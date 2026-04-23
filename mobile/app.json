@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "Trailhead",
+    "slug": "trailhead",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "trailhead",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0c0f14"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.trailhead.app",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Trailhead uses your location to show nearby campsites, reports, and to navigate your route.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Trailhead uses your location in the background to trigger audio guide narration as you drive past landmarks."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0c0f14"
+      },
+      "package": "com.trailhead.app",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-location",
+      [
+        "react-native-maps",
+        { "googleMapsApiKey": "" }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

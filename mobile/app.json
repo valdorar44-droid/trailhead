@@ -17,7 +17,9 @@
       "bundleIdentifier": "com.trailhead.app",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Trailhead uses your location to show nearby campsites, reports, and to navigate your route.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "Trailhead uses your location in the background to trigger audio guide narration as you drive past landmarks."
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Trailhead uses your location in the background to trigger audio guide narration as you drive past landmarks.",
+        "NSLocationAlwaysUsageDescription": "Trailhead uses background location to auto-play narrations while you drive.",
+        "UIBackgroundModes": ["location", "audio", "fetch"]
       }
     },
     "android": {
@@ -28,12 +30,33 @@
       "package": "com.trailhead.app",
       "permissions": [
         "ACCESS_FINE_LOCATION",
-        "ACCESS_COARSE_LOCATION"
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION",
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE"
       ]
     },
     "plugins": [
       "expo-router",
-      "expo-location",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Trailhead uses location to auto-play audio guides as you drive near landmarks.",
+          "locationAlwaysPermission": "Background location lets Trailhead narrate landmarks while your phone is in your pocket.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#e67e22",
+          "sounds": []
+        }
+      ],
       [
         "react-native-maps",
         { "googleMapsApiKey": "" }

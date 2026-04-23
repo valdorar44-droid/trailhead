@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  TextInput, Platform, Alert, Image,
+  TextInput, Alert, Image, Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
@@ -9,31 +9,32 @@ import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { api, Report, LeaderboardEntry } from '@/lib/api';
 import { useStore } from '@/lib/store';
+import { C, mono } from '@/lib/design';
 
 const REPORT_TYPES = [
-  { type: 'road_condition', label: 'Road',        icon: 'car-outline',          ttl: '7 days',
-    subtypes: ['Clear & good', 'Muddy / soft', 'Washed out', 'Snow / ice', 'Rough / rocky', 'Flooded'] },
-  { type: 'campsite',       label: 'Campsite',    icon: 'bonfire-outline',       ttl: '14 days',
-    subtypes: ['Available & clean', 'Occupied', 'Trashed', 'Great condition', 'No water nearby'] },
-  { type: 'hazard',         label: 'Hazard',      icon: 'warning-outline',       ttl: '7 days',
-    subtypes: ['Downed tree', 'Rockfall', 'Wildlife', 'Fire / smoke', 'Flash flood risk'] },
-  { type: 'closure',        label: 'Closure',     icon: 'lock-closed-outline',   ttl: '30 days',
-    subtypes: ['Gate locked', 'Road closed', 'Seasonal closure', 'Fire closure', 'Now open!'] },
-  { type: 'water',          label: 'Water',       icon: 'water-outline',         ttl: '3 days',
-    subtypes: ['Source flowing well', 'Spring dry', 'Questionable quality', 'Filtered required'] },
-  { type: 'police',         label: 'Patrol',      icon: 'shield-outline',        ttl: '2 hrs',
-    subtypes: ['Ranger patrol', 'Fee checkpoint', 'OHV enforcement', 'Fire restriction check'] },
-  { type: 'cell_signal',    label: 'Signal',      icon: 'cellular-outline',      ttl: '1 day',
+  { type: 'hazard',      label: 'HAZARD',   icon: '⚠️',  color: C.red,    ttl: '7d',
+    subtypes: ['Downed tree', 'Rockfall', 'Wildlife', 'Fire / smoke', 'Flash flood'] },
+  { type: 'police',      label: 'PATROL',   icon: '🛡️',  color: C.yellow, ttl: '2h',
+    subtypes: ['Ranger patrol', 'Fee checkpoint', 'OHV enforcement', 'Fire restriction'] },
+  { type: 'road_condition', label: 'ROAD',  icon: '🛤️',  color: C.orange, ttl: '7d',
+    subtypes: ['Clear & good', 'Muddy / soft', 'Washed out', 'Snow / ice', 'Flooded'] },
+  { type: 'water',       label: 'WATER',    icon: '💧',  color: '#38bdf8', ttl: '3d',
+    subtypes: ['Flowing well', 'Spring dry', 'Questionable quality', 'Filter required'] },
+  { type: 'cell_signal', label: 'SIGNAL',   icon: '📶',  color: C.green,  ttl: '1d',
     subtypes: ['Strong signal', 'Weak signal', 'No signal', 'Starlink only'] },
-  { type: 'wildlife',       label: 'Wildlife',    icon: 'paw-outline',           ttl: '1 day',
-    subtypes: ['Bear activity', 'Mountain lion', 'Elk / deer herd', 'Snake', 'Cool sighting'] },
+  { type: 'wildlife',    label: 'WILDLIFE', icon: '🐻',  color: '#a78bfa', ttl: '1d',
+    subtypes: ['Bear activity', 'Mountain lion', 'Elk / deer', 'Snake', 'Cool sighting'] },
+  { type: 'campsite',    label: 'CAMPSITE', icon: '⛺',  color: C.orange, ttl: '14d',
+    subtypes: ['Available & clean', 'Occupied', 'Trashed', 'Great condition', 'No water'] },
+  { type: 'closure',     label: 'CLOSURE',  icon: '🚫',  color: C.red,    ttl: '30d',
+    subtypes: ['Gate locked', 'Road closed', 'Seasonal', 'Fire closure', 'Now open!'] },
 ];
 
 const SEVERITY = [
-  { val: 'low',      label: 'FYI',      color: '#27ae60' },
-  { val: 'moderate', label: 'Heads up', color: '#f59e0b' },
-  { val: 'high',     label: 'Caution',  color: '#e67e22' },
-  { val: 'critical', label: 'AVOID',    color: '#dc2626' },
+  { val: 'low',      label: 'FYI',     color: C.green  },
+  { val: 'moderate', label: 'HEADS UP', color: C.yellow },
+  { val: 'high',     label: 'CAUTION', color: C.orange  },
+  { val: 'critical', label: 'AVOID',   color: C.red     },
 ];
 
 type TabView = 'submit' | 'nearby' | 'leaderboard';
@@ -47,9 +48,14 @@ export default function ReportScreen() {
   const [description, setDescription] = useState('');
   const [photoBase64, setPhotoBase64] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [creditsGained, setCreditsGained] = useState(0);
   const [nearby, setNearby] = useState<Report[]>([]);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [view, setView] = useState<TabView>('submit');
+
+  const successAnim = useRef(new Animated.Value(0)).current;
+  const typeAnims = useRef(REPORT_TYPES.map(() => new Animated.Value(1))).current;
 
   useEffect(() => {
     Location.requestForegroundPermissionsAsync().then(({ status }) => {
@@ -57,15 +63,20 @@ export default function ReportScreen() {
       Location.getCurrentPositionAsync({}).then(l => {
         const c = { lat: l.coords.latitude, lng: l.coords.longitude };
         setLoc(c);
-        refreshNearby(c.lat, c.lng);
+        api.getNearbyReports(c.lat, c.lng).then(setNearby).catch(() => {});
       });
     });
     api.getLeaderboard().then(setLeaderboard).catch(() => {});
   }, []);
 
-  const refreshNearby = (lat: number, lng: number) => {
-    api.getNearbyReports(lat, lng).then(setNearby).catch(() => {});
-  };
+  function selectType(rt: typeof REPORT_TYPES[0], idx: number) {
+    setSelectedType(rt);
+    setSelectedSubtype('');
+    Animated.sequence([
+      Animated.timing(typeAnims[idx], { toValue: 0.88, duration: 80, useNativeDriver: true }),
+      Animated.spring(typeAnims[idx], { toValue: 1, tension: 200, friction: 6, useNativeDriver: true }),
+    ]).start();
+  }
 
   async function pickPhoto() {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -74,25 +85,19 @@ export default function ReportScreen() {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true, quality: 0.5, base64: true,
     });
-    if (!result.canceled && result.assets[0].base64) {
-      setPhotoBase64(result.assets[0].base64);
-    }
+    if (!result.canceled && result.assets[0].base64) setPhotoBase64(result.assets[0].base64);
   }
 
   async function takePhoto() {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') { Alert.alert('Camera access required'); return; }
-    const result = await ImagePicker.launchCameraAsync({
-      allowsEditing: true, quality: 0.5, base64: true,
-    });
-    if (!result.canceled && result.assets[0].base64) {
-      setPhotoBase64(result.assets[0].base64);
-    }
+    const result = await ImagePicker.launchCameraAsync({ allowsEditing: true, quality: 0.5, base64: true });
+    if (!result.canceled && result.assets[0].base64) setPhotoBase64(result.assets[0].base64);
   }
 
   async function submit() {
-    if (!user) { Alert.alert('Sign in required', 'Create an account to submit reports and earn credits.'); return; }
-    if (!selectedType) { Alert.alert('Select a report type'); return; }
+    if (!user) { Alert.alert('Sign in required', 'Create an account to earn credits.'); return; }
+    if (!selectedType) { Alert.alert('Select a report type first'); return; }
     if (!loc) { Alert.alert('Location unavailable'); return; }
     setSubmitting(true);
     try {
@@ -102,18 +107,16 @@ export default function ReportScreen() {
         description, severity,
         photo_data: photoBase64 ?? undefined,
       });
-
-      let msg = `+${res.credits_earned} credits earned.\nReport expires in ${res.ttl_hours}h.`;
-      if (res.streak > 1) msg += `\n\n🔥 ${res.streak}-day streak!`;
-      if (res.streak_bonus) msg += `\n+${res.streak_bonus} streak bonus!`;
-
-      Alert.alert('Report submitted! ✓', msg);
-      setSelectedType(null); setSelectedSubtype('');
-      setDescription(''); setPhotoBase64(null);
-
-      // Refresh user credits
-      api.me().then(u => setAuth(await getToken(), u)).catch(() => {});
-      if (loc) refreshNearby(loc.lat, loc.lng);
+      setCreditsGained(res.credits_earned + (res.streak_bonus ?? 0));
+      setSubmitted(true);
+      Animated.spring(successAnim, { toValue: 1, tension: 60, friction: 7, useNativeDriver: true }).start();
+      setTimeout(() => {
+        Animated.timing(successAnim, { toValue: 0, duration: 300, useNativeDriver: true }).start(() => setSubmitted(false));
+        setSelectedType(null); setSelectedSubtype('');
+        setDescription(''); setPhotoBase64(null);
+      }, 3000);
+      api.me().then(async u => setAuth(await getToken(), u)).catch(() => {});
+      if (loc) api.getNearbyReports(loc.lat, loc.lng).then(setNearby).catch(() => {});
     } catch (e: any) {
       Alert.alert('Error', e.message);
     } finally {
@@ -121,24 +124,42 @@ export default function ReportScreen() {
     }
   }
 
-  const creditsEarned = photoBase64 ? 20 : 10;
-
   return (
     <SafeAreaView style={s.container}>
+      {/* Header */}
       <View style={s.header}>
-        <Text style={s.title}>Reports</Text>
+        <View>
+          <Text style={s.title}>FIELD REPORTS</Text>
+          <Text style={s.subtitle}>Warn the trail community</Text>
+        </View>
         {user && (
-          <View style={s.streakBadge}>
+          <View style={s.creditsBox}>
+            <Text style={s.creditsVal}>{user.credits ?? 0}</Text>
+            <Text style={s.creditsLabel}>CREDITS</Text>
             {(user.report_streak ?? 0) > 1 && (
-              <Text style={s.streakText}>🔥 {user.report_streak}d</Text>
+              <Text style={s.streak}>🔥 {user.report_streak}d</Text>
             )}
-            <Text style={s.credits}>⚡ {user.credits}</Text>
           </View>
         )}
       </View>
 
+      {/* Success banner */}
+      {submitted && (
+        <Animated.View style={[s.successBanner, {
+          opacity: successAnim,
+          transform: [{ scale: successAnim.interpolate({ inputRange: [0,1], outputRange: [0.95, 1] }) }],
+        }]}>
+          <Text style={s.successIcon}>✓</Text>
+          <View>
+            <Text style={s.successTitle}>REPORT SUBMITTED</Text>
+            <Text style={s.successSub}>+{creditsGained} credits earned</Text>
+          </View>
+        </Animated.View>
+      )}
+
+      {/* Tabs */}
       <View style={s.tabs}>
-        {([['submit','REPORT'],['nearby','NEARBY'],['leaderboard','LEADERS']] as const).map(([t, label]) => (
+        {([['submit','REPORT'],['nearby','NEARBY'],['leaderboard','TOP']] as const).map(([t, label]) => (
           <TouchableOpacity key={t} style={[s.tab, view === t && s.tabActive]} onPress={() => setView(t)}>
             <Text style={[s.tabText, view === t && s.tabTextActive]}>{label}</Text>
           </TouchableOpacity>
@@ -146,21 +167,24 @@ export default function ReportScreen() {
       </View>
 
       {view === 'submit' && (
-        <ScrollView contentContainerStyle={s.scroll}>
-          <Text style={s.sectionLabel}>REPORT TYPE</Text>
+        <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
+          <Text style={s.sectionLabel}>TYPE</Text>
           <View style={s.typeGrid}>
-            {REPORT_TYPES.map(rt => (
-              <TouchableOpacity key={rt.type}
-                style={[s.typeBtn, selectedType?.type === rt.type && s.typeBtnActive]}
-                onPress={() => { setSelectedType(rt); setSelectedSubtype(''); }}>
-                <Ionicons name={rt.icon as any} size={22}
-                  color={selectedType?.type === rt.type ? '#e67e22' : '#64748b'} />
-                <Text style={[s.typeBtnText, selectedType?.type === rt.type && { color: '#e67e22' }]}>
-                  {rt.label}
-                </Text>
-                <Text style={s.ttlText}>~{rt.ttl}</Text>
-              </TouchableOpacity>
-            ))}
+            {REPORT_TYPES.map((rt, idx) => {
+              const active = selectedType?.type === rt.type;
+              return (
+                <Animated.View key={rt.type} style={{ transform: [{ scale: typeAnims[idx] }], width: '23%' }}>
+                  <TouchableOpacity
+                    style={[s.typeBtn, active && { borderColor: rt.color, backgroundColor: rt.color + '18' }]}
+                    onPress={() => selectType(rt, idx)}
+                  >
+                    <Text style={s.typeEmoji}>{rt.icon}</Text>
+                    <Text style={[s.typeLabel, active && { color: rt.color }]}>{rt.label}</Text>
+                    <Text style={[s.typeTtl, active && { color: rt.color + 'aa' }]}>{rt.ttl}</Text>
+                  </TouchableOpacity>
+                </Animated.View>
+              );
+            })}
           </View>
 
           {selectedType && (
@@ -169,9 +193,10 @@ export default function ReportScreen() {
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chipRow}>
                 {selectedType.subtypes.map(sub => (
                   <TouchableOpacity key={sub}
-                    style={[s.chip, selectedSubtype === sub && s.chipActive]}
-                    onPress={() => setSelectedSubtype(sub)}>
-                    <Text style={[s.chipText, selectedSubtype === sub && s.chipTextActive]}>{sub}</Text>
+                    style={[s.chip, selectedSubtype === sub && { borderColor: selectedType.color, backgroundColor: selectedType.color + '18' }]}
+                    onPress={() => setSelectedSubtype(sub)}
+                  >
+                    <Text style={[s.chipText, selectedSubtype === sub && { color: selectedType.color }]}>{sub}</Text>
                   </TouchableOpacity>
                 ))}
               </ScrollView>
@@ -181,50 +206,58 @@ export default function ReportScreen() {
                 {SEVERITY.map(sv => (
                   <TouchableOpacity key={sv.val}
                     style={[s.sevBtn, severity === sv.val && { borderColor: sv.color, backgroundColor: sv.color + '20' }]}
-                    onPress={() => setSeverity(sv.val)}>
+                    onPress={() => setSeverity(sv.val)}
+                  >
                     <Text style={[s.sevText, severity === sv.val && { color: sv.color }]}>{sv.label}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
 
-              <Text style={s.sectionLabel}>PHOTO <Text style={s.photoBadge}> +10 BONUS CREDITS </Text></Text>
-              <View style={s.photoRow}>
-                <TouchableOpacity style={s.photoBtn} onPress={takePhoto}>
-                  <Ionicons name="camera-outline" size={20} color="#64748b" />
-                  <Text style={s.photoBtnText}>Camera</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={s.photoBtn} onPress={pickPhoto}>
-                  <Ionicons name="image-outline" size={20} color="#64748b" />
-                  <Text style={s.photoBtnText}>Library</Text>
-                </TouchableOpacity>
-                {photoBase64 && (
-                  <View style={s.photoThumb}>
-                    <Image source={{ uri: `data:image/jpeg;base64,${photoBase64}` }} style={s.thumbImg} />
-                    <TouchableOpacity style={s.removePhoto} onPress={() => setPhotoBase64(null)}>
-                      <Ionicons name="close-circle" size={18} color="#dc2626" />
-                    </TouchableOpacity>
-                  </View>
-                )}
+              <View style={s.photoSection}>
+                <Text style={s.sectionLabel}>
+                  PHOTO <Text style={s.bonusBadge}>+10 BONUS</Text>
+                </Text>
+                <View style={s.photoRow}>
+                  <TouchableOpacity style={s.photoBtn} onPress={takePhoto}>
+                    <Ionicons name="camera-outline" size={22} color={C.text3} />
+                    <Text style={s.photoBtnText}>CAMERA</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={s.photoBtn} onPress={pickPhoto}>
+                    <Ionicons name="image-outline" size={22} color={C.text3} />
+                    <Text style={s.photoBtnText}>LIBRARY</Text>
+                  </TouchableOpacity>
+                  {photoBase64 && (
+                    <View style={s.thumbWrap}>
+                      <Image source={{ uri: `data:image/jpeg;base64,${photoBase64}` }} style={s.thumbImg} />
+                      <TouchableOpacity style={s.removeBtn} onPress={() => setPhotoBase64(null)}>
+                        <Ionicons name="close-circle" size={20} color={C.red} />
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
               </View>
 
               <Text style={s.sectionLabel}>NOTES (OPTIONAL)</Text>
               <TextInput
-                style={s.notesInput}
+                style={s.notes}
                 value={description} onChangeText={setDescription}
-                placeholder="Any details travelers should know..."
-                placeholderTextColor="#64748b" multiline numberOfLines={3}
+                placeholder="Details travelers should know..."
+                placeholderTextColor={C.text3}
+                multiline numberOfLines={3}
+                textAlignVertical="top"
               />
 
-              <View style={s.creditHint}>
-                <Ionicons name="flash" size={14} color="#e67e22" />
-                <Text style={s.creditHintText}>
-                  Submit → +{creditsEarned} credits{photoBase64 ? ' (photo bonus!)' : ''}
-                  {'\n'}Report active for ~{selectedType.ttl} unless flagged
+              <View style={s.earnRow}>
+                <Ionicons name="flash" size={14} color={C.orange} />
+                <Text style={s.earnText}>
+                  +{photoBase64 ? 20 : 10} credits · active ~{selectedType.ttl}
                 </Text>
               </View>
 
-              <TouchableOpacity style={[s.submitBtn, submitting && s.submitBtnDisabled]}
-                onPress={submit} disabled={submitting}>
+              <TouchableOpacity
+                style={[s.submitBtn, submitting && s.submitBtnDisabled]}
+                onPress={submit} disabled={submitting}
+              >
                 <Text style={s.submitBtnText}>{submitting ? 'SUBMITTING...' : 'SUBMIT REPORT'}</Text>
               </TouchableOpacity>
             </>
@@ -235,11 +268,15 @@ export default function ReportScreen() {
       {view === 'nearby' && (
         <ScrollView contentContainerStyle={s.scroll}>
           {nearby.length === 0 ? (
-            <Text style={s.empty}>No active reports nearby.\nBe the first to report!</Text>
+            <View style={s.emptyWrap}>
+              <Text style={s.emptyIcon}>📍</Text>
+              <Text style={s.emptyText}>No active reports nearby</Text>
+              <Text style={s.emptySub}>Be the first to report a condition</Text>
+            </View>
           ) : nearby.map(r => (
             <ReportCard key={r.id} report={r}
               onUpvote={() => api.upvoteReport(r.id).catch(() => {})}
-              onDownvote={() => { api.downvoteReport(r.id).catch(() => {}); }}
+              onDownvote={() => api.downvoteReport(r.id).catch(() => {})}
               onConfirm={() => api.confirmReport(r.id).then(res => {
                 Alert.alert('Confirmed ✓', `+${res.credits_earned} credit earned`);
               }).catch((e: any) => Alert.alert('Error', e.message))}
@@ -252,9 +289,9 @@ export default function ReportScreen() {
         <ScrollView contentContainerStyle={s.scroll}>
           <Text style={s.sectionLabel}>TOP REPORTERS — LAST 30 DAYS</Text>
           {leaderboard.map((entry, i) => (
-            <View key={entry.username} style={s.leaderRow}>
-              <Text style={[s.leaderRank, i < 3 && { color: '#e67e22' }]}>
-                {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`}
+            <View key={entry.username} style={[s.leaderRow, i === 0 && s.leaderGold]}>
+              <Text style={s.leaderRank}>
+                {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i+1}`}
               </Text>
               <View style={s.leaderInfo}>
                 <Text style={s.leaderName}>{entry.username}</Text>
@@ -264,7 +301,7 @@ export default function ReportScreen() {
                 </Text>
               </View>
               {user?.username === entry.username && (
-                <Text style={s.leaderYou}>YOU</Text>
+                <View style={s.youBadge}><Text style={s.youText}>YOU</Text></View>
               )}
             </View>
           ))}
@@ -282,7 +319,7 @@ async function getToken() {
 function ReportCard({ report: r, onUpvote, onDownvote, onConfirm }:
   { report: Report; onUpvote: () => void; onDownvote: () => void; onConfirm: () => void }) {
   const typeInfo = REPORT_TYPES.find(t => t.type === r.type);
-  const sevColor = SEVERITY.find(s => s.val === r.severity)?.color ?? '#64748b';
+  const sevInfo = SEVERITY.find(sv => sv.val === r.severity);
   const age = Math.floor((Date.now() / 1000 - r.created_at) / 3600);
   const expiresIn = r.expires_at ? Math.max(0, Math.floor((r.expires_at - Date.now() / 1000) / 3600)) : null;
 
@@ -290,41 +327,41 @@ function ReportCard({ report: r, onUpvote, onDownvote, onConfirm }:
     <View style={rc.card}>
       {r.cluster_count > 1 && (
         <View style={rc.clusterBadge}>
-          <Text style={rc.clusterText}>{r.cluster_count} reports here</Text>
+          <Text style={rc.clusterText}>{r.cluster_count} REPORTS HERE</Text>
         </View>
       )}
-      <View style={rc.row}>
-        <Ionicons name={(typeInfo?.icon ?? 'alert-circle-outline') as any} size={18} color={sevColor} />
-        <View style={rc.info}>
+      <View style={rc.top}>
+        <Text style={rc.icon}>{typeInfo?.icon ?? '⚠️'}</Text>
+        <View style={rc.meta}>
           <Text style={rc.type}>{typeInfo?.label ?? r.type}</Text>
           {r.subtype && <Text style={rc.subtype}>{r.subtype}</Text>}
         </View>
-        <View style={[rc.sevBadge, { backgroundColor: sevColor + '20', borderColor: sevColor }]}>
-          <Text style={[rc.sevText, { color: sevColor }]}>
-            {SEVERITY.find(s => s.val === r.severity)?.label ?? r.severity}
-          </Text>
-        </View>
+        {sevInfo && (
+          <View style={[rc.sevPill, { backgroundColor: sevInfo.color + '22', borderColor: sevInfo.color }]}>
+            <Text style={[rc.sevText, { color: sevInfo.color }]}>{sevInfo.label}</Text>
+          </View>
+        )}
       </View>
       {r.description ? <Text style={rc.desc}>{r.description}</Text> : null}
       <View style={rc.footer}>
-        <Text style={rc.meta}>
+        <Text style={rc.age}>
           @{r.username} · {age < 1 ? 'just now' : `${age}h ago`}
-          {expiresIn !== null ? ` · expires ${expiresIn}h` : ''}
+          {expiresIn !== null ? ` · exp ${expiresIn}h` : ''}
           {r.has_photo ? ' · 📷' : ''}
-          {r.confirmations > 0 ? ` · ✓ ${r.confirmations}` : ''}
+          {r.confirmations > 0 ? ` · ✓${r.confirmations}` : ''}
         </Text>
         <View style={rc.actions}>
-          <TouchableOpacity style={rc.actionBtn} onPress={onConfirm}>
-            <Ionicons name="checkmark-circle-outline" size={16} color="#27ae60" />
-            <Text style={[rc.actionText, { color: '#27ae60' }]}>Still there</Text>
+          <TouchableOpacity style={rc.confirmBtn} onPress={onConfirm}>
+            <Ionicons name="checkmark-circle-outline" size={15} color={C.green} />
+            <Text style={[rc.actionText, { color: C.green }]}>Still there</Text>
           </TouchableOpacity>
           <TouchableOpacity style={rc.voteBtn} onPress={onUpvote}>
-            <Ionicons name="thumbs-up-outline" size={14} color="#27ae60" />
-            <Text style={[rc.voteCount, { color: '#27ae60' }]}>{r.upvotes}</Text>
+            <Ionicons name="thumbs-up-outline" size={13} color={C.text3} />
+            <Text style={rc.voteCount}>{r.upvotes}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={rc.voteBtn} onPress={onDownvote}>
-            <Ionicons name="thumbs-down-outline" size={14} color="#dc2626" />
-            <Text style={[rc.voteCount, { color: '#dc2626' }]}>{r.downvotes ?? 0}</Text>
+            <Ionicons name="thumbs-down-outline" size={13} color={C.text3} />
+            <Text style={rc.voteCount}>{r.downvotes ?? 0}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -333,71 +370,127 @@ function ReportCard({ report: r, onUpvote, onDownvote, onConfirm }:
 }
 
 const rc = StyleSheet.create({
-  card: { backgroundColor: '#1a1f2a', borderRadius: 10, borderWidth: 1, borderColor: '#252b38', padding: 14, marginBottom: 10 },
-  clusterBadge: { backgroundColor: '#e67e2220', borderRadius: 6, padding: 4, paddingHorizontal: 8, alignSelf: 'flex-start', marginBottom: 8 },
-  clusterText: { color: '#e67e22', fontSize: 10, fontWeight: '700' },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6 },
-  info: { flex: 1 },
-  type: { color: '#e2e8f0', fontWeight: '600', fontSize: 13 },
-  subtype: { color: '#94a3b8', fontSize: 11, marginTop: 1 },
-  sevBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, borderWidth: 1 },
-  sevText: { fontSize: 10, fontWeight: '700' },
-  desc: { color: '#94a3b8', fontSize: 12, lineHeight: 17, marginBottom: 8 },
-  footer: { gap: 6 },
-  meta: { color: '#64748b', fontSize: 10, fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace' },
-  actions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  actionBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  card: {
+    backgroundColor: C.s2, borderRadius: 12, borderWidth: 1, borderColor: C.border,
+    padding: 14, marginBottom: 10,
+  },
+  clusterBadge: {
+    backgroundColor: C.orangeGlow, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3,
+    alignSelf: 'flex-start', marginBottom: 8,
+  },
+  clusterText: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '700', letterSpacing: 0.5 },
+  top: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
+  icon: { fontSize: 22 },
+  meta: { flex: 1 },
+  type: { color: C.text, fontWeight: '700', fontSize: 13 },
+  subtype: { color: C.text2, fontSize: 11, marginTop: 1 },
+  sevPill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 20, borderWidth: 1 },
+  sevText: { fontSize: 9, fontFamily: mono, fontWeight: '700', letterSpacing: 0.5 },
+  desc: { color: C.text2, fontSize: 12, lineHeight: 17, marginBottom: 10 },
+  footer: { gap: 8 },
+  age: { color: C.text3, fontSize: 10, fontFamily: mono },
+  actions: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  confirmBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   actionText: { fontSize: 12, fontWeight: '600' },
-  votes: { flexDirection: 'row', gap: 12 },
   voteBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  voteCount: { fontSize: 12, fontWeight: '600' },
+  voteCount: { color: C.text3, fontSize: 12, fontWeight: '600', fontFamily: mono },
 });
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0c0f14' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderColor: '#252b38' },
-  title: { color: '#e2e8f0', fontSize: 18, fontWeight: '700' },
-  streakBadge: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  streakText: { color: '#e67e22', fontSize: 13, fontWeight: '700' },
-  credits: { color: '#e67e22', fontSize: 13, fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace', fontWeight: '700' },
-  tabs: { flexDirection: 'row', borderBottomWidth: 1, borderColor: '#252b38' },
+  container: { flex: 1, backgroundColor: C.bg },
+  header: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingVertical: 14,
+    borderBottomWidth: 1, borderColor: C.border, backgroundColor: C.s1,
+  },
+  title: { color: C.text, fontSize: 15, fontWeight: '800', fontFamily: mono, letterSpacing: 0.5 },
+  subtitle: { color: C.text3, fontSize: 11, marginTop: 2 },
+  creditsBox: { alignItems: 'center' },
+  creditsVal: { color: C.orange, fontSize: 22, fontWeight: '800', fontFamily: mono },
+  creditsLabel: { color: C.text3, fontSize: 9, fontFamily: mono, letterSpacing: 0.5 },
+  streak: { color: C.orange, fontSize: 11, fontFamily: mono, marginTop: 2 },
+  successBanner: {
+    margin: 12, borderRadius: 12, padding: 14,
+    backgroundColor: C.green + '20', borderWidth: 1, borderColor: C.green,
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+  },
+  successIcon: { fontSize: 28, color: C.green },
+  successTitle: { color: C.green, fontSize: 13, fontWeight: '800', fontFamily: mono },
+  successSub: { color: C.green, fontSize: 11, marginTop: 2 },
+  tabs: { flexDirection: 'row', borderBottomWidth: 1, borderColor: C.border, backgroundColor: C.s1 },
   tab: { flex: 1, paddingVertical: 12, alignItems: 'center', borderBottomWidth: 2, borderBottomColor: 'transparent' },
-  tabActive: { borderBottomColor: '#e67e22' },
-  tabText: { color: '#64748b', fontSize: 11, fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace', fontWeight: '700' },
-  tabTextActive: { color: '#e67e22' },
-  scroll: { padding: 16, gap: 12, paddingBottom: 40 },
-  sectionLabel: { color: '#64748b', fontSize: 10, fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace', letterSpacing: 1, marginBottom: 8 },
-  typeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
-  typeBtn: { width: '47%', backgroundColor: '#1a1f2a', borderWidth: 1, borderColor: '#252b38', borderRadius: 10, padding: 12, alignItems: 'center', gap: 4 },
-  typeBtnActive: { borderColor: '#e67e22', backgroundColor: '#e67e2210' },
-  typeBtnText: { color: '#64748b', fontSize: 12, fontWeight: '500' },
-  ttlText: { color: '#374151', fontSize: 10, fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace' },
+  tabActive: { borderBottomColor: C.orange },
+  tabText: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '700', letterSpacing: 0.5 },
+  tabTextActive: { color: C.orange },
+  scroll: { padding: 14, gap: 12, paddingBottom: 40 },
+  sectionLabel: { color: C.text3, fontSize: 10, fontFamily: mono, letterSpacing: 1, marginBottom: 8 },
+  typeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 16 },
+  typeBtn: {
+    backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
+    borderRadius: 12, padding: 10, alignItems: 'center', gap: 4,
+  },
+  typeEmoji: { fontSize: 24 },
+  typeLabel: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '700', letterSpacing: 0.3 },
+  typeTtl: { color: C.border, fontSize: 8, fontFamily: mono },
   chipRow: { gap: 8, paddingBottom: 4, marginBottom: 16 },
-  chip: { paddingHorizontal: 12, paddingVertical: 7, backgroundColor: '#1a1f2a', borderWidth: 1, borderColor: '#252b38', borderRadius: 20 },
-  chipActive: { borderColor: '#e67e22', backgroundColor: '#e67e2215' },
-  chipText: { color: '#94a3b8', fontSize: 12 },
-  chipTextActive: { color: '#e67e22' },
-  severityRow: { flexDirection: 'row', gap: 8, marginBottom: 16 },
-  sevBtn: { flex: 1, paddingVertical: 8, borderWidth: 1, borderColor: '#252b38', borderRadius: 8, alignItems: 'center', backgroundColor: '#1a1f2a' },
-  sevText: { color: '#64748b', fontSize: 11, fontWeight: '700' },
-  photoBadge: { backgroundColor: '#27ae6020', color: '#27ae60', fontSize: 9, borderRadius: 4, overflow: 'hidden', paddingHorizontal: 4 },
-  photoRow: { flexDirection: 'row', gap: 10, marginBottom: 16, alignItems: 'center' },
-  photoBtn: { backgroundColor: '#1a1f2a', borderWidth: 1, borderColor: '#252b38', borderRadius: 10, padding: 12, alignItems: 'center', gap: 4, flex: 1 },
-  photoBtnText: { color: '#64748b', fontSize: 11 },
-  photoThumb: { width: 60, height: 60, borderRadius: 8, overflow: 'visible', position: 'relative' },
-  thumbImg: { width: 60, height: 60, borderRadius: 8 },
-  removePhoto: { position: 'absolute', top: -8, right: -8 },
-  notesInput: { backgroundColor: '#1a1f2a', borderWidth: 1, borderColor: '#252b38', borderRadius: 10, padding: 12, color: '#e2e8f0', fontSize: 13, minHeight: 70, textAlignVertical: 'top', marginBottom: 12 },
-  creditHint: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, backgroundColor: '#e67e2210', borderRadius: 8, padding: 10, marginBottom: 16 },
-  creditHintText: { color: '#e67e22', fontSize: 12, lineHeight: 18, flex: 1 },
-  submitBtn: { backgroundColor: '#e67e22', borderRadius: 12, padding: 16, alignItems: 'center' },
-  submitBtnDisabled: { backgroundColor: '#252b38' },
-  submitBtnText: { color: '#fff', fontWeight: '700', fontSize: 14, fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace' },
-  empty: { color: '#64748b', textAlign: 'center', marginTop: 60, lineHeight: 22 },
-  leaderRow: { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: '#1a1f2a', borderRadius: 10, borderWidth: 1, borderColor: '#252b38', padding: 14, marginBottom: 8 },
-  leaderRank: { color: '#64748b', fontSize: 18, width: 30, textAlign: 'center' },
+  chip: {
+    paddingHorizontal: 12, paddingVertical: 7,
+    backgroundColor: C.s2, borderWidth: 1, borderColor: C.border, borderRadius: 20,
+  },
+  chipText: { color: C.text2, fontSize: 12 },
+  severityRow: { flexDirection: 'row', gap: 6, marginBottom: 16 },
+  sevBtn: {
+    flex: 1, paddingVertical: 9, borderWidth: 1, borderColor: C.border,
+    borderRadius: 8, alignItems: 'center', backgroundColor: C.s2,
+  },
+  sevText: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '700' },
+  photoSection: { marginBottom: 4 },
+  bonusBadge: {
+    color: C.green, fontSize: 9, fontFamily: mono,
+    backgroundColor: C.green + '20',
+  },
+  photoRow: { flexDirection: 'row', gap: 8, marginBottom: 16, alignItems: 'center' },
+  photoBtn: {
+    backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
+    borderRadius: 10, padding: 14, alignItems: 'center', gap: 5, flex: 1,
+  },
+  photoBtnText: { color: C.text3, fontSize: 10, fontFamily: mono },
+  thumbWrap: { width: 64, height: 64, position: 'relative' },
+  thumbImg: { width: 64, height: 64, borderRadius: 10 },
+  removeBtn: { position: 'absolute', top: -8, right: -8 },
+  notes: {
+    backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
+    borderRadius: 10, padding: 12, color: C.text, fontSize: 13,
+    minHeight: 70, marginBottom: 12,
+  },
+  earnRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: C.orangeGlow, borderRadius: 8, padding: 10, marginBottom: 16,
+  },
+  earnText: { color: C.orange, fontSize: 12, fontFamily: mono },
+  submitBtn: {
+    backgroundColor: C.orange, borderRadius: 12, padding: 16, alignItems: 'center',
+    shadowColor: C.orange, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.35, shadowRadius: 8,
+  },
+  submitBtnDisabled: { backgroundColor: C.s3, shadowOpacity: 0 },
+  submitBtnText: { color: '#fff', fontWeight: '700', fontSize: 13, fontFamily: mono, letterSpacing: 0.5 },
+  emptyWrap: { alignItems: 'center', marginTop: 60, gap: 8 },
+  emptyIcon: { fontSize: 40 },
+  emptyText: { color: C.text2, fontSize: 15, fontWeight: '600' },
+  emptySub: { color: C.text3, fontSize: 12 },
+  leaderRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    backgroundColor: C.s2, borderRadius: 12, borderWidth: 1, borderColor: C.border,
+    padding: 14, marginBottom: 8,
+  },
+  leaderGold: { borderColor: '#f59e0b', backgroundColor: '#f59e0b0a' },
+  leaderRank: { fontSize: 20, width: 32, textAlign: 'center' },
   leaderInfo: { flex: 1 },
-  leaderName: { color: '#e2e8f0', fontWeight: '600', fontSize: 14 },
-  leaderMeta: { color: '#64748b', fontSize: 11, marginTop: 2 },
-  leaderYou: { color: '#e67e22', fontSize: 10, fontWeight: '700', fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace' },
+  leaderName: { color: C.text, fontWeight: '700', fontSize: 14 },
+  leaderMeta: { color: C.text3, fontSize: 11, fontFamily: mono, marginTop: 2 },
+  youBadge: {
+    backgroundColor: C.orangeGlow, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3,
+    borderWidth: 1, borderColor: C.orange,
+  },
+  youText: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '700' },
 });

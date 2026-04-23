@@ -1,18 +1,27 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  TextInput, Alert, Share, Animated,
+  TextInput, Alert, Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import { api } from '@/lib/api';
-import { useStore } from '@/lib/store';
+import { useStore, RigProfile } from '@/lib/store';
 import { C, mono } from '@/lib/design';
 
+const VEHICLE_TYPES = ['Truck', 'Jeep', 'SUV', 'Van', 'Overlander', 'Moto'];
+const DRIVE_TYPES   = ['2WD', 'AWD', '4x4 PT', '4x4 FT'];
+const LIFT_OPTIONS  = ['Stock', '2"', '4"', '6"+'];
+
+const DEFAULT_RIG: RigProfile = {
+  vehicle_type: '', year: '', make: '', model: '',
+  ground_clearance_in: '', lift_in: 'Stock', drive: '4x4 PT', length_ft: '',
+};
+
 export default function ProfileScreen() {
-  const { user, setAuth, clearAuth } = useStore();
+  const { user, rigProfile, setAuth, clearAuth, setRigProfile } = useStore();
   const [view, setView] = useState<'main' | 'login' | 'register'>(!user ? 'login' : 'main');
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
@@ -23,6 +32,19 @@ export default function ProfileScreen() {
   const [showHistory, setShowHistory] = useState(false);
   const [gpxImporting, setGpxImporting] = useState(false);
   const [gpxResult, setGpxResult] = useState('');
+
+  const [editingRig, setEditingRig] = useState(false);
+  const [rigDraft, setRigDraft] = useState<RigProfile>(rigProfile ?? DEFAULT_RIG);
+
+  // Update view once session is restored from SecureStore
+  useEffect(() => {
+    if (user && view !== 'main') setView('main');
+  }, [user]);
+
+  // Sync draft when rigProfile loads from SecureStore
+  useEffect(() => {
+    if (rigProfile && !editingRig) setRigDraft(rigProfile);
+  }, [rigProfile]);
 
   async function login() {
     if (!email || !password) { Alert.alert('Fill in all fields'); return; }
@@ -63,6 +85,12 @@ export default function ProfileScreen() {
     });
   }
 
+  function saveRig() {
+    if (!rigDraft.make || !rigDraft.model) { Alert.alert('Add at least a make and model'); return; }
+    setRigProfile(rigDraft);
+    setEditingRig(false);
+  }
+
   async function importGpx() {
     setGpxImporting(true);
     setGpxResult('');
@@ -71,7 +99,6 @@ export default function ProfileScreen() {
       if (result.canceled) return;
       const file = result.assets[0];
       const content = await FileSystem.readAsStringAsync(file.uri);
-      // Parse GPX waypoints
       const nameMatches = [...content.matchAll(/<name>([\s\S]*?)<\/name>/g)];
       const wptMatches = [...content.matchAll(/<wpt\s+lat="([\d.\-]+)"\s+lon="([\d.\-]+)"([\s\S]*?)<\/wpt>/g)];
       const trkpts = [...content.matchAll(/<trkpt\s+lat="([\d.\-]+)"\s+lon="([\d.\-]+)"/g)];
@@ -152,6 +179,7 @@ export default function ProfileScreen() {
   return (
     <SafeAreaView style={s.container}>
       <ScrollView contentContainerStyle={s.scroll}>
+
         {/* Profile */}
         <View style={s.profileCard}>
           <View style={s.avatar}>
@@ -168,6 +196,129 @@ export default function ProfileScreen() {
             style={s.logoutBtn}>
             <Ionicons name="log-out-outline" size={20} color={C.text3} />
           </TouchableOpacity>
+        </View>
+
+        {/* My Rig */}
+        <View style={s.rigCard}>
+          <View style={s.rigHeader}>
+            <Text style={s.rigIcon}>🚙</Text>
+            <Text style={s.rigTitle}>MY RIG</Text>
+            <TouchableOpacity style={s.rigEditBtn} onPress={() => {
+              if (editingRig) { saveRig(); } else { setRigDraft(rigProfile ?? DEFAULT_RIG); setEditingRig(true); }
+            }}>
+              <Text style={s.rigEditText}>{editingRig ? 'SAVE' : rigProfile ? 'EDIT' : 'ADD RIG'}</Text>
+            </TouchableOpacity>
+          </View>
+
+          {editingRig ? (
+            <View style={s.rigForm}>
+              {/* Vehicle type */}
+              <Text style={s.rigFormLabel}>TYPE</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.rigPillRow}>
+                {VEHICLE_TYPES.map(t => (
+                  <TouchableOpacity key={t}
+                    style={[s.rigPill, rigDraft.vehicle_type === t && s.rigPillActive]}
+                    onPress={() => setRigDraft(d => ({ ...d, vehicle_type: t }))}>
+                    <Text style={[s.rigPillText, rigDraft.vehicle_type === t && s.rigPillTextActive]}>{t}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              {/* Year / Make / Model */}
+              <View style={s.rigRow}>
+                <TextInput style={[s.rigInput, { width: 72 }]} placeholder="Year" placeholderTextColor={C.text3}
+                  value={rigDraft.year} onChangeText={v => setRigDraft(d => ({ ...d, year: v }))}
+                  keyboardType="numeric" maxLength={4} />
+                <TextInput style={[s.rigInput, { flex: 1 }]} placeholder="Make (Toyota)" placeholderTextColor={C.text3}
+                  value={rigDraft.make} onChangeText={v => setRigDraft(d => ({ ...d, make: v }))} />
+              </View>
+              <TextInput style={s.rigInput} placeholder="Model (Tacoma TRD Pro)" placeholderTextColor={C.text3}
+                value={rigDraft.model} onChangeText={v => setRigDraft(d => ({ ...d, model: v }))} />
+
+              {/* Drive */}
+              <Text style={s.rigFormLabel}>DRIVE</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.rigPillRow}>
+                {DRIVE_TYPES.map(d => (
+                  <TouchableOpacity key={d}
+                    style={[s.rigPill, rigDraft.drive === d && s.rigPillActive]}
+                    onPress={() => setRigDraft(dr => ({ ...dr, drive: d }))}>
+                    <Text style={[s.rigPillText, rigDraft.drive === d && s.rigPillTextActive]}>{d}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              {/* Lift + clearance + length */}
+              <Text style={s.rigFormLabel}>LIFT</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.rigPillRow}>
+                {LIFT_OPTIONS.map(l => (
+                  <TouchableOpacity key={l}
+                    style={[s.rigPill, rigDraft.lift_in === l && s.rigPillActive]}
+                    onPress={() => setRigDraft(d => ({ ...d, lift_in: l }))}>
+                    <Text style={[s.rigPillText, rigDraft.lift_in === l && s.rigPillTextActive]}>{l}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              <View style={s.rigRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.rigFormLabel}>CLEARANCE (IN)</Text>
+                  <TextInput style={s.rigInput} placeholder="9" placeholderTextColor={C.text3}
+                    value={rigDraft.ground_clearance_in} onChangeText={v => setRigDraft(d => ({ ...d, ground_clearance_in: v }))}
+                    keyboardType="decimal-pad" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.rigFormLabel}>LENGTH (FT)</Text>
+                  <TextInput style={s.rigInput} placeholder="18" placeholderTextColor={C.text3}
+                    value={rigDraft.length_ft} onChangeText={v => setRigDraft(d => ({ ...d, length_ft: v }))}
+                    keyboardType="decimal-pad" />
+                </View>
+              </View>
+
+              <TouchableOpacity style={s.rigCancelBtn} onPress={() => setEditingRig(false)}>
+                <Text style={s.rigCancelText}>CANCEL</Text>
+              </TouchableOpacity>
+            </View>
+          ) : rigProfile && (rigProfile.make || rigProfile.model) ? (
+            <View style={s.rigDisplay}>
+              <View style={s.rigDisplayTop}>
+                <View>
+                  <Text style={s.rigYear}>{rigProfile.year}</Text>
+                  <Text style={s.rigMakeModel}>{rigProfile.make} {rigProfile.model}</Text>
+                </View>
+                <View style={s.rigTypeBadge}>
+                  <Text style={s.rigTypeBadgeText}>{rigProfile.vehicle_type || 'VEHICLE'}</Text>
+                </View>
+              </View>
+              <View style={s.rigStats}>
+                {rigProfile.drive ? (
+                  <View style={s.rigStat}>
+                    <Text style={s.rigStatVal}>{rigProfile.drive}</Text>
+                    <Text style={s.rigStatLabel}>DRIVE</Text>
+                  </View>
+                ) : null}
+                {rigProfile.lift_in && rigProfile.lift_in !== 'Stock' ? (
+                  <View style={s.rigStat}>
+                    <Text style={s.rigStatVal}>{rigProfile.lift_in}</Text>
+                    <Text style={s.rigStatLabel}>LIFT</Text>
+                  </View>
+                ) : null}
+                {rigProfile.ground_clearance_in ? (
+                  <View style={s.rigStat}>
+                    <Text style={s.rigStatVal}>{rigProfile.ground_clearance_in}"</Text>
+                    <Text style={s.rigStatLabel}>CLEARANCE</Text>
+                  </View>
+                ) : null}
+                {rigProfile.length_ft ? (
+                  <View style={s.rigStat}>
+                    <Text style={s.rigStatVal}>{rigProfile.length_ft}'</Text>
+                    <Text style={s.rigStatLabel}>LENGTH</Text>
+                  </View>
+                ) : null}
+              </View>
+            </View>
+          ) : (
+            <Text style={s.rigEmptyText}>Add your vehicle specs so Trailhead can tailor trail difficulty and logistics to your rig.</Text>
+          )}
         </View>
 
         {/* Credits */}
@@ -315,6 +466,58 @@ const s = StyleSheet.create({
   profileEmail: { color: C.text3, fontSize: 12, marginTop: 1 },
   streakText: { color: C.orange, fontSize: 11, fontFamily: mono, marginTop: 4 },
   logoutBtn: { padding: 6 },
+
+  // MY RIG
+  rigCard: {
+    backgroundColor: C.s2, borderRadius: 16, borderWidth: 1, borderColor: C.border, padding: 16,
+  },
+  rigHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
+  rigIcon: { fontSize: 18 },
+  rigTitle: { color: C.text, fontSize: 13, fontWeight: '800', fontFamily: mono, letterSpacing: 0.5, flex: 1 },
+  rigEditBtn: {
+    backgroundColor: C.s3, borderRadius: 8, borderWidth: 1, borderColor: C.border,
+    paddingHorizontal: 10, paddingVertical: 5,
+  },
+  rigEditText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '700' },
+  rigEmptyText: { color: C.text3, fontSize: 12.5, lineHeight: 18 },
+
+  rigDisplay: { gap: 12 },
+  rigDisplayTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  rigYear: { color: C.text3, fontSize: 11, fontFamily: mono },
+  rigMakeModel: { color: C.text, fontSize: 17, fontWeight: '800', marginTop: 1 },
+  rigTypeBadge: {
+    backgroundColor: C.orangeGlow, borderRadius: 8, borderWidth: 1, borderColor: C.orange,
+    paddingHorizontal: 10, paddingVertical: 4,
+  },
+  rigTypeBadgeText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '700' },
+  rigStats: { flexDirection: 'row', gap: 0 },
+  rigStat: {
+    flex: 1, alignItems: 'center', paddingVertical: 8,
+    borderTopWidth: 1, borderColor: C.border,
+  },
+  rigStatVal: { color: C.text, fontSize: 14, fontWeight: '800', fontFamily: mono },
+  rigStatLabel: { color: C.text3, fontSize: 8, fontFamily: mono, letterSpacing: 0.5, marginTop: 2 },
+
+  rigForm: { gap: 10 },
+  rigFormLabel: { color: C.text3, fontSize: 9, fontFamily: mono, letterSpacing: 1, marginBottom: 4, marginTop: 4 },
+  rigPillRow: { flexDirection: 'row', gap: 6, paddingBottom: 2 },
+  rigPill: {
+    paddingHorizontal: 12, paddingVertical: 6,
+    backgroundColor: C.s3, borderRadius: 20, borderWidth: 1, borderColor: C.border,
+  },
+  rigPillActive: { borderColor: C.orange, backgroundColor: C.orangeGlow },
+  rigPillText: { color: C.text3, fontSize: 12, fontFamily: mono },
+  rigPillTextActive: { color: C.orange },
+  rigRow: { flexDirection: 'row', gap: 8 },
+  rigInput: {
+    backgroundColor: C.s3, borderWidth: 1, borderColor: C.border,
+    borderRadius: 10, padding: 11, color: C.text, fontSize: 13,
+  },
+  rigCancelBtn: {
+    borderWidth: 1, borderColor: C.border, borderRadius: 10,
+    padding: 10, alignItems: 'center', marginTop: 4,
+  },
+  rigCancelText: { color: C.text3, fontSize: 11, fontFamily: mono },
 
   creditsCard: {
     backgroundColor: C.s2, borderRadius: 16, borderWidth: 1, borderColor: C.border, padding: 16,

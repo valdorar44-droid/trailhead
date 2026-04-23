@@ -21,9 +21,17 @@ export default function RootLayout() {
       } catch { SecureStore.deleteItemAsync('trailhead_token'); }
     });
 
-    // When user taps an audio guide notification, open guide tab
-    const sub = Notifications.addNotificationResponseReceivedListener(() => {
-      router.push('/guide');
+    // Request notification permissions on first launch
+    Notifications.requestPermissionsAsync().catch(() => {});
+
+    // Route notification taps: trail alerts → report tab, audio guide → guide tab
+    const sub = Notifications.addNotificationResponseReceivedListener(response => {
+      const data = response.notification.request.content.data as any;
+      if (data?.type === 'trail_alert') {
+        router.push('/report');
+      } else {
+        router.push('/guide');
+      }
     });
     return () => sub.remove();
   }, []);

@@ -27,6 +27,8 @@ export default function PlanScreen() {
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   const setActiveTrip = useStore(s => s.setActiveTrip);
+  const addTripToHistory = useStore(s => s.addTripToHistory);
+  const tripHistory = useStore(s => s.tripHistory);
   const router = useRouter();
 
   async function send() {
@@ -39,6 +41,14 @@ export default function PlanScreen() {
       const result = await api.plan(text);
       setActiveTrip(result);
       setMessages(m => [...m, { role: 'ai', trip: result }]);
+      addTripToHistory({
+        trip_id: result.trip_id,
+        trip_name: result.plan.trip_name,
+        states: result.plan.states ?? [],
+        duration_days: result.plan.duration_days,
+        est_miles: result.plan.total_est_miles ?? 0,
+        planned_at: Date.now(),
+      });
     } catch (e: any) {
       setMessages(m => [...m, { role: 'ai', text: `⚠ ${e.message}` }]);
     } finally {
@@ -65,6 +75,33 @@ export default function PlanScreen() {
       >
         {messages.length === 0 && (
           <View style={s.welcome}>
+            {tripHistory.length > 0 && (
+              <View style={s.historySection}>
+                <Text style={s.historyLabel}>RECENT TRIPS</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.historyScroll}>
+                  {tripHistory.map(t => (
+                    <TouchableOpacity
+                      key={t.trip_id}
+                      style={s.historyCard}
+                      onPress={() => {
+                        api.getTrip(t.trip_id).then(trip => {
+                          setActiveTrip(trip);
+                          setMessages([{ role: 'ai', trip }]);
+                        }).catch(() => {});
+                      }}
+                    >
+                      <Text style={s.historyCardName} numberOfLines={2}>{t.trip_name}</Text>
+                      <Text style={s.historyCardStates}>{(t.states ?? []).join(' · ')}</Text>
+                      <View style={s.historyCardFooter}>
+                        <Text style={s.historyCardStat}>{t.duration_days}D</Text>
+                        <Text style={s.historyCardDot}>·</Text>
+                        <Text style={s.historyCardStat}>{t.est_miles}MI</Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
             <Text style={s.welcomeText}>
               Tell me your next adventure — I'll plan the route, find dispersed campsites, map fuel stops, and brief you on terrain.
             </Text>
@@ -82,7 +119,7 @@ export default function PlanScreen() {
             {msg.role === 'ai' && <Text style={s.msgLabel}>TRAILHEAD AI</Text>}
             {msg.role === 'user' && <Text style={[s.msgLabel, { textAlign: 'right' }]}>YOU</Text>}
             {msg.trip
-              ? <TripCard trip={msg.trip} onViewMap={() => router.push('/map')} />
+              ? <TripCard trip={msg.trip} onViewMap={() => router.push('/map')} onViewGuide={() => router.push('/guide')} />
               : <View style={[s.bubble, msg.role === 'user' ? s.bubbleUser : s.bubbleAi]}>
                   <Text style={[s.bubbleText, msg.role === 'user' && { color: '#fff' }]}>{msg.text}</Text>
                 </View>
@@ -126,7 +163,7 @@ export default function PlanScreen() {
   );
 }
 
-function TripCard({ trip, onViewMap }: { trip: TripResult; onViewMap: () => void }) {
+function TripCard({ trip, onViewMap, onViewGuide }: { trip: TripResult; onViewMap: () => void; onViewGuide: () => void }) {
   const p = trip.plan;
   const slideAnim = useRef(new Animated.Value(24)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -231,7 +268,7 @@ function TripCard({ trip, onViewMap }: { trip: TripResult; onViewMap: () => void
         <TouchableOpacity style={tc.btnPrimary} onPress={onViewMap}>
           <Text style={tc.btnPrimaryText}>VIEW ON MAP →</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={tc.btnGhost} onPress={() => {}}>
+        <TouchableOpacity style={tc.btnGhost} onPress={onViewGuide}>
           <Ionicons name="headset-outline" size={15} color={C.text2} />
           <Text style={tc.btnGhostText}>GUIDE</Text>
         </TouchableOpacity>
@@ -305,6 +342,19 @@ const s = StyleSheet.create({
   messagesContent: { padding: 16, gap: 14, flexGrow: 1 },
   welcome: { gap: 8 },
   welcomeText: { color: C.text2, fontSize: 13.5, lineHeight: 21, marginBottom: 4 },
+  historySection: { marginBottom: 4 },
+  historyLabel: { color: C.text3, fontSize: 9, fontFamily: mono, letterSpacing: 1, marginBottom: 8 },
+  historyScroll: { gap: 8, paddingRight: 4 },
+  historyCard: {
+    backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
+    borderRadius: 14, padding: 12, width: 148, gap: 4,
+    borderLeftWidth: 3, borderLeftColor: C.orange,
+  },
+  historyCardName: { color: C.text, fontSize: 12, fontWeight: '700', lineHeight: 16 },
+  historyCardStates: { color: C.orange, fontSize: 9, fontFamily: mono, letterSpacing: 0.5 },
+  historyCardFooter: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
+  historyCardStat: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '700' },
+  historyCardDot: { color: C.border, fontSize: 9 },
   example: {
     backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
     borderRadius: 12, padding: 12,

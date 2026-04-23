@@ -6,6 +6,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
+import * as Notifications from 'expo-notifications';
 import { Ionicons } from '@expo/vector-icons';
 import { api, Report, LeaderboardEntry } from '@/lib/api';
 import { useStore } from '@/lib/store';
@@ -63,7 +64,20 @@ export default function ReportScreen() {
       Location.getCurrentPositionAsync({}).then(l => {
         const c = { lat: l.coords.latitude, lng: l.coords.longitude };
         setLoc(c);
-        api.getNearbyReports(c.lat, c.lng).then(setNearby).catch(() => {});
+        api.getNearbyReports(c.lat, c.lng).then(reports => {
+          setNearby(reports);
+          const critical = reports.filter(r => r.severity === 'critical');
+          if (critical.length > 0) {
+            Notifications.scheduleNotificationAsync({
+              content: {
+                title: '⚠️ Trail Alert Nearby',
+                body: `${critical.length} critical condition${critical.length > 1 ? 's' : ''} within 0.5 mi of you`,
+                data: { type: 'trail_alert' },
+              },
+              trigger: null,
+            }).catch(() => {});
+          }
+        }).catch(() => {});
       });
     });
     api.getLeaderboard().then(setLeaderboard).catch(() => {});

@@ -19,7 +19,11 @@
         "NSLocationWhenInUseUsageDescription": "Trailhead uses your location to show nearby campsites, reports, and to navigate your route.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Trailhead uses your location in the background to trigger audio guide narration as you drive past landmarks.",
         "NSLocationAlwaysUsageDescription": "Trailhead uses background location to auto-play narrations while you drive.",
-        "UIBackgroundModes": ["location", "audio", "fetch"]
+        "UIBackgroundModes": [
+          "location",
+          "audio",
+          "fetch"
+        ]
       }
     },
     "android": {
@@ -29,13 +33,14 @@
       },
       "package": "com.trailhead.app",
       "permissions": [
-        "ACCESS_FINE_LOCATION",
-        "ACCESS_COARSE_LOCATION",
-        "ACCESS_BACKGROUND_LOCATION",
-        "FOREGROUND_SERVICE",
-        "FOREGROUND_SERVICE_LOCATION",
-        "RECEIVE_BOOT_COMPLETED",
-        "VIBRATE"
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.VIBRATE",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "plugins": [
@@ -57,13 +62,20 @@
           "sounds": []
         }
       ],
-      [
-        "react-native-maps",
-        { "googleMapsApiKey": "" }
-      ]
+      "expo-image-picker",
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "92c016d2-6e63-480e-a483-a6898d7e77d5"
+      }
+    },
+    "owner": "danub44"
   }
 }

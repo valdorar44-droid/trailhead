@@ -4,7 +4,7 @@ import MapView, { Marker, Polyline, Callout, PROVIDER_DEFAULT } from 'react-nati
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '@/lib/store';
-import { api, Waypoint, Campsite, GasStation, Report } from '@/lib/api';
+import { api, Waypoint, Campsite, GasStation, Report, Pin } from '@/lib/api';
 
 export default function MapScreen() {
   const activeTrip = useStore(s => s.activeTrip);
@@ -13,6 +13,7 @@ export default function MapScreen() {
   const [showPanel, setShowPanel] = useState(true);
   const [routeAlerts, setRouteAlerts] = useState<Report[]>([]);
   const [showAlerts, setShowAlerts] = useState(false);
+  const [communityPins, setCommunityPins] = useState<Pin[]>([]);
 
   useEffect(() => {
     Location.requestForegroundPermissionsAsync().then(({ status }) => {
@@ -31,6 +32,14 @@ export default function MapScreen() {
       wps.map(w => ({ latitude: w.lat!, longitude: w.lng! })),
       { edgePadding: { top: 60, right: 40, bottom: 200, left: 40 }, animated: true }
     );
+    // Fetch community pins near trip center
+    const center = wps[Math.floor(wps.length / 2)];
+    if (center.lat && center.lng) {
+      api.getNearbyPins(center.lat!, center.lng!, 3.0)
+        .then(pins => setCommunityPins(pins))
+        .catch(() => {});
+    }
+
     // Fetch reports along the route
     api.getReportsAlongRoute(wps).then(alerts => {
       setRouteAlerts(alerts);
@@ -91,6 +100,20 @@ export default function MapScreen() {
               <View style={s.callout}>
                 <Text style={s.calloutTitle}>{c.name}</Text>
                 <Text style={s.calloutMeta}>Federal Campsite · {c.reservable ? 'Reservable' : 'First-come'}</Text>
+              </View>
+            </Callout>
+          </Marker>
+        ))}
+
+        {/* Community pin markers */}
+        {communityPins.slice(0, 30).map((p, i) => (
+          <Marker key={`pin-${i}`} coordinate={{ latitude: p.lat, longitude: p.lng }}
+            pinColor="#a855f7">
+            <Callout>
+              <View style={s.callout}>
+                <Text style={s.calloutTitle}>{p.name}</Text>
+                <Text style={s.calloutMeta}>Community · {p.type} · {p.land_type}</Text>
+                {p.description ? <Text style={s.calloutDesc} numberOfLines={2}>{p.description}</Text> : null}
               </View>
             </Callout>
           </Marker>
@@ -167,7 +190,7 @@ export default function MapScreen() {
             ))}
           </ScrollView>
           <View style={s.legendRow}>
-            {[['#e67e22', 'Waypoint'], ['#27ae60', 'Campsite'], ['#f59e0b', 'Fuel']].map(([color, label]) => (
+            {[['#e67e22', 'Waypoint'], ['#27ae60', 'Campsite'], ['#f59e0b', 'Fuel'], ['#a855f7', 'Community']].map(([color, label]) => (
               <View key={label} style={s.legendItem}>
                 <View style={[s.legendDot, { backgroundColor: color }]} />
                 <Text style={s.legendText}>{label}</Text>

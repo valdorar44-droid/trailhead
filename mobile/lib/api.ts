@@ -56,8 +56,18 @@ export const api = {
     req<Campsite[]>(`/api/campsites?lat=${lat}&lng=${lng}&radius=${radius}`),
   submitPin: (data: PinPayload) =>
     req('/api/pins', { method: 'POST', body: JSON.stringify(data) }),
-  getNearbyPins: (lat: number, lng: number) =>
-    req<Pin[]>(`/api/pins?lat=${lat}&lng=${lng}`),
+  getNearbyPins: (lat: number, lng: number, radius = 1.0) =>
+    req<Pin[]>(`/api/pins?lat=${lat}&lng=${lng}&radius=${radius}`),
+
+  getAudioGuide: (tripId: string) =>
+    req<Record<string, string>>(`/api/trip/${tripId}/guide`),
+  nearbyAudio: (lat: number, lng: number, location_name = '') =>
+    req<{ narration: string }>('/api/audio/nearby', {
+      method: 'POST', body: JSON.stringify({ lat, lng, location_name }),
+    }),
+
+  getWeather: (lat: number, lng: number, days = 7) =>
+    req<WeatherForecast>(`/api/weather?lat=${lat}&lng=${lng}&days=${days}`),
 };
 
 export interface User {
@@ -67,6 +77,7 @@ export interface User {
 }
 export interface TripResult {
   trip_id: string; plan: TripPlan; campsites: Campsite[]; gas_stations: GasStation[];
+  audio_guide?: Record<string, string>;
 }
 export interface TripPlan {
   trip_name: string; overview: string; duration_days: number;
@@ -118,4 +129,14 @@ export interface Pin {
 }
 export interface PinPayload {
   lat: number; lng: number; name: string; type?: string; description?: string; land_type?: string;
+}
+export interface WeatherForecast {
+  daily: {
+    time: string[];
+    temperature_2m_max: number[];
+    temperature_2m_min: number[];
+    precipitation_sum: number[];
+    windspeed_10m_max: number[];
+    weathercode: number[];
+  };
 }

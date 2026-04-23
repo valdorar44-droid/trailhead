@@ -30,7 +30,13 @@ def init_db():
             user_id     INTEGER,
             created_at  INTEGER NOT NULL,
             request     TEXT NOT NULL,
-            plan        TEXT NOT NULL
+            plan        TEXT NOT NULL,
+            audio_guide TEXT
+        );
+        CREATE TABLE IF NOT EXISTS weather_cache (
+            cache_key   TEXT PRIMARY KEY,
+            fetched_at  INTEGER NOT NULL,
+            data        TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS campsite_cache (
             cache_key   TEXT PRIMARY KEY,
@@ -114,6 +120,7 @@ def init_db():
         "ALTER TABLE reports ADD COLUMN has_photo INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE reports ADD COLUMN photo_data TEXT",
         "ALTER TABLE reports ADD COLUMN downvotes INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE trips ADD COLUMN audio_guide TEXT",
     ]:
         try:
             db.execute(sql)
@@ -134,9 +141,25 @@ def save_trip(trip_id: str, request: str, plan: dict, user_id: int | None = None
 
 def get_trip(trip_id: str) -> dict | None:
     db = _conn()
-    row = db.execute("SELECT plan FROM trips WHERE id=?", (trip_id,)).fetchone()
+    row = db.execute("SELECT plan, audio_guide FROM trips WHERE id=?", (trip_id,)).fetchone()
     db.close()
-    return json.loads(row["plan"]) if row else None
+    if not row:
+        return None
+    result = json.loads(row["plan"])
+    if row["audio_guide"]:
+        result["audio_guide"] = json.loads(row["audio_guide"])
+    return result
+
+def save_audio_guide(trip_id: str, guide: dict):
+    db = _conn()
+    db.execute("UPDATE trips SET audio_guide=? WHERE id=?", (json.dumps(guide), trip_id))
+    db.commit(); db.close()
+
+def get_audio_guide(trip_id: str) -> dict | None:
+    db = _conn()
+    row = db.execute("SELECT audio_guide FROM trips WHERE id=?", (trip_id,)).fetchone()
+    db.close()
+    return json.loads(row["audio_guide"]) if row and row["audio_guide"] else None
 
 # ── Cache ─────────────────────────────────────────────────────────────────────
 

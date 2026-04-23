@@ -84,7 +84,10 @@ Claude always returns this JSON (no markdown wrapper):
 ## Phase Roadmap
 
 - **Phase 1** ✅ Web app: AI trip planner + map + RIDB campsites + NREL gas
-- **Phase 2** — Expo mobile app (same backend)
-- **Phase 3** — Audio guide: GPS-triggered narration for landmarks
-- **Phase 4** — Community layer: user-submitted campsites, conditions
-- **Phase 5** — iOverlander refugee import tool
+- **Phase 2** ✅ Expo mobile app + full Waze-style reporting/gamification
+- **Phase 3** ✅ GPS Audio Guide: Claude narrations per waypoint + TTS + "What's here?" + weather forecast
+- **Phase 4** ✅ Community pins on map, trip sharing via native Share API
+- **Phase 5** — Offline maps (Mapbox tile download for dead zones)
+- **Phase 6** — iOverlander refugee import tool + Reddit/GPX harvest
+- **Phase 7** — Background audio auto-play (expo-task-manager geofencing)
+- **Phase 8** — Trail permit tracker (recreation.gov API)

@@ -1,13 +1,15 @@
 import { useState, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
-  StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator,
+  StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator, Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { api, TripResult } from '@/lib/api';
 import { useStore } from '@/lib/store';
+
+const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://trailhead-production-2049.up.railway.app';
 
 const EXAMPLES = [
   '14-day loop through southern Utah — dispersed camping, off-road, a couple paid showers',
@@ -117,11 +119,24 @@ export default function PlanScreen() {
 
 function TripCard({ trip, onViewMap }: { trip: TripResult; onViewMap: () => void }) {
   const p = trip.plan;
+
+  function shareTrip() {
+    Share.share({
+      title: p.trip_name,
+      message: `🗺️ ${p.trip_name}\n${p.duration_days} days · ${p.total_est_miles ?? '?'} miles · ${(p.states ?? []).join(', ')}\n\n${p.overview}\n\nPlanned with Trailhead AI: ${BASE_URL}`,
+    });
+  }
+
   return (
     <View style={tc.card}>
       <View style={tc.header}>
         <Text style={tc.title} numberOfLines={1}>{p.trip_name}</Text>
-        <Text style={tc.states}>{(p.states ?? []).join(' · ')}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Text style={tc.states}>{(p.states ?? []).join(' · ')}</Text>
+          <TouchableOpacity onPress={shareTrip}>
+            <Ionicons name="share-outline" size={18} color="#64748b" />
+          </TouchableOpacity>
+        </View>
       </View>
       <Text style={tc.overview} numberOfLines={3}>{p.overview}</Text>
       <View style={tc.stats}>

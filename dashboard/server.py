@@ -18,6 +18,7 @@ from ingestors.ridb import get_campsites_near
 from ingestors.nrel import get_gas_along_route
 from db.store import (
     save_trip, get_trip, add_community_pin, get_community_pins,
+    save_audio_guide, get_audio_guide, get_cached, set_cached,
     create_user, get_user_by_email, get_user_by_id, get_user_by_referral_code,
     add_credits, get_credit_history,
     create_report, get_reports_near, get_reports_along_route,
@@ -157,6 +158,77 @@ async def get_trip_route(trip_id: str):
     if not trip:
         raise HTTPException(404, "Trip not found")
     return trip
+
+@app.get("/api/trip/{trip_id}/guide")
+async def trip_guide(trip_id: str):
+    """Return audio guide narrations for trip waypoints (generates + caches on first call)."""
+    cached = get_audio_guide(trip_id)
+    if cached:
+        return cached
+
+    trip = get_trip(trip_id)
+    if not trip:
+        raise HTTPException(404, "Trip not found")
+    if not settings.anthropic_api_key:
+        raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
+
+    from ai.planner import generate_audio_guide
+    waypoints = trip.get("plan", {}).get("waypoints", [])
+    trip_name = trip.get("plan", {}).get("trip_name", "Adventure")
+
+    try:
+        guide = generate_audio_guide(waypoints, trip_name)
+    except Exception as e:
+        raise HTTPException(500, f"Guide generation failed: {e}")
+
+    save_audio_guide(trip_id, guide)
+    return guide
+
+
+# ── Weather ───────────────────────────────────────────────────────────────────
+
+@app.get("/api/weather")
+async def weather_forecast(lat: float, lng: float, days: int = 7):
+    cache_key = f"weather:{lat:.2f},{lng:.2f}"
+    cached = get_cached("weather_cache", cache_key, ttl_seconds=3600)
+    if cached:
+        return cached
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.get(
+            "https://api.open-meteo.com/v1/forecast",
+            params={
+                "latitude": lat, "longitude": lng,
+                "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max,weathercode",
+                "temperature_unit": "fahrenheit",
+                "windspeed_unit": "mph",
+                "precipitation_unit": "inch",
+                "timezone": "auto",
+                "forecast_days": min(days, 14),
+            }
+        )
+        r.raise_for_status()
+        data = r.json()
+
+    set_cached("weather_cache", cache_key, data)
+    return data
+
+
+# ── Audio guide ────────────────────────────────────────────────────────────────
+
+class NearbyAudioRequest(BaseModel):
+    lat: float; lng: float; location_name: str = ""
+
+@app.post("/api/audio/nearby")
+async def nearby_audio(body: NearbyAudioRequest):
+    if not settings.anthropic_api_key:
+        raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
+    from ai.planner import generate_location_narration
+    try:
+        narration = generate_location_narration(body.lat, body.lng, body.location_name)
+    except Exception as e:
+        raise HTTPException(500, f"Narration failed: {e}")
+    return {"narration": narration}
 
 
 # ── Campsite / gas ────────────────────────────────────────────────────────────

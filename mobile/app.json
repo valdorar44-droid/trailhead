@@ -32,6 +32,11 @@
         "backgroundColor": "#0c0f14"
       },
       "package": "com.trailhead.app",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyD-placeholder-replace-with-real-key"
+        }
+      },
       "permissions": [
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION",

@@ -32,9 +32,7 @@ async def health():
 
 @app.get("/api/config")
 async def config():
-    return {
-        "mapbox_token": settings.mapbox_token,
-    }
+    return {"status": "ok"}
 
 
 # ── Trip planning ─────────────────────────────────────────────────────────────
@@ -163,33 +161,29 @@ async def export_gpx(body: GpxRequest):
 # ── Geocoding proxy ───────────────────────────────────────────────────────────
 
 async def _geocode_waypoints(waypoints: list[dict]) -> list[dict]:
-    """Geocode named waypoints using Mapbox. Adds lat/lng to each."""
+    """Geocode named waypoints using Nominatim (OSM). Free, no key required."""
+    import asyncio
     result = []
-    async with httpx.AsyncClient(timeout=10) as client:
+    headers = {"User-Agent": "Trailhead/1.0 (valdorar44@gmail.com)"}
+    async with httpx.AsyncClient(timeout=10, headers=headers) as client:
         for wp in waypoints:
             name = wp.get("name", "")
             if not name:
                 result.append(wp)
                 continue
             try:
-                encoded = name.replace(" ", "%20")
                 resp = await client.get(
-                    f"https://api.mapbox.com/geocoding/v5/mapbox.places/{encoded}.json",
-                    params={
-                        "access_token": settings.mapbox_token,
-                        "country": "us",
-                        "limit": 1,
-                        "types": "place,locality,neighborhood,poi,address",
-                    }
+                    "https://nominatim.openstreetmap.org/search",
+                    params={"q": name, "format": "json", "limit": 1, "countrycodes": "us"},
                 )
                 resp.raise_for_status()
-                features = resp.json().get("features", [])
-                if features:
-                    lng, lat = features[0]["center"]
-                    wp["lat"] = lat
-                    wp["lng"] = lng
-                    wp["geocoded_name"] = features[0].get("place_name", name)
+                hits = resp.json()
+                if hits:
+                    wp["lat"] = float(hits[0]["lat"])
+                    wp["lng"] = float(hits[0]["lon"])
+                    wp["geocoded_name"] = hits[0].get("display_name", name)
             except Exception:
                 pass
             result.append(wp)
+            await asyncio.sleep(1.1)  # Nominatim rate limit: 1 req/sec
     return result

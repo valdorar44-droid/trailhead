@@ -6,8 +6,8 @@
 <title>Trailhead — AI Adventure Planner</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
-<link href="https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.css" rel="stylesheet">
-<script src="https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -270,20 +270,29 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 }
 .thinking-text { font-size: 12px; color: var(--muted); font-family: var(--mono); }
 
-/* ── Mapbox popup ── */
-.mapboxgl-popup-content {
+/* ── Leaflet popup ── */
+.leaflet-popup-content-wrapper {
   background: var(--panel2) !important;
   border: 1px solid var(--border) !important;
   border-radius: 10px !important;
-  padding: 12px 14px !important;
+  padding: 0 !important;
   color: var(--text) !important;
   font-family: var(--sans) !important;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6) !important;
+}
+.leaflet-popup-content {
+  margin: 12px 14px !important;
   font-size: 12.5px !important;
   min-width: 180px;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.5) !important;
+  color: var(--text) !important;
 }
-.mapboxgl-popup-tip { display: none !important; }
-.mapboxgl-popup-close-button { color: var(--muted) !important; font-size: 16px !important; }
+.leaflet-popup-tip { background: var(--panel2) !important; }
+.leaflet-popup-close-button { color: var(--muted) !important; font-size: 18px !important; right: 8px !important; top: 6px !important; }
+.leaflet-container { background: #0c0f14; font-family: var(--sans); }
+.leaflet-control-attribution { background: rgba(13,17,23,0.7) !important; color: var(--muted) !important; font-size: 10px !important; }
+.leaflet-control-attribution a { color: var(--muted) !important; }
+.leaflet-bar a { background: var(--panel2) !important; color: var(--text) !important; border-color: var(--border) !important; }
+.leaflet-bar a:hover { background: var(--panel) !important; }
 .popup-title { font-weight: 600; margin-bottom: 4px; font-size: 13px; }
 .popup-meta { color: var(--muted); font-size: 11px; font-family: var(--mono); }
 .popup-link { color: var(--accent); font-size: 11px; text-decoration: none; display: inline-block; margin-top: 6px; }
@@ -419,50 +428,44 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 
 <script>
 // ── State ────────────────────────────────────────────────────────────────────
-let map, mapboxToken;
+let map;
 let currentTrip = null;
 let markers = [];
+let routeLayer = null;
 let activeTab = 'chat';
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init() {
-  try {
-    const cfg = await fetch('/api/config').then(r => r.json());
-    mapboxToken = cfg.mapbox_token;
-    if (!mapboxToken) { showError('MAPBOX_TOKEN not configured on server.'); return; }
-    initMap();
-  } catch(e) { showError('Could not connect to Trailhead server.'); }
+  initMap();
 }
 
 function initMap() {
-  mapboxgl.accessToken = mapboxToken;
-  map = new mapboxgl.Map({
-    container: 'map',
-    style: 'mapbox://styles/mapbox/satellite-streets-v12',
-    center: [-111.0, 39.0],
-    zoom: 5.5,
-    projection: 'globe',
-  });
+  map = L.map('map', { zoomControl: false, attributionControl: true }).setView([39.5, -111.0], 6);
 
-  map.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'bottom-right');
-  map.addControl(new mapboxgl.ScaleControl({ unit: 'imperial' }), 'bottom-left');
+  // ESRI World Imagery — satellite, no key needed
+  const satellite = L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    { attribution: 'Imagery © Esri', maxZoom: 19 }
+  );
 
-  map.on('load', () => {
-    map.setFog({
-      color: 'rgb(12, 15, 20)',
-      'high-color': 'rgb(20, 30, 50)',
-      'horizon-blend': 0.08,
-      'space-color': 'rgb(5, 8, 15)',
-      'star-intensity': 0.8,
-    });
+  // ESRI labels overlay
+  const labels = L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+    { attribution: '', maxZoom: 19, opacity: 0.8 }
+  );
 
-    map.addSource('terrain', {
-      type: 'raster-dem',
-      url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
-      tileSize: 512,
-    });
-    map.setTerrain({ source: 'terrain', exaggeration: 1.5 });
-  });
+  // OSM topo fallback layer
+  const topo = L.tileLayer(
+    'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+    { attribution: '© OpenTopoMap', maxZoom: 17 }
+  );
+
+  satellite.addTo(map);
+  labels.addTo(map);
+
+  L.control.zoom({ position: 'bottomright' }).addTo(map);
+  L.control.scale({ imperial: true, metric: false }).addTo(map);
+  L.control.layers({ 'Satellite': satellite, 'Topo': topo }, {}, { position: 'bottomright' }).addTo(map);
 }
 
 // ── Chat / planning ───────────────────────────────────────────────────────────
@@ -590,10 +593,13 @@ function renderTripResult(data) {
 
 // ── Map rendering ─────────────────────────────────────────────────────────────
 function clearMarkers() {
-  markers.forEach(m => m.remove());
+  markers.forEach(m => map.removeLayer(m));
   markers = [];
-  if (map.getLayer('route')) map.removeLayer('route');
-  if (map.getSource('route')) map.removeSource('route');
+  if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
+}
+
+function makeIcon(cls, emoji) {
+  return L.divIcon({ className: '', html: `<div class="${cls}">${emoji}</div>`, iconSize: null, iconAnchor: [16, 16] });
 }
 
 function renderMap(data) {
@@ -604,72 +610,55 @@ function renderMap(data) {
   const gasStations = data.gas_stations || [];
 
   // Waypoint markers
-  waypoints.forEach((wp, i) => {
-    const el = document.createElement('div');
-    el.className = 'marker-wp';
-    el.textContent = `D${wp.day}`;
-    el.title = wp.name;
-
-    const marker = new mapboxgl.Marker(el)
-      .setLngLat([wp.lng, wp.lat])
-      .setPopup(new mapboxgl.Popup({ offset: 20, closeButton: true }).setHTML(`
+  waypoints.forEach(wp => {
+    const icon = L.divIcon({
+      className: '',
+      html: `<div class="marker-wp">D${wp.day}</div>`,
+      iconSize: [32, 32], iconAnchor: [16, 16],
+    });
+    const m = L.marker([wp.lat, wp.lng], { icon })
+      .bindPopup(`
         <div class="popup-title">${escHtml(wp.name)}</div>
         <div class="popup-meta">Day ${wp.day} · ${escHtml(wp.type)} · ${escHtml(wp.land_type || '')}</div>
-        <div style="margin-top:8px; font-size:12px; color:#94a3b8; line-height:1.5">${escHtml(wp.description || '')}</div>
-        ${wp.notes ? `<div style="margin-top:6px; font-size:11px; color:#f59e0b">${escHtml(wp.notes)}</div>` : ''}
-      `))
+        <div style="margin-top:8px;font-size:12px;color:#94a3b8;line-height:1.5">${escHtml(wp.description || '')}</div>
+        ${wp.notes ? `<div style="margin-top:6px;font-size:11px;color:#f59e0b">${escHtml(wp.notes)}</div>` : ''}
+      `)
       .addTo(map);
-    markers.push(marker);
+    markers.push(m);
   });
 
   // Federal campsite markers
   campsites.slice(0, 35).forEach(c => {
-    const el = document.createElement('div');
-    el.className = 'marker-camp';
-    el.textContent = '⛺';
-    el.title = c.name;
-
-    const marker = new mapboxgl.Marker(el)
-      .setLngLat([c.lng, c.lat])
-      .setPopup(new mapboxgl.Popup({ offset: 15, closeButton: true }).setHTML(`
+    const m = L.marker([c.lat, c.lng], { icon: makeIcon('marker-camp', '⛺') })
+      .bindPopup(`
         <div class="popup-title">${escHtml(c.name)}</div>
         <div class="popup-meta">Federal Campsite · ${c.reservable ? 'Reservable' : 'First-come'}</div>
-        ${c.description ? `<div style="margin-top:6px; font-size:11px; color:#94a3b8">${escHtml(c.description.slice(0, 120))}</div>` : ''}
+        ${c.description ? `<div style="margin-top:6px;font-size:11px;color:#94a3b8">${escHtml(c.description.slice(0,120))}</div>` : ''}
         ${c.url ? `<a class="popup-link" href="${c.url}" target="_blank">recreation.gov →</a>` : ''}
-      `))
+      `)
       .addTo(map);
-    markers.push(marker);
+    markers.push(m);
   });
 
-  // Fuel station markers
+  // Fuel markers
   gasStations.slice(0, 25).forEach(s => {
-    const el = document.createElement('div');
-    el.className = 'marker-fuel';
-    el.textContent = '⛽';
-    el.title = s.name;
-
-    const marker = new mapboxgl.Marker(el)
-      .setLngLat([s.lng, s.lat])
-      .setPopup(new mapboxgl.Popup({ offset: 15, closeButton: true }).setHTML(`
+    const m = L.marker([s.lat, s.lng], { icon: makeIcon('marker-fuel', '⛽') })
+      .bindPopup(`
         <div class="popup-title">${escHtml(s.name)}</div>
         <div class="popup-meta">Fuel · ${escHtml(s.fuel_types || '')}</div>
-        <div style="margin-top:4px; font-size:11px; color:#94a3b8">${escHtml(s.address || '')}</div>
-      `))
+        <div style="margin-top:4px;font-size:11px;color:#94a3b8">${escHtml(s.address || '')}</div>
+      `)
       .addTo(map);
-    markers.push(marker);
+    markers.push(m);
   });
 
-  // Route line between waypoints
-  if (waypoints.length >= 2) {
-    drawRoute(waypoints);
-  }
+  // Route line
+  if (waypoints.length >= 2) drawRoute(waypoints);
 
-  // Fit map to waypoints
+  // Fit bounds
   if (waypoints.length > 0) {
-    const bounds = new mapboxgl.LngLatBounds();
-    waypoints.forEach(w => bounds.extend([w.lng, w.lat]));
-    campsites.slice(0, 10).forEach(c => bounds.extend([c.lng, c.lat]));
-    map.fitBounds(bounds, { padding: 60, maxZoom: 10, duration: 1500 });
+    const bounds = L.latLngBounds(waypoints.map(w => [w.lat, w.lng]));
+    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 10, animate: true, duration: 1 });
   }
 
   const states = (plan.states || []).join(' · ');
@@ -678,32 +667,24 @@ function renderMap(data) {
 
 async function drawRoute(waypoints) {
   try {
+    // OSRM public routing — free, no key
     const coords = waypoints.map(w => `${w.lng},${w.lat}`).join(';');
-    const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coords}?geometries=geojson&overview=full&access_token=${mapboxToken}`;
+    const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`;
     const resp = await fetch(url);
     const data = await resp.json();
-    const route = data.routes?.[0]?.geometry;
-    if (!route) return;
+    const geom = data.routes?.[0]?.geometry?.coordinates;
+    if (!geom) throw new Error('no route');
 
-    if (map.getLayer('route')) map.removeLayer('route');
-    if (map.getSource('route')) map.removeSource('route');
-
-    map.addSource('route', { type: 'geojson', data: { type: 'Feature', geometry: route } });
-    map.addLayer({
-      id: 'route',
-      type: 'line',
-      source: 'route',
-      layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: {
-        'line-color': '#e67e22',
-        'line-width': 3,
-        'line-opacity': 0.85,
-        'line-dasharray': [1, 0],
-      }
-    });
-  } catch(e) {
-    // Route draw failed — markers still show
-    console.warn('Route draw failed:', e);
+    routeLayer = L.polyline(
+      geom.map(([lng, lat]) => [lat, lng]),
+      { color: '#e67e22', weight: 3, opacity: 0.85 }
+    ).addTo(map);
+  } catch {
+    // Fallback: straight lines between waypoints
+    routeLayer = L.polyline(
+      waypoints.map(w => [w.lat, w.lng]),
+      { color: '#e67e22', weight: 2, opacity: 0.6, dashArray: '6 6' }
+    ).addTo(map);
   }
 }
 
@@ -815,7 +796,7 @@ function showError(msg) {
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
-init();
+init().catch(e => showError('Could not connect to Trailhead server.'));
 </script>
 </body>
 </html>

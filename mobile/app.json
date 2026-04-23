@@ -3,6 +3,12 @@
     "name": "Trailhead",
     "slug": "trailhead",
     "version": "1.0.0",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/92c016d2-6e63-480e-a483-a6898d7e77d5"
+    },
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "trailhead",
@@ -68,7 +74,9 @@
         }
       ],
       "expo-image-picker",
-      "expo-asset"
+      "expo-asset",
+      "expo-font",
+      "./plugins/withKotlinVersion"
     ],
     "experiments": {
       "typedRoutes": true

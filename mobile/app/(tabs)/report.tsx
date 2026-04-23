@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  TextInput, Alert, Image, Animated,
+  TextInput, Alert, Image, Animated, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
@@ -55,15 +55,18 @@ export default function ReportScreen() {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [view, setView] = useState<TabView>('submit');
 
+  const [drivingWarning, setDrivingWarning] = useState(false);
   const successAnim = useRef(new Animated.Value(0)).current;
   const typeAnims = useRef(REPORT_TYPES.map(() => new Animated.Value(1))).current;
 
   useEffect(() => {
     Location.requestForegroundPermissionsAsync().then(({ status }) => {
       if (status !== 'granted') return;
-      Location.getCurrentPositionAsync({}).then(l => {
+      Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }).then(l => {
         const c = { lat: l.coords.latitude, lng: l.coords.longitude };
         setLoc(c);
+        // Warn if moving faster than ~5 mph (2.2 m/s)
+        if (l.coords.speed !== null && l.coords.speed > 2.2) setDrivingWarning(true);
         api.getNearbyReports(c.lat, c.lng).then(reports => {
           setNearby(reports);
           const critical = reports.filter(r => r.severity === 'critical');
@@ -140,6 +143,25 @@ export default function ReportScreen() {
 
   return (
     <SafeAreaView style={s.container}>
+      {/* Driving safety modal */}
+      <Modal visible={drivingWarning} transparent animationType="fade" statusBarTranslucent>
+        <View style={s.drivingOverlay}>
+          <View style={s.drivingModal}>
+            <Text style={s.drivingIcon}>🚗</Text>
+            <Text style={s.drivingTitle}>YOU APPEAR TO BE MOVING</Text>
+            <Text style={s.drivingBody}>
+              Never use your phone while driving. Pull over safely before submitting a trail report.
+            </Text>
+            <TouchableOpacity style={s.drivingParkedBtn} onPress={() => setDrivingWarning(false)}>
+              <Text style={s.drivingParkedText}>I'M PARKED / STOPPED</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={s.drivingPassengerBtn} onPress={() => setDrivingWarning(false)}>
+              <Text style={s.drivingPassengerText}>I'M A PASSENGER</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       {/* Header */}
       <View style={s.header}>
         <View>
@@ -182,6 +204,10 @@ export default function ReportScreen() {
 
       {view === 'submit' && (
         <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
+          <View style={s.safetyBanner}>
+            <Ionicons name="car-outline" size={13} color={C.text3} />
+            <Text style={s.safetyText}>Report only when safely stopped</Text>
+          </View>
           <Text style={s.sectionLabel}>TYPE</Text>
           <View style={s.typeGrid}>
             {REPORT_TYPES.map((rt, idx) => {
@@ -488,6 +514,40 @@ const s = StyleSheet.create({
   },
   submitBtnDisabled: { backgroundColor: C.s3, shadowOpacity: 0 },
   submitBtnText: { color: '#fff', fontWeight: '700', fontSize: 13, fontFamily: mono, letterSpacing: 0.5 },
+  // Driving safety
+  drivingOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.85)',
+    alignItems: 'center', justifyContent: 'center', padding: 24,
+  },
+  drivingModal: {
+    backgroundColor: C.s2, borderRadius: 20, borderWidth: 1, borderColor: C.border,
+    padding: 28, alignItems: 'center', gap: 12, width: '100%', maxWidth: 360,
+  },
+  drivingIcon: { fontSize: 48, marginBottom: 4 },
+  drivingTitle: {
+    color: C.text, fontSize: 15, fontWeight: '800', fontFamily: mono,
+    letterSpacing: 0.5, textAlign: 'center',
+  },
+  drivingBody: { color: C.text2, fontSize: 13.5, lineHeight: 20, textAlign: 'center' },
+  drivingParkedBtn: {
+    backgroundColor: C.orange, borderRadius: 12, padding: 15,
+    width: '100%', alignItems: 'center', marginTop: 6,
+    shadowColor: C.orange, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.35, shadowRadius: 8,
+  },
+  drivingParkedText: { color: '#fff', fontWeight: '700', fontSize: 13, fontFamily: mono },
+  drivingPassengerBtn: {
+    borderWidth: 1, borderColor: C.border, borderRadius: 12, padding: 13,
+    width: '100%', alignItems: 'center',
+  },
+  drivingPassengerText: { color: C.text3, fontSize: 12, fontFamily: mono },
+
+  safetyBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: C.s2, borderRadius: 8, padding: 9, marginBottom: 4,
+    borderWidth: 1, borderColor: C.border,
+  },
+  safetyText: { color: C.text3, fontSize: 11, fontFamily: mono },
+
   emptyWrap: { alignItems: 'center', marginTop: 60, gap: 8 },
   emptyIcon: { fontSize: 40 },
   emptyText: { color: C.text2, fontSize: 15, fontWeight: '600' },

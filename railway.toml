@@ -1,0 +1,18 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "mkdir -p /data && python run.py"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
+
+[deploy.healthcheck]
+path = "/api/health"
+healthcheckTimeout = 30
+
+# ── IMPORTANT: Persistent Volume ──────────────────────────────────────
+# Database lives at /data/trailhead.db — mount a Railway Volume at /data
+# or all trip/cache data will be wiped on every deploy.
+#
+# Railway dashboard → service → Volumes → Add Volume
+#   Mount path: /data

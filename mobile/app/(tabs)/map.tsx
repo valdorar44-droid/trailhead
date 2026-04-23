@@ -1,16 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView, Alert } from 'react-native';
 import MapView, { Marker, Polyline, Callout, PROVIDER_DEFAULT } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '@/lib/store';
-import { Waypoint, Campsite, GasStation } from '@/lib/api';
+import { api, Waypoint, Campsite, GasStation, Report } from '@/lib/api';
 
 export default function MapScreen() {
   const activeTrip = useStore(s => s.activeTrip);
   const mapRef = useRef<MapView>(null);
   const [userLoc, setUserLoc] = useState<{ lat: number; lng: number } | null>(null);
   const [showPanel, setShowPanel] = useState(true);
+  const [routeAlerts, setRouteAlerts] = useState<Report[]>([]);
+  const [showAlerts, setShowAlerts] = useState(false);
 
   useEffect(() => {
     Location.requestForegroundPermissionsAsync().then(({ status }) => {
@@ -29,6 +31,14 @@ export default function MapScreen() {
       wps.map(w => ({ latitude: w.lat!, longitude: w.lng! })),
       { edgePadding: { top: 60, right: 40, bottom: 200, left: 40 }, animated: true }
     );
+    // Fetch reports along the route
+    api.getReportsAlongRoute(wps).then(alerts => {
+      setRouteAlerts(alerts);
+      const critical = alerts.filter(a => a.severity === 'critical' || a.severity === 'high');
+      if (critical.length > 0) {
+        setShowAlerts(true);
+      }
+    }).catch(() => {});
   }, [activeTrip]);
 
   const defaultRegion = {
@@ -119,6 +129,31 @@ export default function MapScreen() {
         <Ionicons name={showPanel ? 'chevron-down' : 'chevron-up'} size={18} color="#e2e8f0" />
       </TouchableOpacity>
 
+      {/* Route alerts panel */}
+      {showAlerts && routeAlerts.length > 0 && (
+        <View style={s.alertPanel}>
+          <View style={s.alertHeader}>
+            <Ionicons name="warning" size={16} color="#ef4444" />
+            <Text style={s.alertTitle}>ROUTE ALERTS ({routeAlerts.length})</Text>
+            <TouchableOpacity onPress={() => setShowAlerts(false)}>
+              <Ionicons name="close" size={16} color="#64748b" />
+            </TouchableOpacity>
+          </View>
+          <ScrollView style={s.alertScroll} showsVerticalScrollIndicator={false}>
+            {routeAlerts.map(r => (
+              <View key={r.id} style={[s.alertItem, r.severity === 'critical' && s.alertCritical]}>
+                <View style={s.alertItemRow}>
+                  <Text style={s.alertBadge}>{r.type.toUpperCase()}</Text>
+                  {r.severity === 'critical' && <Text style={s.alertSev}>CRITICAL</Text>}
+                  {r.severity === 'high' && <Text style={[s.alertSev, { color: '#f59e0b' }]}>HIGH</Text>}
+                </View>
+                {r.description ? <Text style={s.alertDesc} numberOfLines={2}>{r.description}</Text> : null}
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+      )}
+
       {/* Bottom itinerary panel */}
       {showPanel && activeTrip && (
         <View style={s.panel}>
@@ -177,6 +212,24 @@ const s = StyleSheet.create({
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   legendDot: { width: 8, height: 8, borderRadius: 4 },
   legendText: { color: '#64748b', fontSize: 11 },
+  alertPanel: {
+    position: 'absolute', top: 110, left: 16, right: 16,
+    backgroundColor: 'rgba(13,17,23,0.95)', borderRadius: 12,
+    borderWidth: 1, borderColor: '#ef4444', maxHeight: 220,
+  },
+  alertHeader: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingHorizontal: 12, paddingVertical: 8,
+    borderBottomWidth: 1, borderColor: '#252b38',
+  },
+  alertTitle: { color: '#ef4444', fontSize: 11, fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace', flex: 1 },
+  alertScroll: { maxHeight: 160 },
+  alertItem: { paddingHorizontal: 12, paddingVertical: 8, borderBottomWidth: 1, borderColor: '#1a1f2a' },
+  alertCritical: { borderLeftWidth: 3, borderLeftColor: '#ef4444' },
+  alertItemRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 2 },
+  alertBadge: { color: '#e2e8f0', fontSize: 10, fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace' },
+  alertSev: { color: '#ef4444', fontSize: 9, fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace' },
+  alertDesc: { color: '#64748b', fontSize: 11 },
   callout: { width: 180, padding: 4 },
   calloutTitle: { fontWeight: '600', fontSize: 13, marginBottom: 2 },
   calloutMeta: { color: '#64748b', fontSize: 11, marginBottom: 4 },

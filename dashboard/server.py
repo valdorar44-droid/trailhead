@@ -7,6 +7,7 @@ from fastapi.responses import HTMLResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
+from typing import Optional
 import httpx
 from passlib.context import CryptContext
 from jose import jwt, JWTError
@@ -19,7 +20,10 @@ from db.store import (
     save_trip, get_trip, add_community_pin, get_community_pins,
     create_user, get_user_by_email, get_user_by_id, get_user_by_referral_code,
     add_credits, get_credit_history,
-    create_report, get_reports_near, upvote_report,
+    create_report, get_reports_near, get_reports_along_route,
+    upvote_report, downvote_report, confirm_report,
+    get_leaderboard, is_reporter_restricted, check_and_update_streak,
+    EXPIRY_BY_TYPE,
 )
 
 app = FastAPI(title="Trailhead API")
@@ -60,6 +64,9 @@ def _optional_user(creds: HTTPAuthorizationCredentials | None = Depends(bearer))
     uid = _decode_token(creds.credentials)
     return get_user_by_id(uid) if uid else None
 
+def _safe_user(u: dict) -> dict:
+    return {k: v for k, v in u.items() if k not in ("password_hash", "photo_data")}
+
 
 # ── Core ──────────────────────────────────────────────────────────────────────
 
@@ -79,14 +86,10 @@ async def config():
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
 class RegisterRequest(BaseModel):
-    email: str
-    username: str
-    password: str
-    referral_code: str = ""
+    email: str; username: str; password: str; referral_code: str = ""
 
 class LoginRequest(BaseModel):
-    email: str
-    password: str
+    email: str; password: str
 
 @app.post("/api/auth/register")
 async def register(body: RegisterRequest):
@@ -98,8 +101,7 @@ async def register(body: RegisterRequest):
                       referred_by=referrer["id"] if referrer else None)
     if referrer:
         add_credits(referrer["id"], 50, f"Referral — {body.username} signed up!")
-    user = get_user_by_id(uid)
-    return {"token": _make_token(uid), "user": _safe_user(user)}
+    return {"token": _make_token(uid), "user": _safe_user(get_user_by_id(uid))}
 
 @app.post("/api/auth/login")
 async def login(body: LoginRequest):
@@ -111,9 +113,6 @@ async def login(body: LoginRequest):
 @app.get("/api/auth/me")
 async def me(user: dict = Depends(_current_user)):
     return _safe_user(user)
-
-def _safe_user(u: dict) -> dict:
-    return {k: v for k, v in u.items() if k not in ("password_hash",)}
 
 
 # ── Trip planning ─────────────────────────────────────────────────────────────
@@ -141,18 +140,15 @@ async def plan(body: PlanRequest, user: dict | None = Depends(_optional_user)):
         if wp.get("lat") and wp.get("lng"):
             for c in await get_campsites_near(wp["lat"], wp["lng"], radius_miles=25):
                 if c["id"] not in seen:
-                    seen.add(c["id"])
-                    campsites.append(c)
+                    seen.add(c["id"]); campsites.append(c)
 
     gas_stations = await get_gas_along_route(geocoded)
     trip_id = str(uuid.uuid4())[:8]
     result = {"trip_id": trip_id, "plan": plan_data,
               "campsites": campsites[:40], "gas_stations": gas_stations[:30]}
     save_trip(trip_id, body.request, result, user_id=user["id"] if user else None)
-
     if user:
         add_credits(user["id"], 25, f"Trip planned: {plan_data.get('trip_name', 'Adventure')}")
-
     return result
 
 @app.get("/api/trip/{trip_id}")
@@ -195,26 +191,59 @@ async def nearby_pins(lat: float, lng: float, radius: float = 1.0):
     return get_community_pins(lat, lng, radius_deg=radius)
 
 
-# ── Reports (Waze-style) ──────────────────────────────────────────────────────
+# ── Reports ───────────────────────────────────────────────────────────────────
 
 class ReportRequest(BaseModel):
     lat: float; lng: float
-    type: str          # road_condition | campsite | hazard | closure | water | cell_signal
-    subtype: str = ""  # e.g. "washed_out", "occupied", "downed_tree"
+    type: str
+    subtype: str = ""
     description: str = ""
-    severity: str = "moderate"  # low | moderate | high | critical
+    severity: str = "moderate"
+    photo_data: Optional[str] = None  # base64 jpeg
 
 @app.post("/api/reports")
 async def submit_report(body: ReportRequest, user: dict = Depends(_current_user)):
+    # Check restriction
+    restricted, secs = is_reporter_restricted(user["id"])
+    if restricted:
+        hours = round(secs / 3600, 1)
+        raise HTTPException(403, f"Reporting restricted for {hours} more hours due to inaccurate reports.")
+
     report_id = create_report(user["id"], body.lat, body.lng, body.type,
-                              body.subtype, body.description, body.severity)
-    add_credits(user["id"], 10, f"Report submitted: {body.type}")
-    return {"status": "ok", "report_id": report_id, "credits_earned": 10,
-            "new_balance": get_user_by_id(user["id"])["credits"]}
+                              body.subtype, body.description, body.severity,
+                              photo_data=body.photo_data)
+
+    # Base credits: 10, double for photo
+    credits_earned = 20 if body.photo_data else 10
+    add_credits(user["id"], credits_earned,
+                f"{'Photo ' if body.photo_data else ''}Report: {body.type}")
+
+    # Streak check + bonus
+    streak_info = check_and_update_streak(user["id"])
+
+    fresh_user = get_user_by_id(user["id"])
+    return {
+        "status": "ok",
+        "report_id": report_id,
+        "credits_earned": credits_earned + streak_info["bonus"],
+        "new_balance": fresh_user["credits"],
+        "streak": streak_info["streak"],
+        "streak_bonus": streak_info["bonus"],
+        "streak_reason": streak_info["reason"],
+        "ttl_hours": round(EXPIRY_BY_TYPE.get(body.type, 7 * 86400) / 3600, 1),
+    }
 
 @app.get("/api/reports")
 async def nearby_reports(lat: float, lng: float, radius: float = 0.5):
     return get_reports_near(lat, lng, radius_deg=radius)
+
+class RouteReportRequest(BaseModel):
+    waypoints: list[dict]
+
+@app.post("/api/reports/along-route")
+async def route_reports(body: RouteReportRequest):
+    """Return active reports within ~10km of any route waypoint."""
+    return get_reports_along_route(body.waypoints, radius_deg=0.12)
 
 @app.post("/api/reports/{report_id}/upvote")
 async def upvote(report_id: int):
@@ -223,23 +252,49 @@ async def upvote(report_id: int):
 
 @app.post("/api/reports/{report_id}/downvote")
 async def downvote(report_id: int):
-    from db.store import downvote_report
     downvote_report(report_id)
     return {"status": "ok"}
+
+@app.post("/api/reports/{report_id}/confirm")
+async def confirm(report_id: int, user: dict = Depends(_current_user)):
+    """'Still there' — resets expiry, +1 credit to confirmer."""
+    ok = confirm_report(report_id, user["id"])
+    if not ok:
+        raise HTTPException(404, "Report not found")
+    fresh = get_user_by_id(user["id"])
+    return {"status": "ok", "credits_earned": 1, "new_balance": fresh["credits"]}
+
+@app.get("/api/reports/{report_id}/photo")
+async def report_photo(report_id: int):
+    from db.store import _conn
+    db = _conn()
+    row = db.execute("SELECT photo_data FROM reports WHERE id=?", (report_id,)).fetchone()
+    db.close()
+    if not row or not row["photo_data"]:
+        raise HTTPException(404, "No photo")
+    import base64
+    data = base64.b64decode(row["photo_data"])
+    return Response(content=data, media_type="image/jpeg")
 
 
 # ── Credits ───────────────────────────────────────────────────────────────────
 
 @app.get("/api/credits")
-async def credits(user: dict = Depends(_current_user)):
+async def credits_route(user: dict = Depends(_current_user)):
     return {"balance": user["credits"], "history": get_credit_history(user["id"])}
+
+
+# ── Leaderboard ───────────────────────────────────────────────────────────────
+
+@app.get("/api/leaderboard")
+async def leaderboard():
+    return get_leaderboard(limit=20)
 
 
 # ── GPX export ────────────────────────────────────────────────────────────────
 
 class GpxRequest(BaseModel):
-    trip_name: str
-    waypoints: list[dict]
+    trip_name: str; waypoints: list[dict]
 
 @app.post("/api/export/gpx")
 async def export_gpx(body: GpxRequest):
@@ -271,8 +326,7 @@ async def _geocode_waypoints(waypoints: list[dict]) -> list[dict]:
         for wp in waypoints:
             name = wp.get("name", "")
             if not name:
-                result.append(wp)
-                continue
+                result.append(wp); continue
             try:
                 resp = await client.get(
                     "https://nominatim.openstreetmap.org/search",

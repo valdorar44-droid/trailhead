@@ -246,19 +246,21 @@ function ll2tile(lat: number, lng: number, z: number): { x: number; y: number } 
 }
 function estimateTileCount(n: number, s: number, e: number, w: number, minZ: number, maxZ: number): number {
   let count = 0;
-  for (let z = minZ; z <= maxZ && count < 2000; z++) {
+  for (let z = minZ; z <= maxZ; z++) {
     const cap = Math.pow(2, z) - 1;
     const nw = ll2tile(n, w, z); const se = ll2tile(s, e, z);
     count += Math.max(0, Math.min(cap, se.x) - Math.max(0, nw.x) + 1) *
              Math.max(0, Math.min(cap, se.y) - Math.max(0, nw.y) + 1);
   }
-  return Math.min(count, 2000);
+  return count;
 }
+// 3 tile sources per coord (streets vector + terrain vector + satellite raster)
 function tilesMB(count: number, maxZ: number): string {
-  const avgKB = maxZ >= 14 ? 68 : maxZ >= 12 ? 52 : 32;
-  const mb = (count * avgKB) / 1024;
+  const avgKBPerCoord = maxZ >= 15 ? 55 : maxZ >= 13 ? 80 : maxZ >= 11 ? 110 : 150;
+  const mb = (count * avgKBPerCoord) / 1024;
   if (mb < 1) return '<1 MB';
-  if (mb >= 100) return `~${Math.round(mb / 10) * 10} MB`;
+  if (mb >= 1024) return `~${(mb / 1024).toFixed(1)} GB`;
+  if (mb >= 100) return `~${Math.round(mb / 50) * 50} MB`;
   return `~${Math.round(mb)} MB`;
 }
 
@@ -395,26 +397,66 @@ const buildMapHtml = (
   var lastOffCheck=0,downloadActive=false,mapReady=false,pendingMsgs=[];
   function postRN(o){try{window.ReactNativeWebView.postMessage(JSON.stringify(o));}catch(e){}}
 
-  // ── IndexedDB offline tile cache ──────────────────────────────────────────────
-  var _idb=null;
-  var _idbR=new Promise(function(res){var req=indexedDB.open('trailhead-tiles',1);req.onupgradeneeded=function(e){e.target.result.createObjectStore('tiles',{keyPath:'k'});};req.onsuccess=function(e){_idb=e.target.result;res();};req.onerror=function(){res();};});
-  function _gT(k){return _idbR.then(function(){if(!_idb)return null;return new Promise(function(r){var tx=_idb.transaction('tiles','readonly');var rq=tx.objectStore('tiles').get(k);rq.onsuccess=function(){r(rq.result?rq.result.v:null);};rq.onerror=function(){r(null);};});});}
-  function _sT(k,v){return _idbR.then(function(){if(!_idb)return;try{_idb.transaction('tiles','readwrite').objectStore('tiles').put({k:k,v:v});}catch(e){}});}
+  // ── Offline tile cache via Cache API + fetch intercept ────────────────────────
+  // Auto-caches every Mapbox tile request so the map works offline.
+  // This intercepts the actual tiles Mapbox GL JS fetches (vector PBF + satellite
+  // raster), not the style raster tiles — so offline rendering actually works.
+  var TILE_CACHE='trailhead-tiles-v3';
+  var _origFetch=window.fetch.bind(window);
+  window.fetch=async function(input,init){
+    var url=typeof input==='string'?input:(input&&input.url?input.url:'');
+    var isTile=url&&(url.indexOf('api.mapbox.com/v4/')>=0||url.indexOf('api.mapbox.com/styles/')>=0||url.indexOf('api.mapbox.com/fonts/')>=0||url.indexOf('api.mapbox.com/sprites/')>=0);
+    if(isTile){
+      try{
+        var cacheKey=url.replace(/access_token=[^&]*/,'access_token=_');
+        var c=await caches.open(TILE_CACHE);
+        var hit=await c.match(cacheKey);
+        if(hit)return hit;
+        var resp=await _origFetch(input,init);
+        if(resp&&resp.ok){c.put(cacheKey,resp.clone());}
+        return resp;
+      }catch(e){try{return await _origFetch(input,init);}catch(e2){throw e2;}}
+    }
+    return _origFetch(input,init);
+  };
+
   function _ll2t(lat,lng,z){var x=Math.floor((lng+180)/360*Math.pow(2,z));var s=Math.sin(lat*Math.PI/180);var y=Math.floor((0.5-Math.log((1+s)/(1-s))/(4*Math.PI))*Math.pow(2,z));return{x:Math.max(0,x),y:Math.max(0,y)};}
-  async function _fetchDU(url){var r=await fetch(url);if(!r.ok)throw new Error('x');var b=await r.blob();return new Promise(function(res,rej){var rd=new FileReader();rd.onload=function(){res(rd.result);};rd.onerror=rej;rd.readAsDataURL(b);});}
+
+  // The real tiles Mapbox GL JS requests — vector streets, terrain, satellite
+  function _tileUrls(z,x,y){
+    var t=mapboxToken;
+    return [
+      'https://api.mapbox.com/v4/mapbox.mapbox-streets-v8/'+z+'/'+x+'/'+y+'.vector.pbf?access_token='+t,
+      'https://api.mapbox.com/v4/mapbox.mapbox-terrain-v2/'+z+'/'+x+'/'+y+'.vector.pbf?access_token='+t,
+      'https://api.mapbox.com/v4/mapbox.satellite/'+z+'/'+x+'/'+y+'.jpg90?access_token='+t,
+    ];
+  }
+
+  // Average KB per tile-set (streets+terrain vector + satellite) by zoom
+  function _avgKbPerCoord(z){return z>=15?55:z>=13?80:z>=11?110:150;}
+
   async function _dlTiles(n,s,e,w,minZ,maxZ){
-    var tiles=[],MAX=2000;
-    var tileUrl='https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/tiles/256/{z}/{x}/{y}?access_token='+mapboxToken;
-    for(var z=minZ;z<=maxZ&&tiles.length<MAX;z++){var nw=_ll2t(n,w,z);var se=_ll2t(s,e,z);var cap=Math.pow(2,z)-1;for(var x=Math.max(0,nw.x);x<=Math.min(cap,se.x)&&tiles.length<MAX;x++){for(var y=Math.max(0,nw.y);y<=Math.min(cap,se.y)&&tiles.length<MAX;y++){tiles.push({z:z,x:x,y:y});}}}
-    var total=tiles.length,saved=0,BATCH=5;
-    postRN({type:'download_progress',percent:0,saved:0,total:total});
-    for(var i=0;i<tiles.length;i+=BATCH){
+    var coords=[];
+    for(var z=minZ;z<=maxZ;z++){
+      var nw=_ll2t(n,w,z),se=_ll2t(s,e,z),cap=Math.pow(2,z)-1;
+      for(var x=Math.max(0,nw.x);x<=Math.min(cap,se.x);x++){
+        for(var y=Math.max(0,nw.y);y<=Math.min(cap,se.y);y++){
+          coords.push({z:z,x:x,y:y});
+        }
+      }
+    }
+    var total=coords.length,saved=0,bytes=0,BATCH=30;
+    postRN({type:'download_progress',percent:0,saved:0,total:total,mb:'0'});
+    for(var i=0;i<coords.length;i+=BATCH){
       if(!downloadActive)break;
-      var batch=tiles.slice(i,i+BATCH);
+      var batch=coords.slice(i,i+BATCH);
       await Promise.allSettled(batch.map(async function(t){
-        var url=tileUrl.replace('{z}',t.z).replace('{x}',t.x).replace('{y}',t.y);
-        var key='sat_'+t.z+'_'+t.x+'_'+t.y;
-        try{var ex=await _gT(key);if(!ex){var d=await _fetchDU(url);await _sT(key,d);}saved++;postRN({type:'download_progress',percent:Math.round(saved/total*100),saved:saved,total:total});}catch(e){saved++;}
+        var urls=_tileUrls(t.z,t.x,t.y);
+        for(var ui=0;ui<urls.length;ui++){
+          try{await fetch(urls[ui]);}catch(e){}
+        }
+        saved++;bytes+=_avgKbPerCoord(t.z)*1024;
+        postRN({type:'download_progress',percent:Math.round(saved/total*100),saved:saved,total:total,mb:(bytes/1048576).toFixed(1)});
       }));
     }
     postRN({type:'download_complete',saved:saved,total:total});
@@ -466,7 +508,7 @@ const buildMapHtml = (
     _a('gas-circle',{id:'gas-circle',type:'circle',source:'gas',paint:{'circle-radius':9,'circle-color':'#eab308','circle-opacity':0.92,'circle-stroke-width':2,'circle-stroke-color':'#fff'}});
     _a('gas-label',{id:'gas-label',type:'symbol',source:'gas',filter:['>=',['zoom'],13],layout:{'text-field':['get','name'],'text-size':9,'text-offset':[0,1.5],'text-anchor':'top'},paint:{'text-color':'#f1f5f9','text-halo-color':'rgba(0,0,0,0.85)','text-halo-width':1.5}});
     _a('poi-circle',{id:'poi-circle',type:'circle',source:'pois',paint:{'circle-radius':['case',['==',['get','type'],'peak'],9,8],'circle-color':['match',['get','type'],'water','#3b82f6','trailhead','#22c55e','viewpoint','#a855f7','peak','#92400e','#6b7280'],'circle-opacity':0.9,'circle-stroke-width':1.5,'circle-stroke-color':'#fff'}});
-    _a('poi-label',{id:'poi-label',type:'symbol',source:'pois',filter:['>=',['zoom'],12],layout:{'text-field':['case',['all',['==',['get','type'],'peak'],['has','elevation']],['concat',['get','name'],'\n▲ ',['get','elevation']],['get','name']],'text-size':['case',['==',['get','type'],'peak'],10,9],'text-offset':[0,1.3],'text-anchor':'top','text-max-width':10},paint:{'text-color':['case',['==',['get','type'],'peak'],'#d97706','#f1f5f9'],'text-halo-color':['case',['==',['get','type'],'peak'],'rgba(255,255,255,0.95)','rgba(0,0,0,0.85)'],'text-halo-width':2}});
+    _a('poi-label',{id:'poi-label',type:'symbol',source:'pois',filter:['>=',['zoom'],12],layout:{'text-field':['case',['all',['==',['get','type'],'peak'],['has','elevation']],['concat',['get','name'],'\\n▲ ',['get','elevation']],['get','name']],'text-size':['case',['==',['get','type'],'peak'],10,9],'text-offset':[0,1.3],'text-anchor':'top','text-max-width':10},paint:{'text-color':['case',['==',['get','type'],'peak'],'#d97706','#f1f5f9'],'text-halo-color':['case',['==',['get','type'],'peak'],'rgba(255,255,255,0.95)','rgba(0,0,0,0.85)'],'text-halo-width':2}});
     _a('camp-cluster',{id:'camp-cluster',type:'circle',source:'camps',filter:['has','point_count'],paint:{'circle-color':['step',['get','point_count'],'#14b8a6',10,'#f97316',50,'#ef4444'],'circle-radius':['step',['get','point_count'],18,10,25,50,32],'circle-opacity':0.88,'circle-stroke-width':2,'circle-stroke-color':'#fff'}});
     _a('camp-count',{id:'camp-count',type:'symbol',source:'camps',filter:['has','point_count'],layout:{'text-field':'{point_count_abbreviated}','text-size':12,'text-font':['DIN Offc Pro Medium','Arial Unicode MS Bold']},paint:{'text-color':'#fff'}});
     _a('camp-circle',{id:'camp-circle',type:'circle',source:'camps',filter:['!',['has','point_count']],paint:{'circle-radius':['interpolate',['linear'],['zoom'],9,7,13,11],'circle-color':['match',['get','land_type'],'BLM Land','#f97316','National Forest','#22c55e','National Park','#3b82f6','State Park','#8b5cf6','Campground','#14b8a6','#14b8a6'],'circle-opacity':0.88,'circle-stroke-width':2,'circle-stroke-color':'rgba(255,255,255,0.9)'}});
@@ -713,6 +755,7 @@ export default function MapScreen() {
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [downloadTotal, setDownloadTotal] = useState(0);
   const [downloadSaved, setDownloadSaved] = useState(0);
+  const [downloadMB, setDownloadMB] = useState('0');
   const [downloadLabel, setDownloadLabel] = useState('');
   const [offlineSaved, setOfflineSaved] = useState(false);
   const [mapboxToken,   setMapboxToken]   = useState('');
@@ -1345,14 +1388,14 @@ export default function MapScreen() {
         setDownloadProgress(msg.percent ?? 0);
         setDownloadTotal(msg.total ?? 0);
         setDownloadSaved(msg.saved ?? 0);
+        if (msg.mb != null) setDownloadMB(String(msg.mb));
       }
       if (msg.type === 'download_complete') {
         setIsDownloading(false);
         setDownloadProgress(100);
         setOfflineSaved(true);
-        // Persist this region to the store so it shows as cached
         setDownloadLabel(prev => { if (prev) addCachedRegion(prev); return prev; });
-        setTimeout(() => { setDownloadProgress(0); setDownloadSaved(0); }, 3000);
+        setTimeout(() => { setDownloadProgress(0); setDownloadSaved(0); setDownloadMB('0'); }, 3000);
       }
       if (msg.type === 'campsite_tapped') {
         const camp = (msg.camp as CampsitePin) || null;
@@ -1525,7 +1568,7 @@ export default function MapScreen() {
         <View style={[s.topBarDot, navMode && { backgroundColor: C.green }]} />
         <Text style={s.topBarText} numberOfLines={1}>
           {isDownloading
-            ? `CACHING TILES ${downloadProgress}% · ${downloadTotal} TOTAL`
+            ? `CACHING ${downloadProgress}% · ${downloadSaved.toLocaleString()} COORDS · ${downloadMB} MB`
             : offlineWarning && navMode
               ? '⚠ NO OFFLINE MAPS — TAP MAP BUTTON TO DOWNLOAD'
               : isRerouting
@@ -2111,7 +2154,7 @@ export default function MapScreen() {
 
             {/* What's included */}
             <View style={s.offlineIncludesRow}>
-              {['Satellite imagery', 'Road names', 'Terrain', 'Campsite labels'].map(item => (
+              {['Trails & 4WD tracks', 'All road names', 'Terrain contours', 'Speed limits', 'Satellite imagery', 'Camp labels'].map(item => (
                 <View key={item} style={s.offlineIncludeChip}>
                   <Text style={s.offlineIncludeText}>{item}</Text>
                 </View>
@@ -2132,9 +2175,9 @@ export default function MapScreen() {
               <View style={s.offlineProgressCard}>
                 <View style={s.offlineProgressTop}>
                   <Text style={s.offlineProgressLabel}>
-                    DOWNLOADING · {downloadSaved.toLocaleString()} / {downloadTotal.toLocaleString()} TILES
+                    DOWNLOADING · {downloadSaved.toLocaleString()} / {downloadTotal.toLocaleString()} COORDS
                   </Text>
-                  <Text style={s.offlineProgressMB}>{tilesMB(downloadSaved, 14)}</Text>
+                  <Text style={s.offlineProgressMB}>{downloadMB} MB</Text>
                 </View>
                 <View style={s.dlBar}>
                   <View style={[s.dlFill, { width: `${downloadProgress}%` as any }]} />
@@ -2149,13 +2192,13 @@ export default function MapScreen() {
             )}
 
             {/* Current trip download */}
-            <Text style={s.offlineSectionLabel}>MY TRIP CORRIDOR · DETAIL (z10–z14)</Text>
+            <Text style={s.offlineSectionLabel}>MY TRIP CORRIDOR · FULL TRAIL DETAIL (z10–z16)</Text>
             {waypoints.length > 0 ? (() => {
               const lats = waypoints.map(w => w.lat), lngs = waypoints.map(w => w.lng);
-              const pad = 0.3;
+              const pad = 0.4;
               const n = Math.max(...lats) + pad, s2 = Math.min(...lats) - pad;
               const e = Math.max(...lngs) + pad, w2 = Math.min(...lngs) - pad;
-              const count = estimateTileCount(n, s2, e, w2, 10, 14);
+              const count = estimateTileCount(n, s2, e, w2, 10, 16);
               const label = activeTrip?.plan.trip_name ?? 'Trip';
               const isCached = cachedRegions.includes(label);
               return (
@@ -2164,12 +2207,12 @@ export default function MapScreen() {
                   onPress={() => {
                     setShowOfflineModal(false); setIsDownloading(true); setOfflineSaved(false);
                     setDownloadLabel(label);
-                    webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles_bbox', n, s: s2, e, w: w2, minZ: 10, maxZ: 14 }));
+                    webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles_bbox', n, s: s2, e, w: w2, minZ: 10, maxZ: 16 }));
                   }}>
                   <View style={{ flex: 1 }}>
                     <Text style={s.offlineTripName} numberOfLines={1}>{label.toUpperCase()}</Text>
                     <Text style={s.offlineTripMeta}>
-                      {count >= 2000 ? '2,000+ tiles (capped)' : `~${count.toLocaleString()} tiles`} · {tilesMB(count, 14)}
+                      ~{count.toLocaleString()} tile coords · {tilesMB(count, 16)} · trails, tracks, speed limits
                     </Text>
                     {isCached && <Text style={[s.offlineTripMeta, { color: C.green }]}>✓ Cached</Text>}
                   </View>
@@ -2177,34 +2220,48 @@ export default function MapScreen() {
                 </TouchableOpacity>
               );
             })() : (
-              <Text style={s.offlineNoTrip}>Plan a trip first to download its corridor</Text>
+              <Text style={s.offlineNoTrip}>Plan a trip first to download its full trail corridor</Text>
             )}
 
             {/* State downloads */}
-            <Text style={[s.offlineSectionLabel, { marginTop: 16 }]}>US STATES · OVERVIEW (z10–z12)</Text>
-            <ScrollView style={{ maxHeight: 260 }} showsVerticalScrollIndicator={false}>
+            <Text style={[s.offlineSectionLabel, { marginTop: 16 }]}>US STATES</Text>
+            <ScrollView style={{ maxHeight: 280 }} showsVerticalScrollIndicator={false}>
               {Object.entries(US_STATES).map(([code, st]) => {
-                const count = estimateTileCount(st.n, st.s, st.e, st.w, 10, 12);
+                const countOvr = estimateTileCount(st.n, st.s, st.e, st.w, 10, 12);
+                const countDet = estimateTileCount(st.n, st.s, st.e, st.w, 10, 15);
                 const isCached = cachedRegions.includes(st.name);
+                const isCachedDet = cachedRegions.includes(st.name + '-detail');
                 return (
-                  <TouchableOpacity key={code} style={[s.offlineStateRow, isCached && { opacity: 0.75 }]}
-                    disabled={isDownloading}
-                    onPress={() => {
-                      setShowOfflineModal(false); setIsDownloading(true); setOfflineSaved(false);
-                      setDownloadLabel(st.name);
-                      webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles_bbox', n: st.n, s: st.s, e: st.e, w: st.w, minZ: 10, maxZ: 12 }));
-                    }}>
+                  <View key={code} style={s.offlineStateRow}>
                     <Text style={s.stateEmoji}>{st.emoji}</Text>
                     <View style={{ flex: 1 }}>
                       <Text style={s.stateName}>{st.name}</Text>
-                      <Text style={s.offlineStateMeta}>
-                        {count >= 2000 ? '2,000+ tiles' : `~${count.toLocaleString()} tiles`} · {tilesMB(count, 12)}
-                      </Text>
+                      <View style={{ flexDirection: 'row', gap: 6, marginTop: 4 }}>
+                        <TouchableOpacity
+                          style={[s.stateTierBtn, isCached && { borderColor: C.green }]}
+                          disabled={isDownloading}
+                          onPress={() => {
+                            setShowOfflineModal(false); setIsDownloading(true); setOfflineSaved(false);
+                            setDownloadLabel(st.name);
+                            webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles_bbox', n: st.n, s: st.s, e: st.e, w: st.w, minZ: 10, maxZ: 12 }));
+                          }}>
+                          <Text style={s.stateTierLabel}>{isCached ? '✓ ' : ''}OVERVIEW</Text>
+                          <Text style={s.stateTierSize}>{tilesMB(countOvr, 12)}</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[s.stateTierBtn, { borderColor: C.orange + '77' }, isCachedDet && { borderColor: C.green }]}
+                          disabled={isDownloading}
+                          onPress={() => {
+                            setShowOfflineModal(false); setIsDownloading(true); setOfflineSaved(false);
+                            setDownloadLabel(st.name + '-detail');
+                            webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles_bbox', n: st.n, s: st.s, e: st.e, w: st.w, minZ: 10, maxZ: 15 }));
+                          }}>
+                          <Text style={[s.stateTierLabel, { color: C.orange }]}>{isCachedDet ? '✓ ' : ''}TRAILS</Text>
+                          <Text style={s.stateTierSize}>{tilesMB(countDet, 15)}</Text>
+                        </TouchableOpacity>
+                      </View>
                     </View>
-                    {isCached
-                      ? <Ionicons name="checkmark-circle" size={16} color={C.green} />
-                      : <Ionicons name="cloud-download-outline" size={16} color={C.text3} />}
-                  </TouchableOpacity>
+                  </View>
                 );
               })}
             </ScrollView>
@@ -3124,10 +3181,13 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   offlineTripBtn: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 14, borderWidth: 1.5, borderColor: C.orange + '55', backgroundColor: C.s2, marginBottom: 6 },
   offlineTripName: { color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '800' },
   offlineTripMeta: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
-  offlineStateRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, paddingHorizontal: 4, borderBottomWidth: 1, borderColor: C.border },
+  offlineStateRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 4, borderBottomWidth: 1, borderColor: C.border },
   stateEmoji: { fontSize: 20 },
   stateName: { color: C.text2, fontSize: 12, fontFamily: mono, fontWeight: '600' },
   offlineStateMeta: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 1 },
+  stateTierBtn: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: C.border, backgroundColor: C.s2, alignItems: 'center' },
+  stateTierLabel: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '700', letterSpacing: 0.5 },
+  stateTierSize: { color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 1 },
   offlineProgressCard: { backgroundColor: C.s2, borderRadius: 12, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: C.border },
   offlineProgressTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
   offlineProgressLabel: { color: C.text3, fontSize: 9, fontFamily: mono, letterSpacing: 0.5 },

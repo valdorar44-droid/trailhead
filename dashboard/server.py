@@ -50,7 +50,7 @@ async def _bootstrap_admin():
     admin_pass  = os.environ.get("ADMIN_PASSWORD")
     admin_user  = os.environ.get("ADMIN_USERNAME", "admin")
     if admin_email and admin_pass:
-        ensure_admin_user(admin_email, admin_user, pwd.hash(admin_pass))
+        ensure_admin_user(admin_email, admin_user, pwd.hash(admin_pass[:72]))
 
 
 # ── Auth helpers ──────────────────────────────────────────────────────────────

@@ -52,8 +52,13 @@ export const api = {
   getCredits: () => req<{ balance: number; history: CreditTransaction[] }>('/api/credits'),
   getLeaderboard: () => req<LeaderboardEntry[]>('/api/leaderboard'),
 
+  getConfig: () => req<{ mapbox_token: string }>('/api/config'),
   getCampsites: (lat: number, lng: number, radius = 25) =>
     req<Campsite[]>(`/api/campsites?lat=${lat}&lng=${lng}&radius=${radius}`),
+  searchCampsites: (lat: number, lng: number, radius = 40, types: string[] = []) =>
+    req<CampsitePin[]>(`/api/campsites/search?lat=${lat}&lng=${lng}&radius=${radius}&types=${types.join(',')}`),
+  getCampsiteDetail: (id: string) =>
+    req<CampsiteDetail>(`/api/campsites/${id}/detail`),
   submitPin: (data: PinPayload) =>
     req('/api/pins', { method: 'POST', body: JSON.stringify(data) }),
   getNearbyPins: (lat: number, lng: number, radius = 1.0) =>
@@ -99,6 +104,15 @@ export interface Logistics {
 export interface Campsite {
   id: string; name: string; lat: number; lng: number;
   reservable: boolean; description: string; url: string;
+}
+export interface CampsitePin {
+  id: string; name: string; lat: number; lng: number;
+  tags: string[]; land_type: string; description: string;
+  photo_url?: string; reservable: boolean; cost?: string; url: string; ada: boolean;
+}
+export interface CampsiteDetail extends CampsitePin {
+  photos: string[]; amenities: string[]; site_types: string[];
+  activities: string[]; phone?: string; campsites_count: number;
 }
 export interface GasStation {
   id: number; name: string; lat: number; lng: number;

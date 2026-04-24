@@ -14,7 +14,7 @@ from jose import jwt, JWTError
 
 from config.settings import settings
 from ai.planner import plan_trip
-from ingestors.ridb import get_campsites_near
+from ingestors.ridb import get_campsites_near, get_campsites_search, get_facility_detail
 from ingestors.nrel import get_gas_along_route
 from db.store import (
     save_trip, get_trip, add_community_pin, get_community_pins,
@@ -255,11 +255,30 @@ async def nearby_audio(body: NearbyAudioRequest):
     return {"narration": narration}
 
 
+# ── Config (public) ───────────────────────────────────────────────────────────
+
+@app.get("/api/config")
+def get_config():
+    return {"mapbox_token": settings.mapbox_token}
+
+
 # ── Campsite / gas ────────────────────────────────────────────────────────────
 
 @app.get("/api/campsites")
 async def campsites(lat: float, lng: float, radius: float = 25):
     return await get_campsites_near(lat, lng, radius_miles=radius)
+
+@app.get("/api/campsites/search")
+async def campsites_search(lat: float, lng: float, radius: float = 40, types: str = ""):
+    type_filters = [t.strip() for t in types.split(",") if t.strip()] if types else None
+    return await get_campsites_search(lat, lng, radius_miles=radius, type_filters=type_filters)
+
+@app.get("/api/campsites/{facility_id}/detail")
+async def campsite_detail(facility_id: str):
+    detail = await get_facility_detail(facility_id)
+    if not detail:
+        raise HTTPException(status_code=404, detail="Facility not found")
+    return detail
 
 @app.get("/api/gas")
 async def gas(lat: float, lng: float, radius: float = 25):

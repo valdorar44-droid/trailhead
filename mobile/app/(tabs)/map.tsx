@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Linking, Animated, TextInput, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Linking, Animated, TextInput, ActivityIndicator, Modal, Image } from 'react-native';
 import { WebView } from 'react-native-webview';
 import * as Location from 'expo-location';
 import * as Speech from 'expo-speech';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '@/lib/store';
-import { api, Report, Pin } from '@/lib/api';
+import { api, Report, Pin, CampsitePin, CampsiteDetail } from '@/lib/api';
 import { C, mono } from '@/lib/design';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -86,9 +86,31 @@ function stepLabel(type: string, modifier: string): string {
 
 // ─── Map HTML ─────────────────────────────────────────────────────────────────
 
-const TILE_SATELLITE = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
-const TILE_TOPO      = 'https://a.tile.opentopomap.org/{z}/{x}/{y}.png';
-const TILE_LABELS    = 'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}';
+const TILE_SATELLITE_ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+const TILE_TOPO_OSM       = 'https://a.tile.opentopomap.org/{z}/{x}/{y}.png';
+const TILE_LABELS_ESRI    = 'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}';
+
+function getTileUrls(token: string) {
+  if (token) {
+    return {
+      sat:  `https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/{z}/{x}/{y}?access_token=${token}`,
+      topo: `https://api.mapbox.com/styles/v1/mapbox/outdoors-v12/tiles/{z}/{x}/{y}?access_token=${token}`,
+      hyb:  `https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/tiles/{z}/{x}/{y}?access_token=${token}`,
+      labels: null,
+    };
+  }
+  return {
+    sat:    TILE_SATELLITE_ESRI,
+    topo:   TILE_TOPO_OSM,
+    hyb:    TILE_SATELLITE_ESRI,
+    labels: TILE_LABELS_ESRI,
+  };
+}
+
+// Keep legacy names for backwards compat in download logic
+const TILE_SATELLITE = TILE_SATELLITE_ESRI;
+const TILE_TOPO      = TILE_TOPO_OSM;
+const TILE_LABELS    = TILE_LABELS_ESRI;
 
 const buildMapHtml = (
   centerLat: number, centerLng: number,
@@ -96,7 +118,10 @@ const buildMapHtml = (
   campsites: { lat: number; lng: number; name: string }[],
   gasList:   { lat: number; lng: number; name: string }[],
   pins:      { lat: number; lng: number; name: string; type: string }[],
-) => `<!DOCTYPE html>
+  mapboxToken: string = '',
+) => {
+  const tiles = getTileUrls(mapboxToken);
+  return `<!DOCTYPE html>
 <html>
 <head>
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0">
@@ -124,6 +149,10 @@ const buildMapHtml = (
     width:14px;height:14px;box-shadow:0 0 0 4px rgba(249,115,22,0.3);}
   .search-pin{background:rgba(59,130,246,0.15);border:1.5px solid #3b82f6;
     border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:14px;}
+  .disc{background:rgba(20,184,166,0.18);border:2px solid #14b8a6;
+    border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;
+    font-size:15px;box-shadow:0 2px 8px rgba(20,184,166,0.4);cursor:pointer;}
+  .disc:hover{background:rgba(20,184,166,0.35);}
   .leaflet-popup-content-wrapper{background:#0f1319;border:1px solid #252d3d;
     color:#f1f5f9;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,0.6);}
   .leaflet-popup-tip{background:#0f1319;}
@@ -194,7 +223,7 @@ const buildMapHtml = (
     postRN({type:'download_complete',saved:saved,total:total});
   }
 
-  var baseLayer   = L.tileLayer.cached('${TILE_SATELLITE}','sat',{maxZoom:19});
+  var baseLayer   = L.tileLayer.cached('${tiles.sat}','sat',{maxZoom:19,tileSize:256});
   baseLayer.addTo(map);
   var labelLayer  = null;
   var fallbackLine = null;
@@ -202,6 +231,7 @@ const buildMapHtml = (
   var userMarker   = null;
   var wpMarkers    = [];
   var searchPin    = null;
+  var discoverMarkers = [];
   var breadcrumbPts= [];
   var breadcrumb   = null;
 
@@ -327,6 +357,22 @@ const buildMapHtml = (
       if(msg.type==='clear_track'){
         breadcrumbPts=[];if(breadcrumb){map.removeLayer(breadcrumb);breadcrumb=null;}
       }
+      if(msg.type==='set_discover_pins'){
+        discoverMarkers.forEach(function(m){map.removeLayer(m);});discoverMarkers=[];
+        (msg.pins||[]).forEach(function(p){
+          var el=document.createElement('div');
+          el.className='disc';
+          el.textContent=p.tags&&p.tags.includes('rv')?'🚐':p.tags&&p.tags.includes('dispersed')?'🌲':p.tags&&p.tags.includes('parking')?'🅿️':'🏕️';
+          var m=L.marker([p.lat,p.lng],{icon:L.divIcon({className:'',html:el.outerHTML,iconSize:[32,32],iconAnchor:[16,16]})})
+            .addTo(map)
+            .bindPopup('<div class="pt">'+p.name+'</div><div class="pm">'+p.land_type+'</div>');
+          m.on('click',function(ev){ev.originalEvent&&ev.originalEvent.stopPropagation();postRN({type:'campsite_tapped',id:p.id,name:p.name});});
+          discoverMarkers.push(m);
+        });
+      }
+      if(msg.type==='clear_discover_pins'){
+        discoverMarkers.forEach(function(m){map.removeLayer(m);});discoverMarkers=[];
+      }
       if(msg.type==='download_tiles'){
         if(!downloadActive){downloadActive=true;var bounds=map.getBounds();_dlTiles(bounds,msg.minZ||10,msg.maxZ||15);}
       }
@@ -349,6 +395,7 @@ const buildMapHtml = (
 })();
 </script>
 </body></html>`;
+};
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -378,11 +425,26 @@ export default function MapScreen() {
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [downloadTotal, setDownloadTotal] = useState(0);
   const [offlineSaved, setOfflineSaved] = useState(false);
+  const [mapboxToken,   setMapboxToken]   = useState('');
+  const [showFilters,   setShowFilters]   = useState(false);
+  const [activeFilters, setActiveFilters] = useState<string[]>([]);
+  const [discoverPins,  setDiscoverPins]  = useState<CampsitePin[]>([]);
+  const [selectedCamp,  setSelectedCamp]  = useState<CampsitePin | null>(null);
+  const [campDetail,    setCampDetail]    = useState<CampsiteDetail | null>(null);
+  const [showCampDetail,setShowCampDetail] = useState(false);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [isSearchingCamps, setIsSearchingCamps] = useState(false);
 
-  const navAnim  = useRef(new Animated.Value(0)).current;
-  const navRef   = useRef({ active: false, idx: 0, wps: [] as WP[] });
-  const guideRef = useRef<Record<string, string>>({});
-  const spokenRef = useRef(new Set<string>());
+  const navAnim      = useRef(new Animated.Value(0)).current;
+  const navRef       = useRef({ active: false, idx: 0, wps: [] as WP[] });
+  const guideRef     = useRef<Record<string, string>>({});
+  const spokenRef    = useRef(new Set<string>());
+  const discoverRef  = useRef<CampsitePin[]>([]);
+
+  // Fetch Mapbox token once on mount
+  useEffect(() => {
+    api.getConfig().then(c => setMapboxToken(c.mapbox_token || '')).catch(() => {});
+  }, []);
 
   // Keep refs in sync
   useEffect(() => { navRef.current.active = navMode; }, [navMode]);
@@ -468,6 +530,34 @@ export default function MapScreen() {
     spokenRef.current.clear();
   }, [activeTrip?.trip_id]);
 
+  // ── Discover pins: fetch on filter change ──────────────────────────────────
+
+  useEffect(() => {
+    if (!activeFilters.length) {
+      setDiscoverPins([]);
+      webRef.current?.postMessage(JSON.stringify({ type: 'clear_discover_pins' }));
+      return;
+    }
+    const center = userLoc ?? (waypoints[0] ? { lat: waypoints[0].lat, lng: waypoints[0].lng } : null);
+    if (!center) return;
+    setIsSearchingCamps(true);
+    api.searchCampsites(center.lat, center.lng, 50, activeFilters)
+      .then(pins => {
+        discoverRef.current = pins;
+        setDiscoverPins(pins);
+        webRef.current?.postMessage(JSON.stringify({ type: 'set_discover_pins', pins }));
+      })
+      .catch(() => {})
+      .finally(() => setIsSearchingCamps(false));
+  }, [activeFilters]);
+
+  // Re-send discover pins after map reload
+  useEffect(() => {
+    if (discoverPins.length) {
+      webRef.current?.postMessage(JSON.stringify({ type: 'set_discover_pins', pins: discoverPins }));
+    }
+  }, [discoverPins]);
+
   // ── Nav mode animate + speak start ─────────────────────────────────────────
 
   useEffect(() => {
@@ -523,13 +613,15 @@ export default function MapScreen() {
   function switchLayer() {
     const next: MapLayer = mapLayer === 'satellite' ? 'topo' : mapLayer === 'topo' ? 'hybrid' : 'satellite';
     setMapLayerState(next);
+    const t = getTileUrls(mapboxToken);
     let msg: any = { type: 'set_layer' };
     if (next === 'satellite') {
-      msg.url = TILE_SATELLITE; msg.cachePrefix = 'sat';
+      msg.url = t.sat; msg.cachePrefix = 'sat';
     } else if (next === 'topo') {
-      msg.url = TILE_TOPO; msg.opacity = 0.96; msg.cachePrefix = 'topo';
+      msg.url = t.topo; msg.opacity = 0.96; msg.cachePrefix = 'topo';
     } else {
-      msg.url = TILE_SATELLITE; msg.labelsUrl = TILE_LABELS; msg.cachePrefix = 'hyb';
+      msg.url = t.hyb; msg.cachePrefix = 'hyb';
+      if (t.labels) msg.labelsUrl = t.labels;
     }
     webRef.current?.postMessage(JSON.stringify(msg));
   }
@@ -559,7 +651,23 @@ export default function MapScreen() {
         setOfflineSaved(true);
         setTimeout(() => setDownloadProgress(0), 2000);
       }
+      if (msg.type === 'campsite_tapped') {
+        const pin = discoverRef.current.find(p => p.id === msg.id) ?? null;
+        setSelectedCamp(pin);
+        setCampDetail(null);
+      }
     } catch {}
+  }
+
+  async function openCampDetail() {
+    if (!selectedCamp) return;
+    setLoadingDetail(true);
+    try {
+      const d = await api.getCampsiteDetail(selectedCamp.id);
+      setCampDetail(d);
+      setShowCampDetail(true);
+    } catch {}
+    setLoadingDetail(false);
   }
 
   // ── Stable map HTML (only rebuilds on trip/pins change) ─────────────────────
@@ -581,8 +689,8 @@ export default function MapScreen() {
   const centerLng = waypoints[0]?.lng ?? -111.0;
 
   const mapHtml = useMemo(() =>
-    buildMapHtml(centerLat, centerLng, waypoints, campsites, gas, pinList),
-    [activeTrip?.trip_id, communityPins.length]
+    buildMapHtml(centerLat, centerLng, waypoints, campsites, gas, pinList, mapboxToken),
+    [activeTrip?.trip_id, communityPins.length, mapboxToken]
   );
 
   // ── Nav HUD values ──────────────────────────────────────────────────────────
@@ -704,6 +812,13 @@ export default function MapScreen() {
           </TouchableOpacity>
         )}
 
+        <TouchableOpacity
+          style={[s.ctrlBtn, showFilters && { backgroundColor: '#14b8a6dd', borderColor: '#14b8a6' }]}
+          onPress={() => { setShowFilters(p => !p); if (showFilters) { setActiveFilters([]); setSelectedCamp(null); } }}
+        >
+          <Ionicons name="filter" size={20} color={showFilters ? '#fff' : C.text} />
+        </TouchableOpacity>
+
         {!navMode && (
           <TouchableOpacity style={s.ctrlBtn} onPress={() => setShowPanel(p => !p)}>
             <Ionicons name={showPanel ? 'chevron-down' : 'chevron-up'} size={20} color={C.text} />
@@ -778,6 +893,192 @@ export default function MapScreen() {
           )}
         </View>
       )}
+
+      {/* ── Campsite filter bar ── */}
+      {showFilters && !navMode && (
+        <View style={s.filterBar}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.filterScroll}>
+            {([
+              { id: 'tent',      label: 'Tent',             emoji: '⛺' },
+              { id: 'rv',        label: 'RV',               emoji: '🚐' },
+              { id: 'dispersed', label: 'Dispersed',        emoji: '🌲' },
+              { id: 'parking',   label: 'Overnight Prkg',   emoji: '🅿️' },
+              { id: 'state',     label: 'State Park',       emoji: '🏞️' },
+              { id: 'usfs',      label: 'Nat. Forest',      emoji: '🌿' },
+              { id: 'nps',       label: 'Nat. Park',        emoji: '⛰️' },
+              { id: 'blm',       label: 'BLM',              emoji: '🏕️' },
+            ] as const).map(f => {
+              const active = activeFilters.includes(f.id);
+              return (
+                <TouchableOpacity
+                  key={f.id}
+                  style={[s.filterChip, active && s.filterChipActive]}
+                  onPress={() => setActiveFilters(prev =>
+                    prev.includes(f.id) ? prev.filter(x => x !== f.id) : [...prev, f.id]
+                  )}
+                >
+                  <Text style={s.filterChipEmoji}>{f.emoji}</Text>
+                  <Text style={[s.filterChipText, active && { color: '#fff' }]}>{f.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+          {isSearchingCamps && (
+            <View style={s.filterLoading}>
+              <ActivityIndicator size="small" color="#14b8a6" />
+            </View>
+          )}
+        </View>
+      )}
+
+      {/* ── Campsite quick card ── */}
+      {selectedCamp && !navMode && (
+        <View style={s.quickCard}>
+          <View style={s.quickCardImg}>
+            {selectedCamp.photo_url
+              ? <Image source={{ uri: selectedCamp.photo_url }} style={s.quickCardPhoto} resizeMode="cover" />
+              : <View style={[s.quickCardPhotoPlaceholder, { backgroundColor: '#14b8a633' }]}>
+                  <Text style={{ fontSize: 32 }}>
+                    {selectedCamp.tags.includes('rv') ? '🚐' : selectedCamp.tags.includes('dispersed') ? '🌲' : '🏕️'}
+                  </Text>
+                </View>
+            }
+          </View>
+          <View style={s.quickCardBody}>
+            <View style={s.quickCardHeader}>
+              <Text style={s.quickCardName} numberOfLines={2}>{selectedCamp.name}</Text>
+              <TouchableOpacity onPress={() => setSelectedCamp(null)}>
+                <Ionicons name="close" size={18} color={C.text3} />
+              </TouchableOpacity>
+            </View>
+            <View style={s.quickCardTags}>
+              {selectedCamp.tags.slice(0, 4).map(t => (
+                <View key={t} style={s.qTag}><Text style={s.qTagText}>{t.toUpperCase()}</Text></View>
+              ))}
+            </View>
+            <Text style={s.quickCardLand}>{selectedCamp.land_type}</Text>
+            {selectedCamp.cost ? <Text style={s.quickCardCost}>{selectedCamp.cost}</Text> : null}
+            <View style={s.quickCardActions}>
+              <TouchableOpacity style={s.quickCardBook} onPress={() => Linking.openURL(selectedCamp.url)}>
+                <Ionicons name="calendar-outline" size={13} color={C.orange} />
+                <Text style={s.quickCardBookText}>BOOK</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.quickCardFull} onPress={openCampDetail} disabled={loadingDetail}>
+                {loadingDetail
+                  ? <ActivityIndicator size="small" color="#fff" />
+                  : <Text style={s.quickCardFullText}>FULL PROFILE →</Text>
+                }
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
+
+      {/* ── Campsite full profile modal ── */}
+      <Modal visible={showCampDetail} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowCampDetail(false)}>
+        <View style={s.detailModal}>
+          {campDetail && (
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {/* Photos */}
+              {campDetail.photos.length > 0 ? (
+                <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false} style={s.photoGallery}>
+                  {campDetail.photos.map((uri, i) => (
+                    <Image key={i} source={{ uri }} style={s.galleryPhoto} resizeMode="cover" />
+                  ))}
+                </ScrollView>
+              ) : (
+                <View style={s.galleryPlaceholder}>
+                  <Text style={{ fontSize: 48 }}>🏕️</Text>
+                </View>
+              )}
+
+              <View style={s.detailContent}>
+                {/* Header */}
+                <View style={s.detailHeader}>
+                  <Text style={s.detailName}>{campDetail.name}</Text>
+                  <TouchableOpacity style={s.detailClose} onPress={() => setShowCampDetail(false)}>
+                    <Ionicons name="close" size={22} color={C.text} />
+                  </TouchableOpacity>
+                </View>
+
+                {/* Tags */}
+                <View style={s.detailTags}>
+                  <View style={s.detailLandBadge}>
+                    <Text style={s.detailLandText}>{campDetail.land_type.toUpperCase()}</Text>
+                  </View>
+                  {campDetail.tags.map(t => (
+                    <View key={t} style={s.qTag}><Text style={s.qTagText}>{t.toUpperCase()}</Text></View>
+                  ))}
+                  {campDetail.ada && <View style={[s.qTag, { borderColor: '#3b82f6' }]}><Text style={[s.qTagText, { color: '#3b82f6' }]}>♿ ADA</Text></View>}
+                </View>
+
+                {/* Cost + sites count */}
+                <View style={s.detailMeta}>
+                  <Text style={s.detailCost}>{campDetail.cost}</Text>
+                  {campDetail.campsites_count > 0 && (
+                    <Text style={s.detailSiteCount}>{campDetail.campsites_count} sites</Text>
+                  )}
+                </View>
+
+                {/* Description */}
+                {campDetail.description ? (
+                  <View style={s.detailSection}>
+                    <Text style={s.detailSectionTitle}>About</Text>
+                    <Text style={s.detailDesc}>{campDetail.description.replace(/<[^>]+>/g, '')}</Text>
+                  </View>
+                ) : null}
+
+                {/* Amenities */}
+                {campDetail.amenities.length > 0 && (
+                  <View style={s.detailSection}>
+                    <Text style={s.detailSectionTitle}>Amenities</Text>
+                    <View style={s.amenityGrid}>
+                      {campDetail.amenities.map(a => (
+                        <View key={a} style={s.amenityItem}>
+                          <Text style={s.amenityText}>{a}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                )}
+
+                {/* Site types */}
+                {campDetail.site_types.length > 0 && (
+                  <View style={s.detailSection}>
+                    <Text style={s.detailSectionTitle}>Site Types</Text>
+                    {campDetail.site_types.map(st => (
+                      <View key={st} style={s.siteTypeRow}>
+                        <Ionicons name="checkmark-circle-outline" size={14} color={C.green} />
+                        <Text style={s.siteTypeText}>{st}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                {/* Activities */}
+                {campDetail.activities.length > 0 && (
+                  <View style={s.detailSection}>
+                    <Text style={s.detailSectionTitle}>Activities</Text>
+                    <Text style={s.detailActivities}>{campDetail.activities.join(' · ')}</Text>
+                  </View>
+                )}
+
+                {/* Actions */}
+                <View style={s.detailActions}>
+                  <TouchableOpacity style={s.detailBookBtn} onPress={() => Linking.openURL(campDetail.url)}>
+                    <Ionicons name="calendar" size={16} color="#fff" />
+                    <Text style={s.detailBookText}>BOOK ON RECREATION.GOV</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={s.detailDirBtn} onPress={() => Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${campDetail.lat},${campDetail.lng}`)}>
+                    <Ionicons name="navigate-outline" size={16} color={C.orange} />
+                    <Text style={s.detailDirText}>GET DIRECTIONS</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </ScrollView>
+          )}
+        </View>
+      </Modal>
 
       {/* ── Navigation HUD ── */}
       <Animated.View style={[s.navHud, {
@@ -1082,4 +1383,109 @@ const s = StyleSheet.create({
     borderWidth: 1, borderColor: C.border,
   },
   mapsBtnText: { color: C.text3, fontSize: 9, fontFamily: mono },
+
+  // ── Filter bar
+  filterBar: {
+    position: 'absolute', top: 92, left: 0, right: 0,
+    backgroundColor: 'rgba(8,12,18,0.96)', borderBottomWidth: 1, borderColor: C.border,
+  },
+  filterScroll: { paddingHorizontal: 14, paddingVertical: 10, gap: 8 },
+  filterChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20,
+    backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
+  },
+  filterChipActive: { backgroundColor: '#14b8a6', borderColor: '#14b8a6' },
+  filterChipEmoji: { fontSize: 14 },
+  filterChipText: { color: C.text2, fontSize: 11, fontFamily: mono, fontWeight: '600' },
+  filterLoading: { alignItems: 'center', paddingBottom: 8 },
+
+  // ── Campsite quick card
+  quickCard: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    backgroundColor: 'rgba(8,12,18,0.98)',
+    borderTopWidth: 1, borderColor: '#14b8a6',
+    flexDirection: 'row', gap: 0,
+  },
+  quickCardImg: { width: 110, height: 140 },
+  quickCardPhoto: { width: 110, height: 140 },
+  quickCardPhotoPlaceholder: {
+    width: 110, height: 140, alignItems: 'center', justifyContent: 'center',
+  },
+  quickCardBody: { flex: 1, padding: 14, paddingBottom: 28 },
+  quickCardHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 6 },
+  quickCardName: { color: C.text, fontSize: 13, fontWeight: '700', flex: 1, lineHeight: 18 },
+  quickCardTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginBottom: 4 },
+  quickCardLand: { color: '#14b8a6', fontSize: 10, fontFamily: mono, marginBottom: 3 },
+  quickCardCost: { color: C.text3, fontSize: 10, fontFamily: mono, marginBottom: 8 },
+  quickCardActions: { flexDirection: 'row', gap: 8 },
+  quickCardBook: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8,
+    borderWidth: 1, borderColor: C.orange,
+  },
+  quickCardBookText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '700' },
+  quickCardFull: {
+    flex: 1, alignItems: 'center', justifyContent: 'center',
+    paddingVertical: 7, borderRadius: 8, backgroundColor: '#14b8a6',
+  },
+  quickCardFullText: { color: '#fff', fontSize: 10, fontFamily: mono, fontWeight: '700' },
+  qTag: {
+    paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4,
+    borderWidth: 1, borderColor: '#14b8a6',
+  },
+  qTagText: { color: '#14b8a6', fontSize: 8, fontFamily: mono, fontWeight: '700' },
+
+  // ── Campsite detail modal
+  detailModal: { flex: 1, backgroundColor: C.bg },
+  photoGallery: { height: 240 },
+  galleryPhoto: { width: 400, height: 240 },
+  galleryPlaceholder: {
+    height: 200, backgroundColor: '#14b8a611',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  detailContent: { padding: 20 },
+  detailHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 12 },
+  detailName: { color: C.text, fontSize: 20, fontWeight: '800', flex: 1, lineHeight: 26 },
+  detailClose: {
+    width: 36, height: 36, borderRadius: 18, backgroundColor: C.s2,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  detailTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 },
+  detailLandBadge: {
+    paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6,
+    backgroundColor: '#14b8a622', borderWidth: 1, borderColor: '#14b8a6',
+  },
+  detailLandText: { color: '#14b8a6', fontSize: 9, fontFamily: mono, fontWeight: '700' },
+  detailMeta: { flexDirection: 'row', gap: 16, marginBottom: 16 },
+  detailCost: { color: C.green, fontSize: 13, fontFamily: mono, fontWeight: '700' },
+  detailSiteCount: { color: C.text3, fontSize: 13, fontFamily: mono },
+  detailSection: { marginBottom: 20 },
+  detailSectionTitle: {
+    color: C.text2, fontSize: 11, fontFamily: mono, fontWeight: '700',
+    letterSpacing: 1, marginBottom: 10,
+    borderBottomWidth: 1, borderColor: C.border, paddingBottom: 6,
+  },
+  detailDesc: { color: C.text2, fontSize: 13, lineHeight: 20 },
+  amenityGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  amenityItem: {
+    paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8,
+    backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
+  },
+  amenityText: { color: C.text2, fontSize: 12 },
+  siteTypeRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
+  siteTypeText: { color: C.text2, fontSize: 13 },
+  detailActivities: { color: C.text3, fontSize: 12, lineHeight: 20 },
+  detailActions: { gap: 10, marginTop: 8 },
+  detailBookBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    paddingVertical: 14, borderRadius: 14, backgroundColor: C.green,
+  },
+  detailBookText: { color: '#fff', fontSize: 13, fontFamily: mono, fontWeight: '700' },
+  detailDirBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    paddingVertical: 14, borderRadius: 14,
+    borderWidth: 1, borderColor: C.orange,
+  },
+  detailDirText: { color: C.orange, fontSize: 13, fontFamily: mono, fontWeight: '700' },
 });

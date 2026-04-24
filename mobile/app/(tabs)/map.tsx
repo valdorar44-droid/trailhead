@@ -93,9 +93,9 @@ const TILE_LABELS_ESRI    = 'https://services.arcgisonline.com/ArcGIS/rest/servi
 function getTileUrls(token: string) {
   if (token) {
     return {
-      sat:  `https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/{z}/{x}/{y}?access_token=${token}`,
-      topo: `https://api.mapbox.com/styles/v1/mapbox/outdoors-v12/tiles/{z}/{x}/{y}?access_token=${token}`,
-      hyb:  `https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/tiles/{z}/{x}/{y}?access_token=${token}`,
+      sat:    `https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/256/{z}/{x}/{y}?access_token=${token}`,
+      topo:   `https://api.mapbox.com/styles/v1/mapbox/outdoors-v12/tiles/256/{z}/{x}/{y}?access_token=${token}`,
+      hyb:    `https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/tiles/256/{z}/{x}/{y}?access_token=${token}`,
       labels: null,
     };
   }
@@ -118,10 +118,7 @@ const buildMapHtml = (
   campsites: { lat: number; lng: number; name: string }[],
   gasList:   { lat: number; lng: number; name: string }[],
   pins:      { lat: number; lng: number; name: string; type: string }[],
-  mapboxToken: string = '',
-) => {
-  const tiles = getTileUrls(mapboxToken);
-  return `<!DOCTYPE html>
+) => `<!DOCTYPE html>
 <html>
 <head>
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0">
@@ -223,7 +220,7 @@ const buildMapHtml = (
     postRN({type:'download_complete',saved:saved,total:total});
   }
 
-  var baseLayer   = L.tileLayer.cached('${tiles.sat}','sat',{maxZoom:19,tileSize:256});
+  var baseLayer   = L.tileLayer.cached('${TILE_SATELLITE_ESRI}','sat',{maxZoom:19});
   baseLayer.addTo(map);
   var labelLayer  = null;
   var fallbackLine = null;
@@ -395,7 +392,6 @@ const buildMapHtml = (
 })();
 </script>
 </body></html>`;
-};
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -441,9 +437,16 @@ export default function MapScreen() {
   const spokenRef    = useRef(new Set<string>());
   const discoverRef  = useRef<CampsitePin[]>([]);
 
-  // Fetch Mapbox token once on mount
+  // Fetch Mapbox token once on mount; switch tiles via postMessage (no WebView rebuild)
   useEffect(() => {
-    api.getConfig().then(c => setMapboxToken(c.mapbox_token || '')).catch(() => {});
+    api.getConfig().then(c => {
+      const token = c.mapbox_token || '';
+      setMapboxToken(token);
+      if (token) {
+        const t = getTileUrls(token);
+        webRef.current?.postMessage(JSON.stringify({ type: 'set_layer', url: t.sat, cachePrefix: 'sat' }));
+      }
+    }).catch(() => {});
   }, []);
 
   // Keep refs in sync
@@ -689,8 +692,8 @@ export default function MapScreen() {
   const centerLng = waypoints[0]?.lng ?? -111.0;
 
   const mapHtml = useMemo(() =>
-    buildMapHtml(centerLat, centerLng, waypoints, campsites, gas, pinList, mapboxToken),
-    [activeTrip?.trip_id, communityPins.length, mapboxToken]
+    buildMapHtml(centerLat, centerLng, waypoints, campsites, gas, pinList),
+    [activeTrip?.trip_id, communityPins.length]
   );
 
   // ── Nav HUD values ──────────────────────────────────────────────────────────
@@ -734,6 +737,10 @@ export default function MapScreen() {
         onMessage={onWebMessage}
         onLoad={() => {
           if (userLoc) webRef.current?.postMessage(JSON.stringify({ type: 'user_pos', lat: userLoc.lat, lng: userLoc.lng }));
+          if (mapboxToken) {
+            const t = getTileUrls(mapboxToken);
+            webRef.current?.postMessage(JSON.stringify({ type: 'set_layer', url: t.sat, cachePrefix: 'sat' }));
+          }
         }}
       />
 

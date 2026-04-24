@@ -40,6 +40,15 @@ function calcBearing(lat1: number, lng1: number, lat2: number, lng2: number) {
   return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
 }
 
+function nearestWpIdx(loc: { lat: number; lng: number }, wps: WP[]): number {
+  let minD = Infinity, nearest = 0;
+  wps.forEach((wp, i) => {
+    const d = haversineKm(loc.lat, loc.lng, wp.lat, wp.lng);
+    if (d < minD) { minD = d; nearest = i; }
+  });
+  return nearest;
+}
+
 function compassDir(deg: number) {
   return ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(deg / 45) % 8];
 }
@@ -267,18 +276,19 @@ const buildMapHtml = (
 
   // ── OSRM routing ────────────────────────────────────────────────────────────
 
+  var routePts=[];
+  var _lastOffCheck=0;
+
   function drawFallback(){
     if(fallbackLine) return;
     fallbackLine=L.polyline(wps.map(function(w){return[w.lat,w.lng];}),
       {color:'#f97316',weight:3,dashArray:'6,4',opacity:0.8}).addTo(map);
-    postRN({type:'route_ready',routed:false,steps:[]});
+    postRN({type:'route_ready',routed:false,steps:[],fromIdx:0});
   }
 
-  async function loadRoute(){
-    if(wps.length<2){return;}
-    var coords=wps.map(function(w){return w.lng+','+w.lat;}).join(';');
-    var url='https://router.project-osrm.org/route/v1/driving/'+coords+
-            '?steps=true&geometries=geojson&overview=full&annotations=false';
+  async function _fetchRoute(coordStr,fromIdx){
+    var url='https://router.project-osrm.org/route/v1/driving/'+coordStr+
+      '?steps=true&geometries=geojson&overview=full&annotations=false';
     try{
       var ctrl=new AbortController();
       var tid=setTimeout(function(){ctrl.abort();},9000);
@@ -287,10 +297,15 @@ const buildMapHtml = (
       var data=await res.json();
       if(data.code!=='Ok'||!data.routes||!data.routes[0]){drawFallback();return;}
       var route=data.routes[0];
+      if(routeLine){map.removeLayer(routeLine);routeLine=null;}
+      if(fallbackLine){map.removeLayer(fallbackLine);fallbackLine=null;}
       routeLine=L.geoJSON(route.geometry,{
         style:{color:'#f97316',weight:4.5,opacity:0.92,lineCap:'round',lineJoin:'round'}
       }).addTo(map);
-      // parse steps + per-leg groups
+      // Store sampled route pts for off-route detection
+      routePts=[];
+      var coords=route.geometry.coordinates;
+      for(var ci=0;ci<coords.length;ci+=4){routePts.push({lat:coords[ci][1],lng:coords[ci][0]});}
       var steps=[]; var legs=[];
       (route.legs||[]).forEach(function(leg){
         var legSteps=[];
@@ -298,14 +313,38 @@ const buildMapHtml = (
           if(s.distance>0||s.maneuver.type==='arrive'){
             var step={type:s.maneuver.type,modifier:s.maneuver.modifier||'',
               name:s.name||'',distance:s.distance,duration:s.duration};
-            steps.push(step); legSteps.push(step);
+            steps.push(step);legSteps.push(step);
           }
         });
         legs.push(legSteps);
       });
       postRN({type:'route_ready',routed:true,steps:steps,legs:legs,
-              total_distance:route.distance,total_duration:route.duration});
+        total_distance:route.distance,total_duration:route.duration,fromIdx:fromIdx||0});
     }catch(e){drawFallback();}
+  }
+
+  async function loadRoute(){
+    if(wps.length<2){return;}
+    await _fetchRoute(wps.map(function(w){return w.lng+','+w.lat;}).join(';'),0);
+  }
+
+  async function loadRouteFrom(lat,lng,fromWpIdx){
+    var remaining=wps.slice(fromWpIdx);
+    if(!remaining.length){drawFallback();return;}
+    var cs=lng+','+lat+';'+remaining.map(function(w){return w.lng+','+w.lat;}).join(';');
+    await _fetchRoute(cs,fromWpIdx);
+  }
+
+  function _minDistToRoute(lat,lng){
+    var minD=Infinity;
+    for(var i=0;i<routePts.length;i++){
+      var dlat=(routePts[i].lat-lat)*111000;
+      var dlng=(routePts[i].lng-lng)*111000*Math.cos(lat*Math.PI/180);
+      var d=Math.sqrt(dlat*dlat+dlng*dlng);
+      if(d<minD)minD=d;
+      if(minD<80)return minD;
+    }
+    return minD;
   }
 
   loadRoute();
@@ -320,6 +359,12 @@ const buildMapHtml = (
     var icon=L.divIcon({className:'',html:'<div class="me"></div>',iconSize:[14,14],iconAnchor:[7,7]});
     if(userMarker){userMarker.setLatLng([lat,lng]);}
     else{userMarker=L.marker([lat,lng],{icon:icon,zIndexOffset:2000}).addTo(map);}
+    var now=Date.now();
+    if(routePts.length>0&&now-_lastOffCheck>6000){
+      _lastOffCheck=now;
+      var d=_minDistToRoute(lat,lng);
+      if(d>380)postRN({type:'off_route',lat:lat,lng:lng,dist:Math.round(d)});
+    }
   }
 
   function setNavTarget(idx){
@@ -370,6 +415,8 @@ const buildMapHtml = (
       if(msg.type==='clear_discover_pins'){
         discoverMarkers.forEach(function(m){map.removeLayer(m);});discoverMarkers=[];
       }
+      if(msg.type==='start_route_from'&&msg.lat){loadRouteFrom(msg.lat,msg.lng,msg.fromIdx||0);}
+      if(msg.type==='reroute_from'&&msg.lat){routePts=[];loadRouteFrom(msg.lat,msg.lng,msg.fromIdx||0);}
       if(msg.type==='download_tiles'){
         if(!downloadActive){downloadActive=true;var bounds=map.getBounds();_dlTiles(bounds,msg.minZ||10,msg.maxZ||15);}
       }
@@ -417,6 +464,9 @@ export default function MapScreen() {
   const [searchResults,setSearchResults] = useState<{ lat: number; lng: number; name: string }[]>([]);
   const [showSearch,   setShowSearch]   = useState(false);
   const [isSearching,  setIsSearching]  = useState(false);
+  const [routeLegOffset, setRouteLegOffset] = useState(0);
+  const [isApproaching,  setIsApproaching]  = useState(false);
+  const [isRerouting,    setIsRerouting]    = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [downloadTotal, setDownloadTotal] = useState(0);
@@ -489,19 +539,36 @@ export default function MapScreen() {
           if (!active || !wps[idx]) return;
           const dist = haversineKm(pos.lat, pos.lng, wps[idx].lat, wps[idx].lng);
 
-          // Speak narration when approaching
+          // Approaching indicator (within 800m)
+          setIsApproaching(dist < 0.8);
+
+          // Speak audio guide narration when close
           const narration = guideRef.current[wps[idx].name];
           if (dist < 0.5 && narration && !spokenRef.current.has(wps[idx].name)) {
             spokenRef.current.add(wps[idx].name);
             Speech.speak(narration, { rate: 0.88, language: 'en-US' });
           }
 
-          // Auto-advance waypoint
+          // Arrival at final destination
+          if (dist < 0.25 && idx === wps.length - 1) {
+            Speech.speak(`You have arrived at ${wps[idx].name}. Journey complete.`, { rate: 0.9 });
+            setTimeout(() => setNavMode(false), 3000);
+            return;
+          }
+
+          // Auto-advance to next waypoint + reroute from current position
           if (dist < 0.25 && idx < wps.length - 1) {
             const next = idx + 1;
             setNavIdx(next);
             navRef.current.idx = next;
+            setIsApproaching(false);
             webRef.current?.postMessage(JSON.stringify({ type: 'nav_target', idx: next }));
+            webRef.current?.postMessage(JSON.stringify({
+              type: 'start_route_from',
+              lat: pos.lat, lng: pos.lng, fromIdx: next,
+            }));
+            setRouteLegOffset(next);
+            Speech.speak(`Arrived at ${wps[idx].name}. Now heading to ${wps[next].name}.`, { rate: 0.9 });
           }
         }
       ).then(s => { sub = s; });
@@ -567,10 +634,35 @@ export default function MapScreen() {
     Animated.spring(navAnim, { toValue: navMode ? 1 : 0, tension: 80, friction: 10, useNativeDriver: true }).start();
     if (navMode) {
       setShowPanel(false);
-      webRef.current?.postMessage(JSON.stringify({ type: 'nav_target', idx: navIdx }));
-      const first = waypoints[navIdx];
-      if (first) Speech.speak(`Navigation started. Heading to ${first.name}.`, { rate: 0.9 });
+      setIsApproaching(false);
+      setIsRerouting(false);
+      // Find nearest waypoint to current location — start there, not from wp[0]
+      const loc = navRef.current.active ? null : userLoc; // use current loc on fresh start
+      let startIdx = navIdx;
+      if (loc && waypoints.length > 0) {
+        startIdx = nearestWpIdx(loc, waypoints);
+        setNavIdx(startIdx);
+        navRef.current.idx = startIdx;
+        setRouteLegOffset(startIdx);
+      }
+      webRef.current?.postMessage(JSON.stringify({ type: 'nav_target', idx: startIdx }));
+      // Route OSRM from current GPS through remaining waypoints
+      if (userLoc) {
+        webRef.current?.postMessage(JSON.stringify({
+          type: 'start_route_from',
+          lat: userLoc.lat, lng: userLoc.lng, fromIdx: startIdx,
+        }));
+      }
+      const target = waypoints[startIdx];
+      if (target) {
+        const dist = userLoc ? haversineKm(userLoc.lat, userLoc.lng, target.lat, target.lng) : null;
+        const distStr = dist && dist > 0.5 ? `, ${formatDist(dist)} away` : '';
+        Speech.speak(`Navigation started. Heading to ${target.name}${distStr}.`, { rate: 0.9 });
+      }
     } else {
+      setIsApproaching(false);
+      setIsRerouting(false);
+      setRouteLegOffset(0);
       webRef.current?.postMessage(JSON.stringify({ type: 'nav_reset' }));
       webRef.current?.postMessage(JSON.stringify({ type: 'clear_track' }));
       Speech.stop();
@@ -580,8 +672,10 @@ export default function MapScreen() {
   // ── Voice turn announcement on leg advance ──────────────────────────────────
 
   useEffect(() => {
-    if (!navMode || navIdx === 0 || routeLegs.length === 0) return;
-    const legSteps = routeLegs[navIdx];
+    if (!navMode || routeLegs.length === 0) return;
+    const legIdx = navIdx - routeLegOffset;
+    if (legIdx < 0 || legIdx >= routeLegs.length) return;
+    const legSteps = routeLegs[legIdx];
     if (!legSteps) return;
     const first = legSteps.find(s => s.type !== 'depart' && s.distance > 50);
     if (!first) return;
@@ -590,7 +684,7 @@ export default function MapScreen() {
       Speech.speak(`In ${formatStepDist(first.distance)}, ${stepLabel(first.type, first.modifier)}${road}`, { rate: 0.9 });
     }, 1500);
     return () => clearTimeout(t);
-  }, [navIdx, navMode]);
+  }, [navIdx, navMode, routeLegOffset]);
 
   // ── Nominatim map search ────────────────────────────────────────────────────
 
@@ -638,6 +732,18 @@ export default function MapScreen() {
         setIsRouted(msg.routed);
         setRouteSteps(msg.steps ?? []);
         setRouteLegs(msg.legs ?? []);
+        if (msg.fromIdx !== undefined) setRouteLegOffset(msg.fromIdx);
+        setIsRerouting(false);
+      }
+      if (msg.type === 'off_route' && navRef.current.active) {
+        setIsRerouting(true);
+        webRef.current?.postMessage(JSON.stringify({
+          type: 'reroute_from',
+          lat: msg.lat, lng: msg.lng,
+          fromIdx: navRef.current.idx,
+        }));
+        setRouteLegOffset(navRef.current.idx);
+        Speech.speak('Recalculating.', { rate: 0.95 });
       }
       if (msg.type === 'wp_tapped') {
         setNavIdx(msg.idx);
@@ -709,6 +815,16 @@ export default function MapScreen() {
   const nextStep = routeSteps.find(s => s.type !== 'depart' && s.distance > 50) ?? null;
   const isProceeding = distKm !== null && distKm > 30;
 
+  // Total remaining trip distance (current → navIdx → ... → last waypoint)
+  const remainingKm = useMemo(() => {
+    if (!navMode || !userLoc || !waypoints.length) return null;
+    let total = distKm ?? 0;
+    for (let i = navIdx; i < waypoints.length - 1; i++) {
+      total += haversineKm(waypoints[i].lat, waypoints[i].lng, waypoints[i + 1].lat, waypoints[i + 1].lng);
+    }
+    return total;
+  }, [navMode, navIdx, distKm, userLoc]);
+
   function openInMaps() {
     if (!waypoints.length) return;
     const origin = `${waypoints[0].lat},${waypoints[0].lng}`;
@@ -750,11 +866,15 @@ export default function MapScreen() {
         <Text style={s.topBarText} numberOfLines={1}>
           {isDownloading
             ? `CACHING TILES ${downloadProgress}% · ${downloadTotal} TOTAL`
-            : navMode
-              ? isProceeding
-                ? `PROCEED TO STOP ${navIdx + 1}/${waypoints.length}`
-                : `NAVIGATING · STOP ${navIdx + 1}/${waypoints.length} · ${isRouted ? '🗺 ROUTED' : '🧭 OFF-ROAD'}`
-              : activeTrip ? activeTrip.plan.trip_name.toUpperCase() : 'NO ACTIVE TRIP'}
+            : isRerouting
+              ? 'RECALCULATING ROUTE...'
+              : navMode
+                ? isApproaching
+                  ? `ARRIVING · ${waypoints[navIdx]?.name ?? ''}`
+                  : isProceeding
+                    ? `PROCEED TO STOP ${navIdx + 1}/${waypoints.length}`
+                    : `NAVIGATING · STOP ${navIdx + 1}/${waypoints.length} · ${isRouted ? '🗺 ROUTED' : '🧭 OFF-ROAD'}`
+                : activeTrip ? activeTrip.plan.trip_name.toUpperCase() : 'NO ACTIVE TRIP'}
         </Text>
         {routeAlerts.length > 0 && (
           <TouchableOpacity style={s.alertPill} onPress={() => setShowAlerts(v => !v)}>
@@ -1124,11 +1244,16 @@ export default function MapScreen() {
             </View>
           )}
           <View style={s.navDistBlock}>
-            <Text style={s.navDistVal}>{distKm !== null ? formatDist(distKm) : '--'}</Text>
+            <Text style={[s.navDistVal, isApproaching && { color: C.green }]}>
+              {distKm !== null ? formatDist(distKm) : '--'}
+            </Text>
             {etaMins !== null && (
               <Text style={s.navEta}>
                 {etaMins < 60 ? `~${etaMins} min` : `~${Math.floor(etaMins / 60)}h ${etaMins % 60}m`}
               </Text>
+            )}
+            {remainingKm !== null && waypoints.length > navIdx + 1 && (
+              <Text style={s.navRemaining}>{formatDist(remainingKm)} trip total</Text>
             )}
           </View>
           {speedMph !== null && (
@@ -1142,8 +1267,10 @@ export default function MapScreen() {
         {/* Next waypoint */}
         {navTarget && (
           <View style={s.navTarget}>
-            <View style={s.navTargetBadge}>
-              <Text style={s.navTargetBadgeText}>{isProceeding ? 'PROCEED TO' : 'NEXT STOP'}</Text>
+            <View style={[s.navTargetBadge, isApproaching && { backgroundColor: C.green + '22', borderColor: C.green }]}>
+              <Text style={[s.navTargetBadgeText, isApproaching && { color: C.green }]}>
+                {isApproaching ? '⬤ ARRIVING' : isProceeding ? 'PROCEED TO' : 'NEXT STOP'}
+              </Text>
             </View>
             <View style={s.navTargetInfo}>
               <Text style={s.navTargetName} numberOfLines={1}>{navTarget.name}</Text>
@@ -1294,6 +1421,7 @@ const s = StyleSheet.create({
   navDistBlock: { flex: 1, alignItems: 'center' },
   navDistVal: { color: C.text, fontSize: 28, fontWeight: '800', fontFamily: mono },
   navEta: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 1 },
+  navRemaining: { color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 2, opacity: 0.7 },
   navSpeedBlock: { alignItems: 'center', width: 50 },
   navSpeedVal: { color: C.text2, fontSize: 22, fontWeight: '700', fontFamily: mono },
   navSpeedUnit: { color: C.text3, fontSize: 8, fontFamily: mono, letterSpacing: 0.5 },

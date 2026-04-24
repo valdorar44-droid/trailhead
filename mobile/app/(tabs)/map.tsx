@@ -1692,8 +1692,9 @@ export default function MapScreen() {
 
       {/* ── Offline Map Download Modal ── */}
       <Modal visible={showOfflineModal} animationType="slide" transparent onRequestClose={() => setShowOfflineModal(false)}>
-        <TouchableOpacity style={s.modalBackdrop} activeOpacity={1} onPress={() => setShowOfflineModal(false)}>
-          <View style={s.offlineSheet} onStartShouldSetResponder={() => true}>
+        <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.6)' }}>
+          <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => setShowOfflineModal(false)} />
+          <View style={s.offlineSheet}>
             <Text style={s.offlineTitle}>OFFLINE MAPS</Text>
             {!user ? (
               <View style={{ alignItems: 'center', paddingVertical: 24 }}>
@@ -1750,7 +1751,7 @@ export default function MapScreen() {
             )}
             </>)}
           </View>
-        </TouchableOpacity>
+        </View>
       </Modal>
 
       {/* ── Route Brief Modal ── */}

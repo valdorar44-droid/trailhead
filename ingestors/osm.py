@@ -43,9 +43,16 @@ _VIEW_QUERY = """
 [out:json][timeout:15];
 (
   node["tourism"="viewpoint"](around:{radius},{lat},{lng});
-  node["natural"="peak"](around:{radius},{lat},{lng});
 );
 out tags 30;
+"""
+
+_PEAK_QUERY = """
+[out:json][timeout:20];
+(
+  node["natural"="peak"]["name"](around:{radius},{lat},{lng});
+);
+out tags 60;
 """
 
 
@@ -187,7 +194,7 @@ async def get_trailheads(lat: float, lng: float, radius_m: int = 30000) -> list[
 
 
 async def get_viewpoints(lat: float, lng: float, radius_m: int = 30000) -> list[dict]:
-    key = f"osm_view_{lat:.2f}_{lng:.2f}"
+    key = f"osm_view_{lat:.2f}_{lng:.2f}_{radius_m}"
     cached = get_cached("campsite_cache", key, ttl_seconds=3600 * 24)
     if cached is not None:
         return cached
@@ -199,14 +206,52 @@ async def get_viewpoints(lat: float, lng: float, radius_m: int = 30000) -> list[
         if not coord:
             continue
         elat, elng = coord
-        name = _tag(el, "name") or _tag(el, "ele") or "Viewpoint"
-        ntype = _tag(el, "natural", "tourism")
+        name = _tag(el, "name") or "Viewpoint"
         results.append({
             "id": f"osm_view_{el.get('id', '')}",
             "name": name,
             "lat": elat, "lng": elng,
-            "type": "peak" if ntype == "peak" else "viewpoint",
-            "elevation": _tag(el, "ele", ""),
+            "type": "viewpoint",
+            "elevation": "",
+        })
+    set_cached("campsite_cache", key, results)
+    return results
+
+
+def _ele_to_ft(ele_str: str) -> str:
+    """Convert OSM elevation string to feet. OSM standard is meters."""
+    if not ele_str:
+        return ""
+    try:
+        m = float(ele_str.replace("m", "").strip())
+        # If value > 9000 it's likely already in feet (some old US tags)
+        if m > 9000:
+            return str(int(m))
+        return str(int(m * 3.28084))
+    except Exception:
+        return ele_str
+
+
+async def get_peaks(lat: float, lng: float, radius_m: int = 64000) -> list[dict]:
+    key = f"osm_peaks_{lat:.2f}_{lng:.2f}_{radius_m}"
+    cached = get_cached("campsite_cache", key, ttl_seconds=3600 * 24)
+    if cached is not None:
+        return cached
+
+    elements = await _overpass(_PEAK_QUERY.format(lat=lat, lng=lng, radius=radius_m))
+    results = []
+    for el in elements:
+        coord = _node_coord(el)
+        if not coord:
+            continue
+        elat, elng = coord
+        name = _tag(el, "name") or "Peak"
+        results.append({
+            "id": f"osm_peak_{el.get('id', '')}",
+            "name": name,
+            "lat": elat, "lng": elng,
+            "type": "peak",
+            "elevation": _ele_to_ft(_tag(el, "ele", "")),
         })
     set_cached("campsite_cache", key, results)
     return results

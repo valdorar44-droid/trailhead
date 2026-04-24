@@ -16,7 +16,7 @@ from config.settings import settings
 from ai.planner import plan_trip, chat_guide, edit_trip, plan_trip_from_conversation
 from ingestors.ridb import get_campsites_near, get_campsites_search, get_facility_detail
 from ingestors.nrel import get_gas_along_route
-from ingestors.osm import get_osm_campsites, get_water_sources, get_trailheads, get_viewpoints
+from ingestors.osm import get_osm_campsites, get_water_sources, get_trailheads, get_viewpoints, get_peaks
 from db.store import (
     save_trip, get_trip, add_community_pin, get_community_pins,
     save_audio_guide, get_audio_guide, get_cached, set_cached,
@@ -693,17 +693,20 @@ async def camps_bbox(n: float, s: float, e: float, w: float, types: str = ""):
 @app.get("/api/osm-pois")
 async def osm_pois(lat: float, lng: float, radius: float = 30, types: str = "water,trailhead,viewpoint"):
     type_set = {t.strip() for t in types.split(",") if t.strip()}
+    radius_m = int(radius * 1600)
     tasks = []
     if "water" in type_set:
-        tasks.append(get_water_sources(lat, lng, radius_m=int(radius * 1600)))
+        tasks.append(get_water_sources(lat, lng, radius_m=radius_m))
     if "trailhead" in type_set:
-        tasks.append(get_trailheads(lat, lng, radius_m=int(radius * 1600)))
+        tasks.append(get_trailheads(lat, lng, radius_m=radius_m))
     if "viewpoint" in type_set:
-        tasks.append(get_viewpoints(lat, lng, radius_m=int(radius * 1600)))
+        tasks.append(get_viewpoints(lat, lng, radius_m=radius_m))
+    if "peak" in type_set:
+        tasks.append(get_peaks(lat, lng, radius_m=radius_m))
     if not tasks:
         return []
     results = await asyncio.gather(*tasks)
-    return [item for sublist in results for item in sublist][:60]
+    return [item for sublist in results for item in sublist][:100]
 
 
 # ── Wikipedia nearby ──────────────────────────────────────────────────────────

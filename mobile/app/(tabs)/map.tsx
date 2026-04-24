@@ -224,8 +224,7 @@ const buildMapHtml = (
   @keyframes pulse{0%,100%{box-shadow:0 0 0 4px rgba(249,115,22,0.45);}50%{box-shadow:0 0 0 12px rgba(249,115,22,0.1);}}
   .mk-me{background:#f97316;border:3px solid #fff;border-radius:50%;width:16px;height:16px;box-shadow:0 0 0 4px rgba(249,115,22,0.3);}
   .mk-search{background:rgba(59,130,246,0.2);border:2.5px solid #3b82f6;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:17px;}
-  #search-area-btn{position:fixed;bottom:118px;left:50%;transform:translateX(-50%);background:#0f1319;border:1.5px solid #f97316;color:#f97316;font-family:monospace;font-size:11px;font-weight:700;letter-spacing:0.08em;padding:10px 22px;border-radius:20px;cursor:pointer;box-shadow:0 4px 24px rgba(0,0,0,0.65);white-space:nowrap;z-index:100;display:none;}
-  #search-area-btn.show{display:block;}
+  /* search-this-area button moved to React Native for reliable touch handling */
   #loading{position:fixed;top:0;left:0;right:0;bottom:0;background:#080c12;display:flex;align-items:center;justify-content:center;z-index:200;flex-direction:column;gap:12px;}
   #loading.hidden{display:none;}
   .ld{width:8px;height:8px;background:#f97316;border-radius:50%;animation:ld 1.2s infinite;}
@@ -238,7 +237,6 @@ const buildMapHtml = (
 <body>
 <div id="map"></div>
 <div id="loading"><div style="display:flex;gap:6px"><div class="ld"></div><div class="ld"></div><div class="ld"></div></div><div style="color:#4b5563;font-family:monospace;font-size:10px;letter-spacing:.1em;margin-top:4px">LOADING MAP</div></div>
-<button id="search-area-btn" onclick="searchThisArea()">⛺ SEARCH THIS AREA</button>
 <script>
 (function(){
   var wps=${JSON.stringify(waypoints)};
@@ -251,8 +249,6 @@ const buildMapHtml = (
   var routeOpts={avoidTolls:false,avoidHighways:false,backRoads:false,noFerries:false};
   var _routeCoords=[],routePts=[],breadcrumbPts=[];
   var lastOffCheck=0,downloadActive=false,mapReady=false,pendingMsgs=[];
-  var searchAreaBtn=document.getElementById('search-area-btn');
-
   function postRN(o){try{window.ReactNativeWebView.postMessage(JSON.stringify(o));}catch(e){}}
 
   // ── IndexedDB offline tile cache ──────────────────────────────────────────────
@@ -300,17 +296,10 @@ const buildMapHtml = (
     });
     var boundsTimer;
     map.on('moveend',function(){
-      searchAreaBtn.classList.add('show');
       clearTimeout(boundsTimer);
       boundsTimer=setTimeout(function(){var b=map.getBounds();postRN({type:'map_bounds',n:b.getNorth(),s:b.getSouth(),e:b.getEast(),w:b.getWest(),zoom:map.getZoom()});},400);
     });
     map.on('click',function(e){if(!e.defaultPrevented)postRN({type:'map_tapped'});});
-  }
-
-  function searchThisArea(){
-    searchAreaBtn.classList.remove('show');
-    var b=map.getBounds();
-    postRN({type:'search_area',n:b.getNorth(),s:b.getSouth(),e:b.getEast(),w:b.getWest(),zoom:map.getZoom()});
   }
 
   // ── GeoJSON helpers ───────────────────────────────────────────────────────────
@@ -440,7 +429,7 @@ const buildMapHtml = (
     }
     if(msg.type==='track_point'&&msg.lat){breadcrumbPts.push([msg.lng,msg.lat]);updateBreadcrumb();}
     if(msg.type==='clear_track'){breadcrumbPts=[];updateBreadcrumb();}
-    if(msg.type==='set_camps'){allCamps=msg.pins||[];updateCampSrc();searchAreaBtn.classList.remove('show');}
+    if(msg.type==='set_camps'){allCamps=msg.pins||[];updateCampSrc();}
     if(msg.type==='set_discover_pins'){allCamps=msg.pins||[];updateCampSrc();}
     if(msg.type==='clear_discover_pins'){allCamps=[];updateCampSrc();}
     if(msg.type==='set_nearby_camps'){allCamps=msg.pins||[];updateCampSrc();}
@@ -564,6 +553,8 @@ export default function MapScreen() {
   const webLoadedRef = useRef(false);
   const viewportRef  = useRef<{ n: number; s: number; e: number; w: number; zoom: number } | null>(null);
   const [isLoadingAreaCamps, setIsLoadingAreaCamps] = useState(false);
+  const [mapMoved, setMapMoved] = useState(false);
+  const [searchResult, setSearchResult] = useState<{ count: number } | null>(null);
 
   // Fetch Mapbox token once on mount; send set_token to WebView when both are ready
   useEffect(() => {
@@ -925,10 +916,18 @@ export default function MapScreen() {
   async function loadCampsInArea(bounds: { n: number; s: number; e: number; w: number; zoom: number }, types: string[]) {
     if (bounds.zoom < 6) return;
     setIsLoadingAreaCamps(true);
+    setMapMoved(false);
+    setSearchResult(null);
     try {
       const camps = await api.getCampsBbox(bounds.n, bounds.s, bounds.e, bounds.w, types);
       webRef.current?.postMessage(JSON.stringify({ type: 'set_camps', pins: camps }));
-    } catch {}
+      setSearchResult({ count: camps.length });
+      // Clear result badge after 3 seconds
+      setTimeout(() => setSearchResult(null), 3000);
+    } catch (e: any) {
+      setSearchResult({ count: -1 }); // -1 = error
+      setTimeout(() => setSearchResult(null), 3000);
+    }
     setIsLoadingAreaCamps(false);
   }
 
@@ -942,11 +941,12 @@ export default function MapScreen() {
       }
       if (msg.type === 'map_bounds') {
         viewportRef.current = { n: msg.n, s: msg.s, e: msg.e, w: msg.w, zoom: msg.zoom };
+        if ((msg.zoom ?? 0) >= 6) setMapMoved(true);
       }
       if (msg.type === 'search_area') {
+        // Legacy WebView button — handled by native button now, but keep as fallback
         const bounds = { n: msg.n, s: msg.s, e: msg.e, w: msg.w, zoom: msg.zoom };
         viewportRef.current = bounds;
-        // User explicitly tapped "Search This Area"
         loadCampsInArea(bounds, activeFilters);
       }
       if (msg.type === 'map_tapped') {
@@ -1841,6 +1841,45 @@ export default function MapScreen() {
         </View>
       </Modal>
 
+      {/* ── Search This Area (native button — reliable on all platforms) ── */}
+      {(mapMoved || isLoadingAreaCamps || searchResult !== null) && !navMode && !showSearch && (
+        <View style={s.searchAreaWrap}>
+          <TouchableOpacity
+            style={[s.searchAreaBtn, isLoadingAreaCamps && s.searchAreaBtnLoading]}
+            onPress={() => {
+              if (!isLoadingAreaCamps && viewportRef.current) {
+                loadCampsInArea(viewportRef.current, activeFilters);
+              }
+            }}
+            disabled={isLoadingAreaCamps}
+          >
+            {isLoadingAreaCamps ? (
+              <ActivityIndicator size="small" color={C.orange} style={{ marginRight: 6 }} />
+            ) : searchResult !== null ? (
+              <Ionicons
+                name={searchResult.count < 0 ? 'alert-circle-outline' : searchResult.count === 0 ? 'information-circle-outline' : 'checkmark-circle-outline'}
+                size={14}
+                color={searchResult.count < 0 ? C.red : searchResult.count === 0 ? C.text3 : C.green}
+                style={{ marginRight: 5 }}
+              />
+            ) : (
+              <Ionicons name="search" size={13} color={C.orange} style={{ marginRight: 5 }} />
+            )}
+            <Text style={[s.searchAreaText, isLoadingAreaCamps && { color: OVR.text3 }]}>
+              {isLoadingAreaCamps
+                ? 'SEARCHING...'
+                : searchResult !== null
+                  ? searchResult.count < 0
+                    ? 'SEARCH FAILED — RETRY'
+                    : searchResult.count === 0
+                      ? 'NO CAMPS FOUND HERE'
+                      : `${searchResult.count} CAMP${searchResult.count !== 1 ? 'S' : ''} FOUND`
+                  : 'SEARCH THIS AREA'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* ── Navigation HUD ── */}
       <Animated.View style={[s.navHud, {
         opacity: navAnim,
@@ -2121,6 +2160,21 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     height: 3, borderRadius: 1.5, backgroundColor: C.border, overflow: 'hidden',
   },
   dlFill: { height: 3, backgroundColor: C.orange, borderRadius: 1.5 },
+
+  // ── Search This Area (native)
+  searchAreaWrap: {
+    position: 'absolute', bottom: 120, left: 0, right: 0,
+    alignItems: 'center', pointerEvents: 'box-none',
+  },
+  searchAreaBtn: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: OVR.bg2, borderWidth: 1.5, borderColor: C.orange,
+    paddingHorizontal: 18, paddingVertical: 10, borderRadius: 24,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.55, shadowRadius: 10, elevation: 8,
+  },
+  searchAreaBtnLoading: { borderColor: OVR.border, opacity: 0.8 },
+  searchAreaText: { color: C.orange, fontSize: 11, fontFamily: mono, fontWeight: '700', letterSpacing: 0.8 },
 
   stepsList: { maxHeight: 200, borderTopWidth: 1, borderColor: OVR.border },
   stepRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 9, borderBottomWidth: 1, borderColor: OVR.border2 },

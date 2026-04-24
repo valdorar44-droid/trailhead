@@ -4,9 +4,32 @@ import { WebView } from 'react-native-webview';
 import * as Location from 'expo-location';
 import * as Speech from 'expo-speech';
 import { Ionicons } from '@expo/vector-icons';
+import * as Clipboard from 'expo-clipboard';
 import { useStore } from '@/lib/store';
-import { api, Report, Pin, CampsitePin, CampsiteDetail } from '@/lib/api';
+import { api, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList } from '@/lib/api';
 import { C, mono } from '@/lib/design';
+
+// ─── US State bounding boxes for offline download ─────────────────────────────
+
+const US_STATES: Record<string, { name: string; n: number; s: number; e: number; w: number; emoji: string }> = {
+  AZ: { name: 'Arizona',    n: 37.0, s: 31.3, e: -109.0, w: -114.8, emoji: '🏜️' },
+  CA: { name: 'California', n: 42.0, s: 32.5, e: -114.1, w: -124.4, emoji: '🌴' },
+  CO: { name: 'Colorado',   n: 41.0, s: 37.0, e: -102.0, w: -109.1, emoji: '🏔️' },
+  ID: { name: 'Idaho',      n: 49.0, s: 42.0, e: -111.0, w: -117.2, emoji: '🏔️' },
+  MT: { name: 'Montana',    n: 49.0, s: 44.4, e: -104.0, w: -116.0, emoji: '🦬' },
+  NM: { name: 'New Mexico', n: 37.0, s: 31.3, e: -103.0, w: -109.1, emoji: '🌵' },
+  NV: { name: 'Nevada',     n: 42.0, s: 35.0, e: -114.0, w: -120.0, emoji: '🎰' },
+  OR: { name: 'Oregon',     n: 46.3, s: 41.9, e: -116.5, w: -124.6, emoji: '🌲' },
+  UT: { name: 'Utah',       n: 42.0, s: 36.9, e: -109.0, w: -114.1, emoji: '🏜️' },
+  WA: { name: 'Washington', n: 49.0, s: 45.5, e: -116.9, w: -124.7, emoji: '☁️' },
+  WY: { name: 'Wyoming',    n: 45.0, s: 41.0, e: -104.1, w: -111.1, emoji: '🦅' },
+  TX: { name: 'Texas',      n: 36.5, s: 25.8, e: -93.5,  w: -106.6, emoji: '🤠' },
+  NM2:{ name: 'New Mexico', n: 37.0, s: 31.3, e: -103.0, w: -109.1, emoji: '🌵' },
+};
+
+type RouteOpts = { avoidTolls: boolean; avoidHighways: boolean; backRoads: boolean; noFerries: boolean };
+
+interface SearchPlace { lat: number; lng: number; name: string; dist?: number | null; };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -159,6 +182,17 @@ const buildMapHtml = (
     border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;
     font-size:15px;box-shadow:0 2px 8px rgba(20,184,166,0.4);cursor:pointer;}
   .disc:hover{background:rgba(20,184,166,0.35);}
+  .poi-water{background:rgba(59,130,246,0.18);border:2px solid #3b82f6;
+    border-radius:50%;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-size:13px;}
+  .poi-trail{background:rgba(34,197,94,0.18);border:2px solid #22c55e;
+    border-radius:50%;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-size:13px;}
+  .poi-view{background:rgba(168,85,247,0.18);border:2px solid #a855f7;
+    border-radius:50%;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-size:13px;}
+  .nearby-camp{background:rgba(249,115,22,0.12);border:2px solid #f97316;
+    border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;
+    font-size:14px;box-shadow:0 2px 6px rgba(249,115,22,0.35);cursor:pointer;}
+  .search-dest{background:rgba(59,130,246,0.2);border:2.5px solid #3b82f6;
+    border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-size:16px;}
   .leaflet-popup-content-wrapper{background:#0f1319;border:1px solid #252d3d;
     color:#f1f5f9;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,0.6);}
   .leaflet-popup-tip{background:#0f1319;}
@@ -238,6 +272,8 @@ const buildMapHtml = (
   var wpMarkers    = [];
   var searchPin    = null;
   var discoverMarkers = [];
+  var poiMarkers   = [];
+  var nearbyMarkers= [];
   var breadcrumbPts= [];
   var breadcrumb   = null;
 
@@ -278,6 +314,21 @@ const buildMapHtml = (
 
   var routePts=[];
   var _lastOffCheck=0;
+  var _routeOpts={avoidTolls:false,avoidHighways:false,backRoads:false,preferDirt:false,noFerries:false};
+
+  function decodePolyline6(enc){
+    var coords=[],i=0,lat=0,lng=0;
+    while(i<enc.length){
+      var b,shift=0,res=0;
+      do{b=enc.charCodeAt(i++)-63;res|=(b&0x1f)<<shift;shift+=5;}while(b>=0x20);
+      lat+=res&1?~(res>>1):(res>>1);
+      shift=0;res=0;
+      do{b=enc.charCodeAt(i++)-63;res|=(b&0x1f)<<shift;shift+=5;}while(b>=0x20);
+      lng+=res&1?~(res>>1):(res>>1);
+      coords.push([lat/1e6,lng/1e6]);
+    }
+    return coords;
+  }
 
   function drawFallback(){
     if(fallbackLine) return;
@@ -286,9 +337,71 @@ const buildMapHtml = (
     postRN({type:'route_ready',routed:false,steps:[],fromIdx:0});
   }
 
+  async function _fetchRouteValhalla(pairs,fromIdx){
+    var locations=pairs.map(function(p){var s=p.split(',');return{lon:parseFloat(s[0]),lat:parseFloat(s[1])};});
+    var body={
+      locations:locations,costing:'auto',
+      costing_options:{auto:{
+        use_tracks:_routeOpts.preferDirt?0.9:0.1,
+        use_highways:(_routeOpts.avoidHighways||_routeOpts.backRoads)?0.0:0.5,
+        use_tolls:_routeOpts.avoidTolls?0.0:0.5,
+      }},
+      units:'miles',
+    };
+    try{
+      var ctrl=new AbortController();
+      var tid=setTimeout(function(){ctrl.abort();},12000);
+      var res=await fetch('https://valhalla1.openstreetmap.de/route',{
+        method:'POST',signal:ctrl.signal,
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(body),
+      });
+      clearTimeout(tid);
+      var data=await res.json();
+      if(!data.trip||data.trip.status!==0){drawFallback();return;}
+      var trip=data.trip;
+      if(routeLine){map.removeLayer(routeLine);routeLine=null;}
+      if(fallbackLine){map.removeLayer(fallbackLine);fallbackLine=null;}
+      routePts=[];
+      var allCoords=[];
+      var steps=[],legs=[];
+      (trip.legs||[]).forEach(function(leg){
+        var coords=decodePolyline6(leg.shape||'');
+        for(var ci=0;ci<coords.length;ci+=4)routePts.push({lat:coords[ci][0],lng:coords[ci][1]});
+        allCoords=allCoords.concat(coords);
+        var legSteps=[];
+        (leg.maneuvers||[]).forEach(function(m){
+          var dist=Math.round((m.length||0)*1609.34);
+          var step={type:m.type===4?'arrive':m.type===1?'depart':'turn',
+            modifier:_valhallaModifier(m.type),name:m.street_names&&m.street_names[0]||'',
+            distance:dist,duration:m.time||0};
+          steps.push(step);legSteps.push(step);
+        });
+        legs.push(legSteps);
+      });
+      routeLine=L.polyline(allCoords,{color:'#f97316',weight:4.5,opacity:0.92,lineCap:'round',lineJoin:'round'}).addTo(map);
+      postRN({type:'route_ready',routed:true,steps:steps,legs:legs,
+        total_distance:Math.round((trip.summary.length||0)*1609.34),
+        total_duration:trip.summary.time||0,fromIdx:fromIdx||0});
+    }catch(e){drawFallback();}
+  }
+
+  function _valhallaModifier(type){
+    var m={0:'',1:'',2:'left',3:'right',4:'arrive',5:'sharp left',6:'sharp right',7:'left',8:'right',9:'uturn',10:'slight left',11:'slight right'};
+    return m[type]||'';
+  }
+
   async function _fetchRoute(coordStr,fromIdx){
+    if(_routeOpts.preferDirt||_routeOpts.backRoads){
+      return _fetchRouteValhalla(coordStr.split(';'),fromIdx);
+    }
+    var excludes=[];
+    if(_routeOpts.avoidTolls)excludes.push('toll');
+    if(_routeOpts.avoidHighways)excludes.push('motorway');
+    if(_routeOpts.noFerries)excludes.push('ferry');
+    var excStr=excludes.length?'&exclude='+excludes.join(','):'';
     var url='https://router.project-osrm.org/route/v1/driving/'+coordStr+
-      '?steps=true&geometries=geojson&overview=full&annotations=false';
+      '?steps=true&geometries=geojson&overview=full&annotations=false'+excStr;
     try{
       var ctrl=new AbortController();
       var tid=setTimeout(function(){ctrl.abort();},9000);
@@ -302,7 +415,6 @@ const buildMapHtml = (
       routeLine=L.geoJSON(route.geometry,{
         style:{color:'#f97316',weight:4.5,opacity:0.92,lineCap:'round',lineJoin:'round'}
       }).addTo(map);
-      // Store sampled route pts for off-route detection
       routePts=[];
       var coords=route.geometry.coordinates;
       for(var ci=0;ci<coords.length;ci+=4){routePts.push({lat:coords[ci][1],lng:coords[ci][0]});}
@@ -415,8 +527,46 @@ const buildMapHtml = (
       if(msg.type==='clear_discover_pins'){
         discoverMarkers.forEach(function(m){map.removeLayer(m);});discoverMarkers=[];
       }
+      if(msg.type==='set_route_opts'){Object.assign(_routeOpts,msg.opts||{});}
       if(msg.type==='start_route_from'&&msg.lat){loadRouteFrom(msg.lat,msg.lng,msg.fromIdx||0);}
       if(msg.type==='reroute_from'&&msg.lat){routePts=[];loadRouteFrom(msg.lat,msg.lng,msg.fromIdx||0);}
+      if(msg.type==='route_to_search'&&msg.lat){
+        if(searchPin){map.removeLayer(searchPin);searchPin=null;}
+        searchPin=L.marker([msg.lat,msg.lng],{icon:L.divIcon({className:'',html:'<div class="search-dest">📍</div>',iconSize:[30,30],iconAnchor:[15,15]})})
+          .addTo(map).bindPopup('<div class="pt">'+(msg.name||'Destination')+'</div>');
+        searchPin.openPopup();
+        var cs=msg.userLng+','+msg.userLat+';'+msg.lng+','+msg.lat;
+        _fetchRoute(cs,0).then(function(){});
+      }
+      if(msg.type==='set_pois'){
+        poiMarkers.forEach(function(m){map.removeLayer(m);});poiMarkers=[];
+        (msg.pois||[]).forEach(function(p){
+          var cls=p.type==='water'?'poi-water':p.type==='trailhead'?'poi-trail':'poi-view';
+          var icon=p.type==='water'?'💧':p.type==='trailhead'?'🥾':'👁️';
+          var m=L.marker([p.lat,p.lng],{icon:L.divIcon({className:'',html:'<div class="'+cls+'">'+icon+'</div>',iconSize:[26,26],iconAnchor:[13,13]})})
+            .addTo(map).bindPopup('<div class="pt">'+p.name+'</div><div class="pm">'+p.type+'</div>');
+          poiMarkers.push(m);
+        });
+      }
+      if(msg.type==='clear_pois'){poiMarkers.forEach(function(m){map.removeLayer(m);});poiMarkers=[];}
+      if(msg.type==='set_nearby_camps'){
+        nearbyMarkers.forEach(function(m){map.removeLayer(m);});nearbyMarkers=[];
+        (msg.pins||[]).forEach(function(p){
+          var icon=p.tags&&p.tags.includes('rv')?'🚐':p.tags&&p.tags.includes('dispersed')?'🌲':'⛺';
+          var m=L.marker([p.lat,p.lng],{icon:L.divIcon({className:'',html:'<div class="nearby-camp">'+icon+'</div>',iconSize:[30,30],iconAnchor:[15,15]})})
+            .addTo(map).bindPopup('<div class="pt">'+p.name+'</div><div class="pm">'+p.land_type+'</div>');
+          m.on('click',function(ev){ev.originalEvent&&ev.originalEvent.stopPropagation();postRN({type:'campsite_tapped',id:p.id,name:p.name,source:'nearby'});});
+          nearbyMarkers.push(m);
+        });
+      }
+      if(msg.type==='clear_nearby_camps'){nearbyMarkers.forEach(function(m){map.removeLayer(m);});nearbyMarkers=[];}
+      if(msg.type==='download_tiles_bbox'){
+        if(!downloadActive){
+          downloadActive=true;
+          var fakeBounds=L.latLngBounds([[msg.s,msg.w],[msg.n,msg.e]]);
+          _dlTiles(fakeBounds,msg.minZ||10,msg.maxZ||12);
+        }
+      }
       if(msg.type==='download_tiles'){
         if(!downloadActive){downloadActive=true;var bounds=map.getBounds();_dlTiles(bounds,msg.minZ||10,msg.maxZ||15);}
       }
@@ -480,6 +630,41 @@ export default function MapScreen() {
   const [showCampDetail,setShowCampDetail] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [isSearchingCamps, setIsSearchingCamps] = useState(false);
+
+  // Nearby mode (Dyrt-style)
+  const [nearbyMode,    setNearbyMode]    = useState(false);
+  const [nearbyPins,    setNearbyPins]    = useState<CampsitePin[]>([]);
+  const [loadingNearby, setLoadingNearby] = useState(false);
+  const nearbyRef = useRef<CampsitePin[]>([]);
+
+  // POI layer
+  const [showPois, setShowPois] = useState(false);
+  const [pois,     setPois]     = useState<OsmPoi[]>([]);
+
+  // Route options
+  const [routeOpts,      setRouteOpts]      = useState<RouteOpts>({ avoidTolls: false, avoidHighways: false, backRoads: false, noFerries: false });
+  const [showRouteOpts,  setShowRouteOpts]  = useState(false);
+  const [searchRouteCard,setSearchRouteCard]= useState<SearchPlace | null>(null);
+
+  // Offline state modal
+  const [showOfflineModal,  setShowOfflineModal]  = useState(false);
+  const [offlineWarning,    setOfflineWarning]    = useState(false);
+
+  // AI & Wikipedia in campsite detail
+  const [campInsight,    setCampInsight]    = useState<CampsiteInsight | null>(null);
+  const [loadingInsight, setLoadingInsight] = useState(false);
+  const [wikiArticles,   setWikiArticles]   = useState<WikiArticle[]>([]);
+  const [loadingWiki,    setLoadingWiki]    = useState(false);
+
+  // Route brief
+  const [routeBrief,    setRouteBrief]    = useState<RouteBrief | null>(null);
+  const [showRouteBrief,setShowRouteBrief]= useState(false);
+  const [loadingBrief,  setLoadingBrief]  = useState(false);
+
+  // Packing list
+  const [packingList,   setPackingList]   = useState<PackingList | null>(null);
+  const [showPacking,   setShowPacking]   = useState(false);
+  const [loadingPacking,setLoadingPacking]= useState(false);
 
   const navAnim      = useRef(new Animated.Value(0)).current;
   const navRef       = useRef({ active: false, idx: 0, wps: [] as WP[] });
@@ -628,6 +813,61 @@ export default function MapScreen() {
     }
   }, [discoverPins]);
 
+  // Nearby mode (The Dyrt-style — all camps near current location)
+  useEffect(() => {
+    if (!nearbyMode) {
+      nearbyRef.current = [];
+      setNearbyPins([]);
+      webRef.current?.postMessage(JSON.stringify({ type: 'clear_nearby_camps' }));
+      return;
+    }
+    const center = userLoc ?? (waypoints[0] ? { lat: waypoints[0].lat, lng: waypoints[0].lng } : null);
+    if (!center) return;
+    setLoadingNearby(true);
+    api.getNearbyCamps(center.lat, center.lng, 40)
+      .then(pins => {
+        nearbyRef.current = pins;
+        setNearbyPins(pins);
+        webRef.current?.postMessage(JSON.stringify({ type: 'set_nearby_camps', pins }));
+      })
+      .catch(() => {})
+      .finally(() => setLoadingNearby(false));
+  }, [nearbyMode]);
+
+  // POI layer
+  useEffect(() => {
+    if (!showPois) {
+      webRef.current?.postMessage(JSON.stringify({ type: 'clear_pois' }));
+      return;
+    }
+    const center = userLoc ?? (waypoints[0] ? { lat: waypoints[0].lat, lng: waypoints[0].lng } : null);
+    if (!center) return;
+    api.getOsmPois(center.lat, center.lng, 25)
+      .then(p => {
+        setPois(p);
+        webRef.current?.postMessage(JSON.stringify({ type: 'set_pois', pois: p }));
+      })
+      .catch(() => {});
+  }, [showPois]);
+
+  // Sync route options to WebView
+  useEffect(() => {
+    webRef.current?.postMessage(JSON.stringify({ type: 'set_route_opts', opts: {
+      avoidTolls: routeOpts.avoidTolls,
+      avoidHighways: routeOpts.avoidHighways,
+      backRoads: routeOpts.backRoads,
+      preferDirt: routeOpts.backRoads,
+      noFerries: routeOpts.noFerries,
+    }}));
+  }, [routeOpts]);
+
+  // Offline warning during nav if area hasn't been cached
+  useEffect(() => {
+    if (!navMode) { setOfflineWarning(false); return; }
+    const timer = setTimeout(() => setOfflineWarning(!offlineSaved), 4000);
+    return () => clearTimeout(timer);
+  }, [navMode, offlineSaved]);
+
   // ── Nav mode animate + speak start ─────────────────────────────────────────
 
   useEffect(() => {
@@ -691,6 +931,7 @@ export default function MapScreen() {
   async function searchMap() {
     if (!searchQuery.trim()) return;
     setIsSearching(true);
+    setSearchRouteCard(null);
     try {
       const q = encodeURIComponent(searchQuery.trim());
       const res = await fetch(
@@ -703,6 +944,79 @@ export default function MapScreen() {
       })));
     } catch {}
     setIsSearching(false);
+  }
+
+  function selectSearchResult(place: { lat: number; lng: number; name: string }) {
+    const dist = userLoc ? haversineKm(userLoc.lat, userLoc.lng, place.lat, place.lng) : null;
+    setSearchRouteCard({ ...place, dist });
+    setSearchResults([]);
+    webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: place.lat, lng: place.lng, name: place.name }));
+  }
+
+  function navigateToSearch() {
+    if (!searchRouteCard || !userLoc) return;
+    setShowSearch(false);
+    setSearchRouteCard(null);
+    webRef.current?.postMessage(JSON.stringify({
+      type: 'route_to_search',
+      lat: searchRouteCard.lat, lng: searchRouteCard.lng,
+      name: searchRouteCard.name,
+      userLat: userLoc.lat, userLng: userLoc.lng,
+    }));
+  }
+
+  async function openCampInsight() {
+    if (!selectedCamp) return;
+    setLoadingInsight(true);
+    setLoadingWiki(true);
+    try {
+      const [insight, wiki] = await Promise.all([
+        api.getCampsiteInsight({ name: selectedCamp.name, lat: selectedCamp.lat, lng: selectedCamp.lng,
+          description: selectedCamp.description, land_type: selectedCamp.land_type,
+          amenities: campDetail?.amenities ?? [] }),
+        api.getWikipediaNearby(selectedCamp.lat, selectedCamp.lng, 15000),
+      ]);
+      setCampInsight(insight);
+      setWikiArticles(wiki);
+    } catch {}
+    setLoadingInsight(false);
+    setLoadingWiki(false);
+  }
+
+  async function fetchRouteBrief() {
+    if (!activeTrip) return;
+    setLoadingBrief(true);
+    try {
+      const brief = await api.getRouteBrief({
+        trip_name: activeTrip.plan.trip_name,
+        waypoints: activeTrip.plan.waypoints,
+        reports: routeAlerts,
+      });
+      setRouteBrief(brief);
+      setShowRouteBrief(true);
+    } catch {}
+    setLoadingBrief(false);
+  }
+
+  async function fetchPackingList() {
+    if (!activeTrip) return;
+    setLoadingPacking(true);
+    try {
+      const list = await api.getPackingList({
+        trip_name: activeTrip.plan.trip_name,
+        duration_days: activeTrip.plan.duration_days,
+        road_types: [...new Set(activeTrip.plan.daily_itinerary.map(d => d.road_type))],
+        land_types: [...new Set(activeTrip.plan.waypoints.map(w => w.land_type))],
+        states: activeTrip.plan.states,
+      });
+      setPackingList(list);
+      setShowPacking(true);
+    } catch {}
+    setLoadingPacking(false);
+  }
+
+  function copyCoordinates(lat: number, lng: number) {
+    Clipboard.setStringAsync(`${lat.toFixed(6)}, ${lng.toFixed(6)}`);
   }
 
   // ── Layer switch ────────────────────────────────────────────────────────────
@@ -761,9 +1075,13 @@ export default function MapScreen() {
         setTimeout(() => setDownloadProgress(0), 2000);
       }
       if (msg.type === 'campsite_tapped') {
-        const pin = discoverRef.current.find(p => p.id === msg.id) ?? null;
+        const pin = discoverRef.current.find(p => p.id === msg.id)
+          ?? nearbyRef.current.find(p => p.id === msg.id)
+          ?? null;
         setSelectedCamp(pin);
         setCampDetail(null);
+        setCampInsight(null);
+        setWikiArticles([]);
       }
     } catch {}
   }
@@ -771,11 +1089,20 @@ export default function MapScreen() {
   async function openCampDetail() {
     if (!selectedCamp) return;
     setLoadingDetail(true);
+    setCampInsight(null);
+    setWikiArticles([]);
     try {
       const d = await api.getCampsiteDetail(selectedCamp.id);
       setCampDetail(d);
       setShowCampDetail(true);
-    } catch {}
+      // Load AI insight + Wikipedia in background after modal opens
+      openCampInsight();
+    } catch {
+      // OSM pins don't have RIDB detail — show quick card data as detail
+      setCampDetail(selectedCamp as any);
+      setShowCampDetail(true);
+      openCampInsight();
+    }
     setLoadingDetail(false);
   }
 
@@ -866,7 +1193,9 @@ export default function MapScreen() {
         <Text style={s.topBarText} numberOfLines={1}>
           {isDownloading
             ? `CACHING TILES ${downloadProgress}% · ${downloadTotal} TOTAL`
-            : isRerouting
+            : offlineWarning && navMode
+              ? '⚠ NO OFFLINE MAPS — TAP MAP BUTTON TO DOWNLOAD'
+              : isRerouting
               ? 'RECALCULATING ROUTE...'
               : navMode
                 ? isApproaching
@@ -946,6 +1275,30 @@ export default function MapScreen() {
           <Ionicons name="filter" size={20} color={showFilters ? '#fff' : C.text} />
         </TouchableOpacity>
 
+        <TouchableOpacity
+          style={[s.ctrlBtn, nearbyMode && { backgroundColor: C.orange + 'dd', borderColor: C.orange }]}
+          onPress={() => setNearbyMode(p => !p)}
+        >
+          {loadingNearby
+            ? <ActivityIndicator size="small" color={C.orange} />
+            : <Text style={{ fontSize: 16 }}>{nearbyMode ? '🏕️' : '⛺'}</Text>
+          }
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[s.ctrlBtn, showPois && { backgroundColor: '#3b82f6dd', borderColor: '#3b82f6' }]}
+          onPress={() => setShowPois(p => !p)}
+        >
+          <Text style={{ fontSize: 15 }}>💧</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[s.ctrlBtn, { borderColor: C.border }]}
+          onPress={() => setShowOfflineModal(true)}
+        >
+          <Ionicons name="map-outline" size={18} color={C.text2} />
+        </TouchableOpacity>
+
         {!navMode && (
           <TouchableOpacity style={s.ctrlBtn} onPress={() => setShowPanel(p => !p)}>
             <Ionicons name={showPanel ? 'chevron-down' : 'chevron-up'} size={20} color={C.text} />
@@ -1008,15 +1361,37 @@ export default function MapScreen() {
           {searchResults.length > 0 && (
             <ScrollView style={s.searchResults} keyboardShouldPersistTaps="handled">
               {searchResults.map((r, i) => (
-                <TouchableOpacity key={i} style={s.searchResultItem} onPress={() => {
-                  webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: r.lat, lng: r.lng, name: r.name }));
-                  setShowSearch(false); setSearchResults([]); setSearchQuery('');
-                }}>
+                <TouchableOpacity key={i} style={s.searchResultItem} onPress={() => selectSearchResult(r)}>
                   <Ionicons name="location-outline" size={13} color={C.text3} />
                   <Text style={s.searchResultText} numberOfLines={2}>{r.name}</Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
+          )}
+          {searchRouteCard && (
+            <View style={s.routeCard}>
+              <Text style={s.routeCardName} numberOfLines={2}>{searchRouteCard.name}</Text>
+              {searchRouteCard.dist !== null && (
+                <Text style={s.routeCardDist}>
+                  {formatDist(searchRouteCard.dist!)} from you
+                  {routeOpts.backRoads ? ' · BACK ROADS' : routeOpts.avoidHighways ? ' · NO HWY' : ''}
+                  {routeOpts.avoidTolls ? ' · NO TOLL' : ''}
+                </Text>
+              )}
+              <View style={s.routeCardActions}>
+                <TouchableOpacity style={s.routeCardNav} onPress={navigateToSearch} disabled={!userLoc}>
+                  <Ionicons name="navigate" size={14} color="#fff" />
+                  <Text style={s.routeCardNavText}>NAVIGATE HERE</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={s.routeCardOpts} onPress={() => setShowRouteOpts(true)}>
+                  <Ionicons name="options-outline" size={14} color={C.text2} />
+                  <Text style={s.routeCardOptsText}>OPTIONS</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setSearchRouteCard(null)}>
+                  <Ionicons name="close" size={18} color={C.text3} />
+                </TouchableOpacity>
+              </View>
+            </View>
           )}
         </View>
       )}
@@ -1190,18 +1565,267 @@ export default function MapScreen() {
                   </View>
                 )}
 
+                {/* Coordinates */}
+                <View style={s.detailSection}>
+                  <Text style={s.detailSectionTitle}>Coordinates</Text>
+                  <View style={s.coordRow}>
+                    <Text style={s.coordText}>
+                      {campDetail.lat.toFixed(6)}, {campDetail.lng.toFixed(6)}
+                    </Text>
+                    <TouchableOpacity style={s.coordCopy} onPress={() => copyCoordinates(campDetail.lat, campDetail.lng)}>
+                      <Ionicons name="copy-outline" size={14} color={C.orange} />
+                      <Text style={s.coordCopyText}>COPY</Text>
+                    </TouchableOpacity>
+                  </View>
+                  {campInsight?.coordinates_dms ? (
+                    <Text style={s.coordDms}>{campInsight.coordinates_dms}</Text>
+                  ) : null}
+                </View>
+
+                {/* AI Insight */}
+                {(campInsight || loadingInsight) && (
+                  <View style={s.detailSection}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+                      <Text style={s.detailSectionTitle}>AI Insight</Text>
+                      {campInsight?.star_rating && (
+                        <Text style={s.aiStars}>{'★'.repeat(campInsight.star_rating)}{'☆'.repeat(5 - campInsight.star_rating)}</Text>
+                      )}
+                    </View>
+                    {loadingInsight && !campInsight && <ActivityIndicator size="small" color={C.orange} />}
+                    {campInsight?.insider_tip ? (
+                      <View style={s.insiderTip}>
+                        <Text style={s.insiderLabel}>💡 INSIDER TIP</Text>
+                        <Text style={s.insiderText}>{campInsight.insider_tip}</Text>
+                      </View>
+                    ) : null}
+                    {campInsight?.best_for ? <Text style={s.aiMeta}>Best for: {campInsight.best_for}</Text> : null}
+                    {campInsight?.best_season ? <Text style={s.aiMeta}>Best season: {campInsight.best_season}</Text> : null}
+                    {campInsight?.hazards ? (
+                      <View style={s.hazardRow}>
+                        <Ionicons name="warning-outline" size={13} color={C.yellow} />
+                        <Text style={s.hazardText}>{campInsight.hazards}</Text>
+                      </View>
+                    ) : null}
+                    {campInsight?.nearby_highlights?.length ? (
+                      <View style={{ marginTop: 8 }}>
+                        <Text style={[s.detailSectionTitle, { borderBottomWidth: 0, paddingBottom: 0, marginBottom: 6 }]}>Nearby</Text>
+                        {campInsight.nearby_highlights.map((h, i) => (
+                          <Text key={i} style={s.nearbyItem}>• {h}</Text>
+                        ))}
+                      </View>
+                    ) : null}
+                  </View>
+                )}
+
+                {/* Wikipedia nearby */}
+                {(wikiArticles.length > 0 || loadingWiki) && (
+                  <View style={s.detailSection}>
+                    <Text style={s.detailSectionTitle}>Wikipedia Nearby</Text>
+                    {loadingWiki && !wikiArticles.length && <ActivityIndicator size="small" color={C.orange} />}
+                    {wikiArticles.map((w, i) => (
+                      <TouchableOpacity key={i} style={s.wikiItem} onPress={() => Linking.openURL(w.url)}>
+                        <View style={s.wikiItemHeader}>
+                          <Text style={s.wikiTitle} numberOfLines={1}>{w.title}</Text>
+                          <Text style={s.wikiDist}>{(w.dist_m / 1609).toFixed(1)} mi</Text>
+                        </View>
+                        {w.extract ? <Text style={s.wikiExtract} numberOfLines={2}>{w.extract}</Text> : null}
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+
                 {/* Actions */}
                 <View style={s.detailActions}>
-                  <TouchableOpacity style={s.detailBookBtn} onPress={() => Linking.openURL(campDetail.url)}>
-                    <Ionicons name="calendar" size={16} color="#fff" />
-                    <Text style={s.detailBookText}>BOOK ON RECREATION.GOV</Text>
-                  </TouchableOpacity>
+                  {campDetail.url && !campDetail.url.includes('openstreetmap.org/node') && (
+                    <TouchableOpacity style={s.detailBookBtn} onPress={() => Linking.openURL(campDetail.url)}>
+                      <Ionicons name="calendar" size={16} color="#fff" />
+                      <Text style={s.detailBookText}>BOOK ON RECREATION.GOV</Text>
+                    </TouchableOpacity>
+                  )}
                   <TouchableOpacity style={s.detailDirBtn} onPress={() => Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${campDetail.lat},${campDetail.lng}`)}>
                     <Ionicons name="navigate-outline" size={16} color={C.orange} />
                     <Text style={s.detailDirText}>GET DIRECTIONS</Text>
                   </TouchableOpacity>
+                  <TouchableOpacity style={[s.detailDirBtn, { borderColor: '#3b82f6' }]}
+                    onPress={() => copyCoordinates(campDetail.lat, campDetail.lng)}>
+                    <Ionicons name="copy-outline" size={16} color="#3b82f6" />
+                    <Text style={[s.detailDirText, { color: '#3b82f6' }]}>COPY GPS COORDS</Text>
+                  </TouchableOpacity>
                 </View>
               </View>
+            </ScrollView>
+          )}
+        </View>
+      </Modal>
+
+      {/* ── Route Options Sheet ── */}
+      <Modal visible={showRouteOpts} animationType="slide" transparent onRequestClose={() => setShowRouteOpts(false)}>
+        <TouchableOpacity style={s.modalBackdrop} activeOpacity={1} onPress={() => setShowRouteOpts(false)}>
+          <View style={s.routeOptsSheet}>
+            <Text style={s.routeOptsTitle}>ROUTE OPTIONS</Text>
+            {([
+              { key: 'avoidTolls',   label: 'Avoid Tolls',          sub: 'Stay off toll roads' },
+              { key: 'avoidHighways',label: 'Avoid Highways',        sub: 'No interstates/motorways' },
+              { key: 'backRoads',    label: 'Prefer Back Roads',     sub: 'Scenic, slower — via Valhalla' },
+              { key: 'noFerries',    label: 'No Ferries',            sub: 'Avoid water crossings' },
+            ] as const).map(opt => (
+              <TouchableOpacity key={opt.key} style={s.routeOptRow}
+                onPress={() => setRouteOpts(p => ({ ...p, [opt.key]: !p[opt.key] }))}>
+                <View style={s.routeOptCheck}>
+                  {routeOpts[opt.key] && <Ionicons name="checkmark" size={14} color={C.orange} />}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.routeOptLabel}>{opt.label}</Text>
+                  <Text style={s.routeOptSub}>{opt.sub}</Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity style={s.routeOptsApply} onPress={() => {
+              setShowRouteOpts(false);
+              if (searchRouteCard && userLoc) navigateToSearch();
+            }}>
+              <Text style={s.routeOptsApplyText}>APPLY & ROUTE</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* ── Offline Map Download Modal ── */}
+      <Modal visible={showOfflineModal} animationType="slide" transparent onRequestClose={() => setShowOfflineModal(false)}>
+        <TouchableOpacity style={s.modalBackdrop} activeOpacity={1} onPress={() => setShowOfflineModal(false)}>
+          <View style={s.offlineSheet}>
+            <Text style={s.offlineTitle}>OFFLINE MAPS</Text>
+            <Text style={s.offlineSub}>Download tiles for use without signal. z10–z12 overview, z10–z14 for current area.</Text>
+            <Text style={s.offlineSectionLabel}>WESTERN US STATES (z10–z12)</Text>
+            <ScrollView style={{ maxHeight: 260 }} showsVerticalScrollIndicator={false}>
+              <View style={s.stateGrid}>
+                {Object.entries(US_STATES).map(([code, st]) => (
+                  <TouchableOpacity key={code} style={s.stateBtn}
+                    onPress={() => {
+                      setShowOfflineModal(false);
+                      setIsDownloading(true);
+                      setOfflineSaved(false);
+                      webRef.current?.postMessage(JSON.stringify({
+                        type: 'download_tiles_bbox',
+                        n: st.n, s: st.s, e: st.e, w: st.w,
+                        minZ: 10, maxZ: 12,
+                      }));
+                    }}>
+                    <Text style={s.stateEmoji}>{st.emoji}</Text>
+                    <Text style={s.stateName}>{st.name}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </ScrollView>
+            <Text style={s.offlineSectionLabel}>CURRENT TRIP AREA (z10–z14)</Text>
+            {waypoints.length > 0 ? (
+              <TouchableOpacity style={s.offlineRouteBtn}
+                onPress={() => {
+                  setShowOfflineModal(false);
+                  setIsDownloading(true);
+                  setOfflineSaved(false);
+                  webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles', minZ: 10, maxZ: 14 }));
+                }}>
+                <Ionicons name="cloud-download-outline" size={16} color="#fff" />
+                <Text style={s.offlineRouteBtnText}>DOWNLOAD {activeTrip?.plan.trip_name.toUpperCase() ?? 'TRIP'} AREA</Text>
+              </TouchableOpacity>
+            ) : (
+              <Text style={s.offlineNoTrip}>Plan a trip first to download its corridor</Text>
+            )}
+            {isDownloading && (
+              <View style={{ marginTop: 12 }}>
+                <View style={s.dlBar}>
+                  <View style={[s.dlFill, { width: `${downloadProgress}%` as any }]} />
+                </View>
+                <Text style={s.offlineProgress}>{downloadProgress}% · {downloadTotal} tiles</Text>
+              </View>
+            )}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* ── Route Brief Modal ── */}
+      <Modal visible={showRouteBrief} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowRouteBrief(false)}>
+        <View style={s.detailModal}>
+          {routeBrief && (
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 20 }}>
+              <View style={s.detailHeader}>
+                <Text style={s.detailName}>Route Briefing</Text>
+                <TouchableOpacity style={s.detailClose} onPress={() => setShowRouteBrief(false)}>
+                  <Ionicons name="close" size={22} color={C.text} />
+                </TouchableOpacity>
+              </View>
+              <View style={[s.readinessRow, { borderColor: routeBrief.readiness_score >= 7 ? C.green : routeBrief.readiness_score >= 4 ? C.yellow : C.red }]}>
+                <Text style={s.readinessScore}>{routeBrief.readiness_score}/10</Text>
+                <Text style={s.readinessLabel}>READINESS</Text>
+              </View>
+              <Text style={s.briefSummary}>{routeBrief.briefing_summary}</Text>
+              {routeBrief.top_concerns.length > 0 && (
+                <View style={s.detailSection}>
+                  <Text style={s.detailSectionTitle}>Key Concerns</Text>
+                  {routeBrief.top_concerns.map((c, i) => (
+                    <View key={i} style={s.briefItem}>
+                      <Ionicons name="warning-outline" size={14} color={C.yellow} />
+                      <Text style={s.briefItemText}>{c}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+              {routeBrief.must_do_before_leaving.length > 0 && (
+                <View style={s.detailSection}>
+                  <Text style={s.detailSectionTitle}>Before You Leave</Text>
+                  {routeBrief.must_do_before_leaving.map((t, i) => (
+                    <View key={i} style={s.briefItem}>
+                      <Ionicons name="checkmark-circle-outline" size={14} color={C.green} />
+                      <Text style={s.briefItemText}>{t}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+              <View style={s.briefStats}>
+                <View style={s.briefStat}><Text style={s.briefStatVal}>{routeBrief.estimated_fuel_stops}</Text><Text style={s.briefStatLabel}>Fuel Stops</Text></View>
+                <View style={s.briefStat}><Text style={s.briefStatVal}>{routeBrief.water_carry_gallons}</Text><Text style={s.briefStatLabel}>Gallons Water</Text></View>
+              </View>
+            </ScrollView>
+          )}
+        </View>
+      </Modal>
+
+      {/* ── Packing List Modal ── */}
+      <Modal visible={showPacking} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowPacking(false)}>
+        <View style={s.detailModal}>
+          {packingList && (
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 20 }}>
+              <View style={s.detailHeader}>
+                <Text style={s.detailName}>Packing List</Text>
+                <TouchableOpacity style={s.detailClose} onPress={() => setShowPacking(false)}>
+                  <Ionicons name="close" size={22} color={C.text} />
+                </TouchableOpacity>
+              </View>
+              {([
+                { key: 'essentials',          label: 'Essentials',       icon: '⭐' },
+                { key: 'recovery_gear',       label: 'Recovery Gear',    icon: '🔧' },
+                { key: 'water_food',          label: 'Water & Food',     icon: '💧' },
+                { key: 'navigation',          label: 'Navigation',       icon: '🗺️' },
+                { key: 'shelter',             label: 'Shelter',          icon: '⛺' },
+                { key: 'tools_spares',        label: 'Tools & Spares',   icon: '🔩' },
+                { key: 'optional_nice_to_have',label:'Nice to Have',     icon: '✨' },
+                { key: 'leave_at_home',       label: 'Leave at Home',    icon: '🚫' },
+              ] as const).map(section => {
+                const items = (packingList as any)[section.key] as string[];
+                if (!items?.length) return null;
+                return (
+                  <View key={section.key} style={s.detailSection}>
+                    <Text style={s.detailSectionTitle}>{section.icon} {section.label}</Text>
+                    {items.map((item, i) => (
+                      <View key={i} style={s.briefItem}>
+                        <View style={s.packDot} />
+                        <Text style={s.briefItemText}>{item}</Text>
+                      </View>
+                    ))}
+                  </View>
+                );
+              })}
             </ScrollView>
           )}
         </View>
@@ -1337,6 +1961,20 @@ export default function MapScreen() {
             <TouchableOpacity style={s.mapsBtn} onPress={openInMaps}>
               <Ionicons name="open-outline" size={11} color={C.text3} />
               <Text style={s.mapsBtnText}>EXPORT</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={s.aiActionsRow}>
+            <TouchableOpacity style={s.aiActionBtn} onPress={fetchRouteBrief} disabled={loadingBrief}>
+              {loadingBrief
+                ? <ActivityIndicator size="small" color={C.orange} />
+                : <><Ionicons name="shield-checkmark-outline" size={13} color={C.orange} /><Text style={s.aiActionText}>ROUTE BRIEF</Text></>
+              }
+            </TouchableOpacity>
+            <TouchableOpacity style={s.aiActionBtn} onPress={fetchPackingList} disabled={loadingPacking}>
+              {loadingPacking
+                ? <ActivityIndicator size="small" color={C.orange} />
+                : <><Ionicons name="bag-outline" size={13} color={C.orange} /><Text style={s.aiActionText}>PACKING LIST</Text></>
+              }
             </TouchableOpacity>
           </View>
         </View>
@@ -1623,4 +2261,112 @@ const s = StyleSheet.create({
     borderWidth: 1, borderColor: C.orange,
   },
   detailDirText: { color: C.orange, fontSize: 13, fontFamily: mono, fontWeight: '700' },
+
+  // ── Coordinates
+  coordRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  coordText: { color: C.text2, fontSize: 13, fontFamily: mono, flex: 1 },
+  coordDms: { color: C.text3, fontSize: 11, fontFamily: mono, marginTop: 4 },
+  coordCopy: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: C.orange },
+  coordCopyText: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '700' },
+
+  // ── AI insight
+  aiStars: { color: C.yellow, fontSize: 14 },
+  insiderTip: { backgroundColor: C.orange + '14', borderRadius: 10, borderWidth: 1, borderColor: C.orange + '44', padding: 12, marginBottom: 8 },
+  insiderLabel: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '800', marginBottom: 4 },
+  insiderText: { color: C.text, fontSize: 13, lineHeight: 19 },
+  aiMeta: { color: C.text3, fontSize: 12, marginBottom: 3 },
+  hazardRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 6, backgroundColor: C.yellow + '14', borderRadius: 8, padding: 8 },
+  hazardText: { color: C.yellow, fontSize: 12, flex: 1, lineHeight: 17 },
+  nearbyItem: { color: C.text3, fontSize: 12, marginBottom: 3 },
+
+  // ── Wikipedia
+  wikiItem: { paddingVertical: 10, borderBottomWidth: 1, borderColor: C.s2 },
+  wikiItemHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 3 },
+  wikiTitle: { color: '#3b82f6', fontSize: 13, fontWeight: '600', flex: 1 },
+  wikiDist: { color: C.text3, fontSize: 10, fontFamily: mono },
+  wikiExtract: { color: C.text3, fontSize: 11, lineHeight: 16 },
+
+  // ── AI action buttons in panel
+  aiActionsRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 14, paddingBottom: 8 },
+  aiActionBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    flex: 1, paddingVertical: 8, borderRadius: 10,
+    borderWidth: 1, borderColor: C.orange + '55',
+    backgroundColor: C.orange + '0f', justifyContent: 'center',
+  },
+  aiActionText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '700' },
+
+  // ── Route card (search result card)
+  routeCard: {
+    padding: 12, borderTopWidth: 1, borderColor: '#3b82f6',
+    backgroundColor: 'rgba(8,12,18,0.98)',
+  },
+  routeCardName: { color: C.text, fontSize: 12, fontWeight: '600', marginBottom: 4, lineHeight: 17 },
+  routeCardDist: { color: C.text3, fontSize: 10, fontFamily: mono, marginBottom: 8 },
+  routeCardActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  routeCardNav: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5,
+    paddingVertical: 9, borderRadius: 10, backgroundColor: '#3b82f6',
+  },
+  routeCardNavText: { color: '#fff', fontSize: 11, fontFamily: mono, fontWeight: '700' },
+  routeCardOpts: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: 10, paddingVertical: 9, borderRadius: 10,
+    borderWidth: 1, borderColor: C.border,
+  },
+  routeCardOptsText: { color: C.text2, fontSize: 10, fontFamily: mono },
+
+  // ── Route options sheet
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  routeOptsSheet: {
+    backgroundColor: C.s1, borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    padding: 20, paddingBottom: 40, borderTopWidth: 1, borderColor: C.border,
+  },
+  routeOptsTitle: { color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '800', letterSpacing: 1, marginBottom: 16, textAlign: 'center' },
+  routeOptRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 13, borderBottomWidth: 1, borderColor: C.border },
+  routeOptCheck: { width: 22, height: 22, borderRadius: 6, borderWidth: 1.5, borderColor: C.orange, alignItems: 'center', justifyContent: 'center' },
+  routeOptLabel: { color: C.text, fontSize: 14, fontWeight: '600' },
+  routeOptSub: { color: C.text3, fontSize: 11, marginTop: 1 },
+  routeOptsApply: { marginTop: 16, paddingVertical: 14, borderRadius: 14, backgroundColor: '#3b82f6', alignItems: 'center' },
+  routeOptsApplyText: { color: '#fff', fontSize: 13, fontFamily: mono, fontWeight: '800' },
+
+  // ── Offline modal
+  offlineSheet: {
+    backgroundColor: C.s1, borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    padding: 20, paddingBottom: 40, borderTopWidth: 1, borderColor: C.border, maxHeight: '80%',
+  },
+  offlineTitle: { color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '800', letterSpacing: 1, marginBottom: 6, textAlign: 'center' },
+  offlineSub: { color: C.text3, fontSize: 11, textAlign: 'center', marginBottom: 16, lineHeight: 16 },
+  offlineSectionLabel: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '700', letterSpacing: 1, marginBottom: 10 },
+  stateGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
+  stateBtn: {
+    width: '30%', paddingVertical: 10, borderRadius: 12,
+    backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
+    alignItems: 'center',
+  },
+  stateEmoji: { fontSize: 22, marginBottom: 3 },
+  stateName: { color: C.text2, fontSize: 10, fontFamily: mono, textAlign: 'center' },
+  offlineRouteBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    paddingVertical: 13, borderRadius: 14, backgroundColor: C.orange,
+  },
+  offlineRouteBtnText: { color: '#fff', fontSize: 12, fontFamily: mono, fontWeight: '700' },
+  offlineNoTrip: { color: C.text3, fontSize: 11, textAlign: 'center', marginTop: 6 },
+  offlineProgress: { color: C.text3, fontSize: 10, fontFamily: mono, textAlign: 'center', marginTop: 4 },
+
+  // ── Route brief
+  readinessRow: {
+    alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderRadius: 60,
+    width: 100, height: 100, alignSelf: 'center', marginBottom: 16,
+  },
+  readinessScore: { color: C.text, fontSize: 32, fontWeight: '800', fontFamily: mono },
+  readinessLabel: { color: C.text3, fontSize: 9, fontFamily: mono },
+  briefSummary: { color: C.text2, fontSize: 14, lineHeight: 21, marginBottom: 20 },
+  briefItem: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 8 },
+  briefItemText: { color: C.text2, fontSize: 13, flex: 1, lineHeight: 18 },
+  briefStats: { flexDirection: 'row', gap: 16, justifyContent: 'center', marginTop: 8 },
+  briefStat: { alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, backgroundColor: C.s2, borderRadius: 14, flex: 1 },
+  briefStatVal: { color: C.text, fontSize: 28, fontWeight: '800', fontFamily: mono },
+  briefStatLabel: { color: C.text3, fontSize: 10, fontFamily: mono },
+  packDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: C.orange, marginTop: 6 },
 });

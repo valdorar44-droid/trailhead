@@ -73,6 +73,22 @@ export const api = {
 
   getWeather: (lat: number, lng: number, days = 7) =>
     req<WeatherForecast>(`/api/weather?lat=${lat}&lng=${lng}&days=${days}`),
+
+  // Discovery
+  getNearbyCamps: (lat: number, lng: number, radius = 50, types: string[] = []) =>
+    req<CampsitePin[]>(`/api/nearby-camps?lat=${lat}&lng=${lng}&radius=${radius}&types=${types.join(',')}`),
+  getOsmPois: (lat: number, lng: number, radius = 30, types = 'water,trailhead,viewpoint') =>
+    req<OsmPoi[]>(`/api/osm-pois?lat=${lat}&lng=${lng}&radius=${radius}&types=${types}`),
+  getWikipediaNearby: (lat: number, lng: number, radius = 10000) =>
+    req<WikiArticle[]>(`/api/wikipedia-nearby?lat=${lat}&lng=${lng}&radius=${radius}`),
+
+  // AI features
+  getCampsiteInsight: (data: CampsiteInsightRequest) =>
+    req<CampsiteInsight>('/api/ai/campsite-insight', { method: 'POST', body: JSON.stringify(data) }),
+  getRouteBrief: (data: RouteBriefRequest) =>
+    req<RouteBrief>('/api/ai/route-brief', { method: 'POST', body: JSON.stringify(data) }),
+  getPackingList: (data: PackingRequest) =>
+    req<PackingList>('/api/ai/packing-list', { method: 'POST', body: JSON.stringify(data) }),
 };
 
 export interface User {
@@ -143,6 +159,39 @@ export interface Pin {
 }
 export interface PinPayload {
   lat: number; lng: number; name: string; type?: string; description?: string; land_type?: string;
+}
+export interface OsmPoi {
+  id: string; name: string; lat: number; lng: number;
+  type: 'water' | 'trailhead' | 'viewpoint' | 'peak'; subtype?: string; elevation?: string;
+}
+export interface WikiArticle {
+  title: string; lat: number; lng: number; dist_m: number; extract: string; url: string;
+}
+export interface CampsiteInsightRequest {
+  name: string; lat: number; lng: number;
+  description?: string; land_type?: string; amenities?: string[];
+}
+export interface CampsiteInsight {
+  insider_tip: string; best_for: string; best_season: string;
+  nearby_highlights: string[]; hazards: string | null;
+  star_rating: number; coordinates_dms: string;
+}
+export interface RouteBriefRequest {
+  trip_name: string; waypoints: object[]; reports?: object[];
+}
+export interface RouteBrief {
+  readiness_score: number; top_concerns: string[]; must_do_before_leaving: string[];
+  daily_highlights: string[]; estimated_fuel_stops: number;
+  water_carry_gallons: number; briefing_summary: string;
+}
+export interface PackingRequest {
+  trip_name: string; duration_days: number;
+  road_types?: string[]; land_types?: string[]; states?: string[];
+}
+export interface PackingList {
+  essentials: string[]; recovery_gear: string[]; water_food: string[];
+  navigation: string[]; shelter: string[]; tools_spares: string[];
+  optional_nice_to_have: string[]; leave_at_home: string[];
 }
 export interface WeatherForecast {
   daily: {

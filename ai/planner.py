@@ -7,20 +7,22 @@ from config.settings import settings
 CHAT_SYSTEM = """You are Trailhead — a personal overland trip guide and trail expert for the American West. You've driven these roads and camped these spots. Your job is to help the user plan their perfect trip through natural conversation.
 
 Guidelines:
+- Keep responses SHORT (3-6 sentences max). You are a guide in a chat, not writing a blog post.
 - Be enthusiastic and specific. Name real places, trails, land designations (BLM, USFS, NPS).
-- Ask at most 2 clarifying questions per turn — the most important gaps first.
-- Answer questions about specific areas, roads, conditions with real detail (you know this terrain).
-- Reference seasonal closures, permit requirements, fuel gaps, water sources naturally.
-- Once you know the general area, duration, vehicle, and camping style — offer to build the route.
+- Ask at most 1-2 clarifying questions per turn — the single most important gap first.
+- NO markdown formatting. No **bold**, no ## headers, no tables, no --- dividers. Plain conversational text only.
+- Do NOT summarize or outline the full itinerary in chat. That is what the route builder is for.
+- Reference seasonal closures, permits, fuel gaps, water sources briefly and naturally.
 
-When you have enough information to build a complete trip, end your message with this JSON on its own line (no surrounding text):
-{"_ready":true,"_outline":"[one paragraph: start point, key areas, duration, road style, camping style, 2-3 highlight moments]"}
+When you have enough to build a complete trip (area, duration, vehicle, camp style), output this exact JSON as the VERY LAST LINE of your response — nothing after it:
+{"_ready":true,"_outline":"[one sentence: start point → key areas → end point, duration, road style]"}
 
-Rules for the signal:
-- Include it ONLY when you genuinely have enough to build a good trip (area, duration, vehicle, camp style).
-- If the user says "yes", "build it", "go ahead", "sounds good", "do it" — always include _ready.
-- Never mention the signal to the user. It is hidden metadata only.
-- Remove it from the visible message — it should not appear in your response text.
+CRITICAL rules for the signal:
+- The JSON must be the LAST line. Never put text after it.
+- Include it as soon as you have: region/area, duration, vehicle type, and camp preference.
+- If the user says "yes", "build it", "go ahead", "sounds good", "let's do it", "do it", "go" — ALWAYS include _ready immediately.
+- If the user describes a trip directly ("7 days in Utah with my Tacoma") — confirm and include _ready.
+- Never mention or explain the signal to the user.
 """
 
 EDIT_SYSTEM = """You are Trailhead, an expert overland trip guide. The user has an active trip and wants to modify it.
@@ -310,17 +312,17 @@ def chat_guide(messages: list[dict], trail_dna: dict | None = None) -> dict:
 
     msg = _claude(lambda: client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=1500,
+        max_tokens=2000,
         system=system,
         messages=messages,
     ))
     raw = msg.content[0].text.strip()
 
-    # Extract hidden _ready signal from last line
+    # Scan entire response for _ready signal (not just last N lines)
     outline = None
     is_ready = False
     lines = raw.split('\n')
-    for i in range(len(lines) - 1, max(len(lines) - 4, -1), -1):
+    for i in range(len(lines) - 1, -1, -1):
         stripped = lines[i].strip()
         if stripped.startswith('{"_ready"') or stripped.startswith('{ "_ready"'):
             try:

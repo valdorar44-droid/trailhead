@@ -322,7 +322,7 @@ export default function PlanScreen() {
               />
             ) : (
               <View style={[s.bubble, msg.role === 'user' ? s.bubbleUser : s.bubbleAi]}>
-                <Text style={[s.bubbleText, msg.role === 'user' && { color: C.white }]}>{msg.text}</Text>
+                <MarkdownText text={msg.text ?? ''} C={C} isUser={msg.role === 'user'} />
               </View>
             )}
           </View>
@@ -373,6 +373,94 @@ export default function PlanScreen() {
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
+
+// Simple inline markdown renderer — handles bold, headers, bullets, tables, and dividers
+function MarkdownText({ text, C, isUser }: { text: string; C: ColorPalette; isUser?: boolean }) {
+  const baseColor = isUser ? C.white : C.text;
+  const dimColor  = isUser ? 'rgba(255,255,255,0.7)' : C.text2;
+
+  const lines = text.split('\n');
+  const elements: React.ReactNode[] = [];
+
+  lines.forEach((line, idx) => {
+    const trimmed = line.trim();
+
+    // Skip table separator rows (|---|---|)
+    if (/^\|[\s\-|:]+\|$/.test(trimmed)) return;
+
+    // Horizontal rule
+    if (/^-{3,}$/.test(trimmed) || /^\*{3,}$/.test(trimmed)) {
+      elements.push(
+        <View key={idx} style={{ height: 1, backgroundColor: isUser ? 'rgba(255,255,255,0.2)' : C.border, marginVertical: 6 }} />
+      );
+      return;
+    }
+
+    // H2 or H3 header
+    const headerMatch = trimmed.match(/^#{1,3}\s+(.*)/);
+    if (headerMatch) {
+      elements.push(
+        <Text key={idx} style={{ color: isUser ? C.white : C.gold, fontSize: 12, fontFamily: mono, fontWeight: '700', letterSpacing: 0.5, marginTop: 8, marginBottom: 2 }}>
+          {headerMatch[1].replace(/\*\*/g, '').replace(/\*/g, '')}
+        </Text>
+      );
+      return;
+    }
+
+    // Table row — strip pipes, show as indented list
+    if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
+      const cells = trimmed.split('|').map(c => c.trim()).filter(Boolean);
+      elements.push(
+        <Text key={idx} style={{ color: dimColor, fontSize: 12, lineHeight: 18, paddingLeft: 6 }}>
+          {'  ' + cells.join('  ·  ')}
+        </Text>
+      );
+      return;
+    }
+
+    // Bullet line
+    const bulletMatch = trimmed.match(/^[-*]\s+(.*)/);
+    if (bulletMatch) {
+      elements.push(
+        <Text key={idx} style={{ color: baseColor, fontSize: 13, lineHeight: 20 }}>
+          {'• '}<RichText text={bulletMatch[1]} baseColor={baseColor} />
+        </Text>
+      );
+      return;
+    }
+
+    // Empty line
+    if (!trimmed) {
+      elements.push(<View key={idx} style={{ height: 4 }} />);
+      return;
+    }
+
+    // Normal line
+    elements.push(
+      <Text key={idx} style={{ color: baseColor, fontSize: 13, lineHeight: 20 }}>
+        <RichText text={trimmed} baseColor={baseColor} />
+      </Text>
+    );
+  });
+
+  return <View style={{ gap: 1 }}>{elements}</View>;
+}
+
+// Renders inline **bold** and *italic* within a line
+function RichText({ text, baseColor }: { text: string; baseColor: string }) {
+  const parts: React.ReactNode[] = [];
+  const regex = /\*\*(.*?)\*\*|\*(.*?)\*/g;
+  let last = 0, m: RegExpExecArray | null;
+  let key = 0;
+  while ((m = regex.exec(text)) !== null) {
+    if (m.index > last) parts.push(<Text key={key++}>{text.slice(last, m.index)}</Text>);
+    if (m[1] !== undefined) parts.push(<Text key={key++} style={{ fontWeight: '700' }}>{m[1]}</Text>);
+    else if (m[2] !== undefined) parts.push(<Text key={key++} style={{ fontStyle: 'italic' }}>{m[2]}</Text>);
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push(<Text key={key++}>{text.slice(last)}</Text>);
+  return <>{parts}</>;
+}
 
 function DnaChip({ C, label }: { C: ColorPalette; label: string }) {
   return (

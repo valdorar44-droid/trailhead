@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   TextInput, Alert, Image, Animated, Modal,
@@ -10,7 +10,10 @@ import * as Notifications from 'expo-notifications';
 import { Ionicons } from '@expo/vector-icons';
 import { api, Report, LeaderboardEntry } from '@/lib/api';
 import { useStore } from '@/lib/store';
-import { C, mono } from '@/lib/design';
+import { useTheme, mono, ColorPalette, LIGHT_C } from '@/lib/design';
+
+// Module-level C for static color arrays (always light — good contrast both modes)
+const C = LIGHT_C;
 
 const REPORT_TYPES = [
   { type: 'hazard',      label: 'HAZARD',   icon: '⚠️',  color: C.red,    ttl: '7d',
@@ -47,6 +50,8 @@ const SEVERITY = [
 type TabView = 'submit' | 'nearby' | 'leaderboard';
 
 export default function ReportScreen() {
+  const C = useTheme();
+  const s = useMemo(() => makeStyles(C), [C]);
   const { user, setAuth } = useStore();
   const [loc, setLoc] = useState<{ lat: number; lng: number } | null>(null);
   const [selectedType, setSelectedType] = useState<typeof REPORT_TYPES[0] | null>(null);
@@ -387,6 +392,8 @@ async function getToken() {
 
 function ReportCard({ report: r, onUpvote, onDownvote, onConfirm }:
   { report: Report; onUpvote: () => void; onDownvote: () => void; onConfirm: () => void }) {
+  const C = useTheme();
+  const rc = useMemo(() => makeRcStyles(C), [C]);
   const typeInfo = REPORT_TYPES.find(t => t.type === r.type);
   const sevInfo = SEVERITY.find(sv => sv.val === r.severity);
   const age = Math.floor((Date.now() / 1000 - r.created_at) / 3600);
@@ -438,7 +445,7 @@ function ReportCard({ report: r, onUpvote, onDownvote, onConfirm }:
   );
 }
 
-const rc = StyleSheet.create({
+const makeRcStyles = (C: ColorPalette) => StyleSheet.create({
   card: {
     backgroundColor: C.s2, borderRadius: 12, borderWidth: 1, borderColor: C.border,
     padding: 14, marginBottom: 10,
@@ -465,7 +472,7 @@ const rc = StyleSheet.create({
   voteCount: { color: C.text3, fontSize: 12, fontWeight: '600', fontFamily: mono },
 });
 
-const s = StyleSheet.create({
+const makeStyles = (C: ColorPalette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',

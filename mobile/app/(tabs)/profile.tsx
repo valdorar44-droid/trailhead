@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   TextInput, Alert, Share,
@@ -10,7 +10,7 @@ import * as FileSystem from 'expo-file-system';
 import * as SecureStore from 'expo-secure-store';
 import { api } from '@/lib/api';
 import { useStore, RigProfile } from '@/lib/store';
-import { C, mono } from '@/lib/design';
+import { useTheme, mono, ColorPalette } from '@/lib/design';
 
 type ChecklistItem = { id: string; label: string; done: boolean };
 type ChecklistSection = { title: string; emoji: string; items: ChecklistItem[] };
@@ -53,7 +53,11 @@ const DEFAULT_RIG: RigProfile = {
 };
 
 export default function ProfileScreen() {
+  const C = useTheme();
+  const s = useMemo(() => makeStyles(C), [C]);
   const { user, rigProfile, setAuth, clearAuth, setRigProfile } = useStore();
+  const themeMode = useStore(st => st.themeMode);
+  const setThemeMode = useStore(st => st.setThemeMode);
   const [view, setView] = useState<'main' | 'login' | 'register'>(!user ? 'login' : 'main');
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
@@ -473,6 +477,19 @@ export default function ProfileScreen() {
           </View>
         )}
 
+        {/* Theme toggle */}
+        <TouchableOpacity
+          style={s.themeToggle}
+          onPress={() => setThemeMode(themeMode === 'dark' ? 'light' : 'dark')}
+        >
+          <Ionicons name={themeMode === 'dark' ? 'sunny-outline' : 'moon-outline'} size={18} color={C.orange} />
+          <View style={{ flex: 1, marginLeft: 10 }}>
+            <Text style={s.themeToggleLabel}>{themeMode === 'dark' ? 'LIGHT MODE' : 'DARK MODE'}</Text>
+            <Text style={s.themeToggleSub}>{themeMode === 'dark' ? 'Switch to outdoor-readable light theme' : 'Switch to dark theme'}</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color={C.text3} />
+        </TouchableOpacity>
+
         {/* GPX Import */}
         <View style={s.gpxCard}>
           <View style={s.gpxHeader}>
@@ -533,7 +550,7 @@ export default function ProfileScreen() {
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (C: ColorPalette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
   scroll: { padding: 14, gap: 14, paddingBottom: 40 },
 
@@ -741,4 +758,11 @@ const s = StyleSheet.create({
   earnRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 5 },
   earnAmount: { color: C.green, fontSize: 13, fontWeight: '800', fontFamily: mono, width: 40 },
   earnAction: { color: C.text2, fontSize: 13 },
+
+  themeToggle: {
+    backgroundColor: C.s1, borderRadius: 14, borderWidth: 1, borderColor: C.border,
+    padding: 14, flexDirection: 'row', alignItems: 'center',
+  },
+  themeToggleLabel: { color: C.text, fontSize: 13, fontWeight: '700', fontFamily: mono },
+  themeToggleSub: { color: C.text2, fontSize: 11, marginTop: 2 },
 });

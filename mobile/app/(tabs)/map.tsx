@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Linking, Animated, TextInput, ActivityIndicator, Modal, Image, Share } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Linking, Animated, TextInput, ActivityIndicator, Modal, Image, Share, Alert } from 'react-native';
 import { WebView } from 'react-native-webview';
 import * as Location from 'expo-location';
 import * as Speech from 'expo-speech';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '@/lib/store';
 import { api, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList } from '@/lib/api';
-import { C, mono } from '@/lib/design';
+import { useTheme, mono, ColorPalette } from '@/lib/design';
 
 // ─── US State bounding boxes for offline download ─────────────────────────────
 
@@ -439,8 +439,12 @@ const buildMapHtml = (
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function MapScreen() {
-  const activeTrip = useStore(s => s.activeTrip);
-  const user = useStore(s => s.user);
+  const C = useTheme();
+  const s = useMemo(() => makeStyles(C), [C]);
+  const activeTrip = useStore(st => st.activeTrip);
+  const user = useStore(st => st.user);
+  const setStoreLoc = useStore(st => st.setUserLoc);
+  const setStoreToken = useStore(st => st.setMapboxToken);
   const webRef = useRef<WebView>(null);
 
   const [userLoc,   setUserLoc]   = useState<{ lat: number; lng: number } | null>(null);
@@ -531,6 +535,7 @@ export default function MapScreen() {
     api.getConfig().then(c => {
       const token = c.mapbox_token || '';
       setMapboxToken(token);
+      setStoreToken(token);
       if (token && webLoadedRef.current) {
         webRef.current?.postMessage(JSON.stringify({
           type: 'set_token', token,
@@ -565,6 +570,7 @@ export default function MapScreen() {
         loc => {
           const pos = { lat: loc.coords.latitude, lng: loc.coords.longitude };
           setUserLoc(pos);
+          setStoreLoc(pos);
           setUserSpeed(loc.coords.speed ?? null);
 
           const { active, idx, wps } = navRef.current;
@@ -1028,6 +1034,34 @@ export default function MapScreen() {
     Linking.openURL(url).catch(() =>
       Linking.openURL(`maps://?saddr=${origin}&daddr=${dest}`).catch(() => {})
     );
+  }
+
+  function navigateToCamp(camp: { lat: number; lng: number; name: string }) {
+    setShowCampDetail(false);
+    if (!userLoc) {
+      Alert.alert('Location Needed', 'Enable location services to navigate.');
+      return;
+    }
+    const dest: WP = { lat: camp.lat, lng: camp.lng, name: camp.name, day: 0, type: 'camp' };
+    navDestRef.current = dest;
+    setNavDest(dest);
+    webRef.current?.postMessage(JSON.stringify({
+      type: 'route_to_search',
+      lat: dest.lat, lng: dest.lng, name: dest.name,
+      userLat: userLoc.lat, userLng: userLoc.lng,
+    }));
+    setNavMode(true);
+  }
+
+  function openExternalMaps(lat: number, lng: number, name: string) {
+    const label = encodeURIComponent(name);
+    Alert.alert('Get Directions', name.split(',')[0], [
+      { text: '🗺 Navigate in App', onPress: () => navigateToCamp({ lat, lng, name }) },
+      { text: '🟢 Google Maps', onPress: () => Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`) },
+      { text: '🍎 Apple Maps', onPress: () => Linking.openURL(`maps://?daddr=${lat},${lng}&q=${label}`) },
+      { text: '🚗 Waze', onPress: () => Linking.openURL(`waze://?ll=${lat},${lng}&navigate=yes`) },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
   }
 
   const layerLabel: Record<MapLayer, string> = { satellite: 'SAT', topo: 'TOPO', hybrid: 'HYB' };
@@ -1527,7 +1561,7 @@ export default function MapScreen() {
                       <Text style={s.detailBookText}>BOOK ON RECREATION.GOV</Text>
                     </TouchableOpacity>
                   )}
-                  <TouchableOpacity style={s.detailDirBtn} onPress={() => Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${campDetail.lat},${campDetail.lng}`)}>
+                  <TouchableOpacity style={s.detailDirBtn} onPress={() => openExternalMaps(campDetail.lat, campDetail.lng, campDetail.name)}>
                     <Ionicons name="navigate-outline" size={16} color={C.orange} />
                     <Text style={s.detailDirText}>GET DIRECTIONS</Text>
                   </TouchableOpacity>
@@ -1879,7 +1913,7 @@ export default function MapScreen() {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
-const s = StyleSheet.create({
+const makeStyles = (C: ColorPalette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
   map: { flex: 1 },
 

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
   StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator,
@@ -9,7 +9,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { api, TripResult } from '@/lib/api';
 import { useStore } from '@/lib/store';
-import { C, mono, tag } from '@/lib/design';
+import { useTheme, useTag, mono, ColorPalette } from '@/lib/design';
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://trailhead-production-2049.up.railway.app';
 
@@ -22,13 +22,17 @@ const EXAMPLES = [
 interface Message { role: 'user' | 'ai'; text?: string; trip?: TripResult }
 
 export default function PlanScreen() {
+  const C = useTheme();
+  const s = useMemo(() => makeStyles(C), [C]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
-  const setActiveTrip = useStore(s => s.setActiveTrip);
-  const addTripToHistory = useStore(s => s.addTripToHistory);
-  const tripHistory = useStore(s => s.tripHistory);
+  const setActiveTrip = useStore(st => st.setActiveTrip);
+  const addTripToHistory = useStore(st => st.addTripToHistory);
+  const tripHistory = useStore(st => st.tripHistory);
+  const userLoc = useStore(st => st.userLoc);
+  const mapboxToken = useStore(st => st.mapboxToken);
   const router = useRouter();
 
   async function send() {
@@ -38,7 +42,21 @@ export default function PlanScreen() {
     setMessages(m => [...m, { role: 'user', text }]);
     setLoading(true);
     try {
-      const result = await api.plan(text);
+      // Resolve "my location" to a real place name via reverse geocoding
+      let finalText = text;
+      if (/\b(my location|from here|current location|where i am|starting from here|starting here)\b/i.test(text) && userLoc && mapboxToken) {
+        try {
+          const r = await fetch(
+            `https://api.mapbox.com/geocoding/v5/mapbox.places/${userLoc.lng},${userLoc.lat}.json?access_token=${mapboxToken}&types=place,region&limit=1`
+          );
+          const geo = await r.json();
+          const place = geo.features?.[0]?.text ?? `${userLoc.lat.toFixed(3)},${userLoc.lng.toFixed(3)}`;
+          const region = geo.features?.[0]?.context?.find((c: any) => c.id?.startsWith('region'))?.short_code?.replace('US-', '') ?? '';
+          const placeName = region ? `${place}, ${region}` : place;
+          finalText = finalText.replace(/\b(my location|from here|current location|where i am|starting from here|starting here)\b/gi, placeName);
+        } catch {}
+      }
+      const result = await api.plan(finalText);
       setActiveTrip(result);
       setMessages(m => [...m, { role: 'ai', trip: result }]);
       addTripToHistory({
@@ -164,6 +182,9 @@ export default function PlanScreen() {
 }
 
 function TripCard({ trip, onViewMap, onViewGuide }: { trip: TripResult; onViewMap: () => void; onViewGuide: () => void }) {
+  const C = useTheme();
+  const tag = useTag();
+  const tc = useMemo(() => makeTripCardStyles(C), [C]);
   const p = trip.plan;
   const slideAnim = useRef(new Animated.Value(24)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -277,7 +298,7 @@ function TripCard({ trip, onViewMap, onViewGuide }: { trip: TripResult; onViewMa
   );
 }
 
-const tc = StyleSheet.create({
+const makeTripCardStyles = (C: ColorPalette) => StyleSheet.create({
   card: { borderRadius: 16, overflow: 'hidden', borderWidth: 1, borderColor: C.border },
   hero: {
     backgroundColor: '#150800',
@@ -322,7 +343,7 @@ const tc = StyleSheet.create({
   btnGhostText: { color: C.text2, fontSize: 11, fontFamily: mono },
 });
 
-const s = StyleSheet.create({
+const makeStyles = (C: ColorPalette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
   header: {
     flexDirection: 'row', alignItems: 'center', gap: 12,

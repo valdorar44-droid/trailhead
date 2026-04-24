@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator,
 } from 'react-native';
@@ -8,7 +8,7 @@ import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '@/lib/store';
 import { api } from '@/lib/api';
-import { C, mono } from '@/lib/design';
+import { useTheme, mono, ColorPalette } from '@/lib/design';
 
 const WMO_ICON: Record<number, string> = {
   0: '☀️', 1: '🌤️', 2: '⛅', 3: '☁️',
@@ -28,7 +28,9 @@ function wmoIcon(code: number) {
 }
 
 export default function GuideScreen() {
-  const activeTrip = useStore(s => s.activeTrip);
+  const C = useTheme();
+  const s = useMemo(() => makeStyles(C), [C]);
+  const activeTrip = useStore(st => st.activeTrip);
   const [guide, setGuide] = useState<Record<string, string>>({});
   const [guideLoading, setGuideLoading] = useState(false);
   const [playing, setPlaying] = useState<string | null>(null);
@@ -301,7 +303,7 @@ export default function GuideScreen() {
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (C: ColorPalette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
   header: {
     flexDirection: 'row', alignItems: 'center',

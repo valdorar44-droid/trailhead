@@ -28,11 +28,17 @@ interface AppState {
   activeTrip: TripResult | null;
   rigProfile: RigProfile | null;
   tripHistory: TripHistoryItem[];
+  themeMode: 'light' | 'dark';
+  userLoc: { lat: number; lng: number } | null;
+  mapboxToken: string;
   setAuth: (token: string, user: User) => void;
   clearAuth: () => void;
   setActiveTrip: (trip: TripResult | null) => void;
   setRigProfile: (rig: RigProfile) => void;
   addTripToHistory: (item: TripHistoryItem) => void;
+  setThemeMode: (mode: 'light' | 'dark') => void;
+  setUserLoc: (loc: { lat: number; lng: number } | null) => void;
+  setMapboxToken: (token: string) => void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -41,6 +47,9 @@ export const useStore = create<AppState>((set) => ({
   activeTrip: null,
   rigProfile: null,
   tripHistory: [],
+  themeMode: 'light',
+  userLoc: null,
+  mapboxToken: '',
 
   setAuth: (token, user) => {
     SecureStore.setItemAsync('trailhead_token', token);
@@ -64,18 +73,28 @@ export const useStore = create<AppState>((set) => ({
     SecureStore.setItemAsync('trailhead_history', JSON.stringify(updated));
     return { tripHistory: updated };
   }),
+
+  setThemeMode: (mode) => {
+    SecureStore.setItemAsync('trailhead_theme', mode);
+    set({ themeMode: mode });
+  },
+
+  setUserLoc: (loc) => set({ userLoc: loc }),
+  setMapboxToken: (token) => set({ mapboxToken: token }),
 }));
 
-// Load persisted rig profile + trip history on startup (session is restored by _layout.tsx)
+// Load persisted data on startup
 (async () => {
   try {
-    const [rigRaw, historyRaw] = await Promise.all([
+    const [rigRaw, historyRaw, themeRaw] = await Promise.all([
       SecureStore.getItemAsync('trailhead_rig'),
       SecureStore.getItemAsync('trailhead_history'),
+      SecureStore.getItemAsync('trailhead_theme'),
     ]);
-    const patch: { rigProfile?: RigProfile; tripHistory?: TripHistoryItem[] } = {};
+    const patch: Partial<AppState> = {};
     if (rigRaw) patch.rigProfile = JSON.parse(rigRaw);
     if (historyRaw) patch.tripHistory = JSON.parse(historyRaw);
+    if (themeRaw === 'dark' || themeRaw === 'light') patch.themeMode = themeRaw;
     if (Object.keys(patch).length > 0) useStore.setState(patch);
   } catch {}
 })();

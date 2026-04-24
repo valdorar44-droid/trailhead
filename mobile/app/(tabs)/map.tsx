@@ -232,7 +232,10 @@ const buildMapHtml = (
   .mk-wp.nav-target.wp-start{color:#22c55e;}
   .mk-wp.nav-target.wp-waypoint{color:#a855f7;}
   @keyframes pulse{0%,100%{box-shadow:0 0 0 4px rgba(249,115,22,0.45);}50%{box-shadow:0 0 0 12px rgba(249,115,22,0.1);}}
-  .mk-me{background:#f97316;border:3px solid #fff;border-radius:50%;width:16px;height:16px;box-shadow:0 0 0 4px rgba(249,115,22,0.3);}
+  .mk-me{width:44px;height:44px;display:flex;align-items:center;justify-content:center;position:relative;pointer-events:none;}
+  .mk-me-ring{position:absolute;width:44px;height:44px;border-radius:50%;background:rgba(249,115,22,0.1);border:1.5px solid rgba(249,115,22,0.4);animation:loc-pulse 2s ease-in-out infinite;}
+  .mk-me-arrow{filter:drop-shadow(0 2px 5px rgba(0,0,0,0.6)) drop-shadow(0 0 8px rgba(249,115,22,0.6));}
+  @keyframes loc-pulse{0%,100%{transform:scale(1);opacity:0.9;}50%{transform:scale(1.7);opacity:0.15;}}
   .mk-search{background:rgba(59,130,246,0.2);border:2.5px solid #3b82f6;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:17px;}
   /* search-this-area button moved to React Native for reliable touch handling */
   #loading{position:fixed;top:0;left:0;right:0;bottom:0;background:#080c12;display:flex;align-items:center;justify-content:center;z-index:200;flex-direction:column;gap:12px;}
@@ -371,10 +374,18 @@ const buildMapHtml = (
   function updateBreadcrumb(){if(!map||!map.getSource('breadcrumb'))return;map.getSource('breadcrumb').setData({type:'Feature',geometry:{type:'LineString',coordinates:breadcrumbPts}});}
 
   // ── User position ──────────────────────────────────────────────────────────────
-  function setUserPos(lat,lng,recenter,zoom){
-    if(!userMarker){var el=document.createElement('div');el.className='mk-me';userMarker=new mapboxgl.Marker({element:el}).setLngLat([lng,lat]).addTo(map);}
-    else{userMarker.setLngLat([lng,lat]);}
-    if(recenter)map.easeTo({center:[lng,lat],zoom:zoom||15,duration:400});
+  var navActive=false;
+  function setUserPos(lat,lng,recenter,zoom,heading){
+    if(!userMarker){
+      var el=document.createElement('div');el.className='mk-me';
+      el.innerHTML='<div class="mk-me-ring"></div><svg class="mk-me-arrow" width="20" height="26" viewBox="0 0 20 26"><path d="M10 1 L19 24 L10 18 L1 24 Z" fill="#f97316" stroke="white" stroke-width="1.5" stroke-linejoin="round"/></svg>';
+      userMarker=new mapboxgl.Marker({element:el,anchor:'center'}).setLngLat([lng,lat]).addTo(map);
+    }else{userMarker.setLngLat([lng,lat]);}
+    if(navActive&&heading!=null&&heading>=0){
+      map.easeTo({center:[lng,lat],bearing:heading,pitch:50,zoom:zoom||17,duration:500});
+    }else if(recenter){
+      map.easeTo({center:[lng,lat],zoom:zoom||15,duration:400});
+    }
     var now=Date.now();
     if(routePts.length>0&&now-lastOffCheck>6000){
       lastOffCheck=now;var minD=Infinity;
@@ -394,7 +405,7 @@ const buildMapHtml = (
     if(routeOpts.backRoads)return _fetchValhalla(pairs,fromIdx);
     var excl=[];if(routeOpts.avoidTolls)excl.push('toll');if(routeOpts.avoidHighways)excl.push('motorway');if(routeOpts.noFerries)excl.push('ferry');
     var profile=(routeOpts.avoidHighways)?'driving':'driving-traffic';
-    var url='https://api.mapbox.com/directions/v5/mapbox/'+profile+'/'+pairs.join(';')+'?access_token='+mapboxToken+'&steps=true&geometries=geojson&overview=full'+(excl.length?'&exclude='+excl.join(','):'');
+    var url='https://api.mapbox.com/directions/v5/mapbox/'+profile+'/'+pairs.join(';')+'?access_token='+mapboxToken+'&steps=true&geometries=geojson&overview=full&annotations=maxspeed'+(excl.length?'&exclude='+excl.join(','):'');
     try{
       var ctrl=new AbortController();var tid=setTimeout(function(){ctrl.abort();},10000);
       var data=await(await fetch(url,{signal:ctrl.signal})).json();clearTimeout(tid);
@@ -402,8 +413,18 @@ const buildMapHtml = (
       var route=data.routes[0];
       _routeCoords=route.geometry.coordinates;routePts=_routeCoords.filter(function(_,i){return i%4===0;});updateRoute();
       var steps=[],legs=[];
-      (route.legs||[]).forEach(function(leg){var ls=[];(leg.steps||[]).forEach(function(s){if(s.distance>0||s.maneuver.type==='arrive'){var st={type:s.maneuver.type,modifier:s.maneuver.modifier||'',name:s.name||'',distance:s.distance,duration:s.duration};steps.push(st);ls.push(st);}});legs.push(ls);});
-      postRN({type:'route_ready',routed:true,steps:steps,legs:legs,total_distance:route.distance,total_duration:route.duration,fromIdx:fromIdx||0});
+      var legSpeedLimits=[];
+      (route.legs||[]).forEach(function(leg){
+        var ls=[];
+        (leg.steps||[]).forEach(function(s){if(s.distance>0||s.maneuver.type==='arrive'){var st={type:s.maneuver.type,modifier:s.maneuver.modifier||'',name:s.name||'',distance:s.distance,duration:s.duration};steps.push(st);ls.push(st);}});
+        legs.push(ls);
+        var ann=(leg.annotation&&leg.annotation.maxspeed)||[];
+        var valid=ann.filter(function(s){return s&&typeof s.speed==='number';}).map(function(s){return s.speed;});
+        var freq={};valid.forEach(function(v){freq[v]=(freq[v]||0)+1;});
+        var keys=Object.keys(freq).sort(function(a,b){return freq[b]-freq[a];});
+        legSpeedLimits.push(keys.length?parseFloat(keys[0]):null);
+      });
+      postRN({type:'route_ready',routed:true,steps:steps,legs:legs,legSpeedLimits:legSpeedLimits,total_distance:route.distance,total_duration:route.duration,fromIdx:fromIdx||0});
     }catch(e){_fallback(pairs,fromIdx);}
   }
 
@@ -428,8 +449,9 @@ const buildMapHtml = (
   function handleMsgData(msg){
     if(msg.type==='set_token'){initMap(msg.token,msg.style);return;}
     if(!mapReady){pendingMsgs.push(msg);return;}
-    if(msg.type==='user_pos'&&msg.lat)setUserPos(msg.lat,msg.lng,false);
-    if(msg.type==='nav_center'&&msg.lat)setUserPos(msg.lat,msg.lng,true,15);
+    if(msg.type==='nav_active'){navActive=msg.active;if(!msg.active)map.easeTo({pitch:0,bearing:0,zoom:12,duration:700});}
+    if(msg.type==='user_pos'&&msg.lat)setUserPos(msg.lat,msg.lng,false,null,msg.heading);
+    if(msg.type==='nav_center'&&msg.lat)setUserPos(msg.lat,msg.lng,true,17,msg.heading);
     if(msg.type==='locate'&&msg.lat)setUserPos(msg.lat,msg.lng,true,13);
     if(msg.type==='nav_target')setNavTarget(msg.idx);
     if(msg.type==='nav_reset'){setNavTarget(-1);_routeCoords=[];routePts=[];updateRoute();}
@@ -484,8 +506,12 @@ export default function MapScreen() {
   const setStoreToken = useStore(st => st.setMapboxToken);
   const webRef = useRef<WebView>(null);
 
-  const [userLoc,   setUserLoc]   = useState<{ lat: number; lng: number } | null>(null);
-  const [userSpeed, setUserSpeed] = useState<number | null>(null);
+  const [userLoc,       setUserLoc]       = useState<{ lat: number; lng: number } | null>(null);
+  const [userSpeed,     setUserSpeed]     = useState<number | null>(null);
+  const [userHeading,   setUserHeading]   = useState<number | null>(null);
+  const [legSpeedLimits,setLegSpeedLimits]= useState<(number | null)[]>([]);
+  const [quickReport,   setQuickReport]   = useState(false);
+  const [quickToast,    setQuickToast]    = useState('');
   const [navMode,   setNavMode]   = useState(false);
   const [navIdx,    setNavIdx]    = useState(0);
   const [routeSteps,  setRouteSteps]  = useState<RouteStep[]>([]);
@@ -611,11 +637,13 @@ export default function MapScreen() {
           setUserLoc(pos);
           setStoreLoc(pos);
           setUserSpeed(loc.coords.speed ?? null);
+          const hdg = (loc.coords.heading ?? -1) >= 0 ? loc.coords.heading! : -1;
+          setUserHeading(hdg >= 0 ? hdg : null);
 
           const { active, idx, wps } = navRef.current;
           webRef.current?.postMessage(JSON.stringify({
             type: active ? 'nav_center' : 'user_pos',
-            lat: pos.lat, lng: pos.lng,
+            lat: pos.lat, lng: pos.lng, heading: hdg,
           }));
 
           if (active) {
@@ -755,6 +783,7 @@ export default function MapScreen() {
 
   useEffect(() => {
     Animated.spring(navAnim, { toValue: navMode ? 1 : 0, tension: 80, friction: 10, useNativeDriver: true }).start();
+    webRef.current?.postMessage(JSON.stringify({ type: 'nav_active', active: navMode }));
     if (navMode) {
       setShowPanel(false);
       setIsApproaching(false);
@@ -970,6 +999,7 @@ export default function MapScreen() {
         setRouteSteps(msg.steps ?? []);
         setRouteLegs(msg.legs ?? []);
         if (msg.fromIdx !== undefined) setRouteLegOffset(msg.fromIdx);
+        setLegSpeedLimits(msg.legSpeedLimits ?? []);
         setIsRerouting(false);
       }
       if (msg.type === 'off_route' && navRef.current.active) {
@@ -1058,6 +1088,9 @@ export default function MapScreen() {
   const speedMph  = userSpeed !== null && userSpeed > 0 ? userSpeed * 2.237 : null;
   const etaMins   = distKm && userSpeed && userSpeed > 0.5
     ? Math.round(distKm / (userSpeed * 3.6) * 60) : null;
+  const legIdx    = Math.max(0, navIdx - routeLegOffset);
+  const speedLimitKph = legSpeedLimits[legIdx] ?? null;
+  const speedLimitMph = speedLimitKph ? Math.round(speedLimitKph * 0.621371) : null;
 
   // Next OSRM step (rough: first non-depart step with significant distance)
   const nextStep = routeSteps.find(s => s.type !== 'depart' && s.distance > 50) ?? null;
@@ -1914,21 +1947,23 @@ export default function MapScreen() {
           </View>
         )}
 
-        {/* Bearing + speed strip */}
+        {/* Speed + distance strip */}
         <View style={s.navStrip}>
-          {bearing !== null ? (
-            <View style={s.navBearing}>
-              <Animated.View style={{ transform: [{ rotate: `${bearing}deg` }] }}>
-                <Ionicons name="navigate" size={18} color={C.orange} />
-              </Animated.View>
-              <Text style={s.navBearingText}>{compassDir(bearing)}</Text>
-            </View>
-          ) : (
-            <View style={s.navBearing}>
-              <Ionicons name="navigate-outline" size={18} color={OVR.text3} />
-              <Text style={s.navBearingText}>--</Text>
+          {/* Speed circle (Waze-style) */}
+          <View style={s.navSpeedCircle}>
+            <Text style={s.navSpeedBig}>{speedMph !== null ? Math.round(speedMph) : '--'}</Text>
+            <Text style={s.navSpeedUnit}>MPH</Text>
+          </View>
+
+          {/* Speed limit badge */}
+          {speedLimitMph !== null && (
+            <View style={[s.navSpeedLimit, speedMph !== null && Math.round(speedMph) > speedLimitMph + 5 && s.navSpeedLimitOver]}>
+              <Text style={s.navSpeedLimitTop}>LIMIT</Text>
+              <Text style={s.navSpeedLimitVal}>{speedLimitMph}</Text>
             </View>
           )}
+
+          {/* Distance + ETA */}
           <View style={s.navDistBlock}>
             <Text style={[s.navDistVal, isApproaching && { color: C.green }]}>
               {distKm !== null ? formatDist(distKm) : '--'}
@@ -1942,12 +1977,11 @@ export default function MapScreen() {
               <Text style={s.navRemaining}>{formatDist(remainingKm)} trip total</Text>
             )}
           </View>
-          {speedMph !== null && (
-            <View style={s.navSpeedBlock}>
-              <Text style={s.navSpeedVal}>{Math.round(speedMph)}</Text>
-              <Text style={s.navSpeedUnit}>MPH</Text>
-            </View>
-          )}
+
+          {/* Compass */}
+          <View style={s.navBearing}>
+            <Text style={s.navBearingText}>{userHeading !== null ? compassDir(userHeading) : bearing !== null ? compassDir(bearing) : '--'}</Text>
+          </View>
         </View>
 
         {/* Next waypoint */}
@@ -1999,6 +2033,58 @@ export default function MapScreen() {
           </ScrollView>
         )}
       </Animated.View>
+
+      {/* ── Waze-style quick report ─────────────────────────────────────────── */}
+      {userLoc && !showSearch && !selectedCamp && (
+        <View style={s.quickReportWrap} pointerEvents="box-none">
+          {!!quickToast && (
+            <View style={s.quickToast}>
+              <Ionicons name="checkmark-circle" size={14} color={C.green} />
+              <Text style={s.quickToastText}>{quickToast}</Text>
+            </View>
+          )}
+          {quickReport && (
+            <View style={s.quickReportPanel}>
+              {([
+                { type: 'police',      label: 'PATROL',  icon: 'shield-outline',      color: '#eab308', subtype: 'Ranger patrol',  sev: 'moderate' },
+                { type: 'hazard',      label: 'HAZARD',  icon: 'warning-outline',     color: '#ef4444', subtype: 'Downed tree',    sev: 'high'     },
+                { type: 'road_condition', label: 'ROAD', icon: 'trail-sign-outline',  color: '#f97316', subtype: 'Muddy / soft',   sev: 'moderate' },
+                { type: 'wildlife',    label: 'ANIMAL',  icon: 'paw-outline',         color: '#a855f7', subtype: 'Bear activity',  sev: 'low'      },
+              ] as const).map(rt => (
+                <TouchableOpacity
+                  key={rt.type}
+                  style={[s.quickReportBtn, { borderColor: rt.color + '55', backgroundColor: rt.color + '18' }]}
+                  onPress={async () => {
+                    setQuickReport(false);
+                    try {
+                      const res = await api.submitReport({
+                        lat: userLoc.lat, lng: userLoc.lng,
+                        type: rt.type as any, subtype: rt.subtype,
+                        description: '', severity: rt.sev as any,
+                      });
+                      setQuickToast(`+${res.credits_earned} credits`);
+                      setTimeout(() => setQuickToast(''), 3000);
+                    } catch { setQuickToast('Submitted'); setTimeout(() => setQuickToast(''), 2000); }
+                  }}
+                >
+                  <Ionicons name={rt.icon as any} size={22} color={rt.color} />
+                  <Text style={[s.quickReportLabel, { color: rt.color }]}>{rt.label}</Text>
+                </TouchableOpacity>
+              ))}
+              <TouchableOpacity style={s.quickReportClose} onPress={() => setQuickReport(false)}>
+                <Ionicons name="close" size={16} color={OVR.text2} />
+              </TouchableOpacity>
+            </View>
+          )}
+          <TouchableOpacity
+            style={[s.quickReportFab, navMode && s.quickReportFabNav]}
+            onPress={() => setQuickReport(p => !p)}
+          >
+            <Ionicons name="warning-outline" size={18} color={quickReport ? OVR.text : OVR.text2} />
+            <Text style={[s.quickReportFabText, quickReport && { color: OVR.text }]}>REPORT</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Bottom itinerary panel */}
       {showPanel && !navMode && activeTrip && (
@@ -2128,15 +2214,14 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 12,
     borderBottomWidth: 1, borderColor: OVR.border,
   },
-  navBearing: { flexDirection: 'row', alignItems: 'center', gap: 5, width: 50 },
-  navBearingText: { color: C.orange, fontSize: 12, fontFamily: mono, fontWeight: '700' },
+  navBearing: { alignItems: 'center', justifyContent: 'center', width: 46 },
+  navBearingText: { color: C.orange, fontSize: 18, fontWeight: '900', fontFamily: mono },
   navDistBlock: { flex: 1, alignItems: 'center' },
   navDistVal: { color: OVR.text, fontSize: 28, fontWeight: '800', fontFamily: mono },
   navEta: { color: OVR.text3, fontSize: 10, fontFamily: mono, marginTop: 1 },
   navRemaining: { color: OVR.text3, fontSize: 9, fontFamily: mono, marginTop: 2, opacity: 0.7 },
   navSpeedBlock: { alignItems: 'center', width: 50 },
   navSpeedVal: { color: OVR.text2, fontSize: 22, fontWeight: '700', fontFamily: mono },
-  navSpeedUnit: { color: OVR.text3, fontSize: 8, fontFamily: mono, letterSpacing: 0.5 },
 
   navTarget: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
@@ -2471,5 +2556,63 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   briefStat: { alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, backgroundColor: C.s2, borderRadius: 14, flex: 1 },
   briefStatVal: { color: C.text, fontSize: 28, fontWeight: '800', fontFamily: mono },
   briefStatLabel: { color: C.text3, fontSize: 10, fontFamily: mono },
+
+  // ── Nav speed circle + limit badge
+  navSpeedCircle: {
+    width: 62, height: 62, borderRadius: 31,
+    backgroundColor: OVR.bg, borderWidth: 2, borderColor: OVR.border,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  navSpeedBig: { color: OVR.text, fontSize: 26, fontWeight: '900', fontFamily: mono, lineHeight: 28 },
+  navSpeedUnit: { color: OVR.text3, fontSize: 7, fontFamily: mono, letterSpacing: 0.5 },
+  navSpeedLimit: {
+    width: 44, height: 44, borderRadius: 22,
+    borderWidth: 3, borderColor: '#ef4444',
+    backgroundColor: OVR.bg, alignItems: 'center', justifyContent: 'center',
+  },
+  navSpeedLimitOver: { backgroundColor: '#ef444422' },
+  navSpeedLimitTop: { color: '#ef4444', fontSize: 6, fontFamily: mono, fontWeight: '800', letterSpacing: 0.5 },
+  navSpeedLimitVal: { color: OVR.text, fontSize: 16, fontWeight: '900', fontFamily: mono, lineHeight: 18 },
+
+  // ── Waze-style quick report
+  quickReportWrap: {
+    position: 'absolute', bottom: 190, left: 12,
+    alignItems: 'flex-start',
+  },
+  quickToast: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: OVR.bg, borderRadius: 20,
+    paddingHorizontal: 12, paddingVertical: 7,
+    borderWidth: 1, borderColor: C.green,
+    marginBottom: 8,
+  },
+  quickToastText: { color: C.green, fontSize: 11, fontFamily: mono, fontWeight: '700' },
+  quickReportPanel: {
+    backgroundColor: OVR.bg, borderRadius: 16,
+    borderWidth: 1, borderColor: OVR.border,
+    padding: 10, marginBottom: 8, gap: 8,
+  },
+  quickReportBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingHorizontal: 14, paddingVertical: 12,
+    borderRadius: 12, borderWidth: 1, minWidth: 150,
+  },
+  quickReportLabel: { fontSize: 13, fontFamily: mono, fontWeight: '800', letterSpacing: 0.5 },
+  quickReportClose: {
+    alignSelf: 'center', marginTop: 2,
+    paddingVertical: 4, paddingHorizontal: 20,
+    borderTopWidth: 1, borderColor: OVR.border, width: '100%',
+    alignItems: 'center',
+  },
+  quickReportFab: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: OVR.bg, borderRadius: 24,
+    paddingHorizontal: 14, paddingVertical: 9,
+    borderWidth: 1, borderColor: OVR.border,
+  },
+  quickReportFabNav: {
+    backgroundColor: '#1a2a1c', borderColor: OVR.border,
+  },
+  quickReportFabText: { color: OVR.text2, fontSize: 11, fontFamily: mono, fontWeight: '700' },
   packDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: C.orange, marginTop: 6 },
 });

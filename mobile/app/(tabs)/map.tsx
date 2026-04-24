@@ -221,6 +221,16 @@ const buildMapHtml = (
   .mapboxgl-ctrl-logo,.mapboxgl-ctrl-attrib{display:none!important;}
   .mk-wp{background:#f97316;border:2.5px solid #fff;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:12px;font-family:monospace;box-shadow:0 2px 10px rgba(249,115,22,0.6);cursor:pointer;user-select:none;}
   .mk-wp.nav-target{background:#fff;color:#f97316;animation:pulse 1.4s ease-in-out infinite;}
+  .mk-wp.wp-start{background:#22c55e;box-shadow:0 2px 10px rgba(34,197,94,0.6);}
+  .mk-wp.wp-motel{background:#6366f1;box-shadow:0 2px 10px rgba(99,102,241,0.6);}
+  .mk-wp.wp-town{background:#94a3b8;box-shadow:0 2px 10px rgba(148,163,184,0.4);}
+  .mk-wp.wp-fuel{background:#eab308;box-shadow:0 2px 10px rgba(234,179,8,0.6);}
+  .mk-wp.wp-waypoint{background:#a855f7;box-shadow:0 2px 10px rgba(168,85,247,0.6);}
+  .mk-wp.wp-shower{background:#38bdf8;box-shadow:0 2px 10px rgba(56,189,248,0.5);}
+  .mk-wp.nav-target.wp-motel{color:#6366f1;}
+  .mk-wp.nav-target.wp-fuel{color:#eab308;}
+  .mk-wp.nav-target.wp-start{color:#22c55e;}
+  .mk-wp.nav-target.wp-waypoint{color:#a855f7;}
   @keyframes pulse{0%,100%{box-shadow:0 0 0 4px rgba(249,115,22,0.45);}50%{box-shadow:0 0 0 12px rgba(249,115,22,0.1);}}
   .mk-me{background:#f97316;border:3px solid #fff;border-radius:50%;width:16px;height:16px;box-shadow:0 0 0 4px rgba(249,115,22,0.3);}
   .mk-search{background:rgba(59,130,246,0.2);border:2.5px solid #3b82f6;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:17px;}
@@ -337,7 +347,10 @@ const buildMapHtml = (
   function renderWaypoints(){
     wpMarkers.forEach(function(m){m.remove();});wpMarkers=[];
     wps.forEach(function(w,i){
-      var el=document.createElement('div');el.className='mk-wp';el.textContent=w.day||i+1;
+      var el=document.createElement('div');
+      var typeClass=w.type==='start'?'wp-start':w.type==='motel'?'wp-motel':w.type==='fuel'?'wp-fuel':w.type==='waypoint'?'wp-waypoint':w.type==='town'?'wp-town':w.type==='shower'?'wp-shower':'';
+      el.className='mk-wp'+(typeClass?' '+typeClass:'');
+      el.textContent=w.type==='fuel'?'⛽':w.type==='motel'?'M':w.type==='start'?'S':(w.day||i+1);
       var popup=new mapboxgl.Popup({offset:18,closeButton:false}).setHTML('<div class="pt">'+w.name+'</div><div class="pm">Day '+w.day+' · '+w.type+'</div>');
       var m=new mapboxgl.Marker({element:el}).setLngLat([w.lng,w.lat]).setPopup(popup).addTo(map);
       el.addEventListener('click',function(ev){ev.stopPropagation();postRN({type:'wp_tapped',idx:i,name:w.name});});

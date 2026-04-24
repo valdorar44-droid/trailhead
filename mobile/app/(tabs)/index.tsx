@@ -585,12 +585,13 @@ function TripCard({ trip, C, onViewMap, onViewGuide }: {
       Animated.spring(slideAnim, { toValue: 0, tension: 60, friction: 8, useNativeDriver: true }),
       Animated.timing(fadeAnim,  { toValue: 1, duration: 300, useNativeDriver: true }),
     ]).start();
-    const targets = { days: p.duration_days ?? 0, miles: p.total_est_miles ?? 0, stops: p.waypoints?.length ?? 0, camps: trip.campsites?.length ?? 0 };
+    const overnights = (p.waypoints ?? []).filter(w => w.type === 'camp' || w.type === 'town' || w.type === 'motel').length;
+    const targets = { days: p.duration_days ?? 0, miles: p.total_est_miles ?? 0, stops: p.waypoints?.length ?? 0, stays: overnights };
     let frame = 0;
     const timer = setInterval(() => {
       frame++;
       const ease = 1 - Math.pow(1 - Math.min(frame / 24, 1), 3);
-      setCounts({ days: Math.round(targets.days * ease), miles: Math.round(targets.miles * ease), stops: Math.round(targets.stops * ease), camps: Math.round(targets.camps * ease) });
+      setCounts({ days: Math.round(targets.days * ease), miles: Math.round(targets.miles * ease), stops: Math.round(targets.stops * ease), camps: Math.round(targets.stays * ease) });
       if (frame >= 24) clearInterval(timer);
     }, 30);
     return () => clearInterval(timer);
@@ -618,17 +619,17 @@ function TripCard({ trip, C, onViewMap, onViewGuide }: {
       opacity: fadeAnim, transform: [{ translateY: slideAnim }],
     }]}>
       {/* Hero */}
-      <View style={{ backgroundColor: '#0a150a', padding: 14, borderBottomWidth: 1, borderColor: C.border }}>
+      <View style={{ backgroundColor: '#0a150a', padding: 14, borderBottomWidth: 1, borderColor: '#1e2e20' }}>
         <View style={{ marginBottom: 4 }}>
           <Text style={{ color: C.orange, fontSize: 8.5, fontFamily: mono, letterSpacing: 1.2 }}>✦ AI TRIP PLAN READY</Text>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
           <View style={{ flex: 1 }}>
-            <Text style={{ color: C.text, fontSize: 18, fontWeight: '900', letterSpacing: -0.5, lineHeight: 22, textTransform: 'uppercase' }} numberOfLines={2}>{p.trip_name}</Text>
-            <Text style={{ color: C.text2, fontSize: 10, fontFamily: mono, letterSpacing: 0.8, marginTop: 3 }}>{(p.states ?? []).join(' · ')}</Text>
+            <Text style={{ color: '#e4ddd2', fontSize: 18, fontWeight: '900', letterSpacing: -0.5, lineHeight: 22, textTransform: 'uppercase' }} numberOfLines={2}>{p.trip_name}</Text>
+            <Text style={{ color: '#8a9285', fontSize: 10, fontFamily: mono, letterSpacing: 0.8, marginTop: 3 }}>{(p.states ?? []).join(' · ')}</Text>
           </View>
           <TouchableOpacity onPress={shareTrip} style={{ padding: 4, marginTop: -2 }}>
-            <Ionicons name="share-outline" size={18} color={C.text2} />
+            <Ionicons name="share-outline" size={18} color="#8a9285" />
           </TouchableOpacity>
         </View>
         {tags.length > 0 && (
@@ -647,7 +648,7 @@ function TripCard({ trip, C, onViewMap, onViewGuide }: {
 
       {/* Stats */}
       <View style={{ flexDirection: 'row', backgroundColor: C.s2, borderBottomWidth: 1, borderColor: C.border }}>
-        {([['DAYS', counts.days], ['MILES', counts.miles], ['STOPS', counts.stops], ['CAMPS', counts.camps]] as [string, number][]).map(([label, val], i) => (
+        {([['DAYS', counts.days], ['MILES', counts.miles], ['STOPS', counts.stops], ['STAYS', counts.camps]] as [string, number][]).map(([label, val], i) => (
           <View key={label} style={{ flex: 1, alignItems: 'center', paddingVertical: 12, borderLeftWidth: i > 0 ? 1 : 0, borderColor: C.border }}>
             <Text style={{ color: C.orange, fontSize: 22, fontWeight: '800', fontFamily: mono }}>{val}</Text>
             <Text style={{ color: C.text3, fontSize: 8.5, fontFamily: mono, letterSpacing: 0.5, marginTop: 2 }}>{label}</Text>

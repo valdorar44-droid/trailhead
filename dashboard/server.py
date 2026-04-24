@@ -510,7 +510,33 @@ async def nearby_camps(lat: float, lng: float, radius: float = 50, types: str = 
         if s["id"] not in seen:
             if not type_filters or any(t in s.get("tags", []) for t in type_filters):
                 seen.add(s["id"]); merged.append(s)
-    return merged[:80]
+    return merged[:120]
+
+
+@app.get("/api/camps/bbox")
+async def camps_bbox(n: float, s: float, e: float, w: float, types: str = ""):
+    """Viewport-based camp loading — returns all camps in a bounding box."""
+    lat = (n + s) / 2
+    lng = (e + w) / 2
+    # Rough radius: half the larger of NS or EW span in miles
+    lat_span_mi = abs(n - s) * 69.0
+    lng_span_mi = abs(e - w) * 54.6  # ~54.6 mi per degree lng at 38° N
+    radius_miles = min(max(lat_span_mi, lng_span_mi) / 2 + 5, 120)
+    radius_m = int(radius_miles * 1600)
+    type_filters = [t.strip() for t in types.split(",") if t.strip()] if types else None
+    ridb, osm = await asyncio.gather(
+        get_campsites_search(lat, lng, radius_miles=radius_miles, type_filters=type_filters),
+        get_osm_campsites(lat, lng, radius_m=min(radius_m, 120000)),
+    )
+    seen, merged = set(), []
+    for c in ridb:
+        if c["id"] not in seen and s <= c["lat"] <= n and w <= c["lng"] <= e:
+            seen.add(c["id"]); merged.append(c)
+    for c in osm:
+        if c["id"] not in seen and s <= c["lat"] <= n and w <= c["lng"] <= e:
+            if not type_filters or any(t in c.get("tags", []) for t in type_filters):
+                seen.add(c["id"]); merged.append(c)
+    return merged[:150]
 
 
 # ── OSM POIs (water, trailheads, viewpoints) ──────────────────────────────────

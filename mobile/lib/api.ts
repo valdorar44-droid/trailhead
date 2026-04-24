@@ -77,6 +77,8 @@ export const api = {
   // Discovery
   getNearbyCamps: (lat: number, lng: number, radius = 50, types: string[] = []) =>
     req<CampsitePin[]>(`/api/nearby-camps?lat=${lat}&lng=${lng}&radius=${radius}&types=${types.join(',')}`),
+  getCampsBbox: (n: number, s: number, e: number, w: number, types: string[] = []) =>
+    req<CampsitePin[]>(`/api/camps/bbox?n=${n}&s=${s}&e=${e}&w=${w}&types=${types.join(',')}`),
   getOsmPois: (lat: number, lng: number, radius = 30, types = 'water,trailhead,viewpoint') =>
     req<OsmPoi[]>(`/api/osm-pois?lat=${lat}&lng=${lng}&radius=${radius}&types=${types}`),
   getWikipediaNearby: (lat: number, lng: number, radius = 10000) =>

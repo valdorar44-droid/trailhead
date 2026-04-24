@@ -159,31 +159,11 @@ function stepLabel(type: string, modifier: string): string {
 
 // ─── Map HTML ─────────────────────────────────────────────────────────────────
 
-const TILE_SATELLITE_ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
-const TILE_TOPO_OSM       = 'https://a.tile.opentopomap.org/{z}/{x}/{y}.png';
-const TILE_LABELS_ESRI    = 'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}';
-
-function getTileUrls(token: string) {
-  if (token) {
-    return {
-      sat:    `https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/256/{z}/{x}/{y}?access_token=${token}`,
-      topo:   `https://api.mapbox.com/styles/v1/mapbox/outdoors-v12/tiles/256/{z}/{x}/{y}?access_token=${token}`,
-      hyb:    `https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/tiles/256/{z}/{x}/{y}?access_token=${token}`,
-      labels: null,
-    };
-  }
-  return {
-    sat:    TILE_SATELLITE_ESRI,
-    topo:   TILE_TOPO_OSM,
-    hyb:    TILE_SATELLITE_ESRI,
-    labels: TILE_LABELS_ESRI,
-  };
-}
-
-// Keep legacy names for backwards compat in download logic
-const TILE_SATELLITE = TILE_SATELLITE_ESRI;
-const TILE_TOPO      = TILE_TOPO_OSM;
-const TILE_LABELS    = TILE_LABELS_ESRI;
+const MAPBOX_STYLES: Record<string, string> = {
+  satellite: 'mapbox://styles/mapbox/satellite-streets-v12',
+  topo:      'mapbox://styles/mapbox/outdoors-v12',
+  hybrid:    'mapbox://styles/mapbox/satellite-streets-v12',
+};
 
 const buildMapHtml = (
   centerLat: number, centerLng: number,
@@ -191,440 +171,265 @@ const buildMapHtml = (
   campsites: { lat: number; lng: number; name: string }[],
   gasList:   { lat: number; lng: number; name: string }[],
   pins:      { lat: number; lng: number; name: string; type: string }[],
-) => `<!DOCTYPE html>
+) => /* html */`<!DOCTYPE html>
 <html>
 <head>
-<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<script src='https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js'></script>
+<link href='https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css' rel='stylesheet'/>
 <style>
-  body,html{margin:0;padding:0;height:100%;background:#080c12;}
+  body,html{margin:0;padding:0;height:100%;background:#080c12;overflow:hidden;}
   #map{height:100vh;width:100vw;}
-  .wp{background:#f97316;border:2.5px solid #fff;border-radius:50%;
-    width:30px;height:30px;display:flex;align-items:center;justify-content:center;
-    color:#fff;font-weight:800;font-size:12px;font-family:monospace;
-    box-shadow:0 2px 10px rgba(249,115,22,0.55);}
-  .wp.nav-target{background:#fff;color:#f97316;
-    animation:pulse 1.4s ease-in-out infinite;}
-  @keyframes pulse{
-    0%,100%{box-shadow:0 0 0 4px rgba(249,115,22,0.45);}
-    50%{box-shadow:0 0 0 10px rgba(249,115,22,0.1);}}
-  .camp{background:rgba(34,197,94,0.15);border:1.5px solid #22c55e;
-    border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:14px;}
-  .gas{background:rgba(234,179,8,0.15);border:1.5px solid #eab308;
-    border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:14px;}
-  .pin{background:rgba(168,85,247,0.15);border:1.5px solid #a855f7;
-    border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:14px;}
-  .me{background:#f97316;border:3px solid #fff;border-radius:50%;
-    width:14px;height:14px;box-shadow:0 0 0 4px rgba(249,115,22,0.3);}
-  .search-pin{background:rgba(59,130,246,0.15);border:1.5px solid #3b82f6;
-    border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:14px;}
-  .disc{background:rgba(20,184,166,0.18);border:2px solid #14b8a6;
-    border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;
-    font-size:15px;box-shadow:0 2px 8px rgba(20,184,166,0.4);cursor:pointer;}
-  .disc:hover{background:rgba(20,184,166,0.35);}
-  .poi-water{background:rgba(59,130,246,0.18);border:2px solid #3b82f6;
-    border-radius:50%;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-size:13px;}
-  .poi-trail{background:rgba(34,197,94,0.18);border:2px solid #22c55e;
-    border-radius:50%;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-size:13px;}
-  .poi-view{background:rgba(168,85,247,0.18);border:2px solid #a855f7;
-    border-radius:50%;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-size:13px;}
-  .nearby-camp{background:rgba(249,115,22,0.12);border:2px solid #f97316;
-    border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;
-    font-size:14px;box-shadow:0 2px 6px rgba(249,115,22,0.35);cursor:pointer;}
-  .search-dest{background:rgba(59,130,246,0.2);border:2.5px solid #3b82f6;
-    border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-size:16px;}
-  .leaflet-popup-content-wrapper{background:#0f1319;border:1px solid #252d3d;
-    color:#f1f5f9;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,0.6);}
-  .leaflet-popup-tip{background:#0f1319;}
-  .pt{font-weight:700;font-size:13px;margin-bottom:3px;}
-  .pm{color:#4b5563;font-size:11px;font-family:monospace;}
+  .mapboxgl-popup-content{background:#0f1319!important;border:1px solid #252d3d!important;color:#f1f5f9!important;border-radius:10px!important;padding:12px 14px!important;box-shadow:0 4px 20px rgba(0,0,0,0.7)!important;min-width:160px;}
+  .mapboxgl-popup-tip{border-top-color:#252d3d!important;border-bottom-color:#252d3d!important;}
+  .mapboxgl-popup-close-button{color:#6b7280!important;font-size:16px!important;right:4px!important;top:2px!important;}
+  .mapboxgl-ctrl-logo,.mapboxgl-ctrl-attrib{display:none!important;}
+  .mk-wp{background:#f97316;border:2.5px solid #fff;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:12px;font-family:monospace;box-shadow:0 2px 10px rgba(249,115,22,0.6);cursor:pointer;user-select:none;}
+  .mk-wp.nav-target{background:#fff;color:#f97316;animation:pulse 1.4s ease-in-out infinite;}
+  @keyframes pulse{0%,100%{box-shadow:0 0 0 4px rgba(249,115,22,0.45);}50%{box-shadow:0 0 0 12px rgba(249,115,22,0.1);}}
+  .mk-me{background:#f97316;border:3px solid #fff;border-radius:50%;width:16px;height:16px;box-shadow:0 0 0 4px rgba(249,115,22,0.3);}
+  .mk-search{background:rgba(59,130,246,0.2);border:2.5px solid #3b82f6;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:17px;}
+  #search-area-btn{position:fixed;bottom:118px;left:50%;transform:translateX(-50%);background:#0f1319;border:1.5px solid #f97316;color:#f97316;font-family:monospace;font-size:11px;font-weight:700;letter-spacing:0.08em;padding:10px 22px;border-radius:20px;cursor:pointer;box-shadow:0 4px 24px rgba(0,0,0,0.65);white-space:nowrap;z-index:100;display:none;}
+  #search-area-btn.show{display:block;}
+  #loading{position:fixed;top:0;left:0;right:0;bottom:0;background:#080c12;display:flex;align-items:center;justify-content:center;z-index:200;flex-direction:column;gap:12px;}
+  #loading.hidden{display:none;}
+  .ld{width:8px;height:8px;background:#f97316;border-radius:50%;animation:ld 1.2s infinite;}
+  .ld:nth-child(2){animation-delay:.2s}.ld:nth-child(3){animation-delay:.4s}
+  @keyframes ld{0%,80%,100%{transform:scale(.3);opacity:.3}40%{transform:scale(1);opacity:1}}
+  .pt{font-weight:700;font-size:13px;margin-bottom:4px;}
+  .pm{color:#6b7280;font-size:11px;font-family:monospace;}
 </style>
 </head>
-<body><div id="map"></div>
+<body>
+<div id="map"></div>
+<div id="loading"><div style="display:flex;gap:6px"><div class="ld"></div><div class="ld"></div><div class="ld"></div></div><div style="color:#4b5563;font-family:monospace;font-size:10px;letter-spacing:.1em;margin-top:4px">LOADING MAP</div></div>
+<button id="search-area-btn" onclick="searchThisArea()">⛺ SEARCH THIS AREA</button>
 <script>
 (function(){
-  var wps   = ${JSON.stringify(waypoints)};
-  var camps = ${JSON.stringify(campsites.slice(0,30))};
-  var gas   = ${JSON.stringify(gasList.slice(0,20))};
-  var pins  = ${JSON.stringify(pins.slice(0,30))};
+  var wps=${JSON.stringify(waypoints)};
+  var initGas=${JSON.stringify(gasList.slice(0,20))};
+  var initPins=${JSON.stringify(pins.slice(0,30))};
 
-  var zoom  = wps.length > 1 ? 7 : 10;
-  var map   = L.map('map',{zoomControl:false,attributionControl:false})
-                .setView([${centerLat},${centerLng}],zoom);
+  var map,mapboxToken='',currentStyle='mapbox://styles/mapbox/satellite-streets-v12';
+  var userMarker=null,wpMarkers=[],searchMarker=null;
+  var allCamps=[],allGas=[],allPois=[];
+  var routeOpts={avoidTolls:false,avoidHighways:false,backRoads:false,noFerries:false};
+  var _routeCoords=[],routePts=[],breadcrumbPts=[];
+  var lastOffCheck=0,downloadActive=false,mapReady=false,pendingMsgs=[];
+  var searchAreaBtn=document.getElementById('search-area-btn');
 
-  // ── IndexedDB offline tile cache ────────────────────────────────────────────
+  function postRN(o){try{window.ReactNativeWebView.postMessage(JSON.stringify(o));}catch(e){}}
+
+  // ── IndexedDB offline tile cache ──────────────────────────────────────────────
   var _idb=null;
-  var _idbReady=new Promise(function(res){
-    var req=indexedDB.open('trailhead-tiles',1);
-    req.onupgradeneeded=function(e){e.target.result.createObjectStore('tiles',{keyPath:'k'});};
-    req.onsuccess=function(e){_idb=e.target.result;res();};
-    req.onerror=function(){res();};
-  });
-  function _getT(k){return _idbReady.then(function(){if(!_idb)return null;return new Promise(function(r){var tx=_idb.transaction('tiles','readonly');var rq=tx.objectStore('tiles').get(k);rq.onsuccess=function(){r(rq.result?rq.result.v:null);};rq.onerror=function(){r(null);};});});}
-  function _setT(k,v){return _idbReady.then(function(){if(!_idb)return;try{_idb.transaction('tiles','readwrite').objectStore('tiles').put({k:k,v:v});}catch(e){}});}
-  var CachedTileLayer=L.TileLayer.extend({_cp:'sat',createTile:function(coords,done){
-    var tile=document.createElement('img');tile.setAttribute('role','presentation');tile.setAttribute('alt','');
-    var url=this.getTileUrl(coords);var key=this._cp+'_'+coords.z+'_'+coords.x+'_'+coords.y;
-    _getT(key).then(function(cached){
-      if(cached){tile.src=cached;done(null,tile);}
-      else{tile.onload=function(){done(null,tile);};tile.onerror=function(e){done(e,tile);};tile.src=url;}
-    }).catch(function(){tile.onload=function(){done(null,tile);};tile.onerror=function(e){done(e,tile);};tile.src=url;});
-    return tile;
-  }});
-  L.tileLayer.cached=function(url,prefix,opts){var l=new CachedTileLayer(url,opts||{maxZoom:19});l._cp=prefix||'sat';return l;};
-
-  var currentLayerUrl='${TILE_SATELLITE}';
-  var currentLayerPrefix='sat';
-  var downloadActive=false;
-
-  function _ll2t(lat,lng,z){var x=Math.floor((lng+180)/360*Math.pow(2,z));var sin=Math.sin(lat*Math.PI/180);var y=Math.floor((0.5-Math.log((1+sin)/(1-sin))/(4*Math.PI))*Math.pow(2,z));return{x:Math.max(0,x),y:Math.max(0,y)};}
+  var _idbR=new Promise(function(res){var req=indexedDB.open('trailhead-tiles',1);req.onupgradeneeded=function(e){e.target.result.createObjectStore('tiles',{keyPath:'k'});};req.onsuccess=function(e){_idb=e.target.result;res();};req.onerror=function(){res();};});
+  function _gT(k){return _idbR.then(function(){if(!_idb)return null;return new Promise(function(r){var tx=_idb.transaction('tiles','readonly');var rq=tx.objectStore('tiles').get(k);rq.onsuccess=function(){r(rq.result?rq.result.v:null);};rq.onerror=function(){r(null);};});});}
+  function _sT(k,v){return _idbR.then(function(){if(!_idb)return;try{_idb.transaction('tiles','readwrite').objectStore('tiles').put({k:k,v:v});}catch(e){}});}
+  function _ll2t(lat,lng,z){var x=Math.floor((lng+180)/360*Math.pow(2,z));var s=Math.sin(lat*Math.PI/180);var y=Math.floor((0.5-Math.log((1+s)/(1-s))/(4*Math.PI))*Math.pow(2,z));return{x:Math.max(0,x),y:Math.max(0,y)};}
   async function _fetchDU(url){var r=await fetch(url);if(!r.ok)throw new Error('x');var b=await r.blob();return new Promise(function(res,rej){var rd=new FileReader();rd.onload=function(){res(rd.result);};rd.onerror=rej;rd.readAsDataURL(b);});}
-  async function _dlTiles(bounds,minZ,maxZ){
+  async function _dlTiles(n,s,e,w,minZ,maxZ){
     var tiles=[],MAX=2000;
-    for(var z=minZ;z<=maxZ&&tiles.length<MAX;z++){
-      var nw=_ll2t(bounds.getNorth(),bounds.getWest(),z);var se=_ll2t(bounds.getSouth(),bounds.getEast(),z);
-      var cap=Math.pow(2,z)-1;
-      for(var x=Math.max(0,nw.x);x<=Math.min(cap,se.x)&&tiles.length<MAX;x++){
-        for(var y=Math.max(0,nw.y);y<=Math.min(cap,se.y)&&tiles.length<MAX;y++){tiles.push({z:z,x:x,y:y});}
-      }
-    }
+    var tileUrl='https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/tiles/256/{z}/{x}/{y}?access_token='+mapboxToken;
+    for(var z=minZ;z<=maxZ&&tiles.length<MAX;z++){var nw=_ll2t(n,w,z);var se=_ll2t(s,e,z);var cap=Math.pow(2,z)-1;for(var x=Math.max(0,nw.x);x<=Math.min(cap,se.x)&&tiles.length<MAX;x++){for(var y=Math.max(0,nw.y);y<=Math.min(cap,se.y)&&tiles.length<MAX;y++){tiles.push({z:z,x:x,y:y});}}}
     var total=tiles.length,saved=0,BATCH=5;
     postRN({type:'download_progress',percent:0,saved:0,total:total});
     for(var i=0;i<tiles.length;i+=BATCH){
       if(!downloadActive)break;
       var batch=tiles.slice(i,i+BATCH);
       await Promise.allSettled(batch.map(async function(t){
-        var url=currentLayerUrl.replace('{z}',t.z).replace('{x}',t.x).replace('{y}',t.y);
-        var key=currentLayerPrefix+'_'+t.z+'_'+t.x+'_'+t.y;
-        try{var ex=await _getT(key);if(!ex){var d=await _fetchDU(url);await _setT(key,d);}saved++;postRN({type:'download_progress',percent:Math.round(saved/total*100),saved:saved,total:total});}
-        catch(e){saved++;}
+        var url=tileUrl.replace('{z}',t.z).replace('{x}',t.x).replace('{y}',t.y);
+        var key='sat_'+t.z+'_'+t.x+'_'+t.y;
+        try{var ex=await _gT(key);if(!ex){var d=await _fetchDU(url);await _sT(key,d);}saved++;postRN({type:'download_progress',percent:Math.round(saved/total*100),saved:saved,total:total});}catch(e){saved++;}
       }));
     }
     postRN({type:'download_complete',saved:saved,total:total});
   }
 
-  var baseLayer   = L.tileLayer.cached('${TILE_SATELLITE_ESRI}','sat',{maxZoom:19});
-  baseLayer.addTo(map);
-  var labelLayer  = null;
-  var fallbackLine = null;
-  var routeLine    = null;
-  var userMarker   = null;
-  var wpMarkers    = [];
-  var searchPin    = null;
-  var discoverMarkers = [];
-  var poiMarkers   = [];
-  var nearbyMarkers= [];
-  var breadcrumbPts= [];
-  var breadcrumb   = null;
-
-  // ── Markers ─────────────────────────────────────────────────────────────────
-
-  function mkWp(w,i,isTarget){
-    var el=document.createElement('div');
-    el.className='wp'+(isTarget?' nav-target':'');
-    el.textContent=w.day||i+1;
-    return L.divIcon({className:'',html:el.outerHTML,iconSize:[30,30],iconAnchor:[15,15]});
-  }
-
-  wps.forEach(function(w,i){
-    var m=L.marker([w.lat,w.lng],{icon:mkWp(w,i,false)}).addTo(map)
-      .bindPopup('<div class="pt">'+w.name+'</div><div class="pm">Day '+w.day+' · '+w.type+'</div>');
-    m.on('click',function(){postRN({type:'wp_tapped',idx:i,name:w.name});});
-    wpMarkers.push({m:m,w:w,i:i});
-  });
-  camps.forEach(function(c){
-    L.marker([c.lat,c.lng],{icon:L.divIcon({className:'',html:'<div class="camp">⛺</div>',iconSize:[28,28],iconAnchor:[14,14]})})
-      .addTo(map).bindPopup('<div class="pt">'+c.name+'</div><div class="pm">Campsite</div>');
-  });
-  gas.forEach(function(g){
-    L.marker([g.lat,g.lng],{icon:L.divIcon({className:'',html:'<div class="gas">⛽</div>',iconSize:[28,28],iconAnchor:[14,14]})})
-      .addTo(map).bindPopup('<div class="pt">'+g.name+'</div><div class="pm">Fuel</div>');
-  });
-  pins.forEach(function(p){
-    L.marker([p.lat,p.lng],{icon:L.divIcon({className:'',html:'<div class="pin">📍</div>',iconSize:[28,28],iconAnchor:[14,14]})})
-      .addTo(map).bindPopup('<div class="pt">'+p.name+'</div><div class="pm">'+p.type+'</div>');
-  });
-
-  if(wps.length>=2){
-    var grp=new L.featureGroup(wps.map(function(w){return L.marker([w.lat,w.lng]);}));
-    map.fitBounds(grp.getBounds().pad(0.15));
-  }
-
-  // ── OSRM routing ────────────────────────────────────────────────────────────
-
-  var routePts=[];
-  var _lastOffCheck=0;
-  var _routeOpts={avoidTolls:false,avoidHighways:false,backRoads:false,preferDirt:false,noFerries:false};
-
-  function decodePolyline6(enc){
-    var coords=[],i=0,lat=0,lng=0;
-    while(i<enc.length){
-      var b,shift=0,res=0;
-      do{b=enc.charCodeAt(i++)-63;res|=(b&0x1f)<<shift;shift+=5;}while(b>=0x20);
-      lat+=res&1?~(res>>1):(res>>1);
-      shift=0;res=0;
-      do{b=enc.charCodeAt(i++)-63;res|=(b&0x1f)<<shift;shift+=5;}while(b>=0x20);
-      lng+=res&1?~(res>>1):(res>>1);
-      coords.push([lat/1e6,lng/1e6]);
-    }
-    return coords;
-  }
-
-  function drawFallback(){
-    if(fallbackLine) return;
-    fallbackLine=L.polyline(wps.map(function(w){return[w.lat,w.lng];}),
-      {color:'#f97316',weight:3,dashArray:'6,4',opacity:0.8}).addTo(map);
-    postRN({type:'route_ready',routed:false,steps:[],fromIdx:0});
-  }
-
-  async function _fetchRouteValhalla(pairs,fromIdx){
-    var locations=pairs.map(function(p){var s=p.split(',');return{lon:parseFloat(s[0]),lat:parseFloat(s[1])};});
-    var body={
-      locations:locations,costing:'auto',
-      costing_options:{auto:{
-        use_tracks:_routeOpts.preferDirt?0.9:0.1,
-        use_highways:(_routeOpts.avoidHighways||_routeOpts.backRoads)?0.0:0.5,
-        use_tolls:_routeOpts.avoidTolls?0.0:0.5,
-      }},
-      units:'miles',
-    };
-    try{
-      var ctrl=new AbortController();
-      var tid=setTimeout(function(){ctrl.abort();},12000);
-      var res=await fetch('https://valhalla1.openstreetmap.de/route',{
-        method:'POST',signal:ctrl.signal,
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify(body),
-      });
-      clearTimeout(tid);
-      var data=await res.json();
-      if(!data.trip||data.trip.status!==0){drawFallback();return;}
-      var trip=data.trip;
-      if(routeLine){map.removeLayer(routeLine);routeLine=null;}
-      if(fallbackLine){map.removeLayer(fallbackLine);fallbackLine=null;}
-      routePts=[];
-      var allCoords=[];
-      var steps=[],legs=[];
-      (trip.legs||[]).forEach(function(leg){
-        var coords=decodePolyline6(leg.shape||'');
-        for(var ci=0;ci<coords.length;ci+=4)routePts.push({lat:coords[ci][0],lng:coords[ci][1]});
-        allCoords=allCoords.concat(coords);
-        var legSteps=[];
-        (leg.maneuvers||[]).forEach(function(m){
-          var dist=Math.round((m.length||0)*1609.34);
-          var step={type:m.type===4?'arrive':m.type===1?'depart':'turn',
-            modifier:_valhallaModifier(m.type),name:m.street_names&&m.street_names[0]||'',
-            distance:dist,duration:m.time||0};
-          steps.push(step);legSteps.push(step);
-        });
-        legs.push(legSteps);
-      });
-      routeLine=L.polyline(allCoords,{color:'#f97316',weight:4.5,opacity:0.92,lineCap:'round',lineJoin:'round'}).addTo(map);
-      postRN({type:'route_ready',routed:true,steps:steps,legs:legs,
-        total_distance:Math.round((trip.summary.length||0)*1609.34),
-        total_duration:trip.summary.time||0,fromIdx:fromIdx||0});
-    }catch(e){drawFallback();}
-  }
-
-  function _valhallaModifier(type){
-    var m={0:'',1:'',2:'left',3:'right',4:'arrive',5:'sharp left',6:'sharp right',7:'left',8:'right',9:'uturn',10:'slight left',11:'slight right'};
-    return m[type]||'';
-  }
-
-  async function _fetchRoute(coordStr,fromIdx){
-    if(_routeOpts.preferDirt||_routeOpts.backRoads){
-      return _fetchRouteValhalla(coordStr.split(';'),fromIdx);
-    }
-    var excludes=[];
-    if(_routeOpts.avoidTolls)excludes.push('toll');
-    if(_routeOpts.avoidHighways)excludes.push('motorway');
-    if(_routeOpts.noFerries)excludes.push('ferry');
-    var excStr=excludes.length?'&exclude='+excludes.join(','):'';
-    var url='https://router.project-osrm.org/route/v1/driving/'+coordStr+
-      '?steps=true&geometries=geojson&overview=full&annotations=false'+excStr;
-    try{
-      var ctrl=new AbortController();
-      var tid=setTimeout(function(){ctrl.abort();},9000);
-      var res=await fetch(url,{signal:ctrl.signal});
-      clearTimeout(tid);
-      var data=await res.json();
-      if(data.code!=='Ok'||!data.routes||!data.routes[0]){drawFallback();return;}
-      var route=data.routes[0];
-      if(routeLine){map.removeLayer(routeLine);routeLine=null;}
-      if(fallbackLine){map.removeLayer(fallbackLine);fallbackLine=null;}
-      routeLine=L.geoJSON(route.geometry,{
-        style:{color:'#f97316',weight:4.5,opacity:0.92,lineCap:'round',lineJoin:'round'}
-      }).addTo(map);
-      routePts=[];
-      var coords=route.geometry.coordinates;
-      for(var ci=0;ci<coords.length;ci+=4){routePts.push({lat:coords[ci][1],lng:coords[ci][0]});}
-      var steps=[]; var legs=[];
-      (route.legs||[]).forEach(function(leg){
-        var legSteps=[];
-        (leg.steps||[]).forEach(function(s){
-          if(s.distance>0||s.maneuver.type==='arrive'){
-            var step={type:s.maneuver.type,modifier:s.maneuver.modifier||'',
-              name:s.name||'',distance:s.distance,duration:s.duration};
-            steps.push(step);legSteps.push(step);
-          }
-        });
-        legs.push(legSteps);
-      });
-      postRN({type:'route_ready',routed:true,steps:steps,legs:legs,
-        total_distance:route.distance,total_duration:route.duration,fromIdx:fromIdx||0});
-    }catch(e){drawFallback();}
-  }
-
-  async function loadRoute(){
-    if(wps.length<2){return;}
-    await _fetchRoute(wps.map(function(w){return w.lng+','+w.lat;}).join(';'),0);
-  }
-
-  async function loadRouteFrom(lat,lng,fromWpIdx){
-    var remaining=wps.slice(fromWpIdx);
-    if(!remaining.length){drawFallback();return;}
-    var cs=lng+','+lat+';'+remaining.map(function(w){return w.lng+','+w.lat;}).join(';');
-    await _fetchRoute(cs,fromWpIdx);
-  }
-
-  function _minDistToRoute(lat,lng){
-    var minD=Infinity;
-    for(var i=0;i<routePts.length;i++){
-      var dlat=(routePts[i].lat-lat)*111000;
-      var dlng=(routePts[i].lng-lng)*111000*Math.cos(lat*Math.PI/180);
-      var d=Math.sqrt(dlat*dlat+dlng*dlng);
-      if(d<minD)minD=d;
-      if(minD<80)return minD;
-    }
-    return minD;
-  }
-
-  loadRoute();
-
-  // ── Helpers ──────────────────────────────────────────────────────────────────
-
-  function postRN(obj){
-    try{window.ReactNativeWebView.postMessage(JSON.stringify(obj));}catch(e){}
-  }
-
-  function setUserPos(lat,lng){
-    var icon=L.divIcon({className:'',html:'<div class="me"></div>',iconSize:[14,14],iconAnchor:[7,7]});
-    if(userMarker){userMarker.setLatLng([lat,lng]);}
-    else{userMarker=L.marker([lat,lng],{icon:icon,zIndexOffset:2000}).addTo(map);}
-    var now=Date.now();
-    if(routePts.length>0&&now-_lastOffCheck>6000){
-      _lastOffCheck=now;
-      var d=_minDistToRoute(lat,lng);
-      if(d>380)postRN({type:'off_route',lat:lat,lng:lng,dist:Math.round(d)});
-    }
-  }
-
-  function setNavTarget(idx){
-    wpMarkers.forEach(function(m){
-      m.m.setIcon(mkWp(m.w,m.i,m.i===idx));
+  // ── Map init ──────────────────────────────────────────────────────────────────
+  function initMap(token,style){
+    mapboxToken=token;mapboxgl.accessToken=token;
+    currentStyle=style||'mapbox://styles/mapbox/satellite-streets-v12';
+    map=new mapboxgl.Map({container:'map',style:currentStyle,
+      center:[${centerLng},${centerLat}],zoom:${waypoints.length > 1 ? 7 : 10},
+      attributionControl:false,pitchWithRotate:false});
+    map.on('load',function(){
+      setupSources();setupLayers();renderWaypoints();loadInitialData();
+      if(wps.length>=2)loadRoute();
+      document.getElementById('loading').classList.add('hidden');
+      mapReady=true;postRN({type:'map_ready'});
+      pendingMsgs.forEach(handleMsgData);pendingMsgs=[];
     });
+    map.on('style.load',function(){
+      setupSources();setupLayers();renderWaypoints();
+      updateCampSrc();updateGasSrc();updatePoiSrc();updateRoute();updateBreadcrumb();
+    });
+    var boundsTimer;
+    map.on('moveend',function(){
+      searchAreaBtn.classList.add('show');
+      clearTimeout(boundsTimer);
+      boundsTimer=setTimeout(function(){var b=map.getBounds();postRN({type:'map_bounds',n:b.getNorth(),s:b.getSouth(),e:b.getEast(),w:b.getWest(),zoom:map.getZoom()});},400);
+    });
+    map.on('click',function(e){if(!e.defaultPrevented)postRN({type:'map_tapped'});});
   }
 
-  // ── Message handler ──────────────────────────────────────────────────────────
+  function searchThisArea(){
+    searchAreaBtn.classList.remove('show');
+    var b=map.getBounds();
+    postRN({type:'search_area',n:b.getNorth(),s:b.getSouth(),e:b.getEast(),w:b.getWest(),zoom:map.getZoom()});
+  }
 
-  function onMsg(e){
+  // ── GeoJSON helpers ───────────────────────────────────────────────────────────
+  function campFeat(c){return{type:'Feature',geometry:{type:'Point',coordinates:[c.lng,c.lat]},properties:{id:c.id||'',name:c.name||'',land_type:c.land_type||'Campground',cost:c.cost||'',ada:c.ada?1:0,reservable:c.reservable?1:0,raw:JSON.stringify(c)}};}
+
+  function setupSources(){
+    if(!map.getSource('camps'))map.addSource('camps',{type:'geojson',data:{type:'FeatureCollection',features:[]},cluster:true,clusterMaxZoom:11,clusterRadius:45});
+    if(!map.getSource('gas'))map.addSource('gas',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
+    if(!map.getSource('pois'))map.addSource('pois',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
+    if(!map.getSource('route'))map.addSource('route',{type:'geojson',data:{type:'Feature',geometry:{type:'LineString',coordinates:[]}}});
+    if(!map.getSource('breadcrumb'))map.addSource('breadcrumb',{type:'geojson',data:{type:'Feature',geometry:{type:'LineString',coordinates:[]}}});
+  }
+
+  function setupLayers(){
+    var _a=function(id,def){if(!map.getLayer(id))map.addLayer(def);};
+    _a('breadcrumb',{id:'breadcrumb',type:'line',source:'breadcrumb',paint:{'line-color':'#3b82f6','line-width':2.5,'line-opacity':0.8,'line-dasharray':[2,4]}});
+    _a('route-shadow',{id:'route-shadow',type:'line',source:'route',layout:{'line-cap':'round','line-join':'round'},paint:{'line-color':'rgba(0,0,0,0.35)','line-width':9,'line-blur':5,'line-translate':[0,2]}});
+    _a('route-line',{id:'route-line',type:'line',source:'route',layout:{'line-cap':'round','line-join':'round'},paint:{'line-color':'#f97316','line-width':5,'line-opacity':0.94}});
+    _a('gas-circle',{id:'gas-circle',type:'circle',source:'gas',paint:{'circle-radius':9,'circle-color':'#eab308','circle-opacity':0.92,'circle-stroke-width':2,'circle-stroke-color':'#fff'}});
+    _a('gas-label',{id:'gas-label',type:'symbol',source:'gas',filter:['>=',['zoom'],13],layout:{'text-field':['get','name'],'text-size':9,'text-offset':[0,1.5],'text-anchor':'top'},paint:{'text-color':'#f1f5f9','text-halo-color':'rgba(0,0,0,0.85)','text-halo-width':1.5}});
+    _a('poi-circle',{id:'poi-circle',type:'circle',source:'pois',paint:{'circle-radius':8,'circle-color':['match',['get','type'],'water','#3b82f6','trailhead','#22c55e','viewpoint','#a855f7','peak','#8b5cf6','#6b7280'],'circle-opacity':0.9,'circle-stroke-width':1.5,'circle-stroke-color':'#fff'}});
+    _a('poi-label',{id:'poi-label',type:'symbol',source:'pois',filter:['>=',['zoom'],13],layout:{'text-field':['get','name'],'text-size':9,'text-offset':[0,1.3],'text-anchor':'top'},paint:{'text-color':'#f1f5f9','text-halo-color':'rgba(0,0,0,0.85)','text-halo-width':1.5}});
+    _a('camp-cluster',{id:'camp-cluster',type:'circle',source:'camps',filter:['has','point_count'],paint:{'circle-color':['step',['get','point_count'],'#14b8a6',10,'#f97316',50,'#ef4444'],'circle-radius':['step',['get','point_count'],18,10,25,50,32],'circle-opacity':0.88,'circle-stroke-width':2,'circle-stroke-color':'#fff'}});
+    _a('camp-count',{id:'camp-count',type:'symbol',source:'camps',filter:['has','point_count'],layout:{'text-field':'{point_count_abbreviated}','text-size':12,'text-font':['DIN Offc Pro Medium','Arial Unicode MS Bold']},paint:{'text-color':'#fff'}});
+    _a('camp-circle',{id:'camp-circle',type:'circle',source:'camps',filter:['!',['has','point_count']],paint:{'circle-radius':['interpolate',['linear'],['zoom'],9,7,13,11],'circle-color':['match',['get','land_type'],'BLM Land','#f97316','National Forest','#22c55e','National Park','#3b82f6','State Park','#8b5cf6','Campground','#14b8a6','#14b8a6'],'circle-opacity':0.88,'circle-stroke-width':2,'circle-stroke-color':'rgba(255,255,255,0.9)'}});
+    _a('camp-label',{id:'camp-label',type:'symbol',source:'camps',filter:['all',['!',['has','point_count']],['>=',['zoom'],12]],layout:{'text-field':['get','name'],'text-size':10,'text-offset':[0,1.3],'text-anchor':'top','text-max-width':10},paint:{'text-color':'#f1f5f9','text-halo-color':'rgba(0,0,0,0.85)','text-halo-width':1.5}});
+    // clicks
+    map.on('click','camp-cluster',function(e){var f=map.queryRenderedFeatures(e.point,{layers:['camp-cluster']});if(!f.length)return;map.getSource('camps').getClusterExpansionZoom(f[0].properties.cluster_id,function(err,zoom){if(err)return;map.easeTo({center:f[0].geometry.coordinates,zoom:zoom+0.5});});e.preventDefault();});
+    map.on('click','camp-circle',function(e){if(!e.features||!e.features[0])return;var p=e.features[0].properties;var raw;try{raw=JSON.parse(p.raw||'{}');}catch(x){raw=p;}postRN({type:'campsite_tapped',id:raw.id||p.id,name:raw.name||p.name,camp:raw});e.preventDefault();});
+    map.on('click','gas-circle',function(e){if(!e.features||!e.features[0])return;var p=e.features[0].properties;new mapboxgl.Popup({closeButton:false,offset:12}).setLngLat(e.lngLat).setHTML('<div class="pt">⛽ '+p.name+'</div><div class="pm">Fuel Station</div>').addTo(map);e.preventDefault();});
+    map.on('click','poi-circle',function(e){if(!e.features||!e.features[0])return;var p=e.features[0].properties;var ic=p.type==='water'?'💧':p.type==='trailhead'?'🥾':'👁️';new mapboxgl.Popup({closeButton:false,offset:12}).setLngLat(e.lngLat).setHTML('<div class="pt">'+ic+' '+p.name+'</div><div class="pm">'+p.type+'</div>').addTo(map);e.preventDefault();});
+    ['camp-cluster','camp-circle','gas-circle','poi-circle'].forEach(function(l){map.on('mouseenter',l,function(){map.getCanvas().style.cursor='pointer';});map.on('mouseleave',l,function(){map.getCanvas().style.cursor='';});});
+  }
+
+  function renderWaypoints(){
+    wpMarkers.forEach(function(m){m.remove();});wpMarkers=[];
+    wps.forEach(function(w,i){
+      var el=document.createElement('div');el.className='mk-wp';el.textContent=w.day||i+1;
+      var popup=new mapboxgl.Popup({offset:18,closeButton:false}).setHTML('<div class="pt">'+w.name+'</div><div class="pm">Day '+w.day+' · '+w.type+'</div>');
+      var m=new mapboxgl.Marker({element:el}).setLngLat([w.lng,w.lat]).setPopup(popup).addTo(map);
+      el.addEventListener('click',function(ev){ev.stopPropagation();postRN({type:'wp_tapped',idx:i,name:w.name});});
+      wpMarkers.push(m);
+    });
+    if(wps.length>=2){var bounds=new mapboxgl.LngLatBounds();wps.forEach(function(w){bounds.extend([w.lng,w.lat]);});map.fitBounds(bounds,{padding:60,maxZoom:12,duration:800});}
+  }
+
+  function loadInitialData(){
+    if(initGas.length){allGas=initGas;updateGasSrc();}
+    if(initPins.length){allPois=initPins.map(function(p){return{name:p.name,lat:p.lat,lng:p.lng,type:p.type||'pin'};});updatePoiSrc();}
+  }
+
+  function updateCampSrc(){if(!map||!map.getSource('camps'))return;map.getSource('camps').setData({type:'FeatureCollection',features:allCamps.map(campFeat)});}
+  function updateGasSrc(){if(!map||!map.getSource('gas'))return;map.getSource('gas').setData({type:'FeatureCollection',features:allGas.map(function(g){return{type:'Feature',geometry:{type:'Point',coordinates:[g.lng,g.lat]},properties:{name:g.name}};})});}
+  function updatePoiSrc(){if(!map||!map.getSource('pois'))return;map.getSource('pois').setData({type:'FeatureCollection',features:allPois.map(function(p){return{type:'Feature',geometry:{type:'Point',coordinates:[p.lng,p.lat]},properties:{name:p.name,type:p.type||'pin'}};})});}
+  function updateRoute(){if(!map||!map.getSource('route'))return;map.getSource('route').setData({type:'Feature',geometry:{type:'LineString',coordinates:_routeCoords}});}
+  function updateBreadcrumb(){if(!map||!map.getSource('breadcrumb'))return;map.getSource('breadcrumb').setData({type:'Feature',geometry:{type:'LineString',coordinates:breadcrumbPts}});}
+
+  // ── User position ──────────────────────────────────────────────────────────────
+  function setUserPos(lat,lng,recenter,zoom){
+    if(!userMarker){var el=document.createElement('div');el.className='mk-me';userMarker=new mapboxgl.Marker({element:el}).setLngLat([lng,lat]).addTo(map);}
+    else{userMarker.setLngLat([lng,lat]);}
+    if(recenter)map.easeTo({center:[lng,lat],zoom:zoom||15,duration:400});
+    var now=Date.now();
+    if(routePts.length>0&&now-lastOffCheck>6000){
+      lastOffCheck=now;var minD=Infinity;
+      for(var i=0;i<routePts.length;i++){var dlat=(routePts[i][1]-lat)*111000;var dlng=(routePts[i][0]-lng)*111000*Math.cos(lat*Math.PI/180);var d=Math.sqrt(dlat*dlat+dlng*dlng);if(d<minD)minD=d;if(minD<80)break;}
+      if(minD>380)postRN({type:'off_route',lat:lat,lng:lng,dist:Math.round(minD)});
+    }
+  }
+
+  function setNavTarget(idx){wpMarkers.forEach(function(m,i){m.getElement().classList.toggle('nav-target',i===idx);});}
+
+  // ── Routing ───────────────────────────────────────────────────────────────────
+  function decodeP6(enc){var coords=[],i=0,lat=0,lng=0;while(i<enc.length){var b,shift=0,res=0;do{b=enc.charCodeAt(i++)-63;res|=(b&0x1f)<<shift;shift+=5;}while(b>=0x20);lat+=res&1?~(res>>1):(res>>1);shift=0;res=0;do{b=enc.charCodeAt(i++)-63;res|=(b&0x1f)<<shift;shift+=5;}while(b>=0x20);lng+=res&1?~(res>>1):(res>>1);coords.push([lng/1e6,lat/1e6]);}return coords;}
+
+  function _fallback(pairs,fromIdx){var coords=pairs.map(function(p){var s=p.split(',');return[parseFloat(s[0]),parseFloat(s[1])];});_routeCoords=coords;routePts=coords;updateRoute();postRN({type:'route_ready',routed:false,steps:[],legs:[],fromIdx:fromIdx||0});}
+
+  async function _fetchRoute(pairs,fromIdx){
+    if(routeOpts.backRoads)return _fetchValhalla(pairs,fromIdx);
+    var excl=[];if(routeOpts.avoidTolls)excl.push('toll');if(routeOpts.avoidHighways)excl.push('motorway');if(routeOpts.noFerries)excl.push('ferry');
+    var profile=(routeOpts.avoidHighways)?'driving':'driving-traffic';
+    var url='https://api.mapbox.com/directions/v5/mapbox/'+profile+'/'+pairs.join(';')+'?access_token='+mapboxToken+'&steps=true&geometries=geojson&overview=full'+(excl.length?'&exclude='+excl.join(','):'');
     try{
-      var msg=JSON.parse(e.data);
-      if(msg.type==='user_pos'&&msg.lat){setUserPos(msg.lat,msg.lng);}
-      if(msg.type==='nav_center'&&msg.lat){setUserPos(msg.lat,msg.lng);map.setView([msg.lat,msg.lng],15);}
-      if(msg.type==='locate'&&msg.lat){setUserPos(msg.lat,msg.lng);map.setView([msg.lat,msg.lng],13);}
-      if(msg.type==='nav_target'){setNavTarget(msg.idx);}
-      if(msg.type==='nav_reset'){setNavTarget(-1);}
-      if(msg.type==='fly_to'&&msg.lat){
-        map.setView([msg.lat,msg.lng],14);
-        if(searchPin){map.removeLayer(searchPin);}
-        searchPin=L.marker([msg.lat,msg.lng],{icon:L.divIcon({className:'',
-          html:'<div class="search-pin">📍</div>',iconSize:[28,28],iconAnchor:[14,28]})})
-          .addTo(map).bindPopup('<div class="pt">'+(msg.name||'Location')+'</div>');
-        searchPin.openPopup();
-      }
-      if(msg.type==='track_point'&&msg.lat){
-        breadcrumbPts.push([msg.lat,msg.lng]);
-        if(breadcrumb){breadcrumb.setLatLngs(breadcrumbPts);}
-        else{breadcrumb=L.polyline(breadcrumbPts,{color:'#3b82f6',weight:3,opacity:0.75,dashArray:'1,5'}).addTo(map);}
-      }
-      if(msg.type==='clear_track'){
-        breadcrumbPts=[];if(breadcrumb){map.removeLayer(breadcrumb);breadcrumb=null;}
-      }
-      if(msg.type==='set_discover_pins'){
-        discoverMarkers.forEach(function(m){map.removeLayer(m);});discoverMarkers=[];
-        (msg.pins||[]).forEach(function(p){
-          var el=document.createElement('div');
-          el.className='disc';
-          el.textContent=p.tags&&p.tags.includes('rv')?'🚐':p.tags&&p.tags.includes('dispersed')?'🌲':p.tags&&p.tags.includes('parking')?'🅿️':'🏕️';
-          var m=L.marker([p.lat,p.lng],{icon:L.divIcon({className:'',html:el.outerHTML,iconSize:[32,32],iconAnchor:[16,16]})})
-            .addTo(map)
-            .bindPopup('<div class="pt">'+p.name+'</div><div class="pm">'+p.land_type+'</div>');
-          m.on('click',function(ev){ev.originalEvent&&ev.originalEvent.stopPropagation();postRN({type:'campsite_tapped',id:p.id,name:p.name});});
-          discoverMarkers.push(m);
-        });
-      }
-      if(msg.type==='clear_discover_pins'){
-        discoverMarkers.forEach(function(m){map.removeLayer(m);});discoverMarkers=[];
-      }
-      if(msg.type==='set_route_opts'){Object.assign(_routeOpts,msg.opts||{});}
-      if(msg.type==='start_route_from'&&msg.lat){loadRouteFrom(msg.lat,msg.lng,msg.fromIdx||0);}
-      if(msg.type==='reroute_from'&&msg.lat){routePts=[];loadRouteFrom(msg.lat,msg.lng,msg.fromIdx||0);}
-      if(msg.type==='route_to_search'&&msg.lat){
-        if(searchPin){map.removeLayer(searchPin);searchPin=null;}
-        searchPin=L.marker([msg.lat,msg.lng],{icon:L.divIcon({className:'',html:'<div class="search-dest">📍</div>',iconSize:[30,30],iconAnchor:[15,15]})})
-          .addTo(map).bindPopup('<div class="pt">'+(msg.name||'Destination')+'</div>');
-        searchPin.openPopup();
-        var cs=msg.userLng+','+msg.userLat+';'+msg.lng+','+msg.lat;
-        _fetchRoute(cs,0).then(function(){});
-      }
-      if(msg.type==='set_pois'){
-        poiMarkers.forEach(function(m){map.removeLayer(m);});poiMarkers=[];
-        (msg.pois||[]).forEach(function(p){
-          var cls=p.type==='water'?'poi-water':p.type==='trailhead'?'poi-trail':'poi-view';
-          var icon=p.type==='water'?'💧':p.type==='trailhead'?'🥾':'👁️';
-          var m=L.marker([p.lat,p.lng],{icon:L.divIcon({className:'',html:'<div class="'+cls+'">'+icon+'</div>',iconSize:[26,26],iconAnchor:[13,13]})})
-            .addTo(map).bindPopup('<div class="pt">'+p.name+'</div><div class="pm">'+p.type+'</div>');
-          poiMarkers.push(m);
-        });
-      }
-      if(msg.type==='clear_pois'){poiMarkers.forEach(function(m){map.removeLayer(m);});poiMarkers=[];}
-      if(msg.type==='set_nearby_camps'){
-        nearbyMarkers.forEach(function(m){map.removeLayer(m);});nearbyMarkers=[];
-        (msg.pins||[]).forEach(function(p){
-          var icon=p.tags&&p.tags.includes('rv')?'🚐':p.tags&&p.tags.includes('dispersed')?'🌲':'⛺';
-          var m=L.marker([p.lat,p.lng],{icon:L.divIcon({className:'',html:'<div class="nearby-camp">'+icon+'</div>',iconSize:[30,30],iconAnchor:[15,15]})})
-            .addTo(map).bindPopup('<div class="pt">'+p.name+'</div><div class="pm">'+p.land_type+'</div>');
-          m.on('click',function(ev){ev.originalEvent&&ev.originalEvent.stopPropagation();postRN({type:'campsite_tapped',id:p.id,name:p.name,source:'nearby'});});
-          nearbyMarkers.push(m);
-        });
-      }
-      if(msg.type==='clear_nearby_camps'){nearbyMarkers.forEach(function(m){map.removeLayer(m);});nearbyMarkers=[];}
-      if(msg.type==='download_tiles_bbox'){
-        if(!downloadActive){
-          downloadActive=true;
-          var fakeBounds=L.latLngBounds([[msg.s,msg.w],[msg.n,msg.e]]);
-          _dlTiles(fakeBounds,msg.minZ||10,msg.maxZ||12);
-        }
-      }
-      if(msg.type==='download_tiles'){
-        if(!downloadActive){downloadActive=true;var bounds=map.getBounds();_dlTiles(bounds,msg.minZ||10,msg.maxZ||15);}
-      }
-      if(msg.type==='cancel_download'){downloadActive=false;}
-      if(msg.type==='set_layer'){
-        map.removeLayer(baseLayer);
-        if(labelLayer){map.removeLayer(labelLayer);labelLayer=null;}
-        currentLayerUrl=msg.url;currentLayerPrefix=msg.cachePrefix||'sat';
-        baseLayer=L.tileLayer.cached(msg.url,currentLayerPrefix,{maxZoom:19,opacity:msg.opacity||1}).addTo(map);
-        baseLayer.bringToBack();
-        if(msg.labelsUrl){
-          labelLayer=L.tileLayer(msg.labelsUrl,{maxZoom:19,opacity:0.75}).addTo(map);
-          labelLayer.bringToBack();baseLayer.bringToBack();
-        }
-      }
-    }catch(err){}
+      var ctrl=new AbortController();var tid=setTimeout(function(){ctrl.abort();},10000);
+      var data=await(await fetch(url,{signal:ctrl.signal})).json();clearTimeout(tid);
+      if(!data.routes||!data.routes[0])return _fetchValhalla(pairs,fromIdx);
+      var route=data.routes[0];
+      _routeCoords=route.geometry.coordinates;routePts=_routeCoords.filter(function(_,i){return i%4===0;});updateRoute();
+      var steps=[],legs=[];
+      (route.legs||[]).forEach(function(leg){var ls=[];(leg.steps||[]).forEach(function(s){if(s.distance>0||s.maneuver.type==='arrive'){var st={type:s.maneuver.type,modifier:s.maneuver.modifier||'',name:s.name||'',distance:s.distance,duration:s.duration};steps.push(st);ls.push(st);}});legs.push(ls);});
+      postRN({type:'route_ready',routed:true,steps:steps,legs:legs,total_distance:route.distance,total_duration:route.duration,fromIdx:fromIdx||0});
+    }catch(e){_fallback(pairs,fromIdx);}
   }
+
+  async function _fetchValhalla(pairs,fromIdx){
+    var locs=pairs.map(function(p){var s=p.split(',');return{lon:parseFloat(s[0]),lat:parseFloat(s[1])};});
+    var body={locations:locs,costing:'auto',costing_options:{auto:{use_tracks:0.9,use_highways:0.0,use_tolls:routeOpts.avoidTolls?0.0:0.5}},units:'miles'};
+    try{
+      var ctrl=new AbortController();var tid=setTimeout(function(){ctrl.abort();},12000);
+      var data=await(await fetch('https://valhalla1.openstreetmap.de/route',{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();clearTimeout(tid);
+      if(!data.trip||data.trip.status!==0)return _fallback(pairs,fromIdx);
+      var all=[],steps=[],legs=[];
+      (data.trip.legs||[]).forEach(function(leg){var c=decodeP6(leg.shape||'');all=all.concat(c);var ls=[];(leg.maneuvers||[]).forEach(function(m){var dist=Math.round((m.length||0)*1609.34);var st={type:m.type===4?'arrive':m.type===1?'depart':'turn',modifier:{0:'',1:'',2:'left',3:'right',4:'arrive',5:'sharp left',6:'sharp right',7:'left',8:'right',9:'uturn',10:'slight left',11:'slight right'}[m.type]||'',name:m.street_names&&m.street_names[0]||'',distance:dist,duration:m.time||0};steps.push(st);ls.push(st);});legs.push(ls);});
+      _routeCoords=all;routePts=all.filter(function(_,i){return i%4===0;});updateRoute();
+      postRN({type:'route_ready',routed:true,steps:steps,legs:legs,total_distance:Math.round((data.trip.summary.length||0)*1609.34),total_duration:data.trip.summary.time||0,fromIdx:fromIdx||0});
+    }catch(e){_fallback(pairs,fromIdx);}
+  }
+
+  async function loadRoute(){if(wps.length<2)return;await _fetchRoute(wps.map(function(w){return w.lng+','+w.lat;}),0);}
+  async function loadRouteFrom(lat,lng,fromIdx){var rem=wps.slice(fromIdx);if(!rem.length){_fallback([],fromIdx);return;}await _fetchRoute([lng+','+lat].concat(rem.map(function(w){return w.lng+','+w.lat;})),fromIdx);}
+
+  // ── Message handler ───────────────────────────────────────────────────────────
+  function handleMsgData(msg){
+    if(msg.type==='set_token'){initMap(msg.token,msg.style);return;}
+    if(!mapReady){pendingMsgs.push(msg);return;}
+    if(msg.type==='user_pos'&&msg.lat)setUserPos(msg.lat,msg.lng,false);
+    if(msg.type==='nav_center'&&msg.lat)setUserPos(msg.lat,msg.lng,true,15);
+    if(msg.type==='locate'&&msg.lat)setUserPos(msg.lat,msg.lng,true,13);
+    if(msg.type==='nav_target')setNavTarget(msg.idx);
+    if(msg.type==='nav_reset'){setNavTarget(-1);_routeCoords=[];routePts=[];updateRoute();}
+    if(msg.type==='fly_to'&&msg.lat){
+      map.flyTo({center:[msg.lng,msg.lat],zoom:14,duration:600});
+      if(searchMarker){searchMarker.remove();searchMarker=null;}
+      var el=document.createElement('div');el.className='mk-search';el.textContent='📍';
+      searchMarker=new mapboxgl.Marker({element:el}).setLngLat([msg.lng,msg.lat]).setPopup(new mapboxgl.Popup({offset:18,closeButton:false}).setHTML('<div class="pt">'+(msg.name||'Location')+'</div>')).addTo(map);
+      searchMarker.togglePopup();
+    }
+    if(msg.type==='track_point'&&msg.lat){breadcrumbPts.push([msg.lng,msg.lat]);updateBreadcrumb();}
+    if(msg.type==='clear_track'){breadcrumbPts=[];updateBreadcrumb();}
+    if(msg.type==='set_camps'){allCamps=msg.pins||[];updateCampSrc();searchAreaBtn.classList.remove('show');}
+    if(msg.type==='set_discover_pins'){allCamps=msg.pins||[];updateCampSrc();}
+    if(msg.type==='clear_discover_pins'){allCamps=[];updateCampSrc();}
+    if(msg.type==='set_nearby_camps'){allCamps=msg.pins||[];updateCampSrc();}
+    if(msg.type==='clear_nearby_camps'){allCamps=[];updateCampSrc();}
+    if(msg.type==='set_gas'){allGas=msg.gas||[];updateGasSrc();}
+    if(msg.type==='set_pois'){allPois=msg.pois||[];updatePoiSrc();}
+    if(msg.type==='clear_pois'){allPois=[];updatePoiSrc();}
+    if(msg.type==='set_route_opts')Object.assign(routeOpts,msg.opts||{});
+    if(msg.type==='start_route_from'&&msg.lat)loadRouteFrom(msg.lat,msg.lng,msg.fromIdx||0);
+    if(msg.type==='reroute_from'&&msg.lat){_routeCoords=[];routePts=[];loadRouteFrom(msg.lat,msg.lng,msg.fromIdx||0);}
+    if(msg.type==='route_to_search'&&msg.lat){
+      if(searchMarker){searchMarker.remove();searchMarker=null;}
+      var el2=document.createElement('div');el2.className='mk-search';el2.textContent='📍';
+      searchMarker=new mapboxgl.Marker({element:el2}).setLngLat([msg.lng,msg.lat]).setPopup(new mapboxgl.Popup({offset:18,closeButton:false}).setHTML('<div class="pt">'+(msg.name||'Destination')+'</div>')).addTo(map);
+      searchMarker.togglePopup();
+      _fetchRoute([msg.userLng+','+msg.userLat,msg.lng+','+msg.lat],0);
+    }
+    if(msg.type==='set_style'&&msg.style){currentStyle=msg.style;map.setStyle(msg.style);}
+    if(msg.type==='download_tiles_bbox'){if(!downloadActive){downloadActive=true;_dlTiles(msg.n,msg.s,msg.e,msg.w,msg.minZ||10,msg.maxZ||12);}}
+    if(msg.type==='download_tiles'){if(!downloadActive){downloadActive=true;var b=map.getBounds();_dlTiles(b.getNorth(),b.getSouth(),b.getEast(),b.getWest(),msg.minZ||10,msg.maxZ||15);}}
+    if(msg.type==='cancel_download')downloadActive=false;
+  }
+
+  function onMsg(e){try{handleMsgData(JSON.parse(e.data||'{}'));}catch(err){}}
   document.addEventListener('message',onMsg);
   window.addEventListener('message',onMsg);
 })();
@@ -717,14 +522,20 @@ export default function MapScreen() {
   const spokenRef    = useRef(new Set<string>());
   const discoverRef  = useRef<CampsitePin[]>([]);
 
-  // Fetch Mapbox token once on mount; switch tiles via postMessage (no WebView rebuild)
+  const webLoadedRef = useRef(false);
+  const viewportRef  = useRef<{ n: number; s: number; e: number; w: number; zoom: number } | null>(null);
+  const [isLoadingAreaCamps, setIsLoadingAreaCamps] = useState(false);
+
+  // Fetch Mapbox token once on mount; send set_token to WebView when both are ready
   useEffect(() => {
     api.getConfig().then(c => {
       const token = c.mapbox_token || '';
       setMapboxToken(token);
-      if (token) {
-        const t = getTileUrls(token);
-        webRef.current?.postMessage(JSON.stringify({ type: 'set_layer', url: t.sat, cachePrefix: 'sat' }));
+      if (token && webLoadedRef.current) {
+        webRef.current?.postMessage(JSON.stringify({
+          type: 'set_token', token,
+          style: MAPBOX_STYLES[mapLayer] ?? MAPBOX_STYLES.satellite,
+        }));
       }
     }).catch(() => {});
   }, []);
@@ -844,54 +655,22 @@ export default function MapScreen() {
     spokenRef.current.clear();
   }, [activeTrip?.trip_id]);
 
-  // ── Discover pins: fetch on filter change ──────────────────────────────────
-
+  // ── Reload camps in current viewport whenever filters change ──────────────
   useEffect(() => {
-    if (!activeFilters.length) {
-      setDiscoverPins([]);
-      webRef.current?.postMessage(JSON.stringify({ type: 'clear_discover_pins' }));
-      return;
-    }
-    const center = userLoc ?? (waypoints[0] ? { lat: waypoints[0].lat, lng: waypoints[0].lng } : null);
-    if (!center) return;
-    setIsSearchingCamps(true);
-    api.searchCampsites(center.lat, center.lng, 50, activeFilters)
-      .then(pins => {
-        discoverRef.current = pins;
-        setDiscoverPins(pins);
-        webRef.current?.postMessage(JSON.stringify({ type: 'set_discover_pins', pins }));
-      })
-      .catch(() => {})
-      .finally(() => setIsSearchingCamps(false));
+    if (!viewportRef.current) return;
+    loadCampsInArea(viewportRef.current, activeFilters);
   }, [activeFilters]);
 
-  // Re-send discover pins after map reload
+  // Auto-load camps when userLoc first becomes available + map is ready
+  const autoLoadedRef = useRef(false);
   useEffect(() => {
-    if (discoverPins.length) {
-      webRef.current?.postMessage(JSON.stringify({ type: 'set_discover_pins', pins: discoverPins }));
-    }
-  }, [discoverPins]);
-
-  // Nearby mode (The Dyrt-style — all camps near current location)
-  useEffect(() => {
-    if (!nearbyMode) {
-      nearbyRef.current = [];
-      setNearbyPins([]);
-      webRef.current?.postMessage(JSON.stringify({ type: 'clear_nearby_camps' }));
-      return;
-    }
-    const center = userLoc ?? (waypoints[0] ? { lat: waypoints[0].lat, lng: waypoints[0].lng } : null);
-    if (!center) return;
-    setLoadingNearby(true);
-    api.getNearbyCamps(center.lat, center.lng, 40)
-      .then(pins => {
-        nearbyRef.current = pins;
-        setNearbyPins(pins);
-        webRef.current?.postMessage(JSON.stringify({ type: 'set_nearby_camps', pins }));
-      })
-      .catch(() => {})
-      .finally(() => setLoadingNearby(false));
-  }, [nearbyMode]);
+    if (!userLoc || autoLoadedRef.current) return;
+    autoLoadedRef.current = true;
+    const deg = 0.5;
+    const bounds = { n: userLoc.lat + deg, s: userLoc.lat - deg, e: userLoc.lng + deg, w: userLoc.lng - deg, zoom: 10 };
+    viewportRef.current = bounds;
+    loadCampsInArea(bounds, activeFilters);
+  }, [userLoc]);
 
   // POI layer
   useEffect(() => {
@@ -1096,17 +875,20 @@ export default function MapScreen() {
   function switchLayer() {
     const next: MapLayer = mapLayer === 'satellite' ? 'topo' : mapLayer === 'topo' ? 'hybrid' : 'satellite';
     setMapLayerState(next);
-    const t = getTileUrls(mapboxToken);
-    let msg: any = { type: 'set_layer' };
-    if (next === 'satellite') {
-      msg.url = t.sat; msg.cachePrefix = 'sat';
-    } else if (next === 'topo') {
-      msg.url = t.topo; msg.opacity = 0.96; msg.cachePrefix = 'topo';
-    } else {
-      msg.url = t.hyb; msg.cachePrefix = 'hyb';
-      if (t.labels) msg.labelsUrl = t.labels;
-    }
-    webRef.current?.postMessage(JSON.stringify(msg));
+    webRef.current?.postMessage(JSON.stringify({
+      type: 'set_style',
+      style: MAPBOX_STYLES[next] ?? MAPBOX_STYLES.satellite,
+    }));
+  }
+
+  async function loadCampsInArea(bounds: { n: number; s: number; e: number; w: number; zoom: number }, types: string[]) {
+    if (bounds.zoom < 6) return;
+    setIsLoadingAreaCamps(true);
+    try {
+      const camps = await api.getCampsBbox(bounds.n, bounds.s, bounds.e, bounds.w, types);
+      webRef.current?.postMessage(JSON.stringify({ type: 'set_camps', pins: camps }));
+    } catch {}
+    setIsLoadingAreaCamps(false);
   }
 
   // ── WebView message handler ──────────────────────────────────────────────────
@@ -1114,6 +896,21 @@ export default function MapScreen() {
   function onWebMessage(e: any) {
     try {
       const msg = JSON.parse(e.nativeEvent.data);
+      if (msg.type === 'map_ready') {
+        if (viewportRef.current) loadCampsInArea(viewportRef.current, activeFilters);
+      }
+      if (msg.type === 'map_bounds') {
+        viewportRef.current = { n: msg.n, s: msg.s, e: msg.e, w: msg.w, zoom: msg.zoom };
+      }
+      if (msg.type === 'search_area') {
+        const bounds = { n: msg.n, s: msg.s, e: msg.e, w: msg.w, zoom: msg.zoom };
+        viewportRef.current = bounds;
+        // User explicitly tapped "Search This Area"
+        loadCampsInArea(bounds, activeFilters);
+      }
+      if (msg.type === 'map_tapped') {
+        setSelectedCamp(null);
+      }
       if (msg.type === 'route_ready') {
         setIsRouted(msg.routed);
         setRouteSteps(msg.steps ?? []);
@@ -1147,10 +944,8 @@ export default function MapScreen() {
         setTimeout(() => setDownloadProgress(0), 2000);
       }
       if (msg.type === 'campsite_tapped') {
-        const pin = discoverRef.current.find(p => p.id === msg.id)
-          ?? nearbyRef.current.find(p => p.id === msg.id)
-          ?? null;
-        setSelectedCamp(pin);
+        const camp = (msg.camp as CampsitePin) || null;
+        setSelectedCamp(camp);
         setCampDetail(null);
         setCampInsight(null);
         setWikiArticles([]);
@@ -1251,11 +1046,14 @@ export default function MapScreen() {
         onShouldStartLoadWithRequest={() => true}
         onMessage={onWebMessage}
         onLoad={() => {
-          if (userLoc) webRef.current?.postMessage(JSON.stringify({ type: 'user_pos', lat: userLoc.lat, lng: userLoc.lng }));
+          webLoadedRef.current = true;
           if (mapboxToken) {
-            const t = getTileUrls(mapboxToken);
-            webRef.current?.postMessage(JSON.stringify({ type: 'set_layer', url: t.sat, cachePrefix: 'sat' }));
+            webRef.current?.postMessage(JSON.stringify({
+              type: 'set_token', token: mapboxToken,
+              style: MAPBOX_STYLES[mapLayer] ?? MAPBOX_STYLES.satellite,
+            }));
           }
+          if (userLoc) webRef.current?.postMessage(JSON.stringify({ type: 'user_pos', lat: userLoc.lat, lng: userLoc.lng }));
         }}
       />
 
@@ -1350,12 +1148,19 @@ export default function MapScreen() {
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[s.ctrlBtn, nearbyMode && { backgroundColor: C.orange + 'dd', borderColor: C.orange }]}
-          onPress={() => setNearbyMode(p => !p)}
+          style={[s.ctrlBtn, isLoadingAreaCamps && { borderColor: '#14b8a6' }]}
+          onPress={() => {
+            const center = userLoc ?? (waypoints[0] ? { lat: waypoints[0].lat, lng: waypoints[0].lng } : null);
+            if (!center) return;
+            const deg = 0.4;
+            const bounds = { n: center.lat + deg, s: center.lat - deg, e: center.lng + deg, w: center.lng - deg, zoom: 10 };
+            viewportRef.current = bounds;
+            loadCampsInArea(bounds, activeFilters);
+          }}
         >
-          {loadingNearby
-            ? <ActivityIndicator size="small" color={C.orange} />
-            : <Text style={{ fontSize: 16 }}>{nearbyMode ? '🏕️' : '⛺'}</Text>
+          {isLoadingAreaCamps
+            ? <ActivityIndicator size="small" color="#14b8a6" />
+            : <Text style={{ fontSize: 16 }}>⛺</Text>
           }
         </TouchableOpacity>
 
@@ -1475,15 +1280,21 @@ export default function MapScreen() {
         <View style={s.filterBar}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.filterScroll}>
             {([
-              { id: 'tent',      label: 'Tent',             emoji: '⛺' },
-              { id: 'rv',        label: 'RV',               emoji: '🚐' },
-              { id: 'dispersed', label: 'Dispersed',        emoji: '🌲' },
-              { id: 'parking',   label: 'Overnight Prkg',   emoji: '🅿️' },
-              { id: 'state',     label: 'State Park',       emoji: '🏞️' },
-              { id: 'usfs',      label: 'Nat. Forest',      emoji: '🌿' },
-              { id: 'nps',       label: 'Nat. Park',        emoji: '⛰️' },
               { id: 'blm',       label: 'BLM',              emoji: '🏕️' },
-            ] as const).map(f => {
+              { id: 'nfs',       label: 'Nat. Forest',      emoji: '🌿' },
+              { id: 'nps',       label: 'Nat. Park',        emoji: '⛰️' },
+              { id: 'state',     label: 'State Park',       emoji: '🏞️' },
+              { id: 'dispersed', label: 'Dispersed',        emoji: '🌲' },
+              { id: 'rv',        label: 'RV / Hookups',     emoji: '🚐' },
+              { id: 'koa',       label: 'KOA',              emoji: '🏡' },
+              { id: 'tent',      label: 'Tent Only',        emoji: '⛺' },
+              { id: 'free',      label: 'Free',             emoji: '💚' },
+              { id: 'water',     label: 'Water',            emoji: '💧' },
+              { id: 'showers',   label: 'Showers',          emoji: '🚿' },
+              { id: 'dog',       label: 'Dog Friendly',     emoji: '🐕' },
+              { id: 'ada',       label: 'ADA',              emoji: '♿' },
+              { id: 'parking',   label: 'Overnight Prkg',   emoji: '🅿️' },
+            ]).map(f => {
               const active = activeFilters.includes(f.id);
               return (
                 <TouchableOpacity
@@ -1499,7 +1310,7 @@ export default function MapScreen() {
               );
             })}
           </ScrollView>
-          {isSearchingCamps && (
+          {isLoadingAreaCamps && (
             <View style={s.filterLoading}>
               <ActivityIndicator size="small" color="#14b8a6" />
             </View>

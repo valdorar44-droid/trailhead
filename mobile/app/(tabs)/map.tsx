@@ -389,6 +389,7 @@ const buildMapHtml = (
   var lastSpeed=null;
   var _routeLoading=false;
   var routeIsProper=false;
+  var showLandOverlay=false;
   var routeOpts={avoidTolls:false,avoidHighways:false,backRoads:false,noFerries:false};
   var _routeCoords=[],routePts=[],breadcrumbPts=[];
   var lastOffCheck=0,downloadActive=false,mapReady=false,pendingMsgs=[];
@@ -436,6 +437,7 @@ const buildMapHtml = (
     map.on('style.load',function(){
       setupSources();setupLayers();renderWaypoints();
       updateCampSrc();updateGasSrc();updatePoiSrc();updateRoute();updateBreadcrumb();updateReportMarkers();
+      if(showLandOverlay)setLandOverlay(true);
     });
     var boundsTimer;
     map.on('moveend',function(){
@@ -463,8 +465,8 @@ const buildMapHtml = (
     _a('route-line',{id:'route-line',type:'line',source:'route',layout:{'line-cap':'round','line-join':'round'},paint:{'line-color':'#f97316','line-width':5,'line-opacity':0.94}});
     _a('gas-circle',{id:'gas-circle',type:'circle',source:'gas',paint:{'circle-radius':9,'circle-color':'#eab308','circle-opacity':0.92,'circle-stroke-width':2,'circle-stroke-color':'#fff'}});
     _a('gas-label',{id:'gas-label',type:'symbol',source:'gas',filter:['>=',['zoom'],13],layout:{'text-field':['get','name'],'text-size':9,'text-offset':[0,1.5],'text-anchor':'top'},paint:{'text-color':'#f1f5f9','text-halo-color':'rgba(0,0,0,0.85)','text-halo-width':1.5}});
-    _a('poi-circle',{id:'poi-circle',type:'circle',source:'pois',paint:{'circle-radius':8,'circle-color':['match',['get','type'],'water','#3b82f6','trailhead','#22c55e','viewpoint','#a855f7','peak','#8b5cf6','#6b7280'],'circle-opacity':0.9,'circle-stroke-width':1.5,'circle-stroke-color':'#fff'}});
-    _a('poi-label',{id:'poi-label',type:'symbol',source:'pois',filter:['>=',['zoom'],13],layout:{'text-field':['get','name'],'text-size':9,'text-offset':[0,1.3],'text-anchor':'top'},paint:{'text-color':'#f1f5f9','text-halo-color':'rgba(0,0,0,0.85)','text-halo-width':1.5}});
+    _a('poi-circle',{id:'poi-circle',type:'circle',source:'pois',paint:{'circle-radius':['case',['==',['get','type'],'peak'],9,8],'circle-color':['match',['get','type'],'water','#3b82f6','trailhead','#22c55e','viewpoint','#a855f7','peak','#92400e','#6b7280'],'circle-opacity':0.9,'circle-stroke-width':1.5,'circle-stroke-color':'#fff'}});
+    _a('poi-label',{id:'poi-label',type:'symbol',source:'pois',filter:['>=',['zoom'],12],layout:{'text-field':['case',['all',['==',['get','type'],'peak'],['has','elevation']],['concat',['get','name'],'\n▲ ',['get','elevation']],['get','name']],'text-size':['case',['==',['get','type'],'peak'],10,9],'text-offset':[0,1.3],'text-anchor':'top','text-max-width':10},paint:{'text-color':['case',['==',['get','type'],'peak'],'#d97706','#f1f5f9'],'text-halo-color':['case',['==',['get','type'],'peak'],'rgba(255,255,255,0.95)','rgba(0,0,0,0.85)'],'text-halo-width':2}});
     _a('camp-cluster',{id:'camp-cluster',type:'circle',source:'camps',filter:['has','point_count'],paint:{'circle-color':['step',['get','point_count'],'#14b8a6',10,'#f97316',50,'#ef4444'],'circle-radius':['step',['get','point_count'],18,10,25,50,32],'circle-opacity':0.88,'circle-stroke-width':2,'circle-stroke-color':'#fff'}});
     _a('camp-count',{id:'camp-count',type:'symbol',source:'camps',filter:['has','point_count'],layout:{'text-field':'{point_count_abbreviated}','text-size':12,'text-font':['DIN Offc Pro Medium','Arial Unicode MS Bold']},paint:{'text-color':'#fff'}});
     _a('camp-circle',{id:'camp-circle',type:'circle',source:'camps',filter:['!',['has','point_count']],paint:{'circle-radius':['interpolate',['linear'],['zoom'],9,7,13,11],'circle-color':['match',['get','land_type'],'BLM Land','#f97316','National Forest','#22c55e','National Park','#3b82f6','State Park','#8b5cf6','Campground','#14b8a6','#14b8a6'],'circle-opacity':0.88,'circle-stroke-width':2,'circle-stroke-color':'rgba(255,255,255,0.9)'}});
@@ -515,6 +517,19 @@ const buildMapHtml = (
       el.addEventListener('click',function(ev){ev.stopPropagation();m.togglePopup();postRN({type:'report_tapped',report:r});});
       reportMarkers.push(m);
     });
+  }
+
+  // ── Land ownership overlay (BLM/USFS/NPS public tile service) ─────────────────
+  function setLandOverlay(show){
+    showLandOverlay=show;
+    if(!map||!mapReady)return;
+    if(show){
+      if(!map.getSource('blm-sma'))map.addSource('blm-sma',{type:'raster',tiles:['https://gis.blm.gov/arcgis/rest/services/lands/BLM_Natl_SMA_LimitedScale/MapServer/tile/{z}/{y}/{x}'],tileSize:256,attribution:'BLM/USGS'});
+      if(!map.getLayer('blm-sma'))map.addLayer({id:'blm-sma',type:'raster',source:'blm-sma',paint:{'raster-opacity':0.48}},'route-shadow');
+    }else{
+      if(map.getLayer('blm-sma'))map.removeLayer('blm-sma');
+      if(map.getSource('blm-sma'))map.removeSource('blm-sma');
+    }
   }
 
   // ── User position ──────────────────────────────────────────────────────────────
@@ -639,6 +654,7 @@ const buildMapHtml = (
     if(msg.type==='set_reports'){allReports=msg.reports||[];updateReportMarkers();}
     if(msg.type==='add_report'){allReports=allReports.filter(function(r){return r.id!==msg.report.id;});allReports.push(msg.report);updateReportMarkers();}
     if(msg.type==='set_style'&&msg.style){currentStyle=msg.style;map.setStyle(msg.style);}
+    if(msg.type==='set_land_overlay')setLandOverlay(!!msg.show);
     if(msg.type==='download_tiles_bbox'){if(!downloadActive){downloadActive=true;_dlTiles(msg.n,msg.s,msg.e,msg.w,msg.minZ||10,msg.maxZ||12);}}
     if(msg.type==='download_tiles'){if(!downloadActive){downloadActive=true;var b=map.getBounds();_dlTiles(b.getNorth(),b.getSouth(),b.getEast(),b.getWest(),msg.minZ||10,msg.maxZ||15);}}
     if(msg.type==='cancel_download')downloadActive=false;
@@ -678,6 +694,7 @@ export default function MapScreen() {
   const [routeSteps,  setRouteSteps]  = useState<RouteStep[]>([]);
   const [isRouted,    setIsRouted]    = useState(false);
   const [mapLayer,    setMapLayerState] = useState<MapLayer>('satellite');
+  const [showLands,   setShowLands]    = useState(false);
   const [audioGuide,  setAudioGuide]   = useState<Record<string, string>>({});
   const [showSteps,   setShowSteps]    = useState(false);
   const [showPanel,   setShowPanel]    = useState(true);
@@ -1043,7 +1060,7 @@ export default function MapScreen() {
     }
     const center = userLoc ?? (waypoints[0] ? { lat: waypoints[0].lat, lng: waypoints[0].lng } : null);
     if (!center) return;
-    api.getOsmPois(center.lat, center.lng, 25)
+    api.getOsmPois(center.lat, center.lng, 40, 'water,trailhead,viewpoint,peak')
       .then(p => {
         setPois(p);
         webRef.current?.postMessage(JSON.stringify({ type: 'set_pois', pois: p }));
@@ -1547,6 +1564,17 @@ export default function MapScreen() {
 
         <TouchableOpacity style={s.ctrlBtn} onPress={switchLayer}>
           <Text style={s.layerText}>{layerLabel[mapLayer]}</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[s.ctrlBtn, showLands && { backgroundColor: '#16a34a99', borderColor: '#22c55e' }]}
+          onPress={() => {
+            const next = !showLands;
+            setShowLands(next);
+            webRef.current?.postMessage(JSON.stringify({ type: 'set_land_overlay', show: next }));
+          }}
+        >
+          <Text style={[s.layerText, showLands && { color: '#22c55e' }]}>LANDS</Text>
         </TouchableOpacity>
 
         {waypoints.length > 0 && (

@@ -1693,7 +1693,7 @@ export default function MapScreen() {
       {/* ── Offline Map Download Modal ── */}
       <Modal visible={showOfflineModal} animationType="slide" transparent onRequestClose={() => setShowOfflineModal(false)}>
         <TouchableOpacity style={s.modalBackdrop} activeOpacity={1} onPress={() => setShowOfflineModal(false)}>
-          <View style={s.offlineSheet}>
+          <View style={s.offlineSheet} onStartShouldSetResponder={() => true}>
             <Text style={s.offlineTitle}>OFFLINE MAPS</Text>
             {!user ? (
               <View style={{ alignItems: 'center', paddingVertical: 24 }}>
@@ -1705,7 +1705,7 @@ export default function MapScreen() {
             ) : (<>
             <Text style={s.offlineSub}>Download tiles for use without signal. z10–z12 overview, z10–z14 for current area.</Text>
             <Text style={s.offlineSectionLabel}>ALL US STATES (z10–z12)</Text>
-            <ScrollView style={{ maxHeight: 260 }} showsVerticalScrollIndicator={false}>
+            <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={true}>
               <View style={s.stateGrid}>
                 {Object.entries(US_STATES).map(([code, st]) => (
                   <TouchableOpacity key={code} style={s.stateBtn}

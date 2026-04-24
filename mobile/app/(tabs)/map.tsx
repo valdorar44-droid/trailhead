@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Linking, Animated } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Linking, Animated, TextInput, ActivityIndicator } from 'react-native';
 import { WebView } from 'react-native-webview';
 import * as Location from 'expo-location';
 import * as Speech from 'expo-speech';
@@ -122,6 +122,8 @@ const buildMapHtml = (
     border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:14px;}
   .me{background:#f97316;border:3px solid #fff;border-radius:50%;
     width:14px;height:14px;box-shadow:0 0 0 4px rgba(249,115,22,0.3);}
+  .search-pin{background:rgba(59,130,246,0.15);border:1.5px solid #3b82f6;
+    border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:14px;}
   .leaflet-popup-content-wrapper{background:#0f1319;border:1px solid #252d3d;
     color:#f1f5f9;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,0.6);}
   .leaflet-popup-tip{background:#0f1319;}
@@ -141,12 +143,67 @@ const buildMapHtml = (
   var map   = L.map('map',{zoomControl:false,attributionControl:false})
                 .setView([${centerLat},${centerLng}],zoom);
 
-  var baseLayer   = L.tileLayer('${TILE_SATELLITE}',{maxZoom:19}).addTo(map);
+  // ── IndexedDB offline tile cache ────────────────────────────────────────────
+  var _idb=null;
+  var _idbReady=new Promise(function(res){
+    var req=indexedDB.open('trailhead-tiles',1);
+    req.onupgradeneeded=function(e){e.target.result.createObjectStore('tiles',{keyPath:'k'});};
+    req.onsuccess=function(e){_idb=e.target.result;res();};
+    req.onerror=function(){res();};
+  });
+  function _getT(k){return _idbReady.then(function(){if(!_idb)return null;return new Promise(function(r){var tx=_idb.transaction('tiles','readonly');var rq=tx.objectStore('tiles').get(k);rq.onsuccess=function(){r(rq.result?rq.result.v:null);};rq.onerror=function(){r(null);};});});}
+  function _setT(k,v){return _idbReady.then(function(){if(!_idb)return;try{_idb.transaction('tiles','readwrite').objectStore('tiles').put({k:k,v:v});}catch(e){}});}
+  var CachedTileLayer=L.TileLayer.extend({_cp:'sat',createTile:function(coords,done){
+    var tile=document.createElement('img');tile.setAttribute('role','presentation');tile.setAttribute('alt','');
+    var url=this.getTileUrl(coords);var key=this._cp+'_'+coords.z+'_'+coords.x+'_'+coords.y;
+    _getT(key).then(function(cached){
+      if(cached){tile.src=cached;done(null,tile);}
+      else{tile.onload=function(){done(null,tile);};tile.onerror=function(e){done(e,tile);};tile.src=url;}
+    }).catch(function(){tile.onload=function(){done(null,tile);};tile.onerror=function(e){done(e,tile);};tile.src=url;});
+    return tile;
+  }});
+  L.tileLayer.cached=function(url,prefix,opts){var l=new CachedTileLayer(url,opts||{maxZoom:19});l._cp=prefix||'sat';return l;};
+
+  var currentLayerUrl='${TILE_SATELLITE}';
+  var currentLayerPrefix='sat';
+  var downloadActive=false;
+
+  function _ll2t(lat,lng,z){var x=Math.floor((lng+180)/360*Math.pow(2,z));var sin=Math.sin(lat*Math.PI/180);var y=Math.floor((0.5-Math.log((1+sin)/(1-sin))/(4*Math.PI))*Math.pow(2,z));return{x:Math.max(0,x),y:Math.max(0,y)};}
+  async function _fetchDU(url){var r=await fetch(url);if(!r.ok)throw new Error('x');var b=await r.blob();return new Promise(function(res,rej){var rd=new FileReader();rd.onload=function(){res(rd.result);};rd.onerror=rej;rd.readAsDataURL(b);});}
+  async function _dlTiles(bounds,minZ,maxZ){
+    var tiles=[],MAX=2000;
+    for(var z=minZ;z<=maxZ&&tiles.length<MAX;z++){
+      var nw=_ll2t(bounds.getNorth(),bounds.getWest(),z);var se=_ll2t(bounds.getSouth(),bounds.getEast(),z);
+      var cap=Math.pow(2,z)-1;
+      for(var x=Math.max(0,nw.x);x<=Math.min(cap,se.x)&&tiles.length<MAX;x++){
+        for(var y=Math.max(0,nw.y);y<=Math.min(cap,se.y)&&tiles.length<MAX;y++){tiles.push({z:z,x:x,y:y});}
+      }
+    }
+    var total=tiles.length,saved=0,BATCH=5;
+    postRN({type:'download_progress',percent:0,saved:0,total:total});
+    for(var i=0;i<tiles.length;i+=BATCH){
+      if(!downloadActive)break;
+      var batch=tiles.slice(i,i+BATCH);
+      await Promise.allSettled(batch.map(async function(t){
+        var url=currentLayerUrl.replace('{z}',t.z).replace('{x}',t.x).replace('{y}',t.y);
+        var key=currentLayerPrefix+'_'+t.z+'_'+t.x+'_'+t.y;
+        try{var ex=await _getT(key);if(!ex){var d=await _fetchDU(url);await _setT(key,d);}saved++;postRN({type:'download_progress',percent:Math.round(saved/total*100),saved:saved,total:total});}
+        catch(e){saved++;}
+      }));
+    }
+    postRN({type:'download_complete',saved:saved,total:total});
+  }
+
+  var baseLayer   = L.tileLayer.cached('${TILE_SATELLITE}','sat',{maxZoom:19});
+  baseLayer.addTo(map);
   var labelLayer  = null;
   var fallbackLine = null;
   var routeLine    = null;
   var userMarker   = null;
   var wpMarkers    = [];
+  var searchPin    = null;
+  var breadcrumbPts= [];
+  var breadcrumb   = null;
 
   // ── Markers ─────────────────────────────────────────────────────────────────
 
@@ -160,6 +217,7 @@ const buildMapHtml = (
   wps.forEach(function(w,i){
     var m=L.marker([w.lat,w.lng],{icon:mkWp(w,i,false)}).addTo(map)
       .bindPopup('<div class="pt">'+w.name+'</div><div class="pm">Day '+w.day+' · '+w.type+'</div>');
+    m.on('click',function(){postRN({type:'wp_tapped',idx:i,name:w.name});});
     wpMarkers.push({m:m,w:w,i:i});
   });
   camps.forEach(function(c){
@@ -205,22 +263,20 @@ const buildMapHtml = (
       routeLine=L.geoJSON(route.geometry,{
         style:{color:'#f97316',weight:4.5,opacity:0.92,lineCap:'round',lineJoin:'round'}
       }).addTo(map);
-      // parse steps
-      var steps=[];
+      // parse steps + per-leg groups
+      var steps=[]; var legs=[];
       (route.legs||[]).forEach(function(leg){
+        var legSteps=[];
         (leg.steps||[]).forEach(function(s){
           if(s.distance>0||s.maneuver.type==='arrive'){
-            steps.push({
-              type:s.maneuver.type,
-              modifier:s.maneuver.modifier||'',
-              name:s.name||'',
-              distance:s.distance,
-              duration:s.duration,
-            });
+            var step={type:s.maneuver.type,modifier:s.maneuver.modifier||'',
+              name:s.name||'',distance:s.distance,duration:s.duration};
+            steps.push(step); legSteps.push(step);
           }
         });
+        legs.push(legSteps);
       });
-      postRN({type:'route_ready',routed:true,steps:steps,
+      postRN({type:'route_ready',routed:true,steps:steps,legs:legs,
               total_distance:route.distance,total_duration:route.duration});
     }catch(e){drawFallback();}
   }
@@ -255,10 +311,31 @@ const buildMapHtml = (
       if(msg.type==='locate'&&msg.lat){setUserPos(msg.lat,msg.lng);map.setView([msg.lat,msg.lng],13);}
       if(msg.type==='nav_target'){setNavTarget(msg.idx);}
       if(msg.type==='nav_reset'){setNavTarget(-1);}
+      if(msg.type==='fly_to'&&msg.lat){
+        map.setView([msg.lat,msg.lng],14);
+        if(searchPin){map.removeLayer(searchPin);}
+        searchPin=L.marker([msg.lat,msg.lng],{icon:L.divIcon({className:'',
+          html:'<div class="search-pin">📍</div>',iconSize:[28,28],iconAnchor:[14,28]})})
+          .addTo(map).bindPopup('<div class="pt">'+(msg.name||'Location')+'</div>');
+        searchPin.openPopup();
+      }
+      if(msg.type==='track_point'&&msg.lat){
+        breadcrumbPts.push([msg.lat,msg.lng]);
+        if(breadcrumb){breadcrumb.setLatLngs(breadcrumbPts);}
+        else{breadcrumb=L.polyline(breadcrumbPts,{color:'#3b82f6',weight:3,opacity:0.75,dashArray:'1,5'}).addTo(map);}
+      }
+      if(msg.type==='clear_track'){
+        breadcrumbPts=[];if(breadcrumb){map.removeLayer(breadcrumb);breadcrumb=null;}
+      }
+      if(msg.type==='download_tiles'){
+        if(!downloadActive){downloadActive=true;var bounds=map.getBounds();_dlTiles(bounds,msg.minZ||10,msg.maxZ||15);}
+      }
+      if(msg.type==='cancel_download'){downloadActive=false;}
       if(msg.type==='set_layer'){
         map.removeLayer(baseLayer);
         if(labelLayer){map.removeLayer(labelLayer);labelLayer=null;}
-        baseLayer=L.tileLayer(msg.url,{maxZoom:19,opacity:msg.opacity||1}).addTo(map);
+        currentLayerUrl=msg.url;currentLayerPrefix=msg.cachePrefix||'sat';
+        baseLayer=L.tileLayer.cached(msg.url,currentLayerPrefix,{maxZoom:19,opacity:msg.opacity||1}).addTo(map);
         baseLayer.bringToBack();
         if(msg.labelsUrl){
           labelLayer=L.tileLayer(msg.labelsUrl,{maxZoom:19,opacity:0.75}).addTo(map);
@@ -292,6 +369,15 @@ export default function MapScreen() {
   const [routeAlerts, setRouteAlerts]  = useState<Report[]>([]);
   const [showAlerts,  setShowAlerts]   = useState(false);
   const [communityPins, setCommunityPins] = useState<Pin[]>([]);
+  const [routeLegs,    setRouteLegs]    = useState<RouteStep[][]>([]);
+  const [searchQuery,  setSearchQuery]  = useState('');
+  const [searchResults,setSearchResults] = useState<{ lat: number; lng: number; name: string }[]>([]);
+  const [showSearch,   setShowSearch]   = useState(false);
+  const [isSearching,  setIsSearching]  = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [downloadTotal, setDownloadTotal] = useState(0);
+  const [offlineSaved, setOfflineSaved] = useState(false);
 
   const navAnim  = useRef(new Animated.Value(0)).current;
   const navRef   = useRef({ active: false, idx: 0, wps: [] as WP[] });
@@ -330,6 +416,10 @@ export default function MapScreen() {
             type: active ? 'nav_center' : 'user_pos',
             lat: pos.lat, lng: pos.lng,
           }));
+
+          if (active) {
+            webRef.current?.postMessage(JSON.stringify({ type: 'track_point', lat: pos.lat, lng: pos.lng }));
+          }
 
           if (!active || !wps[idx]) return;
           const dist = haversineKm(pos.lat, pos.lng, wps[idx].lat, wps[idx].lng);
@@ -389,9 +479,44 @@ export default function MapScreen() {
       if (first) Speech.speak(`Navigation started. Heading to ${first.name}.`, { rate: 0.9 });
     } else {
       webRef.current?.postMessage(JSON.stringify({ type: 'nav_reset' }));
+      webRef.current?.postMessage(JSON.stringify({ type: 'clear_track' }));
       Speech.stop();
     }
   }, [navMode]);
+
+  // ── Voice turn announcement on leg advance ──────────────────────────────────
+
+  useEffect(() => {
+    if (!navMode || navIdx === 0 || routeLegs.length === 0) return;
+    const legSteps = routeLegs[navIdx];
+    if (!legSteps) return;
+    const first = legSteps.find(s => s.type !== 'depart' && s.distance > 50);
+    if (!first) return;
+    const road = first.name ? ` on ${first.name}` : '';
+    const t = setTimeout(() => {
+      Speech.speak(`In ${formatStepDist(first.distance)}, ${stepLabel(first.type, first.modifier)}${road}`, { rate: 0.9 });
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [navIdx, navMode]);
+
+  // ── Nominatim map search ────────────────────────────────────────────────────
+
+  async function searchMap() {
+    if (!searchQuery.trim()) return;
+    setIsSearching(true);
+    try {
+      const q = encodeURIComponent(searchQuery.trim());
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=5`,
+        { headers: { 'User-Agent': 'Trailhead/1.0' } }
+      );
+      const data = await res.json();
+      setSearchResults(data.map((r: any) => ({
+        lat: parseFloat(r.lat), lng: parseFloat(r.lon), name: r.display_name,
+      })));
+    } catch {}
+    setIsSearching(false);
+  }
 
   // ── Layer switch ────────────────────────────────────────────────────────────
 
@@ -400,13 +525,11 @@ export default function MapScreen() {
     setMapLayerState(next);
     let msg: any = { type: 'set_layer' };
     if (next === 'satellite') {
-      msg.url = TILE_SATELLITE;
+      msg.url = TILE_SATELLITE; msg.cachePrefix = 'sat';
     } else if (next === 'topo') {
-      msg.url = TILE_TOPO;
-      msg.opacity = 0.96;
+      msg.url = TILE_TOPO; msg.opacity = 0.96; msg.cachePrefix = 'topo';
     } else {
-      msg.url = TILE_SATELLITE;
-      msg.labelsUrl = TILE_LABELS;
+      msg.url = TILE_SATELLITE; msg.labelsUrl = TILE_LABELS; msg.cachePrefix = 'hyb';
     }
     webRef.current?.postMessage(JSON.stringify(msg));
   }
@@ -419,6 +542,22 @@ export default function MapScreen() {
       if (msg.type === 'route_ready') {
         setIsRouted(msg.routed);
         setRouteSteps(msg.steps ?? []);
+        setRouteLegs(msg.legs ?? []);
+      }
+      if (msg.type === 'wp_tapped') {
+        setNavIdx(msg.idx);
+        navRef.current.idx = msg.idx;
+        if (!navRef.current.active) setNavMode(true);
+      }
+      if (msg.type === 'download_progress') {
+        setDownloadProgress(msg.percent ?? 0);
+        setDownloadTotal(msg.total ?? 0);
+      }
+      if (msg.type === 'download_complete') {
+        setIsDownloading(false);
+        setDownloadProgress(100);
+        setOfflineSaved(true);
+        setTimeout(() => setDownloadProgress(0), 2000);
       }
     } catch {}
   }
@@ -457,6 +596,7 @@ export default function MapScreen() {
 
   // Next OSRM step (rough: first non-depart step with significant distance)
   const nextStep = routeSteps.find(s => s.type !== 'depart' && s.distance > 50) ?? null;
+  const isProceeding = distKm !== null && distKm > 30;
 
   function openInMaps() {
     if (!waypoints.length) return;
@@ -493,9 +633,13 @@ export default function MapScreen() {
       <View style={s.topBar}>
         <View style={[s.topBarDot, navMode && { backgroundColor: C.green }]} />
         <Text style={s.topBarText} numberOfLines={1}>
-          {navMode
-            ? `NAVIGATING · STOP ${navIdx + 1}/${waypoints.length} · ${isRouted ? '🗺 ROUTED' : '🧭 OFF-ROAD'}`
-            : activeTrip ? activeTrip.plan.trip_name.toUpperCase() : 'NO ACTIVE TRIP'}
+          {isDownloading
+            ? `CACHING TILES ${downloadProgress}% · ${downloadTotal} TOTAL`
+            : navMode
+              ? isProceeding
+                ? `PROCEED TO STOP ${navIdx + 1}/${waypoints.length}`
+                : `NAVIGATING · STOP ${navIdx + 1}/${waypoints.length} · ${isRouted ? '🗺 ROUTED' : '🧭 OFF-ROAD'}`
+              : activeTrip ? activeTrip.plan.trip_name.toUpperCase() : 'NO ACTIVE TRIP'}
         </Text>
         {routeAlerts.length > 0 && (
           <TouchableOpacity style={s.alertPill} onPress={() => setShowAlerts(v => !v)}>
@@ -503,6 +647,13 @@ export default function MapScreen() {
           </TouchableOpacity>
         )}
       </View>
+
+      {/* Offline download progress bar */}
+      {isDownloading && (
+        <View style={s.dlBar}>
+          <View style={[s.dlFill, { width: `${downloadProgress}%` as any }]} />
+        </View>
+      )}
 
       {/* Controls */}
       <View style={s.controls}>
@@ -522,6 +673,34 @@ export default function MapScreen() {
             onPress={() => navMode ? setNavMode(false) : (setNavIdx(0), navRef.current.idx = 0, setNavMode(true))}
           >
             <Ionicons name="navigate" size={20} color={navMode ? '#fff' : C.text} />
+          </TouchableOpacity>
+        )}
+
+        <TouchableOpacity
+          style={[s.ctrlBtn, showSearch && { backgroundColor: '#3b82f6dd', borderColor: '#3b82f6' }]}
+          onPress={() => { setShowSearch(p => !p); setSearchResults([]); setSearchQuery(''); }}
+        >
+          <Ionicons name="search" size={20} color={showSearch ? '#fff' : C.text} />
+        </TouchableOpacity>
+
+        {waypoints.length > 0 && (
+          <TouchableOpacity
+            style={[s.ctrlBtn, isDownloading && { backgroundColor: C.orange + 'dd', borderColor: C.orange }]}
+            onPress={() => {
+              if (isDownloading) {
+                webRef.current?.postMessage(JSON.stringify({ type: 'cancel_download' }));
+                setIsDownloading(false);
+              } else {
+                setIsDownloading(true); setOfflineSaved(false);
+                webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles', minZ: 10, maxZ: 15 }));
+              }
+            }}
+          >
+            <Ionicons
+              name={isDownloading ? 'close-circle-outline' : offlineSaved ? 'cloud-done-outline' : 'cloud-download-outline'}
+              size={20}
+              color={isDownloading ? '#fff' : offlineSaved ? C.green : C.text}
+            />
           </TouchableOpacity>
         )}
 
@@ -557,6 +736,46 @@ export default function MapScreen() {
               </View>
             ))}
           </ScrollView>
+        </View>
+      )}
+
+      {/* ── Search overlay ── */}
+      {showSearch && (
+        <View style={s.searchOverlay}>
+          <View style={s.searchBar}>
+            <Ionicons name="search" size={15} color={C.text3} />
+            <TextInput
+              style={s.searchInput}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              onSubmitEditing={searchMap}
+              placeholder="Search location..."
+              placeholderTextColor={C.text3}
+              returnKeyType="search"
+              autoFocus
+            />
+            {isSearching
+              ? <ActivityIndicator size="small" color={C.orange} />
+              : searchQuery.length > 0 && (
+                <TouchableOpacity onPress={searchMap}>
+                  <Text style={s.searchGo}>GO</Text>
+                </TouchableOpacity>
+              )
+            }
+          </View>
+          {searchResults.length > 0 && (
+            <ScrollView style={s.searchResults} keyboardShouldPersistTaps="handled">
+              {searchResults.map((r, i) => (
+                <TouchableOpacity key={i} style={s.searchResultItem} onPress={() => {
+                  webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: r.lat, lng: r.lng, name: r.name }));
+                  setShowSearch(false); setSearchResults([]); setSearchQuery('');
+                }}>
+                  <Ionicons name="location-outline" size={13} color={C.text3} />
+                  <Text style={s.searchResultText} numberOfLines={2}>{r.name}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
         </View>
       )}
 
@@ -616,7 +835,7 @@ export default function MapScreen() {
         {navTarget && (
           <View style={s.navTarget}>
             <View style={s.navTargetBadge}>
-              <Text style={s.navTargetBadgeText}>NEXT STOP</Text>
+              <Text style={s.navTargetBadgeText}>{isProceeding ? 'PROCEED TO' : 'NEXT STOP'}</Text>
             </View>
             <View style={s.navTargetInfo}>
               <Text style={s.navTargetName} numberOfLines={1}>{navTarget.name}</Text>
@@ -641,10 +860,6 @@ export default function MapScreen() {
             </TouchableOpacity>
           )}
 
-          <TouchableOpacity style={s.navMapsBtn} onPress={openInMaps}>
-            <Ionicons name="open-outline" size={14} color="#fff" />
-            <Text style={s.navMapsBtnText}>OPEN IN MAPS</Text>
-          </TouchableOpacity>
         </View>
 
         {/* Steps list */}
@@ -686,7 +901,7 @@ export default function MapScreen() {
               ))}
             <TouchableOpacity style={s.mapsBtn} onPress={openInMaps}>
               <Ionicons name="open-outline" size={11} color={C.text3} />
-              <Text style={s.mapsBtnText}>MAPS</Text>
+              <Text style={s.mapsBtnText}>EXPORT</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -805,13 +1020,11 @@ const s = StyleSheet.create({
     borderWidth: 1, borderColor: C.border, backgroundColor: C.s2,
   },
   navStepsBtnText: { color: C.text2, fontSize: 11, fontFamily: mono },
-  navMapsBtn: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-    paddingVertical: 10, borderRadius: 11,
-    backgroundColor: C.orange,
-    shadowColor: C.orange, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.35, shadowRadius: 8,
+  dlBar: {
+    position: 'absolute', top: 92, left: 16, right: 16,
+    height: 3, borderRadius: 1.5, backgroundColor: C.border, overflow: 'hidden',
   },
-  navMapsBtnText: { color: '#fff', fontSize: 11, fontFamily: mono, fontWeight: '700' },
+  dlFill: { height: 3, backgroundColor: C.orange, borderRadius: 1.5 },
 
   stepsList: { maxHeight: 200, borderTopWidth: 1, borderColor: C.border },
   stepRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 9, borderBottomWidth: 1, borderColor: C.s2 },
@@ -820,6 +1033,30 @@ const s = StyleSheet.create({
   stepLabel: { color: C.text2, fontSize: 11, fontFamily: mono, fontWeight: '700' },
   stepRoad: { color: C.text3, fontSize: 10, marginTop: 1 },
   stepDist: { color: C.text3, fontSize: 10, fontFamily: mono },
+
+  // ── Search overlay
+  searchOverlay: {
+    position: 'absolute', top: 106, left: 16, right: 70,
+    backgroundColor: 'rgba(8,12,18,0.97)', borderRadius: 14,
+    borderWidth: 1, borderColor: '#3b82f6',
+    overflow: 'hidden',
+  },
+  searchBar: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingHorizontal: 12, paddingVertical: 10,
+    borderBottomWidth: 1, borderColor: C.border,
+  },
+  searchInput: {
+    flex: 1, color: C.text, fontSize: 13, fontFamily: mono,
+  },
+  searchGo: { color: C.orange, fontSize: 11, fontFamily: mono, fontWeight: '700' },
+  searchResults: { maxHeight: 240 },
+  searchResultItem: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 8,
+    paddingHorizontal: 12, paddingVertical: 10,
+    borderBottomWidth: 1, borderColor: C.s2,
+  },
+  searchResultText: { color: C.text2, fontSize: 12, flex: 1, lineHeight: 17 },
 
   // ── Bottom panel
   panel: { backgroundColor: C.s1, borderTopWidth: 1, borderColor: C.border, paddingBottom: 10 },

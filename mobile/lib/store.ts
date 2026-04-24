@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
-import { User, TripResult } from './api';
+import { User, TripResult, Report } from './api';
 
 export interface RigProfile {
   vehicle_type: string;
@@ -32,6 +32,7 @@ interface AppState {
   userLoc: { lat: number; lng: number } | null;
   mapboxToken: string;
   sessionId: string;
+  liveReports: Report[];
   setAuth: (token: string, user: User) => void;
   clearAuth: () => void;
   setActiveTrip: (trip: TripResult | null) => void;
@@ -41,6 +42,8 @@ interface AppState {
   setUserLoc: (loc: { lat: number; lng: number } | null) => void;
   setMapboxToken: (token: string) => void;
   setSessionId: (id: string) => void;
+  addLiveReport: (report: Report) => void;
+  setLiveReports: (reports: Report[]) => void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -53,6 +56,7 @@ export const useStore = create<AppState>((set) => ({
   userLoc: null,
   mapboxToken: '',
   sessionId: 'sess_' + Math.random().toString(36).slice(2, 12),
+  liveReports: [],
 
   setAuth: (token, user) => {
     SecureStore.setItemAsync('trailhead_token', token);
@@ -84,6 +88,10 @@ export const useStore = create<AppState>((set) => ({
 
   setUserLoc: (loc) => set({ userLoc: loc }),
   setMapboxToken: (token) => set({ mapboxToken: token }),
+  addLiveReport: (report) => set(state => ({
+    liveReports: [report, ...state.liveReports.filter(r => r.id !== report.id)].slice(0, 100),
+  })),
+  setLiveReports: (reports) => set({ liveReports: reports }),
   setSessionId: (id) => {
     SecureStore.setItemAsync('trailhead_session', id);
     set({ sessionId: id });

@@ -247,6 +247,15 @@ const buildMapHtml = (
   @keyframes ld{0%,80%,100%{transform:scale(.3);opacity:.3}40%{transform:scale(1);opacity:1}}
   .pt{font-weight:700;font-size:13px;margin-bottom:4px;}
   .pm{color:#6b7280;font-size:11px;font-family:monospace;}
+  .mk-rep{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px;border:2.5px solid rgba(255,255,255,0.7);box-shadow:0 2px 10px rgba(0,0,0,0.45);cursor:pointer;user-select:none;transition:transform .15s;}
+  .mk-rep:hover{transform:scale(1.15);}
+  .mk-rep-police{background:#eab308dd;box-shadow:0 2px 10px rgba(234,179,8,0.6);}
+  .mk-rep-hazard{background:#ef4444dd;box-shadow:0 2px 10px rgba(239,68,68,0.6);}
+  .mk-rep-road_condition{background:#f97316dd;box-shadow:0 2px 10px rgba(249,115,22,0.6);}
+  .mk-rep-wildlife{background:#a855f7dd;box-shadow:0 2px 10px rgba(168,85,247,0.6);}
+  .mk-rep-campsite{background:#22c55edd;box-shadow:0 2px 10px rgba(34,197,94,0.5);}
+  .mk-rep-road_closure{background:#dc2626dd;box-shadow:0 2px 10px rgba(220,38,38,0.6);}
+  .mk-rep-water{background:#38bdf8dd;box-shadow:0 2px 10px rgba(56,189,248,0.5);}
 </style>
 </head>
 <body>
@@ -260,7 +269,8 @@ const buildMapHtml = (
 
   var map,mapboxToken='',currentStyle='mapbox://styles/mapbox/satellite-streets-v12';
   var userMarker=null,wpMarkers=[],searchMarker=null;
-  var allCamps=[],allGas=[],allPois=[];
+  var allCamps=[],allGas=[],allPois=[],allReports=[];
+  var reportMarkers=[];
   var routeOpts={avoidTolls:false,avoidHighways:false,backRoads:false,noFerries:false};
   var _routeCoords=[],routePts=[],breadcrumbPts=[];
   var lastOffCheck=0,downloadActive=false,mapReady=false,pendingMsgs=[];
@@ -307,7 +317,7 @@ const buildMapHtml = (
     });
     map.on('style.load',function(){
       setupSources();setupLayers();renderWaypoints();
-      updateCampSrc();updateGasSrc();updatePoiSrc();updateRoute();updateBreadcrumb();
+      updateCampSrc();updateGasSrc();updatePoiSrc();updateRoute();updateBreadcrumb();updateReportMarkers();
     });
     var boundsTimer;
     map.on('moveend',function(){
@@ -374,6 +384,20 @@ const buildMapHtml = (
   function updatePoiSrc(){if(!map||!map.getSource('pois'))return;map.getSource('pois').setData({type:'FeatureCollection',features:allPois.map(function(p){return{type:'Feature',geometry:{type:'Point',coordinates:[p.lng,p.lat]},properties:{name:p.name,type:p.type||'pin'}};})});}
   function updateRoute(){if(!map||!map.getSource('route'))return;map.getSource('route').setData({type:'Feature',geometry:{type:'LineString',coordinates:_routeCoords}});}
   function updateBreadcrumb(){if(!map||!map.getSource('breadcrumb'))return;map.getSource('breadcrumb').setData({type:'Feature',geometry:{type:'LineString',coordinates:breadcrumbPts}});}
+  var REP_ICONS={police:'🚔',hazard:'⚠️',road_condition:'🛑',wildlife:'🐾',campsite:'⛺',road_closure:'🚧',water:'💧'};
+  function updateReportMarkers(){
+    reportMarkers.forEach(function(m){m.remove();});reportMarkers=[];
+    allReports.forEach(function(r){
+      var el=document.createElement('div');
+      el.className='mk-rep mk-rep-'+(r.type||'hazard');
+      el.textContent=REP_ICONS[r.type]||'⚠️';
+      el.title=(r.subtype||r.type)+(r.confirmations?' ✓'+r.confirmations:'');
+      var popup=new mapboxgl.Popup({offset:18,closeButton:false}).setHTML('<div class="pt">'+(r.subtype||r.type)+'</div><div class="pm">'+(r.description||'Community report')+'</div>');
+      var m=new mapboxgl.Marker({element:el,anchor:'center'}).setLngLat([r.lng,r.lat]).setPopup(popup).addTo(map);
+      el.addEventListener('click',function(ev){ev.stopPropagation();m.togglePopup();postRN({type:'report_tapped',report:r});});
+      reportMarkers.push(m);
+    });
+  }
 
   // ── User position ──────────────────────────────────────────────────────────────
   var navActive=false;
@@ -484,6 +508,8 @@ const buildMapHtml = (
       searchMarker.togglePopup();
       _fetchRoute([msg.userLng+','+msg.userLat,msg.lng+','+msg.lat],0);
     }
+    if(msg.type==='set_reports'){allReports=msg.reports||[];updateReportMarkers();}
+    if(msg.type==='add_report'){allReports=allReports.filter(function(r){return r.id!==msg.report.id;});allReports.push(msg.report);updateReportMarkers();}
     if(msg.type==='set_style'&&msg.style){currentStyle=msg.style;map.setStyle(msg.style);}
     if(msg.type==='download_tiles_bbox'){if(!downloadActive){downloadActive=true;_dlTiles(msg.n,msg.s,msg.e,msg.w,msg.minZ||10,msg.maxZ||12);}}
     if(msg.type==='download_tiles'){if(!downloadActive){downloadActive=true;var b=map.getBounds();_dlTiles(b.getNorth(),b.getSouth(),b.getEast(),b.getWest(),msg.minZ||10,msg.maxZ||15);}}
@@ -506,6 +532,8 @@ export default function MapScreen() {
   const user = useStore(st => st.user);
   const setStoreLoc = useStore(st => st.setUserLoc);
   const setStoreToken = useStore(st => st.setMapboxToken);
+  const liveReports = useStore(st => st.liveReports);
+  const addLiveReport = useStore(st => st.addLiveReport);
   const webRef = useRef<WebView>(null);
 
   const [userLoc,       setUserLoc]       = useState<{ lat: number; lng: number } | null>(null);
@@ -583,8 +611,8 @@ export default function MapScreen() {
   const [loadingPacking,setLoadingPacking]= useState(false);
 
   const [navDest, setNavDest] = useState<WP | null>(null);
-
   const [stepIdx, setStepIdx] = useState(0);
+  const [approachingReport, setApproachingReport] = useState<Report | null>(null);
 
   const navAnim      = useRef(new Animated.Value(0)).current;
   const navRef       = useRef({ active: false, idx: 0, wps: [] as WP[] });
@@ -596,6 +624,10 @@ export default function MapScreen() {
   const stepAnnouncedRef = useRef(new Set<number>());
   const isReroutingRef   = useRef(false);
   const lastRerouteRef   = useRef(0);
+  const liveReportsRef   = useRef<Report[]>([]);
+  const routeAlertsRef   = useRef<Report[]>([]);
+  const alertedRepIdsRef = useRef(new Set<number>());
+  const approachDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const discoverRef  = useRef<CampsitePin[]>([]);
 
   const webLoadedRef = useRef(false);
@@ -622,6 +654,23 @@ export default function MapScreen() {
   // Keep refs in sync
   useEffect(() => { navRef.current.active = navMode; }, [navMode]);
   useEffect(() => { isReroutingRef.current = isRerouting; }, [isRerouting]);
+
+  // Sync report refs + push combined list to WebView whenever either changes
+  useEffect(() => {
+    liveReportsRef.current = liveReports;
+    const all = [...liveReports, ...routeAlertsRef.current];
+    webRef.current?.postMessage(JSON.stringify({ type: 'set_reports', reports: all }));
+    // Push just the new live report individually too (in case map isn't ready yet the set_reports will catch it)
+    if (liveReports.length > 0) {
+      webRef.current?.postMessage(JSON.stringify({ type: 'add_report', report: liveReports[0] }));
+    }
+  }, [liveReports]);
+
+  useEffect(() => {
+    routeAlertsRef.current = routeAlerts;
+    const all = [...liveReportsRef.current, ...routeAlerts];
+    webRef.current?.postMessage(JSON.stringify({ type: 'set_reports', reports: all }));
+  }, [routeAlerts]);
 
   // Keep routeStepsRef in sync; reset step index on each new route
   useEffect(() => {
@@ -691,6 +740,29 @@ export default function MapScreen() {
                 const next = si + 1;
                 stepIdxRef.current = next;
                 setStepIdx(next);
+              }
+            }
+          }
+
+          // ── Approaching report alert (Waze-style 1-mile warning) ──────────
+          {
+            const allReps = [...liveReportsRef.current, ...routeAlertsRef.current];
+            for (const rep of allReps) {
+              if (alertedRepIdsRef.current.has(rep.id)) continue;
+              const repDistM = haversineKm(pos.lat, pos.lng, rep.lat, rep.lng) * 1000;
+              if (repDistM < 1609) { // 1 mile
+                alertedRepIdsRef.current.add(rep.id);
+                setApproachingReport(rep);
+                const labels: Record<string, string> = {
+                  police: 'Ranger patrol', hazard: 'Hazard reported',
+                  road_condition: 'Road condition', wildlife: 'Wildlife',
+                  road_closure: 'Road closure', campsite: 'Campsite report', water: 'Water source',
+                };
+                const label = labels[rep.type] ?? 'Community report';
+                Speech.speak(`${label} ahead in ${formatStepDist(repDistM)}.`, { rate: 0.9 });
+                if (approachDismissRef.current) clearTimeout(approachDismissRef.current);
+                approachDismissRef.current = setTimeout(() => setApproachingReport(null), 20000);
+                break; // one alert at a time
               }
             }
           }
@@ -864,6 +936,9 @@ export default function MapScreen() {
     } else {
       setIsApproaching(false);
       setIsRerouting(false);
+      setApproachingReport(null);
+      alertedRepIdsRef.current.clear();
+      if (approachDismissRef.current) clearTimeout(approachDismissRef.current);
       setRouteLegOffset(0);
       navDestRef.current = null;
       setNavDest(null);
@@ -2142,6 +2217,56 @@ export default function MapScreen() {
         )}
       </Animated.View>
 
+      {/* ── Approaching report alert (Waze-style) ─────────────────────────── */}
+      {approachingReport && navMode && (() => {
+        const rep = approachingReport;
+        const repDistM = userLoc ? haversineKm(userLoc.lat, userLoc.lng, rep.lat, rep.lng) * 1000 : null;
+        const repIcons: Record<string, string> = { police: '🚔', hazard: '⚠️', road_condition: '🛑', wildlife: '🐾', road_closure: '🚧', campsite: '⛺', water: '💧' };
+        const repColors: Record<string, string> = { police: '#eab308', hazard: '#ef4444', road_condition: '#f97316', wildlife: '#a855f7', road_closure: '#dc2626', campsite: '#22c55e', water: '#38bdf8' };
+        const color = repColors[rep.type] ?? '#f97316';
+        const icon  = repIcons[rep.type] ?? '⚠️';
+        const label = rep.subtype || ({ police: 'Ranger Patrol', hazard: 'Hazard', road_condition: 'Road Condition', wildlife: 'Wildlife', road_closure: 'Road Closure' }[rep.type] ?? 'Community Report');
+        return (
+          <View style={[s.approachAlert, { borderColor: color + '66' }]}>
+            <View style={[s.approachAlertIcon, { backgroundColor: color + '22' }]}>
+              <Text style={{ fontSize: 22 }}>{icon}</Text>
+            </View>
+            <View style={s.approachAlertInfo}>
+              <Text style={[s.approachAlertLabel, { color }]}>{label.toUpperCase()}</Text>
+              <Text style={s.approachAlertDist}>
+                {repDistM !== null ? `${formatStepDist(repDistM)} ahead` : 'Nearby'}
+                {rep.confirmations > 0 ? ` · ${rep.confirmations} confirmed` : ''}
+              </Text>
+            </View>
+            <View style={s.approachAlertActions}>
+              <TouchableOpacity
+                style={[s.approachAlertBtn, { backgroundColor: color + '22', borderColor: color + '55' }]}
+                onPress={async () => {
+                  try { await api.confirmReport(rep.id); } catch {}
+                  setApproachingReport(null);
+                  setQuickToast('+2 credits');
+                  setTimeout(() => setQuickToast(''), 2000);
+                }}
+              >
+                <Text style={[s.approachAlertBtnText, { color }]}>STILL{'\n'}THERE</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.approachAlertBtn, { borderColor: OVR.border }]}
+                onPress={async () => {
+                  try { await api.downvoteReport(rep.id); } catch {}
+                  setApproachingReport(null);
+                }}
+              >
+                <Text style={[s.approachAlertBtnText, { color: OVR.text3 }]}>NOT{'\n'}THERE</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.approachAlertClose} onPress={() => setApproachingReport(null)}>
+                <Ionicons name="close" size={14} color={OVR.text3} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        );
+      })()}
+
       {/* ── Waze-style quick report ─────────────────────────────────────────── */}
       {userLoc && !showSearch && !selectedCamp && (
         <View style={s.quickReportWrap} pointerEvents="box-none">
@@ -2172,6 +2297,15 @@ export default function MapScreen() {
                       });
                       setQuickToast(`+${res.credits_earned} credits`);
                       setTimeout(() => setQuickToast(''), 3000);
+                      const newRep: Report = {
+                        id: res.report_id, lat: userLoc.lat, lng: userLoc.lng,
+                        type: rt.type, subtype: rt.subtype, description: '',
+                        severity: rt.sev, upvotes: 0, downvotes: 0, confirmations: 0,
+                        has_photo: 0, cluster_count: 1, username: user?.username ?? 'me',
+                        created_at: Date.now() / 1000,
+                        expires_at: Date.now() / 1000 + res.ttl_hours * 3600,
+                      };
+                      addLiveReport(newRep);
                     } catch { setQuickToast('Submitted'); setTimeout(() => setQuickToast(''), 2000); }
                   }}
                 >
@@ -2729,4 +2863,33 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   quickReportFabText: { color: OVR.text2, fontSize: 11, fontFamily: mono, fontWeight: '700' },
   packDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: C.orange, marginTop: 6 },
+
+  // ── Approaching report alert ─────────────────────────────────────────────────
+  approachAlert: {
+    position: 'absolute', top: 100, left: 16, right: 16,
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: OVR.bg, borderRadius: 16,
+    borderWidth: 1.5, padding: 12,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 12,
+    elevation: 12,
+  },
+  approachAlertIcon: {
+    width: 46, height: 46, borderRadius: 23,
+    alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  },
+  approachAlertInfo: { flex: 1 },
+  approachAlertLabel: { fontSize: 12, fontFamily: mono, fontWeight: '800', letterSpacing: 1 },
+  approachAlertDist: { color: OVR.text2, fontSize: 11, fontFamily: mono, marginTop: 2 },
+  approachAlertActions: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  approachAlertBtn: {
+    alignItems: 'center', justifyContent: 'center',
+    borderRadius: 10, borderWidth: 1,
+    paddingHorizontal: 8, paddingVertical: 6, minWidth: 44,
+  },
+  approachAlertBtnText: { fontSize: 9, fontFamily: mono, fontWeight: '800', textAlign: 'center', letterSpacing: 0.5 },
+  approachAlertClose: {
+    width: 28, height: 28, borderRadius: 14,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: OVR.border2,
+  },
 });

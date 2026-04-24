@@ -53,7 +53,7 @@ type TabView = 'submit' | 'nearby' | 'leaderboard';
 export default function ReportScreen() {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
-  const { user, setAuth } = useStore();
+  const { user, setAuth, addLiveReport } = useStore();
   const [loc, setLoc] = useState<{ lat: number; lng: number } | null>(null);
   const [selectedType, setSelectedType] = useState<typeof REPORT_TYPES[0] | null>(null);
   const [selectedSubtype, setSelectedSubtype] = useState('');
@@ -143,6 +143,17 @@ export default function ReportScreen() {
       });
       setCreditsGained(res.credits_earned + (res.streak_bonus ?? 0));
       setSubmitted(true);
+      // Push report to shared store so map tab shows the pin immediately
+      addLiveReport({
+        id: res.report_id, lat: loc!.lat, lng: loc!.lng,
+        type: selectedType!.type, subtype: selectedSubtype,
+        description: fullDesc ?? '', severity,
+        upvotes: 0, downvotes: 0, confirmations: 0,
+        has_photo: photoBase64 ? 1 : 0, cluster_count: 1,
+        username: user?.username ?? 'me',
+        created_at: Date.now() / 1000,
+        expires_at: Date.now() / 1000 + res.ttl_hours * 3600,
+      });
       Animated.spring(successAnim, { toValue: 1, tension: 60, friction: 7, useNativeDriver: true }).start();
       setTimeout(() => {
         Animated.timing(successAnim, { toValue: 0, duration: 300, useNativeDriver: true }).start(() => setSubmitted(false));

@@ -83,6 +83,8 @@ interface RouteStep {
   name: string;
   distance: number; // metres
   duration: number; // seconds
+  lat?: number;     // maneuver point — used for step advancement
+  lng?: number;
 }
 
 // ─── Geo math ─────────────────────────────────────────────────────────────────
@@ -390,7 +392,7 @@ const buildMapHtml = (
     if(routePts.length>0&&now-lastOffCheck>6000){
       lastOffCheck=now;var minD=Infinity;
       for(var i=0;i<routePts.length;i++){var dlat=(routePts[i][1]-lat)*111000;var dlng=(routePts[i][0]-lng)*111000*Math.cos(lat*Math.PI/180);var d=Math.sqrt(dlat*dlat+dlng*dlng);if(d<minD)minD=d;if(minD<80)break;}
-      if(minD>380)postRN({type:'off_route',lat:lat,lng:lng,dist:Math.round(minD)});
+      if(minD>150)postRN({type:'off_route',lat:lat,lng:lng,dist:Math.round(minD)});
     }
   }
 
@@ -416,7 +418,7 @@ const buildMapHtml = (
       var legSpeedLimits=[];
       (route.legs||[]).forEach(function(leg){
         var ls=[];
-        (leg.steps||[]).forEach(function(s){if(s.distance>0||s.maneuver.type==='arrive'){var st={type:s.maneuver.type,modifier:s.maneuver.modifier||'',name:s.name||'',distance:s.distance,duration:s.duration};steps.push(st);ls.push(st);}});
+        (leg.steps||[]).forEach(function(s){if(s.distance>0||s.maneuver.type==='arrive'){var loc=s.maneuver&&s.maneuver.location;var st={type:s.maneuver.type,modifier:s.maneuver.modifier||'',name:s.name||'',distance:s.distance,duration:s.duration,lat:loc?loc[1]:undefined,lng:loc?loc[0]:undefined};steps.push(st);ls.push(st);}});
         legs.push(ls);
         var ann=(leg.annotation&&leg.annotation.maxspeed)||[];
         var valid=ann.filter(function(s){return s&&typeof s.speed==='number';}).map(function(s){return s.speed;});
@@ -436,7 +438,7 @@ const buildMapHtml = (
       var data=await(await fetch('https://valhalla1.openstreetmap.de/route',{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();clearTimeout(tid);
       if(!data.trip||data.trip.status!==0)return _fallback(pairs,fromIdx);
       var all=[],steps=[],legs=[];
-      (data.trip.legs||[]).forEach(function(leg){var c=decodeP6(leg.shape||'');all=all.concat(c);var ls=[];(leg.maneuvers||[]).forEach(function(m){var dist=Math.round((m.length||0)*1609.34);var st={type:m.type===4?'arrive':m.type===1?'depart':'turn',modifier:{0:'',1:'',2:'left',3:'right',4:'arrive',5:'sharp left',6:'sharp right',7:'left',8:'right',9:'uturn',10:'slight left',11:'slight right'}[m.type]||'',name:m.street_names&&m.street_names[0]||'',distance:dist,duration:m.time||0};steps.push(st);ls.push(st);});legs.push(ls);});
+      (data.trip.legs||[]).forEach(function(leg){var c=decodeP6(leg.shape||'');all=all.concat(c);var ls=[];(leg.maneuvers||[]).forEach(function(m){var dist=Math.round((m.length||0)*1609.34);var shp=c[m.begin_shape_index];var st={type:m.type===4?'arrive':m.type===1?'depart':'turn',modifier:{0:'',1:'',2:'left',3:'right',4:'arrive',5:'sharp left',6:'sharp right',7:'left',8:'right',9:'uturn',10:'slight left',11:'slight right'}[m.type]||'',name:m.street_names&&m.street_names[0]||'',distance:dist,duration:m.time||0,lat:shp?shp[1]:undefined,lng:shp?shp[0]:undefined};steps.push(st);ls.push(st);});legs.push(ls);});
       _routeCoords=all;routePts=all.filter(function(_,i){return i%4===0;});updateRoute();
       postRN({type:'route_ready',routed:true,steps:steps,legs:legs,total_distance:Math.round((data.trip.summary.length||0)*1609.34),total_duration:data.trip.summary.time||0,fromIdx:fromIdx||0});
     }catch(e){_fallback(pairs,fromIdx);}
@@ -582,11 +584,18 @@ export default function MapScreen() {
 
   const [navDest, setNavDest] = useState<WP | null>(null);
 
+  const [stepIdx, setStepIdx] = useState(0);
+
   const navAnim      = useRef(new Animated.Value(0)).current;
   const navRef       = useRef({ active: false, idx: 0, wps: [] as WP[] });
   const navDestRef   = useRef<WP | null>(null);
   const guideRef     = useRef<Record<string, string>>({});
   const spokenRef    = useRef(new Set<string>());
+  const stepIdxRef       = useRef(0);
+  const routeStepsRef    = useRef<RouteStep[]>([]);
+  const stepAnnouncedRef = useRef(new Set<number>());
+  const isReroutingRef   = useRef(false);
+  const lastRerouteRef   = useRef(0);
   const discoverRef  = useRef<CampsitePin[]>([]);
 
   const webLoadedRef = useRef(false);
@@ -612,6 +621,17 @@ export default function MapScreen() {
 
   // Keep refs in sync
   useEffect(() => { navRef.current.active = navMode; }, [navMode]);
+  useEffect(() => { isReroutingRef.current = isRerouting; }, [isRerouting]);
+
+  // Keep routeStepsRef in sync; reset step index on each new route
+  useEffect(() => {
+    routeStepsRef.current = routeSteps;
+    const firstReal = routeSteps.findIndex(s => s.type !== 'depart');
+    const init = firstReal >= 0 ? firstReal : 0;
+    setStepIdx(init);
+    stepIdxRef.current = init;
+    stepAnnouncedRef.current.clear();
+  }, [routeSteps]);
   useEffect(() => { navRef.current.idx = navIdx; }, [navIdx]);
   useEffect(() => { guideRef.current = audioGuide; }, [audioGuide]);
 
@@ -651,6 +671,29 @@ export default function MapScreen() {
           }
 
           if (!active) return;
+
+          // ── Step advancement (turn-by-turn) ──────────────────────────────
+          {
+            const steps = routeStepsRef.current;
+            const si    = stepIdxRef.current;
+            const cur   = steps[si];
+            if (cur?.lat != null && cur?.lng != null) {
+              const distM = haversineKm(pos.lat, pos.lng, cur.lat, cur.lng) * 1000;
+              // Voice announcement: 200 m out (skip depart + arrive)
+              if (distM < 200 && !stepAnnouncedRef.current.has(si) && cur.type !== 'depart' && cur.type !== 'arrive') {
+                stepAnnouncedRef.current.add(si);
+                const road = cur.name ? ` on ${cur.name}` : '';
+                const prefix = distM < 60 ? '' : `In ${formatStepDist(distM)}, `;
+                Speech.speak(`${prefix}${stepLabel(cur.type, cur.modifier)}${road}.`, { rate: 0.9 });
+              }
+              // Advance: passed the maneuver point (35 m)
+              if (distM < 35 && si < steps.length - 1) {
+                const next = si + 1;
+                stepIdxRef.current = next;
+                setStepIdx(next);
+              }
+            }
+          }
 
           // Single-destination nav (from search) — no trip waypoints
           const singleDest = navDestRef.current;
@@ -1003,14 +1046,19 @@ export default function MapScreen() {
         setIsRerouting(false);
       }
       if (msg.type === 'off_route' && navRef.current.active) {
+        const now = Date.now();
+        // Ignore if already rerouting or within 30-second cooldown
+        if (isReroutingRef.current || now - lastRerouteRef.current < 30000) return;
+        lastRerouteRef.current = now;
         setIsRerouting(true);
+        isReroutingRef.current = true;
         webRef.current?.postMessage(JSON.stringify({
           type: 'reroute_from',
           lat: msg.lat, lng: msg.lng,
           fromIdx: navRef.current.idx,
         }));
         setRouteLegOffset(navRef.current.idx);
-        Speech.speak('Recalculating.', { rate: 0.95 });
+        Speech.speak('Off route. Recalculating.', { rate: 0.95 });
       }
       if (msg.type === 'wp_tapped') {
         setNavIdx(msg.idx);
@@ -1092,9 +1140,15 @@ export default function MapScreen() {
   const speedLimitKph = legSpeedLimits[legIdx] ?? null;
   const speedLimitMph = speedLimitKph ? Math.round(speedLimitKph * 0.621371) : null;
 
-  // Next OSRM step (rough: first non-depart step with significant distance)
-  const nextStep = routeSteps.find(s => s.type !== 'depart' && s.distance > 50) ?? null;
+  // Current step the user is navigating toward
+  const nextStep = routeSteps[stepIdx] ?? null;
+  // Real distance to the step's maneuver point (more accurate than step.distance)
+  const stepDistM = nextStep?.lat != null && userLoc
+    ? haversineKm(userLoc.lat, userLoc.lng, nextStep.lat!, nextStep.lng!) * 1000
+    : null;
   const isProceeding = distKm !== null && distKm > 30;
+  // "Proceed to route" when user hasn't started moving along it yet
+  const proceedToRoute = !isRerouting && isRouted && stepIdx === 0 && stepDistM !== null && stepDistM > 300;
 
   // Total remaining trip distance (current → navIdx → ... → last waypoint)
   const remainingKm = useMemo(() => {
@@ -1105,6 +1159,21 @@ export default function MapScreen() {
     }
     return total;
   }, [navMode, navIdx, distKm, userLoc]);
+
+  function manualReroute() {
+    if (!userLoc || !navMode) return;
+    const now = Date.now();
+    lastRerouteRef.current = now;
+    setIsRerouting(true);
+    isReroutingRef.current = true;
+    webRef.current?.postMessage(JSON.stringify({
+      type: 'reroute_from',
+      lat: userLoc.lat, lng: userLoc.lng,
+      fromIdx: navRef.current.idx,
+    }));
+    setRouteLegOffset(navRef.current.idx);
+    Speech.speak('Recalculating.', { rate: 0.95 });
+  }
 
   function openInMaps() {
     if (!waypoints.length) return;
@@ -1933,8 +2002,27 @@ export default function MapScreen() {
         pointerEvents: navMode ? 'box-none' : 'none',
       }]}>
 
-        {/* Next OSRM turn instruction */}
-        {nextStep && isRouted && (
+        {/* Turn instruction strip — rerouting / proceed-to-route / normal */}
+        {navMode && isRerouting ? (
+          <View style={[s.turnStrip, { backgroundColor: '#92400e' }]}>
+            <ActivityIndicator color="#fff" size="small" style={{ marginRight: 12 }} />
+            <View style={s.turnInfo}>
+              <Text style={s.turnLabel}>Recalculating...</Text>
+              <Text style={s.turnRoad}>Off route — finding new path</Text>
+            </View>
+          </View>
+        ) : navMode && proceedToRoute ? (
+          <View style={[s.turnStrip, { backgroundColor: '#1e3a5f' }]}>
+            <View style={s.turnIconWrap}>
+              <Ionicons name="navigate-outline" size={22} color="#fff" />
+            </View>
+            <View style={s.turnInfo}>
+              <Text style={s.turnLabel}>Proceed to route</Text>
+              <Text style={s.turnRoad} numberOfLines={1}>Head toward the route</Text>
+            </View>
+            <Text style={s.turnDist}>{formatStepDist(stepDistM!)}</Text>
+          </View>
+        ) : nextStep && isRouted ? (
           <View style={s.turnStrip}>
             <View style={s.turnIconWrap}>
               <Ionicons name={stepIcon(nextStep.type, nextStep.modifier) as any} size={22} color="#fff" />
@@ -1943,9 +2031,9 @@ export default function MapScreen() {
               <Text style={s.turnLabel}>{stepLabel(nextStep.type, nextStep.modifier)}</Text>
               {nextStep.name ? <Text style={s.turnRoad} numberOfLines={1}>{nextStep.name}</Text> : null}
             </View>
-            <Text style={s.turnDist}>{formatStepDist(nextStep.distance)}</Text>
+            <Text style={s.turnDist}>{formatStepDist(stepDistM ?? nextStep.distance)}</Text>
           </View>
-        )}
+        ) : null}
 
         {/* Speed + distance strip */}
         <View style={s.navStrip}>
@@ -2015,21 +2103,41 @@ export default function MapScreen() {
             </TouchableOpacity>
           )}
 
+          {isRouted && userLoc && (
+            <TouchableOpacity style={s.navRerouteBtn} onPress={manualReroute} disabled={isRerouting}>
+              <Ionicons name="refresh-outline" size={14} color={isRerouting ? OVR.text3 : OVR.text2} />
+              <Text style={[s.navStepsBtnText, isRerouting && { color: OVR.text3 }]}>REROUTE</Text>
+            </TouchableOpacity>
+          )}
+
         </View>
 
         {/* Steps list */}
         {showSteps && routeSteps.length > 0 && (
           <ScrollView style={s.stepsList} showsVerticalScrollIndicator={false}>
-            {routeSteps.filter(s => s.distance > 20).map((step, i) => (
-              <View key={i} style={[s.stepRow, i === 0 && s.stepRowFirst]}>
-                <Ionicons name={stepIcon(step.type, step.modifier) as any} size={16} color={OVR.text3} />
-                <View style={s.stepInfo}>
-                  <Text style={s.stepLabel}>{stepLabel(step.type, step.modifier)}</Text>
-                  {step.name ? <Text style={s.stepRoad} numberOfLines={1}>{step.name}</Text> : null}
+            {routeSteps.map((step, i) => {
+              if (step.distance <= 20 && step.type !== 'arrive') return null;
+              const isActive = i === stepIdx;
+              const isPast   = i < stepIdx;
+              return (
+                <View key={i} style={[s.stepRow, i === 0 && s.stepRowFirst, isActive && s.stepRowActive]}>
+                  <Ionicons
+                    name={stepIcon(step.type, step.modifier) as any}
+                    size={16}
+                    color={isActive ? '#fff' : isPast ? OVR.text3 + '55' : OVR.text3}
+                  />
+                  <View style={s.stepInfo}>
+                    <Text style={[s.stepLabel, isActive && { color: '#fff' }, isPast && { color: OVR.text3, opacity: 0.4 }]}>
+                      {stepLabel(step.type, step.modifier)}
+                    </Text>
+                    {step.name ? <Text style={[s.stepRoad, isPast && { opacity: 0.4 }]} numberOfLines={1}>{step.name}</Text> : null}
+                  </View>
+                  <Text style={[s.stepDist, isActive && { color: '#f97316' }, isPast && { opacity: 0.4 }]}>
+                    {isActive && stepDistM !== null ? formatStepDist(stepDistM) : formatStepDist(step.distance)}
+                  </Text>
                 </View>
-                <Text style={s.stepDist}>{formatStepDist(step.distance)}</Text>
-              </View>
-            ))}
+              );
+            })}
           </ScrollView>
         )}
       </Animated.View>
@@ -2253,6 +2361,11 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     borderWidth: 1, borderColor: OVR.border, backgroundColor: OVR.border2,
   },
   navStepsBtnText: { color: OVR.text2, fontSize: 11, fontFamily: mono },
+  navRerouteBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    paddingHorizontal: 12, paddingVertical: 10, borderRadius: 11,
+    borderWidth: 1, borderColor: OVR.border, backgroundColor: OVR.border2,
+  },
   dlBar: {
     position: 'absolute', top: 92, left: 16, right: 16,
     height: 3, borderRadius: 1.5, backgroundColor: C.border, overflow: 'hidden',
@@ -2277,6 +2390,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   stepsList: { maxHeight: 200, borderTopWidth: 1, borderColor: OVR.border },
   stepRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 9, borderBottomWidth: 1, borderColor: OVR.border2 },
   stepRowFirst: { backgroundColor: OVR.border2 },
+  stepRowActive: { backgroundColor: '#f97316' + '22', borderLeftWidth: 3, borderLeftColor: '#f97316' },
   stepInfo: { flex: 1 },
   stepLabel: { color: OVR.text2, fontSize: 11, fontFamily: mono, fontWeight: '700' },
   stepRoad: { color: OVR.text3, fontSize: 10, marginTop: 1, fontFamily: mono },

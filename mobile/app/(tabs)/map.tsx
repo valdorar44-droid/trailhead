@@ -139,11 +139,26 @@ function formatStepDist(metres: number) {
 
 // Returns [far_m, near_m] announcement distances based on current speed
 function announceDists(speedMph: number | null): [number, number] {
-  if (!speedMph || speedMph < 10) return [250, 60];   // slow / city stop
-  if (speedMph < 25) return [400, 100];                // city (~25mph)
-  if (speedMph < 40) return [600, 180];                // suburban (~35mph)
-  if (speedMph < 60) return [1000, 300];               // arterial (~50mph)
-  return [1800, 600];                                   // highway (60+ mph) ~1 mile then 0.4 mi
+  if (!speedMph || speedMph < 10) return [250, 60];
+  if (speedMph < 25) return [400, 100];
+  if (speedMph < 40) return [600, 180];
+  if (speedMph < 60) return [1000, 300];
+  return [1800, 600]; // highway: ~1 mile then ~0.4 mile
+}
+
+// Natural-language distance for TTS — never reads abbreviations aloud
+function speakDist(metres: number): string {
+  const ft = metres * 3.28084;
+  const mi = metres * 0.000621371;
+  if (metres < 30)   return 'now';
+  if (ft < 200)      return `${Math.round(ft / 25) * 25} feet`;
+  if (ft < 600)      return `${Math.round(ft / 50) * 50} feet`;
+  if (ft < 1000)     return `${Math.round(ft / 100) * 100} feet`;
+  if (mi < 0.35)     return 'a quarter mile';
+  if (mi < 0.65)     return 'half a mile';
+  if (mi < 0.85)     return 'three quarters of a mile';
+  if (mi < 1.15)     return '1 mile';
+  return `${mi.toFixed(mi >= 10 ? 0 : 1)} miles`;
 }
 
 // ─── Maneuver helpers ─────────────────────────────────────────────────────────
@@ -189,15 +204,62 @@ function laneArrowIcon(indication: string): string {
   return map[indication.toLowerCase()] ?? 'arrow-up-outline';
 }
 
-// Build spoken announcement from step
+// Conversational spoken maneuver label (never all-caps, no abbreviations)
+function stepSpeak(type: string, modifier: string, name?: string): string {
+  if (type === 'arrive') return 'arrive at your destination';
+  if (type === 'depart') return 'proceed toward the route';
+  if (type === 'roundabout') return 'take the roundabout';
+  const m = modifier.toLowerCase();
+  const isExit = name ? /exit|ramp|off.?ramp/i.test(name) : false;
+  if (m === 'uturn')        return 'make a U-turn when safe';
+  if (m === 'sharp left')   return 'turn sharply left';
+  if (m === 'sharp right')  return 'turn sharply right';
+  if (m === 'slight left')  return isExit ? 'take the exit on your left'  : 'keep left';
+  if (m === 'slight right') return isExit ? 'take the exit on your right' : 'keep right';
+  if (m === 'left')         return 'turn left';
+  if (m === 'right')        return 'turn right';
+  return 'continue straight';
+}
+
+// Build spoken announcement from step — natural, not robotic
 function buildAnnouncement(step: RouteStep, distM: number, phase: 'far' | 'near'): string {
-  const label = stepLabel(step.type, step.modifier, step.name);
-  const road  = step.name ? ` on ${step.name}` : '';
-  if (phase === 'near') {
-    if (distM < 30) return `${label}${road}.`;
-    return `${label}${road} in ${formatStepDist(distM)}.`;
+  const action = stepSpeak(step.type, step.modifier, step.name);
+  const road   = step.name ? ` on ${step.name}` : '';
+  if (step.type === 'arrive') {
+    return phase === 'far'
+      ? `You'll arrive at your destination in ${speakDist(distM)}.`
+      : `You have arrived at your destination.`;
   }
-  return `In ${formatStepDist(distM)}, ${label.toLowerCase()}${road}.`;
+  if (phase === 'near') {
+    if (distM < 30) return `${action}${road}.`;
+    return `${action}${road}, in ${speakDist(distM)}.`;
+  }
+  return `In ${speakDist(distM)}, ${action}${road}.`;
+}
+
+// ─── Offline tile estimation ──────────────────────────────────────────────────
+function ll2tile(lat: number, lng: number, z: number): { x: number; y: number } {
+  const x = Math.floor((lng + 180) / 360 * Math.pow(2, z));
+  const s = Math.sin(lat * Math.PI / 180);
+  const y = Math.floor((0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * Math.pow(2, z));
+  return { x: Math.max(0, x), y: Math.max(0, y) };
+}
+function estimateTileCount(n: number, s: number, e: number, w: number, minZ: number, maxZ: number): number {
+  let count = 0;
+  for (let z = minZ; z <= maxZ && count < 2000; z++) {
+    const cap = Math.pow(2, z) - 1;
+    const nw = ll2tile(n, w, z); const se = ll2tile(s, e, z);
+    count += Math.max(0, Math.min(cap, se.x) - Math.max(0, nw.x) + 1) *
+             Math.max(0, Math.min(cap, se.y) - Math.max(0, nw.y) + 1);
+  }
+  return Math.min(count, 2000);
+}
+function tilesMB(count: number, maxZ: number): string {
+  const avgKB = maxZ >= 14 ? 68 : maxZ >= 12 ? 52 : 32;
+  const mb = (count * avgKB) / 1024;
+  if (mb < 1) return '<1 MB';
+  if (mb >= 100) return `~${Math.round(mb / 10) * 10} MB`;
+  return `~${Math.round(mb)} MB`;
 }
 
 // ─── Quick-report types with Waze-style subtypes ─────────────────────────────
@@ -325,6 +387,8 @@ const buildMapHtml = (
   var allCamps=[],allGas=[],allPois=[],allReports=[];
   var reportMarkers=[];
   var lastSpeed=null;
+  var _routeLoading=false;
+  var routeIsProper=false;
   var routeOpts={avoidTolls:false,avoidHighways:false,backRoads:false,noFerries:false};
   var _routeCoords=[],routePts=[],breadcrumbPts=[];
   var lastOffCheck=0,downloadActive=false,mapReady=false,pendingMsgs=[];
@@ -467,8 +531,8 @@ const buildMapHtml = (
       map.easeTo({center:[lng,lat],zoom:zoom||15,duration:500});
     }
     var now=Date.now();
-    // Only check off-route if moving (speed > 1 m/s to avoid GPS drift when parked)
-    if(routePts.length>0&&now-lastOffCheck>6000&&(lastSpeed==null||lastSpeed>1)){
+    // Only check off-route when: route exists + is a real routed path + not mid-load + moving
+    if(routePts.length>0&&routeIsProper&&!_routeLoading&&now-lastOffCheck>8000&&(lastSpeed==null||lastSpeed>1.5)){
       lastOffCheck=now;var minD=Infinity;
       for(var i=0;i<routePts.length;i++){var dlat=(routePts[i][1]-lat)*111000;var dlng=(routePts[i][0]-lng)*111000*Math.cos(lat*Math.PI/180);var d=Math.sqrt(dlat*dlat+dlng*dlng);if(d<minD)minD=d;if(minD<60)break;}
       if(minD>200)postRN({type:'off_route',lat:lat,lng:lng,dist:Math.round(minD)});
@@ -480,9 +544,10 @@ const buildMapHtml = (
   // ── Routing ───────────────────────────────────────────────────────────────────
   function decodeP6(enc){var coords=[],i=0,lat=0,lng=0;while(i<enc.length){var b,shift=0,res=0;do{b=enc.charCodeAt(i++)-63;res|=(b&0x1f)<<shift;shift+=5;}while(b>=0x20);lat+=res&1?~(res>>1):(res>>1);shift=0;res=0;do{b=enc.charCodeAt(i++)-63;res|=(b&0x1f)<<shift;shift+=5;}while(b>=0x20);lng+=res&1?~(res>>1):(res>>1);coords.push([lng/1e6,lat/1e6]);}return coords;}
 
-  function _fallback(pairs,fromIdx){var coords=pairs.map(function(p){var s=p.split(',');return[parseFloat(s[0]),parseFloat(s[1])];});_routeCoords=coords;routePts=coords;updateRoute();postRN({type:'route_ready',routed:false,steps:[],legs:[],fromIdx:fromIdx||0});}
+  function _fallback(pairs,fromIdx){routeIsProper=false;_routeLoading=false;if(!pairs.length){postRN({type:'route_ready',routed:false,steps:[],legs:[],fromIdx:fromIdx||0});return;}var coords=pairs.map(function(p){var s=p.split(',');return[parseFloat(s[0]),parseFloat(s[1])];});_routeCoords=coords;routePts=coords;updateRoute();postRN({type:'route_ready',routed:false,steps:[],legs:[],fromIdx:fromIdx||0});}
 
   async function _fetchRoute(pairs,fromIdx){
+    _routeLoading=true;
     if(routeOpts.backRoads)return _fetchValhalla(pairs,fromIdx);
     var excl=[];if(routeOpts.avoidTolls)excl.push('toll');if(routeOpts.avoidHighways)excl.push('motorway');if(routeOpts.noFerries)excl.push('ferry');
     var profile=(routeOpts.avoidHighways)?'driving':'driving-traffic';
@@ -511,6 +576,7 @@ const buildMapHtml = (
         var keys=Object.keys(freq).sort(function(a,b){return freq[b]-freq[a];});
         legSpeedLimits.push(keys.length?parseFloat(keys[0]):null);
       });
+      routeIsProper=true;_routeLoading=false;
       postRN({type:'route_ready',routed:true,steps:steps,legs:legs,legSpeedLimits:legSpeedLimits,total_distance:route.distance,total_duration:route.duration,fromIdx:fromIdx||0});
     }catch(e){_fallback(pairs,fromIdx);}
   }
@@ -525,6 +591,7 @@ const buildMapHtml = (
       var all=[],steps=[],legs=[];
       (data.trip.legs||[]).forEach(function(leg){var c=decodeP6(leg.shape||'');all=all.concat(c);var ls=[];(leg.maneuvers||[]).forEach(function(m){var dist=Math.round((m.length||0)*1609.34);var shp=c[m.begin_shape_index];var st={type:m.type===4?'arrive':m.type===1?'depart':'turn',modifier:{0:'',1:'',2:'left',3:'right',4:'arrive',5:'sharp left',6:'sharp right',7:'left',8:'right',9:'uturn',10:'slight left',11:'slight right'}[m.type]||'',name:m.street_names&&m.street_names[0]||'',distance:dist,duration:m.time||0,lat:shp?shp[1]:undefined,lng:shp?shp[0]:undefined};steps.push(st);ls.push(st);});legs.push(ls);});
       _routeCoords=all;routePts=all.filter(function(_,i){return i%3===0;});updateRoute();
+      routeIsProper=true;_routeLoading=false;
       postRN({type:'route_ready',routed:true,steps:steps,legs:legs,total_distance:Math.round((data.trip.summary.length||0)*1609.34),total_duration:data.trip.summary.time||0,fromIdx:fromIdx||0});
     }catch(e){_fallback(pairs,fromIdx);}
   }
@@ -561,7 +628,7 @@ const buildMapHtml = (
     if(msg.type==='clear_pois'){allPois=[];updatePoiSrc();}
     if(msg.type==='set_route_opts')Object.assign(routeOpts,msg.opts||{});
     if(msg.type==='start_route_from'&&msg.lat)loadRouteFrom(msg.lat,msg.lng,msg.fromIdx||0);
-    if(msg.type==='reroute_from'&&msg.lat){_routeCoords=[];routePts=[];loadRouteFrom(msg.lat,msg.lng,msg.fromIdx||0);}
+    if(msg.type==='reroute_from'&&msg.lat){_routeCoords=[];routePts=[];routeIsProper=false;lastOffCheck=Date.now();loadRouteFrom(msg.lat,msg.lng,msg.fromIdx||0);}
     if(msg.type==='route_to_search'&&msg.lat){
       if(searchMarker){searchMarker.remove();searchMarker=null;}
       var el2=document.createElement('div');el2.className='mk-search';el2.textContent='📍';
@@ -595,6 +662,8 @@ export default function MapScreen() {
   const setStoreToken = useStore(st => st.setMapboxToken);
   const liveReports = useStore(st => st.liveReports);
   const addLiveReport = useStore(st => st.addLiveReport);
+  const cachedRegions = useStore(st => st.cachedRegions);
+  const addCachedRegion = useStore(st => st.addCachedRegion);
   const webRef = useRef<WebView>(null);
 
   const [userLoc,       setUserLoc]       = useState<{ lat: number; lng: number } | null>(null);
@@ -626,6 +695,8 @@ export default function MapScreen() {
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [downloadTotal, setDownloadTotal] = useState(0);
+  const [downloadSaved, setDownloadSaved] = useState(0);
+  const [downloadLabel, setDownloadLabel] = useState('');
   const [offlineSaved, setOfflineSaved] = useState(false);
   const [mapboxToken,   setMapboxToken]   = useState('');
   const [showFilters,   setShowFilters]   = useState(false);
@@ -829,12 +900,12 @@ export default function MapScreen() {
                 // Far announcement (e.g. "In 1 mile, turn right on I-95")
                 if (distM < farDist && !stepAnnouncedRef.current.has(farKey)) {
                   stepAnnouncedRef.current.add(farKey);
-                  Speech.speak(buildAnnouncement(cur, distM, 'far'), { rate: 0.9 });
+                  Speech.speak(buildAnnouncement(cur, distM, 'far'), { rate: 0.88, pitch: 1.05, language: 'en-US' });
                 }
                 // Near announcement (e.g. "Turn right on I-95 in 300 feet")
                 if (distM < nearDist && !stepAnnouncedRef.current.has(nearKey)) {
                   stepAnnouncedRef.current.add(nearKey);
-                  Speech.speak(buildAnnouncement(cur, distM, 'near'), { rate: 0.9 });
+                  Speech.speak(buildAnnouncement(cur, distM, 'near'), { rate: 0.88, pitch: 1.05, language: 'en-US' });
                 }
               }
 
@@ -863,7 +934,7 @@ export default function MapScreen() {
                   road_closure: 'Road closure', campsite: 'Campsite report', water: 'Water source',
                 };
                 const label = labels[rep.type] ?? 'Community report';
-                Speech.speak(`${label} ahead in ${formatStepDist(repDistM)}.`, { rate: 0.9 });
+                Speech.speak(`${label} ahead in ${speakDist(repDistM)}.`, { rate: 0.88, pitch: 1.05, language: 'en-US' });
                 if (approachDismissRef.current) clearTimeout(approachDismissRef.current);
                 approachDismissRef.current = setTimeout(() => setApproachingReport(null), 20000);
                 break; // one alert at a time
@@ -877,7 +948,7 @@ export default function MapScreen() {
             const dist = haversineKm(pos.lat, pos.lng, singleDest.lat, singleDest.lng);
             setIsApproaching(dist < 0.8);
             if (dist < 0.25) {
-              Speech.speak(`You have arrived at ${singleDest.name}.`, { rate: 0.9 });
+              Speech.speak(`You have arrived at ${singleDest.name}.`, { rate: 0.88, pitch: 1.05, language: 'en-US' });
               setTimeout(() => setNavMode(false), 3000);
             }
             return;
@@ -898,7 +969,7 @@ export default function MapScreen() {
 
           // Arrival at final destination
           if (dist < 0.25 && idx === wps.length - 1) {
-            Speech.speak(`You have arrived at ${wps[idx].name}. Journey complete.`, { rate: 0.9 });
+            Speech.speak(`You have arrived at ${wps[idx].name}. Journey complete.`, { rate: 0.88, pitch: 1.05, language: 'en-US' });
             setTimeout(() => setNavMode(false), 3000);
             return;
           }
@@ -915,7 +986,7 @@ export default function MapScreen() {
               lat: pos.lat, lng: pos.lng, fromIdx: next,
             }));
             setRouteLegOffset(next);
-            Speech.speak(`Arrived at ${wps[idx].name}. Now heading to ${wps[next].name}.`, { rate: 0.9 });
+            Speech.speak(`Arrived at ${wps[idx].name}. Now heading to ${wps[next].name}.`, { rate: 0.88, pitch: 1.05, language: 'en-US' });
           }
         }
       ).then(s => { sub = s; });
@@ -1012,7 +1083,7 @@ export default function MapScreen() {
         // Single-destination nav (from search) — route already drawn by route_to_search
         const dist = userLoc ? haversineKm(userLoc.lat, userLoc.lng, dest.lat, dest.lng) : null;
         const distStr = dist && dist > 0.5 ? `, ${formatDist(dist)} away` : '';
-        Speech.speak(`Navigation started. Heading to ${dest.name}${distStr}.`, { rate: 0.9 });
+        Speech.speak(`Navigation started. Heading to ${dest.name}${distStr}.`, { rate: 0.88, pitch: 1.05, language: 'en-US' });
       } else {
         // Trip navigation
         const loc = navRef.current.active ? null : userLoc;
@@ -1034,7 +1105,7 @@ export default function MapScreen() {
         if (target) {
           const dist = userLoc ? haversineKm(userLoc.lat, userLoc.lng, target.lat, target.lng) : null;
           const distStr = dist && dist > 0.5 ? `, ${formatDist(dist)} away` : '';
-          Speech.speak(`Navigation started. Heading to ${target.name}${distStr}.`, { rate: 0.9 });
+          Speech.speak(`Navigation started. Heading to ${target.name}${distStr}.`, { rate: 0.88, pitch: 1.05, language: 'en-US' });
         }
       }
     } else {
@@ -1063,7 +1134,7 @@ export default function MapScreen() {
     const first = legSteps.find(s => s.type !== 'depart' && s.distance > 50);
     if (!first) return;
     const t = setTimeout(() => {
-      Speech.speak(buildAnnouncement(first, first.distance, 'far'), { rate: 0.9 });
+      Speech.speak(buildAnnouncement(first, first.distance, 'far'), { rate: 0.88, pitch: 1.05, language: 'en-US' });
     }, 1500);
     return () => clearTimeout(t);
   }, [navIdx, navMode, routeLegOffset]);
@@ -1225,18 +1296,28 @@ export default function MapScreen() {
       }
       if (msg.type === 'off_route' && navRef.current.active) {
         const now = Date.now();
-        // Ignore if already rerouting or within 30-second cooldown
-        if (isReroutingRef.current || now - lastRerouteRef.current < 30000) return;
+        if (isReroutingRef.current || now - lastRerouteRef.current < 35000) return;
+        // Advance past any waypoints we may have already driven through
+        const { wps } = navRef.current;
+        let bestIdx = navRef.current.idx;
+        while (bestIdx < wps.length - 1) {
+          const d = haversineKm(msg.lat, msg.lng, wps[bestIdx].lat, wps[bestIdx].lng);
+          if (d < 0.4) { bestIdx++; } else break;
+        }
         lastRerouteRef.current = now;
         setIsRerouting(true);
         isReroutingRef.current = true;
+        if (bestIdx !== navRef.current.idx) {
+          setNavIdx(bestIdx);
+          navRef.current.idx = bestIdx;
+        }
         webRef.current?.postMessage(JSON.stringify({
           type: 'reroute_from',
           lat: msg.lat, lng: msg.lng,
-          fromIdx: navRef.current.idx,
+          fromIdx: bestIdx,
         }));
-        setRouteLegOffset(navRef.current.idx);
-        Speech.speak('Off route. Recalculating.', { rate: 0.95 });
+        setRouteLegOffset(bestIdx);
+        Speech.speak('Off route. Recalculating.', { rate: 0.88, pitch: 1.05 });
       }
       if (msg.type === 'wp_tapped') {
         setNavIdx(msg.idx);
@@ -1246,12 +1327,15 @@ export default function MapScreen() {
       if (msg.type === 'download_progress') {
         setDownloadProgress(msg.percent ?? 0);
         setDownloadTotal(msg.total ?? 0);
+        setDownloadSaved(msg.saved ?? 0);
       }
       if (msg.type === 'download_complete') {
         setIsDownloading(false);
         setDownloadProgress(100);
         setOfflineSaved(true);
-        setTimeout(() => setDownloadProgress(0), 2000);
+        // Persist this region to the store so it shows as cached
+        setDownloadLabel(prev => { if (prev) addCachedRegion(prev); return prev; });
+        setTimeout(() => { setDownloadProgress(0); setDownloadSaved(0); }, 3000);
       }
       if (msg.type === 'campsite_tapped') {
         const camp = (msg.camp as CampsitePin) || null;
@@ -1985,61 +2069,125 @@ export default function MapScreen() {
 
       {/* ── Offline Map Download Modal ── */}
       <Modal visible={showOfflineModal} animationType="slide" transparent onRequestClose={() => setShowOfflineModal(false)}>
-        <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.6)' }}>
+        <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.65)' }}>
           <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => setShowOfflineModal(false)} />
           <View style={s.offlineSheet}>
-            <Text style={s.offlineTitle}>OFFLINE MAPS</Text>
+            {/* Header */}
+            <View style={s.offlineHeader}>
+              <Ionicons name="map-outline" size={18} color={C.orange} />
+              <Text style={s.offlineTitle}>OFFLINE MAPS</Text>
+              <TouchableOpacity onPress={() => setShowOfflineModal(false)} style={s.offlineClose}>
+                <Ionicons name="close" size={18} color={C.text3} />
+              </TouchableOpacity>
+            </View>
+
+            {/* What's included */}
+            <View style={s.offlineIncludesRow}>
+              {['Satellite imagery', 'Road names', 'Terrain', 'Campsite labels'].map(item => (
+                <View key={item} style={s.offlineIncludeChip}>
+                  <Text style={s.offlineIncludeText}>{item}</Text>
+                </View>
+              ))}
+            </View>
+
             {!user ? (
-              <View style={{ alignItems: 'center', paddingVertical: 24 }}>
-                <Text style={[s.offlineSub, { textAlign: 'center', marginBottom: 4 }]}>Sign in to download offline maps.</Text>
+              <View style={{ alignItems: 'center', paddingVertical: 20 }}>
+                <Text style={s.offlineSub}>Sign in to download offline maps.</Text>
                 <TouchableOpacity onPress={() => setShowOfflineModal(false)} style={s.offlineRouteBtn}>
-                  <Text style={s.offlineRouteBtnText}>GO TO PROFILE TO SIGN IN</Text>
+                  <Text style={s.offlineRouteBtnText}>GO TO PROFILE → SIGN IN</Text>
                 </TouchableOpacity>
               </View>
             ) : (<>
-            <Text style={s.offlineSub}>Download tiles for use without signal. z10–z12 overview, z10–z14 for current area.</Text>
-            <Text style={s.offlineSectionLabel}>ALL US STATES (z10–z12)</Text>
-            <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={true}>
-              <View style={s.stateGrid}>
-                {Object.entries(US_STATES).map(([code, st]) => (
-                  <TouchableOpacity key={code} style={s.stateBtn}
-                    onPress={() => {
-                      setShowOfflineModal(false);
-                      setIsDownloading(true);
-                      setOfflineSaved(false);
-                      webRef.current?.postMessage(JSON.stringify({
-                        type: 'download_tiles_bbox',
-                        n: st.n, s: st.s, e: st.e, w: st.w,
-                        minZ: 10, maxZ: 12,
-                      }));
-                    }}>
-                    <Text style={s.stateEmoji}>{st.emoji}</Text>
-                    <Text style={s.stateName}>{st.name}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </ScrollView>
-            <Text style={s.offlineSectionLabel}>CURRENT TRIP AREA (z10–z14)</Text>
-            {waypoints.length > 0 ? (
-              <TouchableOpacity style={s.offlineRouteBtn}
-                onPress={() => {
-                  setShowOfflineModal(false);
-                  setIsDownloading(true);
-                  setOfflineSaved(false);
-                  webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles', minZ: 10, maxZ: 14 }));
-                }}>
-                <Ionicons name="cloud-download-outline" size={16} color="#fff" />
-                <Text style={s.offlineRouteBtnText}>DOWNLOAD {activeTrip?.plan.trip_name.toUpperCase() ?? 'TRIP'} AREA</Text>
-              </TouchableOpacity>
-            ) : (
-              <Text style={s.offlineNoTrip}>Plan a trip first to download its corridor</Text>
-            )}
+
+            {/* Active download progress */}
             {isDownloading && (
-              <View style={{ marginTop: 12 }}>
+              <View style={s.offlineProgressCard}>
+                <View style={s.offlineProgressTop}>
+                  <Text style={s.offlineProgressLabel}>
+                    DOWNLOADING · {downloadSaved.toLocaleString()} / {downloadTotal.toLocaleString()} TILES
+                  </Text>
+                  <Text style={s.offlineProgressMB}>{tilesMB(downloadSaved, 14)}</Text>
+                </View>
                 <View style={s.dlBar}>
                   <View style={[s.dlFill, { width: `${downloadProgress}%` as any }]} />
                 </View>
-                <Text style={s.offlineProgress}>{downloadProgress}% · {downloadTotal} tiles</Text>
+                <TouchableOpacity style={s.offlineCancelBtn} onPress={() => {
+                  webRef.current?.postMessage(JSON.stringify({ type: 'cancel_download' }));
+                  setIsDownloading(false);
+                }}>
+                  <Text style={s.offlineCancelText}>CANCEL</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Current trip download */}
+            <Text style={s.offlineSectionLabel}>MY TRIP CORRIDOR · DETAIL (z10–z14)</Text>
+            {waypoints.length > 0 ? (() => {
+              const lats = waypoints.map(w => w.lat), lngs = waypoints.map(w => w.lng);
+              const pad = 0.3;
+              const n = Math.max(...lats) + pad, s2 = Math.min(...lats) - pad;
+              const e = Math.max(...lngs) + pad, w2 = Math.min(...lngs) - pad;
+              const count = estimateTileCount(n, s2, e, w2, 10, 14);
+              const label = activeTrip?.plan.trip_name ?? 'Trip';
+              const isCached = cachedRegions.includes(label);
+              return (
+                <TouchableOpacity style={[s.offlineTripBtn, isCached && { borderColor: C.green + '66' }]}
+                  disabled={isDownloading}
+                  onPress={() => {
+                    setShowOfflineModal(false); setIsDownloading(true); setOfflineSaved(false);
+                    setDownloadLabel(label);
+                    webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles_bbox', n, s: s2, e, w: w2, minZ: 10, maxZ: 14 }));
+                  }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.offlineTripName} numberOfLines={1}>{label.toUpperCase()}</Text>
+                    <Text style={s.offlineTripMeta}>
+                      {count >= 2000 ? '2,000+ tiles (capped)' : `~${count.toLocaleString()} tiles`} · {tilesMB(count, 14)}
+                    </Text>
+                    {isCached && <Text style={[s.offlineTripMeta, { color: C.green }]}>✓ Cached</Text>}
+                  </View>
+                  <Ionicons name={isCached ? 'refresh-outline' : 'cloud-download-outline'} size={20} color={isCached ? C.green : C.orange} />
+                </TouchableOpacity>
+              );
+            })() : (
+              <Text style={s.offlineNoTrip}>Plan a trip first to download its corridor</Text>
+            )}
+
+            {/* State downloads */}
+            <Text style={[s.offlineSectionLabel, { marginTop: 16 }]}>US STATES · OVERVIEW (z10–z12)</Text>
+            <ScrollView style={{ maxHeight: 260 }} showsVerticalScrollIndicator={false}>
+              {Object.entries(US_STATES).map(([code, st]) => {
+                const count = estimateTileCount(st.n, st.s, st.e, st.w, 10, 12);
+                const isCached = cachedRegions.includes(st.name);
+                return (
+                  <TouchableOpacity key={code} style={[s.offlineStateRow, isCached && { opacity: 0.75 }]}
+                    disabled={isDownloading}
+                    onPress={() => {
+                      setShowOfflineModal(false); setIsDownloading(true); setOfflineSaved(false);
+                      setDownloadLabel(st.name);
+                      webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles_bbox', n: st.n, s: st.s, e: st.e, w: st.w, minZ: 10, maxZ: 12 }));
+                    }}>
+                    <Text style={s.stateEmoji}>{st.emoji}</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.stateName}>{st.name}</Text>
+                      <Text style={s.offlineStateMeta}>
+                        {count >= 2000 ? '2,000+ tiles' : `~${count.toLocaleString()} tiles`} · {tilesMB(count, 12)}
+                      </Text>
+                    </View>
+                    {isCached
+                      ? <Ionicons name="checkmark-circle" size={16} color={C.green} />
+                      : <Ionicons name="cloud-download-outline" size={16} color={C.text3} />}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+
+            {/* Cached regions summary */}
+            {cachedRegions.length > 0 && (
+              <View style={s.offlineCachedBar}>
+                <Ionicons name="save-outline" size={12} color={C.green} />
+                <Text style={s.offlineCachedText}>
+                  {cachedRegions.length} region{cachedRegions.length !== 1 ? 's' : ''} cached: {cachedRegions.slice(0, 3).join(', ')}{cachedRegions.length > 3 ? '…' : ''}
+                </Text>
               </View>
             )}
             </>)}
@@ -2935,26 +3083,34 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   // ── Offline modal
   offlineSheet: {
     backgroundColor: C.s1, borderTopLeftRadius: 20, borderTopRightRadius: 20,
-    padding: 20, paddingBottom: 40, borderTopWidth: 1, borderColor: C.border, maxHeight: '80%',
+    padding: 20, paddingBottom: 40, borderTopWidth: 1, borderColor: C.border, maxHeight: '85%',
   },
-  offlineTitle: { color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '800', letterSpacing: 1, marginBottom: 6, textAlign: 'center' },
+  offlineHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
+  offlineTitle: { color: C.text, fontSize: 13, fontFamily: mono, fontWeight: '800', letterSpacing: 1, flex: 1 },
+  offlineClose: { padding: 4 },
+  offlineIncludesRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 14 },
+  offlineIncludeChip: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, backgroundColor: C.s2, borderWidth: 1, borderColor: C.border },
+  offlineIncludeText: { color: C.text3, fontSize: 10, fontFamily: mono },
   offlineSub: { color: C.text3, fontSize: 11, textAlign: 'center', marginBottom: 16, lineHeight: 16 },
-  offlineSectionLabel: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '700', letterSpacing: 1, marginBottom: 10 },
-  stateGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
-  stateBtn: {
-    width: '30%', paddingVertical: 10, borderRadius: 12,
-    backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
-    alignItems: 'center',
-  },
-  stateEmoji: { fontSize: 22, marginBottom: 3 },
-  stateName: { color: C.text2, fontSize: 10, fontFamily: mono, textAlign: 'center' },
-  offlineRouteBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    paddingVertical: 13, borderRadius: 14, backgroundColor: C.orange,
-  },
+  offlineSectionLabel: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '700', letterSpacing: 1, marginBottom: 8 },
+  offlineTripBtn: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 14, borderWidth: 1.5, borderColor: C.orange + '55', backgroundColor: C.s2, marginBottom: 6 },
+  offlineTripName: { color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '800' },
+  offlineTripMeta: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
+  offlineStateRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, paddingHorizontal: 4, borderBottomWidth: 1, borderColor: C.border },
+  stateEmoji: { fontSize: 20 },
+  stateName: { color: C.text2, fontSize: 12, fontFamily: mono, fontWeight: '600' },
+  offlineStateMeta: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 1 },
+  offlineProgressCard: { backgroundColor: C.s2, borderRadius: 12, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: C.border },
+  offlineProgressTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
+  offlineProgressLabel: { color: C.text3, fontSize: 9, fontFamily: mono, letterSpacing: 0.5 },
+  offlineProgressMB: { color: C.orange, fontSize: 11, fontFamily: mono, fontWeight: '700' },
+  offlineCancelBtn: { alignSelf: 'center', marginTop: 8, paddingHorizontal: 16, paddingVertical: 6 },
+  offlineCancelText: { color: C.red, fontSize: 10, fontFamily: mono, fontWeight: '700' },
+  offlineRouteBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 13, borderRadius: 14, backgroundColor: C.orange },
   offlineRouteBtnText: { color: '#fff', fontSize: 12, fontFamily: mono, fontWeight: '700' },
   offlineNoTrip: { color: C.text3, fontSize: 11, textAlign: 'center', marginTop: 6 },
-  offlineProgress: { color: C.text3, fontSize: 10, fontFamily: mono, textAlign: 'center', marginTop: 4 },
+  offlineCachedBar: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 10, marginTop: 6, borderTopWidth: 1, borderColor: C.border },
+  offlineCachedText: { color: C.text3, fontSize: 10, fontFamily: mono, flex: 1 },
 
   // ── Route brief
   readinessRow: {

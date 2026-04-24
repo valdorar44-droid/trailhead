@@ -33,6 +33,7 @@ interface AppState {
   mapboxToken: string;
   sessionId: string;
   liveReports: Report[];
+  cachedRegions: string[];
   setAuth: (token: string, user: User) => void;
   clearAuth: () => void;
   setActiveTrip: (trip: TripResult | null) => void;
@@ -44,6 +45,7 @@ interface AppState {
   setSessionId: (id: string) => void;
   addLiveReport: (report: Report) => void;
   setLiveReports: (reports: Report[]) => void;
+  addCachedRegion: (label: string) => void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -57,6 +59,7 @@ export const useStore = create<AppState>((set) => ({
   mapboxToken: '',
   sessionId: 'sess_' + Math.random().toString(36).slice(2, 12),
   liveReports: [],
+  cachedRegions: [],
 
   setAuth: (token, user) => {
     SecureStore.setItemAsync('trailhead_token', token);
@@ -92,6 +95,9 @@ export const useStore = create<AppState>((set) => ({
     liveReports: [report, ...state.liveReports.filter(r => r.id !== report.id)].slice(0, 100),
   })),
   setLiveReports: (reports) => set({ liveReports: reports }),
+  addCachedRegion: (label) => set(state => ({
+    cachedRegions: [label, ...state.cachedRegions.filter(r => r !== label)].slice(0, 20),
+  })),
   setSessionId: (id) => {
     SecureStore.setItemAsync('trailhead_session', id);
     set({ sessionId: id });

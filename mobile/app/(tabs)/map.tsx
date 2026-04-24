@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Linking, Animated, TextInput, ActivityIndicator, Modal, Image } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Linking, Animated, TextInput, ActivityIndicator, Modal, Image, Share } from 'react-native';
 import { WebView } from 'react-native-webview';
 import * as Location from 'expo-location';
 import * as Speech from 'expo-speech';
 import { Ionicons } from '@expo/vector-icons';
-import * as Clipboard from 'expo-clipboard';
 import { useStore } from '@/lib/store';
 import { api, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList } from '@/lib/api';
 import { C, mono } from '@/lib/design';
@@ -1016,7 +1015,7 @@ export default function MapScreen() {
   }
 
   function copyCoordinates(lat: number, lng: number) {
-    Clipboard.setStringAsync(`${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+    Share.share({ message: `${lat.toFixed(6)}, ${lng.toFixed(6)}` });
   }
 
   // ── Layer switch ────────────────────────────────────────────────────────────

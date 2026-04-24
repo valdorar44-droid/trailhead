@@ -34,7 +34,7 @@ export default function GuideScreen() {
   const [playing, setPlaying] = useState<string | null>(null);
   const [nearbyNarration, setNearbyNarration] = useState('');
   const [nearbyLoading, setNearbyLoading] = useState(false);
-  const [weather, setWeather] = useState<any>(null);
+  const [weatherByWp, setWeatherByWp] = useState<Record<string, any>>({});
   const [weatherLoading, setWeatherLoading] = useState(false);
   const [tab, setTab] = useState<'narrations' | 'weather'>('narrations');
   const [autoPlay, setAutoPlay] = useState(false);
@@ -49,11 +49,19 @@ export default function GuideScreen() {
       api.getAudioGuide(activeTrip.trip_id)
         .then(setGuide).catch(() => {}).finally(() => setGuideLoading(false));
     }
-    const firstWp = activeTrip.plan.waypoints.find(w => w.lat && w.lng);
-    if (firstWp?.lat && firstWp?.lng) {
+    const wpsWithCoords = activeTrip.plan.waypoints.filter(w => w.lat && w.lng).slice(0, 6);
+    if (wpsWithCoords.length > 0) {
       setWeatherLoading(true);
-      api.getWeather(firstWp.lat, firstWp.lng, activeTrip.plan.duration_days)
-        .then(setWeather).catch(() => {}).finally(() => setWeatherLoading(false));
+      const results: Record<string, any> = {};
+      Promise.allSettled(wpsWithCoords.map(async wp => {
+        try {
+          const data = await api.getWeather(wp.lat!, wp.lng!, 3);
+          results[wp.name] = data;
+        } catch {}
+      })).finally(() => {
+        setWeatherByWp(results);
+        setWeatherLoading(false);
+      });
     }
   }, [activeTrip?.trip_id]);
 
@@ -224,47 +232,68 @@ export default function GuideScreen() {
             {weatherLoading && (
               <View style={s.loadRow}>
                 <ActivityIndicator color={C.orange} />
-                <Text style={s.loadText}>Loading forecast...</Text>
+                <Text style={s.loadText}>Loading forecasts for each stop...</Text>
               </View>
             )}
-            {weather?.daily && (
-              <View style={s.weatherWrap}>
-                <Text style={s.weatherRegion}>
-                  Forecast · {activeTrip.plan.states.join(', ')} region
-                </Text>
-                {weather.daily.time.map((date: string, i: number) => {
-                  const hi = Math.round(weather.daily.temperature_2m_max[i]);
-                  const lo = Math.round(weather.daily.temperature_2m_min[i]);
-                  const rain = weather.daily.precipitation_sum[i];
-                  const wind = Math.round(weather.daily.windspeed_10m_max[i]);
-                  const code = weather.daily.weathercode[i];
-                  const d = new Date(date);
-                  const label = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-                  const wp = activeTrip.plan.daily_itinerary.find(day => day.day === i + 1);
-                  return (
-                    <View key={date} style={s.weatherDay}>
-                      <Text style={s.weatherIcon}>{wmoIcon(code)}</Text>
-                      <View style={{ flex: 1, marginLeft: 12 }}>
-                        <Text style={s.weatherDate}>{label}</Text>
-                        {wp && <Text style={s.weatherDayTitle} numberOfLines={1}>{wp.title}</Text>}
-                      </View>
-                      <View style={s.weatherRight}>
-                        <Text style={s.weatherHiLo}>{hi}° / {lo}°</Text>
-                        <Text style={s.weatherMeta}>
-                          {rain > 0 ? `${rain.toFixed(1)}" ` : ''}💨{wind}mph
-                        </Text>
-                      </View>
-                    </View>
-                  );
-                })}
-              </View>
-            )}
-            {!weatherLoading && !weather && (
+            {!weatherLoading && Object.keys(weatherByWp).length === 0 && (
               <View style={s.emptyState}>
                 <Text style={s.emptyIcon}>🌐</Text>
                 <Text style={s.emptySub}>Weather unavailable for this trip area</Text>
               </View>
             )}
+            {waypoints.map((wp, i) => {
+              const w = weatherByWp[wp.name];
+              if (!w?.daily) return null;
+              const code = w.daily.weathercode[0] ?? 0;
+              const hi = Math.round(w.daily.temperature_2m_max[0] ?? 0);
+              const lo = Math.round(w.daily.temperature_2m_min[0] ?? 0);
+              const rain = w.daily.precipitation_sum[0] ?? 0;
+              const wind = Math.round(w.daily.windspeed_10m_max[0] ?? 0);
+              return (
+                <View key={i} style={s.weatherCard}>
+                  <View style={s.weatherCardTop}>
+                    <View style={s.dayBadge}>
+                      <Text style={s.dayBadgeText}>{wp.day}</Text>
+                    </View>
+                    <View style={{ flex: 1, marginLeft: 10 }}>
+                      <Text style={s.wpName} numberOfLines={1}>{wp.name}</Text>
+                      <Text style={s.wpMeta}>{wp.type}</Text>
+                    </View>
+                    <Text style={s.weatherIcon}>{wmoIcon(code)}</Text>
+                  </View>
+                  <View style={s.weatherStatsRow}>
+                    <View style={s.weatherStat}>
+                      <Text style={s.weatherStatVal}>{hi}°/{lo}°</Text>
+                      <Text style={s.weatherStatLabel}>HI/LO</Text>
+                    </View>
+                    <View style={s.weatherStat}>
+                      <Text style={s.weatherStatVal}>{wind}mph</Text>
+                      <Text style={s.weatherStatLabel}>WIND</Text>
+                    </View>
+                    {rain > 0 && (
+                      <View style={s.weatherStat}>
+                        <Text style={[s.weatherStatVal, { color: '#38bdf8' }]}>{rain.toFixed(1)}"</Text>
+                        <Text style={s.weatherStatLabel}>RAIN</Text>
+                      </View>
+                    )}
+                    {w.daily.time.slice(1, 3).map((date: string, di: number) => {
+                      const dc = w.daily.weathercode[di + 1] ?? 0;
+                      const dh = Math.round(w.daily.temperature_2m_max[di + 1] ?? 0);
+                      const dl = Math.round(w.daily.temperature_2m_min[di + 1] ?? 0);
+                      const d = new Date(date);
+                      return (
+                        <View key={di} style={s.weatherStat}>
+                          <Text style={s.weatherStatVal}>{wmoIcon(dc)} {dh}°</Text>
+                          <Text style={s.weatherStatLabel}>
+                            {d.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase()}
+                          </Text>
+                        </View>
+                      );
+                    })}
+                  </View>
+                </View>
+              );
+            })}
           </>
         )}
       </ScrollView>
@@ -342,6 +371,17 @@ const s = StyleSheet.create({
   weatherRight: { alignItems: 'flex-end' },
   weatherHiLo: { color: C.text, fontSize: 15, fontWeight: '800', fontFamily: mono },
   weatherMeta: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
+  weatherCard: {
+    backgroundColor: C.s2, borderRadius: 14, borderWidth: 1, borderColor: C.border, padding: 14, gap: 12,
+  },
+  weatherCardTop: { flexDirection: 'row', alignItems: 'center' },
+  weatherStatsRow: { flexDirection: 'row', gap: 0 },
+  weatherStat: {
+    flex: 1, alignItems: 'center', paddingVertical: 8,
+    borderTopWidth: 1, borderColor: C.border,
+  },
+  weatherStatVal: { color: C.text, fontSize: 13, fontWeight: '700', fontFamily: mono },
+  weatherStatLabel: { color: C.text3, fontSize: 8, fontFamily: mono, letterSpacing: 0.5, marginTop: 2 },
   emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, paddingTop: 80 },
   emptyIcon: { fontSize: 48 },
   emptyTitle: { color: C.text, fontSize: 17, fontWeight: '700' },

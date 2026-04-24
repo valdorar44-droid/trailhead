@@ -29,7 +29,8 @@
           "location",
           "audio",
           "fetch"
-        ]
+        ],
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {

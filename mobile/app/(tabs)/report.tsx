@@ -29,6 +29,12 @@ const REPORT_TYPES = [
     subtypes: ['Available & clean', 'Occupied', 'Trashed', 'Great condition', 'No water'] },
   { type: 'closure',     label: 'CLOSURE',  icon: '🚫',  color: C.red,    ttl: '30d',
     subtypes: ['Gate locked', 'Road closed', 'Seasonal', 'Fire closure', 'Now open!'] },
+  { type: 'fuel',        label: 'FUEL',     icon: '⛽',  color: C.yellow,  ttl: '12h',
+    subtypes: ['Diesel available', 'Gas available', 'Propane available', 'Fuel out', 'Price info'] },
+  { type: 'viewpoint',   label: 'VIEW',     icon: '🏔️',  color: '#38bdf8', ttl: '90d',
+    subtypes: ['Epic vista', 'Sunrise spot', 'Sunset spot', 'Photo opportunity', 'Hidden gem'] },
+  { type: 'service',     label: 'SERVICE',  icon: '🔧',  color: '#94a3b8', ttl: '30d',
+    subtypes: ['Mechanic nearby', 'Tire repair', 'Tow available', 'Auto parts', 'Dump station'] },
 ];
 
 const SEVERITY = [
@@ -56,6 +62,7 @@ export default function ReportScreen() {
   const [view, setView] = useState<TabView>('submit');
 
   const [drivingWarning, setDrivingWarning] = useState(false);
+  const [campsiteRating, setCampsiteRating] = useState(0);
   const successAnim = useRef(new Animated.Value(0)).current;
   const typeAnims = useRef(REPORT_TYPES.map(() => new Animated.Value(1))).current;
 
@@ -89,6 +96,7 @@ export default function ReportScreen() {
   function selectType(rt: typeof REPORT_TYPES[0], idx: number) {
     setSelectedType(rt);
     setSelectedSubtype('');
+    setCampsiteRating(0);
     Animated.sequence([
       Animated.timing(typeAnims[idx], { toValue: 0.88, duration: 80, useNativeDriver: true }),
       Animated.spring(typeAnims[idx], { toValue: 1, tension: 200, friction: 6, useNativeDriver: true }),
@@ -118,10 +126,13 @@ export default function ReportScreen() {
     if (!loc) { Alert.alert('Location unavailable'); return; }
     setSubmitting(true);
     try {
+      const fullDesc = (campsiteRating > 0 && selectedType.type === 'campsite')
+        ? `${campsiteRating}/5 stars.${description ? ' ' + description : ''}`
+        : description;
       const res = await api.submitReport({
         lat: loc.lat, lng: loc.lng,
         type: selectedType.type, subtype: selectedSubtype,
-        description, severity,
+        description: fullDesc, severity,
         photo_data: photoBase64 ?? undefined,
       });
       setCreditsGained(res.credits_earned + (res.streak_bonus ?? 0));
@@ -276,6 +287,24 @@ export default function ReportScreen() {
                   )}
                 </View>
               </View>
+
+              {selectedType?.type === 'campsite' && (
+                <>
+                  <Text style={s.sectionLabel}>CAMPSITE RATING</Text>
+                  <View style={s.starRow}>
+                    {[1, 2, 3, 4, 5].map(star => (
+                      <TouchableOpacity key={star} onPress={() => setCampsiteRating(star)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                        <Text style={[s.star, star <= campsiteRating && s.starActive]}>★</Text>
+                      </TouchableOpacity>
+                    ))}
+                    {campsiteRating > 0 && (
+                      <TouchableOpacity onPress={() => setCampsiteRating(0)}>
+                        <Text style={s.starReset}>CLEAR</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </>
+              )}
 
               <Text style={s.sectionLabel}>NOTES (OPTIONAL)</Text>
               <TextInput
@@ -547,6 +576,10 @@ const s = StyleSheet.create({
     borderWidth: 1, borderColor: C.border,
   },
   safetyText: { color: C.text3, fontSize: 11, fontFamily: mono },
+  starRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 16 },
+  star: { color: C.border, fontSize: 32 },
+  starActive: { color: '#f59e0b' },
+  starReset: { color: C.text3, fontSize: 9, fontFamily: mono, marginLeft: 4 },
 
   emptyWrap: { alignItems: 'center', marginTop: 60, gap: 8 },
   emptyIcon: { fontSize: 40 },

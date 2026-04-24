@@ -7,9 +7,41 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
+import * as SecureStore from 'expo-secure-store';
 import { api } from '@/lib/api';
 import { useStore, RigProfile } from '@/lib/store';
 import { C, mono } from '@/lib/design';
+
+type ChecklistItem = { id: string; label: string; done: boolean };
+type ChecklistSection = { title: string; emoji: string; items: ChecklistItem[] };
+
+const DEFAULT_CHECKLIST: ChecklistSection[] = [
+  { title: 'Vehicle', emoji: '🚙', items: [
+    { id: 'fluids', label: 'Check all fluids (oil, coolant, brakes)', done: false },
+    { id: 'tires', label: 'Tires inflated + spare checked', done: false },
+    { id: 'brakes', label: 'Brakes & lights inspected', done: false },
+    { id: 'battery', label: 'Battery tested', done: false },
+  ]},
+  { title: 'Recovery', emoji: '🪢', items: [
+    { id: 'tow_strap', label: 'Recovery tow strap', done: false },
+    { id: 'hi_lift', label: 'Hi-lift jack + base', done: false },
+    { id: 'shovel', label: 'Folding shovel', done: false },
+    { id: 'boards', label: 'Traction boards', done: false },
+  ]},
+  { title: 'Comms & Nav', emoji: '📡', items: [
+    { id: 'garmin', label: 'Satellite comms (InReach / SPOT)', done: false },
+    { id: 'radio', label: 'CB or GMRS radio', done: false },
+    { id: 'offline', label: 'Offline maps downloaded', done: false },
+    { id: 'paper', label: 'Paper maps / topo backup', done: false },
+  ]},
+  { title: 'Provisions', emoji: '🧃', items: [
+    { id: 'water', label: '1 gal water per person per day', done: false },
+    { id: 'food', label: 'Extra food (2-day buffer)', done: false },
+    { id: 'filter', label: 'Water filter / purification tabs', done: false },
+    { id: 'firstaid', label: 'First aid kit', done: false },
+    { id: 'fire', label: 'Fire extinguisher', done: false },
+  ]},
+];
 
 const VEHICLE_TYPES = ['Truck', 'Jeep', 'SUV', 'Van', 'Overlander', 'Moto'];
 const DRIVE_TYPES   = ['2WD', 'AWD', '4x4 PT', '4x4 FT'];
@@ -35,6 +67,8 @@ export default function ProfileScreen() {
 
   const [editingRig, setEditingRig] = useState(false);
   const [rigDraft, setRigDraft] = useState<RigProfile>(rigProfile ?? DEFAULT_RIG);
+  const [checklist, setChecklist] = useState<ChecklistSection[]>(DEFAULT_CHECKLIST);
+  const [showChecklist, setShowChecklist] = useState(false);
 
   // Update view once session is restored from SecureStore
   useEffect(() => {
@@ -45,6 +79,13 @@ export default function ProfileScreen() {
   useEffect(() => {
     if (rigProfile && !editingRig) setRigDraft(rigProfile);
   }, [rigProfile]);
+
+  // Load checklist from SecureStore on mount
+  useEffect(() => {
+    SecureStore.getItemAsync('trailhead_checklist').then(json => {
+      if (json) setChecklist(JSON.parse(json));
+    }).catch(() => {});
+  }, []);
 
   async function login() {
     if (!email || !password) { Alert.alert('Fill in all fields'); return; }
@@ -83,6 +124,23 @@ export default function ProfileScreen() {
       message: `Join me on Trailhead — the AI adventure planner for overlanders!\nUse my code ${user.referral_code} to sign up and we both earn credits.\nhttps://trailhead-production-2049.up.railway.app`,
       title: 'Join Trailhead',
     });
+  }
+
+  function toggleCheckItem(sectionIdx: number, itemId: string) {
+    setChecklist(prev => {
+      const next = prev.map((sec, si) => si !== sectionIdx ? sec : {
+        ...sec,
+        items: sec.items.map(item => item.id === itemId ? { ...item, done: !item.done } : item),
+      });
+      SecureStore.setItemAsync('trailhead_checklist', JSON.stringify(next)).catch(() => {});
+      return next;
+    });
+  }
+
+  function resetChecklist() {
+    const reset = checklist.map(sec => ({ ...sec, items: sec.items.map(i => ({ ...i, done: false })) }));
+    setChecklist(reset);
+    SecureStore.setItemAsync('trailhead_checklist', JSON.stringify(reset)).catch(() => {});
   }
 
   function saveRig() {
@@ -321,6 +379,56 @@ export default function ProfileScreen() {
           )}
         </View>
 
+        {/* Trip Prep Checklist */}
+        <View style={s.checklistCard}>
+          <TouchableOpacity style={s.checklistHeader} onPress={() => setShowChecklist(p => !p)}>
+            <Text style={s.checklistIcon}>✅</Text>
+            <Text style={s.checklistTitle}>TRIP PREP</Text>
+            <View style={s.checklistProgress}>
+              {(() => {
+                const total = checklist.reduce((n, s) => n + s.items.length, 0);
+                const done  = checklist.reduce((n, s) => n + s.items.filter(i => i.done).length, 0);
+                return (
+                  <>
+                    <Text style={[s.checklistProgressText, done === total && { color: C.green }]}>
+                      {done}/{total}
+                    </Text>
+                    {done > 0 && done < total && (
+                      <View style={s.checklistBar}>
+                        <View style={[s.checklistFill, { width: `${(done / total) * 100}%` as any }]} />
+                      </View>
+                    )}
+                    {done === total && <Text style={{ color: C.green, fontSize: 12 }}>READY!</Text>}
+                  </>
+                );
+              })()}
+            </View>
+            <Ionicons name={showChecklist ? 'chevron-up' : 'chevron-down'} size={16} color={C.text3} />
+          </TouchableOpacity>
+
+          {showChecklist && (
+            <>
+              {checklist.map((section, si) => (
+                <View key={section.title} style={s.checkSection}>
+                  <Text style={s.checkSectionTitle}>{section.emoji} {section.title.toUpperCase()}</Text>
+                  {section.items.map(item => (
+                    <TouchableOpacity key={item.id} style={s.checkItem} onPress={() => toggleCheckItem(si, item.id)}>
+                      <View style={[s.checkbox, item.done && s.checkboxDone]}>
+                        {item.done && <Ionicons name="checkmark" size={13} color="#fff" />}
+                      </View>
+                      <Text style={[s.checkLabel, item.done && s.checkLabelDone]}>{item.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ))}
+              <TouchableOpacity style={s.checkResetBtn} onPress={resetChecklist}>
+                <Ionicons name="refresh-outline" size={13} color={C.text3} />
+                <Text style={s.checkResetText}>RESET ALL</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+
         {/* Credits */}
         <View style={s.creditsCard}>
           <View style={s.creditsTop}>
@@ -518,6 +626,43 @@ const s = StyleSheet.create({
     padding: 10, alignItems: 'center', marginTop: 4,
   },
   rigCancelText: { color: C.text3, fontSize: 11, fontFamily: mono },
+
+  // TRIP PREP CHECKLIST
+  checklistCard: {
+    backgroundColor: C.s2, borderRadius: 16, borderWidth: 1, borderColor: C.border,
+    overflow: 'hidden',
+  },
+  checklistHeader: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, padding: 16,
+  },
+  checklistIcon: { fontSize: 18 },
+  checklistTitle: { color: C.text, fontSize: 13, fontWeight: '800', fontFamily: mono, letterSpacing: 0.5, flex: 1 },
+  checklistProgress: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  checklistProgressText: { color: C.orange, fontSize: 12, fontFamily: mono, fontWeight: '700' },
+  checklistBar: {
+    width: 48, height: 4, backgroundColor: C.s3, borderRadius: 2, overflow: 'hidden',
+  },
+  checklistFill: { height: 4, backgroundColor: C.orange, borderRadius: 2 },
+  checkSection: { paddingHorizontal: 16, paddingBottom: 10 },
+  checkSectionTitle: {
+    color: C.text3, fontSize: 9, fontFamily: mono, letterSpacing: 1,
+    marginBottom: 8, marginTop: 4,
+    borderTopWidth: 1, borderColor: C.border, paddingTop: 10,
+  },
+  checkItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 5 },
+  checkbox: {
+    width: 22, height: 22, borderRadius: 6, borderWidth: 1.5, borderColor: C.border,
+    backgroundColor: C.s3, alignItems: 'center', justifyContent: 'center',
+  },
+  checkboxDone: { backgroundColor: C.green, borderColor: C.green },
+  checkLabel: { color: C.text2, fontSize: 13, flex: 1 },
+  checkLabelDone: { color: C.text3, textDecorationLine: 'line-through' },
+  checkResetBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 5, justifyContent: 'center',
+    paddingVertical: 12, marginHorizontal: 16, marginBottom: 12,
+    borderWidth: 1, borderColor: C.border, borderRadius: 10,
+  },
+  checkResetText: { color: C.text3, fontSize: 10, fontFamily: mono },
 
   creditsCard: {
     backgroundColor: C.s2, borderRadius: 16, borderWidth: 1, borderColor: C.border, padding: 16,

@@ -386,7 +386,7 @@ const buildMapHtml = (
   var initGas=${JSON.stringify(gasList.slice(0,20))};
   var initPins=${JSON.stringify(pins.slice(0,30))};
 
-  var map,mapboxToken='',currentStyle='mapbox://styles/mapbox/satellite-streets-v12';
+  var map,mapboxToken='',apiBase='https://trailhead-production-2049.up.railway.app',currentStyle='mapbox://styles/mapbox/satellite-streets-v12';
   var userMarker=null,wpMarkers=[],searchMarker=null;
   var allCamps=[],allGas=[],allPois=[],allReports=[];
   var reportMarkers=[];
@@ -563,13 +563,22 @@ const buildMapHtml = (
     });
   }
 
-  // ── Land ownership overlay (BLM/USFS/NPS public tile service) ─────────────────
+  // ── Land ownership overlay (BLM/USFS/NPS via backend proxy) ─────────────────
+  // Uses our FastAPI proxy so the WebView never hits BLM ArcGIS directly.
+  // The proxy caches tiles 7 days and adds CORS headers.
   function setLandOverlay(show){
     showLandOverlay=show;
     if(!map||!mapReady)return;
     if(show){
-      if(!map.getSource('blm-sma'))map.addSource('blm-sma',{type:'raster',tiles:['https://gis.blm.gov/arcgis/rest/services/lands/BLM_Natl_SMA_LimitedScale/MapServer/tile/{z}/{y}/{x}'],tileSize:256,attribution:'BLM/USGS'});
-      if(!map.getLayer('blm-sma'))map.addLayer({id:'blm-sma',type:'raster',source:'blm-sma',paint:{'raster-opacity':0.48}},'route-shadow');
+      var tileUrl=apiBase+'/api/land-tile/{z}/{y}/{x}';
+      if(!map.getSource('blm-sma')){
+        map.addSource('blm-sma',{type:'raster',tiles:[tileUrl],tileSize:256,minzoom:4,maxzoom:15,attribution:'BLM/USGS'});
+      }
+      if(!map.getLayer('blm-sma')){
+        // Insert below route layers so route is always visible on top
+        var beforeLayer=map.getLayer('route-shadow')?'route-shadow':undefined;
+        map.addLayer({id:'blm-sma',type:'raster',source:'blm-sma',paint:{'raster-opacity':0.5}},beforeLayer);
+      }
     }else{
       if(map.getLayer('blm-sma'))map.removeLayer('blm-sma');
       if(map.getSource('blm-sma'))map.removeSource('blm-sma');
@@ -660,7 +669,7 @@ const buildMapHtml = (
 
   // ── Message handler ───────────────────────────────────────────────────────────
   function handleMsgData(msg){
-    if(msg.type==='set_token'){initMap(msg.token,msg.style);return;}
+    if(msg.type==='set_token'){if(msg.apiBase)apiBase=msg.apiBase;initMap(msg.token,msg.style);return;}
     if(!mapReady){pendingMsgs.push(msg);return;}
     if(msg.type==='nav_active'){navActive=msg.active;if(!msg.active)map.easeTo({pitch:0,bearing:0,zoom:12,duration:700});}
     if(msg.type==='user_pos'&&msg.lat){lastSpeed=msg.speed!=null?msg.speed:lastSpeed;setUserPos(msg.lat,msg.lng,false,null,msg.heading);}
@@ -843,6 +852,7 @@ export default function MapScreen() {
         webRef.current?.postMessage(JSON.stringify({
           type: 'set_token', token,
           style: MAPBOX_STYLES[mapLayer] ?? MAPBOX_STYLES.satellite,
+          apiBase: process.env.EXPO_PUBLIC_API_URL ?? 'https://trailhead-production-2049.up.railway.app',
         }));
       }
     }).catch(() => {});
@@ -1559,6 +1569,7 @@ export default function MapScreen() {
             webRef.current?.postMessage(JSON.stringify({
               type: 'set_token', token: mapboxToken,
               style: MAPBOX_STYLES[mapLayer] ?? MAPBOX_STYLES.satellite,
+              apiBase: process.env.EXPO_PUBLIC_API_URL ?? 'https://trailhead-production-2049.up.railway.app',
             }));
           }
           if (userLoc) webRef.current?.postMessage(JSON.stringify({ type: 'user_pos', lat: userLoc.lat, lng: userLoc.lng }));
@@ -1679,7 +1690,7 @@ export default function MapScreen() {
         >
           {isLoadingAreaCamps
             ? <ActivityIndicator size="small" color="#14b8a6" />
-            : <Text style={{ fontSize: 16 }}>⛺</Text>
+            : <Ionicons name="trail-sign-outline" size={20} color={OVR.text} />
           }
         </TouchableOpacity>
 
@@ -1687,7 +1698,7 @@ export default function MapScreen() {
           style={[s.ctrlBtn, showPois && { backgroundColor: '#3b82f6dd', borderColor: '#3b82f6' }]}
           onPress={() => setShowPois(p => !p)}
         >
-          <Text style={{ fontSize: 15 }}>💧</Text>
+          <Ionicons name="water-outline" size={20} color={showPois ? '#fff' : OVR.text} />
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -1799,20 +1810,14 @@ export default function MapScreen() {
         <View style={s.filterBar}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.filterScroll}>
             {([
-              { id: 'blm',       label: 'BLM',              emoji: '🏕️' },
-              { id: 'nfs',       label: 'Nat. Forest',      emoji: '🌿' },
-              { id: 'nps',       label: 'Nat. Park',        emoji: '⛰️' },
-              { id: 'state',     label: 'State Park',       emoji: '🏞️' },
-              { id: 'dispersed', label: 'Dispersed',        emoji: '🌲' },
-              { id: 'rv',        label: 'RV / Hookups',     emoji: '🚐' },
-              { id: 'koa',       label: 'KOA',              emoji: '🏡' },
-              { id: 'tent',      label: 'Tent Only',        emoji: '⛺' },
-              { id: 'free',      label: 'Free',             emoji: '💚' },
-              { id: 'water',     label: 'Water',            emoji: '💧' },
-              { id: 'showers',   label: 'Showers',          emoji: '🚿' },
-              { id: 'dog',       label: 'Dog Friendly',     emoji: '🐕' },
-              { id: 'ada',       label: 'ADA',              emoji: '♿' },
-              { id: 'parking',   label: 'Overnight Prkg',   emoji: '🅿️' },
+              { id: 'blm',       label: 'BLM',          icon: 'earth-outline' as const },
+              { id: 'usfs',      label: 'Nat. Forest',  icon: 'leaf-outline' as const },
+              { id: 'nps',       label: 'Nat. Park',    icon: 'triangle-outline' as const },
+              { id: 'state',     label: 'State Park',   icon: 'map-outline' as const },
+              { id: 'dispersed', label: 'Dispersed',    icon: 'radio-button-off-outline' as const },
+              { id: 'rv',        label: 'RV / Hookups', icon: 'car-outline' as const },
+              { id: 'tent',      label: 'Tent',         icon: 'home-outline' as const },
+              { id: 'ada',       label: 'ADA',          icon: 'accessibility-outline' as const },
             ]).map(f => {
               const active = activeFilters.includes(f.id);
               return (
@@ -1823,7 +1828,7 @@ export default function MapScreen() {
                     prev.includes(f.id) ? prev.filter(x => x !== f.id) : [...prev, f.id]
                   )}
                 >
-                  <Text style={s.filterChipEmoji}>{f.emoji}</Text>
+                  <Ionicons name={f.icon} size={13} color={active ? '#fff' : OVR.text2} style={{ marginRight: 4 }} />
                   <Text style={[s.filterChipText, active && { color: '#fff' }]}>{f.label}</Text>
                 </TouchableOpacity>
               );
@@ -2992,7 +2997,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
   },
   filterChipActive: { backgroundColor: '#14b8a6', borderColor: '#14b8a6' },
-  filterChipEmoji: { fontSize: 14 },
   filterChipText: { color: C.text2, fontSize: 11, fontFamily: mono, fontWeight: '600' },
   filterLoading: { alignItems: 'center', paddingBottom: 8 },
 

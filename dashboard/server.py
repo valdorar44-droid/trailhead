@@ -688,6 +688,39 @@ async def camps_bbox(n: float, s: float, e: float, w: float, types: str = ""):
     return merged[:150]
 
 
+# ── Land ownership tile proxy (BLM/USFS/NPS) ─────────────────────────────────
+# Proxies BLM Surface Management Agency tiles through our server so the mobile
+# WebView never hits BLM's ArcGIS directly (CORS + zoom-limit issues).
+
+@app.get("/api/land-tile/{z}/{y}/{x}")
+async def land_tile(z: int, y: int, x: int):
+    cache_key = f"blmtile_{z}_{y}_{x}"
+    import base64
+    cached = get_cached("campsite_cache", cache_key, ttl_seconds=3600 * 24 * 7)
+    if cached:
+        return Response(
+            content=base64.b64decode(cached),
+            media_type="image/png",
+            headers={"Cache-Control": "public, max-age=604800", "Access-Control-Allow-Origin": "*"},
+        )
+    url = f"https://gis.blm.gov/arcgis/rest/services/lands/BLM_Natl_SMA/MapServer/tile/{z}/{y}/{x}"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(url, headers={"User-Agent": "Trailhead/1.0"})
+            r.raise_for_status()
+            data = r.content
+        set_cached("campsite_cache", cache_key, base64.b64encode(data).decode())
+        return Response(
+            content=data,
+            media_type="image/png",
+            headers={"Cache-Control": "public, max-age=604800", "Access-Control-Allow-Origin": "*"},
+        )
+    except Exception:
+        # Return transparent 1x1 pixel PNG on failure
+        empty = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
+        return Response(content=empty, media_type="image/png", headers={"Access-Control-Allow-Origin": "*"})
+
+
 # ── OSM POIs (water, trailheads, viewpoints) ──────────────────────────────────
 
 @app.get("/api/osm-pois")

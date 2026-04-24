@@ -25,15 +25,30 @@ from db.store import (
     upvote_report, downvote_report, confirm_report,
     get_leaderboard, is_reporter_restricted, check_and_update_streak,
     EXPIRY_BY_TYPE,
+    get_platform_stats, get_all_users, set_user_admin, ban_user,
+    get_all_reports, expire_report, delete_report,
+    get_all_trips, get_all_pins, delete_pin, ensure_admin_user,
 )
 
 app = FastAPI(title="Trailhead API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-DASH = Path(__file__).parent / "dashboard.html"
+DASH  = Path(__file__).parent / "dashboard.html"
+ADMIN = Path(__file__).parent / "admin.html"
 pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
 bearer = HTTPBearer(auto_error=False)
 ALGORITHM = "HS256"
+
+
+# ── Admin bootstrap ───────────────────────────────────────────────────────────
+
+@app.on_event("startup")
+async def _bootstrap_admin():
+    admin_email = os.environ.get("ADMIN_EMAIL")
+    admin_pass  = os.environ.get("ADMIN_PASSWORD")
+    admin_user  = os.environ.get("ADMIN_USERNAME", "admin")
+    if admin_email and admin_pass:
+        ensure_admin_user(admin_email, admin_user, pwd.hash(admin_pass))
 
 
 # ── Auth helpers ──────────────────────────────────────────────────────────────
@@ -68,12 +83,21 @@ def _optional_user(creds: HTTPAuthorizationCredentials | None = Depends(bearer))
 def _safe_user(u: dict) -> dict:
     return {k: v for k, v in u.items() if k not in ("password_hash", "photo_data")}
 
+def _require_admin(user: dict = Depends(_current_user)) -> dict:
+    if not user.get("is_admin"):
+        raise HTTPException(403, "Admin access required")
+    return user
+
 
 # ── Core ──────────────────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
     return DASH.read_text()
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_page():
+    return ADMIN.read_text()
 
 @app.get("/api/health")
 async def health():
@@ -386,6 +410,71 @@ async def export_gpx(body: GpxRequest):
     gpx_str = ET.tostring(root, encoding="unicode", xml_declaration=True)
     return Response(content=gpx_str, media_type="application/gpx+xml",
                     headers={"Content-Disposition": 'attachment; filename="trailhead-trip.gpx"'})
+
+
+# ── Geocoding ─────────────────────────────────────────────────────────────────
+
+# ── Admin API ─────────────────────────────────────────────────────────────────
+
+@app.get("/api/admin/stats")
+async def admin_stats(admin: dict = Depends(_require_admin)):
+    return get_platform_stats()
+
+@app.get("/api/admin/users")
+async def admin_users(search: str = "", limit: int = 50, offset: int = 0,
+                      admin: dict = Depends(_require_admin)):
+    return get_all_users(search, limit, offset)
+
+class AdminCreditBody(BaseModel):
+    amount: int; reason: str = "Admin adjustment"
+
+@app.post("/api/admin/users/{user_id}/credits")
+async def admin_adjust_credits(user_id: int, body: AdminCreditBody,
+                               admin: dict = Depends(_require_admin)):
+    add_credits(user_id, body.amount, f"{body.reason} (by admin {admin['username']})")
+    return {"ok": True, "new_balance": get_user_by_id(user_id)["credits"]}
+
+@app.post("/api/admin/users/{user_id}/admin")
+async def admin_toggle_admin(user_id: int, admin: dict = Depends(_require_admin)):
+    user = get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(404, "User not found")
+    new_state = not bool(user.get("is_admin"))
+    set_user_admin(user_id, new_state)
+    return {"ok": True, "is_admin": new_state}
+
+@app.post("/api/admin/users/{user_id}/ban")
+async def admin_ban_user(user_id: int, admin: dict = Depends(_require_admin)):
+    ban_user(user_id, days=365)
+    return {"ok": True}
+
+@app.get("/api/admin/reports")
+async def admin_reports(include_expired: bool = False,
+                        admin: dict = Depends(_require_admin)):
+    return get_all_reports(limit=200, include_expired=include_expired)
+
+@app.post("/api/admin/reports/{report_id}/expire")
+async def admin_expire_report(report_id: int, admin: dict = Depends(_require_admin)):
+    expire_report(report_id)
+    return {"ok": True}
+
+@app.delete("/api/admin/reports/{report_id}")
+async def admin_delete_report(report_id: int, admin: dict = Depends(_require_admin)):
+    delete_report(report_id)
+    return {"ok": True}
+
+@app.get("/api/admin/trips")
+async def admin_trips(admin: dict = Depends(_require_admin)):
+    return get_all_trips(limit=100)
+
+@app.get("/api/admin/pins")
+async def admin_pins(admin: dict = Depends(_require_admin)):
+    return get_all_pins(limit=200)
+
+@app.delete("/api/admin/pins/{pin_id}")
+async def admin_delete_pin(pin_id: int, admin: dict = Depends(_require_admin)):
+    delete_pin(pin_id)
+    return {"ok": True}
 
 
 # ── Geocoding ─────────────────────────────────────────────────────────────────

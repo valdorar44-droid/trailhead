@@ -72,6 +72,7 @@ def init_db():
             last_report_date         TEXT,
             reporting_restricted_until INTEGER,
             flagged_report_count     INTEGER NOT NULL DEFAULT 0,
+            is_admin                 INTEGER NOT NULL DEFAULT 0,
             created_at               INTEGER NOT NULL
         );
         CREATE TABLE IF NOT EXISTS credit_transactions (
@@ -121,6 +122,8 @@ def init_db():
         "ALTER TABLE reports ADD COLUMN photo_data TEXT",
         "ALTER TABLE reports ADD COLUMN downvotes INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE trips ADD COLUMN audio_guide TEXT",
+        "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE trips ADD COLUMN user_id INTEGER",
     ]:
         try:
             db.execute(sql)
@@ -445,3 +448,143 @@ def get_community_pins(lat: float, lng: float, radius_deg: float = 1.0) -> list:
     ).fetchall()
     db.close()
     return [dict(r) for r in rows]
+
+# ── Admin ─────────────────────────────────────────────────────────────────────
+
+def get_platform_stats() -> dict:
+    db = _conn()
+    now = int(time.time())
+    day  = now - 86400
+    week = now - 7 * 86400
+    mon  = now - 30 * 86400
+
+    def scalar(sql, *args):
+        return db.execute(sql, args).fetchone()[0] or 0
+
+    stats = {
+        "users_total":   scalar("SELECT COUNT(*) FROM users"),
+        "users_today":   scalar("SELECT COUNT(*) FROM users WHERE created_at>?", day),
+        "users_7d":      scalar("SELECT COUNT(*) FROM users WHERE created_at>?", week),
+        "users_30d":     scalar("SELECT COUNT(*) FROM users WHERE created_at>?", mon),
+        "reports_active":scalar("SELECT COUNT(*) FROM reports WHERE (expires_at IS NULL OR expires_at>?) AND downvotes<5", now),
+        "reports_today": scalar("SELECT COUNT(*) FROM reports WHERE created_at>?", day),
+        "reports_7d":    scalar("SELECT COUNT(*) FROM reports WHERE created_at>?", week),
+        "reports_30d":   scalar("SELECT COUNT(*) FROM reports WHERE created_at>?", mon),
+        "trips_total":   scalar("SELECT COUNT(*) FROM trips"),
+        "trips_today":   scalar("SELECT COUNT(*) FROM trips WHERE created_at>?", day),
+        "trips_7d":      scalar("SELECT COUNT(*) FROM trips WHERE created_at>?", week),
+        "credits_total": scalar("SELECT COALESCE(SUM(credits),0) FROM users"),
+        "pins_total":    scalar("SELECT COUNT(*) FROM community_pins"),
+    }
+
+    # Report breakdown by type
+    rows = db.execute(
+        """SELECT type, COUNT(*) as cnt FROM reports
+           WHERE (expires_at IS NULL OR expires_at>?) AND downvotes<5
+           GROUP BY type ORDER BY cnt DESC""", (now,)
+    ).fetchall()
+    stats["by_type"] = [{"type": r["type"], "count": r["cnt"]} for r in rows]
+
+    db.close()
+    return stats
+
+def get_all_users(search: str = "", limit: int = 50, offset: int = 0) -> list:
+    db = _conn()
+    like = f"%{search}%"
+    rows = db.execute(
+        """SELECT u.id, u.username, u.email, u.credits, u.is_admin,
+                  u.report_streak, u.flagged_report_count, u.created_at,
+                  u.reporting_restricted_until,
+                  COUNT(r.id) as report_count
+           FROM users u
+           LEFT JOIN reports r ON r.user_id=u.id
+           WHERE u.username LIKE ? OR u.email LIKE ?
+           GROUP BY u.id ORDER BY u.created_at DESC LIMIT ? OFFSET ?""",
+        (like, like, limit, offset)
+    ).fetchall()
+    db.close()
+    return [dict(r) for r in rows]
+
+def set_user_admin(user_id: int, is_admin: bool):
+    db = _conn()
+    db.execute("UPDATE users SET is_admin=? WHERE id=?", (1 if is_admin else 0, user_id))
+    db.commit(); db.close()
+
+def ban_user(user_id: int, days: int = 365):
+    db = _conn()
+    until = int(time.time()) + days * 86400
+    db.execute("UPDATE users SET reporting_restricted_until=? WHERE id=?", (until, user_id))
+    db.commit(); db.close()
+
+def get_all_reports(limit: int = 100, include_expired: bool = False) -> list:
+    db = _conn()
+    now = int(time.time())
+    where = "" if include_expired else "WHERE (r.expires_at IS NULL OR r.expires_at>?) AND r.downvotes<5"
+    params = [] if include_expired else [now]
+    rows = db.execute(
+        f"""SELECT r.id, r.lat, r.lng, r.type, r.subtype, r.severity,
+                   r.upvotes, r.downvotes, r.confirmations, r.has_photo,
+                   r.created_at, r.expires_at, r.description,
+                   u.username
+            FROM reports r JOIN users u ON r.user_id=u.id
+            {where} ORDER BY r.created_at DESC LIMIT ?""",
+        params + [limit]
+    ).fetchall()
+    db.close()
+    return [dict(r) for r in rows]
+
+def expire_report(report_id: int):
+    db = _conn()
+    db.execute("UPDATE reports SET expires_at=? WHERE id=?", (int(time.time()) - 1, report_id))
+    db.commit(); db.close()
+
+def delete_report(report_id: int):
+    db = _conn()
+    db.execute("DELETE FROM reports WHERE id=?", (report_id,))
+    db.commit(); db.close()
+
+def get_all_trips(limit: int = 50) -> list:
+    db = _conn()
+    rows = db.execute(
+        """SELECT t.id, t.created_at, t.request,
+                  json_extract(t.plan,'$.plan.trip_name') as trip_name,
+                  json_extract(t.plan,'$.plan.duration_days') as duration_days,
+                  json_extract(t.plan,'$.plan.states') as states,
+                  u.username
+           FROM trips t LEFT JOIN users u ON t.user_id=u.id
+           ORDER BY t.created_at DESC LIMIT ?""",
+        (limit,)
+    ).fetchall()
+    db.close()
+    return [dict(r) for r in rows]
+
+def get_all_pins(limit: int = 100) -> list:
+    db = _conn()
+    rows = db.execute(
+        """SELECT p.*, u.username FROM community_pins p
+           LEFT JOIN users u ON p.user_id=u.id
+           ORDER BY p.submitted_at DESC LIMIT ?""", (limit,)
+    ).fetchall()
+    db.close()
+    return [dict(r) for r in rows]
+
+def delete_pin(pin_id: int):
+    db = _conn()
+    db.execute("DELETE FROM community_pins WHERE id=?", (pin_id,))
+    db.commit(); db.close()
+
+def ensure_admin_user(email: str, username: str, password_hash: str):
+    """Create admin account if it doesn't exist. Idempotent."""
+    db = _conn()
+    existing = db.execute("SELECT id FROM users WHERE email=?", (email.lower(),)).fetchone()
+    if existing:
+        db.execute("UPDATE users SET is_admin=1 WHERE email=?", (email.lower(),))
+        db.commit(); db.close()
+        return
+    import secrets as _secrets
+    code = f"admin-{_secrets.token_hex(4)}"
+    db.execute(
+        "INSERT INTO users (email,username,password_hash,referral_code,is_admin,created_at) VALUES (?,?,?,?,1,?)",
+        (email.lower(), username, password_hash, code, int(time.time()))
+    )
+    db.commit(); db.close()

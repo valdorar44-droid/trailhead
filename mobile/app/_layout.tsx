@@ -6,9 +6,11 @@ import * as SecureStore from 'expo-secure-store';
 import * as Notifications from 'expo-notifications';
 import { useStore } from '@/lib/store';
 import { api } from '@/lib/api';
+import { useTheme } from '@/lib/design';
 
 export default function RootLayout() {
   const setAuth = useStore(s => s.setAuth);
+  const themeMode = useStore(s => s.themeMode);
   const router = useRouter();
 
   useEffect(() => {
@@ -38,7 +40,7 @@ export default function RootLayout() {
 
   return (
     <>
-      <StatusBar style="light" />
+      <StatusBar style={themeMode === 'dark' ? 'light' : 'dark'} />
       <Stack screenOptions={{ headerShown: false }} />
     </>
   );

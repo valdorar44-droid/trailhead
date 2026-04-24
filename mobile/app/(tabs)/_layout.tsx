@@ -1,8 +1,9 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { C, mono } from '@/lib/design';
+import { useTheme, mono } from '@/lib/design';
 
 export default function TabLayout() {
+  const C = useTheme();
   return (
     <Tabs
       screenOptions={{

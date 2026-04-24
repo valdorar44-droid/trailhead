@@ -104,11 +104,6 @@ async def admin_page():
 async def health():
     return {"status": "ok", "service": "trailhead"}
 
-@app.get("/api/config")
-async def config():
-    return {"status": "ok"}
-
-
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
 class RegisterRequest(BaseModel):

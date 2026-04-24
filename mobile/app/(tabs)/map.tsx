@@ -11,19 +11,61 @@ import { C, mono } from '@/lib/design';
 // ─── US State bounding boxes for offline download ─────────────────────────────
 
 const US_STATES: Record<string, { name: string; n: number; s: number; e: number; w: number; emoji: string }> = {
-  AZ: { name: 'Arizona',    n: 37.0, s: 31.3, e: -109.0, w: -114.8, emoji: '🏜️' },
-  CA: { name: 'California', n: 42.0, s: 32.5, e: -114.1, w: -124.4, emoji: '🌴' },
-  CO: { name: 'Colorado',   n: 41.0, s: 37.0, e: -102.0, w: -109.1, emoji: '🏔️' },
-  ID: { name: 'Idaho',      n: 49.0, s: 42.0, e: -111.0, w: -117.2, emoji: '🏔️' },
-  MT: { name: 'Montana',    n: 49.0, s: 44.4, e: -104.0, w: -116.0, emoji: '🦬' },
-  NM: { name: 'New Mexico', n: 37.0, s: 31.3, e: -103.0, w: -109.1, emoji: '🌵' },
-  NV: { name: 'Nevada',     n: 42.0, s: 35.0, e: -114.0, w: -120.0, emoji: '🎰' },
-  OR: { name: 'Oregon',     n: 46.3, s: 41.9, e: -116.5, w: -124.6, emoji: '🌲' },
-  UT: { name: 'Utah',       n: 42.0, s: 36.9, e: -109.0, w: -114.1, emoji: '🏜️' },
-  WA: { name: 'Washington', n: 49.0, s: 45.5, e: -116.9, w: -124.7, emoji: '☁️' },
-  WY: { name: 'Wyoming',    n: 45.0, s: 41.0, e: -104.1, w: -111.1, emoji: '🦅' },
-  TX: { name: 'Texas',      n: 36.5, s: 25.8, e: -93.5,  w: -106.6, emoji: '🤠' },
-  NM2:{ name: 'New Mexico', n: 37.0, s: 31.3, e: -103.0, w: -109.1, emoji: '🌵' },
+  // West
+  AK: { name: 'Alaska',       n: 71.4, s: 54.6, e: -130.0, w: -168.0, emoji: '🐻' },
+  AZ: { name: 'Arizona',      n: 37.0, s: 31.3, e: -109.0, w: -114.8, emoji: '🏜️' },
+  CA: { name: 'California',   n: 42.0, s: 32.5, e: -114.1, w: -124.4, emoji: '🌴' },
+  CO: { name: 'Colorado',     n: 41.0, s: 37.0, e: -102.0, w: -109.1, emoji: '🏔️' },
+  HI: { name: 'Hawaii',       n: 22.2, s: 18.9, e: -154.8, w: -160.2, emoji: '🌺' },
+  ID: { name: 'Idaho',        n: 49.0, s: 42.0, e: -111.0, w: -117.2, emoji: '🏔️' },
+  MT: { name: 'Montana',      n: 49.0, s: 44.4, e: -104.0, w: -116.0, emoji: '🦬' },
+  NM: { name: 'New Mexico',   n: 37.0, s: 31.3, e: -103.0, w: -109.1, emoji: '🌵' },
+  NV: { name: 'Nevada',       n: 42.0, s: 35.0, e: -114.0, w: -120.0, emoji: '🎰' },
+  OR: { name: 'Oregon',       n: 46.3, s: 41.9, e: -116.5, w: -124.6, emoji: '🌲' },
+  UT: { name: 'Utah',         n: 42.0, s: 36.9, e: -109.0, w: -114.1, emoji: '🏜️' },
+  WA: { name: 'Washington',   n: 49.0, s: 45.5, e: -116.9, w: -124.7, emoji: '☁️' },
+  WY: { name: 'Wyoming',      n: 45.0, s: 41.0, e: -104.1, w: -111.1, emoji: '🦅' },
+  // Central / South
+  KS: { name: 'Kansas',       n: 40.0, s: 36.9, e: -94.6,  w: -102.1, emoji: '🌾' },
+  MN: { name: 'Minnesota',    n: 49.4, s: 43.5, e: -89.5,  w: -97.2,  emoji: '🦅' },
+  MO: { name: 'Missouri',     n: 40.6, s: 35.9, e: -89.1,  w: -95.8,  emoji: '🌉' },
+  ND: { name: 'North Dakota', n: 49.0, s: 45.9, e: -96.6,  w: -104.1, emoji: '🌾' },
+  NE: { name: 'Nebraska',     n: 43.0, s: 40.0, e: -95.3,  w: -104.1, emoji: '🌽' },
+  OK: { name: 'Oklahoma',     n: 37.0, s: 33.6, e: -94.4,  w: -103.0, emoji: '🤠' },
+  SD: { name: 'South Dakota', n: 45.9, s: 42.5, e: -96.4,  w: -104.1, emoji: '🦬' },
+  TX: { name: 'Texas',        n: 36.5, s: 25.8, e: -93.5,  w: -106.6, emoji: '🤠' },
+  // Southeast
+  AL: { name: 'Alabama',      n: 35.0, s: 30.2, e: -84.9,  w: -88.5,  emoji: '🌿' },
+  AR: { name: 'Arkansas',     n: 36.5, s: 33.0, e: -89.6,  w: -94.6,  emoji: '🏞️' },
+  FL: { name: 'Florida',      n: 31.0, s: 24.5, e: -80.0,  w: -87.6,  emoji: '🌊' },
+  GA: { name: 'Georgia',      n: 35.0, s: 30.4, e: -80.8,  w: -85.6,  emoji: '🍑' },
+  KY: { name: 'Kentucky',     n: 39.1, s: 36.5, e: -81.9,  w: -89.6,  emoji: '🐎' },
+  LA: { name: 'Louisiana',    n: 33.0, s: 28.9, e: -88.8,  w: -94.0,  emoji: '🎷' },
+  MS: { name: 'Mississippi',  n: 35.0, s: 30.2, e: -88.1,  w: -91.7,  emoji: '🌊' },
+  NC: { name: 'North Carolina',n:36.6, s: 33.8, e: -75.5,  w: -84.3,  emoji: '🏔️' },
+  SC: { name: 'South Carolina',n:35.2, s: 32.0, e: -78.5,  w: -83.4,  emoji: '🌴' },
+  TN: { name: 'Tennessee',    n: 36.7, s: 35.0, e: -81.6,  w: -90.3,  emoji: '🎵' },
+  VA: { name: 'Virginia',     n: 39.5, s: 36.5, e: -75.2,  w: -83.7,  emoji: '🏛️' },
+  WV: { name: 'West Virginia',n: 40.6, s: 37.2, e: -77.7,  w: -82.6,  emoji: '⛏️' },
+  // Northeast
+  CT: { name: 'Connecticut',  n: 42.1, s: 41.0, e: -71.8,  w: -73.7,  emoji: '🍂' },
+  DE: { name: 'Delaware',     n: 39.8, s: 38.4, e: -75.0,  w: -75.8,  emoji: '🏖️' },
+  MA: { name: 'Massachusetts',n: 42.9, s: 41.2, e: -69.9,  w: -73.5,  emoji: '🦞' },
+  MD: { name: 'Maryland',     n: 39.7, s: 37.9, e: -75.0,  w: -79.5,  emoji: '🦀' },
+  ME: { name: 'Maine',        n: 47.5, s: 43.1, e: -66.9,  w: -71.1,  emoji: '🦌' },
+  NH: { name: 'New Hampshire',n: 45.3, s: 42.7, e: -70.6,  w: -72.6,  emoji: '🍁' },
+  NJ: { name: 'New Jersey',   n: 41.4, s: 38.9, e: -73.9,  w: -75.6,  emoji: '🏙️' },
+  NY: { name: 'New York',     n: 45.0, s: 40.5, e: -71.8,  w: -79.8,  emoji: '🗽' },
+  PA: { name: 'Pennsylvania', n: 42.3, s: 39.7, e: -74.7,  w: -80.5,  emoji: '🔔' },
+  RI: { name: 'Rhode Island', n: 42.0, s: 41.1, e: -71.1,  w: -71.9,  emoji: '⚓' },
+  VT: { name: 'Vermont',      n: 45.0, s: 42.7, e: -71.5,  w: -73.4,  emoji: '🍁' },
+  // Midwest
+  IA: { name: 'Iowa',         n: 43.5, s: 40.4, e: -90.1,  w: -96.6,  emoji: '🌽' },
+  IL: { name: 'Illinois',     n: 42.5, s: 36.9, e: -87.0,  w: -91.5,  emoji: '🏙️' },
+  IN: { name: 'Indiana',      n: 41.8, s: 37.8, e: -84.8,  w: -88.1,  emoji: '🏎️' },
+  MI: { name: 'Michigan',     n: 48.3, s: 41.7, e: -82.4,  w: -90.4,  emoji: '🚗' },
+  OH: { name: 'Ohio',         n: 42.0, s: 38.4, e: -80.5,  w: -84.8,  emoji: '🌻' },
+  WI: { name: 'Wisconsin',    n: 47.1, s: 42.5, e: -86.2,  w: -92.9,  emoji: '🧀' },
 };
 
 type RouteOpts = { avoidTolls: boolean; avoidHighways: boolean; backRoads: boolean; noFerries: boolean };
@@ -593,6 +635,7 @@ const buildMapHtml = (
 
 export default function MapScreen() {
   const activeTrip = useStore(s => s.activeTrip);
+  const user = useStore(s => s.user);
   const webRef = useRef<WebView>(null);
 
   const [userLoc,   setUserLoc]   = useState<{ lat: number; lng: number } | null>(null);
@@ -665,8 +708,11 @@ export default function MapScreen() {
   const [showPacking,   setShowPacking]   = useState(false);
   const [loadingPacking,setLoadingPacking]= useState(false);
 
+  const [navDest, setNavDest] = useState<WP | null>(null);
+
   const navAnim      = useRef(new Animated.Value(0)).current;
   const navRef       = useRef({ active: false, idx: 0, wps: [] as WP[] });
+  const navDestRef   = useRef<WP | null>(null);
   const guideRef     = useRef<Record<string, string>>({});
   const spokenRef    = useRef(new Set<string>());
   const discoverRef  = useRef<CampsitePin[]>([]);
@@ -720,7 +766,21 @@ export default function MapScreen() {
             webRef.current?.postMessage(JSON.stringify({ type: 'track_point', lat: pos.lat, lng: pos.lng }));
           }
 
-          if (!active || !wps[idx]) return;
+          if (!active) return;
+
+          // Single-destination nav (from search) — no trip waypoints
+          const singleDest = navDestRef.current;
+          if (!wps[idx] && singleDest) {
+            const dist = haversineKm(pos.lat, pos.lng, singleDest.lat, singleDest.lng);
+            setIsApproaching(dist < 0.8);
+            if (dist < 0.25) {
+              Speech.speak(`You have arrived at ${singleDest.name}.`, { rate: 0.9 });
+              setTimeout(() => setNavMode(false), 3000);
+            }
+            return;
+          }
+          if (!wps[idx]) return;
+
           const dist = haversineKm(pos.lat, pos.lng, wps[idx].lat, wps[idx].lng);
 
           // Approaching indicator (within 800m)
@@ -875,33 +935,42 @@ export default function MapScreen() {
       setShowPanel(false);
       setIsApproaching(false);
       setIsRerouting(false);
-      // Find nearest waypoint to current location — start there, not from wp[0]
-      const loc = navRef.current.active ? null : userLoc; // use current loc on fresh start
-      let startIdx = navIdx;
-      if (loc && waypoints.length > 0) {
-        startIdx = nearestWpIdx(loc, waypoints);
-        setNavIdx(startIdx);
-        navRef.current.idx = startIdx;
-        setRouteLegOffset(startIdx);
-      }
-      webRef.current?.postMessage(JSON.stringify({ type: 'nav_target', idx: startIdx }));
-      // Route OSRM from current GPS through remaining waypoints
-      if (userLoc) {
-        webRef.current?.postMessage(JSON.stringify({
-          type: 'start_route_from',
-          lat: userLoc.lat, lng: userLoc.lng, fromIdx: startIdx,
-        }));
-      }
-      const target = waypoints[startIdx];
-      if (target) {
-        const dist = userLoc ? haversineKm(userLoc.lat, userLoc.lng, target.lat, target.lng) : null;
+      const dest = navDestRef.current;
+      if (dest && waypoints.length === 0) {
+        // Single-destination nav (from search) — route already drawn by route_to_search
+        const dist = userLoc ? haversineKm(userLoc.lat, userLoc.lng, dest.lat, dest.lng) : null;
         const distStr = dist && dist > 0.5 ? `, ${formatDist(dist)} away` : '';
-        Speech.speak(`Navigation started. Heading to ${target.name}${distStr}.`, { rate: 0.9 });
+        Speech.speak(`Navigation started. Heading to ${dest.name}${distStr}.`, { rate: 0.9 });
+      } else {
+        // Trip navigation
+        const loc = navRef.current.active ? null : userLoc;
+        let startIdx = navIdx;
+        if (loc && waypoints.length > 0) {
+          startIdx = nearestWpIdx(loc, waypoints);
+          setNavIdx(startIdx);
+          navRef.current.idx = startIdx;
+          setRouteLegOffset(startIdx);
+        }
+        webRef.current?.postMessage(JSON.stringify({ type: 'nav_target', idx: startIdx }));
+        if (userLoc) {
+          webRef.current?.postMessage(JSON.stringify({
+            type: 'start_route_from',
+            lat: userLoc.lat, lng: userLoc.lng, fromIdx: startIdx,
+          }));
+        }
+        const target = waypoints[startIdx];
+        if (target) {
+          const dist = userLoc ? haversineKm(userLoc.lat, userLoc.lng, target.lat, target.lng) : null;
+          const distStr = dist && dist > 0.5 ? `, ${formatDist(dist)} away` : '';
+          Speech.speak(`Navigation started. Heading to ${target.name}${distStr}.`, { rate: 0.9 });
+        }
       }
     } else {
       setIsApproaching(false);
       setIsRerouting(false);
       setRouteLegOffset(0);
+      navDestRef.current = null;
+      setNavDest(null);
       webRef.current?.postMessage(JSON.stringify({ type: 'nav_reset' }));
       webRef.current?.postMessage(JSON.stringify({ type: 'clear_track' }));
       Speech.stop();
@@ -954,14 +1023,18 @@ export default function MapScreen() {
 
   function navigateToSearch() {
     if (!searchRouteCard || !userLoc) return;
+    const dest: WP = { lat: searchRouteCard.lat, lng: searchRouteCard.lng, name: searchRouteCard.name, day: 0, type: 'waypoint' };
+    navDestRef.current = dest;
+    setNavDest(dest);
     setShowSearch(false);
     setSearchRouteCard(null);
     webRef.current?.postMessage(JSON.stringify({
       type: 'route_to_search',
-      lat: searchRouteCard.lat, lng: searchRouteCard.lng,
-      name: searchRouteCard.name,
+      lat: dest.lat, lng: dest.lng,
+      name: dest.name,
       userLat: userLoc.lat, userLng: userLoc.lng,
     }));
+    setNavMode(true);
   }
 
   async function openCampInsight() {
@@ -1130,7 +1203,7 @@ export default function MapScreen() {
 
   // ── Nav HUD values ──────────────────────────────────────────────────────────
 
-  const navTarget = navMode && waypoints[navIdx] ? waypoints[navIdx] : null;
+  const navTarget = navMode ? (waypoints[navIdx] ?? navDest ?? null) : null;
   const distKm    = userLoc && navTarget ? haversineKm(userLoc.lat, userLoc.lng, navTarget.lat, navTarget.lng) : null;
   const bearing   = userLoc && navTarget ? calcBearing(userLoc.lat, userLoc.lng, navTarget.lat, navTarget.lng) : null;
   const speedMph  = userSpeed !== null && userSpeed > 0 ? userSpeed * 2.237 : null;
@@ -1197,11 +1270,13 @@ export default function MapScreen() {
               : isRerouting
               ? 'RECALCULATING ROUTE...'
               : navMode
-                ? isApproaching
-                  ? `ARRIVING · ${waypoints[navIdx]?.name ?? ''}`
-                  : isProceeding
-                    ? `PROCEED TO STOP ${navIdx + 1}/${waypoints.length}`
-                    : `NAVIGATING · STOP ${navIdx + 1}/${waypoints.length} · ${isRouted ? '🗺 ROUTED' : '🧭 OFF-ROAD'}`
+                ? navDest && waypoints.length === 0
+                  ? isApproaching ? `ARRIVING · ${navDest.name}` : `NAVIGATING TO ${navDest.name.split(',')[0].toUpperCase()}`
+                  : isApproaching
+                    ? `ARRIVING · ${waypoints[navIdx]?.name ?? ''}`
+                    : isProceeding
+                      ? `PROCEED TO STOP ${navIdx + 1}/${waypoints.length}`
+                      : `NAVIGATING · STOP ${navIdx + 1}/${waypoints.length} · ${isRouted ? '🗺 ROUTED' : '🧭 OFF-ROAD'}`
                 : activeTrip ? activeTrip.plan.trip_name.toUpperCase() : 'NO ACTIVE TRIP'}
         </Text>
         {routeAlerts.length > 0 && (
@@ -1694,8 +1769,16 @@ export default function MapScreen() {
         <TouchableOpacity style={s.modalBackdrop} activeOpacity={1} onPress={() => setShowOfflineModal(false)}>
           <View style={s.offlineSheet}>
             <Text style={s.offlineTitle}>OFFLINE MAPS</Text>
+            {!user ? (
+              <View style={{ alignItems: 'center', paddingVertical: 24 }}>
+                <Text style={[s.offlineSub, { textAlign: 'center', marginBottom: 4 }]}>Sign in to download offline maps.</Text>
+                <TouchableOpacity onPress={() => setShowOfflineModal(false)} style={s.offlineRouteBtn}>
+                  <Text style={s.offlineRouteBtnText}>GO TO PROFILE TO SIGN IN</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (<>
             <Text style={s.offlineSub}>Download tiles for use without signal. z10–z12 overview, z10–z14 for current area.</Text>
-            <Text style={s.offlineSectionLabel}>WESTERN US STATES (z10–z12)</Text>
+            <Text style={s.offlineSectionLabel}>ALL US STATES (z10–z12)</Text>
             <ScrollView style={{ maxHeight: 260 }} showsVerticalScrollIndicator={false}>
               <View style={s.stateGrid}>
                 {Object.entries(US_STATES).map(([code, st]) => (
@@ -1739,6 +1822,7 @@ export default function MapScreen() {
                 <Text style={s.offlineProgress}>{downloadProgress}% · {downloadTotal} tiles</Text>
               </View>
             )}
+            </>)}
           </View>
         </TouchableOpacity>
       </Modal>

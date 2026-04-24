@@ -157,6 +157,41 @@ function stepLabel(type: string, modifier: string): string {
   return 'CONTINUE';
 }
 
+// ─── Land type color helper ──────────────────────────────────────────────────
+
+function landColor(lt: string) {
+  if (!lt) return { bg: '#f1f5f9', text: '#475569', border: '#cbd5e1' };
+  const l = lt.toLowerCase();
+  if (l.includes('national forest') || l.includes('usfs') || l.includes('forest service') || l.includes('ranger'))
+    return { bg: '#dcfce7', text: '#15803d', border: '#86efac' };
+  if (l.includes('national park') || l.includes('nps') || l.includes('national monument') || l.includes('national recreation'))
+    return { bg: '#dbeafe', text: '#1d4ed8', border: '#93c5fd' };
+  if (l.includes('blm') || l.includes('bureau of land'))
+    return { bg: '#fef3c7', text: '#92400e', border: '#fcd34d' };
+  if (l.includes('state park') || l.includes('state forest') || l.includes('state beach'))
+    return { bg: '#ede9fe', text: '#6d28d9', border: '#c4b5fd' };
+  if (l.includes('koa') || l.includes('resort') || l.includes('rv park') || l.includes('private'))
+    return { bg: '#f1f5f9', text: '#475569', border: '#94a3b8' };
+  return { bg: '#ecfdf5', text: '#065f46', border: '#6ee7b7' };
+}
+
+function tagEmoji(tag: string): string {
+  const t = tag.toLowerCase();
+  if (t === 'rv' || t === 'hookups') return '🚐';
+  if (t === 'tent') return '⛺';
+  if (t === 'dispersed') return '🌲';
+  if (t === 'water') return '💧';
+  if (t === 'showers') return '🚿';
+  if (t === 'ada') return '♿';
+  if (t === 'dogs' || t === 'dog friendly') return '🐾';
+  if (t === 'free') return '🆓';
+  if (t === 'reservable') return '📅';
+  if (t === 'usfs') return '🌲';
+  if (t === 'blm') return '🏜️';
+  if (t === 'nps') return '🏔️';
+  return '•';
+}
+
 // ─── Map HTML ─────────────────────────────────────────────────────────────────
 
 const MAPBOX_STYLES: Record<string, string> = {
@@ -1355,38 +1390,64 @@ export default function MapScreen() {
       {/* ── Campsite quick card ── */}
       {selectedCamp && !navMode && (
         <View style={s.quickCard}>
+          {/* Photo / placeholder */}
           <View style={s.quickCardImg}>
             {selectedCamp.photo_url
               ? <Image source={{ uri: selectedCamp.photo_url }} style={s.quickCardPhoto} resizeMode="cover" />
-              : <View style={[s.quickCardPhotoPlaceholder, { backgroundColor: '#14b8a633' }]}>
-                  <Text style={{ fontSize: 32 }}>
+              : <View style={[s.quickCardPhotoPlaceholder, { backgroundColor: landColor(selectedCamp.land_type).bg }]}>
+                  <Text style={{ fontSize: 36 }}>
                     {selectedCamp.tags.includes('rv') ? '🚐' : selectedCamp.tags.includes('dispersed') ? '🌲' : '🏕️'}
+                  </Text>
+                  <Text style={{ fontSize: 9, color: landColor(selectedCamp.land_type).text, fontFamily: mono, marginTop: 4, fontWeight: '700' }}>
+                    {(selectedCamp.land_type || 'CAMP').toUpperCase().slice(0, 12)}
                   </Text>
                 </View>
             }
           </View>
           <View style={s.quickCardBody}>
+            {/* Close + name */}
             <View style={s.quickCardHeader}>
               <Text style={s.quickCardName} numberOfLines={2}>{selectedCamp.name}</Text>
-              <TouchableOpacity onPress={() => setSelectedCamp(null)}>
-                <Ionicons name="close" size={18} color={C.text3} />
+              <TouchableOpacity style={s.quickCardClose} onPress={() => setSelectedCamp(null)}>
+                <Ionicons name="close" size={16} color={C.text3} />
               </TouchableOpacity>
             </View>
+            {/* Land badge */}
+            {selectedCamp.land_type ? (
+              <View style={[s.landBadge, { backgroundColor: landColor(selectedCamp.land_type).bg, borderColor: landColor(selectedCamp.land_type).border }]}>
+                <Text style={[s.landBadgeText, { color: landColor(selectedCamp.land_type).text }]}>
+                  {selectedCamp.land_type.toUpperCase()}
+                </Text>
+              </View>
+            ) : null}
+            {/* Amenity tags */}
             <View style={s.quickCardTags}>
-              {selectedCamp.tags.slice(0, 4).map(t => (
-                <View key={t} style={s.qTag}><Text style={s.qTagText}>{t.toUpperCase()}</Text></View>
+              {selectedCamp.tags.slice(0, 5).map(t => (
+                <View key={t} style={s.qTag}>
+                  <Text style={s.qTagText}>{tagEmoji(t)} {t.toUpperCase()}</Text>
+                </View>
               ))}
+              {selectedCamp.ada && (
+                <View style={[s.qTag, { borderColor: '#3b82f6', backgroundColor: '#eff6ff' }]}>
+                  <Text style={[s.qTagText, { color: '#1d4ed8' }]}>♿ ADA</Text>
+                </View>
+              )}
             </View>
-            <Text style={s.quickCardLand}>{selectedCamp.land_type}</Text>
-            {selectedCamp.cost ? <Text style={s.quickCardCost}>{selectedCamp.cost}</Text> : null}
+            {/* Cost */}
+            {selectedCamp.cost ? (
+              <Text style={s.quickCardCost}>
+                {selectedCamp.reservable ? '📅 ' : '🆓 '}{selectedCamp.cost}
+              </Text>
+            ) : null}
+            {/* Actions */}
             <View style={s.quickCardActions}>
-              <TouchableOpacity style={s.quickCardBook} onPress={() => Linking.openURL(selectedCamp.url)}>
-                <Ionicons name="calendar-outline" size={13} color={C.orange} />
-                <Text style={s.quickCardBookText}>BOOK</Text>
+              <TouchableOpacity style={s.quickCardNav} onPress={() => navigateToCamp(selectedCamp)}>
+                <Ionicons name="navigate" size={13} color="#fff" />
+                <Text style={s.quickCardNavText}>NAVIGATE</Text>
               </TouchableOpacity>
               <TouchableOpacity style={s.quickCardFull} onPress={openCampDetail} disabled={loadingDetail}>
                 {loadingDetail
-                  ? <ActivityIndicator size="small" color="#fff" />
+                  ? <ActivityIndicator size="small" color={C.orange} />
                   : <Text style={s.quickCardFullText}>FULL PROFILE →</Text>
                 }
               </TouchableOpacity>
@@ -1424,13 +1485,19 @@ export default function MapScreen() {
 
                 {/* Tags */}
                 <View style={s.detailTags}>
-                  <View style={s.detailLandBadge}>
-                    <Text style={s.detailLandText}>{campDetail.land_type.toUpperCase()}</Text>
-                  </View>
+                  {campDetail.land_type ? (
+                    <View style={[s.detailLandBadge, { backgroundColor: landColor(campDetail.land_type).bg, borderColor: landColor(campDetail.land_type).border }]}>
+                      <Text style={[s.detailLandText, { color: landColor(campDetail.land_type).text }]}>{campDetail.land_type.toUpperCase()}</Text>
+                    </View>
+                  ) : null}
                   {campDetail.tags.map(t => (
-                    <View key={t} style={s.qTag}><Text style={s.qTagText}>{t.toUpperCase()}</Text></View>
+                    <View key={t} style={s.qTag}><Text style={s.qTagText}>{tagEmoji(t)} {t.toUpperCase()}</Text></View>
                   ))}
-                  {campDetail.ada && <View style={[s.qTag, { borderColor: '#3b82f6' }]}><Text style={[s.qTagText, { color: '#3b82f6' }]}>♿ ADA</Text></View>}
+                  {campDetail.ada && (
+                    <View style={[s.qTag, { borderColor: '#3b82f6', backgroundColor: '#eff6ff' }]}>
+                      <Text style={[s.qTagText, { color: '#1d4ed8' }]}>♿ ADA</Text>
+                    </View>
+                  )}
                 </View>
 
                 {/* Cost + sites count */}
@@ -1452,13 +1519,25 @@ export default function MapScreen() {
                 {/* Amenities */}
                 {campDetail.amenities.length > 0 && (
                   <View style={s.detailSection}>
-                    <Text style={s.detailSectionTitle}>Amenities</Text>
+                    <Text style={s.detailSectionTitle}>AMENITIES</Text>
                     <View style={s.amenityGrid}>
-                      {campDetail.amenities.map(a => (
-                        <View key={a} style={s.amenityItem}>
-                          <Text style={s.amenityText}>{a}</Text>
-                        </View>
-                      ))}
+                      {campDetail.amenities.map(a => {
+                        const al = a.toLowerCase();
+                        const icon = al.includes('water') ? '💧' : al.includes('shower') ? '🚿'
+                          : al.includes('toilet') || al.includes('restroom') ? '🚻'
+                          : al.includes('electric') || al.includes('hookup') ? '⚡'
+                          : al.includes('dump') ? '🗑️' : al.includes('fire') ? '🔥'
+                          : al.includes('picnic') ? '🌳' : al.includes('trash') ? '🗑️'
+                          : al.includes('wifi') || al.includes('internet') ? '📶'
+                          : al.includes('cell') ? '📱' : al.includes('rv') ? '🚐'
+                          : al.includes('pet') || al.includes('dog') ? '🐾' : '✓';
+                        return (
+                          <View key={a} style={s.amenityItem}>
+                            <Text style={{ fontSize: 13 }}>{icon}</Text>
+                            <Text style={s.amenityText}>{a}</Text>
+                          </View>
+                        );
+                      })}
                     </View>
                   </View>
                 )}
@@ -1466,13 +1545,15 @@ export default function MapScreen() {
                 {/* Site types */}
                 {campDetail.site_types.length > 0 && (
                   <View style={s.detailSection}>
-                    <Text style={s.detailSectionTitle}>Site Types</Text>
-                    {campDetail.site_types.map(st => (
-                      <View key={st} style={s.siteTypeRow}>
-                        <Ionicons name="checkmark-circle-outline" size={14} color={C.green} />
-                        <Text style={s.siteTypeText}>{st}</Text>
-                      </View>
-                    ))}
+                    <Text style={s.detailSectionTitle}>SITE TYPES</Text>
+                    <View style={s.amenityGrid}>
+                      {campDetail.site_types.map(st => (
+                        <View key={st} style={[s.amenityItem, { backgroundColor: '#f0fdf4', borderColor: '#86efac' }]}>
+                          <Text style={{ fontSize: 13 }}>⛺</Text>
+                          <Text style={[s.amenityText, { color: '#15803d' }]}>{st}</Text>
+                        </View>
+                      ))}
+                    </View>
                   </View>
                 )}
 
@@ -2101,94 +2182,108 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   filterChipText: { color: C.text2, fontSize: 11, fontFamily: mono, fontWeight: '600' },
   filterLoading: { alignItems: 'center', paddingBottom: 8 },
 
-  // ── Campsite quick card
+  // ── Campsite quick card (Dyrt-style: white card, photo left, bold info right)
   quickCard: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: 'rgba(8,12,18,0.98)',
-    borderTopWidth: 1, borderColor: '#14b8a6',
-    flexDirection: 'row', gap: 0,
+    backgroundColor: '#ffffff',
+    borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    flexDirection: 'row',
+    shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.12, shadowRadius: 16,
+    elevation: 12,
   },
-  quickCardImg: { width: 110, height: 140 },
-  quickCardPhoto: { width: 110, height: 140 },
+  quickCardImg: { width: 120 },
+  quickCardPhoto: { width: 120, height: '100%' as any, borderTopLeftRadius: 20 },
   quickCardPhotoPlaceholder: {
-    width: 110, height: 140, alignItems: 'center', justifyContent: 'center',
+    width: 120, minHeight: 150, alignItems: 'center', justifyContent: 'center',
+    borderTopLeftRadius: 20, gap: 2,
   },
-  quickCardBody: { flex: 1, padding: 14, paddingBottom: 28 },
-  quickCardHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 6 },
-  quickCardName: { color: C.text, fontSize: 13, fontWeight: '700', flex: 1, lineHeight: 18 },
-  quickCardTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginBottom: 4 },
-  quickCardLand: { color: '#14b8a6', fontSize: 10, fontFamily: mono, marginBottom: 3 },
-  quickCardCost: { color: C.text3, fontSize: 10, fontFamily: mono, marginBottom: 8 },
-  quickCardActions: { flexDirection: 'row', gap: 8 },
-  quickCardBook: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8,
-    borderWidth: 1, borderColor: C.orange,
+  quickCardBody: { flex: 1, padding: 14, paddingBottom: 28, gap: 6 },
+  quickCardHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
+  quickCardName: { color: '#0f172a', fontSize: 15, fontWeight: '800', flex: 1, lineHeight: 20 },
+  quickCardClose: {
+    width: 28, height: 28, borderRadius: 14, backgroundColor: '#f1f5f9',
+    alignItems: 'center', justifyContent: 'center',
   },
-  quickCardBookText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '700' },
+  landBadge: {
+    alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3,
+    borderRadius: 6, borderWidth: 1,
+  },
+  landBadgeText: { fontSize: 9, fontFamily: mono, fontWeight: '800', letterSpacing: 0.5 },
+  quickCardTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
+  quickCardCost: { color: '#16a34a', fontSize: 11, fontFamily: mono, fontWeight: '700' },
+  quickCardActions: { flexDirection: 'row', gap: 8, marginTop: 2 },
+  quickCardNav: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10,
+    backgroundColor: '#16a34a',
+  },
+  quickCardNavText: { color: '#fff', fontSize: 11, fontFamily: mono, fontWeight: '700' },
   quickCardFull: {
     flex: 1, alignItems: 'center', justifyContent: 'center',
-    paddingVertical: 7, borderRadius: 8, backgroundColor: '#14b8a6',
+    paddingVertical: 8, borderRadius: 10,
+    borderWidth: 1.5, borderColor: C.orange,
   },
-  quickCardFullText: { color: '#fff', fontSize: 10, fontFamily: mono, fontWeight: '700' },
+  quickCardFullText: { color: C.orange, fontSize: 11, fontFamily: mono, fontWeight: '700' },
   qTag: {
-    paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4,
-    borderWidth: 1, borderColor: '#14b8a6',
+    paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6,
+    borderWidth: 1, borderColor: '#e2e8f0', backgroundColor: '#f8fafc',
   },
-  qTagText: { color: '#14b8a6', fontSize: 8, fontFamily: mono, fontWeight: '700' },
+  qTagText: { color: '#475569', fontSize: 9, fontFamily: mono, fontWeight: '700' },
 
   // ── Campsite detail modal
-  detailModal: { flex: 1, backgroundColor: C.bg },
-  photoGallery: { height: 240 },
-  galleryPhoto: { width: 400, height: 240 },
+  detailModal: { flex: 1, backgroundColor: '#ffffff' },
+  photoGallery: { height: 260 },
+  galleryPhoto: { width: 400, height: 260 },
   galleryPlaceholder: {
-    height: 200, backgroundColor: '#14b8a611',
+    height: 200, backgroundColor: '#f1f5f9',
     alignItems: 'center', justifyContent: 'center',
   },
-  detailContent: { padding: 20 },
-  detailHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 12 },
-  detailName: { color: C.text, fontSize: 20, fontWeight: '800', flex: 1, lineHeight: 26 },
+  detailContent: { padding: 20, backgroundColor: '#ffffff' },
+  detailHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 8 },
+  detailName: { color: '#0f172a', fontSize: 22, fontWeight: '800', flex: 1, lineHeight: 28 },
   detailClose: {
-    width: 36, height: 36, borderRadius: 18, backgroundColor: C.s2,
+    width: 36, height: 36, borderRadius: 18, backgroundColor: '#f1f5f9',
     alignItems: 'center', justifyContent: 'center',
   },
-  detailTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 },
+  detailTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 },
   detailLandBadge: {
-    paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6,
-    backgroundColor: '#14b8a622', borderWidth: 1, borderColor: '#14b8a6',
+    paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8,
+    borderWidth: 1,
   },
-  detailLandText: { color: '#14b8a6', fontSize: 9, fontFamily: mono, fontWeight: '700' },
-  detailMeta: { flexDirection: 'row', gap: 16, marginBottom: 16 },
-  detailCost: { color: C.green, fontSize: 13, fontFamily: mono, fontWeight: '700' },
-  detailSiteCount: { color: C.text3, fontSize: 13, fontFamily: mono },
+  detailLandText: { fontSize: 10, fontFamily: mono, fontWeight: '800', letterSpacing: 0.5 },
+  detailMeta: { flexDirection: 'row', gap: 16, marginBottom: 16, alignItems: 'center' },
+  detailCost: { color: '#16a34a', fontSize: 14, fontFamily: mono, fontWeight: '800' },
+  detailSiteCount: { color: '#64748b', fontSize: 13, fontFamily: mono },
   detailSection: { marginBottom: 20 },
   detailSectionTitle: {
-    color: C.text2, fontSize: 11, fontFamily: mono, fontWeight: '700',
-    letterSpacing: 1, marginBottom: 10,
-    borderBottomWidth: 1, borderColor: C.border, paddingBottom: 6,
+    color: '#94a3b8', fontSize: 10, fontFamily: mono, fontWeight: '800',
+    letterSpacing: 1.5, marginBottom: 10,
+    borderBottomWidth: 1, borderColor: '#e2e8f0', paddingBottom: 6,
   },
-  detailDesc: { color: C.text2, fontSize: 13, lineHeight: 20 },
+  detailDesc: { color: '#374151', fontSize: 14, lineHeight: 22 },
   amenityGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   amenityItem: {
-    paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8,
-    backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
+    paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10,
+    backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0',
+    flexDirection: 'row', alignItems: 'center', gap: 5,
   },
-  amenityText: { color: C.text2, fontSize: 12 },
+  amenityText: { color: '#334155', fontSize: 12, fontWeight: '500' },
   siteTypeRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
-  siteTypeText: { color: C.text2, fontSize: 13 },
-  detailActivities: { color: C.text3, fontSize: 12, lineHeight: 20 },
+  siteTypeText: { color: '#374151', fontSize: 13 },
+  detailActivities: { color: '#64748b', fontSize: 12, lineHeight: 20 },
   detailActions: { gap: 10, marginTop: 8 },
   detailBookBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    paddingVertical: 14, borderRadius: 14, backgroundColor: C.green,
+    paddingVertical: 15, borderRadius: 14, backgroundColor: '#16a34a',
+    shadowColor: '#16a34a', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.3, shadowRadius: 8,
   },
-  detailBookText: { color: '#fff', fontSize: 13, fontFamily: mono, fontWeight: '700' },
+  detailBookText: { color: '#fff', fontSize: 14, fontFamily: mono, fontWeight: '800' },
   detailDirBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    paddingVertical: 14, borderRadius: 14,
-    borderWidth: 1, borderColor: C.orange,
+    paddingVertical: 15, borderRadius: 14, backgroundColor: C.orange,
+    shadowColor: C.orange, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.3, shadowRadius: 8,
   },
-  detailDirText: { color: C.orange, fontSize: 13, fontFamily: mono, fontWeight: '700' },
+  detailDirText: { color: '#fff', fontSize: 14, fontFamily: mono, fontWeight: '800' },
 
   // ── Coordinates
   coordRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },

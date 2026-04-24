@@ -691,33 +691,52 @@ async def camps_bbox(n: float, s: float, e: float, w: float, types: str = ""):
 # ── Land ownership tile proxy (BLM/USFS/NPS) ─────────────────────────────────
 # Proxies BLM Surface Management Agency tiles through our server so the mobile
 # WebView never hits BLM's ArcGIS directly (CORS + zoom-limit issues).
+# We use MapServer/export with transparent=true so only the land-fill areas are colored;
+# the solid-opaque /tile/ endpoint washes the whole map in a background color.
+
+import math as _math
+import base64 as _b64
+
+def _tile_to_bbox(z: int, tile_col: int, tile_row: int):
+    n = 2 ** z
+    lon_w = tile_col / n * 360.0 - 180.0
+    lon_e = (tile_col + 1) / n * 360.0 - 180.0
+    lat_n = _math.degrees(_math.atan(_math.sinh(_math.pi * (1 - 2 * tile_row / n))))
+    lat_s = _math.degrees(_math.atan(_math.sinh(_math.pi * (1 - 2 * (tile_row + 1) / n))))
+    return lon_w, lat_s, lon_e, lat_n
 
 @app.get("/api/land-tile/{z}/{y}/{x}")
 async def land_tile(z: int, y: int, x: int):
-    cache_key = f"blmtile_{z}_{y}_{x}"
-    import base64
+    # route template is /{z}/{y}/{x} to match Mapbox GL JS {z}/{y}/{x} template
+    # y = tile row, x = tile col
+    cache_key = f"blmtile2_{z}_{y}_{x}"
     cached = get_cached("campsite_cache", cache_key, ttl_seconds=3600 * 24 * 7)
     if cached:
         return Response(
-            content=base64.b64decode(cached),
+            content=_b64.b64decode(cached),
             media_type="image/png",
             headers={"Cache-Control": "public, max-age=604800", "Access-Control-Allow-Origin": "*"},
         )
-    url = f"https://gis.blm.gov/arcgis/rest/services/lands/BLM_Natl_SMA/MapServer/tile/{z}/{y}/{x}"
+    lon_w, lat_s, lon_e, lat_n = _tile_to_bbox(z, x, y)
+    url = (
+        "https://gis.blm.gov/arcgis/rest/services/lands/BLM_Natl_SMA/MapServer/export"
+        f"?bbox={lon_w},{lat_s},{lon_e},{lat_n}"
+        "&bboxSR=4326&size=256,256&imageSR=3857"
+        "&format=png32&transparent=true&f=image"
+    )
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=12) as client:
             r = await client.get(url, headers={"User-Agent": "Trailhead/1.0"})
             r.raise_for_status()
             data = r.content
-        set_cached("campsite_cache", cache_key, base64.b64encode(data).decode())
+        set_cached("campsite_cache", cache_key, _b64.b64encode(data).decode())
         return Response(
             content=data,
             media_type="image/png",
             headers={"Cache-Control": "public, max-age=604800", "Access-Control-Allow-Origin": "*"},
         )
     except Exception:
-        # Return transparent 1x1 pixel PNG on failure
-        empty = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
+        empty = _b64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
         return Response(content=empty, media_type="image/png", headers={"Access-Control-Allow-Origin": "*"})
 
 

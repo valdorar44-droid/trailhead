@@ -1,6 +1,6 @@
 """Claude AI trip planning engine."""
 from __future__ import annotations
-import json, re
+import json, re, time
 import anthropic
 from config.settings import settings
 
@@ -98,6 +98,23 @@ Be realistic about distances, road conditions, and what's achievable in a day of
 client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
 
 
+def _claude(fn, max_attempts: int = 3):
+    """Call fn() with exponential backoff on rate-limit / overload errors."""
+    delays = [8, 20, 45]
+    for i in range(max_attempts):
+        try:
+            return fn()
+        except anthropic.RateLimitError:
+            if i == max_attempts - 1:
+                raise
+            time.sleep(delays[i])
+        except anthropic.APIStatusError as exc:
+            if exc.status_code == 529 and i < max_attempts - 1:
+                time.sleep(delays[i])
+            else:
+                raise
+
+
 def generate_audio_guide(waypoints: list[dict], trip_name: str) -> dict:
     """Generate spoken narration for each geocoded waypoint."""
     geocoded = [w for w in waypoints if w.get("lat") and w.get("lng")]
@@ -109,7 +126,7 @@ def generate_audio_guide(waypoints: list[dict], trip_name: str) -> dict:
         for w in geocoded
     )
 
-    msg = client.messages.create(
+    msg = _claude(lambda: client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=3000,
         messages=[{"role": "user", "content": f"""You are a trail guide riding along on the overlanding trip "{trip_name}".
@@ -122,7 +139,7 @@ Conversational and vivid — you're in the passenger seat. No markdown, no heade
 
 Return ONLY valid JSON. Keys are exact waypoint names, values are narration strings:
 {{"Waypoint Name": "narration...", ...}}"""}]
-    )
+    ))
 
     raw = msg.content[0].text.strip()
     raw = re.sub(r'^```json\s*', '', raw)
@@ -139,13 +156,13 @@ Return ONLY valid JSON. Keys are exact waypoint names, values are narration stri
 def generate_location_narration(lat: float, lng: float, location_name: str = "") -> str:
     """Generate on-demand narration for any location."""
     loc_desc = location_name if location_name else f"lat {lat:.4f}, lng {lng:.4f}"
-    msg = client.messages.create(
+    msg = _claude(lambda: client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=300,
         messages=[{"role": "user", "content": f"""You are a trail guide. The user is currently at: {loc_desc}
 Write a 3-4 sentence spoken narration about this location — geology, landscape, history, wildlife, or what to look for.
 Be specific to the American West overlanding context. Conversational tone, no markdown."""}]
-    )
+    ))
     return msg.content[0].text.strip()
 
 
@@ -179,11 +196,11 @@ Return ONLY valid JSON with this exact schema:
   "coordinates_dms": "convert lat/lng to degrees-minutes-seconds format (e.g. 37°52'30''N 109°23'15''W)"
 }}"""
 
-    msg = client.messages.create(
+    msg = _claude(lambda: client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=600,
         messages=[{"role": "user", "content": prompt}]
-    )
+    ))
     raw = msg.content[0].text.strip()
     raw = re.sub(r'^```json\s*', '', raw)
     raw = re.sub(r'^```\s*', '', raw)
@@ -220,11 +237,11 @@ Return ONLY valid JSON:
   "briefing_summary": "2-3 sentence overall readiness summary"
 }}"""
 
-    msg = client.messages.create(
+    msg = _claude(lambda: client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=800,
         messages=[{"role": "user", "content": prompt}]
-    )
+    ))
     raw = msg.content[0].text.strip()
     raw = re.sub(r'^```json\s*', '', raw)
     raw = re.sub(r'^```\s*', '', raw)
@@ -262,11 +279,11 @@ Return ONLY valid JSON:
   "leave_at_home": ["things people usually pack but don't need for this trip"]
 }}"""
 
-    msg = client.messages.create(
+    msg = _claude(lambda: client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=1000,
         messages=[{"role": "user", "content": prompt}]
-    )
+    ))
     raw = msg.content[0].text.strip()
     raw = re.sub(r'^```json\s*', '', raw)
     raw = re.sub(r'^```\s*', '', raw)
@@ -291,12 +308,12 @@ def chat_guide(messages: list[dict], trail_dna: dict | None = None) -> dict:
         if lines:
             system += "\n\nUSER PROFILE (personalize without asking them to repeat):\n" + "\n".join(lines)
 
-    msg = client.messages.create(
+    msg = _claude(lambda: client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=1500,
         system=system,
         messages=messages,
-    )
+    ))
     raw = msg.content[0].text.strip()
 
     # Extract hidden _ready signal from last line
@@ -325,13 +342,13 @@ def edit_trip(current_trip: dict, edit_request: str) -> dict:
     trip_plan = current_trip.get("plan", current_trip)
     trip_json = json.dumps(trip_plan, indent=2)
 
-    msg = client.messages.create(
+    msg = _claude(lambda: client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=4096,
+        max_tokens=8192,
         system=EDIT_SYSTEM,
         messages=[{"role": "user", "content":
             f"Current trip:\n{trip_json}\n\nEdit request: {edit_request}"}],
-    )
+    ))
     raw = msg.content[0].text.strip()
     raw = re.sub(r'^```json\s*', '', raw)
     raw = re.sub(r'^```\s*', '', raw)
@@ -351,21 +368,22 @@ def edit_trip(current_trip: dict, edit_request: str) -> dict:
 
 def plan_trip_from_conversation(messages: list[dict]) -> dict:
     """Generate full trip JSON from conversation history."""
+    # Keep last 12 messages to stay well under input token limits
     convo = "\n".join(
         f"{m['role'].upper()}: {m['content']}"
-        for m in messages[-20:]
+        for m in messages[-12:]
         if m['role'] in ('user', 'assistant')
     )
     synthesis = (
         f"Based on this planning conversation, generate the complete trip plan now:\n\n{convo}"
         "\n\nReturn only the trip JSON."
     )
-    msg = client.messages.create(
+    msg = _claude(lambda: client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=4096,
+        max_tokens=8192,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": synthesis}],
-    )
+    ))
     raw = msg.content[0].text.strip()
     raw = re.sub(r'^```json\s*', '', raw)
     raw = re.sub(r'^```\s*', '', raw)
@@ -380,12 +398,12 @@ def plan_trip_from_conversation(messages: list[dict]) -> dict:
 
 
 def plan_trip(user_request: str) -> dict:
-    msg = client.messages.create(
+    msg = _claude(lambda: client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=4096,
+        max_tokens=8192,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_request}]
-    )
+    ))
     raw = msg.content[0].text.strip()
 
     # Strip markdown code fences if Claude wraps it anyway

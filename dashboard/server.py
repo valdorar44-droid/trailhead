@@ -231,8 +231,11 @@ async def chat_endpoint(body: ChatRequest, user: dict | None = Depends(_optional
 
     # ── Edit mode: active trip exists ──────────────────────────────────────────
     if body.current_trip:
+        import anthropic as _anthropic
         try:
             result = edit_trip(body.current_trip, body.message)
+        except _anthropic.RateLimitError:
+            raise HTTPException(429, "Rate limit hit — please wait 30 seconds and try again")
         except Exception as e:
             raise HTTPException(500, f"Edit failed: {e}")
 
@@ -276,10 +279,10 @@ async def chat_endpoint(body: ChatRequest, user: dict | None = Depends(_optional
 
 @app.post("/api/plan")
 async def plan(body: PlanRequest, user: dict | None = Depends(_optional_user)):
+    import anthropic as _anthropic
     if not settings.anthropic_api_key:
         raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
 
-    # Use conversation history when session_id provided
     try:
         if body.session_id:
             msgs = get_conversation(body.session_id)
@@ -290,8 +293,15 @@ async def plan(body: PlanRequest, user: dict | None = Depends(_optional_user)):
             plan_data = plan_trip(body.request)
     except HTTPException:
         raise
+    except _anthropic.RateLimitError:
+        raise HTTPException(429, "Rate limit hit — please wait 30 seconds and try again")
     except Exception as e:
         raise HTTPException(500, f"AI planning failed: {e}")
+
+    # Save the raw trip immediately so it's recoverable even if geocoding times out
+    trip_id = str(uuid.uuid4())[:8]
+    result_stub = {"trip_id": trip_id, "plan": plan_data, "campsites": [], "gas_stations": []}
+    save_trip(trip_id, body.request, result_stub, user_id=user["id"] if user else None)
 
     geocoded = await _geocode_waypoints(plan_data.get("waypoints", []))
     plan_data["waypoints"] = geocoded
@@ -304,7 +314,6 @@ async def plan(body: PlanRequest, user: dict | None = Depends(_optional_user)):
                     seen.add(c["id"]); campsites.append(c)
 
     gas_stations = await get_gas_along_route(geocoded)
-    trip_id = str(uuid.uuid4())[:8]
     result = {"trip_id": trip_id, "plan": plan_data,
               "campsites": campsites[:40], "gas_stations": gas_stations[:30]}
     save_trip(trip_id, body.request, result, user_id=user["id"] if user else None)
@@ -830,28 +839,40 @@ async def packing_list(body: PackingRequest):
 
 # ── Geocoding ─────────────────────────────────────────────────────────────────
 
+async def _geocode_one(client: httpx.AsyncClient, wp: dict, sem: asyncio.Semaphore) -> dict:
+    name = wp.get("name", "")
+    if not name:
+        return wp
+    async with sem:
+        try:
+            resp = await client.get(
+                "https://nominatim.openstreetmap.org/search",
+                params={"q": name, "format": "json", "limit": 1, "countrycodes": "us"},
+            )
+            resp.raise_for_status()
+            hits = resp.json()
+            if hits:
+                wp["lat"] = float(hits[0]["lat"])
+                wp["lng"] = float(hits[0]["lon"])
+                wp["geocoded_name"] = hits[0].get("display_name", name)
+        except Exception:
+            pass
+        await asyncio.sleep(1.1)  # Nominatim rate limit: 1 req/sec
+    return wp
+
+
 async def _geocode_waypoints(waypoints: list[dict]) -> list[dict]:
-    import asyncio
-    result = []
+    # Cap at 20 waypoints and run with a concurrency of 2, total timeout 25s
+    capped = waypoints[:20]
     headers = {"User-Agent": "Trailhead/1.0 (valdorar44@gmail.com)"}
-    async with httpx.AsyncClient(timeout=10, headers=headers) as client:
-        for wp in waypoints:
-            name = wp.get("name", "")
-            if not name:
-                result.append(wp); continue
-            try:
-                resp = await client.get(
-                    "https://nominatim.openstreetmap.org/search",
-                    params={"q": name, "format": "json", "limit": 1, "countrycodes": "us"},
-                )
-                resp.raise_for_status()
-                hits = resp.json()
-                if hits:
-                    wp["lat"] = float(hits[0]["lat"])
-                    wp["lng"] = float(hits[0]["lon"])
-                    wp["geocoded_name"] = hits[0].get("display_name", name)
-            except Exception:
-                pass
-            result.append(wp)
-            await asyncio.sleep(1.1)
-    return result
+    sem = asyncio.Semaphore(2)
+    try:
+        async with httpx.AsyncClient(timeout=8, headers=headers) as client:
+            results = await asyncio.wait_for(
+                asyncio.gather(*[_geocode_one(client, wp, sem) for wp in capped]),
+                timeout=25,
+            )
+            return list(results) + waypoints[20:]
+    except asyncio.TimeoutError:
+        # Return whatever we have — partially geocoded is better than nothing
+        return capped + waypoints[20:]

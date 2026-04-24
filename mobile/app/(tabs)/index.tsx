@@ -171,7 +171,17 @@ export default function PlanScreen() {
       });
       setPlanPhase('active');
     } catch (e: any) {
-      setMessages(m => [...m, { role: 'ai', text: `⚠ ${e.message}` }]);
+      const isRateLimit = e.message?.includes('429') || e.message?.toLowerCase().includes('rate limit');
+      setMessages(m => [
+        ...m,
+        {
+          role: 'ai',
+          text: isRateLimit
+            ? '⏱ API is busy right now — tap Retry in ~30 seconds and your route will build normally.'
+            : `⚠ ${e.message}`,
+          outline: isRateLimit ? '__retry__' : undefined,
+        },
+      ]);
       setPlanPhase('ready');
     } finally {
       stopStages(); setLoading(false); scrollToEnd();
@@ -407,38 +417,65 @@ function OutlineCard({ outline, C, onBuild, onRefine, loading }: {
       Animated.spring(slideAnim, { toValue: 0, tension: 60, friction: 9, useNativeDriver: true }),
     ]).start();
   }, []);
+
+  const isRetry = outline === '__retry__';
+
   return (
     <Animated.View style={[{
-      backgroundColor: `rgba(200,149,58,0.08)`,
-      borderWidth: 1, borderColor: `rgba(200,149,58,0.28)`,
+      backgroundColor: isRetry ? 'rgba(184,92,56,0.07)' : 'rgba(200,149,58,0.08)',
+      borderWidth: 1,
+      borderColor: isRetry ? 'rgba(184,92,56,0.25)' : 'rgba(200,149,58,0.28)',
       borderRadius: 14, overflow: 'hidden',
       opacity: fadeAnim, transform: [{ translateY: slideAnim }],
     }]}>
       <View style={{ padding: 14 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 }}>
-          <Text style={{ color: C.gold, fontSize: 9, fontFamily: mono, letterSpacing: 1 }}>✦ ROUTE READY TO BUILD</Text>
-        </View>
-        <Text style={{ color: C.text2, fontSize: 13, lineHeight: 20, fontStyle: 'italic', marginBottom: 14 }}>{outline}</Text>
-        <TouchableOpacity
-          onPress={onBuild}
-          disabled={loading}
-          style={{
-            backgroundColor: C.orange, borderRadius: 8, paddingVertical: 12,
-            alignItems: 'center', marginBottom: 8,
-            shadowColor: C.orange, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.3, shadowRadius: 6,
-          }}
-        >
-          {loading
-            ? <ActivityIndicator color="#fff" size="small" />
-            : <Text style={{ color: C.white, fontWeight: '700', fontSize: 13, fontFamily: mono, letterSpacing: 0.5 }}>BUILD ROUTE →</Text>
-          }
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={onRefine}
-          style={{ backgroundColor: 'transparent', borderWidth: 1, borderColor: C.border, borderRadius: 8, paddingVertical: 11, alignItems: 'center' }}
-        >
-          <Text style={{ color: C.text2, fontSize: 12, fontFamily: mono, letterSpacing: 0.3 }}>KEEP REFINING</Text>
-        </TouchableOpacity>
+        {isRetry ? (
+          <>
+            <Text style={{ color: C.orange, fontSize: 9, fontFamily: mono, letterSpacing: 1, marginBottom: 10 }}>⏱ RATE LIMITED</Text>
+            <Text style={{ color: C.text2, fontSize: 13, lineHeight: 20, marginBottom: 14 }}>
+              Anthropic is busy — your route is ready to build, just wait ~30 seconds and tap Retry.
+            </Text>
+            <TouchableOpacity
+              onPress={onBuild}
+              disabled={loading}
+              style={{
+                backgroundColor: C.orange, borderRadius: 8, paddingVertical: 12,
+                alignItems: 'center',
+                shadowColor: C.orange, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.3, shadowRadius: 6,
+              }}
+            >
+              {loading
+                ? <ActivityIndicator color="#fff" size="small" />
+                : <Text style={{ color: C.white, fontWeight: '700', fontSize: 13, fontFamily: mono, letterSpacing: 0.5 }}>RETRY →</Text>
+              }
+            </TouchableOpacity>
+          </>
+        ) : (
+          <>
+            <Text style={{ color: C.gold, fontSize: 9, fontFamily: mono, letterSpacing: 1, marginBottom: 10 }}>✦ ROUTE READY TO BUILD</Text>
+            <Text style={{ color: C.text2, fontSize: 13, lineHeight: 20, fontStyle: 'italic', marginBottom: 14 }}>{outline}</Text>
+            <TouchableOpacity
+              onPress={onBuild}
+              disabled={loading}
+              style={{
+                backgroundColor: C.orange, borderRadius: 8, paddingVertical: 12,
+                alignItems: 'center', marginBottom: 8,
+                shadowColor: C.orange, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.3, shadowRadius: 6,
+              }}
+            >
+              {loading
+                ? <ActivityIndicator color="#fff" size="small" />
+                : <Text style={{ color: C.white, fontWeight: '700', fontSize: 13, fontFamily: mono, letterSpacing: 0.5 }}>BUILD ROUTE →</Text>
+              }
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={onRefine}
+              style={{ backgroundColor: 'transparent', borderWidth: 1, borderColor: C.border, borderRadius: 8, paddingVertical: 11, alignItems: 'center' }}
+            >
+              <Text style={{ color: C.text2, fontSize: 12, fontFamily: mono, letterSpacing: 0.3 }}>KEEP REFINING</Text>
+            </TouchableOpacity>
+          </>
+        )}
       </View>
     </Animated.View>
   );

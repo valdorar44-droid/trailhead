@@ -235,11 +235,11 @@ export default function PlanScreen() {
           contentContainerStyle={s.dnaRowContent}
         >
           <Text style={s.dnaLabel}>TRAIL DNA</Text>
-          {trailDna.vehicle    && <DnaChip C={C} label={`🚗 ${trailDna.vehicle}`} />}
-          {trailDna.terrain    && <DnaChip C={C} label={`🏔 ${trailDna.terrain}`} />}
-          {trailDna.camp_style && <DnaChip C={C} label={`⛺ ${trailDna.camp_style}`} />}
-          {trailDna.duration   && <DnaChip C={C} label={`📅 ${trailDna.duration}`} />}
-          {(trailDna.regions ?? []).map(r => <DnaChip key={r} C={C} label={`📍 ${r}`} />)}
+          {trailDna.vehicle    && <DnaChip C={C} icon="car-outline"       label={trailDna.vehicle} />}
+          {trailDna.terrain    && <DnaChip C={C} icon="triangle-outline"  label={trailDna.terrain} />}
+          {trailDna.camp_style && <DnaChip C={C} icon="moon-outline"      label={trailDna.camp_style} />}
+          {trailDna.duration   && <DnaChip C={C} icon="time-outline"      label={trailDna.duration} />}
+          {(trailDna.regions ?? []).map(r => <DnaChip key={r} C={C} icon="location-outline" label={r} />)}
         </ScrollView>
       )}
 
@@ -462,9 +462,10 @@ function RichText({ text, baseColor }: { text: string; baseColor: string }) {
   return <>{parts}</>;
 }
 
-function DnaChip({ C, label }: { C: ColorPalette; label: string }) {
+function DnaChip({ C, label, icon }: { C: ColorPalette; label: string; icon?: string }) {
   return (
-    <View style={{ backgroundColor: 'rgba(122,170,124,0.1)', borderWidth: 1, borderColor: 'rgba(122,170,124,0.2)', borderRadius: 5, paddingHorizontal: 9, paddingVertical: 3, marginRight: 6 }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(122,170,124,0.1)', borderWidth: 1, borderColor: 'rgba(122,170,124,0.2)', borderRadius: 5, paddingHorizontal: 9, paddingVertical: 3, marginRight: 6 }}>
+      {icon && <Ionicons name={icon as any} size={9} color={C.sage} />}
       <Text style={{ color: C.sage, fontSize: 9, fontFamily: mono, letterSpacing: 0.6 }}>{label.toUpperCase()}</Text>
     </View>
   );

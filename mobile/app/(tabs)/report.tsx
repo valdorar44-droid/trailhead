@@ -17,27 +17,27 @@ import { useTheme, mono, ColorPalette, LIGHT_C } from '@/lib/design';
 const C = LIGHT_C;
 
 const REPORT_TYPES = [
-  { type: 'hazard',      label: 'HAZARD',   icon: '⚠️',  color: C.red,    ttl: '7d',
+  { type: 'hazard',      label: 'HAZARD',   icon: 'warning-outline',      color: C.red,    ttl: '7d',
     subtypes: ['Downed tree', 'Rockfall', 'Wildlife', 'Fire / smoke', 'Flash flood'] },
-  { type: 'police',      label: 'PATROL',   icon: '🛡️',  color: C.yellow, ttl: '2h',
+  { type: 'police',      label: 'PATROL',   icon: 'shield-outline',        color: C.yellow, ttl: '2h',
     subtypes: ['Ranger patrol', 'Fee checkpoint', 'OHV enforcement', 'Fire restriction'] },
-  { type: 'road_condition', label: 'ROAD',  icon: '🛤️',  color: C.orange, ttl: '7d',
+  { type: 'road_condition', label: 'ROAD',  icon: 'trail-sign-outline',    color: C.orange, ttl: '7d',
     subtypes: ['Clear & good', 'Muddy / soft', 'Washed out', 'Snow / ice', 'Flooded'] },
-  { type: 'water',       label: 'WATER',    icon: '💧',  color: '#38bdf8', ttl: '3d',
+  { type: 'water',       label: 'WATER',    icon: 'water-outline',         color: '#38bdf8', ttl: '3d',
     subtypes: ['Flowing well', 'Spring dry', 'Questionable quality', 'Filter required'] },
-  { type: 'cell_signal', label: 'SIGNAL',   icon: '📶',  color: C.green,  ttl: '1d',
+  { type: 'cell_signal', label: 'SIGNAL',   icon: 'cellular-outline',      color: C.green,  ttl: '1d',
     subtypes: ['Strong signal', 'Weak signal', 'No signal', 'Starlink only'] },
-  { type: 'wildlife',    label: 'WILDLIFE', icon: '🐻',  color: '#a78bfa', ttl: '1d',
+  { type: 'wildlife',    label: 'WILDLIFE', icon: 'paw-outline',           color: '#a78bfa', ttl: '1d',
     subtypes: ['Bear activity', 'Mountain lion', 'Elk / deer', 'Snake', 'Cool sighting'] },
-  { type: 'campsite',    label: 'CAMPSITE', icon: '⛺',  color: C.orange, ttl: '14d',
+  { type: 'campsite',    label: 'CAMPSITE', icon: '⛺',                    color: C.orange, ttl: '14d',
     subtypes: ['Available & clean', 'Occupied', 'Trashed', 'Great condition', 'No water'] },
-  { type: 'closure',     label: 'CLOSURE',  icon: '🚫',  color: C.red,    ttl: '30d',
+  { type: 'closure',     label: 'CLOSURE',  icon: 'remove-circle-outline', color: C.red,    ttl: '30d',
     subtypes: ['Gate locked', 'Road closed', 'Seasonal', 'Fire closure', 'Now open!'] },
-  { type: 'fuel',        label: 'FUEL',     icon: '⛽',  color: C.yellow,  ttl: '12h',
+  { type: 'fuel',        label: 'FUEL',     icon: '⛽',                    color: C.yellow,  ttl: '12h',
     subtypes: ['Diesel available', 'Gas available', 'Propane available', 'Fuel out', 'Price info'] },
-  { type: 'viewpoint',   label: 'VIEW',     icon: '🏔️',  color: '#38bdf8', ttl: '90d',
+  { type: 'viewpoint',   label: 'VIEW',     icon: 'flag-outline',          color: '#38bdf8', ttl: '90d',
     subtypes: ['Epic vista', 'Sunrise spot', 'Sunset spot', 'Photo opportunity', 'Hidden gem'] },
-  { type: 'service',     label: 'SERVICE',  icon: '🔧',  color: '#94a3b8', ttl: '30d',
+  { type: 'service',     label: 'SERVICE',  icon: 'construct-outline',     color: '#94a3b8', ttl: '30d',
     subtypes: ['Mechanic nearby', 'Tire repair', 'Tow available', 'Auto parts', 'Dump station'] },
 ];
 
@@ -164,7 +164,7 @@ export default function ReportScreen() {
       <Modal visible={drivingWarning} transparent animationType="fade" statusBarTranslucent>
         <View style={s.drivingOverlay}>
           <View style={s.drivingModal}>
-            <Text style={s.drivingIcon}>🚗</Text>
+            <Ionicons name="car-outline" size={46} color={C.orange} style={{ marginBottom: 4 }} />
             <Text style={s.drivingTitle}>YOU APPEAR TO BE MOVING</Text>
             <Text style={s.drivingBody}>
               Never use your phone while driving. Pull over safely before submitting a trail report.
@@ -190,7 +190,10 @@ export default function ReportScreen() {
             <Text style={s.creditsVal}>{user.credits ?? 0}</Text>
             <Text style={s.creditsLabel}>CREDITS</Text>
             {(user.report_streak ?? 0) > 1 && (
-              <Text style={s.streak}>🔥 {user.report_streak}d</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 2 }}>
+                <Ionicons name="flame" size={11} color={C.orange} />
+                <Text style={s.streak}>{user.report_streak}d</Text>
+              </View>
             )}
           </View>
         )}
@@ -235,7 +238,10 @@ export default function ReportScreen() {
                     style={[s.typeBtn, active && { borderColor: rt.color, backgroundColor: rt.color + '18' }]}
                     onPress={() => selectType(rt, idx)}
                   >
-                    <Text style={s.typeEmoji}>{rt.icon}</Text>
+                    {(rt.icon.codePointAt(0) ?? 0) > 127
+                      ? <Text style={s.typeEmoji}>{rt.icon}</Text>
+                      : <Ionicons name={rt.icon as any} size={22} color={active ? rt.color : C.text3} />
+                    }
                     <Text style={[s.typeLabel, active && { color: rt.color }]}>{rt.label}</Text>
                     <Text style={[s.typeTtl, active && { color: rt.color + 'aa' }]}>{rt.ttl}</Text>
                   </TouchableOpacity>
@@ -344,7 +350,7 @@ export default function ReportScreen() {
         <ScrollView contentContainerStyle={s.scroll}>
           {nearby.length === 0 ? (
             <View style={s.emptyWrap}>
-              <Text style={s.emptyIcon}>📍</Text>
+              <Ionicons name="location-outline" size={40} color={C.text3} />
               <Text style={s.emptyText}>No active reports nearby</Text>
               <Text style={s.emptySub}>Be the first to report a condition</Text>
             </View>
@@ -407,7 +413,12 @@ function ReportCard({ report: r, onUpvote, onDownvote, onConfirm }:
         </View>
       )}
       <View style={rc.top}>
-        <Text style={rc.icon}>{typeInfo?.icon ?? '⚠️'}</Text>
+        {(() => {
+          const icon = typeInfo?.icon ?? 'warning-outline';
+          return (icon.codePointAt(0) ?? 0) > 127
+            ? <Text style={rc.icon}>{icon}</Text>
+            : <Ionicons name={icon as any} size={22} color={typeInfo?.color ?? '#f97316'} />;
+        })()}
         <View style={rc.meta}>
           <Text style={rc.type}>{typeInfo?.label ?? r.type}</Text>
           {r.subtype && <Text style={rc.subtype}>{r.subtype}</Text>}

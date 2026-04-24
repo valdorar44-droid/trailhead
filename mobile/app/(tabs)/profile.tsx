@@ -251,7 +251,10 @@ export default function ProfileScreen() {
             <Text style={s.profileName}>{user?.username}</Text>
             <Text style={s.profileEmail}>{user?.email}</Text>
             {(user?.report_streak ?? 0) > 1 && (
-              <Text style={s.streakText}>🔥 {user!.report_streak}-day reporting streak</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <Ionicons name="flame" size={12} color={C.orange} />
+                <Text style={s.streakText}>{user!.report_streak}-day reporting streak</Text>
+              </View>
             )}
           </View>
           <TouchableOpacity onPress={() => { clearAuth(); setView('login'); }}
@@ -263,7 +266,7 @@ export default function ProfileScreen() {
         {/* My Rig */}
         <View style={s.rigCard}>
           <View style={s.rigHeader}>
-            <Text style={s.rigIcon}>🚙</Text>
+            <Ionicons name="car-sport-outline" size={18} color={C.orange} />
             <Text style={s.rigTitle}>MY RIG</Text>
             <TouchableOpacity style={s.rigEditBtn} onPress={() => {
               if (editingRig) { saveRig(); } else { setRigDraft(rigProfile ?? DEFAULT_RIG); setEditingRig(true); }
@@ -386,7 +389,7 @@ export default function ProfileScreen() {
         {/* Trip Prep Checklist */}
         <View style={s.checklistCard}>
           <TouchableOpacity style={s.checklistHeader} onPress={() => setShowChecklist(p => !p)}>
-            <Text style={s.checklistIcon}>✅</Text>
+            <Ionicons name="checkmark-circle-outline" size={18} color={C.green} />
             <Text style={s.checklistTitle}>TRIP PREP</Text>
             <View style={s.checklistProgress}>
               {(() => {
@@ -441,7 +444,7 @@ export default function ProfileScreen() {
               <Text style={s.creditsBalance}>{user?.credits ?? 0}</Text>
             </View>
             <View style={s.creditsBadge}>
-              <Text style={s.creditsBadgeIcon}>⚡</Text>
+              <Ionicons name="flash" size={22} color={C.orange} />
             </View>
           </View>
           <View style={s.divider} />

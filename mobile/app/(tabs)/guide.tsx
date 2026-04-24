@@ -131,7 +131,7 @@ export default function GuideScreen() {
           <Text style={s.headerTitle}>AUDIO GUIDE</Text>
         </View>
         <View style={s.emptyState}>
-          <Text style={s.emptyIcon}>🎙</Text>
+          <Ionicons name="mic-outline" size={48} color={C.text3} />
           <Text style={s.emptyTitle}>No Active Trip</Text>
           <Text style={s.emptySub}>Plan a trip on the PLAN tab to unlock your personal audio guide.</Text>
         </View>
@@ -161,9 +161,16 @@ export default function GuideScreen() {
       <View style={s.tabs}>
         {(['narrations', 'weather'] as const).map(t => (
           <TouchableOpacity key={t} style={[s.tab, tab === t && s.tabActive]} onPress={() => setTab(t)}>
-            <Text style={[s.tabText, tab === t && s.tabTextActive]}>
-              {t === 'narrations' ? '🎙  NARRATIONS' : '🌤  WEATHER'}
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+              <Ionicons
+                name={t === 'narrations' ? 'mic-outline' : 'partly-sunny-outline'}
+                size={13}
+                color={tab === t ? C.orange : C.text3}
+              />
+              <Text style={[s.tabText, tab === t && s.tabTextActive]}>
+                {t === 'narrations' ? 'NARRATIONS' : 'WEATHER'}
+              </Text>
+            </View>
           </TouchableOpacity>
         ))}
       </View>
@@ -239,7 +246,7 @@ export default function GuideScreen() {
             )}
             {!weatherLoading && Object.keys(weatherByWp).length === 0 && (
               <View style={s.emptyState}>
-                <Text style={s.emptyIcon}>🌐</Text>
+                <Ionicons name="globe-outline" size={44} color={C.text3} />
                 <Text style={s.emptySub}>Weather unavailable for this trip area</Text>
               </View>
             )}

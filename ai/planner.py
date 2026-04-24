@@ -4,6 +4,40 @@ import json, re
 import anthropic
 from config.settings import settings
 
+CHAT_SYSTEM = """You are Trailhead — a personal overland trip guide and trail expert for the American West. You've driven these roads and camped these spots. Your job is to help the user plan their perfect trip through natural conversation.
+
+Guidelines:
+- Be enthusiastic and specific. Name real places, trails, land designations (BLM, USFS, NPS).
+- Ask at most 2 clarifying questions per turn — the most important gaps first.
+- Answer questions about specific areas, roads, conditions with real detail (you know this terrain).
+- Reference seasonal closures, permit requirements, fuel gaps, water sources naturally.
+- Once you know the general area, duration, vehicle, and camping style — offer to build the route.
+
+When you have enough information to build a complete trip, end your message with this JSON on its own line (no surrounding text):
+{"_ready":true,"_outline":"[one paragraph: start point, key areas, duration, road style, camping style, 2-3 highlight moments]"}
+
+Rules for the signal:
+- Include it ONLY when you genuinely have enough to build a good trip (area, duration, vehicle, camp style).
+- If the user says "yes", "build it", "go ahead", "sounds good", "do it" — always include _ready.
+- Never mention the signal to the user. It is hidden metadata only.
+- Remove it from the visible message — it should not appear in your response text.
+"""
+
+EDIT_SYSTEM = """You are Trailhead, an expert overland trip guide. The user has an active trip and wants to modify it.
+
+Analyze the edit request carefully and update the trip. Changes can include:
+- Rerouting around geographic areas or specific roads
+- Adding or removing waypoints/stops
+- Swapping campsites or adjusting days
+- Changing activity focus for a day
+
+Return ONLY valid JSON (no markdown, no extra text):
+{
+  "message": "1-2 sentence response as a guide — what you changed and why it's a good call",
+  "trip": {complete updated trip using the exact same JSON schema}
+}
+"""
+
 SYSTEM_PROMPT = """You are Trailhead AI — an expert overlanding and dispersed camping trip planner for the American West.
 
 You specialize in:
@@ -241,6 +275,108 @@ Return ONLY valid JSON:
         return json.loads(raw)
     except Exception:
         return {}
+
+
+def chat_guide(messages: list[dict], trail_dna: dict | None = None) -> dict:
+    """Conversational trip planning. Returns {type, content, outline}."""
+    system = CHAT_SYSTEM
+    if trail_dna:
+        lines = []
+        if trail_dna.get("vehicle"):        lines.append(f"Vehicle: {trail_dna['vehicle']}")
+        if trail_dna.get("terrain"):        lines.append(f"Terrain comfort: {trail_dna['terrain']}")
+        if trail_dna.get("camp_style"):     lines.append(f"Camping style: {trail_dna['camp_style']}")
+        if trail_dna.get("regions"):        lines.append(f"Regions they love: {', '.join(trail_dna['regions'])}")
+        if trail_dna.get("past_trips"):     lines.append(f"Past trips: {', '.join(trail_dna['past_trips'][-3:])}")
+        if trail_dna.get("duration"):       lines.append(f"Preferred duration: {trail_dna['duration']}")
+        if lines:
+            system += "\n\nUSER PROFILE (personalize without asking them to repeat):\n" + "\n".join(lines)
+
+    msg = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=1500,
+        system=system,
+        messages=messages,
+    )
+    raw = msg.content[0].text.strip()
+
+    # Extract hidden _ready signal from last line
+    outline = None
+    is_ready = False
+    lines = raw.split('\n')
+    for i in range(len(lines) - 1, max(len(lines) - 4, -1), -1):
+        stripped = lines[i].strip()
+        if stripped.startswith('{"_ready"') or stripped.startswith('{ "_ready"'):
+            try:
+                signal = json.loads(stripped)
+                if signal.get('_ready'):
+                    is_ready = True
+                    outline = signal.get('_outline', '')
+                    lines.pop(i)
+                    break
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+    content = '\n'.join(lines).strip()
+    return {"type": "ready" if is_ready else "message", "content": content, "outline": outline}
+
+
+def edit_trip(current_trip: dict, edit_request: str) -> dict:
+    """Edit an existing trip based on user request. Returns {message, trip}."""
+    trip_plan = current_trip.get("plan", current_trip)
+    trip_json = json.dumps(trip_plan, indent=2)
+
+    msg = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=4096,
+        system=EDIT_SYSTEM,
+        messages=[{"role": "user", "content":
+            f"Current trip:\n{trip_json}\n\nEdit request: {edit_request}"}],
+    )
+    raw = msg.content[0].text.strip()
+    raw = re.sub(r'^```json\s*', '', raw)
+    raw = re.sub(r'^```\s*', '', raw)
+    raw = re.sub(r'\s*```$', '', raw).strip()
+
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        match = re.search(r'\{.*\}', raw, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group())
+            except json.JSONDecodeError:
+                pass
+        return {"message": raw, "trip": trip_plan}
+
+
+def plan_trip_from_conversation(messages: list[dict]) -> dict:
+    """Generate full trip JSON from conversation history."""
+    convo = "\n".join(
+        f"{m['role'].upper()}: {m['content']}"
+        for m in messages[-20:]
+        if m['role'] in ('user', 'assistant')
+    )
+    synthesis = (
+        f"Based on this planning conversation, generate the complete trip plan now:\n\n{convo}"
+        "\n\nReturn only the trip JSON."
+    )
+    msg = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=4096,
+        system=SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": synthesis}],
+    )
+    raw = msg.content[0].text.strip()
+    raw = re.sub(r'^```json\s*', '', raw)
+    raw = re.sub(r'^```\s*', '', raw)
+    raw = re.sub(r'\s*```$', '', raw).strip()
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        match = re.search(r'\{.*\}', raw, re.DOTALL)
+        if match:
+            return json.loads(match.group())
+        raise ValueError(f"Claude returned non-JSON: {raw[:200]}")
 
 
 def plan_trip(user_request: str) -> dict:

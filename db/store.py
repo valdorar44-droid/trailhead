@@ -110,6 +110,16 @@ def init_db():
             converted_at    INTEGER,
             FOREIGN KEY (referrer_id) REFERENCES users(id)
         );
+        CREATE TABLE IF NOT EXISTS trail_dna (
+            session_id  TEXT PRIMARY KEY,
+            profile     TEXT NOT NULL,
+            updated_at  INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS conversations (
+            session_id  TEXT PRIMARY KEY,
+            messages    TEXT NOT NULL,
+            updated_at  INTEGER NOT NULL
+        );
     """)
     # Non-destructive column additions for existing deployments
     for sql in [
@@ -131,6 +141,43 @@ def init_db():
             pass
     db.commit()
     db.close()
+
+# ── Trail DNA (user preference profile) ──────────────────────────────────────
+
+def get_trail_dna(session_id: str) -> dict:
+    db = _conn()
+    row = db.execute("SELECT profile FROM trail_dna WHERE session_id=?", (session_id,)).fetchone()
+    db.close()
+    return json.loads(row["profile"]) if row else {}
+
+def save_trail_dna(session_id: str, profile: dict):
+    db = _conn()
+    db.execute(
+        "INSERT OR REPLACE INTO trail_dna (session_id, profile, updated_at) VALUES (?,?,?)",
+        (session_id, json.dumps(profile), int(time.time()))
+    )
+    db.commit(); db.close()
+
+# ── Conversations ─────────────────────────────────────────────────────────────
+
+def get_conversation(session_id: str) -> list:
+    db = _conn()
+    row = db.execute("SELECT messages FROM conversations WHERE session_id=?", (session_id,)).fetchone()
+    db.close()
+    return json.loads(row["messages"]) if row else []
+
+def save_conversation(session_id: str, messages: list):
+    db = _conn()
+    db.execute(
+        "INSERT OR REPLACE INTO conversations (session_id, messages, updated_at) VALUES (?,?,?)",
+        (session_id, json.dumps(messages), int(time.time()))
+    )
+    db.commit(); db.close()
+
+def clear_conversation(session_id: str):
+    db = _conn()
+    db.execute("DELETE FROM conversations WHERE session_id=?", (session_id,))
+    db.commit(); db.close()
 
 # ── Trips ─────────────────────────────────────────────────────────────────────
 

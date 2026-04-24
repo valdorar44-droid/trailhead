@@ -7,22 +7,27 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Trailhead — AI Overland Planner</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@400;600;700;800;900&family=Lora:ital,wght@0,400;0,500;0,600;1,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src='https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js'></script>
 <link href='https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css' rel='stylesheet'/>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root{
-  --bg:#080c12;--s1:#0f1319;--s2:#161c27;--s3:#1e2535;--s4:#252d3d;
-  --border:#252d3d;--border2:#1a2030;
-  --orange:#f97316;--orange2:#ea580c;--og:rgba(249,115,22,.2);--og2:rgba(249,115,22,.08);
-  --green:#22c55e;--green2:#15803d;--yellow:#eab308;--red:#ef4444;--blue:#3b82f6;--purple:#a855f7;
-  --text:#f1f5f9;--text2:#94a3b8;--text3:#4b5563;--text4:#6b7280;
-  --mono:'Space Mono',monospace;--sans:'Space Grotesk',system-ui,sans-serif;
+  --bg:#060d07;--s1:#0d1a0e;--s2:#152016;--s3:#1c2b1d;--s4:#253026;
+  --border:#2a3a2b;--border2:#1a2519;
+  --rust:#b85c38;--rust2:#9c4a28;--rg:rgba(184,92,56,.2);--rg2:rgba(184,92,56,.08);
+  --gold:#c8953a;--sage:#7aaa7c;--pine:#4d8c5f;
+  --green:#3dbd6d;--green2:#16a34a;--yellow:#d4a017;--red:#ef4444;--blue:#3b82f6;--purple:#a855f7;
+  --text:#e4ddd2;--text2:#8a9285;--text3:#4a5a4c;--text4:#5c6b5e;
+  --display:'Big Shoulders Display',sans-serif;
+  --mono:'DM Mono',monospace;--sans:'Lora',Georgia,serif;
   --sh:0 4px 24px rgba(0,0,0,.6);--sh2:0 8px 40px rgba(0,0,0,.8);
   --r:14px;--r2:10px;--r3:20px;
 }
-html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:var(--sans)}
+html,body{
+  height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:var(--sans);
+  cursor:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='3' fill='none' stroke='%23b85c38' stroke-width='1.5'/%3E%3Cline x1='12' y1='2' x2='12' y2='8' stroke='%23b85c38' stroke-width='1.5'/%3E%3Cline x1='12' y1='16' x2='12' y2='22' stroke='%23b85c38' stroke-width='1.5'/%3E%3Cline x1='2' y1='12' x2='8' y2='12' stroke='%23b85c38' stroke-width='1.5'/%3E%3Cline x1='16' y1='12' x2='22' y2='12' stroke='%23b85c38' stroke-width='1.5'/%3E%3C/svg%3E") 12 12, crosshair;
+}
 
 /* ── MAP ── */
 #map-wrap{position:fixed;inset:0;z-index:0}
@@ -32,16 +37,16 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 /* ── Map status ── */
 #map-status-wrap{position:fixed;top:max(16px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);z-index:10;pointer-events:none}
 #map-status{
-  background:rgba(8,12,18,.9);border:1px solid var(--border);
+  background:rgba(6,13,7,.92);border:1px solid var(--border);
   border-radius:100px;padding:8px 20px;
-  font-size:11px;font-family:var(--mono);color:var(--text2);
+  font-size:10px;font-family:var(--mono);color:var(--text2);
   backdrop-filter:blur(20px);white-space:nowrap;
-  transition:all .35s;box-shadow:var(--sh);letter-spacing:.06em;
+  transition:all .35s;box-shadow:var(--sh);letter-spacing:.1em;text-transform:uppercase;
 }
-#map-status.active{border-color:var(--orange);color:var(--orange);background:rgba(8,12,18,.95)}
+#map-status.active{border-color:var(--rust);color:var(--rust);background:rgba(6,13,7,.96)}
 #map-status.active::before{
   content:'';display:inline-block;width:6px;height:6px;border-radius:50%;
-  background:var(--orange);margin-right:8px;vertical-align:middle;
+  background:var(--rust);margin-right:8px;vertical-align:middle;
   animation:live-pulse 2s ease-in-out infinite;
 }
 @keyframes live-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.65)}}
@@ -49,28 +54,28 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 /* ── Map controls ── */
 #map-controls{position:fixed;right:16px;top:calc(max(16px,env(safe-area-inset-top)) + 52px);display:flex;flex-direction:column;gap:8px;z-index:10}
 .map-btn{
-  width:44px;height:44px;border-radius:12px;
-  background:rgba(15,19,25,.95);border:1px solid var(--border);
+  width:44px;height:44px;border-radius:10px;
+  background:rgba(13,26,14,.95);border:1px solid var(--border);
   display:flex;align-items:center;justify-content:center;
   cursor:pointer;backdrop-filter:blur(16px);
   font-size:17px;color:var(--text2);transition:all .15s;
-  box-shadow:var(--sh);
+  box-shadow:var(--sh);font-family:var(--mono);font-size:13px;letter-spacing:.05em;
 }
-.map-btn:hover{background:var(--s3);border-color:var(--orange);color:var(--orange)}
-.map-btn.active{background:var(--og);border-color:var(--orange);color:var(--orange)}
+.map-btn:hover{background:var(--s3);border-color:var(--rust);color:var(--rust)}
+.map-btn.active{background:var(--rg);border-color:var(--rust);color:var(--rust)}
 
 /* ── Alert banner ── */
 #alert-banner{
   position:fixed;top:60px;left:12px;right:12px;z-index:11;
-  background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.35);
-  border-radius:12px;padding:10px 14px;
+  background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);
+  border-radius:10px;padding:10px 14px;
   display:none;align-items:center;gap:10px;
   backdrop-filter:blur(16px);box-shadow:var(--sh);
   animation:slide-down .3s ease-out;
 }
 #alert-banner.show{display:flex}
 @keyframes slide-down{from{transform:translateY(-16px);opacity:0}to{transform:translateY(0);opacity:1}}
-.alert-text{font-size:12px;color:#fca5a5;font-family:var(--mono);flex:1}
+.alert-text{font-size:11px;color:#fca5a5;font-family:var(--mono);flex:1;letter-spacing:.04em}
 .alert-close{font-size:16px;color:var(--text3);cursor:pointer;background:none;border:none;padding:0}
 
 /* ── Report FAB ── */
@@ -80,32 +85,32 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
   background:linear-gradient(135deg,var(--red),#b91c1c);
   border:none;cursor:pointer;
   display:flex;align-items:center;justify-content:center;
-  box-shadow:0 4px 16px rgba(239,68,68,.45);
+  box-shadow:0 4px 16px rgba(239,68,68,.4);
   font-size:18px;transition:transform .15s;
 }
 #report-fab:hover{transform:scale(1.1)}
-@keyframes pfab{0%,100%{box-shadow:0 4px 16px rgba(239,68,68,.45)}50%{box-shadow:0 4px 28px rgba(239,68,68,.75)}}
+@keyframes pfab{0%,100%{box-shadow:0 4px 16px rgba(239,68,68,.4)}50%{box-shadow:0 4px 28px rgba(239,68,68,.7)}}
 #report-fab{animation:pfab 3s ease-in-out infinite}
 
 /* ── Toast ── */
 #toast{
   position:fixed;top:72px;left:50%;transform:translateX(-50%);
-  background:var(--s1);border:1px solid var(--border);
+  background:var(--s2);border:1px solid var(--border);
   border-radius:100px;padding:10px 22px;
-  font-size:12px;font-family:var(--mono);color:var(--text);
+  font-size:11px;font-family:var(--mono);color:var(--text);letter-spacing:.06em;
   display:flex;align-items:center;gap:8px;
   box-shadow:var(--sh2);z-index:100;
   opacity:0;pointer-events:none;transition:opacity .25s;white-space:nowrap;
 }
 #toast.show{opacity:1}
-.toast-val{color:var(--orange);font-weight:700}
+.toast-val{color:var(--rust);font-weight:500}
 
 /* ── Bottom Sheet ── */
 #sheet{
   position:fixed;left:0;right:0;bottom:0;z-index:20;
   background:var(--s1);
   border-top:1px solid var(--border);
-  border-radius:24px 24px 0 0;
+  border-radius:20px 20px 0 0;
   display:flex;flex-direction:column;
   transition:height .35s cubic-bezier(.4,0,.2,1);
   box-shadow:0 -8px 40px rgba(0,0,0,.7);
@@ -119,25 +124,25 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
   display:flex;align-items:center;justify-content:center;
   padding:12px 20px 0;flex-shrink:0;cursor:pointer;position:relative;min-height:48px;
 }
-.handle-bar{width:40px;height:4px;border-radius:2px;background:var(--s4);transition:background .15s}
+.handle-bar{width:36px;height:3px;border-radius:2px;background:var(--s4);transition:background .15s}
 #sheet-handle:hover .handle-bar{background:var(--text3)}
 #sheet-trip-pill{
   position:absolute;left:60px;right:60px;
-  font-size:11px;font-family:var(--mono);color:var(--text2);
-  text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.04em;
+  font-size:10px;font-family:var(--mono);color:var(--text2);
+  text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.08em;
 }
 
 /* ── Tabs ── */
-#tabs{display:flex;padding:0 6px;border-bottom:1px solid var(--border2);flex-shrink:0}
+#tabs{display:flex;padding:0 4px;border-bottom:1px solid var(--border2);flex-shrink:0}
 .tab{
-  flex:1;padding:10px 4px;font-size:10.5px;font-family:var(--mono);
+  flex:1;padding:10px 4px;font-size:9.5px;font-family:var(--mono);
   color:var(--text3);cursor:pointer;border-bottom:2px solid transparent;
-  text-align:center;letter-spacing:.8px;transition:all .15s;
-  display:flex;flex-direction:column;align-items:center;gap:3px;
+  text-align:center;letter-spacing:.1em;transition:all .15s;
+  display:flex;flex-direction:column;align-items:center;gap:3px;text-transform:uppercase;
 }
 .tab:hover{color:var(--text2)}
-.tab.active{color:var(--orange);border-bottom-color:var(--orange)}
-.tab-icon{font-size:14px}
+.tab.active{color:var(--rust);border-bottom-color:var(--rust)}
+.tab-icon{font-size:13px}
 
 /* ── Sheet content ── */
 #sheet-content{flex:1;overflow:hidden;display:flex;flex-direction:column}
@@ -145,64 +150,79 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 /* ── Chat panel ── */
 #chat-panel{display:flex;flex-direction:column;flex:1;overflow:hidden}
 #messages{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:14px;scroll-behavior:smooth}
-#messages::-webkit-scrollbar{width:3px}
+#messages::-webkit-scrollbar{width:2px}
 #messages::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
 
 .msg{display:flex;flex-direction:column;gap:5px}
 .msg.user{align-items:flex-end}
 .msg.ai{align-items:flex-start}
-.msg-label{font-size:9px;color:var(--text3);font-family:var(--mono);padding:0 6px;letter-spacing:1.2px}
+.msg-label{font-size:8.5px;color:var(--text3);font-family:var(--mono);padding:0 6px;letter-spacing:.12em}
 
 .msg.user .msg-bubble{
-  background:linear-gradient(135deg,var(--orange),var(--orange2));
-  color:#fff;border-radius:18px 18px 4px 18px;
-  padding:11px 15px;font-size:13.5px;line-height:1.55;max-width:88%;
-  box-shadow:0 2px 12px rgba(249,115,22,.3);
+  background:linear-gradient(135deg,var(--rust),var(--rust2));
+  color:var(--text);border-radius:18px 18px 4px 18px;
+  padding:11px 15px;font-size:13px;line-height:1.6;max-width:88%;
+  box-shadow:0 2px 12px rgba(184,92,56,.25);font-family:var(--sans);
 }
 .msg.ai .msg-bubble{
   background:var(--s2);color:var(--text);
   border:1px solid var(--border);border-radius:4px 18px 18px 18px;
-  padding:11px 15px;font-size:13.5px;line-height:1.55;max-width:92%;
+  padding:11px 15px;font-size:13px;line-height:1.6;max-width:92%;
+  font-family:var(--sans);
 }
 
 /* ── Welcome screen ── */
 .welcome-hero{
-  background:linear-gradient(135deg,rgba(249,115,22,.08),rgba(249,115,22,.03));
-  border:1px solid rgba(249,115,22,.2);border-radius:16px;
-  padding:18px;margin-bottom:12px;position:relative;overflow:hidden;
+  background:linear-gradient(160deg,rgba(184,92,56,.07),rgba(13,26,14,.8));
+  border:1px solid rgba(184,92,56,.18);border-radius:14px;
+  padding:20px 18px;margin-bottom:12px;position:relative;overflow:hidden;
 }
 .welcome-hero::before{
-  content:'';position:absolute;top:-30px;right:-30px;
-  width:120px;height:120px;border-radius:50%;
-  background:radial-gradient(circle,rgba(249,115,22,.15),transparent 70%);
+  content:'';position:absolute;top:-40px;right:-30px;
+  width:130px;height:130px;border-radius:50%;
+  background:radial-gradient(circle,rgba(184,92,56,.12),transparent 70%);
   pointer-events:none;
+}
+.welcome-hero::after{
+  content:'';position:absolute;bottom:0;left:0;right:0;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(184,92,56,.2),transparent);
 }
 .welcome-badge{
   display:inline-flex;align-items:center;gap:6px;
-  background:rgba(249,115,22,.15);border:1px solid rgba(249,115,22,.3);
+  background:rgba(184,92,56,.12);border:1px solid rgba(184,92,56,.25);
   border-radius:100px;padding:4px 12px;
-  font-size:9px;font-family:var(--mono);color:var(--orange);
-  letter-spacing:1px;margin-bottom:10px;
+  font-size:8.5px;font-family:var(--mono);color:var(--rust);
+  letter-spacing:.12em;margin-bottom:12px;text-transform:uppercase;
 }
-.welcome-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--orange);animation:live-pulse 2s ease-in-out infinite}
-.welcome-h{font-size:17px;font-weight:700;line-height:1.3;margin-bottom:6px}
-.welcome-h span{color:var(--orange)}
-.welcome-sub{font-size:12.5px;color:var(--text2);line-height:1.6}
-.example-grid{display:flex;flex-direction:column;gap:7px;margin-top:12px}
+.welcome-badge::before{content:'';width:5px;height:5px;border-radius:50%;background:var(--rust);animation:live-pulse 2s ease-in-out infinite}
+.welcome-h{
+  font-family:var(--display);font-size:28px;font-weight:900;
+  line-height:.95;margin-bottom:8px;letter-spacing:-.5px;
+  text-transform:uppercase;
+}
+.welcome-h span{
+  color:transparent;-webkit-text-stroke:1.5px var(--rust);
+  background:linear-gradient(135deg,var(--rust),var(--gold));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  background-clip:text;
+}
+.welcome-sub{font-size:13px;color:var(--text2);line-height:1.65;font-family:var(--sans);font-style:italic}
+.example-grid{display:flex;flex-direction:column;gap:7px;margin-top:14px}
 .example-prompt{
-  background:var(--s3);border:1px solid var(--border);
-  border-radius:12px;padding:11px 13px;
+  background:rgba(37,48,38,.6);border:1px solid var(--border);
+  border-radius:10px;padding:11px 13px;
   font-size:12.5px;color:var(--text);cursor:pointer;
-  transition:all .2s;line-height:1.45;
+  transition:all .2s;line-height:1.5;
   display:flex;align-items:flex-start;gap:10px;
+  font-family:var(--sans);
 }
-.example-prompt:hover{border-color:var(--orange);background:var(--og2);transform:translateX(2px)}
+.example-prompt:hover{border-color:rgba(184,92,56,.4);background:rgba(184,92,56,.06);transform:translateX(2px)}
 .example-tag{
-  flex-shrink:0;width:28px;height:20px;border-radius:5px;
-  background:var(--og);border:1px solid var(--border);
-  display:flex;align-items:center;justify-content:center;
-  font-size:9px;font-weight:700;font-family:var(--mono);color:var(--orange);
-  margin-top:1px;
+  flex-shrink:0;min-width:28px;height:20px;border-radius:5px;
+  background:var(--rg);border:1px solid rgba(184,92,56,.3);
+  display:flex;align-items:center;justify-content:center;padding:0 4px;
+  font-size:8.5px;font-weight:500;font-family:var(--mono);color:var(--rust);
+  margin-top:1px;letter-spacing:.06em;
 }
 
 /* ── Thinking ── */
@@ -211,13 +231,11 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
   padding:11px 15px;background:var(--s2);
   border:1px solid var(--border);border-radius:4px 18px 18px 18px;
 }
-.thinking-stages{
-  display:flex;flex-direction:column;gap:3px;
-}
-.thinking-stage{font-size:11px;color:var(--text3);font-family:var(--mono);transition:color .3s}
-.thinking-stage.active{color:var(--orange)}
+.thinking-stages{display:flex;flex-direction:column;gap:3px}
+.thinking-stage{font-size:11px;color:var(--text3);font-family:var(--mono);transition:color .3s;letter-spacing:.06em}
+.thinking-stage.active{color:var(--rust)}
 .dots{display:flex;gap:5px}
-.dots span{width:7px;height:7px;border-radius:50%;background:var(--orange);animation:bop 1.3s ease-in-out infinite}
+.dots span{width:7px;height:7px;border-radius:50%;background:var(--rust);animation:bop 1.3s ease-in-out infinite}
 .dots span:nth-child(2){animation-delay:.18s}
 .dots span:nth-child(3){animation-delay:.36s}
 @keyframes bop{0%,60%,100%{transform:translateY(0);opacity:.25}30%{transform:translateY(-7px);opacity:1}}
@@ -225,154 +243,170 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 /* ── Trip card ── */
 .trip-card{
   background:var(--s2);border:1px solid var(--border);
-  border-radius:16px;overflow:hidden;width:100%;
+  border-radius:14px;overflow:hidden;width:100%;
   animation:rise .45s cubic-bezier(.175,.885,.32,1.275);
 }
 @keyframes rise{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
 .trip-card-hero{
-  padding:16px;border-bottom:1px solid var(--border);
-  background:linear-gradient(135deg,#140800,#1c0e00,#140800);
+  padding:18px 16px;border-bottom:1px solid var(--border);
+  background:linear-gradient(160deg,#0a150a,#11201a,#0d1a0e);
   position:relative;overflow:hidden;
 }
 .trip-card-hero::after{
   content:'';position:absolute;inset:0;
-  background:linear-gradient(135deg,transparent 40%,rgba(249,115,22,.12));
+  background:linear-gradient(135deg,transparent 40%,rgba(184,92,56,.1));
   pointer-events:none;
 }
+.trip-card-hero::before{
+  content:'';position:absolute;bottom:0;left:0;right:0;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(184,92,56,.3),transparent);
+}
 .trip-badge{
-  font-size:9px;font-family:var(--mono);color:var(--orange);
-  letter-spacing:1.2px;margin-bottom:5px;opacity:.8;
+  font-size:8.5px;font-family:var(--mono);color:var(--rust);
+  letter-spacing:.12em;margin-bottom:6px;opacity:.9;text-transform:uppercase;
 }
-.trip-name{font-size:16px;font-weight:700;line-height:1.25;margin-bottom:3px}
-.trip-states{font-size:10px;font-family:var(--mono);color:var(--text2);letter-spacing:.5px}
-.trip-tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:9px}
+.trip-name{
+  font-family:var(--display);font-size:20px;font-weight:800;
+  line-height:1.1;margin-bottom:4px;letter-spacing:-.2px;text-transform:uppercase;
+}
+.trip-states{font-size:9.5px;font-family:var(--mono);color:var(--text2);letter-spacing:.08em}
+.trip-tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:10px}
 .tag{
-  padding:3px 10px;border-radius:100px;font-size:9px;font-family:var(--mono);font-weight:700;
-  letter-spacing:.5px;
+  padding:3px 10px;border-radius:5px;font-size:8.5px;font-family:var(--mono);font-weight:500;
+  letter-spacing:.08em;text-transform:uppercase;
 }
-.tag-4wd{background:#450a0a;color:#fca5a5;border:1px solid #7f1d1d}
-.tag-dirt{background:#431407;color:#fdba74;border:1px solid #92400e}
-.tag-blm{background:#1c1917;color:#d6d3d1;border:1px solid #44403c}
-.tag-usfs{background:#052e16;color:#86efac;border:1px solid #166534}
-.tag-nps{background:#172554;color:#93c5fd;border:1px solid #1d4ed8}
-.tag-mixed{background:#1e2535;color:var(--text2);border:1px solid var(--border)}
+.tag-4wd{background:#3a0a0a;color:#fca5a5;border:1px solid #6b1d1d}
+.tag-dirt{background:#3a1407;color:#fdba74;border:1px solid #7a3508}
+.tag-blm{background:#1c1917;color:#c4b9a8;border:1px solid #3a3430}
+.tag-usfs{background:#0b2010;color:#86c894;border:1px solid #1a4a22}
+.tag-nps{background:#0e1e3a;color:#93c5fd;border:1px solid #1a3a6a}
+.tag-mixed{background:var(--s3);color:var(--text2);border:1px solid var(--border)}
 
 .trip-stats{display:flex;padding:12px 14px;gap:0;border-bottom:1px solid var(--border)}
 .stat{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;position:relative}
 .stat+.stat::before{content:'';position:absolute;left:0;top:6px;bottom:6px;width:1px;background:var(--border)}
-.stat-val{font-size:19px;font-weight:700;font-family:var(--mono);color:var(--orange);line-height:1}
-.stat-label{font-size:8.5px;color:var(--text3);font-family:var(--mono);letter-spacing:.5px;text-transform:uppercase}
-.trip-overview{padding:12px 14px;font-size:12.5px;line-height:1.65;color:var(--text2);border-bottom:1px solid var(--border)}
+.stat-val{font-size:19px;font-weight:700;font-family:var(--mono);color:var(--rust);line-height:1}
+.stat-label{font-size:8px;color:var(--text3);font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase}
+.trip-overview{padding:12px 14px;font-size:12.5px;line-height:1.7;color:var(--text2);border-bottom:1px solid var(--border);font-family:var(--sans);font-style:italic}
 .trip-actions{padding:10px 14px;display:flex;gap:8px}
 
 /* ── Buttons ── */
 .btn{
-  padding:9px 16px;border-radius:10px;border:none;cursor:pointer;
-  font-size:11px;font-family:var(--mono);font-weight:700;letter-spacing:.5px;
+  padding:9px 16px;border-radius:8px;border:none;cursor:pointer;
+  font-size:10px;font-family:var(--mono);font-weight:500;letter-spacing:.1em;
   transition:all .15s;white-space:nowrap;display:flex;align-items:center;gap:5px;
+  text-transform:uppercase;
 }
-.btn-primary{background:linear-gradient(135deg,var(--orange),var(--orange2));color:#fff;box-shadow:0 2px 8px var(--og)}
-.btn-primary:hover{transform:translateY(-1px);box-shadow:0 4px 16px var(--og)}
-.btn-ghost{background:var(--s3);color:var(--text2);border:1px solid var(--border)}
-.btn-ghost:hover{border-color:var(--orange);color:var(--orange)}
+.btn-primary{
+  background:linear-gradient(135deg,var(--rust),var(--rust2));color:var(--text);
+  box-shadow:0 2px 8px rgba(184,92,56,.25);
+  clip-path:polygon(0 0,calc(100% - 6px) 0,100% 6px,100% 100%,6px 100%,0 calc(100% - 6px));
+}
+.btn-primary:hover{transform:translateY(-1px);box-shadow:0 4px 16px rgba(184,92,56,.35)}
+.btn-ghost{
+  background:var(--s3);color:var(--text2);border:1px solid var(--border);
+  clip-path:polygon(0 0,calc(100% - 5px) 0,100% 5px,100% 100%,5px 100%,0 calc(100% - 5px));
+}
+.btn-ghost:hover{border-color:var(--rust);color:var(--rust)}
 
 /* ── Input ── */
 #input-wrap{padding:10px 14px;border-top:1px solid var(--border);background:var(--s1);flex-shrink:0}
 #input-row{display:flex;gap:8px;align-items:flex-end;position:relative}
 #user-input{
   flex:1;background:var(--s2);border:1.5px solid var(--border);
-  border-radius:16px;padding:12px 44px 12px 14px;
-  color:var(--text);font-family:var(--sans);font-size:14px;
+  border-radius:14px;padding:12px 44px 12px 14px;
+  color:var(--text);font-family:var(--sans);font-size:13.5px;
   resize:none;outline:none;min-height:48px;max-height:120px;
-  line-height:1.5;transition:border-color .2s,box-shadow .2s;
+  line-height:1.55;transition:border-color .2s,box-shadow .2s;
 }
-#user-input:focus{border-color:var(--orange);box-shadow:0 0 0 3px var(--og)}
-#user-input::placeholder{color:var(--text3)}
+#user-input:focus{border-color:var(--rust);box-shadow:0 0 0 3px var(--rg)}
+#user-input::placeholder{color:var(--text3);font-style:italic}
 #send-btn{
   position:absolute;right:6px;bottom:6px;
-  width:36px;height:36px;border-radius:10px;
-  background:linear-gradient(135deg,var(--orange),var(--orange2));
+  width:36px;height:36px;border-radius:8px;
+  background:linear-gradient(135deg,var(--rust),var(--rust2));
   border:none;cursor:pointer;
   display:flex;align-items:center;justify-content:center;
-  transition:all .15s;box-shadow:0 2px 8px var(--og);
+  transition:all .15s;box-shadow:0 2px 8px rgba(184,92,56,.3);
+  clip-path:polygon(0 0,calc(100% - 5px) 0,100% 5px,100% 100%,5px 100%,0 calc(100% - 5px));
 }
-#send-btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px var(--og)}
-#send-btn:disabled{background:var(--s3);box-shadow:none;transform:none;cursor:not-allowed;opacity:.5}
-#send-btn svg{width:16px;height:16px;fill:#fff}
-.input-hint{font-size:9px;color:var(--text3);font-family:var(--mono);margin-top:5px;letter-spacing:.4px;text-align:center}
+#send-btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(184,92,56,.4)}
+#send-btn:disabled{background:var(--s3);box-shadow:none;transform:none;cursor:not-allowed;opacity:.5;clip-path:none}
+#send-btn svg{width:16px;height:16px;fill:var(--text)}
+.input-hint{font-size:9px;color:var(--text3);font-family:var(--mono);margin-top:5px;letter-spacing:.08em;text-align:center;text-transform:uppercase}
 
 /* ── Route (itinerary) panel ── */
 #itinerary-panel{display:none;flex-direction:column;flex:1;overflow:hidden}
 #itinerary-content{flex:1;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:8px}
-#itinerary-content::-webkit-scrollbar{width:3px}
+#itinerary-content::-webkit-scrollbar{width:2px}
 #itinerary-content::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
-.day-card{background:var(--s2);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.day-card{background:var(--s2);border:1px solid var(--border);border-radius:10px;overflow:hidden}
 .day-card-header{padding:12px 14px;display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none;transition:background .15s}
 .day-card-header:hover{background:var(--s3)}
 .day-num{
-  width:32px;height:32px;border-radius:50%;flex-shrink:0;
-  background:linear-gradient(135deg,var(--orange),var(--orange2));
-  color:#fff;font-size:11px;font-weight:700;font-family:var(--mono);
+  width:32px;height:32px;border-radius:8px;flex-shrink:0;
+  background:linear-gradient(135deg,var(--rust),var(--rust2));
+  color:var(--text);font-size:13px;font-weight:700;font-family:var(--display);
   display:flex;align-items:center;justify-content:center;
-  box-shadow:0 2px 8px var(--og);
+  box-shadow:0 2px 8px rgba(184,92,56,.25);letter-spacing:-.5px;
 }
-.day-title{font-size:13px;font-weight:600;flex:1;line-height:1.3}
+.day-title{font-family:var(--display);font-size:15px;font-weight:700;flex:1;line-height:1.2;letter-spacing:-.2px;text-transform:uppercase}
 .day-meta-wrap{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
-.day-miles{font-size:11px;color:var(--orange);font-family:var(--mono);font-weight:700}
-.day-road{font-size:9px;color:var(--text3);font-family:var(--mono)}
+.day-miles{font-size:11px;color:var(--rust);font-family:var(--mono);font-weight:500}
+.day-road{font-size:8.5px;color:var(--text3);font-family:var(--mono);letter-spacing:.06em;text-transform:uppercase}
 .day-body{padding:0 14px 12px;display:none}
 .day-body.open{display:block}
-.day-desc{font-size:12.5px;color:var(--text2);line-height:1.6;margin-bottom:8px}
-.road-badge{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:100px;font-size:9px;font-family:var(--mono);font-weight:700;letter-spacing:.8px;margin-bottom:8px}
-.road-4wd{background:#450a0a;color:#fca5a5;border:1px solid #7f1d1d}
-.road-dirt{background:#431407;color:#fdba74;border:1px solid #92400e}
-.road-mixed{background:#1e3a5f;color:#93c5fd;border:1px solid #1d4ed8}
-.road-paved{background:#052e16;color:#86efac;border:1px solid #166534}
+.day-desc{font-size:12.5px;color:var(--text2);line-height:1.7;margin-bottom:8px;font-family:var(--sans);font-style:italic}
+.road-badge{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:5px;font-size:8.5px;font-family:var(--mono);font-weight:500;letter-spacing:.1em;margin-bottom:8px;text-transform:uppercase}
+.road-4wd{background:#3a0a0a;color:#fca5a5;border:1px solid #6b1d1d}
+.road-dirt{background:#3a1407;color:#fdba74;border:1px solid #7a3508}
+.road-mixed{background:#0e1e3a;color:#93c5fd;border:1px solid #1a3a6a}
+.road-paved{background:#0b2010;color:#86c894;border:1px solid #1a4a22}
 .highlights{display:flex;flex-direction:column;gap:5px;margin-top:6px}
-.hl{font-size:12px;color:var(--text);padding-left:14px;position:relative;line-height:1.4}
-.hl::before{content:'→';position:absolute;left:0;color:var(--orange);font-size:10px;top:2px}
+.hl{font-size:12px;color:var(--text);padding-left:16px;position:relative;line-height:1.45;font-family:var(--sans)}
+.hl::before{content:'→';position:absolute;left:0;color:var(--rust);font-size:10px;top:3px;font-family:var(--mono)}
 
 /* ── Camps panel ── */
 #camps-panel{display:none;flex-direction:column;flex:1;overflow:hidden}
 #camps-content{flex:1;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
-#camps-content::-webkit-scrollbar{width:3px}
+#camps-content::-webkit-scrollbar{width:2px}
 #camps-content::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
 
 .camp-item{
-  background:var(--s2);border:1px solid var(--border);border-radius:12px;
+  background:var(--s2);border:1px solid var(--border);border-radius:10px;
   padding:12px 13px;cursor:pointer;transition:all .2s;
 }
-.camp-item:hover{border-color:rgba(249,115,22,.4);background:var(--s3)}
+.camp-item:hover{border-color:rgba(184,92,56,.35);background:var(--s3)}
 .camp-item-header{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:7px}
-.camp-item-name{font-size:13px;font-weight:600;line-height:1.3;flex:1}
+.camp-item-name{font-family:var(--display);font-size:15px;font-weight:700;line-height:1.2;flex:1;letter-spacing:-.2px;text-transform:uppercase}
 .camp-land-badge{
-  font-size:8.5px;font-family:var(--mono);font-weight:700;letter-spacing:.5px;
-  padding:3px 8px;border-radius:6px;white-space:nowrap;flex-shrink:0;
+  font-size:8px;font-family:var(--mono);font-weight:500;letter-spacing:.06em;
+  padding:3px 8px;border-radius:5px;white-space:nowrap;flex-shrink:0;text-transform:uppercase;
 }
-.land-blm{background:#1c1917;color:#d6d3d1;border:1px solid #44403c}
-.land-usfs{background:#052e16;color:#86efac;border:1px solid #166534}
-.land-nps{background:#172554;color:#93c5fd;border:1px solid #1d4ed8}
-.land-state{background:#2e1065;color:#e9d5ff;border:1px solid #7e22ce}
-.land-private{background:#1c1917;color:#fdba74;border:1px solid #92400e}
+.land-blm{background:#1c1917;color:#c4b9a8;border:1px solid #3a3430}
+.land-usfs{background:#0b2010;color:#86c894;border:1px solid #1a4a22}
+.land-nps{background:#0e1e3a;color:#93c5fd;border:1px solid #1a3a6a}
+.land-state{background:#1e0a30;color:#d8b4fe;border:1px solid #5b21b6}
+.land-private{background:#1c1917;color:#fdba74;border:1px solid #7a3508}
 .land-default{background:var(--s3);color:var(--text2);border:1px solid var(--border)}
 
 .camp-item-meta{display:flex;align-items:center;gap:10px;margin-bottom:8px}
-.camp-stars{color:var(--yellow);font-size:12px}
+.camp-stars{color:var(--gold);font-size:11px;letter-spacing:.5px}
 .camp-rating-num{font-size:11px;color:var(--text2);font-family:var(--mono)}
 .camp-dist{font-size:10px;color:var(--text3);font-family:var(--mono)}
 
 .camp-amenities{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px}
 .amenity-chip{
-  font-size:10px;padding:3px 8px;border-radius:6px;
+  font-size:9.5px;padding:3px 8px;border-radius:5px;
   background:var(--s3);border:1px solid var(--border);
-  color:var(--text2);font-family:var(--mono);
+  color:var(--text2);font-family:var(--mono);letter-spacing:.04em;
 }
-.amenity-chip.has{background:rgba(34,197,94,.1);border-color:rgba(34,197,94,.3);color:#86efac}
+.amenity-chip.has{background:rgba(61,189,109,.08);border-color:rgba(61,189,109,.25);color:#86c894}
 
 /* ── Cell coverage ── */
 .cell-coverage{display:flex;gap:8px;margin-top:2px}
 .cell-carrier{display:flex;flex-direction:column;align-items:center;gap:3px;flex:1}
-.cell-name{font-size:8.5px;font-family:var(--mono);color:var(--text3);letter-spacing:.3px}
+.cell-name{font-size:8px;font-family:var(--mono);color:var(--text3);letter-spacing:.06em;text-transform:uppercase}
 .cell-bars{display:flex;align-items:flex-end;gap:1.5px;height:14px}
 .cell-bar{width:4px;border-radius:1px;background:var(--border);transition:background .3s}
 .cell-bar.b1{height:25%}.cell-bar.b2{height:50%}.cell-bar.b3{height:75%}.cell-bar.b4{height:100%}
@@ -381,75 +415,75 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .cell-bar.on.poor{background:var(--red)}
 .cell-signal-label{font-size:8px;font-family:var(--mono);color:var(--text3)}
 .starlink-badge{
-  font-size:8.5px;font-family:var(--mono);font-weight:700;
-  padding:2px 7px;border-radius:5px;
-  background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.3);
-  color:#86efac;letter-spacing:.5px;
+  font-size:8px;font-family:var(--mono);font-weight:500;
+  padding:2px 7px;border-radius:4px;letter-spacing:.08em;text-transform:uppercase;
+  background:rgba(61,189,109,.1);border:1px solid rgba(61,189,109,.25);color:#86c894;
 }
 
 /* ── Gear (logistics) panel ── */
 #logistics-panel{display:none;flex-direction:column;flex:1;overflow:hidden}
 #logistics-content{flex:1;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:8px}
-.logistic-card{background:var(--s2);border:1px solid var(--border);border-radius:12px;padding:14px}
+.logistic-card{background:var(--s2);border:1px solid var(--border);border-radius:10px;padding:14px}
 .logistic-header{display:flex;align-items:center;gap:10px;margin-bottom:8px}
 .logistic-icon{
-  width:32px;height:32px;border-radius:8px;
-  background:var(--og);border:1px solid rgba(249,115,22,.3);
-  color:var(--orange);font-size:12px;font-weight:700;font-family:var(--mono);
-  display:flex;align-items:center;justify-content:center;flex-shrink:0;
+  width:32px;height:32px;border-radius:7px;
+  background:var(--rg);border:1px solid rgba(184,92,56,.25);
+  color:var(--rust);font-size:11px;font-weight:500;font-family:var(--mono);
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;letter-spacing:.04em;
 }
-.logistic-label{font-size:9px;font-family:var(--mono);color:var(--orange);letter-spacing:1.2px}
-.logistic-val{font-size:12.5px;line-height:1.65;color:var(--text2)}
+.logistic-label{font-size:8.5px;font-family:var(--mono);color:var(--rust);letter-spacing:.12em;text-transform:uppercase}
+.logistic-val{font-size:12.5px;line-height:1.7;color:var(--text2);font-family:var(--sans);font-style:italic}
 
 /* ── Mapbox popup ── */
-.mapboxgl-popup-content{background:var(--s1)!important;border:1px solid var(--border)!important;color:var(--text)!important;border-radius:16px!important;padding:0!important;box-shadow:var(--sh2)!important;min-width:220px;max-width:280px}
+.mapboxgl-popup-content{background:var(--s1)!important;border:1px solid var(--border)!important;color:var(--text)!important;border-radius:14px!important;padding:0!important;box-shadow:var(--sh2)!important;min-width:220px;max-width:280px}
 .mapboxgl-popup-tip{border-top-color:var(--border)!important;border-bottom-color:var(--border)!important}
 .mapboxgl-popup-close-button{color:var(--text3)!important;font-size:18px!important;right:8px!important;top:6px!important;background:none!important}
 .pop-header{padding:14px 16px 10px;border-bottom:1px solid var(--border)}
-.pop-type{font-size:9px;font-family:var(--mono);color:var(--orange);letter-spacing:1px;margin-bottom:4px}
-.pop-title{font-size:14px;font-weight:700;line-height:1.25;margin-bottom:4px}
+.pop-type{font-size:8.5px;font-family:var(--mono);color:var(--rust);letter-spacing:.1em;margin-bottom:5px;text-transform:uppercase}
+.pop-title{font-family:var(--display);font-size:16px;font-weight:800;line-height:1.15;margin-bottom:4px;letter-spacing:-.2px;text-transform:uppercase}
 .pop-body{padding:10px 16px 12px;display:flex;flex-direction:column;gap:8px}
-.pop-meta{font-size:11px;color:var(--text2);font-family:var(--mono)}
-.pop-desc{font-size:12px;color:var(--text2);line-height:1.5}
+.pop-meta{font-size:10px;color:var(--text2);font-family:var(--mono);letter-spacing:.06em}
+.pop-desc{font-size:12px;color:var(--text2);line-height:1.55;font-family:var(--sans)}
 .pop-badges{display:flex;flex-wrap:wrap;gap:4px}
-.pop-badge{font-size:8.5px;font-family:var(--mono);padding:2px 8px;border-radius:6px;background:var(--s3);border:1px solid var(--border);color:var(--text2)}
-.pop-badge.green{background:#052e16;border-color:#166534;color:#86efac}
-.pop-badge.yellow{background:#422006;border-color:#92400e;color:#fdba74}
-.pop-link{display:inline-flex;align-items:center;gap:4px;margin-top:2px;font-size:11px;color:var(--orange);text-decoration:none;font-family:var(--mono)}
+.pop-badge{font-size:8px;font-family:var(--mono);padding:2px 8px;border-radius:5px;background:var(--s3);border:1px solid var(--border);color:var(--text2);letter-spacing:.06em;text-transform:uppercase}
+.pop-badge.green{background:#0b2010;border-color:#1a4a22;color:#86c894}
+.pop-badge.yellow{background:#281400;border-color:#7a3508;color:#fdba74}
+.pop-link{display:inline-flex;align-items:center;gap:4px;margin-top:2px;font-size:10px;color:var(--rust);text-decoration:none;font-family:var(--mono);letter-spacing:.04em}
 .pop-link:hover{text-decoration:underline}
 
 /* ── Markers ── */
 @keyframes pop-in{0%{transform:scale(0) translateY(10px);opacity:0}65%{transform:scale(1.15) translateY(-3px)}100%{transform:scale(1) translateY(0);opacity:1}}
 .mk-wp{
   width:36px;height:36px;border-radius:50%;
-  background:linear-gradient(135deg,var(--orange),var(--orange2));
-  border:2.5px solid rgba(255,255,255,.2);
+  background:linear-gradient(135deg,var(--rust),var(--rust2));
+  border:2.5px solid rgba(228,221,210,.15);
   display:flex;align-items:center;justify-content:center;
-  font-size:11px;font-weight:700;font-family:var(--mono);color:#fff;
-  cursor:pointer;box-shadow:0 3px 14px rgba(249,115,22,.5);
+  font-size:10px;font-weight:700;font-family:var(--mono);color:var(--text);
+  cursor:pointer;box-shadow:0 3px 14px rgba(184,92,56,.45);
   animation:pop-in .4s cubic-bezier(.175,.885,.32,1.275) forwards;
+  letter-spacing:.04em;
 }
 .mk-camp{
   width:28px;height:28px;border-radius:50%;
-  background:linear-gradient(135deg,#16a34a,#15803d);
-  border:2px solid rgba(255,255,255,.2);
-  cursor:pointer;box-shadow:0 2px 10px rgba(34,197,94,.4);
+  background:linear-gradient(135deg,#1a6a35,#145d2c);
+  border:2px solid rgba(255,255,255,.15);
+  cursor:pointer;box-shadow:0 2px 10px rgba(22,163,74,.35);
   display:flex;align-items:center;justify-content:center;font-size:13px;
   animation:pop-in .35s cubic-bezier(.175,.885,.32,1.275) forwards;
 }
 .mk-fuel{
   width:26px;height:26px;border-radius:50%;
-  background:linear-gradient(135deg,#ca8a04,#a16207);
-  border:2px solid rgba(255,255,255,.2);
-  cursor:pointer;box-shadow:0 2px 8px rgba(234,179,8,.4);
+  background:linear-gradient(135deg,#9a6e10,#7a5610);
+  border:2px solid rgba(255,255,255,.15);
+  cursor:pointer;box-shadow:0 2px 8px rgba(200,149,58,.4);
   display:flex;align-items:center;justify-content:center;font-size:11px;
   animation:pop-in .3s cubic-bezier(.175,.885,.32,1.275) forwards;
 }
 
 /* ── Empty state ── */
 .empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:48px 20px;gap:10px;text-align:center;flex:1}
-.empty-icon{font-size:40px;opacity:.25}
-.empty-text{font-size:11px;color:var(--text3);font-family:var(--mono);line-height:1.65;letter-spacing:.04em}
+.empty-icon{font-size:36px;opacity:.2}
+.empty-text{font-size:10px;color:var(--text3);font-family:var(--mono);line-height:1.7;letter-spacing:.1em;text-transform:uppercase}
 
 /* ── Desktop sidebar ── */
 @media(min-width:700px){
@@ -466,23 +500,84 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
   #map-status-wrap{left:430px;transform:none}
   #alert-banner{left:430px}
   #tabs{padding:0 4px}
-  .tab{font-size:10px;padding:10px 2px}
+  .tab{font-size:9px;padding:10px 2px}
 }
 
 /* ── Sheet logo (desktop) ── */
 #sheet-logo{display:none;padding:20px 20px 0;align-items:center;gap:12px;flex-shrink:0}
 @media(min-width:700px){#sheet-logo{display:flex}}
 .logo-mark{
-  width:38px;height:38px;border-radius:11px;
-  background:linear-gradient(135deg,var(--orange),var(--orange2));
-  display:flex;align-items:center;justify-content:center;font-size:20px;
-  box-shadow:0 3px 12px var(--og);flex-shrink:0;
+  width:38px;height:38px;border-radius:9px;
+  background:linear-gradient(135deg,var(--rust),var(--rust2));
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 3px 12px rgba(184,92,56,.3);flex-shrink:0;
+  overflow:hidden;
 }
+.logo-mark svg{width:22px;height:22px;fill:var(--text)}
 .logo-text-wrap{}
-.logo-name{font-size:18px;font-weight:800;letter-spacing:-.4px;line-height:1}
-.logo-tag{font-size:8.5px;color:var(--text3);font-family:var(--mono);letter-spacing:.8px;margin-top:2px}
-.logo-home{font-size:8.5px;color:var(--text3);font-family:var(--mono);text-decoration:none;display:inline-block;margin-top:3px;letter-spacing:.6px;transition:color .15s}
-.logo-home:hover{color:var(--orange)}
+.logo-name{font-family:var(--display);font-size:20px;font-weight:900;letter-spacing:-.5px;line-height:1;text-transform:uppercase}
+.logo-tag{font-size:8px;color:var(--text3);font-family:var(--mono);letter-spacing:.12em;margin-top:3px;text-transform:uppercase}
+.logo-home{font-size:8px;color:var(--text3);font-family:var(--mono);text-decoration:none;display:inline-block;margin-top:3px;letter-spacing:.08em;transition:color .15s;text-transform:uppercase}
+.logo-home:hover{color:var(--rust)}
+
+/* ── Grain texture overlay ── */
+#sheet::before{
+  content:'';position:absolute;inset:0;border-radius:inherit;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.035'/%3E%3C/svg%3E");
+  pointer-events:none;z-index:0;opacity:.4;
+}
+#sheet>*{position:relative;z-index:1}
+
+/* ── Outline "ready to build" card ── */
+.outline-card{
+  background:linear-gradient(160deg,rgba(200,149,58,.1),rgba(13,26,14,.8));
+  border:1px solid rgba(200,149,58,.3);border-radius:12px;
+  padding:16px;margin-top:10px;
+  animation:rise .4s cubic-bezier(.175,.885,.32,1.275);
+}
+.outline-badge{
+  font-size:8.5px;font-family:var(--mono);color:var(--gold);
+  letter-spacing:.12em;margin-bottom:8px;text-transform:uppercase;
+  display:flex;align-items:center;gap:6px;
+}
+.outline-badge::before{content:'✦';color:var(--gold)}
+.outline-text{font-size:13px;color:var(--text2);line-height:1.65;font-family:var(--sans);font-style:italic;margin-bottom:14px}
+.outline-actions{display:flex;gap:8px}
+
+/* ── Trail DNA panel ── */
+#trail-dna-panel{
+  border-top:1px solid var(--border2);padding:12px 16px;flex-shrink:0;
+  display:none;
+}
+@media(min-width:700px){#trail-dna-panel{display:block}}
+.dna-header{
+  font-size:8px;font-family:var(--mono);color:var(--text3);
+  letter-spacing:.14em;text-transform:uppercase;margin-bottom:8px;
+  display:flex;align-items:center;gap:8px;
+}
+.dna-header::after{content:'';flex:1;height:1px;background:var(--border2)}
+.dna-tags{display:flex;flex-wrap:wrap;gap:5px}
+.dna-tag{
+  font-size:9px;font-family:var(--mono);padding:3px 9px;border-radius:4px;
+  background:rgba(122,170,124,.08);border:1px solid rgba(122,170,124,.2);
+  color:var(--sage);letter-spacing:.06em;text-transform:uppercase;
+  animation:tag-appear .3s ease-out;
+}
+@keyframes tag-appear{from{opacity:0;transform:scale(.85)}to{opacity:1;transform:scale(1)}}
+.dna-empty{font-size:9px;color:var(--text3);font-family:var(--mono);letter-spacing:.06em;opacity:.5}
+
+/* ── Edit mode indicator ── */
+.edit-mode-badge{
+  display:inline-flex;align-items:center;gap:5px;
+  font-size:8.5px;font-family:var(--mono);color:var(--gold);
+  background:rgba(200,149,58,.1);border:1px solid rgba(200,149,58,.25);
+  border-radius:4px;padding:3px 8px;letter-spacing:.08em;text-transform:uppercase;
+  margin-bottom:6px;
+}
+
+/* ── Phase indicator in input ── */
+#input-phase{font-size:9px;color:var(--text3);font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase;margin-top:5px;text-align:center}
+
 </style>
 </head>
 <body>
@@ -508,11 +603,16 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 
 <div id="sheet">
   <div id="sheet-logo">
-    <div class="logo-mark">⛺</div>
+    <div class="logo-mark">
+      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 2L4 20h16L12 2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+        <path d="M8.5 14l3.5-7 3.5 7" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity=".6"/>
+      </svg>
+    </div>
     <div class="logo-text-wrap">
       <div class="logo-name">Trailhead</div>
-      <div class="logo-tag">AI OVERLAND PLANNER</div>
-      <a href="/" class="logo-home">← BACK TO HOME</a>
+      <div class="logo-tag">AI Overland Planner</div>
+      <a href="/" class="logo-home">← Back to Home</a>
     </div>
   </div>
 
@@ -522,10 +622,10 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
   </div>
 
   <div id="tabs">
-    <div class="tab active" onclick="switchTab('chat')"><span class="tab-icon">🧠</span>PLAN</div>
-    <div class="tab" onclick="switchTab('itinerary')"><span class="tab-icon">🗺</span>ROUTE</div>
-    <div class="tab" onclick="switchTab('camps')"><span class="tab-icon">⛺</span>CAMPS</div>
-    <div class="tab" onclick="switchTab('logistics')"><span class="tab-icon">🎒</span>GEAR</div>
+    <div class="tab active" onclick="switchTab('chat')"><span class="tab-icon">🧠</span>Plan</div>
+    <div class="tab" onclick="switchTab('itinerary')"><span class="tab-icon">🗺</span>Route</div>
+    <div class="tab" onclick="switchTab('camps')"><span class="tab-icon">⛺</span>Camps</div>
+    <div class="tab" onclick="switchTab('logistics')"><span class="tab-icon">🎒</span>Gear</div>
   </div>
 
   <div id="sheet-content">
@@ -534,11 +634,11 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
     <div id="chat-panel">
       <div id="messages">
         <div class="msg ai">
-          <div class="msg-label">TRAILHEAD AI</div>
+          <div class="msg-label">Trailhead AI</div>
           <div class="msg-bubble" style="padding:0;background:transparent;border:none;width:100%;max-width:100%">
             <div class="welcome-hero">
-              <div class="welcome-badge">⚡ AI-POWERED · POWERED BY CLAUDE</div>
-              <div class="welcome-h">Plan your next<br><span>overland adventure</span></div>
+              <div class="welcome-badge">⚡ Powered by Claude</div>
+              <div class="welcome-h">Plan your<br><span>overland</span><br>adventure.</div>
               <div class="welcome-sub">Describe your trip in plain English — I'll build the full route, find dispersed camps, map fuel stops, and brief you on terrain.</div>
               <div class="example-grid">
                 <div class="example-prompt" onclick="useExample(this)">
@@ -564,7 +664,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
             <svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>
           </button>
         </div>
-        <div class="input-hint">↵ PLAN TRIP · SHIFT+↵ NEW LINE</div>
+        <div id="input-phase">↵ Send · Shift+↵ New Line</div>
       </div>
     </div>
 
@@ -573,7 +673,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
       <div id="itinerary-content">
         <div class="empty-state">
           <div class="empty-icon">🗺</div>
-          <div class="empty-text">PLAN A TRIP TO SEE YOUR<br>DAY-BY-DAY ROUTE</div>
+          <div class="empty-text">Plan a trip to see your<br>day-by-day route</div>
         </div>
       </div>
     </div>
@@ -583,7 +683,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
       <div id="camps-content">
         <div class="empty-state">
           <div class="empty-icon">⛺</div>
-          <div class="empty-text">PLAN A TRIP TO SEE<br>CAMPSITES ALONG YOUR ROUTE<br><br>INCLUDES RATINGS, AMENITIES<br>& CELL COVERAGE</div>
+          <div class="empty-text">Plan a trip to see<br>campsites along your route<br><br>Includes ratings, amenities<br>&amp; cell coverage</div>
         </div>
       </div>
     </div>
@@ -593,11 +693,19 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
       <div id="logistics-content">
         <div class="empty-state">
           <div class="empty-icon">🎒</div>
-          <div class="empty-text">PLAN A TRIP TO SEE<br>LOGISTICS & GEAR NOTES</div>
+          <div class="empty-text">Plan a trip to see<br>logistics &amp; gear notes</div>
         </div>
       </div>
     </div>
 
+  </div>
+
+  <!-- Trail DNA panel (desktop sidebar only) -->
+  <div id="trail-dna-panel">
+    <div class="dna-header">Trail DNA</div>
+    <div class="dna-tags" id="dna-tags">
+      <span class="dna-empty">Learned preferences appear here as you chat</span>
+    </div>
   </div>
 </div>
 
@@ -607,6 +715,15 @@ let map = null, mapToken = '', mapStyle = 'mapbox://styles/mapbox/satellite-stre
 let satelliteOn = true;
 let currentTrip = null;
 let wpMarkers = [], campMarkers = [], fuelMarkers = [], userMarker = null, routeLayerId = null;
+
+// Conversation state machine
+// phases: idle | chatting | ready | planning | active | editing
+let planPhase = 'idle';
+let sessionId = (() => {
+  let id = localStorage.getItem('trailhead_session');
+  if (!id) { id = 'sess_' + Math.random().toString(36).slice(2, 12); localStorage.setItem('trailhead_session', id); }
+  return id;
+})();
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 async function init() {
@@ -631,7 +748,7 @@ function initMap() {
     map.on('load', () => {
       map.addSource('route', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } });
       map.addLayer({ id: 'route-shadow', type: 'line', source: 'route', paint: { 'line-color': 'rgba(0,0,0,.4)', 'line-width': 9, 'line-blur': 6, 'line-translate': [0, 2] }, layout: { 'line-cap': 'round', 'line-join': 'round' } });
-      map.addLayer({ id: 'route-line', type: 'line', source: 'route', paint: { 'line-color': '#f97316', 'line-width': 4.5, 'line-opacity': 0.95 }, layout: { 'line-cap': 'round', 'line-join': 'round' } });
+      map.addLayer({ id: 'route-line', type: 'line', source: 'route', paint: { 'line-color': '#b85c38', 'line-width': 4.5, 'line-opacity': 0.95 }, layout: { 'line-cap': 'round', 'line-join': 'round' } });
     });
     document.getElementById('zoom-in').onclick = () => map.zoomIn();
     document.getElementById('zoom-out').onclick = () => map.zoomOut();
@@ -723,31 +840,116 @@ function useExample(el) {
 }
 
 const thinkingStages = ['Mapping your route...', 'Finding campsites...', 'Locating fuel stops...', 'Briefing terrain...'];
+const chatStages = ['Thinking...', 'Checking the trail...', 'On it...'];
+
+function setPhase(phase) {
+  planPhase = phase;
+  const input = document.getElementById('user-input');
+  const hint  = document.getElementById('input-phase');
+  if (phase === 'idle' || phase === 'chatting') {
+    input.placeholder = 'Tell me about your adventure idea...';
+    hint.textContent  = '↵ Send · Shift+↵ New Line';
+  } else if (phase === 'ready') {
+    input.placeholder = 'Refine the plan, or say "build it"...';
+    hint.textContent  = 'Route ready to build ✦';
+    hint.style.color  = 'var(--gold)';
+  } else if (phase === 'planning') {
+    input.placeholder = 'Building your route...';
+    hint.textContent  = 'Generating full trip plan...';
+  } else if (phase === 'active' || phase === 'editing') {
+    input.placeholder = 'Change anything — "add a shower stop", "skip Day 3"...';
+    hint.textContent  = '✏ Edit your route · ↵ Apply change';
+    hint.style.color  = 'var(--rust)';
+  }
+}
 
 async function sendMessage() {
   const input = document.getElementById('user-input');
-  const text = input.value.trim();
+  const text  = input.value.trim();
   if (!text) return;
+
   if (window.innerWidth < 700) { sheetState = 2; document.getElementById('sheet').className = 'full'; }
   appendMsg('user', text);
   input.value = ''; autoResize(input);
-  const thinking = appendThinking();
   document.getElementById('send-btn').disabled = true;
 
-  // Cycle through thinking stages
-  let si = 0;
-  const stageEl = thinking.querySelector('.thinking-stage');
-  const stageTimer = setInterval(() => {
-    si = (si + 1) % thinkingStages.length;
-    if (stageEl) stageEl.textContent = thinkingStages[si];
-  }, 2200);
+  // ── Edit mode: active trip ──────────────────────────────────────────────────
+  if ((planPhase === 'active' || planPhase === 'editing') && currentTrip) {
+    setPhase('editing');
+    const thinking = appendThinking(chatStages);
+    const stageTimer = cycleStages(thinking, chatStages);
+    try {
+      const resp = await fetch('/api/chat', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text, session_id: sessionId, current_trip: currentTrip }),
+      });
+      if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || resp.statusText);
+      const data = await resp.json();
+      clearInterval(stageTimer); thinking.remove();
+      updateTrailDNA(data.trail_dna);
+      appendMsg('ai', data.content);
+      if (data.type === 'trip_update' && data.trip) {
+        currentTrip = data.trip;
+        plotMap(data.trip);
+        renderItinerary(data.trip.plan);
+        renderCamps(data.trip);
+        renderLogistics(data.trip.plan);
+        document.getElementById('sheet-trip-pill').textContent = data.trip.plan?.trip_name || '';
+        showToast('✦ Route updated');
+      }
+      setPhase('active');
+    } catch (e) {
+      clearInterval(stageTimer); thinking.remove();
+      appendMsg('ai', '⚠ ' + e.message);
+      setPhase('active');
+    } finally {
+      document.getElementById('send-btn').disabled = false;
+    }
+    return;
+  }
 
+  // ── Conversation / planning chat ────────────────────────────────────────────
+  setPhase('chatting');
+  const thinking = appendThinking(chatStages);
+  const stageTimer = cycleStages(thinking, chatStages);
+  try {
+    const resp = await fetch('/api/chat', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text, session_id: sessionId }),
+    });
+    if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || resp.statusText);
+    const data = await resp.json();
+    clearInterval(stageTimer); thinking.remove();
+    updateTrailDNA(data.trail_dna);
+    appendMsg('ai', data.content);
+
+    if (data.type === 'ready') {
+      renderOutlineCard(data.outline);
+      setPhase('ready');
+    }
+  } catch (e) {
+    clearInterval(stageTimer); thinking.remove();
+    appendMsg('ai', '⚠ ' + e.message);
+    setPhase('idle');
+  } finally {
+    document.getElementById('send-btn').disabled = false;
+  }
+}
+
+async function buildTrip() {
+  setPhase('planning');
+  // Remove the outline card
+  document.getElementById('outline-card-msg')?.remove();
+
+  const thinking = appendThinking(thinkingStages);
+  const stageTimer = cycleStages(thinking, thinkingStages);
+  document.getElementById('send-btn').disabled = true;
   try {
     const resp = await fetch('/api/plan', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ request: text }),
+      body: JSON.stringify({ request: '', session_id: sessionId }),
     });
-    if (!resp.ok) { const e = await resp.json().catch(() => ({ detail: resp.statusText })); throw new Error(e.detail || 'Plan failed'); }
+    if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || resp.statusText);
     const data = await resp.json();
     clearInterval(stageTimer); thinking.remove();
     currentTrip = data;
@@ -756,30 +958,94 @@ async function sendMessage() {
     renderItinerary(data.plan);
     renderCamps(data);
     renderLogistics(data.plan);
-    document.getElementById('sheet-trip-pill').textContent = data.plan.trip_name || '';
+    document.getElementById('sheet-trip-pill').textContent = data.plan?.trip_name || '';
+    setPhase('active');
   } catch (e) {
     clearInterval(stageTimer); thinking.remove();
     appendMsg('ai', '⚠ ' + e.message);
+    setPhase('ready');
   } finally {
     document.getElementById('send-btn').disabled = false;
   }
 }
 
-function appendMsg(role, text) {
+function keepRefining() {
+  document.getElementById('outline-card-msg')?.remove();
+  setPhase('chatting');
+  appendMsg('ai', 'No problem — what would you like to adjust? I can tweak the route, change the camping style, add or remove days, or focus on a specific area.');
+}
+
+function cycleStages(thinking, stages) {
+  let si = 0;
+  const stageEl = thinking.querySelector('.thinking-stage');
+  return setInterval(() => {
+    si = (si + 1) % stages.length;
+    if (stageEl) stageEl.textContent = stages[si];
+  }, 2200);
+}
+
+function renderOutlineCard(outline) {
   const el = document.createElement('div');
-  el.className = 'msg ' + role;
-  el.innerHTML = `<div class="msg-label">${role === 'user' ? 'YOU' : 'TRAILHEAD AI'}</div><div class="msg-bubble">${esc(text)}</div>`;
+  el.className = 'msg ai';
+  el.id = 'outline-card-msg';
+  el.innerHTML = `<div class="msg-label">Trailhead AI</div>
+    <div class="outline-card">
+      <div class="outline-badge">Route Ready to Build</div>
+      <div class="outline-text">${esc(outline || 'Route outline ready. Click below to generate the full trip with waypoints, campsites, and fuel stops.')}</div>
+      <div class="outline-actions">
+        <button class="btn btn-primary" onclick="buildTrip()">Build Route →</button>
+        <button class="btn btn-ghost" onclick="keepRefining()">Keep Refining</button>
+      </div>
+    </div>`;
   const msgs = document.getElementById('messages');
   msgs.appendChild(el); msgs.scrollTop = msgs.scrollHeight;
 }
 
-function appendThinking() {
+function updateTrailDNA(dna) {
+  if (!dna || !Object.keys(dna).length) return;
+  const container = document.getElementById('dna-tags');
+  if (!container) return;
+  container.innerHTML = '';
+  const labels = {
+    vehicle: v => `🚗 ${v}`,
+    terrain: v => `🏔 ${v}`,
+    camp_style: v => `⛺ ${v}`,
+    duration: v => `📅 ${v}`,
+  };
+  let hasAny = false;
+  for (const [k, v] of Object.entries(dna)) {
+    if (k === 'regions' && Array.isArray(v)) {
+      v.forEach(r => {
+        const tag = document.createElement('span');
+        tag.className = 'dna-tag'; tag.textContent = `📍 ${r}`;
+        container.appendChild(tag); hasAny = true;
+      });
+    } else if (labels[k] && v) {
+      const tag = document.createElement('span');
+      tag.className = 'dna-tag'; tag.textContent = labels[k](v);
+      container.appendChild(tag); hasAny = true;
+    }
+  }
+  if (!hasAny) container.innerHTML = '<span class="dna-empty">Learned preferences appear here as you chat</span>';
+  document.getElementById('trail-dna-panel').style.display = hasAny ? 'block' : 'none';
+}
+
+function appendMsg(role, text) {
+  const el = document.createElement('div');
+  el.className = 'msg ' + role;
+  el.innerHTML = `<div class="msg-label">${role === 'user' ? 'You' : 'Trailhead AI'}</div><div class="msg-bubble">${esc(text)}</div>`;
+  const msgs = document.getElementById('messages');
+  msgs.appendChild(el); msgs.scrollTop = msgs.scrollHeight;
+}
+
+function appendThinking(stages) {
+  stages = stages || thinkingStages;
   const el = document.createElement('div');
   el.className = 'msg ai';
-  el.innerHTML = `<div class="msg-label">TRAILHEAD AI</div>
+  el.innerHTML = `<div class="msg-label">Trailhead AI</div>
     <div class="thinking">
       <div class="dots"><span></span><span></span><span></span></div>
-      <div class="thinking-stage">${thinkingStages[0]}</div>
+      <div class="thinking-stage">${stages[0]}</div>
     </div>`;
   const msgs = document.getElementById('messages');
   msgs.appendChild(el); msgs.scrollTop = msgs.scrollHeight;
@@ -806,10 +1072,10 @@ function renderTripCard(data) {
 
   const el = document.createElement('div');
   el.className = 'msg ai';
-  el.innerHTML = `<div class="msg-label">TRAILHEAD AI</div>
+  el.innerHTML = `<div class="msg-label">Trailhead AI</div>
     <div class="trip-card">
       <div class="trip-card-hero">
-        <div class="trip-badge">✦ AI TRIP PLAN READY</div>
+        <div class="trip-badge">✦ AI Trip Plan Ready</div>
         <div class="trip-name">${esc(p.trip_name || 'Your Adventure')}</div>
         <div class="trip-states">${esc(states)}</div>
         ${tagHtml ? `<div class="trip-tags">${tagHtml}</div>` : ''}
@@ -823,8 +1089,8 @@ function renderTripCard(data) {
       </div>
       <div class="trip-overview">${esc(p.overview || '')}</div>
       <div class="trip-actions">
-        <button class="btn btn-primary" onclick="switchTab('itinerary')">VIEW ROUTE →</button>
-        <button class="btn btn-ghost" onclick="switchTab('camps')">⛺ CAMPS</button>
+        <button class="btn btn-primary" onclick="switchTab('itinerary')">View Route →</button>
+        <button class="btn btn-ghost" onclick="switchTab('camps')">⛺ Camps</button>
         <button class="btn btn-ghost" onclick="exportGpx()">↓ GPX</button>
       </div>
     </div>`;
@@ -886,22 +1152,22 @@ function cellCoverageHtml(sig) {
     <div class="cell-carrier"><div class="cell-name">TMO</div>${signalBars(sig.tmobile)}</div>
     <div class="cell-carrier"><div class="cell-name">VZW</div>${signalBars(sig.verizon)}</div>
     ${sig.wifi ? '<div class="cell-carrier"><div class="cell-name">WiFi</div>' + signalBars(4) + '</div>' : ''}
-    ${sig.starlink ? '<div style="display:flex;align-items:center;margin-left:4px"><span class="starlink-badge">✦ STARLINK</span></div>' : ''}
+    ${sig.starlink ? '<div style="display:flex;align-items:center;margin-left:4px"><span class="starlink-badge">✦ Starlink</span></div>' : ''}
   </div>`;
 }
 
 function campPopupHtml(c) {
   const sig = campSignal(c.land_type || '', c.name);
-  const reservable = c.reservable ? '<span class="pop-badge green">RESERVABLE</span>' : '<span class="pop-badge">FIRST COME</span>';
+  const reservable = c.reservable ? '<span class="pop-badge green">Reservable</span>' : '<span class="pop-badge">First Come</span>';
   const cost = c.cost ? `<span class="pop-badge yellow">${esc(c.cost)}</span>` : '';
   return `<div class="pop-header">
-    <div class="pop-type">⛺ ${esc((c.land_type || 'CAMPSITE').toUpperCase())}</div>
+    <div class="pop-type">⛺ ${esc((c.land_type || 'Campsite').toUpperCase())}</div>
     <div class="pop-title">${esc(c.name)}</div>
   </div>
   <div class="pop-body">
     <div class="pop-badges">${reservable}${cost}</div>
     ${c.description ? `<div class="pop-desc">${esc(c.description.slice(0, 130))}</div>` : ''}
-    <div style="font-size:9px;color:var(--text3);font-family:var(--mono);letter-spacing:.5px;margin-bottom:2px">CELL COVERAGE</div>
+    <div style="font-size:8.5px;color:var(--text3);font-family:var(--mono);letter-spacing:.08em;margin-bottom:2px;text-transform:uppercase">Cell Coverage</div>
     ${cellCoverageHtml(sig)}
     ${c.url && !c.url.includes('openstreetmap') ? `<a class="pop-link" href="${c.url}" target="_blank">recreation.gov →</a>` : ''}
   </div>`;
@@ -963,7 +1229,7 @@ function plotMap(data) {
     });
     campsites.slice(0, 35).forEach(c => {
       const icon = L.divIcon({ className: '', html: '<div class="mk-camp">⛺</div>', iconSize: [28, 28], iconAnchor: [14, 14] });
-      const m = L.marker([c.lat, c.lng], { icon }).bindPopup(`<div style="color:#f1f5f9;background:#0f1319;padding:10px;min-width:200px"><b>${esc(c.name)}</b><br><small style="color:#94a3b8">${esc(c.land_type||'Campsite')}</small></div>`).addTo(_leafletMap);
+      const m = L.marker([c.lat, c.lng], { icon }).bindPopup(`<div style="color:#e4ddd2;background:#0d1a0e;padding:10px;min-width:200px"><b>${esc(c.name)}</b><br><small style="color:#8a9285">${esc(c.land_type||'Campsite')}</small></div>`).addTo(_leafletMap);
       campMarkers.push(m);
     });
     if (waypoints.length >= 2) {
@@ -971,9 +1237,9 @@ function plotMap(data) {
       fetch(`https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`)
         .then(r => r.json()).then(data => {
           const geom = data.routes?.[0]?.geometry?.coordinates;
-          if (geom) { routeLayerId = L.polyline(geom.map(([lng, lat]) => [lat, lng]), { color: '#f97316', weight: 5, opacity: .9 }).addTo(_leafletMap); }
+          if (geom) { routeLayerId = L.polyline(geom.map(([lng, lat]) => [lat, lng]), { color: '#b85c38', weight: 5, opacity: .9 }).addTo(_leafletMap); }
         }).catch(() => {
-          routeLayerId = L.polyline(waypoints.map(w => [w.lat, w.lng]), { color: '#f97316', weight: 4, opacity: .7, dashArray: '10 6' }).addTo(_leafletMap);
+          routeLayerId = L.polyline(waypoints.map(w => [w.lat, w.lng]), { color: '#b85c38', weight: 4, opacity: .7, dashArray: '10 6' }).addTo(_leafletMap);
         });
       const bounds = L.latLngBounds(waypoints.map(w => [w.lat, w.lng]));
       _leafletMap.fitBounds(bounds, { padding: [60, 60], maxZoom: 10, animate: true, duration: 1.5 });
@@ -1008,7 +1274,7 @@ async function drawRouteMbx(wps) {
 function renderItinerary(plan) {
   const el = document.getElementById('itinerary-content');
   const days = plan.daily_itinerary || [];
-  if (!days.length) { el.innerHTML = '<div class="empty-state"><div class="empty-icon">🗺</div><div class="empty-text">NO ITINERARY DATA</div></div>'; return; }
+  if (!days.length) { el.innerHTML = '<div class="empty-state"><div class="empty-icon">🗺</div><div class="empty-text">No itinerary data</div></div>'; return; }
   el.innerHTML = days.map((day, i) => {
     const rc = `road-${(day.road_type || 'mixed').toLowerCase()}`;
     const hls = (day.highlights || []).map(h => `<div class="hl">${esc(h)}</div>`).join('');
@@ -1033,12 +1299,12 @@ function toggleDay(i) { document.getElementById(`db-${i}`)?.classList.toggle('op
 function renderCamps(data) {
   const el = document.getElementById('camps-content');
   const camps = [...(data.campsites || [])];
-  if (!camps.length) { el.innerHTML = '<div class="empty-state"><div class="empty-icon">⛺</div><div class="empty-text">NO CAMPSITES FOUND<br>FOR THIS ROUTE</div></div>'; return; }
+  if (!camps.length) { el.innerHTML = '<div class="empty-state"><div class="empty-icon">⛺</div><div class="empty-text">No campsites found<br>for this route</div></div>'; return; }
 
   el.innerHTML = `
-    <div style="font-size:10px;font-family:var(--mono);color:var(--text3);letter-spacing:.8px;padding:2px 2px 6px;display:flex;justify-content:space-between;align-items:center">
-      <span>${camps.length} CAMPSITES ALONG ROUTE</span>
-      <span style="color:var(--green)">✓ INCLUDES CELL COVERAGE</span>
+    <div style="font-size:9px;font-family:var(--mono);color:var(--text3);letter-spacing:.1em;padding:2px 2px 6px;display:flex;justify-content:space-between;align-items:center;text-transform:uppercase">
+      <span>${camps.length} Campsites Along Route</span>
+      <span style="color:var(--green)">✓ Cell Coverage</span>
     </div>
     ${camps.slice(0, 50).map((c, i) => renderCampItem(c, i)).join('')}`;
 }
@@ -1075,7 +1341,7 @@ function renderCampItem(c, i) {
       ${c.cost ? `<span class="camp-dist">· ${esc(c.cost)}</span>` : ''}
     </div>
     <div class="camp-amenities">${ampHtml}</div>
-    <div style="font-size:9px;color:var(--text3);font-family:var(--mono);letter-spacing:.5px;margin-bottom:4px">CELL COVERAGE · ${sig.label.toUpperCase()}</div>
+    <div style="font-size:8.5px;color:var(--text3);font-family:var(--mono);letter-spacing:.08em;margin-bottom:4px;text-transform:uppercase">Cell Coverage · ${sig.label}</div>
     ${cellCoverageHtml(sig)}
   </div>`;
 }
@@ -1097,7 +1363,7 @@ function renderLogistics(plan) {
     { icon: '✓', label: 'PERMITS', val: L2.permits_needed },
     { icon: '📅', label: 'BEST SEASON', val: L2.best_season },
   ].filter(x => x.val);
-  if (!items.length) { el.innerHTML = '<div class="empty-state"><div class="empty-icon">🎒</div><div class="empty-text">NO LOGISTICS DATA</div></div>'; return; }
+  if (!items.length) { el.innerHTML = '<div class="empty-state"><div class="empty-icon">🎒</div><div class="empty-text">No logistics data</div></div>'; return; }
   el.innerHTML = items.map(item => `
     <div class="logistic-card">
       <div class="logistic-header">

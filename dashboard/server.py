@@ -13,7 +13,7 @@ import bcrypt as _bcrypt_lib
 from jose import jwt, JWTError
 
 from config.settings import settings
-from ai.planner import plan_trip
+from ai.planner import plan_trip, chat_guide, edit_trip, plan_trip_from_conversation
 from ingestors.ridb import get_campsites_near, get_campsites_search, get_facility_detail
 from ingestors.nrel import get_gas_along_route
 from ingestors.osm import get_osm_campsites, get_water_sources, get_trailheads, get_viewpoints
@@ -29,6 +29,7 @@ from db.store import (
     get_platform_stats, get_all_users, set_user_admin, ban_user,
     get_all_reports, expire_report, delete_report,
     get_all_trips, get_all_pins, delete_pin, ensure_admin_user,
+    get_trail_dna, save_trail_dna, get_conversation, save_conversation, clear_conversation,
 )
 
 app = FastAPI(title="Trailhead API")
@@ -150,18 +151,145 @@ async def me(user: dict = Depends(_current_user)):
 
 # ── Trip planning ─────────────────────────────────────────────────────────────
 
+def _extract_dna_signals(message: str) -> dict:
+    """Keyword-match preference signals from user messages."""
+    msg = message.lower()
+    signals: dict = {}
+    vehicle_map = {
+        'tacoma': 'Toyota Tacoma', '4runner': 'Toyota 4Runner', 'tundra': 'Toyota Tundra',
+        'wrangler': 'Jeep Wrangler', 'gladiator': 'Jeep Gladiator', 'bronco': 'Ford Bronco',
+        'f-150': 'Ford F-150', 'f150': 'Ford F-150', 'raptor': 'Ford Raptor',
+        'silverado': 'Chevy Silverado', 'ram ': 'RAM Truck', 'colorado': 'Chevy Colorado',
+        'sprinter': 'Mercedes Sprinter', 'transit van': 'Ford Transit', 'land cruiser': 'Land Cruiser',
+        'land rover': 'Land Rover', 'defender': 'Land Rover Defender',
+    }
+    for key, val in vehicle_map.items():
+        if key in msg:
+            signals['vehicle'] = val; break
+    if not signals.get('vehicle'):
+        if 'truck' in msg:   signals['vehicle'] = 'truck'
+        elif 'van' in msg:   signals['vehicle'] = 'van'
+        elif 'jeep' in msg:  signals['vehicle'] = 'Jeep'
+        elif 'suv' in msg:   signals['vehicle'] = 'SUV'
+
+    if any(x in msg for x in ['4wd', '4x4', 'technical', 'rock crawl', 'high clearance', 'locking']):
+        signals['terrain'] = '4WD/technical'
+    elif any(x in msg for x in ['mild', 'easy dirt', 'no big rocks', 'stock height', 'low clearance']):
+        signals['terrain'] = 'mild dirt'
+
+    if any(x in msg for x in ['dispersed', 'free camp', 'primitive', 'no hookup', 'boondock', 'wild camp']):
+        signals['camp_style'] = 'dispersed/free'
+    elif any(x in msg for x in ['hookup', 'electric', 'rv park', 'koa', 'full service', 'full hook']):
+        signals['camp_style'] = 'hookups/developed'
+    elif any(x in msg for x in ['reservation', 'reservable', 'fee campground']):
+        signals['camp_style'] = 'reservable'
+
+    if 'weekend' in msg:
+        signals['duration'] = 'weekend'
+
+    for region in ['utah', 'colorado', 'wyoming', 'montana', 'idaho', 'nevada', 'arizona',
+                   'new mexico', 'oregon', 'washington', 'california', 'southwest', 'pacific northwest']:
+        if region in msg:
+            signals.setdefault('regions', [])
+            if region not in signals['regions']:
+                signals['regions'].append(region)
+    return signals
+
+
 class PlanRequest(BaseModel):
     request: str
+    session_id: str = ""
 
-@app.post("/api/plan")
-async def plan(body: PlanRequest, user: dict | None = Depends(_optional_user)):
-    if not body.request.strip():
-        raise HTTPException(400, "Request cannot be empty")
+class ChatRequest(BaseModel):
+    message: str
+    session_id: str
+    current_trip: Optional[dict] = None
+
+@app.post("/api/chat")
+async def chat_endpoint(body: ChatRequest, user: dict | None = Depends(_optional_user)):
+    if not body.message.strip():
+        raise HTTPException(400, "Message cannot be empty")
     if not settings.anthropic_api_key:
         raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
 
+    session_id = body.session_id
+    messages  = get_conversation(session_id)
+    trail_dna = get_trail_dna(session_id)
+
+    # Extract and persist preference signals
+    signals = _extract_dna_signals(body.message)
+    if signals:
+        for k, v in signals.items():
+            if k == 'regions':
+                trail_dna.setdefault('regions', [])
+                for r in v:
+                    if r not in trail_dna['regions']:
+                        trail_dna['regions'].append(r)
+            else:
+                trail_dna[k] = v
+        save_trail_dna(session_id, trail_dna)
+
+    # ── Edit mode: active trip exists ──────────────────────────────────────────
+    if body.current_trip:
+        try:
+            result = edit_trip(body.current_trip, body.message)
+        except Exception as e:
+            raise HTTPException(500, f"Edit failed: {e}")
+
+        messages.append({"role": "user", "content": body.message})
+        messages.append({"role": "assistant", "content": result.get("message", "")})
+        save_conversation(session_id, messages[-30:])
+
+        edited_plan = result.get("trip")
+        if edited_plan:
+            geocoded = await _geocode_waypoints(edited_plan.get("waypoints", []))
+            edited_plan["waypoints"] = geocoded
+            campsites, seen = [], set()
+            for wp in geocoded:
+                if wp.get("lat") and wp.get("lng"):
+                    for c in await get_campsites_near(wp["lat"], wp["lng"], radius_miles=20):
+                        if c["id"] not in seen:
+                            seen.add(c["id"]); campsites.append(c)
+            gas_stations = await get_gas_along_route(geocoded)
+            trip_id = body.current_trip.get("trip_id", str(uuid.uuid4())[:8])
+            updated = {"trip_id": trip_id, "plan": edited_plan,
+                       "campsites": campsites[:40], "gas_stations": gas_stations[:30]}
+            save_trip(trip_id, body.message, updated, user_id=user["id"] if user else None)
+            return {"type": "trip_update", "content": result.get("message", "Route updated."),
+                    "trip": updated, "trail_dna": trail_dna}
+
+        return {"type": "message", "content": result.get("message", ""), "trail_dna": trail_dna}
+
+    # ── Conversational planning mode ───────────────────────────────────────────
+    messages.append({"role": "user", "content": body.message})
     try:
-        plan_data = plan_trip(body.request)
+        response = chat_guide(messages, trail_dna)
+    except Exception as e:
+        raise HTTPException(500, f"Chat failed: {e}")
+
+    messages.append({"role": "assistant", "content": response["content"]})
+    save_conversation(session_id, messages[-30:])
+
+    return {"type": response["type"], "content": response["content"],
+            "outline": response.get("outline"), "trail_dna": trail_dna}
+
+
+@app.post("/api/plan")
+async def plan(body: PlanRequest, user: dict | None = Depends(_optional_user)):
+    if not settings.anthropic_api_key:
+        raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
+
+    # Use conversation history when session_id provided
+    try:
+        if body.session_id:
+            msgs = get_conversation(body.session_id)
+            plan_data = plan_trip_from_conversation(msgs) if msgs else plan_trip(body.request or "")
+        else:
+            if not body.request.strip():
+                raise HTTPException(400, "Request cannot be empty")
+            plan_data = plan_trip(body.request)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, f"AI planning failed: {e}")
 

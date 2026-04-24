@@ -81,6 +81,17 @@ Claude always returns this JSON (no markdown wrapper):
 - Health check: `GET /api/health`
 - Required env vars: `ANTHROPIC_API_KEY`, `MAPBOX_TOKEN`, `NREL_API_KEY`, `RIDB_API_KEY`
 
+## Workflow
+
+See `AGENT_WORKFLOW.md` for the Builder→Auditor→Fixer 2-agent structure used for significant features.
+
+Custom slash commands in `.claude/commands/`:
+- `/ui-spec` — build/refine UI following Trailhead design rules
+- `/debug-ui` — debug frontend issues with Playwright workflow
+- `/debug-backend` — debug FastAPI/DB issues
+
+Playwright MCP + context7 plugins are installed — use for before/after screenshots and live library docs.
+
 ## Phase Roadmap
 
 - **Phase 1** ✅ Web app: AI trip planner + map + RIDB campsites + NREL gas

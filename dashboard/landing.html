@@ -1,0 +1,1273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="Trailhead — AI-powered overland adventure planner. Know the trail before you hit it. Plan routes, find dispersed camps, get real-time hazard reports.">
+<meta name="theme-color" content="#080c12">
+<title>Trailhead — Know the Trail Before You Hit It</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700;800&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+/* ── Reset & Root ──────────────────────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#080c12;
+  --s1:#0f1319;
+  --s2:#161c27;
+  --s3:#1e2535;
+  --border:#252d3d;
+  --border2:#1a2030;
+  --orange:#f97316;
+  --orange2:#ea580c;
+  --og:rgba(249,115,22,.2);
+  --og2:rgba(249,115,22,.08);
+  --og3:rgba(249,115,22,.04);
+  --green:#22c55e;
+  --green-dim:rgba(34,197,94,.15);
+  --yellow:#eab308;
+  --red:#ef4444;
+  --text:#f1f5f9;
+  --text2:#94a3b8;
+  --text3:#4b5563;
+  --mono:'Space Mono',monospace;
+  --sans:'Space Grotesk',system-ui,sans-serif;
+  --sh:0 4px 24px rgba(0,0,0,.6);
+  --sh2:0 8px 40px rgba(0,0,0,.8);
+  --sh3:0 24px 80px rgba(0,0,0,.9);
+  --radius:16px;
+  --radius-sm:10px;
+  --radius-xs:6px;
+}
+html{scroll-behavior:smooth;-webkit-font-smoothing:antialiased}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.6;overflow-x:hidden}
+
+/* ── Scroll fade-in ──────────────────────────────────────────────────── */
+.reveal{opacity:0;transform:translateY(28px);transition:opacity .7s cubic-bezier(.22,1,.36,1),transform .7s cubic-bezier(.22,1,.36,1)}
+.reveal.visible{opacity:1;transform:translateY(0)}
+.reveal-delay-1{transition-delay:.1s}
+.reveal-delay-2{transition-delay:.2s}
+.reveal-delay-3{transition-delay:.3s}
+.reveal-delay-4{transition-delay:.4s}
+.reveal-delay-5{transition-delay:.5s}
+
+/* ── Typography utils ────────────────────────────────────────────────── */
+.mono{font-family:var(--mono)}
+.label{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--orange);font-weight:700}
+.section-label{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;letter-spacing:.15em;text-transform:uppercase;color:var(--orange);margin-bottom:20px}
+.section-label::before{content:'';display:inline-block;width:24px;height:1px;background:var(--orange)}
+
+/* ── NAV ─────────────────────────────────────────────────────────────── */
+#nav{
+  position:fixed;top:0;left:0;right:0;z-index:1000;
+  background:rgba(8,12,18,.92);
+  backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+  border-bottom:1px solid var(--border2);
+  height:64px;
+  display:flex;align-items:center;
+  padding:0 24px;
+  gap:32px;
+}
+.nav-logo{
+  font-family:var(--mono);font-weight:700;font-size:15px;
+  letter-spacing:.08em;color:var(--text);text-decoration:none;
+  display:flex;align-items:center;gap:10px;white-space:nowrap;
+  flex-shrink:0;
+}
+.nav-logo span{color:var(--orange)}
+.nav-links{
+  display:flex;align-items:center;gap:2px;
+  margin:0 auto;
+}
+.nav-links a{
+  font-family:var(--mono);font-size:12px;letter-spacing:.06em;
+  color:var(--text2);text-decoration:none;padding:8px 16px;
+  border-radius:8px;transition:color .15s,background .15s;
+  text-transform:uppercase;
+}
+.nav-links a:hover{color:var(--text);background:rgba(255,255,255,.05)}
+.nav-cta{
+  margin-left:auto;flex-shrink:0;
+  background:linear-gradient(135deg,var(--orange),var(--orange2));
+  color:#fff;font-family:var(--mono);font-size:12px;font-weight:700;
+  letter-spacing:.08em;text-transform:uppercase;
+  padding:9px 20px;border-radius:8px;text-decoration:none;
+  white-space:nowrap;
+  transition:opacity .15s,transform .15s,box-shadow .15s;
+  box-shadow:0 4px 16px rgba(249,115,22,.3);
+}
+.nav-cta:hover{opacity:.9;transform:translateY(-1px);box-shadow:0 6px 24px rgba(249,115,22,.45)}
+
+/* hamburger */
+.nav-hamburger{
+  display:none;flex-direction:column;gap:5px;
+  width:36px;height:36px;align-items:center;justify-content:center;
+  background:none;border:1px solid var(--border);border-radius:8px;
+  cursor:pointer;margin-left:auto;flex-shrink:0;
+}
+.nav-hamburger span{display:block;width:18px;height:1.5px;background:var(--text2);transition:all .25s}
+.nav-hamburger.open span:nth-child(1){transform:translateY(6.5px) rotate(45deg)}
+.nav-hamburger.open span:nth-child(2){opacity:0;transform:scaleX(0)}
+.nav-hamburger.open span:nth-child(3){transform:translateY(-6.5px) rotate(-45deg)}
+
+#mobile-menu{
+  display:none;position:fixed;top:64px;left:0;right:0;z-index:999;
+  background:rgba(8,12,18,.98);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+  border-bottom:1px solid var(--border);
+  padding:16px 24px 24px;flex-direction:column;gap:4px;
+}
+#mobile-menu.open{display:flex}
+#mobile-menu a{
+  font-family:var(--mono);font-size:13px;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--text2);text-decoration:none;padding:14px 0;
+  border-bottom:1px solid var(--border2);
+}
+#mobile-menu a:last-child{border-bottom:none}
+#mobile-menu a:hover{color:var(--orange)}
+
+@media(max-width:768px){
+  .nav-links,.nav-cta{display:none}
+  .nav-hamburger{display:flex}
+}
+
+/* ── HERO ─────────────────────────────────────────────────────────────── */
+#hero{
+  position:relative;min-height:100vh;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;padding:120px 24px 80px;
+  overflow:hidden;
+}
+
+/* Topo background SVG */
+#topo-bg{
+  position:absolute;inset:0;z-index:0;
+  width:100%;height:100%;pointer-events:none;
+}
+.topo-line{
+  fill:none;stroke:var(--orange);stroke-width:1;opacity:.06;
+}
+.topo-line:nth-child(odd){animation:topoShift 18s ease-in-out infinite}
+.topo-line:nth-child(even){animation:topoShift 22s ease-in-out infinite reverse}
+.topo-line:nth-child(3n){opacity:.04;animation-duration:28s}
+@keyframes topoShift{
+  0%,100%{transform:translateY(0) scaleX(1)}
+  50%{transform:translateY(-20px) scaleX(1.02)}
+}
+
+/* radial fade overlay on topo */
+#hero::after{
+  content:'';position:absolute;inset:0;z-index:1;
+  background:radial-gradient(ellipse 60% 50% at 50% 50%,transparent 0%,var(--bg) 80%);
+  pointer-events:none;
+}
+
+/* grain overlay */
+#hero::before{
+  content:'';position:absolute;inset:0;z-index:2;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+  pointer-events:none;opacity:.4;
+}
+
+.hero-content{position:relative;z-index:3;max-width:900px;width:100%}
+
+.hero-badge{
+  display:inline-flex;align-items:center;gap:8px;
+  background:rgba(249,115,22,.1);border:1px solid rgba(249,115,22,.3);
+  border-radius:100px;padding:8px 18px;
+  font-family:var(--mono);font-size:11px;letter-spacing:.14em;
+  color:var(--orange);text-transform:uppercase;margin-bottom:32px;
+}
+.hero-badge-dot{width:6px;height:6px;border-radius:50%;background:var(--orange);animation:pulse-dot 2s ease-in-out infinite}
+@keyframes pulse-dot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.8)}}
+
+.hero-h1{
+  font-size:clamp(52px,9vw,96px);
+  font-weight:800;line-height:1.0;letter-spacing:-.03em;
+  margin-bottom:28px;color:var(--text);
+}
+.hero-h1 .orange-word{
+  background:linear-gradient(135deg,#ff9a3c 0%,var(--orange) 40%,var(--orange2) 100%);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+  display:inline-block;
+}
+
+.hero-sub{
+  font-size:clamp(16px,2.2vw,20px);color:var(--text2);
+  max-width:600px;margin:0 auto 48px;line-height:1.7;font-weight:400;
+}
+
+.hero-btns{display:flex;gap:16px;justify-content:center;flex-wrap:wrap;margin-bottom:56px}
+
+.btn-primary{
+  display:inline-flex;align-items:center;gap:10px;
+  background:linear-gradient(135deg,var(--orange),var(--orange2));
+  color:#fff;font-family:var(--mono);font-size:13px;font-weight:700;
+  letter-spacing:.08em;text-transform:uppercase;
+  padding:16px 32px;border-radius:12px;text-decoration:none;
+  box-shadow:0 8px 32px rgba(249,115,22,.4);
+  transition:transform .2s,box-shadow .2s,opacity .2s;
+}
+.btn-primary:hover{transform:translateY(-2px);box-shadow:0 12px 40px rgba(249,115,22,.55);opacity:.95}
+
+.btn-ghost{
+  display:inline-flex;align-items:center;gap:10px;
+  background:transparent;border:1px solid var(--border);
+  color:var(--text2);font-family:var(--mono);font-size:13px;font-weight:700;
+  letter-spacing:.08em;text-transform:uppercase;
+  padding:16px 32px;border-radius:12px;text-decoration:none;
+  transition:border-color .2s,color .2s,background .2s;cursor:pointer;
+}
+.btn-ghost:hover{border-color:var(--orange);color:var(--orange);background:var(--og2)}
+
+.hero-stats{
+  display:flex;align-items:center;gap:0;
+  background:rgba(15,19,25,.8);border:1px solid var(--border);
+  border-radius:100px;padding:14px 28px;
+  font-family:var(--mono);font-size:12px;color:var(--text2);
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  flex-wrap:wrap;justify-content:center;gap:8px;
+  margin:0 auto;width:fit-content;max-width:100%;
+}
+.hero-stat{display:flex;align-items:center;gap:0}
+.hero-stat strong{color:var(--text);font-weight:700}
+.hero-sep{color:var(--border);margin:0 16px;font-size:16px;user-select:none}
+
+/* ── TERRAIN MAP VIZ ─────────────────────────────────────────────────── */
+#terrain-viz{
+  position:relative;z-index:3;width:100%;max-width:1100px;
+  margin:64px auto 0;height:280px;
+}
+#terrain-svg{width:100%;height:100%}
+
+/* route line draw animation */
+.route-path{
+  fill:none;stroke:var(--orange);stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;
+  stroke-dasharray:1200;stroke-dashoffset:1200;
+  filter:drop-shadow(0 0 8px rgba(249,115,22,.7));
+  animation:drawRoute 3.5s cubic-bezier(.37,0,.63,1) 0.5s forwards;
+}
+@keyframes drawRoute{to{stroke-dashoffset:0}}
+
+.terrain-fill{fill:url(#terrainGrad);opacity:.6}
+.terrain-stroke{fill:none;stroke:#252d3d;stroke-width:1;opacity:.8}
+
+.waypoint-dot{
+  fill:var(--orange);
+  filter:drop-shadow(0 0 6px rgba(249,115,22,.8));
+  opacity:0;animation:wptFadeIn .4s ease forwards;
+}
+.wpt-ring{
+  fill:none;stroke:var(--orange);stroke-width:1.5;opacity:0;
+  animation:wptRing 2s ease-in-out infinite;
+}
+@keyframes wptFadeIn{to{opacity:1}}
+@keyframes wptRing{
+  0%{r:8;opacity:.6}100%{r:20;opacity:0}
+}
+
+/* camp waypoint labels */
+.wpt-label{
+  font-family:var(--mono);font-size:10px;fill:var(--text2);
+  opacity:0;animation:wptFadeIn .4s ease .5s forwards;
+}
+
+/* gradient fade at bottom of terrain */
+.terrain-overlay{
+  position:absolute;bottom:0;left:0;right:0;height:120px;
+  background:linear-gradient(to bottom,transparent,var(--bg));
+  pointer-events:none;
+}
+
+/* ── SECTION SHARED ──────────────────────────────────────────────────── */
+section{padding:100px 24px}
+.container{max-width:1100px;margin:0 auto}
+.section-head{margin-bottom:64px}
+.section-title{font-size:clamp(32px,5vw,52px);font-weight:800;letter-spacing:-.02em;line-height:1.1}
+
+/* ── FEATURES ────────────────────────────────────────────────────────── */
+#features{background:var(--s1);border-top:1px solid var(--border2);border-bottom:1px solid var(--border2)}
+
+.features-grid{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:2px;
+}
+@media(max-width:900px){.features-grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:560px){.features-grid{grid-template-columns:1fr}}
+
+.feature-card{
+  background:var(--bg);border:1px solid var(--border2);
+  padding:36px 32px;
+  transition:border-color .25s,background .25s;
+  position:relative;overflow:hidden;
+}
+.feature-card::before{
+  content:'';position:absolute;inset:0;
+  background:radial-gradient(ellipse 120% 80% at 0% 0%,var(--og3),transparent 60%);
+  opacity:0;transition:opacity .3s;
+}
+.feature-card:hover{border-color:rgba(249,115,22,.25);background:var(--s1)}
+.feature-card:hover::before{opacity:1}
+
+.feature-icon{
+  font-size:36px;margin-bottom:20px;display:block;
+  filter:drop-shadow(0 2px 8px rgba(0,0,0,.4));
+}
+.feature-title{
+  font-size:18px;font-weight:700;color:var(--text);
+  margin-bottom:10px;letter-spacing:-.01em;
+}
+.feature-desc{font-size:14px;color:var(--text2);line-height:1.65}
+
+/* ── HOW IT WORKS ────────────────────────────────────────────────────── */
+#how{background:var(--bg)}
+
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:0;position:relative}
+.steps::before{
+  content:'';position:absolute;top:52px;left:calc(16.66% + 32px);right:calc(16.66% + 32px);
+  height:1px;background:linear-gradient(90deg,var(--orange),var(--border),var(--orange));
+  opacity:.5;
+}
+@media(max-width:768px){
+  .steps{grid-template-columns:1fr;gap:40px}
+  .steps::before{display:none}
+}
+
+.step{padding:32px;text-align:center;position:relative}
+.step-num{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:48px;height:48px;border-radius:50%;
+  background:linear-gradient(135deg,var(--orange),var(--orange2));
+  font-family:var(--mono);font-size:16px;font-weight:700;color:#fff;
+  margin:0 auto 24px;position:relative;z-index:1;
+  box-shadow:0 4px 20px rgba(249,115,22,.4);
+}
+.step-title{font-size:18px;font-weight:700;color:var(--text);margin-bottom:12px}
+.step-desc{font-size:13px;color:var(--text2);margin-bottom:24px}
+
+/* Step mockups */
+.step-mockup{
+  background:var(--s1);border:1px solid var(--border);border-radius:var(--radius);
+  overflow:hidden;text-align:left;
+}
+
+/* Step 1: textarea */
+.mockup-textarea-wrap{padding:16px}
+.mockup-label-bar{
+  display:flex;align-items:center;gap:8px;margin-bottom:12px;
+  font-family:var(--mono);font-size:10px;color:var(--text3);letter-spacing:.08em;
+}
+.mockup-dot{width:8px;height:8px;border-radius:50%;background:var(--border)}
+.mockup-dot.orange{background:var(--orange);box-shadow:0 0 6px rgba(249,115,22,.5)}
+.mockup-textarea{
+  background:var(--bg);border:1px solid var(--border);border-radius:8px;
+  padding:12px;font-family:var(--mono);font-size:11px;color:var(--text2);
+  line-height:1.6;width:100%;resize:none;border:none;
+  background:transparent;
+}
+.mockup-textarea-text{
+  font-family:var(--mono);font-size:11px;color:var(--text2);line-height:1.6;
+  padding:12px;background:var(--bg);border-radius:8px;border:1px solid var(--border2);
+  position:relative;
+}
+.mockup-cursor{
+  display:inline-block;width:2px;height:14px;background:var(--orange);
+  vertical-align:middle;margin-left:2px;animation:blink .8s step-end infinite;
+}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+
+/* Step 2: trip card */
+.mockup-trip{padding:16px}
+.mockup-trip-name{font-size:13px;font-weight:700;color:var(--text);margin-bottom:10px}
+.mockup-waypoints{display:flex;flex-direction:column;gap:6px}
+.mockup-wpt{
+  display:flex;align-items:center;gap:10px;
+  padding:8px 10px;background:var(--bg);border-radius:8px;
+  border:1px solid var(--border2);
+}
+.mockup-wpt-dot{
+  width:8px;height:8px;border-radius:50%;flex-shrink:0;
+}
+.dot-start{background:var(--green);box-shadow:0 0 6px rgba(34,197,94,.4)}
+.dot-camp{background:var(--orange);box-shadow:0 0 6px rgba(249,115,22,.4)}
+.dot-fuel{background:var(--yellow);box-shadow:0 0 6px rgba(234,179,8,.4)}
+.dot-end{background:var(--text3)}
+.mockup-wpt-text{font-family:var(--mono);font-size:10px;color:var(--text2);flex:1}
+.mockup-wpt-type{font-family:var(--mono);font-size:9px;color:var(--text3);letter-spacing:.08em;text-transform:uppercase}
+
+/* Step 3: mini map */
+.mockup-map-svg{width:100%;height:140px}
+.mini-terrain{fill:url(#miniTerrainGrad)}
+.mini-route{
+  fill:none;stroke:var(--orange);stroke-width:2;stroke-linecap:round;
+  stroke-dasharray:500;stroke-dashoffset:500;
+  filter:drop-shadow(0 0 4px rgba(249,115,22,.6));
+  animation:drawRoute 2.5s ease 1.2s forwards;
+}
+
+/* ── CAMP INTEL ───────────────────────────────────────────────────────── */
+#camp{background:var(--s1);border-top:1px solid var(--border2);border-bottom:1px solid var(--border2)}
+
+.camp-grid{
+  display:grid;grid-template-columns:1fr 1fr;gap:80px;align-items:center;
+}
+@media(max-width:900px){.camp-grid{grid-template-columns:1fr;gap:48px}}
+
+.camp-bullets{list-style:none;display:flex;flex-direction:column;gap:14px;margin-top:28px}
+.camp-bullets li{
+  display:flex;align-items:flex-start;gap:14px;
+  font-size:15px;color:var(--text2);
+}
+.camp-bullets li::before{
+  content:'';display:block;width:20px;height:20px;flex-shrink:0;
+  background:var(--og);border:1px solid rgba(249,115,22,.3);border-radius:50%;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%23f97316'%3E%3Cpath fill-rule='evenodd' d='M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z' clip-rule='evenodd'/%3E%3C/svg%3E");
+  background-size:12px;background-repeat:no-repeat;background-position:center;
+  margin-top:1px;
+}
+
+/* Camp card mockup */
+.camp-card{
+  background:var(--s2);border:1px solid var(--border);border-radius:20px;
+  overflow:hidden;box-shadow:var(--sh3);
+  max-width:400px;width:100%;
+}
+@media(max-width:900px){.camp-card{margin:0 auto}}
+
+.camp-card-header{
+  background:linear-gradient(160deg,#1e2e1a 0%,#1a2030 60%,var(--s2) 100%);
+  padding:28px 24px 20px;border-bottom:1px solid var(--border);
+  position:relative;
+}
+.camp-header-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px}
+.camp-name{font-size:18px;font-weight:800;color:var(--text);letter-spacing:-.01em;line-height:1.2;max-width:200px}
+.camp-blm-badge{
+  background:rgba(234,179,8,.15);border:1px solid rgba(234,179,8,.4);
+  border-radius:6px;padding:4px 10px;
+  font-family:var(--mono);font-size:10px;font-weight:700;
+  color:var(--yellow);letter-spacing:.08em;white-space:nowrap;
+}
+.camp-rating{display:flex;align-items:center;gap:8px}
+.camp-stars{color:var(--yellow);font-size:16px;letter-spacing:2px}
+.camp-rating-val{font-family:var(--mono);font-size:14px;font-weight:700;color:var(--text)}
+.camp-rating-count{font-family:var(--mono);font-size:11px;color:var(--text3)}
+
+.camp-card-body{padding:20px 24px}
+
+.camp-section-label{
+  font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--text3);margin-bottom:12px;
+}
+.amenity-grid{
+  display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:20px;
+}
+.amenity-item{
+  display:flex;flex-direction:column;align-items:center;gap:4px;
+  background:var(--s3);border:1px solid var(--border2);border-radius:10px;
+  padding:10px 6px;
+}
+.amenity-icon{font-size:18px}
+.amenity-label{font-family:var(--mono);font-size:9px;color:var(--text3);letter-spacing:.06em;text-align:center}
+
+/* signal bars */
+.signal-grid{display:flex;flex-direction:column;gap:8px;margin-bottom:20px}
+.signal-row{display:flex;align-items:center;gap:10px}
+.signal-carrier{font-family:var(--mono);font-size:10px;color:var(--text3);width:60px;flex-shrink:0;letter-spacing:.04em}
+.signal-bars{display:flex;align-items:flex-end;gap:3px;height:18px}
+.bar{
+  width:5px;border-radius:2px 2px 0 0;
+  transition:background .2s;
+}
+.bar.filled{background:var(--green)}
+.bar.empty{background:var(--border)}
+.bar:nth-child(1){height:5px}
+.bar:nth-child(2){height:9px}
+.bar:nth-child(3){height:13px}
+.bar:nth-child(4){height:18px}
+
+.signal-label{font-family:var(--mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase}
+.sig-strong{color:var(--green)}
+.sig-medium{color:var(--yellow)}
+.sig-weak{color:var(--orange)}
+.sig-none{color:var(--text3)}
+
+.camp-ai-insight{
+  background:var(--og2);border:1px solid rgba(249,115,22,.2);
+  border-radius:12px;padding:14px;margin-bottom:16px;
+}
+.camp-ai-label{
+  display:flex;align-items:center;gap:6px;
+  font-family:var(--mono);font-size:10px;color:var(--orange);
+  letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px;
+}
+.camp-ai-text{font-size:13px;color:var(--text2);line-height:1.6;font-style:italic}
+
+.camp-starlink{
+  display:inline-flex;align-items:center;gap:8px;
+  background:var(--green-dim);border:1px solid rgba(34,197,94,.3);
+  border-radius:100px;padding:8px 16px;
+  font-family:var(--mono);font-size:11px;font-weight:700;
+  color:var(--green);letter-spacing:.08em;
+}
+.starlink-dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:pulse-dot 1.8s ease-in-out infinite}
+
+/* ── COMMUNITY ───────────────────────────────────────────────────────── */
+#community{background:var(--bg);position:relative;overflow:hidden}
+#community::before{
+  content:'';position:absolute;top:-200px;right:-200px;
+  width:600px;height:600px;border-radius:50%;
+  background:radial-gradient(circle,rgba(249,115,22,.04) 0%,transparent 70%);
+  pointer-events:none;
+}
+
+.community-grid{
+  display:grid;grid-template-columns:1fr 1fr;gap:60px;
+  align-items:start;
+}
+@media(max-width:900px){.community-grid{grid-template-columns:1fr;gap:48px}}
+
+/* leaderboard */
+.leaderboard{
+  background:var(--s1);border:1px solid var(--border);border-radius:var(--radius);
+  overflow:hidden;
+}
+.lb-header{
+  padding:16px 20px;border-bottom:1px solid var(--border2);
+  display:flex;align-items:center;justify-content:space-between;
+}
+.lb-title{font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--text2);text-transform:uppercase}
+.lb-live{
+  display:flex;align-items:center;gap:6px;
+  font-family:var(--mono);font-size:10px;color:var(--green);
+}
+.lb-live-dot{width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse-dot 1.5s ease-in-out infinite}
+
+.lb-row{
+  display:flex;align-items:center;gap:14px;
+  padding:14px 20px;border-bottom:1px solid var(--border2);
+  transition:background .15s;
+}
+.lb-row:last-child{border-bottom:none}
+.lb-row:hover{background:var(--s2)}
+.lb-rank{
+  font-family:var(--mono);font-size:14px;font-weight:700;
+  width:24px;text-align:center;
+}
+.lb-rank.gold{color:var(--yellow)}
+.lb-rank.silver{color:#94a3b8}
+.lb-rank.bronze{color:#b45309}
+.lb-avatar{
+  width:36px;height:36px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-size:18px;flex-shrink:0;
+}
+.lb-info{flex:1}
+.lb-name{font-size:14px;font-weight:600;color:var(--text)}
+.lb-sub{font-family:var(--mono);font-size:10px;color:var(--text3);letter-spacing:.04em}
+.lb-credits{
+  background:var(--og);border:1px solid rgba(249,115,22,.25);
+  border-radius:6px;padding:4px 10px;
+  font-family:var(--mono);font-size:12px;font-weight:700;color:var(--orange);
+}
+
+/* report types */
+.report-types{
+  display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-top:28px;
+}
+.report-type{
+  background:var(--s1);border:1px solid var(--border);border-radius:12px;
+  padding:20px;display:flex;align-items:flex-start;gap:14px;
+  transition:border-color .2s,background .2s;cursor:default;
+}
+.report-type:hover{border-color:var(--border);background:var(--s2)}
+.rt-icon{font-size:28px;flex-shrink:0}
+.rt-name{font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px}
+.rt-earn{font-family:var(--mono);font-size:11px;color:var(--orange)}
+
+.credit-pitch{
+  margin-top:32px;
+  background:linear-gradient(135deg,var(--og2),transparent);
+  border:1px solid rgba(249,115,22,.15);border-radius:var(--radius);
+  padding:24px;
+}
+.credit-pitch p{font-size:15px;color:var(--text2);line-height:1.65}
+.credit-pitch strong{color:var(--text)}
+
+/* ── DOWNLOAD ─────────────────────────────────────────────────────────── */
+#download{background:var(--s1);border-top:1px solid var(--border2);border-bottom:1px solid var(--border2);text-align:center}
+
+#download .section-title{margin-bottom:12px}
+.download-sub{font-size:17px;color:var(--text2);margin-bottom:48px}
+
+.download-buttons{
+  display:flex;gap:16px;justify-content:center;flex-wrap:wrap;
+  margin-bottom:24px;
+}
+
+.dl-btn{
+  position:relative;display:inline-flex;align-items:center;gap:14px;
+  border-radius:14px;padding:16px 28px;text-decoration:none;
+  min-width:200px;
+}
+.dl-btn-web{
+  background:linear-gradient(135deg,var(--orange),var(--orange2));
+  color:#fff;
+  box-shadow:0 8px 32px rgba(249,115,22,.4);
+  transition:transform .2s,box-shadow .2s;
+}
+.dl-btn-web:hover{transform:translateY(-2px);box-shadow:0 12px 40px rgba(249,115,22,.55)}
+.dl-btn-store{
+  background:var(--s2);border:1px solid var(--border);
+  color:var(--text2);opacity:.6;cursor:not-allowed;
+}
+.dl-btn-icon{font-size:28px;flex-shrink:0}
+.dl-btn-text{text-align:left}
+.dl-btn-small{font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;opacity:.8;display:block}
+.dl-btn-big{font-size:16px;font-weight:700;display:block;margin-top:2px}
+
+.coming-soon-pill{
+  position:absolute;top:-10px;right:-10px;
+  background:var(--s3);border:1px solid var(--border);
+  border-radius:100px;padding:4px 10px;
+  font-family:var(--mono);font-size:9px;letter-spacing:.1em;
+  color:var(--text3);text-transform:uppercase;
+}
+
+.download-note{font-family:var(--mono);font-size:12px;color:var(--text3);letter-spacing:.04em}
+.download-note span{color:var(--green)}
+
+/* ── FOOTER ──────────────────────────────────────────────────────────── */
+footer{
+  background:var(--bg);border-top:1px solid var(--border2);
+  padding:40px 24px;
+}
+.footer-inner{
+  max-width:1100px;margin:0 auto;
+  display:flex;align-items:center;justify-content:space-between;
+  flex-wrap:wrap;gap:24px;
+}
+.footer-logo{
+  font-family:var(--mono);font-weight:700;font-size:14px;
+  letter-spacing:.08em;color:var(--text2);text-decoration:none;
+}
+.footer-logo span{color:var(--orange)}
+.footer-links{display:flex;gap:28px;flex-wrap:wrap}
+.footer-links a{
+  font-family:var(--mono);font-size:12px;color:var(--text3);
+  text-decoration:none;letter-spacing:.04em;
+  transition:color .15s;
+}
+.footer-links a:hover{color:var(--orange)}
+.footer-copy{font-family:var(--mono);font-size:11px;color:var(--text3);letter-spacing:.04em}
+
+/* ── Misc utils ──────────────────────────────────────────────────────── */
+.divider{width:40px;height:2px;background:linear-gradient(90deg,var(--orange),transparent);margin:20px 0}
+
+@media(max-width:480px){
+  .hero-stats{flex-direction:column;gap:6px;padding:16px 20px;border-radius:16px}
+  .hero-sep{display:none}
+  section{padding:72px 20px}
+  .steps{gap:32px}
+  .download-buttons{flex-direction:column;align-items:center}
+  .dl-btn{width:100%;max-width:300px;justify-content:center}
+  .report-types{grid-template-columns:1fr}
+  .footer-inner{flex-direction:column;align-items:flex-start}
+  .features-grid{grid-template-columns:1fr;gap:0}
+}
+</style>
+</head>
+<body>
+
+<!-- ── NAV ──────────────────────────────────────────────────────────── -->
+<nav id="nav">
+  <a href="/" class="nav-logo">⛺ <span>TRAILHEAD</span></a>
+  <div class="nav-links">
+    <a href="#features">Features</a>
+    <a href="/app">App</a>
+    <a href="#community">Community</a>
+  </div>
+  <a href="/app" class="nav-cta">LAUNCH APP →</a>
+  <button class="nav-hamburger" id="hamburger" aria-label="Menu" aria-expanded="false">
+    <span></span><span></span><span></span>
+  </button>
+</nav>
+
+<div id="mobile-menu" role="navigation" aria-label="Mobile navigation">
+  <a href="#features">Features</a>
+  <a href="/app">App</a>
+  <a href="#community">Community</a>
+  <a href="/app" style="color:var(--orange);font-weight:700">LAUNCH APP →</a>
+</div>
+
+<!-- ── HERO ─────────────────────────────────────────────────────────── -->
+<section id="hero">
+
+  <!-- Animated topo lines -->
+  <svg id="topo-bg" viewBox="0 0 1440 800" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+    <path class="topo-line" d="M-100,640 C100,600 200,580 400,560 C600,540 700,620 900,580 C1100,540 1200,500 1540,480"/>
+    <path class="topo-line" d="M-100,600 C80,565 200,545 420,530 C640,515 720,590 950,555 C1180,520 1280,490 1540,455"/>
+    <path class="topo-line" d="M-100,560 C60,525 180,500 440,490 C700,480 760,555 980,525 C1200,495 1310,470 1540,440"/>
+    <path class="topo-line" d="M-100,690 C150,660 280,640 480,615 C680,590 780,650 960,620 C1140,590 1240,560 1540,535"/>
+    <path class="topo-line" d="M-100,730 C170,695 310,670 520,650 C730,630 810,685 1000,658 C1190,631 1290,605 1540,580"/>
+    <path class="topo-line" d="M-100,480 C50,445 160,415 390,400 C620,385 700,460 940,430 C1180,400 1290,380 1540,360"/>
+    <path class="topo-line" d="M-100,430 C40,395 150,362 380,348 C610,334 690,415 935,385 C1180,355 1285,335 1540,315"/>
+    <path class="topo-line" d="M-100,380 C30,347 140,312 370,300 C600,288 680,365 930,338 C1180,311 1280,290 1540,270"/>
+    <path class="topo-line" d="M-100,770 C200,740 360,718 580,700 C800,682 860,725 1040,702 C1220,679 1340,655 1540,635"/>
+    <path class="topo-line" d="M-100,330 C20,300 125,268 360,255 C595,242 672,318 925,292 C1178,266 1278,245 1540,225"/>
+  </svg>
+
+  <div class="hero-content">
+    <div class="hero-badge reveal">
+      <span class="hero-badge-dot"></span>
+      ⚡ AI-POWERED OVERLAND PLANNER
+    </div>
+
+    <h1 class="hero-h1 reveal reveal-delay-1">
+      Know the <span class="orange-word">Trail</span><br>Before You Hit It
+    </h1>
+
+    <p class="hero-sub reveal reveal-delay-2">
+      Describe your adventure in plain English — Trailhead builds the full route.<br>
+      Dispersed camps, BLM access, fuel stops, and real-time hazard reports from overlanders on the ground.
+    </p>
+
+    <div class="hero-btns reveal reveal-delay-3">
+      <a href="/app" class="btn-primary">PLAN YOUR ADVENTURE →</a>
+      <button class="btn-ghost" onclick="document.getElementById('how').scrollIntoView({behavior:'smooth'})">▶ WATCH DEMO</button>
+    </div>
+
+    <div class="hero-stats reveal reveal-delay-4">
+      <div class="hero-stat"><strong>12,400+</strong>&nbsp;trips planned</div>
+      <span class="hero-sep">·</span>
+      <div class="hero-stat"><strong>89,000+</strong>&nbsp;camps mapped</div>
+      <span class="hero-sep">·</span>
+      <div class="hero-stat"><strong>4.8★</strong>&nbsp;from overlanders</div>
+    </div>
+  </div>
+
+  <!-- Terrain Map Visualization -->
+  <div id="terrain-viz" class="reveal reveal-delay-5">
+    <svg id="terrain-svg" viewBox="0 0 1100 280" preserveAspectRatio="xMidYMid meet" aria-label="Route visualization">
+      <defs>
+        <linearGradient id="terrainGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#1e2535"/>
+          <stop offset="100%" stop-color="#080c12" stop-opacity="0.2"/>
+        </linearGradient>
+        <linearGradient id="terrainGrad2" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#161c27"/>
+          <stop offset="100%" stop-color="#080c12" stop-opacity="0"/>
+        </linearGradient>
+        <filter id="glow-filter">
+          <feGaussianBlur stdDeviation="3" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+
+      <!-- Terrain layers -->
+      <path class="terrain-fill" d="M0,280 L0,180 C80,160 140,170 200,145 C260,120 320,100 400,115 C480,130 520,155 600,140 C680,125 740,90 820,105 C900,120 960,145 1040,130 C1080,122 1100,118 1100,118 L1100,280 Z" style="fill:url(#terrainGrad2);opacity:.5"/>
+      <path class="terrain-fill" d="M0,280 L0,210 C70,195 130,205 190,185 C250,165 310,145 400,158 C490,171 530,195 610,178 C690,161 750,128 840,142 C930,156 980,178 1050,162 C1080,155 1100,150 1100,150 L1100,280 Z" style="fill:url(#terrainGrad);opacity:.7"/>
+
+      <!-- Terrain stroke lines (contours) -->
+      <path class="terrain-stroke" d="M0,190 C80,172 140,182 200,158 C260,134 320,115 400,128 C480,141 525,165 605,150 C685,135 745,101 825,115 C905,129 963,152 1044,137 L1100,130"/>
+      <path class="terrain-stroke" d="M0,215 C75,200 135,210 195,188 C255,166 315,145 400,160 C485,175 528,196 610,180 C692,164 750,131 835,144 C920,157 973,180 1048,163 L1100,157" style="opacity:.5"/>
+
+      <!-- Route path animated -->
+      <path class="route-path" d="M80,195 C140,175 180,160 240,152 C300,144 340,158 400,148 C460,138 510,120 580,128 C650,136 690,154 750,145 C810,136 860,118 930,125 C970,129 1000,138 1030,135"/>
+
+      <!-- Waypoint dots with rings -->
+      <!-- Start -->
+      <circle class="wpt-ring" cx="80" cy="195" r="8" style="animation-delay:.1s"/>
+      <circle class="waypoint-dot" cx="80" cy="195" r="5" style="animation-delay:3.5s"/>
+      <text class="wpt-label" x="90" y="186" style="animation-delay:3.8s">⛺ START</text>
+
+      <!-- Camp 1 -->
+      <circle class="wpt-ring" cx="400" cy="148" r="8" style="animation-delay:.3s"/>
+      <circle class="waypoint-dot" cx="400" cy="148" r="5" style="fill:var(--orange);animation-delay:3.5s"/>
+      <text class="wpt-label" x="410" y="139" style="animation-delay:3.9s">DAY 2</text>
+
+      <!-- Fuel stop -->
+      <circle class="waypoint-dot" cx="580" cy="128" r="4" style="fill:var(--yellow);animation-delay:3.6s"/>
+      <text class="wpt-label" x="590" y="120" style="fill:var(--yellow);animation-delay:4s">⛽ FUEL</text>
+
+      <!-- Camp 2 -->
+      <circle class="wpt-ring" cx="750" cy="145" r="8" style="animation-delay:.5s"/>
+      <circle class="waypoint-dot" cx="750" cy="145" r="5" style="fill:var(--orange);animation-delay:3.5s"/>
+      <text class="wpt-label" x="760" y="136" style="animation-delay:4.1s">DAY 3</text>
+
+      <!-- End -->
+      <circle class="wpt-ring" cx="1030" cy="135" r="8" style="animation-delay:.7s"/>
+      <circle class="waypoint-dot" cx="1030" cy="135" r="5" style="fill:var(--green);animation-delay:3.5s"/>
+      <text class="wpt-label" x="1000" y="126" style="fill:var(--green);animation-delay:4.2s">🏁 END</text>
+    </svg>
+    <div class="terrain-overlay"></div>
+  </div>
+
+</section>
+
+<!-- ── FEATURES ───────────────────────────────────────────────────────── -->
+<section id="features">
+  <div class="container">
+    <div class="section-head">
+      <div class="section-label reveal">WHAT TRAILHEAD DOES</div>
+      <h2 class="section-title reveal reveal-delay-1">Everything the trail<br>demands. Nothing it doesn't.</h2>
+    </div>
+    <div class="features-grid">
+
+      <div class="feature-card reveal">
+        <span class="feature-icon">🧠</span>
+        <div class="feature-title">AI Trip Planner</div>
+        <p class="feature-desc">Describe your adventure in plain English. Get a full multi-day route with waypoints, campsites, fuel stops, and terrain brief — one shot.</p>
+      </div>
+
+      <div class="feature-card reveal reveal-delay-1">
+        <span class="feature-icon">🗺</span>
+        <div class="feature-title">Vector Maps</div>
+        <p class="feature-desc">Satellite imagery + outdoor topo with clustering. Every BLM, USFS, National Park, State Park, dispersed, and KOA campsite on one map.</p>
+      </div>
+
+      <div class="feature-card reveal reveal-delay-2">
+        <span class="feature-icon">📡</span>
+        <div class="feature-title">Hazard Reports</div>
+        <p class="feature-desc">Real-time community-sourced reports. Washed roads, trail closures, wildlife, fuel shortages — from overlanders who were just there.</p>
+      </div>
+
+      <div class="feature-card reveal reveal-delay-1">
+        <span class="feature-icon">🎙</span>
+        <div class="feature-title">GPS Audio Guide</div>
+        <p class="feature-desc">Claude narrates each waypoint as you approach. What's here, why it matters, what to do next — your co-pilot for the unknown.</p>
+      </div>
+
+      <div class="feature-card reveal reveal-delay-2">
+        <span class="feature-icon">📶</span>
+        <div class="feature-title">Connectivity Intel</div>
+        <p class="feature-desc">Cell coverage estimates for AT&T, T-Mobile, Verizon, plus Starlink compatibility zones — so you know exactly when to go dark.</p>
+      </div>
+
+      <div class="feature-card reveal reveal-delay-3">
+        <span class="feature-icon">📥</span>
+        <div class="feature-title">Offline Maps</div>
+        <p class="feature-desc">Download entire states for dead-zone navigation. No signal required once cached. Built for the places where bars go to zero.</p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ── HOW IT WORKS ───────────────────────────────────────────────────── -->
+<section id="how">
+  <div class="container">
+    <div class="section-head" style="text-align:center">
+      <div class="section-label reveal" style="justify-content:center">HOW IT WORKS</div>
+      <h2 class="section-title reveal reveal-delay-1">Plan a week-long overland<br>route in 60 seconds.</h2>
+    </div>
+
+    <div class="steps">
+      <!-- Step 1 -->
+      <div class="step reveal">
+        <div class="step-num">01</div>
+        <div class="step-title">Describe your adventure</div>
+        <p class="step-desc">Type anything. Trailhead understands overland context.</p>
+        <div class="step-mockup">
+          <div class="mockup-textarea-wrap">
+            <div class="mockup-label-bar">
+              <span class="mockup-dot orange"></span>
+              <span class="mockup-dot"></span>
+              <span class="mockup-dot"></span>
+              <span style="margin-left:4px">trailhead.ai/plan</span>
+            </div>
+            <div class="mockup-textarea-text">
+              "5 days in the Utah canyon country, want dispersed BLM camps, need 4WD access, overlanding rig, interested in Coyote Gulch area, starting from Escalante"<span class="mockup-cursor"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 2 -->
+      <div class="step reveal reveal-delay-1">
+        <div class="step-num">02</div>
+        <div class="step-title">AI builds your full route</div>
+        <p class="step-desc">Waypoints, campsites, fuel strategy, terrain briefing — in seconds.</p>
+        <div class="step-mockup">
+          <div class="mockup-trip">
+            <div class="mockup-trip-name">🏜 Coyote Gulch Expedition · 5 days</div>
+            <div class="mockup-waypoints">
+              <div class="mockup-wpt">
+                <span class="mockup-wpt-dot dot-start"></span>
+                <span class="mockup-wpt-text">Escalante, UT — Start</span>
+                <span class="mockup-wpt-type">Day 1</span>
+              </div>
+              <div class="mockup-wpt">
+                <span class="mockup-wpt-dot dot-camp"></span>
+                <span class="mockup-wpt-text">Hurricane Wash Trailhead</span>
+                <span class="mockup-wpt-type">Camp</span>
+              </div>
+              <div class="mockup-wpt">
+                <span class="mockup-wpt-dot dot-fuel"></span>
+                <span class="mockup-wpt-text">Cannonville — Fuel &amp; Resupply</span>
+                <span class="mockup-wpt-type">Town</span>
+              </div>
+              <div class="mockup-wpt">
+                <span class="mockup-wpt-dot dot-camp"></span>
+                <span class="mockup-wpt-text">Red Canyon Dispersed BLM</span>
+                <span class="mockup-wpt-type">Camp</span>
+              </div>
+              <div class="mockup-wpt">
+                <span class="mockup-wpt-dot dot-end" style="background:var(--green)"></span>
+                <span class="mockup-wpt-text">Bryce Canyon Rim — End</span>
+                <span class="mockup-wpt-type">Day 5</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 3 -->
+      <div class="step reveal reveal-delay-2">
+        <div class="step-num">03</div>
+        <div class="step-title">Navigate with confidence</div>
+        <p class="step-desc">Voice guidance, hazard alerts, camp intel — all offline-ready.</p>
+        <div class="step-mockup">
+          <svg class="mockup-map-svg" viewBox="0 0 320 140" aria-label="Route map preview">
+            <defs>
+              <linearGradient id="miniTerrainGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#1e2535"/>
+                <stop offset="100%" stop-color="#0f1319"/>
+              </linearGradient>
+            </defs>
+            <rect width="320" height="140" fill="#0f1319"/>
+            <!-- terrain shapes -->
+            <path d="M0,140 L0,85 C40,75 70,90 110,72 C150,54 170,70 210,62 C250,54 280,65 320,58 L320,140 Z" fill="#161c27"/>
+            <path d="M0,140 L0,105 C50,95 90,108 130,92 C170,76 190,90 230,82 C270,74 295,85 320,78 L320,140 Z" fill="#1a2030"/>
+            <!-- grid lines -->
+            <line x1="0" y1="40" x2="320" y2="40" stroke="#252d3d" stroke-width=".5" opacity=".4"/>
+            <line x1="0" y1="80" x2="320" y2="80" stroke="#252d3d" stroke-width=".5" opacity=".4"/>
+            <line x1="80" y1="0" x2="80" y2="140" stroke="#252d3d" stroke-width=".5" opacity=".4"/>
+            <line x1="160" y1="0" x2="160" y2="140" stroke="#252d3d" stroke-width=".5" opacity=".4"/>
+            <line x1="240" y1="0" x2="240" y2="140" stroke="#252d3d" stroke-width=".5" opacity=".4"/>
+            <!-- route -->
+            <path class="mini-route" d="M30,105 C70,92 100,82 140,76 C180,70 210,80 250,72 C275,67 295,63 305,65"/>
+            <!-- dots -->
+            <circle cx="30" cy="105" r="4" fill="#22c55e" filter="url(#glow-filter)" opacity="0" style="animation:wptFadeIn .4s ease 3.2s forwards"/>
+            <circle cx="140" cy="76" r="4" fill="var(--orange)" opacity="0" style="animation:wptFadeIn .4s ease 3.4s forwards"/>
+            <circle cx="305" cy="65" r="4" fill="#22c55e" opacity="0" style="animation:wptFadeIn .4s ease 3.6s forwards"/>
+          </svg>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── CAMP INTEL ─────────────────────────────────────────────────────── -->
+<section id="camp">
+  <div class="container">
+    <div class="camp-grid">
+      <!-- Left copy -->
+      <div>
+        <div class="section-label reveal">EVERY CAMPSITE, FULLY BRIEFED</div>
+        <h2 class="section-title reveal reveal-delay-1">Don't just find a camp.<br>Know it cold.</h2>
+        <div class="divider reveal reveal-delay-2"></div>
+        <p class="reveal reveal-delay-2" style="color:var(--text2);font-size:16px;line-height:1.7;margin-bottom:24px">
+          Every campsite in our database comes with a complete intelligence profile. No more guessing if you'll have signal. No more arriving to find a washed-out road.
+        </p>
+        <ul class="camp-bullets">
+          <li class="reveal reveal-delay-2">Full amenity listing — toilets, water, hookups, fire rings, shade rating</li>
+          <li class="reveal reveal-delay-3">Carrier-by-carrier cell coverage bars — AT&T, T-Mobile, Verizon, US Cellular</li>
+          <li class="reveal reveal-delay-3">AI-generated insight from community reports and satellite imagery</li>
+          <li class="reveal reveal-delay-4">Community star ratings and written reviews from overlanders</li>
+          <li class="reveal reveal-delay-4">Nearby highlights — trails, water sources, viewpoints, towns</li>
+          <li class="reveal reveal-delay-5">Starlink compatibility zone indicator</li>
+        </ul>
+      </div>
+
+      <!-- Right: Camp card mockup -->
+      <div class="reveal reveal-delay-2">
+        <div class="camp-card">
+          <div class="camp-card-header">
+            <div class="camp-header-top">
+              <div class="camp-name">Coyote Gulch Dispersed</div>
+              <div class="camp-blm-badge">BLM LAND</div>
+            </div>
+            <div class="camp-rating">
+              <span class="camp-stars">★★★★☆</span>
+              <span class="camp-rating-val">4.2</span>
+              <span class="camp-rating-count">(84 reviews)</span>
+            </div>
+          </div>
+
+          <div class="camp-card-body">
+            <!-- Amenities -->
+            <div class="camp-section-label">AMENITIES</div>
+            <div class="amenity-grid">
+              <div class="amenity-item">
+                <span class="amenity-icon">🔥</span>
+                <span class="amenity-label">Fire Ring</span>
+              </div>
+              <div class="amenity-item">
+                <span class="amenity-icon">🚽</span>
+                <span class="amenity-label">Vault WC</span>
+              </div>
+              <div class="amenity-item">
+                <span class="amenity-icon">💧</span>
+                <span class="amenity-label">No Water</span>
+              </div>
+              <div class="amenity-item">
+                <span class="amenity-icon">🐕</span>
+                <span class="amenity-label">Dogs OK</span>
+              </div>
+            </div>
+
+            <!-- Cell coverage -->
+            <div class="camp-section-label">CELL COVERAGE</div>
+            <div class="signal-grid">
+              <!-- AT&T: 1 bar -->
+              <div class="signal-row">
+                <span class="signal-carrier">AT&T</span>
+                <div class="signal-bars">
+                  <div class="bar filled"></div>
+                  <div class="bar empty"></div>
+                  <div class="bar empty"></div>
+                  <div class="bar empty"></div>
+                </div>
+                <span class="signal-label sig-weak" style="margin-left:8px">WEAK</span>
+              </div>
+              <!-- T-Mobile: 2 bars -->
+              <div class="signal-row">
+                <span class="signal-carrier">T-Mobile</span>
+                <div class="signal-bars">
+                  <div class="bar filled"></div>
+                  <div class="bar filled"></div>
+                  <div class="bar empty"></div>
+                  <div class="bar empty"></div>
+                </div>
+                <span class="signal-label sig-medium" style="margin-left:8px">FAIR</span>
+              </div>
+              <!-- Verizon: 0 bars -->
+              <div class="signal-row">
+                <span class="signal-carrier">Verizon</span>
+                <div class="signal-bars">
+                  <div class="bar empty"></div>
+                  <div class="bar empty"></div>
+                  <div class="bar empty"></div>
+                  <div class="bar empty"></div>
+                </div>
+                <span class="signal-label sig-none" style="margin-left:8px">NONE</span>
+              </div>
+              <!-- US Cell: 3 bars -->
+              <div class="signal-row">
+                <span class="signal-carrier">US Cell</span>
+                <div class="signal-bars">
+                  <div class="bar filled"></div>
+                  <div class="bar filled"></div>
+                  <div class="bar filled"></div>
+                  <div class="bar empty"></div>
+                </div>
+                <span class="signal-label sig-strong" style="margin-left:8px">GOOD</span>
+              </div>
+            </div>
+
+            <!-- AI Insight -->
+            <div class="camp-ai-insight">
+              <div class="camp-ai-label">
+                <span>🧠</span> AI INSIGHT
+              </div>
+              <div class="camp-ai-text">"Excellent dispersed camp near the Coyote Gulch trailhead. Spring access can be muddy after April rains — high clearance strongly recommended. Sunrise over the canyon walls is a known highlight. Bring all water; nearest source is Escalante (34 mi)."</div>
+            </div>
+
+            <!-- Starlink badge -->
+            <div class="camp-starlink">
+              <span class="starlink-dot"></span>
+              STARLINK COMPATIBLE
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── COMMUNITY ──────────────────────────────────────────────────────── -->
+<section id="community">
+  <div class="container">
+    <div style="text-align:center;margin-bottom:64px">
+      <div class="section-label reveal" style="justify-content:center">WAZE FOR THE WILDERNESS</div>
+      <h2 class="section-title reveal reveal-delay-1">Join the Herd.</h2>
+      <p class="reveal reveal-delay-2" style="color:var(--text2);font-size:17px;max-width:540px;margin:16px auto 0;line-height:1.7">Earn credits for every report you file. Spend them on premium features. The more you contribute, the better the map gets for everyone.</p>
+    </div>
+
+    <div class="community-grid">
+      <!-- Leaderboard -->
+      <div class="reveal">
+        <div class="section-label" style="margin-bottom:20px">TOP CONTRIBUTORS THIS MONTH</div>
+        <div class="leaderboard">
+          <div class="lb-header">
+            <span class="lb-title">Overlander Leaderboard</span>
+            <span class="lb-live"><span class="lb-live-dot"></span> LIVE</span>
+          </div>
+          <div class="lb-row">
+            <span class="lb-rank gold">1</span>
+            <div class="lb-avatar" style="background:rgba(234,179,8,.15)">🤠</div>
+            <div class="lb-info">
+              <div class="lb-name">DesertRat_Kevin</div>
+              <div class="lb-sub">143 reports · 🔥 28-day streak</div>
+            </div>
+            <div class="lb-credits">4,820 cr</div>
+          </div>
+          <div class="lb-row">
+            <span class="lb-rank silver">2</span>
+            <div class="lb-avatar" style="background:rgba(148,163,184,.1)">🏔</div>
+            <div class="lb-info">
+              <div class="lb-name">mesa_sarah</div>
+              <div class="lb-sub">118 reports · 🔥 21-day streak</div>
+            </div>
+            <div class="lb-credits">3,640 cr</div>
+          </div>
+          <div class="lb-row">
+            <span class="lb-rank bronze">3</span>
+            <div class="lb-avatar" style="background:rgba(180,83,9,.1)">🚙</div>
+            <div class="lb-info">
+              <div class="lb-name">overlander_tx</div>
+              <div class="lb-sub">97 reports · 🔥 14-day streak</div>
+            </div>
+            <div class="lb-credits">2,890 cr</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: report types + pitch -->
+      <div class="reveal reveal-delay-1">
+        <div class="section-label" style="margin-bottom:20px">EARN CREDITS BY FILING</div>
+        <div class="report-types">
+          <div class="report-type">
+            <span class="rt-icon">⚠️</span>
+            <div>
+              <div class="rt-name">Road Hazard</div>
+              <div class="rt-earn">+25 credits</div>
+            </div>
+          </div>
+          <div class="report-type">
+            <span class="rt-icon">🐻</span>
+            <div>
+              <div class="rt-name">Wildlife</div>
+              <div class="rt-earn">+15 credits</div>
+            </div>
+          </div>
+          <div class="report-type">
+            <span class="rt-icon">💧</span>
+            <div>
+              <div class="rt-name">Water Source</div>
+              <div class="rt-earn">+20 credits</div>
+            </div>
+          </div>
+          <div class="report-type">
+            <span class="rt-icon">⛽</span>
+            <div>
+              <div class="rt-name">Fuel Report</div>
+              <div class="rt-earn">+20 credits</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="credit-pitch">
+          <p><strong>Credits work like miles.</strong> Every report you file earns credits. Invite a friend and earn bonus credits when they plan their first trip. Spend credits on offline map downloads, advanced AI features, and priority hazard alerts. <strong>The trail gives back what you put in.</strong></p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── DOWNLOAD ───────────────────────────────────────────────────────── -->
+<section id="download">
+  <div class="container">
+    <div class="section-label reveal" style="justify-content:center">GET TRAILHEAD</div>
+    <h2 class="section-title reveal reveal-delay-1">Take It Anywhere.</h2>
+    <p class="download-sub reveal reveal-delay-2">Available now on web. Mobile apps coming soon.</p>
+
+    <div class="download-buttons reveal reveal-delay-3">
+      <!-- Web App -->
+      <a href="/app" class="dl-btn dl-btn-web">
+        <span class="dl-btn-icon">🌐</span>
+        <div class="dl-btn-text">
+          <span class="dl-btn-small">Open in Browser</span>
+          <span class="dl-btn-big">Launch Web App</span>
+        </div>
+      </a>
+
+      <!-- iOS -->
+      <div class="dl-btn dl-btn-store" role="button" aria-disabled="true" aria-label="iOS App Store - Coming Soon">
+        <span class="dl-btn-icon">🍎</span>
+        <div class="dl-btn-text">
+          <span class="dl-btn-small">Download on the</span>
+          <span class="dl-btn-big">App Store</span>
+        </div>
+        <span class="coming-soon-pill">COMING SOON</span>
+      </div>
+
+      <!-- Android -->
+      <div class="dl-btn dl-btn-store" role="button" aria-disabled="true" aria-label="Google Play - Coming Soon">
+        <span class="dl-btn-icon">▶</span>
+        <div class="dl-btn-text">
+          <span class="dl-btn-small">Get it on</span>
+          <span class="dl-btn-big">Google Play</span>
+        </div>
+        <span class="coming-soon-pill">COMING SOON</span>
+      </div>
+    </div>
+
+    <p class="download-note reveal reveal-delay-4"><span>✓</span> Free plan available. No credit card required.</p>
+  </div>
+</section>
+
+<!-- ── FOOTER ─────────────────────────────────────────────────────────── -->
+<footer>
+  <div class="footer-inner">
+    <a href="/" class="footer-logo">⛺ <span>TRAILHEAD</span></a>
+    <div class="footer-links">
+      <a href="/app">App</a>
+      <a href="#features">Features</a>
+      <a href="#community">Community</a>
+      <a href="mailto:valdorar44@gmail.com?subject=Trailhead Bug Report">Report a Bug</a>
+    </div>
+    <div class="footer-copy">Built for the wild. © 2025 Trailhead.</div>
+  </div>
+</footer>
+
+<!-- ── JS ────────────────────────────────────────────────────────────── -->
+<script>
+// Hamburger menu
+const hamburger = document.getElementById('hamburger');
+const mobileMenu = document.getElementById('mobile-menu');
+hamburger.addEventListener('click', () => {
+  const isOpen = mobileMenu.classList.toggle('open');
+  hamburger.classList.toggle('open', isOpen);
+  hamburger.setAttribute('aria-expanded', isOpen);
+});
+// Close mobile menu on link click
+mobileMenu.querySelectorAll('a').forEach(a => {
+  a.addEventListener('click', () => {
+    mobileMenu.classList.remove('open');
+    hamburger.classList.remove('open');
+    hamburger.setAttribute('aria-expanded', false);
+  });
+});
+
+// Intersection Observer for scroll animations
+const revealObserver = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      entry.target.classList.add('visible');
+      revealObserver.unobserve(entry.target);
+    }
+  });
+}, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+
+document.querySelectorAll('.reveal').forEach(el => revealObserver.observe(el));
+
+// Make hero content immediately visible (above fold)
+document.querySelectorAll('#hero .reveal').forEach(el => {
+  setTimeout(() => el.classList.add('visible'), 100);
+});
+</script>
+
+</body>
+</html>

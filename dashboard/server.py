@@ -34,8 +34,9 @@ from db.store import (
 app = FastAPI(title="Trailhead API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-DASH  = Path(__file__).parent / "dashboard.html"
-ADMIN = Path(__file__).parent / "admin.html"
+DASH    = Path(__file__).parent / "dashboard.html"
+LANDING = Path(__file__).parent / "landing.html"
+ADMIN   = Path(__file__).parent / "admin.html"
 pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
 bearer = HTTPBearer(auto_error=False)
 ALGORITHM = "HS256"
@@ -94,6 +95,12 @@ def _require_admin(user: dict = Depends(_current_user)) -> dict:
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
+    if LANDING.exists():
+        return LANDING.read_text()
+    return DASH.read_text()
+
+@app.get("/app", response_class=HTMLResponse)
+async def app_page():
     return DASH.read_text()
 
 @app.get("/admin", response_class=HTMLResponse)

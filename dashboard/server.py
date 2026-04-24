@@ -1,6 +1,6 @@
 """Trailhead FastAPI server. All API routes."""
 from __future__ import annotations
-import os, json, uuid, secrets, xml.etree.ElementTree as ET
+import asyncio, os, json, uuid, secrets, xml.etree.ElementTree as ET
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.responses import HTMLResponse, Response
@@ -16,6 +16,7 @@ from config.settings import settings
 from ai.planner import plan_trip
 from ingestors.ridb import get_campsites_near, get_campsites_search, get_facility_detail
 from ingestors.nrel import get_gas_along_route
+from ingestors.osm import get_osm_campsites, get_water_sources, get_trailheads, get_viewpoints
 from db.store import (
     save_trip, get_trip, add_community_pin, get_community_pins,
     save_audio_guide, get_audio_guide, get_cached, set_cached,
@@ -494,6 +495,176 @@ async def admin_pins(admin: dict = Depends(_require_admin)):
 async def admin_delete_pin(pin_id: int, admin: dict = Depends(_require_admin)):
     delete_pin(pin_id)
     return {"ok": True}
+
+
+# ── Nearby camps (RIDB + OSM aggregated — Dyrt-style discovery) ──────────────
+
+@app.get("/api/nearby-camps")
+async def nearby_camps(lat: float, lng: float, radius: float = 50, types: str = ""):
+    """Aggregate RIDB + OSM campsites near a point, no trip required."""
+    type_filters = [t.strip() for t in types.split(",") if t.strip()] if types else None
+    ridb, osm = await asyncio.gather(
+        get_campsites_search(lat, lng, radius_miles=radius, type_filters=type_filters),
+        get_osm_campsites(lat, lng, radius_m=int(min(radius, 60) * 1600)),
+    )
+    seen, merged = set(), []
+    for s in ridb:
+        if s["id"] not in seen:
+            seen.add(s["id"]); merged.append(s)
+    for s in osm:
+        if s["id"] not in seen:
+            if not type_filters or any(t in s.get("tags", []) for t in type_filters):
+                seen.add(s["id"]); merged.append(s)
+    return merged[:80]
+
+
+# ── OSM POIs (water, trailheads, viewpoints) ──────────────────────────────────
+
+@app.get("/api/osm-pois")
+async def osm_pois(lat: float, lng: float, radius: float = 30, types: str = "water,trailhead,viewpoint"):
+    type_set = {t.strip() for t in types.split(",") if t.strip()}
+    tasks = []
+    if "water" in type_set:
+        tasks.append(get_water_sources(lat, lng, radius_m=int(radius * 1600)))
+    if "trailhead" in type_set:
+        tasks.append(get_trailheads(lat, lng, radius_m=int(radius * 1600)))
+    if "viewpoint" in type_set:
+        tasks.append(get_viewpoints(lat, lng, radius_m=int(radius * 1600)))
+    if not tasks:
+        return []
+    results = await asyncio.gather(*tasks)
+    return [item for sublist in results for item in sublist][:60]
+
+
+# ── Wikipedia nearby ──────────────────────────────────────────────────────────
+
+@app.get("/api/wikipedia-nearby")
+async def wikipedia_nearby(lat: float, lng: float, radius: int = 10000, limit: int = 8):
+    key = f"wiki_{lat:.2f}_{lng:.2f}_{radius}"
+    cached = get_cached("campsite_cache", key, ttl_seconds=3600 * 48)
+    if cached is not None:
+        return cached
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(
+                "https://en.wikipedia.org/w/api.php",
+                params={
+                    "action": "query", "list": "geosearch",
+                    "gscoord": f"{lat}|{lng}", "gsradius": radius,
+                    "gslimit": limit, "format": "json", "gsprop": "type|name",
+                },
+                headers={"User-Agent": "Trailhead/1.0"},
+            )
+            r.raise_for_status()
+            hits = r.json().get("query", {}).get("geosearch", [])
+            # Enrich with extracts
+            if hits:
+                page_ids = "|".join(str(h["pageid"]) for h in hits)
+                r2 = await client.get(
+                    "https://en.wikipedia.org/w/api.php",
+                    params={
+                        "action": "query", "pageids": page_ids,
+                        "prop": "extracts|info", "exintro": True,
+                        "exsentences": 2, "explaintext": True,
+                        "inprop": "url", "format": "json",
+                    },
+                    headers={"User-Agent": "Trailhead/1.0"},
+                )
+                r2.raise_for_status()
+                pages = r2.json().get("query", {}).get("pages", {})
+                enriched = []
+                for h in hits:
+                    p = pages.get(str(h["pageid"]), {})
+                    enriched.append({
+                        "title": h["title"],
+                        "lat": h["lat"], "lng": h["lon"],
+                        "dist_m": h.get("dist", 0),
+                        "extract": p.get("extract", "")[:300],
+                        "url": p.get("fullurl", f"https://en.wikipedia.org/?curid={h['pageid']}"),
+                    })
+                set_cached("campsite_cache", key, enriched)
+                return enriched
+    except Exception:
+        pass
+    return []
+
+
+# ── AI campsite insight ───────────────────────────────────────────────────────
+
+class CampsiteInsightRequest(BaseModel):
+    name: str; lat: float; lng: float
+    description: str = ""; land_type: str = ""; amenities: list[str] = []
+
+@app.post("/api/ai/campsite-insight")
+async def campsite_insight(body: CampsiteInsightRequest):
+    """Generate AI-enriched campsite description with nearby context."""
+    if not settings.anthropic_api_key:
+        raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
+
+    cache_key = f"ai_insight_{body.lat:.3f}_{body.lng:.3f}"
+    cached = get_cached("campsite_cache", cache_key, ttl_seconds=3600 * 72)
+    if cached:
+        return cached
+
+    # Fetch Wikipedia and weather context in parallel
+    wiki_task = wikipedia_nearby(body.lat, body.lng, radius=15000, limit=4)
+    weather_task = weather_forecast(body.lat, body.lng, days=3)
+    wiki_hits, weather_data = await asyncio.gather(wiki_task, weather_task)
+
+    wiki_ctx = "\n".join(f"- {h['title']}: {h['extract'][:150]}" for h in wiki_hits[:3])
+    daily = weather_data.get("daily", {})
+    temps = daily.get("temperature_2m_max", [])
+    weather_ctx = f"Highs: {temps[0]:.0f}°F" if temps else ""
+
+    from ai.planner import generate_campsite_insight
+    try:
+        result = generate_campsite_insight(
+            name=body.name, lat=body.lat, lng=body.lng,
+            description=body.description, land_type=body.land_type,
+            amenities=body.amenities, wiki_context=wiki_ctx, weather_context=weather_ctx,
+        )
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+    set_cached("campsite_cache", cache_key, result)
+    return result
+
+
+# ── AI route briefing ─────────────────────────────────────────────────────────
+
+class RouteBriefRequest(BaseModel):
+    trip_name: str; waypoints: list[dict]; reports: list[dict] = []
+
+@app.post("/api/ai/route-brief")
+async def route_brief(body: RouteBriefRequest):
+    """AI safety and readiness briefing for an active trip."""
+    if not settings.anthropic_api_key:
+        raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
+    from ai.planner import generate_route_brief
+    try:
+        return generate_route_brief(body.trip_name, body.waypoints, body.reports)
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+# ── AI packing list ───────────────────────────────────────────────────────────
+
+class PackingRequest(BaseModel):
+    trip_name: str; duration_days: int; road_types: list[str] = []
+    land_types: list[str] = []; states: list[str] = []
+
+@app.post("/api/ai/packing-list")
+async def packing_list(body: PackingRequest):
+    """Generate a smart packing list based on trip parameters."""
+    if not settings.anthropic_api_key:
+        raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
+    from ai.planner import generate_packing_list
+    try:
+        return generate_packing_list(body.trip_name, body.duration_days,
+                                     body.road_types, body.land_types, body.states)
+    except Exception as e:
+        raise HTTPException(500, str(e))
 
 
 # ── Geocoding ─────────────────────────────────────────────────────────────────

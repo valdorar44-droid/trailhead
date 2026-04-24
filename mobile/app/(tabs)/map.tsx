@@ -223,9 +223,11 @@ function stepSpeak(type: string, modifier: string, name?: string): string {
 
 // Build spoken announcement from step — natural, not robotic
 function buildAnnouncement(step: RouteStep, distM: number, phase: 'far' | 'near'): string {
-  const action = stepSpeak(step.type, step.modifier, step.name);
-  const road   = step.name ? ` on ${step.name}` : '';
-  if (step.type === 'arrive') {
+  const type     = step.type     ?? 'turn';
+  const modifier = step.modifier ?? 'straight';
+  const action   = stepSpeak(type, modifier, step.name);
+  const road     = step.name ? ` on ${step.name}` : '';
+  if (type === 'arrive') {
     return phase === 'far'
       ? `You'll arrive at your destination in ${speakDist(distM)}.`
       : `You have arrived at your destination.`;

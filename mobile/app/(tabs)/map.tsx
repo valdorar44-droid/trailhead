@@ -85,6 +85,7 @@ interface RouteStep {
   duration: number; // seconds
   lat?: number;     // maneuver point — used for step advancement
   lng?: number;
+  lanes?: { indications: string[]; valid: boolean; active?: boolean }[];
 }
 
 // ─── Geo math ─────────────────────────────────────────────────────────────────
@@ -127,37 +128,89 @@ function formatDist(km: number) {
 }
 
 function formatStepDist(metres: number) {
+  if (metres < 30) return 'NOW';
+  const ft = metres * 3.28084;
+  if (ft < 500) return `${Math.round(ft / 50) * 50} FT`;
+  if (ft < 1000) return `${Math.round(ft / 100) * 100} FT`;
   const mi = metres * 0.000621371;
-  if (mi < 0.05) return 'now';
-  if (mi < 0.12) return `${Math.round(metres * 3.28084 / 100) * 100} ft`;
-  return mi >= 10 ? `${Math.round(mi)} mi` : `${mi.toFixed(1)} mi`;
+  if (mi < 0.4) return `${Math.round(mi * 10) / 10} MI`;
+  return mi >= 10 ? `${Math.round(mi)} MI` : `${mi.toFixed(1)} MI`;
+}
+
+// Returns [far_m, near_m] announcement distances based on current speed
+function announceDists(speedMph: number | null): [number, number] {
+  if (!speedMph || speedMph < 10) return [250, 60];   // slow / city stop
+  if (speedMph < 25) return [400, 100];                // city (~25mph)
+  if (speedMph < 40) return [600, 180];                // suburban (~35mph)
+  if (speedMph < 60) return [1000, 300];               // arterial (~50mph)
+  return [1800, 600];                                   // highway (60+ mph) ~1 mile then 0.4 mi
 }
 
 // ─── Maneuver helpers ─────────────────────────────────────────────────────────
 
-function stepIcon(type: string, modifier: string): any {
+function stepIcon(type: string, modifier: string): string {
   if (type === 'arrive') return 'flag-outline';
   if (type === 'depart') return 'navigate-outline';
   if (type === 'roundabout' || type === 'rotary') return 'refresh-outline';
-  if (modifier.includes('uturn')) return 'refresh-outline';
-  if (modifier.includes('sharp left') || modifier.includes('left')) return 'return-up-back-outline';
-  if (modifier.includes('sharp right') || modifier.includes('right')) return 'return-up-forward-outline';
+  const m = modifier.toLowerCase();
+  if (m === 'uturn') return 'refresh-outline';
+  if (m === 'sharp left')   return 'arrow-undo-outline';
+  if (m === 'left')         return 'return-up-back-outline';
+  if (m === 'slight left')  return 'arrow-back-outline';
+  if (m === 'sharp right')  return 'arrow-redo-outline';
+  if (m === 'right')        return 'return-up-forward-outline';
+  if (m === 'slight right') return 'arrow-forward-outline';
   return 'arrow-up-outline';
 }
 
-function stepLabel(type: string, modifier: string): string {
+function stepLabel(type: string, modifier: string, name?: string): string {
   if (type === 'arrive') return 'ARRIVE';
-  if (type === 'depart') return 'START';
+  if (type === 'depart') return 'DEPART';
   if (type === 'roundabout') return 'ROUNDABOUT';
-  if (modifier === 'uturn') return 'U-TURN';
-  if (modifier.includes('sharp left')) return 'SHARP LEFT';
-  if (modifier.includes('sharp right')) return 'SHARP RIGHT';
-  if (modifier.includes('slight left')) return 'BEAR LEFT';
-  if (modifier.includes('slight right')) return 'BEAR RIGHT';
-  if (modifier.includes('left')) return 'TURN LEFT';
-  if (modifier.includes('right')) return 'TURN RIGHT';
-  return 'CONTINUE';
+  const m = modifier.toLowerCase();
+  const isExit = name ? /exit|ramp|off.?ramp/i.test(name) : false;
+  if (m === 'uturn') return 'MAKE U-TURN';
+  if (m === 'sharp left')   return 'TURN SHARP LEFT';
+  if (m === 'sharp right')  return 'TURN SHARP RIGHT';
+  if (m === 'slight left')  return isExit ? 'TAKE EXIT LEFT'  : 'KEEP LEFT';
+  if (m === 'slight right') return isExit ? 'TAKE EXIT RIGHT' : 'KEEP RIGHT';
+  if (m === 'left')         return 'TURN LEFT';
+  if (m === 'right')        return 'TURN RIGHT';
+  return 'CONTINUE STRAIGHT';
 }
+
+function laneArrowIcon(indication: string): string {
+  const map: Record<string, string> = {
+    'left': 'arrow-back-outline', 'slight left': 'arrow-back-outline',
+    'sharp left': 'arrow-back-outline', 'straight': 'arrow-up-outline',
+    'right': 'arrow-forward-outline', 'slight right': 'arrow-forward-outline',
+    'sharp right': 'arrow-forward-outline', 'uturn': 'return-down-back-outline',
+  };
+  return map[indication.toLowerCase()] ?? 'arrow-up-outline';
+}
+
+// Build spoken announcement from step
+function buildAnnouncement(step: RouteStep, distM: number, phase: 'far' | 'near'): string {
+  const label = stepLabel(step.type, step.modifier, step.name);
+  const road  = step.name ? ` on ${step.name}` : '';
+  if (phase === 'near') {
+    if (distM < 30) return `${label}${road}.`;
+    return `${label}${road} in ${formatStepDist(distM)}.`;
+  }
+  return `In ${formatStepDist(distM)}, ${label.toLowerCase()}${road}.`;
+}
+
+// ─── Quick-report types with Waze-style subtypes ─────────────────────────────
+const QUICK_TYPES = [
+  { type: 'police',       label: 'PATROL',  icon: 'shield-outline',     color: '#eab308',
+    subtypes: ['Police hidden', 'Police visible', 'Speed trap', 'Ranger patrol'] },
+  { type: 'hazard',       label: 'HAZARD',  icon: 'warning-outline',    color: '#ef4444',
+    subtypes: ['Object in road', 'Pothole', 'Flood / water', 'Ice / snow', 'Downed tree'] },
+  { type: 'road_condition', label: 'ROAD',  icon: 'trail-sign-outline', color: '#f97316',
+    subtypes: ['Muddy / soft', 'Washed out road', 'Deep ruts', 'Low clearance', 'Logging traffic'] },
+  { type: 'wildlife',     label: 'ANIMAL',  icon: 'paw-outline',        color: '#a855f7',
+    subtypes: ['Animal in road', 'Livestock loose', 'Bear / predator', 'Deer herd', 'Animal sighting'] },
+] as const;
 
 // ─── Land type color helper ──────────────────────────────────────────────────
 
@@ -271,6 +324,7 @@ const buildMapHtml = (
   var userMarker=null,wpMarkers=[],searchMarker=null;
   var allCamps=[],allGas=[],allPois=[],allReports=[];
   var reportMarkers=[];
+  var lastSpeed=null;
   var routeOpts={avoidTolls:false,avoidHighways:false,backRoads:false,noFerries:false};
   var _routeCoords=[],routePts=[],breadcrumbPts=[];
   var lastOffCheck=0,downloadActive=false,mapReady=false,pendingMsgs=[];
@@ -408,15 +462,16 @@ const buildMapHtml = (
       userMarker=new mapboxgl.Marker({element:el,anchor:'center'}).setLngLat([lng,lat]).addTo(map);
     }else{userMarker.setLngLat([lng,lat]);}
     if(navActive&&heading!=null&&heading>=0){
-      map.easeTo({center:[lng,lat],bearing:heading,pitch:50,zoom:zoom||17,duration:500});
+      map.easeTo({center:[lng,lat],bearing:heading,pitch:52,zoom:zoom||17,duration:900});
     }else if(recenter){
-      map.easeTo({center:[lng,lat],zoom:zoom||15,duration:400});
+      map.easeTo({center:[lng,lat],zoom:zoom||15,duration:500});
     }
     var now=Date.now();
-    if(routePts.length>0&&now-lastOffCheck>6000){
+    // Only check off-route if moving (speed > 1 m/s to avoid GPS drift when parked)
+    if(routePts.length>0&&now-lastOffCheck>6000&&(lastSpeed==null||lastSpeed>1)){
       lastOffCheck=now;var minD=Infinity;
-      for(var i=0;i<routePts.length;i++){var dlat=(routePts[i][1]-lat)*111000;var dlng=(routePts[i][0]-lng)*111000*Math.cos(lat*Math.PI/180);var d=Math.sqrt(dlat*dlat+dlng*dlng);if(d<minD)minD=d;if(minD<80)break;}
-      if(minD>150)postRN({type:'off_route',lat:lat,lng:lng,dist:Math.round(minD)});
+      for(var i=0;i<routePts.length;i++){var dlat=(routePts[i][1]-lat)*111000;var dlng=(routePts[i][0]-lng)*111000*Math.cos(lat*Math.PI/180);var d=Math.sqrt(dlat*dlat+dlng*dlng);if(d<minD)minD=d;if(minD<60)break;}
+      if(minD>200)postRN({type:'off_route',lat:lat,lng:lng,dist:Math.round(minD)});
     }
   }
 
@@ -431,18 +486,24 @@ const buildMapHtml = (
     if(routeOpts.backRoads)return _fetchValhalla(pairs,fromIdx);
     var excl=[];if(routeOpts.avoidTolls)excl.push('toll');if(routeOpts.avoidHighways)excl.push('motorway');if(routeOpts.noFerries)excl.push('ferry');
     var profile=(routeOpts.avoidHighways)?'driving':'driving-traffic';
-    var url='https://api.mapbox.com/directions/v5/mapbox/'+profile+'/'+pairs.join(';')+'?access_token='+mapboxToken+'&steps=true&geometries=geojson&overview=full&annotations=maxspeed'+(excl.length?'&exclude='+excl.join(','):'');
+    var url='https://api.mapbox.com/directions/v5/mapbox/'+profile+'/'+pairs.join(';')+'?access_token='+mapboxToken+'&steps=true&geometries=geojson&overview=full&annotations=maxspeed&banner_instructions=true'+(excl.length?'&exclude='+excl.join(','):'');
     try{
       var ctrl=new AbortController();var tid=setTimeout(function(){ctrl.abort();},10000);
       var data=await(await fetch(url,{signal:ctrl.signal})).json();clearTimeout(tid);
       if(!data.routes||!data.routes[0])return _fetchValhalla(pairs,fromIdx);
       var route=data.routes[0];
-      _routeCoords=route.geometry.coordinates;routePts=_routeCoords.filter(function(_,i){return i%4===0;});updateRoute();
+      _routeCoords=route.geometry.coordinates;routePts=_routeCoords.filter(function(_,i){return i%3===0;});updateRoute();
       var steps=[],legs=[];
       var legSpeedLimits=[];
       (route.legs||[]).forEach(function(leg){
         var ls=[];
-        (leg.steps||[]).forEach(function(s){if(s.distance>0||s.maneuver.type==='arrive'){var loc=s.maneuver&&s.maneuver.location;var st={type:s.maneuver.type,modifier:s.maneuver.modifier||'',name:s.name||'',distance:s.distance,duration:s.duration,lat:loc?loc[1]:undefined,lng:loc?loc[0]:undefined};steps.push(st);ls.push(st);}});
+        (leg.steps||[]).forEach(function(s){if(s.distance>0||s.maneuver.type==='arrive'){
+          var loc=s.maneuver&&s.maneuver.location;
+          // Extract lane data from last intersection that has lanes
+          var lanes=[];
+          if(s.intersections){for(var ii=s.intersections.length-1;ii>=0;ii--){var isc=s.intersections[ii];if(isc.lanes&&isc.lanes.length){lanes=isc.lanes.map(function(l){return{indications:l.indications||[],valid:l.valid===true,active:l.active===true};});break;}}}
+          var st={type:s.maneuver.type,modifier:s.maneuver.modifier||'',name:s.name||'',distance:s.distance,duration:s.duration,lat:loc?loc[1]:undefined,lng:loc?loc[0]:undefined,lanes:lanes.length?lanes:undefined};
+          steps.push(st);ls.push(st);}});
         legs.push(ls);
         var ann=(leg.annotation&&leg.annotation.maxspeed)||[];
         var valid=ann.filter(function(s){return s&&typeof s.speed==='number';}).map(function(s){return s.speed;});
@@ -463,7 +524,7 @@ const buildMapHtml = (
       if(!data.trip||data.trip.status!==0)return _fallback(pairs,fromIdx);
       var all=[],steps=[],legs=[];
       (data.trip.legs||[]).forEach(function(leg){var c=decodeP6(leg.shape||'');all=all.concat(c);var ls=[];(leg.maneuvers||[]).forEach(function(m){var dist=Math.round((m.length||0)*1609.34);var shp=c[m.begin_shape_index];var st={type:m.type===4?'arrive':m.type===1?'depart':'turn',modifier:{0:'',1:'',2:'left',3:'right',4:'arrive',5:'sharp left',6:'sharp right',7:'left',8:'right',9:'uturn',10:'slight left',11:'slight right'}[m.type]||'',name:m.street_names&&m.street_names[0]||'',distance:dist,duration:m.time||0,lat:shp?shp[1]:undefined,lng:shp?shp[0]:undefined};steps.push(st);ls.push(st);});legs.push(ls);});
-      _routeCoords=all;routePts=all.filter(function(_,i){return i%4===0;});updateRoute();
+      _routeCoords=all;routePts=all.filter(function(_,i){return i%3===0;});updateRoute();
       postRN({type:'route_ready',routed:true,steps:steps,legs:legs,total_distance:Math.round((data.trip.summary.length||0)*1609.34),total_duration:data.trip.summary.time||0,fromIdx:fromIdx||0});
     }catch(e){_fallback(pairs,fromIdx);}
   }
@@ -476,8 +537,8 @@ const buildMapHtml = (
     if(msg.type==='set_token'){initMap(msg.token,msg.style);return;}
     if(!mapReady){pendingMsgs.push(msg);return;}
     if(msg.type==='nav_active'){navActive=msg.active;if(!msg.active)map.easeTo({pitch:0,bearing:0,zoom:12,duration:700});}
-    if(msg.type==='user_pos'&&msg.lat)setUserPos(msg.lat,msg.lng,false,null,msg.heading);
-    if(msg.type==='nav_center'&&msg.lat)setUserPos(msg.lat,msg.lng,true,17,msg.heading);
+    if(msg.type==='user_pos'&&msg.lat){lastSpeed=msg.speed!=null?msg.speed:lastSpeed;setUserPos(msg.lat,msg.lng,false,null,msg.heading);}
+    if(msg.type==='nav_center'&&msg.lat){lastSpeed=msg.speed!=null?msg.speed:lastSpeed;setUserPos(msg.lat,msg.lng,true,17,msg.heading);}
     if(msg.type==='locate'&&msg.lat)setUserPos(msg.lat,msg.lng,true,13);
     if(msg.type==='nav_target')setNavTarget(msg.idx);
     if(msg.type==='nav_reset'){setNavTarget(-1);_routeCoords=[];routePts=[];updateRoute();}
@@ -542,6 +603,7 @@ export default function MapScreen() {
   const [legSpeedLimits,setLegSpeedLimits]= useState<(number | null)[]>([]);
   const [quickReport,   setQuickReport]   = useState(false);
   const [quickToast,    setQuickToast]    = useState('');
+  const [quickTypeIdx,  setQuickTypeIdx]  = useState<number | null>(null);
   const [navMode,   setNavMode]   = useState(false);
   const [navIdx,    setNavIdx]    = useState(0);
   const [routeSteps,  setRouteSteps]  = useState<RouteStep[]>([]);
@@ -628,6 +690,8 @@ export default function MapScreen() {
   const routeAlertsRef   = useRef<Report[]>([]);
   const alertedRepIdsRef = useRef(new Set<number>());
   const approachDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const userSpeedRef     = useRef<number | null>(null);
+  const smoothedHdgRef   = useRef<number | null>(null);
   const discoverRef  = useRef<CampsitePin[]>([]);
 
   const webLoadedRef = useRef(false);
@@ -700,19 +764,47 @@ export default function MapScreen() {
     Location.requestForegroundPermissionsAsync().then(({ status }) => {
       if (status !== 'granted') return;
       Location.watchPositionAsync(
-        { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 2000, distanceInterval: 8 },
+        { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 1000, distanceInterval: 5 },
         loc => {
           const pos = { lat: loc.coords.latitude, lng: loc.coords.longitude };
           setUserLoc(pos);
           setStoreLoc(pos);
-          setUserSpeed(loc.coords.speed ?? null);
-          const hdg = (loc.coords.heading ?? -1) >= 0 ? loc.coords.heading! : -1;
+          const rawSpeed = loc.coords.speed ?? null;
+          setUserSpeed(rawSpeed);
+          userSpeedRef.current = rawSpeed;
+
+          // Heading: use EMA smoothing; fall back to bearing-to-next-step at low speed
+          const rawHdg = (loc.coords.heading ?? -1);
+          const speedMs = rawSpeed ?? 0;
+          let hdg = -1;
+          if (speedMs > 0.8 && rawHdg >= 0) {
+            // Smooth heading with EMA (α=0.35), handling 0/360 wraparound
+            const prev = smoothedHdgRef.current;
+            if (prev === null) {
+              smoothedHdgRef.current = rawHdg; hdg = rawHdg;
+            } else {
+              let diff = rawHdg - prev;
+              if (diff > 180) diff -= 360;
+              if (diff < -180) diff += 360;
+              const s = (prev + diff * 0.35 + 360) % 360;
+              smoothedHdgRef.current = s; hdg = s;
+            }
+          } else if (speedMs <= 0.8) {
+            // Parked/slow: use bearing toward current step if navigating
+            const cur = routeStepsRef.current[stepIdxRef.current];
+            if (cur?.lat != null) {
+              hdg = calcBearing(pos.lat, pos.lng, cur.lat!, cur.lng!);
+              smoothedHdgRef.current = hdg;
+            } else {
+              hdg = smoothedHdgRef.current ?? -1;
+            }
+          }
           setUserHeading(hdg >= 0 ? hdg : null);
 
           const { active, idx, wps } = navRef.current;
           webRef.current?.postMessage(JSON.stringify({
             type: active ? 'nav_center' : 'user_pos',
-            lat: pos.lat, lng: pos.lng, heading: hdg,
+            lat: pos.lat, lng: pos.lng, heading: hdg, speed: rawSpeed,
           }));
 
           if (active) {
@@ -721,25 +813,37 @@ export default function MapScreen() {
 
           if (!active) return;
 
-          // ── Step advancement (turn-by-turn) ──────────────────────────────
+          // ── Step advancement + two-phase speed-based announcements ──────
           {
             const steps = routeStepsRef.current;
             const si    = stepIdxRef.current;
             const cur   = steps[si];
             if (cur?.lat != null && cur?.lng != null) {
               const distM = haversineKm(pos.lat, pos.lng, cur.lat, cur.lng) * 1000;
-              // Voice announcement: 200 m out (skip depart + arrive)
-              if (distM < 200 && !stepAnnouncedRef.current.has(si) && cur.type !== 'depart' && cur.type !== 'arrive') {
-                stepAnnouncedRef.current.add(si);
-                const road = cur.name ? ` on ${cur.name}` : '';
-                const prefix = distM < 60 ? '' : `In ${formatStepDist(distM)}, `;
-                Speech.speak(`${prefix}${stepLabel(cur.type, cur.modifier)}${road}.`, { rate: 0.9 });
+              const speedMph = (userSpeedRef.current ?? 0) * 2.237;
+              const [farDist, nearDist] = announceDists(speedMph > 0 ? speedMph : null);
+              const farKey  = si * 2;      // first announcement (far)
+              const nearKey = si * 2 + 1;  // second announcement (close)
+
+              if (cur.type !== 'depart' && cur.type !== 'arrive') {
+                // Far announcement (e.g. "In 1 mile, turn right on I-95")
+                if (distM < farDist && !stepAnnouncedRef.current.has(farKey)) {
+                  stepAnnouncedRef.current.add(farKey);
+                  Speech.speak(buildAnnouncement(cur, distM, 'far'), { rate: 0.9 });
+                }
+                // Near announcement (e.g. "Turn right on I-95 in 300 feet")
+                if (distM < nearDist && !stepAnnouncedRef.current.has(nearKey)) {
+                  stepAnnouncedRef.current.add(nearKey);
+                  Speech.speak(buildAnnouncement(cur, distM, 'near'), { rate: 0.9 });
+                }
               }
-              // Advance: passed the maneuver point (35 m)
-              if (distM < 35 && si < steps.length - 1) {
+
+              // Advance to next step when within 30m of maneuver point
+              if (distM < 30 && si < steps.length - 1) {
                 const next = si + 1;
                 stepIdxRef.current = next;
                 setStepIdx(next);
+                stepAnnouncedRef.current.delete(next * 2 + 1); // allow near announce for new step
               }
             }
           }
@@ -958,9 +1062,8 @@ export default function MapScreen() {
     if (!legSteps) return;
     const first = legSteps.find(s => s.type !== 'depart' && s.distance > 50);
     if (!first) return;
-    const road = first.name ? ` on ${first.name}` : '';
     const t = setTimeout(() => {
-      Speech.speak(`In ${formatStepDist(first.distance)}, ${stepLabel(first.type, first.modifier)}${road}`, { rate: 0.9 });
+      Speech.speak(buildAnnouncement(first, first.distance, 'far'), { rate: 0.9 });
     }, 1500);
     return () => clearTimeout(t);
   }, [navIdx, navMode, routeLegOffset]);
@@ -2098,15 +2201,32 @@ export default function MapScreen() {
             <Text style={s.turnDist}>{formatStepDist(stepDistM!)}</Text>
           </View>
         ) : nextStep && isRouted ? (
-          <View style={s.turnStrip}>
-            <View style={s.turnIconWrap}>
-              <Ionicons name={stepIcon(nextStep.type, nextStep.modifier) as any} size={22} color="#fff" />
+          <View style={s.turnStripWrap}>
+            <View style={s.turnStrip}>
+              <View style={s.turnIconWrap}>
+                <Ionicons name={stepIcon(nextStep.type, nextStep.modifier) as any} size={22} color="#fff" />
+              </View>
+              <View style={s.turnInfo}>
+                <Text style={s.turnLabel}>{stepLabel(nextStep.type, nextStep.modifier, nextStep.name)}</Text>
+                {nextStep.name ? <Text style={s.turnRoad} numberOfLines={1}>{nextStep.name}</Text> : null}
+              </View>
+              <Text style={s.turnDist}>{formatStepDist(stepDistM ?? nextStep.distance)}</Text>
             </View>
-            <View style={s.turnInfo}>
-              <Text style={s.turnLabel}>{stepLabel(nextStep.type, nextStep.modifier)}</Text>
-              {nextStep.name ? <Text style={s.turnRoad} numberOfLines={1}>{nextStep.name}</Text> : null}
-            </View>
-            <Text style={s.turnDist}>{formatStepDist(stepDistM ?? nextStep.distance)}</Text>
+            {/* Lane guidance row */}
+            {nextStep.lanes && nextStep.lanes.length > 0 && stepDistM !== null && stepDistM < 800 && (
+              <View style={s.laneRow}>
+                <Text style={s.laneLabel}>LANES</Text>
+                {nextStep.lanes.map((lane, li) => (
+                  <View key={li} style={[s.laneBox, lane.valid && s.laneBoxActive]}>
+                    <Ionicons
+                      name={laneArrowIcon(lane.indications[0] ?? 'straight') as any}
+                      size={13}
+                      color={lane.valid ? '#f97316' : OVR.text3 + '44'}
+                    />
+                  </View>
+                ))}
+              </View>
+            )}
           </View>
         ) : null}
 
@@ -2203,7 +2323,7 @@ export default function MapScreen() {
                   />
                   <View style={s.stepInfo}>
                     <Text style={[s.stepLabel, isActive && { color: '#fff' }, isPast && { color: OVR.text3, opacity: 0.4 }]}>
-                      {stepLabel(step.type, step.modifier)}
+                      {stepLabel(step.type, step.modifier, step.name)}
                     </Text>
                     {step.name ? <Text style={[s.stepRoad, isPast && { opacity: 0.4 }]} numberOfLines={1}>{step.name}</Text> : null}
                   </View>
@@ -2267,7 +2387,7 @@ export default function MapScreen() {
         );
       })()}
 
-      {/* ── Waze-style quick report ─────────────────────────────────────────── */}
+      {/* ── Waze-style quick report (two-step: type → subtype) ─────────────── */}
       {userLoc && !showSearch && !selectedCamp && (
         <View style={s.quickReportWrap} pointerEvents="box-none">
           {!!quickToast && (
@@ -2278,49 +2398,82 @@ export default function MapScreen() {
           )}
           {quickReport && (
             <View style={s.quickReportPanel}>
-              {([
-                { type: 'police',      label: 'PATROL',  icon: 'shield-outline',      color: '#eab308', subtype: 'Ranger patrol',  sev: 'moderate' },
-                { type: 'hazard',      label: 'HAZARD',  icon: 'warning-outline',     color: '#ef4444', subtype: 'Downed tree',    sev: 'high'     },
-                { type: 'road_condition', label: 'ROAD', icon: 'trail-sign-outline',  color: '#f97316', subtype: 'Muddy / soft',   sev: 'moderate' },
-                { type: 'wildlife',    label: 'ANIMAL',  icon: 'paw-outline',         color: '#a855f7', subtype: 'Bear activity',  sev: 'low'      },
-              ] as const).map(rt => (
-                <TouchableOpacity
-                  key={rt.type}
-                  style={[s.quickReportBtn, { borderColor: rt.color + '55', backgroundColor: rt.color + '18' }]}
-                  onPress={async () => {
-                    setQuickReport(false);
-                    try {
-                      const res = await api.submitReport({
-                        lat: userLoc.lat, lng: userLoc.lng,
-                        type: rt.type as any, subtype: rt.subtype,
-                        description: '', severity: rt.sev as any,
-                      });
-                      setQuickToast(`+${res.credits_earned} credits`);
-                      setTimeout(() => setQuickToast(''), 3000);
-                      const newRep: Report = {
-                        id: res.report_id, lat: userLoc.lat, lng: userLoc.lng,
-                        type: rt.type, subtype: rt.subtype, description: '',
-                        severity: rt.sev, upvotes: 0, downvotes: 0, confirmations: 0,
-                        has_photo: 0, cluster_count: 1, username: user?.username ?? 'me',
-                        created_at: Date.now() / 1000,
-                        expires_at: Date.now() / 1000 + res.ttl_hours * 3600,
-                      };
-                      addLiveReport(newRep);
-                    } catch { setQuickToast('Submitted'); setTimeout(() => setQuickToast(''), 2000); }
-                  }}
-                >
-                  <Ionicons name={rt.icon as any} size={22} color={rt.color} />
-                  <Text style={[s.quickReportLabel, { color: rt.color }]}>{rt.label}</Text>
-                </TouchableOpacity>
-              ))}
-              <TouchableOpacity style={s.quickReportClose} onPress={() => setQuickReport(false)}>
-                <Ionicons name="close" size={16} color={OVR.text2} />
-              </TouchableOpacity>
+              {quickTypeIdx === null ? (
+                // Step 1: choose type
+                <>
+                  {QUICK_TYPES.map((rt, i) => (
+                    <TouchableOpacity
+                      key={rt.type}
+                      style={[s.quickReportBtn, { borderColor: rt.color + '55', backgroundColor: rt.color + '18' }]}
+                      onPress={() => setQuickTypeIdx(i)}
+                    >
+                      <Ionicons name={rt.icon as any} size={22} color={rt.color} />
+                      <Text style={[s.quickReportLabel, { color: rt.color }]}>{rt.label}</Text>
+                      <Ionicons name="chevron-forward-outline" size={14} color={rt.color + 'aa'} style={{ marginLeft: 'auto' }} />
+                    </TouchableOpacity>
+                  ))}
+                  <TouchableOpacity style={s.quickReportClose} onPress={() => setQuickReport(false)}>
+                    <Ionicons name="close" size={16} color={OVR.text2} />
+                  </TouchableOpacity>
+                </>
+              ) : (
+                // Step 2: choose subtype
+                (() => {
+                  const rt = QUICK_TYPES[quickTypeIdx];
+                  const sevMap: Record<string, string> = {
+                    'Police hidden': 'high', 'Speed trap': 'high', 'Police visible': 'moderate', 'Ranger patrol': 'moderate',
+                    'Object in road': 'high', 'Flood / water': 'high', 'Ice / snow': 'high', 'Pothole': 'moderate', 'Downed tree': 'high',
+                    'Washed out road': 'high', 'Deep ruts': 'moderate', 'Low clearance': 'high', 'Muddy / soft': 'moderate', 'Logging traffic': 'low',
+                    'Animal in road': 'high', 'Livestock loose': 'high', 'Bear / predator': 'high', 'Deer herd': 'moderate', 'Animal sighting': 'low',
+                  };
+                  return (
+                    <>
+                      <View style={s.quickSubtypeHeader}>
+                        <TouchableOpacity onPress={() => setQuickTypeIdx(null)} style={{ padding: 4 }}>
+                          <Ionicons name="arrow-back-outline" size={16} color={OVR.text2} />
+                        </TouchableOpacity>
+                        <Ionicons name={rt.icon as any} size={16} color={rt.color} />
+                        <Text style={[s.quickSubtypeTitle, { color: rt.color }]}>{rt.label}</Text>
+                      </View>
+                      {rt.subtypes.map(sub => (
+                        <TouchableOpacity
+                          key={sub}
+                          style={[s.quickSubtypeBtn, { borderColor: rt.color + '33' }]}
+                          onPress={async () => {
+                            setQuickReport(false);
+                            setQuickTypeIdx(null);
+                            try {
+                              const sev = sevMap[sub] ?? 'moderate';
+                              const res = await api.submitReport({
+                                lat: userLoc.lat, lng: userLoc.lng,
+                                type: rt.type as any, subtype: sub,
+                                description: '', severity: sev as any,
+                              });
+                              setQuickToast(`+${res.credits_earned} credits`);
+                              setTimeout(() => setQuickToast(''), 3000);
+                              addLiveReport({
+                                id: res.report_id, lat: userLoc.lat, lng: userLoc.lng,
+                                type: rt.type, subtype: sub, description: '',
+                                severity: sev, upvotes: 0, downvotes: 0, confirmations: 0,
+                                has_photo: 0, cluster_count: 1, username: user?.username ?? 'me',
+                                created_at: Date.now() / 1000,
+                                expires_at: Date.now() / 1000 + res.ttl_hours * 3600,
+                              });
+                            } catch { setQuickToast('Submitted'); setTimeout(() => setQuickToast(''), 2000); }
+                          }}
+                        >
+                          <Text style={[s.quickSubtypeText, { color: rt.color }]}>{sub}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </>
+                  );
+                })()
+              )}
             </View>
           )}
           <TouchableOpacity
             style={[s.quickReportFab, navMode && s.quickReportFabNav]}
-            onPress={() => setQuickReport(p => !p)}
+            onPress={() => { setQuickTypeIdx(null); setQuickReport(p => !p); }}
           >
             <Ionicons name="warning-outline" size={18} color={quickReport ? OVR.text : OVR.text2} />
             <Text style={[s.quickReportFabText, quickReport && { color: OVR.text }]}>REPORT</Text>
@@ -2437,19 +2590,32 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     borderTopWidth: 1, borderColor: OVR.border,
   },
 
+  turnStripWrap: { overflow: 'hidden' },
   turnStrip: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     paddingHorizontal: 14, paddingVertical: 10,
-    backgroundColor: C.orange,
+    backgroundColor: '#1a3a1a',
   },
   turnIconWrap: {
-    width: 36, height: 36, borderRadius: 10,
-    backgroundColor: 'rgba(0,0,0,0.2)', alignItems: 'center', justifyContent: 'center',
+    width: 38, height: 38, borderRadius: 10,
+    backgroundColor: 'rgba(249,115,22,0.25)', alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1.5, borderColor: 'rgba(249,115,22,0.5)',
   },
   turnInfo: { flex: 1 },
-  turnLabel: { color: '#fff', fontSize: 14, fontWeight: '900', fontFamily: mono, letterSpacing: 1 },
-  turnRoad: { color: 'rgba(255,255,255,0.75)', fontSize: 11, marginTop: 2, fontFamily: mono },
-  turnDist: { color: '#fff', fontSize: 14, fontWeight: '700', fontFamily: mono },
+  turnLabel: { color: '#fff', fontSize: 15, fontWeight: '900', fontFamily: mono, letterSpacing: 0.5 },
+  turnRoad: { color: 'rgba(255,255,255,0.65)', fontSize: 11, marginTop: 2, fontFamily: mono },
+  turnDist: { color: '#f97316', fontSize: 14, fontWeight: '700', fontFamily: mono },
+  laneRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: '#111a11', paddingHorizontal: 14, paddingVertical: 6,
+    borderTopWidth: 1, borderColor: 'rgba(249,115,22,0.15)',
+  },
+  laneLabel: { color: OVR.text3, fontSize: 9, fontFamily: mono, marginRight: 4, letterSpacing: 1 },
+  laneBox: {
+    width: 26, height: 22, borderRadius: 5, borderWidth: 1, borderColor: OVR.border,
+    alignItems: 'center', justifyContent: 'center', backgroundColor: OVR.border2,
+  },
+  laneBoxActive: { borderColor: '#f97316', backgroundColor: 'rgba(249,115,22,0.15)' },
 
   navStrip: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
@@ -2862,6 +3028,18 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     backgroundColor: '#1a2a1c', borderColor: OVR.border,
   },
   quickReportFabText: { color: OVR.text2, fontSize: 11, fontFamily: mono, fontWeight: '700' },
+  quickSubtypeHeader: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingBottom: 6, marginBottom: 2,
+    borderBottomWidth: 1, borderColor: OVR.border,
+  },
+  quickSubtypeTitle: { fontSize: 12, fontFamily: mono, fontWeight: '800', letterSpacing: 1 },
+  quickSubtypeBtn: {
+    paddingHorizontal: 14, paddingVertical: 11,
+    borderRadius: 10, borderWidth: 1,
+    backgroundColor: OVR.border2,
+  },
+  quickSubtypeText: { fontSize: 13, fontFamily: mono, fontWeight: '700' },
   packDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: C.orange, marginTop: 6 },
 
   // ── Approaching report alert ─────────────────────────────────────────────────

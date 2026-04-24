@@ -9,7 +9,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import Optional
 import httpx
-from passlib.context import CryptContext
+import bcrypt as _bcrypt_lib
 from jose import jwt, JWTError
 
 from config.settings import settings
@@ -37,7 +37,12 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 DASH    = Path(__file__).parent / "dashboard.html"
 LANDING = Path(__file__).parent / "landing.html"
 ADMIN   = Path(__file__).parent / "admin.html"
-pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
+def _hash_pw(password: str) -> str:
+    return _bcrypt_lib.hashpw(password[:72].encode(), _bcrypt_lib.gensalt()).decode()
+
+def _verify_pw(password: str, hashed: str) -> bool:
+    return _bcrypt_lib.checkpw(password[:72].encode(), hashed.encode())
+
 bearer = HTTPBearer(auto_error=False)
 ALGORITHM = "HS256"
 
@@ -50,7 +55,7 @@ async def _bootstrap_admin():
     admin_pass  = os.environ.get("ADMIN_PASSWORD")
     admin_user  = os.environ.get("ADMIN_USERNAME", "admin")
     if admin_email and admin_pass:
-        ensure_admin_user(admin_email, admin_user, pwd.hash(admin_pass[:72]))
+        ensure_admin_user(admin_email, admin_user, _hash_pw(admin_pass))
 
 
 # ── Auth helpers ──────────────────────────────────────────────────────────────
@@ -125,7 +130,7 @@ async def register(body: RegisterRequest):
         raise HTTPException(400, "Email already registered")
     referrer = get_user_by_referral_code(body.referral_code) if body.referral_code else None
     code = f"{body.username.lower()}-{secrets.token_hex(3)}"
-    uid = create_user(body.email, body.username, pwd.hash(body.password), code,
+    uid = create_user(body.email, body.username, _hash_pw(body.password), code,
                       referred_by=referrer["id"] if referrer else None)
     if referrer:
         add_credits(referrer["id"], 50, f"Referral — {body.username} signed up!")
@@ -134,7 +139,7 @@ async def register(body: RegisterRequest):
 @app.post("/api/auth/login")
 async def login(body: LoginRequest):
     user = get_user_by_email(body.email)
-    if not user or not pwd.verify(body.password, user["password_hash"]):
+    if not user or not _verify_pw(body.password, user["password_hash"]):
         raise HTTPException(401, "Invalid email or password")
     return {"token": _make_token(user["id"]), "user": _safe_user(user)}
 

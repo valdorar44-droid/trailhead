@@ -32,8 +32,12 @@ export const api = {
     }),
   me: () => req<User>('/api/auth/me'),
 
-  plan: (request: string) =>
-    req<TripResult>('/api/plan', { method: 'POST', body: JSON.stringify({ request }) }),
+  plan: (request: string, sessionId = '') =>
+    req<TripResult>('/api/plan', { method: 'POST', body: JSON.stringify({ request, session_id: sessionId }) }),
+  planFromSession: (sessionId: string) =>
+    req<TripResult>('/api/plan', { method: 'POST', body: JSON.stringify({ request: '', session_id: sessionId }) }),
+  chat: (message: string, sessionId: string, currentTrip?: TripResult | null) =>
+    req<ChatResponse>('/api/chat', { method: 'POST', body: JSON.stringify({ message, session_id: sessionId, current_trip: currentTrip ?? undefined }) }),
   getTrip: (id: string) => req<TripResult>(`/api/trip/${id}`),
 
   submitReport: (data: ReportPayload) =>
@@ -92,6 +96,22 @@ export const api = {
   getPackingList: (data: PackingRequest) =>
     req<PackingList>('/api/ai/packing-list', { method: 'POST', body: JSON.stringify(data) }),
 };
+
+export interface TrailDNA {
+  vehicle?: string;
+  terrain?: string;
+  camp_style?: string;
+  duration?: string;
+  regions?: string[];
+}
+
+export interface ChatResponse {
+  type: 'message' | 'ready' | 'trip_update';
+  content: string;
+  outline?: string;
+  trip?: TripResult;
+  trail_dna?: TrailDNA;
+}
 
 export interface User {
   id: number; email: string; username: string; credits: number;

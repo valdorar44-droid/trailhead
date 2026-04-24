@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
 import * as Notifications from 'expo-notifications';
+import * as SecureStore from 'expo-secure-store';
 import { Ionicons } from '@expo/vector-icons';
 import { api, Report, LeaderboardEntry } from '@/lib/api';
 import { useStore } from '@/lib/store';
@@ -386,7 +387,6 @@ export default function ReportScreen() {
 }
 
 async function getToken() {
-  const { default: SecureStore } = await import('expo-secure-store');
   return (await SecureStore.getItemAsync('trailhead_token')) ?? '';
 }
 

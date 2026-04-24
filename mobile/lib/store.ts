@@ -31,6 +31,7 @@ interface AppState {
   themeMode: 'light' | 'dark';
   userLoc: { lat: number; lng: number } | null;
   mapboxToken: string;
+  sessionId: string;
   setAuth: (token: string, user: User) => void;
   clearAuth: () => void;
   setActiveTrip: (trip: TripResult | null) => void;
@@ -39,6 +40,7 @@ interface AppState {
   setThemeMode: (mode: 'light' | 'dark') => void;
   setUserLoc: (loc: { lat: number; lng: number } | null) => void;
   setMapboxToken: (token: string) => void;
+  setSessionId: (id: string) => void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -50,6 +52,7 @@ export const useStore = create<AppState>((set) => ({
   themeMode: 'light',
   userLoc: null,
   mapboxToken: '',
+  sessionId: 'sess_' + Math.random().toString(36).slice(2, 12),
 
   setAuth: (token, user) => {
     SecureStore.setItemAsync('trailhead_token', token);
@@ -81,20 +84,31 @@ export const useStore = create<AppState>((set) => ({
 
   setUserLoc: (loc) => set({ userLoc: loc }),
   setMapboxToken: (token) => set({ mapboxToken: token }),
+  setSessionId: (id) => {
+    SecureStore.setItemAsync('trailhead_session', id);
+    set({ sessionId: id });
+  },
 }));
 
 // Load persisted data on startup
 (async () => {
   try {
-    const [rigRaw, historyRaw, themeRaw] = await Promise.all([
+    const [rigRaw, historyRaw, themeRaw, sessionRaw] = await Promise.all([
       SecureStore.getItemAsync('trailhead_rig'),
       SecureStore.getItemAsync('trailhead_history'),
       SecureStore.getItemAsync('trailhead_theme'),
+      SecureStore.getItemAsync('trailhead_session'),
     ]);
     const patch: Partial<AppState> = {};
     if (rigRaw) patch.rigProfile = JSON.parse(rigRaw);
     if (historyRaw) patch.tripHistory = JSON.parse(historyRaw);
     if (themeRaw === 'dark' || themeRaw === 'light') patch.themeMode = themeRaw;
+    if (sessionRaw) patch.sessionId = sessionRaw;
+    else {
+      // First run — persist the generated ID
+      const id = useStore.getState().sessionId;
+      SecureStore.setItemAsync('trailhead_session', id);
+    }
     if (Object.keys(patch).length > 0) useStore.setState(patch);
   } catch {}
 })();

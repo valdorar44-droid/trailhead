@@ -2,69 +2,83 @@ import { Platform } from 'react-native';
 import { useStore } from './store';
 
 export const DARK_C = {
-  bg:      '#080c12',
-  s1:      '#0f1319',
-  s2:      '#161c27',
-  s3:      '#1e2535',
-  border:  '#252d3d',
-  border2: '#1a2030',
-  orange:  '#f97316',
-  orange2: '#ea580c',
-  orangeGlow: 'rgba(249,115,22,0.18)',
-  green:   '#22c55e',
-  green2:  '#16a34a',
-  yellow:  '#eab308',
-  red:     '#ef4444',
-  red2:    '#b91c1c',
-  purple:  '#a855f7',
-  text:    '#f1f5f9',
-  text2:   '#94a3b8',
-  text3:   '#4b5563',
-  white:   '#ffffff',
+  bg:         '#060d07',
+  s1:         '#0d1a0e',
+  s2:         '#152016',
+  s3:         '#1c2b1d',
+  s4:         '#253026',
+  border:     '#2a3a2b',
+  border2:    '#1a2519',
+  // Primary accent — burnt rust
+  orange:     '#b85c38',
+  orange2:    '#9c4a28',
+  orangeGlow: 'rgba(184,92,56,0.18)',
+  // Secondary accents
+  gold:       '#c8953a',
+  sage:       '#7aaa7c',
+  pine:       '#4d8c5f',
+  // Status colors
+  green:      '#3dbd6d',
+  green2:     '#16a34a',
+  yellow:     '#d4a017',
+  red:        '#ef4444',
+  red2:       '#b91c1c',
+  purple:     '#a855f7',
+  // Text
+  text:       '#e4ddd2',
+  text2:      '#8a9285',
+  text3:      '#4a5a4c',
+  white:      '#ffffff',
 };
 
 export const LIGHT_C = {
-  bg:      '#f8fafc',
-  s1:      '#f1f5f9',
-  s2:      '#e8edf5',
-  s3:      '#dde3ed',
-  border:  '#c8d3e0',
-  border2: '#b8c5d6',
-  orange:  '#f97316',
-  orange2: '#ea580c',
-  orangeGlow: 'rgba(249,115,22,0.12)',
-  green:   '#16a34a',
-  green2:  '#15803d',
-  yellow:  '#ca8a04',
-  red:     '#dc2626',
-  red2:    '#b91c1c',
-  purple:  '#7c3aed',
-  text:    '#0f172a',
-  text2:   '#475569',
-  text3:   '#94a3b8',
-  white:   '#ffffff',
+  bg:         '#f4f0eb',
+  s1:         '#ede8e2',
+  s2:         '#e5dfd7',
+  s3:         '#dbd3c8',
+  s4:         '#cfc6b8',
+  border:     '#c4b9a8',
+  border2:    '#b8ac9a',
+  // Primary accent — burnt rust (same brand color both themes)
+  orange:     '#b85c38',
+  orange2:    '#9c4a28',
+  orangeGlow: 'rgba(184,92,56,0.12)',
+  // Secondary accents
+  gold:       '#c8953a',
+  sage:       '#5a8a5c',
+  pine:       '#3d6e4f',
+  // Status colors
+  green:      '#16a34a',
+  green2:     '#15803d',
+  yellow:     '#b45309',
+  red:        '#dc2626',
+  red2:       '#b91c1c',
+  purple:     '#7c3aed',
+  // Text
+  text:       '#1a1208',
+  text2:      '#5a4e3e',
+  text3:      '#8a7a68',
+  white:      '#ffffff',
 };
 
 export type ColorPalette = typeof DARK_C;
-
-// Default to LIGHT for outdoor readability — components should use useTheme()
-export const C: ColorPalette = LIGHT_C;
 
 export function useTheme(): ColorPalette {
   const themeMode = useStore(s => s.themeMode);
   return themeMode === 'dark' ? DARK_C : LIGHT_C;
 }
 
-export const mono = Platform.OS === 'ios' ? 'Courier New' : 'monospace';
+// Mono font — Menlo on iOS is cleaner than Courier New
+export const mono = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
 
 export const DARK_TAG = {
-  '4wd':   { bg: '#450a0a', text: '#fca5a5', border: '#7f1d1d' },
-  'dirt':  { bg: '#431407', text: '#fdba74', border: '#92400e' },
-  'blm':   { bg: '#1c1917', text: '#d6d3d1', border: '#44403c' },
-  'usfs':  { bg: '#052e16', text: '#86efac', border: '#166534' },
-  'nps':   { bg: '#172554', text: '#93c5fd', border: '#1d4ed8' },
-  'mixed': { bg: '#1e2535', text: '#94a3b8', border: '#252d3d' },
-  'paved': { bg: '#052e16', text: '#86efac', border: '#166534' },
+  '4wd':   { bg: '#3a0a0a', text: '#fca5a5', border: '#6b1d1d' },
+  'dirt':  { bg: '#3a1407', text: '#fdba74', border: '#7a3508' },
+  'blm':   { bg: '#1c1917', text: '#c4b9a8', border: '#3a3430' },
+  'usfs':  { bg: '#0b2010', text: '#86c894', border: '#1a4a22' },
+  'nps':   { bg: '#0e1e3a', text: '#93c5fd', border: '#1a3a6a' },
+  'mixed': { bg: '#253026', text: '#8a9285', border: '#2a3a2b' },
+  'paved': { bg: '#0b2010', text: '#86c894', border: '#1a4a22' },
 };
 
 export const LIGHT_TAG = {
@@ -77,9 +91,11 @@ export const LIGHT_TAG = {
   'paved': { bg: '#dcfce7', text: '#166534', border: '#86efac' },
 };
 
-export const tag = DARK_TAG;
-
 export function useTag() {
   const themeMode = useStore(s => s.themeMode);
   return themeMode === 'dark' ? DARK_TAG : LIGHT_TAG;
 }
+
+// Keep legacy export for screens that import it directly
+export const tag = DARK_TAG;
+export const C: ColorPalette = DARK_C;

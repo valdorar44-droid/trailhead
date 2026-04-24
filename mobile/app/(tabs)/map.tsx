@@ -1165,7 +1165,7 @@ export default function MapScreen() {
         <TouchableOpacity style={s.ctrlBtn} onPress={() => {
           if (userLoc) webRef.current?.postMessage(JSON.stringify({ type: 'locate', lat: userLoc.lat, lng: userLoc.lng }));
         }}>
-          <Ionicons name="locate" size={20} color={C.text} />
+          <Ionicons name="locate" size={20} color={OVR.text} />
         </TouchableOpacity>
 
         <TouchableOpacity style={s.ctrlBtn} onPress={switchLayer}>
@@ -1177,7 +1177,7 @@ export default function MapScreen() {
             style={[s.ctrlBtn, navMode && { backgroundColor: C.green + 'dd', borderColor: C.green }]}
             onPress={() => navMode ? setNavMode(false) : (setNavIdx(0), navRef.current.idx = 0, setNavMode(true))}
           >
-            <Ionicons name="navigate" size={20} color={navMode ? '#fff' : C.text} />
+            <Ionicons name="navigate" size={20} color={navMode ? '#fff' : OVR.text} />
           </TouchableOpacity>
         )}
 
@@ -1185,7 +1185,7 @@ export default function MapScreen() {
           style={[s.ctrlBtn, showSearch && { backgroundColor: '#3b82f6dd', borderColor: '#3b82f6' }]}
           onPress={() => { setShowSearch(p => !p); setSearchResults([]); setSearchQuery(''); }}
         >
-          <Ionicons name="search" size={20} color={showSearch ? '#fff' : C.text} />
+          <Ionicons name="search" size={20} color={showSearch ? '#fff' : OVR.text} />
         </TouchableOpacity>
 
         {waypoints.length > 0 && (
@@ -1204,7 +1204,7 @@ export default function MapScreen() {
             <Ionicons
               name={isDownloading ? 'close-circle-outline' : offlineSaved ? 'cloud-done-outline' : 'cloud-download-outline'}
               size={20}
-              color={isDownloading ? '#fff' : offlineSaved ? C.green : C.text}
+              color={isDownloading ? '#fff' : offlineSaved ? C.green : OVR.text}
             />
           </TouchableOpacity>
         )}
@@ -1213,7 +1213,7 @@ export default function MapScreen() {
           style={[s.ctrlBtn, showFilters && { backgroundColor: '#14b8a6dd', borderColor: '#14b8a6' }]}
           onPress={() => { setShowFilters(p => !p); if (showFilters) { setActiveFilters([]); setSelectedCamp(null); } }}
         >
-          <Ionicons name="filter" size={20} color={showFilters ? '#fff' : C.text} />
+          <Ionicons name="filter" size={20} color={showFilters ? '#fff' : OVR.text} />
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -1286,14 +1286,14 @@ export default function MapScreen() {
       {showSearch && (
         <View style={s.searchOverlay}>
           <View style={s.searchBar}>
-            <Ionicons name="search" size={15} color={C.text3} />
+            <Ionicons name="search" size={15} color={OVR.text3} />
             <TextInput
               style={s.searchInput}
               value={searchQuery}
               onChangeText={setSearchQuery}
               onSubmitEditing={searchMap}
               placeholder="Search location..."
-              placeholderTextColor={C.text3}
+              placeholderTextColor={OVR.text3}
               returnKeyType="search"
               autoFocus
             />
@@ -1310,7 +1310,7 @@ export default function MapScreen() {
             <ScrollView style={s.searchResults} keyboardShouldPersistTaps="handled">
               {searchResults.map((r, i) => (
                 <TouchableOpacity key={i} style={s.searchResultItem} onPress={() => selectSearchResult(r)}>
-                  <Ionicons name="location-outline" size={13} color={C.text3} />
+                  <Ionicons name="location-outline" size={13} color={OVR.text3} />
                   <Text style={s.searchResultText} numberOfLines={2}>{r.name}</Text>
                 </TouchableOpacity>
               ))}
@@ -1873,7 +1873,7 @@ export default function MapScreen() {
             </View>
           ) : (
             <View style={s.navBearing}>
-              <Ionicons name="navigate-outline" size={18} color={C.text3} />
+              <Ionicons name="navigate-outline" size={18} color={OVR.text3} />
               <Text style={s.navBearingText}>--</Text>
             </View>
           )}
@@ -1924,7 +1924,7 @@ export default function MapScreen() {
 
           {routeSteps.length > 0 && (
             <TouchableOpacity style={s.navStepsBtn} onPress={() => setShowSteps(p => !p)}>
-              <Ionicons name="list-outline" size={14} color={C.text2} />
+              <Ionicons name="list-outline" size={14} color={OVR.text2} />
               <Text style={s.navStepsBtnText}>TURNS {showSteps ? '▲' : '▼'}</Text>
             </TouchableOpacity>
           )}
@@ -1936,7 +1936,7 @@ export default function MapScreen() {
           <ScrollView style={s.stepsList} showsVerticalScrollIndicator={false}>
             {routeSteps.filter(s => s.distance > 20).map((step, i) => (
               <View key={i} style={[s.stepRow, i === 0 && s.stepRowFirst]}>
-                <Ionicons name={stepIcon(step.type, step.modifier) as any} size={16} color={C.text3} />
+                <Ionicons name={stepIcon(step.type, step.modifier) as any} size={16} color={OVR.text3} />
                 <View style={s.stepInfo}>
                   <Text style={s.stepLabel}>{stepLabel(step.type, step.modifier)}</Text>
                   {step.name ? <Text style={s.stepRoad} numberOfLines={1}>{step.name}</Text> : null}
@@ -1995,19 +1995,31 @@ export default function MapScreen() {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
+// Map overlays always sit on dark transparent backgrounds regardless of app theme.
+// Use these constants so text stays legible in both light and dark mode.
+const OVR = {
+  bg:      'rgba(6,10,8,0.95)',
+  bg2:     'rgba(8,14,10,0.98)',
+  border:  '#1e2e20',
+  border2: '#0d1a0e',
+  text:    '#e4ddd2',
+  text2:   '#8a9285',
+  text3:   '#4a5a4c',
+};
+
 const makeStyles = (C: ColorPalette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
   map: { flex: 1 },
 
   topBar: {
     position: 'absolute', top: 56, left: 16, right: 16,
-    backgroundColor: 'rgba(8,12,18,0.92)', borderRadius: 20,
+    backgroundColor: OVR.bg, borderRadius: 20,
     paddingVertical: 8, paddingHorizontal: 14,
-    borderWidth: 1, borderColor: C.border,
+    borderWidth: 1, borderColor: OVR.border,
     flexDirection: 'row', alignItems: 'center', gap: 8,
   },
   topBarDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: C.orange },
-  topBarText: { color: C.text, fontSize: 10, fontFamily: mono, flex: 1, letterSpacing: 0.5 },
+  topBarText: { color: OVR.text, fontSize: 10, fontFamily: mono, flex: 1, letterSpacing: 0.5 },
   alertPill: {
     backgroundColor: C.red + '22', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3,
     borderWidth: 1, borderColor: C.red,
@@ -2017,32 +2029,32 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   controls: { position: 'absolute', top: 106, right: 16, gap: 8 },
   ctrlBtn: {
     width: 44, height: 44, borderRadius: 14,
-    backgroundColor: 'rgba(8,12,18,0.92)', borderWidth: 1, borderColor: C.border,
+    backgroundColor: OVR.bg, borderWidth: 1, borderColor: OVR.border,
     alignItems: 'center', justifyContent: 'center',
   },
-  layerText: { color: C.text2, fontSize: 9, fontFamily: mono, fontWeight: '800', letterSpacing: 0.5 },
+  layerText: { color: OVR.text2, fontSize: 9, fontFamily: mono, fontWeight: '800', letterSpacing: 0.5 },
 
   alertPanel: {
     position: 'absolute', top: 106, left: 16, right: 70,
-    backgroundColor: 'rgba(8,12,18,0.97)', borderRadius: 14,
+    backgroundColor: OVR.bg2, borderRadius: 14,
     borderWidth: 1, borderColor: C.red,
   },
   alertHeader: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
     paddingHorizontal: 12, paddingVertical: 9,
-    borderBottomWidth: 1, borderColor: C.border,
+    borderBottomWidth: 1, borderColor: OVR.border,
   },
   alertTitle: { color: C.red, fontSize: 10, fontFamily: mono, fontWeight: '700', flex: 1 },
-  alertItem: { paddingHorizontal: 12, paddingVertical: 8, borderBottomWidth: 1, borderColor: C.s2 },
-  alertBadge: { color: C.text, fontSize: 10, fontFamily: mono },
+  alertItem: { paddingHorizontal: 12, paddingVertical: 8, borderBottomWidth: 1, borderColor: OVR.border2 },
+  alertBadge: { color: OVR.text, fontSize: 10, fontFamily: mono },
   alertSev: { fontSize: 9, fontFamily: mono, fontWeight: '700' },
-  alertDesc: { color: C.text3, fontSize: 11 },
+  alertDesc: { color: OVR.text3, fontSize: 11 },
 
   // ── Nav HUD
   navHud: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: 'rgba(8,12,18,0.97)',
-    borderTopWidth: 1, borderColor: C.border,
+    backgroundColor: OVR.bg2,
+    borderTopWidth: 1, borderColor: OVR.border,
   },
 
   turnStrip: {
@@ -2055,29 +2067,29 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.2)', alignItems: 'center', justifyContent: 'center',
   },
   turnInfo: { flex: 1 },
-  turnLabel: { color: '#fff', fontSize: 13, fontWeight: '800', fontFamily: mono, letterSpacing: 0.5 },
-  turnRoad: { color: 'rgba(255,255,255,0.8)', fontSize: 11, marginTop: 1 },
-  turnDist: { color: '#fff', fontSize: 13, fontWeight: '700', fontFamily: mono },
+  turnLabel: { color: '#fff', fontSize: 14, fontWeight: '900', fontFamily: mono, letterSpacing: 1 },
+  turnRoad: { color: 'rgba(255,255,255,0.75)', fontSize: 11, marginTop: 2, fontFamily: mono },
+  turnDist: { color: '#fff', fontSize: 14, fontWeight: '700', fontFamily: mono },
 
   navStrip: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: 1, borderColor: C.border,
+    borderBottomWidth: 1, borderColor: OVR.border,
   },
   navBearing: { flexDirection: 'row', alignItems: 'center', gap: 5, width: 50 },
   navBearingText: { color: C.orange, fontSize: 12, fontFamily: mono, fontWeight: '700' },
   navDistBlock: { flex: 1, alignItems: 'center' },
-  navDistVal: { color: C.text, fontSize: 28, fontWeight: '800', fontFamily: mono },
-  navEta: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 1 },
-  navRemaining: { color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 2, opacity: 0.7 },
+  navDistVal: { color: OVR.text, fontSize: 28, fontWeight: '800', fontFamily: mono },
+  navEta: { color: OVR.text3, fontSize: 10, fontFamily: mono, marginTop: 1 },
+  navRemaining: { color: OVR.text3, fontSize: 9, fontFamily: mono, marginTop: 2, opacity: 0.7 },
   navSpeedBlock: { alignItems: 'center', width: 50 },
-  navSpeedVal: { color: C.text2, fontSize: 22, fontWeight: '700', fontFamily: mono },
-  navSpeedUnit: { color: C.text3, fontSize: 8, fontFamily: mono, letterSpacing: 0.5 },
+  navSpeedVal: { color: OVR.text2, fontSize: 22, fontWeight: '700', fontFamily: mono },
+  navSpeedUnit: { color: OVR.text3, fontSize: 8, fontFamily: mono, letterSpacing: 0.5 },
 
   navTarget: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     paddingHorizontal: 16, paddingVertical: 10,
-    borderBottomWidth: 1, borderColor: C.border,
+    borderBottomWidth: 1, borderColor: OVR.border,
   },
   navTargetBadge: {
     backgroundColor: C.orangeGlow, borderRadius: 6, borderWidth: 1, borderColor: C.orange,
@@ -2085,8 +2097,8 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   navTargetBadgeText: { color: C.orange, fontSize: 8, fontFamily: mono, fontWeight: '700' },
   navTargetInfo: { flex: 1 },
-  navTargetName: { color: C.text, fontSize: 14, fontWeight: '700' },
-  navTargetMeta: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
+  navTargetName: { color: OVR.text, fontSize: 14, fontWeight: '700', fontFamily: mono },
+  navTargetMeta: { color: OVR.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
 
   navActions: {
     flexDirection: 'row', gap: 8,
@@ -2101,46 +2113,46 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   navStepsBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
     paddingHorizontal: 12, paddingVertical: 10, borderRadius: 11,
-    borderWidth: 1, borderColor: C.border, backgroundColor: C.s2,
+    borderWidth: 1, borderColor: OVR.border, backgroundColor: OVR.border2,
   },
-  navStepsBtnText: { color: C.text2, fontSize: 11, fontFamily: mono },
+  navStepsBtnText: { color: OVR.text2, fontSize: 11, fontFamily: mono },
   dlBar: {
     position: 'absolute', top: 92, left: 16, right: 16,
     height: 3, borderRadius: 1.5, backgroundColor: C.border, overflow: 'hidden',
   },
   dlFill: { height: 3, backgroundColor: C.orange, borderRadius: 1.5 },
 
-  stepsList: { maxHeight: 200, borderTopWidth: 1, borderColor: C.border },
-  stepRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 9, borderBottomWidth: 1, borderColor: C.s2 },
-  stepRowFirst: { backgroundColor: C.s2 },
+  stepsList: { maxHeight: 200, borderTopWidth: 1, borderColor: OVR.border },
+  stepRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 9, borderBottomWidth: 1, borderColor: OVR.border2 },
+  stepRowFirst: { backgroundColor: OVR.border2 },
   stepInfo: { flex: 1 },
-  stepLabel: { color: C.text2, fontSize: 11, fontFamily: mono, fontWeight: '700' },
-  stepRoad: { color: C.text3, fontSize: 10, marginTop: 1 },
-  stepDist: { color: C.text3, fontSize: 10, fontFamily: mono },
+  stepLabel: { color: OVR.text2, fontSize: 11, fontFamily: mono, fontWeight: '700' },
+  stepRoad: { color: OVR.text3, fontSize: 10, marginTop: 1, fontFamily: mono },
+  stepDist: { color: OVR.text3, fontSize: 10, fontFamily: mono },
 
   // ── Search overlay
   searchOverlay: {
     position: 'absolute', top: 106, left: 16, right: 70,
-    backgroundColor: 'rgba(8,12,18,0.97)', borderRadius: 14,
+    backgroundColor: OVR.bg2, borderRadius: 14,
     borderWidth: 1, borderColor: '#3b82f6',
     overflow: 'hidden',
   },
   searchBar: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
     paddingHorizontal: 12, paddingVertical: 10,
-    borderBottomWidth: 1, borderColor: C.border,
+    borderBottomWidth: 1, borderColor: OVR.border,
   },
   searchInput: {
-    flex: 1, color: C.text, fontSize: 13, fontFamily: mono,
+    flex: 1, color: OVR.text, fontSize: 14, fontFamily: mono,
   },
   searchGo: { color: C.orange, fontSize: 11, fontFamily: mono, fontWeight: '700' },
   searchResults: { maxHeight: 240 },
   searchResultItem: {
     flexDirection: 'row', alignItems: 'flex-start', gap: 8,
     paddingHorizontal: 12, paddingVertical: 10,
-    borderBottomWidth: 1, borderColor: C.s2,
+    borderBottomWidth: 1, borderColor: OVR.border2,
   },
-  searchResultText: { color: C.text2, fontSize: 12, flex: 1, lineHeight: 17 },
+  searchResultText: { color: OVR.text2, fontSize: 12, flex: 1, lineHeight: 17, fontFamily: mono },
 
   // ── Bottom panel
   panel: { backgroundColor: C.s1, borderTopWidth: 1, borderColor: C.border, paddingBottom: 10 },

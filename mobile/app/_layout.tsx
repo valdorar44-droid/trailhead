@@ -1,6 +1,6 @@
 import '@/lib/backgroundTasks'; // must be first — registers background location task
-import { useEffect } from 'react';
-import { AppState } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { AppState, View, Text, TouchableOpacity } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SecureStore from 'expo-secure-store';
@@ -8,33 +8,55 @@ import * as Notifications from 'expo-notifications';
 import * as Updates from 'expo-updates';
 import { useStore } from '@/lib/store';
 import { api } from '@/lib/api';
-import { useTheme } from '@/lib/design';
+import { useTheme, mono } from '@/lib/design';
 
 export default function RootLayout() {
-  const setAuth = useStore(s => s.setAuth);
-  const themeMode = useStore(s => s.themeMode);
-  const router = useRouter();
+  const setAuth     = useStore(s => s.setAuth);
+  const themeMode   = useStore(s => s.themeMode);
+  const router      = useRouter();
+  const C           = useTheme();
+  const [updateBanner, setUpdateBanner] = useState(false);
+  const updateReady  = useRef(false);
+  const checking     = useRef(false);
+
+  async function checkForUpdate() {
+    if (checking.current) return;
+    checking.current = true;
+    try {
+      const { isAvailable } = await Updates.checkForUpdateAsync();
+      if (isAvailable) {
+        await Updates.fetchUpdateAsync();
+        updateReady.current = true;
+        setUpdateBanner(true); // show "update ready" banner
+      }
+    } catch (e) {
+      // silently ignore — network may be unavailable
+    } finally {
+      checking.current = false;
+    }
+  }
+
+  function applyUpdate() {
+    setUpdateBanner(false);
+    Updates.reloadAsync().catch(() => {});
+  }
 
   useEffect(() => {
     let appStateSub: ReturnType<typeof AppState.addEventListener> | null = null;
 
     if (!__DEV__) {
-      const updateReady = { current: false };
-      const firstActive = { current: true };
+      // Check immediately on launch
+      checkForUpdate();
 
-      // Download update in background — don't restart during launch
-      Updates.checkForUpdateAsync().then(async result => {
-        if (result.isAvailable) {
-          await Updates.fetchUpdateAsync();
-          updateReady.current = true;
-        }
-      }).catch(() => {});
-
-      // Apply only when user returns from background (not mid-session)
+      // On every foreground: apply if ready, otherwise re-check for new deploys
       appStateSub = AppState.addEventListener('change', state => {
         if (state === 'active') {
-          if (firstActive.current) { firstActive.current = false; return; }
-          if (updateReady.current) { Updates.reloadAsync().catch(() => {}); }
+          if (updateReady.current) {
+            // Update was downloaded while app was backgrounded — apply now
+            Updates.reloadAsync().catch(() => {});
+          } else {
+            checkForUpdate();
+          }
         }
       });
     }
@@ -48,10 +70,8 @@ export default function RootLayout() {
       } catch { SecureStore.deleteItemAsync('trailhead_token'); }
     });
 
-    // Request notification permissions on first launch
     Notifications.requestPermissionsAsync().catch(() => {});
 
-    // Route notification taps: trail alerts → report tab, audio guide → guide tab
     const notifSub = Notifications.addNotificationResponseReceivedListener(response => {
       const data = response.notification.request.content.data as any;
       if (data?.type === 'trail_alert') {
@@ -60,6 +80,7 @@ export default function RootLayout() {
         router.push('/guide');
       }
     });
+
     return () => {
       notifSub.remove();
       appStateSub?.remove();
@@ -70,6 +91,27 @@ export default function RootLayout() {
     <>
       <StatusBar style={themeMode === 'dark' ? 'light' : 'dark'} />
       <Stack screenOptions={{ headerShown: false }} />
+      {updateBanner && (
+        <View style={{
+          position: 'absolute', bottom: 90, left: 16, right: 16, zIndex: 9999,
+          backgroundColor: '#1a2e1a', borderRadius: 12, borderWidth: 1, borderColor: '#22c55e',
+          flexDirection: 'row', alignItems: 'center', padding: 14, gap: 12,
+        }}>
+          <Text style={{ color: '#22c55e', fontSize: 16 }}>⬆</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: '#fff', fontSize: 13, fontWeight: '800', fontFamily: mono }}>Update ready</Text>
+            <Text style={{ color: 'rgba(255,255,255,0.55)', fontSize: 11, fontFamily: mono, marginTop: 2 }}>
+              New features downloaded — restart to apply
+            </Text>
+          </View>
+          <TouchableOpacity
+            onPress={applyUpdate}
+            style={{ backgroundColor: '#22c55e', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 }}
+          >
+            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '900', fontFamily: mono }}>RESTART</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </>
   );
 }

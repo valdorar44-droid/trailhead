@@ -33,6 +33,7 @@ from db.store import (
     get_all_trips, get_all_pins, delete_pin, ensure_admin_user,
     submit_bug_report, get_all_bug_reports, award_bug_credits, dismiss_bug_report,
     get_trail_dna, save_trail_dna, get_conversation, save_conversation, clear_conversation,
+    report_camp_full, confirm_camp_full, dispute_camp_full, get_camp_fullness, get_fullness_nearby,
 )
 
 # ── Credit economy ─────────────────────────────────────────────────────────────
@@ -500,6 +501,33 @@ async def campsite_detail(facility_id: str):
 async def gas(lat: float, lng: float, radius: float = 25):
     from ingestors.nrel import get_fuel_near
     return await get_fuel_near(lat, lng, radius_miles=radius)
+
+
+# ── Camp fullness ──────────────────────────────────────────────────────────────
+
+class CampFullRequest(BaseModel):
+    camp_name: str = ""; lat: float; lng: float
+
+@app.post("/api/camps/{camp_id}/full")
+async def api_report_camp_full(camp_id: str, body: CampFullRequest, user: dict = Depends(_current_user)):
+    return report_camp_full(camp_id, body.camp_name, body.lat, body.lng, user["id"])
+
+@app.post("/api/camps/{camp_id}/confirm-full")
+async def api_confirm_camp_full(camp_id: str, user: dict = Depends(_current_user)):
+    return confirm_camp_full(camp_id, user["id"])
+
+@app.post("/api/camps/{camp_id}/dispute-full")
+async def api_dispute_camp_full(camp_id: str, user: dict = Depends(_current_user)):
+    return dispute_camp_full(camp_id, user["id"])
+
+@app.get("/api/camps/fullness/nearby")
+async def api_fullness_nearby(lat: float, lng: float, radius: float = 0.5):
+    return get_fullness_nearby(lat, lng, radius_deg=radius)
+
+@app.get("/api/camps/{camp_id}/fullness")
+async def api_camp_fullness(camp_id: str):
+    result = get_camp_fullness(camp_id)
+    return result if result else {}
 
 
 # ── Community pins ─────────────────────────────────────────────────────────────

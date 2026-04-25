@@ -1,16 +1,27 @@
 import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
-import { User, TripResult, Report } from './api';
+import { User, TripResult, Report, CampsitePin } from './api';
 
 export interface RigProfile {
   vehicle_type: string;
   year: string;
   make: string;
   model: string;
-  ground_clearance_in: string;
-  lift_in: string;
+  trim?: string;
   drive: string;
+  lift_in: string;
+  suspension?: string;
+  tire_size?: string;
+  ground_clearance_in: string;
   length_ft: string;
+  has_winch?: boolean;
+  winch_lbs?: string;
+  locking_diffs?: string;
+  has_skids?: boolean;
+  has_rack?: boolean;
+  is_towing?: boolean;
+  trailer_length_ft?: string;
+  tow_capacity_lbs?: string;
 }
 
 export interface TripHistoryItem {
@@ -34,6 +45,7 @@ interface AppState {
   sessionId: string;
   liveReports: Report[];
   cachedRegions: string[];
+  favoriteCamps: CampsitePin[];
   setAuth: (token: string, user: User) => void;
   clearAuth: () => void;
   setActiveTrip: (trip: TripResult | null) => void;
@@ -46,6 +58,7 @@ interface AppState {
   addLiveReport: (report: Report) => void;
   setLiveReports: (reports: Report[]) => void;
   addCachedRegion: (label: string) => void;
+  toggleFavorite: (camp: CampsitePin) => void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -60,6 +73,7 @@ export const useStore = create<AppState>((set) => ({
   sessionId: 'sess_' + Math.random().toString(36).slice(2, 12),
   liveReports: [],
   cachedRegions: [],
+  favoriteCamps: [],
 
   setAuth: (token, user) => {
     SecureStore.setItemAsync('trailhead_token', token);
@@ -102,21 +116,32 @@ export const useStore = create<AppState>((set) => ({
     SecureStore.setItemAsync('trailhead_session', id);
     set({ sessionId: id });
   },
+
+  toggleFavorite: (camp) => set((state) => {
+    const exists = state.favoriteCamps.some(f => f.id === camp.id);
+    const updated = exists
+      ? state.favoriteCamps.filter(f => f.id !== camp.id)
+      : [camp, ...state.favoriteCamps].slice(0, 50);
+    SecureStore.setItemAsync('trailhead_favorites', JSON.stringify(updated));
+    return { favoriteCamps: updated };
+  }),
 }));
 
 // Load persisted data on startup
 (async () => {
   try {
-    const [rigRaw, historyRaw, themeRaw, sessionRaw] = await Promise.all([
+    const [rigRaw, historyRaw, themeRaw, sessionRaw, favRaw] = await Promise.all([
       SecureStore.getItemAsync('trailhead_rig'),
       SecureStore.getItemAsync('trailhead_history'),
       SecureStore.getItemAsync('trailhead_theme'),
       SecureStore.getItemAsync('trailhead_session'),
+      SecureStore.getItemAsync('trailhead_favorites'),
     ]);
     const patch: Partial<AppState> = {};
     if (rigRaw) patch.rigProfile = JSON.parse(rigRaw);
     if (historyRaw) patch.tripHistory = JSON.parse(historyRaw);
     if (themeRaw === 'dark' || themeRaw === 'light') patch.themeMode = themeRaw;
+    if (favRaw) patch.favoriteCamps = JSON.parse(favRaw);
     if (sessionRaw) patch.sessionId = sessionRaw;
     else {
       // First run — persist the generated ID

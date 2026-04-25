@@ -103,6 +103,18 @@ export const api = {
 
   submitBugReport: (data: { title: string; description: string; app_version?: string }) =>
     req<{ bug_id: number; message: string }>('/api/bugs', { method: 'POST', body: JSON.stringify(data) }),
+
+  // Camp fullness
+  reportCampFull: (campId: string, data: { camp_name: string; lat: number; lng: number }) =>
+    req<CampFullnessResult>(`/api/camps/${encodeURIComponent(campId)}/full`, { method: 'POST', body: JSON.stringify(data) }),
+  confirmCampFull: (campId: string) =>
+    req<CampFullnessResult>(`/api/camps/${encodeURIComponent(campId)}/confirm-full`, { method: 'POST' }),
+  disputeCampFull: (campId: string) =>
+    req<CampFullnessResult>(`/api/camps/${encodeURIComponent(campId)}/dispute-full`, { method: 'POST' }),
+  getCampFullness: (campId: string) =>
+    req<CampFullness | null>(`/api/camps/${encodeURIComponent(campId)}/fullness`),
+  getNearbyFullness: (lat: number, lng: number, radius?: number) =>
+    req<CampFullness[]>(`/api/camps/fullness/nearby?lat=${lat}&lng=${lng}&radius=${radius ?? 0.5}`),
 };
 
 export interface TrailDNA {
@@ -236,4 +248,15 @@ export interface WeatherForecast {
     windspeed_10m_max: number[];
     weathercode: number[];
   };
+}
+export interface CampFullness {
+  camp_id: string; camp_name: string; lat: number; lng: number;
+  status: 'full' | 'open'; reporter_id: number; username?: string;
+  confirmations: number; disputes: number;
+  reported_at: number; expires_at: number;
+}
+export interface CampFullnessResult {
+  credits_earned: number; new_balance: number;
+  confirmations?: number; disputes?: number;
+  status?: string; already_reported?: boolean; already_voted?: boolean;
 }

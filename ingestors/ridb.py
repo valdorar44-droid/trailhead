@@ -19,29 +19,47 @@ def _tag_facility(facility: dict) -> list[str]:
     ftype = (facility.get("FacilityTypeDescription") or "").lower()
     combo = f"{name} {desc} {ftype}"
 
-    # Land type
-    if any(k in combo for k in ["national forest", "usfs", "ranger district", "national grassland"]):
+    # ── Managing agency / land type ──────────────────────────────────────────
+    if any(k in combo for k in ["national forest", "usfs", "ranger district", "national grassland", "u.s. forest", "us forest"]):
         tags.add("usfs")
-    if any(k in combo for k in ["national park", "national monument", "national recreation area", "nps", "national seashore", "national lakeshore"]):
+    if any(k in combo for k in ["national park", "national monument", "national recreation area", "nps", "national seashore", "national lakeshore", "national parkway", "national battlefield"]):
         tags.add("nps")
     if "blm" in combo or "bureau of land management" in combo:
         tags.add("blm")
-    if any(k in combo for k in ["state park", "state recreation", "state forest", "state campground", "state beach", "state lake"]):
+    if any(k in combo for k in ["state park", "state recreation", "state forest", "state campground", "state beach", "state lake", "state game", "dnr camp", "state wildlife"]):
         tags.add("state")
+    if any(k in combo for k in ["army corps", "corps of engineers", "usace", "corps district"]):
+        tags.add("corps")
 
-    # Site type
-    if any(k in combo for k in ["rv park", "rv hookup", "hookup", "full hookup", "electric hookup", "water and electric"]):
+    # ── Site / facility type ─────────────────────────────────────────────────
+    if any(k in combo for k in ["rv park", "rv hookup", "hookup", "full hookup", "electric hookup", "water and electric", "electrical site", "full service", "water/electric"]):
         tags.add("rv")
-    if any(k in combo for k in ["dispersed", "boondock", "primitive camping", "backcountry", "dispersed camping"]):
+    if any(k in combo for k in ["dispersed", "boondock", "primitive camping", "primitive site", "roadside camp", "dispersed camping"]):
         tags.add("dispersed")
     if any(k in combo for k in ["overnight parking", "trailhead parking", "parking area"]):
         tags.add("parking")
+    if any(k in combo for k in ["group camp", "group site", "group area", "group picnic", "organized group", "large group", "group use"]):
+        tags.add("group")
+    if any(k in combo for k in ["walk-in", "walk in only", "hike-in", "hike in", "backpack camp", "backpacking", "backcountry tent", "primitive hike"]):
+        tags.add("walk_in")
+    if any(k in combo for k in ["equestrian", "horse camp", "horse site", "horseback", "stock camp", "corral", "horse trailer", "stock use"]):
+        tags.add("equestrian")
+    if any(k in combo for k in ["lakefront", "lake front", "lakeside", "waterfront", "water front", "riverside", "beachside", "beach camp", "water access"]):
+        tags.add("waterfront")
 
-    # Most campgrounds support tent camping
+    # ── ADA accessibility ────────────────────────────────────────────────────
+    if facility.get("FacilityAdaAccess") == "Y":
+        tags.add("ada")
+
+    # ── Most developed campgrounds support tent camping ──────────────────────
     if not {"dispersed", "parking"}.intersection(tags):
         tags.add("tent")
     if "rv" not in tags and any(k in combo for k in ["rv", "recreational vehicle"]):
         tags.add("rv")
+
+    # ── Free / no-fee ────────────────────────────────────────────────────────
+    if any(k in combo for k in ["no fee", "no charge", "fee free", "free camp", "no cost"]) and not facility.get("Reservable"):
+        tags.add("free")
 
     return list(tags)
 

@@ -2,10 +2,11 @@ import { useEffect, useRef, useState, useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Linking, Animated, TextInput, ActivityIndicator, Modal, Image, Share, Alert } from 'react-native';
 import { WebView } from 'react-native-webview';
 import * as Location from 'expo-location';
+import * as SecureStore from 'expo-secure-store';
 import * as Speech from 'expo-speech';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '@/lib/store';
-import { api, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList } from '@/lib/api';
+import { api, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast } from '@/lib/api';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 
 // ─── US State bounding boxes for offline download ─────────────────────────────
@@ -86,6 +87,7 @@ interface RouteStep {
   lat?: number;     // maneuver point — used for step advancement
   lng?: number;
   lanes?: { indications: string[]; valid: boolean; active?: boolean }[];
+  speedLimit?: number | null; // kph, from per-step maxspeed annotation
 }
 
 // ─── Geo math ─────────────────────────────────────────────────────────────────
@@ -135,6 +137,25 @@ function formatStepDist(metres: number) {
   const mi = metres * 0.000621371;
   if (mi < 0.4) return `${Math.round(mi * 10) / 10} MI`;
   return mi >= 10 ? `${Math.round(mi)} MI` : `${mi.toFixed(1)} MI`;
+}
+
+// Compute Mapbox zoom level from speed for speed-aware camera
+function navZoom(speedMs: number | null): number {
+  if (!speedMs || speedMs < 4)  return 17;  // stopped/slow
+  if (speedMs < 14)             return 16;  // <30 mph, city
+  if (speedMs < 22)             return 15;  // <50 mph, suburban
+  if (speedMs < 35)             return 14;  // highway
+  return 13;                                // freeway
+}
+
+// Format ETA as clock time: "3:42 PM"
+function etaClockTime(mins: number): string {
+  const d = new Date(Date.now() + mins * 60000);
+  const h = d.getHours();
+  const m = d.getMinutes();
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  return `${h12}:${m.toString().padStart(2, '0')} ${ampm}`;
 }
 
 // Returns [far_m, near_m] announcement distances based on current speed
@@ -224,13 +245,23 @@ function stepSpeak(type: string, modifier: string, name?: string): string {
 // Build spoken announcement from step — natural, not robotic
 function buildAnnouncement(step: RouteStep, distM: number, phase: 'far' | 'near'): string {
   const type     = step.type     ?? 'turn';
-  const modifier = step.modifier ?? 'straight';
+  const modifier = (step.modifier ?? '').toLowerCase();
   const action   = stepSpeak(type, modifier, step.name);
   const road     = step.name ? ` on ${step.name}` : '';
   if (type === 'arrive') {
     return phase === 'far'
       ? `You'll arrive at your destination in ${speakDist(distM)}.`
       : `You have arrived at your destination.`;
+  }
+  // Straight/continue: don't say "continue straight", say "stay on road for X" once
+  const isStraight = modifier === '' || modifier === 'straight';
+  if (isStraight && type !== 'arrive') {
+    if (phase === 'far') {
+      return step.name
+        ? `Stay on ${step.name} for ${speakDist(distM)}.`
+        : `Continue for ${speakDist(distM)}.`;
+    }
+    return `Keep straight${road}.`;
   }
   if (phase === 'near') {
     if (distM < 30) return `${action}${road}.`;
@@ -256,10 +287,11 @@ function estimateTileCount(n: number, s: number, e: number, w: number, minZ: num
   }
   return count;
 }
-// 3 tile sources per coord (streets vector + terrain vector + satellite raster)
-function tilesMB(count: number, maxZ: number): string {
-  const avgKBPerCoord = maxZ >= 15 ? 55 : maxZ >= 13 ? 80 : maxZ >= 11 ? 110 : 150;
-  const mb = (count * avgKBPerCoord) / 1024;
+function tilesMB(count: number, maxZ: number, vectorOnly = false): string {
+  const avgKB = vectorOnly
+    ? (maxZ >= 15 ? 10 : maxZ >= 13 ? 8 : 5)
+    : (maxZ >= 15 ? 130 : maxZ >= 13 ? 85 : maxZ >= 11 ? 40 : 20);
+  const mb = (count * avgKB) / 1024;
   if (mb < 1) return '<1 MB';
   if (mb >= 1024) return `~${(mb / 1024).toFixed(1)} GB`;
   if (mb >= 100) return `~${Math.round(mb / 50) * 50} MB`;
@@ -311,6 +343,37 @@ function tagEmoji(tag: string): string {
   if (t === 'blm') return '🏜️';
   if (t === 'nps') return '🏔️';
   return '•';
+}
+
+function weatherIcon(code: number): string {
+  if (code === 0) return '☀️';
+  if (code <= 2) return '⛅';
+  if (code <= 48) return '☁️';
+  if (code <= 67) return '🌧️';
+  if (code <= 77) return '❄️';
+  if (code <= 82) return '🌦️';
+  return '⛈️';
+}
+
+function rigCompatibility(camp: CampsitePin, rig: import('@/lib/store').RigProfile | null): { ok: boolean; msg: string } | null {
+  if (!rig) return null;
+  const tags = camp.tags || [];
+  const desc = (camp.description || '').toLowerCase();
+  const needsHighClear = desc.includes('high clearance') || desc.includes('4wd') || desc.includes('4-wheel') || desc.includes('rough road');
+  const clearance = parseFloat(rig.ground_clearance_in || '0');
+  const drive = (rig.drive || '').toLowerCase();
+  const length = parseFloat(rig.length_ft || '0');
+  const isTowing = rig.is_towing;
+  const trailerLen = parseFloat(rig.trailer_length_ft || '0');
+  const totalLen = length + (isTowing ? trailerLen : 0);
+
+  if (tags.includes('walk_in')) return { ok: false, msg: '🚶 WALK-IN ONLY' };
+  if (needsHighClear && drive === '2wd') return { ok: false, msg: '⚠️ 4WD RECOMMENDED' };
+  if (needsHighClear && clearance > 0 && clearance < 8.5) return { ok: false, msg: `⚠️ CHECK CLEARANCE (${clearance}")` };
+  if (isTowing && totalLen > 28 && !tags.includes('rv')) return { ok: false, msg: `⚠️ TIGHT FOR ${Math.round(totalLen)}' RIG` };
+  if (isTowing && tags.includes('rv')) return { ok: true, msg: '✅ RV/TRAILER OK' };
+  if (tags.includes('rv') && !isTowing) return { ok: true, msg: '⛺ TENT & RV OK' };
+  return { ok: true, msg: '✅ RIG COMPATIBLE' };
 }
 
 // ─── Map HTML ─────────────────────────────────────────────────────────────────
@@ -395,7 +458,7 @@ const buildMapHtml = (
   var lastSpeed=null;
   var _routeLoading=false;
   var routeIsProper=false;
-  var showLandOverlay=false;
+  var showLandOverlay=false,showUsgsOverlay=false;
   var routeOpts={avoidTolls:false,avoidHighways:false,backRoads:false,noFerries:false};
   var _routeCoords=[],routePts=[],breadcrumbPts=[];
   var lastOffCheck=0,downloadActive=false,mapReady=false,pendingMsgs=[];
@@ -409,7 +472,7 @@ const buildMapHtml = (
   var _origFetch=window.fetch.bind(window);
   window.fetch=async function(input,init){
     var url=typeof input==='string'?input:(input&&input.url?input.url:'');
-    var isTile=url&&(url.indexOf('api.mapbox.com/v4/')>=0||url.indexOf('api.mapbox.com/styles/')>=0||url.indexOf('api.mapbox.com/fonts/')>=0||url.indexOf('api.mapbox.com/sprites/')>=0);
+    var isTile=url&&(url.indexOf('api.mapbox.com/v4/')>=0||url.indexOf('api.mapbox.com/styles/')>=0||url.indexOf('api.mapbox.com/fonts/')>=0||url.indexOf('api.mapbox.com/sprites/')>=0||url.indexOf('basemap.nationalmap.gov')>=0);
     if(isTile){
       try{
         var cacheKey=url.replace(/access_token=[^&]*/,'access_token=_');
@@ -426,44 +489,63 @@ const buildMapHtml = (
 
   function _ll2t(lat,lng,z){var x=Math.floor((lng+180)/360*Math.pow(2,z));var s=Math.sin(lat*Math.PI/180);var y=Math.floor((0.5-Math.log((1+s)/(1-s))/(4*Math.PI))*Math.pow(2,z));return{x:Math.max(0,x),y:Math.max(0,y)};}
 
-  // The real tiles Mapbox GL JS requests — vector streets, terrain, satellite
-  function _tileUrls(z,x,y){
+  function _mbUrls(z,x,y,vectorOnly){
     var t=mapboxToken;
-    return [
+    var v=[
       'https://api.mapbox.com/v4/mapbox.mapbox-streets-v8/'+z+'/'+x+'/'+y+'.vector.pbf?access_token='+t,
       'https://api.mapbox.com/v4/mapbox.mapbox-terrain-v2/'+z+'/'+x+'/'+y+'.vector.pbf?access_token='+t,
-      'https://api.mapbox.com/v4/mapbox.satellite/'+z+'/'+x+'/'+y+'.jpg90?access_token='+t,
     ];
+    if(!vectorOnly)v.push('https://api.mapbox.com/v4/mapbox.satellite/'+z+'/'+x+'/'+y+'.jpg90?access_token='+t);
+    return v;
   }
+  function _kbPer(z,vectorOnly){return vectorOnly?(z>=15?10:z>=13?8:5):(z>=15?130:z>=13?85:z>=11?40:20);}
 
-  // Average KB per tile-set (streets+terrain vector + satellite) by zoom
-  function _avgKbPerCoord(z){return z>=15?55:z>=13?80:z>=11?110:150;}
-
-  async function _dlTiles(n,s,e,w,minZ,maxZ){
-    var coords=[];
-    for(var z=minZ;z<=maxZ;z++){
-      var nw=_ll2t(n,w,z),se=_ll2t(s,e,z),cap=Math.pow(2,z)-1;
-      for(var x=Math.max(0,nw.x);x<=Math.min(cap,se.x);x++){
-        for(var y=Math.max(0,nw.y);y<=Math.min(cap,se.y);y++){
-          coords.push({z:z,x:x,y:y});
-        }
-      }
-    }
-    var total=coords.length,saved=0,bytes=0,BATCH=30;
+  async function _runDl(coords,vectorOnly){
+    var total=coords.length,saved=0,bytes=0,BATCH=20;
     postRN({type:'download_progress',percent:0,saved:0,total:total,mb:'0'});
     for(var i=0;i<coords.length;i+=BATCH){
       if(!downloadActive)break;
       var batch=coords.slice(i,i+BATCH);
       await Promise.allSettled(batch.map(async function(t){
-        var urls=_tileUrls(t.z,t.x,t.y);
-        for(var ui=0;ui<urls.length;ui++){
-          try{await fetch(urls[ui]);}catch(e){}
-        }
-        saved++;bytes+=_avgKbPerCoord(t.z)*1024;
+        var urls=_mbUrls(t.z,t.x,t.y,vectorOnly);
+        for(var ui=0;ui<urls.length;ui++){try{await fetch(urls[ui]);}catch(e){}}
+        saved++;bytes+=_kbPer(t.z,vectorOnly)*1024;
         postRN({type:'download_progress',percent:Math.round(saved/total*100),saved:saved,total:total,mb:(bytes/1048576).toFixed(1)});
       }));
     }
     postRN({type:'download_complete',saved:saved,total:total});
+  }
+
+  // Bbox download (used for state-level downloads)
+  async function _dlTiles(n,s,e,w,minZ,maxZ,vectorOnly){
+    var coords=[];
+    for(var z=minZ;z<=maxZ;z++){
+      var nw=_ll2t(n,w,z),se=_ll2t(s,e,z),cap=Math.pow(2,z)-1;
+      for(var x=Math.max(0,nw.x);x<=Math.min(cap,se.x);x++){
+        for(var y=Math.max(0,nw.y);y<=Math.min(cap,se.y);y++){coords.push({z:z,x:x,y:y});}
+      }
+    }
+    await _runDl(coords,!!vectorOnly);
+  }
+
+  // Route-corridor download: buffers around actual route coords — far fewer tiles than bbox
+  async function _dlTilesRoute(bufferKm,minZ,maxZ,vectorOnly){
+    if(!_routeCoords||!_routeCoords.length){postRN({type:'download_complete',saved:0,total:0});return;}
+    var tileSet=new Set();
+    var step=Math.max(1,Math.floor(_routeCoords.length/400));
+    for(var z=minZ;z<=maxZ;z++){
+      for(var i=0;i<_routeCoords.length;i+=step){
+        var lon=_routeCoords[i][0],lat=_routeCoords[i][1];
+        var bufLat=bufferKm/111.0;
+        var bufLng=bufferKm/(111.0*Math.max(0.05,Math.cos(lat*Math.PI/180)));
+        var nw=_ll2t(lat+bufLat,lon-bufLng,z),se=_ll2t(lat-bufLat,lon+bufLng,z),cap=Math.pow(2,z)-1;
+        for(var x=Math.max(0,nw.x);x<=Math.min(cap,se.x);x++){
+          for(var y=Math.max(0,nw.y);y<=Math.min(cap,se.y);y++){tileSet.add(z+'|'+x+'|'+y);}
+        }
+      }
+    }
+    var coords=Array.from(tileSet).map(function(s){var p=s.split('|');return{z:+p[0],x:+p[1],y:+p[2]};});
+    await _runDl(coords,!!vectorOnly);
   }
 
   // ── Map init ──────────────────────────────────────────────────────────────────
@@ -484,17 +566,59 @@ const buildMapHtml = (
       setupSources();setupLayers();renderWaypoints();
       updateCampSrc();updateGasSrc();updatePoiSrc();updateRoute();updateBreadcrumb();updateReportMarkers();
       if(showLandOverlay)setLandOverlay(true);
+      if(showUsgsOverlay)setUsgsOverlay(true);
     });
     var boundsTimer;
     map.on('moveend',function(){
       clearTimeout(boundsTimer);
       boundsTimer=setTimeout(function(){var b=map.getBounds();postRN({type:'map_bounds',n:b.getNorth(),s:b.getSouth(),e:b.getEast(),w:b.getWest(),zoom:map.getZoom()});},400);
+      // Re-sync arrow rotation whenever map bearing changes
+      if(userMarker){var svg=userMarker.getElement().querySelector('svg');var hdg=smoothedHdg;if(svg&&hdg>=0){svg.style.transform='rotate('+(hdg-map.getBearing())+'deg)';}}
     });
-    map.on('click',function(e){if(!e.defaultPrevented)postRN({type:'map_tapped'});});
+    map.on('click',function(e){
+      if(e.defaultPrevented)return;
+      try{
+        var _ownSrc={camps:1,gas:1,pois:1,route:1,breadcrumb:1,'usgs-topo':1};
+        // 1. Tent icons — use e.point (single pixel): Mapbox auto-handles symbol hit area
+        var ptFs=map.queryRenderedFeatures(e.point);
+        for(var ci=0;ci<ptFs.length;ci++){
+          var cf=ptFs[ci];
+          if(_ownSrc[(cf.layer&&cf.layer.source)||''])continue;
+          var cfMaki=(cf.properties&&cf.properties.maki)||'';
+          var cfName=(cf.properties&&cf.properties.name)||'';
+          var cfCls=(cf.properties&&cf.properties.class)||'';
+          var cfSrcLayer=(cf.layer&&cf.layer['source-layer'])||'';
+          var lcn=cfName.toLowerCase();
+          var isCampMaki=cfMaki==='campsite'||cfMaki==='shelter'||cfMaki==='picnic-site'||cfMaki==='park'||cfMaki==='recreation_area'||cfMaki==='ranger-station'||cfMaki==='boat'||cfCls==='campsite'||cfCls==='park_like'||cfCls==='national_park'||cfCls==='park';
+          var cfType=(cf.properties&&cf.properties.type)||'';var lctype=cfType.toLowerCase();
+          var isCampName=cfName&&(lcn.indexOf('camp')>=0||lcn.indexOf('site')>=0||lcn.indexOf('shelter')>=0||lcn.indexOf('picnic')>=0||lcn.indexOf('dispersed')>=0||lcn.indexOf('recreation')>=0||lcn.indexOf('public use')>=0||lcn.indexOf('wildlife')>=0||lcn.indexOf('preserve')>=0||lcn.indexOf('reserve')>=0||lcn.indexOf('forest')>=0||lcn.indexOf('corps')>=0||lcn.indexOf('refuge')>=0||lcn.indexOf('trailhead')>=0||lcn.indexOf('boat launch')>=0||lcn.indexOf('boat ramp')>=0||lcn.indexOf('state park')>=0||lcn.indexOf('county park')>=0||lcn.indexOf('nature center')>=0||lctype.indexOf('park')>=0||lctype.indexOf('recreation')>=0||lctype.indexOf('campground')>=0||lctype.indexOf('camping')>=0);
+          var isPoi=cfSrcLayer==='poi_label'||cfSrcLayer==='poi'||isCampMaki;
+          if((isCampMaki||(isPoi&&isCampName))&&cfName){
+            var cc=cf.geometry&&cf.geometry.type==='Point'&&cf.geometry.coordinates;
+            postRN({type:'base_camp_tapped',name:cfName,lat:cc?cc[1]:e.lngLat.lat,lng:cc?cc[0]:e.lngLat.lng,landType:cfCls});
+            return;
+          }
+        }
+        // 2. Trail lines — use wide box for thin-line tolerance
+        var box=[{x:e.point.x-12,y:e.point.y-12},{x:e.point.x+12,y:e.point.y+12}];
+        var boxFs=map.queryRenderedFeatures(box);
+        for(var i=0;i<boxFs.length;i++){
+          var f=boxFs[i];
+          var cls=(f.properties&&f.properties.class)||'';
+          var lid=(f.layer&&f.layer.id)||'';
+          if(cls==='path'||cls==='track'||lid==='road-path'||lid==='road-path-bg'||lid==='path-pedestrian'||lid.indexOf('trail')>=0){
+            var nm=(f.properties&&f.properties.name)||'';
+            postRN({type:'trail_tapped',name:nm||'Trail',lat:e.lngLat.lat,lng:e.lngLat.lng,cls:cls||'path'});
+            return;
+          }
+        }
+      }catch(x){}
+      postRN({type:'map_tapped'});
+    });
   }
 
   // ── GeoJSON helpers ───────────────────────────────────────────────────────────
-  function campFeat(c){return{type:'Feature',geometry:{type:'Point',coordinates:[c.lng,c.lat]},properties:{id:c.id||'',name:c.name||'',land_type:c.land_type||'Campground',cost:c.cost||'',ada:c.ada?1:0,reservable:c.reservable?1:0,raw:JSON.stringify(c)}};}
+  function campFeat(c){return{type:'Feature',geometry:{type:'Point',coordinates:[c.lng,c.lat]},properties:{id:c.id||'',name:c.name||'',land_type:c.land_type||'Campground',cost:c.cost||'',ada:c.ada?1:0,reservable:c.reservable?1:0,full:c.full||0,raw:JSON.stringify(c)}};}
 
   function setupSources(){
     if(!map.getSource('camps'))map.addSource('camps',{type:'geojson',data:{type:'FeatureCollection',features:[]},cluster:true,clusterMaxZoom:11,clusterRadius:45});
@@ -504,6 +628,7 @@ const buildMapHtml = (
     if(!map.getSource('breadcrumb'))map.addSource('breadcrumb',{type:'geojson',data:{type:'Feature',geometry:{type:'LineString',coordinates:[]}}});
   }
 
+  var _clicksSetup=false;
   function setupLayers(){
     var _a=function(id,def){if(!map.getLayer(id))map.addLayer(def);};
     _a('breadcrumb',{id:'breadcrumb',type:'line',source:'breadcrumb',paint:{'line-color':'#3b82f6','line-width':2.5,'line-opacity':0.8,'line-dasharray':[2,4]}});
@@ -515,9 +640,12 @@ const buildMapHtml = (
     _a('poi-label',{id:'poi-label',type:'symbol',source:'pois',filter:['>=',['zoom'],12],layout:{'text-field':['case',['all',['==',['get','type'],'peak'],['has','elevation']],['concat',['get','name'],'\\n▲ ',['get','elevation']],['get','name']],'text-size':['case',['==',['get','type'],'peak'],10,9],'text-offset':[0,1.3],'text-anchor':'top','text-max-width':10},paint:{'text-color':['case',['==',['get','type'],'peak'],'#d97706','#f1f5f9'],'text-halo-color':['case',['==',['get','type'],'peak'],'rgba(255,255,255,0.95)','rgba(0,0,0,0.85)'],'text-halo-width':2}});
     _a('camp-cluster',{id:'camp-cluster',type:'circle',source:'camps',filter:['has','point_count'],paint:{'circle-color':['step',['get','point_count'],'#14b8a6',10,'#f97316',50,'#ef4444'],'circle-radius':['step',['get','point_count'],18,10,25,50,32],'circle-opacity':0.88,'circle-stroke-width':2,'circle-stroke-color':'#fff'}});
     _a('camp-count',{id:'camp-count',type:'symbol',source:'camps',filter:['has','point_count'],layout:{'text-field':'{point_count_abbreviated}','text-size':12,'text-font':['DIN Offc Pro Medium','Arial Unicode MS Bold']},paint:{'text-color':'#fff'}});
-    _a('camp-circle',{id:'camp-circle',type:'circle',source:'camps',filter:['!',['has','point_count']],paint:{'circle-radius':['interpolate',['linear'],['zoom'],9,7,13,11],'circle-color':['match',['get','land_type'],'BLM Land','#f97316','National Forest','#22c55e','National Park','#3b82f6','State Park','#8b5cf6','Campground','#14b8a6','#14b8a6'],'circle-opacity':0.88,'circle-stroke-width':2,'circle-stroke-color':'rgba(255,255,255,0.9)'}});
+    _a('camp-circle',{id:'camp-circle',type:'circle',source:'camps',filter:['!',['has','point_count']],paint:{'circle-radius':['interpolate',['linear'],['zoom'],9,7,13,11],'circle-color':['match',['get','land_type'],'BLM Land','#f97316','National Forest','#22c55e','National Park','#3b82f6','State Park','#8b5cf6','Campground','#14b8a6','#14b8a6'],'circle-opacity':0.88,'circle-stroke-width':['case',['==',['get','full'],1],3,2],'circle-stroke-color':['case',['==',['get','full'],1],'#ef4444','rgba(255,255,255,0.9)']}});
+    _a('camp-full-badge',{id:'camp-full-badge',type:'circle',source:'camps',filter:['all',['!',['has','point_count']],['==',['get','full'],1]],paint:{'circle-radius':5,'circle-color':'#ef4444','circle-stroke-width':1.5,'circle-stroke-color':'#fff','circle-translate':[7,-7],'circle-opacity':0.95}});
     _a('camp-label',{id:'camp-label',type:'symbol',source:'camps',filter:['all',['!',['has','point_count']],['>=',['zoom'],12]],layout:{'text-field':['get','name'],'text-size':10,'text-offset':[0,1.3],'text-anchor':'top','text-max-width':10},paint:{'text-color':'#f1f5f9','text-halo-color':'rgba(0,0,0,0.85)','text-halo-width':1.5}});
-    // clicks
+    // Guard: only register click handlers once per map instance, never on style reload
+    if(_clicksSetup)return;
+    _clicksSetup=true;
     map.on('click','camp-cluster',function(e){var f=map.queryRenderedFeatures(e.point,{layers:['camp-cluster']});if(!f.length)return;map.getSource('camps').getClusterExpansionZoom(f[0].properties.cluster_id,function(err,zoom){if(err)return;map.easeTo({center:f[0].geometry.coordinates,zoom:zoom+0.5});});e.preventDefault();});
     map.on('click','camp-circle',function(e){if(!e.features||!e.features[0])return;var p=e.features[0].properties;var raw;try{raw=JSON.parse(p.raw||'{}');}catch(x){raw=p;}postRN({type:'campsite_tapped',id:raw.id||p.id,name:raw.name||p.name,camp:raw});e.preventDefault();});
     map.on('click','gas-circle',function(e){if(!e.features||!e.features[0])return;var p=e.features[0].properties;new mapboxgl.Popup({closeButton:false,offset:12}).setLngLat(e.lngLat).setHTML('<div class="pt">⛽ '+p.name+'</div><div class="pm">Fuel Station</div>').addTo(map);e.preventDefault();});
@@ -591,16 +719,42 @@ const buildMapHtml = (
     }
   }
 
+  // ── USGS National Map topo overlay (full trail + contour detail) ──────────────
+  function setUsgsOverlay(show){
+    showUsgsOverlay=show;
+    if(!map||!mapReady)return;
+    if(show){
+      if(!map.getSource('usgs-topo')){
+        map.addSource('usgs-topo',{type:'raster',tiles:['https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}'],tileSize:256,minzoom:4,maxzoom:16,attribution:'USGS National Map'});
+      }
+      if(!map.getLayer('usgs-topo')){
+        var bl=map.getLayer('route-shadow')?'route-shadow':undefined;
+        map.addLayer({id:'usgs-topo',type:'raster',source:'usgs-topo',paint:{'raster-opacity':0.8}},bl);
+      }
+    }else{
+      if(map.getLayer('usgs-topo'))map.removeLayer('usgs-topo');
+      if(map.getSource('usgs-topo'))map.removeSource('usgs-topo');
+    }
+  }
+
   // ── User position ──────────────────────────────────────────────────────────────
   var navActive=false;
+  var smoothedHdg=-1; // last known heading for arrow re-sync on map bearing changes
   function setUserPos(lat,lng,recenter,zoom,heading){
     if(!userMarker){
       var el=document.createElement('div');el.className='mk-me';
-      el.innerHTML='<div class="mk-me-ring"></div><svg class="mk-me-arrow" width="20" height="26" viewBox="0 0 20 26"><path d="M10 1 L19 24 L10 18 L1 24 Z" fill="#f97316" stroke="white" stroke-width="1.5" stroke-linejoin="round"/></svg>';
+      el.innerHTML='<div class="mk-me-ring"></div><svg class="mk-me-arrow" width="24" height="32" viewBox="0 0 24 32" style="transition:transform 0.6s ease"><path d="M12 1 L23 29 L12 22 L1 29 Z" fill="#f97316" stroke="white" stroke-width="1.5" stroke-linejoin="round"/></svg>';
       userMarker=new mapboxgl.Marker({element:el,anchor:'center'}).setLngLat([lng,lat]).addTo(map);
     }else{userMarker.setLngLat([lng,lat]);}
+    // Rotate the arrow to face the true heading, compensating for map bearing so
+    // it always points in the real-world direction regardless of map rotation mode.
+    if(heading!=null&&heading>=0){
+      smoothedHdg=heading;
+      var svg=userMarker.getElement().querySelector('svg');
+      if(svg){var mapBrg=map?map.getBearing():0;svg.style.transform='rotate('+(heading-mapBrg)+'deg)';}
+    }
     if(navActive&&heading!=null&&heading>=0){
-      map.easeTo({center:[lng,lat],bearing:heading,pitch:52,zoom:zoom||17,duration:900});
+      map.easeTo({center:[lng,lat],bearing:heading,pitch:52,zoom:zoom||17,duration:700});
     }else if(recenter){
       map.easeTo({center:[lng,lat],zoom:zoom||15,duration:500});
     }
@@ -609,7 +763,9 @@ const buildMapHtml = (
     if(routePts.length>0&&routeIsProper&&!_routeLoading&&now-lastOffCheck>8000&&(lastSpeed==null||lastSpeed>1.5)){
       lastOffCheck=now;var minD=Infinity;
       for(var i=0;i<routePts.length;i++){var dlat=(routePts[i][1]-lat)*111000;var dlng=(routePts[i][0]-lng)*111000*Math.cos(lat*Math.PI/180);var d=Math.sqrt(dlat*dlat+dlng*dlng);if(d<minD)minD=d;if(minD<60)break;}
-      if(minD>200)postRN({type:'off_route',lat:lat,lng:lng,dist:Math.round(minD)});
+      if(minD>200){postRN({type:'off_route',lat:lat,lng:lng,dist:Math.round(minD)});}
+      else if(minD>30){postRN({type:'off_route_warn',dist:Math.round(minD)});}
+      else{postRN({type:'back_on_route'});}
     }
   }
 
@@ -633,25 +789,33 @@ const buildMapHtml = (
       var route=data.routes[0];
       _routeCoords=route.geometry.coordinates;routePts=_routeCoords.filter(function(_,i){return i%3===0;});updateRoute();
       var steps=[],legs=[];
-      var legSpeedLimits=[];
       (route.legs||[]).forEach(function(leg){
         var ls=[];
-        (leg.steps||[]).forEach(function(s){if(s.distance>0||s.maneuver.type==='arrive'){
-          var loc=s.maneuver&&s.maneuver.location;
-          // Extract lane data from last intersection that has lanes
-          var lanes=[];
-          if(s.intersections){for(var ii=s.intersections.length-1;ii>=0;ii--){var isc=s.intersections[ii];if(isc.lanes&&isc.lanes.length){lanes=isc.lanes.map(function(l){return{indications:l.indications||[],valid:l.valid===true,active:l.active===true};});break;}}}
-          var st={type:s.maneuver.type,modifier:s.maneuver.modifier||'',name:s.name||'',distance:s.distance,duration:s.duration,lat:loc?loc[1]:undefined,lng:loc?loc[0]:undefined,lanes:lanes.length?lanes:undefined};
-          steps.push(st);ls.push(st);}});
-        legs.push(ls);
         var ann=(leg.annotation&&leg.annotation.maxspeed)||[];
-        var valid=ann.filter(function(s){return s&&typeof s.speed==='number';}).map(function(s){return s.speed;});
-        var freq={};valid.forEach(function(v){freq[v]=(freq[v]||0)+1;});
-        var keys=Object.keys(freq).sort(function(a,b){return freq[b]-freq[a];});
-        legSpeedLimits.push(keys.length?parseFloat(keys[0]):null);
+        var annOff=0;
+        (leg.steps||[]).forEach(function(s){
+          // Each step's geometry has N coords → N-1 annotation segments; accumulate offset
+          var nCoords=(s.geometry&&s.geometry.coordinates&&s.geometry.coordinates.length)||0;
+          var nSegs=Math.max(0,nCoords-1);
+          var stepAnn=ann.slice(annOff,annOff+nSegs);
+          annOff+=nSegs;
+          // Mode of valid numeric speeds for this step's coordinate segments
+          var valid=stepAnn.filter(function(a){return a&&typeof a.speed==='number';}).map(function(a){return a.speed;});
+          var freq={};valid.forEach(function(v){freq[v]=(freq[v]||0)+1;});
+          var keys=Object.keys(freq).sort(function(a,b){return freq[b]-freq[a];});
+          var spd=keys.length?parseFloat(keys[0]):null;
+          if(s.distance>0||s.maneuver.type==='arrive'){
+            var loc=s.maneuver&&s.maneuver.location;
+            var lanes=[];
+            if(s.intersections){for(var ii=s.intersections.length-1;ii>=0;ii--){var isc=s.intersections[ii];if(isc.lanes&&isc.lanes.length){lanes=isc.lanes.map(function(l){return{indications:l.indications||[],valid:l.valid===true,active:l.active===true};});break;}}}
+            var st={type:s.maneuver.type,modifier:s.maneuver.modifier||'',name:s.name||'',distance:s.distance,duration:s.duration,lat:loc?loc[1]:undefined,lng:loc?loc[0]:undefined,lanes:lanes.length?lanes:undefined,speedLimit:spd};
+            steps.push(st);ls.push(st);
+          }
+        });
+        legs.push(ls);
       });
       routeIsProper=true;_routeLoading=false;
-      postRN({type:'route_ready',routed:true,steps:steps,legs:legs,legSpeedLimits:legSpeedLimits,total_distance:route.distance,total_duration:route.duration,fromIdx:fromIdx||0});
+      postRN({type:'route_ready',routed:true,steps:steps,legs:legs,total_distance:route.distance,total_duration:route.duration,fromIdx:fromIdx||0});
     }catch(e){_fallback(pairs,fromIdx);}
   }
 
@@ -679,7 +843,7 @@ const buildMapHtml = (
     if(!mapReady){pendingMsgs.push(msg);return;}
     if(msg.type==='nav_active'){navActive=msg.active;if(!msg.active)map.easeTo({pitch:0,bearing:0,zoom:12,duration:700});}
     if(msg.type==='user_pos'&&msg.lat){lastSpeed=msg.speed!=null?msg.speed:lastSpeed;setUserPos(msg.lat,msg.lng,false,null,msg.heading);}
-    if(msg.type==='nav_center'&&msg.lat){lastSpeed=msg.speed!=null?msg.speed:lastSpeed;setUserPos(msg.lat,msg.lng,true,17,msg.heading);}
+    if(msg.type==='nav_center'&&msg.lat){lastSpeed=msg.speed!=null?msg.speed:lastSpeed;setUserPos(msg.lat,msg.lng,true,msg.zoom||17,msg.heading);}
     if(msg.type==='locate'&&msg.lat)setUserPos(msg.lat,msg.lng,true,13);
     if(msg.type==='nav_target')setNavTarget(msg.idx);
     if(msg.type==='nav_reset'){setNavTarget(-1);_routeCoords=[];routePts=[];updateRoute();}
@@ -714,8 +878,10 @@ const buildMapHtml = (
     if(msg.type==='add_report'){allReports=allReports.filter(function(r){return r.id!==msg.report.id;});allReports.push(msg.report);updateReportMarkers();}
     if(msg.type==='set_style'&&msg.style){currentStyle=msg.style;map.setStyle(msg.style);}
     if(msg.type==='set_land_overlay')setLandOverlay(!!msg.show);
-    if(msg.type==='download_tiles_bbox'){if(!downloadActive){downloadActive=true;_dlTiles(msg.n,msg.s,msg.e,msg.w,msg.minZ||10,msg.maxZ||12);}}
-    if(msg.type==='download_tiles'){if(!downloadActive){downloadActive=true;var b=map.getBounds();_dlTiles(b.getNorth(),b.getSouth(),b.getEast(),b.getWest(),msg.minZ||10,msg.maxZ||15);}}
+    if(msg.type==='set_usgs_overlay')setUsgsOverlay(!!msg.show);
+    if(msg.type==='download_tiles_bbox'){if(!downloadActive){downloadActive=true;_dlTiles(msg.n,msg.s,msg.e,msg.w,msg.minZ||10,msg.maxZ||12,!!msg.vectorOnly);}}
+    if(msg.type==='download_tiles_route'){if(!downloadActive){downloadActive=true;_dlTilesRoute(msg.bufferKm||20,msg.minZ||10,msg.maxZ||16,!!msg.vectorOnly);}}
+    if(msg.type==='download_tiles'){if(!downloadActive){downloadActive=true;var b=map.getBounds();_dlTiles(b.getNorth(),b.getSouth(),b.getEast(),b.getWest(),msg.minZ||10,msg.maxZ||15,!!msg.vectorOnly);}}
     if(msg.type==='cancel_download')downloadActive=false;
   }
 
@@ -739,12 +905,12 @@ export default function MapScreen() {
   const addLiveReport = useStore(st => st.addLiveReport);
   const cachedRegions = useStore(st => st.cachedRegions);
   const addCachedRegion = useStore(st => st.addCachedRegion);
+  const rigProfile = useStore(st => st.rigProfile);
   const webRef = useRef<WebView>(null);
 
   const [userLoc,       setUserLoc]       = useState<{ lat: number; lng: number } | null>(null);
   const [userSpeed,     setUserSpeed]     = useState<number | null>(null);
   const [userHeading,   setUserHeading]   = useState<number | null>(null);
-  const [legSpeedLimits,setLegSpeedLimits]= useState<(number | null)[]>([]);
   const [quickReport,   setQuickReport]   = useState(false);
   const [quickToast,    setQuickToast]    = useState('');
   const [quickTypeIdx,  setQuickTypeIdx]  = useState<number | null>(null);
@@ -752,8 +918,9 @@ export default function MapScreen() {
   const [navIdx,    setNavIdx]    = useState(0);
   const [routeSteps,  setRouteSteps]  = useState<RouteStep[]>([]);
   const [isRouted,    setIsRouted]    = useState(false);
-  const [mapLayer,    setMapLayerState] = useState<MapLayer>('satellite');
+  const [mapLayer,    setMapLayerState] = useState<MapLayer>('topo');
   const [showLands,   setShowLands]    = useState(false);
+  const [showUsgs,    setShowUsgs]     = useState(false);
   const [audioGuide,  setAudioGuide]   = useState<Record<string, string>>({});
   const [showSteps,   setShowSteps]    = useState(false);
   const [showPanel,   setShowPanel]    = useState(true);
@@ -810,6 +977,17 @@ export default function MapScreen() {
   const [wikiArticles,   setWikiArticles]   = useState<WikiArticle[]>([]);
   const [loadingWiki,    setLoadingWiki]    = useState(false);
 
+  // Camp fullness
+  const [campFullness,   setCampFullness]   = useState<CampFullness | null>(null);
+  const [fullnessVoting, setFullnessVoting] = useState(false);
+
+  // Camp card extras
+  const [campWeather,    setCampWeather]    = useState<WeatherForecast | null>(null);
+
+  // Favorites
+  const favoriteCamps  = useStore(s => s.favoriteCamps);
+  const toggleFavorite = useStore(s => s.toggleFavorite);
+
   // Route brief
   const [routeBrief,    setRouteBrief]    = useState<RouteBrief | null>(null);
   const [showRouteBrief,setShowRouteBrief]= useState(false);
@@ -823,8 +1001,11 @@ export default function MapScreen() {
   const [navDest, setNavDest] = useState<WP | null>(null);
   const [stepIdx, setStepIdx] = useState(0);
   const [approachingReport, setApproachingReport] = useState<Report | null>(null);
+  const [offRouteWarn, setOffRouteWarn] = useState(false);
+  const offRouteWarnTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showDayModal, setShowDayModal] = useState(false);
   const [tappedWp, setTappedWp] = useState<{ idx: number; wp: WP } | null>(null);
+  const [tappedTrail, setTappedTrail] = useState<{ name: string; lat: number; lng: number; cls: string } | null>(null);
 
   const navAnim      = useRef(new Animated.Value(0)).current;
   const navRef       = useRef({ active: false, idx: 0, wps: [] as WP[] });
@@ -848,7 +1029,9 @@ export default function MapScreen() {
   const viewportRef  = useRef<{ n: number; s: number; e: number; w: number; zoom: number } | null>(null);
   const [isLoadingAreaCamps, setIsLoadingAreaCamps] = useState(false);
   const [mapMoved, setMapMoved] = useState(false);
+  const [mapZoom, setMapZoom] = useState(10);
   const [searchResult, setSearchResult] = useState<{ count: number } | null>(null);
+  const [showOnboard, setShowOnboard] = useState(false);
 
   // Fetch Mapbox token once on mount; send set_token to WebView when both are ready
   useEffect(() => {
@@ -863,6 +1046,13 @@ export default function MapScreen() {
           apiBase: process.env.EXPO_PUBLIC_API_URL ?? 'https://trailhead-production-2049.up.railway.app',
         }));
       }
+    }).catch(() => {});
+  }, []);
+
+  // Show onboarding card for first-time users
+  useEffect(() => {
+    SecureStore.getItemAsync('trailhead_onboarded').then(val => {
+      if (!val) setShowOnboard(true);
     }).catch(() => {});
   }, []);
 
@@ -924,12 +1114,16 @@ export default function MapScreen() {
           setUserSpeed(rawSpeed);
           userSpeedRef.current = rawSpeed;
 
-          // Heading: use EMA smoothing; fall back to bearing-to-next-step at low speed
+          // Heading: device always provides compass heading on iOS (even when parked).
+          // Use it with EMA smoothing at all speeds. Only fall back to bearing-to-step
+          // when the platform truly gives no heading data at all.
           const rawHdg = (loc.coords.heading ?? -1);
           const speedMs = rawSpeed ?? 0;
           let hdg = -1;
-          if (speedMs > 0.8 && rawHdg >= 0) {
-            // Smooth heading with EMA (α=0.35), handling 0/360 wraparound
+          if (rawHdg >= 0) {
+            // Device heading available — smooth with EMA.
+            // Faster α when slow (more responsive to phone turning while parked).
+            const alpha = speedMs > 2 ? 0.35 : 0.55;
             const prev = smoothedHdgRef.current;
             if (prev === null) {
               smoothedHdgRef.current = rawHdg; hdg = rawHdg;
@@ -937,11 +1131,11 @@ export default function MapScreen() {
               let diff = rawHdg - prev;
               if (diff > 180) diff -= 360;
               if (diff < -180) diff += 360;
-              const s = (prev + diff * 0.35 + 360) % 360;
+              const s = (prev + diff * alpha + 360) % 360;
               smoothedHdgRef.current = s; hdg = s;
             }
           } else if (speedMs <= 0.8) {
-            // Parked/slow: use bearing toward current step if navigating
+            // No device heading + parked: point toward next step
             const cur = routeStepsRef.current[stepIdxRef.current];
             if (cur?.lat != null) {
               hdg = calcBearing(pos.lat, pos.lng, cur.lat!, cur.lng!);
@@ -949,6 +1143,8 @@ export default function MapScreen() {
             } else {
               hdg = smoothedHdgRef.current ?? -1;
             }
+          } else {
+            hdg = smoothedHdgRef.current ?? -1;
           }
           setUserHeading(hdg >= 0 ? hdg : null);
 
@@ -956,6 +1152,7 @@ export default function MapScreen() {
           webRef.current?.postMessage(JSON.stringify({
             type: active ? 'nav_center' : 'user_pos',
             lat: pos.lat, lng: pos.lng, heading: hdg, speed: rawSpeed,
+            zoom: active ? navZoom(rawSpeed) : undefined,
           }));
 
           if (active) {
@@ -1158,6 +1355,15 @@ export default function MapScreen() {
       setShowPanel(false);
       setIsApproaching(false);
       setIsRerouting(false);
+      // Immediately fly to user location so they don't have to tap locate
+      if (userLoc) {
+        const hdg = smoothedHdgRef.current ?? -1;
+        webRef.current?.postMessage(JSON.stringify({
+          type: 'nav_center',
+          lat: userLoc.lat, lng: userLoc.lng,
+          heading: hdg, zoom: 17,
+        }));
+      }
       const dest = navDestRef.current;
       if (dest && waypoints.length === 0) {
         // Single-destination nav (from search) — route already drawn by route_to_search
@@ -1192,6 +1398,8 @@ export default function MapScreen() {
       setIsApproaching(false);
       setIsRerouting(false);
       setApproachingReport(null);
+      setOffRouteWarn(false);
+      if (offRouteWarnTimer.current) clearTimeout(offRouteWarnTimer.current);
       alertedRepIdsRef.current.clear();
       if (approachDismissRef.current) clearTimeout(approachDismissRef.current);
       setRouteLegOffset(0);
@@ -1328,18 +1536,36 @@ export default function MapScreen() {
   }
 
   async function loadCampsInArea(bounds: { n: number; s: number; e: number; w: number; zoom: number }, types: string[]) {
-    if (bounds.zoom < 6) return;
+    if ((bounds.zoom ?? 0) < 9) {
+      setSearchResult({ count: -2 });
+      setTimeout(() => setSearchResult(null), 3000);
+      return;
+    }
+    // Center of the visible map area (not GPS location)
+    const centerLat = (bounds.n + bounds.s) / 2;
+    const centerLng = (bounds.e + bounds.w) / 2;
+    // Half-diagonal of visible area in miles, capped at 50
+    const latMi = ((bounds.n - bounds.s) / 2) * 69;
+    const lngMi = ((bounds.e - bounds.w) / 2) * 69 * Math.cos(centerLat * Math.PI / 180);
+    const radiusMi = Math.min(Math.ceil(Math.sqrt(latMi * latMi + lngMi * lngMi)), 50);
     setIsLoadingAreaCamps(true);
     setMapMoved(false);
     setSearchResult(null);
     try {
-      const camps = await api.getCampsBbox(bounds.n, bounds.s, bounds.e, bounds.w, types);
-      webRef.current?.postMessage(JSON.stringify({ type: 'set_camps', pins: camps }));
+      const [campsResult, fullResult] = await Promise.allSettled([
+        api.searchCampsites(centerLat, centerLng, radiusMi, types),
+        api.getNearbyFullness(centerLat, centerLng, radiusMi * 0.6),
+      ]);
+      const camps = campsResult.status === 'fulfilled' ? campsResult.value : [];
+      const fullIds = new Set(
+        fullResult.status === 'fulfilled' ? fullResult.value.map(f => f.camp_id) : []
+      );
+      const tagged = camps.map(c => ({ ...c, full: fullIds.has(c.id) ? 1 : 0 }));
+      webRef.current?.postMessage(JSON.stringify({ type: 'set_camps', pins: tagged }));
       setSearchResult({ count: camps.length });
-      // Clear result badge after 3 seconds
       setTimeout(() => setSearchResult(null), 3000);
     } catch (e: any) {
-      setSearchResult({ count: -1 }); // -1 = error
+      setSearchResult({ count: -1 });
       setTimeout(() => setSearchResult(null), 3000);
     }
     setIsLoadingAreaCamps(false);
@@ -1355,7 +1581,8 @@ export default function MapScreen() {
       }
       if (msg.type === 'map_bounds') {
         viewportRef.current = { n: msg.n, s: msg.s, e: msg.e, w: msg.w, zoom: msg.zoom };
-        if ((msg.zoom ?? 0) >= 6) setMapMoved(true);
+        setMapZoom(msg.zoom ?? 10);
+        if ((msg.zoom ?? 0) >= 9) setMapMoved(true);
       }
       if (msg.type === 'search_area') {
         // Legacy WebView button — handled by native button now, but keep as fallback
@@ -1365,13 +1592,13 @@ export default function MapScreen() {
       }
       if (msg.type === 'map_tapped') {
         setSelectedCamp(null);
+        setTappedTrail(null);
       }
       if (msg.type === 'route_ready') {
         setIsRouted(msg.routed);
         setRouteSteps(msg.steps ?? []);
         setRouteLegs(msg.legs ?? []);
         if (msg.fromIdx !== undefined) setRouteLegOffset(msg.fromIdx);
-        setLegSpeedLimits(msg.legSpeedLimits ?? []);
         setIsRerouting(false);
       }
       if (msg.type === 'off_route' && navRef.current.active) {
@@ -1397,7 +1624,18 @@ export default function MapScreen() {
           fromIdx: bestIdx,
         }));
         setRouteLegOffset(bestIdx);
+        setOffRouteWarn(false);
+        if (offRouteWarnTimer.current) clearTimeout(offRouteWarnTimer.current);
         Speech.speak('Off route. Recalculating.', { rate: 0.88, pitch: 1.05 });
+      }
+      if (msg.type === 'off_route_warn' && navRef.current.active && !isReroutingRef.current) {
+        setOffRouteWarn(true);
+        if (offRouteWarnTimer.current) clearTimeout(offRouteWarnTimer.current);
+        offRouteWarnTimer.current = setTimeout(() => setOffRouteWarn(false), 18000);
+      }
+      if (msg.type === 'back_on_route') {
+        setOffRouteWarn(false);
+        if (offRouteWarnTimer.current) clearTimeout(offRouteWarnTimer.current);
       }
       if (msg.type === 'wp_tapped') {
         const wp = waypoints[msg.idx];
@@ -1422,8 +1660,82 @@ export default function MapScreen() {
         setCampDetail(null);
         setCampInsight(null);
         setWikiArticles([]);
+        setCampFullness(null);
+        setCampWeather(null);
+        if (camp?.id) api.getCampFullness(camp.id).then(r => setCampFullness(r)).catch(() => {});
+        if (camp?.lat && camp?.lng) api.getWeather(camp.lat, camp.lng, 3).then(r => setCampWeather(r)).catch(() => {});
+      }
+      if (msg.type === 'trail_tapped') {
+        setSelectedCamp(null);
+        setTappedTrail({ name: msg.name, lat: msg.lat, lng: msg.lng, cls: msg.cls ?? 'path' });
+      }
+      if (msg.type === 'base_camp_tapped') {
+        setTappedTrail(null);
+        const minId = `map_${msg.lat.toFixed(5)}_${msg.lng.toFixed(5)}`;
+        const minPin: CampsitePin = {
+          id: minId,
+          name: msg.name,
+          lat: msg.lat,
+          lng: msg.lng,
+          tags: [],
+          land_type: 'Dispersed',
+          description: '',
+          reservable: false,
+          cost: '',
+          url: '',
+          ada: false,
+        };
+        setSelectedCamp(minPin);
+        setCampDetail(null);
+        setCampInsight(null);
+        setWikiArticles([]);
+        setCampFullness(null);
+        setCampWeather(null);
+        api.getCampFullness(minId).then(r => setCampFullness(r)).catch(() => {});
+        api.getWeather(msg.lat, msg.lng, 3).then(r => setCampWeather(r)).catch(() => {});
+        // Silently upgrade to full camp data if our backend has it
+        api.searchCampsites(msg.lat, msg.lng, 1).then(results => {
+          if (!results.length) return;
+          const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+          const tapped = norm(msg.name);
+          const match = results.find(r =>
+            norm(r.name).includes(tapped.slice(0, 8)) || tapped.includes(norm(r.name).slice(0, 8))
+          ) ?? results[0];
+          // Only update if user hasn't closed/changed the card
+          setSelectedCamp(prev => prev?.id === minId ? match : prev);
+        }).catch(() => {});
       }
     } catch {}
+  }
+
+  async function handleReportFull() {
+    if (!selectedCamp || fullnessVoting) return;
+    setFullnessVoting(true);
+    try {
+      const res = await api.reportCampFull(selectedCamp.id, {
+        camp_name: selectedCamp.name, lat: selectedCamp.lat, lng: selectedCamp.lng,
+      });
+      const updated = await api.getCampFullness(selectedCamp.id).catch(() => null);
+      setCampFullness(updated);
+      if (res.credits_earned > 0) Alert.alert('Thanks!', `+${res.credits_earned} credits earned for the report.`);
+    } catch (e: any) {
+      Alert.alert('Error', e.message ?? 'Could not submit report');
+    }
+    setFullnessVoting(false);
+  }
+
+  async function handleFullnessVote(action: 'confirm' | 'dispute') {
+    if (!selectedCamp || fullnessVoting) return;
+    setFullnessVoting(true);
+    try {
+      if (action === 'confirm') await api.confirmCampFull(selectedCamp.id);
+      else await api.disputeCampFull(selectedCamp.id);
+      const updated = await api.getCampFullness(selectedCamp.id).catch(() => null);
+      setCampFullness(updated);
+    } catch (e: any) {
+      Alert.alert('Error', e.message ?? 'Could not submit vote');
+    }
+    setFullnessVoting(false);
   }
 
   async function openCampDetail() {
@@ -1477,12 +1789,9 @@ export default function MapScreen() {
   const speedMph  = userSpeed !== null && userSpeed > 0 ? userSpeed * 2.237 : null;
   const etaMins   = distKm && userSpeed && userSpeed > 0.5
     ? Math.round(distKm / (userSpeed * 3.6) * 60) : null;
-  const legIdx    = Math.max(0, navIdx - routeLegOffset);
-  const speedLimitKph = legSpeedLimits[legIdx] ?? null;
-  const speedLimitMph = speedLimitKph ? Math.round(speedLimitKph * 0.621371) : null;
-
   // Current step the user is navigating toward
   const nextStep = routeSteps[stepIdx] ?? null;
+  const speedLimitMph = nextStep?.speedLimit ? Math.round(nextStep.speedLimit * 0.621371) : null;
   // Real distance to the step's maneuver point (more accurate than step.distance)
   const stepDistM = nextStep?.lat != null && userLoc
     ? haversineKm(userLoc.lat, userLoc.lng, nextStep.lat!, nextStep.lng!) * 1000
@@ -1635,7 +1944,12 @@ export default function MapScreen() {
       {/* Controls */}
       <View style={s.controls}>
         <TouchableOpacity style={s.ctrlBtn} onPress={() => {
-          if (userLoc) webRef.current?.postMessage(JSON.stringify({ type: 'locate', lat: userLoc.lat, lng: userLoc.lng }));
+          if (!userLoc) return;
+          webRef.current?.postMessage(JSON.stringify({ type: 'locate', lat: userLoc.lat, lng: userLoc.lng }));
+          const deg = 0.35;
+          const b = { n: userLoc.lat + deg, s: userLoc.lat - deg, e: userLoc.lng + deg, w: userLoc.lng - deg, zoom: 10 };
+          viewportRef.current = b;
+          loadCampsInArea(b, activeFilters);
         }}>
           <Ionicons name="locate" size={20} color={OVR.text} />
         </TouchableOpacity>
@@ -1653,6 +1967,17 @@ export default function MapScreen() {
           }}
         >
           <Text style={[s.layerText, showLands && { color: '#22c55e' }]}>LANDS</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[s.ctrlBtn, showUsgs && { backgroundColor: '#0369a199', borderColor: '#0ea5e9' }]}
+          onPress={() => {
+            const next = !showUsgs;
+            setShowUsgs(next);
+            webRef.current?.postMessage(JSON.stringify({ type: 'set_usgs_overlay', show: next }));
+          }}
+        >
+          <Text style={[s.layerText, showUsgs && { color: '#0ea5e9' }]}>TRAILS</Text>
         </TouchableOpacity>
 
         {waypoints.length > 0 && (
@@ -1835,26 +2160,46 @@ export default function MapScreen() {
       {/* ── Campsite filter bar ── */}
       {showFilters && !navMode && (
         <View style={s.filterBar}>
+          {/* Row 1 — land type */}
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.filterScroll}>
             {([
               { id: 'blm',       label: 'BLM',          icon: 'earth-outline' as const },
               { id: 'usfs',      label: 'Nat. Forest',  icon: 'leaf-outline' as const },
               { id: 'nps',       label: 'Nat. Park',    icon: 'triangle-outline' as const },
               { id: 'state',     label: 'State Park',   icon: 'map-outline' as const },
-              { id: 'dispersed', label: 'Dispersed',    icon: 'radio-button-off-outline' as const },
-              { id: 'rv',        label: 'RV / Hookups', icon: 'car-outline' as const },
-              { id: 'tent',      label: 'Tent',         icon: 'home-outline' as const },
-              { id: 'ada',       label: 'ADA',          icon: 'accessibility-outline' as const },
-            ]).map(f => {
+              { id: 'corps',     label: 'Corps / Lake', icon: 'water-outline' as const },
+            ] as const).map(f => {
               const active = activeFilters.includes(f.id);
               return (
-                <TouchableOpacity
-                  key={f.id}
-                  style={[s.filterChip, active && s.filterChipActive]}
+                <TouchableOpacity key={f.id} style={[s.filterChip, active && s.filterChipActive]}
                   onPress={() => setActiveFilters(prev =>
                     prev.includes(f.id) ? prev.filter(x => x !== f.id) : [...prev, f.id]
-                  )}
-                >
+                  )}>
+                  <Ionicons name={f.icon} size={13} color={active ? '#fff' : OVR.text2} style={{ marginRight: 4 }} />
+                  <Text style={[s.filterChipText, active && { color: '#fff' }]}>{f.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+          {/* Row 2 — site type */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[s.filterScroll, { paddingTop: 0 }]}>
+            {([
+              { id: 'dispersed', label: 'Dispersed',    icon: 'radio-button-off-outline' as const },
+              { id: 'tent',      label: 'Tent Sites',   icon: 'home-outline' as const },
+              { id: 'rv',        label: 'RV / Hookups', icon: 'car-outline' as const },
+              { id: 'walk_in',   label: 'Walk-in',      icon: 'walk-outline' as const },
+              { id: 'group',     label: 'Group',        icon: 'people-outline' as const },
+              { id: 'equestrian',label: 'Horse / Stock',icon: 'trail-sign-outline' as const },
+              { id: 'waterfront',label: 'Waterfront',   icon: 'boat-outline' as const },
+              { id: 'free',      label: 'Free',         icon: 'pricetag-outline' as const },
+              { id: 'ada',       label: 'ADA',          icon: 'accessibility-outline' as const },
+            ] as const).map(f => {
+              const active = activeFilters.includes(f.id);
+              return (
+                <TouchableOpacity key={f.id} style={[s.filterChip, active && s.filterChipActive]}
+                  onPress={() => setActiveFilters(prev =>
+                    prev.includes(f.id) ? prev.filter(x => x !== f.id) : [...prev, f.id]
+                  )}>
                   <Ionicons name={f.icon} size={13} color={active ? '#fff' : OVR.text2} style={{ marginRight: 4 }} />
                   <Text style={[s.filterChipText, active && { color: '#fff' }]}>{f.label}</Text>
                 </TouchableOpacity>
@@ -1887,10 +2232,20 @@ export default function MapScreen() {
             }
           </View>
           <View style={s.quickCardBody}>
-            {/* Close + name */}
+            {/* Close + name + heart */}
             <View style={s.quickCardHeader}>
               <Text style={s.quickCardName} numberOfLines={2}>{selectedCamp.name}</Text>
-              <TouchableOpacity style={s.quickCardClose} onPress={() => setSelectedCamp(null)}>
+              <TouchableOpacity
+                style={[s.quickCardClose, { marginRight: 2 }]}
+                onPress={() => toggleFavorite(selectedCamp)}
+              >
+                <Ionicons
+                  name={favoriteCamps.some(f => f.id === selectedCamp.id) ? 'heart' : 'heart-outline'}
+                  size={16}
+                  color={favoriteCamps.some(f => f.id === selectedCamp.id) ? '#ef4444' : C.text2}
+                />
+              </TouchableOpacity>
+              <TouchableOpacity style={s.quickCardClose} onPress={() => { setSelectedCamp(null); setCampFullness(null); setCampWeather(null); }}>
                 <Ionicons name="close" size={16} color={C.text3} />
               </TouchableOpacity>
             </View>
@@ -1921,6 +2276,60 @@ export default function MapScreen() {
                 {selectedCamp.reservable ? '📅 ' : '🆓 '}{selectedCamp.cost}
               </Text>
             ) : null}
+            {/* Rig compatibility */}
+            {(() => { const compat = rigCompatibility(selectedCamp, rigProfile); return compat ? (
+              <View style={[s.rigCompatBadge, { borderColor: compat.ok ? C.green + '66' : C.yellow + '88', backgroundColor: compat.ok ? C.green + '18' : C.yellow + '14' }]}>
+                <Text style={[s.rigCompatText, { color: compat.ok ? C.green : C.yellow }]}>{compat.msg}</Text>
+              </View>
+            ) : null; })()}
+            {/* Weather 3-day strip */}
+            {campWeather && campWeather.daily.time.length >= 3 && (
+              <View style={s.weatherStrip}>
+                {[0, 1, 2].map(i => (
+                  <View key={i} style={s.weatherDay}>
+                    <Text style={s.weatherIcon}>{weatherIcon(campWeather.daily.weathercode[i])}</Text>
+                    <Text style={s.weatherHiLo}>
+                      {Math.round(campWeather.daily.temperature_2m_max[i])}°/{Math.round(campWeather.daily.temperature_2m_min[i])}°
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
+            {/* Camp Fullness */}
+            {campFullness && campFullness.status === 'full' ? (
+              <View style={s.fullnessBanner}>
+                <View style={s.fullnessBannerTop}>
+                  <Ionicons name="warning" size={13} color="#dc2626" />
+                  <Text style={s.fullnessBannerText}>
+                    REPORTED FULL · {campFullness.confirmations} confirmed
+                  </Text>
+                  <Text style={s.fullnessAge}>
+                    {Math.round((Date.now() / 1000 - campFullness.reported_at) / 3600)}h ago
+                  </Text>
+                </View>
+                <View style={s.fullnessVoteRow}>
+                  <TouchableOpacity
+                    style={[s.fullnessVoteBtn, s.fullnessStillFull]}
+                    onPress={() => handleFullnessVote('confirm')}
+                    disabled={fullnessVoting}
+                  >
+                    <Text style={s.fullnessStillFullText}>👍 STILL FULL</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[s.fullnessVoteBtn, s.fullnessOpen]}
+                    onPress={() => handleFullnessVote('dispute')}
+                    disabled={fullnessVoting}
+                  >
+                    <Text style={s.fullnessOpenText}>✅ IT'S OPEN</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <TouchableOpacity style={s.reportFullBtn} onPress={handleReportFull} disabled={fullnessVoting}>
+                <Ionicons name="warning-outline" size={12} color="#f59e0b" />
+                <Text style={s.reportFullText}>REPORT CAMP FULL</Text>
+              </TouchableOpacity>
+            )}
             {/* Actions */}
             <View style={s.quickCardActions}>
               <TouchableOpacity style={s.quickCardNav} onPress={() => navigateToCamp(selectedCamp)}>
@@ -2226,35 +2635,58 @@ export default function MapScreen() {
             )}
 
             {/* Current trip download */}
-            <Text style={s.offlineSectionLabel}>MY TRIP CORRIDOR · FULL TRAIL DETAIL (z10–z16)</Text>
+            <Text style={s.offlineSectionLabel}>MY TRIP CORRIDOR · 20km BUFFER AROUND ROUTE</Text>
             {waypoints.length > 0 ? (() => {
+              const label = activeTrip?.plan.trip_name ?? 'Trip';
+              const isCachedV = cachedRegions.includes(label + '-vec');
+              const isCachedFull = cachedRegions.includes(label + '-full');
+              // Rough estimate: corridor tiles ≈ bbox / 4 for a linear route
               const lats = waypoints.map(w => w.lat), lngs = waypoints.map(w => w.lng);
-              const pad = 0.4;
+              const pad = 0.2;
               const n = Math.max(...lats) + pad, s2 = Math.min(...lats) - pad;
               const e = Math.max(...lngs) + pad, w2 = Math.min(...lngs) - pad;
-              const count = estimateTileCount(n, s2, e, w2, 10, 16);
-              const label = activeTrip?.plan.trip_name ?? 'Trip';
-              const isCached = cachedRegions.includes(label);
+              const bboxCount = estimateTileCount(n, s2, e, w2, 10, 16);
+              const corridorEst = Math.round(bboxCount / 4);
               return (
-                <TouchableOpacity style={[s.offlineTripBtn, isCached && { borderColor: C.green + '66' }]}
-                  disabled={isDownloading}
-                  onPress={() => {
-                    setShowOfflineModal(false); setIsDownloading(true); setOfflineSaved(false);
-                    setDownloadLabel(label);
-                    webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles_bbox', n, s: s2, e, w: w2, minZ: 10, maxZ: 16 }));
-                  }}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.offlineTripName} numberOfLines={1}>{label.toUpperCase()}</Text>
-                    <Text style={s.offlineTripMeta}>
-                      ~{count.toLocaleString()} tile coords · {tilesMB(count, 16)} · trails, tracks, speed limits
-                    </Text>
-                    {isCached && <Text style={[s.offlineTripMeta, { color: C.green }]}>✓ Cached</Text>}
-                  </View>
-                  <Ionicons name={isCached ? 'refresh-outline' : 'cloud-download-outline'} size={20} color={isCached ? C.green : C.orange} />
-                </TouchableOpacity>
+                <View style={{ gap: 8 }}>
+                  {/* Trails-only (vector, small) */}
+                  <TouchableOpacity style={[s.offlineTripBtn, isCachedV && { borderColor: C.green + '66' }]}
+                    disabled={isDownloading}
+                    onPress={() => {
+                      setShowOfflineModal(false); setIsDownloading(true); setOfflineSaved(false);
+                      setDownloadLabel(label + '-vec');
+                      webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles_route', bufferKm: 20, minZ: 10, maxZ: 16, vectorOnly: true }));
+                    }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.offlineTripName} numberOfLines={1}>{label.toUpperCase()}</Text>
+                      <Text style={s.offlineTripMeta}>
+                        TRAILS ONLY (no satellite) · ~{tilesMB(corridorEst, 16, true)} · fastest download
+                      </Text>
+                      {isCachedV && <Text style={[s.offlineTripMeta, { color: C.green }]}>✓ Trails cached</Text>}
+                    </View>
+                    <Ionicons name={isCachedV ? 'refresh-outline' : 'trail-sign-outline'} size={20} color={isCachedV ? C.green : C.orange} />
+                  </TouchableOpacity>
+                  {/* Full (vector + satellite) */}
+                  <TouchableOpacity style={[s.offlineTripBtn, { borderColor: C.border }, isCachedFull && { borderColor: C.green + '66' }]}
+                    disabled={isDownloading}
+                    onPress={() => {
+                      setShowOfflineModal(false); setIsDownloading(true); setOfflineSaved(false);
+                      setDownloadLabel(label + '-full');
+                      webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles_route', bufferKm: 20, minZ: 10, maxZ: 15, vectorOnly: false }));
+                    }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[s.offlineTripName, { color: C.text2 }]} numberOfLines={1}>{label.toUpperCase()}</Text>
+                      <Text style={s.offlineTripMeta}>
+                        TRAILS + SATELLITE · ~{tilesMB(corridorEst, 15, false)} · larger download
+                      </Text>
+                      {isCachedFull && <Text style={[s.offlineTripMeta, { color: C.green }]}>✓ Full cached</Text>}
+                    </View>
+                    <Ionicons name={isCachedFull ? 'refresh-outline' : 'cloud-download-outline'} size={20} color={isCachedFull ? C.green : C.text3} />
+                  </TouchableOpacity>
+                </View>
               );
             })() : (
-              <Text style={s.offlineNoTrip}>Plan a trip first to download its full trail corridor</Text>
+              <Text style={s.offlineNoTrip}>Plan a trip first to download its trail corridor</Text>
             )}
 
             {/* State downloads */}
@@ -2288,10 +2720,10 @@ export default function MapScreen() {
                           onPress={() => {
                             setShowOfflineModal(false); setIsDownloading(true); setOfflineSaved(false);
                             setDownloadLabel(st.name + '-detail');
-                            webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles_bbox', n: st.n, s: st.s, e: st.e, w: st.w, minZ: 10, maxZ: 15 }));
+                            webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles_bbox', n: st.n, s: st.s, e: st.e, w: st.w, minZ: 10, maxZ: 15, vectorOnly: true }));
                           }}>
                           <Text style={[s.stateTierLabel, { color: C.orange }]}>{isCachedDet ? '✓ ' : ''}TRAILS</Text>
-                          <Text style={s.stateTierSize}>{tilesMB(countDet, 15)}</Text>
+                          <Text style={s.stateTierSize}>{tilesMB(countDet, 15, true)}</Text>
                         </TouchableOpacity>
                       </View>
                     </View>
@@ -2402,7 +2834,7 @@ export default function MapScreen() {
       </Modal>
 
       {/* ── Search This Area (native button — reliable on all platforms) ── */}
-      {(mapMoved || isLoadingAreaCamps || searchResult !== null) && !navMode && !showSearch && (
+      {(mapMoved || isLoadingAreaCamps || searchResult !== null || activeFilters.length > 0) && !navMode && !showSearch && !selectedCamp && mapZoom >= 9 && (
         <View style={s.searchAreaWrap}>
           <TouchableOpacity
             style={[s.searchAreaBtn, isLoadingAreaCamps && s.searchAreaBtnLoading]}
@@ -2417,9 +2849,9 @@ export default function MapScreen() {
               <ActivityIndicator size="small" color={C.orange} style={{ marginRight: 6 }} />
             ) : searchResult !== null ? (
               <Ionicons
-                name={searchResult.count < 0 ? 'alert-circle-outline' : searchResult.count === 0 ? 'information-circle-outline' : 'checkmark-circle-outline'}
+                name={searchResult.count === -2 ? 'expand-outline' : searchResult.count < 0 ? 'alert-circle-outline' : searchResult.count === 0 ? 'information-circle-outline' : 'checkmark-circle-outline'}
                 size={14}
-                color={searchResult.count < 0 ? C.red : searchResult.count === 0 ? C.text3 : C.green}
+                color={searchResult.count === -2 ? C.text2 : searchResult.count < 0 ? C.red : searchResult.count === 0 ? C.text3 : C.green}
                 style={{ marginRight: 5 }}
               />
             ) : (
@@ -2429,12 +2861,16 @@ export default function MapScreen() {
               {isLoadingAreaCamps
                 ? 'SEARCHING...'
                 : searchResult !== null
-                  ? searchResult.count < 0
-                    ? 'SEARCH FAILED — RETRY'
-                    : searchResult.count === 0
-                      ? 'NO CAMPS FOUND HERE'
-                      : `${searchResult.count} CAMP${searchResult.count !== 1 ? 'S' : ''} FOUND`
-                  : 'SEARCH THIS AREA'}
+                  ? searchResult.count === -2
+                    ? 'ZOOM IN TO SEARCH'
+                    : searchResult.count < 0
+                      ? 'SEARCH FAILED — RETRY'
+                      : searchResult.count === 0
+                        ? 'NO CAMPS FOUND HERE'
+                        : `${searchResult.count} CAMP${searchResult.count !== 1 ? 'S' : ''} FOUND`
+                  : activeFilters.length > 0
+                    ? `SEARCH · ${activeFilters.length} FILTER${activeFilters.length !== 1 ? 'S' : ''} ACTIVE`
+                    : 'SEARCH THIS AREA'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -2447,8 +2883,21 @@ export default function MapScreen() {
         pointerEvents: navMode ? 'box-none' : 'none',
       }]}>
 
-        {/* Turn instruction strip — rerouting / proceed-to-route / normal */}
-        {navMode && isRerouting ? (
+        {/* Turn instruction strip — arriving / rerouting / proceed-to-route / normal */}
+        {navMode && isApproaching ? (
+          <View style={[s.turnStrip, { backgroundColor: '#0d2a16' }]}>
+            <View style={[s.turnIconWrap, { borderColor: '#22c55e77', backgroundColor: '#22c55e22' }]}>
+              <Ionicons name="flag-outline" size={28} color="#22c55e" />
+            </View>
+            <View style={s.turnInfo}>
+              <Text style={[s.turnLabel, { color: '#22c55e' }]}>ARRIVING</Text>
+              {navTarget?.name ? <Text style={s.turnRoad} numberOfLines={1}>{navTarget.name}</Text> : null}
+            </View>
+            {distKm !== null && (
+              <Text style={[s.turnDist, { color: '#22c55e' }]}>{formatDist(distKm)}</Text>
+            )}
+          </View>
+        ) : navMode && isRerouting ? (
           <View style={[s.turnStrip, { backgroundColor: '#92400e' }]}>
             <ActivityIndicator color="#fff" size="small" style={{ marginRight: 12 }} />
             <View style={s.turnInfo}>
@@ -2459,7 +2908,7 @@ export default function MapScreen() {
         ) : navMode && proceedToRoute ? (
           <View style={[s.turnStrip, { backgroundColor: '#1e3a5f' }]}>
             <View style={s.turnIconWrap}>
-              <Ionicons name="navigate-outline" size={22} color="#fff" />
+              <Ionicons name="navigate-outline" size={28} color="#fff" />
             </View>
             <View style={s.turnInfo}>
               <Text style={s.turnLabel}>Proceed to route</Text>
@@ -2471,7 +2920,7 @@ export default function MapScreen() {
           <View style={s.turnStripWrap}>
             <View style={s.turnStrip}>
               <View style={s.turnIconWrap}>
-                <Ionicons name={stepIcon(nextStep.type, nextStep.modifier) as any} size={22} color="#fff" />
+                <Ionicons name={stepIcon(nextStep.type, nextStep.modifier) as any} size={28} color="#fff" />
               </View>
               <View style={s.turnInfo}>
                 <Text style={s.turnLabel}>{stepLabel(nextStep.type, nextStep.modifier, nextStep.name)}</Text>
@@ -2479,6 +2928,14 @@ export default function MapScreen() {
               </View>
               <Text style={s.turnDist}>{formatStepDist(stepDistM ?? nextStep.distance)}</Text>
             </View>
+            {/* Distance countdown bar — fills orange as maneuver approaches */}
+            {stepDistM !== null && nextStep.distance > 80 && (
+              <View style={s.stepProgressBg}>
+                <View style={[s.stepProgressFill, {
+                  width: `${Math.max(2, Math.min(100, ((nextStep.distance - stepDistM) / nextStep.distance) * 100))}%` as any,
+                }]} />
+              </View>
+            )}
             {/* Lane guidance row */}
             {nextStep.lanes && nextStep.lanes.length > 0 && stepDistM !== null && stepDistM < 800 && (
               <View style={s.laneRow}>
@@ -2497,6 +2954,17 @@ export default function MapScreen() {
           </View>
         ) : null}
 
+        {/* Off-route nudge — shown between 30–200m off route, before rerouting */}
+        {offRouteWarn && navMode && !isRerouting && (
+          <View style={s.offRouteWarnBar}>
+            <Ionicons name="return-up-back-outline" size={14} color="#fbbf24" />
+            <Text style={s.offRouteWarnText}>RETURN TO ROUTE</Text>
+            <TouchableOpacity onPress={manualReroute} style={s.offRouteWarnBtn}>
+              <Text style={s.offRouteWarnBtnText}>REROUTE NOW</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* Speed + distance strip */}
         <View style={s.navStrip}>
           {/* Speed circle (Waze-style) */}
@@ -2505,11 +2973,12 @@ export default function MapScreen() {
             <Text style={s.navSpeedUnit}>MPH</Text>
           </View>
 
-          {/* Speed limit badge */}
+          {/* Speed limit sign (MUTCD) — only shown when per-step data is available */}
           {speedLimitMph !== null && (
-            <View style={[s.navSpeedLimit, speedMph !== null && Math.round(speedMph) > speedLimitMph + 5 && s.navSpeedLimitOver]}>
-              <Text style={s.navSpeedLimitTop}>LIMIT</Text>
-              <Text style={s.navSpeedLimitVal}>{speedLimitMph}</Text>
+            <View style={[s.navSpeedSign, speedMph !== null && Math.round(speedMph) > speedLimitMph + 5 && s.navSpeedSignOver]}>
+              <Text style={s.navSpeedSignHeader}>SPEED</Text>
+              <Text style={s.navSpeedSignHeader}>LIMIT</Text>
+              <Text style={s.navSpeedSignNum}>{speedLimitMph}</Text>
             </View>
           )}
 
@@ -2519,9 +2988,7 @@ export default function MapScreen() {
               {distKm !== null ? formatDist(distKm) : '--'}
             </Text>
             {etaMins !== null && (
-              <Text style={s.navEta}>
-                {etaMins < 60 ? `~${etaMins} min` : `~${Math.floor(etaMins / 60)}h ${etaMins % 60}m`}
-              </Text>
+              <Text style={s.navEta}>ARRIVE {etaClockTime(etaMins)}</Text>
             )}
             {remainingKm !== null && waypoints.length > navIdx + 1 && (
               <Text style={s.navRemaining}>{formatDist(remainingKm)} trip total</Text>
@@ -2535,17 +3002,19 @@ export default function MapScreen() {
         </View>
 
         {/* Next waypoint */}
-        {navTarget && (
+        {navTarget && !isApproaching && (
           <View style={s.navTarget}>
-            <View style={[s.navTargetBadge, isApproaching && { backgroundColor: C.green + '22', borderColor: C.green }]}>
-              <Text style={[s.navTargetBadgeText, isApproaching && { color: C.green }]}>
-                {isApproaching ? '⬤ ARRIVING' : isProceeding ? 'PROCEED TO' : 'NEXT STOP'}
+            <View style={[s.navTargetBadge, isProceeding && { backgroundColor: '#1e3a5f', borderColor: '#3b82f6' }]}>
+              <Text style={[s.navTargetBadgeText, isProceeding && { color: '#60a5fa' }]}>
+                {isProceeding ? 'PROCEED TO' : 'NEXT STOP'}
               </Text>
             </View>
             <View style={s.navTargetInfo}>
               <Text style={s.navTargetName} numberOfLines={1}>{navTarget.name}</Text>
               <Text style={s.navTargetMeta}>
-                Day {navTarget.day} · {navTarget.type} · {navIdx + 1} of {waypoints.length}
+                {navTarget.day > 0 ? `Day ${navTarget.day} · ` : ''}
+                {navTarget.type === 'camp' ? '⛺ Camp' : navTarget.type === 'fuel' ? '⛽ Fuel' : navTarget.type === 'start' ? '🚩 Start' : navTarget.type === 'motel' ? '🏨 Motel' : navTarget.type}
+                {waypoints.length > 0 ? ` · ${navIdx + 1}/${waypoints.length}` : ''}
               </Text>
             </View>
           </View>
@@ -2569,6 +3038,16 @@ export default function MapScreen() {
             <TouchableOpacity style={s.navRerouteBtn} onPress={manualReroute} disabled={isRerouting}>
               <Ionicons name="refresh-outline" size={14} color={isRerouting ? OVR.text3 : OVR.text2} />
               <Text style={[s.navStepsBtnText, isRerouting && { color: OVR.text3 }]}>REROUTE</Text>
+            </TouchableOpacity>
+          )}
+
+          {userLoc && (
+            <TouchableOpacity
+              style={[s.navReportBtn, quickReport && s.navReportBtnActive]}
+              onPress={() => { setQuickTypeIdx(null); setQuickReport(p => !p); }}
+            >
+              <Ionicons name="warning" size={13} color={quickReport ? '#fff' : '#f59e0b'} />
+              <Text style={[s.navReportBtnText, quickReport && { color: '#fff' }]}>REPORT</Text>
             </TouchableOpacity>
           )}
 
@@ -2655,8 +3134,8 @@ export default function MapScreen() {
       })()}
 
       {/* ── Waze-style quick report (two-step: type → subtype) ─────────────── */}
-      {userLoc && !showSearch && !selectedCamp && (
-        <View style={s.quickReportWrap} pointerEvents="box-none">
+      {userLoc && !showSearch && !selectedCamp && (navMode || mapZoom >= 10) && (
+        <View style={[s.quickReportWrap, navMode && s.quickReportWrapNav]} pointerEvents="box-none">
           {!!quickToast && (
             <View style={s.quickToast}>
               <Ionicons name="checkmark-circle" size={14} color={C.green} />
@@ -2738,13 +3217,39 @@ export default function MapScreen() {
               )}
             </View>
           )}
-          <TouchableOpacity
-            style={[s.quickReportFab, navMode && s.quickReportFabNav]}
-            onPress={() => { setQuickTypeIdx(null); setQuickReport(p => !p); }}
-          >
-            <Ionicons name="warning-outline" size={18} color={quickReport ? OVR.text : OVR.text2} />
-            <Text style={[s.quickReportFabText, quickReport && { color: OVR.text }]}>REPORT</Text>
-          </TouchableOpacity>
+          {!navMode && (
+            <TouchableOpacity
+              style={[s.quickReportFab, quickReport && s.quickReportFabActive]}
+              onPress={() => { setQuickTypeIdx(null); setQuickReport(p => !p); }}
+            >
+              <Ionicons name="warning" size={13} color={quickReport ? '#fff' : '#f59e0b'} />
+              <Text style={[s.quickReportFabText, quickReport && s.quickReportFabTextActive]}>REPORT</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+
+      {/* ── First-time onboarding card ─────────────────────────────────────── */}
+      {showOnboard && !activeTrip && !navMode && !showSearch && !selectedCamp && (
+        <View style={s.onboardCard} pointerEvents="box-none">
+          <View style={s.onboardInner}>
+            <View style={s.onboardIconWrap}>
+              <Ionicons name="map-outline" size={22} color={C.orange} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.onboardTitle}>PLAN YOUR FIRST ADVENTURE</Text>
+              <Text style={s.onboardBody}>Tap the PLAN tab and describe any trip — mountains, desert, off-road, you name it.</Text>
+            </View>
+            <TouchableOpacity
+              style={s.onboardClose}
+              onPress={() => {
+                setShowOnboard(false);
+                SecureStore.setItemAsync('trailhead_onboarded', 'true').catch(() => {});
+              }}
+            >
+              <Ionicons name="close" size={16} color={OVR.text3} />
+            </TouchableOpacity>
+          </View>
         </View>
       )}
 
@@ -2837,6 +3342,40 @@ export default function MapScreen() {
           </View>
         </TouchableOpacity>
       </Modal>
+
+      {/* ── Trail tap sheet ── */}
+      {tappedTrail && (
+        <Modal visible transparent animationType="slide" onRequestClose={() => setTappedTrail(null)}>
+          <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setTappedTrail(null)}>
+            <View style={s.wpSheet}>
+              <View style={s.daySheetHandle} />
+              <View style={s.wpSheetHeader}>
+                <View style={[s.wpSheetTypeDot, { backgroundColor: '#22c55e' }]} />
+                <View style={{ flex: 1 }}>
+                  <Text style={s.wpSheetName} numberOfLines={2}>{tappedTrail.name}</Text>
+                  <Text style={s.wpSheetMeta}>{tappedTrail.cls === 'track' ? 'Dirt Track / Forest Road' : 'Trail / Path'}</Text>
+                </View>
+              </View>
+              <View style={s.wpSheetActions}>
+                <TouchableOpacity
+                  style={s.wpSheetNavBtn}
+                  onPress={() => {
+                    setTappedTrail(null);
+                    navigateToCamp({ lat: tappedTrail.lat, lng: tappedTrail.lng, name: tappedTrail.name });
+                  }}
+                >
+                  <Ionicons name="navigate" size={14} color="#fff" />
+                  <Text style={s.wpSheetNavText}>NAVIGATE HERE</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={s.wpSheetDayBtn} onPress={() => setTappedTrail(null)}>
+                  <Ionicons name="close" size={14} color={OVR.text2} />
+                  <Text style={s.wpSheetDayText}>DISMISS</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+      )}
 
       {/* ── Waypoint tap sheet ── */}
       {tappedWp && (
@@ -2948,14 +3487,22 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     backgroundColor: '#1a3a1a',
   },
   turnIconWrap: {
-    width: 38, height: 38, borderRadius: 10,
+    width: 48, height: 48, borderRadius: 12,
     backgroundColor: 'rgba(249,115,22,0.25)', alignItems: 'center', justifyContent: 'center',
     borderWidth: 1.5, borderColor: 'rgba(249,115,22,0.5)',
   },
   turnInfo: { flex: 1 },
-  turnLabel: { color: '#fff', fontSize: 15, fontWeight: '900', fontFamily: mono, letterSpacing: 0.5 },
-  turnRoad: { color: 'rgba(255,255,255,0.65)', fontSize: 11, marginTop: 2, fontFamily: mono },
-  turnDist: { color: '#f97316', fontSize: 14, fontWeight: '700', fontFamily: mono },
+  turnLabel: { color: '#fff', fontSize: 16, fontWeight: '900', fontFamily: mono, letterSpacing: 0.5 },
+  turnRoad: { color: 'rgba(255,255,255,0.65)', fontSize: 12, marginTop: 2, fontFamily: mono },
+  turnDist: { color: '#f97316', fontSize: 16, fontWeight: '800', fontFamily: mono },
+  stepProgressBg: {
+    height: 4, backgroundColor: 'rgba(249,115,22,0.15)',
+    borderTopWidth: 1, borderColor: 'rgba(249,115,22,0.1)',
+  },
+  stepProgressFill: {
+    height: 4, backgroundColor: '#f97316',
+    borderTopRightRadius: 2, borderBottomRightRadius: 2,
+  },
   laneRow: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
     backgroundColor: '#111a11', paddingHorizontal: 14, paddingVertical: 6,
@@ -2968,6 +3515,18 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   laneBoxActive: { borderColor: '#f97316', backgroundColor: 'rgba(249,115,22,0.15)' },
 
+  offRouteWarnBar: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingHorizontal: 14, paddingVertical: 8,
+    backgroundColor: '#451a03', borderBottomWidth: 1, borderColor: '#92400e',
+  },
+  offRouteWarnText: { color: '#fbbf24', fontSize: 11, fontFamily: mono, fontWeight: '800', flex: 1, letterSpacing: 0.5 },
+  offRouteWarnBtn: {
+    paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8,
+    backgroundColor: '#92400e', borderWidth: 1, borderColor: '#fbbf24',
+  },
+  offRouteWarnBtnText: { color: '#fbbf24', fontSize: 10, fontFamily: mono, fontWeight: '700' },
+
   navStrip: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     paddingHorizontal: 16, paddingVertical: 12,
@@ -2977,7 +3536,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   navBearingText: { color: C.orange, fontSize: 18, fontWeight: '900', fontFamily: mono },
   navDistBlock: { flex: 1, alignItems: 'center' },
   navDistVal: { color: OVR.text, fontSize: 28, fontWeight: '800', fontFamily: mono },
-  navEta: { color: OVR.text3, fontSize: 10, fontFamily: mono, marginTop: 1 },
+  navEta: { color: C.orange, fontSize: 11, fontFamily: mono, fontWeight: '700', marginTop: 2, letterSpacing: 0.3 },
   navRemaining: { color: OVR.text3, fontSize: 9, fontFamily: mono, marginTop: 2, opacity: 0.7 },
   navSpeedBlock: { alignItems: 'center', width: 50 },
   navSpeedVal: { color: OVR.text2, fontSize: 22, fontWeight: '700', fontFamily: mono },
@@ -3017,6 +3576,14 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     paddingHorizontal: 12, paddingVertical: 10, borderRadius: 11,
     borderWidth: 1, borderColor: OVR.border, backgroundColor: OVR.border2,
   },
+  navReportBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    paddingHorizontal: 12, paddingVertical: 10, borderRadius: 11,
+    borderWidth: 1.5, borderColor: '#f59e0b55', backgroundColor: '#f59e0b14',
+    marginLeft: 'auto' as any,
+  },
+  navReportBtnActive: { backgroundColor: '#f59e0b', borderColor: '#f59e0b' },
+  navReportBtnText: { color: '#f59e0b', fontSize: 11, fontFamily: mono, fontWeight: '800' },
   dlBar: {
     position: 'absolute', top: 92, left: 16, right: 16,
     height: 3, borderRadius: 1.5, backgroundColor: C.border, overflow: 'hidden',
@@ -3100,8 +3667,9 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   filterBar: {
     position: 'absolute', top: 92, left: 0, right: 0,
     backgroundColor: 'rgba(8,12,18,0.96)', borderBottomWidth: 1, borderColor: C.border,
+    paddingBottom: 4,
   },
-  filterScroll: { paddingHorizontal: 14, paddingVertical: 10, gap: 8 },
+  filterScroll: { paddingHorizontal: 14, paddingVertical: 8, gap: 7 },
   filterChip: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
     paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20,
@@ -3114,10 +3682,10 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   // ── Campsite quick card (Dyrt-style: white card, photo left, bold info right)
   quickCard: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: '#ffffff',
+    backgroundColor: C.s1,
     borderTopLeftRadius: 20, borderTopRightRadius: 20,
     flexDirection: 'row',
-    shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.12, shadowRadius: 16,
+    shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.18, shadowRadius: 16,
     elevation: 12,
   },
   quickCardImg: { width: 120 },
@@ -3128,9 +3696,9 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   quickCardBody: { flex: 1, padding: 14, paddingBottom: 28, gap: 6 },
   quickCardHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
-  quickCardName: { color: '#0f172a', fontSize: 15, fontWeight: '800', flex: 1, lineHeight: 20 },
+  quickCardName: { color: C.text, fontSize: 15, fontWeight: '800', flex: 1, lineHeight: 20 },
   quickCardClose: {
-    width: 28, height: 28, borderRadius: 14, backgroundColor: '#f1f5f9',
+    width: 28, height: 28, borderRadius: 14, backgroundColor: C.s3,
     alignItems: 'center', justifyContent: 'center',
   },
   landBadge: {
@@ -3139,7 +3707,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   landBadgeText: { fontSize: 9, fontFamily: mono, fontWeight: '800', letterSpacing: 0.5 },
   quickCardTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
-  quickCardCost: { color: '#16a34a', fontSize: 11, fontFamily: mono, fontWeight: '700' },
+  quickCardCost: { color: C.green, fontSize: 11, fontFamily: mono, fontWeight: '700' },
   quickCardActions: { flexDirection: 'row', gap: 8, marginTop: 2 },
   quickCardNav: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
@@ -3153,25 +3721,61 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     borderWidth: 1.5, borderColor: C.orange,
   },
   quickCardFullText: { color: C.orange, fontSize: 11, fontFamily: mono, fontWeight: '700' },
+
+  // ── Rig compat + weather
+  rigCompatBadge: {
+    flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 4,
+    borderRadius: 6, borderWidth: 1, alignSelf: 'flex-start',
+  },
+  rigCompatText: { fontSize: 9, fontFamily: mono, fontWeight: '800' },
+  weatherStrip: { flexDirection: 'row', gap: 8 },
+  weatherDay: { alignItems: 'center', flex: 1 },
+  weatherIcon: { fontSize: 16 },
+  weatherHiLo: { fontSize: 9, fontFamily: mono, fontWeight: '700', color: C.text2 },
+
+  // ── Camp fullness UI
+  fullnessBanner: {
+    backgroundColor: '#fef2f2', borderWidth: 1, borderColor: '#fca5a5',
+    borderRadius: 8, padding: 8, gap: 6,
+  },
+  fullnessBannerTop: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  fullnessBannerText: { flex: 1, color: C.red, fontSize: 10, fontFamily: mono, fontWeight: '800' },
+  fullnessAge: { color: C.red, fontSize: 9, fontFamily: mono },
+  fullnessVoteRow: { flexDirection: 'row', gap: 6 },
+  fullnessVoteBtn: {
+    flex: 1, alignItems: 'center', paddingVertical: 6, borderRadius: 7, borderWidth: 1,
+  },
+  fullnessStillFull: { backgroundColor: C.s2, borderColor: C.red + '66' },
+  fullnessStillFullText: { color: C.red, fontSize: 10, fontFamily: mono, fontWeight: '700' },
+  fullnessOpen: { backgroundColor: C.s2, borderColor: C.green + '66' },
+  fullnessOpenText: { color: C.green, fontSize: 10, fontFamily: mono, fontWeight: '700' },
+  reportFullBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    paddingVertical: 6, paddingHorizontal: 10, borderRadius: 7,
+    borderWidth: 1, borderColor: C.gold + '88', backgroundColor: C.s2,
+    alignSelf: 'flex-start',
+  },
+  reportFullText: { color: C.gold, fontSize: 10, fontFamily: mono, fontWeight: '700' },
+
   qTag: {
     paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6,
-    borderWidth: 1, borderColor: '#e2e8f0', backgroundColor: '#f8fafc',
+    borderWidth: 1, borderColor: C.border, backgroundColor: C.s2,
   },
-  qTagText: { color: '#475569', fontSize: 9, fontFamily: mono, fontWeight: '700' },
+  qTagText: { color: C.text2, fontSize: 9, fontFamily: mono, fontWeight: '700' },
 
   // ── Campsite detail modal
-  detailModal: { flex: 1, backgroundColor: '#ffffff' },
+  detailModal: { flex: 1, backgroundColor: C.bg },
   photoGallery: { height: 260 },
   galleryPhoto: { width: 400, height: 260 },
   galleryPlaceholder: {
-    height: 200, backgroundColor: '#f1f5f9',
+    height: 200, backgroundColor: C.s1,
     alignItems: 'center', justifyContent: 'center',
   },
-  detailContent: { padding: 20, backgroundColor: '#ffffff' },
+  detailContent: { padding: 20, backgroundColor: C.bg },
   detailHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 8 },
-  detailName: { color: '#0f172a', fontSize: 22, fontWeight: '800', flex: 1, lineHeight: 28 },
+  detailName: { color: C.text, fontSize: 22, fontWeight: '800', flex: 1, lineHeight: 28 },
   detailClose: {
-    width: 36, height: 36, borderRadius: 18, backgroundColor: '#f1f5f9',
+    width: 36, height: 36, borderRadius: 18, backgroundColor: C.s2,
     alignItems: 'center', justifyContent: 'center',
   },
   detailTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 },
@@ -3181,25 +3785,25 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   detailLandText: { fontSize: 10, fontFamily: mono, fontWeight: '800', letterSpacing: 0.5 },
   detailMeta: { flexDirection: 'row', gap: 16, marginBottom: 16, alignItems: 'center' },
-  detailCost: { color: '#16a34a', fontSize: 14, fontFamily: mono, fontWeight: '800' },
-  detailSiteCount: { color: '#64748b', fontSize: 13, fontFamily: mono },
+  detailCost: { color: C.green, fontSize: 14, fontFamily: mono, fontWeight: '800' },
+  detailSiteCount: { color: C.text2, fontSize: 13, fontFamily: mono },
   detailSection: { marginBottom: 20 },
   detailSectionTitle: {
-    color: '#94a3b8', fontSize: 10, fontFamily: mono, fontWeight: '800',
+    color: C.text2, fontSize: 10, fontFamily: mono, fontWeight: '800',
     letterSpacing: 1.5, marginBottom: 10,
-    borderBottomWidth: 1, borderColor: '#e2e8f0', paddingBottom: 6,
+    borderBottomWidth: 1, borderColor: C.border, paddingBottom: 6,
   },
-  detailDesc: { color: '#374151', fontSize: 14, lineHeight: 22 },
+  detailDesc: { color: C.text, fontSize: 14, lineHeight: 22 },
   amenityGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   amenityItem: {
     paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10,
-    backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0',
+    backgroundColor: C.s1, borderWidth: 1, borderColor: C.border,
     flexDirection: 'row', alignItems: 'center', gap: 5,
   },
-  amenityText: { color: '#334155', fontSize: 12, fontWeight: '500' },
+  amenityText: { color: C.text, fontSize: 12, fontWeight: '500' },
   siteTypeRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
-  siteTypeText: { color: '#374151', fontSize: 13 },
-  detailActivities: { color: '#64748b', fontSize: 12, lineHeight: 20 },
+  siteTypeText: { color: C.text, fontSize: 13 },
+  detailActivities: { color: C.text2, fontSize: 12, lineHeight: 20 },
   detailActions: { gap: 10, marginTop: 8 },
   detailBookBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
@@ -3217,7 +3821,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   // ── Coordinates
   coordRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   coordText: { color: C.text2, fontSize: 13, fontFamily: mono, flex: 1 },
-  coordDms: { color: C.text3, fontSize: 11, fontFamily: mono, marginTop: 4 },
+  coordDms: { color: C.text2, fontSize: 11, fontFamily: mono, marginTop: 4 },
   coordCopy: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: C.orange },
   coordCopyText: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '700' },
 
@@ -3226,17 +3830,17 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   insiderTip: { backgroundColor: C.orange + '14', borderRadius: 10, borderWidth: 1, borderColor: C.orange + '44', padding: 12, marginBottom: 8 },
   insiderLabel: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '800', marginBottom: 4 },
   insiderText: { color: C.text, fontSize: 13, lineHeight: 19 },
-  aiMeta: { color: C.text3, fontSize: 12, marginBottom: 3 },
+  aiMeta: { color: C.text2, fontSize: 12, marginBottom: 3 },
   hazardRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 6, backgroundColor: C.yellow + '14', borderRadius: 8, padding: 8 },
   hazardText: { color: C.yellow, fontSize: 12, flex: 1, lineHeight: 17 },
-  nearbyItem: { color: C.text3, fontSize: 12, marginBottom: 3 },
+  nearbyItem: { color: C.text2, fontSize: 12, marginBottom: 3 },
 
   // ── Wikipedia
-  wikiItem: { paddingVertical: 10, borderBottomWidth: 1, borderColor: C.s2 },
+  wikiItem: { paddingVertical: 10, borderBottomWidth: 1, borderColor: C.border },
   wikiItemHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 3 },
   wikiTitle: { color: '#3b82f6', fontSize: 13, fontWeight: '600', flex: 1 },
-  wikiDist: { color: C.text3, fontSize: 10, fontFamily: mono },
-  wikiExtract: { color: C.text3, fontSize: 11, lineHeight: 16 },
+  wikiDist: { color: C.text2, fontSize: 10, fontFamily: mono },
+  wikiExtract: { color: C.text2, fontSize: 11, lineHeight: 16 },
 
   // ── AI action buttons in panel
   aiActionsRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 14, paddingBottom: 8 },
@@ -3340,19 +3944,23 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   navSpeedBig: { color: OVR.text, fontSize: 26, fontWeight: '900', fontFamily: mono, lineHeight: 28 },
   navSpeedUnit: { color: OVR.text3, fontSize: 7, fontFamily: mono, letterSpacing: 0.5 },
-  navSpeedLimit: {
-    width: 44, height: 44, borderRadius: 22,
-    borderWidth: 3, borderColor: '#ef4444',
-    backgroundColor: OVR.bg, alignItems: 'center', justifyContent: 'center',
+  navSpeedSign: {
+    width: 42, borderRadius: 3,
+    borderWidth: 3, borderColor: '#111',
+    backgroundColor: '#fff',
+    alignItems: 'center', paddingVertical: 4, paddingHorizontal: 3,
   },
-  navSpeedLimitOver: { backgroundColor: '#ef444422' },
-  navSpeedLimitTop: { color: '#ef4444', fontSize: 6, fontFamily: mono, fontWeight: '800', letterSpacing: 0.5 },
-  navSpeedLimitVal: { color: OVR.text, fontSize: 16, fontWeight: '900', fontFamily: mono, lineHeight: 18 },
+  navSpeedSignOver: { borderColor: '#ef4444', backgroundColor: '#fff0f0' },
+  navSpeedSignHeader: { color: '#111', fontSize: 5.5, fontFamily: mono, fontWeight: '900', letterSpacing: 0.2, lineHeight: 8 },
+  navSpeedSignNum: { color: '#111', fontSize: 22, fontWeight: '900', fontFamily: mono, lineHeight: 24 },
 
   // ── Waze-style quick report
   quickReportWrap: {
     position: 'absolute', bottom: 190, left: 12,
     alignItems: 'flex-start',
+  },
+  quickReportWrapNav: {
+    bottom: 400,
   },
   quickToast: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
@@ -3382,13 +3990,19 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   quickReportFab: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     backgroundColor: OVR.bg, borderRadius: 24,
-    paddingHorizontal: 14, paddingVertical: 9,
-    borderWidth: 1, borderColor: OVR.border,
+    paddingHorizontal: 16, paddingVertical: 10,
+    borderWidth: 1.5, borderColor: '#f59e0b55',
+    shadowColor: '#f59e0b', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 6,
+  },
+  quickReportFabActive: {
+    backgroundColor: '#f59e0b', borderColor: '#f59e0b',
+    shadowOpacity: 0.4,
   },
   quickReportFabNav: {
-    backgroundColor: '#1a2a1c', borderColor: OVR.border,
+    backgroundColor: '#1a2a1c', borderColor: '#f59e0b55',
   },
-  quickReportFabText: { color: OVR.text2, fontSize: 11, fontFamily: mono, fontWeight: '700' },
+  quickReportFabText: { color: '#f59e0b', fontSize: 11, fontFamily: mono, fontWeight: '800', letterSpacing: 0.5 },
+  quickReportFabTextActive: { color: '#fff' },
   quickSubtypeHeader: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
     paddingBottom: 6, marginBottom: 2,
@@ -3402,6 +4016,28 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   quickSubtypeText: { fontSize: 13, fontFamily: mono, fontWeight: '700' },
   packDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: C.orange, marginTop: 6 },
+
+  // ── Onboarding card ─────────────────────────────────────────────────────────
+  onboardCard: {
+    position: 'absolute', bottom: 108, left: 12, right: 12,
+    pointerEvents: 'box-none',
+  },
+  onboardInner: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: OVR.bg, borderRadius: 16,
+    borderWidth: 1.5, borderColor: C.orange + '55',
+    paddingHorizontal: 14, paddingVertical: 12,
+    shadowColor: C.orange, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.15, shadowRadius: 10,
+    elevation: 8,
+  },
+  onboardIconWrap: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: C.orange + '18',
+    alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  },
+  onboardTitle: { color: C.orange, fontSize: 11, fontFamily: mono, fontWeight: '800', letterSpacing: 0.8, marginBottom: 3 },
+  onboardBody: { color: OVR.text2, fontSize: 11, fontFamily: mono, lineHeight: 15 },
+  onboardClose: { padding: 6, alignSelf: 'flex-start', flexShrink: 0 },
 
   // ── Approaching report alert ─────────────────────────────────────────────────
   approachAlert: {

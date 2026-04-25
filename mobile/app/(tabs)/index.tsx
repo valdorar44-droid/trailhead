@@ -7,6 +7,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import { api, TripResult, TrailDNA, CreditPackage } from '@/lib/api';
 import { useStore } from '@/lib/store';
 import { useTheme, useTag, mono, ColorPalette } from '@/lib/design';
@@ -14,9 +16,9 @@ import { useTheme, useTag, mono, ColorPalette } from '@/lib/design';
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://trailhead-production-2049.up.railway.app';
 
 const EXAMPLES = [
-  { label: '14D', text: '14-day loop through southern Utah — dispersed camping, off-road, a couple paid showers' },
-  { label: '7D',  text: '7-day overlanding from Denver into the San Juans, high clearance, wild camping only' },
-  { label: 'WK',  text: 'Weekend run near Moab, BLM land, taking my Tacoma' },
+  { label: '14D', icon: 'moon-outline',     tags: ['DISPERSED', 'DIRT RD', 'UTAH'],    text: '14-day loop through southern Utah — dispersed camping, off-road, a couple paid showers' },
+  { label: '7D',  icon: 'triangle-outline', tags: ['HIGH CLEAR', '4WD', 'SAN JUANS'],  text: '7-day overlanding from Denver into the San Juans, high clearance, wild camping only' },
+  { label: 'WK',  icon: 'flash-outline',    tags: ['BLM', 'MOAB', 'TRUCK'],            text: 'Weekend run near Moab, BLM land, taking my Tacoma' },
 ];
 
 const CHAT_STAGES  = ['Checking the trail...', 'On it...', 'Thinking...'];
@@ -116,10 +118,13 @@ export default function PlanScreen() {
     } catch { return text; }
   }
 
+  const sendRef = useRef(false);
   // ── Main send handler ───────────────────────────────────────────────────────
   async function send() {
     const text = input.trim();
-    if (!text || loading) return;
+    if (!text || loading || sendRef.current) return;
+    sendRef.current = true;
+    setTimeout(() => { sendRef.current = false; }, 1500);
     setInput('');
     setMessages(m => [...m, { role: 'user', text }]);
     setLoading(true);
@@ -402,8 +407,18 @@ export default function PlanScreen() {
 
             {EXAMPLES.map((ex, i) => (
               <TouchableOpacity key={i} style={s.example} onPress={() => setInput(ex.text)}>
-                <View style={s.exampleBadge}><Text style={s.exampleBadgeText}>{ex.label}</Text></View>
-                <Text style={s.exampleText}>{ex.text}</Text>
+                <View style={s.exampleIconWrap}>
+                  <Ionicons name={ex.icon as any} size={18} color={C.orange} />
+                </View>
+                <View style={{ flex: 1, gap: 6 }}>
+                  <View style={s.exampleTagRow}>
+                    <View style={s.exampleBadge}><Text style={s.exampleBadgeText}>{ex.label}</Text></View>
+                    {ex.tags.map(t => (
+                      <View key={t} style={s.exampleTag}><Text style={s.exampleTagText}>{t}</Text></View>
+                    ))}
+                  </View>
+                  <Text style={s.exampleText}>{ex.text}</Text>
+                </View>
               </TouchableOpacity>
             ))}
           </View>
@@ -680,6 +695,17 @@ function OutlineCard({ outline, C, onBuild, onRefine, loading }: {
   );
 }
 
+async function shareGpx(trip: TripResult) {
+  const wpts = trip.plan.waypoints
+    .filter(w => w.lat && w.lng)
+    .map(w => `  <wpt lat="${w.lat!.toFixed(6)}" lon="${w.lng!.toFixed(6)}">\n    <name>${w.name.replace(/[<>&]/g, '')}</name>\n    <desc>Day ${w.day} – ${w.type}</desc>\n  </wpt>`)
+    .join('\n');
+  const gpx = `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Trailhead" xmlns="http://www.topografix.com/GPX/1/1">\n  <metadata><name>${trip.plan.trip_name}</name></metadata>\n${wpts}\n</gpx>`;
+  const path = `${FileSystem.documentDirectory}${trip.plan.trip_name.replace(/[^a-z0-9]/gi, '_')}.gpx`;
+  await FileSystem.writeAsStringAsync(path, gpx, { encoding: FileSystem.EncodingType.UTF8 });
+  await Sharing.shareAsync(path, { mimeType: 'application/gpx+xml', UTI: 'public.gpx' });
+}
+
 function TripCard({ trip, C, onViewMap, onViewGuide }: {
   trip: TripResult; C: ColorPalette;
   onViewMap: () => void; onViewGuide: () => void;
@@ -738,9 +764,14 @@ function TripCard({ trip, C, onViewMap, onViewGuide }: {
             <Text style={{ color: '#e4ddd2', fontSize: 18, fontWeight: '900', letterSpacing: -0.5, lineHeight: 22, textTransform: 'uppercase' }} numberOfLines={2}>{p.trip_name}</Text>
             <Text style={{ color: '#8a9285', fontSize: 10, fontFamily: mono, letterSpacing: 0.8, marginTop: 3 }}>{(p.states ?? []).join(' · ')}</Text>
           </View>
-          <TouchableOpacity onPress={shareTrip} style={{ padding: 4, marginTop: -2 }}>
-            <Ionicons name="share-outline" size={18} color="#8a9285" />
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', gap: 4, marginTop: -2 }}>
+            <TouchableOpacity onPress={() => shareGpx(trip)} style={{ padding: 4 }}>
+              <Ionicons name="navigate-circle-outline" size={18} color="#8a9285" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={shareTrip} style={{ padding: 4 }}>
+              <Ionicons name="share-outline" size={18} color="#8a9285" />
+            </TouchableOpacity>
+          </View>
         </View>
         {tags.length > 0 && (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
@@ -879,16 +910,27 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
 
   example: {
     backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
-    borderRadius: 10, padding: 12,
+    borderRadius: 12, padding: 12,
     flexDirection: 'row', alignItems: 'flex-start', gap: 10,
   },
-  exampleBadge: {
-    minWidth: 28, height: 22, borderRadius: 6,
-    backgroundColor: 'rgba(184,92,56,0.15)', borderWidth: 1, borderColor: C.border,
-    alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5,
+  exampleIconWrap: {
+    width: 36, height: 36, borderRadius: 10,
+    backgroundColor: 'rgba(184,92,56,0.12)', borderWidth: 1, borderColor: 'rgba(184,92,56,0.25)',
+    alignItems: 'center', justifyContent: 'center',
   },
-  exampleBadgeText: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '700' },
-  exampleText: { color: C.text, fontSize: 13, lineHeight: 19, flex: 1 },
+  exampleTagRow: { flexDirection: 'row', alignItems: 'center', gap: 5, flexWrap: 'wrap' },
+  exampleBadge: {
+    height: 20, borderRadius: 5,
+    backgroundColor: C.orange, borderWidth: 0,
+    alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6,
+  },
+  exampleBadgeText: { color: '#fff', fontSize: 8.5, fontFamily: mono, fontWeight: '800' },
+  exampleTag: {
+    height: 20, borderRadius: 5, borderWidth: 1, borderColor: C.border,
+    backgroundColor: C.s3, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6,
+  },
+  exampleTagText: { color: C.text3, fontSize: 8, fontFamily: mono, letterSpacing: 0.3 },
+  exampleText: { color: C.text2, fontSize: 12.5, lineHeight: 18 },
 
   // Messages
   msg:     { gap: 4 },

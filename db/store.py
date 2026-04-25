@@ -137,7 +137,41 @@ def init_db():
             credits_awarded INTEGER NOT NULL DEFAULT 0,
             created_at  INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS camp_fullness (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            camp_id      TEXT NOT NULL UNIQUE,
+            camp_name    TEXT,
+            lat          REAL NOT NULL,
+            lng          REAL NOT NULL,
+            status       TEXT NOT NULL DEFAULT 'full',
+            reporter_id  INTEGER REFERENCES users(id),
+            confirmations INTEGER NOT NULL DEFAULT 0,
+            disputes     INTEGER NOT NULL DEFAULT 0,
+            reported_at  INTEGER NOT NULL,
+            expires_at   INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS camp_fullness_votes (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            camp_id   TEXT NOT NULL,
+            user_id   INTEGER NOT NULL REFERENCES users(id),
+            vote      TEXT NOT NULL,
+            voted_at  INTEGER NOT NULL,
+            UNIQUE(camp_id, user_id)
+        );
     """)
+    # Performance indexes (IF NOT EXISTS is safe to re-run)
+    for idx_sql in [
+        "CREATE INDEX IF NOT EXISTS idx_reports_geo ON reports(lat, lng, expires_at)",
+        "CREATE INDEX IF NOT EXISTS idx_reports_user ON reports(user_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_pins_geo ON community_pins(lat, lng)",
+        "CREATE INDEX IF NOT EXISTS idx_fullness_geo ON camp_fullness(lat, lng, status, expires_at)",
+        "CREATE INDEX IF NOT EXISTS idx_credits_user ON credit_transactions(user_id, created_at)",
+    ]:
+        try:
+            db.execute(idx_sql)
+        except Exception:
+            pass
+
     # Non-destructive column additions for existing deployments
     for sql in [
         "ALTER TABLE users ADD COLUMN report_streak INTEGER NOT NULL DEFAULT 0",
@@ -295,6 +329,114 @@ def get_credit_history(user_id: int, limit: int = 20) -> list:
     return [dict(r) for r in rows]
 
 
+# ── Camp fullness ──────────────────────────────────────────────────────────────
+
+import datetime as _dt
+
+DISPUTE_THRESHOLD = 3  # disputes needed to flip a full report back to open
+
+def _next_noon_utc(ts: int) -> int:
+    """Return timestamp of the next noon UTC — campsites check out at noon."""
+    dt = _dt.datetime.utcfromtimestamp(ts)
+    noon = dt.replace(hour=12, minute=0, second=0, microsecond=0)
+    if dt.hour >= 12:
+        noon += _dt.timedelta(days=1)
+    return int(noon.timestamp())
+
+def _user_balance(user_id: int) -> int:
+    db = _conn()
+    row = db.execute("SELECT credits FROM users WHERE id=?", (user_id,)).fetchone()
+    db.close()
+    return row["credits"] if row else 0
+
+def report_camp_full(camp_id: str, camp_name: str, lat: float, lng: float, user_id: int) -> dict:
+    db = _conn()
+    now = int(time.time())
+    expires = _next_noon_utc(now)
+    existing = db.execute("SELECT * FROM camp_fullness WHERE camp_id=?", (camp_id,)).fetchone()
+    if existing and existing["status"] == "full" and existing["reporter_id"] == user_id and existing["expires_at"] > now:
+        db.close()
+        return {"credits_earned": 0, "confirmations": existing["confirmations"], "already_reported": True, "new_balance": _user_balance(user_id)}
+    db.execute("""
+        INSERT INTO camp_fullness (camp_id, camp_name, lat, lng, status, reporter_id, confirmations, disputes, reported_at, expires_at)
+        VALUES (?, ?, ?, ?, 'full', ?, 0, 0, ?, ?)
+        ON CONFLICT(camp_id) DO UPDATE SET
+            status='full', reporter_id=excluded.reporter_id, confirmations=0,
+            disputes=0, reported_at=excluded.reported_at, expires_at=excluded.expires_at
+    """, (camp_id, camp_name, lat, lng, user_id, now, expires))
+    db.execute("DELETE FROM camp_fullness_votes WHERE camp_id=?", (camp_id,))
+    db.commit(); db.close()
+    add_credits(user_id, 3, f"Reported camp full: {camp_name}")
+    return {"credits_earned": 3, "confirmations": 0, "new_balance": _user_balance(user_id)}
+
+def confirm_camp_full(camp_id: str, user_id: int) -> dict:
+    db = _conn()
+    now = int(time.time())
+    fullness = db.execute("SELECT * FROM camp_fullness WHERE camp_id=?", (camp_id,)).fetchone()
+    if not fullness or fullness["status"] != "full" or fullness["expires_at"] < now:
+        db.close()
+        return {"error": "No active full report", "credits_earned": 0}
+    vote = db.execute("SELECT id FROM camp_fullness_votes WHERE camp_id=? AND user_id=?", (camp_id, user_id)).fetchone()
+    if vote:
+        db.close()
+        return {"credits_earned": 0, "confirmations": fullness["confirmations"], "already_voted": True}
+    db.execute("INSERT INTO camp_fullness_votes (camp_id, user_id, vote, voted_at) VALUES (?,?,'confirm',?)", (camp_id, user_id, now))
+    db.execute("UPDATE camp_fullness SET confirmations=confirmations+1 WHERE camp_id=?", (camp_id,))
+    db.commit(); db.close()
+    add_credits(user_id, 1, f"Confirmed camp full: {fullness['camp_name']}")
+    confirmations = fullness["confirmations"] + 1
+    if confirmations <= 10 and fullness["reporter_id"] and fullness["reporter_id"] != user_id:
+        add_credits(fullness["reporter_id"], 1, f"Camp report confirmed: {fullness['camp_name']}")
+    return {"credits_earned": 1, "confirmations": confirmations, "new_balance": _user_balance(user_id)}
+
+def dispute_camp_full(camp_id: str, user_id: int) -> dict:
+    db = _conn()
+    now = int(time.time())
+    fullness = db.execute("SELECT * FROM camp_fullness WHERE camp_id=?", (camp_id,)).fetchone()
+    if not fullness or fullness["status"] != "full" or fullness["expires_at"] < now:
+        db.close()
+        return {"status": "open", "disputes": 0, "credits_earned": 0}
+    vote = db.execute("SELECT id FROM camp_fullness_votes WHERE camp_id=? AND user_id=?", (camp_id, user_id)).fetchone()
+    if vote:
+        db.close()
+        return {"credits_earned": 0, "disputes": fullness["disputes"], "status": "full", "already_voted": True}
+    db.execute("INSERT INTO camp_fullness_votes (camp_id, user_id, vote, voted_at) VALUES (?,?,'dispute',?)", (camp_id, user_id, now))
+    disputes = fullness["disputes"] + 1
+    new_status = "full"
+    credits_earned = 0
+    if disputes >= DISPUTE_THRESHOLD and disputes > fullness["confirmations"]:
+        new_status = "open"
+        db.execute("UPDATE camp_fullness SET status='open', disputes=? WHERE camp_id=?", (disputes, camp_id))
+        credits_earned = 3 if fullness["confirmations"] >= 2 else 1
+        add_credits(user_id, credits_earned, f"Cleared camp full report: {fullness['camp_name']}")
+    else:
+        db.execute("UPDATE camp_fullness SET disputes=? WHERE camp_id=?", (disputes, camp_id))
+    db.commit(); db.close()
+    return {"credits_earned": credits_earned, "disputes": disputes, "status": new_status, "new_balance": _user_balance(user_id)}
+
+def get_camp_fullness(camp_id: str) -> dict | None:
+    db = _conn()
+    now = int(time.time())
+    row = db.execute(
+        "SELECT cf.*, u.username FROM camp_fullness cf LEFT JOIN users u ON cf.reporter_id=u.id WHERE cf.camp_id=? AND cf.status='full' AND cf.expires_at>?",
+        (camp_id, now)
+    ).fetchone()
+    db.close()
+    return dict(row) if row else None
+
+def get_fullness_nearby(lat: float, lng: float, radius_deg: float = 0.5) -> list:
+    db = _conn()
+    now = int(time.time())
+    rows = db.execute("""
+        SELECT cf.*, u.username FROM camp_fullness cf
+        LEFT JOIN users u ON cf.reporter_id=u.id
+        WHERE cf.status='full' AND cf.expires_at>?
+          AND cf.lat BETWEEN ? AND ? AND cf.lng BETWEEN ? AND ?
+    """, (now, lat - radius_deg, lat + radius_deg, lng - radius_deg, lng + radius_deg)).fetchall()
+    db.close()
+    return [dict(r) for r in rows]
+
+
 def deduct_credits(user_id: int, amount: int, reason: str) -> bool:
     """Atomically deduct credits. Returns False if insufficient balance."""
     db = _conn()
@@ -439,30 +581,47 @@ def get_reports_near(lat: float, lng: float, radius_deg: float = 0.5) -> list:
     return _cluster_reports(raw)
 
 def get_reports_along_route(waypoints: list[dict], radius_deg: float = 0.15) -> list:
-    """Return reports near any waypoint on a route."""
+    """Return reports near any waypoint on a route — single query, no N+1."""
+    valid = [(wp["lat"], wp["lng"], wp.get("day")) for wp in waypoints
+             if wp.get("lat") and wp.get("lng")]
+    if not valid:
+        return []
     db = _conn()
     now = int(time.time())
-    seen, results = set(), []
-    for wp in waypoints:
-        lat, lng = wp.get("lat"), wp.get("lng")
-        if not lat or not lng:
-            continue
-        rows = db.execute(
-            """SELECT r.*,u.username FROM reports r
-               JOIN users u ON r.user_id=u.id
-               WHERE r.lat BETWEEN ? AND ? AND r.lng BETWEEN ? AND ?
-               AND (r.expires_at IS NULL OR r.expires_at>?)
-               ORDER BY r.severity DESC, r.upvotes DESC LIMIT 20""",
-            (lat-radius_deg, lat+radius_deg, lng-radius_deg, lng+radius_deg, now)
-        ).fetchall()
-        for row in rows:
-            if row["id"] not in seen:
-                seen.add(row["id"])
-                d = dict(row)
-                d.pop("photo_data", None)
-                d["waypoint_day"] = wp.get("day")
-                results.append(d)
+    # Build one expanded bounding box covering the whole route, then post-filter
+    lats = [v[0] for v in valid]
+    lngs = [v[1] for v in valid]
+    min_lat, max_lat = min(lats) - radius_deg, max(lats) + radius_deg
+    min_lng, max_lng = min(lngs) - radius_deg, max(lngs) + radius_deg
+    rows = db.execute(
+        """SELECT r.*,u.username FROM reports r
+           JOIN users u ON r.user_id=u.id
+           WHERE r.lat BETWEEN ? AND ? AND r.lng BETWEEN ? AND ?
+           AND (r.expires_at IS NULL OR r.expires_at>?)
+           ORDER BY r.severity DESC, r.upvotes DESC LIMIT 100""",
+        (min_lat, max_lat, min_lng, max_lng, now)
+    ).fetchall()
     db.close()
+    # Post-filter: only keep rows that are actually within radius of a waypoint
+    # and tag with nearest waypoint day
+    results = []
+    seen: set[int] = set()
+    for row in rows:
+        if row["id"] in seen:
+            continue
+        r_lat, r_lng = row["lat"], row["lng"]
+        best_day = None
+        for lat, lng, day in valid:
+            if abs(r_lat - lat) <= radius_deg and abs(r_lng - lng) <= radius_deg:
+                best_day = day
+                break
+        if best_day is None:
+            continue
+        seen.add(row["id"])
+        d = dict(row)
+        d.pop("photo_data", None)
+        d["waypoint_day"] = best_day
+        results.append(d)
     return results
 
 def _cluster_reports(reports: list[dict], cluster_deg: float = 0.002) -> list:

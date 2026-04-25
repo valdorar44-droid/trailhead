@@ -4,6 +4,7 @@ import {
   TextInput, Alert, Share, Linking, ActivityIndicator, Image, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
@@ -43,21 +44,50 @@ const DEFAULT_CHECKLIST: ChecklistSection[] = [
   ]},
 ];
 
-const VEHICLE_TYPES = ['Truck', 'Jeep', 'SUV', 'Van', 'Overlander', 'Moto'];
+const VEHICLE_TYPES = ['Truck', 'Jeep', 'SUV', 'Van/Camper', 'Moto', 'Other'];
 const DRIVE_TYPES   = ['2WD', 'AWD', '4x4 PT', '4x4 FT'];
-const LIFT_OPTIONS  = ['Stock', '2"', '4"', '6"+'];
+const SUSP_TYPES    = ['Stock', 'Leveling Kit', 'Lift Kit', 'Coilovers', 'Long Travel'];
+const DIFF_LOCK     = ['None', 'Rear Locker', 'Front + Rear'];
+
+const MAKES_DATA: Record<string, string[]> = {
+  'Toyota':     ['Tacoma', '4Runner', 'Land Cruiser', 'Tundra', 'Sequoia', 'FJ Cruiser', 'Hilux', 'RAV4'],
+  'Jeep':       ['Wrangler', 'Gladiator', 'Grand Cherokee', 'Cherokee', 'Renegade', 'Compass'],
+  'Ford':       ['Bronco', 'Bronco Sport', 'F-150', 'F-250', 'F-350', 'Ranger', 'Expedition', 'Explorer'],
+  'Chevrolet':  ['Colorado', 'Silverado 1500', 'Silverado 2500HD', 'Silverado 3500HD', 'Suburban', 'Tahoe', 'Blazer'],
+  'GMC':        ['Canyon', 'Sierra 1500', 'Sierra 2500HD', 'Sierra 3500HD', 'Yukon', 'Envoy'],
+  'Ram':        ['1500', '2500', '3500', 'Rebel', 'TRX', 'ProMaster'],
+  'Nissan':     ['Frontier', 'Titan', 'Xterra', 'Pathfinder', 'Armada', 'Patrol'],
+  'Subaru':     ['Outback', 'Forester', 'Crosstrek', 'Ascent', 'Wilderness'],
+  'Land Rover': ['Defender', 'Discovery', 'Discovery Sport', 'Range Rover Sport', 'LR4'],
+  'Mercedes':   ['Sprinter', 'G-Class', 'Unimog'],
+  'Rivian':     ['R1T', 'R1S'],
+  'Scout':      ['Terra', 'Traveler'],
+  'Honda':      ['Ridgeline', 'Passport', 'Pilot'],
+  'Mitsubishi': ['Outlander', 'Eclipse Cross', 'Pajero', 'L200'],
+  'Custom / Other': [],
+};
+
+const ALL_MAKES = Object.keys(MAKES_DATA);
 
 const DEFAULT_RIG: RigProfile = {
-  vehicle_type: '', year: '', make: '', model: '',
-  ground_clearance_in: '', lift_in: 'Stock', drive: '4x4 PT', length_ft: '',
+  vehicle_type: '', year: '', make: '', model: '', trim: '',
+  ground_clearance_in: '', lift_in: '', drive: '4x4 PT', length_ft: '',
+  suspension: 'Stock', tire_size: '',
+  has_winch: false, winch_lbs: '', locking_diffs: 'None',
+  has_skids: false, has_rack: false,
+  is_towing: false, trailer_length_ft: '', tow_capacity_lbs: '',
 };
 
 export default function ProfileScreen() {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
+  const router = useRouter();
   const { user, rigProfile, setAuth, clearAuth, setRigProfile } = useStore();
-  const themeMode = useStore(st => st.themeMode);
-  const setThemeMode = useStore(st => st.setThemeMode);
+  const tripHistory    = useStore(st => st.tripHistory);
+  const themeMode      = useStore(st => st.themeMode);
+  const setThemeMode   = useStore(st => st.setThemeMode);
+  const favoriteCamps  = useStore(st => st.favoriteCamps);
+  const toggleFavorite = useStore(st => st.toggleFavorite);
   const [view, setView] = useState<'main' | 'login' | 'register'>(!user ? 'login' : 'main');
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
@@ -78,6 +108,7 @@ export default function ProfileScreen() {
 
   const [editingRig, setEditingRig] = useState(false);
   const [rigDraft, setRigDraft] = useState<RigProfile>(rigProfile ?? DEFAULT_RIG);
+  const [rigSection, setRigSection] = useState<'vehicle' | 'build' | 'advanced'>('vehicle');
   const [checklist, setChecklist] = useState<ChecklistSection[]>(DEFAULT_CHECKLIST);
   const [showChecklist, setShowChecklist] = useState(false);
 
@@ -122,6 +153,7 @@ export default function ProfileScreen() {
   }
 
   async function loadHistory() {
+    if (creditHistory.length > 0) { setShowHistory(p => !p); return; }
     try {
       const res = await api.getCredits();
       setCreditHistory(res.history);
@@ -184,7 +216,11 @@ export default function ProfileScreen() {
   }
 
   function saveRig() {
-    if (!rigDraft.make || !rigDraft.model) { Alert.alert('Add at least a make and model'); return; }
+    const m = rigDraft.make;
+    if (!m || m === 'Custom / Other' || !rigDraft.model) {
+      Alert.alert('Add a make and model to save');
+      return;
+    }
     setRigProfile(rigDraft);
     setEditingRig(false);
   }
@@ -316,13 +352,85 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* Stats row */}
+        {(() => {
+          const totalMiles = tripHistory.reduce((sum, t) => sum + (t.est_miles || 0), 0);
+          const states = [...new Set(tripHistory.flatMap(t => t.states || []))];
+          return (
+            <View>
+              <View style={s.statsRow}>
+                <View style={s.statCell}>
+                  <Text style={s.statBig}>{user?.credits ?? 0}</Text>
+                  <Text style={s.statLabel}>CREDITS</Text>
+                </View>
+                <View style={s.statDivider} />
+                <View style={s.statCell}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                    {(user?.report_streak ?? 0) > 0 && <Ionicons name="flame" size={14} color={C.orange} />}
+                    <Text style={s.statBig}>{user?.report_streak ?? 0}</Text>
+                  </View>
+                  <Text style={s.statLabel}>DAY STREAK</Text>
+                </View>
+                <View style={s.statDivider} />
+                <View style={s.statCell}>
+                  <Text style={s.statBig}>{tripHistory.length}</Text>
+                  <Text style={s.statLabel}>TRIPS</Text>
+                </View>
+              </View>
+              {tripHistory.length > 0 && (
+                <View style={[s.statsRow, { marginTop: 6 }]}>
+                  <View style={s.statCell}>
+                    <Text style={s.statBig}>{totalMiles > 0 ? `${totalMiles.toLocaleString()}` : '—'}</Text>
+                    <Text style={s.statLabel}>MILES PLANNED</Text>
+                  </View>
+                  <View style={s.statDivider} />
+                  <View style={s.statCell}>
+                    <Text style={s.statBig}>{states.length}</Text>
+                    <Text style={s.statLabel}>STATES EXPLORED</Text>
+                  </View>
+                  <View style={s.statDivider} />
+                  <View style={s.statCell}>
+                    <Text numberOfLines={1} style={[s.statBig, { fontSize: 10 }]}>
+                      {states.slice(0, 5).join(' · ') || '—'}
+                    </Text>
+                    <Text style={s.statLabel}>REGIONS</Text>
+                  </View>
+                </View>
+              )}
+            </View>
+          );
+        })()}
+
+        {/* Quick actions */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={s.quickActionsRow}
+          contentContainerStyle={s.quickActionsContent}
+        >
+          {[
+            { icon: 'compass', label: 'PLAN TRIP',   color: C.orange, onPress: () => router.push('/(tabs)/index') },
+            { icon: 'people',  label: 'REFER',       color: C.orange, onPress: shareReferral },
+            { icon: 'checkmark-circle', label: 'TRIP PREP', color: C.green,  onPress: () => setShowChecklist(true) },
+            { icon: 'cloud-upload-outline', label: 'IMPORT GPX', color: C.text3, onPress: importGpx },
+            { icon: 'bug-outline', label: 'BUG',     color: C.red,   onPress: () => setShowBugModal(true) },
+          ].map(({ icon, label, color, onPress }) => (
+            <TouchableOpacity key={label} style={s.quickAction} onPress={onPress}>
+              <View style={[s.quickActionIcon, { borderColor: color + '44', backgroundColor: color + '18' }]}>
+                <Ionicons name={icon as any} size={22} color={color} />
+              </View>
+              <Text style={s.quickActionLabel}>{label}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+
         {/* My Rig */}
         <View style={s.rigCard}>
           <View style={s.rigHeader}>
             <Ionicons name="car-sport-outline" size={18} color={C.orange} />
             <Text style={s.rigTitle}>MY RIG</Text>
             <TouchableOpacity style={s.rigEditBtn} onPress={() => {
-              if (editingRig) { saveRig(); } else { setRigDraft(rigProfile ?? DEFAULT_RIG); setEditingRig(true); }
+              if (editingRig) { saveRig(); } else { setRigDraft(rigProfile ?? DEFAULT_RIG); setRigSection('vehicle'); setEditingRig(true); }
             }}>
               <Text style={s.rigEditText}>{editingRig ? 'SAVE' : rigProfile ? 'EDIT' : 'ADD RIG'}</Text>
             </TouchableOpacity>
@@ -330,109 +438,327 @@ export default function ProfileScreen() {
 
           {editingRig ? (
             <View style={s.rigForm}>
-              {/* Vehicle type */}
-              <Text style={s.rigFormLabel}>TYPE</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.rigPillRow}>
-                {VEHICLE_TYPES.map(t => (
-                  <TouchableOpacity key={t}
-                    style={[s.rigPill, rigDraft.vehicle_type === t && s.rigPillActive]}
-                    onPress={() => setRigDraft(d => ({ ...d, vehicle_type: t }))}>
-                    <Text style={[s.rigPillText, rigDraft.vehicle_type === t && s.rigPillTextActive]}>{t}</Text>
+
+              {/* Section tabs */}
+              <View style={s.rigTabRow}>
+                {(['vehicle', 'build', 'advanced'] as const).map(tab => (
+                  <TouchableOpacity key={tab} style={[s.rigTab, rigSection === tab && s.rigTabActive]}
+                    onPress={() => setRigSection(tab)}>
+                    <Text style={[s.rigTabText, rigSection === tab && s.rigTabTextActive]}>
+                      {tab === 'vehicle' ? 'VEHICLE' : tab === 'build' ? 'BUILD' : 'ADVANCED'}
+                    </Text>
                   </TouchableOpacity>
                 ))}
-              </ScrollView>
-
-              {/* Year / Make / Model */}
-              <View style={s.rigRow}>
-                <TextInput style={[s.rigInput, { width: 72 }]} placeholder="Year" placeholderTextColor={C.text3}
-                  value={rigDraft.year} onChangeText={v => setRigDraft(d => ({ ...d, year: v }))}
-                  keyboardType="numeric" maxLength={4} />
-                <TextInput style={[s.rigInput, { flex: 1 }]} placeholder="Make (Toyota)" placeholderTextColor={C.text3}
-                  value={rigDraft.make} onChangeText={v => setRigDraft(d => ({ ...d, make: v }))} />
               </View>
-              <TextInput style={s.rigInput} placeholder="Model (Tacoma TRD Pro)" placeholderTextColor={C.text3}
-                value={rigDraft.model} onChangeText={v => setRigDraft(d => ({ ...d, model: v }))} />
 
-              {/* Drive */}
-              <Text style={s.rigFormLabel}>DRIVE</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.rigPillRow}>
-                {DRIVE_TYPES.map(d => (
-                  <TouchableOpacity key={d}
-                    style={[s.rigPill, rigDraft.drive === d && s.rigPillActive]}
-                    onPress={() => setRigDraft(dr => ({ ...dr, drive: d }))}>
-                    <Text style={[s.rigPillText, rigDraft.drive === d && s.rigPillTextActive]}>{d}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
+              {/* ── VEHICLE TAB ───────────────────────────────────── */}
+              {rigSection === 'vehicle' && (
+                <>
+                  {/* Category */}
+                  <Text style={s.rigFormLabel}>CATEGORY</Text>
+                  <View style={s.rigPillGrid}>
+                    {VEHICLE_TYPES.map(t => (
+                      <TouchableOpacity key={t}
+                        style={[s.rigPill, rigDraft.vehicle_type === t && s.rigPillActive]}
+                        onPress={() => setRigDraft(d => ({ ...d, vehicle_type: t }))}>
+                        <Text style={[s.rigPillText, rigDraft.vehicle_type === t && s.rigPillTextActive]}>{t}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
 
-              {/* Lift + clearance + length */}
-              <Text style={s.rigFormLabel}>LIFT</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.rigPillRow}>
-                {LIFT_OPTIONS.map(l => (
-                  <TouchableOpacity key={l}
-                    style={[s.rigPill, rigDraft.lift_in === l && s.rigPillActive]}
-                    onPress={() => setRigDraft(d => ({ ...d, lift_in: l }))}>
-                    <Text style={[s.rigPillText, rigDraft.lift_in === l && s.rigPillTextActive]}>{l}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
+                  {/* Make */}
+                  <Text style={s.rigFormLabel}>MAKE</Text>
+                  <View style={s.rigPillGrid}>
+                    {ALL_MAKES.map(m => (
+                      <TouchableOpacity key={m}
+                        style={[s.rigPill, rigDraft.make === m && s.rigPillActive]}
+                        onPress={() => setRigDraft(d => ({ ...d, make: m, model: '' }))}>
+                        <Text style={[s.rigPillText, rigDraft.make === m && s.rigPillTextActive]}>{m}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
 
-              <View style={s.rigRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.rigFormLabel}>CLEARANCE (IN)</Text>
-                  <TextInput style={s.rigInput} placeholder="9" placeholderTextColor={C.text3}
-                    value={rigDraft.ground_clearance_in} onChangeText={v => setRigDraft(d => ({ ...d, ground_clearance_in: v }))}
-                    keyboardType="decimal-pad" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.rigFormLabel}>LENGTH (FT)</Text>
-                  <TextInput style={s.rigInput} placeholder="18" placeholderTextColor={C.text3}
+                  {/* Model — cascades from make */}
+                  {rigDraft.make && MAKES_DATA[rigDraft.make]?.length > 0 && (
+                    <>
+                      <Text style={s.rigFormLabel}>MODEL</Text>
+                      <View style={s.rigPillGrid}>
+                        {MAKES_DATA[rigDraft.make].map(mod => (
+                          <TouchableOpacity key={mod}
+                            style={[s.rigPill, rigDraft.model === mod && s.rigPillActive]}
+                            onPress={() => setRigDraft(d => ({ ...d, model: mod }))}>
+                            <Text style={[s.rigPillText, rigDraft.model === mod && s.rigPillTextActive]}>{mod}</Text>
+                          </TouchableOpacity>
+                        ))}
+                        <TouchableOpacity
+                          style={[s.rigPill, !MAKES_DATA[rigDraft.make].includes(rigDraft.model) && rigDraft.model ? s.rigPillActive : null]}
+                          onPress={() => setRigDraft(d => ({ ...d, model: '' }))}>
+                          <Text style={[s.rigPillText, !MAKES_DATA[rigDraft.make].includes(rigDraft.model) && rigDraft.model ? s.rigPillTextActive : null]}>Other</Text>
+                        </TouchableOpacity>
+                      </View>
+                      {/* Custom model text field if "Other" or no match */}
+                      {(!MAKES_DATA[rigDraft.make].includes(rigDraft.model)) && (
+                        <TextInput style={s.rigInput} placeholder="Enter model (e.g. 80 Series, Patrol GR)" placeholderTextColor={C.text3}
+                          value={rigDraft.model} onChangeText={v => setRigDraft(d => ({ ...d, model: v }))} />
+                      )}
+                    </>
+                  )}
+                  {/* Fully custom make — show text fields when no recognized make selected */}
+                  {(!rigDraft.make || !ALL_MAKES.includes(rigDraft.make) || rigDraft.make === 'Custom / Other') && (
+                    <>
+                      <Text style={s.rigFormLabel}>MAKE</Text>
+                      <TextInput style={s.rigInput} placeholder="e.g. Toyota, Scout, Bollinger…" placeholderTextColor={C.text3}
+                        value={rigDraft.make === 'Custom / Other' ? '' : rigDraft.make}
+                        onChangeText={v => setRigDraft(d => ({ ...d, make: v }))} />
+                      <Text style={s.rigFormLabel}>MODEL</Text>
+                      <TextInput style={s.rigInput} placeholder="e.g. Tacoma TRD Pro, 80 Series…" placeholderTextColor={C.text3}
+                        value={rigDraft.model} onChangeText={v => setRigDraft(d => ({ ...d, model: v }))} />
+                    </>
+                  )}
+
+                  {/* Year + Trim */}
+                  <View style={s.rigRow}>
+                    <View style={{ width: 90 }}>
+                      <Text style={s.rigFormLabel}>YEAR</Text>
+                      <TextInput style={s.rigInput} placeholder="2022" placeholderTextColor={C.text3}
+                        value={rigDraft.year} onChangeText={v => setRigDraft(d => ({ ...d, year: v }))}
+                        keyboardType="numeric" maxLength={4} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.rigFormLabel}>TRIM / PACKAGE</Text>
+                      <TextInput style={s.rigInput} placeholder="TRD Pro, Rubicon, Raptor…" placeholderTextColor={C.text3}
+                        value={rigDraft.trim ?? ''} onChangeText={v => setRigDraft(d => ({ ...d, trim: v }))} />
+                    </View>
+                  </View>
+                </>
+              )}
+
+              {/* ── BUILD TAB ─────────────────────────────────────── */}
+              {rigSection === 'build' && (
+                <>
+                  <Text style={s.rigFormLabel}>DRIVE</Text>
+                  <View style={s.rigPillGrid}>
+                    {DRIVE_TYPES.map(d => (
+                      <TouchableOpacity key={d}
+                        style={[s.rigPill, rigDraft.drive === d && s.rigPillActive]}
+                        onPress={() => setRigDraft(dr => ({ ...dr, drive: d }))}>
+                        <Text style={[s.rigPillText, rigDraft.drive === d && s.rigPillTextActive]}>{d}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
+                  <Text style={s.rigFormLabel}>SUSPENSION</Text>
+                  <View style={s.rigPillGrid}>
+                    {SUSP_TYPES.map(sus => (
+                      <TouchableOpacity key={sus}
+                        style={[s.rigPill, rigDraft.suspension === sus && s.rigPillActive]}
+                        onPress={() => setRigDraft(d => ({ ...d, suspension: sus }))}>
+                        <Text style={[s.rigPillText, rigDraft.suspension === sus && s.rigPillTextActive]}>{sus}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
+                  <View style={s.rigRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.rigFormLabel}>LIFT HEIGHT (IN)</Text>
+                      <TextInput style={s.rigInput} placeholder='e.g. 2.5' placeholderTextColor={C.text3}
+                        value={rigDraft.lift_in} onChangeText={v => setRigDraft(d => ({ ...d, lift_in: v }))}
+                        keyboardType="decimal-pad" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.rigFormLabel}>GROUND CLEARANCE (IN)</Text>
+                      <TextInput style={s.rigInput} placeholder='e.g. 9.4' placeholderTextColor={C.text3}
+                        value={rigDraft.ground_clearance_in} onChangeText={v => setRigDraft(d => ({ ...d, ground_clearance_in: v }))}
+                        keyboardType="decimal-pad" />
+                    </View>
+                  </View>
+
+                  <Text style={s.rigFormLabel}>TIRE SIZE</Text>
+                  <TextInput style={s.rigInput} placeholder="e.g. 285/75R17 or 35x12.5R17" placeholderTextColor={C.text3}
+                    value={rigDraft.tire_size ?? ''} onChangeText={v => setRigDraft(d => ({ ...d, tire_size: v }))} />
+
+                  <Text style={s.rigFormLabel}>VEHICLE LENGTH (FT)</Text>
+                  <TextInput style={s.rigInput} placeholder="e.g. 18.5" placeholderTextColor={C.text3}
                     value={rigDraft.length_ft} onChangeText={v => setRigDraft(d => ({ ...d, length_ft: v }))}
                     keyboardType="decimal-pad" />
-                </View>
-              </View>
+                </>
+              )}
+
+              {/* ── ADVANCED TAB ──────────────────────────────────── */}
+              {rigSection === 'advanced' && (
+                <>
+                  {/* Locking diffs */}
+                  <Text style={s.rigFormLabel}>LOCKING DIFFERENTIALS</Text>
+                  <View style={s.rigPillGrid}>
+                    {DIFF_LOCK.map(d => (
+                      <TouchableOpacity key={d}
+                        style={[s.rigPill, rigDraft.locking_diffs === d && s.rigPillActive]}
+                        onPress={() => setRigDraft(dr => ({ ...dr, locking_diffs: d }))}>
+                        <Text style={[s.rigPillText, rigDraft.locking_diffs === d && s.rigPillTextActive]}>{d}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
+                  {/* Winch */}
+                  <View style={s.rigToggleRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.rigToggleLabel}>WINCH</Text>
+                      <Text style={s.rigToggleSub}>Self-recovery rated</Text>
+                    </View>
+                    <TouchableOpacity
+                      style={[s.rigToggleBtn, rigDraft.has_winch && s.rigToggleBtnOn]}
+                      onPress={() => setRigDraft(d => ({ ...d, has_winch: !d.has_winch }))}>
+                      <Text style={[s.rigToggleBtnText, rigDraft.has_winch && s.rigToggleBtnTextOn]}>
+                        {rigDraft.has_winch ? 'YES' : 'NO'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                  {rigDraft.has_winch && (
+                    <>
+                      <Text style={s.rigFormLabel}>WINCH RATING (LBS)</Text>
+                      <TextInput style={s.rigInput} placeholder="e.g. 10000" placeholderTextColor={C.text3}
+                        value={rigDraft.winch_lbs ?? ''} onChangeText={v => setRigDraft(d => ({ ...d, winch_lbs: v }))}
+                        keyboardType="numeric" />
+                    </>
+                  )}
+
+                  {/* Skid plates */}
+                  <View style={s.rigToggleRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.rigToggleLabel}>SKID PLATES</Text>
+                      <Text style={s.rigToggleSub}>Transfer case, diff, fuel tank</Text>
+                    </View>
+                    <TouchableOpacity
+                      style={[s.rigToggleBtn, rigDraft.has_skids && s.rigToggleBtnOn]}
+                      onPress={() => setRigDraft(d => ({ ...d, has_skids: !d.has_skids }))}>
+                      <Text style={[s.rigToggleBtnText, rigDraft.has_skids && s.rigToggleBtnTextOn]}>
+                        {rigDraft.has_skids ? 'YES' : 'NO'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Roof rack */}
+                  <View style={s.rigToggleRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.rigToggleLabel}>ROOF RACK</Text>
+                      <Text style={s.rigToggleSub}>Overland-style cargo platform</Text>
+                    </View>
+                    <TouchableOpacity
+                      style={[s.rigToggleBtn, rigDraft.has_rack && s.rigToggleBtnOn]}
+                      onPress={() => setRigDraft(d => ({ ...d, has_rack: !d.has_rack }))}>
+                      <Text style={[s.rigToggleBtnText, rigDraft.has_rack && s.rigToggleBtnTextOn]}>
+                        {rigDraft.has_rack ? 'YES' : 'NO'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Towing */}
+                  <View style={s.rigToggleRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.rigToggleLabel}>CURRENTLY TOWING</Text>
+                      <Text style={s.rigToggleSub}>Trailer, toy hauler, camper</Text>
+                    </View>
+                    <TouchableOpacity
+                      style={[s.rigToggleBtn, rigDraft.is_towing && s.rigToggleBtnOn]}
+                      onPress={() => setRigDraft(d => ({ ...d, is_towing: !d.is_towing }))}>
+                      <Text style={[s.rigToggleBtnText, rigDraft.is_towing && s.rigToggleBtnTextOn]}>
+                        {rigDraft.is_towing ? 'YES' : 'NO'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                  {rigDraft.is_towing && (
+                    <View style={s.rigRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.rigFormLabel}>TRAILER LENGTH (FT)</Text>
+                        <TextInput style={s.rigInput} placeholder="e.g. 20" placeholderTextColor={C.text3}
+                          value={rigDraft.trailer_length_ft ?? ''} onChangeText={v => setRigDraft(d => ({ ...d, trailer_length_ft: v }))}
+                          keyboardType="decimal-pad" />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.rigFormLabel}>TOW CAPACITY (LBS)</Text>
+                        <TextInput style={s.rigInput} placeholder="e.g. 7700" placeholderTextColor={C.text3}
+                          value={rigDraft.tow_capacity_lbs ?? ''} onChangeText={v => setRigDraft(d => ({ ...d, tow_capacity_lbs: v }))}
+                          keyboardType="numeric" />
+                      </View>
+                    </View>
+                  )}
+                </>
+              )}
 
               <TouchableOpacity style={s.rigCancelBtn} onPress={() => setEditingRig(false)}>
                 <Text style={s.rigCancelText}>CANCEL</Text>
               </TouchableOpacity>
             </View>
+
           ) : rigProfile && (rigProfile.make || rigProfile.model) ? (
             <View style={s.rigDisplay}>
+              {/* Header */}
               <View style={s.rigDisplayTop}>
-                <View>
-                  <Text style={s.rigYear}>{rigProfile.year}</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.rigYear}>{rigProfile.year}{rigProfile.trim ? '  ·  ' + rigProfile.trim : ''}</Text>
                   <Text style={s.rigMakeModel}>{rigProfile.make} {rigProfile.model}</Text>
                 </View>
-                <View style={s.rigTypeBadge}>
-                  <Text style={s.rigTypeBadgeText}>{rigProfile.vehicle_type || 'VEHICLE'}</Text>
+                {rigProfile.vehicle_type ? (
+                  <View style={s.rigTypeBadge}>
+                    <Text style={s.rigTypeBadgeText}>{rigProfile.vehicle_type.toUpperCase()}</Text>
+                  </View>
+                ) : null}
+              </View>
+
+              {/* Spec grid */}
+              <View style={s.rigSpecGrid}>
+                {[
+                  rigProfile.drive          && { label: 'DRIVE',     val: rigProfile.drive },
+                  rigProfile.lift_in        && { label: 'LIFT',      val: rigProfile.lift_in + '"' },
+                  rigProfile.suspension && rigProfile.suspension !== 'Stock'
+                                            && { label: 'SUSPENSION',val: rigProfile.suspension },
+                  rigProfile.ground_clearance_in && { label: 'CLEARANCE', val: rigProfile.ground_clearance_in + '"' },
+                  rigProfile.tire_size      && { label: 'TIRES',     val: rigProfile.tire_size },
+                  rigProfile.length_ft      && { label: 'LENGTH',    val: rigProfile.length_ft + "'" },
+                ].filter(Boolean).map((item: any) => (
+                  <View key={item.label} style={s.rigSpecCell}>
+                    <Text style={s.rigSpecVal}>{item.val}</Text>
+                    <Text style={s.rigSpecLabel}>{item.label}</Text>
+                  </View>
+                ))}
+              </View>
+
+              {/* Capability badges */}
+              {(rigProfile.has_winch || rigProfile.has_skids || rigProfile.has_rack ||
+                (rigProfile.locking_diffs && rigProfile.locking_diffs !== 'None') || rigProfile.is_towing) && (
+                <View style={s.rigBadgeRow}>
+                  {rigProfile.has_winch && (
+                    <View style={s.rigCapBadge}>
+                      <Ionicons name="link-outline" size={11} color={C.orange} />
+                      <Text style={s.rigCapBadgeText}>WINCH{rigProfile.winch_lbs ? ' ' + Number(rigProfile.winch_lbs).toLocaleString() + 'lb' : ''}</Text>
+                    </View>
+                  )}
+                  {rigProfile.locking_diffs && rigProfile.locking_diffs !== 'None' && (
+                    <View style={s.rigCapBadge}>
+                      <Ionicons name="settings-outline" size={11} color={C.orange} />
+                      <Text style={s.rigCapBadgeText}>{rigProfile.locking_diffs.toUpperCase()}</Text>
+                    </View>
+                  )}
+                  {rigProfile.has_skids && (
+                    <View style={s.rigCapBadge}>
+                      <Ionicons name="shield-outline" size={11} color={C.orange} />
+                      <Text style={s.rigCapBadgeText}>SKIDS</Text>
+                    </View>
+                  )}
+                  {rigProfile.has_rack && (
+                    <View style={s.rigCapBadge}>
+                      <Ionicons name="grid-outline" size={11} color={C.orange} />
+                      <Text style={s.rigCapBadgeText}>RACK</Text>
+                    </View>
+                  )}
+                  {rigProfile.is_towing && (
+                    <View style={s.rigCapBadge}>
+                      <Ionicons name="git-commit-outline" size={11} color={C.orange} />
+                      <Text style={s.rigCapBadgeText}>TOWING{rigProfile.trailer_length_ft ? ' ' + rigProfile.trailer_length_ft + "'" : ''}</Text>
+                    </View>
+                  )}
                 </View>
-              </View>
-              <View style={s.rigStats}>
-                {rigProfile.drive ? (
-                  <View style={s.rigStat}>
-                    <Text style={s.rigStatVal}>{rigProfile.drive}</Text>
-                    <Text style={s.rigStatLabel}>DRIVE</Text>
-                  </View>
-                ) : null}
-                {rigProfile.lift_in && rigProfile.lift_in !== 'Stock' ? (
-                  <View style={s.rigStat}>
-                    <Text style={s.rigStatVal}>{rigProfile.lift_in}</Text>
-                    <Text style={s.rigStatLabel}>LIFT</Text>
-                  </View>
-                ) : null}
-                {rigProfile.ground_clearance_in ? (
-                  <View style={s.rigStat}>
-                    <Text style={s.rigStatVal}>{rigProfile.ground_clearance_in}"</Text>
-                    <Text style={s.rigStatLabel}>CLEARANCE</Text>
-                  </View>
-                ) : null}
-                {rigProfile.length_ft ? (
-                  <View style={s.rigStat}>
-                    <Text style={s.rigStatVal}>{rigProfile.length_ft}'</Text>
-                    <Text style={s.rigStatLabel}>LENGTH</Text>
-                  </View>
-                ) : null}
-              </View>
+              )}
             </View>
           ) : (
             <Text style={s.rigEmptyText}>Add your vehicle specs so Trailhead can tailor trail difficulty and logistics to your rig.</Text>
@@ -547,6 +873,26 @@ export default function ProfileScreen() {
           </View>
         )}
 
+        {/* Saved Camps */}
+        {favoriteCamps.length > 0 && (
+          <View style={s.historyCard}>
+            <Text style={s.sectionLabel}>❤️ SAVED CAMPS</Text>
+            {favoriteCamps.map(camp => (
+              <View key={camp.id} style={[s.txRow, { alignItems: 'flex-start', paddingVertical: 8 }]}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[s.txReason, { fontWeight: '700', fontSize: 13 }]} numberOfLines={1}>{camp.name}</Text>
+                  <Text style={{ color: C.text3, fontSize: 10, fontFamily: 'monospace', marginTop: 2 }}>
+                    {camp.land_type || 'Camp'}{camp.cost ? ` · ${camp.cost}` : ''}
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={() => toggleFavorite(camp)} style={{ padding: 4 }}>
+                  <Ionicons name="heart" size={16} color="#ef4444" />
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        )}
+
         {/* Theme toggle */}
         <TouchableOpacity
           style={s.themeToggle}
@@ -569,7 +915,11 @@ export default function ProfileScreen() {
           <Text style={s.gpxDesc}>
             Import GPX files from Gaia, Garmin, or iOverlander. Named waypoints become community pins and earn you credits.
           </Text>
-          {!!gpxResult && <Text style={s.gpxResult}>{gpxResult}</Text>}
+          {!!gpxResult && (
+            <Text style={[s.gpxResult, gpxResult.startsWith('Import failed') && { color: C.red }]}>
+              {gpxResult}
+            </Text>
+          )}
           <TouchableOpacity style={[s.gpxBtn, gpxImporting && s.gpxBtnDisabled]}
             onPress={importGpx} disabled={gpxImporting}>
             <Ionicons name={gpxImporting ? 'hourglass-outline' : 'cloud-upload-outline'}
@@ -742,6 +1092,26 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   streakText: { color: C.orange, fontSize: 11, fontFamily: mono, marginTop: 4 },
   logoutBtn: { padding: 6 },
 
+  // Stats row
+  statsRow: {
+    backgroundColor: C.s2, borderRadius: 16, borderWidth: 1, borderColor: C.border,
+    flexDirection: 'row', alignItems: 'stretch',
+  },
+  statCell: { flex: 1, alignItems: 'center', paddingVertical: 14 },
+  statDivider: { width: 1, backgroundColor: C.border, marginVertical: 10 },
+  statBig: { color: C.text, fontSize: 26, fontWeight: '900', fontFamily: mono, lineHeight: 28 },
+  statLabel: { color: C.text3, fontSize: 8, fontFamily: mono, letterSpacing: 0.8, marginTop: 3 },
+
+  // Quick actions
+  quickActionsRow: { marginHorizontal: -14 },
+  quickActionsContent: { flexDirection: 'row', paddingHorizontal: 14, gap: 10 },
+  quickAction: { alignItems: 'center', gap: 6, width: 70 },
+  quickActionIcon: {
+    width: 54, height: 54, borderRadius: 16,
+    borderWidth: 1.5, alignItems: 'center', justifyContent: 'center',
+  },
+  quickActionLabel: { color: C.text3, fontSize: 8.5, fontFamily: mono, letterSpacing: 0.5, textAlign: 'center' },
+
   // MY RIG
   rigCard: {
     backgroundColor: C.s2, borderRadius: 16, borderWidth: 1, borderColor: C.border, padding: 16,
@@ -756,41 +1126,74 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   rigEditText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '700' },
   rigEmptyText: { color: C.text3, fontSize: 12.5, lineHeight: 18 },
 
+  // Display card
   rigDisplay: { gap: 12 },
-  rigDisplayTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  rigYear: { color: C.text3, fontSize: 11, fontFamily: mono },
-  rigMakeModel: { color: C.text, fontSize: 17, fontWeight: '800', marginTop: 1 },
+  rigDisplayTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  rigYear: { color: C.text3, fontSize: 11, fontFamily: mono, letterSpacing: 0.5 },
+  rigMakeModel: { color: C.text, fontSize: 19, fontWeight: '800', marginTop: 1, letterSpacing: -0.3 },
   rigTypeBadge: {
     backgroundColor: C.orangeGlow, borderRadius: 8, borderWidth: 1, borderColor: C.orange,
-    paddingHorizontal: 10, paddingVertical: 4,
+    paddingHorizontal: 10, paddingVertical: 4, alignSelf: 'flex-start',
   },
   rigTypeBadgeText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '700' },
-  rigStats: { flexDirection: 'row', gap: 0 },
-  rigStat: {
-    flex: 1, alignItems: 'center', paddingVertical: 8,
-    borderTopWidth: 1, borderColor: C.border,
+  rigSpecGrid: {
+    flexDirection: 'row', flexWrap: 'wrap', gap: 0,
+    borderTopWidth: 1, borderColor: C.border, marginTop: 4,
   },
-  rigStatVal: { color: C.text, fontSize: 14, fontWeight: '800', fontFamily: mono },
-  rigStatLabel: { color: C.text3, fontSize: 8, fontFamily: mono, letterSpacing: 0.5, marginTop: 2 },
+  rigSpecCell: {
+    width: '33.33%', alignItems: 'center', paddingVertical: 10,
+    borderBottomWidth: 1, borderColor: C.border,
+  },
+  rigSpecVal: { color: C.text, fontSize: 13, fontWeight: '800', fontFamily: mono },
+  rigSpecLabel: { color: C.text3, fontSize: 8, fontFamily: mono, letterSpacing: 0.5, marginTop: 2 },
+  rigBadgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 2 },
+  rigCapBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: C.orangeGlow, borderRadius: 6, borderWidth: 1, borderColor: C.orange + '55',
+    paddingHorizontal: 8, paddingVertical: 4,
+  },
+  rigCapBadgeText: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '700', letterSpacing: 0.3 },
 
+  // Edit form
   rigForm: { gap: 10 },
-  rigFormLabel: { color: C.text3, fontSize: 9, fontFamily: mono, letterSpacing: 1, marginBottom: 4, marginTop: 4 },
-  rigPillRow: { flexDirection: 'row', gap: 6, paddingBottom: 2 },
+  rigTabRow: {
+    flexDirection: 'row', borderRadius: 10, backgroundColor: C.s3,
+    borderWidth: 1, borderColor: C.border, overflow: 'hidden', marginBottom: 4,
+  },
+  rigTab: { flex: 1, paddingVertical: 9, alignItems: 'center' },
+  rigTabActive: { backgroundColor: C.orange },
+  rigTabText: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '700', letterSpacing: 0.5 },
+  rigTabTextActive: { color: '#fff' },
+  rigFormLabel: { color: C.text3, fontSize: 9, fontFamily: mono, letterSpacing: 1, marginBottom: 4, marginTop: 6 },
+  rigPillGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginBottom: 2 },
   rigPill: {
-    paddingHorizontal: 12, paddingVertical: 6,
+    paddingHorizontal: 12, paddingVertical: 7,
     backgroundColor: C.s3, borderRadius: 20, borderWidth: 1, borderColor: C.border,
   },
   rigPillActive: { borderColor: C.orange, backgroundColor: C.orangeGlow },
   rigPillText: { color: C.text3, fontSize: 12, fontFamily: mono },
-  rigPillTextActive: { color: C.orange },
+  rigPillTextActive: { color: C.orange, fontWeight: '700' },
   rigRow: { flexDirection: 'row', gap: 8 },
   rigInput: {
     backgroundColor: C.s3, borderWidth: 1, borderColor: C.border,
     borderRadius: 10, padding: 11, color: C.text, fontSize: 13,
   },
+  rigToggleRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingVertical: 12, borderTopWidth: 1, borderColor: C.border,
+  },
+  rigToggleLabel: { color: C.text, fontSize: 12, fontWeight: '700', fontFamily: mono },
+  rigToggleSub: { color: C.text3, fontSize: 10, marginTop: 2 },
+  rigToggleBtn: {
+    paddingHorizontal: 16, paddingVertical: 7, borderRadius: 20,
+    borderWidth: 1.5, borderColor: C.border, backgroundColor: C.s3,
+  },
+  rigToggleBtnOn: { borderColor: C.orange, backgroundColor: C.orange },
+  rigToggleBtnText: { color: C.text3, fontSize: 11, fontFamily: mono, fontWeight: '700' },
+  rigToggleBtnTextOn: { color: '#fff' },
   rigCancelBtn: {
     borderWidth: 1, borderColor: C.border, borderRadius: 10,
-    padding: 10, alignItems: 'center', marginTop: 4,
+    padding: 10, alignItems: 'center', marginTop: 6,
   },
   rigCancelText: { color: C.text3, fontSize: 11, fontFamily: mono },
 

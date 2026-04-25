@@ -1,8 +1,8 @@
 """Trailhead FastAPI server. All API routes."""
 from __future__ import annotations
-import asyncio, os, json, uuid, secrets, xml.etree.ElementTree as ET
+import asyncio, os, json, uuid, secrets, xml.etree.ElementTree as ET, time
 from pathlib import Path
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.responses import HTMLResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -60,6 +60,36 @@ DAILY_REPORT_LIMIT = 8     # max reports per user per day
 DAILY_REPORT_CREDITS_CAP = 50   # max credits/day from reports
 REPORT_CREDIT_BASE = 5     # credits for a plain report
 REPORT_CREDIT_PHOTO = 10   # credits for a report with photo
+
+
+# ── Anonymous rate limiter ─────────────────────────────────────────────────────
+# Keyed by IP. Buckets reset after ANON_WINDOW_S seconds.
+# Authenticated users bypass this entirely — credits are their limit.
+_ANON_WINDOW_S  = 86_400   # 24-hour rolling window
+_ANON_CHAT_MAX  = 20       # messages per IP per day (enough for 2 full conversations)
+_ANON_PLAN_MAX  = 3        # full trip builds per IP per day
+_anon_buckets: dict[str, dict] = {}
+
+def _anon_check(ip: str, kind: str) -> None:
+    """Raise 429 if the anonymous IP has hit its daily limit for `kind`."""
+    now = time.time()
+    b = _anon_buckets.get(ip)
+    if not b or now - b["t"] > _ANON_WINDOW_S:
+        _anon_buckets[ip] = {"t": now, "chat": 0, "plan": 0}
+        b = _anon_buckets[ip]
+    limit = _ANON_PLAN_MAX if kind == "plan" else _ANON_CHAT_MAX
+    if b[kind] >= limit:
+        reset_in = int(_ANON_WINDOW_S - (now - b["t"])) // 3600
+        raise HTTPException(429, f"Free daily limit reached ({limit} {kind}s/day). "
+                                 f"Sign up on mobile for unlimited planning. "
+                                 f"Resets in ~{reset_in}h.")
+    b[kind] += 1
+    # Prune stale IPs periodically to avoid unbounded growth
+    if len(_anon_buckets) > 10_000:
+        cutoff = now - _ANON_WINDOW_S
+        stale = [k for k, v in _anon_buckets.items() if v["t"] < cutoff]
+        for k in stale:
+            del _anon_buckets[k]
 
 
 def _plan_credit_cost(days: int) -> int:
@@ -250,7 +280,7 @@ class ChatRequest(BaseModel):
     current_trip: Optional[dict] = None
 
 @app.post("/api/chat")
-async def chat_endpoint(body: ChatRequest, user: dict = Depends(_optional_user)):
+async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depends(_optional_user)):
     if not body.message.strip():
         raise HTTPException(400, "Message cannot be empty")
     if not settings.anthropic_api_key:
@@ -260,6 +290,8 @@ async def chat_endpoint(body: ChatRequest, user: dict = Depends(_optional_user))
         cost = AI_COSTS["chat_edit"] if body.current_trip else AI_COSTS["chat"]
         if not deduct_credits(user["id"], cost, f"AI chat"):
             raise HTTPException(402, f"Not enough credits. This action costs {cost} credits.")
+    else:
+        _anon_check(request.client.host, "chat")
 
     session_id = body.session_id
     messages  = get_conversation(session_id)
@@ -327,7 +359,7 @@ async def chat_endpoint(body: ChatRequest, user: dict = Depends(_optional_user))
 
 
 @app.post("/api/plan")
-async def plan(body: PlanRequest, user: dict = Depends(_optional_user)):
+async def plan(request: Request, body: PlanRequest, user: dict = Depends(_optional_user)):
     import anthropic as _anthropic
     if not settings.anthropic_api_key:
         raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
@@ -340,6 +372,7 @@ async def plan(body: PlanRequest, user: dict = Depends(_optional_user)):
         if not deduct_credits(user["id"], cost, f"AI trip plan (~{day_hint}d)"):
             raise HTTPException(402, f"Not enough credits. A ~{day_hint}-day plan costs {cost} credits.")
     else:
+        _anon_check(request.client.host, "plan")
         cost = 0
 
     try:

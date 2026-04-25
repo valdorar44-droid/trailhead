@@ -4,6 +4,8 @@ import { WebView } from 'react-native-webview';
 import * as Location from 'expo-location';
 import * as SecureStore from 'expo-secure-store';
 import * as Speech from 'expo-speech';
+import * as Haptics from 'expo-haptics';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '@/lib/store';
 import { api, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast } from '@/lib/api';
@@ -755,7 +757,10 @@ const buildMapHtml = (
       if(svg){var mapBrg=map?map.getBearing():0;svg.style.transform='rotate('+(heading-mapBrg)+'deg)';}
     }
     if(navActive&&heading!=null&&heading>=0){
-      map.easeTo({center:[lng,lat],bearing:heading,pitch:52,zoom:zoom||17,duration:700});
+      // Only rotate map bearing when actually moving — freezes bearing at lights/stops so map doesn't spin
+      var eOpts={center:[lng,lat],pitch:52,zoom:zoom||17,duration:700};
+      if(lastSpeed!=null&&lastSpeed>3.5)eOpts.bearing=heading;
+      map.easeTo(eOpts);
     }else if(recenter){
       map.easeTo({center:[lng,lat],zoom:zoom||15,duration:500});
     }
@@ -1181,16 +1186,18 @@ export default function MapScreen() {
                   stepAnnouncedRef.current.add(farKey);
                   Speech.speak(buildAnnouncement(cur, distM, 'far'), { rate: 0.88, pitch: 1.05, language: 'en-US' });
                 }
-                // Near announcement — stop far cue mid-play so this fires immediately
+                // Near announcement — stop far cue mid-play, haptic pulse so driver feels it too
                 if (distM < nearDist && !stepAnnouncedRef.current.has(nearKey)) {
                   stepAnnouncedRef.current.add(nearKey);
                   Speech.stop();
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
                   Speech.speak(buildAnnouncement(cur, distM, 'near'), { rate: 0.88, pitch: 1.05, language: 'en-US' });
                 }
               }
 
-              // Advance to next step when within 30m of maneuver point
-              if (distM < 30 && si < steps.length - 1) {
+              // Advance to next step — threshold scales with speed so fast travel advances slightly earlier
+              const advThreshold = Math.max(20, (userSpeedRef.current ?? 0) * 1.5);
+              if (distM < advThreshold && si < steps.length - 1) {
                 const next = si + 1;
                 stepIdxRef.current = next;
                 setStepIdx(next);
@@ -1355,6 +1362,7 @@ export default function MapScreen() {
     Animated.spring(navAnim, { toValue: navMode ? 1 : 0, tension: 80, friction: 10, useNativeDriver: true }).start();
     webRef.current?.postMessage(JSON.stringify({ type: 'nav_active', active: navMode }));
     if (navMode) {
+      activateKeepAwakeAsync();
       setShowPanel(false);
       setIsApproaching(false);
       setIsRerouting(false);
@@ -1398,6 +1406,7 @@ export default function MapScreen() {
         }
       }
     } else {
+      deactivateKeepAwake();
       setIsApproaching(false);
       setIsRerouting(false);
       setApproachingReport(null);
@@ -1797,10 +1806,9 @@ export default function MapScreen() {
   const distKm    = userLoc && navTarget ? haversineKm(userLoc.lat, userLoc.lng, navTarget.lat, navTarget.lng) : null;
   const bearing   = userLoc && navTarget ? calcBearing(userLoc.lat, userLoc.lng, navTarget.lat, navTarget.lng) : null;
   const speedMph  = userSpeed !== null && userSpeed > 0 ? userSpeed * 2.237 : null;
-  const etaMins   = distKm && userSpeed && userSpeed > 0.5
-    ? Math.round(distKm / (userSpeed * 3.6) * 60) : null;
   // Current step the user is navigating toward
   const nextStep = routeSteps[stepIdx] ?? null;
+  const afterStep = routeSteps[stepIdx + 1] ?? null;
   const speedLimitMph = nextStep?.speedLimit ? Math.round(nextStep.speedLimit * 0.621371) : null;
   // Real distance to the step's maneuver point (more accurate than step.distance)
   const stepDistM = nextStep?.lat != null && userLoc
@@ -1809,6 +1817,13 @@ export default function MapScreen() {
   const isProceeding = distKm !== null && distKm > 30;
   // "Proceed to route" when user hasn't started moving along it yet
   const proceedToRoute = !isRerouting && isRouted && stepIdx === 0 && stepDistM !== null && stepDistM > 300;
+  // Step-based ETA: remaining seconds = time to reach current maneuver + sum of later step durations
+  const etaMins = useMemo(() => {
+    if (!navMode || !userSpeed || userSpeed < 0.5) return null;
+    const curStepSecs = stepDistM != null ? stepDistM / userSpeed : (nextStep?.duration ?? 0);
+    const laterSecs = routeSteps.slice(stepIdx + 1).reduce((sum, s) => sum + (s.duration || 0), 0);
+    return Math.round((curStepSecs + laterSecs) / 60);
+  }, [navMode, userSpeed, stepDistM, stepIdx, routeSteps]);
 
   // Total remaining trip distance (current → navIdx → ... → last waypoint)
   const remainingKm = useMemo(() => {
@@ -2961,6 +2976,16 @@ export default function MapScreen() {
                 ))}
               </View>
             )}
+            {/* "Then" preview — next step shown when within far-announcement range */}
+            {afterStep && stepDistM !== null && stepDistM < (announceDists(speedMph)[0] * 1.2) &&
+              afterStep.type !== 'arrive' && (
+              <View style={s.thenRow}>
+                <Ionicons name={stepIcon(afterStep.type, afterStep.modifier) as any} size={14} color="rgba(255,255,255,0.5)" />
+                <Text style={s.thenText} numberOfLines={1}>
+                  then {stepLabel(afterStep.type, afterStep.modifier, afterStep.name)} · {formatStepDist(afterStep.distance)}
+                </Text>
+              </View>
+            )}
           </View>
         ) : null}
 
@@ -3524,6 +3549,12 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', backgroundColor: OVR.border2,
   },
   laneBoxActive: { borderColor: '#f97316', backgroundColor: 'rgba(249,115,22,0.15)' },
+  thenRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 12, paddingVertical: 5,
+    backgroundColor: 'rgba(0,0,0,0.25)', borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.07)',
+  },
+  thenText: { color: 'rgba(255,255,255,0.5)', fontSize: 11, fontFamily: mono, flex: 1, letterSpacing: 0.3 },
 
   offRouteWarnBar: {
     flexDirection: 'row', alignItems: 'center', gap: 8,

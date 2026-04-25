@@ -735,6 +735,51 @@ h1{color:#94a3b8;font-size:24px;}</style></head>
 <p style="color:#64748b;">No charge was made. Return to the app to try again.</p></div></body></html>""")
 
 
+@app.get("/privacy", response_class=HTMLResponse)
+async def privacy_policy():
+    return HTMLResponse("""<!DOCTYPE html><html lang="en"><head><title>Privacy Policy — Trailhead</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+body{font-family:system-ui,-apple-system,sans-serif;background:#0a0f18;color:#e2e8f0;max-width:720px;margin:0 auto;padding:32px 20px;line-height:1.7;}
+h1{color:#f97316;font-size:28px;margin-bottom:4px;}
+h2{color:#f1f5f9;font-size:18px;margin-top:32px;border-bottom:1px solid #1e2d3d;padding-bottom:8px;}
+p,li{color:#94a3b8;font-size:15px;}
+a{color:#f97316;}
+.updated{color:#4b5563;font-size:13px;margin-bottom:32px;}
+</style></head>
+<body>
+<h1>Trailhead — Privacy Policy</h1>
+<p class="updated">Last updated: April 24, 2026</p>
+
+<h2>1. Information We Collect</h2>
+<p>We collect information you provide directly: email address, username, and password (stored as a bcrypt hash). When you use the app we collect location data (with your permission) to show nearby campsites, fuel stations, and community reports. We collect usage data such as trips planned, reports submitted, and credits earned or spent.</p>
+
+<h2>2. How We Use Your Information</h2>
+<p>Your information is used to: provide and improve the Trailhead service; personalise AI trip plans to your vehicle and preferences; display nearby campsite and hazard data on the map; process credit purchases via Stripe; send service-related communications. We do not sell your personal data to third parties.</p>
+
+<h2>3. Location Data</h2>
+<p>Trailhead requests foreground location access to center the map and find nearby camps and reports. Background location is requested only to enable automatic audio guide narrations as you drive. You can disable location access in your device Settings at any time, which will disable navigation and nearby features.</p>
+
+<h2>4. Payment Data</h2>
+<p>Credit purchases are processed by <a href="https://stripe.com/privacy">Stripe</a>. Trailhead never stores your full card number or payment details. Stripe's privacy policy governs payment data handling.</p>
+
+<h2>5. Data Retention</h2>
+<p>Account data is retained while your account is active. Community reports expire automatically (typically within 24–72 hours). You may request account deletion by contacting us at the address below.</p>
+
+<h2>6. Third-Party Services</h2>
+<p>Trailhead uses: Mapbox for maps (see <a href="https://www.mapbox.com/legal/privacy">Mapbox Privacy Policy</a>); Anthropic Claude for AI trip planning; RIDB / Recreation.gov for campsite data; Open-Meteo for weather data; Stripe for payments.</p>
+
+<h2>7. Children's Privacy</h2>
+<p>Trailhead is not directed to children under 13 and we do not knowingly collect personal information from children under 13.</p>
+
+<h2>8. Changes to This Policy</h2>
+<p>We may update this policy from time to time. Continued use of the app after changes constitutes acceptance of the updated policy.</p>
+
+<h2>9. Contact</h2>
+<p>Questions or requests: <a href="mailto:valdorar44@gmail.com">valdorar44@gmail.com</a></p>
+</body></html>""")
+
+
 # ── Leaderboard ───────────────────────────────────────────────────────────────
 
 @app.get("/api/leaderboard")

@@ -348,10 +348,12 @@ const buildMapHtml = (
   .mk-wp.wp-fuel{background:#eab308;box-shadow:0 2px 10px rgba(234,179,8,0.6);}
   .mk-wp.wp-waypoint{background:#a855f7;box-shadow:0 2px 10px rgba(168,85,247,0.6);}
   .mk-wp.wp-shower{background:#38bdf8;box-shadow:0 2px 10px rgba(56,189,248,0.5);}
+  .mk-wp.wp-camp{background:#14b8a6;box-shadow:0 2px 10px rgba(20,184,166,0.6);}
   .mk-wp.nav-target.wp-motel{color:#6366f1;}
   .mk-wp.nav-target.wp-fuel{color:#eab308;}
   .mk-wp.nav-target.wp-start{color:#22c55e;}
   .mk-wp.nav-target.wp-waypoint{color:#a855f7;}
+  .mk-wp.nav-target.wp-camp{color:#14b8a6;}
   @keyframes pulse{0%,100%{box-shadow:0 0 0 4px rgba(249,115,22,0.45);}50%{box-shadow:0 0 0 12px rgba(249,115,22,0.1);}}
   .mk-me{width:44px;height:44px;display:flex;align-items:center;justify-content:center;position:relative;pointer-events:none;}
   .mk-me-ring{position:absolute;width:44px;height:44px;border-radius:50%;background:rgba(249,115,22,0.1);border:1.5px solid rgba(249,115,22,0.4);animation:loc-pulse 2s ease-in-out infinite;}
@@ -525,14 +527,18 @@ const buildMapHtml = (
 
   function renderWaypoints(){
     wpMarkers.forEach(function(m){m.remove();});wpMarkers=[];
+    var typeIcon={fuel:'⛽',camp:'⛺',start:'S',motel:'M',shower:'💧',town:'T'};
+    var typeLabel={fuel:'Fuel Stop',camp:'Camp',start:'Start',motel:'Lodging',shower:'Showers',town:'Town',waypoint:'Waypoint'};
     wps.forEach(function(w,i){
       var el=document.createElement('div');
-      var typeClass=w.type==='start'?'wp-start':w.type==='motel'?'wp-motel':w.type==='fuel'?'wp-fuel':w.type==='waypoint'?'wp-waypoint':w.type==='town'?'wp-town':w.type==='shower'?'wp-shower':'';
-      el.className='mk-wp'+(typeClass?' '+typeClass:'');
-      el.textContent=w.type==='fuel'?'⛽':w.type==='motel'?'M':w.type==='start'?'S':(w.day||i+1);
-      var popup=new mapboxgl.Popup({offset:18,closeButton:false}).setHTML('<div class="pt">'+w.name+'</div><div class="pm">Day '+w.day+' · '+w.type+'</div>');
+      var tc=w.type==='start'?'wp-start':w.type==='motel'?'wp-motel':w.type==='fuel'?'wp-fuel':w.type==='waypoint'?'wp-waypoint':w.type==='town'?'wp-town':w.type==='shower'?'wp-shower':w.type==='camp'?'wp-camp':'';
+      el.className='mk-wp'+(tc?' '+tc:'');
+      el.textContent=typeIcon[w.type]||(w.day||i+1);
+      var label=typeLabel[w.type]||w.type;
+      var popup=new mapboxgl.Popup({offset:20,closeButton:true,maxWidth:'220px'})
+        .setHTML('<div class="pt">'+w.name+'</div><div class="pm">Day '+w.day+' &middot; '+label+'</div>');
       var m=new mapboxgl.Marker({element:el}).setLngLat([w.lng,w.lat]).setPopup(popup).addTo(map);
-      el.addEventListener('click',function(ev){ev.stopPropagation();postRN({type:'wp_tapped',idx:i,name:w.name});});
+      el.addEventListener('click',function(ev){ev.stopPropagation();m.togglePopup();postRN({type:'wp_tapped',idx:i,name:w.name});});
       wpMarkers.push(m);
     });
     if(wps.length>=2){var bounds=new mapboxgl.LngLatBounds();wps.forEach(function(w){bounds.extend([w.lng,w.lat]);});map.fitBounds(bounds,{padding:60,maxZoom:12,duration:800});}
@@ -817,6 +823,8 @@ export default function MapScreen() {
   const [navDest, setNavDest] = useState<WP | null>(null);
   const [stepIdx, setStepIdx] = useState(0);
   const [approachingReport, setApproachingReport] = useState<Report | null>(null);
+  const [showDayModal, setShowDayModal] = useState(false);
+  const [tappedWp, setTappedWp] = useState<{ idx: number; wp: WP } | null>(null);
 
   const navAnim      = useRef(new Animated.Value(0)).current;
   const navRef       = useRef({ active: false, idx: 0, wps: [] as WP[] });
@@ -1392,9 +1400,8 @@ export default function MapScreen() {
         Speech.speak('Off route. Recalculating.', { rate: 0.88, pitch: 1.05 });
       }
       if (msg.type === 'wp_tapped') {
-        setNavIdx(msg.idx);
-        navRef.current.idx = msg.idx;
-        if (!navRef.current.active) setNavMode(true);
+        const wp = waypoints[msg.idx];
+        if (wp) setTappedWp({ idx: msg.idx, wp });
       }
       if (msg.type === 'download_progress') {
         setDownloadProgress(msg.percent ?? 0);
@@ -1507,6 +1514,21 @@ export default function MapScreen() {
     }));
     setRouteLegOffset(navRef.current.idx);
     Speech.speak('Recalculating.', { rate: 0.95 });
+  }
+
+  function startDayNav(day: number | 'all', fromIdx?: number) {
+    setShowDayModal(false);
+    setTappedWp(null);
+    if (day === 'all') {
+      setNavIdx(fromIdx ?? 0);
+      navRef.current.idx = fromIdx ?? 0;
+    } else {
+      const firstOfDay = waypoints.findIndex(w => w.day === day);
+      const idx = fromIdx !== undefined ? fromIdx : (firstOfDay >= 0 ? firstOfDay : 0);
+      setNavIdx(idx);
+      navRef.current.idx = idx;
+    }
+    setNavMode(true);
   }
 
   function openInMaps() {
@@ -1636,7 +1658,12 @@ export default function MapScreen() {
         {waypoints.length > 0 && (
           <TouchableOpacity
             style={[s.ctrlBtn, navMode && { backgroundColor: C.green + 'dd', borderColor: C.green }]}
-            onPress={() => navMode ? setNavMode(false) : (setNavIdx(0), navRef.current.idx = 0, setNavMode(true))}
+            onPress={() => {
+              if (navMode) { setNavMode(false); return; }
+              const days = [...new Set(waypoints.map(w => w.day))].sort((a, b) => a - b);
+              if (days.length <= 1) { startDayNav('all'); return; }
+              setShowDayModal(true);
+            }}
           >
             <Ionicons name="navigate" size={20} color={navMode ? '#fff' : OVR.text} />
           </TouchableOpacity>
@@ -2762,6 +2789,90 @@ export default function MapScreen() {
           </View>
         </View>
       )}
+
+      {/* ── Day selector modal ── */}
+      <Modal visible={showDayModal} transparent animationType="slide" onRequestClose={() => setShowDayModal(false)}>
+        <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setShowDayModal(false)}>
+          <View style={s.daySheet}>
+            <View style={s.daySheetHandle} />
+            <Text style={s.daySheetTitle}>START NAVIGATION</Text>
+            <Text style={s.daySheetSub}>Choose which day's route to navigate</Text>
+            <TouchableOpacity style={s.dayBtnAll} onPress={() => startDayNav('all')}>
+              <Ionicons name="navigate" size={16} color="#fff" />
+              <Text style={s.dayBtnAllText}>START FULL TRIP (ALL DAYS)</Text>
+            </TouchableOpacity>
+            <View style={s.dayDivider}>
+              <View style={s.dayDividerLine} />
+              <Text style={s.dayDividerText}>OR START A SPECIFIC DAY</Text>
+              <View style={s.dayDividerLine} />
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 280 }}>
+              {[...new Set(waypoints.map(w => w.day))].sort((a, b) => a - b).map(day => {
+                const dayWps = waypoints.filter(w => w.day === day);
+                const first = dayWps[0];
+                const last = dayWps[dayWps.length - 1];
+                const camps = dayWps.filter(w => w.type === 'camp').length;
+                const fuel = dayWps.filter(w => w.type === 'fuel').length;
+                return (
+                  <TouchableOpacity key={day} style={s.dayBtn} onPress={() => startDayNav(day)}>
+                    <View style={s.dayBtnDayBadge}>
+                      <Text style={s.dayBtnDayNum}>{day}</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.dayBtnFrom} numberOfLines={1}>{first?.name ?? '—'}</Text>
+                      {last && last.name !== first?.name && (
+                        <Text style={s.dayBtnTo} numberOfLines={1}>→ {last.name}</Text>
+                      )}
+                      <View style={s.dayBtnMeta}>
+                        {camps > 0 && <Text style={s.dayBtnMetaTag}>⛺ {camps} camp</Text>}
+                        {fuel > 0 && <Text style={s.dayBtnMetaTag}>⛽ {fuel} fuel</Text>}
+                        <Text style={s.dayBtnMetaTag}>{dayWps.length} stops</Text>
+                      </View>
+                    </View>
+                    <Ionicons name="chevron-forward" size={16} color={OVR.text3} />
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* ── Waypoint tap sheet ── */}
+      {tappedWp && (
+        <Modal visible transparent animationType="slide" onRequestClose={() => setTappedWp(null)}>
+          <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setTappedWp(null)}>
+            <View style={s.wpSheet}>
+              <View style={s.daySheetHandle} />
+              <View style={s.wpSheetHeader}>
+                <View style={[s.wpSheetTypeDot, {
+                  backgroundColor:
+                    tappedWp.wp.type === 'camp' ? '#14b8a6' :
+                    tappedWp.wp.type === 'fuel' ? '#eab308' :
+                    tappedWp.wp.type === 'start' ? '#22c55e' :
+                    tappedWp.wp.type === 'motel' ? '#6366f1' : '#f97316',
+                }]} />
+                <View style={{ flex: 1 }}>
+                  <Text style={s.wpSheetName} numberOfLines={2}>{tappedWp.wp.name}</Text>
+                  <Text style={s.wpSheetMeta}>
+                    Day {tappedWp.wp.day} · {tappedWp.wp.type === 'camp' ? 'Camp' : tappedWp.wp.type === 'fuel' ? 'Fuel Stop' : tappedWp.wp.type === 'start' ? 'Start' : tappedWp.wp.type}
+                  </Text>
+                </View>
+              </View>
+              <View style={s.wpSheetActions}>
+                <TouchableOpacity style={s.wpSheetNavBtn} onPress={() => startDayNav(tappedWp.wp.day, tappedWp.idx)}>
+                  <Ionicons name="navigate" size={14} color="#fff" />
+                  <Text style={s.wpSheetNavText}>NAVIGATE FROM HERE</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={s.wpSheetDayBtn} onPress={() => { setTappedWp(null); setShowDayModal(true); }}>
+                  <Ionicons name="calendar-outline" size={14} color={OVR.text2} />
+                  <Text style={s.wpSheetDayText}>CHANGE DAY</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+      )}
     </View>
   );
 }
@@ -3320,4 +3431,62 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
     backgroundColor: OVR.border2,
   },
+
+  // ── Day selector + waypoint tap modals ───────────────────────────────────────
+  modalOverlay: {
+    flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  daySheet: {
+    backgroundColor: OVR.bg, borderTopLeftRadius: 22, borderTopRightRadius: 22,
+    padding: 20, paddingBottom: 36, borderWidth: 1, borderColor: OVR.border,
+  },
+  daySheetHandle: {
+    width: 36, height: 4, borderRadius: 2, backgroundColor: OVR.border2,
+    alignSelf: 'center', marginBottom: 16,
+  },
+  daySheetTitle: {
+    color: OVR.text, fontSize: 13, fontFamily: mono, fontWeight: '800', letterSpacing: 1, marginBottom: 4,
+  },
+  daySheetSub: { color: OVR.text3, fontSize: 12, marginBottom: 16 },
+  dayBtnAll: {
+    backgroundColor: C.green, borderRadius: 12, padding: 14,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 16,
+  },
+  dayBtnAllText: { color: '#fff', fontSize: 13, fontFamily: mono, fontWeight: '800', letterSpacing: 0.5 },
+  dayDivider: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 },
+  dayDividerLine: { flex: 1, height: 1, backgroundColor: OVR.border },
+  dayDividerText: { color: OVR.text3, fontSize: 9, fontFamily: mono, letterSpacing: 0.8 },
+  dayBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingVertical: 12, borderBottomWidth: 1, borderColor: OVR.border,
+  },
+  dayBtnDayBadge: {
+    width: 38, height: 38, borderRadius: 10, backgroundColor: C.orange,
+    alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  },
+  dayBtnDayNum: { color: '#fff', fontSize: 16, fontWeight: '900', fontFamily: mono },
+  dayBtnFrom: { color: OVR.text, fontSize: 13, fontWeight: '700' },
+  dayBtnTo: { color: OVR.text2, fontSize: 11, marginTop: 1 },
+  dayBtnMeta: { flexDirection: 'row', gap: 8, marginTop: 4 },
+  dayBtnMetaTag: { color: OVR.text3, fontSize: 10, fontFamily: mono },
+
+  wpSheet: {
+    backgroundColor: OVR.bg, borderTopLeftRadius: 22, borderTopRightRadius: 22,
+    padding: 20, paddingBottom: 36, borderWidth: 1, borderColor: OVR.border,
+  },
+  wpSheetHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 18 },
+  wpSheetTypeDot: { width: 12, height: 12, borderRadius: 6, marginTop: 4, flexShrink: 0 },
+  wpSheetName: { color: OVR.text, fontSize: 16, fontWeight: '800' },
+  wpSheetMeta: { color: OVR.text3, fontSize: 11, fontFamily: mono, marginTop: 2 },
+  wpSheetActions: { flexDirection: 'row', gap: 10 },
+  wpSheetNavBtn: {
+    flex: 1, backgroundColor: C.orange, borderRadius: 12, padding: 13,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+  },
+  wpSheetNavText: { color: '#fff', fontSize: 12, fontFamily: mono, fontWeight: '800' },
+  wpSheetDayBtn: {
+    flex: 1, borderWidth: 1, borderColor: OVR.border, borderRadius: 12, padding: 13,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+  },
+  wpSheetDayText: { color: OVR.text2, fontSize: 12, fontFamily: mono, fontWeight: '700' },
 });

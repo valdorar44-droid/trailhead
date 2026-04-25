@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  TextInput, Alert, Share, Linking, ActivityIndicator,
+  TextInput, Alert, Share, Linking, ActivityIndicator, Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -211,49 +211,66 @@ export default function ProfileScreen() {
 
   if (view === 'login') return (
     <SafeAreaView style={s.container}>
-      <View style={s.authWrap}>
-        <View style={s.authLogo}>
-          <Text style={s.authLogoEmoji}>⛺</Text>
+      <ScrollView contentContainerStyle={s.authScroll} keyboardShouldPersistTaps="handled">
+        <View style={s.authBrand}>
+          <Image source={require('@/assets/icon.png')} style={s.authIcon} />
+          <View>
+            <Text style={s.authWordmark}>TRAILHEAD</Text>
+            <Text style={s.authTagline}>AI OVERLAND GUIDE</Text>
+          </View>
         </View>
-        <Text style={s.authTitle}>Trailhead</Text>
-        <Text style={s.authSub}>Sign in to earn credits, track reports, and save trips.</Text>
-        <TextInput style={s.input} placeholder="Email" placeholderTextColor={C.text3}
-          value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
-        <TextInput style={s.input} placeholder="Password" placeholderTextColor={C.text3}
-          value={password} onChangeText={setPassword} secureTextEntry />
+        <Text style={s.authHeading}>Welcome back</Text>
+        <Text style={s.authSub}>Sign in to plan trips, earn credits, and track your reports.</Text>
+        <View style={s.authFields}>
+          <TextInput style={s.input} placeholder="Email" placeholderTextColor={C.text3}
+            value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
+          <TextInput style={s.input} placeholder="Password" placeholderTextColor={C.text3}
+            value={password} onChangeText={setPassword} secureTextEntry />
+        </View>
         <TouchableOpacity style={[s.btn, loading && s.btnDisabled]} onPress={login} disabled={loading}>
           <Text style={s.btnText}>{loading ? 'SIGNING IN...' : 'SIGN IN'}</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => setView('register')}>
-          <Text style={s.switchText}>No account? Create one →</Text>
+        <TouchableOpacity style={s.switchRow} onPress={() => setView('register')}>
+          <Text style={s.switchText}>No account?</Text>
+          <Text style={s.switchLink}> Create one →</Text>
         </TouchableOpacity>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 
   if (view === 'register') return (
     <SafeAreaView style={s.container}>
-      <View style={s.authWrap}>
-        <View style={s.authLogo}>
-          <Text style={s.authLogoEmoji}>⛺</Text>
+      <ScrollView contentContainerStyle={s.authScroll} keyboardShouldPersistTaps="handled">
+        <View style={s.authBrand}>
+          <Image source={require('@/assets/icon.png')} style={s.authIcon} />
+          <View>
+            <Text style={s.authWordmark}>TRAILHEAD</Text>
+            <Text style={s.authTagline}>AI OVERLAND GUIDE</Text>
+          </View>
         </View>
-        <Text style={s.authTitle}>Create Account</Text>
-        <Text style={s.authSub}>Get 75 free credits on signup — enough for your first few AI trips.</Text>
-        <TextInput style={s.input} placeholder="Email" placeholderTextColor={C.text3}
-          value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
-        <TextInput style={s.input} placeholder="Username" placeholderTextColor={C.text3}
-          value={username} onChangeText={setUsername} autoCapitalize="none" />
-        <TextInput style={s.input} placeholder="Password" placeholderTextColor={C.text3}
-          value={password} onChangeText={setPassword} secureTextEntry />
-        <TextInput style={s.input} placeholder="Referral code (optional)" placeholderTextColor={C.text3}
-          value={refCode} onChangeText={setRefCode} autoCapitalize="none" />
+        <Text style={s.authHeading}>Create account</Text>
+        <View style={s.signupPerk}>
+          <Ionicons name="flash" size={14} color={C.orange} />
+          <Text style={s.signupPerkText}>75 free credits on signup — enough for your first few AI trips</Text>
+        </View>
+        <View style={s.authFields}>
+          <TextInput style={s.input} placeholder="Email" placeholderTextColor={C.text3}
+            value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
+          <TextInput style={s.input} placeholder="Username" placeholderTextColor={C.text3}
+            value={username} onChangeText={setUsername} autoCapitalize="none" />
+          <TextInput style={s.input} placeholder="Password" placeholderTextColor={C.text3}
+            value={password} onChangeText={setPassword} secureTextEntry />
+          <TextInput style={s.input} placeholder="Referral code (optional)" placeholderTextColor={C.text3}
+            value={refCode} onChangeText={setRefCode} autoCapitalize="none" />
+        </View>
         <TouchableOpacity style={[s.btn, loading && s.btnDisabled]} onPress={register} disabled={loading}>
           <Text style={s.btnText}>{loading ? 'CREATING...' : 'CREATE ACCOUNT'}</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => setView('login')}>
-          <Text style={s.switchText}>Have an account? Sign in →</Text>
+        <TouchableOpacity style={s.switchRow} onPress={() => setView('login')}>
+          <Text style={s.switchText}>Have an account?</Text>
+          <Text style={s.switchLink}> Sign in →</Text>
         </TouchableOpacity>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 
@@ -591,16 +608,22 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
   scroll: { padding: 14, gap: 14, paddingBottom: 40 },
 
-  authWrap: { flex: 1, justifyContent: 'center', padding: 24, gap: 14 },
-  authLogo: {
-    width: 64, height: 64, borderRadius: 18,
-    backgroundColor: C.orange, alignItems: 'center', justifyContent: 'center',
-    alignSelf: 'center', marginBottom: 4,
-    shadowColor: C.orange, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 10,
+  authScroll: { flexGrow: 1, justifyContent: 'center', padding: 28, gap: 14 },
+  authBrand: {
+    flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8,
   },
-  authLogoEmoji: { fontSize: 32 },
-  authTitle: { color: C.text, fontSize: 26, fontWeight: '800', textAlign: 'center', letterSpacing: -0.3 },
-  authSub: { color: C.text3, fontSize: 13.5, textAlign: 'center', lineHeight: 20, marginBottom: 4 },
+  authIcon: { width: 52, height: 52, borderRadius: 14 },
+  authWordmark: { color: C.text, fontSize: 18, fontWeight: '900', fontFamily: mono, letterSpacing: 1.5 },
+  authTagline: { color: C.text3, fontSize: 9, fontFamily: mono, letterSpacing: 1.5, marginTop: 2 },
+  authHeading: { color: C.text, fontSize: 28, fontWeight: '800', letterSpacing: -0.5 },
+  authSub: { color: C.text3, fontSize: 13.5, lineHeight: 20, marginTop: -4 },
+  signupPerk: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: C.orangeGlow, borderRadius: 10, borderWidth: 1, borderColor: C.orange,
+    paddingHorizontal: 12, paddingVertical: 10, marginTop: -4,
+  },
+  signupPerkText: { color: C.orange, fontSize: 12.5, flex: 1, lineHeight: 18 },
+  authFields: { gap: 10 },
   input: {
     backgroundColor: C.s2, borderWidth: 1.5, borderColor: C.border,
     borderRadius: 12, padding: 14, color: C.text, fontSize: 14,
@@ -611,7 +634,9 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   btnDisabled: { backgroundColor: C.s3, shadowOpacity: 0 },
   btnText: { color: '#fff', fontWeight: '700', fontSize: 14, fontFamily: mono },
-  switchText: { color: C.text3, textAlign: 'center', fontSize: 13 },
+  switchRow: { flexDirection: 'row', justifyContent: 'center', marginTop: -4 },
+  switchText: { color: C.text3, fontSize: 13 },
+  switchLink: { color: C.orange, fontSize: 13, fontWeight: '600' },
 
   profileCard: {
     backgroundColor: C.s2, borderRadius: 16, borderWidth: 1, borderColor: C.border,

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useRef, useState, useMemo, Component } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Linking, Animated, TextInput, ActivityIndicator, Modal, Image, Share, Alert } from 'react-native';
 import { WebView } from 'react-native-webview';
 import * as Location from 'expo-location';
@@ -974,9 +974,32 @@ function ThreeNeedleCompass({ heading, bearing }: { heading: number | null; bear
   );
 }
 
+// ─── Error boundary ───────────────────────────────────────────────────────────
+
+class MapErrorBoundary extends Component<{ children: React.ReactNode }, { error: string | null }> {
+  state = { error: null };
+  static getDerivedStateFromError(e: any) { return { error: e?.message ?? String(e) }; }
+  render() {
+    if (this.state.error) {
+      return (
+        <View style={{ flex: 1, backgroundColor: '#0a0f0a', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <Text style={{ color: '#ef4444', fontSize: 14, fontWeight: '900', marginBottom: 12 }}>MAP ERROR</Text>
+          <Text style={{ color: '#e4ddd2', fontSize: 11, fontFamily: 'Courier', textAlign: 'center', lineHeight: 18 }}>
+            {this.state.error}
+          </Text>
+          <TouchableOpacity onPress={() => this.setState({ error: null })} style={{ marginTop: 20, backgroundColor: '#22c55e', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 }}>
+            <Text style={{ color: '#fff', fontWeight: '800' }}>RETRY</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
-export default function MapScreen() {
+function MapScreen() {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
   const activeTrip = useStore(st => st.activeTrip);
@@ -3642,6 +3665,10 @@ export default function MapScreen() {
       )}
     </View>
   );
+}
+
+export default function MapScreenWithBoundary() {
+  return <MapErrorBoundary><MapScreen /></MapErrorBoundary>;
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────

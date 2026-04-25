@@ -547,10 +547,15 @@ html,body{
 
 /* ── Trail DNA panel ── */
 #trail-dna-panel{
-  border-top:1px solid var(--border2);padding:12px 16px;flex-shrink:0;
+  border-top:1px solid var(--border2);padding:10px 16px;flex-shrink:0;
   display:none;
 }
 @media(min-width:700px){#trail-dna-panel{display:block}}
+@media(max-width:699px){
+  #trail-dna-panel{display:block;padding:8px 12px}
+  .dna-tags{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px}
+  .dna-tags::-webkit-scrollbar{display:none}
+}
 .dna-header{
   font-size:8px;font-family:var(--mono);color:var(--text3);
   letter-spacing:.14em;text-transform:uppercase;margin-bottom:8px;
@@ -1064,7 +1069,9 @@ function renderTripCard(data) {
   const types = new Set((p.waypoints || []).map(w => w.land_type).filter(Boolean));
   const hasOffroad = (p.daily_itinerary || []).some(d => d.road_type === '4wd');
   const hasDirt = (p.daily_itinerary || []).some(d => d.road_type === 'dirt' || d.road_type === 'mixed');
+  const diffColors = { easy: '#22c55e', moderate: '#f59e0b', difficult: '#ef4444', extreme: '#dc2626' };
   let tagHtml = '';
+  if (p.difficulty) tagHtml += `<span class="tag" style="background:${diffColors[p.difficulty]||'#f59e0b'}22;color:${diffColors[p.difficulty]||'#f59e0b'};border-color:${diffColors[p.difficulty]||'#f59e0b'}44">${esc(p.difficulty.toUpperCase())}</span>`;
   if (hasOffroad) tagHtml += '<span class="tag tag-4wd">4WD</span>';
   if (hasDirt) tagHtml += '<span class="tag tag-dirt">DIRT</span>';
   if (types.has('BLM')) tagHtml += '<span class="tag tag-blm">BLM</span>';
@@ -1089,6 +1096,7 @@ function renderTripCard(data) {
         <div class="stat"><div class="stat-val" data-target="${gas}">0</div><div class="stat-label">Fuel</div></div>
       </div>
       <div class="trip-overview">${esc(p.overview || '')}</div>
+      ${p.route_reasoning ? `<div class="trip-overview" style="margin-top:8px;opacity:0.65;font-style:italic;font-size:12px">💡 ${esc(p.route_reasoning)}</div>` : ''}
       <div class="trip-actions">
         <button class="btn btn-primary" onclick="switchTab('itinerary')">View Route →</button>
         <button class="btn btn-ghost" onclick="switchTab('camps')">⛺ Camps</button>
@@ -1357,21 +1365,28 @@ function flyToCamp(lat, lng, id) {
 function renderLogistics(plan) {
   const el = document.getElementById('logistics-content');
   const L2 = plan.logistics || {};
+  const riskColors = { low: '#22c55e', moderate: '#f59e0b', high: '#ef4444' };
+  const riskColor = riskColors[L2.risk_level] || '#8a9285';
   const items = [
+    L2.risk_level ? { icon: '⚡', label: 'RISK LEVEL', val: L2.risk_level.toUpperCase(), color: riskColor } : null,
     { icon: '4×4', label: 'VEHICLE', val: L2.vehicle_recommendation },
+    L2.clearance_needed ? { icon: '📐', label: 'CLEARANCE', val: { stock: 'Stock vehicle OK', high_clearance: 'High clearance required', '4wd_low_range': '4WD low range required' }[L2.clearance_needed] || L2.clearance_needed } : null,
     { icon: 'GAS', label: 'FUEL STRATEGY', val: L2.fuel_strategy },
     { icon: 'H₂O', label: 'WATER STRATEGY', val: L2.water_strategy },
     { icon: '✓', label: 'PERMITS', val: L2.permits_needed },
+    L2.fire_restrictions_note ? { icon: '🔥', label: 'FIRE RESTRICTIONS', val: L2.fire_restrictions_note } : null,
+    L2.cell_coverage ? { icon: '📶', label: 'CELL COVERAGE', val: L2.cell_coverage } : null,
     { icon: '📅', label: 'BEST SEASON', val: L2.best_season },
-  ].filter(x => x.val);
+    L2.emergency_bailout ? { icon: '🚨', label: 'EMERGENCY BAILOUT', val: L2.emergency_bailout } : null,
+  ].filter(x => x && x.val);
   if (!items.length) { el.innerHTML = '<div class="empty-state"><div class="empty-icon">🎒</div><div class="empty-text">No logistics data</div></div>'; return; }
   el.innerHTML = items.map(item => `
     <div class="logistic-card">
       <div class="logistic-header">
         <div class="logistic-icon">${item.icon}</div>
-        <div class="logistic-label">${item.label}</div>
+        <div class="logistic-label">${esc(item.label)}</div>
       </div>
-      <div class="logistic-val">${esc(item.val)}</div>
+      <div class="logistic-val" style="${item.color ? `color:${item.color};font-weight:700` : ''}">${esc(item.val)}</div>
     </div>`).join('');
 }
 
@@ -1393,7 +1408,7 @@ function dismissAlert() { document.getElementById('alert-banner').classList.remo
 
 let toastTimer;
 function showToast(msg, ms = 2500) {
-  document.getElementById('toast-msg').innerHTML = msg;
+  document.getElementById('toast-msg').textContent = msg;
   document.getElementById('toast').classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => document.getElementById('toast').classList.remove('show'), ms);

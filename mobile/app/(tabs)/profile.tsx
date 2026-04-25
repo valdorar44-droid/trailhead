@@ -9,6 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import * as SecureStore from 'expo-secure-store';
+import * as Updates from 'expo-updates';
 import { api, CreditPackage } from '@/lib/api';
 import { useStore, RigProfile } from '@/lib/store';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
@@ -1037,6 +1038,26 @@ export default function ProfileScreen() {
             </View>
           ))}
         </View>
+
+        {/* Build / OTA version */}
+        <View style={s.versionCard}>
+          <View style={s.versionRow}>
+            <Text style={s.versionLabel}>CHANNEL</Text>
+            <Text style={s.versionValue}>{Updates.channel ?? (Updates.isEmbeddedLaunch ? 'embedded' : 'dev')}</Text>
+          </View>
+          <View style={s.versionRow}>
+            <Text style={s.versionLabel}>UPDATE ID</Text>
+            <Text style={s.versionValue} numberOfLines={1}>
+              {Updates.updateId ? Updates.updateId.slice(0, 8) + '…' : (Updates.isEmbeddedLaunch ? 'embedded build' : '—')}
+            </Text>
+          </View>
+          <View style={s.versionRow}>
+            <Text style={s.versionLabel}>PUBLISHED</Text>
+            <Text style={s.versionValue}>
+              {Updates.createdAt ? Updates.createdAt.toLocaleString() : '—'}
+            </Text>
+          </View>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -1315,6 +1336,13 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   earnRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 5 },
   earnAmount: { color: C.green, fontSize: 13, fontWeight: '800', fontFamily: mono, width: 40 },
   earnAction: { color: C.text2, fontSize: 13 },
+
+  versionCard: {
+    backgroundColor: C.s2, borderRadius: 12, borderWidth: 1, borderColor: C.border, padding: 12, gap: 6,
+  },
+  versionRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  versionLabel: { color: C.text3, fontSize: 10, fontWeight: '700', fontFamily: mono, letterSpacing: 1 },
+  versionValue: { color: C.text2, fontSize: 11, fontFamily: mono, flex: 1, textAlign: 'right' },
 
   bugCard: {
     backgroundColor: C.s2, borderRadius: 16, borderWidth: 1, borderColor: C.border,

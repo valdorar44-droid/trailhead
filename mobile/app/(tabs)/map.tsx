@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '@/lib/store';
 import { api, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck } from '@/lib/api';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
+import { useConnectivitySync } from '@/lib/connectivitySync';
 
 // ─── US State bounding boxes for offline download ─────────────────────────────
 
@@ -1157,6 +1158,10 @@ function MapScreen() {
   const [layerRoads,   setLayerRoads]   = useState(false);
   const [tappedTrail, setTappedTrail] = useState<{ name: string; lat: number; lng: number; cls: string } | null>(null);
 
+  // Connectivity sync toast
+  const [syncToast, setSyncToast] = useState('');
+  const syncToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Land check card
   const [landCheck,        setLandCheck]        = useState<LandCheck | null>(null);
   const [landCheckLoading, setLandCheckLoading] = useState(false);
@@ -1461,6 +1466,28 @@ function MapScreen() {
     setNavIdx(0); setNavMode(false); setRouteSteps([]); setIsRouted(false);
     spokenRef.current.clear();
   }, [activeTrip?.trip_id]);
+
+  // ── Opportunistic background sync ──────────────────────────────────────────
+  useConnectivitySync({
+    activeTrip,
+    onWeatherUpdate: (weather) => {
+      setCachedWeather(weather);
+    },
+    onSyncComplete: () => {
+      if (syncToastTimer.current) clearTimeout(syncToastTimer.current);
+      setSyncToast('Signal found — weather updated');
+      syncToastTimer.current = setTimeout(() => setSyncToast(''), 3500);
+    },
+    onReportRefresh: () => {
+      if (!activeTrip) return;
+      const wps = activeTrip.plan.waypoints.filter(w => w.lat && w.lng);
+      if (wps.length) {
+        api.getReportsAlongRoute(wps).then(alerts => {
+          setRouteAlerts(alerts);
+        }).catch(() => {});
+      }
+    },
+  });
 
   // ── Reload camps in current viewport whenever filters change ──────────────
   useEffect(() => {
@@ -2142,6 +2169,14 @@ function MapScreen() {
         <View style={s.offlineCacheBanner}>
           <Ionicons name="cloud-offline-outline" size={12} color="#a3e635" />
           <Text style={s.offlineCacheBannerText}>Using cached trip data — offline mode</Text>
+        </View>
+      )}
+
+      {/* Sync toast — flashes briefly when signal restores and weather is refreshed */}
+      {!!syncToast && (
+        <View style={s.syncToast}>
+          <Ionicons name="wifi" size={11} color="#22c55e" />
+          <Text style={s.syncToastText}>{syncToast}</Text>
         </View>
       )}
 
@@ -4669,4 +4704,13 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(163,230,53,0.3)',
   },
   offlineCacheBannerText: { color: '#a3e635', fontSize: 10, fontFamily: mono, fontWeight: '700', letterSpacing: 0.3, flex: 1 },
+
+  syncToast: {
+    position: 'absolute', bottom: 110, alignSelf: 'center',
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: 'rgba(10,25,10,0.92)', borderRadius: 20,
+    paddingHorizontal: 14, paddingVertical: 8,
+    borderWidth: 1, borderColor: 'rgba(34,197,94,0.45)',
+  },
+  syncToastText: { color: '#22c55e', fontSize: 11, fontFamily: mono, fontWeight: '700', letterSpacing: 0.3 },
 });

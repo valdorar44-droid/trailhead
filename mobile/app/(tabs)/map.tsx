@@ -5,13 +5,14 @@ import * as Location from 'expo-location';
 import * as SecureStore from 'expo-secure-store';
 import * as Speech from 'expo-speech';
 import * as Haptics from 'expo-haptics';
+import * as FileSystem from 'expo-file-system';
 // expo-keep-awake requires a native build that includes it — load lazily so older binaries don't crash
 const _keepAwake = (() => { try { return require('expo-keep-awake'); } catch { return null; } })();
 const activateKeepAwakeAsync = () => _keepAwake ? _keepAwake.activateKeepAwakeAsync() : Promise.resolve();
 const deactivateKeepAwake    = () => _keepAwake && _keepAwake.deactivateKeepAwake();
 import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '@/lib/store';
-import { api, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast } from '@/lib/api';
+import { api, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck } from '@/lib/api';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 
 // ─── US State bounding boxes for offline download ─────────────────────────────
@@ -664,6 +665,18 @@ const buildMapHtml = (
       }catch(x){}
       postRN({type:'map_tapped'});
     });
+    // ── Long-press to check camping legality ──────────────────────────────────
+    map.on('contextmenu',function(e){
+      postRN({type:'map_long_press',lat:e.lngLat.lat,lng:e.lngLat.lng});
+    });
+    var _longPressTimer;
+    map.on('touchstart',function(e){
+      _longPressTimer=setTimeout(function(){
+        if(e.lngLat)postRN({type:'map_long_press',lat:e.lngLat.lat,lng:e.lngLat.lng});
+      },600);
+    });
+    map.on('touchend',function(){clearTimeout(_longPressTimer);});
+    map.on('touchmove',function(){clearTimeout(_longPressTimer);});
   }
 
   // ── GeoJSON helpers ───────────────────────────────────────────────────────────
@@ -1021,6 +1034,7 @@ function MapScreen() {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
   const activeTrip = useStore(st => st.activeTrip);
+  const activeTripFromCache = useStore(st => st.activeTripFromCache);
   const user = useStore(st => st.user);
   const setStoreLoc = useStore(st => st.setUserLoc);
   const setStoreToken = useStore(st => st.setMapboxToken);
@@ -1121,6 +1135,9 @@ function MapScreen() {
   const [showPacking,   setShowPacking]   = useState(false);
   const [loadingPacking,setLoadingPacking]= useState(false);
 
+  // Cached route weather (loaded from FileSystem)
+  const [cachedWeather, setCachedWeather] = useState<RouteWeatherResult | null>(null);
+
   const [navDest, setNavDest] = useState<WP | null>(null);
   const [stepIdx, setStepIdx] = useState(0);
   const [approachingReport, setApproachingReport] = useState<Report | null>(null);
@@ -1139,6 +1156,11 @@ function MapScreen() {
   const [layerMvum,    setLayerMvum]    = useState(false);
   const [layerRoads,   setLayerRoads]   = useState(false);
   const [tappedTrail, setTappedTrail] = useState<{ name: string; lat: number; lng: number; cls: string } | null>(null);
+
+  // Land check card
+  const [landCheck,        setLandCheck]        = useState<LandCheck | null>(null);
+  const [landCheckLoading, setLandCheckLoading] = useState(false);
+  const landCheckDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const navAnim      = useRef(new Animated.Value(0)).current;
   const navRef       = useRef({ active: false, idx: 0, wps: [] as WP[] });
@@ -1188,6 +1210,15 @@ function MapScreen() {
       if (!val) setShowOnboard(true);
     }).catch(() => {});
   }, []);
+
+  // Load cached route weather from FileSystem when active trip changes
+  useEffect(() => {
+    if (!activeTrip) { setCachedWeather(null); return; }
+    const path = `${FileSystem.documentDirectory}weather_${activeTrip.trip_id}.json`;
+    FileSystem.readAsStringAsync(path, { encoding: FileSystem.EncodingType.UTF8 })
+      .then(raw => { try { setCachedWeather(JSON.parse(raw)); } catch { setCachedWeather(null); } })
+      .catch(() => setCachedWeather(null));
+  }, [activeTrip?.trip_id]);
 
   // Keep refs in sync
   useEffect(() => { navRef.current.active = navMode; }, [navMode]);
@@ -1850,6 +1881,23 @@ function MapScreen() {
           setSelectedCamp(prev => prev?.id === minId ? match : prev);
         }).catch(() => {});
       }
+      if (msg.type === 'map_long_press') {
+        setLandCheck(null);
+        setLandCheckLoading(true);
+        if (landCheckDismissTimer.current) clearTimeout(landCheckDismissTimer.current);
+        api.getLandCheck(msg.lat, msg.lng)
+          .then(result => {
+            setLandCheck(result);
+            setLandCheckLoading(false);
+            landCheckDismissTimer.current = setTimeout(() => {
+              setLandCheck(null);
+              setLandCheckLoading(false);
+            }, 8000);
+          })
+          .catch(() => {
+            setLandCheckLoading(false);
+          });
+      }
     } catch {}
   }
 
@@ -2088,6 +2136,61 @@ function MapScreen() {
           </TouchableOpacity>
         )}
       </View>
+
+      {/* Offline mode banner — shown when activeTrip was loaded from cache */}
+      {activeTripFromCache && (
+        <View style={s.offlineCacheBanner}>
+          <Ionicons name="cloud-offline-outline" size={12} color="#a3e635" />
+          <Text style={s.offlineCacheBannerText}>Using cached trip data — offline mode</Text>
+        </View>
+      )}
+
+      {/* Land check card — appears on long-press, auto-dismisses after 8s */}
+      {(landCheckLoading || landCheck) && (
+        <TouchableOpacity
+          activeOpacity={0.92}
+          style={s.landCheckCard}
+          onPress={() => { setLandCheck(null); setLandCheckLoading(false); if (landCheckDismissTimer.current) clearTimeout(landCheckDismissTimer.current); }}
+        >
+          {landCheckLoading ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <ActivityIndicator size="small" color="#f97316" />
+              <Text style={s.landCheckTitle}>Checking land status...</Text>
+            </View>
+          ) : landCheck ? (
+            <>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                <View style={[s.landCheckBadge, {
+                  backgroundColor: landCheck.camping_status === 'allowed' ? '#16a34a33'
+                    : landCheck.camping_status === 'restricted' ? '#dc262633'
+                    : landCheck.camping_status === 'check-rules' ? '#d9770633'
+                    : '#37415133',
+                  borderColor: landCheck.camping_status === 'allowed' ? '#22c55e'
+                    : landCheck.camping_status === 'restricted' ? '#ef4444'
+                    : landCheck.camping_status === 'check-rules' ? '#f97316'
+                    : '#6b7280',
+                }]}>
+                  <Text style={[s.landCheckBadgeText, {
+                    color: landCheck.camping_status === 'allowed' ? '#22c55e'
+                      : landCheck.camping_status === 'restricted' ? '#ef4444'
+                      : landCheck.camping_status === 'check-rules' ? '#f97316'
+                      : '#9ca3af',
+                  }]}>
+                    {landCheck.camping_status === 'allowed' ? 'CAMPING OK'
+                      : landCheck.camping_status === 'restricted' ? 'RESTRICTED'
+                      : landCheck.camping_status === 'check-rules' ? 'CHECK RULES'
+                      : 'UNKNOWN'}
+                  </Text>
+                </View>
+                <Text style={s.landCheckType}>{landCheck.land_type}</Text>
+                {landCheck.admin_name ? <Text style={s.landCheckAdmin} numberOfLines={1}>{landCheck.admin_name}</Text> : null}
+              </View>
+              <Text style={s.landCheckNote}>{landCheck.camping_note}</Text>
+              <Text style={s.landCheckSource}>Source: {landCheck.source} · tap to dismiss</Text>
+            </>
+          ) : null}
+        </TouchableOpacity>
+      )}
 
       {/* Offline download progress bar */}
       {isDownloading && (
@@ -2951,8 +3054,42 @@ function MapScreen() {
               )}
               <View style={s.briefStats}>
                 <View style={s.briefStat}><Text style={s.briefStatVal}>{routeBrief.estimated_fuel_stops}</Text><Text style={s.briefStatLabel}>Fuel Stops</Text></View>
-                <View style={s.briefStat}><Text style={s.briefStatVal}>{routeBrief.water_carry_gallons}</Text><Text style={s.briefStatLabel}>Gallons Water</Text></View>
+                <View style={s.briefStat}><Text style={s.briefStatVal}>{routeBrief.water_carry_gallons}</Text><Text style={s.briefStatLabel}>Gals Water</Text></View>
               </View>
+              {routeBrief.signal_dead_zones && routeBrief.signal_dead_zones.length > 0 && (
+                <View style={s.detailSection}>
+                  <Text style={s.detailSectionTitle}>📵 Signal Dead Zones</Text>
+                  {routeBrief.signal_dead_zones.map((z, i) => (
+                    <View key={i} style={s.briefItem}>
+                      <Ionicons name="cellular-outline" size={14} color={C.text3} />
+                      <Text style={s.briefItemText}>{z}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+              {routeBrief.fire_restriction_likelihood && (
+                <View style={s.detailSection}>
+                  <Text style={s.detailSectionTitle}>🔥 Fire Restrictions</Text>
+                  <Text style={[s.briefSummary, { marginTop: 4 }]}>{routeBrief.fire_restriction_likelihood}</Text>
+                </View>
+              )}
+              {routeBrief.emergency_bailout && (
+                <View style={[s.detailSection, { backgroundColor: C.red + '12', borderRadius: 8, padding: 10 }]}>
+                  <Text style={[s.detailSectionTitle, { color: C.red }]}>🚨 Emergency Bailout</Text>
+                  <Text style={[s.briefSummary, { marginTop: 4 }]}>{routeBrief.emergency_bailout}</Text>
+                </View>
+              )}
+              {routeBrief.daily_highlights.length > 0 && (
+                <View style={s.detailSection}>
+                  <Text style={s.detailSectionTitle}>Daily Highlights</Text>
+                  {routeBrief.daily_highlights.map((h, i) => (
+                    <View key={i} style={s.briefItem}>
+                      <Text style={{ fontSize: 12, color: C.orange }}>D{i + 1}</Text>
+                      <Text style={s.briefItemText}>{h}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
             </ScrollView>
           )}
         </View>
@@ -3551,6 +3688,59 @@ function MapScreen() {
               <Text style={s.mapsBtnText}>EXPORT</Text>
             </TouchableOpacity>
           </View>
+          {/* ── WEATHER section ── */}
+          <View style={s.weatherSection}>
+            <View style={s.weatherSectionHeader}>
+              <Ionicons name="cloud-outline" size={11} color={C.text3} />
+              <Text style={s.weatherSectionLabel}>WEATHER</Text>
+            </View>
+            {cachedWeather ? (() => {
+              // Collect camp waypoints (one per day)
+              const campDays = activeTrip.plan.waypoints
+                .filter(w => w.type === 'camp')
+                .reduce<Record<number, typeof activeTrip.plan.waypoints[0]>>((acc, w) => {
+                  if (!acc[w.day]) acc[w.day] = w;
+                  return acc;
+                }, {});
+              const campEntries = Object.values(campDays).sort((a, b) => a.day - b.day);
+              if (campEntries.length === 0) {
+                return <Text style={s.weatherNone}>No camp waypoints</Text>;
+              }
+              return (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.weatherScroll}>
+                  {campEntries.map(wp => {
+                    // Find matching forecast — try exact name, then first available
+                    const forecast = cachedWeather.forecasts[wp.name] ?? Object.values(cachedWeather.forecasts)[0];
+                    if (!forecast?.daily) return null;
+                    const { time, temperature_2m_max, temperature_2m_min, precipitation_sum, windspeed_10m_max, weathercode } = forecast.daily;
+                    // Pick day index 0 as representative (forecast for first available day)
+                    const idx = 0;
+                    const hi   = temperature_2m_max?.[idx];
+                    const lo   = temperature_2m_min?.[idx];
+                    const precip = precipitation_sum?.[idx] ?? 0;
+                    const wind   = windspeed_10m_max?.[idx];
+                    const code   = weathercode?.[idx] ?? 1;
+                    return (
+                      <View key={wp.day} style={s.weatherDayCard}>
+                        <Text style={s.weatherDayNum}>DAY {wp.day}</Text>
+                        <Text style={s.weatherDayIcon}>{weatherIcon(code)}{precip > 2 ? ' 🌧️' : ''}</Text>
+                        <Text style={s.weatherTemps}>
+                          {hi !== undefined ? `${Math.round(hi)}°` : '—'}
+                          <Text style={s.weatherTempLo}> / {lo !== undefined ? `${Math.round(lo)}°` : '—'}</Text>
+                        </Text>
+                        {wind !== undefined && (
+                          <Text style={s.weatherWind}>{Math.round(wind)} mph</Text>
+                        )}
+                      </View>
+                    );
+                  })}
+                </ScrollView>
+              );
+            })() : (
+              <Text style={s.weatherNone}>No weather cached — build a trip to download forecasts</Text>
+            )}
+          </View>
+
           <View style={s.aiActionsRow}>
             <TouchableOpacity style={s.aiActionBtn} onPress={fetchRouteBrief} disabled={loadingBrief}>
               {loadingBrief
@@ -3873,6 +4063,26 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   dlFill: { height: 3, backgroundColor: C.orange, borderRadius: 1.5 },
 
+  // ── Land check card
+  landCheckCard: {
+    position: 'absolute', top: 102, left: 16, right: 70,
+    backgroundColor: OVR.bg2, borderRadius: 14,
+    borderWidth: 1, borderColor: OVR.border,
+    paddingHorizontal: 14, paddingVertical: 10,
+    shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 8, shadowOffset: { width: 0, height: 2 },
+    elevation: 6,
+  },
+  landCheckBadge: {
+    borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3,
+    borderWidth: 1,
+  },
+  landCheckBadgeText: { fontSize: 9, fontFamily: mono, fontWeight: '800', letterSpacing: 0.5 },
+  landCheckType: { color: OVR.text, fontSize: 11, fontFamily: mono, fontWeight: '700' },
+  landCheckAdmin: { color: OVR.text2, fontSize: 10, fontFamily: mono, flex: 1 },
+  landCheckTitle: { color: OVR.text, fontSize: 12, fontFamily: mono },
+  landCheckNote: { color: OVR.text2, fontSize: 11, lineHeight: 16, marginBottom: 4 },
+  landCheckSource: { color: OVR.text3, fontSize: 9, fontFamily: mono },
+
   // ── Search This Area (native)
   searchAreaWrap: {
     position: 'absolute', bottom: 120, left: 0, right: 0,
@@ -4134,6 +4344,22 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     backgroundColor: C.orange + '0f', justifyContent: 'center',
   },
   aiActionText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '700' },
+
+  // ── Route weather strip ──────────────────────────────────────────────────────
+  weatherSection: { paddingHorizontal: 14, paddingBottom: 6 },
+  weatherSectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 6 },
+  weatherSectionLabel: { color: C.text3, fontSize: 8.5, fontFamily: mono, letterSpacing: 1 },
+  weatherScroll: { gap: 6, paddingRight: 4 },
+  weatherDayCard: {
+    backgroundColor: C.s3, borderWidth: 1, borderColor: C.border,
+    borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7, alignItems: 'center', minWidth: 64,
+  },
+  weatherDayNum: { color: C.text3, fontSize: 8, fontFamily: mono, letterSpacing: 0.5, marginBottom: 3 },
+  weatherDayIcon: { fontSize: 18, lineHeight: 22 },
+  weatherTemps: { color: C.text, fontSize: 12, fontWeight: '700', marginTop: 2 },
+  weatherTempLo: { color: C.text3, fontSize: 11, fontWeight: '400' },
+  weatherWind: { color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 1 },
+  weatherNone: { color: C.text3, fontSize: 11, fontFamily: mono, fontStyle: 'italic', paddingVertical: 4 },
 
   // ── Route card (search result card)
   routeCard: {
@@ -4433,4 +4659,14 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   layerRowLabel: { color: C.text, fontSize: 13, fontFamily: mono, fontWeight: '700' },
   layerRowSub:   { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
   layerDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: C.border },
+
+  // Offline cache banner
+  offlineCacheBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: 'rgba(20,30,20,0.88)', borderRadius: 8,
+    paddingHorizontal: 10, paddingVertical: 6,
+    marginHorizontal: 14, marginTop: 4,
+    borderWidth: 1, borderColor: 'rgba(163,230,53,0.3)',
+  },
+  offlineCacheBannerText: { color: '#a3e635', fontSize: 10, fontFamily: mono, fontWeight: '700', letterSpacing: 0.3, flex: 1 },
 });

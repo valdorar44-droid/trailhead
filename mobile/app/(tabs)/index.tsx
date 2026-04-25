@@ -12,6 +12,7 @@ import * as Sharing from 'expo-sharing';
 import { api, TripResult, TrailDNA, CreditPackage } from '@/lib/api';
 import { useStore } from '@/lib/store';
 import { useTheme, useTag, mono, ColorPalette } from '@/lib/design';
+import { saveOfflineTrip, loadOfflineTrip } from '@/lib/offlineTrips';
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://trailhead-production-2049.up.railway.app';
 
@@ -60,6 +61,9 @@ export default function PlanScreen() {
   const [showCreditsModal, setShowCreditsModal] = useState(false);
   const [packages, setPackages] = useState<CreditPackage[]>([]);
   const [buyingPkg, setBuyingPkg] = useState<string | null>(null);
+  const [offlineToast, setOfflineToast] = useState(false);
+  const offlineToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [weatherToast, setWeatherToast] = useState('');
 
   const scrollToEnd = useCallback(() => {
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
@@ -148,6 +152,8 @@ export default function PlanScreen() {
             const filtered = m.filter(msg => !msg.trip);
             return [...filtered, { role: 'ai', text: data.content }, { role: 'ai', trip: data.trip }];
           });
+          // Update offline cache with revised trip (fire and forget)
+          saveOfflineTrip(data.trip).catch(() => {});
         }
         setPlanPhase('active');
       } catch (e: any) {
@@ -204,7 +210,20 @@ export default function PlanScreen() {
         est_miles:    result.plan.total_est_miles ?? 0,
         planned_at:   Date.now(),
       });
+      // Fire-and-forget: cache trip for offline access
+      saveOfflineTrip(result).then(() => {
+        setOfflineToast(true);
+        if (offlineToastTimer.current) clearTimeout(offlineToastTimer.current);
+        offlineToastTimer.current = setTimeout(() => setOfflineToast(false), 3000);
+      }).catch(() => {});
       setPlanPhase('active');
+      // Download route weather for offline use (fail silently)
+      api.getRouteWeather(result.trip_id, result.plan.waypoints).then(async weather => {
+        const path = `${FileSystem.documentDirectory}weather_${result.trip_id}.json`;
+        await FileSystem.writeAsStringAsync(path, JSON.stringify(weather), { encoding: FileSystem.EncodingType.UTF8 });
+        setWeatherToast('Weather downloaded for offline use');
+        setTimeout(() => setWeatherToast(''), 3000);
+      }).catch(() => {});
     } catch (e: any) {
       if (isOutOfCredits(e)) {
         handleOutOfCredits();
@@ -342,6 +361,14 @@ export default function PlanScreen() {
         )}
       </View>
 
+      {/* ── Offline saved toast ── */}
+      {offlineToast && (
+        <View style={s.offlineToast}>
+          <Ionicons name="download-outline" size={13} color="#fff" />
+          <Text style={s.offlineToastText}>Trip saved for offline</Text>
+        </View>
+      )}
+
       {/* ── Trail DNA strip ── */}
       {Object.keys(trailDna).some(k => trailDna[k as keyof TrailDNA]) && (
         <ScrollView
@@ -382,7 +409,15 @@ export default function PlanScreen() {
                           setActiveTrip(trip);
                           setMessages([{ role: 'ai', trip }]);
                           setPlanPhase('active');
-                        }).catch(() => {});
+                        }).catch(async () => {
+                          // Network failed — fall back to offline cache
+                          const cached = await loadOfflineTrip(t.trip_id);
+                          if (cached) {
+                            setActiveTrip(cached, true);
+                            setMessages([{ role: 'ai', trip: cached }]);
+                            setPlanPhase('active');
+                          }
+                        });
                       }}
                     >
                       <Text style={s.historyCardName} numberOfLines={2}>{t.trip_name}</Text>
@@ -494,6 +529,12 @@ export default function PlanScreen() {
           </View>
         )}
       </KeyboardAvoidingView>
+      {!!weatherToast && (
+        <View style={s.weatherToast}>
+          <Ionicons name="cloud-download-outline" size={14} color={C.text} />
+          <Text style={s.weatherToastText}>{weatherToast}</Text>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -976,4 +1017,22 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     backgroundColor: C.s1,
   },
   editHintText: { fontSize: 9, fontFamily: mono, letterSpacing: 0.4 },
+
+  // Offline toast
+  offlineToast: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: 'rgba(34,197,94,0.9)', borderRadius: 8,
+    paddingHorizontal: 12, paddingVertical: 7,
+    marginHorizontal: 14, marginBottom: 2,
+  },
+  offlineToastText: { color: '#fff', fontSize: 11, fontFamily: mono, fontWeight: '700', letterSpacing: 0.3 },
+
+  weatherToast: {
+    position: 'absolute', bottom: 90, alignSelf: 'center',
+    flexDirection: 'row', alignItems: 'center', gap: 7,
+    backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
+    borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 6,
+  },
+  weatherToastText: { color: C.text, fontSize: 12, fontFamily: mono, letterSpacing: 0.3 },
 });

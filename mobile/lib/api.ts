@@ -82,6 +82,8 @@ export const api = {
 
   getWeather: (lat: number, lng: number, days = 7) =>
     req<WeatherForecast>(`/api/weather?lat=${lat}&lng=${lng}&days=${days}`),
+  getRouteWeather: (tripId: string, waypoints: Waypoint[]) =>
+    req<RouteWeatherResult>('/api/weather/route', { method: 'POST', body: JSON.stringify({ trip_id: tripId, waypoints }) }),
 
   // Discovery
   getNearbyCamps: (lat: number, lng: number, radius = 50, types: string[] = []) =>
@@ -103,6 +105,9 @@ export const api = {
 
   submitBugReport: (data: { title: string; description: string; app_version?: string }) =>
     req<{ bug_id: number; message: string }>('/api/bugs', { method: 'POST', body: JSON.stringify(data) }),
+
+  getLandCheck: (lat: number, lng: number) =>
+    req<LandCheck>(`/api/land-check?lat=${lat}&lng=${lng}`),
 
   // Camp fullness
   reportCampFull: (campId: string, data: { camp_name: string; lat: number; lng: number }) =>
@@ -229,6 +234,9 @@ export interface RouteBrief {
   readiness_score: number; top_concerns: string[]; must_do_before_leaving: string[];
   daily_highlights: string[]; estimated_fuel_stops: number;
   water_carry_gallons: number; briefing_summary: string;
+  signal_dead_zones?: string[];
+  fire_restriction_likelihood?: string;
+  emergency_bailout?: string;
 }
 export interface PackingRequest {
   trip_name: string; duration_days: number;
@@ -249,6 +257,10 @@ export interface WeatherForecast {
     weathercode: number[];
   };
 }
+export interface RouteWeatherResult {
+  trip_id: string;
+  forecasts: Record<string, WeatherForecast>;
+}
 export interface CampFullness {
   camp_id: string; camp_name: string; lat: number; lng: number;
   status: 'full' | 'open'; reporter_id: number; username?: string;
@@ -259,4 +271,11 @@ export interface CampFullnessResult {
   credits_earned: number; new_balance: number;
   confirmations?: number; disputes?: number;
   status?: string; already_reported?: boolean; already_voted?: boolean;
+}
+export interface LandCheck {
+  land_type: string;
+  admin_name: string;
+  camping_status: 'allowed' | 'check-rules' | 'restricted' | 'unknown';
+  camping_note: string;
+  source: string;
 }

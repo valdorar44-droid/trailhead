@@ -504,6 +504,49 @@ async def trip_guide(trip_id: str, user: dict = Depends(_current_user)):
 
 # ── Weather ───────────────────────────────────────────────────────────────────
 
+class RouteWeatherRequest(BaseModel):
+    waypoints: list[dict]
+    trip_id: str
+
+@app.post("/api/weather/route")
+async def route_weather(body: RouteWeatherRequest):
+    """Download 7-day forecasts for all waypoints in a trip for offline use.
+    Deduplicates waypoints within 0.1° and caches the full result for 3 hours."""
+    cache_key = f"route_weather:{body.trip_id}"
+    cached = get_cached("campsite_cache", cache_key, ttl_seconds=10800)
+    if cached:
+        return cached
+
+    # Filter to waypoints with valid coords, deduplicate within 0.1°
+    seen_coords: list[tuple[float, float]] = []
+    unique_wps: list[dict] = []
+    for wp in body.waypoints:
+        lat = wp.get("lat")
+        lng = wp.get("lng")
+        if lat is None or lng is None:
+            continue
+        is_dup = any(abs(lat - slat) < 0.1 and abs(lng - slng) < 0.1 for slat, slng in seen_coords)
+        if not is_dup:
+            seen_coords.append((lat, lng))
+            unique_wps.append(wp)
+
+    sem = asyncio.Semaphore(5)
+
+    async def _fetch_one(wp: dict) -> tuple[str, dict | None]:
+        async with sem:
+            try:
+                data = await weather_forecast(wp["lat"], wp["lng"], days=7)
+                return (wp.get("name", f"{wp['lat']:.2f},{wp['lng']:.2f}"), data)
+            except Exception:
+                return (wp.get("name", ""), None)
+
+    results = await asyncio.gather(*[_fetch_one(wp) for wp in unique_wps])
+    forecasts = {name: data for name, data in results if data is not None}
+    response = {"trip_id": body.trip_id, "forecasts": forecasts}
+    set_cached("campsite_cache", cache_key, response)
+    return response
+
+
 @app.get("/api/weather")
 async def weather_forecast(lat: float, lng: float, days: int = 7):
     cache_key = f"weather:{lat:.2f},{lng:.2f}"
@@ -1119,6 +1162,106 @@ async def land_tile(z: int, y: int, x: int):
         )
     except Exception:
         return Response(content=_TRANSPARENT_TILE, media_type="image/png", headers={"Access-Control-Allow-Origin": "*"})
+
+
+# ── Land legality check ───────────────────────────────────────────────────────
+
+@app.get("/api/land-check")
+async def land_check(lat: float, lng: float):
+    """Single-tap 'am I legal here?' — queries BLM ArcGIS for land ownership and
+    returns a camping-status determination for the given GPS coordinate."""
+    cache_key = f"land_check:{lat:.2f},{lng:.2f}"
+    cached = get_cached("campsite_cache", cache_key, ttl_seconds=3600 * 24 * 7)
+    if cached:
+        return cached
+
+    UNKNOWN_RESULT = {
+        "land_type": "UNKNOWN",
+        "admin_name": "",
+        "camping_status": "unknown",
+        "camping_note": "Land ownership unclear — verify before camping.",
+        "source": "BLM ArcGIS",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            r = await client.get(
+                "https://gis.blm.gov/arcgis/rest/services/lands/BLM_Natl_SMA_LimitedScale/MapServer/1/query",
+                params={
+                    "geometry": json.dumps({"x": lng, "y": lat}),
+                    "geometryType": "esriGeometryPoint",
+                    "inSR": "4326",
+                    "spatialRel": "esriSpatialRelIntersects",
+                    "outFields": "ADMIN_UNIT_CD,ADMIN_ST,NLCS_DESC,GIS_ACRES,Shape_Area",
+                    "returnGeometry": "false",
+                    "f": "json",
+                },
+                headers={"User-Agent": "Trailhead/1.0"},
+            )
+            r.raise_for_status()
+            data = r.json()
+    except Exception:
+        return UNKNOWN_RESULT
+
+    features = data.get("features", [])
+    if not features:
+        set_cached("campsite_cache", cache_key, UNKNOWN_RESULT)
+        return UNKNOWN_RESULT
+
+    attrs = features[0].get("attributes", {})
+    admin_cd = (attrs.get("ADMIN_UNIT_CD") or "").upper()
+    nlcs_desc = (attrs.get("NLCS_DESC") or "").upper()
+    admin_name = attrs.get("ADMIN_UNIT_CD") or ""
+
+    # Determine land type from admin unit code prefix
+    if "BLM" in admin_cd:
+        land_type = "BLM"
+    elif "USFS" in admin_cd or "NF" in admin_cd:
+        land_type = "USFS"
+    elif "NPS" in admin_cd:
+        land_type = "NPS"
+    elif "BOR" in admin_cd:
+        land_type = "BOR"
+    elif "STATE" in admin_cd or admin_cd.startswith("ST-"):
+        land_type = "STATE"
+    else:
+        # Any matched feature defaults to BLM (most common public land type)
+        land_type = "BLM"
+
+    # Wilderness overrides camping rules
+    is_wilderness = "WILDERNESS" in nlcs_desc and "STUDY" not in nlcs_desc
+
+    if is_wilderness:
+        camping_status = "check-rules"
+        camping_note = "Wilderness area — pack-in/pack-out, no motorized vehicles. Dispersed camping allowed."
+    elif land_type == "BLM":
+        camping_status = "allowed"
+        camping_note = "BLM land — dispersed camping generally allowed. 14-day stay limit. No facilities."
+    elif land_type == "USFS":
+        camping_status = "allowed"
+        camping_note = "National Forest — dispersed camping generally allowed outside developed sites. Check local fire restrictions."
+    elif land_type == "NPS":
+        camping_status = "restricted"
+        camping_note = "National Park — camping in designated sites only. Permit may be required."
+    elif land_type == "BOR":
+        camping_status = "check-rules"
+        camping_note = "Bureau of Reclamation land — camping rules vary by project area. Check with local BOR office."
+    elif land_type == "STATE":
+        camping_status = "check-rules"
+        camping_note = "State land — rules vary by state agency. Check before camping."
+    else:
+        camping_status = "unknown"
+        camping_note = "Land ownership unclear — verify before camping."
+
+    result = {
+        "land_type": land_type,
+        "admin_name": admin_name,
+        "camping_status": camping_status,
+        "camping_note": camping_note,
+        "source": "BLM ArcGIS",
+    }
+    set_cached("campsite_cache", cache_key, result)
+    return result
 
 
 # ── OSM POIs (water, trailheads, viewpoints) ──────────────────────────────────

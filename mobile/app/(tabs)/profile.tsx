@@ -13,6 +13,7 @@ import * as Updates from 'expo-updates';
 import { api, CreditPackage } from '@/lib/api';
 import { useStore, RigProfile } from '@/lib/store';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
+import { getOfflineTripIndex, loadOfflineTrip } from '@/lib/offlineTrips';
 
 type ChecklistItem = { id: string; label: string; done: boolean };
 type ChecklistSection = { title: string; emoji: string; items: ChecklistItem[] };
@@ -113,6 +114,10 @@ export default function ProfileScreen() {
   const [checklist, setChecklist] = useState<ChecklistSection[]>(DEFAULT_CHECKLIST);
   const [showChecklist, setShowChecklist] = useState(false);
 
+  // Offline cache state
+  const [offlineCachedIds, setOfflineCachedIds] = useState<Set<string>>(new Set());
+  const setActiveTrip = useStore(st => st.setActiveTrip);
+
   // Update view once session is restored from SecureStore
   useEffect(() => {
     if (user && view !== 'main') setView('main');
@@ -127,6 +132,13 @@ export default function ProfileScreen() {
   useEffect(() => {
     SecureStore.getItemAsync('trailhead_checklist').then(json => {
       if (json) setChecklist(JSON.parse(json));
+    }).catch(() => {});
+  }, []);
+
+  // Load offline trip index to show cache badges
+  useEffect(() => {
+    getOfflineTripIndex().then(ids => {
+      setOfflineCachedIds(new Set(ids));
     }).catch(() => {});
   }, []);
 
@@ -401,6 +413,49 @@ export default function ProfileScreen() {
             </View>
           );
         })()}
+
+        {/* My Trips — with offline cache badges */}
+        {tripHistory.length > 0 && (
+          <View style={s.tripsCard}>
+            <Text style={s.sectionLabel}>MY TRIPS</Text>
+            {tripHistory.map(t => {
+              const isCached = offlineCachedIds.has(t.trip_id);
+              return (
+                <TouchableOpacity
+                  key={t.trip_id}
+                  style={s.tripRow}
+                  onPress={() => {
+                    if (isCached) {
+                      // Load from offline cache first
+                      loadOfflineTrip(t.trip_id).then(trip => {
+                        if (trip) setActiveTrip(trip, true);
+                      }).catch(() => {});
+                    } else {
+                      // Fetch from server, fall back to offline cache on failure
+                      api.getTrip(t.trip_id).then(trip => setActiveTrip(trip)).catch(async () => {
+                        const cached = await loadOfflineTrip(t.trip_id);
+                        if (cached) setActiveTrip(cached, true);
+                      });
+                    }
+                    router.push('/(tabs)/index');
+                  }}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.tripRowName} numberOfLines={1}>{t.trip_name}</Text>
+                    <Text style={s.tripRowMeta}>{(t.states ?? []).join(' · ')}  ·  {t.duration_days}D  ·  {t.est_miles}MI</Text>
+                  </View>
+                  {isCached && (
+                    <View style={s.offlineBadge}>
+                      <Ionicons name="download-outline" size={10} color="#22c55e" />
+                      <Text style={s.offlineBadgeText}>OFFLINE</Text>
+                    </View>
+                  )}
+                  <Ionicons name="chevron-forward" size={14} color={C.text3} style={{ marginLeft: 4 }} />
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
 
         {/* Quick actions */}
         <ScrollView
@@ -1394,4 +1449,21 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   themeToggleLabel: { color: C.text, fontSize: 13, fontWeight: '700', fontFamily: mono },
   themeToggleSub: { color: C.text2, fontSize: 11, marginTop: 2 },
+
+  // My Trips section
+  tripsCard: {
+    backgroundColor: C.s2, borderRadius: 16, borderWidth: 1, borderColor: C.border, padding: 14,
+  },
+  tripRow: {
+    flexDirection: 'row', alignItems: 'center', paddingVertical: 9,
+    borderBottomWidth: 1, borderColor: C.border + '50',
+  },
+  tripRowName: { color: C.text, fontSize: 13, fontWeight: '700' },
+  tripRowMeta: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
+  offlineBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    backgroundColor: 'rgba(34,197,94,0.12)', borderRadius: 5, borderWidth: 1, borderColor: 'rgba(34,197,94,0.3)',
+    paddingHorizontal: 6, paddingVertical: 3,
+  },
+  offlineBadgeText: { color: '#22c55e', fontSize: 8, fontFamily: mono, fontWeight: '700', letterSpacing: 0.5 },
 });

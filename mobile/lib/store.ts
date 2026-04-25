@@ -47,9 +47,11 @@ interface AppState {
   liveReports: Report[];
   cachedRegions: string[];
   favoriteCamps: CampsitePin[];
+  offlineTripIds: string[];
+  activeTripFromCache: boolean;
   setAuth: (token: string, user: User) => void;
   clearAuth: () => void;
-  setActiveTrip: (trip: TripResult | null) => void;
+  setActiveTrip: (trip: TripResult | null, fromCache?: boolean) => void;
   setRigProfile: (rig: RigProfile) => void;
   addTripToHistory: (item: TripHistoryItem) => void;
   setThemeMode: (mode: 'light' | 'dark') => void;
@@ -60,6 +62,7 @@ interface AppState {
   setLiveReports: (reports: Report[]) => void;
   addCachedRegion: (label: string) => void;
   toggleFavorite: (camp: CampsitePin) => void;
+  setOfflineTripIds: (ids: string[]) => void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -75,6 +78,8 @@ export const useStore = create<AppState>((set) => ({
   liveReports: [],
   cachedRegions: [],
   favoriteCamps: [],
+  offlineTripIds: [],
+  activeTripFromCache: false,
 
   setAuth: (token, user) => {
     SecureStore.setItemAsync('trailhead_token', token);
@@ -86,7 +91,7 @@ export const useStore = create<AppState>((set) => ({
     set({ token: null, user: null, activeTrip: null });
   },
 
-  setActiveTrip: (trip) => set({ activeTrip: trip }),
+  setActiveTrip: (trip, fromCache = false) => set({ activeTrip: trip, activeTripFromCache: fromCache }),
 
   setRigProfile: (rig) => {
     SecureStore.setItemAsync('trailhead_rig', JSON.stringify(rig));
@@ -117,6 +122,8 @@ export const useStore = create<AppState>((set) => ({
     SecureStore.setItemAsync('trailhead_session', id);
     set({ sessionId: id });
   },
+
+  setOfflineTripIds: (ids) => set({ offlineTripIds: ids }),
 
   toggleFavorite: (camp) => set((state) => {
     const exists = state.favoriteCamps.some(f => f.id === camp.id);

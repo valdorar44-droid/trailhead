@@ -245,11 +245,16 @@ function laneArrowIcon(indication: string): string {
 
 // Conversational spoken maneuver label (never all-caps, no abbreviations)
 function stepSpeak(type: string, modifier: string, name?: string): string {
-  if (type === 'arrive') return 'arrive at your destination';
-  if (type === 'depart') return 'proceed toward the route';
-  if (type === 'roundabout') return 'take the roundabout';
-  const m = modifier.toLowerCase();
-  const isExit = name ? /exit|ramp|off.?ramp/i.test(name) : false;
+  const m = (modifier ?? '').toLowerCase();
+  const isExit = name ? /exit|ramp|off.?ramp|i-\d|interstate/i.test(name) : false;
+  if (type === 'arrive')    return 'arrive at your destination';
+  if (type === 'depart')    return 'proceed toward the route';
+  if (type === 'on ramp')   return `take the ramp${m.includes('right') ? ' on your right' : m.includes('left') ? ' on your left' : ''}`;
+  if (type === 'off ramp')  return `take the exit${m.includes('right') ? ' on your right' : m.includes('left') ? ' on your left' : ''}`;
+  if (type === 'merge')     return `merge ${m.includes('right') ? 'right' : m.includes('left') ? 'left' : 'onto the highway'}`;
+  if (type === 'fork')      return `keep ${m.includes('right') ? 'right' : 'left'} at the fork`;
+  if (type === 'roundabout' || type === 'rotary') return 'take the roundabout';
+  if (type === 'end of road') return `turn ${m.includes('right') ? 'right' : 'left'} at the end of the road`;
   if (m === 'uturn')        return 'make a U-turn when safe';
   if (m === 'sharp left')   return 'turn sharply left';
   if (m === 'sharp right')  return 'turn sharply right';
@@ -260,30 +265,67 @@ function stepSpeak(type: string, modifier: string, name?: string): string {
   return 'continue straight';
 }
 
+// Generate lane guidance voice phrase from lane data
+function laneSpeakPhrase(lanes: RouteStep['lanes']): string {
+  if (!lanes?.length) return '';
+  const valid = lanes.filter(l => l.valid);
+  if (!valid.length) return '';
+  const total = lanes.length;
+  const validCount = valid.length;
+  // Determine which side the valid lanes are on
+  const allIndications = valid.flatMap(l => l.indications ?? []);
+  const hasRight  = allIndications.some(i => i.includes('right') || i === 'straight');
+  const hasLeft   = allIndications.some(i => i.includes('left'));
+  const hasStr    = allIndications.some(i => i === 'straight');
+  if (validCount === total) return ''; // all lanes valid — no guidance needed
+  if (hasRight && !hasLeft) {
+    return validCount === 1 ? 'Use the right lane. ' : `Keep right and use the ${validCount === 2 ? 'two right lanes' : 'right lanes'}. `;
+  }
+  if (hasLeft && !hasRight && !hasStr) {
+    return validCount === 1 ? 'Use the left lane. ' : `Keep left and use the ${validCount === 2 ? 'two left lanes' : 'left lanes'}. `;
+  }
+  if (hasStr && !hasRight && !hasLeft) return 'Keep straight. ';
+  return '';
+}
+
 // Build spoken announcement from step — natural, not robotic
 function buildAnnouncement(step: RouteStep, distM: number, phase: 'far' | 'near'): string {
   const type     = step.type     ?? 'turn';
   const modifier = (step.modifier ?? '').toLowerCase();
   const action   = stepSpeak(type, modifier, step.name);
   const road     = step.name ? ` on ${step.name}` : '';
+  const laneHint = phase === 'near' ? laneSpeakPhrase(step.lanes) : '';
+
   if (type === 'arrive') {
     return phase === 'far'
       ? `You'll arrive at your destination in ${speakDist(distM)}.`
       : `You have arrived at your destination.`;
   }
-  // Straight/continue: don't say "continue straight", say "stay on road for X" once
+  // on-ramp / merge / fork types — use specific phrasing
+  if (type === 'on ramp') return phase === 'near' ? `${laneHint}Take the ramp${road}.` : `In ${speakDist(distM)}, take the ramp${road}.`;
+  if (type === 'off ramp') return phase === 'near' ? `${laneHint}Take the exit${road}.` : `In ${speakDist(distM)}, take the exit${road}.`;
+  if (type === 'merge') {
+    const side = modifier.includes('right') ? 'right' : modifier.includes('left') ? 'left' : '';
+    return phase === 'near' ? `Merge ${side}${road}.` : `In ${speakDist(distM)}, merge ${side}${road}.`;
+  }
+  if (type === 'fork') {
+    const side = modifier.includes('right') ? 'right' : modifier.includes('left') ? 'left' : '';
+    return phase === 'near' ? `${laneHint}Keep ${side} at the fork${road}.` : `In ${speakDist(distM)}, keep ${side} at the fork${road}.`;
+  }
+  if (type === 'roundabout' || type === 'rotary') {
+    return phase === 'near' ? `At the roundabout, follow the route.` : `In ${speakDist(distM)}, enter the roundabout.`;
+  }
+  // Straight/continue
   const isStraight = modifier === '' || modifier === 'straight';
-  if (isStraight && type !== 'arrive') {
+  if (isStraight) {
     if (phase === 'far') {
-      return step.name
-        ? `Stay on ${step.name} for ${speakDist(distM)}.`
-        : `Continue for ${speakDist(distM)}.`;
+      return step.name ? `Stay on ${step.name} for ${speakDist(distM)}.` : `Continue for ${speakDist(distM)}.`;
     }
-    return `Keep straight${road}.`;
+    return `${laneHint}Keep straight${road}.`;
   }
   if (phase === 'near') {
-    if (distM < 30) return `${action}${road}.`;
-    return `${action}${road}, in ${speakDist(distM)}.`;
+    if (distM < 30) return `${laneHint}${action}${road}.`;
+    return `${laneHint}${action}${road}, in ${speakDist(distM)}.`;
   }
   return `In ${speakDist(distM)}, ${action}${road}.`;
 }
@@ -852,7 +894,9 @@ const buildMapHtml = (
     }
     if(navActive&&heading!=null&&heading>=0){
       // Only rotate map bearing when actually moving — freezes at stops so map doesn't spin
-      var eOpts={center:[lng,lat],pitch:52,zoom:zoom||17,duration:700};
+      // Duration scales with speed — faster driving needs snappier camera to avoid lag
+      var dur=lastSpeed!=null?(lastSpeed>25?250:lastSpeed>15?350:450):500;
+      var eOpts={center:[lng,lat],pitch:52,zoom:zoom||17,duration:dur,essential:true};
       if(lastSpeed!=null&&lastSpeed>3.5)eOpts.bearing=heading;
       map.easeTo(eOpts);
     }else if(recenter){
@@ -869,8 +913,8 @@ const buildMapHtml = (
         _offRouteStreak++;
         // Require 2 consecutive readings to avoid GPS jitter false-positives
         if(_offRouteStreak>=2){postRN({type:'off_route',lat:lat,lng:lng,dist:Math.round(minD)});}
-        else{postRN({type:'off_route_warn',dist:Math.round(minD)});}
-      }else if(minD>60){_offRouteStreak=0;postRN({type:'off_route_warn',dist:Math.round(minD)});}
+        else{postRN({type:'off_route_warn',lat:lat,lng:lng,dist:Math.round(minD)});}
+      }else if(minD>60){_offRouteStreak=0;postRN({type:'off_route_warn',lat:lat,lng:lng,dist:Math.round(minD)});}
       else{_offRouteStreak=0;postRN({type:'back_on_route'});}
     }
   }
@@ -1413,7 +1457,30 @@ function MapScreen() {
                 const next = si + 1;
                 stepIdxRef.current = next;
                 setStepIdx(next);
-                stepAnnouncedRef.current.delete(next * 2 + 1); // allow near announce for new step
+                // Reset both announcement keys so far+near fire fresh for the new step
+                stepAnnouncedRef.current.delete(next * 2);
+                stepAnnouncedRef.current.delete(next * 2 + 1);
+
+                // "Turn complete" + next maneuver preview — the most important GPS UX moment
+                const nextStep = steps[next];
+                const stepAfter = steps[next + 1];
+                if (nextStep && nextStep.type !== 'arrive' && nextStep.type !== 'depart') {
+                  const contDist = speakDist(nextStep.distance);
+                  if (stepAfter && stepAfter.type !== 'arrive') {
+                    const thenAction = stepSpeak(stepAfter.type, stepAfter.modifier ?? '', stepAfter.name);
+                    const thenRoad   = stepAfter.name ? ` on ${stepAfter.name}` : '';
+                    // Small delay so it doesn't overlap the near-arrival speech that might still be finishing
+                    setTimeout(() => {
+                      Speech.speak(`Continue for ${contDist}, then ${thenAction}${thenRoad}.`, { rate: 0.88, pitch: 1.05, language: 'en-US' });
+                    }, 800);
+                  } else {
+                    setTimeout(() => {
+                      Speech.speak(`Continue for ${contDist}.`, { rate: 0.88, pitch: 1.05, language: 'en-US' });
+                    }, 800);
+                  }
+                  // Mark far key as already spoken so it won't fire again immediately
+                  stepAnnouncedRef.current.add(next * 2);
+                }
               }
             }
           }
@@ -1864,6 +1931,12 @@ function MapScreen() {
       if (msg.type === 'off_route' && navRef.current.active) {
         const now = Date.now();
         if (isReroutingRef.current || now - lastRerouteRef.current < 35000) return;
+        // Never reroute when within 500m of next maneuver — driver is making the turn
+        const curStep = routeStepsRef.current[stepIdxRef.current];
+        if (curStep?.lat != null && msg.lat != null) {
+          const stepDist = haversineKm(msg.lat as number, msg.lng as number, curStep.lat, curStep.lng!) * 1000;
+          if (stepDist < 500) return;
+        }
         // Advance past any waypoints we may have already driven through
         const { wps } = navRef.current;
         let bestIdx = navRef.current.idx;
@@ -1889,6 +1962,12 @@ function MapScreen() {
         Speech.speak('Off route. Recalculating.', { rate: 0.88, pitch: 1.05 });
       }
       if (msg.type === 'off_route_warn' && navRef.current.active && !isReroutingRef.current) {
+        // Suppress warn if within 400m of current maneuver — GPS wobble at intersections is normal
+        const curStep = routeStepsRef.current[stepIdxRef.current];
+        if (curStep?.lat != null && msg.lat != null) {
+          const stepDist = haversineKm(msg.lat as number, msg.lng as number, curStep.lat, curStep.lng!) * 1000;
+          if (stepDist < 400) return;
+        }
         setOffRouteWarn(true);
         if (offRouteWarnTimer.current) clearTimeout(offRouteWarnTimer.current);
         offRouteWarnTimer.current = setTimeout(() => setOffRouteWarn(false), 18000);

@@ -5,6 +5,7 @@ on:
     branches: [master]
     paths:
       - 'mobile/**'
+  workflow_dispatch: # allow manual trigger from GitHub UI or CLI
 
 jobs:
   update:
@@ -34,7 +35,7 @@ jobs:
         run: |
           eas update \
             --channel preview \
-            --message "${{ github.event.head_commit.message }}" \
+            --message "${{ github.event.head_commit.message || 'manual trigger' }}" \
             --non-interactive
 
       - name: Publish to production channel
@@ -42,5 +43,5 @@ jobs:
         run: |
           eas update \
             --channel production \
-            --message "${{ github.event.head_commit.message }}" \
+            --message "${{ github.event.head_commit.message || 'manual trigger' }}" \
             --non-interactive

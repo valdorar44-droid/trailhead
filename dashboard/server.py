@@ -65,24 +65,23 @@ REPORT_CREDIT_PHOTO = 10   # credits for a report with photo
 # ── Anonymous rate limiter ─────────────────────────────────────────────────────
 # Keyed by IP. Buckets reset after ANON_WINDOW_S seconds.
 # Authenticated users bypass this entirely — credits are their limit.
-_ANON_WINDOW_S  = 86_400   # 24-hour rolling window
-_ANON_CHAT_MAX  = 20       # messages per IP per day (enough for 2 full conversations)
-_ANON_PLAN_MAX  = 3        # full trip builds per IP per day
+_ANON_WINDOW_S = 604_800   # 7-day rolling window
+_ANON_LIMITS   = {"chat": 15, "plan": 1, "insight": 1}  # per window
 _anon_buckets: dict[str, dict] = {}
 
 def _anon_check(ip: str, kind: str) -> None:
-    """Raise 429 if the anonymous IP has hit its daily limit for `kind`."""
+    """Raise 429 if the anonymous IP has hit its 7-day limit for `kind`."""
     now = time.time()
     b = _anon_buckets.get(ip)
     if not b or now - b["t"] > _ANON_WINDOW_S:
-        _anon_buckets[ip] = {"t": now, "chat": 0, "plan": 0}
+        _anon_buckets[ip] = {"t": now, **{k: 0 for k in _ANON_LIMITS}}
         b = _anon_buckets[ip]
-    limit = _ANON_PLAN_MAX if kind == "plan" else _ANON_CHAT_MAX
+    limit = _ANON_LIMITS[kind]
     if b[kind] >= limit:
-        reset_in = int(_ANON_WINDOW_S - (now - b["t"])) // 3600
-        raise HTTPException(429, f"Free daily limit reached ({limit} {kind}s/day). "
-                                 f"Sign up on mobile for unlimited planning. "
-                                 f"Resets in ~{reset_in}h.")
+        reset_days = max(1, int((_ANON_WINDOW_S - (now - b["t"])) / 86_400))
+        raise HTTPException(429, f"Free limit reached ({limit} {kind}/week). "
+                                 f"Sign up on mobile for unlimited access. "
+                                 f"Resets in ~{reset_days}d.")
     b[kind] += 1
     # Prune stale IPs periodically to avoid unbounded growth
     if len(_anon_buckets) > 10_000:
@@ -1143,20 +1142,23 @@ class CampsiteInsightRequest(BaseModel):
     description: str = ""; land_type: str = ""; amenities: list[str] = []
 
 @app.post("/api/ai/campsite-insight")
-async def campsite_insight(body: CampsiteInsightRequest, user: dict = Depends(_current_user)):
+async def campsite_insight(request: Request, body: CampsiteInsightRequest, user: dict = Depends(_optional_user)):
     """Generate AI-enriched campsite description with nearby context.
-    Served free from cache; costs credits only on first generation."""
+    Served free from cache; costs credits (auth) or counts against weekly limit (anon) on first generation."""
     if not settings.anthropic_api_key:
         raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
 
     cache_key = f"ai_insight_{body.lat:.3f}_{body.lng:.3f}"
     cached = get_cached("campsite_cache", cache_key, ttl_seconds=3600 * 72)
     if cached:
-        return cached  # free if cached
+        return cached  # free from cache for everyone
 
-    cost = AI_COSTS["campsite_insight"]
-    if not deduct_credits(user["id"], cost, f"Campsite insight — {body.name}"):
-        raise HTTPException(402, f"Not enough credits. Campsite insights cost {cost} credits.")
+    if user:
+        cost = AI_COSTS["campsite_insight"]
+        if not deduct_credits(user["id"], cost, f"Campsite insight — {body.name}"):
+            raise HTTPException(402, f"Not enough credits. Campsite insights cost {cost} credits.")
+    else:
+        _anon_check(request.client.host, "insight")
 
     # Fetch Wikipedia and weather context in parallel
     wiki_task = wikipedia_nearby(body.lat, body.lng, radius=15000, limit=4)
@@ -1176,6 +1178,7 @@ async def campsite_insight(body: CampsiteInsightRequest, user: dict = Depends(_c
             amenities=body.amenities, wiki_context=wiki_ctx, weather_context=weather_ctx,
         )
     except Exception as e:
+        if user: add_credits(user["id"], AI_COSTS["campsite_insight"], "Refund — campsite insight error")
         raise HTTPException(500, str(e))
 
     set_cached("campsite_cache", cache_key, result)

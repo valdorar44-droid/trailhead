@@ -461,10 +461,33 @@ const buildMapHtml = (
   var _routeLoading=false;
   var routeIsProper=false;
   var showLandOverlay=false,showUsgsOverlay=false;
+  var showTerrainLayer=false,showNaipLayer=false,showFireLayer=false,showAvaLayer=false,showRadarLayer=false,showMvumLayer=false,showRoadsLayer=false;
+  var radarFrames=[],radarFrameIdx=0,radarTimer=null;
+  var _mvumTimer=null,_roadsTimer=null;
   var routeOpts={avoidTolls:false,avoidHighways:false,backRoads:false,noFerries:false};
   var _routeCoords=[],routePts=[],breadcrumbPts=[];
   var lastOffCheck=0,downloadActive=false,mapReady=false,pendingMsgs=[];
   var _searchDest=null; // {lat,lng} for single-dest nav so reroute works
+
+  // ── Dynamic layer functions ───────────────────────────────────────────────────
+  function setTerrainLayer(show){showTerrainLayer=show;if(!map||!mapReady)return;if(show){if(!map.getSource('mapbox-dem'))map.addSource('mapbox-dem',{type:'raster-dem',url:'mapbox://mapbox.mapbox-terrain-dem-v1',tileSize:512,maxzoom:14});map.setTerrain({source:'mapbox-dem',exaggeration:1.5});if(!map.getLayer('hillshade'))map.addLayer({id:'hillshade',type:'hillshade',source:'mapbox-dem',paint:{'hillshade-shadow-color':'#473B24','hillshade-illumination-anchor':'viewport','hillshade-exaggeration':0.5}},'waterway-label');}else{if(map.getLayer('hillshade'))map.removeLayer('hillshade');map.setTerrain(null);if(map.getSource('mapbox-dem'))map.removeSource('mapbox-dem');}}
+
+  function setNaipLayer(show){showNaipLayer=show;if(!map||!mapReady)return;if(show){if(!map.getSource('naip'))map.addSource('naip',{type:'raster',tiles:['https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}'],tileSize:256,maxzoom:19,attribution:'USGS NAIP'});if(!map.getLayer('naip-layer'))map.addLayer({id:'naip-layer',type:'raster',source:'naip',paint:{'raster-opacity':0.85}},'waterway-label');}else{if(map.getLayer('naip-layer'))map.removeLayer('naip-layer');if(map.getSource('naip'))map.removeSource('naip');}}
+
+  function setFireLayer(show){showFireLayer=show;if(!map||!mapReady)return;if(show){if(!map.getSource('fires')){map.addSource('fires',{type:'geojson',data:{type:'FeatureCollection',features:[]}});fetch('https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/Current_WildlandFire_Perimeters/FeatureServer/0/query?where=1%3D1&outFields=IncidentName%2CContainment%2CGISAcres&returnGeometry=true&f=geojson&resultRecordCount=500').then(function(r){return r.json();}).then(function(d){if(map.getSource('fires'))map.getSource('fires').setData(d);}).catch(function(){});}if(!map.getLayer('fires-fill'))map.addLayer({id:'fires-fill',type:'fill',source:'fires',paint:{'fill-color':'#dc2626','fill-opacity':0.3}},'waterway-label');if(!map.getLayer('fires-line'))map.addLayer({id:'fires-line',type:'line',source:'fires',paint:{'line-color':'#ef4444','line-width':1.5,'line-opacity':0.85}});}else{['fires-line','fires-fill'].forEach(function(l){if(map.getLayer(l))map.removeLayer(l);});if(map.getSource('fires'))map.removeSource('fires');}}
+
+  function setAvaLayer(show){showAvaLayer=show;if(!map||!mapReady)return;if(show){if(!map.getSource('ava')){map.addSource('ava',{type:'geojson',data:{type:'FeatureCollection',features:[]}});fetch('https://api.avalanche.org/v2/public/products/map-layer').then(function(r){return r.json();}).then(function(d){if(map.getSource('ava'))map.getSource('ava').setData(d);}).catch(function(){});}if(!map.getLayer('ava-fill'))map.addLayer({id:'ava-fill',type:'fill',source:'ava',paint:{'fill-color':['match',['get','danger_level'],'1','#50C878','2','#FFD700','3','#FF8C00','4','#E63946','5','#1a0a0a','#888888'],'fill-opacity':0.45}},'waterway-label');if(!map.getLayer('ava-line'))map.addLayer({id:'ava-line',type:'line',source:'ava',paint:{'line-color':['match',['get','danger_level'],'1','#50C878','2','#FFD700','3','#FF8C00','4','#E63946','5','#1a0a0a','#888888'],'line-width':1.5}});}else{['ava-line','ava-fill'].forEach(function(l){if(map.getLayer(l))map.removeLayer(l);});if(map.getSource('ava'))map.removeSource('ava');}}
+
+  function setRadarLayer(show){showRadarLayer=show;if(!map||!mapReady)return;if(radarTimer){clearInterval(radarTimer);radarTimer=null;}if(map.getLayer('radar-layer'))map.removeLayer('radar-layer');if(map.getSource('radar'))map.removeSource('radar');if(!show)return;fetch('https://api.rainviewer.com/public/weather-maps.json').then(function(r){return r.json();}).then(function(d){radarFrames=(d.radar&&d.radar.past)||[];if(!radarFrames.length)return;radarFrameIdx=radarFrames.length-1;var ts=radarFrames[radarFrameIdx].time;map.addSource('radar',{type:'raster',tiles:['https://tilecache.rainviewer.com/v2/radar/'+ts+'/256/{z}/{x}/{y}/2/1_1.png'],tileSize:256});map.addLayer({id:'radar-layer',type:'raster',source:'radar',paint:{'raster-opacity':0.65}});radarTimer=setInterval(function(){if(!showRadarLayer||!map.getSource('radar'))return;radarFrameIdx=(radarFrameIdx+1)%radarFrames.length;map.getSource('radar').setTiles(['https://tilecache.rainviewer.com/v2/radar/'+radarFrames[radarFrameIdx].time+'/256/{z}/{x}/{y}/2/1_1.png']);},900);}).catch(function(){});}
+
+  function _fetchMvum(){if(!showMvumLayer||!map)return;var b=map.getBounds();var bbox=b.getWest()+','+b.getSouth()+','+b.getEast()+','+b.getNorth();var base='https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_MVUM_01/MapServer/';var rUrl=base+'1/query?where=1%3D1&geometry='+encodeURIComponent(bbox)+'&geometryType=esriGeometryEnvelope&inSR=4326&outSR=4326&outFields=MVUM_NAME%2CSYSTEM%2CPASSENGER_VEHICLE%2CHIGH_CLEARANCE_VEHICLE&returnGeometry=true&f=geojson&resultRecordCount=2000';var tUrl=base+'2/query?where=1%3D1&geometry='+encodeURIComponent(bbox)+'&geometryType=esriGeometryEnvelope&inSR=4326&outSR=4326&outFields=TRAIL_NAME%2CTRAIL_SURFACE&returnGeometry=true&f=geojson&resultRecordCount=2000';Promise.all([fetch(rUrl).then(function(r){return r.json();}),fetch(tUrl).then(function(r){return r.json();})]).then(function(res){if(map.getSource('mvum-roads'))map.getSource('mvum-roads').setData(res[0]);if(map.getSource('mvum-trails'))map.getSource('mvum-trails').setData(res[1]);}).catch(function(){});}
+
+  function setMvumLayer(show){showMvumLayer=show;if(!map||!mapReady)return;if(show){if(!map.getSource('mvum-roads'))map.addSource('mvum-roads',{type:'geojson',data:{type:'FeatureCollection',features:[]}});if(!map.getSource('mvum-trails'))map.addSource('mvum-trails',{type:'geojson',data:{type:'FeatureCollection',features:[]}});if(!map.getLayer('mvum-roads-line'))map.addLayer({id:'mvum-roads-line',type:'line',source:'mvum-roads',paint:{'line-color':['case',['==',['get','PASSENGER_VEHICLE'],'YES'],'#22c55e',['==',['get','HIGH_CLEARANCE_VEHICLE'],'YES'],'#f97316','#ef4444'],'line-width':2.5,'line-opacity':0.85}});if(!map.getLayer('mvum-trails-line'))map.addLayer({id:'mvum-trails-line',type:'line',source:'mvum-trails',paint:{'line-color':'#a855f7','line-width':1.5,'line-opacity':0.8,'line-dasharray':[3,2]}});_fetchMvum();}else{['mvum-trails-line','mvum-roads-line'].forEach(function(l){if(map.getLayer(l))map.removeLayer(l);});['mvum-trails','mvum-roads'].forEach(function(s){if(map.getSource(s))map.removeSource(s);});}}
+
+  function _fetchRoads(){if(!showRoadsLayer||!map||map.getZoom()<9)return;var b=map.getBounds();var bbox=b.getSouth()+','+b.getWest()+','+b.getNorth()+','+b.getEast();var q='[out:json][bbox:'+bbox+'];(way["highway"]["surface"~"unpaved|gravel|dirt|ground|sand|mud"];way["highway"]["4wd_only"="yes"];way["highway"]["smoothness"~"bad|very_bad|horrible|very_horrible|impassable"];);out geom;';fetch('https://overpass-api.de/api/interpreter',{method:'POST',body:'data='+encodeURIComponent(q)}).then(function(r){return r.json();}).then(function(d){var features=(d.elements||[]).filter(function(el){return el.type==='way'&&el.geometry;}).map(function(el){return{type:'Feature',geometry:{type:'LineString',coordinates:el.geometry.map(function(n){return[n.lon,n.lat];})},properties:{surface:(el.tags&&el.tags.surface)||'unpaved',name:(el.tags&&el.tags.name)||''}};});if(map.getSource('oroads'))map.getSource('oroads').setData({type:'FeatureCollection',features:features});}).catch(function(){});}
+
+  function setRoadsLayer(show){showRoadsLayer=show;if(!map||!mapReady)return;if(show){if(!map.getSource('oroads'))map.addSource('oroads',{type:'geojson',data:{type:'FeatureCollection',features:[]}});if(!map.getLayer('oroads-line'))map.addLayer({id:'oroads-line',type:'line',source:'oroads',paint:{'line-color':['match',['get','surface'],'gravel','#eab308','dirt','#f97316','ground','#a16207','sand','#d97706','mud','#92400e','#dc2626'],'line-width':2,'line-opacity':0.9}});_fetchRoads();}else{if(map.getLayer('oroads-line'))map.removeLayer('oroads-line');if(map.getSource('oroads'))map.removeSource('oroads');}}
+
   function postRN(o){try{window.ReactNativeWebView.postMessage(JSON.stringify(o));}catch(e){}}
 
   // ── Offline tile cache via Cache API + fetch intercept ────────────────────────
@@ -570,6 +593,13 @@ const buildMapHtml = (
       updateCampSrc();updateGasSrc();updatePoiSrc();updateRoute();updateBreadcrumb();updateReportMarkers();
       if(showLandOverlay)setLandOverlay(true);
       if(showUsgsOverlay)setUsgsOverlay(true);
+      if(showTerrainLayer)setTerrainLayer(true);
+      if(showNaipLayer)setNaipLayer(true);
+      if(showFireLayer)setFireLayer(true);
+      if(showAvaLayer)setAvaLayer(true);
+      if(showRadarLayer)setRadarLayer(true);
+      if(showMvumLayer)setMvumLayer(true);
+      if(showRoadsLayer)setRoadsLayer(true);
     });
     var boundsTimer;
     map.on('moveend',function(){
@@ -577,6 +607,9 @@ const buildMapHtml = (
       boundsTimer=setTimeout(function(){var b=map.getBounds();postRN({type:'map_bounds',n:b.getNorth(),s:b.getSouth(),e:b.getEast(),w:b.getWest(),zoom:map.getZoom()});},400);
       // Re-sync arrow rotation whenever map bearing changes
       if(userMarker){var svg=userMarker.getElement().querySelector('svg');var hdg=smoothedHdg;if(svg&&hdg>=0){svg.style.transform='rotate('+(hdg-map.getBearing())+'deg)';}}
+      // Refresh viewport-bounded data layers
+      if(showMvumLayer){clearTimeout(_mvumTimer);_mvumTimer=setTimeout(_fetchMvum,700);}
+      if(showRoadsLayer){clearTimeout(_roadsTimer);_roadsTimer=setTimeout(_fetchRoads,700);}
     });
     map.on('click',function(e){
       if(e.defaultPrevented)return;
@@ -886,6 +919,7 @@ const buildMapHtml = (
     if(msg.type==='set_style'&&msg.style){currentStyle=msg.style;map.setStyle(msg.style);}
     if(msg.type==='set_land_overlay')setLandOverlay(!!msg.show);
     if(msg.type==='set_usgs_overlay')setUsgsOverlay(!!msg.show);
+    if(msg.type==='set_layer'){var _s=!!msg.show;if(msg.layer==='terrain')setTerrainLayer(_s);else if(msg.layer==='naip')setNaipLayer(_s);else if(msg.layer==='fire')setFireLayer(_s);else if(msg.layer==='ava')setAvaLayer(_s);else if(msg.layer==='radar')setRadarLayer(_s);else if(msg.layer==='mvum')setMvumLayer(_s);else if(msg.layer==='roads')setRoadsLayer(_s);}
     if(msg.type==='download_tiles_bbox'){if(!downloadActive){downloadActive=true;_dlTiles(msg.n,msg.s,msg.e,msg.w,msg.minZ||10,msg.maxZ||12,!!msg.vectorOnly);}}
     if(msg.type==='download_tiles_route'){if(!downloadActive){downloadActive=true;_dlTilesRoute(msg.bufferKm||20,msg.minZ||10,msg.maxZ||16,!!msg.vectorOnly);}}
     if(msg.type==='download_tiles'){if(!downloadActive){downloadActive=true;var b=map.getBounds();_dlTiles(b.getNorth(),b.getSouth(),b.getEast(),b.getWest(),msg.minZ||10,msg.maxZ||15,!!msg.vectorOnly);}}
@@ -898,6 +932,47 @@ const buildMapHtml = (
 })();
 </script>
 </body></html>`;
+
+// ─── Three-needle compass widget ─────────────────────────────────────────────
+
+function ThreeNeedleCompass({ heading, bearing }: { heading: number | null; bearing: number | null }) {
+  const sz = 46;
+  const half = sz / 2;
+  const nLen = 13;
+  const ringRot = heading !== null ? -heading : 0;
+  const bearRot  = heading !== null && bearing !== null ? bearing - heading : null;
+  return (
+    <View style={{ width: sz, height: sz }}>
+      <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+        borderRadius: half, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' }} />
+      {/* Rotating ring — N label + north needle */}
+      <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+        alignItems: 'center', justifyContent: 'flex-start',
+        transform: [{ rotate: `${ringRot}deg` }] }}>
+        <Text style={{ color: '#ef4444', fontSize: 8, fontWeight: '900', fontFamily: mono, lineHeight: 10, marginTop: 1 }}>N</Text>
+        <View style={{ width: 1.5, height: nLen - 2, backgroundColor: '#ef4444', borderRadius: 1 }} />
+      </View>
+      {/* South side of ring */}
+      <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+        alignItems: 'center', justifyContent: 'flex-end',
+        transform: [{ rotate: `${ringRot}deg` }] }}>
+        <View style={{ width: 1.5, height: 8, backgroundColor: '#374151', borderRadius: 1, marginBottom: 2 }} />
+      </View>
+      {/* Course needle — orange, always points up (direction of travel) */}
+      <View style={{ position: 'absolute', top: half - nLen, left: half - 1, width: 2, height: nLen, backgroundColor: '#f97316', borderRadius: 1 }} />
+      {/* Waypoint bearing needle — blue */}
+      {bearRot !== null && (
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+          alignItems: 'center', justifyContent: 'flex-start',
+          transform: [{ rotate: `${bearRot}deg` }] }}>
+          <View style={{ marginTop: half - nLen, width: 1.5, height: nLen, backgroundColor: '#3b82f6', borderRadius: 1 }} />
+        </View>
+      )}
+      {/* Center pin */}
+      <View style={{ position: 'absolute', top: half - 3, left: half - 3, width: 6, height: 6, borderRadius: 3, backgroundColor: '#fff', zIndex: 10 }} />
+    </View>
+  );
+}
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -1012,6 +1087,16 @@ export default function MapScreen() {
   const offRouteWarnTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showDayModal, setShowDayModal] = useState(false);
   const [tappedWp, setTappedWp] = useState<{ idx: number; wp: WP } | null>(null);
+
+  // Dynamic map layers
+  const [showLayerSheet, setShowLayerSheet] = useState(false);
+  const [layerTerrain, setLayerTerrain] = useState(false);
+  const [layerNaip,    setLayerNaip]    = useState(false);
+  const [layerFire,    setLayerFire]    = useState(false);
+  const [layerAva,     setLayerAva]     = useState(false);
+  const [layerRadar,   setLayerRadar]   = useState(false);
+  const [layerMvum,    setLayerMvum]    = useState(false);
+  const [layerRoads,   setLayerRoads]   = useState(false);
   const [tappedTrail, setTappedTrail] = useState<{ name: string; lat: number; lng: number; cls: string } | null>(null);
 
   const navAnim      = useRef(new Animated.Value(0)).current;
@@ -1835,6 +1920,10 @@ export default function MapScreen() {
     return total;
   }, [navMode, navIdx, distKm, userLoc]);
 
+  function toggleDataLayer(key: string, val: boolean) {
+    webRef.current?.postMessage(JSON.stringify({ type: 'set_layer', layer: key, show: val }));
+  }
+
   function manualReroute() {
     if (!userLoc || !navMode) return;
     const now = Date.now();
@@ -2083,6 +2172,13 @@ export default function MapScreen() {
           onPress={() => setShowOfflineModal(true)}
         >
           <Ionicons name="map-outline" size={18} color={C.text2} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[s.ctrlBtn, showLayerSheet && { backgroundColor: '#6366f1dd', borderColor: '#6366f1' }]}
+          onPress={() => setShowLayerSheet(true)}
+        >
+          <Ionicons name="layers-outline" size={20} color={showLayerSheet ? '#fff' : OVR.text} />
         </TouchableOpacity>
 
         {!navMode && (
@@ -2901,6 +2997,103 @@ export default function MapScreen() {
         </View>
       )}
 
+      {/* ── Layer Sheet ── */}
+      <Modal visible={showLayerSheet} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowLayerSheet(false)}>
+        <View style={s.layerSheet}>
+          <View style={s.layerSheetHeader}>
+            <Text style={s.layerSheetTitle}>MAP LAYERS</Text>
+            <TouchableOpacity onPress={() => setShowLayerSheet(false)}>
+              <Ionicons name="close" size={22} color={C.text2} />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView showsVerticalScrollIndicator={false}>
+            <Text style={s.layerSectionHead}>BASE OVERLAYS</Text>
+            {([
+              { key: 'terrain', label: '3D Terrain + Hillshade', sub: 'Mapbox DEM — elevation + depth shading', icon: 'triangle-outline', val: layerTerrain, set: setLayerTerrain },
+              { key: 'naip',    label: 'USGS Aerial (NAIP)',     sub: 'High-res US aerial photography',          icon: 'earth-outline',    val: layerNaip,    set: setLayerNaip },
+            ] as const).map(l => (
+              <TouchableOpacity key={l.key} style={s.layerRow} onPress={() => { const nv = !l.val; l.set(nv); toggleDataLayer(l.key, nv); }}>
+                <View style={[s.layerRowIcon, l.val && { backgroundColor: '#6366f1' }]}>
+                  <Ionicons name={l.icon as any} size={16} color={l.val ? '#fff' : C.text2} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.layerRowLabel}>{l.label}</Text>
+                  <Text style={s.layerRowSub}>{l.sub}</Text>
+                </View>
+                <View style={[s.layerDot, l.val && { backgroundColor: '#6366f1' }]} />
+              </TouchableOpacity>
+            ))}
+
+            <Text style={s.layerSectionHead}>CONDITIONS</Text>
+            {([
+              { key: 'fire',  label: 'Active Wildfires',   sub: 'NIFC WFIGS — live fire perimeters',       icon: 'flame-outline',      val: layerFire,  set: setLayerFire,  color: '#ef4444' },
+              { key: 'ava',   label: 'Avalanche Zones',    sub: 'Danger 1–5 across all 20 US centers',     icon: 'snow-outline',       val: layerAva,   set: setLayerAva,   color: '#3b82f6' },
+              { key: 'radar', label: 'Rain Radar',         sub: 'RainViewer — animated precipitation',     icon: 'rainy-outline',      val: layerRadar, set: setLayerRadar, color: '#06b6d4' },
+            ] as const).map(l => (
+              <TouchableOpacity key={l.key} style={s.layerRow} onPress={() => { const nv = !l.val; l.set(nv); toggleDataLayer(l.key, nv); }}>
+                <View style={[s.layerRowIcon, l.val && { backgroundColor: l.color }]}>
+                  <Ionicons name={l.icon as any} size={16} color={l.val ? '#fff' : C.text2} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.layerRowLabel}>{l.label}</Text>
+                  <Text style={s.layerRowSub}>{l.sub}</Text>
+                </View>
+                <View style={[s.layerDot, l.val && { backgroundColor: l.color }]} />
+              </TouchableOpacity>
+            ))}
+
+            <Text style={s.layerSectionHead}>ROADS &amp; TRAILS</Text>
+            {([
+              { key: 'mvum',  label: 'MVUM — USFS Roads & Trails', sub: 'Legal vehicle access per USFS designation', icon: 'car-outline',        val: layerMvum,  set: setLayerMvum,  color: '#22c55e' },
+              { key: 'roads', label: 'Road Surface (4WD/Dirt)',    sub: 'OSM gravel/dirt/4WD-only overlay',          icon: 'git-branch-outline', val: layerRoads, set: setLayerRoads, color: '#f97316' },
+            ] as const).map(l => (
+              <TouchableOpacity key={l.key} style={s.layerRow} onPress={() => { const nv = !l.val; l.set(nv); toggleDataLayer(l.key, nv); }}>
+                <View style={[s.layerRowIcon, l.val && { backgroundColor: l.color }]}>
+                  <Ionicons name={l.icon as any} size={16} color={l.val ? '#fff' : C.text2} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.layerRowLabel}>{l.label}</Text>
+                  <Text style={s.layerRowSub}>{l.sub}</Text>
+                </View>
+                <View style={[s.layerDot, l.val && { backgroundColor: l.color }]} />
+              </TouchableOpacity>
+            ))}
+
+            <Text style={s.layerSectionHead}>LEGEND</Text>
+            <View style={{ paddingHorizontal: 16, paddingBottom: 8, gap: 6 }}>
+              {[
+                { color: '#22c55e', label: 'MVUM — Open to all vehicles' },
+                { color: '#f97316', label: 'MVUM — High clearance required' },
+                { color: '#ef4444', label: 'MVUM — Closed / motorized prohibited' },
+                { color: '#a855f7', label: 'MVUM — Designated trail' },
+                { color: '#eab308', label: 'Road surface — Gravel' },
+                { color: '#f97316', label: 'Road surface — Dirt/unpaved' },
+                { color: '#92400e', label: 'Road surface — Mud/difficult' },
+              ].map(l => (
+                <View key={l.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <View style={{ width: 22, height: 4, backgroundColor: l.color, borderRadius: 2 }} />
+                  <Text style={{ color: C.text2, fontSize: 11, fontFamily: mono }}>{l.label}</Text>
+                </View>
+              ))}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                {[
+                  { color: '#50C878', label: 'Low (1)' }, { color: '#FFD700', label: 'Moderate (2)' },
+                  { color: '#FF8C00', label: 'Considerable (3)' }, { color: '#E63946', label: 'High (4)' }, { color: '#1a0a0a', label: 'Extreme (5)' },
+                ].map(a => (
+                  <View key={a.label} style={{ alignItems: 'center', gap: 2 }}>
+                    <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: a.color }} />
+                    <Text style={{ color: C.text3, fontSize: 8, fontFamily: mono }}>{a.label}</Text>
+                  </View>
+                ))}
+              </View>
+              <Text style={{ color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 }}>Avalanche danger levels</Text>
+            </View>
+            <View style={{ height: 40 }} />
+          </ScrollView>
+        </View>
+      </Modal>
+
       {/* ── Navigation HUD ── */}
       <Animated.View style={[s.navHud, {
         opacity: navAnim,
@@ -3030,9 +3223,9 @@ export default function MapScreen() {
             )}
           </View>
 
-          {/* Compass */}
+          {/* Three-needle compass */}
           <View style={s.navBearing}>
-            <Text style={s.navBearingText}>{userHeading !== null ? compassDir(userHeading) : bearing !== null ? compassDir(bearing) : '--'}</Text>
+            <ThreeNeedleCompass heading={userHeading} bearing={bearing} />
           </View>
         </View>
 
@@ -4166,4 +4359,29 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
   },
   wpSheetDayText: { color: OVR.text2, fontSize: 12, fontFamily: mono, fontWeight: '700' },
+
+  // Layer sheet
+  layerSheet: { flex: 1, backgroundColor: C.bg },
+  layerSheetHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 18, paddingTop: 18, paddingBottom: 12,
+    borderBottomWidth: 1, borderBottomColor: C.border,
+  },
+  layerSheetTitle: { color: C.text, fontSize: 14, fontWeight: '900', fontFamily: mono, letterSpacing: 1 },
+  layerSectionHead: {
+    color: C.text3, fontSize: 10, fontWeight: '800', fontFamily: mono, letterSpacing: 1.5,
+    paddingHorizontal: 16, paddingTop: 18, paddingBottom: 8,
+  },
+  layerRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingHorizontal: 16, paddingVertical: 12,
+    borderBottomWidth: 1, borderBottomColor: C.border + '40',
+  },
+  layerRowIcon: {
+    width: 34, height: 34, borderRadius: 10, backgroundColor: C.s2,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  layerRowLabel: { color: C.text, fontSize: 13, fontFamily: mono, fontWeight: '700' },
+  layerRowSub:   { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
+  layerDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: C.border },
 });

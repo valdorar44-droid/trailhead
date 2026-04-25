@@ -126,6 +126,17 @@ def init_db():
             messages    TEXT NOT NULL,
             updated_at  INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS bug_reports (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id     INTEGER,
+            username    TEXT,
+            title       TEXT NOT NULL,
+            description TEXT NOT NULL,
+            app_version TEXT,
+            status      TEXT NOT NULL DEFAULT 'open',
+            credits_awarded INTEGER NOT NULL DEFAULT 0,
+            created_at  INTEGER NOT NULL
+        );
     """)
     # Non-destructive column additions for existing deployments
     for sql in [
@@ -690,6 +701,45 @@ def get_all_pins(limit: int = 100) -> list:
 def delete_pin(pin_id: int):
     db = _conn()
     db.execute("DELETE FROM community_pins WHERE id=?", (pin_id,))
+    db.commit(); db.close()
+
+def submit_bug_report(user_id: int | None, username: str | None, title: str, description: str, app_version: str = '') -> int:
+    db = _conn()
+    cur = db.execute(
+        "INSERT INTO bug_reports (user_id,username,title,description,app_version,created_at) VALUES (?,?,?,?,?,?)",
+        (user_id, username, title, description, app_version, int(time.time()))
+    )
+    bug_id = cur.lastrowid
+    db.commit(); db.close()
+    return bug_id
+
+def get_all_bug_reports(status: str | None = None) -> list:
+    db = _conn()
+    if status:
+        rows = db.execute(
+            "SELECT * FROM bug_reports WHERE status=? ORDER BY created_at DESC", (status,)
+        ).fetchall()
+    else:
+        rows = db.execute("SELECT * FROM bug_reports ORDER BY created_at DESC").fetchall()
+    db.close()
+    return [dict(r) for r in rows]
+
+def award_bug_credits(bug_id: int, credits: int) -> dict:
+    db = _conn()
+    bug = db.execute("SELECT * FROM bug_reports WHERE id=?", (bug_id,)).fetchone()
+    if not bug:
+        db.close(); raise ValueError("Bug report not found")
+    db.execute("UPDATE bug_reports SET status='resolved', credits_awarded=? WHERE id=?", (credits, bug_id))
+    if bug['user_id'] and credits > 0:
+        db.execute("UPDATE users SET credits=credits+? WHERE id=?", (credits, bug['user_id']))
+        db.execute("INSERT INTO credit_transactions (user_id,amount,reason,created_at) VALUES (?,?,?,?)",
+                   (bug['user_id'], credits, f"Bug report reward #{bug_id}", int(time.time())))
+    db.commit(); db.close()
+    return {"bug_id": bug_id, "credits_awarded": credits}
+
+def dismiss_bug_report(bug_id: int):
+    db = _conn()
+    db.execute("UPDATE bug_reports SET status='dismissed' WHERE id=?", (bug_id,))
     db.commit(); db.close()
 
 def ensure_admin_user(email: str, username: str, password_hash: str):

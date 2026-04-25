@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  TextInput, Alert, Share, Linking, ActivityIndicator, Image,
+  TextInput, Alert, Share, Linking, ActivityIndicator, Image, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -70,6 +70,11 @@ export default function ProfileScreen() {
   const [buyingPkg, setBuyingPkg] = useState<string | null>(null);
   const [gpxImporting, setGpxImporting] = useState(false);
   const [gpxResult, setGpxResult] = useState('');
+  const [showBugModal, setShowBugModal] = useState(false);
+  const [bugTitle, setBugTitle] = useState('');
+  const [bugDesc, setBugDesc] = useState('');
+  const [bugSubmitting, setBugSubmitting] = useState(false);
+  const [bugSent, setBugSent] = useState(false);
 
   const [editingRig, setEditingRig] = useState(false);
   const [rigDraft, setRigDraft] = useState<RigProfile>(rigProfile ?? DEFAULT_RIG);
@@ -139,6 +144,18 @@ export default function ProfileScreen() {
     } finally {
       setBuyingPkg(null);
     }
+  }
+
+  async function submitBug() {
+    if (!bugTitle.trim() || !bugDesc.trim()) { Alert.alert('Fill in both fields'); return; }
+    setBugSubmitting(true);
+    try {
+      await api.submitBugReport({ title: bugTitle.trim(), description: bugDesc.trim(), app_version: '1.0' });
+      setBugSent(true);
+      setBugTitle(''); setBugDesc('');
+      setTimeout(() => { setShowBugModal(false); setBugSent(false); }, 2500);
+    } catch (e: any) { Alert.alert('Submission failed', e.message); }
+    finally { setBugSubmitting(false); }
   }
 
   function shareReferral() {
@@ -561,6 +578,77 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* Bug Report */}
+        <TouchableOpacity style={s.bugCard} onPress={() => setShowBugModal(true)}>
+          <View style={s.bugCardLeft}>
+            <Ionicons name="bug-outline" size={20} color={C.red} />
+            <View style={{ flex: 1 }}>
+              <Text style={s.bugCardTitle}>Found a bug?</Text>
+              <Text style={s.bugCardSub}>Report it and earn credits if it's legit</Text>
+            </View>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color={C.text3} />
+        </TouchableOpacity>
+
+        {/* Bug report modal */}
+        <Modal visible={showBugModal} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowBugModal(false)}>
+          <SafeAreaView style={[s.container, { padding: 0 }]}>
+            <View style={s.bugModal}>
+              <View style={s.bugModalHeader}>
+                <Text style={s.bugModalTitle}>Report a Bug</Text>
+                <TouchableOpacity onPress={() => setShowBugModal(false)}>
+                  <Ionicons name="close" size={22} color={C.text3} />
+                </TouchableOpacity>
+              </View>
+
+              {bugSent ? (
+                <View style={s.bugSentWrap}>
+                  <Ionicons name="checkmark-circle" size={52} color={C.green} />
+                  <Text style={s.bugSentTitle}>Report received!</Text>
+                  <Text style={s.bugSentSub}>We'll review it. If it's a real bug you'll earn credits — thanks for helping make Trailhead better.</Text>
+                </View>
+              ) : (
+                <>
+                  <View style={s.bugCreditBanner}>
+                    <Ionicons name="flash" size={14} color={C.orange} />
+                    <Text style={s.bugCreditText}>Verified bugs earn generous credits. You must be logged in to receive them.</Text>
+                  </View>
+                  <Text style={s.bugFieldLabel}>WHAT WENT WRONG</Text>
+                  <TextInput
+                    style={s.bugTitleInput}
+                    placeholder="Short summary (e.g. Map crashes when tapping Day 2 route)"
+                    placeholderTextColor={C.text3}
+                    value={bugTitle}
+                    onChangeText={setBugTitle}
+                    maxLength={120}
+                  />
+                  <Text style={s.bugFieldLabel}>DETAILS</Text>
+                  <TextInput
+                    style={s.bugDescInput}
+                    placeholder="Steps to reproduce, what you expected vs what happened, how often it occurs..."
+                    placeholderTextColor={C.text3}
+                    value={bugDesc}
+                    onChangeText={setBugDesc}
+                    multiline
+                    maxLength={1000}
+                    textAlignVertical="top"
+                  />
+                  <TouchableOpacity
+                    style={[s.bugSubmitBtn, bugSubmitting && { opacity: 0.6 }]}
+                    onPress={submitBug}
+                    disabled={bugSubmitting}
+                  >
+                    {bugSubmitting
+                      ? <ActivityIndicator size="small" color="#fff" />
+                      : <><Ionicons name="send-outline" size={15} color="#fff" /><Text style={s.bugSubmitText}>SUBMIT REPORT</Text></>
+                    }
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+          </SafeAreaView>
+        </Modal>
+
         {/* Referral */}
         <View style={s.referralCard}>
           <View style={s.referralHeader}>
@@ -824,6 +912,42 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   earnRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 5 },
   earnAmount: { color: C.green, fontSize: 13, fontWeight: '800', fontFamily: mono, width: 40 },
   earnAction: { color: C.text2, fontSize: 13 },
+
+  bugCard: {
+    backgroundColor: C.s2, borderRadius: 16, borderWidth: 1, borderColor: C.border,
+    padding: 14, flexDirection: 'row', alignItems: 'center', gap: 10,
+  },
+  bugCardLeft: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  bugCardTitle: { color: C.text, fontSize: 14, fontWeight: '700' },
+  bugCardSub: { color: C.text3, fontSize: 11, marginTop: 1 },
+  bugModal: { flex: 1, padding: 20, gap: 12 },
+  bugModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
+  bugModalTitle: { color: C.text, fontSize: 18, fontWeight: '800' },
+  bugCreditBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: C.orangeGlow, borderRadius: 10, borderWidth: 1, borderColor: C.orange,
+    paddingHorizontal: 12, paddingVertical: 10,
+  },
+  bugCreditText: { color: C.orange, fontSize: 12.5, flex: 1, lineHeight: 18 },
+  bugFieldLabel: { color: C.text3, fontSize: 9, fontFamily: mono, letterSpacing: 1, marginBottom: 4, marginTop: 4 },
+  bugTitleInput: {
+    backgroundColor: C.s2, borderWidth: 1.5, borderColor: C.border,
+    borderRadius: 12, padding: 13, color: C.text, fontSize: 14,
+  },
+  bugDescInput: {
+    backgroundColor: C.s2, borderWidth: 1.5, borderColor: C.border,
+    borderRadius: 12, padding: 13, color: C.text, fontSize: 14,
+    minHeight: 140,
+  },
+  bugSubmitBtn: {
+    backgroundColor: C.orange, borderRadius: 12, padding: 15,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    marginTop: 4,
+  },
+  bugSubmitText: { color: '#fff', fontSize: 13, fontFamily: mono, fontWeight: '800', letterSpacing: 0.5 },
+  bugSentWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16, padding: 20 },
+  bugSentTitle: { color: C.text, fontSize: 22, fontWeight: '800' },
+  bugSentSub: { color: C.text3, fontSize: 14, textAlign: 'center', lineHeight: 22 },
 
   themeToggle: {
     backgroundColor: C.s1, borderRadius: 14, borderWidth: 1, borderColor: C.border,

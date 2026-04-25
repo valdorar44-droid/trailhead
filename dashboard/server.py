@@ -31,6 +31,7 @@ from db.store import (
     get_platform_stats, get_all_users, set_user_admin, ban_user,
     get_all_reports, expire_report, delete_report,
     get_all_trips, get_all_pins, delete_pin, ensure_admin_user,
+    submit_bug_report, get_all_bug_reports, award_bug_credits, dismiss_bug_report,
     get_trail_dna, save_trail_dna, get_conversation, save_conversation, clear_conversation,
 )
 
@@ -874,6 +875,38 @@ async def admin_pins(admin: dict = Depends(_require_admin)):
 @app.delete("/api/admin/pins/{pin_id}")
 async def admin_delete_pin(pin_id: int, admin: dict = Depends(_require_admin)):
     delete_pin(pin_id)
+    return {"ok": True}
+
+
+# ── Bug reports ───────────────────────────────────────────────────────────────
+
+class BugReportPayload(BaseModel):
+    title: str
+    description: str
+    app_version: Optional[str] = ""
+
+@app.post("/api/bugs")
+async def submit_bug(body: BugReportPayload, user: dict = Depends(_current_user)):
+    if not body.title.strip() or not body.description.strip():
+        raise HTTPException(400, "Title and description are required.")
+    bug_id = submit_bug_report(
+        user_id=user["id"], username=user["username"],
+        title=body.title.strip(), description=body.description.strip(),
+        app_version=body.app_version or ""
+    )
+    return {"bug_id": bug_id, "message": "Bug report received. If it's legit you'll earn credits — thank you!"}
+
+@app.get("/api/admin/bugs")
+async def admin_get_bugs(status: Optional[str] = None, admin: dict = Depends(_require_admin)):
+    return get_all_bug_reports(status)
+
+@app.post("/api/admin/bugs/{bug_id}/award")
+async def admin_award_bug(bug_id: int, credits: int, admin: dict = Depends(_require_admin)):
+    return award_bug_credits(bug_id, credits)
+
+@app.post("/api/admin/bugs/{bug_id}/dismiss")
+async def admin_dismiss_bug(bug_id: int, admin: dict = Depends(_require_admin)):
+    dismiss_bug_report(bug_id)
     return {"ok": True}
 
 

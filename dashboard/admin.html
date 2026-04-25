@@ -152,6 +152,9 @@ td.name{color:var(--text);font-weight:600;}
       <div class="nav-item" onclick="showPage('pins',this)">
         <span class="nav-icon">📍</span><span class="nav-label">Pins</span>
       </div>
+      <div class="nav-item" onclick="showPage('bugs',this)">
+        <span class="nav-icon">🐛</span><span class="nav-label">Bug Reports</span>
+      </div>
     </nav>
     <main class="content">
 
@@ -264,6 +267,20 @@ td.name{color:var(--text);font-weight:600;}
         </div>
       </div>
 
+      <!-- Bug Reports -->
+      <div class="page" id="page-bugs">
+        <div class="page-title">Bug Reports</div>
+        <div class="page-sub">User-submitted bug reports. Award credits for legitimate bugs.</div>
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap;">
+          <button class="btn btn-ghost" onclick="loadBugs()">Refresh</button>
+          <button class="btn btn-ghost" onclick="loadBugs('open')" id="bug-filter-open">Open</button>
+          <button class="btn btn-ghost" onclick="loadBugs('resolved')" id="bug-filter-resolved">Resolved</button>
+          <button class="btn btn-ghost" onclick="loadBugs('dismissed')" id="bug-filter-dismissed">Dismissed</button>
+          <span id="bug-count" style="margin-left:4px;color:var(--text3);font-size:12px;font-family:var(--mono);"></span>
+        </div>
+        <div id="bugs-list" style="display:flex;flex-direction:column;gap:12px;"></div>
+      </div>
+
     </main>
   </div>
 </div>
@@ -364,6 +381,7 @@ function showPage(name, el) {
   if (name === 'reports')  loadReports();
   if (name === 'trips')    loadTrips();
   if (name === 'pins')     loadPins();
+  if (name === 'bugs')     loadBugs();
 }
 
 // ── API helper ───────────────────────────────────────────────────────────────
@@ -640,6 +658,72 @@ async function deletePin(id) {
     await api(`/api/admin/pins/${id}`, {method:'DELETE'});
     toast('Pin deleted', 'ok');
     loadPins();
+  } catch(e) { toast('Error: ' + e.message, 'err'); }
+}
+
+// ── Bug Reports ───────────────────────────────────────────────────────────────
+
+async function loadBugs(status) {
+  try {
+    const url = status ? `/api/admin/bugs?status=${status}` : '/api/admin/bugs';
+    const bugs = await api(url);
+    document.getElementById('bug-count').textContent = `${bugs.length} reports`;
+    const list = document.getElementById('bugs-list');
+    if (!bugs.length) {
+      list.innerHTML = '<div style="color:var(--text3);text-align:center;padding:32px;font-family:var(--mono);font-size:12px;">No bug reports yet</div>';
+      return;
+    }
+    const statusColor = { open: 'var(--orange)', resolved: 'var(--green)', dismissed: 'var(--text3)' };
+    list.innerHTML = bugs.map(b => {
+      const date = new Date(b.created_at * 1000).toLocaleString();
+      const col = statusColor[b.status] || 'var(--text3)';
+      return `<div class="card" style="border-left:3px solid ${col};">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;">
+          <div style="flex:1;">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+              <span style="font-weight:700;font-size:15px;">${esc(b.title)}</span>
+              <span style="font-size:10px;font-family:var(--mono);color:${col};text-transform:uppercase;border:1px solid ${col};padding:2px 7px;border-radius:20px;">${b.status}</span>
+              ${b.credits_awarded > 0 ? `<span style="font-size:10px;font-family:var(--mono);color:var(--green);">+${b.credits_awarded} cr awarded</span>` : ''}
+            </div>
+            <div style="color:var(--text2);font-size:13px;line-height:1.6;white-space:pre-wrap;margin-bottom:10px;">${esc(b.description)}</div>
+            <div style="display:flex;gap:16px;font-size:11px;font-family:var(--mono);color:var(--text3);">
+              <span>👤 ${b.username ? esc(b.username) : 'anonymous'}</span>
+              ${b.app_version ? `<span>v${esc(b.app_version)}</span>` : ''}
+              <span>${date}</span>
+              <span>#${b.id}</span>
+            </div>
+          </div>
+          ${b.status === 'open' ? `
+          <div style="display:flex;flex-direction:column;gap:8px;min-width:160px;">
+            <div style="display:flex;gap:6px;align-items:center;">
+              <input id="bug-credits-${b.id}" type="number" class="filter-input" placeholder="Credits" value="100" style="width:80px;">
+              <button class="btn btn-sm" style="background:var(--green);color:#fff;border-color:var(--green);" onclick="awardBug(${b.id})">Award</button>
+            </div>
+            <button class="btn btn-ghost btn-sm" onclick="dismissBug(${b.id})">Dismiss</button>
+          </div>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) { toast('Error loading bugs: ' + e.message, 'err'); }
+}
+
+async function awardBug(id) {
+  const credits = parseInt(document.getElementById(`bug-credits-${id}`)?.value || '100');
+  if (!credits || credits < 1) { toast('Enter a valid credit amount', 'err'); return; }
+  if (!confirm(`Award ${credits} credits for this bug report?`)) return;
+  try {
+    await api(`/api/admin/bugs/${id}/award?credits=${credits}`, { method: 'POST' });
+    toast(`Awarded ${credits} credits!`, 'ok');
+    loadBugs();
+  } catch(e) { toast('Error: ' + e.message, 'err'); }
+}
+
+async function dismissBug(id) {
+  if (!confirm('Dismiss this bug report?')) return;
+  try {
+    await api(`/api/admin/bugs/${id}/dismiss`, { method: 'POST' });
+    toast('Bug dismissed', 'ok');
+    loadBugs();
   } catch(e) { toast('Error: ' + e.message, 'err'); }
 }
 

@@ -100,6 +100,9 @@ export const api = {
     req<RouteBrief>('/api/ai/route-brief', { method: 'POST', body: JSON.stringify(data) }),
   getPackingList: (data: PackingRequest) =>
     req<PackingList>('/api/ai/packing-list', { method: 'POST', body: JSON.stringify(data) }),
+
+  submitBugReport: (data: { title: string; description: string; app_version?: string }) =>
+    req<{ bug_id: number; message: string }>('/api/bugs', { method: 'POST', body: JSON.stringify(data) }),
 };
 
 export interface TrailDNA {

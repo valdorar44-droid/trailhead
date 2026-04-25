@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useMemo, Component } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Linking, Animated, TextInput, ActivityIndicator, Modal, Image, Share, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Linking, Animated, TextInput, ActivityIndicator, Modal, Image, Share, Alert, AppState } from 'react-native';
 import { WebView } from 'react-native-webview';
 import * as Location from 'expo-location';
 import * as SecureStore from 'expo-secure-store';
@@ -11,6 +11,7 @@ const _keepAwake = (() => { try { return require('expo-keep-awake'); } catch { r
 const activateKeepAwakeAsync = () => _keepAwake ? _keepAwake.activateKeepAwakeAsync() : Promise.resolve();
 const deactivateKeepAwake    = () => _keepAwake && _keepAwake.deactivateKeepAwake();
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { useStore } from '@/lib/store';
 import { api, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck } from '@/lib/api';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
@@ -436,9 +437,11 @@ const buildMapHtml = (
   .mk-wp.nav-target.wp-camp{color:#14b8a6;}
   @keyframes pulse{0%,100%{box-shadow:0 0 0 4px rgba(249,115,22,0.45);}50%{box-shadow:0 0 0 12px rgba(249,115,22,0.1);}}
   .mk-me{width:44px;height:44px;display:flex;align-items:center;justify-content:center;position:relative;pointer-events:none;}
-  .mk-me-ring{position:absolute;width:44px;height:44px;border-radius:50%;background:rgba(249,115,22,0.1);border:1.5px solid rgba(249,115,22,0.4);animation:loc-pulse 2s ease-in-out infinite;}
+  .mk-me-ring{position:absolute;width:44px;height:44px;border-radius:50%;background:rgba(249,115,22,0.1);border:1.5px solid rgba(249,115,22,0.4);animation:loc-pulse 2s ease-in-out infinite;transition:opacity 0.4s,width 0.4s,height 0.4s;}
   .mk-me-arrow{filter:drop-shadow(0 2px 5px rgba(0,0,0,0.6)) drop-shadow(0 0 8px rgba(249,115,22,0.6));}
   @keyframes loc-pulse{0%,100%{transform:scale(1);opacity:0.9;}50%{transform:scale(1.7);opacity:0.15;}}
+  /* In nav mode: shrink ring to a tight clean outline, no pulsing */
+  .mk-me.nav-active .mk-me-ring{animation:none;width:28px;height:28px;opacity:0.5;background:transparent;}
   .mk-search{background:rgba(59,130,246,0.2);border:2.5px solid #3b82f6;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:17px;}
   /* search-this-area button moved to React Native for reliable touch handling */
   #loading{position:fixed;top:0;left:0;right:0;bottom:0;background:#080c12;display:flex;align-items:center;justify-content:center;z-index:200;flex-direction:column;gap:12px;}
@@ -620,11 +623,13 @@ const buildMapHtml = (
     map.on('moveend',function(){
       clearTimeout(boundsTimer);
       boundsTimer=setTimeout(function(){var b=map.getBounds();postRN({type:'map_bounds',n:b.getNorth(),s:b.getSouth(),e:b.getEast(),w:b.getWest(),zoom:map.getZoom()});},400);
-      // Re-sync arrow rotation whenever map bearing changes
       if(userMarker){var svg=userMarker.getElement().querySelector('svg');var hdg=smoothedHdg;if(svg&&hdg>=0){svg.style.transform='rotate('+(hdg-map.getBearing())+'deg)';}}
-      // Refresh viewport-bounded data layers
       if(showMvumLayer){clearTimeout(_mvumTimer);_mvumTimer=setTimeout(_fetchMvum,700);}
       if(showRoadsLayer){clearTimeout(_roadsTimer);_roadsTimer=setTimeout(_fetchRoads,700);}
+    });
+    // Continuous compass re-sync while map is rotating (nav mode bearing chase)
+    map.on('rotate',function(){
+      if(userMarker&&smoothedHdg>=0){var svg=userMarker.getElement().querySelector('svg');if(svg)svg.style.transform='rotate('+(smoothedHdg-map.getBearing())+'deg)';}
     });
     map.on('click',function(e){
       if(e.defaultPrevented)return;
@@ -688,6 +693,7 @@ const buildMapHtml = (
     if(!map.getSource('gas'))map.addSource('gas',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
     if(!map.getSource('pois'))map.addSource('pois',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
     if(!map.getSource('route'))map.addSource('route',{type:'geojson',data:{type:'Feature',geometry:{type:'LineString',coordinates:[]}}});
+    if(!map.getSource('route-passed'))map.addSource('route-passed',{type:'geojson',data:{type:'Feature',geometry:{type:'LineString',coordinates:[]}}});
     if(!map.getSource('breadcrumb'))map.addSource('breadcrumb',{type:'geojson',data:{type:'Feature',geometry:{type:'LineString',coordinates:[]}}});
   }
 
@@ -697,6 +703,8 @@ const buildMapHtml = (
     _a('breadcrumb',{id:'breadcrumb',type:'line',source:'breadcrumb',paint:{'line-color':'#3b82f6','line-width':2.5,'line-opacity':0.8,'line-dasharray':[2,4]}});
     _a('route-shadow',{id:'route-shadow',type:'line',source:'route',layout:{'line-cap':'round','line-join':'round'},paint:{'line-color':'rgba(0,0,0,0.35)','line-width':9,'line-blur':5,'line-translate':[0,2]}});
     _a('route-line',{id:'route-line',type:'line',source:'route',layout:{'line-cap':'round','line-join':'round'},paint:{'line-color':'#f97316','line-width':5,'line-opacity':0.94}});
+    /* Dimmed overlay for segments already driven — renders on top of route-line */
+    _a('route-passed-line',{id:'route-passed-line',type:'line',source:'route-passed',layout:{'line-cap':'round','line-join':'round'},paint:{'line-color':'#374151','line-width':5,'line-opacity':0.72}});
     _a('gas-circle',{id:'gas-circle',type:'circle',source:'gas',paint:{'circle-radius':9,'circle-color':'#eab308','circle-opacity':0.92,'circle-stroke-width':2,'circle-stroke-color':'#fff'}});
     _a('gas-label',{id:'gas-label',type:'symbol',source:'gas',filter:['>=',['zoom'],13],layout:{'text-field':['get','name'],'text-size':9,'text-offset':[0,1.5],'text-anchor':'top'},paint:{'text-color':'#f1f5f9','text-halo-color':'rgba(0,0,0,0.85)','text-halo-width':1.5}});
     _a('poi-circle',{id:'poi-circle',type:'circle',source:'pois',paint:{'circle-radius':['case',['==',['get','type'],'peak'],9,8],'circle-color':['match',['get','type'],'water','#3b82f6','trailhead','#22c55e','viewpoint','#a855f7','peak','#92400e','#6b7280'],'circle-opacity':0.9,'circle-stroke-width':1.5,'circle-stroke-color':'#fff'}});
@@ -745,6 +753,26 @@ const buildMapHtml = (
   function updatePoiSrc(){if(!map||!map.getSource('pois'))return;map.getSource('pois').setData({type:'FeatureCollection',features:allPois.map(function(p){return{type:'Feature',geometry:{type:'Point',coordinates:[p.lng,p.lat]},properties:{name:p.name,type:p.type||'pin'}};})});}
   function updateRoute(){if(!map||!map.getSource('route'))return;map.getSource('route').setData({type:'Feature',geometry:{type:'LineString',coordinates:_routeCoords}});}
   function updateBreadcrumb(){if(!map||!map.getSource('breadcrumb'))return;map.getSource('breadcrumb').setData({type:'Feature',geometry:{type:'LineString',coordinates:breadcrumbPts}});}
+
+  var _passedRouteIdx=0,_passedRouteCoords=[];
+  function resetPassedRoute(){_passedRouteIdx=0;_passedRouteCoords=[];if(map&&map.getSource('route-passed'))map.getSource('route-passed').setData({type:'Feature',geometry:{type:'LineString',coordinates:[]}});}
+  function updatePassedRoute(lat,lng){
+    if(!navActive||!_routeCoords.length||!routeIsProper)return;
+    var searchEnd=Math.min(_routeCoords.length-1,_passedRouteIdx+80);
+    var bestIdx=_passedRouteIdx,bestD=Infinity;
+    for(var i=_passedRouteIdx;i<=searchEnd;i++){
+      var dlat=(_routeCoords[i][1]-lat)*111000;
+      var dlng=(_routeCoords[i][0]-lng)*111000*Math.cos(lat*Math.PI/180);
+      var d=Math.sqrt(dlat*dlat+dlng*dlng);
+      if(d<bestD){bestD=d;bestIdx=i;}
+      if(d<15)break;
+    }
+    if(bestIdx>_passedRouteIdx){
+      _passedRouteIdx=bestIdx;
+      _passedRouteCoords=_routeCoords.slice(0,bestIdx+1);
+      if(map&&map.getSource('route-passed'))map.getSource('route-passed').setData({type:'Feature',geometry:{type:'LineString',coordinates:_passedRouteCoords}});
+    }
+  }
   var REP_ICONS={police:'🚔',hazard:'⚠️',road_condition:'🛑',wildlife:'🐾',campsite:'⛺',road_closure:'🚧',water:'💧'};
   function repTimeAgo(ts){if(!ts)return'';var m=Math.floor((Date.now()/1000-ts)/60);if(m<2)return'just now';if(m<60)return m+'m ago';var h=Math.floor(m/60);if(h<24)return h+'h ago';return Math.floor(h/24)+'d ago';}
   function escHTML(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
@@ -808,35 +836,42 @@ const buildMapHtml = (
   // ── User position ──────────────────────────────────────────────────────────────
   var navActive=false;
   var smoothedHdg=-1; // last known heading for arrow re-sync on map bearing changes
+  var _offRouteStreak=0; // consecutive off-route readings before firing reroute
+  var _wakeLock=null;
   function setUserPos(lat,lng,recenter,zoom,heading){
     if(!userMarker){
       var el=document.createElement('div');el.className='mk-me';
       el.innerHTML='<div class="mk-me-ring"></div><svg class="mk-me-arrow" width="24" height="32" viewBox="0 0 24 32" style="transition:transform 0.6s ease"><path d="M12 1 L23 29 L12 22 L1 29 Z" fill="#f97316" stroke="white" stroke-width="1.5" stroke-linejoin="round"/></svg>';
       userMarker=new mapboxgl.Marker({element:el,anchor:'center'}).setLngLat([lng,lat]).addTo(map);
     }else{userMarker.setLngLat([lng,lat]);}
-    // Rotate the arrow to face the true heading, compensating for map bearing so
-    // it always points in the real-world direction regardless of map rotation mode.
+    // Rotate the arrow to face the true heading, compensating for map bearing
     if(heading!=null&&heading>=0){
       smoothedHdg=heading;
       var svg=userMarker.getElement().querySelector('svg');
       if(svg){var mapBrg=map?map.getBearing():0;svg.style.transform='rotate('+(heading-mapBrg)+'deg)';}
     }
     if(navActive&&heading!=null&&heading>=0){
-      // Only rotate map bearing when actually moving — freezes bearing at lights/stops so map doesn't spin
+      // Only rotate map bearing when actually moving — freezes at stops so map doesn't spin
       var eOpts={center:[lng,lat],pitch:52,zoom:zoom||17,duration:700};
       if(lastSpeed!=null&&lastSpeed>3.5)eOpts.bearing=heading;
       map.easeTo(eOpts);
     }else if(recenter){
       map.easeTo({center:[lng,lat],zoom:zoom||15,duration:500});
     }
+    // Update passed-route dimming
+    updatePassedRoute(lat,lng);
     var now=Date.now();
-    // Only check off-route when: route exists + is a real routed path + not mid-load + moving
-    if(routePts.length>0&&routeIsProper&&!_routeLoading&&now-lastOffCheck>8000&&(lastSpeed==null||lastSpeed>1.5)){
+    // Off-route check: only when route loaded + moving + 10s cooldown
+    if(routePts.length>0&&routeIsProper&&!_routeLoading&&now-lastOffCheck>10000&&(lastSpeed==null||lastSpeed>2)){
       lastOffCheck=now;var minD=Infinity;
-      for(var i=0;i<routePts.length;i++){var dlat=(routePts[i][1]-lat)*111000;var dlng=(routePts[i][0]-lng)*111000*Math.cos(lat*Math.PI/180);var d=Math.sqrt(dlat*dlat+dlng*dlng);if(d<minD)minD=d;if(minD<60)break;}
-      if(minD>200){postRN({type:'off_route',lat:lat,lng:lng,dist:Math.round(minD)});}
-      else if(minD>30){postRN({type:'off_route_warn',dist:Math.round(minD)});}
-      else{postRN({type:'back_on_route'});}
+      for(var i=0;i<routePts.length;i++){var dlat=(routePts[i][1]-lat)*111000;var dlng=(routePts[i][0]-lng)*111000*Math.cos(lat*Math.PI/180);var d=Math.sqrt(dlat*dlat+dlng*dlng);if(d<minD)minD=d;if(minD<80)break;}
+      if(minD>350){
+        _offRouteStreak++;
+        // Require 2 consecutive readings to avoid GPS jitter false-positives
+        if(_offRouteStreak>=2){postRN({type:'off_route',lat:lat,lng:lng,dist:Math.round(minD)});}
+        else{postRN({type:'off_route_warn',dist:Math.round(minD)});}
+      }else if(minD>60){_offRouteStreak=0;postRN({type:'off_route_warn',dist:Math.round(minD)});}
+      else{_offRouteStreak=0;postRN({type:'back_on_route'});}
     }
   }
 
@@ -912,12 +947,25 @@ const buildMapHtml = (
   function handleMsgData(msg){
     if(msg.type==='set_token'){if(msg.apiBase)apiBase=msg.apiBase;initMap(msg.token,msg.style);return;}
     if(!mapReady){pendingMsgs.push(msg);return;}
-    if(msg.type==='nav_active'){navActive=msg.active;if(!msg.active)map.easeTo({pitch:0,bearing:0,zoom:12,duration:700});}
+    if(msg.type==='nav_active'){
+      navActive=msg.active;
+      // Toggle nav-active class on location marker (suppresses pulsing ring in nav mode)
+      if(userMarker){userMarker.getElement().classList.toggle('nav-active',msg.active);}
+      if(msg.active){
+        // Request Wake Lock so screen stays on during navigation
+        if('wakeLock' in navigator){navigator.wakeLock.request('screen').then(function(wl){_wakeLock=wl;}).catch(function(){});}
+        resetPassedRoute();
+      }else{
+        map.easeTo({pitch:0,bearing:0,zoom:12,duration:700});
+        if(_wakeLock){_wakeLock.release();_wakeLock=null;}
+        resetPassedRoute();
+      }
+    }
     if(msg.type==='user_pos'&&msg.lat){lastSpeed=msg.speed!=null?msg.speed:lastSpeed;setUserPos(msg.lat,msg.lng,false,null,msg.heading);}
     if(msg.type==='nav_center'&&msg.lat){lastSpeed=msg.speed!=null?msg.speed:lastSpeed;setUserPos(msg.lat,msg.lng,true,msg.zoom||17,msg.heading);}
     if(msg.type==='locate'&&msg.lat)setUserPos(msg.lat,msg.lng,true,13);
     if(msg.type==='nav_target')setNavTarget(msg.idx);
-    if(msg.type==='nav_reset'){setNavTarget(-1);_routeCoords=[];routePts=[];_searchDest=null;updateRoute();}
+    if(msg.type==='nav_reset'){setNavTarget(-1);_routeCoords=[];routePts=[];_searchDest=null;updateRoute();resetPassedRoute();}
     if(msg.type==='fly_to'&&msg.lat){
       map.flyTo({center:[msg.lng,msg.lat],zoom:14,duration:600});
       if(searchMarker){searchMarker.remove();searchMarker=null;}
@@ -937,7 +985,7 @@ const buildMapHtml = (
     if(msg.type==='clear_pois'){allPois=[];updatePoiSrc();}
     if(msg.type==='set_route_opts')Object.assign(routeOpts,msg.opts||{});
     if(msg.type==='start_route_from'&&msg.lat)loadRouteFrom(msg.lat,msg.lng,msg.fromIdx||0);
-    if(msg.type==='reroute_from'&&msg.lat){_routeCoords=[];routePts=[];routeIsProper=false;lastOffCheck=Date.now();if(!wps.length&&_searchDest){_fetchRoute([msg.lng+','+msg.lat,_searchDest.lng+','+_searchDest.lat],0);}else{loadRouteFrom(msg.lat,msg.lng,msg.fromIdx||0);}}
+    if(msg.type==='reroute_from'&&msg.lat){_routeCoords=[];routePts=[];routeIsProper=false;lastOffCheck=Date.now();resetPassedRoute();_offRouteStreak=0;if(!wps.length&&_searchDest){_fetchRoute([msg.lng+','+msg.lat,_searchDest.lng+','+_searchDest.lat],0);}else{loadRouteFrom(msg.lat,msg.lng,msg.fromIdx||0);}}
     if(msg.type==='route_to_search'&&msg.lat){
       if(searchMarker){searchMarker.remove();searchMarker=null;}
       var el2=document.createElement('div');el2.className='mk-search';el2.textContent='📍';
@@ -1034,7 +1082,9 @@ class MapErrorBoundary extends Component<{ children: React.ReactNode }, { error:
 function MapScreen() {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
+  const router = useRouter();
   const activeTrip = useStore(st => st.activeTrip);
+  const setActiveTrip = useStore(st => st.setActiveTrip);
   const activeTripFromCache = useStore(st => st.activeTripFromCache);
   const user = useStore(st => st.user);
   const setStoreLoc = useStore(st => st.setUserLoc);
@@ -1545,8 +1595,13 @@ function MapScreen() {
   useEffect(() => {
     Animated.spring(navAnim, { toValue: navMode ? 1 : 0, tension: 80, friction: 10, useNativeDriver: true }).start();
     webRef.current?.postMessage(JSON.stringify({ type: 'nav_active', active: navMode }));
+    let _appStateSub: ReturnType<typeof AppState.addEventListener> | null = null;
     if (navMode) {
       activateKeepAwakeAsync();
+      // Re-activate keep-awake when app returns to foreground (iOS clears the lock on background)
+      _appStateSub = AppState.addEventListener('change', (state) => {
+        if (state === 'active' && navRef.current.active) activateKeepAwakeAsync();
+      });
       setShowPanel(false);
       setIsApproaching(false);
       setIsRerouting(false);
@@ -1591,6 +1646,7 @@ function MapScreen() {
       }
     } else {
       deactivateKeepAwake();
+      // appStateSub is scoped to nav-on branch; React will cleanup on next effect run
       setIsApproaching(false);
       setIsRerouting(false);
       setApproachingReport(null);
@@ -1612,6 +1668,7 @@ function MapScreen() {
       webRef.current?.postMessage(JSON.stringify({ type: 'clear_track' }));
       Speech.stop();
     }
+    return () => { _appStateSub?.remove(); };
   }, [navMode]);
 
   // ── Voice turn announcement on leg advance ──────────────────────────────────
@@ -2160,6 +2217,20 @@ function MapScreen() {
         {routeAlerts.length > 0 && (
           <TouchableOpacity style={s.alertPill} onPress={() => setShowAlerts(v => !v)}>
             <Text style={s.alertPillText}>⚠ {routeAlerts.length}</Text>
+          </TouchableOpacity>
+        )}
+        {activeTrip && !navMode && (
+          <TouchableOpacity
+            style={s.exitTripBtn}
+            onPress={() => Alert.alert('Exit Trip', 'Clear this trip and go back to planning?', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Exit Trip', style: 'destructive', onPress: () => {
+                setActiveTrip(null);
+                router.push('/(tabs)/');
+              }},
+            ])}
+          >
+            <Ionicons name="close" size={14} color={C.text2} />
           </TouchableOpacity>
         )}
       </View>
@@ -3950,6 +4021,11 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     borderWidth: 1, borderColor: C.red,
   },
   alertPillText: { color: C.red, fontSize: 10, fontFamily: mono, fontWeight: '700' },
+  exitTripBtn: {
+    width: 26, height: 26, borderRadius: 13,
+    backgroundColor: C.s3, borderWidth: 1, borderColor: C.border,
+    alignItems: 'center', justifyContent: 'center', marginLeft: 4,
+  },
 
   controls: { position: 'absolute', top: 106, right: 16, gap: 8 },
   ctrlBtn: {

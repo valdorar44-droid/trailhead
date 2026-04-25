@@ -614,7 +614,7 @@ const buildMapHtml = (
     map.on('click',function(e){
       if(e.defaultPrevented)return;
       try{
-        var _ownSrc={camps:1,gas:1,pois:1,route:1,breadcrumb:1,'usgs-topo':1};
+        var _ownSrc={camps:1,gas:1,pois:1,route:1,breadcrumb:1,'usgs-topo':1,fires:1,ava:1,radar:1,'mvum-roads':1,'mvum-trails':1,oroads:1,naip:1,'mapbox-dem':1};
         // 1. Tent icons — use e.point (single pixel): Mapbox auto-handles symbol hit area
         var ptFs=map.queryRenderedFeatures(e.point);
         for(var ci=0;ci<ptFs.length;ci++){
@@ -939,8 +939,8 @@ function ThreeNeedleCompass({ heading, bearing }: { heading: number | null; bear
   const sz = 46;
   const half = sz / 2;
   const nLen = 13;
-  const ringRot = heading !== null ? -heading : 0;
-  const bearRot  = heading !== null && bearing !== null ? bearing - heading : null;
+  const ringRot = heading !== null && isFinite(heading) ? -heading : 0;
+  const bearRot  = heading !== null && isFinite(heading) && bearing !== null && isFinite(bearing) ? bearing - heading : null;
   return (
     <View style={{ width: sz, height: sz }}>
       <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
@@ -1275,7 +1275,7 @@ export default function MapScreen() {
                 if (distM < nearDist && !stepAnnouncedRef.current.has(nearKey)) {
                   stepAnnouncedRef.current.add(nearKey);
                   Speech.stop();
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
                   Speech.speak(buildAnnouncement(cur, distM, 'near'), { rate: 0.88, pitch: 1.05, language: 'en-US' });
                 }
               }

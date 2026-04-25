@@ -5,7 +5,10 @@ import * as Location from 'expo-location';
 import * as SecureStore from 'expo-secure-store';
 import * as Speech from 'expo-speech';
 import * as Haptics from 'expo-haptics';
-import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
+// expo-keep-awake requires a native build that includes it — load lazily so older binaries don't crash
+const _keepAwake = (() => { try { return require('expo-keep-awake'); } catch { return null; } })();
+const activateKeepAwakeAsync = () => _keepAwake ? _keepAwake.activateKeepAwakeAsync() : Promise.resolve();
+const deactivateKeepAwake    = () => _keepAwake && _keepAwake.deactivateKeepAwake();
 import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '@/lib/store';
 import { api, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast } from '@/lib/api';

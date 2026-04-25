@@ -69,6 +69,13 @@ _ANON_WINDOW_S = 604_800   # 7-day rolling window
 _ANON_LIMITS   = {"chat": 15, "plan": 1, "insight": 1}  # per window
 _anon_buckets: dict[str, dict] = {}
 
+def _client_ip(request: Request) -> str:
+    """Return the real client IP, honoring X-Forwarded-For on Railway/proxies."""
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host
+
 def _anon_check(ip: str, kind: str) -> None:
     """Raise 429 if the anonymous IP has hit its 7-day limit for `kind`."""
     now = time.time()
@@ -290,7 +297,7 @@ async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depend
         if not deduct_credits(user["id"], cost, f"AI chat"):
             raise HTTPException(402, f"Not enough credits. This action costs {cost} credits.")
     else:
-        _anon_check(request.client.host, "chat")
+        _anon_check(_client_ip(request), "chat")
 
     session_id = body.session_id
     messages  = get_conversation(session_id)
@@ -371,7 +378,7 @@ async def plan(request: Request, body: PlanRequest, user: dict = Depends(_option
         if not deduct_credits(user["id"], cost, f"AI trip plan (~{day_hint}d)"):
             raise HTTPException(402, f"Not enough credits. A ~{day_hint}-day plan costs {cost} credits.")
     else:
-        _anon_check(request.client.host, "plan")
+        _anon_check(_client_ip(request), "plan")
         cost = 0
 
     try:
@@ -1158,7 +1165,7 @@ async def campsite_insight(request: Request, body: CampsiteInsightRequest, user:
         if not deduct_credits(user["id"], cost, f"Campsite insight — {body.name}"):
             raise HTTPException(402, f"Not enough credits. Campsite insights cost {cost} credits.")
     else:
-        _anon_check(request.client.host, "insight")
+        _anon_check(_client_ip(request), "insight")
 
     # Fetch Wikipedia and weather context in parallel
     wiki_task = wikipedia_nearby(body.lat, body.lng, radius=15000, limit=4)

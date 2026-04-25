@@ -1,0 +1,46 @@
+name: EAS OTA Update
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'mobile/**'
+
+jobs:
+  update:
+    name: Publish OTA update
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install dependencies
+        working-directory: mobile
+        run: npm ci
+
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Publish to preview channel
+        working-directory: mobile
+        run: |
+          eas update \
+            --channel preview \
+            --message "${{ github.event.head_commit.message }}" \
+            --non-interactive
+
+      - name: Publish to production channel
+        working-directory: mobile
+        run: |
+          eas update \
+            --channel production \
+            --message "${{ github.event.head_commit.message }}" \
+            --non-interactive

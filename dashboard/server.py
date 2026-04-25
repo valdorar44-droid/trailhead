@@ -286,6 +286,7 @@ class ChatRequest(BaseModel):
     message: str
     session_id: str
     current_trip: Optional[dict] = None
+    rig_context: Optional[dict] = None  # mobile passes rig profile to seed trail_dna
 
 @app.post("/api/chat")
 async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depends(_optional_user)):
@@ -306,6 +307,25 @@ async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depend
     session_id = body.session_id
     messages  = get_conversation(session_id)
     trail_dna = get_trail_dna(session_id)
+
+    # Seed trail_dna from rig profile when mobile provides it
+    if body.rig_context:
+        rig = body.rig_context
+        if rig.get("vehicle_type") and not trail_dna.get("vehicle"):
+            parts = [rig.get("vehicle_type", "")]
+            if rig.get("make"):  parts.append(rig["make"])
+            if rig.get("model"): parts.append(rig["model"])
+            if rig.get("lift_in") and rig["lift_in"] != "0": parts.append(f"{rig['lift_in']}\" lift")
+            if rig.get("locking_diffs") and rig["locking_diffs"] not in ("None", ""):
+                parts.append(f"lockers: {rig['locking_diffs']}")
+            trail_dna["vehicle"] = " ".join(p for p in parts if p)
+        if rig.get("fuel_range_miles") and not trail_dna.get("fuel_range"):
+            trail_dna["fuel_range"] = str(rig["fuel_range_miles"])
+        if rig.get("ground_clearance_in") and not trail_dna.get("clearance"):
+            lift = float(rig.get("lift_in") or 0)
+            base = float(rig.get("ground_clearance_in") or 0)
+            trail_dna["clearance"] = str(int(base + lift))
+        save_trail_dna(session_id, trail_dna)
 
     # Extract and persist preference signals
     signals = _extract_dna_signals(body.message)

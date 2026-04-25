@@ -55,6 +55,7 @@ export default function PlanScreen() {
   const activeTrip       = useStore(st => st.activeTrip);
   const sessionId        = useStore(st => st.sessionId);
   const user             = useStore(st => st.user);
+  const rigProfile       = useStore(st => st.rigProfile);
 
   const [showCreditsModal, setShowCreditsModal] = useState(false);
   const [packages, setPackages] = useState<CreditPackage[]>([]);
@@ -136,7 +137,7 @@ export default function PlanScreen() {
       setPlanPhase('editing');
       startStages(CHAT_STAGES);
       try {
-        const data = await api.chat(finalText, sessionId, activeTrip);
+        const data = await api.chat(finalText, sessionId, activeTrip, rigProfile as any);
         if (data.trail_dna) setTrailDna(data.trail_dna);
         setMessages(m => [...m, { role: 'ai', text: data.content }]);
 
@@ -163,7 +164,7 @@ export default function PlanScreen() {
     setPlanPhase('chatting');
     startStages(CHAT_STAGES);
     try {
-      const data = await api.chat(finalText, sessionId);
+      const data = await api.chat(finalText, sessionId, null, rigProfile as any);
       if (data.trail_dna) setTrailDna(data.trail_dna);
 
       if (data.type === 'ready') {

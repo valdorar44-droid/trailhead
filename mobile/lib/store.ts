@@ -14,6 +14,7 @@ export interface RigProfile {
   tire_size?: string;
   ground_clearance_in: string;
   length_ft: string;
+  fuel_range_miles?: string;
   has_winch?: boolean;
   winch_lbs?: string;
   locking_diffs?: string;

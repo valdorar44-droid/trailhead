@@ -36,8 +36,8 @@ export const api = {
     req<TripResult>('/api/plan', { method: 'POST', body: JSON.stringify({ request, session_id: sessionId }) }),
   planFromSession: (sessionId: string) =>
     req<TripResult>('/api/plan', { method: 'POST', body: JSON.stringify({ request: '', session_id: sessionId }) }),
-  chat: (message: string, sessionId: string, currentTrip?: TripResult | null) =>
-    req<ChatResponse>('/api/chat', { method: 'POST', body: JSON.stringify({ message, session_id: sessionId, current_trip: currentTrip ?? undefined }) }),
+  chat: (message: string, sessionId: string, currentTrip?: TripResult | null, rigContext?: Record<string, unknown> | null) =>
+    req<ChatResponse>('/api/chat', { method: 'POST', body: JSON.stringify({ message, session_id: sessionId, current_trip: currentTrip ?? undefined, rig_context: rigContext ?? undefined }) }),
   getTrip: (id: string) => req<TripResult>(`/api/trip/${id}`),
 
   submitReport: (data: ReportPayload) =>

@@ -73,7 +73,7 @@ const ALL_MAKES = Object.keys(MAKES_DATA);
 const DEFAULT_RIG: RigProfile = {
   vehicle_type: '', year: '', make: '', model: '', trim: '',
   ground_clearance_in: '', lift_in: '', drive: '4x4 PT', length_ft: '',
-  suspension: 'Stock', tire_size: '',
+  suspension: 'Stock', tire_size: '', fuel_range_miles: '',
   has_winch: false, winch_lbs: '', locking_diffs: 'None',
   has_skids: false, has_rack: false,
   is_towing: false, trailer_length_ft: '', tow_capacity_lbs: '',
@@ -588,6 +588,14 @@ export default function ProfileScreen() {
               {/* ── ADVANCED TAB ──────────────────────────────────── */}
               {rigSection === 'advanced' && (
                 <>
+                  {/* Fuel range */}
+                  <Text style={s.rigFormLabel}>FUEL RANGE (MILES)</Text>
+                  <TextInput style={s.rigInput} placeholder="e.g. 400 — AI uses this for fuel stop planning"
+                    placeholderTextColor={C.text3}
+                    value={rigDraft.fuel_range_miles ?? ''}
+                    onChangeText={v => setRigDraft(d => ({ ...d, fuel_range_miles: v }))}
+                    keyboardType="numeric" />
+
                   {/* Locking diffs */}
                   <Text style={s.rigFormLabel}>LOCKING DIFFERENTIALS</Text>
                   <View style={s.rigPillGrid}>

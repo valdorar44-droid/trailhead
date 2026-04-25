@@ -386,6 +386,8 @@ def chat_guide(messages: list[dict], trail_dna: dict | None = None) -> dict:
     if trail_dna:
         lines = []
         if trail_dna.get("vehicle"):        lines.append(f"Vehicle: {trail_dna['vehicle']}")
+        if trail_dna.get("fuel_range"):     lines.append(f"Fuel range: ~{trail_dna['fuel_range']} miles (use this for fuel stop planning)")
+        if trail_dna.get("clearance"):      lines.append(f"Ground clearance: ~{trail_dna['clearance']} inches (filter route difficulty accordingly)")
         if trail_dna.get("terrain"):        lines.append(f"Terrain comfort: {trail_dna['terrain']}")
         if trail_dna.get("camp_style"):     lines.append(f"Camping style: {trail_dna['camp_style']}")
         if trail_dna.get("regions"):        lines.append(f"Regions they love: {', '.join(trail_dna['regions'])}")

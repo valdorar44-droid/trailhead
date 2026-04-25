@@ -733,6 +733,7 @@ const buildMapHtml = (
   function updateBreadcrumb(){if(!map||!map.getSource('breadcrumb'))return;map.getSource('breadcrumb').setData({type:'Feature',geometry:{type:'LineString',coordinates:breadcrumbPts}});}
   var REP_ICONS={police:'🚔',hazard:'⚠️',road_condition:'🛑',wildlife:'🐾',campsite:'⛺',road_closure:'🚧',water:'💧'};
   function repTimeAgo(ts){if(!ts)return'';var m=Math.floor((Date.now()/1000-ts)/60);if(m<2)return'just now';if(m<60)return m+'m ago';var h=Math.floor(m/60);if(h<24)return h+'h ago';return Math.floor(h/24)+'d ago';}
+  function escHTML(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
   function updateReportMarkers(){
     reportMarkers.forEach(function(m){m.remove();});reportMarkers=[];
     allReports.forEach(function(r){
@@ -742,8 +743,8 @@ const buildMapHtml = (
       el.title=(r.subtype||r.type)+(r.confirmations?' ✓'+r.confirmations:'');
       var age=repTimeAgo(r.created_at);
       var confLine=r.confirmations?'<div class="pm" style="color:#22c55e;margin-top:2px">✓ '+r.confirmations+' confirmed</div>':'';
-      var ageLine=age?'<div class="pm" style="opacity:0.5;margin-top:2px">'+age+'</div>':'';
-      var popup=new mapboxgl.Popup({offset:18,closeButton:false}).setHTML('<div class="pt">'+(r.subtype||r.type)+'</div><div class="pm">'+(r.description||'Community report')+'</div>'+confLine+ageLine);
+      var ageLine=age?'<div class="pm" style="opacity:0.5;margin-top:2px">'+escHTML(age)+'</div>':'';
+      var popup=new mapboxgl.Popup({offset:18,closeButton:false}).setHTML('<div class="pt">'+escHTML(r.subtype||r.type)+'</div><div class="pm">'+escHTML(r.description||'Community report')+'</div>'+confLine+ageLine);
       var m=new mapboxgl.Marker({element:el,anchor:'center'}).setLngLat([r.lng,r.lat]).setPopup(popup).addTo(map);
       el.addEventListener('click',function(ev){ev.stopPropagation();m.togglePopup();postRN({type:'report_tapped',report:r});});
       reportMarkers.push(m);

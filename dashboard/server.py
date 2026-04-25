@@ -34,6 +34,7 @@ from db.store import (
     submit_bug_report, get_all_bug_reports, award_bug_credits, dismiss_bug_report,
     get_trail_dna, save_trail_dna, get_conversation, save_conversation, clear_conversation,
     report_camp_full, confirm_camp_full, dispute_camp_full, get_camp_fullness, get_fullness_nearby,
+    log_event, cleanup_stale_data,
 )
 
 # ── Credit economy ─────────────────────────────────────────────────────────────
@@ -192,6 +193,7 @@ async def admin_page():
 
 @app.get("/api/health")
 async def health():
+    cleanup_stale_data()
     return {"status": "ok", "service": "trailhead"}
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
@@ -289,6 +291,8 @@ class ChatRequest(BaseModel):
 async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depends(_optional_user)):
     if not body.message.strip():
         raise HTTPException(400, "Message cannot be empty")
+    if len(body.message) > 2000:
+        raise HTTPException(400, "Message exceeds 2000 characters")
     if not settings.anthropic_api_key:
         raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
 
@@ -410,6 +414,18 @@ async def plan(request: Request, body: PlanRequest, user: dict = Depends(_option
     trip_id = str(uuid.uuid4())[:8]
     result_stub = {"trip_id": trip_id, "plan": plan_data, "campsites": [], "gas_stations": []}
     save_trip(trip_id, body.request, result_stub, user_id=user["id"] if user else None)
+
+    actual_days = plan_data.get("duration_days", day_hint)
+    log_event(
+        user["id"] if user else None,
+        body.session_id,
+        "plan_generated",
+        {"trip_id": trip_id, "days": actual_days,
+         "states": plan_data.get("states", []),
+         "difficulty": plan_data.get("difficulty", ""),
+         "waypoint_count": len(plan_data.get("waypoints", [])),
+         "platform": "web"},
+    )
 
     geocoded = await _geocode_waypoints(plan_data.get("waypoints", []))
     plan_data["waypoints"] = geocoded
@@ -595,6 +611,9 @@ async def nearby_pins(lat: float, lng: float, radius: float = 1.0):
 
 # ── Reports ───────────────────────────────────────────────────────────────────
 
+VALID_REPORT_TYPES = {"police", "hazard", "road_condition", "wildlife", "road_closure", "campsite", "water", "cell_signal", "closure"}
+VALID_SEVERITIES   = {"low", "moderate", "high", "critical"}
+
 class ReportRequest(BaseModel):
     lat: float; lng: float
     type: str
@@ -605,6 +624,16 @@ class ReportRequest(BaseModel):
 
 @app.post("/api/reports")
 async def submit_report(body: ReportRequest, user: dict = Depends(_current_user)):
+    if not (-90 <= body.lat <= 90 and -180 <= body.lng <= 180):
+        raise HTTPException(400, "Invalid coordinates")
+    if body.type not in VALID_REPORT_TYPES:
+        raise HTTPException(400, f"Invalid report type")
+    if body.severity not in VALID_SEVERITIES:
+        raise HTTPException(400, "Invalid severity")
+    if len(body.description) > 500:
+        raise HTTPException(400, "Description exceeds 500 characters")
+    if body.photo_data and len(body.photo_data) > 2_000_000:
+        raise HTTPException(400, "Photo too large (max 1.5 MB)")
     import time as _time
     # Check active restriction
     restricted, secs = is_reporter_restricted(user["id"])
@@ -641,6 +670,11 @@ async def submit_report(body: ReportRequest, user: dict = Depends(_current_user)
     else:
         streak_info = {"streak": 0, "bonus": 0, "reason": "Account must be 24h old to earn report credits"}
 
+    log_event(user["id"], None, "report_submitted", {
+        "report_type": body.type,
+        "has_photo": bool(body.photo_data),
+        "credits_earned": credits_earned + streak_info["bonus"],
+    })
     fresh_user = get_user_by_id(user["id"])
     return {
         "status": "ok",

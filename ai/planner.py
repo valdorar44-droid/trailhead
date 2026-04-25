@@ -48,7 +48,7 @@ You specialize in:
 - BLM and USFS dispersed camping, developed campgrounds, national parks
 - Off-road and 4WD routes, jeep trails, forest roads
 - All US terrain — from western backcountry to cross-country road trips to the Southeast and Northeast
-- Overlanding logistics: fuel range, water sourcing, vehicle clearance, seasonal closures
+- Overlanding logistics: fuel range, water sourcing, vehicle clearance, seasonal closures, fire restrictions
 - Road trips that mix camping, motels, and adventure based on user preference
 
 When a user describes their trip, respond ONLY with a valid JSON object. No markdown. No extra text. Just the JSON.
@@ -60,6 +60,8 @@ Use this exact schema:
   "duration_days": number,
   "states": ["UT", "CO"],
   "total_est_miles": number,
+  "difficulty": "easy|moderate|difficult|extreme",
+  "route_reasoning": "2-3 sentences explaining WHY this specific route sequence was chosen — what makes it logical, scenic, or practical over alternatives",
   "waypoints": [
     {
       "day": number,
@@ -67,7 +69,8 @@ Use this exact schema:
       "type": "start|camp|motel|waypoint|town|shower|fuel",
       "description": "1-2 sentences about this stop",
       "land_type": "BLM|USFS|NPS|private|town",
-      "notes": "optional practical notes"
+      "difficulty": "easy|moderate|difficult|extreme",
+      "notes": "optional practical notes — road conditions, permit info, seasonal warnings"
     }
   ],
   "daily_itinerary": [
@@ -77,17 +80,29 @@ Use this exact schema:
       "description": "what you'll do and see this day",
       "est_miles": number,
       "road_type": "paved|dirt|4wd|mixed",
-      "highlights": ["specific thing to see or do"]
+      "highlights": ["specific thing to see or do"],
+      "heads_up": "one sentence about the key challenge or thing NOT to miss this day"
     }
   ],
   "logistics": {
-    "vehicle_recommendation": "what kind of vehicle/clearance needed",
-    "fuel_strategy": "where to fuel up, typical gaps between stations",
-    "water_strategy": "where to source water, how many gallons to carry",
-    "permits_needed": "any required permits or fire restrictions to check",
-    "best_season": "best time of year for this specific route"
+    "vehicle_recommendation": "minimum vehicle needed — be specific (e.g. 'stock SUV with 8+ inches clearance', 'high-clearance 4WD required', 'any vehicle on paved legs')",
+    "clearance_needed": "stock|high_clearance|4wd_low_range",
+    "fuel_strategy": "where to fuel up, typical gaps between stations, carry-range recommendation",
+    "water_strategy": "where to source water, how many gallons to carry per person per day",
+    "permits_needed": "specific permits required — name the permit, where to get it, and cost if known",
+    "fire_restrictions_note": "likelihood of fire restrictions for the season/region — what to check before going",
+    "cell_coverage": "honest assessment of cell coverage — where to expect dead zones, Starlink recommendation if needed",
+    "best_season": "best time of year and why — include shoulder season warnings",
+    "risk_level": "low|moderate|high",
+    "emergency_bailout": "nearest town or highway for emergency egress if things go wrong"
   }
 }
+
+DIFFICULTY RATINGS:
+- easy: paved or well-graded dirt roads, any vehicle, no technical driving
+- moderate: rutted dirt roads, high clearance recommended, some challenging sections
+- difficult: rocky/technical terrain, 4WD required, lockers/skid plates helpful
+- extreme: highly technical, experienced off-road drivers only, recovery gear mandatory
 
 WAYPOINT TYPES:
 - start: departure point (first waypoint only)
@@ -127,6 +142,8 @@ Rules for waypoint names:
 - Include the state in every waypoint name
 
 Be realistic about daily mileage: 200-400 miles/day on paved roads, 60-150 miles/day on dirt/4WD.
+
+ROUTE REASONING: Always explain your routing logic. Why did you choose this direction vs. the reverse? Why these specific camps? What makes the sequence flow naturally? This is what separates Trailhead from a generic GPS app — users deserve to understand the thinking behind their route.
 """
 
 client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
@@ -248,14 +265,24 @@ Return ONLY valid JSON with this exact schema:
 
 def generate_route_brief(trip_name: str, waypoints: list, reports: list = []) -> dict:
     """AI safety briefing for the active trip."""
-    wp_text = "\n".join(f"Day {w.get('day','-')}: {w.get('name','')} ({w.get('type','')})" for w in waypoints[:15])
-    rep_text = "\n".join(f"- {r.get('type','')} near day {r.get('waypoint_day','-')}: {r.get('description','')}" for r in reports[:10]) if reports else "None reported"
+    wp_text = "\n".join(
+        f"Day {w.get('day','-')}: {w.get('name','')} ({w.get('type','')}, {w.get('land_type','')})"
+        for w in waypoints[:20]
+    )
+    rep_text = "\n".join(
+        f"- {r.get('type','')} near day {r.get('waypoint_day','-')}: {r.get('description','')}"
+        for r in reports[:10]
+    ) if reports else "None reported"
 
-    prompt = f"""You are a safety-focused trail guide. Give a pre-departure route briefing for:
+    blm_usfs_days = [w.get('day') for w in waypoints if w.get('land_type') in ('BLM','USFS','NPS')]
+
+    prompt = f"""You are a safety-focused trail guide. Give a thorough pre-departure briefing for:
 
 Trip: {trip_name}
 Route:
 {wp_text}
+
+Days in remote public land (BLM/USFS/NPS): {blm_usfs_days or 'none identified'}
 
 Community reports along route:
 {rep_text}
@@ -263,17 +290,20 @@ Community reports along route:
 Return ONLY valid JSON:
 {{
   "readiness_score": number 1-10 (10 = fully prepared, lower = missing critical prep),
-  "top_concerns": ["up to 3 key safety or logistics concerns"],
-  "must_do_before_leaving": ["2-4 concrete action items before departure"],
-  "daily_highlights": ["1 key thing to watch for each day, max 7"],
+  "top_concerns": ["up to 3 key safety or logistics concerns for THIS specific route"],
+  "must_do_before_leaving": ["2-4 concrete action items — permits to get, gear to check, calls to make"],
+  "daily_highlights": ["1 key thing to watch for each day, max 7 items"],
   "estimated_fuel_stops": number,
-  "water_carry_gallons": number recommended to carry,
-  "briefing_summary": "2-3 sentence overall readiness summary"
+  "water_carry_gallons": number recommended per person,
+  "signal_dead_zones": ["day X: [place name] — expect no cell service, BLM/USFS backcountry"],
+  "fire_restriction_likelihood": "low|possible|likely — brief note on season/region fire risk",
+  "emergency_bailout": "nearest highway or town for emergency exit if things go wrong mid-trip",
+  "briefing_summary": "2-3 sentence overall readiness assessment — be specific to this route"
 }}"""
 
     msg = _claude(lambda: client.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=800,
+        max_tokens=1000,
         messages=[{"role": "user", "content": prompt}]
     ))
     raw = msg.content[0].text.strip()
@@ -285,7 +315,9 @@ Return ONLY valid JSON:
     except Exception:
         return {"readiness_score": 7, "top_concerns": [], "must_do_before_leaving": [],
                 "daily_highlights": [], "estimated_fuel_stops": 0,
-                "water_carry_gallons": 10, "briefing_summary": ""}
+                "water_carry_gallons": 10, "signal_dead_zones": [],
+                "fire_restriction_likelihood": "unknown",
+                "emergency_bailout": "", "briefing_summary": ""}
 
 
 def generate_packing_list(

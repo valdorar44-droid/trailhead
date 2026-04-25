@@ -158,14 +158,25 @@ def init_db():
             voted_at  INTEGER NOT NULL,
             UNIQUE(camp_id, user_id)
         );
+        CREATE TABLE IF NOT EXISTS analytics_events (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id     INTEGER,
+            session_id  TEXT,
+            event_type  TEXT NOT NULL,
+            event_data  TEXT,
+            created_at  INTEGER NOT NULL
+        );
     """)
     # Performance indexes (IF NOT EXISTS is safe to re-run)
     for idx_sql in [
         "CREATE INDEX IF NOT EXISTS idx_reports_geo ON reports(lat, lng, expires_at)",
         "CREATE INDEX IF NOT EXISTS idx_reports_user ON reports(user_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_reports_user_type ON reports(user_id, type, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_pins_geo ON community_pins(lat, lng)",
         "CREATE INDEX IF NOT EXISTS idx_fullness_geo ON camp_fullness(lat, lng, status, expires_at)",
         "CREATE INDEX IF NOT EXISTS idx_credits_user ON credit_transactions(user_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_analytics_session ON analytics_events(session_id, event_type)",
+        "CREATE INDEX IF NOT EXISTS idx_analytics_type ON analytics_events(event_type, created_at)",
     ]:
         try:
             db.execute(idx_sql)
@@ -193,6 +204,33 @@ def init_db():
             pass
     db.commit()
     db.close()
+
+# ── Analytics ────────────────────────────────────────────────────────────────
+
+def log_event(user_id: int | None, session_id: str | None, event_type: str, event_data: dict | None = None):
+    """Fire-and-forget analytics event. Never raises — analytics must not break product."""
+    try:
+        db = _conn()
+        db.execute(
+            "INSERT INTO analytics_events (user_id, session_id, event_type, event_data, created_at) VALUES (?,?,?,?,?)",
+            (user_id, session_id, event_type, json.dumps(event_data) if event_data else None, int(time.time()))
+        )
+        db.commit(); db.close()
+    except Exception:
+        pass
+
+def cleanup_stale_data():
+    """Prune expired camp fullness records and old analytics. Safe to call on health check."""
+    try:
+        db = _conn()
+        now = int(time.time())
+        db.execute("DELETE FROM camp_fullness WHERE expires_at < ? AND status='full'", (now,))
+        # Keep analytics for 90 days
+        cutoff = now - 90 * 86400
+        db.execute("DELETE FROM analytics_events WHERE created_at < ?", (cutoff,))
+        db.commit(); db.close()
+    except Exception:
+        pass
 
 # ── Trail DNA (user preference profile) ──────────────────────────────────────
 

@@ -54,6 +54,11 @@ export const api = {
     req<{ credits_earned: number; new_balance: number }>(`/api/reports/${id}/confirm`, { method: 'POST' }),
 
   getCredits: () => req<{ balance: number; history: CreditTransaction[] }>('/api/credits'),
+  getCreditPackages: () => req<CreditPackage[]>('/api/credits/packages'),
+  createCheckout: (package_id: string) =>
+    req<{ url: string; session_id: string }>('/api/credits/checkout', {
+      method: 'POST', body: JSON.stringify({ package_id }),
+    }),
   getLeaderboard: () => req<LeaderboardEntry[]>('/api/leaderboard'),
 
   getConfig: () => req<{ mapbox_token: string }>('/api/config'),
@@ -172,6 +177,10 @@ export interface ReportResponse {
 }
 export interface CreditTransaction {
   id: number; amount: number; reason: string; created_at: number;
+}
+export interface CreditPackage {
+  id: string; credits: number; price_cents: number; price_display: string;
+  label: string; popular: boolean;
 }
 export interface LeaderboardEntry {
   username: string; report_count: number; total_upvotes: number; streak: number;

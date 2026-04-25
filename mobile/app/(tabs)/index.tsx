@@ -2,12 +2,12 @@ import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
   StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator,
-  Share, Animated,
+  Share, Animated, Linking, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { api, TripResult, TrailDNA } from '@/lib/api';
+import { api, TripResult, TrailDNA, CreditPackage } from '@/lib/api';
 import { useStore } from '@/lib/store';
 import { useTheme, useTag, mono, ColorPalette } from '@/lib/design';
 
@@ -52,6 +52,11 @@ export default function PlanScreen() {
   const mapboxToken      = useStore(st => st.mapboxToken);
   const activeTrip       = useStore(st => st.activeTrip);
   const sessionId        = useStore(st => st.sessionId);
+  const user             = useStore(st => st.user);
+
+  const [showCreditsModal, setShowCreditsModal] = useState(false);
+  const [packages, setPackages] = useState<CreditPackage[]>([]);
+  const [buyingPkg, setBuyingPkg] = useState<string | null>(null);
 
   const scrollToEnd = useCallback(() => {
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
@@ -71,6 +76,29 @@ export default function PlanScreen() {
   }
 
   useEffect(() => () => stopStages(), []);
+
+  function handleOutOfCredits() {
+    setShowCreditsModal(true);
+    if (packages.length === 0) {
+      api.getCreditPackages().then(setPackages).catch(() => {});
+    }
+  }
+
+  async function buyPackage(pkgId: string) {
+    setBuyingPkg(pkgId);
+    try {
+      const res = await api.createCheckout(pkgId);
+      await Linking.openURL(res.url);
+    } catch (e: any) {
+      // If Stripe not configured, show message
+    } finally {
+      setBuyingPkg(null);
+    }
+  }
+
+  function isOutOfCredits(e: any) {
+    return e?.message?.includes('402') || e?.message?.includes('Not enough credits') || e?.message?.includes('credits');
+  }
 
   // ── Resolve location reference in text ──────────────────────────────────────
   async function resolveLocation(text: string): Promise<string> {
@@ -117,7 +145,8 @@ export default function PlanScreen() {
         }
         setPlanPhase('active');
       } catch (e: any) {
-        setMessages(m => [...m, { role: 'ai', text: `⚠ ${e.message}` }]);
+        if (isOutOfCredits(e)) handleOutOfCredits();
+        else setMessages(m => [...m, { role: 'ai', text: `⚠ ${e.message}` }]);
         setPlanPhase('active');
       } finally {
         stopStages(); setLoading(false); scrollToEnd();
@@ -144,8 +173,8 @@ export default function PlanScreen() {
         setPlanPhase('chatting');
       }
     } catch (e: any) {
-      setMessages(m => [...m, { role: 'ai', text: `⚠ ${e.message}` }]);
-      setPlanPhase('idle');
+      if (isOutOfCredits(e)) { handleOutOfCredits(); setPlanPhase('idle'); }
+      else { setMessages(m => [...m, { role: 'ai', text: `⚠ ${e.message}` }]); setPlanPhase('idle'); }
     } finally {
       stopStages(); setLoading(false); scrollToEnd();
     }
@@ -171,18 +200,24 @@ export default function PlanScreen() {
       });
       setPlanPhase('active');
     } catch (e: any) {
-      const isRateLimit = e.message?.includes('429') || e.message?.toLowerCase().includes('rate limit');
-      setMessages(m => [
-        ...m,
-        {
-          role: 'ai',
-          text: isRateLimit
-            ? '⏱ API is busy right now — tap Retry in ~30 seconds and your route will build normally.'
-            : `⚠ ${e.message}`,
-          outline: isRateLimit ? '__retry__' : undefined,
-        },
-      ]);
-      setPlanPhase('ready');
+      if (isOutOfCredits(e)) {
+        handleOutOfCredits();
+        setMessages(m => m); // keep messages unchanged
+        setPlanPhase('ready'); // let user try again after buying
+      } else {
+        const isRateLimit = e.message?.includes('429') || e.message?.toLowerCase().includes('rate limit');
+        setMessages(m => [
+          ...m,
+          {
+            role: 'ai',
+            text: isRateLimit
+              ? '⏱ API is busy right now — tap Retry in ~30 seconds and your route will build normally.'
+              : `⚠ ${e.message}`,
+            outline: isRateLimit ? '__retry__' : undefined,
+          },
+        ]);
+        setPlanPhase('ready');
+      }
     } finally {
       stopStages(); setLoading(false); scrollToEnd();
     }
@@ -207,8 +242,77 @@ export default function PlanScreen() {
 
   const currentStages = planPhase === 'planning' ? PLAN_STAGES : CHAT_STAGES;
 
+  // ── Login gate ───────────────────────────────────────────────────────────
+  if (!user) return (
+    <SafeAreaView style={s.container}>
+      <View style={s.loginGate}>
+        <View style={s.loginGateLogo}>
+          <Ionicons name="compass" size={36} color={C.orange} />
+        </View>
+        <Text style={s.loginGateTitle}>AI Trip Planning</Text>
+        <Text style={s.loginGateSub}>
+          Plan overland routes with AI, get campsite recommendations, packing lists, audio guides and more.
+        </Text>
+        <View style={s.loginGatePerks}>
+          {[
+            ['flash', `${75} credits free on signup`],
+            ['map-outline', 'AI-planned routes with camps + fuel'],
+            ['radio-outline', 'Audio guide for every waypoint'],
+            ['people-outline', 'Earn credits by contributing to the map'],
+          ].map(([icon, text]) => (
+            <View key={text} style={s.loginGatePerk}>
+              <Ionicons name={icon as any} size={16} color={C.orange} />
+              <Text style={s.loginGatePerkText}>{text}</Text>
+            </View>
+          ))}
+        </View>
+        <TouchableOpacity style={s.loginGateBtn} onPress={() => router.push('/(tabs)/profile')}>
+          <Text style={s.loginGateBtnText}>SIGN IN OR CREATE ACCOUNT</Text>
+        </TouchableOpacity>
+        <Text style={s.loginGateNote}>Navigate, browse camps, and report conditions — always free.</Text>
+      </View>
+    </SafeAreaView>
+  );
+
   return (
     <SafeAreaView style={s.container}>
+      {/* ── Credits modal ── */}
+      <Modal visible={showCreditsModal} transparent animationType="fade" onRequestClose={() => setShowCreditsModal(false)}>
+        <View style={s.modalOverlay}>
+          <View style={s.creditsModal}>
+            <TouchableOpacity style={s.creditsModalClose} onPress={() => setShowCreditsModal(false)}>
+              <Ionicons name="close" size={20} color={C.text3} />
+            </TouchableOpacity>
+            <Ionicons name="flash" size={32} color={C.orange} />
+            <Text style={s.creditsModalTitle}>Out of Credits</Text>
+            <Text style={s.creditsModalSub}>
+              You have {user?.credits ?? 0} credits. Buy more or earn credits by contributing to the map.
+            </Text>
+            <View style={s.pkgRow}>
+              {packages.map(pkg => (
+                <TouchableOpacity
+                  key={pkg.id}
+                  style={[s.pkgCard, pkg.popular && s.pkgCardPopular]}
+                  onPress={() => buyPackage(pkg.id)}
+                  disabled={buyingPkg !== null}
+                >
+                  {pkg.popular && <Text style={s.pkgPopularTag}>BEST VALUE</Text>}
+                  <Text style={s.pkgLabel}>{pkg.label}</Text>
+                  <Text style={s.pkgCredits}>{pkg.credits}</Text>
+                  <Text style={s.pkgCreditsLabel}>credits</Text>
+                  <Text style={s.pkgPrice}>{pkg.price_display}</Text>
+                  {buyingPkg === pkg.id && <ActivityIndicator size="small" color={C.orange} style={{ marginTop: 4 }} />}
+                </TouchableOpacity>
+              ))}
+            </View>
+            <View style={s.earnTip}>
+              <Ionicons name="information-circle-outline" size={14} color={C.text3} />
+              <Text style={s.earnTipText}>Submit reports on the Map tab to earn free credits</Text>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* ── Header ── */}
       <View style={s.header}>
         <View style={s.logoBadge}>
@@ -218,6 +322,12 @@ export default function PlanScreen() {
           <Text style={s.logoName}>TRAILHEAD</Text>
           <Text style={s.logoTag}>AI OVERLAND GUIDE</Text>
         </View>
+        {user && (
+          <TouchableOpacity style={s.creditPill} onPress={() => setShowCreditsModal(true)}>
+            <Ionicons name="flash" size={12} color={C.orange} />
+            <Text style={s.creditPillText}>{user.credits}</Text>
+          </TouchableOpacity>
+        )}
         {(planPhase === 'active' || planPhase === 'editing') && (
           <View style={s.editBadge}>
             <Ionicons name="pencil" size={11} color={C.gold} />
@@ -677,6 +787,39 @@ function TripCard({ trip, C, onViewMap, onViewGuide }: {
 
 const makeStyles = (C: ColorPalette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
+
+  // Login gate
+  loginGate: { flex: 1, padding: 28, justifyContent: 'center', alignItems: 'center', gap: 16 },
+  loginGateLogo: { width: 72, height: 72, borderRadius: 20, backgroundColor: C.s2, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+  loginGateTitle: { color: C.text, fontSize: 26, fontWeight: '900', letterSpacing: -0.5 },
+  loginGateSub: { color: C.text2, fontSize: 14, textAlign: 'center', lineHeight: 21, maxWidth: 300 },
+  loginGatePerks: { gap: 10, alignSelf: 'stretch', marginVertical: 4 },
+  loginGatePerk: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 4 },
+  loginGatePerkText: { color: C.text2, fontSize: 13, flex: 1 },
+  loginGateBtn: { backgroundColor: C.orange, borderRadius: 12, paddingVertical: 14, alignSelf: 'stretch', alignItems: 'center', marginTop: 8 },
+  loginGateBtnText: { color: '#fff', fontFamily: mono, fontSize: 12, fontWeight: '700', letterSpacing: 1 },
+  loginGateNote: { color: C.text3, fontSize: 11, textAlign: 'center', fontFamily: mono },
+
+  // Credits modal
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' },
+  creditsModal: { backgroundColor: C.s1, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40, alignItems: 'center', gap: 10 },
+  creditsModalClose: { position: 'absolute', top: 16, right: 16, padding: 4 },
+  creditsModalTitle: { color: C.text, fontSize: 22, fontWeight: '800', marginTop: 4 },
+  creditsModalSub: { color: C.text2, fontSize: 13, textAlign: 'center', lineHeight: 20 },
+  pkgRow: { flexDirection: 'row', gap: 10, marginTop: 8 },
+  pkgCard: { flex: 1, backgroundColor: C.s2, borderRadius: 14, padding: 12, alignItems: 'center', gap: 2, borderWidth: 1, borderColor: C.border },
+  pkgCardPopular: { borderColor: C.orange, backgroundColor: C.s2 },
+  pkgPopularTag: { color: C.orange, fontSize: 8, fontFamily: mono, fontWeight: '700', letterSpacing: 1, marginBottom: 2 },
+  pkgLabel: { color: C.text, fontSize: 13, fontWeight: '700', fontFamily: mono },
+  pkgCredits: { color: C.orange, fontSize: 26, fontWeight: '900', lineHeight: 30 },
+  pkgCreditsLabel: { color: C.text3, fontSize: 9, fontFamily: mono, letterSpacing: 1 },
+  pkgPrice: { color: C.text2, fontSize: 13, fontWeight: '600', marginTop: 4 },
+  earnTip: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
+  earnTipText: { color: C.text3, fontSize: 11, fontFamily: mono },
+
+  // Credit pill in header
+  creditPill: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: C.s2, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: C.border },
+  creditPillText: { color: C.orange, fontSize: 12, fontWeight: '700', fontFamily: mono },
 
   // Header
   header: {

@@ -1,14 +1,14 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  TextInput, Alert, Share,
+  TextInput, Alert, Share, Linking, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import * as SecureStore from 'expo-secure-store';
-import { api } from '@/lib/api';
+import { api, CreditPackage } from '@/lib/api';
 import { useStore, RigProfile } from '@/lib/store';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 
@@ -66,6 +66,8 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(false);
   const [creditHistory, setCreditHistory] = useState<any[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [packages, setPackages] = useState<CreditPackage[]>([]);
+  const [buyingPkg, setBuyingPkg] = useState<string | null>(null);
   const [gpxImporting, setGpxImporting] = useState(false);
   const [gpxResult, setGpxResult] = useState('');
 
@@ -109,7 +111,7 @@ export default function ProfileScreen() {
       const res = await api.register(email, username, password, refCode);
       setAuth(res.token, res.user);
       setView('main');
-      Alert.alert('Welcome to Trailhead!', 'You\'ve been given 20 welcome credits to start.');
+      Alert.alert('Welcome to Trailhead!', 'You\'ve been given 75 free credits — enough to plan your first few trips.');
     } catch (e: any) { Alert.alert('Registration failed', e.message); }
     finally { setLoading(false); }
   }
@@ -120,6 +122,23 @@ export default function ProfileScreen() {
       setCreditHistory(res.history);
       setShowHistory(true);
     } catch (e: any) { Alert.alert('Error', e.message); }
+  }
+
+  async function loadPackages() {
+    if (packages.length > 0) return;
+    try { setPackages(await api.getCreditPackages()); } catch {}
+  }
+
+  async function buyPackage(pkgId: string) {
+    setBuyingPkg(pkgId);
+    try {
+      const res = await api.createCheckout(pkgId);
+      await Linking.openURL(res.url);
+    } catch (e: any) {
+      Alert.alert('Checkout error', e.message);
+    } finally {
+      setBuyingPkg(null);
+    }
   }
 
   function shareReferral() {
@@ -179,7 +198,7 @@ export default function ProfileScreen() {
 
       if (pins.length > 0) {
         await Promise.all(pins.slice(0, 20).map(p => api.submitPin(p).catch(() => {})));
-        setGpxResult(`Imported ${Math.min(pins.length, 20)} waypoints as community pins. +${Math.min(pins.length, 20) * 5} credits`);
+        setGpxResult(`Imported ${Math.min(pins.length, 20)} waypoints as community pins. +${Math.min(pins.length, 20) * 3} credits`);
       } else {
         setGpxResult(`GPX track loaded: ${trkpts.length} track points. No named waypoints to pin.`);
       }
@@ -219,7 +238,7 @@ export default function ProfileScreen() {
           <Text style={s.authLogoEmoji}>⛺</Text>
         </View>
         <Text style={s.authTitle}>Create Account</Text>
-        <Text style={s.authSub}>Get 20 welcome credits just for signing up.</Text>
+        <Text style={s.authSub}>Get 75 free credits on signup — enough for your first few AI trips.</Text>
         <TextInput style={s.input} placeholder="Email" placeholderTextColor={C.text3}
           value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
         <TextInput style={s.input} placeholder="Username" placeholderTextColor={C.text3}
@@ -448,17 +467,31 @@ export default function ProfileScreen() {
             </View>
           </View>
           <View style={s.divider} />
-          <Text style={s.redemptionHeader}>REDEEM</Text>
-          {[
-            ['500', '$5 off monthly plan'],
-            ['900', '$10 off annual plan'],
-            ['200', 'Extra offline map region'],
-          ].map(([cost, reward]) => (
-            <View key={cost} style={s.redemptionRow}>
-              <Text style={s.redemptionCost}>{cost} cr</Text>
-              <Text style={s.redemptionArrow}>→</Text>
-              <Text style={s.redemptionReward}>{reward}</Text>
-            </View>
+          <Text style={s.redemptionHeader}>BUY CREDITS</Text>
+          {packages.length === 0 && (
+            <TouchableOpacity style={s.loadPkgsBtn} onPress={loadPackages}>
+              <Ionicons name="bag-add-outline" size={14} color={C.orange} />
+              <Text style={s.loadPkgsBtnText}>SEE PACKAGES</Text>
+            </TouchableOpacity>
+          )}
+          {packages.map(pkg => (
+            <TouchableOpacity
+              key={pkg.id}
+              style={[s.pkgRow, pkg.popular && s.pkgRowPopular]}
+              onPress={() => buyPackage(pkg.id)}
+              disabled={buyingPkg !== null}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={s.pkgLabel}>{pkg.label}{pkg.popular ? '  ✦ Best Value' : ''}</Text>
+                <Text style={s.pkgCredits}>{pkg.credits} credits</Text>
+              </View>
+              <View style={s.pkgPriceCol}>
+                {buyingPkg === pkg.id
+                  ? <ActivityIndicator size="small" color={C.orange} />
+                  : <Text style={s.pkgPrice}>{pkg.price_display}</Text>
+                }
+              </View>
+            </TouchableOpacity>
           ))}
           <TouchableOpacity style={s.historyBtn} onPress={loadHistory}>
             <Ionicons name="time-outline" size={14} color={C.text3} />
@@ -518,7 +551,7 @@ export default function ProfileScreen() {
             <Text style={s.referralTitle}>Refer Friends</Text>
           </View>
           <Text style={s.referralDesc}>
-            Share your code — +50 credits when a friend signs up, +100 more if they go Pro.
+            Share your code — +20 credits when a friend signs up (both of you get it).
           </Text>
           <View style={s.codeBox}>
             <Text style={s.codeText}>{user?.referral_code ?? '...'}</Text>
@@ -533,14 +566,15 @@ export default function ProfileScreen() {
         <View style={s.earnCard}>
           <Text style={s.sectionLabel}>HOW TO EARN CREDITS</Text>
           {[
-            ['+20', 'Welcome bonus'],
-            ['+10', 'Submit a community report'],
-            ['+20', 'Report with photo'],
-            ['+15', 'Add a campsite pin'],
-            ['+5',  'Import GPX waypoint'],
-            ['+25', 'Plan and share a trip'],
-            ['+50', 'Refer a friend who signs up'],
-            ['+2',  'Your report gets upvoted'],
+            ['+75', 'Signup welcome bonus (one-time)'],
+            ['+5',  'Submit a community report (max 8/day)'],
+            ['+10', 'Report with photo'],
+            ['+2',  'Report confirmed by another user'],
+            ['+5',  'Add a community pin'],
+            ['+3',  'Import a GPX waypoint'],
+            ['+20', 'Refer a friend who signs up'],
+            ['+15', '3-day reporting streak bonus'],
+            ['+30', '7-day streak bonus'],
           ].map(([amount, action]) => (
             <View key={action} style={s.earnRow}>
               <Text style={s.earnAmount}>{amount}</Text>
@@ -698,10 +732,14 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   creditsBadgeIcon: { fontSize: 26 },
   divider: { height: 1, backgroundColor: C.border, marginBottom: 12 },
   redemptionHeader: { color: C.text3, fontSize: 10, fontFamily: mono, letterSpacing: 1, marginBottom: 8 },
-  redemptionRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
-  redemptionCost: { color: C.orange, fontSize: 12, fontWeight: '700', fontFamily: mono, width: 60 },
-  redemptionArrow: { color: C.text3 },
-  redemptionReward: { color: C.text2, fontSize: 12, flex: 1 },
+  loadPkgsBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 10 },
+  loadPkgsBtnText: { color: C.orange, fontSize: 12, fontFamily: mono, fontWeight: '700' },
+  pkgRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderColor: C.border },
+  pkgRowPopular: { backgroundColor: C.s2 + '88', borderRadius: 8, paddingHorizontal: 8 },
+  pkgLabel: { color: C.text, fontSize: 13, fontWeight: '700' },
+  pkgCredits: { color: C.text2, fontSize: 11, fontFamily: mono, marginTop: 2 },
+  pkgPriceCol: { minWidth: 60, alignItems: 'flex-end' },
+  pkgPrice: { color: C.orange, fontSize: 16, fontWeight: '800', fontFamily: mono },
   historyBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     borderWidth: 1, borderColor: C.border, borderRadius: 10,

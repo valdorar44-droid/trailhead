@@ -8,5 +8,9 @@ class Settings:
     ridb_api_key: str = os.environ.get("RIDB_API_KEY", "")
     secret_key: str = os.environ.get("SECRET_KEY", "trailhead-dev-secret-change-in-prod")
     db_path: str = os.environ.get("TRAILHEAD_DB_PATH", "/data/trailhead.db" if os.path.isdir("/data") else "./trailhead.db")
+    stripe_secret_key: str = os.environ.get("STRIPE_SECRET_KEY", "")
+    stripe_webhook_secret: str = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+    # Public URL used for Stripe redirect after checkout
+    public_url: str = os.environ.get("PUBLIC_URL", "https://trailhead-production-2049.up.railway.app")
 
 settings = Settings()

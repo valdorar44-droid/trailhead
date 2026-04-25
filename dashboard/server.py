@@ -21,7 +21,9 @@ from db.store import (
     save_trip, get_trip, add_community_pin, get_community_pins,
     save_audio_guide, get_audio_guide, get_cached, set_cached,
     create_user, get_user_by_email, get_user_by_id, get_user_by_referral_code,
-    add_credits, get_credit_history,
+    add_credits, deduct_credits, get_credit_history,
+    get_user_report_count_today, get_report_credits_today,
+    is_stripe_session_fulfilled, fulfill_stripe_purchase,
     create_report, get_reports_near, get_reports_along_route,
     upvote_report, downvote_report, confirm_report,
     get_leaderboard, is_reporter_restricted, check_and_update_streak,
@@ -31,6 +33,43 @@ from db.store import (
     get_all_trips, get_all_pins, delete_pin, ensure_admin_user,
     get_trail_dna, save_trail_dna, get_conversation, save_conversation, clear_conversation,
 )
+
+# ── Credit economy ─────────────────────────────────────────────────────────────
+
+AI_COSTS = {
+    "chat":             3,
+    "chat_edit":        5,
+    "campsite_insight": 5,
+    "route_brief":      8,
+    "packing_list":     5,
+    "audio_guide":      8,
+    "nearby_audio":     3,
+}
+
+CREDIT_PACKAGES = {
+    "starter":    {"credits": 100,  "price_cents": 299,  "label": "Starter",    "popular": False},
+    "explorer":   {"credits": 350,  "price_cents": 799,  "label": "Explorer",   "popular": True},
+    "overlander": {"credits": 1000, "price_cents": 1799, "label": "Overlander", "popular": False},
+    "trailhead":  {"credits": 3000, "price_cents": 3999, "label": "Trailhead+", "popular": False},
+}
+
+SIGNUP_BONUS       = 75
+DAILY_REPORT_LIMIT = 8     # max reports per user per day
+DAILY_REPORT_CREDITS_CAP = 50   # max credits/day from reports
+REPORT_CREDIT_BASE = 5     # credits for a plain report
+REPORT_CREDIT_PHOTO = 10   # credits for a report with photo
+
+
+def _plan_credit_cost(days: int) -> int:
+    if days <= 3:  return 15
+    if days <= 7:  return 25
+    if days <= 14: return 40
+    return 60
+
+
+def _require_ai(user: dict = Depends(None)) -> dict:
+    """Placeholder — replaced at endpoint level via lambda."""
+    return user
 
 app = FastAPI(title="Trailhead API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -133,8 +172,11 @@ async def register(body: RegisterRequest):
     code = f"{body.username.lower()}-{secrets.token_hex(3)}"
     uid = create_user(body.email, body.username, _hash_pw(body.password), code,
                       referred_by=referrer["id"] if referrer else None)
+    # Welcome bonus — enough for ~3 short AI trips to show off the product
+    add_credits(uid, SIGNUP_BONUS, "Welcome bonus")
     if referrer:
-        add_credits(referrer["id"], 50, f"Referral — {body.username} signed up!")
+        # Referral bonus paid to both parties; capped at 10 referrals lifetime via credit history check
+        add_credits(referrer["id"], 20, f"Referral — {body.username} signed up")
     return {"token": _make_token(uid), "user": _safe_user(get_user_by_id(uid))}
 
 @app.post("/api/auth/login")
@@ -206,11 +248,15 @@ class ChatRequest(BaseModel):
     current_trip: Optional[dict] = None
 
 @app.post("/api/chat")
-async def chat_endpoint(body: ChatRequest, user: dict | None = Depends(_optional_user)):
+async def chat_endpoint(body: ChatRequest, user: dict = Depends(_current_user)):
     if not body.message.strip():
         raise HTTPException(400, "Message cannot be empty")
     if not settings.anthropic_api_key:
         raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
+
+    cost = AI_COSTS["chat_edit"] if body.current_trip else AI_COSTS["chat"]
+    if not deduct_credits(user["id"], cost, f"AI chat"):
+        raise HTTPException(402, f"Not enough credits. This action costs {cost} credits.")
 
     session_id = body.session_id
     messages  = get_conversation(session_id)
@@ -278,10 +324,17 @@ async def chat_endpoint(body: ChatRequest, user: dict | None = Depends(_optional
 
 
 @app.post("/api/plan")
-async def plan(body: PlanRequest, user: dict | None = Depends(_optional_user)):
+async def plan(body: PlanRequest, user: dict = Depends(_current_user)):
     import anthropic as _anthropic
     if not settings.anthropic_api_key:
         raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
+
+    # Estimate days from request text to determine cost; we refund/adjust after AI responds
+    import re as _re
+    day_hint = int((_re.search(r'\b(\d+)\s*-?\s*day', body.request or '', _re.I) or [None, 7])[1])
+    cost = _plan_credit_cost(day_hint)
+    if not deduct_credits(user["id"], cost, f"AI trip plan (~{day_hint}d)"):
+        raise HTTPException(402, f"Not enough credits. A ~{day_hint}-day plan costs {cost} credits.")
 
     try:
         if body.session_id:
@@ -289,19 +342,29 @@ async def plan(body: PlanRequest, user: dict | None = Depends(_optional_user)):
             plan_data = plan_trip_from_conversation(msgs) if msgs else plan_trip(body.request or "")
         else:
             if not body.request.strip():
+                # Refund if no actual request
+                add_credits(user["id"], cost, "Refund — empty plan request")
                 raise HTTPException(400, "Request cannot be empty")
             plan_data = plan_trip(body.request)
     except HTTPException:
         raise
     except _anthropic.RateLimitError:
+        add_credits(user["id"], cost, "Refund — rate limit hit")
         raise HTTPException(429, "Rate limit hit — please wait 30 seconds and try again")
     except Exception as e:
+        add_credits(user["id"], cost, "Refund — planning error")
         raise HTTPException(500, f"AI planning failed: {e}")
 
-    # Save the raw trip immediately so it's recoverable even if geocoding times out
+    # Adjust charge to actual trip length
+    actual_days = plan_data.get("duration_days", day_hint)
+    actual_cost = _plan_credit_cost(actual_days)
+    if actual_cost != cost:
+        diff = cost - actual_cost
+        add_credits(user["id"], diff, f"Credit adjustment — actual trip is {actual_days} days")
+
     trip_id = str(uuid.uuid4())[:8]
     result_stub = {"trip_id": trip_id, "plan": plan_data, "campsites": [], "gas_stations": []}
-    save_trip(trip_id, body.request, result_stub, user_id=user["id"] if user else None)
+    save_trip(trip_id, body.request, result_stub, user_id=user["id"])
 
     geocoded = await _geocode_waypoints(plan_data.get("waypoints", []))
     plan_data["waypoints"] = geocoded
@@ -316,9 +379,7 @@ async def plan(body: PlanRequest, user: dict | None = Depends(_optional_user)):
     gas_stations = await get_gas_along_route(geocoded)
     result = {"trip_id": trip_id, "plan": plan_data,
               "campsites": campsites[:40], "gas_stations": gas_stations[:30]}
-    save_trip(trip_id, body.request, result, user_id=user["id"] if user else None)
-    if user:
-        add_credits(user["id"], 25, f"Trip planned: {plan_data.get('trip_name', 'Adventure')}")
+    save_trip(trip_id, body.request, result, user_id=user["id"])
     return result
 
 @app.get("/api/trip/{trip_id}")
@@ -329,17 +390,22 @@ async def get_trip_route(trip_id: str):
     return trip
 
 @app.get("/api/trip/{trip_id}/guide")
-async def trip_guide(trip_id: str):
-    """Return audio guide narrations for trip waypoints (generates + caches on first call)."""
+async def trip_guide(trip_id: str, user: dict = Depends(_current_user)):
+    """Return audio guide narrations for trip waypoints (generates + caches on first call).
+    Free if already cached; costs credits only on first generation."""
     cached = get_audio_guide(trip_id)
     if cached:
-        return cached
+        return cached  # already generated — serve free
 
     trip = get_trip(trip_id)
     if not trip:
         raise HTTPException(404, "Trip not found")
     if not settings.anthropic_api_key:
         raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
+
+    cost = AI_COSTS["audio_guide"]
+    if not deduct_credits(user["id"], cost, f"Audio guide — {trip_id}"):
+        raise HTTPException(402, f"Not enough credits. Audio guide costs {cost} credits.")
 
     from ai.planner import generate_audio_guide
     waypoints = trip.get("plan", {}).get("waypoints", [])
@@ -348,6 +414,7 @@ async def trip_guide(trip_id: str):
     try:
         guide = generate_audio_guide(waypoints, trip_name)
     except Exception as e:
+        add_credits(user["id"], cost, "Refund — audio guide error")
         raise HTTPException(500, f"Guide generation failed: {e}")
 
     save_audio_guide(trip_id, guide)
@@ -389,9 +456,12 @@ class NearbyAudioRequest(BaseModel):
     lat: float; lng: float; location_name: str = ""
 
 @app.post("/api/audio/nearby")
-async def nearby_audio(body: NearbyAudioRequest):
+async def nearby_audio(body: NearbyAudioRequest, user: dict = Depends(_current_user)):
     if not settings.anthropic_api_key:
         raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
+    cost = AI_COSTS["nearby_audio"]
+    if not deduct_credits(user["id"], cost, "Nearby audio narration"):
+        raise HTTPException(402, f"Not enough credits. This costs {cost} credits.")
     from ai.planner import generate_location_narration
     try:
         narration = generate_location_narration(body.lat, body.lng, body.location_name)
@@ -443,7 +513,7 @@ async def submit_pin(body: PinRequest, user: dict | None = Depends(_optional_use
                       body.description, body.land_type,
                       user_id=user["id"] if user else None)
     if user:
-        add_credits(user["id"], 15, f"New campsite pin: {body.name}")
+        add_credits(user["id"], 5, f"Community pin: {body.name}")
     return {"status": "ok"}
 
 @app.get("/api/pins")
@@ -463,23 +533,41 @@ class ReportRequest(BaseModel):
 
 @app.post("/api/reports")
 async def submit_report(body: ReportRequest, user: dict = Depends(_current_user)):
-    # Check restriction
+    import time as _time
+    # Check active restriction
     restricted, secs = is_reporter_restricted(user["id"])
     if restricted:
         hours = round(secs / 3600, 1)
         raise HTTPException(403, f"Reporting restricted for {hours} more hours due to inaccurate reports.")
 
+    # Anti-abuse: hard daily report cap
+    reports_today = get_user_report_count_today(user["id"])
+    if reports_today >= DAILY_REPORT_LIMIT:
+        raise HTTPException(429, f"Daily report limit reached ({DAILY_REPORT_LIMIT}/day). Thank you for your contributions!")
+
+    # Anti-abuse: new accounts (< 24h) can report but don't earn credits yet
+    account_age_h = (_time.time() - user.get("created_at", 0)) / 3600
+    credits_eligible = account_age_h >= 24
+
     report_id = create_report(user["id"], body.lat, body.lng, body.type,
                               body.subtype, body.description, body.severity,
                               photo_data=body.photo_data)
 
-    # Base credits: 10, double for photo
-    credits_earned = 20 if body.photo_data else 10
-    add_credits(user["id"], credits_earned,
-                f"{'Photo ' if body.photo_data else ''}Report: {body.type}")
+    credits_earned = 0
+    streak_info = {"streak": 0, "bonus": 0, "reason": ""}
 
-    # Streak check + bonus
-    streak_info = check_and_update_streak(user["id"])
+    if credits_eligible:
+        # Check daily credit cap from reports
+        report_credits_today = get_report_credits_today(user["id"])
+        base = REPORT_CREDIT_PHOTO if body.photo_data else REPORT_CREDIT_BASE
+        allowed = min(base, max(0, DAILY_REPORT_CREDITS_CAP - report_credits_today))
+        if allowed > 0:
+            add_credits(user["id"], allowed, f"Report: {body.type}{' (photo)' if body.photo_data else ''}")
+            credits_earned = allowed
+
+        streak_info = check_and_update_streak(user["id"])
+    else:
+        streak_info = {"streak": 0, "bonus": 0, "reason": "Account must be 24h old to earn report credits"}
 
     fresh_user = get_user_by_id(user["id"])
     return {
@@ -537,11 +625,114 @@ async def report_photo(report_id: int):
     return Response(content=data, media_type="image/jpeg")
 
 
-# ── Credits ───────────────────────────────────────────────────────────────────
+# ── Credits & Stripe ─────────────────────────────────────────────────────────
 
 @app.get("/api/credits")
 async def credits_route(user: dict = Depends(_current_user)):
     return {"balance": user["credits"], "history": get_credit_history(user["id"])}
+
+@app.get("/api/credits/packages")
+async def credit_packages():
+    return [
+        {"id": pid, **{k: v for k, v in pkg.items()},
+         "price_display": f"${pkg['price_cents']/100:.2f}"}
+        for pid, pkg in CREDIT_PACKAGES.items()
+    ]
+
+class CheckoutRequest(BaseModel):
+    package_id: str
+
+@app.post("/api/credits/checkout")
+async def create_checkout(body: CheckoutRequest, user: dict = Depends(_current_user)):
+    if not settings.stripe_secret_key:
+        raise HTTPException(503, "Payment system not configured. Contact support.")
+    pkg = CREDIT_PACKAGES.get(body.package_id)
+    if not pkg:
+        raise HTTPException(400, "Invalid package")
+    try:
+        import stripe as _stripe
+        _stripe.api_key = settings.stripe_secret_key
+        session = _stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            line_items=[{
+                "price_data": {
+                    "currency": "usd",
+                    "unit_amount": pkg["price_cents"],
+                    "product_data": {
+                        "name": f"Trailhead Credits — {pkg['label']}",
+                        "description": f"{pkg['credits']} trail credits for AI trip planning",
+                        "images": [f"{settings.public_url}/static/credits-icon.png"],
+                    },
+                },
+                "quantity": 1,
+            }],
+            mode="payment",
+            success_url=f"{settings.public_url}/credits/success?session_id={{CHECKOUT_SESSION_ID}}",
+            cancel_url=f"{settings.public_url}/credits/cancel",
+            metadata={
+                "user_id": str(user["id"]),
+                "package_id": body.package_id,
+                "credits": str(pkg["credits"]),
+                "username": user["username"],
+            },
+            customer_email=user["email"],
+        )
+        return {"url": session.url, "session_id": session.id}
+    except Exception as e:
+        raise HTTPException(500, f"Checkout error: {e}")
+
+from fastapi import Request as _Request
+
+@app.post("/api/credits/webhook")
+async def stripe_webhook(request: _Request):
+    payload = await request.body()
+    sig = request.headers.get("stripe-signature", "")
+    if not settings.stripe_webhook_secret:
+        raise HTTPException(503, "Webhook not configured")
+    try:
+        import stripe as _stripe
+        _stripe.api_key = settings.stripe_secret_key
+        event = _stripe.Webhook.construct_event(payload, sig, settings.stripe_webhook_secret)
+    except Exception:
+        raise HTTPException(400, "Invalid webhook signature")
+
+    if event["type"] == "checkout.session.completed":
+        sess = event["data"]["object"]
+        if sess.get("payment_status") == "paid":
+            meta = sess.get("metadata", {})
+            session_id = sess["id"]
+            try:
+                uid = int(meta.get("user_id", 0))
+                credits = int(meta.get("credits", 0))
+                pkg_id = meta.get("package_id", "")
+            except (ValueError, TypeError):
+                return {"received": True}
+            if uid and credits and not is_stripe_session_fulfilled(session_id):
+                add_credits(uid, credits, f"Purchased {pkg_id} pack — {credits} credits")
+                fulfill_stripe_purchase(session_id, uid, credits)
+
+    return {"received": True}
+
+@app.get("/credits/success", response_class=HTMLResponse)
+async def credits_success(session_id: str = ""):
+    return HTMLResponse("""<!DOCTYPE html><html><head><title>Payment Successful</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{font-family:system-ui;background:#0a0f18;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;}
+.card{text-align:center;padding:40px;border-radius:16px;background:#141c2b;max-width:400px;}
+h1{color:#f97316;font-size:28px;margin-bottom:8px;}p{color:#94a3b8;}</style></head>
+<body><div class="card"><h1>Credits Added!</h1>
+<p>Your trail credits have been added to your account. Return to the Trailhead app to start planning.</p>
+<p style="margin-top:24px;font-size:13px;color:#64748b;">You can close this window.</p></div></body></html>""")
+
+@app.get("/credits/cancel", response_class=HTMLResponse)
+async def credits_cancel():
+    return HTMLResponse("""<!DOCTYPE html><html><head><title>Checkout Cancelled</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{font-family:system-ui;background:#0a0f18;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;}
+.card{text-align:center;padding:40px;border-radius:16px;background:#141c2b;max-width:400px;}
+h1{color:#94a3b8;font-size:24px;}</style></head>
+<body><div class="card"><h1>Checkout Cancelled</h1>
+<p style="color:#64748b;">No charge was made. Return to the app to try again.</p></div></body></html>""")
 
 
 # ── Leaderboard ───────────────────────────────────────────────────────────────
@@ -809,15 +1000,20 @@ class CampsiteInsightRequest(BaseModel):
     description: str = ""; land_type: str = ""; amenities: list[str] = []
 
 @app.post("/api/ai/campsite-insight")
-async def campsite_insight(body: CampsiteInsightRequest):
-    """Generate AI-enriched campsite description with nearby context."""
+async def campsite_insight(body: CampsiteInsightRequest, user: dict = Depends(_current_user)):
+    """Generate AI-enriched campsite description with nearby context.
+    Served free from cache; costs credits only on first generation."""
     if not settings.anthropic_api_key:
         raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
 
     cache_key = f"ai_insight_{body.lat:.3f}_{body.lng:.3f}"
     cached = get_cached("campsite_cache", cache_key, ttl_seconds=3600 * 72)
     if cached:
-        return cached
+        return cached  # free if cached
+
+    cost = AI_COSTS["campsite_insight"]
+    if not deduct_credits(user["id"], cost, f"Campsite insight — {body.name}"):
+        raise HTTPException(402, f"Not enough credits. Campsite insights cost {cost} credits.")
 
     # Fetch Wikipedia and weather context in parallel
     wiki_task = wikipedia_nearby(body.lat, body.lng, radius=15000, limit=4)
@@ -849,14 +1045,18 @@ class RouteBriefRequest(BaseModel):
     trip_name: str; waypoints: list[dict]; reports: list[dict] = []
 
 @app.post("/api/ai/route-brief")
-async def route_brief(body: RouteBriefRequest):
+async def route_brief(body: RouteBriefRequest, user: dict = Depends(_current_user)):
     """AI safety and readiness briefing for an active trip."""
     if not settings.anthropic_api_key:
         raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
+    cost = AI_COSTS["route_brief"]
+    if not deduct_credits(user["id"], cost, f"Route brief — {body.trip_name}"):
+        raise HTTPException(402, f"Not enough credits. Route brief costs {cost} credits.")
     from ai.planner import generate_route_brief
     try:
         return generate_route_brief(body.trip_name, body.waypoints, body.reports)
     except Exception as e:
+        add_credits(user["id"], cost, "Refund — route brief error")
         raise HTTPException(500, str(e))
 
 
@@ -867,15 +1067,19 @@ class PackingRequest(BaseModel):
     land_types: list[str] = []; states: list[str] = []
 
 @app.post("/api/ai/packing-list")
-async def packing_list(body: PackingRequest):
+async def packing_list(body: PackingRequest, user: dict = Depends(_current_user)):
     """Generate a smart packing list based on trip parameters."""
     if not settings.anthropic_api_key:
         raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
+    cost = AI_COSTS["packing_list"]
+    if not deduct_credits(user["id"], cost, f"Packing list — {body.trip_name}"):
+        raise HTTPException(402, f"Not enough credits. Packing list costs {cost} credits.")
     from ai.planner import generate_packing_list
     try:
         return generate_packing_list(body.trip_name, body.duration_days,
                                      body.road_types, body.land_types, body.states)
     except Exception as e:
+        add_credits(user["id"], cost, "Refund — packing list error")
         raise HTTPException(500, str(e))
 
 

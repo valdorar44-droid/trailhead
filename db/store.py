@@ -60,12 +60,18 @@ def init_db():
             submitted_at INTEGER NOT NULL,
             upvotes      INTEGER NOT NULL DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS stripe_purchases (
+            session_id  TEXT PRIMARY KEY,
+            user_id     INTEGER NOT NULL,
+            credits     INTEGER NOT NULL,
+            created_at  INTEGER NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS users (
             id                       INTEGER PRIMARY KEY AUTOINCREMENT,
             email                    TEXT UNIQUE NOT NULL,
             username                 TEXT UNIQUE NOT NULL,
             password_hash            TEXT NOT NULL,
-            credits                  INTEGER NOT NULL DEFAULT 20,
+            credits                  INTEGER NOT NULL DEFAULT 0,
             referral_code            TEXT UNIQUE,
             referred_by              INTEGER,
             report_streak            INTEGER NOT NULL DEFAULT 0,
@@ -134,6 +140,7 @@ def init_db():
         "ALTER TABLE trips ADD COLUMN audio_guide TEXT",
         "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE trips ADD COLUMN user_id INTEGER",
+        "CREATE TABLE IF NOT EXISTS stripe_purchases (session_id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, credits INTEGER NOT NULL, created_at INTEGER NOT NULL)",
     ]:
         try:
             db.execute(sql)
@@ -275,6 +282,71 @@ def get_credit_history(user_id: int, limit: int = 20) -> list:
     ).fetchall()
     db.close()
     return [dict(r) for r in rows]
+
+
+def deduct_credits(user_id: int, amount: int, reason: str) -> bool:
+    """Atomically deduct credits. Returns False if insufficient balance."""
+    db = _conn()
+    try:
+        db.execute(
+            "UPDATE users SET credits=credits-? WHERE id=? AND credits>=?",
+            (amount, user_id, amount)
+        )
+        if db.execute("SELECT changes()").fetchone()[0] == 0:
+            return False
+        db.execute(
+            "INSERT INTO credit_transactions (user_id,amount,reason,created_at) VALUES (?,?,?,?)",
+            (user_id, -amount, reason, int(time.time()))
+        )
+        db.commit()
+        return True
+    except Exception:
+        return False
+    finally:
+        db.close()
+
+
+def get_user_report_count_today(user_id: int) -> int:
+    import datetime
+    today = datetime.date.today().isoformat()
+    db = _conn()
+    row = db.execute(
+        "SELECT COUNT(*) as cnt FROM reports WHERE user_id=? AND date(created_at,'unixepoch')=?",
+        (user_id, today)
+    ).fetchone()
+    db.close()
+    return row["cnt"] if row else 0
+
+
+def get_report_credits_today(user_id: int) -> int:
+    """Sum of credits earned from reports today — used to enforce daily cap."""
+    today_start = int(time.time()) - (int(time.time()) % 86400)
+    db = _conn()
+    row = db.execute(
+        """SELECT COALESCE(SUM(amount),0) as total FROM credit_transactions
+           WHERE user_id=? AND amount>0 AND reason LIKE 'Report%' AND created_at>=?""",
+        (user_id, today_start)
+    ).fetchone()
+    db.close()
+    return row["total"] if row else 0
+
+
+def is_stripe_session_fulfilled(session_id: str) -> bool:
+    db = _conn()
+    row = db.execute("SELECT 1 FROM stripe_purchases WHERE session_id=?", (session_id,)).fetchone()
+    db.close()
+    return row is not None
+
+
+def fulfill_stripe_purchase(session_id: str, user_id: int, credits: int):
+    db = _conn()
+    db.execute(
+        "INSERT OR IGNORE INTO stripe_purchases (session_id,user_id,credits,created_at) VALUES (?,?,?,?)",
+        (session_id, user_id, credits, int(time.time()))
+    )
+    db.commit()
+    db.close()
+
 
 def is_reporter_restricted(user_id: int) -> tuple[bool, int]:
     """Returns (restricted, seconds_remaining)."""

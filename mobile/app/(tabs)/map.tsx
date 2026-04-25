@@ -462,6 +462,7 @@ const buildMapHtml = (
   var routeOpts={avoidTolls:false,avoidHighways:false,backRoads:false,noFerries:false};
   var _routeCoords=[],routePts=[],breadcrumbPts=[];
   var lastOffCheck=0,downloadActive=false,mapReady=false,pendingMsgs=[];
+  var _searchDest=null; // {lat,lng} for single-dest nav so reroute works
   function postRN(o){try{window.ReactNativeWebView.postMessage(JSON.stringify(o));}catch(e){}}
 
   // ── Offline tile cache via Cache API + fetch intercept ────────────────────────
@@ -846,7 +847,7 @@ const buildMapHtml = (
     if(msg.type==='nav_center'&&msg.lat){lastSpeed=msg.speed!=null?msg.speed:lastSpeed;setUserPos(msg.lat,msg.lng,true,msg.zoom||17,msg.heading);}
     if(msg.type==='locate'&&msg.lat)setUserPos(msg.lat,msg.lng,true,13);
     if(msg.type==='nav_target')setNavTarget(msg.idx);
-    if(msg.type==='nav_reset'){setNavTarget(-1);_routeCoords=[];routePts=[];updateRoute();}
+    if(msg.type==='nav_reset'){setNavTarget(-1);_routeCoords=[];routePts=[];_searchDest=null;updateRoute();}
     if(msg.type==='fly_to'&&msg.lat){
       map.flyTo({center:[msg.lng,msg.lat],zoom:14,duration:600});
       if(searchMarker){searchMarker.remove();searchMarker=null;}
@@ -866,12 +867,13 @@ const buildMapHtml = (
     if(msg.type==='clear_pois'){allPois=[];updatePoiSrc();}
     if(msg.type==='set_route_opts')Object.assign(routeOpts,msg.opts||{});
     if(msg.type==='start_route_from'&&msg.lat)loadRouteFrom(msg.lat,msg.lng,msg.fromIdx||0);
-    if(msg.type==='reroute_from'&&msg.lat){_routeCoords=[];routePts=[];routeIsProper=false;lastOffCheck=Date.now();loadRouteFrom(msg.lat,msg.lng,msg.fromIdx||0);}
+    if(msg.type==='reroute_from'&&msg.lat){_routeCoords=[];routePts=[];routeIsProper=false;lastOffCheck=Date.now();if(!wps.length&&_searchDest){_fetchRoute([msg.lng+','+msg.lat,_searchDest.lng+','+_searchDest.lat],0);}else{loadRouteFrom(msg.lat,msg.lng,msg.fromIdx||0);}}
     if(msg.type==='route_to_search'&&msg.lat){
       if(searchMarker){searchMarker.remove();searchMarker=null;}
       var el2=document.createElement('div');el2.className='mk-search';el2.textContent='📍';
       searchMarker=new mapboxgl.Marker({element:el2}).setLngLat([msg.lng,msg.lat]).setPopup(new mapboxgl.Popup({offset:18,closeButton:false}).setHTML('<div class="pt">'+(msg.name||'Destination')+'</div>')).addTo(map);
       searchMarker.togglePopup();
+      _searchDest={lat:msg.lat,lng:msg.lng};
       _fetchRoute([msg.userLng+','+msg.userLat,msg.lng+','+msg.lat],0);
     }
     if(msg.type==='set_reports'){allReports=msg.reports||[];updateReportMarkers();}
@@ -1179,9 +1181,10 @@ export default function MapScreen() {
                   stepAnnouncedRef.current.add(farKey);
                   Speech.speak(buildAnnouncement(cur, distM, 'far'), { rate: 0.88, pitch: 1.05, language: 'en-US' });
                 }
-                // Near announcement (e.g. "Turn right on I-95 in 300 feet")
+                // Near announcement — stop far cue mid-play so this fires immediately
                 if (distM < nearDist && !stepAnnouncedRef.current.has(nearKey)) {
                   stepAnnouncedRef.current.add(nearKey);
+                  Speech.stop();
                   Speech.speak(buildAnnouncement(cur, distM, 'near'), { rate: 0.88, pitch: 1.05, language: 'en-US' });
                 }
               }
@@ -1403,6 +1406,13 @@ export default function MapScreen() {
       alertedRepIdsRef.current.clear();
       if (approachDismissRef.current) clearTimeout(approachDismissRef.current);
       setRouteLegOffset(0);
+      // Restore search card so user can re-navigate without retyping
+      const prevDest = navDestRef.current;
+      if (prevDest && waypoints.length === 0) {
+        const dist = userLoc ? haversineKm(userLoc.lat, userLoc.lng, prevDest.lat, prevDest.lng) : null;
+        setSearchRouteCard({ lat: prevDest.lat, lng: prevDest.lng, name: prevDest.name, dist });
+        setShowSearch(true);
+      }
       navDestRef.current = null;
       setNavDest(null);
       webRef.current?.postMessage(JSON.stringify({ type: 'nav_reset' }));

@@ -250,15 +250,16 @@ class ChatRequest(BaseModel):
     current_trip: Optional[dict] = None
 
 @app.post("/api/chat")
-async def chat_endpoint(body: ChatRequest, user: dict = Depends(_current_user)):
+async def chat_endpoint(body: ChatRequest, user: dict = Depends(_optional_user)):
     if not body.message.strip():
         raise HTTPException(400, "Message cannot be empty")
     if not settings.anthropic_api_key:
         raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
 
-    cost = AI_COSTS["chat_edit"] if body.current_trip else AI_COSTS["chat"]
-    if not deduct_credits(user["id"], cost, f"AI chat"):
-        raise HTTPException(402, f"Not enough credits. This action costs {cost} credits.")
+    if user:
+        cost = AI_COSTS["chat_edit"] if body.current_trip else AI_COSTS["chat"]
+        if not deduct_credits(user["id"], cost, f"AI chat"):
+            raise HTTPException(402, f"Not enough credits. This action costs {cost} credits.")
 
     session_id = body.session_id
     messages  = get_conversation(session_id)
@@ -326,7 +327,7 @@ async def chat_endpoint(body: ChatRequest, user: dict = Depends(_current_user)):
 
 
 @app.post("/api/plan")
-async def plan(body: PlanRequest, user: dict = Depends(_current_user)):
+async def plan(body: PlanRequest, user: dict = Depends(_optional_user)):
     import anthropic as _anthropic
     if not settings.anthropic_api_key:
         raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
@@ -334,9 +335,12 @@ async def plan(body: PlanRequest, user: dict = Depends(_current_user)):
     # Estimate days from request text to determine cost; we refund/adjust after AI responds
     import re as _re
     day_hint = int((_re.search(r'\b(\d+)\s*-?\s*day', body.request or '', _re.I) or [None, 7])[1])
-    cost = _plan_credit_cost(day_hint)
-    if not deduct_credits(user["id"], cost, f"AI trip plan (~{day_hint}d)"):
-        raise HTTPException(402, f"Not enough credits. A ~{day_hint}-day plan costs {cost} credits.")
+    if user:
+        cost = _plan_credit_cost(day_hint)
+        if not deduct_credits(user["id"], cost, f"AI trip plan (~{day_hint}d)"):
+            raise HTTPException(402, f"Not enough credits. A ~{day_hint}-day plan costs {cost} credits.")
+    else:
+        cost = 0
 
     try:
         if body.session_id:
@@ -344,29 +348,29 @@ async def plan(body: PlanRequest, user: dict = Depends(_current_user)):
             plan_data = plan_trip_from_conversation(msgs) if msgs else plan_trip(body.request or "")
         else:
             if not body.request.strip():
-                # Refund if no actual request
-                add_credits(user["id"], cost, "Refund — empty plan request")
+                if user: add_credits(user["id"], cost, "Refund — empty plan request")
                 raise HTTPException(400, "Request cannot be empty")
             plan_data = plan_trip(body.request)
     except HTTPException:
         raise
     except _anthropic.RateLimitError:
-        add_credits(user["id"], cost, "Refund — rate limit hit")
+        if user: add_credits(user["id"], cost, "Refund — rate limit hit")
         raise HTTPException(429, "Rate limit hit — please wait 30 seconds and try again")
     except Exception as e:
-        add_credits(user["id"], cost, "Refund — planning error")
+        if user: add_credits(user["id"], cost, "Refund — planning error")
         raise HTTPException(500, f"AI planning failed: {e}")
 
     # Adjust charge to actual trip length
-    actual_days = plan_data.get("duration_days", day_hint)
-    actual_cost = _plan_credit_cost(actual_days)
-    if actual_cost != cost:
-        diff = cost - actual_cost
-        add_credits(user["id"], diff, f"Credit adjustment — actual trip is {actual_days} days")
+    if user and cost > 0:
+        actual_days = plan_data.get("duration_days", day_hint)
+        actual_cost = _plan_credit_cost(actual_days)
+        if actual_cost != cost:
+            diff = cost - actual_cost
+            add_credits(user["id"], diff, f"Credit adjustment — actual trip is {actual_days} days")
 
     trip_id = str(uuid.uuid4())[:8]
     result_stub = {"trip_id": trip_id, "plan": plan_data, "campsites": [], "gas_stations": []}
-    save_trip(trip_id, body.request, result_stub, user_id=user["id"])
+    save_trip(trip_id, body.request, result_stub, user_id=user["id"] if user else None)
 
     geocoded = await _geocode_waypoints(plan_data.get("waypoints", []))
     plan_data["waypoints"] = geocoded
@@ -381,7 +385,7 @@ async def plan(body: PlanRequest, user: dict = Depends(_current_user)):
     gas_stations = await get_gas_along_route(geocoded)
     result = {"trip_id": trip_id, "plan": plan_data,
               "campsites": campsites[:40], "gas_stations": gas_stations[:30]}
-    save_trip(trip_id, body.request, result, user_id=user["id"])
+    save_trip(trip_id, body.request, result, user_id=user["id"] if user else None)
     return result
 
 @app.get("/api/trip/{trip_id}")
@@ -527,7 +531,7 @@ async def api_fullness_nearby(lat: float, lng: float, radius: float = 0.5):
 @app.get("/api/camps/{camp_id}/fullness")
 async def api_camp_fullness(camp_id: str):
     result = get_camp_fullness(camp_id)
-    return result if result else {}
+    return result if result else None
 
 
 # ── Community pins ─────────────────────────────────────────────────────────────

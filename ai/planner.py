@@ -197,9 +197,10 @@ def generate_audio_guide(waypoints: list[dict], trip_name: str) -> dict:
         for w in geocoded
     )
 
+    # Haiku handles creative prose narrations well and is 10x cheaper than Sonnet
     msg = _claude(lambda: client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=3000,
+        model="claude-haiku-4-5-20251001",
+        max_tokens=4096,
         messages=[{"role": "user", "content": f"""You are a trail guide riding along on the overlanding trip "{trip_name}".
 
 For each waypoint below, write a spoken narration (3-5 sentences) for text-to-speech audio while driving.
@@ -396,8 +397,9 @@ def chat_guide(messages: list[dict], trail_dna: dict | None = None) -> dict:
         if lines:
             system += "\n\nUSER PROFILE (personalize without asking them to repeat):\n" + "\n".join(lines)
 
+    # Haiku handles conversational turns well — Sonnet only needed for final JSON generation
     msg = _claude(lambda: client.messages.create(
-        model="claude-sonnet-4-6",
+        model="claude-haiku-4-5-20251001",
         max_tokens=2000,
         system=system,
         messages=messages,
@@ -485,15 +487,42 @@ def plan_trip_from_conversation(messages: list[dict]) -> dict:
         raise ValueError(f"Claude returned non-JSON: {raw[:200]}")
 
 
-def plan_trip(user_request: str) -> dict:
-    msg = _claude(lambda: client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=8192,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_request}]
-    ))
-    raw = msg.content[0].text.strip()
+def _parse_plan_json(raw: str) -> dict:
+    raw = re.sub(r'^```json\s*', '', raw.strip())
+    raw = re.sub(r'^```\s*', '', raw)
+    raw = re.sub(r'\s*```$', '', raw).strip()
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        match = re.search(r'\{.*\}', raw, re.DOTALL)
+        if match:
+            return json.loads(match.group())
+        raise ValueError(f"Non-JSON response: {raw[:200]}")
 
+
+def plan_trip(user_request: str) -> dict:
+    # Short trips (≤3 days) use Haiku — simpler JSON, reliable output, 10x cheaper.
+    # Longer trips go straight to Sonnet for richer detail and reliability.
+    import re as _re
+    day_hint = int((_re.search(r'\b(\d+)\s*-?\s*day', user_request, _re.I) or [None, 5])[1])
+    use_haiku = day_hint <= 3
+
+    def _call(model: str) -> str:
+        msg = _claude(lambda: client.messages.create(
+            model=model,
+            max_tokens=8192 if model.startswith("claude-sonnet") else 4096,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_request}]
+        ))
+        return msg.content[0].text.strip()
+
+    if use_haiku:
+        try:
+            return _parse_plan_json(_call("claude-haiku-4-5-20251001"))
+        except Exception:
+            pass  # fall through to Sonnet
+
+    raw = _call("claude-sonnet-4-6")
     # Strip markdown code fences if Claude wraps it anyway
     raw = re.sub(r'^```json\s*', '', raw)
     raw = re.sub(r'^```\s*', '', raw)

@@ -42,7 +42,7 @@
       "package": "com.trailhead.app",
       "config": {
         "googleMaps": {
-          "apiKey": "AIzaSyD-placeholder-replace-with-real-key"
+          "apiKey": "AIzaSyDXhz92yE29B5Q3ZdRdxgalcN59MYFFjJU"
         }
       },
       "permissions": [

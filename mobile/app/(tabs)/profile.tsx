@@ -1,7 +1,7 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  TextInput, Alert, Share, Linking, ActivityIndicator, Image, Modal,
+  TextInput, Alert, Share, Linking, ActivityIndicator, Image, Modal, Animated, Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -93,6 +93,8 @@ export default function ProfileScreen() {
   const favoriteCamps  = useStore(st => st.favoriteCamps);
   const toggleFavorite = useStore(st => st.toggleFavorite);
   const [view, setView] = useState<'main' | 'login' | 'register'>(!user ? 'login' : 'main');
+  const [authSuccess, setAuthSuccess] = useState('');  // brief success message before switching to main
+  const authFade = useRef(new Animated.Value(1)).current;
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -122,10 +124,19 @@ export default function ProfileScreen() {
   const [offlineCachedIds, setOfflineCachedIds] = useState<Set<string>>(new Set());
   const setActiveTrip = useStore(st => st.setActiveTrip);
 
-  // Update view once session is restored from SecureStore
-  useEffect(() => {
-    if (user && view !== 'main') setView('main');
-  }, [user]);
+  // Smooth auth → main transition: dismiss keyboard, show success flash, fade out, switch view
+  function transitionToMain(successMsg: string) {
+    Keyboard.dismiss();
+    setAuthSuccess(successMsg);
+    setLoading(false);
+    setTimeout(() => {
+      Animated.timing(authFade, { toValue: 0, duration: 280, useNativeDriver: true }).start(() => {
+        setView('main');
+        authFade.setValue(1);
+        setAuthSuccess('');
+      });
+    }, 700);
+  }
 
   // Sync draft when rigProfile loads from SecureStore
   useEffect(() => {
@@ -152,9 +163,11 @@ export default function ProfileScreen() {
     try {
       const res = await api.login(email, password);
       setAuth(res.token, res.user);
-      setView('main');
-    } catch (e: any) { Alert.alert('Login failed', e.message); }
-    finally { setLoading(false); }
+      transitionToMain(`Welcome back, ${res.user.username}!`);
+    } catch (e: any) {
+      setLoading(false);
+      Alert.alert('Login failed', e.message);
+    }
   }
 
   async function register() {
@@ -163,10 +176,11 @@ export default function ProfileScreen() {
     try {
       const res = await api.register(email, username, password, refCode);
       setAuth(res.token, res.user);
-      setView('main');
-      Alert.alert('Welcome to Trailhead!', 'You\'ve been given 50 free credits — enough to plan your first couple of trips. Earn more by submitting trail reports!');
-    } catch (e: any) { Alert.alert('Registration failed', e.message); }
-    finally { setLoading(false); }
+      transitionToMain(`Welcome to Trailhead, ${res.user.username}! 50 credits added.`);
+    } catch (e: any) {
+      setLoading(false);
+      Alert.alert('Registration failed', e.message);
+    }
   }
 
   async function loadHistory() {
@@ -264,66 +278,84 @@ export default function ProfileScreen() {
 
   if (view === 'login') return (
     <SafeAreaView style={s.container}>
-      <ScrollView contentContainerStyle={s.authScroll} keyboardShouldPersistTaps="handled">
-        <View style={s.authBrand}>
-          <Image source={require('@/assets/icon.png')} style={s.authIcon} />
-          <View>
-            <Text style={s.authWordmark}>TRAILHEAD</Text>
-            <Text style={s.authTagline}>AI OVERLAND GUIDE</Text>
+      <Animated.View style={{ flex: 1, opacity: authFade }}>
+        {authSuccess ? (
+          <View style={s.authSuccessWrap}>
+            <Ionicons name="checkmark-circle" size={52} color="#22c55e" />
+            <Text style={s.authSuccessText}>{authSuccess}</Text>
           </View>
-        </View>
-        <Text style={s.authHeading}>Welcome back</Text>
-        <Text style={s.authSub}>Sign in to plan trips, earn credits, and track your reports.</Text>
-        <View style={s.authFields}>
-          <TextInput style={s.input} placeholder="Email" placeholderTextColor={C.text3}
-            value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
-          <TextInput style={s.input} placeholder="Password" placeholderTextColor={C.text3}
-            value={password} onChangeText={setPassword} secureTextEntry />
-        </View>
-        <TouchableOpacity style={[s.btn, loading && s.btnDisabled]} onPress={login} disabled={loading}>
-          <Text style={s.btnText}>{loading ? 'SIGNING IN...' : 'SIGN IN'}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={s.switchRow} onPress={() => setView('register')}>
-          <Text style={s.switchText}>No account?</Text>
-          <Text style={s.switchLink}> Create one →</Text>
-        </TouchableOpacity>
-      </ScrollView>
+        ) : (
+          <ScrollView contentContainerStyle={s.authScroll} keyboardShouldPersistTaps="handled">
+            <View style={s.authBrand}>
+              <Image source={require('@/assets/icon.png')} style={s.authIcon} />
+              <View>
+                <Text style={s.authWordmark}>TRAILHEAD</Text>
+                <Text style={s.authTagline}>AI OVERLAND GUIDE</Text>
+              </View>
+            </View>
+            <Text style={s.authHeading}>Welcome back</Text>
+            <Text style={s.authSub}>Sign in to plan trips, earn credits, and track your reports.</Text>
+            <View style={s.authFields}>
+              <TextInput style={s.input} placeholder="Email" placeholderTextColor={C.text3}
+                value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
+              <TextInput style={s.input} placeholder="Password" placeholderTextColor={C.text3}
+                value={password} onChangeText={setPassword} secureTextEntry />
+            </View>
+            <TouchableOpacity style={[s.btn, loading && s.btnDisabled]} onPress={login} disabled={loading}>
+              <Text style={s.btnText}>{loading ? 'SIGNING IN...' : 'SIGN IN'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={s.switchRow} onPress={() => setView('register')}>
+              <Text style={s.switchText}>No account?</Text>
+              <Text style={s.switchLink}> Create one →</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        )}
+      </Animated.View>
     </SafeAreaView>
   );
 
   if (view === 'register') return (
     <SafeAreaView style={s.container}>
-      <ScrollView contentContainerStyle={s.authScroll} keyboardShouldPersistTaps="handled">
-        <View style={s.authBrand}>
-          <Image source={require('@/assets/icon.png')} style={s.authIcon} />
-          <View>
-            <Text style={s.authWordmark}>TRAILHEAD</Text>
-            <Text style={s.authTagline}>AI OVERLAND GUIDE</Text>
+      <Animated.View style={{ flex: 1, opacity: authFade }}>
+        {authSuccess ? (
+          <View style={s.authSuccessWrap}>
+            <Ionicons name="checkmark-circle" size={52} color="#22c55e" />
+            <Text style={s.authSuccessText}>{authSuccess}</Text>
           </View>
-        </View>
-        <Text style={s.authHeading}>Create account</Text>
-        <View style={s.signupPerk}>
-          <Ionicons name="flash" size={14} color={C.orange} />
-          <Text style={s.signupPerkText}>50 free credits on signup + earn more by contributing to the map</Text>
-        </View>
-        <View style={s.authFields}>
-          <TextInput style={s.input} placeholder="Email" placeholderTextColor={C.text3}
-            value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
-          <TextInput style={s.input} placeholder="Username" placeholderTextColor={C.text3}
-            value={username} onChangeText={setUsername} autoCapitalize="none" />
-          <TextInput style={s.input} placeholder="Password" placeholderTextColor={C.text3}
-            value={password} onChangeText={setPassword} secureTextEntry />
-          <TextInput style={s.input} placeholder="Referral code (optional)" placeholderTextColor={C.text3}
-            value={refCode} onChangeText={setRefCode} autoCapitalize="none" />
-        </View>
-        <TouchableOpacity style={[s.btn, loading && s.btnDisabled]} onPress={register} disabled={loading}>
-          <Text style={s.btnText}>{loading ? 'CREATING...' : 'CREATE ACCOUNT'}</Text>
+        ) : (
+          <ScrollView contentContainerStyle={s.authScroll} keyboardShouldPersistTaps="handled">
+            <View style={s.authBrand}>
+              <Image source={require('@/assets/icon.png')} style={s.authIcon} />
+              <View>
+                <Text style={s.authWordmark}>TRAILHEAD</Text>
+                <Text style={s.authTagline}>AI OVERLAND GUIDE</Text>
+              </View>
+            </View>
+            <Text style={s.authHeading}>Create account</Text>
+            <View style={s.signupPerk}>
+              <Ionicons name="flash" size={14} color={C.orange} />
+              <Text style={s.signupPerkText}>50 free credits on signup + earn more by contributing to the map</Text>
+            </View>
+            <View style={s.authFields}>
+              <TextInput style={s.input} placeholder="Email" placeholderTextColor={C.text3}
+                value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
+              <TextInput style={s.input} placeholder="Username" placeholderTextColor={C.text3}
+                value={username} onChangeText={setUsername} autoCapitalize="none" />
+              <TextInput style={s.input} placeholder="Password" placeholderTextColor={C.text3}
+                value={password} onChangeText={setPassword} secureTextEntry />
+              <TextInput style={s.input} placeholder="Referral code (optional)" placeholderTextColor={C.text3}
+                value={refCode} onChangeText={setRefCode} autoCapitalize="none" />
+            </View>
+            <TouchableOpacity style={[s.btn, loading && s.btnDisabled]} onPress={register} disabled={loading}>
+              <Text style={s.btnText}>{loading ? 'CREATING...' : 'CREATE ACCOUNT'}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={s.switchRow} onPress={() => setView('login')}>
           <Text style={s.switchText}>Have an account?</Text>
           <Text style={s.switchLink}> Sign in →</Text>
         </TouchableOpacity>
       </ScrollView>
+        )}
+      </Animated.View>
     </SafeAreaView>
   );
 
@@ -1130,6 +1162,8 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
   scroll: { padding: 14, gap: 14, paddingBottom: 40 },
 
+  authSuccessWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16, padding: 32 },
+  authSuccessText: { color: '#22c55e', fontSize: 17, fontWeight: '700', textAlign: 'center', lineHeight: 24 },
   authScroll: { flexGrow: 1, justifyContent: 'center', padding: 28, gap: 14 },
   authBrand: {
     flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8,

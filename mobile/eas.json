@@ -24,6 +24,9 @@
       "ios": {
         "image": "latest"
       },
+      "android": {
+        "image": "latest"
+      },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://trailhead-production-2049.up.railway.app"
       }

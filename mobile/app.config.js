@@ -3,7 +3,7 @@ module.exports = {
     name: 'Trailhead',
     slug: 'trailhead',
     version: '1.0.0',
-    runtimeVersion: { policy: 'appVersion' },
+    runtimeVersion: '1.0.0',
     updates: { url: 'https://u.expo.dev/92c016d2-6e63-480e-a483-a6898d7e77d5' },
     orientation: 'portrait',
     icon: './assets/icon.png',

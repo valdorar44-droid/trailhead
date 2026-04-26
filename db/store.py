@@ -180,6 +180,25 @@ def init_db():
             created_at INTEGER NOT NULL,
             UNIQUE(report_id, user_id, action)
         );
+        CREATE TABLE IF NOT EXISTS camp_field_reports (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            camp_id          TEXT NOT NULL,
+            camp_name        TEXT NOT NULL,
+            lat              REAL NOT NULL,
+            lng              REAL NOT NULL,
+            user_id          INTEGER NOT NULL REFERENCES users(id),
+            username         TEXT NOT NULL,
+            rig_label        TEXT,
+            visited_date     TEXT NOT NULL,
+            sentiment        TEXT NOT NULL,
+            access_condition TEXT NOT NULL,
+            crowd_level      TEXT NOT NULL,
+            tags             TEXT NOT NULL DEFAULT '[]',
+            note             TEXT,
+            photo_data       TEXT,
+            credits_earned   INTEGER NOT NULL DEFAULT 0,
+            created_at       INTEGER NOT NULL
+        );
     """)
     # Performance indexes (IF NOT EXISTS is safe to re-run)
     for idx_sql in [
@@ -233,6 +252,25 @@ def init_db():
             action     TEXT NOT NULL,
             created_at INTEGER NOT NULL,
             UNIQUE(report_id, user_id, action)
+        )""",
+        """CREATE TABLE IF NOT EXISTS camp_field_reports (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            camp_id          TEXT NOT NULL,
+            camp_name        TEXT NOT NULL,
+            lat              REAL NOT NULL,
+            lng              REAL NOT NULL,
+            user_id          INTEGER NOT NULL REFERENCES users(id),
+            username         TEXT NOT NULL,
+            rig_label        TEXT,
+            visited_date     TEXT NOT NULL,
+            sentiment        TEXT NOT NULL,
+            access_condition TEXT NOT NULL,
+            crowd_level      TEXT NOT NULL,
+            tags             TEXT NOT NULL DEFAULT '[]',
+            note             TEXT,
+            photo_data       TEXT,
+            credits_earned   INTEGER NOT NULL DEFAULT 0,
+            created_at       INTEGER NOT NULL
         )""",
     ]:
         try:
@@ -1134,3 +1172,73 @@ def update_plan_job(job_id: str, status: str, result: str | None = None, error: 
         (status, result, error, time.time(), job_id)
     )
     db.commit(); db.close()
+
+
+# ── Camp Field Reports ────────────────────────────────────────────────────────
+
+FIELD_REPORT_CREDITS = 5   # base
+FIELD_REPORT_PHOTO_BONUS = 5
+
+def submit_field_report(camp_id: str, camp_name: str, lat: float, lng: float,
+                         user_id: int, username: str, rig_label: str | None,
+                         visited_date: str, sentiment: str, access_condition: str,
+                         crowd_level: str, tags: list[str], note: str | None,
+                         photo_data: str | None) -> dict:
+    db = _conn()
+    credits = FIELD_REPORT_CREDITS + (FIELD_REPORT_PHOTO_BONUS if photo_data else 0)
+    now = int(time.time())
+    db.execute(
+        """INSERT INTO camp_field_reports
+           (camp_id,camp_name,lat,lng,user_id,username,rig_label,visited_date,
+            sentiment,access_condition,crowd_level,tags,note,photo_data,credits_earned,created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (camp_id, camp_name, lat, lng, user_id, username, rig_label, visited_date,
+         sentiment, access_condition, crowd_level, json.dumps(tags), note,
+         photo_data, credits, now)
+    )
+    db.execute("UPDATE users SET credits=credits+? WHERE id=?", (credits, user_id))
+    db.execute("INSERT INTO credit_transactions (user_id,amount,reason,created_at) VALUES (?,?,?,?)",
+               (user_id, credits, f"Field report for {camp_name}", now))
+    db.commit(); db.close()
+    return {"credits_earned": credits}
+
+def get_field_reports(camp_id: str) -> list[dict]:
+    db = _conn()
+    rows = db.execute(
+        """SELECT id,username,rig_label,visited_date,sentiment,access_condition,
+                  crowd_level,tags,note,photo_data,created_at
+           FROM camp_field_reports WHERE camp_id=?
+           ORDER BY created_at DESC LIMIT 50""",
+        (camp_id,)
+    ).fetchall()
+    db.close()
+    result = []
+    for r in rows:
+        d = dict(r)
+        d['tags'] = json.loads(d['tags'] or '[]')
+        d['has_photo'] = bool(d.pop('photo_data'))
+        result.append(d)
+    return result
+
+def get_field_report_summary(camp_id: str) -> dict:
+    db = _conn()
+    rows = db.execute(
+        "SELECT sentiment, tags, crowd_level, access_condition, visited_date FROM camp_field_reports WHERE camp_id=? ORDER BY created_at DESC",
+        (camp_id,)
+    ).fetchall()
+    db.close()
+    if not rows:
+        return {"count": 0, "sentiment_counts": {}, "top_tags": [], "last_visited": None}
+    sentiment_counts: dict[str, int] = {}
+    tag_counts: dict[str, int] = {}
+    for r in rows:
+        sentiment_counts[r["sentiment"]] = sentiment_counts.get(r["sentiment"], 0) + 1
+        for t in json.loads(r["tags"] or "[]"):
+            tag_counts[t] = tag_counts.get(t, 0) + 1
+    top_tags = sorted(tag_counts.items(), key=lambda x: -x[1])[:8]
+    return {
+        "count": len(rows),
+        "sentiment_counts": sentiment_counts,
+        "top_tags": [{"tag": t, "count": c} for t, c in top_tags],
+        "last_visited": rows[0]["visited_date"] if rows else None,
+    }

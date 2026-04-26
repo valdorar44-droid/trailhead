@@ -13,7 +13,8 @@ const deactivateKeepAwake    = () => _keepAwake && _keepAwake.deactivateKeepAwak
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useStore } from '@/lib/store';
-import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck } from '@/lib/api';
+import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd } from '@/lib/api';
+import * as ImagePicker from 'expo-image-picker';
 import PaywallModal from '@/components/PaywallModal';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 import { useConnectivitySync } from '@/lib/connectivitySync';
@@ -1183,6 +1184,18 @@ function MapScreen() {
   const [campDetail,    setCampDetail]    = useState<CampsiteDetail | null>(null);
   const [showCampDetail,setShowCampDetail] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
+
+  // Field reports
+  const [fieldReports,      setFieldReports]      = useState<CampFieldReport[]>([]);
+  const [fieldReportSummary,setFieldReportSummary] = useState<FieldReportSummary | null>(null);
+  const [showFieldReportForm, setShowFieldReportForm] = useState(false);
+  const [frSentiment,  setFrSentiment]  = useState<FieldReportSentiment | null>(null);
+  const [frAccess,     setFrAccess]     = useState<FieldReportAccess | null>(null);
+  const [frCrowd,      setFrCrowd]      = useState<FieldReportCrowd | null>(null);
+  const [frTags,       setFrTags]       = useState<string[]>([]);
+  const [frNote,       setFrNote]       = useState('');
+  const [frPhoto,      setFrPhoto]      = useState<string | null>(null);
+  const [frSubmitting, setFrSubmitting] = useState(false);
   const [isSearchingCamps, setIsSearchingCamps] = useState(false);
   const [paywallVisible, setPaywallVisible] = useState(false);
   const [paywallCode, setPaywallCode] = useState('');
@@ -2121,19 +2134,66 @@ function MapScreen() {
     setLoadingDetail(true);
     setCampInsight(null);
     setWikiArticles([]);
+    setFieldReports([]);
+    setFieldReportSummary(null);
+    setShowFieldReportForm(false);
+    resetFieldReportForm();
     try {
       const d = await api.getCampsiteDetail(selectedCamp.id);
       setCampDetail(d);
       setShowCampDetail(true);
-      // Load AI insight + Wikipedia in background after modal opens
       openCampInsight();
     } catch {
-      // OSM pins don't have RIDB detail — show quick card data as detail
       setCampDetail(selectedCamp as any);
       setShowCampDetail(true);
       openCampInsight();
     }
     setLoadingDetail(false);
+    // Load field reports in background
+    api.getFieldReports(selectedCamp.id).then(setFieldReports).catch(() => {});
+    api.getFieldReportSummary(selectedCamp.id).then(setFieldReportSummary).catch(() => {});
+  }
+
+  function resetFieldReportForm() {
+    setFrSentiment(null); setFrAccess(null); setFrCrowd(null);
+    setFrTags([]); setFrNote(''); setFrPhoto(null);
+  }
+
+  async function pickFieldReportPhoto() {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') return;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true, quality: 0.5, base64: true,
+    });
+    if (!result.canceled && result.assets[0].base64) setFrPhoto(result.assets[0].base64);
+  }
+
+  async function submitFieldReport() {
+    if (!selectedCamp || !frSentiment || !frAccess || !frCrowd) return;
+    setFrSubmitting(true);
+    try {
+      const rigLabel = rigProfile?.make && rigProfile?.model
+        ? `${rigProfile.year ? rigProfile.year + ' ' : ''}${rigProfile.make} ${rigProfile.model}`
+        : undefined;
+      const today = new Date().toISOString().split('T')[0];
+      const res = await api.submitFieldReport(selectedCamp.id, {
+        camp_name: selectedCamp.name, lat: selectedCamp.lat, lng: selectedCamp.lng,
+        rig_label: rigLabel, visited_date: today,
+        sentiment: frSentiment, access_condition: frAccess, crowd_level: frCrowd,
+        tags: frTags, note: frNote || undefined, photo_data: frPhoto ?? undefined,
+      });
+      setQuickToast(`+${res.credits_earned} credits`);
+      setTimeout(() => setQuickToast(''), 2500);
+      setShowFieldReportForm(false);
+      resetFieldReportForm();
+      // Refresh lists
+      api.getFieldReports(selectedCamp.id).then(setFieldReports).catch(() => {});
+      api.getFieldReportSummary(selectedCamp.id).then(setFieldReportSummary).catch(() => {});
+    } catch (e: any) {
+      Alert.alert('Error', e.message ?? 'Could not submit field report');
+    }
+    setFrSubmitting(false);
   }
 
   // ── Stable map HTML (only rebuilds on trip/pins change) ─────────────────────
@@ -2999,6 +3059,179 @@ function MapScreen() {
                     ))}
                   </View>
                 )}
+
+                {/* ── Field Reports ── */}
+                <View style={s.detailSection}>
+                  <View style={s.frHeader}>
+                    <Text style={s.detailSectionTitle}>FIELD REPORTS</Text>
+                    {fieldReportSummary && fieldReportSummary.count > 0 && (
+                      <Text style={s.frCount}>{fieldReportSummary.count} {fieldReportSummary.count === 1 ? 'report' : 'reports'}</Text>
+                    )}
+                  </View>
+
+                  {/* Sentiment bar */}
+                  {fieldReportSummary && fieldReportSummary.count > 0 && (() => {
+                    const total = fieldReportSummary.count;
+                    const loved = (fieldReportSummary.sentiment_counts['loved_it'] ?? 0) / total;
+                    const ok    = (fieldReportSummary.sentiment_counts['its_ok']    ?? 0) / total;
+                    const skip  = (fieldReportSummary.sentiment_counts['would_skip'] ?? 0) / total;
+                    return (
+                      <View style={{ marginBottom: 10 }}>
+                        <View style={s.frSentimentBar}>
+                          {loved > 0 && <View style={[s.frBarSeg, { flex: loved, backgroundColor: '#22c55e' }]} />}
+                          {ok    > 0 && <View style={[s.frBarSeg, { flex: ok,    backgroundColor: '#f59e0b' }]} />}
+                          {skip  > 0 && <View style={[s.frBarSeg, { flex: skip,  backgroundColor: '#ef4444' }]} />}
+                        </View>
+                        <View style={s.frSentimentLegend}>
+                          {loved > 0 && <Text style={[s.frLegendItem, { color: '#22c55e' }]}>😍 {Math.round(loved * 100)}%</Text>}
+                          {ok    > 0 && <Text style={[s.frLegendItem, { color: '#f59e0b' }]}>👍 {Math.round(ok * 100)}%</Text>}
+                          {skip  > 0 && <Text style={[s.frLegendItem, { color: '#ef4444' }]}>👎 {Math.round(skip * 100)}%</Text>}
+                          {fieldReportSummary.last_visited && (
+                            <Text style={s.frLastVisited}>Last visited {fieldReportSummary.last_visited}</Text>
+                          )}
+                        </View>
+                        {/* Top tags */}
+                        {fieldReportSummary.top_tags.length > 0 && (
+                          <View style={s.frTagCloud}>
+                            {fieldReportSummary.top_tags.map(({ tag, count }) => (
+                              <View key={tag} style={s.frTagCloudItem}>
+                                <Text style={s.frTagCloudText}>{tag}</Text>
+                                {count > 1 && <Text style={s.frTagCloudCount}>{count}</Text>}
+                              </View>
+                            ))}
+                          </View>
+                        )}
+                      </View>
+                    );
+                  })()}
+
+                  {/* Report list */}
+                  {fieldReports.slice(0, 5).map(fr => {
+                    const sentimentIcon = fr.sentiment === 'loved_it' ? '😍' : fr.sentiment === 'its_ok' ? '👍' : '👎';
+                    const accessLabel   = fr.access_condition === 'easy' ? '🟢 Easy access' : fr.access_condition === 'rough' ? '🟡 Rough access' : '🔴 4WD required';
+                    const crowdLabel    = fr.crowd_level === 'empty' ? 'Empty' : fr.crowd_level === 'few_rigs' ? 'A few rigs' : 'Packed';
+                    return (
+                      <View key={fr.id} style={s.frCard}>
+                        <View style={s.frCardTop}>
+                          <Text style={s.frCardSentiment}>{sentimentIcon}</Text>
+                          <View style={{ flex: 1 }}>
+                            <Text style={s.frCardMeta}>{fr.username} · {fr.visited_date}</Text>
+                            {fr.rig_label && <Text style={s.frCardRig}>{fr.rig_label}</Text>}
+                          </View>
+                          {fr.has_photo && <Ionicons name="camera-outline" size={13} color={C.text3} />}
+                        </View>
+                        <View style={s.frCardBadges}>
+                          <Text style={s.frCardBadge}>{accessLabel}</Text>
+                          <Text style={s.frCardBadge}>👥 {crowdLabel}</Text>
+                        </View>
+                        {fr.tags.length > 0 && (
+                          <View style={s.frCardTags}>
+                            {fr.tags.slice(0, 5).map(t => (
+                              <View key={t} style={s.frInlineTag}><Text style={s.frInlineTagText}>{t}</Text></View>
+                            ))}
+                          </View>
+                        )}
+                        {fr.note ? <Text style={s.frCardNote} numberOfLines={3}>{fr.note}</Text> : null}
+                      </View>
+                    );
+                  })}
+
+                  {fieldReports.length === 0 && !showFieldReportForm && (
+                    <Text style={s.frEmpty}>No field reports yet. Be the first to check in.</Text>
+                  )}
+
+                  {/* Submission form */}
+                  {showFieldReportForm ? (
+                    <View style={s.frForm}>
+                      <Text style={s.frFormLabel}>How was it?</Text>
+                      <View style={s.frPillRow}>
+                        {([['loved_it','😍 Loved it','#22c55e'],['its_ok','👍 It\'s OK','#f59e0b'],['would_skip','👎 Would skip','#ef4444']] as const).map(([val, label, color]) => (
+                          <TouchableOpacity key={val} style={[s.frSentimentBtn, frSentiment === val && { borderColor: color, backgroundColor: color + '22' }]}
+                            onPress={() => setFrSentiment(val)}>
+                            <Text style={[s.frSentimentBtnText, frSentiment === val && { color }]}>{label}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+
+                      <Text style={s.frFormLabel}>Access road</Text>
+                      <View style={s.frPillRow}>
+                        {([['easy','🟢 Easy'],['rough','🟡 Rough'],['four_wd_required','🔴 4WD Only']] as const).map(([val, label]) => (
+                          <TouchableOpacity key={val} style={[s.frPill, frAccess === val && s.frPillActive]}
+                            onPress={() => setFrAccess(val)}>
+                            <Text style={[s.frPillText, frAccess === val && s.frPillTextActive]}>{label}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+
+                      <Text style={s.frFormLabel}>Crowd level</Text>
+                      <View style={s.frPillRow}>
+                        {([['empty','🌲 Empty'],['few_rigs','⛺ A few rigs'],['packed','🚗 Packed']] as const).map(([val, label]) => (
+                          <TouchableOpacity key={val} style={[s.frPill, frCrowd === val && s.frPillActive]}
+                            onPress={() => setFrCrowd(val)}>
+                            <Text style={[s.frPillText, frCrowd === val && s.frPillTextActive]}>{label}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+
+                      <Text style={s.frFormLabel}>Tags (pick any)</Text>
+                      <View style={s.frTagPicker}>
+                        {['Great Views','Dog Friendly','Water Nearby','No Cell Signal','Fire Ring',
+                          'Very Quiet','High Clearance','Good Shade','Exposed/Windy','Creek Nearby',
+                          'Stargazing','Kids Friendly','Dusty Road','Fishing Nearby','Horse Friendly'].map(tag => {
+                          const on = frTags.includes(tag);
+                          return (
+                            <TouchableOpacity key={tag}
+                              style={[s.frTagPill, on && s.frTagPillOn]}
+                              onPress={() => setFrTags(p => on ? p.filter(t => t !== tag) : [...p, tag])}>
+                              <Text style={[s.frTagPillText, on && s.frTagPillTextOn]}>{tag}</Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+
+                      <Text style={s.frFormLabel}>Notes <Text style={s.frOptional}>(optional)</Text></Text>
+                      <TextInput
+                        style={s.frNoteInput}
+                        value={frNote}
+                        onChangeText={v => setFrNote(v.slice(0, 280))}
+                        placeholder="Road conditions, water source, anything useful..."
+                        placeholderTextColor={C.text3}
+                        multiline
+                        numberOfLines={3}
+                      />
+                      <Text style={s.frCharCount}>{frNote.length}/280</Text>
+
+                      <TouchableOpacity style={s.frPhotoBtn} onPress={pickFieldReportPhoto}>
+                        <Ionicons name={frPhoto ? 'checkmark-circle' : 'camera-outline'} size={16} color={frPhoto ? '#22c55e' : C.text3} />
+                        <Text style={[s.frPhotoBtnText, frPhoto && { color: '#22c55e' }]}>
+                          {frPhoto ? 'Photo added (+5 credits)' : 'Add photo (+5 credits)'}
+                        </Text>
+                      </TouchableOpacity>
+
+                      <View style={s.frFormActions}>
+                        <TouchableOpacity style={s.frCancelBtn} onPress={() => { setShowFieldReportForm(false); resetFieldReportForm(); }}>
+                          <Text style={s.frCancelText}>Cancel</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[s.frSubmitBtn, (!frSentiment || !frAccess || !frCrowd || frSubmitting) && { opacity: 0.5 }]}
+                          onPress={submitFieldReport}
+                          disabled={!frSentiment || !frAccess || !frCrowd || frSubmitting}
+                        >
+                          {frSubmitting
+                            ? <ActivityIndicator size="small" color="#fff" />
+                            : <Text style={s.frSubmitText}>SUBMIT +{frPhoto ? 10 : 5} CREDITS</Text>}
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ) : (
+                    user && (
+                      <TouchableOpacity style={s.frAddBtn} onPress={() => setShowFieldReportForm(true)}>
+                        <Ionicons name="add-circle-outline" size={15} color={C.orange} />
+                        <Text style={s.frAddBtnText}>ADD FIELD REPORT</Text>
+                      </TouchableOpacity>
+                    )
+                  )}
+                </View>
 
                 {/* Actions */}
                 <View style={s.detailActions}>
@@ -4526,6 +4759,57 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   siteTypeText: { color: C.text, fontSize: 13 },
   detailActivities: { color: C.text2, fontSize: 12, lineHeight: 20 },
   detailActions: { gap: 10, marginTop: 8 },
+
+  // ── Field Reports
+  frHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  frCount: { color: C.text3, fontSize: 11, fontFamily: mono },
+  frSentimentBar: { flexDirection: 'row', height: 6, borderRadius: 3, overflow: 'hidden', backgroundColor: C.s2, marginBottom: 6 },
+  frBarSeg: { height: 6 },
+  frSentimentLegend: { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 8 },
+  frLegendItem: { fontSize: 12, fontWeight: '600' },
+  frLastVisited: { color: C.text3, fontSize: 11, marginLeft: 'auto' as any },
+  frTagCloud: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 2 },
+  frTagCloudItem: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: C.s2, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 },
+  frTagCloudText: { color: C.text2, fontSize: 11 },
+  frTagCloudCount: { color: C.orange, fontSize: 10, fontWeight: '700' },
+  frCard: { backgroundColor: C.s2, borderRadius: 10, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: C.border },
+  frCardTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 6 },
+  frCardSentiment: { fontSize: 18, lineHeight: 22 },
+  frCardMeta: { color: C.text2, fontSize: 12 },
+  frCardRig: { color: C.text3, fontSize: 11, fontFamily: mono, marginTop: 1 },
+  frCardBadges: { flexDirection: 'row', gap: 8, marginBottom: 5 },
+  frCardBadge: { color: C.text2, fontSize: 11 },
+  frCardTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginBottom: 5 },
+  frInlineTag: { backgroundColor: C.s1, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 },
+  frInlineTagText: { color: C.text3, fontSize: 10 },
+  frCardNote: { color: C.text2, fontSize: 12, lineHeight: 17, marginTop: 4 },
+  frEmpty: { color: C.text3, fontSize: 12, fontStyle: 'italic', marginBottom: 10 },
+  frAddBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 10 },
+  frAddBtnText: { color: C.orange, fontSize: 12, fontFamily: mono, fontWeight: '700' },
+  frForm: { backgroundColor: C.s2, borderRadius: 12, padding: 14, gap: 4 },
+  frFormLabel: { color: C.text, fontSize: 12, fontWeight: '700', fontFamily: mono, marginTop: 8, marginBottom: 4 },
+  frOptional: { color: C.text3, fontWeight: '400' },
+  frPillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 4 },
+  frSentimentBtn: { borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7, borderWidth: 1, borderColor: C.border, backgroundColor: C.s1 },
+  frSentimentBtnText: { color: C.text2, fontSize: 12, fontWeight: '600' },
+  frPill: { borderRadius: 16, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: C.border, backgroundColor: C.s1 },
+  frPillActive: { borderColor: C.orange, backgroundColor: C.orange + '22' },
+  frPillText: { color: C.text2, fontSize: 11 },
+  frPillTextActive: { color: C.orange, fontWeight: '600' },
+  frTagPicker: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginBottom: 4 },
+  frTagPill: { borderRadius: 14, paddingHorizontal: 9, paddingVertical: 5, borderWidth: 1, borderColor: C.border, backgroundColor: C.s1 },
+  frTagPillOn: { borderColor: C.green, backgroundColor: C.green + '22' },
+  frTagPillText: { color: C.text2, fontSize: 11 },
+  frTagPillTextOn: { color: C.green, fontWeight: '600' },
+  frNoteInput: { backgroundColor: C.s1, borderRadius: 8, padding: 10, color: C.text, fontSize: 13, minHeight: 72, textAlignVertical: 'top', borderWidth: 1, borderColor: C.border, marginBottom: 2 },
+  frCharCount: { color: C.text3, fontSize: 10, textAlign: 'right', marginBottom: 4 },
+  frPhotoBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8 },
+  frPhotoBtnText: { color: C.text3, fontSize: 12 },
+  frFormActions: { flexDirection: 'row', gap: 10, marginTop: 8 },
+  frCancelBtn: { flex: 1, paddingVertical: 11, borderRadius: 10, borderWidth: 1, borderColor: C.border, alignItems: 'center' },
+  frCancelText: { color: C.text3, fontSize: 12 },
+  frSubmitBtn: { flex: 2, paddingVertical: 11, borderRadius: 10, backgroundColor: C.orange, alignItems: 'center' },
+  frSubmitText: { color: '#fff', fontSize: 11, fontFamily: mono, fontWeight: '800' },
   detailBookBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
     paddingVertical: 15, borderRadius: 14, backgroundColor: '#16a34a',

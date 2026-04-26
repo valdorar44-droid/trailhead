@@ -38,6 +38,7 @@ from db.store import (
     get_camp_brief, set_camp_brief, has_active_plan, activate_plan, use_free_camp_search,
     save_push_token, get_push_token,
     create_plan_job, get_plan_job, update_plan_job,
+    submit_field_report, get_field_reports, get_field_report_summary,
 )
 
 # ── Credit economy ─────────────────────────────────────────────────────────────
@@ -758,6 +759,55 @@ async def api_fullness_nearby(lat: float, lng: float, radius: float = 0.5):
 async def api_camp_fullness(camp_id: str):
     result = get_camp_fullness(camp_id)
     return result if result else None
+
+
+# ── Camp Field Reports ──────────────────────────────────────────────────────────
+
+class FieldReportPayload(BaseModel):
+    camp_name: str
+    lat: float
+    lng: float
+    rig_label: Optional[str] = None
+    visited_date: str
+    sentiment: str        # loved_it | its_ok | would_skip
+    access_condition: str # easy | rough | four_wd_required
+    crowd_level: str      # empty | few_rigs | packed
+    tags: list[str] = []
+    note: Optional[str] = None
+    photo_data: Optional[str] = None
+
+@app.post("/api/camps/{camp_id}/field-report")
+async def post_field_report(camp_id: str, body: FieldReportPayload,
+                             user: dict = Depends(_current_user)):
+    valid_sentiments = {'loved_it', 'its_ok', 'would_skip'}
+    valid_access = {'easy', 'rough', 'four_wd_required'}
+    valid_crowd = {'empty', 'few_rigs', 'packed'}
+    if body.sentiment not in valid_sentiments:
+        raise HTTPException(400, "Invalid sentiment")
+    if body.access_condition not in valid_access:
+        raise HTTPException(400, "Invalid access_condition")
+    if body.crowd_level not in valid_crowd:
+        raise HTTPException(400, "Invalid crowd_level")
+    result = submit_field_report(
+        camp_id=camp_id, camp_name=body.camp_name,
+        lat=body.lat, lng=body.lng,
+        user_id=user["id"], username=user["username"],
+        rig_label=body.rig_label,
+        visited_date=body.visited_date,
+        sentiment=body.sentiment, access_condition=body.access_condition,
+        crowd_level=body.crowd_level, tags=body.tags,
+        note=body.note, photo_data=body.photo_data,
+    )
+    fresh = get_user_by_id(user["id"])
+    return {**result, "new_balance": fresh["credits"]}
+
+@app.get("/api/camps/{camp_id}/field-reports")
+async def get_camp_field_reports(camp_id: str):
+    return get_field_reports(camp_id)
+
+@app.get("/api/camps/{camp_id}/field-report-summary")
+async def get_camp_field_report_summary(camp_id: str):
+    return get_field_report_summary(camp_id)
 
 
 # ── Community pins ─────────────────────────────────────────────────────────────

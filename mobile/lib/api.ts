@@ -161,6 +161,16 @@ export const api = {
   getNearbyFullness: (lat: number, lng: number, radius?: number) =>
     req<CampFullness[]>(`/api/camps/fullness/nearby?lat=${lat}&lng=${lng}&radius=${radius ?? 0.5}`),
 
+  // Camp Field Reports
+  submitFieldReport: (campId: string, data: FieldReportPayload) =>
+    req<{ credits_earned: number; new_balance: number }>(`/api/camps/${encodeURIComponent(campId)}/field-report`, {
+      method: 'POST', body: JSON.stringify(data),
+    }),
+  getFieldReports: (campId: string) =>
+    req<CampFieldReport[]>(`/api/camps/${encodeURIComponent(campId)}/field-reports`),
+  getFieldReportSummary: (campId: string) =>
+    req<FieldReportSummary>(`/api/camps/${encodeURIComponent(campId)}/field-report-summary`),
+
   // Subscription
   subscriptionStatus: () =>
     req<SubscriptionStatus>('/api/subscription/status'),
@@ -334,4 +344,40 @@ export interface SubscriptionStatus {
   is_active: boolean;
   credits: number;
   camp_searches_used: number;
+}
+export type FieldReportSentiment = 'loved_it' | 'its_ok' | 'would_skip';
+export type FieldReportAccess = 'easy' | 'rough' | 'four_wd_required';
+export type FieldReportCrowd = 'empty' | 'few_rigs' | 'packed';
+
+export interface FieldReportPayload {
+  camp_name: string;
+  lat: number;
+  lng: number;
+  rig_label?: string;
+  visited_date: string;
+  sentiment: FieldReportSentiment;
+  access_condition: FieldReportAccess;
+  crowd_level: FieldReportCrowd;
+  tags: string[];
+  note?: string;
+  photo_data?: string;
+}
+export interface CampFieldReport {
+  id: number;
+  username: string;
+  rig_label?: string;
+  visited_date: string;
+  sentiment: FieldReportSentiment;
+  access_condition: FieldReportAccess;
+  crowd_level: FieldReportCrowd;
+  tags: string[];
+  note?: string;
+  has_photo: boolean;
+  created_at: number;
+}
+export interface FieldReportSummary {
+  count: number;
+  sentiment_counts: Record<string, number>;
+  top_tags: { tag: string; count: number }[];
+  last_visited: string | null;
 }

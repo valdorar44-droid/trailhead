@@ -164,7 +164,7 @@ export default function ProfileScreen() {
       const res = await api.register(email, username, password, refCode);
       setAuth(res.token, res.user);
       setView('main');
-      Alert.alert('Welcome to Trailhead!', 'You\'ve been given 75 free credits — enough to plan your first few trips.');
+      Alert.alert('Welcome to Trailhead!', 'You\'ve been given 50 free credits — enough to plan your first couple of trips. Earn more by submitting trail reports!');
     } catch (e: any) { Alert.alert('Registration failed', e.message); }
     finally { setLoading(false); }
   }
@@ -304,7 +304,7 @@ export default function ProfileScreen() {
         <Text style={s.authHeading}>Create account</Text>
         <View style={s.signupPerk}>
           <Ionicons name="flash" size={14} color={C.orange} />
-          <Text style={s.signupPerkText}>75 free credits on signup — enough for your first few AI trips</Text>
+          <Text style={s.signupPerkText}>50 free credits on signup + earn more by contributing to the map</Text>
         </View>
         <View style={s.authFields}>
           <TextInput style={s.input} placeholder="Email" placeholderTextColor={C.text3}

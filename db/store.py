@@ -337,8 +337,6 @@ def create_user(email: str, username: str, password_hash: str, referral_code: st
         (email.lower(), username, password_hash, referral_code, referred_by, int(time.time()))
     )
     uid = cur.lastrowid
-    db.execute("INSERT INTO credit_transactions (user_id,amount,reason,created_at) VALUES (?,?,?,?)",
-               (uid, 20, "Welcome bonus — first adventure on us!", int(time.time())))
     db.commit(); db.close()
     return uid
 

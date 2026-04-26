@@ -57,7 +57,7 @@ CREDIT_PACKAGES = {
     "trailhead":  {"credits": 3000, "price_cents": 3999, "label": "Trailhead+", "popular": False},
 }
 
-SIGNUP_BONUS       = 75
+SIGNUP_BONUS       = 50
 DAILY_REPORT_LIMIT = 8     # max reports per user per day
 DAILY_REPORT_CREDITS_CAP = 50   # max credits/day from reports
 REPORT_CREDIT_BASE = 5     # credits for a plain report

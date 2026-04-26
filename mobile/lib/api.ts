@@ -50,9 +50,32 @@ export const api = {
   me: () => req<User>('/api/auth/me'),
 
   plan: (request: string, sessionId = '') =>
-    req<TripResult>('/api/plan', { method: 'POST', body: JSON.stringify({ request, session_id: sessionId }) }),
-  planFromSession: (sessionId: string) =>
-    req<TripResult>('/api/plan', { method: 'POST', body: JSON.stringify({ request: '', session_id: sessionId }) }),
+    req<{ job_id: string; status: string }>('/api/plan', { method: 'POST', body: JSON.stringify({ request, session_id: sessionId }) }),
+
+  // Submit plan job and poll until done (max 3 min). Safe if app backgrounds —
+  // server completes the job and sends a push notification as a fallback.
+  planFromSession: async (sessionId: string): Promise<TripResult> => {
+    const { job_id } = await req<{ job_id: string; status: string }>(
+      '/api/plan', { method: 'POST', body: JSON.stringify({ request: '', session_id: sessionId }) }
+    );
+    for (let i = 0; i < 60; i++) {
+      await new Promise(r => setTimeout(r, 3000));
+      const job = await req<{ job_id: string; status: string; result: TripResult | null; error: string | null }>(
+        `/api/plan/job/${job_id}`
+      );
+      if (job.status === 'done' && job.result) return job.result;
+      if (job.status === 'failed') throw new Error(job.error ?? 'Planning failed — please try again');
+    }
+    throw new Error('Trip planning is taking longer than usual — check back in a moment');
+  },
+
+  getPlanJob: (jobId: string) =>
+    req<{ job_id: string; status: string; result: TripResult | null; error: string | null }>(
+      `/api/plan/job/${jobId}`
+    ),
+
+  registerPushToken: (token: string) =>
+    req('/api/push-token', { method: 'POST', body: JSON.stringify({ token }) }),
   chat: (message: string, sessionId: string, currentTrip?: TripResult | null, rigContext?: Record<string, unknown> | null) =>
     req<ChatResponse>('/api/chat', { method: 'POST', body: JSON.stringify({ message, session_id: sessionId, current_trip: currentTrip ?? undefined, rig_context: rigContext ?? undefined }) }),
   getTrip: (id: string) => req<TripResult>(`/api/trip/${id}`),

@@ -36,6 +36,8 @@ from db.store import (
     report_camp_full, confirm_camp_full, dispute_camp_full, get_camp_fullness, get_fullness_nearby,
     log_event, cleanup_stale_data,
     get_camp_brief, set_camp_brief, has_active_plan, activate_plan, use_free_camp_search,
+    save_push_token, get_push_token,
+    create_plan_job, get_plan_job, update_plan_job,
 )
 
 # ── Credit economy ─────────────────────────────────────────────────────────────
@@ -401,21 +403,110 @@ async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depend
             "outline": response.get("outline"), "trail_dna": trail_dna}
 
 
+async def _send_expo_push(token: str, title: str, body_text: str, data: dict) -> None:
+    """Fire-and-forget Expo push notification."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            await client.post(
+                "https://exp.host/--/api/v2/push/send",
+                json={"to": token, "title": title, "body": body_text,
+                      "data": data, "sound": "default", "priority": "high"},
+                headers={"Accept": "application/json", "Content-Type": "application/json"},
+            )
+    except Exception:
+        pass  # push is best-effort; never block the main flow
+
+
+async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, cost: int) -> None:
+    """Background task: generate the trip, geocode, enrich, save, notify."""
+    import anthropic as _anthropic
+    import re as _re
+    update_plan_job(job_id, "running")
+    try:
+        if body.session_id:
+            msgs = get_conversation(body.session_id)
+            plan_data = plan_trip_from_conversation(msgs) if msgs else plan_trip(body.request or "")
+        else:
+            plan_data = plan_trip(body.request or "")
+
+        # Adjust credit charge to actual trip length
+        if user and cost > 0:
+            actual_days = plan_data.get("duration_days", 7)
+            day_hint = int((_re.search(r'\b(\d+)\s*-?\s*day', body.request or '', _re.I) or [None, 7])[1])
+            actual_cost = _plan_credit_cost(actual_days)
+            estimated_cost = _plan_credit_cost(day_hint)
+            if actual_cost != estimated_cost:
+                add_credits(user["id"], estimated_cost - actual_cost,
+                            f"Credit adjustment — actual trip is {actual_days} days")
+
+        trip_id = str(uuid.uuid4())[:8]
+        result_stub = {"trip_id": trip_id, "plan": plan_data, "campsites": [], "gas_stations": []}
+        save_trip(trip_id, body.request, result_stub, user_id=user["id"] if user else None)
+
+        actual_days = plan_data.get("duration_days", 7)
+        log_event(
+            user["id"] if user else None, body.session_id, "plan_generated",
+            {"trip_id": trip_id, "days": actual_days,
+             "states": plan_data.get("states", []),
+             "difficulty": plan_data.get("difficulty", ""),
+             "waypoint_count": len(plan_data.get("waypoints", [])),
+             "platform": "mobile"},
+        )
+
+        geocoded = await _geocode_waypoints(plan_data.get("waypoints", []))
+        plan_data["waypoints"] = geocoded
+
+        campsites, seen = [], set()
+        for wp in geocoded:
+            if wp.get("lat") and wp.get("lng"):
+                for c in await get_campsites_near(wp["lat"], wp["lng"], radius_miles=25):
+                    if c["id"] not in seen:
+                        seen.add(c["id"]); campsites.append(c)
+
+        gas_stations = await get_gas_along_route(geocoded)
+        result = {"trip_id": trip_id, "plan": plan_data,
+                  "campsites": campsites[:40], "gas_stations": gas_stations[:30]}
+        save_trip(trip_id, body.request, result, user_id=user["id"] if user else None)
+
+        update_plan_job(job_id, "done", result=json.dumps(result))
+
+        # Push notification — send whether or not app is foregrounded
+        if user:
+            push_token = get_push_token(user["id"])
+            if push_token:
+                trip_name = plan_data.get("trip_name", "Your trip")
+                days = plan_data.get("duration_days", 0)
+                await _send_expo_push(
+                    push_token,
+                    title="Your route is ready 🗺",
+                    body_text=f"{trip_name} — {days} days planned. Tap to explore.",
+                    data={"type": "trip_ready", "job_id": job_id, "trip_id": trip_id},
+                )
+
+    except _anthropic.RateLimitError:
+        if user and cost > 0:
+            add_credits(user["id"], cost, "Refund — rate limit during planning")
+        update_plan_job(job_id, "failed", error="Rate limit hit — please try again in 30 seconds")
+    except Exception as e:
+        if user and cost > 0:
+            add_credits(user["id"], cost, "Refund — planning error")
+        update_plan_job(job_id, "failed", error=f"AI planning failed: {e}")
+
+
 @app.post("/api/plan")
 async def plan(request: Request, body: PlanRequest, user: dict = Depends(_optional_user)):
-    import anthropic as _anthropic
     if not settings.anthropic_api_key:
         raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
 
-    # Estimate days from request text to determine cost; we refund/adjust after AI responds
     import re as _re
     day_hint = int((_re.search(r'\b(\d+)\s*-?\s*day', body.request or '', _re.I) or [None, 7])[1])
+
     if user:
         if has_active_plan(user):
             from db.store import get_plan_action_count_today, log_ai_usage
             if get_plan_action_count_today(user["id"], "trip_plan") >= PLAN_DAILY_TRIPS:
                 raise HTTPException(429, "Daily trip planning limit reached. Resets at midnight UTC.")
-            cost = 0  # plan holders plan for free
+            cost = 0
             log_ai_usage(user["id"], "trip_plan")
         else:
             cost = _plan_credit_cost(day_hint)
@@ -430,63 +521,35 @@ async def plan(request: Request, body: PlanRequest, user: dict = Depends(_option
         _anon_check(_client_ip(request), "plan")
         cost = 0
 
-    try:
-        if body.session_id:
-            msgs = get_conversation(body.session_id)
-            plan_data = plan_trip_from_conversation(msgs) if msgs else plan_trip(body.request or "")
-        else:
-            if not body.request.strip():
-                if user: add_credits(user["id"], cost, "Refund — empty plan request")
-                raise HTTPException(400, "Request cannot be empty")
-            plan_data = plan_trip(body.request)
-    except HTTPException:
-        raise
-    except _anthropic.RateLimitError:
-        if user: add_credits(user["id"], cost, "Refund — rate limit hit")
-        raise HTTPException(429, "Rate limit hit — please wait 30 seconds and try again")
-    except Exception as e:
-        if user: add_credits(user["id"], cost, "Refund — planning error")
-        raise HTTPException(500, f"AI planning failed: {e}")
+    if not body.session_id and not (body.request or "").strip():
+        if user and cost > 0:
+            add_credits(user["id"], cost, "Refund — empty plan request")
+        raise HTTPException(400, "Request cannot be empty")
 
-    # Adjust charge to actual trip length
-    if user and cost > 0:
-        actual_days = plan_data.get("duration_days", day_hint)
-        actual_cost = _plan_credit_cost(actual_days)
-        if actual_cost != cost:
-            diff = cost - actual_cost
-            add_credits(user["id"], diff, f"Credit adjustment — actual trip is {actual_days} days")
+    job_id = str(uuid.uuid4())[:12]
+    create_plan_job(job_id, user["id"] if user else None, body.session_id or "", body.request or "")
+    asyncio.create_task(_execute_plan_job(job_id, body, user, cost))
+    return {"job_id": job_id, "status": "pending"}
 
-    trip_id = str(uuid.uuid4())[:8]
-    result_stub = {"trip_id": trip_id, "plan": plan_data, "campsites": [], "gas_stations": []}
-    save_trip(trip_id, body.request, result_stub, user_id=user["id"] if user else None)
 
-    actual_days = plan_data.get("duration_days", day_hint)
-    log_event(
-        user["id"] if user else None,
-        body.session_id,
-        "plan_generated",
-        {"trip_id": trip_id, "days": actual_days,
-         "states": plan_data.get("states", []),
-         "difficulty": plan_data.get("difficulty", ""),
-         "waypoint_count": len(plan_data.get("waypoints", [])),
-         "platform": "web"},
-    )
+@app.get("/api/plan/job/{job_id}")
+async def plan_job_status(job_id: str, user: dict | None = Depends(_optional_user)):
+    """Poll for async plan job status. Returns result when done."""
+    job = get_plan_job(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    result = json.loads(job["result"]) if job.get("result") else None
+    return {"job_id": job_id, "status": job["status"], "result": result, "error": job.get("error")}
 
-    geocoded = await _geocode_waypoints(plan_data.get("waypoints", []))
-    plan_data["waypoints"] = geocoded
 
-    campsites, seen = [], set()
-    for wp in geocoded:
-        if wp.get("lat") and wp.get("lng"):
-            for c in await get_campsites_near(wp["lat"], wp["lng"], radius_miles=25):
-                if c["id"] not in seen:
-                    seen.add(c["id"]); campsites.append(c)
+class PushTokenRequest(BaseModel):
+    token: str
 
-    gas_stations = await get_gas_along_route(geocoded)
-    result = {"trip_id": trip_id, "plan": plan_data,
-              "campsites": campsites[:40], "gas_stations": gas_stations[:30]}
-    save_trip(trip_id, body.request, result, user_id=user["id"] if user else None)
-    return result
+@app.post("/api/push-token")
+async def register_push_token(body: PushTokenRequest, user: dict = Depends(_current_user)):
+    """Store the device's Expo push token so the server can notify on job completion."""
+    save_push_token(user["id"], body.token)
+    return {"ok": True}
 
 @app.get("/api/trip/{trip_id}")
 async def get_trip_route(trip_id: str, user: dict | None = Depends(_optional_user)):

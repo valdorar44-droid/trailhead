@@ -206,6 +206,18 @@ def init_db():
         "ALTER TABLE users ADD COLUMN plan_type TEXT NOT NULL DEFAULT 'free'",
         "ALTER TABLE users ADD COLUMN plan_expires_at INTEGER",
         "ALTER TABLE users ADD COLUMN camp_searches_used INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN push_token TEXT",
+        """CREATE TABLE IF NOT EXISTS plan_jobs (
+            id          TEXT PRIMARY KEY,
+            user_id     INTEGER,
+            session_id  TEXT,
+            request     TEXT,
+            status      TEXT NOT NULL DEFAULT 'pending',
+            result      TEXT,
+            error       TEXT,
+            created_at  REAL NOT NULL,
+            updated_at  REAL NOT NULL
+        )""",
     ]:
         try:
             db.execute(sql)
@@ -1044,3 +1056,43 @@ def use_free_camp_search(user_id: int) -> bool:
     db.execute("UPDATE users SET camp_searches_used=camp_searches_used+1 WHERE id=?", (user_id,))
     db.commit(); db.close()
     return True
+
+
+# ── Push tokens ───────────────────────────────────────────────────────────────
+
+def save_push_token(user_id: int, token: str):
+    db = _conn()
+    db.execute("UPDATE users SET push_token=? WHERE id=?", (token, user_id))
+    db.commit(); db.close()
+
+def get_push_token(user_id: int) -> str | None:
+    db = _conn()
+    row = db.execute("SELECT push_token FROM users WHERE id=?", (user_id,)).fetchone()
+    db.close()
+    return row["push_token"] if row else None
+
+
+# ── Plan jobs (async background trip planning) ────────────────────────────────
+
+def create_plan_job(job_id: str, user_id: int | None, session_id: str, request: str) -> None:
+    db = _conn()
+    now = time.time()
+    db.execute(
+        "INSERT INTO plan_jobs (id,user_id,session_id,request,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
+        (job_id, user_id, session_id, request, "pending", now, now)
+    )
+    db.commit(); db.close()
+
+def get_plan_job(job_id: str) -> dict | None:
+    db = _conn()
+    row = db.execute("SELECT * FROM plan_jobs WHERE id=?", (job_id,)).fetchone()
+    db.close()
+    return dict(row) if row else None
+
+def update_plan_job(job_id: str, status: str, result: str | None = None, error: str | None = None) -> None:
+    db = _conn()
+    db.execute(
+        "UPDATE plan_jobs SET status=?, result=?, error=?, updated_at=? WHERE id=?",
+        (status, result, error, time.time(), job_id)
+    )
+    db.commit(); db.close()

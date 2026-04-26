@@ -12,14 +12,17 @@ import { PRODUCT_IDS } from '@/lib/useSubscription';
 import { useTheme, mono } from '@/lib/design';
 
 export default function RootLayout() {
-  const setAuth     = useStore(s => s.setAuth);
-  const setPlan     = useStore(s => s.setPlan);
-  const themeMode   = useStore(s => s.themeMode);
-  const router      = useRouter();
-  const C           = useTheme();
+  const setAuth      = useStore(s => s.setAuth);
+  const setPlan      = useStore(s => s.setPlan);
+  const setActiveTrip = useStore(s => s.setActiveTrip);
+  const themeMode    = useStore(s => s.themeMode);
+  const user         = useStore(s => s.user);
+  const router       = useRouter();
+  const C            = useTheme();
   const [updateBanner, setUpdateBanner] = useState(false);
   const updateReady  = useRef(false);
   const checking     = useRef(false);
+  const pushRegistered = useRef(false);
 
   async function checkForUpdate() {
     if (checking.current) return;
@@ -94,11 +97,31 @@ export default function RootLayout() {
       // Native module not in this binary — skip
     }
 
-    Notifications.requestPermissionsAsync().catch(() => {});
+    // Request push permissions and register token with server
+    Notifications.requestPermissionsAsync().then(async ({ status }) => {
+      if (status !== 'granted') return;
+      try {
+        const tokenData = await Notifications.getExpoPushTokenAsync({
+          projectId: '92c016d2-6e63-480e-a483-a6898d7e77d5',
+        });
+        const token = tokenData.data;
+        // Save token for use after login (user may not be loaded yet)
+        SecureStore.setItemAsync('trailhead_push_token', token).catch(() => {});
+      } catch {}
+    }).catch(() => {});
 
-    const notifSub = Notifications.addNotificationResponseReceivedListener(response => {
+    const notifSub = Notifications.addNotificationResponseReceivedListener(async response => {
       const data = response.notification.request.content.data as any;
-      if (data?.type === 'trail_alert') {
+      if (data?.type === 'trip_ready' && data?.job_id) {
+        // User tapped "your route is ready" notification — fetch and load the trip
+        try {
+          const job = await api.getPlanJob(data.job_id);
+          if (job.result) {
+            setActiveTrip(job.result);
+            router.push('/(tabs)/');
+          }
+        } catch {}
+      } else if (data?.type === 'trail_alert') {
         router.push('/report');
       } else {
         router.push('/guide');
@@ -110,6 +133,15 @@ export default function RootLayout() {
       appStateSub?.remove();
     };
   }, []);
+
+  // Register push token with server whenever user signs in
+  useEffect(() => {
+    if (!user || pushRegistered.current) return;
+    pushRegistered.current = true;
+    SecureStore.getItemAsync('trailhead_push_token').then(token => {
+      if (token) api.registerPushToken(token).catch(() => {});
+    }).catch(() => {});
+  }, [user]);
 
   return (
     <>

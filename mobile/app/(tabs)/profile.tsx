@@ -10,8 +10,10 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import * as SecureStore from 'expo-secure-store';
 import * as Updates from 'expo-updates';
-import { api, CreditPackage } from '@/lib/api';
+import { api } from '@/lib/api';
 import { useStore, RigProfile } from '@/lib/store';
+import PaywallModal from '@/components/PaywallModal';
+import { useSubscription } from '@/lib/useSubscription';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 import { getOfflineTripIndex, loadOfflineTrip } from '@/lib/offlineTrips';
 
@@ -98,8 +100,10 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(false);
   const [creditHistory, setCreditHistory] = useState<any[]>([]);
   const [showHistory, setShowHistory] = useState(false);
-  const [packages, setPackages] = useState<CreditPackage[]>([]);
-  const [buyingPkg, setBuyingPkg] = useState<string | null>(null);
+  const [showPaywall, setShowPaywall] = useState(false);
+  const hasPlan     = useStore(st => st.hasPlan);
+  const setPlan     = useStore(st => st.setPlan);
+  const { purchase, restore, monthlyProduct, annualProduct, purchasing, restoring } = useSubscription();
   const [gpxImporting, setGpxImporting] = useState(false);
   const [gpxResult, setGpxResult] = useState('');
   const [showBugModal, setShowBugModal] = useState(false);
@@ -172,23 +176,6 @@ export default function ProfileScreen() {
       setCreditHistory(res.history);
       setShowHistory(true);
     } catch (e: any) { Alert.alert('Error', e.message); }
-  }
-
-  async function loadPackages() {
-    if (packages.length > 0) return;
-    try { setPackages(await api.getCreditPackages()); } catch {}
-  }
-
-  async function buyPackage(pkgId: string) {
-    setBuyingPkg(pkgId);
-    try {
-      const res = await api.createCheckout(pkgId);
-      await Linking.openURL(res.url);
-    } catch (e: any) {
-      Alert.alert('Checkout error', e.message);
-    } finally {
-      setBuyingPkg(null);
-    }
   }
 
   async function submitBug() {
@@ -879,49 +866,62 @@ export default function ProfileScreen() {
           )}
         </View>
 
-        {/* Credits */}
+        {/* Plan + Credits */}
         <View style={s.creditsCard}>
           <View style={s.creditsTop}>
             <View>
               <Text style={s.creditsLabel}>TRAIL CREDITS</Text>
               <Text style={s.creditsBalance}>{user?.credits ?? 0}</Text>
             </View>
-            <View style={s.creditsBadge}>
-              <Ionicons name="flash" size={22} color={C.orange} />
+            <View style={[s.creditsBadge, hasPlan && s.creditsBadgeActive]}>
+              <Ionicons name={hasPlan ? 'shield-checkmark' : 'flash'} size={22} color={C.orange} />
             </View>
           </View>
-          <View style={s.divider} />
-          <Text style={s.redemptionHeader}>BUY CREDITS</Text>
-          {packages.length === 0 && (
-            <TouchableOpacity style={s.loadPkgsBtn} onPress={loadPackages}>
-              <Ionicons name="bag-add-outline" size={14} color={C.orange} />
-              <Text style={s.loadPkgsBtnText}>SEE PACKAGES</Text>
-            </TouchableOpacity>
-          )}
-          {packages.map(pkg => (
-            <TouchableOpacity
-              key={pkg.id}
-              style={[s.pkgRow, pkg.popular && s.pkgRowPopular]}
-              onPress={() => buyPackage(pkg.id)}
-              disabled={buyingPkg !== null}
-            >
-              <View style={{ flex: 1 }}>
-                <Text style={s.pkgLabel}>{pkg.label}{pkg.popular ? '  ✦ Best Value' : ''}</Text>
-                <Text style={s.pkgCredits}>{pkg.credits} credits</Text>
+
+          {hasPlan ? (
+            <>
+              <View style={s.planActiveBanner}>
+                <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
+                <Text style={s.planActiveText}>Explorer Plan active</Text>
               </View>
-              <View style={s.pkgPriceCol}>
-                {buyingPkg === pkg.id
-                  ? <ActivityIndicator size="small" color={C.orange} />
-                  : <Text style={s.pkgPrice}>{pkg.price_display}</Text>
+              <TouchableOpacity style={s.managePlanBtn} onPress={() => Linking.openURL('https://apps.apple.com/account/subscriptions')}>
+                <Text style={s.managePlanBtnText}>Manage subscription</Text>
+                <Ionicons name="open-outline" size={12} color={C.text3} />
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <View style={s.divider} />
+              <TouchableOpacity style={s.getPlanBtn} onPress={() => setShowPaywall(true)} activeOpacity={0.85}>
+                <View>
+                  <Text style={s.getPlanBtnLabel}>Get Explorer Plan</Text>
+                  <Text style={s.getPlanBtnSub}>
+                    {annualProduct?.localizedPrice ?? '$49.99'}/yr · {monthlyProduct?.localizedPrice ?? '$7.99'}/mo · 7-day free trial
+                  </Text>
+                </View>
+                <Ionicons name="arrow-forward" size={18} color="#fff" />
+              </TouchableOpacity>
+              <TouchableOpacity style={s.restoreRow} onPress={restore} disabled={restoring}>
+                {restoring
+                  ? <ActivityIndicator size="small" color={C.text3} />
+                  : <Text style={s.restoreRowText}>Restore purchases</Text>
                 }
-              </View>
-            </TouchableOpacity>
-          ))}
+              </TouchableOpacity>
+            </>
+          )}
+
+          <View style={s.divider} />
           <TouchableOpacity style={s.historyBtn} onPress={loadHistory}>
             <Ionicons name="time-outline" size={14} color={C.text3} />
             <Text style={s.historyBtnText}>CREDIT HISTORY</Text>
           </TouchableOpacity>
         </View>
+
+        <PaywallModal
+          visible={showPaywall}
+          onClose={() => setShowPaywall(false)}
+          onPlanActivated={() => { setPlan(true); setShowPaywall(false); }}
+        />
 
         {showHistory && creditHistory.length > 0 && (
           <View style={s.historyCard}>
@@ -1329,17 +1329,29 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     backgroundColor: C.orangeGlow, alignItems: 'center', justifyContent: 'center',
     borderWidth: 1, borderColor: C.orange,
   },
-  creditsBadgeIcon: { fontSize: 26 },
-  divider: { height: 1, backgroundColor: C.border, marginBottom: 12 },
-  redemptionHeader: { color: C.text3, fontSize: 10, fontFamily: mono, letterSpacing: 1, marginBottom: 8 },
-  loadPkgsBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 10 },
-  loadPkgsBtnText: { color: C.orange, fontSize: 12, fontFamily: mono, fontWeight: '700' },
-  pkgRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderColor: C.border },
-  pkgRowPopular: { backgroundColor: C.s2 + '88', borderRadius: 8, paddingHorizontal: 8 },
-  pkgLabel: { color: C.text, fontSize: 13, fontWeight: '700' },
-  pkgCredits: { color: C.text2, fontSize: 11, fontFamily: mono, marginTop: 2 },
-  pkgPriceCol: { minWidth: 60, alignItems: 'flex-end' },
-  pkgPrice: { color: C.orange, fontSize: 16, fontWeight: '800', fontFamily: mono },
+  creditsBadgeActive: { backgroundColor: 'rgba(34,197,94,0.12)', borderColor: '#22c55e' },
+  divider: { height: 1, backgroundColor: C.border, marginBottom: 12, marginTop: 4 },
+  planActiveBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: 'rgba(34,197,94,0.1)', borderRadius: 10, borderWidth: 1, borderColor: 'rgba(34,197,94,0.3)',
+    paddingHorizontal: 12, paddingVertical: 10, marginTop: 8,
+  },
+  planActiveText: { color: '#22c55e', fontSize: 13, fontWeight: '700' },
+  managePlanBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    paddingVertical: 10, marginTop: 4,
+  },
+  managePlanBtnText: { color: C.text3, fontSize: 12 },
+  getPlanBtn: {
+    backgroundColor: C.orange, borderRadius: 14, padding: 14,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginBottom: 8,
+    shadowColor: C.orange, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.3, shadowRadius: 8,
+  },
+  getPlanBtnLabel: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  getPlanBtnSub: { color: 'rgba(255,255,255,0.75)', fontSize: 11, marginTop: 2 },
+  restoreRow: { alignItems: 'center', paddingVertical: 8, marginBottom: 4 },
+  restoreRowText: { color: C.text3, fontSize: 12 },
   historyBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     borderWidth: 1, borderColor: C.border, borderRadius: 10,

@@ -49,6 +49,8 @@ interface AppState {
   favoriteCamps: CampsitePin[];
   offlineTripIds: string[];
   activeTripFromCache: boolean;
+  hasPlan: boolean;
+  planExpiresAt: number | null;
   setAuth: (token: string, user: User) => void;
   clearAuth: () => void;
   setActiveTrip: (trip: TripResult | null, fromCache?: boolean) => void;
@@ -63,6 +65,7 @@ interface AppState {
   addCachedRegion: (label: string) => void;
   toggleFavorite: (camp: CampsitePin) => void;
   setOfflineTripIds: (ids: string[]) => void;
+  setPlan: (active: boolean, expiresAt?: number | null) => void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -80,6 +83,8 @@ export const useStore = create<AppState>((set) => ({
   favoriteCamps: [],
   offlineTripIds: [],
   activeTripFromCache: false,
+  hasPlan: false,
+  planExpiresAt: null,
 
   setAuth: (token, user) => {
     SecureStore.setItemAsync('trailhead_token', token);
@@ -124,6 +129,7 @@ export const useStore = create<AppState>((set) => ({
   },
 
   setOfflineTripIds: (ids) => set({ offlineTripIds: ids }),
+  setPlan: (active, expiresAt = null) => set({ hasPlan: active, planExpiresAt: expiresAt }),
 
   toggleFavorite: (camp) => set((state) => {
     const exists = state.favoriteCamps.some(f => f.id === camp.id);

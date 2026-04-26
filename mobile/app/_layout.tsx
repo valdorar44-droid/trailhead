@@ -8,10 +8,13 @@ import * as Notifications from 'expo-notifications';
 import * as Updates from 'expo-updates';
 import { useStore } from '@/lib/store';
 import { api } from '@/lib/api';
+import { getAvailablePurchases, initConnection, endConnection } from 'expo-iap';
+import { PRODUCT_IDS } from '@/lib/useSubscription';
 import { useTheme, mono } from '@/lib/design';
 
 export default function RootLayout() {
   const setAuth     = useStore(s => s.setAuth);
+  const setPlan     = useStore(s => s.setPlan);
   const themeMode   = useStore(s => s.themeMode);
   const router      = useRouter();
   const C           = useTheme();
@@ -67,8 +70,24 @@ export default function RootLayout() {
       try {
         const user = await api.me();
         setAuth(token, user);
+        // Check subscription status from backend
+        const sub = await api.subscriptionStatus().catch(() => null);
+        if (sub?.is_active) setPlan(true, sub.plan_expires_at ?? null);
       } catch { SecureStore.deleteItemAsync('trailhead_token'); }
     });
+
+    // Also verify via StoreKit on device — covers reinstalls where backend may lag
+    initConnection().then(async () => {
+      try {
+        const purchases = await getAvailablePurchases();
+        const active = purchases.some((p: any) => {
+          const id = p.productId ?? p.id ?? '';
+          return id === PRODUCT_IDS.monthly || id === PRODUCT_IDS.annual;
+        });
+        if (active) setPlan(true);
+      } catch {}
+      endConnection().catch(() => {});
+    }).catch(() => {});
 
     Notifications.requestPermissionsAsync().catch(() => {});
 

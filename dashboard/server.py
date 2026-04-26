@@ -1243,9 +1243,10 @@ async def land_tile(z: int, y: int, x: int):
 
 @app.get("/api/land-check")
 async def land_check(lat: float, lng: float):
-    """Single-tap 'am I legal here?' — queries BLM ArcGIS for land ownership and
-    returns a camping-status determination for the given GPS coordinate."""
-    cache_key = f"land_check:{lat:.2f},{lng:.2f}"
+    """Long-press 'am I legal here?' — queries BLM ArcGIS for land ownership.
+    Tries layer 1 (LimitedScale) first, then layer 0 as fallback for gaps."""
+    # 3-decimal precision (~100 m) so moving a few feet doesn't skip cache
+    cache_key = f"land_check:{lat:.3f},{lng:.3f}"
     cached = get_cached("campsite_cache", cache_key, ttl_seconds=3600 * 24 * 7)
     if cached:
         return cached
@@ -1258,29 +1259,38 @@ async def land_check(lat: float, lng: float):
         "source": "BLM ArcGIS",
     }
 
+    point_geom = json.dumps({"x": lng, "y": lat})
+    base_params = {
+        "geometry": point_geom,
+        "geometryType": "esriGeometryPoint",
+        "inSR": "4326",
+        "spatialRel": "esriSpatialRelIntersects",
+        "outFields": "ADMIN_UNIT_CD,ADMIN_ST,NLCS_DESC,GIS_ACRES",
+        "returnGeometry": "false",
+        "f": "json",
+    }
+
+    features = []
     try:
-        async with httpx.AsyncClient(timeout=8) as client:
-            r = await client.get(
-                "https://gis.blm.gov/arcgis/rest/services/lands/BLM_Natl_SMA_LimitedScale/MapServer/1/query",
-                params={
-                    "geometry": json.dumps({"x": lng, "y": lat}),
-                    "geometryType": "esriGeometryPoint",
-                    "inSR": "4326",
-                    "spatialRel": "esriSpatialRelIntersects",
-                    "outFields": "ADMIN_UNIT_CD,ADMIN_ST,NLCS_DESC,GIS_ACRES,Shape_Area",
-                    "returnGeometry": "false",
-                    "f": "json",
-                },
-                headers={"User-Agent": "Trailhead/1.0"},
-            )
-            r.raise_for_status()
-            data = r.json()
+        async with httpx.AsyncClient(timeout=10) as client:
+            # Layer 1 = SMA polygon detail; layer 0 = broader SMA coverage
+            for layer in (1, 0):
+                resp = await client.get(
+                    f"https://gis.blm.gov/arcgis/rest/services/lands/BLM_Natl_SMA_LimitedScale/MapServer/{layer}/query",
+                    params=base_params,
+                    headers={"User-Agent": "Trailhead/1.0"},
+                )
+                resp.raise_for_status()
+                features = resp.json().get("features", [])
+                if features:
+                    break  # found data — stop trying fallback layers
     except Exception:
+        # Network or service error — return UNKNOWN without caching so next tap retries
         return UNKNOWN_RESULT
 
-    features = data.get("features", [])
     if not features:
-        set_cached("campsite_cache", cache_key, UNKNOWN_RESULT)
+        # Both layers returned nothing — private or city land; don't cache so
+        # the user can retry after moving to a different spot
         return UNKNOWN_RESULT
 
     attrs = features[0].get("attributes", {})

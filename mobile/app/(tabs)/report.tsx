@@ -48,6 +48,8 @@ const SEVERITY = [
   { val: 'critical', label: 'AVOID',   color: C.red     },
 ];
 
+const PHOTO_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://trailhead-production-2049.up.railway.app';
+
 type TabView = 'submit' | 'nearby' | 'leaderboard';
 
 export default function ReportScreen() {
@@ -67,6 +69,7 @@ export default function ReportScreen() {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [view, setView] = useState<TabView>('submit');
 
+  const [detailReport, setDetailReport] = useState<Report | null>(null);
   const [drivingWarning, setDrivingWarning] = useState(false);
   const [campsiteRating, setCampsiteRating] = useState(0);
   const successAnim = useRef(new Animated.Value(0)).current;
@@ -367,6 +370,7 @@ export default function ReportScreen() {
             </View>
           ) : nearby.map(r => (
             <ReportCard key={r.id} report={r}
+              onPress={() => setDetailReport(r)}
               onUpvote={() => api.upvoteReport(r.id).catch(() => {})}
               onDownvote={() => api.downvoteReport(r.id).catch(() => {})}
               onConfirm={() => api.confirmReport(r.id).then(res => {
@@ -399,6 +403,19 @@ export default function ReportScreen() {
           ))}
         </ScrollView>
       )}
+      {/* Report detail modal */}
+      {detailReport && (
+        <ReportDetailModal
+          report={detailReport}
+          onClose={() => setDetailReport(null)}
+          onUpvote={() => { api.upvoteReport(detailReport.id).catch(() => {}); setDetailReport(null); }}
+          onDownvote={() => { api.downvoteReport(detailReport.id).catch(() => {}); setDetailReport(null); }}
+          onConfirm={() => api.confirmReport(detailReport.id).then(res => {
+            Alert.alert('Confirmed ✓', `+${res.credits_earned} credit earned`);
+            setDetailReport(null);
+          }).catch((e: any) => Alert.alert('Error', e.message))}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -407,8 +424,8 @@ async function getToken() {
   return (await SecureStore.getItemAsync('trailhead_token')) ?? '';
 }
 
-function ReportCard({ report: r, onUpvote, onDownvote, onConfirm }:
-  { report: Report; onUpvote: () => void; onDownvote: () => void; onConfirm: () => void }) {
+function ReportCard({ report: r, onPress, onUpvote, onDownvote, onConfirm }:
+  { report: Report; onPress: () => void; onUpvote: () => void; onDownvote: () => void; onConfirm: () => void }) {
   const C = useTheme();
   const rc = useMemo(() => makeRcStyles(C), [C]);
   const typeInfo = REPORT_TYPES.find(t => t.type === r.type);
@@ -417,7 +434,7 @@ function ReportCard({ report: r, onUpvote, onDownvote, onConfirm }:
   const expiresIn = r.expires_at ? Math.max(0, Math.floor((r.expires_at - Date.now() / 1000) / 3600)) : null;
 
   return (
-    <View style={rc.card}>
+    <TouchableOpacity style={rc.card} onPress={onPress} activeOpacity={0.85}>
       {r.cluster_count > 1 && (
         <View style={rc.clusterBadge}>
           <Text style={rc.clusterText}>{r.cluster_count} REPORTS HERE</Text>
@@ -463,9 +480,152 @@ function ReportCard({ report: r, onUpvote, onDownvote, onConfirm }:
           </TouchableOpacity>
         </View>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 }
+
+// ── Report detail modal ────────────────────────────────────────────────────────
+function ReportDetailModal({ report: r, onClose, onUpvote, onDownvote, onConfirm }:
+  { report: Report; onClose: () => void; onUpvote: () => void; onDownvote: () => void; onConfirm: () => void }) {
+  const C = useTheme();
+  const dm = useMemo(() => makeDmStyles(C), [C]);
+  const typeInfo = REPORT_TYPES.find(t => t.type === r.type);
+  const sevInfo = SEVERITY.find(sv => sv.val === r.severity);
+  const age = Math.floor((Date.now() / 1000 - r.created_at) / 3600);
+  const expiresIn = r.expires_at ? Math.max(0, Math.floor((r.expires_at - Date.now() / 1000) / 3600)) : null;
+  const photoUri = r.has_photo ? `${PHOTO_BASE}/api/reports/${r.id}/photo` : null;
+
+  return (
+    <Modal visible animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <View style={dm.container}>
+        {/* Header bar */}
+        <View style={dm.header}>
+          <TouchableOpacity onPress={onClose} style={dm.closeBtn} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+            <Ionicons name="close" size={22} color={C.text2} />
+          </TouchableOpacity>
+          <Text style={dm.headerTitle}>REPORT DETAIL</Text>
+          <View style={{ width: 40 }} />
+        </View>
+
+        <ScrollView contentContainerStyle={dm.scroll} showsVerticalScrollIndicator={false}>
+          {/* Type + severity row */}
+          <View style={dm.typeRow}>
+            <View style={[dm.typeIconWrap, { backgroundColor: (typeInfo?.color ?? '#f97316') + '20' }]}>
+              {(() => {
+                const icon = typeInfo?.icon ?? 'warning-outline';
+                return (icon.codePointAt(0) ?? 0) > 127
+                  ? <Text style={{ fontSize: 32 }}>{icon}</Text>
+                  : <Ionicons name={icon as any} size={32} color={typeInfo?.color ?? '#f97316'} />;
+              })()}
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={dm.typeLabel}>{typeInfo?.label ?? r.type}</Text>
+              {r.subtype ? <Text style={dm.subtype}>{r.subtype}</Text> : null}
+            </View>
+            {sevInfo && (
+              <View style={[dm.sevPill, { backgroundColor: sevInfo.color + '22', borderColor: sevInfo.color }]}>
+                <Text style={[dm.sevText, { color: sevInfo.color }]}>{sevInfo.label}</Text>
+              </View>
+            )}
+          </View>
+
+          {/* Photo */}
+          {photoUri && (
+            <Image
+              source={{ uri: photoUri }}
+              style={dm.photo}
+              resizeMode="cover"
+            />
+          )}
+
+          {/* Description */}
+          {r.description ? (
+            <View style={dm.descBox}>
+              <Text style={dm.descText}>{r.description}</Text>
+            </View>
+          ) : null}
+
+          {/* Meta */}
+          <View style={dm.metaBox}>
+            <View style={dm.metaRow}>
+              <Ionicons name="person-circle-outline" size={16} color={C.text3} />
+              <Text style={dm.metaText}>@{r.username}</Text>
+            </View>
+            <View style={dm.metaRow}>
+              <Ionicons name="time-outline" size={16} color={C.text3} />
+              <Text style={dm.metaText}>{age < 1 ? 'Just now' : `${age}h ago`}</Text>
+            </View>
+            {expiresIn !== null && (
+              <View style={dm.metaRow}>
+                <Ionicons name="hourglass-outline" size={16} color={C.text3} />
+                <Text style={dm.metaText}>Expires in {expiresIn}h</Text>
+              </View>
+            )}
+            {r.confirmations > 0 && (
+              <View style={dm.metaRow}>
+                <Ionicons name="checkmark-done-circle-outline" size={16} color={C.green} />
+                <Text style={[dm.metaText, { color: C.green }]}>{r.confirmations} confirmation{r.confirmations !== 1 ? 's' : ''}</Text>
+              </View>
+            )}
+          </View>
+
+          {/* Actions */}
+          <View style={dm.actionsRow}>
+            <TouchableOpacity style={dm.confirmBtn} onPress={onConfirm}>
+              <Ionicons name="checkmark-circle-outline" size={18} color={C.green} />
+              <Text style={[dm.btnText, { color: C.green }]}>STILL THERE</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={dm.voteBtn} onPress={onUpvote}>
+              <Ionicons name="thumbs-up-outline" size={18} color={C.text2} />
+              <Text style={dm.voteTxt}>{r.upvotes}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={dm.voteBtn} onPress={onDownvote}>
+              <Ionicons name="thumbs-down-outline" size={18} color={C.text2} />
+              <Text style={dm.voteTxt}>{r.downvotes ?? 0}</Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
+const makeDmStyles = (C: ColorPalette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: C.bg },
+  header: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingTop: 16, paddingBottom: 12,
+    borderBottomWidth: 1, borderColor: C.border, backgroundColor: C.s1,
+  },
+  closeBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  headerTitle: { color: C.text, fontSize: 12, fontWeight: '700', fontFamily: mono, letterSpacing: 1 },
+  scroll: { padding: 20, gap: 16, paddingBottom: 60 },
+  typeRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  typeIconWrap: { width: 64, height: 64, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  typeLabel: { color: C.text, fontSize: 18, fontWeight: '800', fontFamily: mono },
+  subtype: { color: C.text2, fontSize: 13, marginTop: 3 },
+  sevPill: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20, borderWidth: 1 },
+  sevText: { fontSize: 10, fontFamily: mono, fontWeight: '700', letterSpacing: 0.5 },
+  photo: { width: '100%', height: 240, borderRadius: 14, backgroundColor: C.s2 },
+  descBox: { backgroundColor: C.s2, borderRadius: 12, padding: 16, borderWidth: 1, borderColor: C.border },
+  descText: { color: C.text, fontSize: 14, lineHeight: 21 },
+  metaBox: { backgroundColor: C.s2, borderRadius: 12, padding: 14, gap: 10, borderWidth: 1, borderColor: C.border },
+  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  metaText: { color: C.text2, fontSize: 13 },
+  actionsRow: { flexDirection: 'row', gap: 10 },
+  confirmBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    backgroundColor: C.green + '18', borderWidth: 1, borderColor: C.green,
+    borderRadius: 12, paddingVertical: 13,
+  },
+  voteBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
+    borderRadius: 12, paddingVertical: 13, paddingHorizontal: 18,
+  },
+  btnText: { fontSize: 12, fontWeight: '700', fontFamily: mono },
+  voteTxt: { color: C.text2, fontSize: 14, fontWeight: '700', fontFamily: mono },
+});
 
 const makeRcStyles = (C: ColorPalette) => StyleSheet.create({
   card: {

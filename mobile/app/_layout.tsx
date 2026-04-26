@@ -78,7 +78,7 @@ export default function RootLayout() {
     // Also verify via StoreKit on device — covers reinstalls where backend may lag
     // Lazy-require so old binaries without the native module don't crash
     try {
-      const iap = require('expo-iap');
+      const iap = require('react-native-iap');
       iap.initConnection().then(async () => {
         try {
           const purchases = await iap.getAvailablePurchases();

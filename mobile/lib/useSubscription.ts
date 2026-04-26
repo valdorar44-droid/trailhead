@@ -16,11 +16,11 @@ export interface IAPProduct {
   currency: string;
 }
 
-// Lazy-load expo-iap so old binaries (without the native module) don't crash on import.
+// Lazy-load react-native-iap so old binaries (without the native module) don't crash on import.
 // Returns null if the native module isn't present.
-function getIAP(): typeof import('expo-iap') | null {
+function getIAP(): typeof import('react-native-iap') | null {
   try {
-    return require('expo-iap');
+    return require('react-native-iap');
   } catch {
     return null;
   }
@@ -140,7 +140,6 @@ export function useSubscription() {
     setRestoring(true);
     setError('');
     try {
-      await iap.restorePurchases();
       const purchases = await iap.getAvailablePurchases();
       const sub = purchases.find((p: any) => {
         const id = p.productId ?? p.id ?? '';

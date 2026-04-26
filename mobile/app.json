@@ -77,8 +77,7 @@
       "expo-image-picker",
       "expo-asset",
       "expo-font",
-      "./plugins/withKotlinVersion",
-      "expo-iap"
+      "./plugins/withKotlinVersion"
     ],
     "experiments": {
       "typedRoutes": true

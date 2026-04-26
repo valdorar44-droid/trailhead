@@ -1,16 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { Alert, Platform } from 'react-native';
-import {
-  initConnection,
-  endConnection,
-  fetchProducts,
-  requestPurchase,
-  finishTransaction,
-  purchaseUpdatedListener,
-  purchaseErrorListener,
-  restorePurchases,
-  getAvailablePurchases,
-} from 'expo-iap';
+import { Alert } from 'react-native';
 import { api } from './api';
 import { useStore } from './store';
 
@@ -27,9 +16,19 @@ export interface IAPProduct {
   currency: string;
 }
 
+// Lazy-load expo-iap so old binaries (without the native module) don't crash on import.
+// Returns null if the native module isn't present.
+function getIAP(): typeof import('expo-iap') | null {
+  try {
+    return require('expo-iap');
+  } catch {
+    return null;
+  }
+}
+
 export function useSubscription() {
-  const setPlan  = useStore(s => s.setPlan);
-  const token    = useStore(s => s.token);
+  const setPlan = useStore(s => s.setPlan);
+  const token   = useStore(s => s.token);
 
   const [connected,  setConnected]  = useState(false);
   const [products,   setProducts]   = useState<IAPProduct[]>([]);
@@ -40,30 +39,31 @@ export function useSubscription() {
   const purchaseListenerRef = useRef<{ remove: () => void } | null>(null);
   const errorListenerRef    = useRef<{ remove: () => void } | null>(null);
 
-  // Activate plan on our backend and update store
   const activateOnBackend = useCallback(async (productId: string, transactionId: string) => {
     if (!token) return;
     try {
       const res = await api.activateSubscription(productId, transactionId);
       setPlan(res.status !== 'error', res.plan_expires_at ?? null);
     } catch {
-      // Backend activation failed — still mark locally so UX doesn't break
       setPlan(true, Date.now() / 1000 + 366 * 86400);
     }
   }, [token, setPlan]);
 
   useEffect(() => {
+    const iap = getIAP();
+    if (!iap) return; // native module not in this binary — skip silently
+
     let mounted = true;
 
     async function setup() {
+      if (!iap) return;
       try {
-        await initConnection();
+        await iap.initConnection();
         if (!mounted) return;
         setConnected(true);
 
-        // Load product info (prices come from Apple, never hardcode them)
         const skus = [PRODUCT_IDS.monthly, PRODUCT_IDS.annual];
-        const items = await fetchProducts({ skus, type: 'subs' });
+        const items = await iap.fetchProducts({ skus, type: 'subs' });
         if (!mounted) return;
 
         const normalized: IAPProduct[] = (items ?? []).map((p: any) => ({
@@ -74,31 +74,27 @@ export function useSubscription() {
           currency:       p.currency ?? '',
         }));
         setProducts(normalized);
-      } catch (e: any) {
-        // Simulator or device without IAP — graceful degradation
-        if (mounted) setError(e?.message ?? 'Store unavailable');
+      } catch {
+        // Simulator, or store unavailable — degrade silently
       }
     }
 
     setup();
 
-    // Listen for completed purchases
-    purchaseListenerRef.current = purchaseUpdatedListener(async (purchase: any) => {
+    purchaseListenerRef.current = iap.purchaseUpdatedListener(async (purchase: any) => {
       const productId     = purchase.productId ?? purchase.id ?? '';
       const transactionId = purchase.transactionId ?? (purchase as any).orderId ?? purchase.id ?? '';
       if (!productId) return;
-
       try {
         await activateOnBackend(productId, transactionId);
-        await finishTransaction({ purchase, isConsumable: false });
+        await iap.finishTransaction({ purchase, isConsumable: false });
       } catch {
-        await finishTransaction({ purchase, isConsumable: false });
+        await iap.finishTransaction({ purchase, isConsumable: false });
       }
       setPurchasing(false);
     });
 
-    errorListenerRef.current = purchaseErrorListener((err: any) => {
-      // User cancelled is not a real error
+    errorListenerRef.current = iap.purchaseErrorListener((err: any) => {
       const msg = err?.message ?? '';
       if (!msg.toLowerCase().includes('cancel') && !msg.toLowerCase().includes('user')) {
         setError('Purchase failed. Please try again.');
@@ -110,23 +106,23 @@ export function useSubscription() {
       mounted = false;
       purchaseListenerRef.current?.remove();
       errorListenerRef.current?.remove();
-      endConnection().catch(() => {});
+      iap.endConnection().catch(() => {});
     };
   }, [activateOnBackend]);
 
   const purchase = useCallback(async (productId: string) => {
-    if (!connected) { setError('Store not available.'); return; }
+    const iap = getIAP();
+    if (!iap || !connected) { setError('Store not available.'); return; }
     setError('');
     setPurchasing(true);
     try {
-      await requestPurchase({
+      await iap.requestPurchase({
         type: 'subs',
         request: {
           apple:  { sku: productId },
           google: { skus: [productId] } as any,
         },
       });
-      // Result arrives via purchaseUpdatedListener — don't await here
     } catch (e: any) {
       const msg = e?.message ?? '';
       if (!msg.toLowerCase().includes('cancel')) {
@@ -137,11 +133,13 @@ export function useSubscription() {
   }, [connected]);
 
   const restore = useCallback(async () => {
+    const iap = getIAP();
+    if (!iap) { setError('Store not available.'); return; }
     setRestoring(true);
     setError('');
     try {
-      await restorePurchases();
-      const purchases = await getAvailablePurchases();
+      await iap.restorePurchases();
+      const purchases = await iap.getAvailablePurchases();
       const sub = purchases.find((p: any) => {
         const id = p.productId ?? p.id ?? '';
         return id === PRODUCT_IDS.monthly || id === PRODUCT_IDS.annual;

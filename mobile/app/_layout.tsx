@@ -8,7 +8,6 @@ import * as Notifications from 'expo-notifications';
 import * as Updates from 'expo-updates';
 import { useStore } from '@/lib/store';
 import { api } from '@/lib/api';
-import { getAvailablePurchases, initConnection, endConnection } from 'expo-iap';
 import { PRODUCT_IDS } from '@/lib/useSubscription';
 import { useTheme, mono } from '@/lib/design';
 
@@ -77,17 +76,23 @@ export default function RootLayout() {
     });
 
     // Also verify via StoreKit on device — covers reinstalls where backend may lag
-    initConnection().then(async () => {
-      try {
-        const purchases = await getAvailablePurchases();
-        const active = purchases.some((p: any) => {
-          const id = p.productId ?? p.id ?? '';
-          return id === PRODUCT_IDS.monthly || id === PRODUCT_IDS.annual;
-        });
-        if (active) setPlan(true);
-      } catch {}
-      endConnection().catch(() => {});
-    }).catch(() => {});
+    // Lazy-require so old binaries without the native module don't crash
+    try {
+      const iap = require('expo-iap');
+      iap.initConnection().then(async () => {
+        try {
+          const purchases = await iap.getAvailablePurchases();
+          const active = purchases.some((p: any) => {
+            const id = p.productId ?? p.id ?? '';
+            return id === PRODUCT_IDS.monthly || id === PRODUCT_IDS.annual;
+          });
+          if (active) setPlan(true);
+        } catch {}
+        iap.endConnection().catch(() => {});
+      }).catch(() => {});
+    } catch {
+      // Native module not in this binary — skip
+    }
 
     Notifications.requestPermissionsAsync().catch(() => {});
 

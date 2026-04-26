@@ -172,6 +172,14 @@ def init_db():
             generated_at INTEGER NOT NULL,
             view_count   INTEGER NOT NULL DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS report_interactions (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            report_id  INTEGER NOT NULL,
+            user_id    INTEGER NOT NULL REFERENCES users(id),
+            action     TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            UNIQUE(report_id, user_id, action)
+        );
     """)
     # Performance indexes (IF NOT EXISTS is safe to re-run)
     for idx_sql in [
@@ -217,6 +225,14 @@ def init_db():
             error       TEXT,
             created_at  REAL NOT NULL,
             updated_at  REAL NOT NULL
+        )""",
+        """CREATE TABLE IF NOT EXISTS report_interactions (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            report_id  INTEGER NOT NULL,
+            user_id    INTEGER NOT NULL REFERENCES users(id),
+            action     TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            UNIQUE(report_id, user_id, action)
         )""",
     ]:
         try:
@@ -728,12 +744,20 @@ def _cluster_reports(reports: list[dict], cluster_deg: float = 0.002) -> list:
         clusters.append(rep)
     return clusters
 
-def confirm_report(report_id: int, user_id: int) -> bool:
-    """'Still there' confirmation — resets expiry, +1 credit to confirmer."""
+def confirm_report(report_id: int, user_id: int) -> dict:
+    """'Still there' confirmation — resets expiry, +1 credit to confirmer. One confirm per user per report."""
     db = _conn()
-    row = db.execute("SELECT type,expires_at FROM reports WHERE id=?", (report_id,)).fetchone()
+    row = db.execute("SELECT type,expires_at,user_id FROM reports WHERE id=?", (report_id,)).fetchone()
     if not row:
-        db.close(); return False
+        db.close(); return {"ok": False, "reason": "not_found"}
+    if row["user_id"] == user_id:
+        db.close(); return {"ok": False, "reason": "own_report"}
+    existing = db.execute(
+        "SELECT id FROM report_interactions WHERE report_id=? AND user_id=? AND action='confirm'",
+        (report_id, user_id)
+    ).fetchone()
+    if existing:
+        db.close(); return {"ok": False, "reason": "already_confirmed"}
     ttl = EXPIRY_BY_TYPE.get(row["type"], 7 * 86400)
     new_expires = int(time.time()) + ttl
     db.execute("UPDATE reports SET confirmations=confirmations+1, expires_at=? WHERE id=?",
@@ -741,17 +765,31 @@ def confirm_report(report_id: int, user_id: int) -> bool:
     db.execute("UPDATE users SET credits=credits+1 WHERE id=?", (user_id,))
     db.execute("INSERT INTO credit_transactions (user_id,amount,reason,created_at) VALUES (?,?,?,?)",
                (user_id, 1, f"Confirmed report #{report_id} still active", int(time.time())))
+    db.execute("INSERT INTO report_interactions (report_id,user_id,action,created_at) VALUES (?,?,?,?)",
+               (report_id, user_id, "confirm", int(time.time())))
     db.commit(); db.close()
-    return True
+    return {"ok": True}
 
-def upvote_report(report_id: int):
+def upvote_report(report_id: int, user_id: int | None = None):
     db = _conn()
-    db.execute("UPDATE reports SET upvotes=upvotes+1 WHERE id=?", (report_id,))
     row = db.execute("SELECT user_id FROM reports WHERE id=?", (report_id,)).fetchone()
-    if row:
-        db.execute("UPDATE users SET credits=credits+2 WHERE id=?", (row["user_id"],))
-        db.execute("INSERT INTO credit_transactions (user_id,amount,reason,created_at) VALUES (?,?,?,?)",
-                   (row["user_id"], 2, f"Report #{report_id} upvoted", int(time.time())))
+    if not row:
+        db.close(); return
+    if user_id:
+        if row["user_id"] == user_id:
+            db.close(); return  # no self-upvotes
+        existing = db.execute(
+            "SELECT id FROM report_interactions WHERE report_id=? AND user_id=? AND action='upvote'",
+            (report_id, user_id)
+        ).fetchone()
+        if existing:
+            db.close(); return
+        db.execute("INSERT INTO report_interactions (report_id,user_id,action,created_at) VALUES (?,?,?,?)",
+                   (report_id, user_id, "upvote", int(time.time())))
+    db.execute("UPDATE reports SET upvotes=upvotes+1 WHERE id=?", (report_id,))
+    db.execute("UPDATE users SET credits=credits+2 WHERE id=?", (row["user_id"],))
+    db.execute("INSERT INTO credit_transactions (user_id,amount,reason,created_at) VALUES (?,?,?,?)",
+               (row["user_id"], 2, f"Report #{report_id} upvoted", int(time.time())))
     db.commit(); db.close()
 
 def downvote_report(report_id: int):

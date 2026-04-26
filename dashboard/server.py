@@ -871,8 +871,8 @@ async def route_reports(body: RouteReportRequest):
     return get_reports_along_route(body.waypoints, radius_deg=0.12)
 
 @app.post("/api/reports/{report_id}/upvote")
-async def upvote(report_id: int):
-    upvote_report(report_id)
+async def upvote(report_id: int, user: dict = Depends(_optional_user)):
+    upvote_report(report_id, user["id"] if user else None)
     return {"status": "ok"}
 
 @app.post("/api/reports/{report_id}/downvote")
@@ -882,10 +882,15 @@ async def downvote(report_id: int):
 
 @app.post("/api/reports/{report_id}/confirm")
 async def confirm(report_id: int, user: dict = Depends(_current_user)):
-    """'Still there' — resets expiry, +1 credit to confirmer."""
-    ok = confirm_report(report_id, user["id"])
-    if not ok:
+    """'Still there' — resets expiry, +1 credit to confirmer. One per user per report."""
+    result = confirm_report(report_id, user["id"])
+    reason = result.get("reason")
+    if reason == "not_found":
         raise HTTPException(404, "Report not found")
+    if reason == "own_report":
+        raise HTTPException(400, "Cannot confirm your own report")
+    if reason == "already_confirmed":
+        raise HTTPException(400, "Already confirmed this report")
     fresh = get_user_by_id(user["id"])
     return {"status": "ok", "credits_earned": 1, "new_balance": fresh["credits"]}
 

@@ -2,14 +2,15 @@ import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
   StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator,
-  Share, Animated, Linking, Modal,
+  Share, Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
-import { api, PaywallError, TripResult, TrailDNA, CreditPackage } from '@/lib/api';
+import { api, PaywallError, TripResult, TrailDNA } from '@/lib/api';
+import PaywallModal from '@/components/PaywallModal';
 import { useStore } from '@/lib/store';
 import { useTheme, useTag, mono, ColorPalette } from '@/lib/design';
 import { saveOfflineTrip, loadOfflineTrip } from '@/lib/offlineTrips';
@@ -60,9 +61,7 @@ export default function PlanScreen() {
   const user             = useStore(st => st.user);
   const rigProfile       = useStore(st => st.rigProfile);
 
-  const [showCreditsModal, setShowCreditsModal] = useState(false);
-  const [packages, setPackages] = useState<CreditPackage[]>([]);
-  const [buyingPkg, setBuyingPkg] = useState<string | null>(null);
+  const [paywallVisible, setPaywallVisible] = useState(false);
   const [offlineToast, setOfflineToast] = useState(false);
   const offlineToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [weatherToast, setWeatherToast] = useState('');
@@ -87,26 +86,11 @@ export default function PlanScreen() {
   useEffect(() => () => stopStages(), []);
 
   function handleOutOfCredits() {
-    setShowCreditsModal(true);
-    if (packages.length === 0) {
-      api.getCreditPackages().then(setPackages).catch(() => {});
-    }
-  }
-
-  async function buyPackage(pkgId: string) {
-    setBuyingPkg(pkgId);
-    try {
-      const res = await api.createCheckout(pkgId);
-      await Linking.openURL(res.url);
-    } catch (e: any) {
-      // If Stripe not configured, show message
-    } finally {
-      setBuyingPkg(null);
-    }
+    setPaywallVisible(true);
   }
 
   function isOutOfCredits(e: any) {
-    return e instanceof PaywallError || e?.message?.includes('402') || e?.message?.includes('Not enough credits') || e?.message?.includes('credits');
+    return e instanceof PaywallError || e?.message?.includes('402') || e?.message?.includes('Not enough credits');
   }
 
   // ── Resolve location reference in text ──────────────────────────────────────
@@ -320,42 +304,12 @@ export default function PlanScreen() {
 
   return (
     <SafeAreaView style={s.container}>
-      {/* ── Credits modal ── */}
-      <Modal visible={showCreditsModal} transparent animationType="fade" onRequestClose={() => setShowCreditsModal(false)}>
-        <View style={s.modalOverlay}>
-          <View style={s.creditsModal}>
-            <TouchableOpacity style={s.creditsModalClose} onPress={() => setShowCreditsModal(false)}>
-              <Ionicons name="close" size={20} color={C.text3} />
-            </TouchableOpacity>
-            <Ionicons name="flash" size={32} color={C.orange} />
-            <Text style={s.creditsModalTitle}>Out of Credits</Text>
-            <Text style={s.creditsModalSub}>
-              You have {user?.credits ?? 0} credits. Buy more or earn credits by contributing to the map.
-            </Text>
-            <View style={s.pkgRow}>
-              {packages.map(pkg => (
-                <TouchableOpacity
-                  key={pkg.id}
-                  style={[s.pkgCard, pkg.popular && s.pkgCardPopular]}
-                  onPress={() => buyPackage(pkg.id)}
-                  disabled={buyingPkg !== null}
-                >
-                  {pkg.popular && <Text style={s.pkgPopularTag}>BEST VALUE</Text>}
-                  <Text style={s.pkgLabel}>{pkg.label}</Text>
-                  <Text style={s.pkgCredits}>{pkg.credits}</Text>
-                  <Text style={s.pkgCreditsLabel}>credits</Text>
-                  <Text style={s.pkgPrice}>{pkg.price_display}</Text>
-                  {buyingPkg === pkg.id && <ActivityIndicator size="small" color={C.orange} style={{ marginTop: 4 }} />}
-                </TouchableOpacity>
-              ))}
-            </View>
-            <View style={s.earnTip}>
-              <Ionicons name="information-circle-outline" size={14} color={C.text3} />
-              <Text style={s.earnTipText}>Submit reports on the Map tab to earn free credits</Text>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      {/* ── Paywall modal (IAP) ── */}
+      <PaywallModal
+        visible={paywallVisible}
+        onClose={() => setPaywallVisible(false)}
+        onPlanActivated={() => setPaywallVisible(false)}
+      />
 
       {/* ── Header ── */}
       <View style={s.header}>
@@ -367,7 +321,7 @@ export default function PlanScreen() {
           <Text style={s.logoTag}>AI OVERLAND GUIDE</Text>
         </View>
         {user && (
-          <TouchableOpacity style={s.creditPill} onPress={() => setShowCreditsModal(true)}>
+          <TouchableOpacity style={s.creditPill} onPress={() => setPaywallVisible(true)}>
             <Ionicons name="flash" size={12} color={C.orange} />
             <Text style={s.creditPillText}>{user.credits}</Text>
           </TouchableOpacity>
@@ -903,23 +857,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   loginGateBtn: { backgroundColor: C.orange, borderRadius: 12, paddingVertical: 14, alignSelf: 'stretch', alignItems: 'center', marginTop: 8 },
   loginGateBtnText: { color: '#fff', fontFamily: mono, fontSize: 12, fontWeight: '700', letterSpacing: 1 },
   loginGateNote: { color: C.text3, fontSize: 11, textAlign: 'center', fontFamily: mono },
-
-  // Credits modal
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' },
-  creditsModal: { backgroundColor: C.s1, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40, alignItems: 'center', gap: 10 },
-  creditsModalClose: { position: 'absolute', top: 16, right: 16, padding: 4 },
-  creditsModalTitle: { color: C.text, fontSize: 22, fontWeight: '800', marginTop: 4 },
-  creditsModalSub: { color: C.text2, fontSize: 13, textAlign: 'center', lineHeight: 20 },
-  pkgRow: { flexDirection: 'row', gap: 10, marginTop: 8 },
-  pkgCard: { flex: 1, backgroundColor: C.s2, borderRadius: 14, padding: 12, alignItems: 'center', gap: 2, borderWidth: 1, borderColor: C.border },
-  pkgCardPopular: { borderColor: C.orange, backgroundColor: C.s2 },
-  pkgPopularTag: { color: C.orange, fontSize: 8, fontFamily: mono, fontWeight: '700', letterSpacing: 1, marginBottom: 2 },
-  pkgLabel: { color: C.text, fontSize: 13, fontWeight: '700', fontFamily: mono },
-  pkgCredits: { color: C.orange, fontSize: 26, fontWeight: '900', lineHeight: 30 },
-  pkgCreditsLabel: { color: C.text3, fontSize: 9, fontFamily: mono, letterSpacing: 1 },
-  pkgPrice: { color: C.text2, fontSize: 13, fontWeight: '600', marginTop: 4 },
-  earnTip: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
-  earnTipText: { color: C.text3, fontSize: 11, fontFamily: mono },
 
   // Credit pill in header
   creditPill: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: C.s2, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: C.border },

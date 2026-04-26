@@ -1300,6 +1300,9 @@ function MapScreen() {
   const [searchResult, setSearchResult] = useState<{ count: number } | null>(null);
   const [showOnboard, setShowOnboard] = useState(false);
 
+  const [nearbyLoading,   setNearbyLoading]   = useState(false);
+  const [nearbyNarration, setNearbyNarration] = useState<string | null>(null);
+
   // Fetch Mapbox token once on mount; send set_token to WebView when both are ready
   useEffect(() => {
     api.getConfig().then(c => {
@@ -1873,6 +1876,31 @@ function MapScreen() {
       setShowPacking(true);
     } catch {}
     setLoadingPacking(false);
+  }
+
+  async function handleNearbyAudio() {
+    const vp = viewportRef.current;
+    const center = vp
+      ? { lat: (vp.n + vp.s) / 2, lng: (vp.e + vp.w) / 2 }
+      : userLoc;
+    if (!center) return;
+    setNearbyLoading(true);
+    setNearbyNarration(null);
+    try {
+      Speech.stop();
+      const res = await api.nearbyAudio(center.lat, center.lng);
+      setNearbyNarration(res.narration);
+      Speech.speak(res.narration, { rate: 0.88, language: 'en-US' });
+    } catch (e: any) {
+      if (e instanceof PaywallError) {
+        setPaywallVisible(true);
+      } else {
+        setQuickToast('Could not load narration');
+        setTimeout(() => setQuickToast(''), 2500);
+      }
+    } finally {
+      setNearbyLoading(false);
+    }
   }
 
   function copyCoordinates(lat: number, lng: number) {
@@ -2606,6 +2634,17 @@ function MapScreen() {
           onPress={() => setShowLayerSheet(true)}
         >
           <Ionicons name="layers-outline" size={20} color={showLayerSheet ? '#fff' : OVR.text} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[s.ctrlBtn, nearbyNarration != null && { backgroundColor: '#f97316dd', borderColor: '#f97316' }]}
+          onPress={nearbyLoading ? undefined : handleNearbyAudio}
+          disabled={nearbyLoading}
+        >
+          {nearbyLoading
+            ? <ActivityIndicator size="small" color={C.orange} />
+            : <Ionicons name="headset-outline" size={20} color={nearbyNarration != null ? '#fff' : OVR.text} />
+          }
         </TouchableOpacity>
 
         {!navMode && (
@@ -4128,6 +4167,31 @@ function MapScreen() {
         </View>
       )}
 
+      {/* ── "What's here?" narration card ────────────────────────────────────── */}
+      {nearbyNarration && !navMode && !selectedCamp && (
+        <View style={s.narrationCard}>
+          <View style={s.narrationHeader}>
+            <View style={s.narrationIconWrap}>
+              <Ionicons name="headset-outline" size={16} color={C.orange} />
+            </View>
+            <Text style={s.narrationTitle}>WHAT'S HERE</Text>
+            <TouchableOpacity
+              style={s.narrationReplay}
+              onPress={() => Speech.speak(nearbyNarration, { rate: 0.88, language: 'en-US' })}
+            >
+              <Ionicons name="play-circle-outline" size={18} color={C.orange} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={s.narrationClose}
+              onPress={() => { Speech.stop(); setNearbyNarration(null); }}
+            >
+              <Ionicons name="close" size={16} color={OVR.text3} />
+            </TouchableOpacity>
+          </View>
+          <Text style={s.narrationText} numberOfLines={6}>{nearbyNarration}</Text>
+        </View>
+      )}
+
       {/* Bottom itinerary panel */}
       {showPanel && !navMode && activeTrip && (
         <View style={s.panel}>
@@ -5206,4 +5270,31 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(34,197,94,0.45)',
   },
   syncToastText: { color: '#22c55e', fontSize: 11, fontFamily: mono, fontWeight: '700', letterSpacing: 0.3 },
+
+  // ── "What's here?" narration card ────────────────────────────────────────────
+  narrationCard: {
+    position: 'absolute', bottom: 108, left: 12, right: 12,
+    backgroundColor: OVR.bg, borderRadius: 16,
+    borderWidth: 1.5, borderColor: C.orange + '55',
+    paddingHorizontal: 14, paddingVertical: 12,
+    shadowColor: C.orange, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.18, shadowRadius: 12,
+    elevation: 10,
+  },
+  narrationHeader: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8,
+  },
+  narrationIconWrap: {
+    width: 28, height: 28, borderRadius: 14,
+    backgroundColor: C.orange + '18',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  narrationTitle: {
+    flex: 1, color: C.orange, fontSize: 11, fontFamily: mono,
+    fontWeight: '800', letterSpacing: 0.8,
+  },
+  narrationReplay: { padding: 4 },
+  narrationClose:  { padding: 4 },
+  narrationText: {
+    color: OVR.text2, fontSize: 12, fontFamily: mono, lineHeight: 18,
+  },
 });

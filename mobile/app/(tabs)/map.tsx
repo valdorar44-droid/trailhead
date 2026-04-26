@@ -1179,7 +1179,6 @@ function MapScreen() {
   const [mapboxToken,   setMapboxToken]   = useState('');
   const [showFilters,   setShowFilters]   = useState(false);
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
-  const [discoverPins,  setDiscoverPins]  = useState<CampsitePin[]>([]);
   const [selectedCamp,  setSelectedCamp]  = useState<CampsitePin | null>(null);
   const [campDetail,    setCampDetail]    = useState<CampsiteDetail | null>(null);
   const [showCampDetail,setShowCampDetail] = useState(false);
@@ -1201,15 +1200,12 @@ function MapScreen() {
   const [paywallCode, setPaywallCode] = useState('');
   const [paywallMessage, setPaywallMessage] = useState('');
 
-  // Nearby mode (Dyrt-style)
-  const [nearbyMode,    setNearbyMode]    = useState(false);
-  const [nearbyPins,    setNearbyPins]    = useState<CampsitePin[]>([]);
-  const [loadingNearby, setLoadingNearby] = useState(false);
-  const nearbyRef = useRef<CampsitePin[]>([]);
 
   // POI layer
   const [showPois, setShowPois] = useState(false);
   const [pois,     setPois]     = useState<OsmPoi[]>([]);
+  const showPoisRef    = useRef(false);
+  const lastPoiFetchRef = useRef<{lat: number; lng: number} | null>(null);
 
   // Route options
   const [routeOpts,      setRouteOpts]      = useState<RouteOpts>({ avoidTolls: false, avoidHighways: false, backRoads: false, noFerries: false });
@@ -1641,19 +1637,30 @@ function MapScreen() {
   }, [userLoc]);
 
   // POI layer
-  useEffect(() => {
-    if (!showPois) {
-      webRef.current?.postMessage(JSON.stringify({ type: 'clear_pois' }));
-      return;
-    }
-    const center = userLoc ?? (waypoints[0] ? { lat: waypoints[0].lat, lng: waypoints[0].lng } : null);
-    if (!center) return;
+  useEffect(() => { showPoisRef.current = showPois; }, [showPois]);
+
+  function fetchPois(center: { lat: number; lng: number }) {
+    lastPoiFetchRef.current = center;
     api.getOsmPois(center.lat, center.lng, 40, 'water,trailhead,viewpoint,peak')
       .then(p => {
         setPois(p);
         webRef.current?.postMessage(JSON.stringify({ type: 'set_pois', pois: p }));
       })
       .catch(() => {});
+  }
+
+  useEffect(() => {
+    if (!showPois) {
+      webRef.current?.postMessage(JSON.stringify({ type: 'clear_pois' }));
+      lastPoiFetchRef.current = null;
+      return;
+    }
+    const vp = viewportRef.current;
+    const center = vp
+      ? { lat: (vp.n + vp.s) / 2, lng: (vp.e + vp.w) / 2 }
+      : userLoc ?? (waypoints[0] ? { lat: waypoints[0].lat, lng: waypoints[0].lng } : null);
+    if (!center) return;
+    fetchPois(center);
   }, [showPois]);
 
   // Sync route options to WebView
@@ -1942,6 +1949,15 @@ function MapScreen() {
         viewportRef.current = { n: msg.n, s: msg.s, e: msg.e, w: msg.w, zoom: msg.zoom };
         setMapZoom(msg.zoom ?? 10);
         if ((msg.zoom ?? 0) >= 9) setMapMoved(true);
+        // Refresh POIs when panned far enough from last fetch
+        if (showPoisRef.current && (msg.zoom ?? 0) >= 8) {
+          const newLat = (msg.n + msg.s) / 2;
+          const newLng = (msg.e + msg.w) / 2;
+          const last = lastPoiFetchRef.current;
+          if (!last || Math.abs(newLat - last.lat) > 0.15 || Math.abs(newLng - last.lng) > 0.15) {
+            fetchPois({ lat: newLat, lng: newLng });
+          }
+        }
       }
       if (msg.type === 'search_area') {
         // Legacy WebView button — handled by native button now, but keep as fallback

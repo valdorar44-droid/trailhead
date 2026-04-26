@@ -21,6 +21,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.trailhead.app",
+      "deploymentTarget": "15.1",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Trailhead uses your location to show nearby campsites, reports, and to navigate your route.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Trailhead uses your location in the background to trigger audio guide narration as you drive past landmarks.",
@@ -77,7 +78,8 @@
       "expo-image-picker",
       "expo-asset",
       "expo-font",
-      "./plugins/withKotlinVersion"
+      "./plugins/withKotlinVersion",
+      "expo-iap"
     ],
     "experiments": {
       "typedRoutes": true

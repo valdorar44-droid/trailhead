@@ -9,7 +9,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
-import { api, TripResult, TrailDNA, CreditPackage } from '@/lib/api';
+import { api, PaywallError, TripResult, TrailDNA, CreditPackage } from '@/lib/api';
 import { useStore } from '@/lib/store';
 import { useTheme, useTag, mono, ColorPalette } from '@/lib/design';
 import { saveOfflineTrip, loadOfflineTrip } from '@/lib/offlineTrips';
@@ -104,7 +104,7 @@ export default function PlanScreen() {
   }
 
   function isOutOfCredits(e: any) {
-    return e?.message?.includes('402') || e?.message?.includes('Not enough credits') || e?.message?.includes('credits');
+    return e instanceof PaywallError || e?.message?.includes('402') || e?.message?.includes('Not enough credits') || e?.message?.includes('credits');
   }
 
   // ── Resolve location reference in text ──────────────────────────────────────

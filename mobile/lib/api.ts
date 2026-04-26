@@ -6,6 +6,17 @@ async function getToken(): Promise<string | null> {
   return SecureStore.getItemAsync('trailhead_token');
 }
 
+export class PaywallError extends Error {
+  code: string;
+  creditsNeeded?: number;
+  constructor(message: string, code: string, creditsNeeded?: number) {
+    super(message);
+    this.name = 'PaywallError';
+    this.code = code;
+    this.creditsNeeded = creditsNeeded;
+  }
+}
+
 async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const token = await getToken();
   const headers: Record<string, string> = {
@@ -16,7 +27,13 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const res = await fetch(`${BASE}${path}`, { ...opts, headers });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail ?? 'Request failed');
+    const detail = err.detail;
+    // Structured paywall response
+    if (res.status === 402 && detail && typeof detail === 'object' && detail.earn_hint) {
+      throw new PaywallError(detail.message ?? 'Feature requires credits or a plan.', detail.code ?? 'paywall', detail.credits_needed);
+    }
+    const msg = typeof detail === 'string' ? detail : (detail?.message ?? 'Request failed');
+    throw new Error(msg);
   }
   return res.json();
 }
@@ -120,6 +137,14 @@ export const api = {
     req<CampFullness | null>(`/api/camps/${encodeURIComponent(campId)}/fullness`),
   getNearbyFullness: (lat: number, lng: number, radius?: number) =>
     req<CampFullness[]>(`/api/camps/fullness/nearby?lat=${lat}&lng=${lng}&radius=${radius ?? 0.5}`),
+
+  // Subscription
+  subscriptionStatus: () =>
+    req<SubscriptionStatus>('/api/subscription/status'),
+  activateSubscription: (product_id: string, transaction_id: string) =>
+    req<{ status: string; plan_type: string; plan_expires_at: number }>('/api/subscription/activate', {
+      method: 'POST', body: JSON.stringify({ product_id, transaction_id }),
+    }),
 };
 
 export interface TrailDNA {
@@ -221,6 +246,7 @@ export interface WikiArticle {
 export interface CampsiteInsightRequest {
   name: string; lat: number; lng: number;
   description?: string; land_type?: string; amenities?: string[];
+  facility_id?: string;
 }
 export interface CampsiteInsight {
   insider_tip: string; best_for: string; best_season: string;
@@ -278,4 +304,11 @@ export interface LandCheck {
   camping_status: 'allowed' | 'check-rules' | 'restricted' | 'unknown';
   camping_note: string;
   source: string;
+}
+export interface SubscriptionStatus {
+  plan_type: string;
+  plan_expires_at: number | null;
+  is_active: boolean;
+  credits: number;
+  camp_searches_used: number;
 }

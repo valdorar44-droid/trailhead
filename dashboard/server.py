@@ -35,6 +35,7 @@ from db.store import (
     get_trail_dna, save_trail_dna, get_conversation, save_conversation, clear_conversation,
     report_camp_full, confirm_camp_full, dispute_camp_full, get_camp_fullness, get_fullness_nearby,
     log_event, cleanup_stale_data,
+    get_camp_brief, set_camp_brief, has_active_plan, activate_plan, use_free_camp_search,
 )
 
 # ── Credit economy ─────────────────────────────────────────────────────────────
@@ -67,7 +68,7 @@ REPORT_CREDIT_PHOTO = 10   # credits for a report with photo
 # Keyed by IP. Buckets reset after ANON_WINDOW_S seconds.
 # Authenticated users bypass this entirely — credits are their limit.
 _ANON_WINDOW_S = 604_800   # 7-day rolling window
-_ANON_LIMITS   = {"chat": 15, "plan": 1, "insight": 1}  # per window
+_ANON_LIMITS   = {"chat": 15, "plan": 1, "insight": 1, "search": 1}  # per window
 _anon_buckets: dict[str, dict] = {}
 
 def _client_ip(request: Request) -> str:
@@ -398,9 +399,17 @@ async def plan(request: Request, body: PlanRequest, user: dict = Depends(_option
     import re as _re
     day_hint = int((_re.search(r'\b(\d+)\s*-?\s*day', body.request or '', _re.I) or [None, 7])[1])
     if user:
-        cost = _plan_credit_cost(day_hint)
-        if not deduct_credits(user["id"], cost, f"AI trip plan (~{day_hint}d)"):
-            raise HTTPException(402, f"Not enough credits. A ~{day_hint}-day plan costs {cost} credits.")
+        if has_active_plan(user):
+            cost = 0  # plan holders plan for free
+        else:
+            cost = _plan_credit_cost(day_hint)
+            if not deduct_credits(user["id"], cost, f"AI trip plan (~{day_hint}d)"):
+                raise HTTPException(402, detail={
+                    "code": "insufficient_credits",
+                    "message": f"A {day_hint}-day plan costs {cost} credits.",
+                    "credits_needed": cost,
+                    "earn_hint": True,
+                })
     else:
         _anon_check(_client_ip(request), "plan")
         cost = 0
@@ -608,8 +617,24 @@ async def campsites(lat: float, lng: float, radius: float = 25):
     return await get_campsites_near(lat, lng, radius_miles=radius)
 
 @app.get("/api/campsites/search")
-async def campsites_search(lat: float, lng: float, radius: float = 40, types: str = ""):
+async def campsites_search(
+    lat: float, lng: float, radius: float = 40, types: str = "",
+    request: Request = None, user: dict | None = Depends(_optional_user)
+):
     type_filters = [t.strip() for t in types.split(",") if t.strip()] if types else None
+    if user:
+        if not has_active_plan(user) and user.get("credits", 0) < 1:
+            # Check and consume the single free search slot
+            if not use_free_camp_search(user["id"]):
+                raise HTTPException(402, detail={
+                    "code": "search_limit",
+                    "message": "You've used your 1 free camp search.",
+                    "earn_hint": True,
+                })
+    else:
+        # Anonymous: treated as one-time per session via anon check
+        if request:
+            _anon_check(_client_ip(request), "search")
     return await get_campsites_search(lat, lng, radius_miles=radius, type_filters=type_filters)
 
 @app.get("/api/campsites/{facility_id}/detail")
@@ -881,6 +906,56 @@ async def stripe_webhook(request: _Request):
                 fulfill_stripe_purchase(session_id, uid, credits)
 
     return {"received": True}
+
+# ── Apple IAP subscription activation ────────────────────────────────────────
+
+IAP_PRODUCTS = {
+    "com.trailhead.explorer.monthly": {"label": "Explorer Monthly", "days": 31},
+    "com.trailhead.explorer.annual":  {"label": "Explorer Annual",  "days": 366},
+}
+
+class IAPActivateRequest(BaseModel):
+    product_id: str
+    transaction_id: str  # from Apple StoreKit — stored for idempotency
+
+@app.post("/api/subscription/activate")
+async def activate_subscription(body: IAPActivateRequest, user: dict = Depends(_current_user)):
+    """Called by mobile after a successful StoreKit purchase. Activates the plan on the user account."""
+    product = IAP_PRODUCTS.get(body.product_id)
+    if not product:
+        raise HTTPException(400, f"Unknown product: {body.product_id}")
+
+    # Idempotency: store transaction_id to prevent double-activation
+    from db.store import _conn as _db_conn
+    db = _db_conn()
+    existing = db.execute(
+        "SELECT id FROM stripe_purchases WHERE session_id=?", (body.transaction_id,)
+    ).fetchone()
+    if existing:
+        db.close()
+        user_row = get_user_by_id(user["id"])
+        return {"status": "already_active", "plan_type": user_row.get("plan_type"), "plan_expires_at": user_row.get("plan_expires_at")}
+
+    db.execute(
+        "INSERT INTO stripe_purchases (session_id, user_id, credits, created_at) VALUES (?,?,0,?)",
+        (body.transaction_id, user["id"], int(__import__("time").time()))
+    )
+    db.commit(); db.close()
+
+    expires_at = activate_plan(user["id"], body.product_id, product["days"])
+    log_event(user["id"], None, "iap_activate", {"product_id": body.product_id, "days": product["days"]})
+    return {"status": "activated", "plan_type": body.product_id, "plan_expires_at": expires_at}
+
+@app.get("/api/subscription/status")
+async def subscription_status(user: dict = Depends(_current_user)):
+    """Returns current plan state so mobile can gate features."""
+    return {
+        "plan_type": user.get("plan_type", "free"),
+        "plan_expires_at": user.get("plan_expires_at"),
+        "is_active": has_active_plan(user),
+        "credits": user.get("credits", 0),
+        "camp_searches_used": user.get("camp_searches_used", 0),
+    }
 
 @app.get("/credits/success", response_class=HTMLResponse)
 async def credits_success(session_id: str = ""):
@@ -1344,23 +1419,41 @@ async def wikipedia_nearby(lat: float, lng: float, radius: int = 10000, limit: i
 class CampsiteInsightRequest(BaseModel):
     name: str; lat: float; lng: float
     description: str = ""; land_type: str = ""; amenities: list[str] = []
+    facility_id: str = ""
 
 @app.post("/api/ai/campsite-insight")
 async def campsite_insight(request: Request, body: CampsiteInsightRequest, user: dict = Depends(_optional_user)):
     """Generate AI-enriched campsite description with nearby context.
-    Served free from cache; costs credits (auth) or counts against weekly limit (anon) on first generation."""
+    Served free from cache; costs credits (auth) or counts against weekly limit (anon) on first generation.
+    Permanent cache by facility_id; coordinate cache fallback for community pins."""
     if not settings.anthropic_api_key:
         raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
 
-    cache_key = f"ai_insight_{body.lat:.3f}_{body.lng:.3f}"
-    cached = get_cached("campsite_cache", cache_key, ttl_seconds=3600 * 72)
-    if cached:
-        return cached  # free from cache for everyone
+    # Permanent cache by facility_id (RIDB campsites) — free for everyone forever
+    if body.facility_id:
+        cached = get_camp_brief(body.facility_id)
+        if cached:
+            return cached
 
+    # Coordinate-based fallback cache (72h) for pins without a facility_id
+    coord_key = f"ai_insight_{body.lat:.3f}_{body.lng:.3f}"
+    if not body.facility_id:
+        cached = get_cached("campsite_cache", coord_key, ttl_seconds=3600 * 72)
+        if cached:
+            return cached
+
+    # Not cached — need to generate. Check credits/plan/anon limit.
     if user:
-        cost = AI_COSTS["campsite_insight"]
-        if not deduct_credits(user["id"], cost, f"Campsite insight — {body.name}"):
-            raise HTTPException(402, f"Not enough credits. Campsite insights cost {cost} credits.")
+        if has_active_plan(user):
+            pass  # plan holders generate for free
+        else:
+            cost = AI_COSTS["campsite_insight"]
+            if not deduct_credits(user["id"], cost, f"Campsite insight — {body.name}"):
+                raise HTTPException(402, detail={
+                    "code": "insufficient_credits",
+                    "message": f"Campsite briefs cost {cost} credits.",
+                    "earn_hint": True,
+                })
     else:
         _anon_check(_client_ip(request), "insight")
 
@@ -1382,10 +1475,14 @@ async def campsite_insight(request: Request, body: CampsiteInsightRequest, user:
             amenities=body.amenities, wiki_context=wiki_ctx, weather_context=weather_ctx,
         )
     except Exception as e:
-        if user: add_credits(user["id"], AI_COSTS["campsite_insight"], "Refund — campsite insight error")
+        if user and not has_active_plan(user):
+            add_credits(user["id"], AI_COSTS["campsite_insight"], "Refund — campsite insight error")
         raise HTTPException(500, str(e))
 
-    set_cached("campsite_cache", cache_key, result)
+    # Write to permanent cache (facility_id) and/or coordinate cache
+    if body.facility_id:
+        set_camp_brief(body.facility_id, result)
+    set_cached("campsite_cache", coord_key, result)
     return result
 
 

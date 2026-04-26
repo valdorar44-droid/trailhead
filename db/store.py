@@ -166,6 +166,12 @@ def init_db():
             event_data  TEXT,
             created_at  INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS camp_briefs (
+            facility_id  TEXT PRIMARY KEY,
+            brief_json   TEXT NOT NULL,
+            generated_at INTEGER NOT NULL,
+            view_count   INTEGER NOT NULL DEFAULT 0
+        );
     """)
     # Performance indexes (IF NOT EXISTS is safe to re-run)
     for idx_sql in [
@@ -197,6 +203,9 @@ def init_db():
         "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE trips ADD COLUMN user_id INTEGER",
         "CREATE TABLE IF NOT EXISTS stripe_purchases (session_id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, credits INTEGER NOT NULL, created_at INTEGER NOT NULL)",
+        "ALTER TABLE users ADD COLUMN plan_type TEXT NOT NULL DEFAULT 'free'",
+        "ALTER TABLE users ADD COLUMN plan_expires_at INTEGER",
+        "ALTER TABLE users ADD COLUMN camp_searches_used INTEGER NOT NULL DEFAULT 0",
     ]:
         try:
             db.execute(sql)
@@ -954,3 +963,62 @@ def ensure_admin_user(email: str, username: str, password_hash: str):
         (email.lower(), username, password_hash, code, int(time.time()))
     )
     db.commit(); db.close()
+
+
+# ── Camp briefs (permanent cache by facility_id) ──────────────────────────────
+
+def get_camp_brief(facility_id: str) -> dict | None:
+    db = _conn()
+    row = db.execute("SELECT brief_json FROM camp_briefs WHERE facility_id=?", (facility_id,)).fetchone()
+    if row:
+        db.execute("UPDATE camp_briefs SET view_count=view_count+1 WHERE facility_id=?", (facility_id,))
+        db.commit()
+    db.close()
+    return json.loads(row["brief_json"]) if row else None
+
+def set_camp_brief(facility_id: str, data: dict):
+    db = _conn()
+    db.execute(
+        "INSERT OR REPLACE INTO camp_briefs (facility_id, brief_json, generated_at) VALUES (?,?,?)",
+        (facility_id, json.dumps(data), int(time.time()))
+    )
+    db.commit(); db.close()
+
+
+# ── Subscription / plan helpers ───────────────────────────────────────────────
+
+def has_active_plan(user: dict) -> bool:
+    """True if user has a monthly or annual plan that hasn't expired."""
+    plan = user.get("plan_type", "free")
+    if plan == "free":
+        return False
+    expires = user.get("plan_expires_at")
+    if expires is None:
+        return False
+    return int(time.time()) < expires
+
+def activate_plan(user_id: int, plan_type: str, duration_days: int):
+    """Set plan_type and expiry. Extends existing plan if still active."""
+    db = _conn()
+    now = int(time.time())
+    row = db.execute("SELECT plan_expires_at FROM users WHERE id=?", (user_id,)).fetchone()
+    current_expiry = row["plan_expires_at"] if row and row["plan_expires_at"] else now
+    new_expiry = max(current_expiry, now) + duration_days * 86400
+    db.execute(
+        "UPDATE users SET plan_type=?, plan_expires_at=? WHERE id=?",
+        (plan_type, new_expiry, user_id)
+    )
+    db.commit(); db.close()
+    return new_expiry
+
+def use_free_camp_search(user_id: int) -> bool:
+    """Consume one free camp search. Returns True if the slot was available, False if limit reached."""
+    db = _conn()
+    row = db.execute("SELECT camp_searches_used FROM users WHERE id=?", (user_id,)).fetchone()
+    used = row["camp_searches_used"] if row else 0
+    if used >= 1:
+        db.close()
+        return False
+    db.execute("UPDATE users SET camp_searches_used=camp_searches_used+1 WHERE id=?", (user_id,))
+    db.commit(); db.close()
+    return True

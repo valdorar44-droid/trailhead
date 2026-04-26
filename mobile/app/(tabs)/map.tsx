@@ -13,7 +13,8 @@ const deactivateKeepAwake    = () => _keepAwake && _keepAwake.deactivateKeepAwak
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useStore } from '@/lib/store';
-import { api, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck } from '@/lib/api';
+import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck } from '@/lib/api';
+import PaywallModal from '@/components/PaywallModal';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 import { useConnectivitySync } from '@/lib/connectivitySync';
 
@@ -1183,6 +1184,9 @@ function MapScreen() {
   const [showCampDetail,setShowCampDetail] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [isSearchingCamps, setIsSearchingCamps] = useState(false);
+  const [paywallVisible, setPaywallVisible] = useState(false);
+  const [paywallCode, setPaywallCode] = useState('');
+  const [paywallMessage, setPaywallMessage] = useState('');
 
   // Nearby mode (Dyrt-style)
   const [nearbyMode,    setNearbyMode]    = useState(false);
@@ -1805,12 +1809,16 @@ function MapScreen() {
       const [insight, wiki] = await Promise.all([
         api.getCampsiteInsight({ name: selectedCamp.name, lat: selectedCamp.lat, lng: selectedCamp.lng,
           description: selectedCamp.description, land_type: selectedCamp.land_type,
-          amenities: campDetail?.amenities ?? [] }),
+          amenities: campDetail?.amenities ?? [], facility_id: selectedCamp.id ?? '' }),
         api.getWikipediaNearby(selectedCamp.lat, selectedCamp.lng, 15000),
       ]);
       setCampInsight(insight);
       setWikiArticles(wiki);
-    } catch {}
+    } catch (e: any) {
+      if (e instanceof PaywallError) {
+        setPaywallCode(e.code); setPaywallMessage(e.message); setPaywallVisible(true);
+      }
+    }
     setLoadingInsight(false);
     setLoadingWiki(false);
   }
@@ -1884,6 +1892,13 @@ function MapScreen() {
         api.getNearbyFullness(centerLat, centerLng, radiusMi * 0.6),
       ]);
       const camps = campsResult.status === 'fulfilled' ? campsResult.value : [];
+      if (campsResult.status === 'rejected' && campsResult.reason instanceof PaywallError) {
+        setPaywallCode(campsResult.reason.code);
+        setPaywallMessage(campsResult.reason.message);
+        setPaywallVisible(true);
+        setIsLoadingAreaCamps(false);
+        return;
+      }
       const fullIds = new Set(
         fullResult.status === 'fulfilled' ? fullResult.value.map(f => f.camp_id) : []
       );
@@ -1892,8 +1907,12 @@ function MapScreen() {
       setSearchResult({ count: camps.length });
       setTimeout(() => setSearchResult(null), 3000);
     } catch (e: any) {
-      setSearchResult({ count: -1 });
-      setTimeout(() => setSearchResult(null), 3000);
+      if (e instanceof PaywallError) {
+        setPaywallCode(e.code); setPaywallMessage(e.message); setPaywallVisible(true);
+      } else {
+        setSearchResult({ count: -1 });
+        setTimeout(() => setSearchResult(null), 3000);
+      }
     }
     setIsLoadingAreaCamps(false);
   }
@@ -4060,6 +4079,13 @@ function MapScreen() {
           </TouchableOpacity>
         </Modal>
       )}
+
+      <PaywallModal
+        visible={paywallVisible}
+        code={paywallCode}
+        message={paywallMessage}
+        onClose={() => setPaywallVisible(false)}
+      />
     </View>
   );
 }

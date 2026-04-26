@@ -473,10 +473,14 @@ async def plan(request: Request, body: PlanRequest, user: dict = Depends(_option
     return result
 
 @app.get("/api/trip/{trip_id}")
-async def get_trip_route(trip_id: str):
+async def get_trip_route(trip_id: str, user: dict | None = Depends(_optional_user)):
     trip = get_trip(trip_id)
     if not trip:
         raise HTTPException(404, "Trip not found")
+    # Trips with a user_id are private — only the owner can fetch them
+    trip_owner = trip.get("user_id")
+    if trip_owner and (not user or user["id"] != trip_owner):
+        raise HTTPException(403, "Not authorized to view this trip")
     return trip
 
 @app.get("/api/trip/{trip_id}/guide")

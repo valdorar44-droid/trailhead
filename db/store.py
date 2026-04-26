@@ -290,11 +290,12 @@ def save_trip(trip_id: str, request: str, plan: dict, user_id: int | None = None
 
 def get_trip(trip_id: str) -> dict | None:
     db = _conn()
-    row = db.execute("SELECT plan, audio_guide FROM trips WHERE id=?", (trip_id,)).fetchone()
+    row = db.execute("SELECT user_id, plan, audio_guide FROM trips WHERE id=?", (trip_id,)).fetchone()
     db.close()
     if not row:
         return None
     result = json.loads(row["plan"])
+    result["user_id"] = row["user_id"]  # used for ownership check in the route
     if row["audio_guide"]:
         result["audio_guide"] = json.loads(row["audio_guide"])
     return result

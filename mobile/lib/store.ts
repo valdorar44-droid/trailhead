@@ -88,12 +88,36 @@ export const useStore = create<AppState>((set) => ({
 
   setAuth: (token, user) => {
     SecureStore.setItemAsync('trailhead_token', token);
-    set({ token, user });
+    // Reset all user-specific state so a newly logged-in user never sees
+    // a previous user's rig, history, or favorites still in memory.
+    set({
+      token, user,
+      activeTrip: null,
+      rigProfile: null,
+      tripHistory: [],
+      favoriteCamps: [],
+      hasPlan: false,
+      planExpiresAt: null,
+    });
   },
 
   clearAuth: () => {
+    // Wipe token AND all user-specific device storage so the next user
+    // who logs in on this device starts with a clean slate.
     SecureStore.deleteItemAsync('trailhead_token');
-    set({ token: null, user: null, activeTrip: null });
+    SecureStore.deleteItemAsync('trailhead_rig');
+    SecureStore.deleteItemAsync('trailhead_history');
+    SecureStore.deleteItemAsync('trailhead_favorites');
+    set({
+      token: null,
+      user: null,
+      activeTrip: null,
+      rigProfile: null,
+      tripHistory: [],
+      favoriteCamps: [],
+      hasPlan: false,
+      planExpiresAt: null,
+    });
   },
 
   setActiveTrip: (trip, fromCache = false) => set({ activeTrip: trip, activeTripFromCache: fromCache }),

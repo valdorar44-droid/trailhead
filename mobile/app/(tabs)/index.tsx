@@ -279,14 +279,14 @@ export default function PlanScreen() {
         </View>
         <Text style={s.loginGateTitle}>AI Trip Planning</Text>
         <Text style={s.loginGateSub}>
-          Plan overland routes with AI, get campsite recommendations, packing lists, audio guides and more.
+          One app that replaces Gaia, iOverlander & The Dyrt. AI-planned multi-day routes with dispersed camps, fuel stops, and road conditions — tailored to your rig.
         </Text>
         <View style={s.loginGatePerks}>
           {[
-            ['flash', '50 credits free on signup'],
-            ['map-outline', 'AI-planned routes with camps + fuel'],
-            ['radio-outline', 'Audio guide for every waypoint'],
-            ['people-outline', 'Earn credits by contributing to the map'],
+            ['flash',          '50 credits free — earn more by contributing'],
+            ['map-outline',    'AI routes: camps, fuel, weather, land access'],
+            ['radio-outline',  'Audio guide narrated for every waypoint'],
+            ['shield-checkmark-outline', 'Your tracks stay private — always'],
           ].map(([icon, text]) => (
             <View key={text} style={s.loginGatePerk}>
               <Ionicons name={icon as any} size={16} color={C.orange} />
@@ -297,7 +297,7 @@ export default function PlanScreen() {
         <TouchableOpacity style={s.loginGateBtn} onPress={() => router.push('/(tabs)/profile')}>
           <Text style={s.loginGateBtnText}>SIGN IN OR CREATE ACCOUNT</Text>
         </TouchableOpacity>
-        <Text style={s.loginGateNote}>Navigate, browse camps, and report conditions — always free.</Text>
+        <Text style={s.loginGateNote}>Browse camps, report conditions, and navigate — always free.</Text>
       </View>
     </SafeAreaView>
   );
@@ -338,12 +338,12 @@ export default function PlanScreen() {
       {offlineToast && (
         <View style={s.offlineToast}>
           <Ionicons name="download-outline" size={13} color="#fff" />
-          <Text style={s.offlineToastText}>Trip saved for offline</Text>
+          <Text style={s.offlineToastText}>Route + weather saved offline</Text>
         </View>
       )}
 
       {/* ── Trail DNA strip ── */}
-      {Object.keys(trailDna).some(k => trailDna[k as keyof TrailDNA]) && (
+      {(Object.keys(trailDna).some(k => trailDna[k as keyof TrailDNA]) || (rigProfile?.make && rigProfile?.model)) && (
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -351,6 +351,9 @@ export default function PlanScreen() {
           contentContainerStyle={s.dnaRowContent}
         >
           <Text style={s.dnaLabel}>TRAIL DNA</Text>
+          {rigProfile?.make && rigProfile?.model && !trailDna.vehicle && (
+            <DnaChip C={C} icon="car-outline" label={`${rigProfile.year ? rigProfile.year + ' ' : ''}${rigProfile.make} ${rigProfile.model}`} />
+          )}
           {trailDna.vehicle    && <DnaChip C={C} icon="car-outline"       label={trailDna.vehicle} />}
           {trailDna.terrain    && <DnaChip C={C} icon="triangle-outline"  label={trailDna.terrain} />}
           {trailDna.camp_style && <DnaChip C={C} icon="moon-outline"      label={trailDna.camp_style} />}

@@ -2092,7 +2092,10 @@ function MapScreen() {
       });
       const updated = await api.getCampFullness(selectedCamp.id).catch(() => null);
       setCampFullness(updated);
-      if (res.credits_earned > 0) Alert.alert('Thanks!', `+${res.credits_earned} credits earned for the report.`);
+      if (res.credits_earned > 0) {
+        setQuickToast(`+${res.credits_earned} credits`);
+        setTimeout(() => setQuickToast(''), 2500);
+      }
     } catch (e: any) {
       Alert.alert('Error', e.message ?? 'Could not submit report');
     }
@@ -3722,10 +3725,19 @@ function MapScreen() {
               <TouchableOpacity
                 style={[s.approachAlertBtn, { backgroundColor: color + '22', borderColor: color + '55' }]}
                 onPress={async () => {
-                  try { await api.confirmReport(rep.id); } catch {}
+                  try {
+                    await api.confirmReport(rep.id);
+                    setQuickToast('+1 credit');
+                  } catch (e: any) {
+                    const msg = e?.message ?? '';
+                    if (msg.includes('Already confirmed') || msg.includes('own report')) {
+                      setQuickToast('Already confirmed');
+                    } else {
+                      setQuickToast('Confirmed');
+                    }
+                  }
                   setApproachingReport(null);
-                  setQuickToast('+2 credits');
-                  setTimeout(() => setQuickToast(''), 2000);
+                  setTimeout(() => setQuickToast(''), 2500);
                 }}
               >
                 <Text style={[s.approachAlertBtnText, { color }]}>STILL{'\n'}THERE</Text>

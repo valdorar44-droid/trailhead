@@ -16,7 +16,7 @@ interface Props {
 const EARN_ITEMS = [
   { icon: '📍', label: 'Submit a road condition report', credits: '+10 credits' },
   { icon: '🏕️', label: 'Report a campsite condition',   credits: '+10 credits' },
-  { icon: '✅', label: 'Confirm another user\'s report', credits: '+2 credits'  },
+  { icon: '✅', label: "Confirm another user's report",  credits: '+1 credit'   },
   { icon: '📸', label: 'Add a photo to your report',    credits: '+5 bonus'    },
   { icon: '🔗', label: 'Refer a friend who signs up',   credits: '+50 credits' },
 ];
@@ -27,8 +27,8 @@ export default function PaywallModal({ visible, code, message, onClose, onPlanAc
   const isSearchLimit = code === 'search_limit';
   const title = isSearchLimit ? 'Free search used' : 'Credits needed';
   const subtitle = message ?? (isSearchLimit
-    ? "You've used your free camp search. Earn credits by contributing, or get the Explorer Plan for unlimited access."
-    : 'Earn credits through community contributions, or get the Explorer Plan for unlimited trip planning and camp briefs.');
+    ? "You've used your free camp search. Earn credits by contributing to the map, or get the Explorer Plan for unlimited access."
+    : 'Replaces Gaia, iOverlander & The Dyrt. Earn free credits by contributing, or get the Explorer Plan for unlimited AI routes, camp research, and offline access.');
 
   async function handlePurchase(productId: string) {
     await purchase(productId);
@@ -87,7 +87,7 @@ export default function PaywallModal({ visible, code, message, onClose, onPlanAc
 
           {!!error && <Text style={s.errorText}>{error}</Text>}
 
-          <Text style={s.sectionLabel}>Or earn credits free</Text>
+          <Text style={s.sectionLabel}>Or earn free credits</Text>
 
           <ScrollView style={s.earnList} showsVerticalScrollIndicator={false}>
             {EARN_ITEMS.map((item) => (

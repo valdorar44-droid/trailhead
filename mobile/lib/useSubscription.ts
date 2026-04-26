@@ -86,7 +86,7 @@ export function useSubscription() {
         });
 
         const skus = [PRODUCT_IDS.monthly, PRODUCT_IDS.annual];
-        const items = await iap.fetchProducts({ skus, type: 'subs' });
+        const items = await iap.getSubscriptions({ skus });
         if (!mounted) return;
 
         const normalized: IAPProduct[] = (items ?? []).map((p: any) => ({
@@ -118,13 +118,7 @@ export function useSubscription() {
     setError('');
     setPurchasing(true);
     try {
-      await iap.requestPurchase({
-        type: 'subs',
-        request: {
-          apple:  { sku: productId },
-          google: { skus: [productId] } as any,
-        },
-      });
+      await iap.requestSubscription({ sku: productId } as any);
     } catch (e: any) {
       const msg = e?.message ?? '';
       if (!msg.toLowerCase().includes('cancel')) {

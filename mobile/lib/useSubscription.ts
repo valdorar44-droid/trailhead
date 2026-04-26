@@ -62,6 +62,29 @@ export function useSubscription() {
         if (!mounted) return;
         setConnected(true);
 
+        // Listeners must be set up AFTER initConnection() succeeds.
+        // If they run before/outside the try, they crash when the store is unavailable.
+        purchaseListenerRef.current = iap.purchaseUpdatedListener(async (purchase: any) => {
+          const productId     = purchase.productId ?? purchase.id ?? '';
+          const transactionId = purchase.transactionId ?? (purchase as any).orderId ?? purchase.id ?? '';
+          if (!productId) return;
+          try {
+            await activateOnBackend(productId, transactionId);
+            await iap.finishTransaction({ purchase, isConsumable: false });
+          } catch {
+            await iap.finishTransaction({ purchase, isConsumable: false });
+          }
+          setPurchasing(false);
+        });
+
+        errorListenerRef.current = iap.purchaseErrorListener((err: any) => {
+          const msg = err?.message ?? '';
+          if (!msg.toLowerCase().includes('cancel') && !msg.toLowerCase().includes('user')) {
+            setError('Purchase failed. Please try again.');
+          }
+          setPurchasing(false);
+        });
+
         const skus = [PRODUCT_IDS.monthly, PRODUCT_IDS.annual];
         const items = await iap.fetchProducts({ skus, type: 'subs' });
         if (!mounted) return;
@@ -80,27 +103,6 @@ export function useSubscription() {
     }
 
     setup();
-
-    purchaseListenerRef.current = iap.purchaseUpdatedListener(async (purchase: any) => {
-      const productId     = purchase.productId ?? purchase.id ?? '';
-      const transactionId = purchase.transactionId ?? (purchase as any).orderId ?? purchase.id ?? '';
-      if (!productId) return;
-      try {
-        await activateOnBackend(productId, transactionId);
-        await iap.finishTransaction({ purchase, isConsumable: false });
-      } catch {
-        await iap.finishTransaction({ purchase, isConsumable: false });
-      }
-      setPurchasing(false);
-    });
-
-    errorListenerRef.current = iap.purchaseErrorListener((err: any) => {
-      const msg = err?.message ?? '';
-      if (!msg.toLowerCase().includes('cancel') && !msg.toLowerCase().includes('user')) {
-        setError('Purchase failed. Please try again.');
-      }
-      setPurchasing(false);
-    });
 
     return () => {
       mounted = false;

@@ -24,6 +24,8 @@ const EXAMPLES = [
 
 const CHAT_STAGES  = ['Checking the trail...', 'On it...', 'Thinking...'];
 const PLAN_STAGES  = ['Mapping your route...', 'Finding campsites...', 'Locating fuel stops...', 'Briefing terrain...'];
+// Long trips (7+ days) can take 1-2 minutes — we surface an extra stage at ~20s
+const PLAN_STAGES_LONG = ['Mapping your route...', 'Building itinerary... (this can take a minute)', 'Finding campsites...', 'Locating fuel stops...', 'Briefing terrain...'];
 
 type PlanPhase = 'idle' | 'chatting' | 'ready' | 'planning' | 'active' | 'editing';
 
@@ -192,12 +194,29 @@ export default function PlanScreen() {
     }
   }
 
+  // ── Plan Next Leg — start fresh from last waypoint ───────────────────────
+  function planNextLeg() {
+    if (!activeTrip) return;
+    const wps = activeTrip.plan?.waypoints ?? [];
+    const lastWp = [...wps].reverse().find(w => w.type === 'camp' || w.type === 'motel' || w.type === 'start');
+    const endLocation = lastWp?.name ?? activeTrip.plan?.trip_name ?? 'your last stop';
+    const days = activeTrip.plan?.duration_days ?? 0;
+    setActiveTrip(null);
+    setMessages([{
+      role: 'ai',
+      text: `Ready for leg 2! Picking up from ${endLocation.split(',')[0]}. Where do you want to head next, and how many days do you have?`,
+    }]);
+    setInput(`Continue from ${endLocation.split(',')[0]} — `);
+    setPlanPhase('chatting');
+  }
+
   // ── Build full trip from conversation ─────────────────────────────────────
   async function buildTrip() {
     setMessages(m => m.filter(msg => !msg.outline));
     setPlanPhase('planning');
     setLoading(true);
-    startStages(PLAN_STAGES);
+    // Use the longer stage list so "this can take a minute" shows up for long trips
+    startStages(PLAN_STAGES_LONG);
     try {
       const result = await api.planFromSession(sessionId);
       setActiveTrip(result);
@@ -265,7 +284,7 @@ export default function PlanScreen() {
         ? 'Building your route...'
         : 'Tell me about your adventure...';
 
-  const currentStages = planPhase === 'planning' ? PLAN_STAGES : CHAT_STAGES;
+  const currentStages = planPhase === 'planning' ? PLAN_STAGES_LONG : CHAT_STAGES;
 
   // ── Login gate ───────────────────────────────────────────────────────────
   if (!user) return (
@@ -280,7 +299,7 @@ export default function PlanScreen() {
         </Text>
         <View style={s.loginGatePerks}>
           {[
-            ['flash', `${75} credits free on signup`],
+            ['flash', '50 credits free on signup'],
             ['map-outline', 'AI-planned routes with camps + fuel'],
             ['radio-outline', 'Audio guide for every waypoint'],
             ['people-outline', 'Earn credits by contributing to the map'],
@@ -472,6 +491,7 @@ export default function PlanScreen() {
                 C={C}
                 onViewMap={() => router.push('/map')}
                 onViewGuide={() => router.push('/guide')}
+                onNextLeg={planNextLeg}
               />
             ) : msg.outline ? (
               <OutlineCard
@@ -748,9 +768,10 @@ async function shareGpx(trip: TripResult) {
   await Sharing.shareAsync(path, { mimeType: 'application/gpx+xml', UTI: 'public.gpx' });
 }
 
-function TripCard({ trip, C, onViewMap, onViewGuide }: {
+function TripCard({ trip, C, onViewMap, onViewGuide, onNextLeg }: {
   trip: TripResult; C: ColorPalette;
   onViewMap: () => void; onViewGuide: () => void;
+  onNextLeg?: () => void;
 }) {
   const tag = useTag();
   const p = trip.plan;
@@ -852,6 +873,16 @@ function TripCard({ trip, C, onViewMap, onViewGuide }: {
           <Text style={{ color: C.text2, fontSize: 11, fontFamily: mono }}>GUIDE</Text>
         </TouchableOpacity>
       </View>
+      {/* Plan Next Leg — shown when trip is at or near the 14-day cap */}
+      {onNextLeg && (p.duration_days ?? 0) >= 12 && (
+        <TouchableOpacity
+          onPress={onNextLeg}
+          style={{ margin: 12, marginTop: 0, paddingVertical: 11, borderRadius: 8, borderWidth: 1, borderColor: '#22c55e55', backgroundColor: '#0d2a1622', alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }}
+        >
+          <Ionicons name="arrow-forward-circle-outline" size={16} color="#22c55e" />
+          <Text style={{ color: '#22c55e', fontSize: 11, fontFamily: mono, fontWeight: '700', letterSpacing: 0.5 }}>PLAN NEXT LEG FROM HERE →</Text>
+        </TouchableOpacity>
+      )}
     </Animated.View>
   );
 }

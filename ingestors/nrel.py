@@ -55,15 +55,20 @@ async def get_fuel_near(lat: float, lng: float, radius_miles: float = 25) -> lis
 
 
 async def get_gas_along_route(waypoints: list[dict]) -> list[dict]:
-    """Fetch gas stations near each waypoint and deduplicate."""
+    """Fetch alternative fuel stations near fuel-type waypoints only.
+    Querying near every waypoint scatters pins far off route — fuel stops
+    are the only waypoints where an off-route fuel station is actually useful."""
     seen = set()
     all_stations = []
-    for wp in waypoints:
+    fuel_wps = [wp for wp in waypoints if wp.get("type") == "fuel"]
+    # Fall back to all waypoints if Claude generated no explicit fuel stops
+    targets = fuel_wps if fuel_wps else waypoints[:5]
+    for wp in targets:
         lat = wp.get("lat")
         lng = wp.get("lng")
         if not lat or not lng:
             continue
-        stations = await get_fuel_near(lat, lng, radius_miles=30)
+        stations = await get_fuel_near(lat, lng, radius_miles=15)
         for s in stations:
             sid = s["id"]
             if sid not in seen:

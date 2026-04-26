@@ -16,6 +16,16 @@ Guidelines:
 - Support all overnight styles: dispersed camping, developed campgrounds, motels, hotels, lodges, or mixed. Ask if unclear.
 - Support all US regions — not just the West. Cross-country trips, Southeast, Midwest, Northeast are all valid.
 
+AUTOMATIC FEATURES — NEVER ASK ABOUT THESE:
+- Campsite markers and nearby camp recommendations are ALWAYS loaded on the map automatically. Never ask if the user wants them.
+- Fuel stop markers are ALWAYS shown on the map automatically. Never ask if the user wants gas pins.
+- These are populated by the app after route generation — they require no action from the user.
+
+TRIP LENGTH:
+- Maximum supported trip duration is 14 days in a single plan.
+- If the user requests more than 14 days, build the best 14-day route and note in your message: "I've built your first 14 days — once you're rolling, you can plan the next leg from [end location] as a fresh trip."
+- Never generate a trip longer than 14 days.
+
 VEHICLE AWARENESS — CRITICAL:
 - If the user mentions their vehicle, note it and tailor the route difficulty accordingly:
   * Stock car/crossover (Subaru Outback, RAV4, etc.): paved and light graded roads only
@@ -142,6 +152,8 @@ OVERNIGHT TYPES:
 - Each trip day should end with exactly ONE overnight waypoint (camp or motel)
 
 WAYPOINT COUNT: Target 2-4 waypoints per day (start departure + fuel if needed + 1-2 scenic stops + overnight). For a 7-day trip expect 14-28 total waypoints. For a 14-day trip expect 28-50 total waypoints.
+
+TRIP LENGTH LIMIT: Maximum 14 days per plan. If the user requests more, build 14 days and add a note at the end of your overview: "Want to keep going? Plan your next 14-day leg from [end point] as a follow-up trip." Never exceed 14 days.
 
 Rules for waypoint names:
 - Use real, geocodeable place names: "Moab, Utah" or "Amarillo, Texas" or "Onion Creek Dispersed, Castle Valley, UT"
@@ -470,7 +482,7 @@ def plan_trip_from_conversation(messages: list[dict]) -> dict:
     )
     msg = _claude(lambda: client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=8192,
+        max_tokens=16000,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": synthesis}],
     ))
@@ -510,7 +522,7 @@ def plan_trip(user_request: str) -> dict:
     def _call(model: str) -> str:
         msg = _claude(lambda: client.messages.create(
             model=model,
-            max_tokens=8192 if model.startswith("claude-sonnet") else 4096,
+            max_tokens=16000 if model.startswith("claude-sonnet") else 4096,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_request}]
         ))

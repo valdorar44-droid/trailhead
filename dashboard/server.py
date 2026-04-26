@@ -1291,6 +1291,7 @@ async def land_check(lat: float, lng: float):
     }
 
     features = []
+    source_label = "BLM ArcGIS"
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             # Layer 1 = SMA polygon detail; layer 0 = broader SMA coverage
@@ -1303,14 +1304,46 @@ async def land_check(lat: float, lng: float):
                 resp.raise_for_status()
                 features = resp.json().get("features", [])
                 if features:
-                    break  # found data — stop trying fallback layers
+                    break
+
+            # BLM SMA sometimes misses USFS-managed lands — try USFS boundary layer
+            if not features:
+                try:
+                    usfs_params = {
+                        "geometry": point_geom,
+                        "geometryType": "esriGeometryPoint",
+                        "inSR": "4326",
+                        "spatialRel": "esriSpatialRelIntersects",
+                        "outFields": "FORESTNAME,REGION",
+                        "returnGeometry": "false",
+                        "f": "json",
+                    }
+                    r2 = await client.get(
+                        "https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_ForestSystemBoundaries_01/MapServer/0/query",
+                        params=usfs_params,
+                        headers={"User-Agent": "Trailhead/1.0"},
+                        timeout=8,
+                    )
+                    r2.raise_for_status()
+                    usfs_feats = r2.json().get("features", [])
+                    if usfs_feats:
+                        forest_name = usfs_feats[0].get("attributes", {}).get("FORESTNAME", "National Forest")
+                        result = {
+                            "land_type": "USFS",
+                            "admin_name": forest_name,
+                            "camping_status": "allowed",
+                            "camping_note": f"{forest_name} — dispersed camping generally allowed outside developed sites. Check local fire restrictions.",
+                            "source": "USFS ArcGIS",
+                        }
+                        set_cached("campsite_cache", cache_key, result)
+                        return result
+                except Exception:
+                    pass
+
     except Exception:
-        # Network or service error — return UNKNOWN without caching so next tap retries
         return UNKNOWN_RESULT
 
     if not features:
-        # Both layers returned nothing — private or city land; don't cache so
-        # the user can retry after moving to a different spot
         return UNKNOWN_RESULT
 
     attrs = features[0].get("attributes", {})
@@ -1566,36 +1599,35 @@ async def _geocode_one(client: httpx.AsyncClient, wp: dict, sem: asyncio.Semapho
     name = wp.get("name", "")
     if not name:
         return wp
+    token = settings.mapbox_token
     async with sem:
         try:
             resp = await client.get(
-                "https://nominatim.openstreetmap.org/search",
-                params={"q": name, "format": "json", "limit": 1, "countrycodes": "us"},
+                f"https://api.mapbox.com/geocoding/v5/mapbox.places/{httpx.utils.quote(name, safe='')}.json",
+                params={"access_token": token, "limit": 1, "country": "us", "types": "place,locality,address,poi,region"},
             )
             resp.raise_for_status()
-            hits = resp.json()
-            if hits:
-                wp["lat"] = float(hits[0]["lat"])
-                wp["lng"] = float(hits[0]["lon"])
-                wp["geocoded_name"] = hits[0].get("display_name", name)
+            feats = resp.json().get("features", [])
+            if feats:
+                lng, lat = feats[0]["geometry"]["coordinates"]
+                wp["lat"] = lat
+                wp["lng"] = lng
+                wp["geocoded_name"] = feats[0].get("place_name", name)
         except Exception:
             pass
-        await asyncio.sleep(1.1)  # Nominatim rate limit: 1 req/sec
     return wp
 
 
 async def _geocode_waypoints(waypoints: list[dict]) -> list[dict]:
-    # Cap at 20 waypoints and run with a concurrency of 2, total timeout 25s
-    capped = waypoints[:20]
-    headers = {"User-Agent": "Trailhead/1.0 (valdorar44@gmail.com)"}
-    sem = asyncio.Semaphore(2)
+    # Cap at 45 waypoints (covers 14-day trips); Mapbox has no per-second limit
+    capped = waypoints[:45]
+    sem = asyncio.Semaphore(8)
     try:
-        async with httpx.AsyncClient(timeout=8, headers=headers) as client:
+        async with httpx.AsyncClient(timeout=10) as client:
             results = await asyncio.wait_for(
                 asyncio.gather(*[_geocode_one(client, wp, sem) for wp in capped]),
-                timeout=25,
+                timeout=45,
             )
-            return list(results) + waypoints[20:]
+            return list(results) + waypoints[45:]
     except asyncio.TimeoutError:
-        # Return whatever we have — partially geocoded is better than nothing
-        return capped + waypoints[20:]
+        return capped + waypoints[45:]

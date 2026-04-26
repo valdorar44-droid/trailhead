@@ -42,13 +42,18 @@ from db.store import (
 
 AI_COSTS = {
     "chat":             3,
-    "chat_edit":        5,
+    "chat_edit":        10,  # Sonnet + full trip JSON context ≈ same cost as a new plan
     "campsite_insight": 5,
     "route_brief":      8,
     "packing_list":     5,
     "audio_guide":      8,
     "nearby_audio":     3,
 }
+
+# Soft daily caps for plan subscribers (unlimited plan, but abuse protection)
+PLAN_DAILY_TRIPS    = 15   # trip plans per day
+PLAN_DAILY_EDITS    = 20   # trip edits per day
+PLAN_DAILY_AUDIO    = 10   # audio guides per day
 
 CREDIT_PACKAGES = {
     "starter":    {"credits": 100,  "price_cents": 299,  "label": "Starter",    "popular": False},
@@ -299,9 +304,16 @@ async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depend
         raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
 
     if user:
-        cost = AI_COSTS["chat_edit"] if body.current_trip else AI_COSTS["chat"]
-        if not deduct_credits(user["id"], cost, f"AI chat"):
-            raise HTTPException(402, f"Not enough credits. This action costs {cost} credits.")
+        if has_active_plan(user):
+            from db.store import get_plan_action_count_today, log_ai_usage
+            if body.current_trip and get_plan_action_count_today(user["id"], "trip_edit") >= PLAN_DAILY_EDITS:
+                raise HTTPException(429, "Daily trip edit limit reached. Resets at midnight UTC.")
+            cost = 0
+            log_ai_usage(user["id"], "trip_edit" if body.current_trip else "chat")
+        else:
+            cost = AI_COSTS["chat_edit"] if body.current_trip else AI_COSTS["chat"]
+            if not deduct_credits(user["id"], cost, f"AI chat"):
+                raise HTTPException(402, f"Not enough credits. This action costs {cost} credits.")
     else:
         _anon_check(_client_ip(request), "chat")
 
@@ -400,7 +412,11 @@ async def plan(request: Request, body: PlanRequest, user: dict = Depends(_option
     day_hint = int((_re.search(r'\b(\d+)\s*-?\s*day', body.request or '', _re.I) or [None, 7])[1])
     if user:
         if has_active_plan(user):
+            from db.store import get_plan_action_count_today, log_ai_usage
+            if get_plan_action_count_today(user["id"], "trip_plan") >= PLAN_DAILY_TRIPS:
+                raise HTTPException(429, "Daily trip planning limit reached. Resets at midnight UTC.")
             cost = 0  # plan holders plan for free
+            log_ai_usage(user["id"], "trip_plan")
         else:
             cost = _plan_credit_cost(day_hint)
             if not deduct_credits(user["id"], cost, f"AI trip plan (~{day_hint}d)"):

@@ -530,6 +530,29 @@ def get_report_credits_today(user_id: int) -> int:
     return row["total"] if row else 0
 
 
+def log_ai_usage(user_id: int, action: str):
+    """Record a plan-subscriber AI call for daily soft-cap tracking."""
+    db = _conn()
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS ai_usage_log (id INTEGER PRIMARY KEY, user_id INTEGER, action TEXT, created_at INTEGER)"
+    )
+    db.execute("INSERT INTO ai_usage_log (user_id,action,created_at) VALUES (?,?,?)",
+               (user_id, action, int(time.time())))
+    db.commit(); db.close()
+
+def get_plan_action_count_today(user_id: int, action: str) -> int:
+    """Count how many times a plan subscriber has used a given AI action today."""
+    today_start = int(time.time()) - (int(time.time()) % 86400)
+    db = _conn()
+    db.execute("CREATE TABLE IF NOT EXISTS ai_usage_log (id INTEGER PRIMARY KEY, user_id INTEGER, action TEXT, created_at INTEGER)")
+    row = db.execute(
+        "SELECT COUNT(*) as cnt FROM ai_usage_log WHERE user_id=? AND action=? AND created_at>=?",
+        (user_id, action, today_start)
+    ).fetchone()
+    db.close()
+    return row["cnt"] if row else 0
+
+
 def is_stripe_session_fulfilled(session_id: str) -> bool:
     db = _conn()
     row = db.execute("SELECT 1 FROM stripe_purchases WHERE session_id=?", (session_id,)).fetchone()

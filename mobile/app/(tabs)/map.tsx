@@ -513,7 +513,8 @@ const buildMapHtml = (
   var initGas=${JSON.stringify(gasList.slice(0,20))};
   var initPins=${JSON.stringify(pins.slice(0,30))};
 
-  var map,mapboxToken='',apiBase='https://trailhead-production-2049.up.railway.app',currentStyle='satellite';
+  var map,mapboxToken='',apiBase='https://api.gettrailhead.app',currentStyle='satellite';
+  var tileBase='https://tiles.gettrailhead.app';
   // Protomaps API key — set via set_token from RN. When present we fetch tiles
   // directly from Protomaps' CDN (faster); otherwise fall back to our backend
   // proxy at apiBase + '/api/tiles/'.
@@ -596,10 +597,10 @@ const buildMapHtml = (
   // from Protomaps' static GitHub assets. Optional Mapbox satellite raster
   // overlay when in satellite/hybrid mode and token is available.
   function _tileUrl(){
-    return apiBase+'/api/tiles/{z}/{x}/{y}.pbf';
+    return tileBase+'/api/tiles/{z}/{x}/{y}.pbf';
   }
   function _glyphUrl(){
-    return 'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf';
+    return tileBase+'/api/fonts/{fontstack}/{range}.pbf';
   }
   function buildStyle(mode){
     var sources={
@@ -1558,7 +1559,7 @@ function MapScreen() {
         webRef.current?.postMessage(JSON.stringify({
           type: 'set_token', token,
           style: MAP_MODES[mapLayer] ?? MAP_MODES.satellite,
-          apiBase: process.env.EXPO_PUBLIC_API_URL ?? 'https://trailhead-production-2049.up.railway.app',
+          apiBase: process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app',
           protomapsKey: pmKey,
         }));
       }
@@ -2687,7 +2688,7 @@ function MapScreen() {
             webRef.current?.postMessage(JSON.stringify({
               type: 'set_token', token: mapboxToken,
               style: MAP_MODES[mapLayer] ?? MAP_MODES.satellite,
-              apiBase: process.env.EXPO_PUBLIC_API_URL ?? 'https://trailhead-production-2049.up.railway.app',
+              apiBase: process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app',
               protomapsKey,
             }));
           }

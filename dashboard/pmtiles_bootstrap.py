@@ -117,23 +117,30 @@ async def ensure_us_pmtiles() -> None:
         if tmp_path.exists():
             tmp_path.unlink()
 
+        # Discard stdout/stderr — go-pmtiles writes \r-terminated progress bars
+        # that overflow asyncio's 64KB readline buffer. Track progress by
+        # polling the temp file size + elapsed time instead.
+        import time as _time
+        start_t = _time.time()
         proc = await asyncio.create_subprocess_exec(
             str(GO_PMTILES_BINARY), "extract",
             planet_url,
             str(tmp_path),
             f"--bbox={CONUS_BBOX}",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
         )
-        # Drain the subprocess stdout so it doesn't block; capture last line for status
-        async def _drain() -> None:
-            assert proc.stdout is not None
-            async for line in proc.stdout:
-                line_s = line.decode("utf-8", errors="replace").rstrip()
-                if line_s:
-                    _status["progress"] = f"extract: {line_s[:120]}"
 
-        await asyncio.gather(_drain(), proc.wait())
+        async def _heartbeat() -> None:
+            while proc.returncode is None:
+                size_mb = (tmp_path.stat().st_size / 1_000_000) if tmp_path.exists() else 0
+                elapsed = int(_time.time() - start_t)
+                _status["progress"] = (
+                    f"extracting CONUS... {elapsed}s elapsed, {size_mb:.0f}MB written"
+                )
+                await asyncio.sleep(10)
+
+        await asyncio.gather(_heartbeat(), proc.wait())
 
         if proc.returncode != 0:
             _status["error"] = f"go-pmtiles exited {proc.returncode}"

@@ -763,6 +763,14 @@ def pmtiles_status():
     return pmtiles_bootstrap.status()
 
 
+@app.post("/api/admin/pmtiles-retry")
+async def pmtiles_retry():
+    """Re-trigger the extract task. Useful if startup ran with stale code or
+    the Protomaps build server was briefly unavailable."""
+    asyncio.create_task(pmtiles_bootstrap.ensure_us_pmtiles())
+    return {"triggered": True, "status": pmtiles_bootstrap.status()}
+
+
 @app.get("/api/tiles/{z}/{x}/{y}.pbf")
 async def proxy_vector_tile(z: int, x: int, y: int):
     """Vector tile endpoint. Serves from local PMTiles file when available

@@ -748,16 +748,31 @@ _TILE_CACHE_HEADERS = {
 PROTOMAPS_MAXZOOM = 15  # tiles v4 schema cap
 
 
+from dashboard import pmtiles_bootstrap
+
+
+@app.on_event("startup")
+async def _bootstrap_pmtiles():
+    """Kick off the US PMTiles extract in the background. Tiles serve from
+    Protomaps API until the local file is ready."""
+    asyncio.create_task(pmtiles_bootstrap.ensure_us_pmtiles())
+
+
+@app.get("/api/admin/pmtiles-status")
+def pmtiles_status():
+    return pmtiles_bootstrap.status()
+
+
 @app.get("/api/tiles/{z}/{x}/{y}.pbf")
 async def proxy_vector_tile(z: int, x: int, y: int):
-    """Vector tile proxy — covers the whole world. Self-hosted via Protomaps.
+    """Vector tile endpoint. Serves from local PMTiles file when available
+    (fast path, ~5ms), falls back to the Protomaps API while the local file
+    is being extracted on first deploy.
 
     For z > 15 (Protomaps maxzoom), serve the parent z15 tile so MapLibre's
     over-zoom rendering works. Without this, MapLibre's z16+ requests hit a
     400 error and the map appears to stop loading when the user zooms in.
     """
-    if not settings.protomaps_key:
-        raise HTTPException(503, "vector tiles not configured")
     if z < 0 or x < 0 or y < 0 or z > 22:
         raise HTTPException(400, "invalid tile coords")
 
@@ -778,7 +793,19 @@ async def proxy_vector_tile(z: int, x: int, y: int):
             return Response(hit, media_type="application/vnd.mapbox-vector-tile",
                             headers=_TILE_CACHE_HEADERS)
 
-    # Layer 2: upstream Protomaps
+    # Layer 2: local self-hosted PMTiles file (preferred)
+    local_tile = await pmtiles_bootstrap.get_local_tile(upstream_z, upstream_x, upstream_y)
+    if local_tile is not None:
+        async with _tile_lru_lock:
+            _tile_lru[key] = local_tile
+            if len(_tile_lru) > _TILE_LRU_MAX:
+                _tile_lru.popitem(last=False)
+        return Response(local_tile, media_type="application/vnd.mapbox-vector-tile",
+                        headers=_TILE_CACHE_HEADERS)
+
+    # Layer 3: upstream Protomaps API (fallback during extract)
+    if not settings.protomaps_key:
+        raise HTTPException(503, "vector tiles not configured")
     url = f"https://api.protomaps.com/tiles/v4/{upstream_z}/{upstream_x}/{upstream_y}.mvt?key={settings.protomaps_key}"
     try:
         r = await _get_tile_client().get(url)

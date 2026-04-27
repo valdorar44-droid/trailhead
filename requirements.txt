@@ -7,3 +7,4 @@ aiofiles==24.1.0
 bcrypt==4.2.1
 python-jose[cryptography]==3.3.0
 stripe==11.4.0
+pmtiles==3.4.1

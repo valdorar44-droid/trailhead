@@ -591,15 +591,12 @@ const buildMapHtml = (
   };
 
   // ── MapLibre outdoor style ────────────────────────────────────────────────────
-  // Vector tiles direct from Protomaps' CDN (when key is configured) for ~half
-  // the latency of going through our proxy. Falls back to our backend if the
-  // key isn't loaded yet (offline launch). Glyphs come direct from Protomaps'
-  // static assets too. Optional Mapbox satellite raster overlay when in
-  // satellite/hybrid mode and token is available.
+  // Vector tiles served by our self-hosted backend (reads from /data/us.pmtiles
+  // on Railway — no per-tile API cost, no upstream latency). Glyphs come direct
+  // from Protomaps' static GitHub assets. Optional Mapbox satellite raster
+  // overlay when in satellite/hybrid mode and token is available.
   function _tileUrl(){
-    return protomapsKey
-      ? 'https://api.protomaps.com/tiles/v4/{z}/{x}/{y}.mvt?key='+protomapsKey
-      : apiBase+'/api/tiles/{z}/{x}/{y}.pbf';
+    return apiBase+'/api/tiles/{z}/{x}/{y}.pbf';
   }
   function _glyphUrl(){
     return 'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf';

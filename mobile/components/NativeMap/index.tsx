@@ -116,8 +116,9 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     onRouteReady, onRoutePersist,
   } = props;
 
-  const mapRef  = useRef<MapLibreGL.MapViewRef>(null);
-  const camRef  = useRef<MapLibreGL.CameraRef>(null);
+  const mapRef       = useRef<MapLibreGL.MapViewRef>(null);
+  const camRef       = useRef<MapLibreGL.CameraRef>(null);
+  const initializedRef = useRef(false); // true after first setCamera — prevents snap-back
   const mapboxToken = useStore(s => s.mapboxToken);
   const activeTrip  = useStore(s => s.activeTrip);
   const C = useTheme();
@@ -255,6 +256,22 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   }))), [pois]);
 
   // ── Map event handlers ───────────────────────────────────────────────────────
+  // Set initial camera position exactly once on map ready — never again from props.
+  const handleMapReady = useCallback(() => {
+    if (!initializedRef.current) {
+      initializedRef.current = true;
+      const center: [number, number] = waypoints[0]
+        ? [waypoints[0].lng, waypoints[0].lat]
+        : [-98.5, 39.5];
+      const zoom = waypoints.length > 1 ? 7 : 10;
+      // Small delay so the map has time to fully initialise its GL context
+      setTimeout(() => {
+        camRef.current?.setCamera({ centerCoordinate: center, zoomLevel: zoom, animationDuration: 0 });
+      }, 100);
+    }
+    onMapReady();
+  }, [waypoints, onMapReady]);
+
   const handlePress = useCallback((feat: GeoJSON.Feature | undefined) => {
     if (!feat) { onMapTap(); return; }
     // Camp press comes through ShapeSource onPress — see CampsLayer
@@ -294,18 +311,17 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       onPress={handlePress}
       onLongPress={handleLongPress}
       onRegionDidChange={handleRegionChange}
-      onDidFinishLoadingMap={onMapReady}
+      onDidFinishLoadingMap={handleMapReady}
       compassEnabled={false}
       attributionEnabled={false}
       logoEnabled={false}
     >
       {/* ── Camera ────────────────────────────────────────────────────── */}
-      <MapLibreGL.Camera
-        ref={camRef}
-        centerCoordinate={waypoints[0] ? [waypoints[0].lng, waypoints[0].lat] : [-98.5, 39.5]}
-        zoomLevel={waypoints.length > 1 ? 7 : 10}
-        animationDuration={0}
-      />
+      {/* Camera — NO controlled centerCoordinate/zoomLevel props.
+          Binding those as React props causes the camera to snap back to the
+          initial position on every re-render (location update, state change).
+          Instead we set position once imperatively via onDidFinishLoadingMap. */}
+      <MapLibreGL.Camera ref={camRef} />
 
       {/* ── User location ─────────────────────────────────────────────── */}
       <MapLibreGL.UserLocation

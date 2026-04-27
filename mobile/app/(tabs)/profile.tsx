@@ -1134,6 +1134,32 @@ export default function ProfileScreen() {
           ))}
         </View>
 
+        {/* Delete account — required by App Store guideline 5.1.1(v) */}
+        <TouchableOpacity
+          style={s.deleteAccountBtn}
+          onPress={() => {
+            Alert.alert(
+              'Delete Account',
+              'This permanently deletes your account, all trips, reports, and credits. This cannot be undone.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Delete My Account',
+                  style: 'destructive',
+                  onPress: async () => {
+                    try { await api.deleteAccount(); } catch {}
+                    clearAuth();
+                    setView('login');
+                  },
+                },
+              ],
+            );
+          }}
+        >
+          <Ionicons name="trash-outline" size={14} color="#ef4444" />
+          <Text style={s.deleteAccountText}>Delete Account</Text>
+        </TouchableOpacity>
+
         {/* Build / OTA version */}
         <View style={s.versionCard}>
           <View style={s.versionRow}>
@@ -1209,6 +1235,12 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   profileEmail: { color: C.text3, fontSize: 12, marginTop: 1 },
   streakText: { color: C.orange, fontSize: 11, fontFamily: mono, marginTop: 4 },
   logoutBtn: { padding: 6 },
+  deleteAccountBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 6, paddingVertical: 12, borderRadius: 12,
+    borderWidth: 1, borderColor: '#ef444433', backgroundColor: '#ef444411',
+  },
+  deleteAccountText: { color: '#ef4444', fontSize: 13, fontFamily: 'Courier', fontWeight: '600' },
 
   // Stats row
   statsRow: {

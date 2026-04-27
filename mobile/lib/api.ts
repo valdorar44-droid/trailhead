@@ -101,6 +101,7 @@ export const api = {
     }),
   getLeaderboard: () => req<LeaderboardEntry[]>('/api/leaderboard'),
 
+  deleteAccount: () => req<{ deleted: boolean }>('/api/auth/me', { method: 'DELETE' }),
   getConfig: () => req<{ mapbox_token: string; protomaps_key?: string }>('/api/config'),
   getCampsites: (lat: number, lng: number, radius = 25) =>
     req<Campsite[]>(`/api/campsites?lat=${lat}&lng=${lng}&radius=${radius}`),

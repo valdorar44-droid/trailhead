@@ -239,6 +239,14 @@ async def login(body: LoginRequest):
 async def me(user: dict = Depends(_current_user)):
     return _safe_user(user)
 
+@app.delete("/api/auth/me")
+async def delete_account(user: dict = Depends(_current_user)):
+    """Permanently delete the authenticated user's account and all associated data.
+    Required by App Store guideline 5.1.1(v)."""
+    from db.store import delete_user
+    delete_user(user["id"])
+    return {"deleted": True}
+
 
 # ── Trip planning ─────────────────────────────────────────────────────────────
 

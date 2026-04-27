@@ -765,10 +765,97 @@ def pmtiles_status():
 
 @app.post("/api/admin/pmtiles-retry")
 async def pmtiles_retry():
-    """Re-trigger the extract task. Useful if startup ran with stale code or
-    the Protomaps build server was briefly unavailable."""
+    """Re-trigger the extract task."""
     asyncio.create_task(pmtiles_bootstrap.ensure_us_pmtiles())
     return {"triggered": True, "status": pmtiles_bootstrap.status()}
+
+
+# ── R2 upload ─────────────────────────────────────────────────────────────────
+_r2_upload_status: dict = {"running": False, "done": False, "error": None, "progress": ""}
+
+
+@app.get("/api/admin/r2-status")
+def r2_upload_status():
+    from dashboard.pmtiles_bootstrap import PMTILES_PATH
+    return {
+        **_r2_upload_status,
+        "source_size_mb": round(PMTILES_PATH.stat().st_size / 1_000_000, 1) if PMTILES_PATH.exists() else 0,
+    }
+
+
+@app.post("/api/admin/r2-upload")
+async def trigger_r2_upload():
+    """Stream /data/us.pmtiles to Cloudflare R2 via S3 multipart upload.
+    Safe to call multiple times — skips if already done or running."""
+    if _r2_upload_status["running"]:
+        return {"triggered": False, "reason": "already running", **_r2_upload_status}
+    if _r2_upload_status["done"]:
+        return {"triggered": False, "reason": "already done", **_r2_upload_status}
+    asyncio.create_task(_run_r2_upload())
+    return {"triggered": True}
+
+
+async def _run_r2_upload():
+    import boto3
+    from botocore.config import Config
+    from dashboard.pmtiles_bootstrap import PMTILES_PATH
+    import time as _t
+
+    _r2_upload_status.update(running=True, done=False, error=None, progress="starting")
+    try:
+        r2 = boto3.client(
+            "s3",
+            endpoint_url=f"https://{settings.r2_account_id}.r2.cloudflarestorage.com",
+            aws_access_key_id=settings.r2_access_key_id,
+            aws_secret_access_key=settings.r2_secret_access_key,
+            config=Config(signature_version="s3v4"),
+            region_name="auto",
+        )
+
+        file_size = PMTILES_PATH.stat().st_size
+        part_size = 256 * 1024 * 1024  # 256 MB parts — R2 handles large multipart fine
+        start = _t.time()
+
+        mpu = await asyncio.to_thread(
+            r2.create_multipart_upload, Bucket=settings.r2_bucket, Key="us.pmtiles",
+            ContentType="application/vnd.pmtiles",
+        )
+        upload_id = mpu["UploadId"]
+        parts = []
+
+        with open(PMTILES_PATH, "rb") as fh:
+            part_num = 1
+            while True:
+                chunk = fh.read(part_size)
+                if not chunk:
+                    break
+                resp = await asyncio.to_thread(
+                    r2.upload_part,
+                    Bucket=settings.r2_bucket, Key="us.pmtiles",
+                    UploadId=upload_id, PartNumber=part_num, Body=chunk,
+                )
+                parts.append({"PartNumber": part_num, "ETag": resp["ETag"]})
+                uploaded_mb = round(fh.tell() / 1_000_000, 0)
+                total_mb = round(file_size / 1_000_000, 0)
+                elapsed = int(_t.time() - start)
+                _r2_upload_status["progress"] = f"{uploaded_mb:.0f}/{total_mb:.0f} MB  {elapsed}s"
+                part_num += 1
+
+        await asyncio.to_thread(
+            r2.complete_multipart_upload,
+            Bucket=settings.r2_bucket, Key="us.pmtiles",
+            MultipartUpload={"Parts": parts}, UploadId=upload_id,
+        )
+        _r2_upload_status.update(done=True, progress=f"complete — {round(file_size/1_000_000, 0):.0f} MB uploaded")
+    except Exception as e:
+        _r2_upload_status["error"] = f"{type(e).__name__}: {e}"
+        try:
+            await asyncio.to_thread(r2.abort_multipart_upload,
+                                    Bucket=settings.r2_bucket, Key="us.pmtiles", UploadId=upload_id)
+        except Exception:
+            pass
+    finally:
+        _r2_upload_status["running"] = False
 
 
 @app.get("/api/tiles/{z}/{x}/{y}.pbf")

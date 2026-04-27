@@ -13,5 +13,9 @@ class Settings:
     # Public URL used for Stripe redirect after checkout
     public_url: str = os.environ.get("PUBLIC_URL", "https://trailhead-production-2049.up.railway.app")
     protomaps_key: str = os.environ.get("PROTOMAPS_KEY", "")
+    r2_account_id: str = os.environ.get("R2_ACCOUNT_ID", "")
+    r2_access_key_id: str = os.environ.get("R2_ACCESS_KEY_ID", "")
+    r2_secret_access_key: str = os.environ.get("R2_SECRET_ACCESS_KEY", "")
+    r2_bucket: str = os.environ.get("R2_BUCKET", "trailhead-tiles")
 
 settings = Settings()

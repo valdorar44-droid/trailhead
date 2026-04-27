@@ -6,10 +6,6 @@ import * as SecureStore from 'expo-secure-store';
 import * as Speech from 'expo-speech';
 import * as Haptics from 'expo-haptics';
 import * as FileSystem from 'expo-file-system';
-// expo-keep-awake requires a native build that includes it — load lazily so older binaries don't crash
-const _keepAwake = (() => { try { return require('expo-keep-awake'); } catch { return null; } })();
-const activateKeepAwakeAsync = () => _keepAwake ? _keepAwake.activateKeepAwakeAsync() : Promise.resolve();
-const deactivateKeepAwake    = () => _keepAwake && _keepAwake.deactivateKeepAwake();
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useStore } from '@/lib/store';
@@ -440,10 +436,12 @@ function rigCompatibility(camp: CampsitePin, rig: import('@/lib/store').RigProfi
 
 // ─── Map HTML ─────────────────────────────────────────────────────────────────
 
-const MAPBOX_STYLES: Record<string, string> = {
-  satellite: 'mapbox://styles/mapbox/satellite-streets-v12',
-  topo:      'mapbox://styles/mapbox/outdoors-v12',
-  hybrid:    'mapbox://styles/mapbox/satellite-streets-v12',
+// Map mode names sent to the WebView. The WebView builds its own MapLibre style
+// from these — no external style URLs (Mapbox tiles are now satellite-only).
+const MAP_MODES: Record<string, string> = {
+  satellite: 'satellite',
+  topo:      'topo',
+  hybrid:    'hybrid',
 };
 
 const buildMapHtml = (
@@ -456,15 +454,15 @@ const buildMapHtml = (
 <html>
 <head>
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
-<script src='https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js'></script>
-<link href='https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css' rel='stylesheet'/>
+<script src='https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js'></script>
+<link href='https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css' rel='stylesheet'/>
 <style>
   body,html{margin:0;padding:0;height:100%;background:#080c12;overflow:hidden;}
   #map{height:100vh;width:100vw;}
-  .mapboxgl-popup-content{background:#0f1319!important;border:1px solid #252d3d!important;color:#f1f5f9!important;border-radius:10px!important;padding:12px 14px!important;box-shadow:0 4px 20px rgba(0,0,0,0.7)!important;min-width:160px;}
-  .mapboxgl-popup-tip{border-top-color:#252d3d!important;border-bottom-color:#252d3d!important;}
-  .mapboxgl-popup-close-button{color:#6b7280!important;font-size:16px!important;right:4px!important;top:2px!important;}
-  .mapboxgl-ctrl-logo,.mapboxgl-ctrl-attrib{display:none!important;}
+  .maplibregl-popup-content{background:#0f1319!important;border:1px solid #252d3d!important;color:#f1f5f9!important;border-radius:10px!important;padding:12px 14px!important;box-shadow:0 4px 20px rgba(0,0,0,0.7)!important;min-width:160px;}
+  .maplibregl-popup-tip{border-top-color:#252d3d!important;border-bottom-color:#252d3d!important;}
+  .maplibregl-popup-close-button{color:#6b7280!important;font-size:16px!important;right:4px!important;top:2px!important;}
+  .maplibregl-ctrl-logo,.maplibregl-ctrl-attrib{display:none!important;}
   .mk-wp{background:#f97316;border:2.5px solid #fff;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:12px;font-family:monospace;box-shadow:0 2px 10px rgba(249,115,22,0.6);cursor:pointer;user-select:none;}
   .mk-wp.nav-target{background:#fff;color:#f97316;animation:pulse 1.4s ease-in-out infinite;}
   .mk-wp.wp-start{background:#22c55e;box-shadow:0 2px 10px rgba(34,197,94,0.6);}
@@ -515,7 +513,7 @@ const buildMapHtml = (
   var initGas=${JSON.stringify(gasList.slice(0,20))};
   var initPins=${JSON.stringify(pins.slice(0,30))};
 
-  var map,mapboxToken='',apiBase='https://trailhead-production-2049.up.railway.app',currentStyle='mapbox://styles/mapbox/satellite-streets-v12';
+  var map,mapboxToken='',apiBase='https://trailhead-production-2049.up.railway.app',currentStyle='satellite';
   var userMarker=null,wpMarkers=[],searchMarker=null;
   var allCamps=[],allGas=[],allPois=[],allReports=[];
   var reportMarkers=[];
@@ -532,13 +530,13 @@ const buildMapHtml = (
   var _searchDest=null; // {lat,lng} for single-dest nav so reroute works
 
   // ── Dynamic layer functions ───────────────────────────────────────────────────
-  function setTerrainLayer(show){showTerrainLayer=show;if(!map||!mapReady)return;if(show){if(!map.getSource('mapbox-dem'))map.addSource('mapbox-dem',{type:'raster-dem',url:'mapbox://mapbox.mapbox-terrain-dem-v1',tileSize:512,maxzoom:14});map.setTerrain({source:'mapbox-dem',exaggeration:1.5});if(!map.getLayer('hillshade'))map.addLayer({id:'hillshade',type:'hillshade',source:'mapbox-dem',paint:{'hillshade-shadow-color':'#473B24','hillshade-illumination-anchor':'viewport','hillshade-exaggeration':0.5}},'waterway-label');}else{if(map.getLayer('hillshade'))map.removeLayer('hillshade');map.setTerrain(null);if(map.getSource('mapbox-dem'))map.removeSource('mapbox-dem');}}
+  function setTerrainLayer(show){showTerrainLayer=show;if(!map||!mapReady)return;if(show){if(!mapboxToken)return;if(!map.getSource('mapbox-dem'))map.addSource('mapbox-dem',{type:'raster-dem',tiles:['https://api.mapbox.com/raster/v1/mapbox.mapbox-terrain-dem-v1/{z}/{x}/{y}.webp?access_token='+mapboxToken],encoding:'mapbox',tileSize:512,maxzoom:14});map.setTerrain({source:'mapbox-dem',exaggeration:1.5});var bl=map.getLayer('water-name')?'water-name':undefined;if(!map.getLayer('hillshade'))map.addLayer({id:'hillshade',type:'hillshade',source:'mapbox-dem',paint:{'hillshade-shadow-color':'#473B24','hillshade-illumination-anchor':'viewport','hillshade-exaggeration':0.5}},bl);}else{if(map.getLayer('hillshade'))map.removeLayer('hillshade');map.setTerrain(null);if(map.getSource('mapbox-dem'))map.removeSource('mapbox-dem');}}
 
-  function setNaipLayer(show){showNaipLayer=show;if(!map||!mapReady)return;if(show){if(!map.getSource('naip'))map.addSource('naip',{type:'raster',tiles:['https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}'],tileSize:256,maxzoom:19,attribution:'USGS NAIP'});if(!map.getLayer('naip-layer'))map.addLayer({id:'naip-layer',type:'raster',source:'naip',paint:{'raster-opacity':0.85}},'waterway-label');}else{if(map.getLayer('naip-layer'))map.removeLayer('naip-layer');if(map.getSource('naip'))map.removeSource('naip');}}
+  function setNaipLayer(show){showNaipLayer=show;if(!map||!mapReady)return;if(show){if(!map.getSource('naip'))map.addSource('naip',{type:'raster',tiles:['https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}'],tileSize:256,maxzoom:19,attribution:'USGS NAIP'});if(!map.getLayer('naip-layer'))map.addLayer({id:'naip-layer',type:'raster',source:'naip',paint:{'raster-opacity':0.85}},map.getLayer('water-name')?'water-name':undefined);}else{if(map.getLayer('naip-layer'))map.removeLayer('naip-layer');if(map.getSource('naip'))map.removeSource('naip');}}
 
-  function setFireLayer(show){showFireLayer=show;if(!map||!mapReady)return;if(show){if(!map.getSource('fires')){map.addSource('fires',{type:'geojson',data:{type:'FeatureCollection',features:[]}});fetch('https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/Current_WildlandFire_Perimeters/FeatureServer/0/query?where=1%3D1&outFields=IncidentName%2CContainment%2CGISAcres&returnGeometry=true&f=geojson&resultRecordCount=500').then(function(r){return r.json();}).then(function(d){if(map.getSource('fires'))map.getSource('fires').setData(d);}).catch(function(){});}if(!map.getLayer('fires-fill'))map.addLayer({id:'fires-fill',type:'fill',source:'fires',paint:{'fill-color':'#dc2626','fill-opacity':0.3}},'waterway-label');if(!map.getLayer('fires-line'))map.addLayer({id:'fires-line',type:'line',source:'fires',paint:{'line-color':'#ef4444','line-width':1.5,'line-opacity':0.85}});}else{['fires-line','fires-fill'].forEach(function(l){if(map.getLayer(l))map.removeLayer(l);});if(map.getSource('fires'))map.removeSource('fires');}}
+  function setFireLayer(show){showFireLayer=show;if(!map||!mapReady)return;if(show){if(!map.getSource('fires')){map.addSource('fires',{type:'geojson',data:{type:'FeatureCollection',features:[]}});fetch('https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/Current_WildlandFire_Perimeters/FeatureServer/0/query?where=1%3D1&outFields=IncidentName%2CContainment%2CGISAcres&returnGeometry=true&f=geojson&resultRecordCount=500').then(function(r){return r.json();}).then(function(d){if(map.getSource('fires'))map.getSource('fires').setData(d);}).catch(function(){});}if(!map.getLayer('fires-fill'))map.addLayer({id:'fires-fill',type:'fill',source:'fires',paint:{'fill-color':'#dc2626','fill-opacity':0.3}},map.getLayer('water-name')?'water-name':undefined);if(!map.getLayer('fires-line'))map.addLayer({id:'fires-line',type:'line',source:'fires',paint:{'line-color':'#ef4444','line-width':1.5,'line-opacity':0.85}});}else{['fires-line','fires-fill'].forEach(function(l){if(map.getLayer(l))map.removeLayer(l);});if(map.getSource('fires'))map.removeSource('fires');}}
 
-  function setAvaLayer(show){showAvaLayer=show;if(!map||!mapReady)return;if(show){if(!map.getSource('ava')){map.addSource('ava',{type:'geojson',data:{type:'FeatureCollection',features:[]}});fetch('https://api.avalanche.org/v2/public/products/map-layer').then(function(r){return r.json();}).then(function(d){if(map.getSource('ava'))map.getSource('ava').setData(d);}).catch(function(){});}if(!map.getLayer('ava-fill'))map.addLayer({id:'ava-fill',type:'fill',source:'ava',paint:{'fill-color':['match',['get','danger_level'],'1','#50C878','2','#FFD700','3','#FF8C00','4','#E63946','5','#1a0a0a','#888888'],'fill-opacity':0.45}},'waterway-label');if(!map.getLayer('ava-line'))map.addLayer({id:'ava-line',type:'line',source:'ava',paint:{'line-color':['match',['get','danger_level'],'1','#50C878','2','#FFD700','3','#FF8C00','4','#E63946','5','#1a0a0a','#888888'],'line-width':1.5}});}else{['ava-line','ava-fill'].forEach(function(l){if(map.getLayer(l))map.removeLayer(l);});if(map.getSource('ava'))map.removeSource('ava');}}
+  function setAvaLayer(show){showAvaLayer=show;if(!map||!mapReady)return;if(show){if(!map.getSource('ava')){map.addSource('ava',{type:'geojson',data:{type:'FeatureCollection',features:[]}});fetch('https://api.avalanche.org/v2/public/products/map-layer').then(function(r){return r.json();}).then(function(d){if(map.getSource('ava'))map.getSource('ava').setData(d);}).catch(function(){});}if(!map.getLayer('ava-fill'))map.addLayer({id:'ava-fill',type:'fill',source:'ava',paint:{'fill-color':['match',['get','danger_level'],'1','#50C878','2','#FFD700','3','#FF8C00','4','#E63946','5','#1a0a0a','#888888'],'fill-opacity':0.45}},map.getLayer('water-name')?'water-name':undefined);if(!map.getLayer('ava-line'))map.addLayer({id:'ava-line',type:'line',source:'ava',paint:{'line-color':['match',['get','danger_level'],'1','#50C878','2','#FFD700','3','#FF8C00','4','#E63946','5','#1a0a0a','#888888'],'line-width':1.5}});}else{['ava-line','ava-fill'].forEach(function(l){if(map.getLayer(l))map.removeLayer(l);});if(map.getSource('ava'))map.removeSource('ava');}}
 
   function setRadarLayer(show){showRadarLayer=show;if(!map||!mapReady)return;if(radarTimer){clearInterval(radarTimer);radarTimer=null;}if(map.getLayer('radar-layer'))map.removeLayer('radar-layer');if(map.getSource('radar'))map.removeSource('radar');if(!show)return;fetch('https://api.rainviewer.com/public/weather-maps.json').then(function(r){return r.json();}).then(function(d){radarFrames=(d.radar&&d.radar.past)||[];if(!radarFrames.length)return;radarFrameIdx=radarFrames.length-1;var ts=radarFrames[radarFrameIdx].time;map.addSource('radar',{type:'raster',tiles:['https://tilecache.rainviewer.com/v2/radar/'+ts+'/256/{z}/{x}/{y}/2/1_1.png'],tileSize:256});map.addLayer({id:'radar-layer',type:'raster',source:'radar',paint:{'raster-opacity':0.65}});radarTimer=setInterval(function(){if(!showRadarLayer||!map.getSource('radar'))return;radarFrameIdx=(radarFrameIdx+1)%radarFrames.length;map.getSource('radar').setTiles(['https://tilecache.rainviewer.com/v2/radar/'+radarFrames[radarFrameIdx].time+'/256/{z}/{x}/{y}/2/1_1.png']);},900);}).catch(function(){});}
 
@@ -553,14 +551,23 @@ const buildMapHtml = (
   function postRN(o){try{window.ReactNativeWebView.postMessage(JSON.stringify(o));}catch(e){}}
 
   // ── Offline tile cache via Cache API + fetch intercept ────────────────────────
-  // Auto-caches every Mapbox tile request so the map works offline.
-  // This intercepts the actual tiles Mapbox GL JS fetches (vector PBF + satellite
-  // raster), not the style raster tiles — so offline rendering actually works.
+  // Auto-caches every vector tile, font, and satellite raster the WebView fetches.
+  // Vector tiles come from our backend (apiBase + /api/tiles/...) so the entire
+  // world's road/trail/landuse data is reachable without selective region downloads.
+  // Satellite imagery still requires Mapbox (online-only) but is cached when viewed.
   var TILE_CACHE='trailhead-tiles-v3';
   var _origFetch=window.fetch.bind(window);
   window.fetch=async function(input,init){
     var url=typeof input==='string'?input:(input&&input.url?input.url:'');
-    var isTile=url&&(url.indexOf('api.mapbox.com/v4/')>=0||url.indexOf('api.mapbox.com/styles/')>=0||url.indexOf('api.mapbox.com/fonts/')>=0||url.indexOf('api.mapbox.com/sprites/')>=0||url.indexOf('basemap.nationalmap.gov')>=0);
+    var isTile=url&&(
+      url.indexOf('api.mapbox.com/v4/')>=0||
+      url.indexOf('api.mapbox.com/raster/')>=0||
+      url.indexOf('api.mapbox.com/fonts/')>=0||
+      url.indexOf('api.mapbox.com/sprites/')>=0||
+      url.indexOf('/api/tiles/')>=0||
+      url.indexOf('/api/fonts/')>=0||
+      url.indexOf('basemap.nationalmap.gov')>=0
+    );
     if(isTile){
       try{
         var cacheKey=url.replace(/access_token=[^&]*/,'access_token=_');
@@ -575,31 +582,163 @@ const buildMapHtml = (
     return _origFetch(input,init);
   };
 
+  // ── MapLibre outdoor style ────────────────────────────────────────────────────
+  // Self-hosted vector tiles via apiBase + Protomaps schema. Optional Mapbox
+  // satellite raster overlay (online only) when token + mode is satellite/hybrid.
+  function buildStyle(mode){
+    var sources={
+      pm:{type:'vector',tiles:[apiBase+'/api/tiles/{z}/{x}/{y}.pbf'],maxzoom:15,attribution:'© OpenStreetMap'}
+    };
+    if((mode==='satellite'||mode==='hybrid')&&mapboxToken){
+      sources['sat']={type:'raster',tiles:['https://api.mapbox.com/v4/mapbox.satellite/{z}/{x}/{y}@2x.jpg90?access_token='+mapboxToken],tileSize:512,maxzoom:19};
+    }
+    var labelOpacity=mode==='satellite'?0.0:1.0; // pure satellite hides vector labels
+    var fillOpacity=mode==='satellite'?0.0:(mode==='hybrid'?0.35:1.0);
+    var roadOpacity=mode==='satellite'?0.0:1.0; // hybrid still shows roads
+    var layers=[
+      {id:'bg',type:'background',paint:{'background-color':mode==='satellite'?'#000':'#0d1117'}},
+    ];
+    if(sources.sat){
+      layers.push({id:'satellite',type:'raster',source:'sat',paint:{'raster-opacity':1.0,'raster-fade-duration':200}});
+    }
+    layers=layers.concat([
+      {id:'earth',type:'fill',source:'pm','source-layer':'earth',paint:{'fill-color':'#14191f','fill-opacity':fillOpacity}},
+      {id:'lu-park',type:'fill',source:'pm','source-layer':'landuse',
+        filter:['in',['get','pmap:kind'],['literal',['national_park','park','nature_reserve','protected_area','state_park']]],
+        paint:{'fill-color':'#1a3a24','fill-opacity':mode==='satellite'?0.0:(mode==='hybrid'?0.35:0.85)}},
+      {id:'lu-forest',type:'fill',source:'pm','source-layer':'landuse',
+        filter:['in',['get','pmap:kind'],['literal',['forest','wood']]],
+        paint:{'fill-color':'#1d2e1e','fill-opacity':mode==='satellite'?0.0:(mode==='hybrid'?0.3:0.7)}},
+      {id:'water-poly',type:'fill',source:'pm','source-layer':'water',
+        paint:{'fill-color':mode==='satellite'?'rgba(12,30,53,0.0)':'#0c1e35','fill-opacity':mode==='hybrid'?0.5:1.0}},
+      {id:'water-line',type:'line',source:'pm','source-layer':'physical_line',
+        paint:{'line-color':'#1a3552','line-width':['interpolate',['linear'],['zoom'],5,0.4,12,2.5],'line-opacity':roadOpacity}},
+      {id:'road-trunk-case',type:'line',source:'pm','source-layer':'roads',
+        filter:['==',['get','pmap:kind'],'highway'],
+        layout:{'line-cap':'round','line-join':'round'},
+        paint:{'line-color':'#0d1117','line-width':['interpolate',['linear'],['zoom'],5,2,10,5,15,9],'line-opacity':roadOpacity}},
+      {id:'road-trunk',type:'line',source:'pm','source-layer':'roads',
+        filter:['==',['get','pmap:kind'],'highway'],
+        layout:{'line-cap':'round','line-join':'round'},
+        paint:{'line-color':mode==='hybrid'?'#fbbf24':'#c08a3a','line-width':['interpolate',['linear'],['zoom'],5,1,10,3,15,6],'line-opacity':roadOpacity}},
+      {id:'road-major',type:'line',source:'pm','source-layer':'roads',
+        filter:['==',['get','pmap:kind'],'major_road'],
+        layout:{'line-cap':'round','line-join':'round'},
+        paint:{'line-color':mode==='hybrid'?'#e8c980':'#8a6a3a','line-width':['interpolate',['linear'],['zoom'],7,0.5,12,2.2,15,5],'line-opacity':roadOpacity}},
+      {id:'road-minor',type:'line',source:'pm','source-layer':'roads',
+        filter:['==',['get','pmap:kind'],'minor_road'],
+        layout:{'line-cap':'round','line-join':'round'},
+        paint:{'line-color':mode==='hybrid'?'#cbd5e1':'#3d3d35','line-width':['interpolate',['linear'],['zoom'],10,0.5,14,2,16,4],'line-opacity':['interpolate',['linear'],['zoom'],10,0,11,roadOpacity]}},
+      {id:'road-path',type:'line',source:'pm','source-layer':'roads',
+        filter:['in',['get','pmap:kind'],['literal',['path','other']]],
+        layout:{'line-cap':'round','line-join':'round'},
+        paint:{'line-color':mode==='hybrid'?'#a78bfa':'#7c5d2a','line-width':1.5,'line-dasharray':[3,2],'line-opacity':['interpolate',['linear'],['zoom'],11,0,12,roadOpacity]}},
+      {id:'boundary-state',type:'line',source:'pm','source-layer':'boundaries',
+        filter:['==',['get','admin_level'],4],
+        paint:{'line-color':'#3a4f6a','line-width':1,'line-dasharray':[4,2],'line-opacity':roadOpacity}},
+      {id:'boundary-country',type:'line',source:'pm','source-layer':'boundaries',
+        filter:['<=',['get','admin_level'],2],
+        paint:{'line-color':'#5a7090','line-width':1.5,'line-opacity':roadOpacity}},
+      // Protomaps POIs we surface to RN (camp_site, picnic_site, shelter, trailhead, etc.)
+      {id:'pm-pois-camp',type:'circle',source:'pm','source-layer':'pois',
+        filter:['in',['get','pmap:kind'],['literal',['camp_site','camp_pitch','picnic_site','shelter']]],
+        paint:{'circle-radius':5,'circle-color':'#14b8a6','circle-stroke-width':1.5,'circle-stroke-color':'#fff','circle-opacity':labelOpacity}},
+      {id:'pm-pois-trailhead',type:'circle',source:'pm','source-layer':'pois',
+        filter:['==',['get','pmap:kind'],'trailhead'],
+        paint:{'circle-radius':5,'circle-color':'#22c55e','circle-stroke-width':1.5,'circle-stroke-color':'#fff','circle-opacity':labelOpacity}},
+      {id:'pm-pois-viewpoint',type:'circle',source:'pm','source-layer':'pois',
+        filter:['==',['get','pmap:kind'],'viewpoint'],
+        paint:{'circle-radius':4,'circle-color':'#a855f7','circle-stroke-width':1.2,'circle-stroke-color':'#fff','circle-opacity':labelOpacity}},
+      // Labels
+      {id:'water-name',type:'symbol',source:'pm','source-layer':'water',
+        filter:['has','name'],minzoom:8,
+        layout:{'text-field':['get','name'],'text-size':11,'text-font':['Noto Sans Regular']},
+        paint:{'text-color':'#60a5fa','text-halo-color':mode==='satellite'?'rgba(0,0,0,0.85)':'#0d1117','text-halo-width':1.5,'text-opacity':labelOpacity}},
+      {id:'peak-name',type:'symbol',source:'pm','source-layer':'physical_point',
+        filter:['==',['get','pmap:kind'],'peak'],
+        layout:{'text-field':['get','name'],'text-size':10,'text-font':['Noto Sans Regular'],
+          'text-offset':[0,0.7],'text-anchor':'top'},
+        paint:{'text-color':'#f59e0b','text-halo-color':mode==='satellite'?'rgba(0,0,0,0.9)':'#0d1117','text-halo-width':1.5,'text-opacity':labelOpacity}},
+      {id:'road-name',type:'symbol',source:'pm','source-layer':'roads',
+        minzoom:13,filter:['has','name'],
+        layout:{'text-field':['get','name'],'text-size':10,'text-font':['Noto Sans Regular'],
+          'symbol-placement':'line','text-max-width':8},
+        paint:{'text-color':mode==='satellite'?'#fff':'#94a3b8','text-halo-color':'rgba(0,0,0,0.85)','text-halo-width':1.5,'text-opacity':labelOpacity}},
+      {id:'place-locality',type:'symbol',source:'pm','source-layer':'places',
+        minzoom:9,
+        filter:['in',['get','pmap:kind'],['literal',['locality','neighbourhood','hamlet','village']]],
+        layout:{'text-field':['get','name'],'text-size':['interpolate',['linear'],['zoom'],9,9,14,12],
+          'text-font':['Noto Sans Regular']},
+        paint:{'text-color':'#94a3b8','text-halo-color':mode==='satellite'?'rgba(0,0,0,0.9)':'#0d1117','text-halo-width':2,'text-opacity':labelOpacity}},
+      {id:'place-town',type:'symbol',source:'pm','source-layer':'places',
+        filter:['==',['get','pmap:kind'],'town'],
+        layout:{'text-field':['get','name'],'text-size':['interpolate',['linear'],['zoom'],7,10,12,14],
+          'text-font':['Noto Sans Medium']},
+        paint:{'text-color':'#cbd5e1','text-halo-color':mode==='satellite'?'rgba(0,0,0,0.9)':'#0d1117','text-halo-width':2,'text-opacity':labelOpacity}},
+      {id:'place-city',type:'symbol',source:'pm','source-layer':'places',
+        filter:['==',['get','pmap:kind'],'city'],
+        layout:{'text-field':['get','name'],'text-size':['interpolate',['linear'],['zoom'],5,11,12,17],
+          'text-font':['Noto Sans Bold']},
+        paint:{'text-color':'#e2e8f0','text-halo-color':mode==='satellite'?'rgba(0,0,0,0.9)':'#0d1117','text-halo-width':2,'text-opacity':labelOpacity}},
+    ]);
+    return {version:8,sources:sources,glyphs:apiBase+'/api/fonts/{fontstack}/{range}.pbf',layers:layers};
+  }
+
   function _ll2t(lat,lng,z){var x=Math.floor((lng+180)/360*Math.pow(2,z));var s=Math.sin(lat*Math.PI/180);var y=Math.floor((0.5-Math.log((1+s)/(1-s))/(4*Math.PI))*Math.pow(2,z));return{x:Math.max(0,x),y:Math.max(0,y)};}
 
   function _mbUrls(z,x,y,vectorOnly){
-    var t=mapboxToken;
-    var v=[
-      'https://api.mapbox.com/v4/mapbox.mapbox-streets-v8/'+z+'/'+x+'/'+y+'.vector.pbf?access_token='+t,
-      'https://api.mapbox.com/v4/mapbox.mapbox-terrain-v2/'+z+'/'+x+'/'+y+'.vector.pbf?access_token='+t,
-    ];
-    if(!vectorOnly)v.push('https://api.mapbox.com/v4/mapbox.satellite/'+z+'/'+x+'/'+y+'.jpg90?access_token='+t);
+    // Vector tiles always come from our backend (Protomaps proxy) — global coverage.
+    var v=[apiBase+'/api/tiles/'+z+'/'+x+'/'+y+'.pbf'];
+    // Satellite raster from Mapbox is online-only; only fetch if user opted-in.
+    if(!vectorOnly&&mapboxToken){
+      v.push('https://api.mapbox.com/v4/mapbox.satellite/'+z+'/'+x+'/'+y+'@2x.jpg90?access_token='+mapboxToken);
+    }
     return v;
   }
-  function _kbPer(z,vectorOnly){return vectorOnly?(z>=15?10:z>=13?8:5):(z>=15?130:z>=13?85:z>=11?40:20);}
+  function _kbPer(z,vectorOnly){return vectorOnly?(z>=14?12:z>=12?7:4):(z>=14?180:z>=12?95:z>=10?45:20);}
+
+  var _currentDlLabel='';
+
+  // Pre-cache glyph PBFs so labels render offline. Style is built inline so no
+  // style JSON/sprites to fetch — keep this list small and high-coverage.
+  async function _preCacheMapResources(){
+    var base=apiBase+'/api/fonts/';
+    var stacks=['Noto Sans Regular','Noto Sans Bold','Noto Sans Medium'];
+    // ASCII + Latin extended ranges cover all US/EU place names
+    var ranges=['0-255','256-511','512-767','7680-7935'];
+    for(var s=0;s<stacks.length;s++){
+      for(var r=0;r<ranges.length;r++){
+        try{await fetch(base+encodeURIComponent(stacks[s])+'/'+ranges[r]+'.pbf');}catch(e){}
+      }
+    }
+  }
 
   async function _runDl(coords,vectorOnly){
     var total=coords.length,saved=0,bytes=0,BATCH=20;
+    var manifestKeys=[];
+    // Cache style/glyphs/sprites first so map can initialize fully offline
+    await _preCacheMapResources();
     postRN({type:'download_progress',percent:0,saved:0,total:total,mb:'0'});
     for(var i=0;i<coords.length;i+=BATCH){
       if(!downloadActive)break;
       var batch=coords.slice(i,i+BATCH);
       await Promise.allSettled(batch.map(async function(t){
         var urls=_mbUrls(t.z,t.x,t.y,vectorOnly);
-        for(var ui=0;ui<urls.length;ui++){try{await fetch(urls[ui]);}catch(e){}}
+        for(var ui=0;ui<urls.length;ui++){
+          var ck=urls[ui].replace(/access_token=[^&]*/,'access_token=_');
+          manifestKeys.push(ck);
+          try{await fetch(urls[ui]);}catch(e){}
+        }
         saved++;bytes+=_kbPer(t.z,vectorOnly)*1024;
         postRN({type:'download_progress',percent:Math.round(saved/total*100),saved:saved,total:total,mb:(bytes/1048576).toFixed(1)});
       }));
+    }
+    // Store manifest so delete can find exactly which keys belong to this region
+    if(_currentDlLabel){
+      try{
+        var c=await caches.open(TILE_CACHE);
+        await c.put('manifest-'+_currentDlLabel,new Response(JSON.stringify(manifestKeys),{headers:{'Content-Type':'application/json'}}));
+      }catch(e){}
     }
     postRN({type:'download_complete',saved:saved,total:total});
   }
@@ -638,9 +777,9 @@ const buildMapHtml = (
 
   // ── Map init ──────────────────────────────────────────────────────────────────
   function initMap(token,style){
-    mapboxToken=token;mapboxgl.accessToken=token;
-    currentStyle=style||'mapbox://styles/mapbox/satellite-streets-v12';
-    map=new mapboxgl.Map({container:'map',style:currentStyle,
+    mapboxToken=token;
+    currentStyle=style||'satellite';
+    map=new maplibregl.Map({container:'map',style:buildStyle(currentStyle),
       center:[${centerLng},${centerLat}],zoom:${waypoints.length > 1 ? 7 : 10},
       attributionControl:false,pitchWithRotate:false});
     map.on('load',function(){
@@ -678,37 +817,30 @@ const buildMapHtml = (
     map.on('click',function(e){
       if(e.defaultPrevented)return;
       try{
-        var _ownSrc={camps:1,gas:1,pois:1,route:1,breadcrumb:1,'usgs-topo':1,fires:1,ava:1,radar:1,'mvum-roads':1,'mvum-trails':1,oroads:1,naip:1,'mapbox-dem':1};
-        // 1. Tent icons — use e.point (single pixel): Mapbox auto-handles symbol hit area
+        // Detection now uses Protomaps schema (pmap:kind on pois/roads source layers).
+        // 1. Camp/shelter/trailhead POI hits — single-pixel test
         var ptFs=map.queryRenderedFeatures(e.point);
         for(var ci=0;ci<ptFs.length;ci++){
           var cf=ptFs[ci];
-          if(_ownSrc[(cf.layer&&cf.layer.source)||''])continue;
-          var cfMaki=(cf.properties&&cf.properties.maki)||'';
-          var cfName=(cf.properties&&cf.properties.name)||'';
-          var cfCls=(cf.properties&&cf.properties.class)||'';
-          var cfSrcLayer=(cf.layer&&cf.layer['source-layer'])||'';
-          var lcn=cfName.toLowerCase();
-          var isCampMaki=cfMaki==='campsite'||cfMaki==='shelter'||cfMaki==='picnic-site'||cfMaki==='park'||cfMaki==='recreation_area'||cfMaki==='ranger-station'||cfMaki==='boat'||cfCls==='campsite'||cfCls==='park_like'||cfCls==='national_park'||cfCls==='park';
-          var cfType=(cf.properties&&cf.properties.type)||'';var lctype=cfType.toLowerCase();
-          var isCampName=cfName&&(lcn.indexOf('camp')>=0||lcn.indexOf('site')>=0||lcn.indexOf('shelter')>=0||lcn.indexOf('picnic')>=0||lcn.indexOf('dispersed')>=0||lcn.indexOf('recreation')>=0||lcn.indexOf('public use')>=0||lcn.indexOf('wildlife')>=0||lcn.indexOf('preserve')>=0||lcn.indexOf('reserve')>=0||lcn.indexOf('forest')>=0||lcn.indexOf('corps')>=0||lcn.indexOf('refuge')>=0||lcn.indexOf('trailhead')>=0||lcn.indexOf('boat launch')>=0||lcn.indexOf('boat ramp')>=0||lcn.indexOf('state park')>=0||lcn.indexOf('county park')>=0||lcn.indexOf('nature center')>=0||lctype.indexOf('park')>=0||lctype.indexOf('recreation')>=0||lctype.indexOf('campground')>=0||lctype.indexOf('camping')>=0);
-          var isPoi=cfSrcLayer==='poi_label'||cfSrcLayer==='poi'||isCampMaki;
-          if((isCampMaki||(isPoi&&isCampName))&&cfName){
+          var lid=(cf.layer&&cf.layer.id)||'';
+          var pName=(cf.properties&&cf.properties.name)||'';
+          if(lid==='pm-pois-camp'||lid==='pm-pois-trailhead'){
             var cc=cf.geometry&&cf.geometry.type==='Point'&&cf.geometry.coordinates;
-            postRN({type:'base_camp_tapped',name:cfName,lat:cc?cc[1]:e.lngLat.lat,lng:cc?cc[0]:e.lngLat.lng,landType:cfCls});
+            var pKind=(cf.properties&&cf.properties['pmap:kind'])||'';
+            postRN({type:'base_camp_tapped',name:pName||(pKind==='trailhead'?'Trailhead':'Campsite'),lat:cc?cc[1]:e.lngLat.lat,lng:cc?cc[0]:e.lngLat.lng,landType:pKind==='trailhead'?'Trailhead':'Campground'});
             return;
           }
         }
-        // 2. Trail lines — use wide box for thin-line tolerance
+        // 2. Trail/path lines — wide box for thin-line tolerance
         var box=[{x:e.point.x-12,y:e.point.y-12},{x:e.point.x+12,y:e.point.y+12}];
         var boxFs=map.queryRenderedFeatures(box);
         for(var i=0;i<boxFs.length;i++){
           var f=boxFs[i];
-          var cls=(f.properties&&f.properties.class)||'';
-          var lid=(f.layer&&f.layer.id)||'';
-          if(cls==='path'||cls==='track'||lid==='road-path'||lid==='road-path-bg'||lid==='path-pedestrian'||lid.indexOf('trail')>=0){
+          var lid2=(f.layer&&f.layer.id)||'';
+          var pKind2=(f.properties&&f.properties['pmap:kind'])||'';
+          if(lid2==='road-path'||pKind2==='path'){
             var nm=(f.properties&&f.properties.name)||'';
-            postRN({type:'trail_tapped',name:nm||'Trail',lat:e.lngLat.lat,lng:e.lngLat.lng,cls:cls||'path'});
+            postRN({type:'trail_tapped',name:nm||'Trail',lat:e.lngLat.lat,lng:e.lngLat.lng,cls:'path'});
             return;
           }
         }
@@ -763,8 +895,8 @@ const buildMapHtml = (
     _clicksSetup=true;
     map.on('click','camp-cluster',function(e){var f=map.queryRenderedFeatures(e.point,{layers:['camp-cluster']});if(!f.length)return;map.getSource('camps').getClusterExpansionZoom(f[0].properties.cluster_id,function(err,zoom){if(err)return;map.easeTo({center:f[0].geometry.coordinates,zoom:zoom+0.5});});e.preventDefault();});
     map.on('click','camp-circle',function(e){if(!e.features||!e.features[0])return;var p=e.features[0].properties;var raw;try{raw=JSON.parse(p.raw||'{}');}catch(x){raw=p;}postRN({type:'campsite_tapped',id:raw.id||p.id,name:raw.name||p.name,camp:raw});e.preventDefault();});
-    map.on('click','gas-circle',function(e){if(!e.features||!e.features[0])return;var p=e.features[0].properties;new mapboxgl.Popup({closeButton:false,offset:12}).setLngLat(e.lngLat).setHTML('<div class="pt">⛽ '+p.name+'</div><div class="pm">Fuel Station</div>').addTo(map);e.preventDefault();});
-    map.on('click','poi-circle',function(e){if(!e.features||!e.features[0])return;var p=e.features[0].properties;var ic=p.type==='water'?'💧':p.type==='trailhead'?'🥾':'👁️';new mapboxgl.Popup({closeButton:false,offset:12}).setLngLat(e.lngLat).setHTML('<div class="pt">'+ic+' '+p.name+'</div><div class="pm">'+p.type+'</div>').addTo(map);e.preventDefault();});
+    map.on('click','gas-circle',function(e){if(!e.features||!e.features[0])return;var p=e.features[0].properties;new maplibregl.Popup({closeButton:false,offset:12}).setLngLat(e.lngLat).setHTML('<div class="pt">⛽ '+p.name+'</div><div class="pm">Fuel Station</div>').addTo(map);e.preventDefault();});
+    map.on('click','poi-circle',function(e){if(!e.features||!e.features[0])return;var p=e.features[0].properties;var ic=p.type==='water'?'💧':p.type==='trailhead'?'🥾':'👁️';new maplibregl.Popup({closeButton:false,offset:12}).setLngLat(e.lngLat).setHTML('<div class="pt">'+ic+' '+p.name+'</div><div class="pm">'+p.type+'</div>').addTo(map);e.preventDefault();});
     ['camp-cluster','camp-circle','gas-circle','poi-circle'].forEach(function(l){map.on('mouseenter',l,function(){map.getCanvas().style.cursor='pointer';});map.on('mouseleave',l,function(){map.getCanvas().style.cursor='';});});
   }
 
@@ -778,13 +910,13 @@ const buildMapHtml = (
       el.className='mk-wp'+(tc?' '+tc:'');
       el.textContent=typeIcon[w.type]||(w.day||i+1);
       var label=typeLabel[w.type]||w.type;
-      var popup=new mapboxgl.Popup({offset:20,closeButton:true,maxWidth:'220px'})
+      var popup=new maplibregl.Popup({offset:20,closeButton:true,maxWidth:'220px'})
         .setHTML('<div class="pt">'+w.name+'</div><div class="pm">Day '+w.day+' &middot; '+label+'</div>');
-      var m=new mapboxgl.Marker({element:el}).setLngLat([w.lng,w.lat]).setPopup(popup).addTo(map);
+      var m=new maplibregl.Marker({element:el}).setLngLat([w.lng,w.lat]).setPopup(popup).addTo(map);
       el.addEventListener('click',function(ev){ev.stopPropagation();m.togglePopup();postRN({type:'wp_tapped',idx:i,name:w.name});});
       wpMarkers.push(m);
     });
-    if(wps.length>=2){var bounds=new mapboxgl.LngLatBounds();wps.forEach(function(w){bounds.extend([w.lng,w.lat]);});map.fitBounds(bounds,{padding:60,maxZoom:12,duration:800});}
+    if(wps.length>=2){var bounds=new maplibregl.LngLatBounds();wps.forEach(function(w){bounds.extend([w.lng,w.lat]);});map.fitBounds(bounds,{padding:60,maxZoom:12,duration:800});}
   }
 
   function loadInitialData(){
@@ -830,8 +962,8 @@ const buildMapHtml = (
       var age=repTimeAgo(r.created_at);
       var confLine=r.confirmations?'<div class="pm" style="color:#22c55e;margin-top:2px">✓ '+r.confirmations+' confirmed</div>':'';
       var ageLine=age?'<div class="pm" style="opacity:0.5;margin-top:2px">'+escHTML(age)+'</div>':'';
-      var popup=new mapboxgl.Popup({offset:18,closeButton:false}).setHTML('<div class="pt">'+escHTML(r.subtype||r.type)+'</div><div class="pm">'+escHTML(r.description||'Community report')+'</div>'+confLine+ageLine);
-      var m=new mapboxgl.Marker({element:el,anchor:'center'}).setLngLat([r.lng,r.lat]).setPopup(popup).addTo(map);
+      var popup=new maplibregl.Popup({offset:18,closeButton:false}).setHTML('<div class="pt">'+escHTML(r.subtype||r.type)+'</div><div class="pm">'+escHTML(r.description||'Community report')+'</div>'+confLine+ageLine);
+      var m=new maplibregl.Marker({element:el,anchor:'center'}).setLngLat([r.lng,r.lat]).setPopup(popup).addTo(map);
       el.addEventListener('click',function(ev){ev.stopPropagation();m.togglePopup();postRN({type:'report_tapped',report:r});});
       reportMarkers.push(m);
     });
@@ -886,7 +1018,7 @@ const buildMapHtml = (
     if(!userMarker){
       var el=document.createElement('div');el.className='mk-me';
       el.innerHTML='<div class="mk-me-ring"></div><svg class="mk-me-arrow" width="24" height="32" viewBox="0 0 24 32" style="transition:transform 0.6s ease"><path d="M12 1 L23 29 L12 22 L1 29 Z" fill="#f97316" stroke="white" stroke-width="1.5" stroke-linejoin="round"/></svg>';
-      userMarker=new mapboxgl.Marker({element:el,anchor:'center'}).setLngLat([lng,lat]).addTo(map);
+      userMarker=new maplibregl.Marker({element:el,anchor:'center'}).setLngLat([lng,lat]).addTo(map);
     }else{userMarker.setLngLat([lng,lat]);}
     // Rotate the arrow to face the true heading, compensating for map bearing
     if(heading!=null&&heading>=0){
@@ -1013,10 +1145,12 @@ const buildMapHtml = (
     if(msg.type==='nav_target')setNavTarget(msg.idx);
     if(msg.type==='nav_reset'){setNavTarget(-1);_routeCoords=[];routePts=[];_searchDest=null;updateRoute();resetPassedRoute();}
     if(msg.type==='fly_to'&&msg.lat){
-      map.flyTo({center:[msg.lng,msg.lat],zoom:14,duration:600});
+      map.flyTo({center:[msg.lng,msg.lat],zoom:msg.zoom||14,duration:600});
+      // Country-level fly-to skips the pin (no point pinpointing the geographic center of CONUS)
+      if(msg.zoom&&msg.zoom<=5)return;
       if(searchMarker){searchMarker.remove();searchMarker=null;}
       var el=document.createElement('div');el.className='mk-search';el.textContent='📍';
-      searchMarker=new mapboxgl.Marker({element:el}).setLngLat([msg.lng,msg.lat]).setPopup(new mapboxgl.Popup({offset:18,closeButton:false}).setHTML('<div class="pt">'+(msg.name||'Location')+'</div>')).addTo(map);
+      searchMarker=new maplibregl.Marker({element:el}).setLngLat([msg.lng,msg.lat]).setPopup(new maplibregl.Popup({offset:18,closeButton:false}).setHTML('<div class="pt">'+(msg.name||'Location')+'</div>')).addTo(map);
       searchMarker.togglePopup();
     }
     if(msg.type==='track_point'&&msg.lat){breadcrumbPts.push([msg.lng,msg.lat]);updateBreadcrumb();}
@@ -1035,21 +1169,33 @@ const buildMapHtml = (
     if(msg.type==='route_to_search'&&msg.lat){
       if(searchMarker){searchMarker.remove();searchMarker=null;}
       var el2=document.createElement('div');el2.className='mk-search';el2.textContent='📍';
-      searchMarker=new mapboxgl.Marker({element:el2}).setLngLat([msg.lng,msg.lat]).setPopup(new mapboxgl.Popup({offset:18,closeButton:false}).setHTML('<div class="pt">'+(msg.name||'Destination')+'</div>')).addTo(map);
+      searchMarker=new maplibregl.Marker({element:el2}).setLngLat([msg.lng,msg.lat]).setPopup(new maplibregl.Popup({offset:18,closeButton:false}).setHTML('<div class="pt">'+(msg.name||'Destination')+'</div>')).addTo(map);
       searchMarker.togglePopup();
       _searchDest={lat:msg.lat,lng:msg.lng};
       _fetchRoute([msg.userLng+','+msg.userLat,msg.lng+','+msg.lat],0);
     }
     if(msg.type==='set_reports'){allReports=msg.reports||[];updateReportMarkers();}
     if(msg.type==='add_report'){allReports=allReports.filter(function(r){return r.id!==msg.report.id;});allReports.push(msg.report);updateReportMarkers();}
-    if(msg.type==='set_style'&&msg.style){currentStyle=msg.style;map.setStyle(msg.style);}
+    if(msg.type==='set_style'&&msg.style){currentStyle=msg.style;map.setStyle(buildStyle(msg.style));}
     if(msg.type==='set_land_overlay')setLandOverlay(!!msg.show);
     if(msg.type==='set_usgs_overlay')setUsgsOverlay(!!msg.show);
     if(msg.type==='set_layer'){var _s=!!msg.show;if(msg.layer==='terrain')setTerrainLayer(_s);else if(msg.layer==='naip')setNaipLayer(_s);else if(msg.layer==='fire')setFireLayer(_s);else if(msg.layer==='ava')setAvaLayer(_s);else if(msg.layer==='radar')setRadarLayer(_s);else if(msg.layer==='mvum')setMvumLayer(_s);else if(msg.layer==='roads')setRoadsLayer(_s);}
-    if(msg.type==='download_tiles_bbox'){if(!downloadActive){downloadActive=true;_dlTiles(msg.n,msg.s,msg.e,msg.w,msg.minZ||10,msg.maxZ||12,!!msg.vectorOnly);}}
-    if(msg.type==='download_tiles_route'){if(!downloadActive){downloadActive=true;_dlTilesRoute(msg.bufferKm||20,msg.minZ||10,msg.maxZ||16,!!msg.vectorOnly);}}
-    if(msg.type==='download_tiles'){if(!downloadActive){downloadActive=true;var b=map.getBounds();_dlTiles(b.getNorth(),b.getSouth(),b.getEast(),b.getWest(),msg.minZ||10,msg.maxZ||15,!!msg.vectorOnly);}}
-    if(msg.type==='cancel_download')downloadActive=false;
+    if(msg.type==='download_tiles_bbox'){if(!downloadActive){downloadActive=true;_currentDlLabel=msg.label||'';_dlTiles(msg.n,msg.s,msg.e,msg.w,msg.minZ||10,msg.maxZ||12,!!msg.vectorOnly);}}
+    if(msg.type==='download_tiles_route'){if(!downloadActive){downloadActive=true;_currentDlLabel=msg.label||'';_dlTilesRoute(msg.bufferKm||20,msg.minZ||10,msg.maxZ||16,!!msg.vectorOnly);}}
+    if(msg.type==='download_tiles'){if(!downloadActive){downloadActive=true;_currentDlLabel=msg.label||'';var b=map.getBounds();_dlTiles(b.getNorth(),b.getSouth(),b.getEast(),b.getWest(),msg.minZ||10,msg.maxZ||15,!!msg.vectorOnly);}}
+    if(msg.type==='cancel_download'){downloadActive=false;}
+    if(msg.type==='clear_cache_region'&&msg.label){(async function(){
+      try{
+        var c=await caches.open(TILE_CACHE);
+        var mkey='manifest-'+msg.label;
+        var mresp=await c.match(mkey);
+        if(mresp){
+          var urls=JSON.parse(await mresp.text());
+          for(var i=0;i<urls.length;i++){await c.delete(urls[i]);}
+          await c.delete(mkey);
+        }
+      }catch(e){}
+    })();}
   }
 
   function onMsg(e){try{handleMsgData(JSON.parse(e.data||'{}'));}catch(err){}}
@@ -1138,9 +1284,13 @@ function MapScreen() {
   const liveReports = useStore(st => st.liveReports);
   const addLiveReport = useStore(st => st.addLiveReport);
   const cachedRegions = useStore(st => st.cachedRegions);
-  const addCachedRegion = useStore(st => st.addCachedRegion);
+  const addCachedRegion    = useStore(st => st.addCachedRegion);
+  const removeCachedRegion = useStore(st => st.removeCachedRegion);
   const rigProfile = useStore(st => st.rigProfile);
   const webRef = useRef<WebView>(null);
+  const safeSpeech = (text: string, opts?: Parameters<typeof Speech.speak>[1]) => {
+    try { safeSpeech(text, opts); } catch {}
+  };
 
   const [userLoc,       setUserLoc]       = useState<{ lat: number; lng: number } | null>(null);
   const [userSpeed,     setUserSpeed]     = useState<number | null>(null);
@@ -1175,7 +1325,7 @@ function MapScreen() {
   const [downloadSaved, setDownloadSaved] = useState(0);
   const [downloadMB, setDownloadMB] = useState('0');
   const [downloadLabel, setDownloadLabel] = useState('');
-  const [offlineSaved, setOfflineSaved] = useState(false);
+  const offlineSaved = cachedRegions.length > 0;
   const [mapboxToken,   setMapboxToken]   = useState('');
   const [showFilters,   setShowFilters]   = useState(false);
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
@@ -1251,6 +1401,7 @@ function MapScreen() {
   const [approachingReport, setApproachingReport] = useState<Report | null>(null);
   const [offRouteWarn, setOffRouteWarn] = useState(false);
   const offRouteWarnTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rerouteTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showDayModal, setShowDayModal] = useState(false);
   const [tappedWp, setTappedWp] = useState<{ idx: number; wp: WP } | null>(null);
 
@@ -1299,24 +1450,34 @@ function MapScreen() {
   const [mapZoom, setMapZoom] = useState(10);
   const [searchResult, setSearchResult] = useState<{ count: number } | null>(null);
   const [showOnboard, setShowOnboard] = useState(false);
+  const [mapLoadFailed, setMapLoadFailed] = useState(false);
+  const [showLocDisclosure, setShowLocDisclosure] = useState(false);
 
   const [nearbyLoading,   setNearbyLoading]   = useState(false);
   const [nearbyNarration, setNearbyNarration] = useState<string | null>(null);
 
-  // Fetch Mapbox token once on mount; send set_token to WebView when both are ready
+  // Fetch Mapbox token once on mount; fall back to cached token when offline
   useEffect(() => {
-    api.getConfig().then(c => {
-      const token = c.mapbox_token || '';
+    function applyToken(token: string) {
+      if (!token) return;
       setMapboxToken(token);
       setStoreToken(token);
-      if (token && webLoadedRef.current) {
+      if (webLoadedRef.current) {
         webRef.current?.postMessage(JSON.stringify({
           type: 'set_token', token,
-          style: MAPBOX_STYLES[mapLayer] ?? MAPBOX_STYLES.satellite,
+          style: MAP_MODES[mapLayer] ?? MAP_MODES.satellite,
           apiBase: process.env.EXPO_PUBLIC_API_URL ?? 'https://trailhead-production-2049.up.railway.app',
         }));
       }
-    }).catch(() => {});
+    }
+    api.getConfig().then(c => {
+      const token = c.mapbox_token || '';
+      if (token) SecureStore.setItemAsync('trailhead_mapbox_token', token).catch(() => {});
+      applyToken(token);
+    }).catch(() => {
+      // Offline — use cached token so the map can load from tile cache
+      SecureStore.getItemAsync('trailhead_mapbox_token').then(t => { if (t) applyToken(t); }).catch(() => {});
+    });
   }, []);
 
   // Show onboarding card for first-time users
@@ -1379,13 +1540,23 @@ function MapScreen() {
 
   // ── Location watch ──────────────────────────────────────────────────────────
 
+  const [locGranted, setLocGranted] = useState(false);
+
+  // On mount: check if already granted; otherwise show disclosure first
   useEffect(() => {
+    Location.getForegroundPermissionsAsync().then(({ status }) => {
+      if (status === 'granted') setLocGranted(true);
+      else setShowLocDisclosure(true);
+    }).catch(() => setShowLocDisclosure(true));
+  }, []);
+
+  // Start watch only after permission is confirmed granted
+  useEffect(() => {
+    if (!locGranted) return;
     let sub: Location.LocationSubscription | null = null;
-    Location.requestForegroundPermissionsAsync().then(({ status }) => {
-      if (status !== 'granted') return;
-      Location.watchPositionAsync(
-        { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 1000, distanceInterval: 5 },
-        loc => {
+    Location.watchPositionAsync(
+      { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 1000, distanceInterval: 5 },
+      loc => {
           const pos = { lat: loc.coords.latitude, lng: loc.coords.longitude };
           setUserLoc(pos);
           setStoreLoc(pos);
@@ -1456,14 +1627,14 @@ function MapScreen() {
                 // Far announcement (e.g. "In 1 mile, turn right on I-95")
                 if (distM < farDist && !stepAnnouncedRef.current.has(farKey)) {
                   stepAnnouncedRef.current.add(farKey);
-                  Speech.speak(buildAnnouncement(cur, distM, 'far'), { rate: 0.88, pitch: 1.05, language: 'en-US' });
+                  safeSpeech(buildAnnouncement(cur, distM, 'far'), { rate: 0.88, pitch: 1.05, language: 'en-US' });
                 }
                 // Near announcement — stop far cue mid-play, haptic pulse so driver feels it too
                 if (distM < nearDist && !stepAnnouncedRef.current.has(nearKey)) {
                   stepAnnouncedRef.current.add(nearKey);
                   Speech.stop();
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
-                  Speech.speak(buildAnnouncement(cur, distM, 'near'), { rate: 0.88, pitch: 1.05, language: 'en-US' });
+                  safeSpeech(buildAnnouncement(cur, distM, 'near'), { rate: 0.88, pitch: 1.05, language: 'en-US' });
                 }
               }
 
@@ -1487,11 +1658,11 @@ function MapScreen() {
                     const thenRoad   = stepAfter.name ? ` on ${stepAfter.name}` : '';
                     // Small delay so it doesn't overlap the near-arrival speech that might still be finishing
                     setTimeout(() => {
-                      Speech.speak(`Continue for ${contDist}, then ${thenAction}${thenRoad}.`, { rate: 0.88, pitch: 1.05, language: 'en-US' });
+                      safeSpeech(`Continue for ${contDist}, then ${thenAction}${thenRoad}.`, { rate: 0.88, pitch: 1.05, language: 'en-US' });
                     }, 800);
                   } else {
                     setTimeout(() => {
-                      Speech.speak(`Continue for ${contDist}.`, { rate: 0.88, pitch: 1.05, language: 'en-US' });
+                      safeSpeech(`Continue for ${contDist}.`, { rate: 0.88, pitch: 1.05, language: 'en-US' });
                     }, 800);
                   }
                   // Mark far key as already spoken so it won't fire again immediately
@@ -1516,7 +1687,7 @@ function MapScreen() {
                   road_closure: 'Road closure', campsite: 'Campsite report', water: 'Water source',
                 };
                 const label = labels[rep.type] ?? 'Community report';
-                Speech.speak(`${label} ahead in ${speakDist(repDistM)}.`, { rate: 0.88, pitch: 1.05, language: 'en-US' });
+                safeSpeech(`${label} ahead in ${speakDist(repDistM)}.`, { rate: 0.88, pitch: 1.05, language: 'en-US' });
                 if (approachDismissRef.current) clearTimeout(approachDismissRef.current);
                 approachDismissRef.current = setTimeout(() => setApproachingReport(null), 20000);
                 break; // one alert at a time
@@ -1530,7 +1701,7 @@ function MapScreen() {
             const dist = haversineKm(pos.lat, pos.lng, singleDest.lat, singleDest.lng);
             setIsApproaching(dist < 0.8);
             if (dist < 0.25) {
-              Speech.speak(`You have arrived at ${singleDest.name}.`, { rate: 0.88, pitch: 1.05, language: 'en-US' });
+              safeSpeech(`You have arrived at ${singleDest.name}.`, { rate: 0.88, pitch: 1.05, language: 'en-US' });
               setTimeout(() => setNavMode(false), 3000);
             }
             return;
@@ -1546,12 +1717,12 @@ function MapScreen() {
           const narration = guideRef.current[wps[idx].name];
           if (dist < 0.5 && narration && !spokenRef.current.has(wps[idx].name)) {
             spokenRef.current.add(wps[idx].name);
-            Speech.speak(narration, { rate: 0.88, language: 'en-US' });
+            safeSpeech(narration, { rate: 0.88, language: 'en-US' });
           }
 
           // Arrival at final destination
           if (dist < 0.25 && idx === wps.length - 1) {
-            Speech.speak(`You have arrived at ${wps[idx].name}. Journey complete.`, { rate: 0.88, pitch: 1.05, language: 'en-US' });
+            safeSpeech(`You have arrived at ${wps[idx].name}. Journey complete.`, { rate: 0.88, pitch: 1.05, language: 'en-US' });
             setTimeout(() => setNavMode(false), 3000);
             return;
           }
@@ -1568,13 +1739,12 @@ function MapScreen() {
               lat: pos.lat, lng: pos.lng, fromIdx: next,
             }));
             setRouteLegOffset(next);
-            Speech.speak(`Arrived at ${wps[idx].name}. Now heading to ${wps[next].name}.`, { rate: 0.88, pitch: 1.05, language: 'en-US' });
+            safeSpeech(`Arrived at ${wps[idx].name}. Now heading to ${wps[next].name}.`, { rate: 0.88, pitch: 1.05, language: 'en-US' });
           }
         }
-      ).then(s => { sub = s; });
-    });
+      ).then(s => { sub = s; }).catch(() => {});
     return () => { sub?.remove(); };
-  }, []);
+  }, [locGranted]);
 
   // ── Trip data ───────────────────────────────────────────────────────────────
 
@@ -1691,11 +1861,6 @@ function MapScreen() {
     webRef.current?.postMessage(JSON.stringify({ type: 'nav_active', active: navMode }));
     let _appStateSub: ReturnType<typeof AppState.addEventListener> | null = null;
     if (navMode) {
-      activateKeepAwakeAsync();
-      // Re-activate keep-awake when app returns to foreground (iOS clears the lock on background)
-      _appStateSub = AppState.addEventListener('change', (state) => {
-        if (state === 'active' && navRef.current.active) activateKeepAwakeAsync();
-      });
       setShowPanel(false);
       setIsApproaching(false);
       setIsRerouting(false);
@@ -1713,7 +1878,7 @@ function MapScreen() {
         // Single-destination nav (from search) — route already drawn by route_to_search
         const dist = userLoc ? haversineKm(userLoc.lat, userLoc.lng, dest.lat, dest.lng) : null;
         const distStr = dist && dist > 0.5 ? `, ${formatDist(dist)} away` : '';
-        Speech.speak(`Navigation started. Heading to ${dest.name}${distStr}.`, { rate: 0.88, pitch: 1.05, language: 'en-US' });
+        safeSpeech(`Navigation started. Heading to ${dest.name}${distStr}.`, { rate: 0.88, pitch: 1.05, language: 'en-US' });
       } else {
         // Trip navigation
         const loc = navRef.current.active ? null : userLoc;
@@ -1735,12 +1900,10 @@ function MapScreen() {
         if (target) {
           const dist = userLoc ? haversineKm(userLoc.lat, userLoc.lng, target.lat, target.lng) : null;
           const distStr = dist && dist > 0.5 ? `, ${formatDist(dist)} away` : '';
-          Speech.speak(`Navigation started. Heading to ${target.name}${distStr}.`, { rate: 0.88, pitch: 1.05, language: 'en-US' });
+          safeSpeech(`Navigation started. Heading to ${target.name}${distStr}.`, { rate: 0.88, pitch: 1.05, language: 'en-US' });
         }
       }
     } else {
-      deactivateKeepAwake();
-      // appStateSub is scoped to nav-on branch; React will cleanup on next effect run
       setIsApproaching(false);
       setIsRerouting(false);
       setApproachingReport(null);
@@ -1776,7 +1939,7 @@ function MapScreen() {
     const first = legSteps.find(s => s.type !== 'depart' && s.distance > 50);
     if (!first) return;
     const t = setTimeout(() => {
-      Speech.speak(buildAnnouncement(first, first.distance, 'far'), { rate: 0.88, pitch: 1.05, language: 'en-US' });
+      safeSpeech(buildAnnouncement(first, first.distance, 'far'), { rate: 0.88, pitch: 1.05, language: 'en-US' });
     }, 1500);
     return () => clearTimeout(t);
   }, [navIdx, navMode, routeLegOffset]);
@@ -1794,6 +1957,7 @@ function MapScreen() {
         { headers: { 'User-Agent': 'Trailhead/1.0' } }
       );
       const data = await res.json();
+      if (!Array.isArray(data)) { setIsSearching(false); return; }
       setSearchResults(data.map((r: any) => ({
         lat: parseFloat(r.lat), lng: parseFloat(r.lon), name: r.display_name,
       })));
@@ -1890,7 +2054,7 @@ function MapScreen() {
       Speech.stop();
       const res = await api.nearbyAudio(center.lat, center.lng);
       setNearbyNarration(res.narration);
-      Speech.speak(res.narration, { rate: 0.88, language: 'en-US' });
+      safeSpeech(res.narration, { rate: 0.88, language: 'en-US' });
     } catch (e: any) {
       if (e instanceof PaywallError) {
         setPaywallVisible(true);
@@ -1914,7 +2078,7 @@ function MapScreen() {
     setMapLayerState(next);
     webRef.current?.postMessage(JSON.stringify({
       type: 'set_style',
-      style: MAPBOX_STYLES[next] ?? MAPBOX_STYLES.satellite,
+      style: MAP_MODES[next] ?? MAP_MODES.satellite,
     }));
   }
 
@@ -2003,6 +2167,7 @@ function MapScreen() {
         setRouteLegs(msg.legs ?? []);
         if (msg.fromIdx !== undefined) setRouteLegOffset(msg.fromIdx);
         setIsRerouting(false);
+        if (rerouteTimeoutRef.current) { clearTimeout(rerouteTimeoutRef.current); rerouteTimeoutRef.current = null; }
       }
       if (msg.type === 'off_route' && navRef.current.active) {
         const now = Date.now();
@@ -2023,6 +2188,8 @@ function MapScreen() {
         lastRerouteRef.current = now;
         setIsRerouting(true);
         isReroutingRef.current = true;
+        if (rerouteTimeoutRef.current) clearTimeout(rerouteTimeoutRef.current);
+        rerouteTimeoutRef.current = setTimeout(() => { setIsRerouting(false); isReroutingRef.current = false; }, 15000);
         if (bestIdx !== navRef.current.idx) {
           setNavIdx(bestIdx);
           navRef.current.idx = bestIdx;
@@ -2035,7 +2202,7 @@ function MapScreen() {
         setRouteLegOffset(bestIdx);
         setOffRouteWarn(false);
         if (offRouteWarnTimer.current) clearTimeout(offRouteWarnTimer.current);
-        Speech.speak('Off route. Recalculating.', { rate: 0.88, pitch: 1.05 });
+        safeSpeech('Off route. Recalculating.', { rate: 0.88, pitch: 1.05 });
       }
       if (msg.type === 'off_route_warn' && navRef.current.active && !isReroutingRef.current) {
         // Suppress warn if within 400m of current maneuver — GPS wobble at intersections is normal
@@ -2065,7 +2232,6 @@ function MapScreen() {
       if (msg.type === 'download_complete') {
         setIsDownloading(false);
         setDownloadProgress(100);
-        setOfflineSaved(true);
         setDownloadLabel(prev => { if (prev) addCachedRegion(prev); return prev; });
         setTimeout(() => { setDownloadProgress(0); setDownloadSaved(0); setDownloadMB('0'); }, 3000);
       }
@@ -2314,7 +2480,7 @@ function MapScreen() {
       fromIdx: navRef.current.idx,
     }));
     setRouteLegOffset(navRef.current.idx);
-    Speech.speak('Recalculating.', { rate: 0.95 });
+    safeSpeech('Recalculating.', { rate: 0.95 });
   }
 
   function startDayNav(day: number | 'all', fromIdx?: number) {
@@ -2388,16 +2554,26 @@ function MapScreen() {
         onMessage={onWebMessage}
         onLoad={() => {
           webLoadedRef.current = true;
+          setMapLoadFailed(false);
           if (mapboxToken) {
             webRef.current?.postMessage(JSON.stringify({
               type: 'set_token', token: mapboxToken,
-              style: MAPBOX_STYLES[mapLayer] ?? MAPBOX_STYLES.satellite,
+              style: MAP_MODES[mapLayer] ?? MAP_MODES.satellite,
               apiBase: process.env.EXPO_PUBLIC_API_URL ?? 'https://trailhead-production-2049.up.railway.app',
             }));
           }
           if (userLoc) webRef.current?.postMessage(JSON.stringify({ type: 'user_pos', lat: userLoc.lat, lng: userLoc.lng }));
         }}
+        onError={() => setMapLoadFailed(true)}
       />
+
+      {/* Offline map load error banner */}
+      {mapLoadFailed && (
+        <View style={s.mapLoadFailBanner}>
+          <Ionicons name="cloud-offline-outline" size={14} color="#fbbf24" />
+          <Text style={s.mapLoadFailText}>MAP FAILED TO LOAD — OFFLINE MAPS NOT DOWNLOADED FOR THIS AREA</Text>
+        </View>
+      )}
 
       {/* Top bar */}
       <View style={s.topBar}>
@@ -2578,8 +2754,10 @@ function MapScreen() {
                 webRef.current?.postMessage(JSON.stringify({ type: 'cancel_download' }));
                 setIsDownloading(false);
               } else {
-                setIsDownloading(true); setOfflineSaved(false);
-                webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles', minZ: 10, maxZ: 15 }));
+                const vpLabel = 'area-' + Date.now();
+                setIsDownloading(true);
+                setDownloadLabel(vpLabel);
+                webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles', label: vpLabel, minZ: 10, maxZ: 15 }));
               }
             }}
           >
@@ -3397,8 +3575,38 @@ function MapScreen() {
               </View>
             )}
 
+            {/* One-shot CONUS download — whole US road & trail network in vector tiles */}
+            {(() => {
+              const conusCached = cachedRegions.includes('Continental US');
+              return (
+                <TouchableOpacity
+                  style={[s.offlineConusBtn, conusCached && { borderColor: C.green + '88' }]}
+                  disabled={isDownloading}
+                  onPress={() => {
+                    setShowOfflineModal(false); setIsDownloading(true);
+                    setDownloadLabel('Continental US');
+                    webRef.current?.postMessage(JSON.stringify({
+                      type: 'download_tiles_bbox', label: 'Continental US',
+                      n: 49.5, s: 24.5, e: -66.5, w: -125.0,
+                      minZ: 3, maxZ: 10, vectorOnly: true,
+                    }));
+                  }}>
+                  <View style={s.offlineConusIcon}>
+                    <Ionicons name="globe-outline" size={22} color={conusCached ? C.green : C.orange} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.offlineConusTitle}>{conusCached ? '✓ ' : ''}DOWNLOAD CONTINENTAL US</Text>
+                    <Text style={s.offlineConusMeta}>
+                      Whole country at planning + driving zoom · trails + roads · ~80 MB
+                    </Text>
+                  </View>
+                  <Ionicons name={conusCached ? 'refresh-outline' : 'cloud-download-outline'} size={20} color={conusCached ? C.green : C.orange} />
+                </TouchableOpacity>
+              );
+            })()}
+
             {/* Current trip download */}
-            <Text style={s.offlineSectionLabel}>MY TRIP CORRIDOR · 20km BUFFER AROUND ROUTE</Text>
+            <Text style={[s.offlineSectionLabel, { marginTop: 14 }]}>MY TRIP CORRIDOR · 20km BUFFER AROUND ROUTE</Text>
             {waypoints.length > 0 ? (() => {
               const label = activeTrip?.plan.trip_name ?? 'Trip';
               const isCachedV = cachedRegions.includes(label + '-vec');
@@ -3416,9 +3624,9 @@ function MapScreen() {
                   <TouchableOpacity style={[s.offlineTripBtn, isCachedV && { borderColor: C.green + '66' }]}
                     disabled={isDownloading}
                     onPress={() => {
-                      setShowOfflineModal(false); setIsDownloading(true); setOfflineSaved(false);
+                      setShowOfflineModal(false); setIsDownloading(true);
                       setDownloadLabel(label + '-vec');
-                      webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles_route', bufferKm: 20, minZ: 10, maxZ: 16, vectorOnly: true }));
+                      webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles_route', label: label + '-vec', bufferKm: 20, minZ: 10, maxZ: 16, vectorOnly: true }));
                     }}>
                     <View style={{ flex: 1 }}>
                       <Text style={s.offlineTripName} numberOfLines={1}>{label.toUpperCase()}</Text>
@@ -3433,9 +3641,9 @@ function MapScreen() {
                   <TouchableOpacity style={[s.offlineTripBtn, { borderColor: C.border }, isCachedFull && { borderColor: C.green + '66' }]}
                     disabled={isDownloading}
                     onPress={() => {
-                      setShowOfflineModal(false); setIsDownloading(true); setOfflineSaved(false);
+                      setShowOfflineModal(false); setIsDownloading(true);
                       setDownloadLabel(label + '-full');
-                      webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles_route', bufferKm: 20, minZ: 10, maxZ: 15, vectorOnly: false }));
+                      webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles_route', label: label + '-full', bufferKm: 20, minZ: 10, maxZ: 15, vectorOnly: false }));
                     }}>
                     <View style={{ flex: 1 }}>
                       <Text style={[s.offlineTripName, { color: C.text2 }]} numberOfLines={1}>{label.toUpperCase()}</Text>
@@ -3470,9 +3678,9 @@ function MapScreen() {
                           style={[s.stateTierBtn, isCached && { borderColor: C.green }]}
                           disabled={isDownloading}
                           onPress={() => {
-                            setShowOfflineModal(false); setIsDownloading(true); setOfflineSaved(false);
+                            setShowOfflineModal(false); setIsDownloading(true);
                             setDownloadLabel(st.name);
-                            webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles_bbox', n: st.n, s: st.s, e: st.e, w: st.w, minZ: 10, maxZ: 12 }));
+                            webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles_bbox', label: st.name, n: st.n, s: st.s, e: st.e, w: st.w, minZ: 10, maxZ: 12 }));
                           }}>
                           <Text style={s.stateTierLabel}>{isCached ? '✓ ' : ''}OVERVIEW</Text>
                           <Text style={s.stateTierSize}>{tilesMB(countOvr, 12)}</Text>
@@ -3481,9 +3689,9 @@ function MapScreen() {
                           style={[s.stateTierBtn, { borderColor: C.orange + '77' }, isCachedDet && { borderColor: C.green }]}
                           disabled={isDownloading}
                           onPress={() => {
-                            setShowOfflineModal(false); setIsDownloading(true); setOfflineSaved(false);
+                            setShowOfflineModal(false); setIsDownloading(true);
                             setDownloadLabel(st.name + '-detail');
-                            webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles_bbox', n: st.n, s: st.s, e: st.e, w: st.w, minZ: 10, maxZ: 15, vectorOnly: true }));
+                            webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles_bbox', label: st.name + '-detail', n: st.n, s: st.s, e: st.e, w: st.w, minZ: 10, maxZ: 15, vectorOnly: true }));
                           }}>
                           <Text style={[s.stateTierLabel, { color: C.orange }]}>{isCachedDet ? '✓ ' : ''}TRAILS</Text>
                           <Text style={s.stateTierSize}>{tilesMB(countDet, 15, true)}</Text>
@@ -3497,11 +3705,47 @@ function MapScreen() {
 
             {/* Cached regions summary */}
             {cachedRegions.length > 0 && (
-              <View style={s.offlineCachedBar}>
-                <Ionicons name="save-outline" size={12} color={C.green} />
-                <Text style={s.offlineCachedText}>
-                  {cachedRegions.length} region{cachedRegions.length !== 1 ? 's' : ''} cached: {cachedRegions.slice(0, 3).join(', ')}{cachedRegions.length > 3 ? '…' : ''}
-                </Text>
+              <View style={{ marginTop: 12 }}>
+                <Text style={[s.offlineSectionLabel, { marginBottom: 6 }]}>DOWNLOADED · TAP LOAD TO VIEW</Text>
+                {cachedRegions.map(region => {
+                  // Resolve center for this region — strip suffixes to find state name
+                  const baseName = region.replace(/-(vec|full|detail)$/, '');
+                  const stEntry = Object.values(US_STATES).find(st => st.name === baseName);
+                  // Continental US flies to mid-CONUS at country zoom; states fly to state center at state zoom
+                  const isConus = baseName === 'Continental US';
+                  const centerLat = isConus ? 39.5 : (stEntry ? (stEntry.n + stEntry.s) / 2 : null);
+                  const centerLng = isConus ? -98.5 : (stEntry ? (stEntry.e + stEntry.w) / 2 : null);
+                  const flyZoom = isConus ? 4 : null;
+                  return (
+                    <View key={region} style={s.offlineCachedRow}>
+                      <Ionicons name="checkmark-circle" size={13} color={C.green} />
+                      <Text style={s.offlineCachedRegionText} numberOfLines={1}>{region}</Text>
+                      {centerLat !== null && (
+                        <TouchableOpacity
+                          style={s.offlineCachedLoad}
+                          onPress={() => {
+                            setShowOfflineModal(false);
+                            webRef.current?.postMessage(JSON.stringify({
+                              type: 'fly_to', lat: centerLat, lng: centerLng, name: baseName,
+                              ...(flyZoom !== null && { zoom: flyZoom }),
+                            }));
+                          }}
+                        >
+                          <Text style={s.offlineCachedLoadText}>LOAD</Text>
+                        </TouchableOpacity>
+                      )}
+                      <TouchableOpacity
+                        style={s.offlineCachedDelete}
+                        onPress={() => {
+                          removeCachedRegion(region);
+                          webRef.current?.postMessage(JSON.stringify({ type: 'clear_cache_region', label: region }));
+                        }}
+                      >
+                        <Ionicons name="close-circle" size={16} color={C.red} />
+                      </TouchableOpacity>
+                    </View>
+                  );
+                })}
               </View>
             )}
             </>)}
@@ -4144,6 +4388,60 @@ function MapScreen() {
       )}
 
       {/* ── First-time onboarding card ─────────────────────────────────────── */}
+      {/* ── Location permission prominent disclosure ── */}
+      {showLocDisclosure && (
+        <View style={s.locDisclosureOverlay}>
+          <View style={s.locDisclosureCard}>
+            <View style={s.locDisclosureIcon}>
+              <Ionicons name="navigate-circle" size={40} color={C.orange} />
+            </View>
+            <Text style={s.locDisclosureTitle}>LOCATION ACCESS</Text>
+            <Text style={s.locDisclosureBody}>
+              Trailhead uses your location <Text style={{ fontWeight: '700', color: OVR.text }}>while you use the app</Text> to:
+            </Text>
+            <View style={s.locDisclosureList}>
+              <View style={s.locDisclosureRow}>
+                <Ionicons name="location" size={13} color={C.orange} />
+                <Text style={s.locDisclosureItem}>Show your position on the map</Text>
+              </View>
+              <View style={s.locDisclosureRow}>
+                <Ionicons name="navigate" size={13} color={C.orange} />
+                <Text style={s.locDisclosureItem}>Provide turn-by-turn navigation</Text>
+              </View>
+              <View style={s.locDisclosureRow}>
+                <Ionicons name="trail-sign" size={13} color={C.orange} />
+                <Text style={s.locDisclosureItem}>Find nearby campsites and trails</Text>
+              </View>
+              <View style={s.locDisclosureRow}>
+                <Ionicons name="warning" size={13} color={C.orange} />
+                <Text style={s.locDisclosureItem}>Alert you to road hazard reports</Text>
+              </View>
+            </View>
+            <Text style={s.locDisclosureNote}>
+              Location is only used while the app is open and is never shared without your consent.
+            </Text>
+            <TouchableOpacity
+              style={s.locDisclosureAllow}
+              onPress={() => {
+                setShowLocDisclosure(false);
+                Location.requestForegroundPermissionsAsync().then(({ status }) => {
+                  if (status === 'granted') setLocGranted(true);
+                });
+              }}
+            >
+              <Ionicons name="checkmark-circle" size={16} color="#fff" />
+              <Text style={s.locDisclosureAllowText}>ALLOW LOCATION ACCESS</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={s.locDisclosureDeny}
+              onPress={() => setShowLocDisclosure(false)}
+            >
+              <Text style={s.locDisclosureDenyText}>Not Now</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
       {showOnboard && !activeTrip && !navMode && !showSearch && !selectedCamp && (
         <View style={s.onboardCard} pointerEvents="box-none">
           <View style={s.onboardInner}>
@@ -4177,7 +4475,7 @@ function MapScreen() {
             <Text style={s.narrationTitle}>WHAT'S HERE</Text>
             <TouchableOpacity
               style={s.narrationReplay}
-              onPress={() => Speech.speak(nearbyNarration, { rate: 0.88, language: 'en-US' })}
+              onPress={() => safeSpeech(nearbyNarration, { rate: 0.88, language: 'en-US' })}
             >
               <Ionicons name="play-circle-outline" size={18} color={C.orange} />
             </TouchableOpacity>
@@ -5000,6 +5298,10 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   offlineIncludeText: { color: C.text3, fontSize: 10, fontFamily: mono },
   offlineSub: { color: C.text3, fontSize: 11, textAlign: 'center', marginBottom: 16, lineHeight: 16 },
   offlineSectionLabel: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '700', letterSpacing: 1, marginBottom: 8 },
+  offlineConusBtn: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 14, borderWidth: 2, borderColor: C.orange, backgroundColor: C.orange + '14', marginBottom: 4 },
+  offlineConusIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: C.s2, alignItems: 'center', justifyContent: 'center' },
+  offlineConusTitle: { color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '900', letterSpacing: 0.5 },
+  offlineConusMeta: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 3, lineHeight: 14 },
   offlineTripBtn: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 14, borderWidth: 1.5, borderColor: C.orange + '55', backgroundColor: C.s2, marginBottom: 6 },
   offlineTripName: { color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '800' },
   offlineTripMeta: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
@@ -5296,5 +5598,82 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   narrationClose:  { padding: 4 },
   narrationText: {
     color: OVR.text2, fontSize: 12, fontFamily: mono, lineHeight: 18,
+  },
+
+  // ── Location permission disclosure
+  locDisclosureOverlay: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    alignItems: 'center', justifyContent: 'center',
+    paddingHorizontal: 24,
+    zIndex: 999,
+  },
+  locDisclosureCard: {
+    backgroundColor: OVR.bg2, borderRadius: 20,
+    borderWidth: 1.5, borderColor: C.orange + '44',
+    padding: 24,
+    shadowColor: C.orange, shadowOpacity: 0.2, shadowRadius: 24, shadowOffset: { width: 0, height: 4 },
+    elevation: 16,
+    width: '100%',
+  },
+  locDisclosureIcon: { alignItems: 'center', marginBottom: 12 },
+  locDisclosureTitle: {
+    color: C.orange, fontSize: 16, fontFamily: mono, fontWeight: '900',
+    letterSpacing: 2, textAlign: 'center', marginBottom: 12,
+  },
+  locDisclosureBody: {
+    color: OVR.text2, fontSize: 13, fontFamily: mono, lineHeight: 19,
+    marginBottom: 14, textAlign: 'center',
+  },
+  locDisclosureList: { gap: 10, marginBottom: 16 },
+  locDisclosureRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  locDisclosureItem: { color: OVR.text2, fontSize: 12, fontFamily: mono, flex: 1, lineHeight: 17 },
+  locDisclosureNote: {
+    color: OVR.text3, fontSize: 10, fontFamily: mono, lineHeight: 15,
+    textAlign: 'center', marginBottom: 20,
+    borderTopWidth: 1, borderColor: OVR.border, paddingTop: 12,
+  },
+  locDisclosureAllow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: C.orange, borderRadius: 14,
+    paddingVertical: 14, marginBottom: 10,
+  },
+  locDisclosureAllowText: {
+    color: '#fff', fontSize: 13, fontFamily: mono, fontWeight: '900', letterSpacing: 1,
+  },
+  locDisclosureDeny: { alignItems: 'center', paddingVertical: 8 },
+  locDisclosureDenyText: { color: OVR.text3, fontSize: 12, fontFamily: mono },
+
+  // ── Offline cached regions list
+  offlineCachedRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingVertical: 6, paddingHorizontal: 4,
+    borderBottomWidth: 1, borderColor: OVR.border2,
+  },
+  offlineCachedRegionText: {
+    flex: 1, color: OVR.text2, fontSize: 11, fontFamily: mono,
+  },
+  offlineCachedLoad: {
+    paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6,
+    backgroundColor: C.orange + '22', borderWidth: 1, borderColor: C.orange + '55',
+    marginRight: 4,
+  },
+  offlineCachedLoadText: {
+    color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '800', letterSpacing: 0.5,
+  },
+  offlineCachedDelete: {
+    padding: 4,
+  },
+
+  // ── Offline map load failure banner
+  mapLoadFailBanner: {
+    position: 'absolute', top: 56, left: 16, right: 16,
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: 'rgba(69,26,3,0.95)', borderRadius: 10,
+    paddingHorizontal: 12, paddingVertical: 9,
+    borderWidth: 1, borderColor: '#92400e',
+  },
+  mapLoadFailText: {
+    flex: 1, color: '#fbbf24', fontSize: 10, fontFamily: mono, fontWeight: '700', letterSpacing: 0.3,
   },
 });

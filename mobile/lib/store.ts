@@ -63,6 +63,7 @@ interface AppState {
   addLiveReport: (report: Report) => void;
   setLiveReports: (reports: Report[]) => void;
   addCachedRegion: (label: string) => void;
+  removeCachedRegion: (label: string) => void;
   toggleFavorite: (camp: CampsitePin) => void;
   setOfflineTripIds: (ids: string[]) => void;
   setPlan: (active: boolean, expiresAt?: number | null) => void;
@@ -144,9 +145,16 @@ export const useStore = create<AppState>((set) => ({
     liveReports: [report, ...state.liveReports.filter(r => r.id !== report.id)].slice(0, 100),
   })),
   setLiveReports: (reports) => set({ liveReports: reports }),
-  addCachedRegion: (label) => set(state => ({
-    cachedRegions: [label, ...state.cachedRegions.filter(r => r !== label)].slice(0, 20),
-  })),
+  addCachedRegion: (label) => set(state => {
+    const updated = [label, ...state.cachedRegions.filter(r => r !== label)].slice(0, 20);
+    SecureStore.setItemAsync('trailhead_cached_regions', JSON.stringify(updated));
+    return { cachedRegions: updated };
+  }),
+  removeCachedRegion: (label) => set(state => {
+    const updated = state.cachedRegions.filter(r => r !== label);
+    SecureStore.setItemAsync('trailhead_cached_regions', JSON.stringify(updated));
+    return { cachedRegions: updated };
+  }),
   setSessionId: (id) => {
     SecureStore.setItemAsync('trailhead_session', id);
     set({ sessionId: id });
@@ -168,18 +176,20 @@ export const useStore = create<AppState>((set) => ({
 // Load persisted data on startup
 (async () => {
   try {
-    const [rigRaw, historyRaw, themeRaw, sessionRaw, favRaw] = await Promise.all([
+    const [rigRaw, historyRaw, themeRaw, sessionRaw, favRaw, cachedRegionsRaw] = await Promise.all([
       SecureStore.getItemAsync('trailhead_rig'),
       SecureStore.getItemAsync('trailhead_history'),
       SecureStore.getItemAsync('trailhead_theme'),
       SecureStore.getItemAsync('trailhead_session'),
       SecureStore.getItemAsync('trailhead_favorites'),
+      SecureStore.getItemAsync('trailhead_cached_regions'),
     ]);
     const patch: Partial<AppState> = {};
     if (rigRaw) patch.rigProfile = JSON.parse(rigRaw);
     if (historyRaw) patch.tripHistory = JSON.parse(historyRaw);
     if (themeRaw === 'dark' || themeRaw === 'light') patch.themeMode = themeRaw;
     if (favRaw) patch.favoriteCamps = JSON.parse(favRaw);
+    if (cachedRegionsRaw) patch.cachedRegions = JSON.parse(cachedRegionsRaw);
     if (sessionRaw) patch.sessionId = sessionRaw;
     else {
       // First run — persist the generated ID

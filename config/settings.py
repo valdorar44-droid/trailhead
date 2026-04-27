@@ -12,5 +12,6 @@ class Settings:
     stripe_webhook_secret: str = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
     # Public URL used for Stripe redirect after checkout
     public_url: str = os.environ.get("PUBLIC_URL", "https://trailhead-production-2049.up.railway.app")
+    protomaps_key: str = os.environ.get("PROTOMAPS_KEY", "")
 
 settings = Settings()

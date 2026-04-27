@@ -694,6 +694,67 @@ def get_config():
     return {"mapbox_token": settings.mapbox_token}
 
 
+# ── Self-hosted vector tiles (Protomaps proxy) ────────────────────────────────
+# Lets the mobile app render maps without selective region downloads. The whole
+# world's vector data is served from our backend; the WebView caches tiles it
+# fetches, so any area the user views gets cached automatically.
+
+_TILE_TIMEOUT = httpx.Timeout(connect=5.0, read=15.0, write=5.0, pool=5.0)
+_tile_client: Optional[httpx.AsyncClient] = None
+
+def _get_tile_client() -> httpx.AsyncClient:
+    global _tile_client
+    if _tile_client is None or _tile_client.is_closed:
+        _tile_client = httpx.AsyncClient(timeout=_TILE_TIMEOUT, http2=False)
+    return _tile_client
+
+
+@app.get("/api/tiles/{z}/{x}/{y}.pbf")
+async def proxy_vector_tile(z: int, x: int, y: int):
+    """Vector tile proxy — covers the whole world. Self-hosted via Protomaps."""
+    if not settings.protomaps_key:
+        raise HTTPException(503, "vector tiles not configured")
+    if z < 0 or z > 15 or x < 0 or y < 0:
+        raise HTTPException(400, "invalid tile coords")
+    url = f"https://api.protomaps.com/tiles/v4/{z}/{x}/{y}.mvt?key={settings.protomaps_key}"
+    try:
+        r = await _get_tile_client().get(url)
+    except httpx.HTTPError:
+        raise HTTPException(504, "tile upstream timeout")
+    if r.status_code == 404:
+        # Empty tile is normal at high zoom outside data coverage — return empty PBF
+        return Response(b"", media_type="application/vnd.mapbox-vector-tile",
+                        headers={"Cache-Control": "public, max-age=86400"})
+    if r.status_code != 200:
+        raise HTTPException(r.status_code, "tile upstream error")
+    return Response(r.content, media_type="application/vnd.mapbox-vector-tile",
+                    headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.get("/api/fonts/{fontstack}/{range_str}.pbf")
+async def proxy_font(fontstack: str, range_str: str):
+    """Glyph (font PBF) proxy — needed for offline label rendering."""
+    # Validate fontstack to prevent SSRF — only allow known Protomaps font names
+    allowed = {"Noto Sans Regular", "Noto Sans Bold", "Noto Sans Italic", "Noto Sans Medium"}
+    # fontstack may be a comma-separated stack
+    fonts = [f.strip() for f in fontstack.split(",")]
+    if not all(f in allowed for f in fonts):
+        raise HTTPException(400, "unknown fontstack")
+    # Validate range format (e.g. "0-255")
+    if not range_str.replace("-", "").isdigit():
+        raise HTTPException(400, "invalid range")
+    from urllib.parse import quote
+    url = f"https://protomaps.github.io/basemaps-assets/fonts/{quote(fontstack)}/{range_str}.pbf"
+    try:
+        r = await _get_tile_client().get(url)
+    except httpx.HTTPError:
+        raise HTTPException(504, "font upstream timeout")
+    if r.status_code != 200:
+        raise HTTPException(r.status_code, "font upstream error")
+    return Response(r.content, media_type="application/x-protobuf",
+                    headers={"Cache-Control": "public, max-age=604800"})
+
+
 # ── Campsite / gas ────────────────────────────────────────────────────────────
 
 @app.get("/api/campsites")

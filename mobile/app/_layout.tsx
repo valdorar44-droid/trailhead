@@ -71,11 +71,26 @@ export default function RootLayout() {
       if (!token) return;
       try {
         const user = await api.me();
+        // Persist user profile so we can restore it when offline
+        SecureStore.setItemAsync('trailhead_user', JSON.stringify(user)).catch(() => {});
         setAuth(token, user);
         // Check subscription status from backend
         const sub = await api.subscriptionStatus().catch(() => null);
         if (sub?.is_active) setPlan(true, sub.plan_expires_at ?? null);
-      } catch { SecureStore.deleteItemAsync('trailhead_token'); }
+      } catch (e: any) {
+        const isNetworkError = !e?.message || e.message.includes('Network') || e.message.includes('fetch') || e instanceof TypeError;
+        if (isNetworkError) {
+          // Offline — restore from cached user profile so we don't log them out
+          const cachedUser = await SecureStore.getItemAsync('trailhead_user').catch(() => null);
+          if (cachedUser) {
+            try { setAuth(token, JSON.parse(cachedUser)); } catch {}
+          }
+        } else {
+          // Actual auth failure (401/403) — token is invalid, clear it
+          SecureStore.deleteItemAsync('trailhead_token');
+          SecureStore.deleteItemAsync('trailhead_user');
+        }
+      }
     });
 
     // Also verify via StoreKit on device — covers reinstalls where backend may lag

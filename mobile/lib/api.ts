@@ -101,7 +101,7 @@ export const api = {
     }),
   getLeaderboard: () => req<LeaderboardEntry[]>('/api/leaderboard'),
 
-  getConfig: () => req<{ mapbox_token: string }>('/api/config'),
+  getConfig: () => req<{ mapbox_token: string; protomaps_key?: string }>('/api/config'),
   getCampsites: (lat: number, lng: number, radius = 25) =>
     req<Campsite[]>(`/api/campsites?lat=${lat}&lng=${lng}&radius=${radius}`),
   searchCampsites: (lat: number, lng: number, radius = 40, types: string[] = []) =>

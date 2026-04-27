@@ -691,7 +691,13 @@ async def nearby_audio(body: NearbyAudioRequest, user: dict = Depends(_current_u
 
 @app.get("/api/config")
 def get_config():
-    return {"mapbox_token": settings.mapbox_token}
+    return {
+        "mapbox_token": settings.mapbox_token,
+        # Exposed so the mobile app can fetch vector tiles direct from Protomaps'
+        # CDN (faster than proxying via Railway). Acceptable for early-stage —
+        # rotate if abused. Free tier is 200k-1M tiles/month.
+        "protomaps_key": settings.protomaps_key,
+    }
 
 
 # ── Self-hosted vector tiles (Protomaps proxy) ────────────────────────────────

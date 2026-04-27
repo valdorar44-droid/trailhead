@@ -765,35 +765,33 @@ def pmtiles_status():
 
 @app.get("/api/admin/pmtiles-entries")
 async def pmtiles_entries():
-    """Use official pmtiles library to dump the first entries for multiple tiles."""
+    """Dump root directory entries via official pmtiles library (compressed bytes passed directly)."""
     from dashboard.pmtiles_bootstrap import PMTILES_PATH
     if not PMTILES_PATH.exists():
         return {"error": "file missing"}
     try:
-        from pmtiles.reader import Reader, MmapSource
-        # Access the internal directory reader
-        import pmtiles.reader as pmr
-        with open(PMTILES_PATH, "rb") as f:
-            data = f.read(127 + 200000)  # header + enough for root dir
-        header_bytes = data[:127]
+        import pmtiles.tile as pmt
+        import inspect
+        members = dict(inspect.getmembers(pmt, inspect.isfunction))
+        deser = members.get('deserialize_directory') or members.get('deserialize_entries')
+        if not deser:
+            return {"error": "no deserializer", "funcs": list(members.keys())}
         def u64(b, o): return int.from_bytes(b[o:o+8], "little")
-        rdo = u64(header_bytes, 8); rdl = u64(header_bytes, 16)
-        import gzip
-        root_raw = gzip.decompress(data[rdo:rdo+rdl])
-        # Use pmtiles library's own deserializer
-        import importlib, inspect
-        # Find the deserialize function
-        members = inspect.getmembers(pmr, inspect.isfunction)
-        deser = dict(members).get('deserialize_directory') or dict(members).get('deserialize_dir')
-        if deser:
-            entries = deser(root_raw)
-            first10 = [{"tid": e.tile_id, "rl": e.run_length, "len": e.length, "off": e.offset}
-                       for e in (entries[:10] if hasattr(entries[0],'tile_id') else entries[:10])]
-            return {"num": len(entries), "first10": first10}
-        return {"error": "deserializer not found", "members": [m[0] for m in members]}
+        with open(PMTILES_PATH, "rb") as f:
+            hdr = f.read(127)
+            rdo = u64(hdr, 8); rdl = u64(hdr, 16)
+            f.seek(rdo); root_compressed = f.read(rdl)
+        entries = deser(root_compressed)  # library handles decompression internally
+        # Check entry type
+        sample = entries[0]
+        attr = 'tile_id' if hasattr(sample, 'tile_id') else list(vars(sample).keys())[0]
+        def e2d(e): return {"tid": getattr(e,'tile_id',0), "rl": getattr(e,'run_length',0),
+                            "len": getattr(e,'length',0), "off": getattr(e,'offset',0)}
+        return {"num": len(entries), "first_20": [e2d(e) for e in entries[:20]],
+                "entry_attrs": list(vars(sample).keys()) if hasattr(sample,'__dict__') else str(type(sample))}
     except Exception as e:
         import traceback
-        return {"error": str(e), "trace": traceback.format_exc()[-500:]}
+        return {"error": str(e), "trace": traceback.format_exc()[-800:]}
 
 
 @app.get("/api/admin/pmtiles-raw-root")

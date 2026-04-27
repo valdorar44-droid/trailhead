@@ -763,6 +763,46 @@ def pmtiles_status():
     return pmtiles_bootstrap.status()
 
 
+@app.get("/api/admin/pmtiles-leaf-test")
+async def pmtiles_leaf_test():
+    """Inspect the first leaf dir and look up tile 35144 (z=8/60/97)."""
+    from dashboard.pmtiles_bootstrap import PMTILES_PATH
+    if not PMTILES_PATH.exists():
+        return {"error": "file missing"}
+    try:
+        import pmtiles.tile as pmt, inspect, gzip
+        members = dict(inspect.getmembers(pmt, inspect.isfunction))
+        deser = members.get('deserialize_directory') or members.get('deserialize_entries')
+        def u64(b, o): return int.from_bytes(b[o:o+8], "little")
+        with open(PMTILES_PATH, "rb") as f:
+            hdr = f.read(127)
+        ldo = u64(hdr, 40)  # leaf_dirs_offset
+        # Read the first leaf dir (offset=0, len=10291)
+        with open(PMTILES_PATH, "rb") as f:
+            f.seek(ldo + 0); leaf_compressed = f.read(10291)
+        entries = deser(leaf_compressed)
+        def e2d(e): return {"tid": getattr(e,'tile_id',0), "rl": getattr(e,'run_length',0),
+                            "len": getattr(e,'length',0), "off": getattr(e,'offset',0)}
+        # Find entry for tile 35144
+        target = 35144
+        found = None
+        for i, e in enumerate(entries):
+            tid = getattr(e,'tile_id',0)
+            rl = getattr(e,'run_length',0)
+            if tid <= target < tid + max(rl,1):
+                found = {"idx": i, **e2d(e)}
+                break
+            if tid > target:
+                break
+        return {"leaf0_num_entries": len(entries),
+                "first_5": [e2d(e) for e in entries[:5]],
+                "last_5": [e2d(e) for e in entries[-5:]],
+                "tile_35144_entry": found}
+    except Exception as ex:
+        import traceback
+        return {"error": str(ex), "trace": traceback.format_exc()[-600:]}
+
+
 @app.get("/api/admin/pmtiles-entries")
 async def pmtiles_entries():
     """Dump root directory entries via official pmtiles library (compressed bytes passed directly)."""

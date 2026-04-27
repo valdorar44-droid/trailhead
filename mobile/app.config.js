@@ -70,6 +70,7 @@ module.exports = {
       'expo-image-picker',
       'expo-asset',
       'expo-font',
+      '@maplibre/maplibre-react-native',
       './plugins/withKotlinVersion',
     ],
     experiments: { typedRoutes: true },

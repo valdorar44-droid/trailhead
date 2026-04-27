@@ -24,6 +24,11 @@ export default function RootLayout() {
   const checking     = useRef(false);
   const pushRegistered = useRef(false);
 
+  // We auto-apply OTA updates that arrive within ~10s of launch (so users get
+  // the latest code on every cold start with one short reload). After that
+  // window we fall back to a banner so we don't interrupt active use.
+  const launchAtRef = useRef(Date.now());
+
   async function checkForUpdate() {
     if (checking.current) return;
     checking.current = true;
@@ -31,8 +36,13 @@ export default function RootLayout() {
       const { isAvailable } = await Updates.checkForUpdateAsync();
       if (isAvailable) {
         await Updates.fetchUpdateAsync();
+        if (Date.now() - launchAtRef.current < 10000) {
+          // Still in launch window — apply immediately for a seamless update
+          Updates.reloadAsync().catch(() => {});
+          return;
+        }
         updateReady.current = true;
-        setUpdateBanner(true); // show "update ready" banner
+        setUpdateBanner(true); // show "update ready" banner mid-session
       }
     } catch (e) {
       // silently ignore — network may be unavailable

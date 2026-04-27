@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState, useMemo, Component } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Linking, Animated, TextInput, ActivityIndicator, Modal, Image, Share, Alert, AppState } from 'react-native';
 import { WebView } from 'react-native-webview';
+import NativeMap, { type NativeMapHandle } from '@/components/NativeMap';
+
+// ── Feature flag — flip to true once the MLRN binary build is installed ───────
+// The native SDK requires a new binary (EAS build). Flipping this to true via
+// OTA is safe only after users have installed the new build.
+const USE_NATIVE_MAP = false;
 import * as Location from 'expo-location';
 import * as SecureStore from 'expo-secure-store';
 import * as Speech from 'expo-speech';
@@ -1387,7 +1393,8 @@ function MapScreen() {
   const addCachedRegion    = useStore(st => st.addCachedRegion);
   const removeCachedRegion = useStore(st => st.removeCachedRegion);
   const rigProfile = useStore(st => st.rigProfile);
-  const webRef = useRef<WebView>(null);
+  const webRef       = useRef<WebView>(null);
+  const nativeMapRef = useRef<NativeMapHandle>(null);
   const safeSpeech = (text: string, opts?: Parameters<typeof Speech.speak>[1]) => {
     try { safeSpeech(text, opts); } catch {}
   };
@@ -2677,32 +2684,84 @@ function MapScreen() {
 
   return (
     <View style={s.container}>
-      <WebView
-        ref={webRef}
-        source={{ html: mapHtml }}
-        style={s.map}
-        javaScriptEnabled
-        allowsInlineMediaPlayback
-        scrollEnabled={false}
-        onShouldStartLoadWithRequest={() => true}
-        onMessage={onWebMessage}
-        onLoad={() => {
-          webLoadedRef.current = true;
-          setMapLoadFailed(false);
-          // Send config even when only Protomaps key is ready (token may be missing)
-          // so the vector base map can render before satellite is wired up.
-          if (mapboxToken || protomapsKey) {
-            webRef.current?.postMessage(JSON.stringify({
-              type: 'set_token', token: mapboxToken,
-              style: MAP_MODES[mapLayer] ?? MAP_MODES.satellite,
-              apiBase: process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app',
-              protomapsKey,
-            }));
-          }
-          if (userLoc) webRef.current?.postMessage(JSON.stringify({ type: 'user_pos', lat: userLoc.lat, lng: userLoc.lng }));
-        }}
-        onError={() => setMapLoadFailed(true)}
-      />
+      {USE_NATIVE_MAP ? (
+        // ── Native MapLibre SDK (new binary required) ───────────────────────
+        <NativeMap
+          ref={nativeMapRef}
+          waypoints={waypoints}
+          camps={(activeTrip?.campsites ?? []).filter(c => c.lat && c.lng) as any}
+          gas={(activeTrip?.gas_stations ?? []).filter(g => g.lat && g.lng) as any}
+          pois={communityPins.map(p => ({ lat: p.lat, lng: p.lng, name: p.name, type: p.type || 'pin' }))}
+          reports={liveReports}
+          communityPins={communityPins}
+          searchMarker={null}
+          userLoc={userLoc}
+          navMode={navMode}
+          navIdx={navRef.current.idx}
+          navHeading={smoothedHdgRef.current}
+          navSpeed={userSpeed}
+          mapLayer={mapLayer}
+          routeOpts={routeOpts}
+          showLandOverlay={showLands}
+          showUsgsOverlay={showUsgs}
+          showTerrain={false}
+          showMvum={false}
+          showFire={false}
+          showAva={false}
+          showRadar={false}
+          onMapReady={() => { webLoadedRef.current = true; }}
+          onBoundsChange={b => { viewportRef.current = b; setMapZoom(b.zoom ?? 10); if ((b.zoom ?? 0) >= 9) setMapMoved(true); }}
+          onMapTap={() => { setSelectedCamp(null); setTappedTrail(null); }}
+          onMapLongPress={(lat, lng) => {
+            // Mirror WebView long press — trigger land check
+            if (webRef.current) {
+              webRef.current.postMessage(JSON.stringify({ type: 'map_long_press', lat, lng }));
+            }
+          }}
+          onCampTap={camp => { setSelectedCamp(camp); setShowCampDetail(true); }}
+          onBaseCampTap={(name, lat, lng, landType) => {
+            // Open nearby camp search for the tapped point
+          }}
+          onTrailTap={(name, lat, lng) => setTappedTrail({ name, lat, lng, cls: 'path' })}
+          onWaypointTap={(idx, name) => { setTappedWp({ idx, wp: waypoints[idx] }); }}
+          onRouteReady={result => {
+            setIsRouted(result.isProper);
+            setRouteSteps(result.steps ?? []);
+            setRouteLegs(result.legs ?? []);
+            if (result.fromIdx !== undefined) setRouteLegOffset(result.fromIdx);
+            setIsRerouting(false); isReroutingRef.current = false;
+          }}
+          onRoutePersist={data => {
+            SecureStore.setItemAsync('trailhead_active_route', JSON.stringify({ ...data, ts: Date.now() })).catch(() => {});
+          }}
+        />
+      ) : (
+        // ── WebView (current binary) ────────────────────────────────────────
+        <WebView
+          ref={webRef}
+          source={{ html: mapHtml }}
+          style={s.map}
+          javaScriptEnabled
+          allowsInlineMediaPlayback
+          scrollEnabled={false}
+          onShouldStartLoadWithRequest={() => true}
+          onMessage={onWebMessage}
+          onLoad={() => {
+            webLoadedRef.current = true;
+            setMapLoadFailed(false);
+            if (mapboxToken || protomapsKey) {
+              webRef.current?.postMessage(JSON.stringify({
+                type: 'set_token', token: mapboxToken,
+                style: MAP_MODES[mapLayer] ?? MAP_MODES.satellite,
+                apiBase: process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app',
+                protomapsKey,
+              }));
+            }
+            if (userLoc) webRef.current?.postMessage(JSON.stringify({ type: 'user_pos', lat: userLoc.lat, lng: userLoc.lng }));
+          }}
+          onError={() => setMapLoadFailed(true)}
+        />
+      )}
 
       {/* Offline map load error banner */}
       {mapLoadFailed && (

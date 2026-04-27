@@ -1,0 +1,13 @@
+diff --git a/node_modules/react-native-iap/ios/IapSerializationUtils.swift b/node_modules/react-native-iap/ios/IapSerializationUtils.swift
+index 800848a..c7a7d61 100644
+--- a/node_modules/react-native-iap/ios/IapSerializationUtils.swift
++++ b/node_modules/react-native-iap/ios/IapSerializationUtils.swift
+@@ -206,7 +206,7 @@ func serialize(_ t: Transaction) -> [String: Any?] {
+ 
+     #if compiler(>=5.10)
+     if #available(iOS 15.2, tvOS 15.2, *) {
+-        result["appTransactionID"] = t.appTransactionID
++        // appTransactionID removed: only available iOS 18.4+ (guarded incorrectly in source)
+     }
+     #endif
+ 

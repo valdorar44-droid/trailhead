@@ -10,7 +10,7 @@
     "build:android": "eas build --platform android --profile preview",
     "build:all": "eas build --platform all",
     "ota": "eas update --channel production --auto && eas update --channel preview --auto",
-    "postinstall": "node scripts/patch-expo-modules.js"
+    "postinstall": "node scripts/patch-expo-modules.js && patch-package"
   },
   "dependencies": {
     "@expo/vector-icons": "^14.0.0",
@@ -50,6 +50,7 @@
   "devDependencies": {
     "@babel/core": "^7.24.0",
     "@types/react": "~18.3.0",
+    "patch-package": "^8.0.1",
     "typescript": "^5.3.0"
   }
 }

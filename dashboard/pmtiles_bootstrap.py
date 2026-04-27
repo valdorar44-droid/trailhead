@@ -13,7 +13,6 @@ from __future__ import annotations
 import asyncio
 import io
 import os
-import re
 import tarfile
 from pathlib import Path
 from typing import Optional
@@ -36,9 +35,10 @@ GO_PMTILES_TARBALL = (
     f"v{GO_PMTILES_VERSION}/go-pmtiles_{GO_PMTILES_VERSION}_Linux_x86_64.tar.gz"
 )
 
-# Where Protomaps publishes weekly planet builds. We probe the index to find
-# the latest dated file rather than hardcoding a date.
-PROTOMAPS_BUILDS_INDEX = "https://build.protomaps.com/"
+# Protomaps publishes daily planet builds at https://build.protomaps.com/{YYYYMMDD}.pmtiles.
+# There is no directory listing or `latest` alias — we probe recent dates with
+# HEAD requests and use the most recent one that exists. Builds are kept for ~6 days.
+PROTOMAPS_BUILD_URL_TEMPLATE = "https://build.protomaps.com/{date}.pmtiles"
 
 # Status flags accessible from the tile endpoint
 _status: dict = {"ready": False, "extracting": False, "error": None, "progress": ""}
@@ -75,15 +75,24 @@ async def _download_go_pmtiles() -> None:
 
 
 async def _latest_planet_url() -> str:
-    """Find the most recent dated planet PMTiles on the build server."""
-    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-        r = await client.get(PROTOMAPS_BUILDS_INDEX)
-    # Index page lists files like 20250515.pmtiles — pick the largest date
-    dates = sorted(set(re.findall(r"(\d{8})\.pmtiles", r.text)))
-    if not dates:
-        raise RuntimeError("no planet builds found at protomaps build server")
-    latest = dates[-1]
-    return f"https://build.protomaps.com/{latest}.pmtiles"
+    """Find the most recent dated planet PMTiles by probing the build server.
+
+    Builds are daily and kept for ~6 days. We HEAD requests starting from
+    yesterday backwards (today's build often isn't published until late UTC).
+    """
+    from datetime import datetime, timedelta, timezone
+    today = datetime.now(timezone.utc).date()
+    async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+        for days_back in range(1, 10):
+            d = today - timedelta(days=days_back)
+            url = PROTOMAPS_BUILD_URL_TEMPLATE.format(date=d.strftime("%Y%m%d"))
+            try:
+                resp = await client.head(url)
+            except httpx.HTTPError:
+                continue
+            if resp.status_code == 200:
+                return url
+    raise RuntimeError("no recent planet builds reachable on build.protomaps.com")
 
 
 async def ensure_us_pmtiles() -> None:

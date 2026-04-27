@@ -41,10 +41,11 @@ class R2Source {
   }
 }
 
-// Cache the PMTiles instance keyed on the R2 bucket binding reference.
-// Within the same CF Workers isolate, env.TILES_BUCKET is the same object,
-// so the instance (and its internal directory cache) is reused across requests
-// for performance. Different isolates get fresh instances automatically.
+// PMTiles instance cache — WeakMap keyed on the R2 bucket binding so the
+// library's internal header + directory cache survives across requests within
+// the same CF Workers isolate (isolates are reused for ~30s of idle time).
+// The PMTiles library caches the parsed root + leaf directories internally,
+// so warm requests skip all but the final tile-data read from R2.
 const _pmCache = new WeakMap();
 function getPMTiles(env) {
   if (!_pmCache.has(env.TILES_BUCKET)) {
@@ -152,6 +153,30 @@ export default {
       } catch (e) {
         return new Response("tile unavailable", { status: 503 });
       }
+    }
+
+    // ── Static assets (MapLibre GL JS + CSS) — cached at edge for 7 days ────
+    if (path.startsWith("/assets/")) {
+      const cacheKey = new Request(`https://tiles.gettrailhead.app${path}`);
+      const cfCache  = caches.default;
+      const cached   = await cfCache.match(cacheKey);
+      if (cached) return cached;
+      // Proxy from the canonical CDN, cache aggressively at our edge so the
+      // WebView never cold-fetches unpkg on launch
+      const unpkgPath = path.replace("/assets/maplibre-gl", "/maplibre-gl@4.7.1/dist/maplibre-gl");
+      const upstream = `https://unpkg.com${unpkgPath}`;
+      const r = await fetch(upstream);
+      if (!r.ok) return r;
+      const contentType = r.headers.get("Content-Type") || "application/javascript";
+      const out = new Response(r.body, {
+        headers: {
+          "Content-Type":                contentType,
+          "Cache-Control":               "public, max-age=604800, s-maxage=604800",
+          "Access-Control-Allow-Origin": "*",
+        },
+      });
+      ctx.waitUntil(cfCache.put(cacheKey, out.clone()));
+      return out;
     }
 
     // ── Glyphs ────────────────────────────────────────────────────────────────

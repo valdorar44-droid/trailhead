@@ -454,8 +454,8 @@ const buildMapHtml = (
 <html>
 <head>
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
-<script src='https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js'></script>
-<link href='https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css' rel='stylesheet'/>
+<script src='https://tiles.gettrailhead.app/assets/maplibre-gl.js'></script>
+<link href='https://tiles.gettrailhead.app/assets/maplibre-gl.css' rel='stylesheet'/>
 <style>
   body,html{margin:0;padding:0;height:100%;background:#080c12;overflow:hidden;}
   #map{height:100vh;width:100vw;}
@@ -852,11 +852,16 @@ const buildMapHtml = (
   function initMap(token,style){
     mapboxToken=token;
     currentStyle=style||'satellite';
+    // Match MapLibre's parallel request limit to WKWebView's actual HTTP/2 cap.
+    // Default 16 creates a URLSession backlog — tiles wait for each other.
+    maplibregl.config.MAX_PARALLEL_IMAGE_REQUESTS=6;
     map=new maplibregl.Map({container:'map',style:buildStyle(currentStyle),
       center:[${centerLng},${centerLat}],zoom:${waypoints.length > 1 ? 7 : 10},
       attributionControl:false,pitchWithRotate:false,
       fadeDuration:0,
-      maxTileCacheSize:2000});
+      maxTileCacheSize:2000,
+      renderWorldCopies:false,
+      localFontFamily:'sans-serif'});
     map.on('load',function(){
       setupSources();setupLayers();renderWaypoints();loadInitialData();
       if(wps.length>=2)loadRoute();

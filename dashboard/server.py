@@ -763,6 +763,46 @@ def pmtiles_status():
     return pmtiles_bootstrap.status()
 
 
+@app.get("/api/admin/pmtiles-raw-root")
+async def pmtiles_raw_root():
+    """Return the root directory bytes (gzip compressed, base64) for JS decoder testing."""
+    import base64
+    from dashboard.pmtiles_bootstrap import PMTILES_PATH
+    if not PMTILES_PATH.exists():
+        return {"error": "file missing"}
+    with open(PMTILES_PATH, "rb") as f:
+        header = f.read(127)
+    def u64(b, o): return int.from_bytes(b[o:o+8], "little")
+    rdo = u64(header, 8); rdl = u64(header, 16)
+    with open(PMTILES_PATH, "rb") as f:
+        f.seek(rdo); root_compressed = f.read(rdl)
+    import gzip
+    root_raw = gzip.decompress(root_compressed)
+    # Read first 20 entries to show structure
+    import io
+    def read_varint(data, pos):
+        result, shift = 0, 0
+        while True:
+            b = data[pos]; pos += 1
+            result += (b & 127) * (2 ** shift); shift += 7
+            if not (b & 128): break
+        return result, pos
+    pos = 0; n, pos = read_varint(root_raw, pos)
+    entries = []; li=ll=lo=0
+    for _ in range(min(n, 30)):
+        di, pos = read_varint(root_raw, pos)
+        rl, pos = read_varint(root_raw, pos)
+        dl, pos = read_varint(root_raw, pos)
+        od, pos = read_varint(root_raw, pos)
+        tid = li + di; length = ll + dl
+        off = lo + ll if od == 0 else lo + od
+        li=tid; ll=length; lo=off
+        entries.append({"tid": tid, "rl": rl, "len": length, "off": off})
+    return {"num_entries": n, "root_dir_length_compressed": rdl,
+            "root_dir_length_raw": len(root_raw), "first_30": entries,
+            "tdo": u64(header, 56)}
+
+
 @app.get("/api/admin/pmtiles-debug")
 async def pmtiles_debug():
     """Read and decode the PMTiles header so we can verify the Worker's decoder."""

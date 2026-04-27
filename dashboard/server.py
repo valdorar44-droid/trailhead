@@ -698,15 +698,45 @@ def get_config():
 # Lets the mobile app render maps without selective region downloads. The whole
 # world's vector data is served from our backend; the WebView caches tiles it
 # fetches, so any area the user views gets cached automatically.
+#
+# Two cache layers:
+#   1. In-process LRU (RAM) — eliminates Protomaps round-trip for repeat hits
+#   2. Surrogate-Control header — opts into Fastly CDN edge caching at Railway
+# Without these, every tile is ~300-600ms (round trip + Protomaps fetch), and
+# the map feels glitchy as 20-50 tiles slowly populate the viewport.
+
+import asyncio
+from collections import OrderedDict
 
 _TILE_TIMEOUT = httpx.Timeout(connect=5.0, read=15.0, write=5.0, pool=5.0)
 _tile_client: Optional[httpx.AsyncClient] = None
 
+# LRU cache: ~2000 tiles × ~30KB avg = ~60MB RAM. Tiles change on weekly
+# Protomaps builds, so a 24h TTL is more than sufficient.
+_TILE_LRU_MAX = 2000
+_tile_lru: "OrderedDict[tuple, bytes]" = OrderedDict()
+_tile_lru_lock = asyncio.Lock()
+
+# Glyphs only need ~12 unique entries (3 fontstacks × 4 ranges), keep all forever
+_font_lru: "dict[tuple, bytes]" = {}
+_font_lru_lock = asyncio.Lock()
+
+
 def _get_tile_client() -> httpx.AsyncClient:
     global _tile_client
     if _tile_client is None or _tile_client.is_closed:
-        _tile_client = httpx.AsyncClient(timeout=_TILE_TIMEOUT, http2=False)
+        # http2 + keepalive shaves another ~100ms off cache misses on warm conns
+        limits = httpx.Limits(max_keepalive_connections=20, max_connections=50,
+                               keepalive_expiry=300.0)
+        _tile_client = httpx.AsyncClient(timeout=_TILE_TIMEOUT, http2=False, limits=limits)
     return _tile_client
+
+
+_TILE_CACHE_HEADERS = {
+    "Cache-Control": "public, max-age=86400",
+    # Fastly-specific: forces CDN edge caching independent of browser cache
+    "Surrogate-Control": "public, max-age=86400",
+}
 
 
 @app.get("/api/tiles/{z}/{x}/{y}.pbf")
@@ -716,19 +746,37 @@ async def proxy_vector_tile(z: int, x: int, y: int):
         raise HTTPException(503, "vector tiles not configured")
     if z < 0 or z > 15 or x < 0 or y < 0:
         raise HTTPException(400, "invalid tile coords")
+    key = (z, x, y)
+
+    # Layer 1: RAM cache
+    async with _tile_lru_lock:
+        hit = _tile_lru.get(key)
+        if hit is not None:
+            _tile_lru.move_to_end(key)
+            return Response(hit, media_type="application/vnd.mapbox-vector-tile",
+                            headers=_TILE_CACHE_HEADERS)
+
+    # Layer 2: upstream Protomaps
     url = f"https://api.protomaps.com/tiles/v4/{z}/{x}/{y}.mvt?key={settings.protomaps_key}"
     try:
         r = await _get_tile_client().get(url)
     except httpx.HTTPError:
         raise HTTPException(504, "tile upstream timeout")
     if r.status_code == 404:
-        # Empty tile is normal at high zoom outside data coverage — return empty PBF
-        return Response(b"", media_type="application/vnd.mapbox-vector-tile",
-                        headers={"Cache-Control": "public, max-age=86400"})
-    if r.status_code != 200:
+        content = b""  # cache empty tiles too — outside-coverage areas are common
+    elif r.status_code != 200:
         raise HTTPException(r.status_code, "tile upstream error")
-    return Response(r.content, media_type="application/vnd.mapbox-vector-tile",
-                    headers={"Cache-Control": "public, max-age=86400"})
+    else:
+        content = r.content
+
+    # Populate LRU
+    async with _tile_lru_lock:
+        _tile_lru[key] = content
+        if len(_tile_lru) > _TILE_LRU_MAX:
+            _tile_lru.popitem(last=False)
+
+    return Response(content, media_type="application/vnd.mapbox-vector-tile",
+                    headers=_TILE_CACHE_HEADERS)
 
 
 @app.get("/api/fonts/{fontstack}/{range_str}.pbf")
@@ -736,13 +784,20 @@ async def proxy_font(fontstack: str, range_str: str):
     """Glyph (font PBF) proxy — needed for offline label rendering."""
     # Validate fontstack to prevent SSRF — only allow known Protomaps font names
     allowed = {"Noto Sans Regular", "Noto Sans Bold", "Noto Sans Italic", "Noto Sans Medium"}
-    # fontstack may be a comma-separated stack
     fonts = [f.strip() for f in fontstack.split(",")]
     if not all(f in allowed for f in fonts):
         raise HTTPException(400, "unknown fontstack")
-    # Validate range format (e.g. "0-255")
     if not range_str.replace("-", "").isdigit():
         raise HTTPException(400, "invalid range")
+
+    key = (fontstack, range_str)
+    async with _font_lru_lock:
+        hit = _font_lru.get(key)
+        if hit is not None:
+            return Response(hit, media_type="application/x-protobuf",
+                            headers={"Cache-Control": "public, max-age=604800",
+                                     "Surrogate-Control": "public, max-age=604800"})
+
     from urllib.parse import quote
     url = f"https://protomaps.github.io/basemaps-assets/fonts/{quote(fontstack)}/{range_str}.pbf"
     try:
@@ -751,8 +806,13 @@ async def proxy_font(fontstack: str, range_str: str):
         raise HTTPException(504, "font upstream timeout")
     if r.status_code != 200:
         raise HTTPException(r.status_code, "font upstream error")
+
+    async with _font_lru_lock:
+        _font_lru[key] = r.content
+
     return Response(r.content, media_type="application/x-protobuf",
-                    headers={"Cache-Control": "public, max-age=604800"})
+                    headers={"Cache-Control": "public, max-age=604800",
+                             "Surrogate-Control": "public, max-age=604800"})
 
 
 # ── Campsite / gas ────────────────────────────────────────────────────────────

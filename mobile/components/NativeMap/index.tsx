@@ -116,9 +116,17 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     onRouteReady, onRoutePersist,
   } = props;
 
-  const mapRef       = useRef<MapLibreGL.MapViewRef>(null);
-  const camRef       = useRef<MapLibreGL.CameraRef>(null);
-  const initializedRef = useRef(false); // true after first setCamera — prevents snap-back
+  const mapRef = useRef<MapLibreGL.MapViewRef>(null);
+  const camRef = useRef<MapLibreGL.CameraRef>(null);
+
+  // Compute initial camera position ONCE (lazy useState with no deps).
+  // Passing these as controlled Camera props that never change means:
+  //   1. Camera starts at the right position immediately (no ref timing issue)
+  //   2. User can freely pan/zoom after — props don't change so no snap-back
+  const [initialCenter] = useState<[number, number]>(() =>
+    waypoints[0] ? [waypoints[0].lng, waypoints[0].lat] : [-98.5, 39.5]
+  );
+  const [initialZoom] = useState<number>(() => waypoints.length > 1 ? 7 : 10);
   const mapboxToken = useStore(s => s.mapboxToken);
   const activeTrip  = useStore(s => s.activeTrip);
   const C = useTheme();
@@ -256,21 +264,9 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   }))), [pois]);
 
   // ── Map event handlers ───────────────────────────────────────────────────────
-  // Set initial camera position exactly once on map ready — never again from props.
   const handleMapReady = useCallback(() => {
-    if (!initializedRef.current) {
-      initializedRef.current = true;
-      const center: [number, number] = waypoints[0]
-        ? [waypoints[0].lng, waypoints[0].lat]
-        : [-98.5, 39.5];
-      const zoom = waypoints.length > 1 ? 7 : 10;
-      // Small delay so the map has time to fully initialise its GL context
-      setTimeout(() => {
-        camRef.current?.setCamera({ centerCoordinate: center, zoomLevel: zoom, animationDuration: 0 });
-      }, 100);
-    }
     onMapReady();
-  }, [waypoints, onMapReady]);
+  }, [onMapReady]);
 
   const handlePress = useCallback((feat: GeoJSON.Feature | undefined) => {
     if (!feat) { onMapTap(); return; }
@@ -317,11 +313,16 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       logoEnabled={false}
     >
       {/* ── Camera ────────────────────────────────────────────────────── */}
-      {/* Camera — NO controlled centerCoordinate/zoomLevel props.
-          Binding those as React props causes the camera to snap back to the
-          initial position on every re-render (location update, state change).
-          Instead we set position once imperatively via onDidFinishLoadingMap. */}
-      <MapLibreGL.Camera ref={camRef} />
+      {/* Camera — initial values computed once via lazy useState.
+          Because initialCenter/initialZoom never change after mount, these
+          controlled props set the starting position without ever snapping back.
+          All subsequent camera moves (nav follow, flyTo, etc.) happen via ref. */}
+      <MapLibreGL.Camera
+        ref={camRef}
+        centerCoordinate={initialCenter}
+        zoomLevel={initialZoom}
+        animationDuration={0}
+      />
 
       {/* ── User location ─────────────────────────────────────────────── */}
       <MapLibreGL.UserLocation

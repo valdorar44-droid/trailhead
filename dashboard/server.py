@@ -739,16 +739,32 @@ _TILE_CACHE_HEADERS = {
 }
 
 
+PROTOMAPS_MAXZOOM = 15  # tiles v4 schema cap
+
+
 @app.get("/api/tiles/{z}/{x}/{y}.pbf")
 async def proxy_vector_tile(z: int, x: int, y: int):
-    """Vector tile proxy — covers the whole world. Self-hosted via Protomaps."""
+    """Vector tile proxy — covers the whole world. Self-hosted via Protomaps.
+
+    For z > 15 (Protomaps maxzoom), serve the parent z15 tile so MapLibre's
+    over-zoom rendering works. Without this, MapLibre's z16+ requests hit a
+    400 error and the map appears to stop loading when the user zooms in.
+    """
     if not settings.protomaps_key:
         raise HTTPException(503, "vector tiles not configured")
-    if z < 0 or z > 15 or x < 0 or y < 0:
+    if z < 0 or x < 0 or y < 0 or z > 22:
         raise HTTPException(400, "invalid tile coords")
-    key = (z, x, y)
 
-    # Layer 1: RAM cache
+    # Map any z>15 request back to its z15 parent — same data, MapLibre stretches
+    if z > PROTOMAPS_MAXZOOM:
+        shift = z - PROTOMAPS_MAXZOOM
+        upstream_z, upstream_x, upstream_y = PROTOMAPS_MAXZOOM, x >> shift, y >> shift
+    else:
+        upstream_z, upstream_x, upstream_y = z, x, y
+
+    key = (upstream_z, upstream_x, upstream_y)
+
+    # Layer 1: RAM cache (keyed by upstream coords so over-zoom requests dedupe)
     async with _tile_lru_lock:
         hit = _tile_lru.get(key)
         if hit is not None:
@@ -757,7 +773,7 @@ async def proxy_vector_tile(z: int, x: int, y: int):
                             headers=_TILE_CACHE_HEADERS)
 
     # Layer 2: upstream Protomaps
-    url = f"https://api.protomaps.com/tiles/v4/{z}/{x}/{y}.mvt?key={settings.protomaps_key}"
+    url = f"https://api.protomaps.com/tiles/v4/{upstream_z}/{upstream_x}/{upstream_y}.mvt?key={settings.protomaps_key}"
     try:
         r = await _get_tile_client().get(url)
     except httpx.HTTPError:

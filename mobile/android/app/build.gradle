@@ -89,6 +89,7 @@ android {
     namespace 'com.trailhead.app'
     defaultConfig {
         applicationId 'com.trailhead.app'
+        missingDimensionStrategy 'store', 'play'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 6

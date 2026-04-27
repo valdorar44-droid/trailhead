@@ -763,6 +763,47 @@ def pmtiles_status():
     return pmtiles_bootstrap.status()
 
 
+@app.get("/api/admin/pmtiles-debug")
+async def pmtiles_debug():
+    """Read and decode the PMTiles header so we can verify the Worker's decoder."""
+    from dashboard.pmtiles_bootstrap import PMTILES_PATH
+    if not PMTILES_PATH.exists():
+        return {"error": "file missing"}
+    with open(PMTILES_PATH, "rb") as f:
+        header = f.read(127)
+    if len(header) < 127 or header[:7] != b"PMTiles":
+        return {"error": "bad magic", "got": header[:8].hex()}
+    def u64(b, off):
+        lo = int.from_bytes(b[off:off+4], "little")
+        hi = int.from_bytes(b[off+4:off+8], "little")
+        return hi * (2**32) + lo
+    h = {
+        "version": header[7],
+        "root_dir_offset": u64(header, 8),
+        "root_dir_length": u64(header, 16),
+        "leaf_dir_offset": u64(header, 40),
+        "leaf_dir_length": u64(header, 48),
+        "tile_data_offset": u64(header, 56),
+        "tile_data_length": u64(header, 64),
+        "min_zoom": header[100],
+        "max_zoom": header[101],
+        "tile_type": header[99],
+        "internal_compression": header[97],
+        "tile_compression": header[98],
+    }
+    # Also test the Python pmtiles reader lookup for a known Kansas tile
+    reader = pmtiles_bootstrap._open_reader()
+    test_result = None
+    if reader:
+        try:
+            tile = await asyncio.to_thread(reader.get, 8, 60, 97)
+            test_result = len(tile) if tile else "not_found"
+        except Exception as e:
+            test_result = f"error: {e}"
+    h["python_tile_z8_x60_y97"] = test_result
+    return h
+
+
 @app.post("/api/admin/pmtiles-retry")
 async def pmtiles_retry():
     """Re-trigger the extract task."""

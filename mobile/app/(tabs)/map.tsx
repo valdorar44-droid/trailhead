@@ -676,7 +676,7 @@ const buildMapHtml = (
         layout:{'line-cap':'round','line-join':'round'},
         paint:{'line-color':sat?'#0008':'#1c1f26','line-width':['interpolate',['linear'],['zoom'],11,0.6,14,2.6,17,8],'line-opacity':roadOpacity}},
       {id:'road-minor',type:'line',source:'pm','source-layer':'roads',
-        filter:['==',['get','kind'],'minor_road'],minzoom:11,
+        filter:['==',['get','kind'],'minor_road'],minzoom:9,
         layout:{'line-cap':'round','line-join':'round'},
         paint:{'line-color':sat?'#fff':'#6e7079','line-width':['interpolate',['linear'],['zoom'],11,0.4,14,1.8,17,6],'line-opacity':roadOpacity}},
       {id:'road-major-case',type:'line',source:'pm','source-layer':'roads',
@@ -732,7 +732,7 @@ const buildMapHtml = (
         paint:{'text-color':sat?'#fff':'#b9bcc4','text-halo-color':lwHalo,'text-halo-width':1.8,'text-opacity':labelOpacity}},
       // Places: Protomaps gives us only kind=locality with population_rank. Tier by rank.
       {id:'place-small',type:'symbol',source:'pm','source-layer':'places',
-        minzoom:10,filter:['all',['==',['get','kind'],'locality'],['<',['coalesce',['get','population_rank'],0],8]],
+        minzoom:7,filter:['all',['==',['get','kind'],'locality'],['<',['coalesce',['get','population_rank'],0],8]],
         layout:{'text-field':['get','name'],'text-size':['interpolate',['linear'],['zoom'],10,10,14,12],
           'text-font':['Noto Sans Regular'],'text-letter-spacing':0.04},
         paint:{'text-color':'#a3aab9','text-halo-color':lwHalo,'text-halo-width':1.8,'text-opacity':labelOpacity}},
@@ -854,7 +854,9 @@ const buildMapHtml = (
     currentStyle=style||'satellite';
     map=new maplibregl.Map({container:'map',style:buildStyle(currentStyle),
       center:[${centerLng},${centerLat}],zoom:${waypoints.length > 1 ? 7 : 10},
-      attributionControl:false,pitchWithRotate:false});
+      attributionControl:false,pitchWithRotate:false,
+      fadeDuration:0,
+      maxTileCacheSize:2000});
     map.on('load',function(){
       setupSources();setupLayers();renderWaypoints();loadInitialData();
       if(wps.length>=2)loadRoute();

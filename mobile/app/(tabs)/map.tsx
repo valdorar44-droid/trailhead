@@ -601,85 +601,97 @@ const buildMapHtml = (
     if(sources.sat){
       layers.push({id:'satellite',type:'raster',source:'sat',paint:{'raster-opacity':1.0,'raster-fade-duration':200}});
     }
+    // Protomaps tiles v4 schema: source layers earth/landuse/water/roads/boundaries/places/pois.
+    // Property name is "kind" (NOT pmap:kind). Boundaries use kind=country|region|county.
+    // Places only have kind=locality - population_rank tiers them. Peaks live in pois.
+    var lwHalo=mode==='satellite'?'rgba(0,0,0,0.85)':'#0d1117';
     layers=layers.concat([
-      {id:'earth',type:'fill',source:'pm','source-layer':'earth',paint:{'fill-color':'#14191f','fill-opacity':fillOpacity}},
+      {id:'earth',type:'fill',source:'pm','source-layer':'earth',
+        filter:['==',['get','kind'],'earth'],
+        paint:{'fill-color':'#14191f','fill-opacity':fillOpacity}},
       {id:'lu-park',type:'fill',source:'pm','source-layer':'landuse',
-        filter:['in',['get','pmap:kind'],['literal',['national_park','park','nature_reserve','protected_area','state_park']]],
+        filter:['in',['get','kind'],['literal',['national_park','park','nature_reserve','protected_area']]],
         paint:{'fill-color':'#1a3a24','fill-opacity':mode==='satellite'?0.0:(mode==='hybrid'?0.35:0.85)}},
       {id:'lu-forest',type:'fill',source:'pm','source-layer':'landuse',
-        filter:['in',['get','pmap:kind'],['literal',['forest','wood']]],
+        filter:['in',['get','kind'],['literal',['forest','wood']]],
         paint:{'fill-color':'#1d2e1e','fill-opacity':mode==='satellite'?0.0:(mode==='hybrid'?0.3:0.7)}},
+      {id:'lu-grass',type:'fill',source:'pm','source-layer':'landuse',
+        filter:['in',['get','kind'],['literal',['grassland','farmland','meadow']]],
+        paint:{'fill-color':'#1f2b18','fill-opacity':mode==='satellite'?0.0:(mode==='hybrid'?0.2:0.5)}},
+      // Render every polygon in the water layer regardless of kind - Protomaps mixes
+      // lake/ocean/wide-river polygons here; line-only kinds are ignored by fill renderer.
       {id:'water-poly',type:'fill',source:'pm','source-layer':'water',
         paint:{'fill-color':mode==='satellite'?'rgba(12,30,53,0.0)':'#0c1e35','fill-opacity':mode==='hybrid'?0.5:1.0}},
-      {id:'water-line',type:'line',source:'pm','source-layer':'physical_line',
-        paint:{'line-color':'#1a3552','line-width':['interpolate',['linear'],['zoom'],5,0.4,12,2.5],'line-opacity':roadOpacity}},
+      {id:'water-river',type:'line',source:'pm','source-layer':'water',
+        filter:['in',['get','kind'],['literal',['river','stream','canal']]],
+        paint:{'line-color':'#1a3552','line-width':['interpolate',['linear'],['zoom'],8,0.4,12,1.5,15,2.5],'line-opacity':roadOpacity}},
       {id:'road-trunk-case',type:'line',source:'pm','source-layer':'roads',
-        filter:['==',['get','pmap:kind'],'highway'],
+        filter:['==',['get','kind'],'highway'],
         layout:{'line-cap':'round','line-join':'round'},
         paint:{'line-color':'#0d1117','line-width':['interpolate',['linear'],['zoom'],5,2,10,5,15,9],'line-opacity':roadOpacity}},
       {id:'road-trunk',type:'line',source:'pm','source-layer':'roads',
-        filter:['==',['get','pmap:kind'],'highway'],
+        filter:['==',['get','kind'],'highway'],
         layout:{'line-cap':'round','line-join':'round'},
         paint:{'line-color':mode==='hybrid'?'#fbbf24':'#c08a3a','line-width':['interpolate',['linear'],['zoom'],5,1,10,3,15,6],'line-opacity':roadOpacity}},
       {id:'road-major',type:'line',source:'pm','source-layer':'roads',
-        filter:['==',['get','pmap:kind'],'major_road'],
+        filter:['in',['get','kind'],['literal',['major_road','medium_road']]],
         layout:{'line-cap':'round','line-join':'round'},
         paint:{'line-color':mode==='hybrid'?'#e8c980':'#8a6a3a','line-width':['interpolate',['linear'],['zoom'],7,0.5,12,2.2,15,5],'line-opacity':roadOpacity}},
       {id:'road-minor',type:'line',source:'pm','source-layer':'roads',
-        filter:['==',['get','pmap:kind'],'minor_road'],
+        filter:['==',['get','kind'],'minor_road'],
         layout:{'line-cap':'round','line-join':'round'},
-        paint:{'line-color':mode==='hybrid'?'#cbd5e1':'#3d3d35','line-width':['interpolate',['linear'],['zoom'],10,0.5,14,2,16,4],'line-opacity':['interpolate',['linear'],['zoom'],10,0,11,roadOpacity]}},
+        paint:{'line-color':mode==='hybrid'?'#cbd5e1':'#5a5a4a','line-width':['interpolate',['linear'],['zoom'],10,0.5,14,2,16,4],'line-opacity':['interpolate',['linear'],['zoom'],9,0,10,roadOpacity]}},
       {id:'road-path',type:'line',source:'pm','source-layer':'roads',
-        filter:['in',['get','pmap:kind'],['literal',['path','other']]],
+        filter:['in',['get','kind'],['literal',['path','other']]],
         layout:{'line-cap':'round','line-join':'round'},
-        paint:{'line-color':mode==='hybrid'?'#a78bfa':'#7c5d2a','line-width':1.5,'line-dasharray':[3,2],'line-opacity':['interpolate',['linear'],['zoom'],11,0,12,roadOpacity]}},
-      {id:'boundary-state',type:'line',source:'pm','source-layer':'boundaries',
-        filter:['==',['get','admin_level'],4],
+        paint:{'line-color':mode==='hybrid'?'#a78bfa':'#9a7c3a','line-width':1.5,'line-dasharray':[3,2],'line-opacity':['interpolate',['linear'],['zoom'],11,0,12,roadOpacity]}},
+      {id:'boundary-region',type:'line',source:'pm','source-layer':'boundaries',
+        filter:['==',['get','kind'],'region'],
         paint:{'line-color':'#3a4f6a','line-width':1,'line-dasharray':[4,2],'line-opacity':roadOpacity}},
       {id:'boundary-country',type:'line',source:'pm','source-layer':'boundaries',
-        filter:['<=',['get','admin_level'],2],
+        filter:['==',['get','kind'],'country'],
         paint:{'line-color':'#5a7090','line-width':1.5,'line-opacity':roadOpacity}},
-      // Protomaps POIs we surface to RN (camp_site, picnic_site, shelter, trailhead, etc.)
+      // Protomaps POIs surfaced for tap (camp_site, trailhead, viewpoint, peak)
       {id:'pm-pois-camp',type:'circle',source:'pm','source-layer':'pois',
-        filter:['in',['get','pmap:kind'],['literal',['camp_site','camp_pitch','picnic_site','shelter']]],
+        filter:['in',['get','kind'],['literal',['camp_site','camp_pitch','picnic_site','shelter']]],
         paint:{'circle-radius':5,'circle-color':'#14b8a6','circle-stroke-width':1.5,'circle-stroke-color':'#fff','circle-opacity':labelOpacity}},
       {id:'pm-pois-trailhead',type:'circle',source:'pm','source-layer':'pois',
-        filter:['==',['get','pmap:kind'],'trailhead'],
+        filter:['==',['get','kind'],'trailhead'],
         paint:{'circle-radius':5,'circle-color':'#22c55e','circle-stroke-width':1.5,'circle-stroke-color':'#fff','circle-opacity':labelOpacity}},
       {id:'pm-pois-viewpoint',type:'circle',source:'pm','source-layer':'pois',
-        filter:['==',['get','pmap:kind'],'viewpoint'],
+        filter:['==',['get','kind'],'viewpoint'],
         paint:{'circle-radius':4,'circle-color':'#a855f7','circle-stroke-width':1.2,'circle-stroke-color':'#fff','circle-opacity':labelOpacity}},
       // Labels
       {id:'water-name',type:'symbol',source:'pm','source-layer':'water',
         filter:['has','name'],minzoom:8,
         layout:{'text-field':['get','name'],'text-size':11,'text-font':['Noto Sans Regular']},
-        paint:{'text-color':'#60a5fa','text-halo-color':mode==='satellite'?'rgba(0,0,0,0.85)':'#0d1117','text-halo-width':1.5,'text-opacity':labelOpacity}},
-      {id:'peak-name',type:'symbol',source:'pm','source-layer':'physical_point',
-        filter:['==',['get','pmap:kind'],'peak'],
+        paint:{'text-color':'#60a5fa','text-halo-color':lwHalo,'text-halo-width':1.5,'text-opacity':labelOpacity}},
+      {id:'peak-name',type:'symbol',source:'pm','source-layer':'pois',
+        filter:['==',['get','kind'],'peak'],
         layout:{'text-field':['get','name'],'text-size':10,'text-font':['Noto Sans Regular'],
           'text-offset':[0,0.7],'text-anchor':'top'},
-        paint:{'text-color':'#f59e0b','text-halo-color':mode==='satellite'?'rgba(0,0,0,0.9)':'#0d1117','text-halo-width':1.5,'text-opacity':labelOpacity}},
+        paint:{'text-color':'#f59e0b','text-halo-color':lwHalo,'text-halo-width':1.5,'text-opacity':labelOpacity}},
       {id:'road-name',type:'symbol',source:'pm','source-layer':'roads',
         minzoom:13,filter:['has','name'],
         layout:{'text-field':['get','name'],'text-size':10,'text-font':['Noto Sans Regular'],
           'symbol-placement':'line','text-max-width':8},
         paint:{'text-color':mode==='satellite'?'#fff':'#94a3b8','text-halo-color':'rgba(0,0,0,0.85)','text-halo-width':1.5,'text-opacity':labelOpacity}},
-      {id:'place-locality',type:'symbol',source:'pm','source-layer':'places',
-        minzoom:9,
-        filter:['in',['get','pmap:kind'],['literal',['locality','neighbourhood','hamlet','village']]],
+      // Places: Protomaps gives us only kind=locality with population_rank. Tier by rank.
+      {id:'place-small',type:'symbol',source:'pm','source-layer':'places',
+        minzoom:9,filter:['all',['==',['get','kind'],'locality'],['<',['coalesce',['get','population_rank'],0],8]],
         layout:{'text-field':['get','name'],'text-size':['interpolate',['linear'],['zoom'],9,9,14,12],
           'text-font':['Noto Sans Regular']},
-        paint:{'text-color':'#94a3b8','text-halo-color':mode==='satellite'?'rgba(0,0,0,0.9)':'#0d1117','text-halo-width':2,'text-opacity':labelOpacity}},
-      {id:'place-town',type:'symbol',source:'pm','source-layer':'places',
-        filter:['==',['get','pmap:kind'],'town'],
-        layout:{'text-field':['get','name'],'text-size':['interpolate',['linear'],['zoom'],7,10,12,14],
+        paint:{'text-color':'#94a3b8','text-halo-color':lwHalo,'text-halo-width':2,'text-opacity':labelOpacity}},
+      {id:'place-medium',type:'symbol',source:'pm','source-layer':'places',
+        minzoom:6,filter:['all',['==',['get','kind'],'locality'],['>=',['coalesce',['get','population_rank'],0],8],['<',['coalesce',['get','population_rank'],0],11]],
+        layout:{'text-field':['get','name'],'text-size':['interpolate',['linear'],['zoom'],6,10,12,15],
           'text-font':['Noto Sans Medium']},
-        paint:{'text-color':'#cbd5e1','text-halo-color':mode==='satellite'?'rgba(0,0,0,0.9)':'#0d1117','text-halo-width':2,'text-opacity':labelOpacity}},
-      {id:'place-city',type:'symbol',source:'pm','source-layer':'places',
-        filter:['==',['get','pmap:kind'],'city'],
-        layout:{'text-field':['get','name'],'text-size':['interpolate',['linear'],['zoom'],5,11,12,17],
+        paint:{'text-color':'#cbd5e1','text-halo-color':lwHalo,'text-halo-width':2,'text-opacity':labelOpacity}},
+      {id:'place-large',type:'symbol',source:'pm','source-layer':'places',
+        minzoom:3,filter:['all',['==',['get','kind'],'locality'],['>=',['coalesce',['get','population_rank'],0],11]],
+        layout:{'text-field':['get','name'],'text-size':['interpolate',['linear'],['zoom'],4,11,12,17],
           'text-font':['Noto Sans Bold']},
-        paint:{'text-color':'#e2e8f0','text-halo-color':mode==='satellite'?'rgba(0,0,0,0.9)':'#0d1117','text-halo-width':2,'text-opacity':labelOpacity}},
+        paint:{'text-color':'#e2e8f0','text-halo-color':lwHalo,'text-halo-width':2,'text-opacity':labelOpacity}},
     ]);
     return {version:8,sources:sources,glyphs:apiBase+'/api/fonts/{fontstack}/{range}.pbf',layers:layers};
   }
@@ -817,7 +829,7 @@ const buildMapHtml = (
     map.on('click',function(e){
       if(e.defaultPrevented)return;
       try{
-        // Detection now uses Protomaps schema (pmap:kind on pois/roads source layers).
+        // Detection uses Protomaps schema - "kind" prop on pois/roads source layers.
         // 1. Camp/shelter/trailhead POI hits — single-pixel test
         var ptFs=map.queryRenderedFeatures(e.point);
         for(var ci=0;ci<ptFs.length;ci++){
@@ -826,7 +838,7 @@ const buildMapHtml = (
           var pName=(cf.properties&&cf.properties.name)||'';
           if(lid==='pm-pois-camp'||lid==='pm-pois-trailhead'){
             var cc=cf.geometry&&cf.geometry.type==='Point'&&cf.geometry.coordinates;
-            var pKind=(cf.properties&&cf.properties['pmap:kind'])||'';
+            var pKind=(cf.properties&&cf.properties.kind)||'';
             postRN({type:'base_camp_tapped',name:pName||(pKind==='trailhead'?'Trailhead':'Campsite'),lat:cc?cc[1]:e.lngLat.lat,lng:cc?cc[0]:e.lngLat.lng,landType:pKind==='trailhead'?'Trailhead':'Campground'});
             return;
           }
@@ -837,7 +849,7 @@ const buildMapHtml = (
         for(var i=0;i<boxFs.length;i++){
           var f=boxFs[i];
           var lid2=(f.layer&&f.layer.id)||'';
-          var pKind2=(f.properties&&f.properties['pmap:kind'])||'';
+          var pKind2=(f.properties&&f.properties.kind)||'';
           if(lid2==='road-path'||pKind2==='path'){
             var nm=(f.properties&&f.properties.name)||'';
             postRN({type:'trail_tapped',name:nm||'Trail',lat:e.lngLat.lat,lng:e.lngLat.lng,cls:'path'});
@@ -1100,6 +1112,8 @@ const buildMapHtml = (
       });
       routeIsProper=true;_routeLoading=false;
       postRN({type:'route_ready',routed:true,steps:steps,legs:legs,total_distance:route.distance,total_duration:route.duration,fromIdx:fromIdx||0});
+      // Persist for offline replay (RN side caches in SecureStore)
+      postRN({type:'route_persist',coords:_routeCoords,steps:steps,legs:legs,total_distance:route.distance,total_duration:route.duration});
     }catch(e){_fallback(pairs,fromIdx);}
   }
 
@@ -1115,6 +1129,7 @@ const buildMapHtml = (
       _routeCoords=all;routePts=all.filter(function(_,i){return i%3===0;});updateRoute();
       routeIsProper=true;_routeLoading=false;
       postRN({type:'route_ready',routed:true,steps:steps,legs:legs,total_distance:Math.round((data.trip.summary.length||0)*1609.34),total_duration:data.trip.summary.time||0,fromIdx:fromIdx||0});
+      postRN({type:'route_persist',coords:all,steps:steps,legs:legs,total_distance:Math.round((data.trip.summary.length||0)*1609.34),total_duration:data.trip.summary.time||0});
     }catch(e){_fallback(pairs,fromIdx);}
   }
 
@@ -1144,6 +1159,12 @@ const buildMapHtml = (
     if(msg.type==='locate'&&msg.lat)setUserPos(msg.lat,msg.lng,true,13);
     if(msg.type==='nav_target')setNavTarget(msg.idx);
     if(msg.type==='nav_reset'){setNavTarget(-1);_routeCoords=[];routePts=[];_searchDest=null;updateRoute();resetPassedRoute();}
+    if(msg.type==='restore_route'&&Array.isArray(msg.coords)){
+      // Hydrate a previously-fetched route so nav works offline without re-fetching
+      _routeCoords=msg.coords;routePts=_routeCoords.filter(function(_,i){return i%3===0;});updateRoute();
+      routeIsProper=true;
+      postRN({type:'route_ready',routed:true,steps:msg.steps||[],legs:msg.legs||[],total_distance:msg.total_distance,total_duration:msg.total_duration,fromIdx:0});
+    }
     if(msg.type==='fly_to'&&msg.lat){
       map.flyTo({center:[msg.lng,msg.lat],zoom:msg.zoom||14,duration:600});
       // Country-level fly-to skips the pin (no point pinpointing the geographic center of CONUS)
@@ -2136,6 +2157,25 @@ function MapScreen() {
       const msg = JSON.parse(e.nativeEvent.data);
       if (msg.type === 'map_ready') {
         if (viewportRef.current) loadCampsInArea(viewportRef.current, activeFilters);
+        // If we restored a trip from cache (offline relaunch), replay its route geometry
+        // into the WebView so navigation works without re-fetching from Mapbox Directions.
+        if (activeTripFromCache && activeTrip?.trip_id) {
+          SecureStore.getItemAsync('trailhead_active_route').then(raw => {
+            if (!raw) return;
+            try {
+              const cached = JSON.parse(raw);
+              if (cached.tripId !== activeTrip.trip_id) return; // stale, different trip
+              webRef.current?.postMessage(JSON.stringify({
+                type: 'restore_route',
+                coords: cached.coords,
+                steps: cached.steps,
+                legs: cached.legs,
+                total_distance: cached.total_distance,
+                total_duration: cached.total_duration,
+              }));
+            } catch {}
+          }).catch(() => {});
+        }
       }
       if (msg.type === 'map_bounds') {
         viewportRef.current = { n: msg.n, s: msg.s, e: msg.e, w: msg.w, zoom: msg.zoom };
@@ -2160,6 +2200,15 @@ function MapScreen() {
       if (msg.type === 'map_tapped') {
         setSelectedCamp(null);
         setTappedTrail(null);
+      }
+      if (msg.type === 'route_persist' && Array.isArray(msg.coords)) {
+        // Cache the freshly-routed geometry + steps so we can replay offline
+        SecureStore.setItemAsync('trailhead_active_route', JSON.stringify({
+          coords: msg.coords, steps: msg.steps ?? [], legs: msg.legs ?? [],
+          total_distance: msg.total_distance, total_duration: msg.total_duration,
+          tripId: activeTrip?.trip_id ?? null,
+          ts: Date.now(),
+        })).catch(() => {});
       }
       if (msg.type === 'route_ready') {
         setIsRouted(msg.routed);
@@ -2686,8 +2735,14 @@ function MapScreen() {
         </View>
       )}
 
-      {/* Controls */}
-      <View style={s.controls}>
+      {/* Controls — wrapped in ScrollView so the stack scrolls on smaller screens
+          instead of clipping the bottom buttons (audio guide, panel toggle). */}
+      <ScrollView
+        style={s.controls}
+        contentContainerStyle={s.controlsInner}
+        showsVerticalScrollIndicator={false}
+        bounces={false}
+      >
         <TouchableOpacity style={s.ctrlBtn} onPress={() => {
           if (!userLoc) return;
           webRef.current?.postMessage(JSON.stringify({ type: 'locate', lat: userLoc.lat, lng: userLoc.lng }));
@@ -2830,7 +2885,7 @@ function MapScreen() {
             <Ionicons name={showPanel ? 'chevron-down' : 'chevron-up'} size={20} color={C.text} />
           </TouchableOpacity>
         )}
-      </View>
+      </ScrollView>
 
       {/* Route alerts */}
       {showAlerts && routeAlerts.length > 0 && (
@@ -3588,7 +3643,7 @@ function MapScreen() {
                     webRef.current?.postMessage(JSON.stringify({
                       type: 'download_tiles_bbox', label: 'Continental US',
                       n: 49.5, s: 24.5, e: -66.5, w: -125.0,
-                      minZ: 3, maxZ: 10, vectorOnly: true,
+                      minZ: 3, maxZ: 12, vectorOnly: true,
                     }));
                   }}>
                   <View style={s.offlineConusIcon}>
@@ -3597,7 +3652,7 @@ function MapScreen() {
                   <View style={{ flex: 1 }}>
                     <Text style={s.offlineConusTitle}>{conusCached ? '✓ ' : ''}DOWNLOAD CONTINENTAL US</Text>
                     <Text style={s.offlineConusMeta}>
-                      Whole country at planning + driving zoom · trails + roads · ~80 MB
+                      Whole country · all roads, towns, trail markers · ~1 GB
                     </Text>
                   </View>
                   <Ionicons name={conusCached ? 'refresh-outline' : 'cloud-download-outline'} size={20} color={conusCached ? C.green : C.orange} />
@@ -4755,7 +4810,8 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', marginLeft: 4,
   },
 
-  controls: { position: 'absolute', top: 106, right: 16, gap: 8 },
+  controls: { position: 'absolute', top: 106, right: 16, bottom: 100, maxHeight: '80%' as any },
+  controlsInner: { gap: 8, paddingBottom: 8, alignItems: 'flex-end' },
   ctrlBtn: {
     width: 44, height: 44, borderRadius: 14,
     backgroundColor: OVR.bg, borderWidth: 1, borderColor: OVR.border,

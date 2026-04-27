@@ -109,6 +109,8 @@ export const useStore = create<AppState>((set) => ({
     SecureStore.deleteItemAsync('trailhead_rig');
     SecureStore.deleteItemAsync('trailhead_history');
     SecureStore.deleteItemAsync('trailhead_favorites');
+    SecureStore.deleteItemAsync('trailhead_active_trip');
+    SecureStore.deleteItemAsync('trailhead_active_route');
     set({
       token: null,
       user: null,
@@ -121,7 +123,17 @@ export const useStore = create<AppState>((set) => ({
     });
   },
 
-  setActiveTrip: (trip, fromCache = false) => set({ activeTrip: trip, activeTripFromCache: fromCache }),
+  // Persist activeTrip so the user's trip (campsites, gas, daily itinerary, audio
+  // guides — everything to navigate) survives offline relaunch.
+  setActiveTrip: (trip, fromCache = false) => {
+    if (trip) {
+      try { SecureStore.setItemAsync('trailhead_active_trip', JSON.stringify(trip)).catch(() => {}); } catch {}
+    } else {
+      SecureStore.deleteItemAsync('trailhead_active_trip').catch(() => {});
+      SecureStore.deleteItemAsync('trailhead_active_route').catch(() => {});
+    }
+    set({ activeTrip: trip, activeTripFromCache: fromCache });
+  },
 
   setRigProfile: (rig) => {
     SecureStore.setItemAsync('trailhead_rig', JSON.stringify(rig));
@@ -176,13 +188,14 @@ export const useStore = create<AppState>((set) => ({
 // Load persisted data on startup
 (async () => {
   try {
-    const [rigRaw, historyRaw, themeRaw, sessionRaw, favRaw, cachedRegionsRaw] = await Promise.all([
+    const [rigRaw, historyRaw, themeRaw, sessionRaw, favRaw, cachedRegionsRaw, activeTripRaw] = await Promise.all([
       SecureStore.getItemAsync('trailhead_rig'),
       SecureStore.getItemAsync('trailhead_history'),
       SecureStore.getItemAsync('trailhead_theme'),
       SecureStore.getItemAsync('trailhead_session'),
       SecureStore.getItemAsync('trailhead_favorites'),
       SecureStore.getItemAsync('trailhead_cached_regions'),
+      SecureStore.getItemAsync('trailhead_active_trip'),
     ]);
     const patch: Partial<AppState> = {};
     if (rigRaw) patch.rigProfile = JSON.parse(rigRaw);
@@ -191,6 +204,9 @@ export const useStore = create<AppState>((set) => ({
     if (favRaw) patch.favoriteCamps = JSON.parse(favRaw);
     if (cachedRegionsRaw) patch.cachedRegions = JSON.parse(cachedRegionsRaw);
     if (sessionRaw) patch.sessionId = sessionRaw;
+    if (activeTripRaw) {
+      try { patch.activeTrip = JSON.parse(activeTripRaw); patch.activeTripFromCache = true; } catch {}
+    }
     else {
       // First run — persist the generated ID
       const id = useStore.getState().sessionId;

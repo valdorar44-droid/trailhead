@@ -3,10 +3,8 @@ import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Linking, Animated
 import { WebView } from 'react-native-webview';
 import NativeMap, { type NativeMapHandle } from '@/components/NativeMap';
 
-// ── Feature flag — flip to true once the MLRN binary build is installed ───────
-// The native SDK requires a new binary (EAS build). Flipping this to true via
-// OTA is safe only after users have installed the new build.
-const USE_NATIVE_MAP = false;
+// ── Native MapLibre SDK active ────────────────────────────────────────────────
+const USE_NATIVE_MAP = true;
 import * as Location from 'expo-location';
 import * as SecureStore from 'expo-secure-store';
 import * as Speech from 'expo-speech';

@@ -763,6 +763,39 @@ def pmtiles_status():
     return pmtiles_bootstrap.status()
 
 
+@app.get("/api/admin/pmtiles-entries")
+async def pmtiles_entries():
+    """Use official pmtiles library to dump the first entries for multiple tiles."""
+    from dashboard.pmtiles_bootstrap import PMTILES_PATH
+    if not PMTILES_PATH.exists():
+        return {"error": "file missing"}
+    try:
+        from pmtiles.reader import Reader, MmapSource
+        # Access the internal directory reader
+        import pmtiles.reader as pmr
+        with open(PMTILES_PATH, "rb") as f:
+            data = f.read(127 + 200000)  # header + enough for root dir
+        header_bytes = data[:127]
+        def u64(b, o): return int.from_bytes(b[o:o+8], "little")
+        rdo = u64(header_bytes, 8); rdl = u64(header_bytes, 16)
+        import gzip
+        root_raw = gzip.decompress(data[rdo:rdo+rdl])
+        # Use pmtiles library's own deserializer
+        import importlib, inspect
+        # Find the deserialize function
+        members = inspect.getmembers(pmr, inspect.isfunction)
+        deser = dict(members).get('deserialize_directory') or dict(members).get('deserialize_dir')
+        if deser:
+            entries = deser(root_raw)
+            first10 = [{"tid": e.tile_id, "rl": e.run_length, "len": e.length, "off": e.offset}
+                       for e in (entries[:10] if hasattr(entries[0],'tile_id') else entries[:10])]
+            return {"num": len(entries), "first10": first10}
+        return {"error": "deserializer not found", "members": [m[0] for m in members]}
+    except Exception as e:
+        import traceback
+        return {"error": str(e), "trace": traceback.format_exc()[-500:]}
+
+
 @app.get("/api/admin/pmtiles-raw-root")
 async def pmtiles_raw_root():
     """Return the root directory bytes (gzip compressed, base64) for JS decoder testing."""

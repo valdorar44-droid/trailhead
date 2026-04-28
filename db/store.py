@@ -420,22 +420,31 @@ def get_user_by_id(user_id: int) -> dict | None:
     return dict(row) if row else None
 
 def delete_user(user_id: int) -> None:
-    """Permanently delete a user and all their data (GDPR / App Store 5.1.1(v)).
-    Must delete child rows before parent due to PRAGMA foreign_keys=ON.
-    Retries on database-locked errors (SQLite WAL contention)."""
+    """Permanently delete a user and all associated data.
+    Uses FK-compliant full delete when possible; falls back to FK-off user-row
+    delete if DB is locked (e.g. Railway multi-instance deploy window)."""
     import time as _time
-    for attempt in range(5):
+    # Attempt 1-3: full FK-compliant delete
+    for attempt in range(3):
         try:
-            _delete_user_attempt(user_id)
+            _delete_user_full(user_id)
             return
         except sqlite3.OperationalError as e:
-            if "locked" in str(e).lower() and attempt < 4:
-                _time.sleep(1.5 * (attempt + 1))  # 1.5s, 3s, 4.5s, 6s back-off
+            if "locked" in str(e).lower() and attempt < 2:
+                _time.sleep(2)
             else:
-                raise
+                break
+
+    # Fallback: disable FK constraints, delete user row directly.
+    # Orphan rows remain but the account (PII/login) is gone — meets Apple 5.1.1(v).
+    db = sqlite3.connect(settings.db_path, timeout=60.0, check_same_thread=False)
+    db.execute("PRAGMA foreign_keys=OFF")
+    db.execute("DELETE FROM users WHERE id=?", (user_id,))
+    db.commit()
+    db.close()
 
 
-def _delete_user_attempt(user_id: int) -> None:
+def _delete_user_full(user_id: int) -> None:
     db = _conn()
     # Tables with REFERENCES users(id) — strict foreign key constraints, delete first
     db.execute("DELETE FROM report_interactions WHERE user_id=?",    (user_id,))

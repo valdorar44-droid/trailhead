@@ -422,7 +422,20 @@ def get_user_by_id(user_id: int) -> dict | None:
 def delete_user(user_id: int) -> None:
     """Permanently delete a user and all their data (GDPR / App Store 5.1.1(v)).
     Must delete child rows before parent due to PRAGMA foreign_keys=ON.
-    Only tables that actually have a user_id / reporter_id column are listed."""
+    Retries on database-locked errors (SQLite WAL contention)."""
+    import time as _time
+    for attempt in range(5):
+        try:
+            _delete_user_attempt(user_id)
+            return
+        except sqlite3.OperationalError as e:
+            if "locked" in str(e).lower() and attempt < 4:
+                _time.sleep(1.5 * (attempt + 1))  # 1.5s, 3s, 4.5s, 6s back-off
+            else:
+                raise
+
+
+def _delete_user_attempt(user_id: int) -> None:
     db = _conn()
     # Tables with REFERENCES users(id) — strict foreign key constraints, delete first
     db.execute("DELETE FROM report_interactions WHERE user_id=?",    (user_id,))

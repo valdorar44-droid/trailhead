@@ -419,13 +419,28 @@ def get_user_by_id(user_id: int) -> dict | None:
     return dict(row) if row else None
 
 def delete_user(user_id: int) -> None:
-    """Permanently delete a user and all their data (GDPR / App Store 5.1.1(v))."""
+    """Permanently delete a user and all their data (GDPR / App Store 5.1.1(v)).
+    Must delete child rows before parent due to PRAGMA foreign_keys=ON."""
     db = _conn()
-    db.execute("DELETE FROM reports       WHERE user_id=?",  (user_id,))
-    db.execute("DELETE FROM community_pins WHERE user_id=?", (user_id,))
-    db.execute("DELETE FROM push_tokens   WHERE user_id=?",  (user_id,))
-    db.execute("DELETE FROM trips         WHERE user_id=?",  (user_id,))
-    db.execute("DELETE FROM users         WHERE id=?",       (user_id,))
+    # Child tables that REFERENCE users(id) — must go before users row
+    db.execute("DELETE FROM report_interactions  WHERE user_id=?",   (user_id,))
+    db.execute("DELETE FROM camp_field_reports   WHERE user_id=?",   (user_id,))
+    db.execute("DELETE FROM camp_fullness_votes  WHERE user_id=?",   (user_id,))
+    db.execute("DELETE FROM camp_fullness        WHERE reporter_id=?", (user_id,))
+    db.execute("DELETE FROM credit_transactions  WHERE user_id=?",   (user_id,))
+    db.execute("DELETE FROM stripe_purchases     WHERE user_id=?",   (user_id,))
+    db.execute("DELETE FROM referrals            WHERE referrer_id=?", (user_id,))
+    db.execute("DELETE FROM trail_dna            WHERE user_id=?",   (user_id,))
+    db.execute("DELETE FROM conversations        WHERE user_id=?",   (user_id,))
+    db.execute("DELETE FROM analytics_events     WHERE user_id=?",   (user_id,))
+    db.execute("DELETE FROM bug_reports          WHERE user_id=?",   (user_id,))
+    db.execute("DELETE FROM camp_briefs          WHERE user_id=?",   (user_id,))
+    db.execute("DELETE FROM plan_jobs            WHERE user_id=?",   (user_id,))
+    db.execute("DELETE FROM reports              WHERE user_id=?",   (user_id,))
+    db.execute("DELETE FROM community_pins       WHERE user_id=?",   (user_id,))
+    db.execute("DELETE FROM push_tokens          WHERE user_id=?",   (user_id,))
+    db.execute("DELETE FROM trips                WHERE user_id=?",   (user_id,))
+    db.execute("DELETE FROM users                WHERE id=?",        (user_id,))
     db.commit(); db.close()
 
 def get_user_by_referral_code(code: str) -> dict | None:

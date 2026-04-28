@@ -165,6 +165,7 @@ export const useStore = create<AppState>((set) => ({
     sd('trailhead_favorites');
     sd('trailhead_active_trip');
     sd('trailhead_active_route');
+    deleteTripFile(); // clear file-based trip storage too
     set({
       token: null,
       user: null,

@@ -1155,9 +1155,18 @@ export default function ProfileScreen() {
                   text: 'Delete My Account',
                   style: 'destructive',
                   onPress: async () => {
-                    try { await api.deleteAccount(); } catch {}
-                    clearAuth();
-                    setView('login');
+                    try {
+                      await api.deleteAccount();
+                      // Only clear local auth AFTER server confirms deletion
+                      clearAuth();
+                      setView('login');
+                    } catch (e: any) {
+                      Alert.alert(
+                        'Deletion Failed',
+                        'Could not delete your account. Please check your connection and try again.',
+                        [{ text: 'OK' }]
+                      );
+                    }
                   },
                 },
               ],

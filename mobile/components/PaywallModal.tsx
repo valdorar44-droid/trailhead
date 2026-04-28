@@ -6,8 +6,8 @@ import {
 import { useSubscription, PRODUCT_IDS } from '@/lib/useSubscription';
 import { useTheme, mono } from '@/lib/design';
 
-const TERMS_URL   = 'https://gettrailhead.app/terms';
-const PRIVACY_URL = 'https://gettrailhead.app/privacy';
+const TERMS_URL   = 'https://trailhead-production-2049.up.railway.app/terms';
+const PRIVACY_URL = 'https://trailhead-production-2049.up.railway.app/privacy';
 
 interface Props {
   visible: boolean;

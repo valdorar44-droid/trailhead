@@ -251,12 +251,8 @@ async def delete_account(user: dict = Depends(_current_user)):
     """Permanently delete the authenticated user's account and all associated data.
     Required by App Store guideline 5.1.1(v)."""
     from db.store import delete_user
-    try:
-        delete_user(user["id"])
-        return {"deleted": True}
-    except Exception as e:
-        import traceback
-        raise HTTPException(500, f"Delete failed: {type(e).__name__}: {e}\n{traceback.format_exc()[:500]}")
+    delete_user(user["id"])
+    return {"deleted": True}
 
 
 # ── Trip planning ─────────────────────────────────────────────────────────────

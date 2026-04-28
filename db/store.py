@@ -434,12 +434,15 @@ def delete_user(user_id: int) -> None:
     db.execute("DELETE FROM analytics_events    WHERE user_id=?",    (user_id,))
     db.execute("DELETE FROM bug_reports         WHERE user_id=?",    (user_id,))
     db.execute("DELETE FROM plan_jobs           WHERE user_id=?",    (user_id,))
-    db.execute("DELETE FROM stripe_purchases    WHERE user_id=?",    (user_id,))
     db.execute("DELETE FROM reports             WHERE user_id=?",    (user_id,))
     db.execute("DELETE FROM community_pins      WHERE user_id=?",    (user_id,))
-    db.execute("DELETE FROM push_tokens         WHERE user_id=?",    (user_id,))
     db.execute("DELETE FROM trips               WHERE user_id=?",    (user_id,))
-    # Finally delete the user row itself
+    # stripe_purchases uses session_id PK — delete by user_id if col exists (added via migration)
+    try:
+        db.execute("DELETE FROM stripe_purchases WHERE user_id=?",   (user_id,))
+    except Exception:
+        pass  # table or column may not exist on older deployments
+    # Finally delete the user row itself (push_token is a column on users, not a table)
     db.execute("DELETE FROM users               WHERE id=?",         (user_id,))
     db.commit(); db.close()
 

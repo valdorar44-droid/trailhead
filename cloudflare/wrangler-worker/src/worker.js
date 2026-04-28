@@ -139,8 +139,17 @@ export default {
       //    the outer request URL (which would bypass Worker JS on future hits)
       try {
         const railResp = await fetch(`${origin}${path}`, { cf: { cacheEverything: false } });
+        if (!railResp.ok) {
+          // Tile not in our dataset — return 204 No Content (empty tile).
+          // NEVER return 404 here: MLN offlineManager.createPack() aborts the
+          // entire pack on any 404, even for legitimately-absent tiles.
+          return new Response(null, {
+            status: 204,
+            headers: { "Access-Control-Allow-Origin": "*" },
+          });
+        }
         const resp = new Response(railResp.body, {
-          status: railResp.status,
+          status: 200,
           headers: {
             "Content-Type":                railResp.headers.get("Content-Type") || "application/vnd.mapbox-vector-tile",
             "Cache-Control":               "public, max-age=86400, s-maxage=2592000",
@@ -148,10 +157,10 @@ export default {
             "X-Tile-Source":               "RAILWAY",
           },
         });
-        if (railResp.ok) ctx.waitUntil(cfCache.put(cacheKey, resp.clone()));
+        ctx.waitUntil(cfCache.put(cacheKey, resp.clone()));
         return resp;
       } catch (e) {
-        return new Response("tile unavailable", { status: 503 });
+        return new Response(null, { status: 204, headers: { "Access-Control-Allow-Origin": "*" } });
       }
     }
 
@@ -199,6 +208,220 @@ export default {
         ctx.waitUntil(cfCache.put(cacheKey, out.clone()));
         return out;
       }
+      // Font not found at protomaps — return 204 so MLN offline pack doesn't abort.
+      // Do NOT fall through to Railway, which also 404s on font paths.
+      return new Response(null, { status: 204, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+
+    // ── Direct PMTiles file download (single-stream, resumable) ──────────────
+    // Streams the full .pmtiles file from R2 with Range support so
+    // expo-file-system createDownloadResumable can pause/resume a 1GB download.
+    // 100x faster than MLN's per-tile offline pack approach.
+    if (path === '/api/download/manifest.json') {
+      const files = ['us.pmtiles'];
+      const manifest = {};
+      for (const f of files) {
+        const meta = await env.TILES_BUCKET.head(f).catch(() => null);
+        if (meta) manifest[f] = { size: meta.size, etag: meta.httpEtag };
+      }
+      return Response.json(manifest, {
+        headers: { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=300' },
+      });
+    }
+
+    const dlMatch = path.match(/^\/api\/download\/([a-z_]+\.pmtiles)$/);
+    if (dlMatch) {
+      const fileName = dlMatch[1]; // e.g. 'us.pmtiles'
+
+      // HEAD first — need total size for Content-Length + Content-Range
+      const meta = await env.TILES_BUCKET.head(fileName).catch(() => null);
+      if (!meta) return new Response('Not found', { status: 404, headers: { 'Access-Control-Allow-Origin': '*' } });
+
+      const totalSize = meta.size;
+      const rangeHeader = request.headers.get('Range');
+
+      let r2opts = {};
+      let status = 200;
+      let contentRange = null;
+      let contentLength = totalSize;
+
+      if (rangeHeader) {
+        const m = rangeHeader.match(/bytes=(\d+)-(\d*)/);
+        if (m) {
+          const offset = parseInt(m[1]);
+          // If end byte is omitted, download to end of file
+          const endByte = m[2] ? parseInt(m[2]) : totalSize - 1;
+          const length  = endByte - offset + 1;
+          r2opts       = { range: { offset, length } };
+          contentRange = `bytes ${offset}-${endByte}/${totalSize}`;
+          contentLength = length;
+          status = 206;
+        }
+      }
+
+      const obj = await env.TILES_BUCKET.get(fileName, r2opts).catch(() => null);
+      if (!obj) return new Response('Not found', { status: 404, headers: { 'Access-Control-Allow-Origin': '*' } });
+
+      const headers = {
+        'Content-Type':                'application/octet-stream',
+        'Accept-Ranges':               'bytes',
+        'Content-Length':              String(contentLength),
+        'Access-Control-Allow-Origin': '*',
+        'Cache-Control':               'no-cache',
+      };
+      if (contentRange) headers['Content-Range'] = contentRange;
+
+      return new Response(obj.body, { status, headers });
+    }
+
+    // ── Map style for offline packs ───────────────────────────────────────────
+    // MLN offlineManager.createPack() requires a real https:// styleURL —
+    // data: URIs are rejected on iOS (MLNErrorDomain Code=-1).
+    if (path === "/api/style.json") {
+      const TILE_BASE = "https://tiles.gettrailhead.app";
+      const GLYPH_URL = `${TILE_BASE}/api/fonts/{fontstack}/{range}.pbf`;
+      const lwHalo = "#13161c";
+      const style = {
+        version: 8,
+        glyphs: GLYPH_URL,
+        sources: {
+          pm: {
+            type: "vector",
+            tiles: [`${TILE_BASE}/api/tiles/{z}/{x}/{y}.pbf`],
+            minzoom: 0,
+            maxzoom: 15,
+            bounds: [-125.0, 24.5, -66.5, 49.5],
+            attribution: "© OpenStreetMap",
+          },
+        },
+        layers: [
+          { id: "bg", type: "background", paint: { "background-color": "#0e1118" } },
+          { id: "earth", type: "fill", source: "pm", "source-layer": "earth",
+            filter: ["==", ["get", "kind"], "earth"],
+            paint: { "fill-color": "#1e2330", "fill-opacity": 1 } },
+          { id: "lu-park", type: "fill", source: "pm", "source-layer": "landuse",
+            filter: ["in", ["get", "kind"], ["literal", ["national_park", "park", "nature_reserve", "protected_area"]]],
+            paint: { "fill-color": "#1a3322", "fill-opacity": 0.9 } },
+          { id: "lu-forest", type: "fill", source: "pm", "source-layer": "landuse",
+            filter: ["in", ["get", "kind"], ["literal", ["forest", "wood"]]],
+            paint: { "fill-color": "#162818", "fill-opacity": 0.85 } },
+          { id: "lu-grass", type: "fill", source: "pm", "source-layer": "landuse",
+            filter: ["in", ["get", "kind"], ["literal", ["grassland", "meadow"]]],
+            paint: { "fill-color": "#1e2818", "fill-opacity": 0.6 } },
+          { id: "lu-residential", type: "fill", source: "pm", "source-layer": "landuse",
+            filter: ["in", ["get", "kind"], ["literal", ["residential", "urban_area"]]],
+            minzoom: 9,
+            paint: { "fill-color": "#252830", "fill-opacity": 0.5 } },
+          { id: "water-poly", type: "fill", source: "pm", "source-layer": "water",
+            paint: { "fill-color": "#0a1a2e", "fill-opacity": 1 } },
+          { id: "water-river", type: "line", source: "pm", "source-layer": "water",
+            filter: ["in", ["get", "kind"], ["literal", ["river", "stream", "canal"]]],
+            layout: { "line-cap": "round", "line-join": "round" },
+            paint: { "line-color": "#0a1a2e", "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.5, 10, 1.5, 15, 3], "line-opacity": 1 } },
+          { id: "lu-park-line", type: "line", source: "pm", "source-layer": "landuse",
+            filter: ["in", ["get", "kind"], ["literal", ["national_park", "nature_reserve", "protected_area"]]],
+            minzoom: 6,
+            paint: { "line-color": "#3a6040", "line-width": 1, "line-opacity": 0.8 } },
+          { id: "road-other", type: "line", source: "pm", "source-layer": "roads",
+            filter: ["==", ["get", "kind"], "other"], minzoom: 12,
+            layout: { "line-cap": "round", "line-join": "round" },
+            paint: { "line-color": "#5a4a2c", "line-width": ["interpolate", ["linear"], ["zoom"], 12, 0.5, 16, 2], "line-dasharray": [2, 2], "line-opacity": 1 } },
+          { id: "road-path", type: "line", source: "pm", "source-layer": "roads",
+            filter: ["==", ["get", "kind"], "path"], minzoom: 11,
+            layout: { "line-cap": "round", "line-join": "round" },
+            paint: { "line-color": "#9a7840", "line-width": ["interpolate", ["linear"], ["zoom"], 11, 0.8, 16, 2.5], "line-dasharray": [3, 2], "line-opacity": 1 } },
+          { id: "road-minor-case", type: "line", source: "pm", "source-layer": "roads",
+            filter: ["==", ["get", "kind"], "minor_road"], minzoom: 9,
+            layout: { "line-cap": "round", "line-join": "round" },
+            paint: { "line-color": "#0e1118", "line-width": ["interpolate", ["linear"], ["zoom"], 9, 1, 14, 4, 17, 11], "line-opacity": 1 } },
+          { id: "road-minor", type: "line", source: "pm", "source-layer": "roads",
+            filter: ["==", ["get", "kind"], "minor_road"], minzoom: 9,
+            layout: { "line-cap": "round", "line-join": "round" },
+            paint: { "line-color": "#7a7d88", "line-width": ["interpolate", ["linear"], ["zoom"], 9, 0.7, 14, 2.8, 17, 8], "line-opacity": 1 } },
+          { id: "road-major-case", type: "line", source: "pm", "source-layer": "roads",
+            filter: ["in", ["get", "kind"], ["literal", ["major_road", "medium_road"]]],
+            layout: { "line-cap": "round", "line-join": "round" },
+            paint: { "line-color": "#0e1118", "line-width": ["interpolate", ["linear"], ["zoom"], 4, 1.5, 8, 4, 12, 7, 16, 14], "line-opacity": 1 } },
+          { id: "road-major", type: "line", source: "pm", "source-layer": "roads",
+            filter: ["in", ["get", "kind"], ["literal", ["major_road", "medium_road"]]],
+            layout: { "line-cap": "round", "line-join": "round" },
+            paint: { "line-color": "#b88838", "line-width": ["interpolate", ["linear"], ["zoom"], 4, 1, 8, 3, 12, 5.5, 16, 11], "line-opacity": 1 } },
+          { id: "road-trunk-case", type: "line", source: "pm", "source-layer": "roads",
+            filter: ["==", ["get", "kind"], "highway"],
+            layout: { "line-cap": "round", "line-join": "round" },
+            paint: { "line-color": "#0e1118", "line-width": ["interpolate", ["linear"], ["zoom"], 3, 3, 6, 5, 10, 8, 15, 16], "line-opacity": 1 } },
+          { id: "road-trunk", type: "line", source: "pm", "source-layer": "roads",
+            filter: ["==", ["get", "kind"], "highway"],
+            layout: { "line-cap": "round", "line-join": "round" },
+            paint: { "line-color": "#e89428", "line-width": ["interpolate", ["linear"], ["zoom"], 3, 2, 6, 3.5, 10, 6, 15, 12], "line-opacity": 1 } },
+          { id: "boundary-region", type: "line", source: "pm", "source-layer": "boundaries",
+            filter: ["==", ["get", "kind"], "region"],
+            paint: { "line-color": "#6a7a96", "line-width": ["interpolate", ["linear"], ["zoom"], 3, 0.8, 8, 1.5], "line-dasharray": [4, 3], "line-opacity": 0.85 } },
+          { id: "boundary-country", type: "line", source: "pm", "source-layer": "boundaries",
+            filter: ["==", ["get", "kind"], "country"],
+            paint: { "line-color": "#8c9ab3", "line-width": ["interpolate", ["linear"], ["zoom"], 3, 1, 8, 2.5], "line-opacity": 1 } },
+          { id: "pm-pois-camp", type: "circle", source: "pm", "source-layer": "pois",
+            filter: ["in", ["get", "kind"], ["literal", ["camp_site", "camp_pitch", "picnic_site", "shelter"]]],
+            paint: { "circle-radius": 5, "circle-color": "#14b8a6", "circle-stroke-width": 1.5, "circle-stroke-color": "#fff", "circle-opacity": 1 } },
+          { id: "pm-pois-trailhead", type: "circle", source: "pm", "source-layer": "pois",
+            filter: ["==", ["get", "kind"], "trailhead"],
+            paint: { "circle-radius": 5, "circle-color": "#22c55e", "circle-stroke-width": 1.5, "circle-stroke-color": "#fff", "circle-opacity": 1 } },
+          { id: "water-name", type: "symbol", source: "pm", "source-layer": "water",
+            filter: ["has", "name"], minzoom: 7,
+            layout: { "text-field": ["get", "name"], "text-size": 11, "text-font": ["Noto Sans Italic"], "text-max-width": 8 },
+            paint: { "text-color": "#4a9ece", "text-halo-color": lwHalo, "text-halo-width": 1.5, "text-opacity": 1 } },
+          { id: "peak-name", type: "symbol", source: "pm", "source-layer": "pois",
+            filter: ["==", ["get", "kind"], "peak"], minzoom: 10,
+            layout: { "text-field": ["get", "name"], "text-size": 10, "text-font": ["Noto Sans Regular"], "text-offset": [0, 0.7], "text-anchor": "top" },
+            paint: { "text-color": "#f59e0b", "text-halo-color": lwHalo, "text-halo-width": 1.5, "text-opacity": 1 } },
+          { id: "road-name-hwy", type: "symbol", source: "pm", "source-layer": "roads",
+            minzoom: 8,
+            filter: ["all", ["has", "name"], ["==", ["get", "kind"], "highway"]],
+            layout: { "text-field": ["get", "name"], "text-size": 9, "text-font": ["Noto Sans Medium"], "symbol-placement": "line", "text-max-width": 10, "text-repeat": 400 },
+            paint: { "text-color": "#c4a050", "text-halo-color": lwHalo, "text-halo-width": 1.8, "text-opacity": 1 } },
+          { id: "road-name", type: "symbol", source: "pm", "source-layer": "roads",
+            minzoom: 12,
+            filter: ["all", ["has", "name"], ["in", ["get", "kind"], ["literal", ["major_road", "medium_road", "minor_road"]]]],
+            layout: { "text-field": ["get", "name"], "text-size": 10, "text-font": ["Noto Sans Medium"], "symbol-placement": "line", "text-max-width": 10 },
+            paint: { "text-color": "#b9bcc4", "text-halo-color": lwHalo, "text-halo-width": 1.8, "text-opacity": 1 } },
+          { id: "park-name", type: "symbol", source: "pm", "source-layer": "pois",
+            filter: ["in", ["get", "kind"], ["literal", ["park", "national_park", "nature_reserve"]]],
+            minzoom: 7,
+            layout: { "text-field": ["get", "name"], "text-size": 10, "text-font": ["Noto Sans Italic"], "text-max-width": 9 },
+            paint: { "text-color": "#5faa6a", "text-halo-color": lwHalo, "text-halo-width": 1.6, "text-opacity": 1 } },
+          { id: "place-country", type: "symbol", source: "pm", "source-layer": "places",
+            minzoom: 2, maxzoom: 5,
+            filter: ["==", ["get", "kind"], "country"],
+            layout: { "text-field": ["get", "name"], "text-size": ["interpolate", ["linear"], ["zoom"], 2, 9, 5, 13], "text-font": ["Noto Sans Medium"], "text-transform": "uppercase" },
+            paint: { "text-color": "#9aa5b8", "text-halo-color": lwHalo, "text-halo-width": 1.5, "text-opacity": 1 } },
+          { id: "place-region", type: "symbol", source: "pm", "source-layer": "places",
+            minzoom: 4, maxzoom: 8,
+            filter: ["==", ["get", "kind"], "region"],
+            layout: { "text-field": ["get", "name"], "text-size": ["interpolate", ["linear"], ["zoom"], 4, 8, 7, 12], "text-font": ["Noto Sans Regular"], "text-transform": "uppercase", "text-letter-spacing": 0.08 },
+            paint: { "text-color": "#4a5a70", "text-halo-color": lwHalo, "text-halo-width": 1.2, "text-opacity": 1 } },
+          { id: "place-large", type: "symbol", source: "pm", "source-layer": "places",
+            minzoom: 3,
+            filter: ["all", ["==", ["get", "kind"], "locality"], ["<=", ["coalesce", ["get", "rank"], 99], 4]],
+            layout: { "text-field": ["get", "name"], "text-size": ["interpolate", ["linear"], ["zoom"], 3, 11, 8, 18, 12, 22], "text-font": ["Noto Sans Medium"] },
+            paint: { "text-color": "#e6e9f1", "text-halo-color": lwHalo, "text-halo-width": 2.5, "text-opacity": 1 } },
+          { id: "place-medium", type: "symbol", source: "pm", "source-layer": "places",
+            minzoom: 5,
+            filter: ["all", ["==", ["get", "kind"], "locality"], [">", ["coalesce", ["get", "rank"], 99], 4], ["<=", ["coalesce", ["get", "rank"], 99], 7]],
+            layout: { "text-field": ["get", "name"], "text-size": ["interpolate", ["linear"], ["zoom"], 5, 10, 10, 15, 14, 18], "text-font": ["Noto Sans Medium"] },
+            paint: { "text-color": "#cdd2dd", "text-halo-color": lwHalo, "text-halo-width": 2, "text-opacity": 1 } },
+          { id: "place-small", type: "symbol", source: "pm", "source-layer": "places",
+            minzoom: 8,
+            filter: ["all", ["==", ["get", "kind"], "locality"], [">", ["coalesce", ["get", "rank"], 99], 7]],
+            layout: { "text-field": ["get", "name"], "text-size": 11, "text-font": ["Noto Sans Regular"] },
+            paint: { "text-color": "#a3aab9", "text-halo-color": lwHalo, "text-halo-width": 1.8, "text-opacity": 1 } },
+        ],
+      };
+      return Response.json(style, {
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "public, max-age=3600, s-maxage=86400",
+        },
+      });
     }
 
     // ── Everything else → Railway ─────────────────────────────────────────────

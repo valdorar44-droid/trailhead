@@ -1,19 +1,23 @@
 import { useEffect, useRef, useState, useMemo, Component } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Linking, Animated, TextInput, ActivityIndicator, Modal, Image, Share, Alert, AppState } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Linking, Animated, TextInput, ActivityIndicator, Modal, Image, Share, Alert, AppState, KeyboardAvoidingView, Platform } from 'react-native';
 import { WebView } from 'react-native-webview';
 import NativeMap, { type NativeMapHandle } from '@/components/NativeMap';
+import RouteSearchModal from '@/components/RouteSearchModal';
+import OfflineModal from '@/components/NativeMap/OfflineModal';
 
 // ── Native MapLibre SDK active ────────────────────────────────────────────────
 const USE_NATIVE_MAP = true;
 import * as Location from 'expo-location';
-import * as SecureStore from 'expo-secure-store';
+import { storage } from '@/lib/storage';
 import * as Speech from 'expo-speech';
 import * as Haptics from 'expo-haptics';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as FileSystem from 'expo-file-system';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useStore } from '@/lib/store';
 import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd } from '@/lib/api';
+import { loadOfflineTrip } from '@/lib/offlineTrips';
 import * as ImagePicker from 'expo-image-picker';
 import PaywallModal from '@/components/PaywallModal';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
@@ -159,6 +163,116 @@ function timeAgo(unixSec: number): string {
   return `${days}d ago`;
 }
 
+// ─── Turn arrow — pure View, no SVG dependency ───────────────────────────────
+// Draws a road-style directional arrow using borders + transforms.
+function TurnArrow({ modifier, type, size = 56, color = '#f5a623' }: {
+  modifier: string; type: string; size?: number; color?: string;
+}) {
+  const m = modifier.toLowerCase();
+  const lw = Math.round(size / 8);   // line width
+  const r  = Math.round(size / 4);   // corner radius
+  const hw = Math.round(size / 2);   // half width
+  const ah = Math.round(size / 5);   // arrowhead height
+  const aw = Math.round(size / 3);   // arrowhead width
+
+  // Arrowhead as two angled lines rendered via rotated Views
+  const ArrowHead = ({ style }: { style: any }) => (
+    <View style={style}>
+      <View style={{ width: lw * 1.4, height: ah, backgroundColor: color, borderRadius: lw / 2,
+        transform: [{ rotate: '-40deg' }, { translateY: -ah * 0.15 }] }} />
+      <View style={{ width: lw * 1.4, height: ah, backgroundColor: color, borderRadius: lw / 2,
+        transform: [{ rotate: '40deg' }, { translateY: -ah * 0.15 }] }} />
+    </View>
+  );
+
+  if (type === 'arrive') {
+    return (
+      <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+        <View style={{ width: size * 0.55, height: size * 0.55, borderRadius: size * 0.275,
+          borderWidth: lw, borderColor: color }} />
+        <View style={{ position: 'absolute', width: lw, height: size * 0.3,
+          backgroundColor: color, bottom: size * 0.1, borderRadius: lw / 2 }} />
+      </View>
+    );
+  }
+
+  // Straight
+  if (!m || m === 'straight') {
+    return (
+      <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+        <View style={{ width: lw, height: size * 0.65, backgroundColor: color, borderRadius: lw / 2, marginTop: ah * 0.8 }} />
+        <ArrowHead style={{ position: 'absolute', top: 0, flexDirection: 'row', gap: 2, alignItems: 'flex-start' }} />
+      </View>
+    );
+  }
+
+  // U-turn
+  if (m === 'uturn') {
+    return (
+      <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+        <View style={{ width: size * 0.45, height: size * 0.55, borderTopLeftRadius: size * 0.225,
+          borderTopRightRadius: size * 0.225, borderTopWidth: lw, borderLeftWidth: lw, borderRightWidth: lw,
+          borderColor: color, marginLeft: -size * 0.1 }} />
+        <View style={{ position: 'absolute', left: size * 0.14, bottom: size * 0.12,
+          width: lw, height: size * 0.25, backgroundColor: color, borderRadius: lw / 2 }} />
+        <ArrowHead style={{ position: 'absolute', left: size * 0.03, bottom: size * 0.07,
+          flexDirection: 'row', gap: 2, transform: [{ rotate: '-90deg' }] }} />
+      </View>
+    );
+  }
+
+  const isLeft  = m.includes('left');
+  const isSharp = m.includes('sharp');
+  const isSlight = m.includes('slight');
+
+  // Curve radius and x-offset depend on sharpness
+  const curveW  = isSharp ? size * 0.32 : isSlight ? size * 0.18 : size * 0.28;
+  const curveR  = isSharp ? size * 0.22 : isSlight ? size * 0.32 : size * 0.26;
+  const stemH   = isSharp ? size * 0.32 : size * 0.36;
+  const armW    = isSharp ? size * 0.28 : isSlight ? size * 0.2 : size * 0.24;
+  const side    = isLeft ? -1 : 1;
+
+  return (
+    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'flex-end', paddingBottom: size * 0.06 }}>
+      {/* Vertical stem */}
+      <View style={{ width: lw, height: stemH, backgroundColor: color, borderRadius: lw / 2,
+        alignSelf: 'center', marginBottom: 0 }} />
+      {/* Corner curve — simulated with a border-radius box */}
+      <View style={{
+        position: 'absolute',
+        bottom: stemH - lw / 2,
+        [isLeft ? 'left' : 'right']: hw - lw / 2 - curveW,
+        width: curveW, height: curveR,
+        borderBottomWidth: lw, borderColor: color, borderRadius: 0,
+        borderBottomLeftRadius: isLeft ? 0 : curveR,
+        borderBottomRightRadius: isLeft ? curveR : 0,
+        borderLeftWidth: isLeft ? 0 : lw,
+        borderRightWidth: isLeft ? lw : 0,
+      }} />
+      {/* Horizontal arm */}
+      <View style={{
+        position: 'absolute',
+        bottom: stemH + curveR - lw * 1.5,
+        [isLeft ? 'left' : 'right']: hw - lw / 2 - curveW - armW,
+        width: armW, height: lw, backgroundColor: color, borderRadius: lw / 2,
+      }} />
+      {/* Arrowhead at end of arm */}
+      <View style={{
+        position: 'absolute',
+        bottom: stemH + curveR - lw * 1.5 - ah * 0.4,
+        [isLeft ? 'left' : 'right']: hw - lw / 2 - curveW - armW - ah * 0.3,
+        transform: [{ rotate: isLeft ? '-90deg' : '90deg' }],
+        flexDirection: 'row', gap: 2,
+      }}>
+        <View style={{ width: lw * 1.3, height: ah, backgroundColor: color, borderRadius: lw / 2,
+          transform: [{ rotate: '-40deg' }, { translateY: -ah * 0.15 }] }} />
+        <View style={{ width: lw * 1.3, height: ah, backgroundColor: color, borderRadius: lw / 2,
+          transform: [{ rotate: '40deg' }, { translateY: -ah * 0.15 }] }} />
+      </View>
+    </View>
+  );
+}
+
 // Compute Mapbox zoom level from speed for speed-aware camera
 function navZoom(speedMs: number | null): number {
   if (!speedMs || speedMs < 4)  return 17;  // stopped/slow
@@ -178,13 +292,26 @@ function etaClockTime(mins: number): string {
   return `${h12}:${m.toString().padStart(2, '0')} ${ampm}`;
 }
 
-// Returns [far_m, near_m] announcement distances based on current speed
-function announceDists(speedMph: number | null): [number, number] {
-  if (!speedMph || speedMph < 10) return [250, 60];
-  if (speedMph < 25) return [400, 100];
-  if (speedMph < 40) return [600, 180];
-  if (speedMph < 60) return [1000, 300];
-  return [1800, 600]; // highway: ~1 mile then ~0.4 mile
+// Returns [preview_m, prepare_m, action_m] announcement distances.
+// preview ~60s out (first warning), prepare ~15s (lane-change time), action ~5s (turn now).
+// modifier adjusts for turn severity: sharp/U-turn = more lead; slight/merge = less.
+function announceDists(speedMph: number | null, modifier?: string): [number, number, number] {
+  const mph = Math.max(0, speedMph ?? 0);
+  const ms  = mph * 0.44704;
+  const preview = Math.max(400,  Math.min(2500, ms * 60));
+  const prepare = Math.max(120,  Math.min(600,  ms * 15));
+  const action  = Math.max(28,   Math.min(100,  ms * 5));
+  const mod  = (modifier ?? '').toLowerCase();
+  const mult = mod === 'uturn'                        ? 1.5
+             : mod.includes('sharp')                  ? 1.25
+             : mod.includes('slight')                 ? 0.85
+             : mod === '' || mod === 'straight'        ? 0.6
+             : 1.0;
+  return [
+    Math.round(preview * mult),
+    Math.round(Math.max(80,  prepare * mult)),
+    Math.round(Math.max(20,  action  * Math.min(mult, 1.2))),
+  ];
 }
 
 // Natural-language distance for TTS — never reads abbreviations aloud
@@ -290,45 +417,49 @@ function laneSpeakPhrase(lanes: RouteStep['lanes']): string {
   return '';
 }
 
-// Build spoken announcement from step — natural, not robotic
-function buildAnnouncement(step: RouteStep, distM: number, phase: 'far' | 'near'): string {
+// Build spoken announcement from step — natural, not robotic.
+// phase 'far'=preview warning, 'near'=prepare/lane-change, 'action'=turn now (no distance)
+function buildAnnouncement(step: RouteStep, distM: number, phase: 'far' | 'near' | 'action'): string {
   const type     = step.type     ?? 'turn';
   const modifier = (step.modifier ?? '').toLowerCase();
   const action   = stepSpeak(type, modifier, step.name);
   const road     = step.name ? ` on ${step.name}` : '';
-  const laneHint = phase === 'near' ? laneSpeakPhrase(step.lanes) : '';
+  const laneHint = phase !== 'far' ? laneSpeakPhrase(step.lanes) : '';
+  const isAction = phase === 'action';
 
   if (type === 'arrive') {
-    return phase === 'far'
-      ? `You'll arrive at your destination in ${speakDist(distM)}.`
-      : `You have arrived at your destination.`;
+    return isAction ? `Arriving at your destination.`
+         : phase === 'near' ? `You will arrive in ${speakDist(distM)}.`
+         : `You'll arrive at your destination in ${speakDist(distM)}.`;
   }
-  // on-ramp / merge / fork types — use specific phrasing
-  if (type === 'on ramp') return phase === 'near' ? `${laneHint}Take the ramp${road}.` : `In ${speakDist(distM)}, take the ramp${road}.`;
-  if (type === 'off ramp') return phase === 'near' ? `${laneHint}Take the exit${road}.` : `In ${speakDist(distM)}, take the exit${road}.`;
+  if (type === 'on ramp')  return isAction ? `${laneHint}Take the ramp${road}.`                    : phase === 'near' ? `${laneHint}Take the ramp${road}.`                    : `In ${speakDist(distM)}, take the ramp${road}.`;
+  if (type === 'off ramp') return isAction ? `${laneHint}Take the exit${road}.`                   : phase === 'near' ? `${laneHint}Take the exit${road}.`                   : `In ${speakDist(distM)}, take the exit${road}.`;
+  if (type === 'end of road') {
+    // Stop sign / T-intersection — driver must stop, needs clear command
+    return isAction ? `${laneHint}${action}${road}.`
+         : phase === 'near' ? `${laneHint}In ${speakDist(distM)}, ${action}${road}.`
+         : `In ${speakDist(distM)}, ${action} at the intersection${road}.`;
+  }
   if (type === 'merge') {
     const side = modifier.includes('right') ? 'right' : modifier.includes('left') ? 'left' : '';
-    return phase === 'near' ? `Merge ${side}${road}.` : `In ${speakDist(distM)}, merge ${side}${road}.`;
+    return isAction ? `Merge ${side}${road}.` : phase === 'near' ? `Merge ${side}${road}.` : `In ${speakDist(distM)}, merge ${side}${road}.`;
   }
   if (type === 'fork') {
     const side = modifier.includes('right') ? 'right' : modifier.includes('left') ? 'left' : '';
-    return phase === 'near' ? `${laneHint}Keep ${side} at the fork${road}.` : `In ${speakDist(distM)}, keep ${side} at the fork${road}.`;
+    return isAction ? `${laneHint}Keep ${side} at the fork${road}.` : phase === 'near' ? `${laneHint}Keep ${side} at the fork${road}.` : `In ${speakDist(distM)}, keep ${side} at the fork${road}.`;
   }
   if (type === 'roundabout' || type === 'rotary') {
-    return phase === 'near' ? `At the roundabout, follow the route.` : `In ${speakDist(distM)}, enter the roundabout.`;
+    return isAction ? `Enter the roundabout.` : phase === 'near' ? `In ${speakDist(distM)}, enter the roundabout.` : `In ${speakDist(distM)}, enter the roundabout.`;
   }
-  // Straight/continue
   const isStraight = modifier === '' || modifier === 'straight';
   if (isStraight) {
-    if (phase === 'far') {
-      return step.name ? `Stay on ${step.name} for ${speakDist(distM)}.` : `Continue for ${speakDist(distM)}.`;
-    }
+    if (isAction) return `${laneHint}Keep straight${road}.`;
+    if (phase === 'far') return step.name ? `Stay on ${step.name} for ${speakDist(distM)}.` : `Continue for ${speakDist(distM)}.`;
     return `${laneHint}Keep straight${road}.`;
   }
-  if (phase === 'near') {
-    if (distM < 30) return `${laneHint}${action}${road}.`;
-    return `${laneHint}${action}${road}, in ${speakDist(distM)}.`;
-  }
+  // Standard turn
+  if (isAction)       return `${laneHint}${action}${road}.`;
+  if (phase === 'near') return `${laneHint}In ${speakDist(distM)}, ${action}${road}.`;
   return `In ${speakDist(distM)}, ${action}${road}.`;
 }
 
@@ -419,7 +550,7 @@ function weatherIcon(code: number): string {
 
 function rigCompatibility(camp: CampsitePin, rig: import('@/lib/store').RigProfile | null): { ok: boolean; msg: string } | null {
   if (!rig) return null;
-  const tags = camp.tags || [];
+  const tags = Array.isArray(camp.tags) ? camp.tags : [];
   const desc = (camp.description || '').toLowerCase();
   const needsHighClear = desc.includes('high clearance') || desc.includes('4wd') || desc.includes('4-wheel') || desc.includes('rough road');
   const clearance = parseFloat(rig.ground_clearance_in || '0');
@@ -1393,8 +1524,33 @@ function MapScreen() {
   const rigProfile = useStore(st => st.rigProfile);
   const webRef       = useRef<WebView>(null);
   const nativeMapRef = useRef<NativeMapHandle>(null);
+  const navVoiceRef  = useRef<string | undefined>(undefined);
+
+  // Load best available TTS voice — prefer natural iOS voices over robotic default
+  useEffect(() => {
+    Speech.getAvailableVoicesAsync().then(voices => {
+      const en = voices.filter(v => v.language === 'en-US' || v.language?.startsWith('en-US'));
+      // Priority: Siri (most natural) → named quality voices → premium/enhanced generic
+      const best = en.find(v => /siri_female|Nicky|Samantha|Karen/i.test(v.identifier ?? ''))
+                ?? en.find(v => v.identifier?.includes('premium'))
+                ?? en.find(v => v.identifier?.includes('enhanced'))
+                ?? en.find(v => v.quality === 300 || v.quality === 200); // quality: 300=premium, 200=enhanced
+      navVoiceRef.current = best?.identifier;
+    }).catch(() => {});
+  }, []);
+
   const safeSpeech = (text: string, opts?: Parameters<typeof Speech.speak>[1]) => {
-    try { safeSpeech(text, opts); } catch {}
+    try {
+      // Stop any in-progress speech so new announcement isn't delayed/jumbled
+      Speech.stop();
+      Speech.speak(text, {
+        rate: 0.9,    // slightly faster than default = more natural
+        pitch: 1.0,   // natural pitch (0.88 was slightly robotic)
+        language: 'en-US',
+        ...(opts ?? {}),
+        ...(navVoiceRef.current ? { voice: navVoiceRef.current } : {}),
+      });
+    } catch {}
   };
 
   const [userLoc,       setUserLoc]       = useState<{ lat: number; lng: number } | null>(null);
@@ -1407,16 +1563,20 @@ function MapScreen() {
   const [navIdx,    setNavIdx]    = useState(0);
   const [routeSteps,  setRouteSteps]  = useState<RouteStep[]>([]);
   const [isRouted,    setIsRouted]    = useState(false);
+  const [routeFromCache, setRouteFromCache] = useState(false);
   const [mapLayer,    setMapLayerState] = useState<MapLayer>('topo');
   const [showLands,   setShowLands]    = useState(false);
   const [showUsgs,    setShowUsgs]     = useState(false);
   const [audioGuide,  setAudioGuide]   = useState<Record<string, string>>({});
   const [showSteps,   setShowSteps]    = useState(false);
   const [showPanel,   setShowPanel]    = useState(true);
+  const [selectedDay, setSelectedDay]  = useState<number | null>(null);
   const [routeAlerts, setRouteAlerts]  = useState<Report[]>([]);
   const [showAlerts,  setShowAlerts]   = useState(false);
   const [communityPins, setCommunityPins] = useState<Pin[]>([]);
   const [routeLegs,    setRouteLegs]    = useState<RouteStep[][]>([]);
+  const [lastRouteCoords, setLastRouteCoords] = useState<[number,number][]>([]);
+  const [selectOnMapMode, setSelectOnMapMode] = useState(false);
   const [searchQuery,  setSearchQuery]  = useState('');
   const [searchResults,setSearchResults] = useState<{ lat: number; lng: number; name: string }[]>([]);
   const [showSearch,   setShowSearch]   = useState(false);
@@ -1471,6 +1631,7 @@ function MapScreen() {
   // Offline state modal
   const [showOfflineModal,  setShowOfflineModal]  = useState(false);
   const [offlineWarning,    setOfflineWarning]    = useState(false);
+  const [isActuallyOffline, setIsActuallyOffline] = useState(false);
 
   // AI & Wikipedia in campsite detail
   const [campInsight,    setCampInsight]    = useState<CampsiteInsight | null>(null);
@@ -1521,6 +1682,7 @@ function MapScreen() {
   const [layerMvum,    setLayerMvum]    = useState(false);
   const [layerRoads,   setLayerRoads]   = useState(false);
   const [tappedTrail, setTappedTrail] = useState<{ name: string; lat: number; lng: number; cls: string } | null>(null);
+  const [tappedTileSpot, setTappedTileSpot] = useState<{ name: string; kind: string; lat: number; lng: number } | null>(null);
 
   // Connectivity sync toast
   const [syncToast, setSyncToast] = useState('');
@@ -1552,6 +1714,7 @@ function MapScreen() {
   const webLoadedRef = useRef(false);
   const viewportRef  = useRef<{ n: number; s: number; e: number; w: number; zoom: number } | null>(null);
   const [isLoadingAreaCamps, setIsLoadingAreaCamps] = useState(false);
+  const [areaCamps, setAreaCamps] = useState<CampsitePin[]>([]);
   const [mapMoved, setMapMoved] = useState(false);
   const [mapZoom, setMapZoom] = useState(10);
   const [searchResult, setSearchResult] = useState<{ count: number } | null>(null);
@@ -1579,21 +1742,23 @@ function MapScreen() {
     api.getConfig().then(c => {
       const token = c.mapbox_token || '';
       const pmKey = c.protomaps_key || '';
-      if (token) SecureStore.setItemAsync('trailhead_mapbox_token', token).catch(() => {});
-      if (pmKey) SecureStore.setItemAsync('trailhead_protomaps_key', pmKey).catch(() => {});
+      if (token) storage.set('trailhead_mapbox_token', token).catch(() => {});
+      if (pmKey) storage.set('trailhead_protomaps_key', pmKey).catch(() => {});
       applyConfig(token, pmKey);
+      setIsActuallyOffline(false); // confirmed online
     }).catch(() => {
+      setIsActuallyOffline(true);
       // Offline — use cached values so the map can load from tile cache
       Promise.all([
-        SecureStore.getItemAsync('trailhead_mapbox_token').catch(() => null),
-        SecureStore.getItemAsync('trailhead_protomaps_key').catch(() => null),
+        storage.get('trailhead_mapbox_token').catch(() => null),
+        storage.get('trailhead_protomaps_key').catch(() => null),
       ]).then(([t, k]) => applyConfig(t || '', k || ''));
     });
   }, []);
 
   // Show onboarding card for first-time users
   useEffect(() => {
-    SecureStore.getItemAsync('trailhead_onboarded').then(val => {
+    storage.get('trailhead_onboarded').then(val => {
       if (!val) setShowOnboard(true);
     }).catch(() => {});
   }, []);
@@ -1608,7 +1773,16 @@ function MapScreen() {
   }, [activeTrip?.trip_id]);
 
   // Keep refs in sync
-  useEffect(() => { navRef.current.active = navMode; }, [navMode]);
+  useEffect(() => {
+    navRef.current.active = navMode;
+    // Keep screen alive during navigation — phone would otherwise sleep in 15s
+    if (navMode) {
+      activateKeepAwakeAsync('navigation');
+    } else {
+      deactivateKeepAwake('navigation');
+    }
+    return () => { deactivateKeepAwake('navigation'); };
+  }, [navMode]);
   useEffect(() => { isReroutingRef.current = isRerouting; }, [isRerouting]);
 
   // Sync report refs + push combined list to WebView whenever either changes
@@ -1640,11 +1814,14 @@ function MapScreen() {
   useEffect(() => { navRef.current.idx = navIdx; }, [navIdx]);
   useEffect(() => { guideRef.current = audioGuide; }, [audioGuide]);
 
+  // Recompute when trip changes OR when geocoding populates lat/lng on waypoints
+  const geocodedCount = activeTrip?.plan.waypoints.filter(w => w.lat && w.lng).length ?? 0;
   const waypoints: WP[] = useMemo(() =>
     (activeTrip?.plan.waypoints ?? [])
-      .filter(w => w.lat && w.lng)
+      .filter(w => w.lat != null && w.lng != null && isFinite(w.lat) && isFinite(w.lng))
       .map(w => ({ lat: w.lat!, lng: w.lng!, name: w.name, day: w.day, type: w.type })),
-    [activeTrip?.trip_id]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeTrip?.trip_id, geocodedCount]
   );
 
   useEffect(() => { navRef.current.wps = waypoints; }, [waypoints]);
@@ -1730,22 +1907,29 @@ function MapScreen() {
             if (cur?.lat != null && cur?.lng != null) {
               const distM = haversineKm(pos.lat, pos.lng, cur.lat, cur.lng) * 1000;
               const speedMph = (userSpeedRef.current ?? 0) * 2.237;
-              const [farDist, nearDist] = announceDists(speedMph > 0 ? speedMph : null);
-              const farKey  = si * 2;      // first announcement (far)
-              const nearKey = si * 2 + 1;  // second announcement (close)
+              const [previewDist, prepareDist, actionDist] = announceDists(speedMph > 0 ? speedMph : null, cur.modifier);
+              const previewKey = si * 3;       // "In 1 mile, turn left on Main St"
+              const prepareKey = si * 3 + 1;   // "In 500 feet, turn left"
+              const actionKey  = si * 3 + 2;   // "Turn left" (right at the moment)
 
               if (cur.type !== 'depart' && cur.type !== 'arrive') {
-                // Far announcement (e.g. "In 1 mile, turn right on I-95")
-                if (distM < farDist && !stepAnnouncedRef.current.has(farKey)) {
-                  stepAnnouncedRef.current.add(farKey);
+                // Phase 1 — preview (far warning, only fires outside prepare zone)
+                if (distM < previewDist && distM >= prepareDist && !stepAnnouncedRef.current.has(previewKey)) {
+                  stepAnnouncedRef.current.add(previewKey);
                   safeSpeech(buildAnnouncement(cur, distM, 'far'), { rate: 0.88, pitch: 1.05, language: 'en-US' });
                 }
-                // Near announcement — stop far cue mid-play, haptic pulse so driver feels it too
-                if (distM < nearDist && !stepAnnouncedRef.current.has(nearKey)) {
-                  stepAnnouncedRef.current.add(nearKey);
+                // Phase 2 — prepare: slow down + get in lane
+                if (distM < prepareDist && !stepAnnouncedRef.current.has(prepareKey)) {
+                  stepAnnouncedRef.current.add(prepareKey);
+                  Speech.stop();
+                  safeSpeech(buildAnnouncement(cur, distM, 'near'), { rate: 0.88, pitch: 1.05, language: 'en-US' });
+                }
+                // Phase 3 — action: turn NOW, haptic so driver feels it
+                if (distM < actionDist && !stepAnnouncedRef.current.has(actionKey)) {
+                  stepAnnouncedRef.current.add(actionKey);
                   Speech.stop();
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
-                  safeSpeech(buildAnnouncement(cur, distM, 'near'), { rate: 0.88, pitch: 1.05, language: 'en-US' });
+                  safeSpeech(buildAnnouncement(cur, distM, 'action'), { rate: 0.88, pitch: 1.1, language: 'en-US' });
                 }
               }
 
@@ -1755,9 +1939,10 @@ function MapScreen() {
                 const next = si + 1;
                 stepIdxRef.current = next;
                 setStepIdx(next);
-                // Reset both announcement keys so far+near fire fresh for the new step
-                stepAnnouncedRef.current.delete(next * 2);
-                stepAnnouncedRef.current.delete(next * 2 + 1);
+                // Reset all 3 announcement keys for the new step
+                stepAnnouncedRef.current.delete(next * 3);
+                stepAnnouncedRef.current.delete(next * 3 + 1);
+                stepAnnouncedRef.current.delete(next * 3 + 2);
 
                 // "Turn complete" + next maneuver preview — the most important GPS UX moment
                 const nextStep = steps[next];
@@ -1776,8 +1961,8 @@ function MapScreen() {
                       safeSpeech(`Continue for ${contDist}.`, { rate: 0.88, pitch: 1.05, language: 'en-US' });
                     }, 800);
                   }
-                  // Mark far key as already spoken so it won't fire again immediately
-                  stepAnnouncedRef.current.add(next * 2);
+                  // "Continue for X, then Y" serves as preview — mark preview key so it won't double-fire
+                  stepAnnouncedRef.current.add(next * 3);
                 }
               }
             }
@@ -1786,21 +1971,33 @@ function MapScreen() {
           // ── Approaching report alert (Waze-style 1-mile warning) ──────────
           {
             const allReps = [...liveReportsRef.current, ...routeAlertsRef.current];
+            // Speed-aware alert distance — give ~45 seconds of warning like Waze
+            const speedMps = userSpeedRef.current ?? 0;
+            const alertDistM = Math.max(400, Math.min(speedMps * 45, 2500));
             for (const rep of allReps) {
               if (alertedRepIdsRef.current.has(rep.id)) continue;
               const repDistM = haversineKm(pos.lat, pos.lng, rep.lat, rep.lng) * 1000;
-              if (repDistM < 1609) { // 1 mile
+              if (repDistM < alertDistM && repDistM > 30) {
                 alertedRepIdsRef.current.add(rep.id);
                 setApproachingReport(rep);
+                // Waze-style clear labels — short, punchy, no redundant "ahead" suffix
                 const labels: Record<string, string> = {
-                  police: 'Ranger patrol', hazard: 'Hazard reported',
-                  road_condition: 'Road condition', wildlife: 'Wildlife',
-                  road_closure: 'Road closure', campsite: 'Campsite report', water: 'Water source',
+                  police:         'Police ahead',
+                  hazard:         'Hazard ahead',
+                  road_condition: 'Road condition ahead',
+                  wildlife:       'Wildlife on road',
+                  road_closure:   'Road closure ahead',
+                  campsite:       'Campsite report',
+                  water:          'Water source nearby',
                 };
-                const label = labels[rep.type] ?? 'Community report';
-                safeSpeech(`${label} ahead in ${speakDist(repDistM)}.`, { rate: 0.88, pitch: 1.05, language: 'en-US' });
+                const label = labels[rep.type] ?? 'Obstacle ahead';
+                // Announce with distance only — label already includes "ahead"
+                safeSpeech(
+                  repDistM < 200 ? label
+                    : `${label}, ${speakDist(repDistM)}.`
+                );
                 if (approachDismissRef.current) clearTimeout(approachDismissRef.current);
-                approachDismissRef.current = setTimeout(() => setApproachingReport(null), 20000);
+                approachDismissRef.current = setTimeout(() => setApproachingReport(null), 15000);
                 break; // one alert at a time
               }
             }
@@ -1849,6 +2046,8 @@ function MapScreen() {
               type: 'start_route_from',
               lat: pos.lat, lng: pos.lng, fromIdx: next,
             }));
+            nativeMapRef.current?.setNavTarget(next);
+            nativeMapRef.current?.loadRouteFrom(pos.lat, pos.lng, next);
             setRouteLegOffset(next);
             safeSpeech(`Arrived at ${wps[idx].name}. Now heading to ${wps[next].name}.`, { rate: 0.88, pitch: 1.05, language: 'en-US' });
           }
@@ -1859,6 +2058,27 @@ function MapScreen() {
 
   // ── Trip data ───────────────────────────────────────────────────────────────
 
+  // Geocode any waypoints that are missing lat/lng (backend geocoding sometimes partial)
+  useEffect(() => {
+    if (!activeTrip) return;
+    const missing = activeTrip.plan.waypoints.filter(w => !w.lat || !w.lng);
+    if (missing.length > 0) {
+      Promise.all(missing.map(async wp => {
+        try {
+          const r = await fetch(
+            `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(wp.name)}&format=json&limit=1&countrycodes=us`,
+            { headers: { 'User-Agent': 'Trailhead/1.0' } }
+          );
+          const d = await r.json();
+          if (d[0]) { wp.lat = parseFloat(d[0].lat); wp.lng = parseFloat(d[0].lon); }
+        } catch {}
+      })).then(() => {
+        // Force useMemo to re-evaluate by creating a shallow clone of activeTrip
+        useStore.getState().setActiveTrip({ ...activeTrip, plan: { ...activeTrip.plan, waypoints: [...activeTrip.plan.waypoints] } });
+      }).catch(() => {});
+    }
+  }, [activeTrip?.trip_id]);
+
   useEffect(() => {
     if (!activeTrip) return;
     const wps = activeTrip.plan.waypoints.filter(w => w.lat && w.lng);
@@ -1866,6 +2086,13 @@ function MapScreen() {
     const center = wps[Math.floor(wps.length / 2)];
     if (center.lat && center.lng) {
       api.getNearbyPins(center.lat!, center.lng!, 3.0).then(setCommunityPins).catch(() => {});
+      // Load camps + POIs around the trip center so pins appear without requiring a manual search
+      const bounds = {
+        n: center.lat! + 1.5, s: center.lat! - 1.5,
+        e: center.lng! + 1.5, w: center.lng! - 1.5, zoom: 9,
+      };
+      loadCampsInArea(bounds, activeFilters);
+      fetchPois({ lat: center.lat!, lng: center.lng! });
     }
     api.getReportsAlongRoute(wps).then(alerts => {
       setRouteAlerts(alerts);
@@ -1886,11 +2113,13 @@ function MapScreen() {
     activeTrip,
     onWeatherUpdate: (weather) => {
       setCachedWeather(weather);
+      setIsActuallyOffline(false); // if weather updated, we're online
     },
     onSyncComplete: () => {
       if (syncToastTimer.current) clearTimeout(syncToastTimer.current);
       setSyncToast('Signal found — weather updated');
       syncToastTimer.current = setTimeout(() => setSyncToast(''), 3500);
+      setIsActuallyOffline(false);
     },
     onReportRefresh: () => {
       if (!activeTrip) return;
@@ -1983,6 +2212,7 @@ function MapScreen() {
           lat: userLoc.lat, lng: userLoc.lng,
           heading: hdg, zoom: 17,
         }));
+        nativeMapRef.current?.flyTo(userLoc.lat, userLoc.lng, 17);
       }
       const dest = navDestRef.current;
       if (dest && waypoints.length === 0) {
@@ -1992,20 +2222,24 @@ function MapScreen() {
         safeSpeech(`Navigation started. Heading to ${dest.name}${distStr}.`, { rate: 0.88, pitch: 1.05, language: 'en-US' });
       } else {
         // Trip navigation
-        const loc = navRef.current.active ? null : userLoc;
         let startIdx = navIdx;
-        if (loc && waypoints.length > 0) {
-          startIdx = nearestWpIdx(loc, waypoints);
+        // Find nearest waypoint to user if location available
+        if (userLoc && waypoints.length > 0) {
+          startIdx = nearestWpIdx(userLoc, waypoints);
           setNavIdx(startIdx);
           navRef.current.idx = startIdx;
           setRouteLegOffset(startIdx);
         }
         webRef.current?.postMessage(JSON.stringify({ type: 'nav_target', idx: startIdx }));
-        if (userLoc) {
+        nativeMapRef.current?.setNavTarget(startIdx);
+        // Route from user location if available, otherwise from first waypoint
+        const routeStart = userLoc ?? (waypoints[startIdx] ? { lat: waypoints[startIdx].lat, lng: waypoints[startIdx].lng } : null);
+        if (routeStart) {
           webRef.current?.postMessage(JSON.stringify({
             type: 'start_route_from',
-            lat: userLoc.lat, lng: userLoc.lng, fromIdx: startIdx,
+            lat: routeStart.lat, lng: routeStart.lng, fromIdx: startIdx,
           }));
+          nativeMapRef.current?.loadRouteFrom(routeStart.lat, routeStart.lng, startIdx);
         }
         const target = waypoints[startIdx];
         if (target) {
@@ -2034,6 +2268,7 @@ function MapScreen() {
       setNavDest(null);
       webRef.current?.postMessage(JSON.stringify({ type: 'nav_reset' }));
       webRef.current?.postMessage(JSON.stringify({ type: 'clear_track' }));
+      nativeMapRef.current?.resetRoute();
       Speech.stop();
     }
     return () => { _appStateSub?.remove(); };
@@ -2062,17 +2297,28 @@ function MapScreen() {
     setIsSearching(true);
     setSearchRouteCard(null);
     try {
+      const ctrl = new AbortController();
+      const tid = setTimeout(() => ctrl.abort(), 8000);
       const q = encodeURIComponent(searchQuery.trim());
       const res = await fetch(
         `https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=5`,
-        { headers: { 'User-Agent': 'Trailhead/1.0' } }
+        { headers: { 'User-Agent': 'Trailhead/1.0' }, signal: ctrl.signal }
       );
+      clearTimeout(tid);
       const data = await res.json();
-      if (!Array.isArray(data)) { setIsSearching(false); return; }
-      setSearchResults(data.map((r: any) => ({
-        lat: parseFloat(r.lat), lng: parseFloat(r.lon), name: r.display_name,
-      })));
-    } catch {}
+      if (!Array.isArray(data) || data.length === 0) {
+        setSearchResults([]);
+      } else {
+        setSearchResults(data.map((r: any) => ({
+          lat: parseFloat(r.lat), lng: parseFloat(r.lon), name: r.display_name,
+        })));
+      }
+    } catch (e: any) {
+      const isTimeout = e?.name === 'AbortError';
+      setSearchResults([]);
+      // Show brief error in results area via a sentinel item
+      if (!isTimeout) setSearchResults([{ lat: 0, lng: 0, name: '__error__' }]);
+    }
     setIsSearching(false);
   }
 
@@ -2081,6 +2327,7 @@ function MapScreen() {
     setSearchRouteCard({ ...place, dist });
     setSearchResults([]);
     webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: place.lat, lng: place.lng, name: place.name }));
+    nativeMapRef.current?.flyTo(place.lat, place.lng);
   }
 
   function navigateToSearch() {
@@ -2096,7 +2343,9 @@ function MapScreen() {
       name: dest.name,
       userLat: userLoc.lat, userLng: userLoc.lng,
     }));
+    nativeMapRef.current?.routeToSearch(dest.lat, dest.lng, dest.name, userLoc.lat, userLoc.lng);
     setNavMode(true);
+    setShowSearch(false);
   }
 
   async function openCampInsight() {
@@ -2226,7 +2475,9 @@ function MapScreen() {
         fullResult.status === 'fulfilled' ? fullResult.value.map(f => f.camp_id) : []
       );
       const tagged = camps.map(c => ({ ...c, full: fullIds.has(c.id) ? 1 : 0 }));
+      // Feed results to WebView (legacy path) AND native map
       webRef.current?.postMessage(JSON.stringify({ type: 'set_camps', pins: tagged }));
+      setAreaCamps(tagged);
       setSearchResult({ count: camps.length });
       setTimeout(() => setSearchResult(null), 3000);
     } catch (e: any) {
@@ -2249,8 +2500,8 @@ function MapScreen() {
         if (viewportRef.current) loadCampsInArea(viewportRef.current, activeFilters);
         // If we restored a trip from cache (offline relaunch), replay its route geometry
         // into the WebView so navigation works without re-fetching from Mapbox Directions.
-        if (activeTripFromCache && activeTrip?.trip_id) {
-          SecureStore.getItemAsync('trailhead_active_route').then(raw => {
+        if (activeTrip?.trip_id) {
+          storage.get('trailhead_active_route').then(raw => {
             if (!raw) return;
             try {
               const cached = JSON.parse(raw);
@@ -2293,7 +2544,7 @@ function MapScreen() {
       }
       if (msg.type === 'route_persist' && Array.isArray(msg.coords)) {
         // Cache the freshly-routed geometry + steps so we can replay offline
-        SecureStore.setItemAsync('trailhead_active_route', JSON.stringify({
+        storage.set('trailhead_active_route', JSON.stringify({
           coords: msg.coords, steps: msg.steps ?? [], legs: msg.legs ?? [],
           total_distance: msg.total_distance, total_duration: msg.total_duration,
           tripId: activeTrip?.trip_id ?? null,
@@ -2493,7 +2744,20 @@ function MapScreen() {
       setShowCampDetail(true);
       openCampInsight();
     } catch {
-      setCampDetail(selectedCamp as any);
+      // Build a safe minimal CampsiteDetail so the modal doesn't crash on missing arrays
+      setCampDetail({
+        id: selectedCamp.id, name: selectedCamp.name,
+        lat: selectedCamp.lat, lng: selectedCamp.lng,
+        land_type: selectedCamp.land_type ?? '',
+        description: selectedCamp.description ?? '',
+        cost: selectedCamp.cost ?? '',
+        reservable: selectedCamp.reservable ?? false,
+        url: selectedCamp.url ?? '',
+        ada: selectedCamp.ada ?? false,
+        tags: Array.isArray(selectedCamp.tags) ? selectedCamp.tags : [],
+        photos: [], amenities: [], site_types: [], activities: [],
+        campsites_count: 0,
+      } as any);
       setShowCampDetail(true);
       openCampInsight();
     }
@@ -2552,7 +2816,7 @@ function MapScreen() {
     [activeTrip?.trip_id]
   );
   const gas = useMemo(() =>
-    (activeTrip?.gas_stations ?? []).filter(g => g.lat && g.lng).map(g => ({ lat: g.lat, lng: g.lng, name: g.name })),
+    (activeTrip?.gas_stations ?? []).filter(g => g.lat != null && g.lng != null && isFinite(g.lat) && isFinite(g.lng)).map(g => ({ lat: g.lat, lng: g.lng, name: g.name })),
     [activeTrip?.trip_id]
   );
   const pinList = useMemo(() =>
@@ -2618,6 +2882,7 @@ function MapScreen() {
       lat: userLoc.lat, lng: userLoc.lng,
       fromIdx: navRef.current.idx,
     }));
+    nativeMapRef.current?.rerouteFrom(userLoc.lat, userLoc.lng, navRef.current.idx);
     setRouteLegOffset(navRef.current.idx);
     safeSpeech('Recalculating.', { rate: 0.95 });
   }
@@ -2635,6 +2900,7 @@ function MapScreen() {
       navRef.current.idx = idx;
     }
     setNavMode(true);
+    setShowSearch(false);
   }
 
   function openInMaps() {
@@ -2662,7 +2928,9 @@ function MapScreen() {
       lat: dest.lat, lng: dest.lng, name: dest.name,
       userLat: userLoc.lat, userLng: userLoc.lng,
     }));
+    nativeMapRef.current?.routeToSearch(dest.lat, dest.lng, dest.name, userLoc.lat, userLoc.lng);
     setNavMode(true);
+    setShowSearch(false);
   }
 
   function openExternalMaps(lat: number, lng: number, name: string) {
@@ -2687,12 +2955,15 @@ function MapScreen() {
         <NativeMap
           ref={nativeMapRef}
           waypoints={waypoints}
-          camps={(activeTrip?.campsites ?? []).filter(c => c.lat && c.lng) as any}
-          gas={(activeTrip?.gas_stations ?? []).filter(g => g.lat && g.lng) as any}
-          pois={communityPins.map(p => ({ lat: p.lat, lng: p.lng, name: p.name, type: p.type || 'pin' }))}
+          camps={[
+            ...(activeTrip?.campsites ?? []).filter(c => c.lat != null && c.lng != null && isFinite(c.lat) && isFinite(c.lng)),
+            ...areaCamps.filter(c => c.lat != null && c.lng != null),
+          ] as any}
+          gas={(activeTrip?.gas_stations ?? []).filter(g => g.lat != null && g.lng != null && isFinite(g.lat) && isFinite(g.lng)) as any}
+          pois={pois.map(p => ({ lat: p.lat, lng: p.lng, name: p.name, type: p.type || 'poi' }))}
           reports={liveReports}
           communityPins={communityPins}
-          searchMarker={null}
+          searchMarker={searchRouteCard ? { lat: searchRouteCard.lat, lng: searchRouteCard.lng, name: searchRouteCard.name } : null}
           userLoc={userLoc}
           navMode={navMode}
           navIdx={navRef.current.idx}
@@ -2702,21 +2973,63 @@ function MapScreen() {
           routeOpts={routeOpts}
           showLandOverlay={showLands}
           showUsgsOverlay={showUsgs}
-          showTerrain={false}
-          showMvum={false}
-          showFire={false}
-          showAva={false}
-          showRadar={false}
-          onMapReady={() => { webLoadedRef.current = true; }}
-          onBoundsChange={b => { viewportRef.current = b; setMapZoom(b.zoom ?? 10); if ((b.zoom ?? 0) >= 9) setMapMoved(true); }}
-          onMapTap={() => { setSelectedCamp(null); setTappedTrail(null); }}
+          showTerrain={layerTerrain}
+          showMvum={layerMvum}
+          showFire={layerFire}
+          showAva={layerAva}
+          showRadar={layerRadar}
+          onMapReady={() => {
+            webLoadedRef.current = true;
+            // Load camps in the current area — this is what the WebView did on map_ready.
+            // Without this, no camp/POI pins show on the native map until user pans.
+            const vp = viewportRef.current;
+            const center = vp
+              ? { lat: (vp.n + vp.s) / 2, lng: (vp.e + vp.w) / 2 }
+              : waypoints[0] ? { lat: waypoints[0].lat, lng: waypoints[0].lng } : null;
+            if (center) {
+              // Search a generous radius on first load so trip camps appear immediately
+              const bounds = vp ?? {
+                n: center.lat + 1.5, s: center.lat - 1.5,
+                e: center.lng + 1.5, w: center.lng - 1.5, zoom: 9,
+              };
+              loadCampsInArea(bounds, activeFilters);
+              // Also load nearby POIs
+              fetchPois(center);
+            }
+          }}
+          onBoundsChange={b => { viewportRef.current = b; setMapZoom(b.zoom ?? 10); if ((b.zoom ?? 0) >= 9) setMapMoved(true); if ((b.zoom ?? 0) < 8) setAreaCamps([]); }}
+          onMapTap={(lat, lng) => {
+            if (selectOnMapMode && lat != null && lng != null) {
+              setSelectOnMapMode(false);
+              const name = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+              const dist = userLoc ? haversineKm(userLoc.lat, userLoc.lng, lat, lng) : null;
+              setSearchRouteCard({ name, lat, lng, dist });
+              setShowSearch(true);
+              if (userLoc) {
+                const dest = { lat, lng, name, day: 0, type: 'waypoint' as const };
+                navDestRef.current = dest; setNavDest(dest);
+                nativeMapRef.current?.routeToSearch(lat, lng, name, userLoc.lat, userLoc.lng);
+                webRef.current?.postMessage(JSON.stringify({ type: 'route_to_search', lat, lng, name, userLat: userLoc.lat, userLng: userLoc.lng }));
+              }
+              return;
+            }
+            setSelectedCamp(null); setTappedTrail(null); setTappedTileSpot(null);
+          }}
           onMapLongPress={(lat, lng) => {
-            // Mirror WebView long press — trigger land check
             if (webRef.current) {
               webRef.current.postMessage(JSON.stringify({ type: 'map_long_press', lat, lng }));
             }
           }}
-          onCampTap={camp => { setSelectedCamp(camp); setShowCampDetail(true); }}
+          onCampTap={camp => {
+            setSelectedCamp(camp);
+            setCampDetail(null); setCampInsight(null); setWikiArticles([]);
+            setCampFullness(null); setCampWeather(null);
+            if (camp?.id) api.getCampFullness(camp.id).then(r => setCampFullness(r)).catch(() => {});
+            if (camp?.lat && camp?.lng) api.getWeather(camp.lat, camp.lng, 3).then(r => setCampWeather(r)).catch(() => {});
+          }}
+          onTileCampTap={(name, kind, lat, lng) => {
+            setTappedTileSpot({ name, kind, lat, lng });
+          }}
           onBaseCampTap={(name, lat, lng, landType) => {
             // Open nearby camp search for the tapped point
           }}
@@ -2724,13 +3037,15 @@ function MapScreen() {
           onWaypointTap={(idx, name) => { setTappedWp({ idx, wp: waypoints[idx] }); }}
           onRouteReady={result => {
             setIsRouted(result.isProper);
+            setRouteFromCache(!!result.fromCache);
             setRouteSteps(result.steps ?? []);
             setRouteLegs(result.legs ?? []);
             if (result.fromIdx !== undefined) setRouteLegOffset(result.fromIdx);
             setIsRerouting(false); isReroutingRef.current = false;
+            if (result.coords?.length) setLastRouteCoords(result.coords);
           }}
           onRoutePersist={data => {
-            SecureStore.setItemAsync('trailhead_active_route', JSON.stringify({ ...data, ts: Date.now() })).catch(() => {});
+            storage.set('trailhead_active_route', JSON.stringify({ ...data, ts: Date.now() })).catch(() => {});
           }}
         />
       ) : (
@@ -2769,6 +3084,20 @@ function MapScreen() {
         </View>
       )}
 
+      {/* Select-on-map mode banner */}
+      {selectOnMapMode && (
+        <View style={{ position: 'absolute', top: 60, left: 16, right: 16, zIndex: 100,
+          backgroundColor: '#3b82f6', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 10,
+          flexDirection: 'row', alignItems: 'center', gap: 10,
+          shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 }}>
+          <Ionicons name="locate" size={18} color="#fff" />
+          <Text style={{ color: '#fff', fontSize: 14, fontWeight: '600', flex: 1 }}>Tap the map to set destination</Text>
+          <TouchableOpacity onPress={() => setSelectOnMapMode(false)}>
+            <Ionicons name="close" size={18} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* Top bar */}
       <View style={s.topBar}>
         <View style={[s.topBarDot, navMode && { backgroundColor: C.green }]} />
@@ -2786,7 +3115,7 @@ function MapScreen() {
                     ? `ARRIVING · ${waypoints[navIdx]?.name ?? ''}`
                     : isProceeding
                       ? `PROCEED TO STOP ${navIdx + 1}/${waypoints.length}`
-                      : `NAVIGATING · STOP ${navIdx + 1}/${waypoints.length} · ${isRouted ? '🗺 ROUTED' : '🧭 OFF-ROAD'}`
+                      : `NAVIGATING · STOP ${navIdx + 1}/${waypoints.length} · ${isRouted ? (routeFromCache ? '📦 CACHED ROUTE' : '🗺 ROUTED') : '🧭 OFF-ROAD'}`
                 : activeTrip ? activeTrip.plan.trip_name.toUpperCase() : 'NO ACTIVE TRIP'}
         </Text>
         {routeAlerts.length > 0 && (
@@ -2810,11 +3139,17 @@ function MapScreen() {
         )}
       </View>
 
-      {/* Offline mode banner — shown when activeTrip was loaded from cache */}
-      {activeTripFromCache && (
+      {/* Offline mode banners */}
+      {activeTripFromCache && isActuallyOffline && (
         <View style={s.offlineCacheBanner}>
           <Ionicons name="cloud-offline-outline" size={12} color="#a3e635" />
           <Text style={s.offlineCacheBannerText}>Using cached trip data — offline mode</Text>
+        </View>
+      )}
+      {routeFromCache && navMode && (
+        <View style={[s.offlineCacheBanner, { backgroundColor: 'rgba(234,179,8,0.15)' }]}>
+          <Ionicons name="navigate-outline" size={12} color="#eab308" />
+          <Text style={[s.offlineCacheBannerText, { color: '#eab308' }]}>Offline — using last cached route · re-routing disabled</Text>
         </View>
       )}
 
@@ -2880,10 +3215,9 @@ function MapScreen() {
         </View>
       )}
 
-      {/* Controls — wrapped in ScrollView so the stack scrolls on smaller screens
-          instead of clipping the bottom buttons (audio guide, panel toggle). */}
+      {/* Controls — hidden during nav (panel covers them and they serve no purpose while driving) */}
       <ScrollView
-        style={s.controls}
+        style={[s.controls, navMode && { opacity: 0, pointerEvents: 'none' as any }]}
         contentContainerStyle={s.controlsInner}
         showsVerticalScrollIndicator={false}
         bounces={false}
@@ -2891,6 +3225,7 @@ function MapScreen() {
         <TouchableOpacity style={s.ctrlBtn} onPress={() => {
           if (!userLoc) return;
           webRef.current?.postMessage(JSON.stringify({ type: 'locate', lat: userLoc.lat, lng: userLoc.lng }));
+          nativeMapRef.current?.locate(userLoc.lat, userLoc.lng);
           const deg = 0.35;
           const b = { n: userLoc.lat + deg, s: userLoc.lat - deg, e: userLoc.lng + deg, w: userLoc.lng - deg, zoom: 10 };
           viewportRef.current = b;
@@ -3064,64 +3399,57 @@ function MapScreen() {
       )}
 
       {/* ── Search overlay ── */}
-      {showSearch && (
-        <View style={s.searchOverlay}>
-          <View style={s.searchBar}>
-            <Ionicons name="search" size={15} color={OVR.text3} />
-            <TextInput
-              style={s.searchInput}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              onSubmitEditing={searchMap}
-              placeholder="Search location..."
-              placeholderTextColor={OVR.text3}
-              returnKeyType="search"
-              autoFocus
-            />
-            {isSearching
-              ? <ActivityIndicator size="small" color={C.orange} />
-              : searchQuery.length > 0 && (
-                <TouchableOpacity onPress={searchMap}>
-                  <Text style={s.searchGo}>GO</Text>
-                </TouchableOpacity>
-              )
-            }
-          </View>
-          {searchResults.length > 0 && (
-            <ScrollView style={s.searchResults} keyboardShouldPersistTaps="handled">
-              {searchResults.map((r, i) => (
-                <TouchableOpacity key={i} style={s.searchResultItem} onPress={() => selectSearchResult(r)}>
-                  <Ionicons name="location-outline" size={13} color={OVR.text3} />
-                  <Text style={s.searchResultText} numberOfLines={2}>{r.name}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          )}
-          {searchRouteCard && (
-            <View style={s.routeCard}>
-              <Text style={s.routeCardName} numberOfLines={2}>{searchRouteCard.name}</Text>
-              {searchRouteCard.dist !== null && (
-                <Text style={s.routeCardDist}>
-                  {formatDist(searchRouteCard.dist!)} from you
-                  {routeOpts.backRoads ? ' · BACK ROADS' : routeOpts.avoidHighways ? ' · NO HWY' : ''}
-                  {routeOpts.avoidTolls ? ' · NO TOLL' : ''}
-                </Text>
-              )}
-              <View style={s.routeCardActions}>
-                <TouchableOpacity style={s.routeCardNav} onPress={navigateToSearch} disabled={!userLoc}>
-                  <Ionicons name="navigate" size={14} color="#fff" />
-                  <Text style={s.routeCardNavText}>NAVIGATE HERE</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={s.routeCardOpts} onPress={() => setShowRouteOpts(true)}>
-                  <Ionicons name="options-outline" size={14} color={C.text2} />
-                  <Text style={s.routeCardOptsText}>OPTIONS</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => setSearchRouteCard(null)}>
-                  <Ionicons name="close" size={18} color={C.text3} />
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
+      {/* ── Route Search Modal (OsmAnd-style) ──────────────────────────── */}
+      {showSearch && !navMode && (
+        <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
+          <RouteSearchModal
+            visible={showSearch}
+            userLoc={userLoc}
+            camps={[
+              ...(activeTrip?.campsites ?? []).filter(c => c.lat != null && c.lng != null && isFinite(c.lat) && isFinite(c.lng)),
+              ...areaCamps.filter(c => c.lat != null && c.lng != null),
+            ] as any}
+            gas={(activeTrip?.gas_stations ?? []).filter(g => g.lat != null && g.lng != null && isFinite(g.lat) && isFinite(g.lng)) as any}
+            pois={pois.map(p => ({ lat: p.lat, lng: p.lng, name: p.name, type: p.type || 'poi' }))}
+            communityPins={communityPins}
+            routeOpts={routeOpts}
+            routeCoords={lastRouteCoords.length > 0 ? lastRouteCoords : undefined}
+            routeCard={searchRouteCard}
+            onLoadSavedTrip={async (tripId) => {
+              const trip = await loadOfflineTrip(tripId).catch(() => null)
+                ?? await api.getTripById?.(tripId).catch(() => null);
+              if (trip) {
+                setActiveTrip(trip);
+                setShowSearch(false);
+              }
+            }}
+            onCampTap={camp => {
+              setShowSearch(false); setSelectedCamp(camp);
+              setCampDetail(null); setCampInsight(null); setWikiArticles([]);
+              setCampFullness(null); setCampWeather(null);
+              if (camp?.id) api.getCampFullness(camp.id).then(r => setCampFullness(r)).catch(() => {});
+              if (camp?.lat && camp?.lng) api.getWeather(camp.lat, camp.lng, 3).then(r => setCampWeather(r)).catch(() => {});
+            }}
+            onSelectDest={place => {
+              const dist = userLoc ? haversineKm(userLoc.lat, userLoc.lng, place.lat, place.lng) : null;
+              setSearchRouteCard({ ...place, dist });
+              nativeMapRef.current?.flyTo(place.lat, place.lng);
+              webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: place.lat, lng: place.lng, name: place.name }));
+              // Pre-load route
+              if (userLoc) {
+                const dest = { lat: place.lat, lng: place.lng, name: place.name, day: 0, type: 'waypoint' as const };
+                navDestRef.current = dest;
+                setNavDest(dest);
+                webRef.current?.postMessage(JSON.stringify({ type: 'route_to_search', lat: dest.lat, lng: dest.lng, name: dest.name, userLat: userLoc.lat, userLng: userLoc.lng }));
+                nativeMapRef.current?.routeToSearch(dest.lat, dest.lng, dest.name, userLoc.lat, userLoc.lng);
+              }
+            }}
+            onStartNav={() => { setShowSearch(false); navigateToSearch(); }}
+            onSelectOnMap={() => { setShowSearch(false); setSelectOnMapMode(true); }}
+            onClose={() => { setShowSearch(false); setSearchRouteCard(null); }}
+            onClearRoute={() => { setSearchRouteCard(null); navDestRef.current = null; setNavDest(null); }}
+            onOpenRouteOpts={() => setShowRouteOpts(true)}
+          />
         </View>
       )}
 
@@ -3191,7 +3519,7 @@ function MapScreen() {
               ? <Image source={{ uri: selectedCamp.photo_url }} style={s.quickCardPhoto} resizeMode="cover" />
               : <View style={[s.quickCardPhotoPlaceholder, { backgroundColor: landColor(selectedCamp.land_type).bg }]}>
                   <Text style={{ fontSize: 36 }}>
-                    {selectedCamp.tags.includes('rv') ? '🚐' : selectedCamp.tags.includes('dispersed') ? '🌲' : '🏕️'}
+                    {(selectedCamp.tags ?? []).includes('rv') ? '🚐' : (selectedCamp.tags ?? []).includes('dispersed') ? '🌲' : '🏕️'}
                   </Text>
                   <Text style={{ fontSize: 9, color: landColor(selectedCamp.land_type).text, fontFamily: mono, marginTop: 4, fontWeight: '700' }}>
                     {(selectedCamp.land_type || 'CAMP').toUpperCase().slice(0, 12)}
@@ -3227,7 +3555,7 @@ function MapScreen() {
             ) : null}
             {/* Amenity tags */}
             <View style={s.quickCardTags}>
-              {selectedCamp.tags.slice(0, 5).map(t => (
+              {(selectedCamp.tags ?? []).slice(0, 5).map(t => (
                 <View key={t} style={s.qTag}>
                   <Text style={s.qTagText}>{tagEmoji(t)} {t.toUpperCase()}</Text>
                 </View>
@@ -3321,9 +3649,9 @@ function MapScreen() {
           {campDetail && (
             <ScrollView showsVerticalScrollIndicator={false}>
               {/* Photos */}
-              {campDetail.photos.length > 0 ? (
+              {(campDetail.photos ?? []).length > 0 ? (
                 <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false} style={s.photoGallery}>
-                  {campDetail.photos.map((uri, i) => (
+                  {(campDetail.photos ?? []).map((uri, i) => (
                     <Image key={i} source={{ uri }} style={s.galleryPhoto} resizeMode="cover" />
                   ))}
                 </ScrollView>
@@ -3376,11 +3704,11 @@ function MapScreen() {
                 ) : null}
 
                 {/* Amenities */}
-                {campDetail.amenities.length > 0 && (
+                {(campDetail.amenities ?? []).length > 0 && (
                   <View style={s.detailSection}>
                     <Text style={s.detailSectionTitle}>AMENITIES</Text>
                     <View style={s.amenityGrid}>
-                      {campDetail.amenities.map(a => {
+                      {(campDetail.amenities ?? []).map(a => {
                         const al = a.toLowerCase();
                         const icon = al.includes('water') ? '💧' : al.includes('shower') ? '🚿'
                           : al.includes('toilet') || al.includes('restroom') ? '🚻'
@@ -3402,11 +3730,11 @@ function MapScreen() {
                 )}
 
                 {/* Site types */}
-                {campDetail.site_types.length > 0 && (
+                {(campDetail.site_types ?? []).length > 0 && (
                   <View style={s.detailSection}>
                     <Text style={s.detailSectionTitle}>SITE TYPES</Text>
                     <View style={s.amenityGrid}>
-                      {campDetail.site_types.map(st => (
+                      {(campDetail.site_types ?? []).map(st => (
                         <View key={st} style={[s.amenityItem, { backgroundColor: '#f0fdf4', borderColor: '#86efac' }]}>
                           <Text style={{ fontSize: 13 }}>⛺</Text>
                           <Text style={[s.amenityText, { color: '#15803d' }]}>{st}</Text>
@@ -3417,10 +3745,10 @@ function MapScreen() {
                 )}
 
                 {/* Activities */}
-                {campDetail.activities.length > 0 && (
+                {(campDetail.activities ?? []).length > 0 && (
                   <View style={s.detailSection}>
                     <Text style={s.detailSectionTitle}>Activities</Text>
-                    <Text style={s.detailActivities}>{campDetail.activities.join(' · ')}</Text>
+                    <Text style={s.detailActivities}>{(campDetail.activities ?? []).join(' · ')}</Text>
                   </View>
                 )}
 
@@ -3722,236 +4050,36 @@ function MapScreen() {
         </TouchableOpacity>
       </Modal>
 
-      {/* ── Offline Map Download Modal ── */}
-      <Modal visible={showOfflineModal} animationType="slide" transparent onRequestClose={() => setShowOfflineModal(false)}>
-        <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.65)' }}>
-          <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => setShowOfflineModal(false)} />
-          <View style={s.offlineSheet}>
-            {/* Header */}
-            <View style={s.offlineHeader}>
-              <Ionicons name="map-outline" size={18} color={C.orange} />
-              <Text style={s.offlineTitle}>OFFLINE MAPS</Text>
-              <TouchableOpacity onPress={() => setShowOfflineModal(false)} style={s.offlineClose}>
-                <Ionicons name="close" size={18} color={C.text3} />
-              </TouchableOpacity>
-            </View>
-
-            {/* What's included */}
-            <View style={s.offlineIncludesRow}>
-              {['Trails & 4WD tracks', 'All road names', 'Terrain contours', 'Speed limits', 'Satellite imagery', 'Camp labels'].map(item => (
-                <View key={item} style={s.offlineIncludeChip}>
-                  <Text style={s.offlineIncludeText}>{item}</Text>
-                </View>
-              ))}
-            </View>
-
-            {!user ? (
-              <View style={{ alignItems: 'center', paddingVertical: 20 }}>
-                <Text style={s.offlineSub}>Sign in to download offline maps.</Text>
-                <TouchableOpacity onPress={() => setShowOfflineModal(false)} style={s.offlineRouteBtn}>
-                  <Text style={s.offlineRouteBtnText}>GO TO PROFILE → SIGN IN</Text>
-                </TouchableOpacity>
-              </View>
-            ) : (<>
-
-            {/* Active download progress */}
-            {isDownloading && (
-              <View style={s.offlineProgressCard}>
-                <View style={s.offlineProgressTop}>
-                  <Text style={s.offlineProgressLabel}>
-                    DOWNLOADING · {downloadSaved.toLocaleString()} / {downloadTotal.toLocaleString()} COORDS
-                  </Text>
-                  <Text style={s.offlineProgressMB}>{downloadMB} MB</Text>
-                </View>
-                <View style={s.dlBar}>
-                  <View style={[s.dlFill, { width: `${downloadProgress}%` as any }]} />
-                </View>
-                <TouchableOpacity style={s.offlineCancelBtn} onPress={() => {
-                  webRef.current?.postMessage(JSON.stringify({ type: 'cancel_download' }));
-                  setIsDownloading(false);
-                }}>
-                  <Text style={s.offlineCancelText}>CANCEL</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {/* One-shot CONUS download — whole US road & trail network in vector tiles */}
-            {(() => {
-              const conusCached = cachedRegions.includes('Continental US');
-              return (
-                <TouchableOpacity
-                  style={[s.offlineConusBtn, conusCached && { borderColor: C.green + '88' }]}
-                  disabled={isDownloading}
-                  onPress={() => {
-                    setShowOfflineModal(false); setIsDownloading(true);
-                    setDownloadLabel('Continental US');
-                    webRef.current?.postMessage(JSON.stringify({
-                      type: 'download_tiles_bbox', label: 'Continental US',
-                      n: 49.5, s: 24.5, e: -66.5, w: -125.0,
-                      minZ: 3, maxZ: 12, vectorOnly: true,
-                    }));
-                  }}>
-                  <View style={s.offlineConusIcon}>
-                    <Ionicons name="globe-outline" size={22} color={conusCached ? C.green : C.orange} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.offlineConusTitle}>{conusCached ? '✓ ' : ''}DOWNLOAD CONTINENTAL US</Text>
-                    <Text style={s.offlineConusMeta}>
-                      Whole country · all roads, towns, trail markers · ~1 GB
-                    </Text>
-                  </View>
-                  <Ionicons name={conusCached ? 'refresh-outline' : 'cloud-download-outline'} size={20} color={conusCached ? C.green : C.orange} />
-                </TouchableOpacity>
-              );
-            })()}
-
-            {/* Current trip download */}
-            <Text style={[s.offlineSectionLabel, { marginTop: 14 }]}>MY TRIP CORRIDOR · 20km BUFFER AROUND ROUTE</Text>
-            {waypoints.length > 0 ? (() => {
-              const label = activeTrip?.plan.trip_name ?? 'Trip';
-              const isCachedV = cachedRegions.includes(label + '-vec');
-              const isCachedFull = cachedRegions.includes(label + '-full');
-              // Rough estimate: corridor tiles ≈ bbox / 4 for a linear route
-              const lats = waypoints.map(w => w.lat), lngs = waypoints.map(w => w.lng);
-              const pad = 0.2;
-              const n = Math.max(...lats) + pad, s2 = Math.min(...lats) - pad;
-              const e = Math.max(...lngs) + pad, w2 = Math.min(...lngs) - pad;
-              const bboxCount = estimateTileCount(n, s2, e, w2, 10, 16);
-              const corridorEst = Math.round(bboxCount / 4);
-              return (
-                <View style={{ gap: 8 }}>
-                  {/* Trails-only (vector, small) */}
-                  <TouchableOpacity style={[s.offlineTripBtn, isCachedV && { borderColor: C.green + '66' }]}
-                    disabled={isDownloading}
-                    onPress={() => {
-                      setShowOfflineModal(false); setIsDownloading(true);
-                      setDownloadLabel(label + '-vec');
-                      webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles_route', label: label + '-vec', bufferKm: 20, minZ: 10, maxZ: 16, vectorOnly: true }));
-                    }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={s.offlineTripName} numberOfLines={1}>{label.toUpperCase()}</Text>
-                      <Text style={s.offlineTripMeta}>
-                        TRAILS ONLY (no satellite) · ~{tilesMB(corridorEst, 16, true)} · fastest download
-                      </Text>
-                      {isCachedV && <Text style={[s.offlineTripMeta, { color: C.green }]}>✓ Trails cached</Text>}
-                    </View>
-                    <Ionicons name={isCachedV ? 'refresh-outline' : 'trail-sign-outline'} size={20} color={isCachedV ? C.green : C.orange} />
-                  </TouchableOpacity>
-                  {/* Full (vector + satellite) */}
-                  <TouchableOpacity style={[s.offlineTripBtn, { borderColor: C.border }, isCachedFull && { borderColor: C.green + '66' }]}
-                    disabled={isDownloading}
-                    onPress={() => {
-                      setShowOfflineModal(false); setIsDownloading(true);
-                      setDownloadLabel(label + '-full');
-                      webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles_route', label: label + '-full', bufferKm: 20, minZ: 10, maxZ: 15, vectorOnly: false }));
-                    }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[s.offlineTripName, { color: C.text2 }]} numberOfLines={1}>{label.toUpperCase()}</Text>
-                      <Text style={s.offlineTripMeta}>
-                        TRAILS + SATELLITE · ~{tilesMB(corridorEst, 15, false)} · larger download
-                      </Text>
-                      {isCachedFull && <Text style={[s.offlineTripMeta, { color: C.green }]}>✓ Full cached</Text>}
-                    </View>
-                    <Ionicons name={isCachedFull ? 'refresh-outline' : 'cloud-download-outline'} size={20} color={isCachedFull ? C.green : C.text3} />
-                  </TouchableOpacity>
-                </View>
-              );
-            })() : (
-              <Text style={s.offlineNoTrip}>Plan a trip first to download its trail corridor</Text>
-            )}
-
-            {/* State downloads */}
-            <Text style={[s.offlineSectionLabel, { marginTop: 16 }]}>US STATES</Text>
-            <ScrollView style={{ maxHeight: 280 }} showsVerticalScrollIndicator={false}>
-              {Object.entries(US_STATES).map(([code, st]) => {
-                const countOvr = estimateTileCount(st.n, st.s, st.e, st.w, 10, 12);
-                const countDet = estimateTileCount(st.n, st.s, st.e, st.w, 10, 15);
-                const isCached = cachedRegions.includes(st.name);
-                const isCachedDet = cachedRegions.includes(st.name + '-detail');
-                return (
-                  <View key={code} style={s.offlineStateRow}>
-                    <Text style={s.stateEmoji}>{st.emoji}</Text>
-                    <View style={{ flex: 1 }}>
-                      <Text style={s.stateName}>{st.name}</Text>
-                      <View style={{ flexDirection: 'row', gap: 6, marginTop: 4 }}>
-                        <TouchableOpacity
-                          style={[s.stateTierBtn, isCached && { borderColor: C.green }]}
-                          disabled={isDownloading}
-                          onPress={() => {
-                            setShowOfflineModal(false); setIsDownloading(true);
-                            setDownloadLabel(st.name);
-                            webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles_bbox', label: st.name, n: st.n, s: st.s, e: st.e, w: st.w, minZ: 10, maxZ: 12 }));
-                          }}>
-                          <Text style={s.stateTierLabel}>{isCached ? '✓ ' : ''}OVERVIEW</Text>
-                          <Text style={s.stateTierSize}>{tilesMB(countOvr, 12)}</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={[s.stateTierBtn, { borderColor: C.orange + '77' }, isCachedDet && { borderColor: C.green }]}
-                          disabled={isDownloading}
-                          onPress={() => {
-                            setShowOfflineModal(false); setIsDownloading(true);
-                            setDownloadLabel(st.name + '-detail');
-                            webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles_bbox', label: st.name + '-detail', n: st.n, s: st.s, e: st.e, w: st.w, minZ: 10, maxZ: 15, vectorOnly: true }));
-                          }}>
-                          <Text style={[s.stateTierLabel, { color: C.orange }]}>{isCachedDet ? '✓ ' : ''}TRAILS</Text>
-                          <Text style={s.stateTierSize}>{tilesMB(countDet, 15, true)}</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  </View>
-                );
-              })}
-            </ScrollView>
-
-            {/* Cached regions summary */}
-            {cachedRegions.length > 0 && (
-              <View style={{ marginTop: 12 }}>
-                <Text style={[s.offlineSectionLabel, { marginBottom: 6 }]}>DOWNLOADED · TAP LOAD TO VIEW</Text>
-                {cachedRegions.map(region => {
-                  // Resolve center for this region — strip suffixes to find state name
-                  const baseName = region.replace(/-(vec|full|detail)$/, '');
-                  const stEntry = Object.values(US_STATES).find(st => st.name === baseName);
-                  // Continental US flies to mid-CONUS at country zoom; states fly to state center at state zoom
-                  const isConus = baseName === 'Continental US';
-                  const centerLat = isConus ? 39.5 : (stEntry ? (stEntry.n + stEntry.s) / 2 : null);
-                  const centerLng = isConus ? -98.5 : (stEntry ? (stEntry.e + stEntry.w) / 2 : null);
-                  const flyZoom = isConus ? 4 : null;
-                  return (
-                    <View key={region} style={s.offlineCachedRow}>
-                      <Ionicons name="checkmark-circle" size={13} color={C.green} />
-                      <Text style={s.offlineCachedRegionText} numberOfLines={1}>{region}</Text>
-                      {centerLat !== null && (
-                        <TouchableOpacity
-                          style={s.offlineCachedLoad}
-                          onPress={() => {
-                            setShowOfflineModal(false);
-                            webRef.current?.postMessage(JSON.stringify({
-                              type: 'fly_to', lat: centerLat, lng: centerLng, name: baseName,
-                              ...(flyZoom !== null && { zoom: flyZoom }),
-                            }));
-                          }}
-                        >
-                          <Text style={s.offlineCachedLoadText}>LOAD</Text>
-                        </TouchableOpacity>
-                      )}
-                      <TouchableOpacity
-                        style={s.offlineCachedDelete}
-                        onPress={() => {
-                          removeCachedRegion(region);
-                          webRef.current?.postMessage(JSON.stringify({ type: 'clear_cache_region', label: region }));
-                        }}
-                      >
-                        <Ionicons name="close-circle" size={16} color={C.red} />
-                      </TouchableOpacity>
-                    </View>
-                  );
-                })}
-              </View>
-            )}
-            </>)}
-          </View>
-        </View>
-      </Modal>
+      {/* ── Offline Map Download Modal — native MLN pack system ── */}
+      <OfflineModal
+        visible={showOfflineModal}
+        onClose={() => setShowOfflineModal(false)}
+        waypoints={waypoints}
+        tripName={activeTrip?.plan?.trip_name ?? null}
+        useNativeMap={USE_NATIVE_MAP}
+        onWebDownloadBbox={opts => {
+          webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles_bbox', ...opts }));
+          setIsDownloading(true); setDownloadLabel(opts.label);
+        }}
+        onWebDownloadRoute={opts => {
+          webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles_route', ...opts }));
+          setIsDownloading(true); setDownloadLabel(opts.label);
+        }}
+        onWebCancelDownload={() => {
+          webRef.current?.postMessage(JSON.stringify({ type: 'cancel_download' }));
+          setIsDownloading(false);
+        }}
+        onWebClearRegion={label => {
+          removeCachedRegion(label);
+          webRef.current?.postMessage(JSON.stringify({ type: 'clear_cached_region', label }));
+        }}
+        webIsDownloading={isDownloading}
+        webDownloadProgress={downloadProgress}
+        webDownloadSaved={downloadSaved}
+        webDownloadTotal={downloadTotal}
+        webDownloadMB={downloadMB}
+        webCachedRegions={cachedRegions}
+      />
 
       {/* ── Route Brief Modal ── */}
       <Modal visible={showRouteBrief} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowRouteBrief(false)}>
@@ -4075,7 +4203,7 @@ function MapScreen() {
       </Modal>
 
       {/* ── Search This Area (native button — reliable on all platforms) ── */}
-      {(mapMoved || isLoadingAreaCamps || searchResult !== null || activeFilters.length > 0) && !navMode && !showSearch && !selectedCamp && mapZoom >= 9 && (
+      {(mapMoved || isLoadingAreaCamps || searchResult !== null || activeFilters.length > 0) && !navMode && !showSearch && !selectedCamp && !(showPanel && activeTrip) && mapZoom >= 9 && (
         <View style={s.searchAreaWrap}>
           <TouchableOpacity
             style={[s.searchAreaBtn, isLoadingAreaCamps && s.searchAreaBtnLoading]}
@@ -4258,13 +4386,13 @@ function MapScreen() {
           <View style={s.turnStripWrap}>
             <View style={s.turnStrip}>
               <View style={s.turnIconWrap}>
-                <Ionicons name={stepIcon(nextStep.type, nextStep.modifier) as any} size={28} color="#fff" />
+                <TurnArrow modifier={nextStep.modifier ?? ''} type={nextStep.type ?? ''} size={54} color="#f5a623" />
               </View>
               <View style={s.turnInfo}>
+                <Text style={s.turnDist}>{formatStepDist(stepDistM ?? nextStep.distance)}</Text>
                 <Text style={s.turnLabel}>{stepLabel(nextStep.type, nextStep.modifier, nextStep.name)}</Text>
                 {nextStep.name ? <Text style={s.turnRoad} numberOfLines={1}>{nextStep.name}</Text> : null}
               </View>
-              <Text style={s.turnDist}>{formatStepDist(stepDistM ?? nextStep.distance)}</Text>
             </View>
             {/* Distance countdown bar — fills orange as maneuver approaches */}
             {stepDistM !== null && nextStep.distance > 80 && (
@@ -4630,13 +4758,7 @@ function MapScreen() {
               }}
             >
               <Ionicons name="checkmark-circle" size={16} color="#fff" />
-              <Text style={s.locDisclosureAllowText}>ALLOW LOCATION ACCESS</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={s.locDisclosureDeny}
-              onPress={() => setShowLocDisclosure(false)}
-            >
-              <Text style={s.locDisclosureDenyText}>Not Now</Text>
+              <Text style={s.locDisclosureAllowText}>Continue</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -4656,7 +4778,7 @@ function MapScreen() {
               style={s.onboardClose}
               onPress={() => {
                 setShowOnboard(false);
-                SecureStore.setItemAsync('trailhead_onboarded', 'true').catch(() => {});
+                storage.set('trailhead_onboarded', 'true').catch(() => {});
               }}
             >
               <Ionicons name="close" size={16} color={OVR.text3} />
@@ -4694,14 +4816,54 @@ function MapScreen() {
       {showPanel && !navMode && activeTrip && (
         <View style={s.panel}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.dayScroll}>
-            {activeTrip.plan.daily_itinerary.map(day => (
-              <View key={day.day} style={s.dayCard}>
-                <View style={s.dayBadge}><Text style={s.dayBadgeText}>{day.day}</Text></View>
-                <Text style={s.dayTitle} numberOfLines={1}>{day.title}</Text>
-                <Text style={s.dayMeta}>{day.est_miles}mi · {day.road_type}</Text>
-              </View>
-            ))}
+            {activeTrip.plan.daily_itinerary.map(day => {
+              const isSelected = selectedDay === day.day;
+              return (
+                <TouchableOpacity
+                  key={day.day}
+                  style={[s.dayCard, isSelected && { borderColor: C.orange, borderWidth: 2, backgroundColor: C.orangeGlow }]}
+                  onPress={() => {
+                    Haptics.selectionAsync();
+                    if (selectedDay === day.day) {
+                      setSelectedDay(null);
+                    } else {
+                      setSelectedDay(day.day);
+                      // Fit map to this day's waypoints
+                      const dayWps = waypoints.filter(w => w.day === day.day);
+                      if (dayWps.length >= 2) {
+                        const lngs = dayWps.map(w => w.lng);
+                        const lats = dayWps.map(w => w.lat);
+                        setTimeout(() => {
+                          nativeMapRef.current?.flyTo(
+                            (Math.max(...lats) + Math.min(...lats)) / 2,
+                            (Math.max(...lngs) + Math.min(...lngs)) / 2,
+                            9
+                          );
+                        }, 100);
+                      }
+                    }
+                  }}
+                >
+                  <View style={[s.dayBadge, isSelected && { backgroundColor: C.orange }]}>
+                    <Text style={s.dayBadgeText}>{day.day}</Text>
+                  </View>
+                  <Text style={s.dayTitle} numberOfLines={1}>{day.title}</Text>
+                  <Text style={s.dayMeta}>{day.est_miles}mi · {day.road_type}</Text>
+                </TouchableOpacity>
+              );
+            })}
           </ScrollView>
+
+          {/* Start selected day button */}
+          {selectedDay !== null && (
+            <TouchableOpacity
+              style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: C.orange, borderRadius: 10, paddingVertical: 11, marginHorizontal: 12, marginBottom: 6 }}
+              onPress={() => { setSelectedDay(null); startDayNav(selectedDay); }}
+            >
+              <Ionicons name="navigate" size={14} color="#fff" />
+              <Text style={{ color: '#fff', fontSize: 13, fontWeight: '800', fontFamily: mono }}>START DAY {selectedDay}</Text>
+            </TouchableOpacity>
+          )}
           <View style={s.legendRow}>
             {([[C.orange,'⬤','Waypoint'],[C.green,'⛺','Camp'],[C.yellow,'⛽','Fuel'],['#a855f7','📍','Community']] as const)
               .map(([color, dot, label]) => (
@@ -4767,6 +4929,18 @@ function MapScreen() {
               <Text style={s.weatherNone}>No weather cached — build a trip to download forecasts</Text>
             )}
           </View>
+
+          {/* ── START NAVIGATION — primary CTA ── */}
+          <TouchableOpacity
+            style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: C.green, borderRadius: 12, paddingVertical: 13, marginBottom: 8 }}
+            onPress={() => {
+              const days = [...new Set(waypoints.map(w => w.day))].sort((a, b) => a - b);
+              if (days.length <= 1) { startDayNav('all'); } else { setShowDayModal(true); }
+            }}
+          >
+            <Ionicons name="navigate" size={16} color="#fff" />
+            <Text style={{ color: '#fff', fontSize: 14, fontWeight: '800', fontFamily: mono, letterSpacing: 0.5 }}>START TRIP</Text>
+          </TouchableOpacity>
 
           <View style={s.aiActionsRow}>
             <TouchableOpacity style={s.aiActionBtn} onPress={fetchRouteBrief} disabled={loadingBrief}>
@@ -4858,6 +5032,62 @@ function MapScreen() {
                   <Text style={s.wpSheetNavText}>NAVIGATE HERE</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={s.wpSheetDayBtn} onPress={() => setTappedTrail(null)}>
+                  <Ionicons name="close" size={14} color={OVR.text2} />
+                  <Text style={s.wpSheetDayText}>DISMISS</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+      )}
+
+      {/* ── Tile-layer camp/spot tap mini sheet ── */}
+      {tappedTileSpot && (
+        <Modal visible transparent animationType="slide" onRequestClose={() => setTappedTileSpot(null)}>
+          <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setTappedTileSpot(null)}>
+            <View style={s.wpSheet}>
+              <View style={s.daySheetHandle} />
+              <View style={s.wpSheetHeader}>
+                <View style={[s.wpSheetTypeDot, {
+                  backgroundColor: tappedTileSpot.kind === 'camp_pitch' ? '#c4915a'
+                                 : tappedTileSpot.kind === 'shelter'    ? '#8b5cf6'
+                                 : '#14b8a6',
+                }]} />
+                <View style={{ flex: 1 }}>
+                  <Text style={s.wpSheetName} numberOfLines={2}>{tappedTileSpot.name || (
+                    tappedTileSpot.kind === 'camp_pitch' ? 'Dispersed Camping Spot' :
+                    tappedTileSpot.kind === 'shelter'    ? 'Trail Shelter' :
+                    'Campground'
+                  )}</Text>
+                  <Text style={s.wpSheetMeta}>
+                    {tappedTileSpot.kind === 'camp_pitch' ? '🟤 Dispersed / Primitive Spot' :
+                     tappedTileSpot.kind === 'shelter'    ? '🟣 Trail Shelter' :
+                     '🟢 Developed Campground'}
+                  </Text>
+                </View>
+              </View>
+              <View style={s.wpSheetActions}>
+                <TouchableOpacity
+                  style={s.wpSheetNavBtn}
+                  onPress={() => {
+                    setTappedTileSpot(null);
+                    navigateToCamp({ lat: tappedTileSpot.lat, lng: tappedTileSpot.lng, name: tappedTileSpot.name });
+                  }}
+                >
+                  <Ionicons name="navigate" size={14} color="#fff" />
+                  <Text style={s.wpSheetNavText}>NAVIGATE HERE</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[s.wpSheetDayBtn, { borderColor: '#ef4444' + '44' }]}
+                  onPress={() => {
+                    setTappedTileSpot(null);
+                    setQuickReport(true);
+                  }}
+                >
+                  <Ionicons name="warning-outline" size={14} color="#ef4444" />
+                  <Text style={[s.wpSheetDayText, { color: '#ef4444' }]}>REPORT SPOT</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={s.wpSheetDayBtn} onPress={() => setTappedTileSpot(null)}>
                   <Ionicons name="close" size={14} color={OVR.text2} />
                   <Text style={s.wpSheetDayText}>DISMISS</Text>
                 </TouchableOpacity>
@@ -4989,19 +5219,17 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
 
   turnStripWrap: { overflow: 'hidden' },
   turnStrip: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 14, paddingVertical: 10,
-    backgroundColor: '#1a3a1a',
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingHorizontal: 12, paddingVertical: 12,
+    backgroundColor: '#0d1b2e',
   },
   turnIconWrap: {
-    width: 48, height: 48, borderRadius: 12,
-    backgroundColor: 'rgba(249,115,22,0.25)', alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1.5, borderColor: 'rgba(249,115,22,0.5)',
+    width: 64, height: 64, alignItems: 'center', justifyContent: 'center',
   },
-  turnInfo: { flex: 1 },
-  turnLabel: { color: '#fff', fontSize: 16, fontWeight: '900', fontFamily: mono, letterSpacing: 0.5 },
-  turnRoad: { color: 'rgba(255,255,255,0.65)', fontSize: 12, marginTop: 2, fontFamily: mono },
-  turnDist: { color: '#f97316', fontSize: 16, fontWeight: '800', fontFamily: mono },
+  turnInfo: { flex: 1, justifyContent: 'center' },
+  turnDist: { color: '#fff', fontSize: 26, fontWeight: '900', fontFamily: mono, letterSpacing: -0.5, lineHeight: 30 },
+  turnLabel: { color: '#f5a623', fontSize: 12, fontWeight: '700', fontFamily: mono, marginTop: 2, letterSpacing: 0.3 },
+  turnRoad: { color: 'rgba(255,255,255,0.6)', fontSize: 12, marginTop: 1, fontFamily: mono },
   stepProgressBg: {
     height: 4, backgroundColor: 'rgba(249,115,22,0.15)',
     borderTopWidth: 1, borderColor: 'rgba(249,115,22,0.1)',
@@ -5148,31 +5376,53 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   stepDist: { color: OVR.text3, fontSize: 10, fontFamily: mono },
 
   // ── Search overlay
-  searchOverlay: {
-    position: 'absolute', top: 106, left: 16, right: 70,
-    backgroundColor: OVR.bg2, borderRadius: 14,
-    borderWidth: 1, borderColor: '#3b82f6',
-    overflow: 'hidden',
+  searchSheet: {
+    backgroundColor: OVR.bg2,
+    borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    borderTopWidth: 1, borderColor: OVR.border,
+    paddingBottom: 28,
+    shadowColor: '#000', shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.35, shadowRadius: 12, elevation: 12,
+  },
+  searchHandle: {
+    width: 36, height: 4, borderRadius: 2,
+    backgroundColor: OVR.border, alignSelf: 'center', marginTop: 10, marginBottom: 4,
   },
   searchBar: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    paddingHorizontal: 12, paddingVertical: 10,
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingHorizontal: 16, paddingVertical: 12,
     borderBottomWidth: 1, borderColor: OVR.border,
   },
   searchInput: {
-    flex: 1, color: OVR.text, fontSize: 14, fontFamily: mono,
+    flex: 1, color: OVR.text, fontSize: 15, fontFamily: mono,
   },
-  searchGo: { color: C.orange, fontSize: 11, fontFamily: mono, fontWeight: '700' },
-  searchResults: { maxHeight: 240 },
+  searchGoBtn: {
+    backgroundColor: C.orange, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8,
+  },
+  searchGo: { color: '#fff', fontSize: 11, fontFamily: mono, fontWeight: '700' },
+  searchResults: { maxHeight: 280 },
   searchResultItem: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: 8,
-    paddingHorizontal: 12, paddingVertical: 10,
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingHorizontal: 16, paddingVertical: 13,
     borderBottomWidth: 1, borderColor: OVR.border2,
   },
-  searchResultText: { color: OVR.text2, fontSize: 12, flex: 1, lineHeight: 17, fontFamily: mono },
+  searchResultIcon: {
+    width: 30, height: 30, borderRadius: 15,
+    backgroundColor: 'rgba(249,115,22,0.12)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  searchResultText: { color: OVR.text, fontSize: 14, fontWeight: '500' },
+  searchResultSub:  { color: OVR.text3, fontSize: 11, marginTop: 1 },
+  searchResultDist: { color: C.text3, fontSize: 11, fontFamily: mono },
 
   // ── Bottom panel
-  panel: { backgroundColor: C.s1, borderTopWidth: 1, borderColor: C.border, paddingBottom: 10 },
+  panel: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    backgroundColor: C.bg, borderTopWidth: 1, borderColor: C.border,
+    paddingBottom: 8,
+    shadowColor: '#000', shadowOffset: { width: 0, height: -3 },
+    shadowOpacity: 0.12, shadowRadius: 8, elevation: 8,
+  },
   dayScroll: { paddingHorizontal: 14, paddingVertical: 12, gap: 10 },
   dayCard: {
     backgroundColor: C.s2, borderRadius: 12, borderWidth: 1, borderColor: C.border,
@@ -5454,23 +5704,40 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
 
   // ── Route card (search result card)
   routeCard: {
-    padding: 12, borderTopWidth: 1, borderColor: '#3b82f6',
-    backgroundColor: 'rgba(8,12,18,0.98)',
+    padding: 16, borderTopWidth: 1, borderColor: OVR.border,
   },
-  routeCardName: { color: C.text, fontSize: 12, fontWeight: '600', marginBottom: 4, lineHeight: 17 },
-  routeCardDist: { color: C.text3, fontSize: 10, fontFamily: mono, marginBottom: 8 },
-  routeCardActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  routeCardRoute: {
+    flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 10,
+  },
+  routeCardDotLine: {
+    width: 16, alignItems: 'center', gap: 3,
+  },
+  routeCardDot: {
+    width: 10, height: 10, borderRadius: 5,
+  },
+  routeCardLine: {
+    width: 2, height: 14, backgroundColor: OVR.border,
+  },
+  routeCardRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+  },
+  routeCardLabel: {
+    color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '700', width: 30,
+  },
+  routeCardRowText: { color: OVR.text, fontSize: 13, fontWeight: '500', flex: 1 },
+  routeCardDist: { color: C.text3, fontSize: 10, fontFamily: mono, marginBottom: 12 },
+  routeCardActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   routeCardNav: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5,
-    paddingVertical: 9, borderRadius: 10, backgroundColor: '#3b82f6',
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    paddingVertical: 12, borderRadius: 12, backgroundColor: C.orange,
   },
-  routeCardNavText: { color: '#fff', fontSize: 11, fontFamily: mono, fontWeight: '700' },
+  routeCardNavText: { color: '#fff', fontSize: 13, fontFamily: mono, fontWeight: '700' },
   routeCardOpts: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: 10, paddingVertical: 9, borderRadius: 10,
-    borderWidth: 1, borderColor: C.border,
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    paddingHorizontal: 14, paddingVertical: 12, borderRadius: 12,
+    borderWidth: 1, borderColor: OVR.border,
   },
-  routeCardOptsText: { color: C.text2, fontSize: 10, fontFamily: mono },
+  routeCardOptsText: { color: C.text2, fontSize: 12, fontFamily: mono },
 
   // ── Route options sheet
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },

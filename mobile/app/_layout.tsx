@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AppState, View, Text, TouchableOpacity } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import * as SecureStore from 'expo-secure-store';
+import { storage } from '@/lib/storage';
 import * as Notifications from 'expo-notifications';
 import * as Updates from 'expo-updates';
 import { useStore } from '@/lib/store';
@@ -77,50 +77,32 @@ export default function RootLayout() {
     }
 
     // Restore session on launch
-    SecureStore.getItemAsync('trailhead_token').then(async token => {
+    storage.get('trailhead_token').then(async token => {
       if (!token) return;
       try {
         const user = await api.me();
-        // Persist user profile so we can restore it when offline
-        SecureStore.setItemAsync('trailhead_user', JSON.stringify(user)).catch(() => {});
+        storage.set('trailhead_user', JSON.stringify(user)).catch(() => {});
         setAuth(token, user);
-        // Check subscription status from backend
         const sub = await api.subscriptionStatus().catch(() => null);
         if (sub?.is_active) setPlan(true, sub.plan_expires_at ?? null);
       } catch (e: any) {
         const isNetworkError = !e?.message || e.message.includes('Network') || e.message.includes('fetch') || e instanceof TypeError;
         if (isNetworkError) {
-          // Offline — restore from cached user profile so we don't log them out
-          const cachedUser = await SecureStore.getItemAsync('trailhead_user').catch(() => null);
+          const cachedUser = await storage.get('trailhead_user').catch(() => null);
           if (cachedUser) {
             try { setAuth(token, JSON.parse(cachedUser)); } catch {}
           }
         } else {
-          // Actual auth failure (401/403) — token is invalid, clear it
-          SecureStore.deleteItemAsync('trailhead_token');
-          SecureStore.deleteItemAsync('trailhead_user');
+          storage.del('trailhead_token');
+          storage.del('trailhead_user');
         }
       }
     });
 
-    // Also verify via StoreKit on device — covers reinstalls where backend may lag
-    // Lazy-require so old binaries without the native module don't crash
-    try {
-      const iap = require('react-native-iap');
-      iap.initConnection().then(async () => {
-        try {
-          const purchases = await iap.getAvailablePurchases();
-          const active = purchases.some((p: any) => {
-            const id = p.productId ?? p.id ?? '';
-            return id === PRODUCT_IDS.monthly || id === PRODUCT_IDS.annual;
-          });
-          if (active) setPlan(true);
-        } catch {}
-        iap.endConnection().catch(() => {});
-      }).catch(() => {});
-    } catch {
-      // Native module not in this binary — skip
-    }
+    // NOTE: Do NOT call iap.initConnection() / getAvailablePurchases() here.
+    // That hits StoreKit on every cold launch and triggers the iOS "Sign into
+    // Apple account" prompt. Subscription status comes from api.subscriptionStatus()
+    // above. StoreKit is only called when the user explicitly opens the paywall.
 
     // Request push permissions and register token with server
     Notifications.requestPermissionsAsync().then(async ({ status }) => {
@@ -131,7 +113,7 @@ export default function RootLayout() {
         });
         const token = tokenData.data;
         // Save token for use after login (user may not be loaded yet)
-        SecureStore.setItemAsync('trailhead_push_token', token).catch(() => {});
+        storage.set('trailhead_push_token', token).catch(() => {});
       } catch {}
     }).catch(() => {});
 
@@ -163,7 +145,7 @@ export default function RootLayout() {
   useEffect(() => {
     if (!user || pushRegistered.current) return;
     pushRegistered.current = true;
-    SecureStore.getItemAsync('trailhead_push_token').then(token => {
+    storage.get('trailhead_push_token').then(token => {
       if (token) api.registerPushToken(token).catch(() => {});
     }).catch(() => {});
   }, [user]);

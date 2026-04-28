@@ -7,33 +7,32 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
 import * as Notifications from 'expo-notifications';
-import * as SecureStore from 'expo-secure-store';
+import { storage } from '@/lib/storage';
+import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { api, Report, LeaderboardEntry } from '@/lib/api';
 import { useStore } from '@/lib/store';
-import { useTheme, mono, ColorPalette, LIGHT_C } from '@/lib/design';
+import { useTheme, mono, ColorPalette } from '@/lib/design';
 
-// Module-level C for static color arrays (always light — good contrast both modes)
-const C = LIGHT_C;
-
+// Semantic category colors — chosen to read well on both light and dark backgrounds
 const REPORT_TYPES = [
-  { type: 'hazard',      label: 'HAZARD',   icon: 'warning-outline',      color: C.red,    ttl: '7d',
+  { type: 'hazard',      label: 'HAZARD',   icon: 'warning-outline',      color: '#ef4444', ttl: '7d',
     subtypes: ['Downed tree', 'Rockfall', 'Wildlife', 'Fire / smoke', 'Flash flood'] },
-  { type: 'police',      label: 'PATROL',   icon: 'shield-outline',        color: C.yellow, ttl: '2h',
+  { type: 'police',      label: 'PATROL',   icon: 'shield-outline',        color: '#f59e0b', ttl: '2h',
     subtypes: ['Ranger patrol', 'Fee checkpoint', 'OHV enforcement', 'Fire restriction'] },
-  { type: 'road_condition', label: 'ROAD',  icon: 'trail-sign-outline',    color: C.orange, ttl: '7d',
+  { type: 'road_condition', label: 'ROAD',  icon: 'trail-sign-outline',    color: '#f97316', ttl: '7d',
     subtypes: ['Clear & good', 'Muddy / soft', 'Washed out', 'Snow / ice', 'Flooded'] },
   { type: 'water',       label: 'WATER',    icon: 'water-outline',         color: '#38bdf8', ttl: '3d',
     subtypes: ['Flowing well', 'Spring dry', 'Questionable quality', 'Filter required'] },
-  { type: 'cell_signal', label: 'SIGNAL',   icon: 'cellular-outline',      color: C.green,  ttl: '1d',
+  { type: 'cell_signal', label: 'SIGNAL',   icon: 'cellular-outline',      color: '#22c55e', ttl: '1d',
     subtypes: ['Strong signal', 'Weak signal', 'No signal', 'Starlink only'] },
   { type: 'wildlife',    label: 'WILDLIFE', icon: 'paw-outline',           color: '#a78bfa', ttl: '1d',
     subtypes: ['Bear activity', 'Mountain lion', 'Elk / deer', 'Snake', 'Cool sighting'] },
-  { type: 'campsite',    label: 'CAMPSITE', icon: '⛺',                    color: C.orange, ttl: '14d',
+  { type: 'campsite',    label: 'CAMPSITE', icon: 'bonfire-outline',       color: '#14b8a6', ttl: '14d',
     subtypes: ['Available & clean', 'Occupied', 'Trashed', 'Great condition', 'No water'] },
-  { type: 'closure',     label: 'CLOSURE',  icon: 'remove-circle-outline', color: C.red,    ttl: '30d',
+  { type: 'closure',     label: 'CLOSURE',  icon: 'remove-circle-outline', color: '#ef4444', ttl: '30d',
     subtypes: ['Gate locked', 'Road closed', 'Seasonal', 'Fire closure', 'Now open!'] },
-  { type: 'fuel',        label: 'FUEL',     icon: '⛽',                    color: C.yellow,  ttl: '12h',
+  { type: 'fuel',        label: 'FUEL',     icon: 'flash-outline',         color: '#eab308', ttl: '12h',
     subtypes: ['Diesel available', 'Gas available', 'Propane available', 'Fuel out', 'Price info'] },
   { type: 'viewpoint',   label: 'VIEW',     icon: 'flag-outline',          color: '#38bdf8', ttl: '90d',
     subtypes: ['Epic vista', 'Sunrise spot', 'Sunset spot', 'Photo opportunity', 'Hidden gem'] },
@@ -42,10 +41,10 @@ const REPORT_TYPES = [
 ];
 
 const SEVERITY = [
-  { val: 'low',      label: 'FYI',     color: C.green  },
-  { val: 'moderate', label: 'HEADS UP', color: C.yellow },
-  { val: 'high',     label: 'CAUTION', color: C.orange  },
-  { val: 'critical', label: 'AVOID',   color: C.red     },
+  { val: 'low',      label: 'FYI',      color: '#22c55e' },
+  { val: 'moderate', label: 'HEADS UP', color: '#f59e0b' },
+  { val: 'high',     label: 'CAUTION',  color: '#f97316' },
+  { val: 'critical', label: 'AVOID',    color: '#ef4444' },
 ];
 
 const PHOTO_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://trailhead-production-2049.up.railway.app';
@@ -106,6 +105,7 @@ export default function ReportScreen() {
     setSelectedType(rt);
     setSelectedSubtype('');
     setCampsiteRating(0);
+    Haptics.selectionAsync();
     Animated.sequence([
       Animated.timing(typeAnims[idx], { toValue: 0.88, duration: 80, useNativeDriver: true }),
       Animated.spring(typeAnims[idx], { toValue: 1, tension: 200, friction: 6, useNativeDriver: true }),
@@ -145,6 +145,7 @@ export default function ReportScreen() {
         photo_data: photoBase64 ?? undefined,
       });
       setCreditsGained(res.credits_earned + (res.streak_bonus ?? 0));
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setSubmitted(true);
       // Push report to shared store so map tab shows the pin immediately
       addLiveReport({
@@ -421,7 +422,7 @@ export default function ReportScreen() {
 }
 
 async function getToken() {
-  return (await SecureStore.getItemAsync('trailhead_token')) ?? '';
+  return (await storage.get('trailhead_token')) ?? '';
 }
 
 function ReportCard({ report: r, onPress, onUpvote, onDownvote, onConfirm }:

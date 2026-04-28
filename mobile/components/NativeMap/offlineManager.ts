@@ -10,7 +10,6 @@
  * no per-tile download loop. The SDK handles resume on failure, quota, etc.
  */
 import MapLibreGL from '@maplibre/maplibre-react-native';
-import { buildMapStyle } from './mapStyle';
 
 // Bounds format: [[westLng, southLat], [eastLng, northLat]]
 export type PackBounds = [[number, number], [number, number]];
@@ -36,11 +35,11 @@ export interface InstalledPack {
 const MAX_TILE_COUNT = 1_000_000;
 
 // ── Build style URI for offline packs ────────────────────────────────────────
-// Data URI is self-contained — no network needed to load the style definition.
-// Tiles still come from the URL in the source; those are what gets downloaded.
-function packStyleURI(mapboxToken: string): string {
-  const style = buildMapStyle('topo', mapboxToken);
-  return `data:application/json,${encodeURIComponent(JSON.stringify(style))}`;
+// MLN iOS requires a real https:// URL — data: URIs cause MLNErrorDomain Code=-1.
+// The CF Worker at tiles.gettrailhead.app/api/style.json serves the topo style.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function packStyleURI(_mapboxToken: string): string {
+  return 'https://tiles.gettrailhead.app/api/style.json';
 }
 
 // ── Download a pack ───────────────────────────────────────────────────────────

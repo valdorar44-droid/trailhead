@@ -1,9 +1,9 @@
-import * as SecureStore from 'expo-secure-store';
+import { storage } from './storage';
 
 const BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
 
 async function getToken(): Promise<string | null> {
-  return SecureStore.getItemAsync('trailhead_token');
+  return storage.get('trailhead_token');
 }
 
 export class PaywallError extends Error {

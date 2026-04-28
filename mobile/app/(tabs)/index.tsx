@@ -9,6 +9,8 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
+import * as Haptics from 'expo-haptics';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { api, PaywallError, TripResult, TrailDNA } from '@/lib/api';
 import PaywallModal from '@/components/PaywallModal';
 import { useStore } from '@/lib/store';
@@ -116,9 +118,11 @@ export default function PlanScreen() {
     if (!text || loading || sendRef.current) return;
     sendRef.current = true;
     setTimeout(() => { sendRef.current = false; }, 1500);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setInput('');
     setMessages(m => [...m, { role: 'user', text }]);
     setLoading(true);
+    activateKeepAwakeAsync('ai-chat');
 
     const finalText = await resolveLocation(text);
 
@@ -148,6 +152,7 @@ export default function PlanScreen() {
         setPlanPhase('active');
       } finally {
         stopStages(); setLoading(false); scrollToEnd();
+        deactivateKeepAwake('ai-chat');
       }
       return;
     }
@@ -175,6 +180,7 @@ export default function PlanScreen() {
       else { setMessages(m => [...m, { role: 'ai', text: `⚠ ${e.message}` }]); setPlanPhase('idle'); }
     } finally {
       stopStages(); setLoading(false); scrollToEnd();
+      deactivateKeepAwake('ai-chat');
     }
   }
 
@@ -184,14 +190,25 @@ export default function PlanScreen() {
     const wps = activeTrip.plan?.waypoints ?? [];
     const lastWp = [...wps].reverse().find(w => w.type === 'camp' || w.type === 'motel' || w.type === 'start');
     const endLocation = lastWp?.name ?? activeTrip.plan?.trip_name ?? 'your last stop';
-    const days = activeTrip.plan?.duration_days ?? 0;
-    setActiveTrip(null);
-    setMessages([{
-      role: 'ai',
-      text: `Ready for leg 2! Picking up from ${endLocation.split(',')[0]}. Where do you want to head next, and how many days do you have?`,
-    }]);
-    setInput(`Continue from ${endLocation.split(',')[0]} — `);
-    setPlanPhase('chatting');
+    Alert.alert(
+      'Start Next Leg?',
+      `This will clear your current trip plan and start a new conversation from ${endLocation.split(',')[0]}.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Continue', style: 'default',
+          onPress: () => {
+            setActiveTrip(null);
+            setMessages([{
+              role: 'ai',
+              text: `Ready for leg 2! Picking up from ${endLocation.split(',')[0]}. Where do you want to head next, and how many days do you have?`,
+            }]);
+            setInput(`Continue from ${endLocation.split(',')[0]} — `);
+            setPlanPhase('chatting');
+          },
+        },
+      ]
+    );
   }
 
   // ── Build full trip from conversation ─────────────────────────────────────
@@ -199,10 +216,13 @@ export default function PlanScreen() {
     setMessages(m => m.filter(msg => !msg.outline));
     setPlanPhase('planning');
     setLoading(true);
+    // Prevent screen sleep during long AI planning (can take 2-3 min)
+    await activateKeepAwakeAsync('trip-build');
     // Use the longer stage list so "this can take a minute" shows up for long trips
     startStages(PLAN_STAGES_LONG);
     try {
       const result = await api.planFromSession(sessionId);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setActiveTrip(result);
       setMessages(m => [...m, { role: 'ai', trip: result }]);
       addTripToHistory({
@@ -655,9 +675,9 @@ function OutlineCard({ outline, C, onBuild, onRefine, loading }: {
 
   return (
     <Animated.View style={[{
-      backgroundColor: isRetry ? 'rgba(184,92,56,0.07)' : 'rgba(200,149,58,0.08)',
+      backgroundColor: isRetry ? C.orangeGlow : C.gold + '18',
       borderWidth: 1,
-      borderColor: isRetry ? 'rgba(184,92,56,0.25)' : 'rgba(200,149,58,0.28)',
+      borderColor: isRetry ? C.orange + '44' : C.gold + '44',
       borderRadius: 14, overflow: 'hidden',
       opacity: fadeAnim, transform: [{ translateY: slideAnim }],
     }]}>
@@ -775,21 +795,21 @@ function TripCard({ trip, C, onViewMap, onViewGuide, onNextLeg }: {
       opacity: fadeAnim, transform: [{ translateY: slideAnim }],
     }]}>
       {/* Hero */}
-      <View style={{ backgroundColor: '#0a150a', padding: 14, borderBottomWidth: 1, borderColor: '#1e2e20' }}>
+      <View style={{ backgroundColor: C.s1, padding: 14, borderBottomWidth: 1, borderColor: C.border }}>
         <View style={{ marginBottom: 4 }}>
           <Text style={{ color: C.orange, fontSize: 8.5, fontFamily: mono, letterSpacing: 1.2 }}>✦ AI TRIP PLAN READY</Text>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
           <View style={{ flex: 1 }}>
-            <Text style={{ color: '#e4ddd2', fontSize: 18, fontWeight: '900', letterSpacing: -0.5, lineHeight: 22, textTransform: 'uppercase' }} numberOfLines={2}>{p.trip_name}</Text>
-            <Text style={{ color: '#8a9285', fontSize: 10, fontFamily: mono, letterSpacing: 0.8, marginTop: 3 }}>{(p.states ?? []).join(' · ')}</Text>
+            <Text style={{ color: C.text, fontSize: 18, fontWeight: '900', letterSpacing: -0.5, lineHeight: 22, textTransform: 'uppercase' }} numberOfLines={2}>{p.trip_name}</Text>
+            <Text style={{ color: C.text2, fontSize: 10, fontFamily: mono, letterSpacing: 0.8, marginTop: 3 }}>{(p.states ?? []).join(' · ')}</Text>
           </View>
           <View style={{ flexDirection: 'row', gap: 4, marginTop: -2 }}>
             <TouchableOpacity onPress={() => shareGpx(trip)} style={{ padding: 4 }}>
-              <Ionicons name="navigate-circle-outline" size={18} color="#8a9285" />
+              <Ionicons name="navigate-circle-outline" size={18} color={C.text2} />
             </TouchableOpacity>
             <TouchableOpacity onPress={shareTrip} style={{ padding: 4 }}>
-              <Ionicons name="share-outline" size={18} color="#8a9285" />
+              <Ionicons name="share-outline" size={18} color={C.text2} />
             </TouchableOpacity>
           </View>
         </View>
@@ -834,10 +854,10 @@ function TripCard({ trip, C, onViewMap, onViewGuide, onNextLeg }: {
       {onNextLeg && (p.duration_days ?? 0) >= 12 && (
         <TouchableOpacity
           onPress={onNextLeg}
-          style={{ margin: 12, marginTop: 0, paddingVertical: 11, borderRadius: 8, borderWidth: 1, borderColor: '#22c55e55', backgroundColor: '#0d2a1622', alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }}
+          style={{ margin: 12, marginTop: 0, paddingVertical: 11, borderRadius: 8, borderWidth: 1, borderColor: C.green + '55', backgroundColor: C.green + '15', alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }}
         >
-          <Ionicons name="arrow-forward-circle-outline" size={16} color="#22c55e" />
-          <Text style={{ color: '#22c55e', fontSize: 11, fontFamily: mono, fontWeight: '700', letterSpacing: 0.5 }}>PLAN NEXT LEG FROM HERE →</Text>
+          <Ionicons name="arrow-forward-circle-outline" size={16} color={C.green} />
+          <Text style={{ color: C.green, fontSize: 11, fontFamily: mono, fontWeight: '700', letterSpacing: 0.5 }}>PLAN NEXT LEG FROM HERE →</Text>
         </TouchableOpacity>
       )}
     </Animated.View>

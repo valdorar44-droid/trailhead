@@ -1,10 +1,11 @@
 /**
  * MapLibre style spec for Trailhead - dark outdoor theme.
- * Protomaps v4 schema: property name "kind" on all source layers.
+ * Protomaps v4 schema: "kind" on all layers, "rank" on places (1=most important).
  *
  * Key principle: highways must be thick + bright at z3-z5 so users can
  * orient themselves when zoomed out to a 200-mile view. OSM achieves this
  * with thick red interstates; we use bright orange (#e89428) on a dark field.
+ * City labels use Protomaps "rank" (NOT "population_rank") — lower rank = bigger city.
  */
 
 export type MapMode = 'satellite' | 'topo' | 'hybrid';
@@ -12,7 +13,14 @@ export type MapMode = 'satellite' | 'topo' | 'hybrid';
 const TILE_BASE = 'https://tiles.gettrailhead.app';
 const GLYPH_URL = `${TILE_BASE}/api/fonts/{fontstack}/{range}.pbf`;
 
-export function buildMapStyle(mode: MapMode, mapboxToken: string): object {
+// When the local tile server is running, tile requests go to localhost.
+// Glyphs still come from the CDN (always online for label rendering).
+export const LOCAL_TILE_URL_TEMPLATE = 'http://127.0.0.1:57832/api/tiles/{z}/{x}/{y}.pbf';
+
+export function buildMapStyle(mode: MapMode, mapboxToken: string, localTiles = false): object {
+  const tileUrl = localTiles
+    ? LOCAL_TILE_URL_TEMPLATE
+    : `${TILE_BASE}/api/tiles/{z}/{x}/{y}.pbf`;
   const sat = mode === 'satellite';
   const hyb = mode === 'hybrid';
   const lwHalo = sat ? 'rgba(0,0,0,0.85)' : '#13161c';
@@ -20,8 +28,11 @@ export function buildMapStyle(mode: MapMode, mapboxToken: string): object {
   const sources: Record<string, object> = {
     pm: {
       type: 'vector',
-      tiles: [`${TILE_BASE}/api/tiles/{z}/{x}/{y}.pbf`],
+      tiles: [tileUrl],
+      minzoom: 0,
       maxzoom: 15,
+      // CONUS-only PMTiles extract — tells MLN not to request tiles outside this bbox
+      bounds: [-125.0, 24.5, -66.5, 49.5],
       attribution: '© OpenStreetMap',
     },
   };
@@ -156,10 +167,20 @@ export function buildMapStyle(mode: MapMode, mapboxToken: string): object {
         'line-width': ['interpolate', ['linear'], ['zoom'], 3, 1, 8, 2.5],
         'line-opacity': sat ? 0.7 : 1 } },
 
-    // POI circles (camps, trailheads, viewpoints)
-    { id: 'pm-pois-camp', type: 'circle', source: 'pm', 'source-layer': 'pois',
-      filter: ['in', ['get', 'kind'], ['literal', ['camp_site', 'camp_pitch', 'picnic_site', 'shelter']]],
-      paint: { 'circle-radius': 5, 'circle-color': '#14b8a6', 'circle-stroke-width': 1.5, 'circle-stroke-color': '#fff', 'circle-opacity': labelOp } },
+    // POI circles — camp types differentiated by color + size
+    // camp_site (developed, facilities)  = teal,   6px
+    // camp_pitch (dispersed/individual)  = brown,  3.5px — primitive pads
+    // shelter (trail shelter)            = purple, 5px
+    { id: 'pm-pois-camp-site', type: 'circle', source: 'pm', 'source-layer': 'pois',
+      filter: ['==', ['get', 'kind'], 'camp_site'],
+      paint: { 'circle-radius': 6, 'circle-color': '#14b8a6', 'circle-stroke-width': 1.5, 'circle-stroke-color': '#fff', 'circle-opacity': labelOp } },
+    { id: 'pm-pois-camp-pitch', type: 'circle', source: 'pm', 'source-layer': 'pois',
+      filter: ['==', ['get', 'kind'], 'camp_pitch'],
+      minzoom: 11,
+      paint: { 'circle-radius': 3.5, 'circle-color': '#c4915a', 'circle-stroke-width': 1, 'circle-stroke-color': 'rgba(255,255,255,0.6)', 'circle-opacity': labelOp } },
+    { id: 'pm-pois-shelter', type: 'circle', source: 'pm', 'source-layer': 'pois',
+      filter: ['==', ['get', 'kind'], 'shelter'],
+      paint: { 'circle-radius': 5, 'circle-color': '#8b5cf6', 'circle-stroke-width': 1.5, 'circle-stroke-color': '#fff', 'circle-opacity': labelOp } },
     { id: 'pm-pois-trailhead', type: 'circle', source: 'pm', 'source-layer': 'pois',
       filter: ['==', ['get', 'kind'], 'trailhead'],
       paint: { 'circle-radius': 5, 'circle-color': '#22c55e', 'circle-stroke-width': 1.5, 'circle-stroke-color': '#fff', 'circle-opacity': labelOp } },
@@ -176,9 +197,16 @@ export function buildMapStyle(mode: MapMode, mapboxToken: string): object {
         'text-offset': [0, 0.7], 'text-anchor': 'top' },
       paint: { 'text-color': '#f59e0b', 'text-halo-color': lwHalo, 'text-halo-width': 1.5, 'text-opacity': labelOp } },
 
+    // Road labels — highways from z8, local roads from z12
+    { id: 'road-name-hwy', type: 'symbol', source: 'pm', 'source-layer': 'roads',
+      minzoom: 8,
+      filter: ['all', ['has', 'name'], ['==', ['get', 'kind'], 'highway']],
+      layout: { 'text-field': ['get', 'name'], 'text-size': 9, 'text-font': ['Noto Sans Medium'],
+        'symbol-placement': 'line', 'text-max-width': 10, 'text-repeat': 400 },
+      paint: { 'text-color': sat ? '#fbbf24' : '#c4a050', 'text-halo-color': lwHalo, 'text-halo-width': 1.8, 'text-opacity': roadOp } },
     { id: 'road-name', type: 'symbol', source: 'pm', 'source-layer': 'roads',
       minzoom: 12,
-      filter: ['all', ['has', 'name'], ['in', ['get', 'kind'], ['literal', ['highway', 'major_road', 'medium_road', 'minor_road']]]],
+      filter: ['all', ['has', 'name'], ['in', ['get', 'kind'], ['literal', ['major_road', 'medium_road', 'minor_road']]]],
       layout: { 'text-field': ['get', 'name'], 'text-size': 10, 'text-font': ['Noto Sans Medium'],
         'symbol-placement': 'line', 'text-max-width': 10 },
       paint: { 'text-color': sat ? '#fff' : '#b9bcc4', 'text-halo-color': lwHalo, 'text-halo-width': 1.8, 'text-opacity': labelOp } },
@@ -189,26 +217,47 @@ export function buildMapStyle(mode: MapMode, mapboxToken: string): object {
       layout: { 'text-field': ['get', 'name'], 'text-size': 10, 'text-font': ['Noto Sans Italic'], 'text-max-width': 9 },
       paint: { 'text-color': '#5faa6a', 'text-halo-color': lwHalo, 'text-halo-width': 1.6, 'text-opacity': labelOp } },
 
-    // Places - show cities from z4, medium towns from z6, small from z8
-    { id: 'place-small', type: 'symbol', source: 'pm', 'source-layer': 'places',
-      minzoom: 8,
-      filter: ['all', ['==', ['get', 'kind'], 'locality'], ['<', ['coalesce', ['get', 'population_rank'], 0], 8]],
-      layout: { 'text-field': ['get', 'name'], 'text-size': 11, 'text-font': ['Noto Sans Regular'] },
-      paint: { 'text-color': '#a3aab9', 'text-halo-color': lwHalo, 'text-halo-width': 1.8, 'text-opacity': labelOp } },
+    // Country labels z2-z5
+    { id: 'place-country', type: 'symbol', source: 'pm', 'source-layer': 'places',
+      minzoom: 2, maxzoom: 5,
+      filter: ['==', ['get', 'kind'], 'country'],
+      layout: { 'text-field': ['get', 'name'], 'text-size': ['interpolate', ['linear'], ['zoom'], 2, 9, 5, 13],
+        'text-font': ['Noto Sans Medium'], 'text-transform': 'uppercase' },
+      paint: { 'text-color': '#9aa5b8', 'text-halo-color': lwHalo, 'text-halo-width': 1.5, 'text-opacity': labelOp } },
 
+    // State/region labels z4-z8
+    { id: 'place-region', type: 'symbol', source: 'pm', 'source-layer': 'places',
+      minzoom: 4, maxzoom: 8,
+      filter: ['==', ['get', 'kind'], 'region'],
+      layout: { 'text-field': ['get', 'name'], 'text-size': ['interpolate', ['linear'], ['zoom'], 4, 8, 7, 12],
+        'text-font': ['Noto Sans Regular'], 'text-transform': 'uppercase', 'text-letter-spacing': 0.08 },
+      paint: { 'text-color': '#4a5a70', 'text-halo-color': lwHalo, 'text-halo-width': 1.2, 'text-opacity': labelOp } },
+
+    // FIXED: Protomaps v4 uses 'rank' (1=most important) NOT 'population_rank'
+    // rank 1-4: major metros (Chicago, KC, Omaha…) from z3
+    { id: 'place-large', type: 'symbol', source: 'pm', 'source-layer': 'places',
+      minzoom: 3,
+      filter: ['all', ['==', ['get', 'kind'], 'locality'], ['<=', ['coalesce', ['get', 'rank'], 99], 4]],
+      layout: { 'text-field': ['get', 'name'], 'text-size': ['interpolate', ['linear'], ['zoom'], 3, 11, 8, 18, 12, 22],
+        'text-font': ['Noto Sans Medium'] },
+      paint: { 'text-color': '#e6e9f1', 'text-halo-color': lwHalo, 'text-halo-width': 2.5, 'text-opacity': labelOp } },
+
+    // rank 5-7: cities (Topeka, Wichita, Lincoln…) from z5
     { id: 'place-medium', type: 'symbol', source: 'pm', 'source-layer': 'places',
-      minzoom: 6,
+      minzoom: 5,
       filter: ['all', ['==', ['get', 'kind'], 'locality'],
-        ['>=', ['coalesce', ['get', 'population_rank'], 0], 8],
-        ['<',  ['coalesce', ['get', 'population_rank'], 0], 11]],
-      layout: { 'text-field': ['get', 'name'], 'text-size': ['interpolate', ['linear'], ['zoom'], 6, 11, 12, 16], 'text-font': ['Noto Sans Medium'] },
+        ['>', ['coalesce', ['get', 'rank'], 99], 4],
+        ['<=', ['coalesce', ['get', 'rank'], 99], 7]],
+      layout: { 'text-field': ['get', 'name'], 'text-size': ['interpolate', ['linear'], ['zoom'], 5, 10, 10, 15, 14, 18],
+        'text-font': ['Noto Sans Medium'] },
       paint: { 'text-color': '#cdd2dd', 'text-halo-color': lwHalo, 'text-halo-width': 2, 'text-opacity': labelOp } },
 
-    { id: 'place-large', type: 'symbol', source: 'pm', 'source-layer': 'places',
-      minzoom: 4,
-      filter: ['all', ['==', ['get', 'kind'], 'locality'], ['>=', ['coalesce', ['get', 'population_rank'], 0], 11]],
-      layout: { 'text-field': ['get', 'name'], 'text-size': ['interpolate', ['linear'], ['zoom'], 4, 12, 12, 20], 'text-font': ['Noto Sans Bold'] },
-      paint: { 'text-color': '#e6e9f1', 'text-halo-color': lwHalo, 'text-halo-width': 2.5, 'text-opacity': labelOp } },
+    // rank > 7: towns from z8
+    { id: 'place-small', type: 'symbol', source: 'pm', 'source-layer': 'places',
+      minzoom: 8,
+      filter: ['all', ['==', ['get', 'kind'], 'locality'], ['>', ['coalesce', ['get', 'rank'], 99], 7]],
+      layout: { 'text-field': ['get', 'name'], 'text-size': 11, 'text-font': ['Noto Sans Regular'] },
+      paint: { 'text-color': '#a3aab9', 'text-halo-color': lwHalo, 'text-halo-width': 1.8, 'text-opacity': labelOp } },
   );
 
   return {

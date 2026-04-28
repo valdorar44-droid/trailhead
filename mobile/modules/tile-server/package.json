@@ -1,0 +1,7 @@
+{
+  "name": "expo-tile-server",
+  "version": "1.0.0",
+  "description": "Local PMTiles HTTP server for Trailhead offline maps",
+  "main": "src/index.js",
+  "types": "src/index.d.ts"
+}

@@ -32,4 +32,5 @@ export interface RouteResult {
   totalDistance: number;
   totalDuration: number;
   isProper: boolean;
+  fromCache?: boolean;
 }

@@ -8,7 +8,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
-import * as SecureStore from 'expo-secure-store';
+import { storage } from '@/lib/storage';
 import * as Updates from 'expo-updates';
 import { api } from '@/lib/api';
 import { useStore, RigProfile } from '@/lib/store';
@@ -105,7 +105,7 @@ export default function ProfileScreen() {
   const [showPaywall, setShowPaywall] = useState(false);
   const hasPlan     = useStore(st => st.hasPlan);
   const setPlan     = useStore(st => st.setPlan);
-  const { purchase, restore, monthlyProduct, annualProduct, purchasing, restoring } = useSubscription();
+  const { purchase, restore, openPaywall, monthlyProduct, annualProduct, purchasing, restoring } = useSubscription();
   const [gpxImporting, setGpxImporting] = useState(false);
   const [gpxResult, setGpxResult] = useState('');
   const [showBugModal, setShowBugModal] = useState(false);
@@ -138,6 +138,11 @@ export default function ProfileScreen() {
     }, 700);
   }
 
+  // If user session restores from SecureStore after mount, skip the login screen
+  useEffect(() => {
+    if (user && view !== 'main') setView('main');
+  }, [user]);
+
   // Sync draft when rigProfile loads from SecureStore
   useEffect(() => {
     if (rigProfile && !editingRig) setRigDraft(rigProfile);
@@ -145,7 +150,7 @@ export default function ProfileScreen() {
 
   // Load checklist from SecureStore on mount
   useEffect(() => {
-    SecureStore.getItemAsync('trailhead_checklist').then(json => {
+    storage.get('trailhead_checklist').then(json => {
       if (json) setChecklist(JSON.parse(json));
     }).catch(() => {});
   }, []);
@@ -218,7 +223,7 @@ export default function ProfileScreen() {
         ...sec,
         items: sec.items.map(item => item.id === itemId ? { ...item, done: !item.done } : item),
       });
-      SecureStore.setItemAsync('trailhead_checklist', JSON.stringify(next)).catch(() => {});
+      storage.set('trailhead_checklist', JSON.stringify(next)).catch(() => {});
       return next;
     });
   }
@@ -226,7 +231,7 @@ export default function ProfileScreen() {
   function resetChecklist() {
     const reset = checklist.map(sec => ({ ...sec, items: sec.items.map(i => ({ ...i, done: false })) }));
     setChecklist(reset);
-    SecureStore.setItemAsync('trailhead_checklist', JSON.stringify(reset)).catch(() => {});
+    storage.set('trailhead_checklist', JSON.stringify(reset)).catch(() => {});
   }
 
   function saveRig() {
@@ -256,12 +261,15 @@ export default function ProfileScreen() {
         return;
       }
 
-      const pins = wptMatches.map((m, i) => ({
-        lat: parseFloat(m[1]), lng: parseFloat(m[2]),
-        name: nameMatches[i + 1]?.[1]?.trim() ?? `Waypoint ${i + 1}`,
-        type: 'gpx_import',
-        description: `Imported from GPX: ${file.name}`,
-      }));
+      const pins = wptMatches
+        .map((m, i) => ({
+          lat: parseFloat(m[1]), lng: parseFloat(m[2]),
+          name: nameMatches[i + 1]?.[1]?.trim() ?? `Waypoint ${i + 1}`,
+          type: 'gpx_import',
+          description: `Imported from GPX: ${file.name}`,
+        }))
+        .filter(p => isFinite(p.lat) && isFinite(p.lng) &&
+          p.lat >= -90 && p.lat <= 90 && p.lng >= -180 && p.lng <= 180);
 
       if (pins.length > 0) {
         await Promise.all(pins.slice(0, 20).map(p => api.submitPin(p).catch(() => {})));
@@ -924,7 +932,7 @@ export default function ProfileScreen() {
           ) : (
             <>
               <View style={s.divider} />
-              <TouchableOpacity style={s.getPlanBtn} onPress={() => setShowPaywall(true)} activeOpacity={0.85}>
+              <TouchableOpacity style={s.getPlanBtn} onPress={() => { openPaywall(); setShowPaywall(true); }} activeOpacity={0.85}>
                 <View>
                   <Text style={s.getPlanBtnLabel}>Get Explorer Plan</Text>
                   <Text style={s.getPlanBtnSub}>
@@ -933,7 +941,7 @@ export default function ProfileScreen() {
                 </View>
                 <Ionicons name="arrow-forward" size={18} color="#fff" />
               </TouchableOpacity>
-              <TouchableOpacity style={s.restoreRow} onPress={restore} disabled={restoring}>
+              <TouchableOpacity style={s.restoreRow} onPress={() => { openPaywall(); setTimeout(restore, 300); }} disabled={restoring}>
                 {restoring
                   ? <ActivityIndicator size="small" color={C.text3} />
                   : <Text style={s.restoreRowText}>Restore purchases</Text>
@@ -1160,22 +1168,17 @@ export default function ProfileScreen() {
           <Text style={s.deleteAccountText}>Delete Account</Text>
         </TouchableOpacity>
 
-        {/* Build / OTA version */}
+        {/* App version info */}
         <View style={s.versionCard}>
+          <Text style={[s.versionLabel, { marginBottom: 8, letterSpacing: 0.5 }]}>TRAILHEAD v1.0</Text>
           <View style={s.versionRow}>
-            <Text style={s.versionLabel}>CHANNEL</Text>
-            <Text style={s.versionValue}>{Updates.channel ?? (Updates.isEmbeddedLaunch ? 'embedded' : 'dev')}</Text>
+            <Text style={s.versionLabel}>VERSION</Text>
+            <Text style={s.versionValue}>{Updates.updateId ? Updates.updateId.slice(0, 8) : 'release'}</Text>
           </View>
           <View style={s.versionRow}>
-            <Text style={s.versionLabel}>UPDATE ID</Text>
-            <Text style={s.versionValue} numberOfLines={1}>
-              {Updates.updateId ? Updates.updateId.slice(0, 8) + '…' : (Updates.isEmbeddedLaunch ? 'embedded build' : '—')}
-            </Text>
-          </View>
-          <View style={s.versionRow}>
-            <Text style={s.versionLabel}>PUBLISHED</Text>
+            <Text style={s.versionLabel}>LAST UPDATED</Text>
             <Text style={s.versionValue}>
-              {Updates.createdAt ? Updates.createdAt.toLocaleString() : '—'}
+              {Updates.createdAt ? Updates.createdAt.toLocaleDateString() : 'current build'}
             </Text>
           </View>
         </View>
@@ -1189,7 +1192,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   scroll: { padding: 14, gap: 14, paddingBottom: 40 },
 
   authSuccessWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16, padding: 32 },
-  authSuccessText: { color: '#22c55e', fontSize: 17, fontWeight: '700', textAlign: 'center', lineHeight: 24 },
+  authSuccessText: { color: C.green, fontSize: 17, fontWeight: '700', textAlign: 'center', lineHeight: 24 },
   authScroll: { flexGrow: 1, justifyContent: 'center', padding: 28, gap: 14 },
   authBrand: {
     flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8,
@@ -1395,14 +1398,14 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     backgroundColor: C.orangeGlow, alignItems: 'center', justifyContent: 'center',
     borderWidth: 1, borderColor: C.orange,
   },
-  creditsBadgeActive: { backgroundColor: 'rgba(34,197,94,0.12)', borderColor: '#22c55e' },
+  creditsBadgeActive: { backgroundColor: C.green + '20', borderColor: C.green },
   divider: { height: 1, backgroundColor: C.border, marginBottom: 12, marginTop: 4 },
   planActiveBanner: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: 'rgba(34,197,94,0.1)', borderRadius: 10, borderWidth: 1, borderColor: 'rgba(34,197,94,0.3)',
+    backgroundColor: C.green + '18', borderRadius: 10, borderWidth: 1, borderColor: C.green + '44',
     paddingHorizontal: 12, paddingVertical: 10, marginTop: 8,
   },
-  planActiveText: { color: '#22c55e', fontSize: 13, fontWeight: '700' },
+  planActiveText: { color: C.green, fontSize: 13, fontWeight: '700' },
   managePlanBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
     paddingVertical: 10, marginTop: 4,
@@ -1540,8 +1543,8 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   tripRowMeta: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
   offlineBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 3,
-    backgroundColor: 'rgba(34,197,94,0.12)', borderRadius: 5, borderWidth: 1, borderColor: 'rgba(34,197,94,0.3)',
+    backgroundColor: C.green + '20', borderRadius: 5, borderWidth: 1, borderColor: C.green + '44',
     paddingHorizontal: 6, paddingVertical: 3,
   },
-  offlineBadgeText: { color: '#22c55e', fontSize: 8, fontFamily: mono, fontWeight: '700', letterSpacing: 0.5 },
+  offlineBadgeText: { color: C.green, fontSize: 8, fontFamily: mono, fontWeight: '700', letterSpacing: 0.5 },
 });

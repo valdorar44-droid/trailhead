@@ -1,6 +1,49 @@
 import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
+import * as FileSystem from 'expo-file-system';
 import { User, TripResult, Report, CampsitePin } from './api';
+
+// File-based trip storage — no 2KB SecureStore limit
+const TRIP_FILE = () => `${FileSystem.documentDirectory}active_trip.json`;
+const saveTripFile  = (trip: TripResult) => FileSystem.writeAsStringAsync(TRIP_FILE(), JSON.stringify(trip)).catch(() => {});
+const loadTripFile  = async (): Promise<TripResult | null> => {
+  try { const raw = await FileSystem.readAsStringAsync(TRIP_FILE()); return JSON.parse(raw); } catch { return null; }
+};
+const deleteTripFile = () => FileSystem.deleteAsync(TRIP_FILE(), { idempotent: true }).catch(() => {});
+
+// Keep all keychain items on this device only — prevents iOS from prompting
+// "Sign into Apple account" to sync with iCloud Keychain.
+const KCO = { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY };
+const ss  = (key: string, val: string) => SecureStore.setItemAsync(key, val, KCO);
+const sg  = (key: string)              => SecureStore.getItemAsync(key, KCO);
+const sd  = (key: string)              => SecureStore.deleteItemAsync(key, KCO);
+
+export interface SavedPlace {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  icon: 'star' | 'camp' | 'flag' | 'water' | 'fuel' | 'pin';
+  groupId?: string;
+  note?: string;
+  createdAt: number;
+}
+
+export interface MarkerGroup {
+  id: string;
+  name: string;
+  color: string;
+  icon: string;
+  visible: boolean;
+  createdAt: number;
+}
+
+export interface SearchHistoryItem {
+  name: string;
+  lat: number;
+  lng: number;
+  searchedAt: number;
+}
 
 export interface RigProfile {
   vehicle_type: string;
@@ -47,6 +90,9 @@ interface AppState {
   liveReports: Report[];
   cachedRegions: string[];
   favoriteCamps: CampsitePin[];
+  savedPlaces: SavedPlace[];
+  markerGroups: MarkerGroup[];
+  searchHistory: SearchHistoryItem[];
   offlineTripIds: string[];
   activeTripFromCache: boolean;
   hasPlan: boolean;
@@ -65,6 +111,13 @@ interface AppState {
   addCachedRegion: (label: string) => void;
   removeCachedRegion: (label: string) => void;
   toggleFavorite: (camp: CampsitePin) => void;
+  addSavedPlace: (p: SavedPlace) => void;
+  removeSavedPlace: (id: string) => void;
+  addMarkerGroup: (g: MarkerGroup) => void;
+  updateMarkerGroup: (id: string, updates: Partial<MarkerGroup>) => void;
+  removeMarkerGroup: (id: string) => void;
+  addSearchHistory: (item: SearchHistoryItem) => void;
+  clearSearchHistory: () => void;
   setOfflineTripIds: (ids: string[]) => void;
   setPlan: (active: boolean, expiresAt?: number | null) => void;
 }
@@ -82,15 +135,17 @@ export const useStore = create<AppState>((set) => ({
   liveReports: [],
   cachedRegions: [],
   favoriteCamps: [],
+  savedPlaces: [],
+  markerGroups: [],
+  searchHistory: [],
   offlineTripIds: [],
   activeTripFromCache: false,
   hasPlan: false,
   planExpiresAt: null,
 
   setAuth: (token, user) => {
-    SecureStore.setItemAsync('trailhead_token', token);
-    // Reset all user-specific state so a newly logged-in user never sees
-    // a previous user's rig, history, or favorites still in memory.
+    ss('trailhead_token', token);
+    ss('trailhead_user', JSON.stringify(user));
     set({
       token, user,
       activeTrip: null,
@@ -103,14 +158,13 @@ export const useStore = create<AppState>((set) => ({
   },
 
   clearAuth: () => {
-    // Wipe token AND all user-specific device storage so the next user
-    // who logs in on this device starts with a clean slate.
-    SecureStore.deleteItemAsync('trailhead_token');
-    SecureStore.deleteItemAsync('trailhead_rig');
-    SecureStore.deleteItemAsync('trailhead_history');
-    SecureStore.deleteItemAsync('trailhead_favorites');
-    SecureStore.deleteItemAsync('trailhead_active_trip');
-    SecureStore.deleteItemAsync('trailhead_active_route');
+    sd('trailhead_token');
+    sd('trailhead_user');
+    sd('trailhead_rig');
+    sd('trailhead_history');
+    sd('trailhead_favorites');
+    sd('trailhead_active_trip');
+    sd('trailhead_active_route');
     set({
       token: null,
       user: null,
@@ -127,27 +181,27 @@ export const useStore = create<AppState>((set) => ({
   // guides — everything to navigate) survives offline relaunch.
   setActiveTrip: (trip, fromCache = false) => {
     if (trip) {
-      try { SecureStore.setItemAsync('trailhead_active_trip', JSON.stringify(trip)).catch(() => {}); } catch {}
+      saveTripFile(trip); // file-based — no 2KB SecureStore limit
     } else {
-      SecureStore.deleteItemAsync('trailhead_active_trip').catch(() => {});
-      SecureStore.deleteItemAsync('trailhead_active_route').catch(() => {});
+      deleteTripFile();
+      sd('trailhead_active_route');
     }
     set({ activeTrip: trip, activeTripFromCache: fromCache });
   },
 
   setRigProfile: (rig) => {
-    SecureStore.setItemAsync('trailhead_rig', JSON.stringify(rig));
+    ss('trailhead_rig', JSON.stringify(rig));
     set({ rigProfile: rig });
   },
 
   addTripToHistory: (item) => set((state) => {
     const updated = [item, ...state.tripHistory.filter(t => t.trip_id !== item.trip_id)].slice(0, 10);
-    SecureStore.setItemAsync('trailhead_history', JSON.stringify(updated));
+    ss('trailhead_history', JSON.stringify(updated));
     return { tripHistory: updated };
   }),
 
   setThemeMode: (mode) => {
-    SecureStore.setItemAsync('trailhead_theme', mode);
+    ss('trailhead_theme', mode);
     set({ themeMode: mode });
   },
 
@@ -159,16 +213,16 @@ export const useStore = create<AppState>((set) => ({
   setLiveReports: (reports) => set({ liveReports: reports }),
   addCachedRegion: (label) => set(state => {
     const updated = [label, ...state.cachedRegions.filter(r => r !== label)].slice(0, 20);
-    SecureStore.setItemAsync('trailhead_cached_regions', JSON.stringify(updated));
+    ss('trailhead_cached_regions', JSON.stringify(updated));
     return { cachedRegions: updated };
   }),
   removeCachedRegion: (label) => set(state => {
     const updated = state.cachedRegions.filter(r => r !== label);
-    SecureStore.setItemAsync('trailhead_cached_regions', JSON.stringify(updated));
+    ss('trailhead_cached_regions', JSON.stringify(updated));
     return { cachedRegions: updated };
   }),
   setSessionId: (id) => {
-    SecureStore.setItemAsync('trailhead_session', id);
+    ss('trailhead_session', id);
     set({ sessionId: id });
   },
 
@@ -180,37 +234,91 @@ export const useStore = create<AppState>((set) => ({
     const updated = exists
       ? state.favoriteCamps.filter(f => f.id !== camp.id)
       : [camp, ...state.favoriteCamps].slice(0, 50);
-    SecureStore.setItemAsync('trailhead_favorites', JSON.stringify(updated));
+    ss('trailhead_favorites', JSON.stringify(updated));
     return { favoriteCamps: updated };
   }),
+
+  addSavedPlace: (p) => set((state) => {
+    const updated = [p, ...state.savedPlaces.filter(x => x.id !== p.id)].slice(0, 200);
+    ss('trailhead_saved_places', JSON.stringify(updated));
+    return { savedPlaces: updated };
+  }),
+  removeSavedPlace: (id) => set((state) => {
+    const updated = state.savedPlaces.filter(x => x.id !== id);
+    ss('trailhead_saved_places', JSON.stringify(updated));
+    return { savedPlaces: updated };
+  }),
+
+  addMarkerGroup: (g) => set((state) => {
+    const updated = [...state.markerGroups, g];
+    ss('trailhead_marker_groups', JSON.stringify(updated));
+    return { markerGroups: updated };
+  }),
+  updateMarkerGroup: (id, updates) => set((state) => {
+    const updated = state.markerGroups.map(g => g.id === id ? { ...g, ...updates } : g);
+    ss('trailhead_marker_groups', JSON.stringify(updated));
+    return { markerGroups: updated };
+  }),
+  removeMarkerGroup: (id) => set((state) => {
+    const updated = state.markerGroups.filter(g => g.id !== id);
+    ss('trailhead_marker_groups', JSON.stringify(updated));
+    return { savedPlaces: state.savedPlaces.filter(p => p.groupId !== id), markerGroups: updated };
+  }),
+
+  addSearchHistory: (item) => set((state) => {
+    const deduped = state.searchHistory.filter(h => h.name !== item.name);
+    const updated = [item, ...deduped].slice(0, 30);
+    ss('trailhead_search_history', JSON.stringify(updated));
+    return { searchHistory: updated };
+  }),
+  clearSearchHistory: () => {
+    sd('trailhead_search_history');
+    set({ searchHistory: [] });
+  },
 }));
 
 // Load persisted data on startup
 (async () => {
   try {
-    const [rigRaw, historyRaw, themeRaw, sessionRaw, favRaw, cachedRegionsRaw, activeTripRaw] = await Promise.all([
-      SecureStore.getItemAsync('trailhead_rig'),
-      SecureStore.getItemAsync('trailhead_history'),
-      SecureStore.getItemAsync('trailhead_theme'),
-      SecureStore.getItemAsync('trailhead_session'),
-      SecureStore.getItemAsync('trailhead_favorites'),
-      SecureStore.getItemAsync('trailhead_cached_regions'),
-      SecureStore.getItemAsync('trailhead_active_trip'),
+    const [rigRaw, historyRaw, themeRaw, sessionRaw, favRaw, cachedRegionsRaw, activeTripRaw,
+           savedPlacesRaw, markerGroupsRaw, searchHistoryRaw, tokenRaw, userRaw] = await Promise.all([
+      sg('trailhead_rig'),
+      sg('trailhead_history'),
+      sg('trailhead_theme'),
+      sg('trailhead_session'),
+      sg('trailhead_favorites'),
+      sg('trailhead_cached_regions'),
+      sg('trailhead_active_trip'),
+      sg('trailhead_saved_places'),
+      sg('trailhead_marker_groups'),
+      sg('trailhead_search_history'),
+      sg('trailhead_token'),
+      sg('trailhead_user'),
     ]);
     const patch: Partial<AppState> = {};
+    // Restore auth session — keeps user logged in across app launches
+    if (tokenRaw) patch.token = tokenRaw;
+    if (userRaw) { try { patch.user = JSON.parse(userRaw); } catch {} }
     if (rigRaw) patch.rigProfile = JSON.parse(rigRaw);
     if (historyRaw) patch.tripHistory = JSON.parse(historyRaw);
     if (themeRaw === 'dark' || themeRaw === 'light') patch.themeMode = themeRaw;
     if (favRaw) patch.favoriteCamps = JSON.parse(favRaw);
     if (cachedRegionsRaw) patch.cachedRegions = JSON.parse(cachedRegionsRaw);
+    if (savedPlacesRaw) patch.savedPlaces = JSON.parse(savedPlacesRaw);
+    if (markerGroupsRaw) patch.markerGroups = JSON.parse(markerGroupsRaw);
+    if (searchHistoryRaw) patch.searchHistory = JSON.parse(searchHistoryRaw);
     if (sessionRaw) patch.sessionId = sessionRaw;
-    if (activeTripRaw) {
+    // Load active trip from file (no size limit) — fall back to old SecureStore format
+    const tripFromFile = await loadTripFile();
+    if (tripFromFile) {
+      patch.activeTrip = tripFromFile; patch.activeTripFromCache = true;
+    } else if (activeTripRaw) {
       try { patch.activeTrip = JSON.parse(activeTripRaw); patch.activeTripFromCache = true; } catch {}
     }
-    else {
+    if (!sessionRaw) {
       // First run — persist the generated ID
       const id = useStore.getState().sessionId;
-      SecureStore.setItemAsync('trailhead_session', id);
+      ss('trailhead_session', id);
     }
     if (Object.keys(patch).length > 0) useStore.setState(patch);
   } catch {}

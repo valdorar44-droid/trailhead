@@ -35,6 +35,10 @@ export function useSubscription() {
   const [purchasing, setPurchasing] = useState(false);
   const [restoring,  setRestoring]  = useState(false);
   const [error,      setError]      = useState('');
+  // IAP is NOT initialized on mount — only when the user explicitly opens the
+  // paywall or taps Restore. initConnection() + getSubscriptions() hit the App
+  // Store and trigger iOS "Sign into Apple account" if called automatically.
+  const [iapReady, setIapReady] = useState(false);
 
   const purchaseListenerRef = useRef<{ remove: () => void } | null>(null);
   const errorListenerRef    = useRef<{ remove: () => void } | null>(null);
@@ -51,7 +55,8 @@ export function useSubscription() {
 
   useEffect(() => {
     const iap = getIAP();
-    if (!iap) return; // native module not in this binary — skip silently
+    // Only run IAP setup when explicitly triggered (iapReady flag set by openPaywall)
+    if (!iap || !iapReady) return;
 
     let mounted = true;
 
@@ -110,7 +115,12 @@ export function useSubscription() {
       errorListenerRef.current?.remove();
       iap.endConnection().catch(() => {});
     };
-  }, [activateOnBackend]);
+  }, [activateOnBackend, iapReady]);
+
+  // Call this before showing the paywall — initializes IAP on demand
+  const openPaywall = useCallback(() => {
+    setIapReady(true);
+  }, []);
 
   const purchase = useCallback(async (productId: string) => {
     const iap = getIAP();
@@ -156,5 +166,5 @@ export function useSubscription() {
   const monthlyProduct = products.find(p => p.productId === PRODUCT_IDS.monthly);
   const annualProduct  = products.find(p => p.productId === PRODUCT_IDS.annual);
 
-  return { connected, products, monthlyProduct, annualProduct, purchasing, restoring, error, purchase, restore };
+  return { connected, products, monthlyProduct, annualProduct, purchasing, restoring, error, purchase, restore, openPaywall };
 }

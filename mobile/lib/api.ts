@@ -102,6 +102,11 @@ export const api = {
   getLeaderboard: () => req<LeaderboardEntry[]>('/api/leaderboard'),
 
   deleteAccount: () => req<{ deleted: boolean }>('/api/auth/me', { method: 'DELETE' }),
+
+  // Admin-only
+  adminDeleteReport: (reportId: number) => req<{ ok: boolean }>(`/api/admin/reports/${reportId}`, { method: 'DELETE' }),
+  adminRemovePhoto:  (reportId: number) => req<{ ok: boolean }>(`/api/admin/reports/${reportId}/remove-photo`, { method: 'POST' }),
+  adminExpireReport: (reportId: number) => req<{ ok: boolean }>(`/api/admin/reports/${reportId}/expire`, { method: 'POST' }),
   getConfig: () => req<{ mapbox_token: string; protomaps_key?: string }>('/api/config'),
   getCampsites: (lat: number, lng: number, radius = 25) =>
     req<Campsite[]>(`/api/campsites?lat=${lat}&lng=${lng}&radius=${radius}`),
@@ -201,6 +206,7 @@ export interface User {
   id: number; email: string; username: string; credits: number;
   referral_code: string; report_streak: number; created_at: number;
   reporting_restricted_until?: number;
+  is_admin?: boolean;
 }
 export interface TripResult {
   trip_id: string; plan: TripPlan; campsites: Campsite[]; gas_stations: GasStation[];

@@ -79,6 +79,8 @@ export interface NativeMapProps {
   onMapTap:         (lat?: number, lng?: number) => void;
   onMapLongPress:   (lat: number, lng: number) => void;
   onCampTap:        (camp: CampsitePin) => void;
+  onGasTap?:        (station: { name: string; lat: number; lng: number }) => void;
+  onPoiTap?:        (poi: { name: string; type: string; lat: number; lng: number }) => void;
   onTileCampTap:    (name: string, kind: string, lat: number, lng: number) => void;
   onBaseCampTap:    (name: string, lat: number, lng: number, landType: string) => void;
   onTrailTap:       (name: string, lat: number, lng: number) => void;
@@ -121,7 +123,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     mapLayer, routeOpts,
     showLandOverlay, showUsgsOverlay, showFire, showAva, showRadar, showMvum,
     onMapReady, onBoundsChange, onMapTap, onMapLongPress,
-    onCampTap, onTileCampTap, onBaseCampTap, onTrailTap, onWaypointTap,
+    onCampTap, onGasTap, onPoiTap, onTileCampTap, onBaseCampTap, onTrailTap, onWaypointTap,
     onRouteReady, onRoutePersist,
   } = props;
 
@@ -548,31 +550,83 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               circleStrokeColor: ['case', ['==', ['get', 'full'], 1], '#ef4444', 'rgba(255,255,255,0.9)'],
             }}
           />
+          {/* Camp name labels — visible from z11, hidden when clustered */}
+          <MapLibreGL.SymbolLayer
+            id="camp-name"
+            minZoomLevel={11}
+            filter={['!', ['has', 'point_count']]}
+            style={{
+              textField: ['get', 'name'],
+              textSize: 9.5, textFont: ['Noto Sans Regular'],
+              textOffset: [0, 1.5], textAnchor: 'top',
+              textColor: '#14b8a6', textHaloColor: 'rgba(0,0,0,0.8)', textHaloWidth: 1.8,
+              textMaxWidth: 10, textIgnorePlacement: false, textAllowOverlap: false,
+              textOptional: true,
+            } as any}
+          />
         </MapLibreGL.ShapeSource>
       )}
 
       {/* ── Gas stations ──────────────────────────────────────────────── */}
       {gas.length > 0 && (
-        <MapLibreGL.ShapeSource id="gas" shape={gasFC}>
+        <MapLibreGL.ShapeSource
+          id="gas" shape={gasFC}
+          onPress={e => {
+            const f = e.features?.[0];
+            if (f && onGasTap) {
+              const [lng, lat] = (f.geometry as any).coordinates;
+              onGasTap({ name: f.properties?.name ?? 'Gas Station', lat, lng });
+            }
+          }}
+        >
           <MapLibreGL.CircleLayer
             id="gas-circle"
             style={{ circleRadius: 9, circleColor: '#eab308', circleOpacity: 0.92, circleStrokeWidth: 2, circleStrokeColor: '#fff' }}
+          />
+          <MapLibreGL.SymbolLayer
+            id="gas-label"
+            minZoomLevel={11}
+            style={{
+              textField: ['get', 'name'],
+              textSize: 9, textFont: ['Noto Sans Regular'],
+              textOffset: [0, 1.6], textAnchor: 'top',
+              textColor: '#eab308', textHaloColor: 'rgba(0,0,0,0.7)', textHaloWidth: 1.5,
+              textMaxWidth: 8, textIgnorePlacement: false, textAllowOverlap: false,
+            } as any}
           />
         </MapLibreGL.ShapeSource>
       )}
 
       {/* ── POIs (water, trailheads, viewpoints, peaks) ───────────────── */}
       {pois.length > 0 && (
-        <MapLibreGL.ShapeSource id="pois" shape={poiFC}>
+        <MapLibreGL.ShapeSource
+          id="pois" shape={poiFC}
+          onPress={e => {
+            const f = e.features?.[0];
+            if (f && onPoiTap) {
+              const [lng, lat] = (f.geometry as any).coordinates;
+              onPoiTap({ name: f.properties?.name ?? '', type: f.properties?.type ?? 'poi', lat, lng });
+            }
+          }}
+        >
           <MapLibreGL.CircleLayer
             id="poi-circle"
             style={{
               circleRadius: ['case', ['==', ['get', 'type'], 'peak'], 9, 8],
               circleColor: ['match', ['get', 'type'], 'water', '#3b82f6', 'trailhead', '#22c55e', 'viewpoint', '#a855f7', 'peak', '#92400e', '#6b7280'],
-              circleOpacity: 0.9,
-              circleStrokeWidth: 1.5,
-              circleStrokeColor: '#fff',
+              circleOpacity: 0.9, circleStrokeWidth: 1.5, circleStrokeColor: '#fff',
             }}
+          />
+          <MapLibreGL.SymbolLayer
+            id="poi-label"
+            minZoomLevel={11}
+            style={{
+              textField: ['get', 'name'],
+              textSize: 9, textFont: ['Noto Sans Regular'],
+              textOffset: [0, 1.4], textAnchor: 'top',
+              textColor: '#fff', textHaloColor: 'rgba(0,0,0,0.75)', textHaloWidth: 1.5,
+              textMaxWidth: 8, textIgnorePlacement: false, textAllowOverlap: false,
+            } as any}
           />
         </MapLibreGL.ShapeSource>
       )}

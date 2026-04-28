@@ -183,6 +183,13 @@ def _require_admin(user: dict = Depends(_current_user)) -> dict:
         raise HTTPException(403, "Admin access required")
     return user
 
+def _check_credits(user: dict, cost: int, reason: str) -> None:
+    """Deduct credits; admins always pass with no deduction."""
+    if user.get("is_admin"):
+        return  # unlimited for admin
+    if not deduct_credits(user["id"], cost, reason):
+        raise HTTPException(402, f"Not enough credits. This action costs {cost} credits.")
+
 
 # ── Core ──────────────────────────────────────────────────────────────────────
 
@@ -323,8 +330,7 @@ async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depend
             log_ai_usage(user["id"], "trip_edit" if body.current_trip else "chat")
         else:
             cost = AI_COSTS["chat_edit"] if body.current_trip else AI_COSTS["chat"]
-            if not deduct_credits(user["id"], cost, f"AI chat"):
-                raise HTTPException(402, f"Not enough credits. This action costs {cost} credits.")
+            _check_credits(user, cost, f"AI chat")
     else:
         _anon_check(_client_ip(request), "chat")
 
@@ -519,7 +525,7 @@ async def plan(request: Request, body: PlanRequest, user: dict = Depends(_option
             log_ai_usage(user["id"], "trip_plan")
         else:
             cost = _plan_credit_cost(day_hint)
-            if not deduct_credits(user["id"], cost, f"AI trip plan (~{day_hint}d)"):
+            if not user.get("is_admin") and not deduct_credits(user["id"], cost, f"AI trip plan (~{day_hint}d)"):
                 raise HTTPException(402, detail={
                     "code": "insufficient_credits",
                     "message": f"A {day_hint}-day plan costs {cost} credits.",
@@ -586,8 +592,7 @@ async def trip_guide(trip_id: str, user: dict = Depends(_current_user)):
         raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
 
     cost = AI_COSTS["audio_guide"]
-    if not deduct_credits(user["id"], cost, f"Audio guide — {trip_id}"):
-        raise HTTPException(402, f"Not enough credits. Audio guide costs {cost} credits.")
+    _check_credits(user, cost, f"Audio guide — {trip_id}")
 
     from ai.planner import generate_audio_guide
     waypoints = trip.get("plan", {}).get("waypoints", [])
@@ -685,8 +690,7 @@ async def nearby_audio(body: NearbyAudioRequest, user: dict = Depends(_current_u
     if not settings.anthropic_api_key:
         raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
     cost = AI_COSTS["nearby_audio"]
-    if not deduct_credits(user["id"], cost, "Nearby audio narration"):
-        raise HTTPException(402, f"Not enough credits. This costs {cost} credits.")
+    _check_credits(user, cost, "Nearby audio narration")
     from ai.planner import generate_location_narration
     try:
         narration = generate_location_narration(body.lat, body.lng, body.location_name)
@@ -1670,6 +1674,14 @@ async def admin_delete_report(report_id: int, admin: dict = Depends(_require_adm
     delete_report(report_id)
     return {"ok": True}
 
+@app.post("/api/admin/reports/{report_id}/remove-photo")
+async def admin_remove_photo(report_id: int, admin: dict = Depends(_require_admin)):
+    """Strip the photo from a report without deleting the report itself."""
+    db = _get_db()
+    db.execute("UPDATE reports SET photo_url=NULL, photo_data=NULL WHERE id=?", (report_id,))
+    db.commit()
+    return {"ok": True}
+
 @app.get("/api/admin/trips")
 async def admin_trips(admin: dict = Depends(_require_admin)):
     return get_all_trips(limit=100)
@@ -2054,7 +2066,7 @@ async def campsite_insight(request: Request, body: CampsiteInsightRequest, user:
             pass  # plan holders generate for free
         else:
             cost = AI_COSTS["campsite_insight"]
-            if not deduct_credits(user["id"], cost, f"Campsite insight — {body.name}"):
+            if not user.get("is_admin") and not deduct_credits(user["id"], cost, f"Campsite insight — {body.name}"):
                 raise HTTPException(402, detail={
                     "code": "insufficient_credits",
                     "message": f"Campsite briefs cost {cost} credits.",
@@ -2103,8 +2115,7 @@ async def route_brief(body: RouteBriefRequest, user: dict = Depends(_current_use
     if not settings.anthropic_api_key:
         raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
     cost = AI_COSTS["route_brief"]
-    if not deduct_credits(user["id"], cost, f"Route brief — {body.trip_name}"):
-        raise HTTPException(402, f"Not enough credits. Route brief costs {cost} credits.")
+    _check_credits(user, cost, f"Route brief — {body.trip_name}")
     from ai.planner import generate_route_brief
     try:
         return generate_route_brief(body.trip_name, body.waypoints, body.reports)
@@ -2125,8 +2136,7 @@ async def packing_list(body: PackingRequest, user: dict = Depends(_current_user)
     if not settings.anthropic_api_key:
         raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
     cost = AI_COSTS["packing_list"]
-    if not deduct_credits(user["id"], cost, f"Packing list — {body.trip_name}"):
-        raise HTTPException(402, f"Not enough credits. Packing list costs {cost} credits.")
+    _check_credits(user, cost, f"Packing list — {body.trip_name}")
     from ai.planner import generate_packing_list
     try:
         return generate_packing_list(body.trip_name, body.duration_days,

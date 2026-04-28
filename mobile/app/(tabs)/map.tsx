@@ -1683,6 +1683,8 @@ function MapScreen() {
   const [layerRoads,   setLayerRoads]   = useState(false);
   const [tappedTrail, setTappedTrail] = useState<{ name: string; lat: number; lng: number; cls: string } | null>(null);
   const [tappedTileSpot, setTappedTileSpot] = useState<{ name: string; kind: string; lat: number; lng: number } | null>(null);
+  const [tappedGas,  setTappedGas]  = useState<{ name: string; lat: number; lng: number } | null>(null);
+  const [tappedPoi,  setTappedPoi]  = useState<{ name: string; type: string; lat: number; lng: number } | null>(null);
 
   // Connectivity sync toast
   const [syncToast, setSyncToast] = useState('');
@@ -3013,7 +3015,7 @@ function MapScreen() {
               }
               return;
             }
-            setSelectedCamp(null); setTappedTrail(null); setTappedTileSpot(null);
+            setSelectedCamp(null); setTappedTrail(null); setTappedTileSpot(null); setTappedGas(null); setTappedPoi(null);
           }}
           onMapLongPress={(lat, lng) => {
             if (webRef.current) {
@@ -3027,6 +3029,8 @@ function MapScreen() {
             if (camp?.id) api.getCampFullness(camp.id).then(r => setCampFullness(r)).catch(() => {});
             if (camp?.lat && camp?.lng) api.getWeather(camp.lat, camp.lng, 3).then(r => setCampWeather(r)).catch(() => {});
           }}
+          onGasTap={s => { setTappedGas(s); setSelectedCamp(null); setTappedTrail(null); setTappedTileSpot(null); }}
+          onPoiTap={p => { setTappedPoi(p); setSelectedCamp(null); setTappedTrail(null); setTappedTileSpot(null); }}
           onTileCampTap={(name, kind, lat, lng) => {
             setTappedTileSpot({ name, kind, lat, lng });
           }}
@@ -5088,6 +5092,77 @@ function MapScreen() {
                   <Text style={[s.wpSheetDayText, { color: '#ef4444' }]}>REPORT SPOT</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={s.wpSheetDayBtn} onPress={() => setTappedTileSpot(null)}>
+                  <Ionicons name="close" size={14} color={OVR.text2} />
+                  <Text style={s.wpSheetDayText}>DISMISS</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+      )}
+
+      {/* ── Gas station tap card ── */}
+      {tappedGas && (
+        <Modal visible transparent animationType="slide" onRequestClose={() => setTappedGas(null)}>
+          <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setTappedGas(null)}>
+            <View style={s.wpSheet}>
+              <View style={s.daySheetHandle} />
+              <View style={s.wpSheetHeader}>
+                <View style={[s.wpSheetTypeDot, { backgroundColor: '#eab308' }]} />
+                <View style={{ flex: 1 }}>
+                  <Text style={s.wpSheetName} numberOfLines={2}>{tappedGas.name}</Text>
+                  <Text style={s.wpSheetMeta}>⛽ Gas Station</Text>
+                </View>
+              </View>
+              <View style={s.wpSheetActions}>
+                <TouchableOpacity style={s.wpSheetNavBtn} onPress={() => { setTappedGas(null); navigateToCamp(tappedGas); }}>
+                  <Ionicons name="navigate" size={14} color="#fff" />
+                  <Text style={s.wpSheetNavText}>NAVIGATE HERE</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={s.wpSheetDayBtn} onPress={() => setTappedGas(null)}>
+                  <Ionicons name="close" size={14} color={OVR.text2} />
+                  <Text style={s.wpSheetDayText}>DISMISS</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+      )}
+
+      {/* ── POI tap card ── */}
+      {tappedPoi && (
+        <Modal visible transparent animationType="slide" onRequestClose={() => setTappedPoi(null)}>
+          <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setTappedPoi(null)}>
+            <View style={s.wpSheet}>
+              <View style={s.daySheetHandle} />
+              <View style={s.wpSheetHeader}>
+                <View style={[s.wpSheetTypeDot, {
+                  backgroundColor: tappedPoi.type === 'water' ? '#3b82f6'
+                    : tappedPoi.type === 'trailhead' ? '#22c55e'
+                    : tappedPoi.type === 'viewpoint' ? '#a855f7'
+                    : tappedPoi.type === 'peak' ? '#92400e' : '#6b7280',
+                }]} />
+                <View style={{ flex: 1 }}>
+                  <Text style={s.wpSheetName} numberOfLines={2}>{tappedPoi.name || tappedPoi.type}</Text>
+                  <Text style={s.wpSheetMeta}>
+                    {tappedPoi.type === 'water' ? '💧 Water Source'
+                      : tappedPoi.type === 'trailhead' ? '🥾 Trailhead'
+                      : tappedPoi.type === 'viewpoint' ? '🔭 Viewpoint'
+                      : tappedPoi.type === 'peak' ? '⛰ Summit / Peak'
+                      : '📍 Point of Interest'}
+                  </Text>
+                </View>
+              </View>
+              <View style={s.wpSheetActions}>
+                <TouchableOpacity style={s.wpSheetNavBtn} onPress={() => { setTappedPoi(null); navigateToCamp(tappedPoi); }}>
+                  <Ionicons name="navigate" size={14} color="#fff" />
+                  <Text style={s.wpSheetNavText}>NAVIGATE HERE</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[s.wpSheetDayBtn, { borderColor: C.orange + '44' }]} onPress={() => { setTappedPoi(null); setQuickReport(true); }}>
+                  <Ionicons name="warning-outline" size={14} color={C.orange} />
+                  <Text style={[s.wpSheetDayText, { color: C.orange }]}>REPORT</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={s.wpSheetDayBtn} onPress={() => setTappedPoi(null)}>
                   <Ionicons name="close" size={14} color={OVR.text2} />
                   <Text style={s.wpSheetDayText}>DISMISS</Text>
                 </TouchableOpacity>

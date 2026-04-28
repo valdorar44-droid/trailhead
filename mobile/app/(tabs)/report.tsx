@@ -377,6 +377,11 @@ export default function ReportScreen() {
               onConfirm={() => api.confirmReport(r.id).then(res => {
                 Alert.alert('Confirmed ✓', `+${res.credits_earned} credit earned`);
               }).catch((e: any) => Alert.alert('Error', e.message))}
+              onAdminDelete={user?.is_admin ? () => Alert.alert('Delete Report', 'Permanently remove this report?', [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Delete', style: 'destructive', onPress: () => api.adminDeleteReport(r.id).then(() => setNearby(prev => prev.filter(x => x.id !== r.id))).catch(() => {}) },
+              ]) : undefined}
+              onAdminRemovePhoto={user?.is_admin ? () => api.adminRemovePhoto(r.id).then(() => setNearby(prev => prev.map(x => x.id === r.id ? { ...x, has_photo: false } : x))).catch(() => {}) : undefined}
             />
           ))}
         </ScrollView>
@@ -425,8 +430,9 @@ async function getToken() {
   return (await storage.get('trailhead_token')) ?? '';
 }
 
-function ReportCard({ report: r, onPress, onUpvote, onDownvote, onConfirm }:
-  { report: Report; onPress: () => void; onUpvote: () => void; onDownvote: () => void; onConfirm: () => void }) {
+function ReportCard({ report: r, onPress, onUpvote, onDownvote, onConfirm, onAdminDelete, onAdminRemovePhoto }:
+  { report: Report; onPress: () => void; onUpvote: () => void; onDownvote: () => void; onConfirm: () => void;
+    onAdminDelete?: () => void; onAdminRemovePhoto?: () => void; }) {
   const C = useTheme();
   const rc = useMemo(() => makeRcStyles(C), [C]);
   const typeInfo = REPORT_TYPES.find(t => t.type === r.type);
@@ -479,6 +485,17 @@ function ReportCard({ report: r, onPress, onUpvote, onDownvote, onConfirm }:
             <Ionicons name="thumbs-down-outline" size={13} color={C.text3} />
             <Text style={rc.voteCount}>{r.downvotes ?? 0}</Text>
           </TouchableOpacity>
+          {/* Admin-only controls — hidden from regular users */}
+          {onAdminDelete && (
+            <TouchableOpacity style={[rc.voteBtn, { marginLeft: 4 }]} onPress={onAdminDelete}>
+              <Ionicons name="trash-outline" size={13} color="#ef4444" />
+            </TouchableOpacity>
+          )}
+          {onAdminRemovePhoto && r.has_photo && (
+            <TouchableOpacity style={rc.voteBtn} onPress={onAdminRemovePhoto}>
+              <Ionicons name="image-outline" size={13} color="#f97316" />
+            </TouchableOpacity>
+          )}
         </View>
       </View>
     </TouchableOpacity>

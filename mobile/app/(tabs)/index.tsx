@@ -498,6 +498,33 @@ export default function PlanScreen() {
         )}
       </ScrollView>
 
+      {/* ── My Trips quick-access (shown above input when not on welcome screen) ── */}
+      {messages.length > 0 && tripHistory.length > 0 && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}
+          style={{ maxHeight: 44 }}
+          contentContainerStyle={{ paddingHorizontal: 12, paddingVertical: 6, gap: 8, alignItems: 'center' }}
+        >
+          <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, letterSpacing: 1, paddingRight: 4 }}>MY TRIPS</Text>
+          {tripHistory.slice(0, 6).map(t => (
+            <TouchableOpacity
+              key={t.trip_id}
+              style={{ backgroundColor: C.s2, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: C.border, flexDirection: 'row', alignItems: 'center', gap: 5 }}
+              onPress={() => {
+                api.getTrip(t.trip_id).then(trip => {
+                  setActiveTrip(trip); setMessages([{ role: 'ai', trip }]); setPlanPhase('active');
+                }).catch(async () => {
+                  const cached = await loadOfflineTrip(t.trip_id);
+                  if (cached) { setActiveTrip(cached, true); setMessages([{ role: 'ai', trip: cached }]); setPlanPhase('active'); }
+                });
+              }}
+            >
+              <Ionicons name="map-outline" size={11} color={C.orange} />
+              <Text style={{ color: C.text2, fontSize: 11, fontFamily: mono, maxWidth: 120 }} numberOfLines={1}>{t.trip_name}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
+
       {/* ── Input ── */}
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={s.inputWrap}>

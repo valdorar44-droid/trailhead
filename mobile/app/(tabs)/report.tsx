@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  TextInput, Alert, Image, Animated, Modal,
+  TextInput, Alert, Image, Animated, Modal, Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
@@ -13,6 +13,35 @@ import { Ionicons } from '@expo/vector-icons';
 import { api, Report, LeaderboardEntry } from '@/lib/api';
 import { useStore } from '@/lib/store';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
+
+// ── Alert notification helpers ────────────────────────────────────────────────
+// Seen IDs: { [reportId]: expiresAt (unix sec) } — auto-prune on load
+async function loadSeenAlertIds(): Promise<Record<number, number>> {
+  try {
+    const raw = await storage.get('trailhead_alert_seen');
+    if (!raw) return {};
+    const parsed: Record<string, number> = JSON.parse(raw);
+    const now = Date.now() / 1000;
+    const pruned: Record<number, number> = {};
+    for (const [id, exp] of Object.entries(parsed)) {
+      if (exp > now) pruned[Number(id)] = exp;
+    }
+    return pruned;
+  } catch { return {}; }
+}
+async function saveSeenAlertIds(seen: Record<number, number>): Promise<void> {
+  try { await storage.set('trailhead_alert_seen', JSON.stringify(seen)); } catch {}
+}
+// Prefs: { [type]: boolean } — true = notify (default), false = muted
+async function loadAlertPrefs(): Promise<Record<string, boolean>> {
+  try {
+    const raw = await storage.get('trailhead_alert_prefs');
+    return raw ? JSON.parse(raw) : {};
+  } catch { return {}; }
+}
+async function saveAlertPrefs(prefs: Record<string, boolean>): Promise<void> {
+  try { await storage.set('trailhead_alert_prefs', JSON.stringify(prefs)); } catch {}
+}
 
 // Semantic category colors — chosen to read well on both light and dark backgrounds
 const REPORT_TYPES = [
@@ -67,39 +96,96 @@ export default function ReportScreen() {
   const [nearby, setNearby] = useState<Report[]>([]);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [view, setView] = useState<TabView>('submit');
+  const [notifPrefs, setNotifPrefs] = useState<Record<string, boolean>>({});
+  const [showNotifSettings, setShowNotifSettings] = useState(false);
 
   const [detailReport, setDetailReport] = useState<Report | null>(null);
   const [drivingWarning, setDrivingWarning] = useState(false);
   const [campsiteRating, setCampsiteRating] = useState(0);
   const successAnim = useRef(new Animated.Value(0)).current;
   const typeAnims = useRef(REPORT_TYPES.map(() => new Animated.Value(1))).current;
+  // Refs so async callbacks always read latest values without stale closures
+  const seenIdsRef = useRef<Record<number, number>>({});
+  const notifPrefsRef = useRef<Record<string, boolean>>({});
+  const locRef = useRef<{ lat: number; lng: number } | null>(null);
 
+  useEffect(() => { notifPrefsRef.current = notifPrefs; }, [notifPrefs]);
+  useEffect(() => { locRef.current = loc; }, [loc]);
+
+  // Fire deduplicated notifications for unseen critical reports
+  async function checkAndNotify(reports: Report[]) {
+    const critical = reports.filter(r => r.severity === 'critical');
+    if (critical.length === 0) return;
+    const seen = seenIdsRef.current;
+    const prefs = notifPrefsRef.current;
+    const fresh = critical.filter(r => !seen[r.id] && prefs[r.type] !== false);
+    if (fresh.length === 0) return;
+
+    const typeInfo = REPORT_TYPES.find(t => t.type === fresh[0].type);
+    const title = fresh.length === 1
+      ? `⚠️ ${typeInfo?.label ?? 'Alert'} Nearby`
+      : `⚠️ ${fresh.length} Trail Alerts Nearby`;
+    const body = fresh.length === 1
+      ? (fresh[0].description || `Critical ${typeInfo?.label ?? fresh[0].type} within 0.5 mi`)
+      : `${fresh.length} critical conditions within 0.5 mi of you`;
+
+    Notifications.scheduleNotificationAsync({
+      content: { title, body, data: { type: 'trail_alert' } },
+      trigger: null,
+    }).catch(() => {});
+
+    const updated = { ...seen };
+    for (const r of fresh) {
+      updated[r.id] = r.expires_at || (Date.now() / 1000 + 86400);
+    }
+    seenIdsRef.current = updated;
+    saveSeenAlertIds(updated);
+  }
+
+  // Load prefs + seen IDs, then request location once on mount
   useEffect(() => {
+    loadAlertPrefs().then(prefs => {
+      setNotifPrefs(prefs);
+      notifPrefsRef.current = prefs;
+    });
+    loadSeenAlertIds().then(seen => { seenIdsRef.current = seen; });
+
     Location.requestForegroundPermissionsAsync().then(({ status }) => {
       if (status !== 'granted') return;
-      Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }).then(l => {
-        const c = { lat: l.coords.latitude, lng: l.coords.longitude };
-        setLoc(c);
-        // Warn if moving faster than ~5 mph (2.2 m/s)
-        if (l.coords.speed !== null && l.coords.speed > 2.2) setDrivingWarning(true);
-        api.getNearbyReports(c.lat, c.lng).then(reports => {
-          setNearby(reports);
-          const critical = reports.filter(r => r.severity === 'critical');
-          if (critical.length > 0) {
-            Notifications.scheduleNotificationAsync({
-              content: {
-                title: '⚠️ Trail Alert Nearby',
-                body: `${critical.length} critical condition${critical.length > 1 ? 's' : ''} within 0.5 mi of you`,
-                data: { type: 'trail_alert' },
-              },
-              trigger: null,
-            }).catch(() => {});
-          }
-        }).catch(() => {});
-      });
-    });
+      Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
+        .then(l => {
+          const c = { lat: l.coords.latitude, lng: l.coords.longitude };
+          setLoc(c);
+          locRef.current = c;
+          if (l.coords.speed !== null && l.coords.speed > 2.2) setDrivingWarning(true);
+          api.getNearbyReports(c.lat, c.lng).then(reports => {
+            setNearby(reports);
+            checkAndNotify(reports);
+          }).catch(() => {});
+        })
+        .catch(() => {}); // prevent unhandled rejection crash
+    }).catch(() => {});
+
     api.getLeaderboard().then(setLeaderboard).catch(() => {});
   }, []);
+
+  // Refresh nearby reports each time user opens the NEARBY tab
+  useEffect(() => {
+    if (view !== 'nearby') return;
+    const c = locRef.current;
+    if (!c) return;
+    api.getNearbyReports(c.lat, c.lng).then(reports => {
+      setNearby(reports);
+      checkAndNotify(reports);
+    }).catch(() => {});
+  }, [view]);
+
+  async function toggleNotifPref(type: string, enabled: boolean) {
+    const updated = { ...notifPrefsRef.current, [type]: enabled };
+    setNotifPrefs(updated);
+    notifPrefsRef.current = updated;
+    saveAlertPrefs(updated);
+  }
 
   function selectType(rt: typeof REPORT_TYPES[0], idx: number) {
     setSelectedType(rt);
@@ -361,8 +447,50 @@ export default function ReportScreen() {
         </ScrollView>
       )}
 
+      {/* Notification settings modal */}
+      <Modal visible={showNotifSettings} transparent animationType="slide" onRequestClose={() => setShowNotifSettings(false)}>
+        <View style={s.notifOverlay}>
+          <View style={s.notifModal}>
+            <View style={s.notifHeader}>
+              <Text style={s.notifTitle}>ALERT NOTIFICATIONS</Text>
+              <TouchableOpacity onPress={() => setShowNotifSettings(false)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+                <Ionicons name="close" size={20} color={C.text2} />
+              </TouchableOpacity>
+            </View>
+            <Text style={s.notifSub}>Choose which report types send you a push alert when critical conditions are nearby.</Text>
+            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 380 }}>
+              {REPORT_TYPES.map(rt => {
+                const enabled = notifPrefs[rt.type] !== false;
+                return (
+                  <View key={rt.type} style={s.notifRow}>
+                    <View style={[s.notifDot, { backgroundColor: rt.color }]} />
+                    <Ionicons name={rt.icon as any} size={16} color={enabled ? rt.color : C.text3} style={{ width: 20 }} />
+                    <Text style={[s.notifLabel, !enabled && { color: C.text3 }]}>{rt.label}</Text>
+                    <Switch
+                      value={enabled}
+                      onValueChange={v => toggleNotifPref(rt.type, v)}
+                      trackColor={{ false: C.border, true: rt.color + '88' }}
+                      thumbColor={enabled ? rt.color : C.text3}
+                      style={{ marginLeft: 'auto' }}
+                    />
+                  </View>
+                );
+              })}
+            </ScrollView>
+            <Text style={s.notifNote}>Only critical-severity reports trigger alerts. Seen alerts won't repeat.</Text>
+          </View>
+        </View>
+      </Modal>
+
       {view === 'nearby' && (
         <ScrollView contentContainerStyle={s.scroll}>
+          {/* Alert settings row */}
+          <TouchableOpacity style={s.notifSettingsBtn} onPress={() => setShowNotifSettings(true)}>
+            <Ionicons name="notifications-outline" size={14} color={C.text3} />
+            <Text style={s.notifSettingsBtnText}>Alert Settings</Text>
+            <Ionicons name="chevron-forward" size={12} color={C.text3} style={{ marginLeft: 'auto' }} />
+          </TouchableOpacity>
+
           {nearby.length === 0 ? (
             <View style={s.emptyWrap}>
               <Ionicons name="location-outline" size={40} color={C.text3} />
@@ -435,9 +563,11 @@ function ReportCard({ report: r, onPress, onUpvote, onDownvote, onConfirm, onAdm
     onAdminDelete?: () => void; onAdminRemovePhoto?: () => void; }) {
   const C = useTheme();
   const rc = useMemo(() => makeRcStyles(C), [C]);
+  if (!r || r.id == null) return null; // guard against malformed API data
   const typeInfo = REPORT_TYPES.find(t => t.type === r.type);
   const sevInfo = SEVERITY.find(sv => sv.val === r.severity);
-  const age = Math.floor((Date.now() / 1000 - r.created_at) / 3600);
+  const createdAt = typeof r.created_at === 'number' ? r.created_at : 0;
+  const age = Math.floor((Date.now() / 1000 - createdAt) / 3600);
   const expiresIn = r.expires_at ? Math.max(0, Math.floor((r.expires_at - Date.now() / 1000) / 3600)) : null;
 
   return (
@@ -792,6 +922,32 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   emptyIcon: { fontSize: 40 },
   emptyText: { color: C.text2, fontSize: 15, fontWeight: '600' },
   emptySub: { color: C.text3, fontSize: 12 },
+  // Alert settings button
+  notifSettingsBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
+    borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 4,
+  },
+  notifSettingsBtnText: { color: C.text3, fontSize: 11, fontFamily: mono },
+  // Notification settings modal
+  notifOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'flex-end',
+  },
+  notifModal: {
+    backgroundColor: C.s1, borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    borderWidth: 1, borderColor: C.border, padding: 20, paddingBottom: 40, gap: 14,
+  },
+  notifHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  notifTitle: { color: C.text, fontSize: 13, fontWeight: '800', fontFamily: mono, letterSpacing: 0.5 },
+  notifSub: { color: C.text3, fontSize: 12, lineHeight: 17 },
+  notifRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingVertical: 11, borderBottomWidth: 1, borderColor: C.border,
+  },
+  notifDot: { width: 6, height: 6, borderRadius: 3 },
+  notifLabel: { color: C.text, fontSize: 13, fontFamily: mono, fontWeight: '600' },
+  notifNote: { color: C.text3, fontSize: 11, lineHeight: 16, marginTop: 4 },
   leaderRow: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
     backgroundColor: C.s2, borderRadius: 12, borderWidth: 1, borderColor: C.border,

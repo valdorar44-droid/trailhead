@@ -944,7 +944,6 @@ async function sendMessage() {
 
 async function buildTrip() {
   setPhase('planning');
-  // Remove the outline card
   document.getElementById('outline-card-msg')?.remove();
 
   const thinking = appendThinking(thinkingStages);
@@ -956,7 +955,24 @@ async function buildTrip() {
       body: JSON.stringify({ request: '', session_id: sessionId }),
     });
     if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || resp.statusText);
-    const data = await resp.json();
+    const job = await resp.json();
+
+    // Poll for async job completion
+    const data = await (async () => {
+      const maxWait = 120000; // 2 minutes
+      const interval = 2500;
+      const deadline = Date.now() + maxWait;
+      while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, interval));
+        const jr = await fetch(`/api/plan/job/${job.job_id}`);
+        if (!jr.ok) throw new Error('Job status check failed');
+        const jd = await jr.json();
+        if (jd.status === 'done') return jd.result;
+        if (jd.status === 'failed') throw new Error(jd.error || 'Trip planning failed');
+      }
+      throw new Error('Trip planning timed out — please try again');
+    })();
+
     clearInterval(stageTimer); thinking.remove();
     currentTrip = data;
     renderTripCard(data);

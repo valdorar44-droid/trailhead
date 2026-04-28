@@ -126,6 +126,18 @@ export default function PlanScreen() {
 
     const finalText = await resolveLocation(text);
 
+    // ── If route is ready and user types a build phrase, build directly ───────
+    // Prevents Claude from returning raw JSON in the chat bubble instead of
+    // going through the proper buildTrip() flow.
+    const BUILD_PHRASES = /^(build|go|yes|do it|let's go|build it|sounds good|perfect|do that|make it|create it|generate|start building)/i;
+    if (planPhase === 'ready' && BUILD_PHRASES.test(text.trim())) {
+      setLoading(false);
+      stopStages();
+      deactivateKeepAwake('ai-chat');
+      buildTrip();
+      return;
+    }
+
     // ── Edit mode: trip is active ─────────────────────────────────────────────
     if ((planPhase === 'active' || planPhase === 'editing') && activeTrip) {
       setPlanPhase('editing');
@@ -177,7 +189,19 @@ export default function PlanScreen() {
       }
     } catch (e: any) {
       if (isOutOfCredits(e)) { handleOutOfCredits(); setPlanPhase('idle'); }
-      else { setMessages(m => [...m, { role: 'ai', text: `⚠ ${e.message}` }]); setPlanPhase('idle'); }
+      else {
+        // Don't show raw AI responses or JSON in the chat — clean user-facing message
+        const raw = e?.message ?? '';
+        const isTimeout = raw.includes('taking longer') || raw.includes('timeout');
+        const isNetwork = raw.includes('Network') || raw.includes('fetch');
+        const friendly = isTimeout
+          ? '⏳ Trip planning is taking a bit longer than usual. Try "build it" again in a moment.'
+          : isNetwork
+          ? '📡 Network hiccup — check your connection and try again.'
+          : '⚠ Something went wrong. Try rephrasing your request or tap "build it" again.';
+        setMessages(m => [...m, { role: 'ai', text: friendly }]);
+        setPlanPhase('ready'); // stay in ready so they can retry
+      }
     } finally {
       stopStages(); setLoading(false); scrollToEnd();
       deactivateKeepAwake('ai-chat');
@@ -260,7 +284,13 @@ export default function PlanScreen() {
             role: 'ai',
             text: isRateLimit
               ? '⏱ API is busy right now — tap Retry in ~30 seconds and your route will build normally.'
-              : `⚠ ${e.message}`,
+              : e.message?.includes('taking longer')
+              ? '⏳ This trip is taking longer than usual to plan. Tap Retry to try again.'
+              : e.message?.includes('non-JSON') || e.message?.includes('```')
+              ? '⚠ AI had trouble formatting the route. Tap Retry — it usually works on the second attempt.'
+              : e.message?.includes('Network') || e.message?.includes('fetch')
+              ? '📡 Network issue during planning. Check your connection and tap Retry.'
+              : '⚠ Planning hit a snag. Tap Retry to try again.',
             outline: isRateLimit ? '__retry__' : undefined,
           },
         ]);

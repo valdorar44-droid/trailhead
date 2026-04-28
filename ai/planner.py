@@ -29,6 +29,12 @@ WHEN TO SIGNAL READY: Be aggressive about signaling ready. If the user says yes,
 
 REROUTE LOGIC: If the user is modifying an existing trip (add a stop, avoid an area, change a day), confirm the change in 1 sentence and signal ready to rebuild.
 
+CRITICAL — NEVER DO THIS IN CHAT:
+- NEVER generate trip JSON in a chat response. The JSON schema is ONLY for the route builder.
+- If you feel ready to build, output ONLY the {"_ready":true,"_outline":"..."} signal and NOTHING else after it.
+- The route builder will call you separately to generate the full JSON. Your chat job is ONLY conversation + the _ready signal.
+- If you accidentally start generating JSON waypoints in chat, STOP and instead output the _ready signal.
+
 TRIP LENGTH:
 - Maximum supported trip duration is 14 days in a single plan.
 - If the user requests more than 14 days, build the best 14-day route and note in your message: "I've built your first 14 days — once you're rolling, you can plan the next leg from [end location] as a fresh trip."
@@ -519,7 +525,7 @@ def edit_trip(current_trip: dict, edit_request: str) -> dict:
 
 
 def plan_trip_from_conversation(messages: list[dict]) -> dict:
-    """Generate full trip JSON from conversation history."""
+    """Generate full trip JSON from conversation history. Retries once on bad output."""
     # Keep last 12 messages to stay well under input token limits
     convo = "\n".join(
         f"{m['role'].upper()}: {m['content']}"
@@ -528,38 +534,81 @@ def plan_trip_from_conversation(messages: list[dict]) -> dict:
     )
     synthesis = (
         f"Based on this planning conversation, generate the complete trip plan now:\n\n{convo}"
-        "\n\nReturn only the trip JSON."
+        "\n\nIMPORTANT: Respond with ONLY a valid JSON object. "
+        "Do NOT use markdown code fences. Do NOT include any text before or after the JSON. "
+        "Start your response with { and end with }."
     )
-    msg = _claude(lambda: client.messages.create(
+
+    def _call() -> str:
+        msg = _claude(lambda: client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=16000,
+            temperature=0,   # deterministic — reduces hallucinated markdown
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": synthesis}],
+        ))
+        return msg.content[0].text.strip()
+
+    # Attempt 1
+    try:
+        return _parse_plan_json(_call())
+    except (ValueError, json.JSONDecodeError):
+        pass
+
+    # Attempt 2 — with even more explicit instruction
+    retry_msg = synthesis + "\n\nYour previous response was not valid JSON. Try again. Output ONLY the JSON object, nothing else."
+    msg2 = _claude(lambda: client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=16000,
+        temperature=0,
         system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": synthesis}],
+        messages=[{"role": "user", "content": retry_msg}],
     ))
-    raw = msg.content[0].text.strip()
-    raw = re.sub(r'^```json\s*', '', raw)
-    raw = re.sub(r'^```\s*', '', raw)
-    raw = re.sub(r'\s*```$', '', raw).strip()
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        match = re.search(r'\{.*\}', raw, re.DOTALL)
-        if match:
-            return json.loads(match.group())
-        raise ValueError(f"Claude returned non-JSON: {raw[:200]}")
+    return _parse_plan_json(msg2.content[0].text.strip())
 
 
 def _parse_plan_json(raw: str) -> dict:
-    raw = re.sub(r'^```json\s*', '', raw.strip())
-    raw = re.sub(r'^```\s*', '', raw)
-    raw = re.sub(r'\s*```$', '', raw).strip()
+    """Extract and parse a JSON object from Claude's response.
+
+    Handles: raw JSON, ```json fences, text before/after JSON,
+    extra explanation text, nested fences.
+    """
+    raw = raw.strip()
+
+    # 1. Try parsing directly first (fast path for clean responses)
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
-        match = re.search(r'\{.*\}', raw, re.DOTALL)
-        if match:
-            return json.loads(match.group())
-        raise ValueError(f"Non-JSON response: {raw[:200]}")
+        pass
+
+    # 2. Strip markdown code fences wherever they appear (not just ^/$)
+    cleaned = re.sub(r'```json\s*', '', raw, flags=re.IGNORECASE)
+    cleaned = re.sub(r'```\s*', '', cleaned)
+    cleaned = cleaned.strip()
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+
+    # 3. Extract the first complete JSON object from the string
+    # Find the outermost { ... } — handles text before/after the JSON
+    depth = 0
+    start = None
+    for i, ch in enumerate(raw):
+        if ch == '{':
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0 and start is not None:
+                candidate = raw[start:i + 1]
+                try:
+                    return json.loads(candidate)
+                except json.JSONDecodeError:
+                    pass  # keep looking
+
+    raise ValueError(f"Could not extract valid JSON from response (len={len(raw)}): {raw[:300]}")
 
 
 def plan_trip(user_request: str) -> dict:
@@ -569,12 +618,19 @@ def plan_trip(user_request: str) -> dict:
     day_hint = int((_re.search(r'\b(\d+)\s*-?\s*day', user_request, _re.I) or [None, 5])[1])
     use_haiku = day_hint <= 3
 
+    explicit_request = (
+        user_request
+        + "\n\nIMPORTANT: Respond with ONLY a valid JSON object. "
+        "Do NOT use markdown code fences. Start your response with { and end with }."
+    )
+
     def _call(model: str) -> str:
         msg = _claude(lambda: client.messages.create(
             model=model,
             max_tokens=16000 if model.startswith("claude-sonnet") else 4096,
+            temperature=0,  # deterministic JSON output
             system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_request}]
+            messages=[{"role": "user", "content": explicit_request}]
         ))
         return msg.content[0].text.strip()
 
@@ -584,17 +640,9 @@ def plan_trip(user_request: str) -> dict:
         except Exception:
             pass  # fall through to Sonnet
 
-    raw = _call("claude-sonnet-4-6")
-    # Strip markdown code fences if Claude wraps it anyway
-    raw = re.sub(r'^```json\s*', '', raw)
-    raw = re.sub(r'^```\s*', '', raw)
-    raw = re.sub(r'\s*```$', '', raw)
-
+    # Sonnet with retry on bad JSON
     try:
-        return json.loads(raw)
-    except json.JSONDecodeError as e:
-        # Try to extract JSON from the response
-        match = re.search(r'\{.*\}', raw, re.DOTALL)
-        if match:
-            return json.loads(match.group())
-        raise ValueError(f"Claude returned non-JSON: {raw[:200]}") from e
+        return _parse_plan_json(_call("claude-sonnet-4-6"))
+    except (ValueError, json.JSONDecodeError):
+        # One retry
+        return _parse_plan_json(_call("claude-sonnet-4-6"))

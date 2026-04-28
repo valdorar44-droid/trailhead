@@ -16,9 +16,10 @@ EXPIRY_BY_TYPE = {
 }
 
 def _conn() -> sqlite3.Connection:
-    db = sqlite3.connect(settings.db_path, check_same_thread=False)
+    db = sqlite3.connect(settings.db_path, check_same_thread=False, timeout=30.0)
     db.execute("PRAGMA journal_mode=WAL")
     db.execute("PRAGMA foreign_keys=ON")
+    db.execute("PRAGMA busy_timeout=30000")
     db.row_factory = sqlite3.Row
     return db
 

@@ -465,13 +465,12 @@ export default function ReportScreen() {
                   <View key={rt.type} style={s.notifRow}>
                     <View style={[s.notifDot, { backgroundColor: rt.color }]} />
                     <Ionicons name={rt.icon as any} size={16} color={enabled ? rt.color : C.text3} style={{ width: 20 }} />
-                    <Text style={[s.notifLabel, !enabled && { color: C.text3 }]}>{rt.label}</Text>
+                    <Text style={[s.notifLabel, !enabled && { color: C.text3 }, { flex: 1 }]}>{rt.label}</Text>
                     <Switch
                       value={enabled}
                       onValueChange={v => toggleNotifPref(rt.type, v)}
                       trackColor={{ false: C.border, true: rt.color + '88' }}
                       thumbColor={enabled ? rt.color : C.text3}
-                      style={{ marginLeft: 'auto' }}
                     />
                   </View>
                 );
@@ -487,8 +486,8 @@ export default function ReportScreen() {
           {/* Alert settings row */}
           <TouchableOpacity style={s.notifSettingsBtn} onPress={() => setShowNotifSettings(true)}>
             <Ionicons name="notifications-outline" size={14} color={C.text3} />
-            <Text style={s.notifSettingsBtnText}>Alert Settings</Text>
-            <Ionicons name="chevron-forward" size={12} color={C.text3} style={{ marginLeft: 'auto' }} />
+            <Text style={[s.notifSettingsBtnText, { flex: 1 }]}>Alert Settings</Text>
+            <Ionicons name="chevron-forward" size={12} color={C.text3} />
           </TouchableOpacity>
 
           {nearby.length === 0 ? (

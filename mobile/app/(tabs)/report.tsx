@@ -620,7 +620,7 @@ function ReportCard({ report: r, onPress, onUpvote, onDownvote, onConfirm, onAdm
               <Ionicons name="trash-outline" size={13} color="#ef4444" />
             </TouchableOpacity>
           )}
-          {onAdminRemovePhoto && r.has_photo && (
+          {onAdminRemovePhoto && !!r.has_photo && (
             <TouchableOpacity style={rc.voteBtn} onPress={onAdminRemovePhoto}>
               <Ionicons name="image-outline" size={13} color="#f97316" />
             </TouchableOpacity>

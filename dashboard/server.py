@@ -2209,21 +2209,38 @@ async def _geocode_one(client: httpx.AsyncClient, wp: dict, sem: asyncio.Semapho
     if not name:
         return wp
     token = settings.mapbox_token
-    async with sem:
+
+    async def _try(query: str):
         try:
             resp = await client.get(
-                f"https://api.mapbox.com/geocoding/v5/mapbox.places/{httpx.utils.quote(name, safe='')}.json",
-                params={"access_token": token, "limit": 1, "country": "us", "types": "place,locality,address,poi,region"},
+                f"https://api.mapbox.com/geocoding/v5/mapbox.places/{httpx.utils.quote(query, safe='')}.json",
+                params={"access_token": token, "limit": 1, "country": "us"},
             )
             resp.raise_for_status()
             feats = resp.json().get("features", [])
             if feats:
-                lng, lat = feats[0]["geometry"]["coordinates"]
-                wp["lat"] = lat
-                wp["lng"] = lng
-                wp["geocoded_name"] = feats[0].get("place_name", name)
+                return feats[0]["geometry"]["coordinates"], feats[0].get("place_name", query)
         except Exception:
             pass
+        return None, None
+
+    async with sem:
+        # Try full name first
+        coords, place_name = await _try(name)
+        if coords:
+            wp["lat"], wp["lng"], wp["geocoded_name"] = coords[1], coords[0], place_name
+            return wp
+
+        # Fallback: strip leading comma-parts (handles "Road Mile 24, Area, State" → "Area, State" → "State")
+        parts = [p.strip() for p in name.split(",")]
+        for i in range(1, len(parts)):
+            shorter = ", ".join(parts[i:])
+            if shorter:
+                coords, place_name = await _try(shorter)
+                if coords:
+                    wp["lat"], wp["lng"], wp["geocoded_name"] = coords[1], coords[0], place_name
+                    return wp
+
     return wp
 
 

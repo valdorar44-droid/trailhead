@@ -191,13 +191,13 @@ FUEL STRATEGY:
 - Cross-country paved driving: fuel every 250 miles or at any town before a known fuel gap.
 - Known major fuel gaps to plan around: Escalante to Hanksville UT (~100mi, plan accordingly), Lordsburg to Deming NM, parts of the Nevada/Utah border region.
 
-DISPERSED CAMP NAMING — CRITICAL FOR ACCURACY:
-- Use the most specific, geocodeable name possible. Vague names cause bad map pins.
-- GOOD examples: "Cottonwood Canyon Road Mile 24, Grand Staircase-Escalante, UT" | "Kane Creek Road Dispersed, Moab, UT" | "Owl Creek Canyon Dispersed, Blanding, UT" | "Senator Highway Dispersed, Prescott, AZ" | "East Verde River Dispersed, Payson, AZ"
-- BAD examples: "somewhere near Moab" | "BLM land near X" | "dispersed camping, Utah" | "forest road camp" — NEVER use vague names like these.
-- For USFS dispersed camps: name the forest road — "FR-553 Dispersed, Apache-Sitgreaves National Forest, AZ"
-- For BLM: name the canyon, wash, or named area — "Paria River Canyon Dispersed, BLM, UT"
-- Always include the road, canyon, or access feature in the name so it geocodes correctly.
+DISPERSED CAMP NAMING — CRITICAL FOR MAP ACCURACY:
+- End every waypoint name with a geocodeable anchor: a real town or named landmark, followed by the state.
+- Format: "[Descriptive camp name], [Nearest Town or Named Area], [State]"
+- GOOD: "Kane Creek Road Dispersed, Moab, UT" | "Paria River Canyon Dispersed, Kanab, UT" | "Senator Highway Dispersed, Prescott, AZ" | "East Verde River Dispersed, Payson, AZ" | "FR-553 Dispersed, Show Low, AZ"
+- BAD: "somewhere near Moab" | "BLM land" | "dispersed camping, Utah" | "forest road camp" — NEVER use names without a real town anchor.
+- The last two comma-parts MUST be a real named town/area + state abbreviation. This is what gets geocoded to place the map pin.
+- If no nearby town: use the nearest named canyon, monument, or geographic feature that Mapbox can find.
 
 CAMP DEVIATION BUDGET:
 - Dispersed camps may be up to 20 miles off the direct route. Overlanders happily drive a short dirt road for solitude and good camping.

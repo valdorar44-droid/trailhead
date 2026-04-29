@@ -422,6 +422,41 @@ export default function PlanScreen() {
         {/* Welcome screen */}
         {messages.length === 0 && (
           <View style={s.welcome}>
+
+            {/* ── Resume saved trip card ─────────────────────────────────── */}
+            {activeTrip && (
+              <View style={s.resumeCard}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: C.orange }} />
+                  <Text style={{ color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1.5 }}>SAVED ROUTE</Text>
+                </View>
+                <Text style={{ color: C.text, fontSize: 15, fontFamily: mono, fontWeight: '900', marginBottom: 4 }} numberOfLines={2}>
+                  {activeTrip.plan.trip_name}
+                </Text>
+                <Text style={{ color: C.text3, fontSize: 10, fontFamily: mono, marginBottom: 14 }}>
+                  {(activeTrip.plan.states ?? []).join(' · ')}
+                  {!!activeTrip.plan.duration_days && `  ·  ${activeTrip.plan.duration_days} days`}
+                </Text>
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <TouchableOpacity
+                    style={{ flex: 1, backgroundColor: C.orange, borderRadius: 8, paddingVertical: 11, alignItems: 'center' }}
+                    onPress={() => {
+                      setMessages([{ role: 'ai', trip: activeTrip }]);
+                      setPlanPhase('active');
+                    }}
+                  >
+                    <Text style={{ color: '#fff', fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 1 }}>RESUME ROUTE</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={{ flex: 1, backgroundColor: C.s2, borderRadius: 8, paddingVertical: 11, alignItems: 'center', borderWidth: 1, borderColor: C.border }}
+                    onPress={() => setActiveTrip(null)}
+                  >
+                    <Text style={{ color: C.text2, fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 1 }}>NEW TRIP</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
             {tripHistory.length > 0 && (
               <View style={s.historySection}>
                 <Text style={s.sectionLabel}>RECENT TRIPS</Text>
@@ -977,6 +1012,12 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
 
   // Welcome
   welcome: { gap: 10 },
+  resumeCard: {
+    backgroundColor: C.s1, borderRadius: 12, padding: 16,
+    borderLeftWidth: 3, borderLeftColor: C.orange,
+    borderWidth: 1, borderColor: C.border,
+    marginBottom: 4,
+  },
   welcomeHeading: {
     color: C.text, fontSize: 38, fontWeight: '900',
     letterSpacing: -1.5, lineHeight: 40, marginBottom: 8,

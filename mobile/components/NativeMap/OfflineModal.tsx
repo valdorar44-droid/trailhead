@@ -22,11 +22,13 @@ import {
 } from '@/lib/useOfflineFiles';
 import {
   downloadPack, deletePack, getInstalledPacks, pausePack,
-  US_STATE_PACKS, routeCorriderBounds,
+  US_STATE_PACKS,
   type InstalledPack, type PackProgress,
 } from './offlineManager';
 import type { WP } from './types';
 
+
+interface WebDownloadOpts { bufferKm?: number; minZ?: number; maxZ?: number; vectorOnly?: boolean; label: string; n?: number; s?: number; e?: number; w?: number; }
 
 interface Props {
   visible:     boolean;
@@ -34,6 +36,17 @@ interface Props {
   waypoints:   WP[];
   tripName:    string | null;
   useNativeMap: boolean;
+  onWebDownloadBbox?:   (opts: WebDownloadOpts) => void;
+  onWebDownloadRoute?:  (opts: WebDownloadOpts) => void;
+  onWebCancelDownload?: () => void;
+  onWebClearRegion?:    (label: string) => void;
+  webIsDownloading?:    boolean;
+  webDownloadProgress?: number;
+  webDownloadSaved?:    number;
+  webDownloadTotal?:    number;
+  webDownloadMB?:       string;
+  webCachedRegions?:    string[];
+  webDownloadLabel?:    string;
 }
 
 // ── Shimmer animation for active progress bar ────────────────────────────────
@@ -93,17 +106,18 @@ function StatusChip({ label, color }: { label: string; color: string }) {
   );
 }
 
-// ── CONUS file download card ──────────────────────────────────────────────────
-function ConusCard({ state, totalBytes, onStart, onPause, onResume, onDelete }: {
-  state:      FileDownloadState;
-  totalBytes: number;
-  onStart:    () => void;
-  onPause:    () => void;
-  onResume:   () => void;
-  onDelete:   () => void;
+// ── File download card (used for CONUS + all states) ─────────────────────────
+function ConusCard({ state, totalBytes, region: regionProp, onStart, onPause, onResume, onDelete }: {
+  state:       FileDownloadState;
+  totalBytes:  number;
+  region?:     { name: string; description: string; estimatedGb: number };
+  onStart:     () => void;
+  onPause:     () => void;
+  onResume:    () => void;
+  onDelete:    () => void;
 }) {
   const C = useTheme();
-  const region = FILE_REGIONS.conus;
+  const region = regionProp ?? FILE_REGIONS.conus;
   const isActive   = state.status === 'downloading';
   const isPaused   = state.status === 'paused';
   const isComplete = state.status === 'complete';
@@ -230,10 +244,10 @@ function ConusCard({ state, totalBytes, onStart, onPause, onResume, onDelete }: 
       {isComplete && (
         <View style={{ margin: 12, marginTop: 0, padding: 10, backgroundColor: C.green + '15', borderRadius: 6, borderWidth: 1, borderColor: C.green + '30' }}>
           <Text style={{ color: C.green, fontSize: 9, fontFamily: mono, fontWeight: '700', letterSpacing: 0.5 }}>
-            ✓ FILE ON DEVICE — FULL OFFLINE TILES IN NEXT BUILD
+            ✓ FILE ON DEVICE — ACTIVATES WITH NEXT APP UPDATE
           </Text>
           <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 2 }}>
-            The map file is downloaded. A native tile server (next app update) will activate full offline map rendering.
+            Map file downloaded. Use corridor/state downloads for offline nav now — the full file activates in the next binary update.
           </Text>
         </View>
       )}
@@ -242,57 +256,82 @@ function ConusCard({ state, totalBytes, onStart, onPause, onResume, onDelete }: 
 }
 
 // ── State pack row ────────────────────────────────────────────────────────────
-function StateRow({ code, st, isCached, isDownloading, onDownload }: {
+function StateRow({ code, st, isCached, isDownloading, isActive, progress, onDownload, onDelete }: {
   code:          string;
   st:            { name: string; bounds: [[number,number],[number,number]]; emoji: string };
   isCached:      boolean;
   isDownloading: boolean;
+  isActive?:     boolean;
+  progress?:     number;
   onDownload:    () => void;
+  onDelete?:     () => void;
 }) {
   const C = useTheme();
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 9, paddingHorizontal: 4, borderBottomWidth: 1, borderBottomColor: C.border }}>
-      <Text style={{ width: 28, fontSize: 14 }}>{st.emoji}</Text>
-      <Text style={{ color: C.text, fontSize: 11, fontFamily: mono, fontWeight: '700', width: 26, marginRight: 6 }}>{code}</Text>
-      <Text style={{ flex: 1, color: C.text2, fontSize: 10, fontFamily: mono }}>{st.name}</Text>
-      {isCached ? (
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-          <Ionicons name="checkmark-circle" size={12} color={C.green} />
-          <Text style={{ color: C.green, fontSize: 9, fontFamily: mono, fontWeight: '700' }}>READY</Text>
-        </View>
-      ) : (
-        <TouchableOpacity
-          disabled={isDownloading}
-          onPress={onDownload}
-          style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 4, borderWidth: 1, borderColor: isDownloading ? C.border : C.orange + '55', backgroundColor: isDownloading ? 'transparent' : C.orangeGlow }}
-        >
-          <Text style={{ color: isDownloading ? C.text3 : C.orange, fontSize: 9, fontFamily: mono, fontWeight: '700' }}>
-            {isDownloading ? 'BUSY' : 'GET'}
+    <View style={{ borderBottomWidth: 1, borderBottomColor: C.border }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 9, paddingHorizontal: 4 }}>
+        <Text style={{ width: 28, fontSize: 14 }}>{st.emoji}</Text>
+        <Text style={{ color: C.text, fontSize: 11, fontFamily: mono, fontWeight: '700', width: 26, marginRight: 6 }}>{code}</Text>
+        <Text style={{ flex: 1, color: C.text2, fontSize: 10, fontFamily: mono }}>{st.name}</Text>
+        {isCached ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Ionicons name="checkmark-circle" size={12} color={C.green} />
+            <Text style={{ color: C.green, fontSize: 9, fontFamily: mono, fontWeight: '700' }}>CACHED</Text>
+            <TouchableOpacity onPress={onDelete} style={{ padding: 4 }}>
+              <Ionicons name="trash-outline" size={14} color={C.red} />
+            </TouchableOpacity>
+          </View>
+        ) : isActive ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text style={{ color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900' }}>
+              {Math.round(progress ?? 0)}%
+            </Text>
+            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: C.orange }} />
+          </View>
+        ) : (
+          <TouchableOpacity
+            disabled={isDownloading}
+            onPress={onDownload}
+            style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 4, borderWidth: 1, borderColor: isDownloading ? C.border : C.orange + '55', backgroundColor: isDownloading ? 'transparent' : C.orangeGlow }}
+          >
+            <Text style={{ color: isDownloading ? C.text3 : C.orange, fontSize: 9, fontFamily: mono, fontWeight: '700' }}>
+              {isDownloading ? 'BUSY' : 'GET'}
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
+      {isActive && (
+        <View style={{ paddingHorizontal: 4, paddingBottom: 8 }}>
+          <ShimmerBar pct={progress ?? 0} />
+          <Text style={{ color: C.text3, fontSize: 8, fontFamily: mono, marginTop: 4 }}>
+            Downloading tiles — keep app open
           </Text>
-        </TouchableOpacity>
+        </View>
       )}
     </View>
   );
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
-export default function OfflineModal({ visible, onClose, waypoints, tripName, useNativeMap }: Props) {
+export default function OfflineModal({
+  visible, onClose, waypoints, tripName, useNativeMap,
+  onWebDownloadBbox, onWebDownloadRoute, onWebCancelDownload, onWebClearRegion,
+  webIsDownloading, webDownloadProgress, webDownloadMB, webCachedRegions, webDownloadLabel,
+}: Props) {
   const user        = useStore(st => st.user);
   const mapboxToken = useStore(st => st.mapboxToken);
   const C           = useTheme();
   const s           = makeStyles(C);
 
-  // File-based download (CONUS)
+  // File-based download (CONUS + all states)
   const { getState, startDownload, pauseDownload, resumeDownload, deleteDownload, getTotalBytes } = useOfflineFiles();
-  const conusState    = getState('conus');
+  const conusState      = getState('conus');
   const conusTotalBytes = getTotalBytes('conus');
 
-  // MLN pack-based download (states + trip corridor)
-  const [mlnPacks,       setMlnPacks]       = useState<InstalledPack[]>([]);
-  const [activePackName, setActivePackName] = useState<string | null>(null);
-  const [packProgress,   setPackProgress]   = useState<PackProgress | null>(null);
-  const [packError,      setPackError]      = useState<string | null>(null);
-  const [activeTab,      setActiveTab]      = useState<'areas' | 'states'>('areas');
+  // MLN packs still used for legacy corridor fallback (can be removed later)
+  const [mlnPacks,  setMlnPacks]  = useState<InstalledPack[]>([]);
+  const [packError, setPackError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'areas' | 'states'>('areas');
 
   useEffect(() => {
     if (visible) getInstalledPacks().then(setMlnPacks).catch(() => {});
@@ -316,8 +355,6 @@ export default function OfflineModal({ visible, onClose, waypoints, tripName, us
     await deletePack(name);
     setMlnPacks(prev => prev.filter(p => p.name !== name));
   }, []);
-
-  const corridorBounds = routeCorriderBounds(waypoints);
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -401,6 +438,7 @@ export default function OfflineModal({ visible, onClose, waypoints, tripName, us
                   <ConusCard
                     state={conusState}
                     totalBytes={conusTotalBytes}
+                    region={FILE_REGIONS.conus}
                     onStart={() => startDownload('conus')}
                     onPause={() => pauseDownload('conus')}
                     onResume={() => resumeDownload('conus')}
@@ -408,27 +446,35 @@ export default function OfflineModal({ visible, onClose, waypoints, tripName, us
                   />
 
                   {/* Trip corridor */}
-                  <Section label="TRIP CORRIDOR — MLN PACK" />
-                  {waypoints.length > 0 && corridorBounds ? (() => {
-                    const name    = (tripName ?? 'Trip') + '-corridor';
-                    const cached  = mlnPacks.some(p => p.name === name);
+                  <Section label="TRIP CORRIDOR — ROUTE LINE DOWNLOAD" />
+                  {waypoints.length > 0 ? (() => {
+                    const name   = (tripName ?? 'Trip') + '-corridor';
+                    const cached = webCachedRegions?.includes(name) ?? false;
+                    const busy   = !!webIsDownloading;
                     return (
                       <TouchableOpacity
-                        disabled={!!activePackName}
+                        disabled={busy}
                         style={[s.corridorCard, cached && { borderLeftColor: C.green }]}
-                        onPress={() => startMlnPack(name, corridorBounds, 10, 16)}
+                        onPress={() => {
+                          onWebDownloadRoute?.({ bufferKm: 16, minZ: 10, maxZ: 15, vectorOnly: true, label: name });
+                        }}
                       >
                         <View style={{ flex: 1 }}>
                           <Text style={{ color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '800' }}>
                             {(tripName ?? 'CURRENT TRIP').toUpperCase()}
                           </Text>
                           <Text style={{ color: C.text2, fontSize: 10, fontFamily: mono, marginTop: 2 }}>
-                            20 km buffer · z10–z16 · trails + roads
+                            ~10 mi corridor · z10–z15 · vector tiles · trails + roads
                           </Text>
+                          {busy && (
+                            <Text style={{ color: C.orange, fontSize: 9, fontFamily: mono, marginTop: 3 }}>
+                              {webDownloadProgress ?? 0}% downloaded — check map
+                            </Text>
+                          )}
                         </View>
                         {cached
                           ? <StatusChip label="CACHED" color={C.green} />
-                          : <StatusChip label={activePackName ? 'BUSY' : 'DOWNLOAD'} color={activePackName ? C.text3 : C.orange} />
+                          : <StatusChip label={busy ? 'BUSY' : 'DOWNLOAD'} color={busy ? C.text3 : C.orange} />
                         }
                       </TouchableOpacity>
                     );
@@ -464,20 +510,28 @@ export default function OfflineModal({ visible, onClose, waypoints, tripName, us
               {/* ══════════════════ STATES TAB ══════════════════════════ */}
               {activeTab === 'states' && (
                 <>
-                  <Section label="STATE PACKS — MLN TILE CACHE · z10–z14" />
+                  <Section label="US STATES — SINGLE-FILE DOWNLOAD · z0–z14" />
                   <Text style={s.hint}>
-                    Individual state downloads. Good for regional trips where CONUS is overkill.
+                    Roads, trails, towns and parks per state — same fast single-file download as Continental US. Activates fully offline with next app update.
                   </Text>
-                  {Object.entries(US_STATE_PACKS).map(([code, st]) => (
-                    <StateRow
-                      key={code}
-                      code={code}
-                      st={st}
-                      isCached={mlnPacks.some(p => p.name === st.name)}
-                      isDownloading={!!activePackName}
-                      onDownload={() => startMlnPack(st.name, st.bounds, 10, 14)}
-                    />
-                  ))}
+                  {Object.entries(FILE_REGIONS)
+                    .filter(([id]) => id !== 'conus')
+                    .map(([id, region]) => {
+                      const st = getState(id);
+                      const tb = getTotalBytes(id);
+                      return (
+                        <ConusCard
+                          key={id}
+                          state={st}
+                          totalBytes={tb}
+                          region={region as any}
+                          onStart={() => startDownload(id)}
+                          onPause={() => pauseDownload(id)}
+                          onResume={() => resumeDownload(id)}
+                          onDelete={() => deleteDownload(id)}
+                        />
+                      );
+                    })}
                 </>
               )}
 

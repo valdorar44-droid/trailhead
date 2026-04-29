@@ -12,9 +12,10 @@ import { PRODUCT_IDS } from '@/lib/useSubscription';
 import { useTheme, mono } from '@/lib/design';
 
 export default function RootLayout() {
-  const setAuth      = useStore(s => s.setAuth);
-  const setPlan      = useStore(s => s.setPlan);
-  const setActiveTrip = useStore(s => s.setActiveTrip);
+  const setAuth            = useStore(s => s.setAuth);
+  const setPlan            = useStore(s => s.setPlan);
+  const setActiveTrip      = useStore(s => s.setActiveTrip);
+  const restoreActiveTrip  = useStore(s => s.restoreActiveTrip);
   const themeMode    = useStore(s => s.themeMode);
   const user         = useStore(s => s.user);
   const router       = useRouter();
@@ -83,6 +84,7 @@ export default function RootLayout() {
         const user = await api.me();
         storage.set('trailhead_user', JSON.stringify(user)).catch(() => {});
         setAuth(token, user);
+        restoreActiveTrip(); // setAuth clears activeTrip; restore from file
         const sub = await api.subscriptionStatus().catch(() => null);
         if (sub?.is_active) setPlan(true, sub.plan_expires_at ?? null);
       } catch (e: any) {
@@ -90,7 +92,7 @@ export default function RootLayout() {
         if (isNetworkError) {
           const cachedUser = await storage.get('trailhead_user').catch(() => null);
           if (cachedUser) {
-            try { setAuth(token, JSON.parse(cachedUser)); } catch {}
+            try { setAuth(token, JSON.parse(cachedUser)); restoreActiveTrip(); } catch {}
           }
         } else {
           storage.del('trailhead_token');

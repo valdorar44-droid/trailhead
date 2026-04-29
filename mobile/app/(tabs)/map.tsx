@@ -948,6 +948,7 @@ const buildMapHtml = (
         await c.put('manifest-'+_currentDlLabel,new Response(JSON.stringify(manifestKeys),{headers:{'Content-Type':'application/json'}}));
       }catch(e){}
     }
+    downloadActive=false;
     postRN({type:'download_complete',saved:saved,total:total});
   }
 
@@ -1273,7 +1274,16 @@ const buildMapHtml = (
   // ── Routing ───────────────────────────────────────────────────────────────────
   function decodeP6(enc){var coords=[],i=0,lat=0,lng=0;while(i<enc.length){var b,shift=0,res=0;do{b=enc.charCodeAt(i++)-63;res|=(b&0x1f)<<shift;shift+=5;}while(b>=0x20);lat+=res&1?~(res>>1):(res>>1);shift=0;res=0;do{b=enc.charCodeAt(i++)-63;res|=(b&0x1f)<<shift;shift+=5;}while(b>=0x20);lng+=res&1?~(res>>1):(res>>1);coords.push([lng/1e6,lat/1e6]);}return coords;}
 
-  function _fallback(pairs,fromIdx){routeIsProper=false;_routeLoading=false;if(!pairs.length){postRN({type:'route_ready',routed:false,steps:[],legs:[],fromIdx:fromIdx||0});return;}var coords=pairs.map(function(p){var s=p.split(',');return[parseFloat(s[0]),parseFloat(s[1])];});_routeCoords=coords;routePts=coords;updateRoute();postRN({type:'route_ready',routed:false,steps:[],legs:[],fromIdx:fromIdx||0});}
+  function _fallback(pairs,fromIdx){
+    // If we already have a valid cached route, do NOT overwrite it with straight lines.
+    // This preserves the stored route when the Directions API is unreachable offline.
+    if(routeIsProper&&_routeCoords.length){_routeLoading=false;return;}
+    routeIsProper=false;_routeLoading=false;
+    if(!pairs.length){postRN({type:'route_ready',routed:false,steps:[],legs:[],fromIdx:fromIdx||0});return;}
+    var coords=pairs.map(function(p){var s=p.split(',');return[parseFloat(s[0]),parseFloat(s[1])];});
+    _routeCoords=coords;routePts=coords;updateRoute();
+    postRN({type:'route_ready',routed:false,steps:[],legs:[],fromIdx:fromIdx||0});
+  }
 
   async function _fetchRoute(pairs,fromIdx){
     _routeLoading=true;
@@ -1419,7 +1429,7 @@ const buildMapHtml = (
     if(msg.type==='download_tiles_route'){if(!downloadActive){downloadActive=true;_currentDlLabel=msg.label||'';_dlTilesRoute(msg.bufferKm||20,msg.minZ||10,msg.maxZ||16,!!msg.vectorOnly);}}
     if(msg.type==='download_tiles'){if(!downloadActive){downloadActive=true;_currentDlLabel=msg.label||'';var b=map.getBounds();_dlTiles(b.getNorth(),b.getSouth(),b.getEast(),b.getWest(),msg.minZ||10,msg.maxZ||15,!!msg.vectorOnly);}}
     if(msg.type==='cancel_download'){downloadActive=false;}
-    if(msg.type==='clear_cache_region'&&msg.label){(async function(){
+    if(msg.type==='clear_cached_region'&&msg.label){(async function(){
       try{
         var c=await caches.open(TILE_CACHE);
         var mkey='manifest-'+msg.label;
@@ -3134,6 +3144,7 @@ function MapScreen() {
               { text: 'Cancel', style: 'cancel' },
               { text: 'Exit Trip', style: 'destructive', onPress: () => {
                 setActiveTrip(null);
+                webRef.current?.postMessage(JSON.stringify({ type: 'nav_reset' }));
                 router.push('/(tabs)/');
               }},
             ])}
@@ -3296,7 +3307,7 @@ function MapScreen() {
                 const vpLabel = 'area-' + Date.now();
                 setIsDownloading(true);
                 setDownloadLabel(vpLabel);
-                webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles', label: vpLabel, minZ: 10, maxZ: 15 }));
+                webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles', label: vpLabel, minZ: 10, maxZ: 17 }));
               }
             }}
           >
@@ -4083,6 +4094,7 @@ function MapScreen() {
         webDownloadTotal={downloadTotal}
         webDownloadMB={downloadMB}
         webCachedRegions={cachedRegions}
+        webDownloadLabel={downloadLabel}
       />
 
       {/* ── Route Brief Modal ── */}

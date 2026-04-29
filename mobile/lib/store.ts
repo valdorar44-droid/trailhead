@@ -120,6 +120,7 @@ interface AppState {
   clearSearchHistory: () => void;
   setOfflineTripIds: (ids: string[]) => void;
   setPlan: (active: boolean, expiresAt?: number | null) => void;
+  restoreActiveTrip: () => Promise<void>;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -229,6 +230,11 @@ export const useStore = create<AppState>((set) => ({
 
   setOfflineTripIds: (ids) => set({ offlineTripIds: ids }),
   setPlan: (active, expiresAt = null) => set({ hasPlan: active, planExpiresAt: expiresAt }),
+
+  restoreActiveTrip: async () => {
+    const trip = await loadTripFile();
+    if (trip) set({ activeTrip: trip, activeTripFromCache: true });
+  },
 
   toggleFavorite: (camp) => set((state) => {
     const exists = state.favoriteCamps.some(f => f.id === camp.id);

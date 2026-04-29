@@ -934,6 +934,38 @@ async def pmtiles_retry():
     return {"triggered": True, "status": pmtiles_bootstrap.status()}
 
 
+# ── Per-state PMTiles extraction ───────────────────────────────────────────────
+from dashboard import pmtiles_states as _pms
+
+@app.get("/api/admin/states-status")
+async def states_status():
+    """Status of all per-state PMTiles extractions."""
+    return {"running": _pms._running, "states": _pms.all_status()}
+
+@app.post("/api/admin/extract-state/{code}")
+async def extract_single_state(code: str):
+    """Extract + upload a single state (e.g. UT, CO). Runs in background."""
+    code = code.upper()
+    if code not in _pms.STATE_BBOXES:
+        return {"error": f"unknown state code {code}"}
+    asyncio.create_task(_pms.extract_and_upload_state(code))
+    return {"triggered": True, "code": code}
+
+@app.post("/api/admin/extract-all-states")
+async def extract_all_states():
+    """Queue extraction + upload for all 50 states. Runs sequentially in background."""
+    if _pms._running:
+        return {"triggered": False, "reason": "already running"}
+    asyncio.create_task(_pms.extract_all_states_task())
+    return {"triggered": True, "total": len(_pms.STATE_BBOXES)}
+
+@app.post("/api/admin/update-manifest")
+async def update_manifest():
+    """Rewrite manifest.json on R2 with current file sizes."""
+    ok = await _pms.update_manifest_on_r2()
+    return {"ok": ok}
+
+
 # ── R2 upload ─────────────────────────────────────────────────────────────────
 _r2_upload_status: dict = {"running": False, "done": False, "error": None, "progress": ""}
 

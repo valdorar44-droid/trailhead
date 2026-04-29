@@ -1,8 +1,36 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, Component } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   TextInput, Alert, Image, Animated, Modal, Switch,
 } from 'react-native';
+
+class NearbyErrorBoundary extends Component<
+  { children: React.ReactNode },
+  { error: string | null }
+> {
+  state = { error: null };
+  static getDerivedStateFromError(e: any) {
+    return { error: e?.message ?? String(e) };
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <View style={{ padding: 20, alignItems: 'center', marginTop: 40 }}>
+          <Text style={{ color: '#ef4444', fontSize: 13, fontWeight: '700', marginBottom: 8 }}>
+            NEARBY TAB ERROR (tap to copy)
+          </Text>
+          <Text
+            style={{ color: '#fff', fontSize: 11, fontFamily: 'Menlo', backgroundColor: '#1a0a0a', padding: 12, borderRadius: 8 }}
+            onPress={() => Alert.alert('Error', this.state.error!)}
+          >
+            {this.state.error}
+          </Text>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
@@ -482,6 +510,7 @@ export default function ReportScreen() {
       </Modal>
 
       {view === 'nearby' && (
+        <NearbyErrorBoundary>
         <ScrollView contentContainerStyle={s.scroll}>
           {/* Alert settings row */}
           <TouchableOpacity style={s.notifSettingsBtn} onPress={() => setShowNotifSettings(true)}>
@@ -512,6 +541,7 @@ export default function ReportScreen() {
             />
           ))}
         </ScrollView>
+        </NearbyErrorBoundary>
       )}
 
       {view === 'leaderboard' && (

@@ -1267,8 +1267,8 @@ VALID_SEVERITIES   = {"low", "moderate", "high", "critical"}
 class ReportRequest(BaseModel):
     lat: float; lng: float
     type: str
-    subtype: str = ""
-    description: str = ""
+    subtype: Optional[str] = None
+    description: Optional[str] = None
     severity: str = "moderate"
     photo_data: Optional[str] = None  # base64 jpeg
 
@@ -1280,7 +1280,7 @@ async def submit_report(body: ReportRequest, user: dict = Depends(_current_user)
         raise HTTPException(400, f"Invalid report type")
     if body.severity not in VALID_SEVERITIES:
         raise HTTPException(400, "Invalid severity")
-    if len(body.description) > 500:
+    if body.description and len(body.description) > 500:
         raise HTTPException(400, "Description exceeds 500 characters")
     if body.photo_data and len(body.photo_data) > 2_000_000:
         raise HTTPException(400, "Photo too large (max 1.5 MB)")

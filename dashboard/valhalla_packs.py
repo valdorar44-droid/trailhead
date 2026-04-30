@@ -49,6 +49,7 @@ _status: dict[str, dict] = {
     for code in STATE_BBOXES
 }
 _running = False
+RUNNING_STATUSES = {"downloading", "building", "packing", "uploading"}
 
 
 def _state_dir(code: str) -> Path:
@@ -70,6 +71,10 @@ def all_status() -> dict[str, dict]:
         size = path.stat().st_size if path.exists() else 0
         out[code] = {**s, "on_disk": path.exists(), "size_mb": round(size / 1_000_000, 1)}
     return out
+
+
+def is_state_running(code: str) -> bool:
+    return _status.get(code.upper(), {}).get("status") in RUNNING_STATUSES
 
 
 def tool_status() -> dict:
@@ -319,6 +324,9 @@ async def update_routing_manifest_on_r2() -> bool:
 
 
 async def build_and_upload_pack(code: str) -> bool:
+    code = code.upper()
+    if is_state_running(code):
+        return False
     path = await build_pack(code)
     if not path:
         return False
@@ -328,12 +336,14 @@ async def build_and_upload_pack(code: str) -> bool:
 async def build_all_task(codes: Optional[list[str]] = None):
     global _running
     _running = True
-    targets = [c.upper() for c in (codes or list(STATE_BBOXES.keys()))]
-    for code in targets:
-        if code not in STATE_BBOXES:
-            continue
-        try:
-            await build_and_upload_pack(code)
-        except Exception as exc:
-            _status[code].update(status="error", error=str(exc))
-    _running = False
+    try:
+        targets = [c.upper() for c in (codes or list(STATE_BBOXES.keys()))]
+        for code in targets:
+            if code not in STATE_BBOXES:
+                continue
+            try:
+                await build_and_upload_pack(code)
+            except Exception as exc:
+                _status[code].update(status="error", error=str(exc))
+    finally:
+        _running = False

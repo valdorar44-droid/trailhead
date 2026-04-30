@@ -10,6 +10,8 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import { storage } from '@/lib/storage';
 import * as Updates from 'expo-updates';
+import Constants from 'expo-constants';
+import * as Application from 'expo-application';
 import { api } from '@/lib/api';
 import { useStore, RigProfile } from '@/lib/store';
 import PaywallModal from '@/components/PaywallModal';
@@ -1179,15 +1181,22 @@ export default function ProfileScreen() {
 
         {/* App version info */}
         <View style={s.versionCard}>
-          <Text style={[s.versionLabel, { marginBottom: 8, letterSpacing: 0.5 }]}>TRAILHEAD v1.0</Text>
+          <Text style={[s.versionLabel, { marginBottom: 8, letterSpacing: 0.5 }]}>TRAILHEAD</Text>
           <View style={s.versionRow}>
-            <Text style={s.versionLabel}>VERSION</Text>
-            <Text style={s.versionValue}>{Updates.updateId ? Updates.updateId.slice(0, 8) : 'release'}</Text>
+            <Text style={s.versionLabel}>BINARY</Text>
+            <Text style={s.versionValue}>
+              {Application.nativeApplicationVersion ?? Constants.nativeAppVersion ?? Constants.expoConfig?.version ?? '—'}
+              {' '}(build {Application.nativeBuildVersion ?? Constants.nativeBuildVersion ?? '?'})
+            </Text>
           </View>
           <View style={s.versionRow}>
-            <Text style={s.versionLabel}>LAST UPDATED</Text>
+            <Text style={s.versionLabel}>OTA UPDATE</Text>
+            <Text style={s.versionValue}>{Updates.updateId ? Updates.updateId.slice(0, 8) : 'base build'}</Text>
+          </View>
+          <View style={s.versionRow}>
+            <Text style={s.versionLabel}>UPDATED</Text>
             <Text style={s.versionValue}>
-              {Updates.createdAt ? Updates.createdAt.toLocaleDateString() : 'current build'}
+              {Updates.createdAt ? Updates.createdAt.toLocaleDateString() : '—'}
             </Text>
           </View>
         </View>

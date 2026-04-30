@@ -17,7 +17,7 @@ module.exports = {
     ios: {
       supportsTablet: true,
       bundleIdentifier: 'com.trailhead.app',
-      buildNumber: '2',
+      buildNumber: '3',
       infoPlist: {
         NSLocationWhenInUseUsageDescription: 'Trailhead uses your location to show your position on the map, provide turn-by-turn navigation, find nearby campsites, and alert you to road hazard reports near your current position.',
         NSLocationAlwaysAndWhenInUseUsageDescription: 'Trailhead uses your location in the background so navigation and audio guide narrations continue when your phone is locked while driving.',

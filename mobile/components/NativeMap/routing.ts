@@ -1,7 +1,7 @@
 /**
  * Routing — three live engines + offline route cache.
  *
- * Online priority:  Mapbox Directions → Valhalla (OSM DE) → OSRM (Fossgis)
+ * Online priority:  Trailhead Valhalla for backroads → Mapbox → OSRM fallback
  * Offline fallback: cached route from last successful calculation for same waypoints
  * Last resort:      straight-line (isProper: false — UI shows warning)
  *
@@ -11,6 +11,9 @@
 
 import * as FileSystem from 'expo-file-system';
 import type { RouteStep } from './types';
+import { fetchJSOfflineRoute, ENABLE_JS_OFFLINE_ROUTER, getLastOfflineRouterDebug } from './offlineRouter';
+import { routeValhalla } from 'expo-tile-server';
+import { ROUTING_REGIONS } from '../../lib/useOfflineFiles';
 
 export interface RouteResult {
   coords:        [number, number][];
@@ -20,6 +23,7 @@ export interface RouteResult {
   totalDuration: number;
   isProper:      boolean;
   fromCache?:    boolean;
+  debug?:        string;
 }
 
 interface RouteOpts {
@@ -30,35 +34,131 @@ interface RouteOpts {
 }
 
 // ── Route cache (filesystem, survives app restarts) ───────────────────────────
-const CACHE_DIR = `${FileSystem.documentDirectory}routes/`;
+const CACHE_DIR      = `${FileSystem.documentDirectory}routes/`;
+const LAST_ROUTE_PATH = `${FileSystem.documentDirectory}routes/last_route.json`;
+const LAST_ROUTE_DEST_TOLERANCE_M = 150;
+const LAST_ROUTE_START_TOLERANCE_M = 5_000;
+const TRAILHEAD_API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://trailhead-production-2049.up.railway.app';
+const ROUTE_CACHE_VERSION = 'valhalla-proxy-v2';
 
 async function ensureCacheDir() {
   await FileSystem.makeDirectoryAsync(CACHE_DIR, { intermediates: true }).catch(() => {});
 }
 
+function normCoord(coord: string): string {
+  // 4 decimal places ≈ 11m tolerance — coarse enough to survive GPS drift between
+  // app sessions (GPS can shift 5-15m at rest) but fine enough distinct routes don't collide.
+  const [lng, lat] = coord.split(',').map(s => parseFloat(s).toFixed(4));
+  return `${lng},${lat}`;
+}
+
 function cacheKey(pairs: string[]): string {
-  // Simple hash — pairs are stable for same route
-  return pairs.join('|').replace(/[^0-9.,|]/g, '').replace(/\./g, '_').slice(0, 120);
+  return `${ROUTE_CACHE_VERSION}|${pairs.map(normCoord).join('|')}`.replace(/\./g, '_').slice(0, 170);
+}
+
+function parsePair(pair: string): [number, number] | null {
+  const [lng, lat] = pair.split(',').map(Number);
+  return Number.isFinite(lng) && Number.isFinite(lat) ? [lng, lat] : null;
+}
+
+function coordDistanceM(a: [number, number], b: [number, number]): number {
+  const R = 6_371_000;
+  const dLat = (b[1] - a[1]) * Math.PI / 180;
+  const dLng = (b[0] - a[0]) * Math.PI / 180;
+  const la1 = a[1] * Math.PI / 180;
+  const la2 = b[1] * Math.PI / 180;
+  const h = Math.sin(dLat / 2) ** 2 +
+    Math.cos(la1) * Math.cos(la2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+function minDistanceToRouteM(point: [number, number], coords: [number, number][]): number {
+  if (!coords.length) return Infinity;
+  let best = Infinity;
+  const step = Math.max(1, Math.floor(coords.length / 500));
+  for (let i = 0; i < coords.length; i += step) {
+    best = Math.min(best, coordDistanceM(point, coords[i]));
+    if (best < 50) break;
+  }
+  return best;
+}
+
+function routeMatchesRequest(parsed: any, pairs: string[]): boolean {
+  if (parsed.routeCacheVersion !== ROUTE_CACHE_VERSION) return false;
+  const reqStart = parsePair(pairs[0]);
+  const reqEnd = parsePair(pairs[pairs.length - 1]);
+  if (!reqStart || !reqEnd) return false;
+
+  const savedPairs = Array.isArray(parsed.requestedPairs) ? parsed.requestedPairs as string[] : [];
+  if (savedPairs.length > 0) {
+    const savedEnd = parsePair(savedPairs[savedPairs.length - 1]);
+    if (!savedEnd || coordDistanceM(reqEnd, savedEnd) > LAST_ROUTE_DEST_TOLERANCE_M) return false;
+
+    const sameStops = savedPairs.length === pairs.length &&
+      pairs.slice(1).every((pair, i) => {
+        const a = parsePair(pair);
+        const b = parsePair(savedPairs[i + 1]);
+        return !!a && !!b && coordDistanceM(a, b) <= LAST_ROUTE_DEST_TOLERANCE_M;
+      });
+    if (sameStops) return true;
+  }
+
+  const coords = Array.isArray(parsed.coords) ? parsed.coords as [number, number][] : [];
+  const cachedEnd = coords[coords.length - 1];
+  if (!cachedEnd || coordDistanceM(reqEnd, cachedEnd) > LAST_ROUTE_DEST_TOLERANCE_M) return false;
+
+  return minDistanceToRouteM(reqStart, coords) <= LAST_ROUTE_START_TOLERANCE_M;
 }
 
 async function saveRoute(pairs: string[], result: RouteResult) {
   try {
     await ensureCacheDir();
-    const path = `${CACHE_DIR}${cacheKey(pairs)}.json`;
-    await FileSystem.writeAsStringAsync(path, JSON.stringify(result));
-  } catch {}
+    const key  = cacheKey(pairs);
+    const path = `${CACHE_DIR}${key}.json`;
+    const json = JSON.stringify({ ...result, requestedPairs: pairs, routeCacheVersion: ROUTE_CACHE_VERSION, savedAt: Date.now() });
+    // Save keyed route + always overwrite last_route (the "I was just navigating" fallback)
+    await Promise.all([
+      FileSystem.writeAsStringAsync(path, json),
+      FileSystem.writeAsStringAsync(LAST_ROUTE_PATH, json),
+    ]);
+    console.log('[RouteCache] saved key:', key);
+  } catch (e) {
+    console.warn('[RouteCache] save failed', e);
+  }
 }
 
-async function loadCachedRoute(pairs: string[]): Promise<RouteResult | null> {
+async function loadKeyedRoute(pairs: string[]): Promise<RouteResult | null> {
   try {
-    const path = `${CACHE_DIR}${cacheKey(pairs)}.json`;
+    const key  = cacheKey(pairs);
+    const path = `${CACHE_DIR}${key}.json`;
+    console.log('[RouteCache] keyed check, key:', key);
     const info = await FileSystem.getInfoAsync(path);
-    if (!info.exists) return null;
-    const raw = await FileSystem.readAsStringAsync(path);
-    return { ...JSON.parse(raw), fromCache: true };
-  } catch {
-    return null;
+    if (info.exists) {
+      const parsed = JSON.parse(await FileSystem.readAsStringAsync(path));
+      console.log('[RouteCache] keyed hit — coords:', parsed.coords?.length);
+      return { ...parsed, fromCache: true };
+    }
+  } catch (e) {
+    console.warn('[RouteCache] keyed load error', e);
   }
+  return null;
+}
+
+async function loadLastRoute(pairs: string[]): Promise<RouteResult | null> {
+  try {
+    const info = await FileSystem.getInfoAsync(LAST_ROUTE_PATH);
+    if (info.exists) {
+      const parsed = JSON.parse(await FileSystem.readAsStringAsync(LAST_ROUTE_PATH));
+      if (routeMatchesRequest(parsed, pairs)) {
+        console.log('[RouteCache] last_route hit — coords:', parsed.coords?.length);
+        return { ...parsed, fromCache: true };
+      }
+      console.log('[RouteCache] last_route mismatch — ignoring');
+    }
+  } catch (e) {
+    console.warn('[RouteCache] last_route load error', e);
+  }
+  return null;
 }
 
 // ── Connectivity check (2s — fast fail when offline) ─────────────────────────
@@ -98,44 +198,121 @@ export async function fetchRoute(
   mapboxToken: string,
   routeOpts:   RouteOpts,
 ): Promise<RouteResult> {
-  // Fast offline check — skip all network calls immediately if no connectivity
-  const online = await isOnline();
+  console.log('[fetchRoute] pairs:', pairs);
 
-  if (online) {
-    // 1. Mapbox Directions
-    try {
-      const r = await fetchMapbox(pairs, fromIdx, mapboxToken, routeOpts);
-      await saveRoute(pairs, r);
-      return r;
-    } catch {}
-
-    // 2. Valhalla (OSM DE public)
-    try {
-      const r = await fetchValhalla(pairs, fromIdx, routeOpts);
-      await saveRoute(pairs, r);
-      return r;
-    } catch {}
-
-    // 3. OSRM (Fossgis public)
-    try {
-      const r = await fetchOSRM(pairs, fromIdx, routeOpts);
-      await saveRoute(pairs, r);
-      return r;
-    } catch {}
+  // A. Keyed cache first — exact/near-exact same route, no network/local graph work.
+  const cached = await loadKeyedRoute(pairs);
+  if (cached) {
+    console.log('[fetchRoute] returning keyed cached route');
+    return cached;
   }
 
-  // Offline — try local PMTiles router first (tap-anywhere routing from device)
+  const tryNativeOfflineValhalla = async () => {
+    if (pairs.length < 2) return null;
+    const offline = await fetchNativeValhallaOffline(pairs, routeOpts);
+    if (!offline) return null;
+    console.log('[fetchRoute] native offline Valhalla route — saving to cache');
+    await saveRoute(pairs, offline);
+    return offline;
+  };
+
+  const tryOfflineRouter = async () => {
+    if (!ENABLE_JS_OFFLINE_ROUTER || pairs.length < 2) return null;
+    const [fromLng, fromLat] = pairs[0].split(',').map(Number);
+    const [toLng,   toLat]   = pairs[pairs.length - 1].split(',').map(Number);
+    const offline = await fetchJSOfflineRoute(fromLng, fromLat, toLng, toLat);
+    if (!offline) return null;
+    console.log('[fetchRoute] offline JS route — saving to cache');
+    await saveRoute(pairs, offline);
+    return offline;
+  };
+
+  // B. If offline, go straight to PMTiles A* before considering last_route.json.
+  const online = await isOnline();
+  if (!online) {
+    console.log('[fetchRoute] offline — trying native Valhalla routing pack');
+    try {
+      const offline = await tryNativeOfflineValhalla();
+      if (offline) return offline;
+    } catch (e) {
+      console.warn('[fetchRoute] native offline Valhalla error', e);
+    }
+
+    console.log('[fetchRoute] offline — trying JS PMTiles router');
+    try {
+      const offline = await tryOfflineRouter();
+      if (offline) return offline;
+    } catch (e) {
+      console.warn('[fetchRoute] JS offline router error', e);
+      const msg = e instanceof Error ? e.message : String(e);
+      return buildFallbackRoute(pairs, `offline router exception: ${msg}`);
+    }
+    const last = await loadLastRoute(pairs);
+    if (last) {
+      console.log('[fetchRoute] returning matching last_route fallback');
+      return last;
+    }
+    console.log('[RouteCache] miss — no cached route found');
+    const debug = getLastOfflineRouterDebug();
+    console.log('[fetchRoute] offline router failed — no drawable route', debug);
+    return buildNoRoute(pairs, debug);
+  }
+
+  // C. Online: for overland-style routes, prefer our Valhalla service. Racing
+  // Mapbox here lets paved/highway routes win before Valhalla can return.
+  const onlineEngines = routeOpts.backRoads || routeOpts.avoidHighways
+    ? [
+        () => fetchValhalla(pairs, fromIdx, routeOpts),
+        () => fetchMapbox(pairs, fromIdx, mapboxToken, routeOpts),
+        () => fetchOSRM(pairs, fromIdx, routeOpts),
+      ]
+    : [
+        () => fetchMapbox(pairs, fromIdx, mapboxToken, routeOpts),
+        () => fetchValhalla(pairs, fromIdx, routeOpts),
+        () => fetchOSRM(pairs, fromIdx, routeOpts),
+      ];
+
+  console.log('[fetchRoute] online — trying live engines in priority order');
+  for (const engine of onlineEngines) {
+    try {
+      const route = await engine();
+      console.log('[fetchRoute] online route — saving to cache');
+      await saveRoute(pairs, route);
+      return route;
+    } catch (e) {
+      console.warn('[fetchRoute] live engine failed', e);
+    }
+  }
+
+  // D. JS offline router — reads road tiles from local TileServer, runs A*
   try {
-    const r = await fetchLocalRouter(pairs, fromIdx);
-    if (r) { await saveRoute(pairs, r); return r; }
-  } catch {}
+    const offline = await tryNativeOfflineValhalla();
+    if (offline) return offline;
+  } catch (e) {
+    console.warn('[fetchRoute] native offline Valhalla error', e);
+  }
 
-  // Cached route from prior online session
-  const cached = await loadCachedRoute(pairs);
-  if (cached) return cached;
+  if (ENABLE_JS_OFFLINE_ROUTER && pairs.length >= 2) {
+    try {
+      const offline = await tryOfflineRouter();
+      if (offline) return offline;
+    } catch (e) {
+      console.warn('[fetchRoute] JS offline router error', e);
+    }
+  }
 
-  // True last resort: straight line
-  return buildFallbackRoute(pairs);
+  // E. Only after keyed cache + online + JS router fail, use matching last_route.
+  const last = await loadLastRoute(pairs);
+  if (last) {
+    console.log('[fetchRoute] returning matching last_route fallback');
+    return last;
+  }
+
+  // F. True last resort. Offline should not draw a fake route across fields.
+  console.log('[RouteCache] miss — no cached route found');
+  const debug = getLastOfflineRouterDebug();
+  console.log('[fetchRoute] all engines failed — no drawable route', debug);
+  return buildNoRoute(pairs, debug);
 }
 
 // ── Engine 1: Mapbox Directions ───────────────────────────────────────────────
@@ -198,7 +375,7 @@ async function fetchMapbox(
            totalDistance: route.distance, totalDuration: route.duration, isProper: true };
 }
 
-// ── Engine 2: Valhalla (valhalla1.openstreetmap.de) ───────────────────────────
+// ── Engine 2: Trailhead Valhalla proxy ────────────────────────────────────────
 async function fetchValhalla(
   pairs: string[],
   _from: number,
@@ -210,27 +387,27 @@ async function fetchValhalla(
   });
 
   const ctrl = new AbortController();
-  const tid  = setTimeout(() => ctrl.abort(), 12000);
-  const data = await fetch('https://valhalla1.openstreetmap.de/route', {
+  const tid  = setTimeout(() => ctrl.abort(), 20000);
+  const data = await fetch(`${TRAILHEAD_API_BASE}/api/route`, {
     method: 'POST', signal: ctrl.signal,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       locations: locs,
-      costing: 'auto',
-      costing_options: {
-        auto: {
-          use_tracks:   opts.backRoads      ? 0.9 : 0.1,
-          use_highways: opts.avoidHighways  ? 0   : 1,
-          use_tolls:    opts.avoidTolls     ? 0   : 0.5,
-        },
-      },
+      options: opts,
       units: 'miles',
     }),
-  }).then(r => r.json());
+  }).then(async r => {
+    const json = await r.json().catch(() => null);
+    if (!r.ok) throw new Error(`trailhead valhalla ${r.status}: ${json?.detail ?? 'failed'}`);
+    return json;
+  });
   clearTimeout(tid);
 
   if (!data.trip || data.trip.status !== 0) throw new Error('valhalla error');
+  return parseValhallaRoute(data);
+}
 
+function parseValhallaRoute(data: any): RouteResult {
   const TURN: Record<number, string> = {
     0:'', 1:'', 2:'left', 3:'right', 4:'arrive', 5:'sharp left',
     6:'sharp right', 7:'left', 8:'right', 9:'uturn', 10:'slight left', 11:'slight right',
@@ -256,6 +433,68 @@ async function fetchValhalla(
   return { coords: all, steps, legs,
            totalDistance: Math.round((data.trip.summary.length ?? 0) * 1609.34),
            totalDuration: data.trip.summary.time ?? 0, isProper: true };
+}
+
+// ── Engine 2b: native Valhalla Mobile routing pack (true offline) ────────────
+function pointInBounds(point: [number, number], bounds: { n: number; s: number; e: number; w: number }): boolean {
+  const [lng, lat] = point;
+  return lat >= bounds.s && lat <= bounds.n && lng >= bounds.w && lng <= bounds.e;
+}
+
+function findRoutingRegion(pairs: string[]) {
+  const coords = pairs.map(parsePair).filter(Boolean) as [number, number][];
+  if (coords.length !== pairs.length) return null;
+
+  for (const region of Object.values(ROUTING_REGIONS)) {
+    if (coords.every(coord => pointInBounds(coord, region.bounds))) return region;
+  }
+  return null;
+}
+
+function buildValhallaRequest(pairs: string[], opts: RouteOpts): string {
+  return JSON.stringify({
+    locations: pairs.map(pair => {
+      const [lon, lat] = pair.split(',').map(Number);
+      return { lat, lon };
+    }),
+    costing: 'auto',
+    costing_options: {
+      auto: {
+        use_highways: opts.avoidHighways ? 0 : opts.backRoads ? 0.2 : 0.5,
+        use_tolls: opts.avoidTolls ? 0 : 0.5,
+        use_ferry: opts.noFerries ? 0 : 0.5,
+      },
+    },
+    directions_options: { units: 'miles' },
+  });
+}
+
+async function fetchNativeValhallaOffline(
+  pairs: string[],
+  opts: RouteOpts,
+): Promise<RouteResult | null> {
+  const region = findRoutingRegion(pairs);
+  if (!region) {
+    console.log('[ValhallaOffline] no single downloaded-state candidate covers route');
+    return null;
+  }
+
+  const info = await FileSystem.getInfoAsync(region.localPath).catch(() => null);
+  if (!info?.exists) {
+    console.log('[ValhallaOffline] routing pack missing:', region.id);
+    return null;
+  }
+
+  const requestJson = buildValhallaRequest(pairs, opts);
+  const raw = await routeValhalla(region.localPath, requestJson);
+  const data = JSON.parse(raw);
+  if (!data.trip || data.trip.status !== 0) {
+    const msg = data.error ?? data.message ?? data.trip?.status_message ?? 'valhalla offline error';
+    throw new Error(String(msg));
+  }
+
+  const result = parseValhallaRoute(data);
+  return { ...result, debug: `offline valhalla ${region.id}` };
 }
 
 // ── Engine 3: OSRM (Fossgis — great for backcountry/gravel roads) ─────────────
@@ -318,6 +557,7 @@ async function fetchLocalRouter(
   pairs:  string[],
   _from:  number,
 ): Promise<RouteResult | null> {
+  return null; // Disabled: Swift OfflineRouter has fatal crash points (re-enable after binary fix)
   if (pairs.length < 2) return null;
   const [fromLng, fromLat] = pairs[0].split(',').map(Number);
   const [toLng,   toLat]   = pairs[pairs.length - 1].split(',').map(Number);
@@ -366,10 +606,18 @@ async function fetchLocalRouter(
 }
 
 // ── Straight-line fallback (truly offline with no cached route) ───────────────
-export function buildFallbackRoute(pairs: string[]): RouteResult {
+export function buildFallbackRoute(pairs: string[], debug = 'route fallback'): RouteResult {
   const coords: [number, number][] = pairs.map(p => {
     const [ln, lt] = p.split(',');
     return [parseFloat(ln), parseFloat(lt)];
   });
-  return { coords, steps: [], legs: [[]], totalDistance: 0, totalDuration: 0, isProper: false };
+  return { coords, steps: [], legs: [[]], totalDistance: 0, totalDuration: 0, isProper: false, debug };
+}
+
+export function buildNoRoute(pairs: string[], debug = 'route unavailable'): RouteResult {
+  const coords: [number, number][] = pairs.slice(0, 1).map(p => {
+    const [ln, lt] = p.split(',');
+    return [parseFloat(ln), parseFloat(lt)];
+  });
+  return { coords, steps: [], legs: [[]], totalDistance: 0, totalDuration: 0, isProper: false, debug };
 }

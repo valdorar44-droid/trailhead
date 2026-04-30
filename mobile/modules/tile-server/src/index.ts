@@ -1,23 +1,41 @@
-import { NativeModulesProxy } from 'expo-modules-core';
+import { requireOptionalNativeModule } from 'expo-modules-core';
 
-const M = NativeModulesProxy.TileServerModule;
+const M = requireOptionalNativeModule('TileServerModule');
 
 export const TILE_SERVER_PORT = 57832;
-export const LOCAL_STYLE_URL  = `http://127.0.0.1:${TILE_SERVER_PORT}/api/style.json`;
-export const LOCAL_TILE_URL   = `http://127.0.0.1:${TILE_SERVER_PORT}/api/tiles/{z}/{x}/{y}.pbf`;
-export const LOCAL_GLYPH_URL  = `https://tiles.gettrailhead.app/api/fonts/{fontstack}/{range}.pbf`;
 
-/** Start the tile server reading from a local .pmtiles file. Idempotent. */
-export async function startServer(pmtilesPath: string): Promise<void> {
-  return M.startServer(pmtilesPath);
+/** Start the HTTP server socket (call once on app launch). */
+export async function startServer(): Promise<void> {
+  if (!M) throw new Error('TileServerModule not in binary');
+  return M.startServer();
 }
 
-/** Stop the tile server. */
+/** Swap the active state PMTiles file without restarting the socket. */
+export async function switchState(pmtilesPath: string): Promise<void> {
+  if (!M) throw new Error('TileServerModule not in binary');
+  return M.switchState(pmtilesPath);
+}
+
+/** Load the base (z0–z9 US) PMTiles file. Survives state switches. */
+export async function setBase(pmtilesPath: string): Promise<void> {
+  if (!M) throw new Error('TileServerModule not in binary');
+  return M.setBase(pmtilesPath);
+}
+
+/** Stop the server and release all readers. */
 export async function stopServer(): Promise<void> {
+  if (!M) return;
   return M.stopServer();
 }
 
-/** Returns true if the server is currently listening. */
+/** Returns true if the server socket is listening. */
 export async function isRunning(): Promise<boolean> {
+  if (!M) return false;
   return M.isRunning();
+}
+
+/** Calculate a local Valhalla route from a downloaded routing pack tarball. */
+export async function routeValhalla(packPath: string, requestJson: string): Promise<string> {
+  if (!M?.routeValhalla) throw new Error('TileServerModule routeValhalla not in binary');
+  return M.routeValhalla(packPath, requestJson);
 }

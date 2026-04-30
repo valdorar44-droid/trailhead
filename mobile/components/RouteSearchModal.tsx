@@ -129,6 +129,30 @@ function fmtDist(km: number) {
   return `${Math.round(km * 0.621371)} mi`;
 }
 
+function parseCoordinateQuery(raw: string): { lat: number; lng: number; name: string } | null {
+  const nums = raw.match(/-?\d+(?:\.\d+)?/g)?.map(Number) ?? [];
+  if (nums.length < 2) return null;
+  const [a, b] = nums;
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+
+  let lat: number;
+  let lng: number;
+  if (Math.abs(a) <= 90 && Math.abs(b) <= 180) {
+    lat = a; lng = b; // common "lat, lng"
+  } else if (Math.abs(a) <= 180 && Math.abs(b) <= 90) {
+    lng = a; lat = b; // "lng, lat"
+  } else {
+    return null;
+  }
+
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  return {
+    lat,
+    lng,
+    name: `${lat.toFixed(5)}, ${lng.toFixed(5)}`,
+  };
+}
+
 // ── Elevation profile ─────────────────────────────────────────────────────────
 // Fetches SRTM elevation for sampled route coords, renders as bar chart.
 // Uses OpenTopoData (free, no key). Styled in Trailhead orange — not a copy of OsmAnd.
@@ -282,6 +306,13 @@ export default function RouteSearchModal({
 
   const doSearch = useCallback(async () => {
     if (!query.trim()) return;
+    const coord = parseCoordinateQuery(query);
+    if (coord) {
+      const dist = userLoc ? haversineKm(userLoc, coord) : null;
+      setResults([{ ...coord, dist }]);
+      setView('searching');
+      return;
+    }
     setSearching(true);
     try {
       const res = await fetch(

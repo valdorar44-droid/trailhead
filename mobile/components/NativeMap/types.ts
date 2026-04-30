@@ -33,4 +33,5 @@ export interface RouteResult {
   totalDuration: number;
   isProper: boolean;
   fromCache?: boolean;
+  debug?: string;
 }

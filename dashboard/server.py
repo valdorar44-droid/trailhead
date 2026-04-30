@@ -1081,6 +1081,34 @@ async def generate_base():
     return {"triggered": True}
 
 
+# ── Per-state Valhalla routing packs ──────────────────────────────────────────
+from dashboard import valhalla_packs as _vhp
+
+@app.get("/api/admin/routing-packs-status")
+async def routing_packs_status():
+    return {"running": _vhp._running, "tools": _vhp.tool_status(), "states": _vhp.all_status()}
+
+@app.api_route("/api/admin/build-routing-pack/{code}", methods=["GET", "POST"])
+async def build_routing_pack(code: str):
+    code = code.upper()
+    if code not in _pms.STATE_BBOXES:
+        return {"error": f"unknown state code {code}"}
+    asyncio.create_task(_vhp.build_and_upload_pack(code))
+    return {"triggered": True, "code": code}
+
+@app.post("/api/admin/build-all-routing-packs")
+async def build_all_routing_packs():
+    if _vhp._running:
+        return {"triggered": False, "reason": "already running"}
+    asyncio.create_task(_vhp.build_all_task())
+    return {"triggered": True, "total": len(_pms.STATE_BBOXES)}
+
+@app.post("/api/admin/update-routing-manifest")
+async def update_routing_manifest():
+    ok = await _vhp.update_routing_manifest_on_r2()
+    return {"ok": ok}
+
+
 # ── R2 upload ─────────────────────────────────────────────────────────────────
 _r2_upload_status: dict = {"running": False, "done": False, "error": None, "progress": ""}
 

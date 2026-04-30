@@ -77,6 +77,10 @@ def is_state_running(code: str) -> bool:
     return _status.get(code.upper(), {}).get("status") in RUNNING_STATUSES
 
 
+def is_state_built(code: str) -> bool:
+    return pack_path(code.upper()).exists()
+
+
 def tool_status() -> dict:
     return {
         "valhalla_build_tiles": shutil.which("valhalla_build_tiles") or "",
@@ -323,10 +327,51 @@ async def update_routing_manifest_on_r2() -> bool:
         return False
 
 
-async def build_and_upload_pack(code: str) -> bool:
+async def remote_pack_size(code: str) -> Optional[int]:
+    import boto3
+    from botocore.config import Config
+    from config.settings import settings
+
+    key = f"routing/{code.lower()}.tar"
+    try:
+        r2 = boto3.client(
+            "s3",
+            endpoint_url=f"https://{settings.r2_account_id}.r2.cloudflarestorage.com",
+            aws_access_key_id=settings.r2_access_key_id,
+            aws_secret_access_key=settings.r2_secret_access_key,
+            config=Config(signature_version="s3v4"),
+            region_name="auto",
+        )
+        resp = await asyncio.to_thread(r2.head_object, Bucket=settings.r2_bucket, Key=key)
+        return int(resp.get("ContentLength") or 0)
+    except Exception:
+        return None
+
+
+async def build_and_upload_pack(code: str, *, force: bool = False) -> bool:
     code = code.upper()
     if is_state_running(code):
         return False
+    if is_state_built(code) and not force:
+        path = pack_path(code)
+        _status[code].update(
+            status="done",
+            progress=f"already built · {round(path.stat().st_size / 1_000_000, 1)} MB",
+            size_bytes=path.stat().st_size,
+            error=None,
+        )
+        await update_routing_manifest_on_r2()
+        return True
+    remote_size = await remote_pack_size(code) if not force else None
+    if remote_size:
+        _status[code].update(
+            status="done",
+            progress=f"already uploaded · {round(remote_size / 1_000_000, 1)} MB",
+            size_bytes=remote_size,
+            error=None,
+        )
+        await update_routing_manifest_on_r2()
+        return True
     path = await build_pack(code)
     if not path:
         return False

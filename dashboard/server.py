@@ -1089,14 +1089,19 @@ async def routing_packs_status():
     return {"running": _vhp._running, "tools": _vhp.tool_status(), "states": _vhp.all_status()}
 
 @app.api_route("/api/admin/build-routing-pack/{code}", methods=["GET", "POST"])
-async def build_routing_pack(code: str):
+async def build_routing_pack(code: str, force: bool = False):
     code = code.upper()
     if code not in _pms.STATE_BBOXES:
         return {"error": f"unknown state code {code}"}
     if _vhp.is_state_running(code):
         return {"triggered": False, "code": code, "reason": "already running"}
-    asyncio.create_task(_vhp.build_and_upload_pack(code))
-    return {"triggered": True, "code": code}
+    if _vhp.is_state_built(code) and not force:
+        return {"triggered": False, "code": code, "reason": "already built"}
+    remote_size = await _vhp.remote_pack_size(code) if not force else None
+    if remote_size:
+        return {"triggered": False, "code": code, "reason": "already uploaded", "size_bytes": remote_size}
+    asyncio.create_task(_vhp.build_and_upload_pack(code, force=force))
+    return {"triggered": True, "code": code, "force": force}
 
 @app.post("/api/admin/build-all-routing-packs")
 async def build_all_routing_packs():

@@ -237,6 +237,10 @@ async def update_manifest_on_r2() -> bool:
     if US_PATH.exists():
         manifest["us.pmtiles"] = {"size": US_PATH.stat().st_size}
 
+    # Base layer (z0–z9)
+    if BASE_PATH.exists():
+        manifest["base.pmtiles"] = {"size": BASE_PATH.stat().st_size}
+
     # States
     for code in STATE_BBOXES:
         path = STATES_DIR / f"{code.lower()}.pmtiles"
@@ -289,3 +293,142 @@ async def extract_all_states_task(codes: Optional[list[str]] = None):
         except Exception as exc:
             _states[code].update(status="error", error=str(exc))
     _running = False
+
+
+# ── Base layer (z0–z9 CONUS) ──────────────────────────────────────────────────
+
+BASE_PATH = DATA_DIR / "base.pmtiles"
+_base_status: dict = {"status": "idle", "progress": "", "size_bytes": 0, "error": None}
+
+
+def base_status() -> dict:
+    size = BASE_PATH.stat().st_size if BASE_PATH.exists() else 0
+    return {**_base_status, "on_disk": BASE_PATH.exists(), "size_mb": round(size / 1_000_000, 1)}
+
+
+async def generate_base() -> Optional[Path]:
+    """Extract z0–z9 CONUS tiles from us.pmtiles → base.pmtiles."""
+    if not PMTILES_PATH.exists():
+        raise RuntimeError("us.pmtiles not found — run pmtiles bootstrap first")
+    if not GO_PMTILES_BINARY.exists():
+        raise RuntimeError("go-pmtiles binary not found")
+
+    tmp = BASE_PATH.with_suffix(".pmtiles.tmp")
+    if tmp.exists():
+        tmp.unlink()
+
+    _base_status.update(status="extracting", progress="starting", error=None)
+    start = time.time()
+
+    proc = await asyncio.create_subprocess_exec(
+        str(GO_PMTILES_BINARY), "extract",
+        str(PMTILES_PATH),
+        str(tmp),
+        "--bbox=-125.0,24.5,-66.5,49.5",
+        "--maxzoom=9",
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+
+    async def _heartbeat():
+        while proc.returncode is None:
+            size_mb = (tmp.stat().st_size / 1_000_000) if tmp.exists() else 0
+            elapsed = int(time.time() - start)
+            _base_status["progress"] = f"extracting {elapsed}s · {size_mb:.0f} MB"
+            await asyncio.sleep(5)
+
+    await asyncio.gather(_heartbeat(), proc.wait())
+
+    if proc.returncode != 0:
+        _base_status.update(status="error", error=f"go-pmtiles exit {proc.returncode}")
+        if tmp.exists():
+            tmp.unlink()
+        return None
+
+    tmp.rename(BASE_PATH)
+    size = BASE_PATH.stat().st_size
+    _base_status.update(
+        status="extracted",
+        progress=f"done · {round(size / 1_000_000, 1)} MB",
+        size_bytes=size,
+    )
+    return BASE_PATH
+
+
+async def upload_base_to_r2() -> bool:
+    """Upload base.pmtiles to R2 as 'base.pmtiles'."""
+    import boto3
+    from botocore.config import Config
+    from config.settings import settings
+
+    if not BASE_PATH.exists():
+        _base_status.update(status="error", error="base.pmtiles not found")
+        return False
+
+    _base_status.update(status="uploading", progress="starting upload")
+    try:
+        r2 = boto3.client(
+            "s3",
+            endpoint_url=f"https://{settings.r2_account_id}.r2.cloudflarestorage.com",
+            aws_access_key_id=settings.r2_access_key_id,
+            aws_secret_access_key=settings.r2_secret_access_key,
+            config=Config(signature_version="s3v4"),
+            region_name="auto",
+        )
+        file_size = BASE_PATH.stat().st_size
+        part_size = 64 * 1024 * 1024
+
+        mpu = await asyncio.to_thread(
+            r2.create_multipart_upload,
+            Bucket=settings.r2_bucket,
+            Key="base.pmtiles",
+            ContentType="application/vnd.pmtiles",
+        )
+        upload_id = mpu["UploadId"]
+        parts = []
+        uploaded = 0
+
+        with open(BASE_PATH, "rb") as fh:
+            part_num = 1
+            while True:
+                chunk = fh.read(part_size)
+                if not chunk:
+                    break
+                resp = await asyncio.to_thread(
+                    r2.upload_part,
+                    Bucket=settings.r2_bucket,
+                    Key="base.pmtiles",
+                    UploadId=upload_id,
+                    PartNumber=part_num,
+                    Body=chunk,
+                )
+                parts.append({"PartNumber": part_num, "ETag": resp["ETag"]})
+                uploaded += len(chunk)
+                _base_status["progress"] = f"uploading {round(uploaded / file_size * 100)}%"
+                part_num += 1
+
+        await asyncio.to_thread(
+            r2.complete_multipart_upload,
+            Bucket=settings.r2_bucket,
+            Key="base.pmtiles",
+            MultipartUpload={"Parts": parts},
+            UploadId=upload_id,
+        )
+        _base_status.update(
+            status="done",
+            progress=f"uploaded · {round(file_size / 1_000_000, 1)} MB",
+            size_bytes=file_size,
+        )
+        # Refresh manifest to include base.pmtiles
+        await update_manifest_on_r2()
+        return True
+    except Exception as exc:
+        _base_status.update(status="error", error=f"{type(exc).__name__}: {exc}")
+        return False
+
+
+async def generate_and_upload_base() -> bool:
+    path = await generate_base()
+    if not path:
+        return False
+    return await upload_base_to_r2()

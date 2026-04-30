@@ -966,6 +966,22 @@ async def update_manifest():
     return {"ok": ok}
 
 
+@app.get("/api/admin/base-status")
+def base_status():
+    """Status of the z0–z9 CONUS base layer."""
+    return _pms.base_status()
+
+
+@app.post("/api/admin/generate-base")
+async def generate_base():
+    """Extract z0–z9 CONUS tiles and upload to R2 as base.pmtiles.
+    Runs in the background; poll /api/admin/base-status for progress."""
+    if _pms._base_status.get("status") in ("extracting", "uploading"):
+        return {"triggered": False, "reason": "already running"}
+    asyncio.create_task(_pms.generate_and_upload_base())
+    return {"triggered": True}
+
+
 # ── R2 upload ─────────────────────────────────────────────────────────────────
 _r2_upload_status: dict = {"running": False, "done": False, "error": None, "progress": ""}
 

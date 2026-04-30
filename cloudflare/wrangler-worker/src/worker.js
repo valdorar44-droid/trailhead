@@ -218,14 +218,23 @@ export default {
     // expo-file-system createDownloadResumable can pause/resume a 1GB download.
     // 100x faster than MLN's per-tile offline pack approach.
     if (path === '/api/download/manifest.json') {
-      const files = ['us.pmtiles'];
-      const manifest = {};
-      for (const f of files) {
-        const meta = await env.TILES_BUCKET.head(f).catch(() => null);
-        if (meta) manifest[f] = { size: meta.size, etag: meta.httpEtag };
+      // Serve the pre-built manifest.json from R2 (written by Railway after each state extraction).
+      // Falls back to a dynamic stub if it doesn't exist yet.
+      const manifestObj = await env.TILES_BUCKET.get('manifest.json').catch(() => null);
+      if (manifestObj) {
+        return new Response(manifestObj.body, {
+          headers: {
+            'Content-Type':                'application/json',
+            'Access-Control-Allow-Origin': '*',
+            'Cache-Control':               'public, max-age=300',
+          },
+        });
       }
+      // Fallback: dynamic manifest with just CONUS
+      const meta = await env.TILES_BUCKET.head('us.pmtiles').catch(() => null);
+      const manifest = meta ? { 'us.pmtiles': { size: meta.size } } : {};
       return Response.json(manifest, {
-        headers: { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=300' },
+        headers: { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=60' },
       });
     }
 
@@ -264,6 +273,71 @@ export default {
 
       const headers = {
         'Content-Type':                'application/octet-stream',
+        'Accept-Ranges':               'bytes',
+        'Content-Length':              String(contentLength),
+        'Access-Control-Allow-Origin': '*',
+        'Cache-Control':               'no-cache',
+      };
+      if (contentRange) headers['Content-Range'] = contentRange;
+
+      return new Response(obj.body, { status, headers });
+    }
+
+    // ── Valhalla routing pack downloads ─────────────────────────────────────
+    // Routing packs are separate from PMTiles because they are graph data, not
+    // render tiles. Expected R2 keys:
+    //   routing/manifest.json
+    //   routing/ks.tar or routing/ks.tar.gz
+    if (path === '/api/routing/manifest.json') {
+      const manifestObj = await env.TILES_BUCKET.get('routing/manifest.json').catch(() => null);
+      if (manifestObj) {
+        return new Response(manifestObj.body, {
+          headers: {
+            'Content-Type':                'application/json',
+            'Access-Control-Allow-Origin': '*',
+            'Cache-Control':               'public, max-age=300',
+          },
+        });
+      }
+
+      return Response.json({}, {
+        headers: { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=60' },
+      });
+    }
+
+    const routingMatch = path.match(/^\/api\/routing\/([a-z]{2}\.tar(?:\.gz)?)$/);
+    if (routingMatch) {
+      const fileName = routingMatch[1];
+      const key = `routing/${fileName}`;
+      const meta = await env.TILES_BUCKET.head(key).catch(() => null);
+      if (!meta) return new Response('Routing pack not found', { status: 404, headers: { 'Access-Control-Allow-Origin': '*' } });
+
+      const totalSize = meta.size;
+      const rangeHeader = request.headers.get('Range');
+
+      let r2opts = {};
+      let status = 200;
+      let contentRange = null;
+      let contentLength = totalSize;
+
+      if (rangeHeader) {
+        const m = rangeHeader.match(/bytes=(\d+)-(\d*)/);
+        if (m) {
+          const offset = parseInt(m[1]);
+          const endByte = m[2] ? parseInt(m[2]) : totalSize - 1;
+          const length = endByte - offset + 1;
+          r2opts = { range: { offset, length } };
+          contentRange = `bytes ${offset}-${endByte}/${totalSize}`;
+          contentLength = length;
+          status = 206;
+        }
+      }
+
+      const obj = await env.TILES_BUCKET.get(key, r2opts).catch(() => null);
+      if (!obj) return new Response('Routing pack not found', { status: 404, headers: { 'Access-Control-Allow-Origin': '*' } });
+
+      const headers = {
+        'Content-Type':                fileName.endsWith('.gz') ? 'application/gzip' : 'application/x-tar',
         'Accept-Ranges':               'bytes',
         'Content-Length':              String(contentLength),
         'Access-Control-Allow-Origin': '*',

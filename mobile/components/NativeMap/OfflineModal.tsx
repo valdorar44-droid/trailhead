@@ -17,7 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '@/lib/store';
 import { useTheme, mono, type ColorPalette } from '@/lib/design';
 import {
-  useOfflineFiles, FILE_REGIONS, fmtBytes, fmtSpeed, fmtEta,
+  useOfflineFiles, FILE_REGIONS, ROUTING_REGIONS, fmtBytes, fmtSpeed, fmtEta,
   type FileDownloadState,
 } from '@/lib/useOfflineFiles';
 import {
@@ -107,14 +107,21 @@ function StatusChip({ label, color }: { label: string; color: string }) {
 }
 
 // ── File download card (used for CONUS + all states) ─────────────────────────
-function ConusCard({ state, totalBytes, region: regionProp, onStart, onPause, onResume, onDelete }: {
+function ConusCard({
+  state, totalBytes, region: regionProp, code,
+  onStart, onPause, onResume, onDelete,
+  completeTitle, completeText,
+}: {
   state:       FileDownloadState;
   totalBytes:  number;
   region?:     { name: string; description: string; estimatedGb: number };
+  code?:       string;
   onStart:     () => void;
   onPause:     () => void;
   onResume:    () => void;
   onDelete:    () => void;
+  completeTitle?: string;
+  completeText?:  string;
 }) {
   const C = useTheme();
   const region = regionProp ?? FILE_REGIONS.conus;
@@ -123,13 +130,18 @@ function ConusCard({ state, totalBytes, region: regionProp, onStart, onPause, on
   const isComplete = state.status === 'complete';
   const isError    = state.status === 'error';
   const accentColor = isComplete ? C.green : isActive || isPaused ? C.orange : C.border;
+  const iconBorderColor = code ? (accentColor === C.border ? C.orange + '40' : accentColor + '80') : C.border;
 
   return (
     <View style={{ borderLeftWidth: 3, borderLeftColor: accentColor, backgroundColor: C.s1, borderRadius: 10, overflow: 'hidden' }}>
       {/* Header row */}
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', padding: 14, paddingBottom: isActive || isPaused ? 8 : 14 }}>
-        <View style={{ width: 44, height: 44, backgroundColor: C.s2, borderRadius: 8, alignItems: 'center', justifyContent: 'center', marginRight: 12, borderWidth: 1, borderColor: C.border }}>
-          <Text style={{ fontSize: 22 }}>🗺️</Text>
+        <View style={{ width: 44, height: 44, backgroundColor: C.s2, borderRadius: 8, alignItems: 'center', justifyContent: 'center', marginRight: 12, borderWidth: 1, borderColor: iconBorderColor }}>
+          {code ? (
+            <Text style={{ fontSize: 13, fontFamily: mono, fontWeight: '900', color: isComplete ? C.green : C.orange, letterSpacing: 1 }}>{code}</Text>
+          ) : (
+            <Ionicons name="earth-outline" size={22} color={C.text2} />
+          )}
         </View>
 
         <View style={{ flex: 1 }}>
@@ -244,10 +256,10 @@ function ConusCard({ state, totalBytes, region: regionProp, onStart, onPause, on
       {isComplete && (
         <View style={{ margin: 12, marginTop: 0, padding: 10, backgroundColor: C.green + '15', borderRadius: 6, borderWidth: 1, borderColor: C.green + '30' }}>
           <Text style={{ color: C.green, fontSize: 9, fontFamily: mono, fontWeight: '700', letterSpacing: 0.5 }}>
-            ✓ FILE ON DEVICE — ACTIVATES WITH NEXT APP UPDATE
+            {completeTitle ?? '✓ FILE ON DEVICE — READY OFFLINE'}
           </Text>
           <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 2 }}>
-            Map file downloaded. Use corridor/state downloads for offline nav now — the full file activates in the next binary update.
+            {completeText ?? 'File downloaded. Trailhead can use this pack when the matching offline engine is available.'}
           </Text>
         </View>
       )}
@@ -324,14 +336,21 @@ export default function OfflineModal({
   const s           = makeStyles(C);
 
   // File-based download (CONUS + all states)
-  const { getState, startDownload, pauseDownload, resumeDownload, deleteDownload, getTotalBytes } = useOfflineFiles();
+  const {
+    getState, startDownload, pauseDownload, resumeDownload, deleteDownload, getTotalBytes,
+    getRoutingState, startRoutingDownload, pauseRoutingDownload, resumeRoutingDownload,
+    deleteRoutingDownload, getRoutingTotalBytes,
+  } = useOfflineFiles();
   const conusState      = getState('conus');
   const conusTotalBytes = getTotalBytes('conus');
 
   // MLN packs still used for legacy corridor fallback (can be removed later)
-  const [mlnPacks,  setMlnPacks]  = useState<InstalledPack[]>([]);
-  const [packError, setPackError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'areas' | 'states'>('areas');
+  const [mlnPacks,       setMlnPacks]       = useState<InstalledPack[]>([]);
+  const [packError,      setPackError]      = useState<string | null>(null);
+  const [activePackName, setActivePackName] = useState<string | null>(null);
+  const [packProgress,   setPackProgress]   = useState<PackProgress | null>(null);
+  const [activeTab,      setActiveTab]      = useState<'areas' | 'states'>('areas');
+  const [selectedState,  setSelectedState]  = useState('ks');
 
   useEffect(() => {
     if (visible) getInstalledPacks().then(setMlnPacks).catch(() => {});
@@ -510,28 +529,74 @@ export default function OfflineModal({
               {/* ══════════════════ STATES TAB ══════════════════════════ */}
               {activeTab === 'states' && (
                 <>
-                  <Section label="US STATES — SINGLE-FILE DOWNLOAD · z0–z14" />
+                  <Section label="US STATES — MAP + ROUTING PACKS" />
                   <Text style={s.hint}>
-                    Roads, trails, towns and parks per state — same fast single-file download as Continental US. Activates fully offline with next app update.
+                    Pick a state, then download the map file and its routing graph separately. Maps render roads/trails; routing packs are for offline turn-by-turn once the local Valhalla engine is enabled.
                   </Text>
-                  {Object.entries(FILE_REGIONS)
-                    .filter(([id]) => id !== 'conus')
-                    .map(([id, region]) => {
-                      const st = getState(id);
-                      const tb = getTotalBytes(id);
-                      return (
+
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+                    {Object.entries(FILE_REGIONS)
+                      .filter(([id]) => id !== 'conus')
+                      .map(([id, region]) => {
+                        const mapDone = getState(id).status === 'complete';
+                        const routeDone = getRoutingState(id).status === 'complete';
+                        const selected = selectedState === id;
+                        return (
+                          <TouchableOpacity
+                            key={id}
+                            onPress={() => setSelectedState(id)}
+                            style={[
+                              s.statePick,
+                              selected && { borderColor: C.orange, backgroundColor: C.orangeGlow },
+                            ]}
+                          >
+                            <Text style={[s.statePickCode, selected && { color: C.orange }]}>{id.toUpperCase()}</Text>
+                            <Text style={s.statePickName} numberOfLines={1}>{region.name}</Text>
+                            <Text style={{ color: mapDone && routeDone ? C.green : C.text3, fontSize: 8, fontFamily: mono, marginTop: 3 }}>
+                              {mapDone ? 'MAP' : '--'} · {routeDone ? 'ROUTE' : '--'}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                  </ScrollView>
+
+                  {(() => {
+                    const mapRegion = FILE_REGIONS[selectedState as keyof typeof FILE_REGIONS];
+                    const routingRegion = ROUTING_REGIONS[selectedState as keyof typeof ROUTING_REGIONS];
+                    const mapState = getState(selectedState);
+                    const routingState = getRoutingState(selectedState);
+                    return (
+                      <>
+                        <Section label={`${mapRegion.name.toUpperCase()} — MAP DETAILS`} />
                         <ConusCard
-                          key={id}
-                          state={st}
-                          totalBytes={tb}
-                          region={region as any}
-                          onStart={() => startDownload(id)}
-                          onPause={() => pauseDownload(id)}
-                          onResume={() => resumeDownload(id)}
-                          onDelete={() => deleteDownload(id)}
+                          state={mapState}
+                          totalBytes={getTotalBytes(selectedState)}
+                          region={mapRegion as any}
+                          code={selectedState.toUpperCase()}
+                          onStart={() => startDownload(selectedState)}
+                          onPause={() => pauseDownload(selectedState)}
+                          onResume={() => resumeDownload(selectedState)}
+                          onDelete={() => deleteDownload(selectedState)}
+                          completeTitle="✓ MAP FILE ON DEVICE"
+                          completeText="Roads, trails, towns, parks, and labels are available from the downloaded state PMTiles file."
                         />
-                      );
-                    })}
+
+                        <Section label={`${mapRegion.name.toUpperCase()} — ROUTING DETAILS`} />
+                        <ConusCard
+                          state={routingState}
+                          totalBytes={getRoutingTotalBytes(selectedState)}
+                          region={routingRegion as any}
+                          code={selectedState.toUpperCase()}
+                          onStart={() => startRoutingDownload(selectedState)}
+                          onPause={() => pauseRoutingDownload(selectedState)}
+                          onResume={() => resumeRoutingDownload(selectedState)}
+                          onDelete={() => deleteRoutingDownload(selectedState)}
+                          completeTitle="✓ ROUTING GRAPH ON DEVICE"
+                          completeText="Valhalla graph pack is downloaded. Local offline routing will use this file when the native engine is wired in."
+                        />
+                      </>
+                    );
+                  })()}
                 </>
               )}
 
@@ -591,5 +656,11 @@ function makeStyles(C: ColorPalette) {
     },
     packName:      { flex: 1, color: C.text2, fontSize: 11, fontFamily: mono },
     packSize:      { color: C.text3, fontSize: 10, fontFamily: mono },
+    statePick: {
+      width: 92, paddingVertical: 9, paddingHorizontal: 8, marginRight: 8,
+      borderRadius: 8, borderWidth: 1, borderColor: C.border, backgroundColor: C.s1,
+    },
+    statePickCode: { color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
+    statePickName: { color: C.text2, fontSize: 9, fontFamily: mono, marginTop: 2 },
   });
 }

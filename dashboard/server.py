@@ -6,7 +6,7 @@ from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.responses import HTMLResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 import httpx
 import bcrypt as _bcrypt_lib
@@ -565,6 +565,83 @@ async def register_push_token(body: PushTokenRequest, user: dict = Depends(_curr
     """Store the device's Expo push token so the server can notify on job completion."""
     save_push_token(user["id"], body.token)
     return {"ok": True}
+
+
+# ── Routing ───────────────────────────────────────────────────────────────────
+
+class RouteOptions(BaseModel):
+    avoidTolls: bool = False
+    avoidHighways: bool = False
+    backRoads: bool = False
+    noFerries: bool = False
+
+class RouteRequest(BaseModel):
+    locations: list[dict]
+    options: RouteOptions = Field(default_factory=RouteOptions)
+    units: str = "miles"
+
+def _valhalla_base_url() -> str:
+    return settings.valhalla_url.rstrip("/")
+
+def _valhalla_costing_options(opts: RouteOptions) -> dict:
+    return {
+        "auto": {
+            # Valhalla weights are preferences, not hard filters. These defaults
+            # bias overland routes toward service roads/tracks while keeping
+            # enough paved connectivity to avoid broken farm-field shortcuts.
+            "use_tracks": 0.9 if opts.backRoads else 0.35,
+            "use_highways": 0.05 if (opts.backRoads or opts.avoidHighways) else 0.65,
+            "use_tolls": 0.0 if opts.avoidTolls else 0.5,
+            "use_ferry": 0.0 if opts.noFerries else 0.5,
+        }
+    }
+
+@app.get("/api/route/health")
+async def route_health():
+    url = f"{_valhalla_base_url()}/status"
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            res = await client.get(url)
+        return {"ok": res.status_code < 500, "engine": "valhalla", "status": res.status_code}
+    except Exception as e:
+        return {"ok": False, "engine": "valhalla", "error": str(e)}
+
+@app.post("/api/route")
+async def route_proxy(body: RouteRequest):
+    if len(body.locations) < 2:
+        raise HTTPException(400, "At least two locations are required")
+
+    locations = []
+    for loc in body.locations:
+        try:
+            lat = float(loc["lat"])
+            lon = float(loc["lon"])
+        except (KeyError, TypeError, ValueError):
+            raise HTTPException(400, "Each location must include numeric lat and lon")
+        if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+            raise HTTPException(400, "Location out of range")
+        locations.append({"lat": lat, "lon": lon})
+
+    payload = {
+        "locations": locations,
+        "costing": "auto",
+        "costing_options": _valhalla_costing_options(body.options),
+        "units": body.units if body.units in ("miles", "kilometers") else "miles",
+        "directions_options": {"units": body.units if body.units in ("miles", "kilometers") else "miles"},
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            res = await client.post(f"{_valhalla_base_url()}/route", json=payload)
+    except httpx.TimeoutException:
+        raise HTTPException(504, "Valhalla route timed out")
+    except Exception as e:
+        raise HTTPException(502, f"Valhalla route failed: {e}")
+
+    if res.status_code >= 400:
+        detail = res.text[:500] if res.text else "Valhalla route failed"
+        raise HTTPException(res.status_code, detail)
+    return res.json()
 
 @app.get("/api/trip/{trip_id}")
 async def get_trip_route(trip_id: str, user: dict | None = Depends(_optional_user)):

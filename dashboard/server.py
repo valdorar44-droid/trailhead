@@ -1,6 +1,6 @@
 """Trailhead FastAPI server. All API routes."""
 from __future__ import annotations
-import asyncio, os, json, uuid, secrets, xml.etree.ElementTree as ET, time
+import asyncio, os, json, uuid, secrets, xml.etree.ElementTree as ET, time, hashlib
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.responses import HTMLResponse, Response
@@ -19,7 +19,7 @@ from ingestors.nrel import get_gas_along_route
 from ingestors.osm import get_osm_campsites, get_water_sources, get_trailheads, get_viewpoints, get_peaks
 from db.store import (
     save_trip, get_trip, add_community_pin, get_community_pins,
-    save_audio_guide, get_audio_guide, get_cached, set_cached,
+    save_audio_guide, get_audio_guide, get_cached, set_cached, get_route_cached, set_route_cached,
     create_user, get_user_by_email, get_user_by_id, get_user_by_referral_code,
     add_credits, deduct_credits, get_credit_history,
     get_user_report_count_today, get_report_credits_today,
@@ -596,6 +596,19 @@ def _valhalla_costing_options(opts: RouteOptions) -> dict:
         }
     }
 
+def _route_cache_key(payload: dict) -> str:
+    canonical = {
+        "locations": [
+            {"lat": round(float(loc["lat"]), 5), "lon": round(float(loc["lon"]), 5)}
+            for loc in payload["locations"]
+        ],
+        "costing": payload["costing"],
+        "costing_options": payload["costing_options"],
+        "units": payload["units"],
+    }
+    raw = json.dumps(canonical, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode()).hexdigest()
+
 @app.get("/api/route/health")
 async def route_health():
     url = f"{_valhalla_base_url()}/status"
@@ -629,6 +642,11 @@ async def route_proxy(body: RouteRequest):
         "units": body.units if body.units in ("miles", "kilometers") else "miles",
         "directions_options": {"units": body.units if body.units in ("miles", "kilometers") else "miles"},
     }
+    cache_key = _route_cache_key(payload)
+    cached = get_route_cached(cache_key)
+    if cached:
+        cached["_trailhead"] = {"engine": "valhalla", "cache": "hit", "cache_key": cache_key}
+        return cached
 
     try:
         async with httpx.AsyncClient(timeout=20) as client:
@@ -641,7 +659,11 @@ async def route_proxy(body: RouteRequest):
     if res.status_code >= 400:
         detail = res.text[:500] if res.text else "Valhalla route failed"
         raise HTTPException(res.status_code, detail)
-    return res.json()
+    data = res.json()
+    if data.get("trip", {}).get("status") == 0:
+        set_route_cached(cache_key, payload, data)
+    data["_trailhead"] = {"engine": "valhalla", "cache": "miss", "cache_key": cache_key}
+    return data
 
 @app.get("/api/trip/{trip_id}")
 async def get_trip_route(trip_id: str, user: dict | None = Depends(_optional_user)):

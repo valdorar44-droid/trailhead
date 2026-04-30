@@ -49,6 +49,13 @@ def init_db():
             fetched_at  INTEGER NOT NULL,
             data        TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS route_cache (
+            cache_key    TEXT PRIMARY KEY,
+            fetched_at   INTEGER NOT NULL,
+            request_json TEXT NOT NULL,
+            data         TEXT NOT NULL,
+            hit_count    INTEGER NOT NULL DEFAULT 0
+        );
         CREATE TABLE IF NOT EXISTS community_pins (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id      INTEGER,
@@ -211,6 +218,7 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_credits_user ON credit_transactions(user_id, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_analytics_session ON analytics_events(session_id, event_type)",
         "CREATE INDEX IF NOT EXISTS idx_analytics_type ON analytics_events(event_type, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_route_cache_time ON route_cache(fetched_at)",
     ]:
         try:
             db.execute(idx_sql)
@@ -272,6 +280,13 @@ def init_db():
             photo_data       TEXT,
             credits_earned   INTEGER NOT NULL DEFAULT 0,
             created_at       INTEGER NOT NULL
+        )""",
+        """CREATE TABLE IF NOT EXISTS route_cache (
+            cache_key    TEXT PRIMARY KEY,
+            fetched_at   INTEGER NOT NULL,
+            request_json TEXT NOT NULL,
+            data         TEXT NOT NULL,
+            hit_count    INTEGER NOT NULL DEFAULT 0
         )""",
     ]:
         try:
@@ -392,6 +407,25 @@ def set_cached(table: str, key: str, data: list):
     db = _conn()
     db.execute(f"INSERT OR REPLACE INTO {table} (cache_key,fetched_at,data) VALUES (?,?,?)",
                (key, int(time.time()), json.dumps(data)))
+    db.commit(); db.close()
+
+def get_route_cached(key: str, ttl_seconds: int = 30 * 86400) -> dict | None:
+    db = _conn()
+    row = db.execute("SELECT fetched_at,data FROM route_cache WHERE cache_key=?", (key,)).fetchone()
+    if row and (time.time() - row["fetched_at"]) < ttl_seconds:
+        db.execute("UPDATE route_cache SET hit_count=hit_count+1 WHERE cache_key=?", (key,))
+        db.commit(); db.close()
+        return json.loads(row["data"])
+    db.close()
+    return None
+
+def set_route_cached(key: str, request_payload: dict, data: dict):
+    db = _conn()
+    db.execute(
+        """INSERT OR REPLACE INTO route_cache
+           (cache_key,fetched_at,request_json,data,hit_count) VALUES (?,?,?,?,COALESCE((SELECT hit_count FROM route_cache WHERE cache_key=?),0))""",
+        (key, int(time.time()), json.dumps(request_payload), json.dumps(data), key)
+    )
     db.commit(); db.close()
 
 # ── Users ─────────────────────────────────────────────────────────────────────

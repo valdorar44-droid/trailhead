@@ -972,7 +972,7 @@ def base_status():
     return _pms.base_status()
 
 
-@app.post("/api/admin/generate-base")
+@app.api_route("/api/admin/generate-base", methods=["GET", "POST"])
 async def generate_base():
     """Extract z0–z9 CONUS tiles and upload to R2 as base.pmtiles.
     Runs in the background; poll /api/admin/base-status for progress."""

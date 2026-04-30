@@ -11,7 +11,7 @@ import React, {
   forwardRef, useCallback, useEffect, useImperativeHandle,
   useMemo, useRef, useState,
 } from 'react';
-import { View, StyleSheet } from 'react-native';
+import { View, StyleSheet, Text } from 'react-native';
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import { storage } from '@/lib/storage';
 
@@ -21,13 +21,21 @@ import type { RouteResult, RouteStep, RouteOpts, MapBounds, WP } from './types';
 import type { CampsitePin, Pin, Report } from '@/lib/api';
 import { useStore } from '@/lib/store';
 import { useTheme } from '@/lib/design';
-import { OFFLINE_DIR } from '@/lib/useOfflineFiles';
+import { CACHE_OFFLINE_DIR, OFFLINE_DIR, FILE_REGIONS } from '@/lib/useOfflineFiles';
 import * as FileSystem from 'expo-file-system';
+import * as Location from 'expo-location';
 
 // Lazy-load the tile server module — gracefully no-ops if the binary doesn't
 // include it yet (e.g. first launch after OTA-only update).
-let tileServer: typeof import('expo-tile-server') | null = null;
-try { tileServer = require('expo-tile-server'); } catch { /* pre-binary, skip */ }
+type TileServerModule = typeof import('expo-tile-server');
+let tileServer: TileServerModule | null = null;
+let tileServerRequireError = '';
+try { tileServer = require('expo-tile-server'); } catch (e: any) { tileServerRequireError = e?.message ?? 'require failed'; }
+
+const BASE_DL_URL   = 'https://tiles.gettrailhead.app/api/download/base.pmtiles';
+const BASE_PATH     = `${OFFLINE_DIR}base.pmtiles`;
+const BASE_MIN_MB   = 10; // skip base file if under 10 MB (truncated)
+const LEGACY_OFFLINE_DIR = `${FileSystem.documentDirectory}offline/`;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 export type { WP, RouteOpts, MapBounds, RouteResult, RouteStep } from './types';
@@ -113,6 +121,48 @@ function pointFC(features: GeoJSON.Feature[]) {
 function campFeat(c: CampsitePin): GeoJSON.Feature {
   return { type: 'Feature', geometry: { type: 'Point', coordinates: [c.lng, c.lat] },
     properties: { id: c.id || '', name: c.name || '', land_type: c.land_type || 'Campground', cost: c.cost || '', full: (c as any).full || 0, raw: JSON.stringify(c) } };
+}
+
+function pressPayload(event: any): any {
+  return event?.nativeEvent?.payload ?? event?.payload ?? event;
+}
+
+function eventLngLat(event: any): [number, number] | null {
+  const payload = pressPayload(event);
+  const coords =
+    payload?.geometry?.type === 'Point' && Array.isArray(payload.geometry.coordinates) ? payload.geometry.coordinates :
+    payload?.features?.[0]?.geometry?.type === 'Point' && Array.isArray(payload.features[0].geometry.coordinates) ? payload.features[0].geometry.coordinates :
+    Array.isArray(payload?.coordinates) ? payload.coordinates :
+    Array.isArray(payload?.coordinate) ? payload.coordinate :
+    Array.isArray(payload?.nativeEvent?.coordinates) ? payload.nativeEvent.coordinates :
+    Array.isArray(payload?.nativeEvent?.coordinate) ? payload.nativeEvent.coordinate :
+    null;
+  if (!coords) return null;
+  const [lng, lat] = coords.map(Number);
+  return Number.isFinite(lng) && Number.isFinite(lat) ? [lng, lat] : null;
+}
+
+function eventScreenPoint(event: any): [number, number] | null {
+  const payload = pressPayload(event);
+  const props = payload?.properties ?? {};
+  const x = Number(props.screenPointX ?? payload?.screenPointX ?? payload?.x);
+  const y = Number(props.screenPointY ?? payload?.screenPointY ?? payload?.y);
+  return Number.isFinite(x) && Number.isFinite(y) ? [x, y] : null;
+}
+
+async function firstExistingPath(paths: string[]): Promise<{ path: string; sizeMb: number } | null> {
+  for (const path of paths) {
+    const info = await FileSystem.getInfoAsync(path).catch(() => null);
+    if (!info?.exists) continue;
+    const sizeMb = Math.round(((info as any).size ?? 0) / 1_048_576);
+    return { path, sizeMb };
+  }
+  return null;
+}
+
+function offlinePathCandidates(id: string, currentPath: string): string[] {
+  const fileName = id === 'conus' ? 'conus.pmtiles' : `${id}.pmtiles`;
+  return [currentPath, `${LEGACY_OFFLINE_DIR}${fileName}`, `${CACHE_OFFLINE_DIR}${fileName}`];
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -201,21 +251,162 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const mapboxToken = useStore(s => s.mapboxToken);
   const activeTrip  = useStore(s => s.activeTrip);
   const C = useTheme();
-  const [localTiles, setLocalTiles] = useState(false);
+  const [localTiles,   setLocalTiles]   = useState(false);
+  const [tileDebug,    setTileDebug]    = useState('init');
+  const [tileSession,  setTileSession]  = useState(() => Date.now());
+  const loadedStateRef  = useRef<string | null>(null); // path of currently-active state file
+  const switchingRef    = useRef(false);               // prevent concurrent state switches
+  const isRoutingRef    = useRef(false);               // route fetch in progress — block CDN fallback
+  const lastFlyToRef    = useRef(0);                   // timestamp of last flyTo — debounce CDN fallback
 
-  // Start local tile server if conus.pmtiles is on device.
-  // Gracefully skips if the native module isn't in this binary yet.
-  useEffect(() => {
-    if (!tileServer) return;
-    const pmtilesPath = `${OFFLINE_DIR}conus.pmtiles`;
-    FileSystem.getInfoAsync(pmtilesPath).then(info => {
-      if (!info.exists) return;
-      tileServer!.startServer(pmtilesPath)
-        .then(() => setLocalTiles(true))
-        .catch(() => {});
-    }).catch(() => {});
-    return () => { tileServer?.stopServer().catch(() => {}); };
+  // Returns all downloaded state files with their bounds, or null for CONUS.
+  // Skips files under 25% of estimated size (obviously truncated downloads).
+  const getDownloadedFiles = useCallback(async () => {
+    const conusPath = await firstExistingPath(offlinePathCandidates('conus', `${OFFLINE_DIR}conus.pmtiles`));
+    if (conusPath) return null;
+
+    const result: Array<{ id: string; path: string; sizeMb: number; bounds: typeof FILE_REGIONS[keyof typeof FILE_REGIONS]['bounds'] }> = [];
+    for (const [id, region] of Object.entries(FILE_REGIONS)) {
+      if (id === 'conus') continue;
+      const found = await firstExistingPath(offlinePathCandidates(id, region.localPath));
+      if (!found) continue;
+      const minMb  = (region.estimatedGb * 1024) * 0.25;
+      if (found.sizeMb < minMb) continue;
+      result.push({ id, path: found.path, sizeMb: found.sizeMb, bounds: region.bounds });
+    }
+    return result;
   }, []);
+
+  // Switch the active state file. Idempotent — no-ops if already the active file.
+  const switchFile = useCallback(async (path: string, sizeMb: number) => {
+    if (loadedStateRef.current === path || switchingRef.current) return;
+    if (!tileServer?.switchState) { setTileDebug('switch unavailable'); return; }
+    switchingRef.current = true;
+    const nativePath = path.replace(/^file:\/\//, '');
+    const fileName = path.split('/').pop() ?? 'pmtiles';
+    setTileDebug(`switching…`);
+    try {
+      await tileServer!.switchState(nativePath);
+      loadedStateRef.current = path;
+      setLocalTiles(true);
+      setTileSession(Date.now());
+      // Probe z12 tile (Kansas center ~38.5°N, -98.35°W) to verify high-zoom serving
+      setTimeout(async () => {
+        try {
+          const r = await fetch('http://127.0.0.1:57832/api/tiles/12/929/1573.pbf');
+          setTileDebug(`${fileName} ${sizeMb}MB probe:${r.status}`);
+        } catch {
+          setTileDebug(`${fileName} ${sizeMb}MB probe:err`);
+        }
+      }, 600);
+    } catch (e: any) {
+      setTileDebug(`err: ${e?.message ?? '?'}`);
+    } finally {
+      switchingRef.current = false;
+    }
+  }, []);
+
+  const ensureRouteTileFile = useCallback(async (pairs: string[]) => {
+    if (!tileServer?.switchState || pairs.length < 2) return;
+    const parsed = pairs
+      .map(pair => {
+        const [lng, lat] = pair.split(',').map(Number);
+        return Number.isFinite(lng) && Number.isFinite(lat) ? { lat, lng } : null;
+      })
+      .filter(Boolean) as Array<{ lat: number; lng: number }>;
+    if (parsed.length < 2) return;
+
+    const files = await getDownloadedFiles();
+    if (!files) {
+      const found = await firstExistingPath(offlinePathCandidates('conus', `${OFFLINE_DIR}conus.pmtiles`));
+      if (found) await switchFile(found.path, found.sizeMb);
+      return;
+    }
+
+    const start = parsed[0];
+    const dest = parsed[parsed.length - 1];
+    const covers = (bounds: { n: number; s: number; e: number; w: number }, p: { lat: number; lng: number }) =>
+      p.lat >= bounds.s && p.lat <= bounds.n && p.lng >= bounds.w && p.lng <= bounds.e;
+
+    // For tap-anywhere nav, the destination state is the file most likely to
+    // contain the visible road graph. If both endpoints are in one downloaded
+    // state, prefer that. Otherwise use the destination file instead of a stale
+    // GPS/viewport-selected file.
+    const both = files.find(f => covers(f.bounds, start) && covers(f.bounds, dest));
+    const destMatch = files.find(f => covers(f.bounds, dest));
+    const startMatch = files.find(f => covers(f.bounds, start));
+    const chosen = both ?? destMatch ?? startMatch;
+    if (chosen) await switchFile(chosen.path, chosen.sizeMb);
+  }, [getDownloadedFiles, switchFile]);
+
+  // Start server, load base file, then load best state file.
+  useEffect(() => {
+    if (!tileServer) { setTileDebug(`no module: ${tileServerRequireError}`); return; }
+
+    (async () => {
+      // 1. Start the HTTP server socket (no-op if already running)
+      try {
+        await tileServer!.startServer();
+      } catch (e: any) {
+        setTileDebug(`srv err: ${e?.message ?? '?'}`); return;
+      }
+      // localTiles stays false until a state file is loaded — keeps online CDN mode working
+
+      // 2. Load base file if available; silently download if missing
+      await FileSystem.makeDirectoryAsync(OFFLINE_DIR, { intermediates: true }).catch(() => {});
+      const baseInfo = await FileSystem.getInfoAsync(BASE_PATH).catch(() => null);
+      const baseMb = Math.round(((baseInfo as any)?.size ?? 0) / 1_048_576);
+      if (baseInfo?.exists && baseMb >= BASE_MIN_MB) {
+        try {
+          const ts = tileServer as any;
+          if (typeof ts.setBase === 'function') await ts.setBase(BASE_PATH.replace(/^file:\/\//, ''));
+          setTileDebug(`base ${baseMb}MB`);
+        } catch {}
+      } else if (!baseInfo?.exists) {
+        // Background download — don't block map load
+        FileSystem.createDownloadResumable(BASE_DL_URL, BASE_PATH)
+          .downloadAsync()
+          .then(async res => {
+            if (res?.status === 200) {
+              try {
+                const ts = tileServer as any;
+                if (typeof ts.setBase === 'function') await ts.setBase(BASE_PATH.replace(/^file:\/\//, ''));
+              } catch {}
+            } else {
+              await FileSystem.deleteAsync(BASE_PATH, { idempotent: true }).catch(() => {});
+            }
+          })
+          .catch(() => {});
+      }
+
+      // 3. Load best state file (GPS-matched, or first available)
+      const files = await getDownloadedFiles();
+      if (!files) {
+        const found = await firstExistingPath(offlinePathCandidates('conus', `${OFFLINE_DIR}conus.pmtiles`));
+        if (found) await switchFile(found.path, found.sizeMb);
+        return;
+      }
+      if (files.length === 0) { setTileDebug('no state pmtiles found'); return; }
+
+      let best = files[0];
+      try {
+        const { status } = await Location.getForegroundPermissionsAsync();
+        if (status === 'granted') {
+          const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Low });
+          const match = files.find(({ bounds: b }) =>
+            pos.coords.latitude  >= b.s && pos.coords.latitude  <= b.n &&
+            pos.coords.longitude >= b.w && pos.coords.longitude <= b.e
+          );
+          if (match) best = match;
+        }
+      } catch {}
+      const loaded = files.map(f => `${f.id}:${f.sizeMb}MB`).join(' ');
+      setTileDebug(`found ${loaded}`);
+      await switchFile(best.path, best.sizeMb);
+    })();
+
+    return () => { tileServer?.stopServer().catch(() => {}); };
+  }, [getDownloadedFiles, switchFile]);
 
   // Route state
   const [routeCoords,  setRouteCoords]  = useState<[number,number][]>([]);
@@ -229,16 +420,18 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
 
   // MLRN v10 uses `mapStyle` — accepts string (style URL) or object (inline JSON).
   const mapStyleObj = useMemo(
-    () => buildMapStyle(mapLayer, mapboxToken || '', localTiles),
-    [mapLayer, mapboxToken, localTiles],
+    () => buildMapStyle(mapLayer, mapboxToken || '', localTiles, tileSession),
+    [mapLayer, mapboxToken, localTiles, tileSession],
   );
 
   // ── Imperative API (replaces postMessage) ───────────────────────────────────
   useImperativeHandle(ref, () => ({
     flyTo(lat, lng, zoom = 14) {
+      lastFlyToRef.current = Date.now();
       camRef.current?.setCamera({ centerCoordinate: [lng, lat], zoomLevel: zoom, animationDuration: 600, animationMode: 'flyTo' });
     },
     locate(lat, lng) {
+      lastFlyToRef.current = Date.now();
       camRef.current?.setCamera({ centerCoordinate: [lng, lat], zoomLevel: 13, animationDuration: 500, animationMode: 'flyTo' });
     },
     loadRouteFrom(lat, lng, fromIdx) {
@@ -266,15 +459,17 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     },
     restoreRoute(coords, steps, legs, td, tt) {
       setRouteCoords(coords);
-      routeRef.current.coords = coords;
-      onRouteReady({ coords, steps, legs, totalDistance: td, totalDuration: tt, isProper: true, fromIdx: 0 });
+      routeRef.current = { coords, passedIdx: 0 };
+      onRouteReady({ coords, steps, legs, totalDistance: td, totalDuration: tt, isProper: true, fromCache: true, fromIdx: 0 });
     },
     setNavTarget(idx) { setNavTargetIdx(idx); },
   }), [waypoints, searchDest, mapboxToken]);
 
   // ── Routing ─────────────────────────────────────────────────────────────────
   const doFetchRoute = useCallback(async (pairs: string[], fromIdx: number) => {
+    isRoutingRef.current = true;
     try {
+      await ensureRouteTileFile(pairs);
       const result = await fetchRoute(pairs, fromIdx, mapboxToken || '', routeOpts);
       setRouteCoords(result.coords);
       routeRef.current = { coords: result.coords, passedIdx: 0 };
@@ -295,8 +490,10 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       setRouteCoords(fb.coords);
       routeRef.current = { coords: fb.coords, passedIdx: 0 };
       onRouteReady({ ...fb, fromIdx });
+    } finally {
+      isRoutingRef.current = false;
     }
-  }, [mapboxToken, routeOpts, waypoints, activeTrip, onRouteReady, onRoutePersist]);
+  }, [mapboxToken, routeOpts, waypoints, activeTrip, onRouteReady, onRoutePersist, ensureRouteTileFile]);
 
   // When a new trip is planned: auto-route + fit camera to show all waypoints
   useEffect(() => {
@@ -317,6 +514,20 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     }
   }, [waypoints.length]);
 
+  // ── Nav: camera follow (independent of route) ───────────────────────────────
+  useEffect(() => {
+    if (!navMode || !userLoc) return;
+    const { lat, lng } = userLoc;
+    const hasHeading = navHeading !== null && navHeading >= 0;
+    camRef.current?.setCamera({
+      centerCoordinate: [lng, lat],
+      zoomLevel: 17,
+      ...(hasHeading ? { heading: navHeading, pitch: 45 } : {}),
+      animationDuration: 800,
+      animationMode: 'easeTo',
+    });
+  }, [userLoc, navMode, navHeading]);
+
   // ── Nav: track user on route + update passed overlay ────────────────────────
   useEffect(() => {
     if (!navMode || !userLoc || routeRef.current.coords.length === 0) return;
@@ -335,18 +546,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       routeRef.current.passedIdx = best;
       setPassedCoords(coords.slice(0, best + 1));
     }
-    // Update breadcrumb
     setBreadcrumb(prev => [...prev, [lng, lat]]);
-    // Follow camera in nav mode — always center; add heading+pitch when available
-    const hasHeading = navHeading !== null && navHeading >= 0;
-    camRef.current?.setCamera({
-      centerCoordinate: [lng, lat],
-      zoomLevel: 17,
-      ...(hasHeading ? { heading: navHeading, pitch: 45 } : {}),
-      animationDuration: 200,
-      animationMode: 'moveTo',
-    });
-  }, [userLoc, navMode, navHeading]);
+  }, [userLoc, navMode]);
 
   // ── GeoJSON sources ─────────────────────────────────────────────────────────
   const campFC = useMemo(() => pointFC(camps.map(campFeat)), [camps]);
@@ -364,17 +565,35 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     onMapReady();
   }, [onMapReady]);
 
-  const handlePress = useCallback(async (feat: GeoJSON.Feature | undefined) => {
+  const coordinateFromPress = useCallback(async (event: any): Promise<[number, number] | null> => {
+    const lngLat = eventLngLat(event);
+    if (lngLat) return lngLat;
+
+    const point = eventScreenPoint(event);
+    if (!point || !mapRef.current) return null;
+    try {
+      const coord = await mapRef.current.getCoordinateFromView(point);
+      const [lng, lat] = coord.map(Number);
+      return Number.isFinite(lng) && Number.isFinite(lat) ? [lng, lat] : null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const handlePress = useCallback(async (feat: any) => {
     // Check if a PMTiles camp POI was tapped by querying rendered features at the press point
-    if (feat?.geometry?.type === 'Point' && mapRef.current) {
-      const [lng, lat] = (feat.geometry as GeoJSON.Point).coordinates;
+    const lngLat = await coordinateFromPress(feat);
+    if (lngLat && mapRef.current) {
+      const [lng, lat] = lngLat;
       try {
+        const point = eventScreenPoint(feat);
         const rendered = await mapRef.current.queryRenderedFeaturesAtPoint(
-          [0, 0] as any,  // placeholder — MLRN v10 uses the event coordinate directly
+          point ?? await mapRef.current.getPointInView([lng, lat]),
           undefined,
           ['pm-pois-camp-site', 'pm-pois-camp-pitch', 'pm-pois-shelter']
         );
-        const campFeat = rendered?.[0];
+        const renderedFeatures = Array.isArray(rendered) ? rendered : rendered?.features;
+        const campFeat = renderedFeatures?.[0];
         if (campFeat?.properties) {
           const kind = campFeat.properties.kind ?? 'camp_site';
           const name = campFeat.properties.name ?? kindLabel(kind);
@@ -389,13 +608,14 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     } else {
       onMapTap();
     }
-  }, [onMapTap, onTileCampTap]);
+  }, [coordinateFromPress, onMapTap, onTileCampTap]);
 
-  const handleLongPress = useCallback((feat: GeoJSON.Feature | undefined) => {
-    if (!feat?.geometry || feat.geometry.type !== 'Point') return;
-    const [lng, lat] = (feat.geometry as GeoJSON.Point).coordinates;
+  const handleLongPress = useCallback(async (feat: any) => {
+    const lngLat = await coordinateFromPress(feat);
+    if (!lngLat) return;
+    const [lng, lat] = lngLat;
     onMapLongPress(lat, lng);
-  }, [onMapLongPress]);
+  }, [coordinateFromPress, onMapLongPress]);
 
   const handleRegionChange = useCallback(async (feat: GeoJSON.Feature | undefined) => {
     if (!feat?.properties || !mapRef.current) return;
@@ -405,9 +625,38 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     const [[e, n], [w, s]] = bounds;
     boundsRef.current = { n, s, e, w };
     onBoundsChange({ n, s, e, w, zoom: zoomLevel || 10 });
-    // Refresh MVUM data when user pans/zooms while layer is active
     if (showMvum) fetchMvum({ n, s, e, w });
-  }, [onBoundsChange, showMvum, fetchMvum]);
+
+    // Auto-switch state file as map pans. If no downloaded state covers the viewport
+    // center, drop back to CDN so online users get full z0–15 detail.
+    if (tileServer) {
+      const centerLat = (n + s) / 2;
+      const centerLng = (e + w) / 2;
+      getDownloadedFiles().then(files => {
+        if (!files) return; // CONUS — always local
+        const match = files.find(({ bounds: b }) =>
+          centerLat >= b.s && centerLat <= b.n &&
+          centerLng >= b.w && centerLng <= b.e
+        );
+        if (match) {
+          if (loadedStateRef.current === match.path) {
+            setTileDebug(`${match.id}.pmtiles ${match.sizeMb}MB covers view`);
+          }
+          switchFile(match.path, match.sizeMb);
+        } else if (localTiles) {
+          // Panned outside all downloaded states — go back to CDN.
+          // Guard: skip if routing is in progress or if flyTo fired within the last 2s,
+          // to avoid a MapLibre GL Native crash from style-swap during animation.
+          const msSinceFlyTo = Date.now() - lastFlyToRef.current;
+          if (!isRoutingRef.current && msSinceFlyTo > 2000) {
+            setLocalTiles(false);
+            loadedStateRef.current = null; // allow re-entry when panning back in
+            setTileDebug('outside downloaded states');
+          }
+        }
+      });
+    }
+  }, [onBoundsChange, showMvum, fetchMvum, localTiles, getDownloadedFiles, switchFile]);
 
   const handleCampPress = useCallback((e: any) => {
     const feat = e.features?.[0];
@@ -420,18 +669,20 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
 
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
-    <MapLibreGL.MapView
-      ref={mapRef}
-      style={StyleSheet.absoluteFillObject}
-      mapStyle={mapStyleObj}
-      onPress={handlePress}
-      onLongPress={handleLongPress}
-      onRegionDidChange={handleRegionChange}
-      onDidFinishLoadingMap={handleMapReady}
-      compassEnabled={false}
-      attributionEnabled={false}
-      logoEnabled={false}
-    >
+    <View style={styles.mapRoot}>
+      <MapLibreGL.MapView
+        ref={mapRef}
+        style={StyleSheet.absoluteFillObject}
+        mapStyle={mapStyleObj}
+        onPress={handlePress}
+        onLongPress={handleLongPress}
+        onRegionDidChange={handleRegionChange}
+        onDidFinishLoadingMap={handleMapReady}
+        compassEnabled={false}
+        attributionEnabled={false}
+        logoEnabled={false}
+      >
+
       {/* ── Camera ────────────────────────────────────────────────────── */}
       {/* Camera — initial values computed once via lazy useState.
           Because initialCenter/initialZoom never change after mount, these
@@ -771,7 +1022,16 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           />
         </MapLibreGL.MarkerView>
       ))}
-    </MapLibreGL.MapView>
+      </MapLibreGL.MapView>
+      <View pointerEvents="none" style={styles.tileDebugWrap}>
+        <Text
+          numberOfLines={3}
+          style={[styles.tileDebug, localTiles ? styles.tileDebugLocal : styles.tileDebugRemote]}
+        >
+          {localTiles ? 'LOCAL' : 'CDN'} {tileDebug}
+        </Text>
+      </View>
+    </View>
   );
 });
 
@@ -827,6 +1087,9 @@ function ReportDot({ type, subtype }: { type: string; subtype?: string }) {
 
 // ── Styles ─────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
+  mapRoot: {
+    flex: 1,
+  },
   wpDot: {
     width: 30, height: 30, borderRadius: 15,
     borderWidth: 2.5, borderColor: '#fff',
@@ -851,5 +1114,27 @@ const styles = StyleSheet.create({
     width: 32, height: 32, borderRadius: 16,
     backgroundColor: 'rgba(59,130,246,0.2)',
     borderWidth: 2.5, borderColor: '#3b82f6',
+  },
+  tileDebugWrap: {
+    position: 'absolute',
+    bottom: 118,
+    left: 8,
+    right: 8,
+    zIndex: 999,
+  },
+  tileDebug: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '800',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  tileDebugLocal: {
+    backgroundColor: 'rgba(20,83,45,0.88)',
+  },
+  tileDebugRemote: {
+    backgroundColor: 'rgba(127,29,29,0.88)',
   },
 });

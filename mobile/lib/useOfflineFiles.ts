@@ -14,11 +14,12 @@ import { storage } from './storage';
 
 const BASE = 'https://tiles.gettrailhead.app';
 
-// Use cacheDirectory so iOS never syncs these large files to iCloud.
-// documentDirectory files get offloaded to iCloud on low storage, making
-// them unavailable offline when FileHandle tries to open them.
-export const OFFLINE_DIR = `${FileSystem.cacheDirectory}offline/`;
+// Keep offline packs in persistent app storage. iOS may purge cacheDirectory
+// when space is tight; a large routing download can otherwise evict maps.
+export const OFFLINE_DIR = `${FileSystem.documentDirectory}offline/`;
+export const CACHE_OFFLINE_DIR = `${FileSystem.cacheDirectory}offline/`;
 export const ROUTING_DIR = `${OFFLINE_DIR}routing/`;
+const CACHE_ROUTING_DIR = `${CACHE_OFFLINE_DIR}routing/`;
 
 export const FILE_REGIONS = {
   conus: {
@@ -136,6 +137,23 @@ const EMPTY_ROUTING = (id: string): FileDownloadState => {
   };
 };
 
+async function migrateCachedFile(cachePath: string, persistentPath: string) {
+  const target = await FileSystem.getInfoAsync(persistentPath).catch(() => null);
+  if (target?.exists) return;
+
+  const source = await FileSystem.getInfoAsync(cachePath).catch(() => null);
+  if (!source?.exists) return;
+
+  const parent = persistentPath.slice(0, persistentPath.lastIndexOf('/') + 1);
+  await FileSystem.makeDirectoryAsync(parent, { intermediates: true }).catch(() => {});
+  try {
+    await FileSystem.moveAsync({ from: cachePath, to: persistentPath });
+  } catch {
+    await FileSystem.copyAsync({ from: cachePath, to: persistentPath }).catch(() => {});
+    await FileSystem.deleteAsync(cachePath, { idempotent: true }).catch(() => {});
+  }
+}
+
 // ── Formatting helpers ────────────────────────────────────────────────────────
 export function fmtBytes(b: number): string {
   if (b < 1_048_576)      return `${(b / 1024).toFixed(0)} KB`;
@@ -216,6 +234,8 @@ export function useOfflineFiles() {
       await FileSystem.makeDirectoryAsync(ROUTING_DIR, { intermediates: true }).catch(() => {});
 
       for (const [id, region] of Object.entries(FILE_REGIONS)) {
+        const fileName = id === 'conus' ? 'conus.pmtiles' : `${id}.pmtiles`;
+        await migrateCachedFile(`${CACHE_OFFLINE_DIR}${fileName}`, region.localPath);
         const info = await FileSystem.getInfoAsync(region.localPath).catch(() => null);
         if (info?.exists) {
           const sizeMb = Math.round(((info as any).size ?? 0) / 1_048_576 * 10) / 10;
@@ -233,6 +253,7 @@ export function useOfflineFiles() {
       }
 
       for (const [id, region] of Object.entries(ROUTING_REGIONS)) {
+        await migrateCachedFile(`${CACHE_ROUTING_DIR}${id}.tar`, region.localPath);
         const info = await FileSystem.getInfoAsync(region.localPath).catch(() => null);
         if (info?.exists) {
           const sizeMb = Math.round(((info as any).size ?? 0) / 1_048_576 * 10) / 10;

@@ -24,6 +24,9 @@ module.exports = {
         NSLocationAlwaysUsageDescription: 'Trailhead uses background location so turn-by-turn navigation and landmark audio narrations play while your screen is off.',
         NSCameraUsageDescription: 'Trailhead uses your camera to take photos for field reports. For example, you can photograph a washed-out road, a campsite condition, or a trail hazard to warn other overlanders.',
         NSPhotoLibraryUsageDescription: 'Trailhead uses your photo library to attach existing photos to field reports. For example, you can select a photo of a trail condition, campsite, or road hazard to share with the overlanding community.',
+        NSAppTransportSecurity: {
+          NSAllowsLocalNetworking: true,
+        },
         UIBackgroundModes: ['location', 'audio', 'fetch'],
         ITSAppUsesNonExemptEncryption: false,
       },

@@ -1332,10 +1332,12 @@ const buildMapHtml = (
 
   async function _fetchValhalla(pairs,fromIdx){
     var locs=pairs.map(function(p){var s=p.split(',');return{lon:parseFloat(s[0]),lat:parseFloat(s[1])};});
-    var body={locations:locs,costing:'auto',costing_options:{auto:{use_tracks:0.9,use_highways:0.0,use_tolls:routeOpts.avoidTolls?0.0:0.5}},units:'miles'};
+    var body={locations:locs,options:routeOpts,units:'miles'};
     try{
-      var ctrl=new AbortController();var tid=setTimeout(function(){ctrl.abort();},12000);
-      var data=await(await fetch('https://valhalla1.openstreetmap.de/route',{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();clearTimeout(tid);
+      var ctrl=new AbortController();var tid=setTimeout(function(){ctrl.abort();},20000);
+      var res=await fetch(apiBase+'/api/route',{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      var data=await res.json();clearTimeout(tid);
+      if(!res.ok)return _fallback(pairs,fromIdx);
       if(!data.trip||data.trip.status!==0)return _fallback(pairs,fromIdx);
       var all=[],steps=[],legs=[];
       (data.trip.legs||[]).forEach(function(leg){var c=decodeP6(leg.shape||'');all=all.concat(c);var ls=[];(leg.maneuvers||[]).forEach(function(m){var dist=Math.round((m.length||0)*1609.34);var shp=c[m.begin_shape_index];var st={type:m.type===4?'arrive':m.type===1?'depart':'turn',modifier:{0:'',1:'',2:'left',3:'right',4:'arrive',5:'sharp left',6:'sharp right',7:'left',8:'right',9:'uturn',10:'slight left',11:'slight right'}[m.type]||'',name:m.street_names&&m.street_names[0]||'',distance:dist,duration:m.time||0,lat:shp?shp[1]:undefined,lng:shp?shp[0]:undefined};steps.push(st);ls.push(st);});legs.push(ls);});
@@ -1574,6 +1576,7 @@ function MapScreen() {
   const [routeSteps,  setRouteSteps]  = useState<RouteStep[]>([]);
   const [isRouted,    setIsRouted]    = useState(false);
   const [routeFromCache, setRouteFromCache] = useState(false);
+  const [routeDebug, setRouteDebug] = useState('');
   const [mapLayer,    setMapLayerState] = useState<MapLayer>('topo');
   const [showLands,   setShowLands]    = useState(false);
   const [showUsgs,    setShowUsgs]     = useState(false);
@@ -2266,6 +2269,7 @@ function MapScreen() {
       setApproachingReport(null);
       setOffRouteWarn(false);
       if (offRouteWarnTimer.current) clearTimeout(offRouteWarnTimer.current);
+      if (rerouteTimeoutRef.current) { clearTimeout(rerouteTimeoutRef.current); rerouteTimeoutRef.current = null; }
       alertedRepIdsRef.current.clear();
       if (approachDismissRef.current) clearTimeout(approachDismissRef.current);
       setRouteLegOffset(0);
@@ -2503,6 +2507,38 @@ function MapScreen() {
     setIsLoadingAreaCamps(false);
   }
 
+  function restoreCachedActiveRoute(target: 'web' | 'native') {
+    if (!activeTrip?.trip_id) return;
+    storage.get('trailhead_active_route').then(raw => {
+      if (!raw) return;
+      try {
+        const cached = JSON.parse(raw);
+        if (cached.tripId !== activeTrip.trip_id) return;
+        if (!Array.isArray(cached.coords) || cached.coords.length < 2) return;
+
+        const steps = cached.steps ?? [];
+        const legs = cached.legs ?? [];
+        const totalDistance = cached.totalDistance ?? cached.total_distance ?? 0;
+        const totalDuration = cached.totalDuration ?? cached.total_duration ?? 0;
+
+        if (target === 'native') {
+          nativeMapRef.current?.restoreRoute(cached.coords, steps, legs, totalDistance, totalDuration);
+          setLastRouteCoords(cached.coords);
+          return;
+        }
+
+        webRef.current?.postMessage(JSON.stringify({
+          type: 'restore_route',
+          coords: cached.coords,
+          steps,
+          legs,
+          total_distance: totalDistance,
+          total_duration: totalDuration,
+        }));
+      } catch {}
+    }).catch(() => {});
+  }
+
   // ── WebView message handler ──────────────────────────────────────────────────
 
   function onWebMessage(e: any) {
@@ -2512,23 +2548,7 @@ function MapScreen() {
         if (viewportRef.current) loadCampsInArea(viewportRef.current, activeFilters);
         // If we restored a trip from cache (offline relaunch), replay its route geometry
         // into the WebView so navigation works without re-fetching from Mapbox Directions.
-        if (activeTrip?.trip_id) {
-          storage.get('trailhead_active_route').then(raw => {
-            if (!raw) return;
-            try {
-              const cached = JSON.parse(raw);
-              if (cached.tripId !== activeTrip.trip_id) return; // stale, different trip
-              webRef.current?.postMessage(JSON.stringify({
-                type: 'restore_route',
-                coords: cached.coords,
-                steps: cached.steps,
-                legs: cached.legs,
-                total_distance: cached.total_distance,
-                total_duration: cached.total_duration,
-              }));
-            } catch {}
-          }).catch(() => {});
-        }
+        restoreCachedActiveRoute('web');
       }
       if (msg.type === 'map_bounds') {
         viewportRef.current = { n: msg.n, s: msg.s, e: msg.e, w: msg.w, zoom: msg.zoom };
@@ -2886,6 +2906,7 @@ function MapScreen() {
   function manualReroute() {
     if (!userLoc || !navMode) return;
     const now = Date.now();
+    if (isReroutingRef.current || now - lastRerouteRef.current < 5000) return;
     lastRerouteRef.current = now;
     setIsRerouting(true);
     isReroutingRef.current = true;
@@ -3008,9 +3029,15 @@ function MapScreen() {
               // Also load nearby POIs
               fetchPois(center);
             }
+            restoreCachedActiveRoute('native');
           }}
           onBoundsChange={b => { viewportRef.current = b; setMapZoom(b.zoom ?? 10); if ((b.zoom ?? 0) >= 9) setMapMoved(true); if ((b.zoom ?? 0) < 8) setAreaCamps([]); }}
           onMapTap={(lat, lng) => {
+            if (selectOnMapMode && (lat == null || lng == null)) {
+              setQuickToast('Map tap did not return a coordinate. Try tapping the road surface.');
+              setTimeout(() => setQuickToast(''), 4000);
+              return;
+            }
             if (selectOnMapMode && lat != null && lng != null) {
               setSelectOnMapMode(false);
               const name = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
@@ -3052,11 +3079,28 @@ function MapScreen() {
           onRouteReady={result => {
             setIsRouted(result.isProper);
             setRouteFromCache(!!result.fromCache);
+            setRouteDebug(result.debug ?? '');
             setRouteSteps(result.steps ?? []);
             setRouteLegs(result.legs ?? []);
             if (result.fromIdx !== undefined) setRouteLegOffset(result.fromIdx);
             setIsRerouting(false); isReroutingRef.current = false;
             if (result.coords?.length) setLastRouteCoords(result.coords);
+            if (!result.isProper && result.debug) {
+              const longOffline = result.debug.includes('confidence limit');
+              setQuickToast(longOffline
+                ? 'Long offline route needs the Valhalla routing pack engine. Map tiles still work; try a shorter segment or route with signal.'
+                : `Offline route failed: ${result.debug}`
+              );
+              setTimeout(() => setQuickToast(''), longOffline ? 11000 : 8000);
+              setNavMode(false);
+              if (!longOffline) {
+                setNavDest(null);
+                navDestRef.current = null;
+                nativeMapRef.current?.resetRoute();
+                webRef.current?.postMessage(JSON.stringify({ type: 'nav_reset' }));
+              }
+              return;
+            }
           }}
           onRoutePersist={data => {
             storage.set('trailhead_active_route', JSON.stringify({ ...data, ts: Date.now() })).catch(() => {});
@@ -3161,10 +3205,22 @@ function MapScreen() {
           <Text style={s.offlineCacheBannerText}>Using cached trip data — offline mode</Text>
         </View>
       )}
-      {routeFromCache && navMode && (
+      {routeFromCache && navMode && isActuallyOffline && (
         <View style={[s.offlineCacheBanner, { backgroundColor: 'rgba(234,179,8,0.15)' }]}>
           <Ionicons name="navigate-outline" size={12} color="#eab308" />
-          <Text style={[s.offlineCacheBannerText, { color: '#eab308' }]}>Offline — using last cached route · re-routing disabled</Text>
+          <Text style={[s.offlineCacheBannerText, { color: '#eab308' }]}>Offline — using cached route · re-routing disabled</Text>
+        </View>
+      )}
+      {routeFromCache && navMode && !isActuallyOffline && (
+        <View style={[s.offlineCacheBanner, { backgroundColor: 'rgba(59,130,246,0.12)' }]}>
+          <Ionicons name="checkmark-circle-outline" size={12} color="#60a5fa" />
+          <Text style={[s.offlineCacheBannerText, { color: '#60a5fa' }]}>Using cached route</Text>
+        </View>
+      )}
+      {!!routeDebug && !isRouted && navMode && (
+        <View style={[s.offlineCacheBanner, { top: 136, backgroundColor: 'rgba(127,29,29,0.82)', borderColor: 'rgba(248,113,113,0.45)' }]}>
+          <Ionicons name="bug-outline" size={12} color="#fecaca" />
+          <Text style={[s.offlineCacheBannerText, { color: '#fecaca' }]} numberOfLines={2}>Router: {routeDebug}</Text>
         </View>
       )}
 
@@ -6111,11 +6167,12 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
 
   // Offline cache banner
   offlineCacheBanner: {
+    position: 'absolute', top: 102, left: 16, right: 16,
     flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: 'rgba(20,30,20,0.88)', borderRadius: 8,
+    backgroundColor: 'rgba(20,30,20,0.92)', borderRadius: 8,
     paddingHorizontal: 10, paddingVertical: 6,
-    marginHorizontal: 14, marginTop: 4,
     borderWidth: 1, borderColor: 'rgba(163,230,53,0.3)',
+    zIndex: 30,
   },
   offlineCacheBannerText: { color: '#a3e635', fontSize: 10, fontFamily: mono, fontWeight: '700', letterSpacing: 0.3, flex: 1 },
 

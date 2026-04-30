@@ -258,6 +258,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const switchingRef    = useRef(false);               // prevent concurrent state switches
   const isRoutingRef    = useRef(false);               // route fetch in progress — block CDN fallback
   const lastFlyToRef    = useRef(0);                   // timestamp of last flyTo — debounce CDN fallback
+  const routeRequestRef = useRef(0);                   // cancels stale async route results
 
   // Returns all downloaded state files with their bounds, or null for CONUS.
   // Skips files under 25% of estimated size (obviously truncated downloads).
@@ -290,13 +291,18 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       loadedStateRef.current = path;
       setLocalTiles(true);
       setTileSession(Date.now());
-      // Probe z12 tile (Kansas center ~38.5°N, -98.35°W) to verify high-zoom serving
       setTimeout(async () => {
         try {
-          const r = await fetch('http://127.0.0.1:57832/api/tiles/12/929/1573.pbf');
-          setTileDebug(`${fileName} ${sizeMb}MB probe:${r.status}`);
-        } catch {
-          setTileDebug(`${fileName} ${sizeMb}MB probe:err`);
+          const health = await fetch('http://127.0.0.1:57832/health');
+          if (!health.ok) {
+            setTileDebug(`${fileName} ${sizeMb}MB health:${health.status}`);
+            return;
+          }
+          // Probe z12 tile near central Kansas.
+          const r = await fetch('http://127.0.0.1:57832/api/tiles/12/928/1572.pbf');
+          setTileDebug(`${fileName} ${sizeMb}MB health:ok probe:${r.status}`);
+        } catch (e: any) {
+          setTileDebug(`${fileName} ${sizeMb}MB local fetch err: ${String(e?.message ?? e).slice(0, 80)}`);
         }
       }, 600);
     } catch (e: any) {
@@ -453,6 +459,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       doFetchRoute([`${userLng},${userLat}`, `${lng},${lat}`], 0);
     },
     resetRoute() {
+      routeRequestRef.current++;
+      isRoutingRef.current = false;
       setRouteCoords([]); setPassedCoords([]); setBreadcrumb([]);
       routeRef.current = { coords: [], passedIdx: 0 };
       setSearchDest(null); setNavTargetIdx(-1);
@@ -467,10 +475,13 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
 
   // ── Routing ─────────────────────────────────────────────────────────────────
   const doFetchRoute = useCallback(async (pairs: string[], fromIdx: number) => {
+    const requestId = ++routeRequestRef.current;
     isRoutingRef.current = true;
     try {
       await ensureRouteTileFile(pairs);
+      if (requestId !== routeRequestRef.current) return;
       const result = await fetchRoute(pairs, fromIdx, mapboxToken || '', routeOpts);
+      if (requestId !== routeRequestRef.current) return;
       setRouteCoords(result.coords);
       routeRef.current = { coords: result.coords, passedIdx: 0 };
       onRouteReady({ ...result, fromIdx });
@@ -486,12 +497,13 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         tripId: activeTrip?.trip_id ?? null, ts: Date.now(),
       })).catch(() => {});
     } catch {
+      if (requestId !== routeRequestRef.current) return;
       const fb = buildFallbackRoute(pairs);
       setRouteCoords(fb.coords);
       routeRef.current = { coords: fb.coords, passedIdx: 0 };
       onRouteReady({ ...fb, fromIdx });
     } finally {
-      isRoutingRef.current = false;
+      if (requestId === routeRequestRef.current) isRoutingRef.current = false;
     }
   }, [mapboxToken, routeOpts, waypoints, activeTrip, onRouteReady, onRoutePersist, ensureRouteTileFile]);
 

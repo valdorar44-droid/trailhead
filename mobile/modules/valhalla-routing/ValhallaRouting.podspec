@@ -24,10 +24,14 @@ Pod::Spec.new do |s|
     fi
   CMD
 
-  s.source_files = 'ios/**/*.{swift,h,m,mm,cpp,hpp,c}'
+  s.source_files = [
+    'ios/*.{swift,h,m,mm}',
+    'ios/include/**/*.{h,hpp}'
+  ]
   s.public_header_files = 'ios/ValhallaWrapper.h'
   s.resources = ['ios/Resources/default.json', 'ios/Resources/tzdata.tar']
   s.vendored_frameworks = 'ios/vendor/valhalla-wrapper.xcframework'
+  s.preserve_paths = 'ios/vendor/valhalla-wrapper.xcframework'
   s.libraries = ['z', 'c++', 'sqlite3', 'bz2']
   s.frameworks = ['Foundation']
 

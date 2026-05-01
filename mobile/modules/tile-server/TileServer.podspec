@@ -3,24 +3,7 @@ require 'json'
 package = JSON.parse(File.read(File.join(__dir__, 'package.json')))
 
 $TrailheadTileServer ||= Object.new
-$TrailheadTileServer_SPM_SPECS ||= [
-  {
-    url: 'https://github.com/Rallista/valhalla-mobile.git',
-    requirement: {
-      kind: 'exactVersion',
-      version: '0.5.1'
-    },
-    product_name: 'Valhalla'
-  },
-  {
-    url: 'https://github.com/Rallista/valhalla-openapi-models-swift.git',
-    requirement: {
-      kind: 'exactVersion',
-      version: '0.2.0'
-    },
-    product_name: 'ValhallaConfigModels'
-  }
-]
+$TrailheadTileServer_SPM_SPECS ||= []
 
 def $TrailheadTileServer._add_spm_to_target(project, target, url, requirement, product_name)
   return if target.nil?

@@ -44,14 +44,7 @@ public class TileServerModule: Module {
         }
 
         AsyncFunction("routeValhalla") { (packPath: String, requestJson: String, promise: Promise) in
-            DispatchQueue.global(qos: .userInitiated).async {
-                do {
-                    let json = try ValhallaRouteEngine.shared.route(packPath: packPath, requestJson: requestJson)
-                    promise.resolve(json)
-                } catch {
-                    promise.reject("ERR_VALHALLA_ROUTE", error.localizedDescription)
-                }
-            }
+            promise.reject("ERR_VALHALLA_ROUTE", "Valhalla engine is not linked in this preview binary")
         }
     }
 }

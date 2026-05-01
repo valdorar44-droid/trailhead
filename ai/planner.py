@@ -316,6 +316,8 @@ RESPOND TO REQUESTS INTELLIGENTLY:
 """
 
 client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+HAIKU_MODEL = "claude-haiku-4-5-20251001"
+SONNET_MODEL = "claude-sonnet-4-6"
 
 
 def _claude(fn, max_attempts: int = 3):
@@ -613,7 +615,12 @@ def edit_trip(current_trip: dict, edit_request: str) -> dict:
 
 
 def plan_trip_from_conversation(messages: list[dict]) -> dict:
-    """Generate full trip JSON from conversation history. Retries once on bad output."""
+    """Generate full trip JSON from conversation history.
+
+    Haiku drafts quickly. Sonnet then acts as final judge/route editor. If
+    Sonnet is rate-limited or slow, return the valid Haiku draft instead of
+    failing the user's trip build.
+    """
     # Keep last 12 messages to stay well under input token limits
     convo = "\n".join(
         f"{m['role'].upper()}: {m['content']}"
@@ -627,32 +634,13 @@ def plan_trip_from_conversation(messages: list[dict]) -> dict:
         "Start your response with { and end with }."
     )
 
-    def _call() -> str:
-        msg = _claude(lambda: client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=16000,
-            temperature=0,   # deterministic — reduces hallucinated markdown
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": synthesis}],
-        ))
-        return msg.content[0].text.strip()
-
-    # Attempt 1
+    # Draft first with Haiku. It is faster and takes load off Sonnet for long plans.
     try:
-        return _parse_plan_json(_call())
-    except (ValueError, json.JSONDecodeError):
-        pass
+        draft = _parse_plan_json(_call_plan_model(HAIKU_MODEL, synthesis, max_tokens=12000))
+    except Exception:
+        draft = _parse_plan_json(_call_plan_model(SONNET_MODEL, synthesis, max_tokens=16000))
 
-    # Attempt 2 — with even more explicit instruction
-    retry_msg = synthesis + "\n\nYour previous response was not valid JSON. Try again. Output ONLY the JSON object, nothing else."
-    msg2 = _claude(lambda: client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=16000,
-        temperature=0,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": retry_msg}],
-    ))
-    return _parse_plan_json(msg2.content[0].text.strip())
+    return _finalize_plan_with_sonnet(draft, synthesis)
 
 
 def _parse_plan_json(raw: str) -> dict:
@@ -699,38 +687,56 @@ def _parse_plan_json(raw: str) -> dict:
     raise ValueError(f"Could not extract valid JSON from response (len={len(raw)}): {raw[:300]}")
 
 
-def plan_trip(user_request: str) -> dict:
-    # Short trips (≤3 days) use Haiku — simpler JSON, reliable output, 10x cheaper.
-    # Longer trips go straight to Sonnet for richer detail and reliability.
-    import re as _re
-    day_hint = int((_re.search(r'\b(\d+)\s*-?\s*day', user_request, _re.I) or [None, 5])[1])
-    use_haiku = day_hint <= 3
+def _call_plan_model(model: str, prompt: str, max_tokens: int, max_attempts: int = 3) -> str:
+    msg = _claude(
+        lambda: client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            temperature=0,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": prompt}],
+        ),
+        max_attempts=max_attempts,
+    )
+    return msg.content[0].text.strip()
 
+
+def _finalize_plan_with_sonnet(draft: dict, source_request: str) -> dict:
+    """Use Sonnet as final route judge, but never let it block a valid draft."""
+    draft_json = json.dumps(draft, separators=(",", ":"))
+    prompt = f"""Review this Trailhead trip draft against the original request.
+
+Original request/conversation:
+{source_request[:5000]}
+
+Draft JSON:
+{draft_json}
+
+Your job:
+- Keep the same JSON schema.
+- Fix unsafe mileage, missing fuel, bad day order, vague camp names, impossible route rhythm, or missing overnight stops.
+- Make waypoint names geocodeable with town/area + state.
+- Do not add external app recommendations.
+- Preserve good camps, POIs, gas stops, and the user's vehicle/camping intent.
+
+Return ONLY the corrected complete JSON object. No markdown."""
+
+    try:
+        return _parse_plan_json(_call_plan_model(SONNET_MODEL, prompt, max_tokens=14000, max_attempts=1))
+    except Exception:
+        return draft
+
+
+def plan_trip(user_request: str) -> dict:
     explicit_request = (
         user_request
         + "\n\nIMPORTANT: Respond with ONLY a valid JSON object. "
         "Do NOT use markdown code fences. Start your response with { and end with }."
     )
 
-    def _call(model: str) -> str:
-        msg = _claude(lambda: client.messages.create(
-            model=model,
-            max_tokens=16000 if model.startswith("claude-sonnet") else 4096,
-            temperature=0,  # deterministic JSON output
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": explicit_request}]
-        ))
-        return msg.content[0].text.strip()
-
-    if use_haiku:
-        try:
-            return _parse_plan_json(_call("claude-haiku-4-5-20251001"))
-        except Exception:
-            pass  # fall through to Sonnet
-
-    # Sonnet with retry on bad JSON
     try:
-        return _parse_plan_json(_call("claude-sonnet-4-6"))
-    except (ValueError, json.JSONDecodeError):
-        # One retry
-        return _parse_plan_json(_call("claude-sonnet-4-6"))
+        draft = _parse_plan_json(_call_plan_model(HAIKU_MODEL, explicit_request, max_tokens=12000))
+    except Exception:
+        draft = _parse_plan_json(_call_plan_model(SONNET_MODEL, explicit_request, max_tokens=16000))
+
+    return _finalize_plan_with_sonnet(draft, explicit_request)

@@ -13,6 +13,30 @@ static NSString* EscapeJsonString(NSString* value) {
   return escaped;
 }
 
+static NSString* AppendRequestDebug(NSString* response, NSString* request) {
+  if (![response hasPrefix:@"{\"code\":"] && ![response hasPrefix:@"{\"error\":"]) {
+    return response;
+  }
+
+  NSString* prefix = request.length > 120 ? [request substringToIndex:120] : request;
+  NSString* marker = [NSString stringWithFormat:@" req_prefix=%@", prefix];
+
+  NSData* data = [response dataUsingEncoding:NSUTF8StringEncoding];
+  id parsed = data ? [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingMutableContainers error:nil] : nil;
+  if ([parsed isKindOfClass:[NSMutableDictionary class]]) {
+    NSMutableDictionary* json = (NSMutableDictionary*)parsed;
+    NSString* key = json[@"message"] ? @"message" : @"error";
+    NSString* message = [json[key] isKindOfClass:[NSString class]] ? json[key] : @"Valhalla route error";
+    json[key] = [message stringByAppendingString:marker];
+    NSData* out = [NSJSONSerialization dataWithJSONObject:json options:0 error:nil];
+    if (out) {
+      return [[NSString alloc] initWithData:out encoding:NSUTF8StringEncoding] ?: response;
+    }
+  }
+
+  return response;
+}
+
 class ValhallaMobileHttpClientImpl : public ValhallaMobileHttpClient {
 public:
   valhalla::baldr::tile_getter_t::GET_response_t
@@ -158,8 +182,9 @@ public:
   @synchronized(self) {
     try {
       std::string req = std::string([request UTF8String]);
-      std::string res = route(req.c_str(), _actor);
-      return [NSString stringWithUTF8String:res.c_str()];
+      std::string res = ::route(req.c_str(), _actor);
+      NSString* response = [NSString stringWithUTF8String:res.c_str()] ?: @"";
+      return AppendRequestDebug(response, request);
     } catch (NSException *exception) {
       NSString* message = exception.reason ?: @"Valhalla route exception";
       return [NSString stringWithFormat:@"{\"error\":\"%@\"}", EscapeJsonString(message)];

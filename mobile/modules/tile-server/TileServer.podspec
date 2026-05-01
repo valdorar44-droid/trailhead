@@ -1,6 +1,6 @@
 require 'json'
 
-package = JSON.parse(File.read(File.join(__dir__, '..', 'package.json')))
+package = JSON.parse(File.read(File.join(__dir__, 'package.json')))
 
 $TrailheadTileServer ||= Object.new
 $TrailheadTileServer_SPM_SPECS ||= [
@@ -90,7 +90,7 @@ Pod::Spec.new do |s|
   s.author         = { 'Trailhead' => '' }
   s.platforms      = { :ios => '16.4' }
   s.source         = { :path => '.' }
-  s.source_files   = '**/*.{swift,m,h}'
+  s.source_files   = 'ios/**/*.{swift,m,h}'
   s.libraries      = 'z'
   s.dependency 'ExpoModulesCore'
 end

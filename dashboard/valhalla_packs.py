@@ -44,6 +44,18 @@ GEofabrik_NAMES = {
     "WY": "wyoming",
 }
 
+# Approximate OSM PBF size order, smallest first. Running tiny states first
+# gets useful packs into R2 quickly and avoids losing hours if Railway restarts
+# while a huge state like CA/TX is building.
+SMALLEST_FIRST_ORDER = [
+    "RI", "DE", "CT", "HI", "NH", "VT", "MA", "NJ", "MD", "WV",
+    "SC", "ME", "AL", "MS", "KY", "TN", "IN", "AR", "LA", "IA",
+    "OH", "VA", "NC", "WI", "MO", "KS", "NE", "OK", "MN", "IL",
+    "GA", "SD", "ND", "PA", "FL", "MI", "NY", "ID", "WA", "OR",
+    "CO", "NM", "AZ", "UT", "NV", "WY", "MT", "AK", "CA", "TX",
+]
+SMALLEST_FIRST_RANK = {code: idx for idx, code in enumerate(SMALLEST_FIRST_ORDER)}
+
 _status: dict[str, dict] = {
     code: {"status": "pending", "progress": "", "size_bytes": 0, "error": None}
     for code in STATE_BBOXES
@@ -87,6 +99,11 @@ def tool_status() -> dict:
         "valhalla_build_config": shutil.which("valhalla_build_config") or "",
         "valhalla_build_extract": shutil.which("valhalla_build_extract") or "",
     }
+
+
+def ordered_codes(codes: Optional[list[str]] = None) -> list[str]:
+    targets = [c.upper() for c in (codes or list(STATE_BBOXES.keys())) if c.upper() in STATE_BBOXES]
+    return sorted(targets, key=lambda c: SMALLEST_FIRST_RANK.get(c, 999))
 
 
 def _geofabrik_url(code: str) -> str:
@@ -382,7 +399,7 @@ async def build_all_task(codes: Optional[list[str]] = None):
     global _running
     _running = True
     try:
-        targets = [c.upper() for c in (codes or list(STATE_BBOXES.keys()))]
+        targets = ordered_codes(codes)
         for code in targets:
             if code not in STATE_BBOXES:
                 continue

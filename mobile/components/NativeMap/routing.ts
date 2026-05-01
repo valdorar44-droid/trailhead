@@ -40,6 +40,7 @@ const LAST_ROUTE_DEST_TOLERANCE_M = 150;
 const LAST_ROUTE_START_TOLERANCE_M = 5_000;
 const TRAILHEAD_API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://trailhead-production-2049.up.railway.app';
 const ROUTE_CACHE_VERSION = 'valhalla-proxy-v2';
+const ROUTER_DEBUG_MARKER = 'DBGv4';
 
 async function ensureCacheDir() {
   await FileSystem.makeDirectoryAsync(CACHE_DIR, { intermediates: true }).catch(() => {});
@@ -237,7 +238,7 @@ export async function fetchRoute(
       if (offline) return offline;
     } catch (e) {
       console.warn('[fetchRoute] native offline Valhalla error', e);
-      nativeOfflineErrors.push(e instanceof Error ? e.message : String(e));
+      nativeOfflineErrors.push(`${ROUTER_DEBUG_MARKER} ${e instanceof Error ? e.message : String(e)}`);
     }
 
     console.log('[fetchRoute] offline — trying JS PMTiles router');
@@ -294,7 +295,7 @@ export async function fetchRoute(
     if (offline) return offline;
   } catch (e) {
     console.warn('[fetchRoute] native offline Valhalla error', e);
-    nativeOfflineErrors.push(e instanceof Error ? e.message : String(e));
+    nativeOfflineErrors.push(`${ROUTER_DEBUG_MARKER} ${e instanceof Error ? e.message : String(e)}`);
   }
 
   if (ENABLE_JS_OFFLINE_ROUTER && pairs.length >= 2) {
@@ -507,12 +508,12 @@ async function fetchNativeValhallaOffline(
   const diag = await diagnoseValhalla(packPath, requestJson).catch(e => `native-diag-error=${e instanceof Error ? e.message : String(e)}`);
   const raw = await routeValhalla(packPath, requestJson).catch(e => {
     const msg = e instanceof Error ? e.message : String(e);
-    throw new Error(`${compactValhallaDiag(diag)}; ${msg}`);
+    throw new Error(`${ROUTER_DEBUG_MARKER} ${compactValhallaDiag(diag)}; ${msg}`);
   });
   const data = JSON.parse(raw);
   if (!data.trip || data.trip.status !== 0) {
     const msg = data.error ?? data.message ?? data.trip?.status_message ?? 'valhalla offline error';
-    throw new Error(`${compactValhallaDiag(diag)}; ${String(msg)}`);
+    throw new Error(`${ROUTER_DEBUG_MARKER} ${compactValhallaDiag(diag)}; ${String(msg)}`);
   }
 
   const result = parseValhallaRoute(data);

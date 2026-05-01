@@ -38,7 +38,8 @@ final class ValhallaRouter {
         queue.async {
             do {
                 let wrapper = try self.wrapper(packPath: packPath)
-                guard let response = wrapper.route(requestJson), !response.isEmpty else {
+                let response = wrapper.route(requestJson)
+                guard !response.isEmpty else {
                     throw ValhallaRouterError.emptyResponse
                 }
                 completion(.success(response))
@@ -58,9 +59,11 @@ final class ValhallaRouter {
         }
 
         let configPath = try writeConfig(packPath: packPath)
-        var error: NSError?
-        guard let wrapper = ValhallaWrapper(configPath: configPath, error: &error) else {
-            throw ValhallaRouterError.engineInitFailed(error?.localizedDescription ?? "unknown")
+        let wrapper: ValhallaWrapper
+        do {
+            wrapper = try ValhallaWrapper(configPath: configPath)
+        } catch {
+            throw ValhallaRouterError.engineInitFailed(error.localizedDescription)
         }
         wrapperByPackPath[packPath] = wrapper
         return wrapper

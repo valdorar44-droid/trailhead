@@ -64,6 +64,13 @@ final class ValhallaRouter {
             }
 
             do {
+                try ValhallaTzdata.injectIfNeeded()
+                parts.append("tzExists=\(fm.fileExists(atPath: ValhallaTzdata.markerUrl().path))")
+            } catch {
+                parts.append("tzError=\(error.localizedDescription)")
+            }
+
+            do {
                 let configPath = try self.writeConfig(packPath: packPath)
                 parts.append("configPrefix=\(Self.prefix(configPath, max: 72))")
                 parts.append("configExists=\(fm.fileExists(atPath: configPath))")
@@ -91,6 +98,7 @@ final class ValhallaRouter {
         let configPath = try writeConfig(packPath: packPath)
         let wrapper: ValhallaWrapper
         do {
+            try ValhallaTzdata.injectIfNeeded()
             wrapper = try ValhallaWrapper(configPath: configPath)
         } catch {
             throw ValhallaRouterError.engineInitFailed(error.localizedDescription)

@@ -36,6 +36,13 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="route-builder"
+        options={{
+          title: 'ROUTE',
+          tabBarIcon: ({ color, size }) => <Ionicons name="trail-sign-outline" size={size} color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="report"
         options={{
           title: 'REPORT',

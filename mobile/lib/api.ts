@@ -112,6 +112,8 @@ export const api = {
     req<Campsite[]>(`/api/campsites?lat=${lat}&lng=${lng}&radius=${radius}`),
   searchCampsites: (lat: number, lng: number, radius = 40, types: string[] = []) =>
     req<CampsitePin[]>(`/api/campsites/search?lat=${lat}&lng=${lng}&radius=${radius}&types=${types.join(',')}`),
+  getGas: (lat: number, lng: number, radius = 25) =>
+    req<GasStation[]>(`/api/gas?lat=${lat}&lng=${lng}&radius=${radius}`),
   getCampsiteDetail: (id: string) =>
     req<CampsiteDetail>(`/api/campsites/${id}/detail`),
   submitPin: (data: PinPayload) =>

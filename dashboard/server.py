@@ -14,8 +14,8 @@ from jose import jwt, JWTError
 
 from config.settings import settings
 from ai.planner import plan_trip, chat_guide, edit_trip, plan_trip_from_conversation
+from dashboard.route_enrichment import enrich_trip_along_route
 from ingestors.ridb import get_campsites_near, get_campsites_search, get_facility_detail
-from ingestors.nrel import get_gas_along_route
 from ingestors.osm import get_osm_campsites, get_water_sources, get_trailheads, get_viewpoints, get_peaks
 from db.store import (
     save_trip, get_trip, add_community_pin, get_community_pins,
@@ -388,16 +388,12 @@ async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depend
         if edited_plan:
             geocoded = await _geocode_waypoints(edited_plan.get("waypoints", []))
             edited_plan["waypoints"] = geocoded
-            campsites, seen = [], set()
-            for wp in geocoded:
-                if wp.get("lat") and wp.get("lng"):
-                    for c in await get_campsites_near(wp["lat"], wp["lng"], radius_miles=20):
-                        if c["id"] not in seen:
-                            seen.add(c["id"]); campsites.append(c)
-            gas_stations = await get_gas_along_route(geocoded)
+            enrichment = await enrich_trip_along_route(geocoded)
             trip_id = body.current_trip.get("trip_id", str(uuid.uuid4())[:8])
             updated = {"trip_id": trip_id, "plan": edited_plan,
-                       "campsites": campsites[:40], "gas_stations": gas_stations[:30]}
+                       "campsites": enrichment["campsites"][:70],
+                       "gas_stations": enrichment["gas_stations"][:45],
+                       "route_pois": enrichment["route_pois"][:50]}
             save_trip(trip_id, body.message, updated, user_id=user["id"] if user else None)
             return {"type": "trip_update", "content": result.get("message", "Route updated."),
                     "trip": updated, "trail_dna": trail_dna}
@@ -471,16 +467,11 @@ async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, c
         geocoded = await _geocode_waypoints(plan_data.get("waypoints", []))
         plan_data["waypoints"] = geocoded
 
-        campsites, seen = [], set()
-        for wp in geocoded:
-            if wp.get("lat") and wp.get("lng"):
-                for c in await get_campsites_near(wp["lat"], wp["lng"], radius_miles=25):
-                    if c["id"] not in seen:
-                        seen.add(c["id"]); campsites.append(c)
-
-        gas_stations = await get_gas_along_route(geocoded)
+        enrichment = await enrich_trip_along_route(geocoded)
         result = {"trip_id": trip_id, "plan": plan_data,
-                  "campsites": campsites[:40], "gas_stations": gas_stations[:30]}
+                  "campsites": enrichment["campsites"][:70],
+                  "gas_stations": enrichment["gas_stations"][:45],
+                  "route_pois": enrichment["route_pois"][:50]}
         save_trip(trip_id, body.request, result, user_id=user["id"] if user else None)
 
         update_plan_job(job_id, "done", result=json.dumps(result))

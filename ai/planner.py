@@ -204,6 +204,8 @@ CAMP DEVIATION BUDGET:
 - Default to finding the BEST camp in the area, not just the closest one to the highway.
 - Note any significant deviations in the description: "8-mile dirt access road off US-89, worth it for canyon views."
 - If the user says "stay on route" or "no detours": then keep camps within 5 miles of the main road.
+- Treat camp waypoints as overnight intent anchors, not random map pins. If you know a specific developed campground, use its real name. If you are choosing dispersed camping, name the specific legal public-land area or road/canyon access and explain why it fits that night's route.
+- Avoid vague overnight labels like "High Plains Camp" or "Backroads Camp" unless they include a real geocodeable public-land/town anchor and practical access notes.
 
 OVERNIGHT TYPES:
 - If user asks for camping, dispersed camping, or BLM: use type "camp"
@@ -264,6 +266,7 @@ POINTS OF INTEREST (POI) HANDLING:
 - Include 1-2 POI waypoints per day when the route passes worthwhile attractions.
 - If a day is 4WD/backcountry focused, POIs should be on-trail (summits, canyon ends, rock formations).
 - Always include the POI in the waypoint name: "Corona Arch Trailhead, Moab, UT" not just "trailhead".
+- Do not pad the route with generic POIs. Every POI should be a real named place that is naturally on the way or worth a short detour. Favor POIs within ~15 miles of that day's route unless the user asked for a major destination.
 
 TIME PLANNING:
 - Factor in realistic daily schedules. Most overlanders leave camp by 8-9am and arrive at next camp by 5-6pm — that's a 9-hour travel window.

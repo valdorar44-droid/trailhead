@@ -17,7 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useStore } from '@/lib/store';
 import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd } from '@/lib/api';
-import { loadOfflineTrip } from '@/lib/offlineTrips';
+import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import * as ImagePicker from 'expo-image-picker';
 import PaywallModal from '@/components/PaywallModal';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
@@ -2851,6 +2851,19 @@ function MapScreen() {
     (activeTrip?.gas_stations ?? []).filter(g => g.lat != null && g.lng != null && isFinite(g.lat) && isFinite(g.lng)).map(g => ({ lat: g.lat, lng: g.lng, name: g.name })),
     [activeTrip?.trip_id]
   );
+  const routePois = useMemo(() => {
+    const merged = [...(activeTrip?.route_pois ?? []), ...pois];
+    const seen = new Set<string>();
+    return merged
+      .filter(p => p.lat != null && p.lng != null && isFinite(p.lat) && isFinite(p.lng))
+      .filter(p => {
+        const key = p.id || `${p.name}:${p.lat.toFixed(4)}:${p.lng.toFixed(4)}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .map(p => ({ lat: p.lat, lng: p.lng, name: p.name, type: p.type || 'poi' }));
+  }, [activeTrip?.trip_id, pois]);
   const pinList = useMemo(() =>
     communityPins.map(p => ({ lat: p.lat, lng: p.lng, name: p.name, type: p.type })),
     [communityPins.length]
@@ -2993,7 +3006,7 @@ function MapScreen() {
             ...areaCamps.filter(c => c.lat != null && c.lng != null),
           ] as any}
           gas={(activeTrip?.gas_stations ?? []).filter(g => g.lat != null && g.lng != null && isFinite(g.lat) && isFinite(g.lng)) as any}
-          pois={pois.map(p => ({ lat: p.lat, lng: p.lng, name: p.name, type: p.type || 'poi' }))}
+          pois={routePois}
           reports={liveReports}
           communityPins={communityPins}
           searchMarker={searchRouteCard ? { lat: searchRouteCard.lat, lng: searchRouteCard.lng, name: searchRouteCard.name } : null}
@@ -3187,7 +3200,8 @@ function MapScreen() {
             style={s.exitTripBtn}
             onPress={() => Alert.alert('Exit Trip', 'Clear this trip and go back to planning?', [
               { text: 'Cancel', style: 'cancel' },
-              { text: 'Exit Trip', style: 'destructive', onPress: () => {
+              { text: 'Exit Trip', style: 'destructive', onPress: async () => {
+                if (activeTrip) await saveOfflineTrip(activeTrip);
                 setActiveTrip(null);
                 webRef.current?.postMessage(JSON.stringify({ type: 'nav_reset' }));
                 router.push('/(tabs)/');
@@ -3486,7 +3500,7 @@ function MapScreen() {
               ...areaCamps.filter(c => c.lat != null && c.lng != null),
             ] as any}
             gas={(activeTrip?.gas_stations ?? []).filter(g => g.lat != null && g.lng != null && isFinite(g.lat) && isFinite(g.lng)) as any}
-            pois={pois.map(p => ({ lat: p.lat, lng: p.lng, name: p.name, type: p.type || 'poi' }))}
+            pois={routePois}
             communityPins={communityPins}
             routeOpts={routeOpts}
             routeCoords={lastRouteCoords.length > 0 ? lastRouteCoords : undefined}

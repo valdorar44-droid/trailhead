@@ -210,6 +210,7 @@ export interface User {
 }
 export interface TripResult {
   trip_id: string; plan: TripPlan; campsites: Campsite[]; gas_stations: GasStation[];
+  route_pois?: OsmPoi[];
   audio_guide?: Record<string, string>;
 }
 export interface TripPlan {

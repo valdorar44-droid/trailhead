@@ -55,6 +55,15 @@ _PEAK_QUERY = """
 out tags 60;
 """
 
+_FUEL_QUERY = """
+[out:json][timeout:15];
+(
+  node["amenity"="fuel"](around:{radius},{lat},{lng});
+  way["amenity"="fuel"](around:{radius},{lat},{lng});
+);
+out center tags 40;
+"""
+
 
 def _node_coord(el: dict) -> tuple[float, float] | None:
     if el.get("type") == "way":
@@ -254,6 +263,51 @@ async def get_peaks(lat: float, lng: float, radius_m: int = 64000) -> list[dict]
             "elevation": _ele_to_ft(_tag(el, "ele", "")),
         })
     set_cached("campsite_cache", key, results)
+    return results
+
+
+async def get_fuel_stations(lat: float, lng: float, radius_m: int = 24000) -> list[dict]:
+    """Fetch normal gasoline/diesel stations from OSM.
+
+    NREL is useful for propane/EV/alt-fuel, but it does not cover ordinary
+    rural gas well enough for overland trip planning.
+    """
+    key = f"osm_fuel_{lat:.2f}_{lng:.2f}_{radius_m}"
+    cached = get_cached("gas_cache", key, ttl_seconds=3600 * 24)
+    if cached is not None:
+        return cached
+
+    elements = await _overpass(_FUEL_QUERY.format(lat=lat, lng=lng, radius=radius_m))
+    results = []
+    for el in elements:
+        coord = _node_coord(el)
+        if not coord:
+            continue
+        elat, elng = coord
+        access = _tag(el, "access", "yes")
+        if access in ("private", "no"):
+            continue
+        brand = _tag(el, "brand") or _tag(el, "operator")
+        name = _tag(el, "name") or brand or "Fuel Station"
+        fuel_types = []
+        if _tag(el, "fuel:diesel", "") == "yes":
+            fuel_types.append("diesel")
+        if _tag(el, "fuel:propane", "") == "yes":
+            fuel_types.append("propane")
+        if _tag(el, "fuel:octane_87", "") == "yes" or not fuel_types:
+            fuel_types.append("gas")
+        results.append({
+            "id": f"osm_fuel_{el.get('id', '')}",
+            "name": name,
+            "lat": elat,
+            "lng": elng,
+            "type": "fuel",
+            "fuel_types": ", ".join(fuel_types),
+            "address": ", ".join([v for v in [_tag(el, "addr:street"), _tag(el, "addr:city"), _tag(el, "addr:state")] if v]),
+            "source": "osm",
+        })
+
+    set_cached("gas_cache", key, results)
     return results
 
 

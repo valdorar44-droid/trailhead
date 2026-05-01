@@ -207,6 +207,16 @@ def init_db():
             credits_earned   INTEGER NOT NULL DEFAULT 0,
             created_at       INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS offline_downloads (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id     INTEGER NOT NULL REFERENCES users(id),
+            asset_type  TEXT NOT NULL,
+            region_id   TEXT NOT NULL,
+            cost         INTEGER NOT NULL DEFAULT 0,
+            free_used    INTEGER NOT NULL DEFAULT 0,
+            created_at   INTEGER NOT NULL,
+            UNIQUE(user_id, asset_type, region_id)
+        );
     """)
     # Performance indexes (IF NOT EXISTS is safe to re-run)
     for idx_sql in [
@@ -219,6 +229,7 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_analytics_session ON analytics_events(session_id, event_type)",
         "CREATE INDEX IF NOT EXISTS idx_analytics_type ON analytics_events(event_type, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_route_cache_time ON route_cache(fetched_at)",
+        "CREATE INDEX IF NOT EXISTS idx_offline_downloads_user ON offline_downloads(user_id, asset_type, created_at)",
     ]:
         try:
             db.execute(idx_sql)
@@ -287,6 +298,16 @@ def init_db():
             request_json TEXT NOT NULL,
             data         TEXT NOT NULL,
             hit_count    INTEGER NOT NULL DEFAULT 0
+        )""",
+        """CREATE TABLE IF NOT EXISTS offline_downloads (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id     INTEGER NOT NULL REFERENCES users(id),
+            asset_type  TEXT NOT NULL,
+            region_id   TEXT NOT NULL,
+            cost         INTEGER NOT NULL DEFAULT 0,
+            free_used    INTEGER NOT NULL DEFAULT 0,
+            created_at   INTEGER NOT NULL,
+            UNIQUE(user_id, asset_type, region_id)
         )""",
     ]:
         try:
@@ -1191,6 +1212,64 @@ def has_active_plan(user: dict) -> bool:
     if expires is None:
         return False
     return int(time.time()) < expires
+
+def authorize_offline_download(user: dict, asset_type: str, region_id: str, cost: int, reason: str) -> dict:
+    """Authorize one offline map/routing asset.
+
+    Plan users are free. Free users get one state map and one state routing pack,
+    then pay credits. Re-downloading an already-authorized asset is free.
+    """
+    user_id = user["id"]
+    asset_type = asset_type.strip().lower()
+    region_id = region_id.strip().lower()
+    db = _conn()
+    now = int(time.time())
+    try:
+      existing = db.execute(
+          "SELECT * FROM offline_downloads WHERE user_id=? AND asset_type=? AND region_id=?",
+          (user_id, asset_type, region_id),
+      ).fetchone()
+      if existing:
+          return {"authorized": True, "charged": 0, "free_used": False, "already_authorized": True, "credits": user.get("credits", 0)}
+
+      if has_active_plan(user):
+          db.execute(
+              "INSERT OR IGNORE INTO offline_downloads (user_id,asset_type,region_id,cost,free_used,created_at) VALUES (?,?,?,?,?,?)",
+              (user_id, asset_type, region_id, 0, 0, now),
+          )
+          db.commit()
+          return {"authorized": True, "charged": 0, "free_used": False, "plan": True, "credits": user.get("credits", 0)}
+
+      free_allowed = asset_type in ("state_map", "state_route") and region_id != "conus"
+      if free_allowed:
+          free_count = db.execute(
+              "SELECT COUNT(*) AS c FROM offline_downloads WHERE user_id=? AND asset_type=? AND free_used=1",
+              (user_id, asset_type),
+          ).fetchone()["c"]
+          if free_count == 0:
+              db.execute(
+                  "INSERT OR IGNORE INTO offline_downloads (user_id,asset_type,region_id,cost,free_used,created_at) VALUES (?,?,?,?,?,?)",
+                  (user_id, asset_type, region_id, 0, 1, now),
+              )
+              db.commit()
+              return {"authorized": True, "charged": 0, "free_used": True, "credits": user.get("credits", 0)}
+    finally:
+      db.close()
+
+    if not deduct_credits(user_id, cost, reason):
+        fresh = _user_balance(user_id)
+        return {"authorized": False, "charged": 0, "free_used": False, "credits": fresh, "credits_needed": cost}
+
+    db = _conn()
+    try:
+        db.execute(
+            "INSERT OR IGNORE INTO offline_downloads (user_id,asset_type,region_id,cost,free_used,created_at) VALUES (?,?,?,?,?,?)",
+            (user_id, asset_type, region_id, cost, 0, now),
+        )
+        db.commit()
+    finally:
+        db.close()
+    return {"authorized": True, "charged": cost, "free_used": False, "credits": _user_balance(user_id)}
 
 def activate_plan(user_id: int, plan_type: str, duration_days: int):
     """Set plan_type and expiry. Extends existing plan if still active."""

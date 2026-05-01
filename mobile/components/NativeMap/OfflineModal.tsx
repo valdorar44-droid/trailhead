@@ -10,7 +10,7 @@
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Modal, View, Text, TouchableOpacity, ScrollView,
+  Alert, Modal, View, Text, TouchableOpacity, ScrollView,
   StyleSheet, Animated, Easing,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -26,6 +26,7 @@ import {
   type InstalledPack, type PackProgress,
 } from './offlineManager';
 import type { WP } from './types';
+import { api, PaywallError, type OfflineAssetType } from '@/lib/api';
 
 
 interface WebDownloadOpts { bufferKm?: number; minZ?: number; maxZ?: number; vectorOnly?: boolean; label: string; n?: number; s?: number; e?: number; w?: number; }
@@ -408,6 +409,7 @@ export default function OfflineModal({
   const [packProgress,   setPackProgress]   = useState<PackProgress | null>(null);
   const [activeTab,      setActiveTab]      = useState<'areas' | 'states'>('areas');
   const [selectedState,  setSelectedState]  = useState('ks');
+  const [authorizing,    setAuthorizing]    = useState<string | null>(null);
 
   useEffect(() => {
     if (visible) getInstalledPacks().then(setMlnPacks).catch(() => {});
@@ -442,6 +444,34 @@ export default function OfflineModal({
     }
     startMlnPack(name, bounds, 10, 15);
   }, [onWebDownloadRoute, routeCoords, startMlnPack, useNativeMap, waypoints]);
+
+  const authorizeAndRun = useCallback(async (
+    key: string,
+    assetType: OfflineAssetType,
+    regionId: string,
+    label: string,
+    action: () => void | Promise<void>,
+  ) => {
+    if (authorizing) return;
+    setAuthorizing(key);
+    try {
+      const res = await api.authorizeOfflineDownload(assetType, regionId, label);
+      if (res.free_used) {
+        Alert.alert('Free download unlocked', `${label} is your free ${assetType === 'state_route' ? 'routing pack' : 'map'} download.`);
+      } else if (res.charged > 0) {
+        Alert.alert('Credits used', `${label} download unlocked for ${res.charged} credits.`);
+      }
+      await action();
+    } catch (e: any) {
+      if (e instanceof PaywallError) {
+        Alert.alert('Download locked', `${e.message}\n\nFree users get one state map and one routing pack. Explorer members download offline maps freely.`);
+      } else {
+        Alert.alert('Download unavailable', e?.message ?? 'Could not authorize this download.');
+      }
+    } finally {
+      setAuthorizing(null);
+    }
+  }, [authorizing]);
 
   const deleteMlnPack = useCallback(async (name: string) => {
     await deletePack(name);
@@ -525,13 +555,13 @@ export default function OfflineModal({
                   <Section label="CONTINENTAL US — FILE DOWNLOAD" />
                   <Text style={s.hint}>
                     Single-stream download — 100× faster than tile-by-tile.
-                    Download once, navigate forever.
+                    Explorer downloads freely. Free accounts get one state map and one routing pack, then credits unlock more.
                   </Text>
                   <ConusCard
                     state={conusState}
                     totalBytes={conusTotalBytes}
                     region={FILE_REGIONS.conus}
-                    onStart={() => startDownload('conus')}
+                    onStart={() => authorizeAndRun('conus_map', 'conus_map', 'conus', 'Continental US', () => startDownload('conus'))}
                     onPause={() => pauseDownload('conus')}
                     onResume={() => resumeDownload('conus')}
                     onDelete={() => deleteDownload('conus')}
@@ -550,7 +580,7 @@ export default function OfflineModal({
                         disabled={busy}
                         style={[s.corridorCard, cached && { borderLeftColor: C.green }]}
                         onPress={() => {
-                          startTripCorridor(name);
+                          authorizeAndRun(`corridor:${name}`, 'trip_corridor', name, tripName ?? 'Trip corridor', () => startTripCorridor(name));
                         }}
                       >
                         <View style={{ flex: 1 }}>
@@ -609,6 +639,7 @@ export default function OfflineModal({
                   <Section label="US STATES — MAP + ROUTING PACKS" />
                   <Text style={s.hint}>
                     Pick a state, then download the map file and its routing graph separately. Maps render roads/trails; routing packs are for offline turn-by-turn once the local Valhalla engine is enabled.
+                    Free accounts include one state map and one routing pack.
                   </Text>
 
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
@@ -652,8 +683,13 @@ export default function OfflineModal({
                           mapBusy={mapBusy}
                           routeBusy={routeBusy}
                           onDownloadMissing={() => {
-                            if (mapState.status === 'idle' || mapState.status === 'error') startDownload(selectedState);
-                            if (routingState.status === 'idle' || routingState.status === 'error') startRoutingDownload(selectedState);
+                            const label = FILE_REGIONS[selectedState as keyof typeof FILE_REGIONS]?.name ?? selectedState.toUpperCase();
+                            if (mapState.status === 'idle' || mapState.status === 'error') {
+                              authorizeAndRun(`map:${selectedState}`, 'state_map', selectedState, `${label} map`, () => startDownload(selectedState));
+                            }
+                            if (routingState.status === 'idle' || routingState.status === 'error') {
+                              authorizeAndRun(`route:${selectedState}`, 'state_route', selectedState, `${label} routing`, () => startRoutingDownload(selectedState));
+                            }
                             if (mapState.status === 'paused') resumeDownload(selectedState);
                             if (routingState.status === 'paused') resumeRoutingDownload(selectedState);
                           }}
@@ -664,7 +700,7 @@ export default function OfflineModal({
                           totalBytes={getTotalBytes(selectedState)}
                           region={mapRegion as any}
                           code={selectedState.toUpperCase()}
-                          onStart={() => startDownload(selectedState)}
+                          onStart={() => authorizeAndRun(`map:${selectedState}`, 'state_map', selectedState, `${mapRegion.name} map`, () => startDownload(selectedState))}
                           onPause={() => pauseDownload(selectedState)}
                           onResume={() => resumeDownload(selectedState)}
                           onDelete={() => deleteDownload(selectedState)}
@@ -678,7 +714,7 @@ export default function OfflineModal({
                           totalBytes={getRoutingTotalBytes(selectedState)}
                           region={routingRegion as any}
                           code={selectedState.toUpperCase()}
-                          onStart={() => startRoutingDownload(selectedState)}
+                          onStart={() => authorizeAndRun(`route:${selectedState}`, 'state_route', selectedState, `${mapRegion.name} routing`, () => startRoutingDownload(selectedState))}
                           onPause={() => pauseRoutingDownload(selectedState)}
                           onResume={() => resumeRoutingDownload(selectedState)}
                           onDelete={() => deleteRoutingDownload(selectedState)}

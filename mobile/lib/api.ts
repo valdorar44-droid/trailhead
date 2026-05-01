@@ -197,6 +197,10 @@ export const api = {
     req<{ status: string; plan_type: string; plan_expires_at: number }>('/api/subscription/activate', {
       method: 'POST', body: JSON.stringify({ product_id, transaction_id }),
     }),
+  authorizeOfflineDownload: (asset_type: OfflineAssetType, region_id: string, label = '') =>
+    req<OfflineAuthorizeResult>('/api/offline/authorize', {
+      method: 'POST', body: JSON.stringify({ asset_type, region_id, label }),
+    }),
 };
 
 export interface TrailDNA {
@@ -359,6 +363,16 @@ export interface CampFullnessResult {
   credits_earned: number; new_balance: number;
   confirmations?: number; disputes?: number;
   status?: string; already_reported?: boolean; already_voted?: boolean;
+}
+
+export type OfflineAssetType = 'state_map' | 'state_route' | 'trip_corridor' | 'conus_map';
+export interface OfflineAuthorizeResult {
+  authorized: boolean;
+  charged: number;
+  free_used: boolean;
+  already_authorized?: boolean;
+  plan?: boolean;
+  credits: number;
 }
 export interface LandCheck {
   land_type: string;

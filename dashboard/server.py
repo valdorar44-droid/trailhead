@@ -36,6 +36,7 @@ from db.store import (
     report_camp_full, confirm_camp_full, dispute_camp_full, get_camp_fullness, get_fullness_nearby,
     log_event, cleanup_stale_data,
     get_camp_brief, set_camp_brief, has_active_plan, activate_plan, use_free_camp_search,
+    authorize_offline_download,
     save_push_token, get_push_token,
     create_plan_job, get_plan_job, update_plan_job,
     submit_field_report, get_field_reports, get_field_report_summary,
@@ -51,6 +52,13 @@ AI_COSTS = {
     "packing_list":     5,
     "audio_guide":      8,
     "nearby_audio":     3,
+}
+
+OFFLINE_DOWNLOAD_COSTS = {
+    "state_map": 15,
+    "state_route": 10,
+    "trip_corridor": 8,
+    "conus_map": 100,
 }
 
 # Soft daily caps for plan subscribers (unlimited plan, but abuse protection)
@@ -1740,6 +1748,37 @@ async def subscription_status(user: dict = Depends(_current_user)):
         "credits": user.get("credits", 0),
         "camp_searches_used": user.get("camp_searches_used", 0),
     }
+
+class OfflineAuthorizeRequest(BaseModel):
+    asset_type: str
+    region_id: str
+    label: str = ""
+
+@app.post("/api/offline/authorize")
+async def offline_authorize(body: OfflineAuthorizeRequest, user: dict = Depends(_current_user)):
+    asset_type = body.asset_type.strip().lower()
+    region_id = body.region_id.strip().lower()
+    if asset_type not in OFFLINE_DOWNLOAD_COSTS:
+        raise HTTPException(400, "Invalid offline asset type")
+    if asset_type == "conus_map":
+        region_id = "conus"
+    cost = OFFLINE_DOWNLOAD_COSTS[asset_type]
+    label = body.label.strip() or region_id.upper()
+    result = authorize_offline_download(
+        user,
+        asset_type,
+        region_id,
+        cost,
+        f"Offline download — {label} {asset_type.replace('_', ' ')}",
+    )
+    if not result.get("authorized"):
+        raise HTTPException(402, detail={
+            "code": "offline_download",
+            "message": f"{label} offline download costs {cost} credits or Explorer.",
+            "credits_needed": cost,
+            "earn_hint": True,
+        })
+    return result
 
 @app.get("/credits/success", response_class=HTMLResponse)
 async def credits_success(session_id: str = ""):

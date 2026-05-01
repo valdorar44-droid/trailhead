@@ -505,7 +505,10 @@ async function fetchNativeValhallaOffline(
   const requestJson = buildValhallaRequest(pairs, opts);
   const packPath = nativeFilePath(region.localPath);
   const diag = await diagnoseValhalla(packPath, requestJson).catch(e => `native-diag-error=${e instanceof Error ? e.message : String(e)}`);
-  const raw = await routeValhalla(packPath, requestJson);
+  const raw = await routeValhalla(packPath, requestJson).catch(e => {
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new Error(`${compactValhallaDiag(diag)}; ${msg}`);
+  });
   const data = JSON.parse(raw);
   if (!data.trip || data.trip.status !== 0) {
     const msg = data.error ?? data.message ?? data.trip?.status_message ?? 'valhalla offline error';

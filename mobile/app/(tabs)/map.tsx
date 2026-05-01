@@ -3087,11 +3087,12 @@ function MapScreen() {
             if (result.coords?.length) setLastRouteCoords(result.coords);
             if (!result.isProper && result.debug) {
               const longOffline = result.debug.includes('confidence limit');
-              setQuickToast(longOffline
+              const nativeValhallaDebug = result.debug.includes('native valhalla') || result.debug.includes('diag ');
+              setQuickToast(longOffline && !nativeValhallaDebug
                 ? 'Long offline route needs the Valhalla routing pack engine. Map tiles still work; try a shorter segment or route with signal.'
                 : `Offline route failed: ${result.debug}`
               );
-              setTimeout(() => setQuickToast(''), longOffline ? 11000 : 8000);
+              setTimeout(() => setQuickToast(''), nativeValhallaDebug ? 16000 : longOffline ? 11000 : 8000);
               setNavMode(false);
               if (!longOffline) {
                 setNavDest(null);
@@ -3217,10 +3218,10 @@ function MapScreen() {
           <Text style={[s.offlineCacheBannerText, { color: '#60a5fa' }]}>Using cached route</Text>
         </View>
       )}
-      {!!routeDebug && !isRouted && navMode && (
+      {!!routeDebug && !isRouted && (
         <View style={[s.offlineCacheBanner, { top: 136, backgroundColor: 'rgba(127,29,29,0.82)', borderColor: 'rgba(248,113,113,0.45)' }]}>
           <Ionicons name="bug-outline" size={12} color="#fecaca" />
-          <Text style={[s.offlineCacheBannerText, { color: '#fecaca' }]} numberOfLines={2}>Router: {routeDebug}</Text>
+          <Text style={[s.offlineCacheBannerText, { color: '#fecaca' }]} numberOfLines={4}>Router: {routeDebug}</Text>
         </View>
       )}
 

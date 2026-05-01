@@ -18,6 +18,7 @@ import { useRouter } from 'expo-router';
 import { useStore } from '@/lib/store';
 import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, Waypoint } from '@/lib/api';
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
+import { loadRouteGeometry, saveRouteGeometry } from '@/lib/offlineRoutes';
 import * as ImagePicker from 'expo-image-picker';
 import PaywallModal from '@/components/PaywallModal';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
@@ -2666,6 +2667,29 @@ function MapScreen() {
 
   function restoreCachedActiveRoute(target: 'web' | 'native') {
     if (!activeTrip?.trip_id) return;
+    loadRouteGeometry(activeTrip.trip_id).then(saved => {
+      if (!saved || !Array.isArray(saved.coords) || saved.coords.length < 2) return;
+      const steps = saved.steps ?? [];
+      const legs = saved.legs ?? [];
+      const totalDistance = saved.totalDistance ?? saved.total_distance ?? 0;
+      const totalDuration = saved.totalDuration ?? saved.total_duration ?? 0;
+
+      if (target === 'native') {
+        nativeMapRef.current?.restoreRoute(saved.coords, steps, legs, totalDistance, totalDuration);
+        setLastRouteCoords(saved.coords);
+        return;
+      }
+
+      webRef.current?.postMessage(JSON.stringify({
+        type: 'restore_route',
+        coords: saved.coords,
+        steps,
+        legs,
+        total_distance: totalDistance,
+        total_duration: totalDuration,
+      }));
+    }).catch(() => {});
+
     storage.get('trailhead_active_route').then(raw => {
       if (!raw) return;
       try {
@@ -2751,12 +2775,14 @@ function MapScreen() {
       }
       if (msg.type === 'route_persist' && Array.isArray(msg.coords)) {
         // Cache the freshly-routed geometry + steps so we can replay offline
-        storage.set('trailhead_active_route', JSON.stringify({
+        const payload = {
           coords: msg.coords, steps: msg.steps ?? [], legs: msg.legs ?? [],
           total_distance: msg.total_distance, total_duration: msg.total_duration,
           tripId: activeTrip?.trip_id ?? null,
           ts: Date.now(),
-        })).catch(() => {});
+        };
+        storage.set('trailhead_active_route', JSON.stringify(payload)).catch(() => {});
+        saveRouteGeometry(activeTrip?.trip_id, payload).catch(() => {});
       }
       if (msg.type === 'route_ready') {
         setIsRouted(msg.routed);
@@ -3362,6 +3388,13 @@ function MapScreen() {
               { text: 'Cancel', style: 'cancel' },
               { text: 'Exit Trip', style: 'destructive', onPress: async () => {
                 if (activeTrip) await saveOfflineTrip(activeTrip);
+                if (activeTrip?.trip_id) {
+                  await storage.get('trailhead_active_route').then(raw => {
+                    if (!raw) return;
+                    const cached = JSON.parse(raw);
+                    if (cached.tripId === activeTrip.trip_id) return saveRouteGeometry(activeTrip.trip_id, cached);
+                  }).catch(() => {});
+                }
                 setActiveTrip(null);
                 webRef.current?.postMessage(JSON.stringify({ type: 'nav_reset' }));
                 router.push('/(tabs)/');

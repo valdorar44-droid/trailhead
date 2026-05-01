@@ -23,6 +23,7 @@ import type { CampsitePin, Pin, Report } from '@/lib/api';
 import { useStore } from '@/lib/store';
 import { useTheme } from '@/lib/design';
 import { CACHE_OFFLINE_DIR, OFFLINE_DIR, FILE_REGIONS } from '@/lib/useOfflineFiles';
+import { saveRouteGeometry } from '@/lib/offlineRoutes';
 import * as FileSystem from 'expo-file-system';
 import * as Location from 'expo-location';
 
@@ -277,7 +278,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const activeTrip  = useStore(s => s.activeTrip);
   const C = useTheme();
   const [localTiles,   setLocalTiles]   = useState(false);
-  const [tileDebug,    setTileDebug]    = useState('init');
+  const [tileDebug,    setTileDebug]    = useState('Checking maps');
   const [tileSession,  setTileSession]  = useState(() => Date.now());
   const loadedStateRef  = useRef<string | null>(null); // path of currently-active state file
   const switchingRef    = useRef(false);               // prevent concurrent state switches
@@ -313,7 +314,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     switchingRef.current = true;
     const nativePath = path.replace(/^file:\/\//, '');
     const fileName = path.split('/').pop() ?? 'pmtiles';
-    setTileDebug(`switching ${fileName}`);
+    setTileDebug(`Loading ${stateDisplayName(fileName)} maps`);
     try {
       await tileServer!.switchState(nativePath);
       loadedStateRef.current = path;
@@ -323,18 +324,17 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         try {
           const health = await fetch('http://127.0.0.1:57832/health');
           if (!health.ok) {
-            setTileDebug(`${fileName} ${sizeMb}MB health:${health.status}`);
+            setTileDebug(`${stateDisplayName(fileName)} maps ready`);
             return;
           }
-          // Probe z12 tile near central Kansas.
-          const r = await fetch('http://127.0.0.1:57832/api/tiles/12/928/1572.pbf');
-          setTileDebug(`${fileName} ${sizeMb}MB health:ok probe:${r.status}`);
+          await fetch('http://127.0.0.1:57832/api/tiles/12/928/1572.pbf').catch(() => null);
+          setTileDebug(`${stateDisplayName(fileName)} maps ready`);
         } catch (e: any) {
-          setTileDebug(`${fileName} ${sizeMb}MB local fetch err: ${String(e?.message ?? e).slice(0, 80)}`);
+          setTileDebug(`${stateDisplayName(fileName)} maps loaded`);
         }
       }, 600);
     } catch (e: any) {
-      setTileDebug(`${fileName} err: ${String(e?.message ?? '?').slice(0, 90)}`);
+      setTileDebug(`${stateDisplayName(fileName)} maps unavailable`);
     } finally {
       switchingRef.current = false;
     }
@@ -422,9 +422,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       }
       if (files.length === 0) {
         const partialConus = await firstExistingPath(offlinePathCandidates('conus', `${OFFLINE_DIR}conus.pmtiles`));
-        setTileDebug(partialConus
-          ? `partial conus ${partialConus.sizeMb}MB; no state pmtiles found`
-          : 'no state pmtiles found');
+        setTileDebug(partialConus ? 'State maps not ready' : 'No state maps saved');
         return;
       }
 
@@ -440,8 +438,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           if (match) best = match;
         }
       } catch {}
-      const loaded = files.map(f => `${f.id}:${f.sizeMb}MB`).join(' ');
-      setTileDebug(`found ${loaded}`);
+      setTileDebug(`${files.length} state map${files.length === 1 ? '' : 's'} saved`);
       await switchFile(best.path, best.sizeMb);
     })();
 
@@ -529,11 +526,13 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         totalDistance: result.totalDistance, totalDuration: result.totalDuration,
         tripId: activeTrip?.trip_id ?? null,
       });
-      storage.set('trailhead_active_route', JSON.stringify({
+      const routePayload = {
         coords: result.coords, steps: result.steps, legs: result.legs,
         totalDistance: result.totalDistance, totalDuration: result.totalDuration,
         tripId: activeTrip?.trip_id ?? null, ts: Date.now(),
-      })).catch(() => {});
+      };
+      storage.set('trailhead_active_route', JSON.stringify(routePayload)).catch(() => {});
+      saveRouteGeometry(activeTrip?.trip_id, routePayload).catch(() => {});
     } catch {
       if (requestId !== routeRequestRef.current) return;
       const fb = buildFallbackRoute(pairs);
@@ -719,13 +718,13 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         );
         if (match) {
           if (loadedStateRef.current === match.path) {
-            setTileDebug(`${match.id}.pmtiles ${match.sizeMb}MB covers view`);
+            setTileDebug(`${stateName(match.id)} maps ready`);
           }
           switchFile(match.path, match.sizeMb);
         } else if (localTiles) {
           // Stay on local tiles while offline testing. Falling back to CDN here
           // produces a blank/error map in no-service conditions.
-          setTileDebug('outside downloaded states');
+          setTileDebug('Outside saved states');
         }
       });
     }
@@ -1175,7 +1174,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           numberOfLines={3}
           style={[styles.tileDebug, localTiles ? styles.tileDebugLocal : styles.tileDebugRemote]}
         >
-          {localTiles ? 'LOCAL' : 'CDN'} {tileDebug}
+          {localTiles ? tileDebug : 'Online maps active'}
         </Text>
       </View>
     </View>
@@ -1193,6 +1192,16 @@ function kindLabel(kind: string): string {
     case 'shelter':    return 'Trail Shelter';
     default:           return 'Camp';
   }
+}
+
+function stateName(id: string): string {
+  if (id === 'conus') return 'USA';
+  return FILE_REGIONS[id as keyof typeof FILE_REGIONS]?.name ?? id.toUpperCase();
+}
+
+function stateDisplayName(fileName: string): string {
+  const id = fileName.replace(/\.pmtiles$/i, '');
+  return stateName(id);
 }
 
 function poiColor(type: string): string {

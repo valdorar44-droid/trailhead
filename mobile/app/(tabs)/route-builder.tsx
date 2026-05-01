@@ -40,6 +40,22 @@ function haversineMi(a: { lat: number; lng: number }, b: { lat: number; lng: num
   return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
 }
 
+function midpoint(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
+  return { lat: (a.lat + b.lat) / 2, lng: (a.lng + b.lng) / 2 };
+}
+
+function pointSegmentDistanceMi(point: { lat: number; lng: number }, a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
+  const refLat = ((point.lat + a.lat + b.lat) / 3) * Math.PI / 180;
+  const px = point.lng * Math.cos(refLat), py = point.lat;
+  const ax = a.lng * Math.cos(refLat), ay = a.lat;
+  const bx = b.lng * Math.cos(refLat), by = b.lat;
+  const dx = bx - ax, dy = by - ay;
+  if (dx === 0 && dy === 0) return haversineMi(point, a);
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)));
+  const projected = { lat: ay + t * dy, lng: (ax + t * dx) / Math.cos(refLat) };
+  return haversineMi(point, projected);
+}
+
 function fmtMi(mi: number) {
   if (!Number.isFinite(mi)) return '-';
   return mi < 10 ? `${mi.toFixed(1)} mi` : `${Math.round(mi)} mi`;
@@ -111,6 +127,19 @@ export default function RouteBuilderScreen() {
   const orderedStops = [...stops].sort((a, b) => a.day - b.day || stops.indexOf(a) - stops.indexOf(b));
   const mapWaypoints = orderedStops.map(st => ({ lat: st.lat, lng: st.lng, name: st.name, day: st.day, type: st.type }));
   const anchor = [...dayStops].reverse()[0] ?? [...stops].reverse()[0] ?? (userLoc ? { lat: userLoc.lat, lng: userLoc.lng, name: 'Current location' } : null);
+  const previousDayEnd = [...orderedStops].reverse().find(st => st.day < activeDay) ?? null;
+  const activeDayDestination = [...dayStops].reverse().find(st => st.type !== 'fuel' && st.type !== 'waypoint') ?? [...dayStops].reverse()[0] ?? null;
+  const legContext = previousDayEnd && activeDayDestination
+    ? {
+        from: previousDayEnd,
+        to: activeDayDestination,
+        miles: haversineMi(previousDayEnd, activeDayDestination),
+        center: midpoint(previousDayEnd, activeDayDestination),
+      }
+    : null;
+  const discoverContextLabel = legContext && (discoverTab === 'gas' || discoverTab === 'poi')
+    ? `Day ${Math.max(1, activeDay - 1)} to Day ${activeDay} · ${fmtMi(legContext.miles)}`
+    : anchor ? anchor.name.split(',')[0] : 'add a stop first';
 
   const totals = useMemo(() => {
     let miles = 0;
@@ -159,19 +188,35 @@ export default function RouteBuilderScreen() {
   }
 
   async function discover() {
-    if (!anchor) {
+    const useLeg = !!legContext && (discoverTab === 'gas' || discoverTab === 'poi');
+    const target = useLeg ? legContext!.center : anchor;
+    if (!target) {
       Alert.alert('Add a stop first', 'Start with a city, address, or map point, then discover camps, fuel, and POIs nearby.');
       return;
     }
     setDiscoverLoading(true);
-    fly(anchor.lat, anchor.lng, 9);
+    fly(target.lat, target.lng, useLeg ? 8 : 9);
     try {
       if (discoverTab === 'camps') {
-        setCamps(await api.getNearbyCamps(anchor.lat, anchor.lng, 65, []));
+        setCamps(await api.getNearbyCamps(target.lat, target.lng, 65, []));
       } else if (discoverTab === 'gas') {
-        setGas(await api.getGas(anchor.lat, anchor.lng, 35));
+        const radius = useLeg ? Math.min(90, Math.max(35, legContext!.miles / 2 + 12)) : 35;
+        const stations = await api.getGas(target.lat, target.lng, radius);
+        setGas(useLeg
+          ? stations
+              .map(st => ({ ...st, route_distance_mi: pointSegmentDistanceMi(st, legContext!.from, legContext!.to) }))
+              .filter(st => (st.route_distance_mi ?? 999) <= Math.max(18, Math.min(45, legContext!.miles * 0.45)))
+              .sort((a, b) => (a.route_distance_mi ?? 999) - (b.route_distance_mi ?? 999))
+          : stations);
       } else {
-        setPois(await api.getOsmPois(anchor.lat, anchor.lng, 40, 'water,trailhead,viewpoint,peak,hot_spring'));
+        const radius = useLeg ? Math.min(85, Math.max(35, legContext!.miles / 2 + 16)) : 40;
+        const found = await api.getOsmPois(target.lat, target.lng, radius, 'water,trailhead,viewpoint,peak,hot_spring');
+        setPois(useLeg
+          ? found
+              .map(poi => ({ ...poi, route_distance_mi: pointSegmentDistanceMi(poi, legContext!.from, legContext!.to) } as OsmPoi & { route_distance_mi: number }))
+              .filter(poi => poi.route_distance_mi <= Math.max(20, Math.min(50, legContext!.miles * 0.5)))
+              .sort((a, b) => a.route_distance_mi - b.route_distance_mi)
+          : found);
       }
     } catch {
       Alert.alert('Search failed', 'Could not load nearby stops right now.');
@@ -478,7 +523,7 @@ export default function RouteBuilderScreen() {
 
         <View style={s.sectionHeader}>
           <Text style={s.sectionTitle}>DISCOVER NEAR ROUTE</Text>
-          <Text style={s.sectionMeta}>{anchor ? anchor.name.split(',')[0] : 'add a stop first'}</Text>
+          <Text style={s.sectionMeta}>{discoverContextLabel}</Text>
         </View>
         <View style={s.discoverTabs}>
           {(['camps', 'gas', 'poi'] as DiscoveryTab[]).map(tab => (
@@ -512,7 +557,10 @@ export default function RouteBuilderScreen() {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={s.candidateName} numberOfLines={1}>{station.name}</Text>
-              <Text style={s.candidateMeta} numberOfLines={1}>{station.address || station.fuel_types || 'Fuel stop'}</Text>
+              <Text style={s.candidateMeta} numberOfLines={1}>
+                {station.route_distance_mi != null ? `${fmtMi(station.route_distance_mi)} off leg · ` : ''}
+                {station.address || station.fuel_types || 'Fuel stop'}
+              </Text>
             </View>
           </TouchableOpacity>
         ))}
@@ -523,7 +571,10 @@ export default function RouteBuilderScreen() {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={s.candidateName} numberOfLines={1}>{poi.name || poi.type}</Text>
-              <Text style={s.candidateMeta}>{poi.type.replace(/_/g, ' ')}</Text>
+              <Text style={s.candidateMeta}>
+                {(poi as any).route_distance_mi != null ? `${fmtMi((poi as any).route_distance_mi)} off leg · ` : ''}
+                {poi.type.replace(/_/g, ' ')}
+              </Text>
             </View>
           </TouchableOpacity>
         ))}

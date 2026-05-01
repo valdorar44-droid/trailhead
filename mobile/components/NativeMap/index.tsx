@@ -739,6 +739,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     onCampTap(raw);
   }, [onCampTap]);
 
+  const mapStatusLabel = localTiles ? compactMapStatus(tileDebug) : 'Online maps';
+
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <View style={styles.mapRoot}>
@@ -1170,12 +1172,16 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       ))}
       </MapLibreGL.MapView>
       <View pointerEvents="none" style={styles.tileDebugWrap}>
-        <Text
-          numberOfLines={3}
-          style={[styles.tileDebug, localTiles ? styles.tileDebugLocal : styles.tileDebugRemote]}
-        >
-          {localTiles ? tileDebug : 'Online maps active'}
-        </Text>
+        <View style={[styles.tileDebug, localTiles ? styles.tileDebugLocal : styles.tileDebugRemote]}>
+          <Ionicons
+            name={localTiles ? 'cloud-done-outline' : 'cloud-outline'}
+            size={11}
+            color={localTiles ? '#86efac' : '#bfdbfe'}
+          />
+          <Text numberOfLines={1} style={[styles.tileDebugText, localTiles ? styles.tileDebugTextLocal : styles.tileDebugTextRemote]}>
+            {mapStatusLabel}
+          </Text>
+        </View>
       </View>
     </View>
   );
@@ -1202,6 +1208,17 @@ function stateName(id: string): string {
 function stateDisplayName(fileName: string): string {
   const id = fileName.replace(/\.pmtiles$/i, '');
   return stateName(id);
+}
+
+function compactMapStatus(status: string): string {
+  if (/outside saved/i.test(status)) return 'Outside saved';
+  if (/no state maps/i.test(status)) return 'No saved maps';
+  if (/not ready/i.test(status)) return 'Maps pending';
+  const ready = status.match(/^(.+?) maps (ready|loaded|unavailable)$/i);
+  if (ready?.[1]) return ready[1];
+  const saved = status.match(/^(\d+) state maps? saved$/i);
+  if (saved?.[1]) return `${saved[1]} saved`;
+  return 'Saved maps';
 }
 
 function poiColor(type: string): string {
@@ -1324,24 +1341,35 @@ const styles = StyleSheet.create({
   },
   tileDebugWrap: {
     position: 'absolute',
-    bottom: 118,
-    left: 8,
-    right: 8,
+    bottom: 112,
+    left: 10,
     zIndex: 999,
+    alignItems: 'flex-start',
   },
   tileDebug: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: '800',
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    maxWidth: 132,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+    borderRadius: 999,
     overflow: 'hidden',
+    borderWidth: 1,
   },
   tileDebugLocal: {
-    backgroundColor: 'rgba(20,83,45,0.88)',
+    backgroundColor: 'rgba(20,83,45,0.70)',
+    borderColor: 'rgba(134,239,172,0.32)',
   },
   tileDebugRemote: {
-    backgroundColor: 'rgba(127,29,29,0.88)',
+    backgroundColor: 'rgba(30,41,59,0.62)',
+    borderColor: 'rgba(147,197,253,0.28)',
   },
+  tileDebugText: {
+    fontSize: 9,
+    fontWeight: '800',
+    maxWidth: 102,
+  },
+  tileDebugTextLocal: { color: '#dcfce7' },
+  tileDebugTextRemote: { color: '#dbeafe' },
 });

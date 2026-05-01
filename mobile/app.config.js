@@ -81,6 +81,14 @@ module.exports = {
       ],
       'expo-asset',
       'expo-font',
+      [
+        'expo-build-properties',
+        {
+          ios: {
+            deploymentTarget: '16.4',
+          },
+        },
+      ],
       '@maplibre/maplibre-react-native',
       './modules/tile-server/app.plugin.js',
       './plugins/withKotlinVersion',

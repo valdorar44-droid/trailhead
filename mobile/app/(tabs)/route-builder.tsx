@@ -8,7 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import NativeMap, { NativeMapHandle } from '@/components/NativeMap';
 import PaywallModal from '@/components/PaywallModal';
-import { api, CampsiteDetail, CampsitePin, GasStation, OsmPoi, PaywallError, TripResult, Waypoint } from '@/lib/api';
+import { api, CampFullness, CampsiteDetail, CampsitePin, GasStation, OsmPoi, PaywallError, TripResult, Waypoint, WeatherForecast } from '@/lib/api';
 import { saveOfflineTrip } from '@/lib/offlineTrips';
 import { useStore } from '@/lib/store';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
@@ -102,6 +102,8 @@ export default function RouteBuilderScreen() {
   const [pois, setPois] = useState<OsmPoi[]>([]);
   const [selectedCamp, setSelectedCamp] = useState<CampsitePin | null>(null);
   const [campDetail, setCampDetail] = useState<CampsiteDetail | null>(null);
+  const [campWeather, setCampWeather] = useState<WeatherForecast | null>(null);
+  const [campFullness, setCampFullness] = useState<CampFullness | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [paywallVisible, setPaywallVisible] = useState(false);
 
@@ -245,7 +247,11 @@ export default function RouteBuilderScreen() {
   async function openCampDetail(camp: CampsitePin) {
     setSelectedCamp(camp);
     setCampDetail(null);
+    setCampWeather(null);
+    setCampFullness(null);
     fly(camp.lat, camp.lng, 13);
+    api.getWeather(camp.lat, camp.lng, 3).then(setCampWeather).catch(() => {});
+    if (camp.id) api.getCampFullness(camp.id).then(setCampFullness).catch(() => {});
   }
 
   async function loadFullCampDetail() {
@@ -573,6 +579,29 @@ export default function RouteBuilderScreen() {
             <Text style={s.sheetDesc} numberOfLines={campDetail ? undefined : 3}>
               {campDetail?.description || selectedCamp?.description || 'Camp profile preview. Full details show amenities, photos, activities, coordinates, and access notes.'}
             </Text>
+            {campWeather?.daily?.time?.length ? (
+              <View style={s.weatherStrip}>
+                {[0, 1, 2].map(i => (
+                  <View key={i} style={s.weatherDay}>
+                    <Ionicons name={weatherIcon(campWeather.daily.weathercode?.[i] ?? 1)} size={18} color={C.orange} />
+                    <Text style={s.weatherTemp}>
+                      {Math.round(campWeather.daily.temperature_2m_max?.[i] ?? 0)}°/{Math.round(campWeather.daily.temperature_2m_min?.[i] ?? 0)}°
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+            {campFullness?.status === 'full' ? (
+              <View style={s.fullBanner}>
+                <Ionicons name="warning" size={13} color={C.red} />
+                <Text style={s.fullBannerText}>REPORTED FULL · {campFullness.confirmations} confirmed</Text>
+              </View>
+            ) : (
+              <View style={s.openBanner}>
+                <Ionicons name="checkmark-circle-outline" size={13} color={C.green} />
+                <Text style={s.openBannerText}>No recent full reports</Text>
+              </View>
+            )}
             {campDetail && (
               <View style={s.detailGrid}>
                 {(campDetail.amenities ?? []).slice(0, 6).map(item => <Text key={item} style={s.detailPill}>{item}</Text>)}
@@ -670,4 +699,21 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   addCampText: { color: '#fff', fontSize: 11, fontFamily: mono, fontWeight: '900' },
   fullDetailBtn: { flex: 1, borderWidth: 1, borderColor: C.orange, borderRadius: 12, alignItems: 'center', justifyContent: 'center', paddingVertical: 12 },
   fullDetailText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900' },
+  weatherStrip: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  weatherDay: { flex: 1, alignItems: 'center', borderWidth: 1, borderColor: C.border, borderRadius: 10, paddingVertical: 8, backgroundColor: C.s2 },
+  weatherTemp: { color: C.text2, fontSize: 11, fontFamily: mono, marginTop: 3 },
+  fullBanner: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 12, borderWidth: 1, borderColor: C.red + '66', backgroundColor: C.red + '14', borderRadius: 10, padding: 9 },
+  fullBannerText: { color: C.red, fontSize: 10, fontFamily: mono, fontWeight: '800' },
+  openBanner: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 12, borderWidth: 1, borderColor: C.green + '55', backgroundColor: C.green + '12', borderRadius: 10, padding: 9 },
+  openBannerText: { color: C.green, fontSize: 10, fontFamily: mono, fontWeight: '800' },
 });
+
+function weatherIcon(code: number): keyof typeof Ionicons.glyphMap {
+  if ([0, 1].includes(code)) return 'sunny-outline';
+  if ([2, 3].includes(code)) return 'cloud-outline';
+  if ([45, 48].includes(code)) return 'reorder-three-outline';
+  if ([51, 53, 55, 61, 63, 65, 80, 81, 82].includes(code)) return 'rainy-outline';
+  if ([71, 73, 75, 85, 86].includes(code)) return 'snow-outline';
+  if ([95, 96, 99].includes(code)) return 'thunderstorm-outline';
+  return 'cloud-outline';
+}

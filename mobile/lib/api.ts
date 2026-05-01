@@ -17,6 +17,17 @@ export class PaywallError extends Error {
   }
 }
 
+export class ApiError extends Error {
+  status: number;
+  detail: unknown;
+  constructor(message: string, status: number, detail?: unknown) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
 async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const token = await getToken();
   const headers: Record<string, string> = {
@@ -33,7 +44,7 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
       throw new PaywallError(detail.message ?? 'Feature requires credits or a plan.', detail.code ?? 'paywall', detail.credits_needed);
     }
     const msg = typeof detail === 'string' ? detail : (detail?.message ?? 'Request failed');
-    throw new Error(msg);
+    throw new ApiError(msg, res.status, detail);
   }
   return res.json();
 }

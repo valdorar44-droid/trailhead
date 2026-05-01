@@ -11,7 +11,7 @@ import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import * as Haptics from 'expo-haptics';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
-import { api, PaywallError, TripResult, TrailDNA } from '@/lib/api';
+import { api, ApiError, PaywallError, TripResult, TrailDNA } from '@/lib/api';
 import PaywallModal from '@/components/PaywallModal';
 import { useStore } from '@/lib/store';
 import { useTheme, useTag, mono, ColorPalette } from '@/lib/design';
@@ -91,6 +91,30 @@ export default function PlanScreen() {
   const [paywallVisible, setPaywallVisible] = useState(false);
   const [offlineToast, setOfflineToast] = useState(false);
   const offlineToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  async function openHistoryTrip(tripId: string) {
+    try {
+      const cached = await loadOfflineTrip(tripId);
+      if (cached) {
+        setActiveTrip(cached, true);
+        setMessages([{ role: 'ai', trip: cached }]);
+        setPlanPhase('active');
+        return;
+      }
+
+      const trip = await api.getTrip(tripId);
+      setActiveTrip(trip);
+      setMessages([{ role: 'ai', trip }]);
+      setPlanPhase('active');
+      saveOfflineTrip(trip).catch(() => {});
+    } catch (e: any) {
+      if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+        Alert.alert('Trip unavailable', 'This trip is not available for the current signed-in account. Sign in again or open an offline-saved copy.');
+        return;
+      }
+      Alert.alert('Trip unavailable', e?.message ?? 'Could not open this trip.');
+    }
+  }
   const [weatherToast, setWeatherToast] = useState('');
 
   const scrollToEnd = useCallback(() => {
@@ -491,21 +515,7 @@ export default function PlanScreen() {
                     <TouchableOpacity
                       key={t.trip_id}
                       style={s.historyCard}
-                      onPress={() => {
-                        api.getTrip(t.trip_id).then(trip => {
-                          setActiveTrip(trip);
-                          setMessages([{ role: 'ai', trip }]);
-                          setPlanPhase('active');
-                        }).catch(async () => {
-                          // Network failed — fall back to offline cache
-                          const cached = await loadOfflineTrip(t.trip_id);
-                          if (cached) {
-                            setActiveTrip(cached, true);
-                            setMessages([{ role: 'ai', trip: cached }]);
-                            setPlanPhase('active');
-                          }
-                        });
-                      }}
+                      onPress={() => { openHistoryTrip(t.trip_id); }}
                     >
                       <Text style={s.historyCardName} numberOfLines={2}>{t.trip_name}</Text>
                       <Text style={s.historyCardStates}>{(t.states ?? []).join(' · ')}</Text>
@@ -600,14 +610,7 @@ export default function PlanScreen() {
             <TouchableOpacity
               key={t.trip_id}
               style={{ backgroundColor: C.s2, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: C.border, flexDirection: 'row', alignItems: 'center', gap: 5 }}
-              onPress={() => {
-                api.getTrip(t.trip_id).then(trip => {
-                  setActiveTrip(trip); setMessages([{ role: 'ai', trip }]); setPlanPhase('active');
-                }).catch(async () => {
-                  const cached = await loadOfflineTrip(t.trip_id);
-                  if (cached) { setActiveTrip(cached, true); setMessages([{ role: 'ai', trip: cached }]); setPlanPhase('active'); }
-                });
-              }}
+              onPress={() => { openHistoryTrip(t.trip_id); }}
             >
               <Ionicons name="map-outline" size={11} color={C.orange} />
               <Text style={{ color: C.text2, fontSize: 11, fontFamily: mono, maxWidth: 120 }} numberOfLines={1}>{t.trip_name}</Text>

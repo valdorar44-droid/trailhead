@@ -12,12 +12,12 @@ import { storage } from '@/lib/storage';
 import * as Updates from 'expo-updates';
 import Constants from 'expo-constants';
 import * as Application from 'expo-application';
-import { api } from '@/lib/api';
-import { useStore, RigProfile } from '@/lib/store';
+import { api, ApiError } from '@/lib/api';
+import { useStore, RigProfile, TripHistoryItem } from '@/lib/store';
 import PaywallModal from '@/components/PaywallModal';
 import { freeTrialLabel, useSubscription } from '@/lib/useSubscription';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
-import { getOfflineTripIndex, loadOfflineTrip } from '@/lib/offlineTrips';
+import { getOfflineTripIndex, loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 
 type ChecklistItem = { id: string; label: string; done: boolean };
 type ChecklistSection = { title: string; emoji: string; items: ChecklistItem[] };
@@ -197,7 +197,42 @@ export default function ProfileScreen() {
       const res = await api.getCredits();
       setCreditHistory(res.history);
       setShowHistory(true);
-    } catch (e: any) { Alert.alert('Error', e.message); }
+    } catch (e: any) {
+      if (e instanceof ApiError && e.status === 401) {
+        Alert.alert('Sign in again', 'Your session expired. Sign out, then sign back in to refresh credits and purchases.');
+        return;
+      }
+      Alert.alert('Error', e.message);
+    }
+  }
+
+  async function openTripFromProfile(t: TripHistoryItem) {
+    try {
+      const cached = await loadOfflineTrip(t.trip_id);
+      if (cached) {
+        setActiveTrip(cached, true);
+        router.push('/(tabs)/');
+        return;
+      }
+
+      const trip = await api.getTrip(t.trip_id);
+      setActiveTrip(trip);
+      saveOfflineTrip(trip)
+        .then(() => getOfflineTripIndex())
+        .then(ids => setOfflineCachedIds(new Set(ids)))
+        .catch(() => {});
+      router.push('/(tabs)/');
+    } catch (e: any) {
+      if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+        Alert.alert('Trip unavailable', 'This trip is not available for the current signed-in account. Sign in again or open an offline-saved copy.');
+        return;
+      }
+      if (e instanceof ApiError && e.status === 404) {
+        Alert.alert('Trip unavailable', 'This saved trip was not found on the server and is not saved offline on this device.');
+        return;
+      }
+      Alert.alert('Trip unavailable', e?.message ?? 'Could not open this trip.');
+    }
   }
 
   async function submitBug() {
@@ -454,21 +489,7 @@ export default function ProfileScreen() {
                 <TouchableOpacity
                   key={t.trip_id}
                   style={s.tripRow}
-                  onPress={() => {
-                    if (isCached) {
-                      // Load from offline cache first
-                      loadOfflineTrip(t.trip_id).then(trip => {
-                        if (trip) setActiveTrip(trip, true);
-                      }).catch(() => {});
-                    } else {
-                      // Fetch from server, fall back to offline cache on failure
-                      api.getTrip(t.trip_id).then(trip => setActiveTrip(trip)).catch(async () => {
-                        const cached = await loadOfflineTrip(t.trip_id);
-                        if (cached) setActiveTrip(cached, true);
-                      });
-                    }
-                    router.push('/(tabs)/index');
-                  }}
+                  onPress={() => { openTripFromProfile(t); }}
                 >
                   <View style={{ flex: 1 }}>
                     <Text style={s.tripRowName} numberOfLines={1}>{t.trip_name}</Text>
@@ -495,7 +516,7 @@ export default function ProfileScreen() {
           contentContainerStyle={s.quickActionsContent}
         >
           {[
-            { icon: 'compass', label: 'PLAN TRIP',   color: C.orange, onPress: () => router.push('/(tabs)/index') },
+            { icon: 'compass', label: 'PLAN TRIP',   color: C.orange, onPress: () => { setActiveTrip(null); router.push('/(tabs)/'); } },
             { icon: 'people',  label: 'REFER',       color: C.orange, onPress: shareReferral },
             { icon: 'checkmark-circle', label: 'TRIP PREP', color: C.green,  onPress: () => setShowChecklist(true) },
             { icon: 'cloud-upload-outline', label: 'IMPORT GPX', color: C.text3, onPress: importGpx },

@@ -1,0 +1,7 @@
+{
+  "platforms": ["ios"],
+  "ios": {
+    "podspecPath": "ValhallaRouting.podspec",
+    "modules": ["ValhallaRoutingModule"]
+  }
+}

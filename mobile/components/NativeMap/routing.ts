@@ -12,7 +12,7 @@
 import * as FileSystem from 'expo-file-system';
 import type { RouteStep } from './types';
 import { fetchJSOfflineRoute, ENABLE_JS_OFFLINE_ROUTER, getLastOfflineRouterDebug } from './offlineRouter';
-import { routeValhalla } from 'expo-tile-server';
+import { routeValhalla } from 'expo-valhalla-routing';
 import { ROUTING_REGIONS } from '../../lib/useOfflineFiles';
 
 export interface RouteResult {
@@ -199,6 +199,7 @@ export async function fetchRoute(
   routeOpts:   RouteOpts,
 ): Promise<RouteResult> {
   console.log('[fetchRoute] pairs:', pairs);
+  const nativeOfflineErrors: string[] = [];
 
   // A. Keyed cache first — exact/near-exact same route, no network/local graph work.
   const cached = await loadKeyedRoute(pairs);
@@ -236,6 +237,7 @@ export async function fetchRoute(
       if (offline) return offline;
     } catch (e) {
       console.warn('[fetchRoute] native offline Valhalla error', e);
+      nativeOfflineErrors.push(e instanceof Error ? e.message : String(e));
     }
 
     console.log('[fetchRoute] offline — trying JS PMTiles router');
@@ -245,7 +247,8 @@ export async function fetchRoute(
     } catch (e) {
       console.warn('[fetchRoute] JS offline router error', e);
       const msg = e instanceof Error ? e.message : String(e);
-      return buildFallbackRoute(pairs, `offline router exception: ${msg}`);
+      const nativeDebug = nativeOfflineErrors.length ? `native valhalla: ${nativeOfflineErrors.join(' | ')}; ` : '';
+      return buildFallbackRoute(pairs, `${nativeDebug}offline router exception: ${msg}`);
     }
     const last = await loadLastRoute(pairs);
     if (last) {
@@ -254,8 +257,9 @@ export async function fetchRoute(
     }
     console.log('[RouteCache] miss — no cached route found');
     const debug = getLastOfflineRouterDebug();
+    const nativeDebug = nativeOfflineErrors.length ? `native valhalla: ${nativeOfflineErrors.join(' | ')}; ` : '';
     console.log('[fetchRoute] offline router failed — no drawable route', debug);
-    return buildNoRoute(pairs, debug);
+    return buildNoRoute(pairs, `${nativeDebug}${debug}`);
   }
 
   // C. Online: for overland-style routes, prefer our Valhalla service. Racing
@@ -290,6 +294,7 @@ export async function fetchRoute(
     if (offline) return offline;
   } catch (e) {
     console.warn('[fetchRoute] native offline Valhalla error', e);
+    nativeOfflineErrors.push(e instanceof Error ? e.message : String(e));
   }
 
   if (ENABLE_JS_OFFLINE_ROUTER && pairs.length >= 2) {
@@ -311,8 +316,9 @@ export async function fetchRoute(
   // F. True last resort. Offline should not draw a fake route across fields.
   console.log('[RouteCache] miss — no cached route found');
   const debug = getLastOfflineRouterDebug();
+  const nativeDebug = nativeOfflineErrors.length ? `native valhalla: ${nativeOfflineErrors.join(' | ')}; ` : '';
   console.log('[fetchRoute] all engines failed — no drawable route', debug);
-  return buildNoRoute(pairs, debug);
+  return buildNoRoute(pairs, `${nativeDebug}${debug}`);
 }
 
 // ── Engine 1: Mapbox Directions ───────────────────────────────────────────────

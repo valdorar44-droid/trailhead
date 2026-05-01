@@ -39,6 +39,7 @@
     "expo-status-bar": "~2.0.0",
     "expo-task-manager": "~12.0.0",
     "expo-tile-server": "file:./modules/tile-server",
+    "expo-valhalla-routing": "file:./modules/valhalla-routing",
     "expo-updates": "~0.27.5",
     "pbf": "^4.0.1",
     "react": "18.3.1",

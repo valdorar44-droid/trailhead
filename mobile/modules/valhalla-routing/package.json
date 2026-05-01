@@ -1,0 +1,14 @@
+{
+  "name": "expo-valhalla-routing",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "expo": {
+    "autolinking": {
+      "nativeModulesDir": "."
+    }
+  },
+  "peerDependencies": {
+    "expo": "*",
+    "expo-modules-core": "*"
+  }
+}

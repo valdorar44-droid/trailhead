@@ -475,6 +475,10 @@ function buildValhallaRequest(pairs: string[], opts: RouteOpts): string {
   });
 }
 
+function nativeFilePath(uri: string): string {
+  return uri.startsWith('file://') ? decodeURIComponent(uri.slice('file://'.length)) : uri;
+}
+
 async function fetchNativeValhallaOffline(
   pairs: string[],
   opts: RouteOpts,
@@ -492,7 +496,7 @@ async function fetchNativeValhallaOffline(
   }
 
   const requestJson = buildValhallaRequest(pairs, opts);
-  const raw = await routeValhalla(region.localPath, requestJson);
+  const raw = await routeValhalla(nativeFilePath(region.localPath), requestJson);
   const data = JSON.parse(raw);
   if (!data.trip || data.trip.status !== 0) {
     const msg = data.error ?? data.message ?? data.trip?.status_message ?? 'valhalla offline error';

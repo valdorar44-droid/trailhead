@@ -119,6 +119,13 @@ def _dedupe(items: list[dict]) -> list[dict]:
     return out
 
 
+async def _with_timeout(coro, timeout_s: float, fallback):
+    try:
+        return await asyncio.wait_for(coro, timeout=timeout_s)
+    except Exception:
+        return fallback
+
+
 def annotate_waypoint_verification(
     waypoints: list[dict],
     campsites: list[dict],
@@ -280,9 +287,9 @@ async def enrich_trip_along_route(waypoints: list[dict]) -> dict:
         return {"campsites": [], "gas_stations": [], "route_pois": []}
 
     camps, gas, pois = await asyncio.gather(
-        _route_camps(waypoints, route),
-        _route_gas(waypoints, route),
-        _route_pois(route),
+        _with_timeout(_route_camps(waypoints, route), 24, []),
+        _with_timeout(_route_gas(waypoints, route), 16, []),
+        _with_timeout(_route_pois(route), 14, []),
     )
     return {
         "campsites": camps,

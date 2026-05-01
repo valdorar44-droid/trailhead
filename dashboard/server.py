@@ -462,6 +462,7 @@ async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, c
     import re as _re
     update_plan_job(job_id, "running")
     try:
+        update_plan_job(job_id, "ai")
         if body.session_id:
             msgs = get_conversation(_ai_conversation_key(body.session_id, user))
             plan_data = plan_trip_from_conversation(msgs) if msgs else plan_trip(body.request or "")
@@ -492,9 +493,11 @@ async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, c
              "platform": "mobile"},
         )
 
+        update_plan_job(job_id, "geocoding")
         geocoded = await _geocode_waypoints(plan_data.get("waypoints", []))
         plan_data["waypoints"] = geocoded
 
+        update_plan_job(job_id, "enriching")
         enrichment = await enrich_trip_along_route(geocoded)
         plan_data["waypoints"] = enrichment.get("waypoints", geocoded)
         result = {"trip_id": trip_id, "plan": plan_data,

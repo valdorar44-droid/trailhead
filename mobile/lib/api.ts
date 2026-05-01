@@ -63,13 +63,13 @@ export const api = {
   plan: (request: string, sessionId = '') =>
     req<{ job_id: string; status: string }>('/api/plan', { method: 'POST', body: JSON.stringify({ request, session_id: sessionId }) }),
 
-  // Submit plan job and poll until done (max 3 min). Safe if app backgrounds —
+  // Submit plan job and poll until done (max 6 min). Safe if app backgrounds —
   // server completes the job and sends a push notification as a fallback.
   planFromSession: async (sessionId: string): Promise<TripResult> => {
     const { job_id } = await req<{ job_id: string; status: string }>(
       '/api/plan', { method: 'POST', body: JSON.stringify({ request: '', session_id: sessionId }) }
     );
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 120; i++) {
       await new Promise(r => setTimeout(r, 3000));
       const job = await req<{ job_id: string; status: string; result: TripResult | null; error: string | null }>(
         `/api/plan/job/${job_id}`

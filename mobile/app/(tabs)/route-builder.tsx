@@ -8,7 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import NativeMap, { NativeMapHandle } from '@/components/NativeMap';
 import PaywallModal from '@/components/PaywallModal';
-import { api, CampsiteDetail, CampsitePin, GasStation, OsmPoi, TripResult, Waypoint } from '@/lib/api';
+import { api, CampsiteDetail, CampsitePin, GasStation, OsmPoi, PaywallError, TripResult, Waypoint } from '@/lib/api';
 import { saveOfflineTrip } from '@/lib/offlineTrips';
 import { useStore } from '@/lib/store';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
@@ -250,15 +250,15 @@ export default function RouteBuilderScreen() {
 
   async function loadFullCampDetail() {
     if (!selectedCamp) return;
-    if (!hasPlan) {
-      setPaywallVisible(true);
-      return;
-    }
     setDetailLoading(true);
     try {
       setCampDetail(await api.getCampsiteDetail(selectedCamp.id));
-    } catch {
-      Alert.alert('Camp details unavailable', 'This camp does not have a full profile yet.');
+    } catch (e: any) {
+      if (e instanceof PaywallError) {
+        setPaywallVisible(true);
+      } else {
+        Alert.alert('Camp details unavailable', 'This camp does not have a full profile yet.');
+      }
     } finally {
       setDetailLoading(false);
     }
@@ -584,14 +584,14 @@ export default function RouteBuilderScreen() {
                 <Text style={s.addCampText}>USE AS CAMP</Text>
               </TouchableOpacity>
               <TouchableOpacity style={s.fullDetailBtn} onPress={loadFullCampDetail} disabled={detailLoading}>
-                {detailLoading ? <ActivityIndicator size="small" color={C.orange} /> : <Text style={s.fullDetailText}>{hasPlan ? 'FULL DETAILS' : 'FULL DETAILS WITH PLAN'}</Text>}
+                {detailLoading ? <ActivityIndicator size="small" color={C.orange} /> : <Text style={s.fullDetailText}>FULL DETAILS</Text>}
               </TouchableOpacity>
             </View>
           </View>
         </TouchableOpacity>
       </Modal>
 
-      <PaywallModal visible={paywallVisible} code="camp_detail" message="Full campsite profiles are included with Explorer. You can still add this camp to your route from the preview." onClose={() => setPaywallVisible(false)} />
+      <PaywallModal visible={paywallVisible} code="camp_detail" message="Use credits or Explorer to open full campsite profiles. You can still add this camp to your route from the free preview." onClose={() => setPaywallVisible(false)} />
     </SafeAreaView>
   );
 }

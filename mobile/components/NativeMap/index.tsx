@@ -35,6 +35,7 @@ try { tileServer = require('expo-tile-server'); } catch (e: any) { tileServerReq
 const BASE_DL_URL   = 'https://tiles.gettrailhead.app/api/download/base.pmtiles';
 const BASE_PATH     = `${OFFLINE_DIR}base.pmtiles`;
 const BASE_MIN_MB   = 10; // skip base file if under 10 MB (truncated)
+const CONUS_MIN_MB  = 1024; // a partial conus.pmtiles must not hide state packs
 const LEGACY_OFFLINE_DIR = `${FileSystem.documentDirectory}offline/`;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -264,7 +265,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   // Skips files under 25% of estimated size (obviously truncated downloads).
   const getDownloadedFiles = useCallback(async () => {
     const conusPath = await firstExistingPath(offlinePathCandidates('conus', `${OFFLINE_DIR}conus.pmtiles`));
-    if (conusPath) return null;
+    if (conusPath && conusPath.sizeMb >= CONUS_MIN_MB) return null;
 
     const result: Array<{ id: string; path: string; sizeMb: number; bounds: typeof FILE_REGIONS[keyof typeof FILE_REGIONS]['bounds'] }> = [];
     for (const [id, region] of Object.entries(FILE_REGIONS)) {
@@ -285,7 +286,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     switchingRef.current = true;
     const nativePath = path.replace(/^file:\/\//, '');
     const fileName = path.split('/').pop() ?? 'pmtiles';
-    setTileDebug(`switching…`);
+    setTileDebug(`switching ${fileName}`);
     try {
       await tileServer!.switchState(nativePath);
       loadedStateRef.current = path;
@@ -306,7 +307,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         }
       }, 600);
     } catch (e: any) {
-      setTileDebug(`err: ${e?.message ?? '?'}`);
+      setTileDebug(`${fileName} err: ${String(e?.message ?? '?').slice(0, 90)}`);
     } finally {
       switchingRef.current = false;
     }
@@ -392,7 +393,13 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         if (found) await switchFile(found.path, found.sizeMb);
         return;
       }
-      if (files.length === 0) { setTileDebug('no state pmtiles found'); return; }
+      if (files.length === 0) {
+        const partialConus = await firstExistingPath(offlinePathCandidates('conus', `${OFFLINE_DIR}conus.pmtiles`));
+        setTileDebug(partialConus
+          ? `partial conus ${partialConus.sizeMb}MB; no state pmtiles found`
+          : 'no state pmtiles found');
+        return;
+      }
 
       let best = files[0];
       try {
@@ -656,15 +663,9 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           }
           switchFile(match.path, match.sizeMb);
         } else if (localTiles) {
-          // Panned outside all downloaded states — go back to CDN.
-          // Guard: skip if routing is in progress or if flyTo fired within the last 2s,
-          // to avoid a MapLibre GL Native crash from style-swap during animation.
-          const msSinceFlyTo = Date.now() - lastFlyToRef.current;
-          if (!isRoutingRef.current && msSinceFlyTo > 2000) {
-            setLocalTiles(false);
-            loadedStateRef.current = null; // allow re-entry when panning back in
-            setTileDebug('outside downloaded states');
-          }
+          // Stay on local tiles while offline testing. Falling back to CDN here
+          // produces a blank/error map in no-service conditions.
+          setTileDebug('outside downloaded states');
         }
       });
     }

@@ -63,6 +63,15 @@ export default function PlanScreen() {
   const user             = useStore(st => st.user);
   const rigProfile       = useStore(st => st.rigProfile);
 
+  useEffect(() => {
+    setMessages([]);
+    setInput('');
+    setTrailDna({});
+    setLoading(false);
+    setPlanPhase('idle');
+    stopStages();
+  }, [user?.id]);
+
   const [paywallVisible, setPaywallVisible] = useState(false);
   const [offlineToast, setOfflineToast] = useState(false);
   const offlineToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);

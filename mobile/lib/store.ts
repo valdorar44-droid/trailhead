@@ -17,6 +17,7 @@ const KCO = { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY };
 const ss  = (key: string, val: string) => SecureStore.setItemAsync(key, val, KCO);
 const sg  = (key: string)              => SecureStore.getItemAsync(key, KCO);
 const sd  = (key: string)              => SecureStore.deleteItemAsync(key, KCO);
+const newSessionId = () => 'sess_' + Math.random().toString(36).slice(2, 12);
 
 export interface SavedPlace {
   id: string;
@@ -159,6 +160,7 @@ export const useStore = create<AppState>((set) => ({
   },
 
   clearAuth: () => {
+    const freshSession = newSessionId();
     sd('trailhead_token');
     sd('trailhead_user');
     sd('trailhead_rig');
@@ -166,6 +168,7 @@ export const useStore = create<AppState>((set) => ({
     sd('trailhead_favorites');
     sd('trailhead_active_trip');
     sd('trailhead_active_route');
+    ss('trailhead_session', freshSession);
     deleteTripFile(); // clear file-based trip storage too
     set({
       token: null,
@@ -174,6 +177,7 @@ export const useStore = create<AppState>((set) => ({
       rigProfile: null,
       tripHistory: [],
       favoriteCamps: [],
+      sessionId: freshSession,
       hasPlan: false,
       planExpiresAt: null,
     });

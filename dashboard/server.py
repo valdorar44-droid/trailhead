@@ -312,6 +312,20 @@ class ChatRequest(BaseModel):
     current_trip: Optional[dict] = None
     rig_context: Optional[dict] = None  # mobile passes rig profile to seed trail_dna
 
+
+def _ai_memory_key(session_id: str, user: dict | None) -> str:
+    """Privacy boundary for AI chat memory.
+
+    Mobile keeps a device session id so offline/UI state can survive relaunches.
+    That id must not be the backend memory boundary because multiple accounts can
+    use the same device. Authenticated users get account-scoped memory; anonymous
+    users keep session-scoped memory.
+    """
+    if user and user.get("id") is not None:
+        return f"user:{user['id']}"
+    return f"anon:{session_id or 'default'}"
+
+
 @app.post("/api/chat")
 async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depends(_optional_user)):
     if not body.message.strip():
@@ -335,8 +349,9 @@ async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depend
         _anon_check(_client_ip(request), "chat")
 
     session_id = body.session_id
-    messages  = get_conversation(session_id)
-    trail_dna = get_trail_dna(session_id)
+    memory_key = _ai_memory_key(session_id, user)
+    messages  = get_conversation(memory_key)
+    trail_dna = get_trail_dna(memory_key)
 
     # Seed trail_dna from rig profile when mobile provides it
     if body.rig_context:
@@ -355,7 +370,7 @@ async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depend
             lift = float(rig.get("lift_in") or 0)
             base = float(rig.get("ground_clearance_in") or 0)
             trail_dna["clearance"] = str(int(base + lift))
-        save_trail_dna(session_id, trail_dna)
+        save_trail_dna(memory_key, trail_dna)
 
     # Extract and persist preference signals
     signals = _extract_dna_signals(body.message)
@@ -368,7 +383,7 @@ async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depend
                         trail_dna['regions'].append(r)
             else:
                 trail_dna[k] = v
-        save_trail_dna(session_id, trail_dna)
+        save_trail_dna(memory_key, trail_dna)
 
     # ── Edit mode: active trip exists ──────────────────────────────────────────
     if body.current_trip:
@@ -382,7 +397,7 @@ async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depend
 
         messages.append({"role": "user", "content": body.message})
         messages.append({"role": "assistant", "content": result.get("message", "")})
-        save_conversation(session_id, messages[-30:])
+        save_conversation(memory_key, messages[-30:])
 
         edited_plan = result.get("trip")
         if edited_plan:
@@ -408,7 +423,7 @@ async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depend
         raise HTTPException(500, f"Chat failed: {e}")
 
     messages.append({"role": "assistant", "content": response["content"]})
-    save_conversation(session_id, messages[-30:])
+    save_conversation(memory_key, messages[-30:])
 
     return {"type": response["type"], "content": response["content"],
             "outline": response.get("outline"), "trail_dna": trail_dna}
@@ -435,7 +450,7 @@ async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, c
     update_plan_job(job_id, "running")
     try:
         if body.session_id:
-            msgs = get_conversation(body.session_id)
+            msgs = get_conversation(_ai_memory_key(body.session_id, user))
             plan_data = plan_trip_from_conversation(msgs) if msgs else plan_trip(body.request or "")
         else:
             plan_data = plan_trip(body.request or "")

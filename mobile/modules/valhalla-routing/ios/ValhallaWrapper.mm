@@ -3,6 +3,16 @@
 #import <Foundation/Foundation.h>
 #import <include/main.h>
 
+static NSString* EscapeJsonString(NSString* value) {
+  NSMutableString* escaped = [value mutableCopy];
+  [escaped replaceOccurrencesOfString:@"\\" withString:@"\\\\" options:0 range:NSMakeRange(0, escaped.length)];
+  [escaped replaceOccurrencesOfString:@"\"" withString:@"\\\"" options:0 range:NSMakeRange(0, escaped.length)];
+  [escaped replaceOccurrencesOfString:@"\n" withString:@"\\n" options:0 range:NSMakeRange(0, escaped.length)];
+  [escaped replaceOccurrencesOfString:@"\r" withString:@"\\r" options:0 range:NSMakeRange(0, escaped.length)];
+  [escaped replaceOccurrencesOfString:@"\t" withString:@"\\t" options:0 range:NSMakeRange(0, escaped.length)];
+  return escaped;
+}
+
 class ValhallaMobileHttpClientImpl : public ValhallaMobileHttpClient {
 public:
   valhalla::baldr::tile_getter_t::GET_response_t
@@ -146,9 +156,19 @@ public:
 - (NSString*)route:(NSString*)request
 {
   @synchronized(self) {
-    std::string req = std::string([request UTF8String]);
-    std::string res = route(req.c_str(), _actor);
-    return [NSString stringWithUTF8String:res.c_str()];
+    try {
+      std::string req = std::string([request UTF8String]);
+      std::string res = route(req.c_str(), _actor);
+      return [NSString stringWithUTF8String:res.c_str()];
+    } catch (NSException *exception) {
+      NSString* message = exception.reason ?: @"Valhalla route exception";
+      return [NSString stringWithFormat:@"{\"error\":\"%@\"}", EscapeJsonString(message)];
+    } catch (const std::exception &err) {
+      NSString* message = [NSString stringWithUTF8String:err.what()] ?: @"Valhalla route exception";
+      return [NSString stringWithFormat:@"{\"error\":\"%@\"}", EscapeJsonString(message)];
+    } catch (...) {
+      return @"{\"error\":\"Unknown Valhalla route exception\"}";
+    }
   }
 }
 

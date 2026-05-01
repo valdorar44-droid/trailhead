@@ -510,7 +510,14 @@ async function fetchNativeValhallaOffline(
     const msg = e instanceof Error ? e.message : String(e);
     throw new Error(`${ROUTER_DEBUG_MARKER} ${compactValhallaDiag(diag)}; ${msg}`);
   });
-  const data = JSON.parse(raw);
+  let data: any;
+  try {
+    data = JSON.parse(raw);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const rawPrefix = String(raw).replace(/\s+/g, ' ').slice(0, 80);
+    throw new Error(`${ROUTER_DEBUG_MARKER} ${compactValhallaDiag(diag)} raw=${rawPrefix}; ${msg}`);
+  }
   if (!data.trip || data.trip.status !== 0) {
     const msg = data.error ?? data.message ?? data.trip?.status_message ?? 'valhalla offline error';
     throw new Error(`${ROUTER_DEBUG_MARKER} ${compactValhallaDiag(diag)}; ${String(msg)}`);

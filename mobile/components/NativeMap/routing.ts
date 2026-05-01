@@ -479,6 +479,13 @@ function nativeFilePath(uri: string): string {
   return uri.startsWith('file://') ? decodeURIComponent(uri.slice('file://'.length)) : uri;
 }
 
+function compactValhallaDiag(diag: string): string {
+  const pick = (key: string) => diag.match(new RegExp(`${key}=([^ ]+)`))?.[1] ?? '?';
+  const reqPrefix = diag.match(/reqPrefix=(.*?)(?: packExists=|$)/)?.[1] ?? '?';
+  const configPrefix = diag.match(/configJsonPrefix=(.*)$/)?.[1] ?? '';
+  return `diag ${pick('packExists')} ${pick('packMB')}MB req=${reqPrefix.slice(0, 52)} cfg=${configPrefix.slice(0, 42)}`;
+}
+
 async function fetchNativeValhallaOffline(
   pairs: string[],
   opts: RouteOpts,
@@ -502,7 +509,7 @@ async function fetchNativeValhallaOffline(
   const data = JSON.parse(raw);
   if (!data.trip || data.trip.status !== 0) {
     const msg = data.error ?? data.message ?? data.trip?.status_message ?? 'valhalla offline error';
-    throw new Error(`${String(msg)}; ${diag}`);
+    throw new Error(`${compactValhallaDiag(diag)}; ${String(msg)}`);
   }
 
   const result = parseValhallaRoute(data);

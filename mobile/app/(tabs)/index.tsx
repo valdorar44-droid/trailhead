@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
   StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator,
-  Share, Animated,
+  Share, Animated, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -37,6 +37,22 @@ interface Message {
   text?: string;
   trip?: TripResult;
   outline?: string;   // "route ready" card
+}
+
+function userFacingAiText(text?: string) {
+  const clean = (text ?? '').trim();
+  if (!clean) return 'I updated the trip. Review the map pins and daily route before you head out.';
+  if (/(lat\/lng|latitude|longitude|coordinates|geocod|added .*coord|debug|internal)/i.test(clean)) {
+    return 'I updated the trip stops and map pins. Review the route, camps, and fuel stops on the map.';
+  }
+  return clean;
+}
+
+function appendAiMessage(messages: Message[], text?: string): Message[] {
+  const clean = userFacingAiText(text);
+  const last = messages[messages.length - 1];
+  if (last?.role === 'ai' && !last.trip && !last.outline && last.text === clean) return messages;
+  return [...messages, { role: 'ai', text: clean }];
 }
 
 export default function PlanScreen() {
@@ -154,17 +170,18 @@ export default function PlanScreen() {
       try {
         const data = await api.chat(finalText, sessionId, activeTrip, rigProfile as any);
         if (data.trail_dna) setTrailDna(data.trail_dna);
-        setMessages(m => [...m, { role: 'ai', text: data.content }]);
 
         if (data.type === 'trip_update' && data.trip) {
           setActiveTrip(data.trip);
           // Replace or append trip card
           setMessages(m => {
             const filtered = m.filter(msg => !msg.trip);
-            return [...filtered, { role: 'ai', text: data.content }, { role: 'ai', trip: data.trip }];
+            return [...appendAiMessage(filtered, data.content), { role: 'ai', trip: data.trip }];
           });
           // Update offline cache with revised trip (fire and forget)
           saveOfflineTrip(data.trip).catch(() => {});
+        } else {
+          setMessages(m => appendAiMessage(m, data.content));
         }
         setPlanPhase('active');
       } catch (e: any) {

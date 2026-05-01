@@ -55,6 +55,17 @@ _PEAK_QUERY = """
 out tags 60;
 """
 
+_HOT_SPRING_QUERY = """
+[out:json][timeout:15];
+(
+  node["natural"="hot_spring"](around:{radius},{lat},{lng});
+  node["amenity"="public_bath"]["bath:type"="hot_spring"](around:{radius},{lat},{lng});
+  way["natural"="hot_spring"](around:{radius},{lat},{lng});
+  way["amenity"="public_bath"]["bath:type"="hot_spring"](around:{radius},{lat},{lng});
+);
+out center tags 40;
+"""
+
 _FUEL_QUERY = """
 [out:json][timeout:15];
 (
@@ -261,6 +272,36 @@ async def get_peaks(lat: float, lng: float, radius_m: int = 64000) -> list[dict]
             "lat": elat, "lng": elng,
             "type": "peak",
             "elevation": _ele_to_ft(_tag(el, "ele", "")),
+        })
+    set_cached("campsite_cache", key, results)
+    return results
+
+
+async def get_hot_springs(lat: float, lng: float, radius_m: int = 48000) -> list[dict]:
+    key = f"osm_hot_spring_{lat:.2f}_{lng:.2f}_{radius_m}"
+    cached = get_cached("campsite_cache", key, ttl_seconds=3600 * 24)
+    if cached is not None:
+        return cached
+
+    elements = await _overpass(_HOT_SPRING_QUERY.format(lat=lat, lng=lng, radius=radius_m))
+    results = []
+    for el in elements:
+        coord = _node_coord(el)
+        if not coord:
+            continue
+        elat, elng = coord
+        name = _tag(el, "name") or "Hot Spring"
+        access = _tag(el, "access", "yes")
+        if access in ("private", "no"):
+            continue
+        results.append({
+            "id": f"osm_hot_spring_{el.get('id', '')}",
+            "name": name,
+            "lat": elat,
+            "lng": elng,
+            "type": "hot_spring",
+            "subtype": _tag(el, "bath:type", "hot_spring"),
+            "source": "osm",
         })
     set_cached("campsite_cache", key, results)
     return results

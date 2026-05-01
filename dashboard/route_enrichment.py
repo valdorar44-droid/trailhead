@@ -13,6 +13,7 @@ from typing import Iterable
 from ingestors.nrel import get_gas_along_route
 from ingestors.osm import (
     get_fuel_stations,
+    get_hot_springs,
     get_osm_campsites,
     get_peaks,
     get_trailheads,
@@ -89,6 +90,23 @@ def _route_samples(route: list[dict], max_samples: int = 8) -> list[dict]:
     return [route[round(i * step)] for i in range(max_samples)]
 
 
+def _merge_targets(primary: list[dict], fallback: list[dict], max_targets: int) -> list[dict]:
+    """Use AI intent anchors plus route samples so one bad geocode doesn't starve enrichment."""
+    merged: list[dict] = []
+    seen: set[str] = set()
+    for wp in [*primary, *fallback]:
+        if not wp.get("lat") or not wp.get("lng"):
+            continue
+        key = f"{float(wp['lat']):.3f}:{float(wp['lng']):.3f}"
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(wp)
+        if len(merged) >= max_targets:
+            break
+    return merged
+
+
 def _dedupe(items: list[dict]) -> list[dict]:
     seen: set[str] = set()
     out: list[dict] = []
@@ -101,14 +119,56 @@ def _dedupe(items: list[dict]) -> list[dict]:
     return out
 
 
+def annotate_waypoint_verification(
+    waypoints: list[dict],
+    campsites: list[dict],
+    gas_stations: list[dict],
+) -> list[dict]:
+    """Mark AI waypoints that are supported by verified route-corridor data."""
+    verified_by_type = {
+        "camp": campsites,
+        "motel": campsites,
+        "fuel": gas_stations,
+    }
+    thresholds = {"camp": 12.0, "motel": 12.0, "fuel": 5.0}
+    annotated: list[dict] = []
+    for wp in waypoints:
+        out = dict(wp)
+        wp_type = str(out.get("type") or "")
+        items = verified_by_type.get(wp_type)
+        if not items or not out.get("lat") or not out.get("lng"):
+            annotated.append(out)
+            continue
+        point = (float(out["lat"]), float(out["lng"]))
+        candidates = [
+            item for item in items
+            if item.get("lat") is not None and item.get("lng") is not None
+        ]
+        if not candidates:
+            annotated.append(out)
+            continue
+        nearest = min(candidates, key=lambda item: _haversine_mi(point, (float(item["lat"]), float(item["lng"]))))
+        dist = _haversine_mi(point, (float(nearest["lat"]), float(nearest["lng"])))
+        threshold = thresholds.get(wp_type, 5.0)
+        out["verified_match"] = dist <= threshold
+        out["verified_distance_mi"] = round(dist, 1)
+        out["verified_name"] = nearest.get("name")
+        out["verified_source"] = nearest.get("verified_source") or nearest.get("source")
+        if dist > threshold:
+            out["needs_review"] = True
+            out["verification_note"] = f"No verified {wp_type} found within {threshold:g} mi of this AI waypoint."
+        annotated.append(out)
+    return annotated
+
+
 async def _route_camps(waypoints: list[dict], route: list[dict]) -> list[dict]:
     camp_targets = [wp for wp in waypoints if wp.get("type") in ("camp", "motel") and wp.get("lat") and wp.get("lng")]
-    targets = camp_targets or _route_samples(route, max_samples=6)
+    targets = _merge_targets(camp_targets, _route_samples(route, max_samples=8), max_targets=14)
 
     async def fetch_for(wp: dict) -> list[dict]:
         ridb, osm = await asyncio.gather(
-            get_campsites_search(wp["lat"], wp["lng"], radius_miles=30),
-            get_osm_campsites(wp["lat"], wp["lng"], radius_m=48000),
+            get_campsites_search(wp["lat"], wp["lng"], radius_miles=45),
+            get_osm_campsites(wp["lat"], wp["lng"], radius_m=72000),
         )
         return [*ridb, *osm]
 
@@ -128,6 +188,10 @@ async def _route_camps(waypoints: list[dict], route: list[dict]) -> list[dict]:
         day = _nearest_day(camp, waypoints, types=("camp", "motel"))
         tags = set(camp.get("tags") or [])
         quality = 0
+        if route_mi <= 5:
+            quality += 7
+        elif route_mi <= 12:
+            quality += 4
         if "dispersed" in tags or "blm" in tags or "usfs" in tags:
             quality += 8
         if camp.get("photo_url"):
@@ -135,6 +199,7 @@ async def _route_camps(waypoints: list[dict], route: list[dict]) -> list[dict]:
         if camp.get("reservable"):
             quality += 1
         camp["route_distance_mi"] = round(route_mi, 1)
+        camp["route_fit"] = "on_route" if route_mi <= 3 else "short_detour" if route_mi <= 12 else "detour"
         camp["recommended_day"] = day
         camp["verified_source"] = camp.get("source") or ("ridb" if str(camp.get("id", "")).isdigit() else "osm")
         scored.append((route_mi - quality, camp))
@@ -143,7 +208,7 @@ async def _route_camps(waypoints: list[dict], route: list[dict]) -> list[dict]:
 
 async def _route_gas(waypoints: list[dict], route: list[dict]) -> list[dict]:
     fuel_targets = [wp for wp in waypoints if wp.get("type") == "fuel" and wp.get("lat") and wp.get("lng")]
-    targets = fuel_targets or _route_samples(route, max_samples=8)
+    targets = _merge_targets(fuel_targets, _route_samples(route, max_samples=10), max_targets=16)
 
     osm_batches = await asyncio.gather(
         *[get_fuel_stations(wp["lat"], wp["lng"], radius_m=24000) for wp in targets],
@@ -166,6 +231,7 @@ async def _route_gas(waypoints: list[dict], route: list[dict]) -> list[dict]:
         if route_mi > 15:
             continue
         station["route_distance_mi"] = round(route_mi, 1)
+        station["route_fit"] = "on_route" if route_mi <= 2 else "short_detour"
         station["recommended_day"] = _nearest_day(station, waypoints)
         scored.append((route_mi, station))
     return [station for _, station in sorted(scored, key=lambda row: row[0])[:45]]
@@ -175,13 +241,14 @@ async def _route_pois(route: list[dict]) -> list[dict]:
     samples = _route_samples(route, max_samples=6)
 
     async def fetch_for(wp: dict) -> list[dict]:
-        water, trailheads, viewpoints, peaks = await asyncio.gather(
+        water, trailheads, viewpoints, peaks, hot_springs = await asyncio.gather(
             get_water_sources(wp["lat"], wp["lng"], radius_m=16000),
             get_trailheads(wp["lat"], wp["lng"], radius_m=24000),
             get_viewpoints(wp["lat"], wp["lng"], radius_m=24000),
             get_peaks(wp["lat"], wp["lng"], radius_m=32000),
+            get_hot_springs(wp["lat"], wp["lng"], radius_m=48000),
         )
-        return [*water, *trailheads, *viewpoints, *peaks]
+        return [*water, *trailheads, *viewpoints, *peaks, *hot_springs]
 
     batches = await asyncio.gather(*[fetch_for(wp) for wp in samples], return_exceptions=True)
     pois: list[dict] = []
@@ -193,12 +260,16 @@ async def _route_pois(route: list[dict]) -> list[dict]:
     for poi in _dedupe(pois):
         if not poi.get("lat") or not poi.get("lng"):
             continue
-        route_mi = _route_distance_mi(poi, route)
-        if route_mi > 18:
+        raw_route_mi = _route_distance_mi(poi, route)
+        if raw_route_mi > 18:
             continue
+        route_mi = raw_route_mi
         if (poi.get("name") or "").lower() in ("viewpoint", "trailhead", "water source", "natural spring", "peak"):
             route_mi += 5
-        poi["route_distance_mi"] = round(route_mi, 1)
+        if poi.get("type") == "hot_spring":
+            route_mi -= 6
+        poi["route_distance_mi"] = round(raw_route_mi, 1)
+        poi["route_fit"] = "on_route" if raw_route_mi <= 3 else "short_detour"
         scored.append((route_mi, poi))
     return [poi for _, poi in sorted(scored, key=lambda row: row[0])[:50]]
 
@@ -213,4 +284,9 @@ async def enrich_trip_along_route(waypoints: list[dict]) -> dict:
         _route_gas(waypoints, route),
         _route_pois(route),
     )
-    return {"campsites": camps, "gas_stations": gas, "route_pois": pois}
+    return {
+        "campsites": camps,
+        "gas_stations": gas,
+        "route_pois": pois,
+        "waypoints": annotate_waypoint_verification(waypoints, camps, gas),
+    }

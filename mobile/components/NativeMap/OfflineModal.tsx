@@ -107,6 +107,62 @@ function StatusChip({ label, color }: { label: string; color: string }) {
   );
 }
 
+function ReadinessRow({ icon, label, ready }: { icon: keyof typeof Ionicons.glyphMap; label: string; ready: boolean }) {
+  const C = useTheme();
+  const color = ready ? C.green : C.text3;
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
+      <Ionicons name={ready ? 'checkmark-circle' : icon} size={13} color={color} />
+      <Text style={{ color, fontSize: 9, fontFamily: mono, fontWeight: '800' }} numberOfLines={1}>
+        {label}
+      </Text>
+    </View>
+  );
+}
+
+function StateReadinessPanel({
+  mapReady, routeReady, mapBusy, routeBusy, onDownloadMissing,
+}: {
+  mapReady: boolean;
+  routeReady: boolean;
+  mapBusy: boolean;
+  routeBusy: boolean;
+  onDownloadMissing: () => void;
+}) {
+  const C = useTheme();
+  const ready = mapReady && routeReady;
+  const busy = mapBusy || routeBusy;
+  return (
+    <View style={{ backgroundColor: ready ? C.green + '12' : C.s1, borderColor: ready ? C.green + '35' : C.border, borderWidth: 1, borderRadius: 10, padding: 12, marginBottom: 12 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: ready ? C.green : C.text, fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 }}>
+            {ready ? 'STATE OFFLINE READY' : 'STATE NEEDS DOWNLOADS'}
+          </Text>
+          <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 3, lineHeight: 13 }}>
+            Map file draws roads/trails. Routing graph powers long offline route calculation.
+          </Text>
+        </View>
+        {!ready && (
+          <TouchableOpacity
+            disabled={busy}
+            onPress={onDownloadMissing}
+            style={{ borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: busy ? C.s2 : C.orangeGlow, borderWidth: 1, borderColor: busy ? C.border : C.orange + '55' }}
+          >
+            <Text style={{ color: busy ? C.text3 : C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900' }}>
+              {busy ? 'BUSY' : 'GET MISSING'}
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
+      <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+        <ReadinessRow icon="map-outline" label={mapReady ? 'MAP ON DEVICE' : 'MAP MISSING'} ready={mapReady} />
+        <ReadinessRow icon="git-branch-outline" label={routeReady ? 'ROUTE ON DEVICE' : 'ROUTE MISSING'} ready={routeReady} />
+      </View>
+    </View>
+  );
+}
+
 // ── File download card (used for CONUS + all states) ─────────────────────────
 function ConusCard({
   state, totalBytes, region: regionProp, code,
@@ -586,8 +642,22 @@ export default function OfflineModal({
                     const routingRegion = ROUTING_REGIONS[selectedState as keyof typeof ROUTING_REGIONS];
                     const mapState = getState(selectedState);
                     const routingState = getRoutingState(selectedState);
+                    const mapBusy = mapState.status === 'downloading' || mapState.status === 'paused';
+                    const routeBusy = routingState.status === 'downloading' || routingState.status === 'paused';
                     return (
                       <>
+                        <StateReadinessPanel
+                          mapReady={mapState.status === 'complete'}
+                          routeReady={routingState.status === 'complete'}
+                          mapBusy={mapBusy}
+                          routeBusy={routeBusy}
+                          onDownloadMissing={() => {
+                            if (mapState.status === 'idle' || mapState.status === 'error') startDownload(selectedState);
+                            if (routingState.status === 'idle' || routingState.status === 'error') startRoutingDownload(selectedState);
+                            if (mapState.status === 'paused') resumeDownload(selectedState);
+                            if (routingState.status === 'paused') resumeRoutingDownload(selectedState);
+                          }}
+                        />
                         <Section label={`${mapRegion.name.toUpperCase()} — MAP DETAILS`} />
                         <ConusCard
                           state={mapState}
@@ -613,7 +683,7 @@ export default function OfflineModal({
                           onResume={() => resumeRoutingDownload(selectedState)}
                           onDelete={() => deleteRoutingDownload(selectedState)}
                           completeTitle="✓ ROUTING GRAPH ON DEVICE"
-                          completeText="Valhalla graph pack is downloaded. Local offline routing will use this file when the native engine is wired in."
+                          completeText="Valhalla graph pack is downloaded. Long offline routes can use this state without needing signal."
                         />
                       </>
                     );

@@ -16,7 +16,7 @@ from config.settings import settings
 from ai.planner import plan_trip, chat_guide, edit_trip, plan_trip_from_conversation
 from dashboard.route_enrichment import enrich_trip_along_route
 from ingestors.ridb import get_campsites_near, get_campsites_search, get_facility_detail
-from ingestors.osm import get_osm_campsites, get_water_sources, get_trailheads, get_viewpoints, get_peaks
+from ingestors.osm import get_osm_campsites, get_water_sources, get_trailheads, get_viewpoints, get_peaks, get_hot_springs
 from db.store import (
     save_trip, get_trip, add_community_pin, get_community_pins,
     save_audio_guide, get_audio_guide, get_cached, set_cached, get_route_cached, set_route_cached,
@@ -313,16 +313,27 @@ class ChatRequest(BaseModel):
     rig_context: Optional[dict] = None  # mobile passes rig profile to seed trail_dna
 
 
-def _ai_memory_key(session_id: str, user: dict | None) -> str:
-    """Privacy boundary for AI chat memory.
+def _ai_conversation_key(session_id: str, user: dict | None) -> str:
+    """Privacy boundary for AI chat threads.
 
     Mobile keeps a device session id so offline/UI state can survive relaunches.
-    That id must not be the backend memory boundary because multiple accounts can
-    use the same device. Authenticated users get account-scoped memory; anonymous
-    users keep session-scoped memory.
+    Authenticated users still need session-scoped conversations so a new trip
+    does not inherit the last trip's chat transcript.
+    """
+    clean_session = session_id or "default"
+    if user and user.get("id") is not None:
+        return f"user:{user['id']}:session:{clean_session}"
+    return f"anon:{clean_session}"
+
+
+def _ai_profile_key(session_id: str, user: dict | None) -> str:
+    """Durable Trail DNA key.
+
+    Account users keep stable preferences across trips. Anonymous users are
+    still bound to their local session id.
     """
     if user and user.get("id") is not None:
-        return f"user:{user['id']}"
+        return f"user:{user['id']}:profile"
     return f"anon:{session_id or 'default'}"
 
 
@@ -349,9 +360,10 @@ async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depend
         _anon_check(_client_ip(request), "chat")
 
     session_id = body.session_id
-    memory_key = _ai_memory_key(session_id, user)
-    messages  = get_conversation(memory_key)
-    trail_dna = get_trail_dna(memory_key)
+    conversation_key = _ai_conversation_key(session_id, user)
+    profile_key = _ai_profile_key(session_id, user)
+    messages  = get_conversation(conversation_key)
+    trail_dna = get_trail_dna(profile_key)
 
     # Seed trail_dna from rig profile when mobile provides it
     if body.rig_context:
@@ -370,7 +382,7 @@ async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depend
             lift = float(rig.get("lift_in") or 0)
             base = float(rig.get("ground_clearance_in") or 0)
             trail_dna["clearance"] = str(int(base + lift))
-        save_trail_dna(memory_key, trail_dna)
+        save_trail_dna(profile_key, trail_dna)
 
     # Extract and persist preference signals
     signals = _extract_dna_signals(body.message)
@@ -383,7 +395,7 @@ async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depend
                         trail_dna['regions'].append(r)
             else:
                 trail_dna[k] = v
-        save_trail_dna(memory_key, trail_dna)
+        save_trail_dna(profile_key, trail_dna)
 
     # ── Edit mode: active trip exists ──────────────────────────────────────────
     if body.current_trip:
@@ -397,13 +409,14 @@ async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depend
 
         messages.append({"role": "user", "content": body.message})
         messages.append({"role": "assistant", "content": result.get("message", "")})
-        save_conversation(memory_key, messages[-30:])
+        save_conversation(conversation_key, messages[-30:])
 
         edited_plan = result.get("trip")
         if edited_plan:
             geocoded = await _geocode_waypoints(edited_plan.get("waypoints", []))
             edited_plan["waypoints"] = geocoded
             enrichment = await enrich_trip_along_route(geocoded)
+            edited_plan["waypoints"] = enrichment.get("waypoints", geocoded)
             trip_id = body.current_trip.get("trip_id", str(uuid.uuid4())[:8])
             updated = {"trip_id": trip_id, "plan": edited_plan,
                        "campsites": enrichment["campsites"][:70],
@@ -423,7 +436,7 @@ async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depend
         raise HTTPException(500, f"Chat failed: {e}")
 
     messages.append({"role": "assistant", "content": response["content"]})
-    save_conversation(memory_key, messages[-30:])
+    save_conversation(conversation_key, messages[-30:])
 
     return {"type": response["type"], "content": response["content"],
             "outline": response.get("outline"), "trail_dna": trail_dna}
@@ -450,7 +463,7 @@ async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, c
     update_plan_job(job_id, "running")
     try:
         if body.session_id:
-            msgs = get_conversation(_ai_memory_key(body.session_id, user))
+            msgs = get_conversation(_ai_conversation_key(body.session_id, user))
             plan_data = plan_trip_from_conversation(msgs) if msgs else plan_trip(body.request or "")
         else:
             plan_data = plan_trip(body.request or "")
@@ -483,6 +496,7 @@ async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, c
         plan_data["waypoints"] = geocoded
 
         enrichment = await enrich_trip_along_route(geocoded)
+        plan_data["waypoints"] = enrichment.get("waypoints", geocoded)
         result = {"trip_id": trip_id, "plan": plan_data,
                   "campsites": enrichment["campsites"][:70],
                   "gas_stations": enrichment["gas_stations"][:45],
@@ -559,6 +573,9 @@ async def plan_job_status(job_id: str, user: dict | None = Depends(_optional_use
     job = get_plan_job(job_id)
     if not job:
         raise HTTPException(404, "Job not found")
+    job_owner = job.get("user_id")
+    if job_owner and (not user or user["id"] != job_owner):
+        raise HTTPException(403, "Not authorized to view this plan job")
     result = json.loads(job["result"]) if job.get("result") else None
     return {"job_id": job_id, "status": job["status"], "result": result, "error": job.get("error")}
 
@@ -686,13 +703,17 @@ async def get_trip_route(trip_id: str, user: dict | None = Depends(_optional_use
 async def trip_guide(trip_id: str, user: dict = Depends(_current_user)):
     """Return audio guide narrations for trip waypoints (generates + caches on first call).
     Free if already cached; costs credits only on first generation."""
+    trip = get_trip(trip_id)
+    if not trip:
+        raise HTTPException(404, "Trip not found")
+    trip_owner = trip.get("user_id")
+    if trip_owner and user["id"] != trip_owner:
+        raise HTTPException(403, "Not authorized to view this trip")
+
     cached = get_audio_guide(trip_id)
     if cached:
         return cached  # already generated — serve free
 
-    trip = get_trip(trip_id)
-    if not trip:
-        raise HTTPException(404, "Trip not found")
     if not settings.anthropic_api_key:
         raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
 
@@ -2206,7 +2227,7 @@ async def land_check(lat: float, lng: float):
     return result
 
 
-# ── OSM POIs (water, trailheads, viewpoints) ──────────────────────────────────
+# ── OSM POIs (water, trailheads, viewpoints, hot springs) ─────────────────────
 
 @app.get("/api/osm-pois")
 async def osm_pois(lat: float, lng: float, radius: float = 30, types: str = "water,trailhead,viewpoint"):
@@ -2221,6 +2242,8 @@ async def osm_pois(lat: float, lng: float, radius: float = 30, types: str = "wat
         tasks.append(get_viewpoints(lat, lng, radius_m=radius_m))
     if "peak" in type_set:
         tasks.append(get_peaks(lat, lng, radius_m=radius_m))
+    if "hot_spring" in type_set or "hot_springs" in type_set:
+        tasks.append(get_hot_springs(lat, lng, radius_m=radius_m))
     if not tasks:
         return []
     results = await asyncio.gather(*tasks)

@@ -508,7 +508,7 @@ export default function ReportScreen() {
                 { text: 'Cancel', style: 'cancel' },
                 { text: 'Delete', style: 'destructive', onPress: () => api.adminDeleteReport(r.id).then(() => setNearby(prev => prev.filter(x => x.id !== r.id))).catch(() => {}) },
               ]) : undefined}
-              onAdminRemovePhoto={user?.is_admin ? () => api.adminRemovePhoto(r.id).then(() => setNearby(prev => prev.map(x => x.id === r.id ? { ...x, has_photo: false } : x))).catch(() => {}) : undefined}
+              onAdminRemovePhoto={user?.is_admin ? () => api.adminRemovePhoto(r.id).then(() => setNearby(prev => prev.map(x => x.id === r.id ? { ...x, has_photo: 0 } : x))).catch(() => {}) : undefined}
             />
           ))}
         </ScrollView>

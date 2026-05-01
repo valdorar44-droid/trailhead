@@ -15,7 +15,7 @@ import * as Application from 'expo-application';
 import { api } from '@/lib/api';
 import { useStore, RigProfile } from '@/lib/store';
 import PaywallModal from '@/components/PaywallModal';
-import { useSubscription } from '@/lib/useSubscription';
+import { freeTrialLabel, useSubscription } from '@/lib/useSubscription';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 import { getOfflineTripIndex, loadOfflineTrip } from '@/lib/offlineTrips';
 
@@ -108,6 +108,7 @@ export default function ProfileScreen() {
   const hasPlan     = useStore(st => st.hasPlan);
   const setPlan     = useStore(st => st.setPlan);
   const { purchase, restore, openPaywall, monthlyProduct, annualProduct, purchasing, restoring } = useSubscription();
+  const planTrial = freeTrialLabel(annualProduct) || freeTrialLabel(monthlyProduct);
   const [gpxImporting, setGpxImporting] = useState(false);
   const [gpxResult, setGpxResult] = useState('');
   const [showBugModal, setShowBugModal] = useState(false);
@@ -938,7 +939,7 @@ export default function ProfileScreen() {
                 <View>
                   <Text style={s.getPlanBtnLabel}>Get Explorer Plan</Text>
                   <Text style={s.getPlanBtnSub}>
-                    {annualProduct?.localizedPrice ?? '$49.99'}/yr · {monthlyProduct?.localizedPrice ?? '$7.99'}/mo · 7-day free trial
+                    {annualProduct?.localizedPrice ?? '$49.99'}/yr · {monthlyProduct?.localizedPrice ?? '$7.99'}/mo{planTrial ? ` · ${planTrial}` : ''}
                   </Text>
                 </View>
                 <Ionicons name="arrow-forward" size={18} color="#fff" />

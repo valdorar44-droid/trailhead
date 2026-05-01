@@ -124,9 +124,10 @@ function haversineKm(a: { lat: number; lng: number }, b: { lat: number; lng: num
 }
 
 function fmtDist(km: number) {
-  if (km < 1) return `${Math.round(km * 1000)} ft`;
-  if (km < 16) return `${km.toFixed(1)} mi`;
-  return `${Math.round(km * 0.621371)} mi`;
+  const mi = km * 0.621371;
+  if (mi < 0.1) return `${Math.round(mi * 5280)} ft`;
+  if (mi < 10) return `${mi.toFixed(1)} mi`;
+  return `${Math.round(mi)} mi`;
 }
 
 function parseCoordinateQuery(raw: string): { lat: number; lng: number; name: string } | null {

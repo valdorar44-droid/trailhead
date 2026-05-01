@@ -85,6 +85,22 @@ export const FILE_REGIONS = {
 
 export type FileRegionId = keyof typeof FILE_REGIONS;
 
+export const ROUTING_PACK_BYTES: Record<string, number> = {
+  ak: 57640960, az: 462120960, ca: 1636608000, co: 475648000,
+  hi: 38666240, id: 213155840, mt: 142909440, nm: 226703360,
+  nv: 208168960, or: 336179200, ut: 285788160, wa: 542812160,
+  wy: 106383360, ks: 296611840, mn: 421969920, mo: 469155840,
+  nd: 132608000, ne: 190586880, ok: 331417600, sd: 91770880,
+  tx: 1580605440, al: 290508800, ar: 212910080, fl: 1080350720,
+  ga: 582103040, ky: 273674240, la: 207462400, ms: 168458240,
+  nc: 743546880, sc: 309278720, tn: 407162880, va: 607528960,
+  wv: 115722240, ct: 210780160, de: 51496960, ma: 369500160,
+  md: 337172480, me: 108247040, nh: 130754560, nj: 344668160,
+  ny: 701071360, pa: 678471680, ri: 50247680, vt: 60221440,
+  ia: 276623360, il: 753500160, in: 478351360, mi: 799098880,
+  oh: 786380800, wi: 485171200,
+};
+
 export const ROUTING_REGIONS = Object.fromEntries(
   Object.entries(FILE_REGIONS)
     .filter(([id]) => id !== 'conus')
@@ -93,7 +109,7 @@ export const ROUTING_REGIONS = Object.fromEntries(
       name: region.name,
       url: `${BASE}/api/routing/${id}.tar`,
       localPath: `${ROUTING_DIR}${id}.tar`,
-      estimatedGb: Math.max(0.1, Math.round(region.estimatedGb * 0.7 * 10) / 10),
+      estimatedGb: Math.max(0.1, Math.round(((ROUTING_PACK_BYTES[id] ?? region.estimatedGb * 1_073_741_824 * 0.7) / 1_073_741_824) * 10) / 10),
       description: 'Valhalla graph pack · offline turn-by-turn routing',
       bounds: region.bounds,
     }])
@@ -573,6 +589,7 @@ export function useOfflineFiles() {
   }, [manifestSizes]);
   const getRoutingTotalBytes = useCallback((id: string): number => {
     if (routingManifestSizes[id]) return routingManifestSizes[id];
+    if (ROUTING_PACK_BYTES[id]) return ROUTING_PACK_BYTES[id];
     const region = ROUTING_REGIONS[id as RoutingRegionId];
     return region ? region.estimatedGb * 1_073_741_824 : 0;
   }, [routingManifestSizes]);

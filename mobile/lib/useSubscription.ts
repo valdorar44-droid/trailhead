@@ -14,6 +14,40 @@ export interface IAPProduct {
   description: string;
   localizedPrice: string;
   currency: string;
+  introductoryPricePaymentModeIOS?: string;
+  introductoryPriceNumberOfPeriodsIOS?: string;
+  introductoryPriceSubscriptionPeriodIOS?: string;
+}
+
+function formatIapError(err: any, fallback: string) {
+  const code = err?.code ?? err?.responseCode ?? err?.debugCode ?? '';
+  const message = err?.message ?? err?.debugMessage ?? '';
+  const joined = [code, message].filter(Boolean).join(': ').trim();
+  return joined ? `${fallback} (${joined})` : fallback;
+}
+
+function normalizePeriodUnit(unit?: string) {
+  const lower = (unit ?? '').toLowerCase();
+  if (lower === 'day') return 'day';
+  if (lower === 'week') return 'week';
+  if (lower === 'month') return 'month';
+  if (lower === 'year') return 'year';
+  return '';
+}
+
+export function freeTrialLabel(product?: IAPProduct) {
+  const mode = (product?.introductoryPricePaymentModeIOS ?? '').toUpperCase();
+  if (mode !== 'FREETRIAL') return '';
+  const count = Number(product?.introductoryPriceNumberOfPeriodsIOS ?? 0);
+  const unit = normalizePeriodUnit(product?.introductoryPriceSubscriptionPeriodIOS);
+  if (!count || !unit) return 'Free trial';
+  return `${count}-${unit}${count === 1 ? '' : 's'} free trial`;
+}
+
+export function priceLine(product: IAPProduct | undefined, fallbackPrice: string, period: string) {
+  const price = product?.localizedPrice || fallbackPrice;
+  const trial = freeTrialLabel(product);
+  return trial ? `${trial}, then ${price}/${period}` : `${price}/${period}`;
 }
 
 // Lazy-load react-native-iap so old binaries (without the native module) don't crash on import.
@@ -111,14 +145,22 @@ export function useSubscription() {
           description:    p.description ?? '',
           localizedPrice: p.localizedPrice ?? p.price ?? '',
           currency:       p.currency ?? '',
+          introductoryPricePaymentModeIOS: p.introductoryPricePaymentModeIOS ?? p.subscription?.introductoryOffer?.paymentMode,
+          introductoryPriceNumberOfPeriodsIOS: p.introductoryPriceNumberOfPeriodsIOS ?? p.subscription?.introductoryOffer?.period?.value?.toString?.(),
+          introductoryPriceSubscriptionPeriodIOS: p.introductoryPriceSubscriptionPeriodIOS ?? p.subscription?.introductoryOffer?.period?.unit,
         }));
         setProducts(normalized);
-      } catch {
+        const found = new Set(normalized.map(p => p.productId));
+        if (!found.has(PRODUCT_IDS.monthly) && !found.has(PRODUCT_IDS.annual)) {
+          setError('App Store did not return Trailhead plans yet. The first subscriptions may still be propagating or waiting for Apple review.');
+        }
+      } catch (e: any) {
         // Simulator, App Review network hiccups, or a temporary StoreKit outage.
         // Keep the paywall usable and avoid showing a fatal-looking IAP error.
         if (mounted) {
           setConnected(false);
           setProducts([]);
+          setError(formatIapError(e, 'Could not load App Store plans.'));
         }
       } finally {
         if (mounted) setStoreLoading(false);
@@ -148,6 +190,11 @@ export function useSubscription() {
       setError('Purchases are temporarily unavailable. Please try again in a moment.');
       return false;
     }
+    const productLoaded = products.some(p => p.productId === productId);
+    if (!productLoaded) {
+      setError('That Trailhead plan is not available from the App Store yet. Try Retry App Store, or wait for Apple review/propagation.');
+      return false;
+    }
     setError('');
     setPurchasing(true);
     try {
@@ -156,12 +203,12 @@ export function useSubscription() {
     } catch (e: any) {
       const msg = e?.message ?? '';
       if (!msg.toLowerCase().includes('cancel')) {
-        setError('Purchase failed. Please try again.');
+        setError(formatIapError(e, 'Purchase failed. Please try again.'));
       }
       setPurchasing(false);
       return false;
     }
-  }, [connected]);
+  }, [connected, products]);
 
   const restore = useCallback(async () => {
     const iap = getIAP();
@@ -186,8 +233,8 @@ export function useSubscription() {
       } else {
         Alert.alert('Nothing to restore', 'No active subscription found for this account.');
       }
-    } catch {
-      setError('Restore failed. Please try again.');
+    } catch (e: any) {
+      setError(formatIapError(e, 'Restore failed. Please try again.'));
     }
     setRestoring(false);
   }, [activateOnBackend]);

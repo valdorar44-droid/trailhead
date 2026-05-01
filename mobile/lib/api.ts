@@ -221,6 +221,8 @@ export interface TripPlan {
 export interface Waypoint {
   day: number; name: string; type: string; description: string;
   land_type: string; notes?: string; lat?: number; lng?: number;
+  verified_match?: boolean; verified_distance_mi?: number; verified_name?: string;
+  verified_source?: string; needs_review?: boolean; verification_note?: string;
 }
 export interface DayPlan {
   day: number; title: string; description: string;
@@ -233,19 +235,24 @@ export interface Logistics {
 export interface Campsite {
   id: string; name: string; lat: number; lng: number;
   reservable: boolean; description: string; url: string;
+  route_distance_mi?: number; route_fit?: string; recommended_day?: number;
+  verified_source?: string;
 }
 export interface CampsitePin {
   id: string; name: string; lat: number; lng: number;
   tags: string[]; land_type: string; description: string;
   photo_url?: string; reservable: boolean; cost?: string; url: string; ada: boolean;
+  route_distance_mi?: number; route_fit?: string; recommended_day?: number;
+  verified_source?: string;
 }
 export interface CampsiteDetail extends CampsitePin {
   photos: string[]; amenities: string[]; site_types: string[];
   activities: string[]; phone?: string; campsites_count: number;
 }
 export interface GasStation {
-  id: number; name: string; lat: number; lng: number;
+  id: number | string; name: string; lat: number; lng: number;
   fuel_types: string; address: string;
+  route_distance_mi?: number; route_fit?: string; recommended_day?: number;
 }
 export interface Report {
   id: number; lat: number; lng: number; type: string; subtype: string;
@@ -279,7 +286,8 @@ export interface PinPayload {
 }
 export interface OsmPoi {
   id: string; name: string; lat: number; lng: number;
-  type: 'water' | 'trailhead' | 'viewpoint' | 'peak'; subtype?: string; elevation?: string;
+  type: 'water' | 'trailhead' | 'viewpoint' | 'peak' | 'hot_spring'; subtype?: string; elevation?: string;
+  route_distance_mi?: number; route_fit?: string;
 }
 export interface WikiArticle {
   title: string; lat: number; lng: number; dist_m: number; extract: string; url: string;

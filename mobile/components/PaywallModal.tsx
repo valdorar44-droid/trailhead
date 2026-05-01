@@ -3,7 +3,7 @@ import {
   Modal, View, Text, TouchableOpacity, StyleSheet,
   ScrollView, ActivityIndicator, Linking,
 } from 'react-native';
-import { useSubscription, PRODUCT_IDS } from '@/lib/useSubscription';
+import { useSubscription, PRODUCT_IDS, priceLine } from '@/lib/useSubscription';
 import { useTheme, mono } from '@/lib/design';
 
 const TERMS_URL   = 'https://trailhead-production-2049.up.railway.app/terms';
@@ -50,6 +50,8 @@ export default function PaywallModal({ visible, code, message, onClose, onPlanAc
 
   const monthlyPrice = monthlyProduct?.localizedPrice ?? '$7.99';
   const annualPrice  = annualProduct?.localizedPrice  ?? '$49.99';
+  const annualLine   = priceLine(annualProduct, annualPrice, 'year');
+  const monthlyLine  = priceLine(monthlyProduct, monthlyPrice, 'month');
   const annualDisabled = purchasing || restoring || storeLoading;
   const monthlyDisabled = purchasing || restoring || storeLoading;
   const storeMessage = storeLoading
@@ -77,7 +79,7 @@ export default function PaywallModal({ visible, code, message, onClose, onPlanAc
             </View>
             <View style={staticS.planBtnBody}>
               <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700' }}>Explorer Annual</Text>
-              <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 12, marginTop: 2 }}>7-day free trial, then {annualPrice}/year</Text>
+              <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 12, marginTop: 2 }}>{annualLine}</Text>
             </View>
             {purchasing || storeLoading
               ? <ActivityIndicator color="#fff" size="small" />
@@ -93,7 +95,7 @@ export default function PaywallModal({ visible, code, message, onClose, onPlanAc
           >
             <View style={staticS.planBtnBody}>
               <Text style={{ color: C.text, fontSize: 15, fontWeight: '700' }}>Explorer Monthly</Text>
-              <Text style={{ color: C.text2, fontSize: 12, marginTop: 2 }}>7-day free trial, then {monthlyPrice}/month</Text>
+              <Text style={{ color: C.text2, fontSize: 12, marginTop: 2 }}>{monthlyLine}</Text>
             </View>
             {purchasing || storeLoading
               ? <ActivityIndicator color={C.orange} size="small" />

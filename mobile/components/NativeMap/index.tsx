@@ -13,6 +13,7 @@ import React, {
 } from 'react';
 import { View, StyleSheet, Text } from 'react-native';
 import MapLibreGL from '@maplibre/maplibre-react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { storage } from '@/lib/storage';
 
 import { buildMapStyle, MapMode } from './mapStyle';
@@ -96,6 +97,9 @@ export interface NativeMapProps {
   onWaypointTap:    (idx: number, name: string) => void;
   onRouteReady:     (result: RouteResult & { fromIdx: number }) => void;
   onRoutePersist:   (data: { coords: [number,number][]; steps: RouteStep[]; legs: RouteStep[][]; totalDistance: number; totalDuration: number; tripId: string | null }) => void;
+  onOffRoute?:      (lat: number, lng: number, distanceM: number) => void;
+  onOffRouteWarn?:  (lat: number, lng: number, distanceM: number) => void;
+  onBackOnRoute?:   () => void;
   onError?:         (msg: string) => void;
 }
 
@@ -104,12 +108,32 @@ const WP_COLORS: Record<string, string> = {
   start: '#22c55e', camp: '#14b8a6', fuel: '#eab308', motel: '#6366f1',
   shower: '#38bdf8', town: '#94a3b8', waypoint: '#a855f7',
 };
-const WP_ICONS: Record<string, string> = {
-  fuel: '⛽', camp: '⛺', start: 'S', motel: 'M', shower: '💧', town: 'T',
+const WP_ICON_NAMES: Record<string, keyof typeof Ionicons.glyphMap> = {
+  fuel: 'flash-outline',
+  camp: 'bonfire-outline',
+  start: 'flag-outline',
+  motel: 'bed-outline',
+  shower: 'water-outline',
+  town: 'business-outline',
+  waypoint: 'navigate-outline',
 };
 const WP_LABELS: Record<string, string> = {
   fuel: 'Fuel', camp: 'Camp', start: 'Start', motel: 'Lodging',
   shower: 'Showers', town: 'Town', waypoint: 'Waypoint',
+};
+const POI_CODES: Record<string, string> = {
+  water: 'W',
+  trailhead: 'T',
+  viewpoint: 'V',
+  peak: 'P',
+  hot_spring: 'H',
+};
+const POI_ICON_NAMES: Record<string, keyof typeof Ionicons.glyphMap> = {
+  water: 'water-outline',
+  trailhead: 'trail-sign-outline',
+  viewpoint: 'flag-outline',
+  peak: 'triangle-outline',
+  hot_spring: 'flame-outline',
 };
 
 // ── Helper: coords → GeoJSON ──────────────────────────────────────────────────
@@ -175,7 +199,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     showLandOverlay, showUsgsOverlay, showFire, showAva, showRadar, showMvum,
     onMapReady, onBoundsChange, onMapTap, onMapLongPress,
     onCampTap, onGasTap, onPoiTap, onTileCampTap, onBaseCampTap, onTrailTap, onWaypointTap,
-    onRouteReady, onRoutePersist,
+    onRouteReady, onRoutePersist, onOffRoute, onOffRouteWarn, onBackOnRoute,
   } = props;
 
   const mapRef = useRef<MapLibreGL.MapViewRef>(null);
@@ -258,6 +282,9 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const loadedStateRef  = useRef<string | null>(null); // path of currently-active state file
   const switchingRef    = useRef(false);               // prevent concurrent state switches
   const isRoutingRef    = useRef(false);               // route fetch in progress — block CDN fallback
+  const offRouteStreakRef = useRef(0);
+  const offRouteWarnAtRef = useRef(0);
+  const wasOffRouteRef = useRef(false);
   const lastFlyToRef    = useRef(0);                   // timestamp of last flyTo — debounce CDN fallback
   const routeRequestRef = useRef(0);                   // cancels stale async route results
 
@@ -427,6 +454,10 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const [breadcrumb,   setBreadcrumb]   = useState<[number,number][]>([]);
   const [navTargetIdx, setNavTargetIdx] = useState(-1);
   const [searchDest,   setSearchDest]   = useState<{ lat: number; lng: number } | null>(null);
+  const waypointSignature = useMemo(
+    () => waypoints.map(w => `${w.lng.toFixed(5)},${w.lat.toFixed(5)}:${w.type}:${w.day}`).join('|'),
+    [waypoints],
+  );
 
   // Route tracking ref
   const routeRef = useRef({ coords: [] as [number,number][], passedIdx: 0 });
@@ -517,9 +548,13 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   // When a new trip is planned: auto-route + fit camera to show all waypoints
   useEffect(() => {
     if (waypoints.length < 2) return;
-    if (routeCoords.length === 0) {
-      doFetchRoute(waypoints.map(w => `${w.lng},${w.lat}`), 0);
-    }
+    routeRequestRef.current++;
+    isRoutingRef.current = false;
+    setRouteCoords([]);
+    setPassedCoords([]);
+    setBreadcrumb([]);
+    routeRef.current = { coords: [], passedIdx: 0 };
+    doFetchRoute(waypoints.map(w => `${w.lng},${w.lat}`), 0);
     // Fit camera to the trip bounding box (skip if actively navigating)
     if (!navMode) {
       const lngs = waypoints.map(w => w.lng);
@@ -531,7 +566,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         camRef.current?.fitBounds(ne, sw, [80, 50, 120, 50], 900);
       }, 400);
     }
-  }, [waypoints.length]);
+  }, [waypointSignature]);
 
   // ── Nav: camera follow (independent of route) ───────────────────────────────
   useEffect(() => {
@@ -565,8 +600,29 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       routeRef.current.passedIdx = best;
       setPassedCoords(coords.slice(0, best + 1));
     }
+    if (bestD > 120) {
+      offRouteStreakRef.current += 1;
+      wasOffRouteRef.current = true;
+      if (offRouteStreakRef.current >= 2) {
+        onOffRoute?.(lat, lng, Math.round(bestD));
+      } else {
+        onOffRouteWarn?.(lat, lng, Math.round(bestD));
+      }
+    } else if (bestD > 60) {
+      offRouteStreakRef.current = 0;
+      wasOffRouteRef.current = true;
+      const now = Date.now();
+      if (now - offRouteWarnAtRef.current > 8000) {
+        offRouteWarnAtRef.current = now;
+        onOffRouteWarn?.(lat, lng, Math.round(bestD));
+      }
+    } else if (wasOffRouteRef.current) {
+      offRouteStreakRef.current = 0;
+      wasOffRouteRef.current = false;
+      onBackOnRoute?.();
+    }
     setBreadcrumb(prev => [...prev, [lng, lat]]);
-  }, [userLoc, navMode]);
+  }, [userLoc, navMode, onOffRoute, onOffRouteWarn, onBackOnRoute]);
 
   // ── GeoJSON sources ─────────────────────────────────────────────────────────
   const campFC = useMemo(() => pointFC(camps.map(campFeat)), [camps]);
@@ -609,16 +665,20 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         const rendered = await mapRef.current.queryRenderedFeaturesAtPoint(
           point ?? await mapRef.current.getPointInView([lng, lat]),
           undefined,
-          ['pm-pois-camp-site', 'pm-pois-camp-pitch', 'pm-pois-shelter']
+          ['pm-pois-camp-site', 'pm-pois-camp-pitch', 'pm-pois-shelter', 'pm-pois-trailhead']
         );
         const renderedFeatures = Array.isArray(rendered) ? rendered : rendered?.features;
-        const campFeat = renderedFeatures?.[0];
-        if (campFeat?.properties) {
-          const kind = campFeat.properties.kind ?? 'camp_site';
-          const name = campFeat.properties.name ?? kindLabel(kind);
-          const coords = campFeat.geometry?.type === 'Point'
-            ? (campFeat.geometry as GeoJSON.Point).coordinates
+        const tileFeat = renderedFeatures?.[0];
+        if (tileFeat?.properties) {
+          const kind = tileFeat.properties.kind ?? 'camp_site';
+          const name = tileFeat.properties.name ?? kindLabel(kind);
+          const coords = tileFeat.geometry?.type === 'Point'
+            ? (tileFeat.geometry as GeoJSON.Point).coordinates
             : [lng, lat];
+          if (kind === 'trailhead') {
+            onTrailTap(name, coords[1] ?? lat, coords[0] ?? lng);
+            return;
+          }
           onTileCampTap(name, kind, coords[1] ?? lat, coords[0] ?? lng);
           return;
         }
@@ -814,6 +874,20 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               circleStrokeColor: ['case', ['==', ['get', 'full'], 1], '#ef4444', 'rgba(255,255,255,0.9)'],
             }}
           />
+          <MapLibreGL.SymbolLayer
+            id="camp-code"
+            filter={['!', ['has', 'point_count']]}
+            style={{
+              textField: 'C',
+              textSize: 10,
+              textFont: ['Noto Sans Medium'],
+              textColor: '#fff',
+              textHaloColor: 'rgba(0,0,0,0.35)',
+              textHaloWidth: 0.8,
+              textIgnorePlacement: true,
+              textAllowOverlap: true,
+            } as any}
+          />
           {/* Camp name labels — visible from z11, hidden when clustered */}
           <MapLibreGL.SymbolLayer
             id="camp-name"
@@ -848,6 +922,19 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             style={{ circleRadius: 9, circleColor: '#eab308', circleOpacity: 0.92, circleStrokeWidth: 2, circleStrokeColor: '#fff' }}
           />
           <MapLibreGL.SymbolLayer
+            id="gas-code"
+            style={{
+              textField: 'F',
+              textSize: 10,
+              textFont: ['Noto Sans Medium'],
+              textColor: '#111827',
+              textHaloColor: 'rgba(255,255,255,0.55)',
+              textHaloWidth: 0.8,
+              textIgnorePlacement: true,
+              textAllowOverlap: true,
+            } as any}
+          />
+          <MapLibreGL.SymbolLayer
             id="gas-label"
             minZoomLevel={11}
             style={{
@@ -860,6 +947,20 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           />
         </MapLibreGL.ShapeSource>
       )}
+
+      {gas.slice(0, 60).map((station, i) => (
+        <MapLibreGL.MarkerView
+          key={`gas-icon-${station.name}-${station.lat}-${station.lng}-${i}`}
+          id={`gas-icon-${i}`}
+          coordinate={[station.lng, station.lat]}
+        >
+          <IconPin
+            color="#eab308"
+            icon="flash-outline"
+            onPress={() => onGasTap?.({ name: station.name || 'Gas Station', lat: station.lat, lng: station.lng })}
+          />
+        </MapLibreGL.MarkerView>
+      ))}
 
       {/* ── POIs (water, trailheads, viewpoints, peaks) ───────────────── */}
       {pois.length > 0 && (
@@ -877,9 +978,28 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             id="poi-circle"
             style={{
               circleRadius: ['case', ['==', ['get', 'type'], 'peak'], 9, 8],
-              circleColor: ['match', ['get', 'type'], 'water', '#3b82f6', 'trailhead', '#22c55e', 'viewpoint', '#a855f7', 'peak', '#92400e', '#6b7280'],
+              circleColor: ['match', ['get', 'type'], 'water', '#3b82f6', 'trailhead', '#22c55e', 'viewpoint', '#a855f7', 'peak', '#92400e', 'hot_spring', '#f97316', '#6b7280'],
               circleOpacity: 0.9, circleStrokeWidth: 1.5, circleStrokeColor: '#fff',
             }}
+          />
+          <MapLibreGL.SymbolLayer
+            id="poi-code"
+            style={{
+              textField: ['match', ['get', 'type'],
+                'water', POI_CODES.water,
+                'trailhead', POI_CODES.trailhead,
+                'viewpoint', POI_CODES.viewpoint,
+                'peak', POI_CODES.peak,
+                'hot_spring', POI_CODES.hot_spring,
+                'P'],
+              textSize: 9.5,
+              textFont: ['Noto Sans Medium'],
+              textColor: '#fff',
+              textHaloColor: 'rgba(0,0,0,0.35)',
+              textHaloWidth: 0.8,
+              textIgnorePlacement: true,
+              textAllowOverlap: true,
+            } as any}
           />
           <MapLibreGL.SymbolLayer
             id="poi-label"
@@ -894,6 +1014,20 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           />
         </MapLibreGL.ShapeSource>
       )}
+
+      {pois.slice(0, 70).map((poi, i) => (
+        <MapLibreGL.MarkerView
+          key={`poi-icon-${poi.type}-${poi.name}-${poi.lat}-${poi.lng}-${i}`}
+          id={`poi-icon-${i}`}
+          coordinate={[poi.lng, poi.lat]}
+        >
+          <IconPin
+            color={poiColor(poi.type)}
+            icon={POI_ICON_NAMES[poi.type] || 'location-outline'}
+            onPress={() => onPoiTap?.({ name: poi.name, type: poi.type, lat: poi.lat, lng: poi.lng })}
+          />
+        </MapLibreGL.MarkerView>
+      ))}
 
       {/* ── Community pins ────────────────────────────────────────────── */}
       {communityPins.length > 0 && (
@@ -1061,12 +1195,23 @@ function kindLabel(kind: string): string {
   }
 }
 
+function poiColor(type: string): string {
+  switch (type) {
+    case 'water': return '#3b82f6';
+    case 'trailhead': return '#22c55e';
+    case 'viewpoint': return '#a855f7';
+    case 'peak': return '#92400e';
+    case 'hot_spring': return '#f97316';
+    default: return '#6b7280';
+  }
+}
+
 // ── Sub-components ─────────────────────────────────────────────────────────────
 function WaypointDot({ wp, index, isNavTarget, onPress }: {
   wp: WP; index: number; isNavTarget: boolean; onPress: () => void;
 }) {
   const color = WP_COLORS[wp.type] || '#f97316';
-  const icon  = WP_ICONS[wp.type] || String(index + 1);
+  const icon = WP_ICON_NAMES[wp.type];
   return (
     <View
       onTouchEnd={onPress}
@@ -1076,6 +1221,9 @@ function WaypointDot({ wp, index, isNavTarget, onPress }: {
         isNavTarget && styles.wpDotNavTarget,
       ]}
     >
+      {icon
+        ? <Ionicons name={icon} size={16} color={isNavTarget ? color : '#fff'} />
+        : <Text style={[styles.wpDotText, isNavTarget && { color }]} numberOfLines={1}>{index + 1}</Text>}
     </View>
   );
 }
@@ -1087,13 +1235,36 @@ function ReportDot({ type, subtype }: { type: string; subtype?: string }) {
     water: '#38bdf8dd',
   };
   const color = COLORS[type] || '#6b7280dd';
-  const ICONS: Record<string, string> = {
-    police: '🚔', hazard: '⚠️', road_condition: '🚧',
-    wildlife: '🦌', campsite: '⛺', road_closure: '🚫', water: '💧',
+  const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
+    police: 'shield-outline',
+    hazard: 'warning-outline',
+    road_condition: 'trail-sign-outline',
+    wildlife: 'paw-outline',
+    campsite: 'bonfire-outline',
+    road_closure: 'remove-circle-outline',
+    closure: 'remove-circle-outline',
+    water: 'water-outline',
+    fuel: 'flash-outline',
+    viewpoint: 'flag-outline',
+    service: 'construct-outline',
+    cell_signal: 'cellular-outline',
   };
-  const icon = ICONS[type] || '📍';
+  const icon = ICONS[type] || 'alert-outline';
   return (
     <View style={[styles.reportDot, { backgroundColor: color }]}>
+      <Ionicons name={icon} size={17} color="#fff" />
+    </View>
+  );
+}
+
+function IconPin({ color, icon, onPress }: {
+  color: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  onPress: () => void;
+}) {
+  return (
+    <View onTouchEnd={onPress} style={[styles.iconPin, { backgroundColor: color }]}>
+      <Ionicons name={icon} size={15} color="#fff" />
     </View>
   );
 }
@@ -1113,12 +1284,26 @@ const styles = StyleSheet.create({
   wpDotNavTarget: {
     shadowColor: '#f97316', shadowOpacity: 0.8, shadowRadius: 8,
   },
+  wpDotText: {
+    color: '#fff', fontSize: 11, fontWeight: '900', fontFamily: 'monospace',
+    textAlign: 'center',
+  },
   reportDot: {
     width: 32, height: 32, borderRadius: 16,
     borderWidth: 2.5, borderColor: 'rgba(255,255,255,0.7)',
     alignItems: 'center', justifyContent: 'center',
     shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.45, shadowRadius: 4, elevation: 4,
+  },
+  reportDotText: {
+    color: '#fff', fontSize: 14, fontWeight: '900', textAlign: 'center',
+  },
+  iconPin: {
+    width: 28, height: 28, borderRadius: 14,
+    borderWidth: 2, borderColor: '#fff',
+    alignItems: 'center', justifyContent: 'center',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35, shadowRadius: 4, elevation: 4,
   },
   searchMarker: {
     alignItems: 'center', justifyContent: 'center',

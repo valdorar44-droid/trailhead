@@ -38,7 +38,7 @@ class PMTilesReader(path: String) : AutoCloseable {
             tileDataOffset = u64(56),
             internalComp   = hd[97].toInt() and 0xFF
         )
-        rootEntries = parseDir(readBytes(header.rootDirOffset, header.rootDirLength.toInt()))
+        rootEntries = parseDir(readInternalBytes(header.rootDirOffset, header.rootDirLength.toInt()))
     }
 
     override fun close() = raf.close()
@@ -56,15 +56,18 @@ class PMTilesReader(path: String) : AutoCloseable {
         return if (e.runLength == 0) {
             // Leaf directory
             val leaf = leafCache.getOrPut(e.offset) {
-                parseDir(readBytes(header.leafDirsOffset + e.offset, e.length))
+                parseDir(readInternalBytes(header.leafDirsOffset + e.offset, e.length))
             }
             lookup(leaf, id)
         } else {
-            readBytes(header.tileDataOffset + e.offset, e.length)
+            readRawBytes(header.tileDataOffset + e.offset, e.length)
         }
     }
 
-    private fun readBytes(offset: Long, length: Int): ByteArray {
+    private fun readRawBytes(offset: Long, length: Int): ByteArray =
+        ByteArray(length).also { raf.seek(offset); raf.readFully(it) }
+
+    private fun readInternalBytes(offset: Long, length: Int): ByteArray {
         val raw = ByteArray(length).also { raf.seek(offset); raf.readFully(it) }
         return if (header.internalComp == 2) gunzip(raw) ?: raw else raw
     }
@@ -82,7 +85,8 @@ class PMTilesReader(path: String) : AutoCloseable {
         }
         if (lo > 0) {
             val prev = entries[lo - 1]
-            if (prev.runLength > 1 && id < prev.tileId + prev.runLength) return prev
+            if (prev.runLength == 0) return prev
+            if (id < prev.tileId + prev.runLength) return prev
         }
         return null
     }
@@ -108,7 +112,14 @@ class PMTilesReader(path: String) : AutoCloseable {
             val lens  = IntArray(n)  { varint().toInt() }
             val offs  = LongArray(n)
             for (i in 0 until n) {
-                offs[i] = if (i > 0 && rls[i] == 0) offs[i-1] + lens[i-1] else varint()
+                val tmp = varint()
+                offs[i] = if (i > 0 && tmp == 0L) {
+                    offs[i - 1] + lens[i - 1]
+                } else if (tmp > 0) {
+                    tmp - 1
+                } else {
+                    0
+                }
             }
             return List(n) { DirEntry(ids[it], offs[it], lens[it], rls[it]) }
         }
@@ -123,7 +134,7 @@ class PMTilesReader(path: String) : AutoCloseable {
                 val ry = if ((cy and s) != 0) 1 else 0
                 d += s.toLong() * s.toLong() * ((3 * rx) xor ry).toLong()
                 if (ry == 0) {
-                    if (rx == 1) { cx = n - 1 - cx; cy = n - 1 - cy }
+                    if (rx == 1) { cx = s - 1 - cx; cy = s - 1 - cy }
                     val t = cx; cx = cy; cy = t
                 }
                 s = s shr 1

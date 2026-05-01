@@ -14,12 +14,13 @@ object TileServer {
     @Volatile var running = false
         private set
     private var server: ServerSocket? = null
-    private var reader: PMTilesReader? = null
+    private var stateReader: PMTilesReader? = null
+    private var baseReader: PMTilesReader? = null
+    private val readerLock = Any()
     private val pool = Executors.newFixedThreadPool(8)
 
-    fun start(path: String) {
+    fun start() {
         if (running) return
-        reader = PMTilesReader(path)
         server = ServerSocket(PORT).also { it.reuseAddress = true }
         running = true
         Thread {
@@ -34,7 +35,26 @@ object TileServer {
         running = false
         try { server?.close() } catch (_: Exception) {}
         server = null
-        reader?.close(); reader = null
+        synchronized(readerLock) {
+            stateReader?.close(); stateReader = null
+            baseReader?.close(); baseReader = null
+        }
+    }
+
+    fun switchState(path: String) {
+        val next = PMTilesReader(path)
+        synchronized(readerLock) {
+            stateReader?.close()
+            stateReader = next
+        }
+    }
+
+    fun setBase(path: String) {
+        val next = PMTilesReader(path)
+        synchronized(readerLock) {
+            baseReader?.close()
+            baseReader = next
+        }
     }
 
     // ── Handle one connection ─────────────────────────────────────────────────
@@ -53,7 +73,7 @@ object TileServer {
                     }
                     val fLat = qp("from_lat"); val fLng = qp("from_lng")
                     val tLat = qp("to_lat");   val tLng = qp("to_lng")
-                    val rd = reader
+                    val rd = synchronized(readerLock) { stateReader ?: baseReader }
                     if (fLat != null && fLng != null && tLat != null && tLng != null && rd != null) {
                         val result = OfflineRouter.route(fLat, fLng, tLat, tLng, rd)
                         if (result != null) {
@@ -77,11 +97,14 @@ object TileServer {
                 val m = Regex("""GET /api/tiles/(\d+)/(\d+)/(\d+)\.pbf""").find(line)
                 if (m == null) { respond(s, 404, ByteArray(0)); return }
                 val (z, x, y) = m.destructured.toList().map { it.toInt() }
-                val data = reader?.tile(z, x, y)
+                val data = synchronized(readerLock) {
+                    stateReader?.tile(z, x, y)?.takeIf { it.isNotEmpty() }
+                        ?: baseReader?.tile(z, x, y)?.takeIf { it.isNotEmpty() }
+                }
                 if (data != null && data.isNotEmpty()) {
                     respond(s, 200, data, "application/vnd.mapbox-vector-tile", "Content-Encoding: gzip\r\n")
                 } else {
-                    respond(s, 204, ByteArray(0))
+                    respond(s, 204, ByteArray(0), extraHeaders = "Cache-Control: no-store\r\n")
                 }
             } catch (_: Exception) {}
         }
@@ -99,7 +122,7 @@ object TileServer {
                      "Content-Type: $contentType\r\n" +
                      "Content-Length: ${body.size}\r\n" +
                      "Access-Control-Allow-Origin: *\r\n" +
-                     "Cache-Control: max-age=86400\r\n" +
+                     (if (extraHeaders.contains("Cache-Control:")) "" else "Cache-Control: max-age=86400\r\n") +
                      extraHeaders +
                      "Connection: close\r\n\r\n"
         socket.getOutputStream().apply {

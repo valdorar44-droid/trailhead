@@ -50,8 +50,8 @@ export default function PaywallModal({ visible, code, message, onClose, onPlanAc
 
   const monthlyPrice = monthlyProduct?.localizedPrice ?? '$7.99';
   const annualPrice  = annualProduct?.localizedPrice  ?? '$49.99';
-  const annualDisabled = purchasing || restoring || storeLoading || !annualProduct;
-  const monthlyDisabled = purchasing || restoring || storeLoading || !monthlyProduct;
+  const annualDisabled = purchasing || restoring || storeLoading;
+  const monthlyDisabled = purchasing || restoring || storeLoading;
   const storeMessage = storeLoading
     ? 'Loading App Store plans...'
     : error;

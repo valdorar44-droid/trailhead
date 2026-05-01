@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   Modal, View, Text, TouchableOpacity, StyleSheet,
   ScrollView, ActivityIndicator, Linking,
@@ -27,7 +27,11 @@ const EARN_ITEMS = [
 
 export default function PaywallModal({ visible, code, message, onClose, onPlanActivated }: Props) {
   const C  = useTheme();
-  const { monthlyProduct, annualProduct, purchasing, restoring, error, purchase, restore } = useSubscription();
+  const { monthlyProduct, annualProduct, purchasing, restoring, error, storeLoading, purchase, restore, openPaywall } = useSubscription();
+
+  useEffect(() => {
+    if (visible) openPaywall();
+  }, [openPaywall, visible]);
 
   const isSearchLimit = code === 'search_limit';
   const title = isSearchLimit ? 'Free search used' : 'Credits needed';
@@ -36,7 +40,8 @@ export default function PaywallModal({ visible, code, message, onClose, onPlanAc
     : 'Replaces Gaia, iOverlander & The Dyrt. Earn free credits by contributing, or get the Explorer Plan for unlimited AI routes, camp research, and offline access.');
 
   async function handlePurchase(productId: string) {
-    await purchase(productId);
+    const started = await purchase(productId);
+    if (!started) return;
     // purchaseUpdatedListener fires asynchronously — close modal optimistically
     // and let the store update propagate
     onPlanActivated?.();
@@ -45,6 +50,11 @@ export default function PaywallModal({ visible, code, message, onClose, onPlanAc
 
   const monthlyPrice = monthlyProduct?.localizedPrice ?? '$7.99';
   const annualPrice  = annualProduct?.localizedPrice  ?? '$49.99';
+  const annualDisabled = purchasing || restoring || storeLoading || !annualProduct;
+  const monthlyDisabled = purchasing || restoring || storeLoading || !monthlyProduct;
+  const storeMessage = storeLoading
+    ? 'Loading App Store plans...'
+    : error;
 
   return (
     <Modal visible={visible} animationType="slide" transparent presentationStyle="overFullScreen">
@@ -57,9 +67,9 @@ export default function PaywallModal({ visible, code, message, onClose, onPlanAc
 
           {/* Annual — featured */}
           <TouchableOpacity
-            style={{ backgroundColor: C.orange, borderRadius: 14, paddingHorizontal: 18, paddingVertical: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, paddingTop: 20, borderWidth: 1, borderColor: C.orange }}
+            style={{ backgroundColor: C.orange, borderRadius: 14, paddingHorizontal: 18, paddingVertical: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, paddingTop: 20, borderWidth: 1, borderColor: C.orange, opacity: annualDisabled ? 0.72 : 1 }}
             onPress={() => handlePurchase(PRODUCT_IDS.annual)}
-            disabled={purchasing || restoring}
+            disabled={annualDisabled}
             activeOpacity={0.85}
           >
             <View style={[staticS.planBtnBadge, { backgroundColor: '#fff' }]}>
@@ -69,28 +79,37 @@ export default function PaywallModal({ visible, code, message, onClose, onPlanAc
               <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700' }}>Explorer Annual</Text>
               <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 12, marginTop: 2 }}>7-day free trial, then {annualPrice}/year</Text>
             </View>
-            {purchasing
+            {purchasing || storeLoading
               ? <ActivityIndicator color="#fff" size="small" />
               : <Text style={{ color: '#fff', fontSize: 20, fontWeight: '600', marginLeft: 8 }}>→</Text>}
           </TouchableOpacity>
 
           {/* Monthly */}
           <TouchableOpacity
-            style={{ backgroundColor: C.s2, borderRadius: 14, paddingHorizontal: 18, paddingVertical: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, borderWidth: 1, borderColor: C.border }}
+            style={{ backgroundColor: C.s2, borderRadius: 14, paddingHorizontal: 18, paddingVertical: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, borderWidth: 1, borderColor: C.border, opacity: monthlyDisabled ? 0.72 : 1 }}
             onPress={() => handlePurchase(PRODUCT_IDS.monthly)}
-            disabled={purchasing || restoring}
+            disabled={monthlyDisabled}
             activeOpacity={0.85}
           >
             <View style={staticS.planBtnBody}>
               <Text style={{ color: C.text, fontSize: 15, fontWeight: '700' }}>Explorer Monthly</Text>
               <Text style={{ color: C.text2, fontSize: 12, marginTop: 2 }}>7-day free trial, then {monthlyPrice}/month</Text>
             </View>
-            {purchasing
+            {purchasing || storeLoading
               ? <ActivityIndicator color={C.orange} size="small" />
               : <Text style={{ color: C.text2, fontSize: 20, fontWeight: '600', marginLeft: 8 }}>→</Text>}
           </TouchableOpacity>
 
-          {!!error && <Text style={{ color: C.red, fontSize: 13, marginBottom: 8, textAlign: 'center' }}>{error}</Text>}
+          {!!storeMessage && (
+            <View style={staticS.storeStatus}>
+              <Text style={{ color: C.text3, fontSize: 12, textAlign: 'center' }}>{storeMessage}</Text>
+              {!!error && !storeLoading && (
+                <TouchableOpacity onPress={openPaywall} style={staticS.retryStoreBtn} activeOpacity={0.7}>
+                  <Text style={{ color: C.orange, fontSize: 12, fontWeight: '700' }}>Retry App Store</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
 
           <Text style={{ color: C.text3, fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.8, marginTop: 8, marginBottom: 12, fontFamily: mono }}>Or earn free credits</Text>
 
@@ -107,7 +126,7 @@ export default function PaywallModal({ visible, code, message, onClose, onPlanAc
           <TouchableOpacity
             style={staticS.restoreBtn}
             onPress={restore}
-            disabled={restoring || purchasing}
+            disabled={restoring || purchasing || storeLoading}
             activeOpacity={0.7}
           >
             {restoring
@@ -150,6 +169,8 @@ const staticS = StyleSheet.create({
   earnList:      { maxHeight: 180, marginBottom: 16 },
   earnRow:       { flexDirection: 'row', alignItems: 'center', paddingVertical: 10 },
   earnIcon:      { fontSize: 18, width: 30 },
+  storeStatus:   { alignItems: 'center', gap: 6, marginBottom: 8 },
+  retryStoreBtn: { paddingHorizontal: 10, paddingVertical: 4 },
   restoreBtn:    { alignItems: 'center', paddingVertical: 10 },
   closeBtn:      { alignItems: 'center', paddingVertical: 10 },
   legalLinks:    { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 4 },

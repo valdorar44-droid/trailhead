@@ -35,10 +35,12 @@ export function useSubscription() {
   const [purchasing, setPurchasing] = useState(false);
   const [restoring,  setRestoring]  = useState(false);
   const [error,      setError]      = useState('');
+  const [storeLoading, setStoreLoading] = useState(false);
   // IAP is NOT initialized on mount — only when the user explicitly opens the
   // paywall or taps Restore. initConnection() + getSubscriptions() hit the App
   // Store and trigger iOS "Sign into Apple account" if called automatically.
   const [iapReady, setIapReady] = useState(false);
+  const [iapAttempt, setIapAttempt] = useState(0);
 
   const purchaseListenerRef = useRef<{ remove: () => void } | null>(null);
   const errorListenerRef    = useRef<{ remove: () => void } | null>(null);
@@ -54,14 +56,23 @@ export function useSubscription() {
   }, [token, setPlan]);
 
   useEffect(() => {
-    const iap = getIAP();
     // Only run IAP setup when explicitly triggered (iapReady flag set by openPaywall)
-    if (!iap || !iapReady) return;
+    if (!iapReady) return;
+
+    const iap = getIAP();
+    if (!iap) {
+      setConnected(false);
+      setProducts([]);
+      setStoreLoading(false);
+      return;
+    }
 
     let mounted = true;
 
     async function setup() {
       if (!iap) return;
+      setStoreLoading(true);
+      setError('');
       try {
         await iap.initConnection();
         if (!mounted) return;
@@ -103,7 +114,14 @@ export function useSubscription() {
         }));
         setProducts(normalized);
       } catch {
-        // Simulator, or store unavailable — degrade silently
+        // Simulator, App Review network hiccups, or a temporary StoreKit outage.
+        // Keep the paywall usable and avoid showing a fatal-looking IAP error.
+        if (mounted) {
+          setConnected(false);
+          setProducts([]);
+        }
+      } finally {
+        if (mounted) setStoreLoading(false);
       }
     }
 
@@ -115,32 +133,42 @@ export function useSubscription() {
       errorListenerRef.current?.remove();
       iap.endConnection().catch(() => {});
     };
-  }, [activateOnBackend, iapReady]);
+  }, [activateOnBackend, iapAttempt, iapReady]);
 
   // Call this before showing the paywall — initializes IAP on demand
   const openPaywall = useCallback(() => {
+    setError('');
     setIapReady(true);
+    setIapAttempt(n => n + 1);
   }, []);
 
   const purchase = useCallback(async (productId: string) => {
     const iap = getIAP();
-    if (!iap || !connected) { setError('Store not available.'); return; }
+    if (!iap || !connected) {
+      setError('Purchases are temporarily unavailable. Please try again in a moment.');
+      return false;
+    }
     setError('');
     setPurchasing(true);
     try {
       await iap.requestSubscription({ sku: productId } as any);
+      return true;
     } catch (e: any) {
       const msg = e?.message ?? '';
       if (!msg.toLowerCase().includes('cancel')) {
         setError('Purchase failed. Please try again.');
       }
       setPurchasing(false);
+      return false;
     }
   }, [connected]);
 
   const restore = useCallback(async () => {
     const iap = getIAP();
-    if (!iap) { setError('Store not available.'); return; }
+    if (!iap) {
+      setError('Purchases are temporarily unavailable. Please try again in a moment.');
+      return;
+    }
     setRestoring(true);
     setError('');
     try {
@@ -150,8 +178,9 @@ export function useSubscription() {
         return id === PRODUCT_IDS.monthly || id === PRODUCT_IDS.annual;
       });
       if (sub) {
-        const productId     = sub.productId ?? sub.id ?? '';
-        const transactionId = sub.transactionId ?? (sub as any).orderId ?? sub.id ?? '';
+        const restoredPurchase = sub as any;
+        const productId     = restoredPurchase.productId ?? restoredPurchase.id ?? '';
+        const transactionId = restoredPurchase.transactionId ?? restoredPurchase.orderId ?? restoredPurchase.id ?? '';
         await activateOnBackend(productId, transactionId);
         Alert.alert('Restored', 'Your Explorer Plan has been restored.');
       } else {
@@ -166,5 +195,5 @@ export function useSubscription() {
   const monthlyProduct = products.find(p => p.productId === PRODUCT_IDS.monthly);
   const annualProduct  = products.find(p => p.productId === PRODUCT_IDS.annual);
 
-  return { connected, products, monthlyProduct, annualProduct, purchasing, restoring, error, purchase, restore, openPaywall };
+  return { connected, products, monthlyProduct, annualProduct, purchasing, restoring, error, storeLoading, purchase, restore, openPaywall };
 }

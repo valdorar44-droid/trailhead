@@ -22,7 +22,7 @@ import {
 } from '@/lib/useOfflineFiles';
 import {
   downloadPack, deletePack, getInstalledPacks, pausePack,
-  US_STATE_PACKS,
+  routeCorridorBounds, US_STATE_PACKS,
   type InstalledPack, type PackProgress,
 } from './offlineManager';
 import type { WP } from './types';
@@ -34,6 +34,7 @@ interface Props {
   visible:     boolean;
   onClose:     () => void;
   waypoints:   WP[];
+  routeCoords?: [number, number][];
   tripName:    string | null;
   useNativeMap: boolean;
   onWebDownloadBbox?:   (opts: WebDownloadOpts) => void;
@@ -326,7 +327,7 @@ function StateRow({ code, st, isCached, isDownloading, isActive, progress, onDow
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function OfflineModal({
-  visible, onClose, waypoints, tripName, useNativeMap,
+  visible, onClose, waypoints, routeCoords = [], tripName, useNativeMap,
   onWebDownloadBbox, onWebDownloadRoute, onWebCancelDownload, onWebClearRegion,
   webIsDownloading, webDownloadProgress, webDownloadMB, webCachedRegions, webDownloadLabel,
 }: Props) {
@@ -369,6 +370,22 @@ export default function OfflineModal({
       msg => { setPackError(msg); setActivePackName(null); setPackProgress(null); },
     );
   }, [mapboxToken]);
+
+  const startTripCorridor = useCallback((name: string) => {
+    if (!useNativeMap) {
+      onWebDownloadRoute?.({ bufferKm: 16, minZ: 10, maxZ: 15, vectorOnly: true, label: name });
+      return;
+    }
+
+    const routePoints = routeCoords.map(([lng, lat]) => ({ lat, lng }));
+    const points = routePoints.length >= 2 ? routePoints : waypoints;
+    const bounds = routeCorridorBounds(points, 0.22);
+    if (!bounds) {
+      setPackError('Route corridor needs at least two mapped trip points.');
+      return;
+    }
+    startMlnPack(name, bounds, 10, 15);
+  }, [onWebDownloadRoute, routeCoords, startMlnPack, useNativeMap, waypoints]);
 
   const deleteMlnPack = useCallback(async (name: string) => {
     await deletePack(name);
@@ -468,14 +485,16 @@ export default function OfflineModal({
                   <Section label="TRIP CORRIDOR — ROUTE LINE DOWNLOAD" />
                   {waypoints.length > 0 ? (() => {
                     const name   = (tripName ?? 'Trip') + '-corridor';
-                    const cached = webCachedRegions?.includes(name) ?? false;
-                    const busy   = !!webIsDownloading;
+                    const cached = useNativeMap
+                      ? mlnPacks.some(pack => pack.name === name && pack.complete)
+                      : webCachedRegions?.includes(name) ?? false;
+                    const busy   = useNativeMap ? activePackName === name : !!webIsDownloading;
                     return (
                       <TouchableOpacity
                         disabled={busy}
                         style={[s.corridorCard, cached && { borderLeftColor: C.green }]}
                         onPress={() => {
-                          onWebDownloadRoute?.({ bufferKm: 16, minZ: 10, maxZ: 15, vectorOnly: true, label: name });
+                          startTripCorridor(name);
                         }}
                       >
                         <View style={{ flex: 1 }}>
@@ -487,7 +506,9 @@ export default function OfflineModal({
                           </Text>
                           {busy && (
                             <Text style={{ color: C.orange, fontSize: 9, fontFamily: mono, marginTop: 3 }}>
-                              {webDownloadProgress ?? 0}% downloaded — check map
+                              {useNativeMap
+                                ? `${Math.round(packProgress?.percentage ?? 0)}% downloaded`
+                                : `${webDownloadProgress ?? 0}% downloaded — check map`}
                             </Text>
                           )}
                         </View>

@@ -182,8 +182,8 @@ export const US_STATE_PACKS: Record<string, {
 };
 
 // ── Build route-corridor bounds ───────────────────────────────────────────────
-/** Expand waypoints into a bounding box with a buffer (default 0.3° ≈ 20km). */
-export function routeCorriderBounds(
+/** Expand route points into a bounding box with a buffer (default 0.3° ≈ 20km). */
+export function routeCorridorBounds(
   waypoints: { lat: number; lng: number }[],
   bufferDeg = 0.3,
 ): PackBounds | null {
@@ -195,3 +195,5 @@ export function routeCorriderBounds(
     [Math.max(...lngs) + bufferDeg, Math.max(...lats) + bufferDeg],
   ];
 }
+
+export const routeCorriderBounds = routeCorridorBounds;

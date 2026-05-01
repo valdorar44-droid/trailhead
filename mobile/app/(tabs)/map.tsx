@@ -3357,6 +3357,10 @@ function MapScreen() {
           <TouchableOpacity
             style={[s.ctrlBtn, isDownloading && { backgroundColor: C.orange + 'dd', borderColor: C.orange }]}
             onPress={() => {
+              if (USE_NATIVE_MAP) {
+                setShowOfflineModal(true);
+                return;
+              }
               if (isDownloading) {
                 webRef.current?.postMessage(JSON.stringify({ type: 'cancel_download' }));
                 setIsDownloading(false);
@@ -4127,6 +4131,7 @@ function MapScreen() {
         visible={showOfflineModal}
         onClose={() => setShowOfflineModal(false)}
         waypoints={waypoints}
+        routeCoords={lastRouteCoords}
         tripName={activeTrip?.plan?.trip_name ?? null}
         useNativeMap={USE_NATIVE_MAP}
         onWebDownloadBbox={opts => {

@@ -38,8 +38,7 @@ final class ValhallaRouter {
         queue.async {
             do {
                 let wrapper = try self.wrapper(packPath: packPath)
-                let response = wrapper.route(requestJson)
-                guard !response.isEmpty else {
+                guard let response = wrapper.route(requestJson), !response.isEmpty else {
                     throw ValhallaRouterError.emptyResponse
                 }
                 completion(.success(response))

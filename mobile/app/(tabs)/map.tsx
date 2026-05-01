@@ -3493,10 +3493,11 @@ function MapScreen() {
             routeCard={searchRouteCard}
             onLoadSavedTrip={async (tripId) => {
               const trip = await loadOfflineTrip(tripId).catch(() => null)
-                ?? await api.getTripById?.(tripId).catch(() => null);
+                ?? await api.getTrip(tripId).catch(() => null);
               if (trip) {
                 setActiveTrip(trip);
                 setShowSearch(false);
+                setTimeout(() => setShowDayModal(true), 350);
               }
             }}
             onCampTap={camp => {

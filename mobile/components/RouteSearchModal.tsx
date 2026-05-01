@@ -11,7 +11,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useStore, SavedPlace, MarkerGroup, TripHistoryItem } from '@/lib/store';
 import { CampsitePin, Pin } from '@/lib/api';
-import { loadOfflineTrip } from '@/lib/offlineTrips';
+import { getOfflineTripSummaries, loadOfflineTrip } from '@/lib/offlineTrips';
 import { useTheme, mono } from '@/lib/design';
 
 export interface SearchPlace {
@@ -292,6 +292,7 @@ export default function RouteSearchModal({
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupColor, setNewGroupColor] = useState(GROUP_COLORS[0]);
   const [newGroupIcon, setNewGroupIcon] = useState(GROUP_ICONS[0]);
+  const [offlineTrips, setOfflineTrips] = useState<Array<{ trip_id: string; plan: { trip_name: string; states?: string[]; duration_days?: number } }>>([]);
   const inputRef = useRef<TextInput>(null);
 
   // Switch to route view when a route card arrives
@@ -302,6 +303,20 @@ export default function RouteSearchModal({
   // Reset to picker when modal opens fresh with no route
   useEffect(() => {
     if (visible && !routeCard) { setView('picker'); setQuery(''); setResults([]); }
+  }, [visible]);
+
+  useEffect(() => {
+    if (!visible) return;
+    getOfflineTripSummaries()
+      .then(trips => setOfflineTrips(trips.map(t => ({
+        trip_id: t.trip_id,
+        plan: {
+          trip_name: t.plan.trip_name,
+          states: t.plan.states,
+          duration_days: t.plan.duration_days,
+        },
+      }))))
+      .catch(() => setOfflineTrips([]));
   }, [visible]);
 
   const doSearch = useCallback(async () => {
@@ -684,10 +699,34 @@ export default function RouteSearchModal({
           <Ionicons name="map-outline" size={18} color={C.orange} />
         </TouchableOpacity>
 
+        {/* Downloaded trip corridors */}
+        {offlineTrips.length > 0 && onLoadSavedTrip && (
+          <View style={s.section}>
+            <Text style={s.sectionTitle}>DOWNLOADED TRIP CORRIDORS</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chipRow}>
+              {offlineTrips.slice(0, 8).map(t => (
+                <TouchableOpacity
+                  key={t.trip_id}
+                  style={[s.chip, { maxWidth: 210, borderColor: C.green + '66' }]}
+                  onPress={() => { onLoadSavedTrip(t.trip_id); onClose(); }}
+                >
+                  <Ionicons name="cloud-done-outline" size={14} color={C.green} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.chipText, { fontSize: 11, fontWeight: '700' }]} numberOfLines={1}>{t.plan.trip_name}</Text>
+                    <Text style={[s.chipText, { fontSize: 9, color: C.text3 }]}>
+                      {t.plan.duration_days ?? 0}d · {(t.plan.states ?? []).slice(0, 3).join(', ')}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        )}
+
         {/* Saved Trips */}
         {tripHistory.length > 0 && onLoadSavedTrip && (
           <View style={s.section}>
-            <Text style={s.sectionTitle}>MY TRIPS</Text>
+            <Text style={s.sectionTitle}>SAVED TRIPS</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chipRow}>
               {tripHistory.slice(0, 6).map(t => (
                 <TouchableOpacity

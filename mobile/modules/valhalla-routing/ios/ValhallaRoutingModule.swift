@@ -15,5 +15,11 @@ public class ValhallaRoutingModule: Module {
                 }
             }
         }
+
+        AsyncFunction("diagnose") { (packPath: String, requestJson: String, promise: Promise) in
+            ValhallaRouter.shared.diagnose(packPath: packPath, requestJson: requestJson) { result in
+                promise.resolve(result)
+            }
+        }
     }
 }

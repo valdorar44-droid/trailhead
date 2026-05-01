@@ -12,7 +12,7 @@
 import * as FileSystem from 'expo-file-system';
 import type { RouteStep } from './types';
 import { fetchJSOfflineRoute, ENABLE_JS_OFFLINE_ROUTER, getLastOfflineRouterDebug } from './offlineRouter';
-import { routeValhalla } from 'expo-valhalla-routing';
+import { diagnoseValhalla, routeValhalla } from 'expo-valhalla-routing';
 import { ROUTING_REGIONS } from '../../lib/useOfflineFiles';
 
 export interface RouteResult {
@@ -496,11 +496,13 @@ async function fetchNativeValhallaOffline(
   }
 
   const requestJson = buildValhallaRequest(pairs, opts);
-  const raw = await routeValhalla(nativeFilePath(region.localPath), requestJson);
+  const packPath = nativeFilePath(region.localPath);
+  const diag = await diagnoseValhalla(packPath, requestJson).catch(e => `native-diag-error=${e instanceof Error ? e.message : String(e)}`);
+  const raw = await routeValhalla(packPath, requestJson);
   const data = JSON.parse(raw);
   if (!data.trip || data.trip.status !== 0) {
     const msg = data.error ?? data.message ?? data.trip?.status_message ?? 'valhalla offline error';
-    throw new Error(String(msg));
+    throw new Error(`${String(msg)}; ${diag}`);
   }
 
   const result = parseValhallaRoute(data);

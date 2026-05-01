@@ -48,6 +48,37 @@ final class ValhallaRouter {
         }
     }
 
+    func diagnose(packPath: String, requestJson: String, completion: @escaping (String) -> Void) {
+        queue.async {
+            let fm = FileManager.default
+            var parts: [String] = []
+            parts.append("native-diag-v1")
+            parts.append("packPrefix=\(Self.prefix(packPath, max: 72))")
+            parts.append("reqPrefix=\(Self.prefix(requestJson, max: 72))")
+            parts.append("packExists=\(fm.fileExists(atPath: packPath))")
+            if let attrs = try? fm.attributesOfItem(atPath: packPath),
+               let size = attrs[.size] as? NSNumber {
+                parts.append("packMB=\(String(format: "%.1f", size.doubleValue / 1_000_000))")
+            } else {
+                parts.append("packMB=?")
+            }
+
+            do {
+                let configPath = try self.writeConfig(packPath: packPath)
+                parts.append("configPrefix=\(Self.prefix(configPath, max: 72))")
+                parts.append("configExists=\(fm.fileExists(atPath: configPath))")
+                if let data = try? Data(contentsOf: URL(fileURLWithPath: configPath)),
+                   let text = String(data: data, encoding: .utf8) {
+                    parts.append("configJsonPrefix=\(Self.prefix(text, max: 96))")
+                }
+            } catch {
+                parts.append("configError=\(error.localizedDescription)")
+            }
+
+            completion(parts.joined(separator: " "))
+        }
+    }
+
     private func wrapper(packPath: String) throws -> ValhallaWrapper {
         if let wrapper = wrapperByPackPath[packPath] {
             return wrapper
@@ -110,5 +141,15 @@ final class ValhallaRouter {
         let dir = base.appendingPathComponent("TrailheadValhalla", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
+    }
+
+    private static func prefix(_ value: String, max: Int) -> String {
+        let collapsed = value
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "\t", with: " ")
+        if collapsed.count <= max { return collapsed }
+        let end = collapsed.index(collapsed.startIndex, offsetBy: max)
+        return String(collapsed[..<end])
     }
 }

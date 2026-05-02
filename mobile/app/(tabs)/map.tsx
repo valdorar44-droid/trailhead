@@ -5359,34 +5359,48 @@ function MapScreen() {
               </TouchableOpacity>
             ))}
 
-            <Text style={s.layerSectionHead}>LEGEND</Text>
-            <View style={{ paddingHorizontal: 16, paddingBottom: 8, gap: 6 }}>
-              {[
-                { color: '#22c55e', label: 'Public land tint — BLM/USFS/NPS when available' },
-                { color: '#0ea5e9', label: 'USGS topo — contours, paths, and terrain labels' },
-                { color: '#22c55e', label: 'MVUM — Open to all vehicles' },
-                { color: '#f97316', label: 'MVUM — High clearance required' },
-                { color: '#ef4444', label: 'MVUM — Closed / motorized prohibited' },
-                { color: '#a855f7', label: 'MVUM — Designated trail' },
-              ].map(l => (
-                <View key={l.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <View style={{ width: 22, height: 4, backgroundColor: l.color, borderRadius: 2 }} />
-                  <Text style={{ color: C.text2, fontSize: 11, fontFamily: mono }}>{l.label}</Text>
-                </View>
-              ))}
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
-                {[
-                  { color: '#50C878', label: 'Low (1)' }, { color: '#FFD700', label: 'Moderate (2)' },
-                  { color: '#FF8C00', label: 'Considerable (3)' }, { color: '#E63946', label: 'High (4)' }, { color: '#1a0a0a', label: 'Extreme (5)' },
-                ].map(a => (
-                  <View key={a.label} style={{ alignItems: 'center', gap: 2 }}>
-                    <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: a.color }} />
-                    <Text style={{ color: C.text3, fontSize: 8, fontFamily: mono }}>{a.label}</Text>
+            {(layerMvum || layerAva) && (
+              <Text style={s.layerSectionHead}>{layerMvum ? 'MVUM LEGEND' : 'CONDITION LEGEND'}</Text>
+            )}
+            {(layerMvum || layerAva) && (
+              <View style={{ paddingHorizontal: 16, paddingBottom: 8, gap: 6 }}>
+                {layerMvum && [
+                  { color: '#22c55e', label: 'Open to all vehicles' },
+                  { color: '#f97316', label: 'High clearance required' },
+                  { color: '#ef4444', label: 'Closed / motorized prohibited' },
+                  { color: '#a855f7', label: 'Designated trail' },
+                ].map(l => (
+                  <View key={l.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <View style={{ width: 22, height: 4, backgroundColor: l.color, borderRadius: 2 }} />
+                    <Text style={{ color: C.text2, fontSize: 11, fontFamily: mono }}>{l.label}</Text>
                   </View>
                 ))}
+                {layerMvum && (
+                  <Text style={{ color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 }}>
+                    MVUM colors apply only to the USFS MVUM overlay, not every trail line.
+                  </Text>
+                )}
+                {layerAva && layerMvum && (
+                  <Text style={[s.layerSectionHead, { paddingHorizontal: 0, marginTop: 10 }]}>AVALANCHE LEGEND</Text>
+                )}
+                {layerAva && (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                    {[
+                      { color: '#50C878', label: 'Low (1)' }, { color: '#FFD700', label: 'Moderate (2)' },
+                      { color: '#FF8C00', label: 'Considerable (3)' }, { color: '#E63946', label: 'High (4)' }, { color: '#1a0a0a', label: 'Extreme (5)' },
+                    ].map(a => (
+                      <View key={a.label} style={{ alignItems: 'center', gap: 2 }}>
+                        <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: a.color }} />
+                        <Text style={{ color: C.text3, fontSize: 8, fontFamily: mono }}>{a.label}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+                {layerAva && (
+                  <Text style={{ color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 }}>Avalanche danger levels</Text>
+                )}
               </View>
-              <Text style={{ color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 }}>Avalanche danger levels</Text>
-            </View>
+            )}
             <View style={{ height: 40 }} />
           </ScrollView>
         </View>

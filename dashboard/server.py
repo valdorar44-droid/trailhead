@@ -44,6 +44,7 @@ from db.store import (
     create_plan_job, get_plan_job, update_plan_job,
     submit_field_report, get_field_reports, get_field_report_summary,
     get_camp_profile_override, set_camp_profile_override, add_camp_edit_suggestion,
+    get_camp_edit_suggestions, update_camp_edit_suggestion_status,
     get_user_pin_count_today, vote_community_pin,
 )
 
@@ -1726,14 +1727,14 @@ class CampEditSuggestionPayload(BaseModel):
 @app.post("/api/campsites/{facility_id}/suggest-edit")
 async def suggest_camp_edit(facility_id: str, body: CampEditSuggestionPayload,
                             user: dict = Depends(_current_user)):
-    allowed = {"name", "description", "amenities", "site_types", "activities", "cost", "phone", "url", "access", "notes"}
+    allowed = {"profile", "name", "description", "amenities", "site_types", "activities", "cost", "phone", "url", "access", "notes"}
     field = (body.field or "").strip().lower()
     if field not in allowed:
         raise HTTPException(400, "Invalid edit field")
     value = (body.value or "").strip()
     if not value:
         raise HTTPException(400, "Suggested value is required")
-    if len(value) > 2000:
+    if len(value) > 8000:
         raise HTTPException(400, "Suggested value is too long")
     result = add_camp_edit_suggestion(
         facility_id, body.camp_name.strip()[:160], body.lat, body.lng,
@@ -1766,6 +1767,21 @@ async def admin_update_camp_detail(facility_id: str, body: CampAdminUpdatePayloa
         elif isinstance(val, list):
             clean[key] = [str(x).strip()[:80] for x in val if str(x).strip()][:40]
     return {"ok": True, "override": set_camp_profile_override(facility_id, clean, user.get("id"))}
+
+@app.get("/api/admin/camp-edit-suggestions")
+async def admin_camp_edit_suggestions(status: Optional[str] = "pending",
+                                      admin: dict = Depends(_require_admin)):
+    return get_camp_edit_suggestions(status if status else None, limit=200)
+
+@app.post("/api/admin/camp-edit-suggestions/{suggestion_id}/status")
+async def admin_camp_edit_suggestion_status(suggestion_id: int, body: dict,
+                                            admin: dict = Depends(_require_admin)):
+    status = str(body.get("status", "")).strip().lower()
+    if status not in {"pending", "applied", "dismissed"}:
+        raise HTTPException(400, "Invalid status")
+    if not update_camp_edit_suggestion_status(suggestion_id, status):
+        raise HTTPException(404, "Suggestion not found")
+    return {"ok": True}
 
 @app.get("/api/gas")
 async def gas(lat: float, lng: float, radius: float = 25):

@@ -1629,3 +1629,24 @@ def add_camp_edit_suggestion(camp_id: str, camp_name: str, lat: float, lng: floa
     suggestion_id = cur.lastrowid
     db.close()
     return {"id": suggestion_id, "status": "pending"}
+
+def get_camp_edit_suggestions(status: str | None = None, limit: int = 200) -> list[dict]:
+    db = _conn()
+    if status:
+        rows = db.execute(
+            "SELECT * FROM camp_edit_suggestions WHERE status=? ORDER BY created_at DESC LIMIT ?",
+            (status, limit)
+        ).fetchall()
+    else:
+        rows = db.execute(
+            "SELECT * FROM camp_edit_suggestions ORDER BY created_at DESC LIMIT ?",
+            (limit,)
+        ).fetchall()
+    db.close()
+    return [dict(r) for r in rows]
+
+def update_camp_edit_suggestion_status(suggestion_id: int, status: str) -> bool:
+    db = _conn()
+    cur = db.execute("UPDATE camp_edit_suggestions SET status=? WHERE id=?", (status, suggestion_id))
+    db.commit(); db.close()
+    return cur.rowcount > 0

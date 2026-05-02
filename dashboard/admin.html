@@ -152,6 +152,9 @@ td.name{color:var(--text);font-weight:600;}
       <div class="nav-item" onclick="showPage('pins',this)">
         <span class="nav-icon">📍</span><span class="nav-label">Pins</span>
       </div>
+      <div class="nav-item" onclick="showPage('camp-edits',this)">
+        <span class="nav-icon">✎</span><span class="nav-label">Camp Edits</span>
+      </div>
       <div class="nav-item" onclick="showPage('bugs',this)">
         <span class="nav-icon">🐛</span><span class="nav-label">Bug Reports</span>
       </div>
@@ -265,6 +268,23 @@ td.name{color:var(--text);font-weight:600;}
             <tbody id="pins-tbody"></tbody>
           </table>
         </div>
+      </div>
+
+      <!-- Camp Edits -->
+      <div class="page" id="page-camp-edits">
+        <div class="page-title">Camp Edit Suggestions</div>
+        <div class="page-sub">User-submitted campsite corrections. Apply accepted edits from the app admin profile editor, then mark them applied here.</div>
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap;">
+          <select id="camp-edit-status" class="filter-input" style="width:150px;" onchange="loadCampEdits()">
+            <option value="pending">Pending</option>
+            <option value="">All</option>
+            <option value="applied">Applied</option>
+            <option value="dismissed">Dismissed</option>
+          </select>
+          <button class="btn btn-ghost" onclick="loadCampEdits()">Refresh</button>
+          <span id="camp-edit-count" style="margin-left:auto;color:var(--text3);font-size:12px;font-family:var(--mono);"></span>
+        </div>
+        <div id="camp-edits-list" style="display:flex;flex-direction:column;gap:12px;"></div>
       </div>
 
       <!-- Bug Reports -->
@@ -381,6 +401,7 @@ function showPage(name, el) {
   if (name === 'reports')  loadReports();
   if (name === 'trips')    loadTrips();
   if (name === 'pins')     loadPins();
+  if (name === 'camp-edits') loadCampEdits();
   if (name === 'bugs')     loadBugs();
 }
 
@@ -658,6 +679,66 @@ async function deletePin(id) {
     await api(`/api/admin/pins/${id}`, {method:'DELETE'});
     toast('Pin deleted', 'ok');
     loadPins();
+  } catch(e) { toast('Error: ' + e.message, 'err'); }
+}
+
+// ── Camp Edit Suggestions ────────────────────────────────────────────────────
+
+async function loadCampEdits() {
+  try {
+    const status = document.getElementById('camp-edit-status').value;
+    const edits = await api(`/api/admin/camp-edit-suggestions?status=${encodeURIComponent(status)}`);
+    document.getElementById('camp-edit-count').textContent = `${edits.length} suggestions`;
+    const list = document.getElementById('camp-edits-list');
+    if (!edits.length) {
+      list.innerHTML = '<div style="color:var(--text3);text-align:center;padding:32px;font-family:var(--mono);font-size:12px;">No camp edit suggestions</div>';
+      return;
+    }
+    list.innerHTML = edits.map(e => {
+      const date = new Date(e.created_at * 1000).toLocaleString();
+      let preview = esc(e.value || '');
+      if (e.field === 'profile') {
+        try {
+          const parsed = JSON.parse(e.value || '{}');
+          preview = [
+            parsed.name ? `<b>${esc(parsed.name)}</b>` : '',
+            parsed.description ? esc(parsed.description).slice(0, 220) : '',
+            parsed.site_types?.length ? `Sites: ${esc(parsed.site_types.join(', '))}` : '',
+            parsed.amenities?.length ? `Amenities: ${esc(parsed.amenities.join(', '))}` : '',
+            parsed.activities?.length ? `Activities: ${esc(parsed.activities.join(', '))}` : '',
+          ].filter(Boolean).join('<br>');
+        } catch {}
+      }
+      const maps = `https://maps.google.com/?q=${e.lat},${e.lng}`;
+      return `<div class="card">
+        <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;">
+          <div>
+            <div style="font-size:15px;font-weight:800;color:var(--text);">${esc(e.camp_name)}</div>
+            <div style="color:var(--text3);font-size:11px;font-family:var(--mono);margin-top:4px;">
+              #${e.id} · ${esc(e.field)} · ${esc(e.username || 'unknown')} · ${date}
+            </div>
+          </div>
+          <span class="badge ${e.status === 'applied' ? 'badge-green' : e.status === 'dismissed' ? 'badge-gray' : 'badge-orange'}">${esc(e.status)}</span>
+        </div>
+        <div style="margin-top:12px;color:var(--text2);font-size:13px;line-height:1.5;">${preview}</div>
+        ${e.note ? `<div style="margin-top:10px;color:var(--yellow);font-size:12px;">Admin note: ${esc(e.note)}</div>` : ''}
+        <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;">
+          <a class="btn btn-ghost btn-sm" href="${maps}" target="_blank" style="text-decoration:none;">Open Map</a>
+          <button class="btn btn-primary btn-sm" onclick="markCampEdit(${e.id}, 'applied')">Mark Applied</button>
+          <button class="btn btn-danger btn-sm" onclick="markCampEdit(${e.id}, 'dismissed')">Dismiss</button>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) { toast('Error loading camp edits: ' + e.message, 'err'); }
+}
+
+async function markCampEdit(id, status) {
+  try {
+    await api(`/api/admin/camp-edit-suggestions/${id}/status`, {
+      method:'POST', body: JSON.stringify({ status })
+    });
+    toast(`Suggestion marked ${status}`, 'ok');
+    loadCampEdits();
   } catch(e) { toast('Error: ' + e.message, 'err'); }
 }
 

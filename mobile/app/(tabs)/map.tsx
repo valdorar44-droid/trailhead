@@ -567,11 +567,6 @@ const COMMUNITY_PIN_TYPES = [
 ] as const;
 
 type CommunityPinTypeId = typeof COMMUNITY_PIN_TYPES[number]['id'];
-const TRAIL_PIN_FILTERS: CommunityPinTypeId[] = [
-  'trailhead', 'trail_note', 'overlook', 'crossing', 'gate',
-  'trail_closure', 'rock_art', 'cell_signal', 'trash', 'wildlife', 'gpx_import',
-];
-
 function communityPinMeta(type?: string) {
   return COMMUNITY_PIN_TYPES.find(t => t.id === type) ?? COMMUNITY_PIN_TYPES[COMMUNITY_PIN_TYPES.length - 1];
 }
@@ -2001,7 +1996,6 @@ function MapScreen() {
   const [mapboxToken,   setMapboxToken]   = useState('');
   const [protomapsKey,  setProtomapsKey]  = useState('');
   const [showFilters,   setShowFilters]   = useState(false);
-  const [trailMode,     setTrailMode]     = useState(false);
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
   const [activePinFilters, setActivePinFilters] = useState<string[]>([]);
   const [pinDropMode, setPinDropMode] = useState(false);
@@ -2100,13 +2094,10 @@ function MapScreen() {
 
   // Dynamic map layers
   const [showLayerSheet, setShowLayerSheet] = useState(false);
-  const [layerTerrain, setLayerTerrain] = useState(false);
-  const [layerNaip,    setLayerNaip]    = useState(false);
   const [layerFire,    setLayerFire]    = useState(false);
   const [layerAva,     setLayerAva]     = useState(false);
   const [layerRadar,   setLayerRadar]   = useState(false);
   const [layerMvum,    setLayerMvum]    = useState(false);
-  const [layerRoads,   setLayerRoads]   = useState(false);
   const [tappedTrail, setTappedTrail] = useState<{ name: string; lat: number; lng: number; cls: string } | null>(null);
   const [tappedTileSpot, setTappedTileSpot] = useState<{ name: string; kind: string; lat: number; lng: number } | null>(null);
   const [tappedGas,  setTappedGas]  = useState<{ name: string; lat: number; lng: number } | null>(null);
@@ -2628,38 +2619,6 @@ function MapScreen() {
         webRef.current?.postMessage(JSON.stringify({ type: 'set_pois', pois: p }));
       })
       .catch(() => {});
-  }
-
-  function setTrailModeEnabled(enabled: boolean) {
-    setTrailMode(enabled);
-    if (enabled) {
-      setShowPois(true);
-      setShowFilters(true);
-      setShowUsgs(true);
-      setLayerMvum(true);
-      setActivePinFilters(TRAIL_PIN_FILTERS);
-      webRef.current?.postMessage(JSON.stringify({ type: 'set_usgs_overlay', show: true }));
-      webRef.current?.postMessage(JSON.stringify({ type: 'set_layer', layer: 'mvum', show: true }));
-      const vp = viewportRef.current;
-      const center = vp
-        ? { lat: (vp.n + vp.s) / 2, lng: (vp.e + vp.w) / 2 }
-        : userLoc ?? (waypoints[0] ? { lat: waypoints[0].lat, lng: waypoints[0].lng } : null);
-      if (center) {
-        fetchPois(center);
-        refreshCommunityPins(center, 4.0, true);
-      }
-      setQuickToast('Trail Mode: trailheads, notes, MVUM, and topo overlay on');
-      setTimeout(() => setQuickToast(''), 3500);
-    } else {
-      setShowPois(false);
-      setShowUsgs(false);
-      setLayerMvum(false);
-      setActivePinFilters([]);
-      webRef.current?.postMessage(JSON.stringify({ type: 'set_usgs_overlay', show: false }));
-      webRef.current?.postMessage(JSON.stringify({ type: 'set_layer', layer: 'mvum', show: false }));
-      setQuickToast('Trail Mode off');
-      setTimeout(() => setQuickToast(''), 2200);
-    }
   }
 
   function beginCommunityPinDrop(useCurrentLocation = false) {
@@ -3736,6 +3695,27 @@ function MapScreen() {
     webRef.current?.postMessage(JSON.stringify({ type: 'set_layer', layer: key, show: val }));
   }
 
+  function toggleLandOverlay(val: boolean) {
+    setShowLands(val);
+    webRef.current?.postMessage(JSON.stringify({ type: 'set_land_overlay', show: val }));
+  }
+
+  function toggleUsgsOverlay(val: boolean) {
+    setShowUsgs(val);
+    webRef.current?.postMessage(JSON.stringify({ type: 'set_usgs_overlay', show: val }));
+  }
+
+  function togglePoiOverlay(val: boolean) {
+    setShowPois(val);
+    if (val) {
+      const vp = viewportRef.current;
+      const center = vp
+        ? { lat: (vp.n + vp.s) / 2, lng: (vp.e + vp.w) / 2 }
+        : userLoc ?? (waypoints[0] ? { lat: waypoints[0].lat, lng: waypoints[0].lng } : null);
+      if (center) fetchPois(center);
+    }
+  }
+
   function manualReroute() {
     if (!userLoc || !navMode) return;
     const now = Date.now();
@@ -3839,7 +3819,7 @@ function MapScreen() {
           routeOpts={routeOpts}
           showLandOverlay={showLands}
           showUsgsOverlay={showUsgs}
-          showTerrain={layerTerrain}
+          showTerrain={false}
           showMvum={layerMvum}
           showFire={layerFire}
           showAva={layerAva}
@@ -4192,35 +4172,6 @@ function MapScreen() {
               <Text style={s.layerText}>{layerLabel[mapLayer]}</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[s.ctrlBtn, showLands && { backgroundColor: '#16a34a99', borderColor: '#22c55e' }]}
-              onPress={() => {
-                const next = !showLands;
-                setShowLands(next);
-                webRef.current?.postMessage(JSON.stringify({ type: 'set_land_overlay', show: next }));
-              }}
-            >
-              <Text style={[s.layerText, showLands && { color: '#22c55e' }]}>LANDS</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[s.ctrlBtn, showUsgs && { backgroundColor: '#0369a199', borderColor: '#0ea5e9' }]}
-              onPress={() => {
-                const next = !showUsgs;
-                setShowUsgs(next);
-                webRef.current?.postMessage(JSON.stringify({ type: 'set_usgs_overlay', show: next }));
-              }}
-            >
-              <Text style={[s.layerText, showUsgs && { color: '#0ea5e9' }]}>TRAILS</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[s.ctrlBtn, trailMode && { backgroundColor: '#15803d99', borderColor: '#22c55e' }]}
-              onPress={() => setTrailModeEnabled(!trailMode)}
-            >
-              <Text style={[s.layerText, trailMode && { color: '#bbf7d0' }]}>TRAIL</Text>
-            </TouchableOpacity>
-
             {waypoints.length > 0 && (
               <TouchableOpacity
                 style={[s.ctrlBtn, navMode && { backgroundColor: C.green + 'dd', borderColor: C.green }]}
@@ -4293,13 +4244,6 @@ function MapScreen() {
                 ? <ActivityIndicator size="small" color="#14b8a6" />
                 : <Ionicons name="trail-sign-outline" size={20} color={OVR.text} />
               }
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[s.ctrlBtn, showPois && { backgroundColor: '#3b82f6dd', borderColor: '#3b82f6' }]}
-              onPress={() => setShowPois(p => !p)}
-            >
-              <Ionicons name="water-outline" size={20} color={showPois ? '#fff' : OVR.text} />
             </TouchableOpacity>
 
             <TourTarget id="map.offline">
@@ -5363,28 +5307,29 @@ function MapScreen() {
           </View>
 
           <ScrollView showsVerticalScrollIndicator={false}>
-            <Text style={s.layerSectionHead}>BASE OVERLAYS</Text>
+            <Text style={s.layerSectionHead}>MAP OVERLAYS</Text>
             {([
-              { key: 'terrain', label: '3D Terrain + Hillshade', sub: 'Mapbox DEM — elevation + depth shading', icon: 'triangle-outline', val: layerTerrain, set: setLayerTerrain },
-              { key: 'naip',    label: 'USGS Aerial (NAIP)',     sub: 'High-res US aerial photography',          icon: 'earth-outline',    val: layerNaip,    set: setLayerNaip },
+              { key: 'lands', label: 'Public Land Tint', sub: 'BLM/USFS/NPS color overlay. Requires signal unless cached.', icon: 'map-outline', val: showLands, color: '#22c55e', toggle: toggleLandOverlay },
+              { key: 'usgs', label: 'USGS Topo + Trails', sub: 'Topo raster with contours, paths, labels, and land features.', icon: 'trail-sign-outline', val: showUsgs, color: '#0ea5e9', toggle: toggleUsgsOverlay },
+              { key: 'pois', label: 'Trailheads + Water POIs', sub: 'Nearby OSM trailheads, water, viewpoints, peaks, and hot springs.', icon: 'water-outline', val: showPois, color: '#3b82f6', toggle: togglePoiOverlay },
             ] as const).map(l => (
-              <TouchableOpacity key={l.key} style={s.layerRow} onPress={() => { const nv = !l.val; l.set(nv); toggleDataLayer(l.key, nv); }}>
-                <View style={[s.layerRowIcon, l.val && { backgroundColor: '#6366f1' }]}>
+              <TouchableOpacity key={l.key} style={s.layerRow} onPress={() => l.toggle(!l.val)}>
+                <View style={[s.layerRowIcon, l.val && { backgroundColor: l.color }]}>
                   <Ionicons name={l.icon as any} size={16} color={l.val ? '#fff' : C.text2} />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={s.layerRowLabel}>{l.label}</Text>
                   <Text style={s.layerRowSub}>{l.sub}</Text>
                 </View>
-                <View style={[s.layerDot, l.val && { backgroundColor: '#6366f1' }]} />
+                <View style={[s.layerDot, l.val && { backgroundColor: l.color }]} />
               </TouchableOpacity>
             ))}
 
             <Text style={s.layerSectionHead}>CONDITIONS</Text>
             {([
-              { key: 'fire',  label: 'Active Wildfires',   sub: 'NIFC WFIGS — live fire perimeters',       icon: 'flame-outline',      val: layerFire,  set: setLayerFire,  color: '#ef4444' },
-              { key: 'ava',   label: 'Avalanche Zones',    sub: 'Danger 1–5 across all 20 US centers',     icon: 'snow-outline',       val: layerAva,   set: setLayerAva,   color: '#3b82f6' },
-              { key: 'radar', label: 'Rain Radar',         sub: 'RainViewer — animated precipitation',     icon: 'rainy-outline',      val: layerRadar, set: setLayerRadar, color: '#06b6d4' },
+              { key: 'fire',  label: 'Active Wildfires',   sub: 'Live perimeter feed. Requires signal.',       icon: 'flame-outline', val: layerFire,  set: setLayerFire,  color: '#ef4444' },
+              { key: 'ava',   label: 'Avalanche Zones',    sub: 'Avalanche.org danger zones. Requires signal.', icon: 'snow-outline',  val: layerAva,   set: setLayerAva,   color: '#3b82f6' },
+              { key: 'radar', label: 'Rain Radar',         sub: 'RainViewer precipitation raster. Requires signal.', icon: 'rainy-outline', val: layerRadar, set: setLayerRadar, color: '#06b6d4' },
             ] as const).map(l => (
               <TouchableOpacity key={l.key} style={s.layerRow} onPress={() => { const nv = !l.val; l.set(nv); toggleDataLayer(l.key, nv); }}>
                 <View style={[s.layerRowIcon, l.val && { backgroundColor: l.color }]}>
@@ -5400,8 +5345,7 @@ function MapScreen() {
 
             <Text style={s.layerSectionHead}>ROADS &amp; TRAILS</Text>
             {([
-              { key: 'mvum',  label: 'MVUM — USFS Roads & Trails', sub: 'Legal vehicle access per USFS designation', icon: 'car-outline',        val: layerMvum,  set: setLayerMvum,  color: '#22c55e' },
-              { key: 'roads', label: 'Road Surface (4WD/Dirt)',    sub: 'OSM gravel/dirt/4WD-only overlay',          icon: 'git-branch-outline', val: layerRoads, set: setLayerRoads, color: '#f97316' },
+              { key: 'mvum', label: 'MVUM — USFS Roads & Trails', sub: 'Legal motorized access lines. Informational, not turn-by-turn routing.', icon: 'car-outline', val: layerMvum, set: setLayerMvum, color: '#22c55e' },
             ] as const).map(l => (
               <TouchableOpacity key={l.key} style={s.layerRow} onPress={() => { const nv = !l.val; l.set(nv); toggleDataLayer(l.key, nv); }}>
                 <View style={[s.layerRowIcon, l.val && { backgroundColor: l.color }]}>
@@ -5418,13 +5362,12 @@ function MapScreen() {
             <Text style={s.layerSectionHead}>LEGEND</Text>
             <View style={{ paddingHorizontal: 16, paddingBottom: 8, gap: 6 }}>
               {[
+                { color: '#22c55e', label: 'Public land tint — BLM/USFS/NPS when available' },
+                { color: '#0ea5e9', label: 'USGS topo — contours, paths, and terrain labels' },
                 { color: '#22c55e', label: 'MVUM — Open to all vehicles' },
                 { color: '#f97316', label: 'MVUM — High clearance required' },
                 { color: '#ef4444', label: 'MVUM — Closed / motorized prohibited' },
                 { color: '#a855f7', label: 'MVUM — Designated trail' },
-                { color: '#eab308', label: 'Road surface — Gravel' },
-                { color: '#f97316', label: 'Road surface — Dirt/unpaved' },
-                { color: '#92400e', label: 'Road surface — Mud/difficult' },
               ].map(l => (
                 <View key={l.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                   <View style={{ width: 22, height: 4, backgroundColor: l.color, borderRadius: 2 }} />

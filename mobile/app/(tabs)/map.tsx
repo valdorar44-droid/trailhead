@@ -2493,26 +2493,29 @@ function MapScreen() {
     setShowSearch(false);
   }
 
-  async function openCampInsight() {
-    if (!selectedCamp) return;
+  async function openCampInsight(camp: CampsitePin, detail?: CampsiteDetail | null): Promise<boolean> {
     setLoadingInsight(true);
     setLoadingWiki(true);
     try {
-      const [insight, wiki] = await Promise.all([
-        api.getCampsiteInsight({ name: selectedCamp.name, lat: selectedCamp.lat, lng: selectedCamp.lng,
-          description: selectedCamp.description, land_type: selectedCamp.land_type,
-          amenities: campDetail?.amenities ?? [], facility_id: selectedCamp.id ?? '' }),
-        api.getWikipediaNearby(selectedCamp.lat, selectedCamp.lng, 15000),
-      ]);
+      const insight = await api.getCampsiteInsight({ name: camp.name, lat: camp.lat, lng: camp.lng,
+        description: camp.description, land_type: camp.land_type,
+        amenities: detail?.amenities ?? [], facility_id: camp.id ?? '' });
       setCampInsight(insight);
-      setWikiArticles(wiki);
+      api.getWikipediaNearby(camp.lat, camp.lng, 15000)
+        .then(setWikiArticles)
+        .catch(() => setWikiArticles([]))
+        .finally(() => setLoadingWiki(false));
+      return true;
     } catch (e: any) {
+      setLoadingWiki(false);
       if (e instanceof PaywallError) {
         setPaywallCode(e.code); setPaywallMessage(e.message); setPaywallVisible(true);
+        return false;
       }
+      return true;
+    } finally {
+      setLoadingInsight(false);
     }
-    setLoadingInsight(false);
-    setLoadingWiki(false);
   }
 
   async function fetchRouteBrief() {
@@ -3070,14 +3073,12 @@ function MapScreen() {
     setFieldReportSummary(null);
     setShowFieldReportForm(false);
     resetFieldReportForm();
+    let detail: CampsiteDetail;
     try {
-      const d = await api.getCampsiteDetail(selectedCamp.id);
-      setCampDetail(d);
-      setShowCampDetail(true);
-      openCampInsight();
+      detail = await api.getCampsiteDetail(selectedCamp.id);
     } catch {
       // Build a safe minimal CampsiteDetail so the modal doesn't crash on missing arrays
-      setCampDetail({
+      detail = {
         id: selectedCamp.id, name: selectedCamp.name,
         lat: selectedCamp.lat, lng: selectedCamp.lng,
         land_type: selectedCamp.land_type ?? '',
@@ -3089,10 +3090,15 @@ function MapScreen() {
         tags: Array.isArray(selectedCamp.tags) ? selectedCamp.tags : [],
         photos: [], amenities: [], site_types: [], activities: [],
         campsites_count: 0,
-      } as any);
-      setShowCampDetail(true);
-      openCampInsight();
+      } as any;
     }
+    const canOpen = await openCampInsight(selectedCamp, detail);
+    if (!canOpen) {
+      setLoadingDetail(false);
+      return;
+    }
+    setCampDetail(detail);
+    setShowCampDetail(true);
     setLoadingDetail(false);
     // Load field reports in background
     api.getFieldReports(selectedCamp.id).then(setFieldReports).catch(() => {});

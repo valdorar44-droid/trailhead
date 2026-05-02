@@ -2385,12 +2385,31 @@ class CampsiteInsightRequest(BaseModel):
 @app.post("/api/ai/campsite-insight")
 async def campsite_insight(request: Request, body: CampsiteInsightRequest, user: dict = Depends(_optional_user)):
     """Generate AI-enriched campsite description with nearby context.
-    Served free from cache; costs credits (auth) or counts against weekly limit (anon) on first generation.
+    Costs credits or active plan before any cached/generated brief is returned.
     Permanent cache by facility_id; coordinate cache fallback for community pins."""
     if not settings.anthropic_api_key:
         raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
 
-    # Permanent cache by facility_id (RIDB campsites) — free for everyone forever
+    # Full camp briefs are a paid/token feature even when the AI text is cached.
+    if user:
+        if has_active_plan(user) or user.get("is_admin"):
+            pass
+        else:
+            cost = AI_COSTS["campsite_insight"]
+            if not deduct_credits(user["id"], cost, f"Campsite insight — {body.name}"):
+                raise HTTPException(402, detail={
+                    "code": "insufficient_credits",
+                    "message": f"Campsite briefs cost {cost} credits.",
+                    "earn_hint": True,
+                })
+    else:
+        raise HTTPException(402, detail={
+            "code": "login_required",
+            "message": "Sign in or join a plan to view full camp briefs.",
+            "earn_hint": True,
+        })
+
+    # Permanent cache by facility_id (RIDB campsites) — returned only after access is authorized
     if body.facility_id:
         cached = get_camp_brief(body.facility_id)
         if cached:
@@ -2402,21 +2421,6 @@ async def campsite_insight(request: Request, body: CampsiteInsightRequest, user:
         cached = get_cached("campsite_cache", coord_key, ttl_seconds=3600 * 72)
         if cached:
             return cached
-
-    # Not cached — need to generate. Check credits/plan/anon limit.
-    if user:
-        if has_active_plan(user):
-            pass  # plan holders generate for free
-        else:
-            cost = AI_COSTS["campsite_insight"]
-            if not user.get("is_admin") and not deduct_credits(user["id"], cost, f"Campsite insight — {body.name}"):
-                raise HTTPException(402, detail={
-                    "code": "insufficient_credits",
-                    "message": f"Campsite briefs cost {cost} credits.",
-                    "earn_hint": True,
-                })
-    else:
-        _anon_check(_client_ip(request), "insight")
 
     # Fetch Wikipedia and weather context in parallel
     wiki_task = wikipedia_nearby(body.lat, body.lng, radius=15000, limit=4)

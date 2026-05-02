@@ -1,6 +1,6 @@
 """Trailhead FastAPI server. All API routes."""
 from __future__ import annotations
-import asyncio, os, json, uuid, secrets, xml.etree.ElementTree as ET, time, hashlib
+import asyncio, os, json, uuid, secrets, xml.etree.ElementTree as ET, time, hashlib, re, sqlite3
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.responses import HTMLResponse, Response
@@ -20,7 +20,7 @@ from ingestors.osm import get_osm_campsites, get_water_sources, get_trailheads, 
 from db.store import (
     save_trip, get_trip, add_community_pin, get_community_pins,
     save_audio_guide, get_audio_guide, get_cached, set_cached, get_route_cached, set_route_cached,
-    create_user, get_user_by_email, get_user_by_id, get_user_by_referral_code,
+    create_user, get_user_by_email, get_user_by_username, get_user_by_id, get_user_by_referral_code,
     add_credits, deduct_credits, get_credit_history,
     get_user_report_count_today, get_report_credits_today,
     is_stripe_session_fulfilled, fulfill_stripe_purchase,
@@ -231,17 +231,32 @@ class LoginRequest(BaseModel):
 
 @app.post("/api/auth/register")
 async def register(body: RegisterRequest):
-    if get_user_by_email(body.email):
+    email = body.email.strip().lower()
+    username = body.username.strip()
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+        raise HTTPException(400, "Enter a valid email address")
+    if len(username) < 3 or len(username) > 24:
+        raise HTTPException(400, "Username must be 3-24 characters")
+    if not re.match(r"^[A-Za-z0-9_.-]+$", username):
+        raise HTTPException(400, "Username can only use letters, numbers, dots, dashes, and underscores")
+    if len(body.password) < 8:
+        raise HTTPException(400, "Password must be at least 8 characters")
+    if get_user_by_email(email):
         raise HTTPException(400, "Email already registered")
+    if get_user_by_username(username):
+        raise HTTPException(400, "Username already taken")
     referrer = get_user_by_referral_code(body.referral_code) if body.referral_code else None
-    code = f"{body.username.lower()}-{secrets.token_hex(3)}"
-    uid = create_user(body.email, body.username, _hash_pw(body.password), code,
-                      referred_by=referrer["id"] if referrer else None)
+    code = f"{username.lower()}-{secrets.token_hex(3)}"
+    try:
+        uid = create_user(email, username, _hash_pw(body.password), code,
+                          referred_by=referrer["id"] if referrer else None)
+    except sqlite3.IntegrityError:
+        raise HTTPException(400, "Email or username already registered")
     # Welcome bonus — enough for ~3 short AI trips to show off the product
     add_credits(uid, SIGNUP_BONUS, "Welcome bonus")
     if referrer:
         # Referral bonus paid to both parties; capped at 10 referrals lifetime via credit history check
-        add_credits(referrer["id"], 20, f"Referral — {body.username} signed up")
+        add_credits(referrer["id"], 20, f"Referral — {username} signed up")
     return {"token": _make_token(uid), "user": _safe_user(get_user_by_id(uid))}
 
 @app.post("/api/auth/login")
@@ -1883,7 +1898,7 @@ a{color:#f97316;}
 <p>These Terms are governed by the laws of the State of Colorado, United States, without regard to conflict of law provisions.</p>
 
 <h2>13. Contact</h2>
-<p>Questions about these Terms? Email us at <a href="mailto:support@gettrailhead.app">support@gettrailhead.app</a></p>
+<p>Questions about these Terms? Email us at <a href="mailto:hello@gettrailhead.app">hello@gettrailhead.app</a></p>
 </body></html>""")
 
 
@@ -1928,7 +1943,7 @@ a{color:#f97316;}
 <p>We may update this policy from time to time. Continued use of the app after changes constitutes acceptance of the updated policy.</p>
 
 <h2>9. Contact</h2>
-<p>Questions or requests: <a href="mailto:valdorar44@gmail.com">valdorar44@gmail.com</a></p>
+<p>Questions or requests: <a href="mailto:hello@gettrailhead.app">hello@gettrailhead.app</a></p>
 </body></html>""")
 
 

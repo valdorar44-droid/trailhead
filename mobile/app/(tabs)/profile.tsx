@@ -100,6 +100,7 @@ export default function ProfileScreen() {
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [refCode, setRefCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [creditHistory, setCreditHistory] = useState<any[]>([]);
@@ -180,16 +181,25 @@ export default function ProfileScreen() {
   }
 
   async function register() {
-    if (!email || !username || !password) { Alert.alert('Fill in all fields'); return; }
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanUsername = username.trim();
+    if (!cleanEmail || !cleanUsername || !password || !confirmPassword) { Alert.alert('Fill in all fields'); return; }
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(cleanEmail)) { Alert.alert('Email needed', 'Enter a valid email address so you can recover your account later.'); return; }
+    if (password.length < 8) { Alert.alert('Password too short', 'Use at least 8 characters.'); return; }
+    if (password !== confirmPassword) { Alert.alert('Passwords do not match', 'Re-enter your password so both fields match.'); return; }
     setLoading(true);
     try {
-      const res = await api.register(email, username, password, refCode);
+      const res = await api.register(cleanEmail, cleanUsername, password, refCode.trim());
       setAuth(res.token, res.user);
       transitionToMain(`Welcome to Trailhead, ${res.user.username}! 50 credits added.`);
     } catch (e: any) {
       setLoading(false);
       Alert.alert('Registration failed', e.message);
     }
+  }
+
+  function contactSupport(subject = 'Trailhead support') {
+    Linking.openURL(`mailto:hello@gettrailhead.app?subject=${encodeURIComponent(subject)}`);
   }
 
   async function loadHistory() {
@@ -390,6 +400,8 @@ export default function ProfileScreen() {
                 value={username} onChangeText={setUsername} autoCapitalize="none" />
               <TextInput style={s.input} placeholder="Password" placeholderTextColor={C.text3}
                 value={password} onChangeText={setPassword} secureTextEntry />
+              <TextInput style={s.input} placeholder="Confirm password" placeholderTextColor={C.text3}
+                value={confirmPassword} onChangeText={setConfirmPassword} secureTextEntry />
               <TextInput style={s.input} placeholder="Referral code (optional)" placeholderTextColor={C.text3}
                 value={refCode} onChangeText={setRefCode} autoCapitalize="none" />
             </View>
@@ -521,6 +533,7 @@ export default function ProfileScreen() {
             { icon: 'people',  label: 'REFER',       color: C.orange, onPress: shareReferral },
             { icon: 'checkmark-circle', label: 'TRIP PREP', color: C.green,  onPress: () => setShowChecklist(true) },
             { icon: 'help-buoy-outline', label: 'APP TOUR', color: '#3b82f6', onPress: startGuidedTour },
+            { icon: 'mail-outline', label: 'CONTACT', color: '#3b82f6', onPress: () => contactSupport('Trailhead question') },
             { icon: 'cloud-upload-outline', label: 'IMPORT GPX', color: C.text3, onPress: importGpx },
             { icon: 'bug-outline', label: 'BUG',     color: C.red,   onPress: () => setShowBugModal(true) },
           ].map(({ icon, label, color, onPress }) => (

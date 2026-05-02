@@ -34,8 +34,11 @@ let tileServer: TileServerModule | null = null;
 let tileServerRequireError = '';
 try { tileServer = require('expo-tile-server'); } catch (e: any) { tileServerRequireError = e?.message ?? 'require failed'; }
 
-const BASE_DL_URL   = 'https://tiles.gettrailhead.app/api/download/base.pmtiles';
+const TILE_BASE_URL = 'https://tiles.gettrailhead.app';
+const BASE_DL_URL   = `${TILE_BASE_URL}/api/download/base.pmtiles`;
+const GLOBAL_BASE_DL_URL = `${TILE_BASE_URL}/api/download/base-global.pmtiles`;
 const BASE_PATH     = `${OFFLINE_DIR}base.pmtiles`;
+const GLOBAL_BASE_PATH = `${OFFLINE_DIR}base-global.pmtiles`;
 const BASE_MIN_MB   = 10; // skip base file if under 10 MB (truncated)
 const CONUS_MIN_MB  = 1024; // a partial conus.pmtiles must not hide state packs
 const LEGACY_OFFLINE_DIR = `${FileSystem.documentDirectory}offline/`;
@@ -224,6 +227,17 @@ async function firstExistingPath(paths: string[]): Promise<{ path: string; sizeM
     return { path, sizeMb };
   }
   return null;
+}
+
+async function hasPublishedGlobalBase(): Promise<boolean> {
+  try {
+    const res = await fetch(`${TILE_BASE_URL}/api/download/manifest.json`);
+    if (!res.ok) return false;
+    const manifest = await res.json();
+    return Boolean(manifest?.['base-global.pmtiles']?.size);
+  } catch {
+    return false;
+  }
 }
 
 function offlinePathCandidates(id: string, currentPath: string): string[] {
@@ -453,28 +467,42 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       }
       // localTiles stays false until a region file is loaded — keeps online CDN mode working
 
-      // 2. Load base file if available; silently download if missing
+      // 2. Load low-zoom base if available. Prefer future global base, but keep
+      // the current U.S. base as a stable fallback until that file exists on R2.
       await FileSystem.makeDirectoryAsync(OFFLINE_DIR, { intermediates: true }).catch(() => {});
-      const baseInfo = await FileSystem.getInfoAsync(BASE_PATH).catch(() => null);
-      const baseMb = Math.round(((baseInfo as any)?.size ?? 0) / 1_048_576);
-      if (baseInfo?.exists && baseMb >= BASE_MIN_MB) {
+      const globalBaseInfo = await FileSystem.getInfoAsync(GLOBAL_BASE_PATH).catch(() => null);
+      const globalBaseMb = Math.round(((globalBaseInfo as any)?.size ?? 0) / 1_048_576);
+      const conusBaseInfo = await FileSystem.getInfoAsync(BASE_PATH).catch(() => null);
+      const conusBaseMb = Math.round(((conusBaseInfo as any)?.size ?? 0) / 1_048_576);
+      const activeBase = globalBaseInfo?.exists && globalBaseMb >= BASE_MIN_MB
+        ? { path: GLOBAL_BASE_PATH, sizeMb: globalBaseMb, label: 'global base' }
+        : conusBaseInfo?.exists && conusBaseMb >= BASE_MIN_MB
+          ? { path: BASE_PATH, sizeMb: conusBaseMb, label: 'base' }
+          : null;
+      if (activeBase) {
         try {
           const ts = tileServer as any;
-          if (typeof ts.setBase === 'function') await ts.setBase(BASE_PATH.replace(/^file:\/\//, ''));
-          setTileDebug(`base ${baseMb}MB`);
+          if (typeof ts.setBase === 'function') await ts.setBase(activeBase.path.replace(/^file:\/\//, ''));
+          setTileDebug(`${activeBase.label} ${activeBase.sizeMb}MB`);
         } catch {}
-      } else if (!baseInfo?.exists) {
-        // Background download — don't block map load
-        FileSystem.createDownloadResumable(BASE_DL_URL, BASE_PATH)
+      }
+
+      const globalBasePublished = await hasPublishedGlobalBase();
+      const shouldDownloadGlobalBase = globalBasePublished && !(globalBaseInfo?.exists && globalBaseMb >= BASE_MIN_MB);
+      const shouldDownloadConusBase = !globalBasePublished && !conusBaseInfo?.exists;
+      if (shouldDownloadGlobalBase || shouldDownloadConusBase) {
+        const targetPath = shouldDownloadGlobalBase ? GLOBAL_BASE_PATH : BASE_PATH;
+        const targetUrl = shouldDownloadGlobalBase ? GLOBAL_BASE_DL_URL : BASE_DL_URL;
+        FileSystem.createDownloadResumable(targetUrl, targetPath)
           .downloadAsync()
           .then(async res => {
             if (res?.status === 200) {
               try {
                 const ts = tileServer as any;
-                if (typeof ts.setBase === 'function') await ts.setBase(BASE_PATH.replace(/^file:\/\//, ''));
+                if (typeof ts.setBase === 'function') await ts.setBase(targetPath.replace(/^file:\/\//, ''));
               } catch {}
             } else {
-              await FileSystem.deleteAsync(BASE_PATH, { idempotent: true }).catch(() => {});
+              await FileSystem.deleteAsync(targetPath, { idempotent: true }).catch(() => {});
             }
           })
           .catch(() => {});

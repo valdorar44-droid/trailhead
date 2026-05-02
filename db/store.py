@@ -92,6 +92,9 @@ def init_db():
             email_verified           INTEGER NOT NULL DEFAULT 0,
             email_verify_token       TEXT,
             email_verify_sent_at     INTEGER,
+            password_reset_token     TEXT,
+            password_reset_sent_at   INTEGER,
+            password_reset_expires_at INTEGER,
             created_at               INTEGER NOT NULL
         );
         CREATE TABLE IF NOT EXISTS credit_transactions (
@@ -237,6 +240,7 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_route_cache_time ON route_cache(fetched_at)",
         "CREATE INDEX IF NOT EXISTS idx_offline_downloads_user ON offline_downloads(user_id, asset_type, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_users_email_verify_token ON users(email_verify_token)",
+        "CREATE INDEX IF NOT EXISTS idx_users_password_reset_token ON users(password_reset_token)",
     ]:
         try:
             db.execute(idx_sql)
@@ -274,6 +278,9 @@ def init_db():
         "ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 1",
         "ALTER TABLE users ADD COLUMN email_verify_token TEXT",
         "ALTER TABLE users ADD COLUMN email_verify_sent_at INTEGER",
+        "ALTER TABLE users ADD COLUMN password_reset_token TEXT",
+        "ALTER TABLE users ADD COLUMN password_reset_sent_at INTEGER",
+        "ALTER TABLE users ADD COLUMN password_reset_expires_at INTEGER",
         """CREATE TABLE IF NOT EXISTS plan_jobs (
             id          TEXT PRIMARY KEY,
             user_id     INTEGER,
@@ -520,6 +527,41 @@ def get_user_by_email(email: str) -> dict | None:
     row = db.execute("SELECT * FROM users WHERE email=?", (email.lower(),)).fetchone()
     db.close()
     return dict(row) if row else None
+
+def set_password_reset(user_id: int, token: str, expires_at: int, sent_at: int | None = None) -> None:
+    db = _conn()
+    db.execute(
+        "UPDATE users SET password_reset_token=?, password_reset_sent_at=?, password_reset_expires_at=? WHERE id=?",
+        (token, sent_at or int(time.time()), expires_at, user_id)
+    )
+    db.commit(); db.close()
+
+def reset_password_with_token(token: str, password_hash: str) -> dict | None:
+    db = _conn()
+    now = int(time.time())
+    row = db.execute(
+        "SELECT * FROM users WHERE password_reset_token=? AND COALESCE(password_reset_expires_at,0)>=?",
+        (token, now)
+    ).fetchone()
+    if not row:
+        db.close()
+        return None
+    db.execute(
+        """UPDATE users
+           SET password_hash=?,
+               password_reset_token=NULL,
+               password_reset_sent_at=NULL,
+               password_reset_expires_at=NULL,
+               email_verified=1,
+               email_verify_token=NULL,
+               email_verify_sent_at=NULL
+           WHERE id=?""",
+        (password_hash, row["id"])
+    )
+    db.commit()
+    fresh = db.execute("SELECT * FROM users WHERE id=?", (row["id"],)).fetchone()
+    db.close()
+    return dict(fresh) if fresh else None
 
 def get_user_by_username(username: str) -> dict | None:
     db = _conn()

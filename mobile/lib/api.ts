@@ -66,6 +66,10 @@ export const api = {
     req<{ ok: boolean; message: string }>('/api/auth/resend-verification', {
       method: 'POST', body: JSON.stringify({ email }),
     }),
+  forgotPassword: (email: string) =>
+    req<{ ok: boolean; message: string }>('/api/auth/forgot-password', {
+      method: 'POST', body: JSON.stringify({ email }),
+    }),
   me: () => req<User>('/api/auth/me'),
 
   plan: (request: string, sessionId = '') =>

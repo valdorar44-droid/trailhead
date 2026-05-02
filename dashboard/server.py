@@ -23,7 +23,7 @@ from db.store import (
     save_trip, get_trip, add_community_pin, get_community_pins,
     save_audio_guide, get_audio_guide, get_cached, set_cached, get_route_cached, set_route_cached,
     create_user, get_user_by_email, get_user_by_username, get_user_by_id, get_user_by_referral_code,
-    set_email_verification, verify_email_token,
+    set_email_verification, verify_email_token, set_password_reset, reset_password_with_token,
     add_credits, deduct_credits, get_credit_history,
     get_user_report_count_today, get_report_credits_today,
     is_stripe_session_fulfilled, fulfill_stripe_purchase,
@@ -204,6 +204,51 @@ def _verification_links(token: str) -> tuple[str, str]:
     web_link = f"{settings.public_url.rstrip('/')}/api/auth/verify-email?token={token}"
     return app_link, web_link
 
+def _send_email(to_email: str, subject: str, text_body: str, html_body: str) -> None:
+    if settings.cloudflare_email_account_id and settings.cloudflare_email_api_token:
+        cf_logo = '<div style="width:48px;height:48px;border-radius:14px;background:#f97316;display:inline-block;text-align:center;line-height:48px;color:white;font-size:26px;font-weight:900;">T</div>'
+        payload = {
+            "to": to_email,
+            "from": settings.smtp_from_email,
+            "subject": subject,
+            "html": html_body.replace("{logo_html}", cf_logo),
+            "text": text_body,
+        }
+        with httpx.Client(timeout=20) as client:
+            resp = client.post(
+                f"https://api.cloudflare.com/client/v4/accounts/{settings.cloudflare_email_account_id}/email/sending/send",
+                headers={
+                    "Authorization": f"Bearer {settings.cloudflare_email_api_token}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+        if resp.status_code >= 400:
+            raise RuntimeError(f"Cloudflare email send failed: {resp.status_code}")
+        data = resp.json()
+        if not data.get("success"):
+            raise RuntimeError("Cloudflare email send failed")
+        return
+
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = formataddr((settings.smtp_from_name, settings.smtp_from_email))
+    msg["To"] = to_email
+    msg.set_content(text_body)
+    logo_cid = "trailhead-logo"
+    smtp_logo = f'<img src="cid:{logo_cid}" width="48" height="48" alt="Trailhead" style="width:48px;height:48px;border-radius:14px;display:inline-block;" />'
+    msg.add_alternative(html_body.replace("{logo_html}", smtp_logo), subtype="html")
+    logo_path = Path(__file__).resolve().parents[1] / "mobile" / "assets" / "icon.png"
+    if logo_path.exists():
+        msg.get_payload()[1].add_related(logo_path.read_bytes(), maintype="image", subtype="png", cid=f"<{logo_cid}>")
+
+    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20) as smtp:
+        if settings.smtp_tls:
+            smtp.starttls()
+        if settings.smtp_user or settings.smtp_password:
+            smtp.login(settings.smtp_user, settings.smtp_password)
+        smtp.send_message(msg)
+
 def _send_verification_email(email: str, username: str, token: str) -> None:
     if not _email_configured():
         raise RuntimeError("Email sending is not configured")
@@ -247,49 +292,50 @@ def _send_verification_email(email: str, username: str, token: str) -> None:
   </body>
 </html>
 """
-    if settings.cloudflare_email_account_id and settings.cloudflare_email_api_token:
-        cf_logo = '<div style="width:48px;height:48px;border-radius:14px;background:#f97316;display:inline-block;text-align:center;line-height:48px;color:white;font-size:26px;font-weight:900;">T</div>'
-        payload = {
-            "to": email,
-            "from": settings.smtp_from_email,
-            "subject": "Confirm your Trailhead email",
-            "html": html_body.replace("{logo_html}", cf_logo),
-            "text": text_body,
-        }
-        with httpx.Client(timeout=20) as client:
-            resp = client.post(
-                f"https://api.cloudflare.com/client/v4/accounts/{settings.cloudflare_email_account_id}/email/sending/send",
-                headers={
-                    "Authorization": f"Bearer {settings.cloudflare_email_api_token}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-            )
-        if resp.status_code >= 400:
-            raise RuntimeError(f"Cloudflare email send failed: {resp.status_code}")
-        data = resp.json()
-        if not data.get("success"):
-            raise RuntimeError("Cloudflare email send failed")
-        return
+    _send_email(email, "Confirm your Trailhead email", text_body, html_body)
 
-    msg = EmailMessage()
-    msg["Subject"] = "Confirm your Trailhead email"
-    msg["From"] = formataddr((settings.smtp_from_name, settings.smtp_from_email))
-    msg["To"] = email
-    msg.set_content(text_body)
-    logo_cid = "trailhead-logo"
-    smtp_logo = f'<img src="cid:{logo_cid}" width="48" height="48" alt="Trailhead" style="width:48px;height:48px;border-radius:14px;display:inline-block;" />'
-    msg.add_alternative(html_body.replace("{logo_html}", smtp_logo), subtype="html")
-    logo_path = Path(__file__).resolve().parents[1] / "mobile" / "assets" / "icon.png"
-    if logo_path.exists():
-        msg.get_payload()[1].add_related(logo_path.read_bytes(), maintype="image", subtype="png", cid=f"<{logo_cid}>")
-
-    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20) as smtp:
-        if settings.smtp_tls:
-            smtp.starttls()
-        if settings.smtp_user or settings.smtp_password:
-            smtp.login(settings.smtp_user, settings.smtp_password)
-        smtp.send_message(msg)
+def _send_password_reset_email(email: str, username: str, token: str) -> None:
+    if not _email_configured():
+        raise RuntimeError("Email sending is not configured")
+    reset_link = f"{settings.public_url.rstrip('/')}/api/auth/reset-password?token={token}"
+    safe_username = html.escape(username)
+    text_body = (
+        f"Hi {username},\n\n"
+        "Reset your Trailhead password using this secure link:\n"
+        f"{reset_link}\n\n"
+        "This link expires in 1 hour. If you did not request this, you can ignore this email.\n\n"
+        "Trailhead\n"
+        "hello@gettrailhead.app"
+    )
+    html_body = f"""\
+<!doctype html>
+<html>
+  <body style="margin:0;background:#f7f4ee;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#171412;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f7f4ee;padding:28px 12px;">
+      <tr><td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#fffaf2;border:1px solid #eadfce;border-radius:18px;overflow:hidden;">
+          <tr><td style="padding:28px 28px 10px;">
+            <div style="display:flex;align-items:center;gap:12px;">
+              {{logo_html}}
+              <div>
+                <div style="font-size:22px;font-weight:900;letter-spacing:.08em;">TRAILHEAD</div>
+                <div style="font-size:11px;color:#7a6f63;letter-spacing:.18em;">AI OVERLAND GUIDE</div>
+              </div>
+            </div>
+          </td></tr>
+          <tr><td style="padding:18px 28px 8px;">
+            <h1 style="font-size:26px;line-height:1.15;margin:0 0 12px;">Reset your password</h1>
+            <p style="font-size:16px;line-height:1.55;margin:0 0 18px;color:#4b423a;">Hi {safe_username}, use this secure link to set a new Trailhead password. It expires in 1 hour.</p>
+            <a href="{reset_link}" style="display:inline-block;background:#f97316;color:#fff;text-decoration:none;font-weight:900;border-radius:12px;padding:14px 18px;font-size:14px;letter-spacing:.08em;">RESET PASSWORD</a>
+          </td></tr>
+          <tr><td style="padding:18px 28px 28px;color:#95877a;font-size:12px;line-height:1.5;">If you did not request this, ignore this email. Questions? hello@gettrailhead.app</td></tr>
+        </table>
+      </td></tr>
+    </table>
+  </body>
+</html>
+"""
+    _send_email(email, "Reset your Trailhead password", text_body, html_body)
 
 def _grant_signup_rewards(user: dict) -> None:
     if int(user.get("credits") or 0) == 0:
@@ -344,6 +390,13 @@ class VerifyEmailRequest(BaseModel):
 
 class ResendVerificationRequest(BaseModel):
     email: str
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    password: str
 
 @app.post("/api/auth/register")
 async def register(body: RegisterRequest):
@@ -431,6 +484,100 @@ async def resend_verification(body: ResendVerificationRequest):
     except Exception as e:
         raise HTTPException(503, f"Could not send verification email. Contact hello@gettrailhead.app. ({type(e).__name__})")
     return {"ok": True, "message": "Verification email sent."}
+
+@app.post("/api/auth/forgot-password")
+async def forgot_password(body: ForgotPasswordRequest):
+    if not _email_configured():
+        raise HTTPException(503, "Email is not configured. Contact hello@gettrailhead.app.")
+    email = body.email.strip().lower()
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+        raise HTTPException(400, "Enter a valid email address")
+    user = get_user_by_email(email)
+    generic = {"ok": True, "message": "If that email has a Trailhead account, a reset link has been sent."}
+    if not user:
+        return generic
+    last_sent = int(user.get("password_reset_sent_at") or 0)
+    if time.time() - last_sent < 60:
+        return generic
+    token = secrets.token_urlsafe(32)
+    set_password_reset(user["id"], token, int(time.time()) + 3600)
+    try:
+        _send_password_reset_email(email, user["username"], token)
+    except Exception as e:
+        raise HTTPException(503, f"Could not send reset email. Contact hello@gettrailhead.app. ({type(e).__name__})")
+    return generic
+
+@app.post("/api/auth/reset-password")
+async def reset_password(body: ResetPasswordRequest):
+    token = body.token.strip()
+    if not token:
+        raise HTTPException(400, "Reset token is required")
+    if len(body.password) < 8:
+        raise HTTPException(400, "Password must be at least 8 characters")
+    user = reset_password_with_token(token, _hash_pw(body.password))
+    if not user:
+        raise HTTPException(400, "Reset link is invalid or expired")
+    fresh = get_user_by_id(user["id"])
+    return {"token": _make_token(user["id"]), "user": _safe_user(fresh or user)}
+
+@app.get("/api/auth/reset-password", response_class=HTMLResponse)
+async def reset_password_web(token: str = ""):
+    safe_token = html.escape(token.strip())
+    if not safe_token:
+        return HTMLResponse("""<!doctype html><html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f7f4ee;color:#171412;padding:32px;"><h1>Reset link missing</h1><p>Open the latest Trailhead password reset email and try again.</p></body></html>""", status_code=400)
+    return HTMLResponse(f"""<!doctype html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Reset Trailhead Password</title>
+  <style>
+    body{{margin:0;background:#f7f4ee;color:#171412;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;display:flex;min-height:100vh;align-items:center;justify-content:center;padding:18px;box-sizing:border-box;}}
+    .card{{width:100%;max-width:420px;background:#fffaf2;border:1px solid #eadfce;border-radius:18px;padding:24px;box-shadow:0 14px 40px rgba(51,38,22,.12);}}
+    .brand{{display:flex;align-items:center;gap:12px;margin-bottom:18px;}}
+    .mark{{width:48px;height:48px;border-radius:14px;background:#f97316;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:24px;}}
+    .name{{font-weight:900;letter-spacing:.08em;font-size:20px;}}
+    .tag{{font-size:10px;color:#7a6f63;letter-spacing:.18em;margin-top:2px;}}
+    h1{{font-size:26px;margin:0 0 8px;}}
+    p{{color:#5f544a;line-height:1.5;margin:0 0 18px;}}
+    input{{width:100%;box-sizing:border-box;border:1.5px solid #d8cbb8;border-radius:12px;padding:14px;font-size:16px;margin:8px 0;background:#fff;color:#171412;}}
+    button{{width:100%;border:0;border-radius:12px;background:#f97316;color:white;font-weight:900;padding:15px;margin-top:10px;letter-spacing:.08em;}}
+    .msg{{margin-top:14px;font-size:14px;color:#5f544a;}}
+    .err{{color:#b91c1c;}}
+    .ok{{color:#15803d;}}
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="brand"><div class="mark">T</div><div><div class="name">TRAILHEAD</div><div class="tag">AI OVERLAND GUIDE</div></div></div>
+    <h1>Set a new password</h1>
+    <p>Use at least 8 characters. After this works, open Trailhead and sign in with the new password.</p>
+    <input id="pw" type="password" autocomplete="new-password" placeholder="New password" />
+    <input id="pw2" type="password" autocomplete="new-password" placeholder="Confirm new password" />
+    <button id="btn">RESET PASSWORD</button>
+    <div id="msg" class="msg"></div>
+  </main>
+  <script>
+    const token = "{safe_token}";
+    const msg = document.getElementById('msg');
+    document.getElementById('btn').onclick = async () => {{
+      const password = document.getElementById('pw').value;
+      const confirm = document.getElementById('pw2').value;
+      msg.className = 'msg';
+      if (password.length < 8) {{ msg.className = 'msg err'; msg.textContent = 'Use at least 8 characters.'; return; }}
+      if (password !== confirm) {{ msg.className = 'msg err'; msg.textContent = 'Passwords do not match.'; return; }}
+      const res = await fetch('/api/auth/reset-password', {{
+        method: 'POST',
+        headers: {{'Content-Type':'application/json'}},
+        body: JSON.stringify({{token, password}})
+      }});
+      const data = await res.json().catch(() => ({{detail:'Request failed'}}));
+      if (!res.ok) {{ msg.className = 'msg err'; msg.textContent = data.detail || 'Reset failed.'; return; }}
+      msg.className = 'msg ok';
+      msg.innerHTML = 'Password reset. <a href="trailhead://">Open Trailhead</a> and sign in.';
+    }};
+  </script>
+</body>
+</html>""")
 
 @app.get("/api/auth/me")
 async def me(user: dict = Depends(_current_user)):

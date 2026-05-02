@@ -94,7 +94,7 @@ export default function ProfileScreen() {
   const setThemeMode   = useStore(st => st.setThemeMode);
   const favoriteCamps  = useStore(st => st.favoriteCamps);
   const toggleFavorite = useStore(st => st.toggleFavorite);
-  const [view, setView] = useState<'main' | 'login' | 'register'>(!user ? 'login' : 'main');
+  const [view, setView] = useState<'main' | 'login' | 'register' | 'forgot'>(!user ? 'login' : 'main');
   const [authSuccess, setAuthSuccess] = useState('');  // brief success message before switching to main
   const authFade = useRef(new Animated.Value(1)).current;
   const [email, setEmail] = useState('');
@@ -105,6 +105,7 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(false);
   const [pendingVerifyEmail, setPendingVerifyEmail] = useState('');
   const [resendingVerify, setResendingVerify] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
   const [creditHistory, setCreditHistory] = useState<any[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [showPaywall, setShowPaywall] = useState(false);
@@ -223,6 +224,22 @@ export default function ProfileScreen() {
       Alert.alert('Could not resend', e.message);
     } finally {
       setResendingVerify(false);
+    }
+  }
+
+  async function forgotPassword() {
+    const target = email.trim().toLowerCase();
+    if (!target) { Alert.alert('Email needed', 'Enter the email used for your Trailhead account.'); return; }
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(target)) { Alert.alert('Email needed', 'Enter a valid email address.'); return; }
+    setLoading(true);
+    try {
+      const res = await api.forgotPassword(target);
+      setResetSent(true);
+      Alert.alert('Check your email', res.message);
+    } catch (e: any) {
+      Alert.alert('Reset failed', e.message);
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -426,6 +443,9 @@ export default function ProfileScreen() {
             <TouchableOpacity style={[s.btn, loading && s.btnDisabled]} onPress={login} disabled={loading}>
               <Text style={s.btnText}>{loading ? 'SIGNING IN...' : 'SIGN IN'}</Text>
             </TouchableOpacity>
+            <TouchableOpacity style={s.secondaryAuthBtn} onPress={() => { setResetSent(false); setView('forgot'); }}>
+              <Text style={s.secondaryAuthText}>Forgot password?</Text>
+            </TouchableOpacity>
             <TouchableOpacity style={s.switchRow} onPress={() => setView('register')}>
               <Text style={s.switchText}>No account?</Text>
               <Text style={s.switchLink}> Create one →</Text>
@@ -433,6 +453,43 @@ export default function ProfileScreen() {
           </ScrollView>
         )}
       </Animated.View>
+    </SafeAreaView>
+  );
+
+  if (view === 'forgot') return (
+    <SafeAreaView style={s.container}>
+      <ScrollView contentContainerStyle={s.authScroll} keyboardShouldPersistTaps="handled">
+        <View style={s.authBrand}>
+          <Image source={require('@/assets/icon.png')} style={s.authIcon} />
+          <View>
+            <Text style={s.authWordmark}>TRAILHEAD</Text>
+            <Text style={s.authTagline}>AI OVERLAND GUIDE</Text>
+          </View>
+        </View>
+        <Text style={s.authHeading}>Reset password</Text>
+        <Text style={s.authSub}>
+          Enter your account email. Trailhead will send a secure reset link that expires in 1 hour.
+        </Text>
+        <View style={s.authFields}>
+          <TextInput style={s.input} placeholder="Email" placeholderTextColor={C.text3}
+            value={email} onChangeText={(v) => { setEmail(v); setResetSent(false); }} autoCapitalize="none" keyboardType="email-address" />
+        </View>
+        {resetSent ? (
+          <View style={s.verifyCard}>
+            <Ionicons name="mail" size={24} color={C.orange} />
+            <Text style={s.authSub}>If that email has a Trailhead account, a reset link has been sent.</Text>
+          </View>
+        ) : null}
+        <TouchableOpacity style={[s.btn, loading && s.btnDisabled]} onPress={forgotPassword} disabled={loading}>
+          <Text style={s.btnText}>{loading ? 'SENDING...' : 'SEND RESET LINK'}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={s.secondaryAuthBtn} onPress={() => setView('login')}>
+          <Text style={s.secondaryAuthText}>Back to sign in</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={s.secondaryAuthBtn} onPress={() => contactSupport('Trailhead password help')}>
+          <Text style={s.secondaryAuthText}>Contact hello@gettrailhead.app</Text>
+        </TouchableOpacity>
+      </ScrollView>
     </SafeAreaView>
   );
 

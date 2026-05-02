@@ -1,6 +1,8 @@
 """Trailhead FastAPI server. All API routes."""
 from __future__ import annotations
-import asyncio, os, json, uuid, secrets, xml.etree.ElementTree as ET, time, hashlib, re, sqlite3
+import asyncio, os, json, uuid, secrets, xml.etree.ElementTree as ET, time, hashlib, re, sqlite3, smtplib, html
+from email.message import EmailMessage
+from email.utils import formataddr
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.responses import HTMLResponse, Response
@@ -21,6 +23,7 @@ from db.store import (
     save_trip, get_trip, add_community_pin, get_community_pins,
     save_audio_guide, get_audio_guide, get_cached, set_cached, get_route_cached, set_route_cached,
     create_user, get_user_by_email, get_user_by_username, get_user_by_id, get_user_by_referral_code,
+    set_email_verification, verify_email_token,
     add_credits, deduct_credits, get_credit_history,
     get_user_report_count_today, get_report_credits_today,
     is_stripe_session_fulfilled, fulfill_stripe_purchase,
@@ -187,6 +190,79 @@ def _optional_user(creds: HTTPAuthorizationCredentials | None = Depends(bearer))
 def _safe_user(u: dict) -> dict:
     return {k: v for k, v in u.items() if k not in ("password_hash", "photo_data")}
 
+def _email_configured() -> bool:
+    return bool(settings.smtp_host and settings.smtp_from_email)
+
+def _verification_links(token: str) -> tuple[str, str]:
+    app_link = f"trailhead://verify-email?token={token}"
+    web_link = f"{settings.public_url.rstrip('/')}/api/auth/verify-email?token={token}"
+    return app_link, web_link
+
+def _send_verification_email(email: str, username: str, token: str) -> None:
+    if not _email_configured():
+        raise RuntimeError("SMTP is not configured")
+
+    app_link, web_link = _verification_links(token)
+    safe_username = html.escape(username)
+    msg = EmailMessage()
+    msg["Subject"] = "Confirm your Trailhead email"
+    msg["From"] = formataddr((settings.smtp_from_name, settings.smtp_from_email))
+    msg["To"] = email
+    msg.set_content(
+        f"Hi {username},\n\n"
+        "Confirm your email to activate Trailhead:\n"
+        f"{web_link}\n\n"
+        "If you did not create this account, you can ignore this email.\n\n"
+        "Trailhead\n"
+        "hello@gettrailhead.app"
+    )
+    logo_cid = "trailhead-logo"
+    msg.add_alternative(f"""\
+<!doctype html>
+<html>
+  <body style="margin:0;background:#f7f4ee;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#171412;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f7f4ee;padding:28px 12px;">
+      <tr><td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#fffaf2;border:1px solid #eadfce;border-radius:18px;overflow:hidden;">
+          <tr><td style="padding:28px 28px 10px;">
+            <div style="display:flex;align-items:center;gap:12px;">
+              <img src="cid:{logo_cid}" width="48" height="48" alt="Trailhead" style="width:48px;height:48px;border-radius:14px;display:inline-block;" />
+              <div>
+                <div style="font-size:22px;font-weight:900;letter-spacing:.08em;">TRAILHEAD</div>
+                <div style="font-size:11px;color:#7a6f63;letter-spacing:.18em;">AI OVERLAND GUIDE</div>
+              </div>
+            </div>
+          </td></tr>
+          <tr><td style="padding:18px 28px 8px;">
+            <h1 style="font-size:26px;line-height:1.15;margin:0 0 12px;">Confirm your email</h1>
+            <p style="font-size:16px;line-height:1.55;margin:0 0 18px;color:#4b423a;">Hi {safe_username}, tap the button below to activate your Trailhead account. Your signup credits unlock after verification.</p>
+            <a href="{app_link}" style="display:inline-block;background:#f97316;color:#fff;text-decoration:none;font-weight:900;border-radius:12px;padding:14px 18px;font-size:14px;letter-spacing:.08em;">OPEN TRAILHEAD</a>
+            <p style="font-size:13px;line-height:1.5;margin:18px 0 0;color:#7a6f63;">If the app button does not open, use this secure web link:<br><a href="{web_link}" style="color:#c2410c;">Confirm email in browser</a></p>
+          </td></tr>
+          <tr><td style="padding:18px 28px 28px;color:#95877a;font-size:12px;line-height:1.5;">You received this because this email was used to create a Trailhead account. Questions? hello@gettrailhead.app</td></tr>
+        </table>
+      </td></tr>
+    </table>
+  </body>
+</html>
+""", subtype="html")
+    logo_path = Path(__file__).resolve().parents[1] / "mobile" / "assets" / "icon.png"
+    if logo_path.exists():
+        msg.get_payload()[1].add_related(logo_path.read_bytes(), maintype="image", subtype="png", cid=f"<{logo_cid}>")
+
+    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20) as smtp:
+        if settings.smtp_tls:
+            smtp.starttls()
+        if settings.smtp_user or settings.smtp_password:
+            smtp.login(settings.smtp_user, settings.smtp_password)
+        smtp.send_message(msg)
+
+def _grant_signup_rewards(user: dict) -> None:
+    if int(user.get("credits") or 0) == 0:
+        add_credits(user["id"], SIGNUP_BONUS, "Welcome bonus")
+        if user.get("referred_by"):
+            add_credits(user["referred_by"], 20, f"Referral - {user.get('username', 'new user')} signed up")
+
 def _require_admin(user: dict = Depends(_current_user)) -> dict:
     if not user.get("is_admin"):
         raise HTTPException(403, "Admin access required")
@@ -229,10 +305,18 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: str; password: str
 
+class VerifyEmailRequest(BaseModel):
+    token: str
+
+class ResendVerificationRequest(BaseModel):
+    email: str
+
 @app.post("/api/auth/register")
 async def register(body: RegisterRequest):
     email = body.email.strip().lower()
     username = body.username.strip()
+    if not _email_configured():
+        raise HTTPException(503, "Email verification is not configured. Contact hello@gettrailhead.app.")
     if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
         raise HTTPException(400, "Enter a valid email address")
     if len(username) < 3 or len(username) > 24:
@@ -252,19 +336,67 @@ async def register(body: RegisterRequest):
                           referred_by=referrer["id"] if referrer else None)
     except sqlite3.IntegrityError:
         raise HTTPException(400, "Email or username already registered")
-    # Welcome bonus — enough for ~3 short AI trips to show off the product
-    add_credits(uid, SIGNUP_BONUS, "Welcome bonus")
-    if referrer:
-        # Referral bonus paid to both parties; capped at 10 referrals lifetime via credit history check
-        add_credits(referrer["id"], 20, f"Referral — {username} signed up")
-    return {"token": _make_token(uid), "user": _safe_user(get_user_by_id(uid))}
+    token = secrets.token_urlsafe(32)
+    set_email_verification(uid, token)
+    try:
+        _send_verification_email(email, username, token)
+    except Exception as e:
+        raise HTTPException(503, f"Could not send verification email. Contact hello@gettrailhead.app. ({type(e).__name__})")
+    return {
+        "needs_verification": True,
+        "email": email,
+        "message": "Check your email to activate your Trailhead account.",
+    }
 
 @app.post("/api/auth/login")
 async def login(body: LoginRequest):
-    user = get_user_by_email(body.email)
+    user = get_user_by_email(body.email.strip().lower())
     if not user or not _verify_pw(body.password, user["password_hash"]):
         raise HTTPException(401, "Invalid email or password")
+    if not int(user.get("email_verified", 1)):
+        raise HTTPException(403, "Email not verified. Check your inbox or resend the verification email.")
     return {"token": _make_token(user["id"]), "user": _safe_user(user)}
+
+@app.post("/api/auth/verify-email")
+async def verify_email(body: VerifyEmailRequest):
+    token = body.token.strip()
+    if not token:
+        raise HTTPException(400, "Verification token is required")
+    user = verify_email_token(token)
+    if not user:
+        raise HTTPException(400, "Verification link is invalid or expired")
+    _grant_signup_rewards(user)
+    fresh = get_user_by_id(user["id"])
+    return {"token": _make_token(user["id"]), "user": _safe_user(fresh or user)}
+
+@app.get("/api/auth/verify-email", response_class=HTMLResponse)
+async def verify_email_web(token: str = ""):
+    user = verify_email_token(token.strip()) if token else None
+    if not user:
+        return HTMLResponse("""<!doctype html><html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f7f4ee;color:#171412;padding:32px;"><h1>Verification link expired</h1><p>Open Trailhead and resend the verification email, or contact hello@gettrailhead.app.</p></body></html>""", status_code=400)
+    _grant_signup_rewards(user)
+    return HTMLResponse("""<!doctype html><html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f7f4ee;color:#171412;padding:32px;"><h1>Email confirmed</h1><p>Your Trailhead account is active. Open the app and sign in.</p><a href="trailhead://" style="display:inline-block;background:#f97316;color:#fff;text-decoration:none;font-weight:900;border-radius:12px;padding:14px 18px;">Open Trailhead</a></body></html>""")
+
+@app.post("/api/auth/resend-verification")
+async def resend_verification(body: ResendVerificationRequest):
+    if not _email_configured():
+        raise HTTPException(503, "Email verification is not configured. Contact hello@gettrailhead.app.")
+    email = body.email.strip().lower()
+    user = get_user_by_email(email)
+    if not user:
+        raise HTTPException(404, "No account found for that email")
+    if int(user.get("email_verified", 1)):
+        return {"ok": True, "message": "That email is already verified. Sign in to continue."}
+    last_sent = int(user.get("email_verify_sent_at") or 0)
+    if time.time() - last_sent < 60:
+        raise HTTPException(429, "Please wait a minute before resending.")
+    token = secrets.token_urlsafe(32)
+    set_email_verification(user["id"], token)
+    try:
+        _send_verification_email(email, user["username"], token)
+    except Exception as e:
+        raise HTTPException(503, f"Could not send verification email. Contact hello@gettrailhead.app. ({type(e).__name__})")
+    return {"ok": True, "message": "Verification email sent."}
 
 @app.get("/api/auth/me")
 async def me(user: dict = Depends(_current_user)):

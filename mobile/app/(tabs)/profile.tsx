@@ -103,6 +103,8 @@ export default function ProfileScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [refCode, setRefCode] = useState('');
   const [loading, setLoading] = useState(false);
+  const [pendingVerifyEmail, setPendingVerifyEmail] = useState('');
+  const [resendingVerify, setResendingVerify] = useState(false);
   const [creditHistory, setCreditHistory] = useState<any[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [showPaywall, setShowPaywall] = useState(false);
@@ -171,11 +173,17 @@ export default function ProfileScreen() {
     if (!email || !password) { Alert.alert('Fill in all fields'); return; }
     setLoading(true);
     try {
-      const res = await api.login(email, password);
+      const cleanEmail = email.trim().toLowerCase();
+      const res = await api.login(cleanEmail, password);
       setAuth(res.token, res.user);
       transitionToMain(`Welcome back, ${res.user.username}!`);
     } catch (e: any) {
       setLoading(false);
+      if (e instanceof ApiError && e.status === 403 && String(e.message).toLowerCase().includes('email not verified')) {
+        setPendingVerifyEmail(email.trim().toLowerCase());
+        Alert.alert('Verify your email', 'Check your inbox for the Trailhead verification email, or resend it here.');
+        return;
+      }
       Alert.alert('Login failed', e.message);
     }
   }
@@ -190,11 +198,31 @@ export default function ProfileScreen() {
     setLoading(true);
     try {
       const res = await api.register(cleanEmail, cleanUsername, password, refCode.trim());
-      setAuth(res.token, res.user);
-      transitionToMain(`Welcome to Trailhead, ${res.user.username}! 50 credits added.`);
+      if (res.token && res.user) {
+        setAuth(res.token, res.user);
+        transitionToMain(`Welcome to Trailhead, ${res.user.username}! 50 credits added.`);
+        return;
+      }
+      setLoading(false);
+      setPendingVerifyEmail(res.email ?? cleanEmail);
     } catch (e: any) {
       setLoading(false);
       Alert.alert('Registration failed', e.message);
+    }
+  }
+
+  async function resendVerification() {
+    const target = (pendingVerifyEmail || email).trim().toLowerCase();
+    if (!target) { Alert.alert('Email needed', 'Enter the email used for your Trailhead account.'); return; }
+    setResendingVerify(true);
+    try {
+      const res = await api.resendVerification(target);
+      setPendingVerifyEmail(target);
+      Alert.alert('Email sent', res.message);
+    } catch (e: any) {
+      Alert.alert('Could not resend', e.message);
+    } finally {
+      setResendingVerify(false);
     }
   }
 
@@ -333,6 +361,41 @@ export default function ProfileScreen() {
     }
   }
 
+  function renderVerificationPanel() {
+    const target = pendingVerifyEmail || email.trim().toLowerCase();
+    return (
+      <ScrollView contentContainerStyle={s.authScroll} keyboardShouldPersistTaps="handled">
+        <View style={s.authBrand}>
+          <Image source={require('@/assets/icon.png')} style={s.authIcon} />
+          <View>
+            <Text style={s.authWordmark}>TRAILHEAD</Text>
+            <Text style={s.authTagline}>AI OVERLAND GUIDE</Text>
+          </View>
+        </View>
+        <View style={s.verifyCard}>
+          <Ionicons name="mail-unread-outline" size={34} color={C.orange} />
+          <Text style={s.authHeading}>Check your email</Text>
+          <Text style={s.authSub}>
+            We sent a Trailhead confirmation link to {target || 'your email'}. Open it to activate your account and unlock signup credits.
+          </Text>
+          <TouchableOpacity
+            style={[s.btn, resendingVerify && s.btnDisabled]}
+            onPress={resendVerification}
+            disabled={resendingVerify}
+          >
+            <Text style={s.btnText}>{resendingVerify ? 'SENDING...' : 'RESEND EMAIL'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.secondaryAuthBtn} onPress={() => { setPendingVerifyEmail(''); setView('login'); }}>
+            <Text style={s.secondaryAuthText}>Back to sign in</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.secondaryAuthBtn} onPress={() => contactSupport('Trailhead email verification help')}>
+            <Text style={s.secondaryAuthText}>Contact hello@gettrailhead.app</Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+    );
+  }
+
   if (view === 'login') return (
     <SafeAreaView style={s.container}>
       <Animated.View style={{ flex: 1, opacity: authFade }}>
@@ -341,6 +404,8 @@ export default function ProfileScreen() {
             <Ionicons name="checkmark-circle" size={52} color="#22c55e" />
             <Text style={s.authSuccessText}>{authSuccess}</Text>
           </View>
+        ) : pendingVerifyEmail ? (
+          renderVerificationPanel()
         ) : (
           <ScrollView contentContainerStyle={s.authScroll} keyboardShouldPersistTaps="handled">
             <View style={s.authBrand}>
@@ -379,6 +444,8 @@ export default function ProfileScreen() {
             <Ionicons name="checkmark-circle" size={52} color="#22c55e" />
             <Text style={s.authSuccessText}>{authSuccess}</Text>
           </View>
+        ) : pendingVerifyEmail ? (
+          renderVerificationPanel()
         ) : (
           <ScrollView contentContainerStyle={s.authScroll} keyboardShouldPersistTaps="handled">
             <View style={s.authBrand}>
@@ -1257,6 +1324,12 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   authTagline: { color: C.text3, fontSize: 9, fontFamily: mono, letterSpacing: 1.5, marginTop: 2 },
   authHeading: { color: C.text, fontSize: 28, fontWeight: '800', letterSpacing: -0.5 },
   authSub: { color: C.text3, fontSize: 13.5, lineHeight: 20, marginTop: -4 },
+  verifyCard: {
+    gap: 14, backgroundColor: C.s2, borderRadius: 16, borderWidth: 1, borderColor: C.border,
+    padding: 18,
+  },
+  secondaryAuthBtn: { alignItems: 'center', paddingVertical: 8 },
+  secondaryAuthText: { color: C.text3, fontSize: 13, fontWeight: '700' },
   signupPerk: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
     backgroundColor: C.orangeGlow, borderRadius: 10, borderWidth: 1, borderColor: C.orange,

@@ -1,6 +1,6 @@
 import '@/lib/backgroundTasks'; // must be first — registers background location task
 import { useEffect, useRef, useState } from 'react';
-import { AppState, View, Text, TouchableOpacity } from 'react-native';
+import { Alert, AppState, Linking, View, Text, TouchableOpacity } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { storage } from '@/lib/storage';
@@ -29,6 +29,26 @@ export default function RootLayout() {
   // the latest code on every cold start with one short reload). After that
   // window we fall back to a banner so we don't interrupt active use.
   const launchAtRef = useRef(Date.now());
+
+  function verificationTokenFromUrl(url: string | null | undefined) {
+    if (!url || !url.includes('verify-email')) return '';
+    const match = url.match(/[?&]token=([^&]+)/);
+    return match ? decodeURIComponent(match[1]) : '';
+  }
+
+  async function handleVerificationUrl(url: string | null | undefined) {
+    const token = verificationTokenFromUrl(url);
+    if (!token) return;
+    try {
+      const res = await api.verifyEmail(token);
+      setAuth(res.token, res.user);
+      storage.set('trailhead_user', JSON.stringify(res.user)).catch(() => {});
+      Alert.alert('Email confirmed', 'Your Trailhead account is active.');
+      router.push('/(tabs)/profile');
+    } catch (e: any) {
+      Alert.alert('Verification failed', e?.message ?? 'This verification link is invalid or expired.');
+    }
+  }
 
   async function checkForUpdate() {
     if (checking.current) return;
@@ -137,8 +157,14 @@ export default function RootLayout() {
       }
     });
 
+    Linking.getInitialURL().then(handleVerificationUrl).catch(() => {});
+    const linkSub = Linking.addEventListener('url', event => {
+      handleVerificationUrl(event.url);
+    });
+
     return () => {
       notifSub.remove();
+      linkSub.remove();
       appStateSub?.remove();
     };
   }, []);

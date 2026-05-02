@@ -89,6 +89,9 @@ def init_db():
             reporting_restricted_until INTEGER,
             flagged_report_count     INTEGER NOT NULL DEFAULT 0,
             is_admin                 INTEGER NOT NULL DEFAULT 0,
+            email_verified           INTEGER NOT NULL DEFAULT 0,
+            email_verify_token       TEXT,
+            email_verify_sent_at     INTEGER,
             created_at               INTEGER NOT NULL
         );
         CREATE TABLE IF NOT EXISTS credit_transactions (
@@ -233,6 +236,7 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_analytics_type ON analytics_events(event_type, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_route_cache_time ON route_cache(fetched_at)",
         "CREATE INDEX IF NOT EXISTS idx_offline_downloads_user ON offline_downloads(user_id, asset_type, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_users_email_verify_token ON users(email_verify_token)",
     ]:
         try:
             db.execute(idx_sql)
@@ -267,6 +271,9 @@ def init_db():
         "ALTER TABLE users ADD COLUMN plan_expires_at INTEGER",
         "ALTER TABLE users ADD COLUMN camp_searches_used INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE users ADD COLUMN push_token TEXT",
+        "ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE users ADD COLUMN email_verify_token TEXT",
+        "ALTER TABLE users ADD COLUMN email_verify_sent_at INTEGER",
         """CREATE TABLE IF NOT EXISTS plan_jobs (
             id          TEXT PRIMARY KEY,
             user_id     INTEGER,
@@ -468,12 +475,45 @@ def create_user(email: str, username: str, password_hash: str, referral_code: st
                 referred_by: int | None = None) -> int:
     db = _conn()
     cur = db.execute(
-        "INSERT INTO users (email,username,password_hash,referral_code,referred_by,created_at) VALUES (?,?,?,?,?,?)",
+        """INSERT INTO users
+           (email,username,password_hash,referral_code,referred_by,email_verified,created_at)
+           VALUES (?,?,?,?,?,0,?)""",
         (email.lower(), username, password_hash, referral_code, referred_by, int(time.time()))
     )
     uid = cur.lastrowid
     db.commit(); db.close()
     return uid
+
+def set_email_verification(user_id: int, token: str, sent_at: int | None = None) -> None:
+    db = _conn()
+    db.execute(
+        "UPDATE users SET email_verified=0, email_verify_token=?, email_verify_sent_at=? WHERE id=?",
+        (token, sent_at or int(time.time()), user_id)
+    )
+    db.commit(); db.close()
+
+def verify_email_token(token: str) -> dict | None:
+    db = _conn()
+    row = db.execute("SELECT * FROM users WHERE email_verify_token=?", (token,)).fetchone()
+    if not row:
+        db.close()
+        return None
+    db.execute(
+        "UPDATE users SET email_verified=1, email_verify_token=NULL, email_verify_sent_at=NULL WHERE id=?",
+        (row["id"],)
+    )
+    db.commit()
+    fresh = db.execute("SELECT * FROM users WHERE id=?", (row["id"],)).fetchone()
+    db.close()
+    return dict(fresh) if fresh else None
+
+def mark_email_verified(user_id: int) -> None:
+    db = _conn()
+    db.execute(
+        "UPDATE users SET email_verified=1, email_verify_token=NULL, email_verify_sent_at=NULL WHERE id=?",
+        (user_id,)
+    )
+    db.commit(); db.close()
 
 def get_user_by_email(email: str) -> dict | None:
     db = _conn()
@@ -1226,13 +1266,13 @@ def ensure_admin_user(email: str, username: str, password_hash: str):
     db = _conn()
     existing = db.execute("SELECT id FROM users WHERE email=?", (email.lower(),)).fetchone()
     if existing:
-        db.execute("UPDATE users SET is_admin=1 WHERE email=?", (email.lower(),))
+        db.execute("UPDATE users SET is_admin=1, email_verified=1, email_verify_token=NULL WHERE email=?", (email.lower(),))
         db.commit(); db.close()
         return
     import secrets as _secrets
     code = f"admin-{_secrets.token_hex(4)}"
     db.execute(
-        "INSERT INTO users (email,username,password_hash,referral_code,is_admin,created_at) VALUES (?,?,?,?,1,?)",
+        "INSERT INTO users (email,username,password_hash,referral_code,is_admin,email_verified,created_at) VALUES (?,?,?,?,1,1,?)",
         (email.lower(), username, password_hash, code, int(time.time()))
     )
     db.commit(); db.close()

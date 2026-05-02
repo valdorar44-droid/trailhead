@@ -51,12 +51,20 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
 
 export const api = {
   register: (email: string, username: string, password: string, referral_code = '') =>
-    req<{ token: string; user: User }>('/api/auth/register', {
+    req<{ token?: string; user?: User; needs_verification?: boolean; email?: string; message?: string }>('/api/auth/register', {
       method: 'POST', body: JSON.stringify({ email, username, password, referral_code }),
     }),
   login: (email: string, password: string) =>
     req<{ token: string; user: User }>('/api/auth/login', {
       method: 'POST', body: JSON.stringify({ email, password }),
+    }),
+  verifyEmail: (token: string) =>
+    req<{ token: string; user: User }>('/api/auth/verify-email', {
+      method: 'POST', body: JSON.stringify({ token }),
+    }),
+  resendVerification: (email: string) =>
+    req<{ ok: boolean; message: string }>('/api/auth/resend-verification', {
+      method: 'POST', body: JSON.stringify({ email }),
     }),
   me: () => req<User>('/api/auth/me'),
 
@@ -226,6 +234,7 @@ export interface User {
   referral_code: string; report_streak: number; created_at: number;
   reporting_restricted_until?: number;
   is_admin?: boolean;
+  email_verified?: boolean | number;
 }
 export interface TripResult {
   trip_id: string; plan: TripPlan; campsites: Campsite[]; gas_stations: GasStation[];

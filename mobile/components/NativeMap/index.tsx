@@ -272,13 +272,16 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
 
   // MVUM uses viewport-dependent queries — refetch when layer toggled or bounds change
   const fetchMvum = useCallback(async (bounds: { n: number; s: number; e: number; w: number }) => {
-    const bbox = `${bounds.w},${bounds.s},${bounds.e},${bounds.n}`;
+    const envelope = JSON.stringify({
+      xmin: bounds.w, ymin: bounds.s, xmax: bounds.e, ymax: bounds.n,
+      spatialReference: { wkid: 4326 },
+    });
     const base = 'https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_MVUM_01/MapServer/';
-    const params = `where=1%3D1&geometry=${encodeURIComponent(bbox)}&geometryType=esriGeometryEnvelope&inSR=4326&outSR=4326&returnGeometry=true&f=geojson&resultRecordCount=1000`;
+    const params = `where=1%3D1&geometry=${encodeURIComponent(envelope)}&geometryType=esriGeometryEnvelope&inSR=4326&outSR=4326&returnGeometry=true&f=geojson&resultRecordCount=1000`;
     try {
       const [roads, trails] = await Promise.all([
-        fetch(`${base}1/query?${params}&outFields=MVUM_NAME,PASSENGER_VEHICLE,HIGH_CLEARANCE_VEHICLE`).then(r => r.json()),
-        fetch(`${base}2/query?${params}&outFields=TRAIL_NAME,TRAIL_SURFACE`).then(r => r.json()),
+        fetch(`${base}1/query?${params}&outFields=name,symbol,mvum_symbol_name,passengervehicle,highclearancevehicle,seasonal,forestname`).then(r => r.json()),
+        fetch(`${base}2/query?${params}&outFields=name,symbol,mvum_symbol_name,passengervehicle,highclearancevehicle,seasonal,forestname,trailstatus`).then(r => r.json()),
       ]);
       if (roads.features) setMvumRoads(roads);
       if (trails.features) setMvumTrails(trails);
@@ -1185,8 +1188,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             id="mvum-roads-line"
             style={{
               lineColor: ['case',
-                ['==', ['get', 'PASSENGER_VEHICLE'], 'YES'], '#22c55e',
-                ['==', ['get', 'HIGH_CLEARANCE_VEHICLE'], 'YES'], '#f97316',
+                ['==', ['get', 'passengervehicle'], 'open'], '#22c55e',
+                ['==', ['get', 'highclearancevehicle'], 'open'], '#f97316',
                 '#ef4444'],
               lineWidth: 2.5,
               lineOpacity: 0.85,

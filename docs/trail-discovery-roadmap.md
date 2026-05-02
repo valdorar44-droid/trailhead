@@ -18,6 +18,7 @@ Goal: make Trailhead feel like an overlanding app that also handles hiking and t
   - Rain Radar,
   - MVUM.
 - Hide unfinished native rows such as 3D terrain, NAIP, and OSM road-surface overlay until they are truly wired.
+- MVUM queries must use a JSON ArcGIS envelope and lowercase GeoJSON field names such as `passengervehicle` and `highclearancevehicle`.
 
 ## Product direction
 

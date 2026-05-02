@@ -321,7 +321,7 @@ export interface LeaderboardEntry {
 }
 export interface Pin {
   id: number; lat: number; lng: number; name: string; type: string; description: string; land_type: string;
-  details?: Record<string, string>;
+  details?: Record<string, string> | string;
   submitted_at?: number; upvotes?: number; downvotes?: number; hidden?: number;
 }
 export interface PinPayload {

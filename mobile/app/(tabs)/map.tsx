@@ -657,9 +657,22 @@ function pinFields(type: CommunityPinTypeId): PinField[] {
   return COMMUNITY_PIN_FIELDS[type] ?? DEFAULT_PIN_FIELDS;
 }
 
+function normalizedPinDetails(details: Pin['details'] | string | null | undefined): Record<string, string> {
+  if (!details) return {};
+  if (typeof details === 'string') {
+    try {
+      const parsed = JSON.parse(details);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, string> : {};
+    } catch {
+      return {};
+    }
+  }
+  return details;
+}
+
 function pinDetailRows(pin: Pin): { label: string; value: string }[] {
   const type = normalizedCommunityPinType(pin) as CommunityPinTypeId;
-  const details = pin.details ?? {};
+  const details = normalizedPinDetails(pin.details);
   const labels = new Map(pinFields(type).map(f => [f.key, f.label]));
   return Object.entries(details)
     .filter(([, value]) => String(value || '').trim())

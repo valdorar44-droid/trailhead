@@ -566,6 +566,114 @@ function normalizedCommunityPinType(pin: Pick<Pin, 'type' | 'description'>): str
   return type;
 }
 
+type PinField = {
+  key: string;
+  label: string;
+  kind?: 'text' | 'select';
+  placeholder?: string;
+  options?: string[];
+};
+
+const DEFAULT_PIN_FIELDS: PinField[] = [
+  { key: 'access', label: 'Access', kind: 'select', options: ['Public', 'Unknown', 'Members/customers', 'Private / avoid'] },
+  { key: 'status', label: 'Status', kind: 'select', options: ['Open', 'Unknown', 'Seasonal', 'Closed'] },
+];
+
+const COMMUNITY_PIN_FIELDS: Partial<Record<CommunityPinTypeId, PinField[]>> = {
+  camp: [
+    { key: 'camping_status', label: 'Camping', kind: 'select', options: ['Allowed', 'Check signs', 'Unknown', 'Not allowed'] },
+    { key: 'vehicle_fit', label: 'Vehicle fit', kind: 'select', options: ['Car', 'Truck/van', 'Trailer', 'Big rig'] },
+    { key: 'surface', label: 'Surface', kind: 'select', options: ['Dirt', 'Gravel', 'Pavement', 'Sand', 'Mud'] },
+    { key: 'noise', label: 'Noise', kind: 'select', options: ['Quiet', 'Some traffic', 'Loud'] },
+    { key: 'safety', label: 'Safety feel', kind: 'select', options: ['Good', 'Unsure', 'Avoid'] },
+  ],
+  informal_camp: [
+    { key: 'overnight', label: 'Overnight', kind: 'select', options: ['Allowed', 'No signs', 'Unknown', 'Not allowed'] },
+    { key: 'vehicle_fit', label: 'Vehicle fit', kind: 'select', options: ['Car', 'Truck/van', 'Trailer', 'Big rig'] },
+    { key: 'surface', label: 'Surface', kind: 'select', options: ['Dirt', 'Gravel', 'Pavement', 'Sand', 'Mud'] },
+    { key: 'noise', label: 'Noise', kind: 'select', options: ['Quiet', 'Some traffic', 'Loud'] },
+    { key: 'stay_limit', label: 'Stay limit', placeholder: 'Example: 1 night, 14 days, unknown' },
+  ],
+  wild_camp: [
+    { key: 'land_context', label: 'Land context', kind: 'select', options: ['BLM', 'USFS', 'State land', 'Unknown'] },
+    { key: 'vehicle_fit', label: 'Vehicle fit', kind: 'select', options: ['Truck/van', 'High clearance', '4WD required', 'Walk-in only'] },
+    { key: 'surface', label: 'Surface', kind: 'select', options: ['Dirt', 'Gravel', 'Sand', 'Rock', 'Mud'] },
+    { key: 'privacy', label: 'Privacy', kind: 'select', options: ['Secluded', 'Visible from road', 'Shared area'] },
+  ],
+  water: [
+    { key: 'potable', label: 'Potable', kind: 'select', options: ['Yes', 'No', 'Unknown'] },
+    { key: 'water_type', label: 'Type', kind: 'select', options: ['Spigot', 'Fill station', 'Spring', 'Creek', 'Faucet'] },
+    { key: 'flow', label: 'Flow', kind: 'select', options: ['Good', 'Slow', 'Seasonal', 'Dry'] },
+    { key: 'access', label: 'Access', kind: 'select', options: ['Public', 'Customers only', 'Paid', 'Unknown'] },
+  ],
+  propane: [
+    { key: 'service', label: 'Service', kind: 'select', options: ['Refill', 'Exchange', 'Both', 'Unknown'] },
+    { key: 'rig_friendly', label: 'Rig friendly', kind: 'select', options: ['Yes', 'Tight', 'No', 'Unknown'] },
+    { key: 'last_price', label: 'Last price', placeholder: 'Optional' },
+    { key: 'hours', label: 'Hours', placeholder: 'Optional' },
+  ],
+  dump: [
+    { key: 'fee', label: 'Fee', kind: 'select', options: ['Free', 'Paid', 'Customers only', 'Unknown'] },
+    { key: 'rinse_water', label: 'Rinse water', kind: 'select', options: ['Yes', 'No', 'Unknown'] },
+    { key: 'potable_water', label: 'Potable water', kind: 'select', options: ['Yes', 'No', 'Nearby', 'Unknown'] },
+    { key: 'rig_friendly', label: 'Rig friendly', kind: 'select', options: ['Yes', 'Tight', 'No', 'Unknown'] },
+  ],
+  shower: [
+    { key: 'fee', label: 'Fee', kind: 'select', options: ['Free', 'Paid', 'Customers only', 'Unknown'] },
+    { key: 'cleanliness', label: 'Cleanliness', kind: 'select', options: ['Clean', 'Okay', 'Rough', 'Unknown'] },
+    { key: 'privacy', label: 'Privacy', kind: 'select', options: ['Private stalls', 'Shared', 'Unknown'] },
+    { key: 'hours', label: 'Hours', placeholder: 'Optional' },
+  ],
+  laundromat: [
+    { key: 'machines', label: 'Machines', kind: 'select', options: ['Good', 'Limited', 'Often busy', 'Unknown'] },
+    { key: 'payment', label: 'Payment', kind: 'select', options: ['Card', 'Coins', 'Both', 'Unknown'] },
+    { key: 'parking', label: 'Parking', kind: 'select', options: ['Easy', 'Street only', 'Tight', 'Unknown'] },
+  ],
+  fuel: [
+    { key: 'fuel_types', label: 'Fuel', kind: 'select', options: ['Gas', 'Diesel', 'Gas + diesel', 'Propane/DEF too'] },
+    { key: 'rig_friendly', label: 'Rig friendly', kind: 'select', options: ['Yes', 'Tight', 'No', 'Unknown'] },
+    { key: 'reliability', label: 'Reliability', kind: 'select', options: ['Reliable', 'Rural hours', 'Sometimes closed', 'Unknown'] },
+  ],
+  parking: [
+    { key: 'overnight', label: 'Overnight', kind: 'select', options: ['Allowed', 'No signs', 'Unknown', 'Not allowed'] },
+    { key: 'surface', label: 'Surface', kind: 'select', options: ['Pavement', 'Gravel', 'Dirt'] },
+    { key: 'noise', label: 'Noise', kind: 'select', options: ['Quiet', 'Some traffic', 'Loud'] },
+  ],
+  mechanic: [
+    { key: 'service', label: 'Service', kind: 'select', options: ['Repair', 'Tires', 'Tow/recovery', 'Parts', 'Welding'] },
+    { key: 'overland_friendly', label: 'Overland friendly', kind: 'select', options: ['Yes', 'Maybe', 'Unknown'] },
+  ],
+  attraction: [
+    { key: 'worth_stop', label: 'Worth stop', kind: 'select', options: ['Must see', 'Good stop', 'If nearby', 'Skip'] },
+    { key: 'time_needed', label: 'Time needed', kind: 'select', options: ['15 min', '30-60 min', 'Half day', 'Full day'] },
+  ],
+  wifi: [
+    { key: 'signal', label: 'Signal', kind: 'select', options: ['Strong', 'Usable', 'Weak', 'Down'] },
+    { key: 'access', label: 'Access', kind: 'select', options: ['Public', 'Customers only', 'Paid', 'Unknown'] },
+  ],
+};
+
+function pinFields(type: CommunityPinTypeId): PinField[] {
+  return COMMUNITY_PIN_FIELDS[type] ?? DEFAULT_PIN_FIELDS;
+}
+
+function pinDetailRows(pin: Pin): { label: string; value: string }[] {
+  const type = normalizedCommunityPinType(pin) as CommunityPinTypeId;
+  const details = pin.details ?? {};
+  const labels = new Map(pinFields(type).map(f => [f.key, f.label]));
+  return Object.entries(details)
+    .filter(([, value]) => String(value || '').trim())
+    .map(([key, value]) => ({ label: labels.get(key) ?? key.replace(/_/g, ' '), value: String(value) }));
+}
+
+function ageLabel(ts: number) {
+  const seconds = Math.max(0, Date.now() / 1000 - ts);
+  if (seconds < 3600) return `${Math.max(1, Math.round(seconds / 60))}m ago`;
+  if (seconds < 86400) return `${Math.round(seconds / 3600)}h ago`;
+  if (seconds < 86400 * 30) return `${Math.round(seconds / 86400)}d ago`;
+  return `${Math.round(seconds / (86400 * 30))}mo ago`;
+}
+
 // ─── Land type color helper ──────────────────────────────────────────────────
 
 function landColor(lt: string) {
@@ -1825,6 +1933,7 @@ function MapScreen() {
   const [pinType, setPinType] = useState<CommunityPinTypeId>('camp');
   const [pinName, setPinName] = useState('');
   const [pinDescription, setPinDescription] = useState('');
+  const [pinDetails, setPinDetails] = useState<Record<string, string>>({});
   const [pinSubmitting, setPinSubmitting] = useState(false);
   const [selectedCommunityPin, setSelectedCommunityPin] = useState<Pin | null>(null);
   const [selectedCamp,  setSelectedCamp]  = useState<CampsitePin | null>(null);
@@ -2457,6 +2566,7 @@ function MapScreen() {
       setPendingPin(userLoc);
       setPinName('');
       setPinDescription('');
+      setPinDetails({});
       return;
     }
     setPinDropMode(true);
@@ -2477,6 +2587,7 @@ function MapScreen() {
         name,
         description: pinDescription.trim(),
         land_type: '',
+        details: pinDetails,
       });
       const created: Pin = {
         id: Date.now(),
@@ -2485,6 +2596,7 @@ function MapScreen() {
         type: pinType,
         name,
         description: pinDescription.trim(),
+        details: pinDetails,
         land_type: '',
         upvotes: 0,
         downvotes: 0,
@@ -2494,6 +2606,7 @@ function MapScreen() {
       setPendingPin(null);
       setPinName('');
       setPinDescription('');
+      setPinDetails({});
       setQuickToast('+5 credits · community pin added');
       setTimeout(() => setQuickToast(''), 3000);
     } catch (e: any) {
@@ -6097,6 +6210,7 @@ function MapScreen() {
       {/* ── Community pin card ── */}
       {selectedCommunityPin && (() => {
         const meta = communityPinMeta(normalizedCommunityPinType(selectedCommunityPin));
+        const detailRows = pinDetailRows(selectedCommunityPin);
         return (
           <Modal visible transparent animationType="slide" onRequestClose={() => setSelectedCommunityPin(null)}>
             <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setSelectedCommunityPin(null)}>
@@ -6112,9 +6226,32 @@ function MapScreen() {
                       {meta.label.toUpperCase()} · {selectedCommunityPin.upvotes ?? 0} up · {selectedCommunityPin.downvotes ?? 0} down
                     </Text>
                     {!!selectedCommunityPin.description && (
-                      <Text style={s.pinDescription} numberOfLines={3}>{selectedCommunityPin.description}</Text>
+                      <Text style={s.pinDescription}>{selectedCommunityPin.description}</Text>
                     )}
                   </View>
+                </View>
+                <View style={s.pinTrustRow}>
+                  <View style={s.pinTrustChip}>
+                    <Ionicons name="people-outline" size={12} color={OVR.text2} />
+                    <Text style={s.pinTrustText}>COMMUNITY CARD</Text>
+                  </View>
+                  {selectedCommunityPin.submitted_at ? (
+                    <Text style={s.pinAgeText}>{ageLabel(selectedCommunityPin.submitted_at)}</Text>
+                  ) : null}
+                </View>
+                {detailRows.length > 0 && (
+                  <View style={s.pinDetailGrid}>
+                    {detailRows.map(row => (
+                      <View key={`${row.label}-${row.value}`} style={s.pinDetailTile}>
+                        <Text style={s.pinDetailLabel}>{row.label.toUpperCase()}</Text>
+                        <Text style={s.pinDetailValue}>{row.value}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+                <View style={s.pinCoordBox}>
+                  <Ionicons name="location-outline" size={13} color={OVR.text3} />
+                  <Text style={s.pinCoordText}>{selectedCommunityPin.lat.toFixed(5)}, {selectedCommunityPin.lng.toFixed(5)}</Text>
                 </View>
                 <View style={s.wpSheetActions}>
                   <TouchableOpacity style={s.wpSheetNavBtn} onPress={() => { setSelectedCommunityPin(null); navigateToCamp(selectedCommunityPin); }}>
@@ -6159,7 +6296,7 @@ function MapScreen() {
                     <TouchableOpacity
                       key={t.id}
                       style={[s.pinTypeChip, { borderColor: t.color + '55', backgroundColor: active ? t.color : t.color + '18' }]}
-                      onPress={() => setPinType(t.id)}
+                      onPress={() => { setPinType(t.id); setPinDetails({}); }}
                     >
                       <Ionicons name={t.icon as any} size={15} color={active ? '#fff' : t.color} />
                       <Text style={[s.pinTypeText, { color: active ? '#fff' : t.color }]}>{t.label}</Text>
@@ -6178,12 +6315,44 @@ function MapScreen() {
               <TextInput
                 value={pinDescription}
                 onChangeText={setPinDescription}
-                placeholder="Details, access notes, hours, water type..."
+                placeholder="Extra notes, access details, hours, current condition..."
                 placeholderTextColor={OVR.text3}
                 style={[s.pinInput, s.pinTextArea]}
                 maxLength={500}
                 multiline
               />
+              <View style={s.pinFieldWrap}>
+                {pinFields(pinType).map(field => (
+                  <View key={field.key} style={s.pinFieldBlock}>
+                    <Text style={s.pinFieldLabel}>{field.label}</Text>
+                    {field.kind === 'select' && field.options ? (
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.pinOptionRow}>
+                        {field.options.map(option => {
+                          const active = pinDetails[field.key] === option;
+                          return (
+                            <TouchableOpacity
+                              key={option}
+                              style={[s.pinOptionChip, active && { backgroundColor: communityPinMeta(pinType).color, borderColor: communityPinMeta(pinType).color }]}
+                              onPress={() => setPinDetails(prev => ({ ...prev, [field.key]: active ? '' : option }))}
+                            >
+                              <Text style={[s.pinOptionText, active && { color: '#fff' }]}>{option}</Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </ScrollView>
+                    ) : (
+                      <TextInput
+                        value={pinDetails[field.key] ?? ''}
+                        onChangeText={value => setPinDetails(prev => ({ ...prev, [field.key]: value }))}
+                        placeholder={field.placeholder ?? field.label}
+                        placeholderTextColor={OVR.text3}
+                        style={s.pinMiniInput}
+                        maxLength={120}
+                      />
+                    )}
+                  </View>
+                ))}
+              </View>
               <View style={s.wpSheetActions}>
                 <TouchableOpacity style={s.wpSheetNavBtn} onPress={submitCommunityPin} disabled={pinSubmitting}>
                   {pinSubmitting ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="checkmark" size={14} color="#fff" />}
@@ -7218,6 +7387,62 @@ const makeStyles = (C: ColorPalette) => {
     paddingHorizontal: 11, paddingVertical: 7,
   },
   pinTypeText: { fontSize: 10, fontFamily: mono, fontWeight: '900' },
+  pinTrustRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 12 },
+  pinTrustChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    paddingHorizontal: 9, paddingVertical: 5, borderRadius: 999,
+    backgroundColor: OVR.border2, borderWidth: 1, borderColor: OVR.border,
+  },
+  pinTrustText: { color: OVR.text2, fontSize: 9, fontFamily: mono, fontWeight: '900' },
+  pinAgeText: { color: OVR.text3, fontSize: 10, fontFamily: mono, fontWeight: '800' },
+  pinDetailGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
+  pinDetailTile: {
+    width: '48%',
+    minHeight: 58,
+    padding: 10,
+    borderRadius: 12,
+    backgroundColor: OVR.border2,
+    borderWidth: 1,
+    borderColor: OVR.border,
+  },
+  pinDetailLabel: { color: OVR.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', marginBottom: 5 },
+  pinDetailValue: { color: OVR.text, fontSize: 12, fontWeight: '800', lineHeight: 16 },
+  pinCoordBox: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    marginTop: 12, marginBottom: 2,
+    paddingHorizontal: 10, paddingVertical: 8,
+    borderRadius: 10, backgroundColor: 'rgba(15,23,42,0.04)',
+  },
+  pinCoordText: { color: OVR.text3, fontSize: 11, fontFamily: mono },
+  pinFieldWrap: { gap: 10, marginBottom: 10 },
+  pinFieldBlock: {
+    padding: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: OVR.border,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  pinFieldLabel: { color: OVR.text2, fontSize: 10, fontFamily: mono, fontWeight: '900', marginBottom: 8 },
+  pinOptionRow: { gap: 7 },
+  pinOptionChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: OVR.border,
+    backgroundColor: OVR.border2,
+  },
+  pinOptionText: { color: OVR.text2, fontSize: 10, fontFamily: mono, fontWeight: '800' },
+  pinMiniInput: {
+    color: OVR.text,
+    backgroundColor: OVR.border2,
+    borderWidth: 1,
+    borderColor: OVR.border,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    fontSize: 12,
+  },
   pinInput: {
     color: OVR.text,
     backgroundColor: OVR.border2,

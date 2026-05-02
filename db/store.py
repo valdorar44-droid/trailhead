@@ -64,6 +64,7 @@ def init_db():
             name         TEXT NOT NULL,
             type         TEXT NOT NULL DEFAULT 'camp',
             description  TEXT,
+            details      TEXT,
             land_type    TEXT,
             submitted_at INTEGER NOT NULL,
             upvotes      INTEGER NOT NULL DEFAULT 0,
@@ -279,6 +280,7 @@ def init_db():
         "ALTER TABLE reports ADD COLUMN downvotes INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE community_pins ADD COLUMN downvotes INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE community_pins ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE community_pins ADD COLUMN details TEXT",
         """CREATE TABLE IF NOT EXISTS pin_interactions (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
             pin_id     INTEGER NOT NULL,
@@ -1122,12 +1124,26 @@ def get_leaderboard(limit: int = 20) -> list:
 
 # ── Community pins ─────────────────────────────────────────────────────────────
 
+def _decode_pin_details(row: sqlite3.Row | dict) -> dict:
+    data = dict(row)
+    raw = data.get("details")
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+            data["details"] = parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            data["details"] = {}
+    elif raw is None:
+        data["details"] = {}
+    return data
+
 def add_community_pin(lat: float, lng: float, name: str, type: str,
-                      description: str, land_type: str, user_id: int | None = None):
+                      description: str, land_type: str, user_id: int | None = None,
+                      details: dict | None = None):
     db = _conn()
     db.execute(
-        "INSERT INTO community_pins (user_id,lat,lng,name,type,description,land_type,submitted_at) VALUES (?,?,?,?,?,?,?,?)",
-        (user_id, lat, lng, name, type, description, land_type, int(time.time()))
+        "INSERT INTO community_pins (user_id,lat,lng,name,type,description,details,land_type,submitted_at) VALUES (?,?,?,?,?,?,?,?,?)",
+        (user_id, lat, lng, name, type, description, json.dumps(details or {}), land_type, int(time.time()))
     )
     db.commit(); db.close()
 
@@ -1234,7 +1250,7 @@ def get_all_users(search: str = "", limit: int = 50, offset: int = 0) -> list:
         (like, like, limit, offset)
     ).fetchall()
     db.close()
-    return [dict(r) for r in rows]
+    return [_decode_pin_details(r) for r in rows]
 
 def set_user_admin(user_id: int, is_admin: bool):
     db = _conn()
@@ -1262,7 +1278,7 @@ def get_all_reports(limit: int = 100, include_expired: bool = False) -> list:
         params + [limit]
     ).fetchall()
     db.close()
-    return [dict(r) for r in rows]
+    return [_decode_pin_details(r) for r in rows]
 
 def expire_report(report_id: int):
     db = _conn()

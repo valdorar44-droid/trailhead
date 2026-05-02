@@ -1887,6 +1887,7 @@ VALID_PIN_TYPES = {
 class PinRequest(BaseModel):
     lat: float; lng: float; name: str
     type: str = "camp"; description: str = ""; land_type: str = "BLM"
+    details: dict = Field(default_factory=dict)
 
 @app.post("/api/pins")
 async def submit_pin(body: PinRequest, user: dict = Depends(_current_user)):
@@ -1898,9 +1899,15 @@ async def submit_pin(body: PinRequest, user: dict = Depends(_current_user)):
     name = (body.name or "").strip()[:80]
     if not name:
         raise HTTPException(400, "Pin name is required")
+    clean_details: dict[str, str] = {}
+    for key, val in (body.details or {}).items():
+        k = re.sub(r"[^a-zA-Z0-9_:-]", "", str(key))[:40]
+        v = str(val).strip()[:240]
+        if k and v:
+            clean_details[k] = v
     add_community_pin(body.lat, body.lng, name, pin_type,
                       (body.description or "").strip()[:500], (body.land_type or "").strip()[:80],
-                      user_id=user["id"])
+                      user_id=user["id"], details=clean_details)
     add_credits(user["id"], 5, f"Community pin: {name}")
     return {"status": "ok"}
 

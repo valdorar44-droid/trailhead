@@ -21,6 +21,8 @@ class Settings:
     smtp_from_email: str = os.environ.get("SMTP_FROM_EMAIL", "hello@gettrailhead.app")
     smtp_from_name: str = os.environ.get("SMTP_FROM_NAME", "Trailhead")
     smtp_tls: bool = os.environ.get("SMTP_TLS", "true").lower() != "false"
+    cloudflare_email_account_id: str = os.environ.get("CLOUDFLARE_EMAIL_ACCOUNT_ID", os.environ.get("CF_EMAIL_ACCOUNT_ID", ""))
+    cloudflare_email_api_token: str = os.environ.get("CLOUDFLARE_EMAIL_API_TOKEN", os.environ.get("CF_EMAIL_API_TOKEN", ""))
     r2_account_id: str = os.environ.get("R2_ACCOUNT_ID", "")
     r2_access_key_id: str = os.environ.get("R2_ACCESS_KEY_ID", "")
     r2_secret_access_key: str = os.environ.get("R2_SECRET_ACCESS_KEY", "")

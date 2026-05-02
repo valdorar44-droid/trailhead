@@ -191,7 +191,13 @@ def _safe_user(u: dict) -> dict:
     return {k: v for k, v in u.items() if k not in ("password_hash", "photo_data")}
 
 def _email_configured() -> bool:
-    return bool(settings.smtp_host and settings.smtp_from_email)
+    smtp_ready = bool(settings.smtp_host and settings.smtp_from_email)
+    cloudflare_ready = bool(
+        settings.cloudflare_email_account_id and
+        settings.cloudflare_email_api_token and
+        settings.smtp_from_email
+    )
+    return smtp_ready or cloudflare_ready
 
 def _verification_links(token: str) -> tuple[str, str]:
     app_link = f"trailhead://verify-email?token={token}"
@@ -200,15 +206,11 @@ def _verification_links(token: str) -> tuple[str, str]:
 
 def _send_verification_email(email: str, username: str, token: str) -> None:
     if not _email_configured():
-        raise RuntimeError("SMTP is not configured")
+        raise RuntimeError("Email sending is not configured")
 
     app_link, web_link = _verification_links(token)
     safe_username = html.escape(username)
-    msg = EmailMessage()
-    msg["Subject"] = "Confirm your Trailhead email"
-    msg["From"] = formataddr((settings.smtp_from_name, settings.smtp_from_email))
-    msg["To"] = email
-    msg.set_content(
+    text_body = (
         f"Hi {username},\n\n"
         "Confirm your email to activate Trailhead:\n"
         f"{web_link}\n\n"
@@ -216,8 +218,7 @@ def _send_verification_email(email: str, username: str, token: str) -> None:
         "Trailhead\n"
         "hello@gettrailhead.app"
     )
-    logo_cid = "trailhead-logo"
-    msg.add_alternative(f"""\
+    html_body = f"""\
 <!doctype html>
 <html>
   <body style="margin:0;background:#f7f4ee;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#171412;">
@@ -226,7 +227,7 @@ def _send_verification_email(email: str, username: str, token: str) -> None:
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#fffaf2;border:1px solid #eadfce;border-radius:18px;overflow:hidden;">
           <tr><td style="padding:28px 28px 10px;">
             <div style="display:flex;align-items:center;gap:12px;">
-              <img src="cid:{logo_cid}" width="48" height="48" alt="Trailhead" style="width:48px;height:48px;border-radius:14px;display:inline-block;" />
+              {{logo_html}}
               <div>
                 <div style="font-size:22px;font-weight:900;letter-spacing:.08em;">TRAILHEAD</div>
                 <div style="font-size:11px;color:#7a6f63;letter-spacing:.18em;">AI OVERLAND GUIDE</div>
@@ -245,7 +246,40 @@ def _send_verification_email(email: str, username: str, token: str) -> None:
     </table>
   </body>
 </html>
-""", subtype="html")
+"""
+    if settings.cloudflare_email_account_id and settings.cloudflare_email_api_token:
+        cf_logo = '<div style="width:48px;height:48px;border-radius:14px;background:#f97316;display:inline-block;text-align:center;line-height:48px;color:white;font-size:26px;font-weight:900;">T</div>'
+        payload = {
+            "to": email,
+            "from": settings.smtp_from_email,
+            "subject": "Confirm your Trailhead email",
+            "html": html_body.replace("{logo_html}", cf_logo),
+            "text": text_body,
+        }
+        with httpx.Client(timeout=20) as client:
+            resp = client.post(
+                f"https://api.cloudflare.com/client/v4/accounts/{settings.cloudflare_email_account_id}/email/sending/send",
+                headers={
+                    "Authorization": f"Bearer {settings.cloudflare_email_api_token}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+        if resp.status_code >= 400:
+            raise RuntimeError(f"Cloudflare email send failed: {resp.status_code}")
+        data = resp.json()
+        if not data.get("success"):
+            raise RuntimeError("Cloudflare email send failed")
+        return
+
+    msg = EmailMessage()
+    msg["Subject"] = "Confirm your Trailhead email"
+    msg["From"] = formataddr((settings.smtp_from_name, settings.smtp_from_email))
+    msg["To"] = email
+    msg.set_content(text_body)
+    logo_cid = "trailhead-logo"
+    smtp_logo = f'<img src="cid:{logo_cid}" width="48" height="48" alt="Trailhead" style="width:48px;height:48px;border-radius:14px;display:inline-block;" />'
+    msg.add_alternative(html_body.replace("{logo_html}", smtp_logo), subtype="html")
     logo_path = Path(__file__).resolve().parents[1] / "mobile" / "assets" / "icon.png"
     if logo_path.exists():
         msg.get_payload()[1].add_related(logo_path.read_bytes(), maintype="image", subtype="png", cid=f"<{logo_cid}>")

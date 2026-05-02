@@ -31,6 +31,30 @@ const STEPS = [
   },
   {
     route: '/(tabs)/map',
+    icon: 'search-outline',
+    title: 'Search and route',
+    body: 'Use the map search to find camps, towns, gas, or a destination. Once a destination is selected, Trailhead can draw the route and start navigation.',
+    target: 'SEARCH',
+    targetKind: 'mapSearch',
+  },
+  {
+    route: '/(tabs)/map',
+    icon: 'layers-outline',
+    title: 'Map settings',
+    body: 'Map controls switch online/offline map sources, layers, terrain, radar, fire, avalanche, public land overlays, and campsite filters.',
+    target: 'LAYERS / FILTERS',
+    targetKind: 'mapControls',
+  },
+  {
+    route: '/(tabs)/map',
+    icon: 'download-outline',
+    title: 'Offline maps',
+    body: 'Download state maps, routing packs, or trip corridors before you leave service. Offline map status appears quietly while you pan.',
+    target: 'OFFLINE',
+    targetKind: 'mapOffline',
+  },
+  {
+    route: '/(tabs)/map',
     icon: 'location-outline',
     title: 'Pins and reports',
     body: 'Use PIN to add community places like propane, water, dumps, camps, or repairs. Use REPORT for short-lived hazards and trail conditions.',
@@ -103,11 +127,35 @@ export default function GuidedTourOverlay() {
         height: 62,
       };
     }
+    if (step.targetKind === 'mapSearch') {
+      return {
+        left: 12,
+        top: insets.top + 8,
+        width: Math.min(width - 24, 360),
+        height: 58,
+      };
+    }
+    if (step.targetKind === 'mapControls') {
+      return {
+        left: Math.max(10, width - 76),
+        top: insets.top + 82,
+        width: 64,
+        height: 214,
+      };
+    }
+    if (step.targetKind === 'mapOffline') {
+      return {
+        left: Math.max(10, width - 78),
+        top: Math.max(insets.top + 142, height - insets.bottom - 354),
+        width: 66,
+        height: 72,
+      };
+    }
     return {
-      left: 10,
-      top: Math.max(insets.top + 120, height - insets.bottom - 284),
-      width: 114,
-      height: 104,
+      left: 8,
+      top: Math.max(insets.top + 128, height - insets.bottom - 284),
+      width: 142,
+      height: 112,
     };
   }, [height, insets.bottom, insets.top, step, width]);
 
@@ -177,8 +225,17 @@ export default function GuidedTourOverlay() {
 
   const pulseScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] });
   const pulseOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.45, 0.9] });
+  const pad = 8;
+  const spotlight = {
+    left: Math.max(6, target.left - pad),
+    top: Math.max(insets.top + 4, target.top - pad),
+    width: Math.min(width - 12, target.width + pad * 2),
+    height: Math.min(height - insets.bottom - 8, target.height + pad * 2),
+  };
+  if (spotlight.left + spotlight.width > width - 6) spotlight.width = width - 6 - spotlight.left;
+  if (spotlight.top + spotlight.height > height - insets.bottom - 6) spotlight.height = height - insets.bottom - 6 - spotlight.top;
   const targetCenterX = target.left + target.width / 2;
-  const labelTop = target.top > 80 ? target.top - 36 : target.top + target.height + 8;
+  const labelTop = spotlight.top > insets.top + 48 ? spotlight.top - 38 : spotlight.top + spotlight.height + 8;
   const labelLeft = Math.min(Math.max(12, targetCenterX - 58), width - 128);
   const cardStyle = cardSide === 'top'
     ? { top: insets.top + 18 }
@@ -187,6 +244,14 @@ export default function GuidedTourOverlay() {
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={() => closeTour(false)}>
       <Animated.View style={[s.overlay, { opacity: fade }]}>
+        <View pointerEvents="none" style={[s.dimBlock, { left: 0, top: 0, width, height: spotlight.top }]} />
+        <View pointerEvents="none" style={[s.dimBlock, { left: 0, top: spotlight.top, width: spotlight.left, height: spotlight.height }]} />
+        <View pointerEvents="none" style={[s.dimBlock, { left: spotlight.left + spotlight.width, top: spotlight.top, width: Math.max(0, width - spotlight.left - spotlight.width), height: spotlight.height }]} />
+        <View pointerEvents="none" style={[s.dimBlock, { left: 0, top: spotlight.top + spotlight.height, width, height: Math.max(0, height - spotlight.top - spotlight.height) }]} />
+        <View
+          pointerEvents="none"
+          style={[s.spotlight, { left: spotlight.left, top: spotlight.top, width: spotlight.width, height: spotlight.height }]}
+        />
         <TouchableOpacity
           activeOpacity={0.86}
           onPress={next}
@@ -253,23 +318,34 @@ export default function GuidedTourOverlay() {
 const makeStyles = (C: ColorPalette) => StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.64)',
     paddingHorizontal: 16,
+  },
+  dimBlock: {
+    position: 'absolute',
+    backgroundColor: 'rgba(0,0,0,0.76)',
+  },
+  spotlight: {
+    position: 'absolute',
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderWidth: 2,
+    borderColor: C.orange,
+    shadowColor: C.orange,
+    shadowOpacity: 0.55,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 0 },
   },
   targetTouch: {
     position: 'absolute',
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 18,
-    borderWidth: 2,
-    borderColor: C.orange,
-    backgroundColor: C.orange + '12',
   },
   focusRing: {
     width: 54, height: 54, borderRadius: 27,
     alignItems: 'center', justifyContent: 'center',
     borderWidth: 2, borderColor: C.orange,
-    backgroundColor: C.orange + '22',
+    backgroundColor: C.s1,
   },
   focusLabel: {
     position: 'absolute',

@@ -312,7 +312,7 @@ export default function RouteSearchModal({
       .then(trips => setOfflineTrips(trips.map(t => ({
         trip_id: t.trip_id,
         plan: {
-          trip_name: t.plan.trip_name,
+          trip_name: (t.plan.trip_name || '').trim() || (t.trip_id.startsWith('manual_') ? 'Manual Route' : 'Downloaded Trip'),
           states: t.plan.states,
           duration_days: t.plan.duration_days,
         },
@@ -708,14 +708,14 @@ export default function RouteSearchModal({
               {offlineTrips.slice(0, 8).map(t => (
                 <TouchableOpacity
                   key={t.trip_id}
-                  style={[s.chip, { maxWidth: 210, borderColor: C.green + '66' }]}
+                  style={[s.chip, { minWidth: 170, maxWidth: 260, borderColor: C.green + '66' }]}
                   onPress={() => { onLoadSavedTrip(t.trip_id); onClose(); }}
                 >
-                  <Ionicons name="cloud-done-outline" size={14} color={C.green} />
+                  <Ionicons name={t.trip_id.startsWith('manual_') ? 'trail-sign-outline' : 'cloud-done-outline'} size={14} color={C.green} />
                   <View style={{ flex: 1 }}>
                     <Text style={[s.chipText, { fontSize: 11, fontWeight: '700' }]} numberOfLines={1}>{t.plan.trip_name}</Text>
                     <Text style={[s.chipText, { fontSize: 9, color: C.text3 }]}>
-                      {t.plan.duration_days ?? 0}d · {(t.plan.states ?? []).slice(0, 3).join(', ')}
+                      {t.trip_id.startsWith('manual_') ? 'Manual route' : 'Offline trip'} · {t.plan.duration_days ?? 0}d{(t.plan.states ?? []).length ? ` · ${(t.plan.states ?? []).slice(0, 3).join(', ')}` : ''}
                     </Text>
                   </View>
                 </TouchableOpacity>

@@ -174,6 +174,7 @@ export default function RouteBuilderScreen() {
   const [stops, setStops] = useState<BuilderStop[]>([]);
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
+  const [routeName, setRouteName] = useState('');
   const [searchResults, setSearchResults] = useState<SearchPlace[]>([]);
   const [pendingType, setPendingType] = useState<BuilderStopType>('waypoint');
   const [discoverTab, setDiscoverTab] = useState<DiscoveryTab>('camps');
@@ -406,6 +407,16 @@ export default function RouteBuilderScreen() {
     setActiveDay(next);
   }
 
+  function resolvedRouteName() {
+    const clean = routeName.trim();
+    if (clean) return clean;
+    const first = orderedStops[0]?.name?.split(',')[0]?.trim();
+    const last = orderedStops[orderedStops.length - 1]?.name?.split(',')[0]?.trim();
+    if (first && last && first !== last) return `${first} to ${last}`;
+    if (last) return `${last} Route`;
+    return 'Manual Route';
+  }
+
   function buildTrip(): TripResult {
     const sorted = orderedStops;
     const waypoints: Waypoint[] = sorted.map(st => ({
@@ -441,7 +452,7 @@ export default function RouteBuilderScreen() {
     return {
       trip_id: `manual_${Date.now()}`,
       plan: {
-        trip_name: 'Manual Route Builder Trip',
+        trip_name: resolvedRouteName(),
         overview: 'A manually built Trailhead route with user-selected stops, fuel, POIs, and camps.',
         duration_days: days.length,
         states: [],
@@ -468,6 +479,7 @@ export default function RouteBuilderScreen() {
       return;
     }
     const trip = buildTrip();
+    setRouteName(trip.plan.trip_name);
     setActiveTrip(trip);
     addTripToHistory({
       trip_id: trip.trip_id,
@@ -492,6 +504,18 @@ export default function RouteBuilderScreen() {
           <Ionicons name="save-outline" size={16} color={C.orange} />
           <Text style={s.headerBtnText}>SAVE</Text>
         </TouchableOpacity>
+      </View>
+
+      <View style={s.nameBar}>
+        <Ionicons name="trail-sign-outline" size={15} color={C.orange} />
+        <TextInput
+          style={s.nameInput}
+          value={routeName}
+          onChangeText={setRouteName}
+          placeholder="Name this route"
+          placeholderTextColor={C.text3}
+          returnKeyType="done"
+        />
       </View>
 
       <View style={s.mapWrap}>
@@ -935,6 +959,16 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   title: { color: C.text, fontSize: 22, fontWeight: '900', letterSpacing: -0.4 },
   headerBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: C.orange + '55', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7 },
   headerBtnText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '800' },
+  nameBar: {
+    flexDirection: 'row', alignItems: 'center', gap: 9,
+    paddingHorizontal: 16, paddingVertical: 10,
+    borderBottomWidth: 1, borderColor: C.border, backgroundColor: C.bg,
+  },
+  nameInput: {
+    flex: 1, color: C.text, fontSize: 14, fontWeight: '700',
+    borderWidth: 1, borderColor: C.border, borderRadius: 10,
+    backgroundColor: C.s2, paddingHorizontal: 12, paddingVertical: 9,
+  },
   mapWrap: { height: 250, backgroundColor: C.s2 },
   mapHint: { position: 'absolute', left: 12, bottom: 10, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(0,0,0,0.68)', borderRadius: 16, paddingHorizontal: 10, paddingVertical: 6 },
   mapHintText: { color: '#fff', fontSize: 10, fontFamily: mono },

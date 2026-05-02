@@ -62,7 +62,7 @@ AI_COSTS = {
 }
 
 OFFLINE_DOWNLOAD_COSTS = {
-    "state_map": 15,
+    "state_map": 0,
     "state_route": 10,
     "trip_corridor": 8,
     "conus_map": 100,
@@ -2240,9 +2240,15 @@ async def offline_authorize(body: OfflineAuthorizeRequest, user: dict = Depends(
         f"Offline download — {label} {asset_type.replace('_', ' ')}",
     )
     if not result.get("authorized"):
+        if asset_type == "state_route":
+            message = f"{label} offline routing costs {cost} credits or Explorer. State map downloads are free."
+        elif asset_type == "trip_corridor":
+            message = f"{label} trip corridor download costs {cost} credits or Explorer. State map downloads are free."
+        else:
+            message = f"{label} offline download costs {cost} credits or Explorer."
         raise HTTPException(402, detail={
             "code": "offline_download",
-            "message": f"{label} offline download costs {cost} credits or Explorer.",
+            "message": message,
             "credits_needed": cost,
             "earn_hint": True,
         })

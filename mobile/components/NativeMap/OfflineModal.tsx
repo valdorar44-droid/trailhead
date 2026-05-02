@@ -464,7 +464,7 @@ export default function OfflineModal({
       await action();
     } catch (e: any) {
       if (e instanceof PaywallError) {
-        Alert.alert('Download locked', `${e.message}\n\nFree users get one state map and one routing pack. Explorer members download offline maps freely.`);
+        Alert.alert('Download locked', `${e.message}\n\nState maps are free. Routing packs, trip corridors, and full-US bulk downloads use credits or Explorer.`);
       } else {
         Alert.alert('Download unavailable', e?.message ?? 'Could not authorize this download.');
       }
@@ -555,7 +555,7 @@ export default function OfflineModal({
                   <Section label="CONTINENTAL US — FILE DOWNLOAD" />
                   <Text style={s.hint}>
                     Single-stream download — 100× faster than tile-by-tile.
-                    Explorer downloads freely. Free accounts get one state map and one routing pack, then credits unlock more.
+                    State map downloads are free. Full-US bulk downloads, routing packs, and trip corridors use credits or Explorer.
                   </Text>
                   <ConusCard
                     state={conusState}
@@ -639,7 +639,7 @@ export default function OfflineModal({
                   <Section label="US STATES — MAP + ROUTING PACKS" />
                   <Text style={s.hint}>
                     Pick a state, then download the map file and its routing graph separately. Maps render roads/trails; routing packs are for offline turn-by-turn once the local Valhalla engine is enabled.
-                    Free accounts include one state map and one routing pack.
+                    State maps are free. Free accounts include one routing pack, then credits or Explorer unlock more.
                   </Text>
 
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>

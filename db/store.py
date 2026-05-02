@@ -1411,8 +1411,9 @@ def has_active_plan(user: dict) -> bool:
 def authorize_offline_download(user: dict, asset_type: str, region_id: str, cost: int, reason: str) -> dict:
     """Authorize one offline map/routing asset.
 
-    Plan users are free. Free users get one state map and one state routing pack,
-    then pay credits. Re-downloading an already-authorized asset is free.
+    State map downloads are free for everyone. Plan users are free for all
+    offline assets. Free users get one state routing pack, then pay credits.
+    Re-downloading an already-authorized asset is free.
     """
     user_id = user["id"]
     asset_type = asset_type.strip().lower()
@@ -1427,6 +1428,14 @@ def authorize_offline_download(user: dict, asset_type: str, region_id: str, cost
       if existing:
           return {"authorized": True, "charged": 0, "free_used": False, "already_authorized": True, "credits": user.get("credits", 0)}
 
+      if cost <= 0:
+          db.execute(
+              "INSERT OR IGNORE INTO offline_downloads (user_id,asset_type,region_id,cost,free_used,created_at) VALUES (?,?,?,?,?,?)",
+              (user_id, asset_type, region_id, 0, 0, now),
+          )
+          db.commit()
+          return {"authorized": True, "charged": 0, "free_used": False, "credits": user.get("credits", 0)}
+
       if has_active_plan(user):
           db.execute(
               "INSERT OR IGNORE INTO offline_downloads (user_id,asset_type,region_id,cost,free_used,created_at) VALUES (?,?,?,?,?,?)",
@@ -1435,7 +1444,7 @@ def authorize_offline_download(user: dict, asset_type: str, region_id: str, cost
           db.commit()
           return {"authorized": True, "charged": 0, "free_used": False, "plan": True, "credits": user.get("credits", 0)}
 
-      free_allowed = asset_type in ("state_map", "state_route") and region_id != "conus"
+      free_allowed = asset_type == "state_route" and region_id != "conus"
       if free_allowed:
           free_count = db.execute(
               "SELECT COUNT(*) AS c FROM offline_downloads WHERE user_id=? AND asset_type=? AND free_used=1",

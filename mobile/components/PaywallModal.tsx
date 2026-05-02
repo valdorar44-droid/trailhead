@@ -3,6 +3,7 @@ import {
   Modal, View, Text, TouchableOpacity, StyleSheet,
   ScrollView, ActivityIndicator, Linking,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useSubscription, PRODUCT_IDS, priceLine } from '@/lib/useSubscription';
 import { useTheme, mono } from '@/lib/design';
 
@@ -18,12 +19,12 @@ interface Props {
 }
 
 const EARN_ITEMS = [
-  { icon: '📍', label: 'Submit a road condition report', credits: '+10 credits' },
-  { icon: '🏕️', label: 'Report a campsite condition',   credits: '+10 credits' },
-  { icon: '✅', label: "Confirm another user's report",  credits: '+1 credit'   },
-  { icon: '📸', label: 'Add a photo to your report',    credits: '+5 bonus'    },
-  { icon: '🔗', label: 'Refer a friend who signs up',   credits: '+50 credits' },
-];
+  { icon: 'trail-sign-outline', label: 'Submit a road condition report', credits: '+10 credits' },
+  { icon: 'bonfire-outline', label: 'Report a campsite condition', credits: '+10 credits' },
+  { icon: 'checkmark-circle-outline', label: "Confirm another user's report", credits: '+1 credit' },
+  { icon: 'camera-outline', label: 'Add a photo to your report', credits: '+5 bonus' },
+  { icon: 'link-outline', label: 'Refer a friend who signs up', credits: '+50 credits' },
+] as const;
 
 export default function PaywallModal({ visible, code, message, onClose, onPlanActivated }: Props) {
   const C  = useTheme();
@@ -118,7 +119,9 @@ export default function PaywallModal({ visible, code, message, onClose, onPlanAc
           <ScrollView style={staticS.earnList} showsVerticalScrollIndicator={false}>
             {EARN_ITEMS.map((item) => (
               <View key={item.label} style={[staticS.earnRow, { borderBottomWidth: 1, borderBottomColor: C.border }]}>
-                <Text style={[staticS.earnIcon]}>{item.icon}</Text>
+                <View style={[staticS.earnIconCircle, { borderColor: C.orange + '45', backgroundColor: C.orange + '12' }]}>
+                  <Ionicons name={item.icon} size={14} color={C.orange} />
+                </View>
                 <Text style={{ flex: 1, color: C.text2, fontSize: 13 }}>{item.label}</Text>
                 <Text style={{ color: C.orange, fontSize: 13, fontWeight: '600' }}>{item.credits}</Text>
               </View>
@@ -169,8 +172,12 @@ const staticS = StyleSheet.create({
   planBtnBadge:  { position: 'absolute', top: -1, left: 18, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
   planBtnBody:   { flex: 1 },
   earnList:      { maxHeight: 180, marginBottom: 16 },
-  earnRow:       { flexDirection: 'row', alignItems: 'center', paddingVertical: 10 },
-  earnIcon:      { fontSize: 18, width: 30 },
+  earnRow:       { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10 },
+  earnIconCircle: {
+    width: 26, height: 26, borderRadius: 13,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1,
+  },
   storeStatus:   { alignItems: 'center', gap: 6, marginBottom: 8 },
   retryStoreBtn: { paddingHorizontal: 10, paddingVertical: 4 },
   restoreBtn:    { alignItems: 'center', paddingVertical: 10 },

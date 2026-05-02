@@ -1926,8 +1926,10 @@ async def submit_pin(body: PinRequest, user: dict = Depends(_current_user)):
     add_community_pin(body.lat, body.lng, name, pin_type,
                       (body.description or "").strip()[:500], (body.land_type or "").strip()[:80],
                       user_id=user["id"], details=clean_details)
-    add_credits(user["id"], 5, f"Community pin: {name}")
-    return {"status": "ok"}
+    credits_earned = 0 if pin_type == "gpx_import" else 5
+    if credits_earned:
+        add_credits(user["id"], credits_earned, f"Community pin: {name}")
+    return {"status": "ok", "credits_earned": credits_earned}
 
 @app.get("/api/pins")
 async def nearby_pins(lat: float, lng: float, radius: float = 1.0):

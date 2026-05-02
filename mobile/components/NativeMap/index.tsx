@@ -11,7 +11,7 @@ import React, {
   forwardRef, useCallback, useEffect, useImperativeHandle,
   useMemo, useRef, useState,
 } from 'react';
-import { View, StyleSheet, Text } from 'react-native';
+import { TouchableOpacity, View, StyleSheet, Text } from 'react-native';
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { storage } from '@/lib/storage';
@@ -1368,9 +1368,14 @@ function IconPin({ color, icon, onPress }: {
   onPress: () => void;
 }) {
   return (
-    <View onTouchEnd={onPress} style={[styles.iconPin, { backgroundColor: color }]}>
-      <Ionicons name={icon} size={15} color="#fff" />
-    </View>
+    <TouchableOpacity
+      activeOpacity={0.84}
+      hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
+      onPress={onPress}
+      style={[styles.iconPin, { backgroundColor: color }]}
+    >
+      <Ionicons name={icon} size={18} color="#fff" />
+    </TouchableOpacity>
   );
 }
 
@@ -1404,7 +1409,7 @@ const styles = StyleSheet.create({
     color: '#fff', fontSize: 14, fontWeight: '900', textAlign: 'center',
   },
   iconPin: {
-    width: 28, height: 28, borderRadius: 14,
+    width: 34, height: 34, borderRadius: 17,
     borderWidth: 2, borderColor: '#fff',
     alignItems: 'center', justifyContent: 'center',
     shadowColor: '#000', shadowOffset: { width: 0, height: 2 },

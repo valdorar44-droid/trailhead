@@ -369,7 +369,7 @@ export default function ProfileScreen() {
       if (pins.length > 0) {
         const importLimit = 15;
         await Promise.all(pins.slice(0, importLimit).map(p => api.submitPin(p).catch(() => {})));
-        setGpxResult(`Imported up to ${Math.min(pins.length, importLimit)} GPX waypoints. GPX pins stay hidden on the map until enabled in filters.`);
+        setGpxResult(`Imported up to ${Math.min(pins.length, importLimit)} GPX waypoints. GPX pins stay hidden on the map until enabled in filters and do not earn community credits until re-added or verified manually.`);
       } else {
         setGpxResult(`GPX track loaded: ${trkpts.length} track points. No named waypoints to pin.`);
       }

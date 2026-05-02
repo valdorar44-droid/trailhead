@@ -2616,6 +2616,8 @@ function MapScreen() {
         submitted_at: Date.now() / 1000,
       };
       setCommunityPins(prev => [created, ...prev].slice(0, 150));
+      setSelectedCommunityPin(created);
+      refreshCommunityPins({ lat: pendingPin.lat, lng: pendingPin.lng }, 3.0, true);
       setPendingPin(null);
       setPinName('');
       setPinDescription('');
@@ -3990,7 +3992,7 @@ function MapScreen() {
         </View>
       )}
 
-      {!navMode && userHeading !== null && !showSearch && !selectedCamp && !selectedCommunityPin && (
+      {!navMode && userHeading !== null && !showSearch && (
         <View style={s.compassPill}>
           <ThreeNeedleCompass heading={userHeading} bearing={null} compact />
           <View>
@@ -4369,6 +4371,12 @@ function MapScreen() {
                 <Text style={s.filterClearText}>RESET</Text>
               </TouchableOpacity>
             )}
+          </View>
+          <View style={s.pinFilterHint}>
+            <Ionicons name="shield-checkmark-outline" size={12} color={OVR.text3} />
+            <Text style={s.pinFilterHintText}>
+              Community cards are shown by default. GPX imports stay hidden unless selected.
+            </Text>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[s.filterScroll, { paddingTop: 0 }]}>
             {COMMUNITY_PIN_TYPES.map(f => {
@@ -5194,7 +5202,7 @@ function MapScreen() {
       </Modal>
 
       {/* ── Search This Area (native button — reliable on all platforms) ── */}
-      {(mapMoved || isLoadingAreaCamps || searchResult !== null || activeFilters.length > 0 || activePinFilters.length > 0) && !navMode && !showSearch && !selectedCamp && !selectedCommunityPin && !(showPanel && activeTrip) && mapZoom >= 9 && (
+      {(mapMoved || isLoadingAreaCamps || searchResult !== null || activeFilters.length > 0 || activePinFilters.length > 0) && !navMode && !showSearch && !selectedCamp && !selectedCommunityPin && !(showPanel && activeTrip) && (
         <View style={s.searchAreaWrap}>
           <TouchableOpacity
             style={[s.searchAreaBtn, isLoadingAreaCamps && s.searchAreaBtnLoading]}
@@ -5220,6 +5228,8 @@ function MapScreen() {
             <Text style={[s.searchAreaText, isLoadingAreaCamps && { color: OVR.text3 }]}>
               {isLoadingAreaCamps
                 ? 'SEARCHING...'
+                : mapZoom < 9
+                  ? 'ZOOM IN TO SEARCH'
                 : searchResult !== null
                   ? searchResult.count === -2
                     ? 'ZOOM IN TO SEARCH'
@@ -6780,6 +6790,14 @@ const makeStyles = (C: ColorPalette) => {
   },
   filterSectionTitle: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
   filterClearText: { color: '#14b8a6', fontSize: 9, fontFamily: mono, fontWeight: '900' },
+  pinFilterHint: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 6,
+    marginHorizontal: 14, marginTop: 7, marginBottom: 2,
+    paddingHorizontal: 10, paddingVertical: 8,
+    borderRadius: 10, borderWidth: 1, borderColor: C.border,
+    backgroundColor: C.s2,
+  },
+  pinFilterHintText: { flex: 1, color: C.text3, fontSize: 10, lineHeight: 14, fontFamily: mono },
   filterLoading: { alignItems: 'center', paddingBottom: 8 },
 
   // ── Campsite quick card (Dyrt-style: white card, photo left, bold info right)

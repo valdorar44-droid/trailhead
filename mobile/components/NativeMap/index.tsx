@@ -156,6 +156,16 @@ const COMMUNITY_PIN_VISUALS: Record<string, { color: string; icon: keyof typeof 
   laundromat: { color: '#06b6d4', icon: 'shirt-outline' },
   shower: { color: '#06b6d4', icon: 'rainy-outline' },
   wifi: { color: '#06b6d4', icon: 'wifi-outline' },
+  trailhead: { color: '#22c55e', icon: 'trail-sign-outline' },
+  trail_note: { color: '#16a34a', icon: 'walk-outline' },
+  overlook: { color: '#0ea5e9', icon: 'flag-outline' },
+  crossing: { color: '#0284c7', icon: 'git-merge-outline' },
+  gate: { color: '#d97706', icon: 'lock-closed-outline' },
+  trail_closure: { color: '#dc2626', icon: 'remove-circle-outline' },
+  rock_art: { color: '#a855f7', icon: 'scan-outline' },
+  cell_signal: { color: '#2563eb', icon: 'cellular-outline' },
+  trash: { color: '#64748b', icon: 'trash-outline' },
+  wildlife: { color: '#7c3aed', icon: 'paw-outline' },
   checkpoint: { color: '#dc2626', icon: 'hand-left-outline' },
   road_report: { color: '#dc2626', icon: 'trail-sign-outline' },
   warning: { color: '#ef4444', icon: 'warning-outline' },
@@ -1336,6 +1346,7 @@ function WaypointDot({ wp, index, isNavTarget, onPress }: {
 function ReportDot({ type, subtype }: { type: string; subtype?: string }) {
   const COLORS: Record<string, string> = {
     police: '#eab308dd', hazard: '#ef4444dd', road_condition: '#f97316dd',
+    trail_condition: '#22c55edd',
     wildlife: '#a855f7dd', campsite: '#22c55edd', road_closure: '#dc2626dd',
     water: '#38bdf8dd',
   };
@@ -1344,6 +1355,7 @@ function ReportDot({ type, subtype }: { type: string; subtype?: string }) {
     police: 'shield-outline',
     hazard: 'warning-outline',
     road_condition: 'trail-sign-outline',
+    trail_condition: 'walk-outline',
     wildlife: 'paw-outline',
     campsite: 'bonfire-outline',
     road_closure: 'remove-circle-outline',

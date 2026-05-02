@@ -525,6 +525,8 @@ const QUICK_TYPES = [
     subtypes: ['Object in road', 'Pothole', 'Flood / water', 'Ice / snow', 'Downed tree'] },
   { type: 'road_condition', label: 'ROAD',  icon: 'trail-sign-outline', color: '#f97316',
     subtypes: ['Muddy / soft', 'Washed out road', 'Deep ruts', 'Low clearance', 'Logging traffic'] },
+  { type: 'trail_condition', label: 'TRAIL', icon: 'walk-outline',       color: '#22c55e',
+    subtypes: ['Trail muddy', 'Trail washed out', 'Downed tree', 'Wrong-turn risk', 'Crowded trailhead', 'Trail clear'] },
   { type: 'wildlife',     label: 'ANIMAL',  icon: 'paw-outline',        color: '#a855f7',
     subtypes: ['Animal in road', 'Livestock loose', 'Bear / predator', 'Deer herd', 'Animal sighting'] },
 ] as const;
@@ -547,6 +549,16 @@ const COMMUNITY_PIN_TYPES = [
   { id: 'laundromat', label: 'Laundry', icon: 'shirt-outline', color: '#06b6d4', group: 'Community' },
   { id: 'shower', label: 'Shower', icon: 'rainy-outline', color: '#06b6d4', group: 'Community' },
   { id: 'wifi', label: 'Wifi', icon: 'wifi-outline', color: '#06b6d4', group: 'Community' },
+  { id: 'trailhead', label: 'Trailhead', icon: 'trail-sign-outline', color: '#22c55e', group: 'Trail Notes' },
+  { id: 'trail_note', label: 'Trail Note', icon: 'walk-outline', color: '#16a34a', group: 'Trail Notes' },
+  { id: 'overlook', label: 'Overlook', icon: 'flag-outline', color: '#0ea5e9', group: 'Trail Notes' },
+  { id: 'crossing', label: 'Crossing', icon: 'git-merge-outline', color: '#0284c7', group: 'Trail Notes' },
+  { id: 'gate', label: 'Gate', icon: 'lock-closed-outline', color: '#d97706', group: 'Trail Notes' },
+  { id: 'trail_closure', label: 'Closure', icon: 'remove-circle-outline', color: '#dc2626', group: 'Trail Notes' },
+  { id: 'rock_art', label: 'Sensitive Site', icon: 'scan-outline', color: '#a855f7', group: 'Trail Notes' },
+  { id: 'cell_signal', label: 'Cell Signal', icon: 'cellular-outline', color: '#2563eb', group: 'Trail Notes' },
+  { id: 'trash', label: 'Trash', icon: 'trash-outline', color: '#64748b', group: 'Trail Notes' },
+  { id: 'wildlife', label: 'Wildlife', icon: 'paw-outline', color: '#7c3aed', group: 'Trail Notes' },
   { id: 'checkpoint', label: 'Checkpoint', icon: 'hand-left-outline', color: '#dc2626', group: 'Road' },
   { id: 'road_report', label: 'Road', icon: 'trail-sign-outline', color: '#dc2626', group: 'Road' },
   { id: 'warning', label: 'Warning', icon: 'warning-outline', color: '#ef4444', group: 'Road' },
@@ -555,6 +567,10 @@ const COMMUNITY_PIN_TYPES = [
 ] as const;
 
 type CommunityPinTypeId = typeof COMMUNITY_PIN_TYPES[number]['id'];
+const TRAIL_PIN_FILTERS: CommunityPinTypeId[] = [
+  'trailhead', 'trail_note', 'overlook', 'crossing', 'gate',
+  'trail_closure', 'rock_art', 'cell_signal', 'trash', 'wildlife', 'gpx_import',
+];
 
 function communityPinMeta(type?: string) {
   return COMMUNITY_PIN_TYPES.find(t => t.id === type) ?? COMMUNITY_PIN_TYPES[COMMUNITY_PIN_TYPES.length - 1];
@@ -647,6 +663,51 @@ const COMMUNITY_PIN_FIELDS: Partial<Record<CommunityPinTypeId, PinField[]>> = {
   attraction: [
     { key: 'worth_stop', label: 'Worth stop', kind: 'select', options: ['Must see', 'Good stop', 'If nearby', 'Skip'] },
     { key: 'time_needed', label: 'Time needed', kind: 'select', options: ['15 min', '30-60 min', 'Half day', 'Full day'] },
+  ],
+  trailhead: [
+    { key: 'parking', label: 'Parking', kind: 'select', options: ['Easy', 'Limited', 'Roadside', 'None seen'] },
+    { key: 'signage', label: 'Signage', kind: 'select', options: ['Signed', 'Hard to find', 'No sign', 'Unknown'] },
+    { key: 'rig_fit', label: 'Rig fit', kind: 'select', options: ['Car', 'Truck/van', 'Trailer tight', 'No trailer'] },
+    { key: 'fee', label: 'Fee', kind: 'select', options: ['Free', 'Paid', 'Permit', 'Unknown'] },
+  ],
+  trail_note: [
+    { key: 'condition', label: 'Condition', kind: 'select', options: ['Clear', 'Muddy', 'Overgrown', 'Loose rock', 'Exposed'] },
+    { key: 'difficulty', label: 'Difficulty', kind: 'select', options: ['Easy', 'Moderate', 'Hard', 'Technical'] },
+    { key: 'best_for', label: 'Best for', kind: 'select', options: ['Hike', 'Bike', 'Dog walk', 'OHV', 'Scenic stop'] },
+  ],
+  overlook: [
+    { key: 'worth_stop', label: 'Worth stop', kind: 'select', options: ['Must see', 'Good stop', 'If nearby'] },
+    { key: 'time_needed', label: 'Time needed', kind: 'select', options: ['5 min', '15 min', '30-60 min'] },
+    { key: 'access', label: 'Access', kind: 'select', options: ['Roadside', 'Short walk', 'Hike required', 'Unknown'] },
+  ],
+  crossing: [
+    { key: 'crossing_type', label: 'Type', kind: 'select', options: ['Creek', 'Wash', 'Snowfield', 'Bridge', 'Rock step'] },
+    { key: 'current_status', label: 'Status', kind: 'select', options: ['Easy', 'Use caution', 'High water', 'Impassable'] },
+    { key: 'vehicle_fit', label: 'Vehicle fit', kind: 'select', options: ['Any', 'High clearance', '4WD', 'Walk only'] },
+  ],
+  gate: [
+    { key: 'status', label: 'Status', kind: 'select', options: ['Open', 'Closed', 'Seasonal', 'Unknown'] },
+    { key: 'posted', label: 'Posted', kind: 'select', options: ['No sign', 'Public access', 'Private', 'Permit required'] },
+  ],
+  trail_closure: [
+    { key: 'closure_type', label: 'Closure', kind: 'select', options: ['Seasonal', 'Fire', 'Washout', 'Locked gate', 'Private land'] },
+    { key: 'severity', label: 'Severity', kind: 'select', options: ['Heads up', 'Detour needed', 'Do not enter'] },
+  ],
+  rock_art: [
+    { key: 'sensitivity', label: 'Sensitivity', kind: 'select', options: ['Vague location only', 'Needs admin review', 'Do not publish exact'] },
+    { key: 'access_note', label: 'Access note', placeholder: 'Keep details respectful and non-destructive' },
+  ],
+  cell_signal: [
+    { key: 'carrier', label: 'Carrier', kind: 'select', options: ['Verizon', 'AT&T', 'T-Mobile', 'Other'] },
+    { key: 'signal', label: 'Signal', kind: 'select', options: ['Strong', 'Usable', 'Weak', 'None'] },
+  ],
+  trash: [
+    { key: 'amount', label: 'Amount', kind: 'select', options: ['Small', 'Bag needed', 'Dumped site', 'Hazardous'] },
+    { key: 'status', label: 'Status', kind: 'select', options: ['Needs cleanup', 'Partly cleaned', 'Cleaned up'] },
+  ],
+  wildlife: [
+    { key: 'sighting', label: 'Sighting', kind: 'select', options: ['Tracks', 'Recent sighting', 'Active area', 'Livestock'] },
+    { key: 'caution', label: 'Caution', kind: 'select', options: ['Normal', 'Keep distance', 'Avoid area'] },
   ],
   wifi: [
     { key: 'signal', label: 'Signal', kind: 'select', options: ['Strong', 'Usable', 'Weak', 'Down'] },
@@ -1395,8 +1456,8 @@ const buildMapHtml = (
     _a('gas-circle',{id:'gas-circle',type:'circle',source:'gas',paint:{'circle-radius':9,'circle-color':'#eab308','circle-opacity':0.92,'circle-stroke-width':2,'circle-stroke-color':'#fff'}});
     _a('gas-code',{id:'gas-code',type:'symbol',source:'gas',layout:{'text-field':'F','text-size':10,'text-font':['DIN Offc Pro Medium','Arial Unicode MS Bold'],'text-allow-overlap':true,'text-ignore-placement':true},paint:{'text-color':'#111827','text-halo-color':'rgba(255,255,255,0.55)','text-halo-width':0.8}});
     _a('gas-label',{id:'gas-label',type:'symbol',source:'gas',filter:['>=',['zoom'],13],layout:{'text-field':['get','name'],'text-size':9,'text-offset':[0,1.5],'text-anchor':'top'},paint:{'text-color':'#f1f5f9','text-halo-color':'rgba(0,0,0,0.85)','text-halo-width':1.5}});
-    _a('poi-circle',{id:'poi-circle',type:'circle',source:'pois',paint:{'circle-radius':['case',['==',['get','type'],'peak'],9,8],'circle-color':['match',['get','type'],'water','#3b82f6','trailhead','#22c55e','viewpoint','#a855f7','peak','#92400e','hot_spring','#f97316','camp','#16a34a','informal_camp','#65a30d','wild_camp','#15803d','fuel','#ea580c','propane','#f97316','dump','#a16207','gpx_import','#64748b','#6b7280'],'circle-opacity':0.9,'circle-stroke-width':1.5,'circle-stroke-color':'#fff'}});
-    _a('poi-code',{id:'poi-code',type:'symbol',source:'pois',layout:{'text-field':['match',['get','type'],'water','W','trailhead','T','viewpoint','V','peak','P','hot_spring','H','camp','C','informal_camp','C','wild_camp','C','fuel','G','propane','P','dump','D','gpx_import','X','P'],'text-size':9.5,'text-font':['DIN Offc Pro Medium','Arial Unicode MS Bold'],'text-allow-overlap':true,'text-ignore-placement':true},paint:{'text-color':'#fff','text-halo-color':'rgba(0,0,0,0.35)','text-halo-width':0.8}});
+    _a('poi-circle',{id:'poi-circle',type:'circle',source:'pois',paint:{'circle-radius':['case',['==',['get','type'],'peak'],9,8],'circle-color':['match',['get','type'],'water','#3b82f6','trailhead','#22c55e','trail_note','#16a34a','overlook','#0ea5e9','crossing','#0284c7','gate','#d97706','trail_closure','#dc2626','rock_art','#a855f7','cell_signal','#2563eb','trash','#64748b','wildlife','#7c3aed','viewpoint','#a855f7','peak','#92400e','hot_spring','#f97316','camp','#16a34a','informal_camp','#65a30d','wild_camp','#15803d','fuel','#ea580c','propane','#f97316','dump','#a16207','gpx_import','#64748b','#6b7280'],'circle-opacity':0.9,'circle-stroke-width':1.5,'circle-stroke-color':'#fff'}});
+    _a('poi-code',{id:'poi-code',type:'symbol',source:'pois',layout:{'text-field':['match',['get','type'],'water','W','trailhead','T','trail_note','N','overlook','V','crossing','X','gate','G','trail_closure','C','rock_art','S','cell_signal','C','trash','R','wildlife','W','viewpoint','V','peak','P','hot_spring','H','camp','C','informal_camp','C','wild_camp','C','fuel','G','propane','P','dump','D','gpx_import','X','P'],'text-size':9.5,'text-font':['DIN Offc Pro Medium','Arial Unicode MS Bold'],'text-allow-overlap':true,'text-ignore-placement':true},paint:{'text-color':'#fff','text-halo-color':'rgba(0,0,0,0.35)','text-halo-width':0.8}});
     _a('poi-label',{id:'poi-label',type:'symbol',source:'pois',filter:['>=',['zoom'],12],layout:{'text-field':['case',['all',['==',['get','type'],'peak'],['has','elevation']],['concat',['get','name'],'\\n▲ ',['get','elevation']],['get','name']],'text-size':['case',['==',['get','type'],'peak'],10,9],'text-offset':[0,1.3],'text-anchor':'top','text-max-width':10},paint:{'text-color':['case',['==',['get','type'],'peak'],'#d97706','#f1f5f9'],'text-halo-color':['case',['==',['get','type'],'peak'],'rgba(255,255,255,0.95)','rgba(0,0,0,0.85)'],'text-halo-width':2}});
     _a('camp-cluster',{id:'camp-cluster',type:'circle',source:'camps',filter:['has','point_count'],paint:{'circle-color':['step',['get','point_count'],'#14b8a6',10,'#f97316',50,'#ef4444'],'circle-radius':['step',['get','point_count'],18,10,25,50,32],'circle-opacity':0.88,'circle-stroke-width':2,'circle-stroke-color':'#fff'}});
     _a('camp-count',{id:'camp-count',type:'symbol',source:'camps',filter:['has','point_count'],layout:{'text-field':'{point_count_abbreviated}','text-size':12,'text-font':['DIN Offc Pro Medium','Arial Unicode MS Bold']},paint:{'text-color':'#fff'}});
@@ -1940,6 +2001,7 @@ function MapScreen() {
   const [mapboxToken,   setMapboxToken]   = useState('');
   const [protomapsKey,  setProtomapsKey]  = useState('');
   const [showFilters,   setShowFilters]   = useState(false);
+  const [trailMode,     setTrailMode]     = useState(false);
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
   const [activePinFilters, setActivePinFilters] = useState<string[]>([]);
   const [pinDropMode, setPinDropMode] = useState(false);
@@ -2382,6 +2444,7 @@ function MapScreen() {
                   police:         'Police ahead',
                   hazard:         'Hazard ahead',
                   road_condition: 'Road condition ahead',
+                  trail_condition: 'Trail condition nearby',
                   wildlife:       'Wildlife on road',
                   road_closure:   'Road closure ahead',
                   campsite:       'Campsite report',
@@ -2565,6 +2628,38 @@ function MapScreen() {
         webRef.current?.postMessage(JSON.stringify({ type: 'set_pois', pois: p }));
       })
       .catch(() => {});
+  }
+
+  function setTrailModeEnabled(enabled: boolean) {
+    setTrailMode(enabled);
+    if (enabled) {
+      setShowPois(true);
+      setShowFilters(true);
+      setShowUsgs(true);
+      setLayerMvum(true);
+      setActivePinFilters(TRAIL_PIN_FILTERS);
+      webRef.current?.postMessage(JSON.stringify({ type: 'set_usgs_overlay', show: true }));
+      webRef.current?.postMessage(JSON.stringify({ type: 'set_layer', layer: 'mvum', show: true }));
+      const vp = viewportRef.current;
+      const center = vp
+        ? { lat: (vp.n + vp.s) / 2, lng: (vp.e + vp.w) / 2 }
+        : userLoc ?? (waypoints[0] ? { lat: waypoints[0].lat, lng: waypoints[0].lng } : null);
+      if (center) {
+        fetchPois(center);
+        refreshCommunityPins(center, 4.0, true);
+      }
+      setQuickToast('Trail Mode: trailheads, notes, MVUM, and topo overlay on');
+      setTimeout(() => setQuickToast(''), 3500);
+    } else {
+      setShowPois(false);
+      setShowUsgs(false);
+      setLayerMvum(false);
+      setActivePinFilters([]);
+      webRef.current?.postMessage(JSON.stringify({ type: 'set_usgs_overlay', show: false }));
+      webRef.current?.postMessage(JSON.stringify({ type: 'set_layer', layer: 'mvum', show: false }));
+      setQuickToast('Trail Mode off');
+      setTimeout(() => setQuickToast(''), 2200);
+    }
   }
 
   function beginCommunityPinDrop(useCurrentLocation = false) {
@@ -4119,6 +4214,13 @@ function MapScreen() {
               <Text style={[s.layerText, showUsgs && { color: '#0ea5e9' }]}>TRAILS</Text>
             </TouchableOpacity>
 
+            <TouchableOpacity
+              style={[s.ctrlBtn, trailMode && { backgroundColor: '#15803d99', borderColor: '#22c55e' }]}
+              onPress={() => setTrailModeEnabled(!trailMode)}
+            >
+              <Text style={[s.layerText, trailMode && { color: '#bbf7d0' }]}>TRAIL</Text>
+            </TouchableOpacity>
+
             {waypoints.length > 0 && (
               <TouchableOpacity
                 style={[s.ctrlBtn, navMode && { backgroundColor: C.green + 'dd', borderColor: C.green }]}
@@ -5494,7 +5596,7 @@ function MapScreen() {
               <Text style={s.navTargetName} numberOfLines={1}>{navTarget.name}</Text>
               <Text style={s.navTargetMeta}>
                 {navTarget.day > 0 ? `Day ${navTarget.day} · ` : ''}
-                {navTarget.type === 'camp' ? '⛺ Camp' : navTarget.type === 'fuel' ? '⛽ Fuel' : navTarget.type === 'start' ? '🚩 Start' : navTarget.type === 'motel' ? '🏨 Motel' : navTarget.type}
+                {navTarget.type === 'camp' ? 'Camp' : navTarget.type === 'fuel' ? 'Fuel' : navTarget.type === 'start' ? 'Start' : navTarget.type === 'motel' ? 'Motel' : navTarget.type}
                 {waypoints.length > 0 ? ` · ${navIdx + 1}/${waypoints.length}` : ''}
               </Text>
             </View>
@@ -5568,15 +5670,19 @@ function MapScreen() {
       {approachingReport && navMode && (() => {
         const rep = approachingReport;
         const repDistM = userLoc ? haversineKm(userLoc.lat, userLoc.lng, rep.lat, rep.lng) * 1000 : null;
-        const repIcons: Record<string, string> = { police: '🚔', hazard: '⚠️', road_condition: '🛑', wildlife: '🐾', road_closure: '🚧', campsite: '⛺', water: '💧' };
-        const repColors: Record<string, string> = { police: '#eab308', hazard: '#ef4444', road_condition: '#f97316', wildlife: '#a855f7', road_closure: '#dc2626', campsite: '#22c55e', water: '#38bdf8' };
+        const repIcons: Record<string, keyof typeof Ionicons.glyphMap> = {
+          police: 'shield-outline', hazard: 'warning-outline', road_condition: 'trail-sign-outline',
+          trail_condition: 'walk-outline', wildlife: 'paw-outline', road_closure: 'remove-circle-outline',
+          campsite: 'bonfire-outline', water: 'water-outline',
+        };
+        const repColors: Record<string, string> = { police: '#eab308', hazard: '#ef4444', road_condition: '#f97316', trail_condition: '#22c55e', wildlife: '#a855f7', road_closure: '#dc2626', campsite: '#22c55e', water: '#38bdf8' };
         const color = repColors[rep.type] ?? '#f97316';
-        const icon  = repIcons[rep.type] ?? '⚠️';
-        const label = rep.subtype || ({ police: 'Ranger Patrol', hazard: 'Hazard', road_condition: 'Road Condition', wildlife: 'Wildlife', road_closure: 'Road Closure' }[rep.type] ?? 'Community Report');
+        const icon  = repIcons[rep.type] ?? 'alert-outline';
+        const label = rep.subtype || ({ police: 'Ranger Patrol', hazard: 'Hazard', road_condition: 'Road Condition', trail_condition: 'Trail Condition', wildlife: 'Wildlife', road_closure: 'Road Closure' }[rep.type] ?? 'Community Report');
         return (
           <View style={[s.approachAlert, { borderColor: color + '66' }]}>
             <View style={[s.approachAlertIcon, { backgroundColor: color + '22' }]}>
-              <Text style={{ fontSize: 22 }}>{icon}</Text>
+              <Ionicons name={icon} size={22} color={color} />
             </View>
             <View style={s.approachAlertInfo}>
               <Text style={[s.approachAlertLabel, { color }]}>{label.toUpperCase()}</Text>
@@ -5661,6 +5767,7 @@ function MapScreen() {
                     'Police hidden': 'high', 'Speed trap': 'high', 'Police visible': 'moderate', 'Ranger patrol': 'moderate',
                     'Object in road': 'high', 'Flood / water': 'high', 'Ice / snow': 'high', 'Pothole': 'moderate', 'Downed tree': 'high',
                     'Washed out road': 'high', 'Deep ruts': 'moderate', 'Low clearance': 'high', 'Muddy / soft': 'moderate', 'Logging traffic': 'low',
+                    'Trail washed out': 'high', 'Wrong-turn risk': 'moderate', 'Crowded trailhead': 'low', 'Trail muddy': 'moderate', 'Trail clear': 'low',
                     'Animal in road': 'high', 'Livestock loose': 'high', 'Bear / predator': 'high', 'Deer herd': 'moderate', 'Animal sighting': 'low',
                   };
                   return (
@@ -6095,6 +6202,37 @@ function MapScreen() {
                   <Ionicons name="navigate" size={14} color="#fff" />
                   <Text style={s.wpSheetNavText}>NAVIGATE HERE</Text>
                 </TouchableOpacity>
+                <TouchableOpacity
+                  style={[s.wpSheetDayBtn, { borderColor: '#22c55e44' }]}
+                  onPress={() => {
+                    const trail = tappedTrail;
+                    setTappedTrail(null);
+                    setPinType('trail_note');
+                    setPendingPin({ lat: trail.lat, lng: trail.lng });
+                    setPinName(trail.name && trail.name !== 'Trail' ? `${trail.name} note` : '');
+                    setPinDescription('');
+                    setPinDetails({ best_for: 'Hike' });
+                  }}
+                >
+                  <Ionicons name="add-circle-outline" size={14} color="#22c55e" />
+                  <Text style={[s.wpSheetDayText, { color: '#22c55e' }]}>ADD NOTE</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[s.wpSheetDayBtn, { borderColor: C.orange + '44' }]}
+                  onPress={() => {
+                    const trail = tappedTrail;
+                    setTappedTrail(null);
+                    const bounds = { n: trail.lat + 0.35, s: trail.lat - 0.35, e: trail.lng + 0.35, w: trail.lng - 0.35, zoom: 11 };
+                    viewportRef.current = bounds;
+                    setShowFilters(true);
+                    loadCampsInArea(bounds, activeFilters);
+                    setQuickToast('Searching camps near trailhead');
+                    setTimeout(() => setQuickToast(''), 2500);
+                  }}
+                >
+                  <Ionicons name="bonfire-outline" size={14} color={C.orange} />
+                  <Text style={[s.wpSheetDayText, { color: C.orange }]}>NEARBY CAMPS</Text>
+                </TouchableOpacity>
                 <TouchableOpacity style={s.wpSheetDayBtn} onPress={() => setTappedTrail(null)}>
                   <Ionicons name="close" size={14} color={OVR.text2} />
                   <Text style={s.wpSheetDayText}>DISMISS</Text>
@@ -6220,6 +6358,41 @@ function MapScreen() {
                   <Ionicons name="navigate" size={14} color="#fff" />
                   <Text style={s.wpSheetNavText}>NAVIGATE HERE</Text>
                 </TouchableOpacity>
+                {tappedPoi.type === 'trailhead' && (
+                  <TouchableOpacity
+                    style={[s.wpSheetDayBtn, { borderColor: C.orange + '44' }]}
+                    onPress={() => {
+                      const poi = tappedPoi;
+                      setTappedPoi(null);
+                      const bounds = { n: poi.lat + 0.35, s: poi.lat - 0.35, e: poi.lng + 0.35, w: poi.lng - 0.35, zoom: 11 };
+                      viewportRef.current = bounds;
+                      setShowFilters(true);
+                      loadCampsInArea(bounds, activeFilters);
+                      setQuickToast('Searching camps near trailhead');
+                      setTimeout(() => setQuickToast(''), 2500);
+                    }}
+                  >
+                    <Ionicons name="bonfire-outline" size={14} color={C.orange} />
+                    <Text style={[s.wpSheetDayText, { color: C.orange }]}>NEARBY CAMPS</Text>
+                  </TouchableOpacity>
+                )}
+                {tappedPoi.type === 'trailhead' && (
+                  <TouchableOpacity
+                    style={[s.wpSheetDayBtn, { borderColor: '#22c55e44' }]}
+                    onPress={() => {
+                      const poi = tappedPoi;
+                      setTappedPoi(null);
+                      setPinType('trailhead');
+                      setPendingPin({ lat: poi.lat, lng: poi.lng });
+                      setPinName(poi.name || 'Trailhead');
+                      setPinDescription('');
+                      setPinDetails({ parking: 'Unknown', signage: 'Unknown' });
+                    }}
+                  >
+                    <Ionicons name="trail-sign-outline" size={14} color="#22c55e" />
+                    <Text style={[s.wpSheetDayText, { color: '#22c55e' }]}>SAVE TRAIL</Text>
+                  </TouchableOpacity>
+                )}
                 <TouchableOpacity style={[s.wpSheetDayBtn, { borderColor: C.orange + '44' }]} onPress={() => { setTappedPoi(null); setQuickReport(true); }}>
                   <Ionicons name="warning-outline" size={14} color={C.orange} />
                   <Text style={[s.wpSheetDayText, { color: C.orange }]}>REPORT</Text>

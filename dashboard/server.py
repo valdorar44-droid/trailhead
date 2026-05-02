@@ -1901,6 +1901,8 @@ VALID_PIN_TYPES = {
     "camp", "informal_camp", "wild_camp", "fuel", "propane", "water", "dump",
     "parking", "mechanic", "restaurant", "attraction", "shopping", "medical",
     "pet", "laundromat", "shower", "wifi", "checkpoint", "road_report",
+    "trailhead", "trail_note", "overlook", "crossing", "gate", "trail_closure",
+    "rock_art", "cell_signal", "trash", "wildlife",
     "warning", "gpx_import", "other",
 }
 
@@ -1954,7 +1956,10 @@ async def downvote_pin(pin_id: int, user: dict = Depends(_current_user)):
 
 # ── Reports ───────────────────────────────────────────────────────────────────
 
-VALID_REPORT_TYPES = {"police", "hazard", "road_condition", "wildlife", "road_closure", "campsite", "water", "cell_signal", "closure"}
+VALID_REPORT_TYPES = {
+    "police", "hazard", "road_condition", "wildlife", "road_closure",
+    "campsite", "water", "cell_signal", "closure", "trail_condition",
+}
 VALID_SEVERITIES   = {"low", "moderate", "high", "critical"}
 
 class ReportRequest(BaseModel):

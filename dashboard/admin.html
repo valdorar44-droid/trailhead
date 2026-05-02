@@ -442,12 +442,12 @@ async function loadOverview() {
 
     // Type chart
     const maxCount = Math.max(...s.by_type.map(t => t.count), 1);
-    const typeIcons = { hazard:'⚠️', police:'🛡️', road_condition:'🛤️', water:'💧',
-      cell_signal:'📶', wildlife:'🐻', campsite:'⛺', closure:'🚫',
-      fuel:'⛽', viewpoint:'🏔️', service:'🔧' };
+    const typeIcons = { hazard:'HAZ', police:'PATROL', road_condition:'ROAD', trail_condition:'TRAIL', water:'H2O',
+      cell_signal:'CELL', wildlife:'WILD', campsite:'CAMP', closure:'CLOSED',
+      road_closure:'CLOSED', fuel:'FUEL', viewpoint:'VIEW', service:'FIX' };
     document.getElementById('type-chart').innerHTML = s.by_type.map(t => `
       <div class="bar-row">
-        <span class="bar-type">${typeIcons[t.type]||'📍'} ${t.type.replace('_',' ')}</span>
+        <span class="bar-type">${typeIcons[t.type]||'PIN'} ${t.type.replace('_',' ')}</span>
         <div class="bar-track"><div class="bar-fill" style="width:${Math.round(t.count/maxCount*100)}%"></div></div>
         <span class="bar-count">${t.count}</span>
       </div>`).join('') || '<div style="color:var(--text3);font-size:13px;">No active reports</div>';
@@ -584,15 +584,15 @@ function filterReports() {
   );
   document.getElementById('report-count').textContent = `${filtered.length} reports`;
   const sevColors = {critical:'badge-red',high:'badge-yellow',moderate:'badge-orange',low:'badge-green'};
-  const typeIcons  = {hazard:'⚠️',police:'🛡️',road_condition:'🛤️',water:'💧',
-    cell_signal:'📶',wildlife:'🐻',campsite:'⛺',closure:'🚫',fuel:'⛽',viewpoint:'🏔️',service:'🔧'};
+  const typeIcons  = {hazard:'HAZ',police:'PATROL',road_condition:'ROAD',trail_condition:'TRAIL',water:'H2O',
+    cell_signal:'CELL',wildlife:'WILD',campsite:'CAMP',closure:'CLOSED',road_closure:'CLOSED',fuel:'FUEL',viewpoint:'VIEW',service:'FIX'};
   const tbody = document.getElementById('reports-tbody');
   tbody.innerHTML = filtered.map(r => {
     const age = Math.floor((Date.now()/1000 - r.created_at) / 3600);
     const ageStr = age < 1 ? 'just now' : age < 24 ? `${age}h` : `${Math.floor(age/24)}d`;
     return `<tr>
       <td class="mono">${r.id}</td>
-      <td>${typeIcons[r.type]||'📍'} ${r.type.replace('_',' ')}</td>
+      <td><span class="mono">${typeIcons[r.type]||'PIN'}</span> ${r.type.replace('_',' ')}</td>
       <td><span class="badge ${sevColors[r.severity]||'badge-gray'}">${r.severity}</span></td>
       <td class="name">${esc(r.username)}</td>
       <td class="mono" style="font-size:11px;">${r.lat.toFixed(4)}, ${r.lng.toFixed(4)}</td>
@@ -600,7 +600,7 @@ function filterReports() {
       <td class="mono" style="color:var(--green)">${r.upvotes}</td>
       <td class="mono" style="color:var(--red)">${r.downvotes}</td>
       <td class="mono">${r.confirmations}</td>
-      <td>${r.has_photo?'📷':''}</td>
+      <td>${r.has_photo?'photo':''}</td>
       <td><div class="actions-cell">
         <button class="btn btn-ghost btn-sm" onclick="expireReport(${r.id})">Expire</button>
         <button class="btn btn-danger btn-sm" onclick="deleteReport(${r.id})">Delete</button>
@@ -655,14 +655,20 @@ async function loadPins() {
   try {
     const pins = await api('/api/admin/pins');
     document.getElementById('pin-count').textContent = `${pins.length} pins`;
-    const typeIcons = {camp:'⛺',gpx_import:'📤',viewpoint:'🏔️',water:'💧',fuel:'⛽'};
+    const typeIcons = {
+      camp:'CAMP', informal_camp:'OVR', wild_camp:'WILD', fuel:'FUEL', propane:'LP',
+      water:'H2O', dump:'DUMP', parking:'P', mechanic:'FIX', trailhead:'TRAIL',
+      trail_note:'NOTE', overlook:'VIEW', crossing:'XING', gate:'GATE',
+      trail_closure:'CLOSED', rock_art:'SITE', cell_signal:'CELL', trash:'TRASH',
+      wildlife:'WILD', gpx_import:'GPX'
+    };
     const tbody = document.getElementById('pins-tbody');
     tbody.innerHTML = pins.map(p => {
       const date = new Date(p.submitted_at * 1000).toLocaleDateString();
       return `<tr>
         <td class="mono">${p.id}</td>
         <td class="name">${esc(p.name)}</td>
-        <td>${typeIcons[p.type]||'📍'} ${p.type}</td>
+        <td><span class="mono">${typeIcons[p.type]||'PIN'}</span> ${p.type}</td>
         <td class="mono">${p.username ? esc(p.username) : '<span style="color:var(--text3)">guest</span>'}</td>
         <td class="mono" style="font-size:11px;">${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}</td>
         <td class="mono" style="color:var(--green)">${p.upvotes}</td>

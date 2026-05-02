@@ -9,6 +9,7 @@ EXPIRY_BY_TYPE = {
     'cell_signal':  24 * 3600,
     'wildlife':     24 * 3600,
     'water':        3  * 86400,
+    'trail_condition': 7 * 86400,
     'road_condition': 7 * 86400,
     'hazard':       7  * 86400,
     'campsite':     14 * 86400,

@@ -78,6 +78,23 @@ function stopIcon(type: string): keyof typeof Ionicons.glyphMap {
   return 'navigate-outline';
 }
 
+function stopLabel(type: string) {
+  if (type === 'start') return 'Start';
+  if (type === 'fuel') return 'Fuel';
+  if (type === 'camp') return 'Camp';
+  if (type === 'motel') return 'Lodging';
+  return 'Stop';
+}
+
+function sourceLabel(source?: BuilderStop['source']) {
+  if (source === 'camp') return 'verified camp';
+  if (source === 'gas') return 'fuel search';
+  if (source === 'poi') return 'poi search';
+  if (source === 'search') return 'search';
+  if (source === 'map') return 'map tap';
+  return 'manual';
+}
+
 function landColor(lt?: string | null) {
   if (!lt) return { bg: '#f1f5f9', text: '#475569', border: '#cbd5e1' };
   const l = lt.toLowerCase();
@@ -216,6 +233,46 @@ export default function RouteBuilderScreen() {
     for (let i = 1; i < orderedStops.length; i++) miles += haversineMi(orderedStops[i - 1], orderedStops[i]);
     return { miles, stops: orderedStops.length, camps: orderedStops.filter(st => st.type === 'camp').length };
   }, [orderedStops]);
+  const dayMileage = useMemo(() => {
+    const out: Record<number, number> = {};
+    for (const day of days) {
+      const wps = orderedStops.filter(st => st.day === day);
+      let miles = 0;
+      for (let i = 1; i < wps.length; i++) miles += haversineMi(wps[i - 1], wps[i]);
+      out[day] = miles;
+    }
+    return out;
+  }, [days, orderedStops]);
+  const routeChecks = useMemo(() => {
+    const checks: { level: 'ok' | 'warn'; label: string; text: string }[] = [];
+    if (orderedStops.length < 2) {
+      checks.push({ level: 'warn', label: 'Need route', text: 'Add a start and at least one destination.' });
+    }
+    const noCampDays = days.filter(day => !orderedStops.some(st => st.day === day && (st.type === 'camp' || st.type === 'motel')));
+    if (noCampDays.length) {
+      checks.push({ level: 'warn', label: 'Overnight', text: `Add camp/lodging for day ${noCampDays[0]}.` });
+    } else if (orderedStops.length) {
+      checks.push({ level: 'ok', label: 'Overnight', text: 'Each day has an overnight stop.' });
+    }
+    const longDays = days.filter(day => (dayMileage[day] ?? 0) > 220);
+    if (longDays.length) {
+      checks.push({ level: 'warn', label: 'Long day', text: `Day ${longDays[0]} is ${fmtMi(dayMileage[longDays[0]])}. Add fuel or split it.` });
+    } else if (orderedStops.length > 1) {
+      checks.push({ level: 'ok', label: 'Pace', text: 'Day mileage looks manageable.' });
+    }
+    const fuelCount = orderedStops.filter(st => st.type === 'fuel').length;
+    if (totals.miles > 160 && fuelCount === 0) {
+      checks.push({ level: 'warn', label: 'Fuel', text: 'Add at least one fuel stop before remote stretches.' });
+    } else if (fuelCount > 0) {
+      checks.push({ level: 'ok', label: 'Fuel', text: `${fuelCount} fuel stop${fuelCount === 1 ? '' : 's'} added.` });
+    }
+    return checks.slice(0, 3);
+  }, [days, orderedStops, dayMileage, totals.miles]);
+  const discoverEmptyText = discoverTab === 'camps'
+    ? 'Tap scan to find legal camps around your current route anchor.'
+    : discoverTab === 'gas'
+      ? 'Tap scan to find fuel near the current leg. Build Day 1 then Day 2 first for between-days search.'
+      : 'Tap scan to find water, trailheads, viewpoints, peaks, and hot springs near this route.';
 
   function fly(lat: number, lng: number, zoom = 11) {
     mapRef.current?.flyTo(lat, lng, zoom);
@@ -618,6 +675,31 @@ export default function RouteBuilderScreen() {
           </View>
         </TourTarget>
 
+        <View style={s.readinessCard}>
+          <View style={s.readinessTop}>
+            <View>
+              <Text style={s.readinessTitle}>Route readiness</Text>
+              <Text style={s.readinessSub}>Saved routes are available offline from search and trip history.</Text>
+            </View>
+            <View style={[s.readinessBadge, routeChecks.some(c => c.level === 'warn') ? s.readinessBadgeWarn : s.readinessBadgeOk]}>
+              <Text style={[s.readinessBadgeText, routeChecks.some(c => c.level === 'warn') ? { color: C.yellow } : { color: C.green }]}>
+                {routeChecks.some(c => c.level === 'warn') ? 'CHECK' : 'READY'}
+              </Text>
+            </View>
+          </View>
+          <View style={s.checkGrid}>
+            {(routeChecks.length ? routeChecks : [{ level: 'warn' as const, label: 'Start', text: 'Add your first route stop.' }]).map(check => (
+              <View key={`${check.label}-${check.text}`} style={s.checkRow}>
+                <Ionicons name={check.level === 'ok' ? 'checkmark-circle-outline' : 'alert-circle-outline'} size={15} color={check.level === 'ok' ? C.green : C.yellow} />
+                <View style={{ flex: 1 }}>
+                  <Text style={s.checkLabel}>{check.label.toUpperCase()}</Text>
+                  <Text style={s.checkText}>{check.text}</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        </View>
+
         {searchResults.length > 0 && (
           <View style={s.resultsBox}>
             {searchResults.map(place => (
@@ -635,6 +717,14 @@ export default function RouteBuilderScreen() {
         <View style={s.sectionHeader}>
           <Text style={s.sectionTitle}>DISCOVER NEAR ROUTE</Text>
           <Text style={s.sectionMeta}>{discoverContextLabel}</Text>
+        </View>
+        <View style={s.discoverHint}>
+          <Ionicons name={legContext ? 'git-commit-outline' : 'locate-outline'} size={13} color={C.text3} />
+          <Text style={s.discoverHintText}>
+            {legContext && (discoverTab === 'gas' || discoverTab === 'poi')
+              ? 'Searching between the previous day end and this day destination.'
+              : 'Searching around the latest route anchor. Add another day to unlock between-days fuel and POI search.'}
+          </Text>
         </View>
         <View style={s.discoverTabs}>
           {(['camps', 'gas', 'poi'] as DiscoveryTab[]).map(tab => (
@@ -661,6 +751,9 @@ export default function RouteBuilderScreen() {
             </TouchableOpacity>
           </TouchableOpacity>
         ))}
+        {discoverTab === 'camps' && camps.length === 0 && !discoverLoading && (
+          <View style={s.emptyState}><Text style={s.emptyTitle}>No camp results loaded</Text><Text style={s.emptyText}>{discoverEmptyText}</Text></View>
+        )}
         {discoverTab === 'gas' && gas.slice(0, 12).map(station => (
           <TouchableOpacity key={String(station.id)} style={s.candidateRow} onPress={() => { addGas(station); fly(station.lat, station.lng, 13); }}>
             <View style={[s.candidateIcon, { borderColor: '#eab30866', backgroundColor: '#eab30818' }]}>
@@ -675,6 +768,9 @@ export default function RouteBuilderScreen() {
             </View>
           </TouchableOpacity>
         ))}
+        {discoverTab === 'gas' && gas.length === 0 && !discoverLoading && (
+          <View style={s.emptyState}><Text style={s.emptyTitle}>No fuel results loaded</Text><Text style={s.emptyText}>{discoverEmptyText}</Text></View>
+        )}
         {discoverTab === 'poi' && pois.slice(0, 12).map(poi => (
           <TouchableOpacity key={poi.id} style={s.candidateRow} onPress={() => { addPoi(poi); fly(poi.lat, poi.lng, 13); }}>
             <View style={[s.candidateIcon, { borderColor: '#f9731666', backgroundColor: '#f9731618' }]}>
@@ -689,6 +785,9 @@ export default function RouteBuilderScreen() {
             </View>
           </TouchableOpacity>
         ))}
+        {discoverTab === 'poi' && pois.length === 0 && !discoverLoading && (
+          <View style={s.emptyState}><Text style={s.emptyTitle}>No POI results loaded</Text><Text style={s.emptyText}>{discoverEmptyText}</Text></View>
+        )}
 
         <View style={s.sectionHeader}>
           <Text style={s.sectionTitle}>DAY {activeDay} STOPS</Text>
@@ -706,7 +805,7 @@ export default function RouteBuilderScreen() {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={s.stopName} numberOfLines={1}>{st.name}</Text>
-              <Text style={s.stopMeta}>{st.type.toUpperCase()} · {st.source ?? 'manual'}</Text>
+              <Text style={s.stopMeta}>{stopLabel(st.type).toUpperCase()} · {sourceLabel(st.source)}</Text>
             </View>
             <TouchableOpacity style={s.iconBtn} onPress={() => moveStop(st.id, -1)}>
               <Ionicons name="chevron-up" size={15} color={C.text3} />
@@ -724,11 +823,11 @@ export default function RouteBuilderScreen() {
       <View style={s.footer}>
         <View>
           <Text style={s.footerMiles}>{fmtMi(totals.miles)}</Text>
-          <Text style={s.footerSub}>{totals.stops} stops · {totals.camps} camps · {days.length} days</Text>
+          <Text style={s.footerSub}>{totals.stops} stops · {totals.camps} camps · {days.length} days · offline saved</Text>
         </View>
         <TouchableOpacity style={s.previewBtn} onPress={() => saveRoute(true)}>
           <Ionicons name="map-outline" size={16} color="#fff" />
-          <Text style={s.previewText}>OPEN MAP</Text>
+          <Text style={s.previewText}>SAVE & OPEN</Text>
         </TouchableOpacity>
       </View>
 
@@ -990,6 +1089,18 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   searchInput: { flex: 1, color: C.text, fontSize: 13, paddingVertical: 11 },
   searchBtn: { alignSelf: 'stretch', minWidth: 56, backgroundColor: C.orange, borderTopRightRadius: 11, borderBottomRightRadius: 11, alignItems: 'center', justifyContent: 'center' },
   searchBtnText: { color: '#fff', fontSize: 10, fontFamily: mono, fontWeight: '900' },
+  readinessCard: { borderWidth: 1, borderColor: C.border, borderRadius: 12, padding: 12, backgroundColor: C.s1, gap: 10 },
+  readinessTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 },
+  readinessTitle: { color: C.text, fontSize: 13, fontWeight: '900' },
+  readinessSub: { color: C.text3, fontSize: 11, lineHeight: 16, marginTop: 2, maxWidth: 235 },
+  readinessBadge: { borderRadius: 999, borderWidth: 1, paddingHorizontal: 9, paddingVertical: 5 },
+  readinessBadgeWarn: { borderColor: C.yellow + '66', backgroundColor: C.yellow + '14' },
+  readinessBadgeOk: { borderColor: C.green + '66', backgroundColor: C.green + '14' },
+  readinessBadgeText: { fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.7 },
+  checkGrid: { gap: 8 },
+  checkRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 7 },
+  checkLabel: { color: C.text3, fontSize: 8, fontFamily: mono, fontWeight: '900', letterSpacing: 0.6 },
+  checkText: { color: C.text2, fontSize: 11, lineHeight: 16, marginTop: 1 },
   resultsBox: { borderWidth: 1, borderColor: C.border, borderRadius: 12, overflow: 'hidden' },
   resultRow: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 11, borderBottomWidth: 1, borderColor: C.border, backgroundColor: C.s1 },
   resultName: { color: C.text, fontSize: 13, fontWeight: '700' },
@@ -1003,6 +1114,8 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   discoverTabText: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '800' },
   discoverTabTextActive: { color: C.orange },
   discoverBtn: { width: 42, borderWidth: 1, borderColor: C.orange + '55', borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: C.orange + '10' },
+  discoverHint: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, borderWidth: 1, borderColor: C.border, borderRadius: 10, padding: 9, backgroundColor: C.s2 },
+  discoverHintText: { flex: 1, color: C.text3, fontSize: 11, lineHeight: 16 },
   candidateRow: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 11, borderWidth: 1, borderColor: C.border, borderRadius: 12, backgroundColor: C.s1 },
   candidateIcon: { width: 34, height: 34, borderRadius: 10, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   candidateName: { color: C.text, fontSize: 13, fontWeight: '800' },

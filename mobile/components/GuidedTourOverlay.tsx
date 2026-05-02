@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Animated, Modal, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,7 +17,8 @@ const STEPS = [
     title: 'Plan a trip',
     body: 'Tell Trailhead where you want to go, how many days, and your vehicle style. The planner turns that into days, stops, camps, fuel, and map pins.',
     target: 'PLAN TAB',
-    align: 'bottom',
+    targetKind: 'tab',
+    tabIndex: 0,
   },
   {
     route: '/(tabs)/map',
@@ -25,7 +26,8 @@ const STEPS = [
     title: 'Use the map',
     body: 'The map is where your trip becomes usable. Search camps, start navigation, download offline states, switch layers, and check your compass.',
     target: 'MAP TAB',
-    align: 'top',
+    targetKind: 'tab',
+    tabIndex: 1,
   },
   {
     route: '/(tabs)/map',
@@ -33,7 +35,7 @@ const STEPS = [
     title: 'Pins and reports',
     body: 'Use PIN to add community places like propane, water, dumps, camps, or repairs. Use REPORT for short-lived hazards and trail conditions.',
     target: 'PIN / REPORT',
-    align: 'left',
+    targetKind: 'mapQuick',
   },
   {
     route: '/(tabs)/route-builder',
@@ -41,7 +43,8 @@ const STEPS = [
     title: 'Build manually',
     body: 'Route Builder is for people who want control. Add day starts, destinations, gas between days, POIs, and camps without asking AI.',
     target: 'ROUTE TAB',
-    align: 'bottom',
+    targetKind: 'tab',
+    tabIndex: 2,
   },
   {
     route: '/(tabs)/report',
@@ -49,7 +52,8 @@ const STEPS = [
     title: 'Reports help everyone',
     body: 'Reports keep the map current. Road hazards, closures, water, camp status, and trail notes earn credits and help other travelers.',
     target: 'REPORT TAB',
-    align: 'bottom',
+    targetKind: 'tab',
+    tabIndex: 3,
   },
   {
     route: '/(tabs)/guide',
@@ -57,7 +61,8 @@ const STEPS = [
     title: 'Audio guide',
     body: 'Guide gives you spoken context about places, weather, and the route. It is useful when you want less screen time on the trail.',
     target: 'GUIDE TAB',
-    align: 'bottom',
+    targetKind: 'tab',
+    tabIndex: 4,
   },
   {
     route: '/(tabs)/profile',
@@ -65,7 +70,8 @@ const STEPS = [
     title: 'Profile and downloads',
     body: 'Profile keeps your trips, rig, credits, plan status, GPX tools, app settings, and this walkthrough if you want to see it again.',
     target: 'PROFILE TAB',
-    align: 'bottom',
+    targetKind: 'tab',
+    tabIndex: 5,
   },
 ] as const;
 
@@ -74,15 +80,36 @@ export default function GuidedTourOverlay() {
   const s = useMemo(() => makeStyles(C), [C]);
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { width, height } = useWindowDimensions();
   const runId = useStore(st => st.guidedTourRunId);
   const [visible, setVisible] = useState(false);
   const [idx, setIdx] = useState(0);
   const [neverShow, setNeverShow] = useState(false);
+  const [cardSide, setCardSide] = useState<'top' | 'bottom'>('top');
   const fade = useRef(new Animated.Value(0)).current;
   const pulse = useRef(new Animated.Value(0)).current;
 
   const step = STEPS[idx];
   const isLast = idx === STEPS.length - 1;
+  const target = useMemo(() => {
+    if (step.targetKind === 'tab') {
+      const tabCount = 6;
+      const tabW = width / tabCount;
+      const boxW = Math.min(82, Math.max(48, tabW - 8));
+      return {
+        left: tabW * step.tabIndex + (tabW - boxW) / 2,
+        top: height - insets.bottom - 78,
+        width: boxW,
+        height: 62,
+      };
+    }
+    return {
+      left: 10,
+      top: Math.max(insets.top + 120, height - insets.bottom - 284),
+      width: 114,
+      height: 104,
+    };
+  }, [height, insets.bottom, insets.top, step, width]);
 
   useEffect(() => {
     storage.get(TOUR_NEVER).then(never => {
@@ -102,6 +129,7 @@ export default function GuidedTourOverlay() {
 
   useEffect(() => {
     if (!visible) return;
+    setCardSide(target.top > height * 0.45 ? 'top' : 'bottom');
     Animated.timing(fade, { toValue: 1, duration: 220, useNativeDriver: true }).start();
     const loop = Animated.loop(
       Animated.sequence([
@@ -111,7 +139,7 @@ export default function GuidedTourOverlay() {
     );
     loop.start();
     return () => loop.stop();
-  }, [visible, idx]);
+  }, [visible, idx, target.top, height]);
 
   function openTour(start: number) {
     setIdx(start);
@@ -149,20 +177,30 @@ export default function GuidedTourOverlay() {
 
   const pulseScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] });
   const pulseOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.45, 0.9] });
+  const targetCenterX = target.left + target.width / 2;
+  const labelTop = target.top > 80 ? target.top - 36 : target.top + target.height + 8;
+  const labelLeft = Math.min(Math.max(12, targetCenterX - 58), width - 128);
+  const cardStyle = cardSide === 'top'
+    ? { top: insets.top + 18 }
+    : { bottom: insets.bottom + 96 };
 
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={() => closeTour(false)}>
-      <Animated.View style={[s.overlay, { opacity: fade, paddingTop: insets.top + 12, paddingBottom: insets.bottom + 92 }]}>
-        <View style={[s.focusRow, step.align === 'left' && s.focusLeft, step.align === 'top' && s.focusTop]}>
+      <Animated.View style={[s.overlay, { opacity: fade }]}>
+        <TouchableOpacity
+          activeOpacity={0.86}
+          onPress={next}
+          style={[s.targetTouch, { left: target.left, top: target.top, width: target.width, height: target.height }]}
+        >
           <Animated.View style={[s.focusRing, { transform: [{ scale: pulseScale }], opacity: pulseOpacity }]}>
-            <Ionicons name={step.icon as any} size={24} color={C.orange} />
+            <Ionicons name={step.icon as any} size={22} color={C.orange} />
           </Animated.View>
-          <View style={s.focusLabel}>
-            <Text style={s.focusText}>{step.target}</Text>
-          </View>
+        </TouchableOpacity>
+        <View style={[s.focusLabel, { left: labelLeft, top: labelTop }]}>
+          <Text style={s.focusText}>{step.target}</Text>
         </View>
 
-        <View style={[s.card, step.align === 'top' && s.cardTop]}>
+        <View style={[s.card, cardStyle]}>
           <View style={s.progressRow}>
             {STEPS.map((_, i) => <View key={i} style={[s.dot, i <= idx && s.dotActive]} />)}
           </View>
@@ -180,6 +218,10 @@ export default function GuidedTourOverlay() {
           </View>
 
           <Text style={s.body}>{step.body}</Text>
+          <TouchableOpacity style={s.moveBtn} onPress={() => setCardSide(v => v === 'top' ? 'bottom' : 'top')}>
+            <Ionicons name="swap-vertical-outline" size={13} color={C.text3} />
+            <Text style={s.moveText}>MOVE CARD</Text>
+          </TouchableOpacity>
 
           <TouchableOpacity style={s.checkRow} onPress={() => setNeverShow(v => !v)}>
             <View style={[s.checkBox, neverShow && s.checkBoxOn]}>
@@ -213,19 +255,24 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.64)',
     paddingHorizontal: 16,
-    justifyContent: 'space-between',
   },
-  focusRow: { flexDirection: 'row', alignItems: 'center', alignSelf: 'center', marginTop: 74 },
-  focusTop: { marginTop: 110, alignSelf: 'flex-start' },
-  focusLeft: { marginTop: 'auto' as any, marginBottom: 190, alignSelf: 'flex-start' },
+  targetTouch: {
+    position: 'absolute',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 18,
+    borderWidth: 2,
+    borderColor: C.orange,
+    backgroundColor: C.orange + '12',
+  },
   focusRing: {
-    width: 64, height: 64, borderRadius: 32,
+    width: 54, height: 54, borderRadius: 27,
     alignItems: 'center', justifyContent: 'center',
     borderWidth: 2, borderColor: C.orange,
     backgroundColor: C.orange + '22',
   },
   focusLabel: {
-    marginLeft: 10,
+    position: 'absolute',
     backgroundColor: C.s1,
     borderWidth: 1, borderColor: C.orange + '55',
     borderRadius: 12,
@@ -234,6 +281,9 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   focusText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
   card: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
     backgroundColor: C.s1,
     borderRadius: 18,
     borderWidth: 1,
@@ -245,7 +295,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     shadowOffset: { width: 0, height: 8 },
     elevation: 16,
   },
-  cardTop: { marginTop: 'auto' as any },
   progressRow: { flexDirection: 'row', gap: 5, marginBottom: 14 },
   dot: { flex: 1, height: 4, borderRadius: 2, backgroundColor: C.s3 },
   dotActive: { backgroundColor: C.orange },
@@ -260,6 +309,20 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   title: { color: C.text, fontSize: 20, fontWeight: '900', marginTop: 2 },
   closeBtn: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s2 },
   body: { color: C.text2, fontSize: 14, lineHeight: 21, marginBottom: 14 },
+  moveBtn: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 9,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    backgroundColor: C.s2,
+    marginBottom: 10,
+  },
+  moveText: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900' },
   checkRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 4, marginBottom: 14 },
   checkBox: {
     width: 20, height: 20, borderRadius: 6,

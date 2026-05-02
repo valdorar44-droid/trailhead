@@ -533,6 +533,7 @@ const COMMUNITY_PIN_TYPES = [
   { id: 'checkpoint', label: 'Checkpoint', icon: 'hand-left-outline', color: '#dc2626', group: 'Road' },
   { id: 'road_report', label: 'Road', icon: 'trail-sign-outline', color: '#dc2626', group: 'Road' },
   { id: 'warning', label: 'Warning', icon: 'warning-outline', color: '#ef4444', group: 'Road' },
+  { id: 'gpx_import', label: 'GPX', icon: 'cloud-upload-outline', color: '#64748b', group: 'Imports' },
   { id: 'other', label: 'Other', icon: 'star-outline', color: '#38bdf8', group: 'Community' },
 ] as const;
 
@@ -540,6 +541,13 @@ type CommunityPinTypeId = typeof COMMUNITY_PIN_TYPES[number]['id'];
 
 function communityPinMeta(type?: string) {
   return COMMUNITY_PIN_TYPES.find(t => t.id === type) ?? COMMUNITY_PIN_TYPES[COMMUNITY_PIN_TYPES.length - 1];
+}
+
+function normalizedCommunityPinType(pin: Pick<Pin, 'type' | 'description'>): string {
+  const type = (pin.type || 'other').toLowerCase();
+  if (type === 'gpx_import') return 'gpx_import';
+  if (type === 'other' && /imported from gpx/i.test(pin.description || '')) return 'gpx_import';
+  return type;
 }
 
 // ─── Land type color helper ──────────────────────────────────────────────────
@@ -1139,8 +1147,8 @@ const buildMapHtml = (
     _a('gas-circle',{id:'gas-circle',type:'circle',source:'gas',paint:{'circle-radius':9,'circle-color':'#eab308','circle-opacity':0.92,'circle-stroke-width':2,'circle-stroke-color':'#fff'}});
     _a('gas-code',{id:'gas-code',type:'symbol',source:'gas',layout:{'text-field':'F','text-size':10,'text-font':['DIN Offc Pro Medium','Arial Unicode MS Bold'],'text-allow-overlap':true,'text-ignore-placement':true},paint:{'text-color':'#111827','text-halo-color':'rgba(255,255,255,0.55)','text-halo-width':0.8}});
     _a('gas-label',{id:'gas-label',type:'symbol',source:'gas',filter:['>=',['zoom'],13],layout:{'text-field':['get','name'],'text-size':9,'text-offset':[0,1.5],'text-anchor':'top'},paint:{'text-color':'#f1f5f9','text-halo-color':'rgba(0,0,0,0.85)','text-halo-width':1.5}});
-    _a('poi-circle',{id:'poi-circle',type:'circle',source:'pois',paint:{'circle-radius':['case',['==',['get','type'],'peak'],9,8],'circle-color':['match',['get','type'],'water','#3b82f6','trailhead','#22c55e','viewpoint','#a855f7','peak','#92400e','hot_spring','#f97316','#6b7280'],'circle-opacity':0.9,'circle-stroke-width':1.5,'circle-stroke-color':'#fff'}});
-    _a('poi-code',{id:'poi-code',type:'symbol',source:'pois',layout:{'text-field':['match',['get','type'],'water','W','trailhead','T','viewpoint','V','peak','P','hot_spring','H','P'],'text-size':9.5,'text-font':['DIN Offc Pro Medium','Arial Unicode MS Bold'],'text-allow-overlap':true,'text-ignore-placement':true},paint:{'text-color':'#fff','text-halo-color':'rgba(0,0,0,0.35)','text-halo-width':0.8}});
+    _a('poi-circle',{id:'poi-circle',type:'circle',source:'pois',paint:{'circle-radius':['case',['==',['get','type'],'peak'],9,8],'circle-color':['match',['get','type'],'water','#3b82f6','trailhead','#22c55e','viewpoint','#a855f7','peak','#92400e','hot_spring','#f97316','camp','#16a34a','informal_camp','#65a30d','wild_camp','#15803d','fuel','#ea580c','propane','#f97316','dump','#a16207','gpx_import','#64748b','#6b7280'],'circle-opacity':0.9,'circle-stroke-width':1.5,'circle-stroke-color':'#fff'}});
+    _a('poi-code',{id:'poi-code',type:'symbol',source:'pois',layout:{'text-field':['match',['get','type'],'water','W','trailhead','T','viewpoint','V','peak','P','hot_spring','H','camp','C','informal_camp','C','wild_camp','C','fuel','G','propane','P','dump','D','gpx_import','X','P'],'text-size':9.5,'text-font':['DIN Offc Pro Medium','Arial Unicode MS Bold'],'text-allow-overlap':true,'text-ignore-placement':true},paint:{'text-color':'#fff','text-halo-color':'rgba(0,0,0,0.35)','text-halo-width':0.8}});
     _a('poi-label',{id:'poi-label',type:'symbol',source:'pois',filter:['>=',['zoom'],12],layout:{'text-field':['case',['all',['==',['get','type'],'peak'],['has','elevation']],['concat',['get','name'],'\\n▲ ',['get','elevation']],['get','name']],'text-size':['case',['==',['get','type'],'peak'],10,9],'text-offset':[0,1.3],'text-anchor':'top','text-max-width':10},paint:{'text-color':['case',['==',['get','type'],'peak'],'#d97706','#f1f5f9'],'text-halo-color':['case',['==',['get','type'],'peak'],'rgba(255,255,255,0.95)','rgba(0,0,0,0.85)'],'text-halo-width':2}});
     _a('camp-cluster',{id:'camp-cluster',type:'circle',source:'camps',filter:['has','point_count'],paint:{'circle-color':['step',['get','point_count'],'#14b8a6',10,'#f97316',50,'#ef4444'],'circle-radius':['step',['get','point_count'],18,10,25,50,32],'circle-opacity':0.88,'circle-stroke-width':2,'circle-stroke-color':'#fff'}});
     _a('camp-count',{id:'camp-count',type:'symbol',source:'camps',filter:['has','point_count'],layout:{'text-field':'{point_count_abbreviated}','text-size':12,'text-font':['DIN Offc Pro Medium','Arial Unicode MS Bold']},paint:{'text-color':'#fff'}});
@@ -1154,7 +1162,7 @@ const buildMapHtml = (
     map.on('click','camp-cluster',function(e){var f=map.queryRenderedFeatures(e.point,{layers:['camp-cluster']});if(!f.length)return;map.getSource('camps').getClusterExpansionZoom(f[0].properties.cluster_id,function(err,zoom){if(err)return;map.easeTo({center:f[0].geometry.coordinates,zoom:zoom+0.5});});e.preventDefault();});
     map.on('click','camp-circle',function(e){if(!e.features||!e.features[0])return;var p=e.features[0].properties;var raw;try{raw=JSON.parse(p.raw||'{}');}catch(x){raw=p;}postRN({type:'campsite_tapped',id:raw.id||p.id,name:raw.name||p.name,camp:raw});e.preventDefault();});
     map.on('click','gas-circle',function(e){if(!e.features||!e.features[0])return;var p=e.features[0].properties;new maplibregl.Popup({closeButton:false,offset:12}).setLngLat(e.lngLat).setHTML('<div class="pt">F '+p.name+'</div><div class="pm">Fuel Station</div>').addTo(map);e.preventDefault();});
-    map.on('click','poi-circle',function(e){if(!e.features||!e.features[0])return;var p=e.features[0].properties;var ic=p.type==='water'?'W':p.type==='trailhead'?'T':p.type==='viewpoint'?'V':p.type==='peak'?'P':p.type==='hot_spring'?'H':'P';new maplibregl.Popup({closeButton:false,offset:12}).setLngLat(e.lngLat).setHTML('<div class="pt">'+ic+' '+p.name+'</div><div class="pm">'+p.type+'</div>').addTo(map);e.preventDefault();});
+    map.on('click','poi-circle',function(e){if(!e.features||!e.features[0])return;var p=e.features[0].properties;var ic=p.type==='water'?'W':p.type==='trailhead'?'T':p.type==='viewpoint'?'V':p.type==='peak'?'P':p.type==='hot_spring'?'H':p.type==='gpx_import'?'X':p.type==='fuel'?'G':p.type==='propane'?'P':p.type==='dump'?'D':p.type&&p.type.indexOf('camp')>=0?'C':'P';new maplibregl.Popup({closeButton:false,offset:12}).setLngLat(e.lngLat).setHTML('<div class="pt">'+ic+' '+p.name+'</div><div class="pm">'+p.type+'</div>').addTo(map);e.preventDefault();});
     ['camp-cluster','camp-circle','gas-circle','poi-circle'].forEach(function(l){map.on('mouseenter',l,function(){map.getCanvas().style.cursor='pointer';});map.on('mouseleave',l,function(){map.getCanvas().style.cursor='';});});
   }
 
@@ -3215,13 +3223,19 @@ function MapScreen() {
       .map(p => ({ lat: p.lat, lng: p.lng, name: p.name, type: p.type || 'poi' }));
   }, [activeTrip?.trip_id, pois]);
   const visibleCommunityPins = useMemo(() => {
-    if (activePinFilters.length === 0) return communityPins;
+    if (activePinFilters.length === 0) {
+      return communityPins.filter(p => normalizedCommunityPinType(p) !== 'gpx_import');
+    }
     const allowed = new Set(activePinFilters);
-    return communityPins.filter(p => allowed.has((p.type || 'other').toLowerCase()));
+    return communityPins.filter(p => allowed.has(normalizedCommunityPinType(p)));
   }, [communityPins, activePinFilters]);
+  const displayCommunityPins = useMemo(() =>
+    visibleCommunityPins.map(p => ({ ...p, type: normalizedCommunityPinType(p) })),
+    [visibleCommunityPins]
+  );
   const pinList = useMemo(() =>
-    visibleCommunityPins.map(p => ({ lat: p.lat, lng: p.lng, name: p.name, type: p.type })),
-    [visibleCommunityPins.length, activePinFilters.length]
+    displayCommunityPins.map(p => ({ lat: p.lat, lng: p.lng, name: p.name, type: p.type })),
+    [displayCommunityPins]
   );
 
   const centerLat = waypoints[0]?.lat ?? 39.5;
@@ -3229,7 +3243,7 @@ function MapScreen() {
 
   const mapHtml = useMemo(() =>
     buildMapHtml(centerLat, centerLng, waypoints, campsites, gas, pinList),
-    [activeTrip?.trip_id, communityPins.length]
+    [centerLat, centerLng, waypoints, campsites, gas, pinList]
   );
 
   // ── Nav HUD values ──────────────────────────────────────────────────────────
@@ -3363,7 +3377,7 @@ function MapScreen() {
           gas={(activeTrip?.gas_stations ?? []).filter(g => g.lat != null && g.lng != null && isFinite(g.lat) && isFinite(g.lng)) as any}
           pois={routePois}
           reports={mapReports}
-          communityPins={visibleCommunityPins}
+          communityPins={displayCommunityPins}
           searchMarker={searchRouteCard ? { lat: searchRouteCard.lat, lng: searchRouteCard.lng, name: searchRouteCard.name } : null}
           userLoc={userLoc}
           navMode={navMode}
@@ -3897,7 +3911,7 @@ function MapScreen() {
             ] as any}
             gas={(activeTrip?.gas_stations ?? []).filter(g => g.lat != null && g.lng != null && isFinite(g.lat) && isFinite(g.lng)) as any}
             pois={routePois}
-            communityPins={communityPins}
+            communityPins={displayCommunityPins}
             routeOpts={routeOpts}
             routeCoords={lastRouteCoords.length > 0 ? lastRouteCoords : undefined}
             routeCard={searchRouteCard}
@@ -3993,7 +4007,7 @@ function MapScreen() {
             <Text style={s.filterSectionTitle}>COMMUNITY PINS</Text>
             {activePinFilters.length > 0 && (
               <TouchableOpacity onPress={() => setActivePinFilters([])}>
-                <Text style={s.filterClearText}>SHOW ALL</Text>
+                <Text style={s.filterClearText}>RESET</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -5751,7 +5765,7 @@ function MapScreen() {
 
       {/* ── Community pin card ── */}
       {selectedCommunityPin && (() => {
-        const meta = communityPinMeta(selectedCommunityPin.type);
+        const meta = communityPinMeta(normalizedCommunityPinType(selectedCommunityPin));
         return (
           <Modal visible transparent animationType="slide" onRequestClose={() => setSelectedCommunityPin(null)}>
             <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setSelectedCommunityPin(null)}>

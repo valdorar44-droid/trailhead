@@ -1799,7 +1799,7 @@ VALID_PIN_TYPES = {
     "camp", "informal_camp", "wild_camp", "fuel", "propane", "water", "dump",
     "parking", "mechanic", "restaurant", "attraction", "shopping", "medical",
     "pet", "laundromat", "shower", "wifi", "checkpoint", "road_report",
-    "warning", "other",
+    "warning", "gpx_import", "other",
 }
 
 class PinRequest(BaseModel):

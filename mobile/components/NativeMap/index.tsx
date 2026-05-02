@@ -159,6 +159,7 @@ const COMMUNITY_PIN_VISUALS: Record<string, { color: string; icon: keyof typeof 
   checkpoint: { color: '#dc2626', icon: 'hand-left-outline' },
   road_report: { color: '#dc2626', icon: 'trail-sign-outline' },
   warning: { color: '#ef4444', icon: 'warning-outline' },
+  gpx_import: { color: '#64748b', icon: 'cloud-upload-outline' },
   other: { color: '#38bdf8', icon: 'star-outline' },
 };
 

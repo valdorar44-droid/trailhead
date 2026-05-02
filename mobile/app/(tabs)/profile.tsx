@@ -366,8 +366,9 @@ export default function ProfileScreen() {
           p.lat >= -90 && p.lat <= 90 && p.lng >= -180 && p.lng <= 180);
 
       if (pins.length > 0) {
-        await Promise.all(pins.slice(0, 20).map(p => api.submitPin(p).catch(() => {})));
-        setGpxResult(`Imported ${Math.min(pins.length, 20)} waypoints as community pins. +${Math.min(pins.length, 20) * 3} credits`);
+        const importLimit = 15;
+        await Promise.all(pins.slice(0, importLimit).map(p => api.submitPin(p).catch(() => {})));
+        setGpxResult(`Imported up to ${Math.min(pins.length, importLimit)} GPX waypoints. GPX pins stay hidden on the map until enabled in filters.`);
       } else {
         setGpxResult(`GPX track loaded: ${trkpts.length} track points. No named waypoints to pin.`);
       }
@@ -1180,7 +1181,7 @@ export default function ProfileScreen() {
             <Text style={s.gpxTitle}>Import GPX Track</Text>
           </View>
           <Text style={s.gpxDesc}>
-            Import GPX files from Gaia, Garmin, or iOverlander. Named waypoints become community pins and earn you credits.
+            Import GPX files from Gaia, Garmin, or iOverlander. Named waypoints become GPX community pins, hidden by default because imported points may be unverified.
           </Text>
           {!!gpxResult && (
             <Text style={[s.gpxResult, gpxResult.startsWith('Import failed') && { color: C.red }]}>
@@ -1293,7 +1294,7 @@ export default function ProfileScreen() {
             ['+10', 'Report with photo'],
             ['+2',  'Report confirmed by another user'],
             ['+5',  'Add a community pin'],
-            ['+3',  'Import a GPX waypoint'],
+            ['+5',  'Import or add a community pin'],
             ['+20', 'Refer a friend who signs up'],
             ['+15', '3-day reporting streak bonus'],
             ['+30', '7-day streak bonus'],

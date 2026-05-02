@@ -1,8 +1,18 @@
 import { ReactNode, useCallback, useEffect, useRef } from 'react';
-import { View } from 'react-native';
+import { InteractionManager, StyleProp, View, ViewStyle } from 'react-native';
 import { useStore } from '@/lib/store';
 
-export default function TourTarget({ id, children }: { id: string; children: ReactNode }) {
+export default function TourTarget({
+  id,
+  children,
+  style,
+  pointerEvents,
+}: {
+  id: string;
+  children: ReactNode;
+  style?: StyleProp<ViewStyle>;
+  pointerEvents?: 'box-none' | 'none' | 'box-only' | 'auto';
+}) {
   const setTourTarget = useStore(st => st.setTourTarget);
   const ref = useRef<View>(null);
   const measure = useCallback(() => {
@@ -15,15 +25,17 @@ export default function TourTarget({ id, children }: { id: string; children: Rea
 
   useEffect(() => {
     measure();
-    const timers = [120, 350, 800].map(ms => setTimeout(measure, ms));
+    const interaction = InteractionManager.runAfterInteractions(measure);
+    const timers = [80, 180, 350, 700, 1200, 2000].map(ms => setTimeout(measure, ms));
     return () => {
+      interaction.cancel();
       timers.forEach(clearTimeout);
       setTourTarget(id, null);
     };
   }, [id, measure, setTourTarget]);
 
   return (
-    <View ref={ref} collapsable={false} onLayout={measure}>
+    <View ref={ref} collapsable={false} onLayout={measure} style={style} pointerEvents={pointerEvents}>
       {children}
     </View>
   );

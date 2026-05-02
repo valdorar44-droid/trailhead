@@ -24,6 +24,7 @@ import { loadRouteGeometry, saveRouteGeometry } from '@/lib/offlineRoutes';
 import * as ImagePicker from 'expo-image-picker';
 import PaywallModal from '@/components/PaywallModal';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
+import { CREDIT_REWARDS } from '@/lib/credits';
 import { useConnectivitySync } from '@/lib/connectivitySync';
 
 // ─── US State bounding boxes for offline download ─────────────────────────────
@@ -2622,7 +2623,7 @@ function MapScreen() {
       setPinName('');
       setPinDescription('');
       setPinDetails({});
-      setQuickToast('+5 credits · community pin added');
+      setQuickToast(`+${CREDIT_REWARDS.communityPin} credits · community pin added`);
       setTimeout(() => setQuickToast(''), 3000);
     } catch (e: any) {
       setQuickToast(e?.status === 429 ? 'Daily pin cap reached' : e?.status === 401 || e?.status === 403 ? 'Sign in to add community pins' : 'Could not add pin');
@@ -3893,6 +3894,9 @@ function MapScreen() {
           onError={() => setMapLoadFailed(true)}
         />
       )}
+      <TourTarget id="map.canvas" style={s.mapTourTarget} pointerEvents="none">
+        <View />
+      </TourTarget>
 
       {/* Offline map load error banner */}
       {mapLoadFailed && (
@@ -4910,7 +4914,7 @@ function MapScreen() {
                       <TouchableOpacity style={s.frPhotoBtn} onPress={pickFieldReportPhoto}>
                         <Ionicons name={frPhoto ? 'checkmark-circle' : 'camera-outline'} size={16} color={frPhoto ? '#22c55e' : C.text3} />
                         <Text style={[s.frPhotoBtnText, frPhoto && { color: '#22c55e' }]}>
-                          {frPhoto ? 'Photo added (+5 credits)' : 'Add photo (+5 credits)'}
+                          {frPhoto ? `Photo added (+${CREDIT_REWARDS.fieldReportPhotoBonus} credits)` : `Add photo (+${CREDIT_REWARDS.fieldReportPhotoBonus} credits)`}
                         </Text>
                       </TouchableOpacity>
 
@@ -5588,7 +5592,7 @@ function MapScreen() {
                 onPress={async () => {
                   try {
                     await api.confirmReport(rep.id);
-                    setQuickToast('+1 credit');
+                    setQuickToast(`+${CREDIT_REWARDS.confirmReport} credit`);
                   } catch (e: any) {
                     const msg = e?.message ?? '';
                     if (msg.includes('Already confirmed') || msg.includes('own report')) {
@@ -6493,6 +6497,13 @@ const makeStyles = (C: ColorPalette) => {
   },
 
   controls: { position: 'absolute', top: 106, right: 16, bottom: 100, maxHeight: '80%' as any },
+  mapTourTarget: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    top: 104,
+    height: 260,
+  },
   controlsInner: { gap: 8, paddingBottom: 8, alignItems: 'flex-end' },
   ctrlBtn: {
     width: 44, height: 44, borderRadius: 14,

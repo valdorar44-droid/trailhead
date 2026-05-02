@@ -26,9 +26,9 @@ const STEPS = [
     icon: 'map-outline',
     title: 'Use the map',
     body: 'The map is where your trip becomes usable. Search camps, start navigation, download offline states, switch layers, and check your compass.',
-    target: 'MAP TAB',
-    targetKind: 'tab',
-    tabIndex: 1,
+    target: 'MAP',
+    targetKind: 'mapCanvas',
+    targetKey: 'map.canvas',
   },
   {
     route: '/(tabs)/map',
@@ -44,8 +44,8 @@ const STEPS = [
     icon: 'layers-outline',
     title: 'Map settings',
     body: 'Map controls switch online/offline map sources, layers, terrain, radar, fire, avalanche, public land overlays, and campsite filters.',
-    target: 'LAYERS / FILTERS',
-    targetKind: 'mapControls',
+    target: 'LAYERS',
+    targetKind: 'mapLayers',
     targetKey: 'map.layers',
   },
   {
@@ -146,28 +146,44 @@ export default function GuidedTourOverlay() {
         height: 62,
       };
     }
-    if (step.targetKind === 'mapSearch') {
+    if (step.targetKind === 'mapCanvas') {
       return {
-        left: Math.max(10, width - 76),
-        top: insets.top + 360,
-        width: 64,
-        height: 56,
+        left: 16,
+        top: insets.top + 110,
+        width: width - 32,
+        height: Math.min(260, height * 0.34),
       };
     }
-    if (step.targetKind === 'mapControls') {
+    if (step.targetKind === 'mapSearch') {
       return {
-        left: Math.max(10, width - 76),
-        top: insets.top + 82,
-        width: 64,
-        height: 214,
+        left: Math.max(10, width - 70),
+        top: insets.top + 332,
+        width: 58,
+        height: 58,
+      };
+    }
+    if (step.targetKind === 'mapLayers') {
+      return {
+        left: Math.max(10, width - 70),
+        top: insets.top + 462,
+        width: 58,
+        height: 58,
       };
     }
     if (step.targetKind === 'mapOffline') {
       return {
-        left: Math.max(10, width - 78),
-        top: Math.max(insets.top + 142, height - insets.bottom - 354),
-        width: 66,
-        height: 72,
+        left: Math.max(10, width - 70),
+        top: insets.top + 410,
+        width: 58,
+        height: 58,
+      };
+    }
+    if (step.targetKind === 'mapQuick') {
+      return {
+        left: 12,
+        top: Math.max(insets.top + 300, height - insets.bottom - 205),
+        width: 86,
+        height: 106,
       };
     }
     return {
@@ -244,7 +260,7 @@ export default function GuidedTourOverlay() {
 
   const pulseScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] });
   const pulseOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.45, 0.9] });
-  const pad = 8;
+  const pad = step.targetKind === 'mapCanvas' ? 4 : 8;
   const spotlight = {
     left: Math.max(6, target.left - pad),
     top: Math.max(insets.top + 4, target.top - pad),
@@ -274,11 +290,9 @@ export default function GuidedTourOverlay() {
         <TouchableOpacity
           activeOpacity={0.86}
           onPress={next}
-          style={[s.targetTouch, { left: target.left, top: target.top, width: target.width, height: target.height }]}
+          style={[s.targetTouch, { left: spotlight.left, top: spotlight.top, width: spotlight.width, height: spotlight.height }]}
         >
-          <Animated.View style={[s.focusRing, { transform: [{ scale: pulseScale }], opacity: pulseOpacity }]}>
-            <Ionicons name={step.icon as any} size={22} color={C.orange} />
-          </Animated.View>
+          <Animated.View style={[s.focusRing, { transform: [{ scale: pulseScale }], opacity: pulseOpacity }]} />
         </TouchableOpacity>
         <View style={[s.focusLabel, { left: labelLeft, top: labelTop }]}>
           <Text style={s.focusText}>{step.target}</Text>
@@ -341,12 +355,12 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   dimBlock: {
     position: 'absolute',
-    backgroundColor: 'rgba(0,0,0,0.76)',
+    backgroundColor: 'rgba(5,10,15,0.78)',
   },
   spotlight: {
     position: 'absolute',
-    borderRadius: 22,
-    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.26)',
     borderWidth: 2,
     borderColor: C.orange,
     shadowColor: C.orange,
@@ -361,10 +375,11 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     borderRadius: 18,
   },
   focusRing: {
-    width: 54, height: 54, borderRadius: 27,
+    width: '100%', height: '100%',
+    borderRadius: 18,
     alignItems: 'center', justifyContent: 'center',
-    borderWidth: 2, borderColor: C.orange,
-    backgroundColor: C.s1,
+    borderWidth: 1.5, borderColor: C.orange + 'aa',
+    backgroundColor: 'transparent',
   },
   focusLabel: {
     position: 'absolute',

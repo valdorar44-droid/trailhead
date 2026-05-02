@@ -81,6 +81,8 @@ CREDIT_PACKAGES = {
 }
 
 SIGNUP_BONUS       = 50
+REFERRAL_BONUS     = 20
+COMMUNITY_PIN_CREDIT = 5
 DAILY_REPORT_LIMIT = 8     # max reports per user per day
 DAILY_REPORT_CREDITS_CAP = 50   # max credits/day from reports
 REPORT_CREDIT_BASE = 5     # credits for a plain report
@@ -344,7 +346,7 @@ def _grant_signup_rewards(user: dict) -> None:
     if int(user.get("credits") or 0) == 0:
         add_credits(user["id"], SIGNUP_BONUS, "Welcome bonus")
         if user.get("referred_by"):
-            add_credits(user["referred_by"], 20, f"Referral - {user.get('username', 'new user')} signed up")
+            add_credits(user["referred_by"], REFERRAL_BONUS, f"Referral - {user.get('username', 'new user')} signed up")
 
 def _require_admin(user: dict = Depends(_current_user)) -> dict:
     if not user.get("is_admin"):
@@ -1926,7 +1928,7 @@ async def submit_pin(body: PinRequest, user: dict = Depends(_current_user)):
     add_community_pin(body.lat, body.lng, name, pin_type,
                       (body.description or "").strip()[:500], (body.land_type or "").strip()[:80],
                       user_id=user["id"], details=clean_details)
-    credits_earned = 0 if pin_type == "gpx_import" else 5
+    credits_earned = 0 if pin_type == "gpx_import" else COMMUNITY_PIN_CREDIT
     if credits_earned:
         add_credits(user["id"], credits_earned, f"Community pin: {name}")
     return {"status": "ok", "credits_earned": credits_earned}

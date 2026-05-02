@@ -6,6 +6,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSubscription, PRODUCT_IDS, priceLine } from '@/lib/useSubscription';
 import { useTheme, mono } from '@/lib/design';
+import { CREDIT_REWARDS } from '@/lib/credits';
 
 const TERMS_URL   = 'https://trailhead-production-2049.up.railway.app/terms';
 const PRIVACY_URL = 'https://trailhead-production-2049.up.railway.app/privacy';
@@ -19,11 +20,11 @@ interface Props {
 }
 
 const EARN_ITEMS = [
-  { icon: 'trail-sign-outline', label: 'Submit a road condition report', credits: '+10 credits' },
-  { icon: 'bonfire-outline', label: 'Report a campsite condition', credits: '+10 credits' },
-  { icon: 'checkmark-circle-outline', label: "Confirm another user's report", credits: '+1 credit' },
-  { icon: 'camera-outline', label: 'Add a photo to your report', credits: '+5 bonus' },
-  { icon: 'link-outline', label: 'Refer a friend who signs up', credits: '+50 credits' },
+  { icon: 'trail-sign-outline', label: 'Submit a road condition report', credits: `+${CREDIT_REWARDS.communityReport} credits` },
+  { icon: 'bonfire-outline', label: 'Add a camp field report', credits: `+${CREDIT_REWARDS.fieldReport} credits` },
+  { icon: 'camera-outline', label: 'Add a report photo', credits: `+${CREDIT_REWARDS.reportPhotoBonus} bonus` },
+  { icon: 'checkmark-circle-outline', label: "Confirm another user's report", credits: `+${CREDIT_REWARDS.confirmReport} credit` },
+  { icon: 'link-outline', label: 'Refer a friend who signs up', credits: `+${CREDIT_REWARDS.referral} credits` },
 ] as const;
 
 export default function PaywallModal({ visible, code, message, onClose, onPlanActivated }: Props) {

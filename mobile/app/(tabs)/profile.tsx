@@ -19,6 +19,7 @@ import TourTarget from '@/components/TourTarget';
 import { freeTrialLabel, useSubscription } from '@/lib/useSubscription';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 import { getOfflineTripIndex, loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
+import { CREDIT_REWARDS } from '@/lib/credits';
 
 type ChecklistItem = { id: string; label: string; done: boolean };
 type ChecklistSection = { title: string; emoji: string; items: ChecklistItem[] };
@@ -202,7 +203,7 @@ export default function ProfileScreen() {
       const res = await api.register(cleanEmail, cleanUsername, password, refCode.trim());
       if (res.token && res.user) {
         setAuth(res.token, res.user);
-        transitionToMain(`Welcome to Trailhead, ${res.user.username}! 50 credits added.`);
+        transitionToMain(`Welcome to Trailhead, ${res.user.username}! ${CREDIT_REWARDS.signup} credits added.`);
         return;
       }
       setLoading(false);
@@ -517,7 +518,7 @@ export default function ProfileScreen() {
             <Text style={s.authHeading}>Create account</Text>
             <View style={s.signupPerk}>
               <Ionicons name="flash" size={14} color={C.orange} />
-              <Text style={s.signupPerkText}>50 free credits on signup + earn more by contributing to the map</Text>
+              <Text style={s.signupPerkText}>{CREDIT_REWARDS.signup} free credits on signup + earn more by contributing to the map</Text>
             </View>
             <View style={s.authFields}>
               <TextInput style={s.input} placeholder="Email" placeholderTextColor={C.text3}
@@ -1277,7 +1278,7 @@ export default function ProfileScreen() {
             <Text style={s.referralTitle}>Refer Friends</Text>
           </View>
           <Text style={s.referralDesc}>
-            Share your code — +20 credits when a friend signs up (both of you get it).
+            Share your code — +{CREDIT_REWARDS.referral} credits when a friend signs up.
           </Text>
           <View style={s.codeBox}>
             <Text style={s.codeText}>{user?.referral_code ?? '...'}</Text>
@@ -1292,15 +1293,17 @@ export default function ProfileScreen() {
         <View style={s.earnCard}>
           <Text style={s.sectionLabel}>HOW TO EARN CREDITS</Text>
           {[
-            ['+75', 'Signup welcome bonus (one-time)'],
-            ['+5',  'Submit a community report (max 8/day)'],
-            ['+10', 'Report with photo'],
-            ['+2',  'Report confirmed by another user'],
-            ['+5',  'Add a community pin'],
-            ['+5',  'Import or add a community pin'],
-            ['+20', 'Refer a friend who signs up'],
-            ['+15', '3-day reporting streak bonus'],
-            ['+30', '7-day streak bonus'],
+            [`+${CREDIT_REWARDS.signup}`, 'Signup welcome bonus (after email verification)'],
+            [`+${CREDIT_REWARDS.communityReport}`,  'Submit a community report (max 8/day)'],
+            [`+${CREDIT_REWARDS.reportPhotoBonus}`, 'Add a photo to a report'],
+            [`+${CREDIT_REWARDS.confirmReport}`,  'Confirm another user report'],
+            [`+${CREDIT_REWARDS.communityPin}`,  'Add a manual community pin'],
+            [`+${CREDIT_REWARDS.gpxImport}`,  'Import GPX pins (unverified)'],
+            [`+${CREDIT_REWARDS.referral}`, 'Refer a friend who signs up'],
+            [`+${CREDIT_REWARDS.campEditSuggestion}`, 'Suggest a camp profile edit'],
+            [`+${CREDIT_REWARDS.streak3}`, '3-day reporting streak bonus'],
+            [`+${CREDIT_REWARDS.streak7}`, '7-day reporting streak bonus'],
+            [`+${CREDIT_REWARDS.streak30}`, '30-day reporting streak bonus'],
           ].map(([amount, action]) => (
             <View key={action} style={s.earnRow}>
               <Text style={s.earnAmount}>{amount}</Text>

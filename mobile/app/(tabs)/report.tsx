@@ -14,6 +14,7 @@ import TourTarget from '@/components/TourTarget';
 import { api, Report, LeaderboardEntry } from '@/lib/api';
 import { useStore } from '@/lib/store';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
+import { CREDIT_REWARDS } from '@/lib/credits';
 
 // ── Alert notification helpers ────────────────────────────────────────────────
 // Seen IDs: { [reportId]: expiresAt (unix sec) } — auto-prune on load
@@ -231,7 +232,7 @@ export default function ReportScreen() {
         description: fullDesc, severity,
         photo_data: photoBase64 ?? undefined,
       });
-      setCreditsGained(res.credits_earned + (res.streak_bonus ?? 0));
+      setCreditsGained(res.credits_earned);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setSubmitted(true);
       // Push report to shared store so map tab shows the pin immediately
@@ -382,7 +383,7 @@ export default function ReportScreen() {
 
               <View style={s.photoSection}>
                 <Text style={s.sectionLabel}>
-                  PHOTO <Text style={s.bonusBadge}>+10 BONUS</Text>
+                  PHOTO <Text style={s.bonusBadge}>+{CREDIT_REWARDS.reportPhotoBonus} BONUS</Text>
                 </Text>
                 <View style={s.photoRow}>
                   <TouchableOpacity style={s.photoBtn} onPress={takePhoto}>
@@ -435,7 +436,7 @@ export default function ReportScreen() {
               <View style={s.earnRow}>
                 <Ionicons name="flash" size={14} color={C.orange} />
                 <Text style={s.earnText}>
-                  +{photoBase64 ? 20 : 10} credits · active ~{selectedType.ttl}
+                  +{photoBase64 ? CREDIT_REWARDS.reportWithPhotoTotal : CREDIT_REWARDS.communityReport} credits · active ~{selectedType.ttl}
                 </Text>
               </View>
 

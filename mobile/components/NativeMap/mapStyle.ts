@@ -36,7 +36,7 @@ export function buildMapStyle(mode: MapMode, mapboxToken: string, localTiles = f
       tiles: [tileUrl],
       minzoom: 0,
       maxzoom: 15,
-      // No bounds set when local — state files only cover their state, but we let MapLibre
+      // No bounds set when local — region files only cover their area, but we let MapLibre
       // request all tiles and the local server returns 204 for anything not in the file.
       ...(localTiles ? {} : { bounds: [-125.0, 24.5, -66.5, 49.5] }),
       attribution: '© OpenStreetMap',

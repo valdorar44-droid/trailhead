@@ -2246,9 +2246,9 @@ async def offline_authorize(body: OfflineAuthorizeRequest, user: dict = Depends(
     )
     if not result.get("authorized"):
         if asset_type == "state_route":
-            message = f"{label} offline routing costs {cost} credits or Explorer. State map downloads are free."
+            message = f"{label} offline routing costs {cost} credits or Explorer. Region map downloads are free."
         elif asset_type == "trip_corridor":
-            message = f"{label} trip corridor download costs {cost} credits or Explorer. State map downloads are free."
+            message = f"{label} trip corridor download costs {cost} credits or Explorer. Region map downloads are free."
         else:
             message = f"{label} offline download costs {cost} credits or Explorer."
         raise HTTPException(402, detail={

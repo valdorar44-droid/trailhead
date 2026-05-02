@@ -347,8 +347,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const [tileDebug,    setTileDebug]    = useState('Checking maps');
   const [tileSession,  setTileSession]  = useState(() => Date.now());
   const onlineTilesRef  = useRef(true);                // true = prefer live CDN tiles
-  const loadedStateRef  = useRef<string | null>(null); // path of currently-active state file
-  const switchingRef    = useRef(false);               // prevent concurrent state switches
+  const loadedStateRef  = useRef<string | null>(null); // path of currently-active offline region file
+  const switchingRef    = useRef(false);               // prevent concurrent region switches
   const isRoutingRef    = useRef(false);               // route fetch in progress — block CDN fallback
   const offRouteStreakRef = useRef(0);
   const offRouteWarnAtRef = useRef(0);
@@ -356,7 +356,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const lastFlyToRef    = useRef(0);                   // timestamp of last flyTo — debounce CDN fallback
   const routeRequestRef = useRef(0);                   // cancels stale async route results
 
-  // Returns all downloaded state files with their bounds, or null for CONUS.
+  // Returns all downloaded region files with their bounds, or null for CONUS.
   // Skips files under 25% of estimated size (obviously truncated downloads).
   const getDownloadedFiles = useCallback(async () => {
     const conusPath = await firstExistingPath(offlinePathCandidates('conus', `${OFFLINE_DIR}conus.pmtiles`));
@@ -374,7 +374,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     return result;
   }, []);
 
-  // Switch the active state file. Idempotent — no-ops if already the active file.
+  // Switch the active region file. Idempotent — no-ops if already the active file.
   const switchFile = useCallback(async (path: string, sizeMb: number) => {
     if (loadedStateRef.current === path || switchingRef.current) return;
     if (!tileServer?.switchState) { setTileDebug('switch unavailable'); return; }
@@ -429,9 +429,9 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     const covers = (bounds: { n: number; s: number; e: number; w: number }, p: { lat: number; lng: number }) =>
       p.lat >= bounds.s && p.lat <= bounds.n && p.lng >= bounds.w && p.lng <= bounds.e;
 
-    // For tap-anywhere nav, the destination state is the file most likely to
+    // For tap-anywhere nav, the destination region is the file most likely to
     // contain the visible road graph. If both endpoints are in one downloaded
-    // state, prefer that. Otherwise use the destination file instead of a stale
+    // region, prefer that. Otherwise use the destination file instead of a stale
     // GPS/viewport-selected file.
     const both = files.find(f => covers(f.bounds, start) && covers(f.bounds, dest));
     const destMatch = files.find(f => covers(f.bounds, dest));
@@ -440,7 +440,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     if (chosen) await switchFile(chosen.path, chosen.sizeMb);
   }, [getDownloadedFiles, switchFile]);
 
-  // Start server, load base file, then load best state file.
+  // Start server, load base file, then load best offline region file.
   useEffect(() => {
     if (!tileServer) { setTileDebug(`no module: ${tileServerRequireError}`); return; }
 
@@ -451,7 +451,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       } catch (e: any) {
         setTileDebug(`srv err: ${e?.message ?? '?'}`); return;
       }
-      // localTiles stays false until a state file is loaded — keeps online CDN mode working
+      // localTiles stays false until a region file is loaded — keeps online CDN mode working
 
       // 2. Load base file if available; silently download if missing
       await FileSystem.makeDirectoryAsync(OFFLINE_DIR, { intermediates: true }).catch(() => {});
@@ -490,7 +490,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         return;
       }
 
-      // 4. Offline: load best state file (GPS-matched, or first available)
+      // 4. Offline: load best region file (GPS-matched, or first available)
       const files = await getDownloadedFiles();
       if (!files) {
         const found = await firstExistingPath(offlinePathCandidates('conus', `${OFFLINE_DIR}conus.pmtiles`));
@@ -499,7 +499,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       }
       if (files.length === 0) {
         const partialConus = await firstExistingPath(offlinePathCandidates('conus', `${OFFLINE_DIR}conus.pmtiles`));
-        setTileDebug(partialConus ? 'State maps not ready' : 'No state maps saved');
+        setTileDebug(partialConus ? 'Saved maps not ready' : 'No saved maps');
         return;
       }
 
@@ -515,7 +515,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           if (match) best = match;
         }
       } catch {}
-      setTileDebug(`${files.length} state map${files.length === 1 ? '' : 's'} saved`);
+      setTileDebug(`${files.length} region map${files.length === 1 ? '' : 's'} saved`);
       await switchFile(best.path, best.sizeMb);
     })();
 
@@ -789,8 +789,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     onBoundsChange({ n, s, e, w, zoom: zoomLevel || 10 });
     if (showMvum) fetchMvum({ n, s, e, w });
 
-    // Auto-switch state file as map pans only when the live CDN is unreachable.
-    // While online, always keep live tiles active even if a downloaded state covers
+    // Auto-switch region file as map pans only when the live CDN is unreachable.
+    // While online, always keep live tiles active even if a downloaded region covers
     // the viewport; otherwise downloaded packs hide online detail outside the pack.
     if (tileServer) {
       const centerLat = (n + s) / 2;
@@ -821,7 +821,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         } else if (localTiles) {
           // Stay on local tiles while offline testing. Falling back to CDN here
           // produces a blank/error map in no-service conditions.
-          setTileDebug('Outside saved states');
+          setTileDebug('Outside saved maps');
         }
       })();
     }
@@ -1311,11 +1311,11 @@ function stateDisplayName(fileName: string): string {
 
 function compactMapStatus(status: string): string {
   if (/outside saved/i.test(status)) return 'Outside saved';
-  if (/no state maps/i.test(status)) return 'No saved maps';
+  if (/no (state|saved) maps/i.test(status)) return 'No saved maps';
   if (/not ready/i.test(status)) return 'Maps pending';
   const ready = status.match(/^(.+?) maps (ready|loaded|unavailable)$/i);
   if (ready?.[1]) return ready[1];
-  const saved = status.match(/^(\d+) state maps? saved$/i);
+  const saved = status.match(/^(\d+) (state|region) maps? saved$/i);
   if (saved?.[1]) return `${saved[1]} saved`;
   return 'Saved maps';
 }

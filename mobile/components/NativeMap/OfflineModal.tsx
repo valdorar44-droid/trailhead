@@ -6,7 +6,7 @@
  *      Fast: 1 GB in ~2 min on wifi. Uses expo-file-system resumable download.
  *      Full offline tile serving requires the next binary build (local tile server).
  *   2. MLN PACK       — per-tile download via MapLibre offline manager.
- *      Best for states / trip corridors (small enough to complete quickly).
+ *      Best for regions / trip corridors (small enough to complete quickly).
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -122,12 +122,13 @@ function ReadinessRow({ icon, label, ready }: { icon: keyof typeof Ionicons.glyp
 }
 
 function StateReadinessPanel({
-  mapReady, routeReady, mapBusy, routeBusy, onDownloadMissing,
+  mapReady, routeReady, mapBusy, routeBusy, available, onDownloadMissing,
 }: {
   mapReady: boolean;
   routeReady: boolean;
   mapBusy: boolean;
   routeBusy: boolean;
+  available: boolean;
   onDownloadMissing: () => void;
 }) {
   const C = useTheme();
@@ -138,13 +139,15 @@ function StateReadinessPanel({
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
         <View style={{ flex: 1 }}>
           <Text style={{ color: ready ? C.green : C.text, fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 }}>
-            {ready ? 'STATE OFFLINE READY' : 'STATE NEEDS DOWNLOADS'}
+            {ready ? 'REGION OFFLINE READY' : available ? 'REGION NEEDS DOWNLOADS' : 'REGION PACKS COMING SOON'}
           </Text>
           <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 3, lineHeight: 13 }}>
-            Map file draws roads/trails. Routing graph powers long offline route calculation.
+            {available
+              ? 'Map file draws roads/trails. Routing graph powers long offline route calculation.'
+              : 'Trailhead will enable download buttons after map and routing files are uploaded to R2.'}
           </Text>
         </View>
-        {!ready && (
+        {!ready && available && (
           <TouchableOpacity
             disabled={busy}
             onPress={onDownloadMissing}
@@ -157,8 +160,8 @@ function StateReadinessPanel({
         )}
       </View>
       <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
-        <ReadinessRow icon="map-outline" label={mapReady ? 'MAP ON DEVICE' : 'MAP MISSING'} ready={mapReady} />
-        <ReadinessRow icon="git-branch-outline" label={routeReady ? 'ROUTE ON DEVICE' : 'ROUTE MISSING'} ready={routeReady} />
+        <ReadinessRow icon="map-outline" label={mapReady ? 'MAP ON DEVICE' : available ? 'MAP MISSING' : 'MAP PLANNED'} ready={mapReady} />
+        <ReadinessRow icon="git-branch-outline" label={routeReady ? 'ROUTE ON DEVICE' : available ? 'ROUTE MISSING' : 'ROUTE PLANNED'} ready={routeReady} />
       </View>
     </View>
   );
@@ -398,6 +401,7 @@ export default function OfflineModal({
     getState, startDownload, pauseDownload, resumeDownload, deleteDownload, getTotalBytes,
     getRoutingState, startRoutingDownload, pauseRoutingDownload, resumeRoutingDownload,
     deleteRoutingDownload, getRoutingTotalBytes,
+    isFilePublished, isRoutingPublished,
   } = useOfflineFiles();
   const conusState      = getState('conus');
   const conusTotalBytes = getTotalBytes('conus');
@@ -407,7 +411,7 @@ export default function OfflineModal({
   const [packError,      setPackError]      = useState<string | null>(null);
   const [activePackName, setActivePackName] = useState<string | null>(null);
   const [packProgress,   setPackProgress]   = useState<PackProgress | null>(null);
-  const [activeTab,      setActiveTab]      = useState<'areas' | 'states'>('areas');
+  const [activeTab,      setActiveTab]      = useState<'areas' | 'regions'>('areas');
   const [selectedState,  setSelectedState]  = useState('ks');
   const [authorizing,    setAuthorizing]    = useState<string | null>(null);
 
@@ -464,7 +468,7 @@ export default function OfflineModal({
       await action();
     } catch (e: any) {
       if (e instanceof PaywallError) {
-        Alert.alert('Download locked', `${e.message}\n\nState maps are free. Routing packs, trip corridors, and full-US bulk downloads use credits or Explorer.`);
+        Alert.alert('Download locked', `${e.message}\n\nRegion maps are free. Routing packs, trip corridors, and full-US bulk downloads use credits or Explorer.`);
       } else {
         Alert.alert('Download unavailable', e?.message ?? 'Could not authorize this download.');
       }
@@ -498,14 +502,14 @@ export default function OfflineModal({
 
           {/* ── Tabs ─────────────────────────────────────────────────────── */}
           <View style={s.tabs}>
-            {(['areas', 'states'] as const).map(tab => (
+            {(['areas', 'regions'] as const).map(tab => (
               <TouchableOpacity
                 key={tab}
                 style={[s.tab, activeTab === tab && s.tabActive]}
                 onPress={() => setActiveTab(tab)}
               >
                 <Text style={[s.tabText, activeTab === tab && s.tabTextActive]}>
-                  {tab === 'areas' ? 'LARGE AREAS' : 'US STATES'}
+                  {tab === 'areas' ? 'LARGE AREAS' : 'REGIONS'}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -555,7 +559,7 @@ export default function OfflineModal({
                   <Section label="CONTINENTAL US — FILE DOWNLOAD" />
                   <Text style={s.hint}>
                     Single-stream download — 100× faster than tile-by-tile.
-                    State map downloads are free. Full-US bulk downloads, routing packs, and trip corridors use credits or Explorer.
+                    Region map downloads are free. Full-US bulk downloads, routing packs, and trip corridors use credits or Explorer.
                   </Text>
                   <ConusCard
                     state={conusState}
@@ -633,13 +637,13 @@ export default function OfflineModal({
                 </>
               )}
 
-              {/* ══════════════════ STATES TAB ══════════════════════════ */}
-              {activeTab === 'states' && (
+              {/* ══════════════════ REGIONS TAB ═════════════════════════ */}
+              {activeTab === 'regions' && (
                 <>
-                  <Section label="US STATES — MAP + ROUTING PACKS" />
+                  <Section label="REGIONS — MAP + ROUTING PACKS" />
                   <Text style={s.hint}>
-                    Pick a state, then download the map file and its routing graph separately. Maps render roads/trails; routing packs are for offline turn-by-turn once the local Valhalla engine is enabled.
-                    State maps are free. Free accounts include one routing pack, then credits or Explorer unlock more.
+                    Pick a region, then download the map file and routing graph separately. U.S. states are live now; Canada and Mexico unlock automatically when their R2 packs are uploaded.
+                    Region maps are free. Free accounts include one routing pack, then credits or Explorer unlock more.
                   </Text>
 
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
@@ -648,20 +652,25 @@ export default function OfflineModal({
                       .map(([id, region]) => {
                         const mapDone = getState(id).status === 'complete';
                         const routeDone = getRoutingState(id).status === 'complete';
+                        const mapPublished = isFilePublished(id);
+                        const routePublished = isRoutingPublished(id);
+                        const available = mapPublished && routePublished;
                         const selected = selectedState === id;
+                        const code = id === 'canada' ? 'CAN' : id === 'mexico' ? 'MEX' : id.toUpperCase();
                         return (
                           <TouchableOpacity
                             key={id}
                             onPress={() => setSelectedState(id)}
                             style={[
                               s.statePick,
+                              !available && { opacity: 0.72 },
                               selected && { borderColor: C.orange, backgroundColor: C.orangeGlow },
                             ]}
                           >
-                            <Text style={[s.statePickCode, selected && { color: C.orange }]}>{id.toUpperCase()}</Text>
+                            <Text style={[s.statePickCode, selected && { color: C.orange }]}>{code}</Text>
                             <Text style={s.statePickName} numberOfLines={1}>{region.name}</Text>
                             <Text style={{ color: mapDone && routeDone ? C.green : C.text3, fontSize: 8, fontFamily: mono, marginTop: 3 }}>
-                              {mapDone ? 'MAP' : '--'} · {routeDone ? 'ROUTE' : '--'}
+                              {!available ? 'PLANNED' : `${mapDone ? 'MAP' : '--'} · ${routeDone ? 'ROUTE' : '--'}`}
                             </Text>
                           </TouchableOpacity>
                         );
@@ -673,8 +682,12 @@ export default function OfflineModal({
                     const routingRegion = ROUTING_REGIONS[selectedState as keyof typeof ROUTING_REGIONS];
                     const mapState = getState(selectedState);
                     const routingState = getRoutingState(selectedState);
+                    const mapPublished = isFilePublished(selectedState);
+                    const routePublished = isRoutingPublished(selectedState);
+                    const regionAvailable = mapPublished && routePublished;
                     const mapBusy = mapState.status === 'downloading' || mapState.status === 'paused';
                     const routeBusy = routingState.status === 'downloading' || routingState.status === 'paused';
+                    const selectedCode = selectedState === 'canada' ? 'CAN' : selectedState === 'mexico' ? 'MEX' : selectedState.toUpperCase();
                     return (
                       <>
                         <StateReadinessPanel
@@ -682,6 +695,7 @@ export default function OfflineModal({
                           routeReady={routingState.status === 'complete'}
                           mapBusy={mapBusy}
                           routeBusy={routeBusy}
+                          available={regionAvailable}
                           onDownloadMissing={() => {
                             const label = FILE_REGIONS[selectedState as keyof typeof FILE_REGIONS]?.name ?? selectedState.toUpperCase();
                             if (mapState.status === 'idle' || mapState.status === 'error') {
@@ -694,18 +708,45 @@ export default function OfflineModal({
                             if (routingState.status === 'paused') resumeRoutingDownload(selectedState);
                           }}
                         />
+                        {!regionAvailable ? (
+                          <View style={{ backgroundColor: C.s1, borderRadius: 10, borderWidth: 1, borderColor: C.border, padding: 14 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                              <View style={{ width: 40, height: 40, borderRadius: 8, backgroundColor: C.s2, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.orange + '35' }}>
+                                <Text style={{ color: C.orange, fontSize: 12, fontFamily: mono, fontWeight: '900' }}>{selectedCode}</Text>
+                              </View>
+                              <View style={{ flex: 1 }}>
+                                <Text style={{ color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '900' }}>
+                                  {mapRegion.name.toUpperCase()} PACKS ARE BEING PREPARED
+                                </Text>
+                                <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 3, lineHeight: 13 }}>
+                                  Download buttons stay locked until both the PMTiles map and Valhalla route pack are present in the R2 manifests.
+                                </Text>
+                              </View>
+                            </View>
+                            <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
+                              <StatusChip label={mapPublished ? 'MAP READY' : `MAP ~${mapRegion.estimatedGb} GB`} color={mapPublished ? C.green : C.text3} />
+                              <StatusChip label={routePublished ? 'ROUTE READY' : `ROUTE ~${routingRegion?.estimatedGb ?? 0} GB`} color={routePublished ? C.green : C.text3} />
+                            </View>
+                            {'storageNote' in mapRegion && (
+                              <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 10 }}>
+                                {(mapRegion as any).storageNote}
+                              </Text>
+                            )}
+                          </View>
+                        ) : (
+                          <>
                         <Section label={`${mapRegion.name.toUpperCase()} — MAP DETAILS`} />
                         <ConusCard
                           state={mapState}
                           totalBytes={getTotalBytes(selectedState)}
                           region={mapRegion as any}
-                          code={selectedState.toUpperCase()}
+                          code={selectedCode}
                           onStart={() => authorizeAndRun(`map:${selectedState}`, 'state_map', selectedState, `${mapRegion.name} map`, () => startDownload(selectedState))}
                           onPause={() => pauseDownload(selectedState)}
                           onResume={() => resumeDownload(selectedState)}
                           onDelete={() => deleteDownload(selectedState)}
                           completeTitle="✓ MAP FILE ON DEVICE"
-                          completeText="Roads, trails, towns, parks, and labels are available from the downloaded state PMTiles file."
+                          completeText="Roads, trails, towns, parks, and labels are available from the downloaded region PMTiles file."
                         />
 
                         <Section label={`${mapRegion.name.toUpperCase()} — ROUTING DETAILS`} />
@@ -713,7 +754,7 @@ export default function OfflineModal({
                           state={routingState}
                           totalBytes={getRoutingTotalBytes(selectedState)}
                           region={routingRegion as any}
-                          code={selectedState.toUpperCase()}
+                          code={selectedCode}
                           onStart={() => authorizeAndRun(`route:${selectedState}`, 'state_route', selectedState, `${mapRegion.name} routing`, () => startRoutingDownload(selectedState))}
                           onPause={() => pauseRoutingDownload(selectedState)}
                           onResume={() => resumeRoutingDownload(selectedState)}
@@ -721,6 +762,8 @@ export default function OfflineModal({
                           completeTitle="✓ ROUTING GRAPH ON DEVICE"
                           completeText="Valhalla graph pack is downloaded. Long offline routes can use this state without needing signal."
                         />
+                          </>
+                        )}
                       </>
                     );
                   })()}

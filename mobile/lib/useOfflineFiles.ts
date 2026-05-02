@@ -81,6 +81,28 @@ export const FILE_REGIONS = {
   mi: { id:'mi', name:'Michigan',       url:`${BASE}/api/download/mi.pmtiles`, localPath:`${OFFLINE_DIR}mi.pmtiles`, estimatedGb:0.5,  description:'Roads, trails, parks · z0–z15', bounds:{n:48.3,s:41.7,e:-82.4,w:-90.4} },
   oh: { id:'oh', name:'Ohio',           url:`${BASE}/api/download/oh.pmtiles`, localPath:`${OFFLINE_DIR}oh.pmtiles`, estimatedGb:0.3,  description:'Roads, trails, parks · z0–z15', bounds:{n:42.0,s:38.4,e:-80.5,w:-84.8} },
   wi: { id:'wi', name:'Wisconsin',      url:`${BASE}/api/download/wi.pmtiles`, localPath:`${OFFLINE_DIR}wi.pmtiles`, estimatedGb:0.3,  description:'Roads, trails, parks · z0–z15', bounds:{n:47.1,s:42.5,e:-86.2,w:-92.9} },
+  // ── International region placeholders ─────────────────────────────────────
+  // These become live automatically once R2 manifests advertise the files.
+  canada: {
+    id: 'canada', name: 'Canada',
+    url: `${BASE}/api/download/canada.pmtiles`,
+    localPath: `${OFFLINE_DIR}canada.pmtiles`,
+    estimatedGb: 9.0,
+    description: 'Planned country pack · roads, trails, parks · province packs next',
+    bounds: { n: 83.2, s: 41.7, e: -52.6, w: -141.1 },
+    comingSoon: true,
+    storageNote: '~18-22 GB R2 headroom with routing',
+  },
+  mexico: {
+    id: 'mexico', name: 'Mexico',
+    url: `${BASE}/api/download/mexico.pmtiles`,
+    localPath: `${OFFLINE_DIR}mexico.pmtiles`,
+    estimatedGb: 3.0,
+    description: 'Planned country pack · roads, towns, trails, parks',
+    bounds: { n: 32.8, s: 14.5, e: -86.7, w: -118.6 },
+    comingSoon: true,
+    storageNote: '~4-6 GB R2 headroom with routing',
+  },
 } as const;
 
 export type FileRegionId = keyof typeof FILE_REGIONS;
@@ -99,6 +121,8 @@ export const ROUTING_PACK_BYTES: Record<string, number> = {
   ny: 701071360, pa: 678471680, ri: 50247680, vt: 60221440,
   ia: 276623360, il: 753500160, in: 478351360, mi: 799098880,
   oh: 786380800, wi: 485171200,
+  canada: 7 * 1_073_741_824,
+  mexico: 2 * 1_073_741_824,
 };
 
 export const ROUTING_REGIONS = Object.fromEntries(
@@ -124,6 +148,11 @@ export const ROUTING_REGIONS = Object.fromEntries(
 }>;
 
 export type RoutingRegionId = keyof typeof ROUTING_REGIONS;
+
+export function isPlannedOfflineRegion(id: string): boolean {
+  const region = FILE_REGIONS[id as FileRegionId] as any;
+  return Boolean(region?.comingSoon);
+}
 
 export interface FileDownloadState {
   status:          'idle' | 'downloading' | 'paused' | 'complete' | 'error';
@@ -594,10 +623,23 @@ export function useOfflineFiles() {
     return region ? region.estimatedGb * 1_073_741_824 : 0;
   }, [routingManifestSizes]);
 
+  const isFilePublished = useCallback((id: string): boolean => {
+    const region = FILE_REGIONS[id as FileRegionId] as any;
+    if (!region) return false;
+    return !region.comingSoon || Boolean(manifestSizes[id]);
+  }, [manifestSizes]);
+
+  const isRoutingPublished = useCallback((id: string): boolean => {
+    const region = FILE_REGIONS[id as FileRegionId] as any;
+    if (!region || id === 'conus') return false;
+    return !region.comingSoon || Boolean(routingManifestSizes[id]);
+  }, [routingManifestSizes]);
+
   return {
     startDownload, pauseDownload, resumeDownload, deleteDownload,
     startRoutingDownload, pauseRoutingDownload, resumeRoutingDownload, deleteRoutingDownload,
     getState, getRoutingState, isFileAvailable, isRoutingAvailable,
+    isFilePublished, isRoutingPublished,
     getTotalBytes, getRoutingTotalBytes, states, routingStates,
   };
 }

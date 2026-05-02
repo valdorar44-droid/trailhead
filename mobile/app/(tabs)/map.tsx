@@ -5327,9 +5327,9 @@ function MapScreen() {
 
             <Text style={s.layerSectionHead}>CONDITIONS</Text>
             {([
-              { key: 'fire',  label: 'Active Wildfires',   sub: 'Live perimeter feed. Requires signal.',       icon: 'flame-outline', val: layerFire,  set: setLayerFire,  color: '#ef4444' },
+              { key: 'fire',  label: 'Active Wildfires',   sub: 'WFIGS public fire perimeters. Requires signal.', icon: 'flame-outline', val: layerFire,  set: setLayerFire,  color: '#ef4444' },
               { key: 'ava',   label: 'Avalanche Zones',    sub: 'Avalanche.org danger zones. Requires signal.', icon: 'snow-outline',  val: layerAva,   set: setLayerAva,   color: '#3b82f6' },
-              { key: 'radar', label: 'Rain Radar',         sub: 'RainViewer precipitation raster. Requires signal.', icon: 'rainy-outline', val: layerRadar, set: setLayerRadar, color: '#06b6d4' },
+              { key: 'radar', label: 'Rain Radar',         sub: 'RainViewer latest radar raster. Requires signal.', icon: 'rainy-outline', val: layerRadar, set: setLayerRadar, color: '#06b6d4' },
             ] as const).map(l => (
               <TouchableOpacity key={l.key} style={s.layerRow} onPress={() => { const nv = !l.val; l.set(nv); toggleDataLayer(l.key, nv); }}>
                 <View style={[s.layerRowIcon, l.val && { backgroundColor: l.color }]}>

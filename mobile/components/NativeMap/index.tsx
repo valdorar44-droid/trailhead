@@ -299,8 +299,14 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
 
   useEffect(() => {
     if (!showFire) { setFireData(null); return; }
-    fetch('https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/Current_WildlandFire_Perimeters/FeatureServer/0/query?where=1%3D1&outFields=IncidentName,GISAcres&returnGeometry=true&f=geojson&resultRecordCount=500')
-      .then(r => r.json()).then(setFireData).catch(() => {});
+    const url = 'https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Interagency_Perimeters_Current/FeatureServer/0/query'
+      + '?where=1%3D1'
+      + '&outFields=poly_IncidentName,poly_GISAcres,attr_IncidentSize,attr_PercentContained'
+      + '&returnGeometry=true&f=geojson&resultRecordCount=500';
+    fetch(url)
+      .then(r => r.json())
+      .then(d => setFireData(d?.features ? d : null))
+      .catch(() => setFireData(null));
   }, [showFire]);
 
   useEffect(() => {
@@ -316,10 +322,11 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       .then(d => {
         const frames = d?.radar?.past ?? [];
         if (frames.length > 0) {
-          const ts = frames[frames.length - 1].time;
-          setRadarUrl(`https://tilecache.rainviewer.com/v2/radar/${ts}/256/{z}/{x}/{y}/2/1_1.png`);
+          const frame = frames[frames.length - 1];
+          const host = d?.host || 'https://tilecache.rainviewer.com';
+          setRadarUrl(`${host}${frame.path}/256/{z}/{x}/{y}/2/1_1.png`);
         }
-      }).catch(() => {});
+      }).catch(() => setRadarUrl(null));
   }, [showRadar]);
 
   // Compute initial camera position ONCE (lazy useState with no deps).

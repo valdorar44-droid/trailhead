@@ -5,7 +5,7 @@ Goal: make Trailhead feel like an overlanding app that also handles hiking and t
 ## OTA cleanup pass
 
 - Keep the main map controls lean.
-- Move Public Lands, USGS Trails/Topo, MVUM, weather, and condition overlays into the Map Layers drawer.
+- Move Public Lands, USGS Trails/Topo, MVUM, weather, and trusted condition overlays into the Map Layers drawer.
 - Do not use a separate Trail Mode button that duplicates adjacent trail/topo controls.
 - Do not auto-open the filter drawer when enabling trail-related layers.
 - Keep trail community pins available through normal filters.
@@ -43,3 +43,4 @@ Goal: make Trailhead feel like an overlanding app that also handles hiking and t
 - Add elevation profile, distance markers, off-route alerts, and track recording.
 - Add downloadable trail packs that live alongside state map/routing packs.
 - Consider community heat/activity signals after privacy rules are designed.
+- Add visible loading/error states for condition overlays so failed feeds do not look like silent no-op toggles.

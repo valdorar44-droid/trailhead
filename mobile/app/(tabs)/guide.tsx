@@ -8,7 +8,7 @@ import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
 import TourTarget from '@/components/TourTarget';
 import { useStore } from '@/lib/store';
-import { api } from '@/lib/api';
+import { api, PaywallError } from '@/lib/api';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 
 const WMO_ICON: Record<number, string> = {
@@ -32,8 +32,10 @@ export default function GuideScreen() {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
   const activeTrip = useStore(st => st.activeTrip);
+  const setActiveTrip = useStore(st => st.setActiveTrip);
   const [guide, setGuide] = useState<Record<string, string>>({});
   const [guideLoading, setGuideLoading] = useState(false);
+  const [guideError, setGuideError] = useState('');
   const [playing, setPlaying] = useState<string | null>(null);
   const [nearbyNarration, setNearbyNarration] = useState('');
   const [nearbyLoading, setNearbyLoading] = useState(false);
@@ -45,12 +47,15 @@ export default function GuideScreen() {
 
   useEffect(() => {
     if (!activeTrip) return;
+    setGuideError('');
     if (activeTrip.audio_guide) {
       setGuide(activeTrip.audio_guide);
     } else {
       setGuideLoading(true);
-      api.getAudioGuide(activeTrip.trip_id)
-        .then(setGuide).catch(() => {}).finally(() => setGuideLoading(false));
+      api.getAudioGuide(activeTrip.trip_id, false)
+        .then(setGuide)
+        .catch(() => setGuide({}))
+        .finally(() => setGuideLoading(false));
     }
     const wpsWithCoords = activeTrip.plan.waypoints.filter(w => w.lat && w.lng).slice(0, 6);
     if (wpsWithCoords.length > 0) {
@@ -67,6 +72,25 @@ export default function GuideScreen() {
       });
     }
   }, [activeTrip?.trip_id]);
+
+  async function generateGuide() {
+    if (!activeTrip || guideLoading) return;
+    setGuideError('');
+    setGuideLoading(true);
+    try {
+      const generated = await api.getAudioGuide(activeTrip.trip_id, true);
+      setGuide(generated);
+      setActiveTrip({ ...activeTrip, audio_guide: generated });
+    } catch (e: any) {
+      if (e instanceof PaywallError) {
+        setGuideError(e.message || 'Audio guide needs credits or an active plan.');
+      } else {
+        setGuideError('Could not generate the audio guide right now.');
+      }
+    } finally {
+      setGuideLoading(false);
+    }
+  }
 
   useEffect(() => {
     if (!autoPlay || !activeTrip) {
@@ -153,7 +177,7 @@ export default function GuideScreen() {
         </View>
         <TouchableOpacity
           style={[s.autoBtn, autoPlay && s.autoBtnOn]}
-          onPress={() => setAutoPlay(p => !p)}
+          onPress={() => Object.keys(guide).length > 0 && setAutoPlay(p => !p)}
         >
           <Ionicons name={autoPlay ? 'radio' : 'radio-outline'} size={14}
             color={autoPlay ? C.orange : C.text3} />
@@ -184,11 +208,27 @@ export default function GuideScreen() {
             {guideLoading && (
               <View style={s.loadRow}>
                 <ActivityIndicator color={C.orange} />
-                <Text style={s.loadText}>Generating audio guide with AI...</Text>
+                <Text style={s.loadText}>Checking audio guide...</Text>
+              </View>
+            )}
+            {!guideLoading && Object.keys(guide).length === 0 && (
+              <View style={s.guidePromptCard}>
+                <View style={s.guidePromptIcon}>
+                  <Ionicons name="mic-outline" size={22} color={C.orange} />
+                </View>
+                <Text style={s.guidePromptTitle}>Generate trip narrations</Text>
+                <Text style={s.guidePromptText}>
+                  Creates short spoken notes for each mapped stop. Cached guides are free to replay; generation uses credits unless you are on a plan.
+                </Text>
+                {!!guideError && <Text style={s.guideError}>{guideError}</Text>}
+                <TouchableOpacity style={s.generateBtn} onPress={generateGuide}>
+                  <Ionicons name="sparkles-outline" size={15} color="#fff" />
+                  <Text style={s.generateBtnText}>GENERATE GUIDE</Text>
+                </TouchableOpacity>
               </View>
             )}
 
-            {waypoints.map((wp, i) => {
+            {Object.keys(guide).length > 0 && waypoints.map((wp, i) => {
               const narration = guide[wp.name] ?? '';
               const isPlaying = playing === wp.name;
               return (
@@ -343,6 +383,31 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     padding: 16, backgroundColor: C.s2, borderRadius: 12, borderWidth: 1, borderColor: C.border,
   },
   loadText: { color: C.text2, fontSize: 13 },
+  guidePromptCard: {
+    backgroundColor: C.s2,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: C.border,
+    padding: 18,
+    alignItems: 'flex-start',
+  },
+  guidePromptIcon: {
+    width: 42, height: 42, borderRadius: 21,
+    backgroundColor: C.orangeGlow,
+    alignItems: 'center', justifyContent: 'center',
+    marginBottom: 12,
+  },
+  guidePromptTitle: { color: C.text, fontSize: 17, fontWeight: '900', marginBottom: 8 },
+  guidePromptText: { color: C.text2, fontSize: 13, lineHeight: 20, marginBottom: 14 },
+  guideError: { color: C.red, fontSize: 12, lineHeight: 18, marginBottom: 12 },
+  generateBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    alignSelf: 'stretch',
+    backgroundColor: C.orange,
+    borderRadius: 12,
+    paddingVertical: 13,
+  },
+  generateBtnText: { color: '#fff', fontSize: 12, fontFamily: mono, fontWeight: '900' },
   card: { backgroundColor: C.s2, borderRadius: 14, borderWidth: 1, borderColor: C.border, padding: 14 },
   cardTop: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
   dayBadge: {

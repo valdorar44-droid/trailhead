@@ -2498,7 +2498,7 @@ function MapScreen() {
     if (activeTrip.audio_guide) {
       setAudioGuide(activeTrip.audio_guide);
     } else {
-      api.getAudioGuide(activeTrip.trip_id).then(setAudioGuide).catch(() => {});
+      api.getAudioGuide(activeTrip.trip_id, false).then(setAudioGuide).catch(() => {});
     }
     setNavIdx(0); setNavMode(false); setRouteSteps([]); setIsRouted(false);
     spokenRef.current.clear();

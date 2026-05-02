@@ -1043,9 +1043,9 @@ async def get_trip_route(trip_id: str, user: dict | None = Depends(_optional_use
     return trip
 
 @app.get("/api/trip/{trip_id}/guide")
-async def trip_guide(trip_id: str, user: dict = Depends(_current_user)):
+async def trip_guide(trip_id: str, generate: bool = False, user: dict = Depends(_current_user)):
     """Return audio guide narrations for trip waypoints (generates + caches on first call).
-    Free if already cached; costs credits only on first generation."""
+    Free if already cached. Costs credits only when generate=true and no cache exists."""
     trip = get_trip(trip_id)
     if not trip:
         raise HTTPException(404, "Trip not found")
@@ -1056,6 +1056,9 @@ async def trip_guide(trip_id: str, user: dict = Depends(_current_user)):
     cached = get_audio_guide(trip_id)
     if cached:
         return cached  # already generated — serve free
+
+    if not generate:
+        return {}
 
     if not settings.anthropic_api_key:
         raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
@@ -1158,13 +1161,28 @@ class NearbyAudioRequest(BaseModel):
 async def nearby_audio(body: NearbyAudioRequest, user: dict = Depends(_current_user)):
     if not settings.anthropic_api_key:
         raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
+    cache_key = f"nearby_audio:{body.lat:.3f},{body.lng:.3f}:{(body.location_name or '').strip().lower()[:60]}"
+    cached = get_cached("campsite_cache", cache_key, ttl_seconds=3600 * 24)
+    if cached:
+        return {"narration": cached}
     cost = AI_COSTS["nearby_audio"]
     _check_credits(user, cost, "Nearby audio narration")
     from ai.planner import generate_location_narration
     try:
-        narration = generate_location_narration(body.lat, body.lng, body.location_name)
+        location_name = body.location_name
+        if not location_name:
+            wiki_hits, land = await asyncio.gather(
+                wikipedia_nearby(body.lat, body.lng, radius=12000, limit=3),
+                land_check(body.lat, body.lng),
+            )
+            nearby = ", ".join(h.get("title", "") for h in wiki_hits[:3] if h.get("title"))
+            land_label = " ".join(x for x in [land.get("land_type", ""), land.get("admin_name", "")] if x).strip()
+            location_name = "; ".join(x for x in [land_label, nearby] if x)
+        narration = generate_location_narration(body.lat, body.lng, location_name)
     except Exception as e:
+        add_credits(user["id"], cost, "Refund — nearby audio error")
         raise HTTPException(500, f"Narration failed: {e}")
+    set_cached("campsite_cache", cache_key, narration)
     return {"narration": narration}
 
 

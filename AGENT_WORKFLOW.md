@@ -1,6 +1,6 @@
 # Trailhead — Agent Build Workflow
 
-Ported from argus-mobile. Use for significant web or mobile features.
+Use for significant web or mobile features.
 
 ## Structure
 

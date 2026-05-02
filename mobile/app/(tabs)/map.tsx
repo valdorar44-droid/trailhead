@@ -1554,6 +1554,7 @@ class MapErrorBoundary extends Component<{ children: React.ReactNode }, { error:
 
 function MapScreen() {
   const C = useTheme();
+  const OVR = useMemo(() => overlayPalette(C), [C]);
   const s = useMemo(() => makeStyles(C), [C]);
   const router = useRouter();
   const activeTrip = useStore(st => st.activeTrip);
@@ -5870,9 +5871,7 @@ export default function MapScreenWithBoundary() {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
-// Map overlays always sit on dark transparent backgrounds regardless of app theme.
-// Use these constants so text stays legible in both light and dark mode.
-const OVR = {
+const DARK_OVR = {
   bg:      'rgba(6,10,8,0.95)',
   bg2:     'rgba(8,14,10,0.98)',
   border:  '#1e2e20',
@@ -5882,7 +5881,23 @@ const OVR = {
   text3:   '#4a5a4c',
 };
 
-const makeStyles = (C: ColorPalette) => StyleSheet.create({
+const LIGHT_OVR = {
+  bg:      'rgba(250,247,242,0.96)',
+  bg2:     'rgba(244,240,235,0.98)',
+  border:  '#d1c7b8',
+  border2: '#ebe4dc',
+  text:    '#1a1208',
+  text2:   '#5a4e3e',
+  text3:   '#8a7a68',
+};
+
+function overlayPalette(C: ColorPalette) {
+  return C.bg === '#060d07' ? DARK_OVR : LIGHT_OVR;
+}
+
+const makeStyles = (C: ColorPalette) => {
+  const OVR = overlayPalette(C);
+  return StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
   map: { flex: 1 },
 
@@ -6176,7 +6191,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   // ── Filter bar
   filterBar: {
     position: 'absolute', top: 92, left: 0, right: 0,
-    backgroundColor: 'rgba(8,12,18,0.96)', borderBottomWidth: 1, borderColor: C.border,
+    backgroundColor: OVR.bg2, borderBottomWidth: 1, borderColor: OVR.border,
     paddingBottom: 4,
   },
   filterScroll: { paddingHorizontal: 14, paddingVertical: 8, gap: 7 },
@@ -6939,4 +6954,5 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   mapLoadFailText: {
     flex: 1, color: '#fbbf24', fontSize: 10, fontFamily: mono, fontWeight: '700', letterSpacing: 0.3,
   },
-});
+  });
+};

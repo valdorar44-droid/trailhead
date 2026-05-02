@@ -1448,6 +1448,26 @@ async def extract_all_states():
     asyncio.create_task(_pms.extract_all_states_task())
     return {"triggered": True, "total": len(_pms.STATE_BBOXES)}
 
+@app.get("/api/admin/offline-regions-status")
+async def offline_regions_status():
+    """Status of Canada/Mexico PMTiles extraction."""
+    return {"regions": _pms.all_region_status()}
+
+@app.post("/api/admin/extract-region/{code}")
+async def extract_single_region(code: str):
+    """Extract + upload a country/large region such as CANADA or MEXICO."""
+    code = code.upper()
+    if code not in _pms.REGION_BBOXES:
+        return {"error": f"unknown region code {code}"}
+    asyncio.create_task(_pms.extract_and_upload_region(code))
+    return {"triggered": True, "code": code}
+
+@app.post("/api/admin/extract-canada-mexico")
+async def extract_canada_mexico():
+    """Queue Canada and Mexico PMTiles extraction/upload sequentially."""
+    asyncio.create_task(_pms.extract_regions_task(["MEXICO", "CANADA"]))
+    return {"triggered": True, "regions": ["MEXICO", "CANADA"]}
+
 @app.post("/api/admin/update-manifest")
 async def update_manifest():
     """Rewrite manifest.json on R2 with current file sizes."""
@@ -1486,8 +1506,8 @@ async def routing_packs_status():
 @app.api_route("/api/admin/build-routing-pack/{code}", methods=["GET", "POST"])
 async def build_routing_pack(code: str, force: bool = False):
     code = code.upper()
-    if code not in _pms.STATE_BBOXES:
-        return {"error": f"unknown state code {code}"}
+    if code not in _vhp.ALL_REGION_CODES:
+        return {"error": f"unknown routing region code {code}"}
     if _vhp.is_state_running(code):
         return {"triggered": False, "code": code, "reason": "already running"}
     if _vhp.is_state_built(code) and not force:
@@ -1504,6 +1524,13 @@ async def build_all_routing_packs():
         return {"triggered": False, "reason": "already running"}
     asyncio.create_task(_vhp.build_all_task())
     return {"triggered": True, "total": len(_pms.STATE_BBOXES), "order": _vhp.ordered_codes()}
+
+@app.post("/api/admin/build-canada-mexico-routing")
+async def build_canada_mexico_routing():
+    if _vhp._running:
+        return {"triggered": False, "reason": "already running"}
+    asyncio.create_task(_vhp.build_all_task(["MEXICO", "CANADA"]))
+    return {"triggered": True, "regions": ["MEXICO", "CANADA"]}
 
 @app.post("/api/admin/update-routing-manifest")
 async def update_routing_manifest():

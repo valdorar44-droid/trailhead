@@ -18,10 +18,12 @@ from pathlib import Path
 from typing import Optional
 
 # Re-use the go-pmtiles binary and settings from the bootstrap module
-from dashboard.pmtiles_bootstrap import GO_PMTILES_BINARY, DATA_DIR, PMTILES_PATH
+from dashboard.pmtiles_bootstrap import GO_PMTILES_BINARY, DATA_DIR, PMTILES_PATH, _download_go_pmtiles, _latest_planet_url
 
 STATES_DIR = DATA_DIR / "states"
 STATES_DIR.mkdir(parents=True, exist_ok=True)
+REGIONS_DIR = DATA_DIR / "regions"
+REGIONS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Bounding boxes: (west, south, east, north)
 STATE_BBOXES: dict[str, tuple[float, float, float, float]] = {
@@ -77,10 +79,19 @@ STATE_BBOXES: dict[str, tuple[float, float, float, float]] = {
     "WI": ( -92.9, 42.5,   -86.2, 47.1),
 }
 
+REGION_BBOXES: dict[str, tuple[float, float, float, float]] = {
+    "CANADA": (-141.1, 41.7, -52.6, 83.2),
+    "MEXICO": (-118.6, 14.5, -86.7, 32.8),
+}
+
 # Per-state status: code → dict
 _states: dict[str, dict] = {
     code: {"status": "pending", "progress": "", "size_bytes": 0, "error": None}
     for code in STATE_BBOXES
+}
+_regions: dict[str, dict] = {
+    code: {"status": "pending", "progress": "", "size_bytes": 0, "error": None}
+    for code in REGION_BBOXES
 }
 _extract_lock = asyncio.Lock()
 _running = False
@@ -90,6 +101,15 @@ def all_status() -> dict[str, dict]:
     out = {}
     for code, s in _states.items():
         path = STATES_DIR / f"{code.lower()}.pmtiles"
+        size = path.stat().st_size if path.exists() else 0
+        out[code] = {**s, "on_disk": path.exists(), "size_mb": round(size / 1_000_000, 1)}
+    return out
+
+
+def all_region_status() -> dict[str, dict]:
+    out = {}
+    for code, s in _regions.items():
+        path = REGIONS_DIR / f"{code.lower()}.pmtiles"
         size = path.stat().st_size if path.exists() else 0
         out[code] = {**s, "on_disk": path.exists(), "size_mb": round(size / 1_000_000, 1)}
     return out
@@ -142,6 +162,60 @@ async def extract_state(code: str) -> Optional[Path]:
     tmp_path.rename(out_path)
     size = out_path.stat().st_size
     _states[code].update(
+        status="extracted",
+        progress=f"done · {round(size / 1_000_000, 1)} MB",
+        size_bytes=size,
+    )
+    return out_path
+
+
+async def extract_region(code: str) -> Optional[Path]:
+    """Extract a country/large region from the latest Protomaps planet build."""
+    code = code.upper()
+    if code not in REGION_BBOXES:
+        raise ValueError(f"Unknown region code: {code}")
+    if not GO_PMTILES_BINARY.exists():
+        await _download_go_pmtiles()
+
+    w, s, e, n = REGION_BBOXES[code]
+    bbox = f"{w},{s},{e},{n}"
+    out_path = REGIONS_DIR / f"{code.lower()}.pmtiles"
+    tmp_path = out_path.with_suffix(".pmtiles.tmp")
+    if tmp_path.exists():
+        tmp_path.unlink()
+
+    _regions[code].update(status="extracting", progress="resolving planet build", error=None)
+    planet_url = await _latest_planet_url()
+    _regions[code]["progress"] = f"extracting from {planet_url}"
+    start = time.time()
+
+    proc = await asyncio.create_subprocess_exec(
+        str(GO_PMTILES_BINARY), "extract",
+        planet_url,
+        str(tmp_path),
+        f"--bbox={bbox}",
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+
+    async def _heartbeat():
+        while proc.returncode is None:
+            size_mb = (tmp_path.stat().st_size / 1_000_000) if tmp_path.exists() else 0
+            elapsed = int(time.time() - start)
+            _regions[code]["progress"] = f"extracting {elapsed}s · {size_mb:.0f} MB"
+            await asyncio.sleep(10)
+
+    await asyncio.gather(_heartbeat(), proc.wait())
+
+    if proc.returncode != 0:
+        _regions[code].update(status="error", error=f"go-pmtiles exit {proc.returncode}")
+        if tmp_path.exists():
+            tmp_path.unlink()
+        return None
+
+    tmp_path.rename(out_path)
+    size = out_path.stat().st_size
+    _regions[code].update(
         status="extracted",
         progress=f"done · {round(size / 1_000_000, 1)} MB",
         size_bytes=size,
@@ -224,6 +298,80 @@ async def upload_state_to_r2(code: str) -> bool:
         return False
 
 
+async def upload_region_to_r2(code: str) -> bool:
+    """Upload an extracted country/large region PMTiles file to R2."""
+    import boto3
+    from botocore.config import Config
+    from config.settings import settings
+
+    code = code.upper()
+    path = REGIONS_DIR / f"{code.lower()}.pmtiles"
+    if not path.exists():
+        _regions[code].update(status="error", error="file not found for upload")
+        return False
+
+    _regions[code].update(status="uploading", progress="starting upload")
+    try:
+        r2 = boto3.client(
+            "s3",
+            endpoint_url=f"https://{settings.r2_account_id}.r2.cloudflarestorage.com",
+            aws_access_key_id=settings.r2_access_key_id,
+            aws_secret_access_key=settings.r2_secret_access_key,
+            config=Config(signature_version="s3v4"),
+            region_name="auto",
+        )
+        r2_key = f"{code.lower()}.pmtiles"
+        file_size = path.stat().st_size
+        part_size = 64 * 1024 * 1024
+
+        mpu = await asyncio.to_thread(
+            r2.create_multipart_upload,
+            Bucket=settings.r2_bucket,
+            Key=r2_key,
+            ContentType="application/vnd.pmtiles",
+        )
+        upload_id = mpu["UploadId"]
+        parts = []
+        uploaded = 0
+
+        with open(path, "rb") as fh:
+            part_num = 1
+            while True:
+                chunk = fh.read(part_size)
+                if not chunk:
+                    break
+                resp = await asyncio.to_thread(
+                    r2.upload_part,
+                    Bucket=settings.r2_bucket,
+                    Key=r2_key,
+                    UploadId=upload_id,
+                    PartNumber=part_num,
+                    Body=chunk,
+                )
+                parts.append({"PartNumber": part_num, "ETag": resp["ETag"]})
+                uploaded += len(chunk)
+                _regions[code]["progress"] = f"uploading {round(uploaded / file_size * 100)}%"
+                part_num += 1
+
+        await asyncio.to_thread(
+            r2.complete_multipart_upload,
+            Bucket=settings.r2_bucket,
+            Key=r2_key,
+            MultipartUpload={"Parts": parts},
+            UploadId=upload_id,
+        )
+        size = path.stat().st_size
+        _regions[code].update(
+            status="done",
+            progress=f"uploaded · {round(size / 1_000_000, 1)} MB",
+            size_bytes=size,
+        )
+        return True
+    except Exception as exc:
+        _regions[code].update(status="error", error=f"{type(exc).__name__}: {exc}")
+        return False
+
+
 async def update_manifest_on_r2() -> bool:
     """Write manifest.json to R2 with sizes of all available files."""
     import boto3
@@ -244,6 +392,12 @@ async def update_manifest_on_r2() -> bool:
     # States
     for code in STATE_BBOXES:
         path = STATES_DIR / f"{code.lower()}.pmtiles"
+        if path.exists():
+            manifest[f"{code.lower()}.pmtiles"] = {"size": path.stat().st_size}
+
+    # International country/large-region packs
+    for code in REGION_BBOXES:
+        path = REGIONS_DIR / f"{code.lower()}.pmtiles"
         if path.exists():
             manifest[f"{code.lower()}.pmtiles"] = {"size": path.stat().st_size}
 
@@ -278,6 +432,30 @@ async def extract_and_upload_state(code: str) -> bool:
     if ok:
         await update_manifest_on_r2()
     return ok
+
+
+async def extract_and_upload_region(code: str) -> bool:
+    """Full region pipeline: extract from planet → upload → update manifest."""
+    code = code.upper()
+    path = await extract_region(code)
+    if not path:
+        return False
+    ok = await upload_region_to_r2(code)
+    if ok:
+        await update_manifest_on_r2()
+    return ok
+
+
+async def extract_regions_task(codes: Optional[list[str]] = None):
+    """Background task: extract + upload large regions sequentially."""
+    targets = [c.upper() for c in (codes or list(REGION_BBOXES.keys())) if c.upper() in REGION_BBOXES]
+    for code in targets:
+        if _regions[code]["status"] == "done":
+            continue
+        try:
+            await extract_and_upload_region(code)
+        except Exception as exc:
+            _regions[code].update(status="error", error=str(exc))
 
 
 async def extract_all_states_task(codes: Optional[list[str]] = None):

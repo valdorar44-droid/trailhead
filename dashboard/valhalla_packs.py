@@ -21,7 +21,7 @@ from typing import Optional
 import httpx
 
 from dashboard.pmtiles_bootstrap import DATA_DIR
-from dashboard.pmtiles_states import STATE_BBOXES
+from dashboard.pmtiles_states import STATE_BBOXES, REGION_BBOXES
 
 ROUTING_DIR = DATA_DIR / "routing"
 ROUTING_DIR.mkdir(parents=True, exist_ok=True)
@@ -43,6 +43,11 @@ GEofabrik_NAMES = {
     "WA": "washington", "WI": "wisconsin", "WV": "west-virginia",
     "WY": "wyoming",
 }
+REGION_GEOFABRIK_URLS = {
+    "CANADA": "https://download.geofabrik.de/north-america/canada-latest.osm.pbf",
+    "MEXICO": "https://download.geofabrik.de/north-america/mexico-latest.osm.pbf",
+}
+ALL_REGION_CODES = {**STATE_BBOXES, **REGION_BBOXES}
 
 # Approximate OSM PBF size order, smallest first. Running tiny states first
 # gets useful packs into R2 quickly and avoids losing hours if Railway restarts
@@ -58,7 +63,7 @@ SMALLEST_FIRST_RANK = {code: idx for idx, code in enumerate(SMALLEST_FIRST_ORDER
 
 _status: dict[str, dict] = {
     code: {"status": "pending", "progress": "", "size_bytes": 0, "error": None}
-    for code in STATE_BBOXES
+    for code in ALL_REGION_CODES
 }
 _running = False
 RUNNING_STATUSES = {"downloading", "building", "packing", "uploading"}
@@ -102,12 +107,15 @@ def tool_status() -> dict:
 
 
 def ordered_codes(codes: Optional[list[str]] = None) -> list[str]:
-    targets = [c.upper() for c in (codes or list(STATE_BBOXES.keys())) if c.upper() in STATE_BBOXES]
+    targets = [c.upper() for c in (codes or list(STATE_BBOXES.keys())) if c.upper() in ALL_REGION_CODES]
     return sorted(targets, key=lambda c: SMALLEST_FIRST_RANK.get(c, 999))
 
 
 def _geofabrik_url(code: str) -> str:
-    name = GEofabrik_NAMES[code.upper()]
+    code = code.upper()
+    if code in REGION_GEOFABRIK_URLS:
+        return REGION_GEOFABRIK_URLS[code]
+    name = GEofabrik_NAMES[code]
     return f"https://download.geofabrik.de/north-america/us/{name}-latest.osm.pbf"
 
 
@@ -168,8 +176,8 @@ def _write_valhalla_config(code: str, tiles_dir: Path) -> Path:
 
 async def build_pack(code: str) -> Optional[Path]:
     code = code.upper()
-    if code not in STATE_BBOXES:
-        raise ValueError(f"Unknown state code: {code}")
+    if code not in ALL_REGION_CODES:
+        raise ValueError(f"Unknown routing region code: {code}")
     if not shutil.which("valhalla_build_tiles"):
         _status[code].update(
             status="error",
@@ -318,7 +326,7 @@ async def update_routing_manifest_on_r2() -> bool:
     from config.settings import settings
 
     manifest: dict[str, dict] = {}
-    for code in STATE_BBOXES:
+    for code in ALL_REGION_CODES:
         path = pack_path(code)
         if path.exists():
             manifest[f"{code.lower()}.tar"] = {"size": path.stat().st_size}
@@ -401,7 +409,7 @@ async def build_all_task(codes: Optional[list[str]] = None):
     try:
         targets = ordered_codes(codes)
         for code in targets:
-            if code not in STATE_BBOXES:
+            if code not in ALL_REGION_CODES:
                 continue
             try:
                 await build_and_upload_pack(code)

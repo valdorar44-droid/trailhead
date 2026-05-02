@@ -220,6 +220,22 @@ function offlinePathCandidates(id: string, currentPath: string): string[] {
   return [currentPath, `${LEGACY_OFFLINE_DIR}${fileName}`, `${CACHE_OFFLINE_DIR}${fileName}`];
 }
 
+async function probeTileCdn(timeoutMs = 1500): Promise<boolean> {
+  try {
+    const ctrl = new AbortController();
+    const tid = setTimeout(() => ctrl.abort(), timeoutMs);
+    const res = await fetch('https://tiles.gettrailhead.app/api/download/manifest.json', {
+      method: 'HEAD',
+      signal: ctrl.signal,
+      cache: 'no-store',
+    });
+    clearTimeout(tid);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const {
@@ -309,6 +325,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const [localTiles,   setLocalTiles]   = useState(false);
   const [tileDebug,    setTileDebug]    = useState('Checking maps');
   const [tileSession,  setTileSession]  = useState(() => Date.now());
+  const onlineTilesRef  = useRef(true);                // true = prefer live CDN tiles
   const loadedStateRef  = useRef<string | null>(null); // path of currently-active state file
   const switchingRef    = useRef(false);               // prevent concurrent state switches
   const isRoutingRef    = useRef(false);               // route fetch in progress — block CDN fallback
@@ -442,7 +459,17 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           .catch(() => {});
       }
 
-      // 3. Load best state file (GPS-matched, or first available)
+      // 3. Prefer live CDN tiles when online. Downloaded packs are a fallback
+      // for no-service use, not a replacement for richer live map coverage.
+      const online = await probeTileCdn();
+      onlineTilesRef.current = online;
+      if (online) {
+        setLocalTiles(false);
+        setTileDebug('Online maps');
+        return;
+      }
+
+      // 4. Offline: load best state file (GPS-matched, or first available)
       const files = await getDownloadedFiles();
       if (!files) {
         const found = await firstExistingPath(offlinePathCandidates('conus', `${OFFLINE_DIR}conus.pmtiles`));
@@ -542,7 +569,14 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     const requestId = ++routeRequestRef.current;
     isRoutingRef.current = true;
     try {
-      await ensureRouteTileFile(pairs);
+      const online = await probeTileCdn();
+      onlineTilesRef.current = online;
+      if (online) {
+        setLocalTiles(false);
+        setTileDebug('Online maps');
+      } else {
+        await ensureRouteTileFile(pairs);
+      }
       if (requestId !== routeRequestRef.current) return;
       const result = await fetchRoute(pairs, fromIdx, mapboxToken || '', routeOpts);
       if (requestId !== routeRequestRef.current) return;
@@ -734,13 +768,26 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     onBoundsChange({ n, s, e, w, zoom: zoomLevel || 10 });
     if (showMvum) fetchMvum({ n, s, e, w });
 
-    // Auto-switch state file as map pans. If no downloaded state covers the viewport
-    // center, drop back to CDN so online users get full z0–15 detail.
+    // Auto-switch state file as map pans only when the live CDN is unreachable.
+    // While online, always keep live tiles active even if a downloaded state covers
+    // the viewport; otherwise downloaded packs hide online detail outside the pack.
     if (tileServer) {
       const centerLat = (n + s) / 2;
       const centerLng = (e + w) / 2;
-      getDownloadedFiles().then(files => {
-        if (!files) return; // CONUS — always local
+      (async () => {
+        const online = await probeTileCdn();
+        onlineTilesRef.current = online;
+        if (online) {
+          if (localTiles) setLocalTiles(false);
+          setTileDebug('Online maps');
+          return;
+        }
+        const files = await getDownloadedFiles();
+        if (!files) {
+          const found = await firstExistingPath(offlinePathCandidates('conus', `${OFFLINE_DIR}conus.pmtiles`));
+          if (found) await switchFile(found.path, found.sizeMb);
+          return;
+        }
         const match = files.find(({ bounds: b }) =>
           centerLat >= b.s && centerLat <= b.n &&
           centerLng >= b.w && centerLng <= b.e
@@ -755,7 +802,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           // produces a blank/error map in no-service conditions.
           setTileDebug('Outside saved states');
         }
-      });
+      })();
     }
   }, [onBoundsChange, showMvum, fetchMvum, localTiles, getDownloadedFiles, switchFile]);
 

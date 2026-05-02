@@ -155,6 +155,8 @@ async def get_campsites_search(lat: float, lng: float, radius_miles: float = 40,
                 "cost": _format_cost(f),
                 "url": f"https://www.recreation.gov/camping/campgrounds/{f.get('FacilityID')}",
                 "ada": f.get("FacilityAdaAccess") == "Y",
+                "source": "ridb",
+                "verified_source": "Recreation.gov",
             })
         cached = sites
         set_cached("campsite_cache", cache_key, sites)
@@ -271,6 +273,8 @@ async def get_facility_detail(facility_id: str) -> dict | None:
         "phone": f.get("FacilityPhone"),
         "url": f"https://www.recreation.gov/camping/campgrounds/{facility_id}",
         "campsites_count": len(sites_data.get("RECDATA") or []),
+        "source": "ridb",
+        "verified_source": "Recreation.gov",
     }
     set_cached("campsite_cache", cache_key, result)
     return result

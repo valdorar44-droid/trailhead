@@ -18,7 +18,8 @@ from config.settings import settings
 from ai.planner import plan_trip, chat_guide, edit_trip, plan_trip_from_conversation
 from dashboard.route_enrichment import enrich_trip_along_route
 from ingestors.ridb import get_campsites_near, get_campsites_search, get_facility_detail
-from ingestors.osm import get_osm_campsites, get_water_sources, get_trailheads, get_viewpoints, get_peaks, get_hot_springs
+from ingestors.osm import get_osm_campsites, get_osm_campsite_detail, get_water_sources, get_trailheads, get_viewpoints, get_peaks, get_hot_springs
+from ingestors.blm import get_blm_campsites, get_blm_campsite_detail
 from db.store import (
     save_trip, get_trip, add_community_pin, get_community_pins,
     save_audio_guide, get_audio_guide, get_cached, set_cached, get_route_cached, set_route_cached,
@@ -1704,11 +1705,20 @@ async def campsites_search(
         # Anonymous: treated as one-time per session via anon check
         if request:
             _anon_check(_client_ip(request), "search")
-    return await get_campsites_search(lat, lng, radius_miles=radius, type_filters=type_filters)
+    ridb, blm = await asyncio.gather(
+        get_campsites_search(lat, lng, radius_miles=radius, type_filters=type_filters),
+        get_blm_campsites(lat, lng, radius_miles=radius),
+    )
+    return _merge_camp_sources(ridb, blm, type_filters=type_filters)[:80]
 
 @app.get("/api/campsites/{facility_id}/detail")
 async def campsite_detail(facility_id: str):
-    detail = await get_facility_detail(facility_id)
+    if facility_id.startswith("osm_"):
+        detail = await get_osm_campsite_detail(facility_id)
+    elif facility_id.startswith("blm_"):
+        detail = await get_blm_campsite_detail(facility_id)
+    else:
+        detail = await get_facility_detail(facility_id)
     if not detail:
         raise HTTPException(status_code=404, detail="Facility not found")
     override = get_camp_profile_override(facility_id)
@@ -2471,23 +2481,42 @@ async def admin_dismiss_bug(bug_id: int, admin: dict = Depends(_require_admin)):
 
 # ── Nearby camps (RIDB + OSM aggregated — Dyrt-style discovery) ──────────────
 
+def _camp_merge_key(camp: dict) -> str:
+    name = re.sub(r"[^a-z0-9]+", "", str(camp.get("name") or "").lower())[:32]
+    try:
+        lat = round(float(camp.get("lat", 0)), 4)
+        lng = round(float(camp.get("lng", 0)), 4)
+    except Exception:
+        lat = lng = 0
+    return f"{name}:{lat}:{lng}"
+
+def _merge_camp_sources(*sources: list[dict], type_filters: list[str] | None = None) -> list[dict]:
+    seen_ids: set[str] = set()
+    seen_near: set[str] = set()
+    merged: list[dict] = []
+    for source in sources:
+        for camp in source:
+            if type_filters and not any(t in camp.get("tags", []) for t in type_filters):
+                continue
+            camp_id = str(camp.get("id") or "")
+            near_key = _camp_merge_key(camp)
+            if camp_id in seen_ids or near_key in seen_near:
+                continue
+            seen_ids.add(camp_id)
+            seen_near.add(near_key)
+            merged.append(camp)
+    return merged
+
 @app.get("/api/nearby-camps")
 async def nearby_camps(lat: float, lng: float, radius: float = 50, types: str = ""):
-    """Aggregate RIDB + OSM campsites near a point, no trip required."""
+    """Aggregate legal camp sources near a point, no trip required."""
     type_filters = [t.strip() for t in types.split(",") if t.strip()] if types else None
-    ridb, osm = await asyncio.gather(
+    ridb, blm, osm = await asyncio.gather(
         get_campsites_search(lat, lng, radius_miles=radius, type_filters=type_filters),
+        get_blm_campsites(lat, lng, radius_miles=radius),
         get_osm_campsites(lat, lng, radius_m=int(min(radius, 60) * 1600)),
     )
-    seen, merged = set(), []
-    for s in ridb:
-        if s["id"] not in seen:
-            seen.add(s["id"]); merged.append(s)
-    for s in osm:
-        if s["id"] not in seen:
-            if not type_filters or any(t in s.get("tags", []) for t in type_filters):
-                seen.add(s["id"]); merged.append(s)
-    return merged[:120]
+    return _merge_camp_sources(ridb, blm, osm, type_filters=type_filters)[:160]
 
 
 @app.get("/api/camps/bbox")
@@ -2501,19 +2530,16 @@ async def camps_bbox(n: float, s: float, e: float, w: float, types: str = ""):
     radius_miles = min(max(lat_span_mi, lng_span_mi) / 2 + 5, 120)
     radius_m = int(radius_miles * 1600)
     type_filters = [t.strip() for t in types.split(",") if t.strip()] if types else None
-    ridb, osm = await asyncio.gather(
+    ridb, blm, osm = await asyncio.gather(
         get_campsites_search(lat, lng, radius_miles=radius_miles, type_filters=type_filters),
+        get_blm_campsites(lat, lng, radius_miles=radius_miles),
         get_osm_campsites(lat, lng, radius_m=min(radius_m, 120000)),
     )
-    seen, merged = set(), []
-    for c in ridb:
-        if c["id"] not in seen and s <= c["lat"] <= n and w <= c["lng"] <= e:
-            seen.add(c["id"]); merged.append(c)
-    for c in osm:
-        if c["id"] not in seen and s <= c["lat"] <= n and w <= c["lng"] <= e:
-            if not type_filters or any(t in c.get("tags", []) for t in type_filters):
-                seen.add(c["id"]); merged.append(c)
-    return merged[:150]
+    in_box = [
+        [c for c in source if s <= c.get("lat", 999) <= n and w <= c.get("lng", 999) <= e]
+        for source in (ridb, blm, osm)
+    ]
+    return _merge_camp_sources(*in_box, type_filters=type_filters)[:200]
 
 
 # ── Land ownership tile proxy (BLM/USFS/NPS) ─────────────────────────────────

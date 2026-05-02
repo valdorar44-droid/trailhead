@@ -4435,6 +4435,12 @@ function MapScreen() {
                   </TouchableOpacity>
                 </View>
                 <View style={s.detailEditRow}>
+                  {campDetail.verified_source || campDetail.source ? (
+                    <View style={s.verifiedChip}>
+                      <Ionicons name="checkmark-circle-outline" size={12} color={C.green} />
+                      <Text style={s.verifiedChipText}>{(campDetail.verified_source || campDetail.source || 'SOURCE').toUpperCase()}</Text>
+                    </View>
+                  ) : null}
                   {campDetail.admin_edited ? (
                     <View style={s.verifiedChip}>
                       <Ionicons name="shield-checkmark-outline" size={12} color={C.green} />

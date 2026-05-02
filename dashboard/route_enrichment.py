@@ -21,6 +21,7 @@ from ingestors.osm import (
     get_water_sources,
 )
 from ingestors.ridb import get_campsites_search
+from ingestors.blm import get_blm_campsites
 
 
 def _valid_points(waypoints: list[dict]) -> list[dict]:
@@ -173,11 +174,12 @@ async def _route_camps(waypoints: list[dict], route: list[dict]) -> list[dict]:
     targets = _merge_targets(camp_targets, _route_samples(route, max_samples=8), max_targets=14)
 
     async def fetch_for(wp: dict) -> list[dict]:
-        ridb, osm = await asyncio.gather(
+        ridb, blm, osm = await asyncio.gather(
             get_campsites_search(wp["lat"], wp["lng"], radius_miles=45),
+            get_blm_campsites(wp["lat"], wp["lng"], radius_miles=45),
             get_osm_campsites(wp["lat"], wp["lng"], radius_m=72000),
         )
-        return [*ridb, *osm]
+        return [*ridb, *blm, *osm]
 
     batches = await asyncio.gather(*[fetch_for(wp) for wp in targets], return_exceptions=True)
     camps: list[dict] = []

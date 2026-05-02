@@ -283,7 +283,7 @@ export interface CampsitePin {
   tags: string[]; land_type: string; description: string;
   photo_url?: string; reservable: boolean; cost?: string; url: string; ada: boolean;
   route_distance_mi?: number; route_fit?: string; recommended_day?: number;
-  verified_source?: string;
+  source?: string; verified_source?: string;
 }
 export interface CampsiteDetail extends CampsitePin {
   photos: string[]; amenities: string[]; site_types: string[];

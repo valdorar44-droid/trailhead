@@ -14,8 +14,18 @@ _CAMP_QUERY = """
 (
   node["tourism"="camp_site"](around:{radius},{lat},{lng});
   node["tourism"="caravan_site"](around:{radius},{lat},{lng});
+  node["tourism"="camp_pitch"](around:{radius},{lat},{lng});
+  node["tourism"="wilderness_hut"](around:{radius},{lat},{lng});
+  node["tourism"="alpine_hut"](around:{radius},{lat},{lng});
   node["amenity"="camping"](around:{radius},{lat},{lng});
+  node["shelter_type"="basic_hut"](around:{radius},{lat},{lng});
   way["tourism"="camp_site"](around:{radius},{lat},{lng});
+  way["tourism"="caravan_site"](around:{radius},{lat},{lng});
+  way["tourism"="camp_pitch"](around:{radius},{lat},{lng});
+  way["tourism"="wilderness_hut"](around:{radius},{lat},{lng});
+  way["tourism"="alpine_hut"](around:{radius},{lat},{lng});
+  way["amenity"="camping"](around:{radius},{lat},{lng});
+  way["shelter_type"="basic_hut"](around:{radius},{lat},{lng});
 );
 out center tags 60;
 """
@@ -91,6 +101,126 @@ def _tag(el: dict, key: str, default: str = "") -> str:
     return el.get("tags", {}).get(key, default)
 
 
+def _osm_url(el: dict) -> str:
+    kind = el.get("type") or "node"
+    return f"https://www.openstreetmap.org/{kind}/{el.get('id', '')}"
+
+
+def _osm_camp_id(el: dict) -> str:
+    kind = el.get("type") or "node"
+    return f"osm_{kind}_{el.get('id', '')}"
+
+
+def _osm_tags_to_amenities(tags: dict) -> list[str]:
+    checks = [
+        ("toilets", "yes", "Restrooms"),
+        ("drinking_water", "yes", "Drinking water"),
+        ("shower", "yes", "Showers"),
+        ("hot_water", "yes", "Hot water"),
+        ("internet_access", "wlan", "WiFi"),
+        ("internet_access", "yes", "Internet"),
+        ("fireplace", "yes", "Fire rings"),
+        ("bbq", "yes", "BBQ"),
+        ("picnic_table", "yes", "Picnic tables"),
+        ("waste_disposal", "yes", "Trash"),
+        ("sanitary_dump_station", "yes", "Dump station"),
+        ("power_supply", "yes", "Power"),
+        ("electricity", "yes", "Electricity"),
+    ]
+    amenities: list[str] = []
+    for key, expected, label in checks:
+        value = str(tags.get(key, "")).lower()
+        if value == expected or (expected == "yes" and value in {"designated", "customers"}):
+            amenities.append(label)
+    if str(tags.get("wheelchair", "")).lower() in {"yes", "designated"}:
+        amenities.append("ADA")
+    return amenities
+
+
+def _osm_site_types(tags: dict) -> list[str]:
+    tourism = tags.get("tourism", "")
+    site_types: list[str] = []
+    if tourism == "camp_site":
+        site_types.append("Campground")
+    if tourism == "camp_pitch":
+        site_types.append("Camp pitch")
+    if tourism == "caravan_site":
+        site_types.append("RV / caravan")
+    if tourism in {"wilderness_hut", "alpine_hut"} or tags.get("shelter_type") == "basic_hut":
+        site_types.append("Backcountry shelter")
+    if tags.get("tents") == "yes":
+        site_types.append("Tent")
+    if tags.get("caravans") == "yes":
+        site_types.append("RV")
+    if tags.get("backcountry") == "yes":
+        site_types.append("Backcountry")
+    return site_types or ["Camp"]
+
+
+def _normalize_osm_camp(el: dict) -> dict | None:
+    coord = _node_coord(el)
+    if not coord:
+        return None
+    tags_raw = el.get("tags", {})
+    elat, elng = coord
+    name = _tag(el, "name") or _tag(el, "operator") or "Campsite"
+    access = _tag(el, "access", "yes")
+    if access in ("private", "no"):
+        return None
+    fee = _tag(el, "fee", "")
+    tents = _tag(el, "tents", "")
+    caravans = _tag(el, "caravans", "")
+    tourism = _tag(el, "tourism", "")
+    tags = []
+    if tents in ("yes", "") and tourism not in {"caravan_site"}:
+        tags.append("tent")
+    if caravans == "yes" or tourism == "caravan_site":
+        tags.append("rv")
+    if tourism == "camp_pitch":
+        tags.append("dispersed")
+    if tourism in {"wilderness_hut", "alpine_hut"} or _tag(el, "shelter_type") == "basic_hut":
+        tags.append("walk_in")
+    if _tag(el, "backcountry", "") == "yes":
+        tags.append("dispersed")
+    operator = _tag(el, "operator:type", "")
+    if "national_park" in operator.lower() or "nps" in _tag(el, "operator", "").lower():
+        tags.append("nps")
+    elif "forest" in _tag(el, "operator", "").lower():
+        tags.append("usfs")
+    elif "blm" in _tag(el, "operator", "").lower():
+        tags.append("blm")
+    elif "state" in _tag(el, "operator", "").lower():
+        tags.append("state")
+    if fee == "no":
+        tags.append("free")
+    if not tags:
+        tags.append("tent")
+    desc_bits = [
+        _tag(el, "description", ""),
+        _tag(el, "operator", ""),
+        _tag(el, "website", ""),
+    ]
+    description = " · ".join([x for x in desc_bits if x])[:300]
+    return {
+        "id": _osm_camp_id(el),
+        "name": name,
+        "lat": elat,
+        "lng": elng,
+        "tags": sorted(set(tags)),
+        "land_type": _osm_land_label(tags),
+        "description": description,
+        "photo_url": None,
+        "reservable": _tag(el, "reservation", "") in ("required", "yes"),
+        "cost": "Free" if fee == "no" else ("Fee Required" if fee == "yes" else "See site"),
+        "url": _tag(el, "website", "") or _osm_url(el),
+        "ada": _tag(el, "wheelchair", "") in ("yes", "designated"),
+        "source": "osm",
+        "verified_source": "OpenStreetMap",
+        "_osm_type": el.get("type") or "node",
+        "_osm_tags": tags_raw,
+    }
+
+
 async def _overpass(query: str) -> list[dict]:
     try:
         async with httpx.AsyncClient(timeout=25) as client:
@@ -112,54 +242,62 @@ async def get_osm_campsites(lat: float, lng: float, radius_m: int = 40000) -> li
 
     sites = []
     for el in elements:
-        coord = _node_coord(el)
-        if not coord:
-            continue
-        elat, elng = coord
-        name = _tag(el, "name") or _tag(el, "operator") or "Campsite"
-        access = _tag(el, "access", "yes")
-        if access in ("private", "no"):
-            continue
-        fee = _tag(el, "fee", "")
-        tents = _tag(el, "tents", "")
-        caravans = _tag(el, "caravans", "")
-        tags = []
-        if tents in ("yes", ""):
-            tags.append("tent")
-        if caravans == "yes":
-            tags.append("rv")
-        backpacking = _tag(el, "backcountry", "")
-        if backpacking == "yes":
-            tags.append("dispersed")
-        operator = _tag(el, "operator:type", "")
-        if "national_park" in operator.lower() or "nps" in _tag(el, "operator", "").lower():
-            tags.append("nps")
-        elif "forest" in _tag(el, "operator", "").lower():
-            tags.append("usfs")
-        elif "blm" in _tag(el, "operator", "").lower():
-            tags.append("blm")
-        elif "state" in _tag(el, "operator", "").lower():
-            tags.append("state")
-        if not tags:
-            tags.append("tent")
-        sites.append({
-            "id": f"osm_{el.get('id', '')}",
-            "name": name,
-            "lat": elat,
-            "lng": elng,
-            "tags": tags,
-            "land_type": _osm_land_label(tags),
-            "description": _tag(el, "description", "")[:300],
-            "photo_url": None,
-            "reservable": _tag(el, "reservation", "") in ("required", "yes"),
-            "cost": "Free" if fee == "no" else ("Fee Required" if fee == "yes" else "See site"),
-            "url": f"https://www.openstreetmap.org/node/{el.get('id', '')}",
-            "ada": _tag(el, "wheelchair", "") in ("yes", "designated"),
-            "source": "osm",
-        })
+        site = _normalize_osm_camp(el)
+        if site:
+            site.pop("_osm_tags", None)
+            sites.append(site)
 
     set_cached("campsite_cache", key, sites)
     return sites
+
+
+async def get_osm_campsite_detail(camp_id: str) -> dict | None:
+    """Return a full campsite detail for OSM-backed camps.
+
+    Older app caches may still have ids like osm_123, so try node and way.
+    New ids include the element type: osm_node_123 or osm_way_123.
+    """
+    cache_key = f"osm_detail_{camp_id}"
+    cached = get_cached("campsite_cache", cache_key, ttl_seconds=3600 * 24 * 7)
+    if cached is not None:
+        return cached
+
+    parts = camp_id.split("_")
+    candidates: list[tuple[str, str]] = []
+    if len(parts) >= 3 and parts[1] in {"node", "way", "relation"}:
+        candidates.append((parts[1], parts[2]))
+    elif len(parts) >= 2:
+        candidates.extend([("node", parts[1]), ("way", parts[1]), ("relation", parts[1])])
+    for kind, osm_id in candidates:
+        q = f"""
+[out:json][timeout:15];
+{kind}({osm_id});
+out center tags;
+"""
+        elements = await _overpass(q)
+        if not elements:
+            continue
+        site = _normalize_osm_camp(elements[0])
+        if not site:
+            continue
+        tags = site.pop("_osm_tags", elements[0].get("tags", {}))
+        detail = {
+            **site,
+            "photos": [],
+            "amenities": _osm_tags_to_amenities(tags),
+            "site_types": _osm_site_types(tags),
+            "activities": [x for x in [
+                "Camping",
+                "Hiking" if tags.get("hiking") == "yes" else "",
+                "Fishing" if tags.get("fishing") == "yes" else "",
+                "OHV" if tags.get("atv") == "yes" else "",
+            ] if x],
+            "phone": tags.get("phone") or tags.get("contact:phone"),
+            "campsites_count": int(tags.get("capacity", "0")) if str(tags.get("capacity", "0")).isdigit() else 0,
+        }
+        set_cached("campsite_cache", cache_key, detail)
+        return detail
+    return None
 
 
 async def get_water_sources(lat: float, lng: float, radius_m: int = 30000) -> list[dict]:

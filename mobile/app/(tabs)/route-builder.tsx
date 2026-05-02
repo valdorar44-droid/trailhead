@@ -858,6 +858,9 @@ export default function RouteBuilderScreen() {
                 </View>
                 <View style={s.detailMeta}>
                   <Text style={s.detailCost}>{campDetail.cost || 'See site'}</Text>
+                  {(campDetail.verified_source || campDetail.source) ? (
+                    <Text style={s.detailSiteCount}>{(campDetail.verified_source || campDetail.source || '').toUpperCase()}</Text>
+                  ) : null}
                   {campDetail.campsites_count > 0 && <Text style={s.detailSiteCount}>{campDetail.campsites_count} sites</Text>}
                 </View>
                 {campDetail.description ? (

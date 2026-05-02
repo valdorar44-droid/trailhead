@@ -137,6 +137,14 @@ function compassDir(deg: number) {
   return ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(deg / 45) % 8];
 }
 
+function smoothAngle(prev: number | null, next: number, alpha: number) {
+  if (prev === null || !Number.isFinite(prev)) return ((next % 360) + 360) % 360;
+  let diff = next - prev;
+  if (diff > 180) diff -= 360;
+  if (diff < -180) diff += 360;
+  return (prev + diff * alpha + 360) % 360;
+}
+
 function formatDist(km: number) {
   const mi = km * 0.621371;
   if (mi < 0.05) return 'ARRIVING';
@@ -1488,10 +1496,10 @@ const buildMapHtml = (
 
 // ─── Three-needle compass widget ─────────────────────────────────────────────
 
-function ThreeNeedleCompass({ heading, bearing }: { heading: number | null; bearing: number | null }) {
-  const sz = 46;
+function ThreeNeedleCompass({ heading, bearing, compact = false }: { heading: number | null; bearing: number | null; compact?: boolean }) {
+  const sz = compact ? 34 : 46;
   const half = sz / 2;
-  const nLen = 13;
+  const nLen = compact ? 10 : 13;
   const ringRot = heading !== null && isFinite(heading) ? -heading : 0;
   const bearRot  = heading !== null && isFinite(heading) && bearing !== null && isFinite(bearing) ? bearing - heading : null;
   return (
@@ -1502,7 +1510,7 @@ function ThreeNeedleCompass({ heading, bearing }: { heading: number | null; bear
       <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
         alignItems: 'center', justifyContent: 'flex-start',
         transform: [{ rotate: `${ringRot}deg` }] }}>
-        <Text style={{ color: '#ef4444', fontSize: 8, fontWeight: '900', fontFamily: mono, lineHeight: 10, marginTop: 1 }}>N</Text>
+        <Text style={{ color: '#ef4444', fontSize: compact ? 7 : 8, fontWeight: '900', fontFamily: mono, lineHeight: compact ? 8 : 10, marginTop: 1 }}>N</Text>
         <View style={{ width: 1.5, height: nLen - 2, backgroundColor: '#ef4444', borderRadius: 1 }} />
       </View>
       {/* South side of ring */}
@@ -1773,6 +1781,8 @@ function MapScreen() {
   const approachDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const userSpeedRef     = useRef<number | null>(null);
   const smoothedHdgRef   = useRef<number | null>(null);
+  const compassHdgRef    = useRef<number | null>(null);
+  const courseHdgRef     = useRef<number | null>(null);
   const discoverRef  = useRef<CampsitePin[]>([]);
 
   const webLoadedRef = useRef(false);
@@ -1939,6 +1949,17 @@ function MapScreen() {
   useEffect(() => {
     if (!locGranted) return;
     let sub: Location.LocationSubscription | null = null;
+    let headingSub: Location.LocationSubscription | null = null;
+    Location.watchHeadingAsync(h => {
+      const raw = h.trueHeading != null && h.trueHeading >= 0 ? h.trueHeading : h.magHeading;
+      if (raw == null || raw < 0 || !Number.isFinite(raw)) return;
+      const smooth = smoothAngle(compassHdgRef.current, raw, 0.32);
+      compassHdgRef.current = smooth;
+      setUserHeading(smooth);
+      if ((userSpeedRef.current ?? 0) < 1.2) {
+        smoothedHdgRef.current = smooth;
+      }
+    }).then(s => { headingSub = s; }).catch(() => {});
     Location.watchPositionAsync(
       { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 1000, distanceInterval: 5 },
       loc => {
@@ -1949,28 +1970,21 @@ function MapScreen() {
           setUserSpeed(rawSpeed);
           userSpeedRef.current = rawSpeed;
 
-          // Heading: device always provides compass heading on iOS (even when parked).
-          // Use it with EMA smoothing at all speeds. Only fall back to bearing-to-step
-          // when the platform truly gives no heading data at all.
-          const rawHdg = (loc.coords.heading ?? -1);
+          // GPS heading is course-over-ground, not a reliable compass while stopped.
+          // Use course for map-follow when moving; use watchHeadingAsync for the UI compass.
+          const rawCourse = (loc.coords.heading ?? -1);
           const speedMs = rawSpeed ?? 0;
           let hdg = -1;
-          if (rawHdg >= 0) {
-            // Device heading available — smooth with EMA.
-            // Faster α when slow (more responsive to phone turning while parked).
-            const alpha = speedMs > 2 ? 0.35 : 0.55;
-            const prev = smoothedHdgRef.current;
-            if (prev === null) {
-              smoothedHdgRef.current = rawHdg; hdg = rawHdg;
-            } else {
-              let diff = rawHdg - prev;
-              if (diff > 180) diff -= 360;
-              if (diff < -180) diff += 360;
-              const s = (prev + diff * alpha + 360) % 360;
-              smoothedHdgRef.current = s; hdg = s;
-            }
+          if (speedMs > 1.2 && rawCourse >= 0) {
+            const s = smoothAngle(courseHdgRef.current, rawCourse, 0.28);
+            courseHdgRef.current = s;
+            smoothedHdgRef.current = s;
+            hdg = s;
+          } else if (compassHdgRef.current !== null) {
+            hdg = compassHdgRef.current;
+            smoothedHdgRef.current = hdg;
           } else if (speedMs <= 0.8) {
-            // No device heading + parked: point toward next step
+            // No compass + parked: point toward next step as a last resort.
             const cur = routeStepsRef.current[stepIdxRef.current];
             if (cur?.lat != null) {
               hdg = calcBearing(pos.lat, pos.lng, cur.lat!, cur.lng!);
@@ -1981,7 +1995,7 @@ function MapScreen() {
           } else {
             hdg = smoothedHdgRef.current ?? -1;
           }
-          setUserHeading(hdg >= 0 ? hdg : null);
+          if (compassHdgRef.current === null) setUserHeading(hdg >= 0 ? hdg : null);
 
           const { active, idx, wps } = navRef.current;
           webRef.current?.postMessage(JSON.stringify({
@@ -2149,8 +2163,8 @@ function MapScreen() {
             safeSpeech(`Arrived at ${wps[idx].name}. Now heading to ${wps[next].name}.`, { rate: 0.88, pitch: 1.05, language: 'en-US' });
           }
         }
-      ).then(s => { sub = s; }).catch(() => {});
-    return () => { sub?.remove(); };
+    ).then(s => { sub = s; }).catch(() => {});
+    return () => { sub?.remove(); headingSub?.remove(); };
   }, [locGranted]);
 
   // ── Trip data ───────────────────────────────────────────────────────────────
@@ -3614,6 +3628,16 @@ function MapScreen() {
         <View style={[s.offlineCacheBanner, { top: 136, backgroundColor: 'rgba(127,29,29,0.82)', borderColor: 'rgba(248,113,113,0.45)' }]}>
           <Ionicons name="bug-outline" size={12} color="#fecaca" />
           <Text style={[s.offlineCacheBannerText, { color: '#fecaca' }]} numberOfLines={4}>Router: {routeDebug}</Text>
+        </View>
+      )}
+
+      {!navMode && userHeading !== null && !showSearch && !selectedCamp && !selectedCommunityPin && (
+        <View style={s.compassPill}>
+          <ThreeNeedleCompass heading={userHeading} bearing={null} compact />
+          <View>
+            <Text style={s.compassDir}>{compassDir(userHeading)}</Text>
+            <Text style={s.compassDeg}>{Math.round(userHeading)}°</Text>
+          </View>
         </View>
       )}
 
@@ -5971,6 +5995,17 @@ const makeStyles = (C: ColorPalette) => {
     alignItems: 'center', justifyContent: 'center',
   },
   layerText: { color: OVR.text2, fontSize: 9, fontFamily: mono, fontWeight: '800', letterSpacing: 0.5 },
+  compassPill: {
+    position: 'absolute', top: 106, left: 16,
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: OVR.bg, borderRadius: 18,
+    borderWidth: 1, borderColor: OVR.border,
+    paddingHorizontal: 9, paddingVertical: 7,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.22, shadowRadius: 8,
+    elevation: 7,
+  },
+  compassDir: { color: OVR.text, fontSize: 12, fontFamily: mono, fontWeight: '900', lineHeight: 14 },
+  compassDeg: { color: OVR.text3, fontSize: 9, fontFamily: mono, fontWeight: '700', marginTop: 1 },
 
   alertPanel: {
     position: 'absolute', top: 106, left: 16, right: 70,

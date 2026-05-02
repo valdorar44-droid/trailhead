@@ -1777,6 +1777,7 @@ function MapScreen() {
 
   const webLoadedRef = useRef(false);
   const viewportRef  = useRef<{ n: number; s: number; e: number; w: number; zoom: number } | null>(null);
+  const lastPinFetchRef = useRef<{ lat: number; lng: number; ts: number } | null>(null);
   const [isLoadingAreaCamps, setIsLoadingAreaCamps] = useState(false);
   const [areaCamps, setAreaCamps] = useState<CampsitePin[]>([]);
   const [mapMoved, setMapMoved] = useState(false);
@@ -1898,6 +1899,29 @@ function MapScreen() {
   );
 
   useEffect(() => { navRef.current.wps = waypoints; }, [waypoints]);
+
+  const refreshCommunityPins = useCallback((
+    center?: { lat: number; lng: number } | null,
+    radiusDeg = 3.0,
+    force = false,
+  ) => {
+    const vp = viewportRef.current;
+    const target = center
+      ?? (vp ? { lat: (vp.n + vp.s) / 2, lng: (vp.e + vp.w) / 2 } : null)
+      ?? userLoc
+      ?? (waypoints[0] ? { lat: waypoints[0].lat, lng: waypoints[0].lng } : null);
+    if (!target || !Number.isFinite(target.lat) || !Number.isFinite(target.lng)) return;
+
+    const last = lastPinFetchRef.current;
+    const movedKm = last ? haversineKm(last.lat, last.lng, target.lat, target.lng) : Infinity;
+    const recently = last ? Date.now() - last.ts < 45_000 : false;
+    if (!force && movedKm < 8 && recently) return;
+
+    lastPinFetchRef.current = { lat: target.lat, lng: target.lng, ts: Date.now() };
+    api.getNearbyPins(target.lat, target.lng, radiusDeg)
+      .then(setCommunityPins)
+      .catch(() => {});
+  }, [userLoc?.lat, userLoc?.lng, waypoints]);
 
   // ── Location watch ──────────────────────────────────────────────────────────
 
@@ -2158,7 +2182,7 @@ function MapScreen() {
     if (!wps.length) return;
     const center = wps[Math.floor(wps.length / 2)];
     if (center.lat && center.lng) {
-      api.getNearbyPins(center.lat!, center.lng!, 3.0).then(setCommunityPins).catch(() => {});
+      refreshCommunityPins({ lat: center.lat!, lng: center.lng! }, 3.0, true);
       // Load camps + POIs around the trip center so pins appear without requiring a manual search
       const bounds = {
         n: center.lat! + 1.5, s: center.lat! - 1.5,
@@ -2220,7 +2244,15 @@ function MapScreen() {
     const bounds = { n: userLoc.lat + deg, s: userLoc.lat - deg, e: userLoc.lng + deg, w: userLoc.lng - deg, zoom: 10 };
     viewportRef.current = bounds;
     loadCampsInArea(bounds, activeFilters);
+    refreshCommunityPins(userLoc, 3.0, true);
   }, [userLoc]);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', state => {
+      if (state === 'active') refreshCommunityPins(null, 3.0, true);
+    });
+    return () => sub.remove();
+  }, [refreshCommunityPins]);
 
   // POI layer
   useEffect(() => { showPoisRef.current = showPois; }, [showPois]);
@@ -2871,6 +2903,10 @@ function MapScreen() {
         viewportRef.current = { n: msg.n, s: msg.s, e: msg.e, w: msg.w, zoom: msg.zoom };
         setMapZoom(msg.zoom ?? 10);
         if ((msg.zoom ?? 0) >= 9) setMapMoved(true);
+        const pinLat = (msg.n + msg.s) / 2;
+        const pinLng = (msg.e + msg.w) / 2;
+        const pinRadius = Math.max(1.0, Math.min(4.0, Math.max(Math.abs(msg.n - msg.s), Math.abs(msg.e - msg.w)) / 2 + 0.5));
+        refreshCommunityPins({ lat: pinLat, lng: pinLng }, pinRadius, false);
         // Refresh POIs when panned far enough from last fetch
         if (showPoisRef.current && (msg.zoom ?? 0) >= 8) {
           const newLat = (msg.n + msg.s) / 2;
@@ -3352,12 +3388,22 @@ function MapScreen() {
                 e: center.lng + 1.5, w: center.lng - 1.5, zoom: 9,
               };
               loadCampsInArea(bounds, activeFilters);
+              refreshCommunityPins(center, 3.0, true);
               // Also load nearby POIs
               fetchPois(center);
             }
             restoreCachedActiveRoute('native');
           }}
-          onBoundsChange={b => { viewportRef.current = b; setMapZoom(b.zoom ?? 10); if ((b.zoom ?? 0) >= 9) setMapMoved(true); if ((b.zoom ?? 0) < 8) setAreaCamps([]); }}
+          onBoundsChange={b => {
+            viewportRef.current = b;
+            setMapZoom(b.zoom ?? 10);
+            if ((b.zoom ?? 0) >= 9) setMapMoved(true);
+            if ((b.zoom ?? 0) < 8) setAreaCamps([]);
+            const lat = (b.n + b.s) / 2;
+            const lng = (b.e + b.w) / 2;
+            const radius = Math.max(1.0, Math.min(4.0, Math.max(Math.abs(b.n - b.s), Math.abs(b.e - b.w)) / 2 + 0.5));
+            refreshCommunityPins({ lat, lng }, radius, false);
+          }}
           onMapTap={(lat, lng) => {
             if (pinDropMode && (lat == null || lng == null)) {
               setQuickToast('Map tap did not return a coordinate. Try again.');

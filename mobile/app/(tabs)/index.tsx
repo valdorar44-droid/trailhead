@@ -380,14 +380,14 @@ export default function PlanScreen() {
         </View>
         <Text style={s.loginGateTitle}>AI Trip Planning</Text>
         <Text style={s.loginGateSub}>
-          One app that replaces Gaia, iOverlander & The Dyrt. AI-planned multi-day routes with dispersed camps, fuel stops, and road conditions — tailored to your rig.
+          Build multi-day overland routes with fuel, legal camp options, weather, land context, offline downloads, and road-condition reports matched to your rig.
         </Text>
         <View style={s.loginGatePerks}>
           {[
-            ['flash',          '50 credits free — earn more by contributing'],
-            ['map-outline',    'AI routes: camps, fuel, weather, land access'],
-            ['radio-outline',  'Audio guide narrated for every waypoint'],
-            ['shield-checkmark-outline', 'Your tracks stay private — always'],
+            ['flash',          '50 signup credits, then earn more by contributing'],
+            ['map-outline',    'Route days, fuel, camps, POIs, and weather'],
+            ['download-outline', 'Offline maps, route packs, and trip corridors'],
+            ['shield-checkmark-outline', 'Private trips with community reports when needed'],
           ].map(([icon, text]) => (
             <View key={text} style={s.loginGatePerk}>
               <Ionicons name={icon as any} size={16} color={C.orange} />
@@ -532,12 +532,19 @@ export default function PlanScreen() {
             )}
 
             <Text style={s.welcomeHeading}>
-              {'PLAN YOUR\nOVERLAND\n'}
-              <Text style={{ color: C.orange }}>ADVENTURE.</Text>
+              {'BUILD A\nTRAIL-READY\n'}
+              <Text style={{ color: C.orange }}>ROUTE.</Text>
             </Text>
             <Text style={s.welcomeSub}>
-              Tell me your trip idea — I'll ask a few questions, then build the full route, find dispersed camps, and brief you on terrain.
+              Start with where you want to go, how long you have, and what you drive. Trailhead shapes the days, finds nearby camp and fuel options, then sends the route to the map for review.
             </Text>
+            <View style={s.welcomeChips}>
+              {['LEGAL CAMPS', 'FUEL RANGE', 'OFFLINE READY'].map(label => (
+                <View key={label} style={s.welcomeChip}>
+                  <Text style={s.welcomeChipText}>{label}</Text>
+                </View>
+              ))}
+            </View>
 
             {EXAMPLES.map((ex, i) => (
               <TouchableOpacity key={i} style={s.example} onPress={() => setInput(ex.text)}>
@@ -1055,7 +1062,17 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     letterSpacing: -1.5, lineHeight: 40, marginBottom: 8,
     textTransform: 'uppercase',
   },
-  welcomeSub: { color: C.text2, fontSize: 13.5, lineHeight: 21, marginBottom: 4, fontStyle: 'italic' },
+  welcomeSub: { color: C.text2, fontSize: 14, lineHeight: 21, marginBottom: 2 },
+  welcomeChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginBottom: 6 },
+  welcomeChip: {
+    borderWidth: 1, borderColor: C.border,
+    borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5,
+    backgroundColor: C.s2,
+  },
+  welcomeChipText: {
+    color: C.text3, fontSize: 8.5, fontFamily: mono,
+    fontWeight: '900', letterSpacing: 0.7,
+  },
 
   sectionLabel: { color: C.text3, fontSize: 9, fontFamily: mono, letterSpacing: 1, marginBottom: 8, textTransform: 'uppercase' },
   historySection: { marginBottom: 4 },

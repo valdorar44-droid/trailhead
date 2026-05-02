@@ -10,6 +10,7 @@ import * as Notifications from 'expo-notifications';
 import { storage } from '@/lib/storage';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
+import TourTarget from '@/components/TourTarget';
 import { api, Report, LeaderboardEntry } from '@/lib/api';
 import { useStore } from '@/lib/store';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
@@ -330,26 +331,28 @@ export default function ReportScreen() {
             <Text style={s.safetyText}>Report only when safely stopped</Text>
           </View>
           <Text style={s.sectionLabel}>TYPE</Text>
-          <View style={s.typeGrid}>
-            {REPORT_TYPES.map((rt, idx) => {
-              const active = selectedType?.type === rt.type;
-              return (
-                <Animated.View key={rt.type} style={{ transform: [{ scale: typeAnims[idx] }], width: '23%' }}>
-                  <TouchableOpacity
-                    style={[s.typeBtn, active && { borderColor: rt.color, backgroundColor: rt.color + '18' }]}
-                    onPress={() => selectType(rt, idx)}
-                  >
-                    {(rt.icon.codePointAt(0) ?? 0) > 127
-                      ? <Text style={s.typeEmoji}>{rt.icon}</Text>
-                      : <Ionicons name={rt.icon as any} size={22} color={active ? rt.color : C.text3} />
-                    }
-                    <Text style={[s.typeLabel, active && { color: rt.color }]}>{rt.label}</Text>
-                    <Text style={[s.typeTtl, active && { color: rt.color + 'aa' }]}>{rt.ttl}</Text>
-                  </TouchableOpacity>
-                </Animated.View>
-              );
-            })}
-          </View>
+          <TourTarget id="report.types">
+            <View style={s.typeGrid}>
+              {REPORT_TYPES.map((rt, idx) => {
+                const active = selectedType?.type === rt.type;
+                return (
+                  <Animated.View key={rt.type} style={{ transform: [{ scale: typeAnims[idx] }], width: '23%' }}>
+                    <TouchableOpacity
+                      style={[s.typeBtn, active && { borderColor: rt.color, backgroundColor: rt.color + '18' }]}
+                      onPress={() => selectType(rt, idx)}
+                    >
+                      {(rt.icon.codePointAt(0) ?? 0) > 127
+                        ? <Text style={s.typeEmoji}>{rt.icon}</Text>
+                        : <Ionicons name={rt.icon as any} size={22} color={active ? rt.color : C.text3} />
+                      }
+                      <Text style={[s.typeLabel, active && { color: rt.color }]}>{rt.label}</Text>
+                      <Text style={[s.typeTtl, active && { color: rt.color + 'aa' }]}>{rt.ttl}</Text>
+                    </TouchableOpacity>
+                  </Animated.View>
+                );
+              })}
+            </View>
+          </TourTarget>
 
           {selectedType && (
             <>

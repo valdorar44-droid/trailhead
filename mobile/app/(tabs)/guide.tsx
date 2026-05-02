@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Speech from 'expo-speech';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
+import TourTarget from '@/components/TourTarget';
 import { useStore } from '@/lib/store';
 import { api } from '@/lib/api';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
@@ -130,11 +131,13 @@ export default function GuideScreen() {
         <View style={s.header}>
           <Text style={s.headerTitle}>AUDIO GUIDE</Text>
         </View>
-        <View style={s.emptyState}>
-          <Ionicons name="mic-outline" size={48} color={C.text3} />
-          <Text style={s.emptyTitle}>No Active Trip</Text>
-          <Text style={s.emptySub}>Plan a trip on the PLAN tab to unlock your personal audio guide.</Text>
-        </View>
+        <TourTarget id="guide.audio">
+          <View style={s.emptyState}>
+            <Ionicons name="mic-outline" size={48} color={C.text3} />
+            <Text style={s.emptyTitle}>No Active Trip</Text>
+            <Text style={s.emptySub}>Plan a trip on the PLAN tab to unlock your personal audio guide.</Text>
+          </View>
+        </TourTarget>
       </SafeAreaView>
     );
   }
@@ -219,20 +222,22 @@ export default function GuideScreen() {
               );
             })}
 
-            <View style={s.nearbyCard}>
-              <Text style={s.nearbyLabel}>WHAT'S AROUND ME?</Text>
-              <Text style={s.nearbySub}>Instant AI narration for your current GPS location</Text>
-              {!!nearbyNarration && <Text style={s.nearbyText}>{nearbyNarration}</Text>}
-              <TouchableOpacity style={s.nearbyBtn} onPress={whatIsHere} disabled={nearbyLoading}>
-                {nearbyLoading
-                  ? <ActivityIndicator color="#fff" size="small" />
-                  : <>
-                      <Ionicons name="location" size={16} color="#fff" />
-                      <Text style={s.nearbyBtnText}>TELL ME ABOUT HERE</Text>
-                    </>
-                }
-              </TouchableOpacity>
-            </View>
+            <TourTarget id="guide.audio">
+              <View style={s.nearbyCard}>
+                <Text style={s.nearbyLabel}>WHAT'S AROUND ME?</Text>
+                <Text style={s.nearbySub}>Instant AI narration for your current GPS location</Text>
+                {!!nearbyNarration && <Text style={s.nearbyText}>{nearbyNarration}</Text>}
+                <TouchableOpacity style={s.nearbyBtn} onPress={whatIsHere} disabled={nearbyLoading}>
+                  {nearbyLoading
+                    ? <ActivityIndicator color="#fff" size="small" />
+                    : <>
+                        <Ionicons name="location" size={16} color="#fff" />
+                        <Text style={s.nearbyBtnText}>TELL ME ABOUT HERE</Text>
+                      </>
+                  }
+                </TouchableOpacity>
+              </View>
+            </TourTarget>
           </>
         )}
 

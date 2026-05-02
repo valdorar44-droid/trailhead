@@ -8,6 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import NativeMap, { NativeMapHandle } from '@/components/NativeMap';
 import PaywallModal from '@/components/PaywallModal';
+import TourTarget from '@/components/TourTarget';
 import { api, CampFullness, CampsiteDetail, CampsiteInsight, CampsitePin, GasStation, OsmPoi, PaywallError, TripResult, Waypoint, WeatherForecast } from '@/lib/api';
 import { saveOfflineTrip } from '@/lib/offlineTrips';
 import { useStore } from '@/lib/store';
@@ -575,21 +576,23 @@ export default function RouteBuilderScreen() {
           ))}
         </View>
 
-        <View style={s.searchBox}>
-          <Ionicons name="search" size={17} color={C.text3} />
-          <TextInput
-            value={query}
-            onChangeText={setQuery}
-            onSubmitEditing={runSearch}
-            placeholder="Search city, address, trailhead, coordinates"
-            placeholderTextColor={C.text3}
-            style={s.searchInput}
-            returnKeyType="search"
-          />
-          <TouchableOpacity style={s.searchBtn} onPress={runSearch} disabled={searching}>
-            {searching ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.searchBtnText}>ADD</Text>}
-          </TouchableOpacity>
-        </View>
+        <TourTarget id="routeBuilder.search">
+          <View style={s.searchBox}>
+            <Ionicons name="search" size={17} color={C.text3} />
+            <TextInput
+              value={query}
+              onChangeText={setQuery}
+              onSubmitEditing={runSearch}
+              placeholder="Search city, address, trailhead, coordinates"
+              placeholderTextColor={C.text3}
+              style={s.searchInput}
+              returnKeyType="search"
+            />
+            <TouchableOpacity style={s.searchBtn} onPress={runSearch} disabled={searching}>
+              {searching ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.searchBtnText}>ADD</Text>}
+            </TouchableOpacity>
+          </View>
+        </TourTarget>
 
         {searchResults.length > 0 && (
           <View style={s.resultsBox}>

@@ -19,6 +19,7 @@ const STEPS = [
     target: 'PLAN TAB',
     targetKind: 'tab',
     tabIndex: 0,
+    targetKey: 'plan.input',
   },
   {
     route: '/(tabs)/map',
@@ -73,6 +74,7 @@ const STEPS = [
     target: 'ROUTE TAB',
     targetKind: 'tab',
     tabIndex: 2,
+    targetKey: 'routeBuilder.search',
   },
   {
     route: '/(tabs)/report',
@@ -82,6 +84,7 @@ const STEPS = [
     target: 'REPORT TAB',
     targetKind: 'tab',
     tabIndex: 3,
+    targetKey: 'report.types',
   },
   {
     route: '/(tabs)/guide',
@@ -91,6 +94,7 @@ const STEPS = [
     target: 'GUIDE TAB',
     targetKind: 'tab',
     tabIndex: 4,
+    targetKey: 'guide.audio',
   },
   {
     route: '/(tabs)/profile',
@@ -100,6 +104,7 @@ const STEPS = [
     target: 'PROFILE TAB',
     targetKind: 'tab',
     tabIndex: 5,
+    targetKey: 'profile.main',
   },
 ] as const;
 

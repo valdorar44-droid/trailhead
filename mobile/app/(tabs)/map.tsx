@@ -4,6 +4,7 @@ import { WebView } from 'react-native-webview';
 import NativeMap, { type NativeMapHandle } from '@/components/NativeMap';
 import RouteSearchModal from '@/components/RouteSearchModal';
 import OfflineModal from '@/components/NativeMap/OfflineModal';
+import TourTarget from '@/components/TourTarget';
 
 // ── Native MapLibre SDK active ────────────────────────────────────────────────
 const USE_NATIVE_MAP = true;
@@ -1564,31 +1565,6 @@ class MapErrorBoundary extends Component<{ children: React.ReactNode }, { error:
     }
     return this.props.children;
   }
-}
-
-function TourTarget({ id, children }: { id: string; children: React.ReactNode }) {
-  const setTourTarget = useStore(st => st.setTourTarget);
-  const ref = useRef<View>(null);
-  const measure = useCallback(() => {
-    ref.current?.measureInWindow((left, top, width, height) => {
-      if (Number.isFinite(left) && Number.isFinite(top) && width > 0 && height > 0) {
-        setTourTarget(id, { left, top, width, height });
-      }
-    });
-  }, [id, setTourTarget]);
-  useEffect(() => {
-    measure();
-    const t = setTimeout(measure, 250);
-    return () => {
-      clearTimeout(t);
-      setTourTarget(id, null);
-    };
-  }, [id, measure, setTourTarget]);
-  return (
-    <View ref={ref} collapsable={false} onLayout={measure}>
-      {children}
-    </View>
-  );
 }
 
 // ─── Screen ───────────────────────────────────────────────────────────────────

@@ -13,6 +13,7 @@ import * as Haptics from 'expo-haptics';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { api, ApiError, PaywallError, TripResult, TrailDNA } from '@/lib/api';
 import PaywallModal from '@/components/PaywallModal';
+import TourTarget from '@/components/TourTarget';
 import { useStore } from '@/lib/store';
 import { useTheme, useTag, mono, ColorPalette } from '@/lib/design';
 import { saveOfflineTrip, loadOfflineTrip } from '@/lib/offlineTrips';
@@ -621,25 +622,27 @@ export default function PlanScreen() {
 
       {/* ── Input ── */}
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={s.inputWrap}>
-          <TextInput
-            style={[s.input, (planPhase === 'active' || planPhase === 'editing') && s.inputEdit]}
-            value={input}
-            onChangeText={setInput}
-            placeholder={inputPlaceholder}
-            placeholderTextColor={C.text3}
-            multiline
-            maxLength={500}
-            editable={!loading || planPhase === 'active'}
-          />
-          <TouchableOpacity
-            style={[s.sendBtn, loading && s.sendBtnDisabled]}
-            onPress={send}
-            disabled={loading}
-          >
-            <Ionicons name="send" size={18} color="#fff" />
-          </TouchableOpacity>
-        </View>
+        <TourTarget id="plan.input">
+          <View style={s.inputWrap}>
+            <TextInput
+              style={[s.input, (planPhase === 'active' || planPhase === 'editing') && s.inputEdit]}
+              value={input}
+              onChangeText={setInput}
+              placeholder={inputPlaceholder}
+              placeholderTextColor={C.text3}
+              multiline
+              maxLength={500}
+              editable={!loading || planPhase === 'active'}
+            />
+            <TouchableOpacity
+              style={[s.sendBtn, loading && s.sendBtnDisabled]}
+              onPress={send}
+              disabled={loading}
+            >
+              <Ionicons name="send" size={18} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        </TourTarget>
         {(planPhase === 'active' || planPhase === 'editing') && (
           <View style={s.editHint}>
             <Ionicons name="pencil-outline" size={10} color={C.orange} />

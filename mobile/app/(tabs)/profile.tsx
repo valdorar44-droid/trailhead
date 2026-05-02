@@ -15,6 +15,7 @@ import * as Application from 'expo-application';
 import { api, ApiError } from '@/lib/api';
 import { useStore, RigProfile, TripHistoryItem } from '@/lib/store';
 import PaywallModal from '@/components/PaywallModal';
+import TourTarget from '@/components/TourTarget';
 import { freeTrialLabel, useSubscription } from '@/lib/useSubscription';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 import { getOfflineTripIndex, loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
@@ -548,25 +549,27 @@ export default function ProfileScreen() {
       <ScrollView contentContainerStyle={s.scroll}>
 
         {/* Profile */}
-        <View style={s.profileCard}>
-          <View style={s.avatar}>
-            <Text style={s.avatarText}>{user?.username?.[0]?.toUpperCase() ?? '?'}</Text>
+        <TourTarget id="profile.main">
+          <View style={s.profileCard}>
+            <View style={s.avatar}>
+              <Text style={s.avatarText}>{user?.username?.[0]?.toUpperCase() ?? '?'}</Text>
+            </View>
+            <View style={s.profileInfo}>
+              <Text style={s.profileName}>{user?.username}</Text>
+              <Text style={s.profileEmail}>{user?.email}</Text>
+              {(user?.report_streak ?? 0) > 1 && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <Ionicons name="flame" size={12} color={C.orange} />
+                  <Text style={s.streakText}>{user!.report_streak}-day reporting streak</Text>
+                </View>
+              )}
+            </View>
+            <TouchableOpacity onPress={() => { clearAuth(); setView('login'); }}
+              style={s.logoutBtn}>
+              <Ionicons name="log-out-outline" size={20} color={C.text3} />
+            </TouchableOpacity>
           </View>
-          <View style={s.profileInfo}>
-            <Text style={s.profileName}>{user?.username}</Text>
-            <Text style={s.profileEmail}>{user?.email}</Text>
-            {(user?.report_streak ?? 0) > 1 && (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                <Ionicons name="flame" size={12} color={C.orange} />
-                <Text style={s.streakText}>{user!.report_streak}-day reporting streak</Text>
-              </View>
-            )}
-          </View>
-          <TouchableOpacity onPress={() => { clearAuth(); setView('login'); }}
-            style={s.logoutBtn}>
-            <Ionicons name="log-out-outline" size={20} color={C.text3} />
-          </TouchableOpacity>
-        </View>
+        </TourTarget>
 
         {/* Stats row */}
         {(() => {

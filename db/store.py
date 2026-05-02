@@ -66,7 +66,9 @@ def init_db():
             description  TEXT,
             land_type    TEXT,
             submitted_at INTEGER NOT NULL,
-            upvotes      INTEGER NOT NULL DEFAULT 0
+            upvotes      INTEGER NOT NULL DEFAULT 0,
+            downvotes    INTEGER NOT NULL DEFAULT 0,
+            hidden       INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS stripe_purchases (
             session_id  TEXT PRIMARY KEY,
@@ -224,6 +226,7 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_reports_user ON reports(user_id, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_reports_user_type ON reports(user_id, type, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_pins_geo ON community_pins(lat, lng)",
+        "CREATE INDEX IF NOT EXISTS idx_pins_user_time ON community_pins(user_id, submitted_at)",
         "CREATE INDEX IF NOT EXISTS idx_fullness_geo ON camp_fullness(lat, lng, status, expires_at)",
         "CREATE INDEX IF NOT EXISTS idx_credits_user ON credit_transactions(user_id, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_analytics_session ON analytics_events(session_id, event_type)",
@@ -246,6 +249,16 @@ def init_db():
         "ALTER TABLE reports ADD COLUMN has_photo INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE reports ADD COLUMN photo_data TEXT",
         "ALTER TABLE reports ADD COLUMN downvotes INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE community_pins ADD COLUMN downvotes INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE community_pins ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0",
+        """CREATE TABLE IF NOT EXISTS pin_interactions (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            pin_id     INTEGER NOT NULL,
+            user_id    INTEGER NOT NULL REFERENCES users(id),
+            action     TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            UNIQUE(pin_id, user_id, action)
+        )""",
         "ALTER TABLE trips ADD COLUMN audio_guide TEXT",
         "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE trips ADD COLUMN user_id INTEGER",
@@ -990,16 +1003,54 @@ def add_community_pin(lat: float, lng: float, name: str, type: str,
     )
     db.commit(); db.close()
 
+def get_user_pin_count_today(user_id: int) -> int:
+    db = _conn()
+    cutoff = int(time.time()) - 86400
+    row = db.execute(
+        "SELECT COUNT(*) AS c FROM community_pins WHERE user_id=? AND submitted_at>?",
+        (user_id, cutoff)
+    ).fetchone()
+    db.close()
+    return int(row["c"] or 0)
+
 def get_community_pins(lat: float, lng: float, radius_deg: float = 1.0) -> list:
     db = _conn()
     rows = db.execute(
         """SELECT * FROM community_pins
-           WHERE lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?
-           ORDER BY upvotes DESC LIMIT 100""",
+           WHERE hidden=0 AND lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?
+           ORDER BY upvotes DESC, submitted_at DESC LIMIT 150""",
         (lat-radius_deg, lat+radius_deg, lng-radius_deg, lng+radius_deg)
     ).fetchall()
     db.close()
     return [dict(r) for r in rows]
+
+def vote_community_pin(pin_id: int, user_id: int, action: str) -> dict:
+    if action not in {"upvote", "downvote"}:
+        return {"ok": False, "reason": "bad_action"}
+    db = _conn()
+    row = db.execute("SELECT user_id, upvotes, downvotes FROM community_pins WHERE id=?", (pin_id,)).fetchone()
+    if not row:
+        db.close()
+        return {"ok": False, "reason": "not_found"}
+    if row["user_id"] == user_id:
+        db.close()
+        return {"ok": False, "reason": "own_pin"}
+    try:
+        db.execute(
+            "INSERT INTO pin_interactions (pin_id,user_id,action,created_at) VALUES (?,?,?,?)",
+            (pin_id, user_id, action, int(time.time()))
+        )
+    except sqlite3.IntegrityError:
+        db.close()
+        return {"ok": False, "reason": "already_voted"}
+    col = "upvotes" if action == "upvote" else "downvotes"
+    db.execute(f"UPDATE community_pins SET {col}={col}+1 WHERE id=?", (pin_id,))
+    updated = db.execute("SELECT upvotes, downvotes FROM community_pins WHERE id=?", (pin_id,)).fetchone()
+    hidden = 1 if updated["downvotes"] >= 3 and updated["downvotes"] > updated["upvotes"] + 1 else 0
+    if hidden:
+        db.execute("UPDATE community_pins SET hidden=1 WHERE id=?", (pin_id,))
+    db.commit(); db.close()
+    return {"ok": True, "hidden": bool(hidden), "upvotes": updated["upvotes"], "downvotes": updated["downvotes"]}
 
 # ── Admin ─────────────────────────────────────────────────────────────────────
 

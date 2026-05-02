@@ -504,6 +504,36 @@ const QUICK_TYPES = [
     subtypes: ['Animal in road', 'Livestock loose', 'Bear / predator', 'Deer herd', 'Animal sighting'] },
 ] as const;
 
+const COMMUNITY_PIN_TYPES = [
+  { id: 'camp', label: 'Camp', icon: 'bonfire-outline', color: '#16a34a', group: 'Camps' },
+  { id: 'informal_camp', label: 'Informal', icon: 'business-outline', color: '#65a30d', group: 'Camps' },
+  { id: 'wild_camp', label: 'Wild Camp', icon: 'moon-outline', color: '#15803d', group: 'Camps' },
+  { id: 'fuel', label: 'Gas', icon: 'flash-outline', color: '#ea580c', group: 'Services' },
+  { id: 'propane', label: 'Propane', icon: 'flame-outline', color: '#f97316', group: 'Services' },
+  { id: 'water', label: 'Water', icon: 'water-outline', color: '#0284c7', group: 'Services' },
+  { id: 'dump', label: 'Dump', icon: 'trash-bin-outline', color: '#a16207', group: 'Services' },
+  { id: 'parking', label: 'Parking', icon: 'car-outline', color: '#d97706', group: 'Services' },
+  { id: 'mechanic', label: 'Mechanic', icon: 'construct-outline', color: '#f97316', group: 'Services' },
+  { id: 'restaurant', label: 'Food', icon: 'restaurant-outline', color: '#06b6d4', group: 'Community' },
+  { id: 'attraction', label: 'POI', icon: 'camera-outline', color: '#0ea5e9', group: 'Community' },
+  { id: 'shopping', label: 'Shop', icon: 'cart-outline', color: '#06b6d4', group: 'Community' },
+  { id: 'medical', label: 'Medical', icon: 'medical-outline', color: '#06b6d4', group: 'Community' },
+  { id: 'pet', label: 'Pet', icon: 'paw-outline', color: '#06b6d4', group: 'Community' },
+  { id: 'laundromat', label: 'Laundry', icon: 'shirt-outline', color: '#06b6d4', group: 'Community' },
+  { id: 'shower', label: 'Shower', icon: 'rainy-outline', color: '#06b6d4', group: 'Community' },
+  { id: 'wifi', label: 'Wifi', icon: 'wifi-outline', color: '#06b6d4', group: 'Community' },
+  { id: 'checkpoint', label: 'Checkpoint', icon: 'hand-left-outline', color: '#dc2626', group: 'Road' },
+  { id: 'road_report', label: 'Road', icon: 'trail-sign-outline', color: '#dc2626', group: 'Road' },
+  { id: 'warning', label: 'Warning', icon: 'warning-outline', color: '#ef4444', group: 'Road' },
+  { id: 'other', label: 'Other', icon: 'star-outline', color: '#38bdf8', group: 'Community' },
+] as const;
+
+type CommunityPinTypeId = typeof COMMUNITY_PIN_TYPES[number]['id'];
+
+function communityPinMeta(type?: string) {
+  return COMMUNITY_PIN_TYPES.find(t => t.id === type) ?? COMMUNITY_PIN_TYPES[COMMUNITY_PIN_TYPES.length - 1];
+}
+
 // ─── Land type color helper ──────────────────────────────────────────────────
 
 function landColor(lt: string) {
@@ -1612,6 +1642,14 @@ function MapScreen() {
   const [protomapsKey,  setProtomapsKey]  = useState('');
   const [showFilters,   setShowFilters]   = useState(false);
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
+  const [activePinFilters, setActivePinFilters] = useState<string[]>([]);
+  const [pinDropMode, setPinDropMode] = useState(false);
+  const [pendingPin, setPendingPin] = useState<{ lat: number; lng: number } | null>(null);
+  const [pinType, setPinType] = useState<CommunityPinTypeId>('camp');
+  const [pinName, setPinName] = useState('');
+  const [pinDescription, setPinDescription] = useState('');
+  const [pinSubmitting, setPinSubmitting] = useState(false);
+  const [selectedCommunityPin, setSelectedCommunityPin] = useState<Pin | null>(null);
   const [selectedCamp,  setSelectedCamp]  = useState<CampsitePin | null>(null);
   const [campDetail,    setCampDetail]    = useState<CampsiteDetail | null>(null);
   const [showCampDetail,setShowCampDetail] = useState(false);
@@ -2193,6 +2231,81 @@ function MapScreen() {
         webRef.current?.postMessage(JSON.stringify({ type: 'set_pois', pois: p }));
       })
       .catch(() => {});
+  }
+
+  function beginCommunityPinDrop(useCurrentLocation = false) {
+    setQuickReport(false);
+    setQuickTypeIdx(null);
+    setSelectedCamp(null);
+    setTappedTrail(null);
+    setTappedTileSpot(null);
+    setTappedGas(null);
+    setTappedPoi(null);
+    setSelectedCommunityPin(null);
+    if (useCurrentLocation && userLoc) {
+      setPendingPin(userLoc);
+      setPinName('');
+      setPinDescription('');
+      return;
+    }
+    setPinDropMode(true);
+    setQuickToast('Tap anywhere on the map to place a community pin');
+    setTimeout(() => setQuickToast(''), 4000);
+  }
+
+  async function submitCommunityPin() {
+    if (!pendingPin || pinSubmitting) return;
+    const meta = communityPinMeta(pinType);
+    const name = (pinName.trim() || meta.label).slice(0, 80);
+    setPinSubmitting(true);
+    try {
+      await api.submitPin({
+        lat: pendingPin.lat,
+        lng: pendingPin.lng,
+        type: pinType,
+        name,
+        description: pinDescription.trim(),
+        land_type: '',
+      });
+      const created: Pin = {
+        id: Date.now(),
+        lat: pendingPin.lat,
+        lng: pendingPin.lng,
+        type: pinType,
+        name,
+        description: pinDescription.trim(),
+        land_type: '',
+        upvotes: 0,
+        downvotes: 0,
+        submitted_at: Date.now() / 1000,
+      };
+      setCommunityPins(prev => [created, ...prev].slice(0, 150));
+      setPendingPin(null);
+      setPinName('');
+      setPinDescription('');
+      setQuickToast('+5 credits · community pin added');
+      setTimeout(() => setQuickToast(''), 3000);
+    } catch (e: any) {
+      setQuickToast(e?.status === 429 ? 'Daily pin cap reached' : e?.status === 401 || e?.status === 403 ? 'Sign in to add community pins' : 'Could not add pin');
+      setTimeout(() => setQuickToast(''), 3500);
+    } finally {
+      setPinSubmitting(false);
+    }
+  }
+
+  async function voteCommunityPin(pin: Pin, action: 'upvote' | 'downvote') {
+    try {
+      const res = action === 'upvote' ? await api.upvotePin(pin.id) : await api.downvotePin(pin.id);
+      setCommunityPins(prev => res.hidden
+        ? prev.filter(p => p.id !== pin.id)
+        : prev.map(p => p.id === pin.id ? { ...p, upvotes: res.upvotes, downvotes: res.downvotes } : p)
+      );
+      if (res.hidden) setSelectedCommunityPin(null);
+      else setSelectedCommunityPin(p => p && p.id === pin.id ? { ...p, upvotes: res.upvotes, downvotes: res.downvotes } : p);
+    } catch {
+      setQuickToast('Vote already counted');
+      setTimeout(() => setQuickToast(''), 2500);
+    }
   }
 
   useEffect(() => {
@@ -3051,9 +3164,14 @@ function MapScreen() {
       })
       .map(p => ({ lat: p.lat, lng: p.lng, name: p.name, type: p.type || 'poi' }));
   }, [activeTrip?.trip_id, pois]);
+  const visibleCommunityPins = useMemo(() => {
+    if (activePinFilters.length === 0) return communityPins;
+    const allowed = new Set(activePinFilters);
+    return communityPins.filter(p => allowed.has((p.type || 'other').toLowerCase()));
+  }, [communityPins, activePinFilters]);
   const pinList = useMemo(() =>
-    communityPins.map(p => ({ lat: p.lat, lng: p.lng, name: p.name, type: p.type })),
-    [communityPins.length]
+    visibleCommunityPins.map(p => ({ lat: p.lat, lng: p.lng, name: p.name, type: p.type })),
+    [visibleCommunityPins.length, activePinFilters.length]
   );
 
   const centerLat = waypoints[0]?.lat ?? 39.5;
@@ -3195,7 +3313,7 @@ function MapScreen() {
           gas={(activeTrip?.gas_stations ?? []).filter(g => g.lat != null && g.lng != null && isFinite(g.lat) && isFinite(g.lng)) as any}
           pois={routePois}
           reports={mapReports}
-          communityPins={communityPins}
+          communityPins={visibleCommunityPins}
           searchMarker={searchRouteCard ? { lat: searchRouteCard.lat, lng: searchRouteCard.lng, name: searchRouteCard.name } : null}
           userLoc={userLoc}
           navMode={navMode}
@@ -3233,6 +3351,18 @@ function MapScreen() {
           }}
           onBoundsChange={b => { viewportRef.current = b; setMapZoom(b.zoom ?? 10); if ((b.zoom ?? 0) >= 9) setMapMoved(true); if ((b.zoom ?? 0) < 8) setAreaCamps([]); }}
           onMapTap={(lat, lng) => {
+            if (pinDropMode && (lat == null || lng == null)) {
+              setQuickToast('Map tap did not return a coordinate. Try again.');
+              setTimeout(() => setQuickToast(''), 3500);
+              return;
+            }
+            if (pinDropMode && lat != null && lng != null) {
+              setPinDropMode(false);
+              setPendingPin({ lat, lng });
+              setPinName('');
+              setPinDescription('');
+              return;
+            }
             if (selectOnMapMode && (lat == null || lng == null)) {
               setQuickToast('Map tap did not return a coordinate. Try tapping the road surface.');
               setTimeout(() => setQuickToast(''), 4000);
@@ -3252,7 +3382,7 @@ function MapScreen() {
               }
               return;
             }
-            setSelectedCamp(null); setTappedTrail(null); setTappedTileSpot(null); setTappedGas(null); setTappedPoi(null);
+            setSelectedCamp(null); setTappedTrail(null); setTappedTileSpot(null); setTappedGas(null); setTappedPoi(null); setSelectedCommunityPin(null);
           }}
           onMapLongPress={runLandCheck}
           onCampTap={camp => {
@@ -3263,7 +3393,8 @@ function MapScreen() {
             if (camp?.lat && camp?.lng) api.getWeather(camp.lat, camp.lng, 3).then(r => setCampWeather(r)).catch(() => {});
           }}
           onGasTap={s => { setTappedGas(s); setSelectedCamp(null); setTappedTrail(null); setTappedTileSpot(null); }}
-          onPoiTap={p => { setTappedPoi(p); setSelectedCamp(null); setTappedTrail(null); setTappedTileSpot(null); }}
+          onPoiTap={p => { setTappedPoi(p); setSelectedCamp(null); setTappedTrail(null); setTappedTileSpot(null); setSelectedCommunityPin(null); }}
+          onCommunityPinTap={p => { setSelectedCommunityPin(p); setSelectedCamp(null); setTappedTrail(null); setTappedTileSpot(null); setTappedGas(null); setTappedPoi(null); }}
           onTileCampTap={(name, kind, lat, lng) => {
             setTappedTileSpot({ name, kind, lat, lng });
           }}
@@ -3589,9 +3720,16 @@ function MapScreen() {
 
         <TouchableOpacity
           style={[s.ctrlBtn, showFilters && { backgroundColor: '#14b8a6dd', borderColor: '#14b8a6' }]}
-          onPress={() => { setShowFilters(p => !p); if (showFilters) { setActiveFilters([]); setSelectedCamp(null); } }}
+          onPress={() => { setShowFilters(p => !p); if (showFilters) { setActiveFilters([]); setActivePinFilters([]); setSelectedCamp(null); } }}
         >
           <Ionicons name="filter" size={20} color={showFilters ? '#fff' : OVR.text} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[s.ctrlBtn, pinDropMode && { backgroundColor: '#f97316dd', borderColor: '#f97316' }]}
+          onPress={() => beginCommunityPinDrop(false)}
+        >
+          <Ionicons name="location-outline" size={20} color={pinDropMode ? '#fff' : OVR.text} />
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -3781,6 +3919,28 @@ function MapScreen() {
                     prev.includes(f.id) ? prev.filter(x => x !== f.id) : [...prev, f.id]
                   )}>
                   <Ionicons name={f.icon} size={13} color={active ? '#fff' : OVR.text2} style={{ marginRight: 4 }} />
+                  <Text style={[s.filterChipText, active && { color: '#fff' }]}>{f.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+          <View style={s.filterSectionHeader}>
+            <Text style={s.filterSectionTitle}>COMMUNITY PINS</Text>
+            {activePinFilters.length > 0 && (
+              <TouchableOpacity onPress={() => setActivePinFilters([])}>
+                <Text style={s.filterClearText}>SHOW ALL</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[s.filterScroll, { paddingTop: 0 }]}>
+            {COMMUNITY_PIN_TYPES.map(f => {
+              const active = activePinFilters.includes(f.id);
+              return (
+                <TouchableOpacity key={f.id} style={[s.filterChip, active && { backgroundColor: f.color, borderColor: f.color }]}
+                  onPress={() => setActivePinFilters(prev =>
+                    prev.includes(f.id) ? prev.filter(x => x !== f.id) : [...prev, f.id]
+                  )}>
+                  <Ionicons name={f.icon as any} size={13} color={active ? '#fff' : f.color} style={{ marginRight: 4 }} />
                   <Text style={[s.filterChipText, active && { color: '#fff' }]}>{f.label}</Text>
                 </TouchableOpacity>
               );
@@ -4500,7 +4660,7 @@ function MapScreen() {
       </Modal>
 
       {/* ── Search This Area (native button — reliable on all platforms) ── */}
-      {(mapMoved || isLoadingAreaCamps || searchResult !== null || activeFilters.length > 0) && !navMode && !showSearch && !selectedCamp && !(showPanel && activeTrip) && mapZoom >= 9 && (
+      {(mapMoved || isLoadingAreaCamps || searchResult !== null || activeFilters.length > 0 || activePinFilters.length > 0) && !navMode && !showSearch && !selectedCamp && !selectedCommunityPin && !(showPanel && activeTrip) && mapZoom >= 9 && (
         <View style={s.searchAreaWrap}>
           <TouchableOpacity
             style={[s.searchAreaBtn, isLoadingAreaCamps && s.searchAreaBtnLoading]}
@@ -4534,8 +4694,8 @@ function MapScreen() {
                       : searchResult.count === 0
                         ? 'NO CAMPS FOUND HERE'
                         : `${searchResult.count} CAMP${searchResult.count !== 1 ? 'S' : ''} FOUND`
-                  : activeFilters.length > 0
-                    ? `SEARCH · ${activeFilters.length} FILTER${activeFilters.length !== 1 ? 'S' : ''} ACTIVE`
+                  : activeFilters.length + activePinFilters.length > 0
+                    ? `SEARCH · ${activeFilters.length + activePinFilters.length} FILTER${activeFilters.length + activePinFilters.length !== 1 ? 'S' : ''} ACTIVE`
                     : 'SEARCH THIS AREA'}
             </Text>
           </TouchableOpacity>
@@ -4917,7 +5077,7 @@ function MapScreen() {
       })()}
 
       {/* ── Waze-style quick report (two-step: type → subtype) ─────────────── */}
-      {userLoc && !showSearch && !selectedCamp && (navMode || mapZoom >= 10) && (
+      {userLoc && !showSearch && !selectedCamp && !selectedCommunityPin && (navMode || mapZoom >= 10) && (
         <View style={[s.quickReportWrap, navMode && s.quickReportWrapNav]} pointerEvents="box-none">
           {!!quickToast && (
             <View style={s.quickToast}>
@@ -5001,13 +5161,22 @@ function MapScreen() {
             </View>
           )}
           {!navMode && (
-            <TouchableOpacity
-              style={[s.quickReportFab, quickReport && s.quickReportFabActive]}
-              onPress={() => { setQuickTypeIdx(null); setQuickReport(p => !p); }}
-            >
-              <Ionicons name="warning" size={13} color={quickReport ? '#fff' : '#f59e0b'} />
-              <Text style={[s.quickReportFabText, quickReport && s.quickReportFabTextActive]}>REPORT</Text>
-            </TouchableOpacity>
+            <View style={{ gap: 8 }}>
+              <TouchableOpacity
+                style={[s.quickReportFab, pinDropMode && { backgroundColor: '#f97316', borderColor: '#f97316' }]}
+                onPress={() => beginCommunityPinDrop(false)}
+              >
+                <Ionicons name="location-outline" size={13} color={pinDropMode ? '#fff' : '#f97316'} />
+                <Text style={[s.quickReportFabText, pinDropMode && s.quickReportFabTextActive]}>PIN</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.quickReportFab, quickReport && s.quickReportFabActive]}
+                onPress={() => { setQuickTypeIdx(null); setQuickReport(p => !p); }}
+              >
+                <Ionicons name="warning" size={13} color={quickReport ? '#fff' : '#f59e0b'} />
+                <Text style={[s.quickReportFabText, quickReport && s.quickReportFabTextActive]}>REPORT</Text>
+              </TouchableOpacity>
+            </View>
           )}
         </View>
       )}
@@ -5539,6 +5708,110 @@ function MapScreen() {
         </Modal>
       )}
 
+      {/* ── Community pin card ── */}
+      {selectedCommunityPin && (() => {
+        const meta = communityPinMeta(selectedCommunityPin.type);
+        return (
+          <Modal visible transparent animationType="slide" onRequestClose={() => setSelectedCommunityPin(null)}>
+            <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setSelectedCommunityPin(null)}>
+              <View style={s.wpSheet}>
+                <View style={s.daySheetHandle} />
+                <View style={s.wpSheetHeader}>
+                  <View style={[s.pinIconBadge, { backgroundColor: meta.color }]}>
+                    <Ionicons name={meta.icon as any} size={17} color="#fff" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.wpSheetName} numberOfLines={2}>{selectedCommunityPin.name || meta.label}</Text>
+                    <Text style={s.wpSheetMeta}>
+                      {meta.label.toUpperCase()} · {selectedCommunityPin.upvotes ?? 0} up · {selectedCommunityPin.downvotes ?? 0} down
+                    </Text>
+                    {!!selectedCommunityPin.description && (
+                      <Text style={s.pinDescription} numberOfLines={3}>{selectedCommunityPin.description}</Text>
+                    )}
+                  </View>
+                </View>
+                <View style={s.wpSheetActions}>
+                  <TouchableOpacity style={s.wpSheetNavBtn} onPress={() => { setSelectedCommunityPin(null); navigateToCamp(selectedCommunityPin); }}>
+                    <Ionicons name="navigate" size={14} color="#fff" />
+                    <Text style={s.wpSheetNavText}>NAVIGATE</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={s.wpSheetDayBtn} onPress={() => voteCommunityPin(selectedCommunityPin, 'upvote')}>
+                    <Ionicons name="thumbs-up-outline" size={14} color={OVR.text2} />
+                    <Text style={s.wpSheetDayText}>GOOD</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[s.wpSheetDayBtn, { borderColor: '#ef4444' + '44' }]} onPress={() => voteCommunityPin(selectedCommunityPin, 'downvote')}>
+                    <Ionicons name="thumbs-down-outline" size={14} color="#ef4444" />
+                    <Text style={[s.wpSheetDayText, { color: '#ef4444' }]}>BAD</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableOpacity>
+          </Modal>
+        );
+      })()}
+
+      {/* ── Drop community pin ── */}
+      {pendingPin && (
+        <Modal visible transparent animationType="slide" onRequestClose={() => setPendingPin(null)}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.modalOverlay}>
+            <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setPendingPin(null)} />
+            <View style={s.wpSheet}>
+              <View style={s.daySheetHandle} />
+              <View style={s.pinSheetHeader}>
+                <View>
+                  <Text style={s.daySheetTitle}>DROP COMMUNITY PIN</Text>
+                  <Text style={s.daySheetSub}>{pendingPin.lat.toFixed(5)}, {pendingPin.lng.toFixed(5)}</Text>
+                </View>
+                <TouchableOpacity style={s.pinCloseBtn} onPress={() => setPendingPin(null)}>
+                  <Ionicons name="close" size={16} color={OVR.text2} />
+                </TouchableOpacity>
+              </View>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.pinTypeScroll}>
+                {COMMUNITY_PIN_TYPES.map(t => {
+                  const active = pinType === t.id;
+                  return (
+                    <TouchableOpacity
+                      key={t.id}
+                      style={[s.pinTypeChip, { borderColor: t.color + '55', backgroundColor: active ? t.color : t.color + '18' }]}
+                      onPress={() => setPinType(t.id)}
+                    >
+                      <Ionicons name={t.icon as any} size={15} color={active ? '#fff' : t.color} />
+                      <Text style={[s.pinTypeText, { color: active ? '#fff' : t.color }]}>{t.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+              <TextInput
+                value={pinName}
+                onChangeText={setPinName}
+                placeholder={`${communityPinMeta(pinType).label} name`}
+                placeholderTextColor={OVR.text3}
+                style={s.pinInput}
+                maxLength={80}
+              />
+              <TextInput
+                value={pinDescription}
+                onChangeText={setPinDescription}
+                placeholder="Details, access notes, hours, water type..."
+                placeholderTextColor={OVR.text3}
+                style={[s.pinInput, s.pinTextArea]}
+                maxLength={500}
+                multiline
+              />
+              <View style={s.wpSheetActions}>
+                <TouchableOpacity style={s.wpSheetNavBtn} onPress={submitCommunityPin} disabled={pinSubmitting}>
+                  {pinSubmitting ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="checkmark" size={14} color="#fff" />}
+                  <Text style={s.wpSheetNavText}>ADD PIN</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={s.wpSheetDayBtn} onPress={() => setPendingPin(null)}>
+                  <Text style={s.wpSheetDayText}>CANCEL</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
+      )}
+
       {/* ── Waypoint tap sheet ── */}
       {tappedWp && (
         <Modal visible transparent animationType="slide" onRequestClose={() => setTappedWp(null)}>
@@ -5908,6 +6181,12 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   filterChipActive: { backgroundColor: '#14b8a6', borderColor: '#14b8a6' },
   filterChipText: { color: C.text2, fontSize: 11, fontFamily: mono, fontWeight: '600' },
+  filterSectionHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingTop: 4,
+  },
+  filterSectionTitle: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
+  filterClearText: { color: '#14b8a6', fontSize: 9, fontFamily: mono, fontWeight: '900' },
   filterLoading: { alignItems: 'center', paddingBottom: 8 },
 
   // ── Campsite quick card (Dyrt-style: white card, photo left, bold info right)
@@ -6474,6 +6753,37 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
   },
   wpSheetDayText: { color: OVR.text2, fontSize: 12, fontFamily: mono, fontWeight: '700' },
+  pinIconBadge: {
+    width: 34, height: 34, borderRadius: 17,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2, borderColor: '#fff',
+  },
+  pinDescription: { color: OVR.text2, fontSize: 12, lineHeight: 17, marginTop: 8 },
+  pinSheetHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 },
+  pinCloseBtn: {
+    width: 30, height: 30, borderRadius: 15,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: OVR.border,
+  },
+  pinTypeScroll: { gap: 7, paddingVertical: 10 },
+  pinTypeChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    borderWidth: 1, borderRadius: 18,
+    paddingHorizontal: 11, paddingVertical: 7,
+  },
+  pinTypeText: { fontSize: 10, fontFamily: mono, fontWeight: '900' },
+  pinInput: {
+    color: OVR.text,
+    backgroundColor: OVR.border2,
+    borderWidth: 1,
+    borderColor: OVR.border,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    fontSize: 13,
+    marginBottom: 10,
+  },
+  pinTextArea: { minHeight: 74, textAlignVertical: 'top' },
 
   // Layer sheet
   layerSheet: { flex: 1, backgroundColor: C.bg },

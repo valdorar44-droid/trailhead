@@ -131,6 +131,8 @@ export const api = {
     req('/api/pins', { method: 'POST', body: JSON.stringify(data) }),
   getNearbyPins: (lat: number, lng: number, radius = 1.0) =>
     req<Pin[]>(`/api/pins?lat=${lat}&lng=${lng}&radius=${radius}`),
+  upvotePin: (id: number) => req<{ ok: boolean; upvotes: number; downvotes: number; hidden: boolean }>(`/api/pins/${id}/upvote`, { method: 'POST' }),
+  downvotePin: (id: number) => req<{ ok: boolean; upvotes: number; downvotes: number; hidden: boolean }>(`/api/pins/${id}/downvote`, { method: 'POST' }),
 
   getAudioGuide: (tripId: string) =>
     req<Record<string, string>>(`/api/trip/${tripId}/guide`),
@@ -297,6 +299,7 @@ export interface LeaderboardEntry {
 }
 export interface Pin {
   id: number; lat: number; lng: number; name: string; type: string; description: string; land_type: string;
+  submitted_at?: number; upvotes?: number; downvotes?: number; hidden?: number;
 }
 export interface PinPayload {
   lat: number; lng: number; name: string; type?: string; description?: string; land_type?: string;

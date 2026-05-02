@@ -40,6 +40,7 @@ from db.store import (
     save_push_token, get_push_token,
     create_plan_job, get_plan_job, update_plan_job,
     submit_field_report, get_field_reports, get_field_report_summary,
+    get_user_pin_count_today, vote_community_pin,
 )
 
 # ── Credit economy ─────────────────────────────────────────────────────────────
@@ -1466,22 +1467,50 @@ async def get_camp_field_report_summary(camp_id: str):
 
 # ── Community pins ─────────────────────────────────────────────────────────────
 
+VALID_PIN_TYPES = {
+    "camp", "informal_camp", "wild_camp", "fuel", "propane", "water", "dump",
+    "parking", "mechanic", "restaurant", "attraction", "shopping", "medical",
+    "pet", "laundromat", "shower", "wifi", "checkpoint", "road_report",
+    "warning", "other",
+}
+
 class PinRequest(BaseModel):
     lat: float; lng: float; name: str
     type: str = "camp"; description: str = ""; land_type: str = "BLM"
 
 @app.post("/api/pins")
-async def submit_pin(body: PinRequest, user: dict | None = Depends(_optional_user)):
-    add_community_pin(body.lat, body.lng, body.name, body.type,
-                      body.description, body.land_type,
-                      user_id=user["id"] if user else None)
-    if user:
-        add_credits(user["id"], 5, f"Community pin: {body.name}")
+async def submit_pin(body: PinRequest, user: dict = Depends(_current_user)):
+    if get_user_pin_count_today(user["id"]) >= 15:
+        raise HTTPException(429, "Daily community pin cap reached")
+    pin_type = (body.type or "other").strip().lower()
+    if pin_type not in VALID_PIN_TYPES:
+        pin_type = "other"
+    name = (body.name or "").strip()[:80]
+    if not name:
+        raise HTTPException(400, "Pin name is required")
+    add_community_pin(body.lat, body.lng, name, pin_type,
+                      (body.description or "").strip()[:500], (body.land_type or "").strip()[:80],
+                      user_id=user["id"])
+    add_credits(user["id"], 5, f"Community pin: {name}")
     return {"status": "ok"}
 
 @app.get("/api/pins")
 async def nearby_pins(lat: float, lng: float, radius: float = 1.0):
     return get_community_pins(lat, lng, radius_deg=radius)
+
+@app.post("/api/pins/{pin_id}/upvote")
+async def upvote_pin(pin_id: int, user: dict = Depends(_current_user)):
+    result = vote_community_pin(pin_id, user["id"], "upvote")
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("reason", "vote_failed"))
+    return result
+
+@app.post("/api/pins/{pin_id}/downvote")
+async def downvote_pin(pin_id: int, user: dict = Depends(_current_user)):
+    result = vote_community_pin(pin_id, user["id"], "downvote")
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("reason", "vote_failed"))
+    return result
 
 
 # ── Reports ───────────────────────────────────────────────────────────────────

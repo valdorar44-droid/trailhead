@@ -92,6 +92,7 @@ export interface NativeMapProps {
   onCampTap:        (camp: CampsitePin) => void;
   onGasTap?:        (station: { name: string; lat: number; lng: number }) => void;
   onPoiTap?:        (poi: { name: string; type: string; lat: number; lng: number }) => void;
+  onCommunityPinTap?: (pin: Pin) => void;
   onTileCampTap:    (name: string, kind: string, lat: number, lng: number) => void;
   onBaseCampTap:    (name: string, lat: number, lng: number, landType: string) => void;
   onTrailTap:       (name: string, lat: number, lng: number) => void;
@@ -136,6 +137,34 @@ const POI_ICON_NAMES: Record<string, keyof typeof Ionicons.glyphMap> = {
   peak: 'triangle-outline',
   hot_spring: 'flame-outline',
 };
+
+const COMMUNITY_PIN_VISUALS: Record<string, { color: string; icon: keyof typeof Ionicons.glyphMap }> = {
+  camp: { color: '#16a34a', icon: 'bonfire-outline' },
+  informal_camp: { color: '#65a30d', icon: 'business-outline' },
+  wild_camp: { color: '#15803d', icon: 'moon-outline' },
+  fuel: { color: '#ea580c', icon: 'flash-outline' },
+  propane: { color: '#f97316', icon: 'flame-outline' },
+  water: { color: '#0284c7', icon: 'water-outline' },
+  dump: { color: '#a16207', icon: 'trash-bin-outline' },
+  parking: { color: '#d97706', icon: 'car-outline' },
+  mechanic: { color: '#f97316', icon: 'construct-outline' },
+  restaurant: { color: '#06b6d4', icon: 'restaurant-outline' },
+  attraction: { color: '#0ea5e9', icon: 'camera-outline' },
+  shopping: { color: '#06b6d4', icon: 'cart-outline' },
+  medical: { color: '#06b6d4', icon: 'medical-outline' },
+  pet: { color: '#06b6d4', icon: 'paw-outline' },
+  laundromat: { color: '#06b6d4', icon: 'shirt-outline' },
+  shower: { color: '#06b6d4', icon: 'rainy-outline' },
+  wifi: { color: '#06b6d4', icon: 'wifi-outline' },
+  checkpoint: { color: '#dc2626', icon: 'hand-left-outline' },
+  road_report: { color: '#dc2626', icon: 'trail-sign-outline' },
+  warning: { color: '#ef4444', icon: 'warning-outline' },
+  other: { color: '#38bdf8', icon: 'star-outline' },
+};
+
+function communityPinVisual(type?: string) {
+  return COMMUNITY_PIN_VISUALS[(type || '').toLowerCase()] ?? COMMUNITY_PIN_VISUALS.other;
+}
 
 // ── Helper: coords → GeoJSON ──────────────────────────────────────────────────
 function lineFC(coords: [number,number][]) {
@@ -199,7 +228,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     mapLayer, routeOpts,
     showLandOverlay, showUsgsOverlay, showFire, showAva, showRadar, showMvum,
     onMapReady, onBoundsChange, onMapTap, onMapLongPress,
-    onCampTap, onGasTap, onPoiTap, onTileCampTap, onBaseCampTap, onTrailTap, onWaypointTap,
+    onCampTap, onGasTap, onPoiTap, onCommunityPinTap, onTileCampTap, onBaseCampTap, onTrailTap, onWaypointTap,
     onRouteReady, onRoutePersist, onOffRoute, onOffRouteWarn, onBackOnRoute,
   } = props;
 
@@ -1031,20 +1060,22 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       ))}
 
       {/* ── Community pins ────────────────────────────────────────────── */}
-      {communityPins.length > 0 && (
-        <MapLibreGL.ShapeSource
-          id="community-pins"
-          shape={pointFC(communityPins.map(p => ({
-            type: 'Feature', geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
-            properties: { name: p.name, type: p.type || 'pin' },
-          })))}
-        >
-          <MapLibreGL.CircleLayer
-            id="community-circle"
-            style={{ circleRadius: 8, circleColor: '#f97316', circleOpacity: 0.85, circleStrokeWidth: 1.5, circleStrokeColor: '#fff' }}
-          />
-        </MapLibreGL.ShapeSource>
-      )}
+      {communityPins.slice(0, 150).map((pin, i) => {
+        const visual = communityPinVisual(pin.type);
+        return (
+          <MapLibreGL.MarkerView
+            key={`community-pin-${pin.id}-${pin.lat}-${pin.lng}-${i}`}
+            id={`community-pin-${pin.id}-${i}`}
+            coordinate={[pin.lng, pin.lat]}
+          >
+            <IconPin
+              color={visual.color}
+              icon={visual.icon}
+              onPress={() => onCommunityPinTap?.(pin)}
+            />
+          </MapLibreGL.MarkerView>
+        );
+      })}
 
       {/* ── Radar (RainViewer) ───────────────────────────────────────── */}
       {showRadar && radarUrl && (

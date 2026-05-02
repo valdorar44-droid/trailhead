@@ -1604,6 +1604,7 @@ function MapScreen() {
   const [userSpeed,     setUserSpeed]     = useState<number | null>(null);
   const [userHeading,   setUserHeading]   = useState<number | null>(null);
   const [quickReport,   setQuickReport]   = useState(false);
+  const [controlsCollapsed, setControlsCollapsed] = useState(false);
   const [quickToast,    setQuickToast]    = useState('');
   const [quickTypeIdx,  setQuickTypeIdx]  = useState<number | null>(null);
   const [navMode,   setNavMode]   = useState(false);
@@ -3639,159 +3640,154 @@ function MapScreen() {
         showsVerticalScrollIndicator={false}
         bounces={false}
       >
-        <TouchableOpacity style={s.ctrlBtn} onPress={() => {
-          if (!userLoc) return;
-          webRef.current?.postMessage(JSON.stringify({ type: 'locate', lat: userLoc.lat, lng: userLoc.lng }));
-          nativeMapRef.current?.locate(userLoc.lat, userLoc.lng);
-          const deg = 0.35;
-          const b = { n: userLoc.lat + deg, s: userLoc.lat - deg, e: userLoc.lng + deg, w: userLoc.lng - deg, zoom: 10 };
-          viewportRef.current = b;
-          loadCampsInArea(b, activeFilters);
-        }}>
-          <Ionicons name="locate" size={20} color={OVR.text} />
+        <TouchableOpacity style={s.ctrlBtn} onPress={() => setControlsCollapsed(v => !v)}>
+          <Ionicons name={controlsCollapsed ? 'chevron-down' : 'chevron-up'} size={20} color={C.text} />
         </TouchableOpacity>
 
-        <TouchableOpacity style={s.ctrlBtn} onPress={switchLayer}>
-          <Text style={s.layerText}>{layerLabel[mapLayer]}</Text>
-        </TouchableOpacity>
+        {!controlsCollapsed && (
+          <>
+            <TouchableOpacity style={s.ctrlBtn} onPress={() => {
+              if (!userLoc) return;
+              webRef.current?.postMessage(JSON.stringify({ type: 'locate', lat: userLoc.lat, lng: userLoc.lng }));
+              nativeMapRef.current?.locate(userLoc.lat, userLoc.lng);
+              const deg = 0.35;
+              const b = { n: userLoc.lat + deg, s: userLoc.lat - deg, e: userLoc.lng + deg, w: userLoc.lng - deg, zoom: 10 };
+              viewportRef.current = b;
+              loadCampsInArea(b, activeFilters);
+            }}>
+              <Ionicons name="locate" size={20} color={OVR.text} />
+            </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[s.ctrlBtn, showLands && { backgroundColor: '#16a34a99', borderColor: '#22c55e' }]}
-          onPress={() => {
-            const next = !showLands;
-            setShowLands(next);
-            webRef.current?.postMessage(JSON.stringify({ type: 'set_land_overlay', show: next }));
-          }}
-        >
-          <Text style={[s.layerText, showLands && { color: '#22c55e' }]}>LANDS</Text>
-        </TouchableOpacity>
+            <TouchableOpacity style={s.ctrlBtn} onPress={switchLayer}>
+              <Text style={s.layerText}>{layerLabel[mapLayer]}</Text>
+            </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[s.ctrlBtn, showUsgs && { backgroundColor: '#0369a199', borderColor: '#0ea5e9' }]}
-          onPress={() => {
-            const next = !showUsgs;
-            setShowUsgs(next);
-            webRef.current?.postMessage(JSON.stringify({ type: 'set_usgs_overlay', show: next }));
-          }}
-        >
-          <Text style={[s.layerText, showUsgs && { color: '#0ea5e9' }]}>TRAILS</Text>
-        </TouchableOpacity>
+            <TouchableOpacity
+              style={[s.ctrlBtn, showLands && { backgroundColor: '#16a34a99', borderColor: '#22c55e' }]}
+              onPress={() => {
+                const next = !showLands;
+                setShowLands(next);
+                webRef.current?.postMessage(JSON.stringify({ type: 'set_land_overlay', show: next }));
+              }}
+            >
+              <Text style={[s.layerText, showLands && { color: '#22c55e' }]}>LANDS</Text>
+            </TouchableOpacity>
 
-        {waypoints.length > 0 && (
-          <TouchableOpacity
-            style={[s.ctrlBtn, navMode && { backgroundColor: C.green + 'dd', borderColor: C.green }]}
-            onPress={() => {
-              if (navMode) { setNavMode(false); return; }
-              const days = [...new Set(waypoints.map(w => w.day))].sort((a, b) => a - b);
-              if (days.length <= 1) { startDayNav('all'); return; }
-              setShowDayModal(true);
-            }}
-          >
-            <Ionicons name="navigate" size={20} color={navMode ? '#fff' : OVR.text} />
-          </TouchableOpacity>
-        )}
+            <TouchableOpacity
+              style={[s.ctrlBtn, showUsgs && { backgroundColor: '#0369a199', borderColor: '#0ea5e9' }]}
+              onPress={() => {
+                const next = !showUsgs;
+                setShowUsgs(next);
+                webRef.current?.postMessage(JSON.stringify({ type: 'set_usgs_overlay', show: next }));
+              }}
+            >
+              <Text style={[s.layerText, showUsgs && { color: '#0ea5e9' }]}>TRAILS</Text>
+            </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[s.ctrlBtn, showSearch && { backgroundColor: '#3b82f6dd', borderColor: '#3b82f6' }]}
-          onPress={() => { setShowSearch(p => !p); setSearchResults([]); setSearchQuery(''); }}
-        >
-          <Ionicons name="search" size={20} color={showSearch ? '#fff' : OVR.text} />
-        </TouchableOpacity>
+            {waypoints.length > 0 && (
+              <TouchableOpacity
+                style={[s.ctrlBtn, navMode && { backgroundColor: C.green + 'dd', borderColor: C.green }]}
+                onPress={() => {
+                  if (navMode) { setNavMode(false); return; }
+                  const days = [...new Set(waypoints.map(w => w.day))].sort((a, b) => a - b);
+                  if (days.length <= 1) { startDayNav('all'); return; }
+                  setShowDayModal(true);
+                }}
+              >
+                <Ionicons name="navigate" size={20} color={navMode ? '#fff' : OVR.text} />
+              </TouchableOpacity>
+            )}
 
-        {waypoints.length > 0 && (
-          <TouchableOpacity
-            style={[s.ctrlBtn, isDownloading && { backgroundColor: C.orange + 'dd', borderColor: C.orange }]}
-            onPress={() => {
-              if (USE_NATIVE_MAP) {
-                setShowOfflineModal(true);
-                return;
+            <TouchableOpacity
+              style={[s.ctrlBtn, showSearch && { backgroundColor: '#3b82f6dd', borderColor: '#3b82f6' }]}
+              onPress={() => { setShowSearch(p => !p); setSearchResults([]); setSearchQuery(''); }}
+            >
+              <Ionicons name="search" size={20} color={showSearch ? '#fff' : OVR.text} />
+            </TouchableOpacity>
+
+            {waypoints.length > 0 && (
+              <TouchableOpacity
+                style={[s.ctrlBtn, isDownloading && { backgroundColor: C.orange + 'dd', borderColor: C.orange }]}
+                onPress={() => {
+                  if (USE_NATIVE_MAP) {
+                    setShowOfflineModal(true);
+                    return;
+                  }
+                  if (isDownloading) {
+                    webRef.current?.postMessage(JSON.stringify({ type: 'cancel_download' }));
+                    setIsDownloading(false);
+                  } else {
+                    const vpLabel = 'area-' + Date.now();
+                    setIsDownloading(true);
+                    setDownloadLabel(vpLabel);
+                    webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles', label: vpLabel, minZ: 10, maxZ: 17 }));
+                  }
+                }}
+              >
+                <Ionicons
+                  name={isDownloading ? 'close-circle-outline' : offlineSaved ? 'cloud-done-outline' : 'cloud-download-outline'}
+                  size={20}
+                  color={isDownloading ? '#fff' : offlineSaved ? C.green : OVR.text}
+                />
+              </TouchableOpacity>
+            )}
+
+            <TouchableOpacity
+              style={[s.ctrlBtn, showFilters && { backgroundColor: '#14b8a6dd', borderColor: '#14b8a6' }]}
+              onPress={() => { setShowFilters(p => !p); if (showFilters) { setActiveFilters([]); setActivePinFilters([]); setSelectedCamp(null); } }}
+            >
+              <Ionicons name="filter" size={20} color={showFilters ? '#fff' : OVR.text} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[s.ctrlBtn, isLoadingAreaCamps && { borderColor: '#14b8a6' }]}
+              onPress={() => {
+                const center = userLoc ?? (waypoints[0] ? { lat: waypoints[0].lat, lng: waypoints[0].lng } : null);
+                if (!center) return;
+                const deg = 0.4;
+                const bounds = { n: center.lat + deg, s: center.lat - deg, e: center.lng + deg, w: center.lng - deg, zoom: 10 };
+                viewportRef.current = bounds;
+                loadCampsInArea(bounds, activeFilters);
+              }}
+            >
+              {isLoadingAreaCamps
+                ? <ActivityIndicator size="small" color="#14b8a6" />
+                : <Ionicons name="trail-sign-outline" size={20} color={OVR.text} />
               }
-              if (isDownloading) {
-                webRef.current?.postMessage(JSON.stringify({ type: 'cancel_download' }));
-                setIsDownloading(false);
-              } else {
-                const vpLabel = 'area-' + Date.now();
-                setIsDownloading(true);
-                setDownloadLabel(vpLabel);
-                webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles', label: vpLabel, minZ: 10, maxZ: 17 }));
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[s.ctrlBtn, showPois && { backgroundColor: '#3b82f6dd', borderColor: '#3b82f6' }]}
+              onPress={() => setShowPois(p => !p)}
+            >
+              <Ionicons name="water-outline" size={20} color={showPois ? '#fff' : OVR.text} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[s.ctrlBtn, { borderColor: C.border }]}
+              onPress={() => setShowOfflineModal(true)}
+            >
+              <Ionicons name="map-outline" size={18} color={C.text2} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[s.ctrlBtn, showLayerSheet && { backgroundColor: '#6366f1dd', borderColor: '#6366f1' }]}
+              onPress={() => setShowLayerSheet(true)}
+            >
+              <Ionicons name="layers-outline" size={20} color={showLayerSheet ? '#fff' : OVR.text} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[s.ctrlBtn, nearbyNarration != null && { backgroundColor: '#f97316dd', borderColor: '#f97316' }]}
+              onPress={nearbyLoading ? undefined : handleNearbyAudio}
+              disabled={nearbyLoading}
+            >
+              {nearbyLoading
+                ? <ActivityIndicator size="small" color={C.orange} />
+                : <Ionicons name="headset-outline" size={20} color={nearbyNarration != null ? '#fff' : OVR.text} />
               }
-            }}
-          >
-            <Ionicons
-              name={isDownloading ? 'close-circle-outline' : offlineSaved ? 'cloud-done-outline' : 'cloud-download-outline'}
-              size={20}
-              color={isDownloading ? '#fff' : offlineSaved ? C.green : OVR.text}
-            />
-          </TouchableOpacity>
-        )}
-
-        <TouchableOpacity
-          style={[s.ctrlBtn, showFilters && { backgroundColor: '#14b8a6dd', borderColor: '#14b8a6' }]}
-          onPress={() => { setShowFilters(p => !p); if (showFilters) { setActiveFilters([]); setActivePinFilters([]); setSelectedCamp(null); } }}
-        >
-          <Ionicons name="filter" size={20} color={showFilters ? '#fff' : OVR.text} />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[s.ctrlBtn, pinDropMode && { backgroundColor: '#f97316dd', borderColor: '#f97316' }]}
-          onPress={() => beginCommunityPinDrop(false)}
-        >
-          <Ionicons name="location-outline" size={20} color={pinDropMode ? '#fff' : OVR.text} />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[s.ctrlBtn, isLoadingAreaCamps && { borderColor: '#14b8a6' }]}
-          onPress={() => {
-            const center = userLoc ?? (waypoints[0] ? { lat: waypoints[0].lat, lng: waypoints[0].lng } : null);
-            if (!center) return;
-            const deg = 0.4;
-            const bounds = { n: center.lat + deg, s: center.lat - deg, e: center.lng + deg, w: center.lng - deg, zoom: 10 };
-            viewportRef.current = bounds;
-            loadCampsInArea(bounds, activeFilters);
-          }}
-        >
-          {isLoadingAreaCamps
-            ? <ActivityIndicator size="small" color="#14b8a6" />
-            : <Ionicons name="trail-sign-outline" size={20} color={OVR.text} />
-          }
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[s.ctrlBtn, showPois && { backgroundColor: '#3b82f6dd', borderColor: '#3b82f6' }]}
-          onPress={() => setShowPois(p => !p)}
-        >
-          <Ionicons name="water-outline" size={20} color={showPois ? '#fff' : OVR.text} />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[s.ctrlBtn, { borderColor: C.border }]}
-          onPress={() => setShowOfflineModal(true)}
-        >
-          <Ionicons name="map-outline" size={18} color={C.text2} />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[s.ctrlBtn, showLayerSheet && { backgroundColor: '#6366f1dd', borderColor: '#6366f1' }]}
-          onPress={() => setShowLayerSheet(true)}
-        >
-          <Ionicons name="layers-outline" size={20} color={showLayerSheet ? '#fff' : OVR.text} />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[s.ctrlBtn, nearbyNarration != null && { backgroundColor: '#f97316dd', borderColor: '#f97316' }]}
-          onPress={nearbyLoading ? undefined : handleNearbyAudio}
-          disabled={nearbyLoading}
-        >
-          {nearbyLoading
-            ? <ActivityIndicator size="small" color={C.orange} />
-            : <Ionicons name="headset-outline" size={20} color={nearbyNarration != null ? '#fff' : OVR.text} />
-          }
-        </TouchableOpacity>
-
-        {!navMode && (
-          <TouchableOpacity style={s.ctrlBtn} onPress={() => setShowPanel(p => !p)}>
-            <Ionicons name={showPanel ? 'chevron-down' : 'chevron-up'} size={20} color={C.text} />
-          </TouchableOpacity>
+            </TouchableOpacity>
+          </>
         )}
       </ScrollView>
 
@@ -5084,7 +5080,7 @@ function MapScreen() {
       })()}
 
       {/* ── Waze-style quick report (two-step: type → subtype) ─────────────── */}
-      {userLoc && !showSearch && !selectedCamp && !selectedCommunityPin && (navMode || mapZoom >= 10) && (
+      {userLoc && !showSearch && !selectedCamp && !selectedCommunityPin && (
         <View style={[s.quickReportWrap, navMode && s.quickReportWrapNav]} pointerEvents="box-none">
           {!!quickToast && (
             <View style={s.quickToast}>

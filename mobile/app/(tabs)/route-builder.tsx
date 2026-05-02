@@ -1,14 +1,14 @@
 import { useMemo, useRef, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput,
-  ActivityIndicator, Modal, Alert,
+  ActivityIndicator, Modal, Alert, Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import NativeMap, { NativeMapHandle } from '@/components/NativeMap';
 import PaywallModal from '@/components/PaywallModal';
-import { api, CampFullness, CampsiteDetail, CampsitePin, GasStation, OsmPoi, PaywallError, TripResult, Waypoint, WeatherForecast } from '@/lib/api';
+import { api, CampFullness, CampsiteDetail, CampsiteInsight, CampsitePin, GasStation, OsmPoi, PaywallError, TripResult, Waypoint, WeatherForecast } from '@/lib/api';
 import { saveOfflineTrip } from '@/lib/offlineTrips';
 import { useStore } from '@/lib/store';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
@@ -77,6 +77,70 @@ function stopIcon(type: string): keyof typeof Ionicons.glyphMap {
   return 'navigate-outline';
 }
 
+function landColor(lt?: string | null) {
+  if (!lt) return { bg: '#f1f5f9', text: '#475569', border: '#cbd5e1' };
+  const l = lt.toLowerCase();
+  if (l.includes('national forest') || l.includes('usfs') || l.includes('forest service') || l.includes('ranger'))
+    return { bg: '#dcfce7', text: '#15803d', border: '#86efac' };
+  if (l.includes('national park') || l.includes('nps') || l.includes('national monument') || l.includes('national recreation'))
+    return { bg: '#dbeafe', text: '#1d4ed8', border: '#93c5fd' };
+  if (l.includes('blm') || l.includes('bureau of land'))
+    return { bg: '#fef3c7', text: '#92400e', border: '#fcd34d' };
+  if (l.includes('state park') || l.includes('state forest') || l.includes('state beach'))
+    return { bg: '#ede9fe', text: '#6d28d9', border: '#c4b5fd' };
+  if (l.includes('koa') || l.includes('resort') || l.includes('rv park') || l.includes('private'))
+    return { bg: '#f1f5f9', text: '#475569', border: '#94a3b8' };
+  return { bg: '#ecfdf5', text: '#065f46', border: '#6ee7b7' };
+}
+
+function tagEmoji(tag: string): string {
+  const t = tag.toLowerCase();
+  if (t === 'rv' || t === 'hookups') return 'RV';
+  if (t === 'tent') return 'TENT';
+  if (t === 'dispersed') return 'WILD';
+  if (t === 'water') return 'H2O';
+  if (t === 'showers') return 'SHWR';
+  if (t === 'ada') return 'ADA';
+  if (t === 'dogs' || t === 'dog friendly') return 'PET';
+  if (t === 'free') return 'FREE';
+  if (t === 'reservable') return 'RSV';
+  if (t === 'usfs') return 'USFS';
+  if (t === 'blm') return 'BLM';
+  if (t === 'nps') return 'NPS';
+  return '';
+}
+
+function stripHtml(text?: string | null) {
+  if (!text) return '';
+  return text
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function amenityIcon(name: string): keyof typeof Ionicons.glyphMap {
+  const n = name.toLowerCase();
+  if (n.includes('water')) return 'water-outline';
+  if (n.includes('shower')) return 'rainy-outline';
+  if (n.includes('toilet') || n.includes('restroom')) return 'male-female-outline';
+  if (n.includes('electric') || n.includes('hookup')) return 'flash-outline';
+  if (n.includes('dump') || n.includes('trash')) return 'trash-outline';
+  if (n.includes('fire')) return 'flame-outline';
+  if (n.includes('picnic')) return 'restaurant-outline';
+  if (n.includes('wifi') || n.includes('internet')) return 'wifi-outline';
+  if (n.includes('rv')) return 'car-outline';
+  if (n.includes('pet') || n.includes('dog')) return 'paw-outline';
+  return 'checkmark-circle-outline';
+}
+
 async function geocodePlaces(query: string): Promise<SearchPlace[]> {
   const coord = query.match(/-?\d+(?:\.\d+)?/g)?.map(Number);
   if (coord && coord.length >= 2 && Math.abs(coord[0]) <= 90 && Math.abs(coord[1]) <= 180) {
@@ -120,8 +184,12 @@ export default function RouteBuilderScreen() {
   const [campDetail, setCampDetail] = useState<CampsiteDetail | null>(null);
   const [campWeather, setCampWeather] = useState<WeatherForecast | null>(null);
   const [campFullness, setCampFullness] = useState<CampFullness | null>(null);
+  const [campInsight, setCampInsight] = useState<CampsiteInsight | null>(null);
+  const [showCampDetail, setShowCampDetail] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [paywallVisible, setPaywallVisible] = useState(false);
+  const [paywallCode, setPaywallCode] = useState('camp_detail');
+  const [paywallMessage, setPaywallMessage] = useState('Use credits or Explorer to open full campsite profiles. You can still add this camp to your route from the free preview.');
 
   const dayStops = stops.filter(st => st.day === activeDay);
   const orderedStops = [...stops].sort((a, b) => a.day - b.day || stops.indexOf(a) - stops.indexOf(b));
@@ -292,6 +360,8 @@ export default function RouteBuilderScreen() {
   async function openCampDetail(camp: CampsitePin) {
     setSelectedCamp(camp);
     setCampDetail(null);
+    setCampInsight(null);
+    setShowCampDetail(false);
     setCampWeather(null);
     setCampFullness(null);
     fly(camp.lat, camp.lng, 13);
@@ -303,9 +373,23 @@ export default function RouteBuilderScreen() {
     if (!selectedCamp) return;
     setDetailLoading(true);
     try {
-      setCampDetail(await api.getCampsiteDetail(selectedCamp.id));
+      const detail = await api.getCampsiteDetail(selectedCamp.id);
+      const insight = await api.getCampsiteInsight({
+        name: selectedCamp.name,
+        lat: selectedCamp.lat,
+        lng: selectedCamp.lng,
+        description: stripHtml(detail.description || selectedCamp.description),
+        land_type: detail.land_type || selectedCamp.land_type,
+        amenities: detail.amenities ?? [],
+        facility_id: selectedCamp.id ?? '',
+      });
+      setCampDetail({ ...detail, description: stripHtml(detail.description) });
+      setCampInsight(insight);
+      setShowCampDetail(true);
     } catch (e: any) {
       if (e instanceof PaywallError) {
+        setPaywallCode(e.code || 'camp_detail');
+        setPaywallMessage(e.message || 'Use credits or Explorer to open full campsite profiles. You can still add this camp to your route from the free preview.');
         setPaywallVisible(true);
       } else {
         Alert.alert('Camp details unavailable', 'This camp does not have a full profile yet.');
@@ -623,19 +707,57 @@ export default function RouteBuilderScreen() {
 
       <Modal visible={!!selectedCamp} transparent animationType="slide" onRequestClose={() => setSelectedCamp(null)}>
         <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setSelectedCamp(null)}>
-          <View style={s.campSheet}>
-            <View style={s.sheetHandle} />
-            <Text style={s.sheetTitle} numberOfLines={2}>{selectedCamp?.name}</Text>
-            <Text style={s.sheetMeta}>{selectedCamp?.land_type || 'Camp'} · {selectedCamp?.cost || 'See site'}</Text>
-            <Text style={s.sheetDesc} numberOfLines={campDetail ? undefined : 3}>
-              {campDetail?.description || selectedCamp?.description || 'Camp profile preview. Full details show amenities, photos, activities, coordinates, and access notes.'}
-            </Text>
+          <View style={s.quickCard}>
+            <View style={s.quickCardImg}>
+              {selectedCamp?.photo_url ? (
+                <Image source={{ uri: selectedCamp.photo_url }} style={s.quickCardPhoto} resizeMode="cover" />
+              ) : (
+                <View style={[s.quickCardPhotoPlaceholder, { backgroundColor: landColor(selectedCamp?.land_type).bg }]}>
+                  <Ionicons name="bonfire-outline" size={34} color={landColor(selectedCamp?.land_type).text} />
+                  <Text style={[s.placeholderLand, { color: landColor(selectedCamp?.land_type).text }]}>
+                    {(selectedCamp?.land_type || 'CAMP').toUpperCase().slice(0, 12)}
+                  </Text>
+                </View>
+              )}
+            </View>
+            <View style={s.quickCardBody}>
+              <View style={s.quickCardHeader}>
+                <Text style={s.quickCardName} numberOfLines={2}>{selectedCamp?.name}</Text>
+                <TouchableOpacity style={s.quickCardClose} onPress={() => setSelectedCamp(null)}>
+                  <Ionicons name="close" size={16} color={C.text3} />
+                </TouchableOpacity>
+              </View>
+              {selectedCamp?.land_type ? (
+                <View style={[s.landBadge, { backgroundColor: landColor(selectedCamp.land_type).bg, borderColor: landColor(selectedCamp.land_type).border }]}>
+                  <Text style={[s.landBadgeText, { color: landColor(selectedCamp.land_type).text }]}>
+                    {selectedCamp.land_type.toUpperCase()}
+                  </Text>
+                </View>
+              ) : null}
+              <View style={s.quickCardTags}>
+                {(selectedCamp?.tags ?? []).slice(0, 5).map(t => (
+                  <View key={t} style={s.qTag}>
+                    <Text style={s.qTagText}>{tagEmoji(t) ? `${tagEmoji(t)} ` : ''}{t.toUpperCase()}</Text>
+                  </View>
+                ))}
+                {selectedCamp?.ada && (
+                  <View style={[s.qTag, { borderColor: '#3b82f6', backgroundColor: '#eff6ff' }]}>
+                    <Text style={[s.qTagText, { color: '#1d4ed8' }]}>ADA</Text>
+                  </View>
+                )}
+              </View>
+              {selectedCamp?.cost ? (
+                <Text style={s.quickCardCost}>{selectedCamp.reservable ? 'Reservable · ' : ''}{selectedCamp.cost}</Text>
+              ) : null}
+              <Text style={s.quickCardDesc} numberOfLines={3}>
+                {stripHtml(selectedCamp?.description) || 'Camp profile preview. Full profile shows access notes, amenities, coordinates, and Trailhead camp brief.'}
+              </Text>
             {campWeather?.daily?.time?.length ? (
               <View style={s.weatherStrip}>
                 {[0, 1, 2].map(i => (
                   <View key={i} style={s.weatherDay}>
                     <Ionicons name={weatherIcon(campWeather.daily.weathercode?.[i] ?? 1)} size={18} color={C.orange} />
-                    <Text style={s.weatherTemp}>
+                    <Text style={s.weatherHiLo}>
                       {Math.round(campWeather.daily.temperature_2m_max?.[i] ?? 0)}°/{Math.round(campWeather.daily.temperature_2m_min?.[i] ?? 0)}°
                     </Text>
                   </View>
@@ -643,35 +765,159 @@ export default function RouteBuilderScreen() {
               </View>
             ) : null}
             {campFullness?.status === 'full' ? (
-              <View style={s.fullBanner}>
-                <Ionicons name="warning" size={13} color={C.red} />
-                <Text style={s.fullBannerText}>REPORTED FULL · {campFullness.confirmations} confirmed</Text>
+              <View style={s.fullnessBanner}>
+                <View style={s.fullnessBannerTop}>
+                  <Ionicons name="warning" size={13} color={C.red} />
+                  <Text style={s.fullnessBannerText}>REPORTED FULL · {campFullness.confirmations} confirmed</Text>
+                </View>
               </View>
             ) : (
-              <View style={s.openBanner}>
+              <View style={s.reportFullBtn}>
                 <Ionicons name="checkmark-circle-outline" size={13} color={C.green} />
-                <Text style={s.openBannerText}>No recent full reports</Text>
+                <Text style={[s.reportFullText, { color: C.green }]}>NO RECENT FULL REPORTS</Text>
               </View>
             )}
-            {campDetail && (
-              <View style={s.detailGrid}>
-                {(campDetail.amenities ?? []).slice(0, 6).map(item => <Text key={item} style={s.detailPill}>{item}</Text>)}
-                {(campDetail.site_types ?? []).slice(0, 4).map(item => <Text key={item} style={s.detailPill}>{item}</Text>)}
+              <View style={s.quickCardActions}>
+              <TouchableOpacity style={s.quickCardNav} onPress={() => { if (selectedCamp) addCamp(selectedCamp); setSelectedCamp(null); }}>
+                <Ionicons name="add-circle-outline" size={13} color="#fff" />
+                <Text style={s.quickCardNavText}>USE AS CAMP</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.quickCardFull} onPress={loadFullCampDetail} disabled={detailLoading}>
+                {detailLoading ? <ActivityIndicator size="small" color={C.orange} /> : <Text style={s.quickCardFullText}>FULL PROFILE →</Text>}
+              </TouchableOpacity>
               </View>
-            )}
-            <View style={s.sheetActions}>
-              <TouchableOpacity style={s.addCampBtn} onPress={() => { if (selectedCamp) addCamp(selectedCamp); setSelectedCamp(null); }}>
-                <Text style={s.addCampText}>USE AS CAMP</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={s.fullDetailBtn} onPress={loadFullCampDetail} disabled={detailLoading}>
-                {detailLoading ? <ActivityIndicator size="small" color={C.orange} /> : <Text style={s.fullDetailText}>FULL DETAILS</Text>}
-              </TouchableOpacity>
             </View>
           </View>
         </TouchableOpacity>
       </Modal>
 
-      <PaywallModal visible={paywallVisible} code="camp_detail" message="Use credits or Explorer to open full campsite profiles. You can still add this camp to your route from the free preview." onClose={() => setPaywallVisible(false)} />
+      <Modal visible={showCampDetail} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowCampDetail(false)}>
+        <View style={s.detailModal}>
+          {campDetail && (
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {(campDetail.photos ?? []).length > 0 ? (
+                <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false} style={s.photoGallery}>
+                  {(campDetail.photos ?? []).map((uri, i) => (
+                    <Image key={i} source={{ uri }} style={s.galleryPhoto} resizeMode="cover" />
+                  ))}
+                </ScrollView>
+              ) : (
+                <View style={s.galleryPlaceholder}>
+                  <Ionicons name="bonfire-outline" size={48} color={C.orange} />
+                </View>
+              )}
+
+              <View style={s.detailContent}>
+                <View style={s.detailHeader}>
+                  <Text style={s.detailName}>{campDetail.name}</Text>
+                  <TouchableOpacity style={s.detailClose} onPress={() => setShowCampDetail(false)}>
+                    <Ionicons name="close" size={22} color={C.text} />
+                  </TouchableOpacity>
+                </View>
+                <View style={s.detailTags}>
+                  {campDetail.land_type ? (
+                    <View style={[s.detailLandBadge, { backgroundColor: landColor(campDetail.land_type).bg, borderColor: landColor(campDetail.land_type).border }]}>
+                      <Text style={[s.detailLandText, { color: landColor(campDetail.land_type).text }]}>{campDetail.land_type.toUpperCase()}</Text>
+                    </View>
+                  ) : null}
+                  {(campDetail.tags ?? []).map(t => (
+                    <View key={t} style={s.qTag}><Text style={s.qTagText}>{tagEmoji(t) ? `${tagEmoji(t)} ` : ''}{t.toUpperCase()}</Text></View>
+                  ))}
+                  {campDetail.ada && (
+                    <View style={[s.qTag, { borderColor: '#3b82f6', backgroundColor: '#eff6ff' }]}>
+                      <Text style={[s.qTagText, { color: '#1d4ed8' }]}>ADA</Text>
+                    </View>
+                  )}
+                </View>
+                <View style={s.detailMeta}>
+                  <Text style={s.detailCost}>{campDetail.cost || 'See site'}</Text>
+                  {campDetail.campsites_count > 0 && <Text style={s.detailSiteCount}>{campDetail.campsites_count} sites</Text>}
+                </View>
+                {campDetail.description ? (
+                  <View style={s.detailSection}>
+                    <Text style={s.detailSectionTitle}>ABOUT</Text>
+                    <Text style={s.detailDesc}>{stripHtml(campDetail.description)}</Text>
+                  </View>
+                ) : null}
+                {(campDetail.amenities ?? []).length > 0 && (
+                  <View style={s.detailSection}>
+                    <Text style={s.detailSectionTitle}>AMENITIES</Text>
+                    <View style={s.amenityGrid}>
+                      {(campDetail.amenities ?? []).map(a => (
+                        <View key={a} style={s.amenityItem}>
+                          <Ionicons name={amenityIcon(a)} size={13} color={C.text2} />
+                          <Text style={s.amenityText}>{a}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                )}
+                {(campDetail.site_types ?? []).length > 0 && (
+                  <View style={s.detailSection}>
+                    <Text style={s.detailSectionTitle}>SITE TYPES</Text>
+                    <View style={s.amenityGrid}>
+                      {(campDetail.site_types ?? []).map(st => (
+                        <View key={st} style={[s.amenityItem, { backgroundColor: C.green + '12', borderColor: C.green + '55' }]}>
+                          <Ionicons name="home-outline" size={13} color={C.green} />
+                          <Text style={[s.amenityText, { color: C.green }]}>{st}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                )}
+                {(campDetail.activities ?? []).length > 0 && (
+                  <View style={s.detailSection}>
+                    <Text style={s.detailSectionTitle}>ACTIVITIES</Text>
+                    <Text style={s.detailActivities}>{(campDetail.activities ?? []).join(' · ')}</Text>
+                  </View>
+                )}
+                <View style={s.detailSection}>
+                  <Text style={s.detailSectionTitle}>COORDINATES</Text>
+                  <Text style={s.coordText}>{campDetail.lat.toFixed(6)}, {campDetail.lng.toFixed(6)}</Text>
+                  {campInsight?.coordinates_dms ? <Text style={s.coordDms}>{campInsight.coordinates_dms}</Text> : null}
+                </View>
+                {campInsight && (
+                  <View style={s.detailSection}>
+                    <View style={s.aiHeader}>
+                      <Text style={s.detailSectionTitle}>TRAILHEAD BRIEF</Text>
+                      {campInsight.star_rating ? (
+                        <Text style={s.aiStars}>{'★'.repeat(campInsight.star_rating)}{'☆'.repeat(5 - campInsight.star_rating)}</Text>
+                      ) : null}
+                    </View>
+                    {campInsight.insider_tip ? (
+                      <View style={s.insiderTip}>
+                        <Text style={s.insiderLabel}>INSIDER TIP</Text>
+                        <Text style={s.insiderText}>{campInsight.insider_tip}</Text>
+                      </View>
+                    ) : null}
+                    {campInsight.best_for ? <Text style={s.aiMeta}>Best for: {campInsight.best_for}</Text> : null}
+                    {campInsight.best_season ? <Text style={s.aiMeta}>Best season: {campInsight.best_season}</Text> : null}
+                    {campInsight.hazards ? (
+                      <View style={s.hazardRow}>
+                        <Ionicons name="warning-outline" size={13} color={C.yellow} />
+                        <Text style={s.hazardText}>{campInsight.hazards}</Text>
+                      </View>
+                    ) : null}
+                    {campInsight.nearby_highlights?.length ? (
+                      <View style={{ marginTop: 8 }}>
+                        {campInsight.nearby_highlights.map((h, i) => <Text key={i} style={s.nearbyItem}>• {h}</Text>)}
+                      </View>
+                    ) : null}
+                  </View>
+                )}
+                <View style={s.detailActions}>
+                  <TouchableOpacity style={s.detailUseBtn} onPress={() => { if (selectedCamp) addCamp(selectedCamp); setShowCampDetail(false); setSelectedCamp(null); }}>
+                    <Ionicons name="add-circle-outline" size={15} color="#fff" />
+                    <Text style={s.detailUseText}>USE AS CAMP</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </ScrollView>
+          )}
+        </View>
+      </Modal>
+
+      <PaywallModal visible={paywallVisible} code={paywallCode} message={paywallMessage} onClose={() => setPaywallVisible(false)} />
     </SafeAreaView>
   );
 }
@@ -738,25 +984,124 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   previewBtn: { flexDirection: 'row', alignItems: 'center', gap: 7, backgroundColor: C.green, borderRadius: 12, paddingHorizontal: 18, paddingVertical: 12 },
   previewText: { color: '#fff', fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
   modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.55)' },
-  campSheet: { backgroundColor: C.bg, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderWidth: 1, borderColor: C.border, padding: 20, paddingBottom: 34 },
-  sheetHandle: { width: 38, height: 4, borderRadius: 2, backgroundColor: C.border, alignSelf: 'center', marginBottom: 14 },
-  sheetTitle: { color: C.text, fontSize: 18, fontWeight: '900', lineHeight: 22 },
-  sheetMeta: { color: C.orange, fontSize: 11, fontFamily: mono, marginTop: 5, marginBottom: 10 },
-  sheetDesc: { color: C.text2, fontSize: 13, lineHeight: 19 },
-  detailGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12 },
-  detailPill: { color: C.text2, fontSize: 10, borderWidth: 1, borderColor: C.border, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5, backgroundColor: C.s2 },
-  sheetActions: { flexDirection: 'row', gap: 9, marginTop: 16 },
-  addCampBtn: { flex: 1, backgroundColor: C.green, borderRadius: 12, alignItems: 'center', paddingVertical: 12 },
-  addCampText: { color: '#fff', fontSize: 11, fontFamily: mono, fontWeight: '900' },
-  fullDetailBtn: { flex: 1, borderWidth: 1, borderColor: C.orange, borderRadius: 12, alignItems: 'center', justifyContent: 'center', paddingVertical: 12 },
-  fullDetailText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900' },
-  weatherStrip: { flexDirection: 'row', gap: 8, marginTop: 12 },
-  weatherDay: { flex: 1, alignItems: 'center', borderWidth: 1, borderColor: C.border, borderRadius: 10, paddingVertical: 8, backgroundColor: C.s2 },
-  weatherTemp: { color: C.text2, fontSize: 11, fontFamily: mono, marginTop: 3 },
-  fullBanner: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 12, borderWidth: 1, borderColor: C.red + '66', backgroundColor: C.red + '14', borderRadius: 10, padding: 9 },
-  fullBannerText: { color: C.red, fontSize: 10, fontFamily: mono, fontWeight: '800' },
-  openBanner: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 12, borderWidth: 1, borderColor: C.green + '55', backgroundColor: C.green + '12', borderRadius: 10, padding: 9 },
-  openBannerText: { color: C.green, fontSize: 10, fontFamily: mono, fontWeight: '800' },
+  quickCard: {
+    backgroundColor: C.s1,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    flexDirection: 'row',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    elevation: 12,
+  },
+  quickCardImg: { width: 120 },
+  quickCardPhoto: { width: 120, height: '100%' as any, borderTopLeftRadius: 20 },
+  quickCardPhotoPlaceholder: {
+    width: 120, minHeight: 180, alignItems: 'center', justifyContent: 'center',
+    borderTopLeftRadius: 20, gap: 5,
+  },
+  placeholderLand: { fontSize: 9, fontFamily: mono, fontWeight: '800', marginTop: 2 },
+  quickCardBody: { flex: 1, padding: 14, paddingBottom: 28, gap: 6 },
+  quickCardHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
+  quickCardName: { color: C.text, fontSize: 15, fontWeight: '800', flex: 1, lineHeight: 20 },
+  quickCardClose: {
+    width: 28, height: 28, borderRadius: 14, backgroundColor: C.s3,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  landBadge: {
+    alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3,
+    borderRadius: 6, borderWidth: 1,
+  },
+  landBadgeText: { fontSize: 9, fontFamily: mono, fontWeight: '800', letterSpacing: 0.5 },
+  quickCardTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
+  qTag: {
+    paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6,
+    borderWidth: 1, borderColor: C.border, backgroundColor: C.s2,
+  },
+  qTagText: { color: C.text2, fontSize: 9, fontFamily: mono, fontWeight: '700' },
+  quickCardCost: { color: C.green, fontSize: 11, fontFamily: mono, fontWeight: '700' },
+  quickCardDesc: { color: C.text2, fontSize: 12, lineHeight: 17 },
+  quickCardActions: { flexDirection: 'row', gap: 8, marginTop: 2 },
+  quickCardNav: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10,
+    backgroundColor: C.green,
+  },
+  quickCardNavText: { color: '#fff', fontSize: 11, fontFamily: mono, fontWeight: '800' },
+  quickCardFull: {
+    flex: 1, alignItems: 'center', justifyContent: 'center',
+    paddingVertical: 8, borderRadius: 10,
+    borderWidth: 1.5, borderColor: C.orange,
+  },
+  quickCardFullText: { color: C.orange, fontSize: 11, fontFamily: mono, fontWeight: '800' },
+  weatherStrip: { flexDirection: 'row', gap: 8 },
+  weatherDay: { alignItems: 'center', flex: 1 },
+  weatherHiLo: { fontSize: 9, fontFamily: mono, fontWeight: '700', color: C.text2, marginTop: 1 },
+  fullnessBanner: {
+    backgroundColor: C.red + '12', borderWidth: 1, borderColor: C.red + '55',
+    borderRadius: 8, padding: 8, gap: 6,
+  },
+  fullnessBannerTop: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  fullnessBannerText: { flex: 1, color: C.red, fontSize: 10, fontFamily: mono, fontWeight: '800' },
+  reportFullBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    paddingVertical: 6, paddingHorizontal: 10, borderRadius: 7,
+    borderWidth: 1, borderColor: C.green + '66', backgroundColor: C.s2,
+    alignSelf: 'flex-start',
+  },
+  reportFullText: { color: C.green, fontSize: 10, fontFamily: mono, fontWeight: '700' },
+  detailModal: { flex: 1, backgroundColor: C.bg },
+  photoGallery: { height: 260 },
+  galleryPhoto: { width: 400, height: 260 },
+  galleryPlaceholder: {
+    height: 200, backgroundColor: C.s1,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  detailContent: { padding: 20, backgroundColor: C.bg },
+  detailHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 8 },
+  detailName: { color: C.text, fontSize: 22, fontWeight: '800', flex: 1, lineHeight: 28 },
+  detailClose: {
+    width: 36, height: 36, borderRadius: 18, backgroundColor: C.s2,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  detailTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 },
+  detailLandBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, borderWidth: 1 },
+  detailLandText: { fontSize: 10, fontFamily: mono, fontWeight: '800', letterSpacing: 0.5 },
+  detailMeta: { flexDirection: 'row', gap: 16, marginBottom: 16, alignItems: 'center' },
+  detailCost: { color: C.green, fontSize: 14, fontFamily: mono, fontWeight: '800' },
+  detailSiteCount: { color: C.text2, fontSize: 13, fontFamily: mono },
+  detailSection: { marginBottom: 20 },
+  detailSectionTitle: {
+    color: C.text2, fontSize: 10, fontFamily: mono, fontWeight: '800',
+    letterSpacing: 1.5, marginBottom: 10, borderBottomWidth: 1, borderColor: C.border, paddingBottom: 6,
+  },
+  detailDesc: { color: C.text, fontSize: 14, lineHeight: 22 },
+  amenityGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  amenityItem: {
+    paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10,
+    backgroundColor: C.s1, borderWidth: 1, borderColor: C.border,
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+  },
+  amenityText: { color: C.text, fontSize: 12, fontWeight: '500' },
+  detailActivities: { color: C.text2, fontSize: 12, lineHeight: 20 },
+  coordText: { color: C.text2, fontSize: 13, fontFamily: mono },
+  coordDms: { color: C.text2, fontSize: 11, fontFamily: mono, marginTop: 4 },
+  aiHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  aiStars: { color: C.yellow, fontSize: 14, marginBottom: 10 },
+  insiderTip: { backgroundColor: C.orange + '14', borderRadius: 10, borderWidth: 1, borderColor: C.orange + '44', padding: 12, marginBottom: 8 },
+  insiderLabel: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '800', marginBottom: 4 },
+  insiderText: { color: C.text, fontSize: 13, lineHeight: 19 },
+  aiMeta: { color: C.text2, fontSize: 12, marginBottom: 3 },
+  hazardRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 6, backgroundColor: C.yellow + '14', borderRadius: 8, padding: 8 },
+  hazardText: { color: C.yellow, fontSize: 12, flex: 1, lineHeight: 17 },
+  nearbyItem: { color: C.text2, fontSize: 12, marginBottom: 3 },
+  detailActions: { gap: 10, marginTop: 8, marginBottom: 28 },
+  detailUseBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    paddingVertical: 15, borderRadius: 14, backgroundColor: C.green,
+  },
+  detailUseText: { color: '#fff', fontSize: 14, fontFamily: mono, fontWeight: '800' },
 });
 
 function weatherIcon(code: number): keyof typeof Ionicons.glyphMap {

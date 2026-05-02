@@ -586,6 +586,59 @@ function tagEmoji(tag: string): string {
   return '•';
 }
 
+function amenityIcon(name: string): keyof typeof Ionicons.glyphMap {
+  const n = name.toLowerCase();
+  if (n.includes('water')) return 'water-outline';
+  if (n.includes('shower')) return 'rainy-outline';
+  if (n.includes('toilet') || n.includes('restroom')) return 'male-female-outline';
+  if (n.includes('electric') || n.includes('hookup') || n.includes('amp')) return 'flash-outline';
+  if (n.includes('sewer')) return 'git-branch-outline';
+  if (n.includes('dump') || n.includes('trash')) return 'trash-outline';
+  if (n.includes('fire')) return 'flame-outline';
+  if (n.includes('picnic')) return 'restaurant-outline';
+  if (n.includes('wifi') || n.includes('internet') || n.includes('cell')) return 'wifi-outline';
+  if (n.includes('pet') || n.includes('dog')) return 'paw-outline';
+  if (n.includes('market') || n.includes('store')) return 'storefront-outline';
+  if (n.includes('ada') || n.includes('access')) return 'accessibility-outline';
+  return 'checkmark-circle-outline';
+}
+
+function siteTypeIcon(name: string): keyof typeof Ionicons.glyphMap {
+  const n = name.toLowerCase();
+  if (n.includes('rv') || n.includes('vehicle')) return 'car-outline';
+  if (n.includes('tent')) return 'triangle-outline';
+  if (n.includes('cabin')) return 'home-outline';
+  if (n.includes('group')) return 'people-outline';
+  if (n.includes('standard')) return 'bonfire-outline';
+  return 'trail-sign-outline';
+}
+
+function featureBucket(name: string): 'campers' | 'vehicles' {
+  const n = name.toLowerCase();
+  return n.includes('hookup') || n.includes('amp') || n.includes('sewer') || n.includes('pull')
+    || n.includes('rv') || n.includes('length') || n.includes('driveway')
+    ? 'vehicles'
+    : 'campers';
+}
+
+function fieldSentimentLabel(sentiment: FieldReportSentiment) {
+  if (sentiment === 'loved_it') return { label: 'Loved it', icon: 'heart' as const, color: '#16a34a' };
+  if (sentiment === 'its_ok') return { label: "It's OK", icon: 'thumbs-up' as const, color: '#f59e0b' };
+  return { label: 'Would skip', icon: 'thumbs-down' as const, color: '#ef4444' };
+}
+
+function fieldAccessLabel(access: FieldReportAccess) {
+  if (access === 'easy') return { label: 'Easy road', icon: 'ellipse' as const, color: '#22c55e' };
+  if (access === 'rough') return { label: 'Rough road', icon: 'ellipse' as const, color: '#f59e0b' };
+  return { label: '4WD only', icon: 'ellipse' as const, color: '#ef4444' };
+}
+
+function fieldCrowdLabel(crowd: FieldReportCrowd) {
+  if (crowd === 'empty') return { label: 'Empty', icon: 'trail-sign-outline' as const, color: '#16a34a' };
+  if (crowd === 'few_rigs') return { label: 'A few rigs', icon: 'car-outline' as const, color: '#f59e0b' };
+  return { label: 'Packed', icon: 'car-sport-outline' as const, color: '#ef4444' };
+}
+
 function weatherIcon(code: number): string {
   if (code === 0) return '☀️';
   if (code <= 2) return '⛅';
@@ -3158,6 +3211,70 @@ function MapScreen() {
     api.getFieldReportSummary(selectedCamp.id).then(setFieldReportSummary).catch(() => {});
   }
 
+  function promptCampSuggestion(field: string, label: string) {
+    if (!campDetail) return;
+    Alert.prompt(
+      `Suggest ${label}`,
+      'Send a correction for admin review. Useful examples: wrong amenities, bad road access, closed site, fee changed, or better description.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Send',
+          onPress: async value => {
+            const clean = (value || '').trim();
+            if (!clean) return;
+            try {
+              const res = await api.suggestCampsiteEdit(campDetail.id, {
+                camp_name: campDetail.name,
+                lat: campDetail.lat,
+                lng: campDetail.lng,
+                field,
+                value: clean,
+              });
+              setQuickToast(`Edit sent · +${res.credits_earned} credits`);
+              setTimeout(() => setQuickToast(''), 2500);
+            } catch (e: any) {
+              Alert.alert('Could not send edit', e.message ?? 'Try again in a moment.');
+            }
+          },
+        },
+      ],
+      'plain-text'
+    );
+  }
+
+  function promptAdminCampEdit(field: keyof CampsiteDetail, label: string, current?: string) {
+    if (!campDetail || !user?.is_admin) return;
+    Alert.prompt(
+      `Admin edit ${label}`,
+      'This updates the Trailhead override for this camp profile.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Save',
+          onPress: async value => {
+            const clean = (value || '').trim();
+            if (!clean) return;
+            try {
+              const payload: any = {};
+              payload[field] = ['amenities', 'site_types', 'activities'].includes(String(field))
+                ? clean.split(',').map(v => v.trim()).filter(Boolean)
+                : clean;
+              const res = await api.adminUpdateCampsite(campDetail.id, payload);
+              setCampDetail(prev => prev ? { ...prev, ...res.override, admin_edited: true } as CampsiteDetail : prev);
+              setQuickToast('Camp profile updated');
+              setTimeout(() => setQuickToast(''), 2500);
+            } catch (e: any) {
+              Alert.alert('Admin edit failed', e.message ?? 'Try again in a moment.');
+            }
+          },
+        },
+      ],
+      'plain-text',
+      current || ''
+    );
+  }
+
   function resetFieldReportForm() {
     setFrSentiment(null); setFrAccess(null); setFrCrowd(null);
     setFrTags([]); setFrNote(''); setFrPhoto(null);
@@ -4198,7 +4315,7 @@ function MapScreen() {
                 </ScrollView>
               ) : (
                 <View style={s.galleryPlaceholder}>
-                  <Text style={{ fontSize: 48 }}>🏕️</Text>
+                  <Ionicons name="bonfire-outline" size={52} color={C.orange} />
                 </View>
               )}
 
@@ -4209,6 +4326,24 @@ function MapScreen() {
                   <TouchableOpacity style={s.detailClose} onPress={() => setShowCampDetail(false)}>
                     <Ionicons name="close" size={22} color={C.text} />
                   </TouchableOpacity>
+                </View>
+                <View style={s.detailEditRow}>
+                  {campDetail.admin_edited ? (
+                    <View style={s.verifiedChip}>
+                      <Ionicons name="shield-checkmark-outline" size={12} color={C.green} />
+                      <Text style={s.verifiedChipText}>TRAILHEAD EDITED</Text>
+                    </View>
+                  ) : null}
+                  <TouchableOpacity style={s.editLinkBtn} onPress={() => promptCampSuggestion('description', 'an edit')}>
+                    <Ionicons name="create-outline" size={13} color={C.orange} />
+                    <Text style={s.editLinkText}>SUGGEST EDIT</Text>
+                  </TouchableOpacity>
+                  {user?.is_admin ? (
+                    <TouchableOpacity style={s.editLinkBtn} onPress={() => promptAdminCampEdit('description', 'description', campDetail.description)}>
+                      <Ionicons name="construct-outline" size={13} color={C.red} />
+                      <Text style={[s.editLinkText, { color: C.red }]}>ADMIN EDIT</Text>
+                    </TouchableOpacity>
+                  ) : null}
                 </View>
 
                 {/* Tags */}
@@ -4247,38 +4382,50 @@ function MapScreen() {
                 {/* Amenities */}
                 {(campDetail.amenities ?? []).length > 0 && (
                   <View style={s.detailSection}>
-                    <Text style={s.detailSectionTitle}>AMENITIES</Text>
-                    <View style={s.amenityGrid}>
-                      {(campDetail.amenities ?? []).map(a => {
-                        const al = a.toLowerCase();
-                        const icon = al.includes('water') ? '💧' : al.includes('shower') ? '🚿'
-                          : al.includes('toilet') || al.includes('restroom') ? '🚻'
-                          : al.includes('electric') || al.includes('hookup') ? '⚡'
-                          : al.includes('dump') ? '🗑️' : al.includes('fire') ? '🔥'
-                          : al.includes('picnic') ? '🌳' : al.includes('trash') ? '🗑️'
-                          : al.includes('wifi') || al.includes('internet') ? '📶'
-                          : al.includes('cell') ? '📱' : al.includes('rv') ? '🚐'
-                          : al.includes('pet') || al.includes('dog') ? '🐾' : '✓';
-                        return (
-                          <View key={a} style={s.amenityItem}>
-                            <Text style={{ fontSize: 13 }}>{icon}</Text>
-                            <Text style={s.amenityText}>{a}</Text>
-                          </View>
-                        );
-                      })}
+                    <View style={s.sectionTitleRow}>
+                      <Text style={s.detailSectionTitle}>FEATURES</Text>
+                      {user?.is_admin ? (
+                        <TouchableOpacity onPress={() => promptAdminCampEdit('amenities', 'amenities', (campDetail.amenities ?? []).join(', '))}>
+                          <Text style={s.sectionEditText}>EDIT</Text>
+                        </TouchableOpacity>
+                      ) : null}
                     </View>
+                    {(['campers', 'vehicles'] as const).map(bucket => {
+                      const items = (campDetail.amenities ?? []).filter(a => featureBucket(a) === bucket);
+                      if (!items.length) return null;
+                      return (
+                        <View key={bucket} style={s.featureGroup}>
+                          <Text style={s.featureGroupTitle}>{bucket === 'campers' ? 'FOR CAMPERS' : 'FOR VEHICLES'}</Text>
+                          <View style={s.featureGrid}>
+                            {items.map(a => (
+                              <View key={a} style={s.featureItem}>
+                                <Ionicons name={amenityIcon(a)} size={24} color={C.text2} />
+                                <Text style={s.featureText}>{a}</Text>
+                              </View>
+                            ))}
+                          </View>
+                        </View>
+                      );
+                    })}
                   </View>
                 )}
 
                 {/* Site types */}
                 {(campDetail.site_types ?? []).length > 0 && (
                   <View style={s.detailSection}>
-                    <Text style={s.detailSectionTitle}>SITE TYPES</Text>
-                    <View style={s.amenityGrid}>
+                    <View style={s.sectionTitleRow}>
+                      <Text style={s.detailSectionTitle}>SITE TYPES</Text>
+                      {user?.is_admin ? (
+                        <TouchableOpacity onPress={() => promptAdminCampEdit('site_types', 'site types', (campDetail.site_types ?? []).join(', '))}>
+                          <Text style={s.sectionEditText}>EDIT</Text>
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                    <View style={s.featureGrid}>
                       {(campDetail.site_types ?? []).map(st => (
-                        <View key={st} style={[s.amenityItem, { backgroundColor: '#f0fdf4', borderColor: '#86efac' }]}>
-                          <Text style={{ fontSize: 13 }}>⛺</Text>
-                          <Text style={[s.amenityText, { color: '#15803d' }]}>{st}</Text>
+                        <View key={st} style={s.featureItem}>
+                          <Ionicons name={siteTypeIcon(st)} size={24} color={C.green} />
+                          <Text style={s.featureText}>{st}</Text>
                         </View>
                       ))}
                     </View>
@@ -4322,7 +4469,7 @@ function MapScreen() {
                     {loadingInsight && !campInsight && <ActivityIndicator size="small" color={C.orange} />}
                     {campInsight?.insider_tip ? (
                       <View style={s.insiderTip}>
-                        <Text style={s.insiderLabel}>💡 INSIDER TIP</Text>
+                        <Text style={s.insiderLabel}>INSIDER TIP</Text>
                         <Text style={s.insiderText}>{campInsight.insider_tip}</Text>
                       </View>
                     ) : null}
@@ -4385,9 +4532,9 @@ function MapScreen() {
                           {skip  > 0 && <View style={[s.frBarSeg, { flex: skip,  backgroundColor: '#ef4444' }]} />}
                         </View>
                         <View style={s.frSentimentLegend}>
-                          {loved > 0 && <Text style={[s.frLegendItem, { color: '#22c55e' }]}>😍 {Math.round(loved * 100)}%</Text>}
-                          {ok    > 0 && <Text style={[s.frLegendItem, { color: '#f59e0b' }]}>👍 {Math.round(ok * 100)}%</Text>}
-                          {skip  > 0 && <Text style={[s.frLegendItem, { color: '#ef4444' }]}>👎 {Math.round(skip * 100)}%</Text>}
+                          {loved > 0 && <View style={s.frLegendPill}><Ionicons name="heart" size={12} color="#22c55e" /><Text style={[s.frLegendItem, { color: '#22c55e' }]}>{Math.round(loved * 100)}%</Text></View>}
+                          {ok    > 0 && <View style={s.frLegendPill}><Ionicons name="thumbs-up" size={12} color="#f59e0b" /><Text style={[s.frLegendItem, { color: '#f59e0b' }]}>{Math.round(ok * 100)}%</Text></View>}
+                          {skip  > 0 && <View style={s.frLegendPill}><Ionicons name="thumbs-down" size={12} color="#ef4444" /><Text style={[s.frLegendItem, { color: '#ef4444' }]}>{Math.round(skip * 100)}%</Text></View>}
                           {fieldReportSummary.last_visited && (
                             <Text style={s.frLastVisited}>Last visited {fieldReportSummary.last_visited}</Text>
                           )}
@@ -4409,22 +4556,31 @@ function MapScreen() {
 
                   {/* Report list */}
                   {fieldReports.slice(0, 5).map(fr => {
-                    const sentimentIcon = fr.sentiment === 'loved_it' ? '😍' : fr.sentiment === 'its_ok' ? '👍' : '👎';
-                    const accessLabel   = fr.access_condition === 'easy' ? '🟢 Easy access' : fr.access_condition === 'rough' ? '🟡 Rough access' : '🔴 4WD required';
-                    const crowdLabel    = fr.crowd_level === 'empty' ? 'Empty' : fr.crowd_level === 'few_rigs' ? 'A few rigs' : 'Packed';
+                    const sentiment = fieldSentimentLabel(fr.sentiment);
+                    const access = fieldAccessLabel(fr.access_condition);
+                    const crowd = fieldCrowdLabel(fr.crowd_level);
                     return (
                       <View key={fr.id} style={s.frCard}>
                         <View style={s.frCardTop}>
-                          <Text style={s.frCardSentiment}>{sentimentIcon}</Text>
+                          <View style={[s.frIconBubble, { backgroundColor: sentiment.color + '18' }]}>
+                            <Ionicons name={sentiment.icon} size={15} color={sentiment.color} />
+                          </View>
                           <View style={{ flex: 1 }}>
-                            <Text style={s.frCardMeta}>{fr.username} · {fr.visited_date}</Text>
+                            <Text style={s.frCardMeta}>{sentiment.label} · {fr.username}</Text>
+                            <Text style={s.frCardDate}>{fr.visited_date}</Text>
                             {fr.rig_label && <Text style={s.frCardRig}>{fr.rig_label}</Text>}
                           </View>
                           {fr.has_photo && <Ionicons name="camera-outline" size={13} color={C.text3} />}
                         </View>
                         <View style={s.frCardBadges}>
-                          <Text style={s.frCardBadge}>{accessLabel}</Text>
-                          <Text style={s.frCardBadge}>👥 {crowdLabel}</Text>
+                          <View style={s.frMiniBadge}>
+                            <Ionicons name={access.icon} size={10} color={access.color} />
+                            <Text style={s.frCardBadge}>{access.label}</Text>
+                          </View>
+                          <View style={s.frMiniBadge}>
+                            <Ionicons name={crowd.icon} size={11} color={crowd.color} />
+                            <Text style={s.frCardBadge}>{crowd.label}</Text>
+                          </View>
                         </View>
                         {fr.tags.length > 0 && (
                           <View style={s.frCardTags}>
@@ -4447,9 +4603,10 @@ function MapScreen() {
                     <View style={s.frForm}>
                       <Text style={s.frFormLabel}>How was it?</Text>
                       <View style={s.frPillRow}>
-                        {([['loved_it','😍 Loved it','#22c55e'],['its_ok','👍 It\'s OK','#f59e0b'],['would_skip','👎 Would skip','#ef4444']] as const).map(([val, label, color]) => (
+                        {([['loved_it','Loved it','#22c55e','heart'],['its_ok','It\'s OK','#f59e0b','thumbs-up'],['would_skip','Would skip','#ef4444','thumbs-down']] as const).map(([val, label, color, icon]) => (
                           <TouchableOpacity key={val} style={[s.frSentimentBtn, frSentiment === val && { borderColor: color, backgroundColor: color + '22' }]}
                             onPress={() => setFrSentiment(val)}>
+                            <Ionicons name={icon as keyof typeof Ionicons.glyphMap} size={12} color={frSentiment === val ? color : C.text2} />
                             <Text style={[s.frSentimentBtnText, frSentiment === val && { color }]}>{label}</Text>
                           </TouchableOpacity>
                         ))}
@@ -4457,7 +4614,7 @@ function MapScreen() {
 
                       <Text style={s.frFormLabel}>Access road</Text>
                       <View style={s.frPillRow}>
-                        {([['easy','🟢 Easy'],['rough','🟡 Rough'],['four_wd_required','🔴 4WD Only']] as const).map(([val, label]) => (
+                        {([['easy','Easy'],['rough','Rough'],['four_wd_required','4WD Only']] as const).map(([val, label]) => (
                           <TouchableOpacity key={val} style={[s.frPill, frAccess === val && s.frPillActive]}
                             onPress={() => setFrAccess(val)}>
                             <Text style={[s.frPillText, frAccess === val && s.frPillTextActive]}>{label}</Text>
@@ -4467,7 +4624,7 @@ function MapScreen() {
 
                       <Text style={s.frFormLabel}>Crowd level</Text>
                       <View style={s.frPillRow}>
-                        {([['empty','🌲 Empty'],['few_rigs','⛺ A few rigs'],['packed','🚗 Packed']] as const).map(([val, label]) => (
+                        {([['empty','Empty'],['few_rigs','A few rigs'],['packed','Packed']] as const).map(([val, label]) => (
                           <TouchableOpacity key={val} style={[s.frPill, frCrowd === val && s.frPillActive]}
                             onPress={() => setFrCrowd(val)}>
                             <Text style={[s.frPillText, frCrowd === val && s.frPillTextActive]}>{label}</Text>
@@ -6383,6 +6540,11 @@ const makeStyles = (C: ColorPalette) => {
     width: 36, height: 36, borderRadius: 18, backgroundColor: C.s2,
     alignItems: 'center', justifyContent: 'center',
   },
+  detailEditRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
+  verifiedChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, backgroundColor: C.green + '14', borderWidth: 1, borderColor: C.green + '55' },
+  verifiedChipText: { color: C.green, fontSize: 9, fontFamily: mono, fontWeight: '800' },
+  editLinkBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, backgroundColor: C.s2, borderWidth: 1, borderColor: C.border },
+  editLinkText: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '800' },
   detailTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 },
   detailLandBadge: {
     paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8,
@@ -6398,6 +6560,8 @@ const makeStyles = (C: ColorPalette) => {
     letterSpacing: 1.5, marginBottom: 10,
     borderBottomWidth: 1, borderColor: C.border, paddingBottom: 6,
   },
+  sectionTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, borderBottomWidth: 1, borderColor: C.border, marginBottom: 12 },
+  sectionEditText: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900', paddingBottom: 6 },
   detailDesc: { color: C.text, fontSize: 14, lineHeight: 22 },
   amenityGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   amenityItem: {
@@ -6406,6 +6570,11 @@ const makeStyles = (C: ColorPalette) => {
     flexDirection: 'row', alignItems: 'center', gap: 5,
   },
   amenityText: { color: C.text, fontSize: 12, fontWeight: '500' },
+  featureGroup: { marginBottom: 18 },
+  featureGroupTitle: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8, marginBottom: 12 },
+  featureGrid: { flexDirection: 'row', flexWrap: 'wrap', rowGap: 20 },
+  featureItem: { width: '50%', flexDirection: 'row', alignItems: 'center', gap: 12, paddingRight: 12 },
+  featureText: { color: C.text, fontSize: 15, lineHeight: 20, flex: 1 },
   siteTypeRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
   siteTypeText: { color: C.text, fontSize: 13 },
   detailActivities: { color: C.text2, fontSize: 12, lineHeight: 20 },
@@ -6417,6 +6586,7 @@ const makeStyles = (C: ColorPalette) => {
   frSentimentBar: { flexDirection: 'row', height: 6, borderRadius: 3, overflow: 'hidden', backgroundColor: C.s2, marginBottom: 6 },
   frBarSeg: { height: 6 },
   frSentimentLegend: { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 8 },
+  frLegendPill: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   frLegendItem: { fontSize: 12, fontWeight: '600' },
   frLastVisited: { color: C.text3, fontSize: 11, marginLeft: 'auto' as any },
   frTagCloud: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 2 },
@@ -6425,10 +6595,12 @@ const makeStyles = (C: ColorPalette) => {
   frTagCloudCount: { color: C.orange, fontSize: 10, fontWeight: '700' },
   frCard: { backgroundColor: C.s2, borderRadius: 10, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: C.border },
   frCardTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 6 },
-  frCardSentiment: { fontSize: 18, lineHeight: 22 },
+  frIconBubble: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   frCardMeta: { color: C.text2, fontSize: 12 },
+  frCardDate: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 1 },
   frCardRig: { color: C.text3, fontSize: 11, fontFamily: mono, marginTop: 1 },
-  frCardBadges: { flexDirection: 'row', gap: 8, marginBottom: 5 },
+  frCardBadges: { flexDirection: 'row', gap: 8, marginBottom: 5, flexWrap: 'wrap' },
+  frMiniBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: C.s1, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
   frCardBadge: { color: C.text2, fontSize: 11 },
   frCardTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginBottom: 5 },
   frInlineTag: { backgroundColor: C.s1, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 },
@@ -6441,7 +6613,7 @@ const makeStyles = (C: ColorPalette) => {
   frFormLabel: { color: C.text, fontSize: 12, fontWeight: '700', fontFamily: mono, marginTop: 8, marginBottom: 4 },
   frOptional: { color: C.text3, fontWeight: '400' },
   frPillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 4 },
-  frSentimentBtn: { borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7, borderWidth: 1, borderColor: C.border, backgroundColor: C.s1 },
+  frSentimentBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7, borderWidth: 1, borderColor: C.border, backgroundColor: C.s1 },
   frSentimentBtnText: { color: C.text2, fontSize: 12, fontWeight: '600' },
   frPill: { borderRadius: 16, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: C.border, backgroundColor: C.s1 },
   frPillActive: { borderColor: C.orange, backgroundColor: C.orange + '22' },

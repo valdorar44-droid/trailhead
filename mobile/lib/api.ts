@@ -139,6 +139,14 @@ export const api = {
     req<GasStation[]>(`/api/gas?lat=${lat}&lng=${lng}&radius=${radius}`),
   getCampsiteDetail: (id: string) =>
     req<CampsiteDetail>(`/api/campsites/${id}/detail`),
+  suggestCampsiteEdit: (id: string, data: CampEditSuggestionPayload) =>
+    req<{ id: number; status: string; credits_earned: number; new_balance: number }>(`/api/campsites/${encodeURIComponent(id)}/suggest-edit`, {
+      method: 'POST', body: JSON.stringify(data),
+    }),
+  adminUpdateCampsite: (id: string, data: Partial<CampAdminUpdatePayload>) =>
+    req<{ ok: boolean; override: Partial<CampsiteDetail> }>(`/api/admin/campsites/${encodeURIComponent(id)}`, {
+      method: 'POST', body: JSON.stringify(data),
+    }),
   submitPin: (data: PinPayload) =>
     req('/api/pins', { method: 'POST', body: JSON.stringify(data) }),
   getNearbyPins: (lat: number, lng: number, radius = 1.0) =>
@@ -280,6 +288,7 @@ export interface CampsitePin {
 export interface CampsiteDetail extends CampsitePin {
   photos: string[]; amenities: string[]; site_types: string[];
   activities: string[]; phone?: string; campsites_count: number;
+  admin_edited?: boolean;
 }
 export interface GasStation {
   id: number | string; name: string; lat: number; lng: number;
@@ -439,4 +448,22 @@ export interface FieldReportSummary {
   sentiment_counts: Record<string, number>;
   top_tags: { tag: string; count: number }[];
   last_visited: string | null;
+}
+export interface CampEditSuggestionPayload {
+  camp_name: string;
+  lat: number;
+  lng: number;
+  field: string;
+  value: string;
+  note?: string;
+}
+export interface CampAdminUpdatePayload {
+  name: string;
+  description: string;
+  amenities: string[];
+  site_types: string[];
+  activities: string[];
+  cost: string;
+  phone: string;
+  url: string;
 }

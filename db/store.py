@@ -188,6 +188,26 @@ def init_db():
             generated_at INTEGER NOT NULL,
             view_count   INTEGER NOT NULL DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS camp_profile_overrides (
+            camp_id     TEXT PRIMARY KEY,
+            data        TEXT NOT NULL,
+            updated_by  INTEGER,
+            updated_at  INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS camp_edit_suggestions (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            camp_id     TEXT NOT NULL,
+            camp_name   TEXT NOT NULL,
+            lat         REAL NOT NULL,
+            lng         REAL NOT NULL,
+            user_id     INTEGER,
+            username    TEXT,
+            field       TEXT NOT NULL,
+            value       TEXT NOT NULL,
+            note        TEXT,
+            status      TEXT NOT NULL DEFAULT 'pending',
+            created_at  INTEGER NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS report_interactions (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
             report_id  INTEGER NOT NULL,
@@ -335,6 +355,26 @@ def init_db():
             free_used    INTEGER NOT NULL DEFAULT 0,
             created_at   INTEGER NOT NULL,
             UNIQUE(user_id, asset_type, region_id)
+        )""",
+        """CREATE TABLE IF NOT EXISTS camp_profile_overrides (
+            camp_id     TEXT PRIMARY KEY,
+            data        TEXT NOT NULL,
+            updated_by  INTEGER,
+            updated_at  INTEGER NOT NULL
+        )""",
+        """CREATE TABLE IF NOT EXISTS camp_edit_suggestions (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            camp_id     TEXT NOT NULL,
+            camp_name   TEXT NOT NULL,
+            lat         REAL NOT NULL,
+            lng         REAL NOT NULL,
+            user_id     INTEGER,
+            username    TEXT,
+            field       TEXT NOT NULL,
+            value       TEXT NOT NULL,
+            note        TEXT,
+            status      TEXT NOT NULL DEFAULT 'pending',
+            created_at  INTEGER NOT NULL
         )""",
     ]:
         try:
@@ -1545,3 +1585,47 @@ def get_field_report_summary(camp_id: str) -> dict:
         "top_tags": [{"tag": t, "count": c} for t, c in top_tags],
         "last_visited": rows[0]["visited_date"] if rows else None,
     }
+
+
+# ── Camp profile edits ────────────────────────────────────────────────────────
+
+def get_camp_profile_override(camp_id: str) -> dict:
+    db = _conn()
+    row = db.execute("SELECT data FROM camp_profile_overrides WHERE camp_id=?", (camp_id,)).fetchone()
+    db.close()
+    if not row:
+        return {}
+    try:
+        return json.loads(row["data"] or "{}")
+    except Exception:
+        return {}
+
+def set_camp_profile_override(camp_id: str, data: dict, admin_id: int | None) -> dict:
+    current = get_camp_profile_override(camp_id)
+    merged = {**current, **{k: v for k, v in data.items() if v is not None}}
+    now = int(time.time())
+    db = _conn()
+    db.execute(
+        """INSERT INTO camp_profile_overrides (camp_id,data,updated_by,updated_at)
+           VALUES (?,?,?,?)
+           ON CONFLICT(camp_id) DO UPDATE SET data=excluded.data, updated_by=excluded.updated_by, updated_at=excluded.updated_at""",
+        (camp_id, json.dumps(merged), admin_id, now)
+    )
+    db.commit(); db.close()
+    return merged
+
+def add_camp_edit_suggestion(camp_id: str, camp_name: str, lat: float, lng: float,
+                             user_id: int | None, username: str | None,
+                             field: str, value: str, note: str | None) -> dict:
+    now = int(time.time())
+    db = _conn()
+    cur = db.execute(
+        """INSERT INTO camp_edit_suggestions
+           (camp_id,camp_name,lat,lng,user_id,username,field,value,note,status,created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,'pending',?)""",
+        (camp_id, camp_name, lat, lng, user_id, username, field, value, note, now)
+    )
+    db.commit()
+    suggestion_id = cur.lastrowid
+    db.close()
+    return {"id": suggestion_id, "status": "pending"}

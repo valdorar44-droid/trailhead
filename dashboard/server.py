@@ -43,6 +43,7 @@ from db.store import (
     save_push_token, get_push_token,
     create_plan_job, get_plan_job, update_plan_job,
     submit_field_report, get_field_reports, get_field_report_summary,
+    get_camp_profile_override, set_camp_profile_override, add_camp_edit_suggestion,
     get_user_pin_count_today, vote_community_pin,
 )
 
@@ -1709,7 +1710,62 @@ async def campsite_detail(facility_id: str):
     detail = await get_facility_detail(facility_id)
     if not detail:
         raise HTTPException(status_code=404, detail="Facility not found")
+    override = get_camp_profile_override(facility_id)
+    if override:
+        detail = {**detail, **override, "admin_edited": True}
     return detail
+
+class CampEditSuggestionPayload(BaseModel):
+    camp_name: str
+    lat: float
+    lng: float
+    field: str
+    value: str
+    note: Optional[str] = None
+
+@app.post("/api/campsites/{facility_id}/suggest-edit")
+async def suggest_camp_edit(facility_id: str, body: CampEditSuggestionPayload,
+                            user: dict = Depends(_current_user)):
+    allowed = {"name", "description", "amenities", "site_types", "activities", "cost", "phone", "url", "access", "notes"}
+    field = (body.field or "").strip().lower()
+    if field not in allowed:
+        raise HTTPException(400, "Invalid edit field")
+    value = (body.value or "").strip()
+    if not value:
+        raise HTTPException(400, "Suggested value is required")
+    if len(value) > 2000:
+        raise HTTPException(400, "Suggested value is too long")
+    result = add_camp_edit_suggestion(
+        facility_id, body.camp_name.strip()[:160], body.lat, body.lng,
+        user.get("id"), user.get("username"), field, value, (body.note or "").strip()[:500] or None
+    )
+    add_credits(user["id"], 3, f"Camp edit suggestion: {body.camp_name[:80]}")
+    fresh = get_user_by_id(user["id"])
+    return {**result, "credits_earned": 3, "new_balance": fresh["credits"] if fresh else user.get("credits", 0)}
+
+class CampAdminUpdatePayload(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    amenities: Optional[list[str]] = None
+    site_types: Optional[list[str]] = None
+    activities: Optional[list[str]] = None
+    cost: Optional[str] = None
+    phone: Optional[str] = None
+    url: Optional[str] = None
+
+@app.post("/api/admin/campsites/{facility_id}")
+async def admin_update_camp_detail(facility_id: str, body: CampAdminUpdatePayload,
+                                   user: dict = Depends(_current_user)):
+    if not user.get("is_admin"):
+        raise HTTPException(403, "Admin only")
+    raw = body.dict(exclude_unset=True)
+    clean: dict = {}
+    for key, val in raw.items():
+        if isinstance(val, str):
+            clean[key] = val.strip()[:4000]
+        elif isinstance(val, list):
+            clean[key] = [str(x).strip()[:80] for x in val if str(x).strip()][:40]
+    return {"ok": True, "override": set_camp_profile_override(facility_id, clean, user.get("id"))}
 
 @app.get("/api/gas")
 async def gas(lat: float, lng: float, radius: float = 25):

@@ -46,6 +46,14 @@ export interface SearchHistoryItem {
   searchedAt: number;
 }
 
+export interface TourTargetRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  updatedAt: number;
+}
+
 export interface RigProfile {
   vehicle_type: string;
   year: string;
@@ -99,6 +107,7 @@ interface AppState {
   hasPlan: boolean;
   planExpiresAt: number | null;
   guidedTourRunId: number;
+  tourTargets: Record<string, TourTargetRect>;
   setAuth: (token: string, user: User) => void;
   clearAuth: () => void;
   setActiveTrip: (trip: TripResult | null, fromCache?: boolean) => void;
@@ -123,6 +132,7 @@ interface AppState {
   setOfflineTripIds: (ids: string[]) => void;
   setPlan: (active: boolean, expiresAt?: number | null) => void;
   startGuidedTour: () => void;
+  setTourTarget: (key: string, rect: Omit<TourTargetRect, 'updatedAt'> | null) => void;
   restoreActiveTrip: () => Promise<void>;
 }
 
@@ -147,6 +157,7 @@ export const useStore = create<AppState>((set) => ({
   hasPlan: false,
   planExpiresAt: null,
   guidedTourRunId: 0,
+  tourTargets: {},
 
   setAuth: (token, user) => {
     ss('trailhead_token', token);
@@ -238,6 +249,12 @@ export const useStore = create<AppState>((set) => ({
   setOfflineTripIds: (ids) => set({ offlineTripIds: ids }),
   setPlan: (active, expiresAt = null) => set({ hasPlan: active, planExpiresAt: expiresAt }),
   startGuidedTour: () => set(state => ({ guidedTourRunId: state.guidedTourRunId + 1 })),
+  setTourTarget: (key, rect) => set((state) => {
+    const next = { ...state.tourTargets };
+    if (!rect) delete next[key];
+    else next[key] = { ...rect, updatedAt: Date.now() };
+    return { tourTargets: next };
+  }),
 
   restoreActiveTrip: async () => {
     const trip = await loadTripFile();

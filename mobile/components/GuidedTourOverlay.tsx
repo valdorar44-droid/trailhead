@@ -32,10 +32,11 @@ const STEPS = [
   {
     route: '/(tabs)/map',
     icon: 'search-outline',
-    title: 'Search and route',
-    body: 'Use the map search to find camps, towns, gas, or a destination. Once a destination is selected, Trailhead can draw the route and start navigation.',
-    target: 'SEARCH',
+    title: 'Search from controls',
+    body: 'Tap the search icon in the map controls to find camps, towns, gas, or a destination. The top strip only shows route status.',
+    target: 'SEARCH BUTTON',
     targetKind: 'mapSearch',
+    targetKey: 'map.search',
   },
   {
     route: '/(tabs)/map',
@@ -44,6 +45,7 @@ const STEPS = [
     body: 'Map controls switch online/offline map sources, layers, terrain, radar, fire, avalanche, public land overlays, and campsite filters.',
     target: 'LAYERS / FILTERS',
     targetKind: 'mapControls',
+    targetKey: 'map.layers',
   },
   {
     route: '/(tabs)/map',
@@ -52,6 +54,7 @@ const STEPS = [
     body: 'Download state maps, routing packs, or trip corridors before you leave service. Offline map status appears quietly while you pan.',
     target: 'OFFLINE',
     targetKind: 'mapOffline',
+    targetKey: 'map.offline',
   },
   {
     route: '/(tabs)/map',
@@ -60,6 +63,7 @@ const STEPS = [
     body: 'Use PIN to add community places like propane, water, dumps, camps, or repairs. Use REPORT for short-lived hazards and trail conditions.',
     target: 'PIN / REPORT',
     targetKind: 'mapQuick',
+    targetKey: 'map.pinReport',
   },
   {
     route: '/(tabs)/route-builder',
@@ -106,6 +110,7 @@ export default function GuidedTourOverlay() {
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const runId = useStore(st => st.guidedTourRunId);
+  const tourTargets = useStore(st => st.tourTargets);
   const [visible, setVisible] = useState(false);
   const [idx, setIdx] = useState(0);
   const [neverShow, setNeverShow] = useState(false);
@@ -116,6 +121,15 @@ export default function GuidedTourOverlay() {
   const step = STEPS[idx];
   const isLast = idx === STEPS.length - 1;
   const target = useMemo(() => {
+    const measured = 'targetKey' in step ? tourTargets[step.targetKey as string] : null;
+    if (measured && measured.width > 4 && measured.height > 4 && Date.now() - measured.updatedAt < 30_000) {
+      return {
+        left: measured.left,
+        top: measured.top,
+        width: measured.width,
+        height: measured.height,
+      };
+    }
     if (step.targetKind === 'tab') {
       const tabCount = 6;
       const tabW = width / tabCount;
@@ -129,10 +143,10 @@ export default function GuidedTourOverlay() {
     }
     if (step.targetKind === 'mapSearch') {
       return {
-        left: 12,
-        top: insets.top + 8,
-        width: Math.min(width - 24, 360),
-        height: 58,
+        left: Math.max(10, width - 76),
+        top: insets.top + 360,
+        width: 64,
+        height: 56,
       };
     }
     if (step.targetKind === 'mapControls') {
@@ -157,7 +171,7 @@ export default function GuidedTourOverlay() {
       width: 142,
       height: 112,
     };
-  }, [height, insets.bottom, insets.top, step, width]);
+  }, [height, insets.bottom, insets.top, step, tourTargets, width]);
 
   useEffect(() => {
     storage.get(TOUR_NEVER).then(never => {

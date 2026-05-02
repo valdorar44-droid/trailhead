@@ -1566,6 +1566,31 @@ class MapErrorBoundary extends Component<{ children: React.ReactNode }, { error:
   }
 }
 
+function TourTarget({ id, children }: { id: string; children: React.ReactNode }) {
+  const setTourTarget = useStore(st => st.setTourTarget);
+  const ref = useRef<View>(null);
+  const measure = useCallback(() => {
+    ref.current?.measureInWindow((left, top, width, height) => {
+      if (Number.isFinite(left) && Number.isFinite(top) && width > 0 && height > 0) {
+        setTourTarget(id, { left, top, width, height });
+      }
+    });
+  }, [id, setTourTarget]);
+  useEffect(() => {
+    measure();
+    const t = setTimeout(measure, 250);
+    return () => {
+      clearTimeout(t);
+      setTourTarget(id, null);
+    };
+  }, [id, measure, setTourTarget]);
+  return (
+    <View ref={ref} collapsable={false} onLayout={measure}>
+      {children}
+    </View>
+  );
+}
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 function MapScreen() {
@@ -3774,12 +3799,14 @@ function MapScreen() {
               </TouchableOpacity>
             )}
 
-            <TouchableOpacity
-              style={[s.ctrlBtn, showSearch && { backgroundColor: '#3b82f6dd', borderColor: '#3b82f6' }]}
-              onPress={() => { setShowSearch(p => !p); setSearchResults([]); setSearchQuery(''); }}
-            >
-              <Ionicons name="search" size={20} color={showSearch ? '#fff' : OVR.text} />
-            </TouchableOpacity>
+            <TourTarget id="map.search">
+              <TouchableOpacity
+                style={[s.ctrlBtn, showSearch && { backgroundColor: '#3b82f6dd', borderColor: '#3b82f6' }]}
+                onPress={() => { setShowSearch(p => !p); setSearchResults([]); setSearchQuery(''); }}
+              >
+                <Ionicons name="search" size={20} color={showSearch ? '#fff' : OVR.text} />
+              </TouchableOpacity>
+            </TourTarget>
 
             {waypoints.length > 0 && (
               <TouchableOpacity
@@ -3839,19 +3866,23 @@ function MapScreen() {
               <Ionicons name="water-outline" size={20} color={showPois ? '#fff' : OVR.text} />
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[s.ctrlBtn, { borderColor: C.border }]}
-              onPress={() => setShowOfflineModal(true)}
-            >
-              <Ionicons name="map-outline" size={18} color={C.text2} />
-            </TouchableOpacity>
+            <TourTarget id="map.offline">
+              <TouchableOpacity
+                style={[s.ctrlBtn, { borderColor: C.border }]}
+                onPress={() => setShowOfflineModal(true)}
+              >
+                <Ionicons name="map-outline" size={18} color={C.text2} />
+              </TouchableOpacity>
+            </TourTarget>
 
-            <TouchableOpacity
-              style={[s.ctrlBtn, showLayerSheet && { backgroundColor: '#6366f1dd', borderColor: '#6366f1' }]}
-              onPress={() => setShowLayerSheet(true)}
-            >
-              <Ionicons name="layers-outline" size={20} color={showLayerSheet ? '#fff' : OVR.text} />
-            </TouchableOpacity>
+            <TourTarget id="map.layers">
+              <TouchableOpacity
+                style={[s.ctrlBtn, showLayerSheet && { backgroundColor: '#6366f1dd', borderColor: '#6366f1' }]}
+                onPress={() => setShowLayerSheet(true)}
+              >
+                <Ionicons name="layers-outline" size={20} color={showLayerSheet ? '#fff' : OVR.text} />
+              </TouchableOpacity>
+            </TourTarget>
 
             <TouchableOpacity
               style={[s.ctrlBtn, nearbyNarration != null && { backgroundColor: '#f97316dd', borderColor: '#f97316' }]}
@@ -5240,22 +5271,24 @@ function MapScreen() {
             </View>
           )}
           {!navMode && (
-            <View style={{ gap: 8 }}>
-              <TouchableOpacity
-                style={[s.quickReportFab, pinDropMode && { backgroundColor: '#f97316', borderColor: '#f97316' }]}
-                onPress={() => beginCommunityPinDrop(false)}
-              >
-                <Ionicons name="location-outline" size={13} color={pinDropMode ? '#fff' : '#f97316'} />
-                <Text style={[s.quickReportFabText, pinDropMode && s.quickReportFabTextActive]}>PIN</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[s.quickReportFab, quickReport && s.quickReportFabActive]}
-                onPress={() => { setQuickTypeIdx(null); setQuickReport(p => !p); }}
-              >
-                <Ionicons name="warning" size={13} color={quickReport ? '#fff' : '#f59e0b'} />
-                <Text style={[s.quickReportFabText, quickReport && s.quickReportFabTextActive]}>REPORT</Text>
-              </TouchableOpacity>
-            </View>
+            <TourTarget id="map.pinReport">
+              <View style={{ gap: 8 }}>
+                <TouchableOpacity
+                  style={[s.quickReportFab, pinDropMode && { backgroundColor: '#f97316', borderColor: '#f97316' }]}
+                  onPress={() => beginCommunityPinDrop(false)}
+                >
+                  <Ionicons name="location-outline" size={13} color={pinDropMode ? '#fff' : '#f97316'} />
+                  <Text style={[s.quickReportFabText, pinDropMode && s.quickReportFabTextActive]}>PIN</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[s.quickReportFab, quickReport && s.quickReportFabActive]}
+                  onPress={() => { setQuickTypeIdx(null); setQuickReport(p => !p); }}
+                >
+                  <Ionicons name="warning" size={13} color={quickReport ? '#fff' : '#f59e0b'} />
+                  <Text style={[s.quickReportFabText, quickReport && s.quickReportFabTextActive]}>REPORT</Text>
+                </TouchableOpacity>
+              </View>
+            </TourTarget>
           )}
         </View>
       )}

@@ -98,6 +98,7 @@ interface AppState {
   activeTripFromCache: boolean;
   hasPlan: boolean;
   planExpiresAt: number | null;
+  guidedTourRunId: number;
   setAuth: (token: string, user: User) => void;
   clearAuth: () => void;
   setActiveTrip: (trip: TripResult | null, fromCache?: boolean) => void;
@@ -121,6 +122,7 @@ interface AppState {
   clearSearchHistory: () => void;
   setOfflineTripIds: (ids: string[]) => void;
   setPlan: (active: boolean, expiresAt?: number | null) => void;
+  startGuidedTour: () => void;
   restoreActiveTrip: () => Promise<void>;
 }
 
@@ -144,6 +146,7 @@ export const useStore = create<AppState>((set) => ({
   activeTripFromCache: false,
   hasPlan: false,
   planExpiresAt: null,
+  guidedTourRunId: 0,
 
   setAuth: (token, user) => {
     ss('trailhead_token', token);
@@ -234,6 +237,7 @@ export const useStore = create<AppState>((set) => ({
 
   setOfflineTripIds: (ids) => set({ offlineTripIds: ids }),
   setPlan: (active, expiresAt = null) => set({ hasPlan: active, planExpiresAt: expiresAt }),
+  startGuidedTour: () => set(state => ({ guidedTourRunId: state.guidedTourRunId + 1 })),
 
   restoreActiveTrip: async () => {
     const trip = await loadTripFile();

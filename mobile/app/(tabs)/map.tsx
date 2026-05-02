@@ -1793,7 +1793,6 @@ function MapScreen() {
   const [mapMoved, setMapMoved] = useState(false);
   const [mapZoom, setMapZoom] = useState(10);
   const [searchResult, setSearchResult] = useState<{ count: number } | null>(null);
-  const [showOnboard, setShowOnboard] = useState(false);
   const [mapLoadFailed, setMapLoadFailed] = useState(false);
   const [showLocDisclosure, setShowLocDisclosure] = useState(false);
 
@@ -1829,13 +1828,6 @@ function MapScreen() {
         storage.get('trailhead_protomaps_key').catch(() => null),
       ]).then(([t, k]) => applyConfig(t || '', k || ''));
     });
-  }, []);
-
-  // Show onboarding card for first-time users
-  useEffect(() => {
-    storage.get('trailhead_onboarded').then(val => {
-      if (!val) setShowOnboard(true);
-    }).catch(() => {});
   }, []);
 
   // Load cached route weather from FileSystem when active trip changes
@@ -5254,7 +5246,6 @@ function MapScreen() {
         </View>
       )}
 
-      {/* ── First-time onboarding card ─────────────────────────────────────── */}
       {/* ── Location permission prominent disclosure ── */}
       {showLocDisclosure && (
         <View style={s.locDisclosureOverlay}>
@@ -5298,29 +5289,6 @@ function MapScreen() {
             >
               <Ionicons name="checkmark-circle" size={16} color="#fff" />
               <Text style={s.locDisclosureAllowText}>Continue</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
-      {showOnboard && !activeTrip && !navMode && !showSearch && !selectedCamp && (
-        <View style={s.onboardCard} pointerEvents="box-none">
-          <View style={s.onboardInner}>
-            <View style={s.onboardIconWrap}>
-              <Ionicons name="map-outline" size={22} color={C.orange} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={s.onboardTitle}>PLAN YOUR FIRST ADVENTURE</Text>
-              <Text style={s.onboardBody}>Tap the PLAN tab and describe any trip — mountains, desert, off-road, you name it.</Text>
-            </View>
-            <TouchableOpacity
-              style={s.onboardClose}
-              onPress={() => {
-                setShowOnboard(false);
-                storage.set('trailhead_onboarded', 'true').catch(() => {});
-              }}
-            >
-              <Ionicons name="close" size={16} color={OVR.text3} />
             </TouchableOpacity>
           </View>
         </View>
@@ -6718,28 +6686,6 @@ const makeStyles = (C: ColorPalette) => {
   },
   quickSubtypeText: { fontSize: 13, fontFamily: mono, fontWeight: '700' },
   packDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: C.orange, marginTop: 6 },
-
-  // ── Onboarding card ─────────────────────────────────────────────────────────
-  onboardCard: {
-    position: 'absolute', bottom: 108, left: 12, right: 12,
-    pointerEvents: 'box-none',
-  },
-  onboardInner: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    backgroundColor: OVR.bg, borderRadius: 16,
-    borderWidth: 1.5, borderColor: C.orange + '55',
-    paddingHorizontal: 14, paddingVertical: 12,
-    shadowColor: C.orange, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.15, shadowRadius: 10,
-    elevation: 8,
-  },
-  onboardIconWrap: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: C.orange + '18',
-    alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-  },
-  onboardTitle: { color: C.orange, fontSize: 11, fontFamily: mono, fontWeight: '800', letterSpacing: 0.8, marginBottom: 3 },
-  onboardBody: { color: OVR.text2, fontSize: 11, fontFamily: mono, lineHeight: 15 },
-  onboardClose: { padding: 6, alignSelf: 'flex-start', flexShrink: 0 },
 
   // ── Approaching report alert ─────────────────────────────────────────────────
   approachAlert: {

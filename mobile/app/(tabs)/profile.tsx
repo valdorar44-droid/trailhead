@@ -126,6 +126,7 @@ export default function ProfileScreen() {
   // Offline cache state
   const [offlineCachedIds, setOfflineCachedIds] = useState<Set<string>>(new Set());
   const setActiveTrip = useStore(st => st.setActiveTrip);
+  const startGuidedTour = useStore(st => st.startGuidedTour);
 
   // Smooth auth → main transition: dismiss keyboard, show success flash, fade out, switch view
   function transitionToMain(successMsg: string) {
@@ -519,6 +520,7 @@ export default function ProfileScreen() {
             { icon: 'compass', label: 'PLAN TRIP',   color: C.orange, onPress: () => { setActiveTrip(null); router.push('/(tabs)/'); } },
             { icon: 'people',  label: 'REFER',       color: C.orange, onPress: shareReferral },
             { icon: 'checkmark-circle', label: 'TRIP PREP', color: C.green,  onPress: () => setShowChecklist(true) },
+            { icon: 'help-buoy-outline', label: 'APP TOUR', color: '#3b82f6', onPress: startGuidedTour },
             { icon: 'cloud-upload-outline', label: 'IMPORT GPX', color: C.text3, onPress: importGpx },
             { icon: 'bug-outline', label: 'BUG',     color: C.red,   onPress: () => setShowBugModal(true) },
           ].map(({ icon, label, color, onPress }) => (

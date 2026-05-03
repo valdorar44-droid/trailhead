@@ -24,8 +24,24 @@ PACK_DEFINITIONS = {
     "essentials": {
         "id": "essentials",
         "name": "Essentials",
-        "description": "Fuel, water, trailheads, viewpoints, peaks, and hot springs.",
-        "categories": ["fuel", "water", "trailhead", "viewpoint", "peak", "hot_spring"],
+        "description": "Core road-trip services, outdoor stops, lodging, and useful town stops.",
+        "categories": [
+            "fuel", "propane", "water", "dump", "shower", "laundromat",
+            "lodging", "food", "grocery", "mechanic", "parking", "attraction",
+            "trailhead", "viewpoint", "peak", "hot_spring",
+        ],
+    },
+    "services": {
+        "id": "services",
+        "name": "Services",
+        "description": "Fuel, propane, water, dump stations, showers, laundry, groceries, and mechanics.",
+        "categories": ["fuel", "propane", "water", "dump", "shower", "laundromat", "grocery", "mechanic"],
+    },
+    "outdoors": {
+        "id": "outdoors",
+        "name": "Outdoors",
+        "description": "Trailheads, viewpoints, peaks, and hot springs.",
+        "categories": ["trailhead", "viewpoint", "peak", "hot_spring"],
     },
 }
 
@@ -138,6 +154,24 @@ def _classify_osm(el: dict) -> str | None:
         return "peak"
     if tags.get("natural") == "hot_spring" or (tags.get("amenity") == "public_bath" and tags.get("bath:type") == "hot_spring"):
         return "hot_spring"
+    if tags.get("tourism") in {"hotel", "motel", "guest_house", "hostel"}:
+        return "lodging"
+    if tags.get("amenity") == "shower":
+        return "shower"
+    if tags.get("amenity") == "sanitary_dump_station" or tags.get("sanitary_dump_station") == "yes":
+        return "dump"
+    if tags.get("shop") == "laundry":
+        return "laundromat"
+    if tags.get("amenity") in {"restaurant", "cafe", "fast_food"}:
+        return "food"
+    if tags.get("shop") in {"supermarket", "convenience", "general"}:
+        return "grocery"
+    if tags.get("shop") in {"car_repair", "tyres"} or tags.get("craft") == "mechanic":
+        return "mechanic"
+    if tags.get("amenity") == "parking":
+        return "parking"
+    if tags.get("tourism") == "attraction":
+        return "attraction"
     return None
 
 
@@ -171,7 +205,7 @@ def _normalize_overpass_element(el: dict) -> dict | None:
         "type": ptype,
         "category": ptype,
         "source": "osm",
-        "subtype": tags.get("bath:type") or tags.get("natural") or tags.get("amenity") or "",
+        "subtype": tags.get("bath:type") or tags.get("tourism") or tags.get("shop") or tags.get("natural") or tags.get("amenity") or "",
         "address": ", ".join([v for v in [tags.get("addr:street"), tags.get("addr:city"), tags.get("addr:state")] if v]),
         "fuel_types": ", ".join(fuel_types),
         "elevation": tags.get("ele", ""),
@@ -185,9 +219,28 @@ async def _fetch_bbox_cell(cell: tuple[float, float, float, float]) -> list[dict
 (
   node["amenity"="fuel"]({bbox});
   way["amenity"="fuel"]({bbox});
+  node["fuel:propane"="yes"]({bbox});
+  way["fuel:propane"="yes"]({bbox});
   node["natural"="spring"]({bbox});
   node["amenity"="drinking_water"]({bbox});
   node["amenity"="water_point"]({bbox});
+  node["amenity"="sanitary_dump_station"]({bbox});
+  way["amenity"="sanitary_dump_station"]({bbox});
+  node["sanitary_dump_station"="yes"]({bbox});
+  way["sanitary_dump_station"="yes"]({bbox});
+  node["amenity"="shower"]({bbox});
+  node["shop"="laundry"]({bbox});
+  node["tourism"~"hotel|motel|guest_house|hostel"]({bbox});
+  way["tourism"~"hotel|motel|guest_house|hostel"]({bbox});
+  node["amenity"~"restaurant|cafe|fast_food"]({bbox});
+  node["shop"~"supermarket|convenience|general"]({bbox});
+  node["shop"~"car_repair|tyres"]({bbox});
+  way["shop"~"car_repair|tyres"]({bbox});
+  node["craft"="mechanic"]({bbox});
+  node["amenity"="parking"]({bbox});
+  way["amenity"="parking"]({bbox});
+  node["tourism"="attraction"]({bbox});
+  way["tourism"="attraction"]({bbox});
   node["highway"="trailhead"]({bbox});
   node["trailhead"="yes"]({bbox});
   node["tourism"="viewpoint"]({bbox});
@@ -226,7 +279,7 @@ def _normalize_pack_point(item: dict, category: str) -> dict | None:
         "lat": float(lat),
         "lng": float(lng),
         "type": ptype,
-        "category": ptype if ptype in PACK_DEFINITIONS["essentials"]["categories"] else category,
+        "category": ptype,
         "source": str(item.get("source") or "osm"),
         "subtype": item.get("subtype") or "",
         "address": item.get("address") or "",
@@ -287,6 +340,8 @@ async def build_region_pack(region: str, pack_id: str = "essentials") -> Path | 
             points.append(point)
 
     priority = {"fuel": 0, "water": 1, "hot_spring": 2, "trailhead": 3, "viewpoint": 4, "peak": 5}
+    allowed_categories = set(PACK_DEFINITIONS[pack_id]["categories"])
+    points = [p for p in points if str(p.get("type") or p.get("category")) in allowed_categories]
     points.sort(key=lambda p: (priority.get(str(p.get("type")), 9), str(p.get("name", ""))))
     payload = {
         "schema_version": 1,

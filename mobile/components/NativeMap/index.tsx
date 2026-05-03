@@ -134,6 +134,15 @@ const POI_CODES: Record<string, string> = {
   hot_spring: 'H',
   fuel: 'G',
   propane: 'P',
+  dump: 'D',
+  shower: 'S',
+  laundromat: 'L',
+  lodging: 'M',
+  food: 'F',
+  grocery: 'G',
+  mechanic: 'R',
+  parking: 'P',
+  attraction: 'A',
 };
 const POI_ICON_NAMES: Record<string, keyof typeof Ionicons.glyphMap> = {
   water: 'water-outline',
@@ -143,6 +152,15 @@ const POI_ICON_NAMES: Record<string, keyof typeof Ionicons.glyphMap> = {
   hot_spring: 'flame-outline',
   fuel: 'flash-outline',
   propane: 'flame-outline',
+  dump: 'trash-bin-outline',
+  shower: 'rainy-outline',
+  laundromat: 'shirt-outline',
+  lodging: 'bed-outline',
+  food: 'restaurant-outline',
+  grocery: 'cart-outline',
+  mechanic: 'construct-outline',
+  parking: 'car-outline',
+  attraction: 'camera-outline',
 };
 
 const COMMUNITY_PIN_VISUALS: Record<string, { color: string; icon: keyof typeof Ionicons.glyphMap }> = {
@@ -1108,7 +1126,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             id="poi-circle"
             style={{
               circleRadius: ['case', ['==', ['get', 'type'], 'peak'], 9, 8],
-              circleColor: ['match', ['get', 'type'], 'water', '#3b82f6', 'trailhead', '#22c55e', 'viewpoint', '#a855f7', 'peak', '#92400e', 'hot_spring', '#f97316', 'fuel', '#ea580c', 'propane', '#f97316', '#6b7280'],
+              circleColor: ['match', ['get', 'type'], 'water', '#3b82f6', 'trailhead', '#22c55e', 'viewpoint', '#a855f7', 'peak', '#92400e', 'hot_spring', '#f97316', 'fuel', '#ea580c', 'propane', '#f97316', 'dump', '#a16207', 'shower', '#06b6d4', 'laundromat', '#06b6d4', 'lodging', '#6366f1', 'food', '#06b6d4', 'grocery', '#06b6d4', 'mechanic', '#f97316', 'parking', '#d97706', 'attraction', '#0ea5e9', '#6b7280'],
               circleOpacity: 0.9, circleStrokeWidth: 1.5, circleStrokeColor: '#fff',
             }}
           />
@@ -1123,6 +1141,15 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
                 'hot_spring', POI_CODES.hot_spring,
                 'fuel', POI_CODES.fuel,
                 'propane', POI_CODES.propane,
+                'dump', POI_CODES.dump,
+                'shower', POI_CODES.shower,
+                'laundromat', POI_CODES.laundromat,
+                'lodging', POI_CODES.lodging,
+                'food', POI_CODES.food,
+                'grocery', POI_CODES.grocery,
+                'mechanic', POI_CODES.mechanic,
+                'parking', POI_CODES.parking,
+                'attraction', POI_CODES.attraction,
                 'P'],
               textSize: 9.5,
               textFont: ['Noto Sans Medium'],
@@ -1363,6 +1390,15 @@ function poiColor(type: string): string {
     case 'hot_spring': return '#f97316';
     case 'fuel': return '#ea580c';
     case 'propane': return '#f97316';
+    case 'dump': return '#a16207';
+    case 'shower': return '#06b6d4';
+    case 'laundromat': return '#06b6d4';
+    case 'lodging': return '#6366f1';
+    case 'food': return '#06b6d4';
+    case 'grocery': return '#06b6d4';
+    case 'mechanic': return '#f97316';
+    case 'parking': return '#d97706';
+    case 'attraction': return '#0ea5e9';
     default: return '#6b7280';
   }
 }

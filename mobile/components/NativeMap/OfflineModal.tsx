@@ -544,18 +544,16 @@ export default function OfflineModal({
   }, [onOfflinePlacesChanged, reloadPlacePacks]);
 
   const currentPlacePack = placePacks.find(pack => tripId && pack.trip_id === tripId);
-  const currentRegionPlacePack = placePacks.find(pack =>
-    pack.region_id === selectedState && pack.pack_id === `${selectedState}-essentials`
-  );
-  const currentManifestPlacePack = placeManifest?.packs?.[`${selectedState}-essentials.json`];
+  const currentManifestPlacePacks = Object.entries(placeManifest?.packs ?? {})
+    .filter(([, entry]) => entry.region_id === selectedState)
+    .sort(([, a], [, b]) => a.pack_id.localeCompare(b.pack_id));
 
-  const downloadRegionEssentials = useCallback(async () => {
+  const downloadRegionPlacePack = useCallback(async (packId: string) => {
     if (placeBusy) return;
-    if (!currentManifestPlacePack) return;
     setPlaceBusy(true);
     setPlaceError(null);
     try {
-      const pack = await api.getPlacePack(selectedState, 'essentials');
+      const pack = await api.getPlacePack(selectedState, packId);
       await saveOfflinePlacePack(pack);
       await reloadPlacePacks();
       onOfflinePlacesChanged?.();
@@ -565,7 +563,7 @@ export default function OfflineModal({
     } finally {
       setPlaceBusy(false);
     }
-  }, [currentManifestPlacePack, onOfflinePlacesChanged, placeBusy, reloadPlacePacks, selectedState]);
+  }, [onOfflinePlacesChanged, placeBusy, reloadPlacePacks, selectedState]);
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -893,44 +891,50 @@ export default function OfflineModal({
                           completeText="Valhalla graph pack is downloaded. Long offline routes can use this state without needing signal."
                         />
 
-                        {currentManifestPlacePack && (
+                        {currentManifestPlacePacks.length > 0 && (
                           <>
                             <Section label={`${mapRegion.name.toUpperCase()} — PLACES DETAILS`} />
-                            <View style={[s.corridorCard, currentRegionPlacePack && { borderLeftColor: C.green }]}>
-                              <View style={{ flex: 1 }}>
-                                <Text style={{ color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '800' }}>
-                                  ESSENTIAL PLACES
-                                </Text>
-                                <Text style={{ color: C.text2, fontSize: 10, fontFamily: mono, marginTop: 2, lineHeight: 14 }}>
-                                  Fuel, water, trailheads, viewpoints, peaks, and hot springs saved as offline map pins.
-                                </Text>
-                                <Text style={{ color: currentRegionPlacePack ? C.green : C.text3, fontSize: 9, fontFamily: mono, marginTop: 4 }}>
-                                  {currentRegionPlacePack
-                                    ? `${currentRegionPlacePack.point_count} places on device`
-                                    : `${currentManifestPlacePack.point_count} places · ${fmtBytes(currentManifestPlacePack.size)}`}
-                                </Text>
-                                {placeError && (
-                                  <Text style={{ color: C.red, fontSize: 9, fontFamily: mono, marginTop: 4 }}>{placeError}</Text>
-                                )}
-                              </View>
-                              <View style={{ gap: 8, alignItems: 'flex-end' }}>
-                                {currentRegionPlacePack && <StatusChip label="SAVED" color={C.green} />}
-                                <TouchableOpacity
-                                  disabled={placeBusy}
-                                  onPress={downloadRegionEssentials}
-                                  style={{ borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: placeBusy ? C.s2 : C.orangeGlow, borderWidth: 1, borderColor: placeBusy ? C.border : C.orange + '55' }}
-                                >
-                                  <Text style={{ color: placeBusy ? C.text3 : C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900' }}>
-                                    {placeBusy ? 'SAVING' : currentRegionPlacePack ? 'REFRESH' : 'DOWNLOAD'}
-                                  </Text>
-                                </TouchableOpacity>
-                                {currentRegionPlacePack && (
-                                  <TouchableOpacity onPress={() => deleteTripEssentials(currentRegionPlacePack.pack_id)} style={{ padding: 4 }}>
-                                    <Ionicons name="trash-outline" size={16} color={C.red} />
-                                  </TouchableOpacity>
-                                )}
-                              </View>
-                            </View>
+                            {currentManifestPlacePacks.map(([manifestKey, manifestEntry]) => {
+                              const saved = placePacks.find(pack => pack.region_id === selectedState && pack.pack_id === `${selectedState}-${manifestEntry.pack_id}`);
+                              const def = placeManifest?.definitions?.[manifestEntry.pack_id];
+                              return (
+                                <View key={manifestKey} style={[s.corridorCard, { marginBottom: 10 }, saved && { borderLeftColor: C.green }]}>
+                                  <View style={{ flex: 1 }}>
+                                    <Text style={{ color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '800' }}>
+                                      {(def?.name ?? manifestEntry.pack_id).toUpperCase()} PLACES
+                                    </Text>
+                                    <Text style={{ color: C.text2, fontSize: 10, fontFamily: mono, marginTop: 2, lineHeight: 14 }}>
+                                      {def?.description ?? 'Offline places saved as map pins.'}
+                                    </Text>
+                                    <Text style={{ color: saved ? C.green : C.text3, fontSize: 9, fontFamily: mono, marginTop: 4 }}>
+                                      {saved
+                                        ? `${saved.point_count} places on device`
+                                        : `${manifestEntry.point_count} places · ${fmtBytes(manifestEntry.size)}`}
+                                    </Text>
+                                    {placeError && (
+                                      <Text style={{ color: C.red, fontSize: 9, fontFamily: mono, marginTop: 4 }}>{placeError}</Text>
+                                    )}
+                                  </View>
+                                  <View style={{ gap: 8, alignItems: 'flex-end' }}>
+                                    {saved && <StatusChip label="SAVED" color={C.green} />}
+                                    <TouchableOpacity
+                                      disabled={placeBusy}
+                                      onPress={() => downloadRegionPlacePack(manifestEntry.pack_id)}
+                                      style={{ borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: placeBusy ? C.s2 : C.orangeGlow, borderWidth: 1, borderColor: placeBusy ? C.border : C.orange + '55' }}
+                                    >
+                                      <Text style={{ color: placeBusy ? C.text3 : C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900' }}>
+                                        {placeBusy ? 'SAVING' : saved ? 'REFRESH' : 'DOWNLOAD'}
+                                      </Text>
+                                    </TouchableOpacity>
+                                    {saved && (
+                                      <TouchableOpacity onPress={() => deleteTripEssentials(saved.pack_id)} style={{ padding: 4 }}>
+                                        <Ionicons name="trash-outline" size={16} color={C.red} />
+                                      </TouchableOpacity>
+                                    )}
+                                  </View>
+                                </View>
+                              );
+                            })}
                           </>
                         )}
                           </>

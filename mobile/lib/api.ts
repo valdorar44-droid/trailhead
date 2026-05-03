@@ -338,7 +338,7 @@ export interface PinPayload {
 }
 export interface OsmPoi {
   id: string; name: string; lat: number; lng: number;
-  type: 'water' | 'trailhead' | 'viewpoint' | 'peak' | 'hot_spring' | 'fuel' | 'propane' | 'poi'; subtype?: string; elevation?: string;
+  type: 'water' | 'trailhead' | 'viewpoint' | 'peak' | 'hot_spring' | 'fuel' | 'propane' | 'dump' | 'shower' | 'laundromat' | 'lodging' | 'food' | 'grocery' | 'mechanic' | 'parking' | 'attraction' | 'poi'; subtype?: string; elevation?: string;
   route_distance_mi?: number; route_fit?: string;
 }
 export interface PlaceTripPackRequest {

@@ -642,7 +642,7 @@ export default function OfflineModal({
                 <>
                   <Section label="REGIONS — MAP + ROUTING PACKS" />
                   <Text style={s.hint}>
-                    Pick a region, then download the map file and routing graph separately. U.S. states are live now; Canada and Mexico unlock automatically when their R2 packs are uploaded.
+                    Pick a region, then download the map file and routing graph separately. U.S. states, Canada, and Mexico are available now.
                     Region maps are free. Free accounts include one routing pack, then credits or Explorer unlock more.
                   </Text>
 

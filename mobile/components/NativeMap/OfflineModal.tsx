@@ -130,32 +130,36 @@ function ReadinessRow({ icon, label, ready }: { icon: keyof typeof Ionicons.glyp
 }
 
 function StateReadinessPanel({
-  mapReady, routeReady, mapBusy, routeBusy, available, onDownloadMissing,
+  mapReady, routeReady, placeReady, placeAvailable, placeLabel, mapBusy, routeBusy, available, onDownloadMissing,
 }: {
   mapReady: boolean;
   routeReady: boolean;
+  placeReady: boolean;
+  placeAvailable: boolean;
+  placeLabel: string;
   mapBusy: boolean;
   routeBusy: boolean;
   available: boolean;
   onDownloadMissing: () => void;
 }) {
   const C = useTheme();
-  const ready = mapReady && routeReady;
+  const navReady = mapReady && routeReady;
+  const ready = navReady && (!placeAvailable || placeReady);
   const busy = mapBusy || routeBusy;
   return (
     <View style={{ backgroundColor: ready ? C.green + '12' : C.s1, borderColor: ready ? C.green + '35' : C.border, borderWidth: 1, borderRadius: 10, padding: 12, marginBottom: 12 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
         <View style={{ flex: 1 }}>
           <Text style={{ color: ready ? C.green : C.text, fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 }}>
-            {ready ? 'REGION OFFLINE READY' : available ? 'REGION NEEDS DOWNLOADS' : 'REGION PACKS COMING SOON'}
+            {ready ? 'REGION OFFLINE READY' : navReady ? 'NAV READY · PLACES OPTIONAL' : available ? 'REGION NEEDS DOWNLOADS' : 'REGION PACKS COMING SOON'}
           </Text>
           <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 3, lineHeight: 13 }}>
             {available
-              ? 'Map file draws roads/trails. Routing graph powers long offline route calculation.'
+              ? 'Map draws roads/trails. Routing powers long offline routes. Places add fuel, water, campside services, trailheads, and stops.'
               : 'Trailhead will enable download buttons after map and routing files are uploaded to R2.'}
           </Text>
         </View>
-        {!ready && available && (
+        {!navReady && available && (
           <TouchableOpacity
             disabled={busy}
             onPress={onDownloadMissing}
@@ -170,6 +174,7 @@ function StateReadinessPanel({
       <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
         <ReadinessRow icon="map-outline" label={mapReady ? 'MAP ON DEVICE' : available ? 'MAP MISSING' : 'MAP PLANNED'} ready={mapReady} />
         <ReadinessRow icon="git-branch-outline" label={routeReady ? 'ROUTE ON DEVICE' : available ? 'ROUTE MISSING' : 'ROUTE PLANNED'} ready={routeReady} />
+        <ReadinessRow icon="location-outline" label={placeLabel} ready={placeReady} />
       </View>
     </View>
   );
@@ -780,6 +785,7 @@ export default function OfflineModal({
                       .map(([id, region]) => {
                         const mapDone = getState(id).status === 'complete';
                         const routeDone = getRoutingState(id).status === 'complete';
+                        const placesDone = placePacks.some(pack => pack.region_id === id);
                         const mapPublished = isFilePublished(id);
                         const routePublished = isRoutingPublished(id);
                         const available = mapPublished && routePublished;
@@ -798,7 +804,7 @@ export default function OfflineModal({
                             <Text style={[s.statePickCode, selected && { color: C.orange }]}>{code}</Text>
                             <Text style={s.statePickName} numberOfLines={1}>{region.name}</Text>
                             <Text style={{ color: mapDone && routeDone ? C.green : C.text3, fontSize: 8, fontFamily: mono, marginTop: 3 }}>
-                              {!available ? 'PLANNED' : `${mapDone ? 'MAP' : '--'} · ${routeDone ? 'ROUTE' : '--'}`}
+                              {!available ? 'PLANNED' : `${mapDone ? 'MAP' : '--'} · ${routeDone ? 'ROUTE' : '--'} · ${placesDone ? 'PLACES' : '--'}`}
                             </Text>
                           </TouchableOpacity>
                         );
@@ -816,11 +822,21 @@ export default function OfflineModal({
                     const mapBusy = mapState.status === 'downloading' || mapState.status === 'paused';
                     const routeBusy = routingState.status === 'downloading' || routingState.status === 'paused';
                     const selectedCode = selectedState === 'canada' ? 'CAN' : selectedState === 'mexico' ? 'MEX' : selectedState.toUpperCase();
+                    const savedRegionPlacePacks = placePacks.filter(pack => pack.region_id === selectedState);
+                    const savedRegionPlaceCount = savedRegionPlacePacks.reduce((sum, pack) => sum + (pack.point_count || 0), 0);
+                    const regionPlacesAvailable = currentManifestPlacePacks.length > 0;
+                    const regionPlacesReady = savedRegionPlacePacks.length > 0;
+                    const regionPlacesLabel = regionPlacesReady
+                      ? `PLACES ${savedRegionPlaceCount}`
+                      : regionPlacesAvailable ? 'PLACES MISSING' : 'PLACES PLANNED';
                     return (
                       <>
                         <StateReadinessPanel
                           mapReady={mapState.status === 'complete'}
                           routeReady={routingState.status === 'complete'}
+                          placeReady={regionPlacesReady}
+                          placeAvailable={regionPlacesAvailable}
+                          placeLabel={regionPlacesLabel}
                           mapBusy={mapBusy}
                           routeBusy={routeBusy}
                           available={regionAvailable}

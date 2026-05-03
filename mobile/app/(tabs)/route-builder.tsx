@@ -240,6 +240,7 @@ export default function RouteBuilderScreen() {
   const [routeName, setRouteName] = useState('');
   const [searchResults, setSearchResults] = useState<SearchPlace[]>([]);
   const [pendingType, setPendingType] = useState<BuilderStopType>('waypoint');
+  const [insertAfterId, setInsertAfterId] = useState<string | null>(null);
   const [discoverTab, setDiscoverTab] = useState<DiscoveryTab>('camps');
   const [discoverLoading, setDiscoverLoading] = useState(false);
   const [camps, setCamps] = useState<CampsitePin[]>([]);
@@ -281,6 +282,7 @@ export default function RouteBuilderScreen() {
   }, []);
 
   const dayStops = stops.filter(st => st.day === activeDay);
+  const selectedInsertStop = stops.find(st => st.id === insertAfterId) ?? null;
   const orderedStops = [...stops].sort((a, b) => a.day - b.day || stops.indexOf(a) - stops.indexOf(b));
   const mapWaypoints = orderedStops.map(st => ({ lat: st.lat, lng: st.lng, name: st.name, day: st.day, type: st.type }));
   const anchor = [...dayStops].reverse()[0] ?? [...stops].reverse()[0] ?? (userLoc ? { lat: userLoc.lat, lng: userLoc.lng, name: 'Current location' } : null);
@@ -368,12 +370,18 @@ export default function RouteBuilderScreen() {
   }
 
   function addStop(input: Omit<BuilderStop, 'id' | 'day'> & { day?: number }) {
+    const target = insertAfterId ? stops.find(st => st.id === insertAfterId) : null;
     const stop: BuilderStop = {
       ...input,
       id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-      day: input.day ?? activeDay,
+      day: input.day ?? target?.day ?? activeDay,
     };
-    setStops(prev => [...prev, stop]);
+    setStops(prev => {
+      const idx = target ? prev.findIndex(st => st.id === target.id) : -1;
+      if (idx < 0) return [...prev, stop];
+      return [...prev.slice(0, idx + 1), stop, ...prev.slice(idx + 1)];
+    });
+    setActiveDay(stop.day);
     fly(stop.lat, stop.lng, stop.type === 'camp' ? 12 : 11);
   }
 
@@ -482,7 +490,14 @@ export default function RouteBuilderScreen() {
   }
 
   function removeStop(id: string) {
+    if (insertAfterId === id) setInsertAfterId(null);
     setStops(prev => prev.filter(st => st.id !== id));
+  }
+
+  function selectInsertStop(stop: BuilderStop) {
+    setInsertAfterId(prev => prev === stop.id ? null : stop.id);
+    setActiveDay(stop.day);
+    fly(stop.lat, stop.lng, 13);
   }
 
   function moveStop(id: string, dir: -1 | 1) {
@@ -751,6 +766,23 @@ export default function RouteBuilderScreen() {
           ))}
         </View>
 
+        <View style={[s.insertCard, selectedInsertStop && { borderColor: C.orange + '66', backgroundColor: C.orange + '10' }]}>
+          <Ionicons name={selectedInsertStop ? 'git-commit-outline' : 'add-circle-outline'} size={15} color={selectedInsertStop ? C.orange : C.text3} />
+          <View style={{ flex: 1 }}>
+            <Text style={s.insertTitle}>{selectedInsertStop ? 'Adding after selected stop' : 'Adding to end of day'}</Text>
+            <Text style={s.insertText} numberOfLines={1}>
+              {selectedInsertStop
+                ? `${selectedInsertStop.name} · Day ${selectedInsertStop.day}`
+                : 'Tap any stop below to insert the next search, map, or downloaded place after it.'}
+            </Text>
+          </View>
+          {selectedInsertStop ? (
+            <TouchableOpacity style={s.insertClear} onPress={() => setInsertAfterId(null)}>
+              <Text style={s.insertClearText}>END</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+
         <TourTarget id="routeBuilder.search">
           <View style={s.searchBox}>
             <Ionicons name="search" size={17} color={C.text3} />
@@ -894,16 +926,16 @@ export default function RouteBuilderScreen() {
         {dayStops.length === 0 ? (
           <View style={s.emptyState}>
             <Text style={s.emptyTitle}>Build the day in order</Text>
-            <Text style={s.emptyText}>Start with a destination, then add fuel, POIs, and a camp. Tapping a stop flies the map to it.</Text>
+            <Text style={s.emptyText}>Start with a destination, then add fuel, POIs, and a camp. Tap a stop later to insert new places after it.</Text>
           </View>
         ) : dayStops.map((st, idx) => (
-          <TouchableOpacity key={st.id} style={s.stopRow} onPress={() => fly(st.lat, st.lng, 13)}>
+          <TouchableOpacity key={st.id} style={[s.stopRow, insertAfterId === st.id && s.stopRowSelected]} onPress={() => selectInsertStop(st)}>
             <View style={[s.stopNum, { backgroundColor: stopColor(st.type) }]}>
               <Text style={s.stopNumText}>{idx + 1}</Text>
             </View>
             <View style={{ flex: 1 }}>
               <Text style={s.stopName} numberOfLines={1}>{st.name}</Text>
-              <Text style={s.stopMeta}>{stopLabel(st.type).toUpperCase()} · {sourceLabel(st.source)}</Text>
+              <Text style={s.stopMeta}>{stopLabel(st.type).toUpperCase()} · {sourceLabel(st.source)}{insertAfterId === st.id ? ' · INSERT AFTER' : ''}</Text>
             </View>
             <TouchableOpacity style={s.iconBtn} onPress={() => moveStop(st.id, -1)}>
               <Ionicons name="chevron-up" size={15} color={C.text3} />
@@ -1236,6 +1268,11 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   typeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
   typeChip: { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderColor: C.border, borderRadius: 9, paddingHorizontal: 9, paddingVertical: 7, backgroundColor: C.s2 },
   typeChipText: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '800' },
+  insertCard: { flexDirection: 'row', alignItems: 'center', gap: 9, borderWidth: 1, borderColor: C.border, borderRadius: 12, paddingHorizontal: 11, paddingVertical: 10, backgroundColor: C.s2 },
+  insertTitle: { color: C.text, fontSize: 12, fontWeight: '900' },
+  insertText: { color: C.text3, fontSize: 10, lineHeight: 15, marginTop: 1 },
+  insertClear: { borderWidth: 1, borderColor: C.orange + '55', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: C.s1 },
+  insertClearText: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900' },
   searchBox: { flexDirection: 'row', alignItems: 'center', gap: 9, borderWidth: 1, borderColor: C.border, borderRadius: 12, backgroundColor: C.s2, paddingLeft: 12 },
   searchInput: { flex: 1, color: C.text, fontSize: 13, paddingVertical: 11 },
   searchBtn: { alignSelf: 'stretch', minWidth: 56, backgroundColor: C.orange, borderTopRightRadius: 11, borderBottomRightRadius: 11, alignItems: 'center', justifyContent: 'center' },
@@ -1279,6 +1316,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   emptyTitle: { color: C.text, fontSize: 14, fontWeight: '800', marginBottom: 4 },
   emptyText: { color: C.text3, fontSize: 12, lineHeight: 18 },
   stopRow: { flexDirection: 'row', alignItems: 'center', gap: 9, borderWidth: 1, borderColor: C.border, borderRadius: 12, padding: 10, backgroundColor: C.s1 },
+  stopRowSelected: { borderColor: C.orange, backgroundColor: C.orange + '10' },
   stopNum: { width: 28, height: 28, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
   stopNumText: { color: '#fff', fontSize: 11, fontFamily: mono, fontWeight: '900' },
   stopName: { color: C.text, fontSize: 13, fontWeight: '800' },

@@ -1538,6 +1538,26 @@ async def update_routing_manifest():
     return {"ok": ok}
 
 
+# ── Offline place packs ───────────────────────────────────────────────────────
+from dashboard import place_packs as _place_packs
+
+@app.get("/api/admin/place-packs-status")
+async def place_packs_status():
+    return _place_packs.status()
+
+@app.post("/api/admin/build-place-pack/{region}/{pack_id}")
+async def build_place_pack(region: str, pack_id: str = "essentials"):
+    if _place_packs._running:
+        return {"triggered": False, "reason": "already running"}
+    asyncio.create_task(_place_packs.build_and_upload(region, pack_id))
+    return {"triggered": True, "region": region.lower(), "pack_id": pack_id.lower()}
+
+@app.post("/api/admin/update-place-packs-manifest")
+async def update_place_packs_manifest():
+    ok = await _place_packs.update_manifest_on_r2()
+    return {"ok": ok}
+
+
 # ── R2 upload ─────────────────────────────────────────────────────────────────
 _r2_upload_status: dict = {"running": False, "done": False, "error": None, "progress": ""}
 
@@ -2949,6 +2969,19 @@ async def trip_essentials_pack(body: PlaceTripPackRequest, user: dict = Depends(
         "categories": categories,
         "points": points,
     }
+
+
+@app.get("/api/places/packs/manifest")
+async def place_packs_manifest():
+    return await _place_packs.remote_manifest()
+
+
+@app.get("/api/places/packs/{region}/{pack_id}")
+async def place_pack_download(region: str, pack_id: str = "essentials", user: dict = Depends(_current_user)):
+    pack = await _place_packs.fetch_remote_pack(region, pack_id)
+    if not pack:
+        raise HTTPException(404, "Place pack not found")
+    return pack
 
 
 # ── Wikipedia nearby ──────────────────────────────────────────────────────────

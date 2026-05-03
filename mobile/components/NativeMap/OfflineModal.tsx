@@ -26,7 +26,7 @@ import {
   type InstalledPack, type PackProgress,
 } from './offlineManager';
 import type { WP } from './types';
-import { api, PaywallError, type OfflineAssetType } from '@/lib/api';
+import { api, PaywallError, type OfflineAssetType, type PlacePackManifest } from '@/lib/api';
 import {
   deleteOfflinePlacePack,
   listOfflinePlacePacks,
@@ -424,6 +424,7 @@ export default function OfflineModal({
   const [selectedState,  setSelectedState]  = useState('ks');
   const [authorizing,    setAuthorizing]    = useState<string | null>(null);
   const [placePacks,     setPlacePacks]     = useState<OfflinePlacePackSummary[]>([]);
+  const [placeManifest,  setPlaceManifest]  = useState<PlacePackManifest | null>(null);
   const [placeBusy,      setPlaceBusy]      = useState(false);
   const [placeError,     setPlaceError]     = useState<string | null>(null);
 
@@ -439,6 +440,11 @@ export default function OfflineModal({
   useEffect(() => {
     if (visible) reloadPlacePacks();
   }, [visible, reloadPlacePacks]);
+
+  useEffect(() => {
+    if (!visible) return;
+    api.getPlacePackManifest().then(setPlaceManifest).catch(() => setPlaceManifest(null));
+  }, [visible]);
 
   const startMlnPack = useCallback(async (
     name: string, bounds: [[number,number],[number,number]], minZoom: number, maxZoom: number
@@ -538,6 +544,28 @@ export default function OfflineModal({
   }, [onOfflinePlacesChanged, reloadPlacePacks]);
 
   const currentPlacePack = placePacks.find(pack => tripId && pack.trip_id === tripId);
+  const currentRegionPlacePack = placePacks.find(pack =>
+    pack.region_id === selectedState && pack.pack_id === `${selectedState}-essentials`
+  );
+  const currentManifestPlacePack = placeManifest?.packs?.[`${selectedState}-essentials.json`];
+
+  const downloadRegionEssentials = useCallback(async () => {
+    if (placeBusy) return;
+    if (!currentManifestPlacePack) return;
+    setPlaceBusy(true);
+    setPlaceError(null);
+    try {
+      const pack = await api.getPlacePack(selectedState, 'essentials');
+      await saveOfflinePlacePack(pack);
+      await reloadPlacePacks();
+      onOfflinePlacesChanged?.();
+      Alert.alert('Places saved', `${pack.name} saved ${pack.points.length} places for offline use.`);
+    } catch (e: any) {
+      setPlaceError(e?.message ?? 'Could not download this places pack.');
+    } finally {
+      setPlaceBusy(false);
+    }
+  }, [currentManifestPlacePack, onOfflinePlacesChanged, placeBusy, reloadPlacePacks, selectedState]);
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -864,6 +892,47 @@ export default function OfflineModal({
                           completeTitle="✓ ROUTING GRAPH ON DEVICE"
                           completeText="Valhalla graph pack is downloaded. Long offline routes can use this state without needing signal."
                         />
+
+                        {currentManifestPlacePack && (
+                          <>
+                            <Section label={`${mapRegion.name.toUpperCase()} — PLACES DETAILS`} />
+                            <View style={[s.corridorCard, currentRegionPlacePack && { borderLeftColor: C.green }]}>
+                              <View style={{ flex: 1 }}>
+                                <Text style={{ color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '800' }}>
+                                  ESSENTIAL PLACES
+                                </Text>
+                                <Text style={{ color: C.text2, fontSize: 10, fontFamily: mono, marginTop: 2, lineHeight: 14 }}>
+                                  Fuel, water, trailheads, viewpoints, peaks, and hot springs saved as offline map pins.
+                                </Text>
+                                <Text style={{ color: currentRegionPlacePack ? C.green : C.text3, fontSize: 9, fontFamily: mono, marginTop: 4 }}>
+                                  {currentRegionPlacePack
+                                    ? `${currentRegionPlacePack.point_count} places on device`
+                                    : `${currentManifestPlacePack.point_count} places · ${fmtBytes(currentManifestPlacePack.size)}`}
+                                </Text>
+                                {placeError && (
+                                  <Text style={{ color: C.red, fontSize: 9, fontFamily: mono, marginTop: 4 }}>{placeError}</Text>
+                                )}
+                              </View>
+                              <View style={{ gap: 8, alignItems: 'flex-end' }}>
+                                {currentRegionPlacePack && <StatusChip label="SAVED" color={C.green} />}
+                                <TouchableOpacity
+                                  disabled={placeBusy}
+                                  onPress={downloadRegionEssentials}
+                                  style={{ borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: placeBusy ? C.s2 : C.orangeGlow, borderWidth: 1, borderColor: placeBusy ? C.border : C.orange + '55' }}
+                                >
+                                  <Text style={{ color: placeBusy ? C.text3 : C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900' }}>
+                                    {placeBusy ? 'SAVING' : currentRegionPlacePack ? 'REFRESH' : 'DOWNLOAD'}
+                                  </Text>
+                                </TouchableOpacity>
+                                {currentRegionPlacePack && (
+                                  <TouchableOpacity onPress={() => deleteTripEssentials(currentRegionPlacePack.pack_id)} style={{ padding: 4 }}>
+                                    <Ionicons name="trash-outline" size={16} color={C.red} />
+                                  </TouchableOpacity>
+                                )}
+                              </View>
+                            </View>
+                          </>
+                        )}
                           </>
                         )}
                       </>

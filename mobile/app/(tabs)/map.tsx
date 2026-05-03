@@ -21,7 +21,7 @@ import { useStore } from '@/lib/store';
 import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, Waypoint } from '@/lib/api';
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { loadRouteGeometry, saveRouteGeometry } from '@/lib/offlineRoutes';
-import { loadTripPlacePoints } from '@/lib/offlinePlacePacks';
+import { loadAllPlacePoints } from '@/lib/offlinePlacePacks';
 import * as ImagePicker from 'expo-image-picker';
 import PaywallModal from '@/components/PaywallModal';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
@@ -2186,7 +2186,7 @@ function MapScreen() {
     FileSystem.readAsStringAsync(path, { encoding: FileSystem.EncodingType.UTF8 })
       .then(raw => { try { setCachedWeather(JSON.parse(raw)); } catch { setCachedWeather(null); } })
       .catch(() => setCachedWeather(null));
-  }, [activeTrip?.trip_id]);
+  }, []);
 
   // Keep refs in sync
   useEffect(() => {
@@ -2614,11 +2614,7 @@ function MapScreen() {
   useEffect(() => { showPoisRef.current = showPois; }, [showPois]);
 
   const reloadOfflinePlacePois = useCallback(async () => {
-    if (!activeTrip?.trip_id) {
-      setOfflinePlacePois([]);
-      return;
-    }
-    const points = await loadTripPlacePoints(activeTrip.trip_id).catch(() => []);
+    const points = await loadAllPlacePoints().catch(() => []);
     setOfflinePlacePois(points.map(p => ({
       id: p.id,
       name: p.name,

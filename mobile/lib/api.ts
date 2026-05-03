@@ -177,6 +177,10 @@ export const api = {
     req<PlacePack>('/api/places/trip-essentials', {
       method: 'POST', body: JSON.stringify(data),
     }),
+  getPlacePackManifest: () =>
+    req<PlacePackManifest>('/api/places/packs/manifest'),
+  getPlacePack: (region_id: string, pack_id = 'essentials') =>
+    req<PlacePack>(`/api/places/packs/${encodeURIComponent(region_id)}/${encodeURIComponent(pack_id)}`),
   getWikipediaNearby: (lat: number, lng: number, radius = 10000) =>
     req<WikiArticle[]>(`/api/wikipedia-nearby?lat=${lat}&lng=${lng}&radius=${radius}`),
 
@@ -361,12 +365,25 @@ export interface PlacePack {
   pack_id: string;
   trip_id?: string;
   trip_name?: string;
+  region_id?: string;
+  region_name?: string;
   name: string;
   generated_at: number;
   source: string;
-  sample_count: number;
+  sample_count?: number;
   categories: string[];
   points: PlacePackPoint[];
+}
+export interface PlacePackManifestEntry {
+  region_id: string;
+  pack_id: string;
+  size: number;
+  point_count: number;
+  url: string;
+}
+export interface PlacePackManifest {
+  definitions: Record<string, { id: string; name: string; description: string; categories: string[] }>;
+  packs: Record<string, PlacePackManifestEntry>;
 }
 export interface WikiArticle {
   title: string; lat: number; lng: number; dist_m: number; extract: string; url: string;

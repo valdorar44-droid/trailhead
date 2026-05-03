@@ -8,8 +8,10 @@ const MAX_PLACE_PACKS = 8;
 export interface OfflinePlacePackSummary {
   pack_id: string;
   trip_id?: string;
+  region_id?: string;
   name: string;
   trip_name?: string;
+  region_name?: string;
   generated_at: number;
   point_count: number;
   categories: string[];
@@ -65,8 +67,10 @@ export async function listOfflinePlacePacks(): Promise<OfflinePlacePackSummary[]
   return packs.filter(Boolean).map(pack => ({
     pack_id: pack!.pack_id,
     trip_id: pack!.trip_id,
+    region_id: pack!.region_id,
     name: pack!.name,
     trip_name: pack!.trip_name,
+    region_name: pack!.region_name,
     generated_at: pack!.generated_at,
     point_count: pack!.points?.length ?? 0,
     categories: Array.isArray(pack!.categories) ? pack!.categories : [],
@@ -86,5 +90,13 @@ export async function loadTripPlacePoints(tripId?: string | null): Promise<Place
   const matches = packs.filter(pack => pack?.trip_id === tripId);
   const points: PlacePackPoint[] = [];
   matches.forEach(pack => points.push(...(pack?.points ?? [])));
+  return points;
+}
+
+export async function loadAllPlacePoints(): Promise<PlacePackPoint[]> {
+  const index = await getIndex();
+  const packs = await Promise.all(index.map(loadOfflinePlacePack));
+  const points: PlacePackPoint[] = [];
+  packs.filter(Boolean).forEach(pack => points.push(...(pack?.points ?? [])));
   return points;
 }

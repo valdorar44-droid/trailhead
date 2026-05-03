@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput,
   ActivityIndicator, Modal, Alert, Image,
@@ -10,6 +10,7 @@ import NativeMap, { NativeMapHandle } from '@/components/NativeMap';
 import PaywallModal from '@/components/PaywallModal';
 import TourTarget from '@/components/TourTarget';
 import { api, CampFullness, CampsiteDetail, CampsiteInsight, CampsitePin, GasStation, OsmPoi, PaywallError, TripResult, Waypoint, WeatherForecast } from '@/lib/api';
+import { loadAllPlacePoints } from '@/lib/offlinePlacePacks';
 import { saveOfflineTrip } from '@/lib/offlineTrips';
 import { useStore } from '@/lib/store';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
@@ -31,6 +32,26 @@ type BuilderStop = {
 };
 type SearchPlace = { name: string; lat: number; lng: number };
 type DiscoveryTab = 'camps' | 'gas' | 'poi';
+
+const PLACE_FILTER_TYPES = [
+  { id: 'fuel', label: 'Fuel', icon: 'flash-outline', color: '#ea580c' },
+  { id: 'propane', label: 'Propane', icon: 'flame-outline', color: '#f97316' },
+  { id: 'water', label: 'Water', icon: 'water-outline', color: '#0284c7' },
+  { id: 'dump', label: 'Dump', icon: 'trash-bin-outline', color: '#a16207' },
+  { id: 'shower', label: 'Showers', icon: 'rainy-outline', color: '#06b6d4' },
+  { id: 'laundromat', label: 'Laundry', icon: 'shirt-outline', color: '#06b6d4' },
+  { id: 'lodging', label: 'Lodging', icon: 'bed-outline', color: '#6366f1' },
+  { id: 'food', label: 'Food', icon: 'restaurant-outline', color: '#06b6d4' },
+  { id: 'grocery', label: 'Groceries', icon: 'cart-outline', color: '#06b6d4' },
+  { id: 'mechanic', label: 'Mechanic', icon: 'construct-outline', color: '#f97316' },
+  { id: 'parking', label: 'Parking', icon: 'car-outline', color: '#d97706' },
+  { id: 'attraction', label: 'Attractions', icon: 'camera-outline', color: '#0ea5e9' },
+  { id: 'trailhead', label: 'Trailheads', icon: 'trail-sign-outline', color: '#22c55e' },
+  { id: 'viewpoint', label: 'Views', icon: 'flag-outline', color: '#a855f7' },
+  { id: 'peak', label: 'Peaks', icon: 'triangle-outline', color: '#92400e' },
+  { id: 'hot_spring', label: 'Hot Springs', icon: 'flame-outline', color: '#f97316' },
+] as const;
+const DEFAULT_PLACE_FILTERS = ['fuel', 'propane', 'water', 'dump', 'trailhead'];
 
 function haversineMi(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
   const R = 3958.8;
@@ -84,6 +105,31 @@ function stopLabel(type: string) {
   if (type === 'camp') return 'Camp';
   if (type === 'motel') return 'Lodging';
   return 'Stop';
+}
+
+function placeIcon(type: string): keyof typeof Ionicons.glyphMap {
+  const match = PLACE_FILTER_TYPES.find(t => t.id === type);
+  return (match?.icon as keyof typeof Ionicons.glyphMap) ?? 'navigate-outline';
+}
+
+function placeColor(type: string) {
+  return PLACE_FILTER_TYPES.find(t => t.id === type)?.color ?? '#f97316';
+}
+
+function builderTypeForPoi(type: string): BuilderStopType {
+  if (type === 'fuel' || type === 'propane') return 'fuel';
+  if (type === 'lodging') return 'motel';
+  return 'waypoint';
+}
+
+function dedupePois(points: OsmPoi[]) {
+  const seen = new Set<string>();
+  return points.filter(point => {
+    const key = point.id || `${point.type}_${point.lat.toFixed(5)}_${point.lng.toFixed(5)}_${point.name}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function sourceLabel(source?: BuilderStop['source']) {
@@ -199,6 +245,9 @@ export default function RouteBuilderScreen() {
   const [camps, setCamps] = useState<CampsitePin[]>([]);
   const [gas, setGas] = useState<GasStation[]>([]);
   const [pois, setPois] = useState<OsmPoi[]>([]);
+  const [offlinePlaces, setOfflinePlaces] = useState<OsmPoi[]>([]);
+  const [activePlaceFilters, setActivePlaceFilters] = useState<string[]>(DEFAULT_PLACE_FILTERS);
+  const [showPlaceFilters, setShowPlaceFilters] = useState(false);
   const [selectedCamp, setSelectedCamp] = useState<CampsitePin | null>(null);
   const [campDetail, setCampDetail] = useState<CampsiteDetail | null>(null);
   const [campWeather, setCampWeather] = useState<WeatherForecast | null>(null);
@@ -209,6 +258,27 @@ export default function RouteBuilderScreen() {
   const [paywallVisible, setPaywallVisible] = useState(false);
   const [paywallCode, setPaywallCode] = useState('camp_detail');
   const [paywallMessage, setPaywallMessage] = useState('Use credits or Explorer to open full campsite profiles. You can still add this camp to your route from the free preview.');
+
+  useEffect(() => {
+    let mounted = true;
+    loadAllPlacePoints()
+      .then(points => {
+        if (!mounted) return;
+        setOfflinePlaces(points.map(point => ({
+          id: point.id,
+          name: point.name,
+          lat: point.lat,
+          lng: point.lng,
+          type: point.type,
+          subtype: point.subtype,
+          elevation: point.elevation,
+        })));
+      })
+      .catch(() => {
+        if (mounted) setOfflinePlaces([]);
+      });
+    return () => { mounted = false; };
+  }, []);
 
   const dayStops = stops.filter(st => st.day === activeDay);
   const orderedStops = [...stops].sort((a, b) => a.day - b.day || stops.indexOf(a) - stops.indexOf(b));
@@ -227,6 +297,25 @@ export default function RouteBuilderScreen() {
   const discoverContextLabel = legContext && (discoverTab === 'gas' || discoverTab === 'poi')
     ? `Day ${Math.max(1, activeDay - 1)} to Day ${activeDay} · ${fmtMi(legContext.miles)}`
     : anchor ? anchor.name.split(',')[0] : 'add a stop first';
+  const filteredOfflinePlaces = useMemo(() => (
+    offlinePlaces.filter(place => activePlaceFilters.includes(place.type))
+  ), [offlinePlaces, activePlaceFilters]);
+  const mapPois = useMemo(() => dedupePois([...pois, ...filteredOfflinePlaces]), [pois, filteredOfflinePlaces]);
+  const offlinePlaceCandidates = useMemo(() => {
+    const target = legContext ? legContext.center : anchor;
+    if (!target) return [];
+    const scoped = filteredOfflinePlaces
+      .map(place => ({
+        ...place,
+        route_distance_mi: legContext
+          ? pointSegmentDistanceMi(place, legContext.from, legContext.to)
+          : haversineMi(place, target),
+      }))
+      .filter(place => place.route_distance_mi <= (legContext ? Math.max(20, Math.min(50, legContext.miles * 0.5)) : 45))
+      .sort((a, b) => (a.route_distance_mi ?? 999) - (b.route_distance_mi ?? 999));
+    return dedupePois(scoped);
+  }, [anchor, filteredOfflinePlaces, legContext]);
+  const discoveryPois = useMemo(() => dedupePois([...pois, ...offlinePlaceCandidates]), [pois, offlinePlaceCandidates]);
 
   const totals = useMemo(() => {
     let miles = 0;
@@ -379,13 +468,14 @@ export default function RouteBuilderScreen() {
   }
 
   function addPoi(poi: OsmPoi) {
+    const type = builderTypeForPoi(poi.type);
     addStop({
       name: poi.name || poi.type,
       lat: poi.lat,
       lng: poi.lng,
-      type: 'waypoint',
+      type,
       description: `${poi.type.replace(/_/g, ' ')} stop selected in Route Builder.`,
-      land_type: 'route',
+      land_type: type === 'fuel' || type === 'motel' ? 'town' : 'route',
       source: 'poi',
       poi,
     });
@@ -581,7 +671,7 @@ export default function RouteBuilderScreen() {
           waypoints={mapWaypoints}
           camps={camps}
           gas={gas.map(g => ({ lat: g.lat, lng: g.lng, name: g.name }))}
-          pois={pois}
+          pois={mapPois}
           reports={[]}
           communityPins={[]}
           searchMarker={anchor ? { lat: anchor.lat, lng: anchor.lng, name: anchor.name } : null}
@@ -634,6 +724,10 @@ export default function RouteBuilderScreen() {
           <Ionicons name="hand-left-outline" size={12} color="#fff" />
           <Text style={s.mapHintText}>Tap map to add selected stop type</Text>
         </View>
+        <TouchableOpacity style={s.mapFilterPill} onPress={() => setShowPlaceFilters(true)}>
+          <Ionicons name="filter" size={13} color="#fff" />
+          <Text style={s.mapFilterPillText}>{activePlaceFilters.length} places</Text>
+        </TouchableOpacity>
       </View>
 
       <ScrollView style={s.body} contentContainerStyle={s.bodyContent} showsVerticalScrollIndicator={false}>
@@ -716,8 +810,12 @@ export default function RouteBuilderScreen() {
 
         <View style={s.sectionHeader}>
           <Text style={s.sectionTitle}>DISCOVER NEAR ROUTE</Text>
-          <Text style={s.sectionMeta}>{discoverContextLabel}</Text>
+          <TouchableOpacity style={s.sectionAction} onPress={() => setShowPlaceFilters(true)}>
+            <Ionicons name="filter" size={12} color={C.orange} />
+            <Text style={s.sectionActionText}>{offlinePlaces.length ? `${offlinePlaces.length} saved` : 'filters'}</Text>
+          </TouchableOpacity>
         </View>
+        <Text style={s.sectionMeta}>{discoverContextLabel}</Text>
         <View style={s.discoverHint}>
           <Ionicons name={legContext ? 'git-commit-outline' : 'locate-outline'} size={13} color={C.text3} />
           <Text style={s.discoverHintText}>
@@ -729,7 +827,7 @@ export default function RouteBuilderScreen() {
         <View style={s.discoverTabs}>
           {(['camps', 'gas', 'poi'] as DiscoveryTab[]).map(tab => (
             <TouchableOpacity key={tab} style={[s.discoverTab, discoverTab === tab && s.discoverTabActive]} onPress={() => setDiscoverTab(tab)}>
-              <Text style={[s.discoverTabText, discoverTab === tab && s.discoverTabTextActive]}>{tab.toUpperCase()}</Text>
+              <Text style={[s.discoverTabText, discoverTab === tab && s.discoverTabTextActive]}>{tab === 'poi' ? 'PLACES' : tab.toUpperCase()}</Text>
             </TouchableOpacity>
           ))}
           <TouchableOpacity style={s.discoverBtn} onPress={discover} disabled={discoverLoading}>
@@ -771,10 +869,10 @@ export default function RouteBuilderScreen() {
         {discoverTab === 'gas' && gas.length === 0 && !discoverLoading && (
           <View style={s.emptyState}><Text style={s.emptyTitle}>No fuel results loaded</Text><Text style={s.emptyText}>{discoverEmptyText}</Text></View>
         )}
-        {discoverTab === 'poi' && pois.slice(0, 12).map(poi => (
+        {discoverTab === 'poi' && discoveryPois.slice(0, 12).map(poi => (
           <TouchableOpacity key={poi.id} style={s.candidateRow} onPress={() => { addPoi(poi); fly(poi.lat, poi.lng, 13); }}>
-            <View style={[s.candidateIcon, { borderColor: '#f9731666', backgroundColor: '#f9731618' }]}>
-              <Ionicons name="navigate-outline" size={16} color="#f97316" />
+            <View style={[s.candidateIcon, { borderColor: placeColor(poi.type) + '66', backgroundColor: placeColor(poi.type) + '18' }]}>
+              <Ionicons name={placeIcon(poi.type)} size={16} color={placeColor(poi.type)} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={s.candidateName} numberOfLines={1}>{poi.name || poi.type}</Text>
@@ -785,7 +883,7 @@ export default function RouteBuilderScreen() {
             </View>
           </TouchableOpacity>
         ))}
-        {discoverTab === 'poi' && pois.length === 0 && !discoverLoading && (
+        {discoverTab === 'poi' && discoveryPois.length === 0 && !discoverLoading && (
           <View style={s.emptyState}><Text style={s.emptyTitle}>No POI results loaded</Text><Text style={s.emptyText}>{discoverEmptyText}</Text></View>
         )}
 
@@ -1046,6 +1144,57 @@ export default function RouteBuilderScreen() {
         </View>
       </Modal>
 
+      <Modal visible={showPlaceFilters} transparent animationType="slide" onRequestClose={() => setShowPlaceFilters(false)}>
+        <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setShowPlaceFilters(false)}>
+          <TouchableOpacity activeOpacity={1} style={s.filterSheet}>
+            <View style={s.filterSheetTop}>
+              <View>
+                <Text style={s.kicker}>ROUTE BUILDER</Text>
+                <Text style={s.filterSheetTitle}>Downloaded Places</Text>
+              </View>
+              <TouchableOpacity style={s.quickCardClose} onPress={() => setShowPlaceFilters(false)}>
+                <Ionicons name="close" size={17} color={C.text3} />
+              </TouchableOpacity>
+            </View>
+            <Text style={s.filterHintText}>
+              These filters control which downloaded pack points appear on the map and in Places search while building routes offline.
+            </Text>
+            <View style={s.filterToolbar}>
+              <TouchableOpacity style={s.filterSmallBtn} onPress={() => setActivePlaceFilters(DEFAULT_PLACE_FILTERS)}>
+                <Text style={s.filterSmallText}>DEFAULT</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.filterSmallBtn} onPress={() => setActivePlaceFilters(PLACE_FILTER_TYPES.map(t => t.id))}>
+                <Text style={s.filterSmallText}>ALL</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.filterSmallBtn} onPress={() => setActivePlaceFilters([])}>
+                <Text style={s.filterSmallText}>CLEAR</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.filterGrid}>
+              {PLACE_FILTER_TYPES.map(f => {
+                const active = activePlaceFilters.includes(f.id);
+                const count = offlinePlaces.filter(p => p.type === f.id).length;
+                return (
+                  <TouchableOpacity
+                    key={f.id}
+                    style={[s.filterChip, active && { backgroundColor: f.color, borderColor: f.color }]}
+                    onPress={() => setActivePlaceFilters(prev => (
+                      prev.includes(f.id) ? prev.filter(id => id !== f.id) : [...prev, f.id]
+                    ))}
+                  >
+                    <Ionicons name={f.icon as any} size={14} color={active ? '#fff' : f.color} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={[s.filterChipText, active && { color: '#fff' }]}>{f.label}</Text>
+                      <Text style={[s.filterChipSub, active && { color: 'rgba(255,255,255,0.76)' }]}>{count} saved</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
       <PaywallModal visible={paywallVisible} code={paywallCode} message={paywallMessage} onClose={() => setPaywallVisible(false)} />
     </SafeAreaView>
   );
@@ -1074,6 +1223,8 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   mapWrap: { height: 250, backgroundColor: C.s2 },
   mapHint: { position: 'absolute', left: 12, bottom: 10, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(0,0,0,0.68)', borderRadius: 16, paddingHorizontal: 10, paddingVertical: 6 },
   mapHintText: { color: '#fff', fontSize: 10, fontFamily: mono },
+  mapFilterPill: { position: 'absolute', right: 12, bottom: 10, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(0,0,0,0.68)', borderRadius: 16, paddingHorizontal: 10, paddingVertical: 6 },
+  mapFilterPillText: { color: '#fff', fontSize: 10, fontFamily: mono, fontWeight: '800' },
   body: { flex: 1 },
   bodyContent: { padding: 14, paddingBottom: 110, gap: 12 },
   dayTabs: { gap: 8 },
@@ -1108,6 +1259,8 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   sectionHeader: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 4 },
   sectionTitle: { color: C.text, fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
   sectionMeta: { color: C.text3, fontSize: 10, fontFamily: mono, maxWidth: 190 },
+  sectionAction: { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderColor: C.orange + '55', borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5, backgroundColor: C.orange + '10' },
+  sectionActionText: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900' },
   discoverTabs: { flexDirection: 'row', gap: 8 },
   discoverTab: { flex: 1, alignItems: 'center', borderWidth: 1, borderColor: C.border, borderRadius: 10, paddingVertical: 9, backgroundColor: C.s2 },
   discoverTabActive: { borderColor: C.orange, backgroundColor: C.orange + '14' },
@@ -1137,6 +1290,25 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   previewBtn: { flexDirection: 'row', alignItems: 'center', gap: 7, backgroundColor: C.green, borderRadius: 12, paddingHorizontal: 18, paddingVertical: 12 },
   previewText: { color: '#fff', fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
   modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.55)' },
+  filterSheet: {
+    maxHeight: '78%',
+    backgroundColor: C.s1,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 16,
+    paddingBottom: 28,
+    gap: 12,
+  },
+  filterSheetTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 },
+  filterSheetTitle: { color: C.text, fontSize: 20, fontWeight: '900' },
+  filterHintText: { color: C.text3, fontSize: 12, lineHeight: 18 },
+  filterToolbar: { flexDirection: 'row', gap: 8 },
+  filterSmallBtn: { borderWidth: 1, borderColor: C.border, backgroundColor: C.s2, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7 },
+  filterSmallText: { color: C.text2, fontSize: 9, fontFamily: mono, fontWeight: '900' },
+  filterGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingBottom: 10 },
+  filterChip: { width: '48%', minHeight: 50, flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderColor: C.border, backgroundColor: C.s2, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 9 },
+  filterChipText: { color: C.text2, fontSize: 11, fontFamily: mono, fontWeight: '900' },
+  filterChipSub: { color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 2 },
   quickCard: {
     backgroundColor: C.s1,
     borderTopLeftRadius: 20,

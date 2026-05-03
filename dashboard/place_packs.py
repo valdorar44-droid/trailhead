@@ -94,6 +94,13 @@ def _region_name(region: str) -> str:
 
 
 OVERPASS = "https://overpass-api.de/api/interpreter"
+ZERO_OK_PACKS = {
+    ("ct", "essentials"), ("ct", "services"), ("ct", "outdoors"),
+    ("hi", "services"),
+    ("nh", "services"),
+    ("nj", "essentials"),
+    ("ri", "outdoors"),
+}
 
 
 def _grid_samples(bbox: tuple[float, float, float, float], spacing_deg: float = 1.25) -> list[dict]:
@@ -135,6 +142,15 @@ def _bbox_cells(bbox: tuple[float, float, float, float], step_deg: float = 1.5) 
             w = e
         s = n
     return cells
+
+
+def _cell_step_for_region(region: str) -> float:
+    # CA/TX are dense enough that broad Overpass cells can time out or get throttled.
+    if region in {"ca", "tx"}:
+        return 0.75
+    if region == "ak":
+        return 1.5
+    return 1.5
 
 
 def _node_coord(el: dict) -> tuple[float, float] | None:
@@ -261,15 +277,24 @@ async def _fetch_bbox_cell(cell: tuple[float, float, float, float]) -> list[dict
   node["amenity"="public_bath"]["bath:type"="hot_spring"]({bbox});
   way["amenity"="public_bath"]["bath:type"="hot_spring"]({bbox});
 );
-out body center 600;
+out body center 1800;
 """
-    try:
-        async with httpx.AsyncClient(timeout=35) as client:
-            res = await client.post(OVERPASS, data={"data": query}, headers={"User-Agent": "Trailhead/1.0"})
-            res.raise_for_status()
-            elements = res.json().get("elements") or []
-    except Exception:
-        return []
+    elements = []
+    async with httpx.AsyncClient(timeout=55) as client:
+        for attempt in range(3):
+            try:
+                res = await client.post(
+                    OVERPASS,
+                    data={"data": query},
+                    headers={"User-Agent": "Trailhead/1.0 (offline place pack builder)"},
+                )
+                res.raise_for_status()
+                elements = res.json().get("elements") or []
+                break
+            except Exception:
+                if attempt == 2:
+                    return []
+                await asyncio.sleep(1.5 * (attempt + 1))
     points = []
     for el in elements:
         point = _normalize_overpass_element(el)
@@ -323,14 +348,14 @@ async def build_region_pack(region: str, pack_id: str = "essentials") -> Path | 
         raise ValueError(f"Unknown place pack: {pack_id}")
     bbox = _bbox_for_region(region)
     key = f"{region}:{pack_id}"
-    cells = _bbox_cells(bbox)
+    cells = _bbox_cells(bbox, _cell_step_for_region(region))
     _status[key] = {
         "status": "building",
         "progress": f"0/{len(cells)} cells",
         "error": None,
         "size_bytes": 0,
     }
-    semaphore = asyncio.Semaphore(2)
+    semaphore = asyncio.Semaphore(1 if region in {"ca", "tx"} else 2)
     points: list[dict] = []
     seen = set()
     completed = 0
@@ -358,6 +383,18 @@ async def build_region_pack(region: str, pack_id: str = "essentials") -> Path | 
     allowed_categories = set(PACK_DEFINITIONS[pack_id]["categories"])
     points = [p for p in points if str(p.get("type") or p.get("category")) in allowed_categories]
     points.sort(key=lambda p: (priority.get(str(p.get("type")), 9), str(p.get("name", ""))))
+    if not points and (region, pack_id) not in ZERO_OK_PACKS:
+        existing = pack_path(region, pack_id)
+        if existing.exists():
+            _status[key].update(
+                status="error",
+                progress="0 places returned; kept existing pack",
+                error="Overpass returned no usable places",
+                size_bytes=existing.stat().st_size,
+                point_count=0,
+            )
+            return existing
+        raise RuntimeError(f"{region}:{pack_id} returned 0 places")
     payload = {
         "schema_version": 1,
         "pack_id": f"{region}-{pack_id}",

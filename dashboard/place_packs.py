@@ -385,13 +385,19 @@ async def build_region_pack(region: str, pack_id: str = "essentials") -> Path | 
     points.sort(key=lambda p: (priority.get(str(p.get("type")), 9), str(p.get("name", ""))))
     if not points and (region, pack_id) not in ZERO_OK_PACKS:
         existing = pack_path(region, pack_id)
+        existing_count = 0
         if existing.exists():
+            try:
+                existing_count = len((json.loads(existing.read_text()).get("points") or []))
+            except Exception:
+                existing_count = 0
+        if existing.exists() and existing_count > 0:
             _status[key].update(
                 status="error",
                 progress="0 places returned; kept existing pack",
                 error="Overpass returned no usable places",
                 size_bytes=existing.stat().st_size,
-                point_count=0,
+                point_count=existing_count,
             )
             return existing
         raise RuntimeError(f"{region}:{pack_id} returned 0 places")

@@ -465,25 +465,6 @@ async def update_manifest_on_r2() -> bool:
     from botocore.config import Config
     from config.settings import settings
 
-    manifest: dict[str, dict] = {"definitions": PACK_DEFINITIONS, "packs": {}}
-    for path in PLACE_PACK_DIR.glob("*.json"):
-        stem = path.stem
-        if "-" not in stem:
-            continue
-        region, pack_id = stem.split("-", 1)
-        try:
-            payload = json.loads(path.read_text())
-            point_count = len(payload.get("points") or [])
-        except Exception:
-            point_count = 0
-        manifest["packs"][f"{stem}.json"] = {
-            "region_id": region,
-            "pack_id": pack_id,
-            "size": path.stat().st_size,
-            "point_count": point_count,
-            "url": f"/api/places/packs/{region}/{pack_id}",
-        }
-
     try:
         r2 = boto3.client(
             "s3",
@@ -493,6 +474,70 @@ async def update_manifest_on_r2() -> bool:
             config=Config(signature_version="s3v4"),
             region_name="auto",
         )
+        manifest: dict[str, dict] = {"definitions": PACK_DEFINITIONS, "packs": {}}
+        listed_keys: set[str] = set()
+        token = None
+        while True:
+            kwargs = {"Bucket": settings.r2_bucket, "Prefix": "places/"}
+            if token:
+                kwargs["ContinuationToken"] = token
+            page = await asyncio.to_thread(r2.list_objects_v2, **kwargs)
+            for item in page.get("Contents") or []:
+                key = item.get("Key") or ""
+                if key == "places/manifest.json" or not key.endswith(".json"):
+                    continue
+                name = key.rsplit("/", 1)[-1]
+                stem = name[:-5]
+                if "-" not in stem:
+                    continue
+                region, pack_id = stem.split("-", 1)
+                if pack_id not in PACK_DEFINITIONS:
+                    continue
+                listed_keys.add(name)
+                point_count = 0
+                size = int(item.get("Size") or 0)
+                try:
+                    obj = await asyncio.to_thread(r2.get_object, Bucket=settings.r2_bucket, Key=key)
+                    body = await asyncio.to_thread(obj["Body"].read)
+                    payload = json.loads(body.decode())
+                    point_count = len(payload.get("points") or [])
+                except Exception:
+                    pass
+                manifest["packs"][name] = {
+                    "region_id": region,
+                    "pack_id": pack_id,
+                    "size": size,
+                    "point_count": point_count,
+                    "url": f"/api/places/packs/{region}/{pack_id}",
+                }
+            if not page.get("IsTruncated"):
+                break
+            token = page.get("NextContinuationToken")
+
+        # Include freshly generated local files when the pack has not reached R2 yet.
+        for path in PLACE_PACK_DIR.glob("*.json"):
+            name = path.name
+            if name in listed_keys:
+                continue
+            stem = path.stem
+            if "-" not in stem:
+                continue
+            region, pack_id = stem.split("-", 1)
+            if pack_id not in PACK_DEFINITIONS:
+                continue
+            try:
+                payload = json.loads(path.read_text())
+                point_count = len(payload.get("points") or [])
+            except Exception:
+                point_count = 0
+            manifest["packs"][name] = {
+                "region_id": region,
+                "pack_id": pack_id,
+                "size": path.stat().st_size,
+                "point_count": point_count,
+                "url": f"/api/places/packs/{region}/{pack_id}",
+            }
+
         await asyncio.to_thread(
             r2.put_object,
             Bucket=settings.r2_bucket,

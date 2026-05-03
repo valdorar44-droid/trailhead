@@ -6012,6 +6012,10 @@ function MapScreen() {
                   <Text style={s.legendText}>{label}</Text>
                 </View>
               ))}
+            <TouchableOpacity style={s.mapsBtn} onPress={() => router.push('/(tabs)/route-builder')}>
+              <Ionicons name="create-outline" size={11} color={C.text3} />
+              <Text style={s.mapsBtnText}>EDIT</Text>
+            </TouchableOpacity>
             <TouchableOpacity style={s.mapsBtn} onPress={openInMaps}>
               <Ionicons name="open-outline" size={11} color={C.text3} />
               <Text style={s.mapsBtnText}>EXPORT</Text>

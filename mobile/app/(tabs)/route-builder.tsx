@@ -9,7 +9,7 @@ import { useRouter } from 'expo-router';
 import NativeMap, { NativeMapHandle } from '@/components/NativeMap';
 import PaywallModal from '@/components/PaywallModal';
 import TourTarget from '@/components/TourTarget';
-import { api, CampFullness, CampsiteDetail, CampsiteInsight, CampsitePin, GasStation, OsmPoi, PaywallError, TripResult, Waypoint, WeatherForecast } from '@/lib/api';
+import { api, CampFullness, Campsite, CampsiteDetail, CampsiteInsight, CampsitePin, GasStation, OsmPoi, PaywallError, TripResult, Waypoint, WeatherForecast } from '@/lib/api';
 import { loadAllPlacePoints } from '@/lib/offlinePlacePacks';
 import { saveOfflineTrip } from '@/lib/offlineTrips';
 import { useStore } from '@/lib/store';
@@ -132,6 +132,40 @@ function dedupePois(points: OsmPoi[]) {
   });
 }
 
+function stopTypeFromWaypoint(type?: string): BuilderStopType {
+  const t = (type || '').toLowerCase();
+  if (t === 'start') return 'start';
+  if (t.includes('fuel') || t.includes('gas')) return 'fuel';
+  if (t.includes('camp')) return 'camp';
+  if (t.includes('motel') || t.includes('hotel') || t.includes('lodg')) return 'motel';
+  return 'waypoint';
+}
+
+function closeEnough(a: { lat?: number; lng?: number }, b: { lat?: number; lng?: number }) {
+  if (!Number.isFinite(a.lat) || !Number.isFinite(a.lng) || !Number.isFinite(b.lat) || !Number.isFinite(b.lng)) return false;
+  return Math.abs((a.lat ?? 0) - (b.lat ?? 0)) < 0.0008 && Math.abs((a.lng ?? 0) - (b.lng ?? 0)) < 0.0008;
+}
+
+function campsiteToPin(camp: Campsite): CampsitePin {
+  return {
+    id: camp.id,
+    name: camp.name,
+    lat: camp.lat,
+    lng: camp.lng,
+    tags: [],
+    land_type: 'camp',
+    description: camp.description || 'Trip camp.',
+    reservable: camp.reservable,
+    cost: undefined,
+    url: camp.url,
+    ada: false,
+    route_distance_mi: camp.route_distance_mi,
+    route_fit: camp.route_fit,
+    recommended_day: camp.recommended_day,
+    verified_source: camp.verified_source,
+  };
+}
+
 function sourceLabel(source?: BuilderStop['source']) {
   if (source === 'camp') return 'verified camp';
   if (source === 'gas') return 'fuel search';
@@ -227,14 +261,15 @@ export default function RouteBuilderScreen() {
   const s = useMemo(() => makeStyles(C), [C]);
   const router = useRouter();
   const mapRef = useRef<NativeMapHandle>(null);
+  const activeTrip = useStore(st => st.activeTrip);
   const setActiveTrip = useStore(st => st.setActiveTrip);
   const addTripToHistory = useStore(st => st.addTripToHistory);
   const userLoc = useStore(st => st.userLoc);
-  const hasPlan = useStore(st => st.hasPlan);
 
   const [activeDay, setActiveDay] = useState(1);
   const [days, setDays] = useState([1]);
   const [stops, setStops] = useState<BuilderStop[]>([]);
+  const [importedTripId, setImportedTripId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [routeName, setRouteName] = useState('');
@@ -280,6 +315,73 @@ export default function RouteBuilderScreen() {
       });
     return () => { mounted = false; };
   }, []);
+
+  useEffect(() => {
+    if (!activeTrip || importedTripId === activeTrip.trip_id || stops.length > 0) return;
+    const importedStops: BuilderStop[] = activeTrip.plan.waypoints
+      .filter(wp => Number.isFinite(wp.lat) && Number.isFinite(wp.lng))
+      .map((wp, idx) => {
+        const type = stopTypeFromWaypoint(wp.type);
+        const camp = type === 'camp'
+          ? activeTrip.campsites
+              .map(campsiteToPin)
+              .find(c => c.recommended_day === wp.day && (closeEnough(c, wp) || c.name === wp.name)) ?? {
+                id: `wp_${idx}`,
+                name: wp.name || 'Camp',
+                lat: wp.lat!,
+                lng: wp.lng!,
+                tags: [],
+                land_type: wp.land_type || 'camp',
+                description: wp.description || wp.notes || 'Trip camp.',
+                reservable: false,
+                url: '',
+                ada: false,
+                recommended_day: wp.day,
+                verified_source: wp.verified_source,
+              }
+          : undefined;
+        const station = type === 'fuel'
+          ? activeTrip.gas_stations.find(g => g.recommended_day === wp.day && (closeEnough(g, wp) || g.name === wp.name)) ?? {
+            id: `wp_${idx}`,
+            name: wp.name || 'Fuel stop',
+            lat: wp.lat!,
+            lng: wp.lng!,
+            fuel_types: '',
+            address: wp.description || '',
+            recommended_day: wp.day,
+          }
+          : undefined;
+        const poi = type === 'waypoint'
+          ? activeTrip.route_pois?.find(p => closeEnough(p, wp) || p.name === wp.name)
+          : undefined;
+        return {
+          id: `import_${idx}_${Math.random().toString(36).slice(2, 7)}`,
+          day: wp.day || 1,
+          name: wp.name || stopLabel(type),
+          lat: wp.lat!,
+          lng: wp.lng!,
+          type,
+          description: wp.description || wp.notes || 'Imported trip stop.',
+          land_type: wp.land_type || (type === 'fuel' || type === 'motel' ? 'town' : 'route'),
+          source: camp ? 'camp' : station ? 'gas' : poi ? 'poi' : 'search',
+          camp,
+          gas: station,
+          poi,
+        };
+      });
+    if (!importedStops.length) return;
+    const importedDays = Array.from(new Set([
+      ...activeTrip.plan.daily_itinerary.map(day => day.day),
+      ...importedStops.map(stop => stop.day),
+    ])).filter(Number.isFinite).sort((a, b) => a - b);
+    setStops(importedStops);
+    setDays(importedDays.length ? importedDays : [1]);
+    setActiveDay(importedStops[0]?.day ?? 1);
+    setRouteName(activeTrip.plan.trip_name || '');
+    setImportedTripId(activeTrip.trip_id);
+    const first = importedStops[0];
+    if (first) setTimeout(() => fly(first.lat, first.lng, 8), 350);
+  }, [activeTrip, importedTripId, stops.length]);
 
   const dayStops = stops.filter(st => st.day === activeDay);
   const selectedInsertStop = stops.find(st => st.id === insertAfterId) ?? null;
@@ -612,12 +714,14 @@ export default function RouteBuilderScreen() {
     const campsites = sorted.filter(st => st.camp).map(st => ({ ...st.camp!, recommended_day: st.day }));
     const gas_stations = sorted.filter(st => st.gas).map(st => ({ ...st.gas!, recommended_day: st.day }));
     return {
-      trip_id: `manual_${Date.now()}`,
+      trip_id: importedTripId ? `${importedTripId}_edited_${Date.now()}` : `manual_${Date.now()}`,
       plan: {
         trip_name: resolvedRouteName(),
-        overview: 'A manually built Trailhead route with user-selected stops, fuel, POIs, and camps.',
+        overview: importedTripId
+          ? 'A Trailhead route edited in Route Builder with user-selected stops, fuel, POIs, and camps.'
+          : 'A manually built Trailhead route with user-selected stops, fuel, POIs, and camps.',
         duration_days: days.length,
-        states: [],
+        states: importedTripId ? activeTrip?.plan.states ?? [] : [],
         total_est_miles: Math.round(totals.miles),
         waypoints,
         daily_itinerary,

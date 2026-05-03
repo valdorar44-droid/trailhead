@@ -12,16 +12,10 @@ import re
 import time
 from pathlib import Path
 
+import httpx
+
 from dashboard.pmtiles_bootstrap import DATA_DIR
 from dashboard.pmtiles_states import STATE_BBOXES, REGION_BBOXES
-from ingestors.osm import (
-    get_fuel_stations,
-    get_hot_springs,
-    get_peaks,
-    get_trailheads,
-    get_viewpoints,
-    get_water_sources,
-)
 
 PLACE_PACK_DIR = DATA_DIR / "place_packs"
 PLACE_PACK_DIR.mkdir(parents=True, exist_ok=True)
@@ -73,6 +67,9 @@ def _region_name(region: str) -> str:
     return code
 
 
+OVERPASS = "https://overpass-api.de/api/interpreter"
+
+
 def _grid_samples(bbox: tuple[float, float, float, float], spacing_deg: float = 1.25) -> list[dict]:
     west, south, east, north = bbox
     samples: list[dict] = []
@@ -99,6 +96,126 @@ def _grid_samples(bbox: tuple[float, float, float, float], spacing_deg: float = 
     return out
 
 
+def _bbox_cells(bbox: tuple[float, float, float, float], step_deg: float = 1.5) -> list[tuple[float, float, float, float]]:
+    west, south, east, north = bbox
+    cells: list[tuple[float, float, float, float]] = []
+    s = south
+    while s < north:
+        n = min(north, s + step_deg)
+        w = west
+        while w < east:
+            e = min(east, w + step_deg)
+            cells.append((w, s, e, n))
+            w = e
+        s = n
+    return cells
+
+
+def _node_coord(el: dict) -> tuple[float, float] | None:
+    if el.get("type") == "way":
+        center = el.get("center") or {}
+        lat, lng = center.get("lat"), center.get("lon")
+    else:
+        lat, lng = el.get("lat"), el.get("lon")
+    if isinstance(lat, (int, float)) and isinstance(lng, (int, float)):
+        return float(lat), float(lng)
+    return None
+
+
+def _classify_osm(el: dict) -> str | None:
+    tags = el.get("tags") or {}
+    if tags.get("amenity") == "fuel":
+        if tags.get("fuel:propane") == "yes" and tags.get("fuel:diesel") != "yes":
+            return "propane"
+        return "fuel"
+    if tags.get("natural") == "spring" or tags.get("amenity") in {"drinking_water", "water_point"}:
+        return "water"
+    if tags.get("highway") == "trailhead" or tags.get("trailhead") == "yes":
+        return "trailhead"
+    if tags.get("tourism") == "viewpoint":
+        return "viewpoint"
+    if tags.get("natural") == "peak":
+        return "peak"
+    if tags.get("natural") == "hot_spring" or (tags.get("amenity") == "public_bath" and tags.get("bath:type") == "hot_spring"):
+        return "hot_spring"
+    return None
+
+
+def _normalize_overpass_element(el: dict) -> dict | None:
+    coord = _node_coord(el)
+    ptype = _classify_osm(el)
+    if not coord or not ptype:
+        return None
+    tags = el.get("tags") or {}
+    lat, lng = coord
+    if tags.get("access") in {"private", "no"}:
+        return None
+    name = (
+        tags.get("name") or tags.get("brand") or tags.get("operator") or
+        ("Natural Spring" if tags.get("natural") == "spring" else ptype.replace("_", " ").title())
+    )
+    fuel_types: list[str] = []
+    if ptype in {"fuel", "propane"}:
+        if tags.get("fuel:diesel") == "yes":
+            fuel_types.append("diesel")
+        if tags.get("fuel:propane") == "yes":
+            fuel_types.append("propane")
+        if tags.get("fuel:octane_87") == "yes" or not fuel_types:
+            fuel_types.append("gas")
+    kind = el.get("type") or "node"
+    return {
+        "id": f"osm_{ptype}_{kind}_{el.get('id', '')}",
+        "name": name,
+        "lat": lat,
+        "lng": lng,
+        "type": ptype,
+        "category": ptype,
+        "source": "osm",
+        "subtype": tags.get("bath:type") or tags.get("natural") or tags.get("amenity") or "",
+        "address": ", ".join([v for v in [tags.get("addr:street"), tags.get("addr:city"), tags.get("addr:state")] if v]),
+        "fuel_types": ", ".join(fuel_types),
+        "elevation": tags.get("ele", ""),
+    }
+
+
+async def _fetch_bbox_cell(cell: tuple[float, float, float, float]) -> list[dict]:
+    west, south, east, north = cell
+    bbox = f"{south},{west},{north},{east}"
+    query = f"""
+[out:json][timeout:25];
+(
+  node["amenity"="fuel"]({bbox});
+  way["amenity"="fuel"]({bbox});
+  node["natural"="spring"]({bbox});
+  node["amenity"="drinking_water"]({bbox});
+  node["amenity"="water_point"]({bbox});
+  node["highway"="trailhead"]({bbox});
+  node["trailhead"="yes"]({bbox});
+  node["tourism"="viewpoint"]({bbox});
+  way["tourism"="viewpoint"]({bbox});
+  node["natural"="peak"]["name"]({bbox});
+  node["natural"="hot_spring"]({bbox});
+  way["natural"="hot_spring"]({bbox});
+  node["amenity"="public_bath"]["bath:type"="hot_spring"]({bbox});
+  way["amenity"="public_bath"]["bath:type"="hot_spring"]({bbox});
+);
+out center tags 600;
+"""
+    try:
+        async with httpx.AsyncClient(timeout=35) as client:
+            res = await client.post(OVERPASS, data={"data": query})
+            res.raise_for_status()
+            elements = res.json().get("elements") or []
+    except Exception:
+        return []
+    points = []
+    for el in elements:
+        point = _normalize_overpass_element(el)
+        if point:
+            points.append(point)
+    return points
+
+
 def _normalize_pack_point(item: dict, category: str) -> dict | None:
     lat, lng = item.get("lat"), item.get("lng")
     if not isinstance(lat, (int, float)) or not isinstance(lng, (int, float)):
@@ -117,31 +234,6 @@ def _normalize_pack_point(item: dict, category: str) -> dict | None:
         "fuel_types": item.get("fuel_types") or "",
         "elevation": item.get("elevation") or "",
     }
-
-
-async def _fetch_sample(sample: dict) -> list[dict]:
-    lat = sample["lat"]
-    lng = sample["lng"]
-    fuel, water, trailheads, viewpoints, peaks, hot_springs = await asyncio.gather(
-        get_fuel_stations(lat, lng, radius_m=76000),
-        get_water_sources(lat, lng, radius_m=70000),
-        get_trailheads(lat, lng, radius_m=70000),
-        get_viewpoints(lat, lng, radius_m=70000),
-        get_peaks(lat, lng, radius_m=80000),
-        get_hot_springs(lat, lng, radius_m=100000),
-        return_exceptions=True,
-    )
-    out: list[dict] = []
-    for category, batch in (
-        ("fuel", fuel), ("water", water), ("trailhead", trailheads),
-        ("viewpoint", viewpoints), ("peak", peaks), ("hot_spring", hot_springs),
-    ):
-        if isinstance(batch, list):
-            for item in batch:
-                point = _normalize_pack_point(item, category)
-                if point:
-                    out.append(point)
-    return out
 
 
 def status() -> dict:
@@ -164,10 +256,10 @@ async def build_region_pack(region: str, pack_id: str = "essentials") -> Path | 
         raise ValueError(f"Unknown place pack: {pack_id}")
     bbox = _bbox_for_region(region)
     key = f"{region}:{pack_id}"
-    samples = _grid_samples(bbox)
+    cells = _bbox_cells(bbox)
     _status[key] = {
         "status": "building",
-        "progress": f"0/{len(samples)} cells",
+        "progress": f"0/{len(cells)} cells",
         "error": None,
         "size_bytes": 0,
     }
@@ -176,18 +268,18 @@ async def build_region_pack(region: str, pack_id: str = "essentials") -> Path | 
     seen = set()
     completed = 0
 
-    async def run_sample(sample: dict) -> list[dict]:
+    async def run_cell(cell: tuple[float, float, float, float]) -> list[dict]:
         async with semaphore:
-            return await _fetch_sample(sample)
+            return await _fetch_bbox_cell(cell)
 
-    tasks = [asyncio.create_task(run_sample(sample)) for sample in samples]
+    tasks = [asyncio.create_task(run_cell(cell)) for cell in cells]
     for task in asyncio.as_completed(tasks):
         try:
             batch = await task
         except Exception:
             batch = []
         completed += 1
-        _status[key]["progress"] = f"{completed}/{len(samples)} cells"
+        _status[key]["progress"] = f"{completed}/{len(cells)} cells"
         for point in batch:
             point_key = point.get("id") or f"{point.get('type')}:{point.get('lat'):.4f}:{point.get('lng'):.4f}"
             if point_key in seen:

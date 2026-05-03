@@ -1552,6 +1552,15 @@ async def build_place_pack(region: str, pack_id: str = "essentials"):
     asyncio.create_task(_place_packs.build_and_upload(region, pack_id))
     return {"triggered": True, "region": region.lower(), "pack_id": pack_id.lower()}
 
+@app.post("/api/admin/build-all-place-packs")
+async def build_all_place_packs(skip_existing: bool = True):
+    if _place_packs._running:
+        return {"triggered": False, "reason": "already running"}
+    pack_ids = list(_place_packs.PACK_DEFINITIONS.keys())
+    regions = _place_packs.ordered_regions()
+    asyncio.create_task(_place_packs.build_all_task(regions, pack_ids, skip_existing=skip_existing))
+    return {"triggered": True, "regions": len(regions), "packs": pack_ids, "skip_existing": skip_existing}
+
 @app.post("/api/admin/update-place-packs-manifest")
 async def update_place_packs_manifest():
     ok = await _place_packs.update_manifest_on_r2()

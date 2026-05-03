@@ -49,6 +49,16 @@ ALL_REGION_BBOXES = {**STATE_BBOXES, **REGION_BBOXES}
 
 _status: dict[str, dict] = {}
 _running = False
+_batch: dict = {"running": False, "current": "", "completed": 0, "total": 0, "errors": []}
+
+SMALLEST_FIRST_ORDER = [
+    "RI", "DE", "CT", "HI", "NH", "VT", "MA", "NJ", "MD", "WV",
+    "SC", "ME", "AL", "MS", "KY", "TN", "IN", "AR", "LA", "IA",
+    "OH", "VA", "NC", "WI", "MO", "KS", "NE", "OK", "MN", "IL",
+    "GA", "SD", "ND", "PA", "FL", "MI", "NY", "ID", "WA", "OR",
+    "CO", "NM", "AZ", "UT", "NV", "WY", "MT", "AK", "CA", "TX",
+]
+SMALLEST_FIRST_RANK = {code.lower(): idx for idx, code in enumerate(SMALLEST_FIRST_ORDER)}
 
 
 def pack_path(region: str, pack_id: str) -> Path:
@@ -298,7 +308,12 @@ def status() -> dict:
             "on_disk": path.exists(),
             "size_bytes": path.stat().st_size if path.exists() else data.get("size_bytes", 0),
         }
-    return {"running": _running, "packs": out}
+    return {"running": _running, "batch": _batch, "packs": out}
+
+
+def ordered_regions(regions: list[str] | None = None) -> list[str]:
+    targets = [r.lower() for r in (regions or STATE_BBOXES.keys()) if r.upper() in STATE_BBOXES]
+    return sorted(targets, key=lambda r: SMALLEST_FIRST_RANK.get(r, 999))
 
 
 async def build_region_pack(region: str, pack_id: str = "essentials") -> Path | None:
@@ -509,4 +524,39 @@ async def build_and_upload(region: str, pack_id: str = "essentials") -> bool:
             return False
         return await upload_pack_to_r2(region, pack_id)
     finally:
+        _running = False
+
+
+async def build_all_task(regions: list[str] | None = None, pack_ids: list[str] | None = None, *, skip_existing: bool = True) -> None:
+    global _running
+    if _running:
+        return
+    selected_regions = ordered_regions(regions)
+    selected_packs = [_pack_id(p) for p in (pack_ids or list(PACK_DEFINITIONS.keys())) if _pack_id(p) in PACK_DEFINITIONS]
+    targets = [(region, pack_id) for region in selected_regions for pack_id in selected_packs]
+    _running = True
+    _batch.update(running=True, current="", completed=0, total=len(targets), errors=[])
+    try:
+        for region, pack_id in targets:
+            _batch["current"] = f"{region}:{pack_id}"
+            if skip_existing and pack_path(region, pack_id).exists():
+                _status.setdefault(f"{region}:{pack_id}", {}).update(status="done", progress="already on disk")
+                _batch["completed"] += 1
+                continue
+            try:
+                path = await build_region_pack(region, pack_id)
+                if not path:
+                    _batch["errors"].append(f"{region}:{pack_id}: build failed")
+                    continue
+                ok = await upload_pack_to_r2(region, pack_id)
+                if not ok:
+                    _batch["errors"].append(f"{region}:{pack_id}: upload failed")
+            except Exception as exc:
+                _batch["errors"].append(f"{region}:{pack_id}: {type(exc).__name__}: {exc}")
+            finally:
+                _batch["completed"] += 1
+        await update_manifest_on_r2()
+    finally:
+        _batch["running"] = False
+        _batch["current"] = ""
         _running = False

@@ -27,6 +27,12 @@ import {
 } from './offlineManager';
 import type { WP } from './types';
 import { api, PaywallError, type OfflineAssetType } from '@/lib/api';
+import {
+  deleteOfflinePlacePack,
+  listOfflinePlacePacks,
+  saveOfflinePlacePack,
+  type OfflinePlacePackSummary,
+} from '@/lib/offlinePlacePacks';
 
 
 interface WebDownloadOpts { bufferKm?: number; minZ?: number; maxZ?: number; vectorOnly?: boolean; label: string; n?: number; s?: number; e?: number; w?: number; }
@@ -36,8 +42,10 @@ interface Props {
   onClose:     () => void;
   waypoints:   WP[];
   routeCoords?: [number, number][];
+  tripId?:      string | null;
   tripName:    string | null;
   useNativeMap: boolean;
+  onOfflinePlacesChanged?: () => void;
   onWebDownloadBbox?:   (opts: WebDownloadOpts) => void;
   onWebDownloadRoute?:  (opts: WebDownloadOpts) => void;
   onWebCancelDownload?: () => void;
@@ -387,7 +395,8 @@ function StateRow({ code, st, isCached, isDownloading, isActive, progress, onDow
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function OfflineModal({
-  visible, onClose, waypoints, routeCoords = [], tripName, useNativeMap,
+  visible, onClose, waypoints, routeCoords = [], tripId, tripName, useNativeMap,
+  onOfflinePlacesChanged,
   onWebDownloadBbox, onWebDownloadRoute, onWebCancelDownload, onWebClearRegion,
   webIsDownloading, webDownloadProgress, webDownloadMB, webCachedRegions, webDownloadLabel,
 }: Props) {
@@ -414,10 +423,22 @@ export default function OfflineModal({
   const [activeTab,      setActiveTab]      = useState<'areas' | 'regions'>('areas');
   const [selectedState,  setSelectedState]  = useState('ks');
   const [authorizing,    setAuthorizing]    = useState<string | null>(null);
+  const [placePacks,     setPlacePacks]     = useState<OfflinePlacePackSummary[]>([]);
+  const [placeBusy,      setPlaceBusy]      = useState(false);
+  const [placeError,     setPlaceError]     = useState<string | null>(null);
 
   useEffect(() => {
     if (visible) getInstalledPacks().then(setMlnPacks).catch(() => {});
   }, [visible]);
+
+  const reloadPlacePacks = useCallback(async () => {
+    const packs = await listOfflinePlacePacks().catch(() => []);
+    setPlacePacks(packs);
+  }, []);
+
+  useEffect(() => {
+    if (visible) reloadPlacePacks();
+  }, [visible, reloadPlacePacks]);
 
   const startMlnPack = useCallback(async (
     name: string, bounds: [[number,number],[number,number]], minZoom: number, maxZoom: number
@@ -481,6 +502,42 @@ export default function OfflineModal({
     await deletePack(name);
     setMlnPacks(prev => prev.filter(p => p.name !== name));
   }, []);
+
+  const downloadTripEssentials = useCallback(async () => {
+    if (placeBusy) return;
+    const mappedWaypoints = waypoints.filter(w => Number.isFinite(w.lat) && Number.isFinite(w.lng));
+    const usableRoute = routeCoords.filter(c => Array.isArray(c) && Number.isFinite(c[0]) && Number.isFinite(c[1]));
+    if (mappedWaypoints.length < 2 && usableRoute.length < 2) {
+      setPlaceError('Essentials need at least two mapped trip points.');
+      return;
+    }
+    setPlaceBusy(true);
+    setPlaceError(null);
+    try {
+      const pack = await api.buildTripEssentialsPack({
+        trip_id: tripId ?? '',
+        trip_name: tripName ?? 'Current Trip',
+        waypoints: mappedWaypoints.map(w => ({ lat: w.lat, lng: w.lng, name: w.name, day: w.day, type: w.type })),
+        route_coords: usableRoute,
+      });
+      await saveOfflinePlacePack(pack);
+      await reloadPlacePacks();
+      onOfflinePlacesChanged?.();
+      Alert.alert('Essentials saved', `${pack.points.length} places are now available with this trip offline.`);
+    } catch (e: any) {
+      setPlaceError(e?.message ?? 'Could not save trip essentials.');
+    } finally {
+      setPlaceBusy(false);
+    }
+  }, [onOfflinePlacesChanged, placeBusy, reloadPlacePacks, routeCoords, tripId, tripName, waypoints]);
+
+  const deleteTripEssentials = useCallback(async (packId: string) => {
+    await deleteOfflinePlacePack(packId);
+    await reloadPlacePacks();
+    onOfflinePlacesChanged?.();
+  }, [onOfflinePlacesChanged, reloadPlacePacks]);
+
+  const currentPlacePack = placePacks.find(pack => tripId && pack.trip_id === tripId);
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -612,6 +669,51 @@ export default function OfflineModal({
                     <View style={s.noTrip}>
                       <Text style={{ color: C.text3, fontSize: 10, fontFamily: mono, textAlign: 'center' }}>
                         PLAN A TRIP FIRST TO DOWNLOAD ITS CORRIDOR
+                      </Text>
+                    </View>
+                  )}
+
+                  <Section label="TRIP ESSENTIALS — PLACES DOWNLOAD" />
+                  {waypoints.length > 0 ? (
+                    <View style={[s.corridorCard, currentPlacePack && { borderLeftColor: C.green }]}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '800' }}>
+                          {(tripName ?? 'CURRENT TRIP').toUpperCase()} PLACES
+                        </Text>
+                        <Text style={{ color: C.text2, fontSize: 10, fontFamily: mono, marginTop: 2, lineHeight: 14 }}>
+                          Fuel, water, trailheads, viewpoints, peaks, and hot springs near the route. Saves to the map for offline use.
+                        </Text>
+                        {currentPlacePack && (
+                          <Text style={{ color: C.green, fontSize: 9, fontFamily: mono, marginTop: 4 }}>
+                            {currentPlacePack.point_count} places saved · {currentPlacePack.categories.slice(0, 4).join(', ')}
+                          </Text>
+                        )}
+                        {placeError && (
+                          <Text style={{ color: C.red, fontSize: 9, fontFamily: mono, marginTop: 4 }}>{placeError}</Text>
+                        )}
+                      </View>
+                      <View style={{ gap: 8, alignItems: 'flex-end' }}>
+                        {currentPlacePack && <StatusChip label="SAVED" color={C.green} />}
+                        <TouchableOpacity
+                          disabled={placeBusy}
+                          onPress={downloadTripEssentials}
+                          style={{ borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: placeBusy ? C.s2 : C.orangeGlow, borderWidth: 1, borderColor: placeBusy ? C.border : C.orange + '55' }}
+                        >
+                          <Text style={{ color: placeBusy ? C.text3 : C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900' }}>
+                            {placeBusy ? 'SAVING' : currentPlacePack ? 'REFRESH' : 'DOWNLOAD'}
+                          </Text>
+                        </TouchableOpacity>
+                        {currentPlacePack && (
+                          <TouchableOpacity onPress={() => deleteTripEssentials(currentPlacePack.pack_id)} style={{ padding: 4 }}>
+                            <Ionicons name="trash-outline" size={16} color={C.red} />
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </View>
+                  ) : (
+                    <View style={s.noTrip}>
+                      <Text style={{ color: C.text3, fontSize: 10, fontFamily: mono, textAlign: 'center' }}>
+                        PLAN A TRIP FIRST TO SAVE ITS OFFLINE PLACES
                       </Text>
                     </View>
                   )}

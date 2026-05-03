@@ -21,6 +21,7 @@ import { useStore } from '@/lib/store';
 import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, Waypoint } from '@/lib/api';
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { loadRouteGeometry, saveRouteGeometry } from '@/lib/offlineRoutes';
+import { loadTripPlacePoints } from '@/lib/offlinePlacePacks';
 import * as ImagePicker from 'expo-image-picker';
 import PaywallModal from '@/components/PaywallModal';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
@@ -2035,6 +2036,7 @@ function MapScreen() {
   // POI layer
   const [showPois, setShowPois] = useState(false);
   const [pois,     setPois]     = useState<OsmPoi[]>([]);
+  const [offlinePlacePois, setOfflinePlacePois] = useState<OsmPoi[]>([]);
   const showPoisRef    = useRef(false);
   const lastPoiFetchRef = useRef<{lat: number; lng: number} | null>(null);
 
@@ -2610,6 +2612,27 @@ function MapScreen() {
 
   // POI layer
   useEffect(() => { showPoisRef.current = showPois; }, [showPois]);
+
+  const reloadOfflinePlacePois = useCallback(async () => {
+    if (!activeTrip?.trip_id) {
+      setOfflinePlacePois([]);
+      return;
+    }
+    const points = await loadTripPlacePoints(activeTrip.trip_id).catch(() => []);
+    setOfflinePlacePois(points.map(p => ({
+      id: p.id,
+      name: p.name,
+      lat: p.lat,
+      lng: p.lng,
+      type: p.type || 'poi',
+      subtype: p.subtype,
+      elevation: p.elevation,
+    })));
+  }, [activeTrip?.trip_id]);
+
+  useEffect(() => {
+    reloadOfflinePlacePois();
+  }, [reloadOfflinePlacePois]);
 
   function fetchPois(center: { lat: number; lng: number }) {
     lastPoiFetchRef.current = center;
@@ -3620,7 +3643,7 @@ function MapScreen() {
     [activeTrip?.trip_id]
   );
   const routePois = useMemo(() => {
-    const merged = [...(activeTrip?.route_pois ?? []), ...pois];
+    const merged = [...(activeTrip?.route_pois ?? []), ...offlinePlacePois, ...pois];
     const seen = new Set<string>();
     return merged
       .filter(p => p.lat != null && p.lng != null && isFinite(p.lat) && isFinite(p.lng))
@@ -3631,7 +3654,7 @@ function MapScreen() {
         return true;
       })
       .map(p => ({ lat: p.lat, lng: p.lng, name: p.name, type: p.type || 'poi' }));
-  }, [activeTrip?.trip_id, pois]);
+  }, [activeTrip?.trip_id, offlinePlacePois, pois]);
   const visibleCommunityPins = useMemo(() => {
     if (activePinFilters.length === 0) {
       return communityPins.filter(p => normalizedCommunityPinType(p) !== 'gpx_import');
@@ -5103,8 +5126,10 @@ function MapScreen() {
         onClose={() => setShowOfflineModal(false)}
         waypoints={waypoints}
         routeCoords={lastRouteCoords}
+        tripId={activeTrip?.trip_id ?? null}
         tripName={activeTrip?.plan?.trip_name ?? null}
         useNativeMap={USE_NATIVE_MAP}
+        onOfflinePlacesChanged={reloadOfflinePlacePois}
         onWebDownloadBbox={opts => {
           webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles_bbox', ...opts }));
           setIsDownloading(true); setDownloadLabel(opts.label);

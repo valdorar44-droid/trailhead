@@ -173,6 +173,10 @@ export const api = {
     req<CampsitePin[]>(`/api/camps/bbox?n=${n}&s=${s}&e=${e}&w=${w}&types=${types.join(',')}`),
   getOsmPois: (lat: number, lng: number, radius = 30, types = 'water,trailhead,viewpoint') =>
     req<OsmPoi[]>(`/api/osm-pois?lat=${lat}&lng=${lng}&radius=${radius}&types=${types}`),
+  buildTripEssentialsPack: (data: PlaceTripPackRequest) =>
+    req<PlacePack>('/api/places/trip-essentials', {
+      method: 'POST', body: JSON.stringify(data),
+    }),
   getWikipediaNearby: (lat: number, lng: number, radius = 10000) =>
     req<WikiArticle[]>(`/api/wikipedia-nearby?lat=${lat}&lng=${lng}&radius=${radius}`),
 
@@ -330,8 +334,39 @@ export interface PinPayload {
 }
 export interface OsmPoi {
   id: string; name: string; lat: number; lng: number;
-  type: 'water' | 'trailhead' | 'viewpoint' | 'peak' | 'hot_spring'; subtype?: string; elevation?: string;
+  type: 'water' | 'trailhead' | 'viewpoint' | 'peak' | 'hot_spring' | 'fuel' | 'propane' | 'poi'; subtype?: string; elevation?: string;
   route_distance_mi?: number; route_fit?: string;
+}
+export interface PlaceTripPackRequest {
+  trip_id?: string;
+  trip_name: string;
+  waypoints: Array<{ lat: number; lng: number; name?: string; day?: number; type?: string }>;
+  route_coords?: [number, number][];
+}
+export interface PlacePackPoint {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  type: OsmPoi['type'];
+  category?: string;
+  source?: string;
+  subtype?: string;
+  address?: string;
+  fuel_types?: string;
+  elevation?: string;
+}
+export interface PlacePack {
+  schema_version: number;
+  pack_id: string;
+  trip_id?: string;
+  trip_name?: string;
+  name: string;
+  generated_at: number;
+  source: string;
+  sample_count: number;
+  categories: string[];
+  points: PlacePackPoint[];
 }
 export interface WikiArticle {
   title: string; lat: number; lng: number; dist_m: number; extract: string; url: string;

@@ -132,6 +132,8 @@ const POI_CODES: Record<string, string> = {
   viewpoint: 'V',
   peak: 'P',
   hot_spring: 'H',
+  fuel: 'G',
+  propane: 'P',
 };
 const POI_ICON_NAMES: Record<string, keyof typeof Ionicons.glyphMap> = {
   water: 'water-outline',
@@ -139,6 +141,8 @@ const POI_ICON_NAMES: Record<string, keyof typeof Ionicons.glyphMap> = {
   viewpoint: 'flag-outline',
   peak: 'triangle-outline',
   hot_spring: 'flame-outline',
+  fuel: 'flash-outline',
+  propane: 'flame-outline',
 };
 
 const COMMUNITY_PIN_VISUALS: Record<string, { color: string; icon: keyof typeof Ionicons.glyphMap }> = {
@@ -1104,7 +1108,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             id="poi-circle"
             style={{
               circleRadius: ['case', ['==', ['get', 'type'], 'peak'], 9, 8],
-              circleColor: ['match', ['get', 'type'], 'water', '#3b82f6', 'trailhead', '#22c55e', 'viewpoint', '#a855f7', 'peak', '#92400e', 'hot_spring', '#f97316', '#6b7280'],
+              circleColor: ['match', ['get', 'type'], 'water', '#3b82f6', 'trailhead', '#22c55e', 'viewpoint', '#a855f7', 'peak', '#92400e', 'hot_spring', '#f97316', 'fuel', '#ea580c', 'propane', '#f97316', '#6b7280'],
               circleOpacity: 0.9, circleStrokeWidth: 1.5, circleStrokeColor: '#fff',
             }}
           />
@@ -1117,6 +1121,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
                 'viewpoint', POI_CODES.viewpoint,
                 'peak', POI_CODES.peak,
                 'hot_spring', POI_CODES.hot_spring,
+                'fuel', POI_CODES.fuel,
+                'propane', POI_CODES.propane,
                 'P'],
               textSize: 9.5,
               textFont: ['Noto Sans Medium'],
@@ -1355,6 +1361,8 @@ function poiColor(type: string): string {
     case 'viewpoint': return '#a855f7';
     case 'peak': return '#92400e';
     case 'hot_spring': return '#f97316';
+    case 'fuel': return '#ea580c';
+    case 'propane': return '#f97316';
     default: return '#6b7280';
   }
 }

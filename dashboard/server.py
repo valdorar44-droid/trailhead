@@ -18,7 +18,7 @@ from config.settings import settings
 from ai.planner import plan_trip, chat_guide, edit_trip, plan_trip_from_conversation
 from dashboard.route_enrichment import enrich_trip_along_route
 from ingestors.ridb import get_campsites_near, get_campsites_search, get_facility_detail
-from ingestors.osm import get_osm_campsites, get_osm_campsite_detail, get_water_sources, get_trailheads, get_viewpoints, get_peaks, get_hot_springs
+from ingestors.osm import get_osm_campsites, get_osm_campsite_detail, get_water_sources, get_trailheads, get_viewpoints, get_peaks, get_hot_springs, get_fuel_stations
 from ingestors.blm import get_blm_campsites, get_blm_campsite_detail
 from db.store import (
     save_trip, get_trip, add_community_pin, get_community_pins,
@@ -2812,6 +2812,143 @@ async def osm_pois(lat: float, lng: float, radius: float = 30, types: str = "wat
         return []
     results = await asyncio.gather(*tasks)
     return [item for sublist in results for item in sublist][:100]
+
+
+# ── Offline trip essentials packs ─────────────────────────────────────────────
+
+class PlaceTripWaypoint(BaseModel):
+    lat: float
+    lng: float
+    name: str = ""
+    day: int = 0
+    type: str = ""
+
+class PlaceTripPackRequest(BaseModel):
+    trip_id: str = ""
+    trip_name: str = "Trip"
+    waypoints: list[PlaceTripWaypoint] = Field(default_factory=list)
+    route_coords: list[list[float]] = Field(default_factory=list)
+
+def _place_pack_id(trip_id: str, trip_name: str) -> str:
+    base = trip_id.strip() or trip_name.strip().lower()
+    base = re.sub(r"[^a-zA-Z0-9_-]+", "-", base).strip("-").lower()
+    return (base or "trip")[:80] + "-essentials"
+
+def _trip_pack_samples(body: PlaceTripPackRequest) -> list[dict]:
+    samples: list[dict] = []
+    route = []
+    for coord in body.route_coords:
+        if isinstance(coord, list) and len(coord) >= 2:
+            lng, lat = coord[0], coord[1]
+            if isinstance(lat, (int, float)) and isinstance(lng, (int, float)):
+                route.append({"lat": float(lat), "lng": float(lng), "name": "Route"})
+    if len(route) >= 2:
+        stride = max(1, len(route) // 4)
+        samples.extend(route[::stride][:5])
+        if route[-1] not in samples:
+            samples.append(route[-1])
+    for wp in body.waypoints:
+        if isinstance(wp.lat, (int, float)) and isinstance(wp.lng, (int, float)):
+            samples.append({"lat": float(wp.lat), "lng": float(wp.lng), "name": wp.name, "day": wp.day})
+
+    deduped: list[dict] = []
+    seen = set()
+    for p in samples:
+        key = (round(p["lat"], 3), round(p["lng"], 3))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(p)
+    return deduped[:6]
+
+def _normalize_pack_point(item: dict, category: str) -> dict | None:
+    lat, lng = item.get("lat"), item.get("lng")
+    if not isinstance(lat, (int, float)) or not isinstance(lng, (int, float)):
+        return None
+    ptype = str(item.get("type") or category or "poi")
+    if ptype == "fuel":
+        category = "fuel"
+    elif ptype in {"water", "trailhead", "viewpoint", "peak", "hot_spring"}:
+        category = ptype
+    return {
+        "id": str(item.get("id") or f"{ptype}_{lat:.5f}_{lng:.5f}"),
+        "name": str(item.get("name") or ptype.replace("_", " ").title()),
+        "lat": float(lat),
+        "lng": float(lng),
+        "type": ptype,
+        "category": category,
+        "source": str(item.get("source") or "osm"),
+        "subtype": item.get("subtype") or "",
+        "address": item.get("address") or "",
+        "fuel_types": item.get("fuel_types") or "",
+        "elevation": item.get("elevation") or "",
+    }
+
+async def _gather_essentials_for_sample(sample: dict) -> list[dict]:
+    lat = sample["lat"]
+    lng = sample["lng"]
+    fuel, water, trailheads, viewpoints, peaks, hot_springs = await asyncio.gather(
+        get_fuel_stations(lat, lng, radius_m=32000),
+        get_water_sources(lat, lng, radius_m=24000),
+        get_trailheads(lat, lng, radius_m=28000),
+        get_viewpoints(lat, lng, radius_m=28000),
+        get_peaks(lat, lng, radius_m=36000),
+        get_hot_springs(lat, lng, radius_m=52000),
+        return_exceptions=True,
+    )
+    merged: list[dict] = []
+    for category, batch in (
+        ("fuel", fuel), ("water", water), ("trailhead", trailheads),
+        ("viewpoint", viewpoints), ("peak", peaks), ("hot_spring", hot_springs),
+    ):
+        if isinstance(batch, list):
+            for item in batch:
+                normalized = _normalize_pack_point(item, category)
+                if normalized:
+                    merged.append(normalized)
+    return merged
+
+@app.post("/api/places/trip-essentials")
+async def trip_essentials_pack(body: PlaceTripPackRequest, user: dict = Depends(_current_user)):
+    samples = _trip_pack_samples(body)
+    if len(samples) < 2:
+        raise HTTPException(400, "Trip essentials need at least two mapped route points.")
+
+    semaphore = asyncio.Semaphore(2)
+
+    async def limited_gather(sample: dict) -> list[dict]:
+        async with semaphore:
+            return await _gather_essentials_for_sample(sample)
+
+    batches = await asyncio.gather(*[limited_gather(p) for p in samples], return_exceptions=True)
+    points: list[dict] = []
+    seen = set()
+    for batch in batches:
+        if not isinstance(batch, list):
+            continue
+        for point in batch:
+            key = point.get("id") or f"{point.get('type')}:{point.get('lat'):.4f}:{point.get('lng'):.4f}"
+            if key in seen:
+                continue
+            seen.add(key)
+            points.append(point)
+
+    priority = {"fuel": 0, "water": 1, "hot_spring": 2, "trailhead": 3, "viewpoint": 4, "peak": 5}
+    points.sort(key=lambda p: (priority.get(str(p.get("type")), 9), str(p.get("name", ""))))
+    points = points[:350]
+    categories = sorted({str(p.get("type") or p.get("category") or "poi") for p in points})
+    return {
+        "schema_version": 1,
+        "pack_id": _place_pack_id(body.trip_id, body.trip_name),
+        "trip_id": body.trip_id,
+        "trip_name": body.trip_name,
+        "name": f"{body.trip_name or 'Trip'} Essentials",
+        "generated_at": int(time.time()),
+        "source": "OpenStreetMap",
+        "sample_count": len(samples),
+        "categories": categories,
+        "points": points,
+    }
 
 
 # ── Wikipedia nearby ──────────────────────────────────────────────────────────

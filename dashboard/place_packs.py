@@ -181,8 +181,7 @@ def _normalize_overpass_element(el: dict) -> dict | None:
 async def _fetch_bbox_cell(cell: tuple[float, float, float, float]) -> list[dict]:
     west, south, east, north = cell
     bbox = f"{south},{west},{north},{east}"
-    query = f"""
-[out:json][timeout:25];
+    query = f"""[out:json][timeout:25];
 (
   node["amenity"="fuel"]({bbox});
   way["amenity"="fuel"]({bbox});
@@ -199,11 +198,11 @@ async def _fetch_bbox_cell(cell: tuple[float, float, float, float]) -> list[dict
   node["amenity"="public_bath"]["bath:type"="hot_spring"]({bbox});
   way["amenity"="public_bath"]["bath:type"="hot_spring"]({bbox});
 );
-out center tags 600;
+out body center 600;
 """
     try:
         async with httpx.AsyncClient(timeout=35) as client:
-            res = await client.post(OVERPASS, data={"data": query})
+            res = await client.post(OVERPASS, data={"data": query}, headers={"User-Agent": "Trailhead/1.0"})
             res.raise_for_status()
             elements = res.json().get("elements") or []
     except Exception:

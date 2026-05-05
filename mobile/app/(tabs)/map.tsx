@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, useMemo, useCallback, Component } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Linking, Animated, TextInput, ActivityIndicator, Modal, Image, Share, Alert, AppState, KeyboardAvoidingView, Platform, PanResponder } from 'react-native';
-import { Pressable as GesturePressable } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import NativeMap, { type NativeMapHandle } from '@/components/NativeMap';
 import RouteSearchModal from '@/components/RouteSearchModal';
@@ -4406,27 +4405,27 @@ function MapScreen() {
       )}
 
       <View style={s.navActions}>
-        <GesturePressable style={s.navEndBtn} onPress={endNavigation} hitSlop={14}>
+        <TouchableOpacity style={s.navEndBtn} onPress={endNavigation} hitSlop={14}>
           <Ionicons name="close" size={14} color={C.red} />
           <Text style={s.navEndText}>END</Text>
-        </GesturePressable>
+        </TouchableOpacity>
         {routeSteps.length > 0 && (
-          <GesturePressable style={s.navStepsBtn} onPress={() => setShowSteps(p => !p)} hitSlop={14}>
+          <TouchableOpacity style={s.navStepsBtn} onPress={() => setShowSteps(p => !p)} hitSlop={14}>
             <Ionicons name="list-outline" size={14} color={OVR.text2} />
             <Text style={s.navStepsBtnText}>TURNS {showSteps ? '▲' : '▼'}</Text>
-          </GesturePressable>
+          </TouchableOpacity>
         )}
         {isRouted && userLoc && (
-          <GesturePressable style={s.navRerouteBtn} onPress={manualReroute} disabled={isRerouting} hitSlop={14}>
+          <TouchableOpacity style={s.navRerouteBtn} onPress={manualReroute} disabled={isRerouting} hitSlop={14}>
             <Ionicons name="refresh-outline" size={14} color={isRerouting ? OVR.text3 : OVR.text2} />
             <Text style={[s.navStepsBtnText, isRerouting && { color: OVR.text3 }]}>REROUTE</Text>
-          </GesturePressable>
+          </TouchableOpacity>
         )}
         {userLoc && (
-          <GesturePressable style={[s.navReportBtn, quickReport && s.navReportBtnActive]} onPress={() => { setQuickTypeIdx(null); setQuickReport(p => !p); }} hitSlop={14}>
+          <TouchableOpacity style={[s.navReportBtn, quickReport && s.navReportBtnActive]} onPress={() => { setQuickTypeIdx(null); setQuickReport(p => !p); }} hitSlop={14}>
             <Ionicons name="warning" size={13} color={quickReport ? '#fff' : '#f59e0b'} />
             <Text style={[s.navReportBtnText, quickReport && { color: '#fff' }]}>REPORT</Text>
-          </GesturePressable>
+          </TouchableOpacity>
         )}
       </View>
 
@@ -6277,34 +6276,34 @@ function MapScreen() {
 
         {/* Turn list toggle + actions */}
         <View style={s.navActions}>
-          <GesturePressable style={s.navEndBtn} onPress={endNavigation} hitSlop={12}>
+          <TouchableOpacity style={s.navEndBtn} onPress={endNavigation} hitSlop={12}>
             <Ionicons name="close" size={14} color={C.red} />
             <Text style={s.navEndText}>END</Text>
-          </GesturePressable>
+          </TouchableOpacity>
 
           {routeSteps.length > 0 && (
-            <GesturePressable style={s.navStepsBtn} onPress={() => setShowSteps(p => !p)} hitSlop={12}>
+            <TouchableOpacity style={s.navStepsBtn} onPress={() => setShowSteps(p => !p)} hitSlop={12}>
               <Ionicons name="list-outline" size={14} color={OVR.text2} />
               <Text style={s.navStepsBtnText}>TURNS {showSteps ? '▲' : '▼'}</Text>
-            </GesturePressable>
+            </TouchableOpacity>
           )}
 
           {isRouted && userLoc && (
-            <GesturePressable style={s.navRerouteBtn} onPress={manualReroute} disabled={isRerouting} hitSlop={12}>
+            <TouchableOpacity style={s.navRerouteBtn} onPress={manualReroute} disabled={isRerouting} hitSlop={12}>
               <Ionicons name="refresh-outline" size={14} color={isRerouting ? OVR.text3 : OVR.text2} />
               <Text style={[s.navStepsBtnText, isRerouting && { color: OVR.text3 }]}>REROUTE</Text>
-            </GesturePressable>
+            </TouchableOpacity>
           )}
 
           {userLoc && (
-            <GesturePressable
+            <TouchableOpacity
               style={[s.navReportBtn, quickReport && s.navReportBtnActive]}
               onPress={() => { setQuickTypeIdx(null); setQuickReport(p => !p); }}
               hitSlop={12}
             >
               <Ionicons name="warning" size={13} color={quickReport ? '#fff' : '#f59e0b'} />
               <Text style={[s.navReportBtnText, quickReport && { color: '#fff' }]}>REPORT</Text>
-            </GesturePressable>
+            </TouchableOpacity>
           )}
 
         </View>

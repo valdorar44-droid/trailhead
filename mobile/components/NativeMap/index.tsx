@@ -455,6 +455,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const offRouteWarnAtRef = useRef(0);
   const wasOffRouteRef = useRef(false);
   const lastFlyToRef    = useRef(0);                   // timestamp of last flyTo — debounce CDN fallback
+  const lastCamRef      = useRef(0);                   // timestamp of last nav setCamera — prevent animation overlap
   const routeRequestRef = useRef(0);                   // cancels stale async route results
 
   // Returns all downloaded region files with their bounds, or null for CONUS.
@@ -783,16 +784,24 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   }, [waypointSignature]);
 
   // ── Nav: camera follow (independent of route) ───────────────────────────────
+  // GPS can fire every ~180ms at highway speed. Calling setCamera with an 800ms
+  // animation on every tick keeps MLN in permanent animation on iOS, which holds
+  // a native touch-intercept lock and makes every button on screen unresponsive.
+  // Gate so we only call setCamera once per animation cycle.
   useEffect(() => {
     if (!navMode || !userLoc) return;
+    const now = Date.now();
     const { lat, lng } = userLoc;
     const speed = navSpeed ?? 0;
+    const animDuration = speed > 2.2 ? 800 : 350;
+    if (now - lastCamRef.current < animDuration - 80) return;
+    lastCamRef.current = now;
     const hasHeading = speed > 2.2 && navHeading !== null && navHeading >= 0;
     camRef.current?.setCamera({
       centerCoordinate: [lng, lat],
       zoomLevel: speed > 20 ? 15.5 : speed > 9 ? 16.2 : 17,
       ...(hasHeading ? { heading: navHeading, pitch: 45 } : {}),
-      animationDuration: speed > 2.2 ? 800 : 350,
+      animationDuration: animDuration,
       animationMode: 'easeTo',
     });
   }, [userLoc, navMode, navHeading, navSpeed]);
@@ -1001,6 +1010,10 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         compassEnabled={false}
         attributionEnabled={false}
         logoEnabled={false}
+        scrollEnabled={!navMode}
+        zoomEnabled={!navMode}
+        rotateEnabled={!navMode}
+        pitchEnabled={!navMode}
       >
 
       {/* ── Camera ────────────────────────────────────────────────────── */}

@@ -4606,9 +4606,7 @@ function MapScreen() {
           onOffRouteWarn={(lat, lng, dist) => onWebMessage({ nativeEvent: { data: JSON.stringify({ type: 'off_route_warn', lat, lng, dist }) } })}
           onBackOnRoute={() => onWebMessage({ nativeEvent: { data: JSON.stringify({ type: 'back_on_route' }) } })}
           onRouteProgress={progress => setRouteProgress(progress)}
-        >
-          {nativeNavigationPanel}
-        </NativeMap>
+        />
       ) : (
         // ── WebView (current binary) ────────────────────────────────────────
         <WebView
@@ -4636,6 +4634,7 @@ function MapScreen() {
           onError={() => setMapLoadFailed(true)}
         />
       )}
+      {nativeNavigationPanel}
       <TourTarget id="map.canvas" style={s.mapTourTarget} pointerEvents="none">
         <View />
       </TourTarget>

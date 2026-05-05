@@ -10,13 +10,36 @@ const loadTripFile  = async (): Promise<TripResult | null> => {
   try { const raw = await FileSystem.readAsStringAsync(TRIP_FILE()); return JSON.parse(raw); } catch { return null; }
 };
 const deleteTripFile = () => FileSystem.deleteAsync(TRIP_FILE(), { idempotent: true }).catch(() => {});
+const RIG_FILE = () => `${FileSystem.documentDirectory}rig_profile.json`;
+const saveRigFile = (rig: RigProfile) => FileSystem.writeAsStringAsync(RIG_FILE(), JSON.stringify(rig)).catch(() => {});
+const loadRigFile = async (): Promise<RigProfile | null> => {
+  try { const raw = await FileSystem.readAsStringAsync(RIG_FILE()); return JSON.parse(raw); } catch { return null; }
+};
+const deleteRigFile = () => FileSystem.deleteAsync(RIG_FILE(), { idempotent: true }).catch(() => {});
+const PLAN_KEY = 'trailhead_plan';
 
 // Keep all keychain items on this device only — prevents iOS from prompting
 // "Sign into Apple account" to sync with iCloud Keychain.
 const KCO = { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY };
-const ss  = (key: string, val: string) => SecureStore.setItemAsync(key, val, KCO);
-const sg  = (key: string)              => SecureStore.getItemAsync(key, KCO);
-const sd  = (key: string)              => SecureStore.deleteItemAsync(key, KCO);
+const hasWebStorage = () => typeof window !== 'undefined' && !!window.localStorage;
+const ss = (key: string, val: string) => {
+  if (hasWebStorage()) {
+    window.localStorage.setItem(key, val);
+    return Promise.resolve();
+  }
+  return SecureStore.setItemAsync(key, val, KCO);
+};
+const sg = (key: string) => {
+  if (hasWebStorage()) return Promise.resolve(window.localStorage.getItem(key));
+  return SecureStore.getItemAsync(key, KCO);
+};
+const sd = (key: string) => {
+  if (hasWebStorage()) {
+    window.localStorage.removeItem(key);
+    return Promise.resolve();
+  }
+  return SecureStore.deleteItemAsync(key, KCO);
+};
 const newSessionId = () => 'sess_' + Math.random().toString(36).slice(2, 12);
 
 export interface SavedPlace {
@@ -67,6 +90,7 @@ export interface RigProfile {
   ground_clearance_in: string;
   length_ft: string;
   fuel_range_miles?: string;
+  fuel_mpg?: string;
   has_winch?: boolean;
   winch_lbs?: string;
   locking_diffs?: string;
@@ -113,6 +137,7 @@ interface AppState {
   setActiveTrip: (trip: TripResult | null, fromCache?: boolean) => void;
   setRigProfile: (rig: RigProfile) => void;
   addTripToHistory: (item: TripHistoryItem) => void;
+  removeTripFromHistory: (tripId: string) => void;
   setThemeMode: (mode: 'light' | 'dark') => void;
   setUserLoc: (loc: { lat: number; lng: number } | null) => void;
   setMapboxToken: (token: string) => void;
@@ -162,15 +187,13 @@ export const useStore = create<AppState>((set) => ({
   setAuth: (token, user) => {
     ss('trailhead_token', token);
     ss('trailhead_user', JSON.stringify(user));
-    set({
+    set((state) => ({
       token, user,
-      activeTrip: null,
-      rigProfile: null,
-      tripHistory: [],
-      favoriteCamps: [],
-      hasPlan: false,
-      planExpiresAt: null,
-    });
+      activeTrip: state.activeTrip,
+      rigProfile: state.rigProfile,
+      tripHistory: state.tripHistory,
+      favoriteCamps: state.favoriteCamps,
+    }));
   },
 
   clearAuth: () => {
@@ -182,8 +205,11 @@ export const useStore = create<AppState>((set) => ({
     sd('trailhead_favorites');
     sd('trailhead_active_trip');
     sd('trailhead_active_route');
+    sd(PLAN_KEY);
+    sd('trailhead_iap_pending');
     ss('trailhead_session', freshSession);
     deleteTripFile(); // clear file-based trip storage too
+    deleteRigFile();
     set({
       token: null,
       user: null,
@@ -197,20 +223,15 @@ export const useStore = create<AppState>((set) => ({
     });
   },
 
-  // Persist activeTrip so the user's trip (campsites, gas, daily itinerary, audio
-  // guides — everything to navigate) survives offline relaunch.
   setActiveTrip: (trip, fromCache = false) => {
-    if (trip) {
-      saveTripFile(trip); // file-based — no 2KB SecureStore limit
-    } else {
-      deleteTripFile();
-      sd('trailhead_active_route');
-    }
+    deleteTripFile();
+    sd('trailhead_active_route');
     set({ activeTrip: trip, activeTripFromCache: fromCache });
   },
 
   setRigProfile: (rig) => {
     ss('trailhead_rig', JSON.stringify(rig));
+    saveRigFile(rig);
     set({ rigProfile: rig });
   },
 
@@ -218,6 +239,16 @@ export const useStore = create<AppState>((set) => ({
     const updated = [item, ...state.tripHistory.filter(t => t.trip_id !== item.trip_id)].slice(0, 10);
     ss('trailhead_history', JSON.stringify(updated));
     return { tripHistory: updated };
+  }),
+
+  removeTripFromHistory: (tripId) => set((state) => {
+    const updated = state.tripHistory.filter(t => t.trip_id !== tripId);
+    ss('trailhead_history', JSON.stringify(updated));
+    return {
+      tripHistory: updated,
+      activeTrip: state.activeTrip?.trip_id === tripId ? null : state.activeTrip,
+      activeTripFromCache: state.activeTrip?.trip_id === tripId ? false : state.activeTripFromCache,
+    };
   }),
 
   setThemeMode: (mode) => {
@@ -247,7 +278,11 @@ export const useStore = create<AppState>((set) => ({
   },
 
   setOfflineTripIds: (ids) => set({ offlineTripIds: ids }),
-  setPlan: (active, expiresAt = null) => set({ hasPlan: active, planExpiresAt: expiresAt }),
+  setPlan: (active, expiresAt = null) => {
+    if (active) ss(PLAN_KEY, JSON.stringify({ active: true, expiresAt: expiresAt ?? null, updatedAt: Date.now() }));
+    else sd(PLAN_KEY);
+    set({ hasPlan: active, planExpiresAt: expiresAt });
+  },
   startGuidedTour: () => set(state => ({ guidedTourRunId: state.guidedTourRunId + 1 })),
   setTourTarget: (key, rect) => set((state) => {
     const next = { ...state.tourTargets };
@@ -258,7 +293,7 @@ export const useStore = create<AppState>((set) => ({
 
   restoreActiveTrip: async () => {
     const trip = await loadTripFile();
-    if (trip) set({ activeTrip: trip, activeTripFromCache: true });
+    if (trip) set({ activeTrip: trip });
   },
 
   toggleFavorite: (camp) => set((state) => {
@@ -312,7 +347,7 @@ export const useStore = create<AppState>((set) => ({
 // Load persisted data on startup
 (async () => {
   try {
-    const [rigRaw, historyRaw, themeRaw, sessionRaw, favRaw, cachedRegionsRaw, activeTripRaw,
+    const [rigRaw, historyRaw, themeRaw, sessionRaw, favRaw, cachedRegionsRaw, activeTripRaw, planRaw,
            savedPlacesRaw, markerGroupsRaw, searchHistoryRaw, tokenRaw, userRaw] = await Promise.all([
       sg('trailhead_rig'),
       sg('trailhead_history'),
@@ -321,6 +356,7 @@ export const useStore = create<AppState>((set) => ({
       sg('trailhead_favorites'),
       sg('trailhead_cached_regions'),
       sg('trailhead_active_trip'),
+      sg(PLAN_KEY),
       sg('trailhead_saved_places'),
       sg('trailhead_marker_groups'),
       sg('trailhead_search_history'),
@@ -331,7 +367,15 @@ export const useStore = create<AppState>((set) => ({
     // Restore auth session — keeps user logged in across app launches
     if (tokenRaw) patch.token = tokenRaw;
     if (userRaw) { try { patch.user = JSON.parse(userRaw); } catch {} }
-    if (rigRaw) patch.rigProfile = JSON.parse(rigRaw);
+    const rigFromFile = !rigRaw ? await loadRigFile() : null;
+    if (rigRaw) {
+      const rig = JSON.parse(rigRaw) as RigProfile;
+      patch.rigProfile = rig;
+      saveRigFile(rig);
+    } else if (rigFromFile) {
+      patch.rigProfile = rigFromFile;
+      ss('trailhead_rig', JSON.stringify(rigFromFile));
+    }
     if (historyRaw) patch.tripHistory = JSON.parse(historyRaw);
     if (themeRaw === 'dark' || themeRaw === 'light') patch.themeMode = themeRaw;
     if (favRaw) patch.favoriteCamps = JSON.parse(favRaw);
@@ -340,13 +384,22 @@ export const useStore = create<AppState>((set) => ({
     if (markerGroupsRaw) patch.markerGroups = JSON.parse(markerGroupsRaw);
     if (searchHistoryRaw) patch.searchHistory = JSON.parse(searchHistoryRaw);
     if (sessionRaw) patch.sessionId = sessionRaw;
-    // Load active trip from file (no size limit) — fall back to old SecureStore format
-    const tripFromFile = await loadTripFile();
-    if (tripFromFile) {
-      patch.activeTrip = tripFromFile; patch.activeTripFromCache = true;
-    } else if (activeTripRaw) {
-      try { patch.activeTrip = JSON.parse(activeTripRaw); patch.activeTripFromCache = true; } catch {}
+    if (planRaw) {
+      try {
+        const cached = JSON.parse(planRaw);
+        const expiresAt = Number(cached.expiresAt ?? 0);
+        if (cached.active && (!expiresAt || expiresAt * 1000 > Date.now())) {
+          patch.hasPlan = true;
+          patch.planExpiresAt = cached.expiresAt ?? null;
+        } else {
+          sd(PLAN_KEY);
+        }
+      } catch {
+        sd(PLAN_KEY);
+      }
     }
+    deleteTripFile();
+    if (activeTripRaw) sd('trailhead_active_trip');
     if (!sessionRaw) {
       // First run — persist the generated ID
       const id = useStore.getState().sessionId;

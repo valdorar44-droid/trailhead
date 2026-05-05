@@ -10,6 +10,7 @@ import { useStore } from '@/lib/store';
 import { api } from '@/lib/api';
 import { PRODUCT_IDS } from '@/lib/useSubscription';
 import { useTheme, mono } from '@/lib/design';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 export default function RootLayout() {
   const setAuth            = useStore(s => s.setAuth);
@@ -106,7 +107,24 @@ export default function RootLayout() {
         setAuth(token, user);
         restoreActiveTrip(); // setAuth clears activeTrip; restore from file
         const sub = await api.subscriptionStatus().catch(() => null);
-        if (sub?.is_active) setPlan(true, sub.plan_expires_at ?? null);
+        if (sub?.is_active) {
+          setPlan(true, sub.plan_expires_at ?? null);
+          storage.del('trailhead_iap_pending').catch(() => {});
+        } else {
+          const pendingRaw = await storage.get('trailhead_iap_pending').catch(() => null);
+          if (pendingRaw) {
+            try {
+              const pending = JSON.parse(pendingRaw);
+              if (pending?.productId && pending?.transactionId) {
+                const activated = await api.activateSubscription(pending.productId, pending.transactionId).catch(() => null);
+                if (activated?.status && activated.status !== 'error') {
+                  setPlan(true, activated.plan_expires_at ?? null);
+                  storage.del('trailhead_iap_pending').catch(() => {});
+                }
+              }
+            } catch {}
+          }
+        }
       } catch (e: any) {
         const isNetworkError = !e?.message || e.message.includes('Network') || e.message.includes('fetch') || e instanceof TypeError;
         if (isNetworkError) {
@@ -151,9 +169,9 @@ export default function RootLayout() {
           }
         } catch {}
       } else if (data?.type === 'trail_alert') {
-        router.push('/report');
+        router.push('/(tabs)/report');
       } else {
-        router.push('/guide');
+        router.push('/(tabs)/guide');
       }
     });
 
@@ -179,7 +197,7 @@ export default function RootLayout() {
   }, [user]);
 
   return (
-    <>
+    <GestureHandlerRootView style={{ flex: 1 }}>
       <StatusBar style={themeMode === 'dark' ? 'light' : 'dark'} />
       <Stack screenOptions={{ headerShown: false }} />
       {updateBanner && (
@@ -203,6 +221,6 @@ export default function RootLayout() {
           </TouchableOpacity>
         </View>
       )}
-    </>
+    </GestureHandlerRootView>
   );
 }

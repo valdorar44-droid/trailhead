@@ -19,7 +19,9 @@ const BASE = 'https://tiles.gettrailhead.app';
 export const OFFLINE_DIR = `${FileSystem.documentDirectory}offline/`;
 export const CACHE_OFFLINE_DIR = `${FileSystem.cacheDirectory}offline/`;
 export const ROUTING_DIR = `${OFFLINE_DIR}routing/`;
+export const CONTOUR_DIR = `${OFFLINE_DIR}contours/`;
 const CACHE_ROUTING_DIR = `${CACHE_OFFLINE_DIR}routing/`;
+const CACHE_CONTOUR_DIR = `${CACHE_OFFLINE_DIR}contours/`;
 
 export const FILE_REGIONS = {
   conus: {
@@ -144,6 +146,30 @@ export const ROUTING_REGIONS = Object.fromEntries(
 
 export type RoutingRegionId = keyof typeof ROUTING_REGIONS;
 
+export const CONTOUR_REGIONS = Object.fromEntries(
+  Object.entries(FILE_REGIONS)
+    .filter(([id]) => id !== 'conus')
+    .map(([id, region]) => [id, {
+      id,
+      name: `${region.name} contours`,
+      url: `${BASE}/api/contours/${id}.pmtiles`,
+      localPath: `${CONTOUR_DIR}${id}.pmtiles`,
+      estimatedGb: Math.max(0.05, Math.round(region.estimatedGb * 0.18 * 10) / 10),
+      description: 'Topo contour lines · separate overlay pack',
+      bounds: region.bounds,
+    }])
+) as Record<Exclude<FileRegionId, 'conus'>, {
+  id: string;
+  name: string;
+  url: string;
+  localPath: string;
+  estimatedGb: number;
+  description: string;
+  bounds: { n: number; s: number; e: number; w: number };
+}>;
+
+export type ContourRegionId = keyof typeof CONTOUR_REGIONS;
+
 export function isPlannedOfflineRegion(id: string): boolean {
   const region = FILE_REGIONS[id as FileRegionId] as any;
   return Boolean(region?.comingSoon);
@@ -163,6 +189,7 @@ export interface FileDownloadState {
 
 const RESUME_KEY  = (id: string) => `offl_resume_${id}`;
 const ROUTING_RESUME_KEY = (id: string) => `route_resume_${id}`;
+const CONTOUR_RESUME_KEY = (id: string) => `contour_resume_${id}`;
 const EMPTY = (id: FileRegionId): FileDownloadState => ({
   status: 'idle', progress: 0, downloadedBytes: 0, totalBytes: 0,
   speedBps: 0, etaSec: 0, fileSizeMb: 0,
@@ -174,6 +201,14 @@ const EMPTY_ROUTING = (id: string): FileDownloadState => {
     status: 'idle', progress: 0, downloadedBytes: 0, totalBytes: 0,
     speedBps: 0, etaSec: 0, fileSizeMb: 0,
     localPath: region?.localPath ?? `${ROUTING_DIR}${id}.tar`,
+  };
+};
+const EMPTY_CONTOUR = (id: string): FileDownloadState => {
+  const region = CONTOUR_REGIONS[id as ContourRegionId] ?? CONTOUR_REGIONS.ks;
+  return {
+    status: 'idle', progress: 0, downloadedBytes: 0, totalBytes: 0,
+    speedBps: 0, etaSec: 0, fileSizeMb: 0,
+    localPath: region?.localPath ?? `${CONTOUR_DIR}${id}.pmtiles`,
   };
 };
 
@@ -224,12 +259,19 @@ export function useOfflineFiles() {
       Object.keys(ROUTING_REGIONS).map(id => [id, EMPTY_ROUTING(id)])
     )
   );
+  const [contourStates, setContourStates] = useState<Record<string, FileDownloadState>>(
+    () => Object.fromEntries(
+      Object.keys(CONTOUR_REGIONS).map(id => [id, EMPTY_CONTOUR(id)])
+    )
+  );
   // Real file sizes fetched from CF manifest (overrides estimatedGb)
   const [manifestSizes, setManifestSizes] = useState<Record<string, number>>({});
   const [routingManifestSizes, setRoutingManifestSizes] = useState<Record<string, number>>({});
+  const [contourManifestSizes, setContourManifestSizes] = useState<Record<string, number>>({});
 
   const dlRefs    = useRef<Record<string, FileSystem.DownloadResumable | null>>({});
   const routingDlRefs = useRef<Record<string, FileSystem.DownloadResumable | null>>({});
+  const contourDlRefs = useRef<Record<string, FileSystem.DownloadResumable | null>>({});
   const speedBuf  = useRef<Record<string, Array<{ b: number; t: number }>>>({});
   const prevSpeed = useRef<Record<string, number>>({});
 
@@ -267,11 +309,26 @@ export function useOfflineFiles() {
       .catch(() => {});
   }, []);
 
+  useEffect(() => {
+    fetch(`${BASE}/api/contours/manifest.json`)
+      .then(r => r.ok ? r.json() : {})
+      .then((m: Record<string, { size: number }>) => {
+        const sizes: Record<string, number> = {};
+        Object.keys(CONTOUR_REGIONS).forEach(id => {
+          const key = `${id}.pmtiles`;
+          if (m[key]?.size) sizes[id] = m[key].size;
+        });
+        setContourManifestSizes(sizes);
+      })
+      .catch(() => {});
+  }, []);
+
   // On mount: check which files already exist, and which have paused resume data
   useEffect(() => {
     (async () => {
       await FileSystem.makeDirectoryAsync(OFFLINE_DIR, { intermediates: true }).catch(() => {});
       await FileSystem.makeDirectoryAsync(ROUTING_DIR, { intermediates: true }).catch(() => {});
+      await FileSystem.makeDirectoryAsync(CONTOUR_DIR, { intermediates: true }).catch(() => {});
 
       for (const [id, region] of Object.entries(FILE_REGIONS)) {
         const fileName = id === 'conus' ? 'conus.pmtiles' : `${id}.pmtiles`;
@@ -306,6 +363,23 @@ export function useOfflineFiles() {
         const saved = await storage.get(ROUTING_RESUME_KEY(id)).catch(() => null);
         if (saved) {
           setRoutingStates(prev => ({ ...prev, [id]: { ...EMPTY_ROUTING(id), status: 'paused' } }));
+        }
+      }
+
+      for (const [id, region] of Object.entries(CONTOUR_REGIONS)) {
+        await migrateCachedFile(`${CACHE_CONTOUR_DIR}${id}.pmtiles`, region.localPath);
+        const info = await FileSystem.getInfoAsync(region.localPath).catch(() => null);
+        if (info?.exists) {
+          const sizeMb = Math.round(((info as any).size ?? 0) / 1_048_576 * 10) / 10;
+          setContourStates(prev => ({
+            ...prev,
+            [id]: { ...EMPTY_CONTOUR(id), status: 'complete', progress: 100, fileSizeMb: sizeMb, localPath: region.localPath },
+          }));
+          continue;
+        }
+        const saved = await storage.get(CONTOUR_RESUME_KEY(id)).catch(() => null);
+        if (saved) {
+          setContourStates(prev => ({ ...prev, [id]: { ...EMPTY_CONTOUR(id), status: 'paused' } }));
         }
       }
     })();
@@ -349,6 +423,24 @@ export function useOfflineFiles() {
     })();
   }, [routingManifestSizes]);
 
+  useEffect(() => {
+    if (Object.keys(contourManifestSizes).length === 0) return;
+    (async () => {
+      for (const [id, region] of Object.entries(CONTOUR_REGIONS)) {
+        const expected = contourManifestSizes[id];
+        if (!expected) continue;
+        const info = await FileSystem.getInfoAsync(region.localPath).catch(() => null);
+        if (!info?.exists) continue;
+        const actual = (info as any).size ?? 0;
+        if (actual < expected * 0.99) {
+          await FileSystem.deleteAsync(region.localPath, { idempotent: true }).catch(() => {});
+          await storage.del(CONTOUR_RESUME_KEY(id)).catch(() => {});
+          setContourStates(prev => ({ ...prev, [id]: { ...EMPTY_CONTOUR(id) } }));
+        }
+      }
+    })();
+  }, [contourManifestSizes]);
+
   // ── Speed smoothing (EMA over ~8 seconds) ────────────────────────────────
   const calcSpeed = useCallback((id: string, bytes: number): number => {
     const now = Date.now();
@@ -373,6 +465,9 @@ export function useOfflineFiles() {
   }, []);
   const updateRoutingState = useCallback((id: string, patch: Partial<FileDownloadState>) => {
     setRoutingStates(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }));
+  }, []);
+  const updateContourState = useCallback((id: string, patch: Partial<FileDownloadState>) => {
+    setContourStates(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }));
   }, []);
 
   // ── Start or restart a download ───────────────────────────────────────────
@@ -595,6 +690,111 @@ export function useOfflineFiles() {
     updateRoutingState(id, EMPTY_ROUTING(id));
   }, [updateRoutingState]);
 
+  const startContourDownload = useCallback(async (id: string) => {
+    const region = CONTOUR_REGIONS[id as ContourRegionId];
+    if (!region) return;
+
+    await FileSystem.makeDirectoryAsync(CONTOUR_DIR, { intermediates: true }).catch(() => {});
+    speedBuf.current[`contour:${id}`] = [];
+    prevSpeed.current[`contour:${id}`] = 0;
+
+    let resumeData: string | undefined;
+    try {
+      const saved = await storage.get(CONTOUR_RESUME_KEY(id));
+      if (saved) {
+        const parsed: FileSystem.DownloadPauseState = JSON.parse(saved);
+        resumeData = parsed.resumeData;
+      }
+    } catch {}
+
+    updateContourState(id, { status: 'downloading', progress: 0, error: undefined });
+    const dl = FileSystem.createDownloadResumable(
+      region.url,
+      region.localPath,
+      {},
+      ({ totalBytesWritten, totalBytesExpectedToWrite }) => {
+        const key = `contour:${id}`;
+        const total = totalBytesExpectedToWrite || contourManifestSizes[id] || region.estimatedGb * 1_073_741_824;
+        const pct = (totalBytesWritten / total) * 100;
+        const speed = calcSpeed(key, totalBytesWritten);
+        const remain = total - totalBytesWritten;
+        updateContourState(id, {
+          status: 'downloading',
+          progress: Math.min(pct, 99.9),
+          downloadedBytes: totalBytesWritten,
+          totalBytes: total,
+          speedBps: speed,
+          etaSec: speed > 0 ? remain / speed : 0,
+          fileSizeMb: totalBytesWritten / 1_048_576,
+        });
+      },
+      resumeData,
+    );
+    contourDlRefs.current[id] = dl;
+
+    try {
+      const result = await dl.downloadAsync();
+      if (result?.uri && result.status === 200) {
+        const info = await FileSystem.getInfoAsync(region.localPath).catch(() => null);
+        const sizeMb = Math.round(((info as any)?.size ?? 0) / 1_048_576 * 10) / 10;
+        await storage.del(CONTOUR_RESUME_KEY(id)).catch(() => {});
+        updateContourState(id, { status: 'complete', progress: 100, fileSizeMb: sizeMb, speedBps: 0, etaSec: 0 });
+      } else if (result && result.status !== 200) {
+        await FileSystem.deleteAsync(region.localPath, { idempotent: true }).catch(() => {});
+        await storage.del(CONTOUR_RESUME_KEY(id)).catch(() => {});
+        updateContourState(id, { status: 'error', error: `Contour pack not available yet (${result.status})` });
+      }
+    } catch (e: any) {
+      const msg = e?.message ?? '';
+      if (!msg.toLowerCase().includes('cancel') && !msg.toLowerCase().includes('pause')) {
+        updateContourState(id, { status: 'error', error: msg || 'Contour download failed' });
+      }
+    }
+  }, [calcSpeed, contourManifestSizes, updateContourState]);
+
+  const pauseContourDownload = useCallback(async (id: string) => {
+    const dl = contourDlRefs.current[id];
+    if (!dl) return;
+    try {
+      const state = await dl.pauseAsync();
+      if (state) await storage.set(CONTOUR_RESUME_KEY(id), JSON.stringify(state)).catch(() => {});
+    } catch {}
+    updateContourState(id, { status: 'paused', speedBps: 0, etaSec: 0 });
+  }, [updateContourState]);
+
+  const resumeContourDownload = useCallback(async (id: string) => {
+    const dl = contourDlRefs.current[id];
+    if (dl) {
+      updateContourState(id, { status: 'downloading' });
+      try {
+        const result = await dl.resumeAsync();
+        if (result?.uri && result.status === 200) {
+          await storage.del(CONTOUR_RESUME_KEY(id)).catch(() => {});
+          updateContourState(id, { status: 'complete', progress: 100, speedBps: 0, etaSec: 0 });
+        } else if (result && result.status !== 200) {
+          await FileSystem.deleteAsync(CONTOUR_REGIONS[id as ContourRegionId].localPath, { idempotent: true }).catch(() => {});
+          await storage.del(CONTOUR_RESUME_KEY(id)).catch(() => {});
+          updateContourState(id, { status: 'error', error: `Contour pack not available yet (${result.status})` });
+        }
+      } catch {
+        await startContourDownload(id);
+      }
+    } else {
+      await startContourDownload(id);
+    }
+  }, [startContourDownload, updateContourState]);
+
+  const deleteContourDownload = useCallback(async (id: string) => {
+    const region = CONTOUR_REGIONS[id as ContourRegionId];
+    if (!region) return;
+    contourDlRefs.current[id] = null;
+    speedBuf.current[`contour:${id}`] = [];
+    prevSpeed.current[`contour:${id}`] = 0;
+    await FileSystem.deleteAsync(region.localPath, { idempotent: true }).catch(() => {});
+    await storage.del(CONTOUR_RESUME_KEY(id)).catch(() => {});
+    updateContourState(id, EMPTY_CONTOUR(id));
+  }, [updateContourState]);
+
   const getState = useCallback((id: string): FileDownloadState =>
     states[id] ?? EMPTY('conus'), [states]);
 
@@ -604,6 +804,10 @@ export function useOfflineFiles() {
     routingStates[id] ?? EMPTY_ROUTING(id), [routingStates]);
   const isRoutingAvailable = useCallback((id: string): boolean =>
     routingStates[id]?.status === 'complete', [routingStates]);
+  const getContourState = useCallback((id: string): FileDownloadState =>
+    contourStates[id] ?? EMPTY_CONTOUR(id), [contourStates]);
+  const isContourAvailable = useCallback((id: string): boolean =>
+    contourStates[id]?.status === 'complete', [contourStates]);
 
   // Returns the real file size in bytes (from manifest) or estimated fallback
   const getTotalBytes = useCallback((id: string): number => {
@@ -617,6 +821,11 @@ export function useOfflineFiles() {
     const region = ROUTING_REGIONS[id as RoutingRegionId];
     return region ? region.estimatedGb * 1_073_741_824 : 0;
   }, [routingManifestSizes]);
+  const getContourTotalBytes = useCallback((id: string): number => {
+    if (contourManifestSizes[id]) return contourManifestSizes[id];
+    const region = CONTOUR_REGIONS[id as ContourRegionId];
+    return region ? region.estimatedGb * 1_073_741_824 : 0;
+  }, [contourManifestSizes]);
 
   const isFilePublished = useCallback((id: string): boolean => {
     const region = FILE_REGIONS[id as FileRegionId] as any;
@@ -629,12 +838,17 @@ export function useOfflineFiles() {
     if (!region || id === 'conus') return false;
     return !region.comingSoon || Boolean(routingManifestSizes[id]);
   }, [routingManifestSizes]);
+  const isContourPublished = useCallback((id: string): boolean => {
+    if (!CONTOUR_REGIONS[id as ContourRegionId]) return false;
+    return Boolean(contourManifestSizes[id]);
+  }, [contourManifestSizes]);
 
   return {
     startDownload, pauseDownload, resumeDownload, deleteDownload,
     startRoutingDownload, pauseRoutingDownload, resumeRoutingDownload, deleteRoutingDownload,
-    getState, getRoutingState, isFileAvailable, isRoutingAvailable,
-    isFilePublished, isRoutingPublished,
-    getTotalBytes, getRoutingTotalBytes, states, routingStates,
+    startContourDownload, pauseContourDownload, resumeContourDownload, deleteContourDownload,
+    getState, getRoutingState, getContourState, isFileAvailable, isRoutingAvailable, isContourAvailable,
+    isFilePublished, isRoutingPublished, isContourPublished,
+    getTotalBytes, getRoutingTotalBytes, getContourTotalBytes, states, routingStates, contourStates,
   };
 }

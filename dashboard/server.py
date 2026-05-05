@@ -4,6 +4,7 @@ import asyncio, os, json, uuid, secrets, xml.etree.ElementTree as ET, time, hash
 from email.message import EmailMessage
 from email.utils import formataddr
 from pathlib import Path
+from urllib.parse import quote
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.responses import HTMLResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -64,6 +65,7 @@ AI_COSTS = {
 OFFLINE_DOWNLOAD_COSTS = {
     "state_map": 0,
     "state_route": 10,
+    "state_contours": 5,
     "trip_corridor": 8,
     "conus_map": 100,
 }
@@ -802,6 +804,7 @@ async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, c
     """Background task: generate the trip, geocode, enrich, save, notify."""
     import anthropic as _anthropic
     import re as _re
+    started_at = time.time()
     update_plan_job(job_id, "running")
     try:
         update_plan_job(job_id, "ai")
@@ -835,12 +838,22 @@ async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, c
              "platform": "mobile"},
         )
 
+        is_long_trip = int(plan_data.get("duration_days") or 0) >= 10 or len(plan_data.get("waypoints", [])) >= 28
+
         update_plan_job(job_id, "geocoding")
-        geocoded = await _geocode_waypoints(plan_data.get("waypoints", []))
+        try:
+            geocode_timeout = 25 if is_long_trip else 45
+            geocoded = await asyncio.wait_for(_geocode_waypoints(plan_data.get("waypoints", [])), timeout=geocode_timeout)
+        except Exception:
+            geocoded = plan_data.get("waypoints", [])
         plan_data["waypoints"] = geocoded
 
         update_plan_job(job_id, "enriching")
-        enrichment = await enrich_trip_along_route(geocoded)
+        try:
+            enrich_timeout = 10 if is_long_trip or (time.time() - started_at) > 70 else 28
+            enrichment = await asyncio.wait_for(enrich_trip_along_route(geocoded), timeout=enrich_timeout)
+        except Exception:
+            enrichment = {"waypoints": geocoded, "campsites": [], "gas_stations": [], "route_pois": []}
         plan_data["waypoints"] = enrichment.get("waypoints", geocoded)
         result = {"trip_id": trip_id, "plan": plan_data,
                   "campsites": enrichment["campsites"][:70],
@@ -1199,6 +1212,55 @@ def get_config():
         # rotate if abused. Free tier is 200k-1M tiles/month.
         "protomaps_key": settings.protomaps_key,
     }
+
+
+@app.get("/api/geocode")
+async def geocode_places(q: str, limit: int = 8):
+    query = (q or "").strip()
+    if not query:
+        return []
+    limit = max(1, min(int(limit or 8), 10))
+    token = settings.mapbox_token
+    async with httpx.AsyncClient(timeout=8.0, headers={"User-Agent": "TrailheadRouteBuilder/1.0"}) as client:
+        if token:
+            try:
+                resp = await client.get(
+                    f"https://api.mapbox.com/geocoding/v5/mapbox.places/{quote(query, safe='')}.json",
+                    params={"access_token": token, "limit": limit, "country": "us"},
+                )
+                resp.raise_for_status()
+                places = []
+                for feat in resp.json().get("features", [])[:limit]:
+                    coords = feat.get("geometry", {}).get("coordinates") or []
+                    if len(coords) >= 2:
+                        places.append({
+                            "name": feat.get("place_name") or feat.get("text") or query,
+                            "lat": float(coords[1]),
+                            "lng": float(coords[0]),
+                        })
+                if places:
+                    return places
+            except Exception:
+                pass
+        try:
+            resp = await client.get(
+                "https://nominatim.openstreetmap.org/search",
+                params={"format": "json", "limit": limit, "countrycodes": "us", "q": query},
+            )
+            resp.raise_for_status()
+            places = []
+            for p in resp.json()[:limit]:
+                if not p.get("lat") or not p.get("lon"):
+                    continue
+                display = p.get("display_name") or query
+                places.append({
+                    "name": ", ".join(display.split(",")[:3]),
+                    "lat": float(p["lat"]),
+                    "lng": float(p["lon"]),
+                })
+            return places
+        except Exception as e:
+            raise HTTPException(502, f"Geocode failed: {e}")
 
 
 # ── Self-hosted vector tiles (Protomaps proxy) ────────────────────────────────
@@ -2245,17 +2307,23 @@ async def activate_subscription(body: IAPActivateRequest, user: dict = Depends(_
     product = IAP_PRODUCTS.get(body.product_id)
     if not product:
         raise HTTPException(400, f"Unknown product: {body.product_id}")
+    if not body.transaction_id.strip():
+        raise HTTPException(400, "Missing transaction_id")
 
     # Idempotency: store transaction_id to prevent double-activation
     from db.store import _conn as _db_conn
     db = _db_conn()
     existing = db.execute(
-        "SELECT id FROM stripe_purchases WHERE session_id=?", (body.transaction_id,)
+        "SELECT 1 FROM stripe_purchases WHERE session_id=?", (body.transaction_id,)
     ).fetchone()
     if existing:
         db.close()
         user_row = get_user_by_id(user["id"])
-        return {"status": "already_active", "plan_type": user_row.get("plan_type"), "plan_expires_at": user_row.get("plan_expires_at")}
+        if has_active_plan(user_row):
+            return {"status": "already_active", "plan_type": user_row.get("plan_type"), "plan_expires_at": user_row.get("plan_expires_at")}
+        expires_at = activate_plan(user["id"], body.product_id, product["days"])
+        log_event(user["id"], None, "iap_reactivate", {"product_id": body.product_id, "days": product["days"]})
+        return {"status": "reactivated", "plan_type": body.product_id, "plan_expires_at": expires_at}
 
     db.execute(
         "INSERT INTO stripe_purchases (session_id, user_id, credits, created_at) VALUES (?,?,0,?)",
@@ -2303,6 +2371,8 @@ async def offline_authorize(body: OfflineAuthorizeRequest, user: dict = Depends(
     if not result.get("authorized"):
         if asset_type == "state_route":
             message = f"{label} offline routing costs {cost} credits or Explorer. Region map downloads are free."
+        elif asset_type == "state_contours":
+            message = f"{label} offline contours cost {cost} credits or Explorer. Region map downloads are free."
         elif asset_type == "trip_corridor":
             message = f"{label} trip corridor download costs {cost} credits or Explorer. Region map downloads are free."
         else:

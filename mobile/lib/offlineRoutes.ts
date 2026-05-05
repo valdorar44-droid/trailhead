@@ -64,3 +64,14 @@ export async function loadRouteGeometry(tripId: string | null | undefined): Prom
     return null;
   }
 }
+
+export async function deleteRouteGeometry(tripId: string | null | undefined) {
+  if (!tripId) return;
+  try {
+    await FileSystem.deleteAsync(routePath(tripId), { idempotent: true });
+    const index = await getSavedRouteIndex();
+    await FileSystem.writeAsStringAsync(INDEX_PATH, JSON.stringify(index.filter(id => id !== tripId)));
+  } catch {
+    // Route geometry is a convenience cache; never block trip edits on cleanup.
+  }
+}

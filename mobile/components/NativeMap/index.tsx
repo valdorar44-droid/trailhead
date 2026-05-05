@@ -53,6 +53,7 @@ export interface NativeMapHandle {
   rerouteFrom:    (lat: number, lng: number, fromIdx: number) => void;
   routeToSearch:  (lat: number, lng: number, name: string, userLat: number, userLng: number) => void;
   resetRoute:     () => void;
+  stopNavigation: () => void;
   restoreRoute:   (coords: [number,number][], steps: RouteStep[], legs: RouteStep[][], td: number, tt: number) => void;
   setNavTarget:   (idx: number) => void;
 }
@@ -68,7 +69,7 @@ export interface NativeMapProps {
   searchMarker:  { lat: number; lng: number; name: string } | null;
 
   // Nav state
-  userLoc:     { lat: number; lng: number } | null;
+  userLoc:     { lat: number; lng: number; accuracy?: number | null } | null;
   navMode:     boolean;
   navIdx:      number;
   navHeading:  number | null;
@@ -105,7 +106,9 @@ export interface NativeMapProps {
   onOffRoute?:      (lat: number, lng: number, distanceM: number) => void;
   onOffRouteWarn?:  (lat: number, lng: number, distanceM: number) => void;
   onBackOnRoute?:   () => void;
+  onRouteProgress?: (progress: { distanceM: number; remainingM: number; routeDistanceM: number; deviationM: number; segmentIdx: number }) => void;
   onError?:         (msg: string) => void;
+  children?:         React.ReactNode;
 }
 
 // ── Waypoint type → styles ────────────────────────────────────────────────────
@@ -214,6 +217,68 @@ function campFeat(c: CampsitePin): GeoJSON.Feature {
     properties: { id: c.id || '', name: c.name || '', land_type: c.land_type || 'Campground', cost: c.cost || '', full: (c as any).full || 0, raw: JSON.stringify(c) } };
 }
 
+function coordDistanceM(a: [number, number], b: [number, number]): number {
+  const lat = ((a[1] + b[1]) / 2) * Math.PI / 180;
+  const dx = (b[0] - a[0]) * 111_320 * Math.cos(lat);
+  const dy = (b[1] - a[1]) * 110_540;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function routeCumulativeDistances(coords: [number, number][]): number[] {
+  const out = new Array(coords.length).fill(0);
+  for (let i = 1; i < coords.length; i++) out[i] = out[i - 1] + coordDistanceM(coords[i - 1], coords[i]);
+  return out;
+}
+
+function projectPointToRoute(
+  point: [number, number],
+  coords: [number, number][],
+  cumulative: number[],
+  fromSegment: number,
+  toSegment: number,
+) {
+  if (coords.length < 2) return null;
+  const latScale = 110_540;
+  const lngScale = 111_320 * Math.cos(point[1] * Math.PI / 180);
+  const px = point[0] * lngScale;
+  const py = point[1] * latScale;
+  let best: {
+    segmentIdx: number;
+    t: number;
+    distanceM: number;
+    projected: [number, number];
+    progressM: number;
+  } | null = null;
+
+  const start = Math.max(0, Math.min(fromSegment, coords.length - 2));
+  const end = Math.max(start, Math.min(toSegment, coords.length - 2));
+  for (let i = start; i <= end; i++) {
+    const a = coords[i];
+    const b = coords[i + 1];
+    const ax = a[0] * lngScale;
+    const ay = a[1] * latScale;
+    const bx = b[0] * lngScale;
+    const by = b[1] * latScale;
+    const vx = bx - ax;
+    const vy = by - ay;
+    const len2 = vx * vx + vy * vy;
+    if (len2 <= 0.01) continue;
+    const t = Math.max(0, Math.min(1, ((px - ax) * vx + (py - ay) * vy) / len2));
+    const qx = ax + vx * t;
+    const qy = ay + vy * t;
+    const dx = px - qx;
+    const dy = py - qy;
+    const distanceM = Math.sqrt(dx * dx + dy * dy);
+    if (!best || distanceM < best.distanceM) {
+      const projected: [number, number] = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+      const segLen = cumulative[i + 1] - cumulative[i];
+      best = { segmentIdx: i, t, distanceM, projected, progressM: cumulative[i] + segLen * t };
+    }
+    if (distanceM < 8) break;
+  }
+  return best;
+}
+
 function pressPayload(event: any): any {
   return event?.nativeEvent?.payload ?? event?.payload ?? event;
 }
@@ -287,12 +352,12 @@ async function probeTileCdn(timeoutMs = 1500): Promise<boolean> {
 const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const {
     waypoints, camps, gas, pois, reports, communityPins, searchMarker,
-    userLoc, navMode, navIdx, navHeading,
+    userLoc, navMode, navIdx, navHeading, navSpeed,
     mapLayer, routeOpts,
     showLandOverlay, showUsgsOverlay, showFire, showAva, showRadar, showMvum,
     onMapReady, onBoundsChange, onMapTap, onMapLongPress,
     onCampTap, onGasTap, onPoiTap, onCommunityPinTap, onTileCampTap, onBaseCampTap, onTrailTap, onWaypointTap,
-    onRouteReady, onRoutePersist, onOffRoute, onOffRouteWarn, onBackOnRoute,
+    onRouteReady, onRoutePersist, onOffRoute, onOffRouteWarn, onBackOnRoute, onRouteProgress,
   } = props;
 
   const mapRef = useRef<MapLibreGL.MapViewRef>(null);
@@ -584,7 +649,13 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   );
 
   // Route tracking ref
-  const routeRef = useRef({ coords: [] as [number,number][], passedIdx: 0 });
+  const makeRouteState = useCallback((coords: [number, number][]) => ({
+    coords,
+    cumulative: routeCumulativeDistances(coords),
+    passedIdx: 0,
+    passedProgressM: 0,
+  }), []);
+  const routeRef = useRef(makeRouteState([]));
 
   // MLRN v10 uses `mapStyle` — accepts string (style URL) or object (inline JSON).
   const mapStyleObj = useMemo(
@@ -610,6 +681,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     rerouteFrom(lat, lng, fromIdx) {
       setPassedCoords([]);
       routeRef.current.passedIdx = 0;
+      routeRef.current.passedProgressM = 0;
       const rem = waypoints.slice(fromIdx);
       const pairs = rem.length
         ? [`${lng},${lat}`, ...rem.map(w => `${w.lng},${w.lat}`)]
@@ -624,16 +696,25 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       routeRequestRef.current++;
       isRoutingRef.current = false;
       setRouteCoords([]); setPassedCoords([]); setBreadcrumb([]);
-      routeRef.current = { coords: [], passedIdx: 0 };
+      routeRef.current = makeRouteState([]);
       setSearchDest(null); setNavTargetIdx(-1);
+    },
+    stopNavigation() {
+      setPassedCoords([]);
+      setBreadcrumb([]);
+      setNavTargetIdx(-1);
+      routeRef.current.passedIdx = 0;
+      routeRef.current.passedProgressM = 0;
+      offRouteStreakRef.current = 0;
+      wasOffRouteRef.current = false;
     },
     restoreRoute(coords, steps, legs, td, tt) {
       setRouteCoords(coords);
-      routeRef.current = { coords, passedIdx: 0 };
+      routeRef.current = makeRouteState(coords);
       onRouteReady({ coords, steps, legs, totalDistance: td, totalDuration: tt, isProper: true, fromCache: true, fromIdx: 0 });
     },
     setNavTarget(idx) { setNavTargetIdx(idx); },
-  }), [waypoints, searchDest, mapboxToken]);
+  }), [waypoints, searchDest, mapboxToken, makeRouteState]);
 
   // ── Routing ─────────────────────────────────────────────────────────────────
   const doFetchRoute = useCallback(async (pairs: string[], fromIdx: number) => {
@@ -652,7 +733,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       const result = await fetchRoute(pairs, fromIdx, mapboxToken || '', routeOpts);
       if (requestId !== routeRequestRef.current) return;
       setRouteCoords(result.coords);
-      routeRef.current = { coords: result.coords, passedIdx: 0 };
+      routeRef.current = makeRouteState(result.coords);
       onRouteReady({ ...result, fromIdx });
       // Persist for offline relaunch
       onRoutePersist({
@@ -671,12 +752,12 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       if (requestId !== routeRequestRef.current) return;
       const fb = buildFallbackRoute(pairs);
       setRouteCoords(fb.coords);
-      routeRef.current = { coords: fb.coords, passedIdx: 0 };
+      routeRef.current = makeRouteState(fb.coords);
       onRouteReady({ ...fb, fromIdx });
     } finally {
       if (requestId === routeRequestRef.current) isRoutingRef.current = false;
     }
-  }, [mapboxToken, routeOpts, waypoints, activeTrip, onRouteReady, onRoutePersist, ensureRouteTileFile]);
+  }, [mapboxToken, routeOpts, waypoints, activeTrip, onRouteReady, onRoutePersist, ensureRouteTileFile, makeRouteState]);
 
   // When a new trip is planned: auto-route + fit camera to show all waypoints
   useEffect(() => {
@@ -686,7 +767,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     setRouteCoords([]);
     setPassedCoords([]);
     setBreadcrumb([]);
-    routeRef.current = { coords: [], passedIdx: 0 };
+    routeRef.current = makeRouteState([]);
     doFetchRoute(waypoints.map(w => `${w.lng},${w.lat}`), 0);
     // Fit camera to the trip bounding box (skip if actively navigating)
     if (!navMode) {
@@ -705,49 +786,66 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   useEffect(() => {
     if (!navMode || !userLoc) return;
     const { lat, lng } = userLoc;
-    const hasHeading = navHeading !== null && navHeading >= 0;
+    const speed = navSpeed ?? 0;
+    const hasHeading = speed > 2.2 && navHeading !== null && navHeading >= 0;
     camRef.current?.setCamera({
       centerCoordinate: [lng, lat],
-      zoomLevel: 17,
+      zoomLevel: speed > 20 ? 15.5 : speed > 9 ? 16.2 : 17,
       ...(hasHeading ? { heading: navHeading, pitch: 45 } : {}),
-      animationDuration: 800,
+      animationDuration: speed > 2.2 ? 800 : 350,
       animationMode: 'easeTo',
     });
-  }, [userLoc, navMode, navHeading]);
+  }, [userLoc, navMode, navHeading, navSpeed]);
 
   // ── Nav: track user on route + update passed overlay ────────────────────────
   useEffect(() => {
     if (!navMode || !userLoc || routeRef.current.coords.length === 0) return;
     const { lat, lng } = userLoc;
-    const coords = routeRef.current.coords;
-    let best = routeRef.current.passedIdx, bestD = Infinity;
-    const end = Math.min(coords.length - 1, best + 80);
-    for (let i = best; i <= end; i++) {
-      const dlat = (coords[i][1] - lat) * 111000;
-      const dlng = (coords[i][0] - lng) * 111000 * Math.cos(lat * Math.PI / 180);
-      const d = Math.sqrt(dlat * dlat + dlng * dlng);
-      if (d < bestD) { bestD = d; best = i; }
-      if (d < 15) break;
+    const state = routeRef.current;
+    const coords = state.coords;
+    if (coords.length < 2) return;
+
+    const searchStart = Math.max(0, state.passedIdx - 8);
+    const searchEnd = Math.min(coords.length - 2, state.passedIdx + 180);
+    const snap = projectPointToRoute([lng, lat], coords, state.cumulative, searchStart, searchEnd);
+    if (!snap) return;
+
+    const speed = navSpeed ?? 0;
+    const accuracy = Math.max(0, Math.min(userLoc.accuracy ?? 25, 120));
+    const routeDistanceM = state.cumulative[state.cumulative.length - 1] ?? 0;
+    const remainingM = Math.max(0, routeDistanceM - snap.progressM);
+    onRouteProgress?.({
+      distanceM: snap.progressM,
+      remainingM,
+      routeDistanceM,
+      deviationM: snap.distanceM,
+      segmentIdx: snap.segmentIdx,
+    });
+
+    if (snap.progressM + 5 >= state.passedProgressM) {
+      state.passedIdx = Math.max(state.passedIdx, snap.segmentIdx);
+      state.passedProgressM = Math.max(state.passedProgressM, snap.progressM);
+      setPassedCoords([...coords.slice(0, snap.segmentIdx + 1), snap.projected]);
     }
-    if (best > routeRef.current.passedIdx) {
-      routeRef.current.passedIdx = best;
-      setPassedCoords(coords.slice(0, best + 1));
-    }
-    if (bestD > 120) {
+
+    const warnThreshold = Math.max(65, accuracy * 1.5 + 25);
+    const rerouteThreshold = Math.max(120, accuracy * 2 + 55);
+    const allowReroute = speed > 1.2 || snap.distanceM > rerouteThreshold + 70;
+    if (snap.distanceM > rerouteThreshold && allowReroute) {
       offRouteStreakRef.current += 1;
       wasOffRouteRef.current = true;
       if (offRouteStreakRef.current >= 2) {
-        onOffRoute?.(lat, lng, Math.round(bestD));
+        onOffRoute?.(lat, lng, Math.round(snap.distanceM));
       } else {
-        onOffRouteWarn?.(lat, lng, Math.round(bestD));
+        onOffRouteWarn?.(lat, lng, Math.round(snap.distanceM));
       }
-    } else if (bestD > 60) {
+    } else if (snap.distanceM > warnThreshold) {
       offRouteStreakRef.current = 0;
       wasOffRouteRef.current = true;
       const now = Date.now();
       if (now - offRouteWarnAtRef.current > 8000) {
         offRouteWarnAtRef.current = now;
-        onOffRouteWarn?.(lat, lng, Math.round(bestD));
+        onOffRouteWarn?.(lat, lng, Math.round(snap.distanceM));
       }
     } else if (wasOffRouteRef.current) {
       offRouteStreakRef.current = 0;
@@ -755,7 +853,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       onBackOnRoute?.();
     }
     setBreadcrumb(prev => [...prev, [lng, lat]]);
-  }, [userLoc, navMode, onOffRoute, onOffRouteWarn, onBackOnRoute]);
+  }, [userLoc, navMode, navSpeed, onOffRoute, onOffRouteWarn, onBackOnRoute, onRouteProgress]);
 
   // ── GeoJSON sources ─────────────────────────────────────────────────────────
   const campFC = useMemo(() => pointFC(camps.map(campFeat)), [camps]);
@@ -887,6 +985,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   }, [onCampTap]);
 
   const mapStatusLabel = localTiles ? compactMapStatus(tileDebug) : 'Online maps';
+  const overlayChildren = props.children;
 
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
@@ -1343,6 +1442,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           </Text>
         </View>
       </View>
+      {overlayChildren}
     </View>
   );
 });

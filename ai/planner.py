@@ -22,6 +22,15 @@ AUTOMATIC FEATURES — NEVER ASK ABOUT THESE:
 - These are populated by the app after route generation — they require no action from the user.
 - Offline state downloads have two parts: map files for viewing roads/trails and routing packs for long offline turn-by-turn. If asked, tell the user to download both from Offline Maps before leaving signal.
 
+HOW TRAILHEAD ROUTE BUILDER WORKS:
+- Chat is the scout conversation. Gather only the important trip intent: start/end or region, duration, vehicle/rig limits, overnight style, pace, and must-see priorities.
+- Once enough intent is known, signal _ready so the app can build a base route. Do not try to perfect every camp, fuel stop, and POI in chat.
+- After the base route is built, Route Builder is the hands-on editing surface. It shows one active "Day N Itinerary" where users can add or swap camps, fuel, and places for that day.
+- Camp, fuel, and place search results appear directly under the selected day in Route Builder. Never tell users to scroll to a hidden result area.
+- Manual Route Builder may create temporary "Day N target area" pins. Those are planning anchors only, not GPS destinations. When a user chooses a camp, that camp replaces the target and becomes the overnight endpoint; the next day starts from that camp.
+- For long or complicated routes, prefer a strong base route with realistic pacing and geocodeable intent anchors. Route Builder and map enrichment will help verify and refine exact camps, fuel, and POIs.
+- If the user asks how to polish a generated trip, explain briefly that they select a day, choose a camp/fuel/place card, and the card stays in that day's trip flow as a visible stop.
+
 IN-APP ONLY — NEVER RECOMMEND EXTERNAL APPS:
 - Trailhead has offline maps, packing lists, route downloads, and community reports built in.
 - NEVER mention or suggest: Gaia GPS, AllTrails, OSM, CalTopo, Maps.me, OnX, iOverlander, Google Maps, or any third-party navigation or planning app.
@@ -86,6 +95,12 @@ Analyze the edit request carefully and update the trip. Changes can include:
 - Swapping campsites or adjusting days
 - Changing activity focus for a day
 
+Route Builder context:
+- The JSON trip is the base route that feeds the map and Route Builder.
+- Do not treat "Day N target area" or purple planning pins as real destinations. Those are temporary manual-builder anchors only.
+- If the edit changes an overnight camp, make that camp the day's final overnight waypoint and let the next day naturally depart from it.
+- Exact camp/fuel/POI cards can be refined in Route Builder after the rebuild; your edit should keep the route sequence, day numbers, and waypoint types clean.
+
 Return ONLY valid JSON (no markdown, no extra text):
 {
   "message": "1-2 sentence response as a guide — what you changed and why it's a good call",
@@ -104,6 +119,16 @@ You specialize in:
 - Road trips that mix camping, motels, and adventure based on user preference
 
 When a user describes their trip, respond ONLY with a valid JSON object. No markdown. No extra text. Just the JSON.
+
+TRAILHEAD ROUTE BUILDER CONTRACT:
+- Your JSON is a high-quality base route, not final turn-by-turn navigation.
+- Waypoints set trip intent and day flow. Route Builder and map enrichment add verified camp cards, fuel cards, POIs, photos, and nearby options along the route.
+- Every non-rest driving day should end with one camp or motel waypoint so Route Builder can show it as the overnight stop and start the next day from there.
+- Use geocodeable named anchors for day endpoints. Do not invent exact campsite coordinates or fake verified campground names.
+- For dispersed or low-cost camp requests, encode the intent in the waypoint name, description, land_type, and notes, then anchor it to a real town, public-land area, canyon, road, or landmark.
+- For long routes, prefer fewer reliable named anchors over many fragile stops. A solid 2-3 meaningful waypoints per day is better than an overloaded plan that is hard to geocode.
+- Purple "Day N target area" pins are created only by manual Route Builder. Never output AI waypoints named "target area"; use real route anchors and overnight stops.
+- If the user has detailed constraints like "under $30", "wild/curvy roads", "avoid crowds", or max hours per day, reflect those in the base route and notes so Route Builder can help verify exact camps and alternates.
 
 Use this exact schema:
 {
@@ -646,7 +671,7 @@ def plan_trip_from_conversation(messages: list[dict]) -> dict:
     except Exception:
         draft = _parse_plan_json(_call_plan_model(SONNET_MODEL, synthesis, max_tokens=16000))
 
-    return _finalize_plan_with_sonnet(draft, synthesis)
+    return _normalize_plan(_finalize_plan_with_sonnet(draft, synthesis))
 
 
 def _parse_plan_json(raw: str) -> dict:
@@ -709,6 +734,13 @@ def _call_plan_model(model: str, prompt: str, max_tokens: int, max_attempts: int
 
 def _finalize_plan_with_sonnet(draft: dict, source_request: str) -> dict:
     """Use Sonnet as final route judge, but never let it block a valid draft."""
+    try:
+        draft_days = int(draft.get("duration_days") or 0)
+    except Exception:
+        draft_days = 0
+    if draft_days >= 10 or len(draft.get("waypoints") or []) >= 28:
+        return draft
+
     draft_json = json.dumps(draft, separators=(",", ":"))
     prompt = f"""Review this Trailhead trip draft against the original request.
 
@@ -733,6 +765,83 @@ Return ONLY the corrected complete JSON object. No markdown."""
         return draft
 
 
+def _normalize_plan(plan: dict) -> dict:
+    """Make planner output safe enough for downstream geocoding/enrichment."""
+    if not isinstance(plan, dict):
+        raise ValueError("Planner returned a non-object response")
+
+    waypoints = plan.get("waypoints")
+    daily = plan.get("daily_itinerary")
+    logistics = plan.get("logistics")
+    if not isinstance(waypoints, list) or len(waypoints) < 2:
+        raise ValueError("Planner returned too few waypoints")
+    if not isinstance(daily, list) or not daily:
+        raise ValueError("Planner returned no daily itinerary")
+    if not isinstance(logistics, dict):
+        plan["logistics"] = {}
+
+    try:
+        duration = int(plan.get("duration_days") or len(daily) or 1)
+    except Exception:
+        duration = len(daily) or 1
+    duration = max(1, min(14, duration))
+    plan["duration_days"] = duration
+
+    normalized_wps = []
+    for idx, wp in enumerate(waypoints[:56]):
+        if not isinstance(wp, dict):
+            continue
+        name = str(wp.get("name") or "").strip()
+        if not name:
+            continue
+        try:
+            day = int(wp.get("day") or 1)
+        except Exception:
+            day = 1
+        wp_type = str(wp.get("type") or ("start" if idx == 0 else "waypoint")).strip().lower()
+        if wp_type not in {"start", "camp", "motel", "waypoint", "town", "shower", "fuel"}:
+            wp_type = "waypoint"
+        normalized_wps.append({
+            **wp,
+            "day": max(1, min(duration, day)),
+            "name": name,
+            "type": wp_type,
+            "description": str(wp.get("description") or ""),
+            "land_type": str(wp.get("land_type") or ("town" if wp_type in {"fuel", "town", "motel", "shower"} else "route")),
+        })
+    if len(normalized_wps) < 2:
+        raise ValueError("Planner returned too few usable waypoints")
+    normalized_wps[0]["type"] = "start"
+    plan["waypoints"] = normalized_wps
+
+    normalized_days = []
+    for idx, day in enumerate(daily[:duration], start=1):
+        if not isinstance(day, dict):
+            continue
+        normalized_days.append({
+            **day,
+            "day": int(day.get("day") or idx),
+            "title": str(day.get("title") or f"Day {idx}"),
+            "description": str(day.get("description") or "Drive, explore, and settle into camp."),
+            "est_miles": int(day.get("est_miles") or 0),
+            "road_type": str(day.get("road_type") or "mixed"),
+            "highlights": day.get("highlights") if isinstance(day.get("highlights"), list) else [],
+        })
+    if not normalized_days:
+        raise ValueError("Planner returned no usable daily itinerary")
+    plan["daily_itinerary"] = normalized_days
+
+    if not plan.get("trip_name"):
+        plan["trip_name"] = "Trailhead Route"
+    if not isinstance(plan.get("states"), list):
+        plan["states"] = []
+    if not plan.get("overview"):
+        plan["overview"] = "A Trailhead overland route with mapped stops, camps, fuel, and practical route notes."
+    if not plan.get("total_est_miles"):
+        plan["total_est_miles"] = sum(int(d.get("est_miles") or 0) for d in normalized_days)
+    return plan
+
+
 def plan_trip(user_request: str) -> dict:
     explicit_request = (
         user_request
@@ -745,4 +854,4 @@ def plan_trip(user_request: str) -> dict:
     except Exception:
         draft = _parse_plan_json(_call_plan_model(SONNET_MODEL, explicit_request, max_tokens=16000))
 
-    return _finalize_plan_with_sonnet(draft, explicit_request)
+    return _normalize_plan(_finalize_plan_with_sonnet(draft, explicit_request))

@@ -6,10 +6,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import * as Location from 'expo-location';
 import NativeMap, { NativeMapHandle } from '@/components/NativeMap';
 import PaywallModal from '@/components/PaywallModal';
 import TourTarget from '@/components/TourTarget';
-import { api, CampFullness, Campsite, CampsiteDetail, CampsiteInsight, CampsitePin, GasStation, OsmPoi, PaywallError, TripResult, Waypoint, WeatherForecast } from '@/lib/api';
+import { api, CampFullness, Campsite, CampsiteDetail, CampsiteInsight, CampsitePin, GasStation, GeocodePlace, OsmPoi, PaywallError, TripResult, Waypoint, WeatherForecast } from '@/lib/api';
 import { loadAllPlacePoints } from '@/lib/offlinePlacePacks';
 import { saveOfflineTrip } from '@/lib/offlineTrips';
 import { useStore } from '@/lib/store';
@@ -32,6 +33,32 @@ type BuilderStop = {
 };
 type SearchPlace = { name: string; lat: number; lng: number };
 type DiscoveryTab = 'camps' | 'gas' | 'poi';
+type LegSearchContext = {
+  from: { lat: number; lng: number; name: string };
+  to: { lat: number; lng: number; name: string };
+  miles: number;
+  center: { lat: number; lng: number };
+  targetDay?: number;
+  purpose?: 'leg' | 'overnight';
+};
+type RouteDayPlan = {
+  day: number;
+  previous: BuilderStop | null;
+  target: BuilderStop | null;
+  frameworkTarget: BuilderStop | null;
+  stops: BuilderStop[];
+  miles: number;
+  hours: number;
+  rest: boolean;
+  complete: boolean;
+};
+type InlineSearchState = {
+  day: number;
+  tab: DiscoveryTab;
+  label: string;
+} | null;
+type TripBuildMode = 'recommended' | 'blank';
+type DistanceMode = 'hours' | 'miles';
 
 const PLACE_FILTER_TYPES = [
   { id: 'fuel', label: 'Fuel', icon: 'flash-outline', color: '#ea580c' },
@@ -52,6 +79,58 @@ const PLACE_FILTER_TYPES = [
   { id: 'hot_spring', label: 'Hot Springs', icon: 'flame-outline', color: '#f97316' },
 ] as const;
 const DEFAULT_PLACE_FILTERS = ['fuel', 'propane', 'water', 'dump', 'trailhead'];
+const FUEL_POI_TYPES = 'fuel,propane';
+const ROUTE_POI_TYPES = 'water,trailhead,viewpoint,peak,hot_spring,dump,shower,laundromat,lodging,food,grocery,mechanic,parking,attraction';
+const STATE_INFO: Record<string, { name: string; minLat: number; maxLat: number; minLng: number; maxLng: number }> = {
+  AL: { name: 'Alabama', minLat: 30.1, maxLat: 35.1, minLng: -88.6, maxLng: -84.9 },
+  AZ: { name: 'Arizona', minLat: 31.2, maxLat: 37.1, minLng: -114.9, maxLng: -109.0 },
+  AR: { name: 'Arkansas', minLat: 33.0, maxLat: 36.6, minLng: -94.7, maxLng: -89.6 },
+  CA: { name: 'California', minLat: 32.4, maxLat: 42.1, minLng: -124.5, maxLng: -114.1 },
+  CO: { name: 'Colorado', minLat: 36.9, maxLat: 41.1, minLng: -109.1, maxLng: -102.0 },
+  CT: { name: 'Connecticut', minLat: 40.9, maxLat: 42.1, minLng: -73.8, maxLng: -71.8 },
+  DE: { name: 'Delaware', minLat: 38.4, maxLat: 39.9, minLng: -75.8, maxLng: -75.0 },
+  FL: { name: 'Florida', minLat: 24.4, maxLat: 31.1, minLng: -87.7, maxLng: -80.0 },
+  GA: { name: 'Georgia', minLat: 30.3, maxLat: 35.1, minLng: -85.7, maxLng: -80.8 },
+  ID: { name: 'Idaho', minLat: 42.0, maxLat: 49.1, minLng: -117.3, maxLng: -111.0 },
+  IL: { name: 'Illinois', minLat: 36.9, maxLat: 42.6, minLng: -91.6, maxLng: -87.5 },
+  IN: { name: 'Indiana', minLat: 37.7, maxLat: 41.8, minLng: -88.1, maxLng: -84.8 },
+  IA: { name: 'Iowa', minLat: 40.3, maxLat: 43.6, minLng: -96.7, maxLng: -90.1 },
+  KS: { name: 'Kansas', minLat: 36.9, maxLat: 40.1, minLng: -102.1, maxLng: -94.5 },
+  KY: { name: 'Kentucky', minLat: 36.4, maxLat: 39.2, minLng: -89.6, maxLng: -81.9 },
+  LA: { name: 'Louisiana', minLat: 28.9, maxLat: 33.1, minLng: -94.1, maxLng: -88.8 },
+  ME: { name: 'Maine', minLat: 43.0, maxLat: 47.5, minLng: -71.1, maxLng: -66.9 },
+  MD: { name: 'Maryland', minLat: 37.8, maxLat: 39.8, minLng: -79.6, maxLng: -75.0 },
+  MA: { name: 'Massachusetts', minLat: 41.2, maxLat: 42.9, minLng: -73.6, maxLng: -69.9 },
+  MI: { name: 'Michigan', minLat: 41.6, maxLat: 48.4, minLng: -90.5, maxLng: -82.1 },
+  MN: { name: 'Minnesota', minLat: 43.4, maxLat: 49.4, minLng: -97.3, maxLng: -89.5 },
+  MS: { name: 'Mississippi', minLat: 30.1, maxLat: 35.1, minLng: -91.7, maxLng: -88.1 },
+  MO: { name: 'Missouri', minLat: 35.9, maxLat: 40.7, minLng: -95.8, maxLng: -89.1 },
+  MT: { name: 'Montana', minLat: 44.3, maxLat: 49.1, minLng: -116.1, maxLng: -104.0 },
+  NE: { name: 'Nebraska', minLat: 39.9, maxLat: 43.1, minLng: -104.1, maxLng: -95.3 },
+  NV: { name: 'Nevada', minLat: 35.0, maxLat: 42.1, minLng: -120.1, maxLng: -114.0 },
+  NH: { name: 'New Hampshire', minLat: 42.7, maxLat: 45.4, minLng: -72.6, maxLng: -70.6 },
+  NJ: { name: 'New Jersey', minLat: 38.8, maxLat: 41.4, minLng: -75.6, maxLng: -73.9 },
+  NM: { name: 'New Mexico', minLat: 31.2, maxLat: 37.1, minLng: -109.1, maxLng: -103.0 },
+  NY: { name: 'New York', minLat: 40.4, maxLat: 45.1, minLng: -79.8, maxLng: -71.7 },
+  NC: { name: 'North Carolina', minLat: 33.8, maxLat: 36.7, minLng: -84.4, maxLng: -75.4 },
+  ND: { name: 'North Dakota', minLat: 45.9, maxLat: 49.1, minLng: -104.1, maxLng: -96.5 },
+  OH: { name: 'Ohio', minLat: 38.3, maxLat: 42.4, minLng: -84.9, maxLng: -80.5 },
+  OK: { name: 'Oklahoma', minLat: 33.6, maxLat: 37.1, minLng: -103.1, maxLng: -94.4 },
+  OR: { name: 'Oregon', minLat: 41.9, maxLat: 46.4, minLng: -124.7, maxLng: -116.4 },
+  PA: { name: 'Pennsylvania', minLat: 39.6, maxLat: 42.6, minLng: -80.6, maxLng: -74.7 },
+  RI: { name: 'Rhode Island', minLat: 41.1, maxLat: 42.1, minLng: -71.9, maxLng: -71.1 },
+  SC: { name: 'South Carolina', minLat: 32.0, maxLat: 35.3, minLng: -83.4, maxLng: -78.5 },
+  SD: { name: 'South Dakota', minLat: 42.4, maxLat: 45.9, minLng: -104.1, maxLng: -96.4 },
+  TN: { name: 'Tennessee', minLat: 34.9, maxLat: 36.7, minLng: -90.4, maxLng: -81.6 },
+  TX: { name: 'Texas', minLat: 25.8, maxLat: 36.6, minLng: -106.7, maxLng: -93.5 },
+  UT: { name: 'Utah', minLat: 36.9, maxLat: 42.1, minLng: -114.1, maxLng: -109.0 },
+  VT: { name: 'Vermont', minLat: 42.7, maxLat: 45.1, minLng: -73.5, maxLng: -71.5 },
+  VA: { name: 'Virginia', minLat: 36.5, maxLat: 39.5, minLng: -83.8, maxLng: -75.2 },
+  WA: { name: 'Washington', minLat: 45.5, maxLat: 49.1, minLng: -124.9, maxLng: -116.9 },
+  WV: { name: 'West Virginia', minLat: 37.2, maxLat: 40.7, minLng: -82.7, maxLng: -77.7 },
+  WI: { name: 'Wisconsin', minLat: 42.4, maxLat: 47.2, minLng: -92.9, maxLng: -86.8 },
+  WY: { name: 'Wyoming', minLat: 40.9, maxLat: 45.1, minLng: -111.1, maxLng: -104.0 },
+};
 
 function haversineMi(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
   const R = 3958.8;
@@ -66,21 +145,203 @@ function midpoint(a: { lat: number; lng: number }, b: { lat: number; lng: number
   return { lat: (a.lat + b.lat) / 2, lng: (a.lng + b.lng) / 2 };
 }
 
+function scenicPoint(
+  from: { lat: number; lng: number },
+  to: { lat: number; lng: number },
+  progress: number,
+  offsetMi: number
+) {
+  const t = Math.max(0, Math.min(1, progress));
+  const base = { lat: from.lat + (to.lat - from.lat) * t, lng: from.lng + (to.lng - from.lng) * t };
+  if (!offsetMi || t <= 0 || t >= 1) return base;
+  const avgLat = ((from.lat + to.lat) / 2) * Math.PI / 180;
+  const milesPerLng = Math.max(8, 69 * Math.cos(avgLat));
+  const dx = (to.lng - from.lng) * milesPerLng;
+  const dy = (to.lat - from.lat) * 69;
+  const len = Math.hypot(dx, dy);
+  if (!len) return base;
+  const bow = Math.sin(Math.PI * t) * offsetMi;
+  const perpLngMi = -dy / len * bow;
+  const perpLatMi = dx / len * bow;
+  return {
+    lat: base.lat + perpLatMi / 69,
+    lng: base.lng + perpLngMi / milesPerLng,
+  };
+}
+
 function pointSegmentDistanceMi(point: { lat: number; lng: number }, a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
+  return pointSegmentProjection(point, a, b).distanceMi;
+}
+
+function pointSegmentProjection(point: { lat: number; lng: number }, a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
   const refLat = ((point.lat + a.lat + b.lat) / 3) * Math.PI / 180;
   const px = point.lng * Math.cos(refLat), py = point.lat;
   const ax = a.lng * Math.cos(refLat), ay = a.lat;
   const bx = b.lng * Math.cos(refLat), by = b.lat;
   const dx = bx - ax, dy = by - ay;
-  if (dx === 0 && dy === 0) return haversineMi(point, a);
+  if (dx === 0 && dy === 0) return { distanceMi: haversineMi(point, a), progress: 0, progressMi: 0 };
   const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)));
   const projected = { lat: ay + t * dy, lng: (ax + t * dx) / Math.cos(refLat) };
-  return haversineMi(point, projected);
+  return { distanceMi: haversineMi(point, projected), progress: t, progressMi: haversineMi(a, b) * t };
+}
+
+function routeProgressLabel(progress?: number) {
+  if (progress == null || !Number.isFinite(progress)) return '';
+  if (progress < 0.34) return 'early leg';
+  if (progress < 0.67) return 'mid leg';
+  return 'late leg';
+}
+
+function withLegProjection<T extends { lat: number; lng: number }>(item: T, leg: LegSearchContext) {
+  const projection = pointSegmentProjection(item, leg.from, leg.to);
+  return {
+    ...item,
+    route_distance_mi: projection.distanceMi,
+    route_progress: projection.progress,
+    route_progress_mi: projection.progressMi,
+  };
+}
+
+function spreadAlongLeg<T extends { route_distance_mi?: number; route_progress?: number }>(items: T[]) {
+  const buckets = [0, 1, 2].map(bucket => items
+    .filter(item => Math.min(2, Math.floor(((item.route_progress ?? 0) * 3))) === bucket)
+    .sort((a, b) => (a.route_distance_mi ?? 999) - (b.route_distance_mi ?? 999)));
+  const out: T[] = [];
+  const rounds = Math.max(...buckets.map(bucket => bucket.length), 0);
+  for (let round = 0; round < rounds; round++) {
+    for (const bucket of buckets) {
+      const item = bucket[round];
+      if (item) out.push(item);
+    }
+  }
+  return out;
+}
+
+function overnightEndpointCamps<T extends { lat: number; lng: number; route_distance_mi?: number; route_progress?: number }>(items: T[], leg: LegSearchContext) {
+  const withEndpointDistance = items.map(item => ({
+    ...item,
+    endpoint_distance_mi: haversineMi(item, leg.to),
+  }));
+  const routeBuffer = routeBufferForMiles(leg.miles) + 8;
+  const nearEndpoint = withEndpointDistance
+    .filter(item => item.endpoint_distance_mi <= 30 && (item.route_distance_mi ?? 999) <= routeBuffer)
+    .sort((a, b) => (a.endpoint_distance_mi - b.endpoint_distance_mi) || ((a.route_distance_mi ?? 999) - (b.route_distance_mi ?? 999)));
+  if (nearEndpoint.length) return nearEndpoint;
+  const endpointFallback = withEndpointDistance
+    .filter(item => item.endpoint_distance_mi <= 45)
+    .sort((a, b) => (a.endpoint_distance_mi - b.endpoint_distance_mi) || ((a.route_distance_mi ?? 999) - (b.route_distance_mi ?? 999)));
+  if (endpointFallback.length) return endpointFallback;
+  return withEndpointDistance.sort((a, b) => {
+    const aScore = (a.route_distance_mi ?? 999) + Math.abs(1 - (a.route_progress ?? 0)) * 30 + a.endpoint_distance_mi * 0.45;
+    const bScore = (b.route_distance_mi ?? 999) + Math.abs(1 - (b.route_progress ?? 0)) * 30 + b.endpoint_distance_mi * 0.45;
+    return aScore - bScore;
+  });
 }
 
 function fmtMi(mi: number) {
   if (!Number.isFinite(mi)) return '-';
   return mi < 10 ? `${mi.toFixed(1)} mi` : `${Math.round(mi)} mi`;
+}
+
+function fmtHours(hours: number) {
+  if (!Number.isFinite(hours) || hours <= 0) return '-';
+  const h = Math.floor(hours);
+  const m = Math.round((hours - h) * 60);
+  if (h <= 0) return `${m} min`;
+  return m > 0 ? `${h} h ${m} min` : `${h} h`;
+}
+
+function parsePositiveNumber(value?: string | null) {
+  const n = Number(String(value ?? '').replace(/[^\d.]/g, ''));
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function estimateMovingHours(mi: number) {
+  // Manual builder does not have turn-by-turn route durations yet, so use a
+  // conservative overland planning speed rather than interstate speed.
+  return mi / 42;
+}
+
+function estimateMpg(rig: ReturnType<typeof useStore.getState>['rigProfile']) {
+  const realMpg = parsePositiveNumber(rig?.fuel_mpg);
+  if (realMpg) return Math.max(6, Math.round(realMpg * 10) / 10);
+  const type = (rig?.vehicle_type || '').toLowerCase();
+  let mpg = type.includes('rv') ? 10 : type.includes('truck') ? 15 : type.includes('van') ? 17 : type.includes('suv') ? 18 : 20;
+  if (rig?.is_towing) mpg *= 0.72;
+  if (parsePositiveNumber(rig?.lift_in) || parsePositiveNumber(rig?.tire_size)) mpg *= 0.9;
+  return Math.max(8, Math.round(mpg));
+}
+
+function stateForPoint(point: { lat: number; lng: number }) {
+  return Object.entries(STATE_INFO).find(([, box]) =>
+    point.lat >= box.minLat && point.lat <= box.maxLat && point.lng >= box.minLng && point.lng <= box.maxLng
+  )?.[0] ?? null;
+}
+
+function sampleRouteStates(stops: BuilderStop[], loop: boolean) {
+  const out: Record<string, number> = {};
+  const sorted = stops;
+  for (let i = 1; i < sorted.length; i++) {
+    const from = sorted[i - 1];
+    const to = sorted[i];
+    const miles = haversineMi(from, to);
+    const samples = Math.max(1, Math.ceil(miles / 60));
+    for (let j = 0; j < samples; j++) {
+      const t = (j + 0.5) / samples;
+      const point = { lat: from.lat + (to.lat - from.lat) * t, lng: from.lng + (to.lng - from.lng) * t };
+      const state = stateForPoint(point);
+      if (state) out[state] = (out[state] ?? 0) + miles / samples;
+    }
+  }
+  if (loop && sorted.length > 2) {
+    const from = sorted[sorted.length - 1];
+    const to = sorted[0];
+    const miles = haversineMi(from, to);
+    const samples = Math.max(1, Math.ceil(miles / 60));
+    for (let j = 0; j < samples; j++) {
+      const t = (j + 0.5) / samples;
+      const point = { lat: from.lat + (to.lat - from.lat) * t, lng: from.lng + (to.lng - from.lng) * t };
+      const state = stateForPoint(point);
+      if (state) out[state] = (out[state] ?? 0) + miles / samples;
+    }
+  }
+  return out;
+}
+
+async function fetchAaaStateRegular(state: string) {
+  const name = STATE_INFO[state]?.name;
+  if (!name) return null;
+  const res = await fetch(`https://gasprices.aaa.com/?state=${encodeURIComponent(state)}`);
+  const html = await res.text();
+  const stateAvg = html.match(new RegExp(`Today[^$]+${name.replace(/\s+/g, '\\s+')}\\s+Avg\\.\\s+\\$([0-9.]+)`, 'i'));
+  const currentAvg = html.match(/<td>\s*Current Avg\.\s*<\/td>\s*<td>\s*\$([0-9.]+)/i);
+  const value = Number(stateAvg?.[1] ?? currentAvg?.[1]);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function routeBufferForMiles(mi: number) {
+  return Math.max(10, Math.min(30, mi * 0.16));
+}
+
+function legSamplePoints(leg: LegSearchContext) {
+  const count = Math.max(2, Math.min(6, Math.ceil(leg.miles / 90) + 1));
+  return Array.from({ length: count }, (_, idx) => {
+    const t = count === 1 ? 0.5 : idx / (count - 1);
+    return {
+      lat: leg.from.lat + (leg.to.lat - leg.from.lat) * t,
+      lng: leg.from.lng + (leg.to.lng - leg.from.lng) * t,
+    };
+  });
+}
+
+function uniqueByGeo<T extends { id?: string | number; name?: string; lat: number; lng: number }>(items: T[]) {
+  const seen = new Set<string>();
+  return items.filter(item => {
+    const key = String(item.id || `${item.name}_${item.lat.toFixed(4)}_${item.lng.toFixed(4)}`);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function stopColor(type: string) {
@@ -132,6 +393,38 @@ function dedupePois(points: OsmPoi[]) {
   });
 }
 
+function poiToGasStation(point: OsmPoi): GasStation {
+  return {
+    id: point.id,
+    name: point.name || (point.type === 'propane' ? 'Propane stop' : 'Fuel stop'),
+    lat: point.lat,
+    lng: point.lng,
+    fuel_types: point.type === 'propane' ? 'Propane' : 'Fuel',
+    address: point.subtype || point.type.replace(/_/g, ' '),
+    route_distance_mi: point.route_distance_mi,
+    route_fit: point.route_fit,
+  };
+}
+
+function routeScopedOfflinePlaces(points: OsmPoi[], leg: LegSearchContext, types: string[], extraBuffer = 8) {
+  const allowed = new Set(types);
+  return dedupePois(points
+    .filter(point => allowed.has(point.type))
+    .map(point => withLegProjection(point, leg))
+    .filter(point => (point.route_distance_mi ?? 999) <= routeBufferForMiles(leg.miles) + extraBuffer)
+  );
+}
+
+function areaScopedOfflinePlaces(points: OsmPoi[], center: { lat: number; lng: number }, types: string[], radiusMi: number) {
+  const allowed = new Set(types);
+  return dedupePois(points
+    .filter(point => allowed.has(point.type))
+    .map(point => ({ ...point, route_distance_mi: haversineMi(point, center) }))
+    .filter(point => (point.route_distance_mi ?? 999) <= radiusMi)
+    .sort((a, b) => (a.route_distance_mi ?? 999) - (b.route_distance_mi ?? 999))
+  );
+}
+
 function stopTypeFromWaypoint(type?: string): BuilderStopType {
   const t = (type || '').toLowerCase();
   if (t === 'start') return 'start';
@@ -173,6 +466,10 @@ function sourceLabel(source?: BuilderStop['source']) {
   if (source === 'search') return 'search';
   if (source === 'map') return 'map tap';
   return 'manual';
+}
+
+function isFrameworkTarget(stop: BuilderStop) {
+  return stop.source === 'map' && stop.type === 'waypoint' && /target area/i.test(stop.name);
 }
 
 function landColor(lt?: string | null) {
@@ -244,6 +541,8 @@ async function geocodePlaces(query: string): Promise<SearchPlace[]> {
   if (coord && coord.length >= 2 && Math.abs(coord[0]) <= 90 && Math.abs(coord[1]) <= 180) {
     return [{ name: `${coord[0].toFixed(5)}, ${coord[1].toFixed(5)}`, lat: coord[0], lng: coord[1] }];
   }
+  const serverPlaces = await api.geocodePlaces(query, 8).catch(() => [] as GeocodePlace[]);
+  if (serverPlaces.length) return serverPlaces;
   const res = await fetch(
     `https://nominatim.openstreetmap.org/search?format=json&limit=8&countrycodes=us&q=${encodeURIComponent(query)}`,
     { headers: { 'User-Agent': 'TrailheadRouteBuilder/1.0' } }
@@ -256,28 +555,74 @@ async function geocodePlaces(query: string): Promise<SearchPlace[]> {
   })).filter((p: SearchPlace) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
 }
 
+async function searchNominatimNearby(query: string, center: { lat: number; lng: number }, radiusMi = 25, type: OsmPoi['type'] = 'poi', limit = 8): Promise<OsmPoi[]> {
+  const latDelta = radiusMi / 69;
+  const lngDelta = radiusMi / Math.max(8, 69 * Math.cos(center.lat * Math.PI / 180));
+  const west = center.lng - lngDelta;
+  const east = center.lng + lngDelta;
+  const south = center.lat - latDelta;
+  const north = center.lat + latDelta;
+  const res = await fetch(
+    `https://nominatim.openstreetmap.org/search?format=json&limit=${limit}&countrycodes=us&bounded=1&viewbox=${west},${north},${east},${south}&q=${encodeURIComponent(query)}`,
+    { headers: { 'User-Agent': 'TrailheadRouteBuilder/1.0' } }
+  );
+  const data = await res.json();
+  return (data ?? []).map((p: any) => ({
+    id: `${type}_${p.osm_type ?? 'n'}_${p.osm_id ?? `${p.lat}_${p.lon}`}`,
+    name: p.name || p.display_name?.split(',').slice(0, 2).join(',') || query,
+    lat: Number(p.lat),
+    lng: Number(p.lon),
+    type,
+    subtype: p.type || p.class,
+  })).filter((p: OsmPoi) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+}
+
 export default function RouteBuilderScreen() {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
   const router = useRouter();
   const mapRef = useRef<NativeMapHandle>(null);
+  const didInitialMapFitRef = useRef(false);
   const activeTrip = useStore(st => st.activeTrip);
   const setActiveTrip = useStore(st => st.setActiveTrip);
   const addTripToHistory = useStore(st => st.addTripToHistory);
   const userLoc = useStore(st => st.userLoc);
+  const setStoreUserLoc = useStore(st => st.setUserLoc);
+  const rigProfile = useStore(st => st.rigProfile);
 
   const [activeDay, setActiveDay] = useState(1);
   const [days, setDays] = useState([1]);
   const [stops, setStops] = useState<BuilderStop[]>([]);
+  const [tripLoop, setTripLoop] = useState(false);
+  const [driveHoursPerDay, setDriveHoursPerDay] = useState('5');
+  const [plannedDays, setPlannedDays] = useState('3');
+  const [routeStyle, setRouteStyle] = useState<'balanced' | 'direct' | 'adventure'>('balanced');
+  const [tripBuildMode, setTripBuildMode] = useState<TripBuildMode>('recommended');
+  const [distanceMode, setDistanceMode] = useState<DistanceMode>('hours');
+  const [wizardStep, setWizardStep] = useState(0);
+  const [targetMiles, setTargetMiles] = useState('180');
+  const [startQuery, setStartQuery] = useState('');
+  const [endQuery, setEndQuery] = useState('');
+  const [buildingFramework, setBuildingFramework] = useState(false);
+  const [showBuildSuccess, setShowBuildSuccess] = useState(false);
+  const [restDays, setRestDays] = useState<number[]>([]);
+  const [dayDriveTargets, setDayDriveTargets] = useState<Record<number, string>>({});
+  const [gasPrice, setGasPrice] = useState('3.65');
+  const [stateGasPrices, setStateGasPrices] = useState<Record<string, number>>({});
+  const [gasPriceStatus, setGasPriceStatus] = useState<'idle' | 'loading' | 'live' | 'fallback'>('idle');
   const [importedTripId, setImportedTripId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [routeName, setRouteName] = useState('');
   const [searchResults, setSearchResults] = useState<SearchPlace[]>([]);
-  const [pendingType, setPendingType] = useState<BuilderStopType>('waypoint');
+  const [pendingType, setPendingType] = useState<BuilderStopType>('start');
   const [insertAfterId, setInsertAfterId] = useState<string | null>(null);
+  const [insertTargetDay, setInsertTargetDay] = useState<number | null>(null);
+  const [replaceStopId, setReplaceStopId] = useState<string | null>(null);
   const [discoverTab, setDiscoverTab] = useState<DiscoveryTab>('camps');
   const [discoverLoading, setDiscoverLoading] = useState(false);
+  const [discoverySummary, setDiscoverySummary] = useState('');
+  const [inlineSearch, setInlineSearch] = useState<InlineSearchState>(null);
   const [camps, setCamps] = useState<CampsitePin[]>([]);
   const [gas, setGas] = useState<GasStation[]>([]);
   const [pois, setPois] = useState<OsmPoi[]>([]);
@@ -387,19 +732,32 @@ export default function RouteBuilderScreen() {
   const selectedInsertStop = stops.find(st => st.id === insertAfterId) ?? null;
   const orderedStops = [...stops].sort((a, b) => a.day - b.day || stops.indexOf(a) - stops.indexOf(b));
   const mapWaypoints = orderedStops.map(st => ({ lat: st.lat, lng: st.lng, name: st.name, day: st.day, type: st.type }));
+  const mapCamps = useMemo(() => uniqueByGeo([
+    ...orderedStops.map(st => st.camp).filter((camp): camp is CampsitePin => !!camp),
+    ...camps,
+  ]), [orderedStops, camps]);
   const anchor = [...dayStops].reverse()[0] ?? [...stops].reverse()[0] ?? (userLoc ? { lat: userLoc.lat, lng: userLoc.lng, name: 'Current location' } : null);
+  const selectedStopIndex = selectedInsertStop ? orderedStops.findIndex(st => st.id === selectedInsertStop.id) : -1;
+  const selectedNextStop = selectedStopIndex >= 0 ? orderedStops[selectedStopIndex + 1] ?? null : null;
   const previousDayEnd = [...orderedStops].reverse().find(st => st.day < activeDay) ?? null;
   const activeDayDestination = [...dayStops].reverse().find(st => st.type !== 'fuel' && st.type !== 'waypoint') ?? [...dayStops].reverse()[0] ?? null;
-  const legContext = previousDayEnd && activeDayDestination
+  const dayBridge = previousDayEnd && activeDayDestination
+    ? { from: previousDayEnd, to: activeDayDestination, source: 'day' as const }
+    : null;
+  const activeSegment = selectedInsertStop && selectedNextStop
+    ? { from: selectedInsertStop, to: selectedNextStop, source: 'selected' as const, targetDay: insertTargetDay ?? selectedInsertStop.day }
+    : dayBridge ? { ...dayBridge, targetDay: activeDay } : null;
+  const legContext = activeSegment
     ? {
-        from: previousDayEnd,
-        to: activeDayDestination,
-        miles: haversineMi(previousDayEnd, activeDayDestination),
-        center: midpoint(previousDayEnd, activeDayDestination),
+        ...activeSegment,
+        miles: haversineMi(activeSegment.from, activeSegment.to),
+        hours: estimateMovingHours(haversineMi(activeSegment.from, activeSegment.to)),
+        center: midpoint(activeSegment.from, activeSegment.to),
+        targetDay: activeSegment.targetDay,
       }
     : null;
-  const discoverContextLabel = legContext && (discoverTab === 'gas' || discoverTab === 'poi')
-    ? `Day ${Math.max(1, activeDay - 1)} to Day ${activeDay} · ${fmtMi(legContext.miles)}`
+  const discoverContextLabel = legContext
+    ? `${legContext.from.name.split(',')[0]} to ${legContext.to.name.split(',')[0]} · ${fmtMi(legContext.miles)}`
     : anchor ? anchor.name.split(',')[0] : 'add a stop first';
   const filteredOfflinePlaces = useMemo(() => (
     offlinePlaces.filter(place => activePlaceFilters.includes(place.type))
@@ -420,22 +778,112 @@ export default function RouteBuilderScreen() {
     return dedupePois(scoped);
   }, [anchor, filteredOfflinePlaces, legContext]);
   const discoveryPois = useMemo(() => dedupePois([...pois, ...offlinePlaceCandidates]), [pois, offlinePlaceCandidates]);
+  const routeStateMiles = useMemo(() => sampleRouteStates(orderedStops, tripLoop), [orderedStops, tripLoop]);
+  const routeStates = useMemo(() => Object.keys(routeStateMiles).sort((a, b) => routeStateMiles[b] - routeStateMiles[a]), [routeStateMiles]);
+
+  useEffect(() => {
+    const missing = routeStates.filter(state => stateGasPrices[state] == null).slice(0, 6);
+    if (!missing.length) {
+      if (routeStates.length && Object.keys(stateGasPrices).length) setGasPriceStatus('live');
+      return;
+    }
+    let cancelled = false;
+    setGasPriceStatus('loading');
+    Promise.all(missing.map(async state => [state, await fetchAaaStateRegular(state)] as const))
+      .then(entries => {
+        if (cancelled) return;
+        const next: Record<string, number> = {};
+        for (const [state, price] of entries) if (price) next[state] = price;
+        if (Object.keys(next).length) {
+          setStateGasPrices(prev => ({ ...prev, ...next }));
+          setGasPriceStatus('live');
+        } else {
+          setGasPriceStatus('fallback');
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setGasPriceStatus('fallback');
+      });
+    return () => { cancelled = true; };
+  }, [routeStates.join(','), stateGasPrices]);
 
   const totals = useMemo(() => {
     let miles = 0;
     for (let i = 1; i < orderedStops.length; i++) miles += haversineMi(orderedStops[i - 1], orderedStops[i]);
+    if (tripLoop && orderedStops.length > 2) miles += haversineMi(orderedStops[orderedStops.length - 1], orderedStops[0]);
     return { miles, stops: orderedStops.length, camps: orderedStops.filter(st => st.type === 'camp').length };
-  }, [orderedStops]);
+  }, [orderedStops, tripLoop]);
+  const planningStats = useMemo(() => {
+    const mpg = estimateMpg(rigProfile);
+    const fallbackPrice = parsePositiveNumber(gasPrice) ?? 3.65;
+    const weightedGallons = Object.entries(routeStateMiles).reduce((sum, [state, miles]) => {
+      const price = stateGasPrices[state] ?? fallbackPrice;
+      return sum + (miles / mpg) * price;
+    }, 0);
+    const gallons = totals.miles / mpg;
+    const fuelCost = totals.miles > 0 ? (Object.keys(routeStateMiles).length ? weightedGallons : gallons * fallbackPrice) : 0;
+    const price = gallons > 0 ? fuelCost / gallons : fallbackPrice;
+    const driveLimit = parsePositiveNumber(driveHoursPerDay) ?? 5;
+    const range = parsePositiveNumber(rigProfile?.fuel_range_miles);
+    return {
+      mpg,
+      price,
+      gallons,
+      fuelCost,
+      driveLimit,
+      range,
+      driveHours: estimateMovingHours(totals.miles),
+    };
+  }, [driveHoursPerDay, gasPrice, rigProfile, routeStateMiles, stateGasPrices, totals.miles]);
   const dayMileage = useMemo(() => {
     const out: Record<number, number> = {};
     for (const day of days) {
+      const prev = [...orderedStops].reverse().find(st => st.day < day) ?? null;
       const wps = orderedStops.filter(st => st.day === day);
       let miles = 0;
+      if (prev && wps.length) miles += haversineMi(prev, wps[0]);
       for (let i = 1; i < wps.length; i++) miles += haversineMi(wps[i - 1], wps[i]);
       out[day] = miles;
     }
     return out;
   }, [days, orderedStops]);
+  const routeDayPlans = useMemo<RouteDayPlan[]>(() => (
+    days.map(day => {
+      const wps = orderedStops.filter(st => st.day === day);
+      const previous = [...orderedStops].reverse().find(st => st.day < day) ?? null;
+      const frameworkTarget = wps.find(isFrameworkTarget) ?? null;
+      const target = [...wps].reverse().find(st => st.type === 'camp' || st.type === 'motel')
+        ?? frameworkTarget
+        ?? [...wps].reverse().find(st => st.type !== 'fuel')
+        ?? wps[wps.length - 1]
+        ?? null;
+      const miles = dayMileage[day] ?? 0;
+      return {
+        day,
+        previous,
+        target,
+        frameworkTarget,
+        stops: wps,
+        miles,
+        hours: estimateMovingHours(miles),
+        rest: restDays.includes(day),
+        complete: !!target && !isFrameworkTarget(target) && (target.type === 'camp' || target.type === 'motel' || day === days[days.length - 1]),
+      };
+    })
+  ), [days, orderedStops, dayMileage, restDays]);
+  const hasBaseRoute = orderedStops.length >= 2;
+  const realOvernights = routeDayPlans.filter(day => day.complete).length;
+  const setupProgress = useMemo(() => {
+    let score = 0;
+    if (startQuery.trim() || orderedStops.length >= 1 || userLoc) score += 1;
+    if (endQuery.trim() || orderedStops.length >= 2) score += 1;
+    if (parsePositiveNumber(plannedDays)) score += 1;
+    return score;
+  }, [endQuery, orderedStops.length, plannedDays, startQuery, userLoc]);
+  const baseRouteSummary = hasBaseRoute
+    ? `${orderedStops[0].name.split(',')[0]} to ${orderedStops[orderedStops.length - 1].name.split(',')[0]}`
+    : 'Build a base route first';
+  const activeDayDriveLimit = parsePositiveNumber(dayDriveTargets[activeDay]) ?? planningStats.driveLimit;
   const routeChecks = useMemo(() => {
     const checks: { level: 'ok' | 'warn'; label: string; text: string }[] = [];
     if (orderedStops.length < 2) {
@@ -447,24 +895,31 @@ export default function RouteBuilderScreen() {
     } else if (orderedStops.length) {
       checks.push({ level: 'ok', label: 'Overnight', text: 'Each day has an overnight stop.' });
     }
-    const longDays = days.filter(day => (dayMileage[day] ?? 0) > 220);
+    const longDays = days.filter(day => !restDays.includes(day) && estimateMovingHours(dayMileage[day] ?? 0) > (parsePositiveNumber(dayDriveTargets[day]) ?? planningStats.driveLimit));
     if (longDays.length) {
-      checks.push({ level: 'warn', label: 'Long day', text: `Day ${longDays[0]} is ${fmtMi(dayMileage[longDays[0]])}. Add fuel or split it.` });
+      const limit = parsePositiveNumber(dayDriveTargets[longDays[0]]) ?? planningStats.driveLimit;
+      checks.push({ level: 'warn', label: 'Drive time', text: `Day ${longDays[0]} is about ${fmtHours(estimateMovingHours(dayMileage[longDays[0]]))}, over the ${fmtHours(limit)} max.` });
     } else if (orderedStops.length > 1) {
-      checks.push({ level: 'ok', label: 'Pace', text: 'Day mileage looks manageable.' });
+      checks.push({ level: 'ok', label: 'Pace', text: `Days stay under the ${fmtHours(planningStats.driveLimit)} max.` });
     }
     const fuelCount = orderedStops.filter(st => st.type === 'fuel').length;
-    if (totals.miles > 160 && fuelCount === 0) {
-      checks.push({ level: 'warn', label: 'Fuel', text: 'Add at least one fuel stop before remote stretches.' });
+    if ((planningStats.range && totals.miles > planningStats.range * 0.7 && fuelCount === 0) || (!planningStats.range && totals.miles > 160 && fuelCount === 0)) {
+      checks.push({ level: 'warn', label: 'Fuel', text: planningStats.range ? `Rig range is about ${Math.round(planningStats.range)} mi. Add fuel before remote stretches.` : 'Add at least one fuel stop before remote stretches.' });
     } else if (fuelCount > 0) {
       checks.push({ level: 'ok', label: 'Fuel', text: `${fuelCount} fuel stop${fuelCount === 1 ? '' : 's'} added.` });
     }
+    const driveCapacity = days
+      .filter(day => !restDays.includes(day))
+      .reduce((sum, day) => sum + ((parsePositiveNumber(dayDriveTargets[day]) ?? planningStats.driveLimit) * 42), 0);
+    if (totals.miles > driveCapacity && orderedStops.length > 1) {
+      checks.push({ level: 'warn', label: 'Schedule', text: `This route needs more than the selected ${days.length} day${days.length === 1 ? '' : 's'} at the current daily max.` });
+    }
     return checks.slice(0, 3);
-  }, [days, orderedStops, dayMileage, totals.miles]);
+  }, [days, orderedStops, dayMileage, totals.miles, planningStats.driveLimit, planningStats.range, dayDriveTargets, restDays]);
   const discoverEmptyText = discoverTab === 'camps'
-    ? 'Tap scan to find legal camps around your current route anchor.'
+    ? 'Tap scan to find legal camps near the selected leg or route anchor.'
     : discoverTab === 'gas'
-      ? 'Tap scan to find fuel near the current leg. Build Day 1 then Day 2 first for between-days search.'
+      ? 'Tap scan to find fuel between the selected stops.'
       : 'Tap scan to find water, trailheads, viewpoints, peaks, and hot springs near this route.';
 
   function fly(lat: number, lng: number, zoom = 11) {
@@ -476,7 +931,7 @@ export default function RouteBuilderScreen() {
     const stop: BuilderStop = {
       ...input,
       id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-      day: input.day ?? target?.day ?? activeDay,
+      day: input.day ?? insertTargetDay ?? target?.day ?? activeDay,
     };
     setStops(prev => {
       const idx = target ? prev.findIndex(st => st.id === target.id) : -1;
@@ -484,6 +939,7 @@ export default function RouteBuilderScreen() {
       return [...prev.slice(0, idx + 1), stop, ...prev.slice(idx + 1)];
     });
     setActiveDay(stop.day);
+    if (stop.type === 'start') setPendingType('waypoint');
     fly(stop.lat, stop.lng, stop.type === 'camp' ? 12 : 11);
   }
 
@@ -501,6 +957,59 @@ export default function RouteBuilderScreen() {
     setQuery('');
   }
 
+  async function getRouteBuilderLocation() {
+    if (userLoc) return userLoc;
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Location needed', 'Allow location or type a start city so Trailhead knows where this route begins.');
+      return null;
+    }
+    const fix = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+    const loc = { lat: fix.coords.latitude, lng: fix.coords.longitude };
+    setStoreUserLoc(loc);
+    return loc;
+  }
+
+  async function setWizardStartFromLocation() {
+    const loc = await getRouteBuilderLocation();
+    if (!loc) return;
+    const start: BuilderStop = {
+      id: `start_${Date.now()}`,
+      day: 1,
+      name: 'Current location',
+      lat: loc.lat,
+      lng: loc.lng,
+      type: 'start',
+      description: 'Route start from current location.',
+      land_type: 'route',
+      source: 'map',
+    };
+    setStops(prev => {
+      const withoutOldStart = prev.filter((st, idx) => !(idx === 0 && st.type === 'start'));
+      return [start, ...withoutOldStart];
+    });
+    setStartQuery('');
+    setPendingType('waypoint');
+    fly(start.lat, start.lng, 10);
+  }
+
+  function rebalanceFrameworkTargets(prev: BuilderStop[], anchor: BuilderStop) {
+    if (tripLoop) return prev;
+    const sorted = [...prev].sort((a, b) => a.day - b.day || prev.indexOf(a) - prev.indexOf(b));
+    const final = sorted[sorted.length - 1] ?? null;
+    if (!final || final.day <= anchor.day) return prev;
+    return prev.map(st => {
+      if (st.day <= anchor.day || st.day >= final.day || !isFrameworkTarget(st)) return st;
+      const t = (st.day - anchor.day) / (final.day - anchor.day);
+      return {
+        ...st,
+        lat: anchor.lat + (final.lat - anchor.lat) * t,
+        lng: anchor.lng + (final.lng - anchor.lng) * t,
+        description: `Rebalanced target after selecting ${anchor.name.split(',')[0]}. Search this leg for camps, fuel, and POIs.`,
+      };
+    });
+  }
+
   async function runSearch() {
     if (!query.trim()) return;
     setSearching(true);
@@ -513,45 +1022,220 @@ export default function RouteBuilderScreen() {
     }
   }
 
-  async function discover() {
-    const useLeg = !!legContext && (discoverTab === 'gas' || discoverTab === 'poi');
-    const target = useLeg ? legContext!.center : anchor;
-    if (!target) {
-      Alert.alert('Add a stop first', 'Start with a city, address, or map point, then discover camps, fuel, and POIs nearby.');
-      return;
-    }
+  async function runDiscovery(tab: DiscoveryTab, target: { lat: number; lng: number }, leg: LegSearchContext | null, opts: { focusMap?: boolean } = {}) {
+    const useLeg = !!leg;
     setDiscoverLoading(true);
-    fly(target.lat, target.lng, useLeg ? 8 : 9);
+    setDiscoverySummary('');
+    if (opts.focusMap !== false) fly(target.lat, target.lng, useLeg ? 8 : 9);
     try {
-      if (discoverTab === 'camps') {
-        setCamps(await api.getNearbyCamps(target.lat, target.lng, 65, []));
-      } else if (discoverTab === 'gas') {
-        const radius = useLeg ? Math.min(90, Math.max(35, legContext!.miles / 2 + 12)) : 35;
-        const stations = await api.getGas(target.lat, target.lng, radius);
-        setGas(useLeg
-          ? stations
-              .map(st => ({ ...st, route_distance_mi: pointSegmentDistanceMi(st, legContext!.from, legContext!.to) }))
-              .filter(st => (st.route_distance_mi ?? 999) <= Math.max(18, Math.min(45, legContext!.miles * 0.45)))
-              .sort((a, b) => (a.route_distance_mi ?? 999) - (b.route_distance_mi ?? 999))
-          : stations);
+      if (tab === 'camps') {
+        if (useLeg) {
+          const radius = Math.max(28, Math.min(48, leg!.miles / 4 + 12));
+          const found = uniqueByGeo((await Promise.all(
+            legSamplePoints(leg!).map(point => api.getNearbyCamps(point.lat, point.lng, radius, []).catch(() => []))
+          )).flat());
+          const scopedRaw = found
+              .map(camp => withLegProjection(camp, leg!))
+              .filter(camp => (camp.route_distance_mi ?? 999) <= routeBufferForMiles(leg!.miles) + 8);
+          let scoped = leg!.purpose === 'overnight' ? overnightEndpointCamps(scopedRaw, leg!) : spreadAlongLeg(scopedRaw);
+          let fallbackText = '';
+          if (leg!.purpose === 'overnight' && scoped.length === 0) {
+            const endpointCamps = await api.getNearbyCamps(leg!.to.lat, leg!.to.lng, 55, []).catch(() => []);
+            scoped = endpointCamps
+              .map(camp => withLegProjection(camp, leg!))
+              .sort((a, b) => haversineMi(a, leg!.to) - haversineMi(b, leg!.to));
+            fallbackText = ' using the day-end area';
+          }
+          setCamps(scoped);
+          setDiscoverySummary(`${scoped.length} camp${scoped.length === 1 ? '' : 's'} ${leg!.purpose === 'overnight' ? `near Day ${leg!.targetDay ?? activeDay} endpoint${fallbackText}` : 'spread along this leg'}`);
+        } else {
+          const found = await api.getNearbyCamps(target.lat, target.lng, 45, []);
+          setCamps(found);
+          setDiscoverySummary(`${found.length} camp${found.length === 1 ? '' : 's'} near this area`);
+        }
+      } else if (tab === 'gas') {
+        if (useLeg) {
+          const radius = Math.max(24, Math.min(42, leg!.miles / 5 + 10));
+          const nrelStations = uniqueByGeo((await Promise.all(
+            legSamplePoints(leg!).map(point => api.getGas(point.lat, point.lng, radius).catch(() => []))
+          )).flat());
+          const osmFuel = uniqueByGeo((await Promise.all(
+            legSamplePoints(leg!).map(point => api.getOsmPois(point.lat, point.lng, radius, FUEL_POI_TYPES).catch(() => []))
+          )).flat());
+          const offlineFuel = routeScopedOfflinePlaces(offlinePlaces, leg!, ['fuel', 'propane']);
+          const stations = uniqueByGeo([
+            ...nrelStations,
+            ...osmFuel.map(poiToGasStation),
+            ...offlineFuel.map(poiToGasStation),
+          ]);
+          if (stations.length === 0) {
+            const nominatimFuel = uniqueByGeo((await Promise.all(
+              legSamplePoints(leg!).map(point => searchNominatimNearby('gas station', point, radius, 'fuel', 5).catch(() => []))
+            )).flat());
+            stations.push(...nominatimFuel.map(poiToGasStation));
+          }
+          const scoped = spreadAlongLeg(stations
+            .map(st => withLegProjection(st, leg!))
+            .filter(st => (st.route_distance_mi ?? 999) <= routeBufferForMiles(leg!.miles) + 8)
+          );
+          setGas(scoped);
+          setDiscoverySummary(`${scoped.length} fuel stop${scoped.length === 1 ? '' : 's'} along this leg`);
+        } else {
+          const [nrelStations, osmFuel] = await Promise.all([
+            api.getGas(target.lat, target.lng, 35).catch(() => []),
+            api.getOsmPois(target.lat, target.lng, 35, FUEL_POI_TYPES).catch(() => []),
+          ]);
+          const offlineFuel = areaScopedOfflinePlaces(offlinePlaces, target, ['fuel', 'propane'], 45);
+          const stations = uniqueByGeo([
+            ...nrelStations,
+            ...osmFuel.map(poiToGasStation),
+            ...offlineFuel.map(poiToGasStation),
+          ]);
+          if (stations.length === 0) {
+            const nominatimFuel = await searchNominatimNearby('gas station', target, 35, 'fuel', 8).catch(() => []);
+            stations.push(...nominatimFuel.map(poiToGasStation));
+          }
+          stations.sort((a, b) => (a.route_distance_mi ?? haversineMi(a, target)) - (b.route_distance_mi ?? haversineMi(b, target)));
+          setGas(stations);
+          setDiscoverySummary(`${stations.length} fuel stop${stations.length === 1 ? '' : 's'} near this area`);
+        }
       } else {
-        const radius = useLeg ? Math.min(85, Math.max(35, legContext!.miles / 2 + 16)) : 40;
-        const found = await api.getOsmPois(target.lat, target.lng, radius, 'water,trailhead,viewpoint,peak,hot_spring');
-        setPois(useLeg
-          ? found
-              .map(poi => ({ ...poi, route_distance_mi: pointSegmentDistanceMi(poi, legContext!.from, legContext!.to) } as OsmPoi & { route_distance_mi: number }))
-              .filter(poi => poi.route_distance_mi <= Math.max(20, Math.min(50, legContext!.miles * 0.5)))
-              .sort((a, b) => a.route_distance_mi - b.route_distance_mi)
-          : found);
+        if (useLeg) {
+          const radius = Math.max(24, Math.min(42, leg!.miles / 5 + 12));
+          const found = uniqueByGeo((await Promise.all(
+            legSamplePoints(leg!).map(point => api.getOsmPois(point.lat, point.lng, radius, ROUTE_POI_TYPES).catch(() => []))
+          )).flat());
+          const offlineRoutePlaces = routeScopedOfflinePlaces(
+            offlinePlaces,
+            leg!,
+            ROUTE_POI_TYPES.split(',').filter(type => type !== 'fuel' && type !== 'propane')
+          );
+          const routePlaces = uniqueByGeo([...found, ...offlineRoutePlaces]);
+          if (routePlaces.length === 0) {
+            const fallbackQueries: Array<[string, OsmPoi['type']]> = [
+              ['trailhead', 'trailhead'],
+              ['viewpoint', 'viewpoint'],
+              ['water', 'water'],
+              ['grocery', 'grocery'],
+            ];
+            const nominatimPlaces = uniqueByGeo((await Promise.all(
+              legSamplePoints(leg!).flatMap(point =>
+                fallbackQueries.map(([query, type]) => searchNominatimNearby(query, point, radius, type, 3).catch(() => []))
+              )
+            )).flat());
+            routePlaces.push(...nominatimPlaces);
+          }
+          const scoped = spreadAlongLeg(routePlaces
+              .map(poi => withLegProjection(poi, leg!))
+              .filter(poi => poi.route_distance_mi <= routeBufferForMiles(leg!.miles) + 5)
+          );
+          setPois(scoped);
+          setDiscoverySummary(`${scoped.length} place${scoped.length === 1 ? '' : 's'} along this leg`);
+        } else {
+          const found = await api.getOsmPois(target.lat, target.lng, 40, ROUTE_POI_TYPES).catch(() => []);
+          const offlineRoutePlaces = areaScopedOfflinePlaces(
+            offlinePlaces,
+            target,
+            ROUTE_POI_TYPES.split(',').filter(type => type !== 'fuel' && type !== 'propane'),
+            45
+          );
+          const routePlaces = uniqueByGeo([...found, ...offlineRoutePlaces]);
+          if (routePlaces.length === 0) {
+            const fallbackQueries: Array<[string, OsmPoi['type']]> = [
+              ['trailhead', 'trailhead'],
+              ['viewpoint', 'viewpoint'],
+              ['water', 'water'],
+              ['grocery', 'grocery'],
+            ];
+            const nominatimPlaces = uniqueByGeo((await Promise.all(
+              fallbackQueries.map(([query, type]) => searchNominatimNearby(query, target, 40, type, 5).catch(() => []))
+            )).flat());
+            routePlaces.push(...nominatimPlaces);
+          }
+          const scoped = routePlaces
+            .map(poi => ({ ...poi, route_distance_mi: poi.route_distance_mi ?? haversineMi(poi, target) }))
+            .sort((a, b) => (a.route_distance_mi ?? 999) - (b.route_distance_mi ?? 999));
+          setPois(scoped);
+          setDiscoverySummary(`${scoped.length} place${scoped.length === 1 ? '' : 's'} near this area`);
+        }
       }
     } catch {
       Alert.alert('Search failed', 'Could not load nearby stops right now.');
+      setInlineSearch(null);
     } finally {
       setDiscoverLoading(false);
     }
   }
 
+  function clearDiscoveryResults() {
+    setCamps([]);
+    setGas([]);
+    setPois([]);
+    setDiscoverySummary('');
+    setInlineSearch(null);
+  }
+
+  async function discover() {
+    const target = legContext ? legContext.center : anchor;
+    if (!target) {
+      Alert.alert('Add a stop first', 'Start with a city, address, or map point, then discover camps, fuel, and POIs nearby.');
+      return;
+    }
+    setInlineSearch(null);
+    await runDiscovery(discoverTab, target, legContext);
+  }
+
   function addCamp(camp: CampsitePin) {
+    const stopDay = insertTargetDay ?? activeDay;
+    const campStop: BuilderStop = {
+      id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      day: stopDay,
+      name: camp.name,
+      lat: camp.lat,
+      lng: camp.lng,
+      type: 'camp',
+      description: camp.description || 'Camp selected in Route Builder.',
+      land_type: camp.land_type || 'camp',
+      source: 'camp',
+      camp,
+    };
+    if (replaceStopId) {
+      setStops(prev => {
+        const replaced = prev.map(st => st.id === replaceStopId ? {
+          ...st,
+          ...campStop,
+          id: st.id,
+          day: st.day,
+          gas: undefined,
+          poi: undefined,
+        } : st);
+        const anchorStop = replaced.find(st => st.id === replaceStopId) ?? campStop;
+        return rebalanceFrameworkTargets(replaced, anchorStop);
+      });
+      setReplaceStopId(null);
+      setInsertAfterId(null);
+      setInsertTargetDay(null);
+      setSelectedCamp(null);
+      clearDiscoveryResults();
+      fly(camp.lat, camp.lng, 12);
+      return;
+    }
+    const targetDay = legContext ? stopDay : null;
+    const frameworkTarget = targetDay
+      ? orderedStops.find(st => st.day === targetDay && isFrameworkTarget(st))
+      : null;
+    if (frameworkTarget) {
+      setStops(prev => {
+        const anchorStop = { ...campStop, id: frameworkTarget.id, day: frameworkTarget.day };
+        return rebalanceFrameworkTargets(prev.map(st => st.id === frameworkTarget.id ? anchorStop : st), anchorStop);
+      });
+      setSelectedCamp(null);
+      setInsertAfterId(null);
+      setInsertTargetDay(null);
+      clearDiscoveryResults();
+      fly(camp.lat, camp.lng, 12);
+      return;
+    }
     addStop({
       name: camp.name,
       lat: camp.lat,
@@ -561,7 +1245,11 @@ export default function RouteBuilderScreen() {
       land_type: camp.land_type || 'camp',
       source: 'camp',
       camp,
+      day: stopDay,
     });
+    clearDiscoveryResults();
+    setInsertAfterId(null);
+    setInsertTargetDay(null);
   }
 
   function addGas(station: GasStation) {
@@ -575,6 +1263,7 @@ export default function RouteBuilderScreen() {
       source: 'gas',
       gas: station,
     });
+    clearDiscoveryResults();
   }
 
   function addPoi(poi: OsmPoi) {
@@ -589,17 +1278,94 @@ export default function RouteBuilderScreen() {
       source: 'poi',
       poi,
     });
+    clearDiscoveryResults();
   }
 
   function removeStop(id: string) {
     if (insertAfterId === id) setInsertAfterId(null);
+    if (insertAfterId === id) setInsertTargetDay(null);
+    if (replaceStopId === id) setReplaceStopId(null);
     setStops(prev => prev.filter(st => st.id !== id));
   }
 
   function selectInsertStop(stop: BuilderStop) {
-    setInsertAfterId(prev => prev === stop.id ? null : stop.id);
+    setInsertAfterId(prev => {
+      const next = prev === stop.id ? null : stop.id;
+      setInsertTargetDay(next ? stop.day : null);
+      return next;
+    });
     setActiveDay(stop.day);
     fly(stop.lat, stop.lng, 13);
+  }
+
+  function scanBetweenStops(from: BuilderStop, to: BuilderStop, tab: DiscoveryTab, targetDay = from.day, purpose: LegSearchContext['purpose'] = 'leg', inline = true) {
+    const miles = haversineMi(from, to);
+    const leg = { from, to, miles, center: midpoint(from, to), targetDay, purpose };
+    setInsertAfterId(from.id);
+    setInsertTargetDay(targetDay);
+    setActiveDay(targetDay);
+    setDiscoverTab(tab);
+    setInlineSearch(inline ? {
+      day: targetDay,
+      tab,
+      label: tab === 'camps'
+        ? `Choose an overnight near Day ${targetDay} endpoint`
+        : `Add ${tab === 'gas' ? 'fuel' : 'places'} between ${from.name.split(',')[0]} and ${to.name.split(',')[0]}`,
+    } : null);
+    runDiscovery(tab, leg.center, leg, { focusMap: false });
+  }
+
+  function scanDayPlan(plan: RouteDayPlan, tab: DiscoveryTab) {
+    setActiveDay(plan.day);
+    const from = plan.previous ?? plan.stops[0] ?? null;
+    const to = plan.target ?? plan.stops[plan.stops.length - 1] ?? null;
+    if (from && to && from.id !== to.id) {
+      scanBetweenStops(from, to, tab, plan.day, tab === 'camps' ? 'overnight' : 'leg');
+      return;
+    }
+    if (to) {
+      setDiscoverTab(tab);
+      setInsertTargetDay(plan.day);
+      setInlineSearch({
+        day: plan.day,
+        tab,
+        label: tab === 'camps' ? `Choose a camp near Day ${plan.day}` : `Add ${tab === 'gas' ? 'fuel' : 'places'} near Day ${plan.day}`,
+      });
+      runDiscovery(tab, { lat: to.lat, lng: to.lng }, null, { focusMap: false });
+      return;
+    }
+    const fallbackTarget = plan.previous ?? orderedStops[orderedStops.length - 1] ?? anchor;
+    if (fallbackTarget) {
+      setDiscoverTab(tab);
+      setInsertTargetDay(plan.day);
+      setInlineSearch({
+        day: plan.day,
+        tab,
+        label: tab === 'camps'
+          ? `Choose a camp near Day ${plan.day}`
+          : `Add ${tab === 'gas' ? 'fuel' : 'places'} near Day ${plan.day}`,
+      });
+      runDiscovery(tab, { lat: fallbackTarget.lat, lng: fallbackTarget.lng }, null, { focusMap: false });
+      return;
+    }
+    setInlineSearch(null);
+    Alert.alert('Start the route first', 'Add a start location and destination, then Trailhead can search camps, fuel, and places for each day.');
+  }
+
+  function replaceCampStop(stop: BuilderStop) {
+    const sortedIdx = orderedStops.findIndex(st => st.id === stop.id);
+    const from = orderedStops[sortedIdx - 1] ?? orderedStops[sortedIdx];
+    const leg = from && from.id !== stop.id
+      ? { from, to: stop, miles: haversineMi(from, stop), center: midpoint(from, stop), targetDay: stop.day, purpose: 'overnight' as const }
+      : null;
+    setReplaceStopId(stop.id);
+    setInsertAfterId(from?.id ?? null);
+    setInsertTargetDay(stop.day);
+    setActiveDay(stop.day);
+    setDiscoverTab('camps');
+    setInlineSearch({ day: stop.day, tab: 'camps', label: `Swap the Day ${stop.day} camp` });
+    if (leg) runDiscovery('camps', leg.center, leg, { focusMap: false });
+    else runDiscovery('camps', { lat: stop.lat, lng: stop.lng }, null, { focusMap: false });
   }
 
   function moveStop(id: string, dir: -1 | 1) {
@@ -658,7 +1424,18 @@ export default function RouteBuilderScreen() {
         setPaywallMessage(e.message || 'Use credits or Explorer to open full campsite profiles. You can still add this camp to your route from the free preview.');
         setPaywallVisible(true);
       } else {
-        Alert.alert('Camp details unavailable', 'This camp does not have a full profile yet.');
+        setCampDetail({
+          ...selectedCamp,
+          photos: selectedCamp.photo_url ? [selectedCamp.photo_url] : [],
+          amenities: [],
+          site_types: selectedCamp.tags ?? [],
+          activities: [],
+          campsites_count: 0,
+          source: selectedCamp.verified_source ?? selectedCamp.source,
+          description: stripHtml(selectedCamp.description) || 'This camp has a route preview, but a full profile has not been built yet. You can still add it to the trip and replace it later from the route.',
+        } as CampsiteDetail);
+        setCampInsight(null);
+        setShowCampDetail(true);
       }
     } finally {
       setDetailLoading(false);
@@ -669,6 +1446,248 @@ export default function RouteBuilderScreen() {
     const next = Math.max(...days) + 1;
     setDays(prev => [...prev, next]);
     setActiveDay(next);
+  }
+
+  function ensureCampForDay(campStop: BuilderStop, targetDay: number, rest = false) {
+    setDays(prev => prev.includes(targetDay) ? prev : [...prev, targetDay].sort((a, b) => a - b));
+    setStops(prev => {
+      const hasSameCamp = prev.some(st => st.day === targetDay && (st.type === 'camp' || st.type === 'motel') && closeEnough(st, campStop));
+      const withoutFrameworkTarget = prev.filter(st => !(st.day === targetDay && isFrameworkTarget(st)));
+      if (hasSameCamp) return withoutFrameworkTarget;
+      const clone: BuilderStop = {
+        ...campStop,
+        id: `rest_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        day: targetDay,
+        type: campStop.type === 'motel' ? 'motel' : 'camp',
+        description: rest ? `Rest day at ${campStop.name}.` : campStop.description,
+        gas: undefined,
+        poi: undefined,
+      };
+      return [...withoutFrameworkTarget, clone];
+    });
+    if (rest) setRestDays(prev => prev.includes(targetDay) ? prev : [...prev, targetDay].sort((a, b) => a - b));
+    setActiveDay(targetDay);
+    setInsertAfterId(null);
+    setInsertTargetDay(null);
+    setReplaceStopId(null);
+    fly(campStop.lat, campStop.lng, 12);
+  }
+
+  function stayAtCampNextDay(campStop: BuilderStop) {
+    ensureCampForDay(campStop, campStop.day + 1, true);
+  }
+
+  function toggleRestDay(day: number) {
+    if (restDays.includes(day)) {
+      setRestDays(prev => prev.filter(d => d !== day));
+      return;
+    }
+    const sameDayCamp = [...orderedStops].reverse().find(st => st.day === day && (st.type === 'camp' || st.type === 'motel')) ?? null;
+    const previousCamp = [...orderedStops].reverse().find(st => st.day < day && (st.type === 'camp' || st.type === 'motel')) ?? null;
+    const camp = sameDayCamp ?? previousCamp;
+    if (camp) {
+      ensureCampForDay(camp, day, true);
+      return;
+    }
+    setRestDays(prev => [...prev, day].sort((a, b) => a - b));
+  }
+
+  async function addDestinationFromSetup() {
+    const q = endQuery.trim();
+    if (!q) {
+      Alert.alert('Destination needed', 'Enter the place you want to end up at, then build the route framework.');
+      return null;
+    }
+    setBuildingFramework(true);
+    try {
+      let start = orderedStops[0] ?? null;
+      const startQ = startQuery.trim();
+      if (startQ) {
+        const [startPlace] = await geocodePlaces(startQ);
+        if (!startPlace) {
+          Alert.alert('Start not found', 'Try a city, address, trailhead, or coordinates for the route start.');
+          return null;
+        }
+        start = {
+          id: `start_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          day: 1,
+          name: startPlace.name,
+          lat: startPlace.lat,
+          lng: startPlace.lng,
+          type: 'start',
+          description: 'Route start.',
+          land_type: 'route',
+          source: 'search',
+        };
+      } else if (!start && userLoc) {
+        start = {
+          id: `start_${Date.now()}`,
+          day: 1,
+          name: 'Current location',
+          lat: userLoc.lat,
+          lng: userLoc.lng,
+          type: 'start' as BuilderStopType,
+          description: 'Route start.',
+          land_type: 'route',
+          source: 'map' as const,
+        };
+      } else if (!start && !startQ) {
+        const loc = await getRouteBuilderLocation();
+        if (!loc) return null;
+        start = {
+          id: `start_${Date.now()}`,
+          day: 1,
+          name: 'Current location',
+          lat: loc.lat,
+          lng: loc.lng,
+          type: 'start' as BuilderStopType,
+          description: 'Route start.',
+          land_type: 'route',
+          source: 'map' as const,
+        };
+      }
+      const [place] = await geocodePlaces(q);
+      if (!place) {
+        Alert.alert('Destination not found', 'Try a city, campground, park, trailhead, or coordinates.');
+        return null;
+      }
+      if (!start) {
+        Alert.alert('Start needed', 'Add a start point or allow location so Trailhead knows where the route begins.');
+        return null;
+      }
+      const destination: BuilderStop = {
+        id: `dest_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        day: Math.max(1, Math.round(parsePositiveNumber(plannedDays) ?? 3)),
+        name: place.name,
+        lat: place.lat,
+        lng: place.lng,
+        type: 'waypoint',
+        description: 'Route destination.',
+        land_type: 'route',
+        source: 'search',
+      };
+      const next = orderedStops.length
+        ? [start, ...orderedStops.slice(1, Math.max(1, orderedStops.length - 1)), destination]
+        : [start, destination];
+      setStops(next);
+      setEndQuery('');
+      fly((start.lat + destination.lat) / 2, (start.lng + destination.lng) / 2, 5);
+      return next;
+    } finally {
+      setBuildingFramework(false);
+    }
+  }
+
+  async function buildRouteFramework() {
+    let base = orderedStops;
+    if (endQuery.trim()) {
+      const next = await addDestinationFromSetup();
+      if (!next) return;
+      base = next;
+    }
+    if (base.length < 2) {
+      Alert.alert('Start and end needed', 'Add a start and destination first. Trailhead will split the route into day target areas from there.');
+      return;
+    }
+    const routeMiles = haversineMi(base[0], base[base.length - 1]);
+    const plannedCount = parsePositiveNumber(plannedDays) ?? days.length ?? 3;
+    const milesCount = Math.ceil(routeMiles / (parsePositiveNumber(targetMiles) ?? 180));
+    const count = Math.max(1, Math.min(14, Math.round(distanceMode === 'miles' ? milesCount : plannedCount)));
+    const first = base[0];
+    const last = base[base.length - 1];
+    const buildLoop = tripLoop && count > 1 && !closeEnough(first, last);
+    const turnDay = buildLoop ? Math.max(1, Math.min(count - 1, Math.ceil(count / 2))) : count;
+    const styleLabel = routeStyle === 'adventure' ? 'scenic target area' : routeStyle === 'direct' ? 'direct target area' : 'target area';
+    const scenicOffset = routeStyle === 'adventure'
+      ? Math.max(35, Math.min(140, routeMiles * 0.16))
+      : routeStyle === 'balanced'
+      ? Math.max(16, Math.min(70, routeMiles * 0.07))
+      : 0;
+    const framework: BuilderStop[] = [
+      { ...first, day: 1, type: first.type === 'start' ? 'start' : first.type },
+    ];
+    if (tripBuildMode === 'recommended') {
+      for (let day = 1; day < count; day++) {
+        const outbound = !buildLoop || day <= turnDay;
+        const t = buildLoop
+          ? outbound
+            ? day / turnDay
+            : (day - turnDay) / (count - turnDay)
+          : day / count;
+        const from = outbound ? first : last;
+        const to = outbound ? last : first;
+        const point = scenicPoint(
+          from,
+          to,
+          t,
+          buildLoop
+            ? outbound ? scenicOffset : -scenicOffset
+            : routeStyle === 'adventure' ? scenicOffset * (day % 2 === 0 ? -0.65 : 1) : 0
+        );
+        const name = buildLoop && day === turnDay
+          ? `${last.name.split(',')[0]} turnaround`
+          : `Day ${day} ${styleLabel}`;
+        framework.push({
+          id: `target_${Date.now()}_${day}_${Math.random().toString(36).slice(2, 6)}`,
+          day,
+          name,
+          lat: point.lat,
+          lng: point.lng,
+          type: 'waypoint',
+          description: buildLoop && day === turnDay
+            ? 'Loop turnaround target. Pick a camp nearby, then build the return days back to the start.'
+            : `Planning anchor based on ${distanceMode === 'miles' ? `${Math.round(parsePositiveNumber(targetMiles) ?? 180)} miles` : `${fmtHours(parsePositiveNumber(dayDriveTargets[day]) ?? planningStats.driveLimit)} max drive`} between stops. Add fuel, POIs, and camp choices around this leg.`,
+          land_type: 'route',
+          source: 'map',
+        });
+      }
+    }
+    framework.push(buildLoop
+      ? {
+          ...first,
+          id: `return_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          day: count,
+          type: 'waypoint',
+          name: `${first.name.split(',')[0]} return`,
+          description: 'Loop return to the route start.',
+          source: 'map',
+        }
+      : { ...last, day: count });
+    setDays(Array.from({ length: count }, (_, i) => i + 1));
+    setStops(framework);
+    setActiveDay(1);
+    setInsertAfterId(null);
+    setInsertTargetDay(null);
+    setRouteName(routeName.trim() || (buildLoop ? `${first.name.split(',')[0]} to ${last.name.split(',')[0]} Loop` : `${first.name.split(',')[0]} to ${last.name.split(',')[0]}`));
+    fly((first.lat + last.lat) / 2, (first.lng + last.lng) / 2, 5);
+    setShowBuildSuccess(true);
+  }
+
+  function closeLoopToStart() {
+    if (orderedStops.length < 2) return;
+    const first = orderedStops[0];
+    const last = orderedStops[orderedStops.length - 1];
+    if (closeEnough(first, last)) {
+      setTripLoop(true);
+      return;
+    }
+    setInsertAfterId(null);
+    setInsertTargetDay(null);
+    setActiveDay(last.day);
+    setTripLoop(true);
+    const stop: BuilderStop = {
+      id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      name: `${first.name.split(',')[0]} return`,
+      lat: first.lat,
+      lng: first.lng,
+      type: 'waypoint',
+      description: 'Loop return to the route start.',
+      land_type: first.land_type || 'route',
+      source: 'map',
+      day: last.day,
+    };
+    setStops(prev => [...prev, stop]);
+    fly(stop.lat, stop.lng, 11);
   }
 
   function resolvedRouteName() {
@@ -683,7 +1702,8 @@ export default function RouteBuilderScreen() {
 
   function buildTrip(): TripResult {
     const sorted = orderedStops;
-    const waypoints: Waypoint[] = sorted.map(st => ({
+    const navStops = sorted.filter(st => !isFrameworkTarget(st));
+    const waypoints: Waypoint[] = navStops.map(st => ({
       day: st.day,
       name: st.name,
       type: st.type,
@@ -695,24 +1715,32 @@ export default function RouteBuilderScreen() {
       verified_match: true,
     }));
     const daily_itinerary = days.map(day => {
-      const wps = sorted.filter(st => st.day === day);
+      const wps = navStops.filter(st => st.day === day);
+      const hasPlanningTarget = sorted.some(st => st.day === day && isFrameworkTarget(st));
+      const prev = [...navStops].reverse().find(st => st.day < day) ?? null;
       let miles = 0;
+      if (prev && wps.length) miles += haversineMi(prev, wps[0]);
       for (let i = 1; i < wps.length; i++) miles += haversineMi(wps[i - 1], wps[i]);
       const first = wps[0]?.name?.split(',')[0] ?? 'Start';
-      const last = wps[wps.length - 1]?.name?.split(',')[0] ?? 'Finish';
+      const last = wps[wps.length - 1]?.name?.split(',')[0] ?? (hasPlanningTarget ? 'overnight camp needed' : 'Finish');
+      const rest = restDays.includes(day);
       return {
         day,
-        title: `Day ${day}: ${first} to ${last}`,
-        description: wps.length
+        title: rest ? `Day ${day}: Rest / local exploring` : `Day ${day}: ${first} to ${last}`,
+        description: rest
+          ? 'Rest day. Keep the camp, add local POIs, or set a shorter drive max.'
+          : wps.length
           ? `Manual route day with ${wps.length} planned stop${wps.length === 1 ? '' : 's'}.`
+          : hasPlanningTarget
+          ? 'Planning day. Pick an overnight camp before using GPS navigation.'
           : 'Open day. Add a destination, fuel, POIs, and camp.',
         est_miles: Math.round(miles),
-        road_type: 'mixed',
+        road_type: rest ? 'none' : routeStyle === 'adventure' ? 'backroads' : routeStyle === 'direct' ? 'direct' : 'mixed',
         highlights: wps.filter(st => st.type === 'waypoint' || st.type === 'camp').slice(0, 3).map(st => st.name),
       };
     });
-    const campsites = sorted.filter(st => st.camp).map(st => ({ ...st.camp!, recommended_day: st.day }));
-    const gas_stations = sorted.filter(st => st.gas).map(st => ({ ...st.gas!, recommended_day: st.day }));
+    const campsites = navStops.filter(st => st.camp).map(st => ({ ...st.camp!, recommended_day: st.day }));
+    const gas_stations = navStops.filter(st => st.gas).map(st => ({ ...st.gas!, recommended_day: st.day }));
     return {
       trip_id: importedTripId ? `${importedTripId}_edited_${Date.now()}` : `manual_${Date.now()}`,
       plan: {
@@ -726,16 +1754,16 @@ export default function RouteBuilderScreen() {
         waypoints,
         daily_itinerary,
         logistics: {
-          vehicle_recommendation: 'User-built route. Review road surfaces before departure.',
-          fuel_strategy: 'Fuel stops are manually selected. Add fuel before remote stretches.',
+          vehicle_recommendation: `User-built ${routeStyle} route. Review road surfaces against the saved rig profile before departure.`,
+          fuel_strategy: `Estimated fuel: ${Math.round(planningStats.gallons)} gal / $${Math.round(planningStats.fuelCost)} at ${planningStats.mpg} MPG and $${planningStats.price.toFixed(2)}/gal. Fuel stops are manually selected.`,
           water_strategy: 'Carry water for each day and add water POIs where needed.',
-          permits_needed: 'Check local land manager rules for selected camps and trailheads.',
-          best_season: 'Verify seasonal closures and weather before departure.',
+          permits_needed: `${tripLoop ? 'Loop route. ' : ''}Check local land manager rules for selected camps and trailheads.`,
+          best_season: `Verify seasonal closures and weather before departure. Daily drive max: ${fmtHours(planningStats.driveLimit)}.`,
         },
       },
       campsites,
       gas_stations,
-      route_pois: sorted.filter(st => st.poi).map(st => st.poi!),
+      route_pois: navStops.filter(st => st.poi).map(st => st.poi!),
     };
   }
 
@@ -756,7 +1784,346 @@ export default function RouteBuilderScreen() {
       planned_at: Date.now(),
     });
     await saveOfflineTrip(trip).catch(() => {});
-    if (openMap) router.push('/map');
+    if (openMap) router.push('/(tabs)/map');
+  }
+
+  function renderCampPreview(stop: BuilderStop, label: string, compact = false) {
+    const camp = stop.camp;
+    return (
+      <View style={[s.selectedCampCard, compact && s.selectedCampCardCompact]}>
+        <View style={[s.selectedCampPhotoWrap, compact && s.selectedCampPhotoWrapCompact]}>
+          {camp?.photo_url ? (
+            <Image source={{ uri: camp.photo_url }} style={[s.selectedCampPhoto, compact && s.selectedCampPhotoCompact]} resizeMode="cover" />
+          ) : (
+            <View style={[s.selectedCampPlaceholder, compact && s.selectedCampPhotoCompact, { backgroundColor: landColor(stop.land_type).bg }]}>
+              <Ionicons name={stop.type === 'motel' ? 'bed-outline' : 'bonfire-outline'} size={compact ? 18 : 24} color={landColor(stop.land_type).text} />
+            </View>
+          )}
+        </View>
+        <View style={[s.selectedCampBody, compact && s.selectedCampBodyCompact]}>
+          <Text style={s.selectedCampLabel}>{label}</Text>
+          <Text style={s.selectedCampName} numberOfLines={2}>{stop.name}</Text>
+          <Text style={s.selectedCampMeta} numberOfLines={2}>
+            {stop.land_type || stopLabel(stop.type)}{camp?.cost ? ` · ${camp.cost}` : ''}{restDays.includes(stop.day) ? ' · rest day' : ''}
+          </Text>
+          {!compact ? (
+            <View style={s.campPreviewActions}>
+              <TouchableOpacity style={s.campPreviewBtn} onPress={() => replaceCampStop(stop)}>
+                <Ionicons name="swap-horizontal-outline" size={12} color={C.orange} />
+                <Text style={s.campPreviewBtnText}>SWAP</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.campPreviewBtn} onPress={() => stayAtCampNextDay(stop)}>
+                <Ionicons name="bed-outline" size={12} color={C.green} />
+                <Text style={[s.campPreviewBtnText, { color: C.green }]}>STAY NEXT DAY</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+        </View>
+        {camp ? (
+          <TouchableOpacity style={s.selectedCampSwap} onPress={() => openCampDetail(camp)}>
+            <Ionicons name="image-outline" size={14} color={C.orange} />
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    );
+  }
+
+  function renderRouteTimeline() {
+    if (!hasBaseRoute) return null;
+    return (
+      <View style={s.routeTimelineCard}>
+        <View style={s.routeTimelineTop}>
+          <View style={{ flex: 1 }}>
+            <Text style={s.routeTimelineTitle}>Trip overview</Text>
+            <Text style={s.routeTimelineSub}>Scroll days, choose camps, then add fuel and places in the matching segment.</Text>
+          </View>
+          <TouchableOpacity style={s.routeTimelineLoop} onPress={() => setTripLoop(v => !v)}>
+            <Ionicons name={tripLoop ? 'repeat' : 'repeat-outline'} size={13} color={tripLoop ? C.green : C.text3} />
+            <Text style={[s.routeTimelineLoopText, tripLoop && { color: C.green }]}>ROUND</Text>
+          </TouchableOpacity>
+        </View>
+        {routeDayPlans.map(plan => {
+          const camp = plan.stops.find(st => st.type === 'camp' || st.type === 'motel') ?? null;
+          return (
+            <View key={plan.day} style={s.routeDayWrap}>
+              <TouchableOpacity activeOpacity={0.88} style={[s.routeDayCard, activeDay === plan.day && s.routeDayCardActive]} onPress={() => setActiveDay(plan.day)}>
+                <View style={s.routeDayDotCol}>
+                  <View style={[s.routeDayDot, plan.complete && { backgroundColor: C.green, borderColor: C.green }]} />
+                  <View style={s.routeDayStem} />
+                </View>
+                <View style={{ flex: 1, gap: 8 }}>
+                  <View style={s.routeDayHeader}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.routeDayTitle}>Day {plan.day}{plan.rest ? ' · Rest' : ''}</Text>
+                      <Text style={s.routeDayMeta}>{fmtMi(plan.miles)} · {fmtHours(plan.hours)}{plan.previous ? ` · from ${plan.previous.name.split(',')[0]}` : ''}</Text>
+                    </View>
+                    <TouchableOpacity style={s.routeDayMiniBtn} onPress={() => scanDayPlan(plan, 'camps')}>
+                      <Ionicons name="bonfire-outline" size={13} color={C.orange} />
+                    </TouchableOpacity>
+                    <TouchableOpacity style={s.routeDayMiniBtn} onPress={() => scanDayPlan(plan, 'gas')}>
+                      <Ionicons name="flash-outline" size={13} color={C.orange} />
+                    </TouchableOpacity>
+                  </View>
+                  {camp ? (
+                    renderCampPreview(camp, plan.rest ? 'OVERNIGHT / REST CAMP' : 'OVERNIGHT CAMP', true)
+                  ) : (
+                    <TouchableOpacity style={s.routeDayEmptyCamp} onPress={() => scanDayPlan(plan, 'camps')}>
+                      <Ionicons name="add-circle-outline" size={14} color={C.orange} />
+                      <Text style={s.routeDayEmptyCampText}>{plan.frameworkTarget ? 'Choose camp near day finish' : 'Choose overnight camp'}</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </TouchableOpacity>
+              {renderInlineResultsForDay(plan.day)}
+            </View>
+          );
+        })}
+      </View>
+    );
+  }
+
+  function renderInlineResultsForDay(day: number) {
+    if (!inlineSearch || inlineSearch.day !== day) return null;
+    const inlineTab = inlineSearch.tab;
+    return (
+      <View style={s.inlineResults}>
+        <View style={s.inlineResultsTop}>
+          <View style={{ flex: 1 }}>
+            <Text style={s.inlineResultsTitle}>{inlineSearch.label}</Text>
+            <Text style={s.inlineResultsSub}>{discoverySummary || 'Searching along this day segment'}</Text>
+          </View>
+          <TouchableOpacity style={s.inlineClose} onPress={() => setInlineSearch(null)}>
+            <Ionicons name="close" size={13} color={C.text3} />
+          </TouchableOpacity>
+        </View>
+        {discoverLoading ? (
+          <View style={s.inlineLoading}>
+            <ActivityIndicator size="small" color={C.orange} />
+            <Text style={s.inlineLoadingText}>Finding options on this route segment...</Text>
+          </View>
+        ) : inlineTab === 'camps' ? (
+          camps.length ? camps.slice(0, 6).map(camp => (
+            <TouchableOpacity key={camp.id} style={s.inlineCampCard} onPress={() => openCampDetail(camp)}>
+              <View style={s.inlineCampPhotoWrap}>
+                {camp.photo_url ? (
+                  <Image source={{ uri: camp.photo_url }} style={s.inlineCampPhoto} resizeMode="cover" />
+                ) : (
+                  <View style={[s.inlineCampPlaceholder, { backgroundColor: landColor(camp.land_type).bg }]}>
+                    <Ionicons name="bonfire-outline" size={19} color={landColor(camp.land_type).text} />
+                  </View>
+                )}
+              </View>
+              <View style={s.inlineCampBody}>
+                <Text style={s.candidateName} numberOfLines={2}>{camp.name}</Text>
+                <Text style={s.candidateMeta} numberOfLines={2}>
+                  {camp.route_distance_mi != null ? `${fmtMi(camp.route_distance_mi)} off route · ` : ''}
+                  {routeProgressLabel((camp as any).route_progress) ? `${routeProgressLabel((camp as any).route_progress)} · ` : ''}
+                  {camp.land_type || 'Camp'} · {camp.cost || 'See site'}
+                </Text>
+              </View>
+              <TouchableOpacity style={s.useBtn} onPress={() => addCamp(camp)}>
+                <Text style={s.useBtnText}>{replaceStopId ? 'SWAP' : 'USE'}</Text>
+              </TouchableOpacity>
+            </TouchableOpacity>
+          )) : (
+            <Text style={s.inlineEmpty}>No camps found for this day segment.</Text>
+          )
+        ) : inlineTab === 'gas' ? (
+          gas.length ? gas.slice(0, 6).map(station => (
+            <TouchableOpacity key={String(station.id)} style={s.inlineStopRow} onPress={() => { addGas(station); fly(station.lat, station.lng, 13); }}>
+              <View style={[s.candidateIcon, { borderColor: '#eab30866', backgroundColor: '#eab30818' }]}>
+                <Ionicons name="flash-outline" size={16} color="#eab308" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.candidateName} numberOfLines={1}>{station.name}</Text>
+                <Text style={s.candidateMeta} numberOfLines={1}>
+                  {station.route_distance_mi != null ? `${fmtMi(station.route_distance_mi)} off route · ` : ''}
+                  {routeProgressLabel((station as any).route_progress) ? `${routeProgressLabel((station as any).route_progress)} · ` : ''}
+                  {station.address || station.fuel_types || 'Fuel stop'}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          )) : (
+            <Text style={s.inlineEmpty}>No fuel found for this day segment.</Text>
+          )
+        ) : (
+          discoveryPois.length ? discoveryPois.slice(0, 6).map(poi => (
+            <TouchableOpacity key={poi.id} style={s.inlineStopRow} onPress={() => { addPoi(poi); fly(poi.lat, poi.lng, 13); }}>
+              <View style={[s.candidateIcon, { borderColor: placeColor(poi.type) + '66', backgroundColor: placeColor(poi.type) + '18' }]}>
+                <Ionicons name={placeIcon(poi.type)} size={16} color={placeColor(poi.type)} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.candidateName} numberOfLines={1}>{poi.name || poi.type}</Text>
+                <Text style={s.candidateMeta} numberOfLines={1}>
+                  {(poi as any).route_distance_mi != null ? `${fmtMi((poi as any).route_distance_mi)} off route · ` : ''}
+                  {routeProgressLabel((poi as any).route_progress) ? `${routeProgressLabel((poi as any).route_progress)} · ` : ''}
+                  {poi.type.replace(/_/g, ' ')}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          )) : (
+            <Text style={s.inlineEmpty}>No places found for this day segment.</Text>
+          )
+        )}
+      </View>
+    );
+  }
+
+  function renderWizardSetup() {
+    const steps = ['Start', 'Destination', 'Style', 'Pace'];
+    const canMoveNext = wizardStep === 0
+      ? !!(startQuery.trim() || orderedStops[0] || userLoc)
+      : wizardStep === 1
+      ? !!(endQuery.trim() || orderedStops.length > 1)
+      : true;
+    const nextStep = () => setWizardStep(step => Math.min(3, step + 1));
+    return (
+      <View style={s.wizardCard}>
+        <View style={s.wizardSteps}>
+          {steps.map((label, idx) => (
+            <TouchableOpacity key={label} style={[s.wizardStep, wizardStep === idx && s.wizardStepActive]} onPress={() => setWizardStep(idx)}>
+              <Text style={[s.wizardStepNum, wizardStep === idx && s.wizardStepNumActive]}>{idx + 1}</Text>
+              <Text style={[s.wizardStepText, wizardStep === idx && s.wizardStepTextActive]}>{label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {wizardStep === 0 ? (
+          <View style={s.wizardPane}>
+            <View>
+              <Text style={s.wizardTitle}>Where are you starting?</Text>
+              <Text style={s.wizardHelp}>Use current location or type a city, trailhead, address, or coordinates.</Text>
+            </View>
+            <View style={s.setupInputWrap}>
+              <View style={s.setupLabelRow}>
+                <Text style={s.setupLabel}>START</Text>
+                <TouchableOpacity style={s.currentLocationBtn} onPress={async () => { await setWizardStartFromLocation(); setWizardStep(1); }}>
+                  <Ionicons name="locate-outline" size={10} color={C.orange} />
+                  <Text style={s.currentLocationText}>CURRENT</Text>
+                </TouchableOpacity>
+              </View>
+              <TextInput
+                value={startQuery}
+                onChangeText={setStartQuery}
+                placeholder={orderedStops[0]?.name?.split(',')[0] ?? (userLoc ? 'Current location' : 'Denver, address, coordinates')}
+                placeholderTextColor={C.text3}
+                style={s.setupInput}
+                returnKeyType="next"
+                blurOnSubmit={false}
+                onSubmitEditing={() => { if (canMoveNext) nextStep(); }}
+              />
+            </View>
+          </View>
+        ) : wizardStep === 1 ? (
+          <View style={s.wizardPane}>
+            <View>
+              <Text style={s.wizardTitle}>Where are you headed?</Text>
+              <Text style={s.wizardHelp}>Pick the final destination first. Trailhead will spread day targets and camp searches between start and finish.</Text>
+            </View>
+            <View style={s.setupInputWrap}>
+              <Text style={s.setupLabel}>DESTINATION</Text>
+              <TextInput
+                value={endQuery}
+                onChangeText={setEndQuery}
+                placeholder={orderedStops.length > 1 ? orderedStops[orderedStops.length - 1].name.split(',')[0] : 'Moab, Big Bend, coordinates'}
+                placeholderTextColor={C.text3}
+                style={s.setupInput}
+                returnKeyType="next"
+                blurOnSubmit={false}
+                onSubmitEditing={() => { if (canMoveNext) nextStep(); }}
+              />
+            </View>
+          </View>
+        ) : wizardStep === 2 ? (
+          <View style={s.wizardPane}>
+            <View>
+              <Text style={s.wizardTitle}>Choose the route feel</Text>
+              <Text style={s.wizardHelp}>Recommended builds a base route with day targets. Blank keeps it simple for hand-building.</Text>
+            </View>
+            <View style={s.modeRow}>
+              {(['recommended', 'blank'] as TripBuildMode[]).map(mode => (
+                <TouchableOpacity key={mode} style={[s.modeCard, tripBuildMode === mode && s.modeCardActive]} onPress={() => setTripBuildMode(mode)}>
+                  <View style={[s.radioDot, tripBuildMode === mode && s.radioDotActive]} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.modeTitle, tripBuildMode === mode && { color: C.orange }]}>{mode === 'recommended' ? 'Recommended Trip' : 'Blank Trip'}</Text>
+                    <Text style={s.modeText}>{mode === 'recommended' ? 'Auto-place day targets and camp searches.' : 'Only route points, then build by hand.'}</Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <View style={s.routeStyleRow}>
+              {(['balanced', 'direct', 'adventure'] as const).map(style => (
+                <TouchableOpacity key={style} style={[s.routeStyleChip, routeStyle === style && s.routeStyleChipActive]} onPress={() => setRouteStyle(style)}>
+                  <Ionicons name={style === 'direct' ? 'navigate-outline' : style === 'adventure' ? 'trail-sign-outline' : 'options-outline'} size={12} color={routeStyle === style ? C.orange : C.text3} />
+                  <Text style={[s.routeStyleText, routeStyle === style && { color: C.orange }]}>
+                    {style === 'adventure' ? 'WILD' : style.toUpperCase()}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        ) : (
+          <View style={s.wizardPane}>
+            <View>
+              <Text style={s.wizardTitle}>Set the daily pace</Text>
+              <Text style={s.wizardHelp}>Hours per day is the max you want to drive. Trailhead should not force every day to hit that limit.</Text>
+            </View>
+            <View style={s.setupGridPair}>
+              <View style={s.setupInputWrap}>
+                <Text style={s.setupLabel}>DAYS</Text>
+                <TextInput value={plannedDays} onChangeText={setPlannedDays} keyboardType="number-pad" style={s.setupInput} placeholder="3" placeholderTextColor={C.text3} />
+              </View>
+              <View style={s.setupInputWrap}>
+                <Text style={s.setupLabel}>{distanceMode === 'hours' ? 'MAX HRS / DAY' : 'MI / STOP'}</Text>
+                <TextInput
+                  value={distanceMode === 'hours' ? driveHoursPerDay : targetMiles}
+                  onChangeText={distanceMode === 'hours' ? setDriveHoursPerDay : setTargetMiles}
+                  keyboardType="decimal-pad"
+                  style={s.setupInput}
+                  placeholder={distanceMode === 'hours' ? '5' : '180'}
+                  placeholderTextColor={C.text3}
+                />
+              </View>
+            </View>
+            <View style={s.segmentRow}>
+              {(['hours', 'miles'] as DistanceMode[]).map(mode => (
+                <TouchableOpacity key={mode} style={[s.segmentBtn, distanceMode === mode && s.segmentBtnActive]} onPress={() => setDistanceMode(mode)}>
+                  <Text style={[s.segmentText, distanceMode === mode && { color: '#fff' }]}>{mode === 'hours' ? 'HOURS' : 'MILES'}</Text>
+                </TouchableOpacity>
+              ))}
+              <TouchableOpacity
+                style={[s.segmentBtn, tripLoop && s.segmentBtnActive]}
+                onPress={() => {
+                  if (tripLoop) setTripLoop(false);
+                  else if (orderedStops.length > 1) closeLoopToStart();
+                  else setTripLoop(true);
+                }}
+              >
+                <Text style={[s.segmentText, tripLoop && { color: '#fff' }]}>ROUND</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        <View style={s.wizardNav}>
+          <TouchableOpacity style={[s.wizardNavBtn, wizardStep === 0 && { opacity: 0.45 }]} onPress={() => setWizardStep(step => Math.max(0, step - 1))} disabled={wizardStep === 0}>
+            <Ionicons name="chevron-back" size={13} color={C.text3} />
+            <Text style={s.wizardNavText}>BACK</Text>
+          </TouchableOpacity>
+          {wizardStep < 3 ? (
+            <TouchableOpacity style={[s.wizardNextBtn, !canMoveNext && { opacity: 0.55 }]} onPress={nextStep} disabled={!canMoveNext}>
+              <Text style={s.wizardNextText}>NEXT</Text>
+              <Ionicons name="chevron-forward" size={13} color="#fff" />
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity style={s.wizardNextBtn} onPress={buildRouteFramework} disabled={buildingFramework}>
+              {buildingFramework ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="map-outline" size={13} color="#fff" />}
+              <Text style={s.wizardNextText}>{hasBaseRoute ? 'REBUILD ROUTE' : 'PREVIEW ROUTE'}</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+    );
   }
 
   return (
@@ -788,7 +2155,7 @@ export default function RouteBuilderScreen() {
         <NativeMap
           ref={mapRef}
           waypoints={mapWaypoints}
-          camps={camps}
+          camps={mapCamps}
           gas={gas.map(g => ({ lat: g.lat, lng: g.lng, name: g.name }))}
           pois={mapPois}
           reports={[]}
@@ -809,6 +2176,8 @@ export default function RouteBuilderScreen() {
           showAva={false}
           showRadar={false}
           onMapReady={() => {
+            if (didInitialMapFitRef.current) return;
+            didInitialMapFitRef.current = true;
             if (anchor) fly(anchor.lat, anchor.lng, 8);
             else if (userLoc) fly(userLoc.lat, userLoc.lng, 9);
           }}
@@ -861,6 +2230,57 @@ export default function RouteBuilderScreen() {
           </TouchableOpacity>
         </ScrollView>
 
+        <View style={s.builderHero}>
+          <View style={s.builderHeroTop}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.kicker}>{hasBaseRoute ? 'TRIP WORKSPACE' : 'BASE ROUTE'}</Text>
+              <Text style={s.builderHeroTitle}>{hasBaseRoute ? baseRouteSummary : 'Build the route first'}</Text>
+              <Text style={s.builderHeroText}>
+                {hasBaseRoute
+                  ? 'Scroll the route, fill each day with fuel, wild stops, and legal camp options.'
+                  : 'Pick a route shape, start, destination, rig pace, and camp style. Trailhead creates the base route, then you tune each day.'}
+              </Text>
+            </View>
+            <View style={s.progressBadge}>
+              <Text style={s.progressBadgeNum}>{hasBaseRoute ? `${realOvernights}/${routeDayPlans.length}` : `${setupProgress}/3`}</Text>
+              <Text style={s.progressBadgeText}>{hasBaseRoute ? 'CAMPS' : 'READY'}</Text>
+            </View>
+          </View>
+
+          {renderWizardSetup()}
+
+          <View style={s.routeStatStrip}>
+            <View style={s.routeStatItem}>
+              <Ionicons name="time-outline" size={14} color={C.text3} />
+              <Text style={s.routeStatValue}>{fmtHours(planningStats.driveHours)}</Text>
+            </View>
+            <View style={s.routeStatItem}>
+              <Ionicons name="car-outline" size={14} color={C.text3} />
+              <Text style={s.routeStatValue}>{fmtMi(totals.miles)}</Text>
+            </View>
+            <View style={s.routeStatItem}>
+              <Ionicons name="flash-outline" size={14} color={C.text3} />
+              <Text style={s.routeStatValue}>${Math.round(planningStats.fuelCost)}</Text>
+            </View>
+          </View>
+
+          {routeStates.length > 0 ? (
+            <View style={s.gasSourceStrip}>
+              <Ionicons name={gasPriceStatus === 'live' ? 'cloud-done-outline' : gasPriceStatus === 'loading' ? 'cloud-download-outline' : 'cloud-offline-outline'} size={13} color={gasPriceStatus === 'live' ? C.green : C.text3} />
+              <Text style={s.gasSourceText} numberOfLines={2}>
+                {gasPriceStatus === 'live'
+                  ? `AAA state avg: ${routeStates.slice(0, 4).map(st => `${st} $${(stateGasPrices[st] ?? planningStats.price).toFixed(2)}`).join(' · ')}`
+                  : gasPriceStatus === 'loading'
+                    ? 'Loading current state gas averages for this route'
+                    : `Using fallback gas price until live state averages load`}
+              </Text>
+            </View>
+          ) : null}
+
+          {renderRouteTimeline()}
+
+        </View>
+
         <View style={s.typeRow}>
           {(['start', 'fuel', 'waypoint', 'camp', 'motel'] as BuilderStopType[]).map(type => (
             <TouchableOpacity key={type} style={[s.typeChip, pendingType === type && { borderColor: stopColor(type), backgroundColor: stopColor(type) + '18' }]} onPress={() => setPendingType(type)}>
@@ -873,15 +2293,15 @@ export default function RouteBuilderScreen() {
         <View style={[s.insertCard, selectedInsertStop && { borderColor: C.orange + '66', backgroundColor: C.orange + '10' }]}>
           <Ionicons name={selectedInsertStop ? 'git-commit-outline' : 'add-circle-outline'} size={15} color={selectedInsertStop ? C.orange : C.text3} />
           <View style={{ flex: 1 }}>
-            <Text style={s.insertTitle}>{selectedInsertStop ? 'Adding after selected stop' : 'Adding to end of day'}</Text>
-            <Text style={s.insertText} numberOfLines={1}>
+            <Text style={s.insertTitle}>{selectedInsertStop ? 'Insert after stop' : 'Add to active day'}</Text>
+            <Text style={s.insertText} numberOfLines={3}>
               {selectedInsertStop
-                ? `${selectedInsertStop.name} · Day ${selectedInsertStop.day}`
-                : 'Tap any stop below to insert the next search, map, or downloaded place after it.'}
+                ? `New stops will land after ${selectedInsertStop.name.split(',')[0]} on Day ${insertTargetDay ?? selectedInsertStop.day}.`
+                : 'Use a day action below to place fuel, camps, or POIs in the right leg.'}
             </Text>
           </View>
           {selectedInsertStop ? (
-            <TouchableOpacity style={s.insertClear} onPress={() => setInsertAfterId(null)}>
+            <TouchableOpacity style={s.insertClear} onPress={() => { setInsertAfterId(null); setInsertTargetDay(null); }}>
               <Text style={s.insertClearText}>END</Text>
             </TouchableOpacity>
           ) : null}
@@ -945,119 +2365,102 @@ export default function RouteBuilderScreen() {
         )}
 
         <View style={s.sectionHeader}>
-          <Text style={s.sectionTitle}>DISCOVER NEAR ROUTE</Text>
-          <TouchableOpacity style={s.sectionAction} onPress={() => setShowPlaceFilters(true)}>
-            <Ionicons name="filter" size={12} color={C.orange} />
-            <Text style={s.sectionActionText}>{offlinePlaces.length ? `${offlinePlaces.length} saved` : 'filters'}</Text>
-          </TouchableOpacity>
-        </View>
-        <Text style={s.sectionMeta}>{discoverContextLabel}</Text>
-        <View style={s.discoverHint}>
-          <Ionicons name={legContext ? 'git-commit-outline' : 'locate-outline'} size={13} color={C.text3} />
-          <Text style={s.discoverHintText}>
-            {legContext && (discoverTab === 'gas' || discoverTab === 'poi')
-              ? 'Searching between the previous day end and this day destination.'
-              : 'Searching around the latest route anchor. Add another day to unlock between-days fuel and POI search.'}
+          <Text style={s.sectionTitle}>DAY {activeDay} ITINERARY</Text>
+          <Text style={s.sectionMeta}>
+            {restDays.includes(activeDay) ? 'rest day' : `${fmtMi(dayMileage[activeDay] ?? 0)} · ${fmtHours(estimateMovingHours(dayMileage[activeDay] ?? 0))}`}
           </Text>
         </View>
-        <View style={s.discoverTabs}>
-          {(['camps', 'gas', 'poi'] as DiscoveryTab[]).map(tab => (
-            <TouchableOpacity key={tab} style={[s.discoverTab, discoverTab === tab && s.discoverTabActive]} onPress={() => setDiscoverTab(tab)}>
-              <Text style={[s.discoverTabText, discoverTab === tab && s.discoverTabTextActive]}>{tab === 'poi' ? 'PLACES' : tab.toUpperCase()}</Text>
-            </TouchableOpacity>
-          ))}
-          <TouchableOpacity style={s.discoverBtn} onPress={discover} disabled={discoverLoading}>
-            {discoverLoading ? <ActivityIndicator size="small" color={C.orange} /> : <Ionicons name="scan-outline" size={15} color={C.orange} />}
+        <View style={s.dayControlRow}>
+          <TouchableOpacity
+            style={[s.restToggle, restDays.includes(activeDay) && { borderColor: C.green + '77', backgroundColor: C.green + '14' }]}
+            onPress={() => toggleRestDay(activeDay)}
+          >
+            <Ionicons name="bed-outline" size={13} color={restDays.includes(activeDay) ? C.green : C.text3} />
+            <Text style={[s.restToggleText, restDays.includes(activeDay) && { color: C.green }]}>REST DAY</Text>
           </TouchableOpacity>
+          <View style={s.dayHoursBox}>
+            <Text style={s.setupLabel}>MAX HOURS</Text>
+            <TextInput
+              value={dayDriveTargets[activeDay] ?? driveHoursPerDay}
+              onChangeText={v => setDayDriveTargets(prev => ({ ...prev, [activeDay]: v }))}
+              keyboardType="decimal-pad"
+              style={s.setupInput}
+              placeholder={driveHoursPerDay}
+              placeholderTextColor={C.text3}
+            />
+          </View>
+          <Text style={s.dayControlMeta}>{fmtHours(activeDayDriveLimit)} max</Text>
         </View>
-
-        {discoverTab === 'camps' && camps.slice(0, 12).map(camp => (
-          <TouchableOpacity key={camp.id} style={s.candidateRow} onPress={() => openCampDetail(camp)}>
-            <View style={[s.candidateIcon, { borderColor: '#14b8a666', backgroundColor: '#14b8a618' }]}>
-              <Ionicons name="bonfire-outline" size={16} color="#14b8a6" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={s.candidateName} numberOfLines={1}>{camp.name}</Text>
-              <Text style={s.candidateMeta} numberOfLines={1}>{camp.land_type || 'Camp'} · {camp.cost || 'See site'}</Text>
-            </View>
-            <TouchableOpacity style={s.useBtn} onPress={() => addCamp(camp)}>
-              <Text style={s.useBtnText}>USE</Text>
-            </TouchableOpacity>
-          </TouchableOpacity>
-        ))}
-        {discoverTab === 'camps' && camps.length === 0 && !discoverLoading && (
-          <View style={s.emptyState}><Text style={s.emptyTitle}>No camp results loaded</Text><Text style={s.emptyText}>{discoverEmptyText}</Text></View>
-        )}
-        {discoverTab === 'gas' && gas.slice(0, 12).map(station => (
-          <TouchableOpacity key={String(station.id)} style={s.candidateRow} onPress={() => { addGas(station); fly(station.lat, station.lng, 13); }}>
-            <View style={[s.candidateIcon, { borderColor: '#eab30866', backgroundColor: '#eab30818' }]}>
-              <Ionicons name="flash-outline" size={16} color="#eab308" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={s.candidateName} numberOfLines={1}>{station.name}</Text>
-              <Text style={s.candidateMeta} numberOfLines={1}>
-                {station.route_distance_mi != null ? `${fmtMi(station.route_distance_mi)} off leg · ` : ''}
-                {station.address || station.fuel_types || 'Fuel stop'}
-              </Text>
-            </View>
-          </TouchableOpacity>
-        ))}
-        {discoverTab === 'gas' && gas.length === 0 && !discoverLoading && (
-          <View style={s.emptyState}><Text style={s.emptyTitle}>No fuel results loaded</Text><Text style={s.emptyText}>{discoverEmptyText}</Text></View>
-        )}
-        {discoverTab === 'poi' && discoveryPois.slice(0, 12).map(poi => (
-          <TouchableOpacity key={poi.id} style={s.candidateRow} onPress={() => { addPoi(poi); fly(poi.lat, poi.lng, 13); }}>
-            <View style={[s.candidateIcon, { borderColor: placeColor(poi.type) + '66', backgroundColor: placeColor(poi.type) + '18' }]}>
-              <Ionicons name={placeIcon(poi.type)} size={16} color={placeColor(poi.type)} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={s.candidateName} numberOfLines={1}>{poi.name || poi.type}</Text>
-              <Text style={s.candidateMeta}>
-                {(poi as any).route_distance_mi != null ? `${fmtMi((poi as any).route_distance_mi)} off leg · ` : ''}
-                {poi.type.replace(/_/g, ' ')}
-              </Text>
-            </View>
-          </TouchableOpacity>
-        ))}
-        {discoverTab === 'poi' && discoveryPois.length === 0 && !discoverLoading && (
-          <View style={s.emptyState}><Text style={s.emptyTitle}>No POI results loaded</Text><Text style={s.emptyText}>{discoverEmptyText}</Text></View>
-        )}
-
-        <View style={s.sectionHeader}>
-          <Text style={s.sectionTitle}>DAY {activeDay} STOPS</Text>
-          <Text style={s.sectionMeta}>{dayStops.length} stops</Text>
-        </View>
+        {!hasBaseRoute ? renderInlineResultsForDay(activeDay) : null}
         {dayStops.length === 0 ? (
           <View style={s.emptyState}>
             <Text style={s.emptyTitle}>Build the day in order</Text>
             <Text style={s.emptyText}>Start with a destination, then add fuel, POIs, and a camp. Tap a stop later to insert new places after it.</Text>
           </View>
-        ) : dayStops.map((st, idx) => (
-          <TouchableOpacity key={st.id} style={[s.stopRow, insertAfterId === st.id && s.stopRowSelected]} onPress={() => selectInsertStop(st)}>
-            <View style={[s.stopNum, { backgroundColor: stopColor(st.type) }]}>
-              <Text style={s.stopNumText}>{idx + 1}</Text>
+        ) : dayStops.map((st, idx) => {
+          const next = dayStops[idx + 1] ?? null;
+          const legMiles = next ? haversineMi(st, next) : 0;
+          return (
+            <View key={st.id} style={s.timelineItem}>
+              <TouchableOpacity style={[s.stopRow, insertAfterId === st.id && s.stopRowSelected]} onPress={() => selectInsertStop(st)}>
+                <View style={[s.stopNum, { backgroundColor: stopColor(st.type) }]}>
+                  <Text style={s.stopNumText}>{idx + 1}</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.stopName} numberOfLines={1}>{st.name}</Text>
+                  <Text style={s.stopMeta}>{stopLabel(st.type).toUpperCase()} · {sourceLabel(st.source)}{insertAfterId === st.id ? ' · INSERT AFTER' : ''}</Text>
+                </View>
+                {st.camp ? (
+                  <TouchableOpacity style={s.iconBtn} onPress={() => openCampDetail(st.camp!)}>
+                    <Ionicons name="image-outline" size={15} color={C.orange} />
+                  </TouchableOpacity>
+                ) : null}
+                {st.type === 'camp' ? (
+                  <TouchableOpacity style={s.iconBtn} onPress={() => replaceCampStop(st)}>
+                    <Ionicons name="swap-horizontal-outline" size={15} color={C.orange} />
+                  </TouchableOpacity>
+                ) : null}
+                <TouchableOpacity style={s.iconBtn} onPress={() => moveStop(st.id, -1)}>
+                  <Ionicons name="chevron-up" size={15} color={C.text3} />
+                </TouchableOpacity>
+                <TouchableOpacity style={s.iconBtn} onPress={() => moveStop(st.id, 1)}>
+                  <Ionicons name="chevron-down" size={15} color={C.text3} />
+                </TouchableOpacity>
+                <TouchableOpacity style={s.iconBtn} onPress={() => removeStop(st.id)}>
+                  <Ionicons name="trash-outline" size={15} color={C.red} />
+                </TouchableOpacity>
+              </TouchableOpacity>
+              {(st.type === 'camp' || st.type === 'motel') ? renderCampPreview(st, restDays.includes(st.day) ? 'REST / OVERNIGHT' : 'OVERNIGHT') : null}
+              {next ? (
+                <View style={s.legCard}>
+                  <View style={s.legLine} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.legMeta}>{fmtMi(legMiles)} · {fmtHours(estimateMovingHours(legMiles))}</Text>
+                    <Text style={s.legText} numberOfLines={1}>to {next.name}</Text>
+                  </View>
+                  <TouchableOpacity style={s.legAction} onPress={() => scanBetweenStops(st, next, 'gas')}>
+                    <Ionicons name="flash-outline" size={14} color={C.orange} />
+                    <Text style={s.legActionText}>FUEL</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={s.legAction} onPress={() => scanBetweenStops(st, next, 'camps', next.day ?? st.day, 'overnight')}>
+                    <Ionicons name="bonfire-outline" size={14} color={C.orange} />
+                    <Text style={s.legActionText}>CAMP</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={s.legAction} onPress={() => scanBetweenStops(st, next, 'poi')}>
+                    <Ionicons name="trail-sign-outline" size={14} color={C.orange} />
+                    <Text style={s.legActionText}>POI</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={s.stopName} numberOfLines={1}>{st.name}</Text>
-              <Text style={s.stopMeta}>{stopLabel(st.type).toUpperCase()} · {sourceLabel(st.source)}{insertAfterId === st.id ? ' · INSERT AFTER' : ''}</Text>
-            </View>
-            <TouchableOpacity style={s.iconBtn} onPress={() => moveStop(st.id, -1)}>
-              <Ionicons name="chevron-up" size={15} color={C.text3} />
-            </TouchableOpacity>
-            <TouchableOpacity style={s.iconBtn} onPress={() => moveStop(st.id, 1)}>
-              <Ionicons name="chevron-down" size={15} color={C.text3} />
-            </TouchableOpacity>
-            <TouchableOpacity style={s.iconBtn} onPress={() => removeStop(st.id)}>
-              <Ionicons name="trash-outline" size={15} color={C.red} />
-            </TouchableOpacity>
-          </TouchableOpacity>
-        ))}
+          );
+        })}
       </ScrollView>
 
-      <View style={s.footer}>
+      <View style={s.footer} pointerEvents="box-none">
         <View>
           <Text style={s.footerMiles}>{fmtMi(totals.miles)}</Text>
-          <Text style={s.footerSub}>{totals.stops} stops · {totals.camps} camps · {days.length} days · offline saved</Text>
+          <Text style={s.footerSub}>{totals.stops} stops · {totals.camps} camps · ${Math.round(planningStats.fuelCost)} fuel · {days.length} days</Text>
         </View>
         <TouchableOpacity style={s.previewBtn} onPress={() => saveRoute(true)}>
           <Ionicons name="map-outline" size={16} color="#fff" />
@@ -1140,7 +2543,7 @@ export default function RouteBuilderScreen() {
               <View style={s.quickCardActions}>
               <TouchableOpacity style={s.quickCardNav} onPress={() => { if (selectedCamp) addCamp(selectedCamp); setSelectedCamp(null); }}>
                 <Ionicons name="add-circle-outline" size={13} color="#fff" />
-                <Text style={s.quickCardNavText}>USE AS CAMP</Text>
+                <Text style={s.quickCardNavText}>{replaceStopId ? 'REPLACE CAMP' : 'USE AS CAMP'}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={s.quickCardFull} onPress={loadFullCampDetail} disabled={detailLoading}>
                 {detailLoading ? <ActivityIndicator size="small" color={C.orange} /> : <Text style={s.quickCardFullText}>FULL PROFILE →</Text>}
@@ -1271,7 +2674,7 @@ export default function RouteBuilderScreen() {
                 <View style={s.detailActions}>
                   <TouchableOpacity style={s.detailUseBtn} onPress={() => { if (selectedCamp) addCamp(selectedCamp); setShowCampDetail(false); setSelectedCamp(null); }}>
                     <Ionicons name="add-circle-outline" size={15} color="#fff" />
-                    <Text style={s.detailUseText}>USE AS CAMP</Text>
+                    <Text style={s.detailUseText}>{replaceStopId ? 'REPLACE CAMP' : 'USE AS CAMP'}</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -1331,6 +2734,28 @@ export default function RouteBuilderScreen() {
         </TouchableOpacity>
       </Modal>
 
+      <Modal visible={showBuildSuccess} transparent animationType="fade" onRequestClose={() => setShowBuildSuccess(false)}>
+        <TouchableOpacity style={s.buildSuccessOverlay} activeOpacity={1} onPress={() => setShowBuildSuccess(false)}>
+          <TouchableOpacity activeOpacity={1} style={s.buildSuccessCard}>
+            <View style={s.successIconWrap}>
+              <Ionicons name="sparkles-outline" size={28} color={C.orange} />
+            </View>
+            <Text style={s.buildSuccessTitle}>Base Route Built</Text>
+            <Text style={s.buildSuccessText}>
+              Trailhead split {baseRouteSummary} into {days.length} day segments. Start with each day card to choose camps, fuel, and wild stops.
+            </Text>
+            <View style={s.successChecks}>
+              <View style={s.successCheck}><Ionicons name="checkmark" size={14} color={C.green} /><Text style={s.successCheckText}>{fmtMi(totals.miles)}</Text></View>
+              <View style={s.successCheck}><Ionicons name="checkmark" size={14} color={C.green} /><Text style={s.successCheckText}>{fmtHours(planningStats.driveHours)}</Text></View>
+              <View style={s.successCheck}><Ionicons name="checkmark" size={14} color={C.green} /><Text style={s.successCheckText}>{days.length} days</Text></View>
+            </View>
+            <TouchableOpacity style={s.successPrimaryBtn} onPress={() => setShowBuildSuccess(false)}>
+              <Text style={s.successPrimaryText}>EXPLORE MY ROUTE</Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
       <PaywallModal visible={paywallVisible} code={paywallCode} message={paywallMessage} onClose={() => setPaywallVisible(false)} />
     </SafeAreaView>
   );
@@ -1343,7 +2768,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderColor: C.border, backgroundColor: C.s1,
   },
   kicker: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '800', letterSpacing: 1 },
-  title: { color: C.text, fontSize: 22, fontWeight: '900', letterSpacing: -0.4 },
+  title: { color: C.text, fontSize: 22, fontWeight: '900', letterSpacing: 0 },
   headerBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: C.orange + '55', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7 },
   headerBtnText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '800' },
   nameBar: {
@@ -1357,22 +2782,95 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     backgroundColor: C.s2, paddingHorizontal: 12, paddingVertical: 9,
   },
   mapWrap: { height: 250, backgroundColor: C.s2 },
-  mapHint: { position: 'absolute', left: 12, bottom: 10, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(0,0,0,0.68)', borderRadius: 16, paddingHorizontal: 10, paddingVertical: 6 },
-  mapHintText: { color: '#fff', fontSize: 10, fontFamily: mono },
-  mapFilterPill: { position: 'absolute', right: 12, bottom: 10, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(0,0,0,0.68)', borderRadius: 16, paddingHorizontal: 10, paddingVertical: 6 },
+  mapHint: { position: 'absolute', left: 12, bottom: 10, maxWidth: '62%', flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(0,0,0,0.68)', borderRadius: 16, paddingHorizontal: 10, paddingVertical: 6 },
+  mapHintText: { flexShrink: 1, color: '#fff', fontSize: 10, fontFamily: mono },
+  mapFilterPill: { position: 'absolute', right: 12, top: 12, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(0,0,0,0.68)', borderRadius: 16, paddingHorizontal: 10, paddingVertical: 6 },
   mapFilterPillText: { color: '#fff', fontSize: 10, fontFamily: mono, fontWeight: '800' },
   body: { flex: 1 },
-  bodyContent: { padding: 14, paddingBottom: 110, gap: 12 },
+  bodyContent: { padding: 14, paddingBottom: 160, gap: 12 },
   dayTabs: { gap: 8 },
   dayTab: { borderWidth: 1, borderColor: C.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: C.s2 },
   dayTabActive: { borderColor: C.orange, backgroundColor: C.orange + '16' },
   dayTabText: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '800' },
   dayTabTextActive: { color: C.orange },
   dayAdd: { width: 34, height: 34, borderRadius: 10, borderWidth: 1, borderColor: C.orange + '55', alignItems: 'center', justifyContent: 'center' },
+  builderHero: { borderWidth: 1, borderColor: C.border, borderRadius: 16, padding: 13, backgroundColor: C.s1, gap: 13 },
+  builderHeroTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  builderHeroTitle: { color: C.text, fontSize: 21, fontWeight: '900', marginTop: 2 },
+  builderHeroText: { color: C.text3, fontSize: 12, lineHeight: 18, marginTop: 4 },
+  progressBadge: { width: 62, minHeight: 58, borderRadius: 14, borderWidth: 1, borderColor: C.orange + '55', backgroundColor: C.orange + '12', alignItems: 'center', justifyContent: 'center' },
+  progressBadgeNum: { color: C.orange, fontSize: 16, fontFamily: mono, fontWeight: '900' },
+  progressBadgeText: { color: C.text3, fontSize: 8, fontFamily: mono, fontWeight: '900', marginTop: 2 },
+  modeRow: { flexDirection: 'row', gap: 8 },
+  modeCard: { flex: 1, minHeight: 74, flexDirection: 'row', alignItems: 'flex-start', gap: 8, borderWidth: 1, borderColor: C.border, borderRadius: 13, backgroundColor: C.s2, padding: 10 },
+  modeCardActive: { borderColor: C.orange, backgroundColor: C.orange + '10' },
+  radioDot: { width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: C.text3, marginTop: 2 },
+  radioDotActive: { borderColor: C.orange, backgroundColor: C.orange },
+  modeTitle: { color: C.text, fontSize: 12, fontWeight: '900' },
+  modeText: { color: C.text3, fontSize: 10, lineHeight: 14, marginTop: 3 },
+  wizardCard: { borderWidth: 1, borderColor: C.border, borderRadius: 14, backgroundColor: C.bg, padding: 10, gap: 11 },
+  wizardSteps: { flexDirection: 'row', gap: 6 },
+  wizardStep: { flex: 1, minHeight: 36, borderWidth: 1, borderColor: C.border, borderRadius: 10, backgroundColor: C.s2, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
+  wizardStepActive: { borderColor: C.orange + '66', backgroundColor: C.orange + '12' },
+  wizardStepNum: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '900' },
+  wizardStepNumActive: { color: C.orange },
+  wizardStepText: { color: C.text3, fontSize: 7, fontFamily: mono, fontWeight: '900', marginTop: 1 },
+  wizardStepTextActive: { color: C.orange },
+  wizardPane: { gap: 10, minHeight: 142 },
+  wizardTitle: { color: C.text, fontSize: 18, fontWeight: '900' },
+  wizardHelp: { color: C.text3, fontSize: 12, lineHeight: 17, marginTop: 3 },
+  wizardNav: { flexDirection: 'row', gap: 9 },
+  wizardNavBtn: { minHeight: 40, minWidth: 88, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderWidth: 1, borderColor: C.border, borderRadius: 11, backgroundColor: C.s2 },
+  wizardNavText: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900' },
+  wizardNextBtn: { flex: 1, minHeight: 40, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 11, backgroundColor: C.green },
+  wizardNextText: { color: '#fff', fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 0.6 },
+  setupGrid: { gap: 8 },
+  setupGridPair: { flexDirection: 'row', gap: 8 },
+  setupLabelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  currentLocationBtn: { flexDirection: 'row', alignItems: 'center', gap: 3, borderWidth: 1, borderColor: C.orange + '55', borderRadius: 999, paddingHorizontal: 6, paddingVertical: 3, backgroundColor: C.orange + '10' },
+  currentLocationText: { color: C.orange, fontSize: 7, fontFamily: mono, fontWeight: '900' },
+  preferenceBlock: { gap: 7 },
+  prefLabel: { color: C.text3, fontSize: 8, fontFamily: mono, fontWeight: '900', letterSpacing: 0.9 },
+  segmentRow: { flexDirection: 'row', gap: 7 },
+  segmentBtn: { flex: 1, minHeight: 34, borderRadius: 10, borderWidth: 1, borderColor: C.border, backgroundColor: C.s2, alignItems: 'center', justifyContent: 'center' },
+  segmentBtnActive: { borderColor: C.green, backgroundColor: C.green },
+  segmentText: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900' },
+  routeStatStrip: { flexDirection: 'row', gap: 8 },
+  routeStatItem: { flex: 1, minHeight: 38, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderWidth: 1, borderColor: C.border, borderRadius: 11, backgroundColor: C.bg },
+  routeStatValue: { color: C.text2, fontSize: 10, fontFamily: mono, fontWeight: '900' },
+  primaryBuildBtn: { minHeight: 48, borderRadius: 12, backgroundColor: C.green, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  primaryBuildText: { color: '#fff', fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
+  frameworkCard: { borderWidth: 1, borderColor: C.border, borderRadius: 12, padding: 11, backgroundColor: C.s1, gap: 10 },
+  frameworkTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  frameworkTitle: { color: C.text, fontSize: 13, fontWeight: '900' },
+  frameworkText: { color: C.text3, fontSize: 11, lineHeight: 16, marginTop: 2 },
+  frameworkBuildBtn: { minWidth: 76, minHeight: 42, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 10, backgroundColor: C.green, paddingHorizontal: 10 },
+  frameworkBuildText: { color: '#fff', fontSize: 10, fontFamily: mono, fontWeight: '900' },
+  frameworkInputs: { flexDirection: 'row', gap: 8 },
+  routeStyleRow: { flexDirection: 'row', gap: 7 },
+  routeStyleChip: { flex: 1, minHeight: 34, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderWidth: 1, borderColor: C.border, borderRadius: 10, backgroundColor: C.s2 },
+  routeStyleChipActive: { borderColor: C.orange + '77', backgroundColor: C.orange + '12' },
+  routeStyleText: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900' },
+  tripSetup: { flexDirection: 'row', gap: 8, alignItems: 'stretch' },
+  setupToggle: { minWidth: 78, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderWidth: 1, borderColor: C.border, borderRadius: 10, backgroundColor: C.s2, paddingHorizontal: 10, paddingVertical: 8 },
+  setupToggleText: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900' },
+  setupInputWrap: { flex: 1, borderWidth: 1, borderColor: C.border, borderRadius: 10, backgroundColor: C.s2, paddingHorizontal: 9, paddingVertical: 5 },
+  setupLabel: { color: C.text3, fontSize: 7, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
+  setupInput: { color: C.text, fontSize: 13, fontFamily: mono, fontWeight: '900', paddingVertical: 2 },
+  tripStats: { flexDirection: 'row', gap: 8 },
+  tripStat: { flex: 1, minHeight: 34, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderWidth: 1, borderColor: C.border, borderRadius: 10, backgroundColor: C.s1, paddingHorizontal: 7 },
+  tripStatText: { color: C.text2, fontSize: 9, fontFamily: mono, fontWeight: '800' },
+  flowCard: { borderWidth: 1, borderColor: C.border, borderRadius: 12, backgroundColor: C.s1, padding: 11, gap: 9 },
+  flowStep: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  flowDot: { width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.border, backgroundColor: C.s2 },
+  flowTitle: { color: C.text, fontSize: 12, fontWeight: '900' },
+  flowText: { color: C.text3, fontSize: 10, lineHeight: 14, marginTop: 1 },
+  gasSourceStrip: { flexDirection: 'row', alignItems: 'center', gap: 7, borderWidth: 1, borderColor: C.border, borderRadius: 10, backgroundColor: C.s2, paddingHorizontal: 10, paddingVertical: 8 },
+  gasSourceText: { flex: 1, color: C.text3, fontSize: 10, lineHeight: 14, fontFamily: mono, fontWeight: '700' },
   typeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
   typeChip: { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderColor: C.border, borderRadius: 9, paddingHorizontal: 9, paddingVertical: 7, backgroundColor: C.s2 },
   typeChipText: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '800' },
-  insertCard: { flexDirection: 'row', alignItems: 'center', gap: 9, borderWidth: 1, borderColor: C.border, borderRadius: 12, paddingHorizontal: 11, paddingVertical: 10, backgroundColor: C.s2 },
+  insertCard: { flexDirection: 'row', alignItems: 'flex-start', gap: 9, borderWidth: 1, borderColor: C.border, borderRadius: 12, paddingHorizontal: 11, paddingVertical: 10, backgroundColor: C.s2 },
   insertTitle: { color: C.text, fontSize: 12, fontWeight: '900' },
   insertText: { color: C.text3, fontSize: 10, lineHeight: 15, marginTop: 1 },
   insertClear: { borderWidth: 1, borderColor: C.orange + '55', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: C.s1 },
@@ -1397,21 +2895,101 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   resultRow: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 11, borderBottomWidth: 1, borderColor: C.border, backgroundColor: C.s1 },
   resultName: { color: C.text, fontSize: 13, fontWeight: '700' },
   resultMeta: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
+  routePlanCard: { borderWidth: 1, borderColor: C.border, borderRadius: 12, padding: 10, backgroundColor: C.s1, gap: 9 },
+  routePlanTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  routePlanMeta: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
+  routePlanBadge: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5 },
+  routePlanBadgeWarn: { borderColor: C.yellow + '66', backgroundColor: C.yellow + '12' },
+  routePlanBadgeOk: { borderColor: C.green + '66', backgroundColor: C.green + '12' },
+  routePlanBadgeText: { fontSize: 8, fontFamily: mono, fontWeight: '900', letterSpacing: 0.6 },
+  routeDayMain: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  routeDayNum: { width: 28, height: 28, borderRadius: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s3 },
+  routeDayNumText: { color: '#fff', fontSize: 10, fontFamily: mono, fontWeight: '900' },
+  routeDayTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  routeDayTitle: { flex: 1, color: C.text, fontSize: 12, fontWeight: '900' },
+  routeDayMeta: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
+  routeTimelineCard: { borderWidth: 1, borderColor: C.border, borderRadius: 14, backgroundColor: C.s2, padding: 10, gap: 9 },
+  routeTimelineTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 2 },
+  routeTimelineTitle: { color: C.text, fontSize: 14, fontWeight: '900' },
+  routeTimelineSub: { color: C.text3, fontSize: 11, lineHeight: 15, marginTop: 2 },
+  routeTimelineLoop: { minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderColor: C.border, borderRadius: 10, paddingHorizontal: 9, backgroundColor: C.s1 },
+  routeTimelineLoopText: { color: C.text3, fontSize: 8, fontFamily: mono, fontWeight: '900' },
+  routeDayWrap: { gap: 8 },
+  routeDayCard: { flexDirection: 'row', gap: 9, borderWidth: 1, borderColor: C.border, borderRadius: 12, backgroundColor: C.s1, padding: 9 },
+  routeDayCardActive: { borderColor: C.orange + '66', backgroundColor: C.orange + '0f' },
+  routeDayDotCol: { width: 17, alignItems: 'center' },
+  routeDayDot: { width: 12, height: 12, borderRadius: 6, borderWidth: 2, borderColor: C.orange, backgroundColor: C.s1, marginTop: 4 },
+  routeDayStem: { flex: 1, width: 2, backgroundColor: C.border, marginTop: 4 },
+  routeDayHeader: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  routeDayMiniBtn: { width: 31, height: 31, borderRadius: 9, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.orange + '35', backgroundColor: C.orange + '10' },
+  routeDayEmptyCamp: { minHeight: 40, flexDirection: 'row', alignItems: 'center', gap: 7, borderWidth: 1, borderColor: C.orange + '38', borderRadius: 10, backgroundColor: C.orange + '0f', paddingHorizontal: 10 },
+  routeDayEmptyCampText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900' },
+  routeDayActions: { flexDirection: 'row', gap: 7, paddingLeft: 37 },
+  routeDayAction: { flex: 1, minHeight: 34, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderWidth: 1, borderColor: C.orange + '38', borderRadius: 9, backgroundColor: C.orange + '10' },
+  routeDayActionText: { color: C.orange, fontSize: 8, fontFamily: mono, fontWeight: '900' },
+  routeDayVisual: { gap: 7, paddingLeft: 37 },
+  routeStopPill: { minHeight: 42, flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderColor: C.border, borderRadius: 10, backgroundColor: C.s1, paddingHorizontal: 9, paddingVertical: 7 },
+  routeStopPillIcon: { width: 28, height: 28, borderRadius: 9, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  routeStopPillTitle: { color: C.text, fontSize: 11, fontWeight: '800' },
+  routeStopPillMeta: { color: C.text3, fontSize: 8, fontFamily: mono, marginTop: 1 },
+  selectedCampCard: { flexDirection: 'row', alignItems: 'stretch', gap: 9, borderWidth: 1, borderColor: C.green + '55', borderRadius: 12, backgroundColor: C.green + '0f', padding: 8 },
+  selectedCampCardCompact: { padding: 6, gap: 7, borderRadius: 10 },
+  selectedCampPhotoWrap: { width: 72, borderRadius: 10, overflow: 'hidden', backgroundColor: C.s2 },
+  selectedCampPhotoWrapCompact: { width: 54, borderRadius: 8 },
+  selectedCampPhoto: { width: '100%', height: 82 },
+  selectedCampPhotoCompact: { height: 58 },
+  selectedCampPlaceholder: { width: '100%', height: 82, alignItems: 'center', justifyContent: 'center' },
+  selectedCampBody: { flex: 1, minHeight: 82, justifyContent: 'center' },
+  selectedCampBodyCompact: { minHeight: 58 },
+  selectedCampLabel: { color: C.green, fontSize: 8, fontFamily: mono, fontWeight: '900', letterSpacing: 0.6 },
+  selectedCampName: { color: C.text, fontSize: 13, fontWeight: '900', lineHeight: 17, marginTop: 2 },
+  selectedCampMeta: { color: C.text3, fontSize: 10, marginTop: 3 },
+  selectedCampSwap: { width: 30, height: 30, borderRadius: 9, borderWidth: 1, borderColor: C.orange + '55', backgroundColor: C.orange + '10', alignItems: 'center', justifyContent: 'center', alignSelf: 'center' },
+  campPreviewActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 8 },
+  campPreviewBtn: { minHeight: 30, flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderColor: C.border, borderRadius: 9, backgroundColor: C.s1, paddingHorizontal: 8 },
+  campPreviewBtnText: { color: C.orange, fontSize: 8, fontFamily: mono, fontWeight: '900' },
+  inlineResults: { borderWidth: 1, borderColor: C.orange + '44', borderRadius: 12, backgroundColor: C.bg, padding: 9, gap: 8 },
+  inlineResultsTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  inlineResultsTitle: { color: C.text, fontSize: 12, fontWeight: '900' },
+  inlineResultsSub: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
+  inlineClose: { width: 28, height: 28, borderRadius: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s2, borderWidth: 1, borderColor: C.border },
+  inlineLoading: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
+  inlineLoadingText: { color: C.text3, fontSize: 11, fontFamily: mono },
+  inlineCampCard: { flexDirection: 'row', alignItems: 'stretch', gap: 8, padding: 8, borderRadius: 11, borderWidth: 1, borderColor: C.border, backgroundColor: C.s1 },
+  inlineCampPhotoWrap: { width: 64, borderRadius: 9, overflow: 'hidden', backgroundColor: C.s2 },
+  inlineCampPhoto: { width: '100%', height: 74 },
+  inlineCampPlaceholder: { width: '100%', height: 74, alignItems: 'center', justifyContent: 'center' },
+  inlineCampBody: { flex: 1, minHeight: 74, justifyContent: 'center' },
+  inlineStopRow: { flexDirection: 'row', alignItems: 'center', gap: 9, padding: 9, borderWidth: 1, borderColor: C.border, borderRadius: 11, backgroundColor: C.s1 },
+  inlineEmpty: { color: C.text3, fontSize: 11, lineHeight: 16, paddingVertical: 8 },
   sectionHeader: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 4 },
   sectionTitle: { color: C.text, fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
   sectionMeta: { color: C.text3, fontSize: 10, fontFamily: mono, maxWidth: 190 },
   sectionAction: { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderColor: C.orange + '55', borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5, backgroundColor: C.orange + '10' },
   sectionActionText: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900' },
-  discoverTabs: { flexDirection: 'row', gap: 8 },
-  discoverTab: { flex: 1, alignItems: 'center', borderWidth: 1, borderColor: C.border, borderRadius: 10, paddingVertical: 9, backgroundColor: C.s2 },
+  discoverTabs: { flexDirection: 'row', gap: 8, alignItems: 'stretch' },
+  discoverTab: { width: 70, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.border, borderRadius: 10, paddingVertical: 9, backgroundColor: C.s2 },
   discoverTabActive: { borderColor: C.orange, backgroundColor: C.orange + '14' },
   discoverTabText: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '800' },
   discoverTabTextActive: { color: C.orange },
-  discoverBtn: { width: 42, borderWidth: 1, borderColor: C.orange + '55', borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: C.orange + '10' },
+  discoverBtn: { flex: 1, minHeight: 40, flexDirection: 'row', gap: 6, borderWidth: 1, borderColor: C.orange + '55', borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: C.orange + '10', paddingHorizontal: 10 },
+  discoverBtnText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900' },
+  discoverySummary: { flexDirection: 'row', alignItems: 'center', gap: 7, borderWidth: 1, borderColor: C.green + '44', borderRadius: 10, backgroundColor: C.green + '10', paddingHorizontal: 10, paddingVertical: 8 },
+  discoverySummaryText: { flex: 1, color: C.green, fontSize: 11, fontFamily: mono, fontWeight: '800' },
   discoverHint: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, borderWidth: 1, borderColor: C.border, borderRadius: 10, padding: 9, backgroundColor: C.s2 },
   discoverHintText: { flex: 1, color: C.text3, fontSize: 11, lineHeight: 16 },
+  replaceCancel: { alignSelf: 'flex-start', borderWidth: 1, borderColor: C.orange + '55', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 5, backgroundColor: C.orange + '10' },
+  replaceCancelText: { color: C.orange, fontSize: 8, fontFamily: mono, fontWeight: '900' },
   candidateRow: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 11, borderWidth: 1, borderColor: C.border, borderRadius: 12, backgroundColor: C.s1 },
   candidateIcon: { width: 34, height: 34, borderRadius: 10, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  campCandidateCard: { flexDirection: 'row', alignItems: 'stretch', gap: 10, padding: 9, borderWidth: 1, borderColor: C.border, borderRadius: 12, backgroundColor: C.s1 },
+  campCandidatePhotoWrap: { width: 76, borderRadius: 9, overflow: 'hidden', backgroundColor: C.s2 },
+  campCandidatePhoto: { width: '100%', height: 86 },
+  campCandidatePlaceholder: { width: '100%', height: 86, alignItems: 'center', justifyContent: 'center' },
+  campCandidateBody: { flex: 1, minHeight: 86, justifyContent: 'center' },
+  campCandidateTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 7 },
+  miniTag: { borderWidth: 1, borderColor: C.border, borderRadius: 999, paddingHorizontal: 6, paddingVertical: 3, backgroundColor: C.s2 },
+  miniTagText: { color: C.text3, fontSize: 7, fontFamily: mono, fontWeight: '900' },
   candidateName: { color: C.text, fontSize: 13, fontWeight: '800' },
   candidateMeta: { color: C.text3, fontSize: 10, marginTop: 2 },
   useBtn: { borderWidth: 1, borderColor: C.green + '66', backgroundColor: C.green + '14', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
@@ -1426,6 +3004,18 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   stopName: { color: C.text, fontSize: 13, fontWeight: '800' },
   stopMeta: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
   iconBtn: { width: 28, height: 28, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s2 },
+  timelineItem: { gap: 8 },
+  legCard: { marginLeft: 14, flexDirection: 'row', alignItems: 'center', gap: 9, borderLeftWidth: 2, borderLeftColor: C.orange + '55', paddingLeft: 14, paddingVertical: 6 },
+  legLine: { width: 7, height: 7, borderRadius: 4, backgroundColor: C.orange },
+  legMeta: { color: C.text, fontSize: 11, fontFamily: mono, fontWeight: '900' },
+  legText: { color: C.text3, fontSize: 10, marginTop: 1 },
+  legAction: { minWidth: 48, minHeight: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: C.orange + '12', borderWidth: 1, borderColor: C.orange + '35', paddingHorizontal: 7 },
+  legActionText: { color: C.orange, fontSize: 7, fontFamily: mono, fontWeight: '900', marginTop: 1 },
+  dayControlRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderColor: C.border, borderRadius: 12, padding: 9, backgroundColor: C.s2 },
+  restToggle: { minHeight: 36, flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: C.border, borderRadius: 10, paddingHorizontal: 10, backgroundColor: C.s1 },
+  restToggleText: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900' },
+  dayHoursBox: { width: 82, borderWidth: 1, borderColor: C.border, borderRadius: 10, backgroundColor: C.s1, paddingHorizontal: 8, paddingVertical: 4 },
+  dayControlMeta: { flex: 1, color: C.text3, fontSize: 10, fontFamily: mono, textAlign: 'right' },
   footer: { position: 'absolute', left: 0, right: 0, bottom: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 14, paddingBottom: 22, backgroundColor: C.s1, borderTopWidth: 1, borderColor: C.border },
   footerMiles: { color: C.text, fontSize: 18, fontFamily: mono, fontWeight: '900' },
   footerSub: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
@@ -1451,25 +3041,35 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   filterChip: { width: '48%', minHeight: 50, flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderColor: C.border, backgroundColor: C.s2, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 9 },
   filterChipText: { color: C.text2, fontSize: 11, fontFamily: mono, fontWeight: '900' },
   filterChipSub: { color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 2 },
+  buildSuccessOverlay: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.58)', padding: 24 },
+  buildSuccessCard: { width: '100%', borderRadius: 18, backgroundColor: C.s1, borderWidth: 1, borderColor: C.border, padding: 18, alignItems: 'center', gap: 12 },
+  successIconWrap: { width: 64, height: 64, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: C.orange + '14', borderWidth: 1, borderColor: C.orange + '55' },
+  buildSuccessTitle: { color: C.text, fontSize: 22, fontWeight: '900', textAlign: 'center' },
+  buildSuccessText: { color: C.text3, fontSize: 13, lineHeight: 19, textAlign: 'center' },
+  successChecks: { flexDirection: 'row', gap: 8 },
+  successCheck: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderColor: C.green + '44', borderRadius: 999, backgroundColor: C.green + '10', paddingHorizontal: 9, paddingVertical: 6 },
+  successCheckText: { color: C.green, fontSize: 9, fontFamily: mono, fontWeight: '900' },
+  successPrimaryBtn: { alignSelf: 'stretch', minHeight: 46, borderRadius: 12, backgroundColor: C.green, alignItems: 'center', justifyContent: 'center' },
+  successPrimaryText: { color: '#fff', fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
   quickCard: {
     backgroundColor: C.s1,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    flexDirection: 'row',
+    maxHeight: '86%',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -4 },
     shadowOpacity: 0.18,
     shadowRadius: 16,
     elevation: 12,
   },
-  quickCardImg: { width: 120 },
-  quickCardPhoto: { width: 120, height: '100%' as any, borderTopLeftRadius: 20 },
+  quickCardImg: { width: '100%' },
+  quickCardPhoto: { width: '100%', height: 176, borderTopLeftRadius: 20, borderTopRightRadius: 20 },
   quickCardPhotoPlaceholder: {
-    width: 120, minHeight: 180, alignItems: 'center', justifyContent: 'center',
-    borderTopLeftRadius: 20, gap: 5,
+    width: '100%', height: 142, alignItems: 'center', justifyContent: 'center',
+    borderTopLeftRadius: 20, borderTopRightRadius: 20, gap: 5,
   },
   placeholderLand: { fontSize: 9, fontFamily: mono, fontWeight: '800', marginTop: 2 },
-  quickCardBody: { flex: 1, padding: 14, paddingBottom: 28, gap: 6 },
+  quickCardBody: { padding: 14, paddingBottom: 28, gap: 6 },
   quickCardHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
   quickCardName: { color: C.text, fontSize: 15, fontWeight: '800', flex: 1, lineHeight: 20 },
   quickCardClose: {

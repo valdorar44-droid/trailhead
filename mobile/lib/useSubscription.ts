@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { Alert } from 'react-native';
 import { api } from './api';
 import { useStore } from './store';
+import { storage } from './storage';
 
 export const PRODUCT_IDS = {
   monthly: 'com.trailhead.explorer.monthly',
@@ -24,6 +25,12 @@ function formatIapError(err: any, fallback: string) {
   const message = err?.message ?? err?.debugMessage ?? '';
   const joined = [code, message].filter(Boolean).join(': ').trim();
   return joined ? `${fallback} (${joined})` : fallback;
+}
+
+function isUserCancelledIap(err: any) {
+  const code = String(err?.code ?? err?.responseCode ?? err?.debugCode ?? '').toLowerCase();
+  const message = String(err?.message ?? err?.debugMessage ?? '').toLowerCase();
+  return code.includes('cancel') || code.includes('user_cancel') || message.includes('cancel') || message.includes('user');
 }
 
 function normalizePeriodUnit(unit?: string) {
@@ -60,6 +67,15 @@ function getIAP(): typeof import('react-native-iap') | null {
   }
 }
 
+function purchaseTransactionId(purchase: any) {
+  return purchase.transactionId
+    ?? purchase.originalTransactionIdentifierIOS
+    ?? purchase.purchaseToken
+    ?? purchase.orderId
+    ?? purchase.id
+    ?? '';
+}
+
 export function useSubscription() {
   const setPlan = useStore(s => s.setPlan);
   const token   = useStore(s => s.token);
@@ -81,9 +97,13 @@ export function useSubscription() {
 
   const activateOnBackend = useCallback(async (productId: string, transactionId: string) => {
     if (!token) return;
+    if (productId && transactionId) {
+      storage.set('trailhead_iap_pending', JSON.stringify({ productId, transactionId, updatedAt: Date.now() })).catch(() => {});
+    }
     try {
       const res = await api.activateSubscription(productId, transactionId);
       setPlan(res.status !== 'error', res.plan_expires_at ?? null);
+      storage.del('trailhead_iap_pending').catch(() => {});
     } catch {
       setPlan(true, Date.now() / 1000 + 366 * 86400);
     }
@@ -116,7 +136,7 @@ export function useSubscription() {
         // If they run before/outside the try, they crash when the store is unavailable.
         purchaseListenerRef.current = iap.purchaseUpdatedListener(async (purchase: any) => {
           const productId     = purchase.productId ?? purchase.id ?? '';
-          const transactionId = purchase.transactionId ?? (purchase as any).orderId ?? purchase.id ?? '';
+          const transactionId = purchaseTransactionId(purchase);
           if (!productId) return;
           try {
             await activateOnBackend(productId, transactionId);
@@ -128,8 +148,9 @@ export function useSubscription() {
         });
 
         errorListenerRef.current = iap.purchaseErrorListener((err: any) => {
-          const msg = err?.message ?? '';
-          if (!msg.toLowerCase().includes('cancel') && !msg.toLowerCase().includes('user')) {
+          if (isUserCancelledIap(err)) {
+            setError('User cancelled');
+          } else {
             setError('Purchase failed. Please try again.');
           }
           setPurchasing(false);
@@ -201,8 +222,9 @@ export function useSubscription() {
       await iap.requestSubscription({ sku: productId } as any);
       return true;
     } catch (e: any) {
-      const msg = e?.message ?? '';
-      if (!msg.toLowerCase().includes('cancel')) {
+      if (isUserCancelledIap(e)) {
+        setError('User cancelled');
+      } else {
         setError(formatIapError(e, 'Purchase failed. Please try again.'));
       }
       setPurchasing(false);
@@ -227,7 +249,7 @@ export function useSubscription() {
       if (sub) {
         const restoredPurchase = sub as any;
         const productId     = restoredPurchase.productId ?? restoredPurchase.id ?? '';
-        const transactionId = restoredPurchase.transactionId ?? restoredPurchase.orderId ?? restoredPurchase.id ?? '';
+        const transactionId = purchaseTransactionId(restoredPurchase);
         await activateOnBackend(productId, transactionId);
         Alert.alert('Restored', 'Your Explorer Plan has been restored.');
       } else {

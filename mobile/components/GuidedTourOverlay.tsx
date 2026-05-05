@@ -310,7 +310,7 @@ export default function GuidedTourOverlay() {
               <Text style={s.kicker}>TRAILHEAD WALKTHROUGH</Text>
               <Text style={s.title}>{step.title}</Text>
             </View>
-            <TouchableOpacity style={s.closeBtn} onPress={() => closeTour(false)}>
+            <TouchableOpacity style={s.closeBtn} onPress={() => closeTour(true)}>
               <Ionicons name="close" size={18} color={C.text3} />
             </TouchableOpacity>
           </View>

@@ -131,6 +131,8 @@ export const api = {
   adminRemovePhoto:  (reportId: number) => req<{ ok: boolean }>(`/api/admin/reports/${reportId}/remove-photo`, { method: 'POST' }),
   adminExpireReport: (reportId: number) => req<{ ok: boolean }>(`/api/admin/reports/${reportId}/expire`, { method: 'POST' }),
   getConfig: () => req<{ mapbox_token: string; protomaps_key?: string }>('/api/config'),
+  geocodePlaces: (query: string, limit = 8) =>
+    req<GeocodePlace[]>(`/api/geocode?q=${encodeURIComponent(query)}&limit=${limit}`),
   getCampsites: (lat: number, lng: number, radius = 25) =>
     req<Campsite[]>(`/api/campsites?lat=${lat}&lng=${lng}&radius=${radius}`),
   searchCampsites: (lat: number, lng: number, radius = 40, types: string[] = []) =>
@@ -255,6 +257,11 @@ export interface User {
   reporting_restricted_until?: number;
   is_admin?: boolean;
   email_verified?: boolean | number;
+}
+export interface GeocodePlace {
+  name: string;
+  lat: number;
+  lng: number;
 }
 export interface TripResult {
   trip_id: string; plan: TripPlan; campsites: Campsite[]; gas_stations: GasStation[];
@@ -444,7 +451,7 @@ export interface CampFullnessResult {
   status?: string; already_reported?: boolean; already_voted?: boolean;
 }
 
-export type OfflineAssetType = 'state_map' | 'state_route' | 'trip_corridor' | 'conus_map';
+export type OfflineAssetType = 'state_map' | 'state_route' | 'state_contours' | 'trip_corridor' | 'conus_map';
 export interface OfflineAuthorizeResult {
   authorized: boolean;
   charged: number;

@@ -18,7 +18,7 @@ import PaywallModal from '@/components/PaywallModal';
 import TourTarget from '@/components/TourTarget';
 import { freeTrialLabel, useSubscription } from '@/lib/useSubscription';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
-import { getOfflineTripIndex, loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
+import { deleteOfflineTrip, getOfflineTripIndex, loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { CREDIT_REWARDS } from '@/lib/credits';
 
 type ChecklistItem = { id: string; label: string; done: boolean };
@@ -80,7 +80,7 @@ const ALL_MAKES = Object.keys(MAKES_DATA);
 const DEFAULT_RIG: RigProfile = {
   vehicle_type: '', year: '', make: '', model: '', trim: '',
   ground_clearance_in: '', lift_in: '', drive: '4x4 PT', length_ft: '',
-  suspension: 'Stock', tire_size: '', fuel_range_miles: '',
+  suspension: 'Stock', tire_size: '', fuel_range_miles: '', fuel_mpg: '',
   has_winch: false, winch_lbs: '', locking_diffs: 'None',
   has_skids: false, has_rack: false,
   is_towing: false, trailer_length_ft: '', tow_capacity_lbs: '',
@@ -92,6 +92,7 @@ export default function ProfileScreen() {
   const router = useRouter();
   const { user, rigProfile, setAuth, clearAuth, setRigProfile } = useStore();
   const tripHistory    = useStore(st => st.tripHistory);
+  const removeTripFromHistory = useStore(st => st.removeTripFromHistory);
   const themeMode      = useStore(st => st.themeMode);
   const setThemeMode   = useStore(st => st.setThemeMode);
   const favoriteCamps  = useStore(st => st.favoriteCamps);
@@ -291,6 +292,29 @@ export default function ProfileScreen() {
       }
       Alert.alert('Trip unavailable', e?.message ?? 'Could not open this trip.');
     }
+  }
+
+  function confirmDeleteTrip(t: TripHistoryItem) {
+    Alert.alert(
+      'Delete saved trip?',
+      `${t.trip_name} will be removed from this device and your Profile trip list.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            removeTripFromHistory(t.trip_id);
+            await deleteOfflineTrip(t.trip_id);
+            setOfflineCachedIds(prev => {
+              const next = new Set(prev);
+              next.delete(t.trip_id);
+              return next;
+            });
+          },
+        },
+      ],
+    );
   }
 
   async function submitBug() {
@@ -628,23 +652,28 @@ export default function ProfileScreen() {
             {tripHistory.map(t => {
               const isCached = offlineCachedIds.has(t.trip_id);
               return (
-                <TouchableOpacity
-                  key={t.trip_id}
-                  style={s.tripRow}
-                  onPress={() => { openTripFromProfile(t); }}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.tripRowName} numberOfLines={1}>{t.trip_name}</Text>
-                    <Text style={s.tripRowMeta}>{(t.states ?? []).join(' · ')}  ·  {t.duration_days}D  ·  {t.est_miles}MI</Text>
-                  </View>
-                  {isCached && (
-                    <View style={s.offlineBadge}>
-                      <Ionicons name="download-outline" size={10} color="#22c55e" />
-                      <Text style={s.offlineBadgeText}>OFFLINE</Text>
+                <View key={t.trip_id} style={s.tripRow}>
+                  <TouchableOpacity style={s.tripRowOpen} onPress={() => { openTripFromProfile(t); }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.tripRowName} numberOfLines={1}>{t.trip_name}</Text>
+                      <Text style={s.tripRowMeta}>{(t.states ?? []).join(' · ')}  ·  {t.duration_days}D  ·  {t.est_miles}MI</Text>
                     </View>
-                  )}
-                  <Ionicons name="chevron-forward" size={14} color={C.text3} style={{ marginLeft: 4 }} />
-                </TouchableOpacity>
+                    {isCached && (
+                      <View style={s.offlineBadge}>
+                        <Ionicons name="download-outline" size={10} color="#22c55e" />
+                        <Text style={s.offlineBadgeText}>OFFLINE</Text>
+                      </View>
+                    )}
+                    <Ionicons name="chevron-forward" size={14} color={C.text3} style={{ marginLeft: 4 }} />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={s.tripDeleteBtn}
+                    onPress={() => confirmDeleteTrip(t)}
+                    accessibilityLabel={`Delete ${t.trip_name}`}
+                  >
+                    <Ionicons name="trash-outline" size={15} color={C.red} />
+                  </TouchableOpacity>
+                </View>
               );
             })}
           </View>
@@ -845,6 +874,13 @@ export default function ProfileScreen() {
                     value={rigDraft.fuel_range_miles ?? ''}
                     onChangeText={v => setRigDraft(d => ({ ...d, fuel_range_miles: v }))}
                     keyboardType="numeric" />
+
+                  <Text style={s.rigFormLabel}>REAL-WORLD MPG</Text>
+                  <TextInput style={s.rigInput} placeholder="e.g. 14.5 — used for route fuel estimates"
+                    placeholderTextColor={C.text3}
+                    value={rigDraft.fuel_mpg ?? ''}
+                    onChangeText={v => setRigDraft(d => ({ ...d, fuel_mpg: v }))}
+                    keyboardType="decimal-pad" />
 
                   {/* Locking diffs */}
                   <Text style={s.rigFormLabel}>LOCKING DIFFERENTIALS</Text>
@@ -1386,7 +1422,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   authIcon: { width: 52, height: 52, borderRadius: 14 },
   authWordmark: { color: C.text, fontSize: 18, fontWeight: '900', fontFamily: mono, letterSpacing: 1.5 },
   authTagline: { color: C.text3, fontSize: 9, fontFamily: mono, letterSpacing: 1.5, marginTop: 2 },
-  authHeading: { color: C.text, fontSize: 28, fontWeight: '800', letterSpacing: -0.5 },
+  authHeading: { color: C.text, fontSize: 28, fontWeight: '800', letterSpacing: 0 },
   authSub: { color: C.text3, fontSize: 13.5, lineHeight: 20, marginTop: -4 },
   verifyCard: {
     gap: 14, backgroundColor: C.s2, borderRadius: 16, borderWidth: 1, borderColor: C.border,
@@ -1475,7 +1511,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   rigDisplay: { gap: 12 },
   rigDisplayTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
   rigYear: { color: C.text3, fontSize: 11, fontFamily: mono, letterSpacing: 0.5 },
-  rigMakeModel: { color: C.text, fontSize: 19, fontWeight: '800', marginTop: 1, letterSpacing: -0.3 },
+  rigMakeModel: { color: C.text, fontSize: 19, fontWeight: '800', marginTop: 1, letterSpacing: 0 },
   rigTypeBadge: {
     backgroundColor: C.orangeGlow, borderRadius: 8, borderWidth: 1, borderColor: C.orange,
     paddingHorizontal: 10, paddingVertical: 4, alignSelf: 'flex-start',
@@ -1730,6 +1766,11 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   tripRow: {
     flexDirection: 'row', alignItems: 'center', paddingVertical: 9,
     borderBottomWidth: 1, borderColor: C.border + '50',
+  },
+  tripRowOpen: { flex: 1, flexDirection: 'row', alignItems: 'center' },
+  tripDeleteBtn: {
+    width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
+    marginLeft: 8, borderWidth: 1, borderColor: C.red + '35', backgroundColor: C.red + '10',
   },
   tripRowName: { color: C.text, fontSize: 13, fontWeight: '700' },
   tripRowMeta: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },

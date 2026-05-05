@@ -26,10 +26,25 @@ const EXAMPLES = [
   { label: 'WK',  icon: 'flash-outline',    tags: ['BLM', 'MOAB', 'TRUCK'],            text: 'Weekend run near Moab, BLM land, taking my Tacoma' },
 ];
 
-const CHAT_STAGES  = ['Checking the trail...', 'On it...', 'Thinking...'];
-const PLAN_STAGES  = ['Mapping your route...', 'Finding campsites...', 'Locating fuel stops...', 'Briefing terrain...'];
+const CHAT_STAGES  = [
+  'Reading what kind of trip you want...',
+  'Checking your rig, pace, and camp style...',
+  'Looking for the best next move...',
+];
+const PLAN_STAGES  = [
+  'Sketching the route spine...',
+  'Balancing drive days with camp nights...',
+  'Checking fuel gaps and bailout towns...',
+  'Adding the places worth stopping for...',
+];
 // Long trips (7+ days) can take 1-2 minutes — we surface an extra stage at ~20s
-const PLAN_STAGES_LONG = ['Mapping your route...', 'Building itinerary... (this can take a minute)', 'Finding campsites...', 'Locating fuel stops...', 'Briefing terrain...'];
+const PLAN_STAGES_LONG = [
+  'Sketching the route spine...',
+  'Longer routes take a minute. I’m keeping the days realistic.',
+  'Balancing drive time, fuel range, and camp nights...',
+  'Checking useful towns, trailheads, and bailout options...',
+  'Polishing the route so it feels drivable...',
+];
 
 type PlanPhase = 'idle' | 'chatting' | 'ready' | 'planning' | 'active' | 'editing';
 
@@ -246,10 +261,10 @@ export default function PlanScreen() {
         const isTimeout = raw.includes('taking longer') || raw.includes('timeout');
         const isNetwork = raw.includes('Network') || raw.includes('fetch');
         const friendly = isTimeout
-          ? '⏳ Trip planning is taking a bit longer than usual. Try "build it" again in a moment.'
+              ? 'This route is taking longer than usual. Give it one more try and I’ll keep the plan tighter.'
           : isNetwork
-          ? '📡 Network hiccup — check your connection and try again.'
-          : '⚠ Something went wrong. Try rephrasing your request or tap "build it" again.';
+          ? 'I lost the signal for a second. Check your connection and send it again.'
+          : 'I lost the thread on that one. Try one cleaner sentence, or say “build it” again and I’ll take another pass.';
         setMessages(m => [...m, { role: 'ai', text: friendly }]);
         setPlanPhase('ready'); // stay in ready so they can retry
       }
@@ -334,15 +349,15 @@ export default function PlanScreen() {
           {
             role: 'ai',
             text: isRateLimit
-              ? '⏱ API is busy right now — tap Retry in ~30 seconds and your route will build normally.'
+              ? 'The guide is busy for a moment. Tap Retry in about 30 seconds and I’ll pick it back up.'
               : e.message?.includes('taking longer')
-              ? '⏳ This trip is taking longer than usual to plan. Tap Retry to try again.'
+              ? 'This trip is taking longer than usual to plan. Tap Retry and I’ll keep the route tighter.'
               : e.message?.includes('non-JSON') || e.message?.includes('```')
-              ? '⚠ AI had trouble formatting the route. Tap Retry — it usually works on the second attempt.'
+              ? 'I had the route idea, but the format came back messy. Tap Retry and I’ll rebuild it cleanly.'
               : e.message?.includes('Network') || e.message?.includes('fetch')
-              ? '📡 Network issue during planning. Check your connection and tap Retry.'
-              : '⚠ Planning hit a snag. Tap Retry to try again.',
-            outline: isRateLimit ? '__retry__' : undefined,
+              ? 'Signal dropped while planning. Check your connection and tap Retry.'
+              : 'I hit a rough patch building that route. Tap Retry and I’ll take another pass.',
+            outline: '__retry__',
           },
         ]);
         setPlanPhase('ready');
@@ -815,9 +830,9 @@ function OutlineCard({ outline, C, onBuild, onRefine, loading }: {
       <View style={{ padding: 14 }}>
         {isRetry ? (
           <>
-            <Text style={{ color: C.orange, fontSize: 9, fontFamily: mono, letterSpacing: 1, marginBottom: 10 }}>⏱ RATE LIMITED</Text>
+            <Text style={{ color: C.orange, fontSize: 9, fontFamily: mono, letterSpacing: 1, marginBottom: 10 }}>ROUTE NEEDS ANOTHER PASS</Text>
             <Text style={{ color: C.text2, fontSize: 13, lineHeight: 20, marginBottom: 14 }}>
-              Anthropic is busy — your route is ready to build, just wait ~30 seconds and tap Retry.
+              The route idea is still here. Retry will rebuild from the same conversation, which usually clears up long or complicated trips.
             </Text>
             <TouchableOpacity
               onPress={onBuild}
@@ -932,7 +947,7 @@ function TripCard({ trip, C, onViewMap, onViewGuide, onNextLeg }: {
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
           <View style={{ flex: 1 }}>
-            <Text style={{ color: C.text, fontSize: 18, fontWeight: '900', letterSpacing: -0.5, lineHeight: 22, textTransform: 'uppercase' }} numberOfLines={2}>{p.trip_name}</Text>
+            <Text style={{ color: C.text, fontSize: 18, fontWeight: '900', letterSpacing: 0, lineHeight: 22, textTransform: 'uppercase' }} numberOfLines={2}>{p.trip_name}</Text>
             <Text style={{ color: C.text2, fontSize: 10, fontFamily: mono, letterSpacing: 0.8, marginTop: 3 }}>{(p.states ?? []).join(' · ')}</Text>
           </View>
           <View style={{ flexDirection: 'row', gap: 4, marginTop: -2 }}>
@@ -1003,7 +1018,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   // Login gate
   loginGate: { flex: 1, padding: 28, justifyContent: 'center', alignItems: 'center', gap: 16 },
   loginGateLogo: { width: 72, height: 72, borderRadius: 20, backgroundColor: C.s2, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
-  loginGateTitle: { color: C.text, fontSize: 26, fontWeight: '900', letterSpacing: -0.5 },
+  loginGateTitle: { color: C.text, fontSize: 26, fontWeight: '900', letterSpacing: 0 },
   loginGateSub: { color: C.text2, fontSize: 14, textAlign: 'center', lineHeight: 21, maxWidth: 300 },
   loginGatePerks: { gap: 10, alignSelf: 'stretch', marginVertical: 4 },
   loginGatePerk: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 4 },
@@ -1030,7 +1045,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   logoName: {
     color: C.text, fontSize: 17, fontWeight: '900',
-    letterSpacing: -0.5, lineHeight: 20,
+    letterSpacing: 0, lineHeight: 20,
   },
   logoTag: { color: C.text3, fontSize: 8, fontFamily: mono, marginTop: 1, letterSpacing: 1 },
   editBadge: {
@@ -1059,7 +1074,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   welcomeHeading: {
     color: C.text, fontSize: 38, fontWeight: '900',
-    letterSpacing: -1.5, lineHeight: 40, marginBottom: 8,
+    letterSpacing: 0, lineHeight: 40, marginBottom: 8,
     textTransform: 'uppercase',
   },
   welcomeSub: { color: C.text2, fontSize: 14, lineHeight: 21, marginBottom: 2 },

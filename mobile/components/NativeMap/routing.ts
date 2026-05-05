@@ -92,6 +92,9 @@ function routeMatchesRequest(parsed: any, pairs: string[]): boolean {
 
   const savedPairs = Array.isArray(parsed.requestedPairs) ? parsed.requestedPairs as string[] : [];
   if (savedPairs.length > 0) {
+    const savedStart = parsePair(savedPairs[0]);
+    if (!savedStart || coordDistanceM(reqStart, savedStart) > LAST_ROUTE_START_TOLERANCE_M) return false;
+
     const savedEnd = parsePair(savedPairs[savedPairs.length - 1]);
     if (!savedEnd || coordDistanceM(reqEnd, savedEnd) > LAST_ROUTE_DEST_TOLERANCE_M) return false;
 

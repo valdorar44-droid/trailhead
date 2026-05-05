@@ -17,7 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '@/lib/store';
 import { useTheme, mono, type ColorPalette } from '@/lib/design';
 import {
-  useOfflineFiles, FILE_REGIONS, ROUTING_REGIONS, fmtBytes, fmtSpeed, fmtEta,
+  useOfflineFiles, FILE_REGIONS, ROUTING_REGIONS, CONTOUR_REGIONS, fmtBytes, fmtSpeed, fmtEta,
   type FileDownloadState,
 } from '@/lib/useOfflineFiles';
 import {
@@ -36,6 +36,56 @@ import {
 
 
 interface WebDownloadOpts { bufferKm?: number; minZ?: number; maxZ?: number; vectorOnly?: boolean; label: string; n?: number; s?: number; e?: number; w?: number; }
+
+type RegionGroupKey = 'west' | 'central' | 'southeast' | 'northeastMidwest' | 'international';
+
+const REGION_GROUPS: Array<{
+  key: RegionGroupKey;
+  label: string;
+  title: string;
+  subtitle: string;
+  ids: string[];
+}> = [
+  {
+    key: 'west',
+    label: 'WEST',
+    title: 'Western U.S.',
+    subtitle: 'Mountain states, coast, desert, Alaska, Hawaii',
+    ids: ['ak', 'az', 'ca', 'co', 'hi', 'id', 'mt', 'nm', 'nv', 'or', 'ut', 'wa', 'wy'],
+  },
+  {
+    key: 'central',
+    label: 'CENTRAL',
+    title: 'Central / Plains / South',
+    subtitle: 'Great Plains, Texas, Ozarks, upper Mississippi',
+    ids: ['ks', 'mn', 'mo', 'nd', 'ne', 'ok', 'sd', 'tx'],
+  },
+  {
+    key: 'southeast',
+    label: 'SOUTHEAST',
+    title: 'Southeast / Appalachia',
+    subtitle: 'Gulf states, Appalachians, Atlantic South',
+    ids: ['al', 'ar', 'fl', 'ga', 'ky', 'la', 'ms', 'nc', 'sc', 'tn', 'va', 'wv'],
+  },
+  {
+    key: 'northeastMidwest',
+    label: 'NE / MIDWEST',
+    title: 'Northeast / Midwest',
+    subtitle: 'Great Lakes, New England, Mid-Atlantic',
+    ids: ['ct', 'de', 'ia', 'il', 'in', 'ma', 'md', 'me', 'mi', 'nh', 'nj', 'ny', 'oh', 'pa', 'ri', 'vt', 'wi'],
+  },
+  {
+    key: 'international',
+    label: 'CAN / MEX',
+    title: 'Canada / Mexico',
+    subtitle: 'Cross-border overland regions',
+    ids: ['canada', 'mexico'],
+  },
+];
+
+function regionGroupFor(id: string): RegionGroupKey {
+  return REGION_GROUPS.find(group => group.ids.includes(id))?.key ?? 'west';
+}
 
 interface Props {
   visible:     boolean;
@@ -130,22 +180,25 @@ function ReadinessRow({ icon, label, ready }: { icon: keyof typeof Ionicons.glyp
 }
 
 function StateReadinessPanel({
-  mapReady, routeReady, placeReady, placeAvailable, placeLabel, mapBusy, routeBusy, available, onDownloadMissing,
+  mapReady, routeReady, contourReady, contourAvailable, placeReady, placeAvailable, placeLabel, mapBusy, routeBusy, contourBusy, available, onDownloadMissing,
 }: {
   mapReady: boolean;
   routeReady: boolean;
+  contourReady: boolean;
+  contourAvailable: boolean;
   placeReady: boolean;
   placeAvailable: boolean;
   placeLabel: string;
   mapBusy: boolean;
   routeBusy: boolean;
+  contourBusy: boolean;
   available: boolean;
   onDownloadMissing: () => void;
 }) {
   const C = useTheme();
   const navReady = mapReady && routeReady;
   const ready = navReady && (!placeAvailable || placeReady);
-  const busy = mapBusy || routeBusy;
+  const busy = mapBusy || routeBusy || contourBusy;
   return (
     <View style={{ backgroundColor: ready ? C.green + '12' : C.s1, borderColor: ready ? C.green + '35' : C.border, borderWidth: 1, borderRadius: 10, padding: 12, marginBottom: 12 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -174,6 +227,7 @@ function StateReadinessPanel({
       <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
         <ReadinessRow icon="map-outline" label={mapReady ? 'MAP ON DEVICE' : available ? 'MAP MISSING' : 'MAP PLANNED'} ready={mapReady} />
         <ReadinessRow icon="git-branch-outline" label={routeReady ? 'ROUTE ON DEVICE' : available ? 'ROUTE MISSING' : 'ROUTE PLANNED'} ready={routeReady} />
+        <ReadinessRow icon="analytics-outline" label={contourReady ? 'CONTOURS ON DEVICE' : contourAvailable ? 'CONTOURS OPTIONAL' : 'CONTOURS PLANNED'} ready={contourReady} />
         <ReadinessRow icon="location-outline" label={placeLabel} ready={placeReady} />
       </View>
     </View>
@@ -415,7 +469,9 @@ export default function OfflineModal({
     getState, startDownload, pauseDownload, resumeDownload, deleteDownload, getTotalBytes,
     getRoutingState, startRoutingDownload, pauseRoutingDownload, resumeRoutingDownload,
     deleteRoutingDownload, getRoutingTotalBytes,
-    isFilePublished, isRoutingPublished,
+    getContourState, startContourDownload, pauseContourDownload, resumeContourDownload,
+    deleteContourDownload, getContourTotalBytes,
+    isFilePublished, isRoutingPublished, isContourPublished,
   } = useOfflineFiles();
   const conusState      = getState('conus');
   const conusTotalBytes = getTotalBytes('conus');
@@ -427,6 +483,7 @@ export default function OfflineModal({
   const [packProgress,   setPackProgress]   = useState<PackProgress | null>(null);
   const [activeTab,      setActiveTab]      = useState<'areas' | 'regions'>('areas');
   const [selectedState,  setSelectedState]  = useState('ks');
+  const [selectedRegionGroup, setSelectedRegionGroup] = useState<RegionGroupKey>('central');
   const [authorizing,    setAuthorizing]    = useState<string | null>(null);
   const [placePacks,     setPlacePacks]     = useState<OfflinePlacePackSummary[]>([]);
   const [placeManifest,  setPlaceManifest]  = useState<PlacePackManifest | null>(null);
@@ -552,6 +609,10 @@ export default function OfflineModal({
   const currentManifestPlacePacks = Object.entries(placeManifest?.packs ?? {})
     .filter(([, entry]) => entry.region_id === selectedState)
     .sort(([, a], [, b]) => a.pack_id.localeCompare(b.pack_id));
+  const selectRegion = useCallback((id: string) => {
+    setSelectedState(id);
+    setSelectedRegionGroup(regionGroupFor(id));
+  }, []);
 
   const downloadRegionPlacePack = useCallback(async (packId: string) => {
     if (placeBusy) return;
@@ -779,48 +840,118 @@ export default function OfflineModal({
                     Region maps are free. Free accounts include one routing pack, then credits or Explorer unlock more.
                   </Text>
 
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
-                    {Object.entries(FILE_REGIONS)
-                      .filter(([id]) => id !== 'conus')
-                      .map(([id, region]) => {
-                        const mapDone = getState(id).status === 'complete';
-                        const routeDone = getRoutingState(id).status === 'complete';
-                        const placesDone = placePacks.some(pack => pack.region_id === id);
-                        const mapPublished = isFilePublished(id);
-                        const routePublished = isRoutingPublished(id);
-                        const available = mapPublished && routePublished;
-                        const selected = selectedState === id;
-                        const code = id === 'canada' ? 'CAN' : id === 'mexico' ? 'MEX' : id.toUpperCase();
-                        return (
-                          <TouchableOpacity
-                            key={id}
-                            onPress={() => setSelectedState(id)}
-                            style={[
-                              s.statePick,
-                              !available && { opacity: 0.72 },
-                              selected && { borderColor: C.orange, backgroundColor: C.orangeGlow },
-                            ]}
-                          >
-                            <Text style={[s.statePickCode, selected && { color: C.orange }]}>{code}</Text>
-                            <Text style={s.statePickName} numberOfLines={1}>{region.name}</Text>
-                            <Text style={{ color: mapDone && routeDone ? C.green : C.text3, fontSize: 8, fontFamily: mono, marginTop: 3 }}>
-                              {!available ? 'PLANNED' : `${mapDone ? 'MAP' : '--'} · ${routeDone ? 'ROUTE' : '--'} · ${placesDone ? 'PLACES' : '--'}`}
+                  <View style={s.featuredRegionRow}>
+                    {(['canada', 'mexico'] as const).map(id => {
+                      const region = FILE_REGIONS[id];
+                      const mapDone = getState(id).status === 'complete';
+                      const routeDone = getRoutingState(id).status === 'complete';
+                      const contourDone = getContourState(id).status === 'complete';
+                      const selected = selectedState === id;
+                      return (
+                        <TouchableOpacity
+                          key={id}
+                          onPress={() => selectRegion(id)}
+                          style={[s.featuredRegionCard, selected && s.featuredRegionCardActive]}
+                        >
+                          <View style={s.featuredRegionIcon}>
+                            <Text style={[s.featuredRegionCode, selected && { color: C.orange }]}>{id === 'canada' ? 'CAN' : 'MEX'}</Text>
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={s.featuredRegionTitle}>{region.name}</Text>
+                            <Text style={s.featuredRegionSub} numberOfLines={2}>{region.description}</Text>
+                            <Text style={[s.featuredRegionStatus, mapDone && routeDone && { color: C.green }]}>
+                              {mapDone && routeDone ? `READY${contourDone ? ' · TOPO' : ''}` : `MAP ${mapDone ? 'ON' : 'OFF'} · ROUTE ${routeDone ? 'ON' : 'OFF'}`}
                             </Text>
-                          </TouchableOpacity>
-                        );
-                      })}
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.regionGroupTabs}>
+                    {REGION_GROUPS.map(group => {
+                      const active = selectedRegionGroup === group.key;
+                      return (
+                        <TouchableOpacity
+                          key={group.key}
+                          onPress={() => {
+                            setSelectedRegionGroup(group.key);
+                            if (!group.ids.includes(selectedState)) setSelectedState(group.ids[0]);
+                          }}
+                          style={[s.regionGroupTab, active && s.regionGroupTabActive]}
+                        >
+                          <Text style={[s.regionGroupTabText, active && { color: C.orange }]}>{group.label}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
                   </ScrollView>
+
+                  {(() => {
+                    const group = REGION_GROUPS.find(g => g.key === selectedRegionGroup) ?? REGION_GROUPS[0];
+                    return (
+                      <View style={s.regionPickerPanel}>
+                        <View style={s.regionPickerHead}>
+                          <View>
+                            <Text style={s.regionPickerTitle}>{group.title}</Text>
+                            <Text style={s.regionPickerSub}>{group.subtitle}</Text>
+                          </View>
+                          <Text style={s.regionPickerCount}>{group.ids.length}</Text>
+                        </View>
+                        <View style={s.stateGrid}>
+                          {group.ids.map(id => {
+                            const region = FILE_REGIONS[id as keyof typeof FILE_REGIONS];
+                            if (!region) return null;
+                            const mapDone = getState(id).status === 'complete';
+                            const routeDone = getRoutingState(id).status === 'complete';
+                            const contourDone = getContourState(id).status === 'complete';
+                            const placesDone = placePacks.some(pack => pack.region_id === id);
+                            const placesPublished = Object.values(placeManifest?.packs ?? {}).some(entry => entry.region_id === id);
+                            const mapPublished = isFilePublished(id);
+                            const routePublished = isRoutingPublished(id);
+                            const contourPublished = isContourPublished(id);
+                            const available = mapPublished && routePublished;
+                            const selected = selectedState === id;
+                            const code = id === 'canada' ? 'CAN' : id === 'mexico' ? 'MEX' : id.toUpperCase();
+                            return (
+                              <TouchableOpacity
+                                key={id}
+                                onPress={() => selectRegion(id)}
+                                style={[
+                                  s.statePick,
+                                  !available && { opacity: 0.72 },
+                                  selected && { borderColor: C.orange, backgroundColor: C.orangeGlow },
+                                ]}
+                              >
+                                <View style={s.statePickTop}>
+                                  <Text style={[s.statePickCode, selected && { color: C.orange }]}>{code}</Text>
+                                  {(mapDone || routeDone) && <Ionicons name="checkmark-circle" size={13} color={C.green} />}
+                                </View>
+                                <Text style={s.statePickName} numberOfLines={1}>{region.name}</Text>
+                                <Text style={{ color: mapDone && routeDone ? C.green : C.text3, fontSize: 8, fontFamily: mono, marginTop: 4 }}>
+                                  {`${mapDone || mapPublished ? 'MAP' : '--'} · ${routeDone || routePublished ? 'ROUTE' : '--'} · ${contourDone || contourPublished ? 'TOPO' : '--'} · ${placesDone || placesPublished ? 'PLACES' : '--'}`}
+                                </Text>
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </View>
+                      </View>
+                    );
+                  })()}
 
                   {(() => {
                     const mapRegion = FILE_REGIONS[selectedState as keyof typeof FILE_REGIONS];
                     const routingRegion = ROUTING_REGIONS[selectedState as keyof typeof ROUTING_REGIONS];
+                    const contourRegion = CONTOUR_REGIONS[selectedState as keyof typeof CONTOUR_REGIONS];
                     const mapState = getState(selectedState);
                     const routingState = getRoutingState(selectedState);
+                    const contourState = getContourState(selectedState);
                     const mapPublished = isFilePublished(selectedState);
                     const routePublished = isRoutingPublished(selectedState);
+                    const contourPublished = isContourPublished(selectedState);
                     const regionAvailable = mapPublished && routePublished;
                     const mapBusy = mapState.status === 'downloading' || mapState.status === 'paused';
                     const routeBusy = routingState.status === 'downloading' || routingState.status === 'paused';
+                    const contourBusy = contourState.status === 'downloading' || contourState.status === 'paused';
                     const selectedCode = selectedState === 'canada' ? 'CAN' : selectedState === 'mexico' ? 'MEX' : selectedState.toUpperCase();
                     const savedRegionPlacePacks = placePacks.filter(pack => pack.region_id === selectedState);
                     const savedRegionPlaceCount = savedRegionPlacePacks.reduce((sum, pack) => sum + (pack.point_count || 0), 0);
@@ -834,11 +965,14 @@ export default function OfflineModal({
                         <StateReadinessPanel
                           mapReady={mapState.status === 'complete'}
                           routeReady={routingState.status === 'complete'}
+                          contourReady={contourState.status === 'complete'}
+                          contourAvailable={contourPublished}
                           placeReady={regionPlacesReady}
                           placeAvailable={regionPlacesAvailable}
                           placeLabel={regionPlacesLabel}
                           mapBusy={mapBusy}
                           routeBusy={routeBusy}
+                          contourBusy={contourBusy}
                           available={regionAvailable}
                           onDownloadMissing={() => {
                             const label = FILE_REGIONS[selectedState as keyof typeof FILE_REGIONS]?.name ?? selectedState.toUpperCase();
@@ -863,7 +997,7 @@ export default function OfflineModal({
                                   {mapRegion.name.toUpperCase()} PACKS ARE BEING PREPARED
                                 </Text>
                                 <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 3, lineHeight: 13 }}>
-                                  Download buttons stay locked until both the PMTiles map and Valhalla route pack are present in the R2 manifests.
+                                  Map and routing buttons stay locked until their PMTiles and Valhalla packs are present in the R2 manifests.
                                 </Text>
                               </View>
                             </View>
@@ -906,7 +1040,8 @@ export default function OfflineModal({
                           completeTitle="✓ ROUTING GRAPH ON DEVICE"
                           completeText="Valhalla graph pack is downloaded. Long offline routes can use this state without needing signal."
                         />
-
+                          </>
+                        )}
                         {currentManifestPlacePacks.length > 0 && (
                           <>
                             <Section label={`${mapRegion.name.toUpperCase()} — PLACES DETAILS`} />
@@ -953,7 +1088,33 @@ export default function OfflineModal({
                             })}
                           </>
                         )}
-                          </>
+                        <Section label={`${mapRegion.name.toUpperCase()} — TOPO CONTOURS`} />
+                        {contourPublished ? (
+                          <ConusCard
+                            state={contourState}
+                            totalBytes={getContourTotalBytes(selectedState)}
+                            region={contourRegion as any}
+                            code={selectedCode}
+                            onStart={() => authorizeAndRun(`contour:${selectedState}`, 'state_contours', selectedState, `${mapRegion.name} contours`, () => startContourDownload(selectedState))}
+                            onPause={() => pauseContourDownload(selectedState)}
+                            onResume={() => resumeContourDownload(selectedState)}
+                            onDelete={() => deleteContourDownload(selectedState)}
+                            completeTitle="✓ CONTOURS ON DEVICE"
+                            completeText="Topo contour lines are saved as a separate overlay pack, so base maps stay lean."
+                          />
+                        ) : (
+                          <View style={s.contourPlannedCard}>
+                            <View style={s.contourIcon}>
+                              <Ionicons name="analytics-outline" size={18} color={C.orange} />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={s.contourPlannedTitle}>CONTOUR PACK PLANNED</Text>
+                              <Text style={s.contourPlannedText}>
+                                Separate topo contours will download per state or country once contour PMTiles are published. They will sit above the map as an optional layer.
+                              </Text>
+                              <Text style={s.contourPlannedMeta}>Estimated starting size: ~{contourRegion?.estimatedGb ?? 0.1} GB</Text>
+                            </View>
+                          </View>
                         )}
                       </>
                     );
@@ -1017,11 +1178,55 @@ function makeStyles(C: ColorPalette) {
     },
     packName:      { flex: 1, color: C.text2, fontSize: 11, fontFamily: mono },
     packSize:      { color: C.text3, fontSize: 10, fontFamily: mono },
+    featuredRegionRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
+    featuredRegionCard: {
+      flex: 1, minHeight: 104, flexDirection: 'row', gap: 10,
+      borderWidth: 1, borderColor: C.border, borderRadius: 12,
+      backgroundColor: C.s1, padding: 12,
+    },
+    featuredRegionCardActive: { borderColor: C.orange, backgroundColor: C.orangeGlow },
+    featuredRegionIcon: {
+      width: 42, height: 42, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
+      borderWidth: 1, borderColor: C.orange + '45', backgroundColor: C.s2,
+    },
+    featuredRegionCode: { color: C.text, fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
+    featuredRegionTitle: { color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '900' },
+    featuredRegionSub: { color: C.text3, fontSize: 9, fontFamily: mono, lineHeight: 13, marginTop: 3 },
+    featuredRegionStatus: { color: C.text3, fontSize: 8, fontFamily: mono, fontWeight: '900', marginTop: 6 },
+    regionGroupTabs: { gap: 8, paddingBottom: 10 },
+    regionGroupTab: {
+      paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999,
+      borderWidth: 1, borderColor: C.border, backgroundColor: C.s1,
+    },
+    regionGroupTabActive: { borderColor: C.orange, backgroundColor: C.orangeGlow },
+    regionGroupTabText: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.6 },
+    regionPickerPanel: {
+      borderWidth: 1, borderColor: C.border, borderRadius: 14,
+      backgroundColor: C.s1, padding: 12, marginBottom: 12,
+    },
+    regionPickerHead: { flexDirection: 'row', justifyContent: 'space-between', gap: 10, marginBottom: 10 },
+    regionPickerTitle: { color: C.text, fontSize: 13, fontFamily: mono, fontWeight: '900' },
+    regionPickerSub: { color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 3 },
+    regionPickerCount: { color: C.orange, fontSize: 11, fontFamily: mono, fontWeight: '900' },
+    stateGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
     statePick: {
-      width: 92, paddingVertical: 9, paddingHorizontal: 8, marginRight: 8,
+      width: '31%', minWidth: 86, paddingVertical: 9, paddingHorizontal: 8,
       borderRadius: 8, borderWidth: 1, borderColor: C.border, backgroundColor: C.s1,
     },
+    statePickTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6 },
     statePickCode: { color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
     statePickName: { color: C.text2, fontSize: 9, fontFamily: mono, marginTop: 2 },
+    contourPlannedCard: {
+      flexDirection: 'row', gap: 12, padding: 14,
+      borderRadius: 12, borderWidth: 1, borderColor: C.orange + '30',
+      backgroundColor: C.orangeGlow,
+    },
+    contourIcon: {
+      width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
+      backgroundColor: C.s1, borderWidth: 1, borderColor: C.orange + '45',
+    },
+    contourPlannedTitle: { color: C.orange, fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 0.6 },
+    contourPlannedText: { color: C.text2, fontSize: 10, fontFamily: mono, lineHeight: 14, marginTop: 4 },
+    contourPlannedMeta: { color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 6 },
   });
 }

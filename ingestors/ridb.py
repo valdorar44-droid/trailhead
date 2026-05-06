@@ -215,20 +215,20 @@ async def get_facility_detail(facility_id: str) -> dict | None:
     # Amenities from attributes
     amenities: list[str] = []
     attr_map = {
-        "Shade": "🌳 Shade",
-        "Fire": "🔥 Fire Ring",
-        "Picnic": "🪑 Picnic Table",
-        "Water": "🚰 Water",
-        "Electric": "⚡ Electric",
-        "Sewer": "🚿 Sewer",
-        "Dump": "🗑️ Dump Station",
-        "Shower": "🚿 Showers",
-        "Toilet": "🚽 Restrooms",
-        "Pet": "🐕 Pets OK",
-        "ADA": "♿ ADA",
-        "Hookup": "⚡ Hookups",
-        "Internet": "📶 WiFi",
-        "Horse": "🐴 Horse OK",
+        "Shade": "Shade Shade",
+        "Fire": "Fire Fire Ring",
+        "Picnic": "Picnic Picnic Table",
+        "Water": "Water Water",
+        "Electric": "Fast Electric",
+        "Sewer": "Shower Sewer",
+        "Dump": "Dump Dump Station",
+        "Shower": "Shower Showers",
+        "Toilet": "Toilet Restrooms",
+        "Pet": "Dogs Pets OK",
+        "ADA": "ADA ADA",
+        "Hookup": "Fast Hookups",
+        "Internet": "Signal WiFi",
+        "Horse": "Horse Horse OK",
     }
     for attr in (attrs_data.get("RECDATA") or []):
         aname = attr.get("AttributeName") or ""
@@ -243,8 +243,8 @@ async def get_facility_detail(facility_id: str) -> dict | None:
     for kw, label in attr_map.items():
         if kw.lower() in desc and label not in amenities:
             amenities.append(label)
-    if f.get("FacilityAdaAccess") == "Y" and "♿ ADA" not in amenities:
-        amenities.append("♿ ADA")
+    if f.get("FacilityAdaAccess") == "Y" and "ADA ADA" not in amenities:
+        amenities.append("ADA ADA")
 
     # Activities
     activities = [a.get("ActivityName", "") for a in (acts_data.get("RECDATA") or [])

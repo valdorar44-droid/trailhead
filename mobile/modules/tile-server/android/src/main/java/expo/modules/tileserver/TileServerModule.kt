@@ -19,6 +19,22 @@ class TileServerModule : Module() {
             TileServer.setBase(path)
         }
 
+        AsyncFunction("setContours") { path: String ->
+            TileServer.setContours(path)
+        }
+
+        AsyncFunction("clearContours") {
+            TileServer.clearContours()
+        }
+
+        AsyncFunction("setTrails") { path: String ->
+            TileServer.setTrails(path)
+        }
+
+        AsyncFunction("clearTrails") {
+            TileServer.clearTrails()
+        }
+
         AsyncFunction("stopServer") {
             TileServer.stop()
         }

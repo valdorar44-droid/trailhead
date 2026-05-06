@@ -21,5 +21,16 @@ public class ValhallaRoutingModule: Module {
                 promise.resolve(result)
             }
         }
+
+        AsyncFunction("routeTrailGraph") { (graphPath: String, requestJson: String, promise: Promise) in
+            TrailRouteGraphRouter.shared.route(graphPath: graphPath, requestJson: requestJson) { result in
+                switch result {
+                case .success(let json):
+                    promise.resolve(json)
+                case .failure(let error):
+                    promise.reject("ERR_TRAIL_ROUTE_GRAPH", error.localizedDescription)
+                }
+            }
+        }
     }
 }

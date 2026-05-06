@@ -291,6 +291,7 @@ export interface Campsite {
   id: string; name: string; lat: number; lng: number;
   reservable: boolean; description: string; url: string;
   route_distance_mi?: number; route_fit?: string; recommended_day?: number;
+  route_progress?: number; route_progress_mi?: number; route_segment_index?: number;
   verified_source?: string;
 }
 export interface CampsitePin {
@@ -298,6 +299,7 @@ export interface CampsitePin {
   tags: string[]; land_type: string; description: string;
   photo_url?: string; reservable: boolean; cost?: string; url: string; ada: boolean;
   route_distance_mi?: number; route_fit?: string; recommended_day?: number;
+  route_progress?: number; route_progress_mi?: number; route_segment_index?: number;
   source?: string; verified_source?: string;
 }
 export interface CampsiteDetail extends CampsitePin {
@@ -309,6 +311,7 @@ export interface GasStation {
   id: number | string; name: string; lat: number; lng: number;
   fuel_types: string; address: string;
   route_distance_mi?: number; route_fit?: string; recommended_day?: number;
+  route_progress?: number; route_progress_mi?: number; route_segment_index?: number;
 }
 export interface Report {
   id: number; lat: number; lng: number; type: string; subtype: string;
@@ -346,7 +349,9 @@ export interface PinPayload {
 export interface OsmPoi {
   id: string; name: string; lat: number; lng: number;
   type: 'water' | 'trailhead' | 'viewpoint' | 'peak' | 'hot_spring' | 'fuel' | 'propane' | 'dump' | 'shower' | 'laundromat' | 'lodging' | 'food' | 'grocery' | 'mechanic' | 'parking' | 'attraction' | 'poi'; subtype?: string; elevation?: string;
+  source?: string;
   route_distance_mi?: number; route_fit?: string;
+  route_progress?: number; route_progress_mi?: number; route_segment_index?: number;
 }
 export interface PlaceTripPackRequest {
   trip_id?: string;
@@ -451,7 +456,7 @@ export interface CampFullnessResult {
   status?: string; already_reported?: boolean; already_voted?: boolean;
 }
 
-export type OfflineAssetType = 'state_map' | 'state_route' | 'state_contours' | 'trip_corridor' | 'conus_map';
+export type OfflineAssetType = 'state_map' | 'state_route' | 'state_contours' | 'state_trails' | 'trip_corridor' | 'conus_map';
 export interface OfflineAuthorizeResult {
   authorized: boolean;
   charged: number;

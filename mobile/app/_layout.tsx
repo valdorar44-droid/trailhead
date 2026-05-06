@@ -11,6 +11,7 @@ import { api } from '@/lib/api';
 import { PRODUCT_IDS } from '@/lib/useSubscription';
 import { useTheme, mono } from '@/lib/design';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { Ionicons } from '@expo/vector-icons';
 
 export default function RootLayout() {
   const setAuth            = useStore(s => s.setAuth);
@@ -165,7 +166,7 @@ export default function RootLayout() {
           const job = await api.getPlanJob(data.job_id);
           if (job.result) {
             setActiveTrip(job.result);
-            router.push('/(tabs)/');
+            router.push('/(tabs)');
           }
         } catch {}
       } else if (data?.type === 'trail_alert') {
@@ -206,7 +207,7 @@ export default function RootLayout() {
           backgroundColor: '#1a2e1a', borderRadius: 12, borderWidth: 1, borderColor: '#22c55e',
           flexDirection: 'row', alignItems: 'center', padding: 14, gap: 12,
         }}>
-          <Text style={{ color: '#22c55e', fontSize: 16 }}>⬆</Text>
+          <Ionicons name="arrow-up-outline" size={18} color="#22c55e" />
           <View style={{ flex: 1 }}>
             <Text style={{ color: '#fff', fontSize: 13, fontWeight: '800', fontFamily: mono }}>Update ready</Text>
             <Text style={{ color: 'rgba(255,255,255,0.55)', fontSize: 11, fontFamily: mono, marginTop: 2 }}>

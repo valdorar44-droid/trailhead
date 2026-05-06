@@ -34,6 +34,34 @@ public class TileServerModule: Module {
             }
         }
 
+        AsyncFunction("setContours") { (path: String, promise: Promise) in
+            do {
+                try TileServer.shared.setContours(path: path)
+                promise.resolve(nil)
+            } catch {
+                promise.reject("ERR_TILE_SERVER", error.localizedDescription)
+            }
+        }
+
+        AsyncFunction("clearContours") { (promise: Promise) in
+            TileServer.shared.clearContours()
+            promise.resolve(nil)
+        }
+
+        AsyncFunction("setTrails") { (path: String, promise: Promise) in
+            do {
+                try TileServer.shared.setTrails(path: path)
+                promise.resolve(nil)
+            } catch {
+                promise.reject("ERR_TILE_SERVER", error.localizedDescription)
+            }
+        }
+
+        AsyncFunction("clearTrails") { (promise: Promise) in
+            TileServer.shared.clearTrails()
+            promise.resolve(nil)
+        }
+
         AsyncFunction("stopServer") { (promise: Promise) in
             TileServer.shared.stop()
             promise.resolve(nil)

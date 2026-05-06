@@ -592,7 +592,7 @@ html,body{
 <div id="map-status-wrap"><div id="map-status">NO ACTIVE TRIP</div></div>
 
 <div id="alert-banner">
-  <span style="font-size:18px">⚠️</span>
+  <span style="font-size:18px">Alert</span>
   <span class="alert-text" id="alert-text">Route alerts detected</span>
   <button class="alert-close" onclick="dismissAlert()">✕</button>
 </div>
@@ -600,11 +600,11 @@ html,body{
 <div id="map-controls">
   <div class="map-btn" id="zoom-in" title="Zoom in">+</div>
   <div class="map-btn" id="zoom-out" title="Zoom out">−</div>
-  <div class="map-btn" id="layer-btn" onclick="toggleLayer()" title="Toggle map style">🛰</div>
+  <div class="map-btn" id="layer-btn" onclick="toggleLayer()" title="Toggle map style">Satellite</div>
   <div class="map-btn" onclick="locateUser()" title="My location">◎</div>
 </div>
 
-<div id="report-fab" title="Report from mobile app" onclick="showToast('📍 Submit reports from the Trailhead mobile app!',3500)">⚠</div>
+<div id="report-fab" title="Report from mobile app" onclick="showToast('Pin Submit reports from the Trailhead mobile app!',3500)">Alert</div>
 <div id="toast"><span id="toast-msg"></span></div>
 
 <div id="sheet">
@@ -628,10 +628,10 @@ html,body{
   </div>
 
   <div id="tabs">
-    <div class="tab active" onclick="switchTab('chat')"><span class="tab-icon">🧠</span>Plan</div>
-    <div class="tab" onclick="switchTab('itinerary')"><span class="tab-icon">🗺</span>Route</div>
-    <div class="tab" onclick="switchTab('camps')"><span class="tab-icon">⛺</span>Camps</div>
-    <div class="tab" onclick="switchTab('logistics')"><span class="tab-icon">🎒</span>Gear</div>
+    <div class="tab active" onclick="switchTab('chat')"><span class="tab-icon">AI</span>Plan</div>
+    <div class="tab" onclick="switchTab('itinerary')"><span class="tab-icon">Map</span>Route</div>
+    <div class="tab" onclick="switchTab('camps')"><span class="tab-icon">Camp</span>Camps</div>
+    <div class="tab" onclick="switchTab('logistics')"><span class="tab-icon">Gear</span>Gear</div>
   </div>
 
   <div id="sheet-content">
@@ -643,7 +643,7 @@ html,body{
           <div class="msg-label">Trailhead AI</div>
           <div class="msg-bubble" style="padding:0;background:transparent;border:none;width:100%;max-width:100%">
             <div class="welcome-hero">
-              <div class="welcome-badge">⚡ Powered by Claude</div>
+              <div class="welcome-badge">Fast Powered by Claude</div>
               <div class="welcome-h">Plan your<br><span>overland</span><br>adventure.</div>
               <div class="welcome-sub">Describe your trip in plain English — I'll build the full route, find dispersed camps, map fuel stops, and brief you on terrain.</div>
               <div class="example-grid">
@@ -670,7 +670,7 @@ html,body{
             <svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>
           </button>
         </div>
-        <div id="input-phase">↵ Send · Shift+↵ New Line</div>
+        <div id="input-phase">Enter Send · Shift+Enter New Line</div>
       </div>
     </div>
 
@@ -678,7 +678,7 @@ html,body{
     <div id="itinerary-panel">
       <div id="itinerary-content">
         <div class="empty-state">
-          <div class="empty-icon">🗺</div>
+          <div class="empty-icon">Map</div>
           <div class="empty-text">Plan a trip to see your<br>day-by-day route</div>
         </div>
       </div>
@@ -688,7 +688,7 @@ html,body{
     <div id="camps-panel">
       <div id="camps-content">
         <div class="empty-state">
-          <div class="empty-icon">⛺</div>
+          <div class="empty-icon">Camp</div>
           <div class="empty-text">Plan a trip to see<br>campsites along your route<br><br>Includes ratings, amenities<br>&amp; cell coverage</div>
         </div>
       </div>
@@ -698,7 +698,7 @@ html,body{
     <div id="logistics-panel">
       <div id="logistics-content">
         <div class="empty-state">
-          <div class="empty-icon">🎒</div>
+          <div class="empty-icon">Gear</div>
           <div class="empty-text">Plan a trip to see<br>logistics &amp; gear notes</div>
         </div>
       </div>
@@ -784,7 +784,7 @@ function toggleLayer() {
     satelliteOn = !satelliteOn;
     mapStyle = satelliteOn ? 'mapbox://styles/mapbox/satellite-streets-v12' : 'mapbox://styles/mapbox/outdoors-v12';
     map.setStyle(mapStyle);
-    btn.textContent = satelliteOn ? '🛰' : '🗺';
+    btn.textContent = satelliteOn ? 'Satellite' : 'Map';
     btn.classList.toggle('active', !satelliteOn);
   }
 }
@@ -854,7 +854,7 @@ function setPhase(phase) {
   const hint  = document.getElementById('input-phase');
   if (phase === 'idle' || phase === 'chatting') {
     input.placeholder = 'Tell me about your adventure idea...';
-    hint.textContent  = '↵ Send · Shift+↵ New Line';
+    hint.textContent  = 'Enter Send · Shift+Enter New Line';
   } else if (phase === 'ready') {
     input.placeholder = 'Refine the plan, or say "build it"...';
     hint.textContent  = 'Route ready to build ✦';
@@ -864,7 +864,7 @@ function setPhase(phase) {
     hint.textContent  = 'Generating full trip plan...';
   } else if (phase === 'active' || phase === 'editing') {
     input.placeholder = 'Change anything — "add a shower stop", "skip Day 3"...';
-    hint.textContent  = '✏ Edit your route · ↵ Apply change';
+    hint.textContent  = 'Edit Edit your route · Enter Apply change';
     hint.style.color  = 'var(--rust)';
   }
 }
@@ -906,7 +906,7 @@ async function sendMessage() {
       setPhase('active');
     } catch (e) {
       clearInterval(stageTimer); thinking.remove();
-      appendMsg('ai', '⚠ ' + e.message);
+      appendMsg('ai', 'Alert ' + e.message);
       setPhase('active');
     } finally {
       document.getElementById('send-btn').disabled = false;
@@ -935,7 +935,7 @@ async function sendMessage() {
     }
   } catch (e) {
     clearInterval(stageTimer); thinking.remove();
-    appendMsg('ai', '⚠ ' + e.message);
+    appendMsg('ai', 'Alert ' + e.message);
     setPhase('idle');
   } finally {
     document.getElementById('send-btn').disabled = false;
@@ -984,7 +984,7 @@ async function buildTrip() {
     setPhase('active');
   } catch (e) {
     clearInterval(stageTimer); thinking.remove();
-    appendMsg('ai', '⚠ ' + e.message);
+    appendMsg('ai', 'Alert ' + e.message);
     setPhase('ready');
   } finally {
     document.getElementById('send-btn').disabled = false;
@@ -1029,17 +1029,17 @@ function updateTrailDNA(dna) {
   if (!container) return;
   container.innerHTML = '';
   const labels = {
-    vehicle: v => `🚗 ${v}`,
-    terrain: v => `🏔 ${v}`,
-    camp_style: v => `⛺ ${v}`,
-    duration: v => `📅 ${v}`,
+    vehicle: v => `Vehicle ${v}`,
+    terrain: v => `Mountain ${v}`,
+    camp_style: v => `Camp ${v}`,
+    duration: v => `Date ${v}`,
   };
   let hasAny = false;
   for (const [k, v] of Object.entries(dna)) {
     if (k === 'regions' && Array.isArray(v)) {
       v.forEach(r => {
         const tag = document.createElement('span');
-        tag.className = 'dna-tag'; tag.textContent = `📍 ${r}`;
+        tag.className = 'dna-tag'; tag.textContent = `Pin ${r}`;
         container.appendChild(tag); hasAny = true;
       });
     } else if (labels[k] && v) {
@@ -1112,10 +1112,10 @@ function renderTripCard(data) {
         <div class="stat"><div class="stat-val" data-target="${gas}">0</div><div class="stat-label">Fuel</div></div>
       </div>
       <div class="trip-overview">${esc(p.overview || '')}</div>
-      ${p.route_reasoning ? `<div class="trip-overview" style="margin-top:8px;opacity:0.65;font-style:italic;font-size:12px">💡 ${esc(p.route_reasoning)}</div>` : ''}
+      ${p.route_reasoning ? `<div class="trip-overview" style="margin-top:8px;opacity:0.65;font-style:italic;font-size:12px">Note ${esc(p.route_reasoning)}</div>` : ''}
       <div class="trip-actions">
         <button class="btn btn-primary" onclick="switchTab('itinerary')">View Route →</button>
-        <button class="btn btn-ghost" onclick="switchTab('camps')">⛺ Camps</button>
+        <button class="btn btn-ghost" onclick="switchTab('camps')">Camp Camps</button>
         <button class="btn btn-ghost" onclick="exportGpx()">↓ GPX</button>
       </div>
     </div>`;
@@ -1186,7 +1186,7 @@ function campPopupHtml(c) {
   const reservable = c.reservable ? '<span class="pop-badge green">Reservable</span>' : '<span class="pop-badge">First Come</span>';
   const cost = c.cost ? `<span class="pop-badge yellow">${esc(c.cost)}</span>` : '';
   return `<div class="pop-header">
-    <div class="pop-type">⛺ ${esc((c.land_type || 'Campsite').toUpperCase())}</div>
+    <div class="pop-type">Camp ${esc((c.land_type || 'Campsite').toUpperCase())}</div>
     <div class="pop-title">${esc(c.name)}</div>
   </div>
   <div class="pop-body">
@@ -1219,22 +1219,22 @@ function plotMap(data) {
       <div class="pop-body">
         <div class="pop-meta">Day ${wp.day}</div>
         ${wp.description ? `<div class="pop-desc">${esc(wp.description)}</div>` : ''}
-        ${wp.notes ? `<div class="pop-desc" style="color:var(--yellow)">📌 ${esc(wp.notes)}</div>` : ''}
+        ${wp.notes ? `<div class="pop-desc" style="color:var(--yellow)">Note ${esc(wp.notes)}</div>` : ''}
       </div>`);
       const m = new mapboxgl.Marker({ element: el }).setLngLat([wp.lng, wp.lat]).setPopup(popup).addTo(map);
       wpMarkers.push(m);
     });
 
     campsites.slice(0, 40).forEach(c => {
-      const el = document.createElement('div'); el.className = 'mk-camp'; el.textContent = '⛺';
+      const el = document.createElement('div'); el.className = 'mk-camp'; el.textContent = 'Camp';
       const m = new mapboxgl.Marker({ element: el }).setLngLat([c.lng, c.lat])
         .setPopup(mkPopup(campPopupHtml(c))).addTo(map);
       campMarkers.push(m);
     });
 
     gas.slice(0, 25).forEach(s => {
-      const el = document.createElement('div'); el.className = 'mk-fuel'; el.textContent = '⛽';
-      const popup = mkPopup(`<div class="pop-header"><div class="pop-type">⛽ FUEL STOP</div><div class="pop-title">${esc(s.name)}</div></div><div class="pop-body"><div class="pop-meta">${esc(s.fuel_types || '')}</div>${s.address ? `<div class="pop-desc">${esc(s.address)}</div>` : ''}</div>`);
+      const el = document.createElement('div'); el.className = 'mk-fuel'; el.textContent = 'Fuel';
+      const popup = mkPopup(`<div class="pop-header"><div class="pop-type">Fuel FUEL STOP</div><div class="pop-title">${esc(s.name)}</div></div><div class="pop-body"><div class="pop-meta">${esc(s.fuel_types || '')}</div>${s.address ? `<div class="pop-desc">${esc(s.address)}</div>` : ''}</div>`);
       const m = new mapboxgl.Marker({ element: el }).setLngLat([s.lng, s.lat]).setPopup(popup).addTo(map);
       fuelMarkers.push(m);
     });
@@ -1253,7 +1253,7 @@ function plotMap(data) {
       wpMarkers.push(m);
     });
     campsites.slice(0, 35).forEach(c => {
-      const icon = L.divIcon({ className: '', html: '<div class="mk-camp">⛺</div>', iconSize: [28, 28], iconAnchor: [14, 14] });
+      const icon = L.divIcon({ className: '', html: '<div class="mk-camp">Camp</div>', iconSize: [28, 28], iconAnchor: [14, 14] });
       const m = L.marker([c.lat, c.lng], { icon }).bindPopup(`<div style="color:#e4ddd2;background:#0d1a0e;padding:10px;min-width:200px"><b>${esc(c.name)}</b><br><small style="color:#8a9285">${esc(c.land_type||'Campsite')}</small></div>`).addTo(_leafletMap);
       campMarkers.push(m);
     });
@@ -1299,7 +1299,7 @@ async function drawRouteMbx(wps) {
 function renderItinerary(plan) {
   const el = document.getElementById('itinerary-content');
   const days = plan.daily_itinerary || [];
-  if (!days.length) { el.innerHTML = '<div class="empty-state"><div class="empty-icon">🗺</div><div class="empty-text">No itinerary data</div></div>'; return; }
+  if (!days.length) { el.innerHTML = '<div class="empty-state"><div class="empty-icon">Map</div><div class="empty-text">No itinerary data</div></div>'; return; }
   el.innerHTML = days.map((day, i) => {
     const rc = `road-${(day.road_type || 'mixed').toLowerCase()}`;
     const hls = (day.highlights || []).map(h => `<div class="hl">${esc(h)}</div>`).join('');
@@ -1324,7 +1324,7 @@ function toggleDay(i) { document.getElementById(`db-${i}`)?.classList.toggle('op
 function renderCamps(data) {
   const el = document.getElementById('camps-content');
   const camps = [...(data.campsites || [])];
-  if (!camps.length) { el.innerHTML = '<div class="empty-state"><div class="empty-icon">⛺</div><div class="empty-text">No campsites found<br>for this route</div></div>'; return; }
+  if (!camps.length) { el.innerHTML = '<div class="empty-state"><div class="empty-icon">Camp</div><div class="empty-text">No campsites found<br>for this route</div></div>'; return; }
 
   el.innerHTML = `
     <div style="font-size:9px;font-family:var(--mono);color:var(--text3);letter-spacing:.1em;padding:2px 2px 6px;display:flex;justify-content:space-between;align-items:center;text-transform:uppercase">
@@ -1343,12 +1343,12 @@ function renderCampItem(c, i) {
 
   // Common amenities based on type
   const amenities = [];
-  if (c.reservable) amenities.push({ label: '📅 Reserve', has: true });
-  if (!c.reservable) amenities.push({ label: '🆓 First Come', has: true });
-  if (c.land_type?.includes('KOA') || c.name?.toLowerCase().includes('koa')) amenities.push({ label: '🔌 Hookups', has: true });
-  amenities.push({ label: '🚻 Toilets', has: c.reservable || sig.label !== 'Remote' });
-  amenities.push({ label: '💧 Water', has: c.reservable });
-  amenities.push({ label: '🔥 Fire Rings', has: true });
+  if (c.reservable) amenities.push({ label: 'Date Reserve', has: true });
+  if (!c.reservable) amenities.push({ label: 'Free First Come', has: true });
+  if (c.land_type?.includes('KOA') || c.name?.toLowerCase().includes('koa')) amenities.push({ label: 'Power Hookups', has: true });
+  amenities.push({ label: 'Restroom Toilets', has: c.reservable || sig.label !== 'Remote' });
+  amenities.push({ label: 'Water Water', has: c.reservable });
+  amenities.push({ label: 'Fire Fire Rings', has: true });
   if (sig.starlink) amenities.push({ label: '✦ Starlink', has: true });
 
   const ampHtml = amenities.slice(0, 5).map(a =>
@@ -1384,18 +1384,18 @@ function renderLogistics(plan) {
   const riskColors = { low: '#22c55e', moderate: '#f59e0b', high: '#ef4444' };
   const riskColor = riskColors[L2.risk_level] || '#8a9285';
   const items = [
-    L2.risk_level ? { icon: '⚡', label: 'RISK LEVEL', val: L2.risk_level.toUpperCase(), color: riskColor } : null,
+    L2.risk_level ? { icon: 'Fast', label: 'RISK LEVEL', val: L2.risk_level.toUpperCase(), color: riskColor } : null,
     { icon: '4×4', label: 'VEHICLE', val: L2.vehicle_recommendation },
-    L2.clearance_needed ? { icon: '📐', label: 'CLEARANCE', val: { stock: 'Stock vehicle OK', high_clearance: 'High clearance required', '4wd_low_range': '4WD low range required' }[L2.clearance_needed] || L2.clearance_needed } : null,
+    L2.clearance_needed ? { icon: 'Clearance', label: 'CLEARANCE', val: { stock: 'Stock vehicle OK', high_clearance: 'High clearance required', '4wd_low_range': '4WD low range required' }[L2.clearance_needed] || L2.clearance_needed } : null,
     { icon: 'GAS', label: 'FUEL STRATEGY', val: L2.fuel_strategy },
     { icon: 'H₂O', label: 'WATER STRATEGY', val: L2.water_strategy },
     { icon: '✓', label: 'PERMITS', val: L2.permits_needed },
-    L2.fire_restrictions_note ? { icon: '🔥', label: 'FIRE RESTRICTIONS', val: L2.fire_restrictions_note } : null,
-    L2.cell_coverage ? { icon: '📶', label: 'CELL COVERAGE', val: L2.cell_coverage } : null,
-    { icon: '📅', label: 'BEST SEASON', val: L2.best_season },
-    L2.emergency_bailout ? { icon: '🚨', label: 'EMERGENCY BAILOUT', val: L2.emergency_bailout } : null,
+    L2.fire_restrictions_note ? { icon: 'Fire', label: 'FIRE RESTRICTIONS', val: L2.fire_restrictions_note } : null,
+    L2.cell_coverage ? { icon: 'Signal', label: 'CELL COVERAGE', val: L2.cell_coverage } : null,
+    { icon: 'Date', label: 'BEST SEASON', val: L2.best_season },
+    L2.emergency_bailout ? { icon: 'Emergency', label: 'EMERGENCY BAILOUT', val: L2.emergency_bailout } : null,
   ].filter(x => x && x.val);
-  if (!items.length) { el.innerHTML = '<div class="empty-state"><div class="empty-icon">🎒</div><div class="empty-text">No logistics data</div></div>'; return; }
+  if (!items.length) { el.innerHTML = '<div class="empty-state"><div class="empty-icon">Gear</div><div class="empty-text">No logistics data</div></div>'; return; }
   el.innerHTML = items.map(item => `
     <div class="logistic-card">
       <div class="logistic-header">
@@ -1441,7 +1441,7 @@ async function exportGpx() {
   const url = URL.createObjectURL(blob);
   Object.assign(document.createElement('a'), { href: url, download: 'trailhead-trip.gpx' }).click();
   URL.revokeObjectURL(url);
-  showToast('⬇ GPX exported!');
+  showToast('Download GPX exported!');
 }
 
 function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }

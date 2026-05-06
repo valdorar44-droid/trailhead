@@ -1,71 +1,104 @@
 import { Platform } from 'react-native';
 import { useStore } from './store';
+import { premiumColors, premiumLightColors, spacing, radii } from './theme';
 
 export const DARK_C = {
-  bg:         '#060d07',
-  s1:         '#0d1a0e',
-  s2:         '#152016',
-  s3:         '#1c2b1d',
-  s4:         '#253026',
-  border:     '#2a3a2b',
-  border2:    '#1a2519',
-  // Primary accent — burnt rust
-  orange:     '#b85c38',
-  orange2:    '#9c4a28',
-  orangeGlow: 'rgba(184,92,56,0.18)',
-  // Secondary accents
-  gold:       '#c8953a',
-  sage:       '#7aaa7c',
-  pine:       '#4d8c5f',
+  bg:         premiumColors.background,
+  s1:         premiumColors.surface,
+  s2:         premiumColors.surfaceElevated,
+  s3:         '#1B1C20',
+  s4:         '#23252B',
+  border:     premiumColors.border,
+  border2:    premiumColors.borderStrong,
+  // Orange is now reserved for active navigation, warnings, and selected actions.
+  orange:     premiumColors.warningOrange,
+  orange2:    '#B86138',
+  orangeGlow: 'rgba(217,119,69,0.18)',
+  // Premium neutral/technical accents.
+  gold:       premiumColors.silver,
+  sage:       premiumColors.silver,
+  pine:       premiumColors.blueGlow,
   // Status colors
-  green:      '#3dbd6d',
-  green2:     '#16a34a',
-  yellow:     '#d4a017',
-  red:        '#ef4444',
-  red2:       '#b91c1c',
-  purple:     '#a855f7',
+  green:      premiumColors.successGreen,
+  green2:     '#21A974',
+  yellow:     '#C8B98A',
+  red:        premiumColors.danger,
+  red2:       '#B93F3F',
+  purple:     premiumColors.blueGlow,
   // Text
-  text:       '#e4ddd2',
-  text2:      '#8a9285',
-  text3:      '#4a5a4c',
+  text:       premiumColors.textPrimary,
+  text2:      premiumColors.textSecondary,
+  text3:      premiumColors.textMuted,
   white:      '#ffffff',
+  glass:      premiumColors.surfaceGlass,
+  glassStrong: premiumColors.surfaceGlassStrong,
+  silver:     premiumColors.silver,
+  silverBright: premiumColors.silverBright,
+  blueGlow:   premiumColors.blueGlow,
 };
 
 export const LIGHT_C = {
-  bg:         '#f4f0eb',
-  s1:         '#ede8e2',
-  s2:         '#e5dfd7',
-  s3:         '#dbd3c8',
-  s4:         '#cfc6b8',
-  border:     '#c4b9a8',
-  border2:    '#b8ac9a',
-  // Primary accent — burnt rust (same brand color both themes)
-  orange:     '#b85c38',
-  orange2:    '#9c4a28',
-  orangeGlow: 'rgba(184,92,56,0.12)',
+  bg:         premiumLightColors.background,
+  s1:         premiumLightColors.surface,
+  s2:         premiumLightColors.surfaceElevated,
+  s3:         '#E8EAEE',
+  s4:         '#DADDE3',
+  border:     premiumLightColors.border,
+  border2:    premiumLightColors.borderStrong,
+  orange:     premiumLightColors.warningOrange,
+  orange2:    '#984F2F',
+  orangeGlow: 'rgba(184,94,53,0.12)',
   // Secondary accents
-  gold:       '#c8953a',
-  sage:       '#5a8a5c',
-  pine:       '#3d6e4f',
+  gold:       premiumLightColors.silver,
+  sage:       premiumLightColors.silver,
+  pine:       premiumLightColors.blueGlow,
   // Status colors
-  green:      '#16a34a',
-  green2:     '#15803d',
-  yellow:     '#b45309',
-  red:        '#dc2626',
-  red2:       '#b91c1c',
-  purple:     '#7c3aed',
+  green:      premiumLightColors.successGreen,
+  green2:     '#087A4C',
+  yellow:     '#967B35',
+  red:        premiumLightColors.danger,
+  red2:       '#991B1B',
+  purple:     premiumLightColors.blueGlow,
   // Text
-  text:       '#1a1208',
-  text2:      '#5a4e3e',
-  text3:      '#8a7a68',
+  text:       premiumLightColors.textPrimary,
+  text2:      premiumLightColors.textSecondary,
+  text3:      premiumLightColors.textMuted,
   white:      '#ffffff',
+  glass:      premiumLightColors.surfaceGlass,
+  glassStrong: premiumLightColors.surfaceGlassStrong,
+  silver:     premiumLightColors.silver,
+  silverBright: premiumLightColors.silverBright,
+  blueGlow:   premiumLightColors.blueGlow,
 };
 
 export type ColorPalette = typeof DARK_C;
 
+export const RADIUS = {
+  xs: radii.xs,
+  sm: radii.sm,
+  md: radii.md,
+  lg: radii.lg,
+  xl: radii.xl,
+};
+
+export const SPACE = {
+  xs: spacing.xs,
+  sm: spacing.sm,
+  md: spacing.md,
+  lg: spacing.lg,
+  xl: spacing.xl,
+};
+
+export const TYPE = {
+  labelSpacing: 0.7,
+  denseLabelSpacing: 0.4,
+};
+
 export function useTheme(): ColorPalette {
-  const themeMode = useStore(s => s.themeMode);
-  return themeMode === 'dark' ? DARK_C : LIGHT_C;
+  // Premium redesign is dark-only for now. Keep the light palette available for
+  // a later explicit light-mode pass, but never let persisted legacy settings
+  // pull current screens back into the old cream utility UI.
+  return DARK_C;
 }
 
 // Mono font — Menlo on iOS is cleaner than Courier New

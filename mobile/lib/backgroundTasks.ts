@@ -61,7 +61,7 @@ TaskManager.defineTask(AUDIO_LOCATION_TASK, async ({ data, error }: any) => {
         if (now - lastNotified > RENOTIFY_INTERVAL_MS) {
           await Notifications.scheduleNotificationAsync({
             content: {
-              title: `📍 ${wp.name}`,
+              title: wp.name,
               body: guide[wp.name].slice(0, 180),
               data: { tripId: trip.trip_id, waypointName: wp.name },
             },

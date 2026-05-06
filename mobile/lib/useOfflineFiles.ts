@@ -20,8 +20,10 @@ export const OFFLINE_DIR = `${FileSystem.documentDirectory}offline/`;
 export const CACHE_OFFLINE_DIR = `${FileSystem.cacheDirectory}offline/`;
 export const ROUTING_DIR = `${OFFLINE_DIR}routing/`;
 export const CONTOUR_DIR = `${OFFLINE_DIR}contours/`;
+export const TRAIL_PACK_DIR = `${OFFLINE_DIR}trails/`;
 const CACHE_ROUTING_DIR = `${CACHE_OFFLINE_DIR}routing/`;
 const CACHE_CONTOUR_DIR = `${CACHE_OFFLINE_DIR}contours/`;
+const CACHE_TRAIL_PACK_DIR = `${CACHE_OFFLINE_DIR}trails/`;
 
 export const FILE_REGIONS = {
   conus: {
@@ -170,6 +172,30 @@ export const CONTOUR_REGIONS = Object.fromEntries(
 
 export type ContourRegionId = keyof typeof CONTOUR_REGIONS;
 
+export const TRAIL_REGIONS = Object.fromEntries(
+  Object.entries(FILE_REGIONS)
+    .filter(([id]) => id !== 'conus')
+    .map(([id, region]) => [id, {
+      id,
+      name: region.name,
+      url: `${BASE}/api/trail-packs/${id}.pmtiles`,
+      localPath: `${TRAIL_PACK_DIR}${id}.pmtiles`,
+      estimatedGb: Math.max(0.02, Math.min(0.8, region.estimatedGb * 0.18)),
+      description: 'Trail systems overlay + selectable state trail graph',
+      bounds: region.bounds,
+    }])
+) as Record<string, {
+  id: string;
+  name: string;
+  url: string;
+  localPath: string;
+  estimatedGb: number;
+  description: string;
+  bounds: { n: number; s: number; e: number; w: number };
+}>;
+
+export type TrailRegionId = keyof typeof TRAIL_REGIONS;
+
 export function isPlannedOfflineRegion(id: string): boolean {
   const region = FILE_REGIONS[id as FileRegionId] as any;
   return Boolean(region?.comingSoon);
@@ -185,11 +211,13 @@ export interface FileDownloadState {
   fileSizeMb:      number;
   localPath:       string;
   error?:          string;
+  details?:        string;
 }
 
 const RESUME_KEY  = (id: string) => `offl_resume_${id}`;
 const ROUTING_RESUME_KEY = (id: string) => `route_resume_${id}`;
 const CONTOUR_RESUME_KEY = (id: string) => `contour_resume_${id}`;
+const TRAIL_RESUME_KEY = (id: string) => `trail_resume_${id}`;
 const EMPTY = (id: FileRegionId): FileDownloadState => ({
   status: 'idle', progress: 0, downloadedBytes: 0, totalBytes: 0,
   speedBps: 0, etaSec: 0, fileSizeMb: 0,
@@ -211,6 +239,16 @@ const EMPTY_CONTOUR = (id: string): FileDownloadState => {
     localPath: region?.localPath ?? `${CONTOUR_DIR}${id}.pmtiles`,
   };
 };
+const EMPTY_TRAIL = (id: string): FileDownloadState => {
+  const region = TRAIL_REGIONS[id] ?? TRAIL_REGIONS.ks;
+  return {
+    status: 'idle', progress: 0, downloadedBytes: 0, totalBytes: 0,
+    speedBps: 0, etaSec: 0, fileSizeMb: 0,
+    localPath: region?.localPath ?? `${TRAIL_PACK_DIR}${id}.pmtiles`,
+  };
+};
+export const trailGraphLocalPath = (id: string) => `${TRAIL_PACK_DIR}${id}.graph.json`;
+export const trailRouteGraphLocalPath = (id: string) => `${TRAIL_PACK_DIR}${id}.route.jsonl.gz`;
 
 async function migrateCachedFile(cachePath: string, persistentPath: string) {
   const target = await FileSystem.getInfoAsync(persistentPath).catch(() => null);
@@ -264,14 +302,23 @@ export function useOfflineFiles() {
       Object.keys(CONTOUR_REGIONS).map(id => [id, EMPTY_CONTOUR(id)])
     )
   );
+  const [trailStates, setTrailStates] = useState<Record<string, FileDownloadState>>(
+    () => Object.fromEntries(
+      Object.keys(TRAIL_REGIONS).map(id => [id, EMPTY_TRAIL(id)])
+    )
+  );
   // Real file sizes fetched from CF manifest (overrides estimatedGb)
   const [manifestSizes, setManifestSizes] = useState<Record<string, number>>({});
   const [routingManifestSizes, setRoutingManifestSizes] = useState<Record<string, number>>({});
   const [contourManifestSizes, setContourManifestSizes] = useState<Record<string, number>>({});
+  const [trailManifestSizes, setTrailManifestSizes] = useState<Record<string, number>>({});
+  const [trailSelectionGraphManifestSizes, setTrailSelectionGraphManifestSizes] = useState<Record<string, number>>({});
+  const [trailRouteGraphManifestSizes, setTrailRouteGraphManifestSizes] = useState<Record<string, number>>({});
 
   const dlRefs    = useRef<Record<string, FileSystem.DownloadResumable | null>>({});
   const routingDlRefs = useRef<Record<string, FileSystem.DownloadResumable | null>>({});
   const contourDlRefs = useRef<Record<string, FileSystem.DownloadResumable | null>>({});
+  const trailDlRefs = useRef<Record<string, FileSystem.DownloadResumable | null>>({});
   const speedBuf  = useRef<Record<string, Array<{ b: number; t: number }>>>({});
   const prevSpeed = useRef<Record<string, number>>({});
 
@@ -323,12 +370,35 @@ export function useOfflineFiles() {
       .catch(() => {});
   }, []);
 
+  useEffect(() => {
+    fetch(`${BASE}/api/trail-packs/manifest.json`)
+      .then(r => r.ok ? r.json() : {})
+      .then((m: Record<string, { size: number }>) => {
+        const sizes: Record<string, number> = {};
+        const selectionGraphSizes: Record<string, number> = {};
+        const routeGraphSizes: Record<string, number> = {};
+        Object.keys(TRAIL_REGIONS).forEach(id => {
+          const key = `${id}.pmtiles`;
+          const graphKey = `${id}.graph.json`;
+          const routeKey = `${id}.route.jsonl.gz`;
+          if (m[key]?.size) sizes[id] = m[key].size;
+          if (m[graphKey]?.size) selectionGraphSizes[id] = m[graphKey].size;
+          if (m[routeKey]?.size) routeGraphSizes[id] = m[routeKey].size;
+        });
+        setTrailManifestSizes(sizes);
+        setTrailSelectionGraphManifestSizes(selectionGraphSizes);
+        setTrailRouteGraphManifestSizes(routeGraphSizes);
+      })
+      .catch(() => {});
+  }, []);
+
   // On mount: check which files already exist, and which have paused resume data
   useEffect(() => {
     (async () => {
       await FileSystem.makeDirectoryAsync(OFFLINE_DIR, { intermediates: true }).catch(() => {});
       await FileSystem.makeDirectoryAsync(ROUTING_DIR, { intermediates: true }).catch(() => {});
       await FileSystem.makeDirectoryAsync(CONTOUR_DIR, { intermediates: true }).catch(() => {});
+      await FileSystem.makeDirectoryAsync(TRAIL_PACK_DIR, { intermediates: true }).catch(() => {});
 
       for (const [id, region] of Object.entries(FILE_REGIONS)) {
         const fileName = id === 'conus' ? 'conus.pmtiles' : `${id}.pmtiles`;
@@ -380,6 +450,23 @@ export function useOfflineFiles() {
         const saved = await storage.get(CONTOUR_RESUME_KEY(id)).catch(() => null);
         if (saved) {
           setContourStates(prev => ({ ...prev, [id]: { ...EMPTY_CONTOUR(id), status: 'paused' } }));
+        }
+      }
+
+      for (const [id, region] of Object.entries(TRAIL_REGIONS)) {
+        await migrateCachedFile(`${CACHE_TRAIL_PACK_DIR}${id}.pmtiles`, region.localPath);
+        const info = await FileSystem.getInfoAsync(region.localPath).catch(() => null);
+        if (info?.exists) {
+          const sizeMb = Math.round(((info as any).size ?? 0) / 1_048_576 * 10) / 10;
+          setTrailStates(prev => ({
+            ...prev,
+            [id]: { ...EMPTY_TRAIL(id), status: 'complete', progress: 100, fileSizeMb: sizeMb, localPath: region.localPath },
+          }));
+          continue;
+        }
+        const saved = await storage.get(TRAIL_RESUME_KEY(id)).catch(() => null);
+        if (saved) {
+          setTrailStates(prev => ({ ...prev, [id]: { ...EMPTY_TRAIL(id), status: 'paused' } }));
         }
       }
     })();
@@ -441,6 +528,41 @@ export function useOfflineFiles() {
     })();
   }, [contourManifestSizes]);
 
+  useEffect(() => {
+    if (Object.keys(trailManifestSizes).length === 0) return;
+    (async () => {
+      for (const [id, region] of Object.entries(TRAIL_REGIONS)) {
+        const expected = trailManifestSizes[id];
+        if (!expected) continue;
+        const info = await FileSystem.getInfoAsync(region.localPath).catch(() => null);
+        if (!info?.exists) continue;
+        const actual = (info as any).size ?? 0;
+        if (actual < expected * 0.99) {
+          await FileSystem.deleteAsync(region.localPath, { idempotent: true }).catch(() => {});
+          await storage.del(TRAIL_RESUME_KEY(id)).catch(() => {});
+          setTrailStates(prev => ({ ...prev, [id]: { ...EMPTY_TRAIL(id) } }));
+        }
+      }
+    })();
+  }, [trailManifestSizes]);
+
+  useEffect(() => {
+    if (Object.keys(trailRouteGraphManifestSizes).length === 0) return;
+    (async () => {
+      for (const id of Object.keys(TRAIL_REGIONS)) {
+        const expected = trailRouteGraphManifestSizes[id];
+        if (!expected) continue;
+        const path = trailRouteGraphLocalPath(id);
+        const info = await FileSystem.getInfoAsync(path).catch(() => null);
+        if (!info?.exists) continue;
+        const actual = (info as any).size ?? 0;
+        if (actual < expected * 0.99) {
+          await FileSystem.deleteAsync(path, { idempotent: true }).catch(() => {});
+        }
+      }
+    })();
+  }, [trailRouteGraphManifestSizes]);
+
   // ── Speed smoothing (EMA over ~8 seconds) ────────────────────────────────
   const calcSpeed = useCallback((id: string, bytes: number): number => {
     const now = Date.now();
@@ -468,6 +590,9 @@ export function useOfflineFiles() {
   }, []);
   const updateContourState = useCallback((id: string, patch: Partial<FileDownloadState>) => {
     setContourStates(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }));
+  }, []);
+  const updateTrailState = useCallback((id: string, patch: Partial<FileDownloadState>) => {
+    setTrailStates(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }));
   }, []);
 
   // ── Start or restart a download ───────────────────────────────────────────
@@ -795,6 +920,291 @@ export function useOfflineFiles() {
     updateContourState(id, EMPTY_CONTOUR(id));
   }, [updateContourState]);
 
+  const downloadTrailSidecar = useCallback(async (
+    id: string,
+    url: string,
+    path: string,
+    label: string,
+    baseBytes: number,
+    expectedBytes: number,
+    totalBytes: number,
+  ) => {
+    const key = `trail:${id}:sidecar`;
+    speedBuf.current[key] = [];
+    prevSpeed.current[key] = 0;
+    updateTrailState(id, {
+      status: 'downloading',
+      details: label,
+      downloadedBytes: baseBytes,
+      totalBytes,
+      progress: totalBytes > 0 ? Math.min((baseBytes / totalBytes) * 100, 99.9) : 99.9,
+    });
+    const dl = FileSystem.createDownloadResumable(
+      url,
+      path,
+      {},
+      ({ totalBytesWritten, totalBytesExpectedToWrite }) => {
+        const expected = expectedBytes || totalBytesExpectedToWrite || 0;
+        const written = baseBytes + totalBytesWritten;
+        const total = totalBytes || baseBytes + expected;
+        const speed = calcSpeed(key, totalBytesWritten);
+        const remain = Math.max(0, total - written);
+        updateTrailState(id, {
+          status: 'downloading',
+          details: label,
+          progress: total > 0 ? Math.min((written / total) * 100, 99.9) : 99.9,
+          downloadedBytes: written,
+          totalBytes: total,
+          speedBps: speed,
+          etaSec: speed > 0 ? remain / speed : 0,
+          fileSizeMb: written / 1_048_576,
+        });
+      },
+    );
+    const result = await dl.downloadAsync();
+    if (!result || result.status !== 200) {
+      throw new Error(`${label.replace(/\.+$/, '')} unavailable (${result?.status ?? 'no response'})`);
+    }
+  }, [calcSpeed, updateTrailState]);
+
+  const downloadTrailSidecars = useCallback(async (id: string, pmtilesBytes = 0) => {
+    const graphExpected = trailSelectionGraphManifestSizes[id] ?? 0;
+    const routeExpected = trailRouteGraphManifestSizes[id] ?? 0;
+    const totalExpected = pmtilesBytes + graphExpected + routeExpected;
+
+    await downloadTrailSidecar(
+      id,
+      `${BASE}/api/trail-packs/${id}.graph.json`,
+      trailGraphLocalPath(id),
+      'Downloading trail selection graph...',
+      pmtilesBytes,
+      graphExpected,
+      totalExpected,
+    );
+    const graphInfo = await FileSystem.getInfoAsync(trailGraphLocalPath(id)).catch(() => null);
+    const graphActual = (graphInfo as any)?.size ?? 0;
+    if (!graphInfo?.exists || (graphExpected && graphActual < graphExpected * 0.99)) {
+      throw new Error('Selection graph download was incomplete');
+    }
+
+    if (trailRouteGraphManifestSizes[id]) {
+      await downloadTrailSidecar(
+        id,
+        `${BASE}/api/trail-packs/${id}.route.jsonl.gz`,
+        trailRouteGraphLocalPath(id),
+        'Downloading trail routing graph...',
+        pmtilesBytes + graphActual,
+        trailRouteGraphManifestSizes[id],
+        totalExpected,
+      );
+      const info = await FileSystem.getInfoAsync(trailRouteGraphLocalPath(id)).catch(() => null);
+      const expected = trailRouteGraphManifestSizes[id];
+      const actual = (info as any)?.size ?? 0;
+      if (!info?.exists || actual < expected * 0.99) {
+        throw new Error('Routing graph download was incomplete');
+      }
+      updateTrailState(id, { details: 'Trail overlay, selection graph, and routing graph downloaded' });
+    } else {
+      updateTrailState(id, { details: 'Trail overlay and selection graph downloaded; routing graph not published yet' });
+    }
+  }, [downloadTrailSidecar, trailRouteGraphManifestSizes, trailSelectionGraphManifestSizes, updateTrailState]);
+
+  const trailBundleSizeMb = useCallback(async (id: string, pmtilesBytes = 0) => {
+    const graphInfo = await FileSystem.getInfoAsync(trailGraphLocalPath(id)).catch(() => null);
+    const routeInfo = await FileSystem.getInfoAsync(trailRouteGraphLocalPath(id)).catch(() => null);
+    const totalBytes = pmtilesBytes + ((graphInfo as any)?.size ?? 0) + ((routeInfo as any)?.size ?? 0);
+    return Math.round(totalBytes / 1_048_576 * 10) / 10;
+  }, []);
+
+  useEffect(() => {
+    if (Object.keys(trailManifestSizes).length === 0) return;
+    let cancelled = false;
+    (async () => {
+      for (const [id, region] of Object.entries(TRAIL_REGIONS)) {
+        const pmtilesExpected = trailManifestSizes[id];
+        const graphExpected = trailSelectionGraphManifestSizes[id];
+        const routeExpected = trailRouteGraphManifestSizes[id];
+        if (!pmtilesExpected || !graphExpected || !routeExpected) continue;
+
+        const pmtilesInfo = await FileSystem.getInfoAsync(region.localPath).catch(() => null);
+        if (!pmtilesInfo?.exists) continue;
+        const pmtilesBytes = (pmtilesInfo as any)?.size ?? 0;
+        if (pmtilesBytes < pmtilesExpected * 0.99) continue;
+
+        const graphInfo = await FileSystem.getInfoAsync(trailGraphLocalPath(id)).catch(() => null);
+        const routeInfo = await FileSystem.getInfoAsync(trailRouteGraphLocalPath(id)).catch(() => null);
+        const graphOk = graphInfo?.exists && ((graphInfo as any).size ?? 0) >= graphExpected * 0.99;
+        const routeOk = routeInfo?.exists && ((routeInfo as any).size ?? 0) >= routeExpected * 0.99;
+
+        if (graphOk && routeOk) {
+          const sizeMb = await trailBundleSizeMb(id, pmtilesBytes);
+          if (!cancelled) {
+            updateTrailState(id, {
+              status: 'complete',
+              progress: 100,
+              fileSizeMb: sizeMb,
+              error: undefined,
+              details: 'Trail overlay, selection graph, and routing graph downloaded',
+            });
+          }
+          continue;
+        }
+
+        try {
+          if (!cancelled) {
+            updateTrailState(id, {
+              status: 'downloading',
+              progress: 99.9,
+              downloadedBytes: pmtilesBytes,
+              totalBytes: pmtilesExpected + graphExpected + routeExpected,
+              details: 'Repairing missing trail graph files...',
+              error: undefined,
+            });
+          }
+          await downloadTrailSidecars(id, pmtilesBytes);
+          const sizeMb = await trailBundleSizeMb(id, pmtilesBytes);
+          if (!cancelled) {
+            updateTrailState(id, {
+              status: 'complete',
+              progress: 100,
+              fileSizeMb: sizeMb,
+              speedBps: 0,
+              etaSec: 0,
+              error: undefined,
+            });
+          }
+        } catch (error: any) {
+          if (!cancelled) {
+            updateTrailState(id, {
+              status: 'error',
+              error: error?.message ?? 'Trail graph sidecar download failed',
+              details: 'Trail overlay exists, but graph files are missing or incomplete.',
+            });
+          }
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [
+    downloadTrailSidecars,
+    trailBundleSizeMb,
+    trailManifestSizes,
+    trailRouteGraphManifestSizes,
+    trailSelectionGraphManifestSizes,
+    updateTrailState,
+  ]);
+
+  const startTrailDownload = useCallback(async (id: string) => {
+    const region = TRAIL_REGIONS[id];
+    if (!region) return;
+
+    await FileSystem.makeDirectoryAsync(TRAIL_PACK_DIR, { intermediates: true }).catch(() => {});
+    speedBuf.current[`trail:${id}`] = [];
+    prevSpeed.current[`trail:${id}`] = 0;
+
+    let resumeData: string | undefined;
+    try {
+      const saved = await storage.get(TRAIL_RESUME_KEY(id));
+      if (saved) {
+        const parsed: FileSystem.DownloadPauseState = JSON.parse(saved);
+        resumeData = parsed.resumeData;
+      }
+    } catch {}
+
+    updateTrailState(id, { status: 'downloading', progress: 0, error: undefined });
+    const dl = FileSystem.createDownloadResumable(
+      region.url,
+      region.localPath,
+      {},
+      ({ totalBytesWritten, totalBytesExpectedToWrite }) => {
+        const key = `trail:${id}`;
+        const total = totalBytesExpectedToWrite || trailManifestSizes[id] || region.estimatedGb * 1_073_741_824;
+        const pct = (totalBytesWritten / total) * 100;
+        const speed = calcSpeed(key, totalBytesWritten);
+        const remain = total - totalBytesWritten;
+        updateTrailState(id, {
+          status: 'downloading',
+          progress: Math.min(pct, 99.9),
+          downloadedBytes: totalBytesWritten,
+          totalBytes: total,
+          speedBps: speed,
+          etaSec: speed > 0 ? remain / speed : 0,
+          fileSizeMb: totalBytesWritten / 1_048_576,
+        });
+      },
+      resumeData,
+    );
+    trailDlRefs.current[id] = dl;
+
+    try {
+      const result = await dl.downloadAsync();
+      if (result?.uri && result.status === 200) {
+        const info = await FileSystem.getInfoAsync(region.localPath).catch(() => null);
+        await downloadTrailSidecars(id, ((info as any)?.size ?? 0));
+        const sizeMb = await trailBundleSizeMb(id, ((info as any)?.size ?? 0));
+        await storage.del(TRAIL_RESUME_KEY(id)).catch(() => {});
+        updateTrailState(id, { status: 'complete', progress: 100, fileSizeMb: sizeMb, speedBps: 0, etaSec: 0, error: undefined });
+      } else if (result && result.status !== 200) {
+        await FileSystem.deleteAsync(region.localPath, { idempotent: true }).catch(() => {});
+        await storage.del(TRAIL_RESUME_KEY(id)).catch(() => {});
+        updateTrailState(id, { status: 'error', error: `Trail pack not available yet (${result.status})` });
+      }
+    } catch (e: any) {
+      const msg = e?.message ?? '';
+      if (!msg.toLowerCase().includes('cancel') && !msg.toLowerCase().includes('pause')) {
+        updateTrailState(id, { status: 'error', error: msg || 'Trail pack download failed' });
+      }
+    }
+  }, [calcSpeed, downloadTrailSidecars, trailBundleSizeMb, trailManifestSizes, updateTrailState]);
+
+  const pauseTrailDownload = useCallback(async (id: string) => {
+    const dl = trailDlRefs.current[id];
+    if (!dl) return;
+    try {
+      const state = await dl.pauseAsync();
+      if (state) await storage.set(TRAIL_RESUME_KEY(id), JSON.stringify(state)).catch(() => {});
+    } catch {}
+    updateTrailState(id, { status: 'paused', speedBps: 0, etaSec: 0 });
+  }, [updateTrailState]);
+
+  const resumeTrailDownload = useCallback(async (id: string) => {
+    const dl = trailDlRefs.current[id];
+    if (dl) {
+      updateTrailState(id, { status: 'downloading' });
+      try {
+        const result = await dl.resumeAsync();
+        if (result?.uri && result.status === 200) {
+          const info = await FileSystem.getInfoAsync(TRAIL_REGIONS[id].localPath).catch(() => null);
+          await downloadTrailSidecars(id, ((info as any)?.size ?? 0));
+          const sizeMb = await trailBundleSizeMb(id, ((info as any)?.size ?? 0));
+          await storage.del(TRAIL_RESUME_KEY(id)).catch(() => {});
+          updateTrailState(id, { status: 'complete', progress: 100, fileSizeMb: sizeMb, speedBps: 0, etaSec: 0 });
+        } else if (result && result.status !== 200) {
+          await FileSystem.deleteAsync(TRAIL_REGIONS[id].localPath, { idempotent: true }).catch(() => {});
+          await storage.del(TRAIL_RESUME_KEY(id)).catch(() => {});
+          updateTrailState(id, { status: 'error', error: `Trail pack not available yet (${result.status})` });
+        }
+      } catch {
+        await startTrailDownload(id);
+      }
+    } else {
+      await startTrailDownload(id);
+    }
+  }, [downloadTrailSidecars, startTrailDownload, trailBundleSizeMb, updateTrailState]);
+
+  const deleteTrailDownload = useCallback(async (id: string) => {
+    const region = TRAIL_REGIONS[id];
+    if (!region) return;
+    trailDlRefs.current[id] = null;
+    speedBuf.current[`trail:${id}`] = [];
+    prevSpeed.current[`trail:${id}`] = 0;
+    await FileSystem.deleteAsync(region.localPath, { idempotent: true }).catch(() => {});
+    await FileSystem.deleteAsync(trailGraphLocalPath(id), { idempotent: true }).catch(() => {});
+    await FileSystem.deleteAsync(trailRouteGraphLocalPath(id), { idempotent: true }).catch(() => {});
+    await storage.del(TRAIL_RESUME_KEY(id)).catch(() => {});
+    updateTrailState(id, EMPTY_TRAIL(id));
+  }, [updateTrailState]);
+
   const getState = useCallback((id: string): FileDownloadState =>
     states[id] ?? EMPTY('conus'), [states]);
 
@@ -808,6 +1218,10 @@ export function useOfflineFiles() {
     contourStates[id] ?? EMPTY_CONTOUR(id), [contourStates]);
   const isContourAvailable = useCallback((id: string): boolean =>
     contourStates[id]?.status === 'complete', [contourStates]);
+  const getTrailState = useCallback((id: string): FileDownloadState =>
+    trailStates[id] ?? EMPTY_TRAIL(id), [trailStates]);
+  const isTrailAvailable = useCallback((id: string): boolean =>
+    trailStates[id]?.status === 'complete', [trailStates]);
 
   // Returns the real file size in bytes (from manifest) or estimated fallback
   const getTotalBytes = useCallback((id: string): number => {
@@ -826,6 +1240,14 @@ export function useOfflineFiles() {
     const region = CONTOUR_REGIONS[id as ContourRegionId];
     return region ? region.estimatedGb * 1_073_741_824 : 0;
   }, [contourManifestSizes]);
+  const getTrailTotalBytes = useCallback((id: string): number => {
+    const publishedTotal = (trailManifestSizes[id] ?? 0)
+      + (trailSelectionGraphManifestSizes[id] ?? 0)
+      + (trailRouteGraphManifestSizes[id] ?? 0);
+    if (publishedTotal > 0) return publishedTotal;
+    const region = TRAIL_REGIONS[id];
+    return region ? region.estimatedGb * 1_073_741_824 : 0;
+  }, [trailManifestSizes, trailRouteGraphManifestSizes, trailSelectionGraphManifestSizes]);
 
   const isFilePublished = useCallback((id: string): boolean => {
     const region = FILE_REGIONS[id as FileRegionId] as any;
@@ -842,13 +1264,20 @@ export function useOfflineFiles() {
     if (!CONTOUR_REGIONS[id as ContourRegionId]) return false;
     return Boolean(contourManifestSizes[id]);
   }, [contourManifestSizes]);
+  const isTrailPublished = useCallback((id: string): boolean => {
+    if (!TRAIL_REGIONS[id]) return false;
+    return Boolean(trailManifestSizes[id] && trailSelectionGraphManifestSizes[id] && trailRouteGraphManifestSizes[id]);
+  }, [trailManifestSizes, trailRouteGraphManifestSizes, trailSelectionGraphManifestSizes]);
 
   return {
     startDownload, pauseDownload, resumeDownload, deleteDownload,
     startRoutingDownload, pauseRoutingDownload, resumeRoutingDownload, deleteRoutingDownload,
     startContourDownload, pauseContourDownload, resumeContourDownload, deleteContourDownload,
-    getState, getRoutingState, getContourState, isFileAvailable, isRoutingAvailable, isContourAvailable,
-    isFilePublished, isRoutingPublished, isContourPublished,
-    getTotalBytes, getRoutingTotalBytes, getContourTotalBytes, states, routingStates, contourStates,
+    startTrailDownload, pauseTrailDownload, resumeTrailDownload, deleteTrailDownload,
+    getState, getRoutingState, getContourState, getTrailState,
+    isFileAvailable, isRoutingAvailable, isContourAvailable, isTrailAvailable,
+    isFilePublished, isRoutingPublished, isContourPublished, isTrailPublished,
+    getTotalBytes, getRoutingTotalBytes, getContourTotalBytes, getTrailTotalBytes,
+    states, routingStates, contourStates, trailStates,
   };
 }

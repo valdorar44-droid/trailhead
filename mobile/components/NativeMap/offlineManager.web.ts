@@ -20,7 +20,7 @@ export interface InstalledPack {
   sizeMb: number;
 }
 
-export const US_STATE_PACKS: Record<string, { name: string; bounds: PackBounds; emoji: string }> = {};
+export const US_STATE_PACKS: Record<string, { name: string; bounds: PackBounds; icon: string }> = {};
 
 export async function downloadPack(
   _name: string,

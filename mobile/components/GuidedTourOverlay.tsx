@@ -12,7 +12,7 @@ const TOUR_NEVER = 'trailhead_guided_tour_never';
 
 const STEPS = [
   {
-    route: '/(tabs)/',
+    route: '/(tabs)',
     icon: 'compass-outline',
     title: 'Plan a trip',
     body: 'Tell Trailhead where you want to go, how many days, and your vehicle style. The planner turns that into days, stops, camps, fuel, and map pins.',

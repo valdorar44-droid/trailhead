@@ -14,13 +14,36 @@ import * as Speech from 'expo-speech';
 import * as Haptics from 'expo-haptics';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as FileSystem from 'expo-file-system';
+import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useStore } from '@/lib/store';
 import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, Waypoint, TripResult } from '@/lib/api';
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { deleteRouteGeometry, loadRouteGeometry, saveRouteGeometry } from '@/lib/offlineRoutes';
+import { saveOfflineTrail } from '@/lib/offlineTrails';
+import { trailRouteGraphLocalPath } from '@/lib/useOfflineFiles';
 import { loadAllPlacePoints } from '@/lib/offlinePlacePacks';
+import {
+  buildTrailDiscoveries,
+  buildTrailSupport,
+  featureFromMapTrail,
+  featureFromPoi,
+  trailColor,
+  trailIcon,
+  trailTypeFromPoi,
+  type TrailFeature,
+} from '@/lib/trailEngine';
+import {
+  addNavigationStateListener,
+  hasNativeNavigationEngine,
+  setNavigationFollow,
+  startNavigationSession,
+  stopNavigationSession,
+  routeTrailGraph,
+  updateNavigationLocation,
+  type TrailheadNavigationState,
+} from 'expo-valhalla-routing';
 import * as ImagePicker from 'expo-image-picker';
 import PaywallModal from '@/components/PaywallModal';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
@@ -28,65 +51,66 @@ import { CREDIT_REWARDS } from '@/lib/credits';
 import { useConnectivitySync } from '@/lib/connectivitySync';
 
 const WebView: any = Platform.OS === 'web' ? View : require('react-native-webview').WebView;
+const USE_IOS_NATIVE_NAV_ENGINE = Platform.OS === 'ios' && hasNativeNavigationEngine();
 
 // ─── US State bounding boxes for offline download ─────────────────────────────
 
-const US_STATES: Record<string, { name: string; n: number; s: number; e: number; w: number; emoji: string }> = {
+const US_STATES: Record<string, { name: string; n: number; s: number; e: number; w: number; icon: keyof typeof Ionicons.glyphMap }> = {
   // West
-  AK: { name: 'Alaska',       n: 71.4, s: 54.6, e: -130.0, w: -168.0, emoji: '🐻' },
-  AZ: { name: 'Arizona',      n: 37.0, s: 31.3, e: -109.0, w: -114.8, emoji: '🏜️' },
-  CA: { name: 'California',   n: 42.0, s: 32.5, e: -114.1, w: -124.4, emoji: '🌴' },
-  CO: { name: 'Colorado',     n: 41.0, s: 37.0, e: -102.0, w: -109.1, emoji: '🏔️' },
-  HI: { name: 'Hawaii',       n: 22.2, s: 18.9, e: -154.8, w: -160.2, emoji: '🌺' },
-  ID: { name: 'Idaho',        n: 49.0, s: 42.0, e: -111.0, w: -117.2, emoji: '🏔️' },
-  MT: { name: 'Montana',      n: 49.0, s: 44.4, e: -104.0, w: -116.0, emoji: '🦬' },
-  NM: { name: 'New Mexico',   n: 37.0, s: 31.3, e: -103.0, w: -109.1, emoji: '🌵' },
-  NV: { name: 'Nevada',       n: 42.0, s: 35.0, e: -114.0, w: -120.0, emoji: '🎰' },
-  OR: { name: 'Oregon',       n: 46.3, s: 41.9, e: -116.5, w: -124.6, emoji: '🌲' },
-  UT: { name: 'Utah',         n: 42.0, s: 36.9, e: -109.0, w: -114.1, emoji: '🏜️' },
-  WA: { name: 'Washington',   n: 49.0, s: 45.5, e: -116.9, w: -124.7, emoji: '☁️' },
-  WY: { name: 'Wyoming',      n: 45.0, s: 41.0, e: -104.1, w: -111.1, emoji: '🦅' },
+  AK: { name: 'Alaska',       n: 71.4, s: 54.6, e: -130.0, w: -168.0, icon: 'map-outline' },
+  AZ: { name: 'Arizona',      n: 37.0, s: 31.3, e: -109.0, w: -114.8, icon: 'map-outline' },
+  CA: { name: 'California',   n: 42.0, s: 32.5, e: -114.1, w: -124.4, icon: 'map-outline' },
+  CO: { name: 'Colorado',     n: 41.0, s: 37.0, e: -102.0, w: -109.1, icon: 'map-outline' },
+  HI: { name: 'Hawaii',       n: 22.2, s: 18.9, e: -154.8, w: -160.2, icon: 'map-outline' },
+  ID: { name: 'Idaho',        n: 49.0, s: 42.0, e: -111.0, w: -117.2, icon: 'map-outline' },
+  MT: { name: 'Montana',      n: 49.0, s: 44.4, e: -104.0, w: -116.0, icon: 'map-outline' },
+  NM: { name: 'New Mexico',   n: 37.0, s: 31.3, e: -103.0, w: -109.1, icon: 'map-outline' },
+  NV: { name: 'Nevada',       n: 42.0, s: 35.0, e: -114.0, w: -120.0, icon: 'map-outline' },
+  OR: { name: 'Oregon',       n: 46.3, s: 41.9, e: -116.5, w: -124.6, icon: 'map-outline' },
+  UT: { name: 'Utah',         n: 42.0, s: 36.9, e: -109.0, w: -114.1, icon: 'map-outline' },
+  WA: { name: 'Washington',   n: 49.0, s: 45.5, e: -116.9, w: -124.7, icon: 'map-outline' },
+  WY: { name: 'Wyoming',      n: 45.0, s: 41.0, e: -104.1, w: -111.1, icon: 'map-outline' },
   // Central / South
-  KS: { name: 'Kansas',       n: 40.0, s: 36.9, e: -94.6,  w: -102.1, emoji: '🌾' },
-  MN: { name: 'Minnesota',    n: 49.4, s: 43.5, e: -89.5,  w: -97.2,  emoji: '🦅' },
-  MO: { name: 'Missouri',     n: 40.6, s: 35.9, e: -89.1,  w: -95.8,  emoji: '🌉' },
-  ND: { name: 'North Dakota', n: 49.0, s: 45.9, e: -96.6,  w: -104.1, emoji: '🌾' },
-  NE: { name: 'Nebraska',     n: 43.0, s: 40.0, e: -95.3,  w: -104.1, emoji: '🌽' },
-  OK: { name: 'Oklahoma',     n: 37.0, s: 33.6, e: -94.4,  w: -103.0, emoji: '🤠' },
-  SD: { name: 'South Dakota', n: 45.9, s: 42.5, e: -96.4,  w: -104.1, emoji: '🦬' },
-  TX: { name: 'Texas',        n: 36.5, s: 25.8, e: -93.5,  w: -106.6, emoji: '🤠' },
+  KS: { name: 'Kansas',       n: 40.0, s: 36.9, e: -94.6,  w: -102.1, icon: 'map-outline' },
+  MN: { name: 'Minnesota',    n: 49.4, s: 43.5, e: -89.5,  w: -97.2,  icon: 'map-outline' },
+  MO: { name: 'Missouri',     n: 40.6, s: 35.9, e: -89.1,  w: -95.8,  icon: 'map-outline' },
+  ND: { name: 'North Dakota', n: 49.0, s: 45.9, e: -96.6,  w: -104.1, icon: 'map-outline' },
+  NE: { name: 'Nebraska',     n: 43.0, s: 40.0, e: -95.3,  w: -104.1, icon: 'map-outline' },
+  OK: { name: 'Oklahoma',     n: 37.0, s: 33.6, e: -94.4,  w: -103.0, icon: 'map-outline' },
+  SD: { name: 'South Dakota', n: 45.9, s: 42.5, e: -96.4,  w: -104.1, icon: 'map-outline' },
+  TX: { name: 'Texas',        n: 36.5, s: 25.8, e: -93.5,  w: -106.6, icon: 'map-outline' },
   // Southeast
-  AL: { name: 'Alabama',      n: 35.0, s: 30.2, e: -84.9,  w: -88.5,  emoji: '🌿' },
-  AR: { name: 'Arkansas',     n: 36.5, s: 33.0, e: -89.6,  w: -94.6,  emoji: '🏞️' },
-  FL: { name: 'Florida',      n: 31.0, s: 24.5, e: -80.0,  w: -87.6,  emoji: '🌊' },
-  GA: { name: 'Georgia',      n: 35.0, s: 30.4, e: -80.8,  w: -85.6,  emoji: '🍑' },
-  KY: { name: 'Kentucky',     n: 39.1, s: 36.5, e: -81.9,  w: -89.6,  emoji: '🐎' },
-  LA: { name: 'Louisiana',    n: 33.0, s: 28.9, e: -88.8,  w: -94.0,  emoji: '🎷' },
-  MS: { name: 'Mississippi',  n: 35.0, s: 30.2, e: -88.1,  w: -91.7,  emoji: '🌊' },
-  NC: { name: 'North Carolina',n:36.6, s: 33.8, e: -75.5,  w: -84.3,  emoji: '🏔️' },
-  SC: { name: 'South Carolina',n:35.2, s: 32.0, e: -78.5,  w: -83.4,  emoji: '🌴' },
-  TN: { name: 'Tennessee',    n: 36.7, s: 35.0, e: -81.6,  w: -90.3,  emoji: '🎵' },
-  VA: { name: 'Virginia',     n: 39.5, s: 36.5, e: -75.2,  w: -83.7,  emoji: '🏛️' },
-  WV: { name: 'West Virginia',n: 40.6, s: 37.2, e: -77.7,  w: -82.6,  emoji: '⛏️' },
+  AL: { name: 'Alabama',      n: 35.0, s: 30.2, e: -84.9,  w: -88.5,  icon: 'map-outline' },
+  AR: { name: 'Arkansas',     n: 36.5, s: 33.0, e: -89.6,  w: -94.6,  icon: 'map-outline' },
+  FL: { name: 'Florida',      n: 31.0, s: 24.5, e: -80.0,  w: -87.6,  icon: 'map-outline' },
+  GA: { name: 'Georgia',      n: 35.0, s: 30.4, e: -80.8,  w: -85.6,  icon: 'map-outline' },
+  KY: { name: 'Kentucky',     n: 39.1, s: 36.5, e: -81.9,  w: -89.6,  icon: 'map-outline' },
+  LA: { name: 'Louisiana',    n: 33.0, s: 28.9, e: -88.8,  w: -94.0,  icon: 'map-outline' },
+  MS: { name: 'Mississippi',  n: 35.0, s: 30.2, e: -88.1,  w: -91.7,  icon: 'map-outline' },
+  NC: { name: 'North Carolina',n:36.6, s: 33.8, e: -75.5,  w: -84.3,  icon: 'map-outline' },
+  SC: { name: 'South Carolina',n:35.2, s: 32.0, e: -78.5,  w: -83.4,  icon: 'map-outline' },
+  TN: { name: 'Tennessee',    n: 36.7, s: 35.0, e: -81.6,  w: -90.3,  icon: 'map-outline' },
+  VA: { name: 'Virginia',     n: 39.5, s: 36.5, e: -75.2,  w: -83.7,  icon: 'map-outline' },
+  WV: { name: 'West Virginia',n: 40.6, s: 37.2, e: -77.7,  w: -82.6,  icon: 'map-outline' },
   // Northeast
-  CT: { name: 'Connecticut',  n: 42.1, s: 41.0, e: -71.8,  w: -73.7,  emoji: '🍂' },
-  DE: { name: 'Delaware',     n: 39.8, s: 38.4, e: -75.0,  w: -75.8,  emoji: '🏖️' },
-  MA: { name: 'Massachusetts',n: 42.9, s: 41.2, e: -69.9,  w: -73.5,  emoji: '🦞' },
-  MD: { name: 'Maryland',     n: 39.7, s: 37.9, e: -75.0,  w: -79.5,  emoji: '🦀' },
-  ME: { name: 'Maine',        n: 47.5, s: 43.1, e: -66.9,  w: -71.1,  emoji: '🦌' },
-  NH: { name: 'New Hampshire',n: 45.3, s: 42.7, e: -70.6,  w: -72.6,  emoji: '🍁' },
-  NJ: { name: 'New Jersey',   n: 41.4, s: 38.9, e: -73.9,  w: -75.6,  emoji: '🏙️' },
-  NY: { name: 'New York',     n: 45.0, s: 40.5, e: -71.8,  w: -79.8,  emoji: '🗽' },
-  PA: { name: 'Pennsylvania', n: 42.3, s: 39.7, e: -74.7,  w: -80.5,  emoji: '🔔' },
-  RI: { name: 'Rhode Island', n: 42.0, s: 41.1, e: -71.1,  w: -71.9,  emoji: '⚓' },
-  VT: { name: 'Vermont',      n: 45.0, s: 42.7, e: -71.5,  w: -73.4,  emoji: '🍁' },
+  CT: { name: 'Connecticut',  n: 42.1, s: 41.0, e: -71.8,  w: -73.7,  icon: 'map-outline' },
+  DE: { name: 'Delaware',     n: 39.8, s: 38.4, e: -75.0,  w: -75.8,  icon: 'map-outline' },
+  MA: { name: 'Massachusetts',n: 42.9, s: 41.2, e: -69.9,  w: -73.5,  icon: 'map-outline' },
+  MD: { name: 'Maryland',     n: 39.7, s: 37.9, e: -75.0,  w: -79.5,  icon: 'map-outline' },
+  ME: { name: 'Maine',        n: 47.5, s: 43.1, e: -66.9,  w: -71.1,  icon: 'map-outline' },
+  NH: { name: 'New Hampshire',n: 45.3, s: 42.7, e: -70.6,  w: -72.6,  icon: 'map-outline' },
+  NJ: { name: 'New Jersey',   n: 41.4, s: 38.9, e: -73.9,  w: -75.6,  icon: 'map-outline' },
+  NY: { name: 'New York',     n: 45.0, s: 40.5, e: -71.8,  w: -79.8,  icon: 'map-outline' },
+  PA: { name: 'Pennsylvania', n: 42.3, s: 39.7, e: -74.7,  w: -80.5,  icon: 'map-outline' },
+  RI: { name: 'Rhode Island', n: 42.0, s: 41.1, e: -71.1,  w: -71.9,  icon: 'map-outline' },
+  VT: { name: 'Vermont',      n: 45.0, s: 42.7, e: -71.5,  w: -73.4,  icon: 'map-outline' },
   // Midwest
-  IA: { name: 'Iowa',         n: 43.5, s: 40.4, e: -90.1,  w: -96.6,  emoji: '🌽' },
-  IL: { name: 'Illinois',     n: 42.5, s: 36.9, e: -87.0,  w: -91.5,  emoji: '🏙️' },
-  IN: { name: 'Indiana',      n: 41.8, s: 37.8, e: -84.8,  w: -88.1,  emoji: '🏎️' },
-  MI: { name: 'Michigan',     n: 48.3, s: 41.7, e: -82.4,  w: -90.4,  emoji: '🚗' },
-  OH: { name: 'Ohio',         n: 42.0, s: 38.4, e: -80.5,  w: -84.8,  emoji: '🌻' },
-  WI: { name: 'Wisconsin',    n: 47.1, s: 42.5, e: -86.2,  w: -92.9,  emoji: '🧀' },
+  IA: { name: 'Iowa',         n: 43.5, s: 40.4, e: -90.1,  w: -96.6,  icon: 'map-outline' },
+  IL: { name: 'Illinois',     n: 42.5, s: 36.9, e: -87.0,  w: -91.5,  icon: 'map-outline' },
+  IN: { name: 'Indiana',      n: 41.8, s: 37.8, e: -84.8,  w: -88.1,  icon: 'map-outline' },
+  MI: { name: 'Michigan',     n: 48.3, s: 41.7, e: -82.4,  w: -90.4,  icon: 'map-outline' },
+  OH: { name: 'Ohio',         n: 42.0, s: 38.4, e: -80.5,  w: -84.8,  icon: 'map-outline' },
+  WI: { name: 'Wisconsin',    n: 47.1, s: 42.5, e: -86.2,  w: -92.9,  icon: 'map-outline' },
 };
 
 type RouteOpts = { avoidTolls: boolean; avoidHighways: boolean; backRoads: boolean; noFerries: boolean };
@@ -97,6 +121,18 @@ interface SearchPlace { lat: number; lng: number; name: string; dist?: number | 
 
 type WP = { lat: number; lng: number; name: string; day: number; type: string };
 type MapLayer = 'satellite' | 'topo' | 'hybrid';
+type DiscoveryMode = 'camps' | 'trails';
+type TrailRouteIntent = 'segment' | 'out_back' | 'loop' | 'far_end';
+type TrailRoutePlan = {
+  id: TrailRouteIntent;
+  title: string;
+  subtitle: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  coords: [number, number][];
+  distanceM: number;
+  confidence: 'high' | 'medium' | 'low';
+  warnings: string[];
+};
 
 interface RouteStep {
   type: string;
@@ -115,7 +151,7 @@ function isPlanningTargetWaypoint(wp: Partial<Waypoint> | null | undefined) {
 }
 
 function usableTripWaypoints(wps: Waypoint[] | undefined) {
-  return (wps ?? []).filter(w => !isPlanningTargetWaypoint(w));
+  return wps ?? [];
 }
 
 function localRouteBrief(trip: TripResult, reports: Report[] = []): RouteBrief {
@@ -172,6 +208,109 @@ function normalizeRouteBrief(brief: RouteBrief | null | undefined, trip: TripRes
     emergency_bailout: String(brief.emergency_bailout ?? '').trim() || fallback.emergency_bailout,
     briefing_summary: String(brief.briefing_summary ?? '').trim() || fallback.briefing_summary,
   };
+}
+
+function routeProgressLabel(progress?: number | null) {
+  if (progress == null || !Number.isFinite(progress)) return '';
+  if (progress < 0.34) return 'early leg';
+  if (progress < 0.67) return 'mid leg';
+  return 'late leg';
+}
+
+function routeFitLabel(item?: { route_distance_mi?: number | null; route_progress?: number | null } | null) {
+  if (!item) return '';
+  const bits = [
+    item.route_distance_mi != null && Number.isFinite(item.route_distance_mi) ? `${item.route_distance_mi.toFixed(1)} mi off route` : '',
+    routeProgressLabel(item.route_progress),
+  ].filter(Boolean);
+  return bits.join(' · ');
+}
+
+function trailGeometryCoords(fc?: GeoJSON.FeatureCollection | null): [number, number][] {
+  const coords: [number, number][] = [];
+  for (const feature of fc?.features ?? []) {
+    const geometry = feature.geometry;
+    if (!geometry) continue;
+    const lines = geometry.type === 'LineString'
+      ? [geometry.coordinates]
+      : geometry.type === 'MultiLineString'
+        ? geometry.coordinates
+        : [];
+    for (const line of lines) {
+      for (const item of line) {
+        const lng = Number(item?.[0]);
+        const lat = Number(item?.[1]);
+        if (Number.isFinite(lng) && Number.isFinite(lat)) coords.push([lng, lat]);
+      }
+    }
+  }
+  return coords.filter((coord, idx) => idx === 0 || coord[0] !== coords[idx - 1][0] || coord[1] !== coords[idx - 1][1]);
+}
+
+function trailGeometryLines(fc?: GeoJSON.FeatureCollection | null): [number, number][][] {
+  const lines: [number, number][][] = [];
+  for (const feature of fc?.features ?? []) {
+    const geometry = feature.geometry;
+    if (!geometry) continue;
+    const rawLines = geometry.type === 'LineString'
+      ? [geometry.coordinates]
+      : geometry.type === 'MultiLineString'
+        ? geometry.coordinates
+        : [];
+    for (const raw of rawLines) {
+      const coords = (raw ?? [])
+        .map((item: any) => [Number(item?.[0]), Number(item?.[1])] as [number, number])
+        .filter((coord: [number, number]) => Number.isFinite(coord[0]) && Number.isFinite(coord[1]));
+      const clean = dedupeTrailCoords(coords);
+      if (clean.length >= 2) lines.push(clean);
+    }
+  }
+  return lines;
+}
+
+function lineDistanceToSeedM(coords: [number, number][], seed: [number, number]) {
+  if (coords.length < 2) return Number.POSITIVE_INFINITY;
+  let best = Number.POSITIVE_INFINITY;
+  const point = { lat: seed[1], lng: seed[0] };
+  for (let i = 1; i < coords.length; i++) {
+    best = Math.min(
+      best,
+      pointSegmentDistanceMi(
+        point,
+        { lat: coords[i - 1][1], lng: coords[i - 1][0] },
+        { lat: coords[i][1], lng: coords[i][0] },
+      ) * 1609.344,
+    );
+  }
+  return best;
+}
+
+function primaryTrailLine(fc: GeoJSON.FeatureCollection | null | undefined, seed: [number, number]): [number, number][] {
+  return trailGeometryLines(fc)
+    .sort((a, b) => lineDistanceToSeedM(a, seed) - lineDistanceToSeedM(b, seed) || trailCoordsDistanceM(b) - trailCoordsDistanceM(a))[0] ?? [];
+}
+
+function trailCoordsDistanceM(coords: [number, number][]) {
+  return coords.reduce((sum, coord, idx) => {
+    if (idx === 0) return sum;
+    return sum + haversineKm(coords[idx - 1][1], coords[idx - 1][0], coord[1], coord[0]) * 1000;
+  }, 0);
+}
+
+function trailEndpointDistanceM(coords: [number, number][]) {
+  if (coords.length < 2) return Infinity;
+  const first = coords[0];
+  const last = coords[coords.length - 1];
+  return haversineKm(first[1], first[0], last[1], last[0]) * 1000;
+}
+
+function fmtTrailRouteDistance(m: number) {
+  if (!Number.isFinite(m) || m <= 0) return '0.0 mi';
+  return `${(m / 1609.344).toFixed(m >= 16093 ? 0 : 1)} mi`;
+}
+
+function dedupeTrailCoords(coords: [number, number][]) {
+  return coords.filter((coord, idx) => idx === 0 || coord[0] !== coords[idx - 1][0] || coord[1] !== coords[idx - 1][1]);
 }
 
 // ─── Geo math ─────────────────────────────────────────────────────────────────
@@ -745,6 +884,9 @@ const DEFAULT_COMMUNITY_PIN_FILTERS = COMMUNITY_PIN_TYPES
 const MAP_FILTER_PREFS_KEY = 'trailhead_map_filter_preferences';
 const MIN_CAMP_SEARCH_ZOOM = 8;
 const MAX_FREECAM_CAMP_SEARCH_RADIUS_MI = 75;
+const MAX_ALL_MAP_POIS = 1200;
+const MAX_VISIBLE_MAP_POIS = 450;
+const MAX_OFFLINE_POI_SCAN = 1800;
 const CAMP_FILTER_IDS = ['blm', 'usfs', 'nps', 'state', 'corps', 'dispersed', 'tent', 'rv', 'walk_in', 'free', 'ada'];
 type MapFilterPreferences = {
   mapLayer?: MapLayer;
@@ -1082,16 +1224,6 @@ const ACTIVITY_OPTIONS = [
   { label: 'Historic Site', icon: 'business-outline' },
   { label: 'Wildlife Viewing', icon: 'eye-outline' },
 ] as const;
-
-function weatherIcon(code: number): string {
-  if (code === 0) return '☀️';
-  if (code <= 2) return '⛅';
-  if (code <= 48) return '☁️';
-  if (code <= 67) return '🌧️';
-  if (code <= 77) return '❄️';
-  if (code <= 82) return '🌦️';
-  return '⛈️';
-}
 
 function weatherIonIcon(code: number): keyof typeof Ionicons.glyphMap {
   if (code === 0) return 'sunny-outline';
@@ -1736,7 +1868,7 @@ const buildMapHtml = (
       if(map&&map.getSource('route-passed'))map.getSource('route-passed').setData({type:'Feature',geometry:{type:'LineString',coordinates:_passedRouteCoords}});
     }
   }
-  var REP_ICONS={police:'🚔',hazard:'⚠️',road_condition:'🛑',wildlife:'🐾',campsite:'⛺',road_closure:'🚧',water:'💧'};
+  var REP_ICONS={police:'P',hazard:'!',road_condition:'R',wildlife:'W',campsite:'C',road_closure:'X',water:'H2O'};
   function repTimeAgo(ts){if(!ts)return'';var m=Math.floor((Date.now()/1000-ts)/60);if(m<2)return'just now';if(m<60)return m+'m ago';var h=Math.floor(m/60);if(h<24)return h+'h ago';return Math.floor(h/24)+'d ago';}
   function escHTML(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
   function updateReportMarkers(){
@@ -1744,7 +1876,7 @@ const buildMapHtml = (
     allReports.forEach(function(r){
       var el=document.createElement('div');
       el.className='mk-rep mk-rep-'+(r.type||'hazard');
-      el.textContent=REP_ICONS[r.type]||'⚠️';
+      el.textContent=REP_ICONS[r.type]||'!';
       el.title=(r.subtype||r.type)+(r.confirmations?' ✓'+r.confirmations:'');
       var age=repTimeAgo(r.created_at);
       var confLine=r.confirmations?'<div class="pm" style="color:#22c55e;margin-top:2px">✓ '+r.confirmations+' confirmed</div>':'';
@@ -1966,7 +2098,7 @@ const buildMapHtml = (
       // Country-level fly-to skips the pin (no point pinpointing the geographic center of CONUS)
       if(msg.zoom&&msg.zoom<=5)return;
       if(searchMarker){searchMarker.remove();searchMarker=null;}
-      var el=document.createElement('div');el.className='mk-search';el.textContent='📍';
+      var el=document.createElement('div');el.className='mk-search';el.textContent='PIN';
       searchMarker=new maplibregl.Marker({element:el}).setLngLat([msg.lng,msg.lat]).setPopup(new maplibregl.Popup({offset:18,closeButton:false}).setHTML('<div class="pt">'+(msg.name||'Location')+'</div>')).addTo(map);
       searchMarker.togglePopup();
     }
@@ -1985,7 +2117,7 @@ const buildMapHtml = (
     if(msg.type==='reroute_from'&&msg.lat){_routeCoords=[];routePts=[];routeIsProper=false;lastOffCheck=Date.now();resetPassedRoute();_offRouteStreak=0;if(!wps.length&&_searchDest){_fetchRoute([msg.lng+','+msg.lat,_searchDest.lng+','+_searchDest.lat],0);}else{loadRouteFrom(msg.lat,msg.lng,msg.fromIdx||0);}}
     if(msg.type==='route_to_search'&&msg.lat){
       if(searchMarker){searchMarker.remove();searchMarker=null;}
-      var el2=document.createElement('div');el2.className='mk-search';el2.textContent='📍';
+      var el2=document.createElement('div');el2.className='mk-search';el2.textContent='PIN';
       searchMarker=new maplibregl.Marker({element:el2}).setLngLat([msg.lng,msg.lat]).setPopup(new maplibregl.Popup({offset:18,closeButton:false}).setHTML('<div class="pt">'+(msg.name||'Destination')+'</div>')).addTo(map);
       searchMarker.togglePopup();
       _searchDest={lat:msg.lat,lng:msg.lng};
@@ -2128,6 +2260,7 @@ function MapScreen() {
   const router = useRouter();
   const activeTrip = useStore(st => st.activeTrip);
   const setActiveTrip = useStore(st => st.setActiveTrip);
+  const setTabBarHidden = useStore(st => st.setTabBarHidden);
   const activeTripFromCache = useStore(st => st.activeTripFromCache);
   const user = useStore(st => st.user);
   const setStoreLoc = useStore(st => st.setUserLoc);
@@ -2174,9 +2307,12 @@ function MapScreen() {
   const [userHeading,   setUserHeading]   = useState<number | null>(null);
   const [quickReport,   setQuickReport]   = useState(false);
   const [controlsCollapsed, setControlsCollapsed] = useState(false);
+  const [discoveryMode, setDiscoveryMode] = useState<DiscoveryMode>('camps');
+  const [showDiscoveryPanel, setShowDiscoveryPanel] = useState(false);
   const [quickToast,    setQuickToast]    = useState('');
   const [quickTypeIdx,  setQuickTypeIdx]  = useState<number | null>(null);
   const [navMode,   setNavMode]   = useState(false);
+  const [navCameraFollow, setNavCameraFollow] = useState(false);
   const [navIdx,    setNavIdx]    = useState(0);
   const [routeSteps,  setRouteSteps]  = useState<RouteStep[]>([]);
   const [isRouted,    setIsRouted]    = useState(false);
@@ -2286,6 +2422,7 @@ function MapScreen() {
   // Favorites
   const favoriteCamps  = useStore(s => s.favoriteCamps);
   const toggleFavorite = useStore(s => s.toggleFavorite);
+  const addSavedPlace = useStore(s => s.addSavedPlace);
 
   // Route brief
   const [routeBrief,    setRouteBrief]    = useState<RouteBrief | null>(null);
@@ -2324,6 +2461,14 @@ function MapScreen() {
   const [tappedTileSpot, setTappedTileSpot] = useState<{ name: string; kind: string; lat: number; lng: number } | null>(null);
   const [tappedGas,  setTappedGas]  = useState<{ name: string; lat: number; lng: number } | null>(null);
   const [tappedPoi,  setTappedPoi]  = useState<{ name: string; type: string; lat: number; lng: number } | null>(null);
+  const [selectedTrail, setSelectedTrail] = useState<TrailFeature | null>(null);
+  const [trailCardCollapsed, setTrailCardCollapsed] = useState(false);
+  const [showTrailList, setShowTrailList] = useState(false);
+  const [trailRouteBuilderOpen, setTrailRouteBuilderOpen] = useState(false);
+  const [trailRouteBuilding, setTrailRouteBuilding] = useState(false);
+  const [trailRoutePlans, setTrailRoutePlans] = useState<TrailRoutePlan[]>([]);
+  const [selectedTrailRoutePlanId, setSelectedTrailRoutePlanId] = useState<TrailRouteIntent | null>(null);
+  const [trailRouteBuilderError, setTrailRouteBuilderError] = useState('');
 
   // Connectivity sync toast
   const [syncToast, setSyncToast] = useState('');
@@ -2335,6 +2480,7 @@ function MapScreen() {
   const landCheckDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const navAnim      = useRef(new Animated.Value(0)).current;
+  const discoveryModeAnim = useRef(new Animated.Value(0)).current;
   const navRef       = useRef({ active: false, idx: 0, wps: [] as WP[] });
   const navDestRef   = useRef<WP | null>(null);
   const guideRef     = useRef<Record<string, string>>({});
@@ -2466,12 +2612,35 @@ function MapScreen() {
     navRef.current.active = navMode;
     // Keep screen alive during navigation — phone would otherwise sleep in 15s
     if (navMode) {
-      activateKeepAwakeAsync('navigation');
+      activateKeepAwakeAsync('navigation').catch(() => {});
     } else {
-      deactivateKeepAwake('navigation');
+      try { Promise.resolve(deactivateKeepAwake('navigation')).catch(() => {}); } catch {}
     }
-    return () => { deactivateKeepAwake('navigation'); };
+    return () => {
+      try { Promise.resolve(deactivateKeepAwake('navigation')).catch(() => {}); } catch {}
+    };
   }, [navMode]);
+
+  useEffect(() => {
+    setTabBarHidden(
+      navMode
+      || (showSearch && !!searchRouteCard)
+      || !!selectedCamp
+      || !!selectedTrail
+      || !!selectedCommunityPin
+      || !!tappedPoi
+      || !!tappedGas
+      || !!tappedTileSpot
+      || !!tappedTrail
+      || !!tappedWp
+      || !!pendingPin
+    );
+    return () => setTabBarHidden(false);
+  }, [
+    navMode, showSearch, searchRouteCard, selectedCamp, selectedTrail,
+    selectedCommunityPin, tappedPoi, tappedGas, tappedTileSpot, tappedTrail,
+    tappedWp, pendingPin, setTabBarHidden,
+  ]);
   useEffect(() => { isReroutingRef.current = isRerouting; }, [isRerouting]);
 
   // Sync report refs + push combined list to WebView whenever either changes
@@ -2515,6 +2684,53 @@ function MapScreen() {
   }, [lastRouteCoords]);
   useEffect(() => { navRef.current.idx = navIdx; }, [navIdx]);
   useEffect(() => { guideRef.current = audioGuide; }, [audioGuide]);
+
+  const applyNativeNavigationState = useCallback((state: TrailheadNavigationState) => {
+    if (!state?.active && state?.reason !== 'stop') return;
+    if (state.reason === 'stop') {
+      setRouteProgress(null);
+      setOffRouteWarn(false);
+      return;
+    }
+    const distanceM = Number(state.distanceM);
+    const remainingM = Number(state.remainingM);
+    const routeDistanceM = Number(state.routeDistanceM);
+    const deviationM = Number(state.deviationM);
+    const segmentIdx = Number(state.segmentIdx);
+    if ([distanceM, remainingM, routeDistanceM, deviationM, segmentIdx].every(Number.isFinite)) {
+      setRouteProgress({ distanceM, remainingM, routeDistanceM, deviationM, segmentIdx });
+    }
+    if (typeof state.warnOffRoute === 'boolean') setOffRouteWarn(state.warnOffRoute);
+    if (state.offRoute && navRef.current.active && userLoc) {
+      const now = Date.now();
+      if (!isReroutingRef.current && now - lastRerouteRef.current >= 35000) {
+        onWebMessage({ nativeEvent: { data: JSON.stringify({ type: 'off_route', lat: userLoc.lat, lng: userLoc.lng, dist: deviationM }) } });
+      }
+    }
+  }, [userLoc?.lat, userLoc?.lng]);
+
+  useEffect(() => {
+    if (!USE_IOS_NATIVE_NAV_ENGINE) return;
+    const sub = addNavigationStateListener(applyNativeNavigationState);
+    return () => { sub?.remove(); };
+  }, [applyNativeNavigationState]);
+
+  useEffect(() => {
+    if (!USE_IOS_NATIVE_NAV_ENGINE) return;
+    if (!navMode) {
+      stopNavigationSession().catch(() => {});
+      return;
+    }
+    const coords = lastRouteCoordsRef.current;
+    if (coords.length >= 2) {
+      startNavigationSession(coords, navCameraFollow).then(applyNativeNavigationState).catch(() => {});
+    }
+  }, [navMode, lastRouteCoords, applyNativeNavigationState]);
+
+  useEffect(() => {
+    if (!USE_IOS_NATIVE_NAV_ENGINE || !navMode) return;
+    setNavigationFollow(navCameraFollow).then(applyNativeNavigationState).catch(() => {});
+  }, [navMode, navCameraFollow, applyNativeNavigationState]);
 
   // Recompute when trip changes OR when geocoding populates lat/lng on waypoints
   const geocodedCount = usableTripWaypoints(activeTrip?.plan.waypoints).filter(w => w.lat && w.lng).length ?? 0;
@@ -2616,6 +2832,11 @@ function MapScreen() {
           if (compassHdgRef.current === null) setUserHeading(hdg >= 0 ? hdg : null);
 
           const { active, idx, wps } = navRef.current;
+          if (active && USE_IOS_NATIVE_NAV_ENGINE) {
+            updateNavigationLocation(pos.lat, pos.lng, pos.accuracy, rawSpeed, hdg >= 0 ? hdg : null)
+              .then(applyNativeNavigationState)
+              .catch(() => {});
+          }
           webRef.current?.postMessage(JSON.stringify({
             type: active ? 'nav_center' : 'user_pos',
             lat: pos.lat, lng: pos.lng, heading: hdg, speed: rawSpeed,
@@ -2784,7 +3005,7 @@ function MapScreen() {
               lat: pos.lat, lng: pos.lng, fromIdx: next,
             }));
             nativeMapRef.current?.setNavTarget(next);
-            nativeMapRef.current?.loadRouteFrom(pos.lat, pos.lng, next);
+            nativeMapRef.current?.loadRouteSegmentFrom(pos.lat, pos.lng, next, routeSegmentEndIndex(next));
             setRouteLegOffset(next);
             safeSpeech(`Arrived at ${wps[idx].name}. Now heading to ${wps[next].name}.`, { rate: 0.88, pitch: 1.05, language: 'en-US' });
           }
@@ -2820,30 +3041,32 @@ function MapScreen() {
     if (!activeTrip) return;
     const wps = usableTripWaypoints(activeTrip.plan.waypoints).filter(w => w.lat && w.lng);
     if (!wps.length) return;
-    const center = wps[Math.floor(wps.length / 2)];
-    if (center.lat && center.lng) {
-      refreshCommunityPins({ lat: center.lat!, lng: center.lng! }, 3.0, true);
-      // Load camps + POIs around the trip center so pins appear without requiring a manual search
-      const bounds = {
-        n: center.lat! + 1.5, s: center.lat! - 1.5,
-        e: center.lng! + 1.5, w: center.lng! - 1.5, zoom: 9,
-      };
-      loadCampsInArea(bounds, activeFilters);
-      fetchPois({ lat: center.lat!, lng: center.lng! });
-    }
-    api.getReportsAlongRoute(wps).then(alerts => {
-      setRouteAlerts(alerts);
-      setShowAlerts(shouldAutoOpenRouteAlerts(alerts, wps as WP[], userLoc));
-    }).catch(() => {});
-    // Pre-load audio guide
-    if (activeTrip.audio_guide) {
-      setAudioGuide(activeTrip.audio_guide);
-    } else {
-      api.getAudioGuide(activeTrip.trip_id, false).then(setAudioGuide).catch(() => {});
-    }
     setNavIdx(0); setNavMode(false); setRouteSteps([]); setIsRouted(false); setRouteProgress(null);
     setShowPanel(true); setPanelCollapsed(false);
     spokenRef.current.clear();
+    const center = wps[Math.floor(wps.length / 2)];
+    const timer = setTimeout(() => {
+      if (center.lat && center.lng) {
+        refreshCommunityPins({ lat: center.lat!, lng: center.lng! }, 3.0, true);
+        // Load camps + POIs after the trip sheet opens so the first tap does not stall.
+        const bounds = {
+          n: center.lat! + 1.5, s: center.lat! - 1.5,
+          e: center.lng! + 1.5, w: center.lng! - 1.5, zoom: 9,
+        };
+        loadCampsInArea(bounds, activeFilters);
+        fetchPois({ lat: center.lat!, lng: center.lng! });
+      }
+      api.getReportsAlongRoute(wps).then(alerts => {
+        setRouteAlerts(alerts);
+        setShowAlerts(shouldAutoOpenRouteAlerts(alerts, wps as WP[], userLoc));
+      }).catch(() => {});
+      if (activeTrip.audio_guide) {
+        setAudioGuide(activeTrip.audio_guide);
+      } else {
+        api.getAudioGuide(activeTrip.trip_id, false).then(setAudioGuide).catch(() => {});
+      }
+    }, 450);
+    return () => clearTimeout(timer);
   }, [activeTrip?.trip_id]);
 
   // ── Opportunistic background sync ──────────────────────────────────────────
@@ -2909,6 +3132,7 @@ function MapScreen() {
       type: p.type || 'poi',
       subtype: p.subtype,
       elevation: p.elevation,
+      source: 'offline',
     })));
   }, [activeTrip?.trip_id]);
 
@@ -2976,9 +3200,9 @@ function MapScreen() {
         submitted_at: Date.now() / 1000,
       };
       setCommunityPins(prev => [created, ...prev].slice(0, 150));
-      setSelectedCommunityPin(created);
       refreshCommunityPins({ lat: pendingPin.lat, lng: pendingPin.lng }, 3.0, true);
       setPendingPin(null);
+      setSelectedCommunityPin(null);
       setPinName('');
       setPinDescription('');
       setPinDetails({});
@@ -3042,6 +3266,15 @@ function MapScreen() {
   // ── Nav mode animate + speak start ─────────────────────────────────────────
 
   useEffect(() => {
+    Animated.spring(discoveryModeAnim, {
+      toValue: discoveryMode === 'trails' ? 1 : 0,
+      tension: 90,
+      friction: 12,
+      useNativeDriver: true,
+    }).start();
+  }, [discoveryMode, discoveryModeAnim]);
+
+  useEffect(() => {
     Animated.spring(navAnim, { toValue: navMode ? 1 : 0, tension: 80, friction: 10, useNativeDriver: true }).start();
     webRef.current?.postMessage(JSON.stringify({ type: 'nav_active', active: navMode }));
     if (navMode) {
@@ -3057,24 +3290,20 @@ function MapScreen() {
         safeSpeech(`Navigation started. Heading to ${dest.name}${distStr}.`, { rate: 0.88, pitch: 1.05, language: 'en-US' });
       } else {
         // Trip navigation
-        let startIdx = navIdx;
-        // Find nearest waypoint to user if location available
-        if (userLoc && waypoints.length > 0) {
-          startIdx = nearestWpIdx(userLoc, waypoints);
-          setNavIdx(startIdx);
-          navRef.current.idx = startIdx;
-          setRouteLegOffset(startIdx);
-        }
+        const startIdx = Math.max(0, Math.min(navRef.current.idx, Math.max(0, waypoints.length - 1)));
+        setNavIdx(startIdx);
+        navRef.current.idx = startIdx;
+        setRouteLegOffset(startIdx);
         webRef.current?.postMessage(JSON.stringify({ type: 'nav_target', idx: startIdx }));
         nativeMapRef.current?.setNavTarget(startIdx);
-        // Route from user location if available, otherwise from first waypoint
+        // Route only the active day/segment first. Longer trips continue segment-by-segment.
         const routeStart = userLoc ?? (waypoints[startIdx] ? { lat: waypoints[startIdx].lat, lng: waypoints[startIdx].lng } : null);
         if (routeStart) {
           webRef.current?.postMessage(JSON.stringify({
             type: 'start_route_from',
             lat: routeStart.lat, lng: routeStart.lng, fromIdx: startIdx,
           }));
-          nativeMapRef.current?.loadRouteFrom(routeStart.lat, routeStart.lng, startIdx);
+          nativeMapRef.current?.loadRouteSegmentFrom(routeStart.lat, routeStart.lng, startIdx, routeSegmentEndIndex(startIdx));
         }
         const target = waypoints[startIdx];
         if (target) {
@@ -3448,6 +3677,56 @@ function MapScreen() {
     nativeMapRef.current?.flyTo(camp.lat, camp.lng, 12);
   }
 
+  async function saveActiveRouteSnapshot() {
+    if (activeTrip) await saveOfflineTrip(activeTrip);
+    if (activeTrip?.trip_id) {
+      await storage.get('trailhead_active_route').then(raw => {
+        if (!raw) return;
+        const cached = JSON.parse(raw);
+        if (cached.tripId === activeTrip.trip_id) return saveRouteGeometry(activeTrip.trip_id, cached);
+      }).catch(() => {});
+    }
+  }
+
+  function resetMapRouteSession() {
+    setNavMode(false);
+    navRef.current.active = false;
+    navRef.current.idx = 0;
+    setNavIdx(0);
+    setRouteLegOffset(0);
+    setIsRouted(false);
+    setRouteFromCache(false);
+    setRouteDebug('');
+    setRouteSteps([]);
+    setRouteLegs([]);
+    setLastRouteCoords([]);
+    setRouteProgress(null);
+    setOffRouteWarn(false);
+    setIsApproaching(false);
+    setIsRerouting(false);
+    isReroutingRef.current = false;
+    setRouteAlerts([]);
+    setShowAlerts(false);
+    setSelectedDay(null);
+    setShowPanel(false);
+    setPanelCollapsed(true);
+    setSearchRouteCard(null);
+    navDestRef.current = null;
+    setNavDest(null);
+    webRef.current?.postMessage(JSON.stringify({ type: 'nav_reset' }));
+    webRef.current?.postMessage(JSON.stringify({ type: 'clear_track' }));
+    nativeMapRef.current?.resetRoute();
+    nativeMapRef.current?.stopNavigation();
+    Speech.stop();
+  }
+
+  async function saveAndCloseRoute() {
+    await saveActiveRouteSnapshot();
+    resetMapRouteSession();
+    setActiveTrip(null);
+    router.push('/(tabs)/route-builder');
+  }
+
   async function handleNearbyAudio() {
     const vp = viewportRef.current;
     const center = vp
@@ -3538,11 +3817,11 @@ function MapScreen() {
       const fullIds = new Set(
         fullResult.status === 'fulfilled' ? fullResult.value.map(f => f.camp_id) : []
       );
-      const tagged = camps.map(c => ({ ...c, full: fullIds.has(c.id) ? 1 : 0 }));
+      const tagged = camps.slice(0, 180).map(c => ({ ...c, full: fullIds.has(c.id) ? 1 : 0 }));
       // Feed results to WebView (legacy path) AND native map
       webRef.current?.postMessage(JSON.stringify({ type: 'set_camps', pins: tagged }));
       setAreaCamps(tagged);
-      setSearchResult({ count: camps.length });
+      setSearchResult({ count: tagged.length });
       setTimeout(() => setSearchResult(null), 3000);
     } catch (e: any) {
       if (e instanceof PaywallError) {
@@ -3776,8 +4055,7 @@ function MapScreen() {
         if (camp?.lat && camp?.lng) api.getWeather(camp.lat, camp.lng, 3).then(r => setCampWeather(r)).catch(() => {});
       }
       if (msg.type === 'trail_tapped') {
-        setSelectedCamp(null);
-        setTappedTrail({ name: msg.name, lat: msg.lat, lng: msg.lng, cls: msg.cls ?? 'path' });
+        openTrailFromPoint(msg.name, msg.lat, msg.lng, msg.cls ?? 'path');
       }
       if (msg.type === 'base_camp_tapped') {
         setTappedTrail(null);
@@ -3893,6 +4171,17 @@ function MapScreen() {
     // Load field reports in background
     api.getFieldReports(selectedCamp.id).then(setFieldReports).catch(() => {});
     api.getFieldReportSummary(selectedCamp.id).then(setFieldReportSummary).catch(() => {});
+  }
+
+  function closeCampDetail() {
+    setShowCampDetail(false);
+    setSelectedCamp(null);
+    setCampDetail(null);
+    setCampInsight(null);
+    setCampFullness(null);
+    setCampWeather(null);
+    setShowFieldReportForm(false);
+    resetFieldReportForm();
   }
 
   function openCampEdit(mode: 'suggest' | 'admin') {
@@ -4011,21 +4300,79 @@ function MapScreen() {
     (activeTrip?.gas_stations ?? []).filter(g => g.lat != null && g.lng != null && isFinite(g.lat) && isFinite(g.lng)).map(g => ({ lat: g.lat, lng: g.lng, name: g.name })),
     [activeTrip?.trip_id]
   );
-  const routePois = useMemo(() => {
+  const trailSupportCamps = useMemo(() => [
+    ...(activeTrip?.campsites ?? []).filter(c => c.lat != null && c.lng != null && isFinite(c.lat) && isFinite(c.lng)),
+    ...areaCamps.filter(c => c.lat != null && c.lng != null && isFinite(c.lat) && isFinite(c.lng)),
+  ], [activeTrip?.trip_id, areaCamps]);
+  const allMapPois = useMemo(() => {
     const allowedPlaces = new Set(activePlaceFilters);
-    const filteredOfflinePlaces = offlinePlacePois.filter(p => allowedPlaces.has(p.type || 'poi'));
-    const merged = [...(activeTrip?.route_pois ?? []), ...filteredOfflinePlaces, ...pois];
     const seen = new Set<string>();
-    return merged
-      .filter(p => p.lat != null && p.lng != null && isFinite(p.lat) && isFinite(p.lng))
-      .filter(p => {
-        const key = p.id || `${p.name}:${p.lat.toFixed(4)}:${p.lng.toFixed(4)}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      })
-      .map(p => ({ lat: p.lat, lng: p.lng, name: p.name, type: p.type || 'poi' }));
+    const next: OsmPoi[] = [];
+    const pushPoi = (p: OsmPoi | undefined | null, enforceFilter: boolean) => {
+      if (!p || next.length >= MAX_ALL_MAP_POIS) return;
+      if (enforceFilter && !allowedPlaces.has(p.type || 'poi')) return;
+      if (p.lat == null || p.lng == null || !isFinite(p.lat) || !isFinite(p.lng)) return;
+      const key = p.id || `${p.name}:${p.lat.toFixed(4)}:${p.lng.toFixed(4)}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      next.push(p);
+    };
+    for (const p of activeTrip?.route_pois ?? []) pushPoi(p, false);
+    for (const p of pois) pushPoi(p, true);
+    let scannedOffline = 0;
+    for (const p of offlinePlacePois) {
+      scannedOffline += 1;
+      pushPoi(p, true);
+      if (next.length >= MAX_ALL_MAP_POIS || scannedOffline >= MAX_OFFLINE_POI_SCAN) break;
+    }
+    return next;
   }, [activeTrip?.trip_id, activePlaceFilters, offlinePlacePois, pois]);
+  const trailSourcePois = useMemo(() => {
+    const seen = new Set<string>();
+    const next: OsmPoi[] = [];
+    const pushPoi = (p: OsmPoi | undefined | null) => {
+      if (!p || next.length >= MAX_ALL_MAP_POIS) return;
+      if (!['trailhead', 'viewpoint', 'peak', 'hot_spring', 'water'].includes(p.type || '')) return;
+      if (p.lat == null || p.lng == null || !isFinite(p.lat) || !isFinite(p.lng)) return;
+      const key = p.id || `${p.name}:${p.lat.toFixed(4)}:${p.lng.toFixed(4)}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      next.push(p);
+    };
+    for (const p of activeTrip?.route_pois ?? []) pushPoi(p);
+    for (const p of pois) pushPoi(p);
+    let scannedOffline = 0;
+    for (const p of offlinePlacePois) {
+      scannedOffline += 1;
+      pushPoi(p);
+      if (next.length >= MAX_ALL_MAP_POIS || scannedOffline >= MAX_OFFLINE_POI_SCAN) break;
+    }
+    return next;
+  }, [activeTrip?.trip_id, activePlaceFilters, offlinePlacePois, pois]);
+  const trailSupportFuel = useMemo(() => {
+    const fromPois = allMapPois
+      .filter(p => ['fuel', 'propane'].includes(p.type || '') && p.lat != null && p.lng != null && isFinite(p.lat) && isFinite(p.lng))
+      .map(p => ({ lat: p.lat, lng: p.lng }));
+    return [...gas, ...fromPois];
+  }, [allMapPois, gas]);
+  const routePois = useMemo(() =>
+    allMapPois
+      .slice(0, MAX_VISIBLE_MAP_POIS)
+      .map(p => ({ lat: p.lat, lng: p.lng, name: p.name, type: p.type || 'poi' })),
+    [allMapPois]
+  );
+  const trailDiscoveries = useMemo(() =>
+    (showTrailList || showDiscoveryPanel || discoveryMode === 'trails')
+      ? buildTrailDiscoveries(
+        trailSourcePois,
+        trailSupportCamps,
+        trailSupportFuel,
+        mapReports,
+        offlineSaved,
+      )
+      : [],
+    [showTrailList, showDiscoveryPanel, discoveryMode, trailSourcePois, trailSupportCamps, trailSupportFuel, mapReports, offlineSaved]
+  );
   const tripOverviewDays = useMemo(() => {
     if (!activeTrip) return [];
     return activeTrip.plan.daily_itinerary.map((day, idx, arr) => {
@@ -4214,6 +4561,7 @@ function MapScreen() {
 
   function focusNavigationCamera(loc = userLoc) {
     if (!loc) return;
+    setNavCameraFollow(true);
     const hdg = smoothedHdgRef.current ?? userHeading ?? -1;
     webRef.current?.postMessage(JSON.stringify({
       type: 'nav_center',
@@ -4224,22 +4572,13 @@ function MapScreen() {
       speed: userSpeedRef.current,
     }));
     nativeMapRef.current?.flyTo(loc.lat, loc.lng, 17);
-    setTimeout(() => {
-      webRef.current?.postMessage(JSON.stringify({
-        type: 'nav_center',
-        lat: loc.lat,
-        lng: loc.lng,
-        heading: smoothedHdgRef.current ?? hdg,
-        zoom: 17,
-        speed: userSpeedRef.current,
-      }));
-      nativeMapRef.current?.flyTo(loc.lat, loc.lng, 17);
-    }, 450);
   }
 
   function endNavigation() {
     Speech.stop();
+    setNavCameraFollow(false);
     setNavMode(false);
+    setShowSteps(false);
     navRef.current.active = false;
     setIsApproaching(false);
     setIsRerouting(false);
@@ -4262,6 +4601,18 @@ function MapScreen() {
       approachDismissRef.current = null;
     }
   }
+
+  const routeSegmentEndIndex = useCallback((fromIdx: number) => {
+    if (!waypoints.length) return fromIdx;
+    const start = Math.max(0, Math.min(fromIdx, waypoints.length - 1));
+    const startDay = waypoints[start]?.day;
+    let end = start;
+    for (let i = start + 1; i < waypoints.length; i += 1) {
+      if (waypoints[i]?.day !== startDay) break;
+      end = i;
+    }
+    return Math.min(end, start + 8, waypoints.length - 1);
+  }, [waypoints]);
 
   function startDayNav(day: number | 'all', fromIdx?: number) {
     if (navMode) endNavigation();
@@ -4317,13 +4668,337 @@ function MapScreen() {
     setShowSearch(false);
   }
 
+  function openTrailFeature(feature: TrailFeature) {
+    nativeMapRef.current?.highlightTrail(feature.lat, feature.lng, feature.name);
+    setTrailRouteBuilderOpen(false);
+    setTrailRoutePlans([]);
+    setSelectedTrailRoutePlanId(null);
+    setTrailRouteBuilderError('');
+    setTrailCardCollapsed(false);
+    setSelectedTrail(feature);
+    setSelectedCamp(null);
+    setTappedTrail(null);
+    setTappedTileSpot(null);
+    setTappedGas(null);
+    setTappedPoi(null);
+    setSelectedCommunityPin(null);
+  }
+
+  function openTrailFromPoint(name: string, lat: number, lng: number, cls = 'path') {
+    const support = buildTrailSupport(
+      { lat, lng },
+      trailSupportCamps,
+      trailSupportFuel,
+      allMapPois,
+      mapReports,
+      offlineSaved,
+    );
+    openTrailFeature(featureFromMapTrail(name, lat, lng, cls, support));
+  }
+
+  function openPoiFeature(poi: { id?: string; name: string; type: string; lat: number; lng: number }) {
+    const trailType = trailTypeFromPoi(poi.type);
+    if (trailType) {
+      const support = buildTrailSupport(
+        poi,
+        trailSupportCamps,
+        trailSupportFuel,
+        allMapPois,
+        mapReports,
+        offlineSaved,
+      );
+      const feature = featureFromPoi({ ...poi, id: poi.id ?? `${poi.type}:${poi.lat}:${poi.lng}`, type: trailType } as OsmPoi, support, 'osm');
+      if (feature) openTrailFeature(feature);
+      return;
+    }
+    setTappedPoi(poi);
+    setSelectedCamp(null);
+    setTappedTrail(null);
+    setTappedTileSpot(null);
+    setSelectedCommunityPin(null);
+    setSelectedTrail(null);
+  }
+
+  function searchCampsNearTrail(trail: TrailFeature) {
+    const bounds = { n: trail.lat + 0.35, s: trail.lat - 0.35, e: trail.lng + 0.35, w: trail.lng - 0.35, zoom: 11 };
+    setQuickToast('Searching camps near trail');
+    setTimeout(() => setQuickToast(''), 2500);
+    setTimeout(() => {
+      viewportRef.current = bounds;
+      nativeMapRef.current?.flyTo(trail.lat, trail.lng, 11);
+      setShowDiscoveryPanel(false);
+      setShowLayerSheet(false);
+      setTimeout(() => loadCampsInArea(bounds, activeFilters), 120);
+    }, 220);
+  }
+
+  function runDiscoverySearch() {
+    if (discoveryMode === 'trails') {
+      setShowDiscoveryPanel(true);
+      setShowTrailList(false);
+      setMapMoved(false);
+      setSearchResult({ count: trailDiscoveries.length });
+      setTimeout(() => setSearchResult(null), 2400);
+      return;
+    }
+    if (!isLoadingAreaCamps && viewportRef.current) {
+      loadCampsInArea(viewportRef.current, activeFilters);
+    }
+  }
+
+  function selectTrailFromDiscovery(trail: TrailFeature) {
+    setShowDiscoveryPanel(false);
+    setShowTrailList(false);
+    setShowLayerSheet(false);
+    nativeMapRef.current?.highlightTrail(trail.lat, trail.lng, trail.name);
+    webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: trail.lat, lng: trail.lng, zoom: 13 }));
+    setTimeout(() => openTrailFeature(trail), 180);
+  }
+
+  async function getSelectedTrailGeometry(trail: TrailFeature) {
+    let geometry = nativeMapRef.current?.getTrailHighlight?.() ?? null;
+    if (!geometry?.features?.length) {
+      nativeMapRef.current?.highlightTrail(trail.lat, trail.lng, trail.name);
+      await new Promise(resolve => setTimeout(resolve, 620));
+      geometry = nativeMapRef.current?.getTrailHighlight?.() ?? null;
+    }
+    return geometry;
+  }
+
+  function stateIdForTrailPoint(lat: number, lng: number): string | null {
+    for (const [id, state] of Object.entries(US_STATES)) {
+      if (lat <= state.n && lat >= state.s && lng <= state.e && lng >= state.w) {
+        return id.toLowerCase();
+      }
+    }
+    return null;
+  }
+
+  function boundsForTrailCoords(coords: [number, number][], bufferM = 1200) {
+    let w = 180, s = 90, e = -180, n = -90;
+    for (const [lng, lat] of coords) {
+      w = Math.min(w, lng);
+      s = Math.min(s, lat);
+      e = Math.max(e, lng);
+      n = Math.max(n, lat);
+    }
+    if (w > e || s > n) return null;
+    const midLat = (s + n) / 2;
+    const latDelta = bufferM / 110_540;
+    const lngDelta = bufferM / Math.max(30_000, 111_320 * Math.cos(midLat * Math.PI / 180));
+    return [w - lngDelta, s - latDelta, e + lngDelta, n + latDelta];
+  }
+
+  async function routeSelectedTrailWithGraph(trail: TrailFeature, coords: [number, number][]) {
+    if (Platform.OS !== 'ios') return null;
+    const stateId = stateIdForTrailPoint(trail.lat, trail.lng);
+    if (!stateId) return null;
+    const graphPath = trailRouteGraphLocalPath(stateId);
+    const info = await FileSystem.getInfoAsync(graphPath).catch(() => null);
+    if (!info?.exists) throw new Error(`${stateId.toUpperCase()} trail routing graph is not downloaded yet`);
+    if (((info as any)?.size ?? 0) <= 0) throw new Error(`${stateId.toUpperCase()} trail routing graph is empty`);
+    const seed: [number, number] = [trail.lng, trail.lat];
+    const hasLine = coords.length >= 2;
+    const bounds = hasLine
+      ? boundsForTrailCoords(coords, 1800)
+      : boundsForTrailCoords([seed], 2500);
+    const request = {
+      start: hasLine ? coords[0] : seed,
+      end: hasLine ? coords[coords.length - 1] : undefined,
+      bounds,
+      corridorM: hasLine ? 1800 : 2500,
+    };
+    const raw = await routeTrailGraph(graphPath, JSON.stringify(request));
+    const parsed = JSON.parse(raw);
+    const routed = Array.isArray(parsed?.coords)
+      ? parsed.coords
+          .map((pair: any) => [Number(pair?.[0]), Number(pair?.[1])] as [number, number])
+          .filter((pair: [number, number]) => Number.isFinite(pair[0]) && Number.isFinite(pair[1]))
+      : [];
+    return routed.length >= 2 ? routed : null;
+  }
+
+  async function downloadSelectedTrail(trail: TrailFeature) {
+    const geometry = await getSelectedTrailGeometry(trail);
+    const coords = primaryTrailLine(geometry, [trail.lng, trail.lat]);
+    const packGeometry: GeoJSON.FeatureCollection = geometry?.features?.length
+      ? geometry
+      : {
+          type: 'FeatureCollection',
+          features: [{
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: [trail.lng, trail.lat] },
+            properties: { name: trail.name, fallback: true },
+          }],
+        };
+    await saveOfflineTrail({
+      id: `trail:${trail.id}`,
+      trail: { ...trail, support: { ...trail.support, offlineReady: coords.length >= 2, readinessLabel: coords.length >= 2 ? 'Trail downloaded for offline follow mode' : 'Trailhead saved; graph pack needed for full trail nav' } },
+      geometry: packGeometry,
+      savedAt: Date.now(),
+      source: coords.length >= 2 ? 'highlight' : 'manual',
+    });
+    addSavedPlace({
+      id: `trail:${trail.id}`,
+      name: trail.name,
+      lat: trail.lat,
+      lng: trail.lng,
+      icon: 'flag',
+      note: coords.length >= 2 ? `Offline trail · ${coords.length} points` : 'Saved trailhead · graph pending',
+      createdAt: Date.now(),
+    });
+    setSelectedTrail(prev => prev?.id === trail.id
+      ? { ...prev, support: { ...prev.support, offlineReady: coords.length >= 2, readinessLabel: coords.length >= 2 ? 'Trail downloaded for offline follow mode' : 'Trailhead saved; graph pack needed for full trail nav' } }
+      : prev);
+    setQuickToast(coords.length >= 2 ? 'Trail downloaded for offline follow' : 'Trail saved; full graph needed');
+    setTimeout(() => setQuickToast(''), 2600);
+  }
+
+  async function isTrailRouteGraphReady(trail: TrailFeature) {
+    if (Platform.OS !== 'ios') return false;
+    const stateId = stateIdForTrailPoint(trail.lat, trail.lng);
+    if (!stateId) return false;
+    const info = await FileSystem.getInfoAsync(trailRouteGraphLocalPath(stateId)).catch(() => null);
+    return Boolean(info?.exists && (((info as any)?.size ?? 0) > 0));
+  }
+
+  function makeTrailRoutePlans(trail: TrailFeature, coords: [number, number][], graphReady: boolean, featureCount: number): TrailRoutePlan[] {
+    const clean = dedupeTrailCoords(coords);
+    if (clean.length < 2) return [];
+    const baseDistance = trailCoordsDistanceM(clean);
+    const complex = featureCount > 1 || clean.length > 260;
+    const complexWarnings = [
+      complex ? 'This looks like a complex trail system; Trailhead will only follow the confirmed preview line.' : 'Preview before starting; Trailhead will not invent extra connectors.',
+      graphReady ? '' : 'Offline routing graph is still missing, so this uses visible map geometry only.',
+    ].filter(Boolean);
+    const plans: TrailRoutePlan[] = [{
+      id: 'segment',
+      title: 'Visible segment',
+      subtitle: 'Follow the selected line exactly',
+      icon: 'git-commit-outline',
+      coords: clean,
+      distanceM: baseDistance,
+      confidence: graphReady ? 'high' : 'medium',
+      warnings: graphReady ? ['Uses the selected trail geometry as the route line.'] : complexWarnings,
+    }];
+
+    const reversed = clean.slice(0, -1).reverse();
+    plans.push({
+      id: 'out_back',
+      title: 'Out and back',
+      subtitle: 'Return on the same selected line',
+      icon: 'return-down-back-outline',
+      coords: [...clean, ...reversed],
+      distanceM: baseDistance * 2,
+      confidence: 'high',
+      warnings: ['Safest option for ambiguous trail systems because it does not invent extra connectors.'],
+    });
+
+    if (trailEndpointDistanceM(clean) <= 350 && clean.length >= 8) {
+      plans.push({
+        id: 'loop',
+        title: 'Loop direction',
+        subtitle: 'Start and finish on the selected loop',
+        icon: 'sync-outline',
+        coords: clean,
+        distanceM: baseDistance,
+        confidence: 'high',
+        warnings: ['Loop detected from the selected geometry. Confirm direction before starting.'],
+      });
+    }
+
+    plans.push({
+      id: 'far_end',
+      title: 'To far end',
+      subtitle: 'One-way to the end of this segment',
+      icon: 'flag-outline',
+      coords: clean,
+      distanceM: baseDistance,
+      confidence: complex ? 'low' : 'medium',
+      warnings: complexWarnings,
+    });
+
+    return plans;
+  }
+
+  function routeStepsForTrailPlan(trail: TrailFeature, coords: [number, number][], distanceM: number): RouteStep[] {
+    const duration = Math.max(60, distanceM / 1.35);
+    const last = coords[coords.length - 1];
+    return [
+      { type: 'depart', modifier: 'straight', name: trail.name, distance: 0, duration: 0, lat: coords[0][1], lng: coords[0][0] },
+      { type: 'continue', modifier: 'straight', name: 'Follow confirmed trail route', distance: distanceM, duration, lat: coords[Math.floor(coords.length / 2)][1], lng: coords[Math.floor(coords.length / 2)][0] },
+      { type: 'arrive', modifier: 'straight', name: trail.name, distance: 0, duration: 0, lat: last[1], lng: last[0] },
+    ];
+  }
+
+  function previewTrailRoutePlan(trail: TrailFeature, plan: TrailRoutePlan) {
+    const steps = routeStepsForTrailPlan(trail, plan.coords, plan.distanceM);
+    setRouteFromCache(true);
+    setRouteDebug(`trail route preview: ${plan.title}`);
+    setRouteSteps(steps);
+    setRouteLegs([steps]);
+    setLastRouteCoords(plan.coords);
+    setIsRouted(true);
+    nativeMapRef.current?.restoreRoute(plan.coords, steps, [steps], plan.distanceM, Math.max(60, plan.distanceM / 1.35));
+  }
+
+  async function openTrailRouteBuilder(trail: TrailFeature) {
+    setTrailRouteBuilderOpen(true);
+    setTrailCardCollapsed(true);
+    setTrailRouteBuilding(true);
+    setTrailRouteBuilderError('');
+    setTrailRoutePlans([]);
+    setSelectedTrailRoutePlanId(null);
+    setQuickToast('Building trail route options...');
+    const geometry = await getSelectedTrailGeometry(trail);
+    const coords = primaryTrailLine(geometry, [trail.lng, trail.lat]);
+    const graphReady = await isTrailRouteGraphReady(trail);
+    if (coords.length < 2) {
+      setTrailRouteBuilderError('No selectable trail line is loaded here yet. Download the state trail graph, zoom in, or tap a drawn trail segment.');
+      setQuickToast('');
+      setTrailRouteBuilding(false);
+      return;
+    }
+    const plans = makeTrailRoutePlans(trail, coords, graphReady, geometry?.features?.length ?? 0);
+    setTrailRoutePlans(plans);
+    setTrailRouteBuilding(false);
+    setQuickToast('');
+    const preferred = plans.find(p => p.id === 'loop') ?? plans[0];
+    if (preferred) {
+      setSelectedTrailRoutePlanId(preferred.id);
+      previewTrailRoutePlan(trail, preferred);
+    }
+  }
+
+  function startTrailRoutePlan(trail: TrailFeature, plan: TrailRoutePlan) {
+    const steps = routeStepsForTrailPlan(trail, plan.coords, plan.distanceM);
+    const duration = Math.max(60, plan.distanceM / 1.35);
+    const last = plan.coords[plan.coords.length - 1];
+    if (navMode) endNavigation();
+    setRouteProgress(null);
+    setRouteFromCache(true);
+    setRouteDebug(`confirmed trail follow: ${plan.title}`);
+    setRouteSteps(steps);
+    setRouteLegs([steps]);
+    setLastRouteCoords(plan.coords);
+    setIsRouted(true);
+    navDestRef.current = { lat: last[1], lng: last[0], name: trail.name, day: 0, type: 'trail' };
+    setNavDest(navDestRef.current);
+    nativeMapRef.current?.restoreRoute(plan.coords, steps, [steps], plan.distanceM, duration);
+    setSelectedTrail(null);
+    setTrailRouteBuilderOpen(false);
+    setTrailCardCollapsed(false);
+    setNavMode(true);
+    focusNavigationCamera();
+  }
+
   function openExternalMaps(lat: number, lng: number, name: string) {
     const label = encodeURIComponent(name);
     Alert.alert('Get Directions', name.split(',')[0], [
-      { text: '🗺 Navigate in App', onPress: () => navigateToCamp({ lat, lng, name }) },
-      { text: '🟢 Google Maps', onPress: () => Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`) },
-      { text: '🍎 Apple Maps', onPress: () => Linking.openURL(`maps://?daddr=${lat},${lng}&q=${label}`) },
-      { text: '🚗 Waze', onPress: () => Linking.openURL(`waze://?ll=${lat},${lng}&navigate=yes`) },
+      { text: 'Navigate in App', onPress: () => navigateToCamp({ lat, lng, name }) },
+      { text: 'Google Maps', onPress: () => Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`) },
+      { text: 'Apple Maps', onPress: () => Linking.openURL(`maps://?daddr=${lat},${lng}&q=${label}`) },
+      { text: 'Waze', onPress: () => Linking.openURL(`waze://?ll=${lat},${lng}&navigate=yes`) },
       { text: 'Cancel', style: 'cancel' },
     ]);
   }
@@ -4344,13 +5019,13 @@ function MapScreen() {
       <View style={s.turnStrip}>
         <View style={s.turnIconWrap}>
           {isRerouting ? (
-            <ActivityIndicator color="#f97316" size="large" />
+            <ActivityIndicator color={C.orange} size="large" />
           ) : nextStep && isRouted ? (
-            <TurnArrow modifier={nextStep.modifier ?? ''} type={nextStep.type ?? ''} size={54} color="#f5a623" />
+            <TurnArrow modifier={nextStep.modifier ?? ''} type={nextStep.type ?? ''} size={54} color={C.orange} />
           ) : isApproaching ? (
-            <Ionicons name="flag-outline" size={30} color="#22c55e" />
+            <Ionicons name="flag-outline" size={30} color={C.silverBright} />
           ) : (
-            <Ionicons name="navigate-outline" size={30} color="#f97316" />
+            <Ionicons name="navigate-outline" size={30} color={C.orange} />
           )}
         </View>
         <View style={s.turnInfo}>
@@ -4376,7 +5051,7 @@ function MapScreen() {
           <Text style={s.navSpeedUnit}>MPH</Text>
         </View>
         <View style={s.navDistBlock}>
-          <Text style={[s.navDistVal, isApproaching && { color: C.green }]}>
+          <Text style={[s.navDistVal, isApproaching && { color: C.silverBright }]}>
             {remainingKm !== null ? formatDist(remainingKm) : distKm !== null ? formatDist(distKm) : '--'}
           </Text>
           <Text style={s.navEta}>{etaMins !== null ? `ARRIVE ${etaClockTime(etaMins)}` : 'ROUTE REMAINING'}</Text>
@@ -4388,8 +5063,8 @@ function MapScreen() {
 
       {navTarget && (
         <View style={s.navTarget}>
-          <View style={[s.navTargetBadge, proceedToRoute && { backgroundColor: '#1e3a5f', borderColor: '#3b82f6' }]}>
-            <Text style={[s.navTargetBadgeText, proceedToRoute && { color: '#60a5fa' }]}>
+          <View style={[s.navTargetBadge, proceedToRoute && { backgroundColor: C.blueGlow + '18', borderColor: C.blueGlow + '55' }]}>
+            <Text style={[s.navTargetBadgeText, proceedToRoute && { color: C.blueGlow }]}>
               {proceedToRoute ? 'PROCEED TO' : 'NEXT STOP'}
             </Text>
           </View>
@@ -4423,36 +5098,59 @@ function MapScreen() {
         )}
         {userLoc && (
           <TouchableOpacity style={[s.navReportBtn, quickReport && s.navReportBtnActive]} onPress={() => { setQuickTypeIdx(null); setQuickReport(p => !p); }} hitSlop={14}>
-            <Ionicons name="warning" size={13} color={quickReport ? '#fff' : '#f59e0b'} />
+            <Ionicons name="warning" size={13} color={quickReport ? '#fff' : C.orange} />
             <Text style={[s.navReportBtnText, quickReport && { color: '#fff' }]}>REPORT</Text>
           </TouchableOpacity>
         )}
       </View>
 
-      {showSteps && routeSteps.length > 0 && (
-        <ScrollView style={s.stepsList} showsVerticalScrollIndicator={false}>
-          {routeSteps.map((step, i) => {
-            if (step.distance <= 20 && step.type !== 'arrive') return null;
-            const isActive = i === stepIdx;
-            const isPast = i < stepIdx;
-            return (
-              <View key={i} style={[s.stepRow, i === 0 && s.stepRowFirst, isActive && s.stepRowActive]}>
-                <Ionicons name={stepIcon(step.type, step.modifier) as any} size={16} color={isActive ? '#fff' : isPast ? OVR.text3 + '55' : OVR.text3} />
-                <View style={s.stepInfo}>
-                  <Text style={[s.stepLabel, isActive && { color: '#fff' }, isPast && { color: OVR.text3, opacity: 0.4 }]}>
-                    {stepLabel(step.type, step.modifier, step.name)}
-                  </Text>
-                  {step.name ? <Text style={[s.stepRoad, isPast && { opacity: 0.4 }]} numberOfLines={1}>{step.name}</Text> : null}
-                </View>
-                <Text style={[s.stepDist, isActive && { color: '#f97316' }, isPast && { opacity: 0.4 }]}>
-                  {isActive && stepDistM !== null ? formatStepDist(stepDistM) : formatStepDist(step.distance)}
-                </Text>
-              </View>
-            );
-          })}
-        </ScrollView>
-      )}
     </View>
+  ) : null;
+
+  const nativeTurnListPanel = navMode && showSteps && routeSteps.length > 0 ? (
+    <View style={s.navTurnsSheet} pointerEvents="auto">
+      <View style={s.navTurnsHeader}>
+        <View>
+          <Text style={s.navTurnsTitle}>TURN LIST</Text>
+          <Text style={s.navTurnsSub}>{routeSteps.length} maneuvers on this route</Text>
+        </View>
+        <TouchableOpacity style={s.navTurnsClose} onPress={() => setShowSteps(false)} hitSlop={12}>
+          <Ionicons name="close" size={16} color={OVR.text2} />
+        </TouchableOpacity>
+      </View>
+      <ScrollView style={s.stepsListDetached} showsVerticalScrollIndicator={false}>
+        {routeSteps.map((step, i) => {
+          if (step.distance <= 20 && step.type !== 'arrive') return null;
+          const isActive = i === stepIdx;
+          const isPast = i < stepIdx;
+          return (
+            <View key={i} style={[s.stepRow, i === 0 && s.stepRowFirst, isActive && s.stepRowActive]}>
+              <Ionicons name={stepIcon(step.type, step.modifier) as any} size={16} color={isActive ? '#fff' : isPast ? OVR.text3 + '55' : OVR.text3} />
+              <View style={s.stepInfo}>
+                <Text style={[s.stepLabel, isActive && { color: '#fff' }, isPast && { color: OVR.text3, opacity: 0.4 }]}>
+                  {stepLabel(step.type, step.modifier, step.name)}
+                </Text>
+                {step.name ? <Text style={[s.stepRoad, isPast && { opacity: 0.4 }]} numberOfLines={1}>{step.name}</Text> : null}
+              </View>
+              <Text style={[s.stepDist, isActive && { color: '#f97316' }, isPast && { opacity: 0.4 }]}>
+                {isActive && stepDistM !== null ? formatStepDist(stepDistM) : formatStepDist(step.distance)}
+              </Text>
+            </View>
+          );
+        })}
+      </ScrollView>
+    </View>
+  ) : null;
+
+  const navLocateButton = navMode && userLoc ? (
+    <TouchableOpacity
+      style={[s.navLocateBtn, navCameraFollow && s.navLocateBtnFollowing]}
+      onPress={() => focusNavigationCamera(userLoc)}
+      hitSlop={12}
+      activeOpacity={0.82}
+    >
+      <Ionicons name={navCameraFollow ? 'navigate' : 'locate'} size={20} color="#fff" />
+    </TouchableOpacity>
   ) : null;
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -4475,6 +5173,8 @@ function MapScreen() {
           searchMarker={searchRouteCard ? { lat: searchRouteCard.lat, lng: searchRouteCard.lng, name: searchRouteCard.name } : null}
           userLoc={userLoc}
           navMode={navMode}
+          navCameraFollow={navCameraFollow}
+          nativeNavEngineActive={USE_IOS_NATIVE_NAV_ENGINE}
           navIdx={navRef.current.idx}
           navHeading={smoothedHdgRef.current}
           navSpeed={userSpeed}
@@ -4518,6 +5218,9 @@ function MapScreen() {
             const radius = Math.max(1.0, Math.min(4.0, Math.max(Math.abs(b.n - b.s), Math.abs(b.e - b.w)) / 2 + 0.5));
             refreshCommunityPins({ lat, lng }, radius, false);
           }}
+          onMapGesture={() => {
+            if (navMode) setNavCameraFollow(false);
+          }}
           onMapTap={(lat, lng) => {
             if (pinDropMode && (lat == null || lng == null)) {
               setQuickToast('Map tap did not return a coordinate. Try again.');
@@ -4550,7 +5253,9 @@ function MapScreen() {
               }
               return;
             }
-            setSelectedCamp(null); setTappedTrail(null); setTappedTileSpot(null); setTappedGas(null); setTappedPoi(null); setSelectedCommunityPin(null);
+            nativeMapRef.current?.clearTrailHighlight();
+            setTrailCardCollapsed(false);
+            setSelectedCamp(null); setTappedTrail(null); setTappedTileSpot(null); setTappedGas(null); setTappedPoi(null); setSelectedCommunityPin(null); setSelectedTrail(null);
           }}
           onMapLongPress={runLandCheck}
           onCampTap={camp => {
@@ -4560,16 +5265,16 @@ function MapScreen() {
             if (camp?.id) api.getCampFullness(camp.id).then(r => setCampFullness(r)).catch(() => {});
             if (camp?.lat && camp?.lng) api.getWeather(camp.lat, camp.lng, 3).then(r => setCampWeather(r)).catch(() => {});
           }}
-          onGasTap={s => { setTappedGas(s); setSelectedCamp(null); setTappedTrail(null); setTappedTileSpot(null); }}
-          onPoiTap={p => { setTappedPoi(p); setSelectedCamp(null); setTappedTrail(null); setTappedTileSpot(null); setSelectedCommunityPin(null); }}
-          onCommunityPinTap={p => { setSelectedCommunityPin(p); setSelectedCamp(null); setTappedTrail(null); setTappedTileSpot(null); setTappedGas(null); setTappedPoi(null); }}
+          onGasTap={s => { setTappedGas(s); setSelectedCamp(null); setTappedTrail(null); setTappedTileSpot(null); setSelectedTrail(null); }}
+          onPoiTap={p => openPoiFeature(p)}
+          onCommunityPinTap={p => { setSelectedCommunityPin(p); setSelectedCamp(null); setTappedTrail(null); setTappedTileSpot(null); setTappedGas(null); setTappedPoi(null); setSelectedTrail(null); }}
           onTileCampTap={(name, kind, lat, lng) => {
             setTappedTileSpot({ name, kind, lat, lng });
           }}
           onBaseCampTap={(name, lat, lng, landType) => {
             // Open nearby camp search for the tapped point
           }}
-          onTrailTap={(name, lat, lng) => setTappedTrail({ name, lat, lng, cls: 'path' })}
+          onTrailTap={(name, lat, lng) => openTrailFromPoint(name, lat, lng, 'path')}
           onWaypointTap={(idx, name) => { setTappedWp({ idx, wp: waypoints[idx] }); }}
           onRouteReady={result => {
             setIsRouted(result.isProper);
@@ -4634,6 +5339,8 @@ function MapScreen() {
         />
       )}
       {nativeNavigationPanel}
+      {nativeTurnListPanel}
+      {navLocateButton}
       <TourTarget id="map.canvas" style={s.mapTourTarget} pointerEvents="none">
         <View />
       </TourTarget>
@@ -4662,12 +5369,12 @@ function MapScreen() {
 
       {/* Top bar */}
       <View style={s.topBar}>
-        <View style={[s.topBarDot, navMode && { backgroundColor: C.green }]} />
+        <View style={[s.topBarDot, navMode && { backgroundColor: C.orange }]} />
         <Text style={s.topBarText} numberOfLines={1}>
           {isDownloading
             ? `CACHING ${downloadProgress}% · ${downloadSaved.toLocaleString()} COORDS · ${downloadMB} MB`
             : offlineWarning && navMode
-              ? '⚠ NO OFFLINE MAPS — TAP MAP BUTTON TO DOWNLOAD'
+              ? 'OFFLINE MAPS NEEDED - TAP MAP BUTTON TO DOWNLOAD'
               : isRerouting
               ? 'RECALCULATING ROUTE...'
               : navMode
@@ -4677,31 +5384,26 @@ function MapScreen() {
                     ? `ARRIVING · ${waypoints[navIdx]?.name ?? ''}`
                     : isProceeding
                       ? `PROCEED TO STOP ${navIdx + 1}/${waypoints.length}`
-                      : `NAVIGATING · STOP ${navIdx + 1}/${waypoints.length} · ${isRouted ? (routeFromCache ? '📦 CACHED ROUTE' : '🗺 ROUTED') : '🧭 OFF-ROAD'}`
+                      : `NAVIGATING · STOP ${navIdx + 1}/${waypoints.length} · ${isRouted ? (routeFromCache ? 'CACHED ROUTE' : 'ROUTED') : 'OFF-ROAD'}`
                 : activeTrip ? activeTrip.plan.trip_name.toUpperCase() : 'NO ACTIVE TRIP'}
         </Text>
         {routeAlerts.length > 0 && (
           <TouchableOpacity style={s.alertPill} onPress={() => setShowAlerts(v => !v)}>
-            <Text style={s.alertPillText}>⚠ {routeAlerts.length}</Text>
+            <Ionicons name="warning-outline" size={12} color={C.red} />
+            <Text style={s.alertPillText}>{routeAlerts.length}</Text>
           </TouchableOpacity>
         )}
         {activeTrip && !navMode && (
           <TouchableOpacity
             style={s.exitTripBtn}
-            onPress={() => Alert.alert('Exit Trip', 'Clear this trip and go back to planning?', [
+            onPress={() => Alert.alert('Route options', 'Save this route or clear it from the map?', [
               { text: 'Cancel', style: 'cancel' },
-              { text: 'Exit Trip', style: 'destructive', onPress: async () => {
-                if (activeTrip) await saveOfflineTrip(activeTrip);
-                if (activeTrip?.trip_id) {
-                  await storage.get('trailhead_active_route').then(raw => {
-                    if (!raw) return;
-                    const cached = JSON.parse(raw);
-                    if (cached.tripId === activeTrip.trip_id) return saveRouteGeometry(activeTrip.trip_id, cached);
-                  }).catch(() => {});
-                }
+              { text: 'Save & Close', onPress: saveAndCloseRoute },
+              { text: 'Clear Trip', style: 'destructive', onPress: async () => {
+                await saveActiveRouteSnapshot();
+                resetMapRouteSession();
                 setActiveTrip(null);
-                webRef.current?.postMessage(JSON.stringify({ type: 'nav_reset' }));
-                router.push('/(tabs)/');
+                router.push('/(tabs)/route-builder');
               }},
             ])}
           >
@@ -4730,9 +5432,18 @@ function MapScreen() {
         </View>
       )}
       {!!routeDebug && !isRouted && (
-        <View style={[s.offlineCacheBanner, { top: 136, backgroundColor: 'rgba(127,29,29,0.82)', borderColor: 'rgba(248,113,113,0.45)' }]}>
-          <Ionicons name="bug-outline" size={12} color="#fecaca" />
-          <Text style={[s.offlineCacheBannerText, { color: '#fecaca' }]} numberOfLines={4}>Router: {routeDebug}</Text>
+        <View style={s.noRouteCard}>
+          <View style={s.noRouteTop}>
+            <Ionicons name="alert-circle-outline" size={14} color={C.red} />
+            <Text style={s.noRouteTitle}>NO DRAWABLE ROUTE</Text>
+            <TouchableOpacity style={s.noRouteClose} onPress={() => setRouteDebug('')}>
+              <Ionicons name="close" size={14} color={OVR.text3} />
+            </TouchableOpacity>
+          </View>
+          <Text style={s.noRouteText}>
+            Trailhead could not build a navigable route from these stops. Download the routing pack, simplify stops, or retry with signal.
+          </Text>
+          <Text style={s.noRouteDebug} numberOfLines={2}>{routeDebug}</Text>
         </View>
       )}
 
@@ -4840,7 +5551,7 @@ function MapScreen() {
 
             {waypoints.length > 0 && (
               <TouchableOpacity
-                style={[s.ctrlBtn, navMode && { backgroundColor: C.green + 'dd', borderColor: C.green }]}
+                style={[s.ctrlBtn, navMode && s.ctrlBtnActive]}
                 onPress={() => {
                   if (navMode) { endNavigation(); return; }
                   const days = [...new Set(waypoints.map(w => w.day))].sort((a, b) => a - b);
@@ -4883,33 +5594,26 @@ function MapScreen() {
                 <Ionicons
                   name={isDownloading ? 'close-circle-outline' : offlineSaved ? 'cloud-done-outline' : 'cloud-download-outline'}
                   size={20}
-                  color={isDownloading ? '#fff' : offlineSaved ? C.green : OVR.text}
+                  color={isDownloading ? '#fff' : offlineSaved ? OVR.text2 : OVR.text}
                 />
               </TouchableOpacity>
             )}
 
             <TouchableOpacity
-              style={[s.ctrlBtn, showFilterSheet && { backgroundColor: '#14b8a6dd', borderColor: '#14b8a6' }]}
+              style={[s.ctrlBtn, showFilterSheet && s.ctrlBtnActive]}
               onPress={() => setShowFilterSheet(true)}
             >
               <Ionicons name="filter" size={20} color={showFilterSheet ? '#fff' : OVR.text} />
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[s.ctrlBtn, isLoadingAreaCamps && { borderColor: '#14b8a6' }]}
+              style={[s.ctrlBtn, showDiscoveryPanel && { backgroundColor: C.orange + 'dd', borderColor: C.orange }]}
               onPress={() => {
-                const center = userLoc ?? (waypoints[0] ? { lat: waypoints[0].lat, lng: waypoints[0].lng } : null);
-                if (!center) return;
-                const deg = 0.4;
-                const bounds = { n: center.lat + deg, s: center.lat - deg, e: center.lng + deg, w: center.lng - deg, zoom: 10 };
-                viewportRef.current = bounds;
-                loadCampsInArea(bounds, activeFilters);
+                setShowDiscoveryPanel(v => !v);
+                setDiscoveryMode('trails');
               }}
             >
-              {isLoadingAreaCamps
-                ? <ActivityIndicator size="small" color="#14b8a6" />
-                : <Ionicons name="trail-sign-outline" size={20} color={OVR.text} />
-              }
+              <Ionicons name="trail-sign-outline" size={20} color={showDiscoveryPanel ? '#fff' : OVR.text} />
             </TouchableOpacity>
 
             <TourTarget id="map.offline">
@@ -4923,7 +5627,7 @@ function MapScreen() {
 
             <TourTarget id="map.layers">
               <TouchableOpacity
-                style={[s.ctrlBtn, showLayerSheet && { backgroundColor: '#6366f1dd', borderColor: '#6366f1' }]}
+              style={[s.ctrlBtn, showLayerSheet && s.ctrlBtnActive]}
                 onPress={() => setShowLayerSheet(true)}
               >
                 <Ionicons name="layers-outline" size={20} color={showLayerSheet ? '#fff' : OVR.text} />
@@ -4943,6 +5647,289 @@ function MapScreen() {
           </>
         )}
       </ScrollView>
+
+      {selectedTrail && !navMode && trailCardCollapsed && !trailRouteBuilderOpen && (
+        <View style={s.trailCollapsedWrap}>
+          <TouchableOpacity
+            style={s.trailCollapsedTab}
+            activeOpacity={0.86}
+            onPress={() => setTrailCardCollapsed(false)}
+          >
+            <Ionicons name={trailIcon(selectedTrail.type) as any} size={16} color={trailColor(selectedTrail.type)} />
+            <Text style={s.trailCollapsedText} numberOfLines={1}>{selectedTrail.name}</Text>
+            <Ionicons name="chevron-up" size={15} color={OVR.text3} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={s.trailMapCloseBtn}
+            activeOpacity={0.82}
+            onPress={() => {
+              nativeMapRef.current?.clearTrailHighlight();
+              setTrailCardCollapsed(false);
+              setSelectedTrail(null);
+            }}
+          >
+            <Ionicons name="close" size={15} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {selectedTrail && !navMode && !trailCardCollapsed && !trailRouteBuilderOpen && (
+        <View style={s.trailOverlayCard}>
+          <View style={s.wpSheetHeader}>
+            <View style={[s.trailIconBadge, { backgroundColor: trailColor(selectedTrail.type) + '22', borderColor: trailColor(selectedTrail.type) + '66' }]}>
+              <Ionicons name={trailIcon(selectedTrail.type) as any} size={18} color={trailColor(selectedTrail.type)} />
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={s.wpSheetName} numberOfLines={2}>{selectedTrail.name}</Text>
+              <Text style={s.wpSheetMeta}>{selectedTrail.subtitle}</Text>
+            </View>
+            <TouchableOpacity style={s.discoveryPanelClose} onPress={() => setTrailCardCollapsed(true)}>
+              <Ionicons name="chevron-down" size={15} color={OVR.text2} />
+            </TouchableOpacity>
+            <TouchableOpacity style={s.discoveryPanelClose} onPress={() => { nativeMapRef.current?.clearTrailHighlight(); setTrailCardCollapsed(false); setSelectedTrail(null); }}>
+              <Ionicons name="close" size={15} color={OVR.text2} />
+            </TouchableOpacity>
+          </View>
+          <View style={s.trailSupportGrid}>
+            <View style={s.trailMetric}><Text style={s.trailMetricValue}>{selectedTrail.support.campsNearby}</Text><Text style={s.trailMetricLabel}>CAMPS</Text></View>
+            <View style={s.trailMetric}><Text style={s.trailMetricValue}>{selectedTrail.support.fuelNearby}</Text><Text style={s.trailMetricLabel}>FUEL</Text></View>
+            <View style={s.trailMetric}><Text style={s.trailMetricValue}>{selectedTrail.support.waterNearby}</Text><Text style={s.trailMetricLabel}>WATER</Text></View>
+            <View style={s.trailMetric}><Text style={s.trailMetricValue}>{selectedTrail.support.reportsNearby}</Text><Text style={s.trailMetricLabel}>REPORTS</Text></View>
+          </View>
+          <View style={s.trailReadiness}>
+            <Ionicons name={selectedTrail.support.offlineReady ? 'cloud-done-outline' : 'cloud-download-outline'} size={15} color={selectedTrail.support.offlineReady ? C.green : C.orange} />
+            <Text style={s.trailReadinessText}>{selectedTrail.support.readinessLabel}</Text>
+          </View>
+          <View style={s.trailIntelList}>
+            <View style={s.trailIntelRow}>
+              <Ionicons name="bonfire-outline" size={15} color={C.orange} />
+              <Text style={s.trailIntelText} numberOfLines={1}>
+                {selectedTrail.support.nearestCampDistanceMi != null
+                  ? `${selectedTrail.support.nearestCampName || 'Nearest camp'} · ${selectedTrail.support.nearestCampDistanceMi.toFixed(1)} mi`
+                  : 'No loaded camp pins within 12 mi'}
+              </Text>
+            </View>
+            <View style={s.trailIntelRow}>
+              <Ionicons name="water-outline" size={15} color="#38bdf8" />
+              <Text style={s.trailIntelText} numberOfLines={1}>
+                {selectedTrail.support.nearestWaterDistanceMi != null
+                  ? `Water source · ${selectedTrail.support.nearestWaterDistanceMi.toFixed(1)} mi`
+                  : 'No loaded water source within 8 mi'}
+              </Text>
+            </View>
+            <View style={s.trailIntelRow}>
+              <Ionicons name="flash-outline" size={15} color="#eab308" />
+              <Text style={s.trailIntelText} numberOfLines={1}>
+                {selectedTrail.support.nearestFuelDistanceMi != null
+                  ? `Fuel / service · ${selectedTrail.support.nearestFuelDistanceMi.toFixed(1)} mi`
+                  : 'No loaded fuel/service within 20 mi'}
+              </Text>
+            </View>
+          </View>
+          <View style={s.trailActionGrid}>
+            <TouchableOpacity
+              style={[s.wpSheetNavBtn, s.trailSheetAction]}
+              onPress={() => openTrailRouteBuilder(selectedTrail)}
+            >
+              <Ionicons name="git-branch-outline" size={14} color="#fff" />
+              <Text style={s.wpSheetNavText}>BUILD ROUTE</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[s.wpSheetDayBtn, s.trailSheetAction, { borderColor: C.orange + '44' }]}
+              onPress={() => {
+                const trail = selectedTrail;
+                setSelectedTrail(null);
+                searchCampsNearTrail(trail);
+              }}
+            >
+              <Ionicons name="bonfire-outline" size={14} color={C.orange} />
+              <Text style={[s.wpSheetDayText, { color: C.orange }]}>CAMPS</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[s.wpSheetDayBtn, s.trailSheetAction, s.trailSheetMutedAction]}
+              onPress={() => {
+                const trail = selectedTrail;
+                setSelectedTrail(null);
+                setPinType(trail.type === 'trailhead' ? 'trailhead' : 'trail_note');
+                setPendingPin({ lat: trail.lat, lng: trail.lng });
+                setPinName(trail.name && trail.name !== 'Trail' ? `${trail.name} note` : '');
+                setPinDescription('');
+                setPinDetails({ best_for: trail.type === 'road' ? 'Overland' : 'Hike', source: trail.source });
+              }}
+            >
+              <Ionicons name="add-circle-outline" size={14} color={OVR.text2} />
+              <Text style={[s.wpSheetDayText, { color: OVR.text2 }]}>NOTE</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[s.wpSheetDayBtn, s.trailSheetAction, s.trailSheetMutedAction]}
+              onPress={() => downloadSelectedTrail(selectedTrail)}
+            >
+              <Ionicons name={selectedTrail.support.offlineReady ? 'cloud-done-outline' : 'cloud-download-outline'} size={14} color={OVR.text2} />
+              <Text style={[s.wpSheetDayText, { color: OVR.text2 }]}>DOWNLOAD</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {selectedTrail && !navMode && trailRouteBuilderOpen && (
+        <View style={s.trailRouteBuilderWrap}>
+          <BlurView intensity={34} tint="dark" style={s.trailRouteBuilderBlur}>
+            <View style={s.trailRouteBuilderHeader}>
+              <View style={[s.trailIconBadge, { backgroundColor: trailColor(selectedTrail.type) + '22', borderColor: trailColor(selectedTrail.type) + '66' }]}>
+                <Ionicons name="git-branch-outline" size={18} color={trailColor(selectedTrail.type)} />
+              </View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={s.trailRouteEyebrow}>TRAIL ROUTE BUILDER</Text>
+                <Text style={s.trailRouteTitle} numberOfLines={1}>{selectedTrail.name}</Text>
+              </View>
+              <TouchableOpacity
+                style={s.discoveryPanelClose}
+                onPress={() => {
+                  setTrailRouteBuilderOpen(false);
+                  setTrailRoutePlans([]);
+                  setSelectedTrailRoutePlanId(null);
+                  setTrailCardCollapsed(false);
+                }}
+              >
+                <Ionicons name="close" size={15} color={OVR.text2} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={s.trailRouteStatusRow}>
+              <View style={s.trailRouteStatusPill}>
+                <Ionicons name="map-outline" size={13} color={C.silverBright} />
+                <Text style={s.trailRouteStatusText}>Preview first</Text>
+              </View>
+              <View style={s.trailRouteStatusPill}>
+                <Ionicons name="warning-outline" size={13} color={C.orange} />
+                <Text style={s.trailRouteStatusText}>No auto-start</Text>
+              </View>
+            </View>
+
+            {trailRouteBuilding ? (
+              <View style={s.trailRouteLoading}>
+                <ActivityIndicator color={C.orange} />
+                <Text style={s.trailRouteLoadingText}>Reading selected trail geometry</Text>
+              </View>
+            ) : trailRouteBuilderError ? (
+              <View style={s.trailRouteError}>
+                <Ionicons name="alert-circle-outline" size={18} color={C.orange} />
+                <Text style={s.trailRouteErrorText}>{trailRouteBuilderError}</Text>
+              </View>
+            ) : (
+              <>
+                <View style={s.trailRoutePlanList}>
+                  {trailRoutePlans.map(plan => {
+                    const active = selectedTrailRoutePlanId === plan.id;
+                    const tone = plan.confidence === 'high' ? C.green : plan.confidence === 'medium' ? C.orange : C.red;
+                    return (
+                      <TouchableOpacity
+                        key={plan.id}
+                        activeOpacity={0.86}
+                        style={[s.trailRoutePlanCard, active && { borderColor: C.orange, backgroundColor: 'rgba(249,115,22,0.12)' }]}
+                        onPress={() => {
+                          setSelectedTrailRoutePlanId(plan.id);
+                          previewTrailRoutePlan(selectedTrail, plan);
+                        }}
+                      >
+                        <View style={[s.trailRoutePlanIcon, { borderColor: tone + '66', backgroundColor: tone + '18' }]}>
+                          <Ionicons name={plan.icon as any} size={17} color={tone} />
+                        </View>
+                        <View style={{ flex: 1, minWidth: 0 }}>
+                          <View style={s.trailRoutePlanTop}>
+                            <Text style={s.trailRoutePlanTitle} numberOfLines={1}>{plan.title}</Text>
+                            <Text style={s.trailRoutePlanDistance}>{fmtTrailRouteDistance(plan.distanceM)}</Text>
+                          </View>
+                          <Text style={s.trailRoutePlanSub} numberOfLines={1}>{plan.subtitle}</Text>
+                          <Text style={[s.trailRoutePlanConfidence, { color: tone }]}>{plan.confidence.toUpperCase()} CONFIDENCE</Text>
+                        </View>
+                        {active && <Ionicons name="checkmark-circle" size={18} color={C.orange} />}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                {!!trailRoutePlans.find(p => p.id === selectedTrailRoutePlanId)?.warnings.length && (
+                  <View style={s.trailRouteWarningBox}>
+                    <Ionicons name="information-circle-outline" size={16} color={C.silverBright} />
+                    <Text style={s.trailRouteWarningText} numberOfLines={2}>
+                      {trailRoutePlans.find(p => p.id === selectedTrailRoutePlanId)?.warnings[0]}
+                    </Text>
+                  </View>
+                )}
+
+                <View style={s.trailRouteBuilderActions}>
+                  <TouchableOpacity
+                    style={s.trailRouteSecondaryBtn}
+                    onPress={() => {
+                      setTrailRouteBuilderOpen(false);
+                      setTrailCardCollapsed(false);
+                    }}
+                  >
+                    <Ionicons name="chevron-back" size={14} color={OVR.text2} />
+                    <Text style={s.trailRouteSecondaryText}>BACK</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[s.trailRouteStartBtn, !selectedTrailRoutePlanId && { opacity: 0.55 }]}
+                    disabled={!selectedTrailRoutePlanId}
+                    onPress={() => {
+                      const plan = trailRoutePlans.find(p => p.id === selectedTrailRoutePlanId);
+                      if (plan) startTrailRoutePlan(selectedTrail, plan);
+                    }}
+                  >
+                    <Ionicons name="navigate" size={15} color="#fff" />
+                    <Text style={s.trailRouteStartText}>START FOLLOW</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+          </BlurView>
+        </View>
+      )}
+
+      {showDiscoveryPanel && !navMode && !selectedCamp && !selectedCommunityPin && !selectedTrail && (
+        <View style={s.discoveryPanel}>
+          <View style={s.discoveryPanelHeader}>
+            <View>
+              <Text style={s.discoveryPanelTitle}>TRAILS IN VIEW</Text>
+              <Text style={s.discoveryPanelSub}>{trailDiscoveries.length ? 'Tap a trail to open details. Map stays put.' : 'Pan to a downloaded essentials area with trailheads.'}</Text>
+            </View>
+            <TouchableOpacity style={s.discoveryPanelClose} onPress={() => setShowDiscoveryPanel(false)}>
+              <Ionicons name="close" size={15} color={OVR.text2} />
+            </TouchableOpacity>
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.discoveryCats}>
+            {[
+              ['trailhead', 'TRAILHEADS'],
+              ['viewpoint', 'VIEWS'],
+              ['peak', 'PEAKS'],
+              ['hot_spring', 'HOT SPRINGS'],
+            ].map(([type, label]) => {
+              const count = trailDiscoveries.filter(t => t.type === type).length;
+              return <Text key={type} style={s.discoveryCatPill}>{label} {count}</Text>;
+            })}
+          </ScrollView>
+          <ScrollView showsVerticalScrollIndicator={false} style={s.discoveryList}>
+            {trailDiscoveries.length === 0 ? (
+              <View style={s.discoveryEmpty}>
+                <Ionicons name="map-outline" size={20} color={OVR.text3} />
+                <Text style={s.discoveryEmptyText}>Downloaded essentials decide what appears here. Colorado essentials will show Colorado trailheads once this map area is loaded.</Text>
+              </View>
+            ) : trailDiscoveries.map(trail => (
+              <TouchableOpacity key={trail.id} style={s.discoveryTrailRow} onPress={() => selectTrailFromDiscovery(trail)}>
+                <View style={[s.trailIconBadge, { backgroundColor: trailColor(trail.type) + '22', borderColor: trailColor(trail.type) + '66' }]}>
+                  <Ionicons name={trailIcon(trail.type) as any} size={16} color={trailColor(trail.type)} />
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={s.trailCardName} numberOfLines={1}>{trail.name}</Text>
+                  <Text style={s.trailCardMeta} numberOfLines={1}>{trail.subtitle} · {trail.support.campsNearby} camps nearby</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color={OVR.text3} />
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      )}
 
       {/* Route alerts */}
       {showAlerts && routeAlerts.length > 0 && (
@@ -5296,7 +6283,7 @@ function MapScreen() {
       )}
 
       {/* ── Campsite full profile modal ── */}
-      <Modal visible={showCampDetail} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowCampDetail(false)}>
+      <Modal visible={showCampDetail} animationType="slide" presentationStyle="pageSheet" onRequestClose={closeCampDetail}>
         <View style={s.detailModal}>
           {campDetail && (
             <ScrollView showsVerticalScrollIndicator={false}>
@@ -5317,7 +6304,7 @@ function MapScreen() {
                 {/* Header */}
                 <View style={s.detailHeader}>
                   <Text style={s.detailName}>{campDetail.name}</Text>
-                  <TouchableOpacity style={s.detailClose} onPress={() => setShowCampDetail(false)}>
+                  <TouchableOpacity style={s.detailClose} onPress={closeCampDetail}>
                     <Ionicons name="close" size={22} color={C.text} />
                   </TouchableOpacity>
                 </View>
@@ -5463,7 +6450,7 @@ function MapScreen() {
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 }}>
                       <Text style={s.detailSectionTitle}>AI Insight</Text>
                       {campInsight?.star_rating && (
-                        <Text style={s.aiStars}>{'★'.repeat(campInsight.star_rating)}{'☆'.repeat(5 - campInsight.star_rating)}</Text>
+                        <Text style={s.aiStars}>{campInsight.star_rating}/5</Text>
                       )}
                     </View>
                     {loadingInsight && !campInsight && <ActivityIndicator size="small" color={C.orange} />}
@@ -5879,7 +6866,10 @@ function MapScreen() {
               </View>
               {routeBrief.signal_dead_zones && routeBrief.signal_dead_zones.length > 0 && (
                 <View style={s.detailSection}>
-                  <Text style={s.detailSectionTitle}>📵 Signal Dead Zones</Text>
+                  <View style={s.detailSectionTitleRow}>
+                    <Ionicons name="cellular-outline" size={14} color={C.text3} />
+                    <Text style={s.detailSectionTitleInline}>Signal Dead Zones</Text>
+                  </View>
                   {routeBrief.signal_dead_zones.map((z, i) => (
                     <View key={i} style={s.briefItem}>
                       <Ionicons name="cellular-outline" size={14} color={C.text3} />
@@ -5890,13 +6880,19 @@ function MapScreen() {
               )}
               {routeBrief.fire_restriction_likelihood && (
                 <View style={s.detailSection}>
-                  <Text style={s.detailSectionTitle}>🔥 Fire Restrictions</Text>
+                  <View style={s.detailSectionTitleRow}>
+                    <Ionicons name="flame-outline" size={14} color={C.orange} />
+                    <Text style={s.detailSectionTitleInline}>Fire Restrictions</Text>
+                  </View>
                   <Text style={[s.briefSummary, { marginTop: 4 }]}>{routeBrief.fire_restriction_likelihood}</Text>
                 </View>
               )}
               {routeBrief.emergency_bailout && (
                 <View style={[s.detailSection, { backgroundColor: C.red + '12', borderRadius: 8, padding: 10 }]}>
-                  <Text style={[s.detailSectionTitle, { color: C.red }]}>🚨 Emergency Bailout</Text>
+                  <View style={[s.detailSectionTitleRow, { borderColor: C.red + '33' }]}>
+                    <Ionicons name="medical-outline" size={14} color={C.red} />
+                    <Text style={[s.detailSectionTitleInline, { color: C.red }]}>Emergency Bailout</Text>
+                  </View>
                   <Text style={[s.briefSummary, { marginTop: 4 }]}>{routeBrief.emergency_bailout}</Text>
                 </View>
               )}
@@ -5928,20 +6924,23 @@ function MapScreen() {
                 </TouchableOpacity>
               </View>
               {([
-                { key: 'essentials',          label: 'Essentials',       icon: '⭐' },
-                { key: 'recovery_gear',       label: 'Recovery Gear',    icon: '🔧' },
-                { key: 'water_food',          label: 'Water & Food',     icon: '💧' },
-                { key: 'navigation',          label: 'Navigation',       icon: '🗺️' },
-                { key: 'shelter',             label: 'Shelter',          icon: '⛺' },
-                { key: 'tools_spares',        label: 'Tools & Spares',   icon: '🔩' },
-                { key: 'optional_nice_to_have',label:'Nice to Have',     icon: '✨' },
-                { key: 'leave_at_home',       label: 'Leave at Home',    icon: '🚫' },
+                { key: 'essentials',           label: 'Essentials',     icon: 'star-outline' },
+                { key: 'recovery_gear',        label: 'Recovery Gear',  icon: 'construct-outline' },
+                { key: 'water_food',           label: 'Water & Food',   icon: 'water-outline' },
+                { key: 'navigation',           label: 'Navigation',     icon: 'map-outline' },
+                { key: 'shelter',              label: 'Shelter',        icon: 'home-outline' },
+                { key: 'tools_spares',         label: 'Tools & Spares', icon: 'hardware-chip-outline' },
+                { key: 'optional_nice_to_have',label:'Nice to Have',    icon: 'sparkles-outline' },
+                { key: 'leave_at_home',        label: 'Leave at Home',  icon: 'ban-outline' },
               ] as const).map(section => {
                 const items = (packingList as any)[section.key] as string[];
                 if (!items?.length) return null;
                 return (
                   <View key={section.key} style={s.detailSection}>
-                    <Text style={s.detailSectionTitle}>{section.icon} {section.label}</Text>
+                    <View style={s.detailSectionTitleRow}>
+                      <Ionicons name={section.icon as any} size={14} color={C.orange} />
+                      <Text style={s.detailSectionTitleInline}>{section.label}</Text>
+                    </View>
                     {items.map((item, i) => (
                       <View key={i} style={s.briefItem}>
                         <View style={s.packDot} />
@@ -5957,60 +6956,136 @@ function MapScreen() {
       </Modal>
 
       {/* ── Search This Area (native button — reliable on all platforms) ── */}
-      {(mapMoved || isLoadingAreaCamps || searchResult !== null || campSearchFilterCount > 0) && !navMode && !showSearch && !selectedCamp && !selectedCommunityPin && !(showPanel && activeTrip) && (
+      {(mapMoved || isLoadingAreaCamps || searchResult !== null || campSearchFilterCount > 0) && !navMode && !showSearch && !selectedCamp && !selectedTrail && !selectedCommunityPin && !(showPanel && activeTrip) && (
         <View style={s.searchAreaWrap}>
-          <TouchableOpacity
-            style={[s.searchAreaBtn, isLoadingAreaCamps && s.searchAreaBtnLoading]}
-            onPress={() => {
-              if (!isLoadingAreaCamps && viewportRef.current) {
-                loadCampsInArea(viewportRef.current, activeFilters);
-              }
-            }}
-            disabled={isLoadingAreaCamps}
-          >
-            {isLoadingAreaCamps ? (
-              <ActivityIndicator size="small" color={C.orange} style={{ marginRight: 6 }} />
-            ) : searchResult !== null ? (
-              <Ionicons
-                name={searchResult.count === -2 ? 'expand-outline' : searchResult.count < 0 ? 'alert-circle-outline' : searchResult.count === 0 ? 'information-circle-outline' : 'checkmark-circle-outline'}
-                size={14}
-                color={searchResult.count === -2 ? C.text2 : searchResult.count < 0 ? C.red : searchResult.count === 0 ? C.text3 : C.green}
-                style={{ marginRight: 5 }}
+          <View style={[
+            s.searchAreaBtn,
+            s.discoverySearchAreaBtn,
+            discoveryMode === 'trails' ? s.searchAreaBtnTrails : s.searchAreaBtnCamps,
+            isLoadingAreaCamps && s.searchAreaBtnLoading,
+          ]}>
+            <TouchableOpacity
+              style={s.searchAreaModeToggle}
+              onPress={() => setDiscoveryMode(mode => mode === 'camps' ? 'trails' : 'camps')}
+              activeOpacity={0.86}
+            >
+              <Animated.View
+                style={[
+                  s.searchAreaModeThumb,
+                  {
+                    backgroundColor: discoveryMode === 'trails' ? C.orange : C.green,
+                    transform: [{ translateX: discoveryModeAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 58] }) }],
+                  },
+                ]}
               />
-            ) : (
-              <Ionicons name="search" size={13} color={C.orange} style={{ marginRight: 5 }} />
-            )}
-            <Text style={[s.searchAreaText, isLoadingAreaCamps && { color: OVR.text3 }]}>
-              {isLoadingAreaCamps
-                ? 'SEARCHING...'
-                : mapZoom < MIN_CAMP_SEARCH_ZOOM
-                  ? 'ZOOM IN A BIT'
-                : searchResult !== null
-                  ? searchResult.count === -2
+              <Text style={[s.searchAreaModeText, discoveryMode === 'camps' && s.searchAreaModeTextActive]}>CAMP</Text>
+              <Text style={[s.searchAreaModeText, discoveryMode === 'trails' && s.searchAreaModeTextActive]}>TRAIL</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={s.searchAreaAction}
+              onPress={runDiscoverySearch}
+              disabled={discoveryMode === 'camps' && isLoadingAreaCamps}
+              activeOpacity={0.86}
+            >
+              {discoveryMode === 'camps' && isLoadingAreaCamps ? (
+                <ActivityIndicator size="small" color={C.green} style={{ marginRight: 6 }} />
+              ) : searchResult !== null && discoveryMode === 'camps' ? (
+                <Ionicons
+                  name={searchResult.count === -2 ? 'expand-outline' : searchResult.count < 0 ? 'alert-circle-outline' : searchResult.count === 0 ? 'information-circle-outline' : 'checkmark-circle-outline'}
+                  size={14}
+                  color={searchResult.count === -2 ? C.text2 : searchResult.count < 0 ? C.red : searchResult.count === 0 ? C.text3 : C.green}
+                  style={{ marginRight: 5 }}
+                />
+              ) : (
+                <Ionicons name={discoveryMode === 'trails' ? 'trail-sign-outline' : 'search'} size={13} color={discoveryMode === 'trails' ? C.orange : C.green} style={{ marginRight: 5 }} />
+              )}
+              <Text style={[
+                s.searchAreaText,
+                discoveryMode === 'trails' ? s.searchAreaTextTrails : s.searchAreaTextCamps,
+                isLoadingAreaCamps && { color: OVR.text3 },
+              ]}>
+                {discoveryMode === 'trails'
+                  ? trailDiscoveries.length ? `${trailDiscoveries.length} TRAIL${trailDiscoveries.length === 1 ? '' : 'S'} FOUND` : 'SEARCH TRAILS HERE'
+                : isLoadingAreaCamps
+                  ? 'SEARCHING...'
+                  : mapZoom < MIN_CAMP_SEARCH_ZOOM
                     ? 'ZOOM IN A BIT'
-                    : searchResult.count < 0
-                      ? 'SEARCH FAILED — RETRY'
-                      : searchResult.count === 0
-                        ? 'NO CAMPS FOUND HERE'
-                        : `${searchResult.count} CAMP${searchResult.count !== 1 ? 'S' : ''} FOUND`
-                  : campSearchFilterCount > 0
-                    ? `SEARCH · ${campSearchFilterCount} CAMP FILTER${campSearchFilterCount !== 1 ? 'S' : ''}`
-                    : 'SEARCH THIS AREA'}
-            </Text>
-          </TouchableOpacity>
+                  : searchResult !== null
+                    ? searchResult.count === -2
+                      ? 'ZOOM IN A BIT'
+                      : searchResult.count < 0
+                        ? 'SEARCH FAILED — RETRY'
+                        : searchResult.count === 0
+                          ? 'NO CAMPS FOUND HERE'
+                          : `${searchResult.count} CAMP${searchResult.count !== 1 ? 'S' : ''} FOUND`
+                    : campSearchFilterCount > 0
+                      ? `SEARCH · ${campSearchFilterCount} CAMP FILTER${campSearchFilterCount !== 1 ? 'S' : ''}`
+                      : 'SEARCH CAMPS HERE'}
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
       )}
 
       {/* ── Layer Sheet ── */}
-      <Modal visible={showLayerSheet} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowLayerSheet(false)}>
+      <Modal
+        visible={showLayerSheet}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => showTrailList ? setShowTrailList(false) : setShowLayerSheet(false)}
+      >
         <View style={s.layerSheet}>
           <View style={s.layerSheetHeader}>
-            <Text style={s.layerSheetTitle}>MAP LAYERS</Text>
-            <TouchableOpacity onPress={() => setShowLayerSheet(false)}>
+            {showTrailList ? (
+              <TouchableOpacity onPress={() => setShowTrailList(false)}>
+                <Ionicons name="chevron-back" size={22} color={C.text2} />
+              </TouchableOpacity>
+            ) : null}
+            <View style={{ flex: 1 }}>
+              <Text style={s.layerSheetTitle}>{showTrailList ? 'TRAIL DISCOVERY' : 'MAP LAYERS'}</Text>
+              {showTrailList ? (
+                <Text style={s.trailListSub}>{trailDiscoveries.length ? `${trailDiscoveries.length} places near the current map and trip` : 'No trail places loaded yet'}</Text>
+              ) : null}
+            </View>
+            <TouchableOpacity onPress={() => { setShowTrailList(false); setShowLayerSheet(false); }}>
               <Ionicons name="close" size={22} color={C.text2} />
             </TouchableOpacity>
           </View>
 
+          {showTrailList ? (
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.trailListContent}>
+              {trailDiscoveries.length === 0 ? (
+                <View style={s.trailEmptyState}>
+                  <Ionicons name="trail-sign-outline" size={26} color="#16a34a" />
+                  <Text style={s.trailEmptyTitle}>Move the map or enable trail POIs</Text>
+                  <Text style={s.trailEmptyText}>Trailhead builds this list from loaded trailheads, viewpoints, peaks, hot springs, water, camps, fuel, and community reports.</Text>
+                </View>
+              ) : trailDiscoveries.map(trail => (
+                <TouchableOpacity
+                  key={trail.id}
+                  style={s.trailListCard}
+                  activeOpacity={0.86}
+                  onPress={() => {
+                    selectTrailFromDiscovery(trail);
+                  }}
+                >
+                  <View style={[s.trailIconBadge, { backgroundColor: trailColor(trail.type) + '22', borderColor: trailColor(trail.type) + '66' }]}>
+                    <Ionicons name={trailIcon(trail.type) as any} size={18} color={trailColor(trail.type)} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.trailCardName} numberOfLines={1}>{trail.name}</Text>
+                    <Text style={s.trailCardMeta} numberOfLines={1}>{trail.subtitle}</Text>
+                    <View style={s.trailSupportRow}>
+                      <Text style={s.trailSupportPill}>{trail.support.campsNearby} camps</Text>
+                      <Text style={s.trailSupportPill}>{trail.support.fuelNearby} fuel</Text>
+                      <Text style={s.trailSupportPill}>{trail.support.waterNearby} water</Text>
+                    </View>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={OVR.text3} />
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          ) : (
           <ScrollView showsVerticalScrollIndicator={false}>
             <Text style={s.layerSectionHead}>MAP OVERLAYS</Text>
             {([
@@ -6048,7 +7123,6 @@ function MapScreen() {
               </TouchableOpacity>
             ))}
 
-            <Text style={s.layerSectionHead}>ROADS &amp; TRAILS</Text>
             {([
               { key: 'mvum', label: 'MVUM — USFS Roads & Trails', sub: 'Legal motorized access lines. Informational, not turn-by-turn routing.', icon: 'car-outline', val: layerMvum, set: setLayerMvum, color: '#22c55e' },
             ] as const).map(l => (
@@ -6108,6 +7182,7 @@ function MapScreen() {
             )}
             <View style={{ height: 40 }} />
           </ScrollView>
+          )}
         </View>
       </Modal>
 
@@ -6404,7 +7479,7 @@ function MapScreen() {
       })()}
 
       {/* ── Waze-style quick report (two-step: type → subtype) ─────────────── */}
-      {userLoc && !showSearch && !selectedCamp && !selectedCommunityPin && (
+      {userLoc && !showSearch && !selectedCamp && !selectedTrail && !selectedCommunityPin && (
         <View style={[s.quickReportWrap, navMode && s.quickReportWrapNav]} pointerEvents="box-none">
           {!!quickToast && (
             <View style={s.quickToast}>
@@ -6490,7 +7565,7 @@ function MapScreen() {
           )}
           {!navMode && (
             <TourTarget id="map.pinReport">
-              <View style={{ gap: 8 }}>
+              <View style={s.quickReportFabRow}>
                 <TouchableOpacity
                   style={[s.quickReportFab, pinDropMode && { backgroundColor: '#f97316', borderColor: '#f97316' }]}
                   onPress={() => beginCommunityPinDrop(false)}
@@ -6616,110 +7691,23 @@ function MapScreen() {
                 {tripOverviewStats.days} days · {tripOverviewStats.miles} mi · {tripOverviewStats.camps} camps · {tripOverviewStats.fuel} fuel
               </Text>
             </View>
-            <TouchableOpacity style={s.tripPanelEdit} onPress={() => router.push('/(tabs)/route-builder')}>
-              <Ionicons name="create-outline" size={13} color={C.orange} />
-              <Text style={s.tripPanelEditText}>EDIT</Text>
-            </TouchableOpacity>
-          </View>
-          <View style={s.tripPrimaryActions}>
             <TouchableOpacity
-              style={s.tripStartBtn}
-              onPress={() => {
-                const days = [...new Set(waypoints.map(w => w.day))].sort((a, b) => a - b);
-                if (days.length <= 1) { startDayNav('all'); } else { setShowDayModal(true); }
+              style={s.tripPanelSave}
+              onPress={async () => {
+                await saveActiveRouteSnapshot();
+                setQuickToast('Route saved');
+                setTimeout(() => setQuickToast(''), 1800);
               }}
             >
-              <Ionicons name="navigate" size={15} color="#fff" />
-              <Text style={s.tripStartText}>START TRIP</Text>
+              <Ionicons name="save-outline" size={13} color={C.green} />
+              <Text style={s.tripPanelSaveText}>SAVE</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={s.tripSecondaryBtn} onPress={openInMaps}>
-              <Ionicons name="open-outline" size={13} color={C.text2} />
+            <TouchableOpacity style={s.tripPanelEdit} onPress={() => router.push('/(tabs)/route-builder')}>
+              <Ionicons name="albums-outline" size={13} color={C.orange} />
+              <Text style={s.tripPanelEditText}>ROUTES</Text>
             </TouchableOpacity>
           </View>
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.tripPanelScroll}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.dayScroll}>
-            {tripOverviewDays.map(({ day, previousCamp, first, last, camp, campWp, legMiles }) => {
-              const isSelected = selectedDay === day.day;
-              const start = previousCamp ?? first;
-              const finish = campWp ?? camp ?? last;
-              const dayTitle = `${start?.name ?? 'Start'} to ${finish?.name ?? day.title}`;
-              return (
-                <TouchableOpacity
-                  key={day.day}
-                  style={[s.dayCard, isSelected && { borderColor: C.orange, borderWidth: 2, backgroundColor: C.orangeGlow }]}
-                  onPress={() => {
-                    Haptics.selectionAsync();
-                    if (selectedDay === day.day) {
-                      setSelectedDay(null);
-                    } else {
-                      setSelectedDay(day.day);
-                      // Fit map to this day's waypoints
-                      const dayWps = waypoints.filter(w => w.day === day.day);
-                      if (dayWps.length >= 2) {
-                        const lngs = dayWps.map(w => w.lng);
-                        const lats = dayWps.map(w => w.lat);
-                        setTimeout(() => {
-                          nativeMapRef.current?.flyTo(
-                            (Math.max(...lats) + Math.min(...lats)) / 2,
-                            (Math.max(...lngs) + Math.min(...lngs)) / 2,
-                            9
-                          );
-                        }, 100);
-                      }
-                    }
-                  }}
-                >
-                  <View style={[s.dayBadge, isSelected && { backgroundColor: C.orange }]}>
-                    <Text style={s.dayBadgeText}>{day.day}</Text>
-                  </View>
-                  <Text style={s.dayTitle} numberOfLines={1}>{dayTitle}</Text>
-                  <Text style={s.dayMeta}>{legMiles}mi · {day.road_type}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-
-          {/* Start selected day button */}
-          {selectedDay !== null && (() => {
-            const dayPlan = activeTrip.plan.daily_itinerary.find(d => d.day === selectedDay);
-            const isRestDay = (dayPlan?.est_miles ?? 0) === 0 || dayPlan?.road_type === 'none';
-            return isRestDay ? (
-              <View style={s.restDayNotice}>
-                <Ionicons name="bed-outline" size={14} color={C.text3} />
-                <Text style={s.restDayNoticeText}>REST DAY · NO ROUTE TO START</Text>
-              </View>
-            ) : (
-            <TouchableOpacity
-              style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: C.orange, borderRadius: 10, paddingVertical: 11, marginHorizontal: 12, marginBottom: 6 }}
-              onPress={() => { setSelectedDay(null); startDayNav(selectedDay); }}
-            >
-              <Ionicons name="navigate" size={14} color="#fff" />
-              <Text style={{ color: '#fff', fontSize: 13, fontWeight: '800', fontFamily: mono }}>START DAY {selectedDay}</Text>
-            </TouchableOpacity>
-            );
-          })()}
-          <View style={s.legendRow}>
-            {([[C.orange,'W','Waypoint'],[C.green,'C','Camp'],[C.yellow,'F','Fuel'],['#a855f7','P','Community']] as const)
-              .map(([color, dot, label]) => (
-                <View key={label} style={s.legendItem}>
-                  <Text style={[s.legendDot, { color }]}>{dot}</Text>
-                  <Text style={s.legendText}>{label}</Text>
-                </View>
-              ))}
-            <TouchableOpacity style={s.mapsBtn} onPress={() => router.push('/(tabs)/route-builder')}>
-              <Ionicons name="create-outline" size={11} color={C.text3} />
-              <Text style={s.mapsBtnText}>EDIT</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={s.mapsBtn} onPress={openInMaps}>
-              <Ionicons name="open-outline" size={11} color={C.text3} />
-              <Text style={s.mapsBtnText}>EXPORT</Text>
-            </TouchableOpacity>
-          </View>
-          <View style={s.tripOverviewSection}>
-            <View style={s.weatherSectionHeader}>
-              <Ionicons name="map-outline" size={11} color={C.text3} />
-              <Text style={s.weatherSectionLabel}>ROUTE TIMELINE</Text>
-            </View>
             <View style={s.tripTimeline}>
               {tripOverviewDays.map(({ day, previousCamp, first, last, camp, campWp, gasStops, poiStops, waypoints: dayWps, forecast, legMiles }) => {
                 const pin = camp as CampsitePin | null;
@@ -6728,9 +7716,22 @@ function MapScreen() {
                 const lo = forecastDay?.temperature_2m_min?.[0];
                 const start = previousCamp ?? first;
                 const finish = campWp ?? camp ?? last;
+                const complete = !!pin || !!campWp || day.day === tripOverviewDays.length;
+                const statusColor = complete ? C.green : C.orange;
+                const statusText = complete ? (day.day === tripOverviewDays.length ? 'finish day' : 'overnight set') : 'overnight needed';
                 const stops = [
-                  ...gasStops.map(stop => ({ key: `fuel_${stop.id ?? stop.name}_${day.day}`, type: 'fuel' as const, name: stop.name, sub: stop.address || stop.fuel_types || 'Fuel stop' })),
-                  ...poiStops.map(stop => ({ key: `poi_${stop.id ?? stop.name}_${day.day}`, type: 'poi' as const, name: stop.name || stop.type, sub: stop.type?.replace(/_/g, ' ') || 'Place' })),
+                  ...gasStops.map(stop => ({
+                    key: `fuel_${stop.id ?? stop.name}_${day.day}`,
+                    type: 'fuel' as const,
+                    name: stop.name,
+                    sub: [routeFitLabel(stop), stop.address || stop.fuel_types || 'Fuel stop'].filter(Boolean).join(' · '),
+                  })),
+                  ...poiStops.map(stop => ({
+                    key: `poi_${stop.id ?? stop.name}_${day.day}`,
+                    type: 'poi' as const,
+                    name: stop.name || stop.type,
+                    sub: [routeFitLabel(stop), stop.type?.replace(/_/g, ' ') || 'Place'].filter(Boolean).join(' · '),
+                  })),
                 ];
                 return (
                   <TouchableOpacity
@@ -6744,68 +7745,83 @@ function MapScreen() {
                     }}
                   >
                     <View style={s.tripTimelineHead}>
-                      <View style={s.tripTimelineBadge}>
-                        <Text style={s.tripCampDay}>DAY {day.day}</Text>
+                      <View style={s.tripTimelineRail}>
+                        <View style={[s.tripTimelineDotLarge, { borderColor: statusColor }, complete && { backgroundColor: C.green, borderColor: C.green }]} />
+                        <View style={s.tripTimelineStemLarge} />
                       </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={s.tripTimelineTitle} numberOfLines={1}>{start?.name ?? 'Start'} to {finish?.name ?? day.title}</Text>
-                        <Text style={s.tripTimelineMeta}>{legMiles} mi · {gasStops.length} fuel · {poiStops.length} places · {hi != null || lo != null ? `${hi != null ? Math.round(hi) : '-'}°/${lo != null ? Math.round(lo) : '-'}°` : `${dayWps.length} stops`}</Text>
-                      </View>
-                    </View>
-                    <View style={s.tripTimelineRows}>
-                      <View style={s.tripTimelineStop}>
-                        <View style={[s.tripTimelineIcon, { backgroundColor: C.orange + '18', borderColor: C.orange + '55' }]}>
-                          <Ionicons name="flag-outline" size={13} color={C.orange} />
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={s.tripTimelineStopName} numberOfLines={1}>{start?.name ?? 'Start location'}</Text>
-                          <Text style={s.tripTimelineStopMeta}>{day.day === 1 ? 'Start location' : 'Start from previous camp'}</Text>
-                        </View>
-                      </View>
-                      <View style={s.tripTimelineLeg}>
-                        <View style={s.tripTimelineLine} />
-                        <Text style={s.tripTimelineLegText}>{legMiles} mi drive · add fuel before remote stretches</Text>
-                      </View>
-                      {stops.slice(0, 4).map(stop => (
-                        <View key={stop.key} style={s.tripTimelineStop}>
-                          <View style={[s.tripTimelineIcon, { backgroundColor: stop.type === 'fuel' ? C.yellow + '16' : '#38bdf820', borderColor: stop.type === 'fuel' ? C.yellow + '55' : '#38bdf855' }]}>
-                            <Ionicons name={stop.type === 'fuel' ? 'flash-outline' : 'trail-sign-outline'} size={13} color={stop.type === 'fuel' ? C.yellow : '#38bdf8'} />
-                          </View>
+                      <View style={s.tripTimelineContent}>
+                        <View style={s.tripTimelineDayHeader}>
                           <View style={{ flex: 1 }}>
-                            <Text style={s.tripTimelineStopName} numberOfLines={1}>{stop.name}</Text>
-                            <Text style={s.tripTimelineStopMeta} numberOfLines={1}>{stop.sub}</Text>
+                            <Text style={s.tripTimelineDayTitle}>Day {day.day}</Text>
+                            <Text style={s.tripTimelineMeta}>{legMiles} mi · {gasStops.length} fuel · {poiStops.length} places · {hi != null || lo != null ? `${hi != null ? Math.round(hi) : '-'}°/${lo != null ? Math.round(lo) : '-'}°` : `${dayWps.length} stops`}</Text>
+                          </View>
+                          <View style={[s.tripTimelineStatusPill, { borderColor: statusColor + '66', backgroundColor: statusColor + '12' }]}>
+                            <Text style={[s.tripTimelineStatusText, { color: statusColor }]} numberOfLines={1}>{statusText}</Text>
                           </View>
                         </View>
-                      ))}
-                      <View style={s.tripTimelineCamp}>
-                        {pin?.photo_url ? (
-                          <Image source={{ uri: pin.photo_url }} style={s.tripTimelineCampPhoto} resizeMode="cover" />
-                        ) : (
-                          <View style={s.tripTimelineCampPlaceholder}>
-                            <Ionicons name="bonfire-outline" size={18} color={C.green} />
+                        <Text style={s.tripTimelineRouteName} numberOfLines={2}>{start?.name ?? 'Start'} to {finish?.name ?? day.title}</Text>
+                        <View style={s.tripTimelineRows}>
+                          <View style={s.tripTimelineStop}>
+                            <View style={[s.tripTimelineIcon, { backgroundColor: C.orange + '18', borderColor: C.orange + '55' }]}>
+                              <Ionicons name="flag-outline" size={13} color={C.orange} />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={s.tripTimelineStopName} numberOfLines={1}>{start?.name ?? 'Start location'}</Text>
+                              <Text style={s.tripTimelineStopMeta}>{day.day === 1 ? 'Start location' : 'Start from previous camp'}</Text>
+                            </View>
                           </View>
-                        )}
-                        <View style={{ flex: 1 }}>
-                          <Text style={s.tripTimelineCampLabel}>{day.day === tripOverviewDays.length ? 'FINISH / OVERNIGHT' : 'OVERNIGHT CAMP'}</Text>
-                          <Text style={s.tripTimelineCampName} numberOfLines={2}>{pin?.name ?? campWp?.name ?? finish?.name ?? 'Choose camp'}</Text>
+                          <View style={s.tripTimelineLeg}>
+                            <View style={s.tripTimelineLine} />
+                            <Text style={s.tripTimelineLegText}>{legMiles} mi drive</Text>
+                          </View>
+                          {stops.slice(0, 4).map(stop => (
+                            <View key={stop.key} style={s.tripTimelineStop}>
+                              <View style={[s.tripTimelineIcon, { backgroundColor: stop.type === 'fuel' ? C.yellow + '16' : '#38bdf820', borderColor: stop.type === 'fuel' ? C.yellow + '55' : '#38bdf855' }]}>
+                                <Ionicons name={stop.type === 'fuel' ? 'flash-outline' : 'trail-sign-outline'} size={13} color={stop.type === 'fuel' ? C.yellow : '#38bdf8'} />
+                              </View>
+                              <View style={{ flex: 1 }}>
+                                <Text style={s.tripTimelineStopName} numberOfLines={1}>{stop.name}</Text>
+                                <Text style={s.tripTimelineStopMeta} numberOfLines={1}>{stop.sub}</Text>
+                              </View>
+                            </View>
+                          ))}
+                          <View style={s.tripTimelineCamp}>
+                            {pin?.photo_url ? (
+                              <Image source={{ uri: pin.photo_url }} style={s.tripTimelineCampPhoto} resizeMode="cover" />
+                            ) : (
+                              <View style={s.tripTimelineCampPlaceholder}>
+                                <Ionicons name="bonfire-outline" size={30} color={C.green} />
+                              </View>
+                            )}
+                            <View style={s.tripTimelineCampBody}>
+                              <Text style={s.tripTimelineCampLabel}>{day.day === tripOverviewDays.length ? 'FINISH / OVERNIGHT' : 'OVERNIGHT CAMP'}</Text>
+                              <Text style={s.tripTimelineCampName} numberOfLines={2}>{pin?.name ?? campWp?.name ?? finish?.name ?? 'Choose camp near day finish'}</Text>
+                              <Text style={s.tripTimelineCampMeta} numberOfLines={2}>
+                                {pin ? [routeFitLabel(pin), pin.land_type || 'Camp', pin.cost || ''].filter(Boolean).join(' · ') : 'Choose a verified overnight before starting this day'}
+                              </Text>
+                            </View>
+                          </View>
+                          <View style={s.tripDayButtons}>
+                            <TouchableOpacity style={s.tripDaySmallBtn} onPress={() => startDayNav(day.day)}>
+                              <Ionicons name="navigate-outline" size={13} color={C.orange} />
+                              <Text style={s.tripDaySmallText}>START</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={s.tripDaySmallBtn} onPress={() => openCampPicker(day.day)}>
+                              <Ionicons name="bonfire-outline" size={13} color={C.orange} />
+                              <Text style={s.tripDaySmallText}>{pin || campWp ? 'SWAP' : 'CAMP'}</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={s.tripDaySmallBtn} onPress={() => { setSelectedDay(day.day); setShowSearch(true); }}>
+                              <Ionicons name="trail-sign-outline" size={13} color={C.orange} />
+                              <Text style={s.tripDaySmallText}>PLACES</Text>
+                            </TouchableOpacity>
+                          </View>
                         </View>
-                      </View>
-                      <View style={s.tripDayButtons}>
-                        <TouchableOpacity style={s.tripDaySmallBtn} onPress={() => startDayNav(day.day)}>
-                          <Ionicons name="navigate-outline" size={11} color={C.orange} />
-                          <Text style={s.tripDaySmallText}>START</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={s.tripDaySmallBtn} onPress={() => openCampPicker(day.day)}>
-                          <Ionicons name="bonfire-outline" size={11} color={C.orange} />
-                          <Text style={s.tripDaySmallText}>{pin || campWp ? 'SWAP' : 'CAMP'}</Text>
-                        </TouchableOpacity>
                       </View>
                     </View>
                   </TouchableOpacity>
                 );
               })}
             </View>
-          </View>
           {/* ── WEATHER section ── */}
           <View style={s.weatherSection}>
             <View style={s.weatherSectionHeader}>
@@ -6841,7 +7857,10 @@ function MapScreen() {
                     return (
                       <View key={wp.day} style={s.weatherDayCard}>
                         <Text style={s.weatherDayNum}>DAY {wp.day}</Text>
-                        <Text style={s.weatherDayIcon}>{weatherIcon(code)}{precip > 2 ? ' 🌧️' : ''}</Text>
+                        <View style={s.weatherDayIconRow}>
+                          <Ionicons name={weatherIonIcon(code)} size={18} color={C.orange} />
+                          {precip > 2 && <Ionicons name="rainy-outline" size={13} color="#38bdf8" />}
+                        </View>
                         <Text style={s.weatherTemps}>
                           {hi !== undefined ? `${Math.round(hi)}°` : '—'}
                           <Text style={s.weatherTempLo}> / {lo !== undefined ? `${Math.round(lo)}°` : '—'}</Text>
@@ -6860,6 +7879,16 @@ function MapScreen() {
           </View>
 
           <View style={s.aiActionsRow}>
+            <TouchableOpacity
+              style={[s.aiActionBtn, s.aiActionPrimary]}
+              onPress={() => {
+                const days = [...new Set(waypoints.map(w => w.day))].sort((a, b) => a - b);
+                if (days.length <= 1) { startDayNav('all'); } else { setShowDayModal(true); }
+              }}
+            >
+              <Ionicons name="navigate" size={13} color="#fff" />
+              <Text style={[s.aiActionText, { color: '#fff' }]}>START TRIP</Text>
+            </TouchableOpacity>
             <TouchableOpacity style={s.aiActionBtn} onPress={() => openCampPicker(selectedDay ?? undefined)} disabled={campPickerLoading}>
               {campPickerLoading
                 ? <ActivityIndicator size="small" color={C.orange} />
@@ -6968,9 +7997,12 @@ function MapScreen() {
                       <View style={{ flex: 1, minWidth: 0 }}>
                         <Text style={s.campPickName} numberOfLines={2}>{camp.name}</Text>
                         <Text style={s.campPickMeta} numberOfLines={1}>
-                          {(camp.land_type || 'camp').toUpperCase()}
-                          {camp.route_distance_mi != null ? ` · ${camp.route_distance_mi.toFixed(1)} mi` : ''}
-                          {camp.cost ? ` · ${camp.cost}` : ''}
+                          {[
+                            (camp.land_type || 'camp').toUpperCase(),
+                            camp.route_distance_mi != null ? `${camp.route_distance_mi.toFixed(1)} mi off route` : '',
+                            routeProgressLabel(camp.route_progress),
+                            camp.cost || '',
+                          ].filter(Boolean).join(' · ')}
                         </Text>
                         {(camp.tags ?? []).length > 0 && (
                           <Text style={s.campPickTags} numberOfLines={1}>
@@ -6988,6 +8020,55 @@ function MapScreen() {
             )}
           </View>
         </TouchableOpacity>
+      </Modal>
+
+      {/* Trail discovery list */}
+      <Modal visible={false} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowTrailList(false)}>
+        <View style={s.layerSheet}>
+          <View style={s.layerSheetHeader}>
+            <View>
+              <Text style={s.layerSheetTitle}>TRAIL DISCOVERY</Text>
+              <Text style={s.trailListSub}>{trailDiscoveries.length ? `${trailDiscoveries.length} places near the current map and trip` : 'No trail places loaded yet'}</Text>
+            </View>
+            <TouchableOpacity onPress={() => setShowTrailList(false)}>
+              <Ionicons name="close" size={22} color={C.text2} />
+            </TouchableOpacity>
+          </View>
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.trailListContent}>
+            {trailDiscoveries.length === 0 ? (
+              <View style={s.trailEmptyState}>
+                <Ionicons name="trail-sign-outline" size={26} color="#16a34a" />
+                <Text style={s.trailEmptyTitle}>Move the map or enable trail POIs</Text>
+                <Text style={s.trailEmptyText}>Trailhead builds this list from offline place packs, OSM trailheads, viewpoints, peaks, hot springs, camps, fuel, water, and community reports.</Text>
+              </View>
+            ) : trailDiscoveries.map(trail => (
+              <TouchableOpacity
+                key={trail.id}
+                style={s.trailListCard}
+                activeOpacity={0.86}
+                onPress={() => {
+                  setShowTrailList(false);
+                  openTrailFeature(trail);
+                  nativeMapRef.current?.flyTo(trail.lat, trail.lng, 12);
+                }}
+              >
+                <View style={[s.trailIconBadge, { backgroundColor: trailColor(trail.type) + '22', borderColor: trailColor(trail.type) + '66' }]}>
+                  <Ionicons name={trailIcon(trail.type) as any} size={18} color={trailColor(trail.type)} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.trailCardName} numberOfLines={1}>{trail.name}</Text>
+                  <Text style={s.trailCardMeta} numberOfLines={1}>{trail.subtitle}</Text>
+                  <View style={s.trailSupportRow}>
+                    <Text style={s.trailSupportPill}>{trail.support.campsNearby} camps</Text>
+                    <Text style={s.trailSupportPill}>{trail.support.fuelNearby} fuel</Text>
+                    <Text style={s.trailSupportPill}>{trail.support.waterNearby} water</Text>
+                  </View>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={OVR.text3} />
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
       </Modal>
 
       {/* ── Trail tap sheet ── */}
@@ -7008,7 +8089,8 @@ function MapScreen() {
                   style={s.wpSheetNavBtn}
                   onPress={() => {
                     setTappedTrail(null);
-                    navigateToCamp({ lat: tappedTrail.lat, lng: tappedTrail.lng, name: tappedTrail.name });
+                    const trail = tappedTrail;
+                    setTimeout(() => navigateToCamp({ lat: trail.lat, lng: trail.lng, name: trail.name }), 220);
                   }}
                 >
                   <Ionicons name="navigate" size={14} color="#fff" />
@@ -7035,11 +8117,13 @@ function MapScreen() {
                     const trail = tappedTrail;
                     setTappedTrail(null);
                     const bounds = { n: trail.lat + 0.35, s: trail.lat - 0.35, e: trail.lng + 0.35, w: trail.lng - 0.35, zoom: 11 };
-                    viewportRef.current = bounds;
-                    setShowFilterSheet(true);
-                    loadCampsInArea(bounds, activeFilters);
                     setQuickToast('Searching camps near trailhead');
                     setTimeout(() => setQuickToast(''), 2500);
+                    setTimeout(() => {
+                      viewportRef.current = bounds;
+                      setShowLayerSheet(false);
+                      setTimeout(() => loadCampsInArea(bounds, activeFilters), 120);
+                    }, 220);
                   }}
                 >
                   <Ionicons name="bonfire-outline" size={14} color={C.orange} />
@@ -7074,9 +8158,9 @@ function MapScreen() {
                     'Campground'
                   )}</Text>
                   <Text style={s.wpSheetMeta}>
-                    {tappedTileSpot.kind === 'camp_pitch' ? '🟤 Dispersed / Primitive Spot' :
-                     tappedTileSpot.kind === 'shelter'    ? '🟣 Trail Shelter' :
-                     '🟢 Developed Campground'}
+                    {tappedTileSpot.kind === 'camp_pitch' ? 'Dispersed / Primitive Spot' :
+                     tappedTileSpot.kind === 'shelter'    ? 'Trail Shelter' :
+                     'Developed Campground'}
                   </Text>
                 </View>
               </View>
@@ -7121,7 +8205,7 @@ function MapScreen() {
                 <View style={[s.wpSheetTypeDot, { backgroundColor: '#eab308' }]} />
                 <View style={{ flex: 1 }}>
                   <Text style={s.wpSheetName} numberOfLines={2}>{tappedGas.name}</Text>
-                  <Text style={s.wpSheetMeta}>⛽ Gas Station</Text>
+                  <Text style={s.wpSheetMeta}>Gas Station</Text>
                 </View>
               </View>
               <View style={s.wpSheetActions}>
@@ -7177,11 +8261,13 @@ function MapScreen() {
                       const poi = tappedPoi;
                       setTappedPoi(null);
                       const bounds = { n: poi.lat + 0.35, s: poi.lat - 0.35, e: poi.lng + 0.35, w: poi.lng - 0.35, zoom: 11 };
-                      viewportRef.current = bounds;
-                      setShowFilterSheet(true);
-                      loadCampsInArea(bounds, activeFilters);
                       setQuickToast('Searching camps near trailhead');
                       setTimeout(() => setQuickToast(''), 2500);
+                      setTimeout(() => {
+                        viewportRef.current = bounds;
+                        setShowLayerSheet(false);
+                        setTimeout(() => loadCampsInArea(bounds, activeFilters), 120);
+                      }, 220);
                     }}
                   >
                     <Ionicons name="bonfire-outline" size={14} color={C.orange} />
@@ -7432,13 +8518,13 @@ export default function MapScreenWithBoundary() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const DARK_OVR = {
-  bg:      'rgba(6,10,8,0.95)',
-  bg2:     'rgba(8,14,10,0.98)',
-  border:  '#1e2e20',
-  border2: '#0d1a0e',
-  text:    '#e4ddd2',
-  text2:   '#8a9285',
-  text3:   '#4a5a4c',
+  bg:      'rgba(5,5,5,0.72)',
+  bg2:     'rgba(5,5,5,0.82)',
+  border:  'rgba(255,255,255,0.09)',
+  border2: 'rgba(255,255,255,0.055)',
+  text:    '#F5F5F7',
+  text2:   '#C7C9CC',
+  text3:   '#8A8A92',
 };
 
 const LIGHT_OVR = {
@@ -7452,7 +8538,7 @@ const LIGHT_OVR = {
 };
 
 function overlayPalette(C: ColorPalette) {
-  return C.bg === '#060d07' ? DARK_OVR : LIGHT_OVR;
+  return DARK_OVR;
 }
 
 const makeStyles = (C: ColorPalette) => {
@@ -7473,6 +8559,7 @@ const makeStyles = (C: ColorPalette) => {
   alertPill: {
     backgroundColor: C.red + '22', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3,
     borderWidth: 1, borderColor: C.red,
+    flexDirection: 'row', alignItems: 'center', gap: 4,
   },
   alertPillText: { color: C.red, fontSize: 10, fontFamily: mono, fontWeight: '700' },
   exitTripBtn: {
@@ -7491,10 +8578,182 @@ const makeStyles = (C: ColorPalette) => {
   },
   controlsInner: { gap: 8, paddingBottom: 8, alignItems: 'flex-end' },
   ctrlBtn: {
-    width: 44, height: 44, borderRadius: 14,
-    backgroundColor: OVR.bg, borderWidth: 1, borderColor: OVR.border,
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: 'rgba(5,5,5,0.52)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)',
     alignItems: 'center', justifyContent: 'center',
+    shadowColor: '#E5E7EB',
+    shadowOpacity: 0.12,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 12,
   },
+  ctrlBtnActive: {
+    backgroundColor: 'rgba(245,245,247,0.14)',
+    borderColor: 'rgba(245,245,247,0.26)',
+    shadowOpacity: 0.24,
+  },
+  discoveryModeWrap: {
+    position: 'absolute',
+    left: 14,
+    right: 70,
+    top: 112,
+    pointerEvents: 'box-none',
+  },
+  discoveryModeCard: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(5,5,5,0.56)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 22,
+    padding: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.42,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 10,
+  },
+  discoverySwitch: {
+    width: 256,
+    height: 38,
+    borderRadius: 15,
+    backgroundColor: 'rgba(255,255,255,0.045)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  discoverySwitchThumb: {
+    position: 'absolute',
+    left: 3,
+    top: 3,
+    width: 124,
+    height: 30,
+    borderRadius: 12,
+  },
+  discoverySwitchText: {
+    width: 128,
+    textAlign: 'center',
+    color: OVR.text3,
+    fontSize: 10,
+    fontFamily: mono,
+    fontWeight: '900',
+    letterSpacing: 0.7,
+    zIndex: 2,
+  },
+  discoverySwitchTextActive: { color: '#F5F5F7' },
+  discoverySearchBtn: {
+    height: 38,
+    borderRadius: 15,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  discoverySearchBtnCamps: { backgroundColor: C.green + '22', borderWidth: 1, borderColor: C.green + '44' },
+  discoverySearchBtnTrails: { backgroundColor: C.orange + '22', borderWidth: 1, borderColor: C.orange + '44' },
+  discoverySearchText: { color: '#F5F5F7', fontSize: 10, fontFamily: mono, fontWeight: '800', letterSpacing: 0.5 },
+  discoveryPanel: {
+    position: 'absolute',
+    left: 14,
+    right: 14,
+    bottom: 118,
+    maxHeight: 330,
+    backgroundColor: 'rgba(8,8,10,0.72)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.09)',
+    borderRadius: 24,
+    padding: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.46,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 16 },
+    elevation: 14,
+  },
+  trailOverlayCard: {
+    position: 'absolute',
+    left: 14,
+    right: 14,
+    bottom: 118,
+    backgroundColor: 'rgba(8,8,10,0.72)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.09)',
+    borderRadius: 22,
+    padding: 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.46,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 16 },
+    elevation: 14,
+  },
+  trailCollapsedWrap: {
+    position: 'absolute',
+    left: 14,
+    right: 14,
+    bottom: 108,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    zIndex: 16,
+  },
+  trailCollapsedTab: {
+    flex: 1,
+    minHeight: 42,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(8,8,10,0.78)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 999,
+    paddingHorizontal: 13,
+    shadowColor: '#000',
+    shadowOpacity: 0.38,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 12,
+  },
+  trailCollapsedText: { color: '#F5F5F7', fontSize: 12, fontWeight: '800', flex: 1 },
+  trailMapCloseBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(5,5,5,0.62)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  discoveryPanelHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  discoveryPanelTitle: { color: OVR.text, fontSize: 13, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
+  discoveryPanelSub: { color: OVR.text3, fontSize: 10, lineHeight: 14, marginTop: 2, maxWidth: 285 },
+  discoveryPanelClose: { marginLeft: 'auto', width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: OVR.border2 },
+  discoveryCats: { gap: 7, paddingTop: 10, paddingBottom: 8 },
+  discoveryCatPill: {
+    color: OVR.text2,
+    fontSize: 9,
+    fontFamily: mono,
+    fontWeight: '900',
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 10,
+    backgroundColor: OVR.border2,
+    overflow: 'hidden',
+  },
+  discoveryList: { maxHeight: 210 },
+  discoveryTrailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 9,
+    borderTopWidth: 1,
+    borderColor: OVR.border2,
+  },
+  discoveryEmpty: { alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 24, paddingHorizontal: 18 },
+  discoveryEmptyText: { color: OVR.text3, fontSize: 11, lineHeight: 16, textAlign: 'center' },
   layerText: { color: OVR.text2, fontSize: 9, fontFamily: mono, fontWeight: '800', letterSpacing: 0.5 },
   compassPill: {
     position: 'absolute', top: 106, left: 16,
@@ -7527,25 +8786,101 @@ const makeStyles = (C: ColorPalette) => {
   // ── Nav HUD
   navHud: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: OVR.bg2,
-    borderTopWidth: 1, borderColor: OVR.border,
+    backgroundColor: 'rgba(8,8,10,0.92)',
+    borderTopWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    overflow: 'hidden',
     zIndex: 10000,
     elevation: 100,
+    shadowColor: '#000',
+    shadowOpacity: 0.46,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: -14 },
+  },
+  navLocateBtn: {
+    position: 'absolute',
+    right: 16,
+    top: 142,
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(15,23,42,0.94)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.16)',
+    zIndex: 10001,
+    elevation: 101,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+  },
+  navLocateBtnFollowing: {
+    backgroundColor: '#f97316',
+    borderColor: '#fed7aa',
+  },
+  navTurnsSheet: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    bottom: 274,
+    maxHeight: 320,
+    backgroundColor: 'rgba(8,8,10,0.94)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    borderRadius: 18,
+    overflow: 'hidden',
+    zIndex: 10002,
+    elevation: 102,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.32,
+    shadowRadius: 18,
+  },
+  navTurnsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.08)',
+  },
+  navTurnsTitle: { color: OVR.text, fontSize: 12, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
+  navTurnsSub: { color: OVR.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
+  navTurnsClose: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: OVR.border2,
+    borderWidth: 1,
+    borderColor: OVR.border,
   },
 
   turnStripWrap: { overflow: 'hidden' },
   turnStrip: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingHorizontal: 12, paddingVertical: 12,
-    backgroundColor: '#0d1b2e',
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingHorizontal: 16, paddingVertical: 14,
+    backgroundColor: 'rgba(5,5,5,0.28)',
+    borderBottomWidth: 1,
+    borderColor: 'rgba(255,255,255,0.07)',
   },
   turnIconWrap: {
     width: 64, height: 64, alignItems: 'center', justifyContent: 'center',
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.055)',
   },
   turnInfo: { flex: 1, justifyContent: 'center' },
-  turnDist: { color: '#fff', fontSize: 26, fontWeight: '900', fontFamily: mono, letterSpacing: 0, lineHeight: 30 },
-  turnLabel: { color: '#f5a623', fontSize: 12, fontWeight: '700', fontFamily: mono, marginTop: 2, letterSpacing: 0.3 },
-  turnRoad: { color: 'rgba(255,255,255,0.6)', fontSize: 12, marginTop: 1, fontFamily: mono },
+  turnDist: { color: OVR.text, fontSize: 28, fontWeight: '900', letterSpacing: 0, lineHeight: 33 },
+  turnLabel: { color: OVR.text2, fontSize: 13, fontWeight: '800', marginTop: 2, letterSpacing: 0 },
+  turnRoad: { color: OVR.text3, fontSize: 12, marginTop: 1 },
   stepProgressBg: {
     height: 4, backgroundColor: 'rgba(249,115,22,0.15)',
     borderTopWidth: 1, borderColor: 'rgba(249,115,22,0.1)',
@@ -7556,7 +8891,7 @@ const makeStyles = (C: ColorPalette) => {
   },
   laneRow: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: '#111a11', paddingHorizontal: 14, paddingVertical: 6,
+    backgroundColor: 'rgba(255,255,255,0.035)', paddingHorizontal: 14, paddingVertical: 6,
     borderTopWidth: 1, borderColor: 'rgba(249,115,22,0.15)',
   },
   laneLabel: { color: OVR.text3, fontSize: 9, fontFamily: mono, marginRight: 4, letterSpacing: 1 },
@@ -7570,12 +8905,12 @@ const makeStyles = (C: ColorPalette) => {
     paddingHorizontal: 12, paddingVertical: 5,
     backgroundColor: 'rgba(0,0,0,0.25)', borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.07)',
   },
-  thenText: { color: 'rgba(255,255,255,0.5)', fontSize: 11, fontFamily: mono, flex: 1, letterSpacing: 0.3 },
+  thenText: { color: OVR.text3, fontSize: 11, flex: 1, letterSpacing: 0 },
 
   offRouteWarnBar: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
     paddingHorizontal: 14, paddingVertical: 8,
-    backgroundColor: '#451a03', borderBottomWidth: 1, borderColor: '#92400e',
+    backgroundColor: C.orange + '18', borderBottomWidth: 1, borderColor: C.orange + '44',
   },
   offRouteWarnText: { color: '#fbbf24', fontSize: 11, fontFamily: mono, fontWeight: '800', flex: 1, letterSpacing: 0.5 },
   offRouteWarnBtn: {
@@ -7587,13 +8922,13 @@ const makeStyles = (C: ColorPalette) => {
   navStrip: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: 1, borderColor: OVR.border,
+    borderBottomWidth: 1, borderColor: 'rgba(255,255,255,0.07)',
   },
   navBearing: { alignItems: 'center', justifyContent: 'center', width: 46 },
   navBearingText: { color: C.orange, fontSize: 18, fontWeight: '900', fontFamily: mono },
   navDistBlock: { flex: 1, alignItems: 'center' },
-  navDistVal: { color: OVR.text, fontSize: 28, fontWeight: '800', fontFamily: mono },
-  navEta: { color: C.orange, fontSize: 11, fontFamily: mono, fontWeight: '700', marginTop: 2, letterSpacing: 0.3 },
+  navDistVal: { color: OVR.text, fontSize: 27, fontWeight: '900', letterSpacing: 0 },
+  navEta: { color: OVR.text3, fontSize: 10, fontFamily: mono, fontWeight: '800', marginTop: 2, letterSpacing: 0.4 },
   navRemaining: { color: OVR.text3, fontSize: 9, fontFamily: mono, marginTop: 2, opacity: 0.7 },
   navSpeedBlock: { alignItems: 'center', width: 50 },
   navSpeedVal: { color: OVR.text2, fontSize: 22, fontWeight: '700', fontFamily: mono },
@@ -7601,20 +8936,20 @@ const makeStyles = (C: ColorPalette) => {
   navTarget: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     paddingHorizontal: 16, paddingVertical: 10,
-    borderBottomWidth: 1, borderColor: OVR.border,
+    borderBottomWidth: 1, borderColor: 'rgba(255,255,255,0.07)',
   },
   navTargetBadge: {
-    backgroundColor: C.orangeGlow, borderRadius: 6, borderWidth: 1, borderColor: C.orange,
-    paddingHorizontal: 6, paddingVertical: 3,
+    backgroundColor: C.orange + '12', borderRadius: 999, borderWidth: 1, borderColor: C.orange + '44',
+    paddingHorizontal: 8, paddingVertical: 4,
   },
-  navTargetBadgeText: { color: C.orange, fontSize: 8, fontFamily: mono, fontWeight: '700' },
+  navTargetBadgeText: { color: C.orange, fontSize: 8, fontFamily: mono, fontWeight: '900' },
   navTargetInfo: { flex: 1 },
-  navTargetName: { color: OVR.text, fontSize: 14, fontWeight: '700', fontFamily: mono },
+  navTargetName: { color: OVR.text, fontSize: 15, fontWeight: '800' },
   navTargetMeta: { color: OVR.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
 
   navActions: {
     flexDirection: 'row', gap: 8,
-    paddingHorizontal: 14, paddingVertical: 10, paddingBottom: 26,
+    paddingHorizontal: 14, paddingVertical: 10, paddingBottom: 24,
   },
   navEndBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
@@ -7627,7 +8962,7 @@ const makeStyles = (C: ColorPalette) => {
     paddingHorizontal: 12, paddingVertical: 10, borderRadius: 11,
     borderWidth: 1, borderColor: OVR.border, backgroundColor: OVR.border2,
   },
-  navStepsBtnText: { color: OVR.text2, fontSize: 11, fontFamily: mono },
+  navStepsBtnText: { color: OVR.text2, fontSize: 10, fontFamily: mono, fontWeight: '800', letterSpacing: 0.4 },
   navRerouteBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
     paddingHorizontal: 12, paddingVertical: 10, borderRadius: 11,
@@ -7636,11 +8971,11 @@ const makeStyles = (C: ColorPalette) => {
   navReportBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
     paddingHorizontal: 12, paddingVertical: 10, borderRadius: 11,
-    borderWidth: 1.5, borderColor: '#f59e0b55', backgroundColor: '#f59e0b14',
+    borderWidth: 1, borderColor: C.orange + '55', backgroundColor: C.orange + '14',
     marginLeft: 'auto' as any,
   },
-  navReportBtnActive: { backgroundColor: '#f59e0b', borderColor: '#f59e0b' },
-  navReportBtnText: { color: '#f59e0b', fontSize: 11, fontFamily: mono, fontWeight: '800' },
+  navReportBtnActive: { backgroundColor: C.orange, borderColor: C.orange },
+  navReportBtnText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 0.4 },
   dlBar: {
     position: 'absolute', top: 92, left: 16, right: 16,
     height: 3, borderRadius: 1.5, backgroundColor: C.border, overflow: 'hidden',
@@ -7669,20 +9004,73 @@ const makeStyles = (C: ColorPalette) => {
 
   // ── Search This Area (native)
   searchAreaWrap: {
-    position: 'absolute', bottom: 120, left: 0, right: 0,
+    position: 'absolute', bottom: 102, left: 0, right: 0,
     alignItems: 'center', pointerEvents: 'box-none',
   },
   searchAreaBtn: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: OVR.bg2, borderWidth: 1.5, borderColor: C.orange,
-    paddingHorizontal: 18, paddingVertical: 10, borderRadius: 24,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.55, shadowRadius: 10, elevation: 8,
+    backgroundColor: 'rgba(5,5,5,0.58)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
+    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 22,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.55, shadowRadius: 24, elevation: 12,
   },
   searchAreaBtnLoading: { borderColor: OVR.border, opacity: 0.8 },
   searchAreaText: { color: C.orange, fontSize: 11, fontFamily: mono, fontWeight: '700', letterSpacing: 0.8 },
+  discoverySearchAreaBtn: {
+    paddingHorizontal: 6,
+    paddingVertical: 6,
+    gap: 8,
+    shadowOpacity: 0.32,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  searchAreaBtnCamps: { borderColor: C.green + '55', backgroundColor: C.green + '14' },
+  searchAreaBtnTrails: { borderColor: C.orange + '55', backgroundColor: C.orange + '14' },
+  searchAreaModeToggle: {
+    width: 118,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+    borderColor: 'transparent',
+    flexDirection: 'row',
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  searchAreaModeThumb: {
+    position: 'absolute',
+    left: 3,
+    top: 3,
+    width: 54,
+    height: 26,
+    borderRadius: 13,
+  },
+  searchAreaModeText: {
+    width: 58,
+    textAlign: 'center',
+    color: OVR.text3,
+    fontSize: 9,
+    fontFamily: mono,
+    fontWeight: '900',
+    letterSpacing: 0.4,
+    zIndex: 2,
+  },
+  searchAreaModeTextActive: { color: '#fff' },
+  searchAreaAction: {
+    minWidth: 174,
+    height: 34,
+    borderRadius: 17,
+    paddingHorizontal: 12,
+    backgroundColor: 'transparent',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  searchAreaTextCamps: { color: C.green },
+  searchAreaTextTrails: { color: C.orange },
 
   stepsList: { maxHeight: 200, borderTopWidth: 1, borderColor: OVR.border },
+  stepsListDetached: { maxHeight: 248 },
   stepRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 9, borderBottomWidth: 1, borderColor: OVR.border2 },
   stepRowFirst: { backgroundColor: OVR.border2 },
   stepRowActive: { backgroundColor: '#f97316' + '22', borderLeftWidth: 3, borderLeftColor: '#f97316' },
@@ -7735,7 +9123,7 @@ const makeStyles = (C: ColorPalette) => {
   panel: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
     backgroundColor: C.bg, borderTopWidth: 1, borderColor: C.border,
-    paddingBottom: 8, maxHeight: '62%',
+    paddingBottom: 8, height: '88%',
     borderTopLeftRadius: 18, borderTopRightRadius: 18,
     shadowColor: '#000', shadowOffset: { width: 0, height: -3 },
     shadowOpacity: 0.12, shadowRadius: 8, elevation: 8, zIndex: 100,
@@ -7759,11 +9147,13 @@ const makeStyles = (C: ColorPalette) => {
   tripPanelSub: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 3 },
   tripPanelEdit: { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderColor: C.orange + '55', backgroundColor: C.orange + '10', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7 },
   tripPanelEditText: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900' },
+  tripPanelSave: { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderColor: C.green + '55', backgroundColor: C.green + '10', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7 },
+  tripPanelSaveText: { color: C.green, fontSize: 9, fontFamily: mono, fontWeight: '900' },
   tripPrimaryActions: { flexDirection: 'row', gap: 8, paddingHorizontal: 14, paddingBottom: 10 },
   tripStartBtn: { flex: 1, minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: C.green, borderRadius: 12 },
   tripStartText: { color: '#fff', fontSize: 12, fontFamily: mono, fontWeight: '900', letterSpacing: 0.7 },
   tripSecondaryBtn: { width: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 12, borderWidth: 1, borderColor: C.border, backgroundColor: C.s2 },
-  tripPanelScroll: { paddingBottom: 10 },
+  tripPanelScroll: { paddingHorizontal: 14, paddingBottom: 10 },
   dayScroll: { paddingHorizontal: 14, paddingVertical: 8, gap: 10 },
   dayCard: {
     backgroundColor: C.s2, borderRadius: 12, borderWidth: 1, borderColor: C.border,
@@ -7794,13 +9184,23 @@ const makeStyles = (C: ColorPalette) => {
   mapsBtnText: { color: C.text3, fontSize: 9, fontFamily: mono },
   tripOverviewSection: { paddingHorizontal: 14, paddingTop: 4, paddingBottom: 10 },
   tripOverviewScroll: { gap: 9, paddingRight: 4 },
-  tripTimeline: { gap: 10 },
+  tripTimeline: { gap: 18 },
   tripTimelineDay: {
-    borderWidth: 1, borderColor: C.border, borderRadius: 14, backgroundColor: C.s2,
-    padding: 10, gap: 10,
+    minHeight: 520, flexDirection: 'row', gap: 12,
+    borderWidth: 1, borderColor: C.border, borderRadius: 18, backgroundColor: C.s1,
+    padding: 14,
   },
   tripTimelineDayActive: { borderColor: C.orange, backgroundColor: C.orange + '10' },
-  tripTimelineHead: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  tripTimelineHead: { flexDirection: 'row', alignItems: 'stretch', gap: 12, flex: 1 },
+  tripTimelineRail: { width: 28, alignItems: 'center' },
+  tripTimelineDotLarge: { width: 18, height: 18, borderRadius: 9, borderWidth: 3, borderColor: C.orange, backgroundColor: C.s1, marginTop: 10 },
+  tripTimelineStemLarge: { flex: 1, width: 3, backgroundColor: C.border, marginTop: 8, borderRadius: 2 },
+  tripTimelineContent: { flex: 1, gap: 14 },
+  tripTimelineDayHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  tripTimelineDayTitle: { color: C.text, fontSize: 25, fontWeight: '900', lineHeight: 30 },
+  tripTimelineStatusPill: { maxWidth: 124, minHeight: 30, borderWidth: 1, borderRadius: 999, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 9 },
+  tripTimelineStatusText: { fontSize: 8, fontFamily: mono, fontWeight: '900' },
+  tripTimelineRouteName: { color: C.text, fontSize: 15, lineHeight: 20, fontWeight: '800' },
   tripTimelineBadge: { borderWidth: 1, borderColor: C.green + '55', backgroundColor: C.green + '14', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
   tripTimelineTitle: { color: C.text, fontSize: 13, fontWeight: '900' },
   tripTimelineMeta: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
@@ -7812,11 +9212,13 @@ const makeStyles = (C: ColorPalette) => {
   tripTimelineLeg: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 13 },
   tripTimelineLine: { width: 2, height: 22, borderRadius: 2, backgroundColor: C.orange + '66' },
   tripTimelineLegText: { color: C.text3, fontSize: 10, fontFamily: mono },
-  tripTimelineCamp: { flexDirection: 'row', alignItems: 'center', gap: 9, borderWidth: 1, borderColor: C.green + '44', borderRadius: 12, backgroundColor: C.green + '10', padding: 8 },
-  tripTimelineCampPhoto: { width: 58, height: 50, borderRadius: 9, backgroundColor: C.s3 },
-  tripTimelineCampPlaceholder: { width: 58, height: 50, borderRadius: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: C.green + '14' },
-  tripTimelineCampLabel: { color: C.green, fontSize: 8, fontFamily: mono, fontWeight: '900' },
-  tripTimelineCampName: { color: C.text, fontSize: 12, lineHeight: 16, fontWeight: '900', marginTop: 2 },
+  tripTimelineCamp: { gap: 12, borderWidth: 1, borderColor: C.green + '55', borderRadius: 18, backgroundColor: C.green + '0f', padding: 12 },
+  tripTimelineCampPhoto: { width: '100%', height: 170, borderRadius: 16, backgroundColor: C.s3 },
+  tripTimelineCampPlaceholder: { width: '100%', height: 170, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: C.green + '14' },
+  tripTimelineCampBody: { minHeight: 92, justifyContent: 'center' },
+  tripTimelineCampLabel: { color: C.green, fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
+  tripTimelineCampName: { color: C.text, fontSize: 22, lineHeight: 27, fontWeight: '900', marginTop: 4 },
+  tripTimelineCampMeta: { color: C.text3, fontSize: 13, lineHeight: 18, marginTop: 6 },
   tripDayOverviewCard: {
     width: 228, minHeight: 238, borderRadius: 14, borderWidth: 1, borderColor: C.border,
     overflow: 'hidden', backgroundColor: C.s2,
@@ -7828,9 +9230,9 @@ const makeStyles = (C: ColorPalette) => {
   tripDayTopline: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   tripDayWeather: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '800' },
   tripDayRoute: { color: C.text3, fontSize: 10, marginTop: 5 },
-  tripDayButtons: { flexDirection: 'row', gap: 7, marginTop: 9 },
-  tripDaySmallBtn: { flex: 1, minHeight: 30, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, borderWidth: 1, borderColor: C.orange + '40', borderRadius: 9, backgroundColor: C.orange + '10' },
-  tripDaySmallText: { color: C.orange, fontSize: 8, fontFamily: mono, fontWeight: '900' },
+  tripDayButtons: { flexDirection: 'row', gap: 9, marginTop: 'auto' },
+  tripDaySmallBtn: { flex: 1, minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderColor: C.orange + '38', borderRadius: 14, backgroundColor: C.orange + '10' },
+  tripDaySmallText: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900' },
   tripCampCard: {
     width: 188, minHeight: 160, borderRadius: 12, borderWidth: 1, borderColor: C.border,
     overflow: 'hidden', backgroundColor: C.s2,
@@ -8037,6 +9439,14 @@ const makeStyles = (C: ColorPalette) => {
     letterSpacing: 1.5, marginBottom: 10,
     borderBottomWidth: 1, borderColor: C.border, paddingBottom: 6,
   },
+  detailSectionTitleRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 7,
+    borderBottomWidth: 1, borderColor: C.border, paddingBottom: 6, marginBottom: 10,
+  },
+  detailSectionTitleInline: {
+    color: C.text2, fontSize: 10, fontFamily: mono, fontWeight: '800',
+    letterSpacing: 1.5, textTransform: 'uppercase',
+  },
   sectionTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, borderBottomWidth: 1, borderColor: C.border, marginBottom: 12 },
   sectionEditText: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900', paddingBottom: 6 },
   detailDesc: { color: C.text, fontSize: 14, lineHeight: 22 },
@@ -8197,6 +9607,7 @@ const makeStyles = (C: ColorPalette) => {
     borderWidth: 1, borderColor: C.orange + '55',
     backgroundColor: C.orange + '0f', justifyContent: 'center',
   },
+  aiActionPrimary: { backgroundColor: C.green, borderColor: C.green },
   aiActionText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '700' },
 
   // ── Route weather strip ──────────────────────────────────────────────────────
@@ -8209,7 +9620,7 @@ const makeStyles = (C: ColorPalette) => {
     borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7, alignItems: 'center', minWidth: 64,
   },
   weatherDayNum: { color: C.text3, fontSize: 8, fontFamily: mono, letterSpacing: 0.5, marginBottom: 3 },
-  weatherDayIcon: { fontSize: 18, lineHeight: 22 },
+  weatherDayIconRow: { height: 22, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 2 },
   weatherTemps: { color: C.text, fontSize: 12, fontWeight: '700', marginTop: 2 },
   weatherTempLo: { color: C.text3, fontSize: 11, fontWeight: '400' },
   weatherWind: { color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 1 },
@@ -8323,10 +9734,10 @@ const makeStyles = (C: ColorPalette) => {
   // ── Nav speed circle + limit badge
   navSpeedCircle: {
     width: 62, height: 62, borderRadius: 31,
-    backgroundColor: OVR.bg, borderWidth: 2, borderColor: OVR.border,
+    backgroundColor: 'rgba(255,255,255,0.045)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.11)',
     alignItems: 'center', justifyContent: 'center',
   },
-  navSpeedBig: { color: OVR.text, fontSize: 26, fontWeight: '900', fontFamily: mono, lineHeight: 28 },
+  navSpeedBig: { color: OVR.text, fontSize: 26, fontWeight: '900', lineHeight: 28 },
   navSpeedUnit: { color: OVR.text3, fontSize: 7, fontFamily: mono, letterSpacing: 0.5 },
   navSpeedSign: {
     width: 42, borderRadius: 3,
@@ -8340,8 +9751,8 @@ const makeStyles = (C: ColorPalette) => {
 
   // ── Waze-style quick report
   quickReportWrap: {
-    position: 'absolute', bottom: 190, left: 12,
-    alignItems: 'flex-start',
+    position: 'absolute', bottom: 152, left: 0, right: 0,
+    alignItems: 'center',
   },
   quickReportWrapNav: {
     bottom: 400,
@@ -8352,12 +9763,20 @@ const makeStyles = (C: ColorPalette) => {
     paddingHorizontal: 12, paddingVertical: 7,
     borderWidth: 1, borderColor: C.green,
     marginBottom: 8,
+    alignSelf: 'center',
   },
   quickToastText: { color: C.green, fontSize: 11, fontFamily: mono, fontWeight: '700' },
   quickReportPanel: {
     backgroundColor: OVR.bg, borderRadius: 16,
     borderWidth: 1, borderColor: OVR.border,
     padding: 10, marginBottom: 8, gap: 8,
+    alignSelf: 'center',
+  },
+  quickReportFabRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
   },
   quickReportBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
@@ -8374,8 +9793,8 @@ const makeStyles = (C: ColorPalette) => {
   quickReportFab: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     backgroundColor: OVR.bg, borderRadius: 24,
-    paddingHorizontal: 16, paddingVertical: 10,
-    borderWidth: 1.5, borderColor: '#f59e0b55',
+    paddingHorizontal: 14, paddingVertical: 9,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.11)',
     shadowColor: '#f59e0b', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 6,
   },
   quickReportFabActive: {
@@ -8385,7 +9804,7 @@ const makeStyles = (C: ColorPalette) => {
   quickReportFabNav: {
     backgroundColor: '#1a2a1c', borderColor: '#f59e0b55',
   },
-  quickReportFabText: { color: '#f59e0b', fontSize: 11, fontFamily: mono, fontWeight: '800', letterSpacing: 0.5 },
+  quickReportFabText: { color: OVR.text2, fontSize: 11, fontFamily: mono, fontWeight: '800', letterSpacing: 0.5 },
   quickReportFabTextActive: { color: '#fff' },
   quickSubtypeHeader: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
@@ -8504,15 +9923,235 @@ const makeStyles = (C: ColorPalette) => {
   wpSheetMeta: { color: OVR.text3, fontSize: 11, fontFamily: mono, marginTop: 2 },
   wpSheetActions: { flexDirection: 'row', gap: 10 },
   wpSheetNavBtn: {
-    flex: 1, backgroundColor: C.orange, borderRadius: 12, padding: 13,
+    flex: 1, backgroundColor: C.orange, borderRadius: 12, padding: 11,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
   },
-  wpSheetNavText: { color: '#fff', fontSize: 12, fontFamily: mono, fontWeight: '800' },
+  wpSheetNavText: { color: '#fff', fontSize: 11, fontFamily: mono, fontWeight: '800' },
   wpSheetDayBtn: {
-    flex: 1, borderWidth: 1, borderColor: OVR.border, borderRadius: 12, padding: 13,
+    flex: 1, borderWidth: 1, borderColor: OVR.border, borderRadius: 12, padding: 11,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
   },
-  wpSheetDayText: { color: OVR.text2, fontSize: 12, fontFamily: mono, fontWeight: '700' },
+  wpSheetDayText: { color: OVR.text2, fontSize: 11, fontFamily: mono, fontWeight: '700' },
+  trailListSub: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 3 },
+  trailListContent: { padding: 14, paddingBottom: 28, gap: 10 },
+  trailListCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: OVR.bg2,
+    borderWidth: 1,
+    borderColor: OVR.border,
+    borderRadius: 14,
+    padding: 12,
+  },
+  trailIconBadge: {
+    width: 38,
+    height: 38,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    flexShrink: 0,
+  },
+  trailCardName: { color: OVR.text, fontSize: 13, fontWeight: '800' },
+  trailCardMeta: { color: OVR.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
+  trailSupportRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
+  trailSupportPill: {
+    color: OVR.text2,
+    fontSize: 9,
+    fontFamily: mono,
+    backgroundColor: OVR.border2,
+    borderWidth: 1,
+    borderColor: OVR.border,
+    borderRadius: 999,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    overflow: 'hidden',
+  },
+  trailEmptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 38,
+    paddingHorizontal: 20,
+  },
+  trailEmptyTitle: { color: OVR.text, fontSize: 14, fontWeight: '800', textAlign: 'center' },
+  trailEmptyText: { color: OVR.text3, fontSize: 12, lineHeight: 18, textAlign: 'center' },
+  trailSupportGrid: {
+    flexDirection: 'row',
+    gap: 7,
+    marginBottom: 8,
+  },
+  trailMetric: {
+    flex: 1,
+    backgroundColor: OVR.bg2,
+    borderWidth: 1,
+    borderColor: OVR.border,
+    borderRadius: 11,
+    paddingVertical: 7,
+    alignItems: 'center',
+  },
+  trailMetricValue: { color: OVR.text, fontSize: 15, fontWeight: '900', fontFamily: mono },
+  trailMetricLabel: { color: OVR.text3, fontSize: 7.5, fontWeight: '800', fontFamily: mono, marginTop: 1 },
+  trailReadiness: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    backgroundColor: OVR.bg2,
+    borderWidth: 1,
+    borderColor: OVR.border,
+    borderRadius: 11,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    marginBottom: 8,
+  },
+  trailReadinessText: { color: OVR.text2, fontSize: 10.5, fontFamily: mono, flex: 1 },
+  trailIntelList: {
+    gap: 5,
+    marginBottom: 9,
+  },
+  trailIntelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    backgroundColor: OVR.bg2,
+    borderWidth: 1,
+    borderColor: OVR.border,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  trailIntelText: { color: OVR.text2, fontSize: 10.5, flex: 1 },
+  trailActionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  trailSheetAction: { minWidth: '47%' as any },
+  trailSheetMutedAction: {
+    borderColor: 'rgba(255,255,255,0.13)',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  trailRouteBuilderWrap: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    bottom: 104,
+    zIndex: 18,
+    elevation: 18,
+  },
+  trailRouteBuilderBlur: {
+    borderRadius: 24,
+    overflow: 'hidden',
+    padding: 12,
+    backgroundColor: 'rgba(8,8,10,0.72)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.11)',
+    shadowColor: '#000',
+    shadowOpacity: 0.48,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 16 },
+  },
+  trailRouteBuilderHeader: { flexDirection: 'row', alignItems: 'center', gap: 11, marginBottom: 10 },
+  trailRouteEyebrow: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
+  trailRouteTitle: { color: OVR.text, fontSize: 16, fontWeight: '900', marginTop: 2 },
+  trailRouteStatusRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
+  trailRouteStatusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.11)',
+    backgroundColor: 'rgba(255,255,255,0.055)',
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+  },
+  trailRouteStatusText: { color: OVR.text2, fontSize: 10, fontFamily: mono, fontWeight: '800' },
+  trailRouteLoading: {
+    minHeight: 138,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 17,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  trailRouteLoadingText: { color: OVR.text2, fontSize: 11, fontFamily: mono, fontWeight: '800' },
+  trailRouteError: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    padding: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: C.orange + '55',
+    backgroundColor: C.orange + '14',
+  },
+  trailRouteErrorText: { color: OVR.text2, fontSize: 12, lineHeight: 17, flex: 1 },
+  trailRoutePlanList: { gap: 8, maxHeight: 246 },
+  trailRoutePlanCard: {
+    minHeight: 72,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.045)',
+    borderRadius: 17,
+    padding: 10,
+  },
+  trailRoutePlanIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
+  trailRoutePlanTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  trailRoutePlanTitle: { color: OVR.text, fontSize: 13, fontWeight: '900', flex: 1 },
+  trailRoutePlanDistance: { color: C.silverBright, fontSize: 11, fontFamily: mono, fontWeight: '900' },
+  trailRoutePlanSub: { color: OVR.text3, fontSize: 10.5, marginTop: 2 },
+  trailRoutePlanConfidence: { fontSize: 8.5, fontFamily: mono, fontWeight: '900', marginTop: 5 },
+  trailRouteWarningBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginTop: 9,
+    padding: 10,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.045)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  trailRouteWarningText: { color: OVR.text2, fontSize: 10.5, lineHeight: 15, flex: 1 },
+  trailRouteBuilderActions: { flexDirection: 'row', gap: 9, marginTop: 11 },
+  trailRouteSecondaryBtn: {
+    flex: 0.8,
+    minHeight: 44,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.045)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  trailRouteSecondaryText: { color: OVR.text2, fontSize: 10.5, fontFamily: mono, fontWeight: '900' },
+  trailRouteStartBtn: {
+    flex: 1.25,
+    minHeight: 44,
+    borderRadius: 14,
+    backgroundColor: C.orange,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    shadowColor: C.orange,
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 5 },
+  },
+  trailRouteStartText: { color: '#fff', fontSize: 10.5, fontFamily: mono, fontWeight: '900' },
   pinIconBadge: {
     width: 34, height: 34, borderRadius: 17,
     alignItems: 'center', justifyContent: 'center',
@@ -8636,6 +10275,22 @@ const makeStyles = (C: ColorPalette) => {
     zIndex: 30,
   },
   offlineCacheBannerText: { color: '#a3e635', fontSize: 10, fontFamily: mono, fontWeight: '700', letterSpacing: 0.3, flex: 1 },
+  noRouteCard: {
+    position: 'absolute', top: 136, left: 16, right: 16,
+    backgroundColor: OVR.bg2,
+    borderRadius: 14,
+    borderWidth: 1, borderColor: C.red + '77',
+    padding: 12,
+    zIndex: 35,
+    gap: 8,
+    shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 14, shadowOffset: { width: 0, height: 6 },
+    elevation: 12,
+  },
+  noRouteTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  noRouteTitle: { color: C.red, fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8, flex: 1 },
+  noRouteClose: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: OVR.border2 },
+  noRouteText: { color: OVR.text2, fontSize: 11, lineHeight: 16 },
+  noRouteDebug: { color: OVR.text3, fontSize: 9, fontFamily: mono, lineHeight: 13 },
 
   syncToast: {
     position: 'absolute', bottom: 110, alignSelf: 'center',

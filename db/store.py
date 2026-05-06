@@ -917,9 +917,9 @@ def check_and_update_streak(user_id: int) -> dict:
         streak = 1
 
     # Milestone bonuses
-    if streak == 3:   bonus, bonus_reason = 25,  "3-day reporting streak! 🔥"
-    elif streak == 7:  bonus, bonus_reason = 50,  "7-day streak legend! 🏆"
-    elif streak == 30: bonus, bonus_reason = 200, "30-day streak — you're a trailblazer! 🌟"
+    if streak == 3:   bonus, bonus_reason = 25,  "3-day reporting streak! Fire"
+    elif streak == 7:  bonus, bonus_reason = 50,  "7-day streak legend! Trophy"
+    elif streak == 30: bonus, bonus_reason = 200, "30-day streak — you're a trailblazer! Star"
 
     db.execute("UPDATE users SET report_streak=?, last_report_date=? WHERE id=?", (streak, today, user_id))
     if bonus:

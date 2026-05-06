@@ -21,9 +21,9 @@ import { saveOfflineTrip, loadOfflineTrip } from '@/lib/offlineTrips';
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://trailhead-production-2049.up.railway.app';
 
 const EXAMPLES = [
-  { label: '14D', icon: 'moon-outline',     tags: ['DISPERSED', 'DIRT RD', 'UTAH'],    text: '14-day loop through southern Utah — dispersed camping, off-road, a couple paid showers' },
-  { label: '7D',  icon: 'triangle-outline', tags: ['HIGH CLEAR', '4WD', 'SAN JUANS'],  text: '7-day overlanding from Denver into the San Juans, high clearance, wild camping only' },
-  { label: 'WK',  icon: 'flash-outline',    tags: ['BLM', 'MOAB', 'TRUCK'],            text: 'Weekend run near Moab, BLM land, taking my Tacoma' },
+  { label: 'AREA', icon: 'map-outline',       tags: ['TRAILS', 'CAMPS', 'LAND'], text: 'What should I know before exploring this area with my current rig?' },
+  { label: 'RIG',  icon: 'car-sport-outline', tags: ['CLEARANCE', 'RANGE'],      text: 'Check whether my rig setup is ready for rough forest roads and remote camps.' },
+  { label: 'FIELD',icon: 'radio-outline',     tags: ['WEATHER', 'SIGNAL'],       text: 'Give me a quick field brief for tonight: weather, signal, water, and safe camp strategy.' },
 ];
 
 const CHAT_STAGES  = [
@@ -226,7 +226,7 @@ export default function PlanScreen() {
         setPlanPhase('active');
       } catch (e: any) {
         if (isOutOfCredits(e)) handleOutOfCredits();
-        else setMessages(m => [...m, { role: 'ai', text: `⚠ ${e.message}` }]);
+        else setMessages(m => [...m, { role: 'ai', text: `Route error: ${e.message}` }]);
         setPlanPhase('active');
       } finally {
         stopStages(); setLoading(false); scrollToEnd();
@@ -523,38 +523,15 @@ export default function PlanScreen() {
               </View>
             )}
 
-            {tripHistory.length > 0 && (
-              <View style={s.historySection}>
-                <Text style={s.sectionLabel}>RECENT TRIPS</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.historyScroll}>
-                  {tripHistory.map(t => (
-                    <TouchableOpacity
-                      key={t.trip_id}
-                      style={s.historyCard}
-                      onPress={() => { openHistoryTrip(t.trip_id); }}
-                    >
-                      <Text style={s.historyCardName} numberOfLines={2}>{t.trip_name}</Text>
-                      <Text style={s.historyCardStates}>{(t.states ?? []).join(' · ')}</Text>
-                      <View style={s.historyCardFooter}>
-                        <Text style={s.historyCardStat}>{t.duration_days}D</Text>
-                        <Text style={s.historyCardDot}>·</Text>
-                        <Text style={s.historyCardStat}>{t.est_miles}MI</Text>
-                      </View>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </View>
-            )}
-
             <Text style={s.welcomeHeading}>
-              {'BUILD A\nTRAIL-READY\n'}
-              <Text style={{ color: C.orange }}>ROUTE.</Text>
+              {'ASK THE\nTRAIL\n'}
+              <Text style={{ color: C.orange }}>GUIDE.</Text>
             </Text>
             <Text style={s.welcomeSub}>
-              Start with where you want to go, how long you have, and what you drive. Trailhead shapes the days, finds nearby camp and fuel options, then sends the route to the map for review.
+              Use AI for area intel, camp rules, rig readiness, weather strategy, and trip adjustments. Build and reopen full routes from the Route tab.
             </Text>
             <View style={s.welcomeChips}>
-              {['LEGAL CAMPS', 'FUEL RANGE', 'OFFLINE READY'].map(label => (
+              {['TRAIL INTEL', 'CAMP RULES', 'RIG ADVICE'].map(label => (
                 <View key={label} style={s.welcomeChip}>
                   <Text style={s.welcomeChipText}>{label}</Text>
                 </View>
@@ -622,28 +599,8 @@ export default function PlanScreen() {
         )}
       </ScrollView>
 
-      {/* ── My Trips quick-access (shown above input when not on welcome screen) ── */}
-      {messages.length > 0 && tripHistory.length > 0 && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}
-          style={{ maxHeight: 44 }}
-          contentContainerStyle={{ paddingHorizontal: 12, paddingVertical: 6, gap: 8, alignItems: 'center' }}
-        >
-          <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, letterSpacing: 1, paddingRight: 4 }}>MY TRIPS</Text>
-          {tripHistory.slice(0, 6).map(t => (
-            <TouchableOpacity
-              key={t.trip_id}
-              style={{ backgroundColor: C.s2, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: C.border, flexDirection: 'row', alignItems: 'center', gap: 5 }}
-              onPress={() => { openHistoryTrip(t.trip_id); }}
-            >
-              <Ionicons name="map-outline" size={11} color={C.orange} />
-              <Text style={{ color: C.text2, fontSize: 11, fontFamily: mono, maxWidth: 120 }} numberOfLines={1}>{t.trip_name}</Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      )}
-
       {/* ── Input ── */}
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView style={s.inputDock} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <TourTarget id="plan.input">
           <View style={s.inputWrap}>
             <TextInput
@@ -931,7 +888,7 @@ function TripCard({ trip, C, onViewMap, onViewGuide, onNextLeg }: {
   function shareTrip() {
     Share.share({
       title: p.trip_name,
-      message: `🗺 ${p.trip_name}\n${p.duration_days} days · ${p.total_est_miles ?? '?'} miles · ${(p.states ?? []).join(', ')}\n\n${p.overview}\n\nPlanned with Trailhead: ${BASE_URL}`,
+      message: `${p.trip_name}\n${p.duration_days} days · ${p.total_est_miles ?? '?'} miles · ${(p.states ?? []).join(', ')}\n\n${p.overview}\n\nPlanned with Trailhead: ${BASE_URL}`,
     });
   }
 
@@ -1017,14 +974,14 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
 
   // Login gate
   loginGate: { flex: 1, padding: 28, justifyContent: 'center', alignItems: 'center', gap: 16 },
-  loginGateLogo: { width: 72, height: 72, borderRadius: 20, backgroundColor: C.s2, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
-  loginGateTitle: { color: C.text, fontSize: 26, fontWeight: '900', letterSpacing: 0 },
+  loginGateLogo: { width: 72, height: 72, borderRadius: 24, backgroundColor: 'rgba(255,255,255,0.07)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+  loginGateTitle: { color: C.text, fontSize: 28, fontWeight: '800', letterSpacing: 0 },
   loginGateSub: { color: C.text2, fontSize: 14, textAlign: 'center', lineHeight: 21, maxWidth: 300 },
   loginGatePerks: { gap: 10, alignSelf: 'stretch', marginVertical: 4 },
   loginGatePerk: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 4 },
   loginGatePerkText: { color: C.text2, fontSize: 13, flex: 1 },
-  loginGateBtn: { backgroundColor: C.orange, borderRadius: 12, paddingVertical: 14, alignSelf: 'stretch', alignItems: 'center', marginTop: 8 },
-  loginGateBtnText: { color: '#fff', fontFamily: mono, fontSize: 12, fontWeight: '700', letterSpacing: 1 },
+  loginGateBtn: { backgroundColor: C.silverBright, borderRadius: 16, paddingVertical: 15, alignSelf: 'stretch', alignItems: 'center', marginTop: 8, shadowColor: '#fff', shadowOpacity: 0.16, shadowRadius: 18 },
+  loginGateBtnText: { color: '#050505', fontFamily: mono, fontSize: 11, fontWeight: '800', letterSpacing: 1 },
   loginGateNote: { color: C.text3, fontSize: 11, textAlign: 'center', fontFamily: mono },
 
   // Credit pill in header
@@ -1035,13 +992,13 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   header: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     paddingHorizontal: 18, paddingVertical: 13,
-    borderBottomWidth: 1, borderColor: C.border,
-    backgroundColor: C.s1,
+    borderBottomWidth: 1, borderColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: 'rgba(5,5,5,0.82)',
   },
   logoBadge: {
-    width: 36, height: 36, borderRadius: 9,
-    backgroundColor: C.orange, alignItems: 'center', justifyContent: 'center',
-    shadowColor: C.orange, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.35, shadowRadius: 6,
+    width: 36, height: 36, borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.08)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center',
+    shadowColor: '#E5E7EB', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.18, shadowRadius: 14,
   },
   logoName: {
     color: C.text, fontSize: 17, fontWeight: '900',
@@ -1056,33 +1013,32 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   editBadgeText: { color: C.gold, fontSize: 8.5, fontFamily: mono, letterSpacing: 0.8 },
 
   // Trail DNA strip
-  dnaRow: { borderBottomWidth: 1, borderColor: C.border2, backgroundColor: C.s1, maxHeight: 36 },
+  dnaRow: { borderBottomWidth: 1, borderColor: 'rgba(255,255,255,0.05)', backgroundColor: 'rgba(255,255,255,0.025)', maxHeight: 36 },
   dnaRowContent: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 8, gap: 6 },
   dnaLabel: { color: C.text3, fontSize: 8, fontFamily: mono, letterSpacing: 1, marginRight: 4 },
 
   // Messages
   messages: { flex: 1 },
-  messagesContent: { padding: 16, gap: 14, flexGrow: 1 },
+  messagesContent: { padding: 16, paddingBottom: 126, gap: 14, flexGrow: 1 },
 
   // Welcome
   welcome: { gap: 10 },
   resumeCard: {
-    backgroundColor: C.s1, borderRadius: 12, padding: 16,
-    borderLeftWidth: 3, borderLeftColor: C.orange,
-    borderWidth: 1, borderColor: C.border,
+    backgroundColor: 'rgba(255,255,255,0.055)', borderRadius: 22, padding: 16,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)',
     marginBottom: 4,
+    shadowColor: '#000', shadowOpacity: 0.32, shadowRadius: 24, shadowOffset: { width: 0, height: 12 },
   },
   welcomeHeading: {
-    color: C.text, fontSize: 38, fontWeight: '900',
+    color: C.text, fontSize: 36, fontWeight: '800',
     letterSpacing: 0, lineHeight: 40, marginBottom: 8,
-    textTransform: 'uppercase',
   },
   welcomeSub: { color: C.text2, fontSize: 14, lineHeight: 21, marginBottom: 2 },
   welcomeChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginBottom: 6 },
   welcomeChip: {
     borderWidth: 1, borderColor: C.border,
     borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5,
-    backgroundColor: C.s2,
+    backgroundColor: 'rgba(255,255,255,0.045)',
   },
   welcomeChipText: {
     color: C.text3, fontSize: 8.5, fontFamily: mono,
@@ -1093,9 +1049,8 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   historySection: { marginBottom: 4 },
   historyScroll: { gap: 8, paddingRight: 4 },
   historyCard: {
-    backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
-    borderRadius: 12, padding: 12, width: 148, gap: 4,
-    borderLeftWidth: 3, borderLeftColor: C.orange,
+    backgroundColor: 'rgba(255,255,255,0.055)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 18, padding: 12, width: 148, gap: 4,
   },
   historyCardName:   { color: C.text, fontSize: 12, fontWeight: '700', lineHeight: 16 },
   historyCardStates: { color: C.orange, fontSize: 9, fontFamily: mono, letterSpacing: 0.5 },
@@ -1104,22 +1059,22 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   historyCardDot:    { color: C.border, fontSize: 9 },
 
   example: {
-    backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
-    borderRadius: 12, padding: 12,
+    backgroundColor: 'rgba(255,255,255,0.052)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 18, padding: 12,
     flexDirection: 'row', alignItems: 'flex-start', gap: 10,
   },
   exampleIconWrap: {
-    width: 36, height: 36, borderRadius: 10,
-    backgroundColor: 'rgba(184,92,56,0.12)', borderWidth: 1, borderColor: 'rgba(184,92,56,0.25)',
+    width: 36, height: 36, borderRadius: 14,
+    backgroundColor: 'rgba(229,231,235,0.08)', borderWidth: 1, borderColor: 'rgba(229,231,235,0.14)',
     alignItems: 'center', justifyContent: 'center',
   },
   exampleTagRow: { flexDirection: 'row', alignItems: 'center', gap: 5, flexWrap: 'wrap' },
   exampleBadge: {
     height: 20, borderRadius: 5,
-    backgroundColor: C.orange, borderWidth: 0,
+    backgroundColor: 'rgba(229,231,235,0.16)', borderWidth: 1, borderColor: 'rgba(229,231,235,0.16)',
     alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6,
   },
-  exampleBadgeText: { color: '#fff', fontSize: 8.5, fontFamily: mono, fontWeight: '800' },
+  exampleBadgeText: { color: C.silverBright, fontSize: 8.5, fontFamily: mono, fontWeight: '800' },
   exampleTag: {
     height: 20, borderRadius: 5, borderWidth: 1, borderColor: C.border,
     backgroundColor: C.s3, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6,
@@ -1147,14 +1102,22 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   thinkingText: { color: C.text2, fontSize: 12, fontFamily: mono, letterSpacing: 0.3 },
 
   // Input
+  inputDock: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 94,
+    zIndex: 40,
+    backgroundColor: 'rgba(5,5,5,0.9)',
+  },
   inputWrap: {
-    flexDirection: 'row', gap: 10, paddingHorizontal: 14, paddingTop: 10, paddingBottom: 6,
-    borderTopWidth: 1, borderColor: C.border,
-    alignItems: 'flex-end', backgroundColor: C.s1,
+    flexDirection: 'row', gap: 10, paddingHorizontal: 14, paddingTop: 10, paddingBottom: 12,
+    borderTopWidth: 1, borderColor: 'rgba(255,255,255,0.06)',
+    alignItems: 'flex-end', backgroundColor: 'rgba(5,5,5,0.84)',
   },
   input: {
-    flex: 1, backgroundColor: C.s2, borderWidth: 1.5, borderColor: C.border,
-    borderRadius: 14, padding: 12, color: C.text, fontSize: 14, maxHeight: 120,
+    flex: 1, backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)',
+    borderRadius: 18, padding: 12, color: C.text, fontSize: 14, maxHeight: 120,
   },
   inputEdit: { borderColor: `rgba(184,92,56,0.4)` },
   sendBtn: {
@@ -1181,7 +1144,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   offlineToastText: { color: '#fff', fontSize: 11, fontFamily: mono, fontWeight: '700', letterSpacing: 0.3 },
 
   weatherToast: {
-    position: 'absolute', bottom: 90, alignSelf: 'center',
+    position: 'absolute', bottom: 116, alignSelf: 'center',
     flexDirection: 'row', alignItems: 'center', gap: 7,
     backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
     borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8,

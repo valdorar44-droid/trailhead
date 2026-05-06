@@ -22,6 +22,30 @@ export async function setBase(pmtilesPath: string): Promise<void> {
   return M.setBase(pmtilesPath);
 }
 
+/** Load a contour overlay PMTiles file. Survives state/base map switches. */
+export async function setContours(pmtilesPath: string): Promise<void> {
+  if (!M?.setContours) throw new Error('TileServerModule setContours not in binary');
+  return M.setContours(pmtilesPath);
+}
+
+/** Clear the active contour overlay PMTiles file. */
+export async function clearContours(): Promise<void> {
+  if (!M?.clearContours) return;
+  return M.clearContours();
+}
+
+/** Load a dedicated trail overlay PMTiles file. Survives state/base map switches. */
+export async function setTrails(pmtilesPath: string): Promise<void> {
+  if (!M?.setTrails) throw new Error('TileServerModule setTrails not in binary');
+  return M.setTrails(pmtilesPath);
+}
+
+/** Clear the active trail overlay PMTiles file. */
+export async function clearTrails(): Promise<void> {
+  if (!M?.clearTrails) return;
+  return M.clearTrails();
+}
+
 /** Stop the server and release all readers. */
 export async function stopServer(): Promise<void> {
   if (!M) return;

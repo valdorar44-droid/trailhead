@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput,
   ActivityIndicator, Modal, Alert, Image,
@@ -7,14 +7,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
-import NativeMap, { NativeMapHandle } from '@/components/NativeMap';
 import PaywallModal from '@/components/PaywallModal';
 import TourTarget from '@/components/TourTarget';
 import { api, CampFullness, Campsite, CampsiteDetail, CampsiteInsight, CampsitePin, GasStation, GeocodePlace, OsmPoi, PaywallError, TripResult, Waypoint, WeatherForecast } from '@/lib/api';
 import { loadAllPlacePoints } from '@/lib/offlinePlacePacks';
-import { saveOfflineTrip } from '@/lib/offlineTrips';
+import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { useStore } from '@/lib/store';
-import { useTheme, mono, ColorPalette } from '@/lib/design';
+import { useTheme, mono, ColorPalette, RADIUS } from '@/lib/design';
 
 type BuilderStopType = 'start' | 'fuel' | 'waypoint' | 'camp' | 'motel';
 type BuilderStop = {
@@ -59,6 +58,7 @@ type InlineSearchState = {
 } | null;
 type TripBuildMode = 'recommended' | 'blank';
 type DistanceMode = 'hours' | 'miles';
+type RouteTabMode = 'hub' | 'wizard';
 
 const PLACE_FILTER_TYPES = [
   { id: 'fuel', label: 'Fuel', icon: 'flash-outline', color: '#ea580c' },
@@ -324,9 +324,12 @@ function routeBufferForMiles(mi: number) {
 }
 
 function legSamplePoints(leg: LegSearchContext) {
-  const count = Math.max(2, Math.min(6, Math.ceil(leg.miles / 90) + 1));
+  const count = Math.max(3, Math.min(8, Math.ceil(leg.miles / 80) + 1));
+  const start = leg.purpose === 'overnight' ? 0.62 : 0;
+  const end = leg.purpose === 'overnight' ? 1 : 1;
   return Array.from({ length: count }, (_, idx) => {
-    const t = count === 1 ? 0.5 : idx / (count - 1);
+    const raw = count === 1 ? 0.5 : idx / (count - 1);
+    const t = start + (end - start) * raw;
     return {
       lat: leg.from.lat + (leg.to.lat - leg.from.lat) * t,
       lng: leg.from.lng + (leg.to.lng - leg.from.lng) * t,
@@ -581,16 +584,16 @@ export default function RouteBuilderScreen() {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
   const router = useRouter();
-  const mapRef = useRef<NativeMapHandle>(null);
-  const didInitialMapFitRef = useRef(false);
   const activeTrip = useStore(st => st.activeTrip);
   const setActiveTrip = useStore(st => st.setActiveTrip);
   const addTripToHistory = useStore(st => st.addTripToHistory);
+  const tripHistory = useStore(st => st.tripHistory);
   const userLoc = useStore(st => st.userLoc);
   const setStoreUserLoc = useStore(st => st.setUserLoc);
   const rigProfile = useStore(st => st.rigProfile);
 
   const [activeDay, setActiveDay] = useState(1);
+  const [routeTabMode, setRouteTabMode] = useState<RouteTabMode>('hub');
   const [days, setDays] = useState([1]);
   const [stops, setStops] = useState<BuilderStop[]>([]);
   const [tripLoop, setTripLoop] = useState(false);
@@ -604,7 +607,6 @@ export default function RouteBuilderScreen() {
   const [startQuery, setStartQuery] = useState('');
   const [endQuery, setEndQuery] = useState('');
   const [buildingFramework, setBuildingFramework] = useState(false);
-  const [showBuildSuccess, setShowBuildSuccess] = useState(false);
   const [restDays, setRestDays] = useState<number[]>([]);
   const [dayDriveTargets, setDayDriveTargets] = useState<Record<number, string>>({});
   const [gasPrice, setGasPrice] = useState('3.65');
@@ -636,6 +638,7 @@ export default function RouteBuilderScreen() {
   const [campInsight, setCampInsight] = useState<CampsiteInsight | null>(null);
   const [showCampDetail, setShowCampDetail] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [showNewRouteConfirm, setShowNewRouteConfirm] = useState(false);
   const [paywallVisible, setPaywallVisible] = useState(false);
   const [paywallCode, setPaywallCode] = useState('camp_detail');
   const [paywallMessage, setPaywallMessage] = useState('Use credits or Explorer to open full campsite profiles. You can still add this camp to your route from the free preview.');
@@ -662,7 +665,7 @@ export default function RouteBuilderScreen() {
   }, []);
 
   useEffect(() => {
-    if (!activeTrip || importedTripId === activeTrip.trip_id || stops.length > 0) return;
+    if (routeTabMode !== 'wizard' || !activeTrip || importedTripId === activeTrip.trip_id || stops.length > 0) return;
     const importedStops: BuilderStop[] = activeTrip.plan.waypoints
       .filter(wp => Number.isFinite(wp.lat) && Number.isFinite(wp.lng))
       .map((wp, idx) => {
@@ -724,18 +727,11 @@ export default function RouteBuilderScreen() {
     setActiveDay(importedStops[0]?.day ?? 1);
     setRouteName(activeTrip.plan.trip_name || '');
     setImportedTripId(activeTrip.trip_id);
-    const first = importedStops[0];
-    if (first) setTimeout(() => fly(first.lat, first.lng, 8), 350);
-  }, [activeTrip, importedTripId, stops.length]);
+  }, [activeTrip, importedTripId, routeTabMode, stops.length]);
 
   const dayStops = stops.filter(st => st.day === activeDay);
   const selectedInsertStop = stops.find(st => st.id === insertAfterId) ?? null;
   const orderedStops = [...stops].sort((a, b) => a.day - b.day || stops.indexOf(a) - stops.indexOf(b));
-  const mapWaypoints = orderedStops.map(st => ({ lat: st.lat, lng: st.lng, name: st.name, day: st.day, type: st.type }));
-  const mapCamps = useMemo(() => uniqueByGeo([
-    ...orderedStops.map(st => st.camp).filter((camp): camp is CampsitePin => !!camp),
-    ...camps,
-  ]), [orderedStops, camps]);
   const anchor = [...dayStops].reverse()[0] ?? [...stops].reverse()[0] ?? (userLoc ? { lat: userLoc.lat, lng: userLoc.lng, name: 'Current location' } : null);
   const selectedStopIndex = selectedInsertStop ? orderedStops.findIndex(st => st.id === selectedInsertStop.id) : -1;
   const selectedNextStop = selectedStopIndex >= 0 ? orderedStops[selectedStopIndex + 1] ?? null : null;
@@ -762,7 +758,6 @@ export default function RouteBuilderScreen() {
   const filteredOfflinePlaces = useMemo(() => (
     offlinePlaces.filter(place => activePlaceFilters.includes(place.type))
   ), [offlinePlaces, activePlaceFilters]);
-  const mapPois = useMemo(() => dedupePois([...pois, ...filteredOfflinePlaces]), [pois, filteredOfflinePlaces]);
   const offlinePlaceCandidates = useMemo(() => {
     const target = legContext ? legContext.center : anchor;
     if (!target) return [];
@@ -835,6 +830,24 @@ export default function RouteBuilderScreen() {
       driveHours: estimateMovingHours(totals.miles),
     };
   }, [driveHoursPerDay, gasPrice, rigProfile, routeStateMiles, stateGasPrices, totals.miles]);
+  const rigRouteSummary = useMemo(() => {
+    if (!rigProfile || (!rigProfile.make && !rigProfile.model && !rigProfile.vehicle_type)) {
+      return {
+        title: 'No rig profile yet',
+        meta: `${planningStats.mpg} MPG fallback · add rig specs in Profile`,
+        ready: false,
+      };
+    }
+    const title = [rigProfile.year, rigProfile.make, rigProfile.model].filter(Boolean).join(' ') || rigProfile.vehicle_type || 'Saved rig';
+    const specs = [
+      rigProfile.vehicle_type,
+      rigProfile.drive,
+      rigProfile.fuel_range_miles ? `${rigProfile.fuel_range_miles} mi range` : null,
+      `${planningStats.mpg} MPG`,
+      rigProfile.is_towing ? 'towing' : null,
+    ].filter(Boolean).join(' · ');
+    return { title, meta: specs, ready: true };
+  }, [planningStats.mpg, rigProfile]);
   const dayMileage = useMemo(() => {
     const out: Record<number, number> = {};
     for (const day of days) {
@@ -922,9 +935,7 @@ export default function RouteBuilderScreen() {
       ? 'Tap scan to find fuel between the selected stops.'
       : 'Tap scan to find water, trailheads, viewpoints, peaks, and hot springs near this route.';
 
-  function fly(lat: number, lng: number, zoom = 11) {
-    mapRef.current?.flyTo(lat, lng, zoom);
-  }
+  function fly(_lat: number, _lng: number, _zoom = 11) {}
 
   function addStop(input: Omit<BuilderStop, 'id' | 'day'> & { day?: number }) {
     const target = insertAfterId ? stops.find(st => st.id === insertAfterId) : null;
@@ -1030,13 +1041,13 @@ export default function RouteBuilderScreen() {
     try {
       if (tab === 'camps') {
         if (useLeg) {
-          const radius = Math.max(28, Math.min(48, leg!.miles / 4 + 12));
+          const radius = Math.max(34, Math.min(62, leg!.miles / 3.5 + 14));
           const found = uniqueByGeo((await Promise.all(
             legSamplePoints(leg!).map(point => api.getNearbyCamps(point.lat, point.lng, radius, []).catch(() => []))
           )).flat());
           const scopedRaw = found
               .map(camp => withLegProjection(camp, leg!))
-              .filter(camp => (camp.route_distance_mi ?? 999) <= routeBufferForMiles(leg!.miles) + 8);
+              .filter(camp => (camp.route_distance_mi ?? 999) <= routeBufferForMiles(leg!.miles) + 14);
           let scoped = leg!.purpose === 'overnight' ? overnightEndpointCamps(scopedRaw, leg!) : spreadAlongLeg(scopedRaw);
           let fallbackText = '';
           if (leg!.purpose === 'overnight' && scoped.length === 0) {
@@ -1055,7 +1066,7 @@ export default function RouteBuilderScreen() {
         }
       } else if (tab === 'gas') {
         if (useLeg) {
-          const radius = Math.max(24, Math.min(42, leg!.miles / 5 + 10));
+          const radius = Math.max(32, Math.min(64, leg!.miles / 4 + 14));
           const nrelStations = uniqueByGeo((await Promise.all(
             legSamplePoints(leg!).map(point => api.getGas(point.lat, point.lng, radius).catch(() => []))
           )).flat());
@@ -1070,13 +1081,13 @@ export default function RouteBuilderScreen() {
           ]);
           if (stations.length === 0) {
             const nominatimFuel = uniqueByGeo((await Promise.all(
-              legSamplePoints(leg!).map(point => searchNominatimNearby('gas station', point, radius, 'fuel', 5).catch(() => []))
+              legSamplePoints(leg!).map(point => searchNominatimNearby('gas station', point, Math.max(radius, 45), 'fuel', 6).catch(() => []))
             )).flat());
             stations.push(...nominatimFuel.map(poiToGasStation));
           }
           const scoped = spreadAlongLeg(stations
             .map(st => withLegProjection(st, leg!))
-            .filter(st => (st.route_distance_mi ?? 999) <= routeBufferForMiles(leg!.miles) + 8)
+            .filter(st => (st.route_distance_mi ?? 999) <= routeBufferForMiles(leg!.miles) + 18)
           );
           setGas(scoped);
           setDiscoverySummary(`${scoped.length} fuel stop${scoped.length === 1 ? '' : 's'} along this leg`);
@@ -1186,7 +1197,10 @@ export default function RouteBuilderScreen() {
   }
 
   function addCamp(camp: CampsitePin) {
+    setSelectedCamp(null);
+    setShowCampDetail(false);
     const stopDay = insertTargetDay ?? activeDay;
+    const nextDay = days.find(day => day > stopDay) ?? stopDay;
     const campStop: BuilderStop = {
       id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       day: stopDay,
@@ -1215,9 +1229,9 @@ export default function RouteBuilderScreen() {
       setReplaceStopId(null);
       setInsertAfterId(null);
       setInsertTargetDay(null);
-      setSelectedCamp(null);
       clearDiscoveryResults();
-      fly(camp.lat, camp.lng, 12);
+      setActiveDay(nextDay);
+      setTimeout(() => fly(camp.lat, camp.lng, 12), 80);
       return;
     }
     const targetDay = legContext ? stopDay : null;
@@ -1233,7 +1247,8 @@ export default function RouteBuilderScreen() {
       setInsertAfterId(null);
       setInsertTargetDay(null);
       clearDiscoveryResults();
-      fly(camp.lat, camp.lng, 12);
+      setActiveDay(nextDay);
+      setTimeout(() => fly(camp.lat, camp.lng, 12), 80);
       return;
     }
     addStop({
@@ -1250,9 +1265,12 @@ export default function RouteBuilderScreen() {
     clearDiscoveryResults();
     setInsertAfterId(null);
     setInsertTargetDay(null);
+    setActiveDay(nextDay);
+    setTimeout(() => fly(camp.lat, camp.lng, 12), 80);
   }
 
   function addGas(station: GasStation) {
+    const next = selectedNextStop;
     addStop({
       name: station.name,
       lat: station.lat,
@@ -1264,6 +1282,7 @@ export default function RouteBuilderScreen() {
       gas: station,
     });
     clearDiscoveryResults();
+    if (next) setTimeout(() => fly(next.lat, next.lng, 10), 90);
   }
 
   function addPoi(poi: OsmPoi) {
@@ -1442,6 +1461,15 @@ export default function RouteBuilderScreen() {
     }
   }
 
+  function closeCampDetail() {
+    setShowCampDetail(false);
+    setSelectedCamp(null);
+    setCampDetail(null);
+    setCampInsight(null);
+    setCampWeather(null);
+    setCampFullness(null);
+  }
+
   function addDay() {
     const next = Math.max(...days) + 1;
     setDays(prev => [...prev, next]);
@@ -1599,9 +1627,9 @@ export default function RouteBuilderScreen() {
     const turnDay = buildLoop ? Math.max(1, Math.min(count - 1, Math.ceil(count / 2))) : count;
     const styleLabel = routeStyle === 'adventure' ? 'scenic target area' : routeStyle === 'direct' ? 'direct target area' : 'target area';
     const scenicOffset = routeStyle === 'adventure'
-      ? Math.max(35, Math.min(140, routeMiles * 0.16))
+      ? Math.max(24, Math.min(82, routeMiles * 0.065))
       : routeStyle === 'balanced'
-      ? Math.max(16, Math.min(70, routeMiles * 0.07))
+      ? Math.max(10, Math.min(42, routeMiles * 0.035))
       : 0;
     const framework: BuilderStop[] = [
       { ...first, day: 1, type: first.type === 'start' ? 'start' : first.type },
@@ -1622,7 +1650,7 @@ export default function RouteBuilderScreen() {
           t,
           buildLoop
             ? outbound ? scenicOffset : -scenicOffset
-            : routeStyle === 'adventure' ? scenicOffset * (day % 2 === 0 ? -0.65 : 1) : 0
+            : routeStyle === 'adventure' ? scenicOffset * (0.72 + 0.28 * Math.sin(day * 1.31)) : 0
         );
         const name = buildLoop && day === turnDay
           ? `${last.name.split(',')[0]} turnaround`
@@ -1653,14 +1681,15 @@ export default function RouteBuilderScreen() {
           source: 'map',
         }
       : { ...last, day: count });
-    setDays(Array.from({ length: count }, (_, i) => i + 1));
+    const nextDays = Array.from({ length: count }, (_, i) => i + 1);
+    const nextName = routeName.trim() || (buildLoop ? `${first.name.split(',')[0]} to ${last.name.split(',')[0]} Loop` : `${first.name.split(',')[0]} to ${last.name.split(',')[0]}`);
+    setDays(nextDays);
     setStops(framework);
     setActiveDay(1);
     setInsertAfterId(null);
     setInsertTargetDay(null);
-    setRouteName(routeName.trim() || (buildLoop ? `${first.name.split(',')[0]} to ${last.name.split(',')[0]} Loop` : `${first.name.split(',')[0]} to ${last.name.split(',')[0]}`));
-    fly((first.lat + last.lat) / 2, (first.lng + last.lng) / 2, 5);
-    setShowBuildSuccess(true);
+    setRouteName(nextName);
+    commitTrip(buildTrip(framework, nextDays, nextName), true);
   }
 
   function closeLoopToStart() {
@@ -1700,9 +1729,16 @@ export default function RouteBuilderScreen() {
     return 'Manual Route';
   }
 
-  function buildTrip(): TripResult {
-    const sorted = orderedStops;
-    const navStops = sorted.filter(st => !isFrameworkTarget(st));
+  function buildTrip(
+    inputStops: BuilderStop[] = orderedStops,
+    inputDays: number[] = days,
+    nameOverride?: string,
+  ): TripResult {
+    const sorted = [...inputStops].sort((a, b) => a.day - b.day || inputStops.indexOf(a) - inputStops.indexOf(b));
+    const navStops = sorted;
+    let inputMiles = 0;
+    for (let i = 1; i < sorted.length; i += 1) inputMiles += haversineMi(sorted[i - 1], sorted[i]);
+    if (tripLoop && sorted.length > 2) inputMiles += haversineMi(sorted[sorted.length - 1], sorted[0]);
     const waypoints: Waypoint[] = navStops.map(st => ({
       day: st.day,
       name: st.name,
@@ -1714,7 +1750,7 @@ export default function RouteBuilderScreen() {
       verified_source: st.source === 'camp' ? st.camp?.verified_source ?? 'manual' : 'manual',
       verified_match: true,
     }));
-    const daily_itinerary = days.map(day => {
+    const daily_itinerary = inputDays.map(day => {
       const wps = navStops.filter(st => st.day === day);
       const hasPlanningTarget = sorted.some(st => st.day === day && isFrameworkTarget(st));
       const prev = [...navStops].reverse().find(st => st.day < day) ?? null;
@@ -1744,13 +1780,13 @@ export default function RouteBuilderScreen() {
     return {
       trip_id: importedTripId ? `${importedTripId}_edited_${Date.now()}` : `manual_${Date.now()}`,
       plan: {
-        trip_name: resolvedRouteName(),
+        trip_name: nameOverride ?? resolvedRouteName(),
         overview: importedTripId
           ? 'A Trailhead route edited in Route Builder with user-selected stops, fuel, POIs, and camps.'
           : 'A manually built Trailhead route with user-selected stops, fuel, POIs, and camps.',
-        duration_days: days.length,
+        duration_days: inputDays.length,
         states: importedTripId ? activeTrip?.plan.states ?? [] : [],
-        total_est_miles: Math.round(totals.miles),
+        total_est_miles: Math.round(inputMiles),
         waypoints,
         daily_itinerary,
         logistics: {
@@ -1767,12 +1803,7 @@ export default function RouteBuilderScreen() {
     };
   }
 
-  async function saveRoute(openMap = true) {
-    if (orderedStops.length < 2) {
-      Alert.alert('Add more stops', 'Add at least a start and one destination before saving the route.');
-      return;
-    }
-    const trip = buildTrip();
+  function commitTrip(trip: TripResult, openMap = true) {
     setRouteName(trip.plan.trip_name);
     setActiveTrip(trip);
     addTripToHistory({
@@ -1783,8 +1814,90 @@ export default function RouteBuilderScreen() {
       est_miles: trip.plan.total_est_miles,
       planned_at: Date.now(),
     });
-    await saveOfflineTrip(trip).catch(() => {});
-    if (openMap) router.push('/(tabs)/map');
+    saveOfflineTrip(trip).catch(() => {});
+    if (openMap) {
+      setRouteTabMode('hub');
+      router.replace('/(tabs)/map');
+    }
+  }
+
+  async function saveRoute(openMap = true) {
+    if (orderedStops.length < 2) {
+      Alert.alert('Add more stops', 'Add at least a start and one destination before saving the route.');
+      return;
+    }
+    commitTrip(buildTrip(), openMap);
+  }
+
+  function resetRouteDraft() {
+    setActiveDay(1);
+    setDays([1]);
+    setStops([]);
+    setTripLoop(false);
+    setRouteStyle('balanced');
+    setTripBuildMode('recommended');
+    setDistanceMode('hours');
+    setWizardStep(0);
+    setPlannedDays('3');
+    setDriveHoursPerDay('5');
+    setTargetMiles('180');
+    setStartQuery('');
+    setEndQuery('');
+    setRouteName('');
+    setRestDays([]);
+    setDayDriveTargets({});
+    setImportedTripId(null);
+    setSearchResults([]);
+    setInlineSearch(null);
+    setCamps([]);
+    setGas([]);
+    setPois([]);
+  }
+
+  function beginCleanNewRoute() {
+    resetRouteDraft();
+    setActiveTrip(null);
+    setRouteTabMode('wizard');
+  }
+
+  function startNewRoute() {
+    if (activeTrip) {
+      setShowNewRouteConfirm(true);
+      return;
+    }
+    beginCleanNewRoute();
+  }
+
+  async function saveCloseAndStartNewRoute() {
+    if (activeTrip) {
+      await saveOfflineTrip(activeTrip).catch(() => {});
+      addTripToHistory({
+        trip_id: activeTrip.trip_id,
+        trip_name: activeTrip.plan.trip_name,
+        states: activeTrip.plan.states ?? [],
+        duration_days: activeTrip.plan.duration_days ?? 0,
+        est_miles: activeTrip.plan.total_est_miles ?? activeTrip.plan.daily_itinerary?.reduce((sum, day) => sum + (day.est_miles ?? 0), 0) ?? 0,
+        planned_at: Date.now(),
+      });
+    }
+    setShowNewRouteConfirm(false);
+    beginCleanNewRoute();
+  }
+
+  function discardCloseAndStartNewRoute() {
+    setShowNewRouteConfirm(false);
+    beginCleanNewRoute();
+  }
+
+  async function openSavedRoute(tripId: string) {
+    const trip = activeTrip?.trip_id === tripId ? activeTrip : await loadOfflineTrip(tripId);
+    if (!trip) {
+      Alert.alert('Route not available offline', 'Open this trip from Plan history once online, then save it again so it appears here.');
+      return;
+    }
+    setActiveTrip(trip, true);
+    setRouteTabMode('hub');
+    router.replace('/(tabs)/map');
   }
 
   function renderCampPreview(stop: BuilderStop, label: string, compact = false) {
@@ -1831,47 +1944,59 @@ export default function RouteBuilderScreen() {
   function renderRouteTimeline() {
     if (!hasBaseRoute) return null;
     return (
-      <View style={s.routeTimelineCard}>
-        <View style={s.routeTimelineTop}>
-          <View style={{ flex: 1 }}>
-            <Text style={s.routeTimelineTitle}>Trip overview</Text>
-            <Text style={s.routeTimelineSub}>Scroll days, choose camps, then add fuel and places in the matching segment.</Text>
-          </View>
-          <TouchableOpacity style={s.routeTimelineLoop} onPress={() => setTripLoop(v => !v)}>
-            <Ionicons name={tripLoop ? 'repeat' : 'repeat-outline'} size={13} color={tripLoop ? C.green : C.text3} />
-            <Text style={[s.routeTimelineLoopText, tripLoop && { color: C.green }]}>ROUND</Text>
-          </TouchableOpacity>
-        </View>
+      <View style={s.routeTimelineList}>
         {routeDayPlans.map(plan => {
           const camp = plan.stops.find(st => st.type === 'camp' || st.type === 'motel') ?? null;
+          const maxHours = parsePositiveNumber(dayDriveTargets[plan.day]) ?? planningStats.driveLimit;
+          const overDailyMax = !plan.rest && plan.hours > maxHours + 0.05;
+          const needsOvernight = !plan.complete && plan.day < days[days.length - 1];
+          const statusColor = overDailyMax ? C.yellow : needsOvernight ? C.orange : plan.complete ? C.green : C.text3;
+          const statusText = overDailyMax
+            ? `${fmtHours(plan.hours)} over ${fmtHours(maxHours)} max`
+            : needsOvernight
+              ? 'overnight needed'
+              : plan.complete
+                ? 'overnight set'
+                : 'finish day';
           return (
             <View key={plan.day} style={s.routeDayWrap}>
-              <TouchableOpacity activeOpacity={0.88} style={[s.routeDayCard, activeDay === plan.day && s.routeDayCardActive]} onPress={() => setActiveDay(plan.day)}>
-                <View style={s.routeDayDotCol}>
-                  <View style={[s.routeDayDot, plan.complete && { backgroundColor: C.green, borderColor: C.green }]} />
-                  <View style={s.routeDayStem} />
+              <TouchableOpacity activeOpacity={0.9} style={[s.routeDaySection, activeDay === plan.day && s.routeDaySectionActive]} onPress={() => setActiveDay(plan.day)}>
+                <View style={s.routeDayRail}>
+                  <View style={[s.routeDayDotLarge, { borderColor: statusColor }, plan.complete && !overDailyMax && { backgroundColor: C.green, borderColor: C.green }]} />
+                  <View style={s.routeDayStemLarge} />
                 </View>
-                <View style={{ flex: 1, gap: 8 }}>
+                <View style={s.routeDayContent}>
                   <View style={s.routeDayHeader}>
                     <View style={{ flex: 1 }}>
                       <Text style={s.routeDayTitle}>Day {plan.day}{plan.rest ? ' · Rest' : ''}</Text>
                       <Text style={s.routeDayMeta}>{fmtMi(plan.miles)} · {fmtHours(plan.hours)}{plan.previous ? ` · from ${plan.previous.name.split(',')[0]}` : ''}</Text>
                     </View>
-                    <TouchableOpacity style={s.routeDayMiniBtn} onPress={() => scanDayPlan(plan, 'camps')}>
-                      <Ionicons name="bonfire-outline" size={13} color={C.orange} />
-                    </TouchableOpacity>
-                    <TouchableOpacity style={s.routeDayMiniBtn} onPress={() => scanDayPlan(plan, 'gas')}>
-                      <Ionicons name="flash-outline" size={13} color={C.orange} />
-                    </TouchableOpacity>
+                    <View style={[s.routeDayStatusPill, { borderColor: statusColor + '66', backgroundColor: statusColor + '12' }]}>
+                      <Text style={[s.routeDayStatusText, { color: statusColor }]} numberOfLines={1}>{statusText}</Text>
+                    </View>
                   </View>
                   {camp ? (
-                    renderCampPreview(camp, plan.rest ? 'OVERNIGHT / REST CAMP' : 'OVERNIGHT CAMP', true)
+                    renderCampPreview(camp, plan.rest ? 'OVERNIGHT / REST CAMP' : 'OVERNIGHT CAMP')
                   ) : (
                     <TouchableOpacity style={s.routeDayEmptyCamp} onPress={() => scanDayPlan(plan, 'camps')}>
-                      <Ionicons name="add-circle-outline" size={14} color={C.orange} />
+                      <Ionicons name="add-circle-outline" size={18} color={C.orange} />
                       <Text style={s.routeDayEmptyCampText}>{plan.frameworkTarget ? 'Choose camp near day finish' : 'Choose overnight camp'}</Text>
                     </TouchableOpacity>
                   )}
+                  <View style={s.routeDayActionRail}>
+                    <TouchableOpacity style={s.routeDayActionBtn} onPress={() => scanDayPlan(plan, 'camps')}>
+                      <Ionicons name="bonfire-outline" size={13} color={C.orange} />
+                      <Text style={s.routeDayActionText}>CAMP</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={s.routeDayActionBtn} onPress={() => scanDayPlan(plan, 'gas')}>
+                      <Ionicons name="flash-outline" size={13} color={C.orange} />
+                      <Text style={s.routeDayActionText}>FUEL</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={s.routeDayActionBtn} onPress={() => scanDayPlan(plan, 'poi')}>
+                      <Ionicons name="trail-sign-outline" size={13} color={C.orange} />
+                      <Text style={s.routeDayActionText}>PLACES</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               </TouchableOpacity>
               {renderInlineResultsForDay(plan.day)}
@@ -1969,8 +2094,123 @@ export default function RouteBuilderScreen() {
     );
   }
 
-  function renderWizardSetup() {
+  function renderRouteHub() {
+    const savedRoutes = tripHistory.slice(0, 10);
+    return (
+      <SafeAreaView style={s.wizardScreen}>
+        <View style={s.wizardScreenTop}>
+          <Text style={s.title}>Route Builder</Text>
+          <TouchableOpacity style={s.headerBtn} onPress={() => setShowPlaceFilters(true)} accessibilityLabel="Route Builder options">
+            <Ionicons name="options-outline" size={17} color={C.orange} />
+          </TouchableOpacity>
+        </View>
+        <ScrollView style={s.body} contentContainerStyle={s.routeHubContent} showsVerticalScrollIndicator={false}>
+          <View style={s.routeHubHero}>
+            <View style={s.routeHubIcon}>
+              <Ionicons name="map-outline" size={22} color={C.orange} />
+            </View>
+            <Text style={s.routeHubTitle}>Plan a route</Text>
+            <Text style={s.routeHubText}>Build a new trip with your rig, daily pace, fuel range, camps, and route style. Finished routes open on the Map workspace.</Text>
+            <TouchableOpacity style={s.routeHubPrimary} onPress={startNewRoute}>
+              <Ionicons name="add" size={16} color="#fff" />
+              <Text style={s.routeHubPrimaryText}>BUILD NEW ROUTE</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={[s.routeHubRig, rigRouteSummary.ready && s.routeHubRigReady]}>
+            <View style={s.routeHubRigIcon}>
+              <Ionicons name={rigRouteSummary.ready ? 'car-sport-outline' : 'alert-circle-outline'} size={17} color={rigRouteSummary.ready ? C.green : C.yellow} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.routeHubRigTitle}>{rigRouteSummary.title}</Text>
+              <Text style={s.routeHubRigMeta}>{rigRouteSummary.meta}</Text>
+            </View>
+            <TouchableOpacity style={s.routeHubSmallBtn} onPress={() => router.push('/(tabs)/profile')}>
+              <Text style={s.routeHubSmallText}>{rigRouteSummary.ready ? 'EDIT' : 'ADD'}</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={s.routeHubSectionHead}>
+            <Text style={s.routeHubSectionTitle}>Saved routes</Text>
+            {activeTrip ? (
+              <TouchableOpacity style={s.routeHubTinyAction} onPress={() => router.replace('/(tabs)/map')}>
+                <Ionicons name="map-outline" size={12} color={C.orange} />
+                <Text style={s.routeHubTinyText}>OPEN ACTIVE</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+
+          {savedRoutes.length ? (
+            savedRoutes.map(route => (
+              <TouchableOpacity key={route.trip_id} style={s.savedRouteCard} onPress={() => openSavedRoute(route.trip_id)}>
+                <View style={s.savedRouteTop}>
+                  <View style={s.savedRouteIcon}>
+                    <Ionicons name="trail-sign-outline" size={16} color={C.orange} />
+                  </View>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={s.savedRouteName} numberOfLines={2}>{route.trip_name}</Text>
+                    <Text style={s.savedRouteMeta} numberOfLines={1}>
+                      {[route.duration_days ? `${route.duration_days} days` : null, route.est_miles ? `${route.est_miles} mi` : null, (route.states ?? []).join(' · ')].filter(Boolean).join(' · ')}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={17} color={C.text3} />
+                </View>
+                <View style={s.savedRouteActions}>
+                  <View style={s.savedRouteStat}>
+                    <Text style={s.savedRouteStatValue}>{route.duration_days || '-'}</Text>
+                    <Text style={s.savedRouteStatLabel}>DAYS</Text>
+                  </View>
+                  <View style={s.savedRouteStat}>
+                    <Text style={s.savedRouteStatValue}>{route.est_miles || '-'}</Text>
+                    <Text style={s.savedRouteStatLabel}>MILES</Text>
+                  </View>
+                  <View style={s.savedRouteOpen}>
+                    <Ionicons name="map-outline" size={13} color={C.green} />
+                    <Text style={s.savedRouteOpenText}>OPEN ON MAP</Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            ))
+          ) : (
+            <View style={s.routeHubEmpty}>
+              <Ionicons name="map-outline" size={20} color={C.text3} />
+              <Text style={s.routeHubEmptyTitle}>No saved routes yet</Text>
+              <Text style={s.routeHubEmptyText}>Build your first route, then it will appear here for quick map editing or navigation.</Text>
+            </View>
+          )}
+        </ScrollView>
+        <Modal visible={showNewRouteConfirm} transparent animationType="fade" onRequestClose={() => setShowNewRouteConfirm(false)}>
+          <View style={s.confirmOverlay}>
+            <View style={s.confirmCard}>
+              <View style={s.confirmIcon}>
+                <Ionicons name="trail-sign-outline" size={22} color={C.orange} />
+              </View>
+              <Text style={s.confirmTitle}>Start a new route?</Text>
+              <Text style={s.confirmText}>
+                You already have an active route open. Save and close it before starting fresh, or discard it and clear the workspace.
+              </Text>
+              <TouchableOpacity style={s.confirmPrimary} onPress={saveCloseAndStartNewRoute}>
+                <Ionicons name="save-outline" size={15} color="#050505" />
+                <Text style={s.confirmPrimaryText}>SAVE & CLOSE</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.confirmDanger} onPress={discardCloseAndStartNewRoute}>
+                <Ionicons name="trash-outline" size={15} color={C.orange} />
+                <Text style={s.confirmDangerText}>DISCARD & CLOSE</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.confirmCancel} onPress={() => setShowNewRouteConfirm(false)}>
+                <Text style={s.confirmCancelText}>CANCEL</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+        <PaywallModal visible={paywallVisible} code={paywallCode} message={paywallMessage} onClose={() => setPaywallVisible(false)} />
+      </SafeAreaView>
+    );
+  }
+
+  function renderWizardSetup(fullScreen = false) {
     const steps = ['Start', 'Destination', 'Style', 'Pace'];
+    const stepMeta = steps[wizardStep];
     const canMoveNext = wizardStep === 0
       ? !!(startQuery.trim() || orderedStops[0] || userLoc)
       : wizardStep === 1
@@ -1978,45 +2218,63 @@ export default function RouteBuilderScreen() {
       : true;
     const nextStep = () => setWizardStep(step => Math.min(3, step + 1));
     return (
-      <View style={s.wizardCard}>
-        <View style={s.wizardSteps}>
+      <View style={[s.wizardCard, fullScreen && s.wizardCardFull]}>
+        <View style={s.wizardHeader}>
+          <View>
+            <Text style={s.wizardEyebrow}>STEP {wizardStep + 1} OF {steps.length}</Text>
+            <Text style={s.wizardHeaderTitle}>{stepMeta}</Text>
+          </View>
+          <Text style={s.wizardHeaderMeta}>{hasBaseRoute ? 'EDIT BASE' : 'BUILD BASE'}</Text>
+        </View>
+        <View style={s.wizardTrack}>
           {steps.map((label, idx) => (
-            <TouchableOpacity key={label} style={[s.wizardStep, wizardStep === idx && s.wizardStepActive]} onPress={() => setWizardStep(idx)}>
-              <Text style={[s.wizardStepNum, wizardStep === idx && s.wizardStepNumActive]}>{idx + 1}</Text>
-              <Text style={[s.wizardStepText, wizardStep === idx && s.wizardStepTextActive]}>{label}</Text>
+            <TouchableOpacity key={label} style={s.wizardTrackItem} onPress={() => setWizardStep(idx)}>
+              <View style={[s.wizardTrackDot, idx <= wizardStep && s.wizardTrackDotActive]}>
+                <Text style={[s.wizardTrackNum, idx <= wizardStep && s.wizardTrackNumActive]}>{idx + 1}</Text>
+              </View>
+              <View style={[s.wizardTrackLine, idx < wizardStep && s.wizardTrackLineActive]} />
             </TouchableOpacity>
           ))}
         </View>
 
         {wizardStep === 0 ? (
           <View style={s.wizardPane}>
-            <View>
+            <View style={s.wizardQuestion}>
               <Text style={s.wizardTitle}>Where are you starting?</Text>
               <Text style={s.wizardHelp}>Use current location or type a city, trailhead, address, or coordinates.</Text>
             </View>
+            <View style={[s.routeHubRig, rigRouteSummary.ready && s.routeHubRigReady]}>
+              <View style={s.routeHubRigIcon}>
+                <Ionicons name={rigRouteSummary.ready ? 'car-sport-outline' : 'alert-circle-outline'} size={17} color={rigRouteSummary.ready ? C.green : C.yellow} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.routeHubRigTitle}>{rigRouteSummary.ready ? 'Planning with your rig' : 'Rig profile missing'}</Text>
+                <Text style={s.routeHubRigMeta} numberOfLines={2}>{rigRouteSummary.ready ? rigRouteSummary.meta : 'Trailhead will use conservative defaults until you add vehicle specs.'}</Text>
+              </View>
+            </View>
             <View style={s.setupInputWrap}>
-              <View style={s.setupLabelRow}>
-                <Text style={s.setupLabel}>START</Text>
+              <Text style={s.setupLabel}>START</Text>
+              <View style={s.setupInputRow}>
+                <TextInput
+                  value={startQuery}
+                  onChangeText={setStartQuery}
+                  placeholder={orderedStops[0]?.name?.split(',')[0] ?? 'Search city, trailhead, address'}
+                  placeholderTextColor={C.text3}
+                  style={[s.setupInput, s.setupInputInline]}
+                  returnKeyType="next"
+                  blurOnSubmit={false}
+                  onSubmitEditing={() => { if (canMoveNext) nextStep(); }}
+                />
                 <TouchableOpacity style={s.currentLocationBtn} onPress={async () => { await setWizardStartFromLocation(); setWizardStep(1); }}>
-                  <Ionicons name="locate-outline" size={10} color={C.orange} />
+                  <Ionicons name="locate-outline" size={13} color={C.orange} />
                   <Text style={s.currentLocationText}>CURRENT</Text>
                 </TouchableOpacity>
               </View>
-              <TextInput
-                value={startQuery}
-                onChangeText={setStartQuery}
-                placeholder={orderedStops[0]?.name?.split(',')[0] ?? (userLoc ? 'Current location' : 'Denver, address, coordinates')}
-                placeholderTextColor={C.text3}
-                style={s.setupInput}
-                returnKeyType="next"
-                blurOnSubmit={false}
-                onSubmitEditing={() => { if (canMoveNext) nextStep(); }}
-              />
             </View>
           </View>
         ) : wizardStep === 1 ? (
           <View style={s.wizardPane}>
-            <View>
+            <View style={s.wizardQuestion}>
               <Text style={s.wizardTitle}>Where are you headed?</Text>
               <Text style={s.wizardHelp}>Pick the final destination first. Trailhead will spread day targets and camp searches between start and finish.</Text>
             </View>
@@ -2036,9 +2294,25 @@ export default function RouteBuilderScreen() {
           </View>
         ) : wizardStep === 2 ? (
           <View style={s.wizardPane}>
-            <View>
+            <View style={s.wizardQuestion}>
               <Text style={s.wizardTitle}>Choose the route feel</Text>
               <Text style={s.wizardHelp}>Recommended builds a base route with day targets. Blank keeps it simple for hand-building.</Text>
+            </View>
+            <View style={s.loopChoiceRow}>
+              <TouchableOpacity style={[s.loopChoice, !tripLoop && s.loopChoiceActive]} onPress={() => setTripLoop(false)}>
+                <Ionicons name="arrow-forward-outline" size={15} color={!tripLoop ? C.orange : C.text3} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[s.loopChoiceTitle, !tripLoop && { color: C.orange }]}>One way</Text>
+                  <Text style={s.loopChoiceText}>Start and finish can be different places.</Text>
+                </View>
+              </TouchableOpacity>
+              <TouchableOpacity style={[s.loopChoice, tripLoop && s.loopChoiceActive]} onPress={() => setTripLoop(true)}>
+                <Ionicons name="repeat-outline" size={15} color={tripLoop ? C.orange : C.text3} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[s.loopChoiceTitle, tripLoop && { color: C.orange }]}>Loop</Text>
+                  <Text style={s.loopChoiceText}>Build back toward the start after the turnaround.</Text>
+                </View>
+              </TouchableOpacity>
             </View>
             <View style={s.modeRow}>
               {(['recommended', 'blank'] as TripBuildMode[]).map(mode => (
@@ -2064,7 +2338,7 @@ export default function RouteBuilderScreen() {
           </View>
         ) : (
           <View style={s.wizardPane}>
-            <View>
+            <View style={s.wizardQuestion}>
               <Text style={s.wizardTitle}>Set the daily pace</Text>
               <Text style={s.wizardHelp}>Hours per day is the max you want to drive. Trailhead should not force every day to hit that limit.</Text>
             </View>
@@ -2091,17 +2365,29 @@ export default function RouteBuilderScreen() {
                   <Text style={[s.segmentText, distanceMode === mode && { color: '#fff' }]}>{mode === 'hours' ? 'HOURS' : 'MILES'}</Text>
                 </TouchableOpacity>
               ))}
-              <TouchableOpacity
-                style={[s.segmentBtn, tripLoop && s.segmentBtnActive]}
-                onPress={() => {
-                  if (tripLoop) setTripLoop(false);
-                  else if (orderedStops.length > 1) closeLoopToStart();
-                  else setTripLoop(true);
-                }}
-              >
-                <Text style={[s.segmentText, tripLoop && { color: '#fff' }]}>ROUND</Text>
-              </TouchableOpacity>
             </View>
+          </View>
+        )}
+
+        {(hasBaseRoute || wizardStep === 3) && (
+          <View style={s.routeNameOptions}>
+            <View style={s.routeNameField}>
+              <Text style={s.setupLabel}>ROUTE NAME</Text>
+              <TextInput
+                style={s.routeNameInput}
+                value={routeName}
+                onChangeText={setRouteName}
+                placeholder="Name this route"
+                placeholderTextColor={C.text3}
+                returnKeyType="done"
+              />
+            </View>
+            {hasBaseRoute ? (
+              <TouchableOpacity style={s.routeNameSave} onPress={() => saveRoute(false)}>
+                <Ionicons name="save-outline" size={15} color={C.orange} />
+                <Text style={s.routeNameSaveText}>SAVE</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         )}
 
@@ -2118,7 +2404,7 @@ export default function RouteBuilderScreen() {
           ) : (
             <TouchableOpacity style={s.wizardNextBtn} onPress={buildRouteFramework} disabled={buildingFramework}>
               {buildingFramework ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="map-outline" size={13} color="#fff" />}
-              <Text style={s.wizardNextText}>{hasBaseRoute ? 'REBUILD ROUTE' : 'PREVIEW ROUTE'}</Text>
+              <Text style={s.wizardNextText}>{hasBaseRoute ? 'REBUILD ON MAP' : 'BUILD ON MAP'}</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -2126,160 +2412,59 @@ export default function RouteBuilderScreen() {
     );
   }
 
-  return (
-    <SafeAreaView style={s.container}>
-      <View style={s.header}>
-        <View>
-          <Text style={s.kicker}>MANUAL PLANNER</Text>
+  if (routeTabMode === 'hub') {
+    return renderRouteHub();
+  }
+
+  if (!hasBaseRoute) {
+    return (
+      <SafeAreaView style={s.wizardScreen}>
+        <View style={s.wizardScreenTop}>
           <Text style={s.title}>Route Builder</Text>
+          <TouchableOpacity style={s.headerBtn} onPress={() => setRouteTabMode('hub')} accessibilityLabel="Back to saved routes">
+            <Ionicons name="close" size={17} color={C.orange} />
+          </TouchableOpacity>
         </View>
-        <TouchableOpacity style={s.headerBtn} onPress={() => saveRoute(false)}>
-          <Ionicons name="save-outline" size={16} color={C.orange} />
-          <Text style={s.headerBtnText}>SAVE</Text>
+        {renderWizardSetup(true)}
+        <PaywallModal visible={paywallVisible} code={paywallCode} message={paywallMessage} onClose={() => setPaywallVisible(false)} />
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={s.wizardScreen}>
+      <View style={s.wizardScreenTop}>
+        <Text style={s.title}>Route Builder</Text>
+        <TouchableOpacity style={s.headerBtn} onPress={() => setShowPlaceFilters(true)} accessibilityLabel="Route Builder options">
+          <Ionicons name="options-outline" size={17} color={C.orange} />
         </TouchableOpacity>
       </View>
 
-      <View style={s.nameBar}>
-        <Ionicons name="trail-sign-outline" size={15} color={C.orange} />
-        <TextInput
-          style={s.nameInput}
-          value={routeName}
-          onChangeText={setRouteName}
-          placeholder="Name this route"
-          placeholderTextColor={C.text3}
-          returnKeyType="done"
-        />
-      </View>
-
-      <View style={s.mapWrap}>
-        <NativeMap
-          ref={mapRef}
-          waypoints={mapWaypoints}
-          camps={mapCamps}
-          gas={gas.map(g => ({ lat: g.lat, lng: g.lng, name: g.name }))}
-          pois={mapPois}
-          reports={[]}
-          communityPins={[]}
-          searchMarker={anchor ? { lat: anchor.lat, lng: anchor.lng, name: anchor.name } : null}
-          userLoc={userLoc}
-          navMode={false}
-          navIdx={0}
-          navHeading={null}
-          navSpeed={null}
-          mapLayer="topo"
-          routeOpts={{ avoidTolls: false, avoidHighways: false, backRoads: true, noFerries: true }}
-          showLandOverlay={false}
-          showUsgsOverlay={false}
-          showTerrain={false}
-          showMvum={false}
-          showFire={false}
-          showAva={false}
-          showRadar={false}
-          onMapReady={() => {
-            if (didInitialMapFitRef.current) return;
-            didInitialMapFitRef.current = true;
-            if (anchor) fly(anchor.lat, anchor.lng, 8);
-            else if (userLoc) fly(userLoc.lat, userLoc.lng, 9);
-          }}
-          onBoundsChange={() => {}}
-          onMapTap={(lat, lng) => {
-            if (lat == null || lng == null) return;
-            addStop({
-              name: `${lat.toFixed(5)}, ${lng.toFixed(5)}`,
-              lat, lng,
-              type: pendingType,
-              description: 'Map-selected route stop.',
-              land_type: pendingType === 'fuel' || pendingType === 'motel' ? 'town' : 'route',
-              source: 'map',
-            });
-          }}
-          onMapLongPress={() => {}}
-          onCampTap={openCampDetail}
-          onGasTap={station => addGas({ id: `gas_${station.lat}_${station.lng}`, name: station.name, lat: station.lat, lng: station.lng, fuel_types: '', address: '' })}
-          onPoiTap={poi => addPoi({ id: `poi_${poi.lat}_${poi.lng}`, name: poi.name, lat: poi.lat, lng: poi.lng, type: poi.type as OsmPoi['type'] })}
-          onTileCampTap={(name, _kind, lat, lng) => addStop({ name, lat, lng, type: 'camp', description: 'Map camp selected in Route Builder.', land_type: 'camp', source: 'map' })}
-          onBaseCampTap={(name, lat, lng, landType) => addStop({ name, lat, lng, type: 'camp', description: 'Map camp selected in Route Builder.', land_type: landType, source: 'map' })}
-          onTrailTap={(name, lat, lng) => addStop({ name, lat, lng, type: 'waypoint', description: 'Trail stop selected in Route Builder.', land_type: 'route', source: 'map' })}
-          onWaypointTap={(idx) => {
-            const st = orderedStops[idx];
-            if (st) fly(st.lat, st.lng, 13);
-          }}
-          onRouteReady={() => {}}
-          onRoutePersist={() => {}}
-          onError={() => {}}
-        />
-        <View style={s.mapHint}>
-          <Ionicons name="hand-left-outline" size={12} color="#fff" />
-          <Text style={s.mapHintText}>Tap map to add selected stop type</Text>
+      <View style={s.routeEditorPanel}>
+        <View style={s.workspaceHandleArea}>
+          <View style={s.workspaceHandle} />
+          <View style={s.workspaceHandleSummary}>
+            <View>
+              <Text style={s.workspaceSheetTitle}>{resolvedRouteName()}</Text>
+              <Text style={s.workspaceSheetMeta}>{fmtMi(totals.miles)} · {fmtHours(planningStats.driveHours)} · {days.length} days · {totals.camps} camps</Text>
+            </View>
+            <Ionicons name="map-outline" size={18} color={C.text3} />
+          </View>
         </View>
-        <TouchableOpacity style={s.mapFilterPill} onPress={() => setShowPlaceFilters(true)}>
-          <Ionicons name="filter" size={13} color="#fff" />
-          <Text style={s.mapFilterPillText}>{activePlaceFilters.length} places</Text>
-        </TouchableOpacity>
-      </View>
 
       <ScrollView style={s.body} contentContainerStyle={s.bodyContent} showsVerticalScrollIndicator={false}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.dayTabs}>
-          {days.map(day => (
-            <TouchableOpacity key={day} style={[s.dayTab, activeDay === day && s.dayTabActive]} onPress={() => setActiveDay(day)}>
-              <Text style={[s.dayTabText, activeDay === day && s.dayTabTextActive]}>DAY {day}</Text>
-            </TouchableOpacity>
-          ))}
-          <TouchableOpacity style={s.dayAdd} onPress={addDay}>
-            <Ionicons name="add" size={14} color={C.orange} />
+        <View style={s.timelineSheetActions}>
+          <TouchableOpacity style={s.routeTimelineAddDay} onPress={addDay}>
+            <Ionicons name="add" size={13} color={C.orange} />
+            <Text style={s.routeTimelineAddText}>DAY</Text>
           </TouchableOpacity>
-        </ScrollView>
-
-        <View style={s.builderHero}>
-          <View style={s.builderHeroTop}>
-            <View style={{ flex: 1 }}>
-              <Text style={s.kicker}>{hasBaseRoute ? 'TRIP WORKSPACE' : 'BASE ROUTE'}</Text>
-              <Text style={s.builderHeroTitle}>{hasBaseRoute ? baseRouteSummary : 'Build the route first'}</Text>
-              <Text style={s.builderHeroText}>
-                {hasBaseRoute
-                  ? 'Scroll the route, fill each day with fuel, wild stops, and legal camp options.'
-                  : 'Pick a route shape, start, destination, rig pace, and camp style. Trailhead creates the base route, then you tune each day.'}
-              </Text>
-            </View>
-            <View style={s.progressBadge}>
-              <Text style={s.progressBadgeNum}>{hasBaseRoute ? `${realOvernights}/${routeDayPlans.length}` : `${setupProgress}/3`}</Text>
-              <Text style={s.progressBadgeText}>{hasBaseRoute ? 'CAMPS' : 'READY'}</Text>
-            </View>
-          </View>
-
-          {renderWizardSetup()}
-
-          <View style={s.routeStatStrip}>
-            <View style={s.routeStatItem}>
-              <Ionicons name="time-outline" size={14} color={C.text3} />
-              <Text style={s.routeStatValue}>{fmtHours(planningStats.driveHours)}</Text>
-            </View>
-            <View style={s.routeStatItem}>
-              <Ionicons name="car-outline" size={14} color={C.text3} />
-              <Text style={s.routeStatValue}>{fmtMi(totals.miles)}</Text>
-            </View>
-            <View style={s.routeStatItem}>
-              <Ionicons name="flash-outline" size={14} color={C.text3} />
-              <Text style={s.routeStatValue}>${Math.round(planningStats.fuelCost)}</Text>
-            </View>
-          </View>
-
-          {routeStates.length > 0 ? (
-            <View style={s.gasSourceStrip}>
-              <Ionicons name={gasPriceStatus === 'live' ? 'cloud-done-outline' : gasPriceStatus === 'loading' ? 'cloud-download-outline' : 'cloud-offline-outline'} size={13} color={gasPriceStatus === 'live' ? C.green : C.text3} />
-              <Text style={s.gasSourceText} numberOfLines={2}>
-                {gasPriceStatus === 'live'
-                  ? `AAA state avg: ${routeStates.slice(0, 4).map(st => `${st} $${(stateGasPrices[st] ?? planningStats.price).toFixed(2)}`).join(' · ')}`
-                  : gasPriceStatus === 'loading'
-                    ? 'Loading current state gas averages for this route'
-                    : `Using fallback gas price until live state averages load`}
-              </Text>
-            </View>
-          ) : null}
-
-          {renderRouteTimeline()}
-
+          <TouchableOpacity style={s.routeTimelineLoop} onPress={() => setTripLoop(v => !v)}>
+            <Ionicons name={tripLoop ? 'repeat' : 'repeat-outline'} size={13} color={tripLoop ? C.green : C.text3} />
+            <Text style={[s.routeTimelineLoopText, tripLoop && { color: C.green }]}>ROUND</Text>
+          </TouchableOpacity>
         </View>
+
+        {renderRouteTimeline()}
 
         <View style={s.typeRow}>
           {(['start', 'fuel', 'waypoint', 'camp', 'motel'] as BuilderStopType[]).map(type => (
@@ -2456,6 +2641,7 @@ export default function RouteBuilderScreen() {
           );
         })}
       </ScrollView>
+      </View>
 
       <View style={s.footer} pointerEvents="box-none">
         <View>
@@ -2464,7 +2650,7 @@ export default function RouteBuilderScreen() {
         </View>
         <TouchableOpacity style={s.previewBtn} onPress={() => saveRoute(true)}>
           <Ionicons name="map-outline" size={16} color="#fff" />
-          <Text style={s.previewText}>SAVE & OPEN</Text>
+          <Text style={s.previewText}>OPEN ON MAP</Text>
         </TouchableOpacity>
       </View>
 
@@ -2554,7 +2740,7 @@ export default function RouteBuilderScreen() {
         </TouchableOpacity>
       </Modal>
 
-      <Modal visible={showCampDetail} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowCampDetail(false)}>
+      <Modal visible={showCampDetail} animationType="slide" presentationStyle="pageSheet" onRequestClose={closeCampDetail}>
         <View style={s.detailModal}>
           {campDetail && (
             <ScrollView showsVerticalScrollIndicator={false}>
@@ -2573,7 +2759,7 @@ export default function RouteBuilderScreen() {
               <View style={s.detailContent}>
                 <View style={s.detailHeader}>
                   <Text style={s.detailName}>{campDetail.name}</Text>
-                  <TouchableOpacity style={s.detailClose} onPress={() => setShowCampDetail(false)}>
+                  <TouchableOpacity style={s.detailClose} onPress={closeCampDetail}>
                     <Ionicons name="close" size={22} color={C.text} />
                   </TouchableOpacity>
                 </View>
@@ -2647,7 +2833,7 @@ export default function RouteBuilderScreen() {
                     <View style={s.aiHeader}>
                       <Text style={s.detailSectionTitle}>TRAILHEAD BRIEF</Text>
                       {campInsight.star_rating ? (
-                        <Text style={s.aiStars}>{'★'.repeat(campInsight.star_rating)}{'☆'.repeat(5 - campInsight.star_rating)}</Text>
+                        <Text style={s.aiStars}>{campInsight.star_rating}/5</Text>
                       ) : null}
                     </View>
                     {campInsight.insider_tip ? (
@@ -2734,28 +2920,6 @@ export default function RouteBuilderScreen() {
         </TouchableOpacity>
       </Modal>
 
-      <Modal visible={showBuildSuccess} transparent animationType="fade" onRequestClose={() => setShowBuildSuccess(false)}>
-        <TouchableOpacity style={s.buildSuccessOverlay} activeOpacity={1} onPress={() => setShowBuildSuccess(false)}>
-          <TouchableOpacity activeOpacity={1} style={s.buildSuccessCard}>
-            <View style={s.successIconWrap}>
-              <Ionicons name="sparkles-outline" size={28} color={C.orange} />
-            </View>
-            <Text style={s.buildSuccessTitle}>Base Route Built</Text>
-            <Text style={s.buildSuccessText}>
-              Trailhead split {baseRouteSummary} into {days.length} day segments. Start with each day card to choose camps, fuel, and wild stops.
-            </Text>
-            <View style={s.successChecks}>
-              <View style={s.successCheck}><Ionicons name="checkmark" size={14} color={C.green} /><Text style={s.successCheckText}>{fmtMi(totals.miles)}</Text></View>
-              <View style={s.successCheck}><Ionicons name="checkmark" size={14} color={C.green} /><Text style={s.successCheckText}>{fmtHours(planningStats.driveHours)}</Text></View>
-              <View style={s.successCheck}><Ionicons name="checkmark" size={14} color={C.green} /><Text style={s.successCheckText}>{days.length} days</Text></View>
-            </View>
-            <TouchableOpacity style={s.successPrimaryBtn} onPress={() => setShowBuildSuccess(false)}>
-              <Text style={s.successPrimaryText}>EXPLORE MY ROUTE</Text>
-            </TouchableOpacity>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
-
       <PaywallModal visible={paywallVisible} code={paywallCode} message={paywallMessage} onClose={() => setPaywallVisible(false)} />
     </SafeAreaView>
   );
@@ -2763,83 +2927,274 @@ export default function RouteBuilderScreen() {
 
 const makeStyles = (C: ColorPalette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
+  wizardScreen: { flex: 1, backgroundColor: C.bg, paddingHorizontal: 20 },
+  wizardScreenTop: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingTop: 8, paddingBottom: 20,
+  },
+  workspaceContainer: { flex: 1, backgroundColor: C.bg },
+  workspaceTopBar: {
+    position: 'absolute', top: 10, left: 16, right: 16,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+  },
+  workspaceSheet: {
+    position: 'absolute', left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(8,8,10,0.88)',
+    borderTopLeftRadius: 30, borderTopRightRadius: 30,
+    borderWidth: 1, borderBottomWidth: 0, borderColor: 'rgba(255,255,255,0.09)',
+    overflow: 'hidden',
+    shadowColor: '#000', shadowOpacity: 0.46, shadowRadius: 34, shadowOffset: { width: 0, height: -16 },
+    elevation: 12,
+  },
+  workspaceSheetFull: { height: '97%' },
+  workspaceSheetMid: { height: '55%' },
+  workspaceSheetPeek: { height: 92 },
+  routeEditorPanel: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.045)',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    overflow: 'hidden',
+    marginBottom: 116,
+  },
+  workspaceHandleArea: { paddingTop: 8, paddingHorizontal: 18, paddingBottom: 6, gap: 6 },
+  workspaceHandle: { width: 58, height: 5, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.24)', alignSelf: 'center' },
+  workspaceHandleSummary: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  workspaceSheetTitle: { color: C.text, fontSize: 17, fontWeight: '900' },
+  workspaceSheetMeta: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 1 },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderColor: C.border, backgroundColor: C.s1,
+    paddingHorizontal: 16, paddingVertical: 8, borderBottomWidth: 1, borderColor: 'rgba(255,255,255,0.06)', backgroundColor: 'rgba(5,5,5,0.84)',
   },
   kicker: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '800', letterSpacing: 1 },
-  title: { color: C.text, fontSize: 22, fontWeight: '900', letterSpacing: 0 },
-  headerBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: C.orange + '55', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7 },
+  title: { color: C.text, fontSize: 14, fontWeight: '900', letterSpacing: 0 },
+  headerBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.055)' },
   headerBtnText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '800' },
   nameBar: {
     flexDirection: 'row', alignItems: 'center', gap: 9,
     paddingHorizontal: 16, paddingVertical: 10,
-    borderBottomWidth: 1, borderColor: C.border, backgroundColor: C.bg,
+    borderBottomWidth: 1, borderColor: 'rgba(255,255,255,0.06)', backgroundColor: 'rgba(5,5,5,0.84)',
   },
   nameInput: {
     flex: 1, color: C.text, fontSize: 14, fontWeight: '700',
-    borderWidth: 1, borderColor: C.border, borderRadius: 10,
-    backgroundColor: C.s2, paddingHorizontal: 12, paddingVertical: 9,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)', borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.055)', paddingHorizontal: 12, paddingVertical: 9,
   },
-  mapWrap: { height: 250, backgroundColor: C.s2 },
-  mapHint: { position: 'absolute', left: 12, bottom: 10, maxWidth: '62%', flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(0,0,0,0.68)', borderRadius: 16, paddingHorizontal: 10, paddingVertical: 6 },
-  mapHintText: { flexShrink: 1, color: '#fff', fontSize: 10, fontFamily: mono },
-  mapFilterPill: { position: 'absolute', right: 12, top: 12, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(0,0,0,0.68)', borderRadius: 16, paddingHorizontal: 10, paddingVertical: 6 },
-  mapFilterPillText: { color: '#fff', fontSize: 10, fontFamily: mono, fontWeight: '800' },
   body: { flex: 1 },
-  bodyContent: { padding: 14, paddingBottom: 160, gap: 12 },
+  bodyContent: { padding: 12, paddingTop: 0, paddingBottom: 150, gap: 14 },
+  routeHubContent: { paddingBottom: 120, gap: 14 },
+  routeHubHero: {
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)', borderRadius: 26,
+    backgroundColor: 'rgba(255,255,255,0.055)', padding: 18, gap: 14,
+    shadowColor: '#000', shadowOpacity: 0.34, shadowRadius: 28, shadowOffset: { width: 0, height: 14 },
+  },
+  routeHubIcon: {
+    width: 48, height: 48, borderRadius: 16,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.07)', alignItems: 'center', justifyContent: 'center',
+  },
+  routeHubTitle: { color: C.text, fontSize: 30, lineHeight: 35, fontWeight: '800' },
+  routeHubText: { color: C.text3, fontSize: 14, lineHeight: 20 },
+  routeHubPrimary: {
+    minHeight: 52, borderRadius: 16, backgroundColor: C.silverBright,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    shadowColor: '#fff', shadowOpacity: 0.16, shadowRadius: 18, shadowOffset: { width: 0, height: 0 },
+  },
+  routeHubPrimaryText: { color: '#050505', fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
+  routeHubRig: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.045)', padding: 11,
+  },
+  routeHubRigReady: { borderColor: C.green + '44', backgroundColor: C.green + '10' },
+  routeHubRigIcon: {
+    width: 34, height: 34, borderRadius: 12,
+    borderWidth: 1, borderColor: C.border, backgroundColor: C.s1,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  routeHubRigTitle: { color: C.text, fontSize: 12, fontWeight: '900' },
+  routeHubRigMeta: { color: C.text3, fontSize: 10, lineHeight: 14, marginTop: 2 },
+  routeHubSmallBtn: {
+    minHeight: 32, borderRadius: 10, borderWidth: 1, borderColor: C.orange + '55',
+    backgroundColor: C.orange + '10', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10,
+  },
+  routeHubSmallText: { color: C.orange, fontSize: 8, fontFamily: mono, fontWeight: '900' },
+  routeHubSectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 4 },
+  routeHubSectionTitle: { color: C.text, fontSize: 15, fontWeight: '900' },
+  routeHubTinyAction: {
+    minHeight: 30, flexDirection: 'row', alignItems: 'center', gap: 5,
+    borderWidth: 1, borderColor: C.orange + '44', borderRadius: 999,
+    backgroundColor: C.orange + '10', paddingHorizontal: 10,
+  },
+  routeHubTinyText: { color: C.orange, fontSize: 8, fontFamily: mono, fontWeight: '900' },
+  savedRouteCard: {
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.052)', padding: 12, gap: 12,
+    shadowColor: '#000', shadowOpacity: 0.24, shadowRadius: 22, shadowOffset: { width: 0, height: 10 },
+  },
+  savedRouteTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  savedRouteIcon: {
+    width: 38, height: 38, borderRadius: 13,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.055)', alignItems: 'center', justifyContent: 'center',
+  },
+  savedRouteName: { color: C.text, fontSize: 15, lineHeight: 20, fontWeight: '900' },
+  savedRouteMeta: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 3 },
+  savedRouteActions: { flexDirection: 'row', alignItems: 'stretch', gap: 8 },
+  savedRouteStat: {
+    width: 68, minHeight: 48, borderWidth: 1, borderColor: C.border,
+    borderRadius: 14, backgroundColor: 'rgba(5,5,5,0.38)', alignItems: 'center', justifyContent: 'center',
+  },
+  savedRouteStatValue: { color: C.text, fontSize: 13, fontFamily: mono, fontWeight: '900' },
+  savedRouteStatLabel: { color: C.text3, fontSize: 7, fontFamily: mono, fontWeight: '900', marginTop: 2 },
+  savedRouteOpen: {
+    flex: 1, minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.07)',
+  },
+  savedRouteOpenText: { color: C.silverBright, fontSize: 9, fontFamily: mono, fontWeight: '900' },
+  routeHubEmpty: {
+    minHeight: 150, borderWidth: 1, borderColor: C.border, borderRadius: 16,
+    backgroundColor: C.s1, alignItems: 'center', justifyContent: 'center', padding: 18,
+  },
+  routeHubEmptyTitle: { color: C.text, fontSize: 15, fontWeight: '900', marginTop: 8 },
+  routeHubEmptyText: { color: C.text3, fontSize: 12, lineHeight: 18, textAlign: 'center', marginTop: 5 },
+  confirmOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.62)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  confirmCard: {
+    width: '100%',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(12,12,14,0.96)',
+    padding: 18,
+    gap: 11,
+    shadowColor: '#000',
+    shadowOpacity: 0.5,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 18 },
+  },
+  confirmIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: C.orange + '44',
+    backgroundColor: C.orange + '12',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  confirmTitle: { color: C.text, fontSize: 22, lineHeight: 27, fontWeight: '900' },
+  confirmText: { color: C.text2, fontSize: 13, lineHeight: 19, marginBottom: 2 },
+  confirmPrimary: {
+    minHeight: 48,
+    borderRadius: 16,
+    backgroundColor: C.silverBright,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  confirmPrimaryText: { color: '#050505', fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
+  confirmDanger: {
+    minHeight: 46,
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: C.orange + '44',
+    backgroundColor: C.orange + '10',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  confirmDangerText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
+  confirmCancel: { minHeight: 36, alignItems: 'center', justifyContent: 'center' },
+  confirmCancelText: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.9 },
   dayTabs: { gap: 8 },
-  dayTab: { borderWidth: 1, borderColor: C.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: C.s2 },
+  dayTab: { borderWidth: 1, borderColor: C.border, borderRadius: RADIUS.sm, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: C.s2 },
   dayTabActive: { borderColor: C.orange, backgroundColor: C.orange + '16' },
   dayTabText: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '800' },
   dayTabTextActive: { color: C.orange },
-  dayAdd: { width: 34, height: 34, borderRadius: 10, borderWidth: 1, borderColor: C.orange + '55', alignItems: 'center', justifyContent: 'center' },
-  builderHero: { borderWidth: 1, borderColor: C.border, borderRadius: 16, padding: 13, backgroundColor: C.s1, gap: 13 },
+  dayAdd: { width: 34, height: 34, borderRadius: RADIUS.sm, borderWidth: 1, borderColor: C.orange + '55', alignItems: 'center', justifyContent: 'center' },
+  builderHero: { borderWidth: 1, borderColor: C.border, borderRadius: RADIUS.lg, padding: 12, backgroundColor: C.s1, gap: 12 },
   builderHeroTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
-  builderHeroTitle: { color: C.text, fontSize: 21, fontWeight: '900', marginTop: 2 },
+  builderHeroTitle: { color: C.text, fontSize: 19, fontWeight: '900', marginTop: 2 },
   builderHeroText: { color: C.text3, fontSize: 12, lineHeight: 18, marginTop: 4 },
-  progressBadge: { width: 62, minHeight: 58, borderRadius: 14, borderWidth: 1, borderColor: C.orange + '55', backgroundColor: C.orange + '12', alignItems: 'center', justifyContent: 'center' },
+  progressBadge: { width: 62, minHeight: 58, borderRadius: RADIUS.md, borderWidth: 1, borderColor: C.orange + '55', backgroundColor: C.orange + '12', alignItems: 'center', justifyContent: 'center' },
   progressBadgeNum: { color: C.orange, fontSize: 16, fontFamily: mono, fontWeight: '900' },
   progressBadgeText: { color: C.text3, fontSize: 8, fontFamily: mono, fontWeight: '900', marginTop: 2 },
   modeRow: { flexDirection: 'row', gap: 8 },
-  modeCard: { flex: 1, minHeight: 74, flexDirection: 'row', alignItems: 'flex-start', gap: 8, borderWidth: 1, borderColor: C.border, borderRadius: 13, backgroundColor: C.s2, padding: 10 },
+  modeCard: { flex: 1, minHeight: 78, flexDirection: 'row', alignItems: 'flex-start', gap: 8, borderWidth: 1, borderColor: C.border, borderRadius: RADIUS.md, backgroundColor: C.s2, padding: 11 },
   modeCardActive: { borderColor: C.orange, backgroundColor: C.orange + '10' },
   radioDot: { width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: C.text3, marginTop: 2 },
   radioDotActive: { borderColor: C.orange, backgroundColor: C.orange },
   modeTitle: { color: C.text, fontSize: 12, fontWeight: '900' },
   modeText: { color: C.text3, fontSize: 10, lineHeight: 14, marginTop: 3 },
-  wizardCard: { borderWidth: 1, borderColor: C.border, borderRadius: 14, backgroundColor: C.bg, padding: 10, gap: 11 },
-  wizardSteps: { flexDirection: 'row', gap: 6 },
-  wizardStep: { flex: 1, minHeight: 36, borderWidth: 1, borderColor: C.border, borderRadius: 10, backgroundColor: C.s2, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
-  wizardStepActive: { borderColor: C.orange + '66', backgroundColor: C.orange + '12' },
-  wizardStepNum: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '900' },
-  wizardStepNumActive: { color: C.orange },
-  wizardStepText: { color: C.text3, fontSize: 7, fontFamily: mono, fontWeight: '900', marginTop: 1 },
-  wizardStepTextActive: { color: C.orange },
-  wizardPane: { gap: 10, minHeight: 142 },
-  wizardTitle: { color: C.text, fontSize: 18, fontWeight: '900' },
-  wizardHelp: { color: C.text3, fontSize: 12, lineHeight: 17, marginTop: 3 },
-  wizardNav: { flexDirection: 'row', gap: 9 },
-  wizardNavBtn: { minHeight: 40, minWidth: 88, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderWidth: 1, borderColor: C.border, borderRadius: 11, backgroundColor: C.s2 },
+  loopChoiceRow: { gap: 8 },
+  loopChoice: {
+    minHeight: 70, flexDirection: 'row', alignItems: 'flex-start', gap: 9,
+    borderWidth: 1, borderColor: C.border, borderRadius: RADIUS.md,
+    backgroundColor: C.s2, padding: 11,
+  },
+  loopChoiceActive: { borderColor: C.orange + '66', backgroundColor: C.orange + '10' },
+  loopChoiceTitle: { color: C.text, fontSize: 12, fontWeight: '900' },
+  loopChoiceText: { color: C.text3, fontSize: 10, lineHeight: 14, marginTop: 3 },
+  wizardCard: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', borderRadius: 24, backgroundColor: 'rgba(255,255,255,0.045)', padding: 13, gap: 13 },
+  wizardCardFull: {
+    flex: 1, borderWidth: 0, borderRadius: 0, paddingHorizontal: 0, paddingTop: 2, paddingBottom: 18,
+    backgroundColor: C.bg, justifyContent: 'flex-start',
+  },
+  wizardHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 },
+  wizardEyebrow: { color: C.orange, fontSize: 8, fontFamily: mono, fontWeight: '900', letterSpacing: 0.7 },
+  wizardHeaderTitle: { color: C.text, fontSize: 13, fontWeight: '900', marginTop: 2 },
+  wizardHeaderMeta: { color: C.text3, fontSize: 8, fontFamily: mono, fontWeight: '900', letterSpacing: 0.7, marginTop: 2 },
+  wizardTrack: { flexDirection: 'row', alignItems: 'center', gap: 0, paddingVertical: 2 },
+  wizardTrackItem: { flex: 1, flexDirection: 'row', alignItems: 'center' },
+  wizardTrackDot: {
+    width: 24, height: 24, borderRadius: 12,
+    borderWidth: 1, borderColor: C.border, backgroundColor: C.s2,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  wizardTrackDotActive: { borderColor: C.orange, backgroundColor: C.orange },
+  wizardTrackNum: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '900' },
+  wizardTrackNumActive: { color: '#fff' },
+  wizardTrackLine: { flex: 1, height: 2, backgroundColor: C.border, marginHorizontal: 5, borderRadius: 1 },
+  wizardTrackLineActive: { backgroundColor: C.orange },
+  wizardPane: { gap: 14, minHeight: 218, justifyContent: 'flex-start', marginTop: 40 },
+  wizardQuestion: { paddingTop: 2, gap: 5 },
+  wizardTitle: { color: C.text, fontSize: 30, fontWeight: '800', lineHeight: 35 },
+  wizardHelp: { color: C.text3, fontSize: 14, lineHeight: 20, marginTop: 2 },
+  wizardNav: { flexDirection: 'row', gap: 9, marginTop: 18 },
+  wizardNavBtn: { minHeight: 44, minWidth: 88, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderWidth: 1, borderColor: C.border, borderRadius: RADIUS.md, backgroundColor: C.s2 },
   wizardNavText: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900' },
-  wizardNextBtn: { flex: 1, minHeight: 40, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 11, backgroundColor: C.green },
-  wizardNextText: { color: '#fff', fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 0.6 },
+  wizardNextBtn: { flex: 1, minHeight: 46, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 16, backgroundColor: C.silverBright },
+  wizardNextText: { color: '#050505', fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 0.6 },
+  routeNameOptions: { flexDirection: 'row', alignItems: 'stretch', gap: 8 },
+  routeNameField: { flex: 1, borderWidth: 1, borderColor: C.border, borderRadius: RADIUS.md, backgroundColor: C.s2, paddingHorizontal: 12, paddingVertical: 8 },
+  routeNameInput: { color: C.text, fontSize: 15, fontWeight: '800', paddingVertical: 4 },
+  routeNameSave: { minWidth: 74, borderWidth: 1, borderColor: C.orange + '55', borderRadius: RADIUS.md, backgroundColor: C.orange + '10', alignItems: 'center', justifyContent: 'center', gap: 4 },
+  routeNameSaveText: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900' },
   setupGrid: { gap: 8 },
   setupGridPair: { flexDirection: 'row', gap: 8 },
   setupLabelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-  currentLocationBtn: { flexDirection: 'row', alignItems: 'center', gap: 3, borderWidth: 1, borderColor: C.orange + '55', borderRadius: 999, paddingHorizontal: 6, paddingVertical: 3, backgroundColor: C.orange + '10' },
+  currentLocationBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderColor: C.orange + '55', borderRadius: 999, paddingHorizontal: 9, paddingVertical: 7, backgroundColor: C.orange + '10' },
   currentLocationText: { color: C.orange, fontSize: 7, fontFamily: mono, fontWeight: '900' },
   preferenceBlock: { gap: 7 },
   prefLabel: { color: C.text3, fontSize: 8, fontFamily: mono, fontWeight: '900', letterSpacing: 0.9 },
   segmentRow: { flexDirection: 'row', gap: 7 },
-  segmentBtn: { flex: 1, minHeight: 34, borderRadius: 10, borderWidth: 1, borderColor: C.border, backgroundColor: C.s2, alignItems: 'center', justifyContent: 'center' },
+  segmentBtn: { flex: 1, minHeight: 36, borderRadius: RADIUS.sm, borderWidth: 1, borderColor: C.border, backgroundColor: C.s2, alignItems: 'center', justifyContent: 'center' },
   segmentBtnActive: { borderColor: C.green, backgroundColor: C.green },
   segmentText: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900' },
   routeStatStrip: { flexDirection: 'row', gap: 8 },
-  routeStatItem: { flex: 1, minHeight: 38, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderWidth: 1, borderColor: C.border, borderRadius: 11, backgroundColor: C.bg },
+  routeStatItem: { flex: 1, minHeight: 38, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderWidth: 1, borderColor: C.border, borderRadius: RADIUS.sm, backgroundColor: C.bg },
   routeStatValue: { color: C.text2, fontSize: 10, fontFamily: mono, fontWeight: '900' },
-  primaryBuildBtn: { minHeight: 48, borderRadius: 12, backgroundColor: C.green, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
-  primaryBuildText: { color: '#fff', fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
+  primaryBuildBtn: { minHeight: 50, borderRadius: 16, backgroundColor: C.silverBright, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  primaryBuildText: { color: '#050505', fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
   frameworkCard: { borderWidth: 1, borderColor: C.border, borderRadius: 12, padding: 11, backgroundColor: C.s1, gap: 10 },
   frameworkTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   frameworkTitle: { color: C.text, fontSize: 13, fontWeight: '900' },
@@ -2848,15 +3203,17 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   frameworkBuildText: { color: '#fff', fontSize: 10, fontFamily: mono, fontWeight: '900' },
   frameworkInputs: { flexDirection: 'row', gap: 8 },
   routeStyleRow: { flexDirection: 'row', gap: 7 },
-  routeStyleChip: { flex: 1, minHeight: 34, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderWidth: 1, borderColor: C.border, borderRadius: 10, backgroundColor: C.s2 },
+  routeStyleChip: { flex: 1, minHeight: 36, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderWidth: 1, borderColor: C.border, borderRadius: RADIUS.sm, backgroundColor: C.s2 },
   routeStyleChipActive: { borderColor: C.orange + '77', backgroundColor: C.orange + '12' },
   routeStyleText: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900' },
   tripSetup: { flexDirection: 'row', gap: 8, alignItems: 'stretch' },
-  setupToggle: { minWidth: 78, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderWidth: 1, borderColor: C.border, borderRadius: 10, backgroundColor: C.s2, paddingHorizontal: 10, paddingVertical: 8 },
+  setupToggle: { minWidth: 78, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderWidth: 1, borderColor: C.border, borderRadius: RADIUS.sm, backgroundColor: C.s2, paddingHorizontal: 10, paddingVertical: 8 },
   setupToggleText: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900' },
-  setupInputWrap: { flex: 1, borderWidth: 1, borderColor: C.border, borderRadius: 10, backgroundColor: C.s2, paddingHorizontal: 9, paddingVertical: 5 },
+  setupInputWrap: { flex: 1, borderWidth: 1, borderColor: C.border, borderRadius: 16, backgroundColor: C.s2, paddingHorizontal: 16, paddingVertical: 10 },
   setupLabel: { color: C.text3, fontSize: 7, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
-  setupInput: { color: C.text, fontSize: 13, fontFamily: mono, fontWeight: '900', paddingVertical: 2 },
+  setupInput: { color: C.text, fontSize: 20, fontWeight: '800', paddingVertical: 4 },
+  setupInputRow: { flexDirection: 'row', alignItems: 'center', gap: 9, marginTop: 4 },
+  setupInputInline: { flex: 1, minWidth: 0, paddingVertical: 2 },
   tripStats: { flexDirection: 'row', gap: 8 },
   tripStat: { flex: 1, minHeight: 34, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderWidth: 1, borderColor: C.border, borderRadius: 10, backgroundColor: C.s1, paddingHorizontal: 7 },
   tripStatText: { color: C.text2, fontSize: 9, fontFamily: mono, fontWeight: '800' },
@@ -2906,15 +3263,29 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   routeDayNum: { width: 28, height: 28, borderRadius: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s3 },
   routeDayNumText: { color: '#fff', fontSize: 10, fontFamily: mono, fontWeight: '900' },
   routeDayTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  routeDayTitle: { flex: 1, color: C.text, fontSize: 12, fontWeight: '900' },
-  routeDayMeta: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
+  routeDayTitle: { flex: 1, color: C.text, fontSize: 24, fontWeight: '900' },
+  routeDayMeta: { color: C.text3, fontSize: 13, fontFamily: mono, marginTop: 4, lineHeight: 18 },
   routeTimelineCard: { borderWidth: 1, borderColor: C.border, borderRadius: 14, backgroundColor: C.s2, padding: 10, gap: 9 },
+  routeTimelineList: { gap: 18 },
+  timelineSheetActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, paddingHorizontal: 2, paddingBottom: 2 },
   routeTimelineTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 2 },
   routeTimelineTitle: { color: C.text, fontSize: 14, fontWeight: '900' },
   routeTimelineSub: { color: C.text3, fontSize: 11, lineHeight: 15, marginTop: 2 },
+  routeTimelineAddDay: { minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderColor: C.orange + '55', borderRadius: 10, paddingHorizontal: 9, backgroundColor: C.orange + '10' },
+  routeTimelineAddText: { color: C.orange, fontSize: 8, fontFamily: mono, fontWeight: '900' },
   routeTimelineLoop: { minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderColor: C.border, borderRadius: 10, paddingHorizontal: 9, backgroundColor: C.s1 },
   routeTimelineLoopText: { color: C.text3, fontSize: 8, fontFamily: mono, fontWeight: '900' },
-  routeDayWrap: { gap: 8 },
+  routeDayWrap: { gap: 10 },
+  routeDaySection: {
+    minHeight: 520, flexDirection: 'row', gap: 12,
+    borderWidth: 1, borderColor: C.border, borderRadius: 18,
+    backgroundColor: C.s1, padding: 14,
+  },
+  routeDaySectionActive: { borderColor: C.orange + '66', backgroundColor: C.orange + '08' },
+  routeDayRail: { width: 28, alignItems: 'center' },
+  routeDayDotLarge: { width: 18, height: 18, borderRadius: 9, borderWidth: 3, borderColor: C.orange, backgroundColor: C.s1, marginTop: 10 },
+  routeDayStemLarge: { flex: 1, width: 3, backgroundColor: C.border, marginTop: 8, borderRadius: 2 },
+  routeDayContent: { flex: 1, gap: 16 },
   routeDayCard: { flexDirection: 'row', gap: 9, borderWidth: 1, borderColor: C.border, borderRadius: 12, backgroundColor: C.s1, padding: 9 },
   routeDayCardActive: { borderColor: C.orange + '66', backgroundColor: C.orange + '0f' },
   routeDayDotCol: { width: 17, alignItems: 'center' },
@@ -2922,32 +3293,36 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   routeDayStem: { flex: 1, width: 2, backgroundColor: C.border, marginTop: 4 },
   routeDayHeader: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   routeDayMiniBtn: { width: 31, height: 31, borderRadius: 9, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.orange + '35', backgroundColor: C.orange + '10' },
-  routeDayEmptyCamp: { minHeight: 40, flexDirection: 'row', alignItems: 'center', gap: 7, borderWidth: 1, borderColor: C.orange + '38', borderRadius: 10, backgroundColor: C.orange + '0f', paddingHorizontal: 10 },
-  routeDayEmptyCampText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900' },
+  routeDayStatusPill: { maxWidth: 118, minHeight: 28, borderWidth: 1, borderRadius: 999, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
+  routeDayStatusText: { fontSize: 8, fontFamily: mono, fontWeight: '900' },
+  routeDayEmptyCamp: { minHeight: 148, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9, borderWidth: 1, borderColor: C.orange + '38', borderRadius: 16, backgroundColor: C.orange + '0f', paddingHorizontal: 16 },
+  routeDayEmptyCampText: { color: C.orange, fontSize: 15, fontFamily: mono, fontWeight: '900', flexShrink: 1 },
+  routeDayActionRail: { flexDirection: 'row', gap: 9, marginTop: 'auto' },
+  routeDayActionBtn: { flex: 1, minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderColor: C.orange + '38', borderRadius: 14, backgroundColor: C.orange + '10' },
   routeDayActions: { flexDirection: 'row', gap: 7, paddingLeft: 37 },
   routeDayAction: { flex: 1, minHeight: 34, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderWidth: 1, borderColor: C.orange + '38', borderRadius: 9, backgroundColor: C.orange + '10' },
-  routeDayActionText: { color: C.orange, fontSize: 8, fontFamily: mono, fontWeight: '900' },
+  routeDayActionText: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900' },
   routeDayVisual: { gap: 7, paddingLeft: 37 },
   routeStopPill: { minHeight: 42, flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderColor: C.border, borderRadius: 10, backgroundColor: C.s1, paddingHorizontal: 9, paddingVertical: 7 },
   routeStopPillIcon: { width: 28, height: 28, borderRadius: 9, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   routeStopPillTitle: { color: C.text, fontSize: 11, fontWeight: '800' },
   routeStopPillMeta: { color: C.text3, fontSize: 8, fontFamily: mono, marginTop: 1 },
-  selectedCampCard: { flexDirection: 'row', alignItems: 'stretch', gap: 9, borderWidth: 1, borderColor: C.green + '55', borderRadius: 12, backgroundColor: C.green + '0f', padding: 8 },
-  selectedCampCardCompact: { padding: 6, gap: 7, borderRadius: 10 },
-  selectedCampPhotoWrap: { width: 72, borderRadius: 10, overflow: 'hidden', backgroundColor: C.s2 },
-  selectedCampPhotoWrapCompact: { width: 54, borderRadius: 8 },
-  selectedCampPhoto: { width: '100%', height: 82 },
-  selectedCampPhotoCompact: { height: 58 },
-  selectedCampPlaceholder: { width: '100%', height: 82, alignItems: 'center', justifyContent: 'center' },
-  selectedCampBody: { flex: 1, minHeight: 82, justifyContent: 'center' },
-  selectedCampBodyCompact: { minHeight: 58 },
-  selectedCampLabel: { color: C.green, fontSize: 8, fontFamily: mono, fontWeight: '900', letterSpacing: 0.6 },
-  selectedCampName: { color: C.text, fontSize: 13, fontWeight: '900', lineHeight: 17, marginTop: 2 },
-  selectedCampMeta: { color: C.text3, fontSize: 10, marginTop: 3 },
-  selectedCampSwap: { width: 30, height: 30, borderRadius: 9, borderWidth: 1, borderColor: C.orange + '55', backgroundColor: C.orange + '10', alignItems: 'center', justifyContent: 'center', alignSelf: 'center' },
+  selectedCampCard: { gap: 12, borderWidth: 1, borderColor: C.green + '55', borderRadius: 18, backgroundColor: C.green + '0f', padding: 12 },
+  selectedCampCardCompact: { padding: 8, gap: 10, borderRadius: 14 },
+  selectedCampPhotoWrap: { width: '100%', borderRadius: 16, overflow: 'hidden', backgroundColor: C.s2 },
+  selectedCampPhotoWrapCompact: { width: 108, borderRadius: 12 },
+  selectedCampPhoto: { width: '100%', height: 168 },
+  selectedCampPhotoCompact: { height: 96 },
+  selectedCampPlaceholder: { width: '100%', height: 168, alignItems: 'center', justifyContent: 'center' },
+  selectedCampBody: { minHeight: 118, justifyContent: 'center' },
+  selectedCampBodyCompact: { minHeight: 96 },
+  selectedCampLabel: { color: C.green, fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
+  selectedCampName: { color: C.text, fontSize: 24, fontWeight: '900', lineHeight: 29, marginTop: 5 },
+  selectedCampMeta: { color: C.text3, fontSize: 14, marginTop: 7, lineHeight: 20 },
+  selectedCampSwap: { position: 'absolute', right: 14, top: 190, width: 42, height: 42, borderRadius: 14, borderWidth: 1, borderColor: C.orange + '55', backgroundColor: C.s1, alignItems: 'center', justifyContent: 'center' },
   campPreviewActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 8 },
-  campPreviewBtn: { minHeight: 30, flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderColor: C.border, borderRadius: 9, backgroundColor: C.s1, paddingHorizontal: 8 },
-  campPreviewBtnText: { color: C.orange, fontSize: 8, fontFamily: mono, fontWeight: '900' },
+  campPreviewBtn: { minHeight: 38, flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: C.border, borderRadius: 14, backgroundColor: C.s1, paddingHorizontal: 12 },
+  campPreviewBtnText: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900' },
   inlineResults: { borderWidth: 1, borderColor: C.orange + '44', borderRadius: 12, backgroundColor: C.bg, padding: 9, gap: 8 },
   inlineResultsTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
   inlineResultsTitle: { color: C.text, fontSize: 12, fontWeight: '900' },
@@ -3016,7 +3391,13 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   restToggleText: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900' },
   dayHoursBox: { width: 82, borderWidth: 1, borderColor: C.border, borderRadius: 10, backgroundColor: C.s1, paddingHorizontal: 8, paddingVertical: 4 },
   dayControlMeta: { flex: 1, color: C.text3, fontSize: 10, fontFamily: mono, textAlign: 'right' },
-  footer: { position: 'absolute', left: 0, right: 0, bottom: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 14, paddingBottom: 22, backgroundColor: C.s1, borderTopWidth: 1, borderColor: C.border },
+  footer: {
+    position: 'absolute', left: 14, right: 14, bottom: 96,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    padding: 14, borderRadius: 20,
+    backgroundColor: 'rgba(8,8,10,0.88)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)',
+    shadowColor: '#000', shadowOpacity: 0.36, shadowRadius: 22, shadowOffset: { width: 0, height: 12 },
+  },
   footerMiles: { color: C.text, fontSize: 18, fontFamily: mono, fontWeight: '900' },
   footerSub: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
   previewBtn: { flexDirection: 'row', alignItems: 'center', gap: 7, backgroundColor: C.green, borderRadius: 12, paddingHorizontal: 18, paddingVertical: 12 },
@@ -3122,14 +3503,15 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   photoGallery: { height: 260 },
   galleryPhoto: { width: 400, height: 260 },
   galleryPlaceholder: {
-    height: 200, backgroundColor: C.s1,
+    height: 200, backgroundColor: 'rgba(255,255,255,0.045)',
     alignItems: 'center', justifyContent: 'center',
   },
-  detailContent: { padding: 20, backgroundColor: C.bg },
+  detailContent: { padding: 20, paddingBottom: 110, backgroundColor: C.bg },
   detailHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 8 },
-  detailName: { color: C.text, fontSize: 22, fontWeight: '800', flex: 1, lineHeight: 28 },
+  detailName: { color: C.text, fontSize: 25, fontWeight: '800', flex: 1, lineHeight: 31 },
   detailClose: {
-    width: 36, height: 36, borderRadius: 18, backgroundColor: C.s2,
+    width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.07)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
     alignItems: 'center', justifyContent: 'center',
   },
   detailTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 },
@@ -3141,13 +3523,13 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   detailSection: { marginBottom: 20 },
   detailSectionTitle: {
     color: C.text2, fontSize: 10, fontFamily: mono, fontWeight: '800',
-    letterSpacing: 1.5, marginBottom: 10, borderBottomWidth: 1, borderColor: C.border, paddingBottom: 6,
+    letterSpacing: 1.1, marginBottom: 10, borderBottomWidth: 1, borderColor: 'rgba(255,255,255,0.07)', paddingBottom: 6,
   },
   detailDesc: { color: C.text, fontSize: 14, lineHeight: 22 },
   amenityGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   amenityItem: {
-    paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10,
-    backgroundColor: C.s1, borderWidth: 1, borderColor: C.border,
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.055)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
     flexDirection: 'row', alignItems: 'center', gap: 5,
   },
   amenityText: { color: C.text, fontSize: 12, fontWeight: '500' },
@@ -3156,7 +3538,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   coordDms: { color: C.text2, fontSize: 11, fontFamily: mono, marginTop: 4 },
   aiHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   aiStars: { color: C.yellow, fontSize: 14, marginBottom: 10 },
-  insiderTip: { backgroundColor: C.orange + '14', borderRadius: 10, borderWidth: 1, borderColor: C.orange + '44', padding: 12, marginBottom: 8 },
+  insiderTip: { backgroundColor: 'rgba(255,255,255,0.055)', borderRadius: 18, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', padding: 12, marginBottom: 8 },
   insiderLabel: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '800', marginBottom: 4 },
   insiderText: { color: C.text, fontSize: 13, lineHeight: 19 },
   aiMeta: { color: C.text2, fontSize: 12, marginBottom: 3 },
@@ -3166,9 +3548,9 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   detailActions: { gap: 10, marginTop: 8, marginBottom: 28 },
   detailUseBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    paddingVertical: 15, borderRadius: 14, backgroundColor: C.green,
+    paddingVertical: 15, borderRadius: 16, backgroundColor: C.silverBright,
   },
-  detailUseText: { color: '#fff', fontSize: 14, fontFamily: mono, fontWeight: '800' },
+  detailUseText: { color: '#050505', fontSize: 13, fontFamily: mono, fontWeight: '900', letterSpacing: 0.7 },
 });
 
 function weatherIcon(code: number): keyof typeof Ionicons.glyphMap {

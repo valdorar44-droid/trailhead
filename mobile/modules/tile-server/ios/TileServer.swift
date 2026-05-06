@@ -7,6 +7,12 @@
  *   2. baseReader   — bundled/auto-downloaded low-zoom base (z0–z9 US)
  *   3. 204          — no content
  *
+ * Contours are served separately from /api/contours/{z}/{x}/{y}.pbf so the
+ * map can mount them as an overlay without mixing them into base map tiles.
+ * Trails are served separately from /api/trails/{z}/{x}/{y}.pbf. The trail
+ * pack can be regenerated without changing the base map pack and can later be
+ * paired with a graph index for complete selected-trail systems.
+ *
  * switchState(path:) replaces the state reader without restarting the server.
  * setBase(path:) loads the base reader once on app start.
  */
@@ -19,6 +25,8 @@ final class TileServer {
 
     private var stateReader: PMTilesReader?
     private var baseReader:  PMTilesReader?
+    private var contourReader: PMTilesReader?
+    private var trailReader: PMTilesReader?
     private let lock = NSLock()   // guards reader swaps
 
     let port: UInt16 = 57832
@@ -63,7 +71,7 @@ final class TileServer {
     func stop() {
         running = false
         if serverFd >= 0 { close(serverFd); serverFd = -1 }
-        lock.lock(); stateReader = nil; baseReader = nil; lock.unlock()
+        lock.lock(); stateReader = nil; baseReader = nil; contourReader = nil; trailReader = nil; lock.unlock()
     }
 
     // ── Swap state file without restarting the socket ─────────────────────────
@@ -76,6 +84,26 @@ final class TileServer {
     func setBase(path: String) throws {
         let r = try PMTilesReader(path: path)
         lock.lock(); baseReader = r; lock.unlock()
+    }
+
+    // ── Load contour overlay file ─────────────────────────────────────────────
+    func setContours(path: String) throws {
+        let r = try PMTilesReader(path: path)
+        lock.lock(); contourReader = r; lock.unlock()
+    }
+
+    func clearContours() {
+        lock.lock(); contourReader = nil; lock.unlock()
+    }
+
+    // ── Load dedicated trail overlay file ─────────────────────────────────────
+    func setTrails(path: String) throws {
+        let r = try PMTilesReader(path: path)
+        lock.lock(); trailReader = r; lock.unlock()
+    }
+
+    func clearTrails() {
+        lock.lock(); trailReader = nil; lock.unlock()
     }
 
     // ── Accept loop ───────────────────────────────────────────────────────────
@@ -109,16 +137,17 @@ final class TileServer {
             return
         }
 
-        let pattern = #"GET /api/tiles/(\d+)/(\d+)/(\d+)\.pbf"#
+        let pattern = #"GET /api/(tiles|contours|trails)/(\d+)/(\d+)/(\d+)\.pbf"#
         guard let regex = try? NSRegularExpression(pattern: pattern),
               let m = regex.firstMatch(in: req, range: NSRange(req.startIndex..., in: req)),
-              m.numberOfRanges == 4 else {
+              m.numberOfRanges == 5 else {
             respond(fd: fd, status: 404, body: Data())
             return
         }
 
         func rng(_ i: Int) -> String { (req as NSString).substring(with: m.range(at: i)) }
-        guard let z = Int(rng(1)), let x = Int(rng(2)), let y = Int(rng(3)) else {
+        let lane = rng(1)
+        guard let z = Int(rng(2)), let x = Int(rng(3)), let y = Int(rng(4)) else {
             respond(fd: fd, status: 400, body: Data()); return
         }
 
@@ -126,10 +155,19 @@ final class TileServer {
         lock.lock()
         let sr = stateReader
         let br = baseReader
+        let cr = contourReader
+        let tr = trailReader
         lock.unlock()
 
-        let data = (sr?.tile(z: z, x: x, y: y)).flatMap { $0.isEmpty ? nil : $0 }
+        let data: Data?
+        if lane == "contours" {
+            data = (cr?.tile(z: z, x: x, y: y)).flatMap { $0.isEmpty ? nil : $0 }
+        } else if lane == "trails" {
+            data = (tr?.tile(z: z, x: x, y: y)).flatMap { $0.isEmpty ? nil : $0 }
+        } else {
+            data = (sr?.tile(z: z, x: x, y: y)).flatMap { $0.isEmpty ? nil : $0 }
                 ?? (br?.tile(z: z, x: x, y: y)).flatMap { $0.isEmpty ? nil : $0 }
+        }
 
         if let data {
             respond(fd: fd, status: 200, body: data,

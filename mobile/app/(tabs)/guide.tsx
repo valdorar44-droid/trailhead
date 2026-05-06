@@ -11,21 +11,21 @@ import { useStore } from '@/lib/store';
 import { api, PaywallError } from '@/lib/api';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 
-const WMO_ICON: Record<number, string> = {
-  0: '☀️', 1: '🌤️', 2: '⛅', 3: '☁️',
-  45: '🌫️', 48: '🌫️',
-  51: '🌦️', 53: '🌦️', 55: '🌧️',
-  61: '🌧️', 63: '🌧️', 65: '🌧️',
-  71: '❄️', 73: '❄️', 75: '❄️',
-  80: '🌦️', 81: '🌦️', 82: '🌧️',
-  85: '🌨️', 86: '🌨️',
-  95: '⛈️', 96: '⛈️', 99: '⛈️',
+const WMO_ICON: Record<number, keyof typeof Ionicons.glyphMap> = {
+  0: 'sunny-outline', 1: 'partly-sunny-outline', 2: 'partly-sunny-outline', 3: 'cloud-outline',
+  45: 'cloud-outline', 48: 'cloud-outline',
+  51: 'rainy-outline', 53: 'rainy-outline', 55: 'rainy-outline',
+  61: 'rainy-outline', 63: 'rainy-outline', 65: 'rainy-outline',
+  71: 'snow-outline', 73: 'snow-outline', 75: 'snow-outline',
+  80: 'rainy-outline', 81: 'rainy-outline', 82: 'rainy-outline',
+  85: 'snow-outline', 86: 'snow-outline',
+  95: 'thunderstorm-outline', 96: 'thunderstorm-outline', 99: 'thunderstorm-outline',
 };
 
 function wmoIcon(code: number) {
   const keys = Object.keys(WMO_ICON).map(Number).sort((a, b) => b - a);
   for (const k of keys) { if (code >= k) return WMO_ICON[k]; }
-  return '🌡️';
+  return 'thermometer-outline';
 }
 
 export default function GuideScreen() {
@@ -313,7 +313,7 @@ export default function GuideScreen() {
                       <Text style={s.wpName} numberOfLines={1}>{wp.name}</Text>
                       <Text style={s.wpMeta}>{wp.type}</Text>
                     </View>
-                    <Text style={s.weatherIcon}>{wmoIcon(code)}</Text>
+                    <Ionicons name={wmoIcon(code)} size={25} color={C.orange} />
                   </View>
                   <View style={s.weatherStatsRow}>
                     <View style={s.weatherStat}>
@@ -337,7 +337,10 @@ export default function GuideScreen() {
                       const d = new Date(date);
                       return (
                         <View key={di} style={s.weatherStat}>
-                          <Text style={s.weatherStatVal}>{wmoIcon(dc)} {dh}°</Text>
+                          <View style={s.weatherStatIconVal}>
+                            <Ionicons name={wmoIcon(dc)} size={14} color={C.orange} />
+                            <Text style={s.weatherStatVal}>{dh}°</Text>
+                          </View>
                           <Text style={s.weatherStatLabel}>
                             {d.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase()}
                           </Text>
@@ -377,7 +380,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   tabText: { color: C.text3, fontSize: 11, fontFamily: mono },
   tabTextActive: { color: C.orange },
   scroll: { flex: 1 },
-  scrollContent: { padding: 14, gap: 12, paddingBottom: 32 },
+  scrollContent: { padding: 14, gap: 12, paddingBottom: 122 },
   loadRow: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     padding: 16, backgroundColor: C.s2, borderRadius: 12, borderWidth: 1, borderColor: C.border,
@@ -444,7 +447,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     backgroundColor: C.s2, borderRadius: 12, borderWidth: 1, borderColor: C.border,
     padding: 12, flexDirection: 'row', alignItems: 'center',
   },
-  weatherIcon: { fontSize: 26 },
   weatherDate: { color: C.text, fontSize: 12, fontWeight: '700' },
   weatherDayTitle: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 1 },
   weatherRight: { alignItems: 'flex-end' },
@@ -460,6 +462,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     borderTopWidth: 1, borderColor: C.border,
   },
   weatherStatVal: { color: C.text, fontSize: 13, fontWeight: '700', fontFamily: mono },
+  weatherStatIconVal: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 3 },
   weatherStatLabel: { color: C.text3, fontSize: 8, fontFamily: mono, letterSpacing: 0.5, marginTop: 2 },
   emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, paddingTop: 80 },
   emptyIcon: { fontSize: 48 },

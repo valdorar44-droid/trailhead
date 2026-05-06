@@ -346,6 +346,123 @@ export default {
       return new Response(obj.body, { status, headers });
     }
 
+    // ── Trail system PMTiles downloads ─────────────────────────────────────
+    if (path === '/api/trail-packs/manifest.json') {
+      const manifestObj = await env.TILES_BUCKET.get('trails/manifest.json').catch(() => null);
+      if (manifestObj) {
+        return new Response(manifestObj.body, {
+          headers: {
+            'Content-Type':                'application/json',
+            'Access-Control-Allow-Origin': '*',
+            'Cache-Control':               'public, max-age=300',
+          },
+        });
+      }
+
+      return Response.json({}, {
+        headers: { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=60' },
+      });
+    }
+
+    const trailPackMatch = path.match(/^\/api\/trail-packs\/([a-z]{2,6}\.pmtiles)$/);
+    if (trailPackMatch) {
+      const fileName = trailPackMatch[1];
+      const key = `trails/${fileName}`;
+      const meta = await env.TILES_BUCKET.head(key).catch(() => null);
+      if (!meta) return new Response('Trail pack not found', { status: 404, headers: { 'Access-Control-Allow-Origin': '*' } });
+
+      const totalSize = meta.size;
+      const rangeHeader = request.headers.get('Range');
+
+      let r2opts = {};
+      let status = 200;
+      let contentRange = null;
+      let contentLength = totalSize;
+
+      if (rangeHeader) {
+        const m = rangeHeader.match(/bytes=(\d+)-(\d*)/);
+        if (m) {
+          const offset = parseInt(m[1]);
+          const endByte = m[2] ? parseInt(m[2]) : totalSize - 1;
+          const length = endByte - offset + 1;
+          r2opts = { range: { offset, length } };
+          contentRange = `bytes ${offset}-${endByte}/${totalSize}`;
+          contentLength = length;
+          status = 206;
+        }
+      }
+
+      const obj = await env.TILES_BUCKET.get(key, r2opts).catch(() => null);
+      if (!obj) return new Response('Trail pack not found', { status: 404, headers: { 'Access-Control-Allow-Origin': '*' } });
+
+      const headers = {
+        'Content-Type':                'application/octet-stream',
+        'Accept-Ranges':               'bytes',
+        'Content-Length':              String(contentLength),
+        'Access-Control-Allow-Origin': '*',
+        'Cache-Control':               'no-cache',
+      };
+      if (contentRange) headers['Content-Range'] = contentRange;
+
+      return new Response(obj.body, { status, headers });
+    }
+
+    const trailGraphMatch = path.match(/^\/api\/trail-packs\/([a-z]{2,6}\.graph\.json)$/);
+    if (trailGraphMatch) {
+      const fileName = trailGraphMatch[1];
+      const key = `trails/${fileName}`;
+      const obj = await env.TILES_BUCKET.get(key).catch(() => null);
+      if (!obj) return new Response('Trail graph not found', { status: 404, headers: { 'Access-Control-Allow-Origin': '*' } });
+      return new Response(obj.body, {
+        headers: {
+          'Content-Type':                'application/json',
+          'Access-Control-Allow-Origin': '*',
+          'Cache-Control':               'public, max-age=300',
+        },
+      });
+    }
+
+    const trailRouteGraphMatch = path.match(/^\/api\/trail-packs\/([a-z]{2,6}\.route\.jsonl\.gz)$/);
+    if (trailRouteGraphMatch) {
+      const fileName = trailRouteGraphMatch[1];
+      const key = `trails/${fileName}`;
+      const meta = await env.TILES_BUCKET.head(key).catch(() => null);
+      if (!meta) return new Response('Trail routing graph not found', { status: 404, headers: { 'Access-Control-Allow-Origin': '*' } });
+
+      const totalSize = meta.size;
+      const rangeHeader = request.headers.get('Range');
+      let r2opts = {};
+      let status = 200;
+      let contentRange = null;
+      let contentLength = totalSize;
+
+      if (rangeHeader) {
+        const m = rangeHeader.match(/bytes=(\d+)-(\d*)/);
+        if (m) {
+          const offset = parseInt(m[1]);
+          const endByte = m[2] ? parseInt(m[2]) : totalSize - 1;
+          const length = endByte - offset + 1;
+          r2opts = { range: { offset, length } };
+          contentRange = `bytes ${offset}-${endByte}/${totalSize}`;
+          contentLength = length;
+          status = 206;
+        }
+      }
+
+      const obj = await env.TILES_BUCKET.get(key, r2opts).catch(() => null);
+      if (!obj) return new Response('Trail routing graph not found', { status: 404, headers: { 'Access-Control-Allow-Origin': '*' } });
+
+      const headers = {
+        'Content-Type':                'application/gzip',
+        'Accept-Ranges':               'bytes',
+        'Content-Length':              String(contentLength),
+        'Access-Control-Allow-Origin': '*',
+        'Cache-Control':               'no-cache',
+      };
+      if (contentRange) headers['Content-Range'] = contentRange;
+      return new Response(obj.body, { status, headers });
+    }
+
     // ── Valhalla routing pack downloads ─────────────────────────────────────
     // Routing packs are separate from PMTiles because they are graph data, not
     // render tiles. Expected R2 keys:

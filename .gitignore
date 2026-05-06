@@ -8,3 +8,7 @@ __pycache__/
 /data/
 venv/
 .venv/
+.venv-trails/
+.playwright-cli/
+.wrangler/
+output/

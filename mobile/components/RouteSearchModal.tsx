@@ -751,7 +751,15 @@ export default function RouteSearchModal({
           <View style={s.section}>
             <Text style={s.sectionTitle}>FAVORITES</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chipRow}>
-              <TouchableOpacity style={s.chip} onPress={() => {}}>
+              <TouchableOpacity
+                style={s.chip}
+                onPress={() => {
+                  const firstSaved = savedPlaces[0];
+                  const firstCamp = favoriteCamps[0];
+                  if (firstSaved) selectPlace({ name: firstSaved.name, lat: firstSaved.lat, lng: firstSaved.lng });
+                  else if (firstCamp) selectPlace({ name: firstCamp.name, lat: firstCamp.lat, lng: firstCamp.lng });
+                }}
+              >
                 <Ionicons name="star" size={16} color={C.gold} />
                 <Text style={s.chipText}>All Saved</Text>
               </TouchableOpacity>
@@ -809,7 +817,11 @@ export default function RouteSearchModal({
               const groupPlaces = savedPlaces.filter(p => p.groupId === g.id);
               return (
                 <TouchableOpacity key={g.id} style={[s.chip, { borderColor: g.color + '55' }]}
-                  onPress={() => {}}>
+                  onPress={() => {
+                    const first = groupPlaces[0];
+                    if (first) selectPlace({ name: first.name, lat: first.lat, lng: first.lng });
+                    else setShowCreateGroup(true);
+                  }}>
                   <Ionicons name={g.icon as any} size={14} color={g.color} />
                   <Text style={s.chipText} numberOfLines={1}>{g.name}</Text>
                   {groupPlaces.length > 0 && (
@@ -850,11 +862,11 @@ export default function RouteSearchModal({
           </View>
         )}
 
-        {/* Swap */}
+        {/* Change destination */}
         <TouchableOpacity style={s.swapRow}
           onPress={() => { setView('searching'); setTab('history'); }}>
-          <Text style={s.quickRowText}>Swap start and destination</Text>
-          <Ionicons name="swap-vertical" size={18} color={C.orange} />
+          <Text style={s.quickRowText}>Change destination</Text>
+          <Ionicons name="search" size={18} color={C.orange} />
         </TouchableOpacity>
 
         <View style={{ height: 8 }} />

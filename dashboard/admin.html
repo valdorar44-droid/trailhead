@@ -117,7 +117,7 @@ td.name{color:var(--text);font-weight:600;}
 <!-- Login -->
 <div id="login-wrap">
   <div class="login-box">
-    <div class="login-logo">⛺</div>
+    <div class="login-logo">Camp</div>
     <div class="login-title">Trailhead Admin</div>
     <div class="login-sub">Sign in with your admin account</div>
     <input id="login-email" class="login-input" type="email" placeholder="Email" />
@@ -130,7 +130,7 @@ td.name{color:var(--text);font-weight:600;}
 <!-- App -->
 <div id="app" style="display:none;flex-direction:column;">
   <div class="topbar">
-    <span class="topbar-logo">⛺ TRAILHEAD</span>
+    <span class="topbar-logo">Camp TRAILHEAD</span>
     <span class="topbar-badge">ADMIN</span>
     <span class="topbar-user" id="topbar-user"></span>
     <span class="topbar-logout" onclick="logout()">Sign out</span>
@@ -138,25 +138,25 @@ td.name{color:var(--text);font-weight:600;}
   <div class="layout">
     <nav class="sidebar">
       <div class="nav-item active" onclick="showPage('overview',this)">
-        <span class="nav-icon">📊</span><span class="nav-label">Overview</span>
+        <span class="nav-icon">Stats</span><span class="nav-label">Overview</span>
       </div>
       <div class="nav-item" onclick="showPage('users',this)">
-        <span class="nav-icon">👥</span><span class="nav-label">Users</span>
+        <span class="nav-icon">Users</span><span class="nav-label">Users</span>
       </div>
       <div class="nav-item" onclick="showPage('reports',this)">
-        <span class="nav-icon">⚠️</span><span class="nav-label">Reports</span>
+        <span class="nav-icon">Alert</span><span class="nav-label">Reports</span>
       </div>
       <div class="nav-item" onclick="showPage('trips',this)">
-        <span class="nav-icon">🗺️</span><span class="nav-label">Trips</span>
+        <span class="nav-icon">Map</span><span class="nav-label">Trips</span>
       </div>
       <div class="nav-item" onclick="showPage('pins',this)">
-        <span class="nav-icon">📍</span><span class="nav-label">Pins</span>
+        <span class="nav-icon">Pin</span><span class="nav-label">Pins</span>
       </div>
       <div class="nav-item" onclick="showPage('camp-edits',this)">
-        <span class="nav-icon">✎</span><span class="nav-label">Camp Edits</span>
+        <span class="nav-icon">Edit</span><span class="nav-label">Camp Edits</span>
       </div>
       <div class="nav-item" onclick="showPage('bugs',this)">
-        <span class="nav-icon">🐛</span><span class="nav-label">Bug Reports</span>
+        <span class="nav-icon">Bug</span><span class="nav-label">Bug Reports</span>
       </div>
     </nav>
     <main class="content">
@@ -227,7 +227,7 @@ td.name{color:var(--text);font-weight:600;}
           <table>
             <thead><tr>
               <th>ID</th><th>Type</th><th>Sev</th><th>User</th><th>Location</th>
-              <th>Age</th><th>↑</th><th>↓</th><th>✓</th><th>📷</th><th>Actions</th>
+              <th>Age</th><th>↑</th><th>↓</th><th>✓</th><th>Photo</th><th>Actions</th>
             </tr></thead>
             <tbody id="reports-tbody"></tbody>
           </table>
@@ -774,7 +774,7 @@ async function loadBugs(status) {
             </div>
             <div style="color:var(--text2);font-size:13px;line-height:1.6;white-space:pre-wrap;margin-bottom:10px;">${esc(b.description)}</div>
             <div style="display:flex;gap:16px;font-size:11px;font-family:var(--mono);color:var(--text3);">
-              <span>👤 ${b.username ? esc(b.username) : 'anonymous'}</span>
+              <span>User ${b.username ? esc(b.username) : 'anonymous'}</span>
               ${b.app_version ? `<span>v${esc(b.app_version)}</span>` : ''}
               <span>${date}</span>
               <span>#${b.id}</span>

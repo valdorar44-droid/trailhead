@@ -17,7 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '@/lib/store';
 import { useTheme, mono, type ColorPalette } from '@/lib/design';
 import {
-  useOfflineFiles, FILE_REGIONS, ROUTING_REGIONS, CONTOUR_REGIONS, fmtBytes, fmtSpeed, fmtEta,
+  useOfflineFiles, FILE_REGIONS, ROUTING_REGIONS, CONTOUR_REGIONS, TRAIL_REGIONS, fmtBytes, fmtSpeed, fmtEta,
   type FileDownloadState,
 } from '@/lib/useOfflineFiles';
 import {
@@ -180,25 +180,28 @@ function ReadinessRow({ icon, label, ready }: { icon: keyof typeof Ionicons.glyp
 }
 
 function StateReadinessPanel({
-  mapReady, routeReady, contourReady, contourAvailable, placeReady, placeAvailable, placeLabel, mapBusy, routeBusy, contourBusy, available, onDownloadMissing,
+  mapReady, routeReady, contourReady, contourAvailable, trailReady, trailAvailable, placeReady, placeAvailable, placeLabel, mapBusy, routeBusy, contourBusy, trailBusy, available, onDownloadMissing,
 }: {
   mapReady: boolean;
   routeReady: boolean;
   contourReady: boolean;
   contourAvailable: boolean;
+  trailReady: boolean;
+  trailAvailable: boolean;
   placeReady: boolean;
   placeAvailable: boolean;
   placeLabel: string;
   mapBusy: boolean;
   routeBusy: boolean;
   contourBusy: boolean;
+  trailBusy: boolean;
   available: boolean;
   onDownloadMissing: () => void;
 }) {
   const C = useTheme();
   const navReady = mapReady && routeReady;
-  const ready = navReady && (!placeAvailable || placeReady);
-  const busy = mapBusy || routeBusy || contourBusy;
+  const ready = navReady && (!trailAvailable || trailReady) && (!placeAvailable || placeReady);
+  const busy = mapBusy || routeBusy || contourBusy || trailBusy;
   return (
     <View style={{ backgroundColor: ready ? C.green + '12' : C.s1, borderColor: ready ? C.green + '35' : C.border, borderWidth: 1, borderRadius: 10, padding: 12, marginBottom: 12 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -208,7 +211,7 @@ function StateReadinessPanel({
           </Text>
           <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 3, lineHeight: 13 }}>
             {available
-              ? 'Map draws roads/trails. Routing powers long offline routes. Places add fuel, water, campside services, trailheads, and stops.'
+              ? 'Map draws terrain. Routing powers long offline drives. Trail packs add complete selectable trail systems for offline follow mode.'
               : 'Trailhead will enable download buttons after map and routing files are uploaded to R2.'}
           </Text>
         </View>
@@ -227,6 +230,7 @@ function StateReadinessPanel({
       <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
         <ReadinessRow icon="map-outline" label={mapReady ? 'MAP ON DEVICE' : available ? 'MAP MISSING' : 'MAP PLANNED'} ready={mapReady} />
         <ReadinessRow icon="git-branch-outline" label={routeReady ? 'ROUTE ON DEVICE' : available ? 'ROUTE MISSING' : 'ROUTE PLANNED'} ready={routeReady} />
+        <ReadinessRow icon="trail-sign-outline" label={trailReady ? 'TRAILS ON DEVICE' : trailAvailable ? 'TRAILS OPTIONAL' : 'TRAILS PLANNED'} ready={trailReady} />
         <ReadinessRow icon="analytics-outline" label={contourReady ? 'CONTOURS ON DEVICE' : contourAvailable ? 'CONTOURS OPTIONAL' : 'CONTOURS PLANNED'} ready={contourReady} />
         <ReadinessRow icon="location-outline" label={placeLabel} ready={placeReady} />
       </View>
@@ -281,6 +285,11 @@ function ConusCard({
             {isError    && <StatusChip label="ERROR"         color={C.red} />}
           </View>
           <Text style={{ color: C.text2, fontSize: 10, fontFamily: mono }}>{region.description}</Text>
+          {state.details ? (
+            <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 3 }} numberOfLines={2}>
+              {state.details}
+            </Text>
+          ) : null}
           <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
             {isComplete ? (
               <Text style={{ color: C.green, fontSize: 10, fontFamily: mono, fontWeight: '700' }}>
@@ -354,7 +363,7 @@ function ConusCard({
           </View>
           {isActive && (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8, backgroundColor: C.s2, borderRadius: 6, padding: 8 }}>
-              <Text style={{ fontSize: 10 }}>⚡</Text>
+              <Ionicons name="flash-outline" size={12} color={C.orange} />
               <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, flex: 1, lineHeight: 13 }}>
                 Keep app open + screen on. If interrupted, tap RESUME — download continues from where it stopped.
               </Text>
@@ -362,7 +371,7 @@ function ConusCard({
           )}
           {isPaused && (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8, backgroundColor: C.orangeGlow, borderRadius: 6, padding: 8 }}>
-              <Text style={{ fontSize: 10 }}>⏸</Text>
+              <Ionicons name="pause-outline" size={12} color={C.orange} />
               <Text style={{ color: C.orange, fontSize: 9, fontFamily: mono, flex: 1, lineHeight: 13 }}>
                 Paused at {state.progress.toFixed(1)}%. Tap RESUME — continues from this point, no restart.
               </Text>
@@ -398,7 +407,7 @@ function ConusCard({
 // ── State pack row ────────────────────────────────────────────────────────────
 function StateRow({ code, st, isCached, isDownloading, isActive, progress, onDownload, onDelete }: {
   code:          string;
-  st:            { name: string; bounds: [[number,number],[number,number]]; emoji: string };
+  st:            { name: string; bounds: [[number,number],[number,number]]; icon: string };
   isCached:      boolean;
   isDownloading: boolean;
   isActive?:     boolean;
@@ -410,7 +419,7 @@ function StateRow({ code, st, isCached, isDownloading, isActive, progress, onDow
   return (
     <View style={{ borderBottomWidth: 1, borderBottomColor: C.border }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 9, paddingHorizontal: 4 }}>
-        <Text style={{ width: 28, fontSize: 14 }}>{st.emoji}</Text>
+        <Ionicons name={st.icon as keyof typeof Ionicons.glyphMap} size={15} color={C.text2} style={{ width: 28 }} />
         <Text style={{ color: C.text, fontSize: 11, fontFamily: mono, fontWeight: '700', width: 26, marginRight: 6 }}>{code}</Text>
         <Text style={{ flex: 1, color: C.text2, fontSize: 10, fontFamily: mono }}>{st.name}</Text>
         {isCached ? (
@@ -471,7 +480,9 @@ export default function OfflineModal({
     deleteRoutingDownload, getRoutingTotalBytes,
     getContourState, startContourDownload, pauseContourDownload, resumeContourDownload,
     deleteContourDownload, getContourTotalBytes,
-    isFilePublished, isRoutingPublished, isContourPublished,
+    getTrailState, startTrailDownload, pauseTrailDownload, resumeTrailDownload,
+    deleteTrailDownload, getTrailTotalBytes,
+    isFilePublished, isRoutingPublished, isContourPublished, isTrailPublished,
   } = useOfflineFiles();
   const conusState      = getState('conus');
   const conusTotalBytes = getTotalBytes('conus');
@@ -904,11 +915,13 @@ export default function OfflineModal({
                             const mapDone = getState(id).status === 'complete';
                             const routeDone = getRoutingState(id).status === 'complete';
                             const contourDone = getContourState(id).status === 'complete';
+                            const trailDone = getTrailState(id).status === 'complete';
                             const placesDone = placePacks.some(pack => pack.region_id === id);
                             const placesPublished = Object.values(placeManifest?.packs ?? {}).some(entry => entry.region_id === id);
                             const mapPublished = isFilePublished(id);
                             const routePublished = isRoutingPublished(id);
                             const contourPublished = isContourPublished(id);
+                            const trailPublished = isTrailPublished(id);
                             const available = mapPublished && routePublished;
                             const selected = selectedState === id;
                             const code = id === 'canada' ? 'CAN' : id === 'mexico' ? 'MEX' : id.toUpperCase();
@@ -928,7 +941,7 @@ export default function OfflineModal({
                                 </View>
                                 <Text style={s.statePickName} numberOfLines={1}>{region.name}</Text>
                                 <Text style={{ color: mapDone && routeDone ? C.green : C.text3, fontSize: 8, fontFamily: mono, marginTop: 4 }}>
-                                  {`${mapDone || mapPublished ? 'MAP' : '--'} · ${routeDone || routePublished ? 'ROUTE' : '--'} · ${contourDone || contourPublished ? 'TOPO' : '--'} · ${placesDone || placesPublished ? 'PLACES' : '--'}`}
+                                  {`${mapDone || mapPublished ? 'MAP' : '--'} · ${routeDone || routePublished ? 'ROUTE' : '--'} · ${trailDone || trailPublished ? 'TRAILS' : '--'} · ${contourDone || contourPublished ? 'TOPO' : '--'} · ${placesDone || placesPublished ? 'PLACES' : '--'}`}
                                 </Text>
                               </TouchableOpacity>
                             );
@@ -942,16 +955,20 @@ export default function OfflineModal({
                     const mapRegion = FILE_REGIONS[selectedState as keyof typeof FILE_REGIONS];
                     const routingRegion = ROUTING_REGIONS[selectedState as keyof typeof ROUTING_REGIONS];
                     const contourRegion = CONTOUR_REGIONS[selectedState as keyof typeof CONTOUR_REGIONS];
+                    const trailRegion = TRAIL_REGIONS[selectedState];
                     const mapState = getState(selectedState);
                     const routingState = getRoutingState(selectedState);
                     const contourState = getContourState(selectedState);
+                    const trailState = getTrailState(selectedState);
                     const mapPublished = isFilePublished(selectedState);
                     const routePublished = isRoutingPublished(selectedState);
                     const contourPublished = isContourPublished(selectedState);
+                    const trailPublished = isTrailPublished(selectedState);
                     const regionAvailable = mapPublished && routePublished;
                     const mapBusy = mapState.status === 'downloading' || mapState.status === 'paused';
                     const routeBusy = routingState.status === 'downloading' || routingState.status === 'paused';
                     const contourBusy = contourState.status === 'downloading' || contourState.status === 'paused';
+                    const trailBusy = trailState.status === 'downloading' || trailState.status === 'paused';
                     const selectedCode = selectedState === 'canada' ? 'CAN' : selectedState === 'mexico' ? 'MEX' : selectedState.toUpperCase();
                     const savedRegionPlacePacks = placePacks.filter(pack => pack.region_id === selectedState);
                     const savedRegionPlaceCount = savedRegionPlacePacks.reduce((sum, pack) => sum + (pack.point_count || 0), 0);
@@ -967,12 +984,15 @@ export default function OfflineModal({
                           routeReady={routingState.status === 'complete'}
                           contourReady={contourState.status === 'complete'}
                           contourAvailable={contourPublished}
+                          trailReady={trailState.status === 'complete'}
+                          trailAvailable={trailPublished}
                           placeReady={regionPlacesReady}
                           placeAvailable={regionPlacesAvailable}
                           placeLabel={regionPlacesLabel}
                           mapBusy={mapBusy}
                           routeBusy={routeBusy}
                           contourBusy={contourBusy}
+                          trailBusy={trailBusy}
                           available={regionAvailable}
                           onDownloadMissing={() => {
                             const label = FILE_REGIONS[selectedState as keyof typeof FILE_REGIONS]?.name ?? selectedState.toUpperCase();
@@ -1040,6 +1060,34 @@ export default function OfflineModal({
                           completeTitle="✓ ROUTING GRAPH ON DEVICE"
                           completeText="Valhalla graph pack is downloaded. Long offline routes can use this state without needing signal."
                         />
+                        <Section label={`${mapRegion.name.toUpperCase()} — TRAIL SYSTEMS`} />
+                        {trailPublished ? (
+                          <ConusCard
+                            state={trailState}
+                            totalBytes={getTrailTotalBytes(selectedState)}
+                            region={trailRegion as any}
+                            code={selectedCode}
+                            onStart={() => authorizeAndRun(`trail:${selectedState}`, 'state_trails' as OfflineAssetType, selectedState, `${mapRegion.name} trail systems`, () => startTrailDownload(selectedState))}
+                            onPause={() => pauseTrailDownload(selectedState)}
+                            onResume={() => resumeTrailDownload(selectedState)}
+                            onDelete={() => deleteTrailDownload(selectedState)}
+                            completeTitle="✓ TRAIL SYSTEMS ON DEVICE"
+                            completeText="Trail overlay, selection graph, and routing graph are on device. Follow mode can route along downloaded trail vertices offline."
+                          />
+                        ) : (
+                          <View style={s.contourPlannedCard}>
+                            <View style={s.contourIcon}>
+                              <Ionicons name="trail-sign-outline" size={18} color={C.orange} />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={s.contourPlannedTitle}>TRAIL PACK PLANNED</Text>
+                              <Text style={s.contourPlannedText}>
+                                State trail systems are being extracted from OSM/open agency data into their own PMTiles and graph packs. MVUM remains an optional legality layer, not the main trail engine.
+                              </Text>
+                              <Text style={s.contourPlannedMeta}>Estimated starting size: ~{trailRegion?.estimatedGb ?? 0.1} GB</Text>
+                            </View>
+                          </View>
+                        )}
                           </>
                         )}
                         {currentManifestPlacePacks.length > 0 && (

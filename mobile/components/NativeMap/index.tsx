@@ -11,18 +11,20 @@ import React, {
   forwardRef, useCallback, useEffect, useImperativeHandle,
   useMemo, useRef, useState,
 } from 'react';
-import { TouchableOpacity, View, StyleSheet, Text } from 'react-native';
+import { Dimensions, TouchableOpacity, View, StyleSheet, Text } from 'react-native';
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { storage } from '@/lib/storage';
 
 import { buildMapStyle, MapMode } from './mapStyle';
+import type { ContourSourceMode, TrailSourceMode } from './mapStyle';
 import { fetchRoute, buildFallbackRoute } from './routing';
 import type { RouteResult, RouteStep, RouteOpts, MapBounds, WP } from './types';
 import type { CampsitePin, Pin, Report } from '@/lib/api';
 import { useStore } from '@/lib/store';
 import { useTheme } from '@/lib/design';
-import { CACHE_OFFLINE_DIR, OFFLINE_DIR, FILE_REGIONS } from '@/lib/useOfflineFiles';
+import { buildOfflineTrailGraphSelection } from '@/lib/trailGraph';
+import { CACHE_OFFLINE_DIR, CONTOUR_DIR, OFFLINE_DIR, FILE_REGIONS } from '@/lib/useOfflineFiles';
 import { saveRouteGeometry } from '@/lib/offlineRoutes';
 import * as FileSystem from 'expo-file-system';
 import * as Location from 'expo-location';
@@ -42,6 +44,9 @@ const GLOBAL_BASE_PATH = `${OFFLINE_DIR}base-global.pmtiles`;
 const BASE_MIN_MB   = 10; // skip base file if under 10 MB (truncated)
 const CONUS_MIN_MB  = 1024; // a partial conus.pmtiles must not hide state packs
 const LEGACY_OFFLINE_DIR = `${FileSystem.documentDirectory}offline/`;
+const CACHE_CONTOUR_DIR = `${FileSystem.cacheDirectory}offline/contours/`;
+const TRAIL_DIR = `${OFFLINE_DIR}trails/`;
+const CACHE_TRAIL_DIR = `${CACHE_OFFLINE_DIR}trails/`;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 export type { WP, RouteOpts, MapBounds, RouteResult, RouteStep } from './types';
@@ -50,10 +55,14 @@ export interface NativeMapHandle {
   flyTo:          (lat: number, lng: number, zoom?: number, name?: string) => void;
   locate:         (lat: number, lng: number) => void;
   loadRouteFrom:  (lat: number, lng: number, fromIdx: number) => void;
+  loadRouteSegmentFrom: (lat: number, lng: number, fromIdx: number, toIdx: number) => void;
   rerouteFrom:    (lat: number, lng: number, fromIdx: number) => void;
   routeToSearch:  (lat: number, lng: number, name: string, userLat: number, userLng: number) => void;
   resetRoute:     () => void;
   stopNavigation: () => void;
+  highlightTrail: (lat: number, lng: number, name?: string) => void;
+  clearTrailHighlight: () => void;
+  getTrailHighlight: () => GeoJSON.FeatureCollection;
   restoreRoute:   (coords: [number,number][], steps: RouteStep[], legs: RouteStep[][], td: number, tt: number) => void;
   setNavTarget:   (idx: number) => void;
 }
@@ -71,6 +80,8 @@ export interface NativeMapProps {
   // Nav state
   userLoc:     { lat: number; lng: number; accuracy?: number | null } | null;
   navMode:     boolean;
+  navCameraFollow?: boolean;
+  nativeNavEngineActive?: boolean;
   navIdx:      number;
   navHeading:  number | null;
   navSpeed:    number | null;
@@ -91,6 +102,7 @@ export interface NativeMapProps {
   // Callbacks → replaces onWebMessage
   onMapReady:       () => void;
   onBoundsChange:   (bounds: MapBounds) => void;
+  onMapGesture?:    () => void;
   onMapTap:         (lat?: number, lng?: number) => void;
   onMapLongPress:   (lat: number, lng: number) => void;
   onCampTap:        (camp: CampsitePin) => void;
@@ -108,7 +120,6 @@ export interface NativeMapProps {
   onBackOnRoute?:   () => void;
   onRouteProgress?: (progress: { distanceM: number; remainingM: number; routeDistanceM: number; deviationM: number; segmentIdx: number }) => void;
   onError?:         (msg: string) => void;
-  children?:         React.ReactNode;
 }
 
 // ── Waypoint type → styles ────────────────────────────────────────────────────
@@ -212,6 +223,9 @@ function lineFC(coords: [number,number][]) {
 function pointFC(features: GeoJSON.Feature[]) {
   return { type: 'FeatureCollection' as const, features };
 }
+function emptyFC() {
+  return { type: 'FeatureCollection' as const, features: [] as GeoJSON.Feature[] };
+}
 function campFeat(c: CampsitePin): GeoJSON.Feature {
   return { type: 'Feature', geometry: { type: 'Point', coordinates: [c.lng, c.lat] },
     properties: { id: c.id || '', name: c.name || '', land_type: c.land_type || 'Campground', cost: c.cost || '', full: (c as any).full || 0, raw: JSON.stringify(c) } };
@@ -306,6 +320,150 @@ function eventScreenPoint(event: any): [number, number] | null {
   return Number.isFinite(x) && Number.isFinite(y) ? [x, y] : null;
 }
 
+type TrailLineCandidate = {
+  id: string;
+  name: string;
+  coords: [number, number][];
+  start: [number, number];
+  end: [number, number];
+  distanceToSeed: number;
+  lengthM: number;
+  nameScore: number;
+  feature: any;
+};
+
+function lineDistanceToPointM(coords: [number, number][], point: [number, number]): number {
+  if (coords.length < 2) return Number.POSITIVE_INFINITY;
+  const cumulative = routeCumulativeDistances(coords);
+  const snap = projectPointToRoute(point, coords, cumulative, 0, coords.length - 2);
+  return snap?.distanceM ?? Number.POSITIVE_INFINITY;
+}
+
+function lineLengthM(coords: [number, number][]): number {
+  let total = 0;
+  for (let i = 1; i < coords.length; i++) total += coordDistanceM(coords[i - 1], coords[i]);
+  return total;
+}
+
+function normalizeTrailName(value?: string): string {
+  return (value || '')
+    .toLowerCase()
+    .replace(/\b(trail|path|road|route|loop|connector|spur)\b/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function namesCompatible(a: string, b: string): boolean {
+  const aa = normalizeTrailName(a);
+  const bb = normalizeTrailName(b);
+  if (!aa || !bb) return true;
+  return aa === bb || aa.includes(bb) || bb.includes(aa);
+}
+
+function flattenLineCandidate(feature: any, seed: [number, number], trailName?: string): TrailLineCandidate[] {
+  const geometry = feature?.geometry;
+  const props = feature?.properties ?? {};
+  if (!geometry || (geometry.type !== 'LineString' && geometry.type !== 'MultiLineString')) return [];
+  const name = String(props.name ?? props.ref ?? props.mvum_symbol_name ?? props.symbol ?? '').trim();
+  const normalizedName = normalizeTrailName(name);
+  const wanted = normalizeTrailName(trailName);
+  const nameScore = wanted && normalizedName
+    ? normalizedName === wanted ? 3 : normalizedName.includes(wanted) || wanted.includes(normalizedName) ? 2 : 0
+    : 1;
+  const lines = geometry.type === 'LineString' ? [geometry.coordinates] : geometry.coordinates;
+  return lines
+    .map((raw: any, idx: number) => {
+      const coords = (raw ?? [])
+        .map((c: any) => [Number(c?.[0]), Number(c?.[1])] as [number, number])
+        .filter((c: [number, number]) => Number.isFinite(c[0]) && Number.isFinite(c[1]));
+      if (coords.length < 2) return null;
+      const id = `${feature?.id ?? name ?? 'line'}:${idx}:${coords[0][0].toFixed(5)},${coords[0][1].toFixed(5)}`;
+      return {
+        id,
+        name,
+        coords,
+        start: coords[0],
+        end: coords[coords.length - 1],
+        distanceToSeed: lineDistanceToPointM(coords, seed),
+        lengthM: lineLengthM(coords),
+        nameScore,
+        feature,
+      };
+    })
+    .filter(Boolean) as TrailLineCandidate[];
+}
+
+function lineTouches(a: TrailLineCandidate, b: TrailLineCandidate): boolean {
+  const thresholdM = 72;
+  return coordDistanceM(a.start, b.start) <= thresholdM
+    || coordDistanceM(a.start, b.end) <= thresholdM
+    || coordDistanceM(a.end, b.start) <= thresholdM
+    || coordDistanceM(a.end, b.end) <= thresholdM;
+}
+
+function buildTrailSystemFeatures(features: any[], seed: [number, number], trailName?: string): GeoJSON.Feature[] {
+  const wanted = (trailName || '').trim().toLowerCase();
+  const seen = new Set<string>();
+  const candidates = features
+    .flatMap(feature => flattenLineCandidate(feature, seed, trailName))
+    .filter(c => {
+      if (c.distanceToSeed > 5000) return false;
+      if (wanted && c.name && !namesCompatible(c.name, trailName || '') && c.distanceToSeed > 700) return false;
+      return c.lengthM > 8;
+    })
+    .sort((a, b) => (b.nameScore - a.nameScore) || (a.distanceToSeed - b.distanceToSeed));
+
+  const seedLine = candidates.find(c => c.distanceToSeed <= 220 && (c.nameScore > 0 || !wanted))
+    ?? candidates.find(c => c.distanceToSeed <= 420)
+    ?? candidates[0];
+  if (!seedLine) return [];
+
+  const selected = new Map<string, TrailLineCandidate>();
+  selected.set(seedLine.id, seedLine);
+  const queue = [seedLine];
+  let selectedLengthM = seedLine.lengthM;
+
+  while (queue.length > 0 && selected.size < 90 && selectedLengthM < 96_000) {
+    const current = queue.shift()!;
+    for (const next of candidates) {
+      if (selected.has(next.id)) continue;
+      const sameNamedSystem = namesCompatible(current.name || trailName || '', next.name || trailName || '');
+      if (!sameNamedSystem && next.nameScore === 0 && next.distanceToSeed > 850) continue;
+      if (!lineTouches(current, next)) continue;
+      selected.set(next.id, next);
+      selectedLengthM += next.lengthM;
+      queue.push(next);
+      if (selected.size >= 90 || selectedLengthM >= 96_000) break;
+    }
+  }
+
+  // If vector tile clipping breaks endpoints, add same-name visible pieces close
+  // to the trailhead so the highlighted system still reads as one route.
+  for (const next of candidates) {
+    if (selected.has(next.id)) continue;
+    if (next.distanceToSeed > 1800) continue;
+    if (next.nameScore <= 0 && !namesCompatible(seedLine.name, next.name)) continue;
+    selected.set(next.id, next);
+    if (selected.size >= 90) break;
+  }
+
+  const out: GeoJSON.Feature[] = [];
+  for (const line of selected.values()) {
+    const key = `${line.start[0].toFixed(5)},${line.start[1].toFixed(5)}:${line.end[0].toFixed(5)},${line.end[1].toFixed(5)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: line.coords },
+      properties: {
+        name: line.name || trailName || 'Selected trail',
+        selected: 1,
+      },
+    });
+  }
+  return out;
+}
+
 async function firstExistingPath(paths: string[]): Promise<{ path: string; sizeMb: number } | null> {
   for (const path of paths) {
     const info = await FileSystem.getInfoAsync(path).catch(() => null);
@@ -332,6 +490,16 @@ function offlinePathCandidates(id: string, currentPath: string): string[] {
   return [currentPath, `${LEGACY_OFFLINE_DIR}${fileName}`, `${CACHE_OFFLINE_DIR}${fileName}`];
 }
 
+function contourPathCandidates(id: string): string[] {
+  const fileName = `${id}.pmtiles`;
+  return [`${CONTOUR_DIR}${fileName}`, `${CACHE_CONTOUR_DIR}${fileName}`];
+}
+
+function trailPathCandidates(id: string): string[] {
+  const fileName = `${id}.pmtiles`;
+  return [`${TRAIL_DIR}${fileName}`, `${CACHE_TRAIL_DIR}${fileName}`];
+}
+
 async function probeTileCdn(timeoutMs = 1500): Promise<boolean> {
   try {
     const ctrl = new AbortController();
@@ -352,10 +520,10 @@ async function probeTileCdn(timeoutMs = 1500): Promise<boolean> {
 const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const {
     waypoints, camps, gas, pois, reports, communityPins, searchMarker,
-    userLoc, navMode, navIdx, navHeading, navSpeed,
+    userLoc, navMode, navCameraFollow = false, nativeNavEngineActive = false, navIdx, navHeading, navSpeed,
     mapLayer, routeOpts,
     showLandOverlay, showUsgsOverlay, showFire, showAva, showRadar, showMvum,
-    onMapReady, onBoundsChange, onMapTap, onMapLongPress,
+    onMapReady, onBoundsChange, onMapGesture, onMapTap, onMapLongPress,
     onCampTap, onGasTap, onPoiTap, onCommunityPinTap, onTileCampTap, onBaseCampTap, onTrailTap, onWaypointTap,
     onRouteReady, onRoutePersist, onOffRoute, onOffRouteWarn, onBackOnRoute, onRouteProgress,
   } = props;
@@ -445,10 +613,15 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const activeTrip  = useStore(s => s.activeTrip);
   const C = useTheme();
   const [localTiles,   setLocalTiles]   = useState(false);
+  const [localContours, setLocalContours] = useState(false);
+  const [localTrails, setLocalTrails] = useState(false);
   const [tileDebug,    setTileDebug]    = useState('Checking maps');
   const [tileSession,  setTileSession]  = useState(() => Date.now());
+  const trailHighlightRef = useRef<GeoJSON.FeatureCollection>(emptyFC());
   const onlineTilesRef  = useRef(true);                // true = prefer live CDN tiles
   const loadedStateRef  = useRef<string | null>(null); // path of currently-active offline region file
+  const loadedContourRef = useRef<string | null>(null);
+  const loadedTrailRef = useRef<string | null>(null);
   const switchingRef    = useRef(false);               // prevent concurrent region switches
   const isRoutingRef    = useRef(false);               // route fetch in progress — block CDN fallback
   const offRouteStreakRef = useRef(0);
@@ -471,6 +644,31 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       if (!found) continue;
       const minMb  = (region.estimatedGb * 1024) * 0.25;
       if (found.sizeMb < minMb) continue;
+      result.push({ id, path: found.path, sizeMb: found.sizeMb, bounds: region.bounds });
+    }
+    return result;
+  }, []);
+
+  const getDownloadedContourFiles = useCallback(async () => {
+    const result: Array<{ id: string; path: string; sizeMb: number; bounds: typeof FILE_REGIONS[keyof typeof FILE_REGIONS]['bounds'] }> = [];
+    for (const [id, region] of Object.entries(FILE_REGIONS)) {
+      if (id === 'conus') continue;
+      const found = await firstExistingPath(contourPathCandidates(id));
+      if (!found) continue;
+      // Contour packs can be tiny in flat states. Only reject empty/truncated files.
+      if (found.sizeMb <= 0) continue;
+      result.push({ id, path: found.path, sizeMb: found.sizeMb, bounds: region.bounds });
+    }
+    return result;
+  }, []);
+
+  const getDownloadedTrailFiles = useCallback(async () => {
+    const result: Array<{ id: string; path: string; sizeMb: number; bounds: typeof FILE_REGIONS[keyof typeof FILE_REGIONS]['bounds'] }> = [];
+    for (const [id, region] of Object.entries(FILE_REGIONS)) {
+      if (id === 'conus') continue;
+      const found = await firstExistingPath(trailPathCandidates(id));
+      if (!found) continue;
+      if (found.sizeMb <= 0) continue;
       result.push({ id, path: found.path, sizeMb: found.sizeMb, bounds: region.bounds });
     }
     return result;
@@ -508,6 +706,74 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       switchingRef.current = false;
     }
   }, []);
+
+  const switchContourFile = useCallback(async (path: string, sizeMb: number) => {
+    if (loadedContourRef.current === path) return;
+    const ts = tileServer as any;
+    if (!ts?.setContours) return;
+    try {
+      await ts.setContours(path.replace(/^file:\/\//, ''));
+      loadedContourRef.current = path;
+      setLocalContours(true);
+      setTileSession(Date.now());
+      setTileDebug(`Topo contours ${sizeMb}MB`);
+    } catch {
+      setLocalContours(false);
+    }
+  }, []);
+
+  const loadBestContourFile = useCallback(async (lat?: number, lng?: number) => {
+    const files = await getDownloadedContourFiles();
+    if (files.length === 0) {
+      const ts = tileServer as any;
+      if (ts?.clearContours) await ts.clearContours().catch(() => {});
+      loadedContourRef.current = null;
+      setLocalContours(false);
+      return;
+    }
+    const match = Number.isFinite(lat) && Number.isFinite(lng)
+      ? files.find(({ bounds: b }) =>
+          (lat as number) >= b.s && (lat as number) <= b.n &&
+          (lng as number) >= b.w && (lng as number) <= b.e
+        )
+      : null;
+    const chosen = match ?? files[0];
+    await switchContourFile(chosen.path, chosen.sizeMb);
+  }, [getDownloadedContourFiles, switchContourFile]);
+
+  const switchTrailFile = useCallback(async (path: string, sizeMb: number) => {
+    if (loadedTrailRef.current === path) return;
+    const ts = tileServer as any;
+    if (!ts?.setTrails) return;
+    try {
+      await ts.setTrails(path.replace(/^file:\/\//, ''));
+      loadedTrailRef.current = path;
+      setLocalTrails(true);
+      setTileSession(Date.now());
+      setTileDebug(`Trail pack ${sizeMb}MB`);
+    } catch {
+      setLocalTrails(false);
+    }
+  }, []);
+
+  const loadBestTrailFile = useCallback(async (lat?: number, lng?: number) => {
+    const files = await getDownloadedTrailFiles();
+    if (files.length === 0) {
+      const ts = tileServer as any;
+      if (ts?.clearTrails) await ts.clearTrails().catch(() => {});
+      loadedTrailRef.current = null;
+      setLocalTrails(false);
+      return;
+    }
+    const match = Number.isFinite(lat) && Number.isFinite(lng)
+      ? files.find(({ bounds: b }) =>
+          (lat as number) >= b.s && (lat as number) <= b.n &&
+          (lng as number) >= b.w && (lng as number) <= b.e
+        )
+      : null;
+    const chosen = match ?? files[0];
+    await switchTrailFile(chosen.path, chosen.sizeMb);
+  }, [getDownloadedTrailFiles, switchTrailFile]);
 
   const ensureRouteTileFile = useCallback(async (pairs: string[]) => {
     if (!tileServer?.switchState || pairs.length < 2) return;
@@ -558,6 +824,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       // 2. Load low-zoom base if available. Prefer future global base, but keep
       // the current U.S. base as a stable fallback until that file exists on R2.
       await FileSystem.makeDirectoryAsync(OFFLINE_DIR, { intermediates: true }).catch(() => {});
+      await FileSystem.makeDirectoryAsync(CONTOUR_DIR, { intermediates: true }).catch(() => {});
+      await FileSystem.makeDirectoryAsync(TRAIL_DIR, { intermediates: true }).catch(() => {});
       const globalBaseInfo = await FileSystem.getInfoAsync(GLOBAL_BASE_PATH).catch(() => null);
       const globalBaseMb = Math.round(((globalBaseInfo as any)?.size ?? 0) / 1_048_576);
       const conusBaseInfo = await FileSystem.getInfoAsync(BASE_PATH).catch(() => null);
@@ -603,6 +871,12 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       if (online) {
         setLocalTiles(false);
         setTileDebug('Online maps');
+        try {
+          const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Low });
+          await loadBestContourFile(pos.coords.latitude, pos.coords.longitude);
+        } catch {
+          await loadBestContourFile();
+        }
         return;
       }
 
@@ -629,21 +903,28 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             pos.coords.longitude >= b.w && pos.coords.longitude <= b.e
           );
           if (match) best = match;
+          await loadBestContourFile(pos.coords.latitude, pos.coords.longitude);
+          await loadBestTrailFile(pos.coords.latitude, pos.coords.longitude);
         }
-      } catch {}
+      } catch { await loadBestContourFile(); await loadBestTrailFile(); }
       setTileDebug(`${files.length} region map${files.length === 1 ? '' : 's'} saved`);
       await switchFile(best.path, best.sizeMb);
     })();
 
     return () => { tileServer?.stopServer().catch(() => {}); };
-  }, [getDownloadedFiles, switchFile]);
+  }, [getDownloadedFiles, switchFile, loadBestContourFile, loadBestTrailFile]);
 
   // Route state
   const [routeCoords,  setRouteCoords]  = useState<[number,number][]>([]);
   const [passedCoords, setPassedCoords] = useState<[number,number][]>([]);
   const [breadcrumb,   setBreadcrumb]   = useState<[number,number][]>([]);
+  const [trailHighlight, setTrailHighlight] = useState<GeoJSON.FeatureCollection>(emptyFC);
   const [navTargetIdx, setNavTargetIdx] = useState(-1);
   const [searchDest,   setSearchDest]   = useState<{ lat: number; lng: number } | null>(null);
+
+  useEffect(() => {
+    trailHighlightRef.current = trailHighlight;
+  }, [trailHighlight]);
   const waypointSignature = useMemo(
     () => waypoints.map(w => `${w.lng.toFixed(5)},${w.lat.toFixed(5)}:${w.type}:${w.day}`).join('|'),
     [waypoints],
@@ -659,25 +940,40 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const routeRef = useRef(makeRouteState([]));
 
   // MLRN v10 uses `mapStyle` — accepts string (style URL) or object (inline JSON).
+  const contourMode: ContourSourceMode = mapLayer === 'satellite'
+    ? 'none'
+    : localContours
+      ? 'local'
+      : 'online';
+  const trailMode: TrailSourceMode = localTrails ? 'local' : 'none';
   const mapStyleObj = useMemo(
-    () => buildMapStyle(mapLayer, mapboxToken || '', localTiles, tileSession),
-    [mapLayer, mapboxToken, localTiles, tileSession],
+    () => buildMapStyle(mapLayer, mapboxToken || '', localTiles, tileSession, contourMode, trailMode),
+    [mapLayer, mapboxToken, localTiles, tileSession, contourMode, trailMode],
   );
 
   // ── Imperative API (replaces postMessage) ───────────────────────────────────
   useImperativeHandle(ref, () => ({
     flyTo(lat, lng, zoom = 14) {
       lastFlyToRef.current = Date.now();
-      camRef.current?.setCamera({ centerCoordinate: [lng, lat], zoomLevel: zoom, animationDuration: 600, animationMode: 'flyTo' });
+      lastCamRef.current = Date.now();
+      camRef.current?.setCamera({ centerCoordinate: [lng, lat], zoomLevel: zoom, animationDuration: 250, animationMode: 'flyTo' });
     },
     locate(lat, lng) {
       lastFlyToRef.current = Date.now();
-      camRef.current?.setCamera({ centerCoordinate: [lng, lat], zoomLevel: 13, animationDuration: 500, animationMode: 'flyTo' });
+      lastCamRef.current = Date.now();
+      camRef.current?.setCamera({ centerCoordinate: [lng, lat], zoomLevel: 13, animationDuration: 250, animationMode: 'flyTo' });
     },
     loadRouteFrom(lat, lng, fromIdx) {
       const rem = waypoints.slice(fromIdx);
       const pairs = [`${lng},${lat}`, ...rem.map(w => `${w.lng},${w.lat}`)];
       doFetchRoute(pairs, fromIdx);
+    },
+    loadRouteSegmentFrom(lat, lng, fromIdx, toIdx) {
+      const start = Math.max(0, Math.min(fromIdx, waypoints.length - 1));
+      const end = Math.max(start, Math.min(toIdx, waypoints.length - 1));
+      const rem = waypoints.slice(start, end + 1);
+      const pairs = [`${lng},${lat}`, ...rem.map(w => `${w.lng},${w.lat}`)];
+      if (pairs.length >= 2) doFetchRoute(pairs, start);
     },
     rerouteFrom(lat, lng, fromIdx) {
       setPassedCoords([]);
@@ -708,6 +1004,61 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       routeRef.current.passedProgressM = 0;
       offRouteStreakRef.current = 0;
       wasOffRouteRef.current = false;
+    },
+    async highlightTrail(lat, lng, name) {
+      lastFlyToRef.current = Date.now();
+      lastCamRef.current = Date.now();
+      camRef.current?.setCamera({ centerCoordinate: [lng, lat], zoomLevel: 13, animationDuration: 260, animationMode: 'flyTo' });
+      setTimeout(async () => {
+        if (!mapRef.current) return;
+        try {
+          const center = await mapRef.current.getPointInView([lng, lat]);
+          const [cx, cy] = center.map(Number);
+          if (!Number.isFinite(cx) || !Number.isFinite(cy)) return;
+          const offsets = [
+            [0, 0], [-18, 0], [18, 0], [0, -18], [0, 18],
+            [-28, -18], [28, -18], [-28, 18], [28, 18],
+          ];
+          const layerIds = ['trail-pack-line', 'road-path', 'road-other', 'mvum-trails-line', 'mvum-roads-line'];
+          const rendered: any[] = [];
+          const screen = Dimensions.get('window');
+          const rect = [cx - 170, cy - 170, cx + 170, cy + 170];
+          const rectFound = await (mapRef.current as any).queryRenderedFeaturesInRect?.(
+            rect,
+            undefined,
+            layerIds,
+          ).catch(() => null);
+          const rectFeatures = Array.isArray(rectFound) ? rectFound : rectFound?.features;
+          if (Array.isArray(rectFeatures)) rendered.push(...rectFeatures);
+          const viewportFound = await (mapRef.current as any).queryRenderedFeaturesInRect?.(
+            [0, 0, screen.width, screen.height],
+            undefined,
+            layerIds,
+          ).catch(() => null);
+          const viewportFeatures = Array.isArray(viewportFound) ? viewportFound : viewportFound?.features;
+          if (Array.isArray(viewportFeatures)) rendered.push(...viewportFeatures);
+          for (const [dx, dy] of offsets) {
+            const found = await mapRef.current.queryRenderedFeaturesAtPoint(
+              [cx + dx, cy + dy],
+              undefined,
+              layerIds,
+            ).catch(() => null);
+            const features = Array.isArray(found) ? found : found?.features;
+            if (Array.isArray(features)) rendered.push(...features);
+          }
+          const graph = buildOfflineTrailGraphSelection(rendered, [lng, lat], name);
+          const features = graph.features.length ? graph.features : buildTrailSystemFeatures(rendered, [lng, lat], name);
+          setTrailHighlight(features.length ? pointFC(features) : emptyFC());
+        } catch {
+          setTrailHighlight(emptyFC());
+        }
+      }, 340);
+    },
+    clearTrailHighlight() {
+      setTrailHighlight(emptyFC());
+    },
+    getTrailHighlight() {
+      return trailHighlightRef.current;
     },
     restoreRoute(coords, steps, legs, td, tt) {
       setRouteCoords(coords);
@@ -769,7 +1120,13 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     setPassedCoords([]);
     setBreadcrumb([]);
     routeRef.current = makeRouteState([]);
-    doFetchRoute(waypoints.map(w => `${w.lng},${w.lat}`), 0);
+    if (!navMode && waypoints.length > 10) {
+      const previewCoords = waypoints.map(w => [w.lng, w.lat] as [number, number]);
+      setRouteCoords(previewCoords);
+      routeRef.current = makeRouteState(previewCoords);
+    } else {
+      doFetchRoute(waypoints.map(w => `${w.lng},${w.lat}`), 0);
+    }
     // Fit camera to the trip bounding box (skip if actively navigating)
     if (!navMode) {
       const lngs = waypoints.map(w => w.lng);
@@ -783,32 +1140,9 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     }
   }, [waypointSignature]);
 
-  // ── Nav: camera follow (independent of route) ───────────────────────────────
-  // GPS can fire every ~180ms at highway speed. Calling setCamera with an 800ms
-  // animation on every tick keeps MLN in permanent animation on iOS, which holds
-  // a native touch-intercept lock and makes every button on screen unresponsive.
-  // Gate so we only call setCamera once per animation cycle.
-  useEffect(() => {
-    if (!navMode || !userLoc) return;
-    const now = Date.now();
-    const { lat, lng } = userLoc;
-    const speed = navSpeed ?? 0;
-    const animDuration = speed > 2.2 ? 800 : 350;
-    if (now - lastCamRef.current < animDuration - 80) return;
-    lastCamRef.current = now;
-    const hasHeading = speed > 2.2 && navHeading !== null && navHeading >= 0;
-    camRef.current?.setCamera({
-      centerCoordinate: [lng, lat],
-      zoomLevel: speed > 20 ? 15.5 : speed > 9 ? 16.2 : 17,
-      ...(hasHeading ? { heading: navHeading, pitch: 45 } : {}),
-      animationDuration: animDuration,
-      animationMode: 'easeTo',
-    });
-  }, [userLoc, navMode, navHeading, navSpeed]);
-
   // ── Nav: track user on route + update passed overlay ────────────────────────
   useEffect(() => {
-    if (!navMode || !userLoc || routeRef.current.coords.length === 0) return;
+    if (nativeNavEngineActive || !navMode || !userLoc || routeRef.current.coords.length === 0) return;
     const { lat, lng } = userLoc;
     const state = routeRef.current;
     const coords = state.coords;
@@ -862,7 +1196,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       onBackOnRoute?.();
     }
     setBreadcrumb(prev => [...prev, [lng, lat]]);
-  }, [userLoc, navMode, navSpeed, onOffRoute, onOffRouteWarn, onBackOnRoute, onRouteProgress]);
+  }, [userLoc, navMode, nativeNavEngineActive, navSpeed, onOffRoute, onOffRouteWarn, onBackOnRoute, onRouteProgress]);
 
   // ── GeoJSON sources ─────────────────────────────────────────────────────────
   const campFC = useMemo(() => pointFC(camps.map(campFeat)), [camps]);
@@ -905,7 +1239,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         const rendered = await mapRef.current.queryRenderedFeaturesAtPoint(
           point ?? await mapRef.current.getPointInView([lng, lat]),
           undefined,
-          ['pm-pois-camp-site', 'pm-pois-camp-pitch', 'pm-pois-shelter', 'pm-pois-trailhead']
+          ['trail-pack-line', 'pm-pois-camp-site', 'pm-pois-camp-pitch', 'pm-pois-shelter', 'pm-pois-trailhead']
         );
         const renderedFeatures = Array.isArray(rendered) ? rendered : rendered?.features;
         const tileFeat = renderedFeatures?.[0];
@@ -915,6 +1249,10 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           const coords = tileFeat.geometry?.type === 'Point'
             ? (tileFeat.geometry as GeoJSON.Point).coordinates
             : [lng, lat];
+          if (tileFeat.layer?.id === 'trail-pack-line') {
+            onTrailTap(name || 'Trail', lat, lng);
+            return;
+          }
           if (kind === 'trailhead') {
             onTrailTap(name, coords[1] ?? lat, coords[0] ?? lng);
             return;
@@ -927,7 +1265,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     } else {
       onMapTap();
     }
-  }, [coordinateFromPress, onMapTap, onTileCampTap]);
+  }, [coordinateFromPress, onMapTap, onTileCampTap, onTrailTap]);
 
   const handleLongPress = useCallback(async (feat: any) => {
     const lngLat = await coordinateFromPress(feat);
@@ -945,6 +1283,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     boundsRef.current = { n, s, e, w };
     onBoundsChange({ n, s, e, w, zoom: zoomLevel || 10 });
     if (showMvum) fetchMvum({ n, s, e, w });
+    loadBestContourFile((n + s) / 2, (e + w) / 2).catch(() => {});
+    loadBestTrailFile((n + s) / 2, (e + w) / 2).catch(() => {});
 
     // Auto-switch region file as map pans only when the live CDN is unreachable.
     // While online, always keep live tiles active even if a downloaded region covers
@@ -982,7 +1322,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         }
       })();
     }
-  }, [onBoundsChange, showMvum, fetchMvum, localTiles, getDownloadedFiles, switchFile]);
+  }, [onBoundsChange, showMvum, fetchMvum, localTiles, getDownloadedFiles, switchFile, loadBestContourFile, loadBestTrailFile]);
 
   const handleCampPress = useCallback((e: any) => {
     const feat = e.features?.[0];
@@ -994,8 +1334,6 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   }, [onCampTap]);
 
   const mapStatusLabel = localTiles ? compactMapStatus(tileDebug) : 'Online maps';
-  const overlayChildren = props.children;
-
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <View style={styles.mapRoot}>
@@ -1005,15 +1343,18 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         mapStyle={mapStyleObj}
         onPress={handlePress}
         onLongPress={handleLongPress}
+        onRegionWillChange={(feature: any) => {
+          if (feature?.properties?.isUserInteraction) onMapGesture?.();
+        }}
         onRegionDidChange={handleRegionChange}
         onDidFinishLoadingMap={handleMapReady}
         compassEnabled={false}
         attributionEnabled={false}
         logoEnabled={false}
-        scrollEnabled={!navMode}
-        zoomEnabled={!navMode}
-        rotateEnabled={!navMode}
-        pitchEnabled={!navMode}
+        scrollEnabled
+        zoomEnabled
+        rotateEnabled
+        pitchEnabled
       >
 
       {/* ── Camera ────────────────────────────────────────────────────── */}
@@ -1026,6 +1367,13 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         centerCoordinate={initialCenter}
         zoomLevel={initialZoom}
         animationDuration={0}
+        followUserLocation={navMode && navCameraFollow}
+        followUserMode={(navSpeed ?? 0) > 1.2 ? MapLibreGL.UserTrackingMode.FollowWithCourse : MapLibreGL.UserTrackingMode.FollowWithHeading}
+        followZoomLevel={(navSpeed ?? 0) > 20 ? 15.5 : (navSpeed ?? 0) > 9 ? 16.2 : 17}
+        followPitch={(navSpeed ?? 0) > 2.2 ? 45 : 0}
+        onUserTrackingModeChange={(event: any) => {
+          if (navMode && event?.nativeEvent?.payload?.followUserLocation === false) onMapGesture?.();
+        }}
       />
 
       {/* ── User location ─────────────────────────────────────────────── */}
@@ -1035,6 +1383,41 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         showsUserHeadingIndicator
         animated
       />
+
+      {trailHighlight.features.length > 0 && (
+        <MapLibreGL.ShapeSource id="selected-trail-highlight" shape={trailHighlight}>
+          <MapLibreGL.LineLayer
+            id="selected-trail-highlight-glow"
+            style={{
+              lineColor: '#f97316',
+              lineWidth: ['interpolate', ['linear'], ['zoom'], 9, 7, 13, 12, 16, 17],
+              lineOpacity: 0.28,
+              lineCap: 'round',
+              lineJoin: 'round',
+            } as any}
+          />
+          <MapLibreGL.LineLayer
+            id="selected-trail-highlight-line"
+            style={{
+              lineColor: '#ffb000',
+              lineWidth: ['interpolate', ['linear'], ['zoom'], 9, 2.8, 13, 4.8, 16, 7],
+              lineOpacity: 0.96,
+              lineCap: 'round',
+              lineJoin: 'round',
+            } as any}
+          />
+          <MapLibreGL.LineLayer
+            id="selected-trail-highlight-core"
+            style={{
+              lineColor: '#ffffff',
+              lineWidth: ['interpolate', ['linear'], ['zoom'], 9, 0.8, 13, 1.4, 16, 2],
+              lineOpacity: 0.72,
+              lineCap: 'round',
+              lineJoin: 'round',
+            } as any}
+          />
+        </MapLibreGL.ShapeSource>
+      )}
 
       {/* ── Route line ────────────────────────────────────────────────── */}
       {routeCoords.length > 0 && (
@@ -1455,7 +1838,6 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           </Text>
         </View>
       </View>
-      {overlayChildren}
     </View>
   );
 });

@@ -22,28 +22,28 @@ import { deleteOfflineTrip, getOfflineTripIndex, loadOfflineTrip, saveOfflineTri
 import { CREDIT_REWARDS } from '@/lib/credits';
 
 type ChecklistItem = { id: string; label: string; done: boolean };
-type ChecklistSection = { title: string; emoji: string; items: ChecklistItem[] };
+type ChecklistSection = { title: string; icon: keyof typeof Ionicons.glyphMap; items: ChecklistItem[] };
 
 const DEFAULT_CHECKLIST: ChecklistSection[] = [
-  { title: 'Vehicle', emoji: '🚙', items: [
+  { title: 'Vehicle', icon: 'car-sport-outline', items: [
     { id: 'fluids', label: 'Check all fluids (oil, coolant, brakes)', done: false },
     { id: 'tires', label: 'Tires inflated + spare checked', done: false },
     { id: 'brakes', label: 'Brakes & lights inspected', done: false },
     { id: 'battery', label: 'Battery tested', done: false },
   ]},
-  { title: 'Recovery', emoji: '🪢', items: [
+  { title: 'Recovery', icon: 'construct-outline', items: [
     { id: 'tow_strap', label: 'Recovery tow strap', done: false },
     { id: 'hi_lift', label: 'Hi-lift jack + base', done: false },
     { id: 'shovel', label: 'Folding shovel', done: false },
     { id: 'boards', label: 'Traction boards', done: false },
   ]},
-  { title: 'Comms & Nav', emoji: '📡', items: [
+  { title: 'Comms & Nav', icon: 'radio-outline', items: [
     { id: 'garmin', label: 'Satellite comms (InReach / SPOT)', done: false },
     { id: 'radio', label: 'CB or GMRS radio', done: false },
     { id: 'offline', label: 'Offline maps downloaded', done: false },
     { id: 'paper', label: 'Paper maps / topo backup', done: false },
   ]},
-  { title: 'Provisions', emoji: '🧃', items: [
+  { title: 'Provisions', icon: 'water-outline', items: [
     { id: 'water', label: '1 gal water per person per day', done: false },
     { id: 'food', label: 'Extra food (2-day buffer)', done: false },
     { id: 'filter', label: 'Water filter / purification tabs', done: false },
@@ -270,7 +270,7 @@ export default function ProfileScreen() {
       const cached = await loadOfflineTrip(t.trip_id);
       if (cached) {
         setActiveTrip(cached, true);
-        router.push('/(tabs)/');
+        router.push('/(tabs)/map');
         return;
       }
 
@@ -280,7 +280,7 @@ export default function ProfileScreen() {
         .then(() => getOfflineTripIndex())
         .then(ids => setOfflineCachedIds(new Set(ids)))
         .catch(() => {});
-      router.push('/(tabs)/');
+      router.push('/(tabs)/map');
     } catch (e: any) {
       if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
         Alert.alert('Trip unavailable', 'This trip is not available for the current signed-in account. Sign in again or open an offline-saved copy.');
@@ -687,7 +687,7 @@ export default function ProfileScreen() {
           contentContainerStyle={s.quickActionsContent}
         >
           {[
-            { icon: 'compass', label: 'PLAN TRIP',   color: C.orange, onPress: () => { setActiveTrip(null); router.push('/(tabs)/'); } },
+            { icon: 'compass', label: 'PLAN TRIP',   color: C.orange, onPress: () => { setActiveTrip(null); router.push('/(tabs)'); } },
             { icon: 'people',  label: 'REFER',       color: C.orange, onPress: shareReferral },
             { icon: 'checkmark-circle', label: 'TRIP PREP', color: C.green,  onPress: () => setShowChecklist(true) },
             { icon: 'help-buoy-outline', label: 'APP TOUR', color: '#3b82f6', onPress: startGuidedTour },
@@ -1091,7 +1091,10 @@ export default function ProfileScreen() {
             <>
               {checklist.map((section, si) => (
                 <View key={section.title} style={s.checkSection}>
-                  <Text style={s.checkSectionTitle}>{section.emoji} {section.title.toUpperCase()}</Text>
+                  <View style={s.checkSectionTitleRow}>
+                    <Ionicons name={section.icon} size={13} color={C.orange} />
+                    <Text style={s.checkSectionTitle}>{section.title.toUpperCase()}</Text>
+                  </View>
                   {section.items.map(item => (
                     <TouchableOpacity key={item.id} style={s.checkItem} onPress={() => toggleCheckItem(si, item.id)}>
                       <View style={[s.checkbox, item.done && s.checkboxDone]}>
@@ -1184,7 +1187,10 @@ export default function ProfileScreen() {
         {/* Saved Camps */}
         {favoriteCamps.length > 0 && (
           <View style={s.historyCard}>
-            <Text style={s.sectionLabel}>❤️ SAVED CAMPS</Text>
+            <View style={s.sectionLabelRow}>
+              <Ionicons name="heart" size={13} color="#ef4444" />
+              <Text style={s.sectionLabel}>SAVED CAMPS</Text>
+            </View>
             {favoriteCamps.map(camp => (
               <View key={camp.id} style={[s.txRow, { alignItems: 'flex-start', paddingVertical: 8 }]}>
                 <View style={{ flex: 1 }}>
@@ -1411,7 +1417,7 @@ export default function ProfileScreen() {
 
 const makeStyles = (C: ColorPalette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
-  scroll: { padding: 14, gap: 14, paddingBottom: 40 },
+  scroll: { padding: 14, gap: 14, paddingBottom: 104 },
 
   authSuccessWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16, padding: 32 },
   authSuccessText: { color: C.green, fontSize: 17, fontWeight: '700', textAlign: 'center', lineHeight: 24 },
@@ -1425,7 +1431,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   authHeading: { color: C.text, fontSize: 28, fontWeight: '800', letterSpacing: 0 },
   authSub: { color: C.text3, fontSize: 13.5, lineHeight: 20, marginTop: -4 },
   verifyCard: {
-    gap: 14, backgroundColor: C.s2, borderRadius: 16, borderWidth: 1, borderColor: C.border,
+    gap: 14, backgroundColor: 'rgba(255,255,255,0.055)', borderRadius: 22, borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)',
     padding: 18,
   },
   secondaryAuthBtn: { alignItems: 'center', paddingVertical: 8 },
@@ -1438,27 +1444,28 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   signupPerkText: { color: C.orange, fontSize: 12.5, flex: 1, lineHeight: 18 },
   authFields: { gap: 10 },
   input: {
-    backgroundColor: C.s2, borderWidth: 1.5, borderColor: C.border,
-    borderRadius: 12, padding: 14, color: C.text, fontSize: 14,
+    backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)',
+    borderRadius: 16, padding: 14, color: C.text, fontSize: 14,
   },
   btn: {
-    backgroundColor: C.orange, borderRadius: 12, padding: 16, alignItems: 'center',
-    shadowColor: C.orange, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.35, shadowRadius: 8,
+    backgroundColor: C.silverBright, borderRadius: 16, padding: 16, alignItems: 'center',
+    shadowColor: '#fff', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.16, shadowRadius: 18,
   },
   btnDisabled: { backgroundColor: C.s3, shadowOpacity: 0 },
-  btnText: { color: '#fff', fontWeight: '700', fontSize: 14, fontFamily: mono },
+  btnText: { color: '#050505', fontWeight: '800', fontSize: 12, fontFamily: mono, letterSpacing: 1 },
   switchRow: { flexDirection: 'row', justifyContent: 'center', marginTop: -4 },
   switchText: { color: C.text3, fontSize: 13 },
   switchLink: { color: C.orange, fontSize: 13, fontWeight: '600' },
 
   profileCard: {
-    backgroundColor: C.s2, borderRadius: 16, borderWidth: 1, borderColor: C.border,
+    backgroundColor: 'rgba(255,255,255,0.055)', borderRadius: 24, borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)',
     padding: 16, flexDirection: 'row', alignItems: 'center', gap: 14,
+    shadowColor: '#000', shadowOpacity: 0.32, shadowRadius: 24, shadowOffset: { width: 0, height: 12 },
   },
   avatar: {
     width: 52, height: 52, borderRadius: 26,
-    backgroundColor: C.orange, alignItems: 'center', justifyContent: 'center',
-    shadowColor: C.orange, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 6,
+    backgroundColor: 'rgba(229,231,235,0.16)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center',
+    shadowColor: '#E5E7EB', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.18, shadowRadius: 16,
   },
   avatarText: { color: '#fff', fontSize: 22, fontWeight: '800' },
   profileInfo: { flex: 1 },
@@ -1475,7 +1482,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
 
   // Stats row
   statsRow: {
-    backgroundColor: C.s2, borderRadius: 16, borderWidth: 1, borderColor: C.border,
+    backgroundColor: 'rgba(255,255,255,0.045)', borderRadius: 22, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
     flexDirection: 'row', alignItems: 'stretch',
   },
   statCell: { flex: 1, alignItems: 'center', paddingVertical: 14 },
@@ -1488,20 +1495,21 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   quickActionsContent: { flexDirection: 'row', paddingHorizontal: 14, gap: 10 },
   quickAction: { alignItems: 'center', gap: 6, width: 70 },
   quickActionIcon: {
-    width: 54, height: 54, borderRadius: 16,
-    borderWidth: 1.5, alignItems: 'center', justifyContent: 'center',
+    width: 54, height: 54, borderRadius: 20,
+    borderWidth: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.045)',
   },
   quickActionLabel: { color: C.text3, fontSize: 8.5, fontFamily: mono, letterSpacing: 0.5, textAlign: 'center' },
 
   // MY RIG
   rigCard: {
-    backgroundColor: C.s2, borderRadius: 16, borderWidth: 1, borderColor: C.border, padding: 16,
+    backgroundColor: 'rgba(255,255,255,0.052)', borderRadius: 24, borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)', padding: 16,
+    shadowColor: '#000', shadowOpacity: 0.28, shadowRadius: 24, shadowOffset: { width: 0, height: 12 },
   },
   rigHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
   rigIcon: { fontSize: 18 },
   rigTitle: { color: C.text, fontSize: 13, fontWeight: '800', fontFamily: mono, letterSpacing: 0.5, flex: 1 },
   rigEditBtn: {
-    backgroundColor: C.s3, borderRadius: 8, borderWidth: 1, borderColor: C.border,
+    backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)',
     paddingHorizontal: 10, paddingVertical: 5,
   },
   rigEditText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '700' },
@@ -1595,10 +1603,13 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   checklistFill: { height: 4, backgroundColor: C.orange, borderRadius: 2 },
   checkSection: { paddingHorizontal: 16, paddingBottom: 10 },
-  checkSectionTitle: {
-    color: C.text3, fontSize: 9, fontFamily: mono, letterSpacing: 1,
+  checkSectionTitleRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 7,
     marginBottom: 8, marginTop: 4,
     borderTopWidth: 1, borderColor: C.border, paddingTop: 10,
+  },
+  checkSectionTitle: {
+    color: C.text3, fontSize: 9, fontFamily: mono, letterSpacing: 1,
   },
   checkItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 5 },
   checkbox: {
@@ -1660,6 +1671,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     backgroundColor: C.s2, borderRadius: 14, borderWidth: 1, borderColor: C.border, padding: 14,
   },
   sectionLabel: { color: C.text3, fontSize: 10, fontFamily: mono, letterSpacing: 1, marginBottom: 10 },
+  sectionLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 10 },
   txRow: {
     flexDirection: 'row', justifyContent: 'space-between',
     paddingVertical: 7, borderBottomWidth: 1, borderColor: C.border + '50',

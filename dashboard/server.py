@@ -66,6 +66,7 @@ OFFLINE_DOWNLOAD_COSTS = {
     "state_map": 0,
     "state_route": 10,
     "state_contours": 5,
+    "state_trails": 5,
     "trip_corridor": 8,
     "conus_map": 100,
 }
@@ -871,7 +872,7 @@ async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, c
                 days = plan_data.get("duration_days", 0)
                 await _send_expo_push(
                     push_token,
-                    title="Your route is ready 🗺",
+                    title="Your route is ready Map",
                     body_text=f"{trip_name} — {days} days planned. Tap to explore.",
                     data={"type": "trip_ready", "job_id": job_id, "trip_id": trip_id},
                 )
@@ -2373,6 +2374,8 @@ async def offline_authorize(body: OfflineAuthorizeRequest, user: dict = Depends(
             message = f"{label} offline routing costs {cost} credits or Explorer. Region map downloads are free."
         elif asset_type == "state_contours":
             message = f"{label} offline contours cost {cost} credits or Explorer. Region map downloads are free."
+        elif asset_type == "state_trails":
+            message = f"{label} offline trail systems cost {cost} credits or Explorer. Region map downloads are free."
         elif asset_type == "trip_corridor":
             message = f"{label} trip corridor download costs {cost} credits or Explorer. Region map downloads are free."
         else:

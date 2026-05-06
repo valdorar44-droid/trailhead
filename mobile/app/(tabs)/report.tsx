@@ -125,8 +125,8 @@ export default function ReportScreen() {
 
     const typeInfo = REPORT_TYPES.find(t => t.type === fresh[0].type);
     const title = fresh.length === 1
-      ? `⚠️ ${typeInfo?.label ?? 'Alert'} Nearby`
-      : `⚠️ ${fresh.length} Trail Alerts Nearby`;
+      ? `${typeInfo?.label ?? 'Alert'} Nearby`
+      : `${fresh.length} Trail Alerts Nearby`;
     const body = fresh.length === 1
       ? (fresh[0].description || `Critical ${typeInfo?.label ?? fresh[0].type} within 0.5 mi`)
       : `${fresh.length} critical conditions within 0.5 mi of you`;
@@ -342,10 +342,9 @@ export default function ReportScreen() {
                       style={[s.typeBtn, active && { borderColor: rt.color, backgroundColor: rt.color + '18' }]}
                       onPress={() => selectType(rt, idx)}
                     >
-                      {(rt.icon.codePointAt(0) ?? 0) > 127
-                        ? <Text style={s.typeEmoji}>{rt.icon}</Text>
-                        : <Ionicons name={rt.icon as any} size={22} color={active ? rt.color : C.text3} />
-                      }
+                      <View style={[s.typeIconWrap, active && { backgroundColor: rt.color + '22' }]}>
+                        <Ionicons name={rt.icon as any} size={21} color={active ? rt.color : C.text3} />
+                      </View>
                       <Text style={[s.typeLabel, active && { color: rt.color }]}>{rt.label}</Text>
                       <Text style={[s.typeTtl, active && { color: rt.color + 'aa' }]}>{rt.ttl}</Text>
                     </TouchableOpacity>
@@ -411,7 +410,11 @@ export default function ReportScreen() {
                   <View style={s.starRow}>
                     {[1, 2, 3, 4, 5].map(star => (
                       <TouchableOpacity key={star} onPress={() => setCampsiteRating(star)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                        <Text style={[s.star, star <= campsiteRating && s.starActive]}>★</Text>
+                        <Ionicons
+                          name={star <= campsiteRating ? 'star' : 'star-outline'}
+                          size={30}
+                          color={star <= campsiteRating ? C.yellow : C.border}
+                        />
                       </TouchableOpacity>
                     ))}
                     {campsiteRating > 0 && (
@@ -524,13 +527,13 @@ export default function ReportScreen() {
           {leaderboard.map((entry, i) => (
             <View key={entry.username} style={[s.leaderRow, i === 0 && s.leaderGold]}>
               <Text style={s.leaderRank}>
-                {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i+1}`}
+                #{i + 1}
               </Text>
               <View style={s.leaderInfo}>
                 <Text style={s.leaderName}>{entry.username}</Text>
                 <Text style={s.leaderMeta}>
                   {entry.report_count} reports · {entry.total_upvotes ?? 0} upvotes
-                  {entry.streak > 1 ? ` · 🔥 ${entry.streak}d` : ''}
+                  {entry.streak > 1 ? ` · ${entry.streak}d streak` : ''}
                 </Text>
               </View>
               {user?.username === entry.username && (
@@ -583,9 +586,11 @@ function ReportCard({ report: r, onPress, onUpvote, onDownvote, onConfirm, onAdm
       <View style={rc.top}>
         {(() => {
           const icon = typeInfo?.icon ?? 'warning-outline';
-          return (icon.codePointAt(0) ?? 0) > 127
-            ? <Text style={rc.icon}>{icon}</Text>
-            : <Ionicons name={icon as any} size={22} color={typeInfo?.color ?? '#f97316'} />;
+          return (
+            <View style={[rc.iconWrap, { backgroundColor: (typeInfo?.color ?? '#f97316') + '18' }]}>
+              <Ionicons name={icon as any} size={18} color={typeInfo?.color ?? '#f97316'} />
+            </View>
+          );
         })()}
         <View style={rc.meta}>
           <Text style={rc.type}>{typeInfo?.label ?? r.type}</Text>
@@ -602,7 +607,7 @@ function ReportCard({ report: r, onPress, onUpvote, onDownvote, onConfirm, onAdm
         <Text style={rc.age}>
           @{r.username} · {age < 1 ? 'just now' : `${age}h ago`}
           {expiresIn !== null ? ` · exp ${expiresIn}h` : ''}
-          {r.has_photo ? ' · 📷' : ''}
+          {r.has_photo ? ' · photo' : ''}
           {r.confirmations > 0 ? ` · ✓${r.confirmations}` : ''}
         </Text>
         <View style={rc.actions}>
@@ -664,9 +669,7 @@ function ReportDetailModal({ report: r, onClose, onUpvote, onDownvote, onConfirm
             <View style={[dm.typeIconWrap, { backgroundColor: (typeInfo?.color ?? '#f97316') + '20' }]}>
               {(() => {
                 const icon = typeInfo?.icon ?? 'warning-outline';
-                return (icon.codePointAt(0) ?? 0) > 127
-                  ? <Text style={{ fontSize: 32 }}>{icon}</Text>
-                  : <Ionicons name={icon as any} size={32} color={typeInfo?.color ?? '#f97316'} />;
+                return <Ionicons name={icon as any} size={30} color={typeInfo?.color ?? '#f97316'} />;
               })()}
             </View>
             <View style={{ flex: 1 }}>
@@ -789,7 +792,7 @@ const makeRcStyles = (C: ColorPalette) => StyleSheet.create({
   },
   clusterText: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '700', letterSpacing: 0.5 },
   top: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
-  icon: { fontSize: 22 },
+  iconWrap: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   meta: { flex: 1 },
   type: { color: C.text, fontWeight: '700', fontSize: 13 },
   subtype: { color: C.text2, fontSize: 11, marginTop: 1 },
@@ -810,7 +813,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 20, paddingVertical: 14,
-    borderBottomWidth: 1, borderColor: C.border, backgroundColor: C.s1,
+    borderBottomWidth: 1, borderColor: 'rgba(255,255,255,0.06)', backgroundColor: 'rgba(5,5,5,0.84)',
   },
   title: { color: C.text, fontSize: 15, fontWeight: '800', fontFamily: mono, letterSpacing: 0.5 },
   subtitle: { color: C.text3, fontSize: 11, marginTop: 2 },
@@ -826,31 +829,31 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   successIcon: { fontSize: 28, color: C.green },
   successTitle: { color: C.green, fontSize: 13, fontWeight: '800', fontFamily: mono },
   successSub: { color: C.green, fontSize: 11, marginTop: 2 },
-  tabs: { flexDirection: 'row', borderBottomWidth: 1, borderColor: C.border, backgroundColor: C.s1 },
+  tabs: { flexDirection: 'row', borderBottomWidth: 1, borderColor: 'rgba(255,255,255,0.06)', backgroundColor: 'rgba(5,5,5,0.74)' },
   tab: { flex: 1, paddingVertical: 12, alignItems: 'center', borderBottomWidth: 2, borderBottomColor: 'transparent' },
   tabActive: { borderBottomColor: C.orange },
   tabText: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '700', letterSpacing: 0.5 },
   tabTextActive: { color: C.orange },
-  scroll: { padding: 14, gap: 12, paddingBottom: 40 },
+  scroll: { padding: 16, gap: 12, paddingBottom: 104 },
   sectionLabel: { color: C.text3, fontSize: 10, fontFamily: mono, letterSpacing: 1, marginBottom: 8 },
-  typeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 16 },
+  typeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
   typeBtn: {
-    backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
-    borderRadius: 12, padding: 10, alignItems: 'center', gap: 4,
+    backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 18, padding: 9, alignItems: 'center', gap: 5, minHeight: 92,
   },
-  typeEmoji: { fontSize: 24 },
+  typeIconWrap: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.055)' },
   typeLabel: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '700', letterSpacing: 0.3 },
   typeTtl: { color: C.border, fontSize: 8, fontFamily: mono },
   chipRow: { gap: 8, paddingBottom: 4, marginBottom: 16 },
   chip: {
     paddingHorizontal: 12, paddingVertical: 7,
-    backgroundColor: C.s2, borderWidth: 1, borderColor: C.border, borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', borderRadius: 999,
   },
   chipText: { color: C.text2, fontSize: 12 },
   severityRow: { flexDirection: 'row', gap: 6, marginBottom: 16 },
   sevBtn: {
-    flex: 1, paddingVertical: 9, borderWidth: 1, borderColor: C.border,
-    borderRadius: 8, alignItems: 'center', backgroundColor: C.s2,
+    flex: 1, paddingVertical: 9, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 12, alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.05)',
   },
   sevText: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '700' },
   photoSection: { marginBottom: 4 },
@@ -860,16 +863,16 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   photoRow: { flexDirection: 'row', gap: 8, marginBottom: 16, alignItems: 'center' },
   photoBtn: {
-    backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
-    borderRadius: 10, padding: 14, alignItems: 'center', gap: 5, flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 16, padding: 14, alignItems: 'center', gap: 5, flex: 1,
   },
   photoBtnText: { color: C.text3, fontSize: 10, fontFamily: mono },
   thumbWrap: { width: 64, height: 64, position: 'relative' },
   thumbImg: { width: 64, height: 64, borderRadius: 10 },
   removeBtn: { position: 'absolute', top: -8, right: -8 },
   notes: {
-    backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
-    borderRadius: 10, padding: 12, color: C.text, fontSize: 13,
+    backgroundColor: 'rgba(255,255,255,0.055)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 16, padding: 12, color: C.text, fontSize: 13,
     minHeight: 70, marginBottom: 12,
   },
   earnRow: {
@@ -878,18 +881,18 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   earnText: { color: C.orange, fontSize: 12, fontFamily: mono },
   submitBtn: {
-    backgroundColor: C.orange, borderRadius: 12, padding: 16, alignItems: 'center',
-    shadowColor: C.orange, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.35, shadowRadius: 8,
+    backgroundColor: C.silverBright, borderRadius: 16, padding: 16, alignItems: 'center',
+    shadowColor: '#fff', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.16, shadowRadius: 18,
   },
   submitBtnDisabled: { backgroundColor: C.s3, shadowOpacity: 0 },
-  submitBtnText: { color: '#fff', fontWeight: '700', fontSize: 13, fontFamily: mono, letterSpacing: 0.5 },
+  submitBtnText: { color: '#050505', fontWeight: '900', fontSize: 12, fontFamily: mono, letterSpacing: 0.8 },
   // Driving safety
   drivingOverlay: {
     flex: 1, backgroundColor: 'rgba(0,0,0,0.85)',
     alignItems: 'center', justifyContent: 'center', padding: 24,
   },
   drivingModal: {
-    backgroundColor: C.s2, borderRadius: 20, borderWidth: 1, borderColor: C.border,
+    backgroundColor: 'rgba(255,255,255,0.055)', borderRadius: 24, borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)',
     padding: 28, alignItems: 'center', gap: 12, width: '100%', maxWidth: 360,
   },
   drivingIcon: { fontSize: 48, marginBottom: 4 },
@@ -899,11 +902,11 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   drivingBody: { color: C.text2, fontSize: 13.5, lineHeight: 20, textAlign: 'center' },
   drivingParkedBtn: {
-    backgroundColor: C.orange, borderRadius: 12, padding: 15,
+    backgroundColor: C.silverBright, borderRadius: 16, padding: 15,
     width: '100%', alignItems: 'center', marginTop: 6,
     shadowColor: C.orange, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.35, shadowRadius: 8,
   },
-  drivingParkedText: { color: '#fff', fontWeight: '700', fontSize: 13, fontFamily: mono },
+  drivingParkedText: { color: '#050505', fontWeight: '900', fontSize: 12, fontFamily: mono },
   drivingPassengerBtn: {
     borderWidth: 1, borderColor: C.border, borderRadius: 12, padding: 13,
     width: '100%', alignItems: 'center',
@@ -912,8 +915,8 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
 
   safetyBanner: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: C.s2, borderRadius: 8, padding: 9, marginBottom: 4,
-    borderWidth: 1, borderColor: C.border,
+    backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 14, padding: 9, marginBottom: 4,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
   },
   safetyText: { color: C.text3, fontSize: 11, fontFamily: mono },
   starRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 16 },
@@ -928,8 +931,8 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   // Alert settings button
   notifSettingsBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
-    borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 4,
+    backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 4,
   },
   notifSettingsBtnText: { color: C.text3, fontSize: 11, fontFamily: mono },
   // Notification settings modal
@@ -938,8 +941,8 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     justifyContent: 'flex-end',
   },
   notifModal: {
-    backgroundColor: C.s1, borderTopLeftRadius: 20, borderTopRightRadius: 20,
-    borderWidth: 1, borderColor: C.border, padding: 20, paddingBottom: 40, gap: 14,
+    backgroundColor: 'rgba(8,8,10,0.94)', borderTopLeftRadius: 28, borderTopRightRadius: 28,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)', padding: 20, paddingBottom: 40, gap: 14,
   },
   notifHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   notifTitle: { color: C.text, fontSize: 13, fontWeight: '800', fontFamily: mono, letterSpacing: 0.5 },
@@ -953,7 +956,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   notifNote: { color: C.text3, fontSize: 11, lineHeight: 16, marginTop: 4 },
   leaderRow: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
-    backgroundColor: C.s2, borderRadius: 12, borderWidth: 1, borderColor: C.border,
+    backgroundColor: 'rgba(255,255,255,0.052)', borderRadius: 18, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
     padding: 14, marginBottom: 8,
   },
   leaderGold: { borderColor: '#f59e0b', backgroundColor: '#f59e0b0a' },

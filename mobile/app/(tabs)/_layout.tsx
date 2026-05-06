@@ -1,27 +1,19 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useTheme, mono } from '@/lib/design';
 import GuidedTourOverlay from '@/components/GuidedTourOverlay';
+import { PremiumTabBar } from '@/components/premium';
 
 export default function TabLayout() {
-  const C = useTheme();
   return (
     <>
       <Tabs
         screenOptions={{
           headerShown: false,
-          tabBarStyle: {
-            backgroundColor: C.s1,
-            borderTopColor: C.border,
-            borderTopWidth: 1,
-            height: 80,
-            paddingBottom: 16,
-            paddingTop: 8,
-          },
-          tabBarActiveTintColor: C.orange,
-          tabBarInactiveTintColor: C.text3,
-          tabBarLabelStyle: { fontSize: 10, fontWeight: '700', letterSpacing: 0.5, fontFamily: mono },
+          tabBarStyle: { position: 'absolute', backgroundColor: 'transparent', borderTopWidth: 0, elevation: 0 },
+          tabBarActiveTintColor: '#F5F5F7',
+          tabBarInactiveTintColor: 'rgba(245,245,247,0.45)',
         }}
+        tabBar={(props) => <PremiumTabBar {...props} />}
       >
         <Tabs.Screen
           name="index"

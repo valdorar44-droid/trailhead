@@ -94,10 +94,10 @@ Playwright MCP + context7 plugins are installed — use for before/after screens
 
 ## Phase Roadmap
 
-- **Phase 1** ✅ Web app: AI trip planner + map + RIDB campsites + NREL gas
-- **Phase 2** ✅ Expo mobile app + full Waze-style reporting/gamification
-- **Phase 3** ✅ GPS Audio Guide: Claude narrations per waypoint + TTS + "What's here?" + weather forecast
-- **Phase 4** ✅ Community pins on map, trip sharing via native Share API
+- **Phase 1** [done] Web app: AI trip planner + map + RIDB campsites + NREL gas
+- **Phase 2** [done] Expo mobile app + full Waze-style reporting/gamification
+- **Phase 3** [done] GPS Audio Guide: Claude narrations per waypoint + TTS + "What's here?" + weather forecast
+- **Phase 4** [done] Community pins on map, trip sharing via native Share API
 - **Phase 5** — Offline maps (Mapbox tile download for dead zones)
 - **Phase 6** — iOverlander refugee import tool + Reddit/GPX harvest
 - **Phase 7** — Background audio auto-play (expo-task-manager geofencing)

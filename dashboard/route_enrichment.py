@@ -39,8 +39,12 @@ def _haversine_mi(a: tuple[float, float], b: tuple[float, float]) -> float:
     return 3958.8 * 2 * math.asin(min(1, math.sqrt(h)))
 
 
-def _point_segment_distance_mi(point: tuple[float, float], a: tuple[float, float], b: tuple[float, float]) -> float:
-    """Approximate shortest distance from point to route segment in miles."""
+def _point_segment_projection(
+    point: tuple[float, float],
+    a: tuple[float, float],
+    b: tuple[float, float],
+) -> dict:
+    """Approximate point projection onto a route segment in miles."""
     plat, plng = point
     alat, alng = a
     blat, blng = b
@@ -49,22 +53,63 @@ def _point_segment_distance_mi(point: tuple[float, float], a: tuple[float, float
     ax, ay = alng * math.cos(ref_lat), alat
     bx, by = blng * math.cos(ref_lat), blat
     dx, dy = bx - ax, by - ay
+    segment_mi = _haversine_mi(a, b)
     if dx == 0 and dy == 0:
-        return _haversine_mi(point, a)
+        return {"distance_mi": _haversine_mi(point, a), "progress": 0.0, "progress_mi": 0.0}
     t = max(0, min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy)))
     proj = (ay + t * dy, (ax + t * dx) / math.cos(ref_lat))
-    return _haversine_mi(point, proj)
+    return {"distance_mi": _haversine_mi(point, proj), "progress": t, "progress_mi": segment_mi * t}
+
+
+def _point_segment_distance_mi(point: tuple[float, float], a: tuple[float, float], b: tuple[float, float]) -> float:
+    """Approximate shortest distance from point to route segment in miles."""
+    return float(_point_segment_projection(point, a, b)["distance_mi"])
+
+
+def _route_projection(item: dict, route: list[dict]) -> dict:
+    if len(route) < 2:
+        return {
+            "route_distance_mi": 0.0,
+            "route_progress": 0.0,
+            "route_progress_mi": 0.0,
+            "route_segment_index": 0,
+        }
+    point = (float(item["lat"]), float(item["lng"]))
+    cumulative = 0.0
+    total = sum(_haversine_mi((a["lat"], a["lng"]), (b["lat"], b["lng"])) for a, b in zip(route, route[1:]))
+    best: dict | None = None
+    for idx, (a, b) in enumerate(zip(route, route[1:])):
+        seg_a = (a["lat"], a["lng"])
+        seg_b = (b["lat"], b["lng"])
+        projection = _point_segment_projection(point, seg_a, seg_b)
+        candidate = {
+            "route_distance_mi": float(projection["distance_mi"]),
+            "route_progress": ((cumulative + float(projection["progress_mi"])) / total) if total > 0 else 0.0,
+            "route_progress_mi": cumulative + float(projection["progress_mi"]),
+            "route_segment_index": idx,
+        }
+        if best is None or candidate["route_distance_mi"] < best["route_distance_mi"]:
+            best = candidate
+        cumulative += _haversine_mi(seg_a, seg_b)
+    return best or {
+        "route_distance_mi": 0.0,
+        "route_progress": 0.0,
+        "route_progress_mi": 0.0,
+        "route_segment_index": 0,
+    }
 
 
 def _route_distance_mi(item: dict, route: list[dict]) -> float:
-    if len(route) < 2:
-        return 0
-    point = (float(item["lat"]), float(item["lng"]))
-    pairs = zip(route, route[1:])
-    return min(
-        _point_segment_distance_mi(point, (a["lat"], a["lng"]), (b["lat"], b["lng"]))
-        for a, b in pairs
-    )
+    return float(_route_projection(item, route)["route_distance_mi"])
+
+
+def _annotate_route_position(item: dict, route: list[dict]) -> float:
+    projection = _route_projection(item, route)
+    item["route_distance_mi"] = round(float(projection["route_distance_mi"]), 1)
+    item["route_progress"] = round(max(0.0, min(1.0, float(projection["route_progress"]))), 4)
+    item["route_progress_mi"] = round(float(projection["route_progress_mi"]), 1)
+    item["route_segment_index"] = int(projection["route_segment_index"])
+    return float(projection["route_distance_mi"])
 
 
 def _nearest_day(item: dict, waypoints: list[dict], types: Iterable[str] | None = None) -> int | None:
@@ -191,7 +236,7 @@ async def _route_camps(waypoints: list[dict], route: list[dict]) -> list[dict]:
     for camp in _dedupe(camps):
         if not camp.get("lat") or not camp.get("lng"):
             continue
-        route_mi = _route_distance_mi(camp, route)
+        route_mi = _annotate_route_position(camp, route)
         if route_mi > 35:
             continue
         day = _nearest_day(camp, waypoints, types=("camp", "motel"))
@@ -207,7 +252,6 @@ async def _route_camps(waypoints: list[dict], route: list[dict]) -> list[dict]:
             quality += 2
         if camp.get("reservable"):
             quality += 1
-        camp["route_distance_mi"] = round(route_mi, 1)
         camp["route_fit"] = "on_route" if route_mi <= 3 else "short_detour" if route_mi <= 12 else "detour"
         camp["recommended_day"] = day
         camp["verified_source"] = camp.get("source") or ("ridb" if str(camp.get("id", "")).isdigit() else "osm")
@@ -236,10 +280,9 @@ async def _route_gas(waypoints: list[dict], route: list[dict]) -> list[dict]:
     for station in _dedupe(stations):
         if not station.get("lat") or not station.get("lng"):
             continue
-        route_mi = _route_distance_mi(station, route)
+        route_mi = _annotate_route_position(station, route)
         if route_mi > 15:
             continue
-        station["route_distance_mi"] = round(route_mi, 1)
         station["route_fit"] = "on_route" if route_mi <= 2 else "short_detour"
         station["recommended_day"] = _nearest_day(station, waypoints)
         scored.append((route_mi, station))
@@ -269,7 +312,7 @@ async def _route_pois(route: list[dict]) -> list[dict]:
     for poi in _dedupe(pois):
         if not poi.get("lat") or not poi.get("lng"):
             continue
-        raw_route_mi = _route_distance_mi(poi, route)
+        raw_route_mi = _annotate_route_position(poi, route)
         if raw_route_mi > 18:
             continue
         route_mi = raw_route_mi
@@ -277,7 +320,6 @@ async def _route_pois(route: list[dict]) -> list[dict]:
             route_mi += 5
         if poi.get("type") == "hot_spring":
             route_mi -= 6
-        poi["route_distance_mi"] = round(raw_route_mi, 1)
         poi["route_fit"] = "on_route" if raw_route_mi <= 3 else "short_detour"
         scored.append((route_mi, poi))
     return [poi for _, poi in sorted(scored, key=lambda row: row[0])[:50]]

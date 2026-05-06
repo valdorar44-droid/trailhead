@@ -128,6 +128,7 @@ interface AppState {
   searchHistory: SearchHistoryItem[];
   offlineTripIds: string[];
   activeTripFromCache: boolean;
+  tabBarHidden: boolean;
   hasPlan: boolean;
   planExpiresAt: number | null;
   guidedTourRunId: number;
@@ -135,6 +136,7 @@ interface AppState {
   setAuth: (token: string, user: User) => void;
   clearAuth: () => void;
   setActiveTrip: (trip: TripResult | null, fromCache?: boolean) => void;
+  setTabBarHidden: (hidden: boolean) => void;
   setRigProfile: (rig: RigProfile) => void;
   addTripToHistory: (item: TripHistoryItem) => void;
   removeTripFromHistory: (tripId: string) => void;
@@ -167,7 +169,7 @@ export const useStore = create<AppState>((set) => ({
   activeTrip: null,
   rigProfile: null,
   tripHistory: [],
-  themeMode: 'light',
+  themeMode: 'dark',
   userLoc: null,
   mapboxToken: '',
   sessionId: 'sess_' + Math.random().toString(36).slice(2, 12),
@@ -179,6 +181,7 @@ export const useStore = create<AppState>((set) => ({
   searchHistory: [],
   offlineTripIds: [],
   activeTripFromCache: false,
+  tabBarHidden: false,
   hasPlan: false,
   planExpiresAt: null,
   guidedTourRunId: 0,
@@ -228,6 +231,8 @@ export const useStore = create<AppState>((set) => ({
     sd('trailhead_active_route');
     set({ activeTrip: trip, activeTripFromCache: fromCache });
   },
+
+  setTabBarHidden: (hidden) => set({ tabBarHidden: hidden }),
 
   setRigProfile: (rig) => {
     ss('trailhead_rig', JSON.stringify(rig));
@@ -377,7 +382,7 @@ export const useStore = create<AppState>((set) => ({
       ss('trailhead_rig', JSON.stringify(rigFromFile));
     }
     if (historyRaw) patch.tripHistory = JSON.parse(historyRaw);
-    if (themeRaw === 'dark' || themeRaw === 'light') patch.themeMode = themeRaw;
+    patch.themeMode = 'dark';
     if (favRaw) patch.favoriteCamps = JSON.parse(favRaw);
     if (cachedRegionsRaw) patch.cachedRegions = JSON.parse(cachedRegionsRaw);
     if (savedPlacesRaw) patch.savedPlaces = JSON.parse(savedPlacesRaw);

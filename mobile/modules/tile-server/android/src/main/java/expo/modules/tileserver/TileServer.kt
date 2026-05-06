@@ -16,6 +16,8 @@ object TileServer {
     private var server: ServerSocket? = null
     private var stateReader: PMTilesReader? = null
     private var baseReader: PMTilesReader? = null
+    private var contourReader: PMTilesReader? = null
+    private var trailReader: PMTilesReader? = null
     private val readerLock = Any()
     private val pool = Executors.newFixedThreadPool(8)
 
@@ -38,6 +40,8 @@ object TileServer {
         synchronized(readerLock) {
             stateReader?.close(); stateReader = null
             baseReader?.close(); baseReader = null
+            contourReader?.close(); contourReader = null
+            trailReader?.close(); trailReader = null
         }
     }
 
@@ -54,6 +58,36 @@ object TileServer {
         synchronized(readerLock) {
             baseReader?.close()
             baseReader = next
+        }
+    }
+
+    fun setContours(path: String) {
+        val next = PMTilesReader(path)
+        synchronized(readerLock) {
+            contourReader?.close()
+            contourReader = next
+        }
+    }
+
+    fun clearContours() {
+        synchronized(readerLock) {
+            contourReader?.close()
+            contourReader = null
+        }
+    }
+
+    fun setTrails(path: String) {
+        val next = PMTilesReader(path)
+        synchronized(readerLock) {
+            trailReader?.close()
+            trailReader = next
+        }
+    }
+
+    fun clearTrails() {
+        synchronized(readerLock) {
+            trailReader?.close()
+            trailReader = null
         }
     }
 
@@ -93,13 +127,22 @@ object TileServer {
                     return
                 }
 
-                // ── Tile request: GET /api/tiles/{z}/{x}/{y}.pbf ──────────────
-                val m = Regex("""GET /api/tiles/(\d+)/(\d+)/(\d+)\.pbf""").find(line)
+                // ── Tile request: GET /api/{tiles|contours|trails}/{z}/{x}/{y}.pbf ──
+                val m = Regex("""GET /api/(tiles|contours|trails)/(\d+)/(\d+)/(\d+)\.pbf""").find(line)
                 if (m == null) { respond(s, 404, ByteArray(0)); return }
-                val (z, x, y) = m.destructured.toList().map { it.toInt() }
+                val lane = m.groupValues[1]
+                val z = m.groupValues[2].toInt()
+                val x = m.groupValues[3].toInt()
+                val y = m.groupValues[4].toInt()
                 val data = synchronized(readerLock) {
-                    stateReader?.tile(z, x, y)?.takeIf { it.isNotEmpty() }
-                        ?: baseReader?.tile(z, x, y)?.takeIf { it.isNotEmpty() }
+                    if (lane == "contours") {
+                        contourReader?.tile(z, x, y)?.takeIf { it.isNotEmpty() }
+                    } else if (lane == "trails") {
+                        trailReader?.tile(z, x, y)?.takeIf { it.isNotEmpty() }
+                    } else {
+                        stateReader?.tile(z, x, y)?.takeIf { it.isNotEmpty() }
+                            ?: baseReader?.tile(z, x, y)?.takeIf { it.isNotEmpty() }
+                    }
                 }
                 if (data != null && data.isNotEmpty()) {
                     respond(s, 200, data, "application/vnd.mapbox-vector-tile", "Content-Encoding: gzip\r\n")

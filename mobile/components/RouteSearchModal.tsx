@@ -11,7 +11,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore, SavedPlace, MarkerGroup, TripHistoryItem } from '@/lib/store';
-import { CampsitePin, Pin } from '@/lib/api';
+import { api, CampsitePin, Pin } from '@/lib/api';
 import { getOfflineTripSummaries, loadOfflineTrip } from '@/lib/offlineTrips';
 import { useTheme, mono } from '@/lib/design';
 
@@ -31,6 +31,7 @@ export interface RouteSearchModalProps {
   communityPins: Pin[];
   routeOpts: { avoidHighways?: boolean; avoidTolls?: boolean; backRoads?: boolean };
   routeCoords?: [number, number][];  // [lng, lat] for elevation profile
+  contextLoading?: boolean;
   onCampTap?: (camp: CampsitePin) => void;  // opens camp detail card
   onLoadSavedTrip?: (tripId: string) => void;  // load a previously planned trip
   onSelectDest: (place: SearchPlace) => void;
@@ -262,7 +263,7 @@ const GROUP_ICONS = ['flag', 'star', 'bonfire-outline', 'water', 'car-sport-outl
 const GROUP_COLORS = ['#ef4444', '#f5a623', '#14b8a6', '#38bdf8', '#eab308', '#22c55e', '#a855f7', '#6366f1'];
 
 export default function RouteSearchModal({
-  visible, userLoc, camps, gas, pois, communityPins, routeOpts, routeCoords,
+  visible, userLoc, camps, gas, pois, communityPins, routeOpts, routeCoords, contextLoading = false,
   onCampTap, onLoadSavedTrip, onSelectDest, onStartNav, onSelectOnMap, onClose,
   routeCard, onClearRoute, onOpenRouteOpts,
 }: RouteSearchModalProps) {
@@ -360,6 +361,34 @@ export default function RouteSearchModal({
     if (!cat) return;
     setCatSearching(true);
     try {
+      if (catId === 'fuel') {
+        const stations = await api.getGas(userLoc.lat, userLoc.lng, 35);
+        setCatResults(stations
+          .filter(g => g.lat != null && g.lng != null && Number.isFinite(g.lat) && Number.isFinite(g.lng))
+          .map(g => ({
+            name: g.name || 'Fuel',
+            lat: g.lat,
+            lng: g.lng,
+            dist: haversineKm(userLoc, g),
+          }))
+          .sort((a, b) => (a.dist ?? 999) - (b.dist ?? 999))
+          .slice(0, 30));
+        return;
+      }
+      if (catId === 'water') {
+        const water = await api.getOsmPois(userLoc.lat, userLoc.lng, 35, 'water');
+        setCatResults(water
+          .filter(p => p.lat != null && p.lng != null && Number.isFinite(p.lat) && Number.isFinite(p.lng))
+          .map(p => ({
+            name: p.name || (p.subtype === 'fountain' ? 'Fountain' : 'Water Source'),
+            lat: p.lat,
+            lng: p.lng,
+            dist: haversineKm(userLoc, p),
+          }))
+          .sort((a, b) => (a.dist ?? 999) - (b.dist ?? 999))
+          .slice(0, 30));
+        return;
+      }
       // Camps: broad Overpass search + merge local trip camps at top
       const radius = catId === 'camps' ? 80000 : 25000;
       const places = cat.tags.length > 0
@@ -376,8 +405,11 @@ export default function RouteSearchModal({
       } else {
         setCatResults(places);
       }
-    } catch {}
-    setCatSearching(false);
+    } catch {
+      setCatResults([]);
+    } finally {
+      setCatSearching(false);
+    }
   }, [userLoc, camps]);
 
   const selectPlace = useCallback((place: SearchPlace) => {
@@ -512,7 +544,15 @@ export default function RouteSearchModal({
             {/* Nearby tab */}
             {results.length === 0 && tab === 'nearby' && (
               <View>
-                <Text style={[s.sectionHeaderText, { paddingHorizontal: 16, paddingTop: 12 }]}>NEARBY</Text>
+                <View style={s.liveNearbyHeader}>
+                  <Text style={s.sectionHeaderText}>NEARBY</Text>
+                  {contextLoading && (
+                    <View style={s.liveNearbyPill}>
+                      <Ionicons name="search" size={11} color={C.orange} />
+                      <Text style={s.liveNearbyPillText}>SEARCHING LIVE PLACES</Text>
+                    </View>
+                  )}
+                </View>
                 {nearbyPlaces.map((p, i) => (
                   <TouchableOpacity key={i} style={s.resultRow} onPress={() => selectPlace(p)}>
                     <View style={[s.resultIcon, { backgroundColor: ICON_COLORS[p.icon] + '22' }]}>
@@ -966,6 +1006,9 @@ const styles = (C: ReturnType<typeof useTheme>) => StyleSheet.create({
   tabTextActive: { color: C.text, fontWeight: '600' },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 8 },
   sectionHeaderText: { color: C.text3, fontSize: 11, fontFamily: mono, fontWeight: '700', letterSpacing: 0.8 },
+  liveNearbyHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4 },
+  liveNearbyPill: { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderColor: C.orange + '44', backgroundColor: C.orange + '12', borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4 },
+  liveNearbyPillText: { color: C.orange, fontSize: 8.5, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
   resultRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 13, borderBottomWidth: 1, borderColor: C.border },
   resultIcon: { width: 30, height: 30, borderRadius: 15, backgroundColor: C.orangeGlow, alignItems: 'center', justifyContent: 'center' },
   resultName: { color: C.text, fontSize: 14, fontWeight: '500' },

@@ -2751,6 +2751,9 @@ function MapScreen() {
   const [pois,     setPois]     = useState<OsmPoi[]>([]);
   const [offlinePlacePois, setOfflinePlacePois] = useState<OsmPoi[]>([]);
   const [offlinePlaceCount, setOfflinePlaceCount] = useState(0);
+  const [liveRouteGas, setLiveRouteGas] = useState<Array<{ lat: number; lng: number; name: string }>>([]);
+  const [liveRoutePois, setLiveRoutePois] = useState<OsmPoi[]>([]);
+  const [routeContextLoading, setRouteContextLoading] = useState(false);
   const showPoisRef    = useRef(false);
   const lastPoiFetchRef = useRef<{lat: number; lng: number} | null>(null);
 
@@ -3544,13 +3547,56 @@ function MapScreen() {
 
   function fetchPois(center: { lat: number; lng: number }) {
     lastPoiFetchRef.current = center;
-    api.getOsmPois(center.lat, center.lng, 40, 'water,trailhead,viewpoint,peak,hot_spring')
+    api.getOsmPois(center.lat, center.lng, 40, 'fuel,water,trail,trailhead,viewpoint,peak,hot_spring')
       .then(p => {
         setPois(p);
         webRef.current?.postMessage(JSON.stringify({ type: 'set_pois', pois: p }));
       })
       .catch(() => {});
   }
+
+  useEffect(() => {
+    if (!showSearch || !userLoc) return;
+    let cancelled = false;
+    setRouteContextLoading(true);
+    Promise.allSettled([
+      api.getGas(userLoc.lat, userLoc.lng, 35),
+      api.getOsmPois(userLoc.lat, userLoc.lng, 35, 'fuel,water,trail,trailhead,viewpoint,peak,hot_spring,food,grocery,mechanic'),
+      api.getNearbyCamps(userLoc.lat, userLoc.lng, 45, activeFilters),
+    ]).then(([gasResult, poisResult, campsResult]) => {
+      if (cancelled) return;
+      const gasStations = gasResult.status === 'fulfilled'
+        ? gasResult.value
+            .filter(g => g.lat != null && g.lng != null && isFinite(g.lat) && isFinite(g.lng))
+            .map(g => ({ lat: g.lat, lng: g.lng, name: g.name || 'Fuel' }))
+        : [];
+      const livePois = poisResult.status === 'fulfilled' ? poisResult.value : [];
+      setLiveRouteGas(gasStations);
+      setLiveRoutePois(mergeOsmPois(livePois, gasStations.map(gasStationToPoi).filter((poi): poi is OsmPoi => !!poi)));
+      if (campsResult.status === 'fulfilled' && campsResult.value.length > 0) {
+        setAreaCamps(prev => {
+          const seen = new Set(prev.map(c => String(c.id || `${c.name}:${c.lat.toFixed(4)}:${c.lng.toFixed(4)}`)));
+          const merged = [...prev];
+          for (const camp of campsResult.value) {
+            const key = String(camp.id || `${camp.name}:${camp.lat.toFixed(4)}:${camp.lng.toFixed(4)}`);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            merged.push(camp);
+            if (merged.length >= 180) break;
+          }
+          return merged;
+        });
+      }
+    }).catch(() => {
+      if (!cancelled) {
+        setLiveRouteGas([]);
+        setLiveRoutePois([]);
+      }
+    }).finally(() => {
+      if (!cancelled) setRouteContextLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [showSearch, userLoc?.lat, userLoc?.lng, activeFilters.join(',')]);
 
   useEffect(() => {
     if (!pendingSavedTrailId) return;
@@ -4938,6 +4984,7 @@ function MapScreen() {
     };
     for (const p of activeTrip?.route_pois ?? []) pushPoi(p, false);
     for (const p of pois) pushPoi(p, true);
+    for (const p of liveRoutePois) pushPoi(p, true);
     let scannedOffline = 0;
     for (const p of offlinePlacePois) {
       scannedOffline += 1;
@@ -4945,7 +4992,7 @@ function MapScreen() {
       if (next.length >= MAX_ALL_MAP_POIS || scannedOffline >= MAX_OFFLINE_POI_SCAN) break;
     }
     return next;
-  }, [activeTrip?.trip_id, activePlaceFilters, offlinePlacePois, pois]);
+  }, [activeTrip?.trip_id, activePlaceFilters, liveRoutePois, offlinePlacePois, pois]);
   const trailSourcePois = useMemo(() => {
     const seen = new Set<string>();
     const next: OsmPoi[] = [];
@@ -4972,8 +5019,25 @@ function MapScreen() {
     const fromPois = allMapPois
       .filter(p => ['fuel', 'propane'].includes(p.type || '') && p.lat != null && p.lng != null && isFinite(p.lat) && isFinite(p.lng))
       .map(p => ({ lat: p.lat, lng: p.lng }));
-    return [...gas, ...fromPois];
-  }, [allMapPois, gas]);
+    return [...gas, ...liveRouteGas, ...fromPois];
+  }, [allMapPois, gas, liveRouteGas]);
+  const routeSearchGas = useMemo(() => {
+    const seen = new Set<string>();
+    const next: Array<{ lat: number; lng: number; name: string }> = [];
+    for (const station of [
+      ...(activeTrip?.gas_stations ?? []).filter(g => g.lat != null && g.lng != null && isFinite(g.lat) && isFinite(g.lng)).map(g => ({ lat: g.lat, lng: g.lng, name: g.name || 'Fuel' })),
+      ...liveRouteGas,
+      ...allMapPois
+        .filter(p => ['fuel', 'propane'].includes(p.type || '') && p.lat != null && p.lng != null && isFinite(p.lat) && isFinite(p.lng))
+        .map(p => ({ lat: p.lat, lng: p.lng, name: p.name || 'Fuel' })),
+    ]) {
+      const key = `${station.name}:${station.lat.toFixed(4)}:${station.lng.toFixed(4)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      next.push(station);
+    }
+    return next;
+  }, [activeTrip?.trip_id, allMapPois, liveRouteGas]);
   const routePois = useMemo(() => {
     const trailPinsActive = showTrailList || showDiscoveryPanel || discoveryMode === 'trails';
     const seen = new Set<string>();
@@ -6675,7 +6739,7 @@ function MapScreen() {
             ...(activeTrip?.campsites ?? []).filter(c => c.lat != null && c.lng != null && isFinite(c.lat) && isFinite(c.lng)),
             ...areaCamps.filter(c => c.lat != null && c.lng != null),
           ] as any}
-          gas={(activeTrip?.gas_stations ?? []).filter(g => g.lat != null && g.lng != null && isFinite(g.lat) && isFinite(g.lng)) as any}
+          gas={routeSearchGas as any}
           pois={routePois}
           reports={mapReports}
           communityPins={displayCommunityPins}
@@ -7816,8 +7880,9 @@ function MapScreen() {
               ...(activeTrip?.campsites ?? []).filter(c => c.lat != null && c.lng != null && isFinite(c.lat) && isFinite(c.lng)),
               ...areaCamps.filter(c => c.lat != null && c.lng != null),
             ] as any}
-            gas={(activeTrip?.gas_stations ?? []).filter(g => g.lat != null && g.lng != null && isFinite(g.lat) && isFinite(g.lng)) as any}
+            gas={routeSearchGas as any}
             pois={routePois}
+            contextLoading={routeContextLoading}
             communityPins={displayCommunityPins}
             routeOpts={routeOpts}
             routeCoords={lastRouteCoords.length > 0 ? lastRouteCoords : undefined}

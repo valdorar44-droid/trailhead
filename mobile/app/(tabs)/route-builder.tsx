@@ -1748,13 +1748,13 @@ export default function RouteBuilderScreen() {
     setRestDays(prev => [...prev, day].sort((a, b) => a - b));
   }
 
-  async function addDestinationFromSetup() {
+  async function addDestinationFromSetup(manageLoading = true) {
     const q = endQuery.trim();
     if (!q) {
       Alert.alert('Destination needed', 'Enter the place you want to end up at, then build the route framework.');
       return null;
     }
-    setBuildingFramework(true);
+    if (manageLoading) setBuildingFramework(true);
     try {
       let start = orderedStops[0] ?? null;
       const startQ = startQuery.trim();
@@ -1830,7 +1830,7 @@ export default function RouteBuilderScreen() {
       fly((start.lat + destination.lat) / 2, (start.lng + destination.lng) / 2, 5);
       return next;
     } finally {
-      setBuildingFramework(false);
+      if (manageLoading) setBuildingFramework(false);
     }
   }
 
@@ -1950,7 +1950,7 @@ export default function RouteBuilderScreen() {
     let base = orderedStops;
     try {
       if (endQuery.trim()) {
-        const next = await addDestinationFromSetup();
+        const next = await addDestinationFromSetup(false);
         if (!next) return;
         base = next;
       }
@@ -1963,7 +1963,7 @@ export default function RouteBuilderScreen() {
       const roughMiles = haversineMi(first, last) * (tripLoop ? 2 : 1);
       const plannedCount = parsePositiveNumber(plannedDays) ?? days.length ?? 3;
       const milesCount = Math.ceil(roughMiles / (parsePositiveNumber(targetMiles) ?? 180));
-      const count = Math.max(1, Math.min(14, Math.round(distanceMode === 'miles' ? milesCount : plannedCount)));
+      const count = Math.max(1, Math.min(30, Math.round(distanceMode === 'miles' ? milesCount : plannedCount)));
       const framework: BuilderStop[] = [
         { ...first, day: 1, type: first.type === 'start' ? 'start' : first.type },
       ];
@@ -2008,6 +2008,8 @@ export default function RouteBuilderScreen() {
       setInsertAfterId(null);
       setInsertTargetDay(null);
       setRouteName(nextName);
+      setFrameworkStatus('Route built. Opening the map...');
+      await new Promise(resolve => setTimeout(resolve, 650));
       commitTrip(buildTrip(framework, nextDays, nextName), true);
     } finally {
       setBuildingFramework(false);
@@ -2889,6 +2891,39 @@ export default function RouteBuilderScreen() {
     return renderRouteHub();
   }
 
+  if (buildingFramework) {
+    return (
+      <SafeAreaView style={s.wizardScreen}>
+        <View style={s.wizardScreenTop}>
+          <Text style={s.title}>Route Builder</Text>
+          <View style={s.headerBtn}>
+            <ActivityIndicator size="small" color={C.orange} />
+          </View>
+        </View>
+        <View style={s.buildingScreen}>
+          <RouteBuildStatus C={C} message={frameworkStatus} />
+          <View style={s.buildingChecklist}>
+            {[
+              'Route spine',
+              'Daily pacing',
+              'Camp windows',
+              'Fuel and stops',
+            ].map(label => (
+              <View key={label} style={s.buildingChecklistRow}>
+                <Ionicons name="radio-button-on" size={10} color={C.orange} />
+                <Text style={s.buildingChecklistText}>{label}</Text>
+              </View>
+            ))}
+          </View>
+          <Text style={s.buildingNote}>
+            Long routes can take a minute. Trailhead will keep this screen open until the route is ready to open on the map.
+          </Text>
+        </View>
+        <PaywallModal visible={paywallVisible} code={paywallCode} message={paywallMessage} onClose={() => setPaywallVisible(false)} />
+      </SafeAreaView>
+    );
+  }
+
   if (!hasBaseRoute) {
     return (
       <SafeAreaView style={s.wizardScreen}>
@@ -3414,6 +3449,23 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingTop: 6, paddingBottom: 14,
   },
+  buildingScreen: {
+    flex: 1,
+    justifyContent: 'center',
+    gap: 18,
+    paddingBottom: 76,
+  },
+  buildingChecklist: {
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 18,
+    backgroundColor: C.glass,
+    padding: 14,
+    gap: 10,
+  },
+  buildingChecklistRow: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  buildingChecklistText: { color: C.text2, fontSize: 11, fontFamily: mono, fontWeight: '800', letterSpacing: 0.5 },
+  buildingNote: { color: C.text3, fontSize: 12, lineHeight: 18, textAlign: 'center', paddingHorizontal: 16 },
   workspaceContainer: { flex: 1, backgroundColor: C.bg },
   workspaceTopBar: {
     position: 'absolute', top: 10, left: 16, right: 16,

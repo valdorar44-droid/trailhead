@@ -2,9 +2,9 @@ import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
   StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator,
-  Share, Animated, Alert,
+  Share, Animated, Alert, Image,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system';
@@ -13,15 +13,18 @@ import * as Haptics from 'expo-haptics';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { api, ApiError, PaywallError, TripResult, TrailDNA } from '@/lib/api';
 import PaywallModal from '@/components/PaywallModal';
+import AppReviewPrompt from '@/components/AppReviewPrompt';
 import TourTarget from '@/components/TourTarget';
 import { useStore } from '@/lib/store';
 import { useTheme, useTag, mono, ColorPalette } from '@/lib/design';
 import { saveOfflineTrip, loadOfflineTrip } from '@/lib/offlineTrips';
+import { markReviewPromptShown, recordReviewMoment } from '@/lib/reviewPrompt';
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://trailhead-production-2049.up.railway.app';
+const TRAILHEAD_LOGO = require('../../assets/icon.png');
 
 const EXAMPLES = [
-  { label: 'AREA', icon: 'map-outline',       tags: ['TRAILS', 'CAMPS', 'LAND'], text: 'What should I know before exploring this area with my current rig?' },
+  { label: 'WILD TRIP', icon: 'trail-sign-outline', tags: ['BACKROADS', 'CAMPS'], text: 'Create a wild trip from my start to my destination using scenic backroads, wild roads, dispersed camps, fuel checks, and realistic first-day pacing.' },
   { label: 'RIG',  icon: 'car-sport-outline', tags: ['CLEARANCE', 'RANGE'],      text: 'Check whether my rig setup is ready for rough forest roads and remote camps.' },
   { label: 'FIELD',icon: 'radio-outline',     tags: ['WEATHER', 'SIGNAL'],       text: 'Give me a quick field brief for tonight: weather, signal, water, and safe camp strategy.' },
 ];
@@ -74,6 +77,8 @@ function appendAiMessage(messages: Message[], text?: string): Message[] {
 export default function PlanScreen() {
   const C  = useTheme();
   const s  = useMemo(() => makeStyles(C), [C]);
+  const insets = useSafeAreaInsets();
+  const bottomInset = Math.max(insets.bottom, Platform.OS === 'android' ? 0 : 0);
   const router = useRouter();
 
   const [messages,  setMessages]  = useState<Message[]>([]);
@@ -105,8 +110,16 @@ export default function PlanScreen() {
   }, [user?.id]);
 
   const [paywallVisible, setPaywallVisible] = useState(false);
+  const [reviewPromptVisible, setReviewPromptVisible] = useState(false);
   const [offlineToast, setOfflineToast] = useState(false);
   const offlineToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  async function maybeShowReviewPrompt() {
+    const shouldShow = await recordReviewMoment('trip_built');
+    if (!shouldShow) return;
+    await markReviewPromptShown();
+    setReviewPromptVisible(true);
+  }
 
   async function openHistoryTrip(tripId: string) {
     try {
@@ -329,6 +342,7 @@ export default function PlanScreen() {
         if (offlineToastTimer.current) clearTimeout(offlineToastTimer.current);
         offlineToastTimer.current = setTimeout(() => setOfflineToast(false), 3000);
       }).catch(() => {});
+      maybeShowReviewPrompt().catch(() => {});
       setPlanPhase('active');
       // Download route weather for offline use (fail silently)
       api.getRouteWeather(result.trip_id, result.plan.waypoints).then(async weather => {
@@ -391,7 +405,7 @@ export default function PlanScreen() {
     <SafeAreaView style={s.container}>
       <View style={s.loginGate}>
         <View style={s.loginGateLogo}>
-          <Ionicons name="compass" size={36} color={C.orange} />
+          <Image source={TRAILHEAD_LOGO} style={s.loginGateLogoImage} resizeMode="cover" />
         </View>
         <Text style={s.loginGateTitle}>AI Trip Planning</Text>
         <Text style={s.loginGateSub}>
@@ -420,17 +434,21 @@ export default function PlanScreen() {
 
   return (
     <SafeAreaView style={s.container}>
+      <PlannerAmbientBackground C={C} />
       {/* ── Paywall modal (IAP) ── */}
       <PaywallModal
         visible={paywallVisible}
         onClose={() => setPaywallVisible(false)}
-        onPlanActivated={() => setPaywallVisible(false)}
+      />
+      <AppReviewPrompt
+        visible={reviewPromptVisible}
+        onClose={() => setReviewPromptVisible(false)}
       />
 
       {/* ── Header ── */}
       <View style={s.header}>
         <View style={s.logoBadge}>
-          <Ionicons name="compass" size={20} color="#fff" />
+          <Image source={TRAILHEAD_LOGO} style={s.logoBadgeImage} resizeMode="cover" />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={s.logoName}>TRAILHEAD</Text>
@@ -482,7 +500,7 @@ export default function PlanScreen() {
       <ScrollView
         ref={scrollRef}
         style={s.messages}
-        contentContainerStyle={s.messagesContent}
+        contentContainerStyle={[s.messagesContent, { paddingBottom: 226 + bottomInset }]}
         keyboardShouldPersistTaps="handled"
       >
         {/* Welcome screen */}
@@ -524,11 +542,11 @@ export default function PlanScreen() {
             )}
 
             <Text style={s.welcomeHeading}>
-              {'ASK THE\nTRAIL\n'}
-              <Text style={{ color: C.orange }}>GUIDE.</Text>
+              {'ASK\nTRAILHEAD\n'}
+              <Text style={{ color: C.orange }}>TO PLAN IT.</Text>
             </Text>
             <Text style={s.welcomeSub}>
-              Use AI for area intel, camp rules, rig readiness, weather strategy, and trip adjustments. Build and reopen full routes from the Route tab.
+              Plan routes with camp context, trail scouting, rig readiness, weather strategy, and trip adjustments. Build and reopen full routes from the Route tab.
             </Text>
             <View style={s.welcomeChips}>
               {['TRAIL INTEL', 'CAMP RULES', 'RIG ADVICE'].map(label => (
@@ -560,7 +578,7 @@ export default function PlanScreen() {
         {/* Message list */}
         {messages.map((msg, i) => (
           <View key={i} style={[s.msg, msg.role === 'user' ? s.msgUser : s.msgAi]}>
-            {msg.role === 'ai'   && <Text style={s.msgLabel}>TRAIL GUIDE</Text>}
+            {msg.role === 'ai'   && <Text style={s.msgLabel}>TRAILHEAD PLANNER</Text>}
             {msg.role === 'user' && <Text style={[s.msgLabel, { textAlign: 'right' }]}>YOU</Text>}
 
             {msg.trip ? (
@@ -590,17 +608,22 @@ export default function PlanScreen() {
         {/* Thinking indicator */}
         {loading && (
           <View style={s.msgAi}>
-            <Text style={s.msgLabel}>TRAIL GUIDE</Text>
+            <Text style={s.msgLabel}>TRAILHEAD PLANNER</Text>
             <View style={s.thinkingBubble}>
-              <ThinkingDots C={C} />
-              <Text style={[s.bubbleText, s.thinkingText]}>{currentStages[stageIdx]}</Text>
+              <View style={s.thinkingOrb}>
+                <ThinkingDots C={C} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.thinkingKicker}>PLANNING PASS</Text>
+                <Text style={[s.bubbleText, s.thinkingText]}>{currentStages[stageIdx]}</Text>
+              </View>
             </View>
           </View>
         )}
       </ScrollView>
 
       {/* ── Input ── */}
-      <KeyboardAvoidingView style={s.inputDock} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView style={[s.inputDock, { bottom: 94 + bottomInset }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <TourTarget id="plan.input">
           <View style={s.inputWrap}>
             <TextInput
@@ -630,7 +653,7 @@ export default function PlanScreen() {
         )}
       </KeyboardAvoidingView>
       {!!weatherToast && (
-        <View style={s.weatherToast}>
+        <View style={[s.weatherToast, { bottom: 116 + bottomInset }]}>
           <Ionicons name="cloud-download-outline" size={14} color={C.text} />
           <Text style={s.weatherToastText}>{weatherToast}</Text>
         </View>
@@ -738,6 +761,107 @@ function DnaChip({ C, label, icon }: { C: ColorPalette; label: string; icon?: st
   );
 }
 
+function PlannerAmbientBackground({ C }: { C: ColorPalette }) {
+  const waveA = useRef(new Animated.Value(0)).current;
+  const waveB = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const loopA = Animated.loop(
+      Animated.timing(waveA, { toValue: 1, duration: 5600, useNativeDriver: true })
+    );
+    const loopB = Animated.loop(
+      Animated.sequence([
+        Animated.delay(1700),
+        Animated.timing(waveB, { toValue: 1, duration: 6400, useNativeDriver: true }),
+      ])
+    );
+    loopA.start();
+    loopB.start();
+    return () => {
+      loopA.stop();
+      loopB.stop();
+    };
+  }, [waveA, waveB]);
+
+  const lineColor = C.bg === '#050505' ? 'rgba(229,231,235,0.10)' : 'rgba(15,23,42,0.055)';
+  const glowColor = C.bg === '#050505' ? 'rgba(249,115,22,0.09)' : 'rgba(184,92,56,0.055)';
+  const accentColor = C.bg === '#050505' ? 'rgba(148,163,184,0.12)' : 'rgba(71,85,105,0.07)';
+  const txA = waveA.interpolate({ inputRange: [0, 0.55, 1], outputRange: [-70, 22, 96] });
+  const tyA = waveA.interpolate({ inputRange: [0, 0.55, 1], outputRange: [14, -8, 12] });
+  const scaleA = waveA.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.96, 1.075, 1.0] });
+  const opacityA = waveA.interpolate({ inputRange: [0, 0.16, 0.62, 1], outputRange: [0.06, 0.30, 0.18, 0.03] });
+  const txB = waveB.interpolate({ inputRange: [0, 0.5, 1], outputRange: [-130, -8, 126] });
+  const tyB = waveB.interpolate({ inputRange: [0, 0.6, 1], outputRange: [-12, 10, -2] });
+  const scaleB = waveB.interpolate({ inputRange: [0, 0.52, 1], outputRange: [0.9, 1.16, 1.02] });
+  const opacityB = waveB.interpolate({ inputRange: [0, 0.18, 0.64, 1], outputRange: [0, 0.18, 0.13, 0] });
+
+  return (
+    <View pointerEvents="none" style={sAmbient.wrap}>
+      <Animated.View style={[sAmbient.gridPlane, { opacity: opacityA, transform: [{ translateX: txA }, { translateY: tyA }, { scale: scaleA }] }]}>
+        <PlannerGridLines lineColor={lineColor} glowColor={glowColor} />
+      </Animated.View>
+      <Animated.View style={[sAmbient.gridPlaneSoft, { opacity: opacityB, transform: [{ translateX: txB }, { translateY: tyB }, { scale: scaleB }] }]}>
+        <PlannerGridLines lineColor={accentColor} glowColor={glowColor} />
+      </Animated.View>
+    </View>
+  );
+}
+
+function PlannerGridLines({ lineColor, glowColor }: { lineColor: string; glowColor: string }) {
+  return (
+    <View style={StyleSheet.absoluteFillObject}>
+      <View style={[sAmbient.gridGlow, { backgroundColor: glowColor }]} />
+      {Array.from({ length: 12 }).map((_, i) => (
+        <View key={`v-${i}`} style={[sAmbient.gridLineV, { left: `${i * 9.1}%`, backgroundColor: lineColor }]} />
+      ))}
+      {Array.from({ length: 16 }).map((_, i) => (
+        <View key={`h-${i}`} style={[sAmbient.gridLineH, { top: `${i * 6.66}%`, backgroundColor: lineColor }]} />
+      ))}
+    </View>
+  );
+}
+
+const sAmbient = StyleSheet.create({
+  wrap: {
+    ...StyleSheet.absoluteFillObject,
+    overflow: 'hidden',
+  },
+  gridPlane: {
+    position: 'absolute',
+    left: -90,
+    right: -90,
+    top: -90,
+    bottom: -90,
+  },
+  gridPlaneSoft: {
+    position: 'absolute',
+    left: -120,
+    right: -120,
+    top: -120,
+    bottom: -120,
+  },
+  gridGlow: {
+    position: 'absolute',
+    left: '12%',
+    right: '8%',
+    top: '18%',
+    height: '44%',
+    borderRadius: 180,
+  },
+  gridLineV: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: 1,
+  },
+  gridLineH: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: 1,
+  },
+});
+
 function ThinkingDots({ C }: { C: ColorPalette }) {
   const dots = [useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current];
   useEffect(() => {
@@ -753,9 +877,9 @@ function ThinkingDots({ C }: { C: ColorPalette }) {
     });
   }, []);
   return (
-    <View style={{ flexDirection: 'row', gap: 5, marginRight: 10 }}>
+    <View style={{ flexDirection: 'row', gap: 4 }}>
       {dots.map((dot, i) => (
-        <Animated.View key={i} style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: C.orange, transform: [{ translateY: dot }] }} />
+        <Animated.View key={i} style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: C.orange, transform: [{ translateY: dot }] }} />
       ))}
     </View>
   );
@@ -974,14 +1098,15 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
 
   // Login gate
   loginGate: { flex: 1, padding: 28, justifyContent: 'center', alignItems: 'center', gap: 16 },
-  loginGateLogo: { width: 72, height: 72, borderRadius: 24, backgroundColor: 'rgba(255,255,255,0.07)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+  loginGateLogo: { width: 72, height: 72, borderRadius: 24, backgroundColor: C.s2, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center', marginBottom: 4, overflow: 'hidden' },
+  loginGateLogoImage: { width: 72, height: 72 },
   loginGateTitle: { color: C.text, fontSize: 28, fontWeight: '800', letterSpacing: 0 },
   loginGateSub: { color: C.text2, fontSize: 14, textAlign: 'center', lineHeight: 21, maxWidth: 300 },
   loginGatePerks: { gap: 10, alignSelf: 'stretch', marginVertical: 4 },
   loginGatePerk: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 4 },
   loginGatePerkText: { color: C.text2, fontSize: 13, flex: 1 },
-  loginGateBtn: { backgroundColor: C.silverBright, borderRadius: 16, paddingVertical: 15, alignSelf: 'stretch', alignItems: 'center', marginTop: 8, shadowColor: '#fff', shadowOpacity: 0.16, shadowRadius: 18 },
-  loginGateBtnText: { color: '#050505', fontFamily: mono, fontSize: 11, fontWeight: '800', letterSpacing: 1 },
+  loginGateBtn: { backgroundColor: C.bg === '#050505' ? C.silverBright : C.orange, borderRadius: 16, paddingVertical: 15, alignSelf: 'stretch', alignItems: 'center', marginTop: 8, shadowColor: C.orange, shadowOpacity: 0.16, shadowRadius: 18 },
+  loginGateBtnText: { color: C.bg === '#050505' ? '#050505' : '#fff', fontFamily: mono, fontSize: 11, fontWeight: '800', letterSpacing: 1 },
   loginGateNote: { color: C.text3, fontSize: 11, textAlign: 'center', fontFamily: mono },
 
   // Credit pill in header
@@ -992,14 +1117,15 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   header: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     paddingHorizontal: 18, paddingVertical: 13,
-    borderBottomWidth: 1, borderColor: 'rgba(255,255,255,0.06)',
-    backgroundColor: 'rgba(5,5,5,0.82)',
+    borderBottomWidth: 1, borderColor: C.border,
+    backgroundColor: C.glassStrong,
   },
   logoBadge: {
     width: 36, height: 36, borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.08)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: C.s2, borderWidth: 1, borderColor: C.border2, alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
     shadowColor: '#E5E7EB', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.18, shadowRadius: 14,
   },
+  logoBadgeImage: { width: 36, height: 36 },
   logoName: {
     color: C.text, fontSize: 17, fontWeight: '900',
     letterSpacing: 0, lineHeight: 20,
@@ -1013,13 +1139,13 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   editBadgeText: { color: C.gold, fontSize: 8.5, fontFamily: mono, letterSpacing: 0.8 },
 
   // Trail DNA strip
-  dnaRow: { borderBottomWidth: 1, borderColor: 'rgba(255,255,255,0.05)', backgroundColor: 'rgba(255,255,255,0.025)', maxHeight: 36 },
+  dnaRow: { borderBottomWidth: 1, borderColor: C.border, backgroundColor: C.glass, maxHeight: 36 },
   dnaRowContent: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 8, gap: 6 },
   dnaLabel: { color: C.text3, fontSize: 8, fontFamily: mono, letterSpacing: 1, marginRight: 4 },
 
   // Messages
   messages: { flex: 1 },
-  messagesContent: { padding: 16, paddingBottom: 126, gap: 14, flexGrow: 1 },
+  messagesContent: { padding: 16, paddingBottom: 226, gap: 14, flexGrow: 1 },
 
   // Welcome
   welcome: { gap: 10 },
@@ -1095,11 +1221,20 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
 
   thinkingBubble: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
-    borderRadius: 4, borderBottomLeftRadius: 16, borderTopRightRadius: 16, borderBottomRightRadius: 16,
-    paddingHorizontal: 14, paddingVertical: 12, maxWidth: '85%',
+    gap: 11,
+    backgroundColor: C.glassStrong, borderWidth: 1, borderColor: C.border,
+    borderRadius: 18,
+    paddingHorizontal: 13, paddingVertical: 12, maxWidth: '94%',
+    shadowColor: C.orange, shadowOpacity: 0.1, shadowRadius: 18, shadowOffset: { width: 0, height: 8 },
   },
-  thinkingText: { color: C.text2, fontSize: 12, fontFamily: mono, letterSpacing: 0.3 },
+  thinkingOrb: {
+    width: 34, height: 34, borderRadius: 17,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: C.orange + '40',
+    backgroundColor: C.orange + '12',
+  },
+  thinkingKicker: { color: C.orange, fontSize: 8, fontFamily: mono, fontWeight: '900', letterSpacing: 0.9, marginBottom: 3 },
+  thinkingText: { color: C.text2, fontSize: 12, fontFamily: mono, flexShrink: 1, lineHeight: 17 },
 
   // Input
   inputDock: {
@@ -1108,12 +1243,12 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     right: 0,
     bottom: 94,
     zIndex: 40,
-    backgroundColor: 'rgba(5,5,5,0.9)',
+    backgroundColor: C.bg,
   },
   inputWrap: {
     flexDirection: 'row', gap: 10, paddingHorizontal: 14, paddingTop: 10, paddingBottom: 12,
-    borderTopWidth: 1, borderColor: 'rgba(255,255,255,0.06)',
-    alignItems: 'flex-end', backgroundColor: 'rgba(5,5,5,0.84)',
+    borderTopWidth: 1, borderColor: C.border,
+    alignItems: 'flex-end', backgroundColor: C.glassStrong,
   },
   input: {
     flex: 1, backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)',

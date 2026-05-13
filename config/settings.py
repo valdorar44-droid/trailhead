@@ -3,6 +3,10 @@ import os, secrets
 
 class Settings:
     anthropic_api_key: str = os.environ.get("ANTHROPIC_API_KEY", "")
+    elevenlabs_api_key: str = os.environ.get("ELEVENLABS_API_KEY", "")
+    elevenlabs_voice_id: str = os.environ.get("ELEVENLABS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb")
+    audio_cache_dir: str = os.environ.get("AUDIO_CACHE_DIR", "/data/audio_cache" if os.path.isdir("/data") else "./audio_cache")
+    audio_cache_r2_prefix: str = os.environ.get("AUDIO_CACHE_R2_PREFIX", "audio-cache")
     mapbox_token: str = os.environ.get("MAPBOX_TOKEN", "")
     nrel_api_key: str = os.environ.get("NREL_API_KEY", "DEMO_KEY")
     ridb_api_key: str = os.environ.get("RIDB_API_KEY", "")
@@ -27,5 +31,13 @@ class Settings:
     r2_access_key_id: str = os.environ.get("R2_ACCESS_KEY_ID", "")
     r2_secret_access_key: str = os.environ.get("R2_SECRET_ACCESS_KEY", "")
     r2_bucket: str = os.environ.get("R2_BUCKET", "trailhead-tiles")
+    apple_bundle_id: str = os.environ.get("APPLE_BUNDLE_ID", os.environ.get("IOS_BUNDLE_ID", ""))
+    apple_issuer_id: str = os.environ.get("APPLE_ISSUER_ID", "")
+    apple_key_id: str = os.environ.get("APPLE_KEY_ID", "")
+    apple_private_key: str = os.environ.get("APPLE_PRIVATE_KEY", "")
+    apple_private_key_path: str = os.environ.get("APPLE_PRIVATE_KEY_PATH", "")
+    google_play_package_name: str = os.environ.get("GOOGLE_PLAY_PACKAGE_NAME", "com.trailhead.app")
+    google_play_service_account_json: str = os.environ.get("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON", "")
+    google_play_service_account_path: str = os.environ.get("GOOGLE_PLAY_SERVICE_ACCOUNT_PATH", "")
 
 settings = Settings()

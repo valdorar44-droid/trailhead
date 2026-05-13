@@ -128,6 +128,8 @@ interface AppState {
   searchHistory: SearchHistoryItem[];
   offlineTripIds: string[];
   activeTripFromCache: boolean;
+  pendingSavedTrailId: string | null;
+  pendingNavigatePlace: { lat: number; lng: number; name: string } | null;
   tabBarHidden: boolean;
   hasPlan: boolean;
   planExpiresAt: number | null;
@@ -157,6 +159,8 @@ interface AppState {
   addSearchHistory: (item: SearchHistoryItem) => void;
   clearSearchHistory: () => void;
   setOfflineTripIds: (ids: string[]) => void;
+  setPendingSavedTrailId: (id: string | null) => void;
+  setPendingNavigatePlace: (place: { lat: number; lng: number; name: string } | null) => void;
   setPlan: (active: boolean, expiresAt?: number | null) => void;
   startGuidedTour: () => void;
   setTourTarget: (key: string, rect: Omit<TourTargetRect, 'updatedAt'> | null) => void;
@@ -181,6 +185,8 @@ export const useStore = create<AppState>((set) => ({
   searchHistory: [],
   offlineTripIds: [],
   activeTripFromCache: false,
+  pendingSavedTrailId: null,
+  pendingNavigatePlace: null,
   tabBarHidden: false,
   hasPlan: false,
   planExpiresAt: null,
@@ -283,9 +289,10 @@ export const useStore = create<AppState>((set) => ({
   },
 
   setOfflineTripIds: (ids) => set({ offlineTripIds: ids }),
+  setPendingSavedTrailId: (id) => set({ pendingSavedTrailId: id }),
+  setPendingNavigatePlace: (place) => set({ pendingNavigatePlace: place }),
   setPlan: (active, expiresAt = null) => {
-    if (active) ss(PLAN_KEY, JSON.stringify({ active: true, expiresAt: expiresAt ?? null, updatedAt: Date.now() }));
-    else sd(PLAN_KEY);
+    sd(PLAN_KEY);
     set({ hasPlan: active, planExpiresAt: expiresAt });
   },
   startGuidedTour: () => set(state => ({ guidedTourRunId: state.guidedTourRunId + 1 })),
@@ -382,27 +389,14 @@ export const useStore = create<AppState>((set) => ({
       ss('trailhead_rig', JSON.stringify(rigFromFile));
     }
     if (historyRaw) patch.tripHistory = JSON.parse(historyRaw);
-    patch.themeMode = 'dark';
+    patch.themeMode = themeRaw === 'light' ? 'light' : 'dark';
     if (favRaw) patch.favoriteCamps = JSON.parse(favRaw);
     if (cachedRegionsRaw) patch.cachedRegions = JSON.parse(cachedRegionsRaw);
     if (savedPlacesRaw) patch.savedPlaces = JSON.parse(savedPlacesRaw);
     if (markerGroupsRaw) patch.markerGroups = JSON.parse(markerGroupsRaw);
     if (searchHistoryRaw) patch.searchHistory = JSON.parse(searchHistoryRaw);
     if (sessionRaw) patch.sessionId = sessionRaw;
-    if (planRaw) {
-      try {
-        const cached = JSON.parse(planRaw);
-        const expiresAt = Number(cached.expiresAt ?? 0);
-        if (cached.active && (!expiresAt || expiresAt * 1000 > Date.now())) {
-          patch.hasPlan = true;
-          patch.planExpiresAt = cached.expiresAt ?? null;
-        } else {
-          sd(PLAN_KEY);
-        }
-      } catch {
-        sd(PLAN_KEY);
-      }
-    }
+    if (planRaw) sd(PLAN_KEY);
     deleteTripFile();
     if (activeTripRaw) sd('trailhead_active_trip');
     if (!sessionRaw) {

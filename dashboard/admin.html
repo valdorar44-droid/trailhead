@@ -66,6 +66,22 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 input.filter-input{background:var(--s3);border:1px solid var(--border);border-radius:8px;padding:8px 12px;color:var(--text);font-size:13px;outline:none;width:260px;}
 input.filter-input:focus{border-color:var(--orange);}
 .inline-input{background:var(--s3);border:1px solid var(--border);border-radius:6px;padding:5px 8px;color:var(--text);font-size:12px;outline:none;width:80px;}
+.plan-select{background:var(--s3);border:1px solid var(--border);border-radius:7px;padding:5px 8px;color:var(--text2);font-size:11px;font-family:var(--mono);outline:none;}
+.plan-select:focus{border-color:var(--orange);}
+.story-layout{display:grid;grid-template-columns:330px minmax(0,1fr);gap:16px;align-items:start;}
+.story-list{display:flex;flex-direction:column;gap:8px;max-height:calc(100vh - 245px);overflow:auto;padding-right:4px;}
+.story-item{background:var(--s3);border:1px solid var(--border);border-radius:12px;padding:12px;cursor:pointer;}
+.story-item:hover,.story-item.active{border-color:var(--orange);}
+.story-item-title{color:var(--text);font-size:13px;font-weight:800;line-height:18px;}
+.story-item-meta{color:var(--text3);font-size:10px;font-family:var(--mono);margin-top:6px;}
+.story-editor{display:grid;gap:12px;}
+.story-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.story-textarea{background:var(--s3);border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;color:var(--text);font-size:15px;line-height:1.6;width:100%;outline:none;resize:vertical;font-family:Georgia,'Times New Roman',serif;}
+.story-textarea:focus{border-color:var(--orange);}
+.story-scrollbox{max-height:52vh;overflow:auto;border:1px solid var(--border);border-radius:12px;background:var(--s3);}
+.story-scrollbox textarea{border:0;background:transparent;min-height:740px;display:block;}
+.story-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.story-stat{color:var(--text3);font-size:11px;font-family:var(--mono);}
 
 /* ── Stats grid ────────────────────────────────────────────────────────── */
 .stats-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px;margin-bottom:28px;}
@@ -93,7 +109,18 @@ td{padding:11px 12px;border-bottom:1px solid var(--s3);color:var(--text2);vertic
 tr:hover td{background:var(--s3);}
 td.mono{font-family:var(--mono);font-size:12px;}
 td.name{color:var(--text);font-weight:600;}
-.actions-cell{display:flex;gap:6px;align-items:center;}
+.actions-cell{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
+.contest-list{display:flex;flex-direction:column;gap:8px;}
+.contest-row{display:grid;grid-template-columns:46px 1fr auto;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);}
+.contest-rank{font-family:var(--mono);font-weight:900;color:var(--yellow);}
+.contest-name{color:var(--text);font-weight:800;}
+.contest-points{font-family:var(--mono);font-weight:900;color:var(--green);}
+.contest-awards{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;}
+.contest-award{background:var(--s3);border:1px solid var(--border);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:10px;}
+.contest-award-title{color:var(--text);font-size:14px;font-weight:900;}
+.contest-award-meta{color:var(--text3);font-size:11px;font-family:var(--mono);line-height:1.5;}
+.contest-award-controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+.contest-note{background:var(--s2);border:1px solid var(--border);border-radius:8px;padding:7px 9px;color:var(--text);font-size:12px;outline:none;flex:1;min-width:150px;}
 
 /* ── Modal ─────────────────────────────────────────────────────────────── */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);display:none;align-items:center;justify-content:center;z-index:1000;}
@@ -130,7 +157,7 @@ td.name{color:var(--text);font-weight:600;}
 <!-- App -->
 <div id="app" style="display:none;flex-direction:column;">
   <div class="topbar">
-    <span class="topbar-logo">Camp TRAILHEAD</span>
+    <span class="topbar-logo">TRAILHEAD</span>
     <span class="topbar-badge">ADMIN</span>
     <span class="topbar-user" id="topbar-user"></span>
     <span class="topbar-logout" onclick="logout()">Sign out</span>
@@ -138,25 +165,34 @@ td.name{color:var(--text);font-weight:600;}
   <div class="layout">
     <nav class="sidebar">
       <div class="nav-item active" onclick="showPage('overview',this)">
-        <span class="nav-icon">Stats</span><span class="nav-label">Overview</span>
+        <span class="nav-icon">OV</span><span class="nav-label">Overview</span>
       </div>
       <div class="nav-item" onclick="showPage('users',this)">
-        <span class="nav-icon">Users</span><span class="nav-label">Users</span>
+        <span class="nav-icon">US</span><span class="nav-label">Users</span>
       </div>
       <div class="nav-item" onclick="showPage('reports',this)">
-        <span class="nav-icon">Alert</span><span class="nav-label">Reports</span>
+        <span class="nav-icon">RP</span><span class="nav-label">Reports</span>
       </div>
       <div class="nav-item" onclick="showPage('trips',this)">
-        <span class="nav-icon">Map</span><span class="nav-label">Trips</span>
+        <span class="nav-icon">TR</span><span class="nav-label">Trips</span>
       </div>
       <div class="nav-item" onclick="showPage('pins',this)">
-        <span class="nav-icon">Pin</span><span class="nav-label">Pins</span>
+        <span class="nav-icon">PN</span><span class="nav-label">Pins</span>
+      </div>
+      <div class="nav-item" onclick="showPage('pin-updates',this)">
+        <span class="nav-icon">PU</span><span class="nav-label">Pin Updates</span>
       </div>
       <div class="nav-item" onclick="showPage('camp-edits',this)">
-        <span class="nav-icon">Edit</span><span class="nav-label">Camp Edits</span>
+        <span class="nav-icon">CE</span><span class="nav-label">Camp Edits</span>
+      </div>
+      <div class="nav-item" onclick="showPage('audio-guides',this)">
+        <span class="nav-icon">AG</span><span class="nav-label">Audio Guides</span>
+      </div>
+      <div class="nav-item" onclick="showPage('contest',this)">
+        <span class="nav-icon">CT</span><span class="nav-label">Contest</span>
       </div>
       <div class="nav-item" onclick="showPage('bugs',this)">
-        <span class="nav-icon">Bug</span><span class="nav-label">Bug Reports</span>
+        <span class="nav-icon">BG</span><span class="nav-label">Bug Reports</span>
       </div>
     </nav>
     <main class="content">
@@ -190,7 +226,7 @@ td.name{color:var(--text);font-weight:600;}
           <table>
             <thead><tr>
               <th>ID</th><th>Username</th><th>Email</th><th>Credits</th>
-              <th>Reports</th><th>Streak</th><th>Joined</th><th>Flags</th><th>Role</th><th>Actions</th>
+              <th>Reports</th><th>Streak</th><th>Joined</th><th>Flags</th><th>Role</th><th>Plan</th><th>Actions</th>
             </tr></thead>
             <tbody id="users-tbody"></tbody>
           </table>
@@ -270,6 +306,23 @@ td.name{color:var(--text);font-weight:600;}
         </div>
       </div>
 
+      <!-- Pin Update Suggestions -->
+      <div class="page" id="page-pin-updates">
+        <div class="page-title">Pin Update Suggestions</div>
+        <div class="page-sub">Reviewed community place corrections submitted from pin cards.</div>
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap;">
+          <select id="pin-update-status" class="filter-input" style="width:150px;" onchange="loadPinUpdates()">
+            <option value="pending">Pending</option>
+            <option value="">All</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+          </select>
+          <button class="btn btn-ghost" onclick="loadPinUpdates()">Refresh</button>
+          <span id="pin-update-count" style="color:var(--text3);font-size:12px;font-family:var(--mono);"></span>
+        </div>
+        <div id="pin-updates-list" style="display:flex;flex-direction:column;gap:12px;"></div>
+      </div>
+
       <!-- Camp Edits -->
       <div class="page" id="page-camp-edits">
         <div class="page-title">Camp Edit Suggestions</div>
@@ -285,6 +338,94 @@ td.name{color:var(--text);font-weight:600;}
           <span id="camp-edit-count" style="margin-left:auto;color:var(--text3);font-size:12px;font-family:var(--mono);"></span>
         </div>
         <div id="camp-edits-list" style="display:flex;flex-direction:column;gap:12px;"></div>
+      </div>
+
+      <!-- Audio Guides -->
+      <div class="page" id="page-audio-guides">
+        <div class="page-title">Audio Guide Story Edits</div>
+        <div class="page-sub">Write polished long-form stories for Explore places. The app will read your story first and fall back to generated copy if this is empty.</div>
+        <div class="story-layout">
+          <div class="card">
+            <div style="display:flex;gap:8px;margin-bottom:12px;">
+              <input id="story-search" class="filter-input" style="width:100%;" placeholder="Search monuments, parks, states..." oninput="loadAudioGuidePlaces()">
+              <button class="btn btn-ghost" onclick="loadAudioGuidePlaces()">Refresh</button>
+            </div>
+            <div class="story-list" id="story-place-list"></div>
+          </div>
+          <div class="card" id="story-editor-empty">
+            <div class="section-label">SELECT A PLACE</div>
+            <div style="color:var(--text2);line-height:1.6;">Choose a place on the left to edit its title, card text, and full story narration.</div>
+          </div>
+          <div class="card story-editor" id="story-editor" style="display:none;">
+            <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">
+              <div>
+                <div class="section-label">FULL STORY EDITOR</div>
+                <div id="story-current-title" style="font-size:18px;font-weight:900;"></div>
+              </div>
+              <button class="btn btn-primary" onclick="saveAudioGuideStory()">Save Story</button>
+            </div>
+            <div class="story-grid">
+              <div>
+                <div class="modal-label">CARD TITLE</div>
+                <input class="modal-input" id="story-title">
+              </div>
+              <div>
+                <div class="modal-label">CARD HOOK</div>
+                <input class="modal-input" id="story-hook">
+              </div>
+            </div>
+            <div>
+              <div class="modal-label">SHORT SUMMARY / CARD DESCRIPTION</div>
+              <textarea class="story-textarea" id="story-summary" style="min-height:110px;font-family:inherit;font-size:14px;"></textarea>
+            </div>
+            <div>
+              <div class="story-toolbar">
+                <div class="modal-label" style="margin:0;">FULL STORY AUDIO SCRIPT</div>
+                <button class="btn btn-ghost btn-sm" onclick="adjustStoryFont(-1)">A-</button>
+                <button class="btn btn-ghost btn-sm" onclick="adjustStoryFont(1)">A+</button>
+                <span class="story-stat" id="story-font-label">15px</span>
+                <span class="story-stat" id="story-word-count"></span>
+              </div>
+              <div class="story-scrollbox">
+                <textarea class="story-textarea" id="story-full" oninput="updateStoryWordCount()" placeholder="Write the 5-7 minute story here. This is what ElevenLabs will read."></textarea>
+              </div>
+            </div>
+            <div>
+              <div class="modal-label">PRIVATE ADMIN NOTES</div>
+              <textarea class="story-textarea" id="story-notes" style="min-height:80px;font-family:inherit;font-size:13px;"></textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Contest -->
+      <div class="page" id="page-contest">
+        <div class="page-title">Contest</div>
+        <div class="page-sub">Track contributor standings, monthly drawings, and prize fulfillment.</div>
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap;">
+          <input id="contest-month" class="filter-input" style="width:130px;" placeholder="YYYY-MM">
+          <input id="contest-year" class="filter-input" style="width:100px;" placeholder="YYYY">
+          <button class="btn btn-ghost" onclick="loadContest()">Refresh</button>
+          <button class="btn btn-ghost" onclick="backfillContest()">Backfill</button>
+          <button class="btn btn-primary" onclick="snapshotContest('monthly_top')">Snapshot Monthly</button>
+          <button class="btn btn-primary" onclick="snapshotContest('yearly_top')">Snapshot Yearly</button>
+          <button class="btn btn-primary" onclick="runContestDrawing()">Run Drawing</button>
+        </div>
+        <div class="stats-grid" id="contest-stats"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+          <div class="card">
+            <div class="section-label">MONTHLY LEADERS</div>
+            <div id="contest-month-leaders" class="contest-list"></div>
+          </div>
+          <div class="card">
+            <div class="section-label">YEARLY LEADERS</div>
+            <div id="contest-year-leaders" class="contest-list"></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="section-label">AWARDS</div>
+          <div id="contest-awards" class="contest-awards"></div>
+        </div>
       </div>
 
       <!-- Bug Reports -->
@@ -334,6 +475,9 @@ let adminUser = null;
 let creditTargetId = null;
 let usersOffset = 0;
 let allReports = [];
+let audioGuidePlaces = [];
+let selectedAudioGuidePlaceId = null;
+let storyFontSize = 15;
 
 // ── Auth ────────────────────────────────────────────────────────────────────
 
@@ -401,7 +545,10 @@ function showPage(name, el) {
   if (name === 'reports')  loadReports();
   if (name === 'trips')    loadTrips();
   if (name === 'pins')     loadPins();
+  if (name === 'pin-updates') loadPinUpdates();
   if (name === 'camp-edits') loadCampEdits();
+  if (name === 'audio-guides') loadAudioGuidePlaces();
+  if (name === 'contest') loadContest();
   if (name === 'bugs')     loadBugs();
 }
 
@@ -433,6 +580,7 @@ async function loadOverview() {
       { label:'CREDITS IN CIRC.',val: s.credits_total,  sub: 'across all users' },
       { label:'COMMUNITY PINS',  val: s.pins_total,     sub: 'user-submitted' },
       { label:'TRIPS THIS WEEK', val: s.trips_7d,       sub: '' },
+      { label:'APPLE VALIDATION', val: s.apple_validation_configured ? 'ON' : 'OFF', sub: s.apple_bundle_id || 'set Apple Server API keys' },
     ].map(c => `
       <div class="stat-card">
         <div class="stat-label">${c.label}</div>
@@ -495,9 +643,15 @@ function renderUsers(users, append) {
   const html = users.map(u => {
     const restricted = u.reporting_restricted_until && u.reporting_restricted_until > now;
     const joined = new Date(u.created_at * 1000).toLocaleDateString();
+    const planActive = u.plan_type && u.plan_type !== 'free' && u.plan_expires_at && u.plan_expires_at > now;
+    const planLabel = planActive ? 'EXPLORER' : 'FREE';
+    const planExpiry = planActive ? `<div class="mono" style="font-size:10px;color:var(--text3);margin-top:3px;">until ${new Date(u.plan_expires_at * 1000).toLocaleDateString()}</div>` : '';
     const roleBadge = u.is_admin
       ? `<span class="badge badge-orange">ADMIN</span>`
       : `<span class="badge badge-gray">USER</span>`;
+    const planBadge = planActive
+      ? `<span class="badge badge-green">${planLabel}</span>${planExpiry}`
+      : `<span class="badge badge-gray">FREE</span>`;
     const statusBadge = restricted
       ? `<span class="badge badge-red" title="Restricted">BANNED</span>`
       : '';
@@ -511,7 +665,13 @@ function renderUsers(users, append) {
       <td class="mono">${joined}</td>
       <td class="mono" style="${u.flagged_report_count>0?'color:var(--red)':''}">${u.flagged_report_count}</td>
       <td>${roleBadge}</td>
+      <td>${planBadge}</td>
       <td><div class="actions-cell">
+        <select class="plan-select" onchange="setUserPlan(${u.id}, this.value, this)" aria-label="Set plan for ${esc(u.username)}">
+          <option value="" selected>Set plan</option>
+          <option value="free">Free</option>
+          <option value="explorer">Explorer</option>
+        </select>
         <button class="btn btn-ghost btn-sm" onclick="openCreditModal(${u.id})">Credits</button>
         <button class="btn btn-ghost btn-sm" onclick="toggleAdmin(${u.id}, ${u.is_admin})">${u.is_admin?'Remove Admin':'Make Admin'}</button>
         ${!u.is_admin?`<button class="btn btn-danger btn-sm" onclick="banUser(${u.id}, '${esc(u.username)}')">Ban</button>`:''}
@@ -519,7 +679,7 @@ function renderUsers(users, append) {
     </tr>`;
   }).join('');
   if (append) tbody.innerHTML += html;
-  else tbody.innerHTML = html || '<tr><td colspan="10" style="color:var(--text3);text-align:center;padding:24px;">No users found</td></tr>';
+  else tbody.innerHTML = html || '<tr><td colspan="11" style="color:var(--text3);text-align:center;padding:24px;">No users found</td></tr>';
 }
 
 function openCreditModal(userId) {
@@ -556,6 +716,31 @@ async function toggleAdmin(userId, currentState) {
   } catch(e) { toast('Error: ' + e.message, 'err'); }
 }
 
+async function setUserPlan(userId, planType, selectEl) {
+  if (!planType) return;
+  const label = planType === 'free' ? 'Free' : 'Explorer';
+  const message = planType === 'free'
+    ? 'Switch this user to Free? This clears their backend plan and the app will remove Explorer on next sync.'
+    : 'Grant Explorer from the admin dashboard for testing? This does not create an Apple subscription.';
+  if (!confirm(message)) {
+    selectEl.value = '';
+    return;
+  }
+  selectEl.disabled = true;
+  try {
+    await api(`/api/admin/users/${userId}/plan`, {
+      method:'POST',
+      body: JSON.stringify({ plan_type: planType, duration_days: 366 })
+    });
+    toast(`Plan set to ${label}`, 'ok');
+    loadUsers();
+  } catch(e) {
+    toast('Error: ' + e.message, 'err');
+    selectEl.disabled = false;
+    selectEl.value = '';
+  }
+}
+
 async function banUser(userId, username) {
   if (!confirm(`Ban ${username} for 365 days? They cannot submit reports.`)) return;
   try {
@@ -563,6 +748,125 @@ async function banUser(userId, username) {
     toast(`${username} banned`, 'ok');
     loadUsers();
   } catch(e) { toast('Error: ' + e.message, 'err'); }
+}
+
+// ── Contest ──────────────────────────────────────────────────────────────────
+
+function contestParams() {
+  const month = document.getElementById('contest-month')?.value.trim() || '';
+  const year = document.getElementById('contest-year')?.value.trim() || '';
+  const qs = new URLSearchParams();
+  if (month) qs.set('month', month);
+  if (year) qs.set('year', year);
+  return qs.toString();
+}
+
+function renderContestLeaders(id, leaders) {
+  const el = document.getElementById(id);
+  el.innerHTML = (leaders || []).map(r => `
+    <div class="contest-row">
+      <div class="contest-rank">#${r.rank}</div>
+      <div>
+        <div class="contest-name">${esc(r.username || r.display_name || 'User')}</div>
+        <div class="contest-award-meta">${r.event_count || 0} point events</div>
+      </div>
+      <div class="contest-points">${Number(r.points || 0).toLocaleString()}</div>
+    </div>
+  `).join('') || '<div style="color:var(--text3);font-size:13px;">No contest points yet.</div>';
+}
+
+function renderContestAwards(awards) {
+  const el = document.getElementById('contest-awards');
+  el.innerHTML = (awards || []).map(a => `
+    <div class="contest-award">
+      <div>
+        <div class="contest-award-title">${esc(a.prize_label || a.prize_type)}</div>
+        <div class="contest-award-meta">
+          ${esc(a.prize_type)} · ${esc(a.period_month || a.period_year || '')}<br>
+          Winner: ${esc(a.winner_username || 'No winner')} · Points: ${Number(a.points_snapshot || 0).toLocaleString()} · Entries: ${Number(a.entry_count || 0).toLocaleString()}
+        </div>
+      </div>
+      <span class="badge ${a.status === 'paid' ? 'badge-green' : a.status === 'void' ? 'badge-red' : 'badge-yellow'}">${esc(a.status || 'selected').toUpperCase()}</span>
+      <div class="contest-award-controls">
+        <input class="contest-note" id="contest-note-${a.id}" value="${esc(a.notes || '')}" placeholder="Prize notes">
+        <select class="plan-select" id="contest-status-${a.id}">
+          ${['selected','notified','paid','void'].map(s => `<option value="${s}" ${a.status === s ? 'selected' : ''}>${s}</option>`).join('')}
+        </select>
+        <button class="btn btn-ghost btn-sm" onclick="updateContestAward(${a.id})">Save</button>
+      </div>
+    </div>
+  `).join('') || '<div style="color:var(--text3);font-size:13px;">No awards recorded yet.</div>';
+}
+
+async function loadContest() {
+  try {
+    const qs = contestParams();
+    const data = await api(`/api/admin/contest/overview${qs ? '?' + qs : ''}`);
+    document.getElementById('contest-month').value = data.period_month || '';
+    document.getElementById('contest-year').value = data.period_year || '';
+    document.getElementById('contest-stats').innerHTML = [
+      { label:'DRAWING ENTRIES', val:data.entries || 0, sub:'monthly total' },
+      { label:'FREE ENTRIES', val:data.free_entries || 0, sub:'no-purchase path' },
+      { label:'SUBSCRIBER ENTRIES', val:data.subscriber_entries || 0, sub:'auto-entered' },
+      { label:'AWARDS TRACKED', val:(data.awards || []).length, sub:'selected/notified/paid' },
+    ].map(c => `
+      <div class="stat-card">
+        <div class="stat-label">${c.label}</div>
+        <div class="stat-val">${Number(c.val || 0).toLocaleString()}</div>
+        <div class="stat-sub">${c.sub}</div>
+      </div>`).join('');
+    renderContestLeaders('contest-month-leaders', data.month_leaders);
+    renderContestLeaders('contest-year-leaders', data.year_leaders);
+    renderContestAwards(data.awards);
+  } catch(e) { toast('Error loading contest: ' + e.message, 'err'); }
+}
+
+async function backfillContest() {
+  if (!confirm('Backfill contest points from existing eligible credit transactions?')) return;
+  try {
+    const r = await api('/api/admin/contest/backfill', { method:'POST' });
+    toast(`Backfilled ${r.inserted} contest events`, 'ok');
+    loadContest();
+  } catch(e) { toast('Backfill failed: ' + e.message, 'err'); }
+}
+
+async function snapshotContest(prizeType) {
+  const label = prizeType === 'yearly_top' ? 'yearly top contributor' : 'monthly top contributor';
+  if (!confirm(`Snapshot ${label}?`)) return;
+  try {
+    await api('/api/admin/contest/snapshot', {
+      method:'POST',
+      body: JSON.stringify({ prize_type: prizeType, month: document.getElementById('contest-month').value, year: document.getElementById('contest-year').value })
+    });
+    toast('Award snapshot saved', 'ok');
+    loadContest();
+  } catch(e) { toast('Snapshot failed: ' + e.message, 'err'); }
+}
+
+async function runContestDrawing() {
+  if (!confirm('Run the monthly random drawing from current entries?')) return;
+  try {
+    await api('/api/admin/contest/drawing/run', {
+      method:'POST',
+      body: JSON.stringify({ month: document.getElementById('contest-month').value, year: document.getElementById('contest-year').value })
+    });
+    toast('Drawing winner saved', 'ok');
+    loadContest();
+  } catch(e) { toast('Drawing failed: ' + e.message, 'err'); }
+}
+
+async function updateContestAward(id) {
+  try {
+    await api(`/api/admin/contest/awards/${id}/status`, {
+      method:'POST',
+      body: JSON.stringify({
+        status: document.getElementById(`contest-status-${id}`).value,
+        notes: document.getElementById(`contest-note-${id}`).value,
+      })
+    });
+    toast('Award updated', 'ok');
+    loadContest();
+  } catch(e) { toast('Award update failed: ' + e.message, 'err'); }
 }
 
 // ── Reports ───────────────────────────────────────────────────────────────────
@@ -685,6 +989,51 @@ async function deletePin(id) {
     await api(`/api/admin/pins/${id}`, {method:'DELETE'});
     toast('Pin deleted', 'ok');
     loadPins();
+  } catch(e) { toast('Error: ' + e.message, 'err'); }
+}
+
+// ── Pin Update Suggestions ───────────────────────────────────────────────────
+
+async function loadPinUpdates() {
+  try {
+    const status = document.getElementById('pin-update-status').value;
+    const updates = await api(`/api/admin/pin-update-suggestions?status=${encodeURIComponent(status)}`);
+    document.getElementById('pin-update-count').textContent = `${updates.length} suggestions`;
+    const list = document.getElementById('pin-updates-list');
+    if (!updates.length) {
+      list.innerHTML = '<div style="color:var(--text3);text-align:center;padding:32px;font-family:var(--mono);font-size:12px;">No pin update suggestions</div>';
+      return;
+    }
+    list.innerHTML = updates.map(u => {
+      const date = new Date(u.created_at * 1000).toLocaleString();
+      return `<div class="card">
+        <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;">
+          <div>
+            <div style="font-size:15px;font-weight:800;color:var(--text);">${esc(u.pin_name || 'Community pin')}</div>
+            <div style="color:var(--text3);font-size:11px;font-family:var(--mono);margin-top:4px;">
+              #${u.id} · pin ${u.pin_id} · ${esc(u.field)} · ${esc(u.username || 'unknown')} · ${date}
+            </div>
+          </div>
+          <span class="badge ${u.status === 'approved' ? 'badge-green' : u.status === 'rejected' ? 'badge-gray' : 'badge-orange'}">${esc(u.status)}</span>
+        </div>
+        <div style="margin-top:12px;color:var(--text2);font-size:13px;line-height:1.5;white-space:pre-wrap;">${esc(u.value || '')}</div>
+        ${u.note ? `<div style="margin-top:10px;color:var(--yellow);font-size:12px;white-space:pre-wrap;">${esc(u.note)}</div>` : ''}
+        <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;">
+          <button class="btn btn-primary btn-sm" onclick="markPinUpdate(${u.id}, 'approved')">Mark Approved</button>
+          <button class="btn btn-danger btn-sm" onclick="markPinUpdate(${u.id}, 'rejected')">Reject</button>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) { toast('Error loading pin updates: ' + e.message, 'err'); }
+}
+
+async function markPinUpdate(id, status) {
+  try {
+    await api(`/api/admin/pin-update-suggestions/${id}/status`, {
+      method:'POST', body: JSON.stringify({ status })
+    });
+    toast(`Suggestion marked ${status}`, 'ok');
+    loadPinUpdates();
   } catch(e) { toast('Error: ' + e.message, 'err'); }
 }
 
@@ -812,6 +1161,88 @@ async function dismissBug(id) {
     toast('Bug dismissed', 'ok');
     loadBugs();
   } catch(e) { toast('Error: ' + e.message, 'err'); }
+}
+
+// ── Audio guide story edits ──────────────────────────────────────────────────
+
+async function loadAudioGuidePlaces() {
+  const q = document.getElementById('story-search')?.value || '';
+  const list = document.getElementById('story-place-list');
+  if (!list) return;
+  list.innerHTML = '<div style="color:var(--text3);font-size:12px;">Loading places...</div>';
+  try {
+    const data = await api(`/api/admin/explore/places?search=${encodeURIComponent(q)}&limit=120`);
+    audioGuidePlaces = data.places || [];
+    list.innerHTML = audioGuidePlaces.map(p => `
+      <div class="story-item ${p.id === selectedAudioGuidePlaceId ? 'active' : ''}" onclick="openAudioGuideStory('${esc(p.id)}')">
+        <div class="story-item-title">${esc(p.title)}</div>
+        <div class="story-item-meta">${esc(p.category || 'Place')} • ${esc(p.state || '')} • ${p.story_words || 0} words ${p.edited ? '• EDITED' : ''}</div>
+      </div>
+    `).join('') || '<div style="color:var(--text3);font-size:12px;">No places found.</div>';
+  } catch(e) {
+    list.innerHTML = `<div style="color:var(--red);font-size:12px;">${esc(e.message)}</div>`;
+  }
+}
+
+async function openAudioGuideStory(placeId) {
+  selectedAudioGuidePlaceId = placeId;
+  loadAudioGuidePlaces();
+  try {
+    const data = await api(`/api/admin/explore/places/${encodeURIComponent(placeId)}`);
+    document.getElementById('story-editor-empty').style.display = 'none';
+    document.getElementById('story-editor').style.display = 'grid';
+    document.getElementById('story-current-title').textContent = data.editable.title || placeId;
+    document.getElementById('story-title').value = data.editable.title || '';
+    document.getElementById('story-hook').value = data.editable.hook || '';
+    document.getElementById('story-summary').value = data.editable.summary || '';
+    document.getElementById('story-full').value = data.editable.story || '';
+    document.getElementById('story-notes').value = data.editable.notes || '';
+    updateStoryWordCount();
+    applyStoryFont();
+  } catch(e) {
+    toast('Error: ' + e.message, 'err');
+  }
+}
+
+function updateStoryWordCount() {
+  const text = document.getElementById('story-full')?.value || '';
+  const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+  const minutes = Math.max(1, Math.round(words / 145));
+  const label = document.getElementById('story-word-count');
+  if (label) label.textContent = `${words} words • about ${minutes} min`;
+}
+
+function applyStoryFont() {
+  const full = document.getElementById('story-full');
+  if (full) full.style.fontSize = `${storyFontSize}px`;
+  const label = document.getElementById('story-font-label');
+  if (label) label.textContent = `${storyFontSize}px`;
+}
+
+function adjustStoryFont(delta) {
+  storyFontSize = Math.max(13, Math.min(24, storyFontSize + delta));
+  applyStoryFont();
+}
+
+async function saveAudioGuideStory() {
+  if (!selectedAudioGuidePlaceId) return;
+  const body = {
+    title: document.getElementById('story-title').value,
+    hook: document.getElementById('story-hook').value,
+    summary: document.getElementById('story-summary').value,
+    story: document.getElementById('story-full').value,
+    notes: document.getElementById('story-notes').value,
+  };
+  try {
+    await api(`/api/admin/explore/places/${encodeURIComponent(selectedAudioGuidePlaceId)}`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    toast('Audio guide story saved', 'ok');
+    loadAudioGuidePlaces();
+  } catch(e) {
+    toast('Error: ' + e.message, 'err');
+  }
 }
 
 // ── Utility ───────────────────────────────────────────────────────────────────

@@ -2,7 +2,7 @@ module.exports = {
   expo: {
     name: 'Trailhead',
     slug: 'trailhead',
-    version: '1.0.0',
+    version: '1.0.1',
     runtimeVersion: '1.0.0',
     updates: { url: 'https://u.expo.dev/92c016d2-6e63-480e-a483-a6898d7e77d5' },
     orientation: 'portrait',
@@ -51,6 +51,7 @@ module.exports = {
         'android.permission.RECEIVE_BOOT_COMPLETED',
         'android.permission.VIBRATE',
         'android.permission.RECORD_AUDIO',
+        'com.android.vending.BILLING',
       ],
     },
     plugins: [

@@ -54,6 +54,50 @@ function getPMTiles(env) {
   return _pmCache.get(env.TILES_BUCKET);
 }
 
+async function streamR2Parts(bucket, parts, start = 0, end = null) {
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    async start(controller) {
+      try {
+        let cursor = 0;
+        const lastByte = end ?? parts.reduce((sum, part) => sum + part.size, 0) - 1;
+        for (const part of parts) {
+          const partStart = cursor;
+          const partEnd = cursor + part.size - 1;
+          cursor += part.size;
+          if (partEnd < start) continue;
+          if (partStart > lastByte) break;
+          const offset = Math.max(0, start - partStart);
+          const length = Math.min(partEnd, lastByte) - (partStart + offset) + 1;
+          if (length <= 0) continue;
+          const obj = await bucket.get(part.key, { range: { offset, length } });
+          if (!obj) throw new Error(`Missing R2 part ${part.key}`);
+          const reader = obj.body.getReader();
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            controller.enqueue(value);
+          }
+        }
+        controller.close();
+      } catch (err) {
+        controller.enqueue(encoder.encode(String(err?.message || err)));
+        controller.error(err);
+      }
+    },
+  });
+}
+
+async function getPartsManifest(bucket, key) {
+  const obj = await bucket.get(`${key}.parts.json`).catch(() => null);
+  if (!obj) return null;
+  try {
+    return await obj.json();
+  } catch {
+    return null;
+  }
+}
+
 // ── Worker ────────────────────────────────────────────────────────────────────
 export default {
   async fetch(request, env, ctx) {
@@ -98,6 +142,71 @@ export default {
       } catch (e) {
         return Response.json({ status: "error", message: e.message });
       }
+    }
+
+    // ── GraphHopper pinned trail route proxy ─────────────────────────────────
+    // Keeps the GraphHopper API key out of the mobile bundle while we test
+    // whether its OSM walking/hiking graph handles trail anchors better.
+    if (path === "/api/graphhopper/route" && request.method === "POST") {
+      if (!env.GRAPHOPPER_API_KEY) {
+        return Response.json({ error: "GRAPHOPPER_API_KEY is not configured" }, { status: 501 });
+      }
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+      }
+      const points = Array.isArray(body?.points) ? body.points : [];
+      const clean = points
+        .map((p) => [Number(p?.[0]), Number(p?.[1])])
+        .filter((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]))
+        .slice(0, 25);
+      if (clean.length < 2) {
+        return Response.json({ error: "At least two [lng,lat] points are required" }, { status: 400 });
+      }
+
+      const ghBody = {
+        points: clean,
+        profile: body?.profile || "foot",
+        locale: "en",
+        elevation: true,
+        details: ["road_class", "surface", "foot_network", "hike_rating"],
+        points_encoded: false,
+        instructions: true,
+        snap_preventions: ["ferry"],
+        ch: { disable: true },
+      };
+      if (body?.custom_model && typeof body.custom_model === "object") {
+        ghBody.custom_model = body.custom_model;
+      }
+
+      const upstream = await fetch(`https://graphhopper.com/api/1/route?key=${encodeURIComponent(env.GRAPHOPPER_API_KEY)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(ghBody),
+      });
+      const json = await upstream.json().catch(() => null);
+      const headers = {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "no-store",
+      };
+      return new Response(JSON.stringify(json ?? { error: "GraphHopper returned an invalid response" }), {
+        status: upstream.status,
+        headers,
+      });
+    }
+
+    if (path === "/api/graphhopper/route" && request.method === "OPTIONS") {
+      return new Response(null, {
+        status: 204,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "POST, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type",
+        },
+      });
     }
 
     // ── Vector tiles ──────────────────────────────────────────────────────────
@@ -350,7 +459,7 @@ export default {
     if (path === '/api/trail-packs/manifest.json') {
       const manifestObj = await env.TILES_BUCKET.get('trails/manifest.json').catch(() => null);
       if (manifestObj) {
-        return new Response(manifestObj.body, {
+        return new Response(await manifestObj.text(), {
           headers: {
             'Content-Type':                'application/json',
             'Access-Control-Allow-Origin': '*',
@@ -412,7 +521,20 @@ export default {
       const fileName = trailGraphMatch[1];
       const key = `trails/${fileName}`;
       const obj = await env.TILES_BUCKET.get(key).catch(() => null);
-      if (!obj) return new Response('Trail graph not found', { status: 404, headers: { 'Access-Control-Allow-Origin': '*' } });
+      if (!obj) {
+        const partsManifest = await getPartsManifest(env.TILES_BUCKET, key);
+        if (!partsManifest?.parts?.length) {
+          return new Response('Trail graph not found', { status: 404, headers: { 'Access-Control-Allow-Origin': '*' } });
+        }
+        return new Response(await streamR2Parts(env.TILES_BUCKET, partsManifest.parts), {
+          headers: {
+            'Content-Type':                'application/json',
+            'Content-Length':              String(partsManifest.size || ''),
+            'Access-Control-Allow-Origin': '*',
+            'Cache-Control':               'no-cache',
+          },
+        });
+      }
       return new Response(obj.body, {
         headers: {
           'Content-Type':                'application/json',
@@ -427,7 +549,50 @@ export default {
       const fileName = trailRouteGraphMatch[1];
       const key = `trails/${fileName}`;
       const meta = await env.TILES_BUCKET.head(key).catch(() => null);
-      if (!meta) return new Response('Trail routing graph not found', { status: 404, headers: { 'Access-Control-Allow-Origin': '*' } });
+      if (!meta) {
+        const partsManifest = await getPartsManifest(env.TILES_BUCKET, key);
+        if (!partsManifest?.parts?.length) {
+          return new Response('Trail routing graph not found', { status: 404, headers: { 'Access-Control-Allow-Origin': '*' } });
+        }
+        const totalSize = partsManifest.size;
+        const rangeHeader = request.headers.get('Range');
+        let status = 200;
+        let contentRange = null;
+        let contentLength = totalSize;
+        let start = 0;
+        let end = totalSize - 1;
+        if (rangeHeader) {
+          const m = rangeHeader.match(/bytes=(\d+)-(\d*)/);
+          if (m) {
+            start = parseInt(m[1]);
+            end = m[2] ? parseInt(m[2]) : totalSize - 1;
+            if (!Number.isFinite(start) || !Number.isFinite(end) || start >= totalSize || end < start) {
+              return new Response('Requested range not satisfiable', {
+                status: 416,
+                headers: { 'Access-Control-Allow-Origin': '*' },
+              });
+            }
+            end = Math.min(end, totalSize - 1);
+            contentRange = `bytes ${start}-${end}/${totalSize}`;
+            contentLength = end - start + 1;
+            status = 206;
+          }
+        }
+        const headers = {
+          'Content-Type':                'application/gzip',
+          'Accept-Ranges':               'bytes',
+          'Content-Length':              String(contentLength),
+          'Access-Control-Allow-Origin': '*',
+          'Cache-Control':               'no-cache',
+        };
+        if (contentRange) headers['Content-Range'] = contentRange;
+        return new Response(await streamR2Parts(env.TILES_BUCKET, partsManifest.parts, start, end), {
+          status,
+          headers: {
+            ...headers,
+          },
+        });
+      }
 
       const totalSize = meta.size;
       const rangeHeader = request.headers.get('Range');

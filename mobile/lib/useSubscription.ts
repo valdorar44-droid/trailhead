@@ -1,12 +1,12 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { Alert } from 'react-native';
+import { Alert, Platform } from 'react-native';
 import { api } from './api';
 import { useStore } from './store';
 import { storage } from './storage';
 
 export const PRODUCT_IDS = {
-  monthly: 'com.trailhead.explorer.monthly',
-  annual:  'com.trailhead.explorer.annual',
+  monthly: 'com.trailhead.explorer.monthly.v2',
+  annual:  'com.trailhead.explorer.annual.v2',
 } as const;
 
 export interface IAPProduct {
@@ -15,6 +15,7 @@ export interface IAPProduct {
   description: string;
   localizedPrice: string;
   currency: string;
+  offerTokenAndroid?: string;
   introductoryPricePaymentModeIOS?: string;
   introductoryPriceNumberOfPeriodsIOS?: string;
   introductoryPriceSubscriptionPeriodIOS?: string;
@@ -76,6 +77,24 @@ function purchaseTransactionId(purchase: any) {
     ?? '';
 }
 
+function androidOffer(product: any) {
+  const offers = product?.subscriptionOfferDetails ?? [];
+  if (!Array.isArray(offers) || !offers.length) return null;
+  return offers.find((offer: any) => offer?.offerToken && !offer?.offerId) ?? offers.find((offer: any) => offer?.offerToken) ?? null;
+}
+
+function androidPrice(product: any, offer: any) {
+  const phases = offer?.pricingPhases?.pricingPhaseList ?? [];
+  const recurring = Array.isArray(phases)
+    ? phases.find((phase: any) => Number(phase?.recurrenceMode) === 1) ?? phases[phases.length - 1]
+    : null;
+  return recurring?.formattedPrice ?? product?.localizedPrice ?? product?.price ?? '';
+}
+
+function storeName() {
+  return Platform.OS === 'android' ? 'Google Play' : 'App Store';
+}
+
 export function useSubscription() {
   const setPlan = useStore(s => s.setPlan);
   const token   = useStore(s => s.token);
@@ -96,16 +115,25 @@ export function useSubscription() {
   const errorListenerRef    = useRef<{ remove: () => void } | null>(null);
 
   const activateOnBackend = useCallback(async (productId: string, transactionId: string) => {
-    if (!token) return;
+    if (!token) {
+      if (productId && transactionId) {
+        storage.set('trailhead_iap_pending', JSON.stringify({ productId, transactionId, updatedAt: Date.now() })).catch(() => {});
+      }
+      setError('Purchase saved. Sign in or create an account when you want Explorer access synced in Trailhead.');
+      return true;
+    }
     if (productId && transactionId) {
       storage.set('trailhead_iap_pending', JSON.stringify({ productId, transactionId, updatedAt: Date.now() })).catch(() => {});
     }
     try {
       const res = await api.activateSubscription(productId, transactionId);
-      setPlan(res.status !== 'error', res.plan_expires_at ?? null);
+      const active = res.status !== 'error';
+      setPlan(active, active ? res.plan_expires_at ?? null : null);
       storage.del('trailhead_iap_pending').catch(() => {});
-    } catch {
-      setPlan(true, Date.now() / 1000 + 366 * 86400);
+      return active;
+    } catch (e: any) {
+      setError(e?.message ?? 'Purchase was received, but Explorer could not be activated yet. Tap Restore purchases to retry.');
+      return false;
     }
   }, [token, setPlan]);
 
@@ -139,10 +167,12 @@ export function useSubscription() {
           const transactionId = purchaseTransactionId(purchase);
           if (!productId) return;
           try {
-            await activateOnBackend(productId, transactionId);
-            await iap.finishTransaction({ purchase, isConsumable: false });
+            const activated = await activateOnBackend(productId, transactionId);
+            if (activated) {
+              await iap.finishTransaction({ purchase, isConsumable: false });
+            }
           } catch {
-            await iap.finishTransaction({ purchase, isConsumable: false });
+            setError('Purchase was received, but Explorer could not be activated yet. Tap Restore purchases to retry.');
           }
           setPurchasing(false);
         });
@@ -160,28 +190,32 @@ export function useSubscription() {
         const items = await iap.getSubscriptions({ skus });
         if (!mounted) return;
 
-        const normalized: IAPProduct[] = (items ?? []).map((p: any) => ({
-          productId:      p.productId ?? p.id ?? '',
-          title:          p.title ?? p.displayName ?? '',
-          description:    p.description ?? '',
-          localizedPrice: p.localizedPrice ?? p.price ?? '',
-          currency:       p.currency ?? '',
-          introductoryPricePaymentModeIOS: p.introductoryPricePaymentModeIOS ?? p.subscription?.introductoryOffer?.paymentMode,
-          introductoryPriceNumberOfPeriodsIOS: p.introductoryPriceNumberOfPeriodsIOS ?? p.subscription?.introductoryOffer?.period?.value?.toString?.(),
-          introductoryPriceSubscriptionPeriodIOS: p.introductoryPriceSubscriptionPeriodIOS ?? p.subscription?.introductoryOffer?.period?.unit,
-        }));
+        const normalized: IAPProduct[] = (items ?? []).map((p: any) => {
+          const offer = Platform.OS === 'android' ? androidOffer(p) : null;
+          return {
+            productId:      p.productId ?? p.id ?? '',
+            title:          p.title ?? p.displayName ?? p.name ?? '',
+            description:    p.description ?? '',
+            localizedPrice: Platform.OS === 'android' ? androidPrice(p, offer) : (p.localizedPrice ?? p.price ?? ''),
+            currency:       p.currency ?? offer?.pricingPhases?.pricingPhaseList?.[0]?.priceCurrencyCode ?? '',
+            offerTokenAndroid: offer?.offerToken,
+            introductoryPricePaymentModeIOS: p.introductoryPricePaymentModeIOS ?? p.subscription?.introductoryOffer?.paymentMode,
+            introductoryPriceNumberOfPeriodsIOS: p.introductoryPriceNumberOfPeriodsIOS ?? p.subscription?.introductoryOffer?.period?.value?.toString?.(),
+            introductoryPriceSubscriptionPeriodIOS: p.introductoryPriceSubscriptionPeriodIOS ?? p.subscription?.introductoryOffer?.period?.unit,
+          };
+        });
         setProducts(normalized);
         const found = new Set(normalized.map(p => p.productId));
         if (!found.has(PRODUCT_IDS.monthly) && !found.has(PRODUCT_IDS.annual)) {
-          setError('App Store did not return Trailhead plans yet. The first subscriptions may still be propagating or waiting for Apple review.');
+          setError(`${storeName()} did not return Trailhead plans yet. The subscriptions may still be propagating or waiting for store review.`);
         }
       } catch (e: any) {
-        // Simulator, App Review network hiccups, or a temporary StoreKit outage.
+        // Simulator, store review network hiccups, or a temporary store outage.
         // Keep the paywall usable and avoid showing a fatal-looking IAP error.
         if (mounted) {
           setConnected(false);
           setProducts([]);
-          setError(formatIapError(e, 'Could not load App Store plans.'));
+          setError(formatIapError(e, `Could not load ${storeName()} plans.`));
         }
       } finally {
         if (mounted) setStoreLoading(false);
@@ -213,13 +247,24 @@ export function useSubscription() {
     }
     const productLoaded = products.some(p => p.productId === productId);
     if (!productLoaded) {
-      setError('That Trailhead plan is not available from the App Store yet. Try Retry App Store, or wait for Apple review/propagation.');
+      setError(`That Trailhead plan is not available from ${storeName()} yet. Try retrying the store, or wait for review/propagation.`);
+      return false;
+    }
+    const product = products.find(p => p.productId === productId);
+    if (Platform.OS === 'android' && !product?.offerTokenAndroid) {
+      setError('Google Play returned the plan without a base plan offer. Check the subscription base plan in Play Console.');
       return false;
     }
     setError('');
     setPurchasing(true);
     try {
-      await iap.requestSubscription({ sku: productId } as any);
+      if (Platform.OS === 'android') {
+        await iap.requestSubscription({
+          subscriptionOffers: [{ sku: productId, offerToken: product!.offerTokenAndroid! }],
+        } as any);
+      } else {
+        await iap.requestSubscription({ sku: productId } as any);
+      }
       return true;
     } catch (e: any) {
       if (isUserCancelledIap(e)) {
@@ -250,8 +295,12 @@ export function useSubscription() {
         const restoredPurchase = sub as any;
         const productId     = restoredPurchase.productId ?? restoredPurchase.id ?? '';
         const transactionId = purchaseTransactionId(restoredPurchase);
-        await activateOnBackend(productId, transactionId);
-        Alert.alert('Restored', 'Your Explorer Plan has been restored.');
+        const activated = await activateOnBackend(productId, transactionId);
+        if (activated) {
+          Alert.alert('Restored', 'Your Explorer Plan has been restored.');
+        } else {
+          Alert.alert('Restore pending', `${storeName()} returned a purchase, but Trailhead could not activate it yet. Try again in a moment.`);
+        }
       } else {
         Alert.alert('Nothing to restore', 'No active subscription found for this account.');
       }

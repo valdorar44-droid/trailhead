@@ -1,9 +1,11 @@
 import React, { useEffect } from 'react';
 import {
   Modal, View, Text, TouchableOpacity, StyleSheet,
-  ScrollView, ActivityIndicator, Linking,
+  ScrollView, ActivityIndicator, Linking, Platform, useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSubscription, PRODUCT_IDS, priceLine } from '@/lib/useSubscription';
 import { useTheme, mono } from '@/lib/design';
 import { CREDIT_REWARDS } from '@/lib/credits';
@@ -16,7 +18,6 @@ interface Props {
   code?: string;
   message?: string;
   onClose: () => void;
-  onPlanActivated?: () => void;
 }
 
 const EARN_ITEMS = [
@@ -27,27 +28,35 @@ const EARN_ITEMS = [
   { icon: 'link-outline', label: 'Refer a friend who signs up', credits: `+${CREDIT_REWARDS.referral} credits` },
 ] as const;
 
-export default function PaywallModal({ visible, code, message, onClose, onPlanActivated }: Props) {
+const BENEFITS = [
+  ['sparkles-outline', 'Explorer includes AI trip planning, route refinement, and audio guide generation.'],
+  ['headset-outline', 'Explore Summary and Full Story audio are included without per-play credit charges.'],
+  ['bonfire-outline', 'Camp briefs, route briefs, and packing lists stay available for serious trip planning.'],
+] as const;
+
+export default function PaywallModal({ visible, code, message, onClose }: Props) {
   const C  = useTheme();
+  const insets = useSafeAreaInsets();
+  const { height } = useWindowDimensions();
   const { monthlyProduct, annualProduct, purchasing, restoring, error, storeLoading, purchase, restore, openPaywall } = useSubscription();
+  const storeName = Platform.OS === 'android' ? 'Google Play' : 'App Store';
+  const accountSettings = Platform.OS === 'android' ? 'your Google Play subscriptions' : 'your Apple ID settings';
 
   useEffect(() => {
     if (visible) openPaywall();
   }, [openPaywall, visible]);
 
   const isSearchLimit = code === 'search_limit';
-  const title = isSearchLimit ? 'Free search used' : 'Credits needed';
+  const title = isSearchLimit ? 'Free search used' : 'Explorer or credits';
   const subtitle = message ?? (isSearchLimit
     ? "You've used your free camp search. Earn credits by contributing to the map, or get the Explorer Plan for unlimited access."
-    : 'Replaces Gaia, iOverlander & The Dyrt. Earn free credits by contributing, or get the Explorer Plan for unlimited AI routes, camp research, and offline access.');
+    : 'Use credits when you need a single AI action, or join Explorer for planning, camp briefs, route briefs, and audio guides. Offline downloads are included for everyone.');
 
   async function handlePurchase(productId: string) {
     const started = await purchase(productId);
     if (!started) return;
-    // purchaseUpdatedListener fires asynchronously — close modal optimistically
-    // and let the store update propagate
-    onPlanActivated?.();
-    onClose();
+    // The native store confirms asynchronously through purchaseUpdatedListener.
+    // Do not mark Explorer active or close this sheet until that confirmation arrives.
   }
 
   const monthlyPrice = monthlyProduct?.localizedPrice ?? '$7.99';
@@ -57,17 +66,38 @@ export default function PaywallModal({ visible, code, message, onClose, onPlanAc
   const annualDisabled = purchasing || restoring || storeLoading;
   const monthlyDisabled = purchasing || restoring || storeLoading;
   const storeMessage = storeLoading
-    ? 'Loading App Store plans...'
+    ? `Loading ${storeName} plans...`
     : error;
+  const sheetMaxHeight = Math.min(height - 8, Math.max(420, height - Math.max(insets.top + 16, 32)));
+  const sheetBottomPad = Math.max(insets.bottom, Platform.OS === 'android' ? 16 : 18) + 16;
 
   return (
     <Modal visible={visible} animationType="slide" transparent presentationStyle="overFullScreen">
       <View style={staticS.overlay}>
-        <View style={{ backgroundColor: C.bg, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 24, paddingBottom: 40, paddingTop: 12, borderTopWidth: 1, borderColor: C.border }}>
+        <BlurView intensity={28} tint="dark" style={[staticS.blurShell, { maxHeight: sheetMaxHeight }]}>
+        <View style={{ backgroundColor: C.bg + 'F2', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 22, paddingBottom: sheetBottomPad, paddingTop: 12, borderTopWidth: 1, borderColor: C.border, maxHeight: sheetMaxHeight }}>
           <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: C.border, alignSelf: 'center', marginBottom: 20 }} />
 
-          <Text style={{ color: C.text, fontSize: 20, fontWeight: '700', marginBottom: 8 }}>{title}</Text>
-          <Text style={{ color: C.text2, fontSize: 14, lineHeight: 20, marginBottom: 20 }}>{subtitle}</Text>
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={staticS.sheetScroll}>
+          <View style={staticS.heroRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 1 }}>TRAILHEAD EXPLORER</Text>
+              <Text style={{ color: C.text, fontSize: 24, fontWeight: '900', marginTop: 5 }}>{title}</Text>
+              <Text style={{ color: C.text2, fontSize: 13, lineHeight: 19, marginTop: 8 }}>{subtitle}</Text>
+            </View>
+            <View style={[staticS.heroIcon, { backgroundColor: C.orange + '18', borderColor: C.orange + '44' }]}>
+              <Ionicons name="trail-sign-outline" size={28} color={C.orange} />
+            </View>
+          </View>
+
+          <View style={{ gap: 8, marginBottom: 16 }}>
+            {BENEFITS.map(([icon, text]) => (
+              <View key={text} style={[staticS.benefitRow, { backgroundColor: C.s2, borderColor: C.border }]}>
+                <Ionicons name={icon as any} size={15} color={C.orange} />
+                <Text style={{ color: C.text2, fontSize: 12.5, lineHeight: 17, flex: 1 }}>{text}</Text>
+              </View>
+            ))}
+          </View>
 
           {/* Annual — featured */}
           <TouchableOpacity
@@ -109,7 +139,7 @@ export default function PaywallModal({ visible, code, message, onClose, onPlanAc
               <Text style={{ color: C.text3, fontSize: 12, textAlign: 'center' }}>{storeMessage}</Text>
               {!!error && !storeLoading && (
                 <TouchableOpacity onPress={openPaywall} style={staticS.retryStoreBtn} activeOpacity={0.7}>
-                  <Text style={{ color: C.orange, fontSize: 12, fontWeight: '700' }}>Retry App Store</Text>
+                  <Text style={{ color: C.orange, fontSize: 12, fontWeight: '700' }}>Retry {storeName}</Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -144,10 +174,10 @@ export default function PaywallModal({ visible, code, message, onClose, onPlanAc
             <Text style={{ color: C.text3, fontSize: 13 }}>Maybe later</Text>
           </TouchableOpacity>
 
-          {/* Required by App Store: subscription duration, price, and links */}
+          {/* Required store disclosure: subscription duration, price, renewal, and links */}
           <Text style={{ color: C.text3, fontSize: 10, textAlign: 'center', lineHeight: 14, marginTop: 12, paddingHorizontal: 8 }}>
             Subscriptions auto-renew unless cancelled 24 hours before the end of the period.
-            Manage or cancel in your Apple ID settings.{' '}
+            Manage or cancel in {accountSettings}.{' '}
           </Text>
           <View style={staticS.legalLinks}>
             <TouchableOpacity onPress={() => Linking.openURL(TERMS_URL)}>
@@ -158,7 +188,9 @@ export default function PaywallModal({ visible, code, message, onClose, onPlanAc
               <Text style={{ color: C.text3, fontSize: 10, textDecorationLine: 'underline' }}>Privacy Policy</Text>
             </TouchableOpacity>
           </View>
+          </ScrollView>
         </View>
+        </BlurView>
       </View>
     </Modal>
   );
@@ -170,6 +202,11 @@ export default function PaywallModal({ visible, code, message, onClose, onPlanAc
 // and only use StyleSheet.create for layout-only (theme-independent) properties.
 const staticS = StyleSheet.create({
   overlay:       { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'flex-end' },
+  blurShell:     { borderTopLeftRadius: 28, borderTopRightRadius: 28, overflow: 'hidden' },
+  sheetScroll:   { paddingBottom: 4 },
+  heroRow:       { flexDirection: 'row', alignItems: 'flex-start', gap: 14, marginBottom: 16 },
+  heroIcon:      { width: 58, height: 58, borderRadius: 18, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
+  benefitRow:    { flexDirection: 'row', alignItems: 'flex-start', gap: 9, borderWidth: 1, borderRadius: 12, padding: 10 },
   planBtnBadge:  { position: 'absolute', top: -1, left: 18, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
   planBtnBody:   { flex: 1 },
   earnList:      { maxHeight: 180, marginBottom: 16 },

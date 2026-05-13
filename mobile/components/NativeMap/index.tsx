@@ -11,7 +11,7 @@ import React, {
   forwardRef, useCallback, useEffect, useImperativeHandle,
   useMemo, useRef, useState,
 } from 'react';
-import { Dimensions, TouchableOpacity, View, StyleSheet, Text } from 'react-native';
+import { Dimensions, PanResponder, TouchableOpacity, View, StyleSheet, Text } from 'react-native';
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { storage } from '@/lib/storage';
@@ -20,7 +20,7 @@ import { buildMapStyle, MapMode } from './mapStyle';
 import type { ContourSourceMode, TrailSourceMode } from './mapStyle';
 import { fetchRoute, buildFallbackRoute } from './routing';
 import type { RouteResult, RouteStep, RouteOpts, MapBounds, WP } from './types';
-import type { CampsitePin, Pin, Report } from '@/lib/api';
+import type { CampsitePin, OsmPoi, Pin, Report } from '@/lib/api';
 import { useStore } from '@/lib/store';
 import { useTheme } from '@/lib/design';
 import { buildOfflineTrailGraphSelection } from '@/lib/trailGraph';
@@ -63,6 +63,10 @@ export interface NativeMapHandle {
   highlightTrail: (lat: number, lng: number, name?: string) => void;
   clearTrailHighlight: () => void;
   getTrailHighlight: () => GeoJSON.FeatureCollection;
+  captureTrailAt: (lat: number, lng: number, name?: string) => Promise<GeoJSON.FeatureCollection>;
+  screenToCoordinate: (x: number, y: number) => Promise<[number, number] | null>;
+  getVisibleCenter: () => Promise<[number, number] | null>;
+  getVisibleBounds: () => Promise<MapBounds | null>;
   restoreRoute:   (coords: [number,number][], steps: RouteStep[], legs: RouteStep[][], td: number, tt: number) => void;
   setNavTarget:   (idx: number) => void;
 }
@@ -72,7 +76,7 @@ export interface NativeMapProps {
   waypoints:     WP[];
   camps:         CampsitePin[];
   gas:           { lat: number; lng: number; name: string }[];
-  pois:          { lat: number; lng: number; name: string; type: string }[];
+  pois:          OsmPoi[];
   reports:       Report[];
   communityPins: Pin[];
   searchMarker:  { lat: number; lng: number; name: string } | null;
@@ -89,6 +93,10 @@ export interface NativeMapProps {
   // Config
   mapLayer:  MapMode;
   routeOpts: RouteOpts;
+  traceMode?: boolean;
+  traceDraftCoords?: [number, number][];
+  traceRouteCoords?: [number, number][];
+  tracePinCoords?: [number, number][];
 
   // Overlay visibility
   showLandOverlay: boolean;
@@ -107,7 +115,7 @@ export interface NativeMapProps {
   onMapLongPress:   (lat: number, lng: number) => void;
   onCampTap:        (camp: CampsitePin) => void;
   onGasTap?:        (station: { name: string; lat: number; lng: number }) => void;
-  onPoiTap?:        (poi: { name: string; type: string; lat: number; lng: number }) => void;
+  onPoiTap?:        (poi: OsmPoi) => void;
   onCommunityPinTap?: (pin: Pin) => void;
   onTileCampTap:    (name: string, kind: string, lat: number, lng: number) => void;
   onBaseCampTap:    (name: string, lat: number, lng: number, landType: string) => void;
@@ -119,6 +127,9 @@ export interface NativeMapProps {
   onOffRouteWarn?:  (lat: number, lng: number, distanceM: number) => void;
   onBackOnRoute?:   () => void;
   onRouteProgress?: (progress: { distanceM: number; remainingM: number; routeDistanceM: number; deviationM: number; segmentIdx: number }) => void;
+  onTraceStart?:    (coord: [number, number]) => void;
+  onTraceMove?:     (coord: [number, number]) => void;
+  onTraceEnd?:      () => void;
   onError?:         (msg: string) => void;
 }
 
@@ -141,6 +152,7 @@ const WP_LABELS: Record<string, string> = {
   shower: 'Showers', town: 'Town', waypoint: 'Waypoint',
 };
 const POI_CODES: Record<string, string> = {
+  trail: 'T',
   water: 'W',
   trailhead: 'T',
   viewpoint: 'V',
@@ -159,6 +171,7 @@ const POI_CODES: Record<string, string> = {
   attraction: 'A',
 };
 const POI_ICON_NAMES: Record<string, keyof typeof Ionicons.glyphMap> = {
+  trail: 'walk-outline',
   water: 'water-outline',
   trailhead: 'trail-sign-outline',
   viewpoint: 'flag-outline',
@@ -226,6 +239,20 @@ function pointFC(features: GeoJSON.Feature[]) {
 function emptyFC() {
   return { type: 'FeatureCollection' as const, features: [] as GeoJSON.Feature[] };
 }
+
+function maneuverArrowText(step: RouteStep): string | null {
+  const type = (step.type || '').toLowerCase();
+  const modifier = (step.modifier || '').toLowerCase();
+  if (type === 'arrive') return '◆';
+  if (type === 'roundabout' || type === 'rotary') return '↻';
+  if (modifier.includes('uturn')) return '↩';
+  if (modifier.includes('sharp left')) return '↰';
+  if (modifier.includes('sharp right')) return '↱';
+  if (modifier.includes('left')) return '↰';
+  if (modifier.includes('right')) return '↱';
+  return null;
+}
+
 function campFeat(c: CampsitePin): GeoJSON.Feature {
   return { type: 'Feature', geometry: { type: 'Point', coordinates: [c.lng, c.lat] },
     properties: { id: c.id || '', name: c.name || '', land_type: c.land_type || 'Campground', cost: c.cost || '', full: (c as any).full || 0, raw: JSON.stringify(c) } };
@@ -522,10 +549,12 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     waypoints, camps, gas, pois, reports, communityPins, searchMarker,
     userLoc, navMode, navCameraFollow = false, nativeNavEngineActive = false, navIdx, navHeading, navSpeed,
     mapLayer, routeOpts,
+    traceMode = false, traceDraftCoords = [], traceRouteCoords = [], tracePinCoords = [],
     showLandOverlay, showUsgsOverlay, showFire, showAva, showRadar, showMvum,
     onMapReady, onBoundsChange, onMapGesture, onMapTap, onMapLongPress,
     onCampTap, onGasTap, onPoiTap, onCommunityPinTap, onTileCampTap, onBaseCampTap, onTrailTap, onWaypointTap,
     onRouteReady, onRoutePersist, onOffRoute, onOffRouteWarn, onBackOnRoute, onRouteProgress,
+    onTraceStart, onTraceMove, onTraceEnd,
   } = props;
 
   const mapRef = useRef<MapLibreGL.MapViewRef>(null);
@@ -618,6 +647,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const [tileDebug,    setTileDebug]    = useState('Checking maps');
   const [tileSession,  setTileSession]  = useState(() => Date.now());
   const trailHighlightRef = useRef<GeoJSON.FeatureCollection>(emptyFC());
+  const lastTracePointRef = useRef(0);
   const onlineTilesRef  = useRef(true);                // true = prefer live CDN tiles
   const loadedStateRef  = useRef<string | null>(null); // path of currently-active offline region file
   const loadedContourRef = useRef<string | null>(null);
@@ -916,6 +946,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
 
   // Route state
   const [routeCoords,  setRouteCoords]  = useState<[number,number][]>([]);
+  const [routeSteps,   setRouteSteps]   = useState<RouteStep[]>([]);
   const [passedCoords, setPassedCoords] = useState<[number,number][]>([]);
   const [breadcrumb,   setBreadcrumb]   = useState<[number,number][]>([]);
   const [trailHighlight, setTrailHighlight] = useState<GeoJSON.FeatureCollection>(emptyFC);
@@ -992,7 +1023,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     resetRoute() {
       routeRequestRef.current++;
       isRoutingRef.current = false;
-      setRouteCoords([]); setPassedCoords([]); setBreadcrumb([]);
+      setRouteCoords([]); setRouteSteps([]); setPassedCoords([]); setBreadcrumb([]);
       routeRef.current = makeRouteState([]);
       setSearchDest(null); setNavTargetIdx(-1);
     },
@@ -1060,13 +1091,112 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     getTrailHighlight() {
       return trailHighlightRef.current;
     },
+    async captureTrailAt(lat, lng, name) {
+      if (!mapRef.current) return emptyFC();
+      try {
+        const center = await mapRef.current.getPointInView([lng, lat]);
+        const [cx, cy] = center.map(Number);
+        if (!Number.isFinite(cx) || !Number.isFinite(cy)) return emptyFC();
+        const layerIds = ['trail-pack-line', 'road-path', 'road-other', 'mvum-trails-line', 'mvum-roads-line'];
+        const rendered: any[] = [];
+        const rectFound = await (mapRef.current as any).queryRenderedFeaturesInRect?.(
+          [cx - 150, cy - 150, cx + 150, cy + 150],
+          undefined,
+          layerIds,
+        ).catch(() => null);
+        const rectFeatures = Array.isArray(rectFound) ? rectFound : rectFound?.features;
+        if (Array.isArray(rectFeatures)) rendered.push(...rectFeatures);
+        for (const [dx, dy] of [[0, 0], [-16, 0], [16, 0], [0, -16], [0, 16], [-28, -18], [28, -18], [-28, 18], [28, 18]]) {
+          const found = await mapRef.current.queryRenderedFeaturesAtPoint(
+            [cx + dx, cy + dy],
+            undefined,
+            layerIds,
+          ).catch(() => null);
+          const features = Array.isArray(found) ? found : found?.features;
+          if (Array.isArray(features)) rendered.push(...features);
+        }
+        const graph = buildOfflineTrailGraphSelection(rendered, [lng, lat], name);
+        const features = graph.features.length ? graph.features : buildTrailSystemFeatures(rendered, [lng, lat], name);
+        return features.length ? pointFC(features) : emptyFC();
+      } catch {
+        return emptyFC();
+      }
+    },
+    async screenToCoordinate(x, y) {
+      if (!mapRef.current) return null;
+      try {
+        const coord = await mapRef.current.getCoordinateFromView([x, y]);
+        const [lng, lat] = coord.map(Number);
+        return Number.isFinite(lng) && Number.isFinite(lat) ? [lng, lat] : null;
+      } catch {
+        return null;
+      }
+    },
+    async getVisibleCenter() {
+      if (!mapRef.current) return null;
+      try {
+        const bounds = await mapRef.current.getVisibleBounds();
+        if (!bounds) return null;
+        const [[e, n], [w, s]] = bounds;
+        const lng = (Number(e) + Number(w)) / 2;
+        const lat = (Number(n) + Number(s)) / 2;
+        return Number.isFinite(lng) && Number.isFinite(lat) ? [lng, lat] : null;
+      } catch {
+        return null;
+      }
+    },
+    async getVisibleBounds() {
+      if (!mapRef.current) return null;
+      try {
+        const bounds = await mapRef.current.getVisibleBounds();
+        if (!bounds) return null;
+        const [[e, n], [w, s]] = bounds;
+        const zoom = await mapRef.current.getZoom().catch(() => 10);
+        const next = { n: Number(n), s: Number(s), e: Number(e), w: Number(w), zoom: Number(zoom) || 10 };
+        return [next.n, next.s, next.e, next.w].every(Number.isFinite) ? next : null;
+      } catch {
+        return null;
+      }
+    },
     restoreRoute(coords, steps, legs, td, tt) {
       setRouteCoords(coords);
+      setRouteSteps(steps);
       routeRef.current = makeRouteState(coords);
       onRouteReady({ coords, steps, legs, totalDistance: td, totalDuration: tt, isProper: true, fromCache: true, fromIdx: 0 });
     },
     setNavTarget(idx) { setNavTargetIdx(idx); },
   }), [waypoints, searchDest, mapboxToken, makeRouteState]);
+
+  const emitTracePoint = useCallback(async (
+    x: number,
+    y: number,
+    phase: 'start' | 'move',
+  ) => {
+    if (!traceMode || !mapRef.current) return;
+    const now = Date.now();
+    if (phase === 'move' && now - lastTracePointRef.current < 45) return;
+    lastTracePointRef.current = now;
+    try {
+      const coord = await mapRef.current.getCoordinateFromView([x, y]);
+      const [lng, lat] = coord.map(Number);
+      if (!Number.isFinite(lng) || !Number.isFinite(lat)) return;
+      if (phase === 'start') onTraceStart?.([lng, lat]);
+      else onTraceMove?.([lng, lat]);
+    } catch {}
+  }, [onTraceMove, onTraceStart, traceMode]);
+
+  const tracePanResponder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => traceMode,
+    onMoveShouldSetPanResponder: () => traceMode,
+    onPanResponderGrant: evt => {
+      emitTracePoint(evt.nativeEvent.locationX, evt.nativeEvent.locationY, 'start');
+    },
+    onPanResponderMove: evt => {
+      emitTracePoint(evt.nativeEvent.locationX, evt.nativeEvent.locationY, 'move');
+    },
+    onPanResponderRelease: () => onTraceEnd?.(),
+    onPanResponderTerminate: () => onTraceEnd?.(),
+  }), [emitTracePoint, onTraceEnd, traceMode]);
 
   // ── Routing ─────────────────────────────────────────────────────────────────
   const doFetchRoute = useCallback(async (pairs: string[], fromIdx: number) => {
@@ -1085,6 +1215,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       const result = await fetchRoute(pairs, fromIdx, mapboxToken || '', routeOpts);
       if (requestId !== routeRequestRef.current) return;
       setRouteCoords(result.coords);
+      setRouteSteps(result.steps);
       routeRef.current = makeRouteState(result.coords);
       onRouteReady({ ...result, fromIdx });
       // Persist for offline relaunch
@@ -1104,6 +1235,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       if (requestId !== routeRequestRef.current) return;
       const fb = buildFallbackRoute(pairs);
       setRouteCoords(fb.coords);
+      setRouteSteps(fb.steps);
       routeRef.current = makeRouteState(fb.coords);
       onRouteReady({ ...fb, fromIdx });
     } finally {
@@ -1117,12 +1249,14 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     routeRequestRef.current++;
     isRoutingRef.current = false;
     setRouteCoords([]);
+    setRouteSteps([]);
     setPassedCoords([]);
     setBreadcrumb([]);
     routeRef.current = makeRouteState([]);
     if (!navMode && waypoints.length > 10) {
       const previewCoords = waypoints.map(w => [w.lng, w.lat] as [number, number]);
       setRouteCoords(previewCoords);
+      setRouteSteps([]);
       routeRef.current = makeRouteState(previewCoords);
     } else {
       doFetchRoute(waypoints.map(w => `${w.lng},${w.lat}`), 0);
@@ -1171,9 +1305,9 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       setPassedCoords([...coords.slice(0, snap.segmentIdx + 1), snap.projected]);
     }
 
-    const warnThreshold = Math.max(65, accuracy * 1.5 + 25);
-    const rerouteThreshold = Math.max(120, accuracy * 2 + 55);
-    const allowReroute = speed > 1.2 || snap.distanceM > rerouteThreshold + 70;
+    const warnThreshold = Math.max(30, accuracy * 1.2 + 15);
+    const rerouteThreshold = Math.max(50, accuracy * 1.8 + 25);
+    const allowReroute = speed > 1.2 || snap.distanceM > rerouteThreshold + 45;
     if (snap.distanceM > rerouteThreshold && allowReroute) {
       offRouteStreakRef.current += 1;
       wasOffRouteRef.current = true;
@@ -1206,8 +1340,23 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   }))), [gas]);
   const poiFC = useMemo(() => pointFC(pois.map(p => ({
     type: 'Feature' as const, geometry: { type: 'Point' as const, coordinates: [p.lng, p.lat] },
-    properties: { name: p.name, type: p.type },
+    properties: { ...p, raw: JSON.stringify(p) },
   }))), [pois]);
+  const routeTurnFC = useMemo(() => pointFC(routeSteps.flatMap((step, idx) => {
+    if (step.lat == null || step.lng == null) return [];
+    const arrow = maneuverArrowText(step);
+    if (!arrow) return [];
+    return [{
+      type: 'Feature' as const,
+      geometry: { type: 'Point' as const, coordinates: [step.lng, step.lat] },
+      properties: {
+        arrow,
+        idx,
+        modifier: step.modifier || '',
+        type: step.type || '',
+      },
+    }];
+  })), [routeSteps]);
 
   // ── Map event handlers ───────────────────────────────────────────────────────
   const handleMapReady = useCallback(() => {
@@ -1419,6 +1568,67 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         </MapLibreGL.ShapeSource>
       )}
 
+      {traceDraftCoords.length > 1 && (
+        <MapLibreGL.ShapeSource id="trail-trace-draft" shape={lineFC(traceDraftCoords)}>
+          <MapLibreGL.LineLayer
+            id="trail-trace-draft-glow"
+            style={{ lineColor: '#38bdf8', lineWidth: 11, lineBlur: 4, lineOpacity: 0.22, lineCap: 'round', lineJoin: 'round' }}
+          />
+          <MapLibreGL.LineLayer
+            id="trail-trace-draft-line"
+            style={{ lineColor: '#38bdf8', lineWidth: 4.2, lineOpacity: 0.92, lineCap: 'round', lineJoin: 'round', lineDasharray: [0.8, 1.4] }}
+          />
+        </MapLibreGL.ShapeSource>
+      )}
+
+      {tracePinCoords.length > 0 && (
+        <MapLibreGL.ShapeSource
+          id="trail-capture-pins"
+          shape={pointFC(tracePinCoords.map((coord, idx) => ({
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: coord },
+            properties: { idx: idx + 1 },
+          })))}
+        >
+          <MapLibreGL.CircleLayer
+            id="trail-capture-pin-dot"
+            style={{
+              circleRadius: 8,
+              circleColor: '#38bdf8',
+              circleOpacity: 0.98,
+              circleStrokeWidth: 2,
+              circleStrokeColor: '#fff',
+            }}
+          />
+          <MapLibreGL.SymbolLayer
+            id="trail-capture-pin-label"
+            style={{
+              textField: ['to-string', ['get', 'idx']],
+              textSize: 10,
+              textColor: '#062033',
+              textHaloColor: '#ffffff',
+              textHaloWidth: 0.5,
+              textFont: ['Open Sans Bold'],
+              textAllowOverlap: true,
+              textIgnorePlacement: true,
+            } as any}
+          />
+        </MapLibreGL.ShapeSource>
+      )}
+
+      {traceRouteCoords.length > 1 && (
+        <MapLibreGL.ShapeSource id="trail-trace-route" shape={lineFC(traceRouteCoords)}>
+          <MapLibreGL.LineLayer
+            id="trail-trace-route-glow"
+            style={{ lineColor: '#f97316', lineWidth: 13, lineBlur: 5, lineOpacity: 0.28, lineCap: 'round', lineJoin: 'round' }}
+          />
+          <MapLibreGL.LineLayer
+            id="trail-trace-route-line"
+            style={{ lineColor: '#ff8a2a', lineWidth: 5.5, lineOpacity: 0.96, lineCap: 'round', lineJoin: 'round' }}
+          />
+        </MapLibreGL.ShapeSource>
+      )}
+
       {/* ── Route line ────────────────────────────────────────────────── */}
       {routeCoords.length > 0 && (
         <MapLibreGL.ShapeSource id="route" shape={lineFC(routeCoords)}>
@@ -1433,19 +1643,53 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           {/* Direction arrows along route — ASCII > rotated along line direction */}
           <MapLibreGL.SymbolLayer
             id="route-arrows"
-            minZoomLevel={10}
+            minZoomLevel={9}
             style={{
               symbolPlacement: 'line',
-              symbolSpacing: 90,
+              symbolSpacing: 70,
               textField: '>',
-              textSize: ['interpolate', ['linear'], ['zoom'], 10, 11, 14, 15],
-              textColor: 'rgba(255,255,255,0.9)',
+              textSize: ['interpolate', ['linear'], ['zoom'], 9, 14, 12, 17, 15, 21, 17, 25],
+              textColor: '#111827',
+              textHaloColor: 'rgba(255,255,255,0.82)',
+              textHaloWidth: 1.2,
               textFont: ['Noto Sans Medium'],
               textIgnorePlacement: true,
               textAllowOverlap: true,
               textRotationAlignment: 'map',
               textKeepUpright: false,
-              textLetterSpacing: -0.1,
+              textLetterSpacing: 0,
+            } as any}
+          />
+        </MapLibreGL.ShapeSource>
+      )}
+
+      {routeTurnFC.features.length > 0 && (
+        <MapLibreGL.ShapeSource id="route-turns" shape={routeTurnFC}>
+          <MapLibreGL.SymbolLayer
+            id="route-turn-shadows"
+            minZoomLevel={12}
+            style={{
+              textField: ['get', 'arrow'],
+              textSize: ['interpolate', ['linear'], ['zoom'], 12, 28, 15, 36, 17, 44],
+              textColor: 'rgba(2,6,23,0.42)',
+              textTranslate: [0, 2],
+              textFont: ['Noto Sans Bold'],
+              textIgnorePlacement: true,
+              textAllowOverlap: true,
+            } as any}
+          />
+          <MapLibreGL.SymbolLayer
+            id="route-turn-arrows"
+            minZoomLevel={12}
+            style={{
+              textField: ['get', 'arrow'],
+              textSize: ['interpolate', ['linear'], ['zoom'], 12, 25, 15, 34, 17, 42],
+              textColor: '#f8c73d',
+              textHaloColor: 'rgba(2,6,23,0.82)',
+              textHaloWidth: 2.4,
+              textFont: ['Noto Sans Bold'],
+              textIgnorePlacement: true,
+              textAllowOverlap: true,
             } as any}
           />
         </MapLibreGL.ShapeSource>
@@ -1613,7 +1857,9 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             const f = e.features?.[0];
             if (f && onPoiTap) {
               const [lng, lat] = (f.geometry as any).coordinates;
-              onPoiTap({ name: f.properties?.name ?? '', type: f.properties?.type ?? 'poi', lat, lng });
+              let raw: OsmPoi | null = null;
+              try { raw = f.properties?.raw ? JSON.parse(String(f.properties.raw)) : null; } catch {}
+              onPoiTap({ ...(raw || {}), id: raw?.id || f.properties?.id || `${f.properties?.type ?? 'poi'}:${lat}:${lng}`, name: raw?.name || f.properties?.name || '', type: (raw?.type || f.properties?.type || 'poi') as OsmPoi['type'], lat, lng });
             }
           }}
         >
@@ -1621,7 +1867,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             id="poi-circle"
             style={{
               circleRadius: ['case', ['==', ['get', 'type'], 'peak'], 9, 8],
-              circleColor: ['match', ['get', 'type'], 'water', '#3b82f6', 'trailhead', '#22c55e', 'viewpoint', '#a855f7', 'peak', '#92400e', 'hot_spring', '#f97316', 'fuel', '#ea580c', 'propane', '#f97316', 'dump', '#a16207', 'shower', '#06b6d4', 'laundromat', '#06b6d4', 'lodging', '#6366f1', 'food', '#06b6d4', 'grocery', '#06b6d4', 'mechanic', '#f97316', 'parking', '#d97706', 'attraction', '#0ea5e9', '#6b7280'],
+              circleColor: ['match', ['get', 'type'], 'trail', '#f97316', 'water', '#3b82f6', 'trailhead', '#22c55e', 'viewpoint', '#a855f7', 'peak', '#92400e', 'hot_spring', '#f97316', 'fuel', '#ea580c', 'propane', '#f97316', 'dump', '#a16207', 'shower', '#06b6d4', 'laundromat', '#06b6d4', 'lodging', '#6366f1', 'food', '#06b6d4', 'grocery', '#06b6d4', 'mechanic', '#f97316', 'parking', '#d97706', 'attraction', '#0ea5e9', '#6b7280'],
               circleOpacity: 0.9, circleStrokeWidth: 1.5, circleStrokeColor: '#fff',
             }}
           />
@@ -1629,6 +1875,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             id="poi-code"
             style={{
               textField: ['match', ['get', 'type'],
+                'trail', POI_CODES.trail,
                 'water', POI_CODES.water,
                 'trailhead', POI_CODES.trailhead,
                 'viewpoint', POI_CODES.viewpoint,
@@ -1678,7 +1925,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           <IconPin
             color={poiColor(poi.type)}
             icon={POI_ICON_NAMES[poi.type] || 'location-outline'}
-            onPress={() => onPoiTap?.({ name: poi.name, type: poi.type, lat: poi.lat, lng: poi.lng })}
+            onPress={() => onPoiTap?.(poi)}
           />
         </MapLibreGL.MarkerView>
       ))}
@@ -1826,6 +2073,13 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         </MapLibreGL.MarkerView>
       ))}
       </MapLibreGL.MapView>
+      {traceMode && (
+        <View
+          style={StyleSheet.absoluteFillObject}
+          pointerEvents="auto"
+          {...tracePanResponder.panHandlers}
+        />
+      )}
       <View pointerEvents="none" style={styles.tileDebugWrap}>
         <View style={[styles.tileDebug, localTiles ? styles.tileDebugLocal : styles.tileDebugRemote]}>
           <Ionicons
@@ -1878,6 +2132,7 @@ function compactMapStatus(status: string): string {
 
 function poiColor(type: string): string {
   switch (type) {
+    case 'trail': return '#f97316';
     case 'water': return '#3b82f6';
     case 'trailhead': return '#22c55e';
     case 'viewpoint': return '#a855f7';

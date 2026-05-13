@@ -1,7 +1,7 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import GuidedTourOverlay from '@/components/GuidedTourOverlay';
 import { PremiumTabBar } from '@/components/premium';
+import PreviewRunOnboarding from '@/components/PreviewRunOnboarding';
 
 export default function TabLayout() {
   return (
@@ -58,7 +58,7 @@ export default function TabLayout() {
           }}
         />
       </Tabs>
-      <GuidedTourOverlay />
+      <PreviewRunOnboarding />
     </>
   );
 }

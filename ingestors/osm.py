@@ -76,6 +76,16 @@ _HOT_SPRING_QUERY = """
 out center tags 40;
 """
 
+_TRAIL_ROUTE_QUERY = """
+[out:json][timeout:25];
+(
+  relation["route"~"^(hiking|foot|bicycle|mtb|horse)$"](around:{radius},{lat},{lng});
+  way["highway"~"^(path|track|footway|bridleway|cycleway)$"](around:{radius},{lat},{lng});
+  way["route"~"^(hiking|foot|bicycle|mtb|horse)$"](around:{radius},{lat},{lng});
+);
+out center tags 120;
+"""
+
 _FUEL_QUERY = """
 [out:json][timeout:15];
 (
@@ -224,7 +234,11 @@ def _normalize_osm_camp(el: dict) -> dict | None:
 async def _overpass(query: str) -> list[dict]:
     try:
         async with httpx.AsyncClient(timeout=25) as client:
-            r = await client.post(OVERPASS, data={"data": query})
+            r = await client.post(
+                OVERPASS,
+                data={"data": query},
+                headers={"User-Agent": "Trailhead/1.0 contact@gettrailhead.app"},
+            )
             r.raise_for_status()
             return r.json().get("elements", [])
     except Exception:
@@ -346,6 +360,59 @@ async def get_trailheads(lat: float, lng: float, radius_m: int = 30000) -> list[
             "name": name,
             "lat": elat, "lng": elng,
             "type": "trailhead",
+        })
+    set_cached("campsite_cache", key, results)
+    return results
+
+
+async def get_trails(lat: float, lng: float, radius_m: int = 30000) -> list[dict]:
+    key = f"osm_trail_routes_v3_{lat:.2f}_{lng:.2f}_{radius_m}"
+    cached = get_cached("campsite_cache", key, ttl_seconds=3600 * 24)
+    if cached is not None:
+        return cached
+
+    elements = await _overpass(_TRAIL_ROUTE_QUERY.format(lat=lat, lng=lng, radius=radius_m))
+    results = []
+    seen = set()
+    for el in elements:
+        coord = _node_coord(el)
+        if not coord:
+            continue
+        tags = el.get("tags", {})
+        access = str(tags.get("access", "")).lower()
+        if access in {"private", "no"}:
+            continue
+        route = str(tags.get("route") or tags.get("highway") or "trail")
+        surface = str(tags.get("surface") or "").replace("_", " ")
+        tracktype = str(tags.get("tracktype") or "").lower()
+        name = _tag(el, "name") or _tag(el, "ref")
+        if not name:
+            if route == "track":
+                if surface:
+                    name = f"Mapped {surface} track"
+                elif tracktype in {"grade4", "grade5"}:
+                    name = "Mapped rough track"
+                else:
+                    name = "Mapped backroad"
+            elif route in {"path", "footway", "bridleway", "cycleway"}:
+                name = "Mapped trail"
+            else:
+                name = "Mapped trail route"
+        elat, elng = coord
+        kind = el.get("type") or "way"
+        key2 = f"{kind}:{el.get('id')}"
+        if key2 in seen:
+            continue
+        seen.add(key2)
+        results.append({
+            "id": f"osm_{kind}_{el.get('id', '')}",
+            "name": name,
+            "lat": elat,
+            "lng": elng,
+            "type": "trail",
+            "subtype": route,
+            "source_label": "OpenStreetMap",
+            "url": _osm_url(el),
         })
     set_cached("campsite_cache", key, results)
     return results

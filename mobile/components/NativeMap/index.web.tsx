@@ -15,6 +15,13 @@ export interface NativeMapHandle {
   routeToSearch:  (lat: number, lng: number, name: string, userLat: number, userLng: number) => void;
   resetRoute:     () => void;
   stopNavigation: () => void;
+  highlightTrail: (lat: number, lng: number, name?: string) => void;
+  clearTrailHighlight: () => void;
+  getTrailHighlight: () => GeoJSON.FeatureCollection;
+  captureTrailAt: (lat: number, lng: number, name?: string) => Promise<GeoJSON.FeatureCollection>;
+  screenToCoordinate: (x: number, y: number) => Promise<[number, number] | null>;
+  getVisibleCenter: () => Promise<[number, number] | null>;
+  getVisibleBounds: () => Promise<MapBounds | null>;
   restoreRoute:   (coords: [number,number][], steps: RouteStep[], legs: RouteStep[][], td: number, tt: number) => void;
   setNavTarget:   (idx: number) => void;
 }
@@ -34,6 +41,10 @@ export interface NativeMapProps {
   navSpeed:      number | null;
   mapLayer:      string;
   routeOpts:     RouteOpts;
+  traceMode?: boolean;
+  traceDraftCoords?: [number, number][];
+  traceRouteCoords?: [number, number][];
+  tracePinCoords?: [number, number][];
   showLandOverlay: boolean;
   showUsgsOverlay: boolean;
   showTerrain:     boolean;
@@ -59,6 +70,9 @@ export interface NativeMapProps {
   onOffRouteWarn?:  (lat: number, lng: number, distanceM: number) => void;
   onBackOnRoute?:   () => void;
   onRouteProgress?: (progress: { distanceM: number; remainingM: number; routeDistanceM: number; deviationM: number; segmentIdx: number }) => void;
+  onTraceStart?:    (coord: [number, number]) => void;
+  onTraceMove?:     (coord: [number, number]) => void;
+  onTraceEnd?:      () => void;
   onError?:         (msg: string) => void;
   children?:         React.ReactNode;
 }
@@ -75,6 +89,13 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     routeToSearch: noop,
     resetRoute: noop,
     stopNavigation: noop,
+    highlightTrail: noop,
+    clearTrailHighlight: noop,
+    getTrailHighlight: () => ({ type: 'FeatureCollection', features: [] }),
+    captureTrailAt: async () => ({ type: 'FeatureCollection', features: [] }),
+    screenToCoordinate: async () => null,
+    getVisibleCenter: async () => null,
+    getVisibleBounds: async () => null,
     restoreRoute: noop,
     setNavTarget: noop,
   }));

@@ -42,6 +42,13 @@ export async function saveOfflineTrail(item: OfflineTrail) {
   await writeIndex([item.id, ...ids.filter(id => id !== item.id)].slice(0, 200));
 }
 
+export async function deleteOfflineTrail(id: string) {
+  await ensureDir();
+  await FileSystem.deleteAsync(fileFor(id), { idempotent: true }).catch(() => {});
+  const ids = await readIndex();
+  await writeIndex(ids.filter(existing => existing !== id));
+}
+
 export async function loadOfflineTrail(id: string): Promise<OfflineTrail | null> {
   try {
     const raw = await FileSystem.readAsStringAsync(fileFor(id));

@@ -1,6 +1,6 @@
 {
   "name": "trailhead-mobile",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "main": "expo-router/entry",
   "scripts": {
     "start": "expo start",
@@ -21,6 +21,7 @@
     "@turf/helpers": "^7.3.5",
     "expo": "~52.0.0",
     "expo-asset": "~11.0.5",
+    "expo-av": "~15.0.2",
     "expo-blur": "~14.0.3",
     "expo-build-properties": "^0.13.3",
     "expo-constants": "~17.0.0",
@@ -43,6 +44,7 @@
     "expo-tile-server": "file:./modules/tile-server",
     "expo-updates": "~0.27.5",
     "expo-valhalla-routing": "file:./modules/valhalla-routing",
+    "fast-xml-parser": "^5.8.0",
     "pbf": "^4.0.1",
     "react": "18.3.1",
     "react-dom": "^18.3.1",

@@ -11,10 +11,11 @@ import { storage } from '@/lib/storage';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import TourTarget from '@/components/TourTarget';
-import { api, Report, LeaderboardEntry } from '@/lib/api';
+import { api, Report, ContributorLeader, ContributorProfile, ContributionPeriod } from '@/lib/api';
 import { useStore } from '@/lib/store';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 import { CREDIT_REWARDS } from '@/lib/credits';
+import Reanimated, { FadeInDown, ZoomIn } from 'react-native-reanimated';
 
 // ── Alert notification helpers ────────────────────────────────────────────────
 // Seen IDs: { [reportId]: expiresAt (unix sec) } — auto-prune on load
@@ -96,7 +97,10 @@ export default function ReportScreen() {
   const [submitted, setSubmitted] = useState(false);
   const [creditsGained, setCreditsGained] = useState(0);
   const [nearby, setNearby] = useState<Report[]>([]);
-  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [topUsers, setTopUsers] = useState<ContributorLeader[]>([]);
+  const [topPeriod, setTopPeriod] = useState<ContributionPeriod>('month');
+  const [selectedContributor, setSelectedContributor] = useState<ContributorProfile | null>(null);
+  const [contributorLoading, setContributorLoading] = useState(false);
   const [view, setView] = useState<TabView>('submit');
   const [notifPrefs, setNotifPrefs] = useState<Record<string, boolean>>({});
   const [showNotifSettings, setShowNotifSettings] = useState(false);
@@ -168,8 +172,13 @@ export default function ReportScreen() {
         .catch(() => {}); // prevent unhandled rejection crash
     }).catch(() => {});
 
-    api.getLeaderboard().then(setLeaderboard).catch(() => {});
+    api.getContributionsLeaderboard('month').then(res => setTopUsers(res.leaders)).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (view !== 'leaderboard') return;
+    api.getContributionsLeaderboard(topPeriod).then(res => setTopUsers(res.leaders)).catch(() => {});
+  }, [view, topPeriod]);
 
   // Refresh nearby reports each time user opens the NEARBY tab
   useEffect(() => {
@@ -181,6 +190,17 @@ export default function ReportScreen() {
       checkAndNotify(reports);
     }).catch(() => {});
   }, [view]);
+
+  async function openContributor(userId: number) {
+    setContributorLoading(true);
+    try {
+      setSelectedContributor(await api.getContributorProfile(userId));
+    } catch (e: any) {
+      Alert.alert('Profile unavailable', e?.message ?? 'This contributor profile is private.');
+    } finally {
+      setContributorLoading(false);
+    }
+  }
 
   async function toggleNotifPref(type: string, enabled: boolean) {
     const updated = { ...notifPrefsRef.current, [type]: enabled };
@@ -327,9 +347,18 @@ export default function ReportScreen() {
 
       {view === 'submit' && (
         <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
+          <View style={s.reportHero}>
+            <View style={s.reportHeroIcon}>
+              <Ionicons name="radio-outline" size={19} color={C.orange} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.reportHeroTitle}>What changed out here?</Text>
+              <Text style={s.reportHeroText}>Pick one condition, add useful details, and help the next rig make a better call.</Text>
+            </View>
+          </View>
           <View style={s.safetyBanner}>
-            <Ionicons name="car-outline" size={13} color={C.text3} />
-            <Text style={s.safetyText}>Report only when safely stopped</Text>
+            <Ionicons name="car-outline" size={13} color={C.orange} />
+            <Text style={s.safetyText}>Pull over before posting. Reports use your current location.</Text>
           </View>
           <Text style={s.sectionLabel}>TYPE</Text>
           <TourTarget id="report.types">
@@ -337,16 +366,17 @@ export default function ReportScreen() {
               {REPORT_TYPES.map((rt, idx) => {
                 const active = selectedType?.type === rt.type;
                 return (
-                  <Animated.View key={rt.type} style={{ transform: [{ scale: typeAnims[idx] }], width: '23%' }}>
+                  <Animated.View key={rt.type} style={{ transform: [{ scale: typeAnims[idx] }], width: '31.5%' }}>
                     <TouchableOpacity
                       style={[s.typeBtn, active && { borderColor: rt.color, backgroundColor: rt.color + '18' }]}
                       onPress={() => selectType(rt, idx)}
                     >
-                      <View style={[s.typeIconWrap, active && { backgroundColor: rt.color + '22' }]}>
+                      <View style={[s.typeAccent, { backgroundColor: rt.color }]} />
+                      <View style={[s.typeIconWrap, { backgroundColor: rt.color + '16' }, active && { backgroundColor: rt.color + '26' }]}>
                         <Ionicons name={rt.icon as any} size={21} color={active ? rt.color : C.text3} />
                       </View>
                       <Text style={[s.typeLabel, active && { color: rt.color }]}>{rt.label}</Text>
-                      <Text style={[s.typeTtl, active && { color: rt.color + 'aa' }]}>{rt.ttl}</Text>
+                      <Text style={[s.typeTtl, active && { color: rt.color + 'cc' }]}>{rt.ttl} active</Text>
                     </TouchableOpacity>
                   </Animated.View>
                 );
@@ -490,18 +520,39 @@ export default function ReportScreen() {
 
       {view === 'nearby' && (
         <ScrollView contentContainerStyle={s.scroll}>
+          <View style={s.nearbyHero}>
+            <View>
+              <Text style={s.nearbyKicker}>LIVE CONDITIONS</Text>
+              <Text style={s.nearbyTitle}>Nearby trail reports</Text>
+            </View>
+            <View style={s.nearbyCount}>
+              <Text style={s.nearbyCountNum}>{nearby.length}</Text>
+              <Text style={s.nearbyCountLabel}>ACTIVE</Text>
+            </View>
+          </View>
           {/* Alert settings row */}
           <TouchableOpacity style={s.notifSettingsBtn} onPress={() => setShowNotifSettings(true)}>
-            <Ionicons name="notifications-outline" size={14} color={C.text3} />
-            <Text style={[s.notifSettingsBtnText, { flex: 1 }]}>Alert Settings</Text>
-            <Ionicons name="chevron-forward" size={12} color={C.text3} />
+            <View style={s.notifSettingsIcon}>
+              <Ionicons name="notifications-outline" size={14} color={C.orange} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.notifSettingsBtnText}>Critical alert settings</Text>
+              <Text style={s.notifSettingsSub}>Choose which nearby warnings can notify you.</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={13} color={C.text3} />
           </TouchableOpacity>
 
           {nearby.length === 0 ? (
             <View style={s.emptyWrap}>
-              <Ionicons name="location-outline" size={40} color={C.text3} />
+              <View style={s.emptyIconWrap}>
+                <Ionicons name="location-outline" size={30} color={C.text3} />
+              </View>
               <Text style={s.emptyText}>No active reports nearby</Text>
-              <Text style={s.emptySub}>Be the first to report a condition</Text>
+              <Text style={s.emptySub}>This area looks quiet. If you spot a closure, washed road, full camp, or fuel issue, add the first report.</Text>
+              <TouchableOpacity style={s.emptyAction} onPress={() => setView('submit')}>
+                <Ionicons name="add-circle-outline" size={14} color={C.orange} />
+                <Text style={s.emptyActionText}>ADD REPORT</Text>
+              </TouchableOpacity>
             </View>
           ) : nearby.map(r => (
             <ReportCard key={r.id} report={r}
@@ -523,24 +574,95 @@ export default function ReportScreen() {
 
       {view === 'leaderboard' && (
         <ScrollView contentContainerStyle={s.scroll}>
-          <Text style={s.sectionLabel}>TOP REPORTERS — LAST 30 DAYS</Text>
-          {leaderboard.map((entry, i) => (
-            <View key={entry.username} style={[s.leaderRow, i === 0 && s.leaderGold]}>
-              <Text style={s.leaderRank}>
-                #{i + 1}
-              </Text>
-              <View style={s.leaderInfo}>
-                <Text style={s.leaderName}>{entry.username}</Text>
-                <Text style={s.leaderMeta}>
-                  {entry.report_count} reports · {entry.total_upvotes ?? 0} upvotes
-                  {entry.streak > 1 ? ` · ${entry.streak}d streak` : ''}
-                </Text>
+          <View style={s.contributorHero}>
+            <View style={s.contributorHeroTop}>
+              <View>
+                <Text style={s.sectionLabel}>COMMUNITY STANDINGS</Text>
+                <Text style={s.contributorTitle}>Top Contributors</Text>
               </View>
-              {user?.username === entry.username && (
-                <View style={s.youBadge}><Text style={s.youText}>YOU</Text></View>
-              )}
+              <Reanimated.View entering={ZoomIn.springify()} style={s.contributorTrophy}>
+                <Ionicons name="trophy" size={24} color="#f8d77a" />
+              </Reanimated.View>
             </View>
-          ))}
+            <Text style={s.contributorHeroText}>Points come from useful reports, trail notes, camp updates, confirmations, and contest activity.</Text>
+            <View style={s.periodRow}>
+              {([
+                ['month', 'MONTH'],
+                ['year', 'YEAR'],
+                ['all', 'ALL-TIME'],
+              ] as const).map(([period, label]) => (
+                <TouchableOpacity
+                  key={period}
+                  style={[s.periodBtn, topPeriod === period && s.periodBtnActive]}
+                  onPress={() => setTopPeriod(period)}
+                >
+                  <Text style={[s.periodText, topPeriod === period && s.periodTextActive]}>{label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          {topUsers.length === 0 ? (
+            <View style={s.emptyWrap}>
+              <Ionicons name="trophy-outline" size={42} color={C.text3} />
+              <Text style={s.emptyText}>No contribution points yet</Text>
+              <Text style={s.emptySub}>Useful reports and field updates will rank here.</Text>
+            </View>
+          ) : (
+            <>
+              <View style={s.podiumRow}>
+                {topUsers.slice(0, 3).map((entry, i) => (
+                  <TouchableOpacity
+                    key={`podium-${entry.user_id}`}
+                    style={[s.podiumCard, i === 0 && s.podiumGold]}
+                    onPress={() => openContributor(entry.user_id)}
+                    activeOpacity={0.9}
+                  >
+                    <Text style={s.podiumRank}>#{entry.rank_number}</Text>
+                    <View style={[s.podiumAvatar, { backgroundColor: entry.avatar_color }]}>
+                      <Text style={s.podiumInitial}>{entry.display_name?.[0]?.toUpperCase() ?? '?'}</Text>
+                    </View>
+                    <Text style={s.podiumName} numberOfLines={1}>{entry.display_name}</Text>
+                    <Text style={s.podiumPoints}>{entry.points_for_period.toLocaleString()}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              {topUsers.map((entry, i) => (
+                <Reanimated.View key={entry.user_id} entering={FadeInDown.delay(Math.min(i * 40, 300))}>
+                  <TouchableOpacity
+                    style={[s.leaderRow, i === 0 && s.leaderGold]}
+                    onPress={() => openContributor(entry.user_id)}
+                    activeOpacity={0.88}
+                  >
+                    <Text style={s.leaderRank}>#{entry.rank_number}</Text>
+                    <View style={[s.leaderAvatar, { backgroundColor: entry.avatar_color }]}>
+                      <Text style={s.leaderAvatarText}>{entry.display_name?.[0]?.toUpperCase() ?? '?'}</Text>
+                    </View>
+                    <View style={s.leaderInfo}>
+                      <View style={s.leaderNameRow}>
+                        <Text style={s.leaderName}>{entry.display_name}</Text>
+                        {entry.is_self && <View style={s.youBadge}><Text style={s.youText}>YOU</Text></View>}
+                      </View>
+                      <Text style={s.leaderMeta}>
+                        {entry.title} · {entry.event_count} actions{entry.streak > 1 ? ` · ${entry.streak}d streak` : ''}
+                      </Text>
+                      <View style={s.badgeRow}>
+                        {entry.badges.slice(0, 3).map(b => (
+                          <View key={`${entry.user_id}-${b.id}`} style={s.miniBadge}>
+                            <Text style={s.miniBadgeText}>{b.label}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+                    <View style={s.leaderPointsBox}>
+                      <Text style={s.leaderPoints}>{entry.points_for_period.toLocaleString()}</Text>
+                      <Text style={s.leaderPointsLabel}>PTS</Text>
+                    </View>
+                  </TouchableOpacity>
+                </Reanimated.View>
+              ))}
+            </>
+          )}
         </ScrollView>
       )}
       {/* Report detail modal */}
@@ -556,12 +678,107 @@ export default function ReportScreen() {
           }).catch((e: any) => Alert.alert('Error', e.message))}
         />
       )}
+      {selectedContributor && (
+        <ContributorProfileModal
+          profile={selectedContributor}
+          loading={contributorLoading}
+          onClose={() => setSelectedContributor(null)}
+        />
+      )}
     </SafeAreaView>
   );
 }
 
 async function getToken() {
   return (await storage.get('trailhead_token')) ?? '';
+}
+
+function ContributorProfileModal({ profile, onClose }:
+  { profile: ContributorProfile; loading: boolean; onClose: () => void }) {
+  const C = useTheme();
+  const s = useMemo(() => makeStyles(C), [C]);
+  const badgeIcon = (icon: string) => {
+    const map: Record<string, keyof typeof Ionicons.glyphMap> = {
+      trophy: 'trophy-outline', ribbon: 'ribbon-outline', medal: 'medal-outline',
+      camera: 'camera-outline', map: 'map-outline', radio: 'radio-outline',
+      bonfire: 'bonfire-outline', sparkles: 'sparkles-outline', 'trail-sign': 'trail-sign-outline',
+    };
+    return map[icon] ?? 'ribbon-outline';
+  };
+  return (
+    <Modal visible animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <SafeAreaView style={s.contribModal}>
+        <View style={s.contribHeader}>
+          <TouchableOpacity style={s.contribClose} onPress={onClose}>
+            <Ionicons name="close" size={22} color={C.text} />
+          </TouchableOpacity>
+          <View style={{ flex: 1 }}>
+            <Text style={s.contribKicker}>CONTRIBUTOR PROFILE</Text>
+            <Text style={s.contribHeaderTitle}>{profile.display_name}</Text>
+          </View>
+        </View>
+        <ScrollView contentContainerStyle={s.contribScroll}>
+          <View style={s.contribHeroCard}>
+            <View style={[s.contribAvatar, { backgroundColor: profile.avatar_color }]}>
+              <Text style={s.contribAvatarText}>{profile.display_name?.[0]?.toUpperCase() ?? '?'}</Text>
+            </View>
+            <Text style={s.contribName}>{profile.display_name}</Text>
+            <Text style={s.contribTitle}>{profile.title}</Text>
+            <View style={s.contribStatsGrid}>
+              <View style={s.contribStat}><Text style={s.contribStatValue}>{profile.points.month.toLocaleString()}</Text><Text style={s.contribStatLabel}>MONTH</Text></View>
+              <View style={s.contribStat}><Text style={s.contribStatValue}>{profile.points.year.toLocaleString()}</Text><Text style={s.contribStatLabel}>YEAR</Text></View>
+              <View style={s.contribStat}><Text style={s.contribStatValue}>{profile.points.all.toLocaleString()}</Text><Text style={s.contribStatLabel}>ALL TIME</Text></View>
+            </View>
+            <View style={s.tierBarOuter}><View style={[s.tierBarInner, { width: `${Math.round((profile.tier.progress ?? 0) * 100)}%` }]} /></View>
+            <Text style={s.contribMuted}>
+              {profile.tier.next_label ? `${profile.tier.next_label} at ${profile.tier.next_points?.toLocaleString()} points` : 'Top tier unlocked'}
+            </Text>
+          </View>
+
+          <View style={s.contribSection}>
+            <Text style={s.contribSectionTitle}>Badges</Text>
+            <View style={s.contribBadgeGrid}>
+              {profile.badges.length ? profile.badges.map(badge => (
+                <View key={badge.id} style={s.contribBadge}>
+                  <Ionicons name={badgeIcon(badge.icon)} size={18} color="#f8d77a" />
+                  <Text style={s.contribBadgeTitle}>{badge.label}</Text>
+                  <Text style={s.contribBadgeText}>{badge.description}</Text>
+                </View>
+              )) : <Text style={s.contribMuted}>Badges unlock as contributions grow.</Text>}
+            </View>
+          </View>
+
+          <View style={s.contribSection}>
+            <Text style={s.contribSectionTitle}>Field Impact</Text>
+            {[
+              ['Camp reports', profile.stats.camp_reports],
+              ['Trail reports', profile.stats.trail_reports],
+              ['Photos', profile.stats.photos],
+              ['Confirmations', profile.stats.confirmations],
+            ].map(([label, value]) => (
+              <View key={label} style={s.contribActivityRow}>
+                <Text style={s.contribActivityLabel}>{label}</Text>
+                <Text style={s.contribActivityValue}>{Number(value).toLocaleString()}</Text>
+              </View>
+            ))}
+          </View>
+
+          {profile.awards.length > 0 && (
+            <View style={s.contribSection}>
+              <Text style={s.contribSectionTitle}>Winnings</Text>
+              {profile.awards.map(award => (
+                <View key={award.id} style={s.contribActivityRow}>
+                  <Text style={s.contribActivityLabel}>{award.prize_label}</Text>
+                  <Text style={s.contribActivityValue}>{award.status.toUpperCase()}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+          <Text style={s.contribPrivacy}>Public profiles hide exact report places and private account details.</Text>
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
+  );
 }
 
 function ReportCard({ report: r, onPress, onUpvote, onDownvote, onConfirm, onAdminDelete, onAdminRemovePhoto }:
@@ -813,7 +1030,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 20, paddingVertical: 14,
-    borderBottomWidth: 1, borderColor: 'rgba(255,255,255,0.06)', backgroundColor: 'rgba(5,5,5,0.84)',
+    borderBottomWidth: 1, borderColor: C.border, backgroundColor: C.glassStrong,
   },
   title: { color: C.text, fontSize: 15, fontWeight: '800', fontFamily: mono, letterSpacing: 0.5 },
   subtitle: { color: C.text3, fontSize: 11, marginTop: 2 },
@@ -829,21 +1046,45 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   successIcon: { fontSize: 28, color: C.green },
   successTitle: { color: C.green, fontSize: 13, fontWeight: '800', fontFamily: mono },
   successSub: { color: C.green, fontSize: 11, marginTop: 2 },
-  tabs: { flexDirection: 'row', borderBottomWidth: 1, borderColor: 'rgba(255,255,255,0.06)', backgroundColor: 'rgba(5,5,5,0.74)' },
+  tabs: { flexDirection: 'row', borderBottomWidth: 1, borderColor: C.border, backgroundColor: C.glass },
   tab: { flex: 1, paddingVertical: 12, alignItems: 'center', borderBottomWidth: 2, borderBottomColor: 'transparent' },
   tabActive: { borderBottomColor: C.orange },
   tabText: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '700', letterSpacing: 0.5 },
   tabTextActive: { color: C.orange },
-  scroll: { padding: 16, gap: 12, paddingBottom: 104 },
+  scroll: { padding: 16, gap: 12, paddingBottom: 112 },
+  reportHero: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 18,
+    backgroundColor: C.s2,
+    padding: 14,
+  },
+  reportHeroIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: C.orange + '44',
+    backgroundColor: C.orange + '12',
+  },
+  reportHeroTitle: { color: C.text, fontSize: 18, lineHeight: 22, fontWeight: '900' },
+  reportHeroText: { color: C.text3, fontSize: 12, lineHeight: 17, marginTop: 3 },
   sectionLabel: { color: C.text3, fontSize: 10, fontFamily: mono, letterSpacing: 1, marginBottom: 8 },
   typeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
   typeBtn: {
     backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 18, padding: 9, alignItems: 'center', gap: 5, minHeight: 92,
+    borderRadius: 16, padding: 10, alignItems: 'flex-start', gap: 7, minHeight: 108,
+    overflow: 'hidden',
   },
-  typeIconWrap: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.055)' },
-  typeLabel: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '700', letterSpacing: 0.3 },
-  typeTtl: { color: C.border, fontSize: 8, fontFamily: mono },
+  typeAccent: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, opacity: 0.82 },
+  typeIconWrap: { width: 38, height: 38, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.055)' },
+  typeLabel: { color: C.text2, fontSize: 10, fontFamily: mono, fontWeight: '900' },
+  typeTtl: { color: C.text3, fontSize: 8, fontFamily: mono },
   chipRow: { gap: 8, paddingBottom: 4, marginBottom: 16 },
   chip: {
     paddingHorizontal: 12, paddingVertical: 7,
@@ -881,11 +1122,11 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   earnText: { color: C.orange, fontSize: 12, fontFamily: mono },
   submitBtn: {
-    backgroundColor: C.silverBright, borderRadius: 16, padding: 16, alignItems: 'center',
-    shadowColor: '#fff', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.16, shadowRadius: 18,
+    backgroundColor: C.bg === '#050505' ? C.silverBright : C.orange, borderRadius: 16, padding: 16, alignItems: 'center',
+    shadowColor: C.orange, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.16, shadowRadius: 18,
   },
   submitBtnDisabled: { backgroundColor: C.s3, shadowOpacity: 0 },
-  submitBtnText: { color: '#050505', fontWeight: '900', fontSize: 12, fontFamily: mono, letterSpacing: 0.8 },
+  submitBtnText: { color: C.bg === '#050505' ? '#050505' : '#fff', fontWeight: '900', fontSize: 12, fontFamily: mono, letterSpacing: 0.8 },
   // Driving safety
   drivingOverlay: {
     flex: 1, backgroundColor: 'rgba(0,0,0,0.85)',
@@ -902,11 +1143,11 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   drivingBody: { color: C.text2, fontSize: 13.5, lineHeight: 20, textAlign: 'center' },
   drivingParkedBtn: {
-    backgroundColor: C.silverBright, borderRadius: 16, padding: 15,
+    backgroundColor: C.bg === '#050505' ? C.silverBright : C.orange, borderRadius: 16, padding: 15,
     width: '100%', alignItems: 'center', marginTop: 6,
     shadowColor: C.orange, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.35, shadowRadius: 8,
   },
-  drivingParkedText: { color: '#050505', fontWeight: '900', fontSize: 12, fontFamily: mono },
+  drivingParkedText: { color: C.bg === '#050505' ? '#050505' : '#fff', fontWeight: '900', fontSize: 12, fontFamily: mono },
   drivingPassengerBtn: {
     borderWidth: 1, borderColor: C.border, borderRadius: 12, padding: 13,
     width: '100%', alignItems: 'center',
@@ -915,26 +1156,95 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
 
   safetyBanner: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 14, padding: 9, marginBottom: 4,
+    backgroundColor: C.orange + '0c', borderRadius: 14, padding: 10, marginBottom: 4,
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
   },
-  safetyText: { color: C.text3, fontSize: 11, fontFamily: mono },
+  safetyText: { color: C.text2, fontSize: 11, fontFamily: mono, flex: 1 },
   starRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 16 },
   star: { color: C.border, fontSize: 32 },
   starActive: { color: '#f59e0b' },
   starReset: { color: C.text3, fontSize: 9, fontFamily: mono, marginLeft: 4 },
 
-  emptyWrap: { alignItems: 'center', marginTop: 60, gap: 8 },
+  nearbyHero: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 18,
+    backgroundColor: C.s2,
+    padding: 14,
+  },
+  nearbyKicker: { color: C.orange, fontSize: 8, fontFamily: mono, fontWeight: '900' },
+  nearbyTitle: { color: C.text, fontSize: 19, lineHeight: 23, fontWeight: '900', marginTop: 3 },
+  nearbyCount: {
+    minWidth: 62,
+    minHeight: 54,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: C.orange + '44',
+    borderRadius: 16,
+    backgroundColor: C.orange + '10',
+  },
+  nearbyCountNum: { color: C.orange, fontSize: 21, fontFamily: mono, fontWeight: '900' },
+  nearbyCountLabel: { color: C.text3, fontSize: 7, fontFamily: mono, fontWeight: '900', marginTop: 1 },
+  emptyWrap: {
+    alignItems: 'center',
+    marginTop: 34,
+    gap: 9,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 20,
+    backgroundColor: C.s1,
+    padding: 22,
+  },
+  emptyIconWrap: {
+    width: 58,
+    height: 58,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.s2,
+  },
   emptyIcon: { fontSize: 40 },
   emptyText: { color: C.text2, fontSize: 15, fontWeight: '600' },
-  emptySub: { color: C.text3, fontSize: 12 },
+  emptySub: { color: C.text3, fontSize: 12, lineHeight: 18, textAlign: 'center', maxWidth: 310 },
+  emptyAction: {
+    minHeight: 38,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: C.orange + '44',
+    borderRadius: 999,
+    backgroundColor: C.orange + '10',
+    paddingHorizontal: 13,
+    marginTop: 4,
+  },
+  emptyActionText: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900' },
   // Alert settings button
   notifSettingsBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
+    flexDirection: 'row', alignItems: 'center', gap: 10,
     backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 4,
+    borderRadius: 16, paddingHorizontal: 12, paddingVertical: 11, marginBottom: 4,
   },
-  notifSettingsBtnText: { color: C.text3, fontSize: 11, fontFamily: mono },
+  notifSettingsIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.orange + '10',
+    borderWidth: 1,
+    borderColor: C.orange + '33',
+  },
+  notifSettingsBtnText: { color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '900' },
+  notifSettingsSub: { color: C.text3, fontSize: 10.5, lineHeight: 14, marginTop: 2 },
   // Notification settings modal
   notifOverlay: {
     flex: 1, backgroundColor: 'rgba(0,0,0,0.7)',
@@ -954,19 +1264,74 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   notifDot: { width: 6, height: 6, borderRadius: 3 },
   notifLabel: { color: C.text, fontSize: 13, fontFamily: mono, fontWeight: '600' },
   notifNote: { color: C.text3, fontSize: 11, lineHeight: 16, marginTop: 4 },
+  contributorHero: { backgroundColor: C.s2, borderRadius: 24, borderWidth: 1, borderColor: '#d4af3744', padding: 16, gap: 12, overflow: 'hidden' },
+  contributorHeroTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  contributorTitle: { color: C.text, fontSize: 28, fontWeight: '900', letterSpacing: 0 },
+  contributorHeroText: { color: C.text3, fontSize: 12.5, lineHeight: 18 },
+  contributorTrophy: { width: 52, height: 52, borderRadius: 18, backgroundColor: '#d4af3720', borderWidth: 1, borderColor: '#d4af3766', alignItems: 'center', justifyContent: 'center' },
+  periodRow: { flexDirection: 'row', gap: 8 },
+  periodBtn: { flex: 1, borderRadius: 999, borderWidth: 1, borderColor: C.border, backgroundColor: C.s3, paddingVertical: 9, alignItems: 'center' },
+  periodBtnActive: { backgroundColor: C.orangeGlow, borderColor: C.orange },
+  periodText: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
+  periodTextActive: { color: C.orange },
+  podiumRow: { flexDirection: 'row', gap: 8, alignItems: 'stretch' },
+  podiumCard: { flex: 1, backgroundColor: C.s2, borderWidth: 1, borderColor: C.border, borderRadius: 18, padding: 10, alignItems: 'center', gap: 6, minHeight: 142 },
+  podiumGold: { borderColor: '#d4af37', backgroundColor: '#d4af3711' },
+  podiumRank: { color: '#d4af37', fontSize: 13, fontFamily: mono, fontWeight: '900' },
+  podiumAvatar: { width: 42, height: 42, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  podiumInitial: { color: '#fff', fontSize: 17, fontWeight: '900' },
+  podiumName: { color: C.text, fontSize: 12, fontWeight: '800', textAlign: 'center', width: '100%' },
+  podiumPoints: { color: C.text3, fontSize: 11, fontFamily: mono, fontWeight: '800' },
   leaderRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 14,
-    backgroundColor: 'rgba(255,255,255,0.052)', borderRadius: 18, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
-    padding: 14, marginBottom: 8,
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: C.s2, borderRadius: 18, borderWidth: 1, borderColor: C.border,
+    padding: 12, marginBottom: 8,
   },
-  leaderGold: { borderColor: '#f59e0b', backgroundColor: '#f59e0b0a' },
-  leaderRank: { fontSize: 20, width: 32, textAlign: 'center' },
+  leaderGold: { borderColor: '#d4af37', backgroundColor: '#d4af3710' },
+  leaderRank: { color: '#d4af37', fontSize: 13, width: 34, textAlign: 'center', fontFamily: mono, fontWeight: '900' },
+  leaderAvatar: { width: 42, height: 42, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  leaderAvatarText: { color: '#fff', fontSize: 16, fontWeight: '900' },
   leaderInfo: { flex: 1 },
-  leaderName: { color: C.text, fontWeight: '700', fontSize: 14 },
+  leaderNameRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  leaderName: { color: C.text, fontWeight: '900', fontSize: 14 },
   leaderMeta: { color: C.text3, fontSize: 11, fontFamily: mono, marginTop: 2 },
+  badgeRow: { flexDirection: 'row', gap: 5, flexWrap: 'wrap', marginTop: 7 },
+  miniBadge: { borderRadius: 999, backgroundColor: '#d4af3718', borderWidth: 1, borderColor: '#d4af3738', paddingHorizontal: 7, paddingVertical: 3 },
+  miniBadgeText: { color: '#d4af37', fontSize: 8, fontFamily: mono, fontWeight: '900' },
+  leaderPointsBox: { alignItems: 'flex-end', minWidth: 58 },
+  leaderPoints: { color: C.text, fontSize: 15, fontFamily: mono, fontWeight: '900' },
+  leaderPointsLabel: { color: C.text3, fontSize: 8, fontFamily: mono, fontWeight: '900' },
   youBadge: {
     backgroundColor: C.orangeGlow, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3,
     borderWidth: 1, borderColor: C.orange,
   },
   youText: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '700' },
+  contribModal: { flex: 1, backgroundColor: C.bg },
+  contribHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, backgroundColor: C.s2, borderBottomWidth: 1, borderBottomColor: C.border },
+  contribClose: { width: 38, height: 38, borderRadius: 14, backgroundColor: C.s3, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center' },
+  contribKicker: { color: '#d4af37', fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1.2 },
+  contribHeaderTitle: { color: C.text, fontSize: 22, fontWeight: '900', letterSpacing: 0 },
+  contribScroll: { padding: 16, gap: 14, paddingBottom: 44 },
+  contribHeroCard: { backgroundColor: C.s2, borderRadius: 24, borderWidth: 1, borderColor: '#d4af3744', padding: 18, alignItems: 'center', gap: 10 },
+  contribAvatar: { width: 78, height: 78, borderRadius: 26, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#ffffff44' },
+  contribAvatarText: { color: '#fff', fontSize: 34, fontWeight: '900' },
+  contribName: { color: C.text, fontSize: 24, fontWeight: '900', letterSpacing: 0 },
+  contribTitle: { color: '#d4af37', fontSize: 12, fontFamily: mono, fontWeight: '900' },
+  contribStatsGrid: { flexDirection: 'row', gap: 8, width: '100%' },
+  contribStat: { flex: 1, borderRadius: 16, backgroundColor: C.s3, borderWidth: 1, borderColor: C.border, padding: 10, alignItems: 'center' },
+  contribStatValue: { color: C.text, fontSize: 17, fontFamily: mono, fontWeight: '900' },
+  contribStatLabel: { color: C.text3, fontSize: 8, fontFamily: mono, marginTop: 3 },
+  tierBarOuter: { width: '100%', height: 8, borderRadius: 999, backgroundColor: C.s3, overflow: 'hidden', borderWidth: 1, borderColor: C.border },
+  tierBarInner: { height: '100%', backgroundColor: '#d4af37', borderRadius: 999 },
+  contribMuted: { color: C.text3, fontSize: 12, lineHeight: 18 },
+  contribSection: { backgroundColor: C.s2, borderRadius: 20, borderWidth: 1, borderColor: C.border, padding: 14, gap: 10 },
+  contribSectionTitle: { color: C.text, fontSize: 16, fontWeight: '900' },
+  contribBadgeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  contribBadge: { width: '48%', minHeight: 104, borderRadius: 16, backgroundColor: C.s3, borderWidth: 1, borderColor: '#d4af3738', padding: 10, gap: 5 },
+  contribBadgeTitle: { color: C.text, fontSize: 12, fontWeight: '900' },
+  contribBadgeText: { color: C.text3, fontSize: 10.5, lineHeight: 14 },
+  contribActivityRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: C.border },
+  contribActivityLabel: { color: C.text2, fontSize: 13, flex: 1 },
+  contribActivityValue: { color: C.text, fontSize: 13, fontFamily: mono, fontWeight: '900' },
+  contribPrivacy: { color: C.text3, fontSize: 11, lineHeight: 16, textAlign: 'center', paddingHorizontal: 12 },
 });

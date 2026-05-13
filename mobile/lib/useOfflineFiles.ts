@@ -972,19 +972,22 @@ export function useOfflineFiles() {
     const routeExpected = trailRouteGraphManifestSizes[id] ?? 0;
     const totalExpected = pmtilesBytes + graphExpected + routeExpected;
 
-    await downloadTrailSidecar(
-      id,
-      `${BASE}/api/trail-packs/${id}.graph.json`,
-      trailGraphLocalPath(id),
-      'Downloading trail selection graph...',
-      pmtilesBytes,
-      graphExpected,
-      totalExpected,
-    );
-    const graphInfo = await FileSystem.getInfoAsync(trailGraphLocalPath(id)).catch(() => null);
-    const graphActual = (graphInfo as any)?.size ?? 0;
-    if (!graphInfo?.exists || (graphExpected && graphActual < graphExpected * 0.99)) {
-      throw new Error('Selection graph download was incomplete');
+    let graphActual = 0;
+    if (graphExpected) {
+      await downloadTrailSidecar(
+        id,
+        `${BASE}/api/trail-packs/${id}.graph.json`,
+        trailGraphLocalPath(id),
+        'Downloading trail selection graph...',
+        pmtilesBytes,
+        graphExpected,
+        totalExpected,
+      );
+      const graphInfo = await FileSystem.getInfoAsync(trailGraphLocalPath(id)).catch(() => null);
+      graphActual = (graphInfo as any)?.size ?? 0;
+      if (!graphInfo?.exists || graphActual < graphExpected * 0.99) {
+        throw new Error('Selection graph download was incomplete');
+      }
     }
 
     if (trailRouteGraphManifestSizes[id]) {
@@ -1003,7 +1006,11 @@ export function useOfflineFiles() {
       if (!info?.exists || actual < expected * 0.99) {
         throw new Error('Routing graph download was incomplete');
       }
-      updateTrailState(id, { details: 'Trail overlay, selection graph, and routing graph downloaded' });
+      updateTrailState(id, {
+        details: graphExpected
+          ? 'Trail overlay, selection graph, and routing graph downloaded'
+          : 'Trail overlay and routing graph downloaded',
+      });
     } else {
       updateTrailState(id, { details: 'Trail overlay and selection graph downloaded; routing graph not published yet' });
     }
@@ -1024,7 +1031,7 @@ export function useOfflineFiles() {
         const pmtilesExpected = trailManifestSizes[id];
         const graphExpected = trailSelectionGraphManifestSizes[id];
         const routeExpected = trailRouteGraphManifestSizes[id];
-        if (!pmtilesExpected || !graphExpected || !routeExpected) continue;
+        if (!pmtilesExpected || !routeExpected) continue;
 
         const pmtilesInfo = await FileSystem.getInfoAsync(region.localPath).catch(() => null);
         if (!pmtilesInfo?.exists) continue;
@@ -1033,7 +1040,7 @@ export function useOfflineFiles() {
 
         const graphInfo = await FileSystem.getInfoAsync(trailGraphLocalPath(id)).catch(() => null);
         const routeInfo = await FileSystem.getInfoAsync(trailRouteGraphLocalPath(id)).catch(() => null);
-        const graphOk = graphInfo?.exists && ((graphInfo as any).size ?? 0) >= graphExpected * 0.99;
+        const graphOk = !graphExpected || (graphInfo?.exists && ((graphInfo as any).size ?? 0) >= graphExpected * 0.99);
         const routeOk = routeInfo?.exists && ((routeInfo as any).size ?? 0) >= routeExpected * 0.99;
 
         if (graphOk && routeOk) {
@@ -1044,7 +1051,9 @@ export function useOfflineFiles() {
               progress: 100,
               fileSizeMb: sizeMb,
               error: undefined,
-              details: 'Trail overlay, selection graph, and routing graph downloaded',
+              details: graphExpected
+                ? 'Trail overlay, selection graph, and routing graph downloaded'
+                : 'Trail overlay and routing graph downloaded',
             });
           }
           continue;

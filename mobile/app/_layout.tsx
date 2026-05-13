@@ -8,10 +8,10 @@ import * as Notifications from 'expo-notifications';
 import * as Updates from 'expo-updates';
 import { useStore } from '@/lib/store';
 import { api } from '@/lib/api';
-import { PRODUCT_IDS } from '@/lib/useSubscription';
 import { useTheme, mono } from '@/lib/design';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function RootLayout() {
   const setAuth            = useStore(s => s.setAuth);
@@ -22,6 +22,7 @@ export default function RootLayout() {
   const user         = useStore(s => s.user);
   const router       = useRouter();
   const C            = useTheme();
+  const insets       = useSafeAreaInsets();
   const [updateBanner, setUpdateBanner] = useState(false);
   const updateReady  = useRef(false);
   const checking     = useRef(false);
@@ -74,6 +75,23 @@ export default function RootLayout() {
     }
   }
 
+  async function refreshSubscriptionStatus() {
+    const token = await storage.get('trailhead_token').catch(() => null);
+    if (!token) {
+      setPlan(false, null);
+      return;
+    }
+    const sub = await api.subscriptionStatus().catch(() => null);
+    if (!sub) return;
+    if (sub.is_active) {
+      setPlan(true, sub.plan_expires_at ?? null);
+      storage.del('trailhead_iap_pending').catch(() => {});
+    } else {
+      setPlan(false, null);
+      storage.del('trailhead_iap_pending').catch(() => {});
+    }
+  }
+
   function applyUpdate() {
     setUpdateBanner(false);
     Updates.reloadAsync().catch(() => {});
@@ -89,6 +107,7 @@ export default function RootLayout() {
       // On every foreground: apply if ready, otherwise re-check for new deploys
       appStateSub = AppState.addEventListener('change', state => {
         if (state === 'active') {
+          refreshSubscriptionStatus();
           if (updateReady.current) {
             // Update was downloaded while app was backgrounded — apply now
             Updates.reloadAsync().catch(() => {});
@@ -107,25 +126,7 @@ export default function RootLayout() {
         storage.set('trailhead_user', JSON.stringify(user)).catch(() => {});
         setAuth(token, user);
         restoreActiveTrip(); // setAuth clears activeTrip; restore from file
-        const sub = await api.subscriptionStatus().catch(() => null);
-        if (sub?.is_active) {
-          setPlan(true, sub.plan_expires_at ?? null);
-          storage.del('trailhead_iap_pending').catch(() => {});
-        } else {
-          const pendingRaw = await storage.get('trailhead_iap_pending').catch(() => null);
-          if (pendingRaw) {
-            try {
-              const pending = JSON.parse(pendingRaw);
-              if (pending?.productId && pending?.transactionId) {
-                const activated = await api.activateSubscription(pending.productId, pending.transactionId).catch(() => null);
-                if (activated?.status && activated.status !== 'error') {
-                  setPlan(true, activated.plan_expires_at ?? null);
-                  storage.del('trailhead_iap_pending').catch(() => {});
-                }
-              }
-            } catch {}
-          }
-        }
+        await refreshSubscriptionStatus();
       } catch (e: any) {
         const isNetworkError = !e?.message || e.message.includes('Network') || e.message.includes('fetch') || e instanceof TypeError;
         if (isNetworkError) {
@@ -203,7 +204,7 @@ export default function RootLayout() {
       <Stack screenOptions={{ headerShown: false }} />
       {updateBanner && (
         <View style={{
-          position: 'absolute', bottom: 90, left: 16, right: 16, zIndex: 9999,
+          position: 'absolute', bottom: 90 + Math.max(insets.bottom, 0), left: 16, right: 16, zIndex: 9999,
           backgroundColor: '#1a2e1a', borderRadius: 12, borderWidth: 1, borderColor: '#22c55e',
           flexDirection: 'row', alignItems: 'center', padding: 14, gap: 12,
         }}>

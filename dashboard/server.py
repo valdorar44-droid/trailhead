@@ -1,6 +1,7 @@
 """Trailhead FastAPI server. All API routes."""
 from __future__ import annotations
 import asyncio, os, json, uuid, secrets, xml.etree.ElementTree as ET, time, hashlib, re, sqlite3, smtplib, html
+from datetime import datetime, timezone
 from email.message import EmailMessage
 from email.utils import formataddr
 from pathlib import Path
@@ -19,10 +20,10 @@ from config.settings import settings
 from ai.planner import plan_trip, chat_guide, edit_trip, plan_trip_from_conversation
 from dashboard.route_enrichment import enrich_trip_along_route
 from ingestors.ridb import get_campsites_near, get_campsites_search, get_facility_detail
-from ingestors.osm import get_osm_campsites, get_osm_campsite_detail, get_water_sources, get_trailheads, get_viewpoints, get_peaks, get_hot_springs, get_fuel_stations
+from ingestors.osm import get_osm_campsites, get_osm_campsite_detail, get_water_sources, get_trailheads, get_trails, get_viewpoints, get_peaks, get_hot_springs, get_fuel_stations
 from ingestors.blm import get_blm_campsites, get_blm_campsite_detail
 from db.store import (
-    save_trip, get_trip, add_community_pin, get_community_pins,
+    save_trip, get_trip, add_community_pin, get_community_pins, find_duplicate_community_pin,
     save_audio_guide, get_audio_guide, get_cached, set_cached, get_route_cached, set_route_cached,
     create_user, get_user_by_email, get_user_by_username, get_user_by_id, get_user_by_referral_code,
     set_email_verification, verify_email_token, set_password_reset, reset_password_with_token,
@@ -45,9 +46,22 @@ from db.store import (
     save_push_token, get_push_token,
     create_plan_job, get_plan_job, update_plan_job,
     submit_field_report, get_field_reports, get_field_report_summary,
+    submit_trail_field_report, get_trail_field_reports, get_trail_field_report_summary,
+    upsert_trail_profile, get_trail_profile, list_trail_profiles_near,
+    add_trail_edit_suggestion, get_trail_edit_suggestions,
+    update_trail_edit_suggestion_status, set_trail_profile_admin_update,
     get_camp_profile_override, set_camp_profile_override, add_camp_edit_suggestion,
     get_camp_edit_suggestions, update_camp_edit_suggestion_status,
-    get_user_pin_count_today, vote_community_pin,
+    get_explore_story_override, get_explore_story_overrides, set_explore_story_override,
+    get_user_pin_count_today, vote_community_pin, add_pin_update_suggestion,
+    get_pin_update_suggestions, update_pin_update_suggestion_status, set_user_plan,
+    save_app_store_subscription, get_app_store_subscription,
+    add_contest_points, ensure_contest_entry, get_contest_user_status, get_contest_leaderboard,
+    get_contest_admin_overview, snapshot_contest_award, run_contest_drawing,
+    update_contest_award_status, backfill_contest_events_from_credits,
+    get_contributor_profile, get_contributor_leaderboard, set_contributor_visibility,
+    submit_map_contributor_application, get_map_contributor_applications,
+    update_map_contributor_application_status,
 )
 
 # ── Credit economy ─────────────────────────────────────────────────────────────
@@ -58,17 +72,19 @@ AI_COSTS = {
     "campsite_insight": 5,
     "route_brief":      8,
     "packing_list":     5,
-    "audio_guide":      8,
-    "nearby_audio":     3,
+    "audio_guide":      10,
+    "nearby_audio":     5,
+    "explore_audio_summary": 5,
+    "explore_audio_story": 10,
 }
 
 OFFLINE_DOWNLOAD_COSTS = {
     "state_map": 0,
-    "state_route": 10,
-    "state_contours": 5,
-    "state_trails": 5,
-    "trip_corridor": 8,
-    "conus_map": 100,
+    "state_route": 0,
+    "state_contours": 0,
+    "state_trails": 0,
+    "trip_corridor": 0,
+    "conus_map": 0,
 }
 
 # Soft daily caps for plan subscribers (unlimited plan, but abuse protection)
@@ -145,6 +161,67 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 DASH    = Path(__file__).parent / "dashboard.html"
 LANDING = Path(__file__).parent / "landing.html"
 ADMIN   = Path(__file__).parent / "admin.html"
+EXPLORE_CATALOG = Path(__file__).parent / "explore_catalog_v1.json"
+
+
+def _haversine_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    from math import asin, cos, radians, sin, sqrt
+    r = 6371000.0
+    dlat = radians(lat2 - lat1)
+    dlng = radians(lng2 - lng1)
+    a = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlng / 2) ** 2
+    return 2 * r * asin(sqrt(a))
+
+
+def _load_explore_catalog() -> dict:
+    if EXPLORE_CATALOG.exists():
+        try:
+            catalog = json.loads(EXPLORE_CATALOG.read_text())
+            return _apply_explore_story_overrides(catalog)
+        except Exception:
+            pass
+    return _apply_explore_story_overrides({
+        "schema_version": 1,
+        "catalog_id": "explore-us-top-v1",
+        "name": "Trailhead Featured Explore",
+        "generated_at": 0,
+        "source": "Fallback catalog",
+        "future_pack_compatible": True,
+        "places": [],
+    })
+
+def _apply_explore_story_overrides(catalog: dict) -> dict:
+    overrides = get_explore_story_overrides()
+    if not overrides:
+        return catalog
+    places = []
+    for place in catalog.get("places") or []:
+        override = overrides.get(str(place.get("id") or ""))
+        if not override:
+            places.append(place)
+            continue
+        enriched = dict(place)
+        summary = dict(enriched.get("summary") or {})
+        profile = dict(enriched.get("profile") or {})
+        if override.get("title"):
+            summary["title"] = override["title"]
+        if override.get("hook"):
+            summary["hook"] = override["hook"]
+            profile["hook"] = override["hook"]
+        if override.get("summary"):
+            summary["short_description"] = override["summary"]
+            profile["summary"] = override["summary"]
+        if override.get("story"):
+            profile["story"] = override["story"]
+            enriched["audio_script"] = override["story"]
+        enriched["summary"] = summary
+        enriched["profile"] = profile
+        enriched["admin_story"] = {
+            "edited": True,
+            "updated_at": override.get("updated_at"),
+        }
+        places.append(enriched)
+    return {**catalog, "places": places}
 def _hash_pw(password: str) -> str:
     return _bcrypt_lib.hashpw(password[:72].encode(), _bcrypt_lib.gensalt()).decode()
 
@@ -362,6 +439,15 @@ def _check_credits(user: dict, cost: int, reason: str) -> None:
         return  # unlimited for admin
     if not deduct_credits(user["id"], cost, reason):
         raise HTTPException(402, f"Not enough credits. This action costs {cost} credits.")
+
+
+def _paywall_detail(code: str, message: str, credits_needed: int) -> dict:
+    return {
+        "code": code,
+        "message": message,
+        "credits_needed": credits_needed,
+        "earn_hint": True,
+    }
 
 
 # ── Core ──────────────────────────────────────────────────────────────────────
@@ -658,6 +744,26 @@ class ChatRequest(BaseModel):
     rig_context: Optional[dict] = None  # mobile passes rig profile to seed trail_dna
 
 
+def _trip_edit_clarification(message: str) -> Optional[str]:
+    """Catch vague edit-mode requests before the planner rewrites a whole route."""
+    text = (message or "").strip().lower()
+    if not text:
+        return None
+    specific_day = bool(re.search(r"\bday\s*\d+\b", text))
+    has_action = bool(re.search(r"\b(add|remove|delete|swap|replace|avoid|reroute|change|shorten|extend|move|insert|navigate|trail|camp|fuel|gas|monument|poi|viewpoint|hike|hot spring|waterfall)\b", text))
+    has_place_signal = bool(re.search(r"\b(to|from|near|around|through|between|at)\s+[a-z0-9]", text))
+    affirmative_build = bool(re.search(r"\b(build|do it|go ahead|yes|sounds good|send it)\b", text))
+    vague_quality = bool(re.search(r"\b(better|cooler|fun|wild|chill|fix|improve|polish|interesting|scenic|less boring|more)\b", text))
+
+    if affirmative_build or (has_action and (specific_day or has_place_signal)):
+        return None
+    if vague_quality or len(text.split()) <= 6:
+        return (
+            "I can tune this route before rebuilding it. What should I optimize for: easier driving, wilder roads, better camps, trails/hikes, monuments/viewpoints, or fuel/resupply?"
+        )
+    return None
+
+
 def _ai_conversation_key(session_id: str, user: dict | None) -> str:
     """Privacy boundary for AI chat threads.
 
@@ -745,6 +851,12 @@ async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depend
     # ── Edit mode: active trip exists ──────────────────────────────────────────
     if body.current_trip:
         import anthropic as _anthropic
+        clarification = _trip_edit_clarification(body.message)
+        if clarification:
+            messages.append({"role": "user", "content": body.message})
+            messages.append({"role": "assistant", "content": clarification})
+            save_conversation(conversation_key, messages[-30:])
+            return {"type": "message", "content": clarification, "trail_dna": trail_dna}
         try:
             result = edit_trip(body.current_trip, body.message)
         except _anthropic.RateLimitError:
@@ -1080,7 +1192,15 @@ async def trip_guide(trip_id: str, generate: bool = False, user: dict = Depends(
         raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
 
     cost = AI_COSTS["audio_guide"]
-    _check_credits(user, cost, f"Audio guide — {trip_id}")
+    charged_audio_guide = False
+    if not user.get("is_admin") and not has_active_plan(user):
+        if not deduct_credits(user["id"], cost, f"Audio guide — {trip_id}"):
+            raise HTTPException(402, detail=_paywall_detail(
+                "audio_guide",
+                f"Trip audio guide generation costs {cost} credits, or is included with Explorer.",
+                cost,
+            ))
+        charged_audio_guide = True
 
     from ai.planner import generate_audio_guide
     waypoints = trip.get("plan", {}).get("waypoints", [])
@@ -1089,7 +1209,8 @@ async def trip_guide(trip_id: str, generate: bool = False, user: dict = Depends(
     try:
         guide = generate_audio_guide(waypoints, trip_name)
     except Exception as e:
-        add_credits(user["id"], cost, "Refund — audio guide error")
+        if charged_audio_guide:
+            add_credits(user["id"], cost, "Refund — audio guide error")
         raise HTTPException(500, f"Guide generation failed: {e}")
 
     save_audio_guide(trip_id, guide)
@@ -1170,8 +1291,246 @@ async def weather_forecast(lat: float, lng: float, days: int = 7):
 
 # ── Audio guide ────────────────────────────────────────────────────────────────
 
+ELEVENLABS_DIRECTION_MODEL = "eleven_flash_v2_5"
+ELEVENLABS_GUIDE_MODEL = "eleven_multilingual_v2"
+AUDIO_CACHE_VERSION = "v1"
+
+def _tts_mode(mode: str) -> str:
+    return "guide" if mode == "guide" else "direction"
+
+def _tts_model_id(mode: str) -> str:
+    return ELEVENLABS_DIRECTION_MODEL if mode == "direction" else ELEVENLABS_GUIDE_MODEL
+
+def _tts_voice_settings(mode: str) -> dict:
+    return {
+        "stability": 0.42 if mode == "guide" else 0.58,
+        "similarity_boost": 0.78,
+        "style": 0.45 if mode == "guide" else 0.12,
+        "use_speaker_boost": True,
+    }
+
+def _normalize_tts_text(text: str, mode: str) -> str:
+    clean = " ".join((text or "").split())
+    if not clean:
+        raise HTTPException(400, "Text is required")
+    limit = 280 if mode == "direction" else 10000
+    return clean[:limit]
+
+def _audio_cache_digest(text: str, mode: str) -> str:
+    payload = {
+        "version": AUDIO_CACHE_VERSION,
+        "mode": mode,
+        "voice_id": settings.elevenlabs_voice_id,
+        "model_id": _tts_model_id(mode),
+        "voice_settings": _tts_voice_settings(mode),
+        "text": text,
+    }
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+def _audio_cache_key(digest: str, mode: str) -> str:
+    prefix = (settings.audio_cache_r2_prefix or "audio-cache").strip("/").strip()
+    return f"{prefix}/{AUDIO_CACHE_VERSION}/{mode}/{digest}.mp3"
+
+def _audio_cache_path(digest: str, mode: str) -> Path:
+    return Path(settings.audio_cache_dir) / AUDIO_CACHE_VERSION / mode / f"{digest}.mp3"
+
+def _audio_cache_headers(text: str, mode: str, cache_status: str) -> dict[str, str]:
+    digest = _audio_cache_digest(text, mode)[:24]
+    max_age = "2592000" if mode == "guide" else "300"
+    return {
+        "Cache-Control": f"private, max-age={max_age}",
+        "ETag": f'"tts-{digest}"',
+        "X-Trailhead-Voice": "elevenlabs",
+        "X-Trailhead-Audio-Cache": cache_status,
+    }
+
+def _r2_audio_client():
+    if not (settings.r2_account_id and settings.r2_access_key_id and settings.r2_secret_access_key and settings.r2_bucket):
+        return None
+    try:
+        import boto3
+        from botocore.config import Config
+        return boto3.client(
+            "s3",
+            endpoint_url=f"https://{settings.r2_account_id}.r2.cloudflarestorage.com",
+            aws_access_key_id=settings.r2_access_key_id,
+            aws_secret_access_key=settings.r2_secret_access_key,
+            config=Config(signature_version="s3v4"),
+            region_name="auto",
+        )
+    except Exception as exc:
+        try:
+            log_event(None, None, "audio_cache_r2_unavailable", {"details": f"{type(exc).__name__}: {exc}"})
+        except Exception:
+            pass
+        return None
+
+async def _read_audio_cache(digest: str, mode: str) -> bytes | None:
+    if mode != "guide":
+        return None
+    r2 = _r2_audio_client()
+    key = _audio_cache_key(digest, mode)
+    if r2 is not None:
+        try:
+            obj = await asyncio.to_thread(r2.get_object, Bucket=settings.r2_bucket, Key=key)
+            return await asyncio.to_thread(obj["Body"].read)
+        except Exception:
+            pass
+    path = _audio_cache_path(digest, mode)
+    if path.exists():
+        try:
+            return await asyncio.to_thread(path.read_bytes)
+        except Exception:
+            return None
+    return None
+
+async def _write_audio_cache(digest: str, mode: str, audio: bytes) -> None:
+    if mode != "guide" or not audio:
+        return
+    r2 = _r2_audio_client()
+    key = _audio_cache_key(digest, mode)
+    if r2 is not None:
+        try:
+            await asyncio.to_thread(
+                r2.put_object,
+                Bucket=settings.r2_bucket,
+                Key=key,
+                Body=audio,
+                ContentType="audio/mpeg",
+                CacheControl="private, max-age=2592000",
+                Metadata={"trailhead-cache-version": AUDIO_CACHE_VERSION, "mode": mode},
+            )
+            return
+        except Exception as exc:
+            try:
+                log_event(None, None, "audio_cache_r2_write_failed", {"details": f"{type(exc).__name__}: {exc}"})
+            except Exception:
+                pass
+    try:
+        path = _audio_cache_path(digest, mode)
+        await asyncio.to_thread(path.parent.mkdir, parents=True, exist_ok=True)
+        await asyncio.to_thread(path.write_bytes, audio)
+    except Exception as exc:
+        try:
+            log_event(None, None, "audio_cache_local_write_failed", {"details": f"{type(exc).__name__}: {exc}"})
+        except Exception:
+            pass
+
+async def _delete_audio_cache(digest: str, mode: str) -> None:
+    if mode != "guide":
+        return
+    r2 = _r2_audio_client()
+    key = _audio_cache_key(digest, mode)
+    if r2 is not None:
+        try:
+            await asyncio.to_thread(r2.delete_object, Bucket=settings.r2_bucket, Key=key)
+        except Exception as exc:
+            try:
+                log_event(None, None, "audio_cache_r2_delete_failed", {"details": f"{type(exc).__name__}: {exc}"})
+            except Exception:
+                pass
+    try:
+        path = _audio_cache_path(digest, mode)
+        if path.exists():
+            await asyncio.to_thread(path.unlink)
+    except Exception as exc:
+        try:
+            log_event(None, None, "audio_cache_local_delete_failed", {"details": f"{type(exc).__name__}: {exc}"})
+        except Exception:
+            pass
+
+async def _purge_guide_audio_texts(*texts: str) -> int:
+    purged = 0
+    seen = set()
+    for text in texts:
+        if not text:
+            continue
+        clean = _normalize_tts_text(text, "guide")
+        digest = _audio_cache_digest(clean, "guide")
+        if digest in seen:
+            continue
+        seen.add(digest)
+        await _delete_audio_cache(digest, "guide")
+        purged += 1
+    return purged
+
+async def _elevenlabs_tts(clean: str, mode: str) -> bytes:
+    if not settings.elevenlabs_api_key:
+        raise HTTPException(500, "ELEVENLABS_API_KEY not configured")
+    model_id = _tts_model_id(mode)
+    url = (
+        "https://api.elevenlabs.io/v1/text-to-speech/"
+        f"{quote(settings.elevenlabs_voice_id)}?output_format=mp3_44100_128"
+    )
+    payload = {
+        "text": clean,
+        "model_id": model_id,
+        "voice_settings": _tts_voice_settings(mode),
+    }
+    timeout = 120 if mode == "guide" else 30
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        r = await client.post(
+            url,
+            headers={
+                "xi-api-key": settings.elevenlabs_api_key,
+                "Accept": "audio/mpeg",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+    if r.status_code >= 400:
+        detail = r.text[:240] if r.text else r.reason_phrase
+        raise HTTPException(r.status_code, f"ElevenLabs TTS failed: {detail}")
+    return r.content
+
+@app.get("/api/audio/tts")
+async def tts_audio(text: str = "", mode: str = "direction", token: str = "", user: dict = Depends(_current_user)):
+    """Return ElevenLabs MP3 speech. The API key stays server-side."""
+    mode = _tts_mode(mode)
+    if token:
+        session = get_cached("campsite_cache", f"tts_session:{user['id']}:{token}", ttl_seconds=3600)
+        if not session:
+            raise HTTPException(404, "Audio session expired")
+        text = session.get("text") or ""
+        mode = _tts_mode(session.get("mode") or mode)
+    clean = _normalize_tts_text(text, mode)
+    digest = _audio_cache_digest(clean, mode)
+    cached = await _read_audio_cache(digest, mode)
+    if cached:
+        return Response(
+            content=cached,
+            media_type="audio/mpeg",
+            headers=_audio_cache_headers(clean, mode, "HIT"),
+        )
+
+    audio = await _elevenlabs_tts(clean, mode)
+    await _write_audio_cache(digest, mode, audio)
+    return Response(
+        content=audio,
+        media_type="audio/mpeg",
+        headers=_audio_cache_headers(clean, mode, "MISS" if mode == "guide" else "BYPASS"),
+    )
+
 class NearbyAudioRequest(BaseModel):
     lat: float; lng: float; location_name: str = ""
+
+class ExploreAudioAuthorizeRequest(BaseModel):
+    place_id: str
+    mode: str = "summary"
+
+class TtsSessionRequest(BaseModel):
+    text: str
+    mode: str = "guide"
+
+@app.post("/api/audio/tts-session")
+async def prepare_tts_session(body: TtsSessionRequest, user: dict = Depends(_current_user)):
+    """Store long TTS text briefly so mobile can fetch audio without an oversized URL."""
+    mode = _tts_mode(body.mode)
+    clean = _normalize_tts_text(body.text, mode)
+    token = hashlib.sha256(f"{user['id']}:{mode}:{clean}:{settings.secret_key}".encode()).hexdigest()[:40]
+    set_cached("campsite_cache", f"tts_session:{user['id']}:{token}", {"text": clean, "mode": mode})
+    return {"uri": f"/api/audio/tts?token={token}", "mode": mode}
 
 @app.post("/api/audio/nearby")
 async def nearby_audio(body: NearbyAudioRequest, user: dict = Depends(_current_user)):
@@ -1182,7 +1541,15 @@ async def nearby_audio(body: NearbyAudioRequest, user: dict = Depends(_current_u
     if cached:
         return {"narration": cached}
     cost = AI_COSTS["nearby_audio"]
-    _check_credits(user, cost, "Nearby audio narration")
+    charged_nearby_audio = False
+    if not user.get("is_admin") and not has_active_plan(user):
+        if not deduct_credits(user["id"], cost, "Nearby audio narration"):
+            raise HTTPException(402, detail=_paywall_detail(
+                "nearby_audio",
+                f"What’s Around Me audio costs {cost} credits, or is included with Explorer.",
+                cost,
+            ))
+        charged_nearby_audio = True
     from ai.planner import generate_location_narration
     try:
         location_name = body.location_name
@@ -1196,10 +1563,31 @@ async def nearby_audio(body: NearbyAudioRequest, user: dict = Depends(_current_u
             location_name = "; ".join(x for x in [land_label, nearby] if x)
         narration = generate_location_narration(body.lat, body.lng, location_name)
     except Exception as e:
-        add_credits(user["id"], cost, "Refund — nearby audio error")
+        if charged_nearby_audio:
+            add_credits(user["id"], cost, "Refund — nearby audio error")
         raise HTTPException(500, f"Narration failed: {e}")
     set_cached("campsite_cache", cache_key, narration)
     return {"narration": narration}
+
+@app.post("/api/audio/explore/authorize")
+async def authorize_explore_audio(body: ExploreAudioAuthorizeRequest, user: dict = Depends(_current_user)):
+    mode = "story" if body.mode == "story" else "summary"
+    cost = AI_COSTS["explore_audio_story"] if mode == "story" else AI_COSTS["explore_audio_summary"]
+    place_id = re.sub(r"[^a-zA-Z0-9_.:-]", "", (body.place_id or ""))[:160] or "place"
+    unlock_key = f"explore_audio_unlock:{user['id']}:{place_id}:{mode}"
+    if user.get("is_admin") or has_active_plan(user):
+        return {"authorized": True, "charged": 0, "plan": True, "credits": user.get("credits", 0)}
+    if get_cached("campsite_cache", unlock_key, ttl_seconds=3600 * 24 * 365):
+        return {"authorized": True, "charged": 0, "already_unlocked": True, "credits": user.get("credits", 0)}
+    if not deduct_credits(user["id"], cost, f"Explore audio {mode} — {place_id}"):
+        raise HTTPException(402, detail=_paywall_detail(
+            "explore_audio",
+            f"{'Full Story' if mode == 'story' else 'Summary'} audio costs {cost} credits, or is included with Explorer.",
+            cost,
+        ))
+    set_cached("campsite_cache", unlock_key, {"mode": mode, "place_id": place_id})
+    fresh = get_user_by_id(user["id"]) or user
+    return {"authorized": True, "charged": cost, "credits": fresh.get("credits", 0)}
 
 
 # ── Config (public) ───────────────────────────────────────────────────────────
@@ -2014,6 +2402,329 @@ async def get_camp_field_report_summary(camp_id: str):
     return get_field_report_summary(camp_id)
 
 
+# ── Trail Profiles / Discovery ────────────────────────────────────────────────
+
+def _clean_trail_profile_id(value: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_.:-]", "", value or "")[:180]
+
+def _trail_profile_from_open_poi(item: dict) -> dict | None:
+    lat, lng = item.get("lat"), item.get("lng")
+    if not isinstance(lat, (int, float)) or not isinstance(lng, (int, float)):
+        return None
+    kind = str(item.get("type") or "trailhead")
+    source_id = str(item.get("id") or f"{kind}_{float(lat):.5f}_{float(lng):.5f}")
+    trail_id = _clean_trail_profile_id(f"osm:{source_id}") or hashlib.sha1(source_id.encode()).hexdigest()
+    name = str(item.get("name") or {
+        "trail": "Trail",
+        "trailhead": "Trailhead",
+        "viewpoint": "Viewpoint",
+        "peak": "Peak",
+        "hot_spring": "Hot Spring",
+    }.get(kind, "Trail"))
+    if re.search(r"\bgrade[1-5]\b", name, re.I):
+        name = "Mapped rough track" if re.search(r"\bgrade[45]\b", name, re.I) else "Mapped backroad"
+    summary = {
+        "trail": "Mapped trail route with nearby support context from Trailhead.",
+        "trailhead": "Mapped trail access point with nearby support context from Trailhead.",
+        "viewpoint": "Mapped viewpoint that can anchor a trail scouting route.",
+        "peak": "Mapped peak or summit feature for route scouting.",
+        "hot_spring": "Mapped hot spring or public bath feature near trails.",
+    }.get(kind, "Open-source trail feature with Trailhead scouting context.")
+    now = int(time.time())
+    official_url = str(item.get("url") or "")
+    if not official_url and source_id.startswith("osm_"):
+        parts = source_id.split("_")
+        if len(parts) >= 3:
+            official_url = f"https://www.openstreetmap.org/{parts[1]}/{parts[2]}"
+    provenance = {
+        "name": {"source": "OpenStreetMap", "last_checked": now},
+        "location": {"source": "OpenStreetMap", "last_checked": now},
+        "summary": {"source": "Trailhead generated from open-source tags", "last_checked": now},
+        "activities": {"source": "Trailhead inference", "last_checked": now},
+    }
+    return {
+        "id": trail_id,
+        "name": name[:180],
+        "summary": summary,
+        "description": f"{summary} Verify current access, difficulty, closures, and legality with the land manager before relying on this trail profile.",
+        "lat": float(lat),
+        "lng": float(lng),
+        "length_mi": None,
+        "difficulty": "Scout first",
+        "activities": ["Overlanding", "Hiking"] if kind in {"trail", "trailhead", "viewpoint", "peak"} else ["Overlanding"],
+        "land_manager": "",
+        "geometry": None,
+        "trailheads": [{"name": name, "lat": float(lat), "lng": float(lng), "source": "OpenStreetMap"}],
+        "official_url": official_url,
+        "photos": [],
+        "source": "osm",
+        "source_label": "OpenStreetMap",
+        "provenance": provenance,
+        "last_checked": now,
+    }
+
+async def _open_trail_photos(name: str, lat: float, lng: float) -> list[dict]:
+    clean = re.sub(r"\s+", " ", (name or "").strip())
+    if not clean or clean.lower() in {"trail", "trailhead", "mapped trail", "mapped rough track", "mapped backroad"}:
+        return []
+    cache_key = f"trail_photo_wiki_{hashlib.sha1(f'{clean}:{lat:.3f}:{lng:.3f}'.encode()).hexdigest()[:16]}"
+    cached = get_cached("campsite_cache", cache_key, ttl_seconds=3600 * 24 * 30)
+    if cached is not None:
+        return cached
+    try:
+        async with httpx.AsyncClient(timeout=7.0, headers={"User-Agent": "TrailheadTrailDiscovery/1.0"}) as client:
+            search = await client.get(
+                "https://en.wikipedia.org/w/api.php",
+                params={
+                    "action": "query",
+                    "format": "json",
+                    "generator": "search",
+                    "gsrsearch": f'"{clean}" trail',
+                    "gsrlimit": 3,
+                    "prop": "pageimages|info",
+                    "piprop": "original|thumbnail",
+                    "pithumbsize": 900,
+                    "inprop": "url",
+                    "origin": "*",
+                },
+            )
+            pages = (search.json().get("query") or {}).get("pages") or {}
+            for page in sorted(pages.values(), key=lambda p: p.get("index", 99)):
+                title = str(page.get("title") or "")
+                title_norm = re.sub(r"[^a-z0-9]+", " ", title.lower()).strip()
+                name_norm = re.sub(r"[^a-z0-9]+", " ", clean.lower()).strip()
+                if name_norm and name_norm not in title_norm and title_norm not in name_norm:
+                    continue
+                url = (page.get("original") or {}).get("source") or (page.get("thumbnail") or {}).get("source")
+                if not url:
+                    continue
+                photos = [{
+                    "url": url,
+                    "caption": title,
+                    "credit": "Wikipedia / Wikimedia Commons",
+                    "source": "Wikipedia",
+                }]
+                set_cached("campsite_cache", cache_key, photos)
+                return photos
+    except Exception:
+        pass
+    set_cached("campsite_cache", cache_key, [])
+    return []
+
+async def _seed_open_trail_profiles(lat: float, lng: float, radius_mi: float, limit: int = 80) -> list[dict]:
+    radius_m = int(max(3, min(radius_mi, 80)) * 1609.344)
+    batches = await asyncio.gather(
+        get_trails(lat, lng, radius_m=radius_m),
+        get_trailheads(lat, lng, radius_m=radius_m),
+        get_viewpoints(lat, lng, radius_m=radius_m),
+        get_peaks(lat, lng, radius_m=radius_m),
+        get_hot_springs(lat, lng, radius_m=radius_m),
+        return_exceptions=True,
+    )
+    profiles: list[dict] = []
+    seen: set[str] = set()
+    for batch in batches:
+        if not isinstance(batch, list):
+            continue
+        for item in batch:
+            profile = _trail_profile_from_open_poi(item)
+            if not profile or profile["id"] in seen:
+                continue
+            photos = await _open_trail_photos(profile["name"], profile["lat"], profile["lng"])
+            if photos:
+                profile["photos"] = photos
+                profile["provenance"]["photos"] = {"source": "Wikipedia / Wikimedia Commons", "last_checked": profile["last_checked"]}
+            seen.add(profile["id"])
+            profiles.append(upsert_trail_profile(profile))
+            if len(profiles) >= limit:
+                return profiles
+    return profiles
+
+@app.get("/api/trails/discover")
+async def trails_discover(
+    lat: float | None = None,
+    lng: float | None = None,
+    radius: float = 45,
+    n: float | None = None,
+    s: float | None = None,
+    e: float | None = None,
+    w: float | None = None,
+    mode: str = "nearby",
+    limit: int = 60,
+):
+    mode = "view" if mode == "view" else "nearby"
+    bbox = None
+    if mode == "view" and None not in (n, s, e, w):
+        bbox = {"n": float(n), "s": float(s), "e": float(e), "w": float(w)}
+        lat = (bbox["n"] + bbox["s"]) / 2
+        lng = (bbox["e"] + bbox["w"]) / 2
+        radius = max(3, min(80, max(abs(bbox["n"] - bbox["s"]) * 69, abs(bbox["e"] - bbox["w"]) * 69) / 2 + 3))
+    if lat is None or lng is None:
+        raise HTTPException(400, "lat/lng or n/s/e/w bounds are required")
+    await _seed_open_trail_profiles(float(lat), float(lng), radius, limit=max(limit, 80))
+    trails = list_trail_profiles_near(float(lat), float(lng), radius, max(1, min(limit, 100)), bbox=bbox, mode=mode)
+    return {
+        "mode": mode,
+        "source": "online-open-official-first",
+        "offline": False,
+        "trails": trails,
+    }
+
+@app.get("/api/trails/{trail_id}")
+async def trail_profile(trail_id: str):
+    profile = get_trail_profile(_clean_trail_profile_id(trail_id))
+    if not profile:
+        raise HTTPException(404, "Trail profile not found")
+    profile["field_report_summary"] = get_trail_field_report_summary(profile["id"])
+    return profile
+
+class TrailEditSuggestionPayload(BaseModel):
+    trail_name: str
+    field: str
+    value: str
+    note: Optional[str] = None
+
+@app.post("/api/trails/{trail_id}/suggest-edit")
+async def suggest_trail_edit(trail_id: str, body: TrailEditSuggestionPayload,
+                             user: dict = Depends(_current_user)):
+    allowed = {"name", "summary", "description", "length_mi", "difficulty", "activities", "land_manager", "official_url", "trailheads", "geometry", "photos", "access", "notes"}
+    clean_id = _clean_trail_profile_id(trail_id)
+    if not clean_id:
+        raise HTTPException(400, "Invalid trail id")
+    field = (body.field or "").strip().lower()
+    if field not in allowed:
+        raise HTTPException(400, "Invalid edit field")
+    value = (body.value or "").strip()
+    if not value:
+        raise HTTPException(400, "Suggested value is required")
+    result = add_trail_edit_suggestion(clean_id, body.trail_name.strip()[:180] or "Trail",
+                                       user.get("id"), user.get("username"), field, value,
+                                       (body.note or "").strip()[:500] or None)
+    add_credits(user["id"], 3, f"Trail edit suggestion: {(body.trail_name or clean_id)[:80]}")
+    fresh = get_user_by_id(user["id"])
+    return {**result, "credits_earned": 3, "new_balance": fresh["credits"] if fresh else user.get("credits", 0)}
+
+class TrailAdminUpdatePayload(BaseModel):
+    name: Optional[str] = None
+    summary: Optional[str] = None
+    description: Optional[str] = None
+    length_mi: Optional[float] = None
+    difficulty: Optional[str] = None
+    activities: Optional[list[str]] = None
+    land_manager: Optional[str] = None
+    geometry: Optional[dict] = None
+    trailheads: Optional[list[dict]] = None
+    official_url: Optional[str] = None
+    photos: Optional[list[dict]] = None
+
+@app.post("/api/admin/trails/{trail_id}")
+async def admin_update_trail(trail_id: str, body: TrailAdminUpdatePayload,
+                             admin: dict = Depends(_require_admin)):
+    raw = body.dict(exclude_unset=True)
+    clean: dict = {}
+    for key, val in raw.items():
+        if isinstance(val, str):
+            clean[key] = val.strip()[:6000]
+        elif isinstance(val, list):
+            clean[key] = val[:80]
+        elif isinstance(val, dict):
+            clean[key] = val
+        elif isinstance(val, (int, float)):
+            clean[key] = val
+    try:
+        profile = set_trail_profile_admin_update(_clean_trail_profile_id(trail_id), clean, admin.get("id"))
+    except KeyError:
+        raise HTTPException(404, "Trail profile not found")
+    return {"ok": True, "profile": profile}
+
+@app.get("/api/admin/trail-edit-suggestions")
+async def admin_trail_edit_suggestions(status: Optional[str] = "pending",
+                                       admin: dict = Depends(_require_admin)):
+    return get_trail_edit_suggestions(status if status else None, limit=200)
+
+@app.post("/api/admin/trail-edit-suggestions/{suggestion_id}/status")
+async def admin_trail_edit_suggestion_status(suggestion_id: int, body: dict,
+                                             admin: dict = Depends(_require_admin)):
+    status = str(body.get("status", "")).strip().lower()
+    if status not in {"pending", "applied", "dismissed"}:
+        raise HTTPException(400, "Invalid status")
+    if not update_trail_edit_suggestion_status(suggestion_id, status):
+        raise HTTPException(404, "Suggestion not found")
+    return {"ok": True}
+
+
+# ── Trail Field Reports ───────────────────────────────────────────────────────
+
+class TrailFieldReportPayload(BaseModel):
+    trail_name: str
+    lat: float
+    lng: float
+    rig_label: Optional[str] = None
+    visited_date: str
+    sentiment: str
+    access_condition: str
+    crowd_level: str
+    tags: list[str] = []
+    note: Optional[str] = None
+    photo_data: Optional[str] = None
+
+def _validate_field_report(body: FieldReportPayload):
+    valid_sentiments = {'loved_it', 'its_ok', 'would_skip'}
+    valid_access = {'easy', 'rough', 'four_wd_required'}
+    valid_crowd = {'empty', 'few_rigs', 'packed'}
+    if body.sentiment not in valid_sentiments:
+        raise HTTPException(400, "Invalid sentiment")
+    if body.access_condition not in valid_access:
+        raise HTTPException(400, "Invalid access_condition")
+    if body.crowd_level not in valid_crowd:
+        raise HTTPException(400, "Invalid crowd_level")
+
+@app.post("/api/trails/{trail_id}/field-report")
+async def post_trail_field_report(trail_id: str, body: TrailFieldReportPayload,
+                                  user: dict = Depends(_current_user)):
+    _validate_field_report(body)
+    clean_trail_id = re.sub(r"[^a-zA-Z0-9_.:-]", "", trail_id)[:140] or "trail"
+    result = submit_trail_field_report(
+        trail_id=clean_trail_id,
+        trail_name=(body.trail_name or "Trail")[:120],
+        lat=body.lat, lng=body.lng,
+        user_id=user["id"], username=user["username"],
+        rig_label=body.rig_label,
+        visited_date=body.visited_date,
+        sentiment=body.sentiment, access_condition=body.access_condition,
+        crowd_level=body.crowd_level, tags=body.tags,
+        note=body.note, photo_data=body.photo_data,
+    )
+    fresh = get_user_by_id(user["id"])
+    return {**result, "new_balance": fresh["credits"]}
+
+@app.get("/api/trails/{trail_id}/field-reports")
+async def get_trail_reports(trail_id: str):
+    clean_trail_id = re.sub(r"[^a-zA-Z0-9_.:-]", "", trail_id)[:140] or "trail"
+    return get_trail_field_reports(clean_trail_id)
+
+@app.get("/api/trails/{trail_id}/field-report-summary")
+async def get_trail_report_summary(trail_id: str):
+    clean_trail_id = re.sub(r"[^a-zA-Z0-9_.:-]", "", trail_id)[:140] or "trail"
+    return get_trail_field_report_summary(clean_trail_id)
+
+@app.get("/api/trails/{trail_id}/field-reports/{report_id}/photo")
+async def trail_report_photo(trail_id: str, report_id: int):
+    from db.store import _conn
+    clean_trail_id = re.sub(r"[^a-zA-Z0-9_.:-]", "", trail_id)[:140] or "trail"
+    db = _conn()
+    row = db.execute(
+        "SELECT photo_data FROM trail_field_reports WHERE trail_id=? AND id=?",
+        (clean_trail_id, report_id),
+    ).fetchone()
+    db.close()
+    if not row or not row["photo_data"]:
+        raise HTTPException(404, "No photo")
+    import base64
+    data = base64.b64decode(row["photo_data"])
+    return Response(content=data, media_type="image/jpeg")
+
+
 # ── Community pins ─────────────────────────────────────────────────────────────
 
 VALID_PIN_TYPES = {
@@ -2029,6 +2740,12 @@ class PinRequest(BaseModel):
     lat: float; lng: float; name: str
     type: str = "camp"; description: str = ""; land_type: str = "BLM"
     details: dict = Field(default_factory=dict)
+
+class PinUpdateSuggestionPayload(BaseModel):
+    pin_name: str
+    field: str = "notes"
+    value: str
+    note: Optional[str] = None
 
 @app.post("/api/pins")
 async def submit_pin(body: PinRequest, user: dict = Depends(_current_user)):
@@ -2046,17 +2763,43 @@ async def submit_pin(body: PinRequest, user: dict = Depends(_current_user)):
         v = str(val).strip()[:240]
         if k and v:
             clean_details[k] = v
-    add_community_pin(body.lat, body.lng, name, pin_type,
-                      (body.description or "").strip()[:500], (body.land_type or "").strip()[:80],
-                      user_id=user["id"], details=clean_details)
+    duplicate = find_duplicate_community_pin(body.lat, body.lng, pin_type, name)
+    if duplicate and pin_type == "gpx_import":
+        return {"status": "duplicate", "credits_earned": 0, "duplicate_id": duplicate.get("id")}
+    pin_id = add_community_pin(body.lat, body.lng, name, pin_type,
+                               (body.description or "").strip()[:500], (body.land_type or "").strip()[:80],
+                               user_id=user["id"], details=clean_details)
     credits_earned = 0 if pin_type == "gpx_import" else COMMUNITY_PIN_CREDIT
     if credits_earned:
         add_credits(user["id"], credits_earned, f"Community pin: {name}")
-    return {"status": "ok", "credits_earned": credits_earned}
+    return {"status": "ok", "id": pin_id, "credits_earned": credits_earned}
 
 @app.get("/api/pins")
 async def nearby_pins(lat: float, lng: float, radius: float = 1.0):
     return get_community_pins(lat, lng, radius_deg=radius)
+
+@app.post("/api/pins/{pin_id}/suggest-update")
+async def suggest_pin_update(pin_id: int, body: PinUpdateSuggestionPayload,
+                             user: dict = Depends(_current_user)):
+    field = (body.field or "notes").strip().lower()
+    allowed = {"name", "type", "description", "details", "access", "status", "notes", "duplicate", "location"}
+    if field not in allowed:
+        raise HTTPException(400, "Invalid update field")
+    value = (body.value or "").strip()
+    if len(value) < 3:
+        raise HTTPException(400, "Suggested update is too short")
+    result = add_pin_update_suggestion(
+        pin_id,
+        (body.pin_name or f"Pin {pin_id}").strip()[:120],
+        user.get("id"),
+        user.get("username"),
+        field,
+        value,
+        (body.note or "").strip()[:700] or None,
+    )
+    add_credits(user["id"], 2, f"Community pin update: {(body.pin_name or str(pin_id))[:80]}")
+    fresh = get_user_by_id(user["id"])
+    return {**result, "credits_earned": 2, "new_balance": fresh["credits"] if fresh else user.get("credits", 0)}
 
 @app.post("/api/pins/{pin_id}/upvote")
 async def upvote_pin(pin_id: int, user: dict = Depends(_current_user)):
@@ -2294,22 +3037,218 @@ async def stripe_webhook(request: _Request):
 # ── Apple IAP subscription activation ────────────────────────────────────────
 
 IAP_PRODUCTS = {
-    "com.trailhead.explorer.monthly": {"label": "Explorer Monthly", "days": 31},
-    "com.trailhead.explorer.annual":  {"label": "Explorer Annual",  "days": 366},
+    # Current App Store / Play Store products. Product IDs are permanent in App Store Connect.
+    "com.trailhead.explorer.monthly.v2": {"label": "Explorer Monthly", "days": 31},
+    "com.trailhead.explorer.annual.v2":  {"label": "Explorer Annual",  "days": 366},
+    "com.trailhead.explorer.yearly.v2":  {"label": "Explorer Yearly Alias",  "days": 366},
+    # Legacy IDs remain accepted so existing sandbox/Play transactions can still sync during transition.
+    "com.trailhead.explorer.monthly":    {"label": "Explorer Monthly Legacy", "days": 31},
+    "com.trailhead.explorer.annual":     {"label": "Explorer Annual Legacy",  "days": 366},
 }
+
+APPLE_STOREKIT_PROD = "https://api.storekit.itunes.apple.com"
+APPLE_STOREKIT_SANDBOX = "https://api.storekit-sandbox.itunes.apple.com"
 
 class IAPActivateRequest(BaseModel):
     product_id: str
     transaction_id: str  # from Apple StoreKit — stored for idempotency
+    platform: str = "ios"
+
+class AppleNotificationBody(BaseModel):
+    signedPayload: str
+
+def _apple_private_key() -> str:
+    if settings.apple_private_key:
+        return settings.apple_private_key.replace("\\n", "\n")
+    if settings.apple_private_key_path:
+        try:
+            return Path(settings.apple_private_key_path).read_text()
+        except Exception:
+            return ""
+    return ""
+
+def _apple_server_api_ready() -> bool:
+    return bool(settings.apple_issuer_id and settings.apple_key_id and _apple_private_key())
+
+def _google_play_server_api_ready() -> bool:
+    return bool(settings.google_play_package_name and (settings.google_play_service_account_json or settings.google_play_service_account_path))
+
+def _google_play_service_account() -> dict:
+    raw = settings.google_play_service_account_json
+    if not raw and settings.google_play_service_account_path:
+        try:
+            raw = Path(settings.google_play_service_account_path).read_text()
+        except Exception:
+            raw = ""
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw)
+    except Exception:
+        try:
+            return json.loads(raw.replace("\\n", "\n"))
+        except Exception:
+            return {}
+
+async def _google_play_access_token() -> str:
+    account = _google_play_service_account()
+    if not account.get("client_email") or not account.get("private_key"):
+        raise HTTPException(500, "Google Play service account is not configured")
+    now = int(time.time())
+    assertion = jwt.encode(
+        {
+            "iss": account["client_email"],
+            "scope": "https://www.googleapis.com/auth/androidpublisher",
+            "aud": "https://oauth2.googleapis.com/token",
+            "iat": now,
+            "exp": now + 900,
+        },
+        account["private_key"].replace("\\n", "\n"),
+        algorithm="RS256",
+    )
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+                "assertion": assertion,
+            },
+        )
+    if r.status_code >= 400:
+        detail = r.text[:240] if r.text else r.reason_phrase
+        raise HTTPException(502, f"Google Play auth failed: {detail}")
+    return r.json().get("access_token") or ""
+
+def _parse_google_expiry(value: str | None) -> int:
+    if not value:
+        return 0
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return int(parsed.astimezone(timezone.utc).timestamp())
+    except Exception:
+        return 0
+
+async def _verify_google_play_subscription(product_id: str, purchase_token: str) -> dict:
+    token = await _google_play_access_token()
+    if not token:
+        raise HTTPException(502, "Google Play auth did not return an access token")
+    url = (
+        "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/"
+        f"{quote(settings.google_play_package_name)}/purchases/subscriptionsv2/tokens/{quote(purchase_token)}"
+    )
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+    if r.status_code >= 400:
+        detail = r.text[:240] if r.text else r.reason_phrase
+        raise HTTPException(402, f"Google Play could not verify this subscription ({r.status_code}: {detail})")
+    data = r.json()
+    line_items = data.get("lineItems") or []
+    matching = next((item for item in line_items if item.get("productId") == product_id), None)
+    if not matching:
+        raise HTTPException(400, "Google Play subscription does not match the requested product")
+    expires_at = _parse_google_expiry(matching.get("expiryTime"))
+    if expires_at <= int(time.time()):
+        raise HTTPException(402, "Google Play subscription is expired")
+    state = data.get("subscriptionState", "")
+    if state in {"SUBSCRIPTION_STATE_EXPIRED", "SUBSCRIPTION_STATE_CANCELED", "SUBSCRIPTION_STATE_PENDING"}:
+        raise HTTPException(402, f"Google Play subscription is not active ({state})")
+    return {
+        "product_id": product_id,
+        "transaction_id": data.get("latestOrderId") or purchase_token,
+        "original_transaction_id": data.get("linkedPurchaseToken") or purchase_token,
+        "expires_at": expires_at,
+        "environment": "GooglePlay",
+        "state": state,
+    }
+
+def _apple_server_jwt() -> str:
+    now = int(time.time())
+    payload = {
+        "iss": settings.apple_issuer_id,
+        "iat": now,
+        "exp": now + 900,
+        "aud": "appstoreconnect-v1",
+    }
+    if settings.apple_bundle_id:
+        payload["bid"] = settings.apple_bundle_id
+    return jwt.encode(
+        payload,
+        _apple_private_key(),
+        algorithm="ES256",
+        headers={"kid": settings.apple_key_id, "typ": "JWT"},
+    )
+
+def _decode_apple_jws_payload(jws: str) -> dict:
+    try:
+        part = jws.split(".")[1]
+        part += "=" * (-len(part) % 4)
+        import base64
+        return json.loads(base64.urlsafe_b64decode(part.encode()).decode())
+    except Exception:
+        raise HTTPException(502, "Apple returned an unreadable transaction payload")
+
+async def _fetch_apple_transaction(transaction_id: str) -> tuple[dict, str]:
+    token = _apple_server_jwt()
+    headers = {"Authorization": f"Bearer {token}"}
+    last_status = 0
+    last_detail = ""
+    for base, env in ((APPLE_STOREKIT_PROD, "Production"), (APPLE_STOREKIT_SANDBOX, "Sandbox")):
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(f"{base}/inApps/v1/transactions/{quote(transaction_id)}", headers=headers)
+        if r.status_code == 200:
+            data = r.json()
+            signed = data.get("signedTransactionInfo")
+            if not signed:
+                raise HTTPException(502, "Apple response did not include transaction info")
+            return _decode_apple_jws_payload(signed), env
+        last_status = r.status_code
+        last_detail = r.text[:240] if r.text else r.reason_phrase
+        if r.status_code not in {404, 400}:
+            break
+    raise HTTPException(402, f"Apple could not verify this subscription transaction ({last_status}: {last_detail})")
+
+async def _verify_apple_subscription(product_id: str, transaction_id: str) -> dict:
+    tx, queried_env = await _fetch_apple_transaction(transaction_id)
+    apple_product_id = tx.get("productId")
+    if apple_product_id != product_id:
+        raise HTTPException(400, "Apple transaction does not match the requested product")
+    if apple_product_id not in IAP_PRODUCTS:
+        raise HTTPException(400, "Apple transaction is not a Trailhead Explorer product")
+    bundle_id = tx.get("bundleId")
+    if settings.apple_bundle_id and bundle_id and bundle_id != settings.apple_bundle_id:
+        raise HTTPException(400, "Apple transaction bundle does not match Trailhead")
+    expires_ms = int(tx.get("expiresDate") or 0)
+    if expires_ms <= 0:
+        raise HTTPException(402, "Apple transaction is not an active subscription")
+    expires_at = expires_ms // 1000
+    if expires_at <= int(time.time()):
+        raise HTTPException(402, "Apple subscription is expired")
+    return {
+        "product_id": apple_product_id,
+        "transaction_id": tx.get("transactionId") or transaction_id,
+        "original_transaction_id": tx.get("originalTransactionId"),
+        "expires_at": expires_at,
+        "environment": tx.get("environment") or queried_env,
+        "bundle_id": bundle_id,
+    }
 
 @app.post("/api/subscription/activate")
 async def activate_subscription(body: IAPActivateRequest, user: dict = Depends(_current_user)):
-    """Called by mobile after a successful StoreKit purchase. Activates the plan on the user account."""
+    """Called by mobile after a successful native store purchase. Activates the plan on the user account."""
     product = IAP_PRODUCTS.get(body.product_id)
     if not product:
         raise HTTPException(400, f"Unknown product: {body.product_id}")
     if not body.transaction_id.strip():
         raise HTTPException(400, "Missing transaction_id")
+
+    platform = (body.platform or "ios").strip().lower()
+    if platform not in {"ios", "android"}:
+        platform = "ios"
+    verification = None
+    if platform == "ios" and _apple_server_api_ready():
+        verification = await _verify_apple_subscription(body.product_id, body.transaction_id.strip())
+    if platform == "android" and _google_play_server_api_ready():
+        verification = await _verify_google_play_subscription(body.product_id, body.transaction_id.strip())
 
     # Idempotency: store transaction_id to prevent double-activation
     from db.store import _conn as _db_conn
@@ -2320,10 +3259,28 @@ async def activate_subscription(body: IAPActivateRequest, user: dict = Depends(_
     if existing:
         db.close()
         user_row = get_user_by_id(user["id"])
+        if verification:
+            updated = set_user_plan(user["id"], verification["product_id"], verification["expires_at"])
+            if verification.get("original_transaction_id"):
+                save_app_store_subscription(
+                    verification["original_transaction_id"],
+                    verification.get("transaction_id"),
+                    user["id"],
+                    verification["product_id"],
+                    verification.get("environment"),
+                    verification["expires_at"],
+                    "active",
+                )
+            log_event(user["id"], None, "iap_verified_existing", verification)
+            return {
+                "status": "verified",
+                "plan_type": updated.get("plan_type"),
+                "plan_expires_at": updated.get("plan_expires_at"),
+            }
         if has_active_plan(user_row):
             return {"status": "already_active", "plan_type": user_row.get("plan_type"), "plan_expires_at": user_row.get("plan_expires_at")}
         expires_at = activate_plan(user["id"], body.product_id, product["days"])
-        log_event(user["id"], None, "iap_reactivate", {"product_id": body.product_id, "days": product["days"]})
+        log_event(user["id"], None, "iap_reactivate", {"product_id": body.product_id, "platform": platform, "days": product["days"]})
         return {"status": "reactivated", "plan_type": body.product_id, "plan_expires_at": expires_at}
 
     db.execute(
@@ -2332,9 +3289,85 @@ async def activate_subscription(body: IAPActivateRequest, user: dict = Depends(_
     )
     db.commit(); db.close()
 
+    if verification:
+        updated = set_user_plan(user["id"], verification["product_id"], verification["expires_at"])
+        if verification.get("original_transaction_id"):
+            save_app_store_subscription(
+                verification["original_transaction_id"],
+                verification.get("transaction_id"),
+                user["id"],
+                verification["product_id"],
+                verification.get("environment"),
+                verification["expires_at"],
+                "active",
+            )
+        log_event(user["id"], None, "iap_verified_activate", verification)
+        return {
+            "status": "verified",
+            "plan_type": updated.get("plan_type"),
+            "plan_expires_at": updated.get("plan_expires_at"),
+        }
+
     expires_at = activate_plan(user["id"], body.product_id, product["days"])
-    log_event(user["id"], None, "iap_activate", {"product_id": body.product_id, "days": product["days"]})
+    log_event(user["id"], None, "iap_activate_unverified", {
+        "product_id": body.product_id,
+        "platform": platform,
+        "google_validation_configured": _google_play_server_api_ready(),
+        "days": product["days"],
+    })
     return {"status": "activated", "plan_type": body.product_id, "plan_expires_at": expires_at}
+
+@app.post("/api/apple/notifications")
+async def apple_server_notification(body: AppleNotificationBody):
+    """App Store Server Notifications v2 endpoint for renewal/cancellation sync."""
+    payload = _decode_apple_jws_payload(body.signedPayload)
+    data = payload.get("data") or {}
+    signed_tx = data.get("signedTransactionInfo")
+    if not signed_tx:
+        log_event(None, None, "apple_notification_no_transaction", {"notificationType": payload.get("notificationType")})
+        return {"ok": True, "handled": False}
+    tx = _decode_apple_jws_payload(signed_tx)
+    original_id = tx.get("originalTransactionId")
+    product_id = tx.get("productId")
+    if not original_id or product_id not in IAP_PRODUCTS:
+        log_event(None, None, "apple_notification_unmapped_product", {
+            "product_id": product_id,
+            "notificationType": payload.get("notificationType"),
+        })
+        return {"ok": True, "handled": False}
+    mapped = get_app_store_subscription(original_id)
+    if not mapped:
+        log_event(None, None, "apple_notification_no_user_mapping", {
+            "original_transaction_id": original_id,
+            "product_id": product_id,
+            "notificationType": payload.get("notificationType"),
+        })
+        return {"ok": True, "handled": False}
+    expires_ms = int(tx.get("expiresDate") or 0)
+    expires_at = expires_ms // 1000 if expires_ms else None
+    active = bool(expires_at and expires_at > int(time.time()))
+    status = "active" if active else "expired"
+    if active:
+        set_user_plan(mapped["user_id"], product_id, expires_at)
+    else:
+        set_user_plan(mapped["user_id"], "free", None)
+    save_app_store_subscription(
+        original_id,
+        tx.get("transactionId"),
+        mapped["user_id"],
+        product_id,
+        tx.get("environment") or data.get("environment"),
+        expires_at,
+        status,
+    )
+    log_event(mapped["user_id"], None, "apple_notification_subscription_sync", {
+        "notificationType": payload.get("notificationType"),
+        "subtype": payload.get("subtype"),
+        "product_id": product_id,
+        "expires_at": expires_at,
+        "status": status,
+    })
+    return {"ok": True, "handled": True, "status": status}
 
 @app.get("/api/subscription/status")
 async def subscription_status(user: dict = Depends(_current_user)):
@@ -2360,33 +3393,14 @@ async def offline_authorize(body: OfflineAuthorizeRequest, user: dict = Depends(
         raise HTTPException(400, "Invalid offline asset type")
     if asset_type == "conus_map":
         region_id = "conus"
-    cost = OFFLINE_DOWNLOAD_COSTS[asset_type]
-    label = body.label.strip() or region_id.upper()
-    result = authorize_offline_download(
-        user,
-        asset_type,
-        region_id,
-        cost,
-        f"Offline download — {label} {asset_type.replace('_', ' ')}",
-    )
-    if not result.get("authorized"):
-        if asset_type == "state_route":
-            message = f"{label} offline routing costs {cost} credits or Explorer. Region map downloads are free."
-        elif asset_type == "state_contours":
-            message = f"{label} offline contours cost {cost} credits or Explorer. Region map downloads are free."
-        elif asset_type == "state_trails":
-            message = f"{label} offline trail systems cost {cost} credits or Explorer. Region map downloads are free."
-        elif asset_type == "trip_corridor":
-            message = f"{label} trip corridor download costs {cost} credits or Explorer. Region map downloads are free."
-        else:
-            message = f"{label} offline download costs {cost} credits or Explorer."
-        raise HTTPException(402, detail={
-            "code": "offline_download",
-            "message": message,
-            "credits_needed": cost,
-            "earn_hint": True,
-        })
-    return result
+    return {
+        "authorized": True,
+        "charged": 0,
+        "free_used": False,
+        "already_authorized": True,
+        "plan": has_active_plan(user),
+        "credits": user.get("credits", 0),
+    }
 
 @app.get("/credits/success", response_class=HTMLResponse)
 async def credits_success(session_id: str = ""):
@@ -2435,7 +3449,7 @@ a{color:#f97316;}
 <p>You must create an account to access most features. You are responsible for maintaining the confidentiality of your credentials and for all activities under your account. You may delete your account at any time from the Profile screen.</p>
 
 <h2>4. Subscriptions and Credits</h2>
-<p>Trailhead offers auto-renewable subscriptions (Explorer Plan Monthly and Explorer Plan Annual) through Apple's App Store. Subscriptions automatically renew unless cancelled at least 24 hours before the end of the current period. Manage or cancel subscriptions in your Apple ID settings. Credits are non-refundable except where required by law.</p>
+<p>Trailhead offers auto-renewable subscriptions (Explorer Plan Monthly and Explorer Plan Annual) through Apple's App Store on iOS and Google Play on Android. Subscriptions automatically renew unless cancelled at least 24 hours before the end of the current period. Manage or cancel subscriptions in your Apple ID settings or Google Play subscriptions. Credits are non-refundable except where required by law.</p>
 
 <h2>5. Prohibited Conduct</h2>
 <p>You agree not to: (a) use the App for any unlawful purpose; (b) submit false or misleading reports; (c) attempt to reverse engineer or tamper with the App; (d) use automated tools to scrape data; (e) harass other users.</p>
@@ -2492,13 +3506,13 @@ a{color:#f97316;}
 <p>Trailhead requests foreground location access to center the map and find nearby camps and reports. Background location is requested only to enable automatic audio guide narrations as you drive. You can disable location access in your device Settings at any time, which will disable navigation and nearby features.</p>
 
 <h2>4. Payment Data</h2>
-<p>Credit purchases are processed by <a href="https://stripe.com/privacy">Stripe</a>. Trailhead never stores your full card number or payment details. Stripe's privacy policy governs payment data handling.</p>
+<p>Credit purchases and subscriptions are processed by Stripe, Apple, or Google Play depending on platform and purchase type. Trailhead never stores your full card number or payment details. Their privacy policies govern payment data handling.</p>
 
 <h2>5. Data Retention</h2>
 <p>Account data is retained while your account is active. Community reports expire automatically (typically within 24–72 hours). You may request account deletion by contacting us at the address below.</p>
 
 <h2>6. Third-Party Services</h2>
-<p>Trailhead uses: Mapbox for maps (see <a href="https://www.mapbox.com/legal/privacy">Mapbox Privacy Policy</a>); Anthropic Claude for AI trip planning; RIDB / Recreation.gov for campsite data; Open-Meteo for weather data; Stripe for payments.</p>
+<p>Trailhead uses: Mapbox for maps (see <a href="https://www.mapbox.com/legal/privacy">Mapbox Privacy Policy</a>); Anthropic Claude for AI trip planning; ElevenLabs for optional AI voice/audio guide generation; RIDB / Recreation.gov and National Park Service data for campsite and place information; Open-Meteo for weather data; Stripe, Apple, and Google Play for payments.</p>
 
 <h2>7. Children's Privacy</h2>
 <p>Trailhead is not directed to children under 13 and we do not knowingly collect personal information from children under 13.</p>
@@ -2516,6 +3530,99 @@ a{color:#f97316;}
 @app.get("/api/leaderboard")
 async def leaderboard():
     return get_leaderboard(limit=20)
+
+
+# ── Contest ──────────────────────────────────────────────────────────────────
+
+CONTEST_RULES = {
+    "title": "Trailhead Contributor Contest Official Rules",
+    "eligibility": "Open to legal U.S. residents who are 18 or older. Void where prohibited.",
+    "sponsor": "Sponsored by Trailhead. Apple is not a sponsor and is not involved in this contest or drawing in any manner.",
+    "prizes": [
+        "Yearly top contributor: $1,000 cash/card plus 1 year Explorer.",
+        "Monthly top contributor: $100 cash/card plus 1 year Explorer.",
+        "Monthly drawing: $50 cash/card plus 1 year Explorer.",
+    ],
+    "entries": "No purchase necessary. Subscribers are automatically entered in the monthly drawing, and any eligible user may enter free once per calendar month in the app. A purchase does not improve odds.",
+    "odds": "Monthly drawing odds depend on the number of eligible entries received for that month.",
+    "points": "Contest points are separate from spendable credits. Spendable credits stay on the account; contest totals are measured by calendar month and calendar year.",
+    "contact": "Questions or winner verification: hello@gettrailhead.app",
+}
+
+@app.get("/api/contest/rules")
+async def contest_rules():
+    return CONTEST_RULES
+
+@app.get("/api/contest/status")
+async def contest_status(user: dict = Depends(_current_user)):
+    if has_active_plan(user):
+        ensure_contest_entry(user["id"], "subscriber")
+    return {
+        **get_contest_user_status(user["id"]),
+        "rules": CONTEST_RULES,
+        "month_leaders": get_contest_leaderboard("month", 10),
+        "year_leaders": get_contest_leaderboard("year", 10),
+    }
+
+@app.get("/api/contest/leaderboard")
+async def contest_leaderboard(period: str = "month", user: dict = Depends(_current_user)):
+    return {"leaders": get_contest_leaderboard(period, 50)}
+
+@app.post("/api/contest/free-entry")
+async def contest_free_entry(user: dict = Depends(_current_user)):
+    entry = ensure_contest_entry(user["id"], "free")
+    return {"ok": True, "entry": entry, "status": get_contest_user_status(user["id"])}
+
+
+# ── Contributor profiles ─────────────────────────────────────────────────────
+
+class ContributionPrivacyBody(BaseModel):
+    visible: bool
+
+class MapContributorApplicationBody(BaseModel):
+    experience: str = ""
+    regions: str = ""
+    sample_note: str = ""
+
+@app.get("/api/contributions/me")
+async def contributions_me(user: dict = Depends(_current_user)):
+    if has_active_plan(user):
+        ensure_contest_entry(user["id"], "subscriber")
+    profile = get_contributor_profile(user["id"], user["id"])
+    if not profile:
+        raise HTTPException(404, "Contributor profile not found")
+    return profile
+
+@app.get("/api/contributions/leaderboard")
+async def contributions_leaderboard(period: str = "month", user: dict = Depends(_current_user)):
+    period = period if period in {"month", "year", "all"} else "month"
+    return {"period": period, "leaders": get_contributor_leaderboard(period, 50, user["id"])}
+
+@app.get("/api/contributors/{user_id}")
+async def contributor_public_profile(user_id: int, user: dict = Depends(_current_user)):
+    profile = get_contributor_profile(user_id, user["id"])
+    if not profile:
+        raise HTTPException(404, "Contributor profile is private")
+    return profile
+
+@app.post("/api/contributions/privacy")
+async def contribution_privacy(body: ContributionPrivacyBody, user: dict = Depends(_current_user)):
+    profile = set_contributor_visibility(user["id"], body.visible)
+    if not profile:
+        raise HTTPException(404, "Contributor profile not found")
+    return profile
+
+@app.post("/api/contributions/map-contributor/apply")
+async def map_contributor_apply(body: MapContributorApplicationBody, user: dict = Depends(_current_user)):
+    experience = (body.experience or "").strip()
+    regions = (body.regions or "").strip()
+    sample_note = (body.sample_note or "").strip()
+    if len(experience) < 20 or len(regions) < 2:
+        raise HTTPException(400, "Tell us where you map and how you verify places.")
+    application = submit_map_contributor_application(
+        user["id"], user.get("username") or "", experience, regions, sample_note,
+    )
+    return {"ok": True, "application": application}
 
 
 # ── GPX export ────────────────────────────────────────────────────────────────
@@ -2547,17 +3654,186 @@ async def export_gpx(body: GpxRequest):
 
 # ── Admin API ─────────────────────────────────────────────────────────────────
 
+class AdminCreditBody(BaseModel):
+    amount: int; reason: str = "Admin adjustment"
+
+class AdminPlanBody(BaseModel):
+    plan_type: str
+    duration_days: int = 366
+
+class AdminContestSnapshotBody(BaseModel):
+    prize_type: str
+    month: str = ""
+    year: str = ""
+    notes: str = ""
+
+class AdminContestDrawingBody(BaseModel):
+    month: str = ""
+    year: str = ""
+    notes: str = ""
+
+class AdminContestAwardStatusBody(BaseModel):
+    status: str
+    notes: str = ""
+
+class ExploreStoryAdminBody(BaseModel):
+    title: str = ""
+    hook: str = ""
+    summary: str = ""
+    story: str = ""
+    notes: str = ""
+
 @app.get("/api/admin/stats")
 async def admin_stats(admin: dict = Depends(_require_admin)):
-    return get_platform_stats()
+    stats = get_platform_stats()
+    stats["apple_validation_configured"] = _apple_server_api_ready()
+    stats["apple_bundle_id"] = settings.apple_bundle_id
+    stats["google_play_validation_configured"] = _google_play_server_api_ready()
+    stats["google_play_package_name"] = settings.google_play_package_name
+    return stats
 
 @app.get("/api/admin/users")
 async def admin_users(search: str = "", limit: int = 50, offset: int = 0,
                       admin: dict = Depends(_require_admin)):
     return get_all_users(search, limit, offset)
 
-class AdminCreditBody(BaseModel):
-    amount: int; reason: str = "Admin adjustment"
+@app.get("/api/admin/contest/overview")
+async def admin_contest_overview(month: str = "", year: str = "",
+                                 admin: dict = Depends(_require_admin)):
+    return get_contest_admin_overview(month or None, year or None)
+
+@app.get("/api/admin/contest/leaderboard")
+async def admin_contest_leaderboard(period: str = "month", month: str = "", year: str = "",
+                                    admin: dict = Depends(_require_admin)):
+    return {"leaders": get_contest_leaderboard(period, 100, month or None, year or None)}
+
+@app.post("/api/admin/contest/backfill")
+async def admin_contest_backfill(admin: dict = Depends(_require_admin)):
+    count = backfill_contest_events_from_credits()
+    return {"ok": True, "inserted": count}
+
+@app.post("/api/admin/contest/snapshot")
+async def admin_contest_snapshot(body: AdminContestSnapshotBody,
+                                 admin: dict = Depends(_require_admin)):
+    prize_type = body.prize_type.strip()
+    if prize_type not in {"monthly_top", "yearly_top"}:
+        raise HTTPException(400, "prize_type must be monthly_top or yearly_top")
+    award = snapshot_contest_award(prize_type, admin["id"], body.month or None, body.year or None, body.notes)
+    return {"ok": True, "award": award}
+
+@app.post("/api/admin/contest/drawing/run")
+async def admin_contest_run_drawing(body: AdminContestDrawingBody,
+                                    admin: dict = Depends(_require_admin)):
+    award = run_contest_drawing(admin["id"], body.month or None, body.year or None, body.notes)
+    return {"ok": True, "award": award}
+
+@app.post("/api/admin/contest/awards/{award_id}/status")
+async def admin_contest_award_status(award_id: int, body: AdminContestAwardStatusBody,
+                                     admin: dict = Depends(_require_admin)):
+    award = update_contest_award_status(award_id, body.status.strip().lower(), body.notes)
+    if not award:
+        raise HTTPException(400, "Invalid award or status")
+    return {"ok": True, "award": award}
+
+@app.get("/api/admin/map-contributor-applications")
+async def admin_map_contributor_applications(status: Optional[str] = "pending",
+                                             admin: dict = Depends(_require_admin)):
+    return get_map_contributor_applications(status if status else None, limit=200)
+
+@app.post("/api/admin/map-contributor-applications/{application_id}/status")
+async def admin_map_contributor_application_status(application_id: int, body: dict,
+                                                  admin: dict = Depends(_require_admin)):
+    status = str(body.get("status", "")).strip().lower()
+    if status not in {"pending", "approved", "dismissed"}:
+        raise HTTPException(400, "Invalid status")
+    if not update_map_contributor_application_status(application_id, status):
+        raise HTTPException(404, "Application not found")
+    return {"ok": True}
+
+def _find_explore_place(place_id: str) -> dict | None:
+    catalog = _load_explore_catalog()
+    for place in catalog.get("places") or []:
+        if str(place.get("id") or "") == place_id:
+            return place
+    return None
+
+@app.get("/api/admin/explore/places")
+async def admin_explore_places(search: str = "", limit: int = 80,
+                               admin: dict = Depends(_require_admin)):
+    query = search.strip().lower()
+    overrides = get_explore_story_overrides()
+    places = []
+    for place in (_load_explore_catalog().get("places") or []):
+        summary = place.get("summary") or {}
+        title = str(summary.get("title") or place.get("id") or "")
+        haystack = " ".join([
+            str(place.get("id") or ""),
+            title,
+            str(summary.get("state") or ""),
+            str(summary.get("category") or ""),
+        ]).lower()
+        if query and query not in haystack:
+            continue
+        override = overrides.get(str(place.get("id") or "")) or {}
+        story = override.get("story") or (place.get("profile") or {}).get("story") or place.get("audio_script") or ""
+        places.append({
+            "id": place.get("id"),
+            "title": title,
+            "category": summary.get("category"),
+            "state": summary.get("state"),
+            "rank": summary.get("rank"),
+            "edited": bool(override.get("story") or override.get("summary") or override.get("hook")),
+            "updated_at": override.get("updated_at"),
+            "story_words": len(str(story).split()),
+        })
+    places.sort(key=lambda p: (not p["edited"], p.get("rank") or 9999, p.get("title") or ""))
+    limit = max(1, min(limit, 200))
+    return {"places": places[:limit], "total": len(places)}
+
+@app.get("/api/admin/explore/places/{place_id}")
+async def admin_explore_place(place_id: str, admin: dict = Depends(_require_admin)):
+    place_id = re.sub(r"[^a-zA-Z0-9_.:-]", "", place_id)[:180]
+    place = _find_explore_place(place_id)
+    if not place:
+        raise HTTPException(404, "Explore place not found")
+    override = get_explore_story_override(place_id)
+    summary = place.get("summary") or {}
+    profile = place.get("profile") or {}
+    return {
+        "place": place,
+        "override": override,
+        "editable": {
+            "title": override.get("title") or summary.get("title") or "",
+            "hook": override.get("hook") or profile.get("hook") or summary.get("hook") or "",
+            "summary": override.get("summary") or profile.get("summary") or summary.get("short_description") or "",
+            "story": override.get("story") or profile.get("story") or place.get("audio_script") or place.get("wiki_extract") or "",
+            "notes": override.get("notes") or "",
+        },
+    }
+
+@app.post("/api/admin/explore/places/{place_id}")
+async def admin_update_explore_place(place_id: str, body: ExploreStoryAdminBody,
+                                     admin: dict = Depends(_require_admin)):
+    place_id = re.sub(r"[^a-zA-Z0-9_.:-]", "", place_id)[:180]
+    if not _find_explore_place(place_id):
+        raise HTTPException(404, "Explore place not found")
+    old_override = get_explore_story_override(place_id)
+    old_story = old_override.get("story") or ""
+    story = " ".join(body.story.split()) if len(body.story) < 400 else body.story.strip()
+    override = set_explore_story_override(place_id, {
+        "title": body.title.strip()[:180],
+        "hook": body.hook.strip()[:500],
+        "summary": body.summary.strip()[:1200],
+        "story": story[:18000],
+        "notes": body.notes.strip()[:2000],
+    }, admin.get("id"))
+    purged_audio = await _purge_guide_audio_texts(old_story, override.get("story") or "")
+    log_event(admin["id"], None, "admin_explore_story_edit", {
+        "place_id": place_id,
+        "story_words": len((override.get("story") or "").split()),
+        "purged_audio": purged_audio,
+    })
+    return {"ok": True, "override": override, "purged_audio": purged_audio}
 
 @app.post("/api/admin/users/{user_id}/credits")
 async def admin_adjust_credits(user_id: int, body: AdminCreditBody,
@@ -2573,6 +3849,32 @@ async def admin_toggle_admin(user_id: int, admin: dict = Depends(_require_admin)
     new_state = not bool(user.get("is_admin"))
     set_user_admin(user_id, new_state)
     return {"ok": True, "is_admin": new_state}
+
+@app.post("/api/admin/users/{user_id}/plan")
+async def admin_set_user_plan(user_id: int, body: AdminPlanBody,
+                              admin: dict = Depends(_require_admin)):
+    plan = body.plan_type.strip().lower()
+    if plan not in {"free", "explorer"}:
+        raise HTTPException(400, "plan_type must be free or explorer")
+    user = get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(404, "User not found")
+    expires_at = None
+    if plan == "explorer":
+        days = min(max(body.duration_days, 1), 3660)
+        expires_at = int(time.time()) + days * 86400
+    updated = set_user_plan(user_id, plan, expires_at)
+    log_event(admin["id"], None, "admin_plan_override", {
+        "target_user_id": user_id,
+        "plan_type": plan,
+        "expires_at": expires_at,
+    })
+    return {
+        "ok": True,
+        "plan_type": updated.get("plan_type", "free") if updated else plan,
+        "plan_expires_at": updated.get("plan_expires_at") if updated else expires_at,
+        "is_active": has_active_plan(updated) if updated else False,
+    }
 
 @app.post("/api/admin/users/{user_id}/ban")
 async def admin_ban_user(user_id: int, admin: dict = Depends(_require_admin)):
@@ -2609,6 +3911,21 @@ async def admin_trips(admin: dict = Depends(_require_admin)):
 @app.get("/api/admin/pins")
 async def admin_pins(admin: dict = Depends(_require_admin)):
     return get_all_pins(limit=200)
+
+@app.get("/api/admin/pin-update-suggestions")
+async def admin_pin_update_suggestions(status: Optional[str] = "pending",
+                                       admin: dict = Depends(_require_admin)):
+    return get_pin_update_suggestions(status if status else None, limit=200)
+
+@app.post("/api/admin/pin-update-suggestions/{suggestion_id}/status")
+async def admin_pin_update_suggestion_status(suggestion_id: int, body: dict,
+                                             admin: dict = Depends(_require_admin)):
+    status = str(body.get("status") or "").strip().lower()
+    if status not in {"pending", "approved", "rejected"}:
+        raise HTTPException(400, "Invalid status")
+    if not update_pin_update_suggestion_status(suggestion_id, status):
+        raise HTTPException(404, "Suggestion not found")
+    return {"ok": True}
 
 @app.delete("/api/admin/pins/{pin_id}")
 async def admin_delete_pin(pin_id: int, admin: dict = Depends(_require_admin)):
@@ -2893,13 +4210,15 @@ async def land_check(lat: float, lng: float):
     return result
 
 
-# ── OSM POIs (water, trailheads, viewpoints, hot springs) ─────────────────────
+# ── OSM POIs (water, named trails, trailheads, viewpoints, hot springs) ────────
 
 @app.get("/api/osm-pois")
 async def osm_pois(lat: float, lng: float, radius: float = 30, types: str = "water,trailhead,viewpoint"):
     type_set = {t.strip() for t in types.split(",") if t.strip()}
     radius_m = int(radius * 1600)
     tasks = []
+    if "trail" in type_set or "trails" in type_set:
+        tasks.append(get_trails(lat, lng, radius_m=radius_m))
     if "water" in type_set:
         tasks.append(get_water_sources(lat, lng, radius_m=radius_m))
     if "trailhead" in type_set:
@@ -3064,6 +4383,42 @@ async def place_pack_download(region: str, pack_id: str = "essentials", user: di
     if not pack:
         raise HTTPException(404, "Place pack not found")
     return pack
+
+
+# ── Explore catalog ────────────────────────────────────────────────────────────
+
+@app.get("/api/explore/catalog")
+async def explore_catalog():
+    """Return the prebuilt featured Explore catalog. No request-time AI."""
+    return _load_explore_catalog()
+
+
+@app.get("/api/explore/places")
+async def explore_places(
+    lat: float | None = None,
+    lng: float | None = None,
+    mode: str = "featured",
+    limit: int = 60,
+):
+    catalog = _load_explore_catalog()
+    places = list(catalog.get("places") or [])
+    if lat is not None and lng is not None and mode in {"nearby", "trip"}:
+        ranked = []
+        for place in places:
+            summary = place.get("summary") or {}
+            plat = summary.get("lat")
+            plng = summary.get("lng")
+            if not isinstance(plat, (int, float)) or not isinstance(plng, (int, float)):
+                continue
+            dist_m = _haversine_m(lat, lng, float(plat), float(plng))
+            enriched = dict(place)
+            enriched["summary"] = {**summary, "distance_m": round(dist_m)}
+            ranked.append(enriched)
+        places = sorted(ranked, key=lambda p: (p.get("summary") or {}).get("distance_m", 999999999))
+    else:
+        places = sorted(places, key=lambda p: (p.get("summary") or {}).get("rank", 9999))
+    limit = max(1, min(limit, 100))
+    return {**catalog, "places": places[:limit], "mode": mode}
 
 
 # ── Wikipedia nearby ──────────────────────────────────────────────────────────

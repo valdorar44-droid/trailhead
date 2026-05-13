@@ -27,6 +27,18 @@ TaskManager.defineTask(AUDIO_LOCATION_TASK, async ({ data, error }: any) => {
   if (!loc) return;
 
   try {
+    await FileSystem.writeAsStringAsync(
+      FileSystem.documentDirectory + 'last_background_location.json',
+      JSON.stringify({
+        lat: loc.coords.latitude,
+        lng: loc.coords.longitude,
+        accuracy: loc.coords.accuracy ?? null,
+        speed: loc.coords.speed ?? null,
+        heading: loc.coords.heading ?? null,
+        ts: Date.now(),
+      }),
+    ).catch(() => {});
+
     const tripPath = FileSystem.documentDirectory + 'active_trip.json';
     const tripExists = await FileSystem.getInfoAsync(tripPath);
     if (!tripExists.exists) return;

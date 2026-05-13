@@ -95,10 +95,8 @@ export const TYPE = {
 };
 
 export function useTheme(): ColorPalette {
-  // Premium redesign is dark-only for now. Keep the light palette available for
-  // a later explicit light-mode pass, but never let persisted legacy settings
-  // pull current screens back into the old cream utility UI.
-  return DARK_C;
+  const themeMode = useStore(s => s.themeMode);
+  return themeMode === 'light' ? LIGHT_C : DARK_C;
 }
 
 // Mono font — Menlo on iOS is cleaner than Courier New

@@ -81,8 +81,8 @@ final class TrailheadNavigationEngine {
             }
 
             let acc = min(max(accuracy ?? 25, 0), 120)
-            let threshold = max(65, acc * 1.5 + 25)
-            let moving = (speed ?? 0) > 2.0
+            let threshold = max(50, acc * 1.8 + 25)
+            let moving = (speed ?? 0) > 1.2 || projection.deviationM > threshold + 45
             if projection.deviationM > threshold && moving {
                 offRouteStreak += 1
             } else if projection.deviationM < threshold * 0.65 {
@@ -98,7 +98,7 @@ final class TrailheadNavigationEngine {
                 "routeDistanceM": projection.routeDistanceM,
                 "deviationM": projection.deviationM,
                 "segmentIdx": projection.segmentIdx,
-                "offRoute": offRouteStreak >= 3,
+                "offRoute": offRouteStreak >= 2,
                 "warnOffRoute": offRouteStreak > 0,
                 "projectedLng": projection.projected.lng,
                 "projectedLat": projection.projected.lat

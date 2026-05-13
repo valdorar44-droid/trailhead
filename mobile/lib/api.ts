@@ -1,9 +1,15 @@
 import { storage } from './storage';
+import { Platform } from 'react-native';
 
 const BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
 
 async function getToken(): Promise<string | null> {
   return storage.get('trailhead_token');
+}
+
+export async function authHeaders(): Promise<Record<string, string>> {
+  const token = await getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 export class PaywallError extends Error {
@@ -153,20 +159,56 @@ export const api = {
     req('/api/pins', { method: 'POST', body: JSON.stringify(data) }),
   getNearbyPins: (lat: number, lng: number, radius = 1.0) =>
     req<Pin[]>(`/api/pins?lat=${lat}&lng=${lng}&radius=${radius}`),
+  suggestPinUpdate: (id: number, data: { pin_name: string; note: string; field?: string; value?: string }) =>
+    req<{ id?: number; status: string; credits_earned?: number; new_balance?: number }>(`/api/pins/${id}/suggest-update`, {
+      method: 'POST', body: JSON.stringify(data),
+    }),
   upvotePin: (id: number) => req<{ ok: boolean; upvotes: number; downvotes: number; hidden: boolean }>(`/api/pins/${id}/upvote`, { method: 'POST' }),
   downvotePin: (id: number) => req<{ ok: boolean; upvotes: number; downvotes: number; hidden: boolean }>(`/api/pins/${id}/downvote`, { method: 'POST' }),
 
   getAudioGuide: (tripId: string, generate = false) =>
     req<Record<string, string>>(`/api/trip/${tripId}/guide${generate ? '?generate=true' : ''}`),
+  getExploreCatalog: () =>
+    req<ExploreCatalog>('/api/explore/catalog'),
+  getExplorePlaces: (lat?: number, lng?: number, mode: 'featured' | 'nearby' | 'trip' = 'featured', limit = 60) => {
+    const qs = new URLSearchParams({ mode, limit: String(limit) });
+    if (lat != null && lng != null) {
+      qs.set('lat', String(lat));
+      qs.set('lng', String(lng));
+    }
+    return req<ExploreCatalog>(`/api/explore/places?${qs.toString()}`);
+  },
   nearbyAudio: (lat: number, lng: number, location_name = '') =>
     req<{ narration: string }>('/api/audio/nearby', {
       method: 'POST', body: JSON.stringify({ lat, lng, location_name }),
     }),
+  authorizeExploreAudio: (place_id: string, mode: 'summary' | 'story') =>
+    req<{ authorized: boolean; charged: number; already_unlocked?: boolean; plan?: boolean; credits: number }>('/api/audio/explore/authorize', {
+      method: 'POST', body: JSON.stringify({ place_id, mode }),
+    }),
+  ttsSource: async (text: string, mode: 'direction' | 'guide' = 'direction') => ({
+    ...(mode === 'guide' && text.length > 1600
+      ? { uri: `${BASE}${(await req<{ uri: string }>('/api/audio/tts-session', {
+          method: 'POST',
+          body: JSON.stringify({ mode, text }),
+        })).uri}` }
+      : { uri: `${BASE}/api/audio/tts?mode=${encodeURIComponent(mode)}&text=${encodeURIComponent(text)}` }),
+    headers: await authHeaders(),
+  }),
 
   getWeather: (lat: number, lng: number, days = 7) =>
     req<WeatherForecast>(`/api/weather?lat=${lat}&lng=${lng}&days=${days}`),
   getRouteWeather: (tripId: string, waypoints: Waypoint[]) =>
     req<RouteWeatherResult>('/api/weather/route', { method: 'POST', body: JSON.stringify({ trip_id: tripId, waypoints }) }),
+  buildRoute: (locations: Array<{ lat: number; lng: number; type?: 'break' | 'through' }>, options: RouteBuildOptions = {}) =>
+    req<RouteBuildResult>('/api/route', {
+      method: 'POST',
+      body: JSON.stringify({
+        locations: locations.map(loc => ({ lat: loc.lat, lon: loc.lng, type: loc.type ?? 'break' })),
+        options,
+        units: 'miles',
+      }),
+    }),
 
   // Discovery
   getNearbyCamps: (lat: number, lng: number, radius = 50, types: string[] = []) =>
@@ -175,6 +217,23 @@ export const api = {
     req<CampsitePin[]>(`/api/camps/bbox?n=${n}&s=${s}&e=${e}&w=${w}&types=${types.join(',')}`),
   getOsmPois: (lat: number, lng: number, radius = 30, types = 'water,trailhead,viewpoint') =>
     req<OsmPoi[]>(`/api/osm-pois?lat=${lat}&lng=${lng}&radius=${radius}&types=${types}`),
+  discoverTrails: (params: TrailDiscoverParams) => {
+    const qs = new URLSearchParams({ mode: params.mode ?? 'nearby', limit: String(params.limit ?? 60) });
+    if (params.lat != null) qs.set('lat', String(params.lat));
+    if (params.lng != null) qs.set('lng', String(params.lng));
+    if (params.radius != null) qs.set('radius', String(params.radius));
+    if (params.n != null) qs.set('n', String(params.n));
+    if (params.s != null) qs.set('s', String(params.s));
+    if (params.e != null) qs.set('e', String(params.e));
+    if (params.w != null) qs.set('w', String(params.w));
+    return req<TrailDiscoverResponse>(`/api/trails/discover?${qs.toString()}`);
+  },
+  getTrailProfile: (trailId: string) =>
+    req<TrailProfile>(`/api/trails/${encodeURIComponent(trailId)}`),
+  suggestTrailEdit: (trailId: string, data: TrailEditSuggestionPayload) =>
+    req<{ id: number; status: string; credits_earned: number; new_balance: number }>(`/api/trails/${encodeURIComponent(trailId)}/suggest-edit`, {
+      method: 'POST', body: JSON.stringify(data),
+    }),
   buildTripEssentialsPack: (data: PlaceTripPackRequest) =>
     req<PlacePack>('/api/places/trip-essentials', {
       method: 'POST', body: JSON.stringify(data),
@@ -196,6 +255,25 @@ export const api = {
 
   submitBugReport: (data: { title: string; description: string; app_version?: string }) =>
     req<{ bug_id: number; message: string }>('/api/bugs', { method: 'POST', body: JSON.stringify(data) }),
+
+  getContestStatus: () =>
+    req<ContestStatus>('/api/contest/status'),
+  enterContestDrawing: () =>
+    req<{ ok: boolean; entry: ContestEntry; status: ContestUserStatus }>('/api/contest/free-entry', { method: 'POST' }),
+  getContestRules: () =>
+    req<ContestRules>('/api/contest/rules'),
+  getMyContributions: () =>
+    req<ContributorProfile>('/api/contributions/me'),
+  getContributionsLeaderboard: (period: ContributionPeriod = 'month') =>
+    req<ContributorLeaderboardResponse>(`/api/contributions/leaderboard?period=${period}`),
+  getContributorProfile: (userId: number) =>
+    req<ContributorProfile>(`/api/contributors/${userId}`),
+  setContributionVisibility: (visible: boolean) =>
+    req<ContributorProfile>('/api/contributions/privacy', { method: 'POST', body: JSON.stringify({ visible }) }),
+  applyMapContributor: (data: MapContributorApplicationPayload) =>
+    req<{ ok: boolean; application: MapContributorApplication }>('/api/contributions/map-contributor/apply', {
+      method: 'POST', body: JSON.stringify(data),
+    }),
 
   getLandCheck: (lat: number, lng: number) =>
     req<LandCheck>(`/api/land-check?lat=${lat}&lng=${lng}`),
@@ -221,13 +299,21 @@ export const api = {
     req<CampFieldReport[]>(`/api/camps/${encodeURIComponent(campId)}/field-reports`),
   getFieldReportSummary: (campId: string) =>
     req<FieldReportSummary>(`/api/camps/${encodeURIComponent(campId)}/field-report-summary`),
+  submitTrailFieldReport: (trailId: string, data: TrailFieldReportPayload) =>
+    req<{ credits_earned: number; new_balance: number }>(`/api/trails/${encodeURIComponent(trailId)}/field-report`, {
+      method: 'POST', body: JSON.stringify(data),
+    }),
+  getTrailFieldReports: (trailId: string) =>
+    req<CampFieldReport[]>(`/api/trails/${encodeURIComponent(trailId)}/field-reports`),
+  getTrailFieldReportSummary: (trailId: string) =>
+    req<FieldReportSummary>(`/api/trails/${encodeURIComponent(trailId)}/field-report-summary`),
 
   // Subscription
   subscriptionStatus: () =>
     req<SubscriptionStatus>('/api/subscription/status'),
   activateSubscription: (product_id: string, transaction_id: string) =>
     req<{ status: string; plan_type: string; plan_expires_at: number }>('/api/subscription/activate', {
-      method: 'POST', body: JSON.stringify({ product_id, transaction_id }),
+      method: 'POST', body: JSON.stringify({ product_id, transaction_id, platform: Platform.OS }),
     }),
   authorizeOfflineDownload: (asset_type: OfflineAssetType, region_id: string, label = '') =>
     req<OfflineAuthorizeResult>('/api/offline/authorize', {
@@ -337,6 +423,66 @@ export interface CreditPackage {
 export interface LeaderboardEntry {
   username: string; report_count: number; total_upvotes: number; streak: number;
 }
+export interface ContestLeader {
+  user_id: number; username: string; display_name: string; points: number; event_count: number; rank: number;
+}
+export interface ContestRules {
+  title: string; eligibility: string; sponsor: string; prizes: string[]; entries: string; odds: string; points: string; contact: string;
+}
+export interface ContestEntry {
+  id: number; user_id: number; period_month: string; period_year: string; entry_type: 'free' | 'subscriber'; created_at: number;
+}
+export interface ContestUserStatus {
+  period_month: string; period_year: string; month_points: number; year_points: number;
+  month_rank?: number | null; year_rank?: number | null; drawing_entered: boolean; drawing_entry_type?: string | null;
+}
+export interface ContestStatus extends ContestUserStatus {
+  rules: ContestRules; month_leaders: ContestLeader[]; year_leaders: ContestLeader[];
+}
+export type ContributionPeriod = 'month' | 'year' | 'all';
+export interface ContributorTier {
+  id: string; label: string; points_required: number; next_label?: string | null; next_points?: number | null; progress: number;
+}
+export interface ContributorBadge {
+  id: string; label: string; description: string; icon: string; tone: string; source: 'auto' | 'admin'; earned_at?: number | null;
+}
+export interface ContributorAward {
+  id: number; prize_type: string; period_month?: string | null; period_year: string; prize_label: string; status: string; created_at: number;
+}
+export interface ContributorStats {
+  total_events: number; reports: number; pins: number; camp_reports: number; trail_reports: number;
+  confirmations: number; photos: number; edits: number; camp_status: number; signal_water_road?: number;
+}
+export interface ContributorProfile {
+  user_id: number; username: string; display_name: string; is_self?: boolean; public_profile_visible: boolean;
+  title: string; bio: string; avatar_color: string; joined_at: number;
+  points: { month: number; year: number; all: number };
+  rank: { month?: number | null; year?: number | null; all?: number | null };
+  streak: number; tier: ContributorTier; stats: ContributorStats; badges: ContributorBadge[];
+  awards: ContributorAward[]; recent_activity: { label: string; count: number; points: number }[];
+}
+export interface ContributorLeader {
+  user_id: number; username: string; display_name: string; is_self?: boolean; rank_number: number; points_for_period: number;
+  title: string; avatar_color: string; streak: number; tier: ContributorTier; stats: ContributorStats;
+  badges: ContributorBadge[]; awards: ContributorAward[]; event_count: number;
+  points: { month: number; year: number; all: number };
+}
+export interface ContributorLeaderboardResponse {
+  period: ContributionPeriod; leaders: ContributorLeader[];
+}
+export interface MapContributorApplicationPayload {
+  experience: string;
+  regions: string[];
+  sample_note?: string;
+}
+export interface MapContributorApplication extends MapContributorApplicationPayload {
+  id: number;
+  user_id: number;
+  username?: string;
+  status: 'pending' | 'approved' | 'dismissed';
+  created_at: number;
+  updated_at: number;
+}
 export interface Pin {
   id: number; lat: number; lng: number; name: string; type: string; description: string; land_type: string;
   details?: Record<string, string> | string;
@@ -348,10 +494,74 @@ export interface PinPayload {
 }
 export interface OsmPoi {
   id: string; name: string; lat: number; lng: number;
-  type: 'water' | 'trailhead' | 'viewpoint' | 'peak' | 'hot_spring' | 'fuel' | 'propane' | 'dump' | 'shower' | 'laundromat' | 'lodging' | 'food' | 'grocery' | 'mechanic' | 'parking' | 'attraction' | 'poi'; subtype?: string; elevation?: string;
+  type: 'water' | 'trail' | 'trailhead' | 'viewpoint' | 'peak' | 'hot_spring' | 'fuel' | 'propane' | 'dump' | 'shower' | 'laundromat' | 'lodging' | 'food' | 'grocery' | 'mechanic' | 'parking' | 'attraction' | 'poi'; subtype?: string; elevation?: string;
   source?: string;
+  profile_id?: string;
+  source_label?: string;
+  photo_url?: string | null;
+  length_mi?: number | null;
+  activities?: string[];
+  last_checked?: number;
   route_distance_mi?: number; route_fit?: string;
   route_progress?: number; route_progress_mi?: number; route_segment_index?: number;
+}
+export interface TrailClaim {
+  source: string;
+  last_checked?: number;
+  note?: string;
+}
+export interface TrailPhoto {
+  url: string;
+  caption?: string;
+  credit?: string;
+  source?: string;
+}
+export interface TrailProfile {
+  id: string;
+  name: string;
+  summary?: string;
+  description?: string;
+  lat: number;
+  lng: number;
+  length_mi?: number | null;
+  difficulty?: string;
+  activities: string[];
+  land_manager?: string;
+  geometry?: GeoJSON.FeatureCollection | null;
+  trailheads: Array<{ name?: string; lat: number; lng: number; source?: string }>;
+  official_url?: string;
+  photos: TrailPhoto[];
+  source: string;
+  source_label: string;
+  provenance: Record<string, TrailClaim>;
+  last_checked: number;
+  admin_edited?: boolean;
+  distance_mi?: number;
+  viewport_score?: number;
+  field_report_summary?: FieldReportSummary;
+}
+export interface TrailDiscoverParams {
+  lat?: number;
+  lng?: number;
+  radius?: number;
+  n?: number;
+  s?: number;
+  e?: number;
+  w?: number;
+  mode?: 'nearby' | 'view';
+  limit?: number;
+}
+export interface TrailDiscoverResponse {
+  mode: 'nearby' | 'view';
+  source: string;
+  offline: boolean;
+  trails: TrailProfile[];
+}
+export interface TrailEditSuggestionPayload {
+  trail_name: string;
+  field: string;
+  value: string;
+  note?: string;
 }
 export interface PlaceTripPackRequest {
   trip_id?: string;
@@ -396,6 +606,84 @@ export interface PlacePackManifestEntry {
 export interface PlacePackManifest {
   definitions: Record<string, { id: string; name: string; description: string; categories: string[] }>;
   packs: Record<string, PlacePackManifestEntry>;
+}
+export type ExploreCategory = 'Park' | 'National Monument' | 'Historic Site' | 'Scenic Landmark' | 'National Preserve' | 'National Seashore' | 'National Lakeshore' | string;
+export interface ExplorePlaceSummary {
+  id: string;
+  title: string;
+  category: ExploreCategory;
+  state: string;
+  region: string;
+  lat?: number | null;
+  lng?: number | null;
+  rank: number;
+  tags: string[];
+  hook: string;
+  short_description: string;
+  thumbnail_url?: string | null;
+  image_url?: string | null;
+  source_url?: string | null;
+  source_title?: string;
+  distance_m?: number;
+  day?: number;
+}
+export interface ExplorePlaceProfile {
+  id: string;
+  summary: ExplorePlaceSummary;
+  profile: {
+    hook: string;
+    summary?: string;
+    story?: string;
+    why_it_matters: string;
+    what_to_know: string;
+    best_time_to_stop: string;
+    access_notes: string;
+    nearby_context: string;
+  };
+  audio_script: string;
+  wiki_extract: string;
+  source_pack?: {
+    quality?: 'official' | 'wiki' | string;
+    primary?: string;
+    official_url?: string;
+    nps_park_code?: string;
+    sources?: { title?: string; publisher?: string; url?: string; kind?: string }[];
+    photos?: { url?: string; caption?: string; credit?: string }[];
+    activities?: string[];
+    topics?: string[];
+    things_to_do?: ExploreSourcePackItem[];
+    things_to_see?: ExploreSourcePackItem[];
+    visitor_centers?: ExploreSourcePackItem[];
+    campgrounds?: ExploreSourcePackItem[];
+    fees?: string[];
+    operating_hours?: string;
+    alerts?: { title?: string; category?: string; url?: string }[];
+    source_note?: string;
+    extract?: string;
+  };
+  facts: { coordinates?: string; source_url?: string; source_title?: string; official_url?: string; source_quality?: string; last_updated?: number };
+  attribution: string;
+}
+export interface ExploreSourcePackItem {
+  kind?: string;
+  title?: string;
+  description?: string;
+  url?: string;
+  lat?: number | null;
+  lng?: number | null;
+  image_url?: string;
+  image_caption?: string;
+  image_credit?: string;
+}
+export interface ExploreCatalog {
+  schema_version: number;
+  catalog_id: string;
+  name: string;
+  generated_at: number;
+  source: string;
+  future_pack_compatible?: boolean;
+  mode?: string;
+  places: ExplorePlaceProfile[];
 }
 export interface WikiArticle {
   title: string; lat: number; lng: number; dist_m: number; extract: string; url: string;
@@ -444,6 +732,20 @@ export interface RouteWeatherResult {
   trip_id: string;
   forecasts: Record<string, WeatherForecast>;
 }
+export interface RouteBuildOptions {
+  avoidTolls?: boolean;
+  avoidHighways?: boolean;
+  backRoads?: boolean;
+  noFerries?: boolean;
+}
+export interface RouteBuildResult {
+  trip?: {
+    status?: number;
+    summary?: { length?: number; time?: number };
+    legs?: Array<{ shape?: string; summary?: { length?: number; time?: number } }>;
+  };
+  _trailhead?: { engine?: string; cache?: string; cache_key?: string };
+}
 export interface CampFullness {
   camp_id: string; camp_name: string; lat: number; lng: number;
   status: 'full' | 'open'; reporter_id: number; username?: string;
@@ -485,6 +787,19 @@ export type FieldReportCrowd = 'empty' | 'few_rigs' | 'packed';
 
 export interface FieldReportPayload {
   camp_name: string;
+  lat: number;
+  lng: number;
+  rig_label?: string;
+  visited_date: string;
+  sentiment: FieldReportSentiment;
+  access_condition: FieldReportAccess;
+  crowd_level: FieldReportCrowd;
+  tags: string[];
+  note?: string;
+  photo_data?: string;
+}
+export interface TrailFieldReportPayload {
+  trail_name: string;
   lat: number;
   lng: number;
   rig_label?: string;

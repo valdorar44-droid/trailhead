@@ -12,20 +12,10 @@ const TOUR_NEVER = 'trailhead_guided_tour_never';
 
 const STEPS = [
   {
-    route: '/(tabs)',
-    icon: 'compass-outline',
-    title: 'Plan a trip',
-    body: 'Tell Trailhead where you want to go, how many days, and your vehicle style. The planner turns that into days, stops, camps, fuel, and map pins.',
-    target: 'PLAN TAB',
-    targetKind: 'tab',
-    tabIndex: 0,
-    targetKey: 'plan.input',
-  },
-  {
     route: '/(tabs)/map',
     icon: 'map-outline',
-    title: 'Use the map',
-    body: 'The map is where your trip becomes usable. Search camps, start navigation, download offline regions, switch layers, and check your compass.',
+    title: 'Start with the map',
+    body: 'Pan the map to inspect camps, trails, reports, public-land context, and your route.',
     target: 'MAP',
     targetKind: 'mapCanvas',
     targetKey: 'map.canvas',
@@ -33,8 +23,8 @@ const STEPS = [
   {
     route: '/(tabs)/map',
     icon: 'search-outline',
-    title: 'Search from controls',
-    body: 'Tap the search icon in the map controls to find camps, towns, gas, or a destination. The top strip only shows route status.',
+    title: 'Search and navigate',
+    body: 'Search for camps, towns, gas, trailheads, or a destination. Preview the route before starting.',
     target: 'SEARCH BUTTON',
     targetKind: 'mapSearch',
     targetKey: 'map.search',
@@ -42,17 +32,35 @@ const STEPS = [
   {
     route: '/(tabs)/map',
     icon: 'layers-outline',
-    title: 'Map settings',
-    body: 'Map controls switch online/offline map sources, layers, terrain, radar, fire, avalanche, public land overlays, and campsite filters.',
+    title: 'Tune the map',
+    body: 'Layers control terrain, radar, fire, public land, trailheads, water, fuel, and offline place packs.',
     target: 'LAYERS',
     targetKind: 'mapLayers',
     targetKey: 'map.layers',
   },
   {
     route: '/(tabs)/map',
+    icon: 'trail-sign-outline',
+    title: 'Discover trails',
+    body: 'Tap the trail button to find trailheads and trail places near you. Use the CAMP/TRAIL area search when you want trails in the current map view.',
+    target: 'TRAILS',
+    targetKind: 'mapTrails',
+    targetKey: 'map.trails',
+  },
+  {
+    route: '/(tabs)/map',
+    icon: 'git-branch-outline',
+    title: 'Build trails with pins',
+    body: 'For trail routes, pan the map and drop pins at bends, forks, and the finish. Preview the line, then save or follow.',
+    target: 'PIN BUILDER',
+    targetKind: 'mapTrailBuilder',
+    targetKey: 'map.trailBuilder',
+  },
+  {
+    route: '/(tabs)/map',
     icon: 'download-outline',
-    title: 'Offline maps',
-    body: 'Download region maps, routing packs, or trip corridors before you leave service. Offline map status appears quietly while you pan.',
+    title: 'Download before signal drops',
+    body: 'Download maps, routing, contours, trail systems, trip corridors, and place packs before you leave service.',
     target: 'OFFLINE',
     targetKind: 'mapOffline',
     targetKey: 'map.offline',
@@ -60,37 +68,17 @@ const STEPS = [
   {
     route: '/(tabs)/map',
     icon: 'location-outline',
-    title: 'Pins and reports',
-    body: 'Use PIN to add community places like propane, water, dumps, camps, or repairs. Use REPORT for short-lived hazards and trail conditions.',
+    title: 'Add pins and reports',
+    body: 'Use PIN for places worth keeping. Use REPORT for hazards, closures, and current trail conditions.',
     target: 'PIN / REPORT',
     targetKind: 'mapQuick',
     targetKey: 'map.pinReport',
   },
   {
-    route: '/(tabs)/route-builder',
-    icon: 'trail-sign-outline',
-    title: 'Build manually',
-    body: 'Route Builder is for people who want control. Add day starts, destinations, gas between days, POIs, and camps without asking AI.',
-    target: 'ROUTE TAB',
-    targetKind: 'tab',
-    tabIndex: 2,
-    targetKey: 'routeBuilder.search',
-  },
-  {
-    route: '/(tabs)/report',
-    icon: 'warning-outline',
-    title: 'Reports help everyone',
-    body: 'Reports keep the map current. Road hazards, closures, water, camp status, and trail notes earn credits and help other travelers.',
-    target: 'REPORT TAB',
-    targetKind: 'tab',
-    tabIndex: 3,
-    targetKey: 'report.types',
-  },
-  {
     route: '/(tabs)/guide',
     icon: 'headset-outline',
-    title: 'Audio guide',
-    body: 'Guide gives you spoken context about places, weather, and the route. It is useful when you want less screen time on the trail.',
+    title: 'Explore and listen',
+    body: 'Guide has Explore cards, Summary and Full Story audio, trip narrations, weather, and What’s Around Me.',
     target: 'GUIDE TAB',
     targetKind: 'tab',
     tabIndex: 4,
@@ -99,12 +87,32 @@ const STEPS = [
   {
     route: '/(tabs)/profile',
     icon: 'person-outline',
-    title: 'Profile and downloads',
-    body: 'Profile keeps your trips, rig, credits, plan status, GPX tools, app settings, and this walkthrough if you want to see it again.',
+    title: 'Set up your profile',
+    body: 'Profile keeps your rig, credits, Explorer status, saved trips, GPX tools, checklist, and app settings.',
     target: 'PROFILE TAB',
     targetKind: 'tab',
     tabIndex: 5,
     targetKey: 'profile.main',
+  },
+  {
+    route: '/(tabs)',
+    icon: 'compass-outline',
+    title: 'Ask the AI planner',
+    body: 'Tell Trailhead where you want to go, how many days you have, and what your rig can handle.',
+    target: 'PLAN TAB',
+    targetKind: 'tab',
+    tabIndex: 0,
+    targetKey: 'plan.input',
+  },
+  {
+    route: '/(tabs)/route-builder',
+    icon: 'trail-sign-outline',
+    title: 'Build routes by hand',
+    body: 'Route Builder is for control: saved routes, starts, destinations, gas, camps, POIs, and saved trail routes.',
+    target: 'ROUTE TAB',
+    targetKind: 'tab',
+    tabIndex: 2,
+    targetKey: 'routeBuilder.search',
   },
 ] as const;
 
@@ -166,6 +174,22 @@ export default function GuidedTourOverlay() {
       return {
         left: Math.max(10, width - 70),
         top: insets.top + 462,
+        width: 58,
+        height: 58,
+      };
+    }
+    if (step.targetKind === 'mapTrails') {
+      return {
+        left: Math.max(10, width - 70),
+        top: insets.top + 384,
+        width: 58,
+        height: 58,
+      };
+    }
+    if (step.targetKind === 'mapTrailBuilder') {
+      return {
+        left: Math.max(10, width - 70),
+        top: insets.top + 436,
         width: 58,
         height: 58,
       };

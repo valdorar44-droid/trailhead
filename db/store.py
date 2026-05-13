@@ -1,6 +1,6 @@
 """SQLite WAL store. Schema + queries."""
 from __future__ import annotations
-import sqlite3, json, time, math
+import sqlite3, json, time, math, hashlib, random
 from config.settings import settings
 
 # Report expiry by type (seconds)
@@ -72,11 +72,43 @@ def init_db():
             downvotes    INTEGER NOT NULL DEFAULT 0,
             hidden       INTEGER NOT NULL DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS pin_update_suggestions (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            pin_id      INTEGER NOT NULL,
+            pin_name    TEXT NOT NULL,
+            user_id     INTEGER,
+            username    TEXT,
+            field       TEXT NOT NULL,
+            value       TEXT NOT NULL,
+            note        TEXT,
+            status      TEXT NOT NULL DEFAULT 'pending',
+            created_at  INTEGER NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS stripe_purchases (
             session_id  TEXT PRIMARY KEY,
             user_id     INTEGER NOT NULL,
             credits     INTEGER NOT NULL,
             created_at  INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS app_store_subscriptions (
+            original_transaction_id TEXT PRIMARY KEY,
+            transaction_id          TEXT,
+            user_id                 INTEGER NOT NULL REFERENCES users(id),
+            product_id              TEXT NOT NULL,
+            environment             TEXT,
+            expires_at              INTEGER,
+            status                  TEXT NOT NULL DEFAULT 'active',
+            updated_at              INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS explore_story_overrides (
+            place_id      TEXT PRIMARY KEY,
+            title         TEXT,
+            story         TEXT,
+            summary       TEXT,
+            hook          TEXT,
+            notes         TEXT,
+            updated_by    INTEGER,
+            updated_at    INTEGER NOT NULL
         );
         CREATE TABLE IF NOT EXISTS users (
             id                       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -97,6 +129,10 @@ def init_db():
             password_reset_token     TEXT,
             password_reset_sent_at   INTEGER,
             password_reset_expires_at INTEGER,
+            public_profile_visible   INTEGER NOT NULL DEFAULT 1,
+            contributor_title        TEXT,
+            contributor_bio          TEXT,
+            contributor_avatar_color TEXT,
             created_at               INTEGER NOT NULL
         );
         CREATE TABLE IF NOT EXISTS credit_transactions (
@@ -237,6 +273,59 @@ def init_db():
             credits_earned   INTEGER NOT NULL DEFAULT 0,
             created_at       INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS trail_field_reports (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            trail_id         TEXT NOT NULL,
+            trail_name       TEXT NOT NULL,
+            lat              REAL NOT NULL,
+            lng              REAL NOT NULL,
+            user_id          INTEGER NOT NULL REFERENCES users(id),
+            username         TEXT NOT NULL,
+            rig_label        TEXT,
+            visited_date     TEXT NOT NULL,
+            sentiment        TEXT NOT NULL,
+            access_condition TEXT NOT NULL,
+            crowd_level      TEXT NOT NULL,
+            tags             TEXT NOT NULL DEFAULT '[]',
+            note             TEXT,
+            photo_data       TEXT,
+            credits_earned   INTEGER NOT NULL DEFAULT 0,
+            created_at       INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS trail_profiles (
+            id           TEXT PRIMARY KEY,
+            name         TEXT NOT NULL,
+            summary      TEXT,
+            description  TEXT,
+            lat          REAL NOT NULL,
+            lng          REAL NOT NULL,
+            length_mi    REAL,
+            difficulty   TEXT,
+            activities   TEXT NOT NULL DEFAULT '[]',
+            land_manager TEXT,
+            geometry     TEXT,
+            trailheads   TEXT NOT NULL DEFAULT '[]',
+            official_url TEXT,
+            photos       TEXT NOT NULL DEFAULT '[]',
+            source       TEXT NOT NULL,
+            source_label TEXT NOT NULL,
+            provenance   TEXT NOT NULL DEFAULT '{}',
+            last_checked INTEGER NOT NULL,
+            admin_edited INTEGER NOT NULL DEFAULT 0,
+            updated_at   INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS trail_edit_suggestions (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            trail_id    TEXT NOT NULL,
+            trail_name  TEXT NOT NULL,
+            user_id     INTEGER,
+            username    TEXT,
+            field       TEXT NOT NULL,
+            value       TEXT NOT NULL,
+            note        TEXT,
+            status      TEXT NOT NULL DEFAULT 'pending',
+            created_at  INTEGER NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS offline_downloads (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id     INTEGER NOT NULL REFERENCES users(id),
@@ -247,6 +336,64 @@ def init_db():
             created_at   INTEGER NOT NULL,
             UNIQUE(user_id, asset_type, region_id)
         );
+        CREATE TABLE IF NOT EXISTS contest_events (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id      INTEGER NOT NULL REFERENCES users(id),
+            points       INTEGER NOT NULL,
+            source_type  TEXT NOT NULL,
+            source_id    TEXT NOT NULL,
+            label        TEXT NOT NULL,
+            period_month TEXT NOT NULL,
+            period_year  TEXT NOT NULL,
+            created_at   INTEGER NOT NULL,
+            UNIQUE(user_id, source_type, source_id)
+        );
+        CREATE TABLE IF NOT EXISTS contest_entries (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id     INTEGER NOT NULL REFERENCES users(id),
+            period_month TEXT NOT NULL,
+            period_year  TEXT NOT NULL,
+            entry_type  TEXT NOT NULL,
+            created_at  INTEGER NOT NULL,
+            UNIQUE(user_id, period_month)
+        );
+        CREATE TABLE IF NOT EXISTS contest_awards (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            prize_type      TEXT NOT NULL,
+            period_month    TEXT,
+            period_year     TEXT NOT NULL,
+            winner_user_id  INTEGER REFERENCES users(id),
+            winner_username TEXT,
+            points_snapshot INTEGER NOT NULL DEFAULT 0,
+            entry_count     INTEGER NOT NULL DEFAULT 0,
+            prize_label     TEXT NOT NULL,
+            status          TEXT NOT NULL DEFAULT 'selected',
+            notes           TEXT,
+            awarded_by      INTEGER REFERENCES users(id),
+            created_at      INTEGER NOT NULL,
+            updated_at      INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS contributor_badges (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id     INTEGER NOT NULL REFERENCES users(id),
+            badge_id    TEXT NOT NULL,
+            label       TEXT NOT NULL,
+            description TEXT,
+            granted_by  INTEGER REFERENCES users(id),
+            created_at  INTEGER NOT NULL,
+            UNIQUE(user_id, badge_id)
+        );
+        CREATE TABLE IF NOT EXISTS map_contributor_applications (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id     INTEGER NOT NULL REFERENCES users(id),
+            username    TEXT,
+            experience  TEXT,
+            regions     TEXT,
+            sample_note TEXT,
+            status      TEXT NOT NULL DEFAULT 'pending',
+            created_at  INTEGER NOT NULL,
+            updated_at  INTEGER NOT NULL
+        );
     """)
     # Performance indexes (IF NOT EXISTS is safe to re-run)
     for idx_sql in [
@@ -255,6 +402,10 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_reports_user_type ON reports(user_id, type, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_pins_geo ON community_pins(lat, lng)",
         "CREATE INDEX IF NOT EXISTS idx_pins_user_time ON community_pins(user_id, submitted_at)",
+        "CREATE INDEX IF NOT EXISTS idx_pin_update_suggestions_status ON pin_update_suggestions(status, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_trail_field_reports_trail ON trail_field_reports(trail_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_trail_profiles_geo ON trail_profiles(lat, lng)",
+        "CREATE INDEX IF NOT EXISTS idx_trail_edit_suggestions_status ON trail_edit_suggestions(status, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_fullness_geo ON camp_fullness(lat, lng, status, expires_at)",
         "CREATE INDEX IF NOT EXISTS idx_credits_user ON credit_transactions(user_id, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_analytics_session ON analytics_events(session_id, event_type)",
@@ -263,6 +414,12 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_offline_downloads_user ON offline_downloads(user_id, asset_type, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_users_email_verify_token ON users(email_verify_token)",
         "CREATE INDEX IF NOT EXISTS idx_users_password_reset_token ON users(password_reset_token)",
+        "CREATE INDEX IF NOT EXISTS idx_contest_events_period ON contest_events(period_year, period_month, points)",
+        "CREATE INDEX IF NOT EXISTS idx_contest_events_user_period ON contest_events(user_id, period_year, period_month)",
+        "CREATE INDEX IF NOT EXISTS idx_contest_entries_period ON contest_entries(period_month, entry_type)",
+        "CREATE INDEX IF NOT EXISTS idx_contest_awards_period ON contest_awards(period_year, period_month, prize_type)",
+        "CREATE INDEX IF NOT EXISTS idx_contributor_badges_user ON contributor_badges(user_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_map_contributor_applications_status ON map_contributor_applications(status, created_at)",
     ]:
         try:
             db.execute(idx_sql)
@@ -290,10 +447,42 @@ def init_db():
             created_at INTEGER NOT NULL,
             UNIQUE(pin_id, user_id, action)
         )""",
+        """CREATE TABLE IF NOT EXISTS pin_update_suggestions (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            pin_id      INTEGER NOT NULL,
+            pin_name    TEXT NOT NULL,
+            user_id     INTEGER,
+            username    TEXT,
+            field       TEXT NOT NULL,
+            value       TEXT NOT NULL,
+            note        TEXT,
+            status      TEXT NOT NULL DEFAULT 'pending',
+            created_at  INTEGER NOT NULL
+        )""",
         "ALTER TABLE trips ADD COLUMN audio_guide TEXT",
         "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE trips ADD COLUMN user_id INTEGER",
         "CREATE TABLE IF NOT EXISTS stripe_purchases (session_id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, credits INTEGER NOT NULL, created_at INTEGER NOT NULL)",
+        """CREATE TABLE IF NOT EXISTS app_store_subscriptions (
+            original_transaction_id TEXT PRIMARY KEY,
+            transaction_id          TEXT,
+            user_id                 INTEGER NOT NULL REFERENCES users(id),
+            product_id              TEXT NOT NULL,
+            environment             TEXT,
+            expires_at              INTEGER,
+            status                  TEXT NOT NULL DEFAULT 'active',
+            updated_at              INTEGER NOT NULL
+        )""",
+        """CREATE TABLE IF NOT EXISTS explore_story_overrides (
+            place_id      TEXT PRIMARY KEY,
+            title         TEXT,
+            story         TEXT,
+            summary       TEXT,
+            hook          TEXT,
+            notes         TEXT,
+            updated_by    INTEGER,
+            updated_at    INTEGER NOT NULL
+        )""",
         "ALTER TABLE users ADD COLUMN plan_type TEXT NOT NULL DEFAULT 'free'",
         "ALTER TABLE users ADD COLUMN plan_expires_at INTEGER",
         "ALTER TABLE users ADD COLUMN camp_searches_used INTEGER NOT NULL DEFAULT 0",
@@ -304,6 +493,10 @@ def init_db():
         "ALTER TABLE users ADD COLUMN password_reset_token TEXT",
         "ALTER TABLE users ADD COLUMN password_reset_sent_at INTEGER",
         "ALTER TABLE users ADD COLUMN password_reset_expires_at INTEGER",
+        "ALTER TABLE users ADD COLUMN public_profile_visible INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE users ADD COLUMN contributor_title TEXT",
+        "ALTER TABLE users ADD COLUMN contributor_bio TEXT",
+        "ALTER TABLE users ADD COLUMN contributor_avatar_color TEXT",
         """CREATE TABLE IF NOT EXISTS plan_jobs (
             id          TEXT PRIMARY KEY,
             user_id     INTEGER,
@@ -342,6 +535,59 @@ def init_db():
             credits_earned   INTEGER NOT NULL DEFAULT 0,
             created_at       INTEGER NOT NULL
         )""",
+        """CREATE TABLE IF NOT EXISTS trail_field_reports (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            trail_id         TEXT NOT NULL,
+            trail_name       TEXT NOT NULL,
+            lat              REAL NOT NULL,
+            lng              REAL NOT NULL,
+            user_id          INTEGER NOT NULL REFERENCES users(id),
+            username         TEXT NOT NULL,
+            rig_label        TEXT,
+            visited_date     TEXT NOT NULL,
+            sentiment        TEXT NOT NULL,
+            access_condition TEXT NOT NULL,
+            crowd_level      TEXT NOT NULL,
+            tags             TEXT NOT NULL DEFAULT '[]',
+            note             TEXT,
+            photo_data       TEXT,
+            credits_earned   INTEGER NOT NULL DEFAULT 0,
+            created_at       INTEGER NOT NULL
+        )""",
+        """CREATE TABLE IF NOT EXISTS trail_profiles (
+            id           TEXT PRIMARY KEY,
+            name         TEXT NOT NULL,
+            summary      TEXT,
+            description  TEXT,
+            lat          REAL NOT NULL,
+            lng          REAL NOT NULL,
+            length_mi    REAL,
+            difficulty   TEXT,
+            activities   TEXT NOT NULL DEFAULT '[]',
+            land_manager TEXT,
+            geometry     TEXT,
+            trailheads   TEXT NOT NULL DEFAULT '[]',
+            official_url TEXT,
+            photos       TEXT NOT NULL DEFAULT '[]',
+            source       TEXT NOT NULL,
+            source_label TEXT NOT NULL,
+            provenance   TEXT NOT NULL DEFAULT '{}',
+            last_checked INTEGER NOT NULL,
+            admin_edited INTEGER NOT NULL DEFAULT 0,
+            updated_at   INTEGER NOT NULL
+        )""",
+        """CREATE TABLE IF NOT EXISTS trail_edit_suggestions (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            trail_id    TEXT NOT NULL,
+            trail_name  TEXT NOT NULL,
+            user_id     INTEGER,
+            username    TEXT,
+            field       TEXT NOT NULL,
+            value       TEXT NOT NULL,
+            note        TEXT,
+            status      TEXT NOT NULL DEFAULT 'pending',
+            created_at  INTEGER NOT NULL
+        )""",
         """CREATE TABLE IF NOT EXISTS route_cache (
             cache_key    TEXT PRIMARY KEY,
             fetched_at   INTEGER NOT NULL,
@@ -379,6 +625,64 @@ def init_db():
             status      TEXT NOT NULL DEFAULT 'pending',
             created_at  INTEGER NOT NULL
         )""",
+        """CREATE TABLE IF NOT EXISTS contest_events (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id      INTEGER NOT NULL REFERENCES users(id),
+            points       INTEGER NOT NULL,
+            source_type  TEXT NOT NULL,
+            source_id    TEXT NOT NULL,
+            label        TEXT NOT NULL,
+            period_month TEXT NOT NULL,
+            period_year  TEXT NOT NULL,
+            created_at   INTEGER NOT NULL,
+            UNIQUE(user_id, source_type, source_id)
+        )""",
+        """CREATE TABLE IF NOT EXISTS contest_entries (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id      INTEGER NOT NULL REFERENCES users(id),
+            period_month TEXT NOT NULL,
+            period_year  TEXT NOT NULL,
+            entry_type   TEXT NOT NULL,
+            created_at   INTEGER NOT NULL,
+            UNIQUE(user_id, period_month)
+        )""",
+        """CREATE TABLE IF NOT EXISTS contest_awards (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            prize_type      TEXT NOT NULL,
+            period_month    TEXT,
+            period_year     TEXT NOT NULL,
+            winner_user_id  INTEGER REFERENCES users(id),
+            winner_username TEXT,
+            points_snapshot INTEGER NOT NULL DEFAULT 0,
+            entry_count     INTEGER NOT NULL DEFAULT 0,
+            prize_label     TEXT NOT NULL,
+            status          TEXT NOT NULL DEFAULT 'selected',
+            notes           TEXT,
+            awarded_by      INTEGER REFERENCES users(id),
+            created_at      INTEGER NOT NULL,
+            updated_at      INTEGER NOT NULL
+        )""",
+        """CREATE TABLE IF NOT EXISTS contributor_badges (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id     INTEGER NOT NULL REFERENCES users(id),
+            badge_id    TEXT NOT NULL,
+            label       TEXT NOT NULL,
+            description TEXT,
+            granted_by  INTEGER REFERENCES users(id),
+            created_at  INTEGER NOT NULL,
+            UNIQUE(user_id, badge_id)
+        )""",
+        """CREATE TABLE IF NOT EXISTS map_contributor_applications (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id     INTEGER NOT NULL REFERENCES users(id),
+            username    TEXT,
+            experience  TEXT,
+            regions     TEXT,
+            sample_note TEXT,
+            status      TEXT NOT NULL DEFAULT 'pending',
+            created_at  INTEGER NOT NULL,
+            updated_at  INTEGER NOT NULL
+        )""",
     ]:
         try:
             db.execute(sql)
@@ -386,6 +690,10 @@ def init_db():
             pass
     db.commit()
     db.close()
+    try:
+        backfill_contest_events_from_credits()
+    except Exception:
+        pass
 
 # ── Analytics ────────────────────────────────────────────────────────────────
 
@@ -424,7 +732,7 @@ def get_trail_dna(session_id: str) -> dict:
 
 def save_trail_dna(session_id: str, profile: dict):
     db = _conn()
-    db.execute(
+    cur = db.execute(
         "INSERT OR REPLACE INTO trail_dna (session_id, profile, updated_at) VALUES (?,?,?)",
         (session_id, json.dumps(profile), int(time.time()))
     )
@@ -440,7 +748,7 @@ def get_conversation(session_id: str) -> list:
 
 def save_conversation(session_id: str, messages: list):
     db = _conn()
-    db.execute(
+    cur = db.execute(
         "INSERT OR REPLACE INTO conversations (session_id, messages, updated_at) VALUES (?,?,?)",
         (session_id, json.dumps(messages), int(time.time()))
     )
@@ -646,8 +954,13 @@ def delete_user(user_id: int) -> None:
 def _delete_user_full(user_id: int) -> None:
     db = _conn()
     # Tables with REFERENCES users(id) — strict foreign key constraints, delete first
+    db.execute("DELETE FROM contributor_badges WHERE user_id=? OR granted_by=?", (user_id, user_id))
+    db.execute("DELETE FROM contest_events      WHERE user_id=?",    (user_id,))
+    db.execute("DELETE FROM contest_entries     WHERE user_id=?",    (user_id,))
+    db.execute("UPDATE contest_awards SET winner_user_id=NULL,winner_username='Deleted user' WHERE winner_user_id=?", (user_id,))
     db.execute("DELETE FROM report_interactions WHERE user_id=?",    (user_id,))
     db.execute("DELETE FROM camp_field_reports  WHERE user_id=?",    (user_id,))
+    db.execute("DELETE FROM trail_field_reports WHERE user_id=?",    (user_id,))
     db.execute("DELETE FROM camp_fullness_votes WHERE user_id=?",    (user_id,))
     db.execute("DELETE FROM camp_fullness       WHERE reporter_id=?", (user_id,))
     db.execute("DELETE FROM credit_transactions WHERE user_id=?",    (user_id,))
@@ -674,11 +987,66 @@ def get_user_by_referral_code(code: str) -> dict | None:
     db.close()
     return dict(row) if row else None
 
+def _contest_period(ts: int | None = None) -> tuple[str, str]:
+    stamp = time.gmtime(ts or int(time.time()))
+    return time.strftime("%Y-%m", stamp), time.strftime("%Y", stamp)
+
+def _contest_source_type(reason: str) -> str | None:
+    r = (reason or "").strip()
+    if not r:
+        return None
+    if r.startswith("Report:"):
+        return "community_report"
+    if r.startswith("Community pin:"):
+        return "community_pin"
+    if r.startswith("Confirmed report") or "still active" in r:
+        return "report_confirmation"
+    if r.startswith("Report #") and "upvoted" in r:
+        return "report_upvote"
+    if r.startswith("Field report for"):
+        return "camp_field_report"
+    if r.startswith("Trail report for"):
+        return "trail_field_report"
+    if r.startswith("Camp edit suggestion:"):
+        return "camp_edit"
+    if r.startswith("Reported camp full:") or r.startswith("Confirmed camp full:") or r.startswith("Camp report confirmed:") or r.startswith("Cleared camp full report:"):
+        return "camp_status"
+    if "reporting streak" in r.lower() or "streak" in r.lower():
+        return "streak_bonus"
+    return None
+
+def _record_contest_event_db(db: sqlite3.Connection, user_id: int, points: int, reason: str,
+                             source_type: str | None = None, source_id: str | None = None,
+                             created_at: int | None = None) -> None:
+    if points <= 0:
+        return
+    source = source_type or _contest_source_type(reason)
+    if not source:
+        return
+    ts = int(created_at or time.time())
+    month, year = _contest_period(ts)
+    sid = source_id or hashlib.sha1(f"{user_id}:{source}:{reason}:{ts}".encode("utf-8")).hexdigest()
+    db.execute(
+        """INSERT OR IGNORE INTO contest_events
+           (user_id,points,source_type,source_id,label,period_month,period_year,created_at)
+           VALUES (?,?,?,?,?,?,?,?)""",
+        (user_id, points, source, str(sid), reason[:240], month, year, ts),
+    )
+
+def add_contest_points(user_id: int, points: int, reason: str,
+                       source_type: str | None = None, source_id: str | None = None,
+                       created_at: int | None = None) -> None:
+    db = _conn()
+    _record_contest_event_db(db, user_id, points, reason, source_type, source_id, created_at)
+    db.commit(); db.close()
+
 def add_credits(user_id: int, amount: int, reason: str):
+    now = int(time.time())
     db = _conn()
     db.execute("UPDATE users SET credits=MAX(0,credits+?) WHERE id=?", (amount, user_id))
     db.execute("INSERT INTO credit_transactions (user_id,amount,reason,created_at) VALUES (?,?,?,?)",
-               (user_id, amount, reason, int(time.time())))
+               (user_id, amount, reason, now))
+    _record_contest_event_db(db, user_id, amount, reason, created_at=now)
     db.commit(); db.close()
 
 def get_credit_history(user_id: int, limit: int = 20) -> list:
@@ -923,9 +1291,11 @@ def check_and_update_streak(user_id: int) -> dict:
 
     db.execute("UPDATE users SET report_streak=?, last_report_date=? WHERE id=?", (streak, today, user_id))
     if bonus:
+        now = int(time.time())
         db.execute("UPDATE users SET credits=credits+? WHERE id=?", (bonus, user_id))
         db.execute("INSERT INTO credit_transactions (user_id,amount,reason,created_at) VALUES (?,?,?,?)",
-                   (user_id, bonus, bonus_reason, int(time.time())))
+                   (user_id, bonus, bonus_reason, now))
+        _record_contest_event_db(db, user_id, bonus, bonus_reason, "streak_bonus", today, now)
     db.commit(); db.close()
     return {"streak": streak, "bonus": bonus, "reason": bonus_reason}
 
@@ -1050,11 +1420,13 @@ def confirm_report(report_id: int, user_id: int) -> dict:
     new_expires = int(time.time()) + ttl
     db.execute("UPDATE reports SET confirmations=confirmations+1, expires_at=? WHERE id=?",
                (new_expires, report_id))
+    now = int(time.time())
     db.execute("UPDATE users SET credits=credits+1 WHERE id=?", (user_id,))
     db.execute("INSERT INTO credit_transactions (user_id,amount,reason,created_at) VALUES (?,?,?,?)",
-               (user_id, 1, f"Confirmed report #{report_id} still active", int(time.time())))
+               (user_id, 1, f"Confirmed report #{report_id} still active", now))
     db.execute("INSERT INTO report_interactions (report_id,user_id,action,created_at) VALUES (?,?,?,?)",
-               (report_id, user_id, "confirm", int(time.time())))
+               (report_id, user_id, "confirm", now))
+    _record_contest_event_db(db, user_id, 1, f"Confirmed report #{report_id} still active", "report_confirmation", str(report_id), now)
     db.commit(); db.close()
     return {"ok": True}
 
@@ -1075,9 +1447,11 @@ def upvote_report(report_id: int, user_id: int | None = None):
         db.execute("INSERT INTO report_interactions (report_id,user_id,action,created_at) VALUES (?,?,?,?)",
                    (report_id, user_id, "upvote", int(time.time())))
     db.execute("UPDATE reports SET upvotes=upvotes+1 WHERE id=?", (report_id,))
+    now = int(time.time())
     db.execute("UPDATE users SET credits=credits+2 WHERE id=?", (row["user_id"],))
     db.execute("INSERT INTO credit_transactions (user_id,amount,reason,created_at) VALUES (?,?,?,?)",
-               (row["user_id"], 2, f"Report #{report_id} upvoted", int(time.time())))
+               (row["user_id"], 2, f"Report #{report_id} upvoted", now))
+    _record_contest_event_db(db, row["user_id"], 2, f"Report #{report_id} upvoted", "report_upvote", str(report_id), now)
     db.commit(); db.close()
 
 def downvote_report(report_id: int):
@@ -1123,6 +1497,581 @@ def get_leaderboard(limit: int = 20) -> list:
     db.close()
     return [dict(r) for r in rows]
 
+# ── Contest tracking ──────────────────────────────────────────────────────────
+
+def _masked_username(username: str | None) -> str:
+    name = (username or "Trailhead user").strip()
+    if len(name) <= 2:
+        return name[0:1] + "***"
+    return f"{name[:1]}***{name[-1:]}"
+
+def _contest_bounds(period: str, month: str | None = None, year: str | None = None) -> tuple[str | None, str]:
+    now_month, now_year = _contest_period()
+    y = (year or now_year)[:4]
+    m = (month or now_month)[:7]
+    return (m if period == "month" else None), y
+
+def get_contest_leaderboard(period: str = "month", limit: int = 50,
+                            month: str | None = None, year: str | None = None) -> list[dict]:
+    period = "year" if period == "year" else "month"
+    m, y = _contest_bounds(period, month, year)
+    db = _conn()
+    if period == "month":
+        rows = db.execute(
+            """SELECT u.id AS user_id,u.username,COALESCE(SUM(e.points),0) AS points,COUNT(e.id) AS event_count
+               FROM contest_events e JOIN users u ON u.id=e.user_id
+               WHERE e.period_month=?
+               GROUP BY e.user_id
+               ORDER BY points DESC,event_count DESC,MAX(e.created_at) ASC
+               LIMIT ?""",
+            (m, limit),
+        ).fetchall()
+    else:
+        rows = db.execute(
+            """SELECT u.id AS user_id,u.username,COALESCE(SUM(e.points),0) AS points,COUNT(e.id) AS event_count
+               FROM contest_events e JOIN users u ON u.id=e.user_id
+               WHERE e.period_year=?
+               GROUP BY e.user_id
+               ORDER BY points DESC,event_count DESC,MAX(e.created_at) ASC
+               LIMIT ?""",
+            (y, limit),
+        ).fetchall()
+    db.close()
+    out = []
+    for idx, row in enumerate(rows, start=1):
+        d = dict(row)
+        d["rank"] = idx
+        d["display_name"] = _masked_username(d.get("username"))
+        out.append(d)
+    return out
+
+def get_contest_user_status(user_id: int) -> dict:
+    month, year = _contest_period()
+    db = _conn()
+    month_points = db.execute(
+        "SELECT COALESCE(SUM(points),0) AS total FROM contest_events WHERE user_id=? AND period_month=?",
+        (user_id, month),
+    ).fetchone()["total"]
+    year_points = db.execute(
+        "SELECT COALESCE(SUM(points),0) AS total FROM contest_events WHERE user_id=? AND period_year=?",
+        (user_id, year),
+    ).fetchone()["total"]
+    entry = db.execute(
+        "SELECT * FROM contest_entries WHERE user_id=? AND period_month=?",
+        (user_id, month),
+    ).fetchone()
+    month_rank = None
+    for row in get_contest_leaderboard("month", 500, month=month, year=year):
+        if row["user_id"] == user_id:
+            month_rank = row["rank"]; break
+    year_rank = None
+    for row in get_contest_leaderboard("year", 500, year=year):
+        if row["user_id"] == user_id:
+            year_rank = row["rank"]; break
+    db.close()
+    return {
+        "period_month": month,
+        "period_year": year,
+        "month_points": int(month_points or 0),
+        "year_points": int(year_points or 0),
+        "month_rank": month_rank,
+        "year_rank": year_rank,
+        "drawing_entered": bool(entry),
+        "drawing_entry_type": entry["entry_type"] if entry else None,
+    }
+
+def ensure_contest_entry(user_id: int, entry_type: str = "free") -> dict:
+    month, year = _contest_period()
+    entry_type = "subscriber" if entry_type == "subscriber" else "free"
+    now = int(time.time())
+    db = _conn()
+    db.execute(
+        """INSERT OR IGNORE INTO contest_entries (user_id,period_month,period_year,entry_type,created_at)
+           VALUES (?,?,?,?,?)""",
+        (user_id, month, year, entry_type, now),
+    )
+    row = db.execute(
+        "SELECT * FROM contest_entries WHERE user_id=? AND period_month=?",
+        (user_id, month),
+    ).fetchone()
+    db.commit(); db.close()
+    return dict(row) if row else {}
+
+def get_contest_admin_overview(month: str | None = None, year: str | None = None) -> dict:
+    month = (month or _contest_period()[0])[:7]
+    year = (year or _contest_period()[1])[:4]
+    db = _conn()
+    now = int(time.time())
+    active_subs = db.execute(
+        "SELECT id FROM users WHERE plan_type!='free' AND COALESCE(plan_expires_at,0)>?",
+        (now,),
+    ).fetchall()
+    for sub in active_subs:
+        db.execute(
+            """INSERT OR IGNORE INTO contest_entries (user_id,period_month,period_year,entry_type,created_at)
+               VALUES (?,?,?,?,?)""",
+            (sub["id"], month, year, "subscriber", now),
+        )
+    db.commit()
+    entries = db.execute("SELECT COUNT(*) AS c FROM contest_entries WHERE period_month=?", (month,)).fetchone()["c"]
+    free_entries = db.execute("SELECT COUNT(*) AS c FROM contest_entries WHERE period_month=? AND entry_type='free'", (month,)).fetchone()["c"]
+    sub_entries = db.execute("SELECT COUNT(*) AS c FROM contest_entries WHERE period_month=? AND entry_type='subscriber'", (month,)).fetchone()["c"]
+    awards = [dict(r) for r in db.execute(
+        """SELECT a.*,u.email FROM contest_awards a LEFT JOIN users u ON u.id=a.winner_user_id
+           WHERE a.period_year=? ORDER BY a.created_at DESC LIMIT 80""",
+        (year,),
+    ).fetchall()]
+    db.close()
+    return {
+        "period_month": month,
+        "period_year": year,
+        "entries": entries,
+        "free_entries": free_entries,
+        "subscriber_entries": sub_entries,
+        "month_leaders": get_contest_leaderboard("month", 25, month=month, year=year),
+        "year_leaders": get_contest_leaderboard("year", 25, year=year),
+        "awards": awards,
+    }
+
+def snapshot_contest_award(prize_type: str, admin_id: int, month: str | None = None,
+                           year: str | None = None, notes: str = "") -> dict:
+    month = (month or _contest_period()[0])[:7]
+    year = (year or _contest_period()[1])[:4]
+    is_year = prize_type == "yearly_top"
+    leaders = get_contest_leaderboard("year" if is_year else "month", 1, month=month, year=year)
+    winner = leaders[0] if leaders else None
+    prize_label = "$1,000 cash/card + 1 year Explorer" if is_year else "$100 cash/card + 1 year Explorer"
+    now = int(time.time())
+    db = _conn()
+    cur = db.execute(
+        """INSERT INTO contest_awards
+           (prize_type,period_month,period_year,winner_user_id,winner_username,points_snapshot,entry_count,prize_label,status,notes,awarded_by,created_at,updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            prize_type,
+            None if is_year else month,
+            year,
+            winner.get("user_id") if winner else None,
+            winner.get("username") if winner else None,
+            int(winner.get("points") or 0) if winner else 0,
+            0,
+            prize_label,
+            "selected",
+            notes,
+            admin_id,
+            now,
+            now,
+        ),
+    )
+    row = db.execute("SELECT * FROM contest_awards WHERE id=?", (cur.lastrowid,)).fetchone()
+    db.commit(); db.close()
+    return dict(row)
+
+def run_contest_drawing(admin_id: int, month: str | None = None, year: str | None = None,
+                        notes: str = "") -> dict:
+    month = (month or _contest_period()[0])[:7]
+    year = (year or _contest_period()[1])[:4]
+    db = _conn()
+    rows = db.execute(
+        """SELECT e.*,u.username FROM contest_entries e JOIN users u ON u.id=e.user_id
+           WHERE e.period_month=? ORDER BY e.created_at ASC""",
+        (month,),
+    ).fetchall()
+    entries = [dict(r) for r in rows]
+    winner = random.choice(entries) if entries else None
+    now = int(time.time())
+    cur = db.execute(
+        """INSERT INTO contest_awards
+           (prize_type,period_month,period_year,winner_user_id,winner_username,points_snapshot,entry_count,prize_label,status,notes,awarded_by,created_at,updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            "monthly_drawing",
+            month,
+            year,
+            winner.get("user_id") if winner else None,
+            winner.get("username") if winner else None,
+            0,
+            len(entries),
+            "$50 cash/card + 1 year Explorer",
+            "selected",
+            notes,
+            admin_id,
+            now,
+            now,
+        ),
+    )
+    row = db.execute("SELECT * FROM contest_awards WHERE id=?", (cur.lastrowid,)).fetchone()
+    db.commit(); db.close()
+    return dict(row)
+
+def update_contest_award_status(award_id: int, status: str, notes: str = "") -> dict | None:
+    allowed = {"selected", "notified", "paid", "void"}
+    if status not in allowed:
+        return None
+    db = _conn()
+    db.execute(
+        "UPDATE contest_awards SET status=?, notes=?, updated_at=? WHERE id=?",
+        (status, notes, int(time.time()), award_id),
+    )
+    row = db.execute("SELECT * FROM contest_awards WHERE id=?", (award_id,)).fetchone()
+    db.commit(); db.close()
+    return dict(row) if row else None
+
+def backfill_contest_events_from_credits() -> int:
+    db = _conn()
+    existing = db.execute("SELECT COUNT(*) AS c FROM contest_events").fetchone()["c"]
+    if existing:
+        db.close()
+        return 0
+    rows = db.execute("SELECT * FROM credit_transactions WHERE amount>0 ORDER BY created_at ASC").fetchall()
+    count = 0
+    for r in rows:
+        source = _contest_source_type(r["reason"])
+        if not source:
+            continue
+        before = db.total_changes
+        _record_contest_event_db(db, r["user_id"], r["amount"], r["reason"], source, f"credit:{r['id']}", r["created_at"])
+        if db.total_changes > before:
+            count += 1
+    db.commit(); db.close()
+    return count
+
+
+# ── Contributor profiles ─────────────────────────────────────────────────────
+
+CONTRIBUTOR_TIERS = [
+    {"id": "first_tracks", "label": "First Tracks", "points_required": 0},
+    {"id": "trail_scout", "label": "Trail Scout", "points_required": 50},
+    {"id": "camp_finder", "label": "Camp Finder", "points_required": 250},
+    {"id": "backroad_mapper", "label": "Backroad Mapper", "points_required": 750},
+    {"id": "ridge_runner", "label": "Ridge Runner", "points_required": 1500},
+    {"id": "desert_proven", "label": "Desert Proven", "points_required": 3000},
+    {"id": "expedition_legend", "label": "Expedition Legend", "points_required": 7500},
+]
+
+def _contributor_tier(points: int) -> dict:
+    points = int(points or 0)
+    current = CONTRIBUTOR_TIERS[0]
+    next_tier = None
+    for idx, tier in enumerate(CONTRIBUTOR_TIERS):
+        if points >= tier["points_required"]:
+            current = tier
+            next_tier = CONTRIBUTOR_TIERS[idx + 1] if idx + 1 < len(CONTRIBUTOR_TIERS) else None
+    if next_tier:
+        span = max(1, next_tier["points_required"] - current["points_required"])
+        progress = max(0, min(1, (points - current["points_required"]) / span))
+    else:
+        progress = 1
+    return {
+        **current,
+        "next_label": next_tier["label"] if next_tier else None,
+        "next_points": next_tier["points_required"] if next_tier else None,
+        "progress": progress,
+    }
+
+def _sum_points(db: sqlite3.Connection, user_id: int, period: str) -> int:
+    if period == "month":
+        month = _contest_period()[0]
+        row = db.execute(
+            "SELECT COALESCE(SUM(points),0) AS total FROM contest_events WHERE user_id=? AND period_month=?",
+            (user_id, month),
+        ).fetchone()
+    elif period == "year":
+        year = _contest_period()[1]
+        row = db.execute(
+            "SELECT COALESCE(SUM(points),0) AS total FROM contest_events WHERE user_id=? AND period_year=?",
+            (user_id, year),
+        ).fetchone()
+    else:
+        row = db.execute(
+            "SELECT COALESCE(SUM(points),0) AS total FROM contest_events WHERE user_id=?",
+            (user_id,),
+        ).fetchone()
+    return int(row["total"] or 0) if row else 0
+
+def _rank_for_user(user_id: int, period: str) -> int | None:
+    for row in get_contributor_leaderboard(period, 500):
+        if row["user_id"] == user_id:
+            return row["rank_number"]
+    return None
+
+def _contributor_stats(db: sqlite3.Connection, user_id: int) -> tuple[dict, list[dict]]:
+    rows = db.execute(
+        """SELECT COALESCE(source_type,'contribution') AS source_type,
+                  COUNT(*) AS count,
+                  COALESCE(SUM(points),0) AS points
+           FROM contest_events
+           WHERE user_id=?
+           GROUP BY COALESCE(source_type,'contribution')
+           ORDER BY points DESC,count DESC""",
+        (user_id,),
+    ).fetchall()
+    counts = {r["source_type"]: int(r["count"] or 0) for r in rows}
+    points = {r["source_type"]: int(r["points"] or 0) for r in rows}
+    camp_reports = int(counts.get("camp_field_report", 0))
+    trail_reports = int(counts.get("trail_field_report", 0))
+    photo_reports = db.execute(
+        """SELECT
+              (SELECT COUNT(*) FROM camp_field_reports WHERE user_id=? AND COALESCE(photo_data,'')!='') +
+              (SELECT COUNT(*) FROM trail_field_reports WHERE user_id=? AND COALESCE(photo_data,'')!='') AS c""",
+        (user_id, user_id),
+    ).fetchone()["c"]
+    report_rows = int(db.execute("SELECT COUNT(*) AS c FROM reports WHERE user_id=?", (user_id,)).fetchone()["c"])
+    pin_rows = int(db.execute("SELECT COUNT(*) AS c FROM community_pins WHERE user_id=?", (user_id,)).fetchone()["c"])
+    stats = {
+        "total_events": sum(counts.values()),
+        "reports": report_rows,
+        "pins": pin_rows,
+        "camp_reports": camp_reports,
+        "trail_reports": trail_reports,
+        "confirmations": int(counts.get("report_confirmation", 0)),
+        "photos": int(photo_reports or 0),
+        "edits": int(counts.get("camp_edit_suggestion", 0)),
+        "camp_status": int(counts.get("camp_status", 0)),
+        "signal_water_road": int(counts.get("report_confirmation", 0) + counts.get("report_upvote", 0)),
+    }
+    labels = {
+        "camp_field_report": "Camp field reports",
+        "trail_field_report": "Trail field reports",
+        "report_confirmation": "Confirmed reports",
+        "report_upvote": "Helpful votes",
+        "streak_bonus": "Streak bonuses",
+        "camp_edit_suggestion": "Camp edits",
+        "camp_status": "Camp status updates",
+    }
+    recent = [
+        {"label": labels.get(r["source_type"], str(r["source_type"]).replace("_", " ").title()),
+         "count": int(r["count"] or 0), "points": int(points.get(r["source_type"], 0))}
+        for r in rows[:6]
+    ]
+    return stats, recent
+
+def _contributor_awards(db: sqlite3.Connection, user_id: int) -> list[dict]:
+    rows = db.execute(
+        """SELECT id,prize_type,period_month,period_year,prize_label,status,created_at
+           FROM contest_awards
+           WHERE winner_user_id=? AND status!='void'
+           ORDER BY created_at DESC LIMIT 20""",
+        (user_id,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+def _auto_contributor_badges(stats: dict, awards: list[dict], all_points: int, joined_at: int | None) -> list[dict]:
+    earned: list[dict] = []
+    def add(badge_id: str, label: str, description: str, icon: str, tone: str):
+        earned.append({
+            "id": badge_id, "label": label, "description": description,
+            "icon": icon, "tone": tone, "source": "auto", "earned_at": joined_at,
+        })
+    if stats.get("total_events", 0) >= 1:
+        add("first_tracks", "First Tracks", "Logged a first useful field contribution.", "trail-sign", "green")
+    if stats.get("signal_water_road", 0) >= 10:
+        add("signal_finder", "Signal Finder", "Helped verify road, signal, or condition reports.", "radio", "blue")
+    if stats.get("camp_reports", 0) >= 10:
+        add("camp_steward", "Camp Steward", "Submitted 10 camp field reports.", "bonfire", "teal")
+    if stats.get("trail_reports", 0) >= 10:
+        add("trail_steward", "Trail Steward", "Submitted 10 trail field reports.", "map", "orange")
+    if stats.get("photos", 0) >= 25:
+        add("photo_scout", "Photo Scout", "Added 25 photo-backed reports.", "camera", "purple")
+    if any(a.get("prize_type") == "monthly_top" for a in awards):
+        add("month_leader", "Month Leader", "Finished a month as top contributor.", "trophy", "gold")
+    if any(a.get("prize_type") == "yearly_top" for a in awards):
+        add("trailhead_champion", "Trailhead Champion", "Won the yearly contributor title.", "ribbon", "gold")
+    for tier in CONTRIBUTOR_TIERS[1:]:
+        if all_points >= tier["points_required"]:
+            add(tier["id"], tier["label"], f"Reached {tier['points_required']:,} lifetime contribution points.", "medal", "gold")
+    return earned
+
+def _manual_contributor_badges(db: sqlite3.Connection, user_id: int) -> list[dict]:
+    rows = db.execute(
+        "SELECT badge_id,label,description,created_at FROM contributor_badges WHERE user_id=? ORDER BY created_at DESC",
+        (user_id,),
+    ).fetchall()
+    return [{
+        "id": r["badge_id"], "label": r["label"], "description": r["description"] or "",
+        "icon": "sparkles", "tone": "gold", "source": "admin", "earned_at": r["created_at"],
+    } for r in rows]
+
+def _avatar_color(user_id: int, stored: str | None) -> str:
+    if stored:
+        return stored
+    colors = ["#f97316", "#14b8a6", "#38bdf8", "#a78bfa", "#d4af37", "#22c55e"]
+    return colors[int(user_id or 0) % len(colors)]
+
+def get_contributor_profile(user_id: int, viewer_id: int | None = None) -> dict | None:
+    db = _conn()
+    user = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+    if not user:
+        db.close()
+        return None
+    is_self = viewer_id == user_id
+    visible = bool(user["public_profile_visible"])
+    if not visible and not is_self:
+        db.close()
+        return None
+    month_points = _sum_points(db, user_id, "month")
+    year_points = _sum_points(db, user_id, "year")
+    all_points = _sum_points(db, user_id, "all")
+    stats, recent = _contributor_stats(db, user_id)
+    awards = _contributor_awards(db, user_id)
+    badges = _manual_contributor_badges(db, user_id) + _auto_contributor_badges(stats, awards, all_points, user["created_at"])
+    seen = set()
+    unique_badges = []
+    for badge in badges:
+        if badge["id"] in seen:
+            continue
+        seen.add(badge["id"])
+        unique_badges.append(badge)
+    tier = _contributor_tier(all_points)
+    profile = {
+        "user_id": user_id,
+        "username": user["username"],
+        "display_name": user["username"],
+        "is_self": is_self,
+        "public_profile_visible": visible,
+        "title": user["contributor_title"] or tier["label"],
+        "bio": user["contributor_bio"] or "",
+        "avatar_color": _avatar_color(user_id, user["contributor_avatar_color"]),
+        "joined_at": user["created_at"],
+        "points": {"month": month_points, "year": year_points, "all": all_points},
+        "rank": {
+            "month": _rank_for_user(user_id, "month"),
+            "year": _rank_for_user(user_id, "year"),
+            "all": _rank_for_user(user_id, "all"),
+        },
+        "streak": int(user["report_streak"] or 0),
+        "tier": tier,
+        "stats": stats,
+        "badges": unique_badges,
+        "awards": awards,
+        "recent_activity": recent,
+    }
+    db.close()
+    return profile
+
+def get_contributor_leaderboard(period: str = "month", limit: int = 50, viewer_id: int | None = None) -> list[dict]:
+    period = period if period in {"month", "year", "all"} else "month"
+    now_month, now_year = _contest_period()
+    where = "COALESCE(u.public_profile_visible,1)=1"
+    params: list = []
+    if period == "month":
+        where += " AND e.period_month=?"
+        params.append(now_month)
+    elif period == "year":
+        where += " AND e.period_year=?"
+        params.append(now_year)
+    params.append(limit)
+    db = _conn()
+    rows = db.execute(
+        f"""SELECT u.id AS user_id,u.username,u.report_streak,u.contributor_title,u.contributor_avatar_color,
+                  COALESCE(SUM(e.points),0) AS points_for_period,
+                  COUNT(e.id) AS event_count,
+                  MAX(e.created_at) AS last_event
+           FROM contest_events e JOIN users u ON u.id=e.user_id
+           WHERE {where}
+           GROUP BY e.user_id
+           ORDER BY points_for_period DESC,event_count DESC,last_event ASC
+           LIMIT ?""",
+        params,
+    ).fetchall()
+    leaders = []
+    for idx, r in enumerate(rows, start=1):
+        user_id = int(r["user_id"])
+        all_points = _sum_points(db, user_id, "all")
+        stats, _recent = _contributor_stats(db, user_id)
+        awards = _contributor_awards(db, user_id)
+        badges = (_manual_contributor_badges(db, user_id) + _auto_contributor_badges(stats, awards, all_points, None))[:4]
+        tier = _contributor_tier(all_points)
+        leaders.append({
+            "user_id": user_id,
+            "username": r["username"],
+            "display_name": r["username"],
+            "is_self": viewer_id == user_id,
+            "rank_number": idx,
+            "points_for_period": int(r["points_for_period"] or 0),
+            "points": {
+                "month": _sum_points(db, user_id, "month"),
+                "year": _sum_points(db, user_id, "year"),
+                "all": all_points,
+            },
+            "title": r["contributor_title"] or tier["label"],
+            "avatar_color": _avatar_color(user_id, r["contributor_avatar_color"]),
+            "streak": int(r["report_streak"] or 0),
+            "tier": tier,
+            "stats": stats,
+            "badges": badges,
+            "awards": awards[:3],
+            "event_count": int(r["event_count"] or 0),
+        })
+    db.close()
+    return leaders
+
+def set_contributor_visibility(user_id: int, visible: bool) -> dict | None:
+    db = _conn()
+    db.execute("UPDATE users SET public_profile_visible=? WHERE id=?", (1 if visible else 0, user_id))
+    db.commit(); db.close()
+    return get_contributor_profile(user_id, user_id)
+
+def submit_map_contributor_application(user_id: int, username: str, experience: str, regions: str, sample_note: str) -> dict:
+    now = int(time.time())
+    db = _conn()
+    row = db.execute(
+        "SELECT * FROM map_contributor_applications WHERE user_id=? AND status='pending' ORDER BY created_at DESC LIMIT 1",
+        (user_id,),
+    ).fetchone()
+    if row:
+        db.execute(
+            """UPDATE map_contributor_applications
+               SET username=?,experience=?,regions=?,sample_note=?,updated_at=? WHERE id=?""",
+            (username, experience[:2000], regions[:500], sample_note[:2000], now, row["id"]),
+        )
+        app_id = row["id"]
+    else:
+        cur = db.execute(
+            """INSERT INTO map_contributor_applications
+               (user_id,username,experience,regions,sample_note,status,created_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (user_id, username, experience[:2000], regions[:500], sample_note[:2000], "pending", now, now),
+        )
+        app_id = cur.lastrowid
+    out = db.execute("SELECT * FROM map_contributor_applications WHERE id=?", (app_id,)).fetchone()
+    db.commit(); db.close()
+    return dict(out)
+
+def get_map_contributor_applications(status: str | None = "pending", limit: int = 200) -> list[dict]:
+    db = _conn()
+    if status:
+        rows = db.execute(
+            "SELECT * FROM map_contributor_applications WHERE status=? ORDER BY created_at DESC LIMIT ?",
+            (status, limit),
+        ).fetchall()
+    else:
+        rows = db.execute("SELECT * FROM map_contributor_applications ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+    db.close()
+    return [dict(r) for r in rows]
+
+def update_map_contributor_application_status(application_id: int, status: str) -> bool:
+    if status not in {"pending", "approved", "dismissed"}:
+        return False
+    db = _conn()
+    cur = db.execute(
+        "UPDATE map_contributor_applications SET status=?,updated_at=? WHERE id=?",
+        (status, int(time.time()), application_id),
+    )
+    db.commit(); db.close()
+    return cur.rowcount > 0
+
+def grant_contributor_badge(user_id: int, badge_id: str, label: str, description: str = "", admin_id: int | None = None) -> dict | None:
+    now = int(time.time())
+    db = _conn()
+    db.execute(
+        """INSERT OR REPLACE INTO contributor_badges (user_id,badge_id,label,description,granted_by,created_at)
+           VALUES (?,?,?,?,?,?)""",
+        (user_id, badge_id, label, description, admin_id, now),
+    )
+    db.commit(); db.close()
+    return get_contributor_profile(user_id, admin_id)
+
 # ── Community pins ─────────────────────────────────────────────────────────────
 
 def _decode_pin_details(row: sqlite3.Row | dict) -> dict:
@@ -1138,15 +2087,34 @@ def _decode_pin_details(row: sqlite3.Row | dict) -> dict:
         data["details"] = {}
     return data
 
+def find_duplicate_community_pin(lat: float, lng: float, pin_type: str, name: str = "", radius_deg: float = 0.00018) -> dict | None:
+    db = _conn()
+    name_norm = (name or "").strip().lower()
+    rows = db.execute(
+        """SELECT * FROM community_pins
+           WHERE hidden=0 AND type=? AND lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?
+           ORDER BY submitted_at DESC LIMIT 20""",
+        (pin_type, lat - radius_deg, lat + radius_deg, lng - radius_deg, lng + radius_deg)
+    ).fetchall()
+    db.close()
+    for row in rows:
+        data = dict(row)
+        other_name = (data.get("name") or "").strip().lower()
+        if not name_norm or not other_name or name_norm == other_name:
+            return data
+    return dict(rows[0]) if rows else None
+
 def add_community_pin(lat: float, lng: float, name: str, type: str,
                       description: str, land_type: str, user_id: int | None = None,
-                      details: dict | None = None):
+                      details: dict | None = None) -> int:
     db = _conn()
-    db.execute(
+    cur = db.execute(
         "INSERT INTO community_pins (user_id,lat,lng,name,type,description,details,land_type,submitted_at) VALUES (?,?,?,?,?,?,?,?,?)",
         (user_id, lat, lng, name, type, description, json.dumps(details or {}), land_type, int(time.time()))
     )
+    pin_id = cur.lastrowid
     db.commit(); db.close()
+    return int(pin_id)
 
 def get_user_pin_count_today(user_id: int) -> int:
     db = _conn()
@@ -1197,6 +2165,40 @@ def vote_community_pin(pin_id: int, user_id: int, action: str) -> dict:
     db.commit(); db.close()
     return {"ok": True, "hidden": bool(hidden), "upvotes": updated["upvotes"], "downvotes": updated["downvotes"]}
 
+def add_pin_update_suggestion(pin_id: int, pin_name: str, user_id: int | None, username: str | None,
+                              field: str, value: str, note: str | None = None) -> dict:
+    db = _conn()
+    cur = db.execute(
+        """INSERT INTO pin_update_suggestions
+           (pin_id,pin_name,user_id,username,field,value,note,status,created_at)
+           VALUES (?,?,?,?,?,?,?,?,?)""",
+        (pin_id, pin_name[:120], user_id, username, field[:60], value[:1000], note[:700] if note else None, "pending", int(time.time()))
+    )
+    db.commit()
+    suggestion_id = cur.lastrowid
+    db.close()
+    return {"id": suggestion_id, "status": "pending"}
+
+def get_pin_update_suggestions(status: str | None = "pending", limit: int = 200) -> list[dict]:
+    db = _conn()
+    if status:
+      rows = db.execute(
+          "SELECT * FROM pin_update_suggestions WHERE status=? ORDER BY created_at DESC LIMIT ?",
+          (status, limit)
+      ).fetchall()
+    else:
+      rows = db.execute("SELECT * FROM pin_update_suggestions ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+    db.close()
+    return [dict(r) for r in rows]
+
+def update_pin_update_suggestion_status(suggestion_id: int, status: str) -> bool:
+    db = _conn()
+    cur = db.execute("UPDATE pin_update_suggestions SET status=? WHERE id=?", (status, suggestion_id))
+    db.commit()
+    ok = cur.rowcount > 0
+    db.close()
+    return ok
+
 # ── Admin ─────────────────────────────────────────────────────────────────────
 
 def get_platform_stats() -> dict:
@@ -1242,7 +2244,7 @@ def get_all_users(search: str = "", limit: int = 50, offset: int = 0) -> list:
     rows = db.execute(
         """SELECT u.id, u.username, u.email, u.credits, u.is_admin,
                   u.report_streak, u.flagged_report_count, u.created_at,
-                  u.reporting_restricted_until,
+                  u.reporting_restricted_until, u.plan_type, u.plan_expires_at,
                   COUNT(r.id) as report_count
            FROM users u
            LEFT JOIN reports r ON r.user_id=u.id
@@ -1257,6 +2259,48 @@ def set_user_admin(user_id: int, is_admin: bool):
     db = _conn()
     db.execute("UPDATE users SET is_admin=? WHERE id=?", (1 if is_admin else 0, user_id))
     db.commit(); db.close()
+
+def set_user_plan(user_id: int, plan_type: str, expires_at: int | None = None) -> dict | None:
+    db = _conn()
+    if plan_type == "free":
+        db.execute("UPDATE users SET plan_type='free', plan_expires_at=NULL WHERE id=?", (user_id,))
+    else:
+        if expires_at is None:
+            expires_at = int(time.time()) + 366 * 86400
+        db.execute("UPDATE users SET plan_type=?, plan_expires_at=? WHERE id=?", (plan_type, expires_at, user_id))
+    db.commit()
+    row = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+    db.close()
+    return _decode_pin_details(row) if row else None
+
+def save_app_store_subscription(original_transaction_id: str, transaction_id: str | None,
+                                user_id: int, product_id: str, environment: str | None,
+                                expires_at: int | None, status: str = "active") -> None:
+    db = _conn()
+    db.execute(
+        """INSERT INTO app_store_subscriptions
+           (original_transaction_id,transaction_id,user_id,product_id,environment,expires_at,status,updated_at)
+           VALUES (?,?,?,?,?,?,?,?)
+           ON CONFLICT(original_transaction_id) DO UPDATE SET
+             transaction_id=excluded.transaction_id,
+             user_id=excluded.user_id,
+             product_id=excluded.product_id,
+             environment=excluded.environment,
+             expires_at=excluded.expires_at,
+             status=excluded.status,
+             updated_at=excluded.updated_at""",
+        (original_transaction_id, transaction_id, user_id, product_id, environment, expires_at, status, int(time.time()))
+    )
+    db.commit(); db.close()
+
+def get_app_store_subscription(original_transaction_id: str) -> dict | None:
+    db = _conn()
+    row = db.execute(
+        "SELECT * FROM app_store_subscriptions WHERE original_transaction_id=?",
+        (original_transaction_id,),
+    ).fetchone()
+    db.close()
+    return dict(row) if row else None
 
 def ban_user(user_id: int, days: int = 365):
     db = _conn()
@@ -1556,7 +2600,7 @@ def submit_field_report(camp_id: str, camp_name: str, lat: float, lng: float,
     db = _conn()
     credits = FIELD_REPORT_CREDITS + (FIELD_REPORT_PHOTO_BONUS if photo_data else 0)
     now = int(time.time())
-    db.execute(
+    cur = db.execute(
         """INSERT INTO camp_field_reports
            (camp_id,camp_name,lat,lng,user_id,username,rig_label,visited_date,
             sentiment,access_condition,crowd_level,tags,note,photo_data,credits_earned,created_at)
@@ -1568,6 +2612,7 @@ def submit_field_report(camp_id: str, camp_name: str, lat: float, lng: float,
     db.execute("UPDATE users SET credits=credits+? WHERE id=?", (credits, user_id))
     db.execute("INSERT INTO credit_transactions (user_id,amount,reason,created_at) VALUES (?,?,?,?)",
                (user_id, credits, f"Field report for {camp_name}", now))
+    _record_contest_event_db(db, user_id, credits, f"Field report for {camp_name}", "camp_field_report", str(cur.lastrowid), now)
     db.commit(); db.close()
     return {"credits_earned": credits}
 
@@ -1613,6 +2658,229 @@ def get_field_report_summary(camp_id: str) -> dict:
     }
 
 
+# ── Trail Field Reports ───────────────────────────────────────────────────────
+
+def submit_trail_field_report(trail_id: str, trail_name: str, lat: float, lng: float,
+                              user_id: int, username: str, rig_label: str | None,
+                              visited_date: str, sentiment: str, access_condition: str,
+                              crowd_level: str, tags: list[str], note: str | None,
+                              photo_data: str | None) -> dict:
+    db = _conn()
+    credits = FIELD_REPORT_CREDITS + (FIELD_REPORT_PHOTO_BONUS if photo_data else 0)
+    now = int(time.time())
+    cur = db.execute(
+        """INSERT INTO trail_field_reports
+           (trail_id,trail_name,lat,lng,user_id,username,rig_label,visited_date,
+            sentiment,access_condition,crowd_level,tags,note,photo_data,credits_earned,created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (trail_id, trail_name, lat, lng, user_id, username, rig_label, visited_date,
+         sentiment, access_condition, crowd_level, json.dumps(tags), note,
+         photo_data, credits, now)
+    )
+    db.execute("UPDATE users SET credits=credits+? WHERE id=?", (credits, user_id))
+    db.execute("INSERT INTO credit_transactions (user_id,amount,reason,created_at) VALUES (?,?,?,?)",
+               (user_id, credits, f"Trail report for {trail_name}", now))
+    _record_contest_event_db(db, user_id, credits, f"Trail report for {trail_name}", "trail_field_report", str(cur.lastrowid), now)
+    db.commit(); db.close()
+    return {"credits_earned": credits}
+
+def get_trail_field_reports(trail_id: str) -> list[dict]:
+    db = _conn()
+    rows = db.execute(
+        """SELECT id,username,rig_label,visited_date,sentiment,access_condition,
+                  crowd_level,tags,note,photo_data,created_at
+           FROM trail_field_reports WHERE trail_id=?
+           ORDER BY created_at DESC LIMIT 50""",
+        (trail_id,)
+    ).fetchall()
+    db.close()
+    result = []
+    for r in rows:
+        d = dict(r)
+        d['tags'] = json.loads(d['tags'] or '[]')
+        d['has_photo'] = bool(d.pop('photo_data'))
+        result.append(d)
+    return result
+
+def get_trail_field_report_summary(trail_id: str) -> dict:
+    db = _conn()
+    rows = db.execute(
+        "SELECT sentiment, tags, crowd_level, access_condition, visited_date FROM trail_field_reports WHERE trail_id=? ORDER BY created_at DESC",
+        (trail_id,)
+    ).fetchall()
+    db.close()
+    if not rows:
+        return {"count": 0, "sentiment_counts": {}, "top_tags": [], "last_visited": None}
+    sentiment_counts: dict[str, int] = {}
+    tag_counts: dict[str, int] = {}
+    for r in rows:
+        sentiment_counts[r["sentiment"]] = sentiment_counts.get(r["sentiment"], 0) + 1
+        for t in json.loads(r["tags"] or "[]"):
+            tag_counts[t] = tag_counts.get(t, 0) + 1
+    top_tags = sorted(tag_counts.items(), key=lambda x: -x[1])[:8]
+    return {
+        "count": len(rows),
+        "sentiment_counts": sentiment_counts,
+        "top_tags": [{"tag": t, "count": c} for t, c in top_tags],
+        "last_visited": rows[0]["visited_date"] if rows else None,
+    }
+
+
+# ── Trail profiles ────────────────────────────────────────────────────────────
+
+TRAIL_PROFILE_JSON_FIELDS = {"activities", "geometry", "trailheads", "photos", "provenance"}
+
+def _decode_trail_profile(row: sqlite3.Row | dict) -> dict:
+    d = dict(row)
+    for key in TRAIL_PROFILE_JSON_FIELDS:
+        raw = d.get(key)
+        if raw is None:
+            d[key] = {} if key == "provenance" else []
+            continue
+        try:
+            d[key] = json.loads(raw or ("{}" if key == "provenance" else "[]"))
+        except Exception:
+            d[key] = {} if key == "provenance" else []
+    d["admin_edited"] = bool(d.get("admin_edited"))
+    return d
+
+def upsert_trail_profile(profile: dict, preserve_admin: bool = True) -> dict:
+    now = int(time.time())
+    trail_id = str(profile.get("id") or "").strip()[:180]
+    if not trail_id:
+        raise ValueError("trail profile id required")
+    db = _conn()
+    existing = db.execute("SELECT * FROM trail_profiles WHERE id=?", (trail_id,)).fetchone()
+    if existing and preserve_admin and int(existing["admin_edited"] or 0):
+        decoded = _decode_trail_profile(existing)
+        db.close()
+        return decoded
+    merged = {**(_decode_trail_profile(existing) if existing else {}), **profile}
+    lat = float(merged.get("lat") or 0)
+    lng = float(merged.get("lng") or 0)
+    db.execute(
+        """INSERT INTO trail_profiles
+           (id,name,summary,description,lat,lng,length_mi,difficulty,activities,land_manager,
+            geometry,trailheads,official_url,photos,source,source_label,provenance,last_checked,admin_edited,updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           ON CONFLICT(id) DO UPDATE SET
+             name=excluded.name, summary=excluded.summary, description=excluded.description,
+             lat=excluded.lat, lng=excluded.lng, length_mi=excluded.length_mi,
+             difficulty=excluded.difficulty, activities=excluded.activities,
+             land_manager=excluded.land_manager, geometry=excluded.geometry,
+             trailheads=excluded.trailheads, official_url=excluded.official_url,
+             photos=excluded.photos, source=excluded.source, source_label=excluded.source_label,
+             provenance=excluded.provenance, last_checked=excluded.last_checked,
+             admin_edited=excluded.admin_edited, updated_at=excluded.updated_at""",
+        (
+            trail_id,
+            str(merged.get("name") or "Trail")[:180],
+            (merged.get("summary") or "")[:800],
+            (merged.get("description") or "")[:6000],
+            lat,
+            lng,
+            merged.get("length_mi"),
+            (merged.get("difficulty") or "")[:80],
+            json.dumps(merged.get("activities") or []),
+            (merged.get("land_manager") or "")[:180],
+            json.dumps(merged.get("geometry") or None),
+            json.dumps(merged.get("trailheads") or []),
+            (merged.get("official_url") or "")[:800],
+            json.dumps(merged.get("photos") or []),
+            (merged.get("source") or "open")[:80],
+            (merged.get("source_label") or "Open source")[:180],
+            json.dumps(merged.get("provenance") or {}),
+            int(merged.get("last_checked") or now),
+            1 if merged.get("admin_edited") else 0,
+            now,
+        ),
+    )
+    row = db.execute("SELECT * FROM trail_profiles WHERE id=?", (trail_id,)).fetchone()
+    db.commit(); db.close()
+    return _decode_trail_profile(row)
+
+def get_trail_profile(trail_id: str) -> dict | None:
+    db = _conn()
+    row = db.execute("SELECT * FROM trail_profiles WHERE id=?", (trail_id,)).fetchone()
+    db.close()
+    return _decode_trail_profile(row) if row else None
+
+def list_trail_profiles_near(lat: float, lng: float, radius_mi: float = 50, limit: int = 80,
+                             bbox: dict | None = None, mode: str = "nearby") -> list[dict]:
+    db = _conn()
+    params: list = []
+    where = ""
+    if bbox:
+        where = "WHERE lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?"
+        params = [bbox["s"], bbox["n"], bbox["w"], bbox["e"]]
+    else:
+        lat_delta = radius_mi / 69
+        lng_delta = radius_mi / max(10, 69 * math.cos(math.radians(lat)))
+        where = "WHERE lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?"
+        params = [lat - lat_delta, lat + lat_delta, lng - lng_delta, lng + lng_delta]
+    rows = db.execute(f"SELECT * FROM trail_profiles {where} LIMIT ?", (*params, max(limit * 3, limit))).fetchall()
+    db.close()
+    profiles = [_decode_trail_profile(r) for r in rows]
+    for p in profiles:
+        p["distance_mi"] = _distance_miles(lat, lng, p["lat"], p["lng"])
+        if bbox:
+            center_score = _distance_miles(lat, lng, p["lat"], p["lng"])
+            p["viewport_score"] = max(0, 100 - center_score)
+    if mode == "view":
+        profiles.sort(key=lambda p: (-(p.get("viewport_score") or 0), p.get("distance_mi") or 9999, p["name"]))
+    else:
+        profiles.sort(key=lambda p: (p.get("distance_mi") or 9999, p["name"]))
+    return profiles[:limit]
+
+def _distance_miles(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    r = 3958.8
+    dlat = math.radians(lat2 - lat1)
+    dlng = math.radians(lng2 - lng1)
+    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlng / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
+
+def add_trail_edit_suggestion(trail_id: str, trail_name: str, user_id: int | None, username: str | None,
+                              field: str, value: str, note: str | None) -> dict:
+    now = int(time.time())
+    db = _conn()
+    cur = db.execute(
+        """INSERT INTO trail_edit_suggestions
+           (trail_id,trail_name,user_id,username,field,value,note,status,created_at)
+           VALUES (?,?,?,?,?,?,?,?,?)""",
+        (trail_id, trail_name[:180], user_id, username, field[:80], value[:8000], note, "pending", now),
+    )
+    db.commit(); db.close()
+    return {"id": cur.lastrowid, "status": "pending"}
+
+def get_trail_edit_suggestions(status: str | None = "pending", limit: int = 200) -> list[dict]:
+    db = _conn()
+    if status:
+        rows = db.execute(
+            "SELECT * FROM trail_edit_suggestions WHERE status=? ORDER BY created_at DESC LIMIT ?",
+            (status, limit),
+        ).fetchall()
+    else:
+        rows = db.execute("SELECT * FROM trail_edit_suggestions ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+    db.close()
+    return [dict(r) for r in rows]
+
+def update_trail_edit_suggestion_status(suggestion_id: int, status: str) -> bool:
+    db = _conn()
+    cur = db.execute("UPDATE trail_edit_suggestions SET status=? WHERE id=?", (status, suggestion_id))
+    db.commit(); db.close()
+    return cur.rowcount > 0
+
+def set_trail_profile_admin_update(trail_id: str, data: dict, admin_id: int | None) -> dict:
+    current = get_trail_profile(trail_id)
+    if not current:
+        raise KeyError(trail_id)
+    clean = {k: v for k, v in data.items() if v is not None}
+    return upsert_trail_profile({**current, **clean, "admin_edited": True, "provenance": {
+        **(current.get("provenance") or {}),
+        "admin_edit": {"source": "Trailhead admin", "updated_by": admin_id, "updated_at": int(time.time())},
+    }}, preserve_admin=False)
+
+
 # ── Camp profile edits ────────────────────────────────────────────────────────
 
 def get_camp_profile_override(camp_id: str) -> dict:
@@ -1639,6 +2907,55 @@ def set_camp_profile_override(camp_id: str, data: dict, admin_id: int | None) ->
     )
     db.commit(); db.close()
     return merged
+
+
+# ── Explore audio guide story edits ───────────────────────────────────────────
+
+def get_explore_story_override(place_id: str) -> dict:
+    db = _conn()
+    row = db.execute("SELECT * FROM explore_story_overrides WHERE place_id=?", (place_id,)).fetchone()
+    db.close()
+    return dict(row) if row else {}
+
+def get_explore_story_overrides() -> dict[str, dict]:
+    db = _conn()
+    rows = db.execute("SELECT * FROM explore_story_overrides").fetchall()
+    db.close()
+    return {row["place_id"]: dict(row) for row in rows}
+
+def set_explore_story_override(place_id: str, data: dict, admin_id: int | None) -> dict:
+    current = get_explore_story_override(place_id)
+    merged = {
+        **current,
+        **{k: (v if isinstance(v, str) else None) for k, v in data.items() if k in {"title", "story", "summary", "hook", "notes"}},
+    }
+    now = int(time.time())
+    db = _conn()
+    db.execute(
+        """INSERT INTO explore_story_overrides
+           (place_id,title,story,summary,hook,notes,updated_by,updated_at)
+           VALUES (?,?,?,?,?,?,?,?)
+           ON CONFLICT(place_id) DO UPDATE SET
+             title=excluded.title,
+             story=excluded.story,
+             summary=excluded.summary,
+             hook=excluded.hook,
+             notes=excluded.notes,
+             updated_by=excluded.updated_by,
+             updated_at=excluded.updated_at""",
+        (
+            place_id,
+            merged.get("title"),
+            merged.get("story"),
+            merged.get("summary"),
+            merged.get("hook"),
+            merged.get("notes"),
+            admin_id,
+            now,
+        ),
+    )
+    db.commit(); db.close()
+    return get_explore_story_override(place_id)
 
 def add_camp_edit_suggestion(camp_id: str, camp_name: str, lat: float, lng: float,
                              user_id: int | None, username: str | None,

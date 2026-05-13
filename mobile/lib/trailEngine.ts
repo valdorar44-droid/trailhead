@@ -21,11 +21,20 @@ export type TrailFeature = {
   lat: number;
   lng: number;
   type: TrailFeatureType;
-  source: 'osm' | 'offline_places' | 'map_tile' | 'mvum' | 'community' | 'trip';
+  source: 'osm' | 'offline_places' | 'map_tile' | 'mvum' | 'community' | 'trip' | 'trailhead';
   subtitle: string;
   score: number;
   support: TrailSupport;
   elevation?: string;
+  distanceMi?: number;
+  profile_id?: string;
+  source_label?: string;
+  photo_url?: string | null;
+  length_mi?: number | null;
+  activities?: string[];
+  last_checked?: number;
+  summary?: string;
+  difficulty?: string;
 };
 
 type Point = { lat: number; lng: number };
@@ -110,7 +119,7 @@ function nearestPoint<T extends Partial<Point>>(
 }
 
 export function trailTypeFromPoi(type?: string): TrailFeatureType | null {
-  if (type === 'trailhead' || type === 'viewpoint' || type === 'peak' || type === 'hot_spring') return type;
+  if (type === 'trail' || type === 'trailhead' || type === 'viewpoint' || type === 'peak' || type === 'hot_spring') return type;
   return null;
 }
 
@@ -163,10 +172,18 @@ export function featureFromPoi(
     lng: poi.lng,
     type,
     source,
-    subtitle: poi.elevation ? `${titleFor(type)} · ${poi.elevation}` : titleFor(type),
+    subtitle: poi.length_mi != null && Number.isFinite(poi.length_mi)
+      ? `${poi.length_mi.toFixed(poi.length_mi >= 10 ? 0 : 1)} mi · ${poi.source_label || titleFor(type)}`
+      : poi.elevation ? `${titleFor(type)} · ${poi.elevation}` : (poi.source_label || titleFor(type)),
     score,
     support,
     elevation: poi.elevation,
+    profile_id: poi.profile_id,
+    source_label: poi.source_label,
+    photo_url: poi.photo_url,
+    length_mi: poi.length_mi,
+    activities: poi.activities,
+    last_checked: poi.last_checked,
   };
 }
 
@@ -198,6 +215,8 @@ export function buildTrailDiscoveries(
   gas: Array<Point>,
   reports: Array<Pick<Report, 'lat' | 'lng'>>,
   offlineReady: boolean,
+  origin?: Point | null,
+  sortMode: 'score' | 'distance' = 'score',
 ): TrailFeature[] {
   const seen = new Set<string>();
   const supportCamps = camps.filter(isValidPoint).slice(0, MAX_SUPPORT_POINTS);
@@ -220,7 +239,13 @@ export function buildTrailDiscoveries(
   return candidates
     .map(poi => {
       const support = buildTrailSupport(poi, supportCamps, supportGas, supportWater, supportReports, offlineReady);
-      return featureFromPoi(poi, support, poi.source === 'offline' ? 'offline_places' : 'osm');
+      const feature = featureFromPoi(
+        poi,
+        support,
+        poi.source === 'offline' ? 'offline_places' : poi.source === 'trailhead' ? 'trailhead' : 'osm',
+      );
+      if (feature && origin && isValidPoint(origin)) feature.distanceMi = haversineMiles(origin, feature);
+      return feature;
     })
     .filter((feature): feature is TrailFeature => !!feature)
     .filter(feature => {
@@ -229,7 +254,14 @@ export function buildTrailDiscoveries(
       seen.add(key);
       return true;
     })
-    .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
+    .sort((a, b) => {
+      if (sortMode === 'distance') {
+        const da = a.distanceMi ?? Number.POSITIVE_INFINITY;
+        const db = b.distanceMi ?? Number.POSITIVE_INFINITY;
+        return da - db || b.score - a.score || a.name.localeCompare(b.name);
+      }
+      return b.score - a.score || (a.distanceMi ?? 9999) - (b.distanceMi ?? 9999) || a.name.localeCompare(b.name);
+    })
     .slice(0, MAX_DISCOVERIES);
 }
 

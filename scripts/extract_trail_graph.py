@@ -105,6 +105,63 @@ def load_geojson(path: Path) -> Dict[str, Any]:
     raise ValueError(f"{path} is not a GeoJSON FeatureCollection")
 
 
+def iter_geojson_features(path: Path) -> Iterable[Dict[str, Any]]:
+    """Stream features from a compact FeatureCollection without loading it all.
+
+    Trail pack GeoJSON can be hundreds of MB for large states. The routing graph
+    resume path only needs one feature at a time, so avoid materializing the
+    entire FeatureCollection in memory.
+    """
+    decoder = json.JSONDecoder()
+    buffer = ""
+    in_features = False
+    done = False
+
+    with path.open("r", encoding="utf-8") as f:
+        while not done:
+            chunk = f.read(1_048_576)
+            if chunk:
+                buffer += chunk
+            elif not buffer:
+                break
+
+            while True:
+                if not in_features:
+                    idx = buffer.find('"features"')
+                    if idx < 0:
+                        if not chunk:
+                            raise ValueError(f"{path} has no features array")
+                        buffer = buffer[-64:]
+                        break
+                    array_idx = buffer.find("[", idx)
+                    if array_idx < 0:
+                        if not chunk:
+                            raise ValueError(f"{path} has no features array")
+                        buffer = buffer[idx:]
+                        break
+                    buffer = buffer[array_idx + 1 :]
+                    in_features = True
+
+                buffer = buffer.lstrip()
+                if buffer.startswith("]"):
+                    done = True
+                    break
+                if buffer.startswith(","):
+                    buffer = buffer[1:].lstrip()
+                if not buffer:
+                    break
+
+                try:
+                    feature, end = decoder.raw_decode(buffer)
+                except json.JSONDecodeError:
+                    if not chunk:
+                        raise
+                    break
+                if isinstance(feature, dict):
+                    yield feature
+                buffer = buffer[end:]
+
+
 class TrailPbfHandler(osmium.SimpleHandler if osmium else object):
     def __init__(self, progress_interval: int = 50_000) -> None:
         super().__init__()
@@ -410,7 +467,7 @@ def write_json(path: Path, data: Dict[str, Any]) -> None:
 
 
 def write_routing_graph_jsonl_gz(
-    trails: Dict[str, Any],
+    trails: Dict[str, Any] | Iterable[Dict[str, Any]],
     out_path: Path,
     region: str,
 ) -> None:
@@ -452,7 +509,8 @@ def write_routing_graph_jsonl_gz(
                 "e": "directed-neutral edge [id,a,b,length_m,segment]",
             },
         })
-        for feature_idx, feature in enumerate(trails.get("features") or []):
+        feature_iter = trails.get("features") if isinstance(trails, dict) else trails
+        for feature_idx, feature in enumerate(feature_iter or []):
             props = feature.get("properties") or {}
             for line_idx, coords in enumerate(iter_lines(feature)):
                 if len(coords) < 2:
@@ -718,7 +776,20 @@ def main() -> None:
     if source is None:
         raise SystemExit("Pass a source file or --download-geofabrik.")
 
-    if not args.force and trails_path.exists() and graph_path.exists():
+    needs_pmtiles = args.pmtiles and (args.force or not pmtiles_path.exists())
+    needs_route_graph = args.routing_graph and (args.force or not route_graph_path.exists())
+    can_stream_route_graph_only = (
+        needs_route_graph
+        and not needs_pmtiles
+        and trails_path.exists()
+        and graph_path.exists()
+    )
+
+    if can_stream_route_graph_only:
+        print(f"{region}: existing display/graph/PMTiles complete; streaming routing graph from {trails_path}", flush=True)
+        trails: Dict[str, Any] | Iterable[Dict[str, Any]] = iter_geojson_features(trails_path)
+        graph: Dict[str, Any] | None = None
+    elif not args.force and trails_path.exists() and graph_path.exists():
         print(f"{region}: reusing existing graph/display outputs", flush=True)
         trails = load_geojson(trails_path)
         graph = json.loads(graph_path.read_text(encoding="utf-8"))
@@ -743,8 +814,10 @@ def main() -> None:
         else:
             print(f"{region}: writing {route_graph_path}", flush=True)
             write_routing_graph_jsonl_gz(trails, route_graph_path, region)
-    print(f"Wrote {len(trails['features'])} trail display features", flush=True)
-    print(f"Wrote {len(graph['nodes'])} graph nodes, {len(graph['edges'])} graph edges, {len(graph['systems'])} systems", flush=True)
+    if isinstance(trails, dict):
+        print(f"Wrote {len(trails['features'])} trail display features", flush=True)
+    if graph is not None:
+        print(f"Wrote {len(graph['nodes'])} graph nodes, {len(graph['edges'])} graph edges, {len(graph['systems'])} systems", flush=True)
     if not args.pmtiles:
         print(f"Next PMTiles step: rerun with --pmtiles or use tippecanoe -o {region_dir / 'trails.pmtiles'} -zg --drop-densest-as-needed --extend-zooms-if-still-dropping -l trails {region_dir / 'trails.geojson'}")
 

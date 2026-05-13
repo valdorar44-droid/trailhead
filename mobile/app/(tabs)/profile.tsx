@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  TextInput, Alert, Share, Linking, ActivityIndicator, Image, Modal, Animated, Keyboard,
+  TextInput, Alert, Share, Linking, ActivityIndicator, Image, Modal, Animated, Keyboard, Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -12,13 +12,24 @@ import { storage } from '@/lib/storage';
 import * as Updates from 'expo-updates';
 import Constants from 'expo-constants';
 import * as Application from 'expo-application';
-import { api, ApiError } from '@/lib/api';
+import { api, ApiError, ContestStatus, ContributorProfile } from '@/lib/api';
 import { useStore, RigProfile, TripHistoryItem } from '@/lib/store';
 import PaywallModal from '@/components/PaywallModal';
 import TourTarget from '@/components/TourTarget';
 import { freeTrialLabel, useSubscription } from '@/lib/useSubscription';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 import { deleteOfflineTrip, getOfflineTripIndex, loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
+import { deleteRouteGeometry, saveRouteGeometry } from '@/lib/offlineRoutes';
+import {
+  buildTripFromGpxTrack,
+  gpxTrackDistanceMiles,
+  loadGpxImportBatches,
+  parseGpx,
+  removeGpxImportBatch,
+  saveGpxImportBatch,
+  thinTrackCoords,
+  type GpxImportBatch,
+} from '@/lib/gpxImport';
 import { CREDIT_REWARDS } from '@/lib/credits';
 
 type ChecklistItem = { id: string; label: string; done: boolean };
@@ -118,11 +129,26 @@ export default function ProfileScreen() {
   const planTrial = freeTrialLabel(annualProduct) || freeTrialLabel(monthlyProduct);
   const [gpxImporting, setGpxImporting] = useState(false);
   const [gpxResult, setGpxResult] = useState('');
+  const [gpxBatches, setGpxBatches] = useState<GpxImportBatch[]>([]);
+  const [showContributorApply, setShowContributorApply] = useState(false);
+  const [contributorExperience, setContributorExperience] = useState('');
+  const [contributorRegions, setContributorRegions] = useState('');
+  const [contributorSample, setContributorSample] = useState('');
+  const [contributorApplying, setContributorApplying] = useState(false);
+  const [contributorApplyResult, setContributorApplyResult] = useState('');
   const [showBugModal, setShowBugModal] = useState(false);
   const [bugTitle, setBugTitle] = useState('');
   const [bugDesc, setBugDesc] = useState('');
   const [bugSubmitting, setBugSubmitting] = useState(false);
   const [bugSent, setBugSent] = useState(false);
+  const [showContest, setShowContest] = useState(false);
+  const [contest, setContest] = useState<ContestStatus | null>(null);
+  const [contestLoading, setContestLoading] = useState(false);
+  const [contestEntering, setContestEntering] = useState(false);
+  const [showContributions, setShowContributions] = useState(false);
+  const [contributions, setContributions] = useState<ContributorProfile | null>(null);
+  const [contributionsLoading, setContributionsLoading] = useState(false);
+  const [visibilitySaving, setVisibilitySaving] = useState(false);
 
   const [editingRig, setEditingRig] = useState(false);
   const [rigDraft, setRigDraft] = useState<RigProfile>(rigProfile ?? DEFAULT_RIG);
@@ -133,6 +159,7 @@ export default function ProfileScreen() {
   // Offline cache state
   const [offlineCachedIds, setOfflineCachedIds] = useState<Set<string>>(new Set());
   const setActiveTrip = useStore(st => st.setActiveTrip);
+  const addTripToHistory = useStore(st => st.addTripToHistory);
   const startGuidedTour = useStore(st => st.startGuidedTour);
 
   // Smooth auth → main transition: dismiss keyboard, show success flash, fade out, switch view
@@ -171,7 +198,57 @@ export default function ProfileScreen() {
     getOfflineTripIndex().then(ids => {
       setOfflineCachedIds(new Set(ids));
     }).catch(() => {});
+    loadGpxImportBatches().then(setGpxBatches).catch(() => {});
   }, []);
+
+  async function openContest() {
+    setShowContest(true);
+    setContestLoading(true);
+    try {
+      setContest(await api.getContestStatus());
+    } catch (e: any) {
+      Alert.alert('Contest unavailable', e?.message ?? 'Could not load contest standings.');
+    } finally {
+      setContestLoading(false);
+    }
+  }
+
+  async function enterContestDrawing() {
+    setContestEntering(true);
+    try {
+      const res = await api.enterContestDrawing();
+      setContest(prev => prev ? { ...prev, ...res.status } : prev);
+      Alert.alert('Entry saved', 'You are entered in this month’s drawing. No purchase is required and a purchase does not improve your odds.');
+    } catch (e: any) {
+      Alert.alert('Entry failed', e?.message ?? 'Could not save your entry.');
+    } finally {
+      setContestEntering(false);
+    }
+  }
+
+  async function openContributions() {
+    setShowContributions(true);
+    setContributionsLoading(true);
+    try {
+      setContributions(await api.getMyContributions());
+    } catch (e: any) {
+      Alert.alert('Contributions unavailable', e?.message ?? 'Could not load your contribution profile.');
+    } finally {
+      setContributionsLoading(false);
+    }
+  }
+
+  async function toggleContributionVisibility() {
+    if (!contributions) return;
+    setVisibilitySaving(true);
+    try {
+      setContributions(await api.setContributionVisibility(!contributions.public_profile_visible));
+    } catch (e: any) {
+      Alert.alert('Privacy update failed', e?.message ?? 'Could not update profile visibility.');
+    } finally {
+      setVisibilitySaving(false);
+    }
+  }
 
   async function login() {
     if (!email || !password) { Alert.alert('Fill in all fields'); return; }
@@ -317,6 +394,54 @@ export default function ProfileScreen() {
     );
   }
 
+  async function openGpxBatch(batch: GpxImportBatch) {
+    const tripId = batch.routeTripId || batch.routeTripIds?.[0];
+    if (!tripId) {
+      setGpxResult('This GPX import only added waypoint pins. Enable GPX in map filters to view them.');
+      return;
+    }
+    try {
+      const trip = await loadOfflineTrip(tripId);
+      if (!trip) {
+        setGpxResult('That imported route is no longer saved offline on this device.');
+        return;
+      }
+      setActiveTrip(trip, true);
+      router.push('/(tabs)/map');
+    } catch (e: any) {
+      setGpxResult(`Could not open GPX route: ${e?.message ?? 'unknown error'}`);
+    }
+  }
+
+  function confirmDeleteGpxBatch(batch: GpxImportBatch) {
+    Alert.alert(
+      'Remove GPX import?',
+      `${batch.routeName || batch.fileName} will be removed from GPX import history${batch.routeTripIds?.length ? ' and its saved route previews will be deleted from this device' : ''}.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            const tripIds = batch.routeTripIds ?? (batch.routeTripId ? [batch.routeTripId] : []);
+            await Promise.all(tripIds.map(async id => {
+              removeTripFromHistory(id);
+              await deleteOfflineTrip(id);
+              await deleteRouteGeometry(id);
+            }));
+            const next = await removeGpxImportBatch(batch.id);
+            setGpxBatches(next);
+            setOfflineCachedIds(prev => {
+              const out = new Set(prev);
+              tripIds.forEach(id => out.delete(id));
+              return out;
+            });
+          },
+        },
+      ],
+    );
+  }
+
   async function submitBug() {
     if (!bugTitle.trim() || !bugDesc.trim()) { Alert.alert('Fill in both fields'); return; }
     setBugSubmitting(true);
@@ -372,36 +497,139 @@ export default function ProfileScreen() {
       if (result.canceled) return;
       const file = result.assets[0];
       const content = await FileSystem.readAsStringAsync(file.uri);
-      const nameMatches = [...content.matchAll(/<name>([\s\S]*?)<\/name>/g)];
-      const wptMatches = [...content.matchAll(/<wpt\s+lat="([\d.\-]+)"\s+lon="([\d.\-]+)"([\s\S]*?)<\/wpt>/g)];
-      const trkpts = [...content.matchAll(/<trkpt\s+lat="([\d.\-]+)"\s+lon="([\d.\-]+)"/g)];
-
-      if (wptMatches.length === 0 && trkpts.length === 0) {
+      const parsed = parseGpx(content, file.name);
+      if (parsed.waypoints.length === 0 && parsed.tracks.length === 0) {
         setGpxResult('No waypoints or track points found in this GPX file.');
         return;
       }
 
-      const pins = wptMatches
-        .map((m, i) => ({
-          lat: parseFloat(m[1]), lng: parseFloat(m[2]),
-          name: nameMatches[i + 1]?.[1]?.trim() ?? `Waypoint ${i + 1}`,
+      const pins = parsed.waypoints
+        .map((point, i) => ({
+          lat: point.lat,
+          lng: point.lng,
+          name: (point.name || `Waypoint ${i + 1}`).slice(0, 80),
           type: 'gpx_import',
-          description: `Imported from GPX: ${file.name}`,
+          description: [point.desc, `Imported from GPX: ${file.name}`].filter(Boolean).join('\n'),
+          details: {
+            import_name: parsed.name,
+            ...(point.ele != null ? { elevation_m: String(Math.round(point.ele)) } : {}),
+            ...(point.time ? { recorded_at: point.time } : {}),
+          },
         }))
         .filter(p => isFinite(p.lat) && isFinite(p.lng) &&
           p.lat >= -90 && p.lat <= 90 && p.lng >= -180 && p.lng <= 180);
 
+      const pinLimit = user?.is_admin ? 250 : 15;
+      let importedPins = 0;
+      let duplicatePins = 0;
       if (pins.length > 0) {
-        const importLimit = 15;
-        await Promise.all(pins.slice(0, importLimit).map(p => api.submitPin(p).catch(() => {})));
-        setGpxResult(`Imported up to ${Math.min(pins.length, importLimit)} GPX waypoints. GPX pins stay hidden on the map until enabled in filters and do not earn community credits until re-added or verified manually.`);
+        const results = await Promise.all(pins.slice(0, pinLimit).map(p => api.submitPin(p).catch(() => null)));
+        importedPins = results.filter((res: any) => res?.status === 'ok' || res?.id).length;
+        duplicatePins = results.filter((res: any) => res?.status === 'duplicate').length;
+      }
+
+      const savedTripIds: string[] = [];
+      let primaryTripId = '';
+      let primaryRoutePoints = 0;
+      let totalDistance = 0;
+      const tracks = [...parsed.tracks].sort((a, b) => b.distanceMiles - a.distanceMiles);
+      for (const [idx, track] of tracks.entries()) {
+        const tripId = `gpx_${Date.now()}_${idx + 1}`;
+        const routeCoords = thinTrackCoords(track.coords);
+        const trip = buildTripFromGpxTrack({ ...track, coords: routeCoords }, tripId);
+        await saveOfflineTrip(trip);
+        await saveRouteGeometry(trip.trip_id, {
+          coords: routeCoords,
+          steps: [],
+          legs: [],
+          totalDistance: gpxTrackDistanceMiles(routeCoords) * 1609.344,
+          totalDuration: Math.max(600, gpxTrackDistanceMiles(routeCoords) / 18 * 3600),
+        });
+        if (idx === 0) {
+          setActiveTrip(trip, true);
+          primaryTripId = trip.trip_id;
+          primaryRoutePoints = routeCoords.length;
+        }
+        savedTripIds.push(trip.trip_id);
+        totalDistance += trip.plan.total_est_miles || 0;
+        addTripToHistory({
+          trip_id: trip.trip_id,
+          trip_name: trip.plan.trip_name,
+          states: [],
+          duration_days: 1,
+          est_miles: trip.plan.total_est_miles,
+          planned_at: Date.now(),
+        });
+      }
+      if (savedTripIds.length > 0) {
+        setOfflineCachedIds(prev => new Set([...savedTripIds, ...prev]));
+        const batch: GpxImportBatch = {
+          id: `gpx_batch_${Date.now()}`,
+          fileName: file.name,
+          routeTripId: primaryTripId,
+          routeTripIds: savedTripIds,
+          routeName: parsed.name,
+          importedAt: Date.now(),
+          trackCount: parsed.sourceStats.trackCount || parsed.tracks.length,
+          routeCount: parsed.sourceStats.routeCount,
+          waypointCount: parsed.waypoints.length,
+          importedPins,
+          skippedPins: Math.max(0, pins.length - importedPins - duplicatePins),
+          pinLimit,
+          routePointCount: primaryRoutePoints,
+          distanceMiles: totalDistance,
+          status: 'review',
+        };
+        const batches = await saveGpxImportBatch(batch);
+        setGpxBatches(batches);
+        setGpxResult(`Imported ${savedTripIds.length} GPX route${savedTripIds.length === 1 ? '' : 's'} and ${importedPins} new waypoint pin${importedPins === 1 ? '' : 's'}.${duplicatePins ? ` ${duplicatePins} duplicate waypoint${duplicatePins === 1 ? '' : 's'} grouped with existing pins.` : ''}${batch.skippedPins ? ` ${batch.skippedPins} waypoints held back by the current import limit.` : ''}`);
+        router.push('/(tabs)/map');
       } else {
-        setGpxResult(`GPX track loaded: ${trkpts.length} track points. No named waypoints to pin.`);
+        const batch: GpxImportBatch = {
+          id: `gpx_batch_${Date.now()}`,
+          fileName: file.name,
+          routeName: parsed.name,
+          importedAt: Date.now(),
+          trackCount: 0,
+          routeCount: parsed.sourceStats.routeCount,
+          waypointCount: parsed.waypoints.length,
+          importedPins,
+          skippedPins: Math.max(0, pins.length - importedPins - duplicatePins),
+          pinLimit,
+          routePointCount: 0,
+          distanceMiles: 0,
+          status: 'review',
+        };
+        const batches = await saveGpxImportBatch(batch);
+        setGpxBatches(batches);
+        setGpxResult(`Imported ${importedPins} new GPX waypoint pin${importedPins === 1 ? '' : 's'}.${duplicatePins ? ` ${duplicatePins} duplicate waypoint${duplicatePins === 1 ? '' : 's'} grouped with existing pins.` : ''}${batch.skippedPins ? ` ${batch.skippedPins} waypoints held back by the current import limit.` : ''} Enable GPX in map filters to see them.`);
       }
     } catch (e: any) {
       setGpxResult(`Import failed: ${e.message}`);
     } finally {
       setGpxImporting(false);
+    }
+  }
+
+  async function applyMapContributor() {
+    const regions = contributorRegions.split(',').map(r => r.trim()).filter(Boolean);
+    if (contributorExperience.trim().length < 20 || regions.length === 0) {
+      Alert.alert('Add a little more detail', 'Tell us your mapping experience and at least one region you know well.');
+      return;
+    }
+    setContributorApplying(true);
+    setContributorApplyResult('');
+    try {
+      await api.applyMapContributor({
+        experience: contributorExperience.trim(),
+        regions,
+        sample_note: contributorSample.trim() || undefined,
+      });
+      setContributorApplyResult('Application received. Imports still stay untrusted until review, verification, or trusted contributor approval.');
+    } catch (e: any) {
+      setContributorApplyResult(e?.message ?? 'Application failed. Please try again.');
+    } finally {
+      setContributorApplying(false);
     }
   }
 
@@ -460,7 +688,7 @@ export default function ProfileScreen() {
               </View>
             </View>
             <Text style={s.authHeading}>Welcome back</Text>
-            <Text style={s.authSub}>Sign in to plan trips, earn credits, and track your reports.</Text>
+            <Text style={s.authSub}>Sign in to plan trips, sync downloads, manage Explorer, and track your field reports.</Text>
             <View style={s.authFields}>
               <TextInput style={s.input} placeholder="Email" placeholderTextColor={C.text3}
                 value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
@@ -470,13 +698,18 @@ export default function ProfileScreen() {
             <TouchableOpacity style={[s.btn, loading && s.btnDisabled]} onPress={login} disabled={loading}>
               <Text style={s.btnText}>{loading ? 'SIGNING IN...' : 'SIGN IN'}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={s.secondaryAuthBtn} onPress={() => { setResetSent(false); setView('forgot'); }}>
-              <Text style={s.secondaryAuthText}>Forgot password?</Text>
+            <TouchableOpacity style={s.forgotBtn} onPress={() => { setResetSent(false); setView('forgot'); }}>
+              <Ionicons name="key-outline" size={14} color={C.orange} />
+              <Text style={s.forgotText}>Forgot your password?</Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.switchRow} onPress={() => setView('register')}>
               <Text style={s.switchText}>No account?</Text>
               <Text style={s.switchLink}> Create one →</Text>
             </TouchableOpacity>
+            <TouchableOpacity style={s.secondaryAuthBtn} onPress={() => { openPaywall(); setShowPaywall(true); }}>
+              <Text style={s.secondaryAuthText}>View Explorer plans without an account</Text>
+            </TouchableOpacity>
+            <PaywallModal visible={showPaywall} onClose={() => setShowPaywall(false)} />
           </ScrollView>
         )}
       </Animated.View>
@@ -563,6 +796,10 @@ export default function ProfileScreen() {
           <Text style={s.switchText}>Have an account?</Text>
           <Text style={s.switchLink}> Sign in →</Text>
         </TouchableOpacity>
+        <TouchableOpacity style={s.secondaryAuthBtn} onPress={() => { openPaywall(); setShowPaywall(true); }}>
+          <Text style={s.secondaryAuthText}>View Explorer plans without an account</Text>
+        </TouchableOpacity>
+        <PaywallModal visible={showPaywall} onClose={() => setShowPaywall(false)} />
       </ScrollView>
         )}
       </Animated.View>
@@ -688,6 +925,8 @@ export default function ProfileScreen() {
         >
           {[
             { icon: 'compass', label: 'PLAN TRIP',   color: C.orange, onPress: () => { setActiveTrip(null); router.push('/(tabs)'); } },
+            { icon: 'trophy-outline', label: 'CONTEST', color: '#d4af37', onPress: openContest },
+            { icon: 'ribbon-outline', label: 'CONTRIB', color: '#14b8a6', onPress: openContributions },
             { icon: 'people',  label: 'REFER',       color: C.orange, onPress: shareReferral },
             { icon: 'checkmark-circle', label: 'TRIP PREP', color: C.green,  onPress: () => setShowChecklist(true) },
             { icon: 'help-buoy-outline', label: 'APP TOUR', color: '#3b82f6', onPress: startGuidedTour },
@@ -1167,7 +1406,6 @@ export default function ProfileScreen() {
         <PaywallModal
           visible={showPaywall}
           onClose={() => setShowPaywall(false)}
-          onPlanActivated={() => { setPlan(true); setShowPaywall(false); }}
         />
 
         {showHistory && creditHistory.length > 0 && (
@@ -1224,10 +1462,10 @@ export default function ProfileScreen() {
         <View style={s.gpxCard}>
           <View style={s.gpxHeader}>
             <Ionicons name="map-outline" size={18} color={C.orange} />
-            <Text style={s.gpxTitle}>Import GPX Track</Text>
+            <Text style={s.gpxTitle}>Import GPX</Text>
           </View>
           <Text style={s.gpxDesc}>
-            Import GPX files from Gaia, Garmin, or iOverlander. Named waypoints become GPX community pins, hidden by default because imported points may be unverified.
+            Import GPX tracks as saved route previews and GPX waypoints as map pins. Normal accounts can add 15 waypoint pins per import. Imported points stay untrusted until review, verification, or trusted contributor approval.
           </Text>
           {!!gpxResult && (
             <Text style={[s.gpxResult, gpxResult.startsWith('Import failed') && { color: C.red }]}>
@@ -1240,7 +1478,91 @@ export default function ProfileScreen() {
               size={16} color="#fff" />
             <Text style={s.gpxBtnText}>{gpxImporting ? 'IMPORTING...' : 'SELECT GPX FILE'}</Text>
           </TouchableOpacity>
+          <TouchableOpacity style={s.contributorApplyBtn} onPress={() => setShowContributorApply(true)}>
+            <Ionicons name="shield-checkmark-outline" size={16} color={C.green} />
+            <Text style={s.contributorApplyText}>APPLY AS MAP CONTRIBUTOR</Text>
+          </TouchableOpacity>
+          {gpxBatches.length > 0 && (
+            <View style={s.gpxBatchList}>
+              <Text style={s.gpxBatchHeader}>RECENT GPX IMPORTS</Text>
+              {gpxBatches.slice(0, 5).map(batch => {
+                const hasRoute = !!(batch.routeTripId || batch.routeTripIds?.length);
+                return (
+                  <View key={batch.id} style={s.gpxBatchRow}>
+                    <TouchableOpacity style={s.gpxBatchMain} onPress={() => openGpxBatch(batch)} disabled={!hasRoute}>
+                      <View style={[s.gpxBatchIcon, { borderColor: hasRoute ? C.orange + '55' : C.border }]}>
+                        <Ionicons name={hasRoute ? 'map-outline' : 'location-outline'} size={15} color={hasRoute ? C.orange : C.text3} />
+                      </View>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={s.gpxBatchName} numberOfLines={1}>{batch.routeName || batch.fileName}</Text>
+                        <Text style={s.gpxBatchMeta} numberOfLines={1}>
+                          {batch.routeTripIds?.length || (batch.routeTripId ? 1 : 0)} routes · {batch.importedPins}/{batch.waypointCount} pins · {Math.round(batch.distanceMiles)} mi · review
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={s.gpxBatchDelete} onPress={() => confirmDeleteGpxBatch(batch)}>
+                      <Ionicons name="trash-outline" size={15} color={C.red} />
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
+            </View>
+          )}
         </View>
+
+        <Modal visible={showContributorApply} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowContributorApply(false)}>
+          <SafeAreaView style={[s.container, { padding: 0 }]}>
+            <View style={s.bugModal}>
+              <View style={s.bugModalHeader}>
+                <Text style={s.bugModalTitle}>Map Contributor</Text>
+                <TouchableOpacity onPress={() => setShowContributorApply(false)}>
+                  <Ionicons name="close" size={22} color={C.text3} />
+                </TouchableOpacity>
+              </View>
+              <Text style={s.contributorIntro}>
+                Apply for higher reviewed import limits. Approved contributors can help upgrade imported points, but new GPX imports still start untrusted.
+              </Text>
+              <Text style={s.bugFieldLabel}>REGIONS YOU KNOW</Text>
+              <TextInput
+                style={s.bugTitleInput}
+                placeholder="Colorado Front Range, Moab, Ozarks..."
+                placeholderTextColor={C.text3}
+                value={contributorRegions}
+                onChangeText={setContributorRegions}
+                maxLength={180}
+              />
+              <Text style={s.bugFieldLabel}>MAPPING EXPERIENCE</Text>
+              <TextInput
+                style={s.bugDescInput}
+                placeholder="Trail scouting, land access checks, GPX cleanup, local club work, agency maps used..."
+                placeholderTextColor={C.text3}
+                value={contributorExperience}
+                onChangeText={setContributorExperience}
+                multiline
+                maxLength={900}
+                textAlignVertical="top"
+              />
+              <Text style={s.bugFieldLabel}>SAMPLE NOTE</Text>
+              <TextInput
+                style={[s.bugTitleInput, { minHeight: 70, textAlignVertical: 'top' }]}
+                placeholder="Optional example of how you would verify a campsite, water source, or trailhead."
+                placeholderTextColor={C.text3}
+                value={contributorSample}
+                onChangeText={setContributorSample}
+                multiline
+                maxLength={500}
+              />
+              {!!contributorApplyResult && (
+                <Text style={[s.gpxResult, contributorApplyResult.startsWith('Application received') ? { color: C.green } : { color: C.red }]}>
+                  {contributorApplyResult}
+                </Text>
+              )}
+              <TouchableOpacity style={[s.bugSubmitBtn, contributorApplying && { opacity: 0.6 }]} onPress={applyMapContributor} disabled={contributorApplying}>
+                {contributorApplying ? <ActivityIndicator color="#fff" /> : <Text style={s.bugSubmitText}>SUBMIT APPLICATION</Text>}
+              </TouchableOpacity>
+            </View>
+          </SafeAreaView>
+        </Modal>
 
         {/* Bug Report */}
         <TouchableOpacity style={s.bugCard} onPress={() => setShowBugModal(true)}>
@@ -1312,6 +1634,281 @@ export default function ProfileScreen() {
             </View>
           </SafeAreaView>
         </Modal>
+
+        <Modal visible={showContributions} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowContributions(false)}>
+          <SafeAreaView style={s.contestModal}>
+            <View style={s.contestModalHeader}>
+              <TouchableOpacity style={s.contestClose} onPress={() => setShowContributions(false)}>
+                <Ionicons name="close" size={20} color={C.text} />
+              </TouchableOpacity>
+              <View style={{ flex: 1 }}>
+                <Text style={s.contestModalKicker}>PROFILE</Text>
+                <Text style={s.contestModalTitle}>Contributions</Text>
+              </View>
+              <View style={s.betaBadge}><Text style={s.betaBadgeText}>LIVE</Text></View>
+            </View>
+            {contributionsLoading ? (
+              <View style={s.contestLoading}>
+                <ActivityIndicator color={C.orange} />
+                <Text style={s.contestMuted}>Loading your contributor profile...</Text>
+              </View>
+            ) : (
+              <ScrollView contentContainerStyle={s.contestScroll}>
+                <View style={s.contributionHero}>
+                  <View style={[s.contributionAvatar, { backgroundColor: contributions?.avatar_color ?? C.orange }]}>
+                    <Text style={s.contributionAvatarText}>{contributions?.display_name?.[0]?.toUpperCase() ?? user?.username?.[0]?.toUpperCase() ?? '?'}</Text>
+                  </View>
+                  <Text style={s.contributionName}>{contributions?.display_name ?? user?.username}</Text>
+                  <Text style={s.contributionTitle}>{contributions?.title ?? 'First Tracks'}</Text>
+                  <View style={s.contestHeroStats}>
+                    <View style={s.contestHeroStat}>
+                      <Text style={s.contestHeroNumber}>{contributions?.points.month ?? 0}</Text>
+                      <Text style={s.contestHeroLabel}>MONTH</Text>
+                    </View>
+                    <View style={s.contestHeroStat}>
+                      <Text style={s.contestHeroNumber}>{contributions?.points.year ?? 0}</Text>
+                      <Text style={s.contestHeroLabel}>YEAR</Text>
+                    </View>
+                    <View style={s.contestHeroStat}>
+                      <Text style={s.contestHeroNumber}>{contributions?.rank.year ? `#${contributions.rank.year}` : '—'}</Text>
+                      <Text style={s.contestHeroLabel}>YEAR RANK</Text>
+                    </View>
+                  </View>
+                  <View style={s.contributionProgress}>
+                    <View style={[s.contributionProgressFill, { width: `${Math.round(((contributions?.tier.progress ?? 0) * 100))}%` }]} />
+                  </View>
+                  <Text style={s.contestMuted}>
+                    {contributions?.tier.next_label
+                      ? `${contributions.tier.next_label} unlocks at ${contributions.tier.next_points?.toLocaleString()} points.`
+                      : 'Top contributor tier unlocked.'}
+                  </Text>
+                </View>
+
+                <View style={s.contributionPrivacyCard}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.contestEntryTitle}>Public contributor profile</Text>
+                    <Text style={s.contestEntryText}>Shows badges, ranks, and stats. Exact places and account details stay hidden.</Text>
+                  </View>
+                  <Switch
+                    value={!!contributions?.public_profile_visible}
+                    onValueChange={toggleContributionVisibility}
+                    disabled={!contributions || visibilitySaving}
+                    trackColor={{ false: C.s3, true: C.orangeGlow }}
+                    thumbColor={contributions?.public_profile_visible ? C.orange : C.text3}
+                  />
+                </View>
+
+                <View style={s.contestBoardCard}>
+                  <Text style={s.sectionLabel}>BADGE SHELF</Text>
+                  <View style={s.contributionBadgeGrid}>
+                    {(contributions?.badges ?? []).length ? contributions!.badges.map(badge => (
+                      <View key={badge.id} style={s.contributionBadge}>
+                        <Ionicons name="ribbon-outline" size={18} color="#f8d77a" />
+                        <Text style={s.contributionBadgeTitle}>{badge.label}</Text>
+                        <Text style={s.contributionBadgeDesc}>{badge.description}</Text>
+                      </View>
+                    )) : <Text style={s.contestMuted}>Earn badges by submitting useful reports, photos, confirmations, and trail notes.</Text>}
+                  </View>
+                </View>
+
+                <View style={s.contestBoardCard}>
+                  <Text style={s.sectionLabel}>FIELD IMPACT</Text>
+                  {[
+                    ['Camp reports', contributions?.stats.camp_reports ?? 0],
+                    ['Trail reports', contributions?.stats.trail_reports ?? 0],
+                    ['Photo-backed reports', contributions?.stats.photos ?? 0],
+                    ['Confirmed reports', contributions?.stats.confirmations ?? 0],
+                  ].map(([label, value]) => (
+                    <View key={label} style={s.contestLeaderRow}>
+                      <Text style={s.contributionMetricLabel}>{label}</Text>
+                      <Text style={s.contestLeaderPoints}>{Number(value).toLocaleString()}</Text>
+                    </View>
+                  ))}
+                </View>
+
+                <View style={s.contestBoardCard}>
+                  <Text style={s.sectionLabel}>RECENT POINT SOURCES</Text>
+                  {(contributions?.recent_activity ?? []).length ? contributions!.recent_activity.map(item => (
+                    <View key={item.label} style={s.contestLeaderRow}>
+                      <Text style={s.contributionMetricLabel}>{item.label}</Text>
+                      <Text style={s.contestLeaderPoints}>{item.points.toLocaleString()} pts</Text>
+                    </View>
+                  )) : <Text style={s.contestMuted}>No contribution points yet.</Text>}
+                </View>
+              </ScrollView>
+            )}
+          </SafeAreaView>
+        </Modal>
+
+        <Modal visible={showContest} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowContest(false)}>
+          <SafeAreaView style={s.contestModal}>
+            <View style={s.contestModalHeader}>
+              <TouchableOpacity style={s.contestClose} onPress={() => setShowContest(false)}>
+                <Ionicons name="close" size={20} color={C.text} />
+              </TouchableOpacity>
+              <View style={{ flex: 1 }}>
+                <Text style={s.contestModalKicker}>TRAILHEAD</Text>
+                <Text style={s.contestModalTitle}>Contributor Contest</Text>
+              </View>
+            </View>
+            {contestLoading ? (
+              <View style={s.contestLoading}>
+                <ActivityIndicator color={C.orange} />
+                <Text style={s.contestMuted}>Loading contest standings...</Text>
+              </View>
+            ) : (
+              <ScrollView contentContainerStyle={s.contestScroll}>
+                <View style={s.contestHero}>
+                  <Text style={s.contestHeroTitle}>Build the map. Share what matters.</Text>
+                  <Text style={s.contestHeroText}>Contest points come from useful contributions across Trailhead. Your spendable credits stay separate.</Text>
+                  <View style={s.contestHeroStats}>
+                    <View style={s.contestHeroStat}>
+                      <Text style={s.contestHeroNumber}>{contest?.month_points ?? 0}</Text>
+                      <Text style={s.contestHeroLabel}>THIS MONTH</Text>
+                    </View>
+                    <View style={s.contestHeroStat}>
+                      <Text style={s.contestHeroNumber}>{contest?.year_points ?? 0}</Text>
+                      <Text style={s.contestHeroLabel}>THIS YEAR</Text>
+                    </View>
+                    <View style={s.contestHeroStat}>
+                      <Text style={s.contestHeroNumber}>{contest?.year_rank ? `#${contest.year_rank}` : '—'}</Text>
+                      <Text style={s.contestHeroLabel}>YEAR RANK</Text>
+                    </View>
+                  </View>
+                </View>
+
+                <View style={s.contestPrizeGrid}>
+                  {[
+                    ['$1,000', 'New Year winner', 'Top total contest points for the calendar year.'],
+                    ['$100', 'Monthly leader', 'Top contributor at the end of each calendar month.'],
+                    ['$50', 'Monthly drawing', 'Subscribers enter automatically. Free entry is available here.'],
+                  ].map(([amount, title, desc]) => (
+                    <View key={title} style={s.contestPrizeCard}>
+                      <Text style={s.contestPrizeCardAmount}>{amount}</Text>
+                      <Text style={s.contestPrizeCardTitle}>{title}</Text>
+                      <Text style={s.contestPrizeCardDesc}>{desc}</Text>
+                    </View>
+                  ))}
+                </View>
+
+                <View style={s.contestEntryCard}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.contestEntryTitle}>Monthly drawing</Text>
+                    <Text style={s.contestEntryText}>
+                      {contest?.drawing_entered
+                        ? `Entered for ${contest.period_month}${contest.drawing_entry_type ? ` via ${contest.drawing_entry_type}` : ''}.`
+                        : 'No purchase necessary. One free entry per eligible user each month.'}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={[s.contestEntryBtn, contest?.drawing_entered && s.contestEntryBtnDone]}
+                    onPress={enterContestDrawing}
+                    disabled={contestEntering || contest?.drawing_entered}
+                  >
+                    <Text style={s.contestEntryBtnText}>{contestEntering ? 'SAVING' : contest?.drawing_entered ? 'ENTERED' : 'ENTER FREE'}</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={s.contestBoardCard}>
+                  <Text style={s.sectionLabel}>MONTHLY LEADERS</Text>
+                  {(contest?.month_leaders ?? []).slice(0, 8).map(row => (
+                    <View key={`m-${row.user_id}`} style={s.contestLeaderRow}>
+                      <Text style={s.contestRank}>#{row.rank}</Text>
+                      <Text style={s.contestLeaderName}>{row.display_name}</Text>
+                      <Text style={s.contestLeaderPoints}>{row.points.toLocaleString()}</Text>
+                    </View>
+                  ))}
+                  {!contest?.month_leaders?.length && <Text style={s.contestMuted}>No contributions yet this month.</Text>}
+                </View>
+
+                <View style={s.contestBoardCard}>
+                  <Text style={s.sectionLabel}>YEARLY LEADERS</Text>
+                  {(contest?.year_leaders ?? []).slice(0, 8).map(row => (
+                    <View key={`y-${row.user_id}`} style={s.contestLeaderRow}>
+                      <Text style={s.contestRank}>#{row.rank}</Text>
+                      <Text style={s.contestLeaderName}>{row.display_name}</Text>
+                      <Text style={s.contestLeaderPoints}>{row.points.toLocaleString()}</Text>
+                    </View>
+                  ))}
+                  {!contest?.year_leaders?.length && <Text style={s.contestMuted}>No yearly standings yet.</Text>}
+                </View>
+
+                <View style={s.contestRulesCard}>
+                  <Text style={s.contestRulesTitle}>Official rules</Text>
+                  {contest?.rules ? [
+                    contest.rules.eligibility,
+                    contest.rules.entries,
+                    contest.rules.odds,
+                    contest.rules.points,
+                    contest.rules.sponsor,
+                    contest.rules.contact,
+                  ].map((line, idx) => <Text key={idx} style={s.contestRuleLine}>{line}</Text>) : (
+                    <Text style={s.contestRuleLine}>Rules are loading.</Text>
+                  )}
+                </View>
+              </ScrollView>
+            )}
+          </SafeAreaView>
+        </Modal>
+
+        {/* Contributions */}
+        <TouchableOpacity style={s.contributionCard} onPress={openContributions} activeOpacity={0.9}>
+          <View style={s.contributionGlow} />
+          <View style={s.contestHeader}>
+            <View style={s.contributionIcon}>
+              <Ionicons name="ribbon-outline" size={20} color="#7dd3fc" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.contributionKicker}>CONTRIBUTIONS</Text>
+              <Text style={s.contestTitle}>Badges, streaks, and public profile.</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={C.text3} />
+          </View>
+          <View style={s.contributionMiniRow}>
+            <View style={s.contributionMini}>
+              <Ionicons name="medal-outline" size={16} color="#d4af37" />
+              <Text style={s.contributionMiniText}>tier badges</Text>
+            </View>
+            <View style={s.contributionMini}>
+              <Ionicons name="flame-outline" size={16} color={C.orange} />
+              <Text style={s.contributionMiniText}>streaks</Text>
+            </View>
+            <View style={s.contributionMini}>
+              <Ionicons name="people-outline" size={16} color="#14b8a6" />
+              <Text style={s.contributionMiniText}>leaderboards</Text>
+            </View>
+          </View>
+        </TouchableOpacity>
+
+        {/* Contest */}
+        <TouchableOpacity style={s.contestCard} onPress={openContest} activeOpacity={0.9}>
+          <View style={s.contestGlow} />
+          <View style={s.contestHeader}>
+            <View style={s.contestIcon}>
+              <Ionicons name="trophy-outline" size={20} color="#f8d77a" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.contestKicker}>CONTRIBUTOR CONTEST</Text>
+              <Text style={s.contestTitle}>Earn points. Win Trailhead prizes.</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={C.text3} />
+          </View>
+          <View style={s.contestPrizeRow}>
+            <View style={s.contestPrize}>
+              <Text style={s.contestPrizeAmount}>$100</Text>
+              <Text style={s.contestPrizeLabel}>monthly top</Text>
+            </View>
+            <View style={s.contestPrize}>
+              <Text style={s.contestPrizeAmount}>$1,000</Text>
+              <Text style={s.contestPrizeLabel}>yearly top</Text>
+            </View>
+            <View style={s.contestPrize}>
+              <Text style={s.contestPrizeAmount}>$50</Text>
+              <Text style={s.contestPrizeLabel}>monthly drawing</Text>
+            </View>
+          </View>
+          <Text style={s.contestFinePrint}>No purchase necessary. Apple is not a sponsor or involved.</Text>
+        </TouchableOpacity>
 
         {/* Referral */}
         <View style={s.referralCard}>
@@ -1431,11 +2028,13 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   authHeading: { color: C.text, fontSize: 28, fontWeight: '800', letterSpacing: 0 },
   authSub: { color: C.text3, fontSize: 13.5, lineHeight: 20, marginTop: -4 },
   verifyCard: {
-    gap: 14, backgroundColor: 'rgba(255,255,255,0.055)', borderRadius: 22, borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)',
+    gap: 14, backgroundColor: C.s2, borderRadius: 22, borderWidth: 1, borderColor: C.border,
     padding: 18,
   },
   secondaryAuthBtn: { alignItems: 'center', paddingVertical: 8 },
   secondaryAuthText: { color: C.text3, fontSize: 13, fontWeight: '700' },
+  forgotBtn: { alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 999, backgroundColor: C.orangeGlow, borderWidth: 1, borderColor: C.orange + '55' },
+  forgotText: { color: C.orange, fontSize: 13, fontWeight: '800' },
   signupPerk: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
     backgroundColor: C.orangeGlow, borderRadius: 10, borderWidth: 1, borderColor: C.orange,
@@ -1444,30 +2043,30 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   signupPerkText: { color: C.orange, fontSize: 12.5, flex: 1, lineHeight: 18 },
   authFields: { gap: 10 },
   input: {
-    backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)',
+    backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
     borderRadius: 16, padding: 14, color: C.text, fontSize: 14,
   },
   btn: {
-    backgroundColor: C.silverBright, borderRadius: 16, padding: 16, alignItems: 'center',
-    shadowColor: '#fff', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.16, shadowRadius: 18,
+    backgroundColor: C.orange, borderRadius: 16, padding: 16, alignItems: 'center',
+    shadowColor: C.orange, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.16, shadowRadius: 18,
   },
   btnDisabled: { backgroundColor: C.s3, shadowOpacity: 0 },
-  btnText: { color: '#050505', fontWeight: '800', fontSize: 12, fontFamily: mono, letterSpacing: 1 },
+  btnText: { color: '#fff', fontWeight: '800', fontSize: 12, fontFamily: mono, letterSpacing: 1 },
   switchRow: { flexDirection: 'row', justifyContent: 'center', marginTop: -4 },
   switchText: { color: C.text3, fontSize: 13 },
   switchLink: { color: C.orange, fontSize: 13, fontWeight: '600' },
 
   profileCard: {
-    backgroundColor: 'rgba(255,255,255,0.055)', borderRadius: 24, borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)',
+    backgroundColor: C.s2, borderRadius: 24, borderWidth: 1, borderColor: C.border,
     padding: 16, flexDirection: 'row', alignItems: 'center', gap: 14,
     shadowColor: '#000', shadowOpacity: 0.32, shadowRadius: 24, shadowOffset: { width: 0, height: 12 },
   },
   avatar: {
     width: 52, height: 52, borderRadius: 26,
-    backgroundColor: 'rgba(229,231,235,0.16)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: C.s3, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center',
     shadowColor: '#E5E7EB', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.18, shadowRadius: 16,
   },
-  avatarText: { color: '#fff', fontSize: 22, fontWeight: '800' },
+  avatarText: { color: C.text, fontSize: 22, fontWeight: '800' },
   profileInfo: { flex: 1 },
   profileName: { color: C.text, fontSize: 16, fontWeight: '700' },
   profileEmail: { color: C.text3, fontSize: 12, marginTop: 1 },
@@ -1482,7 +2081,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
 
   // Stats row
   statsRow: {
-    backgroundColor: 'rgba(255,255,255,0.045)', borderRadius: 22, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: C.s2, borderRadius: 22, borderWidth: 1, borderColor: C.border,
     flexDirection: 'row', alignItems: 'stretch',
   },
   statCell: { flex: 1, alignItems: 'center', paddingVertical: 14 },
@@ -1496,20 +2095,97 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   quickAction: { alignItems: 'center', gap: 6, width: 70 },
   quickActionIcon: {
     width: 54, height: 54, borderRadius: 20,
-    borderWidth: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.045)',
+    borderWidth: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s2,
   },
   quickActionLabel: { color: C.text3, fontSize: 8.5, fontFamily: mono, letterSpacing: 0.5, textAlign: 'center' },
 
+  contributionCard: {
+    backgroundColor: C.s2, borderRadius: 24, borderWidth: 1, borderColor: '#14b8a655',
+    padding: 16, overflow: 'hidden', gap: 14,
+    shadowColor: '#14b8a6', shadowOpacity: 0.12, shadowRadius: 24, shadowOffset: { width: 0, height: 12 },
+  },
+  contributionGlow: { position: 'absolute', right: -44, top: -60, width: 162, height: 162, borderRadius: 81, backgroundColor: '#14b8a61f' },
+  contributionIcon: { width: 42, height: 42, borderRadius: 16, backgroundColor: '#14b8a61f', borderWidth: 1, borderColor: '#14b8a666', alignItems: 'center', justifyContent: 'center' },
+  contributionKicker: { color: '#14b8a6', fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
+  contributionMiniRow: { flexDirection: 'row', gap: 8 },
+  contributionMini: { flex: 1, borderRadius: 16, backgroundColor: C.s3, borderWidth: 1, borderColor: C.border, padding: 10, minHeight: 62, alignItems: 'center', justifyContent: 'center', gap: 5 },
+  contributionMiniText: { color: C.text3, fontSize: 9, fontFamily: mono, textAlign: 'center' },
+  contributionHero: { backgroundColor: C.s2, borderRadius: 26, borderWidth: 1, borderColor: '#14b8a655', padding: 18, gap: 12, alignItems: 'center' },
+  contributionAvatar: { width: 76, height: 76, borderRadius: 26, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#ffffff44' },
+  contributionAvatarText: { color: '#fff', fontSize: 32, fontWeight: '900' },
+  contributionName: { color: C.text, fontSize: 25, fontWeight: '900', letterSpacing: 0 },
+  contributionTitle: { color: '#14b8a6', fontSize: 12, fontFamily: mono, fontWeight: '900' },
+  contributionProgress: { width: '100%', height: 9, borderRadius: 999, backgroundColor: C.s3, borderWidth: 1, borderColor: C.border, overflow: 'hidden' },
+  contributionProgressFill: { height: '100%', borderRadius: 999, backgroundColor: '#14b8a6' },
+  contributionPrivacyCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.s2, borderRadius: 20, borderWidth: 1, borderColor: C.border, padding: 14 },
+  contributionBadgeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  contributionBadge: { width: '48%', minHeight: 106, borderRadius: 16, backgroundColor: C.s3, borderWidth: 1, borderColor: '#d4af3738', padding: 10, gap: 5 },
+  contributionBadgeTitle: { color: C.text, fontSize: 12, fontWeight: '900' },
+  contributionBadgeDesc: { color: C.text3, fontSize: 10.5, lineHeight: 14 },
+  contributionMetricLabel: { color: C.text2, flex: 1, fontSize: 13 },
+
+  contestCard: {
+    backgroundColor: C.s2, borderRadius: 24, borderWidth: 1, borderColor: '#d4af3744',
+    padding: 16, overflow: 'hidden', gap: 14,
+    shadowColor: '#d4af37', shadowOpacity: 0.13, shadowRadius: 24, shadowOffset: { width: 0, height: 12 },
+  },
+  contestGlow: { position: 'absolute', right: -42, top: -58, width: 160, height: 160, borderRadius: 80, backgroundColor: '#d4af3722' },
+  contestHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  contestIcon: { width: 42, height: 42, borderRadius: 16, backgroundColor: '#d4af3720', borderWidth: 1, borderColor: '#d4af3755', alignItems: 'center', justifyContent: 'center' },
+  contestKicker: { color: '#d4af37', fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
+  contestTitle: { color: C.text, fontSize: 18, fontWeight: '900', marginTop: 3, letterSpacing: 0 },
+  contestPrizeRow: { flexDirection: 'row', gap: 8 },
+  contestPrize: { flex: 1, borderRadius: 16, backgroundColor: C.s3, borderWidth: 1, borderColor: C.border, padding: 10, minHeight: 76, justifyContent: 'center' },
+  contestPrizeAmount: { color: C.text, fontSize: 19, fontFamily: mono, fontWeight: '900' },
+  contestPrizeLabel: { color: C.text3, fontSize: 10, lineHeight: 14, marginTop: 3 },
+  contestFinePrint: { color: C.text3, fontSize: 10.5, lineHeight: 15 },
+  contestModal: { flex: 1, backgroundColor: C.bg },
+  contestModalHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, borderBottomWidth: 1, borderBottomColor: C.border, backgroundColor: C.s2 },
+  contestClose: { width: 38, height: 38, borderRadius: 14, backgroundColor: C.s3, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center' },
+  contestModalKicker: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1.2 },
+  contestModalTitle: { color: C.text, fontSize: 22, fontWeight: '900', letterSpacing: 0 },
+  betaBadge: { borderRadius: 999, borderWidth: 1, borderColor: '#d4af3766', backgroundColor: '#d4af371c', paddingHorizontal: 10, paddingVertical: 5 },
+  betaBadgeText: { color: '#d4af37', fontSize: 9, fontFamily: mono, fontWeight: '900' },
+  contestScroll: { padding: 16, gap: 14, paddingBottom: 40 },
+  contestLoading: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  contestHero: { backgroundColor: C.s2, borderRadius: 26, borderWidth: 1, borderColor: C.border, padding: 18, gap: 14 },
+  contestHeroTitle: { color: C.text, fontSize: 27, lineHeight: 31, fontWeight: '900', letterSpacing: 0 },
+  contestHeroText: { color: C.text2, fontSize: 14, lineHeight: 21 },
+  contestHeroStats: { flexDirection: 'row', gap: 8 },
+  contestHeroStat: { flex: 1, borderRadius: 16, backgroundColor: C.s3, borderWidth: 1, borderColor: C.border, padding: 10, alignItems: 'center' },
+  contestHeroNumber: { color: C.text, fontSize: 20, fontFamily: mono, fontWeight: '900' },
+  contestHeroLabel: { color: C.text3, fontSize: 8, fontFamily: mono, marginTop: 4, textAlign: 'center' },
+  contestPrizeGrid: { gap: 10 },
+  contestPrizeCard: { backgroundColor: C.s2, borderRadius: 20, borderWidth: 1, borderColor: C.border, padding: 15 },
+  contestPrizeCardAmount: { color: '#d4af37', fontSize: 28, fontFamily: mono, fontWeight: '900' },
+  contestPrizeCardTitle: { color: C.text, fontSize: 15, fontWeight: '900', marginTop: 3 },
+  contestPrizeCardDesc: { color: C.text3, fontSize: 12.5, lineHeight: 18, marginTop: 5 },
+  contestEntryCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.s2, borderRadius: 20, borderWidth: 1, borderColor: '#d4af3744', padding: 14 },
+  contestEntryTitle: { color: C.text, fontSize: 15, fontWeight: '900' },
+  contestEntryText: { color: C.text3, fontSize: 12, lineHeight: 17, marginTop: 3 },
+  contestEntryBtn: { borderRadius: 14, backgroundColor: C.orange, paddingHorizontal: 14, paddingVertical: 11, minWidth: 98, alignItems: 'center' },
+  contestEntryBtnDone: { backgroundColor: C.green },
+  contestEntryBtnText: { color: '#fff', fontSize: 10, fontFamily: mono, fontWeight: '900' },
+  contestBoardCard: { backgroundColor: C.s2, borderRadius: 20, borderWidth: 1, borderColor: C.border, padding: 14 },
+  contestLeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: C.border },
+  contestRank: { color: '#d4af37', width: 38, fontSize: 13, fontFamily: mono, fontWeight: '900' },
+  contestLeaderName: { color: C.text, flex: 1, fontSize: 14, fontWeight: '700' },
+  contestLeaderPoints: { color: C.text, fontSize: 14, fontFamily: mono, fontWeight: '900' },
+  contestMuted: { color: C.text3, fontSize: 12, lineHeight: 18 },
+  contestRulesCard: { backgroundColor: C.s2, borderRadius: 20, borderWidth: 1, borderColor: C.border, padding: 14, gap: 8 },
+  contestRulesTitle: { color: C.text, fontSize: 16, fontWeight: '900' },
+  contestRuleLine: { color: C.text3, fontSize: 12, lineHeight: 18 },
+
   // MY RIG
   rigCard: {
-    backgroundColor: 'rgba(255,255,255,0.052)', borderRadius: 24, borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)', padding: 16,
+    backgroundColor: C.s2, borderRadius: 24, borderWidth: 1, borderColor: C.border, padding: 16,
     shadowColor: '#000', shadowOpacity: 0.28, shadowRadius: 24, shadowOffset: { width: 0, height: 12 },
   },
   rigHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
   rigIcon: { fontSize: 18 },
   rigTitle: { color: C.text, fontSize: 13, fontWeight: '800', fontFamily: mono, letterSpacing: 0.5, flex: 1 },
   rigEditBtn: {
-    backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)',
+    backgroundColor: C.s3, borderRadius: 12, borderWidth: 1, borderColor: C.border,
     paddingHorizontal: 10, paddingVertical: 5,
   },
   rigEditText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '700' },
@@ -1695,6 +2371,50 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   gpxBtnDisabled: { opacity: 0.5 },
   gpxBtnText: { color: C.text2, fontSize: 12, fontFamily: mono, fontWeight: '700' },
+  gpxBatchList: {
+    marginTop: 4,
+    borderTopWidth: 1,
+    borderColor: C.border,
+    paddingTop: 10,
+    gap: 8,
+  },
+  gpxBatchHeader: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
+  gpxBatchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderColor: C.border + '66',
+  },
+  gpxBatchMain: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 9 },
+  gpxBatchIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.bg,
+  },
+  gpxBatchName: { color: C.text, fontSize: 12.5, fontWeight: '800' },
+  gpxBatchMeta: { color: C.text3, fontSize: 10.5, marginTop: 2, fontFamily: mono },
+  gpxBatchDelete: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: C.red + '33',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  contributorApplyBtn: {
+    borderRadius: 10, padding: 12,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    borderWidth: 1, borderColor: C.green + '55', backgroundColor: C.green + '12',
+  },
+  contributorApplyText: { color: C.green, fontSize: 11, fontFamily: mono, fontWeight: '800', letterSpacing: 0.5 },
+  contributorIntro: { color: C.text2, fontSize: 13, lineHeight: 20, marginBottom: 18 },
 
   referralCard: {
     backgroundColor: C.s2, borderRadius: 16, borderWidth: 1, borderColor: C.border, padding: 16, gap: 10,

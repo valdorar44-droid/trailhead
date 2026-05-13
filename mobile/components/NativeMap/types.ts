@@ -8,6 +8,10 @@ export interface RouteStep {
   duration: number;  // seconds
   lat?: number;
   lng?: number;
+  instruction?: string;
+  verbalPre?: string;
+  verbalPost?: string;
+  roundaboutExit?: number | null;
   lanes?: { indications: string[]; valid: boolean; active?: boolean }[];
   speedLimit?: number | null;
 }

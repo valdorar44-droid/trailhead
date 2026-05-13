@@ -435,7 +435,11 @@ function parseValhallaRoute(data: any): RouteResult {
       ls.push({ type: m.type === 4 ? 'arrive' : m.type === 1 ? 'depart' : 'turn',
                 modifier: TURN[m.type] ?? '', name: m.street_names?.[0] ?? '',
                 distance: Math.round((m.length ?? 0) * 1609.34),
-                duration: m.time ?? 0, lat: shp?.[1], lng: shp?.[0] });
+                duration: m.time ?? 0, lat: shp?.[1], lng: shp?.[0],
+                instruction: m.instruction ?? '',
+                verbalPre: m.verbal_pre_transition_instruction ?? m.verbal_transition_alert_instruction ?? '',
+                verbalPost: m.verbal_post_transition_instruction ?? '',
+                roundaboutExit: Number.isFinite(m.roundabout_exit_count) ? m.roundabout_exit_count : null });
     }
     steps.push(...ls); legs.push(ls);
   }

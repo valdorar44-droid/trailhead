@@ -5,9 +5,10 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
-  StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator,
+  StyleSheet, Keyboard, KeyboardAvoidingView, Platform, ActivityIndicator, useWindowDimensions,
   Modal, SafeAreaView, LayoutChangeEvent,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore, SavedPlace, MarkerGroup, TripHistoryItem } from '@/lib/store';
 import { CampsitePin, Pin } from '@/lib/api';
@@ -267,6 +268,10 @@ export default function RouteSearchModal({
 }: RouteSearchModalProps) {
   const C = useTheme();
   const s = styles(C);
+  const insets = useSafeAreaInsets();
+  const { height } = useWindowDimensions();
+  const bottomPad = Math.max(insets.bottom, Platform.OS === 'android' ? 16 : 18);
+  const sheetMaxHeight = Math.min(height * (Platform.OS === 'android' ? 0.84 : 0.78), height - Math.max(insets.top + 36, 72));
 
   const savedPlaces   = useStore(st => st.savedPlaces);
   const markerGroups  = useStore(st => st.markerGroups);
@@ -429,11 +434,11 @@ export default function RouteSearchModal({
     return (
       <Modal visible animationType="slide" transparent={false} statusBarTranslucent>
         <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <View style={s.searchingSheet}>
           {/* Search input row */}
           <View style={s.searchInputRow}>
-            <TouchableOpacity onPress={() => { setView('picker'); setQuery(''); setResults([]); setActiveCat(null); setCatResults([]); }} style={{ padding: 4 }}>
+            <TouchableOpacity onPress={() => { Keyboard.dismiss(); setView('picker'); setQuery(''); setResults([]); setActiveCat(null); setCatResults([]); }} style={{ padding: 4 }}>
               <Ionicons name="arrow-back" size={20} color={C.text2} />
             </TouchableOpacity>
             <TextInput ref={inputRef} style={s.searchInput} value={query} onChangeText={setQuery}
@@ -441,7 +446,7 @@ export default function RouteSearchModal({
               returnKeyType="search" autoFocus />
             {searching
               ? <ActivityIndicator size="small" color={C.orange} />
-              : <TouchableOpacity onPress={() => { setView('picker'); setQuery(''); setResults([]); setActiveCat(null); setCatResults([]); }}>
+                : <TouchableOpacity onPress={() => { Keyboard.dismiss(); setView('picker'); setQuery(''); setResults([]); setActiveCat(null); setCatResults([]); }}>
                   <Text style={s.hideBtn}>Hide</Text>
                 </TouchableOpacity>
             }
@@ -594,7 +599,7 @@ export default function RouteSearchModal({
   // ── View: Route ready ────────────────────────────────────────────────────────
   if (view === 'route' && routeCard) {
     return (
-      <View style={s.sheet}>
+      <View style={[s.sheet, { maxHeight: sheetMaxHeight, paddingBottom: bottomPad }]}>
         <View style={s.handle} />
         <View style={s.routeHeader}>
           <Ionicons name="car" size={24} color={C.text2} />
@@ -656,7 +661,7 @@ export default function RouteSearchModal({
             <Text style={s.settingsBtnText}>Audio On</Text>
           </TouchableOpacity>
         </View>
-        <View style={s.startCancelRow}>
+        <View style={[s.startCancelRow, { paddingBottom: Math.max(bottomPad - 8, 10) }]}>
           <TouchableOpacity style={s.cancelBtn} onPress={() => { onClearRoute(); setView('picker'); }}>
             <Text style={s.cancelBtnText}>Cancel</Text>
           </TouchableOpacity>
@@ -671,7 +676,7 @@ export default function RouteSearchModal({
 
   // ── View: Picker (default "Add destination") ────────────────────────────────
   return (
-    <View style={s.sheet}>
+    <View style={[s.sheet, { maxHeight: sheetMaxHeight, paddingBottom: bottomPad }]}>
       <View style={s.handle} />
 
       <View style={s.pickerHeader}>
@@ -681,7 +686,12 @@ export default function RouteSearchModal({
         </TouchableOpacity>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        style={s.pickerScroll}
+        contentContainerStyle={{ paddingBottom: bottomPad + 22 }}
+      >
         {/* Search / Address quick actions */}
         <View style={s.quickCard}>
           <TouchableOpacity style={s.quickRow} onPress={() => { setView('searching'); setTab('history'); setTimeout(() => inputRef.current?.focus(), 100); }}>
@@ -913,10 +923,10 @@ const styles = (C: ReturnType<typeof useTheme>) => StyleSheet.create({
     backgroundColor: C.bg,
     borderTopLeftRadius: 20, borderTopRightRadius: 20,
     borderTopWidth: 1, borderColor: C.border,
-    paddingBottom: 28,
     shadowColor: '#000', shadowOffset: { width: 0, height: -4 },
     shadowOpacity: 0.15, shadowRadius: 12, elevation: 16,
   },
+  pickerScroll: { flexGrow: 0 },
   handle: { width: 36, height: 4, borderRadius: 2, backgroundColor: C.border, alignSelf: 'center', marginTop: 10, marginBottom: 6 },
 
   pickerHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 8 },

@@ -11,8 +11,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert, Modal, View, Text, TouchableOpacity, ScrollView,
-  StyleSheet, Animated, Easing,
+  StyleSheet, Animated, Easing, Platform, useWindowDimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '@/lib/store';
 import { useTheme, mono, type ColorPalette } from '@/lib/design';
@@ -211,8 +212,8 @@ function StateReadinessPanel({
           </Text>
           <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 3, lineHeight: 13 }}>
             {available
-              ? 'Map draws terrain. Routing powers long offline drives. Trail packs add complete selectable trail systems for offline follow mode.'
-              : 'Trailhead will enable download buttons after map and routing files are uploaded to R2.'}
+              ? 'Maps, routing, and trail systems are saved separately so you can choose only what you need.'
+              : 'This region is coming soon. Download buttons will appear when the packs are ready.'}
           </Text>
         </View>
         {!navReady && available && (
@@ -472,6 +473,10 @@ export default function OfflineModal({
   const mapboxToken = useStore(st => st.mapboxToken);
   const C           = useTheme();
   const s           = makeStyles(C);
+  const insets      = useSafeAreaInsets();
+  const { height }  = useWindowDimensions();
+  const bottomPad   = Math.max(insets.bottom, Platform.OS === 'android' ? 16 : 18);
+  const sheetMaxHeight = Math.min(height * 0.91, height - Math.max(insets.top + 28, 64));
 
   // File-based download (CONUS + all states)
   const {
@@ -559,16 +564,11 @@ export default function OfflineModal({
     if (authorizing) return;
     setAuthorizing(key);
     try {
-      const res = await api.authorizeOfflineDownload(assetType, regionId, label);
-      if (res.free_used) {
-        Alert.alert('Free download unlocked', `${label} is your free ${assetType === 'state_route' ? 'routing pack' : 'map'} download.`);
-      } else if (res.charged > 0) {
-        Alert.alert('Credits used', `${label} download unlocked for ${res.charged} credits.`);
-      }
+      await api.authorizeOfflineDownload(assetType, regionId, label);
       await action();
     } catch (e: any) {
       if (e instanceof PaywallError) {
-        Alert.alert('Download locked', `${e.message}\n\nRegion maps are free. Routing packs, trip corridors, and full-US bulk downloads use credits or Explorer.`);
+        Alert.alert('Download unavailable', e.message);
       } else {
         Alert.alert('Download unavailable', e?.message ?? 'Could not authorize this download.');
       }
@@ -647,7 +647,7 @@ export default function OfflineModal({
       <View style={s.overlay}>
         <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={onClose} />
 
-        <View style={s.sheet}>
+        <View style={[s.sheet, { maxHeight: sheetMaxHeight, paddingBottom: bottomPad }]}>
           {/* ── Header ───────────────────────────────────────────────────── */}
           <View style={s.header}>
             <View style={s.headerAccent} />
@@ -681,7 +681,7 @@ export default function OfflineModal({
               <Text style={s.noUserText}>SIGN IN TO DOWNLOAD OFFLINE MAPS</Text>
             </View>
           ) : (
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 32 }}>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: bottomPad + 28 }}>
 
               {/* ── Active MLN pack progress ────────────────────────────── */}
               {activePackName && (
@@ -719,7 +719,7 @@ export default function OfflineModal({
                   <Section label="CONTINENTAL US — FILE DOWNLOAD" />
                   <Text style={s.hint}>
                     Single-stream download — 100× faster than tile-by-tile.
-                    Region map downloads are free. Full-US bulk downloads, routing packs, and trip corridors use credits or Explorer.
+                    All offline downloads are included. Use Wi-Fi for large packs and keep the app open for the fastest transfer.
                   </Text>
                   <ConusCard
                     state={conusState}
@@ -848,7 +848,7 @@ export default function OfflineModal({
                   <Section label="REGIONS — MAP + ROUTING PACKS" />
                   <Text style={s.hint}>
                     Pick a region, then download the map file and routing graph separately. U.S. states, Canada, and Mexico are available now.
-                    Region maps are free. Free accounts include one routing pack, then credits or Explorer unlock more.
+                    Offline maps, routing, contours, trail systems, and place packs are included. Use Wi-Fi for large regions.
                   </Text>
 
                   <View style={s.featuredRegionRow}>
@@ -1017,7 +1017,7 @@ export default function OfflineModal({
                                   {mapRegion.name.toUpperCase()} PACKS ARE BEING PREPARED
                                 </Text>
                                 <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 3, lineHeight: 13 }}>
-                                  Map and routing buttons stay locked until their PMTiles and Valhalla packs are present in the R2 manifests.
+                                  Download buttons will appear as soon as this region is ready.
                                 </Text>
                               </View>
                             </View>
@@ -1043,8 +1043,8 @@ export default function OfflineModal({
                           onPause={() => pauseDownload(selectedState)}
                           onResume={() => resumeDownload(selectedState)}
                           onDelete={() => deleteDownload(selectedState)}
-                          completeTitle="✓ MAP FILE ON DEVICE"
-                          completeText="Roads, trails, towns, parks, and labels are available from the downloaded region PMTiles file."
+                          completeTitle="MAP SAVED"
+                          completeText="Roads, trails, towns, parks, and labels are available offline for this region."
                         />
 
                         <Section label={`${mapRegion.name.toUpperCase()} — ROUTING DETAILS`} />
@@ -1057,8 +1057,8 @@ export default function OfflineModal({
                           onPause={() => pauseRoutingDownload(selectedState)}
                           onResume={() => resumeRoutingDownload(selectedState)}
                           onDelete={() => deleteRoutingDownload(selectedState)}
-                          completeTitle="✓ ROUTING GRAPH ON DEVICE"
-                          completeText="Valhalla graph pack is downloaded. Long offline routes can use this state without needing signal."
+                          completeTitle="ROUTING SAVED"
+                          completeText="Offline driving routes can use this region without needing signal."
                         />
                         <Section label={`${mapRegion.name.toUpperCase()} — TRAIL SYSTEMS`} />
                         {trailPublished ? (
@@ -1071,8 +1071,8 @@ export default function OfflineModal({
                             onPause={() => pauseTrailDownload(selectedState)}
                             onResume={() => resumeTrailDownload(selectedState)}
                             onDelete={() => deleteTrailDownload(selectedState)}
-                            completeTitle="✓ TRAIL SYSTEMS ON DEVICE"
-                            completeText="Trail overlay, selection graph, and routing graph are on device. Follow mode can route along downloaded trail vertices offline."
+                            completeTitle="TRAILS SAVED"
+                            completeText="Trail lines and follow mode are available offline for this region."
                           />
                         ) : (
                           <View style={s.contourPlannedCard}>
@@ -1082,7 +1082,7 @@ export default function OfflineModal({
                             <View style={{ flex: 1 }}>
                               <Text style={s.contourPlannedTitle}>TRAIL PACK PLANNED</Text>
                               <Text style={s.contourPlannedText}>
-                                State trail systems are being extracted from OSM/open agency data into their own PMTiles and graph packs. MVUM remains an optional legality layer, not the main trail engine.
+                                Downloadable trail systems for this region are coming soon. The MVUM layer can still help check legal motorized access where available.
                               </Text>
                               <Text style={s.contourPlannedMeta}>Estimated starting size: ~{trailRegion?.estimatedGb ?? 0.1} GB</Text>
                             </View>
@@ -1158,7 +1158,7 @@ export default function OfflineModal({
                             <View style={{ flex: 1 }}>
                               <Text style={s.contourPlannedTitle}>CONTOUR PACK PLANNED</Text>
                               <Text style={s.contourPlannedText}>
-                                Separate topo contours will download per state or country once contour PMTiles are published. They will sit above the map as an optional layer.
+                                Topo contour downloads for this region are coming soon. They will appear as an optional map layer.
                               </Text>
                               <Text style={s.contourPlannedMeta}>Estimated starting size: ~{contourRegion?.estimatedGb ?? 0.1} GB</Text>
                             </View>
@@ -1184,7 +1184,7 @@ function makeStyles(C: ColorPalette) {
     overlay:       { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.6)' },
     sheet: {
       backgroundColor: C.bg, borderTopLeftRadius: 20, borderTopRightRadius: 20,
-      paddingHorizontal: 16, paddingTop: 16, paddingBottom: 4, maxHeight: '91%',
+      paddingHorizontal: 16, paddingTop: 16,
       borderTopWidth: 1, borderTopColor: C.border,
     },
     header:        { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },

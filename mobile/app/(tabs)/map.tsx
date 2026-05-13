@@ -2708,6 +2708,14 @@ function MapScreen() {
   const [communityUpdatePin, setCommunityUpdatePin] = useState<Pin | null>(null);
   const [communityUpdateNote, setCommunityUpdateNote] = useState('');
   const [communityUpdateSubmitting, setCommunityUpdateSubmitting] = useState(false);
+  const [communityLiveContext, setCommunityLiveContext] = useState<Record<number, {
+    loading: boolean;
+    camps: CampsitePin[];
+    fuel: Array<{ lat: number; lng: number; name?: string }>;
+    pois: OsmPoi[];
+    reports: Report[];
+    loadedAt?: number;
+  }>>({});
   const [selectedCamp,  setSelectedCamp]  = useState<CampsitePin | null>(null);
   const [campDetail,    setCampDetail]    = useState<CampsiteDetail | null>(null);
   const [showCampDetail,setShowCampDetail] = useState(false);
@@ -3686,7 +3694,6 @@ function MapScreen() {
   function openCommunityUpdate(pin: Pin) {
     setCommunityUpdatePin(pin);
     setCommunityUpdateNote('');
-    setSelectedCommunityPin(null);
   }
 
   async function submitCommunityUpdate() {
@@ -3734,6 +3741,52 @@ function MapScreen() {
       setCommunityUpdateSubmitting(false);
     }
   }
+
+  useEffect(() => {
+    if (!selectedCommunityPin) return;
+    const pin = selectedCommunityPin;
+    const cached = communityLiveContext[pin.id];
+    if (cached?.loadedAt && Date.now() - cached.loadedAt < 5 * 60_000) return;
+    setCommunityLiveContext(prev => ({
+      ...prev,
+      [pin.id]: {
+        loading: true,
+        camps: prev[pin.id]?.camps ?? [],
+        fuel: prev[pin.id]?.fuel ?? [],
+        pois: prev[pin.id]?.pois ?? [],
+        reports: prev[pin.id]?.reports ?? [],
+        loadedAt: prev[pin.id]?.loadedAt,
+      },
+    }));
+    let cancelled = false;
+    Promise.allSettled([
+      api.getNearbyCamps(pin.lat, pin.lng, 20, activeFilters),
+      api.getGas(pin.lat, pin.lng, 25),
+      api.getOsmPois(pin.lat, pin.lng, 20, 'water,trail,trailhead,viewpoint,peak,hot_spring'),
+      api.getNearbyReports(pin.lat, pin.lng, 0.15),
+    ]).then(([campsResult, fuelResult, poisResult, reportsResult]) => {
+      if (cancelled) return;
+      const camps = campsResult.status === 'fulfilled' ? campsResult.value.slice(0, 80) : [];
+      const fuel = fuelResult.status === 'fulfilled'
+        ? fuelResult.value
+            .filter(g => g.lat != null && g.lng != null && isFinite(g.lat) && isFinite(g.lng))
+            .map(g => ({ lat: g.lat, lng: g.lng, name: g.name }))
+        : [];
+      const pois = poisResult.status === 'fulfilled' ? poisResult.value : [];
+      const reports = reportsResult.status === 'fulfilled' ? reportsResult.value : [];
+      setCommunityLiveContext(prev => ({
+        ...prev,
+        [pin.id]: { loading: false, camps, fuel, pois, reports, loadedAt: Date.now() },
+      }));
+    }).catch(() => {
+      if (cancelled) return;
+      setCommunityLiveContext(prev => ({
+        ...prev,
+        [pin.id]: { loading: false, camps: [], fuel: [], pois: [], reports: [], loadedAt: Date.now() },
+      }));
+    });
+    return () => { cancelled = true; };
+  }, [selectedCommunityPin?.id, selectedCommunityPin?.lat, selectedCommunityPin?.lng, activeFilters]);
 
   useEffect(() => {
     if (!showPois) {
@@ -10119,7 +10172,20 @@ function MapScreen() {
           mapReports,
           offlineSaved,
         );
-        const nearbyTrails = trailSourcePois.filter(p => p.type !== 'water' && haversineKm(selectedCommunityPin.lat, selectedCommunityPin.lng, p.lat, p.lng) * 0.621371 <= 8).length;
+        const liveContext = communityLiveContext[selectedCommunityPin.id];
+        const liveSupport = liveContext?.loadedAt
+          ? buildTrailSupport(
+              selectedCommunityPin,
+              liveContext.camps,
+              liveContext.fuel,
+              liveContext.pois,
+              liveContext.reports,
+              offlineSaved,
+            )
+          : communitySupport;
+        const contextPois = liveContext?.loadedAt ? liveContext.pois : trailSourcePois;
+        const nearbyTrails = contextPois.filter(p => p.type !== 'water' && haversineKm(selectedCommunityPin.lat, selectedCommunityPin.lng, p.lat, p.lng) * 0.621371 <= 8).length;
+        const updateOpen = communityUpdatePin?.id === selectedCommunityPin.id;
         const saveCommunityPlace = () => {
           addSavedPlace({
             id: `community-pin-${selectedCommunityPin.id}`,
@@ -10137,8 +10203,9 @@ function MapScreen() {
           openCommunityUpdate(selectedCommunityPin);
         };
         return (
-          <Modal visible transparent animationType="slide" onRequestClose={() => setSelectedCommunityPin(null)}>
-            <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setSelectedCommunityPin(null)}>
+          <Modal visible transparent animationType="slide" onRequestClose={() => { setSelectedCommunityPin(null); setCommunityUpdatePin(null); setCommunityUpdateNote(''); }}>
+            <View style={s.modalOverlay}>
+              <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => { setSelectedCommunityPin(null); setCommunityUpdatePin(null); setCommunityUpdateNote(''); }} />
               <View style={[s.wpSheet, modalSheetPad]}>
                 <View style={s.daySheetHandle} />
                 <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.communityCardScroll}>
@@ -10175,15 +10242,23 @@ function MapScreen() {
                   </View>
                   <View style={s.communitySection}>
                     <Text style={s.communitySectionLabel}>NEARBY CONTEXT</Text>
+                    {liveContext?.loading && (
+                      <Text style={s.communityContextNote}>Loading nearby camps, fuel, water, trails, and reports...</Text>
+                    )}
                     <View style={s.communityContextGrid}>
                       <View style={s.communityContextTile}>
                         <Ionicons name="bonfire-outline" size={14} color={C.orange} />
-                        <Text style={s.communityContextValue}>{communitySupport.campsNearby}</Text>
+                        <Text style={s.communityContextValue}>{liveSupport.campsNearby}</Text>
                         <Text style={s.communityContextLabel}>camps</Text>
                       </View>
                       <View style={s.communityContextTile}>
+                        <Ionicons name="flash-outline" size={14} color="#f97316" />
+                        <Text style={s.communityContextValue}>{liveSupport.fuelNearby}</Text>
+                        <Text style={s.communityContextLabel}>fuel</Text>
+                      </View>
+                      <View style={s.communityContextTile}>
                         <Ionicons name="water-outline" size={14} color="#38bdf8" />
-                        <Text style={s.communityContextValue}>{communitySupport.waterNearby}</Text>
+                        <Text style={s.communityContextValue}>{liveSupport.waterNearby}</Text>
                         <Text style={s.communityContextLabel}>water</Text>
                       </View>
                       <View style={s.communityContextTile}>
@@ -10193,14 +10268,14 @@ function MapScreen() {
                       </View>
                       <View style={s.communityContextTile}>
                         <Ionicons name="warning-outline" size={14} color="#f59e0b" />
-                        <Text style={s.communityContextValue}>{communitySupport.reportsNearby}</Text>
+                        <Text style={s.communityContextValue}>{liveSupport.reportsNearby}</Text>
                         <Text style={s.communityContextLabel}>reports</Text>
                       </View>
                     </View>
                     <Text style={s.communityContextNote}>
-                      {communitySupport.nearestCampName
-                        ? `Nearest camp: ${communitySupport.nearestCampName}${communitySupport.nearestCampDistanceMi != null ? ` · ${communitySupport.nearestCampDistanceMi.toFixed(1)} mi` : ''}`
-                        : 'No nearby camp context loaded for this area.'}
+                      {liveSupport.nearestCampName
+                        ? `Nearest camp: ${liveSupport.nearestCampName}${liveSupport.nearestCampDistanceMi != null ? ` · ${liveSupport.nearestCampDistanceMi.toFixed(1)} mi` : ''}`
+                        : liveContext?.loadedAt ? 'No nearby camp found within 20 mi.' : 'Nearby context loads live when this card opens.'}
                     </Text>
                   </View>
                   {detailRows.length > 0 && (
@@ -10217,7 +10292,33 @@ function MapScreen() {
                     <Ionicons name="location-outline" size={13} color={OVR.text3} />
                     <Text style={s.pinCoordText}>{selectedCommunityPin.lat.toFixed(5)}, {selectedCommunityPin.lng.toFixed(5)}</Text>
                   </View>
-                  <View style={s.communityActionsGrid}>
+                  {updateOpen && (
+                    <View style={s.communitySection}>
+                      <Text style={s.communitySectionLabel}>SUGGEST UPDATE</Text>
+                      <TextInput
+                        value={communityUpdateNote}
+                        onChangeText={setCommunityUpdateNote}
+                        placeholder="What changed? Add access, hours, condition, duplicate note, better name, or verification details..."
+                        placeholderTextColor={OVR.text3}
+                        style={[s.pinInput, s.pinTextArea, { minHeight: 118 }]}
+                        maxLength={700}
+                        multiline
+                      />
+                      <Text style={s.communityContextNote}>
+                        Suggestions do not overwrite the original community place until reviewed.
+                      </Text>
+                      <View style={s.wpSheetActions}>
+                        <TouchableOpacity style={s.wpSheetNavBtn} onPress={submitCommunityUpdate} disabled={communityUpdateSubmitting}>
+                          {communityUpdateSubmitting ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="checkmark" size={14} color="#fff" />}
+                          <Text style={s.wpSheetNavText}>SUBMIT UPDATE</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={s.wpSheetDayBtn} onPress={() => { setCommunityUpdatePin(null); setCommunityUpdateNote(''); }}>
+                          <Text style={s.wpSheetDayText}>CANCEL</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  )}
+                  {!updateOpen && <View style={s.communityActionsGrid}>
                     <TouchableOpacity style={s.communityPrimaryAction} onPress={() => { setSelectedCommunityPin(null); navigateToCamp(selectedCommunityPin); }}>
                       <Ionicons name="navigate" size={14} color="#fff" />
                       <Text style={s.communityPrimaryActionText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>NAVIGATE</Text>
@@ -10242,16 +10343,16 @@ function MapScreen() {
                       <Ionicons name="warning-outline" size={14} color={C.orange} />
                       <Text style={[s.communityActionText, { color: C.orange }]} numberOfLines={1}>REPORT</Text>
                     </TouchableOpacity>
-                  </View>
+                  </View>}
                 </ScrollView>
               </View>
-            </TouchableOpacity>
+            </View>
           </Modal>
         );
       })()}
 
       {/* ── Community pin update suggestion ── */}
-      {communityUpdatePin && (() => {
+      {communityUpdatePin && !selectedCommunityPin && (() => {
         const meta = communityPinMeta(normalizedCommunityPinType(communityUpdatePin));
         return (
           <Modal visible transparent animationType="slide" onRequestClose={() => setCommunityUpdatePin(null)}>

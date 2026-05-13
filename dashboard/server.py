@@ -2323,7 +2323,22 @@ async def admin_camp_edit_suggestion_status(suggestion_id: int, body: dict,
 @app.get("/api/gas")
 async def gas(lat: float, lng: float, radius: float = 25):
     from ingestors.nrel import get_fuel_near
-    return await get_fuel_near(lat, lng, radius_miles=radius)
+    nrel, osm = await asyncio.gather(
+        get_fuel_near(lat, lng, radius_miles=radius),
+        get_fuel_stations(lat, lng, radius_m=int(radius * 1609.344)),
+        return_exceptions=True,
+    )
+    merged: list[dict] = []
+    seen = set()
+    for batch in (nrel if isinstance(nrel, list) else [], osm if isinstance(osm, list) else []):
+        for item in batch:
+            item_id = str(item.get("id") or "")
+            key = item_id or f"{item.get('name')}:{float(item.get('lat', 0)):.4f}:{float(item.get('lng', 0)):.4f}"
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(item)
+    return merged[:100]
 
 
 # ── Camp fullness ──────────────────────────────────────────────────────────────
@@ -4221,6 +4236,8 @@ async def osm_pois(lat: float, lng: float, radius: float = 30, types: str = "wat
         tasks.append(get_trails(lat, lng, radius_m=radius_m))
     if "water" in type_set:
         tasks.append(get_water_sources(lat, lng, radius_m=radius_m))
+    if "fuel" in type_set or "gas" in type_set:
+        tasks.append(get_fuel_stations(lat, lng, radius_m=radius_m))
     if "trailhead" in type_set:
         tasks.append(get_trailheads(lat, lng, radius_m=radius_m))
     if "viewpoint" in type_set:

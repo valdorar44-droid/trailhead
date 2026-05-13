@@ -3762,17 +3762,21 @@ function MapScreen() {
     Promise.allSettled([
       api.getNearbyCamps(pin.lat, pin.lng, 20, activeFilters),
       api.getGas(pin.lat, pin.lng, 25),
-      api.getOsmPois(pin.lat, pin.lng, 20, 'water,trail,trailhead,viewpoint,peak,hot_spring'),
+      api.getOsmPois(pin.lat, pin.lng, 25, 'fuel,water,trail,trailhead,viewpoint,peak,hot_spring'),
       api.getNearbyReports(pin.lat, pin.lng, 0.15),
     ]).then(([campsResult, fuelResult, poisResult, reportsResult]) => {
       if (cancelled) return;
       const camps = campsResult.status === 'fulfilled' ? campsResult.value.slice(0, 80) : [];
+      const pois = poisResult.status === 'fulfilled' ? poisResult.value : [];
+      const fuelFromPois = pois
+        .filter(p => p.type === 'fuel' && p.lat != null && p.lng != null && isFinite(p.lat) && isFinite(p.lng))
+        .map(p => ({ lat: p.lat, lng: p.lng, name: p.name }));
       const fuel = fuelResult.status === 'fulfilled'
         ? fuelResult.value
             .filter(g => g.lat != null && g.lng != null && isFinite(g.lat) && isFinite(g.lng))
             .map(g => ({ lat: g.lat, lng: g.lng, name: g.name }))
+            .concat(fuelFromPois)
         : [];
-      const pois = poisResult.status === 'fulfilled' ? poisResult.value : [];
       const reports = reportsResult.status === 'fulfilled' ? reportsResult.value : [];
       setCommunityLiveContext(prev => ({
         ...prev,
@@ -10241,7 +10245,15 @@ function MapScreen() {
                     )}
                   </View>
                   <View style={s.communitySection}>
-                    <Text style={s.communitySectionLabel}>NEARBY CONTEXT</Text>
+                    <View style={s.communitySectionHeader}>
+                      <Text style={s.communitySectionLabel}>NEARBY CONTEXT</Text>
+                      {liveContext?.loading && (
+                        <View style={s.contextSearchingPill}>
+                          <Ionicons name="search" size={11} color={C.orange} />
+                          <Text style={s.contextSearchingText}>SEARCHING</Text>
+                        </View>
+                      )}
+                    </View>
                     {liveContext?.loading && (
                       <Text style={s.communityContextNote}>Loading nearby camps, fuel, water, trails, and reports...</Text>
                     )}
@@ -12593,7 +12605,20 @@ const makeStyles = (C: ColorPalette) => {
   communityHeroText: { flex: 1 },
   communityHeroKicker: { color: OVR.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8, marginBottom: 4 },
   communitySection: { marginTop: 14 },
+  communitySectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 8 },
   communitySectionLabel: { color: OVR.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8, marginBottom: 7 },
+  contextSearchingPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderWidth: 1,
+    borderColor: C.orange + '44',
+    backgroundColor: C.orange + '12',
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+  },
+  contextSearchingText: { color: C.orange, fontSize: 8.5, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
   communityContextGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   communityContextTile: {
     width: '48%',

@@ -36,8 +36,11 @@ _WATER_QUERY = """
   node["natural"="spring"](around:{radius},{lat},{lng});
   node["amenity"="drinking_water"](around:{radius},{lat},{lng});
   node["amenity"="water_point"](around:{radius},{lat},{lng});
+  node["amenity"="fountain"](around:{radius},{lat},{lng});
+  way["natural"="water"](around:{radius},{lat},{lng});
+  way["waterway"~"^(river|stream|canal)$"](around:{radius},{lat},{lng});
 );
-out tags 40;
+out center tags 60;
 """
 
 _TRAILHEAD_QUERY = """
@@ -329,13 +332,14 @@ async def get_water_sources(lat: float, lng: float, radius_m: int = 30000) -> li
         elat, elng = coord
         ntype = _tag(el, "natural", "")
         atype = _tag(el, "amenity", "")
-        name = _tag(el, "name") or ("Natural Spring" if ntype == "spring" else "Water Source")
+        wtype = _tag(el, "waterway", "")
+        name = _tag(el, "name") or ("Natural Spring" if ntype == "spring" else "Fountain" if atype == "fountain" else "Mapped Water" if ntype == "water" or wtype else "Water Source")
         results.append({
             "id": f"osm_water_{el.get('id', '')}",
             "name": name,
             "lat": elat, "lng": elng,
             "type": "water",
-            "subtype": "spring" if ntype == "spring" else "tap",
+            "subtype": "spring" if ntype == "spring" else "fountain" if atype == "fountain" else wtype or "tap",
         })
     set_cached("campsite_cache", key, results)
     return results

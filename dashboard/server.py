@@ -4249,7 +4249,22 @@ async def osm_pois(lat: float, lng: float, radius: float = 30, types: str = "wat
     if not tasks:
         return []
     results = await asyncio.gather(*tasks)
-    return [item for sublist in results for item in sublist][:100]
+    merged: list[dict] = []
+    seen = set()
+    per_type_limit = max(12, min(40, int(120 / max(len(results), 1))))
+    for sublist in results:
+        added_for_type = 0
+        for item in sublist:
+            item_id = str(item.get("id") or "")
+            key = item_id or f"{item.get('type')}:{item.get('name')}:{float(item.get('lat', 0)):.4f}:{float(item.get('lng', 0)):.4f}"
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(item)
+            added_for_type += 1
+            if added_for_type >= per_type_limit:
+                break
+    return merged[:120]
 
 
 # ── Offline trip essentials packs ─────────────────────────────────────────────

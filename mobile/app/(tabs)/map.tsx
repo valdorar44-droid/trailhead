@@ -3771,11 +3771,18 @@ function MapScreen() {
       const fuelFromPois = pois
         .filter(p => p.type === 'fuel' && p.lat != null && p.lng != null && isFinite(p.lat) && isFinite(p.lng))
         .map(p => ({ lat: p.lat, lng: p.lng, name: p.name }));
+      const fuelSeen = new Set<string>();
       const fuel = fuelResult.status === 'fulfilled'
         ? fuelResult.value
             .filter(g => g.lat != null && g.lng != null && isFinite(g.lat) && isFinite(g.lng))
             .map(g => ({ lat: g.lat, lng: g.lng, name: g.name }))
             .concat(fuelFromPois)
+            .filter(g => {
+              const key = `${g.name || 'Fuel Station'}:${g.lat.toFixed(4)}:${g.lng.toFixed(4)}`;
+              if (fuelSeen.has(key)) return false;
+              fuelSeen.add(key);
+              return true;
+            })
         : [];
       const reports = reportsResult.status === 'fulfilled' ? reportsResult.value : [];
       setCommunityLiveContext(prev => ({

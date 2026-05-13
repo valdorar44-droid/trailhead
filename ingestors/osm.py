@@ -38,7 +38,10 @@ _WATER_QUERY = """
   node["amenity"="water_point"](around:{radius},{lat},{lng});
   node["amenity"="fountain"](around:{radius},{lat},{lng});
   way["natural"="water"](around:{radius},{lat},{lng});
+  way["water"~"^(lake|pond|reservoir|river)$"](around:{radius},{lat},{lng});
   way["waterway"~"^(river|stream|canal)$"](around:{radius},{lat},{lng});
+  relation["natural"="water"](around:{radius},{lat},{lng});
+  relation["waterway"~"^(river|stream|canal)$"](around:{radius},{lat},{lng});
 );
 out center tags 60;
 """
@@ -318,7 +321,7 @@ out center tags;
 
 
 async def get_water_sources(lat: float, lng: float, radius_m: int = 30000) -> list[dict]:
-    key = f"osm_water_{lat:.2f}_{lng:.2f}"
+    key = f"osm_water_v3_{lat:.2f}_{lng:.2f}_{int(radius_m / 1600)}"
     cached = get_cached("campsite_cache", key, ttl_seconds=3600 * 24)
     if cached is not None:
         return cached

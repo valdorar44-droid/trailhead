@@ -398,6 +398,33 @@ function mergeOsmPois(...groups: OsmPoi[][]): OsmPoi[] {
   return merged;
 }
 
+function uniqueRouteContextCenters(...groups: Array<Array<{ lat?: number; lng?: number } | null | undefined>>): Array<{ lat: number; lng: number }> {
+  const seen = new Set<string>();
+  const centers: Array<{ lat: number; lng: number }> = [];
+  for (const group of groups) {
+    for (const point of group) {
+      if (!point || point.lat == null || point.lng == null || !Number.isFinite(point.lat) || !Number.isFinite(point.lng)) continue;
+      const key = `${point.lat.toFixed(2)}:${point.lng.toFixed(2)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      centers.push({ lat: point.lat, lng: point.lng });
+      if (centers.length >= 5) return centers;
+    }
+  }
+  return centers;
+}
+
+function routeSamplePoints(coords: [number, number][], maxSamples = 3): Array<{ lat: number; lng: number }> {
+  if (coords.length < 2) return [];
+  const indexes = maxSamples <= 1
+    ? [Math.floor(coords.length / 2)]
+    : Array.from({ length: maxSamples }, (_, i) => Math.round((coords.length - 1) * (i / (maxSamples - 1))));
+  return indexes
+    .map(i => coords[Math.max(0, Math.min(coords.length - 1, i))])
+    .filter(Boolean)
+    .map(([lng, lat]) => ({ lat, lng }));
+}
+
 function trailSourceLine(trail: TrailFeature, profile?: TrailProfile | null) {
   const source = profile?.source_label || trail.source_label || (trail.source === 'offline_places' ? 'Offline place pack' : trail.source === 'trailhead' ? 'Trailhead profile' : 'OpenStreetMap');
   const ts = profile?.last_checked || trail.last_checked;
@@ -3556,28 +3583,58 @@ function MapScreen() {
   }
 
   useEffect(() => {
-    if (!showSearch || !userLoc) return;
+    if (!showSearch) return;
+    const tripPoints = usableTripWaypoints(activeTrip?.plan.waypoints)
+      .filter(w => w.lat != null && w.lng != null && isFinite(w.lat) && isFinite(w.lng))
+      .map(w => ({ lat: w.lat!, lng: w.lng! }));
+    const centers = uniqueRouteContextCenters(
+      searchRouteCard ? [{ lat: searchRouteCard.lat, lng: searchRouteCard.lng }] : [],
+      routeSamplePoints(lastRouteCoords, 3),
+      tripPoints.length > 0 ? [tripPoints[0], tripPoints[Math.floor(tripPoints.length / 2)], tripPoints[tripPoints.length - 1]] : [],
+      userLoc ? [userLoc] : [],
+    );
+    if (centers.length === 0) return;
     let cancelled = false;
     setRouteContextLoading(true);
-    Promise.allSettled([
-      api.getGas(userLoc.lat, userLoc.lng, 35),
-      api.getOsmPois(userLoc.lat, userLoc.lng, 35, 'fuel,water,trail,trailhead,viewpoint,peak,hot_spring,food,grocery,mechanic'),
-      api.getNearbyCamps(userLoc.lat, userLoc.lng, 45, activeFilters),
-    ]).then(([gasResult, poisResult, campsResult]) => {
+    const contextJobs = centers.flatMap(center => [
+      api.getGas(center.lat, center.lng, 25).then(value => ({ kind: 'gas' as const, value })),
+      api.getOsmPois(center.lat, center.lng, 25, 'fuel').then(value => ({ kind: 'pois' as const, value })),
+      api.getOsmPois(center.lat, center.lng, 25, 'water').then(value => ({ kind: 'pois' as const, value })),
+      api.getOsmPois(center.lat, center.lng, 25, 'trail,trailhead,viewpoint,peak,hot_spring').then(value => ({ kind: 'pois' as const, value })),
+      api.getNearbyCamps(center.lat, center.lng, 35, activeFilters).then(value => ({ kind: 'camps' as const, value })),
+    ]);
+    Promise.allSettled(contextJobs).then(results => {
       if (cancelled) return;
-      const gasStations = gasResult.status === 'fulfilled'
-        ? gasResult.value
+      const gasStations: Array<{ lat: number; lng: number; name: string }> = [];
+      const livePoiBatches: OsmPoi[][] = [];
+      const liveCampBatches: CampsitePin[][] = [];
+      for (const result of results) {
+        if (result.status !== 'fulfilled') continue;
+        if (result.value.kind === 'gas') {
+          gasStations.push(...result.value.value
             .filter(g => g.lat != null && g.lng != null && isFinite(g.lat) && isFinite(g.lng))
-            .map(g => ({ lat: g.lat, lng: g.lng, name: g.name || 'Fuel' }))
-        : [];
-      const livePois = poisResult.status === 'fulfilled' ? poisResult.value : [];
-      setLiveRouteGas(gasStations);
-      setLiveRoutePois(mergeOsmPois(livePois, gasStations.map(gasStationToPoi).filter((poi): poi is OsmPoi => !!poi)));
-      if (campsResult.status === 'fulfilled' && campsResult.value.length > 0) {
+            .map(g => ({ lat: g.lat, lng: g.lng, name: g.name || 'Fuel' })));
+        } else if (result.value.kind === 'pois') {
+          livePoiBatches.push(result.value.value);
+        } else {
+          liveCampBatches.push(result.value.value);
+        }
+      }
+      const seenGas = new Set<string>();
+      const uniqueGas = gasStations.filter(g => {
+        const key = `${g.name}:${g.lat.toFixed(4)}:${g.lng.toFixed(4)}`;
+        if (seenGas.has(key)) return false;
+        seenGas.add(key);
+        return true;
+      });
+      setLiveRouteGas(uniqueGas);
+      setLiveRoutePois(mergeOsmPois(...livePoiBatches, uniqueGas.map(gasStationToPoi).filter((poi): poi is OsmPoi => !!poi)));
+      const liveCamps = liveCampBatches.flat();
+      if (liveCamps.length > 0) {
         setAreaCamps(prev => {
           const seen = new Set(prev.map(c => String(c.id || `${c.name}:${c.lat.toFixed(4)}:${c.lng.toFixed(4)}`)));
           const merged = [...prev];
-          for (const camp of campsResult.value) {
+          for (const camp of liveCamps) {
             const key = String(camp.id || `${camp.name}:${camp.lat.toFixed(4)}:${camp.lng.toFixed(4)}`);
             if (seen.has(key)) continue;
             seen.add(key);
@@ -3596,7 +3653,7 @@ function MapScreen() {
       if (!cancelled) setRouteContextLoading(false);
     });
     return () => { cancelled = true; };
-  }, [showSearch, userLoc?.lat, userLoc?.lng, activeFilters.join(',')]);
+  }, [showSearch, userLoc?.lat, userLoc?.lng, searchRouteCard?.lat, searchRouteCard?.lng, activeTrip?.trip_id, lastRouteCoords.length, activeFilters.join(',')]);
 
   useEffect(() => {
     if (!pendingSavedTrailId) return;

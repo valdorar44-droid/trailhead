@@ -27,7 +27,7 @@ export interface RouteSearchModalProps {
   userLoc: { lat: number; lng: number } | null;
   camps: CampsitePin[];
   gas: { lat: number; lng: number; name: string }[];
-  pois: { lat: number; lng: number; name: string; type: string }[];
+  pois: { lat: number; lng: number; name: string; type: string; subtype?: string }[];
   communityPins: Pin[];
   routeOpts: { avoidHighways?: boolean; avoidTolls?: boolean; backRoads?: boolean };
   routeCoords?: [number, number][];  // [lng, lat] for elevation profile
@@ -362,29 +362,59 @@ export default function RouteSearchModal({
     setCatSearching(true);
     try {
       if (catId === 'fuel') {
-        const stations = await api.getGas(userLoc.lat, userLoc.lng, 35);
-        setCatResults(stations
+        const loadedFuel = gas
           .filter(g => g.lat != null && g.lng != null && Number.isFinite(g.lat) && Number.isFinite(g.lng))
           .map(g => ({
             name: g.name || 'Fuel',
             lat: g.lat,
             lng: g.lng,
             dist: haversineKm(userLoc, g),
-          }))
+          }));
+        const liveFuel = loadedFuel.length >= 10 ? [] : await api.getGas(userLoc.lat, userLoc.lng, 25);
+        const seen = new Set<string>();
+        setCatResults([...loadedFuel, ...liveFuel
+          .filter(g => g.lat != null && g.lng != null && Number.isFinite(g.lat) && Number.isFinite(g.lng))
+          .map(g => ({
+            name: g.name || 'Fuel',
+            lat: g.lat,
+            lng: g.lng,
+            dist: haversineKm(userLoc, g),
+          }))]
+          .filter(g => {
+            const key = `${g.name}:${g.lat.toFixed(4)}:${g.lng.toFixed(4)}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          })
           .sort((a, b) => (a.dist ?? 999) - (b.dist ?? 999))
           .slice(0, 30));
         return;
       }
       if (catId === 'water') {
-        const water = await api.getOsmPois(userLoc.lat, userLoc.lng, 35, 'water');
-        setCatResults(water
+        const loadedWater = pois
+          .filter(p => p.type === 'water' && p.lat != null && p.lng != null && Number.isFinite(p.lat) && Number.isFinite(p.lng))
+          .map(p => ({
+            name: p.name || (p.subtype === 'fountain' ? 'Fountain' : 'Water Source'),
+            lat: p.lat,
+            lng: p.lng,
+            dist: haversineKm(userLoc, p),
+          }));
+        const liveWater = loadedWater.length >= 10 ? [] : await api.getOsmPois(userLoc.lat, userLoc.lng, 25, 'water');
+        const seen = new Set<string>();
+        setCatResults([...loadedWater, ...liveWater
           .filter(p => p.lat != null && p.lng != null && Number.isFinite(p.lat) && Number.isFinite(p.lng))
           .map(p => ({
             name: p.name || (p.subtype === 'fountain' ? 'Fountain' : 'Water Source'),
             lat: p.lat,
             lng: p.lng,
             dist: haversineKm(userLoc, p),
-          }))
+          }))]
+          .filter(p => {
+            const key = `${p.name}:${p.lat.toFixed(4)}:${p.lng.toFixed(4)}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          })
           .sort((a, b) => (a.dist ?? 999) - (b.dist ?? 999))
           .slice(0, 30));
         return;

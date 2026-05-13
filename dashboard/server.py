@@ -2323,9 +2323,10 @@ async def admin_camp_edit_suggestion_status(suggestion_id: int, body: dict,
 @app.get("/api/gas")
 async def gas(lat: float, lng: float, radius: float = 25):
     from ingestors.nrel import get_fuel_near
+    osm_radius_m = int(min(max(radius, 1), 25) * 1609.344)
     nrel, osm = await asyncio.gather(
         get_fuel_near(lat, lng, radius_miles=radius),
-        get_fuel_stations(lat, lng, radius_m=int(radius * 1609.344)),
+        get_fuel_stations(lat, lng, radius_m=osm_radius_m),
         return_exceptions=True,
     )
     merged: list[dict] = []
@@ -4231,13 +4232,14 @@ async def land_check(lat: float, lng: float):
 async def osm_pois(lat: float, lng: float, radius: float = 30, types: str = "water,trailhead,viewpoint"):
     type_set = {t.strip() for t in types.split(",") if t.strip()}
     radius_m = int(radius * 1600)
+    dense_radius_m = int(min(max(radius, 1), 25) * 1600)
     tasks = []
     if "trail" in type_set or "trails" in type_set:
-        tasks.append(get_trails(lat, lng, radius_m=radius_m))
+        tasks.append(get_trails(lat, lng, radius_m=dense_radius_m))
     if "water" in type_set:
-        tasks.append(get_water_sources(lat, lng, radius_m=radius_m))
+        tasks.append(get_water_sources(lat, lng, radius_m=dense_radius_m))
     if "fuel" in type_set or "gas" in type_set:
-        tasks.append(get_fuel_stations(lat, lng, radius_m=radius_m))
+        tasks.append(get_fuel_stations(lat, lng, radius_m=dense_radius_m))
     if "trailhead" in type_set:
         tasks.append(get_trailheads(lat, lng, radius_m=radius_m))
     if "viewpoint" in type_set:
@@ -4248,11 +4250,13 @@ async def osm_pois(lat: float, lng: float, radius: float = 30, types: str = "wat
         tasks.append(get_hot_springs(lat, lng, radius_m=radius_m))
     if not tasks:
         return []
-    results = await asyncio.gather(*tasks)
+    results = await asyncio.gather(*tasks, return_exceptions=True)
     merged: list[dict] = []
     seen = set()
     per_type_limit = max(12, min(40, int(120 / max(len(results), 1))))
     for sublist in results:
+        if not isinstance(sublist, list):
+            continue
         added_for_type = 0
         for item in sublist:
             item_id = str(item.get("id") or "")

@@ -3296,12 +3296,14 @@ function MapScreen() {
       || !!tappedTrail
       || !!tappedWp
       || !!pendingPin
+      || trailPinCaptureMode
+      || trailRouteBuilderOpen
     );
     return () => setTabBarHidden(false);
   }, [
     navMode, showSearch, showFilterSheet, showLayerSheet, searchRouteCard, selectedCamp, selectedPlace, selectedTrail,
     selectedCommunityPin, tappedPoi, tappedGas, tappedTileSpot, tappedTrail,
-    tappedWp, pendingPin, setTabBarHidden,
+    tappedWp, pendingPin, trailPinCaptureMode, trailRouteBuilderOpen, setTabBarHidden,
   ]);
   useEffect(() => { isReroutingRef.current = isRerouting; }, [isRerouting]);
 
@@ -6903,6 +6905,9 @@ function MapScreen() {
     trailTraceDraftRef.current = [];
     trailAutoBuildCountRef.current = 0;
     setTrailTraceRoute([]);
+    setSelectedTrail(null);
+    setTrailCardCollapsed(false);
+    setTrailRouteBuilderOpen(false);
     clearTrailRoutePreview();
   }
 
@@ -7050,7 +7055,7 @@ function MapScreen() {
     setTrailCaptureBusy(true);
     if (!previewOnly) {
       setTrailRouteBuilding(true);
-      setTrailRouteBuilderOpen(true);
+      setTrailRouteBuilderOpen(false);
       setTrailCardCollapsed(true);
     }
     setTrailRouteBuilderError('');
@@ -7169,13 +7174,10 @@ function MapScreen() {
       } else {
         setTrailTraceDraft([]);
         trailTraceDraftRef.current = [];
-        setTrailCapturePins([]);
-        setTrailCaptureAnchors([]);
       }
       setTrailTraceRoute(clean);
       setTrailRoutePlans([plan]);
       setSelectedTrailRoutePlanId('capture');
-      if (!previewOnly) setTrailPinCaptureMode(false);
       setTrailRouteBuilderError('');
       setTrailRouteSegmentStatus(segmentStatuses);
       if (previewOnly) {
@@ -7847,7 +7849,7 @@ function MapScreen() {
         </View>
       )}
 
-      {!navMode && userHeading !== null && !showSearch && (
+      {!trailPinCaptureMode && !navMode && userHeading !== null && !showSearch && (
         <View style={s.compassPill}>
           <ThreeNeedleCompass heading={userHeading} bearing={null} compact />
           <View>
@@ -7894,13 +7896,6 @@ function MapScreen() {
                   TRAIL BUILDER · {trailTraceRoute.length > 1 ? 'PREVIEW SNAPPED' : trailCapturePins.length ? 'ADD NEXT POINT' : 'TAP START'}
                 </Text>
                 <Text style={s.trailCompactText} numberOfLines={2}>
-                  {[
-                    previewTrailDistanceM > 0 ? fmtTrailRouteDistance(previewTrailDistanceM) : null,
-                    previewTrailDistanceM > 0 ? fmtTrailRouteTime(previewTrailDistanceM) : null,
-                    `${trailCapturePins.length} pts`,
-                    fmtTrailElevation(selectedTrailRoutePlan),
-                  ].filter(Boolean).join(' · ')}
-                  {' · '}
                   {trailPinCaptureSeedName
                     ? 'Tap bends, forks, or finish to snap the preview.'
                     : 'Map taps add snapped anchors around curves and forks.'}
@@ -7910,6 +7905,14 @@ function MapScreen() {
                 <Ionicons name="close" size={15} color={OVR.text2} />
               </TouchableOpacity>
             </View>
+            <TrailheadMetricRow
+              metrics={[
+                { label: 'Distance', value: previewTrailDistanceM > 0 ? fmtTrailRouteDistance(previewTrailDistanceM) : '--', icon: 'map-outline', tone: C.silverBright },
+                { label: 'Time', value: previewTrailDistanceM > 0 ? fmtTrailRouteTime(previewTrailDistanceM) : '--', icon: 'time-outline', tone: C.silverBright },
+                { label: 'Points', value: String(trailCapturePins.length), icon: 'radio-button-on-outline', tone: '#22c55e' },
+                { label: trailElevationLabel(selectedTrailRoutePlan), value: fmtTrailElevation(selectedTrailRoutePlan), icon: 'trending-up-outline', tone: C.orange },
+              ]}
+            />
             <TrailheadButtonDock style={s.trailRouteBuilderActions}>
               <TrailheadButton
                 label="Undo"
@@ -7926,7 +7929,15 @@ function MapScreen() {
                 loading={trailCaptureBusy}
                 onPress={() => capturePinnedTrailRoute()}
                 disabled={trailCapturePins.length < 2}
-                style={{ flex: 1.1 }}
+                style={{ flex: 1 }}
+              />
+              <TrailheadButton
+                label="Save"
+                icon="bookmark-outline"
+                variant="secondary"
+                onPress={() => selectedTrail && selectedTrailRoutePlan && nameAndSaveTrailRoutePlan(selectedTrail, selectedTrailRoutePlan)}
+                disabled={!selectedTrail || !selectedTrailRoutePlan}
+                style={{ flex: 1 }}
               />
             </TrailheadButtonDock>
           </TrailheadSheet>
@@ -8134,7 +8145,7 @@ function MapScreen() {
         )}
       </ScrollView>
 
-      {selectedTrail && !navMode && trailCardCollapsed && !trailRouteBuilderOpen && (
+      {selectedTrail && !navMode && !trailPinCaptureMode && trailCardCollapsed && !trailRouteBuilderOpen && (
         <View style={s.trailCollapsedWrap}>
           <TouchableOpacity
             style={s.trailCollapsedTab}
@@ -8159,7 +8170,7 @@ function MapScreen() {
         </View>
       )}
 
-      {selectedTrail && !navMode && !trailCardCollapsed && !trailRouteBuilderOpen && (
+      {selectedTrail && !navMode && !trailPinCaptureMode && !trailCardCollapsed && !trailRouteBuilderOpen && (
         <View style={s.trailOverlayCard}>
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.trailOverlayContent}>
           <View style={s.wpSheetHeader}>
@@ -8441,7 +8452,7 @@ function MapScreen() {
         </View>
       )}
 
-      {selectedTrail && !navMode && trailRouteBuilderOpen && (
+      {selectedTrail && !navMode && !trailPinCaptureMode && trailRouteBuilderOpen && (
         <View style={s.trailRouteBuilderWrap}>
           <TrailheadSheet contentStyle={s.trailRouteBuilderBlur}>
             <View style={s.trailRouteBuilderHeader}>
@@ -13547,11 +13558,11 @@ const makeStyles = (C: ColorPalette) => {
   },
   trailRouteBuilderWrap: {
     position: 'absolute',
-    left: 8,
-    right: 8,
-    bottom: 8,
-    zIndex: 18,
-    elevation: 18,
+    left: 10,
+    right: 10,
+    bottom: 0,
+    zIndex: 10020,
+    elevation: 120,
   },
   trailRouteBuilderBlur: {
     borderRadius: 24,
@@ -13566,7 +13577,7 @@ const makeStyles = (C: ColorPalette) => {
     shadowOffset: { width: 0, height: 16 },
   },
   trailRouteBuilderHeader: { flexDirection: 'row', alignItems: 'center', gap: 11, marginBottom: 10 },
-  trailCaptureSheetContent: { gap: 8, padding: 10 },
+  trailCaptureSheetContent: { gap: 8, padding: 10, paddingBottom: 14 },
   trailCompactMessage: {
     minHeight: 56,
     flexDirection: 'row',

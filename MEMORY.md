@@ -10,6 +10,17 @@ Use this after a Codex restart:
 
 We are improving the Trailhead mobile app, especially Route Builder, offline state packs, My Rig persistence, camp cards, and Explorer purchase handling.
 
+## Current Design Direction
+
+- The user wants a broader premium redesign direction because the map feels confusing and some pages are inconsistent.
+- Chosen baseline: **Sublima Mobile App Pro + Opex**.
+  - Sublima copied Figma file: `https://www.figma.com/design/8jYbmt6yU97e7zmFBaMlZi/Sublima-Mobile-App-PRO--v1.0---Copy-`
+  - Useful Sublima nodes: Cards `923:2970`, Button Dock `21047:2548`, Bottom Navigation `21042:22`, Searchbar `21150:659`, Top Navigation `21118:1101`.
+  - Opex stays the map/navigation inspiration because the user already bought/imported it.
+- First implementation priority: clean up the map and trail route builder before doing the full app-wide redesign.
+- Trail builder target UX: dedicated mode, no Drop Pin button, tap near trail segments to auto-snap anchors, live snapped preview, explicit BUILD step, then name/save/cache/start the route.
+- Later redesign pass should revisit map search/filter duplication, navigation panel, bottom navigation, profile/settings/paywall consistency, and place/trail cards using Sublima-style surfaces.
+
 The user wants Route Builder to feel closer to The Dyrt's smooth road-trip planner, but still unique to Trailhead:
 
 - Ask where the user is going.

@@ -3123,16 +3123,6 @@ function MapScreen() {
   }, [trailTraceDraft]);
 
   useEffect(() => {
-    if (!trailPinCaptureMode || trailCapturePins.length < 2 || trailCaptureBusy) return;
-    if (trailAutoBuildCountRef.current === trailCapturePins.length) return;
-    trailAutoBuildCountRef.current = trailCapturePins.length;
-    const timer = setTimeout(() => {
-      capturePinnedTrailRoute();
-    }, 650);
-    return () => clearTimeout(timer);
-  }, [trailPinCaptureMode, trailCapturePins.length, trailCaptureBusy]);
-
-  useEffect(() => {
     let cancelled = false;
     storage.get(MAP_FILTER_PREFS_KEY).then(raw => {
       if (cancelled) return;
@@ -6847,7 +6837,7 @@ function MapScreen() {
     setTrailTraceDraft([]);
     trailTraceDraftRef.current = [];
     setTrailPinCaptureMode(true);
-    setQuickToast('Pan map, drop pins at bends, forks, and finish');
+    setQuickToast('Tap the trail start, then tap the next bend or finish');
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     setTimeout(() => setQuickToast(''), 2600);
   }
@@ -6887,47 +6877,47 @@ function MapScreen() {
     trailTraceDraftRef.current = [seed];
     setTrailPinCaptureMode(true);
     setQuickToast(snap && snap.distanceM <= 240
-      ? 'Start pin set. Drop bends, forks, and finish.'
-      : 'Start pin set. Drop bends, forks, and finish.');
+      ? 'Start snapped. Tap bends, forks, and finish.'
+      : 'Start set. Tap bends, forks, and finish.');
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     setTimeout(() => setQuickToast(''), 3600);
   }
 
-  async function addTrailCapturePin() {
-    const center = currentMapCenterCoord();
-    if (!center) {
-      setQuickToast('Move the map over the trail first');
+  async function addTrailCaptureAnchor(rawCoord: [number, number]) {
+    if (trailCaptureBusy) return;
+    if (!rawCoord) {
+      setQuickToast('Tap near the trail first');
       setTimeout(() => setQuickToast(''), 2400);
       return;
     }
     setTrailCaptureBusy(true);
     try {
-      const geometry = await nativeMapRef.current?.captureTrailAt?.(center[1], center[0]);
-      const snap = geometry ? nearestVisibleTrailSnap(geometry, center) : null;
-      const snapped = geometry?.features?.length && snap && snap.distanceM <= 180 ? snap.coord : center;
+      const geometry = await nativeMapRef.current?.captureTrailAt?.(rawCoord[1], rawCoord[0], trailPinCaptureSeedName || undefined);
+      const snap = geometry ? nearestVisibleTrailSnap(geometry, rawCoord) : null;
+      const snapped = geometry?.features?.length && snap && snap.distanceM <= 180 ? snap.coord : rawCoord;
       const anchorGeometry = geometry?.features?.length ? geometry : { type: 'FeatureCollection' as const, features: [] };
-      let nextAnchors: TrailCaptureAnchor[] = [];
-      setTrailCaptureAnchors(prev => {
-        const last = prev[prev.length - 1]?.coord;
-        if (last && haversineKm(last[1], last[0], snapped[1], snapped[0]) * 1000 < 12) return prev;
-        const next = [...prev, { coord: snapped, geometry: anchorGeometry }].slice(-24);
-        nextAnchors = next;
-        const pins = next.map(anchor => anchor.coord);
-        setTrailCapturePins(pins);
-        setTrailTraceDraft(pins);
-        trailTraceDraftRef.current = pins;
-        return next;
-      });
+      const last = trailCaptureAnchors[trailCaptureAnchors.length - 1]?.coord;
+      if (last && haversineKm(last[1], last[0], snapped[1], snapped[0]) * 1000 < 12) {
+        setQuickToast('That point is already on the route');
+        setTimeout(() => setQuickToast(''), 1800);
+        return;
+      }
+      const nextAnchors = [...trailCaptureAnchors, { coord: snapped, geometry: anchorGeometry }].slice(-24);
+      const pins = nextAnchors.map(anchor => anchor.coord);
+      setTrailCaptureAnchors(nextAnchors);
+      setTrailCapturePins(pins);
+      setTrailTraceDraft([]);
+      trailTraceDraftRef.current = [];
       setTrailTraceRoute([]);
       if (nextAnchors.length >= 2) {
         trailAutoBuildCountRef.current += 1;
         setQuickToast('Snapping preview...');
-        setTimeout(() => capturePinnedTrailRoute(nextAnchors, { previewOnly: true }), 0);
+        await capturePinnedTrailRoute(nextAnchors, { previewOnly: true });
       } else if (!geometry?.features?.length || !snap || snap.distanceM > 180) {
-        setQuickToast('Start set. Drop the finish near the trail.');
+        setQuickToast('Start set. Tap the next trail point.');
         setTimeout(() => setQuickToast(''), 2600);
       } else {
-        setQuickToast('Start snapped. Drop the finish near the trail.');
+        setQuickToast('Start snapped. Tap the next trail point.');
         setTimeout(() => setQuickToast(''), 2200);
       }
       Haptics.selectionAsync().catch(() => {});
@@ -6943,8 +6933,8 @@ function MapScreen() {
       nextAnchors = next;
       const pins = next.map(anchor => anchor.coord);
       setTrailCapturePins(pins);
-      setTrailTraceDraft(pins);
-      trailTraceDraftRef.current = pins;
+      setTrailTraceDraft([]);
+      trailTraceDraftRef.current = [];
       return next;
     });
     setTrailTraceRoute([]);
@@ -7081,8 +7071,8 @@ function MapScreen() {
       };
       if (!previewOnly) setSelectedTrail(feature);
       if (previewOnly) {
-        setTrailTraceDraft(pins);
-        trailTraceDraftRef.current = pins;
+        setTrailTraceDraft([]);
+        trailTraceDraftRef.current = [];
       } else {
         setTrailTraceDraft([]);
         trailTraceDraftRef.current = [];
@@ -7412,7 +7402,7 @@ function MapScreen() {
           mapLayer={mapLayer}
           routeOpts={routeOpts}
           traceMode={trailTraceMode}
-          traceDraftCoords={trailPinCaptureMode ? trailCapturePins : trailTraceDraft}
+          traceDraftCoords={trailTraceMode ? trailTraceDraft : []}
           traceRouteCoords={trailTraceRoute}
           tracePinCoords={trailPinCaptureMode ? trailCapturePins : []}
           showLandOverlay={showLands}
@@ -7490,7 +7480,15 @@ function MapScreen() {
               }
               return;
             }
-            if (trailPinCaptureMode) return;
+            if (trailPinCaptureMode) {
+              if (lat == null || lng == null) {
+                setQuickToast('Map tap did not return a coordinate. Tap near the trail again.');
+                setTimeout(() => setQuickToast(''), 3000);
+                return;
+              }
+              addTrailCaptureAnchor([lng, lat]);
+              return;
+            }
             nativeMapRef.current?.clearTrailHighlight();
             setTrailCardCollapsed(false);
               setSelectedCamp(null); setSelectedPlace(null); setTappedTrail(null); setTappedTileSpot(null); setTappedGas(null); setTappedPoi(null); setSelectedCommunityPin(null); setSelectedTrail(null);
@@ -7513,6 +7511,10 @@ function MapScreen() {
             // Open nearby camp search for the tapped point
           }}
           onTrailTap={(name, lat, lng) => {
+            if (trailPinCaptureMode) {
+              if (lat != null && lng != null) addTrailCaptureAnchor([lng, lat]);
+              return;
+            }
             setSearchRouteCard(null);
             setSelectedPlace({ id: `trail:${lat}:${lng}`, name: name || 'Trail', lat, lng, type: 'trail', source: 'map', source_label: 'Map trail', summary: 'Trail or track selected from the map.' });
             setSelectedCamp(null); setTappedTrail(null); setTappedTileSpot(null); setSelectedTrail(null); setSelectedCommunityPin(null);
@@ -7771,40 +7773,34 @@ function MapScreen() {
 
       {trailPinCaptureMode && !navMode && (
         <>
-          <View style={s.pinCaptureReticle} pointerEvents="none">
-            <View style={s.pinCaptureStem} />
-            <View style={s.pinCaptureDot}>
-              <Ionicons name="pin" size={21} color="#fff" />
-            </View>
-          </View>
           <View style={s.traceHud} pointerEvents="auto">
             <View style={s.traceHudIcon}>
               <Ionicons name="git-branch-outline" size={18} color="#22c55e" />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={s.traceHudTitle}>PIN TRAIL ROUTE</Text>
+              <Text style={s.traceHudTitle}>TRAIL BUILDER</Text>
               <Text style={s.traceHudText}>
                 {trailPinCaptureSeedName
-                  ? `${trailPinCaptureSeedName}: drop the next point near the trail. Trailhead snaps and rebuilds the preview.`
-                  : 'Drop points near the trail. Trailhead snaps them and rebuilds the preview as you go.'}
+                  ? `${trailPinCaptureSeedName}: tap bends, forks, or the finish. Trailhead snaps the preview as you go.`
+                  : 'Tap near the trail to add points. Trailhead snaps and redraws the preview as you go.'}
               </Text>
               <Text style={s.traceHudMeta}>
-                {trailCapturePins.length} pins{trailCapturePins.length > 1 ? ` · ${fmtTrailRouteDistance(trailCoordsDistanceM(trailCapturePins))} guide` : ' · start set'}
+                {trailCapturePins.length} points{trailTraceRoute.length > 1 ? ` · ${fmtTrailRouteDistance(trailCoordsDistanceM(trailTraceRoute))} snapped` : trailCapturePins.length ? ' · start set' : ' · tap start'}
               </Text>
               <View style={s.pinCaptureActions}>
-                <TouchableOpacity style={s.pinCapturePrimary} onPress={addTrailCapturePin} disabled={trailCaptureBusy}>
-                  <Ionicons name="add" size={15} color="#06120b" />
-                  <Text style={s.pinCapturePrimaryText}>DROP PIN</Text>
-                </TouchableOpacity>
                 <TouchableOpacity style={s.pinCaptureAction} onPress={undoTrailCapturePin} disabled={trailCaptureBusy || trailCapturePins.length === 0}>
                   <Ionicons name="arrow-undo-outline" size={14} color={trailCapturePins.length === 0 ? OVR.text3 : OVR.text2} />
                   <Text style={[s.pinCaptureActionText, trailCapturePins.length === 0 && { color: OVR.text3 }]}>UNDO</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={s.pinCapturePreview} onPress={() => capturePinnedTrailRoute()} disabled={trailCaptureBusy || trailCapturePins.length < 2}>
+                <TouchableOpacity
+                  style={[s.pinCapturePreview, trailCapturePins.length < 2 && s.pinCapturePreviewDisabled]}
+                  onPress={() => capturePinnedTrailRoute()}
+                  disabled={trailCaptureBusy || trailCapturePins.length < 2}
+                >
                   {trailCaptureBusy
-                    ? <ActivityIndicator size="small" color="#22c55e" />
-                    : <Ionicons name="checkmark" size={15} color={trailCapturePins.length < 2 ? OVR.text3 : '#22c55e'} />}
-                  <Text style={[s.pinCaptureActionText, trailCapturePins.length >= 2 && { color: '#22c55e' }]}>BUILD</Text>
+                    ? <ActivityIndicator size="small" color="#fff" />
+                    : <Ionicons name="checkmark" size={15} color={trailCapturePins.length < 2 ? OVR.text3 : '#fff'} />}
+                  <Text style={[s.pinCaptureActionText, trailCapturePins.length >= 2 && { color: '#fff' }]}>BUILD</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -11546,13 +11542,13 @@ const makeStyles = (C: ColorPalette) => {
     right: 18,
     zIndex: 850,
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    padding: 12,
-    borderRadius: 8,
+    alignItems: 'flex-start',
+    gap: 12,
+    padding: 16,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#22c55e66',
-    backgroundColor: 'rgba(6, 12, 10, 0.88)',
+    borderColor: 'rgba(229,231,235,0.18)',
+    backgroundColor: 'rgba(10, 15, 13, 0.94)',
   },
   traceHudIcon: {
     width: 36,
@@ -11609,7 +11605,7 @@ const makeStyles = (C: ColorPalette) => {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginTop: 10,
+    marginTop: 12,
   },
   pinCapturePrimary: {
     minHeight: 34,
@@ -11623,8 +11619,8 @@ const makeStyles = (C: ColorPalette) => {
   },
   pinCapturePrimaryText: { color: '#06120b', fontSize: 10, fontFamily: mono, fontWeight: '900' },
   pinCaptureAction: {
-    minWidth: 54,
-    height: 34,
+    minWidth: 68,
+    height: 44,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
@@ -11635,18 +11631,23 @@ const makeStyles = (C: ColorPalette) => {
     borderColor: 'rgba(255,255,255,0.11)',
   },
   pinCapturePreview: {
-    minWidth: 82,
-    height: 34,
+    flex: 1,
+    minWidth: 112,
+    height: 44,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
     gap: 4,
-    backgroundColor: 'rgba(34,197,94,0.12)',
+    backgroundColor: '#22c55e',
     borderWidth: 1,
-    borderColor: 'rgba(34,197,94,0.26)',
+    borderColor: '#22c55e',
   },
-  pinCaptureActionText: { color: OVR.text2, fontSize: 9, fontFamily: mono, fontWeight: '900' },
+  pinCapturePreviewDisabled: {
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderColor: 'rgba(255,255,255,0.11)',
+  },
+  pinCaptureActionText: { color: OVR.text2, fontSize: 10, fontFamily: mono, fontWeight: '900' },
 
   controls: { position: 'absolute', top: 106, right: 16, bottom: 100, maxHeight: '80%' as any },
   mapTourTarget: {

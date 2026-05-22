@@ -854,7 +854,6 @@ export default function RouteBuilderScreen() {
   }, [wizardFade, wizardSlide, wizardStep]);
 
   useEffect(() => {
-    if (Platform.OS !== 'android') return;
     const showSub = Keyboard.addListener('keyboardDidShow', () => {
       setKeyboardVisible(true);
       setTabBarHidden(true);
@@ -2823,6 +2822,11 @@ export default function RouteBuilderScreen() {
       ? !!(endQuery.trim() || orderedStops.length > 1)
       : true;
     const nextStep = () => setWizardStep(step => Math.min(3, step + 1));
+    const dockMarginBottom = keyboardVisible
+      ? 104 + bottomInset
+      : wizardStep === 0
+      ? 18 + bottomInset
+      : 72 + bottomInset;
     return (
       <TrailheadSheet handle={false} style={[s.wizardCard, fullScreen && s.wizardCardFull]} contentStyle={s.routeSheetContent}>
         <View style={s.wizardHeader}>
@@ -3021,7 +3025,7 @@ export default function RouteBuilderScreen() {
 
         {buildingFramework && <RouteBuildStatus C={C} message={frameworkStatus} />}
 
-        <View style={[s.wizardNav, fullScreen && [s.wizardNavDock, { marginBottom: 72 + bottomInset }]]}>
+        <View style={[s.wizardNav, fullScreen && [s.wizardNavDock, { marginBottom: dockMarginBottom }]]}>
           <TouchableOpacity style={[s.wizardNavBtn, wizardStep === 0 && { opacity: 0.45 }]} onPress={() => setWizardStep(step => Math.max(0, step - 1))} disabled={wizardStep === 0}>
             <Ionicons name="chevron-back" size={13} color={C.text3} />
             <Text style={s.wizardNavText}>BACK</Text>

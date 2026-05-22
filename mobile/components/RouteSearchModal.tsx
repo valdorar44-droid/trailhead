@@ -14,6 +14,7 @@ import { useStore, SavedPlace, MarkerGroup, TripHistoryItem } from '@/lib/store'
 import { api, CampsitePin, Pin } from '@/lib/api';
 import { getOfflineTripSummaries, loadOfflineTrip } from '@/lib/offlineTrips';
 import { useTheme, mono } from '@/lib/design';
+import { TrailheadSheet } from '@/components/TrailheadUI';
 
 export interface SearchPlace {
   name: string;
@@ -709,7 +710,7 @@ export default function RouteSearchModal({
   // ── View: Route ready ────────────────────────────────────────────────────────
   if (view === 'route' && routeCard) {
     return (
-      <View style={[s.sheet, { maxHeight: sheetMaxHeight, paddingBottom: bottomPad }]}>
+      <TrailheadSheet handle={false} style={[s.sheet, { maxHeight: sheetMaxHeight }]} contentStyle={[s.sheetContent, { paddingBottom: bottomPad }]}>
         <View style={s.handle} />
         <View style={s.routeHeader}>
           <Ionicons name="car" size={24} color={C.text2} />
@@ -780,13 +781,13 @@ export default function RouteSearchModal({
             <Text style={s.startBtnText}>Start</Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </TrailheadSheet>
     );
   }
 
   // ── View: Picker (default "Add destination") ────────────────────────────────
   return (
-    <View style={[s.sheet, { maxHeight: sheetMaxHeight, paddingBottom: bottomPad }]}>
+    <TrailheadSheet handle={false} style={[s.sheet, { maxHeight: sheetMaxHeight }]} contentStyle={[s.sheetContent, { paddingBottom: bottomPad }]}>
       <View style={s.handle} />
 
       <View style={s.pickerHeader}>
@@ -1024,18 +1025,15 @@ export default function RouteSearchModal({
           </View>
         </View>
       )}
-    </View>
+    </TrailheadSheet>
   );
 }
 
 const styles = (C: ReturnType<typeof useTheme>) => StyleSheet.create({
   sheet: {
-    backgroundColor: C.bg,
     borderTopLeftRadius: 20, borderTopRightRadius: 20,
-    borderTopWidth: 1, borderColor: C.border,
-    shadowColor: '#000', shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.15, shadowRadius: 12, elevation: 16,
   },
+  sheetContent: { padding: 0 },
   pickerScroll: { flexGrow: 0 },
   handle: { width: 36, height: 4, borderRadius: 2, backgroundColor: C.border, alignSelf: 'center', marginTop: 10, marginBottom: 6 },
 

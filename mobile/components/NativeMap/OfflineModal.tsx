@@ -35,6 +35,7 @@ import {
   saveOfflinePlacePack,
   type OfflinePlacePackSummary,
 } from '@/lib/offlinePlacePacks';
+import { TrailheadSheet } from '@/components/TrailheadUI';
 
 
 interface WebDownloadOpts { bufferKm?: number; minZ?: number; maxZ?: number; vectorOnly?: boolean; label: string; n?: number; s?: number; e?: number; w?: number; }
@@ -661,7 +662,7 @@ export default function OfflineModal({
       <View style={s.overlay}>
         <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={onClose} />
 
-        <View style={[s.sheet, { maxHeight: sheetMaxHeight, paddingBottom: bottomPad }]}>
+        <TrailheadSheet handle={false} style={[s.sheet, { maxHeight: sheetMaxHeight }]} contentStyle={[s.sheetContent, { paddingBottom: bottomPad }]}>
           {/* ── Header ───────────────────────────────────────────────────── */}
           <View style={s.header}>
             <View style={s.headerAccent} />
@@ -1198,7 +1199,7 @@ export default function OfflineModal({
 
             </ScrollView>
           )}
-        </View>
+        </TrailheadSheet>
       </View>
     </Modal>
   );
@@ -1209,10 +1210,9 @@ function makeStyles(C: ColorPalette) {
   return StyleSheet.create({
     overlay:       { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.6)' },
     sheet: {
-      backgroundColor: C.bg, borderTopLeftRadius: 20, borderTopRightRadius: 20,
-      paddingHorizontal: 16, paddingTop: 16,
-      borderTopWidth: 1, borderTopColor: C.border,
+      borderTopLeftRadius: 20, borderTopRightRadius: 20,
     },
+    sheetContent: { paddingHorizontal: 16, paddingTop: 16 },
     header:        { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
     headerAccent:  { width: 4, height: 32, backgroundColor: C.orange, borderRadius: 2 },
     title:         { color: C.text, fontSize: 15, fontFamily: mono, fontWeight: '900', letterSpacing: 1.5 },

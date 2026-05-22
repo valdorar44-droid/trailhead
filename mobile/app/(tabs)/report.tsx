@@ -11,6 +11,7 @@ import { storage } from '@/lib/storage';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import TourTarget from '@/components/TourTarget';
+import { TrailheadButton, TrailheadCard, TrailheadSheet, TrailheadTopBar } from '@/components/TrailheadUI';
 import { api, Report, ContributorLeader, ContributorProfile, ContributionPeriod } from '@/lib/api';
 import { useStore } from '@/lib/store';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
@@ -286,29 +287,25 @@ export default function ReportScreen() {
       {/* Driving safety modal */}
       <Modal visible={drivingWarning} transparent animationType="fade" statusBarTranslucent>
         <View style={s.drivingOverlay}>
-          <View style={s.drivingModal}>
+          <TrailheadSheet handle={false} style={s.drivingModal}>
             <Ionicons name="car-outline" size={46} color={C.orange} style={{ marginBottom: 4 }} />
             <Text style={s.drivingTitle}>YOU APPEAR TO BE MOVING</Text>
             <Text style={s.drivingBody}>
               Never use your phone while driving. Pull over safely before submitting a trail report.
             </Text>
-            <TouchableOpacity style={s.drivingParkedBtn} onPress={() => setDrivingWarning(false)}>
-              <Text style={s.drivingParkedText}>I'M PARKED / STOPPED</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={s.drivingPassengerBtn} onPress={() => setDrivingWarning(false)}>
-              <Text style={s.drivingPassengerText}>I'M A PASSENGER</Text>
-            </TouchableOpacity>
-          </View>
+            <TrailheadButton label="I'm Parked / Stopped" variant="primary" onPress={() => setDrivingWarning(false)} style={{ alignSelf: 'stretch' }} />
+            <TrailheadButton label="I'm a Passenger" variant="secondary" onPress={() => setDrivingWarning(false)} style={{ alignSelf: 'stretch' }} />
+          </TrailheadSheet>
         </View>
       </Modal>
 
       {/* Header */}
-      <View style={s.header}>
-        <View>
-          <Text style={s.title}>FIELD REPORTS</Text>
-          <Text style={s.subtitle}>Warn the trail community</Text>
-        </View>
-        {user && (
+      <TrailheadTopBar
+        title="FIELD REPORTS"
+        subtitle="Warn the trail community"
+        icon="warning-outline"
+        style={s.header}
+        right={user ? (
           <View style={s.creditsBox}>
             <Text style={s.creditsVal}>{user.credits ?? 0}</Text>
             <Text style={s.creditsLabel}>CREDITS</Text>
@@ -319,8 +316,8 @@ export default function ReportScreen() {
               </View>
             )}
           </View>
-        )}
-      </View>
+        ) : null}
+      />
 
       {/* Success banner */}
       {submitted && (
@@ -347,7 +344,7 @@ export default function ReportScreen() {
 
       {view === 'submit' && (
         <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
-          <View style={s.reportHero}>
+          <TrailheadCard style={s.reportHero}>
             <View style={s.reportHeroIcon}>
               <Ionicons name="radio-outline" size={19} color={C.orange} />
             </View>
@@ -355,11 +352,11 @@ export default function ReportScreen() {
               <Text style={s.reportHeroTitle}>What changed out here?</Text>
               <Text style={s.reportHeroText}>Pick one condition, add useful details, and help the next rig make a better call.</Text>
             </View>
-          </View>
-          <View style={s.safetyBanner}>
+          </TrailheadCard>
+          <TrailheadCard style={s.safetyBanner}>
             <Ionicons name="car-outline" size={13} color={C.orange} />
             <Text style={s.safetyText}>Pull over before posting. Reports use your current location.</Text>
-          </View>
+          </TrailheadCard>
           <Text style={s.sectionLabel}>TYPE</Text>
           <TourTarget id="report.types">
             <View style={s.typeGrid}>

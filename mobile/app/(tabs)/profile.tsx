@@ -16,6 +16,7 @@ import { api, ApiError, ContestStatus, ContributorProfile } from '@/lib/api';
 import { useStore, RigProfile, TripHistoryItem } from '@/lib/store';
 import PaywallModal from '@/components/PaywallModal';
 import TourTarget from '@/components/TourTarget';
+import { TrailheadButton, TrailheadCard, TrailheadMetricRow, TrailheadTopBar } from '@/components/TrailheadUI';
 import { freeTrialLabel, useSubscription } from '@/lib/useSubscription';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 import { deleteOfflineTrip, getOfflineTripIndex, loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
@@ -916,7 +917,7 @@ export default function ProfileScreen() {
 
         {/* Profile */}
         <TourTarget id="profile.main">
-          <View style={s.profileCard}>
+          <TrailheadCard style={s.profileCard}>
             <View style={s.avatar}>
               <Text style={s.avatarText}>{user?.username?.[0]?.toUpperCase() ?? '?'}</Text>
             </View>
@@ -934,7 +935,7 @@ export default function ProfileScreen() {
               style={s.logoutBtn}>
               <Ionicons name="log-out-outline" size={20} color={C.text3} />
             </TouchableOpacity>
-          </View>
+          </TrailheadCard>
         </TourTarget>
 
         {/* Stats row */}
@@ -943,44 +944,22 @@ export default function ProfileScreen() {
           const states = [...new Set(tripHistory.flatMap(t => t.states || []))];
           return (
             <View>
-              <View style={s.statsRow}>
-                <View style={s.statCell}>
-                  <Text style={s.statBig}>{user?.credits ?? 0}</Text>
-                  <Text style={s.statLabel}>CREDITS</Text>
-                </View>
-                <View style={s.statDivider} />
-                <View style={s.statCell}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-                    {(user?.report_streak ?? 0) > 0 && <Ionicons name="flame" size={14} color={C.orange} />}
-                    <Text style={s.statBig}>{user?.report_streak ?? 0}</Text>
-                  </View>
-                  <Text style={s.statLabel}>DAY STREAK</Text>
-                </View>
-                <View style={s.statDivider} />
-                <View style={s.statCell}>
-                  <Text style={s.statBig}>{tripHistory.length}</Text>
-                  <Text style={s.statLabel}>TRIPS</Text>
-                </View>
-              </View>
+              <TrailheadMetricRow
+                metrics={[
+                  { label: 'Credits', value: String(user?.credits ?? 0), icon: 'flash', tone: C.orange },
+                  { label: 'Day streak', value: String(user?.report_streak ?? 0), icon: 'flame', tone: C.orange },
+                  { label: 'Trips', value: String(tripHistory.length), icon: 'map-outline', tone: C.silverBright },
+                ]}
+              />
               {tripHistory.length > 0 && (
-                <View style={[s.statsRow, { marginTop: 6 }]}>
-                  <View style={s.statCell}>
-                    <Text style={s.statBig}>{totalMiles > 0 ? `${totalMiles.toLocaleString()}` : '—'}</Text>
-                    <Text style={s.statLabel}>MILES PLANNED</Text>
-                  </View>
-                  <View style={s.statDivider} />
-                  <View style={s.statCell}>
-                    <Text style={s.statBig}>{states.length}</Text>
-                    <Text style={s.statLabel}>STATES EXPLORED</Text>
-                  </View>
-                  <View style={s.statDivider} />
-                  <View style={s.statCell}>
-                    <Text numberOfLines={1} style={[s.statBig, { fontSize: 10 }]}>
-                      {states.slice(0, 5).join(' · ') || '—'}
-                    </Text>
-                    <Text style={s.statLabel}>REGIONS</Text>
-                  </View>
-                </View>
+                <TrailheadMetricRow
+                  style={{ marginTop: 6 }}
+                  metrics={[
+                    { label: 'Miles planned', value: totalMiles > 0 ? totalMiles.toLocaleString() : '—', icon: 'speedometer-outline', tone: C.silverBright },
+                    { label: 'States explored', value: String(states.length), icon: 'flag-outline', tone: C.silverBright },
+                    { label: 'Regions', value: states.slice(0, 2).join(' ') || '—', icon: 'trail-sign-outline', tone: C.silverBright },
+                  ]}
+                />
               )}
             </View>
           );
@@ -988,7 +967,7 @@ export default function ProfileScreen() {
 
         {/* My Trips — with offline cache badges */}
         {tripHistory.length > 0 && (
-          <View style={s.tripsCard}>
+          <TrailheadCard style={s.tripsCard}>
             <Text style={s.sectionLabel}>MY TRIPS</Text>
             {tripHistory.map(t => {
               const isCached = offlineCachedIds.has(t.trip_id);
@@ -1017,7 +996,7 @@ export default function ProfileScreen() {
                 </View>
               );
             })}
-          </View>
+          </TrailheadCard>
         )}
 
         {/* Quick actions */}
@@ -1642,12 +1621,13 @@ export default function ProfileScreen() {
         <Modal visible={showContributorApply} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowContributorApply(false)}>
           <SafeAreaView style={[s.container, { padding: 0 }]}>
             <View style={s.bugModal}>
-              <View style={s.bugModalHeader}>
-                <Text style={s.bugModalTitle}>Map Contributor</Text>
-                <TouchableOpacity onPress={() => setShowContributorApply(false)}>
-                  <Ionicons name="close" size={22} color={C.text3} />
-                </TouchableOpacity>
-              </View>
+              <TrailheadTopBar
+                title="MAP CONTRIBUTOR"
+                subtitle="Reviewed import limits"
+                icon="ribbon-outline"
+                style={s.bugModalHeader}
+                right={<TouchableOpacity onPress={() => setShowContributorApply(false)}><Ionicons name="close" size={22} color={C.text3} /></TouchableOpacity>}
+              />
               <Text style={s.contributorIntro}>
                 Apply for higher reviewed import limits. Approved contributors can help upgrade imported points, but new GPX imports still start untrusted.
               </Text>
@@ -1686,9 +1666,7 @@ export default function ProfileScreen() {
                   {contributorApplyResult}
                 </Text>
               )}
-              <TouchableOpacity style={[s.bugSubmitBtn, contributorApplying && { opacity: 0.6 }]} onPress={applyMapContributor} disabled={contributorApplying}>
-                {contributorApplying ? <ActivityIndicator color="#fff" /> : <Text style={s.bugSubmitText}>SUBMIT APPLICATION</Text>}
-              </TouchableOpacity>
+              <TrailheadButton label="Submit Application" variant="primary" loading={contributorApplying} onPress={applyMapContributor} disabled={contributorApplying} />
             </View>
           </SafeAreaView>
         </Modal>
@@ -1709,12 +1687,13 @@ export default function ProfileScreen() {
         <Modal visible={showBugModal} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowBugModal(false)}>
           <SafeAreaView style={[s.container, { padding: 0 }]}>
             <View style={s.bugModal}>
-              <View style={s.bugModalHeader}>
-                <Text style={s.bugModalTitle}>Report a Bug</Text>
-                <TouchableOpacity onPress={() => setShowBugModal(false)}>
-                  <Ionicons name="close" size={22} color={C.text3} />
-                </TouchableOpacity>
-              </View>
+              <TrailheadTopBar
+                title="REPORT A BUG"
+                subtitle="Describe what went wrong"
+                icon="bug-outline"
+                style={s.bugModalHeader}
+                right={<TouchableOpacity onPress={() => setShowBugModal(false)}><Ionicons name="close" size={22} color={C.text3} /></TouchableOpacity>}
+              />
 
               {bugSent ? (
                 <View style={s.bugSentWrap}>
@@ -1724,10 +1703,10 @@ export default function ProfileScreen() {
                 </View>
               ) : (
                 <>
-                  <View style={s.bugCreditBanner}>
+                  <TrailheadCard style={s.bugCreditBanner}>
                     <Ionicons name="flash" size={14} color={C.orange} />
                     <Text style={s.bugCreditText}>Verified bugs earn generous credits. You must be logged in to receive them.</Text>
-                  </View>
+                  </TrailheadCard>
                   <Text style={s.bugFieldLabel}>WHAT WENT WRONG</Text>
                   <TextInput
                     style={s.bugTitleInput}
@@ -1748,16 +1727,7 @@ export default function ProfileScreen() {
                     maxLength={1000}
                     textAlignVertical="top"
                   />
-                  <TouchableOpacity
-                    style={[s.bugSubmitBtn, bugSubmitting && { opacity: 0.6 }]}
-                    onPress={submitBug}
-                    disabled={bugSubmitting}
-                  >
-                    {bugSubmitting
-                      ? <ActivityIndicator size="small" color="#fff" />
-                      : <><Ionicons name="send-outline" size={15} color="#fff" /><Text style={s.bugSubmitText}>SUBMIT REPORT</Text></>
-                    }
-                  </TouchableOpacity>
+                  <TrailheadButton label="Submit Report" icon="send-outline" variant="primary" loading={bugSubmitting} onPress={submitBug} disabled={bugSubmitting} />
                 </>
               )}
             </View>
@@ -1766,16 +1736,20 @@ export default function ProfileScreen() {
 
         <Modal visible={showContributions} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowContributions(false)}>
           <SafeAreaView style={s.contestModal}>
-            <View style={s.contestModalHeader}>
-              <TouchableOpacity style={s.contestClose} onPress={() => setShowContributions(false)}>
-                <Ionicons name="close" size={20} color={C.text} />
-              </TouchableOpacity>
-              <View style={{ flex: 1 }}>
-                <Text style={s.contestModalKicker}>PROFILE</Text>
-                <Text style={s.contestModalTitle}>Contributions</Text>
-              </View>
-              <View style={s.betaBadge}><Text style={s.betaBadgeText}>LIVE</Text></View>
-            </View>
+            <TrailheadTopBar
+              title="PROFILE"
+              subtitle="Contributions"
+              icon="ribbon-outline"
+              style={s.contestModalHeader}
+              right={(
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <View style={s.betaBadge}><Text style={s.betaBadgeText}>LIVE</Text></View>
+                  <TouchableOpacity style={s.contestClose} onPress={() => setShowContributions(false)}>
+                    <Ionicons name="close" size={20} color={C.text} />
+                  </TouchableOpacity>
+                </View>
+              )}
+            />
             {contributionsLoading ? (
               <View style={s.contestLoading}>
                 <ActivityIndicator color={C.orange} />
@@ -1783,7 +1757,7 @@ export default function ProfileScreen() {
               </View>
             ) : (
               <ScrollView contentContainerStyle={s.contestScroll}>
-                <View style={s.contributionHero}>
+                <TrailheadCard style={s.contributionHero}>
                   <View style={[s.contributionAvatar, { backgroundColor: contributions?.avatar_color ?? C.orange }]}>
                     <Text style={s.contributionAvatarText}>{contributions?.display_name?.[0]?.toUpperCase() ?? user?.username?.[0]?.toUpperCase() ?? '?'}</Text>
                   </View>
@@ -1811,9 +1785,9 @@ export default function ProfileScreen() {
                       ? `${contributions.tier.next_label} unlocks at ${contributions.tier.next_points?.toLocaleString()} points.`
                       : 'Top contributor tier unlocked.'}
                   </Text>
-                </View>
+                </TrailheadCard>
 
-                <View style={s.contributionPrivacyCard}>
+                <TrailheadCard style={s.contributionPrivacyCard}>
                   <View style={{ flex: 1 }}>
                     <Text style={s.contestEntryTitle}>Public contributor profile</Text>
                     <Text style={s.contestEntryText}>Shows badges, ranks, and stats. Exact places and account details stay hidden.</Text>
@@ -1825,9 +1799,9 @@ export default function ProfileScreen() {
                     trackColor={{ false: C.s3, true: C.orangeGlow }}
                     thumbColor={contributions?.public_profile_visible ? C.orange : C.text3}
                   />
-                </View>
+                </TrailheadCard>
 
-                <View style={s.contestBoardCard}>
+                <TrailheadCard style={s.contestBoardCard}>
                   <Text style={s.sectionLabel}>BADGE SHELF</Text>
                   <View style={s.contributionBadgeGrid}>
                     {(contributions?.badges ?? []).length ? contributions!.badges.map(badge => (
@@ -1838,9 +1812,9 @@ export default function ProfileScreen() {
                       </View>
                     )) : <Text style={s.contestMuted}>Earn badges by submitting useful reports, photos, confirmations, and trail notes.</Text>}
                   </View>
-                </View>
+                </TrailheadCard>
 
-                <View style={s.contestBoardCard}>
+                <TrailheadCard style={s.contestBoardCard}>
                   <Text style={s.sectionLabel}>FIELD IMPACT</Text>
                   {[
                     ['Camp reports', contributions?.stats.camp_reports ?? 0],
@@ -1853,9 +1827,9 @@ export default function ProfileScreen() {
                       <Text style={s.contestLeaderPoints}>{Number(value).toLocaleString()}</Text>
                     </View>
                   ))}
-                </View>
+                </TrailheadCard>
 
-                <View style={s.contestBoardCard}>
+                <TrailheadCard style={s.contestBoardCard}>
                   <Text style={s.sectionLabel}>RECENT POINT SOURCES</Text>
                   {(contributions?.recent_activity ?? []).length ? contributions!.recent_activity.map(item => (
                     <View key={item.label} style={s.contestLeaderRow}>
@@ -1863,7 +1837,7 @@ export default function ProfileScreen() {
                       <Text style={s.contestLeaderPoints}>{item.points.toLocaleString()} pts</Text>
                     </View>
                   )) : <Text style={s.contestMuted}>No contribution points yet.</Text>}
-                </View>
+                </TrailheadCard>
               </ScrollView>
             )}
           </SafeAreaView>
@@ -1871,15 +1845,17 @@ export default function ProfileScreen() {
 
         <Modal visible={showContest} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowContest(false)}>
           <SafeAreaView style={s.contestModal}>
-            <View style={s.contestModalHeader}>
-              <TouchableOpacity style={s.contestClose} onPress={() => setShowContest(false)}>
-                <Ionicons name="close" size={20} color={C.text} />
-              </TouchableOpacity>
-              <View style={{ flex: 1 }}>
-                <Text style={s.contestModalKicker}>TRAILHEAD</Text>
-                <Text style={s.contestModalTitle}>Contributor Contest</Text>
-              </View>
-            </View>
+            <TrailheadTopBar
+              title="TRAILHEAD"
+              subtitle="Contributor Contest"
+              icon="trophy-outline"
+              style={s.contestModalHeader}
+              right={(
+                <TouchableOpacity style={s.contestClose} onPress={() => setShowContest(false)}>
+                  <Ionicons name="close" size={20} color={C.text} />
+                </TouchableOpacity>
+              )}
+            />
             {contestLoading ? (
               <View style={s.contestLoading}>
                 <ActivityIndicator color={C.orange} />
@@ -1887,7 +1863,7 @@ export default function ProfileScreen() {
               </View>
             ) : (
               <ScrollView contentContainerStyle={s.contestScroll}>
-                <View style={s.contestHero}>
+                <TrailheadCard style={s.contestHero}>
                   <Text style={s.contestHeroTitle}>Build the map. Share what matters.</Text>
                   <Text style={s.contestHeroText}>Contest points come from useful contributions across Trailhead. Your spendable credits stay separate.</Text>
                   <View style={s.contestHeroStats}>
@@ -1904,7 +1880,7 @@ export default function ProfileScreen() {
                       <Text style={s.contestHeroLabel}>YEAR RANK</Text>
                     </View>
                   </View>
-                </View>
+                </TrailheadCard>
 
                 <View style={s.contestPrizeGrid}>
                   {[
@@ -1912,15 +1888,15 @@ export default function ProfileScreen() {
                     ['$100', 'Monthly leader', 'Top contributor at the end of each calendar month.'],
                     ['$50', 'Monthly drawing', 'Subscribers enter automatically. Free entry is available here.'],
                   ].map(([amount, title, desc]) => (
-                    <View key={title} style={s.contestPrizeCard}>
+                    <TrailheadCard key={title} style={s.contestPrizeCard}>
                       <Text style={s.contestPrizeCardAmount}>{amount}</Text>
                       <Text style={s.contestPrizeCardTitle}>{title}</Text>
                       <Text style={s.contestPrizeCardDesc}>{desc}</Text>
-                    </View>
+                    </TrailheadCard>
                   ))}
                 </View>
 
-                <View style={s.contestEntryCard}>
+                <TrailheadCard style={s.contestEntryCard}>
                   <View style={{ flex: 1 }}>
                     <Text style={s.contestEntryTitle}>Monthly drawing</Text>
                     <Text style={s.contestEntryText}>
@@ -1936,9 +1912,9 @@ export default function ProfileScreen() {
                   >
                     <Text style={s.contestEntryBtnText}>{contestEntering ? 'SAVING' : contest?.drawing_entered ? 'ENTERED' : 'ENTER FREE'}</Text>
                   </TouchableOpacity>
-                </View>
+                </TrailheadCard>
 
-                <View style={s.contestBoardCard}>
+                <TrailheadCard style={s.contestBoardCard}>
                   <Text style={s.sectionLabel}>MONTHLY LEADERS</Text>
                   {(contest?.month_leaders ?? []).slice(0, 8).map(row => (
                     <View key={`m-${row.user_id}`} style={s.contestLeaderRow}>
@@ -1948,9 +1924,9 @@ export default function ProfileScreen() {
                     </View>
                   ))}
                   {!contest?.month_leaders?.length && <Text style={s.contestMuted}>No contributions yet this month.</Text>}
-                </View>
+                </TrailheadCard>
 
-                <View style={s.contestBoardCard}>
+                <TrailheadCard style={s.contestBoardCard}>
                   <Text style={s.sectionLabel}>YEARLY LEADERS</Text>
                   {(contest?.year_leaders ?? []).slice(0, 8).map(row => (
                     <View key={`y-${row.user_id}`} style={s.contestLeaderRow}>
@@ -1960,9 +1936,9 @@ export default function ProfileScreen() {
                     </View>
                   ))}
                   {!contest?.year_leaders?.length && <Text style={s.contestMuted}>No yearly standings yet.</Text>}
-                </View>
+                </TrailheadCard>
 
-                <View style={s.contestRulesCard}>
+                <TrailheadCard style={s.contestRulesCard}>
                   <Text style={s.contestRulesTitle}>Official rules</Text>
                   {contest?.rules ? [
                     contest.rules.eligibility,
@@ -1974,7 +1950,7 @@ export default function ProfileScreen() {
                   ].map((line, idx) => <Text key={idx} style={s.contestRuleLine}>{line}</Text>) : (
                     <Text style={s.contestRuleLine}>Rules are loading.</Text>
                   )}
-                </View>
+                </TrailheadCard>
               </ScrollView>
             )}
           </SafeAreaView>

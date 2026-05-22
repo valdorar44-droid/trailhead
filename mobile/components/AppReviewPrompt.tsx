@@ -1,9 +1,9 @@
 import { Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { ColorPalette, mono, useTheme } from '@/lib/design';
 import { completeReviewPrompt, openReviewDestination, snoozeReviewPrompt } from '@/lib/reviewPrompt';
+import { TrailheadButton, TrailheadButtonDock, TrailheadSheet } from '@/components/TrailheadUI';
 
 type Props = {
   visible: boolean;
@@ -30,12 +30,7 @@ export default function AppReviewPrompt({ visible, onClose }: Props) {
     <Modal visible={visible} transparent animationType="fade" onRequestClose={closeLater}>
       <Pressable style={s.overlay} onPress={closeLater}>
         <Pressable style={s.sheet}>
-          <LinearGradient
-            colors={[C.s2, C.bg]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={s.panel}
-          >
+          <TrailheadSheet handle={false} contentStyle={s.panel}>
             <View style={s.topRow}>
               <View style={s.badge}>
                 <Ionicons name="sparkles" size={18} color={C.orange} />
@@ -59,15 +54,11 @@ export default function AppReviewPrompt({ visible, onClose }: Props) {
               A quick App Store review helps more overlanders find better camps, safer routes, and cleaner trip plans.
             </Text>
 
-            <TouchableOpacity style={s.primaryBtn} onPress={rateNow}>
-              <Ionicons name="logo-apple-appstore" size={18} color="#fff" />
-              <Text style={s.primaryText}>RATE TRAILHEAD</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={s.secondaryBtn} onPress={closeLater}>
-              <Text style={s.secondaryText}>MAYBE LATER</Text>
-            </TouchableOpacity>
-          </LinearGradient>
+            <TrailheadButtonDock style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+              <TrailheadButton label="Rate Trailhead" icon="logo-apple-appstore" variant="primary" onPress={rateNow} />
+              <TrailheadButton label="Maybe Later" variant="ghost" onPress={closeLater} />
+            </TrailheadButtonDock>
+          </TrailheadSheet>
         </Pressable>
       </Pressable>
     </Modal>
@@ -84,13 +75,7 @@ const styles = (C: ColorPalette) => StyleSheet.create({
   sheet: {
     width: '100%',
   },
-  panel: {
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: C.border2,
-    padding: 18,
-    overflow: 'hidden',
-  },
+  panel: { padding: 18 },
   topRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -151,32 +136,5 @@ const styles = (C: ColorPalette) => StyleSheet.create({
     lineHeight: 21,
     marginTop: 10,
     marginBottom: 18,
-  },
-  primaryBtn: {
-    minHeight: 50,
-    borderRadius: 12,
-    backgroundColor: C.orange,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  primaryText: {
-    color: '#fff',
-    fontSize: 12,
-    fontFamily: mono,
-    fontWeight: '900',
-  },
-  secondaryBtn: {
-    minHeight: 46,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 8,
-  },
-  secondaryText: {
-    color: C.text3,
-    fontSize: 11,
-    fontFamily: mono,
-    fontWeight: '900',
   },
 });

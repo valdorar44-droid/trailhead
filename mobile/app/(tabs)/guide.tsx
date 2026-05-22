@@ -10,6 +10,7 @@ import { useRouter } from 'expo-router';
 import TourTarget from '@/components/TourTarget';
 import PaywallModal from '@/components/PaywallModal';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
+import { TrailheadButton, TrailheadButtonDock, TrailheadCard, TrailheadTopBar } from '@/components/TrailheadUI';
 import { useStore } from '@/lib/store';
 import { api, PaywallError, type ExplorePlaceProfile, type ExploreSourcePackItem, type OsmPoi } from '@/lib/api';
 import { storage } from '@/lib/storage';
@@ -401,12 +402,13 @@ export default function GuideScreen() {
 
   return (
     <SafeAreaView style={s.container}>
-      <View style={s.header}>
-        <View style={{ flex: 1 }}>
-          <Text style={s.headerTitle}>AUDIO GUIDE</Text>
-          <Text style={s.headerSub} numberOfLines={1}>{activeTrip?.plan.trip_name ?? 'Featured places, stories, and trip audio'}</Text>
-        </View>
-        <View style={s.headerRight}>
+      <TrailheadTopBar
+        title="AUDIO GUIDE"
+        subtitle={activeTrip?.plan.trip_name ?? 'Featured places, stories, and trip audio'}
+        icon="headset-outline"
+        style={s.header}
+        right={(
+          <View style={s.headerRight}>
           {tab === 'narrations' && (
             <TouchableOpacity
               style={[s.autoBtn, autoPlay && s.autoBtnOn]}
@@ -417,8 +419,9 @@ export default function GuideScreen() {
               <Text style={[s.autoBtnText, autoPlay && { color: C.orange }]}>AUTO</Text>
             </TouchableOpacity>
           )}
-        </View>
-      </View>
+          </View>
+        )}
+      />
 
       <View style={s.tabs}>
         {(['explore', 'narrations', 'weather'] as const).map(t => (
@@ -440,14 +443,14 @@ export default function GuideScreen() {
       <ScrollView style={s.scroll} contentContainerStyle={s.scrollContent}>
         {tab === 'explore' && (
           <>
-            <View style={s.exploreHero}>
+            <TrailheadCard style={s.exploreHero}>
               <View style={s.exploreHeroText}>
                 <Text style={s.exploreEyebrow}>FEATURED GUIDE</Text>
                 <Text style={s.exploreTitle}>Stories worth the detour</Text>
                 <Text style={s.exploreSub}>Open cards instantly, read official NPS details, listen, or route there. Audio costs 5 credits for Summary or 10 for Full Story unless you have Explorer.</Text>
               </View>
               <Ionicons name="sparkles-outline" size={30} color={C.orange} />
-            </View>
+            </TrailheadCard>
 
             <View style={s.modeRow}>
               {(['featured', 'nearby', 'trip'] as const).map(mode => (
@@ -568,7 +571,7 @@ export default function GuideScreen() {
               </View>
             )}
             {!!activeTrip && !guideLoading && Object.keys(guide).length === 0 && (
-              <View style={s.guidePromptCard}>
+              <TrailheadCard style={s.guidePromptCard}>
                 <View style={s.guidePromptIcon}>
                   <Ionicons name="mic-outline" size={22} color={C.orange} />
                 </View>
@@ -577,11 +580,8 @@ export default function GuideScreen() {
                   Creates short spoken notes for each mapped stop. Costs 10 credits unless you have Explorer. First-time audio can take up to a minute; cached guides are free to replay.
                 </Text>
                 {!!guideError && <Text style={s.guideError}>{guideError}</Text>}
-                <TouchableOpacity style={s.generateBtn} onPress={generateGuide}>
-                  <Ionicons name="sparkles-outline" size={15} color="#fff" />
-                  <Text style={s.generateBtnText}>GENERATE GUIDE</Text>
-                </TouchableOpacity>
-              </View>
+                <TrailheadButton label="Generate Guide" icon="sparkles-outline" variant="primary" onPress={generateGuide} style={{ alignSelf: 'stretch' }} />
+              </TrailheadCard>
             )}
 
             {!!activeTrip && Object.keys(guide).length > 0 && waypoints.map((wp, i) => {
@@ -727,15 +727,17 @@ export default function GuideScreen() {
         <SafeAreaView style={s.modal}>
           {selectedExplore && (
             <>
-              <View style={[s.profileModalHeader, { paddingTop: Math.max(insets.top + 6, 14) }]}>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.profileModalKicker}>GUIDE CARD</Text>
-                  <Text style={s.profileModalName} numberOfLines={1}>{selectedExplore.summary.title}</Text>
-                </View>
-                <TouchableOpacity style={s.profileModalClose} onPress={() => setSelectedExplore(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                  <Ionicons name="close" size={22} color={C.text} />
-                </TouchableOpacity>
-              </View>
+              <TrailheadTopBar
+                title="GUIDE CARD"
+                subtitle={selectedExplore.summary.title}
+                icon="headset-outline"
+                style={[s.profileModalHeader, { paddingTop: Math.max(insets.top + 6, 14) }]}
+                right={(
+                  <TouchableOpacity style={s.profileModalClose} onPress={() => setSelectedExplore(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <Ionicons name="close" size={22} color={C.text} />
+                  </TouchableOpacity>
+                )}
+              />
               <ScrollView contentContainerStyle={s.profileScroll}>
                 <View style={s.profileHero}>
                   {selectedExplore.summary.image_url || selectedExplore.summary.thumbnail_url ? (
@@ -752,16 +754,21 @@ export default function GuideScreen() {
                   </View>
                 </View>
 
-                <View style={s.profileActions}>
-                  <TouchableOpacity style={s.profileActionBtn} onPress={() => playExplore(selectedExplore)}>
-                    <Ionicons name={playing === `explore:${selectedExplore.id}` ? 'stop' : 'play'} size={17} color="#fff" />
-                    <Text style={s.profileActionText}>{playing === `explore:${selectedExplore.id}` ? 'STOP' : 'PLAY AUDIO'}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[s.profileActionBtn, s.profileActionSecondary]} onPress={() => navigateExplore(selectedExplore)}>
-                    <Ionicons name="navigate-outline" size={17} color={C.orange} />
-                    <Text style={[s.profileActionText, { color: C.orange }]}>NAVIGATE</Text>
-                  </TouchableOpacity>
-                </View>
+                <TrailheadButtonDock style={s.profileActions}>
+                  <TrailheadButton
+                    label={playing === `explore:${selectedExplore.id}` ? 'Stop' : 'Play Audio'}
+                    icon={playing === `explore:${selectedExplore.id}` ? 'stop' : 'play'}
+                    variant="primary"
+                    onPress={() => playExplore(selectedExplore)}
+                    style={{ flex: 1 }}
+                  />
+                  <TrailheadButton
+                    label="Navigate"
+                    icon="navigate-outline"
+                    onPress={() => navigateExplore(selectedExplore)}
+                    style={{ flex: 1 }}
+                  />
+                </TrailheadButtonDock>
 
                 <View style={s.readModeRow}>
                   {(['summary', 'story'] as const).map(mode => (
@@ -777,7 +784,7 @@ export default function GuideScreen() {
                   ))}
                 </View>
 
-                <View style={s.profileSection}>
+                <TrailheadCard style={s.profileSection}>
                   {profileReadMode === 'story' ? (
                     <ScrollView
                       ref={storyScrollRef}
@@ -799,7 +806,7 @@ export default function GuideScreen() {
                       {selectedExplore.profile.summary || selectedExplore.profile.hook}
                     </Text>
                   )}
-                </View>
+                </TrailheadCard>
                 {[
                   ['WHY IT MATTERS', selectedExplore.profile.why_it_matters],
                   ['KEY DETAILS', selectedExplore.profile.what_to_know],
@@ -807,13 +814,13 @@ export default function GuideScreen() {
                   ['ACCESS NOTES', selectedExplore.profile.access_notes],
                   ['NEARBY CONTEXT', selectedExplore.profile.nearby_context],
                 ].map(([label, text]) => (
-                  <View key={label} style={s.profileSection}>
+                  <TrailheadCard key={label} style={s.profileSection}>
                     <Text style={s.profileLabel}>{label}</Text>
                     <Text style={s.profileText}>{text}</Text>
-                  </View>
+                  </TrailheadCard>
                 ))}
                 {!!selectedExplore.source_pack && (
-                  <View style={s.profileSection}>
+                  <TrailheadCard style={s.profileSection}>
                     <View style={s.sourcePackTop}>
                       <Text style={s.profileLabel}>
                         {selectedExplore.source_pack.quality === 'official' ? 'OFFICIAL SOURCE PACK' : 'SOURCE PACK'}
@@ -905,13 +912,13 @@ export default function GuideScreen() {
                         </Text>
                       </>
                     )}
-                  </View>
+                  </TrailheadCard>
                 )}
                 {!!selectedExplore.wiki_extract && (
-                  <View style={s.profileSection}>
+                  <TrailheadCard style={s.profileSection}>
                     <Text style={s.profileLabel}>SOURCE SUMMARY</Text>
                     <Text style={s.profileText}>{selectedExplore.wiki_extract}</Text>
-                  </View>
+                  </TrailheadCard>
                 )}
                 <TouchableOpacity
                   style={s.sourceBtn}

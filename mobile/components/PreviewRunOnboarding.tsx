@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Modal, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ColorPalette, mono, useTheme } from '@/lib/design';
 import { useStore } from '@/lib/store';
+import { TrailheadButton, TrailheadButtonDock, TrailheadSheet } from '@/components/TrailheadUI';
 
 type TourItem = {
   title: string;
@@ -58,10 +58,10 @@ export default function PreviewRunOnboarding() {
     <Modal visible={visible} transparent animationType="fade" statusBarTranslucent onRequestClose={() => close()}>
       <View style={s.root}>
         <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => close()} />
-        <BlurView
-          intensity={Platform.OS === 'android' ? 74 : 54}
-          tint={C.bg === '#050505' ? 'dark' : 'light'}
+        <TrailheadSheet
+          handle={false}
           style={[s.sheet, { paddingBottom: Math.max(insets.bottom, Platform.OS === 'android' ? 18 : 10) + 14 }]}
+          contentStyle={s.sheetContent}
         >
           <View style={s.header}>
             <View style={s.badge}>
@@ -89,17 +89,11 @@ export default function PreviewRunOnboarding() {
             ))}
           </View>
 
-          <View style={s.actions}>
-            <TouchableOpacity style={s.secondaryBtn} onPress={() => close('map')}>
-              <Ionicons name="map-outline" size={15} color={C.text2} />
-              <Text style={s.secondaryText}>OPEN MAP</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={s.primaryBtn} onPress={() => close('plan')}>
-              <Text style={s.primaryText}>ASK TRAILHEAD</Text>
-              <Ionicons name="arrow-forward" size={15} color="#fff" />
-            </TouchableOpacity>
-          </View>
-        </BlurView>
+          <TrailheadButtonDock style={s.actions}>
+            <TrailheadButton label="Open Map" icon="map-outline" variant="secondary" onPress={() => close('map')} style={{ flex: 1 }} />
+            <TrailheadButton label="Ask Trailhead" icon="arrow-forward" variant="primary" onPress={() => close('plan')} style={{ flex: 1.1 }} />
+          </TrailheadButtonDock>
+        </TrailheadSheet>
       </View>
     </Modal>
   );
@@ -110,13 +104,8 @@ const styles = (C: ColorPalette) => StyleSheet.create({
   sheet: {
     margin: 12,
     borderRadius: 18,
-    overflow: 'hidden',
-    paddingHorizontal: 18,
-    paddingTop: 16,
-    borderWidth: 1,
-    borderColor: C.bg === '#050505' ? 'rgba(255,255,255,0.14)' : 'rgba(15,23,42,0.12)',
-    backgroundColor: C.bg === '#050505' ? 'rgba(9,10,12,0.72)' : 'rgba(255,255,255,0.72)',
   },
+  sheetContent: { paddingHorizontal: 18, paddingTop: 16 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   badge: {
     width: 36,
@@ -162,28 +151,4 @@ const styles = (C: ColorPalette) => StyleSheet.create({
   itemTitle: { color: C.text, fontSize: 13, fontWeight: '900' },
   itemBody: { color: C.text3, fontSize: 11.5, lineHeight: 16, marginTop: 3 },
   actions: { flexDirection: 'row', gap: 10, marginTop: 16 },
-  primaryBtn: {
-    flex: 1.1,
-    minHeight: 46,
-    borderRadius: 12,
-    backgroundColor: C.orange,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 7,
-  },
-  primaryText: { color: '#fff', fontSize: 11, fontFamily: mono, fontWeight: '900' },
-  secondaryBtn: {
-    flex: 1,
-    minHeight: 46,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: C.border,
-    backgroundColor: C.s1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 7,
-  },
-  secondaryText: { color: C.text2, fontSize: 11, fontFamily: mono, fontWeight: '900' },
 });

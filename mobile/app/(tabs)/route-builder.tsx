@@ -4,12 +4,12 @@ import {
   ActivityIndicator, Animated, Easing, Keyboard, Modal, Alert, Image, Platform,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
 import PaywallModal from '@/components/PaywallModal';
 import TourTarget from '@/components/TourTarget';
+import { TrailheadButton, TrailheadCard, TrailheadSheet, TrailheadTopBar } from '@/components/TrailheadUI';
 import { api, ApiError, CampFullness, Campsite, CampsiteDetail, CampsiteInsight, CampsitePin, ExcursionCandidate, GasStation, GeocodePlace, OsmPoi, PaywallError, TripResult, Waypoint, WeatherForecast } from '@/lib/api';
 import { loadAllPlacePoints } from '@/lib/offlinePlacePacks';
 import { deleteOfflineTrail, listOfflineTrails, type OfflineTrail } from '@/lib/offlineTrails';
@@ -2668,12 +2668,17 @@ export default function RouteBuilderScreen() {
     const savedRoutes = tripHistory.slice(0, 10);
     return (
       <SafeAreaView style={s.wizardScreen}>
-        <View style={s.wizardScreenTop}>
-          <Text style={s.title}>Route Builder</Text>
-          <TouchableOpacity style={s.headerBtn} onPress={() => setShowPlaceFilters(true)} accessibilityLabel="Route Builder options">
-            <Ionicons name="options-outline" size={17} color={C.orange} />
-          </TouchableOpacity>
-        </View>
+        <TrailheadTopBar
+          title="ROUTE BUILDER"
+          subtitle="Saved routes, camps, trail routes"
+          icon="trail-sign-outline"
+          style={s.wizardScreenTop}
+          right={(
+            <TouchableOpacity style={s.headerBtn} onPress={() => setShowPlaceFilters(true)} accessibilityLabel="Route Builder options">
+              <Ionicons name="options-outline" size={17} color={C.orange} />
+            </TouchableOpacity>
+          )}
+        />
         <ScrollView
           style={s.body}
           contentContainerStyle={[s.routeHubContent, { paddingBottom: 120 + bottomInset }]}
@@ -2681,19 +2686,16 @@ export default function RouteBuilderScreen() {
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
         >
-          <BlurView tint={blurTint} intensity={34} style={s.routeHubHero}>
+          <TrailheadCard style={s.routeHubHero}>
             <View style={s.routeHubIcon}>
               <Ionicons name="map-outline" size={22} color={C.orange} />
             </View>
             <Text style={s.routeHubTitle}>Plan a route</Text>
             <Text style={s.routeHubText}>Build a new trip with your rig, daily pace, fuel range, camps, and route style. Finished routes open on the Map workspace.</Text>
-            <TouchableOpacity style={s.routeHubPrimary} onPress={startNewRoute}>
-              <Ionicons name="add" size={16} color="#fff" />
-              <Text style={s.routeHubPrimaryText}>BUILD NEW ROUTE</Text>
-            </TouchableOpacity>
-          </BlurView>
+            <TrailheadButton label="Build New Route" icon="add" variant="primary" onPress={startNewRoute} />
+          </TrailheadCard>
 
-          <View style={[s.routeHubRig, rigRouteSummary.ready && s.routeHubRigReady]}>
+          <TrailheadCard style={[s.routeHubRig, rigRouteSummary.ready && s.routeHubRigReady]}>
             <View style={s.routeHubRigIcon}>
               <Ionicons name={rigRouteSummary.ready ? 'car-sport-outline' : 'alert-circle-outline'} size={17} color={rigRouteSummary.ready ? C.green : C.yellow} />
             </View>
@@ -2704,7 +2706,7 @@ export default function RouteBuilderScreen() {
             <TouchableOpacity style={s.routeHubSmallBtn} onPress={() => router.push('/(tabs)/profile')}>
               <Text style={s.routeHubSmallText}>{rigRouteSummary.ready ? 'EDIT' : 'ADD'}</Text>
             </TouchableOpacity>
-          </View>
+          </TrailheadCard>
 
           <View style={s.routeHubSectionHead}>
             <Text style={s.routeHubSectionTitle}>Saved routes</Text>
@@ -2718,7 +2720,7 @@ export default function RouteBuilderScreen() {
 
           {savedRoutes.length ? (
             savedRoutes.map(route => (
-              <TouchableOpacity key={route.trip_id} style={s.savedRouteCard} onPress={() => openSavedRoute(route.trip_id)}>
+              <TrailheadCard key={route.trip_id} style={s.savedRouteCard} onPress={() => openSavedRoute(route.trip_id)}>
                 <View style={s.savedRouteTop}>
                   <View style={s.savedRouteIcon}>
                     <Ionicons name="trail-sign-outline" size={16} color={C.orange} />
@@ -2745,14 +2747,14 @@ export default function RouteBuilderScreen() {
                     <Text style={s.savedRouteOpenText}>OPEN ON MAP</Text>
                   </View>
                 </View>
-              </TouchableOpacity>
+              </TrailheadCard>
             ))
           ) : (
-            <View style={s.routeHubEmpty}>
+            <TrailheadCard style={s.routeHubEmpty}>
               <Ionicons name="map-outline" size={20} color={C.text3} />
               <Text style={s.routeHubEmptyTitle}>No saved routes yet</Text>
               <Text style={s.routeHubEmptyText}>Build your first route, then it will appear here for quick map editing or navigation.</Text>
-            </View>
+            </TrailheadCard>
           )}
 
           <View style={s.routeHubSectionHead}>
@@ -2762,7 +2764,7 @@ export default function RouteBuilderScreen() {
 
           {savedTrails.length ? (
             savedTrails.map(item => (
-              <TouchableOpacity key={item.id} style={s.savedTrailCard} onPress={() => openSavedTrailRoute(item)} activeOpacity={0.88}>
+              <TrailheadCard key={item.id} style={s.savedTrailCard} onPress={() => openSavedTrailRoute(item)}>
                 <View style={s.savedTrailPreview}>
                   <Ionicons name="git-branch-outline" size={19} color={C.green} />
                 </View>
@@ -2787,18 +2789,18 @@ export default function RouteBuilderScreen() {
                   </TouchableOpacity>
                   <Ionicons name="chevron-forward" size={17} color={C.text3} />
                 </View>
-              </TouchableOpacity>
+              </TrailheadCard>
             ))
           ) : (
-            <View style={s.routeHubEmptyCompact}>
+            <TrailheadCard style={s.routeHubEmptyCompact}>
               <Ionicons name="git-branch-outline" size={18} color={C.text3} />
               <Text style={s.routeHubEmptyText}>Saved pinned trail routes will appear here after you tap SAVE in the trail planner.</Text>
-            </View>
+            </TrailheadCard>
           )}
         </ScrollView>
         <Modal visible={showNewRouteConfirm} transparent animationType="fade" onRequestClose={() => setShowNewRouteConfirm(false)}>
           <View style={s.confirmOverlay}>
-            <View style={s.confirmCard}>
+            <TrailheadSheet handle={false} style={s.confirmCard} contentStyle={s.confirmCardContent}>
               <View style={s.confirmIcon}>
                 <Ionicons name="trail-sign-outline" size={22} color={C.orange} />
               </View>
@@ -2806,18 +2808,10 @@ export default function RouteBuilderScreen() {
               <Text style={s.confirmText}>
                 You already have an active route open. Save and close it before starting fresh, or discard it and clear the workspace.
               </Text>
-              <TouchableOpacity style={s.confirmPrimary} onPress={saveCloseAndStartNewRoute}>
-                <Ionicons name="save-outline" size={15} color="#050505" />
-                <Text style={s.confirmPrimaryText}>SAVE & CLOSE</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={s.confirmDanger} onPress={discardCloseAndStartNewRoute}>
-                <Ionicons name="trash-outline" size={15} color={C.orange} />
-                <Text style={s.confirmDangerText}>DISCARD & CLOSE</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={s.confirmCancel} onPress={() => setShowNewRouteConfirm(false)}>
-                <Text style={s.confirmCancelText}>CANCEL</Text>
-              </TouchableOpacity>
-            </View>
+              <TrailheadButton label="Save & Close" icon="save-outline" variant="primary" onPress={saveCloseAndStartNewRoute} style={{ alignSelf: 'stretch' }} />
+              <TrailheadButton label="Discard & Close" icon="trash-outline" variant="danger" onPress={discardCloseAndStartNewRoute} style={{ alignSelf: 'stretch' }} />
+              <TrailheadButton label="Cancel" variant="ghost" onPress={() => setShowNewRouteConfirm(false)} style={{ alignSelf: 'stretch' }} />
+            </TrailheadSheet>
           </View>
         </Modal>
         <PaywallModal visible={paywallVisible} code={paywallCode} message={paywallMessage} onClose={() => setPaywallVisible(false)} />
@@ -2835,7 +2829,7 @@ export default function RouteBuilderScreen() {
       : true;
     const nextStep = () => setWizardStep(step => Math.min(3, step + 1));
     return (
-      <BlurView tint={blurTint} intensity={fullScreen ? 38 : 28} style={[s.wizardCard, fullScreen && s.wizardCardFull]}>
+      <TrailheadSheet handle={false} style={[s.wizardCard, fullScreen && s.wizardCardFull]} contentStyle={s.routeSheetContent}>
         <View style={s.wizardHeader}>
           <View>
             <Text style={s.wizardEyebrow}>ROUTE BUILDER</Text>
@@ -3049,7 +3043,7 @@ export default function RouteBuilderScreen() {
             </TouchableOpacity>
           )}
         </View>
-      </BlurView>
+      </TrailheadSheet>
     );
   }
 
@@ -3114,7 +3108,7 @@ export default function RouteBuilderScreen() {
         </TouchableOpacity>
       </View>
 
-      <BlurView tint={blurTint} intensity={30} style={[s.routeEditorPanel, { marginBottom: keyboardVisible ? 12 : 116 + bottomInset }]}>
+      <TrailheadSheet handle={false} style={[s.routeEditorPanel, { marginBottom: keyboardVisible ? 12 : 116 + bottomInset }]} contentStyle={s.routeSheetContent}>
         <View style={s.workspaceHandleArea}>
           <View style={s.workspaceHandle} />
           <View style={s.workspaceHandleSummary}>
@@ -3324,7 +3318,7 @@ export default function RouteBuilderScreen() {
           );
         })}
       </ScrollView>
-      </BlurView>
+      </TrailheadSheet>
 
       {!keyboardVisible && <View style={[s.footer, { bottom: 96 + bottomInset }]} pointerEvents="box-none">
         <View>
@@ -3339,7 +3333,7 @@ export default function RouteBuilderScreen() {
 
       <Modal visible={!!selectedCamp} transparent animationType="slide" onRequestClose={() => setSelectedCamp(null)}>
         <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setSelectedCamp(null)}>
-          <View style={[s.quickCard, { paddingBottom: bottomSheetPad }]}>
+          <TrailheadSheet handle={false} style={s.quickCard} contentStyle={[s.quickCardSheetContent, { paddingBottom: bottomSheetPad }]}>
             <View style={s.quickCardImg}>
               {selectedCamp?.photo_url ? (
                 <Image source={{ uri: selectedCamp.photo_url }} style={s.quickCardPhoto} resizeMode="cover" />
@@ -3419,7 +3413,7 @@ export default function RouteBuilderScreen() {
               </TouchableOpacity>
               </View>
             </View>
-          </View>
+          </TrailheadSheet>
         </TouchableOpacity>
       </Modal>
 
@@ -3440,12 +3434,17 @@ export default function RouteBuilderScreen() {
               )}
 
               <View style={s.detailContent}>
-                <View style={s.detailHeader}>
-                  <Text style={s.detailName}>{campDetail.name}</Text>
-                  <TouchableOpacity style={s.detailClose} onPress={closeCampDetail}>
-                    <Ionicons name="close" size={22} color={C.text} />
-                  </TouchableOpacity>
-                </View>
+                <TrailheadTopBar
+                  title="CAMP PROFILE"
+                  subtitle={campDetail.name}
+                  icon="bonfire-outline"
+                  style={s.detailHeader}
+                  right={(
+                    <TouchableOpacity style={s.detailClose} onPress={closeCampDetail}>
+                      <Ionicons name="close" size={22} color={C.text} />
+                    </TouchableOpacity>
+                  )}
+                />
                 <View style={s.detailTags}>
                   {campDetail.land_type ? (
                     <View style={[s.detailLandBadge, { backgroundColor: landColor(campDetail.land_type).bg, borderColor: landColor(campDetail.land_type).border }]}>
@@ -3469,13 +3468,13 @@ export default function RouteBuilderScreen() {
                   {campDetail.campsites_count > 0 && <Text style={s.detailSiteCount}>{campDetail.campsites_count} sites</Text>}
                 </View>
                 {campDetail.description ? (
-                  <View style={s.detailSection}>
+                  <TrailheadCard style={s.detailSection}>
                     <Text style={s.detailSectionTitle}>ABOUT</Text>
                     <Text style={s.detailDesc}>{stripHtml(campDetail.description)}</Text>
-                  </View>
+                  </TrailheadCard>
                 ) : null}
                 {(campDetail.amenities ?? []).length > 0 && (
-                  <View style={s.detailSection}>
+                  <TrailheadCard style={s.detailSection}>
                     <Text style={s.detailSectionTitle}>AMENITIES</Text>
                     <View style={s.amenityGrid}>
                       {(campDetail.amenities ?? []).map(a => (
@@ -3485,10 +3484,10 @@ export default function RouteBuilderScreen() {
                         </View>
                       ))}
                     </View>
-                  </View>
+                  </TrailheadCard>
                 )}
                 {(campDetail.site_types ?? []).length > 0 && (
-                  <View style={s.detailSection}>
+                  <TrailheadCard style={s.detailSection}>
                     <Text style={s.detailSectionTitle}>SITE TYPES</Text>
                     <View style={s.amenityGrid}>
                       {(campDetail.site_types ?? []).map(st => (
@@ -3498,21 +3497,21 @@ export default function RouteBuilderScreen() {
                         </View>
                       ))}
                     </View>
-                  </View>
+                  </TrailheadCard>
                 )}
                 {(campDetail.activities ?? []).length > 0 && (
-                  <View style={s.detailSection}>
+                  <TrailheadCard style={s.detailSection}>
                     <Text style={s.detailSectionTitle}>ACTIVITIES</Text>
                     <Text style={s.detailActivities}>{(campDetail.activities ?? []).join(' · ')}</Text>
-                  </View>
+                  </TrailheadCard>
                 )}
-                <View style={s.detailSection}>
+                <TrailheadCard style={s.detailSection}>
                   <Text style={s.detailSectionTitle}>COORDINATES</Text>
                   <Text style={s.coordText}>{campDetail.lat.toFixed(6)}, {campDetail.lng.toFixed(6)}</Text>
                   {campInsight?.coordinates_dms ? <Text style={s.coordDms}>{campInsight.coordinates_dms}</Text> : null}
-                </View>
+                </TrailheadCard>
                 {campInsight && (
-                  <View style={s.detailSection}>
+                  <TrailheadCard style={s.detailSection}>
                     <View style={s.aiHeader}>
                       <Text style={s.detailSectionTitle}>TRAILHEAD BRIEF</Text>
                       {campInsight.star_rating ? (
@@ -3538,13 +3537,16 @@ export default function RouteBuilderScreen() {
                         {campInsight.nearby_highlights.map((h, i) => <Text key={i} style={s.nearbyItem}>• {h}</Text>)}
                       </View>
                     ) : null}
-                  </View>
+                  </TrailheadCard>
                 )}
                 <View style={s.detailActions}>
-                  <TouchableOpacity style={s.detailUseBtn} onPress={() => { if (selectedCamp) addCamp(selectedCamp); setShowCampDetail(false); setSelectedCamp(null); }}>
-                    <Ionicons name="add-circle-outline" size={15} color="#fff" />
-                    <Text style={s.detailUseText}>{replaceStopId ? 'REPLACE CAMP' : 'USE AS CAMP'}</Text>
-                  </TouchableOpacity>
+                  <TrailheadButton
+                    label={replaceStopId ? 'Replace Camp' : 'Use as Camp'}
+                    icon="add-circle-outline"
+                    variant="primary"
+                    onPress={() => { if (selectedCamp) addCamp(selectedCamp); setShowCampDetail(false); setSelectedCamp(null); }}
+                    style={{ flex: 1 }}
+                  />
                 </View>
               </View>
             </ScrollView>
@@ -3554,7 +3556,7 @@ export default function RouteBuilderScreen() {
 
       <Modal visible={showPlaceFilters} transparent animationType="slide" onRequestClose={() => setShowPlaceFilters(false)}>
         <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setShowPlaceFilters(false)}>
-          <TouchableOpacity activeOpacity={1} style={[s.filterSheet, { paddingBottom: bottomSheetPad }]}>
+          <TrailheadSheet handle={false} style={s.filterSheet} contentStyle={[s.filterSheetContent, { paddingBottom: bottomSheetPad }]}>
             <View style={s.filterSheetTop}>
               <View>
                 <Text style={s.kicker}>ROUTE BUILDER</Text>
@@ -3599,7 +3601,7 @@ export default function RouteBuilderScreen() {
                 );
               })}
             </ScrollView>
-          </TouchableOpacity>
+          </TrailheadSheet>
         </TouchableOpacity>
       </Modal>
 
@@ -3651,13 +3653,10 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   workspaceSheetPeek: { height: 92 },
   routeEditorPanel: {
     flex: 1,
-    backgroundColor: C.s1,
     borderRadius: 24,
-    borderWidth: 1,
-    borderColor: C.border,
-    overflow: 'hidden',
     marginBottom: 116,
   },
+  routeSheetContent: { padding: 14, gap: 13 },
   workspaceHandleArea: { paddingTop: 8, paddingHorizontal: 18, paddingBottom: 6, gap: 6 },
   workspaceHandle: { width: 58, height: 5, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.24)', alignSelf: 'center' },
   workspaceHandleSummary: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
@@ -3830,16 +3829,8 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   confirmCard: {
     width: '100%',
     borderRadius: 24,
-    borderWidth: 1,
-    borderColor: C.border,
-    backgroundColor: C.s1,
-    padding: 18,
-    gap: 11,
-    shadowColor: '#000',
-    shadowOpacity: 0.5,
-    shadowRadius: 28,
-    shadowOffset: { width: 0, height: 18 },
   },
+  confirmCardContent: { padding: 18, gap: 11 },
   confirmIcon: {
     width: 44,
     height: 44,
@@ -3906,22 +3897,11 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   loopChoiceTitle: { color: C.text, fontSize: 12, fontWeight: '900' },
   loopChoiceText: { color: C.text3, fontSize: 10, lineHeight: 14, marginTop: 3 },
   wizardCard: {
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: C.border,
     borderRadius: 28,
-    backgroundColor: C.glassStrong,
-    padding: 14,
-    gap: 13,
   },
   wizardCardFull: {
     flex: 1,
-    borderWidth: 1,
     borderRadius: 28,
-    paddingHorizontal: 14,
-    paddingTop: 14,
-    paddingBottom: 14,
-    backgroundColor: C.glassStrong,
     justifyContent: 'flex-start',
   },
   wizardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
@@ -4277,13 +4257,10 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.55)' },
   filterSheet: {
     maxHeight: '78%',
-    backgroundColor: C.s1,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    padding: 16,
-    paddingBottom: 28,
-    gap: 12,
   },
+  filterSheetContent: { padding: 16, gap: 12 },
   filterSheetTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 },
   filterSheetTitle: { color: C.text, fontSize: 20, fontWeight: '900' },
   filterHintText: { color: C.text3, fontSize: 12, lineHeight: 18 },
@@ -4305,16 +4282,11 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   successPrimaryBtn: { alignSelf: 'stretch', minHeight: 46, borderRadius: 12, backgroundColor: C.green, alignItems: 'center', justifyContent: 'center' },
   successPrimaryText: { color: '#fff', fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
   quickCard: {
-    backgroundColor: C.s1,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     maxHeight: '86%',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 16,
-    elevation: 12,
   },
+  quickCardSheetContent: { padding: 0 },
   quickCardImg: { width: '100%' },
   quickCardPhoto: { width: '100%', height: 176, borderTopLeftRadius: 20, borderTopRightRadius: 20 },
   quickCardPhotoPlaceholder: {

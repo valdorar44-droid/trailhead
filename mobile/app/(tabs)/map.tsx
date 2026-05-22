@@ -6,6 +6,13 @@ import RouteSearchModal from '@/components/RouteSearchModal';
 import OfflineModal from '@/components/NativeMap/OfflineModal';
 import TourTarget from '@/components/TourTarget';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
+import {
+  TrailheadButton,
+  TrailheadButtonDock,
+  TrailheadMetricRow,
+  TrailheadPrompt,
+  TrailheadSheet,
+} from '@/components/TrailheadUI';
 
 // ── Native MapLibre SDK active ────────────────────────────────────────────────
 const USE_NATIVE_MAP = true;
@@ -15,7 +22,6 @@ import * as Speech from 'expo-speech';
 import * as Haptics from 'expo-haptics';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as FileSystem from 'expo-file-system';
-import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useStore } from '@/lib/store';
@@ -144,6 +150,9 @@ type TrailRoutePlan = {
   coords: [number, number][];
   distanceM: number;
   confidence: 'high' | 'medium' | 'low';
+  elevationGainFt?: number;
+  elevationLossFt?: number;
+  elevationConfidence?: 'high' | 'estimated' | 'unavailable';
   warnings: string[];
   engine?: string;
 };
@@ -399,6 +408,42 @@ function trailEndpointDistanceM(coords: [number, number][]) {
 function fmtTrailRouteDistance(m: number) {
   if (!Number.isFinite(m) || m <= 0) return '0.0 mi';
   return `${(m / 1609.344).toFixed(m >= 16093 ? 0 : 1)} mi`;
+}
+
+function estimateTrailElevation(coords: [number, number][]): Pick<TrailRoutePlan, 'elevationGainFt' | 'elevationLossFt' | 'elevationConfidence'> {
+  const elevationsM = coords
+    .map(coord => Number((coord as any)[2]))
+    .filter(value => Number.isFinite(value));
+  if (elevationsM.length < 2 || elevationsM.length < Math.max(2, Math.floor(coords.length * 0.65))) {
+    return { elevationConfidence: 'unavailable' };
+  }
+  let gainM = 0;
+  let lossM = 0;
+  for (let i = 1; i < elevationsM.length; i += 1) {
+    const delta = elevationsM[i] - elevationsM[i - 1];
+    if (Math.abs(delta) < 1.5) continue;
+    if (delta > 0) gainM += delta;
+    else lossM += Math.abs(delta);
+  }
+  return {
+    elevationGainFt: Math.round(gainM * 3.28084),
+    elevationLossFt: Math.round(lossM * 3.28084),
+    elevationConfidence: 'estimated',
+  };
+}
+
+function withTrailElevation(plan: TrailRoutePlan): TrailRoutePlan {
+  return { ...plan, ...estimateTrailElevation(plan.coords) };
+}
+
+function fmtTrailElevation(plan?: Pick<TrailRoutePlan, 'elevationGainFt' | 'elevationLossFt' | 'elevationConfidence'> | null) {
+  if (!plan || plan.elevationConfidence === 'unavailable' || plan.elevationGainFt == null || plan.elevationLossFt == null) return 'Elev unavailable';
+  return `+${Math.round(plan.elevationGainFt).toLocaleString()} / -${Math.round(plan.elevationLossFt).toLocaleString()} ft`;
+}
+
+function trailElevationLabel(plan?: Pick<TrailRoutePlan, 'elevationConfidence'> | null) {
+  if (!plan?.elevationConfidence || plan.elevationConfidence === 'unavailable') return 'No DEM sample';
+  return plan.elevationConfidence === 'high' ? 'Elevation' : 'Est. elevation';
 }
 
 function dedupeTrailCoords(coords: [number, number][]) {
@@ -5701,6 +5746,8 @@ function MapScreen() {
     : routeSourceDebug
       ? routeSourceDebug.toUpperCase().slice(0, 28)
       : 'ROUTED';
+  const selectedTrailRoutePlan = trailRoutePlans.find(p => p.id === selectedTrailRoutePlanId) ?? trailRoutePlans[0] ?? null;
+  const previewTrailDistanceM = selectedTrailRoutePlan?.distanceM ?? (trailTraceRoute.length > 1 ? trailCoordsDistanceM(trailTraceRoute) : 0);
   const routeCumulative = useMemo(() => routeCumulativeDistances(lastRouteCoords), [lastRouteCoords]);
   const activeRouteProgress = routeProgress;
   // Current step the user is navigating toward
@@ -6591,7 +6638,7 @@ function MapScreen() {
       complex ? 'This looks like a complex trail system, so Trailhead will only follow the preview line you select.' : 'Preview before starting; Trailhead will not add hidden connectors.',
       graphReady ? '' : 'Download this region for stronger offline trail routing.',
     ].filter(Boolean);
-    const plans: TrailRoutePlan[] = [{
+    const plans: TrailRoutePlan[] = [withTrailElevation({
       id: 'segment',
       title: 'Visible segment',
       subtitle: 'Follow the selected line exactly',
@@ -6601,10 +6648,10 @@ function MapScreen() {
       confidence: graphReady ? 'high' : 'medium',
       warnings: graphReady ? ['Follows the selected trail line.'] : complexWarnings,
       engine: graphReady ? 'Offline ready' : 'Preview line',
-    }];
+    })];
 
     const reversed = clean.slice(0, -1).reverse();
-    plans.push({
+    plans.push(withTrailElevation({
       id: 'out_back',
       title: 'Out and back',
       subtitle: 'Return on the same selected line',
@@ -6614,10 +6661,10 @@ function MapScreen() {
       confidence: 'high',
       warnings: ['Good option for unclear trail systems because it returns on the same confirmed line.'],
       engine: 'Preview line',
-    });
+    }));
 
     if (trailEndpointDistanceM(clean) <= 350 && clean.length >= 8) {
-      plans.push({
+      plans.push(withTrailElevation({
         id: 'loop',
         title: 'Loop direction',
         subtitle: 'Start and finish on the selected loop',
@@ -6627,10 +6674,10 @@ function MapScreen() {
         confidence: 'high',
         warnings: ['Loop detected from the selected line. Confirm direction before starting.'],
         engine: 'Preview line',
-      });
+      }));
     }
 
-    plans.push({
+    plans.push(withTrailElevation({
       id: 'far_end',
       title: 'To far end',
       subtitle: 'One-way to the end of this segment',
@@ -6640,7 +6687,7 @@ function MapScreen() {
       confidence: complex ? 'low' : 'medium',
       warnings: complexWarnings,
       engine: graphReady ? 'Offline ready' : 'Preview line',
-    });
+    }));
 
     return plans;
   }
@@ -6774,10 +6821,10 @@ function MapScreen() {
         offlineSaved,
       ),
     };
-      const plan: TrailRoutePlan = {
+      const plan: TrailRoutePlan = withTrailElevation({
         id: 'capture',
         title: graphSnapped ? 'Captured trail route' : 'Rough trace preview',
-        subtitle: `Trace route · elevation coming soon`,
+        subtitle: `Trace route · ${fmtTrailElevation(estimateTrailElevation(captured))}`,
         icon: graphSnapped ? 'git-branch-outline' : 'analytics-outline',
         coords: captured,
         distanceM,
@@ -6786,7 +6833,7 @@ function MapScreen() {
           ? 'Built from the trail line inside your traced area.'
           : 'This is only a rough finger trace. Use pinned routing for a cleaner route.'],
         engine: graphSnapped ? 'Clean route' : 'Manual trace',
-      };
+      });
     setSelectedTrail(feature);
     setTrailTraceDraft(rough);
     trailTraceDraftRef.current = rough;
@@ -7058,17 +7105,17 @@ function MapScreen() {
           offlineSaved,
         ),
       };
-      const plan: TrailRoutePlan = {
+      const plan: TrailRoutePlan = withTrailElevation({
         id: 'capture',
         title: 'Pinned trail route',
-        subtitle: `${fmtTrailRouteDistance(distanceM)} · ${pins.length} pins · elevation coming soon`,
+        subtitle: `${fmtTrailRouteDistance(distanceM)} · ${pins.length} points · ${fmtTrailElevation(estimateTrailElevation(clean))}`,
         icon: 'git-branch-outline',
         coords: clean,
         distanceM,
         confidence: engineConfidence,
         warnings: [engineWarning],
         engine: engineLabel,
-      };
+      });
       if (!previewOnly) setSelectedTrail(feature);
       if (previewOnly) {
         setTrailTraceDraft([]);
@@ -7166,6 +7213,9 @@ function MapScreen() {
             route_name: routeName,
             captured: true,
             distance_m: Math.round(plan.distanceM),
+            elevation_gain_ft: plan.elevationGainFt,
+            elevation_loss_ft: plan.elevationLossFt,
+            elevation_confidence: plan.elevationConfidence ?? 'unavailable',
           },
         }],
       },
@@ -7178,7 +7228,7 @@ function MapScreen() {
       lat: namedTrail.lat,
       lng: namedTrail.lng,
       icon: 'flag',
-      note: `${fmtTrailRouteDistance(plan.distanceM)} captured trail route`,
+      note: `${fmtTrailRouteDistance(plan.distanceM)} · ${fmtTrailElevation(plan)} captured trail route`,
       createdAt: Date.now(),
     });
     setQuickToast('Saved to Route Builder > Trails');
@@ -7229,7 +7279,7 @@ function MapScreen() {
     (placeFilterChanged ? 1 : 0);
 
   const nativeNavigationPanel = navMode ? (
-    <View style={s.navHud} pointerEvents="auto">
+    <TrailheadSheet handle={false} style={s.navHud} contentStyle={s.navHudInner}>
       <View style={s.turnStrip}>
         <View style={s.turnIconWrap}>
           {isRerouting ? (
@@ -7255,6 +7305,21 @@ function MapScreen() {
           </Text>
           <Text style={s.turnRoad} numberOfLines={1}>
             {displayStepRoad(nextStep) || navTarget?.name || 'Waiting for route details'}
+          </Text>
+        </View>
+      </View>
+
+      <View style={s.navSourceRow}>
+        <View style={[s.navSourcePill, isRerouting && { borderColor: C.orange + '55', backgroundColor: C.orange + '14' }]}>
+          <Ionicons name={isRerouting ? 'git-compare-outline' : routeFromCache ? 'cloud-offline-outline' : 'git-branch-outline'} size={12} color={isRerouting ? C.orange : C.silverBright} />
+          <Text style={[s.navSourceText, { color: isRerouting ? C.orange : OVR.text2 }]} numberOfLines={1}>
+            {isRerouting ? 'REROUTING' : routeHudLabel}
+          </Text>
+        </View>
+        <View style={[s.navSourcePill, proceedToRoute || offRouteWarn ? { borderColor: C.orange + '55', backgroundColor: C.orange + '14' } : null]}>
+          <Ionicons name={proceedToRoute || offRouteWarn ? 'warning-outline' : 'checkmark-circle-outline'} size={12} color={proceedToRoute || offRouteWarn ? C.orange : C.green} />
+          <Text style={[s.navSourceText, { color: proceedToRoute || offRouteWarn ? C.orange : OVR.text2 }]} numberOfLines={1}>
+            {proceedToRoute ? 'PROCEED TO LINE' : offRouteWarn ? 'OFF ROUTE WARNING' : 'ON ROUTE'}
           </Text>
         </View>
       </View>
@@ -7325,7 +7390,7 @@ function MapScreen() {
         )}
       </View>
 
-    </View>
+    </TrailheadSheet>
   ) : null;
 
   const nativeTurnListPanel = navMode && showSteps && routeSteps.length > 0 ? (
@@ -7772,43 +7837,57 @@ function MapScreen() {
       )}
 
       {trailPinCaptureMode && !navMode && (
-        <>
-          <View style={s.traceHud} pointerEvents="auto">
-            <View style={s.traceHudIcon}>
-              <Ionicons name="git-branch-outline" size={18} color="#22c55e" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={s.traceHudTitle}>TRAIL BUILDER</Text>
-              <Text style={s.traceHudText}>
-                {trailPinCaptureSeedName
-                  ? `${trailPinCaptureSeedName}: tap bends, forks, or the finish. Trailhead snaps the preview as you go.`
-                  : 'Tap near the trail to add points. Trailhead snaps and redraws the preview as you go.'}
-              </Text>
-              <Text style={s.traceHudMeta}>
-                {trailCapturePins.length} points{trailTraceRoute.length > 1 ? ` · ${fmtTrailRouteDistance(trailCoordsDistanceM(trailTraceRoute))} snapped` : trailCapturePins.length ? ' · start set' : ' · tap start'}
-              </Text>
-              <View style={s.pinCaptureActions}>
-                <TouchableOpacity style={s.pinCaptureAction} onPress={undoTrailCapturePin} disabled={trailCaptureBusy || trailCapturePins.length === 0}>
-                  <Ionicons name="arrow-undo-outline" size={14} color={trailCapturePins.length === 0 ? OVR.text3 : OVR.text2} />
-                  <Text style={[s.pinCaptureActionText, trailCapturePins.length === 0 && { color: OVR.text3 }]}>UNDO</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[s.pinCapturePreview, trailCapturePins.length < 2 && s.pinCapturePreviewDisabled]}
-                  onPress={() => capturePinnedTrailRoute()}
-                  disabled={trailCaptureBusy || trailCapturePins.length < 2}
-                >
-                  {trailCaptureBusy
-                    ? <ActivityIndicator size="small" color="#fff" />
-                    : <Ionicons name="checkmark" size={15} color={trailCapturePins.length < 2 ? OVR.text3 : '#fff'} />}
-                  <Text style={[s.pinCaptureActionText, trailCapturePins.length >= 2 && { color: '#fff' }]}>BUILD</Text>
-                </TouchableOpacity>
+        <View style={s.trailRouteBuilderWrap} pointerEvents="auto">
+          <TrailheadSheet contentStyle={s.trailCaptureSheetContent}>
+            <View style={s.trailRouteBuilderHeader}>
+              <View style={[s.trailIconBadge, { backgroundColor: '#22c55e22', borderColor: '#22c55e66' }]}>
+                <Ionicons name="git-branch-outline" size={18} color="#22c55e" />
               </View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={s.trailRouteEyebrow}>TRAIL BUILDER</Text>
+                <Text style={s.trailRouteTitle} numberOfLines={1}>{trailPinCaptureSeedName || 'Tap-to-snap route'}</Text>
+              </View>
+              <TouchableOpacity style={s.discoveryPanelClose} onPress={clearTrailPinCapture} disabled={trailCaptureBusy}>
+                <Ionicons name="close" size={15} color={OVR.text2} />
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity style={s.traceHudCancel} onPress={clearTrailPinCapture} disabled={trailCaptureBusy}>
-              <Ionicons name="close" size={16} color={OVR.text2} />
-            </TouchableOpacity>
-          </View>
-        </>
+            <TrailheadMetricRow
+              metrics={[
+                { label: 'Distance', value: previewTrailDistanceM > 0 ? fmtTrailRouteDistance(previewTrailDistanceM) : '--', icon: 'map-outline', tone: C.silverBright },
+                { label: 'Time', value: previewTrailDistanceM > 0 ? fmtTrailRouteTime(previewTrailDistanceM) : '--', icon: 'time-outline', tone: C.silverBright },
+                { label: 'Points', value: String(trailCapturePins.length), icon: 'radio-button-on-outline', tone: '#22c55e' },
+                { label: trailElevationLabel(selectedTrailRoutePlan), value: fmtTrailElevation(selectedTrailRoutePlan), icon: 'trending-up-outline', tone: C.orange },
+              ]}
+            />
+            <TrailheadPrompt
+              title={trailTraceRoute.length > 1 ? 'Preview snapped' : trailCapturePins.length ? 'Add the next trail point' : 'Tap the map to set start'}
+              body={trailPinCaptureSeedName
+                ? 'Tap bends, forks, or the finish. Trailhead snaps the route preview as points are added.'
+                : 'Map taps add snapped anchors; use more points around tight curves or uncertain forks.'}
+              icon="information-circle-outline"
+              tone="#22c55e"
+            />
+            <TrailheadButtonDock style={s.trailRouteBuilderActions}>
+              <TrailheadButton
+                label="Undo"
+                icon="arrow-undo-outline"
+                variant="secondary"
+                onPress={undoTrailCapturePin}
+                disabled={trailCaptureBusy || trailCapturePins.length === 0}
+                style={{ flex: 0.9 }}
+              />
+              <TrailheadButton
+                label="Build"
+                icon="checkmark"
+                variant="primary"
+                loading={trailCaptureBusy}
+                onPress={() => capturePinnedTrailRoute()}
+                disabled={trailCapturePins.length < 2}
+                style={{ flex: 1.1 }}
+              />
+            </TrailheadButtonDock>
+          </TrailheadSheet>
+        </View>
       )}
 
       {/* Land check card — appears on long-press, auto-dismisses after 8s */}
@@ -8284,7 +8363,7 @@ function MapScreen() {
               onPress={() => seedTrailPinCaptureFromTrail(selectedTrail)}
             >
               <Ionicons name="git-branch-outline" size={14} color="#fff" />
-              <Text style={s.wpSheetNavText}>BUILD WITH PINS</Text>
+              <Text style={s.wpSheetNavText}>BUILD ROUTE</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[s.wpSheetDayBtn, s.trailSheetAction, { borderColor: C.orange + '44' }]}
@@ -8321,7 +8400,7 @@ function MapScreen() {
 
       {selectedTrail && !navMode && trailRouteBuilderOpen && (
         <View style={s.trailRouteBuilderWrap}>
-          <BlurView intensity={34} tint={themeMode === 'light' ? 'light' : 'dark'} style={s.trailRouteBuilderBlur}>
+          <TrailheadSheet contentStyle={s.trailRouteBuilderBlur}>
             <View style={s.trailRouteBuilderHeader}>
               <View style={[s.trailIconBadge, { backgroundColor: trailColor(selectedTrail.type) + '22', borderColor: trailColor(selectedTrail.type) + '66' }]}>
                 <Ionicons name="git-branch-outline" size={18} color={trailColor(selectedTrail.type)} />
@@ -8351,6 +8430,15 @@ function MapScreen() {
                 <Text style={s.trailRouteStatusText}>No auto-start</Text>
               </View>
             </View>
+
+            <TrailheadMetricRow
+              style={{ marginBottom: 10 }}
+              metrics={[
+                { label: 'Distance', value: selectedTrailRoutePlan ? fmtTrailRouteDistance(selectedTrailRoutePlan.distanceM) : '--', icon: 'map-outline', tone: C.silverBright },
+                { label: 'Time', value: selectedTrailRoutePlan ? fmtTrailRouteTime(selectedTrailRoutePlan.distanceM) : '--', icon: 'time-outline', tone: C.silverBright },
+                { label: trailElevationLabel(selectedTrailRoutePlan), value: fmtTrailElevation(selectedTrailRoutePlan), icon: 'trending-up-outline', tone: C.orange },
+              ]}
+            />
 
             {trailRouteBuilding ? (
               <View style={s.trailRouteLoading}>
@@ -8389,6 +8477,7 @@ function MapScreen() {
                           <Text style={s.trailRoutePlanSub} numberOfLines={1}>{plan.subtitle}</Text>
                           <View style={s.trailRoutePlanMetaRow}>
                             <Text style={[s.trailRoutePlanConfidence, { color: tone }]}>{plan.confidence.toUpperCase()} CONFIDENCE</Text>
+                            <Text style={s.trailRoutePlanEngine} numberOfLines={1}>{fmtTrailElevation(plan)}</Text>
                             {!!plan.engine && <Text style={s.trailRoutePlanEngine} numberOfLines={1}>{plan.engine}</Text>}
                           </View>
                         </View>
@@ -8464,7 +8553,7 @@ function MapScreen() {
                 </View>
               </>
             )}
-          </BlurView>
+          </TrailheadSheet>
         </View>
       )}
 
@@ -8671,9 +8760,12 @@ function MapScreen() {
       <Modal visible={showFilterSheet && !navMode} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setShowFilterSheet(false)}>
         <View style={s.filterModalOverlay}>
           <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => setShowFilterSheet(false)} />
-          <View style={Platform.OS === 'android'
+          <TrailheadSheet
+            handle={false}
+            style={Platform.OS === 'android'
             ? [s.filterSheet, { height: filterSheetHeight, maxHeight: undefined, paddingBottom: 0 }]
             : s.filterSheet}
+            contentStyle={{ padding: 0 }}
           >
             <View style={s.filterSheetHeader}>
               <View>
@@ -8797,7 +8889,7 @@ function MapScreen() {
               </View>
               {Platform.OS === 'android' ? <View style={{ height: filterBottomSpacer }} /> : null}
             </ScrollView>
-          </View>
+          </TrailheadSheet>
         </View>
       </Modal>
 
@@ -9522,7 +9614,7 @@ function MapScreen() {
       {/* ── Route Options Sheet ── */}
       <Modal visible={showRouteOpts} animationType="slide" transparent onRequestClose={() => setShowRouteOpts(false)}>
         <TouchableOpacity style={s.modalBackdrop} activeOpacity={1} onPress={() => setShowRouteOpts(false)}>
-          <View style={s.routeOptsSheet}>
+          <TrailheadSheet handle={false} style={s.routeOptsSheet} contentStyle={{ padding: 0 }}>
             <Text style={s.routeOptsTitle}>ROUTE OPTIONS</Text>
             {([
               { key: 'avoidTolls',   label: 'Avoid Tolls',          sub: 'Stay off toll roads' },
@@ -9547,7 +9639,7 @@ function MapScreen() {
             }}>
               <Text style={s.routeOptsApplyText}>APPLY & ROUTE</Text>
             </TouchableOpacity>
-          </View>
+          </TrailheadSheet>
         </TouchableOpacity>
       </Modal>
 
@@ -10652,7 +10744,7 @@ function MapScreen() {
       {/* ── Day selector modal ── */}
       <Modal visible={showDayModal} transparent animationType="slide" onRequestClose={() => setShowDayModal(false)}>
         <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setShowDayModal(false)}>
-          <View style={[s.daySheet, modalSheetPad]}>
+          <TrailheadSheet handle={false} style={[s.daySheet, modalSheetPad]} contentStyle={{ padding: 0 }}>
             <View style={s.daySheetHandle} />
             <Text style={s.daySheetTitle}>START NAVIGATION</Text>
             <Text style={s.daySheetSub}>Choose which day's route to navigate</Text>
@@ -10695,14 +10787,14 @@ function MapScreen() {
                 );
               })}
             </ScrollView>
-          </View>
+          </TrailheadSheet>
         </TouchableOpacity>
       </Modal>
 
       {/* ── Trip camp picker ── */}
       <Modal visible={campPickerVisible} transparent animationType="slide" onRequestClose={() => setCampPickerVisible(false)}>
         <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setCampPickerVisible(false)}>
-          <View style={[s.daySheet, modalSheetPad]}>
+          <TrailheadSheet handle={false} style={[s.daySheet, modalSheetPad]} contentStyle={{ padding: 0 }}>
             <View style={s.daySheetHandle} />
             <View style={s.campPickerHeader}>
               <View>
@@ -10755,7 +10847,7 @@ function MapScreen() {
                 })}
               </ScrollView>
             )}
-          </View>
+          </TrailheadSheet>
         </TouchableOpacity>
       </Modal>
 
@@ -10812,7 +10904,7 @@ function MapScreen() {
       {tappedTrail && (
         <Modal visible transparent animationType="slide" onRequestClose={() => setTappedTrail(null)}>
           <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setTappedTrail(null)}>
-            <View style={[s.wpSheet, modalSheetPad]}>
+            <TrailheadSheet handle={false} style={[s.wpSheet, modalSheetPad]} contentStyle={{ padding: 0 }}>
               <View style={s.daySheetHandle} />
               <View style={s.wpSheetHeader}>
                 <View style={[s.wpSheetTypeDot, { backgroundColor: '#22c55e' }]} />
@@ -10871,7 +10963,7 @@ function MapScreen() {
                   <Text style={s.wpSheetDayText}>DISMISS</Text>
                 </TouchableOpacity>
               </View>
-            </View>
+            </TrailheadSheet>
           </TouchableOpacity>
         </Modal>
       )}
@@ -10880,7 +10972,7 @@ function MapScreen() {
       {tappedTileSpot && (
         <Modal visible transparent animationType="slide" onRequestClose={() => setTappedTileSpot(null)}>
           <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setTappedTileSpot(null)}>
-            <View style={[s.wpSheet, modalSheetPad]}>
+            <TrailheadSheet handle={false} style={[s.wpSheet, modalSheetPad]} contentStyle={{ padding: 0 }}>
               <View style={s.daySheetHandle} />
               <View style={s.wpSheetHeader}>
                 <View style={[s.wpSheetTypeDot, {
@@ -10927,7 +11019,7 @@ function MapScreen() {
                   <Text style={s.wpSheetDayText}>DISMISS</Text>
                 </TouchableOpacity>
               </View>
-            </View>
+            </TrailheadSheet>
           </TouchableOpacity>
         </Modal>
       )}
@@ -10936,7 +11028,7 @@ function MapScreen() {
       {tappedGas && (
         <Modal visible transparent animationType="slide" onRequestClose={() => setTappedGas(null)}>
           <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setTappedGas(null)}>
-            <View style={[s.wpSheet, modalSheetPad]}>
+            <TrailheadSheet handle={false} style={[s.wpSheet, modalSheetPad]} contentStyle={{ padding: 0 }}>
               <View style={s.daySheetHandle} />
               <View style={s.wpSheetHeader}>
                 <View style={[s.wpSheetTypeDot, { backgroundColor: '#eab308' }]} />
@@ -10955,7 +11047,7 @@ function MapScreen() {
                   <Text style={s.wpSheetDayText}>DISMISS</Text>
                 </TouchableOpacity>
               </View>
-            </View>
+            </TrailheadSheet>
           </TouchableOpacity>
         </Modal>
       )}
@@ -10964,7 +11056,7 @@ function MapScreen() {
       {tappedPoi && (
         <Modal visible transparent animationType="slide" onRequestClose={() => setTappedPoi(null)}>
           <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setTappedPoi(null)}>
-            <View style={[s.wpSheet, modalSheetPad]}>
+            <TrailheadSheet handle={false} style={[s.wpSheet, modalSheetPad]} contentStyle={{ padding: 0 }}>
               <View style={s.daySheetHandle} />
               <View style={s.wpSheetHeader}>
                 <View style={[s.wpSheetTypeDot, {
@@ -11037,7 +11129,7 @@ function MapScreen() {
                   <Text style={s.wpSheetDayText}>DISMISS</Text>
                 </TouchableOpacity>
               </View>
-            </View>
+            </TrailheadSheet>
           </TouchableOpacity>
         </Modal>
       )}
@@ -11088,7 +11180,7 @@ function MapScreen() {
           <Modal visible transparent animationType="slide" onRequestClose={() => { setSelectedCommunityPin(null); setCommunityUpdatePin(null); setCommunityUpdateNote(''); }}>
             <View style={s.modalOverlay}>
               <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => { setSelectedCommunityPin(null); setCommunityUpdatePin(null); setCommunityUpdateNote(''); }} />
-              <View style={[s.wpSheet, modalSheetPad]}>
+              <TrailheadSheet handle={false} style={[s.wpSheet, modalSheetPad]} contentStyle={{ padding: 0 }}>
                 <View style={s.daySheetHandle} />
                 <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.communityCardScroll}>
                   <View style={[s.communityHero, { borderColor: meta.color + '55' }]}>
@@ -11235,7 +11327,7 @@ function MapScreen() {
                     </TouchableOpacity>
                   </View>}
                 </ScrollView>
-              </View>
+              </TrailheadSheet>
             </View>
           </Modal>
         );
@@ -11248,7 +11340,7 @@ function MapScreen() {
           <Modal visible transparent animationType="slide" onRequestClose={() => setCommunityUpdatePin(null)}>
             <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.modalOverlay}>
               <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setCommunityUpdatePin(null)} />
-              <View style={[s.wpSheet, modalSheetPad]}>
+              <TrailheadSheet handle={false} style={[s.wpSheet, modalSheetPad]} contentStyle={{ padding: 0 }}>
                 <View style={s.daySheetHandle} />
                 <View style={s.pinSheetHeader}>
                   <View style={{ flex: 1, minWidth: 0 }}>
@@ -11285,7 +11377,7 @@ function MapScreen() {
                     <Text style={s.wpSheetDayText}>CANCEL</Text>
                   </TouchableOpacity>
                 </View>
-              </View>
+              </TrailheadSheet>
             </KeyboardAvoidingView>
           </Modal>
         );
@@ -11296,7 +11388,7 @@ function MapScreen() {
         <Modal visible transparent animationType="slide" onRequestClose={() => setPendingPin(null)}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.modalOverlay}>
             <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setPendingPin(null)} />
-            <View style={[s.wpSheet, modalSheetPad]}>
+            <TrailheadSheet handle={false} style={[s.wpSheet, modalSheetPad]} contentStyle={{ padding: 0 }}>
               <View style={s.daySheetHandle} />
               <View style={s.pinSheetHeader}>
                 <View>
@@ -11380,7 +11472,7 @@ function MapScreen() {
                   <Text style={s.wpSheetDayText}>CANCEL</Text>
                 </TouchableOpacity>
               </View>
-            </View>
+            </TrailheadSheet>
           </KeyboardAvoidingView>
         </Modal>
       )}
@@ -11389,7 +11481,7 @@ function MapScreen() {
       {tappedWp && (
         <Modal visible transparent animationType="slide" onRequestClose={() => setTappedWp(null)}>
           <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setTappedWp(null)}>
-            <View style={[s.wpSheet, modalSheetPad]}>
+            <TrailheadSheet handle={false} style={[s.wpSheet, modalSheetPad]} contentStyle={{ padding: 0 }}>
               <View style={s.daySheetHandle} />
               <View style={s.wpSheetHeader}>
                 <View style={[s.wpSheetTypeDot, {
@@ -11416,7 +11508,7 @@ function MapScreen() {
                   <Text style={s.wpSheetDayText}>CHANGE DAY</Text>
                 </TouchableOpacity>
               </View>
-            </View>
+            </TrailheadSheet>
           </TouchableOpacity>
         </Modal>
       )}
@@ -11946,7 +12038,7 @@ const makeStyles = (C: ColorPalette) => {
   // ── Nav HUD
   navHud: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: 'rgba(8,8,10,0.92)',
+    backgroundColor: 'rgba(8,8,10,0.82)',
     borderTopWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
@@ -11957,6 +12049,9 @@ const makeStyles = (C: ColorPalette) => {
     shadowOpacity: 0.46,
     shadowRadius: 28,
     shadowOffset: { width: 0, height: -14 },
+  },
+  navHudInner: {
+    padding: 0,
   },
   navLocateBtn: {
     position: 'absolute',
@@ -12042,6 +12137,27 @@ const makeStyles = (C: ColorPalette) => {
   turnDist: { color: OVR.text, fontSize: 28, fontWeight: '900', letterSpacing: 0, lineHeight: 33 },
   turnLabel: { color: OVR.text2, fontSize: 13, fontWeight: '800', marginTop: 2, letterSpacing: 0 },
   turnRoad: { color: OVR.text3, fontSize: 12, marginTop: 1 },
+  navSourceRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    paddingBottom: 2,
+  },
+  navSourcePill: {
+    minHeight: 28,
+    maxWidth: '48%' as any,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.11)',
+    backgroundColor: 'rgba(255,255,255,0.045)',
+  },
+  navSourceText: { fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.6, flexShrink: 1 },
   currentRoadPill: {
     marginHorizontal: 14,
     marginTop: 10,
@@ -13407,6 +13523,7 @@ const makeStyles = (C: ColorPalette) => {
     shadowOffset: { width: 0, height: 16 },
   },
   trailRouteBuilderHeader: { flexDirection: 'row', alignItems: 'center', gap: 11, marginBottom: 10 },
+  trailCaptureSheetContent: { gap: 10 },
   trailRouteEyebrow: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
   trailRouteTitle: { color: OVR.text, fontSize: 16, fontWeight: '900', marginTop: 2 },
   trailRouteStatusRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },

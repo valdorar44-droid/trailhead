@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { storage } from '@/lib/storage';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 import { useStore } from '@/lib/store';
+import { TrailheadButton, TrailheadSheet } from '@/components/TrailheadUI';
 
 const TOUR_SEEN = 'trailhead_guided_tour_seen';
 const TOUR_NEVER = 'trailhead_guided_tour_never';
@@ -51,7 +52,7 @@ const STEPS = [
     route: '/(tabs)/map',
     icon: 'git-branch-outline',
     title: 'Build trails with pins',
-    body: 'For trail routes, pan the map and drop pins at bends, forks, and the finish. Preview the line, then save or follow.',
+    body: 'For trail routes, tap bends, forks, and the finish to add snapped anchors. Preview the line, then save or follow.',
     target: 'PIN BUILDER',
     targetKind: 'mapTrailBuilder',
     targetKey: 'map.trailBuilder',
@@ -322,7 +323,7 @@ export default function GuidedTourOverlay() {
           <Text style={s.focusText}>{step.target}</Text>
         </View>
 
-        <View style={[s.card, cardStyle]}>
+        <TrailheadSheet handle={false} style={[s.card, cardStyle]} contentStyle={s.cardContent}>
           <View style={s.progressRow}>
             {STEPS.map((_, i) => <View key={i} style={[s.dot, i <= idx && s.dotActive]} />)}
           </View>
@@ -353,20 +354,15 @@ export default function GuidedTourOverlay() {
           </TouchableOpacity>
 
           <View style={s.actions}>
-            <TouchableOpacity style={s.secondaryBtn} onPress={() => closeTour(true)}>
-              <Text style={s.secondaryText}>HIDE FOR NOW</Text>
-            </TouchableOpacity>
+            <TrailheadButton label="Hide" variant="secondary" onPress={() => closeTour(true)} style={{ flex: 1 }} />
             {idx > 0 && (
               <TouchableOpacity style={s.backBtn} onPress={back}>
                 <Ionicons name="chevron-back" size={14} color={C.text2} />
               </TouchableOpacity>
             )}
-            <TouchableOpacity style={s.primaryBtn} onPress={next}>
-              <Text style={s.primaryText}>{isLast ? 'FINISH' : 'NEXT'}</Text>
-              <Ionicons name={isLast ? 'checkmark' : 'chevron-forward'} size={14} color="#fff" />
-            </TouchableOpacity>
+            <TrailheadButton label={isLast ? 'Finish' : 'Next'} icon={isLast ? 'checkmark' : 'chevron-forward'} variant="primary" onPress={next} style={{ minWidth: 96 }} />
           </View>
-        </View>
+        </TrailheadSheet>
       </Animated.View>
     </Modal>
   );
@@ -418,17 +414,9 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     position: 'absolute',
     left: 16,
     right: 16,
-    backgroundColor: C.s1,
     borderRadius: 18,
-    borderWidth: 1,
-    borderColor: C.orange + '55',
-    padding: 16,
-    shadowColor: '#000',
-    shadowOpacity: 0.35,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 16,
   },
+  cardContent: { padding: 16 },
   progressRow: { flexDirection: 'row', gap: 5, marginBottom: 14 },
   dot: { flex: 1, height: 4, borderRadius: 2, backgroundColor: C.s3 },
   dotActive: { backgroundColor: C.orange },
@@ -467,29 +455,10 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   checkBoxOn: { backgroundColor: C.orange, borderColor: C.orange },
   checkText: { color: C.text3, fontSize: 12, flex: 1 },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  secondaryBtn: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: C.border,
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: 'center',
-    backgroundColor: C.s2,
-  },
-  secondaryText: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '900' },
   backBtn: {
     width: 44, height: 44, borderRadius: 12,
     alignItems: 'center', justifyContent: 'center',
     borderWidth: 1, borderColor: C.border,
     backgroundColor: C.s2,
   },
-  primaryBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5,
-    minWidth: 96,
-    backgroundColor: C.orange,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 13,
-  },
-  primaryText: { color: '#fff', fontSize: 11, fontFamily: mono, fontWeight: '900' },
 });

@@ -15,6 +15,7 @@ import { api, ApiError, PaywallError, TripResult, TrailDNA } from '@/lib/api';
 import PaywallModal from '@/components/PaywallModal';
 import AppReviewPrompt from '@/components/AppReviewPrompt';
 import TourTarget from '@/components/TourTarget';
+import { TrailheadButton, TrailheadButtonDock, TrailheadCard, TrailheadTopBar } from '@/components/TrailheadUI';
 import { useStore } from '@/lib/store';
 import { useTheme, useTag, mono, ColorPalette } from '@/lib/design';
 import { saveOfflineTrip, loadOfflineTrip } from '@/lib/offlineTrips';
@@ -460,27 +461,28 @@ export default function PlanScreen() {
       />
 
       {/* ── Header ── */}
-      <View style={s.header}>
-        <View style={s.logoBadge}>
-          <Image source={TRAILHEAD_LOGO} style={s.logoBadgeImage} resizeMode="cover" />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={s.logoName}>TRAILHEAD</Text>
-          <Text style={s.logoTag}>AI OVERLAND GUIDE</Text>
-        </View>
-        {user && (
-          <TouchableOpacity style={s.creditPill} onPress={() => setPaywallVisible(true)}>
-            <Ionicons name="flash" size={12} color={C.orange} />
-            <Text style={s.creditPillText}>{user.credits}</Text>
-          </TouchableOpacity>
+      <TrailheadTopBar
+        title="TRAILHEAD"
+        subtitle="AI OVERLAND GUIDE"
+        icon="compass-outline"
+        style={s.header}
+        right={(
+          <>
+            {user && (
+              <TouchableOpacity style={s.creditPill} onPress={() => setPaywallVisible(true)}>
+                <Ionicons name="flash" size={12} color={C.orange} />
+                <Text style={s.creditPillText}>{user.credits}</Text>
+              </TouchableOpacity>
+            )}
+            {(planPhase === 'active' || planPhase === 'editing') && (
+              <View style={s.editBadge}>
+                <Ionicons name="pencil" size={11} color={C.gold} />
+                <Text style={s.editBadgeText}>EDIT</Text>
+              </View>
+            )}
+          </>
         )}
-        {(planPhase === 'active' || planPhase === 'editing') && (
-          <View style={s.editBadge}>
-            <Ionicons name="pencil" size={11} color={C.gold} />
-            <Text style={s.editBadgeText}>EDIT</Text>
-          </View>
-        )}
-      </View>
+      />
 
       {/* ── Offline saved toast ── */}
       {offlineToast && (
@@ -523,7 +525,7 @@ export default function PlanScreen() {
 
             {/* ── Resume saved trip card ─────────────────────────────────── */}
             {activeTrip && (
-              <View style={s.resumeCard}>
+              <TrailheadCard style={s.resumeCard}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
                   <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: C.orange }} />
                   <Text style={{ color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1.5 }}>SAVED ROUTE</Text>
@@ -535,24 +537,24 @@ export default function PlanScreen() {
                   {(activeTrip.plan.states ?? []).join(' · ')}
                   {!!activeTrip.plan.duration_days && `  ·  ${activeTrip.plan.duration_days} days`}
                 </Text>
-                <View style={{ flexDirection: 'row', gap: 10 }}>
-                  <TouchableOpacity
-                    style={{ flex: 1, backgroundColor: C.orange, borderRadius: 8, paddingVertical: 11, alignItems: 'center' }}
+                <TrailheadButtonDock>
+                  <TrailheadButton
+                    label="Resume Route"
+                    variant="primary"
                     onPress={() => {
                       setMessages([{ role: 'ai', trip: activeTrip }]);
                       setPlanPhase('active');
                     }}
-                  >
-                    <Text style={{ color: '#fff', fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 1 }}>RESUME ROUTE</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={{ flex: 1, backgroundColor: C.s2, borderRadius: 8, paddingVertical: 11, alignItems: 'center', borderWidth: 1, borderColor: C.border }}
+                    style={{ flex: 1 }}
+                  />
+                  <TrailheadButton
+                    label="New Trip"
+                    variant="secondary"
                     onPress={() => setActiveTrip(null)}
-                  >
-                    <Text style={{ color: C.text2, fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 1 }}>NEW TRIP</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
+                    style={{ flex: 1 }}
+                  />
+                </TrailheadButtonDock>
+              </TrailheadCard>
             )}
 
             <Text style={s.welcomeHeading}>
@@ -571,7 +573,7 @@ export default function PlanScreen() {
             </View>
 
             {EXAMPLES.map((ex, i) => (
-              <TouchableOpacity key={i} style={s.example} onPress={() => setInput(ex.text)}>
+              <TrailheadCard key={i} style={s.example} onPress={() => setInput(ex.text)}>
                 <View style={s.exampleIconWrap}>
                   <Ionicons name={ex.icon as any} size={18} color={C.orange} />
                 </View>
@@ -584,7 +586,7 @@ export default function PlanScreen() {
                   </View>
                   <Text style={s.exampleText}>{ex.text}</Text>
                 </View>
-              </TouchableOpacity>
+              </TrailheadCard>
             ))}
           </View>
         )}

@@ -5,11 +5,11 @@ import {
   Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSubscription, PRODUCT_IDS, priceLine } from '@/lib/useSubscription';
 import { useTheme, mono } from '@/lib/design';
 import { CREDIT_REWARDS } from '@/lib/credits';
+import { TrailheadSheet } from '@/components/TrailheadUI';
 
 const TERMS_URL   = 'https://api.gettrailhead.app/terms';
 const PRIVACY_URL = 'https://api.gettrailhead.app/privacy';
@@ -77,8 +77,11 @@ export default function PaywallModal({ visible, code, message, onClose }: Props)
   return (
     <Modal visible={visible} animationType="slide" transparent presentationStyle="overFullScreen">
       <View style={staticS.overlay}>
-        <BlurView intensity={28} tint="dark" style={[staticS.blurShell, { maxHeight: sheetMaxHeight }]}>
-        <View style={{ backgroundColor: C.bg + 'F2', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 22, paddingBottom: sheetBottomPad, paddingTop: 12, borderTopWidth: 1, borderColor: C.border, maxHeight: sheetMaxHeight }}>
+        <TrailheadSheet
+          handle={false}
+          style={[staticS.blurShell, { maxHeight: sheetMaxHeight }]}
+          contentStyle={{ backgroundColor: C.bg + 'F2', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 22, paddingBottom: sheetBottomPad, paddingTop: 12, maxHeight: sheetMaxHeight }}
+        >
           <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: C.border, alignSelf: 'center', marginBottom: 10 }} />
 
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={{ maxHeight: sheetMaxHeight - 156 }} contentContainerStyle={staticS.sheetScroll}>
@@ -204,8 +207,7 @@ export default function PaywallModal({ visible, code, message, onClose }: Props)
               </TouchableOpacity>
             </View>
           </View>
-        </View>
-        </BlurView>
+        </TrailheadSheet>
       </View>
     </Modal>
   );

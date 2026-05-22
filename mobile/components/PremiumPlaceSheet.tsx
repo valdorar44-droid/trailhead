@@ -13,12 +13,11 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api, type PlaceDetail } from '@/lib/api';
-import { useStore } from '@/lib/store';
 import { useTheme, mono, type ColorPalette } from '@/lib/design';
+import { TrailheadButton, TrailheadButtonDock, TrailheadSheet } from '@/components/TrailheadUI';
 
 type Stage = 'full' | 'half' | 'peek';
 const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
@@ -96,7 +95,6 @@ export default function PremiumPlaceSheet({
 }: Props) {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
-  const themeMode = useStore(st => st.themeMode);
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const [stage, setStage] = useState<Stage>(initialStage);
@@ -187,10 +185,10 @@ export default function PremiumPlaceSheet({
       pointerEvents="box-none"
       style={[s.wrap, { height: stageHeight, paddingBottom: Math.max(insets.bottom, 10), transform: [{ translateY: dragY }] }]}
     >
-      <BlurView
-        tint={themeMode === 'light' ? 'light' : 'dark'}
-        intensity={themeMode === 'light' ? 46 : 34}
+      <TrailheadSheet
+        handle={false}
         style={[s.sheet, stage === 'peek' && s.sheetTip]}
+        contentStyle={s.sheetContent}
       >
         <View style={s.grabberZone} {...pan.panHandlers}>
           <TouchableOpacity style={s.grabberTap} onPress={cycleStage} activeOpacity={0.78}>
@@ -255,11 +253,14 @@ export default function PremiumPlaceSheet({
                 </View>
               )}
 
-              <View style={s.actions}>
-                <TouchableOpacity style={s.primaryBtn} onPress={() => onNavigate(place)}>
-                  <Ionicons name="navigate" size={15} color="#fff" />
-                  <Text style={s.primaryText}>NAVIGATE</Text>
-                </TouchableOpacity>
+              <TrailheadButtonDock style={s.actions}>
+                <TrailheadButton
+                  label="Navigate"
+                  icon="navigate"
+                  variant="primary"
+                  onPress={() => onNavigate(place)}
+                  style={{ flex: 1 }}
+                />
                 {!!data.phone && (
                   <TouchableOpacity style={s.secondaryBtn} onPress={() => Linking.openURL(`tel:${data.phone}`)}>
                     <Ionicons name="call-outline" size={15} color={C.text2} />
@@ -280,7 +281,7 @@ export default function PremiumPlaceSheet({
                     <Ionicons name="add-circle-outline" size={15} color={C.text2} />
                   </TouchableOpacity>
                 )}
-              </View>
+              </TrailheadButtonDock>
 
               {stage === 'full' && (
                 <View style={s.deepActions}>
@@ -323,7 +324,7 @@ export default function PremiumPlaceSheet({
             </View>
           </ScrollView>
         )}
-      </BlurView>
+      </TrailheadSheet>
     </Animated.View>
   );
 }
@@ -338,18 +339,10 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   sheet: {
     flex: 1,
-    overflow: 'hidden',
     borderTopLeftRadius: 26,
     borderTopRightRadius: 26,
-    borderWidth: 1,
-    borderColor: C.border2,
-    backgroundColor: C.bg === '#050505' ? 'rgba(5,5,5,0.62)' : 'rgba(255,255,255,0.78)',
-    shadowColor: '#000',
-    shadowOpacity: C.bg === '#050505' ? 0.45 : 0.18,
-    shadowRadius: 30,
-    shadowOffset: { width: 0, height: -14 },
-    elevation: 22,
   },
+  sheetContent: { padding: 0 },
   sheetTip: {
     borderRadius: 24,
   },
@@ -377,8 +370,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   sectionLabel: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8, marginBottom: 5 },
   sectionText: { color: C.text2, fontSize: 12, lineHeight: 18 },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 9, marginTop: 2 },
-  primaryBtn: { flex: 1, minHeight: 45, borderRadius: 16, backgroundColor: C.orange, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8 },
-  primaryText: { color: '#fff', fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 0.6 },
   secondaryBtn: { width: 45, height: 45, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: C.glassStrong, borderWidth: 1, borderColor: C.border },
   deepActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   linkBtn: { flexDirection: 'row', alignItems: 'center', gap: 7, borderWidth: 1, borderColor: C.border, backgroundColor: C.glass, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 8 },

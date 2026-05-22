@@ -4,3 +4,4 @@ export * from './FloatingButton';
 export * from './MetallicButton';
 export * from './PremiumChip';
 export * from './PremiumTabBar';
+export * from '../TrailheadUI';

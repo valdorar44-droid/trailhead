@@ -431,6 +431,38 @@ function estimateTrailElevation(coords: [number, number][]): Pick<TrailRoutePlan
   };
 }
 
+async function sampleTrailElevationFromSrtm(coords: [number, number][]): Promise<Pick<TrailRoutePlan, 'elevationGainFt' | 'elevationLossFt' | 'elevationConfidence'>> {
+  if (coords.length < 2) return { elevationConfidence: 'unavailable' };
+  const sampleCount = Math.min(80, Math.max(2, coords.length));
+  const sampled = Array.from({ length: sampleCount }, (_, idx) => {
+    const coordIdx = Math.min(coords.length - 1, Math.round((idx / Math.max(1, sampleCount - 1)) * (coords.length - 1)));
+    return coords[coordIdx];
+  });
+  const locs = sampled.map(([lng, lat]) => `${lat.toFixed(5)},${lng.toFixed(5)}`).join('|');
+  const res = await fetch(`https://api.opentopodata.org/v1/srtm30m?locations=${encodeURIComponent(locs)}`);
+  if (!res.ok) return { elevationConfidence: 'unavailable' };
+  const json = await res.json();
+  const elevationsM = Array.isArray(json?.results)
+    ? json.results.map((row: any) => Number(row?.elevation)).filter((value: number) => Number.isFinite(value))
+    : [];
+  if (elevationsM.length < 2 || elevationsM.length < Math.max(2, Math.floor(sampled.length * 0.65))) {
+    return { elevationConfidence: 'unavailable' };
+  }
+  let gainM = 0;
+  let lossM = 0;
+  for (let i = 1; i < elevationsM.length; i += 1) {
+    const delta = elevationsM[i] - elevationsM[i - 1];
+    if (Math.abs(delta) < 2) continue;
+    if (delta > 0) gainM += delta;
+    else lossM += Math.abs(delta);
+  }
+  return {
+    elevationGainFt: Math.round(gainM * 3.28084),
+    elevationLossFt: Math.round(lossM * 3.28084),
+    elevationConfidence: 'estimated',
+  };
+}
+
 function withTrailElevation(plan: TrailRoutePlan): TrailRoutePlan {
   return { ...plan, ...estimateTrailElevation(plan.coords) };
 }
@@ -3083,6 +3115,7 @@ function MapScreen() {
   const [trailRoutePlans, setTrailRoutePlans] = useState<TrailRoutePlan[]>([]);
   const [selectedTrailRoutePlanId, setSelectedTrailRoutePlanId] = useState<TrailRouteIntent | null>(null);
   const [trailRouteBuilderError, setTrailRouteBuilderError] = useState('');
+  const [trailBuildFinalized, setTrailBuildFinalized] = useState(false);
   const [trailTraceMode, setTrailTraceMode] = useState(false);
   const [trailTraceDraft, setTrailTraceDraft] = useState<[number, number][]>([]);
   const [trailTraceRoute, setTrailTraceRoute] = useState<[number, number][]>([]);
@@ -5796,6 +5829,16 @@ function MapScreen() {
       : 'ROUTED';
   const selectedTrailRoutePlan = trailRoutePlans.find(p => p.id === selectedTrailRoutePlanId) ?? trailRoutePlans[0] ?? null;
   const previewTrailDistanceM = selectedTrailRoutePlan?.distanceM ?? (trailTraceRoute.length > 1 ? trailCoordsDistanceM(trailTraceRoute) : 0);
+  const elevationHydrationRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    trailRoutePlans.forEach(plan => {
+      if (plan.elevationConfidence && plan.elevationConfidence !== 'unavailable') return;
+      const key = `${plan.id}:${Math.round(plan.distanceM)}:${plan.coords.length}`;
+      if (elevationHydrationRef.current.has(key)) return;
+      elevationHydrationRef.current.add(key);
+      hydrateTrailRoutePlanElevation(plan);
+    });
+  }, [trailRoutePlans]);
   const routeCumulative = useMemo(() => routeCumulativeDistances(lastRouteCoords), [lastRouteCoords]);
   const activeRouteProgress = routeProgress;
   // Current step the user is navigating toward
@@ -6904,6 +6947,7 @@ function MapScreen() {
     setTrailTraceDraft([]);
     trailTraceDraftRef.current = [];
     trailAutoBuildCountRef.current = 0;
+    setTrailBuildFinalized(false);
     setTrailTraceRoute([]);
     setSelectedTrail(null);
     setTrailCardCollapsed(false);
@@ -6925,6 +6969,7 @@ function MapScreen() {
     setTrailRoutePlans([]);
     setSelectedTrailRoutePlanId(null);
     setTrailRouteBuilderError('');
+    setTrailBuildFinalized(false);
     setTrailRouteSegmentStatus([]);
     trailAutoBuildCountRef.current = 0;
     setTrailTraceMode(false);
@@ -6965,6 +7010,7 @@ function MapScreen() {
     setTrailRoutePlans([]);
     setSelectedTrailRoutePlanId(null);
     setTrailRouteBuilderError('');
+    setTrailBuildFinalized(false);
     setTrailTraceMode(false);
     setTrailTraceRoute([]);
     setTrailCaptureAnchors([anchor]);
@@ -6990,6 +7036,7 @@ function MapScreen() {
     }
     setTrailCaptureBusy(true);
     try {
+      setTrailBuildFinalized(false);
       const geometry = await nativeMapRef.current?.captureTrailAt?.(rawCoord[1], rawCoord[0], trailPinCaptureSeedName || undefined);
       const snap = geometry ? nearestVisibleTrailSnap(geometry, rawCoord) : null;
       const snapped = geometry?.features?.length && snap && snap.distanceM <= 180 ? snap.coord : rawCoord;
@@ -7026,6 +7073,7 @@ function MapScreen() {
 
   function undoTrailCapturePin() {
     let nextAnchors: TrailCaptureAnchor[] = [];
+    setTrailBuildFinalized(false);
     setTrailCaptureAnchors(prev => {
       const next = prev.slice(0, -1);
       nextAnchors = next;
@@ -7057,6 +7105,7 @@ function MapScreen() {
       setTrailRouteBuilding(true);
       setTrailRouteBuilderOpen(false);
       setTrailCardCollapsed(true);
+      setTrailBuildFinalized(false);
     }
     setTrailRouteBuilderError('');
     setTrailRouteSegmentStatus(pins.slice(0, -1).map((_, idx) => ({ label: `${idx + 1}-${idx + 2}`, status: 'fallback', engine: 'Queued' })));
@@ -7180,11 +7229,14 @@ function MapScreen() {
       setSelectedTrailRoutePlanId('capture');
       setTrailRouteBuilderError('');
       setTrailRouteSegmentStatus(segmentStatuses);
+      hydrateTrailRoutePlanElevation(plan);
       if (previewOnly) {
         setQuickToast('Preview snapped. Add another point or tap BUILD.');
         setTimeout(() => setQuickToast(''), 2600);
       } else {
-        setQuickToast('');
+        setTrailBuildFinalized(true);
+        setQuickToast('Route ready. Save it or start following.');
+        setTimeout(() => setQuickToast(''), 2600);
         previewTrailRoutePlan(feature, plan);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       }
@@ -7209,6 +7261,17 @@ function MapScreen() {
     setLastRouteCoords(plan.coords);
     setIsRouted(true);
     nativeMapRef.current?.restoreRoute(plan.coords, steps, [steps], plan.distanceM, Math.max(60, plan.distanceM / 1.35));
+  }
+
+  async function hydrateTrailRoutePlanElevation(plan: TrailRoutePlan) {
+    if (plan.elevationConfidence && plan.elevationConfidence !== 'unavailable') return;
+    try {
+      const elevation = await sampleTrailElevationFromSrtm(plan.coords);
+      if (elevation.elevationConfidence === 'unavailable') return;
+      setTrailRoutePlans(prev => prev.map(item => item.id === plan.id ? { ...item, ...elevation } : item));
+    } catch {
+      // Elevation is optional; route distance/time remain authoritative.
+    }
   }
 
   async function openTrailRouteBuilder(trail: TrailFeature) {
@@ -7893,12 +7956,14 @@ function MapScreen() {
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={s.trailCompactTitle} numberOfLines={1}>
-                  TRAIL BUILDER · {trailTraceRoute.length > 1 ? 'PREVIEW SNAPPED' : trailCapturePins.length ? 'ADD NEXT POINT' : 'TAP START'}
+                  TRAIL BUILDER · {trailBuildFinalized ? 'ROUTE READY' : trailTraceRoute.length > 1 ? 'PREVIEW SNAPPED' : trailCapturePins.length ? 'ADD NEXT POINT' : 'TAP START'}
                 </Text>
                 <Text style={s.trailCompactText} numberOfLines={2}>
-                  {trailPinCaptureSeedName
-                    ? 'Tap bends, forks, or finish to snap the preview.'
-                    : 'Map taps add snapped anchors around curves and forks.'}
+                  {trailBuildFinalized
+                    ? 'Route ready. Save it or start following.'
+                    : trailCapturePins.length < 2
+                    ? 'Tap any trail start.'
+                    : 'Tap the next route point. Trailhead snaps the line.'}
                 </Text>
               </View>
               <TouchableOpacity style={s.discoveryPanelClose} onPress={clearTrailPinCapture} disabled={trailCaptureBusy}>
@@ -7920,25 +7985,37 @@ function MapScreen() {
                 variant="secondary"
                 onPress={undoTrailCapturePin}
                 disabled={trailCaptureBusy || trailCapturePins.length === 0}
-                style={{ flex: 0.9 }}
+                style={{ flex: 1, minWidth: trailBuildFinalized ? '47%' as any : undefined }}
               />
               <TrailheadButton
-                label="Build"
+                label={trailBuildFinalized ? 'Rebuild' : 'Build'}
                 icon="checkmark"
                 variant="primary"
                 loading={trailCaptureBusy}
                 onPress={() => capturePinnedTrailRoute()}
                 disabled={trailCapturePins.length < 2}
-                style={{ flex: 1 }}
+                style={{ flex: 1, minWidth: trailBuildFinalized ? '47%' as any : undefined }}
               />
-              <TrailheadButton
-                label="Save"
-                icon="bookmark-outline"
-                variant="secondary"
-                onPress={() => selectedTrail && selectedTrailRoutePlan && nameAndSaveTrailRoutePlan(selectedTrail, selectedTrailRoutePlan)}
-                disabled={!selectedTrail || !selectedTrailRoutePlan}
-                style={{ flex: 1 }}
-              />
+              {trailBuildFinalized && (
+                <>
+                  <TrailheadButton
+                    label="Save"
+                    icon="bookmark-outline"
+                    variant="secondary"
+                    onPress={() => selectedTrail && selectedTrailRoutePlan && nameAndSaveTrailRoutePlan(selectedTrail, selectedTrailRoutePlan)}
+                    disabled={!selectedTrail || !selectedTrailRoutePlan}
+                    style={{ flex: 1, minWidth: '47%' as any }}
+                  />
+                  <TrailheadButton
+                    label="Start"
+                    icon="navigate"
+                    variant="primary"
+                    onPress={() => selectedTrail && selectedTrailRoutePlan && startTrailRoutePlan(selectedTrail, selectedTrailRoutePlan)}
+                    disabled={!selectedTrail || !selectedTrailRoutePlan}
+                    style={{ flex: 1, minWidth: '47%' as any }}
+                  />
+                </>
+              )}
             </TrailheadButtonDock>
           </TrailheadSheet>
         </View>
@@ -13593,7 +13670,7 @@ const makeStyles = (C: ColorPalette) => {
     justifyContent: 'center',
   },
   trailCompactTitle: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.7 },
-  trailCompactText: { color: OVR.text2, fontSize: 10.5, lineHeight: 14, marginTop: 2 },
+  trailCompactText: { color: C.text2, fontSize: 10.5, lineHeight: 14, marginTop: 2 },
   trailRouteEyebrow: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
   trailRouteTitle: { color: OVR.text, fontSize: 16, fontWeight: '900', marginTop: 2 },
   trailRouteStatusRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
@@ -13689,7 +13766,7 @@ const makeStyles = (C: ColorPalette) => {
   },
   trailSegmentText: { fontSize: 8.5, fontFamily: mono, fontWeight: '900', flexShrink: 1 },
   trailSegmentMore: { color: OVR.text3, fontSize: 9, fontFamily: mono, fontWeight: '900' },
-  trailRouteBuilderActions: { flexDirection: 'row', gap: 9 },
+  trailRouteBuilderActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 9 },
   trailRouteSecondaryBtn: {
     flex: 0.8,
     minHeight: 44,

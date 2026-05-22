@@ -10,7 +10,6 @@ import {
   TrailheadButton,
   TrailheadButtonDock,
   TrailheadMetricRow,
-  TrailheadPrompt,
   TrailheadSheet,
 } from '@/components/TrailheadUI';
 
@@ -7886,34 +7885,31 @@ function MapScreen() {
       {trailPinCaptureMode && !navMode && (
         <View style={s.trailRouteBuilderWrap} pointerEvents="auto">
           <TrailheadSheet contentStyle={s.trailCaptureSheetContent}>
-            <View style={s.trailRouteBuilderHeader}>
-              <View style={[s.trailIconBadge, { backgroundColor: '#22c55e22', borderColor: '#22c55e66' }]}>
-                <Ionicons name="git-branch-outline" size={18} color="#22c55e" />
+            <View style={s.trailCompactMessage}>
+              <View style={[s.trailCompactIcon, { backgroundColor: '#22c55e22', borderColor: '#22c55e66' }]}>
+                <Ionicons name="git-branch-outline" size={15} color="#22c55e" />
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={s.trailRouteEyebrow}>TRAIL BUILDER</Text>
-                <Text style={s.trailRouteTitle} numberOfLines={1}>{trailPinCaptureSeedName || 'Tap-to-snap route'}</Text>
+                <Text style={s.trailCompactTitle} numberOfLines={1}>
+                  TRAIL BUILDER · {trailTraceRoute.length > 1 ? 'PREVIEW SNAPPED' : trailCapturePins.length ? 'ADD NEXT POINT' : 'TAP START'}
+                </Text>
+                <Text style={s.trailCompactText} numberOfLines={2}>
+                  {[
+                    previewTrailDistanceM > 0 ? fmtTrailRouteDistance(previewTrailDistanceM) : null,
+                    previewTrailDistanceM > 0 ? fmtTrailRouteTime(previewTrailDistanceM) : null,
+                    `${trailCapturePins.length} pts`,
+                    fmtTrailElevation(selectedTrailRoutePlan),
+                  ].filter(Boolean).join(' · ')}
+                  {' · '}
+                  {trailPinCaptureSeedName
+                    ? 'Tap bends, forks, or finish to snap the preview.'
+                    : 'Map taps add snapped anchors around curves and forks.'}
+                </Text>
               </View>
               <TouchableOpacity style={s.discoveryPanelClose} onPress={clearTrailPinCapture} disabled={trailCaptureBusy}>
                 <Ionicons name="close" size={15} color={OVR.text2} />
               </TouchableOpacity>
             </View>
-            <TrailheadMetricRow
-              metrics={[
-                { label: 'Distance', value: previewTrailDistanceM > 0 ? fmtTrailRouteDistance(previewTrailDistanceM) : '--', icon: 'map-outline', tone: C.silverBright },
-                { label: 'Time', value: previewTrailDistanceM > 0 ? fmtTrailRouteTime(previewTrailDistanceM) : '--', icon: 'time-outline', tone: C.silverBright },
-                { label: 'Points', value: String(trailCapturePins.length), icon: 'radio-button-on-outline', tone: '#22c55e' },
-                { label: trailElevationLabel(selectedTrailRoutePlan), value: fmtTrailElevation(selectedTrailRoutePlan), icon: 'trending-up-outline', tone: C.orange },
-              ]}
-            />
-            <TrailheadPrompt
-              title={trailTraceRoute.length > 1 ? 'Preview snapped' : trailCapturePins.length ? 'Add the next trail point' : 'Tap the map to set start'}
-              body={trailPinCaptureSeedName
-                ? 'Tap bends, forks, or the finish. Trailhead snaps the route preview as points are added.'
-                : 'Map taps add snapped anchors; use more points around tight curves or uncertain forks.'}
-              icon="information-circle-outline"
-              tone="#22c55e"
-            />
             <TrailheadButtonDock style={s.trailRouteBuilderActions}>
               <TrailheadButton
                 label="Undo"
@@ -13551,9 +13547,9 @@ const makeStyles = (C: ColorPalette) => {
   },
   trailRouteBuilderWrap: {
     position: 'absolute',
-    left: 12,
-    right: 12,
-    bottom: 104,
+    left: 8,
+    right: 8,
+    bottom: 8,
     zIndex: 18,
     elevation: 18,
   },
@@ -13570,7 +13566,23 @@ const makeStyles = (C: ColorPalette) => {
     shadowOffset: { width: 0, height: 16 },
   },
   trailRouteBuilderHeader: { flexDirection: 'row', alignItems: 'center', gap: 11, marginBottom: 10 },
-  trailCaptureSheetContent: { gap: 10 },
+  trailCaptureSheetContent: { gap: 8, padding: 10 },
+  trailCompactMessage: {
+    minHeight: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+  },
+  trailCompactIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  trailCompactTitle: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.7 },
+  trailCompactText: { color: OVR.text2, fontSize: 10.5, lineHeight: 14, marginTop: 2 },
   trailRouteEyebrow: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
   trailRouteTitle: { color: OVR.text, fontSize: 16, fontWeight: '900', marginTop: 2 },
   trailRouteStatusRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
@@ -13666,7 +13678,7 @@ const makeStyles = (C: ColorPalette) => {
   },
   trailSegmentText: { fontSize: 8.5, fontFamily: mono, fontWeight: '900', flexShrink: 1 },
   trailSegmentMore: { color: OVR.text3, fontSize: 9, fontFamily: mono, fontWeight: '900' },
-  trailRouteBuilderActions: { flexDirection: 'row', gap: 9, marginTop: 11 },
+  trailRouteBuilderActions: { flexDirection: 'row', gap: 9 },
   trailRouteSecondaryBtn: {
     flex: 0.8,
     minHeight: 44,

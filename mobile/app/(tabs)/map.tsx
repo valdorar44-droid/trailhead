@@ -6672,6 +6672,33 @@ function MapScreen() {
     setTrailTraceRoute([]);
   }
 
+  function clearTrailRoutePreview() {
+    setTrailRouteBuilderOpen(false);
+    setTrailRoutePlans([]);
+    setSelectedTrailRoutePlanId(null);
+    setTrailRouteBuilderError('');
+    setTrailRouteSegmentStatus([]);
+    setTrailTraceRoute([]);
+    setTrailTraceDraft([]);
+    trailTraceDraftRef.current = [];
+    setTrailCapturePins([]);
+    setTrailCaptureAnchors([]);
+    setTrailPinCaptureMode(false);
+    setTrailPinCaptureSeedName('');
+    trailAutoBuildCountRef.current = 0;
+    if (!navMode) {
+      setRouteFromCache(false);
+      setRouteDebug('');
+      setRouteSteps([]);
+      setRouteLegs([]);
+      setLastRouteCoords([]);
+      setIsRouted(false);
+      setRouteProgress(null);
+      nativeMapRef.current?.resetRoute();
+      webRef.current?.postMessage(JSON.stringify({ type: 'nav_reset' }));
+    }
+  }
+
   function beginTrailTrace() {
     if (navMode) return;
     setSelectedCamp(null);
@@ -6793,6 +6820,7 @@ function MapScreen() {
     trailTraceDraftRef.current = [];
     trailAutoBuildCountRef.current = 0;
     setTrailTraceRoute([]);
+    clearTrailRoutePreview();
   }
 
   function beginTrailPinCapture() {
@@ -6878,10 +6906,12 @@ function MapScreen() {
       const snap = geometry ? nearestVisibleTrailSnap(geometry, center) : null;
       const snapped = geometry?.features?.length && snap && snap.distanceM <= 180 ? snap.coord : center;
       const anchorGeometry = geometry?.features?.length ? geometry : { type: 'FeatureCollection' as const, features: [] };
+      let nextAnchors: TrailCaptureAnchor[] = [];
       setTrailCaptureAnchors(prev => {
         const last = prev[prev.length - 1]?.coord;
         if (last && haversineKm(last[1], last[0], snapped[1], snapped[0]) * 1000 < 12) return prev;
         const next = [...prev, { coord: snapped, geometry: anchorGeometry }].slice(-24);
+        nextAnchors = next;
         const pins = next.map(anchor => anchor.coord);
         setTrailCapturePins(pins);
         setTrailTraceDraft(pins);
@@ -6889,9 +6919,16 @@ function MapScreen() {
         return next;
       });
       setTrailTraceRoute([]);
-      if (!geometry?.features?.length || !snap || snap.distanceM > 180) {
-        setQuickToast('Anchor dropped. Add another pin at the next bend or finish.');
+      if (nextAnchors.length >= 2) {
+        trailAutoBuildCountRef.current += 1;
+        setQuickToast('Snapping preview...');
+        setTimeout(() => capturePinnedTrailRoute(nextAnchors, { previewOnly: true }), 0);
+      } else if (!geometry?.features?.length || !snap || snap.distanceM > 180) {
+        setQuickToast('Start set. Drop the finish near the trail.');
         setTimeout(() => setQuickToast(''), 2600);
+      } else {
+        setQuickToast('Start snapped. Drop the finish near the trail.');
+        setTimeout(() => setQuickToast(''), 2200);
       }
       Haptics.selectionAsync().catch(() => {});
     } finally {
@@ -6900,8 +6937,10 @@ function MapScreen() {
   }
 
   function undoTrailCapturePin() {
+    let nextAnchors: TrailCaptureAnchor[] = [];
     setTrailCaptureAnchors(prev => {
       const next = prev.slice(0, -1);
+      nextAnchors = next;
       const pins = next.map(anchor => anchor.coord);
       setTrailCapturePins(pins);
       setTrailTraceDraft(pins);
@@ -6909,11 +6948,15 @@ function MapScreen() {
       return next;
     });
     setTrailTraceRoute([]);
+    if (nextAnchors.length >= 2) {
+      setTimeout(() => capturePinnedTrailRoute(nextAnchors, { previewOnly: true }), 0);
+    }
   }
 
-  async function capturePinnedTrailRoute() {
-    if (trailCaptureBusy) return;
-    const anchors = trailCaptureAnchors;
+  async function capturePinnedTrailRoute(anchorOverride?: TrailCaptureAnchor[], opts: { previewOnly?: boolean } = {}) {
+    if (trailCaptureBusy && !anchorOverride) return;
+    const previewOnly = !!opts.previewOnly;
+    const anchors = anchorOverride ?? trailCaptureAnchors;
     const pins = anchors.map(anchor => anchor.coord);
     if (anchors.length < 2) {
       setQuickToast('Drop at least start and finish pins');
@@ -6922,12 +6965,14 @@ function MapScreen() {
     }
 
     setTrailCaptureBusy(true);
-    setTrailRouteBuilding(true);
-    setTrailRouteBuilderOpen(true);
-    setTrailCardCollapsed(true);
+    if (!previewOnly) {
+      setTrailRouteBuilding(true);
+      setTrailRouteBuilderOpen(true);
+      setTrailCardCollapsed(true);
+    }
     setTrailRouteBuilderError('');
     setTrailRouteSegmentStatus(pins.slice(0, -1).map((_, idx) => ({ label: `${idx + 1}-${idx + 2}`, status: 'fallback', engine: 'Queued' })));
-    setQuickToast('Building trail route...');
+    setQuickToast(previewOnly ? 'Snapping preview...' : 'Building trail route...');
 
     try {
       let clean: [number, number][] = [];
@@ -7034,24 +7079,36 @@ function MapScreen() {
         warnings: [engineWarning],
         engine: engineLabel,
       };
-      setSelectedTrail(feature);
-      setTrailTraceDraft(pins);
-      trailTraceDraftRef.current = pins;
+      if (!previewOnly) setSelectedTrail(feature);
+      if (previewOnly) {
+        setTrailTraceDraft(pins);
+        trailTraceDraftRef.current = pins;
+      } else {
+        setTrailTraceDraft([]);
+        trailTraceDraftRef.current = [];
+        setTrailCapturePins([]);
+        setTrailCaptureAnchors([]);
+      }
       setTrailTraceRoute(clean);
       setTrailRoutePlans([plan]);
       setSelectedTrailRoutePlanId('capture');
-      setTrailPinCaptureMode(false);
+      if (!previewOnly) setTrailPinCaptureMode(false);
       setTrailRouteBuilderError('');
       setTrailRouteSegmentStatus(segmentStatuses);
-      setQuickToast('');
-      previewTrailRoutePlan(feature, plan);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      if (previewOnly) {
+        setQuickToast('Preview snapped. Add another point or tap BUILD.');
+        setTimeout(() => setQuickToast(''), 2600);
+      } else {
+        setQuickToast('');
+        previewTrailRoutePlan(feature, plan);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      }
     } catch (err: any) {
       const message = err?.message ?? 'Pinned trail capture failed. Add more pins around forks or bends.';
       setTrailRouteBuilderError(message);
       setQuickToast(message);
       setTimeout(() => setQuickToast(''), 5200);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+      if (!previewOnly) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
     } finally {
       setTrailCaptureBusy(false);
       setTrailRouteBuilding(false);
@@ -7095,14 +7152,16 @@ function MapScreen() {
     focusNavigationCamera();
   }
 
-  async function saveTrailRoutePlan(trail: TrailFeature, plan: TrailRoutePlan) {
+  async function saveTrailRoutePlan(trail: TrailFeature, plan: TrailRoutePlan, nameOverride?: string) {
     if (plan.coords.length < 2) return;
+    const routeName = (nameOverride || trail.name || 'Pinned trail route').trim() || 'Pinned trail route';
+    const namedTrail = { ...trail, name: routeName };
     await saveOfflineTrail({
-      id: `captured:${trail.id}`,
+      id: `captured:${namedTrail.id}`,
       trail: {
-        ...trail,
+        ...namedTrail,
         support: {
-          ...trail.support,
+          ...namedTrail.support,
           offlineReady: true,
           readinessLabel: 'Captured route saved for offline follow',
         },
@@ -7113,7 +7172,8 @@ function MapScreen() {
           type: 'Feature',
           geometry: { type: 'LineString', coordinates: plan.coords },
           properties: {
-            name: trail.name,
+            name: routeName,
+            route_name: routeName,
             captured: true,
             distance_m: Math.round(plan.distanceM),
           },
@@ -7123,10 +7183,10 @@ function MapScreen() {
       source: 'manual',
     });
     addSavedPlace({
-      id: `captured:${trail.id}`,
-      name: trail.name,
-      lat: trail.lat,
-      lng: trail.lng,
+      id: `captured:${namedTrail.id}`,
+      name: routeName,
+      lat: namedTrail.lat,
+      lng: namedTrail.lng,
       icon: 'flag',
       note: `${fmtTrailRouteDistance(plan.distanceM)} captured trail route`,
       createdAt: Date.now(),
@@ -7134,6 +7194,24 @@ function MapScreen() {
     setQuickToast('Saved to Route Builder > Trails');
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     setTimeout(() => setQuickToast(''), 2400);
+  }
+
+  function nameAndSaveTrailRoutePlan(trail: TrailFeature, plan: TrailRoutePlan) {
+    const fallbackName = trail.name === 'Pinned trail route' ? 'Pinned trail route' : trail.name;
+    if (Platform.OS === 'ios' && typeof Alert.prompt === 'function') {
+      Alert.prompt(
+        'Name trail route',
+        'Saved routes are cached for offline follow.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Save', onPress: name => saveTrailRoutePlan(trail, plan, name || fallbackName) },
+        ],
+        'plain-text',
+        fallbackName,
+      );
+      return;
+    }
+    saveTrailRoutePlan(trail, plan, fallbackName);
   }
 
   function openExternalMaps(lat: number, lng: number, name: string) {
@@ -7722,7 +7800,7 @@ function MapScreen() {
                   <Ionicons name="arrow-undo-outline" size={14} color={trailCapturePins.length === 0 ? OVR.text3 : OVR.text2} />
                   <Text style={[s.pinCaptureActionText, trailCapturePins.length === 0 && { color: OVR.text3 }]}>UNDO</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={s.pinCapturePreview} onPress={capturePinnedTrailRoute} disabled={trailCaptureBusy || trailCapturePins.length < 2}>
+                <TouchableOpacity style={s.pinCapturePreview} onPress={() => capturePinnedTrailRoute()} disabled={trailCaptureBusy || trailCapturePins.length < 2}>
                   {trailCaptureBusy
                     ? <ActivityIndicator size="small" color="#22c55e" />
                     : <Ionicons name="checkmark" size={15} color={trailCapturePins.length < 2 ? OVR.text3 : '#22c55e'} />}
@@ -8259,10 +8337,7 @@ function MapScreen() {
               <TouchableOpacity
                 style={s.discoveryPanelClose}
                 onPress={() => {
-                  setTrailRouteBuilderOpen(false);
-                  setTrailRoutePlans([]);
-                  setSelectedTrailRoutePlanId(null);
-                  setTrailRouteSegmentStatus([]);
+                  clearTrailRoutePreview();
                   setTrailCardCollapsed(false);
                 }}
               >
@@ -8361,7 +8436,7 @@ function MapScreen() {
                   <TouchableOpacity
                     style={s.trailRouteSecondaryBtn}
                     onPress={() => {
-                      setTrailRouteBuilderOpen(false);
+                      clearTrailRoutePreview();
                       setTrailCardCollapsed(false);
                     }}
                   >
@@ -8373,7 +8448,7 @@ function MapScreen() {
                     disabled={!selectedTrailRoutePlanId}
                     onPress={() => {
                       const plan = trailRoutePlans.find(p => p.id === selectedTrailRoutePlanId);
-                      if (plan) saveTrailRoutePlan(selectedTrail, plan);
+                      if (plan) nameAndSaveTrailRoutePlan(selectedTrail, plan);
                     }}
                   >
                     <Ionicons name="bookmark-outline" size={14} color={OVR.text2} />

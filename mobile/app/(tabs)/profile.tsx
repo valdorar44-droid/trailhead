@@ -13,7 +13,7 @@ import * as Updates from 'expo-updates';
 import Constants from 'expo-constants';
 import * as Application from 'expo-application';
 import { api, ApiError, ContestStatus, ContributorProfile } from '@/lib/api';
-import { useStore, RigProfile, TripHistoryItem } from '@/lib/store';
+import { useStore, RigProfile, SavedPlace, TripHistoryItem } from '@/lib/store';
 import PaywallModal from '@/components/PaywallModal';
 import TourTarget from '@/components/TourTarget';
 import { TrailheadButton, TrailheadCard, TrailheadMetricRow, TrailheadTopBar } from '@/components/TrailheadUI';
@@ -120,6 +120,9 @@ export default function ProfileScreen() {
   const setWeatherUnitMode = useStore(st => st.setWeatherUnitMode);
   const favoriteCamps  = useStore(st => st.favoriteCamps);
   const toggleFavorite = useStore(st => st.toggleFavorite);
+  const savedPlaces = useStore(st => st.savedPlaces);
+  const removeSavedPlace = useStore(st => st.removeSavedPlace);
+  const setPendingMapSelection = useStore(st => st.setPendingMapSelection);
   const [view, setView] = useState<'main' | 'login' | 'register' | 'forgot'>(!user ? 'login' : 'main');
   const [authSuccess, setAuthSuccess] = useState('');  // brief success message before switching to main
   const authFade = useRef(new Animated.Value(1)).current;
@@ -174,6 +177,16 @@ export default function ProfileScreen() {
   const setActiveTrip = useStore(st => st.setActiveTrip);
   const addTripToHistory = useStore(st => st.addTripToHistory);
   const startGuidedTour = useStore(st => st.startGuidedTour);
+
+  function openSavedCampOnMap(camp: typeof favoriteCamps[number]) {
+    setPendingMapSelection({ kind: 'camp', camp });
+    router.push('/(tabs)/map');
+  }
+
+  function openSavedPlaceOnMap(place: SavedPlace) {
+    setPendingMapSelection({ kind: 'place', place });
+    router.push('/(tabs)/map');
+  }
 
   // Smooth auth → main transition: dismiss keyboard, show success flash, fade out, switch view
   function transitionToMain(successMsg: string) {
@@ -1513,17 +1526,40 @@ export default function ProfileScreen() {
               <Text style={s.sectionLabel}>SAVED CAMPS</Text>
             </View>
             {favoriteCamps.map(camp => (
-              <View key={camp.id} style={[s.txRow, { alignItems: 'flex-start', paddingVertical: 8 }]}>
+              <TouchableOpacity key={camp.id} style={[s.txRow, { alignItems: 'flex-start', paddingVertical: 8 }]} activeOpacity={0.86} onPress={() => openSavedCampOnMap(camp)}>
                 <View style={{ flex: 1 }}>
                   <Text style={[s.txReason, { fontWeight: '700', fontSize: 13 }]} numberOfLines={1}>{camp.name}</Text>
                   <Text style={{ color: C.text3, fontSize: 10, fontFamily: 'monospace', marginTop: 2 }}>
                     {camp.land_type || 'Camp'}{camp.cost ? ` · ${camp.cost}` : ''}
                   </Text>
                 </View>
-                <TouchableOpacity onPress={() => toggleFavorite(camp)} style={{ padding: 4 }}>
+                <TouchableOpacity onPress={(event: any) => { event.stopPropagation?.(); toggleFavorite(camp); }} style={{ padding: 4 }}>
                   <Ionicons name="heart" size={16} color="#ef4444" />
                 </TouchableOpacity>
-              </View>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
+        {/* Saved Locations */}
+        {savedPlaces.length > 0 && (
+          <View style={s.historyCard}>
+            <View style={s.sectionLabelRow}>
+              <Ionicons name="bookmark" size={13} color={C.orange} />
+              <Text style={s.sectionLabel}>SAVED LOCATIONS</Text>
+            </View>
+            {savedPlaces.map(place => (
+              <TouchableOpacity key={place.id} style={[s.txRow, { alignItems: 'flex-start', paddingVertical: 8 }]} activeOpacity={0.86} onPress={() => openSavedPlaceOnMap(place)}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[s.txReason, { fontWeight: '700', fontSize: 13 }]} numberOfLines={1}>{place.name}</Text>
+                  <Text style={{ color: C.text3, fontSize: 10, fontFamily: 'monospace', marginTop: 2 }} numberOfLines={1}>
+                    {place.note || `${place.lat.toFixed(5)}, ${place.lng.toFixed(5)}`}
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={(event: any) => { event.stopPropagation?.(); removeSavedPlace(place.id); }} style={{ padding: 4 }}>
+                  <Ionicons name="trash-outline" size={16} color={C.text3} />
+                </TouchableOpacity>
+              </TouchableOpacity>
             ))}
           </View>
         )}

@@ -133,6 +133,7 @@ interface AppState {
   activeTripFromCache: boolean;
   pendingSavedTrailId: string | null;
   pendingNavigatePlace: { lat: number; lng: number; name: string } | null;
+  pendingMapSelection: { kind: 'camp'; camp: CampsitePin } | { kind: 'place'; place: SavedPlace } | null;
   tabBarHidden: boolean;
   hasPlan: boolean;
   planExpiresAt: number | null;
@@ -165,6 +166,7 @@ interface AppState {
   setOfflineTripIds: (ids: string[]) => void;
   setPendingSavedTrailId: (id: string | null) => void;
   setPendingNavigatePlace: (place: { lat: number; lng: number; name: string } | null) => void;
+  setPendingMapSelection: (selection: AppState['pendingMapSelection']) => void;
   setPlan: (active: boolean, expiresAt?: number | null) => void;
   startGuidedTour: () => void;
   setTourTarget: (key: string, rect: Omit<TourTargetRect, 'updatedAt'> | null) => void;
@@ -192,6 +194,7 @@ export const useStore = create<AppState>((set) => ({
   activeTripFromCache: false,
   pendingSavedTrailId: null,
   pendingNavigatePlace: null,
+  pendingMapSelection: null,
   tabBarHidden: false,
   hasPlan: false,
   planExpiresAt: null,
@@ -231,6 +234,7 @@ export const useStore = create<AppState>((set) => ({
       rigProfile: null,
       tripHistory: [],
       favoriteCamps: [],
+      pendingMapSelection: null,
       sessionId: freshSession,
       hasPlan: false,
       planExpiresAt: null,
@@ -301,6 +305,7 @@ export const useStore = create<AppState>((set) => ({
   setOfflineTripIds: (ids) => set({ offlineTripIds: ids }),
   setPendingSavedTrailId: (id) => set({ pendingSavedTrailId: id }),
   setPendingNavigatePlace: (place) => set({ pendingNavigatePlace: place }),
+  setPendingMapSelection: (selection) => set({ pendingMapSelection: selection }),
   setPlan: (active, expiresAt = null) => {
     sd(PLAN_KEY);
     set({ hasPlan: active, planExpiresAt: expiresAt });

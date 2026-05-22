@@ -2673,11 +2673,6 @@ export default function RouteBuilderScreen() {
           subtitle="Saved routes, camps, trail routes"
           icon="trail-sign-outline"
           style={s.wizardScreenTop}
-          right={(
-            <TouchableOpacity style={s.headerBtn} onPress={() => setShowPlaceFilters(true)} accessibilityLabel="Route Builder options">
-              <Ionicons name="options-outline" size={17} color={C.orange} />
-            </TouchableOpacity>
-          )}
         />
         <ScrollView
           style={s.body}
@@ -3026,7 +3021,7 @@ export default function RouteBuilderScreen() {
 
         {buildingFramework && <RouteBuildStatus C={C} message={frameworkStatus} />}
 
-        <View style={[s.wizardNav, fullScreen && [s.wizardNavDock, { marginBottom: 104 + bottomInset }]]}>
+        <View style={[s.wizardNav, fullScreen && [s.wizardNavDock, { marginBottom: 72 + bottomInset }]]}>
           <TouchableOpacity style={[s.wizardNavBtn, wizardStep === 0 && { opacity: 0.45 }]} onPress={() => setWizardStep(step => Math.max(0, step - 1))} disabled={wizardStep === 0}>
             <Ionicons name="chevron-back" size={13} color={C.text3} />
             <Text style={s.wizardNavText}>BACK</Text>
@@ -3103,9 +3098,7 @@ export default function RouteBuilderScreen() {
     <SafeAreaView style={s.wizardScreen}>
       <View style={s.wizardScreenTop}>
         <Text style={s.title}>Route Builder</Text>
-        <TouchableOpacity style={s.headerBtn} onPress={() => setShowPlaceFilters(true)} accessibilityLabel="Route Builder options">
-          <Ionicons name="options-outline" size={17} color={C.orange} />
-        </TouchableOpacity>
+        <View style={s.headerBtn} />
       </View>
 
       <TrailheadSheet handle={false} style={[s.routeEditorPanel, { marginBottom: keyboardVisible ? 12 : 116 + bottomInset }]} contentStyle={s.routeSheetContent}>

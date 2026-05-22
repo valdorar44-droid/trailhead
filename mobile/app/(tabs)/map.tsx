@@ -2842,6 +2842,8 @@ function MapScreen() {
   const setPendingSavedTrailId = useStore(st => st.setPendingSavedTrailId);
   const pendingNavigatePlace = useStore(st => st.pendingNavigatePlace);
   const setPendingNavigatePlace = useStore(st => st.setPendingNavigatePlace);
+  const pendingMapSelection = useStore(st => st.pendingMapSelection);
+  const setPendingMapSelection = useStore(st => st.setPendingMapSelection);
   const user = useStore(st => st.user);
   const setStoreLoc = useStore(st => st.setUserLoc);
   const setStoreToken = useStore(st => st.setMapboxToken);
@@ -4124,6 +4126,51 @@ function MapScreen() {
     setPendingNavigatePlace(null);
     setTimeout(() => navigateToCamp(place), 120);
   }, [pendingNavigatePlace, userLoc?.lat, userLoc?.lng]);
+
+  useEffect(() => {
+    if (!pendingMapSelection) return;
+    setPendingMapSelection(null);
+    setShowSearch(false);
+    setSearchRouteCard(null);
+    setSelectedTrail(null);
+    setSelectedCommunityPin(null);
+    setTappedTrail(null);
+    setTappedTileSpot(null);
+    setTappedGas(null);
+    setTappedPoi(null);
+    if (pendingMapSelection.kind === 'camp') {
+      const camp = pendingMapSelection.camp;
+      setSelectedPlace(null);
+      setSelectedCamp(camp);
+      setCampDetail(null);
+      setCampInsight(null);
+      setWikiArticles([]);
+      setCampFullness(null);
+      setCampWeather(null);
+      nativeMapRef.current?.flyTo(camp.lat, camp.lng, 12, camp.name);
+      webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: camp.lat, lng: camp.lng, zoom: 12, name: camp.name }));
+      if (camp.id) api.getCampFullness(camp.id).then(r => setCampFullness(r)).catch(() => {});
+      if (camp.lat && camp.lng) api.getWeather(camp.lat, camp.lng, 3, weatherUnitMode).then(r => setCampWeather(r)).catch(() => {});
+      return;
+    }
+    const place = pendingMapSelection.place;
+    setSelectedCamp(null);
+    setCampDetail(null);
+    setCampInsight(null);
+    setWikiArticles([]);
+    setSelectedPlace({
+      id: place.id,
+      name: place.name,
+      lat: place.lat,
+      lng: place.lng,
+      type: place.icon === 'fuel' ? 'fuel' : place.icon === 'water' ? 'water' : place.icon === 'camp' ? 'camp' : 'poi',
+      source: 'saved',
+      source_label: 'Saved location',
+      summary: place.note || 'Saved location',
+    });
+    nativeMapRef.current?.flyTo(place.lat, place.lng, 12, place.name);
+    webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: place.lat, lng: place.lng, zoom: 12, name: place.name }));
+  }, [pendingMapSelection, setPendingMapSelection, weatherUnitMode]);
 
   function beginCommunityPinDrop(useCurrentLocation = false) {
     setQuickReport(false);
@@ -7766,7 +7813,7 @@ function MapScreen() {
         </View>
       )}
 
-      {!navMode && !showSearch && !selectedCamp && !selectedPlace && !selectedTrail && !selectedCommunityPin && (
+      {!activeTrip && !navMode && !showSearch && !selectedCamp && !selectedPlace && !selectedTrail && !selectedCommunityPin && (
         <View style={s.exploreSearchWrap} pointerEvents="box-none">
           <View
             style={s.exploreSearchPill}

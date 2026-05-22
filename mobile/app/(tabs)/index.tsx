@@ -19,8 +19,9 @@ import { useStore } from '@/lib/store';
 import { useTheme, useTag, mono, ColorPalette } from '@/lib/design';
 import { saveOfflineTrip, loadOfflineTrip } from '@/lib/offlineTrips';
 import { markReviewPromptShown, recordReviewMoment } from '@/lib/reviewPrompt';
+import { CREDIT_REWARDS } from '@/lib/credits';
 
-const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://trailhead-production-2049.up.railway.app';
+const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
 const TRAILHEAD_LOGO = require('../../assets/icon.png');
 
 const EXAMPLES = [
@@ -99,6 +100,7 @@ export default function PlanScreen() {
   const sessionId        = useStore(st => st.sessionId);
   const user             = useStore(st => st.user);
   const rigProfile       = useStore(st => st.rigProfile);
+  const weatherUnitMode  = useStore(st => st.weatherUnitMode);
 
   useEffect(() => {
     setMessages([]);
@@ -173,6 +175,10 @@ export default function PlanScreen() {
     return e instanceof PaywallError || e?.message?.includes('402') || e?.message?.includes('Not enough credits');
   }
 
+  function isRouteValidationMessage(message = '') {
+    return /outside Trail Head|supported planning|too far apart|correct the start|cross-ocean|unsupported/i.test(message);
+  }
+
   // ── Resolve location reference in text ──────────────────────────────────────
   async function resolveLocation(text: string): Promise<string> {
     if (!/\b(my location|from here|current location|where i am|starting from here|starting here)\b/i.test(text)) return text;
@@ -239,7 +245,12 @@ export default function PlanScreen() {
         setPlanPhase('active');
       } catch (e: any) {
         if (isOutOfCredits(e)) handleOutOfCredits();
-        else setMessages(m => [...m, { role: 'ai', text: `Route error: ${e.message}` }]);
+        else {
+          const message = e instanceof ApiError || isRouteValidationMessage(e?.message)
+            ? e.message
+            : 'I could not safely apply that route change. Try one clearer edit with the start, stops, and destination.';
+          setMessages(m => [...m, { role: 'ai', text: message }]);
+        }
         setPlanPhase('active');
       } finally {
         stopStages(); setLoading(false); scrollToEnd();
@@ -345,7 +356,7 @@ export default function PlanScreen() {
       maybeShowReviewPrompt().catch(() => {});
       setPlanPhase('active');
       // Download route weather for offline use (fail silently)
-      api.getRouteWeather(result.trip_id, result.plan.waypoints).then(async weather => {
+      api.getRouteWeather(result.trip_id, result.plan.waypoints, weatherUnitMode).then(async weather => {
         const path = `${FileSystem.documentDirectory}weather_${result.trip_id}.json`;
         await FileSystem.writeAsStringAsync(path, JSON.stringify(weather), { encoding: FileSystem.EncodingType.UTF8 });
         setWeatherToast('Weather downloaded for offline use');
@@ -358,12 +369,15 @@ export default function PlanScreen() {
         setPlanPhase('ready'); // let user try again after buying
       } else {
         const isRateLimit = e.message?.includes('429') || e.message?.toLowerCase().includes('rate limit');
+        const isRouteValidation = isRouteValidationMessage(e.message);
         setMessages(m => [
           ...m,
           {
             role: 'ai',
             text: isRateLimit
               ? 'The guide is busy for a moment. Tap Retry in about 30 seconds and I’ll pick it back up.'
+              : isRouteValidation
+              ? e.message
               : e.message?.includes('taking longer')
               ? 'This trip is taking longer than usual to plan. Tap Retry and I’ll keep the route tighter.'
               : e.message?.includes('non-JSON') || e.message?.includes('```')
@@ -413,7 +427,7 @@ export default function PlanScreen() {
         </Text>
         <View style={s.loginGatePerks}>
           {[
-            ['flash',          '50 signup credits, then earn more by contributing'],
+            ['flash',          `${CREDIT_REWARDS.signup} signup credits, then earn more by contributing`],
             ['map-outline',    'Route days, fuel, camps, POIs, and weather'],
             ['download-outline', 'Offline maps, route packs, and trip corridors'],
             ['shield-checkmark-outline', 'Private trips with community reports when needed'],

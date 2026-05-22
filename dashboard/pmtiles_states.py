@@ -82,6 +82,7 @@ STATE_BBOXES: dict[str, tuple[float, float, float, float]] = {
 REGION_BBOXES: dict[str, tuple[float, float, float, float]] = {
     "CANADA": (-141.1, 41.7, -52.6, 83.2),
     "MEXICO": (-118.6, 14.5, -86.7, 32.8),
+    "FI": (19.0, 59.5, 31.6, 70.1),
 }
 
 # Per-state status: code → dict

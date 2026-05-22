@@ -102,6 +102,14 @@ export const FILE_REGIONS = {
     description: 'Mexico offline map · roads, towns, trails, parks',
     bounds: { n: 32.8, s: 14.5, e: -86.7, w: -118.6 },
   },
+  fi: {
+    id: 'fi', name: 'Finland',
+    url: `${BASE}/api/download/fi.pmtiles`,
+    localPath: `${OFFLINE_DIR}fi.pmtiles`,
+    estimatedGb: 1.2,
+    description: 'Finland offline map · roads, trails, towns, parks',
+    bounds: { n: 70.1, s: 59.5, e: 31.6, w: 19.0 },
+  },
 } as const;
 
 export type FileRegionId = keyof typeof FILE_REGIONS;
@@ -122,6 +130,7 @@ export const ROUTING_PACK_BYTES: Record<string, number> = {
   oh: 786380800, wi: 485171200,
   canada: 1828741120,
   mexico: 1835325440,
+  fi: 450000000,
 };
 
 export const ROUTING_REGIONS = Object.fromEntries(

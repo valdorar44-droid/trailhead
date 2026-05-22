@@ -1,2 +1,11 @@
 [phases.setup]
-nixPkgs = ["...", "valhalla"]
+nixPkgs = ["nodejs_23", "npm-10_x", "python312", "python312Packages.pip"]
+
+[phases.install]
+cmds = ["python -m venv --copies /opt/venv && . /opt/venv/bin/activate && pip install -r requirements.txt", "npm install"]
+
+[phases.build]
+cmds = ["npm run build"]
+
+[start]
+cmd = ". /opt/venv/bin/activate && python run.py"

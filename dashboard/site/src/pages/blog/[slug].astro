@@ -1,0 +1,21 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import { getPost, posts } from "../../data/posts";
+
+export function getStaticPaths() {
+  return posts.map(post => ({ params: { slug: post.slug } }));
+}
+
+const post = getPost(Astro.params.slug || '');
+if (!post) return Astro.redirect('/blog');
+---
+
+<Layout title={`${post.title} - Trailhead`} description={post.description}>
+  <article class="th-article">
+    <a href="/blog" class="th-back">Back to journal</a>
+    <p class="th-eyebrow">{post.category}</p>
+    <h1>{post.title}</h1>
+    <p class="th-article-lead">{post.description}</p>
+    {post.body.map(paragraph => <p>{paragraph}</p>)}
+  </article>
+</Layout>

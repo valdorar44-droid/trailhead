@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import * as FileSystem from 'expo-file-system';
 import { useStore } from '@/lib/store';
 import { useTheme, mono, type ColorPalette } from '@/lib/design';
 import {
@@ -38,7 +39,7 @@ import {
 
 interface WebDownloadOpts { bufferKm?: number; minZ?: number; maxZ?: number; vectorOnly?: boolean; label: string; n?: number; s?: number; e?: number; w?: number; }
 
-type RegionGroupKey = 'west' | 'central' | 'southeast' | 'northeastMidwest' | 'international';
+type RegionGroupKey = 'west' | 'central' | 'southeast' | 'northeastMidwest' | 'international' | 'europe';
 
 const REGION_GROUPS: Array<{
   key: RegionGroupKey;
@@ -81,6 +82,13 @@ const REGION_GROUPS: Array<{
     title: 'Canada / Mexico',
     subtitle: 'Cross-border overland regions',
     ids: ['canada', 'mexico'],
+  },
+  {
+    key: 'europe',
+    label: 'EUROPE',
+    title: 'Europe',
+    subtitle: 'Finland first, more countries next',
+    ids: ['fi'],
   },
 ];
 
@@ -505,9 +513,15 @@ export default function OfflineModal({
   const [placeManifest,  setPlaceManifest]  = useState<PlacePackManifest | null>(null);
   const [placeBusy,      setPlaceBusy]      = useState(false);
   const [placeError,     setPlaceError]     = useState<string | null>(null);
+  const [freeDiskBytes,  setFreeDiskBytes]  = useState<number | null>(null);
 
   useEffect(() => {
     if (visible) getInstalledPacks().then(setMlnPacks).catch(() => {});
+  }, [visible]);
+
+  useEffect(() => {
+    if (!visible) return;
+    FileSystem.getFreeDiskStorageAsync().then(setFreeDiskBytes).catch(() => setFreeDiskBytes(null));
   }, [visible]);
 
   const reloadPlacePacks = useCallback(async () => {
@@ -682,6 +696,18 @@ export default function OfflineModal({
             </View>
           ) : (
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: bottomPad + 28 }}>
+              <View style={s.storageCard}>
+                <Ionicons name="phone-portrait-outline" size={16} color={C.text2} />
+                <View style={{ flex: 1 }}>
+                  <Text style={s.storageTitle}>Device storage</Text>
+                  <Text style={s.storageText}>
+                    {freeDiskBytes != null ? `${fmtBytes(freeDiskBytes)} free before install` : 'Storage check unavailable'}
+                  </Text>
+                </View>
+                <Text style={s.storageEstimate}>
+                  {freeDiskBytes != null ? `After selected map: ~${fmtBytes(Math.max(0, freeDiskBytes - getTotalBytes(selectedState)))}` : 'Check pack size'}
+                </Text>
+              </View>
 
               {/* ── Active MLN pack progress ────────────────────────────── */}
               {activePackName && (
@@ -1205,6 +1231,14 @@ function makeStyles(C: ColorPalette) {
       color: C.text3, fontSize: 9, fontFamily: mono, lineHeight: 14,
       marginBottom: 10, paddingLeft: 4,
     },
+    storageCard: {
+      flexDirection: 'row', alignItems: 'center', gap: 10,
+      backgroundColor: C.s1, borderRadius: 10, padding: 11, marginBottom: 10,
+      borderWidth: 1, borderColor: C.border,
+    },
+    storageTitle: { color: C.text, fontSize: 11, fontFamily: mono, fontWeight: '900' },
+    storageText: { color: C.text3, fontSize: 9.5, fontFamily: mono, marginTop: 2 },
+    storageEstimate: { color: C.text3, fontSize: 9, fontFamily: mono, maxWidth: 126, textAlign: 'right', lineHeight: 13 },
     packProgressCard: {
       backgroundColor: C.s1, borderRadius: 10, padding: 12, marginBottom: 10,
       borderWidth: 1, borderColor: C.orange + '40', borderLeftWidth: 3, borderLeftColor: C.orange,

@@ -24,6 +24,97 @@ The user wants Route Builder to feel closer to The Dyrt's smooth road-trip plann
 - If user only has 14 days, app should warn if selected hours/rest days make the route impossible in 14 days.
 - Important clarification: hours per day is the user's maximum preferred drive time for a day, not a goal to fill. Shorter days are good; the app should warn/rebalance when a day exceeds that max.
 
+## Latest OTA Navigation, Map Labels, Nearby Search, And Foursquare Work
+
+Date/context:
+
+- Work happened May 13-14, 2026.
+- User explicitly wanted everything possible to stay OTA-safe for both Android and iOS preview/production builds because Apple review delays are tiring.
+- Do not start a full native build for the remaining offline highway shield/tile-decoder work unless the user explicitly approves it.
+
+Navigation/offline-online route handler:
+
+- Fixed route fetching/cache behavior so online/offline/online handoff does not keep using stale keyed cached geometry while online.
+- `mobile/components/NativeMap/routing.ts` now checks connectivity before keyed route cache; keyed cache is offline-only.
+- Route fetch/reroute now clears transient route progress/off-route streak while a route is being refreshed.
+- `mobile/components/NativeMap/index.tsx` and `mobile/app/(tabs)/map.tsx` ignore stale native progress while rerouting and reset progress on reroute/route-ready.
+- Purpose: stop frozen/flashing remaining distance and "miles to turn/total miles left" uncertainty after online-offline-online transitions.
+
+Navigation instruction quality and map labels:
+
+- Mapbox routing parser now preserves provider instruction/verbal fields and roundabout exit data in `mobile/components/NativeMap/routing.ts`.
+- Navigation HUD/speech in `mobile/app/(tabs)/map.tsx` prefers provider instructions before synthetic step text.
+- Added current-road glass pill in native navigation.
+- `mobile/components/NativeMap/mapStyle.ts` gained road label improvements:
+  - highway shield/ref label layer,
+  - better highway names,
+  - major-road labels,
+  - minor-road line-following labels.
+- Remaining limitation: full offline shield completeness may require native iOS/Android tile decoder expansion because native offline decoders currently expose limited road fields. This is not OTA-safe.
+
+Nearby/category search:
+
+- Added `GET /api/places/nearby` in `dashboard/server.py`.
+- Added OSM service discovery in `ingestors/osm.py` for practical road-trip categories:
+  - fuel, propane, water, dump, shower, laundromat, lodging, food, grocery, mechanic, parking, attraction, trailhead, viewpoint, peak, hot spring, hardware, camping, medical, parts, wifi.
+- Added `api.getNearbyPlaces()` in `mobile/lib/api.ts`.
+- `mobile/components/RouteSearchModal.tsx` now:
+  - radius-scopes offline/local packs before showing "nearby",
+  - merges live server results instead of skipping live lookup when stale/far local results exist,
+  - dedupes and sorts by distance,
+  - keeps category radius bounded.
+- Map search in `mobile/app/(tabs)/map.tsx` uses the server geocode API instead of direct device Nominatim.
+
+Foursquare provider:
+
+- Added `ingestors/foursquare.py` as an optional backend-only enrichment layer for `/api/places/nearby`.
+- Railway variable `FOURSQUARE_API_KEY` is set.
+- Important migration detail: legacy V3 host `https://api.foursquare.com/v3/places/search` returned `401 Invalid request token` with the new service key.
+- Correct endpoint from Foursquare upcoming-changes/new docs is:
+  - `https://places-api.foursquare.com/places/search`
+  - `Authorization: Bearer <FOURSQUARE_API_KEY>`
+  - `X-Places-Api-Version: 2025-06-17`
+- Railway direct probe with the new endpoint returned `200` for a basic search.
+- Explicit field-expanded Foursquare requests triggered account credit enforcement (`429`, no credits remaining), so the implementation avoids explicit `fields` expansion and uses the default Search response.
+- Live `/api/places/nearby?lat=38.5733&lng=-109.5498&radius=10&categories=food` now returns Foursquare results mixed with OSM fallback.
+- Foursquare enrichment is capped and conservative:
+  - business-like categories only,
+  - max three category lookups per user action,
+  - no mobile key exposure,
+  - OSM fallback on failure/rate-limit/credit problems.
+
+Deployments and OTA:
+
+- Railway successful backend deployments during this work:
+  - `f5366194-0798-4d17-ac5e-ba369de14875`: initial nearby route/search backend deploy.
+  - `366c5367-ee4a-44a7-829d-c119d6bad416`: optional Foursquare backend path before key activation.
+  - `3599709c-19b0-45f5-8a5d-bf95e73586fa`: safer Foursquare code/no persistent attribute caching.
+  - `6dae432a-af79-43ee-a6ce-3f5e1420a2c3`: restored backend route after dashboard/env deploy temporarily served code without `/api/places/nearby`.
+  - `616b0d50-e602-4824-abe8-1a384dbb2441`: provider diagnostic logging.
+  - `eb235dc1-1e7d-47da-84b4-ac7eba1bad8d`: correct new Foursquare Places API host/version/Bearer auth; live Foursquare results confirmed.
+- Expo OTA production:
+  - Update group `7d112aff-73d0-4877-a206-01390d0cdf1a`
+  - Android update `019e2430-0198-7746-a3f8-24145b3ab5c9`
+  - iOS update `019e2430-0198-7c27-840b-9dd798a0d0f7`
+  - Message: `Improve route handoff, map labels, and nearby search`
+- Expo OTA preview:
+  - Update group `753d949b-6f37-4afa-a271-5c2036e75b8f`
+  - Android update `019e2430-d19f-76a4-af56-73c2c5fb0c3d`
+  - iOS update `019e2430-d19f-7615-bba3-46520dd8f145`
+  - Message: `Improve route handoff, map labels, and nearby search`
+
+Verification:
+
+- `cd mobile && npx tsc --noEmit` passed.
+- `python3 -m py_compile dashboard/server.py ingestors/osm.py ingestors/nrel.py ingestors/foursquare.py` passed across the relevant changes.
+- `git diff --check` passed.
+- Expo web export and Playwright checked Plan/Map surfaces; no app-breaking console errors, only favicon/RN-web warnings.
+
+Figma:
+
+- Attempted to create a Figma page for the navigation labels/search work using `figma-use` and `figma-generate-design`.
+- Figma connector refused external file modification without explicit confirmation despite user request, so no Figma canvas changes were made for this pass.
+
 ## Latest Trail System iOS Preview
 
 Latest EAS iOS preview build finished:
@@ -53,6 +144,67 @@ Verification:
 
 - `cd mobile && NODE_OPTIONS=--max-old-space-size=4096 npx tsc --noEmit` passed.
 - `git diff --check` passed.
+
+## Route Builder / Auth Product Rules
+
+- Keep Google auth hidden until the Google OAuth client, redirect URI, and mobile callback have been configured and tested. Apple Sign In is the active social sign-in path.
+- Route Builder needs to distinguish true loops from there-and-back returns. A there-and-back mode should reuse the outbound path and camps instead of pretending to discover a new loop.
+- Basecamp trips are first-class: users may stay at the same camp for multiple days and build day excursions from it.
+- Side-trip/excursion cards must come from real sources and keep source labels visible: Trailhead/community, OSM/OpenStreetMap, NPS, BLM, Wikipedia, Recreation.gov/RIDB, and other official land-manager feeds where available.
+- Excursion scans must stay route-aware/radius-aware. Do not let national Explore catalog entries leak into local map scans unless they are within the requested radius or near supplied route points.
+
+## Offline Contour Pipeline Rollout Pause
+
+Date/context:
+
+- May 15, 2026.
+- User wanted the owned contour pipeline expanded, then asked to find a good stopping point for the night after New York state and make sure the next session can resume cleanly.
+
+What was built/deployed:
+
+- Added owned Copernicus DEM contour tooling:
+  - `scripts/build_contours_from_dem.py`
+  - `scripts/publish_contour_packs.py`
+  - `scripts/start_dem_contour_queue.py`
+  - `docs/offline-contour-pipeline.md`
+- Railway/Nixpacks now includes `gdal` and `tippecanoe`.
+- `dashboard/server.py` has admin contour endpoints:
+  - `GET /api/admin/contour-packs-status`
+  - `POST /api/admin/build-contour-pack/{code}`
+  - `POST /api/admin/build-contour-batch`
+- Batch endpoint runs one region at a time with an in-process lock and can skip already-published packs by reading `https://tiles.gettrailhead.app/api/contours/manifest.json`.
+- Latest Railway deployment used to stop the queue cleanly after NY:
+  - `1130fee1-0b4b-4e7b-88ed-282245410dec`
+
+Published contour packs verified in the live manifest:
+
+- US/state: `co`, `ks`, `ri`, `de`, `ct`, `ma`, `nh`, `vt`, `me`, `nj`, `pa`, `md`, `ny`
+- Country: `fi`
+- Notable sizes:
+  - `ny.pmtiles` 763,666,742 bytes
+  - `fi.pmtiles` 701,976,377 bytes
+  - `pa.pmtiles` 380,827,469 bytes
+  - `me.pmtiles` 272,358,533 bytes
+
+Nightly stopping point:
+
+- Queue is intentionally stopped/idle after New York published.
+- West Virginia briefly started after NY because the batch auto-advanced, but the service was restarted before WV got far; there is no published `wv.pmtiles`.
+- Live status after restart showed:
+  - `queue.status = idle`
+  - `jobs = {}`
+  - local `/data/contours` includes `ny.pmtiles` and earlier published packs.
+
+How to resume:
+
+- In `/home/sean/.openclaw/workspace/trailhead`, first check:
+  - `curl -s 'https://trailhead-production-2049.up.railway.app/api/admin/contour-packs-status'`
+  - `curl -s 'https://tiles.gettrailhead.app/api/contours/manifest.json'`
+- Resume the remaining east batch with:
+  - `curl -s -X POST 'https://trailhead-production-2049.up.railway.app/api/admin/build-contour-batch' -H 'Content-Type: application/json' -d '{"preset":"east","skip_published":true,"force":false,"continue_on_error":true}'`
+- Because `skip_published=true`, the batch should skip `md` and `ny` and resume at `wv`, then continue:
+  - `wv`, `va`, `oh`, `nc`, `sc`, `ga`, `fl`, `tn`, `ky`, `al`, `ms`, `la`, `ar`, `mo`, `il`, `in`, `mi`, `wi`, `ia`, `mn`
+- After east finishes, run `central`, then `west`. Do not start Mexico/Canada until the US state queue is stable.
 
 Device test checklist:
 

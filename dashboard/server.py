@@ -7,9 +7,10 @@ from email.utils import formataddr
 from pathlib import Path
 from urllib.parse import quote
 from fastapi import FastAPI, HTTPException, Depends, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from typing import Optional
 import httpx
@@ -20,12 +21,15 @@ from config.settings import settings
 from ai.planner import plan_trip, chat_guide, edit_trip, plan_trip_from_conversation
 from dashboard.route_enrichment import enrich_trip_along_route
 from ingestors.ridb import get_campsites_near, get_campsites_search, get_facility_detail
-from ingestors.osm import get_osm_campsites, get_osm_campsite_detail, get_water_sources, get_trailheads, get_trails, get_viewpoints, get_peaks, get_hot_springs, get_fuel_stations
+from ingestors.osm import get_osm_campsites, get_osm_campsite_detail, get_water_sources, get_trailheads, get_trails, get_viewpoints, get_peaks, get_hot_springs, get_fuel_stations, get_service_places
+from ingestors.foursquare import FSQ_BUSINESS_CATEGORIES, foursquare_enabled, get_foursquare_places
+from ingestors.google_places import fetch_google_photo, get_google_place_detail, get_google_places, google_places_enabled
 from ingestors.blm import get_blm_campsites, get_blm_campsite_detail
 from db.store import (
     save_trip, get_trip, add_community_pin, get_community_pins, find_duplicate_community_pin,
     save_audio_guide, get_audio_guide, get_cached, set_cached, get_route_cached, set_route_cached,
-    create_user, get_user_by_email, get_user_by_username, get_user_by_id, get_user_by_referral_code,
+    create_user, create_oauth_user, get_user_by_oauth, link_user_oauth,
+    get_user_by_email, get_user_by_username, get_user_by_id, get_user_by_referral_code,
     set_email_verification, verify_email_token, set_password_reset, reset_password_with_token,
     add_credits, deduct_credits, get_credit_history,
     get_user_report_count_today, get_report_credits_today,
@@ -44,6 +48,7 @@ from db.store import (
     get_camp_brief, set_camp_brief, has_active_plan, activate_plan, use_free_camp_search,
     authorize_offline_download,
     save_push_token, get_push_token,
+    list_user_trips, save_account_trip, save_trip_geometry,
     create_plan_job, get_plan_job, update_plan_job,
     submit_field_report, get_field_reports, get_field_report_summary,
     submit_trail_field_report, get_trail_field_reports, get_trail_field_report_summary,
@@ -99,7 +104,7 @@ CREDIT_PACKAGES = {
     "trailhead":  {"credits": 3000, "price_cents": 3999, "label": "Trailhead+", "popular": False},
 }
 
-SIGNUP_BONUS       = 50
+SIGNUP_BONUS       = 20
 REFERRAL_BONUS     = 20
 COMMUNITY_PIN_CREDIT = 5
 DAILY_REPORT_LIMIT = 8     # max reports per user per day
@@ -155,13 +160,27 @@ def _require_ai(user: dict = Depends(None)) -> dict:
     """Placeholder — replaced at endpoint level via lambda."""
     return user
 
-app = FastAPI(title="Trailhead API")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
-
 DASH    = Path(__file__).parent / "dashboard.html"
 LANDING = Path(__file__).parent / "landing.html"
 ADMIN   = Path(__file__).parent / "admin.html"
+WEB_DIST = Path(__file__).parent / "site" / "dist"
+BLOG_INDEX = Path(__file__).parent / "blog.html"
+BLOG_DIR = Path(__file__).parent / "blog"
 EXPLORE_CATALOG = Path(__file__).parent / "explore_catalog_v1.json"
+APP_ICON = Path(__file__).resolve().parents[1] / "mobile" / "assets" / "icon.png"
+
+app = FastAPI(title="Trailhead API")
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+if (WEB_DIST / "_astro").exists():
+    app.mount("/_astro", StaticFiles(directory=str(WEB_DIST / "_astro")), name="astro-assets")
+if (WEB_DIST / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=str(WEB_DIST / "assets")), name="site-assets")
+
+BLOG_POSTS = {
+    "offline-maps-are-not-magic": "offline-maps-are-not-magic.html",
+    "web-planning-phone-navigation": "web-planning-phone-navigation.html",
+    "trailhead-vs-ioverlander": "trailhead-vs-ioverlander.html",
+}
 
 
 def _haversine_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
@@ -171,6 +190,82 @@ def _haversine_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     dlng = radians(lng2 - lng1)
     a = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlng / 2) ** 2
     return 2 * r * asin(sqrt(a))
+
+
+UNSUPPORTED_ROUTE_TERMS = re.compile(
+    r"\b("
+    r"uk|united kingdom|england|scotland|wales|ireland|london|europe|france|germany|spain|italy|"
+    r"australia|new zealand|africa|asia|china|japan|india|russia|iceland|greenland|hawaii"
+    r")\b",
+    re.I,
+)
+
+SUPPORTED_ROUTE_TERMS = re.compile(
+    r"\b("
+    r"united states|usa|u\.s\.|canada|mexico|finland|alaska|"
+    r"al|ak|az|ar|ca|co|ct|de|fl|ga|id|il|in|ia|ks|ky|la|me|md|ma|mi|mn|ms|mo|mt|"
+    r"ne|nv|nh|nj|nm|ny|nc|nd|oh|ok|or|pa|ri|sc|sd|tn|tx|ut|vt|va|wa|wv|wi|wy|dc|fi"
+    r")\b",
+    re.I,
+)
+
+def _route_validation_result(ok: bool, reason: str = "", details: list[str] | None = None,
+                             severity: str = "block", supported_region: bool = True) -> dict:
+    return {
+        "ok": ok,
+        "severity": severity,
+        "reason": reason,
+        "details": details or [],
+        "supported_region": supported_region,
+    }
+
+def _validate_route_waypoints(waypoints: list[dict], context: str = "") -> dict:
+    names = " ".join(str(w.get("name", "")) for w in waypoints if isinstance(w, dict))
+    text = f"{context} {names}"
+    if UNSUPPORTED_ROUTE_TERMS.search(text) and not re.search(r"\bfinland\b|\bfi\b", text, re.I):
+        return _route_validation_result(
+            False,
+            "This route leaves Trailhead's supported planning regions.",
+            ["Trailhead currently supports the United States, Canada, Mexico, and Finland.", "Start a separate plan inside a supported region."],
+            supported_region=False,
+        )
+
+    points: list[dict] = []
+    for wp in waypoints:
+        if not isinstance(wp, dict):
+            continue
+        lat = wp.get("lat")
+        lng = wp.get("lng")
+        try:
+            lat = float(lat)
+            lng = float(lng)
+        except (TypeError, ValueError):
+            continue
+        if -90 <= lat <= 90 and -180 <= lng <= 180:
+            points.append({"lat": lat, "lng": lng, "name": str(wp.get("name", "stop"))})
+
+    for a, b in zip(points, points[1:]):
+        miles = _haversine_m(a["lat"], a["lng"], b["lat"], b["lng"]) / 1609.344
+        lng_span = abs(a["lng"] - b["lng"])
+        if miles > 2800 and lng_span > 45:
+            return _route_validation_result(
+                False,
+                "This plan contains an unrealistic over-water or unsupported long jump.",
+                [f"{a['name']} to {b['name']} is about {round(miles):,} miles direct.", "Break the trip into supported land routes before saving or navigating."],
+            )
+    return _route_validation_result(True)
+
+def _validate_route_locations(locations: list[dict]) -> dict:
+    for a, b in zip(locations, locations[1:]):
+        miles = _haversine_m(a["lat"], a["lon"], b["lat"], b["lon"]) / 1609.344
+        lng_span = abs(a["lon"] - b["lon"])
+        if miles > 2800 and lng_span > 45:
+            return _route_validation_result(
+                False,
+                "Route request looks like an unsupported cross-ocean jump.",
+                [f"Adjacent route anchors are about {round(miles):,} miles apart.", "Add realistic land-route stops or keep the route inside a supported region."],
+            )
+    return _route_validation_result(True)
 
 
 def _load_explore_catalog() -> dict:
@@ -275,6 +370,102 @@ def _optional_user(creds: HTTPAuthorizationCredentials | None = Depends(bearer))
 def _safe_user(u: dict) -> dict:
     return {k: v for k, v in u.items() if k not in ("password_hash", "photo_data")}
 
+_OAUTH_JWKS_CACHE: dict[str, tuple[float, list[dict]]] = {}
+
+def _oauth_client_ids(provider: str) -> list[str]:
+    if provider == "apple":
+        return [v for v in [settings.apple_bundle_id, settings.apple_service_id] if v]
+    return [v.strip() for v in (settings.google_oauth_client_ids or "").split(",") if v.strip()]
+
+async def _jwks(url: str) -> list[dict]:
+    cached = _OAUTH_JWKS_CACHE.get(url)
+    if cached and time.time() - cached[0] < 3600:
+        return cached[1]
+    async with httpx.AsyncClient(timeout=8) as client:
+        r = await client.get(url)
+        r.raise_for_status()
+    keys = r.json().get("keys") or []
+    _OAUTH_JWKS_CACHE[url] = (time.time(), keys)
+    return keys
+
+async def _decode_oauth_token(provider: str, identity_token: str) -> dict:
+    token = (identity_token or "").strip()
+    if not token:
+        raise HTTPException(400, "Identity token is required")
+    audiences = _oauth_client_ids(provider)
+    if not audiences:
+        raise HTTPException(503, f"{provider.title()} sign in is not configured")
+    issuers = ["https://appleid.apple.com"] if provider == "apple" else ["https://accounts.google.com", "accounts.google.com"]
+    jwks_url = "https://appleid.apple.com/auth/keys" if provider == "apple" else "https://www.googleapis.com/oauth2/v3/certs"
+    try:
+        header = jwt.get_unverified_header(token)
+        kid = header.get("kid")
+        key = next((k for k in await _jwks(jwks_url) if k.get("kid") == kid), None)
+        if not key:
+            _OAUTH_JWKS_CACHE.pop(jwks_url, None)
+            key = next((k for k in await _jwks(jwks_url) if k.get("kid") == kid), None)
+        if not key:
+            raise HTTPException(401, "Could not verify sign-in token")
+        last_error: Exception | None = None
+        for audience in audiences:
+            for issuer in issuers:
+                try:
+                    return jwt.decode(token, key, algorithms=[header.get("alg", "RS256")], audience=audience, issuer=issuer)
+                except Exception as exc:
+                    last_error = exc
+        raise last_error or JWTError("Invalid token audience")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(401, "Invalid sign-in token")
+
+def _oauth_username(email: str, full_name: str, provider: str) -> str:
+    base = re.sub(r"[^A-Za-z0-9_.-]+", "", (full_name or "").strip().replace(" ", "."))
+    if len(base) < 3:
+        base = re.sub(r"[^A-Za-z0-9_.-]+", "", email.split("@")[0])
+    if len(base) < 3:
+        base = f"{provider}user"
+    base = (base[:20].strip("._-") or f"{provider}user")
+    candidate = base
+    for _ in range(12):
+        if not get_user_by_username(candidate):
+            return candidate
+        suffix = secrets.token_hex(2)
+        candidate = f"{base[: max(3, 24 - len(suffix))]}{suffix}"[:24]
+    return f"{provider}{secrets.token_hex(5)}"[:24]
+
+async def _oauth_login(provider: str, body: "OAuthLoginRequest"):
+    claims = await _decode_oauth_token(provider, body.identity_token)
+    sub = str(claims.get("sub") or "")
+    email = str(claims.get("email") or body.email or "").strip().lower()
+    email_verified = str(claims.get("email_verified", "true")).lower() in {"true", "1"}
+    if not sub:
+        raise HTTPException(401, "Sign-in token is missing an account id")
+    if not email:
+        raise HTTPException(400, "Sign-in provider did not return an email address")
+    if provider == "google" and not email_verified:
+        raise HTTPException(401, "Google email is not verified")
+    grant_welcome = False
+    user = get_user_by_oauth(provider, sub)
+    if not user:
+        existing = get_user_by_email(email)
+        if existing:
+            grant_welcome = not int(existing.get("email_verified", 1))
+            user = link_user_oauth(existing["id"], provider, sub) or existing
+        else:
+            username = _oauth_username(email, body.full_name, provider)
+            uid = create_oauth_user(email, username, _hash_pw(secrets.token_urlsafe(48)), provider, sub)
+            user = get_user_by_id(uid)
+            grant_welcome = True
+    if not user:
+        raise HTTPException(500, "Could not create account")
+    if not int(user.get("email_verified", 1)):
+        user = link_user_oauth(user["id"], provider, sub) or user
+    if grant_welcome:
+        _grant_signup_rewards(user)
+    fresh = get_user_by_id(user["id"]) or user
+    return {"token": _make_token(fresh["id"]), "user": _safe_user(fresh)}
+
 def _email_configured() -> bool:
     smtp_ready = bool(settings.smtp_host and settings.smtp_from_email)
     cloudflare_ready = bool(
@@ -288,6 +479,25 @@ def _verification_links(token: str) -> tuple[str, str]:
     app_link = f"trailhead://verify-email?token={token}"
     web_link = f"{settings.public_url.rstrip('/')}/api/auth/verify-email?token={token}"
     return app_link, web_link
+
+def _verification_success_html() -> str:
+    return """<!doctype html>
+<html>
+  <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f7f4ee;color:#171412;padding:32px;line-height:1.45;">
+    <h1>Email confirmed</h1>
+    <p>Your Trailhead account is active. Open the app and sign in.</p>
+    <a href="trailhead://" style="display:inline-block;background:#f97316;color:#fff;text-decoration:none;font-weight:900;border-radius:12px;padding:14px 18px;">Open Trailhead</a>
+  </body>
+</html>"""
+
+def _verification_failed_html() -> str:
+    return """<!doctype html>
+<html>
+  <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f7f4ee;color:#171412;padding:32px;line-height:1.45;">
+    <h1>Verification link expired</h1>
+    <p>Open Trailhead and resend the verification email, or contact hello@gettrailhead.app.</p>
+  </body>
+</html>"""
 
 def _send_email(to_email: str, subject: str, text_body: str, html_body: str) -> None:
     if settings.cloudflare_email_account_id and settings.cloudflare_email_api_token:
@@ -339,6 +549,8 @@ def _send_verification_email(email: str, username: str, token: str) -> None:
         raise RuntimeError("Email sending is not configured")
 
     app_link, web_link = _verification_links(token)
+    safe_web_link = html.escape(web_link, quote=True)
+    safe_app_link = html.escape(app_link, quote=True)
     safe_username = html.escape(username)
     text_body = (
         f"Hi {username},\n\n"
@@ -360,15 +572,16 @@ def _send_verification_email(email: str, username: str, token: str) -> None:
               {{logo_html}}
               <div>
                 <div style="font-size:22px;font-weight:900;letter-spacing:.08em;">TRAILHEAD</div>
-                <div style="font-size:11px;color:#7a6f63;letter-spacing:.18em;">AI OVERLAND GUIDE</div>
+                <div style="font-size:11px;color:#7a6f63;letter-spacing:.18em;">OVERLAND NAVIGATION</div>
               </div>
             </div>
           </td></tr>
           <tr><td style="padding:18px 28px 8px;">
             <h1 style="font-size:26px;line-height:1.15;margin:0 0 12px;">Confirm your email</h1>
             <p style="font-size:16px;line-height:1.55;margin:0 0 18px;color:#4b423a;">Hi {safe_username}, tap the button below to activate your Trailhead account. Your signup credits unlock after verification.</p>
-            <a href="{app_link}" style="display:inline-block;background:#f97316;color:#fff;text-decoration:none;font-weight:900;border-radius:12px;padding:14px 18px;font-size:14px;letter-spacing:.08em;">OPEN TRAILHEAD</a>
-            <p style="font-size:13px;line-height:1.5;margin:18px 0 0;color:#7a6f63;">If the app button does not open, use this secure web link:<br><a href="{web_link}" style="color:#c2410c;">Confirm email in browser</a></p>
+            <a href="{safe_web_link}" style="display:inline-block;background:#f97316;color:#fff;text-decoration:none;font-weight:900;border-radius:12px;padding:14px 18px;font-size:14px;letter-spacing:.08em;">CONFIRM EMAIL</a>
+            <p style="font-size:13px;line-height:1.5;margin:18px 0 0;color:#7a6f63;">If the button does not open, copy this secure link into your browser:<br><a href="{safe_web_link}" style="color:#c2410c;word-break:break-all;">{safe_web_link}</a></p>
+            <p style="font-size:12px;line-height:1.5;margin:12px 0 0;color:#95877a;">Already on your phone? You can also try opening Trailhead directly:<br><a href="{safe_app_link}" style="color:#c2410c;word-break:break-all;">{safe_app_link}</a></p>
           </td></tr>
           <tr><td style="padding:18px 28px 28px;color:#95877a;font-size:12px;line-height:1.5;">You received this because this email was used to create a Trailhead account. Questions? hello@gettrailhead.app</td></tr>
         </table>
@@ -404,7 +617,7 @@ def _send_password_reset_email(email: str, username: str, token: str) -> None:
               {{logo_html}}
               <div>
                 <div style="font-size:22px;font-weight:900;letter-spacing:.08em;">TRAILHEAD</div>
-                <div style="font-size:11px;color:#7a6f63;letter-spacing:.18em;">AI OVERLAND GUIDE</div>
+                <div style="font-size:11px;color:#7a6f63;letter-spacing:.18em;">OVERLAND NAVIGATION</div>
               </div>
             </div>
           </td></tr>
@@ -454,17 +667,126 @@ def _paywall_detail(code: str, message: str, credits_needed: int) -> dict:
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
+    site_index = WEB_DIST / "index.html"
+    if site_index.exists():
+        return FileResponse(site_index, media_type="text/html")
     if LANDING.exists():
         return LANDING.read_text()
     return DASH.read_text()
 
+@app.head("/")
+async def index_head():
+    return Response(status_code=200, media_type="text/html")
+
 @app.get("/app", response_class=HTMLResponse)
 async def app_page():
+    web_index = WEB_DIST / "app" / "index.html"
+    if web_index.exists():
+        return FileResponse(web_index, media_type="text/html")
     return DASH.read_text()
+
+@app.head("/app")
+async def app_page_head():
+    return Response(status_code=200, media_type="text/html")
+
+@app.get("/journal", response_class=HTMLResponse)
+async def journal_page():
+    site_journal = WEB_DIST / "journal" / "index.html"
+    if site_journal.exists():
+        return FileResponse(site_journal, media_type="text/html")
+    return await blog_index()
+
+@app.get("/blog", response_class=HTMLResponse)
+async def blog_index():
+    site_blog = WEB_DIST / "blog" / "index.html"
+    if site_blog.exists():
+        return FileResponse(site_blog, media_type="text/html")
+    if BLOG_INDEX.exists():
+        return BLOG_INDEX.read_text()
+    raise HTTPException(404, "Blog not found")
+
+@app.head("/blog")
+async def blog_index_head():
+    return Response(status_code=200, media_type="text/html")
+
+@app.get("/blog/{slug}", response_class=HTMLResponse)
+async def blog_post(slug: str):
+    site_post = WEB_DIST / "blog" / slug / "index.html"
+    if site_post.exists():
+        return FileResponse(site_post, media_type="text/html")
+    filename = BLOG_POSTS.get(slug)
+    if not filename:
+        raise HTTPException(404, "Post not found")
+    post = BLOG_DIR / filename
+    if not post.exists():
+        raise HTTPException(404, "Post not found")
+    return post.read_text()
+
+@app.head("/blog/{slug}")
+async def blog_post_head(slug: str):
+    if not (WEB_DIST / "blog" / slug / "index.html").exists() and slug not in BLOG_POSTS:
+        raise HTTPException(404, "Post not found")
+    return Response(status_code=200, media_type="text/html")
+
+@app.get("/hero.mp4")
+async def site_hero_video():
+    path = WEB_DIST / "hero.mp4"
+    if not path.exists():
+        raise HTTPException(404, "Asset not found")
+    return FileResponse(path, media_type="video/mp4")
+
+@app.get("/hero.jpg")
+async def site_hero_poster():
+    path = WEB_DIST / "hero.jpg"
+    if not path.exists():
+        raise HTTPException(404, "Asset not found")
+    return FileResponse(path, media_type="image/jpeg")
+
+@app.get("/favicon.svg")
+async def site_favicon():
+    path = WEB_DIST / "favicon.svg"
+    if not path.exists():
+        raise HTTPException(404, "Asset not found")
+    return FileResponse(path, media_type="image/svg+xml")
+
+@app.get("/sitemap-index.xml")
+async def sitemap_index():
+    path = WEB_DIST / "sitemap-index.xml"
+    if not path.exists():
+        raise HTTPException(404, "Asset not found")
+    return FileResponse(path, media_type="application/xml")
+
+@app.get("/sitemap-0.xml")
+async def sitemap_zero():
+    path = WEB_DIST / "sitemap-0.xml"
+    if not path.exists():
+        raise HTTPException(404, "Asset not found")
+    return FileResponse(path, media_type="application/xml")
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_page():
     return ADMIN.read_text()
+
+@app.get("/favicon.ico")
+async def favicon():
+    svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#050505"/><path d="M32 10 13 54h38L32 10Z" fill="none" stroke="#e5e7eb" stroke-width="4" stroke-linejoin="round"/><path d="M24 39 32 20l8 19" fill="none" stroke="#6da8ff" stroke-width="3" stroke-linejoin="round"/></svg>"""
+    return Response(content=svg, media_type="image/svg+xml")
+
+@app.head("/favicon.ico")
+async def favicon_head():
+    return Response(status_code=200, media_type="image/svg+xml")
+
+@app.get("/assets/app-icon.png")
+async def app_icon():
+    if not APP_ICON.exists():
+        raise HTTPException(404, "App icon not found")
+    return Response(content=APP_ICON.read_bytes(), media_type="image/png")
+
+@app.head("/assets/app-icon.png")
+async def app_icon_head():
+    if not APP_ICON.exists():
+        raise HTTPException(404, "App icon not found")
+    return Response(status_code=200, media_type="image/png")
 
 @app.get("/api/health")
 async def health():
@@ -478,6 +800,11 @@ class RegisterRequest(BaseModel):
 
 class LoginRequest(BaseModel):
     email: str; password: str
+
+class OAuthLoginRequest(BaseModel):
+    identity_token: str
+    full_name: str = ""
+    email: str = ""
 
 class VerifyEmailRequest(BaseModel):
     token: str
@@ -538,6 +865,14 @@ async def login(body: LoginRequest):
         raise HTTPException(403, "Email not verified. Check your inbox or resend the verification email.")
     return {"token": _make_token(user["id"]), "user": _safe_user(user)}
 
+@app.post("/api/auth/oauth/apple")
+async def apple_oauth_login(body: OAuthLoginRequest):
+    return await _oauth_login("apple", body)
+
+@app.post("/api/auth/oauth/google")
+async def google_oauth_login(body: OAuthLoginRequest):
+    return await _oauth_login("google", body)
+
 @app.post("/api/auth/verify-email")
 async def verify_email(body: VerifyEmailRequest):
     token = body.token.strip()
@@ -554,9 +889,9 @@ async def verify_email(body: VerifyEmailRequest):
 async def verify_email_web(token: str = ""):
     user = verify_email_token(token.strip()) if token else None
     if not user:
-        return HTMLResponse("""<!doctype html><html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f7f4ee;color:#171412;padding:32px;"><h1>Verification link expired</h1><p>Open Trailhead and resend the verification email, or contact hello@gettrailhead.app.</p></body></html>""", status_code=400)
+        return HTMLResponse(_verification_failed_html(), status_code=400)
     _grant_signup_rewards(user)
-    return HTMLResponse("""<!doctype html><html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f7f4ee;color:#171412;padding:32px;"><h1>Email confirmed</h1><p>Your Trailhead account is active. Open the app and sign in.</p><a href="trailhead://" style="display:inline-block;background:#f97316;color:#fff;text-decoration:none;font-weight:900;border-radius:12px;padding:14px 18px;">Open Trailhead</a></body></html>""")
+    return HTMLResponse(_verification_success_html())
 
 @app.post("/api/auth/resend-verification")
 async def resend_verification(body: ResendVerificationRequest):
@@ -642,7 +977,7 @@ async def reset_password_web(token: str = ""):
 </head>
 <body>
   <main class="card">
-    <div class="brand"><div class="mark">T</div><div><div class="name">TRAILHEAD</div><div class="tag">AI OVERLAND GUIDE</div></div></div>
+    <div class="brand"><div class="mark">T</div><div><div class="name">TRAILHEAD</div><div class="tag">OVERLAND NAVIGATION</div></div></div>
     <h1>Set a new password</h1>
     <p>Use at least 8 characters. After this works, open Trailhead and sign in with the new password.</p>
     <input id="pw" type="password" autocomplete="new-password" placeholder="New password" />
@@ -872,6 +1207,12 @@ async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depend
         if edited_plan:
             geocoded = await _geocode_waypoints(edited_plan.get("waypoints", []))
             edited_plan["waypoints"] = geocoded
+            validation = _validate_route_waypoints(geocoded, body.message)
+            if not validation["ok"]:
+                content = f"{validation['reason']} " + " ".join(validation["details"])
+                messages.append({"role": "assistant", "content": content})
+                save_conversation(conversation_key, messages[-30:])
+                return {"type": "message", "content": content, "route_validation": validation, "trail_dna": trail_dna}
             enrichment = await enrich_trip_along_route(geocoded)
             edited_plan["waypoints"] = enrichment.get("waypoints", geocoded)
             trip_id = body.current_trip.get("trip_id", str(uuid.uuid4())[:8])
@@ -960,6 +1301,12 @@ async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, c
         except Exception:
             geocoded = plan_data.get("waypoints", [])
         plan_data["waypoints"] = geocoded
+        validation = _validate_route_waypoints(geocoded, body.request or "")
+        if not validation["ok"]:
+            if user and cost > 0:
+                add_credits(user["id"], cost, "Refund — unsupported route")
+            update_plan_job(job_id, "failed", error=f"{validation['reason']} {' '.join(validation['details'])}")
+            return
 
         update_plan_job(job_id, "enriching")
         try:
@@ -1074,8 +1421,53 @@ class RouteRequest(BaseModel):
     options: RouteOptions = Field(default_factory=RouteOptions)
     units: str = "miles"
 
+class AccountTripRequest(BaseModel):
+    trip: dict
+    request: str = ""
+    route_geometry: Optional[dict] = None
+    builder_state: Optional[dict] = None
+    source: str = "web"
+
+class RouteGeometryRequest(BaseModel):
+    route_geometry: dict
+
+class PlannerBounds(BaseModel):
+    n: float
+    s: float
+    e: float
+    w: float
+
+class PlannerPoint(BaseModel):
+    lat: float
+    lng: float
+
+class PlannerContextRequest(BaseModel):
+    bounds: PlannerBounds | None = None
+    center: PlannerPoint | None = None
+    radius: float = 35
+    filters: list[str] = Field(default_factory=list)
+    route: list[list[float]] = Field(default_factory=list)
+
+class ExcursionNearbyRequest(BaseModel):
+    center: PlannerPoint
+    radius: float = 35
+    categories: list[str] = Field(default_factory=list)
+    route: list[list[float]] = Field(default_factory=list)
+    day: Optional[int] = None
+    source_context: str = "map"
+
+class NearbySmartPackRequest(BaseModel):
+    center: PlannerPoint
+    radius: float = 35
+    categories: list[str] = Field(default_factory=list)
+    route: list[list[float]] = Field(default_factory=list)
+
 def _valhalla_base_url() -> str:
     return settings.valhalla_url.rstrip("/")
+
+def _route_fallback_urls() -> list[str]:
+    raw = getattr(settings, "route_fallback_urls", "") or ""
+    return [u.strip().rstrip("/") for u in raw.split(",") if u.strip()]
 
 def _valhalla_costing_options(opts: RouteOptions) -> dict:
     return {
@@ -1103,15 +1495,148 @@ def _route_cache_key(payload: dict) -> str:
     raw = json.dumps(canonical, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode()).hexdigest()
 
+def _polyline6_point_count(shape: str) -> int:
+    index = 0
+    count = 0
+    while index < len(shape):
+        for _ in range(2):
+            shift = 0
+            while index < len(shape):
+                b = ord(shape[index]) - 63
+                index += 1
+                shift += 5
+                if b < 0x20:
+                    break
+        count += 1
+    return count
+
+def _osrm_maneuver_type(step: dict, is_first: bool, is_last: bool) -> int:
+    if is_first:
+        return 1
+    if is_last or step.get("maneuver", {}).get("type") == "arrive":
+        return 4
+    modifier = str(step.get("maneuver", {}).get("modifier") or "").lower()
+    if "sharp left" in modifier:
+        return 5
+    if "sharp right" in modifier:
+        return 6
+    if "slight left" in modifier:
+        return 10
+    if "slight right" in modifier:
+        return 11
+    if "left" in modifier:
+        return 2
+    if "right" in modifier:
+        return 3
+    if "uturn" in modifier:
+        return 9
+    return 0
+
+def _osrm_instruction(step: dict, is_first: bool, is_last: bool) -> str:
+    if is_first:
+        return "Head toward destination"
+    if is_last:
+        return "Arrive at destination"
+    name = step.get("name") or step.get("ref") or "the road"
+    modifier = str(step.get("maneuver", {}).get("modifier") or "").replace("straight", "continue")
+    if modifier:
+        return f"{modifier.title()} onto {name}" if name != "the road" else modifier.title()
+    return f"Continue on {name}"
+
+def _osrm_to_valhalla(data: dict, units: str) -> dict:
+    routes = data.get("routes") or []
+    if not routes:
+        raise ValueError("OSRM returned no routes")
+    route = routes[0]
+    meters = float(route.get("distance") or 0)
+    seconds = float(route.get("duration") or 0)
+    length = meters / (1000.0 if units == "kilometers" else 1609.344)
+    maneuvers: list[dict] = []
+    begin_index = 0
+    steps = [step for leg in route.get("legs", []) for step in (leg.get("steps") or [])]
+    for idx, step in enumerate(steps):
+        is_first = idx == 0
+        is_last = idx == len(steps) - 1
+        step_points = max(_polyline6_point_count(step.get("geometry") or ""), 1)
+        maneuver = step.get("maneuver") or {}
+        street_name = step.get("name") or step.get("ref") or ""
+        maneuvers.append({
+            "type": _osrm_maneuver_type(step, is_first, is_last),
+            "instruction": _osrm_instruction(step, is_first, is_last),
+            "verbal_pre_transition_instruction": _osrm_instruction(step, is_first, is_last),
+            "verbal_transition_alert_instruction": "",
+            "verbal_post_transition_instruction": "",
+            "street_names": [street_name] if street_name else [],
+            "length": float(step.get("distance") or 0) / (1000.0 if units == "kilometers" else 1609.344),
+            "time": float(step.get("duration") or 0),
+            "begin_shape_index": begin_index,
+            "end_shape_index": begin_index + step_points - 1,
+            "roundabout_exit_count": None,
+            "_osrm": {
+                "type": maneuver.get("type"),
+                "modifier": maneuver.get("modifier"),
+                "location": maneuver.get("location"),
+            },
+        })
+        begin_index += max(step_points - 1, 1)
+    return {
+        "trip": {
+            "status": 0,
+            "status_message": "Found route",
+            "units": units,
+            "summary": {"length": length, "time": seconds},
+            "legs": [{
+                "shape": route.get("geometry") or "",
+                "summary": {"length": length, "time": seconds},
+                "maneuvers": maneuvers,
+            }],
+        },
+        "_fallback": {
+            "engine": "osrm",
+            "warning": "Valhalla unavailable; used emergency car-routing fallback. Off-road/backroad weighting may be limited.",
+        },
+    }
+
+async def _route_with_osrm(client: httpx.AsyncClient, locations: list[dict], units: str) -> tuple[dict, str]:
+    coords = ";".join(f"{loc['lon']:.6f},{loc['lat']:.6f}" for loc in locations)
+    last_error = "No OSRM fallback configured"
+    for base in _route_fallback_urls():
+        url = f"{base}/route/v1/driving/{coords}"
+        try:
+            res = await client.get(url, params={"overview": "full", "geometries": "polyline6", "steps": "true"})
+            if res.status_code >= 400:
+                last_error = f"{base}: HTTP {res.status_code} {res.text[:160]}"
+                continue
+            data = res.json()
+            if data.get("code") != "Ok":
+                last_error = f"{base}: {data.get('code') or 'route failed'}"
+                continue
+            return _osrm_to_valhalla(data, units), base
+        except Exception as exc:
+            last_error = f"{base}: {exc}"
+    raise RuntimeError(last_error)
+
 @app.get("/api/route/health")
 async def route_health():
     url = f"{_valhalla_base_url()}/status"
+    checks: list[dict] = []
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             res = await client.get(url)
-        return {"ok": res.status_code < 500, "engine": "valhalla", "status": res.status_code}
+            checks.append({"engine": "valhalla", "url": _valhalla_base_url(), "ok": res.status_code < 500, "status": res.status_code})
+            if res.status_code < 500:
+                return {"ok": True, "engine": "valhalla", "status": res.status_code, "checks": checks}
     except Exception as e:
-        return {"ok": False, "engine": "valhalla", "error": str(e)}
+        checks.append({"engine": "valhalla", "url": _valhalla_base_url(), "ok": False, "error": str(e)})
+    sample = [{"lat": 38.5733, "lon": -109.5498}, {"lat": 38.5677, "lon": -109.5271}]
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            _, base = await _route_with_osrm(client, sample, "miles")
+        checks.append({"engine": "osrm", "url": base, "ok": True})
+        return {"ok": True, "engine": "osrm-fallback", "checks": checks}
+    except Exception as e:
+        checks.append({"engine": "osrm", "ok": False, "error": str(e)})
+    return {"ok": False, "engine": "none", "checks": checks}
 
 @app.post("/api/route")
 async def route_proxy(body: RouteRequest):
@@ -1128,6 +1653,9 @@ async def route_proxy(body: RouteRequest):
         if not (-90 <= lat <= 90 and -180 <= lon <= 180):
             raise HTTPException(400, "Location out of range")
         locations.append({"lat": lat, "lon": lon})
+    validation = _validate_route_locations(locations)
+    if not validation["ok"]:
+        raise HTTPException(422, validation)
 
     payload = {
         "locations": locations,
@@ -1139,25 +1667,42 @@ async def route_proxy(body: RouteRequest):
     cache_key = _route_cache_key(payload)
     cached = get_route_cached(cache_key)
     if cached:
-        cached["_trailhead"] = {"engine": "valhalla", "cache": "hit", "cache_key": cache_key}
+        cached_engine = "osrm-fallback" if cached.get("_fallback", {}).get("engine") == "osrm" else "valhalla"
+        cached["_trailhead"] = {"engine": cached_engine, "cache": "hit", "cache_key": cache_key}
         return cached
 
+    valhalla_error = ""
     try:
         async with httpx.AsyncClient(timeout=20) as client:
             res = await client.post(f"{_valhalla_base_url()}/route", json=payload)
+            if res.status_code < 400:
+                data = res.json()
+                if data.get("trip", {}).get("status") == 0:
+                    set_route_cached(cache_key, payload, data)
+                data["_trailhead"] = {"engine": "valhalla", "cache": "miss", "cache_key": cache_key}
+                return data
+            valhalla_error = res.text[:500] if res.text else f"HTTP {res.status_code}"
     except httpx.TimeoutException:
-        raise HTTPException(504, "Valhalla route timed out")
+        valhalla_error = "Valhalla route timed out"
     except Exception as e:
-        raise HTTPException(502, f"Valhalla route failed: {e}")
+        valhalla_error = f"Valhalla route failed: {e}"
 
-    if res.status_code >= 400:
-        detail = res.text[:500] if res.text else "Valhalla route failed"
-        raise HTTPException(res.status_code, detail)
-    data = res.json()
-    if data.get("trip", {}).get("status") == 0:
-        set_route_cached(cache_key, payload, data)
-    data["_trailhead"] = {"engine": "valhalla", "cache": "miss", "cache_key": cache_key}
-    return data
+    try:
+        async with httpx.AsyncClient(timeout=18) as client:
+            data, base = await _route_with_osrm(client, locations, payload["units"])
+        if data.get("trip", {}).get("status") == 0:
+            set_route_cached(cache_key, payload, data)
+        data["_trailhead"] = {
+            "engine": "osrm-fallback",
+            "cache": "miss",
+            "cache_key": cache_key,
+            "fallback_url": base,
+            "valhalla_error": valhalla_error,
+        }
+        return data
+    except Exception as e:
+        detail = f"{valhalla_error}; OSRM fallback failed: {e}" if valhalla_error else f"OSRM fallback failed: {e}"
+        raise HTTPException(502, detail)
 
 @app.get("/api/trip/{trip_id}")
 async def get_trip_route(trip_id: str, user: dict | None = Depends(_optional_user)):
@@ -1169,6 +1714,57 @@ async def get_trip_route(trip_id: str, user: dict | None = Depends(_optional_use
     if trip_owner and (not user or user["id"] != trip_owner):
         raise HTTPException(403, "Not authorized to view this trip")
     return trip
+
+@app.get("/api/trips")
+async def user_trips(limit: int = 25, user: dict = Depends(_current_user)):
+    return {"trips": list_user_trips(user["id"], max(1, min(limit, 100)))}
+
+@app.post("/api/trips")
+async def create_account_trip(body: AccountTripRequest, user: dict = Depends(_current_user)):
+    trip = dict(body.trip or {})
+    trip_id = str(trip.get("trip_id") or f"web_{uuid.uuid4().hex[:12]}")
+    trip["trip_id"] = trip_id
+    existing = get_trip(trip_id)
+    if existing and existing.get("user_id") and existing.get("user_id") != user["id"]:
+        raise HTTPException(403, "Not authorized to update this trip")
+    saved = save_account_trip(
+        trip_id,
+        trip,
+        user["id"],
+        request=body.request,
+        route_geometry=body.route_geometry,
+        builder_state=body.builder_state,
+        source=body.source or "web",
+    )
+    return saved
+
+@app.put("/api/trip/{trip_id}")
+async def update_account_trip(trip_id: str, body: AccountTripRequest, user: dict = Depends(_current_user)):
+    existing = get_trip(trip_id)
+    if existing and existing.get("user_id") and existing.get("user_id") != user["id"]:
+        raise HTTPException(403, "Not authorized to update this trip")
+    trip = dict(body.trip or {})
+    trip["trip_id"] = trip_id
+    saved = save_account_trip(
+        trip_id,
+        trip,
+        user["id"],
+        request=body.request,
+        route_geometry=body.route_geometry,
+        builder_state=body.builder_state,
+        source=body.source or "web",
+    )
+    return saved
+
+@app.put("/api/trip/{trip_id}/geometry")
+async def update_trip_geometry(trip_id: str, body: RouteGeometryRequest, user: dict = Depends(_current_user)):
+    try:
+        saved = save_trip_geometry(trip_id, user["id"], body.route_geometry)
+    except PermissionError:
+        raise HTTPException(403, "Not authorized to update this trip")
+    if not saved:
+        raise HTTPException(404, "Trip not found")
+    return saved
 
 @app.get("/api/trip/{trip_id}/guide")
 async def trip_guide(trip_id: str, generate: bool = False, user: dict = Depends(_current_user)):
@@ -1222,12 +1818,50 @@ async def trip_guide(trip_id: str, generate: bool = False, user: dict = Depends(
 class RouteWeatherRequest(BaseModel):
     waypoints: list[dict]
     trip_id: str
+    units: str = "auto"
+
+def _weather_units_for(lat: float, lng: float, mode: str = "auto") -> dict:
+    """Return Open-Meteo params + display metadata for a coordinate."""
+    clean = (mode or "auto").lower()
+    if clean not in {"auto", "imperial", "metric"}:
+        clean = "auto"
+    if clean == "auto":
+        # US users expect Fahrenheit; almost everywhere else uses metric.
+        # Bounds include Alaska, Hawaii, and CONUS.
+        in_us = (
+            (24.0 <= lat <= 49.8 and -125.5 <= lng <= -66.0) or
+            (51.0 <= lat <= 72.0 and -170.0 <= lng <= -129.0) or
+            (18.5 <= lat <= 23.0 and -161.0 <= lng <= -154.0)
+        )
+        clean = "imperial" if in_us else "metric"
+    if clean == "metric":
+        return {
+            "mode": "metric",
+            "temperature_unit": "celsius",
+            "windspeed_unit": "kmh",
+            "precipitation_unit": "mm",
+            "distance_unit": "kilometers",
+            "temperature_label": "°C",
+            "wind_label": "km/h",
+            "precipitation_label": "mm",
+        }
+    return {
+        "mode": "imperial",
+        "temperature_unit": "fahrenheit",
+        "windspeed_unit": "mph",
+        "precipitation_unit": "inch",
+        "distance_unit": "miles",
+        "temperature_label": "°F",
+        "wind_label": "mph",
+        "precipitation_label": "in",
+    }
 
 @app.post("/api/weather/route")
 async def route_weather(body: RouteWeatherRequest):
     """Download 7-day forecasts for all waypoints in a trip for offline use.
     Deduplicates waypoints within 0.1° and caches the full result for 3 hours."""
-    cache_key = f"route_weather:{body.trip_id}"
+    unit_key = (body.units or "auto").lower()
+    cache_key = f"route_weather:{body.trip_id}:{unit_key}"
     cached = get_cached("campsite_cache", cache_key, ttl_seconds=10800)
     if cached:
         return cached
@@ -1250,7 +1884,7 @@ async def route_weather(body: RouteWeatherRequest):
     async def _fetch_one(wp: dict) -> tuple[str, dict | None]:
         async with sem:
             try:
-                data = await weather_forecast(wp["lat"], wp["lng"], days=7)
+                data = await weather_forecast(wp["lat"], wp["lng"], days=7, units=body.units)
                 return (wp.get("name", f"{wp['lat']:.2f},{wp['lng']:.2f}"), data)
             except Exception:
                 return (wp.get("name", ""), None)
@@ -1263,8 +1897,9 @@ async def route_weather(body: RouteWeatherRequest):
 
 
 @app.get("/api/weather")
-async def weather_forecast(lat: float, lng: float, days: int = 7):
-    cache_key = f"weather:{lat:.2f},{lng:.2f}"
+async def weather_forecast(lat: float, lng: float, days: int = 7, units: str = "auto"):
+    unit_meta = _weather_units_for(lat, lng, units)
+    cache_key = f"weather:{lat:.2f},{lng:.2f}:{unit_meta['mode']}"
     cached = get_cached("weather_cache", cache_key, ttl_seconds=3600)
     if cached:
         return cached
@@ -1275,15 +1910,16 @@ async def weather_forecast(lat: float, lng: float, days: int = 7):
             params={
                 "latitude": lat, "longitude": lng,
                 "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max,weathercode",
-                "temperature_unit": "fahrenheit",
-                "windspeed_unit": "mph",
-                "precipitation_unit": "inch",
+                "temperature_unit": unit_meta["temperature_unit"],
+                "windspeed_unit": unit_meta["windspeed_unit"],
+                "precipitation_unit": unit_meta["precipitation_unit"],
                 "timezone": "auto",
                 "forecast_days": min(days, 14),
             }
         )
         r.raise_for_status()
         data = r.json()
+    data["trailhead_units"] = unit_meta
 
     set_cached("weather_cache", cache_key, data)
     return data
@@ -1600,22 +2236,50 @@ def get_config():
         # CDN (faster than proxying via Railway). Acceptable for early-stage —
         # rotate if abused. Free tier is 200k-1M tiles/month.
         "protomaps_key": settings.protomaps_key,
+        "google_oauth_client_id": (_oauth_client_ids("google") or [""])[0],
+        "apple_service_id": settings.apple_service_id,
     }
 
 
+def _clean_countrycodes(countrycodes: str = "") -> str:
+    codes = []
+    for raw in (countrycodes or "").split(","):
+        code = re.sub(r"[^a-zA-Z]", "", raw).lower()
+        if len(code) == 2:
+            codes.append(code)
+    return ",".join(dict.fromkeys(codes))
+
+def _countrycodes_for_query(query: str) -> str:
+    text = (query or "").lower()
+    matches = []
+    hints = {
+        "finland": "fi", "suomi": "fi", "helsinki": "fi", "turku": "fi", "tampere": "fi", "rovaniemi": "fi",
+        "canada": "ca", "alberta": "ca", "british columbia": "ca", "ontario": "ca", "quebec": "ca",
+        "mexico": "mx", "baja": "mx", "sonora": "mx", "chihuahua": "mx", "oaxaca": "mx",
+        "united states": "us", "usa": "us",
+    }
+    for needle, code in hints.items():
+        if needle in text and code not in matches:
+            matches.append(code)
+    return ",".join(matches)
+
 @app.get("/api/geocode")
-async def geocode_places(q: str, limit: int = 8):
+async def geocode_places(q: str, limit: int = 8, countrycodes: str = ""):
     query = (q or "").strip()
     if not query:
         return []
     limit = max(1, min(int(limit or 8), 10))
     token = settings.mapbox_token
+    country_filter = _clean_countrycodes(countrycodes) or _countrycodes_for_query(query)
     async with httpx.AsyncClient(timeout=8.0, headers={"User-Agent": "TrailheadRouteBuilder/1.0"}) as client:
         if token:
             try:
+                params = {"access_token": token, "limit": limit}
+                if country_filter:
+                    params["country"] = country_filter
                 resp = await client.get(
                     f"https://api.mapbox.com/geocoding/v5/mapbox.places/{quote(query, safe='')}.json",
-                    params={"access_token": token, "limit": limit, "country": "us"},
+                    params=params,
                 )
                 resp.raise_for_status()
                 places = []
@@ -1632,9 +2296,12 @@ async def geocode_places(q: str, limit: int = 8):
             except Exception:
                 pass
         try:
+            params = {"format": "json", "limit": limit, "q": query}
+            if country_filter:
+                params["countrycodes"] = country_filter
             resp = await client.get(
                 "https://nominatim.openstreetmap.org/search",
-                params={"format": "json", "limit": limit, "countrycodes": "us", "q": query},
+                params=params,
             )
             resp.raise_for_status()
             places = []
@@ -1698,6 +2365,12 @@ _TILE_CACHE_HEADERS = {
 
 
 PROTOMAPS_MAXZOOM = 15  # tiles v4 schema cap
+
+def _tile_response_headers(content: bytes) -> dict:
+    headers = dict(_TILE_CACHE_HEADERS)
+    if content.startswith(b"\x1f\x8b"):
+        headers["Content-Encoding"] = "gzip"
+    return headers
 
 
 from dashboard import pmtiles_bootstrap
@@ -1989,6 +2662,213 @@ async def update_routing_manifest():
     return {"ok": ok}
 
 
+# ── Offline contour packs ─────────────────────────────────────────────────────
+_contour_jobs: dict[str, dict] = {}
+_contour_lock = asyncio.Lock()
+_contour_queue: dict = {
+    "status": "idle",
+    "preset": None,
+    "regions": [],
+    "pending": [],
+    "completed": [],
+    "failed": [],
+    "current": None,
+    "started_at": None,
+    "completed_at": None,
+    "error": None,
+}
+
+class ContourBatchRequest(BaseModel):
+    regions: list[str] | None = None
+    preset: str = Field("east", description="east, all-states, countries, or custom with regions")
+    force: bool = False
+    skip_published: bool = True
+    continue_on_error: bool = True
+
+_CONTOUR_PRESETS: dict[str, list[str]] = {
+    "east": [
+        "md", "ny", "wv", "va", "oh", "nc", "sc", "ga", "fl", "tn", "ky",
+        "al", "ms", "la", "ar", "mo", "il", "in", "mi", "wi", "ia", "mn",
+    ],
+    "central": ["nd", "sd", "ne", "ok", "tx"],
+    "west": ["ak", "az", "ca", "hi", "id", "mt", "nm", "nv", "or", "ut", "wa", "wy"],
+    "countries": ["mexico", "canada"],
+}
+
+def _contour_region_id(code: str) -> str:
+    raw = (code or "").strip()
+    upper = raw.upper()
+    if upper in _pms.STATE_BBOXES:
+        return upper.lower()
+    if upper in _pms.REGION_BBOXES:
+        return upper.lower()
+    raise HTTPException(400, f"unknown contour region code {code}")
+
+def _contour_defaults(region: str) -> tuple[str, str, str]:
+    if region.upper() in _pms.STATE_BBOXES:
+        return "feet", "12.192", "200"
+    return "meters", "20", "100"
+
+def _contour_preset_regions(preset: str) -> list[str]:
+    key = (preset or "").strip().lower()
+    if key in {"all", "all-states", "states"}:
+        return [code.lower() for code in _pms.STATE_BBOXES]
+    if key in _CONTOUR_PRESETS:
+        return list(_CONTOUR_PRESETS[key])
+    raise HTTPException(400, f"unknown contour batch preset {preset}")
+
+async def _remote_contour_manifest() -> dict:
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.get("https://tiles.gettrailhead.app/api/contours/manifest.json")
+            if resp.status_code == 404:
+                return {}
+            resp.raise_for_status()
+            data = resp.json()
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+async def _contour_batch_regions(req: ContourBatchRequest) -> list[str]:
+    requested = req.regions if req.regions else _contour_preset_regions(req.preset)
+    regions = [_contour_region_id(code) for code in requested]
+    regions = list(dict.fromkeys(regions))
+    if req.skip_published and not req.force:
+        manifest = await _remote_contour_manifest()
+        published = {name.rsplit(".", 1)[0].lower() for name in manifest if str(name).endswith(".pmtiles")}
+        regions = [region for region in regions if region not in published]
+    return regions
+
+async def _run_contour_command(region: str, cmd: list[str]) -> int:
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        cwd=str(Path(__file__).resolve().parents[1]),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+    lines: list[str] = []
+    assert proc.stdout is not None
+    pending = ""
+    while True:
+        raw = await proc.stdout.read(4096)
+        if not raw:
+            break
+        pending += raw.decode(errors="replace")
+        parts = re.split(r"[\r\n]+", pending)
+        pending = parts.pop() if parts else ""
+        for part in parts:
+            line = part.strip()
+            if not line:
+                continue
+            lines.append(line)
+            lines = lines[-25:]
+            _contour_jobs[region]["progress"] = line[-500:]
+            _contour_jobs[region]["log_tail"] = lines
+        if pending.strip():
+            _contour_jobs[region]["progress"] = pending.strip()[-500:]
+    return await proc.wait()
+
+async def _build_and_publish_contour(region: str, *, force: bool = False) -> None:
+    async with _contour_lock:
+        unit, interval, index_interval = _contour_defaults(region)
+        _contour_jobs[region] = {
+            "status": "building",
+            "progress": "starting",
+            "error": None,
+            "started_at": int(time.time()),
+            "completed_at": None,
+            "log_tail": [],
+        }
+        build_cmd = [
+            "python3", "scripts/build_contours_from_dem.py", region,
+            "--unit", unit,
+            "--interval-meters", interval,
+            "--index-interval", index_interval,
+        ]
+        if not force:
+            build_cmd.append("--skip-existing")
+        rc = await _run_contour_command(region, build_cmd)
+        if rc != 0:
+            _contour_jobs[region].update(status="error", error=f"build exited {rc}", completed_at=int(time.time()))
+            return
+        _contour_jobs[region].update(status="publishing", progress="uploading to R2")
+        rc = await _run_contour_command(region, ["python3", "scripts/publish_contour_packs.py", region])
+        if rc != 0:
+            _contour_jobs[region].update(status="error", error=f"publish exited {rc}", completed_at=int(time.time()))
+            return
+        _contour_jobs[region].update(status="done", progress="published", completed_at=int(time.time()))
+
+async def _run_contour_batch(req: ContourBatchRequest, regions: list[str]) -> None:
+    _contour_queue.update({
+        "status": "running",
+        "preset": req.preset,
+        "regions": regions,
+        "pending": regions[:],
+        "completed": [],
+        "failed": [],
+        "current": None,
+        "started_at": int(time.time()),
+        "completed_at": None,
+        "error": None,
+    })
+    try:
+        for region in regions:
+            _contour_queue["current"] = region
+            _contour_queue["pending"] = [r for r in _contour_queue["pending"] if r != region]
+            await _build_and_publish_contour(region, force=req.force)
+            job = _contour_jobs.get(region, {})
+            if job.get("status") == "done":
+                _contour_queue["completed"].append(region)
+                continue
+            _contour_queue["failed"].append({"region": region, "error": job.get("error") or "unknown error"})
+            if not req.continue_on_error:
+                break
+        _contour_queue.update(status="done", current=None, completed_at=int(time.time()))
+    except Exception as exc:
+        _contour_queue.update(status="error", current=None, error=f"{type(exc).__name__}: {exc}", completed_at=int(time.time()))
+
+@app.get("/api/admin/contour-packs-status")
+async def contour_packs_status():
+    data_dir = Path("/data/contours")
+    local = {}
+    if data_dir.exists():
+        for path in sorted(data_dir.glob("*.pmtiles")):
+            local[path.name] = {"size": path.stat().st_size}
+    return {"jobs": _contour_jobs, "queue": _contour_queue, "local": local}
+
+@app.api_route("/api/admin/build-contour-pack/{code}", methods=["GET", "POST"])
+async def build_contour_pack(code: str, force: bool = False):
+    region = _contour_region_id(code)
+    active = _contour_lock.locked() or _contour_queue.get("status") == "running"
+    if active:
+        return {"triggered": False, "region": region, "reason": "contour job already running"}
+    asyncio.create_task(_build_and_publish_contour(region, force=force))
+    return {"triggered": True, "region": region, "force": force}
+
+@app.post("/api/admin/build-contour-batch")
+async def build_contour_batch(req: ContourBatchRequest):
+    active = _contour_lock.locked() or _contour_queue.get("status") == "running"
+    if active:
+        return {"triggered": False, "reason": "contour job already running", "queue": _contour_queue}
+    regions = await _contour_batch_regions(req)
+    if not regions:
+        _contour_queue.update({
+            "status": "done",
+            "preset": req.preset,
+            "regions": [],
+            "pending": [],
+            "completed": [],
+            "failed": [],
+            "current": None,
+            "started_at": int(time.time()),
+            "completed_at": int(time.time()),
+            "error": None,
+        })
+        return {"triggered": False, "reason": "nothing to build", "regions": []}
+    asyncio.create_task(_run_contour_batch(req, regions))
+    return {"triggered": True, "regions": regions, "count": len(regions), "force": req.force, "skip_published": req.skip_published}
+
+
 # ── Offline place packs ───────────────────────────────────────────────────────
 from dashboard import place_packs as _place_packs
 
@@ -2134,7 +3014,7 @@ async def proxy_vector_tile(z: int, x: int, y: int):
         if hit is not None:
             _tile_lru.move_to_end(key)
             return Response(hit, media_type="application/vnd.mapbox-vector-tile",
-                            headers=_TILE_CACHE_HEADERS)
+                            headers=_tile_response_headers(hit))
 
     # Layer 2: local self-hosted PMTiles file (preferred)
     local_tile = await pmtiles_bootstrap.get_local_tile(upstream_z, upstream_x, upstream_y)
@@ -2144,7 +3024,7 @@ async def proxy_vector_tile(z: int, x: int, y: int):
             if len(_tile_lru) > _TILE_LRU_MAX:
                 _tile_lru.popitem(last=False)
         return Response(local_tile, media_type="application/vnd.mapbox-vector-tile",
-                        headers=_TILE_CACHE_HEADERS)
+                        headers=_tile_response_headers(local_tile))
 
     # Layer 3: upstream Protomaps API (fallback during extract)
     if not settings.protomaps_key:
@@ -2168,7 +3048,7 @@ async def proxy_vector_tile(z: int, x: int, y: int):
             _tile_lru.popitem(last=False)
 
     return Response(content, media_type="application/vnd.mapbox-vector-tile",
-                    headers=_TILE_CACHE_HEADERS)
+                    headers=_tile_response_headers(content))
 
 
 @app.get("/api/fonts/{fontstack}/{range_str}.pbf")
@@ -2633,6 +3513,20 @@ class TrailAdminUpdatePayload(BaseModel):
     official_url: Optional[str] = None
     photos: Optional[list[dict]] = None
 
+class CommunityTrailPayload(BaseModel):
+    name: str
+    summary: Optional[str] = None
+    description: Optional[str] = None
+    geometry: dict
+    trailheads: list[dict] = Field(default_factory=list)
+    activities: list[str] = Field(default_factory=list)
+    difficulty: Optional[str] = None
+    land_manager: Optional[str] = None
+    photos: list[dict] = Field(default_factory=list)
+    source_note: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+
 @app.post("/api/admin/trails/{trail_id}")
 async def admin_update_trail(trail_id: str, body: TrailAdminUpdatePayload,
                              admin: dict = Depends(_require_admin)):
@@ -2652,6 +3546,82 @@ async def admin_update_trail(trail_id: str, body: TrailAdminUpdatePayload,
     except KeyError:
         raise HTTPException(404, "Trail profile not found")
     return {"ok": True, "profile": profile}
+
+@app.post("/api/trails/community")
+async def submit_community_trail(body: CommunityTrailPayload, user: dict = Depends(_current_user)):
+    name = re.sub(r"\s+", " ", (body.name or "").strip())[:140]
+    if not name:
+        raise HTTPException(400, "Trail name is required")
+    geometry = body.geometry if isinstance(body.geometry, dict) else {}
+    coords = geometry.get("coordinates") if geometry.get("type") == "LineString" else None
+    if not isinstance(coords, list) or len(coords) < 2:
+        raise HTTPException(400, "Trail geometry must be a LineString with at least two points")
+    clean_coords: list[list[float]] = []
+    for pair in coords[:2000]:
+        if not isinstance(pair, (list, tuple)) or len(pair) < 2:
+            continue
+        lng, lat = float(pair[0]), float(pair[1])
+        if -180 <= lng <= 180 and -90 <= lat <= 90:
+            clean_coords.append([round(lng, 7), round(lat, 7)])
+    if len(clean_coords) < 2:
+        raise HTTPException(400, "Trail geometry has no valid coordinates")
+    length_m = 0.0
+    for idx in range(1, len(clean_coords)):
+        a, b = clean_coords[idx - 1], clean_coords[idx]
+        length_m += _haversine_m(a[1], a[0], b[1], b[0])
+    mid = clean_coords[len(clean_coords) // 2]
+    trail_id = _clean_trail_profile_id(f"trailhead:{user['id']}:{uuid.uuid4().hex[:12]}")
+    clean_trailheads = []
+    for item in body.trailheads[:8]:
+        if not isinstance(item, dict):
+            continue
+        try:
+            th_lat = float(item.get("lat"))
+            th_lng = float(item.get("lng"))
+        except Exception:
+            continue
+        if -90 <= th_lat <= 90 and -180 <= th_lng <= 180:
+            clean_trailheads.append({
+                "name": str(item.get("name") or "Trailhead").strip()[:120],
+                "lat": round(th_lat, 7),
+                "lng": round(th_lng, 7),
+                "role": str(item.get("role") or "access").strip()[:40],
+            })
+    profile = upsert_trail_profile({
+        "id": trail_id,
+        "name": name,
+        "summary": (body.summary or f"Community trail route submitted by {user.get('username') or 'a Trailhead user'}.").strip()[:700],
+        "description": (body.description or body.source_note or "User-pinned route. Verify legality, closures, and conditions before driving.").strip()[:4000],
+        "lat": float(body.lat) if body.lat is not None else mid[1],
+        "lng": float(body.lng) if body.lng is not None else mid[0],
+        "length_mi": round(length_m / 1609.344, 2),
+        "difficulty": (body.difficulty or "Unrated").strip()[:80],
+        "activities": [str(a).strip()[:40] for a in body.activities[:12] if str(a).strip()] or ["overland", "trail"],
+        "land_manager": (body.land_manager or "Verify locally").strip()[:180],
+        "geometry": {"type": "FeatureCollection", "features": [{
+            "type": "Feature",
+            "properties": {"name": name, "source": "Trailhead community"},
+            "geometry": {"type": "LineString", "coordinates": clean_coords},
+        }]},
+        "trailheads": clean_trailheads,
+        "official_url": None,
+        "photos": body.photos[:12],
+        "source": "trailhead",
+        "source_label": "Trailhead community",
+        "provenance": {
+            "submitted_by": user.get("username"),
+            "submitted_by_id": user.get("id"),
+            "source_note": (body.source_note or "").strip()[:500],
+            "review_status": "community",
+        },
+        "last_checked": int(time.time()),
+        "admin_edited": False,
+        "updated_at": int(time.time()),
+    })
+    credits_earned = 5
+    add_credits(user["id"], credits_earned, f"Community trail: {name[:80]}")
+    fresh = get_user_by_id(user["id"])
+    return {"ok": True, "profile": profile, "credits_earned": credits_earned, "new_balance": fresh["credits"] if fresh else user.get("credits", 0)}
 
 @app.get("/api/admin/trail-edit-suggestions")
 async def admin_trail_edit_suggestions(status: Optional[str] = "pending",
@@ -3513,7 +4483,7 @@ a{color:#f97316;}
 <p class="updated">Last updated: April 24, 2026</p>
 
 <h2>1. Information We Collect</h2>
-<p>We collect information you provide directly: email address, username, and password (stored as a bcrypt hash). When you use the app we collect location data (with your permission) to show nearby campsites, fuel stations, and community reports. We collect usage data such as trips planned, reports submitted, and credits earned or spent.</p>
+<p>We collect information you provide directly: email address, username, and password (stored as a bcrypt hash). If you use Apple or Google sign in, we store the verified email address and provider account identifier needed to keep you signed in. When you use the app we collect location data (with your permission) to show nearby campsites, fuel stations, and community reports. We collect usage data such as trips planned, reports submitted, and credits earned or spent.</p>
 
 <h2>2. How We Use Your Information</h2>
 <p>Your information is used to: provide and improve the Trailhead service; personalise AI trip plans to your vehicle and preferences; display nearby campsite and hazard data on the map; process credit purchases via Stripe; send service-related communications. We do not sell your personal data to third parties.</p>
@@ -4009,16 +4979,59 @@ def _merge_camp_sources(*sources: list[dict], type_filters: list[str] | None = N
             merged.append(camp)
     return merged
 
+def _camp_from_live_place(place: dict) -> dict | None:
+    """Convert commercial campground/RV park provider results into camp pins."""
+    try:
+        lat = float(place.get("lat"))
+        lng = float(place.get("lng"))
+    except Exception:
+        return None
+    name = re.sub(r"\s+", " ", str(place.get("name") or "")).strip()
+    if not name:
+        return None
+    source = str(place.get("source") or "places").lower()
+    subtype = str(place.get("subtype") or "").strip()
+    type_text = f"{subtype} {place.get('type') or ''}".lower()
+    tags = ["commercial", "campground"]
+    land_type = "RV Park" if "rv" in type_text else "Commercial Campground"
+    if "rv" in type_text:
+        tags.append("rv")
+    return {
+        "id": str(place.get("id") or f"{source}:camp:{lat:.5f}:{lng:.5f}"),
+        "name": name,
+        "lat": lat,
+        "lng": lng,
+        "tags": tags,
+        "land_type": land_type,
+        "description": _planner_clean_text(place.get("summary") or place.get("address") or subtype or "Commercial campground found from live place data.", 360),
+        "photo_url": place.get("photo_url") or "",
+        "reservable": bool(place.get("website")),
+        "cost": "",
+        "url": place.get("website") or place.get("google_maps_uri") or "",
+        "ada": False,
+        "source": source,
+        "verified_source": place.get("source_label") or place.get("attribution") or source.title(),
+        "rating": place.get("rating"),
+        "rating_count": place.get("rating_count"),
+        "phone": place.get("phone") or "",
+        "address": place.get("address") or "",
+        "provider_place_id": place.get("provider_place_id") or place.get("place_id") or "",
+        "place_id": place.get("place_id") or "",
+    }
+
 @app.get("/api/nearby-camps")
 async def nearby_camps(lat: float, lng: float, radius: float = 50, types: str = ""):
     """Aggregate legal camp sources near a point, no trip required."""
     type_filters = [t.strip() for t in types.split(",") if t.strip()] if types else None
-    ridb, blm, osm = await asyncio.gather(
+    ridb, blm, osm, google_live, fsq_live = await asyncio.gather(
         get_campsites_search(lat, lng, radius_miles=radius, type_filters=type_filters),
         get_blm_campsites(lat, lng, radius_miles=radius),
         get_osm_campsites(lat, lng, radius_m=int(min(radius, 60) * 1600)),
+        get_google_places(lat, lng, radius_m=int(min(radius, 45) * 1609.344), categories={"camp"}, limit_per_category=12) if google_places_enabled() else asyncio.sleep(0, result=[]),
+        get_foursquare_places(lat, lng, radius_m=int(min(radius, 45) * 1609.344), categories={"camp", "rv_park"}, limit_per_category=12) if foursquare_enabled() else asyncio.sleep(0, result=[]),
     )
-    return _merge_camp_sources(ridb, blm, osm, type_filters=type_filters)[:160]
+    live_camps = [camp for camp in (_camp_from_live_place(p) for p in [*google_live, *fsq_live]) if camp]
+    return _merge_camp_sources(ridb, blm, osm, live_camps, type_filters=type_filters)[:160]
 
 
 @app.get("/api/camps/bbox")
@@ -4042,6 +5055,454 @@ async def camps_bbox(n: float, s: float, e: float, w: float, types: str = ""):
         for source in (ridb, blm, osm)
     ]
     return _merge_camp_sources(*in_box, type_filters=type_filters)[:200]
+
+
+def _planner_clean_text(value: object, max_chars: int = 700) -> str:
+    raw = str(value or "")
+    if not raw:
+        return ""
+    raw = re.sub(r"<\s*(br|p|div|li|h[1-6])[^>]*>", " ", raw, flags=re.I)
+    raw = re.sub(r"<[^>]+>", " ", raw)
+    text = html.unescape(raw)
+    text = re.sub(r"\b(overview|about)\s*(overview|about)?\s*", "", text, flags=re.I)
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) > max_chars:
+        text = text[:max_chars].rsplit(" ", 1)[0].rstrip() + "..."
+    return text
+
+def _planner_route_samples(route: list[list[float]], max_samples: int = 5) -> list[dict]:
+    coords: list[dict] = []
+    for point in route:
+        try:
+            lng, lat = float(point[0]), float(point[1])
+        except Exception:
+            continue
+        if -90 <= lat <= 90 and -180 <= lng <= 180:
+            coords.append({"lat": lat, "lng": lng})
+    if len(coords) <= max_samples:
+        return coords
+    step = max(1, (len(coords) - 1) // (max_samples - 1))
+    sampled = [coords[0], *coords[step:-1:step][: max_samples - 2], coords[-1]]
+    return sampled[:max_samples]
+
+def _planner_dedupe(items: list[dict], limit: int = 180) -> list[dict]:
+    out: list[dict] = []
+    seen: set[str] = set()
+    for item in items:
+        try:
+            lat = round(float(item.get("lat")), 4)
+            lng = round(float(item.get("lng")), 4)
+        except Exception:
+            continue
+        key = str(item.get("id") or f"{item.get('type','')}_{item.get('name','')}_{lat}_{lng}").lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+        if len(out) >= limit:
+            break
+    return out
+
+@app.post("/api/planner/context")
+async def planner_context(body: PlannerContextRequest):
+    """Return the real map data needed by the web planner in one cached call.
+
+    The browser should not know provider keys or call every source separately.
+    This endpoint mirrors the mobile planner approach: load Trailhead camps,
+    practical services, community pins, and trail profiles around a viewport or
+    sampled route while allowing individual sources to fail without blanking the map.
+    """
+    errors: dict[str, str] = {}
+    filters = [re.sub(r"[^a-z0-9_]+", "", f.strip().lower()) for f in body.filters if f.strip()]
+    filters = filters or ["fuel", "water", "dump", "trailhead"]
+
+    center_lat: float
+    center_lng: float
+    radius = max(3.0, min(float(body.radius or 35), 85.0))
+    if body.center:
+        center_lat, center_lng = float(body.center.lat), float(body.center.lng)
+    elif body.bounds:
+        center_lat = (float(body.bounds.n) + float(body.bounds.s)) / 2
+        center_lng = (float(body.bounds.e) + float(body.bounds.w)) / 2
+    else:
+        raise HTTPException(400, "center or bounds is required")
+
+    bbox = None
+    if body.bounds:
+        bbox = {
+            "n": float(body.bounds.n),
+            "s": float(body.bounds.s),
+            "e": float(body.bounds.e),
+            "w": float(body.bounds.w),
+        }
+        radius = max(3.0, min(85.0, max(abs(bbox["n"] - bbox["s"]) * 69, abs(bbox["e"] - bbox["w"]) * 54.6) / 2 + 5))
+
+    route_samples = _planner_route_samples(body.route)
+    sample_points = route_samples or [{"lat": center_lat, "lng": center_lng}]
+    sample_radius = min(radius, 35 if route_samples else radius)
+
+    async def load_camps() -> list[dict]:
+        merged: list[dict] = []
+        for point in sample_points:
+            try:
+                ridb, blm, osm = await asyncio.gather(
+                    get_campsites_search(point["lat"], point["lng"], radius_miles=sample_radius, type_filters=None),
+                    get_blm_campsites(point["lat"], point["lng"], radius_miles=sample_radius),
+                    get_osm_campsites(point["lat"], point["lng"], radius_m=int(min(sample_radius, 60) * 1600)),
+                )
+                merged.extend(_merge_camp_sources(ridb, blm, osm))
+            except Exception as exc:
+                errors["camps"] = str(exc)
+        if bbox:
+            merged = [c for c in merged if bbox["s"] <= float(c.get("lat", 999)) <= bbox["n"] and bbox["w"] <= float(c.get("lng", 999)) <= bbox["e"]]
+        cleaned = []
+        for camp in _planner_dedupe(merged, limit=180):
+            camp = dict(camp)
+            desc = _planner_clean_text(camp.get("description"), 700)
+            camp["description"] = desc
+            camp["summary"] = _planner_clean_text(camp.get("summary") or desc, 240)
+            cleaned.append(camp)
+        return cleaned
+
+    async def load_places() -> list[dict]:
+        merged: list[dict] = []
+        for point in sample_points:
+            try:
+                merged.extend(await nearby_places(point["lat"], point["lng"], radius=sample_radius, categories=",".join(filters), provider="auto"))
+            except Exception as exc:
+                errors["places"] = str(exc)
+        return _planner_dedupe(merged, limit=120)
+
+    async def load_pins() -> list[dict]:
+        try:
+            return get_community_pins(center_lat, center_lng, radius_deg=max(0.05, radius / 69.0))[:120]
+        except Exception as exc:
+            errors["pins"] = str(exc)
+            return []
+
+    async def load_trails() -> list[dict]:
+        try:
+            await _seed_open_trail_profiles(center_lat, center_lng, radius, limit=100)
+            return list_trail_profiles_near(center_lat, center_lng, radius, 100, bbox=bbox, mode="view" if bbox else "nearby")
+        except Exception as exc:
+            errors["trails"] = str(exc)
+            return []
+
+    async def guarded(name: str, loader, timeout: float):
+        try:
+            return await asyncio.wait_for(loader(), timeout=timeout)
+        except Exception as exc:
+            errors[name] = str(exc)
+            return []
+
+    camps, places, pins, trails = await asyncio.gather(
+        guarded("camps", load_camps, 9.0),
+        guarded("places", load_places, 8.0),
+        guarded("pins", load_pins, 2.0),
+        guarded("trails", load_trails, 6.0),
+    )
+    return {
+        "center": {"lat": center_lat, "lng": center_lng},
+        "radius": radius,
+        "filters": filters,
+        "route_samples": sample_points,
+        "camps": camps,
+        "places": places,
+        "pins": pins,
+        "trails": trails,
+        "errors": errors,
+    }
+
+EXCURSION_DEFAULT_CATEGORIES = {
+    "trailhead", "trail", "ohv", "viewpoint", "peak", "hot_spring",
+    "park", "historic", "climbing", "water", "attraction",
+}
+
+EXCURSION_PLACE_CATEGORIES = "water,trailhead,viewpoint,peak,hot_spring,parking,attraction"
+
+def _excursion_distance_mi(lat: float, lng: float, item: dict) -> float:
+    try:
+        return round(_haversine_m(lat, lng, float(item.get("lat")), float(item.get("lng"))) / 1609.344, 2)
+    except Exception:
+        return 9999.0
+
+def _excursion_route_distance_mi(center_lat: float, center_lng: float, item: dict, route: list[list[float]] | None = None) -> float:
+    distances = [_excursion_distance_mi(center_lat, center_lng, item)]
+    for point in route or []:
+        if not isinstance(point, list) or len(point) < 2:
+            continue
+        try:
+            lng = float(point[0])
+            lat = float(point[1])
+        except Exception:
+            continue
+        distances.append(_excursion_distance_mi(lat, lng, item))
+    return round(min(distances), 2)
+
+def _excursion_source_confidence(source: str) -> str:
+    source = (source or "").lower()
+    if source in {"nps", "blm", "ridb", "recreation.gov", "trailhead", "community"}:
+        return "high"
+    if source in {"osm", "wikipedia", "openbeta"}:
+        return "medium"
+    return "low"
+
+def _excursion_candidate(
+    *,
+    item: dict,
+    center_lat: float,
+    center_lng: float,
+    route: list[list[float]] | None = None,
+    max_distance_mi: float | None = None,
+    xtype: str,
+    source: str,
+    source_label: str,
+    summary: str = "",
+    why_go: str = "",
+    access_notes: str = "",
+    risk_notes: str = "",
+    best_for: str = "",
+    offline_ready: bool = False,
+    sensitive_location: bool = False,
+) -> dict | None:
+    try:
+        lat = float(item.get("lat"))
+        lng = float(item.get("lng"))
+    except Exception:
+        return None
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return None
+    name = re.sub(r"\s+", " ", str(item.get("name") or item.get("title") or xtype.replace("_", " ").title())).strip()
+    if not name:
+        return None
+    distance = _excursion_route_distance_mi(center_lat, center_lng, {"lat": lat, "lng": lng}, route)
+    if max_distance_mi is not None and distance > max_distance_mi:
+        return None
+    clean_summary = _planner_clean_text(summary or item.get("summary") or item.get("description") or item.get("extract") or "", 360)
+    clean_access = _planner_clean_text(access_notes or item.get("access_notes") or "", 260)
+    clean_risk = _planner_clean_text(risk_notes or "", 260)
+    source_id = str(item.get("id") or item.get("pageid") or item.get("place_id") or f"{source}:{xtype}:{lat:.5f}:{lng:.5f}")
+    return {
+        "id": _clean_trail_profile_id(f"{source}:{source_id}") or hashlib.sha1(f"{source_id}:{lat}:{lng}".encode()).hexdigest(),
+        "name": name[:180],
+        "type": xtype,
+        "subtype": str(item.get("subtype") or item.get("category") or item.get("kind") or "")[:80],
+        "lat": lat,
+        "lng": lng,
+        "source": source,
+        "source_label": source_label,
+        "summary": clean_summary,
+        "why_go": _planner_clean_text(why_go or clean_summary, 260),
+        "access_notes": clean_access or "Verify current access, closures, fees, road conditions, and land-manager rules before committing.",
+        "risk_notes": clean_risk,
+        "best_for": best_for or ("Basecamp side trip" if distance <= 30 else "Route detour"),
+        "distance_from_route_mi": distance,
+        "detour_mi": round(distance * 2, 1),
+        "drive_time_min": max(8, int(distance * 3.2)),
+        "day_fit": "near camp" if distance <= 12 else "half day" if distance <= 35 else "long detour",
+        "offline_ready": bool(offline_ready),
+        "source_confidence": _excursion_source_confidence(source),
+        "sensitive_location": bool(sensitive_location),
+    }
+
+def _excursion_dedupe(items: list[dict], limit: int = 80) -> list[dict]:
+    out: list[dict] = []
+    seen: set[str] = set()
+    for item in sorted(items, key=lambda p: (p.get("distance_from_route_mi", 9999), p.get("source_confidence") != "high", p.get("name", ""))):
+        try:
+            key = f"{item.get('type')}:{str(item.get('name','')).lower()}:{round(float(item.get('lat')), 4)}:{round(float(item.get('lng')), 4)}"
+        except Exception:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+        if len(out) >= limit:
+            break
+    return out
+
+async def _blm_recreation_excursions(lat: float, lng: float, radius_mi: float) -> list[dict]:
+    radius_deg = max(0.05, min(radius_mi / 69.0, 1.0))
+    geometry = {
+        "xmin": lng - radius_deg,
+        "ymin": lat - radius_deg,
+        "xmax": lng + radius_deg,
+        "ymax": lat + radius_deg,
+        "spatialReference": {"wkid": 4326},
+    }
+    url = "https://gis.blm.gov/arcgis/rest/services/recreation/BLM_Natl_Recreation/MapServer/12/query"
+    params = {
+        "where": "1=1",
+        "geometry": json.dumps(geometry),
+        "geometryType": "esriGeometryEnvelope",
+        "inSR": 4326,
+        "outSR": 4326,
+        "outFields": "RecSiteName,FeaturedActivity,PrimaryType,RecAreaName,URL",
+        "returnGeometry": "true",
+        "f": "geojson",
+        "resultRecordCount": 80,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=8.0, headers={"User-Agent": "TrailheadExcursions/1.0"}) as client:
+            res = await client.get(url, params=params)
+            res.raise_for_status()
+            features = (res.json() or {}).get("features") or []
+    except Exception:
+        return []
+    out: list[dict] = []
+    for feature in features:
+        props = feature.get("properties") or {}
+        coords = ((feature.get("geometry") or {}).get("coordinates") or [])
+        if not isinstance(coords, list) or len(coords) < 2:
+            continue
+        activity = str(props.get("FeaturedActivity") or props.get("PrimaryType") or "recreation").lower()
+        xtype = "climbing" if "climb" in activity else "ohv" if any(k in activity for k in ["ohv", "off-highway", "motor"]) else "park"
+        out.append({
+            "id": str(props.get("OBJECTID") or props.get("RecSiteName") or ""),
+            "name": props.get("RecSiteName") or props.get("RecAreaName") or "BLM recreation site",
+            "lat": coords[1],
+            "lng": coords[0],
+            "subtype": props.get("FeaturedActivity") or props.get("PrimaryType") or "",
+            "summary": f"{props.get('FeaturedActivity') or 'Public recreation'} site from BLM recreation data.",
+            "access_notes": props.get("URL") or "Check the BLM field office or posted rules before driving.",
+        })
+    return out
+
+@app.post("/api/excursions/nearby")
+async def excursions_nearby(body: ExcursionNearbyRequest):
+    center_lat = float(body.center.lat)
+    center_lng = float(body.center.lng)
+    radius = max(3.0, min(float(body.radius or 35), 85.0))
+    route = body.route or []
+    categories = {re.sub(r"[^a-z0-9_]+", "", c.strip().lower()) for c in body.categories if c.strip()}
+    categories = categories or EXCURSION_DEFAULT_CATEGORIES
+    candidates: list[dict] = []
+    errors: dict[str, str] = {}
+
+    async def load_places():
+        places = await nearby_places(center_lat, center_lng, radius=min(radius, 45), categories=EXCURSION_PLACE_CATEGORIES, provider="auto")
+        for place in places:
+            ptype = str(place.get("type") or "attraction")
+            xtype = "trail" if ptype == "trailhead" else ptype
+            if xtype not in categories and ptype not in categories:
+                continue
+            cand = _excursion_candidate(
+                item=place, center_lat=center_lat, center_lng=center_lng,
+                route=route, max_distance_mi=radius,
+                xtype=xtype, source=str(place.get("source") or "osm"),
+                source_label=str(place.get("source_label") or "Open place data"),
+                summary=place.get("address") or place.get("subtype") or "",
+                best_for="Quick stop" if ptype in {"water", "viewpoint"} else "Side trip",
+            )
+            if cand:
+                candidates.append(cand)
+
+    async def load_trails():
+        await _seed_open_trail_profiles(center_lat, center_lng, radius, limit=80)
+        for trail in list_trail_profiles_near(center_lat, center_lng, radius, 80):
+            if "trail" not in categories and "trailhead" not in categories and "ohv" not in categories:
+                continue
+            activities = " ".join(str(a).lower() for a in trail.get("activities") or [])
+            xtype = "ohv" if any(k in activities for k in ["overland", "ohv", "4x4", "motor"]) else "trail"
+            cand = _excursion_candidate(
+                item=trail, center_lat=center_lat, center_lng=center_lng,
+                route=route, max_distance_mi=radius,
+                xtype=xtype, source=str(trail.get("source") or "trailhead"),
+                source_label=str(trail.get("source_label") or "Trailhead"),
+                summary=trail.get("summary") or trail.get("description") or "",
+                why_go=trail.get("summary") or "",
+                best_for="Trail scouting",
+                offline_ready=False,
+            )
+            if cand:
+                cand["length_mi"] = trail.get("length_mi")
+                cand["difficulty"] = trail.get("difficulty")
+                cand["activities"] = trail.get("activities") or []
+                candidates.append(cand)
+
+    async def load_explore():
+        try:
+            catalog = await explore_places(center_lat, center_lng, mode="nearby", limit=60)
+        except Exception:
+            return
+        for place in catalog.get("places") or []:
+            summary = place.get("summary") or {}
+            source_pack = place.get("source_pack") or {}
+            category = str(summary.get("category") or "").lower()
+            xtype = "historic" if any(k in category for k in ["historic", "monument"]) else "park"
+            if xtype not in categories and "attraction" not in categories:
+                continue
+            cand = _excursion_candidate(
+                item={**summary, "lat": summary.get("lat"), "lng": summary.get("lng")},
+                center_lat=center_lat, center_lng=center_lng,
+                route=route, max_distance_mi=radius,
+                xtype=xtype,
+                source="nps" if source_pack.get("quality") == "official" else "wikipedia",
+                source_label=source_pack.get("primary") or summary.get("source_title") or "Explore",
+                summary=summary.get("short_description") or (place.get("profile") or {}).get("summary") or "",
+                why_go=(place.get("profile") or {}).get("why_it_matters") or "",
+                access_notes=(place.get("profile") or {}).get("access_notes") or "",
+                sensitive_location=xtype == "historic" and source_pack.get("quality") != "official",
+            )
+            if cand:
+                candidates.append(cand)
+
+    async def load_wiki():
+        if not categories.intersection({"historic", "attraction", "park"}):
+            return
+        for article in await wikipedia_nearby(center_lat, center_lng, radius=int(min(radius * 1609.344, 30000)), limit=12):
+            title = str(article.get("title") or "")
+            lower = title.lower()
+            xtype = "historic" if any(k in lower for k in ["historic", "ruins", "monument", "petroglyph", "fort", "mission"]) else "attraction"
+            cand = _excursion_candidate(
+                item=article, center_lat=center_lat, center_lng=center_lng,
+                route=route, max_distance_mi=radius,
+                xtype=xtype, source="wikipedia", source_label="Wikipedia",
+                summary=article.get("extract") or "",
+                access_notes="Use this as context only; verify official access before detouring.",
+                sensitive_location=any(k in lower for k in ["petroglyph", "archaeological", "ruins"]),
+            )
+            if cand and (not cand["sensitive_location"] or "historic" in categories):
+                candidates.append(cand)
+
+    async def load_blm():
+        if not categories.intersection({"climbing", "ohv", "park", "attraction"}):
+            return
+        for item in await _blm_recreation_excursions(center_lat, center_lng, radius):
+            xtype = "climbing" if "climb" in str(item.get("subtype", "")).lower() else "ohv" if "ohv" in str(item.get("subtype", "")).lower() else "park"
+            if xtype not in categories and "attraction" not in categories:
+                continue
+            cand = _excursion_candidate(
+                item=item, center_lat=center_lat, center_lng=center_lng,
+                route=route, max_distance_mi=radius,
+                xtype=xtype, source="blm", source_label="Bureau of Land Management",
+                summary=item.get("summary") or "",
+                access_notes=item.get("access_notes") or "",
+                best_for="Public land side trip",
+            )
+            if cand:
+                candidates.append(cand)
+
+    async def guarded(name: str, fn):
+        try:
+            await asyncio.wait_for(fn(), timeout=8.0)
+        except Exception as exc:
+            errors[name] = str(exc)
+
+    await asyncio.gather(
+        guarded("places", load_places),
+        guarded("trails", load_trails),
+        guarded("explore", load_explore),
+        guarded("wikipedia", load_wiki),
+        guarded("blm", load_blm),
+    )
+    return {
+        "center": {"lat": center_lat, "lng": center_lng},
+        "radius": radius,
+        "categories": sorted(categories),
+        "excursions": _excursion_dedupe(candidates, limit=80),
+        "errors": errors,
+    }
 
 
 # ── Land ownership tile proxy (BLM/USFS/NPS) ─────────────────────────────────
@@ -4269,6 +5730,313 @@ async def osm_pois(lat: float, lng: float, radius: float = 30, types: str = "wat
             if added_for_type >= per_type_limit:
                 break
     return merged[:120]
+
+
+@app.get("/api/places/nearby")
+async def nearby_places(
+    lat: float,
+    lng: float,
+    radius: float = 25,
+    categories: str = "fuel,water,trailhead,viewpoint",
+    provider: str = "auto",
+):
+    """Server-cached nearby services for app category search.
+
+    This keeps public OSM services behind Trailhead caching/rate control and
+    gives the app one production path for online + offline result merging.
+    """
+    category_set = {re.sub(r"[^a-z0-9_]+", "", t.strip().lower()) for t in categories.split(",") if t.strip()}
+    radius_m = int(min(max(radius, 1), 45) * 1609.344)
+    provider = (provider or "auto").lower().strip()
+    osm_places: list[dict] = []
+    google_places: list[dict] = []
+    fsq_places: list[dict] = []
+
+    if provider in {"auto", "google"} and google_places_enabled():
+        google_places = await get_google_places(lat, lng, radius_m=radius_m, categories=category_set)
+    if provider in {"auto", "foursquare"} and foursquare_enabled() and category_set.intersection(FSQ_BUSINESS_CATEGORIES):
+        fsq_places = await get_foursquare_places(lat, lng, radius_m=radius_m, categories=category_set)
+    if provider in {"auto", "osm"}:
+        osm_places = await get_service_places(lat, lng, radius_m=radius_m, categories=category_set)
+
+    def dist_mi(item: dict) -> float:
+        try:
+            return _haversine_m(lat, lng, float(item.get("lat")), float(item.get("lng"))) / 1609.344
+        except Exception:
+            return 9999.0
+
+    merged: list[dict] = []
+    seen: set[str] = set()
+    for item in [*google_places, *fsq_places, *osm_places]:
+        name = str(item.get("name") or "").lower().strip()
+        coord_key = f"{item.get('type')}:{name}:{round(float(item.get('lat', 0)), 4)}:{round(float(item.get('lng', 0)), 4)}"
+        key = str(item.get("id") or coord_key)
+        fuzzy_key = coord_key
+        if fuzzy_key in seen:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        seen.add(fuzzy_key)
+        item["distance_mi"] = round(dist_mi(item), 2)
+        merged.append(item)
+    return _balanced_nearby_places(merged, category_set, dist_mi, limit=80)
+
+
+OUTDOOR_PLACE_PRIORITY = {
+    "trailhead": 0,
+    "trail": 1,
+    "viewpoint": 2,
+    "peak": 3,
+    "hot_spring": 4,
+    "park": 5,
+    "historic": 6,
+    "attraction": 7,
+    "climbing": 8,
+    "ohv": 9,
+    "camp": 10,
+    "camping": 11,
+    "water": 12,
+    "grocery": 16,
+    "mechanic": 17,
+    "food": 18,
+    "hardware": 19,
+    "parts": 20,
+    "parking": 24,
+    "dump": 25,
+    "propane": 26,
+    "fuel": 27,
+}
+UTILITY_PLACE_TYPES = {"fuel", "propane", "dump", "parking"}
+
+
+def _place_type_priority(value: object) -> int:
+    return OUTDOOR_PLACE_PRIORITY.get(_smart_pack_type(value), 50)
+
+
+def _balanced_nearby_places(items: list[dict], requested: set[str], dist_fn, limit: int = 80) -> list[dict]:
+    """Keep browse/search results from being monopolized by one utility type."""
+    if not items:
+        return []
+    broad_explore = len(requested) > 3 or bool(requested.intersection({"trailhead", "viewpoint", "park", "historic", "attraction", "hot_spring", "peak"}))
+    if not broad_explore:
+        return sorted(items, key=dist_fn)[:limit]
+
+    buckets: dict[str, list[dict]] = {}
+    for item in items:
+        ptype = _smart_pack_type(item.get("type") or item.get("category"))
+        buckets.setdefault(ptype, []).append(item)
+    for bucket in buckets.values():
+        bucket.sort(key=dist_fn)
+
+    result: list[dict] = []
+    seen: set[str] = set()
+    ordered_types = sorted(buckets, key=lambda ptype: (_place_type_priority(ptype), ptype))
+    for ptype in ordered_types:
+        cap = 4 if ptype in UTILITY_PLACE_TYPES else 10
+        for item in buckets[ptype][:cap]:
+            key = str(item.get("id") or f"{ptype}:{item.get('name')}:{item.get('lat')}:{item.get('lng')}")
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(item)
+            if len(result) >= limit:
+                return result
+
+    for item in sorted(items, key=dist_fn):
+        ptype = _smart_pack_type(item.get("type") or item.get("category"))
+        key = str(item.get("id") or f"{ptype}:{item.get('name')}:{item.get('lat')}:{item.get('lng')}")
+        if key not in seen:
+            seen.add(key)
+            result.append(item)
+            if len(result) >= limit:
+                break
+    return result
+
+
+def _smart_pack_type(value: object) -> str:
+    t = re.sub(r"[^a-z0-9_]+", "", str(value or "poi").lower().replace(" ", "_"))
+    return t or "poi"
+
+def _smart_place_from_camp(camp: dict, center_lat: float, center_lng: float, route: list[list[float]]) -> dict | None:
+    try:
+        lat = float(camp.get("lat"))
+        lng = float(camp.get("lng"))
+    except Exception:
+        return None
+    name = re.sub(r"\s+", " ", str(camp.get("name") or "")).strip()
+    if not name:
+        return None
+    source = str(camp.get("verified_source") or camp.get("source") or "camp").lower()
+    return {
+        "id": str(camp.get("id") or f"camp:{lat:.5f}:{lng:.5f}"),
+        "name": name,
+        "lat": lat,
+        "lng": lng,
+        "type": "camp",
+        "subtype": camp.get("land_type") or "camp",
+        "source": source,
+        "source_label": "Camp data",
+        "confidence": _excursion_source_confidence(source),
+        "distance_mi": round(_haversine_m(center_lat, center_lng, lat, lng) / 1609.344, 2),
+        "route_distance_mi": _excursion_route_distance_mi(center_lat, center_lng, {"lat": lat, "lng": lng}, route),
+        "summary": _planner_clean_text(camp.get("description") or camp.get("land_type") or "Camp option near this area.", 260),
+        "access_note": "Verify current access, fees, stay limits, fire restrictions, and road conditions before camping.",
+        "photo_url": camp.get("photo_url"),
+        "website": camp.get("url"),
+        "attribution": camp.get("verified_source") or camp.get("source") or "Trailhead",
+    }
+
+def _smart_place_from_poi(item: dict, center_lat: float, center_lng: float, route: list[list[float]]) -> dict | None:
+    try:
+        lat = float(item.get("lat"))
+        lng = float(item.get("lng"))
+    except Exception:
+        return None
+    ptype = _smart_pack_type(item.get("type") or item.get("subtype"))
+    raw_name = re.sub(r"\s+", " ", str(item.get("name") or "")).strip()
+    utility = ptype in {"fuel", "propane", "water", "dump", "parking"}
+    has_card_value = raw_name or item.get("address") or item.get("phone") or item.get("website") or item.get("photo_url")
+    if not has_card_value and not utility:
+        return None
+    name = raw_name or ptype.replace("_", " ").title()
+    source = str(item.get("source") or "osm").lower()
+    return {
+        **item,
+        "id": str(item.get("id") or item.get("place_id") or f"{source}:{ptype}:{lat:.5f}:{lng:.5f}"),
+        "name": name,
+        "lat": lat,
+        "lng": lng,
+        "type": ptype,
+        "source": source,
+        "source_label": item.get("source_label") or item.get("attribution") or ("Google" if source == "google" else "Open place data"),
+        "confidence": _excursion_source_confidence(source),
+        "distance_mi": round(_haversine_m(center_lat, center_lng, lat, lng) / 1609.344, 2),
+        "route_distance_mi": _excursion_route_distance_mi(center_lat, center_lng, {"lat": lat, "lng": lng}, route),
+        "summary": _planner_clean_text(item.get("summary") or item.get("description") or item.get("address") or item.get("subtype") or "", 300),
+    }
+
+def _smart_place_from_excursion(item: dict, center_lat: float, center_lng: float, route: list[list[float]]) -> dict | None:
+    try:
+        lat = float(item.get("lat"))
+        lng = float(item.get("lng"))
+    except Exception:
+        return None
+    name = re.sub(r"\s+", " ", str(item.get("name") or "")).strip()
+    if not name:
+        return None
+    xtype = _smart_pack_type(item.get("type") or "attraction")
+    return {
+        "id": str(item.get("id") or f"{item.get('source','excursion')}:{xtype}:{lat:.5f}:{lng:.5f}"),
+        "name": name,
+        "lat": lat,
+        "lng": lng,
+        "type": xtype if xtype in {"trailhead", "viewpoint", "peak", "hot_spring", "water"} else "attraction",
+        "subtype": item.get("subtype") or xtype,
+        "source": item.get("source") or "excursion",
+        "source_label": item.get("source_label") or "Trailhead",
+        "confidence": item.get("source_confidence") or _excursion_source_confidence(str(item.get("source") or "")),
+        "distance_mi": round(_haversine_m(center_lat, center_lng, lat, lng) / 1609.344, 2),
+        "route_distance_mi": item.get("distance_from_route_mi") or _excursion_route_distance_mi(center_lat, center_lng, {"lat": lat, "lng": lng}, route),
+        "summary": _planner_clean_text(item.get("summary") or item.get("why_go") or "", 320),
+        "access_note": _planner_clean_text(item.get("access_notes") or item.get("risk_notes") or "", 260),
+        "attribution": item.get("source_label") or item.get("source") or "Trailhead",
+        "length_mi": item.get("length_mi"),
+        "activities": item.get("activities") or [],
+    }
+
+@app.post("/api/nearby/smart-pack")
+async def nearby_smart_pack(body: NearbySmartPackRequest):
+    """Unified app-facing nearby discovery feed for rich place cards."""
+    center_lat = float(body.center.lat)
+    center_lng = float(body.center.lng)
+    radius = max(2.0, min(float(body.radius or 35), 70.0))
+    route = body.route or []
+    requested = {_smart_pack_type(c) for c in body.categories if str(c).strip()}
+    requested = requested or {"camp", "fuel", "propane", "water", "dump", "trailhead", "viewpoint", "peak", "hot_spring", "park", "historic", "climbing", "ohv", "attraction", "grocery", "mechanic", "parking", "camping"}
+    errors: dict[str, str] = {}
+
+    async def guarded(name: str, fn, default):
+        try:
+            return await asyncio.wait_for(fn(), timeout=9.0)
+        except Exception as exc:
+            errors[name] = str(exc)
+            return default
+
+    place_categories = ",".join(sorted(requested.union({"camp", "fuel", "propane", "water", "dump", "trailhead", "viewpoint", "peak", "hot_spring", "parking", "attraction", "grocery", "mechanic", "camping"})))
+    camps_task = guarded("camps", lambda: nearby_camps(center_lat, center_lng, min(radius, 55), ""), [])
+    places_task = guarded("places", lambda: nearby_places(center_lat, center_lng, min(radius, 45), place_categories, "auto"), [])
+    excursions_task = guarded("excursions", lambda: excursions_nearby(ExcursionNearbyRequest(
+        center=PlannerPoint(lat=center_lat, lng=center_lng),
+        radius=radius,
+        categories=list(requested),
+        route=route,
+        source_context="smart_pack",
+    )), {"excursions": []})
+    camps, places, excursion_pack = await asyncio.gather(camps_task, places_task, excursions_task)
+
+    normalized: list[dict] = []
+    if "camp" in requested or "camps" in requested:
+        normalized.extend(filter(None, (_smart_place_from_camp(c, center_lat, center_lng, route) for c in camps[:80])))
+    normalized.extend(filter(None, (_smart_place_from_poi(p, center_lat, center_lng, route) for p in places)))
+    normalized.extend(filter(None, (_smart_place_from_excursion(e, center_lat, center_lng, route) for e in (excursion_pack or {}).get("excursions", []))))
+
+    deduped: list[dict] = []
+    seen: set[str] = set()
+    def smart_dist(item: dict) -> float:
+        try:
+            return float(item.get("route_distance_mi") or item.get("distance_mi") or 9999)
+        except Exception:
+            return 9999.0
+
+    sorted_normalized = _balanced_nearby_places(normalized, requested, smart_dist, limit=160)
+    for item in sorted(sorted_normalized, key=lambda p: (_place_type_priority(p.get("type")), smart_dist(p), p.get("confidence") != "high", p.get("name", ""))):
+        ptype = _smart_pack_type(item.get("type"))
+        if ptype not in requested and not (ptype == "attraction" and requested.intersection({"park", "historic", "climbing", "ohv", "attraction"})):
+            continue
+        try:
+            key = f"{ptype}:{str(item.get('name','')).lower()}:{round(float(item.get('lat')), 4)}:{round(float(item.get('lng')), 4)}"
+        except Exception:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+        if len(deduped) >= 120:
+            break
+    return {
+        "center": {"lat": center_lat, "lng": center_lng},
+        "radius": radius,
+        "categories": sorted(requested),
+        "places": deduped,
+        "errors": errors,
+    }
+
+
+@app.get("/api/places/{source}/{place_id}/detail")
+async def place_detail(source: str, place_id: str):
+    """Return selected-place details for rich cards.
+
+    Google details are fetched on demand. Other providers may already include
+    the practical list fields, so callers should keep showing the summary if
+    this endpoint returns 404.
+    """
+    source = (source or "").lower().strip()
+    if source == "google":
+        detail = await get_google_place_detail(place_id)
+        if not detail:
+            raise HTTPException(404, "Google place detail unavailable")
+        return detail
+    raise HTTPException(404, "Place detail unavailable for this provider")
+
+
+@app.get("/api/places/google/photo")
+async def google_place_photo(name: str, max_width: int = 900):
+    photo = await fetch_google_photo(name, max_width=max_width)
+    if not photo:
+        raise HTTPException(404, "Place photo unavailable")
+    body, media_type = photo
+    return Response(content=body, media_type=media_type, headers={"Cache-Control": "private, max-age=86400"})
 
 
 # ── Offline trip essentials packs ─────────────────────────────────────────────
@@ -4636,17 +6404,34 @@ async def _geocode_one(client: httpx.AsyncClient, wp: dict, sem: asyncio.Semapho
     if not name:
         return wp
     token = settings.mapbox_token
+    country_filter = _countrycodes_for_query(name)
 
     async def _try(query: str):
+        if token:
+            try:
+                params = {"access_token": token, "limit": 1}
+                if country_filter:
+                    params["country"] = country_filter
+                resp = await client.get(
+                    f"https://api.mapbox.com/geocoding/v5/mapbox.places/{quote(query, safe='')}.json",
+                    params=params,
+                )
+                resp.raise_for_status()
+                feats = resp.json().get("features", [])
+                if feats:
+                    return feats[0]["geometry"]["coordinates"], feats[0].get("place_name", query)
+            except Exception:
+                pass
         try:
-            resp = await client.get(
-                f"https://api.mapbox.com/geocoding/v5/mapbox.places/{httpx.utils.quote(query, safe='')}.json",
-                params={"access_token": token, "limit": 1, "country": "us"},
-            )
+            params = {"format": "json", "limit": 1, "q": query}
+            if country_filter:
+                params["countrycodes"] = country_filter
+            resp = await client.get("https://nominatim.openstreetmap.org/search", params=params)
             resp.raise_for_status()
-            feats = resp.json().get("features", [])
-            if feats:
-                return feats[0]["geometry"]["coordinates"], feats[0].get("place_name", query)
+            hits = resp.json()
+            if hits:
+                hit = hits[0]
+                return [float(hit["lon"]), float(hit["lat"])], hit.get("display_name", query)
         except Exception:
             pass
         return None, None

@@ -6,7 +6,8 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>Trailhead — AI Overland Planner</title>
+<meta name="description" content="Trailhead web planner: build and revise overland trips, then send saved routes to the mobile app for offline maps and navigation.">
+<title>Trailhead — Web Trip Planner</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@400;600;700;800;900&family=Lora:ital,wght@0,400;0,500;0,600;1,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src='https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js'></script>
@@ -82,16 +83,15 @@ html,body{
 /* ── Report FAB ── */
 #report-fab{
   position:fixed;left:16px;bottom:72px;z-index:10;
-  width:50px;height:50px;border-radius:50%;
-  background:linear-gradient(135deg,var(--red),#b91c1c);
-  border:none;cursor:pointer;
+  width:54px;height:54px;border-radius:16px;
+  background:rgba(5,5,5,.78);
+  border:1px solid rgba(109,168,255,.26);cursor:pointer;
   display:flex;align-items:center;justify-content:center;
-  box-shadow:0 4px 16px rgba(239,68,68,.4);
-  font-size:18px;transition:transform .15s;
+  box-shadow:0 12px 34px rgba(0,0,0,.48);
+  font-size:11px;color:#93c5fd;font-family:var(--mono);letter-spacing:.06em;text-transform:uppercase;
+  transition:transform .15s, border-color .15s;
 }
-#report-fab:hover{transform:scale(1.1)}
-@keyframes pfab{0%,100%{box-shadow:0 4px 16px rgba(239,68,68,.4)}50%{box-shadow:0 4px 28px rgba(239,68,68,.7)}}
-#report-fab{animation:pfab 3s ease-in-out infinite}
+#report-fab:hover{transform:translateY(-1px);border-color:rgba(109,168,255,.5)}
 
 /* ── Toast ── */
 #toast{
@@ -584,12 +584,126 @@ html,body{
 /* ── Phase indicator in input ── */
 #input-phase{font-size:9px;color:var(--text3);font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase;margin-top:5px;text-align:center}
 
+/* ── Web planner/account boundary ── */
+#web-boundary{
+  position:fixed;top:max(16px,env(safe-area-inset-top));left:16px;z-index:12;
+  max-width:min(390px,calc(100vw - 32px));padding:10px 12px;border-radius:14px;
+  background:rgba(5,5,5,.74);border:1px solid rgba(255,255,255,.1);
+  backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  color:#c7c9cc;font-size:11px;font-family:var(--mono);letter-spacing:.04em;
+  box-shadow:var(--sh);
+}
+#web-boundary strong{color:var(--text);font-weight:700}
+#auth-chip{
+  position:fixed;top:max(16px,env(safe-area-inset-top));right:72px;z-index:12;
+  display:flex;align-items:center;gap:8px;min-height:38px;padding:0 12px;border-radius:999px;
+  background:rgba(5,5,5,.76);border:1px solid rgba(255,255,255,.1);
+  backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  color:var(--text2);font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+  cursor:pointer;box-shadow:var(--sh);
+}
+#auth-chip.signed{color:#86c894;border-color:rgba(61,189,109,.28)}
+#auth-modal{
+  position:fixed;inset:0;z-index:200;display:none;align-items:center;justify-content:center;
+  background:rgba(0,0,0,.68);backdrop-filter:blur(16px);padding:18px;
+}
+#auth-modal.open{display:flex}
+.auth-card{
+  width:min(430px,100%);background:#0e0e10;border:1px solid rgba(255,255,255,.12);
+  border-radius:18px;padding:22px;box-shadow:0 24px 80px rgba(0,0,0,.65);
+}
+.auth-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:16px}
+.auth-title{font-size:22px;font-weight:800;line-height:1.05}
+.auth-sub{font-size:13px;color:var(--text2);line-height:1.5;margin-top:8px}
+.auth-close{background:transparent;border:0;color:var(--text2);font-size:22px;cursor:pointer}
+.auth-tabs{display:flex;gap:6px;margin:0 0 14px}
+.auth-tab{flex:1;border:1px solid var(--border);background:var(--s2);color:var(--text2);border-radius:10px;padding:10px;font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;cursor:pointer}
+.auth-tab.active{border-color:var(--rust);color:var(--rust);background:var(--rg2)}
+.auth-field{width:100%;background:#151518;border:1px solid rgba(255,255,255,.1);border-radius:12px;color:var(--text);padding:13px;margin:0 0 9px;outline:none}
+.auth-field:focus{border-color:var(--rust);box-shadow:0 0 0 3px var(--rg)}
+.auth-submit{width:100%;border:0;border-radius:12px;background:linear-gradient(135deg,var(--rust),var(--rust2));color:var(--text);font-weight:800;padding:13px;cursor:pointer}
+.auth-alt{margin-top:12px;color:var(--text2);font-size:12px;line-height:1.5}
+.auth-alt button{background:none;border:0;color:var(--rust);padding:0;cursor:pointer}
+#auth-msg{min-height:20px;margin-top:10px;color:var(--text2);font-size:12px}
+#auth-msg.err{color:#fca5a5}#auth-msg.ok{color:#86c894}
+.handoff-card{margin-top:10px;padding:14px;border-radius:12px;background:rgba(109,168,255,.07);border:1px solid rgba(109,168,255,.2)}
+.handoff-card h4{margin:0 0 8px;font-size:13px;color:#93c5fd;font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase}
+.handoff-link{display:block;word-break:break-all;color:#c7c9cc;font-size:12px}
+@media(min-width:700px){
+  #web-boundary{left:440px}
+  #auth-chip{right:88px}
+}
+@media(max-width:699px){
+  #web-boundary{display:none}
+  #auth-chip{right:14px;top:calc(max(16px,env(safe-area-inset-top)) + 52px)}
+}
+
+/* ── Trailhead web redesign layer ── */
+:root{
+  --th-bg:#06100f;--th-bg-2:#10201d;--th-ink:#f7f3ea;--th-sand:#e7d7bb;
+  --th-muted:rgba(231,215,187,.72);--th-amber:#d99a3d;--th-cyan:#8fe3d9;--th-green:#7cbf74;
+  --th-panel:rgba(255,255,255,.055);--th-panel-strong:rgba(7,13,12,.68);--th-border:rgba(255,255,255,.16);
+  --th-radius-xl:48px;--th-radius-lg:30px;--th-radius-pill:999px;--th-shadow:0 28px 90px rgba(0,0,0,.45);
+  --bg:var(--th-bg);--s1:#0b1513;--s2:#10201d;--s3:#172824;--s4:#253832;
+  --border:rgba(255,255,255,.12);--border2:rgba(255,255,255,.08);
+  --rust:var(--th-amber);--rust2:#b8732e;--gold:var(--th-sand);--sage:var(--th-green);--pine:var(--th-cyan);
+  --text:var(--th-ink);--text2:var(--th-muted);--text3:rgba(231,215,187,.46);
+}
+body{background:var(--th-bg);color:var(--th-ink)}
+.glass,.GlassCard{
+  background:linear-gradient(135deg,rgba(255,255,255,.105),rgba(255,255,255,.035)),var(--th-panel);
+  border:1px solid var(--th-border);box-shadow:var(--th-shadow);
+  backdrop-filter:blur(24px) saturate(1.35);-webkit-backdrop-filter:blur(24px) saturate(1.35);
+}
+@media (prefers-reduced-transparency: reduce){
+  .glass,.GlassCard{background:rgba(13,27,25,.96);backdrop-filter:none;-webkit-backdrop-filter:none}
+}
+#web-boundary,#auth-chip,#map-status{
+  background:linear-gradient(135deg,rgba(255,255,255,.105),rgba(255,255,255,.035)),var(--th-panel-strong);
+  border:1px solid var(--th-border);color:var(--th-sand);box-shadow:0 16px 48px rgba(0,0,0,.38);
+}
+#web-boundary strong{color:var(--th-ink)}
+#auth-chip.signed{color:var(--th-green);border-color:rgba(124,191,116,.42)}
+#report-fab{display:none!important}
+#planner-dock{position:fixed;right:20px;top:calc(max(16px,env(safe-area-inset-top)) + 112px);z-index:11;width:min(360px,calc(100vw - 456px));display:grid;gap:10px}
+.planner-dock-title{font-size:11px;color:var(--th-cyan);font-family:var(--mono);letter-spacing:.13em;text-transform:uppercase;margin:0 0 2px}
+.PlannerToolCard,.planner-tool-card{width:100%;text-align:left;border-radius:18px;padding:14px 15px;cursor:pointer;color:var(--th-ink);background:linear-gradient(135deg,rgba(255,255,255,.105),rgba(255,255,255,.035)),var(--th-panel-strong);border:1px solid rgba(255,255,255,.13);box-shadow:0 14px 40px rgba(0,0,0,.34);backdrop-filter:blur(18px) saturate(1.25);-webkit-backdrop-filter:blur(18px) saturate(1.25)}
+.planner-tool-card:hover{border-color:rgba(217,154,61,.48);transform:translateY(-1px)}
+.planner-tool-card b{display:block;font-size:13px;letter-spacing:.04em;margin-bottom:3px}
+.planner-tool-card span{display:block;color:var(--th-muted);font-size:11px;line-height:1.35}
+.planner-tool-card .tool-state{float:right;color:var(--th-green);font-family:var(--mono);font-size:9px;margin-top:2px}
+.CTAButton,.cta-button{border-radius:var(--th-radius-pill);font-weight:900}
+.FeaturePill,.feature-pill{display:inline-flex;align-items:center;gap:8px;border-radius:var(--th-radius-pill);border:1px solid var(--th-border);background:rgba(3,5,4,.72);padding:6px 10px;color:var(--th-ink);font-family:var(--mono);font-size:10px;letter-spacing:.05em;text-transform:uppercase}
+.FeaturePill:before,.feature-pill:before{content:"";width:7px;height:7px;border-radius:999px;background:var(--pill-color,var(--th-cyan))}
+.auth-card{background:#0b1513;border-color:var(--th-border);border-radius:24px}
+.auth-title{color:var(--th-ink)}.auth-sub,.auth-alt,#auth-msg{color:var(--th-muted)}
+.auth-submit,.btn-primary,#send-btn{background:linear-gradient(135deg,var(--th-amber),#b8732e);color:#050505}
+#sheet{background:rgba(6,16,15,.92);border-color:var(--th-border)}
+#sheet-logo .logo-mark{background:none;box-shadow:none;border-radius:13px}
+#sheet-logo .logo-mark img{width:38px;height:38px;border-radius:12px;display:block}
+.welcome-hero{background:linear-gradient(145deg,rgba(16,32,29,.94),rgba(7,13,12,.72));border-color:rgba(255,255,255,.14);border-radius:20px}
+.welcome-badge{color:var(--th-cyan);background:rgba(143,227,217,.08);border-color:rgba(143,227,217,.24)}
+.welcome-badge::before{background:var(--th-green)}
+.welcome-h span{-webkit-text-stroke:0;background:none;-webkit-text-fill-color:var(--th-amber);color:var(--th-amber)}
+.example-prompt{background:rgba(255,255,255,.045);border-color:rgba(255,255,255,.12)}
+.example-prompt:hover{border-color:rgba(217,154,61,.45);background:rgba(217,154,61,.08)}
+.example-tag{background:rgba(217,154,61,.16);border-color:rgba(217,154,61,.32);color:var(--th-amber)}
+.map-btn{background:var(--th-panel-strong);border-color:var(--th-border);color:var(--th-sand);border-radius:14px}
+.map-btn:hover{border-color:rgba(217,154,61,.5);color:var(--th-amber)}
+.trip-badge,.outline-badge{color:var(--th-cyan)}
+.handoff-card{background:rgba(143,227,217,.08);border-color:rgba(143,227,217,.22)}
+@media(max-width:1100px){#planner-dock{display:none}}
+@media(max-width:699px){#map-status-wrap{display:none}}
+
 </style>
 </head>
 <body>
 <div id="map-wrap"><div id="map"></div></div>
 
-<div id="map-status-wrap"><div id="map-status">NO ACTIVE TRIP</div></div>
+<div id="web-boundary"><strong>Planning desk.</strong> Use the phone app for offline maps, cached routes, and navigation.</div>
+<button id="auth-chip" onclick="openAuthModal()">Sign in to save</button>
+
+<div id="map-status-wrap"><div id="map-status">PLANNING DESK</div></div>
 
 <div id="alert-banner">
   <span style="font-size:18px">Alert</span>
@@ -604,20 +718,44 @@ html,body{
   <div class="map-btn" onclick="locateUser()" title="My location">◎</div>
 </div>
 
-<div id="report-fab" title="Report from mobile app" onclick="showToast('Pin Submit reports from the Trailhead mobile app!',3500)">Alert</div>
+<aside id="planner-dock" aria-label="Planner tools">
+  <div class="planner-dock-title">Web planner tools</div>
+  <button class="PlannerToolCard planner-tool-card" onclick="plannerAction('route')"><span class="tool-state">WEB</span><b>Route Builder</b><span>Plan starts, destinations, fuel, camps, POIs, and export backups.</span></button>
+  <button class="PlannerToolCard planner-tool-card" onclick="plannerAction('camps')"><span class="tool-state">WEB</span><b>Camp search</b><span>Find camps around a route or map area before you leave service.</span></button>
+  <button class="PlannerToolCard planner-tool-card" onclick="plannerAction('trails')"><span class="tool-state">WEB</span><b>Trail discovery</b><span>Search trailheads and plan trail routes; report conditions from the phone.</span></button>
+  <button class="PlannerToolCard planner-tool-card" onclick="plannerAction('explore')"><span class="tool-state">GUIDE</span><b>Explore</b><span>Browse place context and audio guide ideas for the trip.</span></button>
+  <button class="PlannerToolCard planner-tool-card" onclick="plannerAction('phone')"><span class="tool-state">APP</span><b>Offline packs</b><span>Send the plan to your phone for offline maps, reports, and navigation.</span></button>
+</aside>
 <div id="toast"><span id="toast-msg"></span></div>
+
+<div id="auth-modal" role="dialog" aria-modal="true" aria-label="Trailhead account">
+  <div class="auth-card">
+    <div class="auth-head">
+      <div>
+        <div class="auth-title">Save the trip before you send it into the dirt.</div>
+        <div class="auth-sub">Sign in to save planner work and open it from the phone app. Offline maps and cached navigation still belong on the phone.</div>
+      </div>
+      <button class="auth-close" onclick="closeAuthModal()" aria-label="Close">×</button>
+    </div>
+    <div class="auth-tabs">
+      <button class="auth-tab active" id="auth-tab-login" onclick="setAuthMode('login')">Sign in</button>
+      <button class="auth-tab" id="auth-tab-register" onclick="setAuthMode('register')">Create</button>
+    </div>
+    <input class="auth-field" id="auth-email" type="email" autocomplete="email" placeholder="Email">
+    <input class="auth-field" id="auth-username" autocomplete="username" placeholder="Username" style="display:none">
+    <input class="auth-field" id="auth-password" type="password" autocomplete="current-password" placeholder="Password">
+    <button class="auth-submit" onclick="submitAuth()">Continue</button>
+    <div class="auth-alt"><button onclick="resendVerification()">Resend verification email</button> if the email link is being stubborn.</div>
+    <div id="auth-msg"></div>
+  </div>
+</div>
 
 <div id="sheet">
   <div id="sheet-logo">
-    <div class="logo-mark">
-      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-        <path d="M12 2L4 20h16L12 2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-        <path d="M8.5 14l3.5-7 3.5 7" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity=".6"/>
-      </svg>
-    </div>
+    <div class="logo-mark"><img src="/assets/app-icon.png" alt="" width="38" height="38"></div>
     <div class="logo-text-wrap">
       <div class="logo-name">Trailhead</div>
-      <div class="logo-tag">AI Overland Planner</div>
+      <div class="logo-tag">Web Planner</div>
       <a href="/" class="logo-home">← Back to Home</a>
     </div>
   </div>
@@ -628,7 +766,7 @@ html,body{
   </div>
 
   <div id="tabs">
-    <div class="tab active" onclick="switchTab('chat')"><span class="tab-icon">AI</span>Plan</div>
+    <div class="tab active" onclick="switchTab('chat')"><span class="tab-icon">Plan</span>Plan</div>
     <div class="tab" onclick="switchTab('itinerary')"><span class="tab-icon">Map</span>Route</div>
     <div class="tab" onclick="switchTab('camps')"><span class="tab-icon">Camp</span>Camps</div>
     <div class="tab" onclick="switchTab('logistics')"><span class="tab-icon">Gear</span>Gear</div>
@@ -640,12 +778,17 @@ html,body{
     <div id="chat-panel">
       <div id="messages">
         <div class="msg ai">
-          <div class="msg-label">Trailhead AI</div>
+          <div class="msg-label">Trailhead</div>
           <div class="msg-bubble" style="padding:0;background:transparent;border:none;width:100%;max-width:100%">
             <div class="welcome-hero">
-              <div class="welcome-badge">Fast Powered by Claude</div>
-              <div class="welcome-h">Plan your<br><span>overland</span><br>adventure.</div>
-              <div class="welcome-sub">Describe your trip in plain English — I'll build the full route, find dispersed camps, map fuel stops, and brief you on terrain.</div>
+              <div class="welcome-badge">Planning desk</div>
+              <div class="welcome-h">Build the route.<br><span>Open it</span><br>on your phone.</div>
+              <div class="welcome-sub">Use the browser for route planning, camp search, trail discovery, Explore, GPX export, and account handoff. Use the mobile app for offline packs, reports, and navigation.</div>
+              <div class="feature-pills" style="margin-top:12px">
+                <span class="FeaturePill feature-pill" style="--pill-color:var(--th-amber)">Route Builder</span>
+                <span class="FeaturePill feature-pill" style="--pill-color:var(--th-green)">Offline packs</span>
+                <span class="FeaturePill feature-pill" style="--pill-color:var(--th-cyan)">Trail discovery</span>
+              </div>
               <div class="example-grid">
                 <div class="example-prompt" onclick="useExample(this)">
                   <span class="example-tag">14D</span>14-day loop through southern Utah — dispersed camping, off-road, a couple paid showers
@@ -664,7 +807,7 @@ html,body{
 
       <div id="input-wrap">
         <div id="input-row">
-          <textarea id="user-input" placeholder="Describe your adventure..." rows="1"
+          <textarea id="user-input" placeholder="Describe the trip you want to plan..." rows="1"
             onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
           <button id="send-btn" onclick="sendMessage()" title="Plan trip">
             <svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>
@@ -717,7 +860,7 @@ html,body{
 
 <script>
 // ── State ────────────────────────────────────────────────────────────────────
-let map = null, mapToken = '', mapStyle = 'mapbox://styles/mapbox/satellite-streets-v12';
+let map = null, mapToken = '', mapStyle = 'mapbox://styles/mapbox/standard-satellite';
 let satelliteOn = true;
 let currentTrip = null;
 let wpMarkers = [], campMarkers = [], fuelMarkers = [], userMarker = null, routeLayerId = null;
@@ -730,6 +873,18 @@ let sessionId = (() => {
   if (!id) { id = 'sess_' + Math.random().toString(36).slice(2, 12); localStorage.setItem('trailhead_session', id); }
   return id;
 })();
+let authToken = localStorage.getItem('trailhead_auth_token') || '';
+let currentUser = null;
+let authMode = 'login';
+
+function authHeaders(extra = {}) {
+  return authToken ? { ...extra, Authorization: `Bearer ${authToken}` } : extra;
+}
+
+function apiFetch(url, options = {}) {
+  const headers = authHeaders(options.headers || {});
+  return fetch(url, { ...options, headers });
+}
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 async function init() {
@@ -737,8 +892,93 @@ async function init() {
     const cfg = await fetch('/api/config').then(r => r.json());
     mapToken = cfg.mapbox_token || '';
   } catch {}
+  await refreshUser();
   initMap();
   initSheet();
+}
+
+async function refreshUser() {
+  if (!authToken) { updateAuthChip(); return; }
+  try {
+    const res = await apiFetch('/api/auth/me');
+    if (!res.ok) throw new Error('session expired');
+    currentUser = await res.json();
+  } catch {
+    authToken = ''; currentUser = null; localStorage.removeItem('trailhead_auth_token');
+  }
+  updateAuthChip();
+}
+
+function updateAuthChip() {
+  const chip = document.getElementById('auth-chip');
+  if (!chip) return;
+  if (currentUser) {
+    chip.textContent = `Signed in · ${currentUser.username || currentUser.email}`;
+    chip.classList.add('signed');
+  } else {
+    chip.textContent = 'Sign in to save';
+    chip.classList.remove('signed');
+  }
+}
+
+function openAuthModal() {
+  if (currentUser) {
+    showToast(`Signed in as ${currentUser.username || currentUser.email}`);
+    return;
+  }
+  document.getElementById('auth-modal').classList.add('open');
+}
+function closeAuthModal() { document.getElementById('auth-modal').classList.remove('open'); }
+function setAuthMode(mode) {
+  authMode = mode;
+  document.getElementById('auth-tab-login').classList.toggle('active', mode === 'login');
+  document.getElementById('auth-tab-register').classList.toggle('active', mode === 'register');
+  document.getElementById('auth-username').style.display = mode === 'register' ? 'block' : 'none';
+  document.getElementById('auth-password').autocomplete = mode === 'register' ? 'new-password' : 'current-password';
+  setAuthMsg('');
+}
+function setAuthMsg(msg, cls = '') {
+  const el = document.getElementById('auth-msg');
+  el.className = cls;
+  el.textContent = msg;
+}
+async function submitAuth() {
+  const email = document.getElementById('auth-email').value.trim();
+  const username = document.getElementById('auth-username').value.trim();
+  const password = document.getElementById('auth-password').value;
+  if (!email || !password || (authMode === 'register' && !username)) {
+    setAuthMsg('Fill the required fields.', 'err'); return;
+  }
+  setAuthMsg('Working...');
+  try {
+    const endpoint = authMode === 'register' ? '/api/auth/register' : '/api/auth/login';
+    const body = authMode === 'register' ? { email, username, password } : { email, password };
+    const res = await fetch(endpoint, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || 'Account request failed');
+    if (data.token) {
+      authToken = data.token; localStorage.setItem('trailhead_auth_token', authToken);
+      currentUser = data.user; updateAuthChip(); closeAuthModal();
+      showToast('Trip saving is available on this browser.');
+    } else {
+      setAuthMsg(data.message || 'Check your email to verify this account.', 'ok');
+    }
+  } catch (e) {
+    setAuthMsg(e.message, 'err');
+  }
+}
+async function resendVerification() {
+  const email = document.getElementById('auth-email').value.trim();
+  if (!email) { setAuthMsg('Enter your email first.', 'err'); return; }
+  setAuthMsg('Sending...');
+  try {
+    const res = await fetch('/api/auth/resend-verification', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ email }) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || 'Could not resend verification');
+    setAuthMsg(data.message || 'Verification email sent.', 'ok');
+  } catch (e) {
+    setAuthMsg(e.message, 'err');
+  }
 }
 
 function initMap() {
@@ -750,11 +990,19 @@ function initMap() {
       center: [-111.0, 39.5],
       zoom: 5,
       attributionControl: false,
+      config: {
+        basemap: {
+          lightPreset: 'dusk',
+          showPointOfInterestLabels: false,
+          showTransitLabels: false,
+          show3dObjects: false,
+        },
+      },
     });
     map.on('load', () => {
       map.addSource('route', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } });
       map.addLayer({ id: 'route-shadow', type: 'line', source: 'route', paint: { 'line-color': 'rgba(0,0,0,.4)', 'line-width': 9, 'line-blur': 6, 'line-translate': [0, 2] }, layout: { 'line-cap': 'round', 'line-join': 'round' } });
-      map.addLayer({ id: 'route-line', type: 'line', source: 'route', paint: { 'line-color': '#b85c38', 'line-width': 4.5, 'line-opacity': 0.95 }, layout: { 'line-cap': 'round', 'line-join': 'round' } });
+      map.addLayer({ id: 'route-line', type: 'line', source: 'route', paint: { 'line-color': '#d99a3d', 'line-width': 4.5, 'line-opacity': 0.95 }, layout: { 'line-cap': 'round', 'line-join': 'round' } });
     });
     document.getElementById('zoom-in').onclick = () => map.zoomIn();
     document.getElementById('zoom-out').onclick = () => map.zoomOut();
@@ -782,10 +1030,47 @@ function toggleLayer() {
   const btn = document.getElementById('layer-btn');
   if (map) {
     satelliteOn = !satelliteOn;
-    mapStyle = satelliteOn ? 'mapbox://styles/mapbox/satellite-streets-v12' : 'mapbox://styles/mapbox/outdoors-v12';
+    mapStyle = satelliteOn ? 'mapbox://styles/mapbox/standard-satellite' : 'mapbox://styles/mapbox/standard';
     map.setStyle(mapStyle);
     btn.textContent = satelliteOn ? 'Satellite' : 'Map';
     btn.classList.toggle('active', !satelliteOn);
+  }
+}
+
+function setPlannerPrompt(text, tab = 'chat') {
+  switchTab(tab);
+  const input = document.getElementById('user-input');
+  if (input) {
+    input.value = text;
+    autoResize(input);
+    input.focus();
+  }
+  if (window.innerWidth < 700 && sheetState < 2) {
+    sheetState = 2;
+    document.getElementById('sheet').className = 'full';
+  }
+}
+
+function plannerAction(kind) {
+  if (kind === 'route') {
+    setPlannerPrompt('Build a route with start, destination, fuel stops, camps, and a GPX backup.');
+    showToast('Route Builder planning prompt ready.');
+  } else if (kind === 'camps') {
+    setPlannerPrompt('Find camps near my route or map area, with public-land context and practical access notes.');
+    showToast('Camp search starts from a planned route or map area.');
+  } else if (kind === 'trails') {
+    setPlannerPrompt('Search trails and trailheads in the area I am planning, then help me build a route with pins.');
+    showToast('Trail discovery is available from the web planner.');
+  } else if (kind === 'explore') {
+    setPlannerPrompt('Show Explore ideas, audio guide stops, scenic detours, and public-land context for this trip.');
+    showToast('Explore planning prompt ready.');
+  } else if (kind === 'phone') {
+    if (currentTrip) {
+      sendToPhone();
+    } else {
+      openAuthModal();
+      setAuthMsg('Plan or sign in first, then send the trip to your phone for offline packs and navigation.', '');
+    }
   }
 }
 
@@ -797,7 +1082,7 @@ function locateUser() {
       map.flyTo({ center: [lng, lat], zoom: 13, duration: 1200 });
       if (userMarker) userMarker.remove();
       const el = document.createElement('div');
-      el.style.cssText = 'width:14px;height:14px;border-radius:50%;background:#3b82f6;border:2.5px solid #fff;box-shadow:0 0 0 4px rgba(59,130,246,.3)';
+      el.style.cssText = 'width:14px;height:14px;border-radius:50%;background:#8fe3d9;border:2.5px solid #fff;box-shadow:0 0 0 4px rgba(143,227,217,.3)';
       userMarker = new mapboxgl.Marker({ element: el }).setLngLat([lng, lat]).addTo(map);
     } else if (_leafletMap) {
       _leafletMap.flyTo([lat, lng], 13, { duration: 1.2 });
@@ -885,7 +1170,7 @@ async function sendMessage() {
     const thinking = appendThinking(chatStages);
     const stageTimer = cycleStages(thinking, chatStages);
     try {
-      const resp = await fetch('/api/chat', {
+      const resp = await apiFetch('/api/chat', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text, session_id: sessionId, current_trip: currentTrip }),
       });
@@ -919,7 +1204,7 @@ async function sendMessage() {
   const thinking = appendThinking(chatStages);
   const stageTimer = cycleStages(thinking, chatStages);
   try {
-    const resp = await fetch('/api/chat', {
+    const resp = await apiFetch('/api/chat', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: text, session_id: sessionId }),
     });
@@ -943,6 +1228,9 @@ async function sendMessage() {
 }
 
 async function buildTrip() {
+  if (!currentUser) {
+    showToast('Free preview. Sign in after this to save or send to phone.', 3600);
+  }
   setPhase('planning');
   document.getElementById('outline-card-msg')?.remove();
 
@@ -950,7 +1238,7 @@ async function buildTrip() {
   const stageTimer = cycleStages(thinking, thinkingStages);
   document.getElementById('send-btn').disabled = true;
   try {
-    const resp = await fetch('/api/plan', {
+    const resp = await apiFetch('/api/plan', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ request: '', session_id: sessionId }),
     });
@@ -964,7 +1252,7 @@ async function buildTrip() {
       const deadline = Date.now() + maxWait;
       while (Date.now() < deadline) {
         await new Promise(r => setTimeout(r, interval));
-        const jr = await fetch(`/api/plan/job/${job.job_id}`);
+        const jr = await apiFetch(`/api/plan/job/${job.job_id}`);
         if (!jr.ok) throw new Error('Job status check failed');
         const jd = await jr.json();
         if (jd.status === 'done') return jd.result;
@@ -1010,7 +1298,7 @@ function renderOutlineCard(outline) {
   const el = document.createElement('div');
   el.className = 'msg ai';
   el.id = 'outline-card-msg';
-  el.innerHTML = `<div class="msg-label">Trailhead AI</div>
+  el.innerHTML = `<div class="msg-label">Trailhead</div>
     <div class="outline-card">
       <div class="outline-badge">Route Ready to Build</div>
       <div class="outline-text">${esc(outline || 'Route outline ready. Click below to generate the full trip with waypoints, campsites, and fuel stops.')}</div>
@@ -1055,7 +1343,15 @@ function updateTrailDNA(dna) {
 function appendMsg(role, text) {
   const el = document.createElement('div');
   el.className = 'msg ' + role;
-  el.innerHTML = `<div class="msg-label">${role === 'user' ? 'You' : 'Trailhead AI'}</div><div class="msg-bubble">${esc(text)}</div>`;
+  el.innerHTML = `<div class="msg-label">${role === 'user' ? 'You' : 'Trailhead'}</div><div class="msg-bubble">${esc(text)}</div>`;
+  const msgs = document.getElementById('messages');
+  msgs.appendChild(el); msgs.scrollTop = msgs.scrollHeight;
+}
+
+function appendHtmlMsg(role, html) {
+  const el = document.createElement('div');
+  el.className = 'msg ' + role;
+  el.innerHTML = `<div class="msg-label">${role === 'user' ? 'You' : 'Trailhead'}</div><div class="msg-bubble">${html}</div>`;
   const msgs = document.getElementById('messages');
   msgs.appendChild(el); msgs.scrollTop = msgs.scrollHeight;
 }
@@ -1064,7 +1360,7 @@ function appendThinking(stages) {
   stages = stages || thinkingStages;
   const el = document.createElement('div');
   el.className = 'msg ai';
-  el.innerHTML = `<div class="msg-label">Trailhead AI</div>
+  el.innerHTML = `<div class="msg-label">Trailhead</div>
     <div class="thinking">
       <div class="dots"><span></span><span></span><span></span></div>
       <div class="thinking-stage">${stages[0]}</div>
@@ -1096,10 +1392,10 @@ function renderTripCard(data) {
 
   const el = document.createElement('div');
   el.className = 'msg ai';
-  el.innerHTML = `<div class="msg-label">Trailhead AI</div>
+  el.innerHTML = `<div class="msg-label">Trailhead</div>
     <div class="trip-card">
       <div class="trip-card-hero">
-        <div class="trip-badge">✦ AI Trip Plan Ready</div>
+        <div class="trip-badge">Route Plan Ready</div>
         <div class="trip-name">${esc(p.trip_name || 'Your Adventure')}</div>
         <div class="trip-states">${esc(states)}</div>
         ${tagHtml ? `<div class="trip-tags">${tagHtml}</div>` : ''}
@@ -1116,6 +1412,7 @@ function renderTripCard(data) {
       <div class="trip-actions">
         <button class="btn btn-primary" onclick="switchTab('itinerary')">View Route →</button>
         <button class="btn btn-ghost" onclick="switchTab('camps')">Camp Camps</button>
+        <button class="btn btn-ghost" onclick="sendToPhone()">Send to Phone</button>
         <button class="btn btn-ghost" onclick="exportGpx()">↓ GPX</button>
       </div>
     </div>`;
@@ -1337,7 +1634,7 @@ function renderCamps(data) {
 function renderCampItem(c, i) {
   const sig = campSignal(c.land_type || '', c.name);
   const landCls = campLandClass(c.land_type || '');
-  // AI-estimated star rating based on reservable + land type
+  // Estimated star rating based on reservable + land type
   const rating = c.reservable ? 4.1 + (i % 3) * 0.2 : 3.4 + (i % 4) * 0.3;
   const stars = '★'.repeat(Math.floor(rating)) + (rating % 1 > 0.4 ? '½' : '') + '☆'.repeat(5 - Math.ceil(rating));
 
@@ -1433,7 +1730,7 @@ function showToast(msg, ms = 2500) {
 async function exportGpx() {
   if (!currentTrip) return;
   const { plan } = currentTrip;
-  const resp = await fetch('/api/export/gpx', {
+  const resp = await apiFetch('/api/export/gpx', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ trip_name: plan.trip_name, waypoints: (plan.waypoints || []).filter(w => w.lat && w.lng) }),
   });
@@ -1442,6 +1739,20 @@ async function exportGpx() {
   Object.assign(document.createElement('a'), { href: url, download: 'trailhead-trip.gpx' }).click();
   URL.revokeObjectURL(url);
   showToast('Download GPX exported!');
+}
+
+function sendToPhone() {
+  if (!currentTrip) return;
+  if (!currentUser) {
+    openAuthModal();
+    setAuthMsg('Sign in first so the trip can be tied to your account before phone handoff.', 'err');
+    return;
+  }
+  const tripId = currentTrip.trip_id || '';
+  const appLink = tripId ? `trailhead://trip/${encodeURIComponent(tripId)}` : 'trailhead://';
+  const webLink = tripId ? `${location.origin}/app?trip=${encodeURIComponent(tripId)}` : `${location.origin}/app`;
+  appendHtmlMsg('ai', `<div class="handoff-card"><h4>Phone handoff</h4><div>Open Trailhead on your phone and sign in with this account. If deep links are enabled on this build, use:</div><a class="handoff-link" href="${esc(appLink)}">${esc(appLink)}</a><br><div>Browser fallback:</div><a class="handoff-link" href="${esc(webLink)}">${esc(webLink)}</a><br><div style="color:var(--text3);margin-top:8px">Download offline packs in the phone app before leaving service.</div></div>`);
+  showToast('Phone handoff ready.');
 }
 
 function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }

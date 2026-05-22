@@ -1,6 +1,6 @@
 """SQLite WAL store. Schema + queries."""
 from __future__ import annotations
-import sqlite3, json, time, math, hashlib, random
+import sqlite3, json, time, math, hashlib, random, secrets
 from config.settings import settings
 
 # Report expiry by type (seconds)
@@ -31,8 +31,13 @@ def init_db():
             id          TEXT PRIMARY KEY,
             user_id     INTEGER,
             created_at  INTEGER NOT NULL,
+            updated_at  INTEGER,
             request     TEXT NOT NULL,
             plan        TEXT NOT NULL,
+            route_geometry TEXT,
+            builder_state  TEXT,
+            source      TEXT,
+            version     INTEGER NOT NULL DEFAULT 1,
             audio_guide TEXT
         );
         CREATE TABLE IF NOT EXISTS weather_cache (
@@ -133,6 +138,9 @@ def init_db():
             contributor_title        TEXT,
             contributor_bio          TEXT,
             contributor_avatar_color TEXT,
+            auth_provider            TEXT,
+            apple_sub                TEXT,
+            google_sub               TEXT,
             created_at               INTEGER NOT NULL
         );
         CREATE TABLE IF NOT EXISTS credit_transactions (
@@ -462,6 +470,12 @@ def init_db():
         "ALTER TABLE trips ADD COLUMN audio_guide TEXT",
         "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE trips ADD COLUMN user_id INTEGER",
+        "ALTER TABLE trips ADD COLUMN updated_at INTEGER",
+        "ALTER TABLE trips ADD COLUMN route_geometry TEXT",
+        "ALTER TABLE trips ADD COLUMN builder_state TEXT",
+        "ALTER TABLE trips ADD COLUMN source TEXT",
+        "ALTER TABLE trips ADD COLUMN version INTEGER NOT NULL DEFAULT 1",
+        "CREATE INDEX IF NOT EXISTS idx_trips_user_updated ON trips(user_id, updated_at)",
         "CREATE TABLE IF NOT EXISTS stripe_purchases (session_id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, credits INTEGER NOT NULL, created_at INTEGER NOT NULL)",
         """CREATE TABLE IF NOT EXISTS app_store_subscriptions (
             original_transaction_id TEXT PRIMARY KEY,
@@ -497,6 +511,11 @@ def init_db():
         "ALTER TABLE users ADD COLUMN contributor_title TEXT",
         "ALTER TABLE users ADD COLUMN contributor_bio TEXT",
         "ALTER TABLE users ADD COLUMN contributor_avatar_color TEXT",
+        "ALTER TABLE users ADD COLUMN auth_provider TEXT",
+        "ALTER TABLE users ADD COLUMN apple_sub TEXT",
+        "ALTER TABLE users ADD COLUMN google_sub TEXT",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_apple_sub ON users(apple_sub) WHERE apple_sub IS NOT NULL AND apple_sub != ''",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub) WHERE google_sub IS NOT NULL AND google_sub != ''",
         """CREATE TABLE IF NOT EXISTS plan_jobs (
             id          TEXT PRIMARY KEY,
             user_id     INTEGER,
@@ -763,23 +782,125 @@ def clear_conversation(session_id: str):
 
 def save_trip(trip_id: str, request: str, plan: dict, user_id: int | None = None):
     db = _conn()
+    now = int(time.time())
+    existing = db.execute("SELECT created_at, audio_guide FROM trips WHERE id=?", (trip_id,)).fetchone()
+    created_at = existing["created_at"] if existing else now
+    audio_guide = existing["audio_guide"] if existing else None
     db.execute(
-        "INSERT OR REPLACE INTO trips (id, user_id, created_at, request, plan) VALUES (?,?,?,?,?)",
-        (trip_id, user_id, int(time.time()), request, json.dumps(plan))
+        """INSERT OR REPLACE INTO trips
+           (id, user_id, created_at, updated_at, request, plan, audio_guide, version)
+           VALUES (?,?,?,?,?,?,?,COALESCE((SELECT version + 1 FROM trips WHERE id=?), 1))""",
+        (trip_id, user_id, created_at, now, request, json.dumps(plan), audio_guide, trip_id)
     )
     db.commit(); db.close()
 
 def get_trip(trip_id: str) -> dict | None:
     db = _conn()
-    row = db.execute("SELECT user_id, plan, audio_guide FROM trips WHERE id=?", (trip_id,)).fetchone()
+    row = db.execute(
+        """SELECT user_id, created_at, updated_at, plan, audio_guide, route_geometry,
+                  builder_state, source, version
+           FROM trips WHERE id=?""",
+        (trip_id,)
+    ).fetchone()
     db.close()
     if not row:
         return None
     result = json.loads(row["plan"])
     result["user_id"] = row["user_id"]  # used for ownership check in the route
+    result["created_at"] = row["created_at"]
+    result["updated_at"] = row["updated_at"] or row["created_at"]
+    result["source"] = row["source"]
+    result["version"] = row["version"] or 1
+    if row["route_geometry"]:
+        result["route_geometry"] = json.loads(row["route_geometry"])
+    if row["builder_state"]:
+        result["builder_state"] = json.loads(row["builder_state"])
     if row["audio_guide"]:
         result["audio_guide"] = json.loads(row["audio_guide"])
     return result
+
+def save_account_trip(
+    trip_id: str,
+    trip: dict,
+    user_id: int,
+    request: str = "",
+    route_geometry: dict | None = None,
+    builder_state: dict | None = None,
+    source: str = "web",
+) -> dict:
+    db = _conn()
+    now = int(time.time())
+    existing = db.execute("SELECT created_at, audio_guide, version FROM trips WHERE id=?", (trip_id,)).fetchone()
+    created_at = existing["created_at"] if existing else now
+    version = (existing["version"] or 1) + 1 if existing else 1
+    audio_guide = existing["audio_guide"] if existing else None
+    db.execute(
+        """INSERT OR REPLACE INTO trips
+           (id, user_id, created_at, updated_at, request, plan, route_geometry,
+            builder_state, source, version, audio_guide)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            trip_id,
+            user_id,
+            created_at,
+            now,
+            request,
+            json.dumps(trip),
+            json.dumps(route_geometry) if route_geometry is not None else None,
+            json.dumps(builder_state) if builder_state is not None else None,
+            source,
+            version,
+            audio_guide,
+        )
+    )
+    db.commit(); db.close()
+    saved = get_trip(trip_id)
+    return saved if saved else trip
+
+def list_user_trips(user_id: int, limit: int = 25) -> list[dict]:
+    db = _conn()
+    rows = db.execute(
+        """SELECT id, created_at, COALESCE(updated_at, created_at) AS updated_at,
+                  request, plan, source, version
+           FROM trips
+           WHERE user_id=?
+           ORDER BY COALESCE(updated_at, created_at) DESC
+           LIMIT ?""",
+        (user_id, limit)
+    ).fetchall()
+    db.close()
+    out = []
+    for row in rows:
+        plan_json = json.loads(row["plan"])
+        plan = plan_json.get("plan", {}) if isinstance(plan_json, dict) else {}
+        out.append({
+            "trip_id": row["id"],
+            "trip_name": plan.get("trip_name") or "Untitled route",
+            "states": plan.get("states") or [],
+            "duration_days": plan.get("duration_days") or 0,
+            "est_miles": plan.get("total_est_miles") or 0,
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "source": row["source"],
+            "version": row["version"] or 1,
+        })
+    return out
+
+def save_trip_geometry(trip_id: str, user_id: int, route_geometry: dict) -> dict | None:
+    db = _conn()
+    row = db.execute("SELECT user_id FROM trips WHERE id=?", (trip_id,)).fetchone()
+    if not row:
+        db.close()
+        return None
+    if row["user_id"] != user_id:
+        db.close()
+        raise PermissionError("Not authorized")
+    db.execute(
+        "UPDATE trips SET route_geometry=?, updated_at=?, version=COALESCE(version,1)+1 WHERE id=?",
+        (json.dumps(route_geometry), int(time.time()), trip_id)
+    )
+    db.commit(); db.close()
+    return get_trip(trip_id)
 
 def save_audio_guide(trip_id: str, guide: dict):
     db = _conn()
@@ -841,6 +962,51 @@ def create_user(email: str, username: str, password_hash: str, referral_code: st
     uid = cur.lastrowid
     db.commit(); db.close()
     return uid
+
+def create_oauth_user(email: str, username: str, password_hash: str, provider: str, provider_sub: str) -> int:
+    if provider not in {"apple", "google"}:
+        raise ValueError("Unsupported OAuth provider")
+    column = "apple_sub" if provider == "apple" else "google_sub"
+    db = _conn()
+    code = f"{username.lower()}-{secrets.token_hex(3)}"
+    cur = db.execute(
+        f"""INSERT INTO users
+           (email,username,password_hash,referral_code,email_verified,auth_provider,{column},created_at)
+           VALUES (?,?,?,?,1,?,?,?)""",
+        (email.lower(), username, password_hash, code, provider, provider_sub, int(time.time()))
+    )
+    uid = cur.lastrowid
+    db.commit(); db.close()
+    return uid
+
+def get_user_by_oauth(provider: str, provider_sub: str) -> dict | None:
+    if provider not in {"apple", "google"} or not provider_sub:
+        return None
+    column = "apple_sub" if provider == "apple" else "google_sub"
+    db = _conn()
+    row = db.execute(f"SELECT * FROM users WHERE {column}=?", (provider_sub,)).fetchone()
+    db.close()
+    return dict(row) if row else None
+
+def link_user_oauth(user_id: int, provider: str, provider_sub: str) -> dict | None:
+    if provider not in {"apple", "google"} or not provider_sub:
+        return None
+    column = "apple_sub" if provider == "apple" else "google_sub"
+    db = _conn()
+    db.execute(
+        f"""UPDATE users
+           SET {column}=?,
+               auth_provider=COALESCE(auth_provider, ?),
+               email_verified=1,
+               email_verify_token=NULL,
+               email_verify_sent_at=NULL
+           WHERE id=?""",
+        (provider_sub, provider, user_id)
+    )
+    db.commit()
+    row = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+    db.close()
+    return dict(row) if row else None
 
 def set_email_verification(user_id: int, token: str, sent_at: int | None = None) -> None:
     db = _conn()

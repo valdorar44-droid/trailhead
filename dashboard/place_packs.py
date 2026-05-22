@@ -90,6 +90,8 @@ def _region_name(region: str) -> str:
         return "Canada"
     if code == "MEXICO":
         return "Mexico"
+    if code == "FI":
+        return "Finland"
     return code
 
 
@@ -238,7 +240,15 @@ def _normalize_overpass_element(el: dict) -> dict | None:
     }
 
 
-async def _fetch_bbox_cell(cell: tuple[float, float, float, float]) -> list[dict]:
+def _failed_cell(cell: tuple[float, float, float, float], error: str) -> dict:
+    west, south, east, north = cell
+    return {
+        "bbox": [round(west, 6), round(south, 6), round(east, 6), round(north, 6)],
+        "error": error[:500],
+    }
+
+
+async def _fetch_bbox_cell(cell: tuple[float, float, float, float]) -> dict:
     west, south, east, north = cell
     bbox = f"{south},{west},{north},{east}"
     query = f"""[out:json][timeout:25];
@@ -291,16 +301,16 @@ out body center 1800;
                 res.raise_for_status()
                 elements = res.json().get("elements") or []
                 break
-            except Exception:
+            except Exception as exc:
                 if attempt == 2:
-                    return []
+                    return {"points": [], "failed_cell": _failed_cell(cell, f"{type(exc).__name__}: {exc}")}
                 await asyncio.sleep(1.5 * (attempt + 1))
     points = []
     for el in elements:
         point = _normalize_overpass_element(el)
         if point:
             points.append(point)
-    return points
+    return {"points": points, "failed_cell": None}
 
 
 def _normalize_pack_point(item: dict, category: str) -> dict | None:
@@ -337,7 +347,7 @@ def status() -> dict:
 
 
 def ordered_regions(regions: list[str] | None = None) -> list[str]:
-    targets = [r.lower() for r in (regions or STATE_BBOXES.keys()) if r.upper() in STATE_BBOXES]
+    targets = [r.lower() for r in (regions or STATE_BBOXES.keys()) if r.upper() in ALL_REGION_BBOXES]
     return sorted(targets, key=lambda r: SMALLEST_FIRST_RANK.get(r, 999))
 
 
@@ -354,25 +364,33 @@ async def build_region_pack(region: str, pack_id: str = "essentials") -> Path | 
         "progress": f"0/{len(cells)} cells",
         "error": None,
         "size_bytes": 0,
+        "failed_cells": [],
+        "failed_cell_count": 0,
     }
     semaphore = asyncio.Semaphore(1 if region in {"ca", "tx"} else 2)
     points: list[dict] = []
+    failed_cells: list[dict] = []
     seen = set()
     completed = 0
 
-    async def run_cell(cell: tuple[float, float, float, float]) -> list[dict]:
+    async def run_cell(cell: tuple[float, float, float, float]) -> dict:
         async with semaphore:
-            return await _fetch_bbox_cell(cell)
+            try:
+                return await _fetch_bbox_cell(cell)
+            except Exception as exc:
+                return {"points": [], "failed_cell": _failed_cell(cell, f"{type(exc).__name__}: {exc}")}
 
     tasks = [asyncio.create_task(run_cell(cell)) for cell in cells]
     for task in asyncio.as_completed(tasks):
-        try:
-            batch = await task
-        except Exception:
-            batch = []
+        result = await task
         completed += 1
         _status[key]["progress"] = f"{completed}/{len(cells)} cells"
-        for point in batch:
+        failed_cell = result.get("failed_cell")
+        if failed_cell:
+            failed_cells.append(failed_cell)
+            _status[key]["failed_cells"] = failed_cells
+            _status[key]["failed_cell_count"] = len(failed_cells)
+        for point in result.get("points") or []:
             point_key = point.get("id") or f"{point.get('type')}:{point.get('lat'):.4f}:{point.get('lng'):.4f}"
             if point_key in seen:
                 continue
@@ -398,6 +416,8 @@ async def build_region_pack(region: str, pack_id: str = "essentials") -> Path | 
                 error="Overpass returned no usable places",
                 size_bytes=existing.stat().st_size,
                 point_count=existing_count,
+                failed_cells=failed_cells,
+                failed_cell_count=len(failed_cells),
             )
             return existing
         raise RuntimeError(f"{region}:{pack_id} returned 0 places")
@@ -410,15 +430,19 @@ async def build_region_pack(region: str, pack_id: str = "essentials") -> Path | 
         "generated_at": int(time.time()),
         "source": "OpenStreetMap",
         "categories": PACK_DEFINITIONS[pack_id]["categories"],
+        "failed_cells": failed_cells,
+        "failed_cell_count": len(failed_cells),
         "points": points,
     }
     path = pack_path(region, pack_id)
     path.write_text(json.dumps(payload, separators=(",", ":")))
     _status[key].update(
         status="built",
-        progress=f"built · {len(points)} places",
+        progress=f"built · {len(points)} places" + (f" · {len(failed_cells)} failed cells" if failed_cells else ""),
         size_bytes=path.stat().st_size,
         point_count=len(points),
+        failed_cells=failed_cells,
+        failed_cell_count=len(failed_cells),
     )
     return path
 
@@ -452,7 +476,12 @@ async def upload_pack_to_r2(region: str, pack_id: str = "essentials") -> bool:
             Body=path.read_bytes(),
             ContentType="application/json",
         )
-        _status[key].update(status="done", progress="uploaded", size_bytes=path.stat().st_size)
+        failed_count = int(_status.get(key, {}).get("failed_cell_count") or 0)
+        _status[key].update(
+            status="done",
+            progress="uploaded" + (f" · {failed_count} failed cells" if failed_count else ""),
+            size_bytes=path.stat().st_size,
+        )
         await update_manifest_on_r2()
         return True
     except Exception as exc:
@@ -495,12 +524,14 @@ async def update_manifest_on_r2() -> bool:
                     continue
                 listed_keys.add(name)
                 point_count = 0
+                failed_cells: list[dict] = []
                 size = int(item.get("Size") or 0)
                 try:
                     obj = await asyncio.to_thread(r2.get_object, Bucket=settings.r2_bucket, Key=key)
                     body = await asyncio.to_thread(obj["Body"].read)
                     payload = json.loads(body.decode())
                     point_count = len(payload.get("points") or [])
+                    failed_cells = payload.get("failed_cells") or []
                 except Exception:
                     pass
                 manifest["packs"][name] = {
@@ -508,6 +539,8 @@ async def update_manifest_on_r2() -> bool:
                     "pack_id": pack_id,
                     "size": size,
                     "point_count": point_count,
+                    "failed_cell_count": len(failed_cells),
+                    "failed_cells": failed_cells,
                     "url": f"/api/places/packs/{region}/{pack_id}",
                 }
             if not page.get("IsTruncated"):
@@ -528,13 +561,17 @@ async def update_manifest_on_r2() -> bool:
             try:
                 payload = json.loads(path.read_text())
                 point_count = len(payload.get("points") or [])
+                failed_cells = payload.get("failed_cells") or []
             except Exception:
                 point_count = 0
+                failed_cells = []
             manifest["packs"][name] = {
                 "region_id": region,
                 "pack_id": pack_id,
                 "size": path.stat().st_size,
                 "point_count": point_count,
+                "failed_cell_count": len(failed_cells),
+                "failed_cells": failed_cells,
                 "url": f"/api/places/packs/{region}/{pack_id}",
             }
 

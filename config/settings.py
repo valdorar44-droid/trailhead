@@ -14,10 +14,16 @@ class Settings:
     db_path: str = os.environ.get("TRAILHEAD_DB_PATH", "/data/trailhead.db" if os.path.isdir("/data") else "./trailhead.db")
     stripe_secret_key: str = os.environ.get("STRIPE_SECRET_KEY", "")
     stripe_webhook_secret: str = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
-    # Public URL used for Stripe redirect after checkout
-    public_url: str = os.environ.get("PUBLIC_URL", "https://trailhead-production-2049.up.railway.app")
+    # Public URL used for account emails and web callbacks.
+    public_url: str = os.environ.get(
+        "PUBLIC_URL",
+        f"https://{os.environ.get('RAILWAY_PUBLIC_DOMAIN', 'api.gettrailhead.app')}"
+    )
     protomaps_key: str = os.environ.get("PROTOMAPS_KEY", "")
+    google_places_api_key: str = os.environ.get("GOOGLE_PLACES_API_KEY", "")
+    google_oauth_client_ids: str = os.environ.get("GOOGLE_OAUTH_CLIENT_IDS", "")
     valhalla_url: str = os.environ.get("VALHALLA_URL", "https://valhalla1.openstreetmap.de")
+    route_fallback_urls: str = os.environ.get("ROUTE_FALLBACK_URLS", "https://routing.openstreetmap.de/routed-car")
     smtp_host: str = os.environ.get("SMTP_HOST", "")
     smtp_port: int = int(os.environ.get("SMTP_PORT", "587"))
     smtp_user: str = os.environ.get("SMTP_USER", "")
@@ -32,6 +38,7 @@ class Settings:
     r2_secret_access_key: str = os.environ.get("R2_SECRET_ACCESS_KEY", "")
     r2_bucket: str = os.environ.get("R2_BUCKET", "trailhead-tiles")
     apple_bundle_id: str = os.environ.get("APPLE_BUNDLE_ID", os.environ.get("IOS_BUNDLE_ID", ""))
+    apple_service_id: str = os.environ.get("APPLE_SERVICE_ID", "")
     apple_issuer_id: str = os.environ.get("APPLE_ISSUER_ID", "")
     apple_key_id: str = os.environ.get("APPLE_KEY_ID", "")
     apple_private_key: str = os.environ.get("APPLE_PRIVATE_KEY", "")

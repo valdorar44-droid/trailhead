@@ -6,7 +6,7 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
   StyleSheet, Keyboard, KeyboardAvoidingView, Platform, ActivityIndicator, useWindowDimensions,
-  Modal, SafeAreaView, LayoutChangeEvent,
+  Modal, SafeAreaView, LayoutChangeEvent, Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,6 +20,24 @@ export interface SearchPlace {
   lat: number;
   lng: number;
   dist?: number | null;
+  id?: string;
+  source?: string;
+  source_label?: string;
+  place_id?: string;
+  provider_place_id?: string;
+  type?: string;
+  subtype?: string;
+  address?: string;
+  phone?: string;
+  website?: string;
+  open_now?: boolean | null;
+  rating?: number;
+  rating_count?: number;
+  photo_url?: string | null;
+  google_maps_uri?: string;
+  attribution?: string;
+  icon?: string;
+  _camp?: CampsitePin;
 }
 
 export interface RouteSearchModalProps {
@@ -27,7 +45,7 @@ export interface RouteSearchModalProps {
   userLoc: { lat: number; lng: number } | null;
   camps: CampsitePin[];
   gas: { lat: number; lng: number; name: string }[];
-  pois: { lat: number; lng: number; name: string; type: string; subtype?: string }[];
+  pois: SearchPlace[];
   communityPins: Pin[];
   routeOpts: { avoidHighways?: boolean; avoidTolls?: boolean; backRoads?: boolean };
   routeCoords?: [number, number][];  // [lng, lat] for elevation profile
@@ -48,6 +66,9 @@ type SearchTab = 'history' | 'nearby' | 'categories';
 
 // Overpass API categories — overlander-focused supply stops
 const CATEGORIES = [
+  { id: 'trails',    label: 'Trails in View', icon: 'trail-sign-outline',  color: '#f97316', tags: [
+    ['highway','path'], ['highway','track'], ['tourism','viewpoint'], ['natural','peak'],
+  ] as string[][] },
   { id: 'camps',     label: 'Camps Nearby',  icon: 'bonfire-outline',      color: '#14b8a6', tags: [
     ['tourism','camp_site'], ['tourism','caravan_site'], ['tourism','camp_pitch'],
     ['amenity','camping'],   ['tourism','wilderness_hut'], ['tourism','alpine_hut'],
@@ -67,56 +88,6 @@ const CATEGORIES = [
   { id: 'wifi',      label: 'WiFi / Library', icon: 'wifi-outline',         color: '#8b5cf6', tags: [['amenity','library'],['amenity','cafe']] },
 ] as const;
 
-async function searchOverpass(
-  tags: readonly (readonly string[])[],
-  lat: number, lng: number, radiusM = 25000
-): Promise<SearchPlace[]> {
-  // Search node + way + relation so we find both point markers AND polygon buildings
-  // "out center" gives center coord for ways/relations, "out skel" for nodes
-  const tagQueries = tags.flatMap(([k, v]) => [
-    `node["${k}"="${v}"](around:${radiusM},${lat},${lng});`,
-    `way["${k}"="${v}"](around:${radiusM},${lat},${lng});`,
-    `relation["${k}"="${v}"](around:${radiusM},${lat},${lng});`,
-  ]).join('\n');
-  const query = `[out:json][timeout:15];\n(\n${tagQueries}\n);\nout center 30;`;
-  const res = await fetch('https://overpass-api.de/api/interpreter', {
-    method: 'POST',
-    body: query,
-    headers: { 'Content-Type': 'text/plain' },
-  });
-  const data = await res.json();
-  const origin = { lat, lng };
-  return (data.elements ?? [])
-    .map((e: any) => {
-      const elat = e.lat ?? e.center?.lat;
-      const elng = e.lon ?? e.center?.lon;
-      if (!elat || !elng) return null;
-      const rawName = e.tags?.name ?? e.tags?.brand ?? e.tags?.operator ?? e.tags?.['name:en'];
-      if (!rawName) return null; // skip unnamed features
-      // Add type hint for camping areas
-      const tourism = e.tags?.tourism ?? '';
-      const suffix =
-        tourism === 'camp_site'     ? ' Campground' :
-        tourism === 'caravan_site'  ? ' RV Park' :
-        tourism === 'camp_pitch'    ? ' Camp Pitch' :
-        tourism === 'wilderness_hut'? ' Wilderness Hut' :
-        e.tags?.boundary === 'national_park' ? ' (National Park)' :
-        e.tags?.leisure === 'nature_reserve' ? ' (Nature Reserve)' : '';
-      return {
-        name: rawName + suffix,
-        lat: elat, lng: elng,
-        dist: haversineKm(origin, { lat: elat, lng: elng }),
-      };
-    })
-    .filter(Boolean)
-    .sort((a: SearchPlace, b: SearchPlace) => (a.dist ?? 999) - (b.dist ?? 999))
-    // Dedupe by name+approximate position
-    .filter((p: SearchPlace, i: number, arr: SearchPlace[]) =>
-      arr.findIndex(x => x.name === p.name && Math.abs(x.lat - p.lat) < 0.001) === i
-    )
-    .slice(0, 15);
-}
-
 function haversineKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
   const R = 6371;
   const dLat = (b.lat - a.lat) * Math.PI / 180;
@@ -130,6 +101,56 @@ function fmtDist(km: number) {
   if (mi < 0.1) return `${Math.round(mi * 5280)} ft`;
   if (mi < 10) return `${mi.toFixed(1)} mi`;
   return `${Math.round(mi)} mi`;
+}
+
+const NEARBY_RADIUS_MI = 45;
+const DEFAULT_CATEGORY_RADIUS_MI = 25;
+const WIDE_CATEGORY_RADIUS_MI = 45;
+
+function distanceMi(origin: { lat: number; lng: number }, point: { lat: number; lng: number }) {
+  return haversineKm(origin, point) * 0.621371;
+}
+
+function scopedNearby<T extends { lat: number; lng: number; name?: string }>(
+  origin: { lat: number; lng: number },
+  items: T[],
+  radiusMi: number,
+  label: (item: T) => string,
+): SearchPlace[] {
+  return items
+    .filter(item => item?.lat != null && item?.lng != null && Number.isFinite(item.lat) && Number.isFinite(item.lng))
+    .map(item => ({ name: label(item), lat: item.lat, lng: item.lng, dist: haversineKm(origin, item) }))
+    .filter(item => item.dist != null && item.dist * 0.621371 <= radiusMi)
+    .sort((a, b) => (a.dist ?? 999) - (b.dist ?? 999));
+}
+
+function dedupePlaces<T extends SearchPlace>(items: T[]): T[] {
+  const seen = new Set<string>();
+  return items.filter(item => {
+    const key = `${item.name.toLowerCase().trim()}:${item.lat.toFixed(4)}:${item.lng.toFixed(4)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function categoryTypes(catId: string) {
+  const map: Record<string, string[]> = {
+    fuel: ['fuel', 'propane'],
+    propane: ['propane', 'fuel'],
+    water: ['water'],
+    grocery: ['grocery'],
+    mechanic: ['mechanic'],
+    hardware: ['hardware'],
+    tires: ['mechanic', 'parts'],
+    parts: ['parts', 'mechanic'],
+    trails: ['trail', 'trailhead', 'viewpoint', 'peak', 'hot_spring'],
+    camping: ['camping'],
+    laundry: ['laundromat'],
+    medical: ['medical'],
+    wifi: ['wifi', 'food'],
+  };
+  return map[catId] ?? [catId];
 }
 
 function parseCoordinateQuery(raw: string): { lat: number; lng: number; name: string } | null {
@@ -253,11 +274,11 @@ const epS = StyleSheet.create({
 
 const ICON_COLORS: Record<string, string> = {
   star: '#f5a623', camp: '#14b8a6', flag: '#ef4444',
-  water: '#38bdf8', fuel: '#eab308', pin: '#a855f7',
+  water: '#38bdf8', fuel: '#eab308', pin: '#a855f7', trail: '#f97316',
 };
 const ICON_NAMES: Record<string, any> = {
   star: 'star', camp: 'bonfire-outline', flag: 'flag',
-  water: 'water', fuel: 'car-sport-outline', pin: 'location',
+  water: 'water', fuel: 'car-sport-outline', pin: 'location', trail: 'trail-sign-outline',
 };
 const GROUP_ICONS = ['flag', 'star', 'bonfire-outline', 'water', 'car-sport-outline', 'leaf-outline', 'camera-outline', 'shield-outline'];
 const GROUP_COLORS = ['#ef4444', '#f5a623', '#14b8a6', '#38bdf8', '#eab308', '#22c55e', '#a855f7', '#6366f1'];
@@ -337,18 +358,10 @@ export default function RouteSearchModal({
     }
     setSearching(true);
     try {
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=8&countrycodes=us`,
-        { headers: { 'User-Agent': 'Trailhead/1.0' } }
-      );
-      const data = await res.json();
-      const places: SearchPlace[] = data.map((r: any) => {
-        const lat = parseFloat(r.lat);
-        const lng = parseFloat(r.lon);
-        const dist = userLoc ? haversineKm(userLoc, { lat, lng }) : null;
-        return { name: r.display_name, lat, lng, dist };
-      });
-      setResults(places);
+      const places = await api.geocodePlaces(query.trim(), 8);
+      setResults(places
+        .map(place => ({ name: place.name, lat: place.lat, lng: place.lng, dist: userLoc ? haversineKm(userLoc, place) : null, source: place.source, place_id: place.place_id }))
+        .sort((a, b) => (a.dist ?? 9999) - (b.dist ?? 9999)));
     } catch { setResults([]); }
     setSearching(false);
   }, [query, userLoc]);
@@ -361,86 +374,96 @@ export default function RouteSearchModal({
     if (!cat) return;
     setCatSearching(true);
     try {
+      const radiusMi = ['camps', 'fuel', 'propane', 'mechanic', 'hardware', 'tires', 'parts', 'camping', 'medical'].includes(catId)
+        ? WIDE_CATEGORY_RADIUS_MI
+        : DEFAULT_CATEGORY_RADIUS_MI;
       if (catId === 'fuel') {
-        const loadedFuel = gas
-          .filter(g => g.lat != null && g.lng != null && Number.isFinite(g.lat) && Number.isFinite(g.lng))
+        const loadedFuel = scopedNearby(userLoc, gas, radiusMi, g => g.name || 'Fuel');
+        const liveFuel = await api.getGas(userLoc.lat, userLoc.lng, radiusMi);
+        setCatResults(dedupePlaces([...loadedFuel, ...liveFuel
           .map(g => ({
             name: g.name || 'Fuel',
             lat: g.lat,
             lng: g.lng,
             dist: haversineKm(userLoc, g),
-          }));
-        const liveFuel = loadedFuel.length >= 10 ? [] : await api.getGas(userLoc.lat, userLoc.lng, 25);
-        const seen = new Set<string>();
-        setCatResults([...loadedFuel, ...liveFuel
-          .filter(g => g.lat != null && g.lng != null && Number.isFinite(g.lat) && Number.isFinite(g.lng))
-          .map(g => ({
-            name: g.name || 'Fuel',
-            lat: g.lat,
-            lng: g.lng,
-            dist: haversineKm(userLoc, g),
-          }))]
-          .filter(g => {
-            const key = `${g.name}:${g.lat.toFixed(4)}:${g.lng.toFixed(4)}`;
-            if (seen.has(key)) return false;
-            seen.add(key);
-            return true;
-          })
+          }))
+          .filter(g => Number.isFinite(g.lat) && Number.isFinite(g.lng) && distanceMi(userLoc, g) <= radiusMi)])
           .sort((a, b) => (a.dist ?? 999) - (b.dist ?? 999))
           .slice(0, 30));
         return;
       }
       if (catId === 'water') {
         const loadedWater = pois
-          .filter(p => p.type === 'water' && p.lat != null && p.lng != null && Number.isFinite(p.lat) && Number.isFinite(p.lng))
+          .filter(p => p.type === 'water' && distanceMi(userLoc, p) <= radiusMi)
+          .map(p => ({ ...p, name: p.name || (p.subtype === 'fountain' ? 'Fountain' : 'Water Source'), dist: haversineKm(userLoc, p) }));
+        const liveWater = await api.getOsmPois(userLoc.lat, userLoc.lng, radiusMi, 'water');
+        setCatResults(dedupePlaces([...loadedWater, ...liveWater
           .map(p => ({
             name: p.name || (p.subtype === 'fountain' ? 'Fountain' : 'Water Source'),
             lat: p.lat,
             lng: p.lng,
             dist: haversineKm(userLoc, p),
-          }));
-        const liveWater = loadedWater.length >= 10 ? [] : await api.getOsmPois(userLoc.lat, userLoc.lng, 25, 'water');
-        const seen = new Set<string>();
-        setCatResults([...loadedWater, ...liveWater
-          .filter(p => p.lat != null && p.lng != null && Number.isFinite(p.lat) && Number.isFinite(p.lng))
-          .map(p => ({
-            name: p.name || (p.subtype === 'fountain' ? 'Fountain' : 'Water Source'),
-            lat: p.lat,
-            lng: p.lng,
-            dist: haversineKm(userLoc, p),
-          }))]
-          .filter(p => {
-            const key = `${p.name}:${p.lat.toFixed(4)}:${p.lng.toFixed(4)}`;
-            if (seen.has(key)) return false;
-            seen.add(key);
-            return true;
-          })
+            id: p.id,
+            source: p.source,
+            source_label: p.source_label,
+            type: p.type,
+            subtype: p.subtype,
+            photo_url: p.photo_url,
+          }))
+          .filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng) && distanceMi(userLoc, p) <= radiusMi)])
           .sort((a, b) => (a.dist ?? 999) - (b.dist ?? 999))
           .slice(0, 30));
         return;
       }
-      // Camps: broad Overpass search + merge local trip camps at top
-      const radius = catId === 'camps' ? 80000 : 25000;
-      const places = cat.tags.length > 0
-        ? await searchOverpass(cat.tags, userLoc.lat, userLoc.lng, radius)
-        : [];
       if (catId === 'camps') {
-        // Prepend local trip campsites (already loaded, free, instant)
-        const origin = userLoc;
         const localCamps = (camps ?? [])
-          .filter(c => c.lat && c.lng)
-          .map(c => ({ name: c.name, lat: c.lat, lng: c.lng, dist: haversineKm(origin, c), _camp: c }))
-          .filter(lc => !places.some(p => Math.abs(p.lat - lc.lat) < 0.005 && Math.abs(p.lng - lc.lng) < 0.005));
-        setCatResults([...localCamps, ...places] as any);
+          .filter(c => c.lat && c.lng && distanceMi(userLoc, c) <= radiusMi)
+          .map(c => ({ name: c.name || 'Camp', lat: c.lat, lng: c.lng, dist: haversineKm(userLoc, c), _camp: c }));
+        const liveCamps = await api.getNearbyCamps(userLoc.lat, userLoc.lng, radiusMi, []);
+        setCatResults(dedupePlaces([...localCamps, ...liveCamps
+          .filter(c => c.lat && c.lng && distanceMi(userLoc, c) <= radiusMi)
+          .map(c => ({ name: c.name || 'Camp', lat: c.lat, lng: c.lng, dist: haversineKm(userLoc, c), _camp: c }))] as any)
+          .sort((a, b) => (a.dist ?? 999) - (b.dist ?? 999))
+          .slice(0, 30));
       } else {
-        setCatResults(places);
+        const types = categoryTypes(catId);
+        const local = pois
+          .filter(p => types.includes(p.type || '') && distanceMi(userLoc, p) <= radiusMi)
+          .map(p => ({ ...p, name: p.name || (p.type || 'place').replace('_', ' '), dist: haversineKm(userLoc, p) }));
+        const live = await api.getNearbyPlaces(userLoc.lat, userLoc.lng, radiusMi, types.join(','));
+        setCatResults(dedupePlaces([...local, ...live
+          .filter(p => p.lat != null && p.lng != null && distanceMi(userLoc, p) <= radiusMi)
+            .map(p => ({
+              name: p.name || p.type.replace('_', ' '),
+              lat: p.lat,
+              lng: p.lng,
+              dist: haversineKm(userLoc, p),
+              id: p.id,
+              source: p.source,
+              source_label: p.source_label,
+              place_id: p.place_id,
+              provider_place_id: p.provider_place_id,
+              type: p.type,
+              subtype: p.subtype,
+              address: p.address,
+              phone: p.phone,
+              website: p.website,
+              open_now: p.open_now,
+              rating: p.rating,
+              rating_count: p.rating_count,
+              photo_url: p.photo_url,
+              google_maps_uri: p.google_maps_uri,
+              attribution: p.attribution,
+            }))])
+          .sort((a, b) => (a.dist ?? 999) - (b.dist ?? 999))
+          .slice(0, 30));
       }
     } catch {
       setCatResults([]);
     } finally {
       setCatSearching(false);
     }
-  }, [userLoc, camps]);
+  }, [userLoc, camps, gas, pois]);
 
   const selectPlace = useCallback((place: SearchPlace) => {
     addSearchHistory({ name: place.name, lat: place.lat, lng: place.lng, searchedAt: Date.now() });
@@ -473,11 +496,17 @@ export default function RouteSearchModal({
     setNewGroupName(''); setShowCreateGroup(false);
   };
 
-  const nearbyPlaces = userLoc ? [
-    ...camps.slice(0, 5).map(c => ({ name: c.name, lat: c.lat, lng: c.lng, icon: 'camp', dist: haversineKm(userLoc, c) })),
-    ...gas.slice(0, 3).map(g => ({ name: g.name, lat: g.lat, lng: g.lng, icon: 'fuel', dist: haversineKm(userLoc, g) })),
-    ...pois.slice(0, 3).map(p => ({ name: p.name, lat: p.lat, lng: p.lng, icon: 'pin', dist: haversineKm(userLoc, p) })),
-  ].sort((a, b) => (a.dist ?? 9999) - (b.dist ?? 9999)).slice(0, 10) : [];
+  const nearbyPlaces = userLoc ? dedupePlaces([
+    ...camps
+      .filter(c => c.lat && c.lng && distanceMi(userLoc, c) <= NEARBY_RADIUS_MI)
+      .map(c => ({ name: c.name || 'Camp', lat: c.lat, lng: c.lng, dist: haversineKm(userLoc, c), icon: 'camp', type: 'camp', photo_url: (c as any).photo_url, _camp: c })),
+    ...gas
+      .filter(g => g.lat && g.lng && distanceMi(userLoc, g) <= NEARBY_RADIUS_MI)
+      .map(g => ({ name: g.name || 'Fuel', lat: g.lat, lng: g.lng, dist: haversineKm(userLoc, g), icon: 'fuel', type: 'fuel' })),
+    ...pois
+      .filter(p => p.lat && p.lng && distanceMi(userLoc, p) <= NEARBY_RADIUS_MI)
+      .map(p => ({ ...p, name: p.name || (p.type || 'place').replace('_', ' '), dist: haversineKm(userLoc, p), icon: p.type === 'trail' || p.type === 'trailhead' ? 'trail' : 'pin' })),
+  ] as SearchPlace[]).sort((a, b) => (a.dist ?? 9999) - (b.dist ?? 9999)).slice(0, 18) : [];
 
   if (!visible) return null;
 
@@ -504,8 +533,10 @@ export default function RouteSearchModal({
               <Ionicons name="arrow-back" size={20} color={C.text2} />
             </TouchableOpacity>
             <TextInput ref={inputRef} style={s.searchInput} value={query} onChangeText={setQuery}
-              onSubmitEditing={doSearch} placeholder="Type to search all" placeholderTextColor={C.text3}
-              returnKeyType="search" autoFocus />
+              onSubmitEditing={() => { Keyboard.dismiss(); doSearch(); }}
+              onBlur={() => Keyboard.dismiss()}
+              placeholder="Type to search all" placeholderTextColor={C.text3}
+              returnKeyType="search" blurOnSubmit autoFocus />
             {searching
               ? <ActivityIndicator size="small" color={C.orange} />
                 : <TouchableOpacity onPress={() => { Keyboard.dismiss(); setView('picker'); setQuery(''); setResults([]); setActiveCat(null); setCatResults([]); }}>
@@ -585,10 +616,17 @@ export default function RouteSearchModal({
                 </View>
                 {nearbyPlaces.map((p, i) => (
                   <TouchableOpacity key={i} style={s.resultRow} onPress={() => selectPlace(p)}>
-                    <View style={[s.resultIcon, { backgroundColor: ICON_COLORS[p.icon] + '22' }]}>
-                      <Ionicons name={ICON_NAMES[p.icon]} size={14} color={ICON_COLORS[p.icon]} />
+                    {p.photo_url ? (
+                      <Image source={{ uri: p.photo_url }} style={s.resultThumb} resizeMode="cover" />
+                    ) : (
+                      <View style={[s.resultIcon, { backgroundColor: ICON_COLORS[p.icon || 'pin'] + '22' }]}>
+                        <Ionicons name={ICON_NAMES[p.icon || 'pin']} size={14} color={ICON_COLORS[p.icon || 'pin']} />
+                      </View>
+                    )}
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={s.resultName} numberOfLines={1}>{p.name}</Text>
+                      <Text style={s.resultSub} numberOfLines={1}>{[p.type?.replace(/_/g, ' '), p.source_label || p.source].filter(Boolean).join(' · ')}</Text>
                     </View>
-                    <Text style={s.resultName} numberOfLines={1}>{p.name}</Text>
                     {p.dist != null && <Text style={s.resultDist}>{fmtDist(p.dist)}</Text>}
                   </TouchableOpacity>
                 ))}
@@ -633,14 +671,16 @@ export default function RouteSearchModal({
                       const isCamp = activeCat === 'camps';
                       return (
                         <TouchableOpacity key={i} style={s.resultRow} onPress={() => selectPlace(r)}>
-                          <View style={[s.resultIcon, { backgroundColor: (cat?.color ?? C.orange) + '22' }]}>
-                            <Ionicons name={(cat?.icon ?? 'location') as any} size={14} color={cat?.color ?? C.orange} />
-                          </View>
+                          {r.photo_url ? (
+                            <Image source={{ uri: r.photo_url }} style={s.resultThumb} resizeMode="cover" />
+                          ) : (
+                            <View style={[s.resultIcon, { backgroundColor: (cat?.color ?? C.orange) + '22' }]}>
+                              <Ionicons name={(cat?.icon ?? 'location') as any} size={14} color={cat?.color ?? C.orange} />
+                            </View>
+                          )}
                           <View style={{ flex: 1 }}>
                             <Text style={s.resultName} numberOfLines={1}>{r.name}</Text>
-                            {isCamp && r._camp?.land_type && (
-                              <Text style={s.resultSub} numberOfLines={1}>{r._camp.land_type}</Text>
-                            )}
+                            <Text style={s.resultSub} numberOfLines={1}>{isCamp && r._camp?.land_type ? r._camp.land_type : [r.type?.replace(/_/g, ' '), r.source_label || r.source].filter(Boolean).join(' · ')}</Text>
                           </View>
                           {r.dist != null && <Text style={s.resultDist}>{fmtDist(r.dist)}</Text>}
                           {isCamp && onCampTap && r._camp && (
@@ -957,7 +997,7 @@ export default function RouteSearchModal({
         <View style={s.createGroupSheet}>
           <Text style={s.createGroupTitle}>New Marker Group</Text>
           <TextInput style={s.createGroupInput} value={newGroupName} onChangeText={setNewGroupName}
-            placeholder="Group name..." placeholderTextColor={C.text3} autoFocus />
+            placeholder="Group name..." placeholderTextColor={C.text3} returnKeyType="done" blurOnSubmit onSubmitEditing={Keyboard.dismiss} autoFocus />
           <Text style={s.createGroupSubtitle}>Color</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 4 }}>
             {GROUP_COLORS.map(color => (
@@ -1041,6 +1081,7 @@ const styles = (C: ReturnType<typeof useTheme>) => StyleSheet.create({
   liveNearbyPillText: { color: C.orange, fontSize: 8.5, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
   resultRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 13, borderBottomWidth: 1, borderColor: C.border },
   resultIcon: { width: 30, height: 30, borderRadius: 15, backgroundColor: C.orangeGlow, alignItems: 'center', justifyContent: 'center' },
+  resultThumb: { width: 42, height: 42, borderRadius: 12, backgroundColor: C.s2 },
   resultName: { color: C.text, fontSize: 14, fontWeight: '500' },
   resultSub: { color: C.text3, fontSize: 11, marginTop: 1 },
   resultDist: { color: C.text3, fontSize: 11, fontFamily: mono },

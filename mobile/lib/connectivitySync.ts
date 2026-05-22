@@ -2,8 +2,9 @@ import { useEffect, useRef, useCallback } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
 import * as FileSystem from 'expo-file-system';
 import { api, TripResult, RouteWeatherResult } from './api';
+import { useStore } from './store';
 
-const BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://trailhead-production-2049.up.railway.app';
+const BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
 const POLL_MS = 45_000;
 const PROBE_TIMEOUT_MS = 5_000;
 
@@ -24,6 +25,7 @@ interface SyncCallbacks {
   onWeatherUpdate: (weather: RouteWeatherResult) => void;
   onSyncComplete: () => void; // called when any sync succeeds (show toast)
   onReportRefresh: () => void; // called on reconnect to trigger live report re-fetch
+  onReconnect?: () => void; // called once when the probe transitions to online
 }
 
 export function useConnectivitySync({
@@ -31,6 +33,7 @@ export function useConnectivitySync({
   onWeatherUpdate,
   onSyncComplete,
   onReportRefresh,
+  onReconnect,
 }: SyncCallbacks) {
   const wasOnline = useRef<boolean | null>(null); // null = unknown (first probe not done)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -40,7 +43,7 @@ export function useConnectivitySync({
     if (isSyncing.current) return;
     isSyncing.current = true;
     try {
-      const weather = await api.getRouteWeather(trip.trip_id, trip.plan.waypoints);
+      const weather = await api.getRouteWeather(trip.trip_id, trip.plan.waypoints, useStore.getState().weatherUnitMode);
       const path = `${FileSystem.documentDirectory}weather_${trip.trip_id}.json`;
       await FileSystem.writeAsStringAsync(path, JSON.stringify(weather), {
         encoding: FileSystem.EncodingType.UTF8,
@@ -65,11 +68,12 @@ export function useConnectivitySync({
     if (prevOnline === true) return;
 
     // Reconnected — sync
+    onReconnect?.();
     onReportRefresh();
     if (activeTrip) {
       await syncWeather(activeTrip);
     }
-  }, [activeTrip, syncWeather, onReportRefresh]);
+  }, [activeTrip, syncWeather, onReportRefresh, onReconnect]);
 
   // Keep tick closure fresh (activeTrip changes)
   const tickRef = useRef(tick);

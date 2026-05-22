@@ -1,0 +1,65 @@
+---
+import BaseHead from "../components/BaseHead.astro";
+import Nav from "../components/Nav.jsx";
+import Footer from "../components/Footer.jsx";
+import { ClientRouter } from "astro:transitions";
+import site from "../data/site.json";
+const { title, description, image, transparentNav = false } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <BaseHead title={title} description={description} image={image} />
+    <ClientRouter />
+  </head>
+  <body>
+    {transparentNav ? (
+      <div class="absolute inset-x-0 top-0 z-30">
+        <Nav
+          brand={site.brand}
+          links={site.nav}
+          active="/"
+          transparent={true}
+          client:load
+        />
+      </div>
+    ) : (
+      <Nav
+        brand={site.brand}
+        links={site.nav}
+        active="/"
+        transparent={false}
+        client:load
+      />
+    )}
+    <slot />
+    <Footer data={site.footer} client:load />
+    <script is:inline>
+      (function () {
+        function applyTheme() {
+          const saved = localStorage.getItem("hq-theme");
+          if (saved) {
+            document.documentElement.setAttribute("data-theme", saved);
+          }
+        }
+
+        // Apply theme on initial load
+        applyTheme();
+
+        // Apply theme after view transitions
+        document.addEventListener("astro:after-swap", applyTheme);
+
+        // Handle theme toggle
+        document.addEventListener("click", (e) => {
+          const t = e.target.closest("#theme-toggle");
+          if (!t) return;
+          const cur = document.documentElement.getAttribute("data-theme");
+          const next = cur === "dark" ? "light" : "dark";
+          document.documentElement.setAttribute("data-theme", next);
+          localStorage.setItem("hq-theme", next);
+        });
+      })();
+    </script>
+  </body>
+</html>

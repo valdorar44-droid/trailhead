@@ -2,6 +2,7 @@ import { storage } from './storage';
 import { Platform } from 'react-native';
 
 const BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
+export type WeatherUnitMode = 'auto' | 'imperial' | 'metric';
 
 async function getToken(): Promise<string | null> {
   return storage.get('trailhead_token');
@@ -49,7 +50,7 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
     if (res.status === 402 && detail && typeof detail === 'object' && detail.earn_hint) {
       throw new PaywallError(detail.message ?? 'Feature requires credits or a plan.', detail.code ?? 'paywall', detail.credits_needed);
     }
-    const msg = typeof detail === 'string' ? detail : (detail?.message ?? 'Request failed');
+    const msg = typeof detail === 'string' ? detail : (detail?.message ?? detail?.reason ?? 'Request failed');
     throw new ApiError(msg, res.status, detail);
   }
   return res.json();
@@ -63,6 +64,14 @@ export const api = {
   login: (email: string, password: string) =>
     req<{ token: string; user: User }>('/api/auth/login', {
       method: 'POST', body: JSON.stringify({ email, password }),
+    }),
+  oauthApple: (identity_token: string, full_name = '', email = '') =>
+    req<{ token: string; user: User }>('/api/auth/oauth/apple', {
+      method: 'POST', body: JSON.stringify({ identity_token, full_name, email }),
+    }),
+  oauthGoogle: (identity_token: string, full_name = '', email = '') =>
+    req<{ token: string; user: User }>('/api/auth/oauth/google', {
+      method: 'POST', body: JSON.stringify({ identity_token, full_name, email }),
     }),
   verifyEmail: (token: string) =>
     req<{ token: string; user: User }>('/api/auth/verify-email', {
@@ -108,6 +117,23 @@ export const api = {
   chat: (message: string, sessionId: string, currentTrip?: TripResult | null, rigContext?: Record<string, unknown> | null) =>
     req<ChatResponse>('/api/chat', { method: 'POST', body: JSON.stringify({ message, session_id: sessionId, current_trip: currentTrip ?? undefined, rig_context: rigContext ?? undefined }) }),
   getTrip: (id: string) => req<TripResult>(`/api/trip/${id}`),
+  listTrips: (limit = 25) => req<{ trips: AccountTripSummary[] }>(`/api/trips?limit=${limit}`),
+  saveTrip: (trip: TripResult, route_geometry?: SavedRouteGeometryPayload | null, builder_state?: Record<string, unknown> | null, source: string = Platform.OS) =>
+    req<TripResult>(`/api/trip/${encodeURIComponent(trip.trip_id)}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        trip,
+        route_geometry,
+        builder_state,
+        source,
+        request: `${source} route: ${trip.plan?.trip_name ?? trip.trip_id}`,
+      }),
+    }),
+  saveTripGeometry: (tripId: string, route_geometry: SavedRouteGeometryPayload) =>
+    req<TripResult>(`/api/trip/${encodeURIComponent(tripId)}/geometry`, {
+      method: 'PUT',
+      body: JSON.stringify({ route_geometry }),
+    }),
 
   submitReport: (data: ReportPayload) =>
     req<ReportResponse>('/api/reports', { method: 'POST', body: JSON.stringify(data) }),
@@ -196,10 +222,10 @@ export const api = {
     headers: await authHeaders(),
   }),
 
-  getWeather: (lat: number, lng: number, days = 7) =>
-    req<WeatherForecast>(`/api/weather?lat=${lat}&lng=${lng}&days=${days}`),
-  getRouteWeather: (tripId: string, waypoints: Waypoint[]) =>
-    req<RouteWeatherResult>('/api/weather/route', { method: 'POST', body: JSON.stringify({ trip_id: tripId, waypoints }) }),
+  getWeather: (lat: number, lng: number, days = 7, units: WeatherUnitMode = 'auto') =>
+    req<WeatherForecast>(`/api/weather?lat=${lat}&lng=${lng}&days=${days}&units=${encodeURIComponent(units)}`),
+  getRouteWeather: (tripId: string, waypoints: Waypoint[], units: WeatherUnitMode = 'auto') =>
+    req<RouteWeatherResult>('/api/weather/route', { method: 'POST', body: JSON.stringify({ trip_id: tripId, waypoints, units }) }),
   buildRoute: (locations: Array<{ lat: number; lng: number; type?: 'break' | 'through' }>, options: RouteBuildOptions = {}) =>
     req<RouteBuildResult>('/api/route', {
       method: 'POST',
@@ -217,6 +243,15 @@ export const api = {
     req<CampsitePin[]>(`/api/camps/bbox?n=${n}&s=${s}&e=${e}&w=${w}&types=${types.join(',')}`),
   getOsmPois: (lat: number, lng: number, radius = 30, types = 'water,trailhead,viewpoint') =>
     req<OsmPoi[]>(`/api/osm-pois?lat=${lat}&lng=${lng}&radius=${radius}&types=${types}`),
+  getNearbyPlaces: (lat: number, lng: number, radius = 25, categories = 'fuel,water,trailhead,viewpoint', provider: 'auto' | 'google' | 'foursquare' | 'osm' = 'auto') =>
+    req<OsmPoi[]>(`/api/places/nearby?lat=${lat}&lng=${lng}&radius=${radius}&categories=${encodeURIComponent(categories)}&provider=${encodeURIComponent(provider)}`),
+  getNearbySmartPack: (lat: number, lng: number, radius = 35, categories = 'camp,trailhead,viewpoint,peak,hot_spring,park,historic,climbing,ohv,attraction,camping,water,grocery,mechanic,parking,dump,propane,fuel', route?: [number, number][]) =>
+    req<NearbySmartPackResponse>('/api/nearby/smart-pack', {
+      method: 'POST',
+      body: JSON.stringify({ center: { lat, lng }, radius, categories: categories.split(',').filter(Boolean), route }),
+    }),
+  getPlaceDetail: (source: string, placeId: string) =>
+    req<PlaceDetail>(`/api/places/${encodeURIComponent(source)}/${encodeURIComponent(placeId)}/detail`),
   discoverTrails: (params: TrailDiscoverParams) => {
     const qs = new URLSearchParams({ mode: params.mode ?? 'nearby', limit: String(params.limit ?? 60) });
     if (params.lat != null) qs.set('lat', String(params.lat));
@@ -244,6 +279,8 @@ export const api = {
     req<PlacePack>(`/api/places/packs/${encodeURIComponent(region_id)}/${encodeURIComponent(pack_id)}`),
   getWikipediaNearby: (lat: number, lng: number, radius = 10000) =>
     req<WikiArticle[]>(`/api/wikipedia-nearby?lat=${lat}&lng=${lng}&radius=${radius}`),
+  getExcursionsNearby: (data: ExcursionNearbyRequest) =>
+    req<ExcursionNearbyResponse>('/api/excursions/nearby', { method: 'POST', body: JSON.stringify(data) }),
 
   // AI features
   getCampsiteInsight: (data: CampsiteInsightRequest) =>
@@ -329,12 +366,21 @@ export interface TrailDNA {
   regions?: string[];
 }
 
+export interface RouteValidationResult {
+  ok: boolean;
+  reason?: string;
+  details?: string[];
+  severity?: 'block' | 'warn';
+  supported_region?: boolean;
+}
+
 export interface ChatResponse {
   type: 'message' | 'ready' | 'trip_update';
   content: string;
   outline?: string;
   trip?: TripResult;
   trail_dna?: TrailDNA;
+  route_validation?: RouteValidationResult;
 }
 
 export interface User {
@@ -348,11 +394,33 @@ export interface GeocodePlace {
   name: string;
   lat: number;
   lng: number;
+  source?: string;
+  place_id?: string;
 }
 export interface TripResult {
   trip_id: string; plan: TripPlan; campsites: Campsite[]; gas_stations: GasStation[];
   route_pois?: OsmPoi[];
   audio_guide?: Record<string, string>;
+  route_geometry?: SavedRouteGeometryPayload;
+  builder_state?: Record<string, unknown>;
+  updated_at?: number;
+  version?: number;
+}
+export interface AccountTripSummary {
+  trip_id: string; trip_name: string; states: string[]; duration_days: number; est_miles: number;
+  created_at: number; updated_at: number; source?: string; version?: number;
+}
+export interface SavedRouteGeometryPayload {
+  coords: [number, number][];
+  steps?: any[];
+  legs?: any[];
+  totalDistance?: number;
+  totalDuration?: number;
+  total_distance?: number;
+  total_duration?: number;
+  tripId?: string | null;
+  ts?: number;
+  source?: string;
 }
 export interface TripPlan {
   trip_name: string; overview: string; duration_days: number;
@@ -387,6 +455,8 @@ export interface CampsitePin {
   route_distance_mi?: number; route_fit?: string; recommended_day?: number;
   route_progress?: number; route_progress_mi?: number; route_segment_index?: number;
   source?: string; verified_source?: string;
+  rating?: number; rating_count?: number; phone?: string; address?: string;
+  provider_place_id?: string; place_id?: string;
 }
 export interface CampsiteDetail extends CampsitePin {
   photos: string[]; amenities: string[]; site_types: string[];
@@ -494,16 +564,56 @@ export interface PinPayload {
 }
 export interface OsmPoi {
   id: string; name: string; lat: number; lng: number;
-  type: 'water' | 'trail' | 'trailhead' | 'viewpoint' | 'peak' | 'hot_spring' | 'fuel' | 'propane' | 'dump' | 'shower' | 'laundromat' | 'lodging' | 'food' | 'grocery' | 'mechanic' | 'parking' | 'attraction' | 'poi'; subtype?: string; elevation?: string;
+  type: 'camp' | 'water' | 'trail' | 'trailhead' | 'viewpoint' | 'peak' | 'hot_spring' | 'fuel' | 'propane' | 'dump' | 'shower' | 'laundromat' | 'lodging' | 'food' | 'grocery' | 'mechanic' | 'parking' | 'attraction' | 'hardware' | 'camping' | 'medical' | 'parts' | 'wifi' | 'poi'; subtype?: string; elevation?: string;
   source?: string;
-  profile_id?: string;
   source_label?: string;
+  provider_place_id?: string;
+  place_id?: string;
+  address?: string;
+  phone?: string;
+  website?: string;
+  open_now?: boolean | null;
+  rating?: number;
+  rating_count?: number;
+  google_maps_uri?: string;
+  attribution?: string;
+  profile_id?: string;
   photo_url?: string | null;
   length_mi?: number | null;
   activities?: string[];
   last_checked?: number;
   route_distance_mi?: number; route_fit?: string;
   route_progress?: number; route_progress_mi?: number; route_segment_index?: number;
+}
+export interface PlacePhoto {
+  url: string;
+  credit?: string;
+  source?: string;
+}
+export interface PlaceDetail extends OsmPoi {
+  photos?: PlacePhoto[];
+  hours?: string[];
+  international_phone?: string;
+  source_footer?: string;
+  distance_mi?: number;
+  summary?: string;
+  access_note?: string;
+}
+export interface NearbySmartPlace extends OsmPoi {
+  source: string;
+  source_label?: string;
+  confidence?: 'high' | 'medium' | 'low' | string;
+  distance_mi?: number;
+  summary?: string;
+  access_note?: string;
+  photo_url?: string | null;
+}
+export interface NearbySmartPackResponse {
+  center: { lat: number; lng: number };
+  radius: number;
+  categories: string[];
+  places: NearbySmartPlace[];
+  errors?: Record<string, string>;
 }
 export interface TrailClaim {
   source: string;
@@ -688,6 +798,47 @@ export interface ExploreCatalog {
 export interface WikiArticle {
   title: string; lat: number; lng: number; dist_m: number; extract: string; url: string;
 }
+export type ExcursionType = 'trail' | 'trailhead' | 'ohv' | 'viewpoint' | 'peak' | 'hot_spring' | 'park' | 'historic' | 'climbing' | 'water' | 'attraction' | 'poi';
+export interface ExcursionCandidate {
+  id: string;
+  name: string;
+  type: ExcursionType | string;
+  subtype?: string;
+  lat: number;
+  lng: number;
+  source: string;
+  source_label: string;
+  summary?: string;
+  why_go?: string;
+  access_notes?: string;
+  risk_notes?: string;
+  best_for?: string;
+  distance_from_route_mi?: number;
+  detour_mi?: number;
+  drive_time_min?: number;
+  day_fit?: string;
+  offline_ready?: boolean;
+  source_confidence?: 'high' | 'medium' | 'low' | string;
+  sensitive_location?: boolean;
+  length_mi?: number | null;
+  difficulty?: string;
+  activities?: string[];
+}
+export interface ExcursionNearbyRequest {
+  center: { lat: number; lng: number };
+  radius?: number;
+  categories?: string[];
+  route?: [number, number][];
+  day?: number;
+  source_context?: string;
+}
+export interface ExcursionNearbyResponse {
+  center: { lat: number; lng: number };
+  radius: number;
+  categories: string[];
+  excursions: ExcursionCandidate[];
+  errors?: Record<string, string>;
+}
 export interface CampsiteInsightRequest {
   name: string; lat: number; lng: number;
   description?: string; land_type?: string; amenities?: string[];
@@ -719,6 +870,13 @@ export interface PackingList {
   optional_nice_to_have: string[]; leave_at_home: string[];
 }
 export interface WeatherForecast {
+  trailhead_units?: {
+    mode: 'imperial' | 'metric';
+    temperature_label: string;
+    wind_label: string;
+    precipitation_label: string;
+    distance_unit: 'miles' | 'kilometers';
+  };
   daily: {
     time: string[];
     temperature_2m_max: number[];

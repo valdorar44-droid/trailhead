@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import {
   Modal, View, Text, TouchableOpacity, StyleSheet,
   ScrollView, ActivityIndicator, Linking, Platform, useWindowDimensions,
+  Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
@@ -10,8 +11,10 @@ import { useSubscription, PRODUCT_IDS, priceLine } from '@/lib/useSubscription';
 import { useTheme, mono } from '@/lib/design';
 import { CREDIT_REWARDS } from '@/lib/credits';
 
-const TERMS_URL   = 'https://trailhead-production-2049.up.railway.app/terms';
-const PRIVACY_URL = 'https://trailhead-production-2049.up.railway.app/privacy';
+const TERMS_URL   = 'https://api.gettrailhead.app/terms';
+const PRIVACY_URL = 'https://api.gettrailhead.app/privacy';
+const TRAILHEAD_LOGO = require('@/assets/icon.png');
+const EXPLORER_VEHICLE = require('@/assets/paywall-explorer-vehicle.png');
 
 interface Props {
   visible: boolean;
@@ -29,9 +32,9 @@ const EARN_ITEMS = [
 ] as const;
 
 const BENEFITS = [
-  ['sparkles-outline', 'Explorer includes AI trip planning, route refinement, and audio guide generation.'],
-  ['headset-outline', 'Explore Summary and Full Story audio are included without per-play credit charges.'],
-  ['bonfire-outline', 'Camp briefs, route briefs, and packing lists stay available for serious trip planning.'],
+  ['sparkles-outline', 'Plan routes, refine days, and keep route briefs ready for the field.'],
+  ['headset-outline', 'Audio guides and place stories are included with Explorer.'],
+  ['bonfire-outline', 'Camp briefs, packing lists, and saved trip context stay with your route.'],
 ] as const;
 
 export default function PaywallModal({ visible, code, message, onClose }: Props) {
@@ -47,10 +50,10 @@ export default function PaywallModal({ visible, code, message, onClose }: Props)
   }, [openPaywall, visible]);
 
   const isSearchLimit = code === 'search_limit';
-  const title = isSearchLimit ? 'Free search used' : 'Explorer or credits';
+  const title = isSearchLimit ? 'Free search used' : 'Explorer';
   const subtitle = message ?? (isSearchLimit
-    ? "You've used your free camp search. Earn credits by contributing to the map, or get the Explorer Plan for unlimited access."
-    : 'Use credits when you need a single AI action, or join Explorer for planning, camp briefs, route briefs, and audio guides. Offline downloads are included for everyone.');
+    ? "You've used your free camp search. Earn credits by contributing to the map, or get Explorer for unlimited access."
+    : 'Plan routes, camp nights, route briefs, packing lists, and audio guides with one field-ready plan. Offline downloads are included for everyone.');
 
   async function handlePurchase(productId: string) {
     const started = await purchase(productId);
@@ -76,18 +79,25 @@ export default function PaywallModal({ visible, code, message, onClose }: Props)
       <View style={staticS.overlay}>
         <BlurView intensity={28} tint="dark" style={[staticS.blurShell, { maxHeight: sheetMaxHeight }]}>
         <View style={{ backgroundColor: C.bg + 'F2', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 22, paddingBottom: sheetBottomPad, paddingTop: 12, borderTopWidth: 1, borderColor: C.border, maxHeight: sheetMaxHeight }}>
-          <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: C.border, alignSelf: 'center', marginBottom: 20 }} />
+          <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: C.border, alignSelf: 'center', marginBottom: 10 }} />
 
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={staticS.sheetScroll}>
-          <View style={staticS.heroRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 1 }}>TRAILHEAD EXPLORER</Text>
-              <Text style={{ color: C.text, fontSize: 24, fontWeight: '900', marginTop: 5 }}>{title}</Text>
-              <Text style={{ color: C.text2, fontSize: 13, lineHeight: 19, marginTop: 8 }}>{subtitle}</Text>
-            </View>
-            <View style={[staticS.heroIcon, { backgroundColor: C.orange + '18', borderColor: C.orange + '44' }]}>
-              <Ionicons name="trail-sign-outline" size={28} color={C.orange} />
-            </View>
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={{ maxHeight: sheetMaxHeight - 156 }} contentContainerStyle={staticS.sheetScroll}>
+          <View style={[staticS.heroVisual, { borderColor: C.border, backgroundColor: C.s2 }]}>
+            <Image source={EXPLORER_VEHICLE} resizeMode="contain" style={staticS.heroImage} />
+          </View>
+
+          <View style={[staticS.copyCard, { backgroundColor: C.s1, borderColor: C.border }]}>
+              <View style={staticS.heroBrandRow}>
+                <Image source={TRAILHEAD_LOGO} style={staticS.heroLogo} />
+                <View>
+                  <Text style={[staticS.heroBrandText, { color: C.text }]}>Trail-Head</Text>
+                  <View style={[staticS.heroBadge, { backgroundColor: C.orange }]}>
+                    <Text style={staticS.heroBadgeText}>EXPLORER</Text>
+                  </View>
+                </View>
+              </View>
+              <Text style={[staticS.heroTitle, { color: C.text }]}>{title}</Text>
+              <Text style={[staticS.heroSubtitle, { color: C.text2 }]}>{subtitle}</Text>
           </View>
 
           <View style={{ gap: 8, marginBottom: 16 }}>
@@ -159,36 +169,41 @@ export default function PaywallModal({ visible, code, message, onClose }: Props)
             ))}
           </ScrollView>
 
-          <TouchableOpacity
-            style={staticS.restoreBtn}
-            onPress={restore}
-            disabled={restoring || purchasing || storeLoading}
-            activeOpacity={0.7}
-          >
-            {restoring
-              ? <ActivityIndicator color={C.text3} size="small" />
-              : <Text style={{ color: C.text3, fontSize: 13 }}>Restore purchases</Text>}
-          </TouchableOpacity>
+          </ScrollView>
 
-          <TouchableOpacity style={staticS.closeBtn} onPress={onClose} activeOpacity={0.7}>
-            <Text style={{ color: C.text3, fontSize: 13 }}>Maybe later</Text>
-          </TouchableOpacity>
+          <View style={[staticS.paywallFooter, { borderTopColor: C.border, backgroundColor: C.bg + 'FA' }]}>
+            <View style={staticS.footerActions}>
+              <TouchableOpacity
+                style={[staticS.footerBtn, { borderColor: C.border, backgroundColor: C.s2 }]}
+                onPress={restore}
+                disabled={restoring || purchasing || storeLoading}
+                activeOpacity={0.7}
+              >
+                {restoring
+                  ? <ActivityIndicator color={C.text3} size="small" />
+                  : <Text style={{ color: C.text2, fontSize: 13, fontWeight: '700' }}>Restore</Text>}
+              </TouchableOpacity>
 
-          {/* Required store disclosure: subscription duration, price, renewal, and links */}
-          <Text style={{ color: C.text3, fontSize: 10, textAlign: 'center', lineHeight: 14, marginTop: 12, paddingHorizontal: 8 }}>
+              <TouchableOpacity style={[staticS.footerBtn, { borderColor: C.border, backgroundColor: C.s2 }]} onPress={onClose} activeOpacity={0.7}>
+                <Text style={{ color: C.text2, fontSize: 13, fontWeight: '700' }}>Maybe later</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Required store disclosure: subscription duration, price, renewal, and links */}
+            <Text style={{ color: C.text3, fontSize: 10, textAlign: 'center', lineHeight: 14, paddingHorizontal: 8 }}>
             Subscriptions auto-renew unless cancelled 24 hours before the end of the period.
             Manage or cancel in {accountSettings}.{' '}
-          </Text>
-          <View style={staticS.legalLinks}>
-            <TouchableOpacity onPress={() => Linking.openURL(TERMS_URL)}>
-              <Text style={{ color: C.text3, fontSize: 10, textDecorationLine: 'underline' }}>Terms of Use</Text>
-            </TouchableOpacity>
-            <Text style={{ color: C.text3, fontSize: 10 }}> · </Text>
-            <TouchableOpacity onPress={() => Linking.openURL(PRIVACY_URL)}>
-              <Text style={{ color: C.text3, fontSize: 10, textDecorationLine: 'underline' }}>Privacy Policy</Text>
-            </TouchableOpacity>
+            </Text>
+            <View style={staticS.legalLinks}>
+              <TouchableOpacity onPress={() => Linking.openURL(TERMS_URL)} hitSlop={10}>
+                <Text style={{ color: C.text3, fontSize: 11, textDecorationLine: 'underline' }}>Terms of Use</Text>
+              </TouchableOpacity>
+              <Text style={{ color: C.text3, fontSize: 11 }}> · </Text>
+              <TouchableOpacity onPress={() => Linking.openURL(PRIVACY_URL)} hitSlop={10}>
+                <Text style={{ color: C.text3, fontSize: 11, textDecorationLine: 'underline' }}>Privacy Policy</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-          </ScrollView>
         </View>
         </BlurView>
       </View>
@@ -203,9 +218,17 @@ export default function PaywallModal({ visible, code, message, onClose }: Props)
 const staticS = StyleSheet.create({
   overlay:       { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'flex-end' },
   blurShell:     { borderTopLeftRadius: 28, borderTopRightRadius: 28, overflow: 'hidden' },
-  sheetScroll:   { paddingBottom: 4 },
-  heroRow:       { flexDirection: 'row', alignItems: 'flex-start', gap: 14, marginBottom: 16 },
-  heroIcon:      { width: 58, height: 58, borderRadius: 18, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
+  sheetScroll:   { paddingBottom: 12 },
+  heroVisual:    { width: '100%', aspectRatio: 1200 / 720, marginTop: 0, overflow: 'hidden', borderWidth: 1, borderRadius: 18, marginBottom: 12 },
+  heroImage:     { width: '100%', height: '100%' },
+  copyCard:      { borderWidth: 1, borderRadius: 16, padding: 14, marginBottom: 12, gap: 10 },
+  heroBrandRow:  { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  heroLogo:      { width: 42, height: 42, borderRadius: 10 },
+  heroBrandText: { fontSize: 20, lineHeight: 23, fontWeight: '900' },
+  heroBadge:     { alignSelf: 'flex-start', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2, marginTop: 2 },
+  heroBadgeText: { color: '#fff', fontSize: 9, fontFamily: mono, fontWeight: '900' },
+  heroTitle:     { fontSize: 26, lineHeight: 31, fontWeight: '900' },
+  heroSubtitle:  { fontSize: 13, lineHeight: 19 },
   benefitRow:    { flexDirection: 'row', alignItems: 'flex-start', gap: 9, borderWidth: 1, borderRadius: 12, padding: 10 },
   planBtnBadge:  { position: 'absolute', top: -1, left: 18, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
   planBtnBody:   { flex: 1 },
@@ -218,6 +241,9 @@ const staticS = StyleSheet.create({
   },
   storeStatus:   { alignItems: 'center', gap: 6, marginBottom: 8 },
   retryStoreBtn: { paddingHorizontal: 10, paddingVertical: 4 },
+  paywallFooter: { borderTopWidth: 1, paddingTop: 12, gap: 8 },
+  footerActions: { flexDirection: 'row', gap: 10 },
+  footerBtn:     { flex: 1, minHeight: 42, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   restoreBtn:    { alignItems: 'center', paddingVertical: 10 },
   closeBtn:      { alignItems: 'center', paddingVertical: 10 },
   legalLinks:    { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 4 },

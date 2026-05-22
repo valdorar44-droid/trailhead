@@ -10,7 +10,7 @@ import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
 import PaywallModal from '@/components/PaywallModal';
 import TourTarget from '@/components/TourTarget';
-import { api, CampFullness, Campsite, CampsiteDetail, CampsiteInsight, CampsitePin, GasStation, GeocodePlace, OsmPoi, PaywallError, TripResult, Waypoint, WeatherForecast } from '@/lib/api';
+import { api, ApiError, CampFullness, Campsite, CampsiteDetail, CampsiteInsight, CampsitePin, ExcursionCandidate, GasStation, GeocodePlace, OsmPoi, PaywallError, TripResult, Waypoint, WeatherForecast } from '@/lib/api';
 import { loadAllPlacePoints } from '@/lib/offlinePlacePacks';
 import { deleteOfflineTrail, listOfflineTrails, type OfflineTrail } from '@/lib/offlineTrails';
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
@@ -33,7 +33,7 @@ type BuilderStop = {
   poi?: OsmPoi;
 };
 type SearchPlace = { name: string; lat: number; lng: number };
-type DiscoveryTab = 'camps' | 'gas' | 'poi';
+type DiscoveryTab = 'camps' | 'gas' | 'poi' | 'excursions';
 type LegSearchContext = {
   from: { lat: number; lng: number; name: string };
   to: { lat: number; lng: number; name: string };
@@ -352,6 +352,28 @@ function routeProgressLabel(progress?: number) {
   if (progress < 0.34) return 'early leg';
   if (progress < 0.67) return 'mid leg';
   return 'late leg';
+}
+
+function smartPlaceToExcursion(place: OsmPoi): ExcursionCandidate {
+  const type = (place.type === 'attraction' ? (place.subtype || 'attraction') : place.type) as string;
+  return {
+    id: place.id,
+    name: place.name || place.type,
+    type,
+    subtype: place.subtype,
+    lat: place.lat,
+    lng: place.lng,
+    source: place.source || 'smart_pack',
+    source_label: place.source_label || place.attribution || 'Trailhead',
+    summary: (place as any).summary || place.address || '',
+    access_notes: (place as any).access_note || '',
+    best_for: place.subtype || 'Side trip',
+    distance_from_route_mi: place.route_distance_mi ?? (place as any).distance_mi,
+    source_confidence: (place as any).confidence || 'medium',
+    offline_ready: place.source === 'offline',
+    length_mi: place.length_mi,
+    activities: place.activities,
+  };
 }
 
 function withLegProjection<T extends { lat: number; lng: number }>(item: T, leg: LegSearchContext) {
@@ -713,7 +735,7 @@ async function geocodePlaces(query: string): Promise<SearchPlace[]> {
   const serverPlaces = await api.geocodePlaces(query, 8).catch(() => [] as GeocodePlace[]);
   if (serverPlaces.length) return serverPlaces;
   const res = await fetch(
-    `https://nominatim.openstreetmap.org/search?format=json&limit=8&countrycodes=us&q=${encodeURIComponent(query)}`,
+    `https://nominatim.openstreetmap.org/search?format=json&limit=8&q=${encodeURIComponent(query)}`,
     { headers: { 'User-Agent': 'TrailheadRouteBuilder/1.0' } }
   );
   const data = await res.json();
@@ -732,7 +754,7 @@ async function searchNominatimNearby(query: string, center: { lat: number; lng: 
   const south = center.lat - latDelta;
   const north = center.lat + latDelta;
   const res = await fetch(
-    `https://nominatim.openstreetmap.org/search?format=json&limit=${limit}&countrycodes=us&bounded=1&viewbox=${west},${north},${east},${south}&q=${encodeURIComponent(query)}`,
+    `https://nominatim.openstreetmap.org/search?format=json&limit=${limit}&bounded=1&viewbox=${west},${north},${east},${south}&q=${encodeURIComponent(query)}`,
     { headers: { 'User-Agent': 'TrailheadRouteBuilder/1.0' } }
   );
   const data = await res.json();
@@ -764,6 +786,7 @@ export default function RouteBuilderScreen() {
   const userLoc = useStore(st => st.userLoc);
   const setStoreUserLoc = useStore(st => st.setUserLoc);
   const rigProfile = useStore(st => st.rigProfile);
+  const weatherUnitMode = useStore(st => st.weatherUnitMode);
   const setPendingSavedTrailId = useStore(st => st.setPendingSavedTrailId);
 
   const [activeDay, setActiveDay] = useState(1);
@@ -804,6 +827,7 @@ export default function RouteBuilderScreen() {
   const [camps, setCamps] = useState<CampsitePin[]>([]);
   const [gas, setGas] = useState<GasStation[]>([]);
   const [pois, setPois] = useState<OsmPoi[]>([]);
+  const [excursions, setExcursions] = useState<ExcursionCandidate[]>([]);
   const [offlinePlaces, setOfflinePlaces] = useState<OsmPoi[]>([]);
   const [activePlaceFilters, setActivePlaceFilters] = useState<string[]>(DEFAULT_PLACE_FILTERS);
   const [showPlaceFilters, setShowPlaceFilters] = useState(false);
@@ -1154,7 +1178,9 @@ export default function RouteBuilderScreen() {
     ? 'Tap scan to find legal camps near the selected leg or route anchor.'
     : discoverTab === 'gas'
       ? 'Tap scan to find fuel between the selected stops.'
-      : 'Tap scan to find water, trailheads, viewpoints, peaks, and hot springs near this route.';
+      : discoverTab === 'excursions'
+        ? 'Tap scan to find side trips, parks, trails, viewpoints, climbing, and historic stops from real map sources.'
+        : 'Tap scan to find water, trailheads, viewpoints, peaks, and hot springs near this route.';
 
   function fly(_lat: number, _lng: number, _zoom = 11) {}
 
@@ -1338,11 +1364,42 @@ export default function RouteBuilderScreen() {
           setGas(stations);
           setDiscoverySummary(`${stations.length} fuel stop${stations.length === 1 ? '' : 's'} near this area`);
         }
+      } else if (tab === 'excursions') {
+        const center = useLeg ? leg!.center : target;
+        const radius = useLeg ? Math.max(28, Math.min(60, leg!.miles / 4 + 18)) : 45;
+        const smart = await api.getNearbySmartPack(
+          center.lat,
+          center.lng,
+          radius,
+          'trailhead,viewpoint,peak,hot_spring,park,historic,climbing,ohv,attraction,water',
+          excursionRouteCoords(),
+        ).catch(async () => {
+          const found = await api.getExcursionsNearby({
+            center,
+            radius,
+            day: leg?.targetDay ?? activeDay,
+            route: excursionRouteCoords(),
+            source_context: useLeg ? 'route_leg' : 'area',
+            categories: ['trail', 'ohv', 'viewpoint', 'peak', 'hot_spring', 'park', 'historic', 'climbing', 'water', 'attraction'],
+          }).catch(() => ({ excursions: [] }));
+          return { places: (found.excursions ?? []).map(item => ({
+            id: item.id, name: item.name, lat: item.lat, lng: item.lng,
+            type: item.type as OsmPoi['type'], subtype: item.subtype, source: item.source,
+            source_label: item.source_label, route_distance_mi: item.distance_from_route_mi,
+            summary: item.summary || item.why_go, access_note: item.access_notes,
+          } as any)) };
+        });
+        const scoped = ((smart.places ?? []) as OsmPoi[])
+          .map(smartPlaceToExcursion)
+          .filter(item => !item.sensitive_location || item.source_confidence === 'high')
+          .sort((a, b) => (a.distance_from_route_mi ?? 999) - (b.distance_from_route_mi ?? 999));
+        setExcursions(scoped);
+        setDiscoverySummary(`${scoped.length} excursion${scoped.length === 1 ? '' : 's'} near ${useLeg ? 'this leg' : 'this area'}`);
       } else {
         if (useLeg) {
           const radius = Math.max(24, Math.min(42, leg!.miles / 5 + 12));
           const found = uniqueByGeo((await Promise.all(
-            legSamplePoints(leg!).map(point => api.getOsmPois(point.lat, point.lng, radius, ROUTE_POI_TYPES).catch(() => []))
+            legSamplePoints(leg!).map(point => api.getNearbySmartPack(point.lat, point.lng, radius, ROUTE_POI_TYPES, excursionRouteCoords()).then(pack => pack.places as OsmPoi[]).catch(() => []))
           )).flat());
           const offlineRoutePlaces = routeScopedOfflinePlaces(
             offlinePlaces,
@@ -1371,7 +1428,9 @@ export default function RouteBuilderScreen() {
           setPois(scoped);
           setDiscoverySummary(`${scoped.length} place${scoped.length === 1 ? '' : 's'} along this leg`);
         } else {
-          const found = await api.getOsmPois(target.lat, target.lng, 40, ROUTE_POI_TYPES).catch(() => []);
+          const found = await api.getNearbySmartPack(target.lat, target.lng, 40, ROUTE_POI_TYPES, excursionRouteCoords())
+            .then(pack => pack.places as OsmPoi[])
+            .catch(() => api.getOsmPois(target.lat, target.lng, 40, ROUTE_POI_TYPES).catch(() => []));
           const offlineRoutePlaces = areaScopedOfflinePlaces(
             offlinePlaces,
             target,
@@ -1410,6 +1469,7 @@ export default function RouteBuilderScreen() {
     setCamps([]);
     setGas([]);
     setPois([]);
+    setExcursions([]);
     setDiscoverySummary('');
     setInlineSearch(null);
   }
@@ -1528,6 +1588,44 @@ export default function RouteBuilderScreen() {
     clearDiscoveryResults();
   }
 
+  function excursionRouteCoords(): [number, number][] {
+    return orderedStops
+      .filter(st => Number.isFinite(st.lat) && Number.isFinite(st.lng))
+      .map(st => [st.lng, st.lat] as [number, number]);
+  }
+
+  function addExcursion(excursion: ExcursionCandidate) {
+    const poi: OsmPoi = {
+      id: excursion.id,
+      name: excursion.name,
+      lat: excursion.lat,
+      lng: excursion.lng,
+      type: excursion.type === 'ohv' || excursion.type === 'climbing' || excursion.type === 'historic' || excursion.type === 'park'
+        ? 'attraction'
+        : (excursion.type as OsmPoi['type']),
+      subtype: excursion.subtype || excursion.best_for || 'excursion',
+      source: excursion.source,
+      source_label: excursion.source_label,
+      address: [excursion.day_fit, excursion.source_confidence ? `${excursion.source_confidence} confidence` : ''].filter(Boolean).join(' · '),
+      route_distance_mi: excursion.distance_from_route_mi,
+    };
+    addStop({
+      name: excursion.name,
+      lat: excursion.lat,
+      lng: excursion.lng,
+      type: 'waypoint',
+      description: [
+        excursion.summary || excursion.why_go || 'Excursion selected in Route Builder.',
+        excursion.access_notes ? `Access: ${excursion.access_notes}` : '',
+        excursion.risk_notes ? `Note: ${excursion.risk_notes}` : '',
+      ].filter(Boolean).join(' '),
+      land_type: excursion.type,
+      source: 'poi',
+      poi,
+    });
+    clearDiscoveryResults();
+  }
+
   function removeStop(id: string) {
     if (insertAfterId === id) setInsertAfterId(null);
     if (insertAfterId === id) setInsertTargetDay(null);
@@ -1557,7 +1655,7 @@ export default function RouteBuilderScreen() {
       tab,
       label: tab === 'camps'
         ? `Choose an overnight near Day ${targetDay} endpoint`
-        : `Add ${tab === 'gas' ? 'fuel' : 'places'} between ${from.name.split(',')[0]} and ${to.name.split(',')[0]}`,
+        : `Add ${tab === 'gas' ? 'fuel' : tab === 'excursions' ? 'side trips' : 'places'} between ${from.name.split(',')[0]} and ${to.name.split(',')[0]}`,
     } : null);
     runDiscovery(tab, leg.center, leg, { focusMap: false });
   }
@@ -1576,7 +1674,7 @@ export default function RouteBuilderScreen() {
       setInlineSearch({
         day: plan.day,
         tab,
-        label: tab === 'camps' ? `Choose a camp near Day ${plan.day}` : `Add ${tab === 'gas' ? 'fuel' : 'places'} near Day ${plan.day}`,
+        label: tab === 'camps' ? `Choose a camp near Day ${plan.day}` : `Add ${tab === 'gas' ? 'fuel' : tab === 'excursions' ? 'side trips' : 'places'} near Day ${plan.day}`,
       });
       runDiscovery(tab, { lat: to.lat, lng: to.lng }, null, { focusMap: false });
       return;
@@ -1590,7 +1688,7 @@ export default function RouteBuilderScreen() {
         tab,
         label: tab === 'camps'
           ? `Choose a camp near Day ${plan.day}`
-          : `Add ${tab === 'gas' ? 'fuel' : 'places'} near Day ${plan.day}`,
+          : `Add ${tab === 'gas' ? 'fuel' : tab === 'excursions' ? 'side trips' : 'places'} near Day ${plan.day}`,
       });
       runDiscovery(tab, { lat: fallbackTarget.lat, lng: fallbackTarget.lng }, null, { focusMap: false });
       return;
@@ -1644,7 +1742,7 @@ export default function RouteBuilderScreen() {
     setCampWeather(null);
     setCampFullness(null);
     fly(camp.lat, camp.lng, 13);
-    api.getWeather(camp.lat, camp.lng, 3).then(setCampWeather).catch(() => {});
+    api.getWeather(camp.lat, camp.lng, 3, weatherUnitMode).then(setCampWeather).catch(() => {});
     if (camp.id) api.getCampFullness(camp.id).then(setCampFullness).catch(() => {});
   }
 
@@ -1731,6 +1829,11 @@ export default function RouteBuilderScreen() {
 
   function stayAtCampNextDay(campStop: BuilderStop) {
     ensureCampForDay(campStop, campStop.day + 1, true);
+  }
+
+  function stayAtCampTwoNights(campStop: BuilderStop) {
+    ensureCampForDay(campStop, campStop.day + 1, true);
+    ensureCampForDay(campStop, campStop.day + 2, true);
   }
 
   function toggleRestDay(day: number) {
@@ -1851,6 +1954,14 @@ export default function RouteBuilderScreen() {
   async function buildRouteSpine(first: BuilderStop, last: BuilderStop) {
     const fallback = straightRouteSpine(first, last);
     if (closeEnough(first, last)) return fallback;
+    const directMi = haversineMi(first, last);
+    if (directMi > 2800 && Math.abs(first.lng - last.lng) > 45) {
+      Alert.alert(
+        'Route needs correction',
+        'Those anchors look like an unsupported long jump. Add realistic land-route stops or keep this route inside Trailhead supported regions.'
+      );
+      return [];
+    }
     try {
       const opts = {
         backRoads: routeStyle === 'adventure',
@@ -1874,7 +1985,12 @@ export default function RouteBuilderScreen() {
         points = inPoints.length >= 2 ? [...points, ...inPoints.slice(1)] : [...points, ...points.slice(0, -1).reverse()];
       }
       return points.length >= 2 ? points : fallback;
-    } catch {
+    } catch (e: any) {
+      if (e instanceof ApiError && e.status === 422) {
+        const detail: any = e.detail;
+        Alert.alert('Route needs correction', detail?.reason || e.message || 'This route cannot be built safely.');
+        return [];
+      }
       return fallback;
     }
   }
@@ -1969,6 +2085,7 @@ export default function RouteBuilderScreen() {
       ];
 
       const spine = await buildRouteSpine(first, last);
+      if (spine.length < 2) return;
       const routeMiles = routeDistanceMi(spine) || roughMiles;
       let strongAnchors = 0;
       let weakAnchors = 0;
@@ -2139,6 +2256,20 @@ export default function RouteBuilderScreen() {
       planned_at: Date.now(),
     });
     saveOfflineTrip(trip).catch(() => {});
+    api.saveTrip(trip, null, {
+      stops,
+      days,
+      routeStyle,
+      tripLoop,
+      driveHoursPerDay,
+      plannedDays,
+      tripBuildMode,
+      distanceMode,
+      targetMiles,
+      restDays,
+      dayDriveTargets,
+      activePlaceFilters,
+    }, 'mobile-route-builder').catch(() => {});
     if (openMap) {
       setRouteTabMode('hub');
       router.replace('/(tabs)/map');
@@ -2177,6 +2308,7 @@ export default function RouteBuilderScreen() {
     setCamps([]);
     setGas([]);
     setPois([]);
+    setExcursions([]);
   }
 
   function beginCleanNewRoute() {
@@ -2279,6 +2411,10 @@ export default function RouteBuilderScreen() {
               <TouchableOpacity style={s.campPreviewBtn} onPress={() => stayAtCampNextDay(stop)}>
                 <Ionicons name="bed-outline" size={12} color={C.green} />
                 <Text style={[s.campPreviewBtnText, { color: C.green }]}>STAY NEXT DAY</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.campPreviewBtn} onPress={() => stayAtCampTwoNights(stop)}>
+                <Ionicons name="calendar-outline" size={12} color={C.green} />
+                <Text style={[s.campPreviewBtnText, { color: C.green }]}>BASECAMP +2</Text>
               </TouchableOpacity>
             </View>
           ) : null}
@@ -2406,6 +2542,10 @@ export default function RouteBuilderScreen() {
                       <Ionicons name="trail-sign-outline" size={13} color={C.orange} />
                       <Text style={s.routeDayActionText}>PLACES</Text>
                     </TouchableOpacity>
+                    <TouchableOpacity style={s.routeDayActionBtn} onPress={() => scanDayPlan(plan, 'excursions')}>
+                      <Ionicons name="compass-outline" size={13} color={C.orange} />
+                      <Text style={s.routeDayActionText}>SIDE TRIPS</Text>
+                    </TouchableOpacity>
                   </View>
                 </View>
               </TouchableOpacity>
@@ -2481,6 +2621,26 @@ export default function RouteBuilderScreen() {
           )) : (
             <Text style={s.inlineEmpty}>No fuel found for this day segment.</Text>
           )
+        ) : inlineTab === 'excursions' ? (
+          excursions.length ? excursions.slice(0, 8).map(item => (
+            <TouchableOpacity key={item.id} style={s.inlineStopRow} onPress={() => { addExcursion(item); fly(item.lat, item.lng, 13); }}>
+              <View style={[s.candidateIcon, { borderColor: placeColor(item.type) + '66', backgroundColor: placeColor(item.type) + '18' }]}>
+                <Ionicons name={item.type === 'climbing' ? 'trending-up-outline' : item.type === 'historic' ? 'business-outline' : item.type === 'park' ? 'map-outline' : 'compass-outline'} size={16} color={placeColor(item.type)} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.candidateName} numberOfLines={1}>{item.name}</Text>
+                <Text style={s.candidateMeta} numberOfLines={2}>
+                  {item.distance_from_route_mi != null ? `${fmtMi(item.distance_from_route_mi)} away · ` : ''}
+                  {item.day_fit || item.type} · {item.source_label}
+                </Text>
+              </View>
+              <View style={[s.miniTag, item.offline_ready && { borderColor: C.green + '66' }]}>
+                <Text style={s.miniTagText}>{item.offline_ready ? 'OFFLINE' : item.source_confidence?.toUpperCase() || 'SOURCE'}</Text>
+              </View>
+            </TouchableOpacity>
+          )) : (
+            <Text style={s.inlineEmpty}>No side trips found for this day segment.</Text>
+          )
         ) : (
           discoveryPois.length ? discoveryPois.slice(0, 6).map(poi => (
             <TouchableOpacity key={poi.id} style={s.inlineStopRow} onPress={() => { addPoi(poi); fly(poi.lat, poi.lng, 13); }}>
@@ -2514,7 +2674,13 @@ export default function RouteBuilderScreen() {
             <Ionicons name="options-outline" size={17} color={C.orange} />
           </TouchableOpacity>
         </View>
-        <ScrollView style={s.body} contentContainerStyle={[s.routeHubContent, { paddingBottom: 120 + bottomInset }]} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          style={s.body}
+          contentContainerStyle={[s.routeHubContent, { paddingBottom: 120 + bottomInset }]}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+        >
           <BlurView tint={blurTint} intensity={34} style={s.routeHubHero}>
             <View style={s.routeHubIcon}>
               <Ionicons name="map-outline" size={22} color={C.orange} />
@@ -2723,8 +2889,8 @@ export default function RouteBuilderScreen() {
                   placeholderTextColor={C.text3}
                   style={[s.setupInput, s.setupInputInline]}
                   returnKeyType="next"
-                  blurOnSubmit={false}
-                  onSubmitEditing={() => { if (canMoveNext) nextStep(); }}
+                  blurOnSubmit
+                  onSubmitEditing={() => { Keyboard.dismiss(); if (canMoveNext) nextStep(); }}
                 />
                 <TouchableOpacity style={s.currentLocationBtn} onPress={async () => { await setWizardStartFromLocation(); setWizardStep(1); }}>
                   <Ionicons name="locate-outline" size={13} color={C.orange} />
@@ -2752,8 +2918,8 @@ export default function RouteBuilderScreen() {
                   placeholderTextColor={C.text3}
                   style={[s.setupInput, s.setupInputInline]}
                   returnKeyType="next"
-                  blurOnSubmit={false}
-                  onSubmitEditing={() => { if (canMoveNext) nextStep(); }}
+                  blurOnSubmit
+                  onSubmitEditing={() => { Keyboard.dismiss(); if (canMoveNext) nextStep(); }}
                 />
               </View>
             </View>
@@ -3224,7 +3390,7 @@ export default function RouteBuilderScreen() {
                   <View key={i} style={s.weatherDay}>
                     <Ionicons name={weatherIcon(campWeather.daily.weathercode?.[i] ?? 1)} size={18} color={C.orange} />
                     <Text style={s.weatherHiLo}>
-                      {Math.round(campWeather.daily.temperature_2m_max?.[i] ?? 0)}°/{Math.round(campWeather.daily.temperature_2m_min?.[i] ?? 0)}°
+                      {Math.round(campWeather.daily.temperature_2m_max?.[i] ?? 0)}{campWeather.trailhead_units?.temperature_label ?? '°'}/{Math.round(campWeather.daily.temperature_2m_min?.[i] ?? 0)}{campWeather.trailhead_units?.temperature_label ?? '°'}
                     </Text>
                   </View>
                 ))}

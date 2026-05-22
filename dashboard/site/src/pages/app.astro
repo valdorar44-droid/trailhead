@@ -1,0 +1,14 @@
+---
+import BaseHead from "../components/BaseHead.astro";
+import WebPlanner from "../components/WebPlanner";
+---
+
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <BaseHead title="Trailhead Web Planner" description="Build Trailhead routes, camps, pins, filters, and custom trail routes on the web, then pick them up in the phone app." />
+  </head>
+  <body class="planner-body">
+    <WebPlanner client:only="react" />
+  </body>
+</html>

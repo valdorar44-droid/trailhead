@@ -101,6 +101,58 @@ _FUEL_QUERY = """
 out center tags 40;
 """
 
+_SERVICE_QUERY = """
+[out:json][timeout:18];
+(
+  node["amenity"="fuel"](around:{radius},{lat},{lng});
+  way["amenity"="fuel"](around:{radius},{lat},{lng});
+  node["fuel:propane"="yes"](around:{radius},{lat},{lng});
+  way["fuel:propane"="yes"](around:{radius},{lat},{lng});
+  node["natural"="spring"](around:{radius},{lat},{lng});
+  node["amenity"="drinking_water"](around:{radius},{lat},{lng});
+  node["amenity"="water_point"](around:{radius},{lat},{lng});
+  node["amenity"="sanitary_dump_station"](around:{radius},{lat},{lng});
+  way["amenity"="sanitary_dump_station"](around:{radius},{lat},{lng});
+  node["sanitary_dump_station"="yes"](around:{radius},{lat},{lng});
+  way["sanitary_dump_station"="yes"](around:{radius},{lat},{lng});
+  node["amenity"="shower"](around:{radius},{lat},{lng});
+  node["shop"="laundry"](around:{radius},{lat},{lng});
+  node["tourism"~"hotel|motel|guest_house|hostel"](around:{radius},{lat},{lng});
+  way["tourism"~"hotel|motel|guest_house|hostel"](around:{radius},{lat},{lng});
+  node["amenity"~"restaurant|cafe|fast_food"](around:{radius},{lat},{lng});
+  node["shop"~"supermarket|convenience|general"](around:{radius},{lat},{lng});
+  node["shop"~"car_repair|tyres|car_parts|auto_parts|vehicle"](around:{radius},{lat},{lng});
+  way["shop"~"car_repair|tyres|car_parts|auto_parts|vehicle"](around:{radius},{lat},{lng});
+  node["craft"="mechanic"](around:{radius},{lat},{lng});
+  node["shop"="hardware"](around:{radius},{lat},{lng});
+  node["shop"="doityourself"](around:{radius},{lat},{lng});
+  node["shop"~"outdoor|sports"](around:{radius},{lat},{lng});
+  node["amenity"~"hospital|clinic|pharmacy"](around:{radius},{lat},{lng});
+  node["amenity"="parking"](around:{radius},{lat},{lng});
+  way["amenity"="parking"](around:{radius},{lat},{lng});
+  node["amenity"="library"](around:{radius},{lat},{lng});
+  node["tourism"="attraction"](around:{radius},{lat},{lng});
+  way["tourism"="attraction"](around:{radius},{lat},{lng});
+  node["highway"="trailhead"](around:{radius},{lat},{lng});
+  node["trailhead"="yes"](around:{radius},{lat},{lng});
+  node["tourism"="viewpoint"](around:{radius},{lat},{lng});
+  way["tourism"="viewpoint"](around:{radius},{lat},{lng});
+  node["natural"="peak"]["name"](around:{radius},{lat},{lng});
+  node["natural"="hot_spring"](around:{radius},{lat},{lng});
+  way["natural"="hot_spring"](around:{radius},{lat},{lng});
+  node["amenity"="public_bath"]["bath:type"="hot_spring"](around:{radius},{lat},{lng});
+  way["amenity"="public_bath"]["bath:type"="hot_spring"](around:{radius},{lat},{lng});
+);
+out center tags 160;
+"""
+
+SERVICE_CATEGORIES = {
+    "fuel", "propane", "water", "dump", "shower", "laundromat",
+    "lodging", "food", "grocery", "mechanic", "parking", "attraction",
+    "trailhead", "viewpoint", "peak", "hot_spring", "hardware", "camping",
+    "medical", "parts", "wifi",
+}
+
 
 def _node_coord(el: dict) -> tuple[float, float] | None:
     if el.get("type") == "way":
@@ -111,6 +163,86 @@ def _node_coord(el: dict) -> tuple[float, float] | None:
     if lat and lng:
         return float(lat), float(lng)
     return None
+
+
+def _service_category(tags: dict) -> str | None:
+    if tags.get("amenity") == "fuel":
+        if tags.get("fuel:propane") == "yes" and tags.get("fuel:diesel") != "yes":
+            return "propane"
+        return "fuel"
+    if tags.get("fuel:propane") == "yes":
+        return "propane"
+    if tags.get("natural") == "spring" or tags.get("amenity") in {"drinking_water", "water_point", "fountain"}:
+        return "water"
+    if tags.get("highway") == "trailhead" or tags.get("trailhead") == "yes":
+        return "trailhead"
+    if tags.get("tourism") == "viewpoint":
+        return "viewpoint"
+    if tags.get("natural") == "peak":
+        return "peak"
+    if tags.get("natural") == "hot_spring" or (tags.get("amenity") == "public_bath" and tags.get("bath:type") == "hot_spring"):
+        return "hot_spring"
+    if tags.get("tourism") in {"hotel", "motel", "guest_house", "hostel"}:
+        return "lodging"
+    if tags.get("amenity") == "shower":
+        return "shower"
+    if tags.get("amenity") == "sanitary_dump_station" or tags.get("sanitary_dump_station") == "yes":
+        return "dump"
+    if tags.get("shop") == "laundry":
+        return "laundromat"
+    if tags.get("amenity") in {"restaurant", "cafe", "fast_food"}:
+        return "food"
+    if tags.get("shop") in {"supermarket", "convenience", "general"}:
+        return "grocery"
+    if tags.get("shop") in {"car_repair", "tyres", "car_parts", "auto_parts", "vehicle"} or tags.get("craft") == "mechanic":
+        return "mechanic" if tags.get("shop") not in {"car_parts", "auto_parts"} else "parts"
+    if tags.get("shop") in {"hardware", "doityourself"}:
+        return "hardware"
+    if tags.get("shop") in {"outdoor", "sports"}:
+        return "camping"
+    if tags.get("amenity") in {"hospital", "clinic", "pharmacy"}:
+        return "medical"
+    if tags.get("amenity") == "parking":
+        return "parking"
+    if tags.get("amenity") == "library" or tags.get("internet_access") in {"wlan", "yes"}:
+        return "wifi"
+    if tags.get("tourism") == "attraction":
+        return "attraction"
+    return None
+
+
+def _normalize_service_place(el: dict) -> dict | None:
+    coord = _node_coord(el)
+    tags = el.get("tags", {})
+    ptype = _service_category(tags)
+    if not coord or not ptype:
+        return None
+    if str(tags.get("access", "")).lower() in {"private", "no"}:
+        return None
+    lat, lng = coord
+    name = tags.get("name") or tags.get("brand") or tags.get("operator") or ptype.replace("_", " ").title()
+    kind = el.get("type") or "node"
+    fuel_types: list[str] = []
+    if ptype in {"fuel", "propane"}:
+        if tags.get("fuel:diesel") == "yes":
+            fuel_types.append("diesel")
+        if tags.get("fuel:propane") == "yes":
+            fuel_types.append("propane")
+        if tags.get("fuel:octane_87") == "yes" or not fuel_types:
+            fuel_types.append("gas")
+    return {
+        "id": f"osm_{ptype}_{kind}_{el.get('id', '')}",
+        "name": name,
+        "lat": lat,
+        "lng": lng,
+        "type": ptype,
+        "category": ptype,
+        "source": "osm",
+        "subtype": tags.get("tourism") or tags.get("shop") or tags.get("amenity") or tags.get("natural") or tags.get("bath:type") or "",
+        "address": ", ".join([v for v in [tags.get("addr:street"), tags.get("addr:city"), tags.get("addr:state")] if v]),
+        "fuel_types": ", ".join(fuel_types),
+        "elevation": tags.get("ele", ""),
+    }
 
 
 def _tag(el: dict, key: str, default: str = "") -> str:
@@ -562,6 +694,34 @@ async def get_fuel_stations(lat: float, lng: float, radius_m: int = 24000) -> li
 
     set_cached("gas_cache", key, results)
     return results
+
+
+async def get_service_places(lat: float, lng: float, radius_m: int = 24000, categories: set[str] | None = None) -> list[dict]:
+    """Fetch practical road-trip services from OSM with backend cache control."""
+    allowed = {c for c in (categories or SERVICE_CATEGORIES) if c in SERVICE_CATEGORIES}
+    if not allowed:
+        return []
+    radius_m = max(1000, min(int(radius_m), 72_000))
+    key = f"osm_services_{lat:.2f}_{lng:.2f}_{radius_m}_{','.join(sorted(allowed))}"
+    cached = get_cached("gas_cache", key, ttl_seconds=3600 * 24)
+    if cached is not None:
+        return cached
+
+    elements = await _overpass(_SERVICE_QUERY.format(lat=lat, lng=lng, radius=radius_m))
+    seen: set[str] = set()
+    results: list[dict] = []
+    for el in elements:
+        point = _normalize_service_place(el)
+        if not point or point.get("type") not in allowed:
+            continue
+        dedupe = f"{point.get('type')}:{point.get('name')}:{float(point.get('lat', 0)):.4f}:{float(point.get('lng', 0)):.4f}"
+        if dedupe in seen:
+            continue
+        seen.add(dedupe)
+        results.append(point)
+
+    set_cached("gas_cache", key, results[:160])
+    return results[:160]
 
 
 def _osm_land_label(tags: list[str]) -> str:

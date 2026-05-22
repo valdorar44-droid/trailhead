@@ -1,0 +1,47 @@
+{
+  "brand": {
+    "name": "Trailhead",
+    "mark": "",
+    "tagline": "Overland planner / Offline app"
+  },
+  "nav": [
+    { "label": "Planner", "href": "/app" },
+    { "label": "Offline Maps", "href": "/#offline" },
+    { "label": "Journal", "href": "/blog" },
+    { "label": "Download", "href": "https://apps.apple.com/app/id6763677349" }
+  ],
+  "footer": {
+    "headline": {
+      "lead": "Plan with",
+      "italic": "signal.",
+      "tail": "Carry it without."
+    },
+    "blurb": "Trailhead is built for overland planning on the web and offline navigation on the phone. The browser is the planning desk. The app is the field tool.",
+    "columns": [
+      {
+        "title": "Trailhead",
+        "links": [
+          { "label": "Web planner", "href": "/app" },
+          { "label": "Download iOS", "href": "https://apps.apple.com/app/id6763677349" },
+          { "label": "Journal", "href": "/blog" }
+        ]
+      },
+      {
+        "title": "Field",
+        "links": [
+          { "label": "Offline maps", "href": "/#offline" },
+          { "label": "Route builder", "href": "/app" },
+          { "label": "Camp search", "href": "/app" }
+        ]
+      },
+      {
+        "title": "Legal",
+        "links": [
+          { "label": "Privacy", "href": "/privacy" },
+          { "label": "Terms", "href": "/terms" }
+        ]
+      }
+    ],
+    "copyright": "© 2026 Trailhead"
+  }
+}

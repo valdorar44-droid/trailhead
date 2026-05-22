@@ -46,6 +46,7 @@ GEofabrik_NAMES = {
 REGION_GEOFABRIK_URLS = {
     "CANADA": "https://download.geofabrik.de/north-america/canada-latest.osm.pbf",
     "MEXICO": "https://download.geofabrik.de/north-america/mexico-latest.osm.pbf",
+    "FI": "https://download.geofabrik.de/europe/finland-latest.osm.pbf",
 }
 ALL_REGION_CODES = {**STATE_BBOXES, **REGION_BBOXES}
 

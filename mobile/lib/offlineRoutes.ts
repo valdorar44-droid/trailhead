@@ -1,4 +1,5 @@
 import * as FileSystem from 'expo-file-system';
+import { api } from './api';
 
 const DIR = FileSystem.documentDirectory + 'offline_routes/';
 const INDEX_PATH = DIR + '_index.json';
@@ -50,6 +51,7 @@ export async function saveRouteGeometry(tripId: string | null | undefined, data:
     const evicted = index.filter(id => !updated.includes(id));
     await Promise.all(evicted.map(id => FileSystem.deleteAsync(routePath(id), { idempotent: true }).catch(() => {})));
     await FileSystem.writeAsStringAsync(INDEX_PATH, JSON.stringify(updated));
+    api.saveTripGeometry(tripId, payload).catch(() => {});
   } catch {
     // Route geometry is a convenience cache; never crash navigation for it.
   }

@@ -1,0 +1,73 @@
+---
+import Layout from "../layouts/Layout.astro";
+---
+
+<Layout title="Trailhead - Know the trail before you roll." transparentNav={true}>
+  <main class="trailhead-home">
+    <section class="th-hero">
+      <video class="th-hero-video" src="/hero.mp4" poster="/hero.jpg" autoplay muted loop playsinline></video>
+      <div class="th-hero-shade"></div>
+      <div class="th-hero-inner">
+        <div class="th-hero-copy">
+          <p class="th-eyebrow">Overland navigation / Offline maps / Field reports</p>
+          <h1>Know the trail before you roll.</h1>
+          <p class="th-lead">Plan routes, find camps, build custom trails, save offline map packs, and check field reports without staring at a cluttered dashboard.</p>
+          <div class="th-actions">
+            <a class="th-btn th-btn-primary" href="https://apps.apple.com/app/id6763677349">Download iOS</a>
+            <a class="th-btn th-btn-ghost" href="/app">Open web planner</a>
+          </div>
+        </div>
+        <div class="th-phone-stack" aria-label="Trailhead app screenshots">
+          <img class="th-phone th-phone-main" src="/assets/screenshots/map-main.jpg" alt="Trailhead app map with camp pins and layers" loading="eager" />
+          <img class="th-phone th-phone-side" src="/assets/screenshots/route-builder.jpg" alt="Trailhead route builder" loading="eager" />
+        </div>
+      </div>
+    </section>
+
+    <section class="th-section th-map-first">
+      <div>
+        <p class="th-eyebrow">Map first</p>
+        <h2>The website is the planning desk.</h2>
+        <p>Use the bigger screen for route building, camp search, trail creation, Explore, credits, and GPX export. Then pick up the trip on the phone before you drive.</p>
+      </div>
+      <div class="th-glass th-map-card">
+        <img src="/assets/screenshots/camp-card.jpg" alt="Trailhead camp card over the map" loading="lazy" />
+      </div>
+    </section>
+
+    <section class="th-feature-grid" id="offline">
+      <article class="th-glass">
+        <span>01</span>
+        <h3>Route Builder</h3>
+        <p>Starts, destinations, fuel, camps, POIs, daily legs, and saved routes that open on the phone.</p>
+      </article>
+      <article class="th-glass">
+        <span>02</span>
+        <h3>Offline map packs</h3>
+        <p>Download on the app before the signal disappears. Cached is useful; downloaded is deliberate.</p>
+      </article>
+      <article class="th-glass">
+        <span>03</span>
+        <h3>Custom trail pins</h3>
+        <p>Drop pins at bends and forks, preview the line, then save or publish a community trail profile.</p>
+      </article>
+      <article class="th-glass">
+        <span>04</span>
+        <h3>Field reports</h3>
+        <p>Community notes, camp fullness, trail updates, and conditions that are useful before the drive.</p>
+      </article>
+    </section>
+
+    <section class="th-section">
+      <div class="th-glass th-layer-shot">
+        <img src="/assets/screenshots/map-layers.jpg" alt="Trailhead map layers sheet" loading="lazy" />
+      </div>
+      <div>
+        <p class="th-eyebrow">Real layers</p>
+        <h2>Filters that match the app.</h2>
+        <p>Public land tint, USGS topo and trails, trailheads and water POIs, active wildfires, avalanche zones, rain radar, and MVUM roads and trails belong on the planner too.</p>
+        <a class="th-btn th-btn-primary" href="/app">Open the planner</a>
+      </div>
+    </section>
+  </main>
+</Layout>

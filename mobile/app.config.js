@@ -2,7 +2,7 @@ module.exports = {
   expo: {
     name: 'Trailhead',
     slug: 'trailhead',
-    version: '1.0.1',
+    version: '1.0.2',
     runtimeVersion: '1.0.0',
     updates: { url: 'https://u.expo.dev/92c016d2-6e63-480e-a483-a6898d7e77d5' },
     orientation: 'portrait',
@@ -18,6 +18,7 @@ module.exports = {
       supportsTablet: true,
       bundleIdentifier: 'com.trailhead.app',
       buildNumber: '4',
+      usesAppleSignIn: true,
       infoPlist: {
         NSLocationWhenInUseUsageDescription: 'Trailhead uses your location to show your position on the map, provide turn-by-turn navigation, find nearby campsites, and alert you to road hazard reports near your current position.',
         NSLocationAlwaysAndWhenInUseUsageDescription: 'Trailhead uses your location in the background so navigation and audio guide narrations continue when your phone is locked while driving.',
@@ -81,6 +82,7 @@ module.exports = {
         },
       ],
       'expo-asset',
+      'expo-apple-authentication',
       'expo-font',
       [
         'expo-build-properties',
@@ -96,6 +98,9 @@ module.exports = {
     ],
     experiments: { typedRoutes: true },
     extra: {
+      googleIosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || '',
+      googleAndroidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || '',
+      googleWebClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || '',
       router: { origin: false },
       eas: { projectId: '92c016d2-6e63-480e-a483-a6898d7e77d5' },
     },

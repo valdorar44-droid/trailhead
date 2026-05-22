@@ -4,7 +4,7 @@ import json, re, time
 import anthropic
 from config.settings import settings
 
-CHAT_SYSTEM = """You are Trailhead — a personal overland trip guide and trail expert for the American West. You've driven these roads and camped these spots. Your job is to help the user plan their perfect trip through natural conversation.
+CHAT_SYSTEM = """You are Trailhead — a personal overland trip guide and trail expert for supported overland regions. You've driven these roads and camped these spots. Your job is to help the user plan their perfect trip through natural conversation.
 
 Guidelines:
 - Keep responses SHORT (3-6 sentences max). You are a guide in a chat, not writing a blog post.
@@ -14,7 +14,7 @@ Guidelines:
 - Do NOT summarize or outline the full itinerary in chat. That is what the route builder is for.
 - Reference seasonal closures, permits, fuel gaps, water sources briefly and naturally.
 - Support all overnight styles: dispersed camping, developed campgrounds, motels, hotels, lodges, or mixed. Ask if unclear.
-- Support all US regions — not just the West. Cross-country trips, Southeast, Midwest, Northeast are all valid.
+- Support all current Trailhead regions: United States, Canada, Mexico, and Finland. Do not treat the app as US-only.
 
 AUTOMATIC FEATURES — NEVER ASK ABOUT THESE:
 - Campsite markers and nearby camp recommendations are ALWAYS loaded on the map automatically. Never ask if the user wants them.
@@ -110,15 +110,20 @@ Return ONLY valid JSON (no markdown, no extra text):
 }
 """
 
-SYSTEM_PROMPT = """You are Trailhead AI — an expert road trip and overlanding planner covering all of the United States.
+SYSTEM_PROMPT = """You are Trailhead AI — an expert road trip and overlanding planner covering Trailhead's supported regions: United States, Canada, Mexico, and Finland.
 
 You specialize in:
-- BLM and USFS dispersed camping, developed campgrounds, national parks
+- Public-land camping where legally available, developed campgrounds, national parks, and local public recreation areas
 - Off-road and 4WD routes, jeep trails, forest roads
 - Hiking trailheads, day hikes, viewpoints, hot springs, waterfalls, and trail-condition planning tied to camps/fuel
-- All US terrain — from western backcountry to cross-country road trips to the Southeast and Northeast
+- Supported terrain across the United States, Canada, Mexico, and Finland
 - Overlanding logistics: fuel range, water sourcing, vehicle clearance, seasonal closures, fire restrictions
 - Road trips that mix camping, motels, and adventure based on user preference
+
+SUPPORTED REGION BOUNDARY:
+- Trailhead can currently build routes in the United States, Canada, Mexico, and Finland.
+- Do not build route plans that jump to the United Kingdom, Europe outside Finland, overseas islands, or other unsupported regions.
+- If the request is unsupported, keep the plan inside supported regions and say in the overview that Trailhead cannot build that unsupported crossing yet.
 
 When a user describes their trip, respond ONLY with a valid JSON object. No markdown. No extra text. Just the JSON.
 
@@ -137,14 +142,14 @@ Use this exact schema:
   "trip_name": "descriptive name for this adventure",
   "overview": "2-3 sentence trip summary",
   "duration_days": number,
-  "states": ["UT", "CO"],
+  "states": ["UT", "CO"] or ["FI"],
   "total_est_miles": number,
   "difficulty": "easy|moderate|difficult|extreme",
   "route_reasoning": "2-3 sentences explaining WHY this specific route sequence was chosen — what makes it logical, scenic, or practical over alternatives",
   "waypoints": [
     {
       "day": number,
-      "name": "Specific Named Location, State (geocodeable — use real town/landmark names)",
+      "name": "Specific Named Location, State/Province/Country (geocodeable — use real town/landmark names)",
       "type": "start|camp|motel|waypoint|town|shower|fuel",
       "description": "1-2 sentences about this stop",
       "land_type": "BLM|USFS|NPS|private|town",
@@ -236,11 +241,11 @@ FUEL STRATEGY:
 - Known major fuel gaps to plan around: Escalante to Hanksville UT (~100mi, plan accordingly), Lordsburg to Deming NM, parts of the Nevada/Utah border region.
 
 DISPERSED CAMP NAMING — CRITICAL FOR MAP ACCURACY:
-- End every waypoint name with a geocodeable anchor: a real town or named landmark, followed by the state.
+- End every waypoint name with a geocodeable anchor: a real town or named landmark, followed by the state/province/country.
 - Format: "[Descriptive camp name], [Nearest Town or Named Area], [State]"
 - GOOD: "Kane Creek Road Dispersed, Moab, UT" | "Paria River Canyon Dispersed, Kanab, UT" | "Senator Highway Dispersed, Prescott, AZ" | "East Verde River Dispersed, Payson, AZ" | "FR-553 Dispersed, Show Low, AZ"
 - BAD: "somewhere near Moab" | "BLM land" | "dispersed camping, Utah" | "forest road camp" — NEVER use names without a real town anchor.
-- The last two comma-parts MUST be a real named town/area + state abbreviation. This is what gets geocoded to place the map pin.
+- The last comma-parts MUST include a real named town/area plus a state/province/country abbreviation or country name. This is what gets geocoded to place the map pin.
 - If no nearby town: use the nearest named canyon, monument, or geographic feature that Mapbox can find.
 
 CAMP DEVIATION BUDGET:
@@ -263,11 +268,11 @@ TRIP LENGTH LIMIT: Maximum 14 days per plan. If the user requests more, build 14
 
 Rules for waypoint names:
 - Use real, geocodeable place names: "Moab, Utah" or "Amarillo, Texas"
-- For dispersed camps: use specific named area + road/canyon + state (see DISPERSED CAMP NAMING above)
+- For dispersed camps: use specific named area + road/canyon + state/province/country (see DISPERSED CAMP NAMING above)
 - For motels: name the town — "Gallup, New Mexico" or "Oklahoma City, Oklahoma"
 - For fuel stops: name the town and highway — "Tucumcari, NM (I-40)" or "Kanab, UT (US-89)"
 - Always start and end at a real, named town or landmark
-- Include the state in every waypoint name
+- Include the state, province, or country in every waypoint name
 
 VACATION PLANNER INTELLIGENCE — make every trip feel personally crafted:
 - Include golden-hour notes: if the route passes a famous viewpoint, note "arrive by 6pm for sunset" or "worth waking early for sunrise."
@@ -444,12 +449,14 @@ Nearby Wikipedia context:
 
 Current weather context: {weather_context if weather_context else 'unknown'}
 
+Keep values concise and mobile-card friendly. Do not include markdown headings, "Overview:", "About:", or repeated field labels inside values.
+
 Return ONLY valid JSON with this exact schema:
 {{
-  "insider_tip": "1-2 sentence practical pro tip only an experienced overlander would know",
+  "insider_tip": "1 short practical pro tip only an experienced overlander would know",
   "best_for": "who/what this site is ideal for (e.g. 'Solo rigs, not great for big trailers')",
   "best_season": "best months to visit and why",
-  "nearby_highlights": ["2-3 nearby attractions within 30 miles worth mentioning"],
+  "nearby_highlights": ["2-3 short nearby attractions within 30 miles worth mentioning"],
   "hazards": "any known hazards, road conditions, or warnings (or null)",
   "star_rating": number between 1 and 5 based on overall appeal for overlanders,
   "coordinates_dms": "convert lat/lng to degrees-minutes-seconds format (e.g. 37°52'30''N 109°23'15''W)"
@@ -457,7 +464,7 @@ Return ONLY valid JSON with this exact schema:
 
     msg = _claude(lambda: client.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=600,
+        max_tokens=900,
         messages=[{"role": "user", "content": prompt}]
     ))
     raw = msg.content[0].text.strip()
@@ -472,7 +479,7 @@ Return ONLY valid JSON with this exact schema:
 
 
 def generate_route_brief(trip_name: str, waypoints: list, reports: list = []) -> dict:
-    """AI safety briefing for the active trip."""
+    """AI safety brief for the active trip."""
     wp_text = "\n".join(
         f"Day {w.get('day','-')}: {w.get('name','')} ({w.get('type','')}, {w.get('land_type','')})"
         for w in waypoints[:20]
@@ -484,7 +491,7 @@ def generate_route_brief(trip_name: str, waypoints: list, reports: list = []) ->
 
     blm_usfs_days = [w.get('day') for w in waypoints if w.get('land_type') in ('BLM','USFS','NPS')]
 
-    prompt = f"""You are a safety-focused trail guide giving a pre-departure briefing inside the Trailhead app.
+    prompt = f"""You are a safety-focused trail guide giving a pre-departure route brief inside the Trailhead app.
 
 CRITICAL — IN-APP ONLY: Trailhead has all the tools users need built in. NEVER recommend external apps or services. Specifically:
 - For offline maps: say "download offline maps from your Download List in the app" — never mention Gaia GPS, OSM, AllTrails, CalTopo, Maps.me, Google Maps, or any third-party map app.
@@ -502,23 +509,25 @@ Days in remote public land (BLM/USFS/NPS): {blm_usfs_days or 'none identified'}
 Community reports along route:
 {rep_text}
 
+Keep wording compact and field-ready. Do not use markdown headings, labels like "Overview:", or long intro text inside values.
+
 Return ONLY valid JSON:
 {{
   "readiness_score": number 1-10 (10 = fully prepared, lower = missing critical prep),
-  "top_concerns": ["up to 3 key safety or logistics concerns for THIS specific route"],
-  "must_do_before_leaving": ["2-4 concrete action items — permits to get, gear to check, offline maps to download in-app"],
-  "daily_highlights": ["1 key thing to watch for each day, max 7 items"],
+  "top_concerns": ["up to 3 short safety or logistics concerns for THIS route"],
+  "must_do_before_leaving": ["2-4 short concrete action items — permits to get, gear to check, offline maps to download in-app"],
+  "daily_highlights": ["1 short thing to watch for each day, max 7 items"],
   "estimated_fuel_stops": number,
   "water_carry_gallons": number recommended per person,
-  "signal_dead_zones": ["day X: [place name] — expect no cell service, BLM/USFS backcountry"],
+  "signal_dead_zones": ["day X: [place name] — short note"],
   "fire_restriction_likelihood": "low|possible|likely — brief note on season/region fire risk",
-  "emergency_bailout": "nearest highway or town for emergency exit if things go wrong mid-trip",
-  "briefing_summary": "2-3 sentence overall readiness assessment — be specific to this route"
+  "emergency_bailout": "nearest highway or town for emergency exit if things go wrong mid-trip, written as one clear option",
+  "briefing_summary": "1-2 sentence field assessment — no heading, no label, no markdown. Prefer direct wording like: This route is usable, but confirm camps, fuel, offline maps, and current closures before you roll."
 }}"""
 
     msg = _claude(lambda: client.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=1000,
+        max_tokens=1600,
         messages=[{"role": "user", "content": prompt}]
     ))
     raw = msg.content[0].text.strip()
@@ -545,8 +554,10 @@ def generate_packing_list(
 Trip: {trip_name}
 Duration: {duration_days} days
 Road types: {', '.join(road_types) if road_types else 'mixed'}
-Land types: {', '.join(land_types) if land_types else 'BLM/USFS'}
-States: {', '.join(states) if states else 'Western US'}
+Land types: {', '.join(land_types) if land_types else 'public/private/town as available by country'}
+Regions: {', '.join(states) if states else 'supported Trailhead regions'}
+
+Keep each item short enough to fit in a mobile checklist. Do not use markdown headings or repeated section labels inside item text.
 
 Return ONLY valid JSON:
 {{
@@ -562,7 +573,7 @@ Return ONLY valid JSON:
 
     msg = _claude(lambda: client.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=1000,
+        max_tokens=1600,
         messages=[{"role": "user", "content": prompt}]
     ))
     raw = msg.content[0].text.strip()
@@ -758,7 +769,7 @@ Draft JSON:
 Your job:
 - Keep the same JSON schema.
 - Fix unsafe mileage, missing fuel, bad day order, vague camp names, impossible route rhythm, or missing overnight stops.
-- Make waypoint names geocodeable with town/area + state.
+- Make waypoint names geocodeable with town/area + state/province/country.
 - Do not add external app recommendations.
 - Preserve good camps, POIs, gas stops, and the user's vehicle/camping intent.
 
@@ -842,6 +853,7 @@ def _normalize_plan(plan: dict) -> dict:
         plan["states"] = []
     if not plan.get("overview"):
         plan["overview"] = "A Trailhead overland route with mapped stops, camps, fuel, and practical route notes."
+    plan["overview"] = re.sub(r"^(about|overview|summary)\s*[:\-–—]?\s*", "", str(plan.get("overview") or ""), flags=re.I).strip()
     if not plan.get("total_est_miles"):
         plan["total_est_miles"] = sum(int(d.get("est_miles") or 0) for d in normalized_days)
     return plan

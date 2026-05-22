@@ -72,6 +72,10 @@ GEOFABRIK_STATE_SLUGS = {
     "wi": "wisconsin", "wv": "west-virginia", "wy": "wyoming",
 }
 
+GEOFABRIK_REGION_URLS = {
+    "fi": "https://download.geofabrik.de/europe/finland-latest.osm.pbf",
+}
+
 
 def distance_m(a: Coord, b: Coord) -> float:
     lat = math.radians((a[1] + b[1]) / 2.0)
@@ -717,7 +721,10 @@ def write_trail_pmtiles(
 
 
 def geofabrik_url(region: str) -> str:
-    slug_value = GEOFABRIK_STATE_SLUGS.get(region.lower())
+    region = region.lower()
+    if region in GEOFABRIK_REGION_URLS:
+        return GEOFABRIK_REGION_URLS[region]
+    slug_value = GEOFABRIK_STATE_SLUGS.get(region)
     if not slug_value:
         raise ValueError(f"No Geofabrik state slug for {region}")
     return f"https://download.geofabrik.de/north-america/us/{slug_value}-latest.osm.pbf"

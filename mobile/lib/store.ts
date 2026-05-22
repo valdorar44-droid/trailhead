@@ -110,6 +110,8 @@ export interface TripHistoryItem {
   planned_at: number;
 }
 
+export type WeatherUnitMode = 'auto' | 'imperial' | 'metric';
+
 interface AppState {
   user: User | null;
   token: string | null;
@@ -117,6 +119,7 @@ interface AppState {
   rigProfile: RigProfile | null;
   tripHistory: TripHistoryItem[];
   themeMode: 'light' | 'dark';
+  weatherUnitMode: WeatherUnitMode;
   userLoc: { lat: number; lng: number } | null;
   mapboxToken: string;
   sessionId: string;
@@ -143,6 +146,7 @@ interface AppState {
   addTripToHistory: (item: TripHistoryItem) => void;
   removeTripFromHistory: (tripId: string) => void;
   setThemeMode: (mode: 'light' | 'dark') => void;
+  setWeatherUnitMode: (mode: WeatherUnitMode) => void;
   setUserLoc: (loc: { lat: number; lng: number } | null) => void;
   setMapboxToken: (token: string) => void;
   setSessionId: (id: string) => void;
@@ -174,6 +178,7 @@ export const useStore = create<AppState>((set) => ({
   rigProfile: null,
   tripHistory: [],
   themeMode: 'dark',
+  weatherUnitMode: 'auto',
   userLoc: null,
   mapboxToken: '',
   sessionId: 'sess_' + Math.random().toString(36).slice(2, 12),
@@ -265,6 +270,11 @@ export const useStore = create<AppState>((set) => ({
   setThemeMode: (mode) => {
     ss('trailhead_theme', mode);
     set({ themeMode: mode });
+  },
+  setWeatherUnitMode: (mode) => {
+    const clean = mode === 'imperial' || mode === 'metric' ? mode : 'auto';
+    ss('trailhead_weather_units', clean);
+    set({ weatherUnitMode: clean });
   },
 
   setUserLoc: (loc) => set({ userLoc: loc }),
@@ -359,11 +369,12 @@ export const useStore = create<AppState>((set) => ({
 // Load persisted data on startup
 (async () => {
   try {
-    const [rigRaw, historyRaw, themeRaw, sessionRaw, favRaw, cachedRegionsRaw, activeTripRaw, planRaw,
+    const [rigRaw, historyRaw, themeRaw, weatherUnitsRaw, sessionRaw, favRaw, cachedRegionsRaw, activeTripRaw, planRaw,
            savedPlacesRaw, markerGroupsRaw, searchHistoryRaw, tokenRaw, userRaw] = await Promise.all([
       sg('trailhead_rig'),
       sg('trailhead_history'),
       sg('trailhead_theme'),
+      sg('trailhead_weather_units'),
       sg('trailhead_session'),
       sg('trailhead_favorites'),
       sg('trailhead_cached_regions'),
@@ -390,6 +401,7 @@ export const useStore = create<AppState>((set) => ({
     }
     if (historyRaw) patch.tripHistory = JSON.parse(historyRaw);
     patch.themeMode = themeRaw === 'light' ? 'light' : 'dark';
+    patch.weatherUnitMode = weatherUnitsRaw === 'imperial' || weatherUnitsRaw === 'metric' ? weatherUnitsRaw : 'auto';
     if (favRaw) patch.favoriteCamps = JSON.parse(favRaw);
     if (cachedRegionsRaw) patch.cachedRegions = JSON.parse(cachedRegionsRaw);
     if (savedPlacesRaw) patch.savedPlaces = JSON.parse(savedPlacesRaw);

@@ -40,4 +40,5 @@ Canada should later be split into province packs so users do not have to downloa
 1. Canada province packs after the country pack is proven on-device.
 2. Central America after Canada/Mexico routing is stable.
 3. POI/place packs by region and trip corridor.
-4. Terrain/contour packs after native multi-pack tile serving is available.
+4. Terrain/contour packs from the owned Copernicus DEM pipeline in
+   `docs/offline-contour-pipeline.md`.

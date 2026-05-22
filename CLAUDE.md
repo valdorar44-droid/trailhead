@@ -8,7 +8,7 @@ _Read this before touching anything._
 
 Trailhead is an AI adventure trip planner for overlanders. Phase 1 is a web app (FastAPI + single-file SPA). Phase 2+ is Expo iOS/Android. Same backend serves both.
 
-**Stack:** FastAPI · SQLite WAL · Anthropic SDK · Mapbox GL JS · RIDB API · NREL API · Railway
+**Stack:** FastAPI · SQLite WAL · Anthropic SDK · Mapbox GL JS · RIDB API · NREL API · Foursquare Places API · Railway · Expo
 
 ## File Map
 
@@ -20,6 +20,8 @@ Trailhead is an AI adventure trip planner for overlanders. Phase 1 is a web app 
 | `ai/planner.py` | Claude trip planner. System prompt lives here |
 | `ingestors/ridb.py` | RIDB (Recreation.gov) campsite fetcher |
 | `ingestors/nrel.py` | NREL fuel station fetcher |
+| `ingestors/osm.py` | OSM/Overpass campsites, POIs, fuel, water, and nearby services |
+| `ingestors/foursquare.py` | Optional server-only Foursquare Places enrichment for nearby/category search |
 | `db/store.py` | SQLite WAL. Schema + queries |
 | `config/settings.py` | All settings from env vars |
 
@@ -33,6 +35,9 @@ Trailhead is an AI adventure trip planner for overlanders. Phase 1 is a web app 
 6. **RIDB results are cached.** Don't re-fetch campsites for the same bbox within 24h. Use db cache.
 7. **Test with DEMO_KEY for NREL in development.** Rate limited but functional.
 8. **The AI waypoints are named places, not coordinates.** Claude generates place names → backend geocodes → frontend renders. Never ask Claude for coordinates directly.
+9. **Keep mobile changes OTA-safe unless a native build is explicitly approved.** JS/TS, styles, and backend changes can ship OTA. Native module/tile decoder changes require EAS builds and Apple review.
+10. **Foursquare is backend-only.** Never ship the key to mobile. Use `FOURSQUARE_API_KEY` on Railway and call the new Places API host `https://places-api.foursquare.com/places/search` with `Authorization: Bearer <key>` and `X-Places-Api-Version: 2025-06-17`.
+11. **Nearby/category search must be radius-scoped.** Do not show far offline pack results as "nearby"; scope local packs first, merge live data second, dedupe, then sort by distance.
 
 ## Trip Planning Response Schema
 
@@ -80,6 +85,8 @@ Claude always returns this JSON (no markdown wrapper):
 - Persistent Volume at `/data` — SQLite lives there
 - Health check: `GET /api/health`
 - Required env vars: `ANTHROPIC_API_KEY`, `MAPBOX_TOKEN`, `NREL_API_KEY`, `RIDB_API_KEY`
+- Optional env vars: `FOURSQUARE_API_KEY` enables richer online nearby/category results through `/api/places/nearby`; OSM remains the fallback.
+- Expo OTA is used for production/preview JS updates when no native code changes are involved.
 
 ## Workflow
 

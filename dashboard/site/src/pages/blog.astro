@@ -1,0 +1,23 @@
+---
+import Layout from "../layouts/Layout.astro";
+import { posts } from "../data/posts";
+---
+
+<Layout title="Trailhead Journal" description="Trailhead field notes on offline maps, web planning, route building, and overland navigation.">
+  <main class="th-journal">
+    <header>
+      <p class="th-eyebrow">Journal</p>
+      <h1>Field notes without the brochure voice.</h1>
+      <p>Practical notes on planning, offline maps, route handoff, and what the app should actually do in the field.</p>
+    </header>
+    <section class="th-post-list">
+      {posts.map(post => (
+        <a class="th-glass th-post-card" href={`/blog/${post.slug}`}>
+          <span>{post.category}</span>
+          <h2>{post.title}</h2>
+          <p>{post.description}</p>
+        </a>
+      ))}
+    </section>
+  </main>
+</Layout>

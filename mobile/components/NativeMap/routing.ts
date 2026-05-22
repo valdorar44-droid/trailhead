@@ -23,6 +23,8 @@ export interface RouteResult {
   totalDuration: number;
   isProper:      boolean;
   fromCache?:    boolean;
+  routeSource?:  string;
+  routeSourceLabel?: string;
   debug?:        string;
 }
 
@@ -38,7 +40,7 @@ const CACHE_DIR      = `${FileSystem.documentDirectory}routes/`;
 const LAST_ROUTE_PATH = `${FileSystem.documentDirectory}routes/last_route.json`;
 const LAST_ROUTE_DEST_TOLERANCE_M = 150;
 const LAST_ROUTE_START_TOLERANCE_M = 5_000;
-const TRAILHEAD_API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://trailhead-production-2049.up.railway.app';
+const TRAILHEAD_API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
 const ROUTE_CACHE_VERSION = 'valhalla-proxy-v2';
 const ROUTER_DEBUG_MARKER = 'DBGv4';
 
@@ -140,7 +142,7 @@ async function loadKeyedRoute(pairs: string[]): Promise<RouteResult | null> {
     if (info.exists) {
       const parsed = JSON.parse(await FileSystem.readAsStringAsync(path));
       console.log('[RouteCache] keyed hit — coords:', parsed.coords?.length);
-      return { ...parsed, fromCache: true };
+      return { ...parsed, fromCache: true, routeSource: parsed.routeSource ?? 'cache-keyed', routeSourceLabel: parsed.routeSourceLabel ?? 'Cached route' };
     }
   } catch (e) {
     console.warn('[RouteCache] keyed load error', e);
@@ -155,7 +157,7 @@ async function loadLastRoute(pairs: string[]): Promise<RouteResult | null> {
       const parsed = JSON.parse(await FileSystem.readAsStringAsync(LAST_ROUTE_PATH));
       if (routeMatchesRequest(parsed, pairs)) {
         console.log('[RouteCache] last_route hit — coords:', parsed.coords?.length);
-        return { ...parsed, fromCache: true };
+        return { ...parsed, fromCache: true, routeSource: parsed.routeSource ?? 'cache-last', routeSourceLabel: parsed.routeSourceLabel ?? 'Last route cache' };
       }
       console.log('[RouteCache] last_route mismatch — ignoring');
     }
@@ -167,16 +169,24 @@ async function loadLastRoute(pairs: string[]): Promise<RouteResult | null> {
 
 // ── Connectivity check (2s — fast fail when offline) ─────────────────────────
 async function isOnline(): Promise<boolean> {
+  let tid: ReturnType<typeof setTimeout> | null = null;
   try {
     const ctrl = new AbortController();
-    const tid  = setTimeout(() => ctrl.abort(), 2000);
-    await fetch('https://tiles.gettrailhead.app/api/download/manifest.json',
-      { method: 'HEAD', signal: ctrl.signal, cache: 'no-store' });
-    clearTimeout(tid);
-    return true;
+    tid = setTimeout(() => ctrl.abort(), 2000);
+    const res = await fetch('https://tiles.gettrailhead.app/api/tiles/4/3/6.pbf',
+      { method: 'GET', signal: ctrl.signal, cache: 'no-store' });
+    if (!res.ok || res.status === 204) return false;
+    const buf = await res.arrayBuffer();
+    return buf.byteLength > 0;
   } catch {
     return false;
+  } finally {
+    if (tid) clearTimeout(tid);
   }
+}
+
+function sourceRoute(result: RouteResult, routeSource: string, routeSourceLabel: string): RouteResult {
+  return { ...result, routeSource, routeSourceLabel, debug: result.debug ?? routeSourceLabel };
 }
 
 // ── Polyline6 decoder (Valhalla) ─────────────────────────────────────────────
@@ -205,20 +215,14 @@ export async function fetchRoute(
   console.log('[fetchRoute] pairs:', pairs);
   const nativeOfflineErrors: string[] = [];
 
-  // A. Keyed cache first — exact/near-exact same route, no network/local graph work.
-  const cached = await loadKeyedRoute(pairs);
-  if (cached) {
-    console.log('[fetchRoute] returning keyed cached route');
-    return cached;
-  }
-
   const tryNativeOfflineValhalla = async () => {
     if (pairs.length < 2) return null;
     const offline = await fetchNativeValhallaOffline(pairs, routeOpts);
     if (!offline) return null;
+    const sourced = sourceRoute(offline, 'offline-valhalla', `offline valhalla${offline.debug ? ` · ${offline.debug}` : ''}`);
     console.log('[fetchRoute] native offline Valhalla route — saving to cache');
-    await saveRoute(pairs, offline);
-    return offline;
+    await saveRoute(pairs, sourced);
+    return sourced;
   };
 
   const tryOfflineRouter = async () => {
@@ -227,13 +231,28 @@ export async function fetchRoute(
     const [toLng,   toLat]   = pairs[pairs.length - 1].split(',').map(Number);
     const offline = await fetchJSOfflineRoute(fromLng, fromLat, toLng, toLat);
     if (!offline) return null;
+    const sourced = sourceRoute(offline, 'offline-js-router', 'offline JS router');
     console.log('[fetchRoute] offline JS route — saving to cache');
-    await saveRoute(pairs, offline);
-    return offline;
+    await saveRoute(pairs, sourced);
+    return sourced;
   };
 
-  // B. If offline, go straight to PMTiles A* before considering last_route.json.
+  // Check connectivity before route cache lookup. When signal comes back, a
+  // cached/offline route can have different geometry and maneuver distances than
+  // the live route, which makes the navigation HUD look frozen until reroute.
   const online = await isOnline();
+
+  // A. Offline keyed cache — exact/near-exact same route, no network/local graph work.
+  // Online deliberately skips this so online → offline → online refreshes geometry.
+  if (!online) {
+    const cached = await loadKeyedRoute(pairs);
+    if (cached) {
+      console.log('[fetchRoute] returning keyed cached route');
+      return cached;
+    }
+  }
+
+  // B. If offline, go straight to PMTiles A* before considering last_route.json.
   if (!online) {
     console.log('[fetchRoute] offline — trying native Valhalla routing pack');
     try {
@@ -288,6 +307,12 @@ export async function fetchRoute(
       await saveRoute(pairs, route);
       return route;
     } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      if (message.startsWith('blocked-route:')) {
+        const reason = message.replace(/^blocked-route:/, '').trim() || 'This route needs corrected stops.';
+        console.warn('[fetchRoute] route blocked by Trailhead validation', reason);
+        return buildNoRoute(pairs, reason);
+      }
       console.warn('[fetchRoute] live engine failed', e);
     }
   }
@@ -365,6 +390,9 @@ async function fetchMapbox(
           ? isc.lanes.map((l: any) => ({ indications: l.indications ?? [], valid: l.valid === true, active: l.active === true }))
           : undefined;
       }, undefined);
+      const banner = s.bannerInstructions?.[0]?.primary;
+      const bannerText = [banner?.text, banner?.modifier ? '' : null].filter(Boolean).join(' ').trim();
+      const instruction = s.maneuver?.instruction || bannerText || '';
       const st: RouteStep = {
         type:       s.maneuver?.type ?? 'turn',
         modifier:   s.maneuver?.modifier ?? '',
@@ -373,6 +401,10 @@ async function fetchMapbox(
         duration:   s.duration,
         lat:        loc?.[1],
         lng:        loc?.[0],
+        instruction,
+        verbalPre:  s.voiceInstructions?.[0]?.announcement ?? instruction,
+        verbalPost: s.maneuver?.instruction ?? '',
+        roundaboutExit: Number.isFinite(s.maneuver?.exit) ? s.maneuver.exit : null,
         lanes:      lanes?.length ? lanes : undefined,
         speedLimit: null,
       };
@@ -381,8 +413,8 @@ async function fetchMapbox(
     legs.push(ls);
   }
 
-  return { coords: route.geometry.coordinates, steps, legs,
-           totalDistance: route.distance, totalDuration: route.duration, isProper: true };
+  return sourceRoute({ coords: route.geometry.coordinates, steps, legs,
+           totalDistance: route.distance, totalDuration: route.duration, isProper: true }, 'mapbox', 'Mapbox');
 }
 
 // ── Engine 2: Trailhead Valhalla proxy ────────────────────────────────────────
@@ -408,13 +440,20 @@ async function fetchValhalla(
     }),
   }).then(async r => {
     const json = await r.json().catch(() => null);
-    if (!r.ok) throw new Error(`trailhead valhalla ${r.status}: ${json?.detail ?? 'failed'}`);
+    if (!r.ok) {
+      const detail = json?.detail;
+      if (detail && typeof detail === 'object' && detail.ok === false) {
+        throw new Error(`blocked-route:${detail.reason ?? 'Route blocked by Trailhead validation'}`);
+      }
+      const reason = typeof detail === 'string' ? detail : detail?.reason ?? detail?.message ?? 'failed';
+      throw new Error(`trailhead valhalla ${r.status}: ${reason}`);
+    }
     return json;
   });
   clearTimeout(tid);
 
   if (!data.trip || data.trip.status !== 0) throw new Error('valhalla error');
-  return parseValhallaRoute(data);
+  return sourceRoute(parseValhallaRoute(data), 'trailhead-valhalla', 'Trailhead Valhalla');
 }
 
 function parseValhallaRoute(data: any): RouteResult {
@@ -582,9 +621,9 @@ async function fetchOSRM(
     steps.push(...ls); legs.push(ls);
   }
 
-  return { coords: route.geometry.coordinates, steps, legs,
+  return sourceRoute({ coords: route.geometry.coordinates, steps, legs,
            totalDistance: route.distance ?? 0,
-           totalDuration: route.duration ?? 0, isProper: true };
+           totalDuration: route.duration ?? 0, isProper: true }, 'osrm', 'OSRM');
 }
 
 // ── Engine 4: Local PMTiles router (offline, tap-anywhere) ───────────────────
@@ -648,7 +687,7 @@ export function buildFallbackRoute(pairs: string[], debug = 'route fallback'): R
     const [ln, lt] = p.split(',');
     return [parseFloat(ln), parseFloat(lt)];
   });
-  return { coords, steps: [], legs: [[]], totalDistance: 0, totalDuration: 0, isProper: false, debug };
+  return { coords, steps: [], legs: [[]], totalDistance: 0, totalDuration: 0, isProper: false, routeSource: 'fallback-line', routeSourceLabel: 'Fallback line', debug };
 }
 
 export function buildNoRoute(pairs: string[], debug = 'route unavailable'): RouteResult {
@@ -656,5 +695,5 @@ export function buildNoRoute(pairs: string[], debug = 'route unavailable'): Rout
     const [ln, lt] = p.split(',');
     return [parseFloat(ln), parseFloat(lt)];
   });
-  return { coords, steps: [], legs: [[]], totalDistance: 0, totalDuration: 0, isProper: false, debug };
+  return { coords, steps: [], legs: [[]], totalDistance: 0, totalDuration: 0, isProper: false, routeSource: 'no-route', routeSourceLabel: 'No drawable route', debug };
 }

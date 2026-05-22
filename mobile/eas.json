@@ -15,7 +15,7 @@
         "simulator": false
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://trailhead-production-2049.up.railway.app"
+        "EXPO_PUBLIC_API_URL": "https://api.gettrailhead.app"
       }
     },
     "production": {
@@ -28,7 +28,7 @@
         "image": "latest"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://trailhead-production-2049.up.railway.app"
+        "EXPO_PUBLIC_API_URL": "https://api.gettrailhead.app"
       }
     }
   },

@@ -1,5 +1,5 @@
 export const CREDIT_REWARDS = {
-  signup: 50,
+  signup: 20,
   referral: 20,
   communityReport: 5,
   reportPhotoBonus: 5,
@@ -16,4 +16,3 @@ export const CREDIT_REWARDS = {
   streak7: 50,
   streak30: 200,
 } as const;
-

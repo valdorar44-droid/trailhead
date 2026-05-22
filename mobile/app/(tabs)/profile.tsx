@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  TextInput, Alert, Share, Linking, ActivityIndicator, Image, Modal, Animated, Keyboard, Switch,
+  TextInput, Alert, Share, Linking, ActivityIndicator, Image, Modal, Animated, Keyboard, Switch, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -31,6 +31,15 @@ import {
   type GpxImportBatch,
 } from '@/lib/gpxImport';
 import { CREDIT_REWARDS } from '@/lib/credits';
+
+type AppleAuthModule = typeof import('expo-apple-authentication');
+const AppleAuthentication: AppleAuthModule | null = (() => {
+  try {
+    return require('expo-apple-authentication') as AppleAuthModule;
+  } catch {
+    return null;
+  }
+})();
 
 type ChecklistItem = { id: string; label: string; done: boolean };
 type ChecklistSection = { title: string; icon: keyof typeof Ionicons.glyphMap; items: ChecklistItem[] };
@@ -106,6 +115,8 @@ export default function ProfileScreen() {
   const removeTripFromHistory = useStore(st => st.removeTripFromHistory);
   const themeMode      = useStore(st => st.themeMode);
   const setThemeMode   = useStore(st => st.setThemeMode);
+  const weatherUnitMode = useStore(st => st.weatherUnitMode);
+  const setWeatherUnitMode = useStore(st => st.setWeatherUnitMode);
   const favoriteCamps  = useStore(st => st.favoriteCamps);
   const toggleFavorite = useStore(st => st.toggleFavorite);
   const [view, setView] = useState<'main' | 'login' | 'register' | 'forgot'>(!user ? 'login' : 'main');
@@ -118,6 +129,7 @@ export default function ProfileScreen() {
   const [refCode, setRefCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [pendingVerifyEmail, setPendingVerifyEmail] = useState('');
+  const [appleAuthAvailable, setAppleAuthAvailable] = useState(false);
   const [resendingVerify, setResendingVerify] = useState(false);
   const [resetSent, setResetSent] = useState(false);
   const [creditHistory, setCreditHistory] = useState<any[]>([]);
@@ -180,6 +192,18 @@ export default function ProfileScreen() {
   useEffect(() => {
     if (user && view !== 'main') setView('main');
   }, [user]);
+
+  useEffect(() => {
+    let alive = true;
+    if (Platform.OS !== 'ios' || !AppleAuthentication) {
+      setAppleAuthAvailable(false);
+      return;
+    }
+    AppleAuthentication.isAvailableAsync()
+      .then(available => { if (alive) setAppleAuthAvailable(available); })
+      .catch(() => { if (alive) setAppleAuthAvailable(false); });
+    return () => { alive = false; };
+  }, []);
 
   // Sync draft when rigProfile loads from SecureStore
   useEffect(() => {
@@ -267,6 +291,47 @@ export default function ProfileScreen() {
       }
       Alert.alert('Login failed', e.message);
     }
+  }
+
+  async function handleProviderLogin(provider: 'apple' | 'google', identityToken: string, fullName = '', providerEmail = '') {
+    if (!identityToken) {
+      Alert.alert('Sign in failed', `${provider === 'apple' ? 'Apple' : 'Google'} did not return a sign-in token.`);
+      return;
+    }
+    Keyboard.dismiss();
+    setLoading(true);
+    try {
+      const res = provider === 'apple'
+        ? await api.oauthApple(identityToken, fullName, providerEmail)
+        : await api.oauthGoogle(identityToken, fullName, providerEmail);
+      setAuth(res.token, res.user);
+      transitionToMain(`Welcome, ${res.user.username}!`);
+    } catch (e: any) {
+      setLoading(false);
+      Alert.alert('Sign in failed', e?.message ?? `Could not sign in with ${provider}.`);
+    }
+  }
+
+  async function signInWithApple() {
+    if (Platform.OS !== 'ios' || !AppleAuthentication || !appleAuthAvailable) return;
+    try {
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+      const fullName = [credential.fullName?.givenName, credential.fullName?.familyName].filter(Boolean).join(' ');
+      await handleProviderLogin('apple', credential.identityToken ?? '', fullName, credential.email ?? '');
+    } catch (e: any) {
+      if (e?.code !== 'ERR_REQUEST_CANCELED') {
+        Alert.alert('Apple Sign In failed', e?.message ?? 'Could not sign in with Apple.');
+      }
+    }
+  }
+
+  async function signInWithGoogle() {
+    Alert.alert('Google Sign In coming soon', 'Apple Sign In and email sign in are available now. Google needs the OAuth client IDs before it can be enabled.');
   }
 
   async function register() {
@@ -457,7 +522,7 @@ export default function ProfileScreen() {
   function shareReferral() {
     if (!user) return;
     Share.share({
-      message: `Join me on Trailhead — the AI adventure planner for overlanders!\nUse my code ${user.referral_code} to sign up and we both earn credits.\nhttps://trailhead-production-2049.up.railway.app`,
+      message: `Join me on Trailhead — the AI adventure planner for overlanders!\nUse my code ${user.referral_code} to sign up and we both earn credits.\nhttps://api.gettrailhead.app`,
       title: 'Join Trailhead',
     });
   }
@@ -689,11 +754,31 @@ export default function ProfileScreen() {
             </View>
             <Text style={s.authHeading}>Welcome back</Text>
             <Text style={s.authSub}>Sign in to plan trips, sync downloads, manage Explorer, and track your field reports.</Text>
+            <View style={s.socialAuthStack}>
+              {appleAuthAvailable && AppleAuthentication ? (
+                <AppleAuthentication.AppleAuthenticationButton
+                  buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+                  buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
+                  cornerRadius={14}
+                  style={s.appleAuthButton}
+                  onPress={signInWithApple}
+                />
+              ) : null}
+              {false && (
+                <TouchableOpacity style={s.socialAuthButton} onPress={signInWithGoogle} disabled={loading}>
+                  <Ionicons name="logo-google" size={18} color={C.text} />
+                  <Text style={s.socialAuthText}>Continue with Google</Text>
+                </TouchableOpacity>
+              )}
+              <View style={s.authDivider}><View style={s.authDividerLine} /><Text style={s.authDividerText}>or</Text><View style={s.authDividerLine} /></View>
+            </View>
             <View style={s.authFields}>
               <TextInput style={s.input} placeholder="Email" placeholderTextColor={C.text3}
-                value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
+                value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address"
+                returnKeyType="next" blurOnSubmit />
               <TextInput style={s.input} placeholder="Password" placeholderTextColor={C.text3}
-                value={password} onChangeText={setPassword} secureTextEntry />
+                value={password} onChangeText={setPassword} secureTextEntry returnKeyType="done"
+                onSubmitEditing={login} />
             </View>
             <TouchableOpacity style={[s.btn, loading && s.btnDisabled]} onPress={login} disabled={loading}>
               <Text style={s.btnText}>{loading ? 'SIGNING IN...' : 'SIGN IN'}</Text>
@@ -777,17 +862,36 @@ export default function ProfileScreen() {
               <Ionicons name="flash" size={14} color={C.orange} />
               <Text style={s.signupPerkText}>{CREDIT_REWARDS.signup} free credits on signup + earn more by contributing to the map</Text>
             </View>
+            <View style={s.socialAuthStack}>
+              {appleAuthAvailable && AppleAuthentication ? (
+                <AppleAuthentication.AppleAuthenticationButton
+                  buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_UP}
+                  buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
+                  cornerRadius={14}
+                  style={s.appleAuthButton}
+                  onPress={signInWithApple}
+                />
+              ) : null}
+              {false && (
+                <TouchableOpacity style={s.socialAuthButton} onPress={signInWithGoogle} disabled={loading}>
+                  <Ionicons name="logo-google" size={18} color={C.text} />
+                  <Text style={s.socialAuthText}>Continue with Google</Text>
+                </TouchableOpacity>
+              )}
+              <View style={s.authDivider}><View style={s.authDividerLine} /><Text style={s.authDividerText}>or create with email</Text><View style={s.authDividerLine} /></View>
+            </View>
             <View style={s.authFields}>
               <TextInput style={s.input} placeholder="Email" placeholderTextColor={C.text3}
-                value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
+                value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address"
+                returnKeyType="next" blurOnSubmit />
               <TextInput style={s.input} placeholder="Username" placeholderTextColor={C.text3}
-                value={username} onChangeText={setUsername} autoCapitalize="none" />
+                value={username} onChangeText={setUsername} autoCapitalize="none" returnKeyType="next" blurOnSubmit />
               <TextInput style={s.input} placeholder="Password" placeholderTextColor={C.text3}
-                value={password} onChangeText={setPassword} secureTextEntry />
+                value={password} onChangeText={setPassword} secureTextEntry returnKeyType="next" blurOnSubmit />
               <TextInput style={s.input} placeholder="Confirm password" placeholderTextColor={C.text3}
-                value={confirmPassword} onChangeText={setConfirmPassword} secureTextEntry />
+                value={confirmPassword} onChangeText={setConfirmPassword} secureTextEntry returnKeyType="next" blurOnSubmit />
               <TextInput style={s.input} placeholder="Referral code (optional)" placeholderTextColor={C.text3}
-                value={refCode} onChangeText={setRefCode} autoCapitalize="none" />
+                value={refCode} onChangeText={setRefCode} autoCapitalize="none" returnKeyType="done" onSubmitEditing={register} />
             </View>
             <TouchableOpacity style={[s.btn, loading && s.btnDisabled]} onPress={register} disabled={loading}>
               <Text style={s.btnText}>{loading ? 'CREATING...' : 'CREATE ACCOUNT'}</Text>
@@ -1458,6 +1562,31 @@ export default function ProfileScreen() {
           <Ionicons name="chevron-forward" size={16} color={C.text3} />
         </TouchableOpacity>
 
+        <View style={s.weatherUnitsCard}>
+          <View style={{ flex: 1 }}>
+            <Text style={s.themeToggleLabel}>WEATHER UNITS</Text>
+            <Text style={s.themeToggleSub}>Auto uses °F in the U.S. and °C elsewhere</Text>
+          </View>
+          <View style={s.weatherUnitsSegment}>
+            {[
+              ['auto', 'AUTO'],
+              ['imperial', '°F'],
+              ['metric', '°C'],
+            ].map(([mode, label]) => {
+              const active = weatherUnitMode === mode;
+              return (
+                <TouchableOpacity
+                  key={mode}
+                  style={[s.weatherUnitsOption, active && s.weatherUnitsOptionActive]}
+                  onPress={() => setWeatherUnitMode(mode as 'auto' | 'imperial' | 'metric')}
+                >
+                  <Text style={[s.weatherUnitsOptionText, active && s.weatherUnitsOptionTextActive]}>{label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+
         {/* GPX Import */}
         <View style={s.gpxCard}>
           <View style={s.gpxHeader}>
@@ -2031,6 +2160,16 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     gap: 14, backgroundColor: C.s2, borderRadius: 22, borderWidth: 1, borderColor: C.border,
     padding: 18,
   },
+  socialAuthStack: { gap: 10 },
+  appleAuthButton: { height: 50, width: '100%' },
+  socialAuthButton: {
+    height: 50, borderRadius: 14, borderWidth: 1, borderColor: C.border,
+    backgroundColor: C.s2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
+  },
+  socialAuthText: { color: C.text, fontSize: 14, fontWeight: '800' },
+  authDivider: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 2 },
+  authDividerLine: { flex: 1, height: 1, backgroundColor: C.border },
+  authDividerText: { color: C.text3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', fontFamily: mono },
   secondaryAuthBtn: { alignItems: 'center', paddingVertical: 8 },
   secondaryAuthText: { color: C.text3, fontSize: 13, fontWeight: '700' },
   forgotBtn: { alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 999, backgroundColor: C.orangeGlow, borderWidth: 1, borderColor: C.orange + '55' },
@@ -2490,6 +2629,21 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   themeToggleLabel: { color: C.text, fontSize: 13, fontWeight: '700', fontFamily: mono },
   themeToggleSub: { color: C.text2, fontSize: 11, marginTop: 2 },
+  weatherUnitsCard: {
+    backgroundColor: C.s1, borderRadius: 14, borderWidth: 1, borderColor: C.border,
+    padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12,
+  },
+  weatherUnitsSegment: {
+    flexDirection: 'row', alignItems: 'center', padding: 3, borderRadius: 12,
+    backgroundColor: C.s3, borderWidth: 1, borderColor: C.border,
+  },
+  weatherUnitsOption: {
+    height: 30, minWidth: 42, paddingHorizontal: 10, borderRadius: 9,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  weatherUnitsOptionActive: { backgroundColor: C.orange },
+  weatherUnitsOptionText: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '800' },
+  weatherUnitsOptionTextActive: { color: '#fff' },
 
   // My Trips section
   tripsCard: {

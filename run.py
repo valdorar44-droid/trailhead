@@ -4,6 +4,11 @@ Entry point. Loads .env and starts the server.
 from __future__ import annotations
 import os, sys
 
+def _activate_packaged_venv():
+    venv_python = "/opt/venv/bin/python"
+    if os.path.exists(venv_python) and os.path.abspath(sys.executable) != venv_python:
+        os.execv(venv_python, [venv_python, *sys.argv])
+
 def _load_env():
     env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
     if not os.path.exists(env_path):
@@ -22,6 +27,7 @@ def _load_env():
             os.environ.setdefault(k, v)
 
 _load_env()
+_activate_packaged_venv()
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from db.store import init_db

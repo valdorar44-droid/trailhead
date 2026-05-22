@@ -54,6 +54,18 @@ function getPMTiles(env) {
   return _pmCache.get(env.TILES_BUCKET);
 }
 
+function vectorTileHeaders(source, contentLength = null) {
+  const headers = {
+    "Content-Type":                "application/vnd.mapbox-vector-tile",
+    "Content-Encoding":            "gzip",
+    "Cache-Control":               "public, max-age=86400, s-maxage=2592000",
+    "Access-Control-Allow-Origin": "*",
+    "X-Tile-Source":               source,
+  };
+  if (contentLength) headers["Content-Length"] = contentLength;
+  return headers;
+}
+
 async function streamR2Parts(bucket, parts, start = 0, end = null) {
   const encoder = new TextEncoder();
   return new ReadableStream({
@@ -215,14 +227,33 @@ export default {
       const [z, x, y] = tm.slice(1).map(Number);
 
       // Stable cache key — custom domain ensures CF edge cache works on this
-      const cacheKey = new Request(`https://tiles.gettrailhead.app/v3${path}`);
+      const cacheKey = new Request(`https://tiles.gettrailhead.app/v4${path}`);
       const cfCache  = caches.default;
 
       // 1. Edge cache hit
       const cached = await cfCache.match(cacheKey);
       if (cached) return cached;
 
-      // 2. R2 via pmtiles library
+      // 2. Railway tile server. The Worker-side PMTiles reader has previously
+      // hung on large R2 range reads, which leaves iOS MapLibre with a blank map
+      // even though the online probe succeeds. Railway is the known-good live
+      // tile path; cache it at the edge so steady-state requests stay fast.
+      try {
+        const railResp = await fetch(`${origin}${path}`, { cf: { cacheEverything: false } });
+        if (railResp.ok) {
+          const resp = new Response(request.method === "HEAD" ? null : railResp.body, {
+            status: railResp.status,
+            headers: vectorTileHeaders("RAILWAY", railResp.headers.get("Content-Length")),
+          });
+          if (request.method !== "HEAD") ctx.waitUntil(cfCache.put(cacheKey, resp.clone()));
+          return resp;
+        }
+      } catch (e) {
+        console.error(`Railway tile error z=${z}/${x}/${y}:`, e.message);
+      }
+
+      // 3. R2 via pmtiles library. Keep this only as fallback so a PMTiles
+      // lookup issue cannot block the main online map path.
       try {
         const pm   = getPMTiles(env);
         const tile = await pm.getZxy(z, x, y);
@@ -230,12 +261,7 @@ export default {
 
         if (tile && tile.data && (tile.data.byteLength > 0 || tile.data.length > 0)) {
           const resp = new Response(tile.data, {
-            headers: {
-              "Content-Type":                "application/vnd.mapbox-vector-tile",
-              "Cache-Control":               "public, max-age=86400, s-maxage=2592000",
-              "Access-Control-Allow-Origin": "*",
-              "X-Tile-Source":               "R2",
-            },
+            headers: vectorTileHeaders("R2", String(tile.data.byteLength ?? tile.data.length)),
           });
           ctx.waitUntil(cfCache.put(cacheKey, resp.clone()));
           return resp;
@@ -244,33 +270,10 @@ export default {
         console.error(`PMTiles R2 error z=${z}/${x}/${y}:`, e.message);
       }
 
-      // 3. Railway fallback — no cf:{cacheEverything} to avoid CF edge caching
-      //    the outer request URL (which would bypass Worker JS on future hits)
-      try {
-        const railResp = await fetch(`${origin}${path}`, { cf: { cacheEverything: false } });
-        if (!railResp.ok) {
-          // Tile not in our dataset — return 204 No Content (empty tile).
-          // NEVER return 404 here: MLN offlineManager.createPack() aborts the
-          // entire pack on any 404, even for legitimately-absent tiles.
-          return new Response(null, {
-            status: 204,
-            headers: { "Access-Control-Allow-Origin": "*" },
-          });
-        }
-        const resp = new Response(railResp.body, {
-          status: 200,
-          headers: {
-            "Content-Type":                railResp.headers.get("Content-Type") || "application/vnd.mapbox-vector-tile",
-            "Cache-Control":               "public, max-age=86400, s-maxage=2592000",
-            "Access-Control-Allow-Origin": "*",
-            "X-Tile-Source":               "RAILWAY",
-          },
-        });
-        ctx.waitUntil(cfCache.put(cacheKey, resp.clone()));
-        return resp;
-      } catch (e) {
-        return new Response(null, { status: 204, headers: { "Access-Control-Allow-Origin": "*" } });
-      }
+      // Tile not in our dataset — return 204 No Content (empty tile).
+      // NEVER return 404 here: MLN offlineManager.createPack() aborts the
+      // entire pack on any 404, even for legitimately-absent tiles.
+      return new Response(null, { status: 204, headers: { "Access-Control-Allow-Origin": "*" } });
     }
 
     // ── Static assets (MapLibre GL JS + CSS) — cached at edge for 7 days ────
@@ -650,7 +653,7 @@ export default {
       });
     }
 
-    const routingMatch = path.match(/^\/api\/routing\/([a-z]{2}\.tar(?:\.gz)?)$/);
+    const routingMatch = path.match(/^\/api\/routing\/([a-z]{2,12}\.tar(?:\.gz)?)$/);
     if (routingMatch) {
       const fileName = routingMatch[1];
       const key = `routing/${fileName}`;

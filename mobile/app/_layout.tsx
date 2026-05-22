@@ -35,8 +35,13 @@ export default function RootLayout() {
 
   function verificationTokenFromUrl(url: string | null | undefined) {
     if (!url || !url.includes('verify-email')) return '';
-    const match = url.match(/[?&]token=([^&]+)/);
-    return match ? decodeURIComponent(match[1]) : '';
+    try {
+      const parsed = new URL(url);
+      const token = parsed.searchParams.get('token');
+      if (token) return token;
+    } catch {}
+    const match = url.match(/[?&]token=([^&#]+)/);
+    return match ? decodeURIComponent(match[1].replace(/\+/g, '%20')) : '';
   }
 
   async function handleVerificationUrl(url: string | null | undefined) {

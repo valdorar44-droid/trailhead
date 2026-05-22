@@ -9,6 +9,7 @@ __pycache__/
 venv/
 .venv/
 .venv-trails/
+node_modules/
 .playwright-cli/
 .wrangler/
 output/

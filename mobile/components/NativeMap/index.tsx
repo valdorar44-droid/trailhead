@@ -37,6 +37,7 @@ let tileServerRequireError = '';
 try { tileServer = require('expo-tile-server'); } catch (e: any) { tileServerRequireError = e?.message ?? 'require failed'; }
 
 const TILE_BASE_URL = 'https://tiles.gettrailhead.app';
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
 const BASE_DL_URL   = `${TILE_BASE_URL}/api/download/base.pmtiles`;
 const GLOBAL_BASE_DL_URL = `${TILE_BASE_URL}/api/download/base-global.pmtiles`;
 const BASE_PATH     = `${OFFLINE_DIR}base.pmtiles`;
@@ -126,7 +127,7 @@ export interface NativeMapProps {
   onOffRoute?:      (lat: number, lng: number, distanceM: number) => void;
   onOffRouteWarn?:  (lat: number, lng: number, distanceM: number) => void;
   onBackOnRoute?:   () => void;
-  onRouteProgress?: (progress: { distanceM: number; remainingM: number; routeDistanceM: number; deviationM: number; segmentIdx: number }) => void;
+  onRouteProgress?: (progress: { distanceM: number; remainingM: number; routeDistanceM: number; deviationM: number; segmentIdx: number } | null) => void;
   onTraceStart?:    (coord: [number, number]) => void;
   onTraceMove?:     (coord: [number, number]) => void;
   onTraceEnd?:      () => void;
@@ -169,6 +170,12 @@ const POI_CODES: Record<string, string> = {
   mechanic: 'R',
   parking: 'P',
   attraction: 'A',
+  camping: 'C',
+  hardware: 'H',
+  medical: 'M',
+  parts: 'R',
+  wifi: 'W',
+  poi: 'P',
 };
 const POI_ICON_NAMES: Record<string, keyof typeof Ionicons.glyphMap> = {
   trail: 'walk-outline',
@@ -188,6 +195,12 @@ const POI_ICON_NAMES: Record<string, keyof typeof Ionicons.glyphMap> = {
   mechanic: 'construct-outline',
   parking: 'car-outline',
   attraction: 'camera-outline',
+  camping: 'storefront-outline',
+  hardware: 'hammer-outline',
+  medical: 'medical-outline',
+  parts: 'cog-outline',
+  wifi: 'wifi-outline',
+  poi: 'location-outline',
 };
 
 const COMMUNITY_PIN_VISUALS: Record<string, { color: string; icon: keyof typeof Ionicons.glyphMap }> = {
@@ -528,18 +541,25 @@ function trailPathCandidates(id: string): string[] {
 }
 
 async function probeTileCdn(timeoutMs = 1500): Promise<boolean> {
+  let tid: ReturnType<typeof setTimeout> | null = null;
   try {
     const ctrl = new AbortController();
-    const tid = setTimeout(() => ctrl.abort(), timeoutMs);
-    const res = await fetch('https://tiles.gettrailhead.app/api/download/manifest.json', {
-      method: 'HEAD',
+    tid = setTimeout(() => ctrl.abort(), timeoutMs);
+    // Probe an actual low-zoom vector tile, not just the manifest. The manifest
+    // can be healthy while the Worker tile path is wedged, which leaves the app
+    // in "online maps" mode with no drawable tiles.
+    const res = await fetch('https://tiles.gettrailhead.app/api/tiles/4/3/6.pbf', {
+      method: 'GET',
       signal: ctrl.signal,
       cache: 'no-store',
     });
-    clearTimeout(tid);
-    return res.ok;
+    if (!res.ok || res.status === 204) return false;
+    const buf = await res.arrayBuffer();
+    return buf.byteLength > 0;
   } catch {
     return false;
+  } finally {
+    if (tid) clearTimeout(tid);
   }
 }
 
@@ -630,10 +650,9 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       }).catch(() => setRadarUrl(null));
   }, [showRadar]);
 
-  // Compute initial camera position ONCE (lazy useState with no deps).
-  // Passing these as controlled Camera props that never change means:
-  //   1. Camera starts at the right position immediately (no ref timing issue)
-  //   2. User can freely pan/zoom after — props don't change so no snap-back
+  // Compute initial camera position once, then pass it as a Camera default.
+  // Keeping center/zoom as controlled props can re-apply this launch position
+  // when navigation follow is interrupted by a gesture on iOS.
   const [initialCenter] = useState<[number, number]>(() =>
     waypoints[0] ? [waypoints[0].lng, waypoints[0].lat] : [-98.5, 39.5]
   );
@@ -660,6 +679,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const lastFlyToRef    = useRef(0);                   // timestamp of last flyTo — debounce CDN fallback
   const lastCamRef      = useRef(0);                   // timestamp of last nav setCamera — prevent animation overlap
   const routeRequestRef = useRef(0);                   // cancels stale async route results
+  const tileProbeSeqRef = useRef(0);                   // cancels stale online/offline source probes
+  const onlineProbeStreakRef = useRef(0);
 
   // Returns all downloaded region files with their bounds, or null for CONUS.
   // Skips files under 25% of estimated size (obviously truncated downloads).
@@ -731,6 +752,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         }
       }, 600);
     } catch (e: any) {
+      loadedStateRef.current = null;
+      if (onlineTilesRef.current) setLocalTiles(false);
       setTileDebug(`${stateDisplayName(fileName)} maps unavailable`);
     } finally {
       switchingRef.current = false;
@@ -899,6 +922,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       const online = await probeTileCdn();
       onlineTilesRef.current = online;
       if (online) {
+        onlineProbeStreakRef.current += 1;
         setLocalTiles(false);
         setTileDebug('Online maps');
         try {
@@ -909,6 +933,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         }
         return;
       }
+      onlineProbeStreakRef.current = 0;
 
       // 4. Offline: load best region file (GPS-matched, or first available)
       const files = await getDownloadedFiles();
@@ -1202,6 +1227,9 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const doFetchRoute = useCallback(async (pairs: string[], fromIdx: number) => {
     const requestId = ++routeRequestRef.current;
     isRoutingRef.current = true;
+    onRouteProgress?.(null);
+    offRouteStreakRef.current = 0;
+    wasOffRouteRef.current = false;
     try {
       const online = await probeTileCdn();
       onlineTilesRef.current = online;
@@ -1276,7 +1304,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
 
   // ── Nav: track user on route + update passed overlay ────────────────────────
   useEffect(() => {
-    if (nativeNavEngineActive || !navMode || !userLoc || routeRef.current.coords.length === 0) return;
+    if (nativeNavEngineActive || !navMode || !userLoc || isRoutingRef.current || routeRef.current.coords.length === 0) return;
     const { lat, lng } = userLoc;
     const state = routeRef.current;
     const coords = state.coords;
@@ -1441,12 +1469,20 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     if (tileServer) {
       const centerLat = (n + s) / 2;
       const centerLng = (e + w) / 2;
+      const probeSeq = ++tileProbeSeqRef.current;
       (async () => {
         const online = await probeTileCdn();
+        if (probeSeq !== tileProbeSeqRef.current) return;
         onlineTilesRef.current = online;
+        onlineProbeStreakRef.current = online ? onlineProbeStreakRef.current + 1 : 0;
+        const canUseOnline = online && (!navMode || !localTiles || onlineProbeStreakRef.current >= 2);
         if (online) {
-          if (localTiles) setLocalTiles(false);
-          setTileDebug('Online maps');
+          if (canUseOnline) {
+            if (localTiles) setLocalTiles(false);
+            setTileDebug('Online maps');
+          } else {
+            setTileDebug('Verifying online maps');
+          }
           return;
         }
         const files = await getDownloadedFiles();
@@ -1471,7 +1507,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         }
       })();
     }
-  }, [onBoundsChange, showMvum, fetchMvum, localTiles, getDownloadedFiles, switchFile, loadBestContourFile, loadBestTrailFile]);
+  }, [onBoundsChange, showMvum, fetchMvum, localTiles, navMode, getDownloadedFiles, switchFile, loadBestContourFile, loadBestTrailFile]);
 
   const handleCampPress = useCallback((e: any) => {
     const feat = e.features?.[0];
@@ -1507,15 +1543,15 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       >
 
       {/* ── Camera ────────────────────────────────────────────────────── */}
-      {/* Camera — initial values computed once via lazy useState.
-          Because initialCenter/initialZoom never change after mount, these
-          controlled props set the starting position without ever snapping back.
-          All subsequent camera moves (nav follow, flyTo, etc.) happen via ref. */}
+      {/* Initial placement is default-only. Navigation follow and explicit
+          locate actions are the only code paths that should recenter later. */}
       <MapLibreGL.Camera
         ref={camRef}
-        centerCoordinate={initialCenter}
-        zoomLevel={initialZoom}
-        animationDuration={0}
+        defaultSettings={{
+          centerCoordinate: initialCenter,
+          zoomLevel: initialZoom,
+          animationDuration: 0,
+        }}
         followUserLocation={navMode && navCameraFollow}
         followUserMode={(navSpeed ?? 0) > 1.2 ? MapLibreGL.UserTrackingMode.FollowWithCourse : MapLibreGL.UserTrackingMode.FollowWithHeading}
         followZoomLevel={(navSpeed ?? 0) > 20 ? 15.5 : (navSpeed ?? 0) > 9 ? 16.2 : 17}
@@ -1866,9 +1902,9 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           <MapLibreGL.CircleLayer
             id="poi-circle"
             style={{
-              circleRadius: ['case', ['==', ['get', 'type'], 'peak'], 9, 8],
-              circleColor: ['match', ['get', 'type'], 'trail', '#f97316', 'water', '#3b82f6', 'trailhead', '#22c55e', 'viewpoint', '#a855f7', 'peak', '#92400e', 'hot_spring', '#f97316', 'fuel', '#ea580c', 'propane', '#f97316', 'dump', '#a16207', 'shower', '#06b6d4', 'laundromat', '#06b6d4', 'lodging', '#6366f1', 'food', '#06b6d4', 'grocery', '#06b6d4', 'mechanic', '#f97316', 'parking', '#d97706', 'attraction', '#0ea5e9', '#6b7280'],
-              circleOpacity: 0.9, circleStrokeWidth: 1.5, circleStrokeColor: '#fff',
+              circleRadius: ['case', ['==', ['get', 'type'], 'peak'], 9.5, 8.5],
+              circleColor: ['match', ['get', 'type'], 'trail', '#f97316', 'water', '#0284c7', 'trailhead', '#22c55e', 'viewpoint', '#a855f7', 'peak', '#92400e', 'hot_spring', '#f97316', 'fuel', '#ea580c', 'propane', '#f97316', 'dump', '#a16207', 'shower', '#06b6d4', 'laundromat', '#0891b2', 'lodging', '#6366f1', 'food', '#0ea5e9', 'grocery', '#06b6d4', 'mechanic', '#f97316', 'parking', '#d97706', 'attraction', '#0ea5e9', 'camping', '#16a34a', 'hardware', '#f59e0b', 'medical', '#ef4444', 'parts', '#f97316', 'wifi', '#2563eb', '#3b82f6'],
+              circleOpacity: 0.92, circleStrokeWidth: 2, circleStrokeColor: '#fff',
             }}
           />
           <MapLibreGL.SymbolLayer
@@ -1892,6 +1928,11 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
                 'mechanic', POI_CODES.mechanic,
                 'parking', POI_CODES.parking,
                 'attraction', POI_CODES.attraction,
+                'camping', POI_CODES.camping,
+                'hardware', POI_CODES.hardware,
+                'medical', POI_CODES.medical,
+                'parts', POI_CODES.parts,
+                'wifi', POI_CODES.wifi,
                 'P'],
               textSize: 9.5,
               textFont: ['Noto Sans Medium'],
@@ -2013,7 +2054,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       {showLandOverlay && (
         <MapLibreGL.RasterSource
           id="land-overlay"
-          tileUrlTemplates={['https://trailhead-production-2049.up.railway.app/api/land-tile/{z}/{y}/{x}']}
+          tileUrlTemplates={[`${API_BASE_URL}/api/land-tile/{z}/{y}/{x}`]}
           tileSize={256}
           minZoomLevel={4}
           maxZoomLevel={15}
@@ -2149,7 +2190,12 @@ function poiColor(type: string): string {
     case 'mechanic': return '#f97316';
     case 'parking': return '#d97706';
     case 'attraction': return '#0ea5e9';
-    default: return '#6b7280';
+    case 'camping': return '#16a34a';
+    case 'hardware': return '#f59e0b';
+    case 'medical': return '#ef4444';
+    case 'parts': return '#f97316';
+    case 'wifi': return '#2563eb';
+    default: return '#3b82f6';
   }
 }
 

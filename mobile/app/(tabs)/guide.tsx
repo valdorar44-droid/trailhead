@@ -9,13 +9,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import TourTarget from '@/components/TourTarget';
 import PaywallModal from '@/components/PaywallModal';
+import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
 import { useStore } from '@/lib/store';
-import { api, PaywallError, type ExplorePlaceProfile, type ExploreSourcePackItem } from '@/lib/api';
+import { api, PaywallError, type ExplorePlaceProfile, type ExploreSourcePackItem, type OsmPoi } from '@/lib/api';
 import { storage } from '@/lib/storage';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 import { playTrailheadVoice, stopTrailheadVoice } from '@/lib/voice';
 
 const EXPLORE_CACHE_KEY = 'trailhead_explore_catalog_v1';
+const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
 
 const WMO_ICON: Record<number, keyof typeof Ionicons.glyphMap> = {
   0: 'sunny-outline', 1: 'partly-sunny-outline', 2: 'partly-sunny-outline', 3: 'cloud-outline',
@@ -82,6 +84,11 @@ function sentenceDurationMs(sentence: string) {
   return Math.max(2200, Math.min(9500, words * 360));
 }
 
+function mediaUrl(url?: string | null) {
+  if (!url) return '';
+  return url.startsWith('/') ? `${API_BASE}${url}` : url;
+}
+
 export default function GuideScreen() {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
@@ -90,6 +97,7 @@ export default function GuideScreen() {
   const activeTrip = useStore(st => st.activeTrip);
   const setActiveTrip = useStore(st => st.setActiveTrip);
   const userLoc = useStore(st => st.userLoc);
+  const weatherUnitMode = useStore(st => st.weatherUnitMode);
   const setPendingNavigatePlace = useStore(st => st.setPendingNavigatePlace);
   const [guide, setGuide] = useState<Record<string, string>>({});
   const [guideLoading, setGuideLoading] = useState(false);
@@ -104,9 +112,12 @@ export default function GuideScreen() {
   const [exploreCategory, setExploreCategory] = useState('All');
   const [profileReadMode, setProfileReadMode] = useState<'summary' | 'story'>('summary');
   const [explorePlaces, setExplorePlaces] = useState<ExplorePlaceProfile[]>([]);
+  const [liveExplorePlaces, setLiveExplorePlaces] = useState<OsmPoi[]>([]);
   const [exploreLoading, setExploreLoading] = useState(false);
+  const [liveExploreLoading, setLiveExploreLoading] = useState(false);
   const [exploreError, setExploreError] = useState('');
   const [selectedExplore, setSelectedExplore] = useState<ExplorePlaceProfile | null>(null);
+  const [selectedLivePlace, setSelectedLivePlace] = useState<OsmPoi | null>(null);
   const [paywallVisible, setPaywallVisible] = useState(false);
   const [paywallCode, setPaywallCode] = useState('');
   const [paywallMessage, setPaywallMessage] = useState('');
@@ -141,6 +152,26 @@ export default function GuideScreen() {
   }, []);
 
   useEffect(() => {
+    if (exploreMode !== 'nearby' || !userLoc) {
+      setLiveExplorePlaces([]);
+      return;
+    }
+    let cancelled = false;
+    setLiveExploreLoading(true);
+    api.getNearbyPlaces(userLoc.lat, userLoc.lng, 35, 'food,grocery,fuel,lodging,attraction,hardware,mechanic,medical,camping')
+      .then(places => {
+        if (!cancelled) setLiveExplorePlaces(places.slice(0, 18));
+      })
+      .catch(() => {
+        if (!cancelled) setLiveExplorePlaces([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLiveExploreLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [exploreMode, userLoc?.lat, userLoc?.lng]);
+
+  useEffect(() => {
     if (!activeTrip) {
       setGuide({});
       setWeatherByWp({});
@@ -162,7 +193,7 @@ export default function GuideScreen() {
       const results: Record<string, any> = {};
       Promise.allSettled(wpsWithCoords.map(async wp => {
         try {
-          const data = await api.getWeather(wp.lat!, wp.lng!, 3);
+          const data = await api.getWeather(wp.lat!, wp.lng!, 3, weatherUnitMode);
           results[wp.name] = data;
         } catch {}
       })).finally(() => {
@@ -170,7 +201,7 @@ export default function GuideScreen() {
         setWeatherLoading(false);
       });
     }
-  }, [activeTrip?.trip_id]);
+  }, [activeTrip?.trip_id, weatherUnitMode]);
 
   const waypoints = useMemo(() => activeTrip?.plan.waypoints.filter(w => w.lat && w.lng) ?? [], [activeTrip?.trip_id]);
   const categories = useMemo(() => {
@@ -440,6 +471,33 @@ export default function GuideScreen() {
               ))}
             </ScrollView>
 
+            {exploreMode === 'nearby' && (
+              <View style={s.livePlacesBlock}>
+                <View style={s.livePlacesTop}>
+                  <Text style={s.livePlacesTitle}>LIVE PLACES NEAR YOU</Text>
+                  {liveExploreLoading && <ActivityIndicator color={C.orange} size="small" />}
+                </View>
+                {liveExplorePlaces.map(place => (
+                  <TouchableOpacity key={place.id} style={s.livePlaceRow} activeOpacity={0.86} onPress={() => setSelectedLivePlace(place)}>
+                    {place.photo_url ? (
+                      <Image source={{ uri: mediaUrl(place.photo_url) }} style={s.livePlacePhoto} resizeMode="cover" />
+                    ) : (
+                      <View style={s.livePlaceIcon}>
+                        <Ionicons name="business-outline" size={18} color={C.orange} />
+                      </View>
+                    )}
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={s.livePlaceName} numberOfLines={1}>{place.name}</Text>
+                      <Text style={s.livePlaceMeta} numberOfLines={1}>
+                        {place.subtype || place.type}{place.rating ? ` · ${Number(place.rating).toFixed(1)}` : ''}{place.open_now === true ? ' · Open' : place.open_now === false ? ' · Closed' : ''}
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-up-outline" size={16} color={C.text3} />
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
             {exploreLoading && (
               <View style={s.loadRow}>
                 <ActivityIndicator color={C.orange} />
@@ -607,6 +665,10 @@ export default function GuideScreen() {
               const lo = Math.round(w.daily.temperature_2m_min[0] ?? 0);
               const rain = w.daily.precipitation_sum[0] ?? 0;
               const wind = Math.round(w.daily.windspeed_10m_max[0] ?? 0);
+              const units = w.trailhead_units;
+              const tempLabel = units?.temperature_label ?? '°';
+              const windLabel = units?.wind_label ?? 'mph';
+              const rainLabel = units?.precipitation_label ?? '"';
               return (
                 <View key={i} style={s.weatherCard}>
                   <View style={s.weatherCardTop}>
@@ -621,16 +683,16 @@ export default function GuideScreen() {
                   </View>
                   <View style={s.weatherStatsRow}>
                     <View style={s.weatherStat}>
-                      <Text style={s.weatherStatVal}>{hi}°/{lo}°</Text>
+                      <Text style={s.weatherStatVal}>{hi}{tempLabel}/{lo}{tempLabel}</Text>
                       <Text style={s.weatherStatLabel}>HI/LO</Text>
                     </View>
                     <View style={s.weatherStat}>
-                      <Text style={s.weatherStatVal}>{wind}mph</Text>
+                      <Text style={s.weatherStatVal}>{wind}{windLabel}</Text>
                       <Text style={s.weatherStatLabel}>WIND</Text>
                     </View>
                     {rain > 0 && (
                       <View style={s.weatherStat}>
-                        <Text style={[s.weatherStatVal, { color: '#38bdf8' }]}>{rain.toFixed(1)}"</Text>
+                        <Text style={[s.weatherStatVal, { color: '#38bdf8' }]}>{rain.toFixed(units?.mode === 'metric' ? 0 : 1)}{rainLabel}</Text>
                         <Text style={s.weatherStatLabel}>RAIN</Text>
                       </View>
                     )}
@@ -649,11 +711,23 @@ export default function GuideScreen() {
         onClose={() => setPaywallVisible(false)}
       />
 
+      <PremiumPlaceSheet
+        place={selectedLivePlace}
+        visible={!!selectedLivePlace}
+        initialStage="half"
+        onClose={() => setSelectedLivePlace(null)}
+        onNavigate={place => {
+          setPendingNavigatePlace({ lat: place.lat, lng: place.lng, name: place.name });
+          setSelectedLivePlace(null);
+          router.push('/(tabs)/map');
+        }}
+      />
+
       <Modal visible={!!selectedExplore} animationType="slide" onRequestClose={() => setSelectedExplore(null)}>
         <SafeAreaView style={s.modal}>
           {selectedExplore && (
             <>
-              <View style={[s.profileModalHeader, { paddingTop: Math.max(10, insets.top ? 4 : 10) }]}>
+              <View style={[s.profileModalHeader, { paddingTop: Math.max(insets.top + 6, 14) }]}>
                 <View style={{ flex: 1 }}>
                   <Text style={s.profileModalKicker}>GUIDE CARD</Text>
                   <Text style={s.profileModalName} numberOfLines={1}>{selectedExplore.summary.title}</Text>
@@ -908,6 +982,14 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   categoryChipActive: { borderColor: C.orange, backgroundColor: C.orangeGlow },
   categoryText: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '800' },
   categoryTextActive: { color: C.orange },
+  livePlacesBlock: { backgroundColor: C.glassStrong, borderWidth: 1, borderColor: C.border, borderRadius: 16, padding: 10, gap: 8 },
+  livePlacesTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 2 },
+  livePlacesTitle: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
+  livePlaceRow: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: C.border, backgroundColor: C.glass, borderRadius: 13, padding: 8 },
+  livePlacePhoto: { width: 46, height: 46, borderRadius: 11, backgroundColor: C.s2 },
+  livePlaceIcon: { width: 46, height: 46, borderRadius: 11, backgroundColor: C.s1, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center' },
+  livePlaceName: { color: C.text, fontSize: 13, fontWeight: '900' },
+  livePlaceMeta: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 3 },
   exploreCard: { backgroundColor: C.s2, borderRadius: 16, borderWidth: 1, borderColor: C.border, overflow: 'hidden' },
   exploreCardLead: { borderColor: C.orange + '45' },
   exploreImageWrap: { height: 154, backgroundColor: C.s1 },

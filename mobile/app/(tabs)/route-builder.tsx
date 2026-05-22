@@ -2828,7 +2828,11 @@ export default function RouteBuilderScreen() {
       ? 18 + bottomInset
       : 72 + bottomInset;
     return (
-      <TrailheadSheet handle={false} style={[s.wizardCard, fullScreen && s.wizardCardFull]} contentStyle={s.routeSheetContent}>
+      <TrailheadSheet
+        handle={false}
+        style={[s.wizardCard, fullScreen && s.wizardCardFull]}
+        contentStyle={[s.routeSheetContent, fullScreen && s.routeSheetFullContent]}
+      >
         <View style={s.wizardHeader}>
           <View>
             <Text style={s.wizardEyebrow}>ROUTE BUILDER</Text>
@@ -3025,7 +3029,7 @@ export default function RouteBuilderScreen() {
 
         {buildingFramework && <RouteBuildStatus C={C} message={frameworkStatus} />}
 
-        <View style={[s.wizardNav, fullScreen && [s.wizardNavDock, { marginBottom: dockMarginBottom }]]}>
+        <View style={[s.wizardNav, fullScreen && [s.wizardNavDock, wizardStep === 0 && s.wizardNavStepOne, { marginBottom: dockMarginBottom }]]}>
           <TouchableOpacity style={[s.wizardNavBtn, wizardStep === 0 && { opacity: 0.45 }]} onPress={() => setWizardStep(step => Math.max(0, step - 1))} disabled={wizardStep === 0}>
             <Ionicons name="chevron-back" size={13} color={C.text3} />
             <Text style={s.wizardNavText}>BACK</Text>
@@ -3654,6 +3658,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     marginBottom: 116,
   },
   routeSheetContent: { padding: 14, gap: 13 },
+  routeSheetFullContent: { flex: 1 },
   workspaceHandleArea: { paddingTop: 8, paddingHorizontal: 18, paddingBottom: 6, gap: 6 },
   workspaceHandle: { width: 58, height: 5, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.24)', alignSelf: 'center' },
   workspaceHandleSummary: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
@@ -3953,6 +3958,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   wizardHelp: { color: C.text3, fontSize: 14, lineHeight: 20, marginTop: 2 },
   wizardNav: { flexDirection: 'row', gap: 9, marginTop: 16, paddingBottom: 6 },
   wizardNavDock: { marginTop: 'auto', paddingTop: 10, paddingBottom: 0 },
+  wizardNavStepOne: { borderTopWidth: 1, borderColor: C.border, paddingTop: 14 },
   wizardNavBtn: { minHeight: 50, minWidth: 96, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderWidth: 1, borderColor: C.border, borderRadius: 16, backgroundColor: C.s2 },
   wizardNavText: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900' },
   wizardNextBtn: {

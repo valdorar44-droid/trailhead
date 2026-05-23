@@ -462,6 +462,8 @@ export interface CampsiteDetail extends CampsitePin {
   photos: string[]; amenities: string[]; site_types: string[];
   activities: string[]; phone?: string; campsites_count: number;
   admin_edited?: boolean;
+  reviews?: PlaceReview[];
+  media_source?: 'trailhead' | 'ridb' | 'blm' | 'osm' | 'google' | 'mixed' | string;
 }
 export interface GasStation {
   id: number | string; name: string; lat: number; lng: number;
@@ -589,9 +591,20 @@ export interface PlacePhoto {
   url: string;
   credit?: string;
   source?: string;
+  caption?: string;
+}
+export interface PlaceReview {
+  authorName: string;
+  rating?: number;
+  relativeTime?: string;
+  text?: string;
+  profileUrl?: string;
+  photoUrl?: string;
+  source?: string;
 }
 export interface PlaceDetail extends OsmPoi {
   photos?: PlacePhoto[];
+  reviews?: PlaceReview[];
   hours?: string[];
   international_phone?: string;
   source_footer?: string;

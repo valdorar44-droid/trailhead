@@ -6,6 +6,7 @@ import RouteSearchModal from '@/components/RouteSearchModal';
 import OfflineModal from '@/components/NativeMap/OfflineModal';
 import TourTarget from '@/components/TourTarget';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
+import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
 import {
   TrailheadButton,
   TrailheadButtonDock,
@@ -62,6 +63,11 @@ const WebView: any = Platform.OS === 'web' ? View : require('react-native-webvie
 const USE_IOS_NATIVE_NAV_ENGINE = Platform.OS === 'ios' && hasNativeNavigationEngine();
 const STADIA_API_KEY = process.env.EXPO_PUBLIC_STADIA_API_KEY ?? '4d2b6230-f506-42ca-b556-35f419510aa2';
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
+
+function mediaUrl(url?: string | null) {
+  if (!url) return '';
+  return url.startsWith('/') ? `${API_BASE_URL}${url}` : url;
+}
 
 // ─── US State bounding boxes for offline download ─────────────────────────────
 
@@ -2855,7 +2861,7 @@ function MapScreen() {
   const OVR = useMemo(() => overlayPalette(C), [C]);
   const s = useMemo(() => makeStyles(C), [C]);
   const insets = useSafeAreaInsets();
-  const { height: windowHeight } = useWindowDimensions();
+  const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const bottomInset = Math.max(insets.bottom, Platform.OS === 'android' ? 16 : 18);
   const modalSheetPad = useMemo(() => ({ paddingBottom: bottomInset + 20 }), [bottomInset]);
   const filterSheetHeight = useMemo(() => {
@@ -2993,6 +2999,7 @@ function MapScreen() {
   const [selectedPlace, setSelectedPlace] = useState<SearchPlace | null>(null);
   const [campDetail,    setCampDetail]    = useState<CampsiteDetail | null>(null);
   const [showCampDetail,setShowCampDetail] = useState(false);
+  const [campGalleryIndex, setCampGalleryIndex] = useState<number | null>(null);
   const [showCampEdit, setShowCampEdit] = useState(false);
   const [campEditMode, setCampEditMode] = useState<'suggest' | 'admin'>('suggest');
   const [campEditDraft, setCampEditDraft] = useState<CampEditDraft | null>(null);
@@ -5401,6 +5408,7 @@ function MapScreen() {
         campsites_count: 0,
       } as any;
     }
+    detail = await enrichCampDetailWithGoogle(detail, selectedCamp);
     const canOpen = await openCampInsight(selectedCamp, detail);
     if (!canOpen) {
       setLoadingDetail(false);
@@ -5426,10 +5434,36 @@ function MapScreen() {
     setSelectedCamp(null);
     setCampDetail(null);
     setCampInsight(null);
+    setCampGalleryIndex(null);
     setCampFullness(null);
     setCampWeather(null);
     setShowFieldReportForm(false);
     resetFieldReportForm();
+  }
+
+  async function enrichCampDetailWithGoogle(detail: CampsiteDetail, camp: CampsitePin): Promise<CampsiteDetail> {
+    const source = String(camp.source || detail.source || '').toLowerCase();
+    const id = camp.provider_place_id || camp.place_id || (String(camp.id || '').startsWith('google:') ? String(camp.id).replace(/^google:/, '') : '');
+    if (!id || source !== 'google') return detail;
+    try {
+      const place = await api.getPlaceDetail('google', id);
+      const googlePhotos = (place.photos ?? []).map(photo => mediaUrl(photo.url)).filter(Boolean);
+      return {
+        ...detail,
+        phone: detail.phone || place.phone,
+        address: detail.address || place.address,
+        rating: detail.rating ?? place.rating,
+        rating_count: detail.rating_count ?? place.rating_count,
+        url: detail.url || place.website || place.google_maps_uri || '',
+        photos: detail.photos?.length ? detail.photos : googlePhotos,
+        reviews: place.reviews ?? detail.reviews,
+        media_source: detail.photos?.length ? 'mixed' : 'google',
+        verified_source: detail.verified_source || 'Google Places',
+        source: detail.source || 'google',
+      };
+    } catch {
+      return detail;
+    }
   }
 
   function openCampEdit(mode: 'suggest' | 'admin') {
@@ -9069,12 +9103,114 @@ function MapScreen() {
         }}
       />
 
+      <PremiumPlaceSheet
+        place={tappedPoi ? {
+          ...tappedPoi,
+          source_label: tappedPoi.source_label || (tappedPoi.source === 'google' ? 'Google Places' : 'Map source'),
+          summary: (tappedPoi as any).summary || tappedPoi.address || `${cleanDisplayLabel(tappedPoi.type)} selected from the map.`,
+        } as any : null}
+        visible={!!tappedPoi && !navMode}
+        initialStage="full"
+        onClose={() => setTappedPoi(null)}
+        onNavigate={place => {
+          setTappedPoi(null);
+          navigateToCamp(place);
+        }}
+        onSave={place => {
+          addSavedPlace({
+            id: `place-${Date.now()}`,
+            name: place.name,
+            lat: place.lat,
+            lng: place.lng,
+            icon: tappedPoi?.type === 'water' ? 'water' : tappedPoi?.type === 'fuel' ? 'fuel' : tappedPoi?.type === 'trailhead' ? 'flag' : 'pin',
+            note: place.note || tappedPoi?.source_label || tappedPoi?.source || 'Saved map place',
+            createdAt: Date.now(),
+          });
+          setQuickToast('Place saved');
+          setTimeout(() => setQuickToast(''), 2200);
+        }}
+        onReport={() => {
+          setTappedPoi(null);
+          setQuickReport(true);
+        }}
+        onNearbyCamps={place => {
+          setTappedPoi(null);
+          const bounds = { n: place.lat + 0.35, s: place.lat - 0.35, e: place.lng + 0.35, w: place.lng - 0.35, zoom: 11 };
+          setQuickToast('Searching camps nearby');
+          setTimeout(() => setQuickToast(''), 2500);
+          setTimeout(() => {
+            viewportRef.current = bounds;
+            nativeMapRef.current?.flyTo(place.lat, place.lng, 11);
+            loadCampsInArea(bounds, activeFilters);
+          }, 160);
+        }}
+        onAddToRoute={place => {
+          setTappedPoi(null);
+          setSearchRouteCard({ name: place.name, lat: place.lat, lng: place.lng, dist: userLoc ? haversineKm(userLoc.lat, userLoc.lng, place.lat, place.lng) : null });
+          setShowSearch(true);
+        }}
+      />
+
+      <PremiumPlaceSheet
+        place={tappedTileSpot ? {
+          id: `tile:${tappedTileSpot.kind}:${tappedTileSpot.lat}:${tappedTileSpot.lng}`,
+          name: tappedTileSpot.name || (tappedTileSpot.kind === 'camp_pitch' ? 'Dispersed Camping Spot' : tappedTileSpot.kind === 'shelter' ? 'Trail Shelter' : 'Campground'),
+          lat: tappedTileSpot.lat,
+          lng: tappedTileSpot.lng,
+          type: 'camp',
+          subtype: tappedTileSpot.kind === 'camp_pitch' ? 'Dispersed / Primitive Spot' : tappedTileSpot.kind === 'shelter' ? 'Trail Shelter' : 'Campground',
+          source: 'offline',
+          source_label: 'Map tile',
+          summary: 'Map-sourced camp feature. Verify current access, rules, road conditions, and stay limits before relying on it.',
+        } as any : null}
+        visible={!!tappedTileSpot && !navMode}
+        initialStage="full"
+        onClose={() => setTappedTileSpot(null)}
+        onNavigate={place => {
+          setTappedTileSpot(null);
+          navigateToCamp(place);
+        }}
+        onSave={place => {
+          addSavedPlace({
+            id: `place-${Date.now()}`,
+            name: place.name,
+            lat: place.lat,
+            lng: place.lng,
+            icon: 'camp',
+            note: place.note || 'Saved camp feature',
+            createdAt: Date.now(),
+          });
+          setQuickToast('Camp saved');
+          setTimeout(() => setQuickToast(''), 2200);
+        }}
+        onReport={() => {
+          setTappedTileSpot(null);
+          setQuickReport(true);
+        }}
+        onNearbyCamps={place => {
+          setTappedTileSpot(null);
+          const bounds = { n: place.lat + 0.35, s: place.lat - 0.35, e: place.lng + 0.35, w: place.lng - 0.35, zoom: 11 };
+          setQuickToast('Searching camps nearby');
+          setTimeout(() => setQuickToast(''), 2500);
+          setTimeout(() => {
+            viewportRef.current = bounds;
+            nativeMapRef.current?.flyTo(place.lat, place.lng, 11);
+            loadCampsInArea(bounds, activeFilters);
+          }, 160);
+        }}
+        onAddToRoute={place => {
+          setTappedTileSpot(null);
+          setSearchRouteCard({ name: place.name, lat: place.lat, lng: place.lng, dist: userLoc ? haversineKm(userLoc.lat, userLoc.lng, place.lat, place.lng) : null });
+          setShowSearch(true);
+        }}
+      />
+
       {/* ── Campsite quick card ── */}
       {selectedCamp && !navMode && (
         <View style={s.quickCard}>
           <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
             {/* Photo / placeholder */}
-            <View style={s.quickCardImg}>
+            <TouchableOpacity style={s.quickCardImg} activeOpacity={selectedCamp.photo_url ? 0.88 : 1} onPress={() => selectedCamp.photo_url && setCampGalleryIndex(0)}>
               {selectedCamp.photo_url
                 ? <Image source={{ uri: selectedCamp.photo_url }} style={s.quickCardPhoto} resizeMode="cover" />
                 : <View style={[s.quickCardPhotoPlaceholder, { backgroundColor: landColor(selectedCamp.land_type).bg }]}>
@@ -9084,7 +9220,7 @@ function MapScreen() {
                     </Text>
                   </View>
               }
-            </View>
+            </TouchableOpacity>
             <View style={s.quickCardBody}>
             {/* Close + name + heart */}
             <View style={s.quickCardHeader}>
@@ -9278,7 +9414,9 @@ function MapScreen() {
               {(campDetail.photos ?? []).length > 0 ? (
                 <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false} style={s.photoGallery}>
                   {(campDetail.photos ?? []).map((uri, i) => (
-                    <Image key={i} source={{ uri }} style={s.galleryPhoto} resizeMode="cover" />
+                    <TouchableOpacity key={i} activeOpacity={0.9} onPress={() => setCampGalleryIndex(i)}>
+                      <Image source={{ uri: mediaUrl(uri) }} style={[s.galleryPhoto, { width: windowWidth }]} resizeMode="cover" />
+                    </TouchableOpacity>
                   ))}
                 </ScrollView>
               ) : (
@@ -9463,6 +9601,22 @@ function MapScreen() {
                         ))}
                       </View>
                     ) : null}
+                  </View>
+                )}
+
+                {(campDetail.reviews ?? []).length > 0 && (
+                  <View style={s.detailSection}>
+                    <Text style={s.detailSectionTitle}>GOOGLE REVIEWS</Text>
+                    {(campDetail.reviews ?? []).slice(0, 3).map((review, idx) => (
+                      <View key={`${review.authorName}-${idx}`} style={s.campReviewCard}>
+                        <View style={s.campReviewTop}>
+                          <Text style={s.campReviewAuthor} numberOfLines={1}>{review.authorName || 'Google user'}</Text>
+                          <Text style={s.campReviewRating}>{review.rating ? `${review.rating}/5` : 'Google'}</Text>
+                        </View>
+                        {!!review.relativeTime && <Text style={s.campReviewMeta}>{review.relativeTime}</Text>}
+                        {!!review.text && <Text style={s.campReviewText} numberOfLines={4}>{review.text}</Text>}
+                      </View>
+                    ))}
                   </View>
                 )}
 
@@ -9689,6 +9843,18 @@ function MapScreen() {
           )}
         </View>
       </Modal>
+
+      <TrailheadPhotoGallery
+        visible={campGalleryIndex !== null}
+        photos={(campDetail?.photos?.length
+          ? campDetail.photos.map(url => ({ url: mediaUrl(url), source: campDetail.media_source || campDetail.verified_source || campDetail.source || 'Trailhead' }))
+          : selectedCamp?.photo_url
+            ? [{ url: mediaUrl(selectedCamp.photo_url), source: selectedCamp.verified_source || selectedCamp.source || 'Trailhead' }]
+            : []) as TrailheadGalleryPhoto[]}
+        initialIndex={campGalleryIndex ?? 0}
+        title={campDetail?.name || selectedCamp?.name || 'Camp'}
+        onClose={() => setCampGalleryIndex(null)}
+      />
 
       <Modal visible={showCampEdit} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowCampEdit(false)}>
         <SafeAreaView style={s.campEditModal}>
@@ -11099,62 +11265,6 @@ function MapScreen() {
         </Modal>
       )}
 
-      {/* ── Tile-layer camp/spot tap mini sheet ── */}
-      {tappedTileSpot && (
-        <Modal visible transparent animationType="slide" onRequestClose={() => setTappedTileSpot(null)}>
-          <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setTappedTileSpot(null)}>
-            <TrailheadSheet handle={false} style={[s.wpSheet, modalSheetPad]} contentStyle={{ padding: 0 }}>
-              <View style={s.daySheetHandle} />
-              <View style={s.wpSheetHeader}>
-                <View style={[s.wpSheetTypeDot, {
-                  backgroundColor: tappedTileSpot.kind === 'camp_pitch' ? '#c4915a'
-                                 : tappedTileSpot.kind === 'shelter'    ? '#8b5cf6'
-                                 : '#14b8a6',
-                }]} />
-                <View style={{ flex: 1 }}>
-                  <Text style={s.wpSheetName} numberOfLines={2}>{tappedTileSpot.name || (
-                    tappedTileSpot.kind === 'camp_pitch' ? 'Dispersed Camping Spot' :
-                    tappedTileSpot.kind === 'shelter'    ? 'Trail Shelter' :
-                    'Campground'
-                  )}</Text>
-                  <Text style={s.wpSheetMeta}>
-                    {tappedTileSpot.kind === 'camp_pitch' ? 'Dispersed / Primitive Spot' :
-                     tappedTileSpot.kind === 'shelter'    ? 'Trail Shelter' :
-                     'Developed Campground'}
-                  </Text>
-                </View>
-              </View>
-              <View style={s.wpSheetActions}>
-                <TouchableOpacity
-                  style={s.wpSheetNavBtn}
-                  onPress={() => {
-                    setTappedTileSpot(null);
-                    navigateToCamp({ lat: tappedTileSpot.lat, lng: tappedTileSpot.lng, name: tappedTileSpot.name });
-                  }}
-                >
-                  <Ionicons name="navigate" size={14} color="#fff" />
-                  <Text style={s.wpSheetNavText}>NAVIGATE HERE</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[s.wpSheetDayBtn, { borderColor: '#ef4444' + '44' }]}
-                  onPress={() => {
-                    setTappedTileSpot(null);
-                    setQuickReport(true);
-                  }}
-                >
-                  <Ionicons name="warning-outline" size={14} color="#ef4444" />
-                  <Text style={[s.wpSheetDayText, { color: '#ef4444' }]}>REPORT SPOT</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={s.wpSheetDayBtn} onPress={() => setTappedTileSpot(null)}>
-                  <Ionicons name="close" size={14} color={OVR.text2} />
-                  <Text style={s.wpSheetDayText}>DISMISS</Text>
-                </TouchableOpacity>
-              </View>
-            </TrailheadSheet>
-          </TouchableOpacity>
-        </Modal>
-      )}
-
       {/* ── Gas station tap card ── */}
       {tappedGas && (
         <Modal visible transparent animationType="slide" onRequestClose={() => setTappedGas(null)}>
@@ -11174,88 +11284,6 @@ function MapScreen() {
                   <Text style={s.wpSheetNavText}>NAVIGATE HERE</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={s.wpSheetDayBtn} onPress={() => setTappedGas(null)}>
-                  <Ionicons name="close" size={14} color={OVR.text2} />
-                  <Text style={s.wpSheetDayText}>DISMISS</Text>
-                </TouchableOpacity>
-              </View>
-            </TrailheadSheet>
-          </TouchableOpacity>
-        </Modal>
-      )}
-
-      {/* ── POI tap card ── */}
-      {tappedPoi && (
-        <Modal visible transparent animationType="slide" onRequestClose={() => setTappedPoi(null)}>
-          <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setTappedPoi(null)}>
-            <TrailheadSheet handle={false} style={[s.wpSheet, modalSheetPad]} contentStyle={{ padding: 0 }}>
-              <View style={s.daySheetHandle} />
-              <View style={s.wpSheetHeader}>
-                <View style={[s.wpSheetTypeDot, {
-                  backgroundColor: tappedPoi.type === 'water' ? '#3b82f6'
-                    : tappedPoi.type === 'trailhead' ? '#22c55e'
-                    : tappedPoi.type === 'viewpoint' ? '#a855f7'
-                    : tappedPoi.type === 'peak' ? '#92400e'
-                    : tappedPoi.type === 'hot_spring' ? '#f97316' : '#6b7280',
-                }]} />
-                <View style={{ flex: 1 }}>
-                  <Text style={s.wpSheetName} numberOfLines={2}>{tappedPoi.name || tappedPoi.type}</Text>
-                  <Text style={s.wpSheetMeta}>
-                    {tappedPoi.type === 'water' ? 'Water Source'
-                      : tappedPoi.type === 'trailhead' ? 'Trailhead'
-                      : tappedPoi.type === 'viewpoint' ? 'Viewpoint'
-                      : tappedPoi.type === 'peak' ? 'Summit / Peak'
-                      : tappedPoi.type === 'hot_spring' ? 'Hot Spring'
-                      : 'Point of Interest'}
-                  </Text>
-                </View>
-              </View>
-              <View style={s.wpSheetActions}>
-                <TouchableOpacity style={s.wpSheetNavBtn} onPress={() => { setTappedPoi(null); navigateToCamp(tappedPoi); }}>
-                  <Ionicons name="navigate" size={14} color="#fff" />
-                  <Text style={s.wpSheetNavText}>NAVIGATE HERE</Text>
-                </TouchableOpacity>
-                {tappedPoi.type === 'trailhead' && (
-                  <TouchableOpacity
-                    style={[s.wpSheetDayBtn, { borderColor: C.orange + '44' }]}
-                    onPress={() => {
-                      const poi = tappedPoi;
-                      setTappedPoi(null);
-                      const bounds = { n: poi.lat + 0.35, s: poi.lat - 0.35, e: poi.lng + 0.35, w: poi.lng - 0.35, zoom: 11 };
-                      setQuickToast('Searching camps near trailhead');
-                      setTimeout(() => setQuickToast(''), 2500);
-                      setTimeout(() => {
-                        viewportRef.current = bounds;
-                        setShowLayerSheet(false);
-                        setTimeout(() => loadCampsInArea(bounds, activeFilters), 120);
-                      }, 220);
-                    }}
-                  >
-                    <Ionicons name="bonfire-outline" size={14} color={C.orange} />
-                    <Text style={[s.wpSheetDayText, { color: C.orange }]}>NEARBY CAMPS</Text>
-                  </TouchableOpacity>
-                )}
-                {tappedPoi.type === 'trailhead' && (
-                  <TouchableOpacity
-                    style={[s.wpSheetDayBtn, { borderColor: '#22c55e44' }]}
-                    onPress={() => {
-                      const poi = tappedPoi;
-                      setTappedPoi(null);
-                      setPinType('trailhead');
-                      setPendingPin({ lat: poi.lat, lng: poi.lng });
-                      setPinName(poi.name || 'Trailhead');
-                      setPinDescription('');
-                      setPinDetails({ parking: 'Unknown', signage: 'Unknown' });
-                    }}
-                  >
-                    <Ionicons name="trail-sign-outline" size={14} color="#22c55e" />
-                    <Text style={[s.wpSheetDayText, { color: '#22c55e' }]}>SAVE TRAIL</Text>
-                  </TouchableOpacity>
-                )}
-                <TouchableOpacity style={[s.wpSheetDayBtn, { borderColor: C.orange + '44' }]} onPress={() => { setTappedPoi(null); setQuickReport(true); }}>
-                  <Ionicons name="warning-outline" size={14} color={C.orange} />
-                  <Text style={[s.wpSheetDayText, { color: C.orange }]}>REPORT</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={s.wpSheetDayBtn} onPress={() => setTappedPoi(null)}>
                   <Ionicons name="close" size={14} color={OVR.text2} />
                   <Text style={s.wpSheetDayText}>DISMISS</Text>
                 </TouchableOpacity>
@@ -12904,6 +12932,12 @@ const makeStyles = (C: ColorPalette) => {
   sectionTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, borderBottomWidth: 1, borderColor: C.border, marginBottom: 12 },
   sectionEditText: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900', paddingBottom: 6 },
   detailDesc: { color: C.text, fontSize: 14, lineHeight: 22 },
+  campReviewCard: { borderWidth: 1, borderColor: C.border, backgroundColor: C.s1, borderRadius: 12, padding: 11, gap: 5, marginBottom: 8 },
+  campReviewTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  campReviewAuthor: { flex: 1, color: C.text, fontSize: 12, fontWeight: '800' },
+  campReviewRating: { color: C.gold, fontSize: 10, fontFamily: mono, fontWeight: '900' },
+  campReviewMeta: { color: C.text3, fontSize: 10, fontFamily: mono },
+  campReviewText: { color: C.text2, fontSize: 12, lineHeight: 17 },
   amenityGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   amenityItem: {
     paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10,

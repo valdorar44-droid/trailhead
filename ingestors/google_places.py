@@ -88,6 +88,11 @@ DETAIL_FIELDS = ",".join([
     "regularOpeningHours.weekdayDescriptions",
     "photos.name",
     "photos.authorAttributions",
+    "reviews.authorAttribution",
+    "reviews.rating",
+    "reviews.relativePublishTimeDescription",
+    "reviews.text",
+    "reviews.originalText",
     "googleMapsUri",
     "websiteUri",
     "nationalPhoneNumber",
@@ -273,9 +278,26 @@ async def get_google_place_detail(place_id: str) -> dict | None:
             "source": "Google",
         })
     hours = place.get("currentOpeningHours") or place.get("regularOpeningHours") or {}
+    reviews = []
+    for review in (place.get("reviews") or [])[:5]:
+        if not isinstance(review, dict):
+            continue
+        author = review.get("authorAttribution") or {}
+        text_obj = review.get("text") or review.get("originalText") or {}
+        text = text_obj.get("text") if isinstance(text_obj, dict) else ""
+        reviews.append({
+            "authorName": author.get("displayName") or "Google user",
+            "rating": review.get("rating"),
+            "relativeTime": review.get("relativePublishTimeDescription") or "",
+            "text": text or "",
+            "profileUrl": author.get("uri") or "",
+            "photoUrl": author.get("photoUri") or "",
+            "source": "Google",
+        })
     return {
         **summary,
         "photos": photos,
+        "reviews": reviews,
         "hours": hours.get("weekdayDescriptions") or [],
         "international_phone": place.get("internationalPhoneNumber") or "",
         "source_footer": "Place information from Google. Verify hours and availability before relying on them.",

@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api, type PlaceDetail } from '@/lib/api';
 import { useTheme, mono, type ColorPalette } from '@/lib/design';
 import { TrailheadButton, TrailheadButtonDock, TrailheadSheet } from '@/components/TrailheadUI';
+import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
 
 type Stage = 'full' | 'half' | 'peek';
 const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
@@ -100,6 +101,7 @@ export default function PremiumPlaceSheet({
   const [stage, setStage] = useState<Stage>(initialStage);
   const [detail, setDetail] = useState<PlaceDetail | null>(null);
   const [loading, setLoading] = useState(false);
+  const [galleryIndex, setGalleryIndex] = useState<number | null>(null);
   const dragY = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -109,6 +111,7 @@ export default function PremiumPlaceSheet({
     }
     setStage(initialStage);
     setDetail(null);
+    setGalleryIndex(null);
     const sid = sourceId(place);
     if (!sid) return;
     let cancelled = false;
@@ -157,7 +160,7 @@ export default function PremiumPlaceSheet({
 
   if (!visible || !place || !data) return null;
 
-  const photos = detail?.photos?.length
+  const photos: TrailheadGalleryPhoto[] = detail?.photos?.length
     ? detail.photos.map(photo => ({ ...photo, url: mediaUrl(photo.url) }))
     : data.photo_url
       ? [{ url: mediaUrl(data.photo_url), source: data.source_label || data.source || '' }]
@@ -212,7 +215,7 @@ export default function PremiumPlaceSheet({
             scrollEnabled={stage === 'full'}
             contentContainerStyle={s.content}
           >
-            <View style={s.hero}>
+            <TouchableOpacity style={s.hero} activeOpacity={hero ? 0.9 : 1} onPress={() => hero && setGalleryIndex(0)}>
               {hero ? (
                 <Image source={{ uri: hero }} style={s.heroImage} resizeMode="cover" />
               ) : (
@@ -225,7 +228,7 @@ export default function PremiumPlaceSheet({
                 <Text style={s.kicker}>{sourceLabel.toUpperCase()}</Text>
                 <Text style={s.title} numberOfLines={2}>{data.name}</Text>
               </View>
-            </View>
+            </TouchableOpacity>
 
             <View style={s.body}>
               {!!subtitle && <Text style={s.meta}>{subtitle}</Text>}
@@ -309,9 +312,27 @@ export default function PremiumPlaceSheet({
               {stage === 'full' && photos.length > 1 && (
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.photoRail}>
                   {photos.slice(1, 7).map((photo, idx) => (
-                    <Image key={`${photo.url}-${idx}`} source={{ uri: photo.url }} style={s.railPhoto} resizeMode="cover" />
+                    <TouchableOpacity key={`${photo.url}-${idx}`} activeOpacity={0.86} onPress={() => setGalleryIndex(idx + 1)}>
+                      <Image source={{ uri: photo.url }} style={s.railPhoto} resizeMode="cover" />
+                    </TouchableOpacity>
                   ))}
                 </ScrollView>
+              )}
+
+              {stage === 'full' && !!detail?.reviews?.length && (
+                <View style={s.section}>
+                  <Text style={s.sectionLabel}>GOOGLE REVIEWS</Text>
+                  {detail.reviews.slice(0, 3).map((review, idx) => (
+                    <View key={`${review.authorName}-${idx}`} style={s.reviewCard}>
+                      <View style={s.reviewTop}>
+                        <Text style={s.reviewAuthor} numberOfLines={1}>{review.authorName || 'Google user'}</Text>
+                        <Text style={s.reviewRating}>{review.rating ? `${review.rating}/5` : 'Google'}</Text>
+                      </View>
+                      {!!review.relativeTime && <Text style={s.reviewMeta}>{review.relativeTime}</Text>}
+                      {!!review.text && <Text style={s.reviewText} numberOfLines={4}>{review.text}</Text>}
+                    </View>
+                  ))}
+                </View>
               )}
 
               <View style={s.sourceFooter}>
@@ -325,6 +346,13 @@ export default function PremiumPlaceSheet({
           </ScrollView>
         )}
       </TrailheadSheet>
+      <TrailheadPhotoGallery
+        visible={galleryIndex !== null}
+        photos={photos}
+        initialIndex={galleryIndex ?? 0}
+        title={data.name}
+        onClose={() => setGalleryIndex(null)}
+      />
     </Animated.View>
   );
 }
@@ -369,6 +397,12 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   section: { marginTop: 4, borderTopWidth: 1, borderColor: C.border, paddingTop: 10 },
   sectionLabel: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8, marginBottom: 5 },
   sectionText: { color: C.text2, fontSize: 12, lineHeight: 18 },
+  reviewCard: { borderWidth: 1, borderColor: C.border, backgroundColor: C.s2, borderRadius: 14, padding: 11, gap: 5, marginBottom: 8 },
+  reviewTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  reviewAuthor: { flex: 1, color: C.text, fontSize: 12, fontWeight: '800' },
+  reviewRating: { color: C.gold, fontSize: 10, fontFamily: mono, fontWeight: '900' },
+  reviewMeta: { color: C.text3, fontSize: 10, fontFamily: mono },
+  reviewText: { color: C.text2, fontSize: 12, lineHeight: 17 },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 9, marginTop: 2 },
   secondaryBtn: { width: 45, height: 45, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: C.glassStrong, borderWidth: 1, borderColor: C.border },
   deepActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput,
   ActivityIndicator, Animated, Easing, Keyboard, Modal, Alert, Image, Platform,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -10,12 +11,20 @@ import * as Location from 'expo-location';
 import PaywallModal from '@/components/PaywallModal';
 import TourTarget from '@/components/TourTarget';
 import { TrailheadButton, TrailheadCard, TrailheadSheet, TrailheadTopBar } from '@/components/TrailheadUI';
+import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
 import { api, ApiError, CampFullness, Campsite, CampsiteDetail, CampsiteInsight, CampsitePin, ExcursionCandidate, GasStation, GeocodePlace, OsmPoi, PaywallError, TripResult, Waypoint, WeatherForecast } from '@/lib/api';
 import { loadAllPlacePoints } from '@/lib/offlinePlacePacks';
 import { deleteOfflineTrail, listOfflineTrails, type OfflineTrail } from '@/lib/offlineTrails';
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { useStore } from '@/lib/store';
 import { useTheme, mono, ColorPalette, RADIUS } from '@/lib/design';
+
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
+
+function mediaUrl(url?: string | null) {
+  if (!url) return '';
+  return url.startsWith('/') ? `${API_BASE_URL}${url}` : url;
+}
 
 type BuilderStopType = 'start' | 'fuel' | 'waypoint' | 'camp' | 'motel';
 type BuilderStop = {
@@ -772,6 +781,7 @@ export default function RouteBuilderScreen() {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
   const insets = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
   const bottomInset = Math.max(insets.bottom, Platform.OS === 'android' ? 0 : 0);
   const bottomSheetPad = Math.max(insets.bottom, Platform.OS === 'android' ? 16 : 18);
   const blurTint: 'dark' | 'light' = C.bg === '#050505' ? 'dark' : 'light';
@@ -837,6 +847,7 @@ export default function RouteBuilderScreen() {
   const [campFullness, setCampFullness] = useState<CampFullness | null>(null);
   const [campInsight, setCampInsight] = useState<CampsiteInsight | null>(null);
   const [showCampDetail, setShowCampDetail] = useState(false);
+  const [campGalleryIndex, setCampGalleryIndex] = useState<number | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [showNewRouteConfirm, setShowNewRouteConfirm] = useState(false);
   const [paywallVisible, setPaywallVisible] = useState(false);
@@ -1749,7 +1760,7 @@ export default function RouteBuilderScreen() {
     if (!selectedCamp) return;
     setDetailLoading(true);
     try {
-      const detail = await api.getCampsiteDetail(selectedCamp.id);
+      const detail = await enrichCampDetailWithGoogle(await api.getCampsiteDetail(selectedCamp.id), selectedCamp);
       const insight = await api.getCampsiteInsight({
         name: selectedCamp.name,
         lat: selectedCamp.lat,
@@ -1768,7 +1779,7 @@ export default function RouteBuilderScreen() {
         setPaywallMessage(e.message || 'Use credits or Explorer to open full campsite profiles. You can still add this camp to your route from the free preview.');
         setPaywallVisible(true);
       } else {
-        setCampDetail({
+        setCampDetail(await enrichCampDetailWithGoogle({
           ...selectedCamp,
           photos: selectedCamp.photo_url ? [selectedCamp.photo_url] : [],
           amenities: [],
@@ -1777,7 +1788,7 @@ export default function RouteBuilderScreen() {
           campsites_count: 0,
           source: selectedCamp.verified_source ?? selectedCamp.source,
           description: stripHtml(selectedCamp.description) || 'This camp has a route preview, but a full profile has not been built yet. You can still add it to the trip and replace it later from the route.',
-        } as CampsiteDetail);
+        } as CampsiteDetail, selectedCamp));
         setCampInsight(null);
         setShowCampDetail(true);
       }
@@ -1791,8 +1802,34 @@ export default function RouteBuilderScreen() {
     setSelectedCamp(null);
     setCampDetail(null);
     setCampInsight(null);
+    setCampGalleryIndex(null);
     setCampWeather(null);
     setCampFullness(null);
+  }
+
+  async function enrichCampDetailWithGoogle(detail: CampsiteDetail, camp: CampsitePin): Promise<CampsiteDetail> {
+    const source = String(camp.source || detail.source || '').toLowerCase();
+    const id = camp.provider_place_id || camp.place_id || (String(camp.id || '').startsWith('google:') ? String(camp.id).replace(/^google:/, '') : '');
+    if (!id || source !== 'google') return detail;
+    try {
+      const place = await api.getPlaceDetail('google', id);
+      const googlePhotos = (place.photos ?? []).map(photo => mediaUrl(photo.url)).filter(Boolean);
+      return {
+        ...detail,
+        phone: detail.phone || place.phone,
+        address: detail.address || place.address,
+        rating: detail.rating ?? place.rating,
+        rating_count: detail.rating_count ?? place.rating_count,
+        url: detail.url || place.website || place.google_maps_uri || '',
+        photos: detail.photos?.length ? detail.photos : googlePhotos,
+        reviews: place.reviews ?? detail.reviews,
+        media_source: detail.photos?.length ? 'mixed' : 'google',
+        verified_source: detail.verified_source || 'Google Places',
+        source: detail.source || 'google',
+      };
+    } catch {
+      return detail;
+    }
   }
 
   function addDay() {
@@ -3335,7 +3372,7 @@ export default function RouteBuilderScreen() {
       <Modal visible={!!selectedCamp} transparent animationType="slide" onRequestClose={() => setSelectedCamp(null)}>
         <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setSelectedCamp(null)}>
           <TrailheadSheet handle={false} style={s.quickCard} contentStyle={[s.quickCardSheetContent, { paddingBottom: bottomSheetPad }]}>
-            <View style={s.quickCardImg}>
+            <TouchableOpacity style={s.quickCardImg} activeOpacity={selectedCamp?.photo_url ? 0.88 : 1} onPress={() => selectedCamp?.photo_url && setCampGalleryIndex(0)}>
               {selectedCamp?.photo_url ? (
                 <Image source={{ uri: selectedCamp.photo_url }} style={s.quickCardPhoto} resizeMode="cover" />
               ) : (
@@ -3346,7 +3383,7 @@ export default function RouteBuilderScreen() {
                   </Text>
                 </View>
               )}
-            </View>
+            </TouchableOpacity>
             <View style={s.quickCardBody}>
               <View style={s.quickCardHeader}>
                 <Text style={s.quickCardName} numberOfLines={2}>{selectedCamp?.name}</Text>
@@ -3425,7 +3462,9 @@ export default function RouteBuilderScreen() {
               {(campDetail.photos ?? []).length > 0 ? (
                 <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false} style={s.photoGallery}>
                   {(campDetail.photos ?? []).map((uri, i) => (
-                    <Image key={i} source={{ uri }} style={s.galleryPhoto} resizeMode="cover" />
+                    <TouchableOpacity key={i} activeOpacity={0.9} onPress={() => setCampGalleryIndex(i)}>
+                      <Image source={{ uri: mediaUrl(uri) }} style={[s.galleryPhoto, { width: windowWidth }]} resizeMode="cover" />
+                    </TouchableOpacity>
                   ))}
                 </ScrollView>
               ) : (
@@ -3540,6 +3579,21 @@ export default function RouteBuilderScreen() {
                     ) : null}
                   </TrailheadCard>
                 )}
+                {(campDetail.reviews ?? []).length > 0 && (
+                  <TrailheadCard style={s.detailSection}>
+                    <Text style={s.detailSectionTitle}>GOOGLE REVIEWS</Text>
+                    {(campDetail.reviews ?? []).slice(0, 3).map((review, idx) => (
+                      <View key={`${review.authorName}-${idx}`} style={s.campReviewCard}>
+                        <View style={s.campReviewTop}>
+                          <Text style={s.campReviewAuthor} numberOfLines={1}>{review.authorName || 'Google user'}</Text>
+                          <Text style={s.campReviewRating}>{review.rating ? `${review.rating}/5` : 'Google'}</Text>
+                        </View>
+                        {!!review.relativeTime && <Text style={s.campReviewMeta}>{review.relativeTime}</Text>}
+                        {!!review.text && <Text style={s.campReviewText} numberOfLines={4}>{review.text}</Text>}
+                      </View>
+                    ))}
+                  </TrailheadCard>
+                )}
                 <View style={s.detailActions}>
                   <TrailheadButton
                     label={replaceStopId ? 'Replace Camp' : 'Use as Camp'}
@@ -3554,6 +3608,21 @@ export default function RouteBuilderScreen() {
           )}
         </View>
       </Modal>
+
+      <TrailheadPhotoGallery
+        visible={campGalleryIndex !== null}
+        photos={(campDetail?.photos?.length
+          ? campDetail.photos.map(url => ({
+              url: mediaUrl(url),
+              source: campDetail?.media_source || campDetail?.verified_source || campDetail?.source || 'Trailhead',
+            }))
+          : selectedCamp?.photo_url
+            ? [{ url: mediaUrl(selectedCamp.photo_url), source: selectedCamp.verified_source || selectedCamp.source || 'Trailhead' }]
+            : []) as TrailheadGalleryPhoto[]}
+        initialIndex={campGalleryIndex ?? 0}
+        title={campDetail?.name || selectedCamp?.name || 'Camp'}
+        onClose={() => setCampGalleryIndex(null)}
+      />
 
       <Modal visible={showPlaceFilters} transparent animationType="slide" onRequestClose={() => setShowPlaceFilters(false)}>
         <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setShowPlaceFilters(false)}>
@@ -4373,6 +4442,12 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     letterSpacing: 1.1, marginBottom: 10, borderBottomWidth: 1, borderColor: C.border, paddingBottom: 6,
   },
   detailDesc: { color: C.text, fontSize: 14, lineHeight: 22 },
+  campReviewCard: { borderWidth: 1, borderColor: C.border, backgroundColor: C.s2, borderRadius: 12, padding: 11, gap: 5, marginBottom: 8 },
+  campReviewTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  campReviewAuthor: { flex: 1, color: C.text, fontSize: 12, fontWeight: '800' },
+  campReviewRating: { color: C.gold, fontSize: 10, fontFamily: mono, fontWeight: '900' },
+  campReviewMeta: { color: C.text3, fontSize: 10, fontFamily: mono },
+  campReviewText: { color: C.text2, fontSize: 12, lineHeight: 17 },
   amenityGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   amenityItem: {
     paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999,

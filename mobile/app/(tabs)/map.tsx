@@ -9416,28 +9416,33 @@ function MapScreen() {
           {campDetail && (
             <ScrollView showsVerticalScrollIndicator={false}>
               {/* Photos */}
-              {(campDetail.photos ?? []).length > 0 ? (
-                <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false} style={s.photoGallery}>
-                  {(campDetail.photos ?? []).map((uri, i) => (
-                    <TouchableOpacity key={i} activeOpacity={0.9} onPress={() => setCampGalleryIndex(i)}>
-                      <Image source={{ uri: mediaUrl(uri) }} style={[s.galleryPhoto, { width: windowWidth }]} resizeMode="cover" />
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              ) : (
-                <View style={s.galleryPlaceholder}>
-                  <Ionicons name="bonfire-outline" size={52} color={C.orange} />
+              <View style={s.detailHero}>
+                {(campDetail.photos ?? []).length > 0 ? (
+                  <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false} style={s.photoGallery}>
+                    {(campDetail.photos ?? []).map((uri, i) => (
+                      <TouchableOpacity key={i} activeOpacity={0.9} onPress={() => setCampGalleryIndex(i)}>
+                        <Image source={{ uri: mediaUrl(uri) }} style={[s.galleryPhoto, { width: windowWidth }]} resizeMode="cover" />
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                ) : (
+                  <View style={s.galleryPlaceholder}>
+                    <Ionicons name="bonfire-outline" size={52} color="#fff" />
+                  </View>
+                )}
+                <View style={s.detailHeroShade} />
+                <TouchableOpacity style={s.detailHeroClose} onPress={closeCampDetail}>
+                  <Ionicons name="close" size={20} color="#fff" />
+                </TouchableOpacity>
+                <View style={s.detailHeroText}>
+                  <Text style={s.detailHeroKicker} numberOfLines={1}>
+                    {(campDetail.verified_source || campDetail.source || campDetail.land_type || 'Camp profile').toUpperCase()}
+                  </Text>
+                  <Text style={s.detailHeroTitle} numberOfLines={2}>{campDetail.name}</Text>
                 </View>
-              )}
+              </View>
 
               <View style={s.detailContent}>
-                {/* Header */}
-                <View style={s.detailHeader}>
-                  <Text style={s.detailName}>{campDetail.name}</Text>
-                  <TouchableOpacity style={s.detailClose} onPress={closeCampDetail}>
-                    <Ionicons name="close" size={22} color={C.text} />
-                  </TouchableOpacity>
-                </View>
                 <View style={s.detailEditRow}>
                   {campDetail.verified_source || campDetail.source ? (
                     <View style={s.verifiedChip}>
@@ -9624,6 +9629,32 @@ function MapScreen() {
                     ))}
                   </View>
                 )}
+
+                {(() => {
+                  const key = nearbyFeedKey('camp', campDetail.lat, campDetail.lng);
+                  const feed = nearbyPlaceFeeds[key];
+                  return (
+                    <View style={s.detailSection}>
+                      <View style={s.nearbyPlacesHeader}>
+                        <Text style={s.detailSectionTitle}>PLACES NEARBY</Text>
+                        {feed?.loading ? <ActivityIndicator size="small" color={C.orange} /> : null}
+                      </View>
+                      {!feed?.loading && !feed?.places?.length ? (
+                        <Text style={s.nearbyPlacesEmpty}>{feed?.error ?? 'No nearby discovery loaded yet'}</Text>
+                      ) : (
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.nearbyPlaceRail}>
+                          {(feed?.places ?? []).slice(0, 12).map(place => (
+                            <TouchableOpacity key={place.id || `${place.type}:${place.lat}:${place.lng}`} style={s.nearbyPlaceCard} onPress={() => openNearbyPlace(place)} activeOpacity={0.86}>
+                              <Ionicons name={placeTypeIcon(place.type) as any} size={15} color={C.orange} />
+                              <Text style={s.nearbyPlaceName} numberOfLines={2}>{place.name || cleanDisplayLabel(place.type) || 'Place'}</Text>
+                              <Text style={s.nearbyPlaceMeta} numberOfLines={1}>{[place.type?.replace(/_/g, ' '), (place as any).distance_mi != null ? `${Number((place as any).distance_mi).toFixed(1)} mi` : ''].filter(Boolean).join(' · ')}</Text>
+                            </TouchableOpacity>
+                          ))}
+                        </ScrollView>
+                      )}
+                    </View>
+                  );
+                })()}
 
                 {/* Wikipedia nearby */}
                 {(wikiArticles.length > 0 || loadingWiki) && (
@@ -12899,38 +12930,47 @@ const makeStyles = (C: ColorPalette) => {
 
   // ── Campsite detail modal
   detailModal: { flex: 1, backgroundColor: C.bg },
-  photoGallery: { height: 260 },
-  galleryPhoto: { width: 400, height: 260 },
+  detailHero: { height: 292, backgroundColor: C.s2 },
+  photoGallery: { height: '100%' },
+  galleryPhoto: { width: 400, height: 292 },
   galleryPlaceholder: {
-    height: 200, backgroundColor: C.s1,
+    height: '100%', backgroundColor: C.orange,
     alignItems: 'center', justifyContent: 'center',
   },
-  detailContent: { padding: 20, backgroundColor: C.bg },
+  detailHeroShade: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.34)' },
+  detailHeroClose: {
+    position: 'absolute', top: 18, right: 14,
+    width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.36)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)',
+  },
+  detailHeroText: { position: 'absolute', left: 18, right: 18, bottom: 18 },
+  detailHeroKicker: { color: '#fff', fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8, opacity: 0.9 },
+  detailHeroTitle: { color: '#fff', fontSize: 28, lineHeight: 33, fontWeight: '900', marginTop: 5 },
+  detailContent: { padding: 14, paddingBottom: 116, backgroundColor: C.bg, gap: 12 },
   detailHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 8 },
   detailName: { color: C.text, fontSize: 22, fontWeight: '800', flex: 1, lineHeight: 28 },
   detailClose: {
     width: 36, height: 36, borderRadius: 18, backgroundColor: C.s2,
     alignItems: 'center', justifyContent: 'center',
   },
-  detailEditRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
+  detailEditRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
   verifiedChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, backgroundColor: C.green + '14', borderWidth: 1, borderColor: C.green + '55' },
   verifiedChipText: { color: C.green, fontSize: 9, fontFamily: mono, fontWeight: '800' },
   editLinkBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, backgroundColor: C.s2, borderWidth: 1, borderColor: C.border },
   editLinkText: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '800' },
-  detailTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 },
+  detailTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   detailLandBadge: {
     paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8,
     borderWidth: 1,
   },
   detailLandText: { fontSize: 10, fontFamily: mono, fontWeight: '800', letterSpacing: 0.5 },
-  detailMeta: { flexDirection: 'row', gap: 16, marginBottom: 16, alignItems: 'center' },
+  detailMeta: { flexDirection: 'row', gap: 16, alignItems: 'center', borderWidth: 1, borderColor: C.border, backgroundColor: C.s1, borderRadius: 14, padding: 12 },
   detailCost: { color: C.green, fontSize: 14, fontFamily: mono, fontWeight: '800' },
   detailSiteCount: { color: C.text2, fontSize: 13, fontFamily: mono },
-  detailSection: { marginBottom: 20 },
+  detailSection: { borderWidth: 1, borderColor: C.border, backgroundColor: C.s1, borderRadius: 16, padding: 14, gap: 8 },
   detailSectionTitle: {
-    color: C.text2, fontSize: 10, fontFamily: mono, fontWeight: '800',
-    letterSpacing: 1.5, marginBottom: 10,
-    borderBottomWidth: 1, borderColor: C.border, paddingBottom: 6,
+    color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '900',
+    letterSpacing: 1.2,
   },
   detailSectionTitleRow: {
     flexDirection: 'row', alignItems: 'center', gap: 7,
@@ -12940,8 +12980,8 @@ const makeStyles = (C: ColorPalette) => {
     color: C.text2, fontSize: 10, fontFamily: mono, fontWeight: '800',
     letterSpacing: 1.5, textTransform: 'uppercase',
   },
-  sectionTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, borderBottomWidth: 1, borderColor: C.border, marginBottom: 12 },
-  sectionEditText: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900', paddingBottom: 6 },
+  sectionTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  sectionEditText: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900' },
   detailDesc: { color: C.text, fontSize: 14, lineHeight: 22 },
   campReviewCard: { borderWidth: 1, borderColor: C.border, backgroundColor: C.s1, borderRadius: 12, padding: 11, gap: 5, marginBottom: 8 },
   campReviewTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },

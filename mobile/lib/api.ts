@@ -143,6 +143,12 @@ export const api = {
     req<Report[]>('/api/reports/along-route', {
       method: 'POST', body: JSON.stringify({ waypoints }),
     }),
+  getNearbyAlerts: (lat: number, lng: number, radius = 0.5) =>
+    req<Report[]>(`/api/conditions/nearby?lat=${lat}&lng=${lng}&radius=${radius}`),
+  getAlertsAlongRoute: (waypoints: Waypoint[]) =>
+    req<Report[]>('/api/conditions/along-route', {
+      method: 'POST', body: JSON.stringify({ waypoints }),
+    }),
   upvoteReport: (id: number) => req(`/api/reports/${id}/upvote`, { method: 'POST' }),
   downvoteReport: (id: number) => req(`/api/reports/${id}/downvote`, { method: 'POST' }),
   confirmReport: (id: number) =>
@@ -484,10 +490,12 @@ export interface GasStation {
   route_progress?: number; route_progress_mi?: number; route_segment_index?: number;
 }
 export interface Report {
-  id: number; lat: number; lng: number; type: string; subtype: string;
+  id: number | string; lat: number; lng: number; type: string; subtype: string;
   description: string; severity: string; upvotes: number; downvotes: number;
   confirmations: number; has_photo: number; cluster_count: number;
   username: string; created_at: number; expires_at: number; waypoint_day?: number;
+  source?: 'trailhead' | 'provider' | string; provider?: string | null; provider_id?: string;
+  updated_at?: number; road_name?: string | null; confidence?: number; geometry?: unknown;
 }
 export interface ReportPayload {
   lat: number; lng: number; type: string;

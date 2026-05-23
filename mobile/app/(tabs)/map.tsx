@@ -779,7 +779,7 @@ function shouldAutoOpenRouteAlerts(alerts: Report[], wps: WP[], userLoc: { lat: 
   if (!alerts.length) return false;
   const origin = userLoc ?? wps[0] ?? null;
   if (!origin) return false;
-  const roadIssueTypes = new Set(['road_report', 'road_condition', 'road_closure', 'hazard', 'police']);
+  const roadIssueTypes = new Set(['road_report', 'road_condition', 'road_closure', 'closure', 'traffic', 'weather', 'fire', 'smoke', 'hazard', 'police']);
   return alerts.some(alert => {
     const severity = String(alert.severity || '').toLowerCase();
     const type = String(alert.type || '').toLowerCase();
@@ -787,6 +787,75 @@ function shouldAutoOpenRouteAlerts(alerts: Report[], wps: WP[], userLoc: { lat: 
     const milesFromOrigin = haversineKm(origin.lat, origin.lng, alert.lat, alert.lng) * 0.621371;
     return milesFromOrigin <= 25;
   });
+}
+
+function conditionSourceLabel(r: Report): string {
+  const provider = String(r.provider ?? '').toLowerCase();
+  if (provider === 'tomtom') return 'LIVE TRAFFIC · TOMTOM';
+  if (provider === 'nws') return 'WEATHER ALERT · NWS';
+  if (provider === 'airnow') return 'AIR QUALITY · AIRNOW';
+  if (provider === 'wfigs') return 'WILDFIRE · WFIGS';
+  if (provider === 'firms') return 'FIRE DETECTION · NASA FIRMS';
+  return `LIVE CONDITION · ${(r.provider ?? 'provider').toUpperCase()}`;
+}
+
+function conditionCanSpeak(r: Report): boolean {
+  const type = String(r.type || '').toLowerCase();
+  const severity = String(r.severity || '').toLowerCase();
+  if (severity !== 'critical') return false;
+  return ['closure', 'road_closure', 'traffic', 'weather', 'fire', 'smoke', 'hazard'].includes(type);
+}
+
+function conditionIcon(type: string): keyof typeof Ionicons.glyphMap {
+  return ({
+    police: 'shield-outline',
+    hazard: 'warning-outline',
+    road_condition: 'trail-sign-outline',
+    trail_condition: 'walk-outline',
+    wildlife: 'paw-outline',
+    road_closure: 'remove-circle-outline',
+    closure: 'remove-circle-outline',
+    traffic: 'car-outline',
+    weather: 'thunderstorm-outline',
+    fire: 'flame-outline',
+    smoke: 'cloud-outline',
+    campsite: 'bonfire-outline',
+    water: 'water-outline',
+  } as Record<string, keyof typeof Ionicons.glyphMap>)[type] ?? 'alert-outline';
+}
+
+function conditionColor(type: string): string {
+  return ({
+    police: '#eab308',
+    hazard: '#ef4444',
+    road_condition: '#D97745',
+    trail_condition: '#3BCF8E',
+    wildlife: '#a855f7',
+    road_closure: '#FF6B6B',
+    closure: '#FF6B6B',
+    traffic: '#6DA8FF',
+    weather: '#6DA8FF',
+    fire: '#FF6B6B',
+    smoke: '#a78bfa',
+    campsite: '#3BCF8E',
+    water: '#38bdf8',
+  } as Record<string, string>)[type] ?? '#D97745';
+}
+
+function conditionLabel(r: Report): string {
+  return r.subtype || (({
+    police: 'Ranger Patrol',
+    hazard: 'Hazard',
+    road_condition: 'Road Condition',
+    trail_condition: 'Trail Condition',
+    wildlife: 'Wildlife',
+    road_closure: 'Road Closure',
+    closure: 'Road Closure',
+    traffic: 'Traffic',
+    weather: 'Weather Alert',
+    fire: 'Wildfire',
+    smoke: 'Smoke/AQI',
+  } as Record<string, string>)[r.type] ?? 'Live Condition');
 }
 
 function calcBearing(lat1: number, lng1: number, lat2: number, lng2: number) {
@@ -1943,7 +2012,10 @@ const buildMapHtml = (
   .mk-rep-road_condition{background:#f97316dd;box-shadow:0 2px 10px rgba(249,115,22,0.6);}
   .mk-rep-wildlife{background:#a855f7dd;box-shadow:0 2px 10px rgba(168,85,247,0.6);}
   .mk-rep-campsite{background:#22c55edd;box-shadow:0 2px 10px rgba(34,197,94,0.5);}
-  .mk-rep-road_closure{background:#dc2626dd;box-shadow:0 2px 10px rgba(220,38,38,0.6);}
+  .mk-rep-road_closure,.mk-rep-closure{background:#dc2626dd;box-shadow:0 2px 10px rgba(220,38,38,0.6);}
+  .mk-rep-traffic,.mk-rep-weather{background:#6DA8FFdd;box-shadow:0 2px 10px rgba(109,168,255,0.5);}
+  .mk-rep-fire{background:#ef4444dd;box-shadow:0 2px 10px rgba(239,68,68,0.6);}
+  .mk-rep-smoke{background:#a78bfadd;box-shadow:0 2px 10px rgba(167,139,250,0.5);}
   .mk-rep-water{background:#38bdf8dd;box-shadow:0 2px 10px rgba(56,189,248,0.5);}
 </style>
 </head>
@@ -1982,7 +2054,7 @@ const buildMapHtml = (
 
   function setNaipLayer(show){showNaipLayer=show;if(!map||!mapReady)return;if(show){if(!map.getSource('naip'))map.addSource('naip',{type:'raster',tiles:['https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}'],tileSize:256,maxzoom:19,attribution:'USGS NAIP'});if(!map.getLayer('naip-layer'))map.addLayer({id:'naip-layer',type:'raster',source:'naip',paint:{'raster-opacity':0.85}},map.getLayer('water-name')?'water-name':undefined);}else{if(map.getLayer('naip-layer'))map.removeLayer('naip-layer');if(map.getSource('naip'))map.removeSource('naip');}}
 
-  function setFireLayer(show){showFireLayer=show;if(!map||!mapReady)return;if(show){if(!map.getSource('fires')){map.addSource('fires',{type:'geojson',data:{type:'FeatureCollection',features:[]}});fetch('https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/Current_WildlandFire_Perimeters/FeatureServer/0/query?where=1%3D1&outFields=IncidentName%2CContainment%2CGISAcres&returnGeometry=true&f=geojson&resultRecordCount=500').then(function(r){return r.json();}).then(function(d){if(map.getSource('fires'))map.getSource('fires').setData(d);}).catch(function(){});}if(!map.getLayer('fires-fill'))map.addLayer({id:'fires-fill',type:'fill',source:'fires',paint:{'fill-color':'#dc2626','fill-opacity':0.3}},map.getLayer('water-name')?'water-name':undefined);if(!map.getLayer('fires-line'))map.addLayer({id:'fires-line',type:'line',source:'fires',paint:{'line-color':'#ef4444','line-width':1.5,'line-opacity':0.85}});}else{['fires-line','fires-fill'].forEach(function(l){if(map.getLayer(l))map.removeLayer(l);});if(map.getSource('fires'))map.removeSource('fires');}}
+  function setFireLayer(show){showFireLayer=show;if(!map||!mapReady)return;if(show){if(!map.getSource('fires')){map.addSource('fires',{type:'geojson',data:{type:'FeatureCollection',features:[]}});fetch(apiBase+'/api/conditions/fire-perimeters').then(function(r){return r.json();}).then(function(d){if(map.getSource('fires'))map.getSource('fires').setData(d);}).catch(function(){});}if(!map.getLayer('fires-fill'))map.addLayer({id:'fires-fill',type:'fill',source:'fires',paint:{'fill-color':'#dc2626','fill-opacity':0.3}},map.getLayer('water-name')?'water-name':undefined);if(!map.getLayer('fires-line'))map.addLayer({id:'fires-line',type:'line',source:'fires',paint:{'line-color':'#ef4444','line-width':1.5,'line-opacity':0.85}});}else{['fires-line','fires-fill'].forEach(function(l){if(map.getLayer(l))map.removeLayer(l);});if(map.getSource('fires'))map.removeSource('fires');}}
 
   function setAvaLayer(show){showAvaLayer=show;if(!map||!mapReady)return;if(show){if(!map.getSource('ava')){map.addSource('ava',{type:'geojson',data:{type:'FeatureCollection',features:[]}});fetch('https://api.avalanche.org/v2/public/products/map-layer').then(function(r){return r.json();}).then(function(d){if(map.getSource('ava'))map.getSource('ava').setData(d);}).catch(function(){});}if(!map.getLayer('ava-fill'))map.addLayer({id:'ava-fill',type:'fill',source:'ava',paint:{'fill-color':['match',['get','danger_level'],'1','#50C878','2','#FFD700','3','#FF8C00','4','#E63946','5','#1a0a0a','#888888'],'fill-opacity':0.45}},map.getLayer('water-name')?'water-name':undefined);if(!map.getLayer('ava-line'))map.addLayer({id:'ava-line',type:'line',source:'ava',paint:{'line-color':['match',['get','danger_level'],'1','#50C878','2','#FFD700','3','#FF8C00','4','#E63946','5','#1a0a0a','#888888'],'line-width':1.5}});}else{['ava-line','ava-fill'].forEach(function(l){if(map.getLayer(l))map.removeLayer(l);});if(map.getSource('ava'))map.removeSource('ava');}}
 
@@ -2500,7 +2572,7 @@ const buildMapHtml = (
       if(map&&map.getSource('route-passed'))map.getSource('route-passed').setData({type:'Feature',geometry:{type:'LineString',coordinates:_passedRouteCoords}});
     }
   }
-  var REP_ICONS={police:'P',hazard:'!',road_condition:'R',wildlife:'W',campsite:'C',road_closure:'X',water:'H2O'};
+  var REP_ICONS={police:'P',hazard:'!',road_condition:'R',wildlife:'W',campsite:'C',road_closure:'X',closure:'X',traffic:'T',weather:'WX',fire:'F',smoke:'AQI',water:'H2O'};
   function repTimeAgo(ts){if(!ts)return'';var m=Math.floor((Date.now()/1000-ts)/60);if(m<2)return'just now';if(m<60)return m+'m ago';var h=Math.floor(m/60);if(h<24)return h+'h ago';return Math.floor(h/24)+'d ago';}
   function escHTML(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
   function updateReportMarkers(){
@@ -2509,11 +2581,12 @@ const buildMapHtml = (
       var el=document.createElement('div');
       el.className='mk-rep mk-rep-'+(r.type||'hazard');
       el.textContent=REP_ICONS[r.type]||'!';
-      el.title=(r.subtype||r.type)+(r.confirmations?' ✓'+r.confirmations:'');
+      el.title=(r.source==='provider'?'LIVE CONDITION · ':'')+(r.subtype||r.type)+(r.confirmations?' ✓'+r.confirmations:'');
       var age=repTimeAgo(r.created_at);
-      var confLine=r.confirmations?'<div class="pm" style="color:#22c55e;margin-top:2px">✓ '+r.confirmations+' confirmed</div>':'';
+      var providerLabel=r.provider==='nws'?'WEATHER ALERT · NWS':r.provider==='airnow'?'AIR QUALITY · AIRNOW':r.provider==='wfigs'?'WILDFIRE · WFIGS':r.provider==='firms'?'FIRE DETECTION · NASA FIRMS':r.provider==='tomtom'?'LIVE TRAFFIC · TOMTOM':'LIVE CONDITION · '+String(r.provider||'provider').toUpperCase();
+      var confLine=r.source==='provider'?'<div class="pm" style="color:#6DA8FF;margin-top:2px">'+escHTML(providerLabel)+'</div>':(r.confirmations?'<div class="pm" style="color:#22c55e;margin-top:2px">✓ '+r.confirmations+' confirmed</div>':'');
       var ageLine=age?'<div class="pm" style="opacity:0.5;margin-top:2px">'+escHTML(age)+'</div>':'';
-      var popup=new maplibregl.Popup({offset:18,closeButton:false}).setHTML('<div class="pt">'+escHTML(r.subtype||r.type)+'</div><div class="pm">'+escHTML(r.description||'Community report')+'</div>'+confLine+ageLine);
+      var popup=new maplibregl.Popup({offset:18,closeButton:false}).setHTML('<div class="pt">'+escHTML(r.subtype||r.type)+'</div><div class="pm">'+escHTML(r.description||(r.source==='provider'?'Live condition alert':'Community report'))+'</div>'+confLine+ageLine);
       var m=new maplibregl.Marker({element:el,anchor:'center'}).setLngLat([r.lng,r.lat]).setPopup(popup).addTo(map);
       el.addEventListener('click',function(ev){ev.stopPropagation();m.togglePopup();postRN({type:'report_tapped',report:r});});
       reportMarkers.push(m);
@@ -3222,7 +3295,7 @@ function MapScreen() {
   const reconnectRouteRefreshRef = useRef(false);
   const liveReportsRef   = useRef<Report[]>([]);
   const routeAlertsRef   = useRef<Report[]>([]);
-  const alertedRepIdsRef = useRef(new Set<number>());
+  const alertedRepIdsRef = useRef(new Set<number | string>());
   const approachDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const userSpeedRef     = useRef<number | null>(null);
   const smoothedHdgRef   = useRef<number | null>(null);
@@ -3405,7 +3478,7 @@ function MapScreen() {
   }, [routeAlerts]);
 
   const mapReports = useMemo(() => {
-    const seen = new Set<number>();
+    const seen = new Set<number | string>();
     return [...liveReports, ...routeAlerts].filter(r => {
       if (seen.has(r.id)) return false;
       seen.add(r.id);
@@ -3708,15 +3781,21 @@ function MapScreen() {
                   trail_condition: 'Trail condition nearby',
                   wildlife:       'Wildlife on road',
                   road_closure:   'Road closure ahead',
+                  closure:        'Road closure ahead',
+                  traffic:        'Critical traffic ahead',
+                  weather:        'Severe weather warning',
+                  fire:           'Wildfire warning',
+                  smoke:          'Smoke warning',
                   campsite:       'Campsite report',
                   water:          'Water source nearby',
                 };
                 const label = isRail ? 'Railroad crossing ahead' : labels[rep.type] ?? 'Obstacle ahead';
-                // Announce with distance only — label already includes "ahead"
-                safeSpeech(
-                  repDistM < 200 ? label
-                    : `${label}, ${speakDist(repDistM)}.`
-                );
+                if (conditionCanSpeak(rep)) {
+                  safeSpeech(
+                    repDistM < 200 ? label
+                      : `${label}, ${speakDist(repDistM)}.`
+                  );
+                }
                 if (approachDismissRef.current) clearTimeout(approachDismissRef.current);
                 approachDismissRef.current = setTimeout(() => setApproachingReport(null), 15000);
                 break; // one alert at a time
@@ -3823,7 +3902,7 @@ function MapScreen() {
         loadCampsInArea(bounds, activeFilters);
         fetchPois({ lat: center.lat!, lng: center.lng! });
       }
-      api.getReportsAlongRoute(wps).then(alerts => {
+      api.getAlertsAlongRoute(wps).then(alerts => {
         setRouteAlerts(alerts);
         setShowAlerts(shouldAutoOpenRouteAlerts(alerts, wps as WP[], userLoc));
       }).catch(() => {});
@@ -3875,7 +3954,7 @@ function MapScreen() {
       if (!activeTrip) return;
       const wps = usableTripWaypoints(activeTrip.plan.waypoints).filter(w => w.lat && w.lng);
       if (wps.length) {
-        api.getReportsAlongRoute(wps).then(alerts => {
+        api.getAlertsAlongRoute(wps).then(alerts => {
           setRouteAlerts(alerts);
         }).catch(() => {});
       }
@@ -4406,7 +4485,7 @@ function MapScreen() {
       api.getNearbyCamps(pin.lat, pin.lng, 20, activeFilters),
       api.getGas(pin.lat, pin.lng, 25),
       api.getOsmPois(pin.lat, pin.lng, 25, 'fuel,water,trail,trailhead,viewpoint,peak,hot_spring'),
-      api.getNearbyReports(pin.lat, pin.lng, 0.15),
+      api.getNearbyAlerts(pin.lat, pin.lng, 0.15),
     ]).then(([campsResult, fuelResult, poisResult, reportsResult]) => {
       if (cancelled) return;
       const camps = campsResult.status === 'fulfilled' ? campsResult.value.slice(0, 80) : [];
@@ -9042,6 +9121,9 @@ function MapScreen() {
               <View key={r.id} style={[s.alertItem, r.severity === 'critical' && { borderLeftWidth: 3, borderLeftColor: C.red }]}>
                 <View style={{ flexDirection: 'row', gap: 8, marginBottom: 2 }}>
                   <Text style={s.alertBadge}>{r.type.replace('_', ' ').toUpperCase()}</Text>
+                  {r.source === 'provider' && (
+                    <Text style={s.alertBadge}>{conditionSourceLabel(r)}</Text>
+                  )}
                   {(r.severity === 'critical' || r.severity === 'high') && (
                     <Text style={[s.alertSev, { color: r.severity === 'critical' ? C.red : C.yellow }]}>
                       {r.severity.toUpperCase()}
@@ -9049,6 +9131,7 @@ function MapScreen() {
                   )}
                 </View>
                 {r.description ? <Text style={s.alertDesc} numberOfLines={2}>{r.description}</Text> : null}
+                {r.road_name ? <Text style={[s.alertDesc, { opacity: 0.65 }]} numberOfLines={1}>{r.road_name}</Text> : null}
                 {r.created_at ? (
                   <Text style={[s.alertDesc, { opacity: 0.45, marginTop: 1 }]}>{timeAgo(r.created_at)}</Text>
                 ) : null}
@@ -10479,11 +10562,11 @@ function MapScreen() {
               </TouchableOpacity>
             ))}
 
-            <Text style={s.layerSectionHead}>CONDITIONS</Text>
+            <Text style={s.layerSectionHead}>CONDITIONS HUB</Text>
             {([
-              { key: 'fire',  label: 'Active Wildfires',   sub: 'WFIGS public fire perimeters. Requires signal.', icon: 'flame-outline', val: layerFire,  set: setLayerFire,  color: '#ef4444' },
+              { key: 'fire',  label: 'Active Wildfires',   sub: 'Cached WFIGS perimeters plus FIRMS detections in route alerts.', icon: 'flame-outline', val: layerFire,  set: setLayerFire,  color: '#ef4444' },
               { key: 'ava',   label: 'Avalanche Zones',    sub: 'Avalanche.org danger zones. Requires signal.', icon: 'snow-outline',  val: layerAva,   set: setLayerAva,   color: '#3b82f6' },
-              { key: 'radar', label: 'Rain Radar',         sub: 'RainViewer latest radar raster. Requires signal.', icon: 'rainy-outline', val: layerRadar, set: setLayerRadar, color: '#06b6d4' },
+              { key: 'radar', label: 'Rain Radar',         sub: 'Latest radar raster; weather and AQI warnings flow into alerts.', icon: 'rainy-outline', val: layerRadar, set: setLayerRadar, color: '#06b6d4' },
             ] as const).map(l => (
               <TouchableOpacity key={l.key} style={s.layerRow} onPress={() => { const nv = !l.val; l.set(nv); toggleDataLayer(l.key, nv); }}>
                 <View style={[s.layerRowIcon, l.val && { backgroundColor: l.color }]}>
@@ -10792,15 +10875,9 @@ function MapScreen() {
       {approachingReport && navMode && (() => {
         const rep = approachingReport;
         const repDistM = userLoc ? haversineKm(userLoc.lat, userLoc.lng, rep.lat, rep.lng) * 1000 : null;
-        const repIcons: Record<string, keyof typeof Ionicons.glyphMap> = {
-          police: 'shield-outline', hazard: 'warning-outline', road_condition: 'trail-sign-outline',
-          trail_condition: 'walk-outline', wildlife: 'paw-outline', road_closure: 'remove-circle-outline',
-          campsite: 'bonfire-outline', water: 'water-outline',
-        };
-        const repColors: Record<string, string> = { police: '#eab308', hazard: '#ef4444', road_condition: '#f97316', trail_condition: '#22c55e', wildlife: '#a855f7', road_closure: '#dc2626', campsite: '#22c55e', water: '#38bdf8' };
-        const color = repColors[rep.type] ?? '#f97316';
-        const icon  = repIcons[rep.type] ?? 'alert-outline';
-        const label = rep.subtype || ({ police: 'Ranger Patrol', hazard: 'Hazard', road_condition: 'Road Condition', trail_condition: 'Trail Condition', wildlife: 'Wildlife', road_closure: 'Road Closure' }[rep.type] ?? 'Community Report');
+        const color = conditionColor(rep.type);
+        const icon  = conditionIcon(rep.type);
+        const label = conditionLabel(rep);
         return (
           <View style={[s.approachAlert, { borderColor: color + '66' }]}>
             <View style={[s.approachAlertIcon, { backgroundColor: color + '22' }]}>
@@ -10808,6 +10885,7 @@ function MapScreen() {
             </View>
             <View style={s.approachAlertInfo}>
               <Text style={[s.approachAlertLabel, { color }]}>{label.toUpperCase()}</Text>
+              {rep.source === 'provider' ? <Text style={s.approachAlertSource}>{conditionSourceLabel(rep)}</Text> : null}
               <Text style={s.approachAlertDist}>
                 {repDistM !== null ? `${formatStepDist(repDistM)} ahead` : 'Nearby'}
                 {rep.confirmations > 0 ? ` · ${rep.confirmations} confirmed` : ''}
@@ -10819,8 +10897,12 @@ function MapScreen() {
                 style={[s.approachAlertBtn, { backgroundColor: color + '22', borderColor: color + '55' }]}
                 onPress={async () => {
                   try {
-                    await api.confirmReport(rep.id);
-                    setQuickToast(`+${CREDIT_REWARDS.confirmReport} credit`);
+                    if (rep.source === 'provider' || typeof rep.id !== 'number') {
+                      setQuickToast('Live traffic alert');
+                    } else {
+                      await api.confirmReport(rep.id);
+                      setQuickToast(`+${CREDIT_REWARDS.confirmReport} credit`);
+                    }
                   } catch (e: any) {
                     const msg = e?.message ?? '';
                     if (msg.includes('Already confirmed') || msg.includes('own report')) {
@@ -10838,7 +10920,7 @@ function MapScreen() {
               <TouchableOpacity
                 style={[s.approachAlertBtn, { borderColor: OVR.border }]}
                 onPress={async () => {
-                  try { await api.downvoteReport(rep.id); } catch {}
+                  try { if (rep.source !== 'provider' && typeof rep.id === 'number') await api.downvoteReport(rep.id); } catch {}
                   setApproachingReport(null);
                 }}
               >
@@ -10925,7 +11007,10 @@ function MapScreen() {
                                 created_at: Date.now() / 1000,
                                 expires_at: Date.now() / 1000 + res.ttl_hours * 3600,
                               });
-                            } catch { setQuickToast('Submitted'); setTimeout(() => setQuickToast(''), 2000); }
+                            } catch (e: any) {
+                              setQuickToast(e?.message ? `Report failed: ${e.message}` : 'Report failed');
+                              setTimeout(() => setQuickToast(''), 3000);
+                            }
                           }}
                         >
                           <Text style={[s.quickSubtypeText, { color: rt.color }]}>{sub}</Text>
@@ -10986,7 +11071,7 @@ function MapScreen() {
               </View>
               <View style={s.locDisclosureRow}>
                 <Ionicons name="warning" size={13} color={C.orange} />
-                <Text style={s.locDisclosureItem}>Alert you to road hazard reports</Text>
+                <Text style={s.locDisclosureItem}>Alert you to live route conditions</Text>
               </View>
             </View>
             <Text style={s.locDisclosureNote}>
@@ -13637,6 +13722,7 @@ const makeStyles = (C: ColorPalette) => {
   },
   approachAlertInfo: { flex: 1 },
   approachAlertLabel: { fontSize: 12, fontFamily: mono, fontWeight: '800', letterSpacing: 1 },
+  approachAlertSource: { color: OVR.text3, fontSize: 8.5, fontFamily: mono, fontWeight: '900', letterSpacing: 0.7, marginTop: 2 },
   approachAlertDist: { color: OVR.text2, fontSize: 11, fontFamily: mono, marginTop: 2 },
   approachAlertActions: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   approachAlertBtn: {

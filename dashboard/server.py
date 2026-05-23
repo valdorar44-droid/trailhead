@@ -25,6 +25,7 @@ from ingestors.osm import get_osm_campsites, get_osm_campsite_detail, get_water_
 from ingestors.foursquare import FSQ_BUSINESS_CATEGORIES, foursquare_enabled, get_foursquare_place_detail, get_foursquare_places
 from ingestors.google_places import fetch_google_photo, get_google_place_detail, get_google_places, google_places_enabled
 from ingestors.blm import get_blm_campsites, get_blm_campsite_detail
+from ingestors.conditions import get_provider_conditions_along_route, get_provider_conditions_near, get_wfigs_fire_perimeters
 from db.store import (
     save_trip, get_trip, add_community_pin, get_community_pins, find_duplicate_community_pin,
     save_audio_guide, get_audio_guide, get_cached, set_cached, get_route_cached, set_route_cached,
@@ -3842,6 +3843,7 @@ async def downvote_pin(pin_id: int, user: dict = Depends(_current_user)):
 VALID_REPORT_TYPES = {
     "police", "hazard", "road_condition", "wildlife", "road_closure",
     "campsite", "water", "cell_signal", "closure", "trail_condition",
+    "fuel", "service", "viewpoint", "traffic", "weather", "fire", "smoke",
 }
 VALID_SEVERITIES   = {"low", "moderate", "high", "critical"}
 
@@ -3925,10 +3927,71 @@ async def nearby_reports(lat: float, lng: float, radius: float = 0.5):
 class RouteReportRequest(BaseModel):
     waypoints: list[dict]
 
+def _community_alert(report: dict) -> dict:
+    alert = dict(report)
+    alert.setdefault("source", "trailhead")
+    alert.setdefault("provider", None)
+    alert.setdefault("provider_id", str(alert.get("id")))
+    alert.setdefault("confidence", 0.75 + min(float(alert.get("confirmations") or 0), 5) * 0.04)
+    alert.setdefault("updated_at", alert.get("created_at"))
+    alert.setdefault("road_name", None)
+    return alert
+
+def _severity_rank(alert: dict) -> int:
+    return {"critical": 4, "high": 3, "moderate": 2, "low": 1}.get(str(alert.get("severity")), 0)
+
+def _dedupe_sort_alerts(alerts: list[dict]) -> list[dict]:
+    seen: set[str] = set()
+    out: list[dict] = []
+    for alert in alerts:
+        key = str(alert.get("id") or f"{alert.get('provider')}:{alert.get('provider_id')}")
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(alert)
+    out.sort(key=lambda a: (_severity_rank(a), int(a.get("updated_at") or a.get("created_at") or 0)), reverse=True)
+    return out
+
+async def _provider_alerts_near(lat: float, lng: float, radius_deg: float) -> list[dict]:
+    return await get_provider_conditions_near(lat, lng, radius_deg)
+
+async def _provider_alerts_along_route(waypoints: list[dict], radius_deg: float = 0.12) -> list[dict]:
+    return await get_provider_conditions_along_route(waypoints, radius_deg)
+
 @app.post("/api/reports/along-route")
 async def route_reports(body: RouteReportRequest):
     """Return active reports within ~10km of any route waypoint."""
     return get_reports_along_route(body.waypoints, radius_deg=0.12)
+
+@app.get("/api/alerts/nearby")
+async def nearby_alerts(lat: float, lng: float, radius: float = 0.5):
+    """Return community reports plus server-side live condition alerts."""
+    community = [_community_alert(r) for r in get_reports_near(lat, lng, radius_deg=radius)]
+    provider = await _provider_alerts_near(lat, lng, radius)
+    return _dedupe_sort_alerts([*community, *provider])
+
+@app.post("/api/alerts/along-route")
+async def route_alerts(body: RouteReportRequest):
+    """Return active community and live condition alerts within ~10km of route waypoints."""
+    community = [_community_alert(r) for r in get_reports_along_route(body.waypoints, radius_deg=0.12)]
+    provider = await _provider_alerts_along_route(body.waypoints, radius_deg=0.12)
+    return _dedupe_sort_alerts([*community, *provider])
+
+@app.get("/api/conditions/nearby")
+async def nearby_conditions(lat: float, lng: float, radius: float = 0.5):
+    """Unified live conditions feed for map panels and navigation."""
+    return await nearby_alerts(lat, lng, radius)
+
+@app.post("/api/conditions/along-route")
+async def route_conditions(body: RouteReportRequest):
+    """Unified live conditions feed along active route waypoints."""
+    return await route_alerts(body)
+
+@app.get("/api/conditions/fire-perimeters")
+async def fire_perimeters():
+    """Cached WFIGS active fire perimeters for map overlays."""
+    data = await get_wfigs_fire_perimeters()
+    return data or {"type": "FeatureCollection", "features": []}
 
 @app.post("/api/reports/{report_id}/upvote")
 async def upvote(report_id: int, user: dict = Depends(_optional_user)):

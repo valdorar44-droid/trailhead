@@ -620,10 +620,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
 
   useEffect(() => {
     if (!showFire) { setFireData(null); return; }
-    const url = 'https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Interagency_Perimeters_Current/FeatureServer/0/query'
-      + '?where=1%3D1'
-      + '&outFields=poly_IncidentName,poly_GISAcres,attr_IncidentSize,attr_PercentContained'
-      + '&returnGeometry=true&f=geojson&resultRecordCount=500';
+    const url = `${API_BASE_URL}/api/conditions/fire-perimeters`;
     fetch(url)
       .then(r => r.json())
       .then(d => setFireData(d?.features ? d : null))
@@ -2226,7 +2223,8 @@ function ReportDot({ type, subtype }: { type: string; subtype?: string }) {
     police: '#eab308dd', hazard: '#ef4444dd', road_condition: '#f97316dd',
     trail_condition: '#22c55edd',
     wildlife: '#a855f7dd', campsite: '#22c55edd', road_closure: '#dc2626dd',
-    water: '#38bdf8dd',
+    closure: '#dc2626dd', traffic: '#6DA8FFdd', weather: '#6DA8FFdd',
+    fire: '#ef4444dd', smoke: '#a78bfadd', water: '#38bdf8dd',
   };
   const color = COLORS[type] || '#6b7280dd';
   const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
@@ -2238,6 +2236,10 @@ function ReportDot({ type, subtype }: { type: string; subtype?: string }) {
     campsite: 'bonfire-outline',
     road_closure: 'remove-circle-outline',
     closure: 'remove-circle-outline',
+    traffic: 'car-outline',
+    weather: 'thunderstorm-outline',
+    fire: 'flame-outline',
+    smoke: 'cloud-outline',
     water: 'water-outline',
     fuel: 'flash-outline',
     viewpoint: 'flag-outline',

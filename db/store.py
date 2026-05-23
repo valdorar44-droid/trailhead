@@ -14,6 +14,14 @@ EXPIRY_BY_TYPE = {
     'hazard':       7  * 86400,
     'campsite':     14 * 86400,
     'closure':      30 * 86400,
+    'road_closure': 30 * 86400,
+    'fuel':         12 * 3600,
+    'service':      30 * 86400,
+    'viewpoint':    90 * 86400,
+    'traffic':      6  * 3600,
+    'weather':      12 * 3600,
+    'fire':         14 * 86400,
+    'smoke':        12 * 3600,
 }
 
 def _conn() -> sqlite3.Connection:

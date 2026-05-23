@@ -20,7 +20,7 @@ import Reanimated, { FadeInDown, ZoomIn } from 'react-native-reanimated';
 
 // ── Alert notification helpers ────────────────────────────────────────────────
 // Seen IDs: { [reportId]: expiresAt (unix sec) } — auto-prune on load
-async function loadSeenAlertIds(): Promise<Record<number, number>> {
+async function loadSeenAlertIds(): Promise<Record<string, number>> {
   try {
     const raw = await storage.get('trailhead_alert_seen');
     if (!raw) return {};
@@ -33,7 +33,7 @@ async function loadSeenAlertIds(): Promise<Record<number, number>> {
     return pruned;
   } catch { return {}; }
 }
-async function saveSeenAlertIds(seen: Record<number, number>): Promise<void> {
+async function saveSeenAlertIds(seen: Record<string, number>): Promise<void> {
   try { await storage.set('trailhead_alert_seen', JSON.stringify(seen)); } catch {}
 }
 // Prefs: { [type]: boolean } — true = notify (default), false = muted
@@ -65,6 +65,14 @@ const REPORT_TYPES = [
     subtypes: ['Available & clean', 'Occupied', 'Trashed', 'Great condition', 'No water'] },
   { type: 'closure',     label: 'CLOSURE',  icon: 'remove-circle-outline', color: '#ef4444', ttl: '30d',
     subtypes: ['Gate locked', 'Road closed', 'Seasonal', 'Fire closure', 'Now open!'] },
+  { type: 'traffic',     label: 'TRAFFIC',  icon: 'car-outline',           color: '#38bdf8', ttl: '6h',
+    subtypes: ['Crash', 'Congestion', 'Lane closed', 'Disabled vehicle', 'Delay'] },
+  { type: 'weather',     label: 'WEATHER',  icon: 'thunderstorm-outline',  color: '#6DA8FF', ttl: '12h',
+    subtypes: ['Severe storm', 'Flash flood', 'High wind', 'Winter storm', 'Heat warning'] },
+  { type: 'fire',        label: 'FIRE',     icon: 'flame-outline',         color: '#ef4444', ttl: '14d',
+    subtypes: ['Active wildfire', 'Fire closure', 'Evacuation', 'Fire restriction', 'Smoke visible'] },
+  { type: 'smoke',       label: 'SMOKE',    icon: 'cloud-outline',         color: '#a78bfa', ttl: '12h',
+    subtypes: ['Unhealthy AQI', 'Heavy smoke', 'Low visibility', 'Sensitive groups', 'Clearing'] },
   { type: 'fuel',        label: 'FUEL',     icon: 'flash-outline',         color: '#eab308', ttl: '12h',
     subtypes: ['Diesel available', 'Gas available', 'Propane available', 'Fuel out', 'Price info'] },
   { type: 'viewpoint',   label: 'VIEW',     icon: 'flag-outline',          color: '#38bdf8', ttl: '90d',
@@ -112,7 +120,7 @@ export default function ReportScreen() {
   const successAnim = useRef(new Animated.Value(0)).current;
   const typeAnims = useRef(REPORT_TYPES.map(() => new Animated.Value(1))).current;
   // Refs so async callbacks always read latest values without stale closures
-  const seenIdsRef = useRef<Record<number, number>>({});
+  const seenIdsRef = useRef<Record<string, number>>({});
   const notifPrefsRef = useRef<Record<string, boolean>>({});
   const locRef = useRef<{ lat: number; lng: number } | null>(null);
 
@@ -125,7 +133,7 @@ export default function ReportScreen() {
     if (critical.length === 0) return;
     const seen = seenIdsRef.current;
     const prefs = notifPrefsRef.current;
-    const fresh = critical.filter(r => !seen[r.id] && prefs[r.type] !== false);
+    const fresh = critical.filter(r => !seen[String(r.id)] && prefs[r.type] !== false);
     if (fresh.length === 0) return;
 
     const typeInfo = REPORT_TYPES.find(t => t.type === fresh[0].type);
@@ -143,7 +151,7 @@ export default function ReportScreen() {
 
     const updated = { ...seen };
     for (const r of fresh) {
-      updated[r.id] = r.expires_at || (Date.now() / 1000 + 86400);
+      updated[String(r.id)] = r.expires_at || (Date.now() / 1000 + 86400);
     }
     seenIdsRef.current = updated;
     saveSeenAlertIds(updated);
@@ -165,7 +173,7 @@ export default function ReportScreen() {
           setLoc(c);
           locRef.current = c;
           if (l.coords.speed !== null && l.coords.speed > 2.2) setDrivingWarning(true);
-          api.getNearbyReports(c.lat, c.lng).then(reports => {
+          api.getNearbyAlerts(c.lat, c.lng).then(reports => {
             setNearby(reports);
             checkAndNotify(reports);
           }).catch(() => {});
@@ -186,7 +194,7 @@ export default function ReportScreen() {
     if (view !== 'nearby') return;
     const c = locRef.current;
     if (!c) return;
-    api.getNearbyReports(c.lat, c.lng).then(reports => {
+    api.getNearbyAlerts(c.lat, c.lng).then(reports => {
       setNearby(reports);
       checkAndNotify(reports);
     }).catch(() => {});
@@ -274,7 +282,7 @@ export default function ReportScreen() {
         setDescription(''); setPhotoBase64(null);
       }, 3000);
       api.me().then(async u => setAuth(await getToken(), u)).catch(() => {});
-      if (loc) api.getNearbyReports(loc.lat, loc.lng).then(setNearby).catch(() => {});
+      if (loc) api.getNearbyAlerts(loc.lat, loc.lng).then(setNearby).catch(() => {});
     } catch (e: any) {
       Alert.alert('Error', e.message);
     } finally {
@@ -554,16 +562,16 @@ export default function ReportScreen() {
           ) : nearby.map(r => (
             <ReportCard key={r.id} report={r}
               onPress={() => setDetailReport(r)}
-              onUpvote={() => api.upvoteReport(r.id).catch(() => {})}
-              onDownvote={() => api.downvoteReport(r.id).catch(() => {})}
-              onConfirm={() => api.confirmReport(r.id).then(res => {
+              onUpvote={() => typeof r.id === 'number' && api.upvoteReport(r.id).catch(() => {})}
+              onDownvote={() => typeof r.id === 'number' && api.downvoteReport(r.id).catch(() => {})}
+              onConfirm={() => typeof r.id === 'number' && api.confirmReport(r.id).then(res => {
                 Alert.alert('Confirmed ✓', `+${res.credits_earned} credit earned`);
               }).catch((e: any) => Alert.alert('Error', e.message))}
               onAdminDelete={user?.is_admin ? () => Alert.alert('Delete Report', 'Permanently remove this report?', [
                 { text: 'Cancel', style: 'cancel' },
-                { text: 'Delete', style: 'destructive', onPress: () => api.adminDeleteReport(r.id).then(() => setNearby(prev => prev.filter(x => x.id !== r.id))).catch(() => {}) },
+                { text: 'Delete', style: 'destructive', onPress: () => typeof r.id === 'number' && api.adminDeleteReport(r.id).then(() => setNearby(prev => prev.filter(x => x.id !== r.id))).catch(() => {}) },
               ]) : undefined}
-              onAdminRemovePhoto={user?.is_admin ? () => api.adminRemovePhoto(r.id).then(() => setNearby(prev => prev.map(x => x.id === r.id ? { ...x, has_photo: 0 } : x))).catch(() => {}) : undefined}
+              onAdminRemovePhoto={user?.is_admin ? () => typeof r.id === 'number' && api.adminRemovePhoto(r.id).then(() => setNearby(prev => prev.map(x => x.id === r.id ? { ...x, has_photo: 0 } : x))).catch(() => {}) : undefined}
             />
           ))}
         </ScrollView>
@@ -667,9 +675,9 @@ export default function ReportScreen() {
         <ReportDetailModal
           report={detailReport}
           onClose={() => setDetailReport(null)}
-          onUpvote={() => { api.upvoteReport(detailReport.id).catch(() => {}); setDetailReport(null); }}
-          onDownvote={() => { api.downvoteReport(detailReport.id).catch(() => {}); setDetailReport(null); }}
-          onConfirm={() => api.confirmReport(detailReport.id).then(res => {
+          onUpvote={() => { if (typeof detailReport.id === 'number') api.upvoteReport(detailReport.id).catch(() => {}); setDetailReport(null); }}
+          onDownvote={() => { if (typeof detailReport.id === 'number') api.downvoteReport(detailReport.id).catch(() => {}); setDetailReport(null); }}
+          onConfirm={() => typeof detailReport.id === 'number' && api.confirmReport(detailReport.id).then(res => {
             Alert.alert('Confirmed ✓', `+${res.credits_earned} credit earned`);
             setDetailReport(null);
           }).catch((e: any) => Alert.alert('Error', e.message))}
@@ -778,6 +786,16 @@ function ContributorProfileModal({ profile, onClose }:
   );
 }
 
+function conditionSourceLabel(r: Report): string {
+  const provider = String(r.provider ?? '').toLowerCase();
+  if (provider === 'tomtom') return 'LIVE TRAFFIC · TOMTOM';
+  if (provider === 'nws') return 'WEATHER ALERT · NWS';
+  if (provider === 'airnow') return 'AIR QUALITY · AIRNOW';
+  if (provider === 'wfigs') return 'WILDFIRE · WFIGS';
+  if (provider === 'firms') return 'FIRE DETECTION · NASA FIRMS';
+  return `LIVE CONDITION · ${(r.provider ?? 'provider').toUpperCase()}`;
+}
+
 function ReportCard({ report: r, onPress, onUpvote, onDownvote, onConfirm, onAdminDelete, onAdminRemovePhoto }:
   { report: Report; onPress: () => void; onUpvote: () => void; onDownvote: () => void; onConfirm: () => void;
     onAdminDelete?: () => void; onAdminRemovePhoto?: () => void; }) {
@@ -786,6 +804,8 @@ function ReportCard({ report: r, onPress, onUpvote, onDownvote, onConfirm, onAdm
   if (!r || r.id == null) return null; // guard against malformed API data
   const typeInfo = REPORT_TYPES.find(t => t.type === r.type);
   const sevInfo = SEVERITY.find(sv => sv.val === r.severity);
+  const isProvider = r.source === 'provider';
+  const sourceLabel = conditionSourceLabel(r);
   const createdAt = typeof r.created_at === 'number' ? r.created_at : 0;
   const age = Math.floor((Date.now() / 1000 - createdAt) / 3600);
   const expiresIn = r.expires_at ? Math.max(0, Math.floor((r.expires_at - Date.now() / 1000) / 3600)) : null;
@@ -809,6 +829,11 @@ function ReportCard({ report: r, onPress, onUpvote, onDownvote, onConfirm, onAdm
         <View style={rc.meta}>
           <Text style={rc.type}>{typeInfo?.label ?? r.type}</Text>
           {!!r.subtype && <Text style={rc.subtype}>{r.subtype}</Text>}
+          {isProvider && (
+            <Text style={rc.provider}>
+              {sourceLabel}{r.road_name ? ` · ${r.road_name}` : ''}
+            </Text>
+          )}
         </View>
         {sevInfo && (
           <View style={[rc.sevPill, { backgroundColor: sevInfo.color + '22', borderColor: sevInfo.color }]}>
@@ -819,12 +844,12 @@ function ReportCard({ report: r, onPress, onUpvote, onDownvote, onConfirm, onAdm
       {r.description ? <Text style={rc.desc}>{r.description}</Text> : null}
       <View style={rc.footer}>
         <Text style={rc.age}>
-          @{r.username} · {age < 1 ? 'just now' : `${age}h ago`}
+          {isProvider ? sourceLabel : `@${r.username}`} · {age < 1 ? 'just now' : `${age}h ago`}
           {expiresIn !== null ? ` · exp ${expiresIn}h` : ''}
           {r.has_photo ? ' · photo' : ''}
-          {r.confirmations > 0 ? ` · ✓${r.confirmations}` : ''}
+          {!isProvider && r.confirmations > 0 ? ` · ✓${r.confirmations}` : ''}
         </Text>
-        <View style={rc.actions}>
+        {!isProvider ? <View style={rc.actions}>
           <TouchableOpacity style={rc.confirmBtn} onPress={onConfirm}>
             <Ionicons name="checkmark-circle-outline" size={15} color={C.green} />
             <Text style={[rc.actionText, { color: C.green }]}>Still there</Text>
@@ -848,7 +873,9 @@ function ReportCard({ report: r, onPress, onUpvote, onDownvote, onConfirm, onAdm
               <Ionicons name="image-outline" size={13} color="#f97316" />
             </TouchableOpacity>
           )}
-        </View>
+        </View> : (
+          <View style={rc.providerPill}><Text style={rc.providerPillText}>READ ONLY</Text></View>
+        )}
       </View>
     </TouchableOpacity>
   );
@@ -861,9 +888,11 @@ function ReportDetailModal({ report: r, onClose, onUpvote, onDownvote, onConfirm
   const dm = useMemo(() => makeDmStyles(C), [C]);
   const typeInfo = REPORT_TYPES.find(t => t.type === r.type);
   const sevInfo = SEVERITY.find(sv => sv.val === r.severity);
+  const isProvider = r.source === 'provider';
+  const sourceLabel = conditionSourceLabel(r);
   const age = Math.floor((Date.now() / 1000 - r.created_at) / 3600);
   const expiresIn = r.expires_at ? Math.max(0, Math.floor((r.expires_at - Date.now() / 1000) / 3600)) : null;
-  const photoUri = r.has_photo ? `${PHOTO_BASE}/api/reports/${r.id}/photo` : null;
+  const photoUri = !isProvider && r.has_photo ? `${PHOTO_BASE}/api/reports/${r.id}/photo` : null;
 
   return (
     <Modal visible animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
@@ -889,6 +918,7 @@ function ReportDetailModal({ report: r, onClose, onUpvote, onDownvote, onConfirm
             <View style={{ flex: 1 }}>
               <Text style={dm.typeLabel}>{typeInfo?.label ?? r.type}</Text>
               {r.subtype ? <Text style={dm.subtype}>{r.subtype}</Text> : null}
+              {isProvider ? <Text style={dm.provider}>{sourceLabel}</Text> : null}
             </View>
             {sevInfo && (
               <View style={[dm.sevPill, { backgroundColor: sevInfo.color + '22', borderColor: sevInfo.color }]}>
@@ -916,9 +946,15 @@ function ReportDetailModal({ report: r, onClose, onUpvote, onDownvote, onConfirm
           {/* Meta */}
           <View style={dm.metaBox}>
             <View style={dm.metaRow}>
-              <Ionicons name="person-circle-outline" size={16} color={C.text3} />
-              <Text style={dm.metaText}>@{r.username}</Text>
+              <Ionicons name={isProvider ? "radio-outline" : "person-circle-outline"} size={16} color={C.text3} />
+              <Text style={dm.metaText}>{isProvider ? sourceLabel : `@${r.username}`}</Text>
             </View>
+            {r.road_name ? (
+              <View style={dm.metaRow}>
+                <Ionicons name="map-outline" size={16} color={C.text3} />
+                <Text style={dm.metaText}>{r.road_name}</Text>
+              </View>
+            ) : null}
             <View style={dm.metaRow}>
               <Ionicons name="time-outline" size={16} color={C.text3} />
               <Text style={dm.metaText}>{age < 1 ? 'Just now' : `${age}h ago`}</Text>
@@ -929,7 +965,7 @@ function ReportDetailModal({ report: r, onClose, onUpvote, onDownvote, onConfirm
                 <Text style={dm.metaText}>Expires in {expiresIn}h</Text>
               </View>
             )}
-            {r.confirmations > 0 && (
+            {!isProvider && r.confirmations > 0 && (
               <View style={dm.metaRow}>
                 <Ionicons name="checkmark-done-circle-outline" size={16} color={C.green} />
                 <Text style={[dm.metaText, { color: C.green }]}>{r.confirmations} confirmation{r.confirmations !== 1 ? 's' : ''}</Text>
@@ -938,7 +974,7 @@ function ReportDetailModal({ report: r, onClose, onUpvote, onDownvote, onConfirm
           </View>
 
           {/* Actions */}
-          <View style={dm.actionsRow}>
+          {!isProvider ? <View style={dm.actionsRow}>
             <TouchableOpacity style={dm.confirmBtn} onPress={onConfirm}>
               <Ionicons name="checkmark-circle-outline" size={18} color={C.green} />
               <Text style={[dm.btnText, { color: C.green }]}>STILL THERE</Text>
@@ -951,7 +987,7 @@ function ReportDetailModal({ report: r, onClose, onUpvote, onDownvote, onConfirm
               <Ionicons name="thumbs-down-outline" size={18} color={C.text2} />
               <Text style={dm.voteTxt}>{r.downvotes ?? 0}</Text>
             </TouchableOpacity>
-          </View>
+          </View> : null}
         </ScrollView>
       </View>
     </Modal>
@@ -972,6 +1008,7 @@ const makeDmStyles = (C: ColorPalette) => StyleSheet.create({
   typeIconWrap: { width: 64, height: 64, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   typeLabel: { color: C.text, fontSize: 18, fontWeight: '800', fontFamily: mono },
   subtype: { color: C.text2, fontSize: 13, marginTop: 3 },
+  provider: { color: '#38bdf8', fontSize: 10, marginTop: 5, fontFamily: mono, fontWeight: '800' },
   sevPill: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20, borderWidth: 1 },
   sevText: { fontSize: 10, fontFamily: mono, fontWeight: '700', letterSpacing: 0.5 },
   photo: { width: '100%', height: 240, borderRadius: 14, backgroundColor: C.s2 },
@@ -1010,12 +1047,15 @@ const makeRcStyles = (C: ColorPalette) => StyleSheet.create({
   meta: { flex: 1 },
   type: { color: C.text, fontWeight: '700', fontSize: 13 },
   subtype: { color: C.text2, fontSize: 11, marginTop: 1 },
+  provider: { color: '#38bdf8', fontSize: 9, marginTop: 3, fontFamily: mono, fontWeight: '800' },
   sevPill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 20, borderWidth: 1 },
   sevText: { fontSize: 9, fontFamily: mono, fontWeight: '700', letterSpacing: 0.5 },
   desc: { color: C.text2, fontSize: 12, lineHeight: 17, marginBottom: 10 },
   footer: { gap: 8 },
   age: { color: C.text3, fontSize: 10, fontFamily: mono },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  providerPill: { paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, borderWidth: 1, borderColor: '#38bdf855', backgroundColor: '#38bdf814', alignSelf: 'flex-start' },
+  providerPillText: { color: '#38bdf8', fontSize: 9, fontFamily: mono, fontWeight: '800' },
   confirmBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   actionText: { fontSize: 12, fontWeight: '600' },
   voteBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },

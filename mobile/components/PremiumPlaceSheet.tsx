@@ -50,16 +50,40 @@ type PlaceLike = {
   confidence?: string;
 };
 
+type RelatedItem = {
+  id?: string | number;
+  name?: string;
+  lat: number;
+  lng: number;
+  type?: string;
+  subtype?: string;
+  source_label?: string;
+  distance_mi?: number;
+  route_distance_mi?: number;
+  photo_url?: string | null;
+  length_mi?: number | null;
+};
+
 type Props = {
   place: PlaceLike | null;
   visible?: boolean;
   initialStage?: Stage;
+  related?: {
+    loading?: boolean;
+    places?: RelatedItem[];
+    camps?: RelatedItem[];
+    trails?: RelatedItem[];
+    error?: string;
+  };
   onClose: () => void;
   onNavigate: (place: { name: string; lat: number; lng: number }) => void;
   onSave?: (place: { name: string; lat: number; lng: number; note?: string }) => void;
   onReport?: () => void;
   onNearbyCamps?: (place: { name: string; lat: number; lng: number }) => void;
   onAddToRoute?: (place: { name: string; lat: number; lng: number; note?: string }) => void;
+  onOpenRelatedPlace?: (place: RelatedItem) => void;
+  onOpenRelatedCamp?: (place: RelatedItem) => void;
+  onOpenRelatedTrail?: (place: RelatedItem) => void;
 };
 
 function titleCase(value?: string) {
@@ -83,16 +107,42 @@ function mediaUrl(url?: string | null) {
   return url.startsWith('/') ? `${API_BASE}${url}` : url;
 }
 
+function itemIcon(type?: string): keyof typeof Ionicons.glyphMap {
+  const clean = String(type || '').toLowerCase();
+  if (clean === 'camp') return 'bonfire-outline';
+  if (clean === 'trail' || clean === 'trailhead') return 'trail-sign-outline';
+  if (clean === 'viewpoint') return 'flag-outline';
+  if (clean === 'peak') return 'triangle-outline';
+  if (clean === 'hot_spring') return 'flame-outline';
+  if (clean === 'fuel') return 'flash-outline';
+  if (clean === 'water') return 'water-outline';
+  if (clean === 'food') return 'restaurant-outline';
+  if (clean === 'grocery') return 'cart-outline';
+  return 'location-outline';
+}
+
+function itemMeta(item: RelatedItem) {
+  const distance = item.route_distance_mi ?? item.distance_mi;
+  return [
+    item.length_mi != null ? `${Number(item.length_mi).toFixed(Number(item.length_mi) >= 10 ? 0 : 1)} mi trail` : titleCase(item.subtype || item.type),
+    distance != null && Number.isFinite(Number(distance)) ? `${Number(distance).toFixed(1)} mi` : '',
+  ].filter(Boolean).join(' · ');
+}
+
 export default function PremiumPlaceSheet({
   place,
   visible = !!place,
   initialStage = 'full',
+  related,
   onClose,
   onNavigate,
   onSave,
   onReport,
   onNearbyCamps,
   onAddToRoute,
+  onOpenRelatedPlace,
+  onOpenRelatedCamp,
+  onOpenRelatedTrail,
 }: Props) {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
@@ -165,7 +215,12 @@ export default function PremiumPlaceSheet({
     : data.photo_url
       ? [{ url: mediaUrl(data.photo_url), source: data.source_label || data.source || '' }]
       : [];
-  const hero = photos[0]?.url;
+  const relatedHero = [
+    ...(related?.places ?? []),
+    ...(related?.camps ?? []),
+    ...(related?.trails ?? []),
+  ].map(item => mediaUrl(item.photo_url)).find(Boolean);
+  const hero = photos[0]?.url || relatedHero;
   const sourceLabel = data.source_label || data.attribution || (data.source === 'google' ? 'Google' : data.source || 'Trailhead');
   const distanceLabel = data.route_distance_mi != null && Number.isFinite(data.route_distance_mi)
     ? `${Number(data.route_distance_mi).toFixed(1)} mi off route`
@@ -247,6 +302,20 @@ export default function PremiumPlaceSheet({
                   <Text style={s.infoText} numberOfLines={3}>{data.access_note}</Text>
                 </View>
               )}
+              {stage === 'full' && (related?.loading || related?.places?.length || related?.camps?.length || related?.trails?.length || related?.error) ? (
+                <View style={s.relatedBlock}>
+                  <View style={s.relatedHeader}>
+                    <Text style={s.sectionLabel}>NEARBY CONTEXT</Text>
+                    {related?.loading ? <ActivityIndicator color={C.orange} size="small" /> : null}
+                  </View>
+                  {!!related?.error && !related?.loading && (
+                    <Text style={s.sectionText}>{related.error}</Text>
+                  )}
+                  <RelatedRail title="Best nearby" items={(related?.places ?? []).slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
+                  <RelatedRail title="Camps" items={(related?.camps ?? []).slice(0, 8)} onPress={onOpenRelatedCamp} C={C} styles={s} />
+                  <RelatedRail title="Trails" items={(related?.trails ?? []).slice(0, 8)} onPress={onOpenRelatedTrail} C={C} styles={s} />
+                </View>
+              ) : null}
               {stage === 'full' && !!detail?.hours?.length && (
                 <View style={s.section}>
                   <Text style={s.sectionLabel}>HOURS</Text>
@@ -357,6 +426,47 @@ export default function PremiumPlaceSheet({
   );
 }
 
+function RelatedRail({
+  title,
+  items,
+  onPress,
+  C,
+  styles,
+}: {
+  title: string;
+  items: RelatedItem[];
+  onPress?: (item: RelatedItem) => void;
+  C: ColorPalette;
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  if (!items.length) return null;
+  return (
+    <View style={styles.relatedSection}>
+      <Text style={styles.relatedTitle}>{title.toUpperCase()}</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.relatedRail}>
+        {items.map((item, idx) => (
+          <TouchableOpacity
+            key={`${item.id || item.name || title}-${idx}`}
+            style={styles.relatedCard}
+            activeOpacity={0.86}
+            onPress={() => onPress?.(item)}
+          >
+            {item.photo_url ? (
+              <Image source={{ uri: mediaUrl(item.photo_url) }} style={styles.relatedPhoto} resizeMode="cover" />
+            ) : (
+              <View style={styles.relatedIcon}>
+                <Ionicons name={itemIcon(item.type)} size={17} color={C.orange} />
+              </View>
+            )}
+            <Text style={styles.relatedName} numberOfLines={2}>{item.name || titleCase(item.type)}</Text>
+            <Text style={styles.relatedMeta} numberOfLines={1}>{itemMeta(item)}</Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+    </View>
+  );
+}
+
 const makeStyles = (C: ColorPalette) => StyleSheet.create({
   wrap: {
     position: 'absolute',
@@ -397,6 +507,32 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   section: { marginTop: 4, borderTopWidth: 1, borderColor: C.border, paddingTop: 10 },
   sectionLabel: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8, marginBottom: 5 },
   sectionText: { color: C.text2, fontSize: 12, lineHeight: 18 },
+  relatedBlock: { gap: 10, paddingVertical: 2 },
+  relatedHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  relatedSection: { gap: 7 },
+  relatedTitle: { color: C.text3, fontSize: 9, fontFamily: mono, letterSpacing: 0.9, fontWeight: '900' },
+  relatedRail: { gap: 8, paddingRight: 12 },
+  relatedCard: {
+    width: 128,
+    minHeight: 116,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.s1,
+    padding: 9,
+    gap: 7,
+  },
+  relatedPhoto: { width: '100%', height: 44, borderRadius: 8, backgroundColor: C.s2 },
+  relatedIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: C.orange + '18',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  relatedName: { color: C.text, fontSize: 12, fontWeight: '800', lineHeight: 15 },
+  relatedMeta: { color: C.text3, fontSize: 10, fontFamily: mono },
   reviewCard: { borderWidth: 1, borderColor: C.border, backgroundColor: C.s2, borderRadius: 14, padding: 11, gap: 5, marginBottom: 8 },
   reviewTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   reviewAuthor: { flex: 1, color: C.text, fontSize: 12, fontWeight: '800' },

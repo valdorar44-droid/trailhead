@@ -10,6 +10,7 @@ from urllib.parse import quote
 import httpx
 
 GOOGLE_NEARBY_URL = "https://places.googleapis.com/v1/places:searchNearby"
+GOOGLE_TEXT_URL = "https://places.googleapis.com/v1/places:searchText"
 GOOGLE_DETAIL_URL = "https://places.googleapis.com/v1/places"
 log = logging.getLogger(__name__)
 
@@ -245,6 +246,46 @@ async def get_google_places(
                     seen.add(key)
                     merged.append(normalized)
     return merged
+
+
+async def search_google_places_text(
+    query: str,
+    lat: float | None = None,
+    lng: float | None = None,
+    radius_m: int = 50000,
+    limit: int = 5,
+) -> list[dict]:
+    """Search Google Places by free-form text for rich selected-search cards."""
+    if not google_places_enabled() or not query.strip():
+        return []
+    body: dict = {
+        "textQuery": query.strip(),
+        "maxResultCount": max(1, min(int(limit or 5), 10)),
+    }
+    if lat is not None and lng is not None:
+        body["locationBias"] = {
+            "circle": {
+                "center": {"latitude": float(lat), "longitude": float(lng)},
+                "radius": max(1000, min(int(radius_m), 50000)),
+            }
+        }
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            res = await client.post(GOOGLE_TEXT_URL, json=body, headers=_headers(SUMMARY_FIELDS))
+            if res.status_code in {400, 401, 403, 429}:
+                log.warning("Google Places text search returned %s for %r: %s", res.status_code, query, res.text[:240])
+                return []
+            res.raise_for_status()
+            payload = res.json()
+    except Exception as exc:
+        log.warning("Google Places text search failed for %r: %s", query, exc)
+        return []
+    places = []
+    for item in payload.get("places") or []:
+        normalized = _normalize_place(item, "poi")
+        if normalized:
+            places.append(normalized)
+    return places
 
 
 async def get_google_place_detail(place_id: str) -> dict | None:

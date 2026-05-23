@@ -34,6 +34,7 @@ import { loadAllPlacePoints } from '@/lib/offlinePlacePacks';
 import {
   buildTrailDiscoveries,
   buildTrailSupport,
+  featureFromPoi,
   featureFromMapTrail,
   trailColor,
   trailIcon,
@@ -138,6 +139,14 @@ interface SearchPlace {
   open_now?: boolean | null; rating?: number; rating_count?: number; photo_url?: string | null;
   google_maps_uri?: string; attribution?: string;
   summary?: string; access_note?: string; distance_mi?: number; route_distance_mi?: number; confidence?: string;
+};
+
+type SelectedPlaceContext = {
+  loading: boolean;
+  places: OsmPoi[];
+  camps: CampsitePin[];
+  trails: TrailProfile[];
+  error?: string;
 };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -3060,7 +3069,7 @@ function MapScreen() {
   const [routeProgress, setRouteProgress] = useState<{ distanceM: number; remainingM: number; routeDistanceM: number; deviationM: number; segmentIdx: number } | null>(null);
   const [selectOnMapMode, setSelectOnMapMode] = useState(false);
   const [searchQuery,  setSearchQuery]  = useState('');
-  const [searchResults,setSearchResults] = useState<{ lat: number; lng: number; name: string }[]>([]);
+  const [searchResults,setSearchResults] = useState<SearchPlace[]>([]);
   const [showSearch,   setShowSearch]   = useState(false);
   const [isSearching,  setIsSearching]  = useState(false);
   const [routeLegOffset, setRouteLegOffset] = useState(0);
@@ -3102,6 +3111,7 @@ function MapScreen() {
   const [selectedCamp,  setSelectedCamp]  = useState<CampsitePin | null>(null);
   const selectedCampRef = useRef<CampsitePin | null>(null);
   const [selectedPlace, setSelectedPlace] = useState<SearchPlace | null>(null);
+  const [selectedPlaceContext, setSelectedPlaceContext] = useState<SelectedPlaceContext | null>(null);
   const [campDetail,    setCampDetail]    = useState<CampsiteDetail | null>(null);
   const [showCampDetail,setShowCampDetail] = useState(false);
   const [campGalleryIndex, setCampGalleryIndex] = useState<number | null>(null);
@@ -3998,6 +4008,47 @@ function MapScreen() {
     setNavDest(null);
   }, [selectedPlace?.id, selectedPlace?.lat, selectedPlace?.lng]);
 
+  useEffect(() => {
+    if (!selectedPlace?.lat || !selectedPlace?.lng || navMode) {
+      setSelectedPlaceContext(null);
+      return;
+    }
+    let cancelled = false;
+    setSelectedPlaceContext(prev => ({
+      loading: true,
+      places: prev?.places ?? [],
+      camps: prev?.camps ?? [],
+      trails: prev?.trails ?? [],
+    }));
+    Promise.allSettled([
+      api.getNearbySmartPack(selectedPlace.lat, selectedPlace.lng, 28, SMART_PLACE_CATEGORIES),
+      api.discoverTrails({ mode: 'nearby', lat: selectedPlace.lat, lng: selectedPlace.lng, radius: 35, limit: 12 }),
+    ]).then(([packResult, trailsResult]) => {
+      if (cancelled) return;
+      const pack = packResult.status === 'fulfilled' ? packResult.value : null;
+      const smartPlaces = pack?.places ?? [];
+      const camps = smartPlaces
+        .map(p => smartPlaceToCampPin(p as OsmPoi))
+        .filter((p): p is CampsitePin => !!p)
+        .slice(0, 10);
+      const places = smartPlaces
+        .filter(p => String(p.type) !== 'camp')
+        .filter(p => (p.name && p.name.trim()) || UTILITY_PLACE_TYPES.has(String(p.type || '')))
+        .slice(0, 14) as OsmPoi[];
+      const trails = trailsResult.status === 'fulfilled' ? (trailsResult.value.trails ?? []).slice(0, 10) : [];
+      setSelectedPlaceContext({
+        loading: false,
+        places,
+        camps,
+        trails,
+        error: !places.length && !camps.length && !trails.length ? 'No nearby camps, trails, or useful places loaded yet.' : undefined,
+      });
+    }).catch(() => {
+      if (!cancelled) setSelectedPlaceContext({ loading: false, places: [], camps: [], trails: [], error: 'Nearby context unavailable.' });
+    });
+    return () => { cancelled = true; };
+  }, [selectedPlace?.id, selectedPlace?.lat, selectedPlace?.lng, navMode]);
+
   const reloadOfflinePlacePois = useCallback(async () => {
     const points = await loadAllPlacePoints().catch(() => []);
     setOfflinePlaceCount(points.length);
@@ -4658,7 +4709,7 @@ function MapScreen() {
       const sorted = userLoc
         ? places.slice().sort((a, b) => haversineKm(userLoc.lat, userLoc.lng, a.lat, a.lng) - haversineKm(userLoc.lat, userLoc.lng, b.lat, b.lng))
         : places;
-      setSearchResults(sorted.map(place => ({ lat: place.lat, lng: place.lng, name: place.name })));
+      setSearchResults(sorted.map(place => ({ ...place, source: place.source || 'search', type: 'poi' })));
     } catch (e: any) {
       setSearchResults([]);
       setSearchResults([{ lat: 0, lng: 0, name: '__error__' }]);
@@ -4666,13 +4717,29 @@ function MapScreen() {
     setIsSearching(false);
   }
 
-  function selectSearchResult(place: { lat: number; lng: number; name: string }) {
+  function selectSearchResult(place: SearchPlace) {
     const dist = userLoc ? haversineKm(userLoc.lat, userLoc.lng, place.lat, place.lng) : null;
-    setSearchRouteCard({ ...place, dist });
-    setSelectedPlace({ ...place, dist, source: 'search', type: 'poi' });
+    const basePlace = { ...place, dist, source: place.source || 'search', type: place.type || 'poi' };
+    setSearchRouteCard(basePlace);
+    setSelectedPlace({
+      ...basePlace,
+      summary: basePlace.summary || 'Loading place details, nearby camps, trails, and useful stops...',
+      source_label: basePlace.source_label || 'Map search',
+    });
     setSearchResults([]);
     webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: place.lat, lng: place.lng, name: place.name }));
     nativeMapRef.current?.flyTo(place.lat, place.lng);
+    api.getSearchPlaceCard(place.name, place.lat, place.lng)
+      .then(rich => {
+        if (!rich) return;
+        const richPlace = { ...basePlace, ...rich, dist } as SearchPlace;
+        setSelectedPlace(current => {
+          if (!current || Math.abs(current.lat - place.lat) > 0.02 || Math.abs(current.lng - place.lng) > 0.02) return current;
+          return richPlace;
+        });
+        setSearchRouteCard(current => current ? { ...current, ...richPlace } : current);
+      })
+      .catch(() => {});
   }
 
   function navigateToSearch() {
@@ -9334,9 +9401,11 @@ function MapScreen() {
         place={selectedPlace}
         visible={!!selectedPlace && !navMode}
         initialStage="full"
-        onClose={() => setSelectedPlace(null)}
+        related={selectedPlaceContext ?? undefined}
+        onClose={() => { setSelectedPlace(null); setSelectedPlaceContext(null); }}
         onNavigate={place => {
           setSelectedPlace(null);
+          setSelectedPlaceContext(null);
           navigateToCamp(place);
         }}
         onSave={place => {
@@ -9354,10 +9423,12 @@ function MapScreen() {
         }}
         onReport={() => {
           setSelectedPlace(null);
+          setSelectedPlaceContext(null);
           setQuickReport(true);
         }}
         onNearbyCamps={place => {
           setSelectedPlace(null);
+          setSelectedPlaceContext(null);
           const bounds = { n: place.lat + 0.35, s: place.lat - 0.35, e: place.lng + 0.35, w: place.lng - 0.35, zoom: 11 };
           setQuickToast('Searching camps nearby');
           setTimeout(() => setQuickToast(''), 2500);
@@ -9370,8 +9441,43 @@ function MapScreen() {
         }}
         onAddToRoute={place => {
           setSelectedPlace(null);
+          setSelectedPlaceContext(null);
           setSearchRouteCard({ name: place.name, lat: place.lat, lng: place.lng, dist: userLoc ? haversineKm(userLoc.lat, userLoc.lng, place.lat, place.lng) : null });
           setShowSearch(true);
+        }}
+        onOpenRelatedPlace={place => {
+          setSelectedPlace(null);
+          setSelectedPlaceContext(null);
+          openNearbyPlace(place as OsmPoi);
+        }}
+        onOpenRelatedCamp={place => {
+          setSelectedPlace(null);
+          setSelectedPlaceContext(null);
+          const camp = place as CampsitePin;
+          setSelectedCamp(camp);
+          setCampDetail(null); setCampInsight(null); setWikiArticles([]);
+          setCampFullness(null); setCampWeather(null);
+          nativeMapRef.current?.flyTo(camp.lat, camp.lng, 12, camp.name);
+          webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: camp.lat, lng: camp.lng, name: camp.name }));
+        }}
+        onOpenRelatedTrail={place => {
+          setSelectedPlace(null);
+          setSelectedPlaceContext(null);
+          const trailPoi = trailProfileToPoi(place as TrailProfile);
+          const support = buildTrailSupport(
+            { lat: trailPoi.lat, lng: trailPoi.lng },
+            selectedPlaceContext?.camps ?? areaCamps,
+            liveRouteGas,
+            [...(selectedPlaceContext?.places ?? []), ...allMapPois],
+            mapReports,
+            offlineSaved,
+          );
+          const feature = featureFromPoi(trailPoi, support, 'trailhead');
+          if (feature) {
+            nativeMapRef.current?.flyTo(feature.lat, feature.lng, 12, feature.name);
+            webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: feature.lat, lng: feature.lng, name: feature.name }));
+            openTrailFeature(feature);
+          }
         }}
       />
 

@@ -171,6 +171,8 @@ export const api = {
   getConfig: () => req<{ mapbox_token: string; protomaps_key?: string }>('/api/config'),
   geocodePlaces: (query: string, limit = 8) =>
     req<GeocodePlace[]>(`/api/geocode?q=${encodeURIComponent(query)}&limit=${limit}`),
+  getSearchPlaceCard: (query: string, lat: number, lng: number) =>
+    req<OsmPoi | null>(`/api/places/search-card?q=${encodeURIComponent(query)}&lat=${lat}&lng=${lng}`),
   getCampsites: (lat: number, lng: number, radius = 25) =>
     req<Campsite[]>(`/api/campsites?lat=${lat}&lng=${lng}&radius=${radius}`),
   searchCampsites: (lat: number, lng: number, radius = 40, types: string[] = []) =>

@@ -23,7 +23,7 @@ from dashboard.route_enrichment import enrich_trip_along_route
 from ingestors.ridb import get_campsites_near, get_campsites_search, get_facility_detail
 from ingestors.osm import get_osm_campsites, get_osm_campsite_detail, get_water_sources, get_trailheads, get_trails, get_viewpoints, get_peaks, get_hot_springs, get_fuel_stations, get_service_places
 from ingestors.foursquare import FSQ_BUSINESS_CATEGORIES, foursquare_enabled, get_foursquare_place_detail, get_foursquare_places
-from ingestors.google_places import fetch_google_photo, get_google_place_detail, get_google_places, google_places_enabled
+from ingestors.google_places import fetch_google_photo, get_google_place_detail, get_google_places, google_places_enabled, search_google_places_text
 from ingestors.blm import get_blm_campsites, get_blm_campsite_detail
 from ingestors.conditions import get_provider_conditions_along_route, get_provider_conditions_near, get_wfigs_fire_perimeters
 from db.store import (
@@ -5951,6 +5951,40 @@ async def nearby_places(
         merged.append(item)
     merged = _dedupe_nearby_places(merged)
     return _balanced_nearby_places(merged, category_set, dist_mi, limit=80)
+
+
+@app.get("/api/places/search-card")
+async def search_place_card(q: str, lat: float | None = None, lng: float | None = None):
+    """Return the best rich provider card for a map search result."""
+    query = (q or "").strip()
+    if not query:
+        return None
+    google_hits = await search_google_places_text(query, lat, lng, radius_m=50000, limit=6)
+    if google_hits:
+        def score(item: dict) -> tuple[float, int]:
+            dist = 999999.0
+            if lat is not None and lng is not None:
+                try:
+                    dist = _haversine_m(float(lat), float(lng), float(item.get("lat")), float(item.get("lng")))
+                except Exception:
+                    pass
+            media_penalty = 0 if item.get("photo_url") else 1
+            return (dist, media_penalty)
+        best = sorted(google_hits, key=score)[0]
+        best["summary"] = best.get("summary") or best.get("address") or best.get("subtype") or "Selected map place."
+        return best
+    if lat is not None and lng is not None:
+        return {
+            "id": f"search:{query.lower().replace(' ', '-')[:40]}:{float(lat):.5f}:{float(lng):.5f}",
+            "name": query,
+            "lat": float(lat),
+            "lng": float(lng),
+            "type": "poi",
+            "source": "search",
+            "source_label": "Map search",
+            "summary": "Selected map place.",
+        }
+    return None
 
 
 OUTDOOR_PLACE_PRIORITY = {

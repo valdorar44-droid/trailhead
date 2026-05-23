@@ -232,7 +232,10 @@ async def get_google_places(
                     places.append(normalized)
             return places
 
-        batches = await asyncio.gather(*(fetch_category(category) for category in requested[:8]), return_exceptions=True)
+        # Broad app discovery asks for many categories. Keep Google in the mix
+        # across services so photo-capable results are not crowded out by
+        # fallback providers that do not expose media through our detail path.
+        batches = await asyncio.gather(*(fetch_category(category) for category in requested[:14]), return_exceptions=True)
         for batch in batches:
             if not isinstance(batch, list):
                 continue

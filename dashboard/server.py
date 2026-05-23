@@ -5243,7 +5243,7 @@ def _excursion_source_confidence(source: str) -> str:
     source = (source or "").lower()
     if source in {"nps", "blm", "ridb", "recreation.gov", "trailhead", "community"}:
         return "high"
-    if source in {"osm", "wikipedia", "openbeta"}:
+    if source in {"osm", "wikipedia", "openbeta", "google", "google places"}:
         return "medium"
     return "low"
 
@@ -5814,20 +5814,36 @@ def _place_type_priority(value: object) -> int:
     return OUTDOOR_PLACE_PRIORITY.get(_smart_pack_type(value), 50)
 
 
+def _place_source_priority(item: dict) -> int:
+    source = str(item.get("source") or item.get("attribution") or "").lower()
+    verified = str(item.get("verified_source") or item.get("source_label") or "").lower()
+    if source in {"trailhead", "community", "ridb", "blm", "nps", "recreation.gov"} or any(v in verified for v in ("trailhead", "ridb", "blm", "nps", "recreation")):
+        return 0
+    if "google" in source and item.get("photo_url"):
+        return 1
+    if "google" in source or "google" in verified:
+        return 2
+    if source in {"offline", "osm", "openstreetmap"}:
+        return 3
+    if "foursquare" in source or "foursquare" in verified:
+        return 8
+    return 5
+
+
 def _balanced_nearby_places(items: list[dict], requested: set[str], dist_fn, limit: int = 80) -> list[dict]:
     """Keep browse/search results from being monopolized by one utility type."""
     if not items:
         return []
     broad_explore = len(requested) > 3 or bool(requested.intersection({"trailhead", "viewpoint", "park", "historic", "attraction", "hot_spring", "peak"}))
     if not broad_explore:
-        return sorted(items, key=dist_fn)[:limit]
+        return sorted(items, key=lambda item: (_place_source_priority(item), dist_fn(item)))[:limit]
 
     buckets: dict[str, list[dict]] = {}
     for item in items:
         ptype = _smart_pack_type(item.get("type") or item.get("category"))
         buckets.setdefault(ptype, []).append(item)
     for bucket in buckets.values():
-        bucket.sort(key=dist_fn)
+        bucket.sort(key=lambda item: (_place_source_priority(item), dist_fn(item)))
 
     result: list[dict] = []
     seen: set[str] = set()
@@ -5843,7 +5859,7 @@ def _balanced_nearby_places(items: list[dict], requested: set[str], dist_fn, lim
             if len(result) >= limit:
                 return result
 
-    for item in sorted(items, key=dist_fn):
+    for item in sorted(items, key=lambda item: (_place_source_priority(item), dist_fn(item))):
         ptype = _smart_pack_type(item.get("type") or item.get("category"))
         key = str(item.get("id") or f"{ptype}:{item.get('name')}:{item.get('lat')}:{item.get('lng')}")
         if key not in seen:
@@ -5990,7 +6006,7 @@ async def nearby_smart_pack(body: NearbySmartPackRequest):
             return 9999.0
 
     sorted_normalized = _balanced_nearby_places(normalized, requested, smart_dist, limit=160)
-    for item in sorted(sorted_normalized, key=lambda p: (_place_type_priority(p.get("type")), smart_dist(p), p.get("confidence") != "high", p.get("name", ""))):
+    for item in sorted(sorted_normalized, key=lambda p: (_place_type_priority(p.get("type")), _place_source_priority(p), smart_dist(p), p.get("confidence") != "high", p.get("name", ""))):
         ptype = _smart_pack_type(item.get("type"))
         if ptype not in requested and not (ptype == "attraction" and requested.intersection({"park", "historic", "climbing", "ohv", "attraction"})):
             continue

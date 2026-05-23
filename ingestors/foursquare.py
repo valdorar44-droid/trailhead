@@ -60,10 +60,10 @@ FSQ_CATEGORY_PRIORITY = {
 }
 
 FSQ_SUMMARY_FIELDS = ",".join([
-    "fsq_id",
     "fsq_place_id",
     "name",
-    "geocodes",
+    "latitude",
+    "longitude",
     "location",
     "categories",
     "distance",

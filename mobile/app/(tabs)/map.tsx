@@ -9207,7 +9207,7 @@ function MapScreen() {
 
       {/* ── Campsite quick card ── */}
       {selectedCamp && !navMode && (
-        <View style={s.quickCard}>
+        <TrailheadSheet handle={false} style={s.quickCard} contentStyle={s.quickCardShell}>
           <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
             {/* Photo / placeholder */}
             <TouchableOpacity style={s.quickCardImg} activeOpacity={selectedCamp.photo_url ? 0.88 : 1} onPress={() => selectedCamp.photo_url && setCampGalleryIndex(0)}>
@@ -9220,25 +9220,30 @@ function MapScreen() {
                     </Text>
                   </View>
               }
+              <View style={s.quickCardHeroShade} />
+              <View style={s.quickCardHeroActions}>
+                <TouchableOpacity
+                  style={s.quickCardHeroIcon}
+                  onPress={() => toggleFavorite(selectedCamp)}
+                >
+                  <Ionicons
+                    name={favoriteCamps.some(f => f.id === selectedCamp.id) ? 'heart' : 'heart-outline'}
+                    size={17}
+                    color={favoriteCamps.some(f => f.id === selectedCamp.id) ? '#ef4444' : '#fff'}
+                  />
+                </TouchableOpacity>
+                <TouchableOpacity style={s.quickCardHeroIcon} onPress={() => { setSelectedCamp(null); setCampFullness(null); setCampWeather(null); }}>
+                  <Ionicons name="close" size={17} color="#fff" />
+                </TouchableOpacity>
+              </View>
+              <View style={s.quickCardHeroText}>
+                <Text style={s.quickCardHeroKicker} numberOfLines={1}>
+                  {(selectedCamp.verified_source || selectedCamp.source || selectedCamp.land_type || 'Trailhead camp').toUpperCase()}
+                </Text>
+                <Text style={s.quickCardHeroTitle} numberOfLines={2}>{selectedCamp.name}</Text>
+              </View>
             </TouchableOpacity>
             <View style={s.quickCardBody}>
-            {/* Close + name + heart */}
-            <View style={s.quickCardHeader}>
-              <Text style={s.quickCardName} numberOfLines={2}>{selectedCamp.name}</Text>
-              <TouchableOpacity
-                style={[s.quickCardClose, { marginRight: 2 }]}
-                onPress={() => toggleFavorite(selectedCamp)}
-              >
-                <Ionicons
-                  name={favoriteCamps.some(f => f.id === selectedCamp.id) ? 'heart' : 'heart-outline'}
-                  size={16}
-                  color={favoriteCamps.some(f => f.id === selectedCamp.id) ? '#ef4444' : C.text2}
-                />
-              </TouchableOpacity>
-              <TouchableOpacity style={s.quickCardClose} onPress={() => { setSelectedCamp(null); setCampFullness(null); setCampWeather(null); }}>
-                <Ionicons name="close" size={16} color={C.text3} />
-              </TouchableOpacity>
-            </View>
             {/* Land badge */}
             {selectedCamp.land_type ? (
               <View style={[s.landBadge, { backgroundColor: landColor(selectedCamp.land_type).bg, borderColor: landColor(selectedCamp.land_type).border }]}>
@@ -9402,7 +9407,7 @@ function MapScreen() {
             </View>
             </View>
           </ScrollView>
-        </View>
+        </TrailheadSheet>
       )}
 
       {/* ── Campsite full profile modal ── */}
@@ -12773,21 +12778,27 @@ const makeStyles = (C: ColorPalette) => {
 
   // ── Campsite quick card
   quickCard: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: C.s1,
-    borderTopLeftRadius: 20, borderTopRightRadius: 20,
-    maxHeight: '88%',
+    position: 'absolute', bottom: 0, left: 10, right: 10,
+    maxHeight: '86%',
     overflow: 'hidden',
-    shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.18, shadowRadius: 16,
     elevation: 40, zIndex: 1000,
   },
-  quickCardImg: { width: '100%' },
-  quickCardPhoto: { width: '100%', height: 178, borderTopLeftRadius: 20, borderTopRightRadius: 20 },
+  quickCardShell: { padding: 0 },
+  quickCardImg: { width: '100%', height: 190, position: 'relative', overflow: 'hidden' },
+  quickCardPhoto: { width: '100%', height: '100%' },
   quickCardPhotoPlaceholder: {
-    width: '100%', height: 142, alignItems: 'center', justifyContent: 'center',
-    borderTopLeftRadius: 20, borderTopRightRadius: 20, gap: 2,
+    width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', gap: 2,
   },
-  quickCardBody: { padding: 14, paddingBottom: 28, gap: 6 },
+  quickCardHeroShade: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.28)' },
+  quickCardHeroActions: { position: 'absolute', top: 12, right: 12, flexDirection: 'row', gap: 8 },
+  quickCardHeroIcon: {
+    width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.36)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)',
+  },
+  quickCardHeroText: { position: 'absolute', left: 15, right: 76, bottom: 14 },
+  quickCardHeroKicker: { color: '#fff', fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8, opacity: 0.9 },
+  quickCardHeroTitle: { color: '#fff', fontSize: 22, lineHeight: 27, fontWeight: '900', marginTop: 4 },
+  quickCardBody: { padding: 14, paddingBottom: 28, gap: 8 },
   quickCardHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
   quickCardName: { color: C.text, fontSize: 15, fontWeight: '800', flex: 1, lineHeight: 20 },
   quickCardClose: {

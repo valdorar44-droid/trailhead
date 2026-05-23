@@ -21,7 +21,7 @@ FSQ_DETAIL_URL = "https://places-api.foursquare.com/places/{fsq_id}"
 FSQ_LEGACY_DETAIL_URL = "https://api.foursquare.com/v3/places/{fsq_id}"
 FSQ_PERMISSION_BACKOFF_KEY = "foursquare_permission_backoff_v1"
 FSQ_QUOTA_BACKOFF_KEY = "foursquare_quota_backoff_v1"
-FSQ_BACKOFF_TTL_SECONDS = 6 * 3600
+FSQ_BACKOFF_TTL_SECONDS = 15 * 60
 log = logging.getLogger(__name__)
 
 FSQ_CATEGORY_QUERIES: dict[str, str] = {

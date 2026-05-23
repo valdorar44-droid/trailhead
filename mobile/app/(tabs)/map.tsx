@@ -25,7 +25,7 @@ import * as FileSystem from 'expo-file-system';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useStore } from '@/lib/store';
-import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile } from '@/lib/api';
+import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile, MapCardResolveResponse } from '@/lib/api';
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { deleteRouteGeometry, loadRouteGeometry, saveRouteGeometry } from '@/lib/offlineRoutes';
 import { loadOfflineTrail, saveOfflineTrail } from '@/lib/offlineTrails';
@@ -3113,6 +3113,7 @@ function MapScreen() {
   const selectedCampRef = useRef<CampsitePin | null>(null);
   const [selectedPlace, setSelectedPlace] = useState<SearchPlace | null>(null);
   const [selectedPlaceContext, setSelectedPlaceContext] = useState<SelectedPlaceContext | null>(null);
+  const mapCardResolveCacheRef = useRef(new Map<string, { at: number; response: MapCardResolveResponse }>());
   const selectedPlaceResolveKeyRef = useRef('');
   const [campDetail,    setCampDetail]    = useState<CampsiteDetail | null>(null);
   const [showCampDetail,setShowCampDetail] = useState(false);
@@ -4020,36 +4021,21 @@ function MapScreen() {
     if (selectedPlaceResolveKeyRef.current === resolveKey) return;
     selectedPlaceResolveKeyRef.current = resolveKey;
     let cancelled = false;
-    setSelectedPlaceContext(prev => ({
-      loading: true,
-      places: prev?.places ?? [],
-      camps: prev?.camps ?? [],
-      trails: prev?.trails ?? [],
-    }));
-    api.resolveMapCard({
-      kind: selectedPlace.type === 'trail' || selectedPlace.type === 'trailhead' ? 'trail' : selectedPlace.type === 'camp' ? 'camp' : selectedPlace.source === 'search' ? 'search' : 'place',
-      id: selectedPlace.id,
-      source: selectedPlace.source,
-      source_label: selectedPlace.source_label,
-      provider_place_id: selectedPlace.provider_place_id,
-      place_id: selectedPlace.place_id,
-      name: selectedPlace.name,
-      lat: selectedPlace.lat,
-      lng: selectedPlace.lng,
-      type: selectedPlace.type,
-      subtype: selectedPlace.subtype,
-      photo_url: selectedPlace.photo_url,
-      summary: selectedPlace.summary,
-      address: selectedPlace.address,
-      rating: selectedPlace.rating,
-      rating_count: selectedPlace.rating_count,
-    }).then(resolved => {
-      if (cancelled) return;
+    const mergeResolvedCard = (resolved: MapCardResolveResponse) => {
+      const resolvedCard = (resolved.card as any) ?? {};
       const nextCard = {
         ...selectedPlace,
-        ...(resolved.card as any),
-        photos: resolved.photos?.length ? resolved.photos : (resolved.card as any).photos,
+        ...resolvedCard,
+        photos: resolved.photos?.length ? resolved.photos : resolvedCard.photos,
       } as SearchPlace;
+      const currentSource = String(selectedPlace.source || '').toLowerCase();
+      const nextSource = String(resolvedCard.source || '').toLowerCase();
+      if (!['google', 'foursquare', 'fsq'].includes(currentSource) && ['google', 'foursquare', 'fsq'].includes(nextSource)) {
+        const provider = nextSource === 'google' ? 'Google Maps' : 'Foursquare';
+        const baseLabel = selectedPlace.source_label || (currentSource === 'search' ? 'Map search' : selectedPlace.source || 'Map source');
+        nextCard.source_label = baseLabel.includes(provider) ? baseLabel : `${baseLabel} · ${provider}`;
+        nextCard.attribution = resolvedCard.source_label || resolvedCard.attribution || provider;
+      }
       setSelectedPlace(current => {
         if (!current || Math.abs(current.lat - selectedPlace.lat) > 0.02 || Math.abs(current.lng - selectedPlace.lng) > 0.02) return current;
         return { ...current, ...nextCard };
@@ -4069,6 +4055,39 @@ function MapScreen() {
         trails,
         error: !smartPlaces.length && !smartCamps.length && !trails.length ? 'No nearby camps, trails, or useful places loaded yet.' : undefined,
       });
+    };
+    const cached = mapCardResolveCacheRef.current.get(resolveKey);
+    if (cached && Date.now() - cached.at < 10 * 60_000) {
+      mergeResolvedCard(cached.response);
+    } else {
+      setSelectedPlaceContext(prev => ({
+        loading: true,
+        places: prev?.places ?? [],
+        camps: prev?.camps ?? [],
+        trails: prev?.trails ?? [],
+      }));
+    }
+    api.resolveMapCard({
+      kind: selectedPlace.type === 'trail' || selectedPlace.type === 'trailhead' ? 'trail' : selectedPlace.type === 'camp' ? 'camp' : selectedPlace.source === 'search' ? 'search' : 'place',
+      id: selectedPlace.id,
+      source: selectedPlace.source,
+      source_label: selectedPlace.source_label,
+      provider_place_id: selectedPlace.provider_place_id,
+      place_id: selectedPlace.place_id,
+      name: selectedPlace.name,
+      lat: selectedPlace.lat,
+      lng: selectedPlace.lng,
+      type: selectedPlace.type,
+      subtype: selectedPlace.subtype,
+      photo_url: selectedPlace.photo_url,
+      summary: selectedPlace.summary,
+      address: selectedPlace.address,
+      rating: selectedPlace.rating,
+      rating_count: selectedPlace.rating_count,
+    }).then(resolved => {
+      if (cancelled) return;
+      mapCardResolveCacheRef.current.set(resolveKey, { at: Date.now(), response: resolved });
+      mergeResolvedCard(resolved);
     }).catch(() => {
       selectedPlaceResolveKeyRef.current = '';
       if (!cancelled) setSelectedPlaceContext({ loading: false, places: [], camps: [], trails: [], error: 'Nearby context unavailable.' });
@@ -6512,6 +6531,26 @@ function MapScreen() {
     openPoiFeature(place);
     nativeMapRef.current?.flyTo(place.lat, place.lng, 12);
     webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: place.lat, lng: place.lng, name: place.name }));
+  }
+
+  function renderNearbyPlaceCard(place: OsmPoi, compact = false) {
+    const photo = mediaUrl(place.photo_url);
+    const meta = [place.type?.replace(/_/g, ' '), (place as any).distance_mi != null ? `${Number((place as any).distance_mi).toFixed(1)} mi` : ''].filter(Boolean).join(' · ');
+    return (
+      <TouchableOpacity key={place.id || `${place.type}:${place.lat}:${place.lng}`} style={[s.nearbyPlaceCard, compact && s.nearbyPlaceCardCompact]} onPress={() => openNearbyPlace(place)} activeOpacity={0.86}>
+        {photo ? (
+          <Image source={{ uri: photo }} style={s.nearbyPlacePhoto} resizeMode="cover" />
+        ) : (
+          <View style={s.nearbyPlaceIconBlock}>
+            <Ionicons name={placeTypeIcon(place.type) as any} size={18} color={C.orange} />
+          </View>
+        )}
+        <View style={s.nearbyPlaceBody}>
+          <Text style={s.nearbyPlaceName} numberOfLines={2}>{place.name || cleanDisplayLabel(place.type) || 'Place'}</Text>
+          <Text style={s.nearbyPlaceMeta} numberOfLines={1}>{meta}</Text>
+        </View>
+      </TouchableOpacity>
+    );
   }
 
   function loadNearbyPlacesFor(key: string, center?: { lat?: number | null; lng?: number | null }, radius = 22) {
@@ -9717,13 +9756,7 @@ function MapScreen() {
                     <Text style={s.nearbyPlacesEmpty}>{feed?.error ?? 'No useful nearby places loaded yet'}</Text>
                   ) : (
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.nearbyPlaceRail}>
-                      {(feed?.places ?? []).slice(0, 10).map(place => (
-                        <TouchableOpacity key={place.id || `${place.type}:${place.lat}:${place.lng}`} style={s.nearbyPlaceCard} onPress={() => openNearbyPlace(place)} activeOpacity={0.86}>
-                          <Ionicons name={placeTypeIcon(place.type) as any} size={15} color={C.orange} />
-                          <Text style={s.nearbyPlaceName} numberOfLines={2}>{place.name || cleanDisplayLabel(place.type) || 'Place'}</Text>
-                          <Text style={s.nearbyPlaceMeta} numberOfLines={1}>{[place.type?.replace(/_/g, ' '), (place as any).distance_mi != null ? `${Number((place as any).distance_mi).toFixed(1)} mi` : ''].filter(Boolean).join(' · ')}</Text>
-                        </TouchableOpacity>
-                      ))}
+                      {(feed?.places ?? []).slice(0, 10).map(place => renderNearbyPlaceCard(place))}
                     </ScrollView>
                   )}
                 </View>
@@ -10041,13 +10074,7 @@ function MapScreen() {
                         <Text style={s.nearbyPlacesEmpty}>{feed?.error ?? 'No nearby discovery loaded yet'}</Text>
                       ) : (
                         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.nearbyPlaceRail}>
-                          {(feed?.places ?? []).slice(0, 12).map(place => (
-                            <TouchableOpacity key={place.id || `${place.type}:${place.lat}:${place.lng}`} style={s.nearbyPlaceCard} onPress={() => openNearbyPlace(place)} activeOpacity={0.86}>
-                              <Ionicons name={placeTypeIcon(place.type) as any} size={15} color={C.orange} />
-                              <Text style={s.nearbyPlaceName} numberOfLines={2}>{place.name || cleanDisplayLabel(place.type) || 'Place'}</Text>
-                              <Text style={s.nearbyPlaceMeta} numberOfLines={1}>{[place.type?.replace(/_/g, ' '), (place as any).distance_mi != null ? `${Number((place as any).distance_mi).toFixed(1)} mi` : ''].filter(Boolean).join(' · ')}</Text>
-                            </TouchableOpacity>
-                          ))}
+                          {(feed?.places ?? []).slice(0, 12).map(place => renderNearbyPlaceCard(place))}
                         </ScrollView>
                       )}
                     </View>
@@ -13326,7 +13353,11 @@ const makeStyles = (C: ColorPalette) => {
   nearbyPlacesTitle: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
   nearbyPlacesEmpty: { color: C.text3, fontSize: 11, lineHeight: 15 },
   nearbyPlaceRail: { gap: 8, paddingRight: 4 },
-  nearbyPlaceCard: { width: 132, minHeight: 92, borderWidth: 1, borderColor: C.border, backgroundColor: C.s2, borderRadius: 12, padding: 10, gap: 6 },
+  nearbyPlaceCard: { width: 142, minHeight: 132, borderWidth: 1, borderColor: C.border, backgroundColor: C.s2, borderRadius: 12, overflow: 'hidden' },
+  nearbyPlaceCardCompact: { minHeight: 112 },
+  nearbyPlacePhoto: { width: '100%', height: 72, backgroundColor: C.s3 },
+  nearbyPlaceIconBlock: { width: '100%', height: 72, alignItems: 'center', justifyContent: 'center', backgroundColor: C.orange + '12', borderBottomWidth: 1, borderBottomColor: C.border },
+  nearbyPlaceBody: { padding: 9, gap: 4, minHeight: 58 },
   nearbyPlaceName: { color: C.text, fontSize: 12, lineHeight: 16, fontWeight: '800' },
   nearbyPlaceMeta: { color: C.text3, fontSize: 9, fontFamily: mono },
   quickCardActions: { flexDirection: 'row', gap: 8, marginTop: 2 },

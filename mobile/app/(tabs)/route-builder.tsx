@@ -842,6 +842,7 @@ export default function RouteBuilderScreen() {
   const [activePlaceFilters, setActivePlaceFilters] = useState<string[]>(DEFAULT_PLACE_FILTERS);
   const [showPlaceFilters, setShowPlaceFilters] = useState(false);
   const [selectedCamp, setSelectedCamp] = useState<CampsitePin | null>(null);
+  const selectedCampRef = useRef<CampsitePin | null>(null);
   const [campDetail, setCampDetail] = useState<CampsiteDetail | null>(null);
   const [campWeather, setCampWeather] = useState<WeatherForecast | null>(null);
   const [campFullness, setCampFullness] = useState<CampFullness | null>(null);
@@ -854,6 +855,10 @@ export default function RouteBuilderScreen() {
   const [paywallCode, setPaywallCode] = useState('camp_detail');
   const [paywallMessage, setPaywallMessage] = useState('Use credits or Explorer to open full campsite profiles. You can still add this camp to your route from the free preview.');
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+
+  useEffect(() => {
+    selectedCampRef.current = selectedCamp;
+  }, [selectedCamp]);
 
   useEffect(() => {
     wizardFade.setValue(0);
@@ -1758,18 +1763,27 @@ export default function RouteBuilderScreen() {
 
   async function loadFullCampDetail() {
     if (!selectedCamp) return;
+    const camp = selectedCamp;
     setDetailLoading(true);
     try {
-      const detail = await enrichCampDetailWithGoogle(await api.getCampsiteDetail(selectedCamp.id), selectedCamp);
+      const detail = await enrichCampDetailWithGoogle(await api.getCampsiteDetail(camp.id), camp);
+      if (selectedCampRef.current?.id !== camp.id) {
+        setDetailLoading(false);
+        return;
+      }
       const insight = await api.getCampsiteInsight({
-        name: selectedCamp.name,
-        lat: selectedCamp.lat,
-        lng: selectedCamp.lng,
-        description: stripHtml(detail.description || selectedCamp.description),
-        land_type: detail.land_type || selectedCamp.land_type,
+        name: camp.name,
+        lat: camp.lat,
+        lng: camp.lng,
+        description: stripHtml(detail.description || camp.description),
+        land_type: detail.land_type || camp.land_type,
         amenities: detail.amenities ?? [],
-        facility_id: selectedCamp.id ?? '',
+        facility_id: camp.id ?? '',
       });
+      if (selectedCampRef.current?.id !== camp.id) {
+        setDetailLoading(false);
+        return;
+      }
       setCampDetail({ ...detail, description: stripHtml(detail.description) });
       setCampInsight(insight);
       setShowCampDetail(true);
@@ -1779,16 +1793,21 @@ export default function RouteBuilderScreen() {
         setPaywallMessage(e.message || 'Use credits or Explorer to open full campsite profiles. You can still add this camp to your route from the free preview.');
         setPaywallVisible(true);
       } else {
-        setCampDetail(await enrichCampDetailWithGoogle({
-          ...selectedCamp,
-          photos: selectedCamp.photo_url ? [selectedCamp.photo_url] : [],
+        const fallbackDetail = await enrichCampDetailWithGoogle({
+          ...camp,
+          photos: camp.photo_url ? [camp.photo_url] : [],
           amenities: [],
-          site_types: selectedCamp.tags ?? [],
+          site_types: camp.tags ?? [],
           activities: [],
           campsites_count: 0,
-          source: selectedCamp.verified_source ?? selectedCamp.source,
-          description: stripHtml(selectedCamp.description) || 'This camp has a route preview, but a full profile has not been built yet. You can still add it to the trip and replace it later from the route.',
-        } as CampsiteDetail, selectedCamp));
+          source: camp.verified_source ?? camp.source,
+          description: stripHtml(camp.description) || 'This camp has a route preview, but a full profile has not been built yet. You can still add it to the trip and replace it later from the route.',
+        } as CampsiteDetail, camp);
+        if (selectedCampRef.current?.id !== camp.id) {
+          setDetailLoading(false);
+          return;
+        }
+        setCampDetail(fallbackDetail);
         setCampInsight(null);
         setShowCampDetail(true);
       }

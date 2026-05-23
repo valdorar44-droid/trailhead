@@ -172,7 +172,7 @@ export const api = {
   getGas: (lat: number, lng: number, radius = 25) =>
     req<GasStation[]>(`/api/gas?lat=${lat}&lng=${lng}&radius=${radius}`),
   getCampsiteDetail: (id: string) =>
-    req<CampsiteDetail>(`/api/campsites/${id}/detail`),
+    req<CampsiteDetail>(`/api/campsites/${encodeURIComponent(id)}/detail`),
   suggestCampsiteEdit: (id: string, data: CampEditSuggestionPayload) =>
     req<{ id: number; status: string; credits_earned: number; new_balance: number }>(`/api/campsites/${encodeURIComponent(id)}/suggest-edit`, {
       method: 'POST', body: JSON.stringify(data),

@@ -3027,6 +3027,7 @@ function MapScreen() {
     loadedAt?: number;
   }>>({});
   const [selectedCamp,  setSelectedCamp]  = useState<CampsitePin | null>(null);
+  const selectedCampRef = useRef<CampsitePin | null>(null);
   const [selectedPlace, setSelectedPlace] = useState<SearchPlace | null>(null);
   const [campDetail,    setCampDetail]    = useState<CampsiteDetail | null>(null);
   const [showCampDetail,setShowCampDetail] = useState(false);
@@ -3036,6 +3037,10 @@ function MapScreen() {
   const [campEditDraft, setCampEditDraft] = useState<CampEditDraft | null>(null);
   const [campEditSaving, setCampEditSaving] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
+
+  useEffect(() => {
+    selectedCampRef.current = selectedCamp;
+  }, [selectedCamp]);
 
   // Field reports
   const [fieldReports,      setFieldReports]      = useState<CampFieldReport[]>([]);
@@ -4620,11 +4625,21 @@ function MapScreen() {
       const insight = await api.getCampsiteInsight({ name: camp.name, lat: camp.lat, lng: camp.lng,
         description: camp.description, land_type: camp.land_type,
         amenities: detail?.amenities ?? [], facility_id: camp.id ?? '' });
+      if (selectedCampRef.current?.id !== camp.id) {
+        setLoadingWiki(false);
+        return false;
+      }
       setCampInsight(insight);
       api.getWikipediaNearby(camp.lat, camp.lng, 15000)
-        .then(setWikiArticles)
-        .catch(() => setWikiArticles([]))
-        .finally(() => setLoadingWiki(false));
+        .then(articles => {
+          if (selectedCampRef.current?.id === camp.id) setWikiArticles(articles);
+        })
+        .catch(() => {
+          if (selectedCampRef.current?.id === camp.id) setWikiArticles([]);
+        })
+        .finally(() => {
+          if (selectedCampRef.current?.id === camp.id) setLoadingWiki(false);
+        });
       return true;
     } catch (e: any) {
       setLoadingWiki(false);
@@ -4634,7 +4649,7 @@ function MapScreen() {
       }
       return true;
     } finally {
-      setLoadingInsight(false);
+      if (selectedCampRef.current?.id === camp.id) setLoadingInsight(false);
     }
   }
 
@@ -5417,6 +5432,7 @@ function MapScreen() {
 
   async function openCampDetail() {
     if (!selectedCamp) return;
+    const camp = selectedCamp;
     setLoadingDetail(true);
     setCampInsight(null);
     setWikiArticles([]);
@@ -5429,13 +5445,21 @@ function MapScreen() {
     resetFieldReportForm();
     let detail: CampsiteDetail;
     try {
-      detail = await api.getCampsiteDetail(selectedCamp.id);
+      detail = await api.getCampsiteDetail(camp.id);
     } catch {
-      detail = minimalCampDetail(selectedCamp);
+      detail = minimalCampDetail(camp);
     }
-    detail = await enrichCampDetailWithGoogle(detail, selectedCamp);
-    const canOpen = await openCampInsight(selectedCamp, detail);
+    detail = await enrichCampDetailWithGoogle(detail, camp);
+    if (selectedCampRef.current?.id !== camp.id) {
+      setLoadingDetail(false);
+      return;
+    }
+    const canOpen = await openCampInsight(camp, detail);
     if (!canOpen) {
+      setLoadingDetail(false);
+      return;
+    }
+    if (selectedCampRef.current?.id !== camp.id) {
       setLoadingDetail(false);
       return;
     }
@@ -5450,9 +5474,15 @@ function MapScreen() {
       })
       .catch(() => {});
     // Load field reports in background
-    api.getFieldReports(selectedCamp.id).then(setFieldReports).catch(() => {});
-    api.getFieldReportSummary(selectedCamp.id).then(setFieldReportSummary).catch(() => {});
-    api.getCampComments(selectedCamp.id).then(setCampComments).catch(() => {});
+    api.getFieldReports(camp.id).then(r => {
+      if (selectedCampRef.current?.id === camp.id) setFieldReports(r);
+    }).catch(() => {});
+    api.getFieldReportSummary(camp.id).then(r => {
+      if (selectedCampRef.current?.id === camp.id) setFieldReportSummary(r);
+    }).catch(() => {});
+    api.getCampComments(camp.id).then(r => {
+      if (selectedCampRef.current?.id === camp.id) setCampComments(r);
+    }).catch(() => {});
   }
 
   function closeCampDetail() {

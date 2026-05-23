@@ -14,10 +14,14 @@ from typing import Iterable
 from urllib.parse import quote
 
 import httpx
+from db.store import get_cached, set_cached
 
 FSQ_SEARCH_URL = "https://places-api.foursquare.com/places/search"
 FSQ_DETAIL_URL = "https://places-api.foursquare.com/places/{fsq_id}"
 FSQ_LEGACY_DETAIL_URL = "https://api.foursquare.com/v3/places/{fsq_id}"
+FSQ_PERMISSION_BACKOFF_KEY = "foursquare_permission_backoff_v1"
+FSQ_QUOTA_BACKOFF_KEY = "foursquare_quota_backoff_v1"
+FSQ_BACKOFF_TTL_SECONDS = 6 * 3600
 log = logging.getLogger(__name__)
 
 FSQ_CATEGORY_QUERIES: dict[str, str] = {
@@ -123,6 +127,21 @@ def _headers() -> dict[str, str]:
         "Accept": "application/json",
         "X-Places-Api-Version": "2025-06-17",
     }
+
+
+def _foursquare_blocked() -> bool:
+    return (
+        get_cached("campsite_cache", FSQ_PERMISSION_BACKOFF_KEY, ttl_seconds=FSQ_BACKOFF_TTL_SECONDS) is not None
+        or get_cached("campsite_cache", FSQ_QUOTA_BACKOFF_KEY, ttl_seconds=FSQ_BACKOFF_TTL_SECONDS) is not None
+    )
+
+
+def _remember_foursquare_block(status_code: int, text: str, scope: str) -> None:
+    payload = {"status_code": status_code, "scope": scope, "message": text[:240], "empty": True}
+    if status_code in {401, 403}:
+        set_cached("campsite_cache", FSQ_PERMISSION_BACKOFF_KEY, payload)
+    elif status_code == 429:
+        set_cached("campsite_cache", FSQ_QUOTA_BACKOFF_KEY, payload)
 
 
 def _coord(place: dict) -> tuple[float, float] | None:
@@ -274,6 +293,8 @@ async def _search_category(lat: float, lng: float, radius_m: int, category: str,
     if not api_key:
         log.info("Foursquare Places disabled: FOURSQUARE_API_KEY is not set")
         return []
+    if _foursquare_blocked():
+        return []
 
     params = {
         "ll": f"{lat:.6f},{lng:.6f}",
@@ -289,6 +310,7 @@ async def _search_category(lat: float, lng: float, radius_m: int, category: str,
             res = await client.get(FSQ_SEARCH_URL, params=params, headers=_headers())
             if res.status_code in {401, 403, 429}:
                 log.warning("Foursquare Places returned %s for category=%s: %s", res.status_code, category, res.text[:240])
+                _remember_foursquare_block(res.status_code, res.text, "search")
                 return []
             res.raise_for_status()
             body = res.json()
@@ -313,6 +335,8 @@ async def get_foursquare_place_detail(fsq_id: str) -> dict | None:
     clean_id = quote(str(fsq_id or "").replace("foursquare:", "").strip(), safe="")
     if not clean_id or not foursquare_enabled():
         return None
+    if _foursquare_blocked():
+        return None
 
     params = {"fields": FSQ_DETAIL_FIELDS}
     body: dict | None = None
@@ -323,6 +347,7 @@ async def get_foursquare_place_detail(fsq_id: str) -> dict | None:
                 res = await client.get(FSQ_LEGACY_DETAIL_URL.format(fsq_id=clean_id), params=params, headers=_headers())
             if res.status_code in {400, 401, 403, 404, 429}:
                 log.warning("Foursquare detail returned %s for %s: %s", res.status_code, clean_id, res.text[:240])
+                _remember_foursquare_block(res.status_code, res.text, "detail")
                 return None
             res.raise_for_status()
             body = res.json()

@@ -13,6 +13,11 @@ from db.store import get_cached, set_cached
 GOOGLE_NEARBY_URL = "https://places.googleapis.com/v1/places:searchNearby"
 GOOGLE_TEXT_URL = "https://places.googleapis.com/v1/places:searchText"
 GOOGLE_DETAIL_URL = "https://places.googleapis.com/v1/places"
+GOOGLE_PERMISSION_BACKOFF_KEY = "google_places_permission_backoff_v1"
+GOOGLE_NEARBY_QUOTA_BACKOFF_KEY = "google_places_nearby_quota_backoff_v1"
+GOOGLE_TEXT_ERROR_TTL_SECONDS = 15 * 60
+GOOGLE_TEXT_EMPTY_TTL_SECONDS = 12 * 3600
+GOOGLE_QUOTA_BACKOFF_TTL_SECONDS = 6 * 3600
 log = logging.getLogger(__name__)
 
 GOOGLE_TYPE_MAP: dict[str, list[str]] = {
@@ -120,6 +125,22 @@ def _photo_url(photo_name: str | None, max_width: int = 900) -> str:
     return f"/api/places/google/photo?name={quote(photo_name, safe='')}&max_width={max_width}"
 
 
+def _google_permission_blocked() -> bool:
+    return get_cached("campsite_cache", GOOGLE_PERMISSION_BACKOFF_KEY, ttl_seconds=GOOGLE_TEXT_ERROR_TTL_SECONDS) is not None
+
+
+def _google_nearby_quota_blocked() -> bool:
+    return get_cached("campsite_cache", GOOGLE_NEARBY_QUOTA_BACKOFF_KEY, ttl_seconds=GOOGLE_QUOTA_BACKOFF_TTL_SECONDS) is not None
+
+
+def _remember_google_block(status_code: int, text: str, scope: str) -> None:
+    payload = {"status_code": status_code, "scope": scope, "message": text[:240], "empty": True}
+    if status_code in {401, 403}:
+        set_cached("campsite_cache", GOOGLE_PERMISSION_BACKOFF_KEY, payload)
+    elif status_code == 429:
+        set_cached("campsite_cache", GOOGLE_NEARBY_QUOTA_BACKOFF_KEY, payload)
+
+
 def _category_for_types(types: list[str], requested: str) -> str:
     type_set = set(types or [])
     if {"campground", "rv_park"} & type_set:
@@ -195,6 +216,8 @@ async def get_google_places(
 ) -> list[dict]:
     if not google_places_enabled():
         return []
+    if _google_permission_blocked() or _google_nearby_quota_blocked():
+        return []
     requested = sorted(
         {c for c in (categories or []) if c in GOOGLE_TYPE_MAP},
         key=lambda c: (GOOGLE_CATEGORY_PRIORITY.get(c, 50), c),
@@ -221,6 +244,7 @@ async def get_google_places(
                 res = await client.post(GOOGLE_NEARBY_URL, json=body, headers=_headers(SUMMARY_FIELDS))
                 if res.status_code in {400, 401, 403, 429}:
                     log.warning("Google Places nearby returned %s for category=%s: %s", res.status_code, category, res.text[:240])
+                    _remember_google_block(res.status_code, res.text, "nearby")
                     return []
                 res.raise_for_status()
                 body_json = res.json()
@@ -259,9 +283,15 @@ async def search_google_places_text(
     """Search Google Places by free-form text for rich selected-search cards."""
     if not google_places_enabled() or not query.strip():
         return []
+    if _google_permission_blocked():
+        return []
     normalized_query = " ".join(query.strip().lower().split())
-    empty_key = f"google_text_empty_v1:{normalized_query}:{float(lat or 0):.3f}:{float(lng or 0):.3f}"
-    if get_cached("campsite_cache", empty_key, ttl_seconds=3600 * 12) is not None:
+    cache_suffix = f"{normalized_query}:{float(lat or 0):.3f}:{float(lng or 0):.3f}"
+    empty_key = f"google_text_empty_v1:{cache_suffix}"
+    error_key = f"google_text_error_v1:{cache_suffix}"
+    if get_cached("campsite_cache", empty_key, ttl_seconds=GOOGLE_TEXT_EMPTY_TTL_SECONDS) is not None:
+        return []
+    if get_cached("campsite_cache", error_key, ttl_seconds=GOOGLE_TEXT_ERROR_TTL_SECONDS) is not None:
         return []
     body: dict = {
         "textQuery": query.strip(),
@@ -279,13 +309,14 @@ async def search_google_places_text(
             res = await client.post(GOOGLE_TEXT_URL, json=body, headers=_headers(SUMMARY_FIELDS))
             if res.status_code in {400, 401, 403, 429}:
                 log.warning("Google Places text search returned %s for %r: %s", res.status_code, query, res.text[:240])
-                set_cached("campsite_cache", empty_key, {"status_code": res.status_code, "empty": True})
+                set_cached("campsite_cache", error_key, {"status_code": res.status_code, "empty": True})
+                _remember_google_block(res.status_code, res.text, "text")
                 return []
             res.raise_for_status()
             payload = res.json()
     except Exception as exc:
         log.warning("Google Places text search failed for %r: %s", query, exc)
-        set_cached("campsite_cache", empty_key, {"error": str(exc)[:120], "empty": True})
+        set_cached("campsite_cache", error_key, {"error": str(exc)[:120], "empty": True})
         return []
     places = []
     for item in payload.get("places") or []:
@@ -300,12 +331,15 @@ async def search_google_places_text(
 async def get_google_place_detail(place_id: str) -> dict | None:
     if not google_places_enabled() or not place_id:
         return None
+    if _google_permission_blocked():
+        return None
     clean_id = place_id.replace("google:", "").strip()
     try:
         async with httpx.AsyncClient(timeout=8) as client:
             res = await client.get(f"{GOOGLE_DETAIL_URL}/{quote(clean_id, safe='')}", headers=_headers(DETAIL_FIELDS))
             if res.status_code in {400, 401, 403, 404, 429}:
                 log.warning("Google Places detail returned %s for %s: %s", res.status_code, clean_id, res.text[:240])
+                _remember_google_block(res.status_code, res.text, "detail")
                 return None
             res.raise_for_status()
             place = res.json()
@@ -360,6 +394,8 @@ async def get_google_place_detail(place_id: str) -> dict | None:
 async def fetch_google_photo(photo_name: str, max_width: int = 900) -> tuple[bytes, str] | None:
     if not google_places_enabled() or not photo_name:
         return None
+    if _google_permission_blocked():
+        return None
     max_width = max(120, min(int(max_width), 1600))
     url = f"https://places.googleapis.com/v1/{photo_name}/media"
     try:
@@ -367,6 +403,7 @@ async def fetch_google_photo(photo_name: str, max_width: int = 900) -> tuple[byt
             res = await client.get(url, params={"maxWidthPx": max_width, "key": os.getenv("GOOGLE_PLACES_API_KEY", "").strip()})
             if res.status_code in {400, 401, 403, 404, 429}:
                 log.warning("Google Places photo returned %s for %s", res.status_code, photo_name)
+                _remember_google_block(res.status_code, f"photo {photo_name}", "photo")
                 return None
             res.raise_for_status()
             return res.content, res.headers.get("content-type", "image/jpeg")

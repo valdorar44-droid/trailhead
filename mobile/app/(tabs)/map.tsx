@@ -5443,11 +5443,14 @@ function MapScreen() {
 
   async function enrichCampDetailWithGoogle(detail: CampsiteDetail, camp: CampsitePin): Promise<CampsiteDetail> {
     const source = String(camp.source || detail.source || '').toLowerCase();
-    const id = camp.provider_place_id || camp.place_id || (String(camp.id || '').startsWith('google:') ? String(camp.id).replace(/^google:/, '') : '');
-    if (!id || source !== 'google') return detail;
+    const rawId = String(camp.id || '');
+    const id = camp.provider_place_id || camp.place_id ||
+      (rawId.startsWith('google:') ? rawId.replace(/^google:/, '') : rawId.startsWith('foursquare:') ? rawId.replace(/^foursquare:/, '') : '');
+    const provider = source === 'google' || source === 'foursquare' ? source : rawId.startsWith('foursquare:') ? 'foursquare' : rawId.startsWith('google:') ? 'google' : '';
+    if (!id || !provider) return detail;
     try {
-      const place = await api.getPlaceDetail('google', id);
-      const googlePhotos = (place.photos ?? []).map(photo => mediaUrl(photo.url)).filter(Boolean);
+      const place = await api.getPlaceDetail(provider, id);
+      const providerPhotos = (place.photos ?? []).map(photo => mediaUrl(photo.url)).filter(Boolean);
       return {
         ...detail,
         phone: detail.phone || place.phone,
@@ -5455,11 +5458,11 @@ function MapScreen() {
         rating: detail.rating ?? place.rating,
         rating_count: detail.rating_count ?? place.rating_count,
         url: detail.url || place.website || place.google_maps_uri || '',
-        photos: detail.photos?.length ? detail.photos : googlePhotos,
+        photos: detail.photos?.length ? detail.photos : providerPhotos,
         reviews: place.reviews ?? detail.reviews,
-        media_source: detail.photos?.length ? 'mixed' : 'google',
-        verified_source: detail.verified_source || 'Google Places',
-        source: detail.source || 'google',
+        media_source: detail.photos?.length ? 'mixed' : provider,
+        verified_source: detail.verified_source || place.source_label || (provider === 'google' ? 'Google Places' : 'Foursquare'),
+        source: detail.source || provider,
       };
     } catch {
       return detail;
@@ -9616,12 +9619,12 @@ function MapScreen() {
 
                 {(campDetail.reviews ?? []).length > 0 && (
                   <View style={s.detailSection}>
-                    <Text style={s.detailSectionTitle}>GOOGLE REVIEWS</Text>
+                    <Text style={s.detailSectionTitle}>{campDetail.source === 'foursquare' || campDetail.media_source === 'foursquare' ? 'FOURSQUARE TIPS' : 'GOOGLE REVIEWS'}</Text>
                     {(campDetail.reviews ?? []).slice(0, 3).map((review, idx) => (
                       <View key={`${review.authorName}-${idx}`} style={s.campReviewCard}>
                         <View style={s.campReviewTop}>
-                          <Text style={s.campReviewAuthor} numberOfLines={1}>{review.authorName || 'Google user'}</Text>
-                          <Text style={s.campReviewRating}>{review.rating ? `${review.rating}/5` : 'Google'}</Text>
+                          <Text style={s.campReviewAuthor} numberOfLines={1}>{review.authorName || (campDetail.source === 'foursquare' ? 'Foursquare tip' : 'Google user')}</Text>
+                          <Text style={s.campReviewRating}>{review.rating ? `${review.rating}/5` : review.source || (campDetail.source === 'foursquare' ? 'Foursquare' : 'Google')}</Text>
                         </View>
                         {!!review.relativeTime && <Text style={s.campReviewMeta}>{review.relativeTime}</Text>}
                         {!!review.text && <Text style={s.campReviewText} numberOfLines={4}>{review.text}</Text>}

@@ -22,7 +22,7 @@ from ai.planner import plan_trip, chat_guide, edit_trip, plan_trip_from_conversa
 from dashboard.route_enrichment import enrich_trip_along_route
 from ingestors.ridb import get_campsites_near, get_campsites_search, get_facility_detail
 from ingestors.osm import get_osm_campsites, get_osm_campsite_detail, get_water_sources, get_trailheads, get_trails, get_viewpoints, get_peaks, get_hot_springs, get_fuel_stations, get_service_places
-from ingestors.foursquare import FSQ_BUSINESS_CATEGORIES, foursquare_enabled, get_foursquare_places
+from ingestors.foursquare import FSQ_BUSINESS_CATEGORIES, foursquare_enabled, get_foursquare_place_detail, get_foursquare_places
 from ingestors.google_places import fetch_google_photo, get_google_place_detail, get_google_places, google_places_enabled
 from ingestors.blm import get_blm_campsites, get_blm_campsite_detail
 from db.store import (
@@ -4962,22 +4962,84 @@ def _camp_merge_key(camp: dict) -> str:
         lat = lng = 0
     return f"{name}:{lat}:{lng}"
 
+_CAMP_CHILD_SITE_RE = re.compile(r"\b(group\s+site|site|loop|campsite|camp\s*site|area|unit)\s*#?\s*[a-z0-9-]+\b", re.I)
+
+def _camp_cluster_name(value: object) -> str:
+    name = re.sub(r"\s+", " ", str(value or "").lower()).strip()
+    name = re.sub(r"\([^)]*\)", " ", name)
+    name = _CAMP_CHILD_SITE_RE.sub(" ", name)
+    name = re.sub(r"\b(group|standard|tent|rv|primitive|walk[- ]?in|drive[- ]?in|single|double|site|loop|area|unit)\b", " ", name)
+    return re.sub(r"[^a-z0-9]+", "", name)[:42]
+
+def _camp_source_rank(camp: dict) -> int:
+    source = str(camp.get("source") or camp.get("verified_source") or "").lower()
+    verified = str(camp.get("verified_source") or "").lower()
+    if any(v in source or v in verified for v in ("ridb", "recreation.gov", "nps")):
+        return 0
+    if "blm" in source or "blm" in verified:
+        return 1
+    if "google" in source or "google" in verified:
+        return 2
+    if "osm" in source or "openstreetmap" in verified:
+        return 3
+    if "foursquare" in source or "foursquare" in verified:
+        return 5
+    return 4
+
+def _camp_distance_m(a: dict, b: dict) -> float:
+    try:
+        return _haversine_m(float(a.get("lat")), float(a.get("lng")), float(b.get("lat")), float(b.get("lng")))
+    except Exception:
+        return 999999.0
+
+def _merge_camp_record(existing: dict, incoming: dict) -> dict:
+    primary, secondary = (incoming, existing) if _camp_source_rank(incoming) < _camp_source_rank(existing) else (existing, incoming)
+    merged = dict(primary)
+    merged["alternate_sources"] = sorted(set([
+        *(existing.get("alternate_sources") or []),
+        *(incoming.get("alternate_sources") or []),
+        str(existing.get("verified_source") or existing.get("source") or "").strip(),
+        str(incoming.get("verified_source") or incoming.get("source") or "").strip(),
+    ]) - {""})
+    for key in ("photo_url", "description", "url", "phone", "address", "rating", "rating_count", "provider_place_id", "place_id"):
+        if not merged.get(key):
+            merged[key] = secondary.get(key)
+    merged_tags = sorted(set((existing.get("tags") or []) + (incoming.get("tags") or [])))
+    if merged_tags:
+        merged["tags"] = merged_tags
+    if not merged.get("photos") and secondary.get("photos"):
+        merged["photos"] = secondary.get("photos")
+    if not merged.get("reviews") and secondary.get("reviews"):
+        merged["reviews"] = secondary.get("reviews")
+    return merged
+
 def _merge_camp_sources(*sources: list[dict], type_filters: list[str] | None = None) -> list[dict]:
     seen_ids: set[str] = set()
-    seen_near: set[str] = set()
     merged: list[dict] = []
     for source in sources:
         for camp in source:
             if type_filters and not any(t in camp.get("tags", []) for t in type_filters):
                 continue
             camp_id = str(camp.get("id") or "")
-            near_key = _camp_merge_key(camp)
-            if camp_id in seen_ids or near_key in seen_near:
+            if camp_id in seen_ids:
                 continue
             seen_ids.add(camp_id)
-            seen_near.add(near_key)
-            merged.append(camp)
-    return merged
+            cluster_name = _camp_cluster_name(camp.get("name"))
+            replaced = False
+            for idx, existing in enumerate(merged):
+                same_named_cluster = cluster_name and cluster_name == _camp_cluster_name(existing.get("name")) and _camp_distance_m(camp, existing) <= 260
+                same_site_cluster = _camp_distance_m(camp, existing) <= 220 and (
+                    cluster_name == _camp_cluster_name(existing.get("name")) or
+                    re.search(r"\b(group\s+site|site|loop|area)\b", str(camp.get("name") or ""), re.I) or
+                    re.search(r"\b(group\s+site|site|loop|area)\b", str(existing.get("name") or ""), re.I)
+                )
+                if same_named_cluster or same_site_cluster:
+                    merged[idx] = _merge_camp_record(existing, camp)
+                    replaced = True
+                    break
+            if not replaced:
+                merged.append(camp)
+    return sorted(merged, key=_camp_source_rank)
 
 def _camp_from_live_place(place: dict) -> dict | None:
     """Convert commercial campground/RV park provider results into camp pins."""
@@ -4992,6 +5054,13 @@ def _camp_from_live_place(place: dict) -> dict | None:
     source = str(place.get("source") or "places").lower()
     subtype = str(place.get("subtype") or "").strip()
     type_text = f"{subtype} {place.get('type') or ''}".lower()
+    if str(place.get("type") or "").lower() != "camp":
+        return None
+    non_camp = ("college", "university", "school", "campus", "summer camp", "boot camp", "training camp")
+    campish = ("campground", "camp ground", "campsite", "camp site", "rv park", "recreational vehicle", "caravan")
+    combined = f"{name} {type_text} {place.get('address') or ''}".lower()
+    if any(term in combined for term in non_camp) or not any(term in combined for term in campish):
+        return None
     tags = ["commercial", "campground"]
     land_type = "RV Park" if "rv" in type_text else "Commercial Campground"
     if "rv" in type_text:
@@ -5017,6 +5086,8 @@ def _camp_from_live_place(place: dict) -> dict | None:
         "address": place.get("address") or "",
         "provider_place_id": place.get("provider_place_id") or place.get("place_id") or "",
         "place_id": place.get("place_id") or "",
+        "photos": place.get("photos") or [],
+        "reviews": place.get("reviews") or [],
     }
 
 @app.get("/api/nearby-camps")
@@ -5780,6 +5851,7 @@ async def nearby_places(
         seen.add(fuzzy_key)
         item["distance_mi"] = round(dist_mi(item), 2)
         merged.append(item)
+    merged = _dedupe_nearby_places(merged)
     return _balanced_nearby_places(merged, category_set, dist_mi, limit=80)
 
 
@@ -5814,6 +5886,20 @@ def _place_type_priority(value: object) -> int:
     return OUTDOOR_PLACE_PRIORITY.get(_smart_pack_type(value), 50)
 
 
+def _place_cluster_name(value: object) -> str:
+    name = re.sub(r"\s+", " ", str(value or "").lower()).strip()
+    name = re.sub(r"\([^)]*\)", " ", name)
+    name = re.sub(r"\b(group\s+site|site|loop|area|unit)\s*#?\s*[a-z0-9-]+\b", " ", name)
+    return re.sub(r"[^a-z0-9]+", "", name)[:42]
+
+
+def _place_distance_m(a: dict, b: dict) -> float:
+    try:
+        return _haversine_m(float(a.get("lat")), float(a.get("lng")), float(b.get("lat")), float(b.get("lng")))
+    except Exception:
+        return 999999.0
+
+
 def _place_source_priority(item: dict) -> int:
     source = str(item.get("source") or item.get("attribution") or "").lower()
     verified = str(item.get("verified_source") or item.get("source_label") or "").lower()
@@ -5828,6 +5914,48 @@ def _place_source_priority(item: dict) -> int:
     if "foursquare" in source or "foursquare" in verified:
         return 8
     return 5
+
+
+def _merge_place_record(existing: dict, incoming: dict) -> dict:
+    primary, secondary = (incoming, existing) if _place_source_priority(incoming) < _place_source_priority(existing) else (existing, incoming)
+    merged = dict(primary)
+    for key in ("photo_url", "summary", "address", "phone", "website", "rating", "rating_count", "google_maps_uri", "provider_place_id", "place_id"):
+        if not merged.get(key):
+            merged[key] = secondary.get(key)
+    for key in ("photos", "reviews"):
+        if not merged.get(key) and secondary.get(key):
+            merged[key] = secondary.get(key)
+    sources = sorted(set([
+        *(existing.get("alternate_sources") or []),
+        *(incoming.get("alternate_sources") or []),
+        str(existing.get("source_label") or existing.get("source") or "").strip(),
+        str(incoming.get("source_label") or incoming.get("source") or "").strip(),
+    ]) - {""})
+    if sources:
+        merged["alternate_sources"] = sources
+    return merged
+
+
+def _dedupe_nearby_places(items: list[dict]) -> list[dict]:
+    deduped: list[dict] = []
+    for item in sorted(items, key=lambda p: (_place_source_priority(p), 0 if p.get("photo_url") else 1)):
+        name_key = _place_cluster_name(item.get("name"))
+        ptype = _smart_pack_type(item.get("type") or item.get("category"))
+        merged = False
+        for idx, existing in enumerate(deduped):
+            existing_type = _smart_pack_type(existing.get("type") or existing.get("category"))
+            if ptype != existing_type:
+                continue
+            same_name = name_key and name_key == _place_cluster_name(existing.get("name"))
+            near_same = _place_distance_m(item, existing) <= (220 if ptype == "camp" else 70)
+            child_site = ptype == "camp" and re.search(r"\b(group\s+site|site|loop|area)\b", f"{item.get('name','')} {existing.get('name','')}", re.I)
+            if (same_name and near_same) or (child_site and near_same):
+                deduped[idx] = _merge_place_record(existing, item)
+                merged = True
+                break
+        if not merged:
+            deduped.append(item)
+    return deduped
 
 
 def _balanced_nearby_places(items: list[dict], requested: set[str], dist_fn, limit: int = 80) -> list[dict]:
@@ -6005,6 +6133,7 @@ async def nearby_smart_pack(body: NearbySmartPackRequest):
         except Exception:
             return 9999.0
 
+    normalized = _dedupe_nearby_places(normalized)
     sorted_normalized = _balanced_nearby_places(normalized, requested, smart_dist, limit=160)
     for item in sorted(sorted_normalized, key=lambda p: (_place_type_priority(p.get("type")), _place_source_priority(p), smart_dist(p), p.get("confidence") != "high", p.get("name", ""))):
         ptype = _smart_pack_type(item.get("type"))
@@ -6042,6 +6171,11 @@ async def place_detail(source: str, place_id: str):
         detail = await get_google_place_detail(place_id)
         if not detail:
             raise HTTPException(404, "Google place detail unavailable")
+        return detail
+    if source in {"foursquare", "fsq"}:
+        detail = await get_foursquare_place_detail(place_id)
+        if not detail:
+            raise HTTPException(404, "Foursquare place detail unavailable")
         return detail
     raise HTTPException(404, "Place detail unavailable for this provider")
 

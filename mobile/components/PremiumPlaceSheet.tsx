@@ -321,12 +321,12 @@ export default function PremiumPlaceSheet({
 
               {stage === 'full' && !!detail?.reviews?.length && (
                 <View style={s.section}>
-                  <Text style={s.sectionLabel}>GOOGLE REVIEWS</Text>
+                  <Text style={s.sectionLabel}>{data.source === 'foursquare' ? 'FOURSQUARE TIPS' : 'GOOGLE REVIEWS'}</Text>
                   {detail.reviews.slice(0, 3).map((review, idx) => (
                     <View key={`${review.authorName}-${idx}`} style={s.reviewCard}>
                       <View style={s.reviewTop}>
-                        <Text style={s.reviewAuthor} numberOfLines={1}>{review.authorName || 'Google user'}</Text>
-                        <Text style={s.reviewRating}>{review.rating ? `${review.rating}/5` : 'Google'}</Text>
+                        <Text style={s.reviewAuthor} numberOfLines={1}>{review.authorName || (data.source === 'foursquare' ? 'Foursquare tip' : 'Google user')}</Text>
+                        <Text style={s.reviewRating}>{review.rating ? `${review.rating}/5` : review.source || (data.source === 'foursquare' ? 'Foursquare' : 'Google')}</Text>
                       </View>
                       {!!review.relativeTime && <Text style={s.reviewMeta}>{review.relativeTime}</Text>}
                       {!!review.text && <Text style={s.reviewText} numberOfLines={4}>{review.text}</Text>}

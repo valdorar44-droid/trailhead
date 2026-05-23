@@ -2,8 +2,8 @@
 
 This module is server-only: the API key stays on Railway and mobile clients use
 Trailhead's `/api/places/nearby` endpoint. Full Foursquare place attributes are
-not persisted because pay-as-you-go/sandbox Places API usage does not permit
-server-side attribute caching.
+kept live/fallback-safe because Places usage rules can limit server-side
+attribute caching.
 """
 from __future__ import annotations
 
@@ -11,10 +11,13 @@ import os
 import logging
 import asyncio
 from typing import Iterable
+from urllib.parse import quote
 
 import httpx
 
 FSQ_SEARCH_URL = "https://places-api.foursquare.com/places/search"
+FSQ_DETAIL_URL = "https://places-api.foursquare.com/places/{fsq_id}"
+FSQ_LEGACY_DETAIL_URL = "https://api.foursquare.com/v3/places/{fsq_id}"
 log = logging.getLogger(__name__)
 
 FSQ_CATEGORY_QUERIES: dict[str, str] = {
@@ -52,8 +55,74 @@ FSQ_CATEGORY_PRIORITY = {
     "propane": 13,
 }
 
+FSQ_SUMMARY_FIELDS = ",".join([
+    "fsq_id",
+    "fsq_place_id",
+    "name",
+    "geocodes",
+    "location",
+    "categories",
+    "distance",
+    "link",
+    "closed_bucket",
+    "tel",
+    "website",
+    "hours",
+    "rating",
+    "stats",
+    "photos",
+    "tips",
+    "description",
+    "venue_reality_bucket",
+])
+
+FSQ_DETAIL_FIELDS = ",".join([
+    FSQ_SUMMARY_FIELDS,
+    "email",
+    "social_media",
+    "features",
+    "popularity",
+    "price",
+    "tastes",
+    "timezone",
+])
+
+_FSQ_CAMP_ALLOW = (
+    "campground",
+    "camp ground",
+    "camp site",
+    "campsite",
+    "camping",
+    "rv park",
+    "recreational vehicle",
+    "caravan",
+)
+_FSQ_CAMP_DENY = (
+    "college",
+    "university",
+    "school",
+    "campus",
+    "summer camp",
+    "boot camp",
+    "training camp",
+    "camp store",
+    "campus building",
+    "stadium",
+    "athletic field",
+    "fraternity",
+    "sorority",
+)
+
 def foursquare_enabled() -> bool:
     return bool(os.getenv("FOURSQUARE_API_KEY", "").strip())
+
+
+def _headers() -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {os.getenv('FOURSQUARE_API_KEY', '').strip()}",
+        "Accept": "application/json",
+        "X-Places-Api-Version": "2025-06-17",
+    }
 
 
 def _coord(place: dict) -> tuple[float, float] | None:
@@ -79,22 +148,103 @@ def _address(location: dict) -> str:
     return ", ".join(str(v).strip() for v in bits if str(v or "").strip())
 
 
+def _fsq_place_id(place: dict) -> str:
+    return str(place.get("fsq_place_id") or place.get("fsq_id") or place.get("id") or "").strip()
+
+
+def _category_names(place: dict) -> list[str]:
+    names: list[str] = []
+    for cat in place.get("categories") or []:
+        if isinstance(cat, dict):
+            label = str(cat.get("name") or "").strip()
+            if label:
+                names.append(label)
+    return names
+
+
+def _is_camp_result(place: dict, requested_category: str) -> bool:
+    if requested_category not in {"camp", "camps", "rv_park"}:
+        return True
+    text = " ".join([
+        str(place.get("name") or ""),
+        str(place.get("description") or ""),
+        " ".join(_category_names(place)),
+    ]).lower()
+    if any(term in text for term in _FSQ_CAMP_DENY):
+        return False
+    return any(term in text for term in _FSQ_CAMP_ALLOW)
+
+
+def _fsq_photo_url(photo: dict, size: str = "original") -> str:
+    prefix = str(photo.get("prefix") or "").strip()
+    suffix = str(photo.get("suffix") or "").strip()
+    if not prefix or not suffix:
+        return ""
+    return f"{prefix}{size}{suffix}"
+
+
+def _normalize_photos(place: dict, limit: int = 8) -> list[dict]:
+    photos: list[dict] = []
+    for photo in (place.get("photos") or [])[:limit]:
+        if not isinstance(photo, dict):
+            continue
+        url = _fsq_photo_url(photo, "1000x1000")
+        if not url:
+            continue
+        tip = photo.get("tip") if isinstance(photo.get("tip"), dict) else {}
+        photos.append({
+            "url": url,
+            "caption": str(tip.get("text") or "").strip(),
+            "credit": "Foursquare user photo",
+            "source": "Foursquare",
+        })
+    return photos
+
+
+def _normalize_tips(place: dict, limit: int = 5) -> list[dict]:
+    reviews: list[dict] = []
+    for tip in (place.get("tips") or [])[:limit]:
+        if not isinstance(tip, dict):
+            continue
+        text = str(tip.get("text") or "").strip()
+        if not text:
+            continue
+        reviews.append({
+            "authorName": "Foursquare tip",
+            "relativeTime": str(tip.get("created_at") or "").strip(),
+            "text": text,
+            "profileUrl": str(tip.get("url") or "").strip(),
+            "source": "Foursquare",
+        })
+    return reviews
+
+
 def _normalize_place(place: dict, category: str) -> dict | None:
     coord = _coord(place)
     name = str(place.get("name") or "").strip()
+    fsq_id = _fsq_place_id(place)
     if not coord or not name:
+        return None
+    if not _is_camp_result(place, category):
         return None
     closed_bucket = str(place.get("closed_bucket") or "").lower()
     if closed_bucket in {"very_likely_closed", "likely_closed"}:
         return None
     lat, lng = coord
-    cats = place.get("categories") or []
-    subtype = ""
-    if cats and isinstance(cats[0], dict):
-        subtype = str(cats[0].get("name") or "")
+    category_names = _category_names(place)
+    subtype = category_names[0] if category_names else ""
     normalized_category = "camp" if category in {"camp", "camps", "rv_park"} else category
+    photos = _normalize_photos(place, limit=3)
+    stats = place.get("stats") if isinstance(place.get("stats"), dict) else {}
+    rating = place.get("rating")
+    try:
+        rating = round(float(rating) / 2, 1) if rating is not None else None
+    except Exception:
+        rating = None
     return {
-        "id": f"fsq_{category}_{place.get('fsq_place_id') or place.get('fsq_id') or f'{lat:.5f}_{lng:.5f}'}",
+        "id": f"foursquare:{fsq_id or f'{category}_{lat:.5f}_{lng:.5f}'}",
+        "provider_place_id": fsq_id,
+        "place_id": fsq_id,
         "name": name,
         "lat": lat,
         "lng": lng,
@@ -108,6 +258,12 @@ def _normalize_place(place: dict, category: str) -> dict | None:
         "website": place.get("website") or "",
         "phone": place.get("tel") or place.get("phone") or "",
         "open_now": (place.get("hours") or {}).get("open_now"),
+        "rating": rating,
+        "rating_count": stats.get("total_ratings") or stats.get("total_tips"),
+        "photo_url": photos[0]["url"] if photos else "",
+        "photos": photos,
+        "reviews": _normalize_tips(place, limit=3),
+        "summary": str(place.get("description") or "").strip(),
         "fuel_types": "gas" if category == "fuel" else ("propane" if category == "propane" else ""),
         "elevation": "",
     }
@@ -125,16 +281,12 @@ async def _search_category(lat: float, lng: float, radius_m: int, category: str,
         "query": FSQ_CATEGORY_QUERIES[category],
         "limit": str(max(1, min(limit, 30))),
         "sort": "DISTANCE",
-    }
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Accept": "application/json",
-        "X-Places-Api-Version": "2025-06-17",
+        "fields": FSQ_SUMMARY_FIELDS,
     }
 
     try:
         async with httpx.AsyncClient(timeout=8) as client:
-            res = await client.get(FSQ_SEARCH_URL, params=params, headers=headers)
+            res = await client.get(FSQ_SEARCH_URL, params=params, headers=_headers())
             if res.status_code in {401, 403, 429}:
                 log.warning("Foursquare Places returned %s for category=%s: %s", res.status_code, category, res.text[:240])
                 return []
@@ -150,6 +302,57 @@ async def _search_category(lat: float, lng: float, radius_m: int, category: str,
         if normalized:
             places.append(normalized)
     return places
+
+
+async def get_foursquare_place_detail(fsq_id: str) -> dict | None:
+    """Return live Foursquare detail/photos/tips for a selected place.
+
+    Search can return enough for a preview, but the full card should fetch a
+    detail payload on demand so we do not have to persist rich Foursquare data.
+    """
+    clean_id = quote(str(fsq_id or "").replace("foursquare:", "").strip(), safe="")
+    if not clean_id or not foursquare_enabled():
+        return None
+
+    params = {"fields": FSQ_DETAIL_FIELDS}
+    body: dict | None = None
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            res = await client.get(FSQ_DETAIL_URL.format(fsq_id=clean_id), params=params, headers=_headers())
+            if res.status_code == 404:
+                res = await client.get(FSQ_LEGACY_DETAIL_URL.format(fsq_id=clean_id), params=params, headers=_headers())
+            if res.status_code in {400, 401, 403, 404, 429}:
+                log.warning("Foursquare detail returned %s for %s: %s", res.status_code, clean_id, res.text[:240])
+                return None
+            res.raise_for_status()
+            body = res.json()
+    except Exception as exc:
+        log.warning("Foursquare detail failed for %s: %s", clean_id, exc)
+        return None
+    if not isinstance(body, dict):
+        return None
+
+    normalized = _normalize_place(body, "poi")
+    if not normalized:
+        return None
+    photos = _normalize_photos(body, limit=8)
+    reviews = _normalize_tips(body, limit=5)
+    hours = body.get("hours") if isinstance(body.get("hours"), dict) else {}
+    display_hours = hours.get("display")
+    if isinstance(display_hours, str):
+        hours_list = [display_hours]
+    elif isinstance(display_hours, list):
+        hours_list = [str(v) for v in display_hours if str(v or "").strip()]
+    else:
+        hours_list = []
+    return {
+        **normalized,
+        "photos": photos,
+        "reviews": reviews,
+        "hours": hours_list,
+        "media_source": "foursquare" if photos else "",
+        "source_footer": "Place information from Foursquare. Verify hours, access, and availability before relying on it.",
+    }
 
 
 async def get_foursquare_places(

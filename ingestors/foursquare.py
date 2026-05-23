@@ -68,7 +68,6 @@ FSQ_SUMMARY_FIELDS = ",".join([
     "categories",
     "distance",
     "link",
-    "closed_bucket",
     "tel",
     "website",
     "hours",
@@ -77,7 +76,6 @@ FSQ_SUMMARY_FIELDS = ",".join([
     "photos",
     "tips",
     "description",
-    "venue_reality_bucket",
 ])
 
 FSQ_DETAIL_FIELDS = ",".join([

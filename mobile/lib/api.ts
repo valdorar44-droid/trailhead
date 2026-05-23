@@ -173,6 +173,8 @@ export const api = {
     req<GeocodePlace[]>(`/api/geocode?q=${encodeURIComponent(query)}&limit=${limit}`),
   getSearchPlaceCard: (query: string, lat: number, lng: number) =>
     req<OsmPoi | null>(`/api/places/search-card?q=${encodeURIComponent(query)}&lat=${lat}&lng=${lng}`),
+  resolveMapCard: (data: MapCardResolveRequest) =>
+    req<MapCardResolveResponse>('/api/map-card/resolve', { method: 'POST', body: JSON.stringify(data) }),
   getCampsites: (lat: number, lng: number, radius = 25) =>
     req<Campsite[]>(`/api/campsites?lat=${lat}&lng=${lng}&radius=${radius}`),
   searchCampsites: (lat: number, lng: number, radius = 40, types: string[] = []) =>
@@ -649,6 +651,38 @@ export interface NearbySmartPackResponse {
   categories: string[];
   places: NearbySmartPlace[];
   errors?: Record<string, string>;
+}
+export interface MapCardResolveRequest {
+  kind?: 'search' | 'place' | 'poi' | 'camp' | 'trail' | string;
+  id?: string;
+  source?: string;
+  source_label?: string;
+  provider_place_id?: string;
+  place_id?: string;
+  name: string;
+  lat: number;
+  lng: number;
+  type?: string;
+  subtype?: string;
+  photo_url?: string | null;
+  summary?: string;
+  address?: string;
+  rating?: number;
+  rating_count?: number;
+  route?: [number, number][];
+}
+export interface MapCardResolveResponse {
+  card: PlaceDetail;
+  photos?: PlacePhoto[];
+  sections?: Array<{ type: string; title: string; items?: unknown[] }>;
+  related?: {
+    places?: NearbySmartPlace[];
+    camps?: NearbySmartPlace[];
+    trails?: TrailProfile[];
+  };
+  partial?: boolean;
+  errors?: Record<string, string>;
+  timings?: Record<string, number>;
 }
 export interface TrailClaim {
   source: string;

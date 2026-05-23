@@ -41,6 +41,7 @@ type PlaceLike = {
   rating?: number;
   rating_count?: number;
   photo_url?: string | null;
+  photos?: TrailheadGalleryPhoto[];
   google_maps_uri?: string;
   attribution?: string;
   summary?: string;
@@ -93,7 +94,8 @@ function titleCase(value?: string) {
 function sourceId(place: PlaceLike) {
   const source = place.source || (String(place.id || '').startsWith('google:') ? 'google' : '');
   const id = place.provider_place_id || place.place_id || String(place.id || '').replace(/^google:/, '');
-  return source && id ? { source, id } : null;
+  const cleanSource = String(source || '').toLowerCase();
+  return cleanSource && ['google', 'foursquare', 'fsq'].includes(cleanSource) && id ? { source: cleanSource, id } : null;
 }
 
 function openNowLabel(openNow?: boolean | null) {
@@ -212,6 +214,8 @@ export default function PremiumPlaceSheet({
 
   const photos: TrailheadGalleryPhoto[] = detail?.photos?.length
     ? detail.photos.map(photo => ({ ...photo, url: mediaUrl(photo.url) }))
+    : data.photos?.length
+      ? data.photos.map(photo => ({ ...photo, url: mediaUrl(photo.url) }))
     : data.photo_url
       ? [{ url: mediaUrl(data.photo_url), source: data.source_label || data.source || '' }]
       : [];

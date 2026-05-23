@@ -1464,6 +1464,25 @@ class NearbySmartPackRequest(BaseModel):
     categories: list[str] = Field(default_factory=list)
     route: list[list[float]] = Field(default_factory=list)
 
+class MapCardResolveRequest(BaseModel):
+    kind: str = "place"
+    id: Optional[str] = None
+    source: Optional[str] = None
+    source_label: Optional[str] = None
+    provider_place_id: Optional[str] = None
+    place_id: Optional[str] = None
+    name: str = ""
+    lat: float
+    lng: float
+    type: Optional[str] = None
+    subtype: Optional[str] = None
+    photo_url: Optional[str] = None
+    summary: Optional[str] = None
+    address: Optional[str] = None
+    rating: Optional[float] = None
+    rating_count: Optional[int] = None
+    route: list[list[float]] = Field(default_factory=list)
+
 def _valhalla_base_url() -> str:
     return settings.valhalla_url.rstrip("/")
 
@@ -5985,6 +6004,184 @@ async def search_place_card(q: str, lat: float | None = None, lng: float | None 
             "summary": "Selected map place.",
         }
     return None
+
+
+def _map_card_base_from_request(body: MapCardResolveRequest) -> dict:
+    source = (body.source or "search").strip().lower() or "search"
+    kind = _smart_pack_type(body.kind or body.type or "place")
+    name = re.sub(r"\s+", " ", (body.name or kind.replace("_", " ").title()).strip())
+    card_type = _smart_pack_type(body.type or ("trail" if kind == "trail" else "camp" if kind == "camp" else "poi"))
+    return {
+        "id": body.id or f"{source}:{card_type}:{float(body.lat):.5f}:{float(body.lng):.5f}",
+        "name": name or "Selected place",
+        "lat": float(body.lat),
+        "lng": float(body.lng),
+        "type": card_type,
+        "subtype": body.subtype or card_type,
+        "source": source,
+        "source_label": body.source_label or ("Trailhead trail" if card_type == "trail" else "Map search" if source == "search" else body.source or "Map source"),
+        "provider_place_id": body.provider_place_id,
+        "place_id": body.place_id,
+        "photo_url": body.photo_url,
+        "summary": body.summary or ("Mapped trail route with nearby support context from Trailhead." if card_type == "trail" else "Selected map place."),
+        "address": body.address,
+        "rating": body.rating,
+        "rating_count": body.rating_count,
+    }
+
+
+def _map_card_merge(primary: dict, secondary: dict | None) -> dict:
+    if not secondary:
+        return primary
+    merged = dict(primary)
+    for key in (
+        "id", "name", "lat", "lng", "type", "subtype", "source", "source_label",
+        "provider_place_id", "place_id", "photo_url", "summary", "address", "phone",
+        "website", "rating", "rating_count", "google_maps_uri", "access_note",
+    ):
+        value = secondary.get(key)
+        if value not in (None, "", []):
+            if key in {"id", "lat", "lng"} and merged.get(key) not in (None, ""):
+                continue
+            if key == "name" and merged.get("name") and primary.get("source") != "search":
+                continue
+            merged[key] = value
+    for key in ("photos", "reviews", "hours"):
+        if secondary.get(key):
+            merged[key] = secondary.get(key)
+    return merged
+
+
+def _map_card_sections(card: dict, body: MapCardResolveRequest) -> list[dict]:
+    sections: list[dict] = []
+    if card.get("hours"):
+        sections.append({"type": "hours", "title": "Hours", "items": card.get("hours") or []})
+    if card.get("reviews"):
+        sections.append({"type": "reviews", "title": "Reviews", "items": card.get("reviews") or []})
+    if _smart_pack_type(card.get("type")) == "trail":
+        sections.append({
+            "type": "support",
+            "title": "Trail support",
+            "items": [
+                "Nearby camps, trails, and useful stops load below.",
+                "Verify current access, closures, road difficulty, and legality with the land manager.",
+            ],
+        })
+    if body.kind == "camp" or _smart_pack_type(card.get("type")) == "camp":
+        sections.append({
+            "type": "access",
+            "title": "Camp access",
+            "items": ["Verify current access, fees, stay limits, fire restrictions, and road conditions before camping."],
+        })
+    return sections
+
+
+@app.post("/api/map-card/resolve")
+async def resolve_map_card(body: MapCardResolveRequest):
+    """Resolve a selected map item into the richest fast card payload available.
+
+    The client opens from the optimistic input immediately, then merges this
+    result. Slow provider data is guarded so one vendor cannot block the card.
+    """
+    started = time.time()
+    center_lat = float(body.lat)
+    center_lng = float(body.lng)
+    base = _map_card_base_from_request(body)
+    errors: dict[str, str] = {}
+
+    async def guarded(name: str, coro, default):
+        t0 = time.time()
+        try:
+            value = await asyncio.wait_for(coro, timeout=2.8)
+            return value, round((time.time() - t0) * 1000)
+        except Exception as exc:
+            errors[name] = str(exc)[:160]
+            return default, round((time.time() - t0) * 1000)
+
+    provider = (body.source or "").lower()
+    provider_id = body.provider_place_id or body.place_id or ""
+    raw_id = str(body.id or "")
+    if not provider_id and raw_id.startswith(("google:", "foursquare:")):
+        provider, provider_id = raw_id.split(":", 1)
+
+    timings: dict[str, int] = {}
+    detail_task = None
+    if provider in {"google", "foursquare", "fsq"} and provider_id:
+        detail_task = guarded("detail", place_detail(provider, provider_id), None)
+    elif body.kind in {"search", "place"} and body.name:
+        detail_task = guarded(
+            "text_search",
+            search_google_places_text(body.name, center_lat, center_lng, radius_m=50000, limit=5),
+            [],
+        )
+    else:
+        async def no_detail():
+            return None, 0
+        detail_task = no_detail()
+
+    is_trailish = body.kind == "trail" or _smart_pack_type(body.type) in {"trail", "trailhead", "ohv"}
+    photos_task = guarded("trail_photos", _open_trail_photos(body.name, center_lat, center_lng), []) if is_trailish else None
+    nearby_task = guarded(
+        "nearby",
+        nearby_smart_pack(NearbySmartPackRequest(
+            center=PlannerPoint(lat=center_lat, lng=center_lng),
+            radius=28,
+            categories=["camp", "trailhead", "viewpoint", "peak", "hot_spring", "park", "historic", "climbing", "ohv", "attraction", "water", "fuel", "grocery", "mechanic", "parking"],
+            route=body.route or [],
+        )),
+        {"places": []},
+    )
+    trails_task = guarded(
+        "trails",
+        trails_discover(lat=center_lat, lng=center_lng, radius=35, mode="nearby", limit=12),
+        {"trails": []},
+    )
+    if photos_task:
+        (detail_value, detail_ms), (photos, photos_ms), (related_pack, nearby_ms), (trail_pack, trails_ms) = await asyncio.gather(detail_task, photos_task, nearby_task, trails_task)
+        timings["trail_photos_ms"] = photos_ms
+    else:
+        (detail_value, detail_ms), (related_pack, nearby_ms), (trail_pack, trails_ms) = await asyncio.gather(detail_task, nearby_task, trails_task)
+        photos = []
+    if provider in {"google", "foursquare", "fsq"} and provider_id:
+        timings["detail_ms"] = detail_ms
+        detail = detail_value
+    elif body.kind in {"search", "place"} and body.name:
+        timings["text_search_ms"] = detail_ms
+        hits = detail_value if isinstance(detail_value, list) else []
+        detail = sorted(
+            hits,
+            key=lambda item: (
+                _haversine_m(center_lat, center_lng, float(item.get("lat")), float(item.get("lng"))),
+                0 if item.get("photo_url") else 1,
+            ),
+        )[0] if hits else None
+    else:
+        detail = None
+    timings["nearby_ms"] = nearby_ms
+    timings["trails_ms"] = trails_ms
+
+    card = _map_card_merge(base, detail)
+    if photos and not card.get("photos"):
+        card["photos"] = photos
+        card["photo_url"] = card.get("photo_url") or photos[0].get("url")
+
+    smart_places = (related_pack or {}).get("places") or []
+    related = {
+        "places": [p for p in smart_places if _smart_pack_type(p.get("type")) != "camp"][:14],
+        "camps": [p for p in smart_places if _smart_pack_type(p.get("type")) == "camp"][:10],
+        "trails": (trail_pack or {}).get("trails", [])[:10],
+    }
+    card["summary"] = card.get("summary") or card.get("address") or "Selected map place."
+    card["source_label"] = card.get("source_label") or card.get("source") or "Trailhead"
+    return {
+        "card": card,
+        "photos": card.get("photos") or ([{"url": card["photo_url"], "source": card.get("source_label", "")}] if card.get("photo_url") else []),
+        "sections": _map_card_sections(card, body),
+        "related": related,
+        "partial": bool(errors),
+        "errors": errors,
+        "timings": {**timings, "total_ms": round((time.time() - started) * 1000)},
+    }
 
 
 OUTDOOR_PLACE_PRIORITY = {

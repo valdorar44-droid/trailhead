@@ -51,6 +51,7 @@ from db.store import (
     list_user_trips, save_account_trip, save_trip_geometry,
     create_plan_job, get_plan_job, update_plan_job,
     submit_field_report, get_field_reports, get_field_report_summary,
+    add_camp_comment, get_camp_comments,
     submit_trail_field_report, get_trail_field_reports, get_trail_field_report_summary,
     upsert_trail_profile, get_trail_profile, list_trail_profiles_near,
     add_trail_edit_suggestion, get_trail_edit_suggestions,
@@ -3170,6 +3171,12 @@ class CampAdminUpdatePayload(BaseModel):
     cost: Optional[str] = None
     phone: Optional[str] = None
     url: Optional[str] = None
+    access_notes: Optional[str] = None
+    bail_out_notes: Optional[str] = None
+    stay_limit: Optional[str] = None
+    reservation_notes: Optional[str] = None
+    source_confidence_notes: Optional[str] = None
+    max_rig_length: Optional[str] = None
 
 @app.post("/api/admin/campsites/{facility_id}")
 async def admin_update_camp_detail(facility_id: str, body: CampAdminUpdatePayload,
@@ -3296,6 +3303,34 @@ async def get_camp_field_reports(camp_id: str):
 @app.get("/api/camps/{camp_id}/field-report-summary")
 async def get_camp_field_report_summary(camp_id: str):
     return get_field_report_summary(camp_id)
+
+class CampCommentPayload(BaseModel):
+    camp_name: str
+    lat: float
+    lng: float
+    body: str
+
+@app.post("/api/camps/{camp_id}/comments")
+async def post_camp_comment(camp_id: str, body: CampCommentPayload,
+                            user: dict = Depends(_current_user)):
+    text = (body.body or "").strip()
+    if len(text) < 2:
+        raise HTTPException(400, "Comment is too short")
+    if len(text) > 800:
+        raise HTTPException(400, "Comment is too long")
+    return add_camp_comment(
+        camp_id=camp_id,
+        camp_name=body.camp_name.strip()[:160],
+        lat=body.lat,
+        lng=body.lng,
+        user_id=user["id"],
+        username=user["username"],
+        body=text,
+    )
+
+@app.get("/api/camps/{camp_id}/comments")
+async def list_camp_comments(camp_id: str):
+    return get_camp_comments(camp_id)
 
 
 # ── Trail Profiles / Discovery ────────────────────────────────────────────────

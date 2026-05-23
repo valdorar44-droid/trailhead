@@ -336,6 +336,12 @@ export const api = {
     req<CampFieldReport[]>(`/api/camps/${encodeURIComponent(campId)}/field-reports`),
   getFieldReportSummary: (campId: string) =>
     req<FieldReportSummary>(`/api/camps/${encodeURIComponent(campId)}/field-report-summary`),
+  getCampComments: (campId: string) =>
+    req<CampComment[]>(`/api/camps/${encodeURIComponent(campId)}/comments`),
+  submitCampComment: (campId: string, data: CampCommentPayload) =>
+    req<{ id: number; created_at: number }>(`/api/camps/${encodeURIComponent(campId)}/comments`, {
+      method: 'POST', body: JSON.stringify(data),
+    }),
   submitTrailFieldReport: (trailId: string, data: TrailFieldReportPayload) =>
     req<{ credits_earned: number; new_balance: number }>(`/api/trails/${encodeURIComponent(trailId)}/field-report`, {
       method: 'POST', body: JSON.stringify(data),
@@ -462,6 +468,12 @@ export interface CampsiteDetail extends CampsitePin {
   photos: string[]; amenities: string[]; site_types: string[];
   activities: string[]; phone?: string; campsites_count: number;
   admin_edited?: boolean;
+  access_notes?: string;
+  bail_out_notes?: string;
+  stay_limit?: string;
+  reservation_notes?: string;
+  source_confidence_notes?: string;
+  max_rig_length?: string;
   reviews?: PlaceReview[];
   media_source?: 'trailhead' | 'ridb' | 'blm' | 'osm' | 'google' | 'mixed' | string;
 }
@@ -1001,6 +1013,18 @@ export interface FieldReportSummary {
   top_tags: { tag: string; count: number }[];
   last_visited: string | null;
 }
+export interface CampComment {
+  id: number;
+  username: string;
+  body: string;
+  created_at: number;
+}
+export interface CampCommentPayload {
+  camp_name: string;
+  lat: number;
+  lng: number;
+  body: string;
+}
 export interface CampEditSuggestionPayload {
   camp_name: string;
   lat: number;
@@ -1018,4 +1042,10 @@ export interface CampAdminUpdatePayload {
   cost: string;
   phone: string;
   url: string;
+  access_notes: string;
+  bail_out_notes: string;
+  stay_limit: string;
+  reservation_notes: string;
+  source_confidence_notes: string;
+  max_rig_length: string;
 }

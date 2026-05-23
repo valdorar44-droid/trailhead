@@ -281,6 +281,17 @@ def init_db():
             credits_earned   INTEGER NOT NULL DEFAULT 0,
             created_at       INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS camp_comments (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            camp_id     TEXT NOT NULL,
+            camp_name   TEXT NOT NULL,
+            lat         REAL NOT NULL,
+            lng         REAL NOT NULL,
+            user_id     INTEGER NOT NULL REFERENCES users(id),
+            username    TEXT NOT NULL,
+            body        TEXT NOT NULL,
+            created_at  INTEGER NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS trail_field_reports (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
             trail_id         TEXT NOT NULL,
@@ -553,6 +564,17 @@ def init_db():
             photo_data       TEXT,
             credits_earned   INTEGER NOT NULL DEFAULT 0,
             created_at       INTEGER NOT NULL
+        )""",
+        """CREATE TABLE IF NOT EXISTS camp_comments (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            camp_id     TEXT NOT NULL,
+            camp_name   TEXT NOT NULL,
+            lat         REAL NOT NULL,
+            lng         REAL NOT NULL,
+            user_id     INTEGER NOT NULL REFERENCES users(id),
+            username    TEXT NOT NULL,
+            body        TEXT NOT NULL,
+            created_at  INTEGER NOT NULL
         )""",
         """CREATE TABLE IF NOT EXISTS trail_field_reports (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1126,6 +1148,7 @@ def _delete_user_full(user_id: int) -> None:
     db.execute("UPDATE contest_awards SET winner_user_id=NULL,winner_username='Deleted user' WHERE winner_user_id=?", (user_id,))
     db.execute("DELETE FROM report_interactions WHERE user_id=?",    (user_id,))
     db.execute("DELETE FROM camp_field_reports  WHERE user_id=?",    (user_id,))
+    db.execute("DELETE FROM camp_comments       WHERE user_id=?",    (user_id,))
     db.execute("DELETE FROM trail_field_reports WHERE user_id=?",    (user_id,))
     db.execute("DELETE FROM camp_fullness_votes WHERE user_id=?",    (user_id,))
     db.execute("DELETE FROM camp_fullness       WHERE reporter_id=?", (user_id,))
@@ -2822,6 +2845,30 @@ def get_field_report_summary(camp_id: str) -> dict:
         "top_tags": [{"tag": t, "count": c} for t, c in top_tags],
         "last_visited": rows[0]["visited_date"] if rows else None,
     }
+
+def add_camp_comment(camp_id: str, camp_name: str, lat: float, lng: float,
+                     user_id: int, username: str, body: str) -> dict:
+    now = int(time.time())
+    db = _conn()
+    cur = db.execute(
+        """INSERT INTO camp_comments
+           (camp_id,camp_name,lat,lng,user_id,username,body,created_at)
+           VALUES (?,?,?,?,?,?,?,?)""",
+        (camp_id, camp_name, lat, lng, user_id, username, body, now),
+    )
+    db.commit(); db.close()
+    return {"id": cur.lastrowid, "created_at": now}
+
+def get_camp_comments(camp_id: str, limit: int = 50) -> list[dict]:
+    db = _conn()
+    rows = db.execute(
+        """SELECT id,username,body,created_at
+           FROM camp_comments WHERE camp_id=?
+           ORDER BY created_at DESC LIMIT ?""",
+        (camp_id, limit),
+    ).fetchall()
+    db.close()
+    return [dict(r) for r in rows]
 
 
 # ── Trail Field Reports ───────────────────────────────────────────────────────

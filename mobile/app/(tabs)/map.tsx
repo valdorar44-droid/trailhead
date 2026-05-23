@@ -25,7 +25,7 @@ import * as FileSystem from 'expo-file-system';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useStore } from '@/lib/store';
-import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, Waypoint, TripResult, TrailProfile } from '@/lib/api';
+import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile } from '@/lib/api';
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { deleteRouteGeometry, loadRouteGeometry, saveRouteGeometry } from '@/lib/offlineRoutes';
 import { loadOfflineTrail, saveOfflineTrail } from '@/lib/offlineTrails';
@@ -1761,6 +1761,12 @@ type CampEditDraft = {
   cost: string;
   phone: string;
   url: string;
+  accessNotes: string;
+  bailOutNotes: string;
+  stayLimit: string;
+  reservationNotes: string;
+  sourceConfidenceNotes: string;
+  maxRigLength: string;
   siteTypes: string[];
   amenities: string[];
   activities: string[];
@@ -1774,21 +1780,42 @@ const SITE_TYPE_OPTIONS = [
   { label: 'Cabins', icon: 'home-outline' },
   { label: 'Standard Sites', icon: 'bonfire-outline' },
   { label: 'Equestrian Sites', icon: 'walk-outline' },
+  { label: 'Dispersed', icon: 'moon-outline' },
+  { label: 'Walk-In Sites', icon: 'walk-outline' },
 ] as const;
 
-const AMENITY_OPTIONS = [
+const ESSENTIAL_AMENITY_OPTIONS = [
   { label: 'ADA Accessible', icon: 'accessibility-outline' },
   { label: 'Drinking Water', icon: 'water-outline' },
+  { label: 'No Potable Water', icon: 'water' },
   { label: 'Toilets', icon: 'male-female-outline' },
+  { label: 'Vault Toilets', icon: 'trail-sign-outline' },
+  { label: 'Flush Toilets', icon: 'male-female-outline' },
   { label: 'Showers', icon: 'rainy-outline' },
   { label: 'Trash', icon: 'trash-outline' },
-  { label: 'Wifi', icon: 'wifi-outline' },
-  { label: 'Fires Allowed', icon: 'flame-outline' },
-  { label: 'Pets Allowed', icon: 'paw-outline' },
   { label: 'Picnic Tables', icon: 'restaurant-outline' },
+  { label: 'Bear Box', icon: 'cube-outline' },
+  { label: 'Good Shade', icon: 'leaf-outline' },
+] as const;
+
+const FIRE_WATER_OPTIONS = [
+  { label: 'Fire Ring', icon: 'ellipse-outline' },
+  { label: 'Grill', icon: 'restaurant-outline' },
+  { label: 'Fires Allowed', icon: 'flame-outline' },
+  { label: 'Fire Restricted', icon: 'warning-outline' },
+  { label: 'Firewood Available', icon: 'file-tray-stacked-outline' },
+  { label: 'Water Nearby', icon: 'water-outline' },
+] as const;
+
+const SERVICES_OPTIONS = [
+  { label: 'Wifi', icon: 'wifi-outline' },
+  { label: 'No Wifi', icon: 'wifi' },
+  { label: 'Cell Signal', icon: 'cellular-outline' },
+  { label: 'No Cell Signal', icon: 'cellular' },
+  { label: 'Starlink Suitable', icon: 'radio-outline' },
+  { label: 'Pets Allowed', icon: 'paw-outline' },
   { label: 'General Store', icon: 'storefront-outline' },
   { label: 'Laundry', icon: 'shirt-outline' },
-  { label: 'Firewood Available', icon: 'file-tray-stacked-outline' },
 ] as const;
 
 const RV_FEATURE_OPTIONS = [
@@ -1801,6 +1828,10 @@ const RV_FEATURE_OPTIONS = [
   { label: 'Big Rig Friendly', icon: 'bus-outline' },
   { label: 'Drive-In', icon: 'car-sport-outline' },
   { label: 'Walk-In', icon: 'walk-outline' },
+  { label: 'Trailer Access', icon: 'trail-sign-outline' },
+  { label: '2WD Access', icon: 'car-outline' },
+  { label: 'High Clearance', icon: 'car-sport-outline' },
+  { label: '4WD Only', icon: 'construct-outline' },
   { label: 'Propane Fill', icon: 'cube-outline' },
 ] as const;
 
@@ -3020,6 +3051,10 @@ function MapScreen() {
   const [frNote,       setFrNote]       = useState('');
   const [frPhoto,      setFrPhoto]      = useState<string | null>(null);
   const [frSubmitting, setFrSubmitting] = useState(false);
+  const [campComments, setCampComments] = useState<CampComment[]>([]);
+  const [showCampCommentForm, setShowCampCommentForm] = useState(false);
+  const [campCommentText, setCampCommentText] = useState('');
+  const [campCommentSubmitting, setCampCommentSubmitting] = useState(false);
   const [isSearchingCamps, setIsSearchingCamps] = useState(false);
   const [paywallVisible, setPaywallVisible] = useState(false);
   const [paywallCode, setPaywallCode] = useState('');
@@ -5387,26 +5422,16 @@ function MapScreen() {
     setWikiArticles([]);
     setFieldReports([]);
     setFieldReportSummary(null);
+    setCampComments([]);
+    setShowCampCommentForm(false);
+    setCampCommentText('');
     setShowFieldReportForm(false);
     resetFieldReportForm();
     let detail: CampsiteDetail;
     try {
       detail = await api.getCampsiteDetail(selectedCamp.id);
     } catch {
-      // Build a safe minimal CampsiteDetail so the modal doesn't crash on missing arrays
-      detail = {
-        id: selectedCamp.id, name: selectedCamp.name,
-        lat: selectedCamp.lat, lng: selectedCamp.lng,
-        land_type: selectedCamp.land_type ?? '',
-        description: selectedCamp.description ?? '',
-        cost: selectedCamp.cost ?? '',
-        reservable: selectedCamp.reservable ?? false,
-        url: selectedCamp.url ?? '',
-        ada: selectedCamp.ada ?? false,
-        tags: Array.isArray(selectedCamp.tags) ? selectedCamp.tags : [],
-        photos: [], amenities: [], site_types: [], activities: [],
-        campsites_count: 0,
-      } as any;
+      detail = minimalCampDetail(selectedCamp);
     }
     detail = await enrichCampDetailWithGoogle(detail, selectedCamp);
     const canOpen = await openCampInsight(selectedCamp, detail);
@@ -5427,6 +5452,7 @@ function MapScreen() {
     // Load field reports in background
     api.getFieldReports(selectedCamp.id).then(setFieldReports).catch(() => {});
     api.getFieldReportSummary(selectedCamp.id).then(setFieldReportSummary).catch(() => {});
+    api.getCampComments(selectedCamp.id).then(setCampComments).catch(() => {});
   }
 
   function closeCampDetail() {
@@ -5438,6 +5464,9 @@ function MapScreen() {
     setCampFullness(null);
     setCampWeather(null);
     setShowFieldReportForm(false);
+    setShowCampCommentForm(false);
+    setCampCommentText('');
+    setCampComments([]);
     resetFieldReportForm();
   }
 
@@ -5469,18 +5498,55 @@ function MapScreen() {
     }
   }
 
+  function minimalCampDetail(camp: CampsitePin): CampsiteDetail {
+    return {
+      id: camp.id,
+      name: camp.name,
+      lat: camp.lat,
+      lng: camp.lng,
+      land_type: camp.land_type ?? '',
+      description: camp.description ?? '',
+      cost: camp.cost ?? '',
+      reservable: camp.reservable ?? false,
+      url: camp.url ?? '',
+      ada: camp.ada ?? false,
+      tags: Array.isArray(camp.tags) ? camp.tags : [],
+      photos: camp.photo_url ? [camp.photo_url] : [],
+      amenities: [],
+      site_types: [],
+      activities: [],
+      campsites_count: 0,
+      source: camp.source,
+      verified_source: camp.verified_source,
+      phone: camp.phone,
+      address: camp.address,
+      rating: camp.rating,
+      rating_count: camp.rating_count,
+      provider_place_id: camp.provider_place_id,
+      place_id: camp.place_id,
+    } as CampsiteDetail;
+  }
+
   function openCampEdit(mode: 'suggest' | 'admin') {
-    if (!campDetail) return;
+    const detail = campDetail ?? (selectedCamp ? minimalCampDetail(selectedCamp) : null);
+    if (!detail) return;
+    if (!campDetail) setCampDetail(detail);
     setCampEditMode(mode);
     setCampEditDraft({
-      name: campDetail.name || '',
-      description: stripHtml(campDetail.description || ''),
-      cost: campDetail.cost || '',
-      phone: campDetail.phone || '',
-      url: campDetail.url || '',
-      siteTypes: [...(campDetail.site_types ?? [])],
-      amenities: [...(campDetail.amenities ?? [])],
-      activities: [...(campDetail.activities ?? [])],
+      name: detail.name || '',
+      description: stripHtml(detail.description || ''),
+      cost: detail.cost || '',
+      phone: detail.phone || '',
+      url: detail.url || '',
+      accessNotes: (detail as any).access_notes || '',
+      bailOutNotes: (detail as any).bail_out_notes || '',
+      stayLimit: (detail as any).stay_limit || '',
+      reservationNotes: (detail as any).reservation_notes || '',
+      sourceConfidenceNotes: (detail as any).source_confidence_notes || '',
+      maxRigLength: (detail as any).max_rig_length || '',
+      siteTypes: [...(detail.site_types ?? [])],
+      amenities: [...(detail.amenities ?? [])],
+      activities: [...(detail.activities ?? [])],
       note: '',
     });
     setShowCampEdit(true);
@@ -5505,6 +5571,12 @@ function MapScreen() {
         cost: campEditDraft.cost.trim(),
         phone: campEditDraft.phone.trim(),
         url: campEditDraft.url.trim(),
+        access_notes: campEditDraft.accessNotes.trim(),
+        bail_out_notes: campEditDraft.bailOutNotes.trim(),
+        stay_limit: campEditDraft.stayLimit.trim(),
+        reservation_notes: campEditDraft.reservationNotes.trim(),
+        source_confidence_notes: campEditDraft.sourceConfidenceNotes.trim(),
+        max_rig_length: campEditDraft.maxRigLength.trim(),
         site_types: campEditDraft.siteTypes,
         amenities: campEditDraft.amenities,
         activities: campEditDraft.activities,
@@ -5573,6 +5645,30 @@ function MapScreen() {
       Alert.alert('Error', e.message ?? 'Could not submit field report');
     }
     setFrSubmitting(false);
+  }
+
+  async function submitCampComment() {
+    const detail = campDetail ?? selectedCamp;
+    const text = campCommentText.trim();
+    if (!detail || campCommentSubmitting || text.length < 2) return;
+    setCampCommentSubmitting(true);
+    try {
+      await api.submitCampComment(detail.id, {
+        camp_name: detail.name,
+        lat: detail.lat,
+        lng: detail.lng,
+        body: text,
+      });
+      setCampCommentText('');
+      setShowCampCommentForm(false);
+      api.getCampComments(detail.id).then(setCampComments).catch(() => {});
+      setQuickToast('Comment posted');
+      setTimeout(() => setQuickToast(''), 2200);
+    } catch (e: any) {
+      Alert.alert('Could not post comment', e.message ?? 'Try again in a moment.');
+    } finally {
+      setCampCommentSubmitting(false);
+    }
   }
 
   async function submitTrailFieldReport() {
@@ -9401,6 +9497,10 @@ function MapScreen() {
                 <Ionicons name="warning-outline" size={12} color={C.text2} />
                 <Text style={s.quickCardSecondaryText}>REPORT</Text>
               </TouchableOpacity>
+              <TouchableOpacity style={s.quickCardSecondaryBtn} onPress={() => openCampEdit('suggest')}>
+                <Ionicons name="create-outline" size={12} color={C.text2} />
+                <Text style={s.quickCardSecondaryText}>EDIT</Text>
+              </TouchableOpacity>
               {!!selectedCamp.url && (
                 <TouchableOpacity style={s.quickCardSecondaryBtn} onPress={() => Linking.openURL(selectedCamp.url)}>
                   <Ionicons name="open-outline" size={12} color={C.text2} />
@@ -9501,6 +9601,39 @@ function MapScreen() {
                   <View style={s.detailSection}>
                     <Text style={s.detailSectionTitle}>Summary</Text>
                     <Text style={s.detailDesc}>{cleanCampDescriptionText(campDetail.description)}</Text>
+                  </View>
+                ) : null}
+
+                {[
+                  { title: 'ACCESS NOTES', text: campDetail.access_notes },
+                  { title: 'BAIL-OUT NOTES', text: campDetail.bail_out_notes },
+                  { title: 'STAY LIMIT', text: campDetail.stay_limit },
+                  { title: 'RESERVATION NOTES', text: campDetail.reservation_notes },
+                  { title: 'SOURCE CONFIDENCE', text: campDetail.source_confidence_notes },
+                  { title: 'MAX RIG LENGTH', text: campDetail.max_rig_length },
+                ].some(item => !!item.text) ? (
+                  <View style={s.detailSection}>
+                    <View style={s.sectionTitleRow}>
+                      <Text style={s.detailSectionTitle}>FIELD NOTES</Text>
+                      {user?.is_admin ? (
+                        <TouchableOpacity onPress={() => openCampEdit('admin')}>
+                          <Text style={s.sectionEditText}>EDIT</Text>
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                    {[
+                      { title: 'ACCESS NOTES', text: campDetail.access_notes },
+                      { title: 'BAIL-OUT NOTES', text: campDetail.bail_out_notes },
+                      { title: 'STAY LIMIT', text: campDetail.stay_limit },
+                      { title: 'RESERVATION NOTES', text: campDetail.reservation_notes },
+                      { title: 'SOURCE CONFIDENCE', text: campDetail.source_confidence_notes },
+                      { title: 'MAX RIG LENGTH', text: campDetail.max_rig_length },
+                    ].filter(item => !!item.text).map(item => (
+                      <View key={item.title} style={s.campNoteCard}>
+                        <Text style={s.campNoteTitle}>{item.title}</Text>
+                        <Text style={s.campNoteText}>{item.text}</Text>
+                      </View>
+                    ))}
                   </View>
                 ) : null}
 
@@ -9664,17 +9797,74 @@ function MapScreen() {
                   <View style={s.detailSection}>
                     <Text style={s.detailSectionTitle}>Wikipedia Nearby</Text>
                     {loadingWiki && !wikiArticles.length && <ActivityIndicator size="small" color={C.orange} />}
-                    {wikiArticles.map((w, i) => (
-                      <TouchableOpacity key={i} style={s.wikiItem} onPress={() => Linking.openURL(w.url)}>
-                        <View style={s.wikiItemHeader}>
-                          <Text style={s.wikiTitle} numberOfLines={1}>{w.title}</Text>
-                          <Text style={s.wikiDist}>{(w.dist_m / 1609).toFixed(1)} mi</Text>
+                {wikiArticles.map((w, i) => (
+                  <TouchableOpacity key={i} style={s.wikiItem} onPress={() => Linking.openURL(w.url)}>
+                    <View style={s.wikiItemHeader}>
+                      <Text style={s.wikiTitle} numberOfLines={1}>{w.title}</Text>
+                      <Text style={s.wikiDist}>{(w.dist_m / 1609).toFixed(1)} mi</Text>
                         </View>
                         {w.extract ? <Text style={s.wikiExtract} numberOfLines={2}>{w.extract}</Text> : null}
                       </TouchableOpacity>
                     ))}
                   </View>
                 )}
+
+                <View style={s.detailSection}>
+                  <View style={s.frHeader}>
+                    <Text style={s.detailSectionTitle}>COMMENTS & QUESTIONS</Text>
+                    {campComments.length > 0 && (
+                      <Text style={s.frCount}>{campComments.length} {campComments.length === 1 ? 'comment' : 'comments'}</Text>
+                    )}
+                  </View>
+                  {campComments.slice(0, 8).map(comment => (
+                    <View key={comment.id} style={s.campCommentCard}>
+                      <View style={s.campCommentTop}>
+                        <Text style={s.campCommentAuthor} numberOfLines={1}>{comment.username}</Text>
+                        <Text style={s.campCommentDate}>{new Date(comment.created_at * 1000).toLocaleDateString()}</Text>
+                      </View>
+                      <Text style={s.campCommentBody}>{comment.body}</Text>
+                    </View>
+                  ))}
+                  {!campComments.length && !showCampCommentForm ? (
+                    <Text style={s.frEmpty}>No comments yet. Ask a question or leave a recent note.</Text>
+                  ) : null}
+                  {showCampCommentForm ? (
+                    <View style={s.frForm}>
+                      <Text style={s.frFormLabel}>Comment</Text>
+                      <TextInput
+                        style={s.frNoteInput}
+                        value={campCommentText}
+                        onChangeText={v => setCampCommentText(v.slice(0, 800))}
+                        placeholder="Ask a question, share a recent condition, or add a useful note..."
+                        placeholderTextColor={C.text3}
+                        multiline
+                        numberOfLines={4}
+                      />
+                      <Text style={s.frCharCount}>{campCommentText.length}/800</Text>
+                      <View style={s.frFormActions}>
+                        <TouchableOpacity style={s.frCancelBtn} onPress={() => { setShowCampCommentForm(false); setCampCommentText(''); }}>
+                          <Text style={s.frCancelText}>Cancel</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[s.frSubmitBtn, (campCommentText.trim().length < 2 || campCommentSubmitting) && { opacity: 0.5 }]}
+                          onPress={submitCampComment}
+                          disabled={campCommentText.trim().length < 2 || campCommentSubmitting}
+                        >
+                          {campCommentSubmitting
+                            ? <ActivityIndicator size="small" color="#fff" />
+                            : <Text style={s.frSubmitText}>POST COMMENT</Text>}
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ) : (
+                    user && (
+                      <TouchableOpacity style={s.frAddBtn} onPress={() => setShowCampCommentForm(true)}>
+                        <Ionicons name="chatbubble-ellipses-outline" size={15} color={C.orange} />
+                        <Text style={s.frAddBtnText}>ADD COMMENT</Text>
+                      </TouchableOpacity>
+                    )
+                  )}
+                </View>
 
                 {/* ── Field Reports ── */}
                 <View style={s.detailSection}>
@@ -9908,7 +10098,8 @@ function MapScreen() {
           </View>
           {campEditDraft && campDetail && (
             <>
-              <ScrollView style={s.campEditScroll} contentContainerStyle={s.campEditContent} showsVerticalScrollIndicator={false}>
+              <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+              <ScrollView style={s.campEditScroll} contentContainerStyle={s.campEditContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
                 <Text style={s.campEditTitle}>{campEditMode === 'admin' ? `Edit ${campDetail.name}` : `Improve ${campDetail.name}`}</Text>
                 <Text style={s.campEditIntro}>
                   {campEditMode === 'admin'
@@ -9923,12 +10114,24 @@ function MapScreen() {
                   <TextInput style={s.campEditInput} value={campEditDraft.url} onChangeText={url => setCampEditDraft(p => p ? { ...p, url } : p)} placeholder="Website or booking link" placeholderTextColor={C.text3} autoCapitalize="none" />
                   <TextInput style={s.campEditInput} value={campEditDraft.phone} onChangeText={phone => setCampEditDraft(p => p ? { ...p, phone } : p)} placeholder="Phone" placeholderTextColor={C.text3} keyboardType="phone-pad" />
                   <TextInput style={s.campEditInput} value={campEditDraft.cost} onChangeText={cost => setCampEditDraft(p => p ? { ...p, cost } : p)} placeholder="Price or fee notes" placeholderTextColor={C.text3} />
+                  <TextInput style={s.campEditInput} value={campEditDraft.stayLimit} onChangeText={stayLimit => setCampEditDraft(p => p ? { ...p, stayLimit } : p)} placeholder="Stay limit or season notes" placeholderTextColor={C.text3} />
+                  <TextInput style={s.campEditInput} value={campEditDraft.reservationNotes} onChangeText={reservationNotes => setCampEditDraft(p => p ? { ...p, reservationNotes } : p)} placeholder="Reservation, first-come, or permit notes" placeholderTextColor={C.text3} />
                 </View>
 
                 <CampEditOptionSection title="SITE TYPE & ACCOMMODATIONS" options={SITE_TYPE_OPTIONS} values={campEditDraft.siteTypes} onToggle={label => toggleDraftList('siteTypes', label)} styles={s} colors={C} />
-                <CampEditOptionSection title="AMENITIES" options={AMENITY_OPTIONS} values={campEditDraft.amenities} onToggle={label => toggleDraftList('amenities', label)} styles={s} colors={C} />
+                <CampEditOptionSection title="ESSENTIALS" options={ESSENTIAL_AMENITY_OPTIONS} values={campEditDraft.amenities} onToggle={label => toggleDraftList('amenities', label)} styles={s} colors={C} />
+                <CampEditOptionSection title="FIRE, WATER & TABLES" options={FIRE_WATER_OPTIONS} values={campEditDraft.amenities} onToggle={label => toggleDraftList('amenities', label)} styles={s} colors={C} />
                 <CampEditOptionSection title="RV & TRAILER FEATURES" options={RV_FEATURE_OPTIONS} values={campEditDraft.amenities} onToggle={label => toggleDraftList('amenities', label)} styles={s} colors={C} />
+                <CampEditOptionSection title="CONNECTIVITY & SERVICES" options={SERVICES_OPTIONS} values={campEditDraft.amenities} onToggle={label => toggleDraftList('amenities', label)} styles={s} colors={C} />
                 <CampEditOptionSection title="NEARBY ACTIVITIES" options={ACTIVITY_OPTIONS} values={campEditDraft.activities} onToggle={label => toggleDraftList('activities', label)} styles={s} colors={C} />
+
+                <View style={s.campEditSection}>
+                  <Text style={s.campEditSectionTitle}>ACCESS & CONFIDENCE</Text>
+                  <TextInput style={s.campEditInput} value={campEditDraft.maxRigLength} onChangeText={maxRigLength => setCampEditDraft(p => p ? { ...p, maxRigLength } : p)} placeholder="Max rig/trailer length, if known" placeholderTextColor={C.text3} />
+                  <TextInput style={[s.campEditInput, s.campEditTextArea]} value={campEditDraft.accessNotes} onChangeText={accessNotes => setCampEditDraft(p => p ? { ...p, accessNotes } : p)} placeholder="Road condition, clearance, trailer turns, seasonal gates..." placeholderTextColor={C.text3} multiline />
+                  <TextInput style={[s.campEditInput, s.campEditTextArea]} value={campEditDraft.bailOutNotes} onChangeText={bailOutNotes => setCampEditDraft(p => p ? { ...p, bailOutNotes } : p)} placeholder="Bail-out notes: where to go if full, closed, muddy, or unsafe..." placeholderTextColor={C.text3} multiline />
+                  <TextInput style={[s.campEditInput, s.campEditTextArea]} value={campEditDraft.sourceConfidenceNotes} onChangeText={sourceConfidenceNotes => setCampEditDraft(p => p ? { ...p, sourceConfidenceNotes } : p)} placeholder="How confident is this? Source, last visit, ranger note, sign, website..." placeholderTextColor={C.text3} multiline />
+                </View>
 
                 {campEditMode !== 'admin' && (
                   <View style={s.campEditSection}>
@@ -9937,6 +10140,7 @@ function MapScreen() {
                   </View>
                 )}
               </ScrollView>
+              </KeyboardAvoidingView>
               <View style={s.campEditFooter}>
                 <TouchableOpacity style={[s.campEditSave, campEditSaving && { opacity: 0.6 }]} onPress={submitCampEdit} disabled={campEditSaving}>
                   {campEditSaving ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.campEditSaveText}>{campEditMode === 'admin' ? 'SAVE CHANGES' : 'SUBMIT EDIT'}</Text>}
@@ -12992,6 +13196,21 @@ const makeStyles = (C: ColorPalette) => {
   campReviewRating: { color: C.gold, fontSize: 10, fontFamily: mono, fontWeight: '900' },
   campReviewMeta: { color: C.text3, fontSize: 10, fontFamily: mono },
   campReviewText: { color: C.text2, fontSize: 12, lineHeight: 17 },
+  campNoteCard: {
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.s1,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 8,
+  },
+  campNoteTitle: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900', marginBottom: 5 },
+  campNoteText: { color: C.text2, fontSize: 13, lineHeight: 19 },
+  campCommentCard: { borderWidth: 1, borderColor: C.border, backgroundColor: C.s1, borderRadius: 12, padding: 12, gap: 7, marginBottom: 8 },
+  campCommentTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  campCommentAuthor: { flex: 1, color: C.text, fontSize: 12, fontWeight: '800' },
+  campCommentDate: { color: C.text3, fontSize: 10, fontFamily: mono },
+  campCommentBody: { color: C.text2, fontSize: 13, lineHeight: 19 },
   amenityGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   amenityItem: {
     paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10,

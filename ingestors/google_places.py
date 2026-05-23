@@ -8,6 +8,7 @@ from typing import Iterable
 from urllib.parse import quote
 
 import httpx
+from db.store import get_cached, set_cached
 
 GOOGLE_NEARBY_URL = "https://places.googleapis.com/v1/places:searchNearby"
 GOOGLE_TEXT_URL = "https://places.googleapis.com/v1/places:searchText"
@@ -258,6 +259,10 @@ async def search_google_places_text(
     """Search Google Places by free-form text for rich selected-search cards."""
     if not google_places_enabled() or not query.strip():
         return []
+    normalized_query = " ".join(query.strip().lower().split())
+    empty_key = f"google_text_empty_v1:{normalized_query}:{float(lat or 0):.3f}:{float(lng or 0):.3f}"
+    if get_cached("campsite_cache", empty_key, ttl_seconds=3600 * 12) is not None:
+        return []
     body: dict = {
         "textQuery": query.strip(),
         "maxResultCount": max(1, min(int(limit or 5), 10)),
@@ -274,17 +279,21 @@ async def search_google_places_text(
             res = await client.post(GOOGLE_TEXT_URL, json=body, headers=_headers(SUMMARY_FIELDS))
             if res.status_code in {400, 401, 403, 429}:
                 log.warning("Google Places text search returned %s for %r: %s", res.status_code, query, res.text[:240])
+                set_cached("campsite_cache", empty_key, {"status_code": res.status_code, "empty": True})
                 return []
             res.raise_for_status()
             payload = res.json()
     except Exception as exc:
         log.warning("Google Places text search failed for %r: %s", query, exc)
+        set_cached("campsite_cache", empty_key, {"error": str(exc)[:120], "empty": True})
         return []
     places = []
     for item in payload.get("places") or []:
         normalized = _normalize_place(item, "poi")
         if normalized:
             places.append(normalized)
+    if not places:
+        set_cached("campsite_cache", empty_key, {"empty": True})
     return places
 
 

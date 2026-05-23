@@ -6076,6 +6076,52 @@ def _map_card_sections(card: dict, body: MapCardResolveRequest) -> list[dict]:
     return sections
 
 
+MAP_CARD_SAFE_TTL_SECONDS = 3600 * 24 * 7
+
+
+def _map_card_cache_key(body: MapCardResolveRequest) -> str:
+    base = "|".join([
+        _smart_pack_type(body.kind or "place"),
+        _smart_pack_type(body.type or ""),
+        str(body.id or body.provider_place_id or body.place_id or ""),
+        re.sub(r"\s+", " ", (body.name or "").lower()).strip(),
+        f"{float(body.lat):.4f}",
+        f"{float(body.lng):.4f}",
+    ])
+    return f"map_card_v2:{hashlib.sha1(base.encode()).hexdigest()[:24]}"
+
+
+def _contains_restricted_provider(value: object) -> bool:
+    if isinstance(value, str):
+        lowered = value.lower()
+        return any(
+            token in lowered
+            for token in (
+                "googleapis.com",
+                "googleusercontent.com",
+                "gstatic.com",
+                "maps.google",
+                "foursquare.com",
+                "4sqi.net",
+            )
+        )
+    if isinstance(value, dict):
+        source = str(value.get("source") or value.get("source_label") or value.get("attribution") or "").lower()
+        if "google" in source or "foursquare" in source or source == "fsq":
+            return True
+        return any(_contains_restricted_provider(v) for v in value.values())
+    if isinstance(value, list):
+        return any(_contains_restricted_provider(v) for v in value)
+    return False
+
+
+def _map_card_cacheable(body: MapCardResolveRequest, response: dict) -> bool:
+    source = str(body.source or "").lower()
+    if source in {"google", "foursquare", "fsq"}:
+        return False
+    return not _contains_restricted_provider(response)
+
+
 @app.post("/api/map-card/resolve")
 async def resolve_map_card(body: MapCardResolveRequest):
     """Resolve a selected map item into the richest fast card payload available.
@@ -6088,6 +6134,12 @@ async def resolve_map_card(body: MapCardResolveRequest):
     center_lng = float(body.lng)
     base = _map_card_base_from_request(body)
     errors: dict[str, str] = {}
+    cache_key = _map_card_cache_key(body)
+    cached = get_cached("campsite_cache", cache_key, ttl_seconds=MAP_CARD_SAFE_TTL_SECONDS)
+    if cached is not None:
+        cached["cached"] = True
+        cached.setdefault("timings", {})["total_ms"] = round((time.time() - started) * 1000)
+        return cached
 
     async def guarded(name: str, coro, default):
         t0 = time.time()
@@ -6173,15 +6225,20 @@ async def resolve_map_card(body: MapCardResolveRequest):
     }
     card["summary"] = card.get("summary") or card.get("address") or "Selected map place."
     card["source_label"] = card.get("source_label") or card.get("source") or "Trailhead"
-    return {
+    response = {
         "card": card,
         "photos": card.get("photos") or ([{"url": card["photo_url"], "source": card.get("source_label", "")}] if card.get("photo_url") else []),
         "sections": _map_card_sections(card, body),
         "related": related,
         "partial": bool(errors),
         "errors": errors,
+        "cached": False,
+        "cache_ttl_seconds": MAP_CARD_SAFE_TTL_SECONDS if _map_card_cacheable(body, {"card": card, "photos": card.get("photos") or [], "related": related}) else 0,
         "timings": {**timings, "total_ms": round((time.time() - started) * 1000)},
     }
+    if response["cache_ttl_seconds"]:
+        set_cached("campsite_cache", cache_key, response)
+    return response
 
 
 OUTDOOR_PLACE_PRIORITY = {

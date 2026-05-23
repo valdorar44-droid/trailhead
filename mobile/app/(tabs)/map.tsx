@@ -6247,6 +6247,66 @@ function MapScreen() {
     openTrailFeature(featureFromMapTrail(name, lat, lng, cls, support));
   }
 
+  function mapTileCampPin(name: string, kind: string, lat: number, lng: number, landType?: string): CampsitePin {
+    const cleanKind = String(kind || 'camp_site');
+    const title = name || (cleanKind === 'camp_pitch' ? 'Dispersed Camping Spot' : cleanKind === 'shelter' ? 'Trail Shelter' : 'Campground');
+    const group = /\bgroup\b/i.test(title) || /\b(group|camp_area)\b/i.test(cleanKind);
+    const dispersed = cleanKind === 'camp_pitch';
+    const shelter = cleanKind === 'shelter';
+    return {
+      id: `tile:${cleanKind}:${lat.toFixed(5)}:${lng.toFixed(5)}`,
+      name: title,
+      lat,
+      lng,
+      tags: [
+        group ? 'group' : '',
+        dispersed ? 'dispersed' : shelter ? 'shelter' : 'campground',
+      ].filter(Boolean),
+      land_type: landType || (dispersed ? 'Dispersed' : shelter ? 'Shelter' : 'Campground'),
+      description: 'Map-sourced camp feature. Verify current access, rules, road conditions, and stay limits before relying on it.',
+      reservable: false,
+      cost: '',
+      url: '',
+      ada: false,
+      source: 'map_tile',
+      verified_source: 'Map tile',
+    };
+  }
+
+  function openMapTileCamp(name: string, kind: string, lat: number, lng: number, landType?: string) {
+    const pin = mapTileCampPin(name, kind, lat, lng, landType);
+    setTappedPoi(null);
+    setTappedGas(null);
+    setTappedTrail(null);
+    setTappedTileSpot(null);
+    setSelectedPlace(null);
+    setSelectedTrail(null);
+    setSelectedCommunityPin(null);
+    setSelectedCamp(pin);
+    setCampDetail(null);
+    setCampInsight(null);
+    setWikiArticles([]);
+    setCampFullness(null);
+    setCampWeather(null);
+    if (pin.id) api.getCampFullness(pin.id).then(r => setCampFullness(r)).catch(() => {});
+    api.getWeather(lat, lng, 3, weatherUnitMode).then(r => {
+      if (selectedCampRef.current?.id === pin.id) setCampWeather(r);
+    }).catch(() => {});
+
+    api.getNearbyCamps(lat, lng, 2).then(results => {
+      if (!results.length) return;
+      const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const tapped = norm(pin.name);
+      const named = results.find(r => {
+        const rn = norm(r.name);
+        return rn && tapped && (rn.includes(tapped.slice(0, 8)) || tapped.includes(rn.slice(0, 8)));
+      });
+      const match = named ?? results[0];
+      setSelectedCamp(prev => prev?.id === pin.id ? match : prev);
+      if (match?.id) api.getCampFullness(match.id).then(r => setCampFullness(r)).catch(() => {});
+    }).catch(() => {});
+  }
+
   function openPoiFeature(poi: OsmPoi) {
     setTappedPoi(null);
     setSearchRouteCard(null);
@@ -7844,10 +7904,10 @@ function MapScreen() {
           onPoiTap={p => openPoiFeature(p)}
           onCommunityPinTap={p => { setSelectedCommunityPin(p); setSelectedCamp(null); setTappedTrail(null); setTappedTileSpot(null); setTappedGas(null); setTappedPoi(null); setSelectedTrail(null); }}
           onTileCampTap={(name, kind, lat, lng) => {
-            setTappedTileSpot({ name, kind, lat, lng });
+            openMapTileCamp(name, kind, lat, lng);
           }}
           onBaseCampTap={(name, lat, lng, landType) => {
-            // Open nearby camp search for the tapped point
+            openMapTileCamp(name, 'camp_site', lat, lng, landType);
           }}
           onTrailTap={(name, lat, lng) => {
             if (trailPinCaptureMode) {
@@ -9275,60 +9335,6 @@ function MapScreen() {
         }}
         onAddToRoute={place => {
           setTappedPoi(null);
-          setSearchRouteCard({ name: place.name, lat: place.lat, lng: place.lng, dist: userLoc ? haversineKm(userLoc.lat, userLoc.lng, place.lat, place.lng) : null });
-          setShowSearch(true);
-        }}
-      />
-
-      <PremiumPlaceSheet
-        place={tappedTileSpot ? {
-          id: `tile:${tappedTileSpot.kind}:${tappedTileSpot.lat}:${tappedTileSpot.lng}`,
-          name: tappedTileSpot.name || (tappedTileSpot.kind === 'camp_pitch' ? 'Dispersed Camping Spot' : tappedTileSpot.kind === 'shelter' ? 'Trail Shelter' : 'Campground'),
-          lat: tappedTileSpot.lat,
-          lng: tappedTileSpot.lng,
-          type: 'camp',
-          subtype: tappedTileSpot.kind === 'camp_pitch' ? 'Dispersed / Primitive Spot' : tappedTileSpot.kind === 'shelter' ? 'Trail Shelter' : 'Campground',
-          source: 'offline',
-          source_label: 'Map tile',
-          summary: 'Map-sourced camp feature. Verify current access, rules, road conditions, and stay limits before relying on it.',
-        } as any : null}
-        visible={!!tappedTileSpot && !navMode}
-        initialStage="full"
-        onClose={() => setTappedTileSpot(null)}
-        onNavigate={place => {
-          setTappedTileSpot(null);
-          navigateToCamp(place);
-        }}
-        onSave={place => {
-          addSavedPlace({
-            id: `place-${Date.now()}`,
-            name: place.name,
-            lat: place.lat,
-            lng: place.lng,
-            icon: 'camp',
-            note: place.note || 'Saved camp feature',
-            createdAt: Date.now(),
-          });
-          setQuickToast('Camp saved');
-          setTimeout(() => setQuickToast(''), 2200);
-        }}
-        onReport={() => {
-          setTappedTileSpot(null);
-          setQuickReport(true);
-        }}
-        onNearbyCamps={place => {
-          setTappedTileSpot(null);
-          const bounds = { n: place.lat + 0.35, s: place.lat - 0.35, e: place.lng + 0.35, w: place.lng - 0.35, zoom: 11 };
-          setQuickToast('Searching camps nearby');
-          setTimeout(() => setQuickToast(''), 2500);
-          setTimeout(() => {
-            viewportRef.current = bounds;
-            nativeMapRef.current?.flyTo(place.lat, place.lng, 11);
-            loadCampsInArea(bounds, activeFilters);
-          }, 160);
-        }}
-        onAddToRoute={place => {
-          setTappedTileSpot(null);
           setSearchRouteCard({ name: place.name, lat: place.lat, lng: place.lng, dist: userLoc ? haversineKm(userLoc.lat, userLoc.lng, place.lat, place.lng) : null });
           setShowSearch(true);
         }}

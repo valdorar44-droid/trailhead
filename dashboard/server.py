@@ -6142,6 +6142,7 @@ def _map_card_merge(primary: dict, secondary: dict | None) -> dict:
     if not secondary:
         return primary
     merged = dict(primary)
+    preserve_primary_type = _smart_pack_type(primary.get("type")) in {"peak", "viewpoint", "trailhead", "hot_spring", "trail"}
     for key in (
         "id", "name", "lat", "lng", "type", "subtype",
         "provider_place_id", "place_id", "photo_url", "summary", "address", "phone",
@@ -6150,6 +6151,8 @@ def _map_card_merge(primary: dict, secondary: dict | None) -> dict:
         value = secondary.get(key)
         if value not in (None, "", []):
             if key in {"id", "lat", "lng"} and merged.get(key) not in (None, ""):
+                continue
+            if key == "type" and preserve_primary_type:
                 continue
             if key == "name" and merged.get("name") and primary.get("source") != "search":
                 continue
@@ -6361,7 +6364,18 @@ async def resolve_map_card(body: MapCardResolveRequest):
         "camps": [p for p in smart_places if _smart_pack_type(p.get("type")) == "camp"][:10],
         "trails": (trail_pack or {}).get("trails", [])[:10],
     }
-    card["summary"] = card.get("summary") or card.get("address") or "Selected map place."
+    if not card.get("summary") or card.get("summary") == "Selected map place.":
+        ctype = _smart_pack_type(card.get("type"))
+        if ctype == "peak":
+            card["summary"] = "Mapped peak or summit feature. Verify route, access, weather, and exposure before using it as a destination."
+        elif ctype == "viewpoint":
+            card["summary"] = "Mapped viewpoint or overlook. Verify current access, parking, and road conditions before relying on it."
+        elif ctype == "trailhead":
+            card["summary"] = "Mapped trail access point. Check current closures, parking rules, and trail conditions before heading out."
+        elif ctype == "hot_spring":
+            card["summary"] = "Mapped hot spring or public bath feature. Verify access, rules, fees, and current conditions before visiting."
+        else:
+            card["summary"] = card.get("address") or "Selected map place."
     card["source_label"] = card.get("source_label") or card.get("source") or "Trailhead"
     enriched_by = card.get("enriched_by")
     display_source_label = card["source_label"]

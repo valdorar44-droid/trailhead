@@ -876,14 +876,19 @@ export default function RouteBuilderScreen() {
     });
     const hideSub = Keyboard.addListener('keyboardDidHide', () => {
       setKeyboardVisible(false);
-      setTabBarHidden(false);
+      setTabBarHidden(routeTabMode !== 'hub');
     });
     return () => {
       showSub.remove();
       hideSub.remove();
       setTabBarHidden(false);
     };
-  }, [setTabBarHidden]);
+  }, [routeTabMode, setTabBarHidden]);
+
+  useEffect(() => {
+    setTabBarHidden(routeTabMode !== 'hub' || keyboardVisible);
+    return () => setTabBarHidden(false);
+  }, [keyboardVisible, routeTabMode, setTabBarHidden]);
 
   useEffect(() => {
     let mounted = true;
@@ -2881,11 +2886,7 @@ export default function RouteBuilderScreen() {
       ? !!(endQuery.trim() || orderedStops.length > 1)
       : true;
     const nextStep = () => setWizardStep(step => Math.min(3, step + 1));
-    const dockMarginBottom = keyboardVisible
-      ? 10 + bottomInset
-      : wizardStep === 0
-      ? 18 + bottomInset
-      : 72 + bottomInset;
+    const dockMarginBottom = keyboardVisible ? 10 + bottomInset : 18 + bottomInset;
     return (
       <TrailheadSheet
         handle={false}
@@ -3124,11 +3125,8 @@ export default function RouteBuilderScreen() {
   if (buildingFramework) {
     return (
       <SafeAreaView style={s.wizardScreen}>
-        <View style={s.wizardScreenTop}>
-          <Text style={s.title}>Route Builder</Text>
-          <View style={s.headerBtn}>
-            <ActivityIndicator size="small" color={C.orange} />
-          </View>
+        <View style={s.wizardCompactTop}>
+          <ActivityIndicator size="small" color={C.orange} />
         </View>
         <View style={s.buildingScreen}>
           <RouteBuildStatus C={C} message={frameworkStatus} />
@@ -3158,12 +3156,9 @@ export default function RouteBuilderScreen() {
     return (
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <SafeAreaView style={s.wizardScreen}>
-          <View style={s.wizardScreenTop}>
-            <Text style={s.title}>Route Builder</Text>
-            <TouchableOpacity style={s.headerBtn} onPress={() => setRouteTabMode('hub')} accessibilityLabel="Back to saved routes">
-              <Ionicons name="close" size={17} color={C.orange} />
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity style={s.wizardFloatingClose} onPress={() => setRouteTabMode('hub')} accessibilityLabel="Back to saved routes" activeOpacity={0.82}>
+            <Ionicons name="close" size={18} color={C.orange} />
+          </TouchableOpacity>
           {renderWizardSetup(true)}
           <PaywallModal visible={paywallVisible} code={paywallCode} message={paywallMessage} onClose={() => setPaywallVisible(false)} />
         </SafeAreaView>
@@ -3173,12 +3168,13 @@ export default function RouteBuilderScreen() {
 
   return (
     <SafeAreaView style={s.wizardScreen}>
-      <View style={s.wizardScreenTop}>
-        <Text style={s.title}>Route Builder</Text>
-        <View style={s.headerBtn} />
+      <View style={s.wizardCompactTop}>
+        <TouchableOpacity style={s.headerBtn} onPress={() => setRouteTabMode('hub')} accessibilityLabel="Back to saved routes" activeOpacity={0.82}>
+          <Ionicons name="close" size={17} color={C.orange} />
+        </TouchableOpacity>
       </View>
 
-      <TrailheadSheet handle={false} style={[s.routeEditorPanel, { marginBottom: keyboardVisible ? 12 : 116 + bottomInset }]} contentStyle={s.routeSheetContent}>
+      <TrailheadSheet handle={false} style={[s.routeEditorPanel, { marginBottom: keyboardVisible ? 12 : 18 + bottomInset }]} contentStyle={s.routeSheetContent}>
         <View style={s.workspaceHandleArea}>
           <View style={s.workspaceHandle} />
           <View style={s.workspaceHandleSummary}>
@@ -3390,7 +3386,7 @@ export default function RouteBuilderScreen() {
       </ScrollView>
       </TrailheadSheet>
 
-      {!keyboardVisible && <View style={[s.footer, { bottom: 96 + bottomInset }]} pointerEvents="box-none">
+      {!keyboardVisible && <View style={[s.footer, { bottom: 18 + bottomInset }]} pointerEvents="box-none">
         <View>
           <Text style={s.footerMiles}>{fmtMi(totals.miles)}</Text>
           <Text style={s.footerSub}>{totals.stops} stops · {totals.camps} camps · ${Math.round(planningStats.fuelCost)} fuel · {days.length} days</Text>
@@ -3714,10 +3710,31 @@ export default function RouteBuilderScreen() {
 
 const makeStyles = (C: ColorPalette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
-  wizardScreen: { flex: 1, backgroundColor: C.bg, paddingHorizontal: 18 },
+  wizardScreen: { flex: 1, backgroundColor: C.bg, paddingHorizontal: 14, paddingTop: 8 },
   wizardScreenTop: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingTop: 6, paddingBottom: 14,
+  },
+  wizardCompactTop: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    paddingBottom: 8,
+  },
+  wizardFloatingClose: {
+    position: 'absolute',
+    top: 8,
+    right: 14,
+    zIndex: 5,
+    width: 42,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 21,
+    backgroundColor: C.glassStrong,
   },
   buildingScreen: {
     flex: 1,
@@ -4000,12 +4017,13 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   loopChoiceTitle: { color: C.text, fontSize: 12, fontWeight: '900' },
   loopChoiceText: { color: C.text3, fontSize: 10, lineHeight: 14, marginTop: 3 },
   wizardCard: {
-    borderRadius: 28,
+    borderRadius: 24,
   },
   wizardCardFull: {
     flex: 1,
-    borderRadius: 28,
+    borderRadius: 24,
     justifyContent: 'flex-start',
+    marginTop: 8,
   },
   wizardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   wizardEyebrow: { color: C.orange, fontSize: 8, fontFamily: mono, fontWeight: '900', letterSpacing: 1.1 },

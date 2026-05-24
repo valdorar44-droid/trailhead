@@ -1,5 +1,6 @@
 import { storage } from './storage';
 import { Platform } from 'react-native';
+import { guardedRequest, normalizeRequestText, stableNumber, stableRouteKey } from './requestGuard';
 
 const BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
 export type WeatherUnitMode = 'auto' | 'imperial' | 'metric';
@@ -169,12 +170,28 @@ export const api = {
   adminRemovePhoto:  (reportId: number) => req<{ ok: boolean }>(`/api/admin/reports/${reportId}/remove-photo`, { method: 'POST' }),
   adminExpireReport: (reportId: number) => req<{ ok: boolean }>(`/api/admin/reports/${reportId}/expire`, { method: 'POST' }),
   getConfig: () => req<{ mapbox_token: string; protomaps_key?: string }>('/api/config'),
-  geocodePlaces: (query: string, limit = 8) =>
-    req<GeocodePlace[]>(`/api/geocode?q=${encodeURIComponent(query)}&limit=${limit}`),
+  geocodePlaces: (query: string, limit = 8) => {
+    const normalized = normalizeRequestText(query);
+    if (normalized.length < 2) return Promise.resolve([]);
+    const safeLimit = Math.max(1, Math.min(Math.round(limit || 8), 10));
+    return guardedRequest(
+      `geocode:${normalized}:${safeLimit}`,
+      10 * 60_000,
+      () => req<GeocodePlace[]>(`/api/geocode?q=${encodeURIComponent(normalized)}&limit=${safeLimit}`),
+    );
+  },
   getSearchPlaceCard: (query: string, lat: number, lng: number) =>
-    req<OsmPoi | null>(`/api/places/search-card?q=${encodeURIComponent(query)}&lat=${lat}&lng=${lng}`),
+    guardedRequest(
+      `search-card:${normalizeRequestText(query)}:${stableNumber(lat)}:${stableNumber(lng)}`,
+      10 * 60_000,
+      () => req<OsmPoi | null>(`/api/places/search-card?q=${encodeURIComponent(query)}&lat=${lat}&lng=${lng}`),
+    ),
   resolveMapCard: (data: MapCardResolveRequest) =>
-    req<MapCardResolveResponse>('/api/map-card/resolve', { method: 'POST', body: JSON.stringify(data) }),
+    guardedRequest(
+      `map-card:${data.kind || 'place'}:${data.source || ''}:${data.id || data.provider_place_id || data.place_id || ''}:${normalizeRequestText(data.name || '')}:${stableNumber(data.lat, 4)}:${stableNumber(data.lng, 4)}`,
+      10 * 60_000,
+      () => req<MapCardResolveResponse>('/api/map-card/resolve', { method: 'POST', body: JSON.stringify(data) }),
+    ),
   getCampsites: (lat: number, lng: number, radius = 25) =>
     req<Campsite[]>(`/api/campsites?lat=${lat}&lng=${lng}&radius=${radius}`),
   searchCampsites: (lat: number, lng: number, radius = 40, types: string[] = []) =>
@@ -258,14 +275,26 @@ export const api = {
   getOsmPois: (lat: number, lng: number, radius = 30, types = 'water,trailhead,viewpoint') =>
     req<OsmPoi[]>(`/api/osm-pois?lat=${lat}&lng=${lng}&radius=${radius}&types=${types}`),
   getNearbyPlaces: (lat: number, lng: number, radius = 25, categories = 'fuel,water,trailhead,viewpoint', provider: 'auto' | 'google' | 'foursquare' | 'osm' = 'auto') =>
-    req<OsmPoi[]>(`/api/places/nearby?lat=${lat}&lng=${lng}&radius=${radius}&categories=${encodeURIComponent(categories)}&provider=${encodeURIComponent(provider)}`),
+    guardedRequest(
+      `nearby:${provider}:${stableNumber(lat)}:${stableNumber(lng)}:${Math.round(radius)}:${categories.split(',').map(c => c.trim()).filter(Boolean).sort().join(',')}`,
+      5 * 60_000,
+      () => req<OsmPoi[]>(`/api/places/nearby?lat=${lat}&lng=${lng}&radius=${radius}&categories=${encodeURIComponent(categories)}&provider=${encodeURIComponent(provider)}`),
+    ),
   getNearbySmartPack: (lat: number, lng: number, radius = 35, categories = 'camp,trailhead,viewpoint,peak,hot_spring,park,historic,climbing,ohv,attraction,camping,water,grocery,mechanic,parking,dump,propane,fuel', route?: [number, number][]) =>
-    req<NearbySmartPackResponse>('/api/nearby/smart-pack', {
-      method: 'POST',
-      body: JSON.stringify({ center: { lat, lng }, radius, categories: categories.split(',').filter(Boolean), route }),
-    }),
+    guardedRequest(
+      `smart-pack:${stableNumber(lat)}:${stableNumber(lng)}:${Math.round(radius)}:${categories.split(',').map(c => c.trim()).filter(Boolean).sort().join(',')}:${stableRouteKey(route)}`,
+      5 * 60_000,
+      () => req<NearbySmartPackResponse>('/api/nearby/smart-pack', {
+        method: 'POST',
+        body: JSON.stringify({ center: { lat, lng }, radius, categories: categories.split(',').filter(Boolean), route }),
+      }),
+    ),
   getPlaceDetail: (source: string, placeId: string) =>
-    req<PlaceDetail>(`/api/places/${encodeURIComponent(source)}/${encodeURIComponent(placeId)}/detail`),
+    guardedRequest(
+      `place-detail:${String(source || '').toLowerCase()}:${placeId}`,
+      15 * 60_000,
+      () => req<PlaceDetail>(`/api/places/${encodeURIComponent(source)}/${encodeURIComponent(placeId)}/detail`),
+    ),
   discoverTrails: (params: TrailDiscoverParams) => {
     const qs = new URLSearchParams({ mode: params.mode ?? 'nearby', limit: String(params.limit ?? 60) });
     if (params.lat != null) qs.set('lat', String(params.lat));

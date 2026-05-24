@@ -24,6 +24,7 @@ from ingestors.ridb import get_campsites_near, get_campsites_search, get_facilit
 from ingestors.osm import get_osm_campsites, get_osm_campsite_detail, get_water_sources, get_trailheads, get_trails, get_viewpoints, get_peaks, get_hot_springs, get_fuel_stations, get_service_places
 from ingestors.foursquare import FSQ_BUSINESS_CATEGORIES, foursquare_enabled, get_foursquare_place_detail, get_foursquare_places
 from ingestors.google_places import fetch_google_photo, get_google_place_detail, get_google_places, google_places_enabled, search_google_places_text
+from ingestors.provider_guard import provider_call_snapshot, record_provider_call, runtime_cached_call
 from ingestors.blm import get_blm_campsites, get_blm_campsite_detail
 from ingestors.conditions import get_provider_conditions_along_route, get_provider_conditions_near, get_wfigs_fire_perimeters
 from db.store import (
@@ -2388,54 +2389,84 @@ async def geocode_places(q: str, limit: int = 8, countrycodes: str = ""):
     if not query:
         return []
     limit = max(1, min(int(limit or 8), 10))
-    token = settings.mapbox_token
     country_filter = _clean_countrycodes(countrycodes) or _countrycodes_for_query(query)
-    async with httpx.AsyncClient(timeout=8.0, headers={"User-Agent": "TrailheadRouteBuilder/1.0"}) as client:
-        if token:
+
+    async def fetch_geocode() -> list[dict]:
+        token = settings.mapbox_token
+        async with httpx.AsyncClient(timeout=8.0, headers={"User-Agent": "TrailheadRouteBuilder/1.0"}) as client:
+            if token:
+                try:
+                    params = {"access_token": token, "limit": limit}
+                    if country_filter:
+                        params["country"] = country_filter
+                    t0 = time.time()
+                    resp = await client.get(
+                        f"https://api.mapbox.com/geocoding/v5/mapbox.places/{quote(query, safe='')}.json",
+                        params=params,
+                    )
+                    record_provider_call(
+                        "mapbox",
+                        "geocode",
+                        status_code=resp.status_code,
+                        duration_ms=round((time.time() - t0) * 1000),
+                        source_action="submit_search",
+                        key=f"{query.lower()}:{country_filter}:{limit}",
+                    )
+                    resp.raise_for_status()
+                    places = []
+                    for feat in resp.json().get("features", [])[:limit]:
+                        coords = feat.get("geometry", {}).get("coordinates") or []
+                        if len(coords) >= 2:
+                            places.append({
+                                "name": feat.get("place_name") or feat.get("text") or query,
+                                "lat": float(coords[1]),
+                                "lng": float(coords[0]),
+                            })
+                    if places:
+                        return places
+                except Exception:
+                    pass
             try:
-                params = {"access_token": token, "limit": limit}
+                params = {"format": "json", "limit": limit, "q": query}
                 if country_filter:
-                    params["country"] = country_filter
+                    params["countrycodes"] = country_filter
+                t0 = time.time()
                 resp = await client.get(
-                    f"https://api.mapbox.com/geocoding/v5/mapbox.places/{quote(query, safe='')}.json",
+                    "https://nominatim.openstreetmap.org/search",
                     params=params,
+                )
+                record_provider_call(
+                    "nominatim",
+                    "geocode",
+                    status_code=resp.status_code,
+                    duration_ms=round((time.time() - t0) * 1000),
+                    source_action="submit_search",
+                    key=f"{query.lower()}:{country_filter}:{limit}",
                 )
                 resp.raise_for_status()
                 places = []
-                for feat in resp.json().get("features", [])[:limit]:
-                    coords = feat.get("geometry", {}).get("coordinates") or []
-                    if len(coords) >= 2:
-                        places.append({
-                            "name": feat.get("place_name") or feat.get("text") or query,
-                            "lat": float(coords[1]),
-                            "lng": float(coords[0]),
-                        })
-                if places:
-                    return places
-            except Exception:
-                pass
-        try:
-            params = {"format": "json", "limit": limit, "q": query}
-            if country_filter:
-                params["countrycodes"] = country_filter
-            resp = await client.get(
-                "https://nominatim.openstreetmap.org/search",
-                params=params,
-            )
-            resp.raise_for_status()
-            places = []
-            for p in resp.json()[:limit]:
-                if not p.get("lat") or not p.get("lon"):
-                    continue
-                display = p.get("display_name") or query
-                places.append({
-                    "name": ", ".join(display.split(",")[:3]),
-                    "lat": float(p["lat"]),
-                    "lng": float(p["lon"]),
-                })
-            return places
-        except Exception as e:
-            raise HTTPException(502, f"Geocode failed: {e}")
+                for p in resp.json()[:limit]:
+                    if not p.get("lat") or not p.get("lon"):
+                        continue
+                    display = p.get("display_name") or query
+                    places.append({
+                        "name": ", ".join(display.split(",")[:3]),
+                        "lat": float(p["lat"]),
+                        "lng": float(p["lon"]),
+                    })
+                return places
+            except Exception as e:
+                raise HTTPException(502, f"Geocode failed: {e}")
+
+    cache_key = f"geocode:{query.lower()}:{country_filter}:{limit}"
+    return await runtime_cached_call(
+        cache_key,
+        10 * 60,
+        fetch_geocode,
+        provider="geocode",
+        endpoint="search",
+        source_action="submit_search",
+    )
 
 
 # ── Self-hosted vector tiles (Protomaps proxy) ────────────────────────────────
@@ -4892,6 +4923,10 @@ async def admin_stats(admin: dict = Depends(_require_admin)):
     stats["google_play_validation_configured"] = _google_play_server_api_ready()
     stats["google_play_package_name"] = settings.google_play_package_name
     return stats
+
+@app.get("/api/admin/provider-calls")
+async def admin_provider_calls(limit: int = 100, admin: dict = Depends(_require_admin)):
+    return provider_call_snapshot(limit)
 
 @app.get("/api/admin/users")
 async def admin_users(search: str = "", limit: int = 50, offset: int = 0,

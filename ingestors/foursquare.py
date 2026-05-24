@@ -15,6 +15,7 @@ from urllib.parse import quote
 
 import httpx
 from db.store import get_cached, set_cached
+from ingestors.provider_guard import record_provider_call, runtime_cached_call
 
 FSQ_SEARCH_URL = "https://places-api.foursquare.com/places/search"
 FSQ_DETAIL_URL = "https://places-api.foursquare.com/places/{fsq_id}"
@@ -59,7 +60,7 @@ FSQ_CATEGORY_PRIORITY = {
     "propane": 13,
 }
 
-FSQ_SUMMARY_FIELDS = ",".join([
+FSQ_DETAIL_FIELDS = ",".join([
     "fsq_place_id",
     "name",
     "latitude",
@@ -76,10 +77,6 @@ FSQ_SUMMARY_FIELDS = ",".join([
     "photos",
     "tips",
     "description",
-])
-
-FSQ_DETAIL_FIELDS = ",".join([
-    FSQ_SUMMARY_FIELDS,
     "email",
     "social_media",
     "features",
@@ -125,6 +122,10 @@ def foursquare_search_enabled() -> bool:
 
 def foursquare_detail_enabled() -> bool:
     return os.getenv("FOURSQUARE_DETAIL_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def foursquare_premium_fields_enabled() -> bool:
+    return os.getenv("FOURSQUARE_PREMIUM_FIELDS_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _headers() -> dict[str, str]:
@@ -308,12 +309,21 @@ async def _search_category(lat: float, lng: float, radius_m: int, category: str,
         "query": FSQ_CATEGORY_QUERIES[category],
         "limit": str(max(1, min(limit, 30))),
         "sort": "DISTANCE",
-        "fields": FSQ_SUMMARY_FIELDS,
     }
 
     try:
         async with httpx.AsyncClient(timeout=8) as client:
+            t0 = asyncio.get_running_loop().time()
             res = await client.get(FSQ_SEARCH_URL, params=params, headers=_headers())
+            record_provider_call(
+                "foursquare",
+                "search",
+                status_code=res.status_code,
+                duration_ms=round((asyncio.get_running_loop().time() - t0) * 1000),
+                source_action="nearby_places",
+                premium_fields=False,
+                key=f"{category}:{lat:.3f}:{lng:.3f}:{radius_m}",
+            )
             if res.status_code in {401, 403, 429}:
                 log.warning("Foursquare Places returned %s for category=%s: %s", res.status_code, category, res.text[:240])
                 _remember_foursquare_block(res.status_code, res.text, "search")
@@ -339,27 +349,49 @@ async def get_foursquare_place_detail(fsq_id: str) -> dict | None:
     detail payload on demand so we do not have to persist rich Foursquare data.
     """
     clean_id = quote(str(fsq_id or "").replace("foursquare:", "").strip(), safe="")
-    if not clean_id or not foursquare_enabled() or not foursquare_detail_enabled():
+    if not clean_id or not foursquare_enabled() or not foursquare_detail_enabled() or not foursquare_premium_fields_enabled():
         return None
     if _foursquare_blocked():
         return None
 
-    params = {"fields": FSQ_DETAIL_FIELDS}
-    body: dict | None = None
-    try:
-        async with httpx.AsyncClient(timeout=8) as client:
-            res = await client.get(FSQ_DETAIL_URL.format(fsq_id=clean_id), params=params, headers=_headers())
-            if res.status_code == 404:
-                res = await client.get(FSQ_LEGACY_DETAIL_URL.format(fsq_id=clean_id), params=params, headers=_headers())
-            if res.status_code in {400, 401, 403, 404, 429}:
-                log.warning("Foursquare detail returned %s for %s: %s", res.status_code, clean_id, res.text[:240])
-                _remember_foursquare_block(res.status_code, res.text, "detail")
-                return None
-            res.raise_for_status()
-            body = res.json()
-    except Exception as exc:
-        log.warning("Foursquare detail failed for %s: %s", clean_id, exc)
-        return None
+    async def fetch_detail() -> dict | None:
+        params = {"fields": FSQ_DETAIL_FIELDS}
+        body: dict | None = None
+        try:
+            async with httpx.AsyncClient(timeout=8) as client:
+                t0 = asyncio.get_running_loop().time()
+                res = await client.get(FSQ_DETAIL_URL.format(fsq_id=clean_id), params=params, headers=_headers())
+                if res.status_code == 404:
+                    res = await client.get(FSQ_LEGACY_DETAIL_URL.format(fsq_id=clean_id), params=params, headers=_headers())
+                record_provider_call(
+                    "foursquare",
+                    "detail",
+                    status_code=res.status_code,
+                    duration_ms=round((asyncio.get_running_loop().time() - t0) * 1000),
+                    source_action="place_detail",
+                    premium_fields=True,
+                    key=clean_id,
+                )
+                if res.status_code in {400, 401, 403, 404, 429}:
+                    log.warning("Foursquare detail returned %s for %s: %s", res.status_code, clean_id, res.text[:240])
+                    _remember_foursquare_block(res.status_code, res.text, "detail")
+                    return None
+                res.raise_for_status()
+                body = res.json()
+        except Exception as exc:
+            log.warning("Foursquare detail failed for %s: %s", clean_id, exc)
+            return None
+        return body
+
+    body = await runtime_cached_call(
+        f"foursquare_detail:{clean_id}",
+        15 * 60,
+        fetch_detail,
+        provider="foursquare",
+        endpoint="detail",
+        source_action="place_detail",
+        premium_fields=True,
+    )
     if not isinstance(body, dict):
         return None
 

@@ -280,6 +280,84 @@ function cleanAiCardText(value?: string | null): string {
     .trim();
 }
 
+function compactText(value: string, max = 520): string {
+  const cleaned = cleanCampDescriptionText(value);
+  if (cleaned.length <= max) return cleaned;
+  const clipped = cleaned.slice(0, max - 1);
+  const cut = Math.max(clipped.lastIndexOf('. '), clipped.lastIndexOf(' '));
+  return `${clipped.slice(0, cut > 220 ? cut : max - 1).trim()}...`;
+}
+
+function campSummaryText(camp?: CampsitePin | null, detail?: CampsiteDetail | null): string {
+  const candidates = [
+    (detail as any)?.summary,
+    detail?.description,
+    camp?.description,
+    (detail as any)?.access_note,
+  ]
+    .map(cleanCampDescriptionText)
+    .filter(Boolean)
+    .filter(text => !/^[-\d.,\s]+$/.test(text));
+  const useful = candidates.find(text => text.length >= 26) ?? candidates[0] ?? '';
+  if (useful) return compactText(useful);
+  const type = cleanDisplayLabel(camp?.land_type || camp?.tags?.[0] || 'campground') || 'Campground';
+  const where = (detail?.address || camp?.address) ? ` near ${detail?.address || camp?.address}` : '';
+  return `${type}${where}. Verify current access, rules, fees, road conditions, and availability before relying on it.`;
+}
+
+function uniqueCleanLabels(values: Array<string | undefined | null>): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const label = cleanDisplayLabel(value || '');
+    if (!label) continue;
+    const key = label.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(label);
+  }
+  return out;
+}
+
+function derivedCampFeatures(camp?: CampsitePin | null, detail?: CampsiteDetail | null): string[] {
+  const sourceText = `${detail?.description || ''} ${camp?.description || ''}`.toLowerCase();
+  const tags = [...(detail?.tags ?? []), ...(camp?.tags ?? [])];
+  const raw: string[] = [...(detail?.amenities ?? [])];
+  const usefulTagLabels = tags
+    .filter(tag => !/^(camp|campground|camp_site|commercial|federal|blm|ridb|google)$/i.test(String(tag).trim()))
+    .map(tag => cleanDisplayLabel(tag));
+  raw.push(...usefulTagLabels);
+  if (camp?.ada || detail?.ada) raw.push('ADA Accessible');
+  if (/water\s*:\s*yes|drinking water|potable water|water available/.test(sourceText) && !/water\s*:\s*no|no potable water/.test(sourceText)) raw.push('Drinking Water');
+  if (/toilet\s*:\s*yes|toilets?\s*:\s*yes|vault toilets?|flush toilets?|restrooms?/.test(sourceText) && !/toilets?\s*:\s*no|no toilets?/.test(sourceText)) raw.push('Toilet Restrooms');
+  if (/picnic table/.test(sourceText)) raw.push('Picnic Tables');
+  if (/fire rings?|fire pits?|fires allowed/.test(sourceText)) raw.push('Fire Ring');
+  if (/walk[-\s]?in/.test(sourceText)) raw.push('Walk-In');
+  if (camp?.reservable || detail?.reservable) raw.push('Reservable');
+  return uniqueCleanLabels(raw).slice(0, 12);
+}
+
+function derivedCampSiteTypes(camp?: CampsitePin | null, detail?: CampsiteDetail | null): string[] {
+  const tags = [...(detail?.tags ?? []), ...(camp?.tags ?? [])].map(tag => String(tag).toLowerCase());
+  const raw = [...(detail?.site_types ?? [])];
+  if (tags.some(tag => tag.includes('rv'))) raw.push('RV Sites');
+  if (tags.some(tag => tag.includes('tent'))) raw.push('Tent Sites');
+  if (tags.some(tag => tag.includes('group'))) raw.push('Group Sites');
+  if (tags.some(tag => tag.includes('dispersed'))) raw.push('Dispersed');
+  if (tags.some(tag => tag.includes('walk'))) raw.push('Walk-In Sites');
+  return uniqueCleanLabels(raw).slice(0, 8);
+}
+
+function derivedCampActivities(camp?: CampsitePin | null, detail?: CampsiteDetail | null): string[] {
+  const tags = [...(detail?.tags ?? []), ...(camp?.tags ?? [])].map(tag => String(tag).toLowerCase());
+  const raw = [...(detail?.activities ?? [])];
+  if (tags.some(tag => tag.includes('hiking'))) raw.push('Hiking');
+  if (tags.some(tag => tag.includes('biking') || tag.includes('bike'))) raw.push('Biking');
+  if (tags.some(tag => tag.includes('ohv') || tag.includes('4wd') || tag.includes('utv'))) raw.push('OHV Trails');
+  if (tags.some(tag => tag.includes('fishing'))) raw.push('Fishing');
+  return uniqueCleanLabels(raw).slice(0, 8);
+}
+
 type SavedAiKind = 'route_brief' | 'packing_list';
 type SavedAiPayload = RouteBrief | PackingList;
 
@@ -3143,8 +3221,8 @@ function MapScreen() {
 
   useEffect(() => {
     if (!selectedCamp?.id) return;
-    loadCampDetailForCamp(selectedCamp, { loadInsight: false }).catch(() => {});
-  }, [selectedCamp?.id, selectedCamp?.lat, selectedCamp?.lng]);
+    loadCampDetailForCamp(selectedCamp, { loadInsight: hasPlan }).catch(() => {});
+  }, [selectedCamp?.id, selectedCamp?.lat, selectedCamp?.lng, hasPlan]);
 
   // Field reports
   const [fieldReports,      setFieldReports]      = useState<CampFieldReport[]>([]);
@@ -9857,12 +9935,17 @@ function MapScreen() {
                 <Text style={s.inlineLoadingText}>Loading camp details</Text>
               </View>
             ) : null}
-            {campDetail ? (
+            {campDetail ? (() => {
+              const summaryText = campSummaryText(selectedCamp, campDetail);
+              const featureItems = derivedCampFeatures(selectedCamp, campDetail);
+              const siteTypeItems = derivedCampSiteTypes(selectedCamp, campDetail);
+              const activityItems = derivedCampActivities(selectedCamp, campDetail);
+              return (
               <>
-                {cleanCampDescriptionText(campDetail.description) ? (
+                {summaryText ? (
                   <View style={s.detailSection}>
                     <Text style={s.detailSectionTitle}>SUMMARY</Text>
-                    <Text style={s.detailDesc}>{cleanCampDescriptionText(campDetail.description)}</Text>
+                    <Text style={s.detailDesc}>{summaryText}</Text>
                   </View>
                 ) : null}
 
@@ -9899,7 +9982,7 @@ function MapScreen() {
                   </View>
                 ) : null}
 
-                {(campDetail.amenities ?? []).length > 0 ? (
+                {featureItems.length > 0 ? (
                   <View style={s.detailSection}>
                     <View style={s.sectionTitleRow}>
                       <Text style={s.detailSectionTitle}>FEATURES</Text>
@@ -9910,7 +9993,7 @@ function MapScreen() {
                       ) : null}
                     </View>
                     {(['campers', 'vehicles'] as const).map(bucket => {
-                      const items = (campDetail.amenities ?? []).map(cleanDisplayLabel).filter(a => a && featureBucket(a) === bucket);
+                      const items = featureItems.filter(a => featureBucket(a) === bucket);
                       if (!items.length) return null;
                       return (
                         <View key={bucket} style={s.featureGroup}>
@@ -9929,23 +10012,23 @@ function MapScreen() {
                   </View>
                 ) : null}
 
-                {(campDetail.site_types ?? []).length > 0 || (campDetail.activities ?? []).length > 0 ? (
+                {siteTypeItems.length > 0 || activityItems.length > 0 ? (
                   <View style={s.detailSection}>
-                    {(campDetail.site_types ?? []).length > 0 ? (
+                    {siteTypeItems.length > 0 ? (
                       <>
                         <Text style={s.detailSectionTitle}>SITE TYPES</Text>
                         <View style={s.featureGrid}>
-                          {(campDetail.site_types ?? []).map(cleanDisplayLabel).filter(Boolean).map(st => (
+                          {siteTypeItems.map(st => (
                             <View key={st} style={s.featureItem}>
                               <Ionicons name={siteTypeIcon(st)} size={22} color={C.green} />
-                              <Text style={s.featureText}>{cleanDisplayLabel(st)}</Text>
+                              <Text style={s.featureText}>{st}</Text>
                             </View>
                           ))}
                         </View>
                       </>
                     ) : null}
-                    {(campDetail.activities ?? []).length > 0 ? (
-                      <Text style={s.detailActivities}>{(campDetail.activities ?? []).map(cleanDisplayLabel).filter(Boolean).join(' · ')}</Text>
+                    {activityItems.length > 0 ? (
+                      <Text style={s.detailActivities}>{activityItems.join(' · ')}</Text>
                     ) : null}
                   </View>
                 ) : null}
@@ -10102,14 +10185,38 @@ function MapScreen() {
                       </View>
                     ) : null}
                   </View>
-                ) : (
+                ) : hasPlan ? (
                   <TouchableOpacity style={s.lockedInlineCard} onPress={() => openCampInsight(selectedCamp, campDetail)}>
-                    <Ionicons name={hasPlan ? 'sparkles-outline' : 'lock-closed-outline'} size={15} color={C.orange} />
-                    <Text style={s.lockedInlineText}>{hasPlan ? 'Generate AI camp insight for route fit, hazards, and nearby highlights.' : 'Generate camp info with credits or Explorer.'}</Text>
+                    <Ionicons name="sparkles-outline" size={15} color={C.orange} />
+                    <Text style={s.lockedInlineText}>Generate AI camp insight for route fit, hazards, and nearby highlights.</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity style={s.lockedAiPreview} onPress={() => openCampInsight(selectedCamp, campDetail)} activeOpacity={0.9}>
+                    <View style={s.lockedAiPreviewTop}>
+                      <Text style={s.detailSectionTitle}>AI INSIGHT</Text>
+                      <View style={s.lockedAiBadge}>
+                        <Ionicons name="lock-closed-outline" size={12} color={C.orange} />
+                        <Text style={s.lockedAiBadgeText}>UNLOCK</Text>
+                      </View>
+                    </View>
+                    <View style={s.lockedAiFakeBlock}>
+                      <View style={[s.lockedAiLine, { width: '76%' }]} />
+                      <View style={[s.lockedAiLine, { width: '92%' }]} />
+                      <View style={[s.lockedAiLine, { width: '68%' }]} />
+                      <View style={s.lockedAiMetaRow}>
+                        <View style={[s.lockedAiPill, { width: 92 }]} />
+                        <View style={[s.lockedAiPill, { width: 118 }]} />
+                      </View>
+                    </View>
+                    <View style={s.lockedAiOverlay}>
+                      <Ionicons name="sparkles-outline" size={17} color={C.orange} />
+                      <Text style={s.lockedAiOverlayText}>Unlock full AI camp fit, hazards, best season, and nearby highlights with credits or Explorer.</Text>
+                    </View>
                   </TouchableOpacity>
                 )}
               </>
-            ) : null}
+              );
+            })() : null}
             {(() => {
               const key = nearbyFeedKey('camp', selectedCamp.lat, selectedCamp.lng);
               const feed = nearbyPlaceFeeds[key];
@@ -13763,6 +13870,43 @@ const makeStyles = (C: ColorPalette) => {
     borderRadius: 14, padding: 12,
   },
   lockedInlineText: { flex: 1, color: C.text2, fontSize: 12, lineHeight: 17, fontWeight: '700' },
+  lockedAiPreview: {
+    position: 'relative',
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: C.orange + '55',
+    backgroundColor: C.s1,
+    borderRadius: 16,
+    padding: 13,
+    minHeight: 158,
+  },
+  lockedAiPreviewTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  lockedAiBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderWidth: 1,
+    borderColor: C.orange + '55',
+    borderRadius: 999,
+    backgroundColor: C.orange + '12',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
+  lockedAiBadgeText: { color: C.orange, fontSize: 8, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
+  lockedAiFakeBlock: { gap: 10, marginTop: 14, opacity: 0.42 },
+  lockedAiLine: { height: 13, borderRadius: 7, backgroundColor: C.text2 },
+  lockedAiMetaRow: { flexDirection: 'row', gap: 8, marginTop: 6 },
+  lockedAiPill: { height: 26, borderRadius: 13, backgroundColor: C.text3 },
+  lockedAiOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    top: 46,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 18,
+    backgroundColor: 'rgba(9, 18, 17, 0.66)',
+  },
+  lockedAiOverlayText: { color: C.text, fontSize: 12, lineHeight: 17, fontWeight: '800', textAlign: 'center' },
 
   // ── Rig compat + weather
   rigCompatBadge: {

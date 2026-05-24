@@ -10072,10 +10072,42 @@ function MapScreen() {
                   ) : null}
                 </View>
 
-                <TouchableOpacity style={s.lockedInlineCard} onPress={() => openCampInsight(selectedCamp, campDetail)}>
-                  <Ionicons name={hasPlan ? 'sparkles-outline' : 'lock-closed-outline'} size={15} color={C.orange} />
-                  <Text style={s.lockedInlineText}>{hasPlan ? 'Generate AI camp insight for route fit, hazards, and nearby highlights.' : 'AI camp insight uses credits or Explorer.'}</Text>
-                </TouchableOpacity>
+                {(campInsight || loadingInsight) ? (
+                  <View style={s.detailSection}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                      <Text style={s.detailSectionTitle}>AI INSIGHT</Text>
+                      {loadingInsight ? <ActivityIndicator size="small" color={C.orange} /> : null}
+                      {campInsight?.star_rating ? <Text style={s.aiStars}>{campInsight.star_rating}/5</Text> : null}
+                    </View>
+                    {campInsight?.insider_tip ? (
+                      <View style={s.insiderTip}>
+                        <Text style={s.insiderLabel}>INSIDER TIP</Text>
+                        <Text style={s.insiderText}>{campInsight.insider_tip}</Text>
+                      </View>
+                    ) : null}
+                    {campInsight?.best_for ? <Text style={s.aiMeta}>Best for: {campInsight.best_for}</Text> : null}
+                    {campInsight?.best_season ? <Text style={s.aiMeta}>Best season: {campInsight.best_season}</Text> : null}
+                    {campInsight?.hazards ? (
+                      <View style={s.hazardRow}>
+                        <Ionicons name="warning-outline" size={13} color={C.yellow} />
+                        <Text style={s.hazardText}>{campInsight.hazards}</Text>
+                      </View>
+                    ) : null}
+                    {campInsight?.nearby_highlights?.length ? (
+                      <View style={{ marginTop: 8 }}>
+                        <Text style={[s.detailSectionTitle, { marginBottom: 6 }]}>NEARBY</Text>
+                        {campInsight.nearby_highlights.map((h, i) => (
+                          <Text key={i} style={s.nearbyItem}>• {h}</Text>
+                        ))}
+                      </View>
+                    ) : null}
+                  </View>
+                ) : (
+                  <TouchableOpacity style={s.lockedInlineCard} onPress={() => openCampInsight(selectedCamp, campDetail)}>
+                    <Ionicons name={hasPlan ? 'sparkles-outline' : 'lock-closed-outline'} size={15} color={C.orange} />
+                    <Text style={s.lockedInlineText}>{hasPlan ? 'Generate AI camp insight for route fit, hazards, and nearby highlights.' : 'Generate camp info with credits or Explorer.'}</Text>
+                  </TouchableOpacity>
+                )}
               </>
             ) : null}
             {(() => {

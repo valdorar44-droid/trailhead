@@ -119,6 +119,14 @@ def foursquare_enabled() -> bool:
     return bool(os.getenv("FOURSQUARE_API_KEY", "").strip())
 
 
+def foursquare_search_enabled() -> bool:
+    return os.getenv("FOURSQUARE_SEARCH_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def foursquare_detail_enabled() -> bool:
+    return os.getenv("FOURSQUARE_DETAIL_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _headers() -> dict[str, str]:
     return {
         "Authorization": f"Bearer {os.getenv('FOURSQUARE_API_KEY', '').strip()}",
@@ -331,7 +339,7 @@ async def get_foursquare_place_detail(fsq_id: str) -> dict | None:
     detail payload on demand so we do not have to persist rich Foursquare data.
     """
     clean_id = quote(str(fsq_id or "").replace("foursquare:", "").strip(), safe="")
-    if not clean_id or not foursquare_enabled():
+    if not clean_id or not foursquare_enabled() or not foursquare_detail_enabled():
         return None
     if _foursquare_blocked():
         return None
@@ -390,7 +398,7 @@ async def get_foursquare_places(
         {c for c in (categories or []) if c in FSQ_BUSINESS_CATEGORIES},
         key=lambda c: (FSQ_CATEGORY_PRIORITY.get(c, 50), c),
     )
-    if not requested or not foursquare_enabled():
+    if not requested or not foursquare_enabled() or not foursquare_search_enabled():
         return []
 
     merged: list[dict] = []

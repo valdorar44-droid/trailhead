@@ -5309,14 +5309,13 @@ def _camp_from_live_place(place: dict) -> dict | None:
 async def nearby_camps(lat: float, lng: float, radius: float = 50, types: str = ""):
     """Aggregate legal camp sources near a point, no trip required."""
     type_filters = [t.strip() for t in types.split(",") if t.strip()] if types else None
-    ridb, blm, osm, google_live, fsq_live = await asyncio.gather(
+    ridb, blm, osm, google_live = await asyncio.gather(
         get_campsites_search(lat, lng, radius_miles=radius, type_filters=type_filters),
         get_blm_campsites(lat, lng, radius_miles=radius),
         get_osm_campsites(lat, lng, radius_m=int(min(radius, 60) * 1600)),
         get_google_places(lat, lng, radius_m=int(min(radius, 45) * 1609.344), categories={"camp"}, limit_per_category=12) if google_places_enabled() else asyncio.sleep(0, result=[]),
-        get_foursquare_places(lat, lng, radius_m=int(min(radius, 45) * 1609.344), categories={"camp", "rv_park"}, limit_per_category=12) if foursquare_enabled() else asyncio.sleep(0, result=[]),
     )
-    live_camps = [camp for camp in (_camp_from_live_place(p) for p in [*google_live, *fsq_live]) if camp]
+    live_camps = [camp for camp in (_camp_from_live_place(p) for p in google_live) if camp]
     return _merge_camp_sources(ridb, blm, osm, live_camps, type_filters=type_filters)[:160]
 
 
@@ -6044,7 +6043,7 @@ async def nearby_places(
 
     if provider in {"auto", "google"} and google_places_enabled():
         google_places = await get_google_places(lat, lng, radius_m=radius_m, categories=category_set)
-    if provider in {"auto", "foursquare"} and foursquare_enabled() and category_set.intersection(FSQ_BUSINESS_CATEGORIES):
+    if provider == "foursquare" and foursquare_enabled() and category_set.intersection(FSQ_BUSINESS_CATEGORIES):
         fsq_places = await get_foursquare_places(lat, lng, radius_m=radius_m, categories=category_set)
     if provider in {"auto", "osm"}:
         osm_places = await get_service_places(lat, lng, radius_m=radius_m, categories=category_set)

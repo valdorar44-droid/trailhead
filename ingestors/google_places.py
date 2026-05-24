@@ -43,6 +43,7 @@ GOOGLE_TYPE_MAP: dict[str, list[str]] = {
     "park": ["national_park", "park"],
     "historic": ["historical_landmark", "tourist_attraction"],
     "hot_spring": ["tourist_attraction"],
+    "peak": ["tourist_attraction", "park"],
 }
 
 GOOGLE_CATEGORY_PRIORITY = {
@@ -165,6 +166,8 @@ def _category_for_types(types: list[str], requested: str) -> str:
         return "trailhead"
     if "park" in type_set and requested in {"park", "hot_spring"}:
         return requested
+    if requested == "peak" and ({"natural_feature", "tourist_attraction", "park", "hiking_area"} & type_set):
+        return "peak"
     if {"restaurant", "cafe"} & type_set:
         return "food"
     return requested

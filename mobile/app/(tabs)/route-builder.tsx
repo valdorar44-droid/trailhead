@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput,
   ActivityIndicator, Animated, Easing, Keyboard, Modal, Alert, Image, Platform,
-  useWindowDimensions,
+  useWindowDimensions, KeyboardAvoidingView,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -2882,7 +2882,7 @@ export default function RouteBuilderScreen() {
       : true;
     const nextStep = () => setWizardStep(step => Math.min(3, step + 1));
     const dockMarginBottom = keyboardVisible
-      ? 104 + bottomInset
+      ? 10 + bottomInset
       : wizardStep === 0
       ? 18 + bottomInset
       : 72 + bottomInset;
@@ -2913,12 +2913,19 @@ export default function RouteBuilderScreen() {
           ))}
         </View>
 
-        <Animated.View style={[
-          s.wizardAnimatedPane,
-          { opacity: wizardFade, transform: [{ translateY: wizardSlide }] },
-        ]}>
-        {wizardStep === 0 ? (
-          <View style={s.wizardPane}>
+        <ScrollView
+          style={s.wizardStepScroll}
+          contentContainerStyle={[s.wizardStepScrollContent, { paddingBottom: keyboardVisible ? 26 : 10 }]}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+        >
+          <Animated.View style={[
+            s.wizardAnimatedPane,
+            { opacity: wizardFade, transform: [{ translateY: wizardSlide }] },
+          ]}>
+          {wizardStep === 0 ? (
+            <View style={s.wizardPane}>
             <View style={s.wizardQuestion}>
               <Text style={s.wizardTitle}>Where are you starting?</Text>
               <Text style={s.wizardHelp}>Use current location or search a known city, trailhead, address, campsite, or coordinates.</Text>
@@ -2954,9 +2961,9 @@ export default function RouteBuilderScreen() {
                 </TouchableOpacity>
               </View>
             </View>
-          </View>
-        ) : wizardStep === 1 ? (
-          <View style={s.wizardPane}>
+            </View>
+          ) : wizardStep === 1 ? (
+            <View style={s.wizardPane}>
             <View style={s.wizardQuestion}>
               <Text style={s.wizardTitle}>Where are you headed?</Text>
               <Text style={s.wizardHelp}>Pick the final destination first. Trailhead will build day finishes around route shape, camp search, and realistic pacing.</Text>
@@ -2979,9 +2986,9 @@ export default function RouteBuilderScreen() {
                 />
               </View>
             </View>
-          </View>
-        ) : wizardStep === 2 ? (
-          <View style={s.wizardPane}>
+            </View>
+          ) : wizardStep === 2 ? (
+            <View style={s.wizardPane}>
             <View style={s.wizardQuestion}>
               <Text style={s.wizardTitle}>Choose the route feel</Text>
               <Text style={s.wizardHelp}>Recommended builds a camp-aware base route. Blank keeps it simple for hand-building.</Text>
@@ -3029,9 +3036,9 @@ export default function RouteBuilderScreen() {
                 </TouchableOpacity>
               ))}
             </View>
-          </View>
-        ) : (
-          <View style={s.wizardPane}>
+            </View>
+          ) : (
+            <View style={s.wizardPane}>
             <View style={s.wizardQuestion}>
               <Text style={s.wizardTitle}>Set the daily pace</Text>
               <Text style={s.wizardHelp}>Hours per day is the max you want to drive. Trailhead should not force every day to hit that limit.</Text>
@@ -3060,12 +3067,12 @@ export default function RouteBuilderScreen() {
                 </TouchableOpacity>
               ))}
             </View>
-          </View>
-        )}
-        </Animated.View>
+            </View>
+          )}
+          </Animated.View>
 
-        {(hasBaseRoute || wizardStep === 3) && (
-          <View style={s.routeNameOptions}>
+          {(hasBaseRoute || wizardStep === 3) && (
+            <View style={s.routeNameOptions}>
             <View style={s.routeNameField}>
               <Text style={s.setupLabel}>ROUTE NAME</Text>
               <TextInput
@@ -3083,10 +3090,11 @@ export default function RouteBuilderScreen() {
                 <Text style={s.routeNameSaveText}>SAVE</Text>
               </TouchableOpacity>
             ) : null}
-          </View>
-        )}
+            </View>
+          )}
 
-        {buildingFramework && <RouteBuildStatus C={C} message={frameworkStatus} />}
+          {buildingFramework && <RouteBuildStatus C={C} message={frameworkStatus} />}
+        </ScrollView>
 
         <View style={[s.wizardNav, fullScreen && [s.wizardNavDock, wizardStep === 0 && s.wizardNavStepOne, { marginBottom: dockMarginBottom }]]}>
           <TouchableOpacity style={[s.wizardNavBtn, wizardStep === 0 && { opacity: 0.45 }]} onPress={() => setWizardStep(step => Math.max(0, step - 1))} disabled={wizardStep === 0}>
@@ -3148,16 +3156,18 @@ export default function RouteBuilderScreen() {
 
   if (!hasBaseRoute) {
     return (
-      <SafeAreaView style={s.wizardScreen}>
-        <View style={s.wizardScreenTop}>
-          <Text style={s.title}>Route Builder</Text>
-          <TouchableOpacity style={s.headerBtn} onPress={() => setRouteTabMode('hub')} accessibilityLabel="Back to saved routes">
-            <Ionicons name="close" size={17} color={C.orange} />
-          </TouchableOpacity>
-        </View>
-        {renderWizardSetup(true)}
-        <PaywallModal visible={paywallVisible} code={paywallCode} message={paywallMessage} onClose={() => setPaywallVisible(false)} />
-      </SafeAreaView>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <SafeAreaView style={s.wizardScreen}>
+          <View style={s.wizardScreenTop}>
+            <Text style={s.title}>Route Builder</Text>
+            <TouchableOpacity style={s.headerBtn} onPress={() => setRouteTabMode('hub')} accessibilityLabel="Back to saved routes">
+              <Ionicons name="close" size={17} color={C.orange} />
+            </TouchableOpacity>
+          </View>
+          {renderWizardSetup(true)}
+          <PaywallModal visible={paywallVisible} code={paywallCode} message={paywallMessage} onClose={() => setPaywallVisible(false)} />
+        </SafeAreaView>
+      </KeyboardAvoidingView>
     );
   }
 
@@ -4042,6 +4052,8 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   wizardTrackNumActive: { color: '#fff' },
   wizardTrackLine: { flex: 1, height: 2, backgroundColor: C.border, marginHorizontal: 5, borderRadius: 1 },
   wizardTrackLineActive: { backgroundColor: C.orange },
+  wizardStepScroll: { flex: 1, minHeight: 0 },
+  wizardStepScrollContent: { flexGrow: 1 },
   wizardAnimatedPane: { minHeight: 0 },
   wizardPane: { gap: 12, minHeight: 218, justifyContent: 'flex-start', marginTop: 18 },
   wizardQuestion: { paddingTop: 2, gap: 5 },

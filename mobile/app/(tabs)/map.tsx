@@ -289,6 +289,7 @@ function compactText(value: string, max = 520): string {
 }
 
 function campSummaryText(camp?: CampsitePin | null, detail?: CampsiteDetail | null): string {
+  const addressKey = cleanCampDescriptionText(detail?.address || camp?.address || '').toLowerCase();
   const candidates = [
     (detail as any)?.summary,
     detail?.description,
@@ -297,6 +298,7 @@ function campSummaryText(camp?: CampsitePin | null, detail?: CampsiteDetail | nu
   ]
     .map(cleanCampDescriptionText)
     .filter(Boolean)
+    .filter(text => !addressKey || text.toLowerCase() !== addressKey)
     .filter(text => !/^[-\d.,\s]+$/.test(text));
   const useful = candidates.find(text => text.length >= 26) ?? candidates[0] ?? '';
   if (useful) return compactText(useful);
@@ -309,7 +311,7 @@ function uniqueCleanLabels(values: Array<string | undefined | null>): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const value of values) {
-    const label = cleanDisplayLabel(value || '');
+    const label = canonicalCampFeatureLabel(cleanDisplayLabel(value || ''));
     if (!label) continue;
     const key = label.toLowerCase();
     if (seen.has(key)) continue;
@@ -328,13 +330,14 @@ function derivedCampFeatures(camp?: CampsitePin | null, detail?: CampsiteDetail 
     .map(tag => cleanDisplayLabel(tag));
   raw.push(...usefulTagLabels);
   if (camp?.ada || detail?.ada) raw.push('ADA Accessible');
+  if (/\bshade\b|shaded|cottonwood/.test(sourceText)) raw.push('Good Shade');
   if (/water\s*:\s*yes|drinking water|potable water|water available/.test(sourceText) && !/water\s*:\s*no|no potable water/.test(sourceText)) raw.push('Drinking Water');
-  if (/toilet\s*:\s*yes|toilets?\s*:\s*yes|vault toilets?|flush toilets?|restrooms?/.test(sourceText) && !/toilets?\s*:\s*no|no toilets?/.test(sourceText)) raw.push('Toilet Restrooms');
+  if (/toilet\s*:\s*yes|toilets?\s*:\s*yes|vault toilets?|flush toilets?|restrooms?/.test(sourceText) && !/toilets?\s*:\s*no|no toilets?/.test(sourceText)) raw.push('Toilets');
   if (/picnic table/.test(sourceText)) raw.push('Picnic Tables');
   if (/fire rings?|fire pits?|fires allowed/.test(sourceText)) raw.push('Fire Ring');
   if (/walk[-\s]?in/.test(sourceText)) raw.push('Walk-In');
   if (camp?.reservable || detail?.reservable) raw.push('Reservable');
-  return uniqueCleanLabels(raw).slice(0, 12);
+  return uniqueCleanLabels(raw).filter(label => campOptionGroup(label) === 'feature').slice(0, 12);
 }
 
 function derivedCampSiteTypes(camp?: CampsitePin | null, detail?: CampsiteDetail | null): string[] {
@@ -345,7 +348,7 @@ function derivedCampSiteTypes(camp?: CampsitePin | null, detail?: CampsiteDetail
   if (tags.some(tag => tag.includes('group'))) raw.push('Group Sites');
   if (tags.some(tag => tag.includes('dispersed'))) raw.push('Dispersed');
   if (tags.some(tag => tag.includes('walk'))) raw.push('Walk-In Sites');
-  return uniqueCleanLabels(raw).slice(0, 8);
+  return uniqueCleanLabels(raw).filter(label => campOptionGroup(label) === 'site').slice(0, 8);
 }
 
 function derivedCampActivities(camp?: CampsitePin | null, detail?: CampsiteDetail | null): string[] {
@@ -355,7 +358,7 @@ function derivedCampActivities(camp?: CampsitePin | null, detail?: CampsiteDetai
   if (tags.some(tag => tag.includes('biking') || tag.includes('bike'))) raw.push('Biking');
   if (tags.some(tag => tag.includes('ohv') || tag.includes('4wd') || tag.includes('utv'))) raw.push('OHV Trails');
   if (tags.some(tag => tag.includes('fishing'))) raw.push('Fishing');
-  return uniqueCleanLabels(raw).slice(0, 8);
+  return uniqueCleanLabels(raw).filter(label => campOptionGroup(label) === 'activity').slice(0, 8);
 }
 
 type SavedAiKind = 'route_brief' | 'packing_list';
@@ -2006,6 +2009,8 @@ const RV_FEATURE_OPTIONS = [
 
 const ACTIVITY_OPTIONS = [
   { label: 'Hiking', icon: 'walk-outline' },
+  { label: 'Camping', icon: 'bonfire-outline' },
+  { label: 'Biking', icon: 'bicycle-outline' },
   { label: 'Fishing', icon: 'fish-outline' },
   { label: 'Boating', icon: 'boat-outline' },
   { label: 'OHV Trails', icon: 'car-sport-outline' },
@@ -2014,6 +2019,104 @@ const ACTIVITY_OPTIONS = [
   { label: 'Historic Site', icon: 'business-outline' },
   { label: 'Wildlife Viewing', icon: 'eye-outline' },
 ] as const;
+
+type CampOptionGroup = 'site' | 'feature' | 'activity';
+type CampOptionMeta = { label: string; icon: keyof typeof Ionicons.glyphMap; group: CampOptionGroup };
+
+const CAMP_OPTION_REGISTRY: CampOptionMeta[] = [
+  ...SITE_TYPE_OPTIONS.map(opt => ({ ...opt, group: 'site' as const })),
+  ...ESSENTIAL_AMENITY_OPTIONS.map(opt => ({ ...opt, group: 'feature' as const })),
+  ...FIRE_WATER_OPTIONS.map(opt => ({ ...opt, group: 'feature' as const })),
+  ...RV_FEATURE_OPTIONS.map(opt => ({ ...opt, group: 'feature' as const })),
+  ...SERVICES_OPTIONS.map(opt => ({ ...opt, group: 'feature' as const })),
+  ...ACTIVITY_OPTIONS.map(opt => ({ ...opt, group: 'activity' as const })),
+];
+
+const CAMP_OPTION_ALIASES: Record<string, string> = {
+  ada: 'ADA Accessible',
+  accessible: 'ADA Accessible',
+  water: 'Drinking Water',
+  potable_water: 'Drinking Water',
+  drinking_water: 'Drinking Water',
+  no_water: 'No Potable Water',
+  toilets: 'Toilets',
+  toilet: 'Toilets',
+  restroom: 'Toilets',
+  restrooms: 'Toilets',
+  toilet_restrooms: 'Toilets',
+  vault_toilet: 'Vault Toilets',
+  vault_toilets: 'Vault Toilets',
+  picnic_table: 'Picnic Tables',
+  picnic_tables: 'Picnic Tables',
+  shade: 'Good Shade',
+  shaded: 'Good Shade',
+  fire_ring: 'Fire Ring',
+  fire_pit: 'Fire Ring',
+  fire_pits: 'Fire Ring',
+  tent: 'Tent Sites',
+  tents: 'Tent Sites',
+  tent_sites: 'Tent Sites',
+  rv: 'RV Sites',
+  rv_sites: 'RV Sites',
+  group: 'Group Sites',
+  group_sites: 'Group Sites',
+  standard: 'Standard Sites',
+  standard_nonelectric: 'Standard Nonelectric',
+  group_standard_nonelectric: 'Group Standard Nonelectric',
+  walk_in: 'Walk-In Sites',
+  walkin: 'Walk-In Sites',
+  reservable: 'Reservable',
+  reservation: 'Reservable',
+  hiking: 'Hiking',
+  biking: 'Biking',
+  camping: 'Camping',
+  boating: 'Boating',
+  fishing: 'Fishing',
+  climbing: 'Climbing',
+  swimming: 'Swimming',
+  wildlife: 'Wildlife Viewing',
+  wildlife_viewing: 'Wildlife Viewing',
+  ohv: 'OHV Trails',
+  ohv_trails: 'OHV Trails',
+};
+
+function campOptionKey(value: string): string {
+  return cleanDisplayLabel(value)
+    .toLowerCase()
+    .replace(/&/g, 'and')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function canonicalCampFeatureLabel(value: string): string {
+  const cleaned = cleanDisplayLabel(value);
+  if (!cleaned) return '';
+  const key = campOptionKey(cleaned);
+  const alias = CAMP_OPTION_ALIASES[key];
+  if (alias) return alias;
+  const exact = CAMP_OPTION_REGISTRY.find(opt => campOptionKey(opt.label) === key);
+  if (exact) return exact.label;
+  return cleaned.replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function campOptionMeta(label: string): CampOptionMeta {
+  const canonical = canonicalCampFeatureLabel(label);
+  const key = campOptionKey(canonical);
+  return CAMP_OPTION_REGISTRY.find(opt => campOptionKey(opt.label) === key)
+    ?? { label: canonical, icon: amenityIcon(canonical), group: 'feature' };
+}
+
+function campOptionGroup(label: string): CampOptionGroup {
+  const meta = campOptionMeta(label);
+  if (meta.label === 'Reservable') return 'feature';
+  if (/standard nonelectric/i.test(meta.label)) return 'site';
+  return meta.group;
+}
+
+function campOptionIcon(label: string): keyof typeof Ionicons.glyphMap {
+  if (/standard nonelectric/i.test(label)) return 'bonfire-outline';
+  return campOptionMeta(label).icon;
+}
 
 function weatherIonIcon(code: number): keyof typeof Ionicons.glyphMap {
   if (code === 0) return 'sunny-outline';
@@ -10001,7 +10104,7 @@ function MapScreen() {
                           <View style={s.featureGrid}>
                             {items.map(a => (
                               <View key={a} style={s.featureItem}>
-                                <Ionicons name={amenityIcon(a)} size={22} color={C.text2} />
+                                <Ionicons name={campOptionIcon(a)} size={22} color={C.text2} />
                                 <Text style={s.featureText}>{cleanDisplayLabel(a)}</Text>
                               </View>
                             ))}
@@ -10020,7 +10123,7 @@ function MapScreen() {
                         <View style={s.featureGrid}>
                           {siteTypeItems.map(st => (
                             <View key={st} style={s.featureItem}>
-                              <Ionicons name={siteTypeIcon(st)} size={22} color={C.green} />
+                              <Ionicons name={campOptionIcon(st)} size={22} color={C.green} />
                               <Text style={s.featureText}>{st}</Text>
                             </View>
                           ))}
@@ -10420,7 +10523,7 @@ function MapScreen() {
                           <View style={s.featureGrid}>
                             {items.map(a => (
                               <View key={a} style={s.featureItem}>
-                                <Ionicons name={amenityIcon(a)} size={24} color={C.text2} />
+                                <Ionicons name={campOptionIcon(a)} size={24} color={C.text2} />
                                 <Text style={s.featureText}>{cleanDisplayLabel(a)}</Text>
                               </View>
                             ))}
@@ -10445,7 +10548,7 @@ function MapScreen() {
                     <View style={s.featureGrid}>
                       {(campDetail.site_types ?? []).map(cleanDisplayLabel).filter(Boolean).map(st => (
                         <View key={st} style={s.featureItem}>
-                          <Ionicons name={siteTypeIcon(st)} size={24} color={C.green} />
+                          <Ionicons name={campOptionIcon(st)} size={24} color={C.green} />
                           <Text style={s.featureText}>{cleanDisplayLabel(st)}</Text>
                         </View>
                       ))}

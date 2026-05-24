@@ -6166,6 +6166,28 @@ def _map_card_merge(primary: dict, secondary: dict | None) -> dict:
     return merged
 
 
+def _outdoor_google_match_ok(body: MapCardResolveRequest, item: dict) -> bool:
+    requested = _smart_pack_type(body.type or body.kind or "")
+    if requested not in {"peak", "viewpoint", "trailhead", "hot_spring"}:
+        return True
+    try:
+        dist_m = _haversine_m(float(body.lat), float(body.lng), float(item.get("lat")), float(item.get("lng")))
+    except Exception:
+        return False
+    if dist_m > (2500 if requested == "peak" else 1200):
+        return False
+    haystack = " ".join(str(item.get(k) or "").lower() for k in ("type", "subtype", "name", "summary", "address"))
+    if requested == "peak":
+        return any(token in haystack for token in ("peak", "summit", "mountain", "natural", "trail", "park", "view"))
+    if requested == "viewpoint":
+        return any(token in haystack for token in ("view", "overlook", "vista", "lookout", "trail", "park", "tourist"))
+    if requested == "trailhead":
+        return any(token in haystack for token in ("trail", "hiking", "park"))
+    if requested == "hot_spring":
+        return any(token in haystack for token in ("hot spring", "spring", "bath", "spa", "park"))
+    return True
+
+
 def _map_card_sections(card: dict, body: MapCardResolveRequest) -> list[dict]:
     sections: list[dict] = []
     if card.get("hours"):
@@ -6315,6 +6337,7 @@ async def resolve_map_card(body: MapCardResolveRequest):
     elif body.kind in {"search", "place"} and body.name:
         timings["text_search_ms"] = detail_ms
         hits = detail_value if isinstance(detail_value, list) else []
+        hits = [hit for hit in hits if _outdoor_google_match_ok(body, hit)]
         detail = sorted(
             hits,
             key=lambda item: (

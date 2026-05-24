@@ -177,6 +177,7 @@ export default function ProfileScreen() {
   const setActiveTrip = useStore(st => st.setActiveTrip);
   const addTripToHistory = useStore(st => st.addTripToHistory);
   const startGuidedTour = useStore(st => st.startGuidedTour);
+  const startWelcomePrompt = useStore(st => st.startWelcomePrompt);
 
   function openSavedCampOnMap(camp: typeof favoriteCamps[number]) {
     setPendingMapSelection({ kind: 'camp', camp });
@@ -1023,6 +1024,7 @@ export default function ProfileScreen() {
             { icon: 'compass', label: 'PLAN TRIP',   color: C.orange, onPress: () => { setActiveTrip(null); router.push('/(tabs)'); } },
             { icon: 'trophy-outline', label: 'CONTEST', color: '#d4af37', onPress: openContest },
             { icon: 'ribbon-outline', label: 'CONTRIB', color: '#14b8a6', onPress: openContributions },
+            { icon: 'sparkles-outline', label: 'WELCOME', color: '#d4af37', onPress: startWelcomePrompt },
             { icon: 'people',  label: 'REFER',       color: C.orange, onPress: shareReferral },
             { icon: 'checkmark-circle', label: 'TRIP PREP', color: C.green,  onPress: () => setShowChecklist(true) },
             { icon: 'help-buoy-outline', label: 'APP TOUR', color: '#3b82f6', onPress: startGuidedTour },

@@ -691,6 +691,12 @@ class ExploreCategoryAuthorizeRequest(BaseModel):
     group: str = EXPLORE_CATEGORY_GROUP
 
 
+class AnalyticsEventRequest(BaseModel):
+    event_type: str
+    session_id: str = ""
+    event_data: dict = Field(default_factory=dict)
+
+
 def _normalize_place_category(value: object) -> str:
     category = re.sub(r"[^a-z0-9_]+", "", str(value or "").lower().replace(" ", "_"))
     return EXPLORE_CATEGORY_ALIASES.get(category, category)
@@ -2327,6 +2333,16 @@ async def authorize_explore_categories(body: ExploreCategoryAuthorizeRequest, us
     set_cached("campsite_cache", unlock_key, {"group": group, "date": _today_key()})
     fresh = get_user_by_id(user["id"]) or user
     return {"authorized": True, "charged": cost, "group": group, "credits": fresh.get("credits", 0)}
+
+
+@app.post("/api/analytics/event")
+async def analytics_event(body: AnalyticsEventRequest, user: dict | None = Depends(_optional_user)):
+    event_type = re.sub(r"[^a-z0-9_.:-]+", "_", (body.event_type or "").strip().lower())[:80]
+    if event_type not in {"welcome_contest_seen", "welcome_contest_cta", "welcome_contest_cta_attributed"}:
+        raise HTTPException(400, "Unsupported analytics event")
+    clean_session = re.sub(r"[^a-zA-Z0-9_.:-]+", "", (body.session_id or "").strip())[:120]
+    log_event(user["id"] if user else None, clean_session or None, event_type, body.event_data or {})
+    return {"ok": True}
 
 
 # ── Config (public) ───────────────────────────────────────────────────────────

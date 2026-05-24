@@ -1,6 +1,6 @@
 import '@/lib/backgroundTasks'; // must be first — registers background location task
 import { useEffect, useRef, useState } from 'react';
-import { Alert, AppState, Linking, View, Text, TouchableOpacity } from 'react-native';
+import { Alert, AppState, Linking, Modal, ScrollView, View, Text, TouchableOpacity } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { storage } from '@/lib/storage';
@@ -20,10 +20,13 @@ export default function RootLayout() {
   const restoreActiveTrip  = useStore(s => s.restoreActiveTrip);
   const themeMode    = useStore(s => s.themeMode);
   const user         = useStore(s => s.user);
+  const sessionId    = useStore(s => s.sessionId);
+  const welcomePromptRunId = useStore(s => s.welcomePromptRunId);
   const router       = useRouter();
   const C            = useTheme();
   const insets       = useSafeAreaInsets();
   const [updateBanner, setUpdateBanner] = useState(false);
+  const [welcomeVisible, setWelcomeVisible] = useState(false);
   const updateReady  = useRef(false);
   const checking     = useRef(false);
   const pushRegistered = useRef(false);
@@ -32,6 +35,8 @@ export default function RootLayout() {
   // the latest code on every cold start with one short reload). After that
   // window we fall back to a banner so we don't interrupt active use.
   const launchAtRef = useRef(Date.now());
+  const WELCOME_SEEN_KEY = 'trailhead_welcome_contest_seen_v1';
+  const WELCOME_PENDING_ATTR_KEY = 'trailhead_welcome_contest_clicked_pending_v1';
 
   function verificationTokenFromUrl(url: string | null | undefined) {
     if (!url || !url.includes('verify-email')) return '';
@@ -100,6 +105,29 @@ export default function RootLayout() {
   function applyUpdate() {
     setUpdateBanner(false);
     Updates.reloadAsync().catch(() => {});
+  }
+
+  function logWelcomeEvent(eventType: 'welcome_contest_seen' | 'welcome_contest_cta' | 'welcome_contest_cta_attributed', data: Record<string, unknown> = {}) {
+    api.logAnalyticsEvent(eventType, sessionId, data).catch(() => {});
+  }
+
+  function closeWelcomeContest() {
+    setWelcomeVisible(false);
+    storage.set(WELCOME_SEEN_KEY, '1').catch(() => {});
+  }
+
+  function openWelcomeContest() {
+    setWelcomeVisible(true);
+    storage.set(WELCOME_SEEN_KEY, '1').catch(() => {});
+    logWelcomeEvent('welcome_contest_seen', { source: 'profile_reopen' });
+  }
+
+  function goToProfileFromWelcome() {
+    setWelcomeVisible(false);
+    storage.set(WELCOME_SEEN_KEY, '1').catch(() => {});
+    storage.set(WELCOME_PENDING_ATTR_KEY, '1').catch(() => {});
+    logWelcomeEvent('welcome_contest_cta', { source: 'first_open_modal', signed_in: !!user });
+    router.push('/(tabs)/profile');
   }
 
   useEffect(() => {
@@ -187,6 +215,16 @@ export default function RootLayout() {
       handleVerificationUrl(event.url);
     });
 
+    storage.get(WELCOME_SEEN_KEY).then(seen => {
+      if (!seen) {
+        setTimeout(() => {
+          setWelcomeVisible(true);
+          storage.set(WELCOME_SEEN_KEY, '1').catch(() => {});
+          logWelcomeEvent('welcome_contest_seen', { source: 'first_open_modal' });
+        }, 900);
+      }
+    }).catch(() => {});
+
     return () => {
       notifSub.remove();
       linkSub.remove();
@@ -203,10 +241,101 @@ export default function RootLayout() {
     }).catch(() => {});
   }, [user]);
 
+  useEffect(() => {
+    if (!user) return;
+    storage.get(WELCOME_PENDING_ATTR_KEY).then(value => {
+      if (value !== '1') return;
+      api.logAnalyticsEvent('welcome_contest_cta_attributed', sessionId, { source: 'post_sign_in', user_id: user.id }).catch(() => {});
+      storage.del(WELCOME_PENDING_ATTR_KEY).catch(() => {});
+    }).catch(() => {});
+  }, [sessionId, user]);
+
+  useEffect(() => {
+    if (welcomePromptRunId <= 0) return;
+    openWelcomeContest();
+  }, [welcomePromptRunId]);
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <StatusBar style={themeMode === 'dark' ? 'light' : 'dark'} />
       <Stack screenOptions={{ headerShown: false }} />
+      <Modal visible={welcomeVisible} animationType="fade" transparent onRequestClose={closeWelcomeContest}>
+        <View style={{
+          flex: 1, backgroundColor: 'rgba(0,0,0,0.66)', justifyContent: 'flex-end',
+        }}>
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={closeWelcomeContest} />
+          <View style={{
+            margin: 12, marginBottom: Math.max(insets.bottom + 12, 18), borderRadius: 26,
+            backgroundColor: C.bg, borderWidth: 1, borderColor: C.border, overflow: 'hidden',
+          }}>
+            <ScrollView contentContainerStyle={{ padding: 20, gap: 14 }} showsVerticalScrollIndicator={false}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                <View style={{
+                  width: 48, height: 48, borderRadius: 18, backgroundColor: '#d4af3720',
+                  borderWidth: 1, borderColor: '#d4af3755', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <Ionicons name="trophy-outline" size={23} color="#f8d77a" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: '#d4af37', fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1.2 }}>WELCOME TO TRAILHEAD</Text>
+                  <Text style={{ color: C.text, fontSize: 22, lineHeight: 26, fontWeight: '900', marginTop: 3 }}>
+                    Plan smarter. Build the map. Win Trailhead prizes.
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={closeWelcomeContest} style={{
+                  width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center',
+                  backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
+                }}>
+                  <Ionicons name="close" size={18} color={C.text2} />
+                </TouchableOpacity>
+              </View>
+
+              <Text style={{ color: C.text2, fontSize: 14, lineHeight: 21 }}>
+                Trailhead helps you find camps, trails, public-land context, weather, reports, route tools, offline packs, and field-ready navigation in one app.
+              </Text>
+
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                {[
+                  ['Camps', 'bonfire-outline'],
+                  ['Trails', 'trail-sign-outline'],
+                  ['Offline', 'download-outline'],
+                ].map(([label, icon]) => (
+                  <View key={label} style={{ flex: 1, backgroundColor: C.s2, borderWidth: 1, borderColor: C.border, borderRadius: 16, padding: 10, gap: 7 }}>
+                    <Ionicons name={icon as any} size={17} color={C.orange} />
+                    <Text style={{ color: C.text, fontSize: 11, fontFamily: mono, fontWeight: '900' }}>{label.toUpperCase()}</Text>
+                  </View>
+                ))}
+              </View>
+
+              <View style={{ backgroundColor: C.s2, borderRadius: 18, borderWidth: 1, borderColor: '#d4af3744', padding: 14, gap: 8 }}>
+                <Text style={{ color: '#d4af37', fontSize: 30, fontFamily: mono, fontWeight: '900' }}>$1,000</Text>
+                <Text style={{ color: C.text, fontSize: 16, fontWeight: '900' }}>Register in Profile for the contributor contest.</Text>
+                <Text style={{ color: C.text3, fontSize: 12.5, lineHeight: 18 }}>
+                  Sign in or create a Profile account to join. Contest points come from useful reports, trail notes, camp updates, confirmations, and other map contributions.
+                </Text>
+                <Text style={{ color: C.text3, fontSize: 10.5, lineHeight: 15 }}>
+                  No purchase necessary. Apple is not a sponsor or involved.
+                </Text>
+              </View>
+
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <TouchableOpacity
+                  onPress={closeWelcomeContest}
+                  style={{ flex: 1, minHeight: 46, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s2, borderWidth: 1, borderColor: C.border }}
+                >
+                  <Text style={{ color: C.text2, fontSize: 12, fontFamily: mono, fontWeight: '900' }}>NOT NOW</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={goToProfileFromWelcome}
+                  style={{ flex: 1.35, minHeight: 46, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: C.orange }}
+                >
+                  <Text style={{ color: '#fff', fontSize: 12, fontFamily: mono, fontWeight: '900' }}>OPEN PROFILE</Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
       {updateBanner && (
         <View style={{
           position: 'absolute', bottom: 90 + Math.max(insets.bottom, 0), left: 16, right: 16, zIndex: 9999,

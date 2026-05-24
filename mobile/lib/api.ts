@@ -313,6 +313,8 @@ export const api = {
     req<{ ok: boolean; entry: ContestEntry; status: ContestUserStatus }>('/api/contest/free-entry', { method: 'POST' }),
   getContestRules: () =>
     req<ContestRules>('/api/contest/rules'),
+  logAnalyticsEvent: (event_type: string, session_id = '', event_data: Record<string, unknown> = {}) =>
+    req<{ ok: boolean }>('/api/analytics/event', { method: 'POST', body: JSON.stringify({ event_type, session_id, event_data }) }),
   getMyContributions: () =>
     req<ContributorProfile>('/api/contributions/me'),
   getContributionsLeaderboard: (period: ContributionPeriod = 'month') =>

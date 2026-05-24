@@ -138,6 +138,7 @@ interface AppState {
   hasPlan: boolean;
   planExpiresAt: number | null;
   guidedTourRunId: number;
+  welcomePromptRunId: number;
   tourTargets: Record<string, TourTargetRect>;
   setAuth: (token: string, user: User) => void;
   clearAuth: () => void;
@@ -169,6 +170,7 @@ interface AppState {
   setPendingMapSelection: (selection: AppState['pendingMapSelection']) => void;
   setPlan: (active: boolean, expiresAt?: number | null) => void;
   startGuidedTour: () => void;
+  startWelcomePrompt: () => void;
   setTourTarget: (key: string, rect: Omit<TourTargetRect, 'updatedAt'> | null) => void;
   restoreActiveTrip: () => Promise<void>;
 }
@@ -199,6 +201,7 @@ export const useStore = create<AppState>((set) => ({
   hasPlan: false,
   planExpiresAt: null,
   guidedTourRunId: 0,
+  welcomePromptRunId: 0,
   tourTargets: {},
 
   setAuth: (token, user) => {
@@ -311,6 +314,7 @@ export const useStore = create<AppState>((set) => ({
     set({ hasPlan: active, planExpiresAt: expiresAt });
   },
   startGuidedTour: () => set(state => ({ guidedTourRunId: state.guidedTourRunId + 1 })),
+  startWelcomePrompt: () => set(state => ({ welcomePromptRunId: state.welcomePromptRunId + 1 })),
   setTourTarget: (key, rect) => set((state) => {
     const next = { ...state.tourTargets };
     if (!rect) delete next[key];

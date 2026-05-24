@@ -10,6 +10,7 @@ import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
 import PaywallModal from '@/components/PaywallModal';
 import TourTarget from '@/components/TourTarget';
+import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
 import { TrailheadButton, TrailheadCard, TrailheadSheet, TrailheadTopBar } from '@/components/TrailheadUI';
 import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
 import { api, ApiError, CampFullness, Campsite, CampsiteDetail, CampsiteInsight, CampsitePin, ExcursionCandidate, GasStation, GeocodePlace, OsmPoi, PaywallError, TripResult, Waypoint, WeatherForecast } from '@/lib/api';
@@ -43,6 +44,12 @@ type BuilderStop = {
 };
 type SearchPlace = { name: string; lat: number; lng: number };
 type DiscoveryTab = 'camps' | 'gas' | 'poi' | 'excursions';
+type CampPreferenceMode = 'public' | 'developed' | 'rv' | 'any';
+type CampCadenceMode = 'nightly' | 'alternate' | 'manual';
+type RoutePlaceSelection =
+  | { kind: 'gas'; day: number; place: any; data: GasStation }
+  | { kind: 'poi'; day: number; place: any; data: OsmPoi }
+  | { kind: 'excursion'; day: number; place: any; data: ExcursionCandidate };
 type LegSearchContext = {
   from: { lat: number; lng: number; name: string };
   to: { lat: number; lng: number; name: string };
@@ -92,6 +99,17 @@ const PLACE_FILTER_TYPES = [
 const DEFAULT_PLACE_FILTERS = ['fuel', 'propane', 'water', 'dump', 'trailhead'];
 const FUEL_POI_TYPES = 'fuel,propane';
 const ROUTE_POI_TYPES = 'water,trailhead,viewpoint,peak,hot_spring,dump,shower,laundromat,lodging,food,grocery,mechanic,parking,attraction';
+const CAMP_PREFERENCE_OPTIONS: Array<{ id: CampPreferenceMode; label: string; sub: string; icon: keyof typeof Ionicons.glyphMap; filters: string[] }> = [
+  { id: 'public', label: 'Public', sub: 'BLM / USFS first', icon: 'trail-sign-outline', filters: ['blm', 'usfs', 'dispersed', 'free', 'tent'] },
+  { id: 'developed', label: 'Developed', sub: 'Parks + reservable', icon: 'bonfire-outline', filters: ['tent', 'reservable', 'state', 'nps', 'usfs'] },
+  { id: 'rv', label: 'RV', sub: 'Hookups + parks', icon: 'car-sport-outline', filters: ['rv', 'reservable'] },
+  { id: 'any', label: 'Any legal', sub: 'Broad search', icon: 'map-outline', filters: [] },
+];
+const CAMP_CADENCE_OPTIONS: Array<{ id: CampCadenceMode; label: string; sub: string; icon: keyof typeof Ionicons.glyphMap }> = [
+  { id: 'nightly', label: 'Every night', sub: 'Camp each route day', icon: 'moon-outline' },
+  { id: 'alternate', label: 'Every other', sub: 'Camp on alternating days', icon: 'swap-horizontal-outline' },
+  { id: 'manual', label: 'Manual', sub: 'Pick camps yourself', icon: 'hand-left-outline' },
+];
 const BUILD_STATUS_LINES = [
   'Reading the route shape',
   'Checking day pacing',
@@ -810,6 +828,8 @@ export default function RouteBuilderScreen() {
   const [routeStyle, setRouteStyle] = useState<'balanced' | 'direct' | 'adventure'>('balanced');
   const [tripBuildMode, setTripBuildMode] = useState<TripBuildMode>('recommended');
   const [distanceMode, setDistanceMode] = useState<DistanceMode>('hours');
+  const [campPreferenceMode, setCampPreferenceMode] = useState<CampPreferenceMode>('public');
+  const [campCadenceMode, setCampCadenceMode] = useState<CampCadenceMode>('nightly');
   const [wizardStep, setWizardStep] = useState(0);
   const [targetMiles, setTargetMiles] = useState('180');
   const [startQuery, setStartQuery] = useState('');
@@ -841,6 +861,7 @@ export default function RouteBuilderScreen() {
   const [offlinePlaces, setOfflinePlaces] = useState<OsmPoi[]>([]);
   const [activePlaceFilters, setActivePlaceFilters] = useState<string[]>(DEFAULT_PLACE_FILTERS);
   const [showPlaceFilters, setShowPlaceFilters] = useState(false);
+  const [selectedRoutePlace, setSelectedRoutePlace] = useState<RoutePlaceSelection | null>(null);
   const [selectedCamp, setSelectedCamp] = useState<CampsitePin | null>(null);
   const selectedCampRef = useRef<CampsitePin | null>(null);
   const [campDetail, setCampDetail] = useState<CampsiteDetail | null>(null);
@@ -1017,6 +1038,15 @@ export default function RouteBuilderScreen() {
   const filteredOfflinePlaces = useMemo(() => (
     offlinePlaces.filter(place => activePlaceFilters.includes(place.type))
   ), [offlinePlaces, activePlaceFilters]);
+  const campTypeFilters = useMemo(() => (
+    CAMP_PREFERENCE_OPTIONS.find(option => option.id === campPreferenceMode)?.filters ?? []
+  ), [campPreferenceMode]);
+  const campPreferenceLabel = CAMP_PREFERENCE_OPTIONS.find(option => option.id === campPreferenceMode)?.label ?? 'Public';
+  const dayNeedsCamp = (day: number) => {
+    if (campCadenceMode === 'manual') return false;
+    if (campCadenceMode === 'alternate') return day % 2 === 1 || day === days[days.length - 1];
+    return true;
+  };
   const offlinePlaceCandidates = useMemo(() => {
     const target = legContext ? legContext.center : anchor;
     if (!target) return [];
@@ -1139,10 +1169,10 @@ export default function RouteBuilderScreen() {
         miles,
         hours: estimateMovingHours(miles),
         rest: restDays.includes(day),
-        complete: !!target && !isFrameworkTarget(target) && (target.type === 'camp' || target.type === 'motel' || day === days[days.length - 1]),
+        complete: !dayNeedsCamp(day) || (!!target && !isFrameworkTarget(target) && (target.type === 'camp' || target.type === 'motel')),
       };
     })
-  ), [days, orderedStops, dayMileage, restDays]);
+  ), [days, orderedStops, dayMileage, restDays, campCadenceMode]);
   const hasBaseRoute = orderedStops.length >= 2;
   const realOvernights = routeDayPlans.filter(day => day.complete).length;
   const setupProgress = useMemo(() => {
@@ -1161,11 +1191,15 @@ export default function RouteBuilderScreen() {
     if (orderedStops.length < 2) {
       checks.push({ level: 'warn', label: 'Need route', text: 'Add a start and at least one destination.' });
     }
-    const noCampDays = days.filter(day => !orderedStops.some(st => st.day === day && (st.type === 'camp' || st.type === 'motel')));
+    const noCampDays = days.filter(day => dayNeedsCamp(day) && !orderedStops.some(st => st.day === day && (st.type === 'camp' || st.type === 'motel')));
     if (noCampDays.length) {
       checks.push({ level: 'warn', label: 'Overnight', text: `Add camp/lodging for day ${noCampDays[0]}.` });
     } else if (orderedStops.length) {
-      checks.push({ level: 'ok', label: 'Overnight', text: 'Each day has an overnight stop.' });
+      checks.push({
+        level: 'ok',
+        label: 'Overnight',
+        text: campCadenceMode === 'manual' ? 'Manual camp cadence selected.' : 'Required overnight stops are set.',
+      });
     }
     const weakTarget = orderedStops.find(st => isFrameworkTarget(st) && /camp search weak/i.test(st.description));
     if (weakTarget) {
@@ -1193,7 +1227,7 @@ export default function RouteBuilderScreen() {
       checks.push({ level: 'warn', label: 'Schedule', text: `This route needs more than the selected ${days.length} day${days.length === 1 ? '' : 's'} at the current daily max.` });
     }
     return checks.slice(0, 3);
-  }, [days, orderedStops, dayMileage, totals.miles, planningStats.driveLimit, planningStats.range, dayDriveTargets, restDays, frameworkStatus]);
+  }, [days, orderedStops, dayMileage, totals.miles, planningStats.driveLimit, planningStats.range, dayDriveTargets, restDays, frameworkStatus, campCadenceMode]);
   const discoverEmptyText = discoverTab === 'camps'
     ? 'Tap scan to find legal camps near the selected leg or route anchor.'
     : discoverTab === 'gas'
@@ -1295,6 +1329,18 @@ export default function RouteBuilderScreen() {
     });
   }
 
+  function campPreferenceScore(camp: CampsitePin) {
+    const text = `${camp.name} ${camp.land_type} ${(camp.tags ?? []).join(' ')} ${camp.description}`.toLowerCase();
+    const isPublic = /(blm|usfs|forest|public|dispersed|free|boondock)/i.test(text);
+    const isRv = /(rv|hookup|koa|resort)/i.test(text);
+    const isReservable = /(reservable|reservation|state|nps|recreation\.gov|developed)/i.test(text);
+    const distance = camp.route_distance_mi ?? 0;
+    if (campPreferenceMode === 'rv') return distance + (isRv ? -14 : 8) + (isReservable ? -3 : 0);
+    if (campPreferenceMode === 'developed') return distance + (isReservable ? -10 : 0) + (isPublic ? -4 : 0) + (isRv ? 3 : 0);
+    if (campPreferenceMode === 'public') return distance + (isPublic ? -16 : 8) + (isRv ? 18 : 0);
+    return distance + (isPublic ? -6 : 0) + (isRv ? 3 : 0);
+  }
+
   async function runSearch() {
     if (!query.trim()) return;
     setSearching(true);
@@ -1317,26 +1363,27 @@ export default function RouteBuilderScreen() {
         if (useLeg) {
           const radius = Math.max(34, Math.min(62, leg!.miles / 3.5 + 14));
           const found = uniqueByGeo((await Promise.all(
-            legSamplePoints(leg!).map(point => api.getNearbyCamps(point.lat, point.lng, radius, []).catch(() => []))
+            legSamplePoints(leg!).map(point => api.getNearbyCamps(point.lat, point.lng, radius, campTypeFilters).catch(() => []))
           )).flat());
           const scopedRaw = found
               .map(camp => withLegProjection(camp, leg!))
               .filter(camp => (camp.route_distance_mi ?? 999) <= routeBufferForMiles(leg!.miles) + 14);
-          let scoped = leg!.purpose === 'overnight' ? overnightEndpointCamps(scopedRaw, leg!) : spreadAlongLeg(scopedRaw);
+          let scoped = (leg!.purpose === 'overnight' ? overnightEndpointCamps(scopedRaw, leg!) : spreadAlongLeg(scopedRaw))
+            .sort((a, b) => campPreferenceScore(a) - campPreferenceScore(b));
           let fallbackText = '';
           if (leg!.purpose === 'overnight' && scoped.length === 0) {
-            const endpointCamps = await api.getNearbyCamps(leg!.to.lat, leg!.to.lng, 55, []).catch(() => []);
+            const endpointCamps = await api.getNearbyCamps(leg!.to.lat, leg!.to.lng, 55, campTypeFilters).catch(() => []);
             scoped = endpointCamps
               .map(camp => withLegProjection(camp, leg!))
-              .sort((a, b) => haversineMi(a, leg!.to) - haversineMi(b, leg!.to));
+              .sort((a, b) => campPreferenceScore(a) - campPreferenceScore(b) || haversineMi(a, leg!.to) - haversineMi(b, leg!.to));
             fallbackText = ' using the day-end area';
           }
           setCamps(scoped);
-          setDiscoverySummary(`${scoped.length} camp${scoped.length === 1 ? '' : 's'} ${leg!.purpose === 'overnight' ? `near Day ${leg!.targetDay ?? activeDay} endpoint${fallbackText}` : 'spread along this leg'}`);
+          setDiscoverySummary(`${scoped.length} ${campPreferenceLabel.toLowerCase()} camp${scoped.length === 1 ? '' : 's'} ${leg!.purpose === 'overnight' ? `near Day ${leg!.targetDay ?? activeDay} endpoint${fallbackText}` : 'spread along this leg'}`);
         } else {
-          const found = await api.getNearbyCamps(target.lat, target.lng, 45, []);
+          const found = (await api.getNearbyCamps(target.lat, target.lng, 45, campTypeFilters)).sort((a, b) => campPreferenceScore(a) - campPreferenceScore(b));
           setCamps(found);
-          setDiscoverySummary(`${found.length} camp${found.length === 1 ? '' : 's'} near this area`);
+          setDiscoverySummary(`${found.length} ${campPreferenceLabel.toLowerCase()} camp${found.length === 1 ? '' : 's'} near this area`);
         }
       } else if (tab === 'gas') {
         if (useLeg) {
@@ -1646,6 +1693,82 @@ export default function RouteBuilderScreen() {
     clearDiscoveryResults();
   }
 
+  function routeSheetPlaceFromGas(station: GasStation) {
+    return {
+      id: String(station.id),
+      name: station.name,
+      lat: station.lat,
+      lng: station.lng,
+      type: 'fuel',
+      subtype: station.fuel_types || 'fuel',
+      address: station.address,
+      source: 'route_builder',
+      source_label: 'Route Builder',
+      route_distance_mi: station.route_distance_mi,
+      summary: station.address || 'Fuel stop found near this route leg.',
+    };
+  }
+
+  function routeSheetPlaceFromPoi(poi: OsmPoi) {
+    return {
+      id: poi.id,
+      name: poi.name || poi.type,
+      lat: poi.lat,
+      lng: poi.lng,
+      type: poi.type,
+      subtype: poi.subtype,
+      address: poi.address,
+      phone: poi.phone,
+      website: poi.website,
+      open_now: poi.open_now,
+      rating: poi.rating,
+      rating_count: poi.rating_count,
+      photo_url: poi.photo_url,
+      google_maps_uri: poi.google_maps_uri,
+      provider_place_id: poi.provider_place_id,
+      place_id: poi.place_id,
+      source: poi.source,
+      source_label: poi.source_label,
+      attribution: poi.attribution,
+      route_distance_mi: poi.route_distance_mi,
+      summary: poi.address || `${poi.type.replace(/_/g, ' ')} found near this route leg.`,
+    };
+  }
+
+  function routeSheetPlaceFromExcursion(item: ExcursionCandidate) {
+    return {
+      id: item.id,
+      name: item.name,
+      lat: item.lat,
+      lng: item.lng,
+      type: item.type,
+      subtype: item.subtype || item.best_for,
+      source: item.source,
+      source_label: item.source_label,
+      route_distance_mi: item.distance_from_route_mi,
+      summary: item.summary || item.why_go,
+      access_note: item.access_notes || item.risk_notes,
+      length_mi: item.length_mi,
+    };
+  }
+
+  function openRoutePlace(selection: RoutePlaceSelection) {
+    setSelectedRoutePlace(selection);
+    fly(selection.place.lat, selection.place.lng, 13);
+  }
+
+  function addSelectedRoutePlace() {
+    if (!selectedRoutePlace) return;
+    if (selectedRoutePlace.kind === 'gas') {
+      addGas(selectedRoutePlace.data);
+    } else if (selectedRoutePlace.kind === 'excursion') {
+      addExcursion(selectedRoutePlace.data);
+    } else {
+      addPoi(selectedRoutePlace.data);
+    }
+    setSelectedRoutePlace(null);
+  }
+
   function removeStop(id: string) {
     if (insertAfterId === id) setInsertAfterId(null);
     if (insertAfterId === id) setInsertTargetDay(null);
@@ -1683,7 +1806,9 @@ export default function RouteBuilderScreen() {
   function scanDayPlan(plan: RouteDayPlan, tab: DiscoveryTab) {
     setActiveDay(plan.day);
     const from = plan.previous ?? plan.stops[0] ?? null;
-    const to = plan.target ?? plan.stops[plan.stops.length - 1] ?? null;
+    const to = tab === 'camps'
+      ? plan.target ?? plan.stops[plan.stops.length - 1] ?? null
+      : plan.stops[plan.stops.length - 1] ?? plan.target ?? null;
     if (from && to && from.id !== to.id) {
       scanBetweenStops(from, to, tab, plan.day, tab === 'camps' ? 'overnight' : 'leg');
       return;
@@ -2067,19 +2192,18 @@ export default function RouteBuilderScreen() {
       .slice(0, 6);
     const radius = Math.max(28, Math.min(58, searchWindowMi * 0.65));
     const found = uniqueByGeo((await Promise.all(
-      samples.map(point => api.getNearbyCamps(point.lat, point.lng, radius, []).catch(() => [] as CampsitePin[]))
+      samples.map(point => api.getNearbyCamps(point.lat, point.lng, radius, campTypeFilters).catch(() => [] as CampsitePin[]))
     )).flat());
     const scored = found
       .map(camp => {
         const routeDistance = Math.min(...samples.map(sample => haversineMi(camp, sample)));
         const endpointDistance = haversineMi(camp, target);
-        const publicLandBias = /(blm|usfs|forest|public|dispersed)/i.test(`${camp.land_type} ${camp.tags?.join(' ') ?? ''}`) ? -5 : 0;
         return {
           ...camp,
           route_distance_mi: routeDistance,
           route_progress: totalMi > 0 ? targetMi / totalMi : day / count,
           route_progress_mi: targetMi,
-          _score: endpointDistance * 0.75 + routeDistance * 0.9 + publicLandBias,
+          _score: endpointDistance * 0.75 + routeDistance * 0.9 + campPreferenceScore({ ...camp, route_distance_mi: routeDistance }),
         };
       })
       .filter(camp => (camp.route_distance_mi ?? 999) <= routeBufferForMiles(totalMi / Math.max(1, count)) + 22)
@@ -2154,7 +2278,8 @@ export default function RouteBuilderScreen() {
       let weakAnchors = 0;
 
       if (tripBuildMode === 'recommended') {
-        for (let day = 1; day < count; day++) {
+        for (let day = 1; day <= count; day++) {
+          if (!dayNeedsCamp(day)) continue;
           setFrameworkStatus(`Checking camps near Day ${day} finish...`);
           const anchor = await findCampAwareAnchor(day, count, spine, routeMiles);
           framework.push(anchor.stop);
@@ -2332,6 +2457,8 @@ export default function RouteBuilderScreen() {
       restDays,
       dayDriveTargets,
       activePlaceFilters,
+      campPreferenceMode,
+      campCadenceMode,
     }, 'mobile-route-builder').catch(() => {});
     if (openMap) {
       setRouteTabMode('hub');
@@ -2355,6 +2482,8 @@ export default function RouteBuilderScreen() {
     setRouteStyle('balanced');
     setTripBuildMode('recommended');
     setDistanceMode('hours');
+    setCampPreferenceMode('public');
+    setCampCadenceMode('nightly');
     setWizardStep(0);
     setPlannedDays('3');
     setDriveHoursPerDay('5');
@@ -2372,6 +2501,7 @@ export default function RouteBuilderScreen() {
     setGas([]);
     setPois([]);
     setExcursions([]);
+    setSelectedRoutePlace(null);
   }
 
   function beginCleanNewRoute() {
@@ -2558,7 +2688,7 @@ export default function RouteBuilderScreen() {
           const camp = plan.stops.find(st => st.type === 'camp' || st.type === 'motel') ?? null;
           const maxHours = parsePositiveNumber(dayDriveTargets[plan.day]) ?? planningStats.driveLimit;
           const overDailyMax = !plan.rest && plan.hours > maxHours + 0.05;
-          const needsOvernight = !plan.complete && plan.day < days[days.length - 1];
+          const needsOvernight = dayNeedsCamp(plan.day) && !plan.complete;
           const statusColor = overDailyMax ? C.yellow : needsOvernight ? C.orange : plan.complete ? C.green : C.text3;
           const statusText = overDailyMax
             ? `${fmtHours(plan.hours)} over ${fmtHours(maxHours)} max`
@@ -2566,7 +2696,7 @@ export default function RouteBuilderScreen() {
               ? 'overnight needed'
               : plan.complete
                 ? 'overnight set'
-                : 'finish day';
+                : campCadenceMode === 'manual' ? 'manual camp' : 'travel day';
           return (
             <View key={plan.day} style={s.routeDayWrap}>
               <TouchableOpacity activeOpacity={0.9} style={[s.routeDaySection, activeDay === plan.day && s.routeDaySectionActive]} onPress={() => setActiveDay(plan.day)}>
@@ -2577,7 +2707,7 @@ export default function RouteBuilderScreen() {
                 <View style={s.routeDayContent}>
                   <View style={s.routeDayHeader}>
                     <View style={{ flex: 1 }}>
-                      <Text style={s.routeDayTitle}>Day {plan.day}{plan.rest ? ' · Rest' : ''}</Text>
+                      <Text style={s.routeDayTitle}>Day {plan.day} Camp{plan.rest ? ' · Rest' : ''}</Text>
                       <Text style={s.routeDayMeta}>{fmtMi(plan.miles)} · {fmtHours(plan.hours)}{plan.previous ? ` · from ${plan.previous.name.split(',')[0]}` : ''}</Text>
                     </View>
                     <View style={[s.routeDayStatusPill, { borderColor: statusColor + '66', backgroundColor: statusColor + '12' }]}>
@@ -2592,6 +2722,7 @@ export default function RouteBuilderScreen() {
                       <Text style={s.routeDayEmptyCampText}>{plan.frameworkTarget ? 'Choose camp near day finish' : 'Choose overnight camp'}</Text>
                     </TouchableOpacity>
                   )}
+                  <Text style={s.routeDayGroupLabel}>Day {plan.day} Points of Interest</Text>
                   <View style={s.routeDayActionRail}>
                     <TouchableOpacity style={s.routeDayActionBtn} onPress={() => scanDayPlan(plan, 'camps')}>
                       <Ionicons name="bonfire-outline" size={13} color={C.orange} />
@@ -2668,7 +2799,7 @@ export default function RouteBuilderScreen() {
           )
         ) : inlineTab === 'gas' ? (
           gas.length ? gas.slice(0, 6).map(station => (
-            <TouchableOpacity key={String(station.id)} style={s.inlineStopRow} onPress={() => { addGas(station); fly(station.lat, station.lng, 13); }}>
+            <TouchableOpacity key={String(station.id)} style={s.inlineStopRow} onPress={() => openRoutePlace({ kind: 'gas', day, data: station, place: routeSheetPlaceFromGas(station) })}>
               <View style={[s.candidateIcon, { borderColor: '#eab30866', backgroundColor: '#eab30818' }]}>
                 <Ionicons name="flash-outline" size={16} color="#eab308" />
               </View>
@@ -2686,7 +2817,7 @@ export default function RouteBuilderScreen() {
           )
         ) : inlineTab === 'excursions' ? (
           excursions.length ? excursions.slice(0, 8).map(item => (
-            <TouchableOpacity key={item.id} style={s.inlineStopRow} onPress={() => { addExcursion(item); fly(item.lat, item.lng, 13); }}>
+            <TouchableOpacity key={item.id} style={s.inlineStopRow} onPress={() => openRoutePlace({ kind: 'excursion', day, data: item, place: routeSheetPlaceFromExcursion(item) })}>
               <View style={[s.candidateIcon, { borderColor: placeColor(item.type) + '66', backgroundColor: placeColor(item.type) + '18' }]}>
                 <Ionicons name={item.type === 'climbing' ? 'trending-up-outline' : item.type === 'historic' ? 'business-outline' : item.type === 'park' ? 'map-outline' : 'compass-outline'} size={16} color={placeColor(item.type)} />
               </View>
@@ -2706,7 +2837,7 @@ export default function RouteBuilderScreen() {
           )
         ) : (
           discoveryPois.length ? discoveryPois.slice(0, 6).map(poi => (
-            <TouchableOpacity key={poi.id} style={s.inlineStopRow} onPress={() => { addPoi(poi); fly(poi.lat, poi.lng, 13); }}>
+            <TouchableOpacity key={poi.id} style={s.inlineStopRow} onPress={() => openRoutePlace({ kind: 'poi', day, data: poi, place: routeSheetPlaceFromPoi(poi) })}>
               <View style={[s.candidateIcon, { borderColor: placeColor(poi.type) + '66', backgroundColor: placeColor(poi.type) + '18' }]}>
                 <Ionicons name={placeIcon(poi.type)} size={16} color={placeColor(poi.type)} />
               </View>
@@ -2878,14 +3009,14 @@ export default function RouteBuilderScreen() {
   }
 
   function renderWizardSetup(fullScreen = false) {
-    const steps = ['Start', 'Destination', 'Style', 'Pace'];
+    const steps = ['Start', 'Destination', 'Style', 'Camp', 'Pace'];
     const stepMeta = steps[wizardStep];
     const canMoveNext = wizardStep === 0
       ? !!(startQuery.trim() || orderedStops[0] || userLoc)
       : wizardStep === 1
       ? !!(endQuery.trim() || orderedStops.length > 1)
       : true;
-    const nextStep = () => setWizardStep(step => Math.min(3, step + 1));
+    const nextStep = () => setWizardStep(step => Math.min(4, step + 1));
     const dockMarginBottom = keyboardVisible ? 10 + bottomInset : 18 + bottomInset;
     return (
       <TrailheadSheet
@@ -3037,6 +3168,42 @@ export default function RouteBuilderScreen() {
               ))}
             </View>
             </View>
+          ) : wizardStep === 3 ? (
+            <View style={s.wizardPane}>
+            <View style={s.wizardQuestion}>
+              <Text style={s.wizardTitle}>Choose camp style</Text>
+              <Text style={s.wizardHelp}>Trailhead will prefer these camp types when placing overnight stops. Public first avoids random RV parks unless they are the best fallback.</Text>
+            </View>
+            <View style={s.campPreferenceGrid}>
+              {CAMP_PREFERENCE_OPTIONS.map(option => {
+                const active = campPreferenceMode === option.id;
+                return (
+                  <TouchableOpacity key={option.id} style={[s.campPreferenceCard, active && s.campPreferenceCardActive]} onPress={() => setCampPreferenceMode(option.id)}>
+                    <Ionicons name={option.icon} size={16} color={active ? C.orange : C.text3} />
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={[s.campPreferenceTitle, active && { color: C.orange }]}>{option.label}</Text>
+                      <Text style={s.campPreferenceSub} numberOfLines={1}>{option.sub}</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text style={s.setupLabel}>CAMP CADENCE</Text>
+            <View style={s.campPreferenceGrid}>
+              {CAMP_CADENCE_OPTIONS.map(option => {
+                const active = campCadenceMode === option.id;
+                return (
+                  <TouchableOpacity key={option.id} style={[s.campPreferenceCard, active && s.campPreferenceCardActive]} onPress={() => setCampCadenceMode(option.id)}>
+                    <Ionicons name={option.icon} size={16} color={active ? C.orange : C.text3} />
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={[s.campPreferenceTitle, active && { color: C.orange }]}>{option.label}</Text>
+                      <Text style={s.campPreferenceSub} numberOfLines={1}>{option.sub}</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            </View>
           ) : (
             <View style={s.wizardPane}>
             <View style={s.wizardQuestion}>
@@ -3071,7 +3238,7 @@ export default function RouteBuilderScreen() {
           )}
           </Animated.View>
 
-          {(hasBaseRoute || wizardStep === 3) && (
+          {(hasBaseRoute || wizardStep === 4) && (
             <View style={s.routeNameOptions}>
             <View style={s.routeNameField}>
               <Text style={s.setupLabel}>ROUTE NAME</Text>
@@ -3101,7 +3268,7 @@ export default function RouteBuilderScreen() {
             <Ionicons name="chevron-back" size={13} color={C.text3} />
             <Text style={s.wizardNavText}>BACK</Text>
           </TouchableOpacity>
-          {wizardStep < 3 ? (
+          {wizardStep < 4 ? (
             <TouchableOpacity style={[s.wizardNextBtn, !canMoveNext && { opacity: 0.55 }]} onPress={nextStep} disabled={!canMoveNext}>
               <Text style={s.wizardNextText}>NEXT</Text>
               <Ionicons name="chevron-forward" size={13} color="#fff" />
@@ -3699,6 +3866,17 @@ export default function RouteBuilderScreen() {
         </TouchableOpacity>
       </Modal>
 
+      <PremiumPlaceSheet
+        place={selectedRoutePlace?.place ?? null}
+        visible={!!selectedRoutePlace}
+        initialStage="full"
+        onClose={() => setSelectedRoutePlace(null)}
+        onNavigate={place => fly(place.lat, place.lng, 13)}
+        onAddToRoute={addSelectedRoutePlace}
+        addToRoutePrimary
+        addToRouteLabel={`Add to Day ${selectedRoutePlace?.day ?? activeDay} Route`}
+      />
+
       <PaywallModal visible={paywallVisible} code={paywallCode} message={paywallMessage} onClose={() => setPaywallVisible(false)} />
     </SafeAreaView>
   );
@@ -4117,6 +4295,23 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   premiumModeText: { color: C.text2, fontSize: 11, fontFamily: mono, fontWeight: '900' },
   premiumModeSub: { color: C.text3, fontSize: 8.5, marginTop: 2 },
+  campPreferenceGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  campPreferenceCard: {
+    width: '48%',
+    minHeight: 58,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 15,
+    backgroundColor: C.s2,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+  },
+  campPreferenceCardActive: { borderColor: C.orange + '77', backgroundColor: C.orange + '12' },
+  campPreferenceTitle: { color: C.text2, fontSize: 11, fontFamily: mono, fontWeight: '900' },
+  campPreferenceSub: { color: C.text3, fontSize: 9, marginTop: 2 },
   routeNameOptions: { flexDirection: 'row', alignItems: 'stretch', gap: 8 },
   routeNameField: { flex: 1, borderWidth: 1, borderColor: C.border, borderRadius: RADIUS.md, backgroundColor: C.s2, paddingHorizontal: 12, paddingVertical: 8 },
   routeNameInput: { color: C.text, fontSize: 15, fontWeight: '800', paddingVertical: 4 },
@@ -4252,6 +4447,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   routeDayStatusText: { fontSize: 8, fontFamily: mono, fontWeight: '900' },
   routeDayEmptyCamp: { minHeight: 148, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9, borderWidth: 1, borderColor: C.orange + '38', borderRadius: 16, backgroundColor: C.orange + '0f', paddingHorizontal: 16 },
   routeDayEmptyCampText: { color: C.orange, fontSize: 15, fontFamily: mono, fontWeight: '900', flexShrink: 1 },
+  routeDayGroupLabel: { color: C.text3, fontSize: 8, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8, marginTop: 2 },
   routeDayActionRail: { flexDirection: 'row', gap: 9, marginTop: 'auto' },
   routeDayActionBtn: { flex: 1, minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderColor: C.orange + '38', borderRadius: 14, backgroundColor: C.orange + '10' },
   routeDayActions: { flexDirection: 'row', gap: 7, paddingLeft: 37 },

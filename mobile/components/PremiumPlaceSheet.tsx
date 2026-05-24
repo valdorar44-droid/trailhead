@@ -82,6 +82,8 @@ type Props = {
   onReport?: () => void;
   onNearbyCamps?: (place: { name: string; lat: number; lng: number }) => void;
   onAddToRoute?: (place: { name: string; lat: number; lng: number; note?: string }) => void;
+  addToRouteLabel?: string;
+  addToRoutePrimary?: boolean;
   onOpenRelatedPlace?: (place: RelatedItem) => void;
   onOpenRelatedCamp?: (place: RelatedItem) => void;
   onOpenRelatedTrail?: (place: RelatedItem) => void;
@@ -142,6 +144,8 @@ export default function PremiumPlaceSheet({
   onReport,
   onNearbyCamps,
   onAddToRoute,
+  addToRouteLabel = 'Add to route',
+  addToRoutePrimary = false,
   onOpenRelatedPlace,
   onOpenRelatedCamp,
   onOpenRelatedTrail,
@@ -330,13 +334,28 @@ export default function PremiumPlaceSheet({
               )}
 
               <TrailheadButtonDock style={s.actions}>
-                <TrailheadButton
-                  label="Navigate"
-                  icon="navigate"
-                  variant="primary"
-                  onPress={() => onNavigate(place)}
-                  style={{ flex: 1 }}
-                />
+                {addToRoutePrimary && !!onAddToRoute ? (
+                  <>
+                    <TrailheadButton
+                      label={addToRouteLabel}
+                      icon="add-circle-outline"
+                      variant="primary"
+                      onPress={() => onAddToRoute({ name: place.name, lat: place.lat, lng: place.lng, note: data.summary || subtitle })}
+                      style={{ flex: 1 }}
+                    />
+                    <TouchableOpacity style={s.secondaryBtn} onPress={() => onNavigate(place)}>
+                      <Ionicons name="navigate-outline" size={15} color={C.text2} />
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <TrailheadButton
+                    label="Navigate"
+                    icon="navigate"
+                    variant="primary"
+                    onPress={() => onNavigate(place)}
+                    style={{ flex: 1 }}
+                  />
+                )}
                 {!!data.phone && (
                   <TouchableOpacity style={s.secondaryBtn} onPress={() => Linking.openURL(`tel:${data.phone}`)}>
                     <Ionicons name="call-outline" size={15} color={C.text2} />
@@ -352,7 +371,7 @@ export default function PremiumPlaceSheet({
                     <Ionicons name="bookmark-outline" size={15} color={C.text2} />
                   </TouchableOpacity>
                 )}
-                {!!onAddToRoute && (
+                {!!onAddToRoute && !addToRoutePrimary && (
                   <TouchableOpacity style={s.secondaryBtn} onPress={() => onAddToRoute({ name: place.name, lat: place.lat, lng: place.lng, note: data.summary || subtitle })}>
                     <Ionicons name="add-circle-outline" size={15} color={C.text2} />
                   </TouchableOpacity>

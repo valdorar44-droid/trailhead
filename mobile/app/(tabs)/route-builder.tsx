@@ -7,6 +7,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { ResizeMode, Video } from 'expo-av';
 import * as Location from 'expo-location';
 import PaywallModal from '@/components/PaywallModal';
 import TourTarget from '@/components/TourTarget';
@@ -21,6 +22,8 @@ import { useStore } from '@/lib/store';
 import { useTheme, mono, ColorPalette, RADIUS } from '@/lib/design';
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
+const ROUTE_BUILDER_LOAD_VIDEO = require('../../assets/route-builder-load.mp4');
+const ROUTE_BUILDER_MAP_SETTLE_MS = 2800;
 
 function mediaUrl(url?: string | null) {
   if (!url) return '';
@@ -2434,9 +2437,8 @@ export default function RouteBuilderScreen() {
       setInsertAfterId(null);
       setInsertTargetDay(null);
       setRouteName(nextName);
-      setFrameworkStatus('Route built. Opening the map...');
-      await new Promise(resolve => setTimeout(resolve, 650));
-      await commitTrip(buildTrip(framework, nextDays, nextName), true);
+      setFrameworkStatus('Route built. Preparing your trip overview...');
+      await commitTrip(buildTrip(framework, nextDays, nextName), true, ROUTE_BUILDER_MAP_SETTLE_MS);
     } finally {
       setBuildingFramework(false);
     }
@@ -2560,7 +2562,7 @@ export default function RouteBuilderScreen() {
     };
   }
 
-  async function commitTrip(trip: TripResult, openMap = true) {
+  async function commitTrip(trip: TripResult, openMap = true, settleBeforeOpenMs = 0) {
     if (routeSaving) return;
     setRouteSaving(true);
     const builderState = {
@@ -2595,6 +2597,9 @@ export default function RouteBuilderScreen() {
         console.warn('Route Builder server save failed', err?.message ?? err);
       });
       if (openMap) {
+        if (settleBeforeOpenMs > 0) {
+          await new Promise(resolve => setTimeout(resolve, settleBeforeOpenMs));
+        }
         setRouteTabMode('hub');
         router.replace('/(tabs)/map');
       }
@@ -3457,28 +3462,51 @@ export default function RouteBuilderScreen() {
 
   if (buildingFramework) {
     return (
-      <SafeAreaView style={s.wizardScreen}>
-        <View style={s.wizardCompactTop}>
-          <ActivityIndicator size="small" color={C.orange} />
-        </View>
-        <View style={s.buildingScreen}>
-          <RouteBuildStatus C={C} message={frameworkStatus} />
-          <View style={s.buildingChecklist}>
-            {[
-              'Route spine',
-              'Daily pacing',
-              'Camp windows',
-              'Fuel and stops',
-            ].map(label => (
-              <View key={label} style={s.buildingChecklistRow}>
-                <Ionicons name="radio-button-on" size={10} color={C.orange} />
-                <Text style={s.buildingChecklistText}>{label}</Text>
-              </View>
-            ))}
+      <SafeAreaView style={s.buildingVideoScreen}>
+        <Video
+          source={ROUTE_BUILDER_LOAD_VIDEO}
+          style={s.buildingVideo}
+          resizeMode={ResizeMode.COVER}
+          shouldPlay
+          isLooping
+          isMuted
+        />
+        <View style={s.buildingVideoShade} />
+        <View style={[s.buildingVideoContent, { paddingTop: Math.max(insets.top, 12) + 18, paddingBottom: Math.max(insets.bottom, 18) + 22 }]}>
+          <View style={s.buildingVideoTop}>
+            <View style={s.buildingLivePill}>
+              <ActivityIndicator size="small" color="#fff" />
+              <Text style={s.buildingLiveText}>BUILDING ROUTE</Text>
+            </View>
           </View>
-          <Text style={s.buildingNote}>
-            Long routes can take a minute. Trailhead will keep this screen open until the route is ready to open on the map.
-          </Text>
+
+          <View style={s.buildingHeroCopy}>
+            <Text style={s.buildingEyebrow}>TRAILHEAD ROUTE BUILDER</Text>
+            <Text style={s.buildingHeadline}>Dialing in your trip overview</Text>
+            <Text style={s.buildingSubtitle}>
+              {frameworkStatus || 'Tracing the route, checking camp windows, and staging the map before it opens.'}
+            </Text>
+          </View>
+
+          <View style={s.buildingBottomPanel}>
+            <RouteBuildStatus C={C} message={frameworkStatus} />
+            <View style={s.buildingChecklist}>
+              {[
+                'Route spine',
+                'Daily pacing',
+                'Camp windows',
+                'Trip overview',
+              ].map(label => (
+                <View key={label} style={s.buildingChecklistRow}>
+                  <Ionicons name="radio-button-on" size={10} color={C.orange} />
+                  <Text style={s.buildingChecklistText}>{label}</Text>
+                </View>
+              ))}
+            </View>
+            <Text style={s.buildingNote}>
+              Keeping this open a moment longer so camps, places, and route context are ready when the map appears.
+            </Text>
+          </View>
         </View>
         <PaywallModal visible={paywallVisible} code={paywallCode} message={paywallMessage} onClose={() => setPaywallVisible(false)} />
       </SafeAreaView>
@@ -4042,6 +4070,11 @@ export default function RouteBuilderScreen() {
         onAddToRoute={addSelectedRoutePlace}
         addToRoutePrimary
         addToRouteLabel={`Add to Day ${selectedRoutePlace?.day ?? activeDay} Route`}
+        onRichDetailLocked={() => {
+          setPaywallCode('category_unlock');
+          setPaywallMessage('Explorer unlocks rich photos, reviews, and full weekly hours for town-service places.');
+          setPaywallVisible(true);
+        }}
       />
 
       <PaywallModal visible={paywallVisible} code={paywallCode} message={paywallMessage} onClose={() => setPaywallVisible(false)} />
@@ -4069,17 +4102,65 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     gap: 18,
     paddingBottom: 76,
   },
+  buildingVideoScreen: {
+    flex: 1,
+    backgroundColor: '#050505',
+    overflow: 'hidden',
+  },
+  buildingVideo: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  buildingVideoShade: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.44)',
+  },
+  buildingVideoContent: {
+    flex: 1,
+    paddingHorizontal: 18,
+    justifyContent: 'space-between',
+  },
+  buildingVideoTop: {
+    minHeight: 44,
+    alignItems: 'flex-end',
+  },
+  buildingLivePill: {
+    minHeight: 34,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.28)',
+    borderRadius: 999,
+    backgroundColor: 'rgba(5,5,5,0.46)',
+    paddingHorizontal: 12,
+  },
+  buildingLiveText: { color: '#fff', fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
+  buildingHeroCopy: {
+    gap: 10,
+    paddingRight: 18,
+  },
+  buildingEyebrow: { color: '#f97316', fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 1.5 },
+  buildingHeadline: { color: '#fff', fontSize: 38, lineHeight: 42, fontWeight: '900' },
+  buildingSubtitle: { color: 'rgba(255,255,255,0.82)', fontSize: 15, lineHeight: 21, maxWidth: 340 },
+  buildingBottomPanel: {
+    gap: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    borderRadius: 20,
+    backgroundColor: 'rgba(5,5,5,0.62)',
+    padding: 14,
+  },
   buildingChecklist: {
     borderWidth: 1,
-    borderColor: C.border,
+    borderColor: C.orange + '36',
     borderRadius: 18,
-    backgroundColor: C.glass,
+    backgroundColor: 'rgba(5,5,5,0.32)',
     padding: 14,
     gap: 10,
   },
   buildingChecklistRow: { flexDirection: 'row', alignItems: 'center', gap: 9 },
-  buildingChecklistText: { color: C.text2, fontSize: 11, fontFamily: mono, fontWeight: '800', letterSpacing: 0.5 },
-  buildingNote: { color: C.text3, fontSize: 12, lineHeight: 18, textAlign: 'center', paddingHorizontal: 16 },
+  buildingChecklistText: { color: 'rgba(255,255,255,0.86)', fontSize: 11, fontFamily: mono, fontWeight: '800', letterSpacing: 0.5 },
+  buildingNote: { color: 'rgba(255,255,255,0.72)', fontSize: 12, lineHeight: 18, textAlign: 'center', paddingHorizontal: 10 },
   workspaceContainer: { flex: 1, backgroundColor: C.bg },
   workspaceTopBar: {
     position: 'absolute', top: 10, left: 16, right: 16,

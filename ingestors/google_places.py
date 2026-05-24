@@ -18,7 +18,7 @@ GOOGLE_PERMISSION_BACKOFF_KEY = "google_places_permission_backoff_v1"
 GOOGLE_NEARBY_QUOTA_BACKOFF_KEY = "google_places_nearby_quota_backoff_v1"
 GOOGLE_TEXT_ERROR_TTL_SECONDS = 15 * 60
 GOOGLE_TEXT_EMPTY_TTL_SECONDS = 12 * 3600
-GOOGLE_QUOTA_BACKOFF_TTL_SECONDS = 6 * 3600
+GOOGLE_QUOTA_BACKOFF_TTL_SECONDS = 5 * 60
 log = logging.getLogger(__name__)
 
 GOOGLE_TYPE_MAP: dict[str, list[str]] = {
@@ -33,6 +33,7 @@ GOOGLE_TYPE_MAP: dict[str, list[str]] = {
     "mechanic": ["car_repair"],
     "parts": ["auto_parts_store"],
     "parking": ["parking"],
+    "dump": ["rv_park"],
     "attraction": ["tourist_attraction"],
     "hardware": ["hardware_store"],
     "camping": ["sporting_goods_store"],
@@ -45,6 +46,17 @@ GOOGLE_TYPE_MAP: dict[str, list[str]] = {
     "historic": ["historical_landmark", "tourist_attraction"],
     "hot_spring": ["tourist_attraction"],
     "peak": ["tourist_attraction", "park"],
+    "climbing": ["tourist_attraction"],
+    "ohv": ["tourist_attraction"],
+}
+
+GOOGLE_RICH_SUMMARY_CATEGORIES = {
+    "camp", "camps", "trailhead", "viewpoint", "peak", "hot_spring", "park",
+    "historic", "attraction", "climbing", "ohv",
+}
+GOOGLE_LIGHTWEIGHT_CATEGORIES = {
+    "fuel", "propane", "dump", "parking", "grocery", "food", "mechanic",
+    "parts", "hardware", "medical", "laundromat", "wifi", "lodging", "camping",
 }
 
 GOOGLE_CATEGORY_PRIORITY = {
@@ -67,7 +79,7 @@ GOOGLE_CATEGORY_PRIORITY = {
     "propane": 19,
 }
 
-SUMMARY_FIELDS = ",".join([
+RICH_SUMMARY_FIELDS = ",".join([
     "places.id",
     "places.displayName",
     "places.location",
@@ -82,6 +94,21 @@ SUMMARY_FIELDS = ",".join([
     "places.websiteUri",
     "places.nationalPhoneNumber",
 ])
+
+LIGHTWEIGHT_SUMMARY_FIELDS = ",".join([
+    "places.id",
+    "places.displayName",
+    "places.location",
+    "places.formattedAddress",
+    "places.primaryTypeDisplayName",
+    "places.types",
+    "places.currentOpeningHours.openNow",
+    "places.googleMapsUri",
+    "places.websiteUri",
+    "places.nationalPhoneNumber",
+])
+
+SUMMARY_FIELDS = RICH_SUMMARY_FIELDS
 
 DETAIL_FIELDS = ",".join([
     "id",
@@ -174,6 +201,41 @@ def _category_for_types(types: list[str], requested: str) -> str:
     return requested
 
 
+def is_lightweight_google_category(category: object) -> bool:
+    return _clean_category(category) in GOOGLE_LIGHTWEIGHT_CATEGORIES
+
+
+def _clean_category(category: object) -> str:
+    return str(category or "").strip().lower().replace(" ", "_")
+
+
+def _summary_fields_for_category(category: str) -> str:
+    return LIGHTWEIGHT_SUMMARY_FIELDS if is_lightweight_google_category(category) else RICH_SUMMARY_FIELDS
+
+
+def mark_google_rich_detail_gate(item: dict) -> dict:
+    category = _clean_category(item.get("type") or item.get("category"))
+    if str(item.get("source") or "").lower() == "google" and is_lightweight_google_category(category):
+        item["rich_detail_available"] = True
+        item["rich_detail_locked"] = True
+        item["rich_detail_reason"] = "explorer"
+    return item
+
+
+def strip_lightweight_google_rich_fields(item: dict) -> dict:
+    """Keep practical Google list fields for town services without rich media/review data."""
+    if str(item.get("source") or "").lower() != "google":
+        return item
+    category = _clean_category(item.get("type") or item.get("category"))
+    if not is_lightweight_google_category(category):
+        item.setdefault("rich_detail_available", True)
+        item.setdefault("rich_detail_locked", False)
+        return item
+    for key in ("photo_url", "photos", "reviews", "rating", "rating_count"):
+        item.pop(key, None)
+    return mark_google_rich_detail_gate(item)
+
+
 def _normalize_place(place: dict, requested_category: str) -> dict | None:
     loc = place.get("location") or {}
     lat, lng = loc.get("latitude"), loc.get("longitude")
@@ -182,12 +244,12 @@ def _normalize_place(place: dict, requested_category: str) -> dict | None:
     if not name or not place_id or not isinstance(lat, (int, float)) or not isinstance(lng, (int, float)):
         return None
     types = [str(t) for t in (place.get("types") or [])]
+    category = _category_for_types(types, requested_category)
     photos = place.get("photos") or []
     photo_name = photos[0].get("name") if photos and isinstance(photos[0], dict) else ""
-    category = _category_for_types(types, requested_category)
     type_label = str(((place.get("primaryTypeDisplayName") or {}).get("text")) or category.replace("_", " ").title())
     hours = place.get("currentOpeningHours") or {}
-    return {
+    normalized = {
         "id": f"google:{place_id}",
         "provider_place_id": place_id,
         "place_id": place_id,
@@ -203,12 +265,17 @@ def _normalize_place(place: dict, requested_category: str) -> dict | None:
         "phone": place.get("nationalPhoneNumber") or "",
         "website": place.get("websiteUri") or "",
         "open_now": hours.get("openNow"),
-        "rating": place.get("rating"),
-        "rating_count": place.get("userRatingCount"),
-        "photo_url": _photo_url(photo_name, 720),
         "google_maps_uri": place.get("googleMapsUri") or "",
         "attribution": "Google",
+        "rich_detail_available": True,
+        "rich_detail_locked": False,
     }
+    if is_lightweight_google_category(category):
+        return strip_lightweight_google_rich_fields(normalized)
+    normalized["rating"] = place.get("rating")
+    normalized["rating_count"] = place.get("userRatingCount")
+    normalized["photo_url"] = _photo_url(photo_name, 720)
+    return normalized
 
 
 async def get_google_places(
@@ -247,7 +314,7 @@ async def get_google_places(
                 }
                 try:
                     t0 = asyncio.get_running_loop().time()
-                    res = await client.post(GOOGLE_NEARBY_URL, json=body, headers=_headers(SUMMARY_FIELDS))
+                    res = await client.post(GOOGLE_NEARBY_URL, json=body, headers=_headers(_summary_fields_for_category(category)))
                     record_provider_call(
                         "google",
                         "nearby",
@@ -295,6 +362,7 @@ async def get_google_places(
         provider="google",
         endpoint="nearby",
         source_action="nearby_places",
+        cache_empty=False,
     )
 
 

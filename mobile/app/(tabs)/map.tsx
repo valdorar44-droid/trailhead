@@ -9913,6 +9913,11 @@ function MapScreen() {
           setSearchRouteCard({ name: place.name, lat: place.lat, lng: place.lng, dist: userLoc ? haversineKm(userLoc.lat, userLoc.lng, place.lat, place.lng) : null });
           setShowSearch(true);
         }}
+        onRichDetailLocked={() => {
+          setPaywallCode('category_unlock');
+          setPaywallMessage('Explorer unlocks rich photos, reviews, and full weekly hours for town-service places.');
+          setPaywallVisible(true);
+        }}
         onOpenRelatedPlace={place => {
           setSelectedPlace(null);
           setSelectedPlaceContext(null);
@@ -9997,6 +10002,11 @@ function MapScreen() {
           setTappedPoi(null);
           setSearchRouteCard({ name: place.name, lat: place.lat, lng: place.lng, dist: userLoc ? haversineKm(userLoc.lat, userLoc.lng, place.lat, place.lng) : null });
           setShowSearch(true);
+        }}
+        onRichDetailLocked={() => {
+          setPaywallCode('category_unlock');
+          setPaywallMessage('Explorer unlocks rich photos, reviews, and full weekly hours for town-service places.');
+          setPaywallVisible(true);
         }}
       />
 

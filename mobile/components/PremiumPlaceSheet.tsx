@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { api, type PlaceDetail } from '@/lib/api';
+import { api, PaywallError, type PlaceDetail } from '@/lib/api';
 import { useTheme, mono, type ColorPalette } from '@/lib/design';
 import { TrailheadButton, TrailheadButtonDock, TrailheadSheet } from '@/components/TrailheadUI';
 import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
@@ -49,6 +49,9 @@ type PlaceLike = {
   distance_mi?: number;
   route_distance_mi?: number;
   confidence?: string;
+  rich_detail_available?: boolean;
+  rich_detail_locked?: boolean;
+  rich_detail_reason?: string;
 };
 
 type RelatedItem = {
@@ -84,6 +87,7 @@ type Props = {
   onAddToRoute?: (place: { name: string; lat: number; lng: number; note?: string }) => void;
   addToRouteLabel?: string;
   addToRoutePrimary?: boolean;
+  onRichDetailLocked?: (place: PlaceLike) => void;
   onOpenRelatedPlace?: (place: RelatedItem) => void;
   onOpenRelatedCamp?: (place: RelatedItem) => void;
   onOpenRelatedTrail?: (place: RelatedItem) => void;
@@ -146,6 +150,7 @@ export default function PremiumPlaceSheet({
   onAddToRoute,
   addToRouteLabel = 'Add to route',
   addToRoutePrimary = false,
+  onRichDetailLocked,
   onOpenRelatedPlace,
   onOpenRelatedCamp,
   onOpenRelatedTrail,
@@ -170,13 +175,16 @@ export default function PremiumPlaceSheet({
     setGalleryIndex(null);
     const sid = sourceId(place);
     if (!sid) return;
+    if (place.rich_detail_locked) return;
     let cancelled = false;
     setLoading(true);
-    api.getPlaceDetail(sid.source, sid.id)
+    api.getPlaceDetail(sid.source, sid.id, place.type || '')
       .then(next => {
         if (!cancelled) setDetail(next);
       })
-      .catch(() => {})
+      .catch(err => {
+        if (!cancelled && err instanceof PaywallError) onRichDetailLocked?.(place);
+      })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
@@ -215,6 +223,7 @@ export default function PremiumPlaceSheet({
   }), [dragY, stage]);
 
   if (!visible || !place || !data) return null;
+  const richDetailLocked = !!place.rich_detail_locked && !detail;
 
   const photos: TrailheadGalleryPhoto[] = detail?.photos?.length
     ? detail.photos.map(photo => ({ ...photo, url: mediaUrl(photo.url) }))
@@ -332,6 +341,31 @@ export default function PremiumPlaceSheet({
                     <Text key={line} style={s.sectionText}>{line}</Text>
                   ))}
                 </View>
+              )}
+              {stage === 'full' && richDetailLocked && (
+                <TouchableOpacity
+                  style={s.richLockedCard}
+                  activeOpacity={0.86}
+                  onPress={() => onRichDetailLocked?.(place)}
+                >
+                  <View style={s.richLockedTop}>
+                    <View style={s.richLockedIcon}>
+                      <Ionicons name="lock-closed-outline" size={15} color={C.orange} />
+                    </View>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={s.richLockedTitle}>Explorer rich details</Text>
+                      <Text style={s.richLockedText}>Photos, reviews, and full weekly hours load on demand.</Text>
+                    </View>
+                  </View>
+                  <View style={s.richLockedPreview}>
+                    <View style={[s.richLockedLine, { width: '82%' }]} />
+                    <View style={[s.richLockedLine, { width: '64%' }]} />
+                    <View style={s.richLockedPills}>
+                      <View style={[s.richLockedPill, { width: 72 }]} />
+                      <View style={[s.richLockedPill, { width: 98 }]} />
+                    </View>
+                  </View>
+                </TouchableOpacity>
               )}
 
               <TrailheadButtonDock style={s.actions}>
@@ -546,6 +580,33 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   section: { marginTop: 4, borderTopWidth: 1, borderColor: C.border, paddingTop: 10 },
   sectionLabel: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8, marginBottom: 5 },
   sectionText: { color: C.text2, fontSize: 12, lineHeight: 18 },
+  richLockedCard: {
+    marginTop: 4,
+    borderWidth: 1,
+    borderColor: C.orange + '45',
+    backgroundColor: C.orange + '10',
+    borderRadius: 14,
+    padding: 12,
+    gap: 12,
+    overflow: 'hidden',
+  },
+  richLockedTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  richLockedIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.orange + '18',
+    borderWidth: 1,
+    borderColor: C.orange + '42',
+  },
+  richLockedTitle: { color: C.text, fontSize: 13, fontWeight: '900' },
+  richLockedText: { color: C.text3, fontSize: 11, lineHeight: 15, marginTop: 2 },
+  richLockedPreview: { gap: 8, opacity: 0.46 },
+  richLockedLine: { height: 11, borderRadius: 6, backgroundColor: C.text2 },
+  richLockedPills: { flexDirection: 'row', gap: 8, marginTop: 2 },
+  richLockedPill: { height: 22, borderRadius: 11, backgroundColor: C.text3 },
   relatedBlock: { gap: 10, paddingVertical: 2 },
   relatedHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   relatedSection: { gap: 7 },

@@ -64,6 +64,7 @@ async def runtime_cached_call(
     endpoint: str,
     source_action: str = "",
     premium_fields: bool = False,
+    cache_empty: bool = True,
 ) -> Any:
     now = time.time()
     cached = _RUNTIME_CACHE.get(key)
@@ -94,7 +95,8 @@ async def runtime_cached_call(
     _IN_FLIGHT[key] = task
     try:
         value = await task
-        if ttl_seconds > 0:
+        is_empty = value is None or value == [] or value == {}
+        if ttl_seconds > 0 and (cache_empty or not is_empty):
             _RUNTIME_CACHE[key] = (time.time() + ttl_seconds, value)
         return value
     finally:

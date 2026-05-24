@@ -23,7 +23,15 @@ from dashboard.route_enrichment import enrich_trip_along_route
 from ingestors.ridb import get_campsites_near, get_campsites_search, get_facility_detail
 from ingestors.osm import get_osm_campsites, get_osm_campsite_detail, get_water_sources, get_trailheads, get_trails, get_viewpoints, get_peaks, get_hot_springs, get_fuel_stations, get_service_places
 from ingestors.foursquare import FSQ_BUSINESS_CATEGORIES, foursquare_enabled, get_foursquare_place_detail, get_foursquare_places
-from ingestors.google_places import fetch_google_photo, get_google_place_detail, get_google_places, google_places_enabled, search_google_places_text
+from ingestors.google_places import (
+    fetch_google_photo,
+    get_google_place_detail,
+    get_google_places,
+    google_places_enabled,
+    is_lightweight_google_category,
+    search_google_places_text,
+    strip_lightweight_google_rich_fields,
+)
 from ingestors.provider_guard import provider_call_snapshot, record_provider_call, runtime_cached_call
 from ingestors.blm import get_blm_campsites, get_blm_campsite_detail
 from ingestors.conditions import get_provider_conditions_along_route, get_provider_conditions_near, get_wfigs_fire_perimeters
@@ -6382,6 +6390,9 @@ async def nearby_places(
     merged = _dedupe_nearby_places(merged)
     balanced = _balanced_nearby_places(merged, category_set, dist_mi, limit=80)
     for item in balanced:
+        strip_lightweight_google_rich_fields(item)
+        if item.get("rich_detail_locked") and access_meta["explore_unlocked"]:
+            item["rich_detail_locked"] = False
         item.setdefault("category_access", {
             "explore_unlocked": access_meta["explore_unlocked"],
             "locked_categories": locked_categories,
@@ -6572,7 +6583,7 @@ def _map_card_cacheable(body: MapCardResolveRequest, response: dict) -> bool:
 
 
 @app.post("/api/map-card/resolve")
-async def resolve_map_card(body: MapCardResolveRequest):
+async def resolve_map_card(body: MapCardResolveRequest, user: dict | None = Depends(_optional_user)):
     """Resolve a selected map item into the richest fast card payload available.
 
     The client opens from the optimistic input immediately, then merges this
@@ -6609,7 +6620,7 @@ async def resolve_map_card(body: MapCardResolveRequest):
     timings: dict[str, int] = {}
     detail_task = None
     if provider in {"google", "foursquare", "fsq"} and provider_id:
-        detail_task = guarded("detail", place_detail(provider, provider_id), None)
+        detail_task = guarded("detail", place_detail(provider, provider_id, body.type or body.kind or "", user if isinstance(user, dict) else None), None)
     elif body.kind in {"search", "place"} and body.name:
         detail_task = guarded(
             "text_search",
@@ -6903,7 +6914,7 @@ def _smart_place_from_poi(item: dict, center_lat: float, center_lng: float, rout
         return None
     name = raw_name or ptype.replace("_", " ").title()
     source = str(item.get("source") or "osm").lower()
-    return {
+    normalized = {
         **item,
         "id": str(item.get("id") or item.get("place_id") or f"{source}:{ptype}:{lat:.5f}:{lng:.5f}"),
         "name": name,
@@ -6917,6 +6928,7 @@ def _smart_place_from_poi(item: dict, center_lat: float, center_lng: float, rout
         "route_distance_mi": _excursion_route_distance_mi(center_lat, center_lng, {"lat": lat, "lng": lng}, route),
         "summary": _planner_clean_text(item.get("summary") or item.get("description") or item.get("address") or item.get("subtype") or "", 300),
     }
+    return strip_lightweight_google_rich_fields(normalized)
 
 def _smart_place_from_excursion(item: dict, center_lat: float, center_lng: float, route: list[list[float]]) -> dict | None:
     try:
@@ -7000,6 +7012,9 @@ async def nearby_smart_pack(body: NearbySmartPackRequest, user: dict | None = De
     normalized = _dedupe_nearby_places(normalized)
     sorted_normalized = _balanced_nearby_places(normalized, requested, smart_dist, limit=80)
     for item in sorted(sorted_normalized, key=lambda p: (_place_type_priority(p.get("type")), _place_source_priority(p), smart_dist(p), p.get("confidence") != "high", p.get("name", ""))):
+        strip_lightweight_google_rich_fields(item)
+        if item.get("rich_detail_locked") and access_meta["explore_unlocked"]:
+            item["rich_detail_locked"] = False
         ptype = _smart_pack_type(item.get("type"))
         if ptype not in requested and not (ptype == "attraction" and requested.intersection({"park", "historic", "climbing", "ohv", "attraction"})):
             continue
@@ -7027,7 +7042,7 @@ async def nearby_smart_pack(body: NearbySmartPackRequest, user: dict | None = De
 
 
 @app.get("/api/places/{source}/{place_id}/detail")
-async def place_detail(source: str, place_id: str):
+async def place_detail(source: str, place_id: str, category: str = "", user: dict | None = Depends(_optional_user)):
     """Return selected-place details for rich cards.
 
     Google details are fetched on demand. Other providers may already include
@@ -7036,6 +7051,12 @@ async def place_detail(source: str, place_id: str):
     """
     source = (source or "").lower().strip()
     if source == "google":
+        if is_lightweight_google_category(category) and not _has_explore_category_access(user if isinstance(user, dict) else None):
+            raise HTTPException(402, detail=_paywall_detail(
+                "category_unlock",
+                f"Rich photos, reviews, and full weekly hours for town-service places are included with Explorer.",
+                AI_COSTS["explore_category_day"],
+            ))
         detail = await get_google_place_detail(place_id)
         if not detail:
             raise HTTPException(404, "Google place detail unavailable")

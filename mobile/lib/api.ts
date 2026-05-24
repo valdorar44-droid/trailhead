@@ -298,11 +298,11 @@ export const api = {
         body: JSON.stringify({ center: { lat, lng }, radius, categories: categories.split(',').filter(Boolean), route }),
       }),
     ),
-  getPlaceDetail: (source: string, placeId: string) =>
+  getPlaceDetail: (source: string, placeId: string, category = '') =>
     guardedRequest(
-      `place-detail:${String(source || '').toLowerCase()}:${placeId}`,
+      `place-detail:${String(source || '').toLowerCase()}:${placeId}:${String(category || '').toLowerCase()}`,
       15 * 60_000,
-      () => req<PlaceDetail>(`/api/places/${encodeURIComponent(source)}/${encodeURIComponent(placeId)}/detail`),
+      () => req<PlaceDetail>(`/api/places/${encodeURIComponent(source)}/${encodeURIComponent(placeId)}/detail${category ? `?category=${encodeURIComponent(category)}` : ''}`),
     ),
   discoverTrails: (params: TrailDiscoverParams) => {
     const qs = new URLSearchParams({ mode: params.mode ?? 'nearby', limit: String(params.limit ?? 60) });
@@ -684,6 +684,9 @@ export interface OsmPoi {
   profile_id?: string;
   photo_url?: string | null;
   length_mi?: number | null;
+  rich_detail_available?: boolean;
+  rich_detail_locked?: boolean;
+  rich_detail_reason?: string;
   activities?: string[];
   last_checked?: number;
   route_distance_mi?: number; route_fit?: string;

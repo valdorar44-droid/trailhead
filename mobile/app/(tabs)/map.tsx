@@ -4169,7 +4169,7 @@ function MapScreen() {
         useStore.getState().setActiveTrip({ ...activeTrip, plan: { ...activeTrip.plan, waypoints: [...activeTrip.plan.waypoints] } });
       }).catch(() => {});
     }
-  }, [activeTrip?.trip_id]);
+  }, [activeTrip?.trip_id, activeTrip?.updated_at, activeTrip?.version]);
 
   useEffect(() => {
     if (!activeTrip) return;
@@ -4211,7 +4211,7 @@ function MapScreen() {
       clearTimeout(placesTimer);
       clearTimeout(poiTimer);
     };
-  }, [activeTrip?.trip_id]);
+  }, [activeTrip?.trip_id, activeTrip?.updated_at, activeTrip?.version]);
 
   // ── Opportunistic background sync ──────────────────────────────────────────
   function refreshRouteGeometryAfterReconnect() {
@@ -6407,13 +6407,33 @@ function MapScreen() {
   }, [activeTrip?.trip_id, panelCollapsed, tripOverviewDays.length]);
 
   const expandTripPanel = useCallback(() => {
+    setShowPanel(true);
     setPanelCollapsed(false);
     Haptics.selectionAsync().catch(() => {});
   }, []);
   const collapseTripPanel = useCallback(() => {
+    setShowPanel(true);
     setPanelCollapsed(true);
     Haptics.selectionAsync().catch(() => {});
   }, []);
+  const restoreTripOverview = useCallback((expanded = true) => {
+    if (!activeTrip || navMode) return;
+    setSelectedCamp(null);
+    setShowCampDetail(false);
+    setSelectedPlace(null);
+    setSelectedPlaceContext(null);
+    setTappedPoi(null);
+    setTappedTrail(null);
+    setTappedTileSpot(null);
+    setTappedGas(null);
+    setSelectedCommunityPin(null);
+    setSelectedTrail(null);
+    setShowSearch(false);
+    setSearchRouteCard(null);
+    setShowPanel(true);
+    setPanelCollapsed(!expanded);
+    Haptics.selectionAsync().catch(() => {});
+  }, [activeTrip?.trip_id, navMode]);
   const collapsedPanelPan = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => false,
     onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dy) > 6 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
@@ -8554,24 +8574,31 @@ function MapScreen() {
 
       {/* Top bar */}
       <View style={s.topBar}>
-        <View style={[s.topBarDot, navMode && { backgroundColor: C.orange }]} />
-        <Text style={s.topBarText} numberOfLines={1}>
-          {isDownloading
-            ? `CACHING ${downloadProgress}% · ${downloadSaved.toLocaleString()} COORDS · ${downloadMB} MB`
-            : offlineWarning && navMode
-              ? 'OFFLINE MAPS NEEDED - TAP MAP BUTTON TO DOWNLOAD'
-              : isRerouting
-              ? 'RECALCULATING ROUTE...'
-              : navMode
-                ? navDest && waypoints.length === 0
-                  ? isApproaching ? `ARRIVING · ${navDest.name}` : `NAVIGATING TO ${navDest.name.split(',')[0].toUpperCase()}`
-                  : isApproaching
-                    ? `ARRIVING · ${waypoints[navIdx]?.name ?? ''}`
-                    : isProceeding
-                      ? `PROCEED TO STOP ${navIdx + 1}/${waypoints.length}`
-                      : `NAVIGATING · STOP ${navIdx + 1}/${waypoints.length} · ${isRouted ? routeHudLabel : 'OFF-ROAD'}`
-                : activeTrip ? activeTrip.plan.trip_name.toUpperCase() : 'NO ACTIVE TRIP'}
-        </Text>
+        <TouchableOpacity
+          style={s.topBarMain}
+          activeOpacity={activeTrip && !navMode ? 0.78 : 1}
+          onPress={() => restoreTripOverview(true)}
+          disabled={!activeTrip || navMode}
+        >
+          <View style={[s.topBarDot, navMode && { backgroundColor: C.orange }]} />
+          <Text style={s.topBarText} numberOfLines={1}>
+            {isDownloading
+              ? `CACHING ${downloadProgress}% · ${downloadSaved.toLocaleString()} COORDS · ${downloadMB} MB`
+              : offlineWarning && navMode
+                ? 'OFFLINE MAPS NEEDED - TAP MAP BUTTON TO DOWNLOAD'
+                : isRerouting
+                ? 'RECALCULATING ROUTE...'
+                : navMode
+                  ? navDest && waypoints.length === 0
+                    ? isApproaching ? `ARRIVING · ${navDest.name}` : `NAVIGATING TO ${navDest.name.split(',')[0].toUpperCase()}`
+                    : isApproaching
+                      ? `ARRIVING · ${waypoints[navIdx]?.name ?? ''}`
+                      : isProceeding
+                        ? `PROCEED TO STOP ${navIdx + 1}/${waypoints.length}`
+                        : `NAVIGATING · STOP ${navIdx + 1}/${waypoints.length} · ${isRouted ? routeHudLabel : 'OFF-ROAD'}`
+                  : activeTrip ? activeTrip.plan.trip_name.toUpperCase() : 'NO ACTIVE TRIP'}
+          </Text>
+        </TouchableOpacity>
         {routeAlerts.length > 0 && (
           <TouchableOpacity style={s.alertPill} onPress={() => setShowAlerts(v => !v)}>
             <Ionicons name="warning-outline" size={12} color={C.red} />
@@ -9624,6 +9651,10 @@ function MapScreen() {
               if (trip) {
                 setActiveTrip(trip);
                 setShowSearch(false);
+                setSelectedPlace(null);
+                setSelectedCamp(null);
+                setShowPanel(true);
+                setPanelCollapsed(false);
                 setTimeout(() => setShowDayModal(true), 350);
               }
             }}
@@ -9838,6 +9869,7 @@ function MapScreen() {
           if (selectedPlace?.type === 'trail' || selectedPlace?.type === 'trailhead') nativeMapRef.current?.clearTrailHighlight();
           setSelectedPlace(null);
           setSelectedPlaceContext(null);
+          if (activeTrip) restoreTripOverview(false);
         }}
         onNavigate={place => {
           setSelectedPlace(null);
@@ -9925,7 +9957,10 @@ function MapScreen() {
         } as any : null}
         visible={!!tappedPoi && !navMode}
         initialStage="full"
-        onClose={() => setTappedPoi(null)}
+        onClose={() => {
+          setTappedPoi(null);
+          if (activeTrip) restoreTripOverview(false);
+        }}
         onNavigate={place => {
           setTappedPoi(null);
           navigateToCamp(place);
@@ -12905,6 +12940,7 @@ const makeStyles = (C: ColorPalette) => {
     borderWidth: 1, borderColor: OVR.border,
     flexDirection: 'row', alignItems: 'center', gap: 8,
   },
+  topBarMain: { flex: 1, minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 8 },
   topBarDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: C.orange },
   topBarText: { color: OVR.text, fontSize: 10, fontFamily: mono, flex: 1, letterSpacing: 0.5 },
   exploreSearchWrap: {

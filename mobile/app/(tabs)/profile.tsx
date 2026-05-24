@@ -449,13 +449,13 @@ export default function ProfileScreen() {
     try {
       const cached = await loadOfflineTrip(t.trip_id);
       if (cached) {
-        setActiveTrip(cached, true);
+        setActiveTrip({ ...cached, updated_at: Date.now() }, true);
         router.push('/(tabs)/map');
         return;
       }
 
       const trip = await api.getTrip(t.trip_id);
-      setActiveTrip(trip);
+      setActiveTrip({ ...trip, updated_at: Date.now() });
       saveOfflineTrip(trip)
         .then(() => getOfflineTripIndex())
         .then(ids => setOfflineCachedIds(new Set(ids)))

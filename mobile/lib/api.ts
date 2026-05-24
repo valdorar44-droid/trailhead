@@ -274,6 +274,11 @@ export const api = {
   // Discovery
   getNearbyCamps: (lat: number, lng: number, radius = 50, types: string[] = []) =>
     req<CampsitePin[]>(`/api/nearby-camps?lat=${lat}&lng=${lng}&radius=${radius}&types=${types.join(',')}`),
+  getRouteCampWindows: (data: RouteCampWindowsRequest) =>
+    req<RouteCampWindowsResponse>('/api/route/camp-windows', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
   getCampsBbox: (n: number, s: number, e: number, w: number, types: string[] = []) =>
     req<CampsitePin[]>(`/api/camps/bbox?n=${n}&s=${s}&e=${e}&w=${w}&types=${types.join(',')}`),
   getOsmPois: (lat: number, lng: number, radius = 30, types = 'water,trailhead,viewpoint') =>
@@ -487,6 +492,7 @@ export interface Waypoint {
   land_type: string; notes?: string; lat?: number; lng?: number;
   verified_match?: boolean; verified_distance_mi?: number; verified_name?: string;
   verified_source?: string; needs_review?: boolean; verification_note?: string;
+  camp_window_start?: number; camp_window_end?: number; camp_window_label?: string;
 }
 export interface DayPlan {
   day: number; title: string; description: string;
@@ -514,6 +520,37 @@ export interface CampsitePin {
   cache_status?: string; fetched_at?: number; feature_source?: string;
   rating?: number; rating_count?: number; phone?: string; address?: string;
   provider_place_id?: string; place_id?: string;
+}
+export interface RouteCampWindowInput {
+  day: number;
+  start: number;
+  end: number;
+  label: string;
+  target_mi: number;
+  search_window_mi?: number;
+}
+export interface RouteCampWindowsRequest {
+  route: Array<{ lat: number; lng: number }>;
+  windows: RouteCampWindowInput[];
+  camp_filters?: string[];
+  route_style?: string;
+  max_radius?: number;
+}
+export interface RouteCampWindowResult {
+  day: number;
+  start: number;
+  end: number;
+  label: string;
+  camp: CampsitePin | null;
+  fallback: { lat: number; lng: number; name: string; description: string } | null;
+  strong: boolean;
+  found: number;
+  cache_status?: string;
+  error?: string;
+}
+export interface RouteCampWindowsResponse {
+  windows: RouteCampWindowResult[];
+  errors?: Record<string, string>;
 }
 export interface CampsiteDetail extends CampsitePin {
   photos: string[]; amenities: string[]; site_types: string[];

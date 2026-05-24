@@ -3,7 +3,7 @@ import { TripResult } from './api';
 
 const DIR = FileSystem.documentDirectory + 'offline_trips/';
 const INDEX_PATH = DIR + '_index.json';
-const MAX_OFFLINE_TRIPS = 5;
+const MAX_OFFLINE_TRIPS = 20;
 
 async function ensureDir() {
   const info = await FileSystem.getInfoAsync(DIR);

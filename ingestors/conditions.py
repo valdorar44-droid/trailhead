@@ -394,12 +394,44 @@ async def get_provider_conditions_along_route(waypoints: list[dict], radius_deg:
                 seen.add(key)
                 combined.append(alert)
     for sample in samples[:8]:
-        for alert in await get_provider_conditions_near(sample["lat"], sample["lng"], radius_deg=max(radius_deg, 0.18)):
+        radius_miles = max(5.0, min(max(radius_deg, 0.18) * 69.0, 75.0))
+        sample_results = await asyncio_gather_quiet(
+            get_nws_alerts_near(sample["lat"], sample["lng"]),
+            get_airnow_alerts_near(sample["lat"], sample["lng"], radius_miles=min(radius_miles, 50)),
+            get_wfigs_fire_alerts_near(sample["lat"], sample["lng"], radius_miles=radius_miles),
+            get_firms_fire_alerts_near(sample["lat"], sample["lng"], radius_miles=min(radius_miles, 50)),
+        )
+        for alert in [item for result in sample_results for item in result]:
             key = str(alert.get("id") or alert.get("provider_id"))
             if key not in seen:
                 seen.add(key)
                 combined.append(alert)
-    return filter_alerts_near_waypoints(combined, samples, radius_deg=max(radius_deg, 0.18))
+    filtered = filter_alerts_near_waypoints(combined, samples, radius_deg=max(radius_deg, 0.18))
+    high_value: list[dict] = []
+    low_traffic = 0
+    for alert in filtered:
+        is_tomtom_traffic = alert.get("provider") == "tomtom" and alert.get("type") == "traffic"
+        if is_tomtom_traffic and str(alert.get("severity") or "low") in {"low", "moderate"}:
+            low_traffic += 1
+            continue
+        high_value.append(alert)
+    if low_traffic:
+        high_value.append({
+            "id": "tomtom:traffic-summary",
+            "provider": "tomtom",
+            "provider_id": "traffic-summary",
+            "source": "provider",
+            "lat": samples[len(samples) // 2]["lat"],
+            "lng": samples[len(samples) // 2]["lng"],
+            "type": "traffic",
+            "subtype": "summary",
+            "severity": "low",
+            "description": f"{low_traffic} ordinary traffic slowdowns hidden from default route alerts.",
+            "confidence": 0.7,
+            "created_at": int(time.time()),
+            "updated_at": int(time.time()),
+        })
+    return high_value[:40]
 
 
 async def asyncio_gather_quiet(*aws) -> list[list[dict]]:

@@ -1533,6 +1533,21 @@ class NearbySmartPackRequest(BaseModel):
     categories: list[str] = Field(default_factory=list)
     route: list[list[float]] = Field(default_factory=list)
 
+class RouteCampWindow(BaseModel):
+    day: int
+    start: int
+    end: int
+    label: str = ""
+    target_mi: float
+    search_window_mi: float = 45
+
+class RouteCampWindowsRequest(BaseModel):
+    route: list[dict] = Field(default_factory=list)
+    windows: list[RouteCampWindow] = Field(default_factory=list)
+    camp_filters: list[str] = Field(default_factory=list)
+    route_style: str = "balanced"
+    max_radius: float = 58
+
 class MapCardResolveRequest(BaseModel):
     kind: str = "place"
     id: Optional[str] = None
@@ -5451,6 +5466,169 @@ async def nearby_camps(lat: float, lng: float, radius: float = 50, types: str = 
     return _merge_camp_sources(ridb, blm, osm, live_camps, type_filters=type_filters)[:160]
 
 
+def _route_points_from_body(route: list[dict]) -> list[dict]:
+    points: list[dict] = []
+    for item in route or []:
+        try:
+            lat = float(item.get("lat"))
+            lng = float(item.get("lng"))
+        except Exception:
+            continue
+        if -90 <= lat <= 90 and -180 <= lng <= 180:
+            points.append({"lat": lat, "lng": lng})
+    return points
+
+def _route_distance_mi(points: list[dict]) -> float:
+    total = 0.0
+    for a, b in zip(points, points[1:]):
+        total += _haversine_m(a["lat"], a["lng"], b["lat"], b["lng"]) / 1609.344
+    return total
+
+def _point_at_route_mile(points: list[dict], target_mi: float) -> dict | None:
+    if not points:
+        return None
+    if len(points) == 1 or target_mi <= 0:
+        return points[0]
+    travelled = 0.0
+    for a, b in zip(points, points[1:]):
+        seg = _haversine_m(a["lat"], a["lng"], b["lat"], b["lng"]) / 1609.344
+        if travelled + seg >= target_mi:
+            t = 0 if seg <= 0 else max(0.0, min(1.0, (target_mi - travelled) / seg))
+            return {"lat": a["lat"] + (b["lat"] - a["lat"]) * t, "lng": a["lng"] + (b["lng"] - a["lng"]) * t}
+        travelled += seg
+    return points[-1]
+
+def _route_window_samples(points: list[dict], target_mi: float, window_mi: float, max_samples: int = 6) -> list[dict]:
+    if not points:
+        return []
+    total = _route_distance_mi(points)
+    start = max(0.0, target_mi - window_mi / 2)
+    end = min(total, target_mi + window_mi / 2)
+    if max_samples <= 1 or end <= start:
+        target = _point_at_route_mile(points, target_mi)
+        return [target] if target else []
+    out: list[dict] = []
+    for idx in range(max_samples):
+        mile = start + (end - start) * (idx / (max_samples - 1))
+        point = _point_at_route_mile(points, mile)
+        if point:
+            out.append(point)
+    deduped: list[dict] = []
+    seen: set[str] = set()
+    for point in out:
+        key = f"{point['lat']:.4f},{point['lng']:.4f}"
+        if key not in seen:
+            seen.add(key)
+            deduped.append(point)
+    return deduped
+
+def _camp_pref_score(camp: dict) -> float:
+    combined = " ".join(str(v or "") for v in [
+        camp.get("land_type"),
+        camp.get("cost"),
+        " ".join(camp.get("tags") or []),
+        " ".join(camp.get("amenities") or []),
+        " ".join(camp.get("site_types") or []),
+    ]).lower()
+    score = 0.0
+    if any(term in combined for term in ("blm", "usfs", "national forest", "dispersed", "free")):
+        score -= 8
+    if any(term in combined for term in ("rv", "hookup", "electric")):
+        score += 2
+    if camp.get("rating"):
+        try:
+            score -= min(float(camp.get("rating")), 5.0)
+        except Exception:
+            pass
+    return score
+
+async def _select_camp_for_window(window: RouteCampWindow, points: list[dict], type_filters: list[str], max_radius: float, total_mi: float, sem: asyncio.Semaphore) -> dict:
+    label = window.label or (f"Day {window.day}" if window.start == window.end else f"Days {window.start}-{window.end}")
+    target = _point_at_route_mile(points, window.target_mi) or points[min(len(points) - 1, max(0, window.day - 1))]
+    samples = _route_window_samples(points, window.target_mi, max(12.0, window.search_window_mi), max_samples=6)
+    radius = max(24.0, min(max_radius, window.search_window_mi * 0.75))
+    key_payload = {
+        "v": 1,
+        "route": [[round(p["lat"], 3), round(p["lng"], 3)] for p in samples],
+        "window": [window.day, window.start, window.end, round(window.target_mi, 1), round(window.search_window_mi, 1)],
+        "filters": sorted(type_filters),
+        "radius": round(radius),
+    }
+    cache_key = "route_camp_window:" + hashlib.sha1(json.dumps(key_payload, sort_keys=True).encode()).hexdigest()[:24]
+    cached = get_cached("campsite_cache", cache_key, ttl_seconds=3600 * 24)
+    if cached is not None:
+        cached["cache_status"] = "hit"
+        return cached
+    try:
+        async with sem:
+            results = await asyncio.gather(*[
+                asyncio.wait_for(nearby_camps(sample["lat"], sample["lng"], radius, ",".join(type_filters)), timeout=8.0)
+                for sample in samples
+            ], return_exceptions=True)
+        found = _merge_camp_sources(*[r for r in results if isinstance(r, list)], type_filters=type_filters)
+        scored = []
+        for camp in found:
+            try:
+                route_distance = min(_haversine_m(float(camp["lat"]), float(camp["lng"]), s["lat"], s["lng"]) / 1609.344 for s in samples)
+                endpoint_distance = _haversine_m(float(camp["lat"]), float(camp["lng"]), target["lat"], target["lng"]) / 1609.344
+            except Exception:
+                continue
+            camp = {**camp, "route_distance_mi": round(route_distance, 2), "route_progress": (window.target_mi / total_mi if total_mi > 0 else 0), "route_progress_mi": round(window.target_mi, 1)}
+            scored.append((endpoint_distance * 0.75 + route_distance * 0.9 + _camp_pref_score(camp), camp))
+        scored.sort(key=lambda item: item[0])
+        best = scored[0][1] if scored else None
+        response = {
+            "day": window.day,
+            "start": window.start,
+            "end": window.end,
+            "label": label,
+            "camp": best,
+            "fallback": None if best else {"lat": target["lat"], "lng": target["lng"], "name": f"{label} camp search area", "description": "Camp search weak in this area. Move the day finish or scan nearby before navigation."},
+            "strong": bool(best and float(best.get("route_distance_mi") or 999) <= 22 and (_haversine_m(float(best["lat"]), float(best["lng"]), target["lat"], target["lng"]) / 1609.344) <= 42),
+            "found": len(scored),
+            "cache_status": "miss",
+        }
+    except Exception as exc:
+        response = {
+            "day": window.day,
+            "start": window.start,
+            "end": window.end,
+            "label": label,
+            "camp": None,
+            "fallback": {"lat": target["lat"], "lng": target["lng"], "name": f"{label} camp search area", "description": "Camp search failed for this window. Scan nearby before navigation."},
+            "strong": False,
+            "found": 0,
+            "cache_status": "error",
+            "error": str(exc),
+        }
+    set_cached("campsite_cache", cache_key, response)
+    return response
+
+@app.post("/api/route/camp-windows")
+async def route_camp_windows(body: RouteCampWindowsRequest):
+    points = _route_points_from_body(body.route)
+    if len(points) < 2:
+        raise HTTPException(400, "At least two route points are required")
+    windows = body.windows[:30]
+    if not windows:
+        return {"windows": [], "errors": {}}
+    total_mi = _route_distance_mi(points)
+    sem = asyncio.Semaphore(3)
+    type_filters = [str(t).strip() for t in body.camp_filters if str(t).strip()]
+    results = await asyncio.gather(*[
+        _select_camp_for_window(window, points, type_filters, max(25.0, min(float(body.max_radius or 58), 75.0)), total_mi, sem)
+        for window in windows
+    ], return_exceptions=True)
+    out: list[dict] = []
+    errors: dict[str, str] = {}
+    for idx, result in enumerate(results):
+        if isinstance(result, Exception):
+            errors[str(windows[idx].day)] = str(result)
+        else:
+            out.append(result)
+    return {"windows": out, "errors": errors}
+
+
 @app.get("/api/camps/bbox")
 async def camps_bbox(n: float, s: float, e: float, w: float, types: str = ""):
     """Viewport-based camp loading — returns all camps in a bounding box."""
@@ -6790,9 +6968,11 @@ async def nearby_smart_pack(body: NearbySmartPackRequest, user: dict | None = De
             errors[name] = str(exc)
             return default
 
-    place_categories = ",".join(sorted(requested.union({"camp", "fuel", "propane", "water", "dump", "trailhead", "viewpoint", "peak", "hot_spring", "parking", "mechanic", "camping"})))
-    camps_task = guarded("camps", lambda: nearby_camps(center_lat, center_lng, min(radius, 55), ""), [])
-    places_task = guarded("places", lambda: nearby_places(center_lat, center_lng, min(radius, 45), place_categories, "auto", user if isinstance(user, dict) else None), [])
+    camp_requested = bool(requested.intersection({"camp", "camps", "camping"}))
+    place_requested = sorted(c for c in requested if c not in {"camp", "camps", "camping"})
+    place_categories = ",".join(place_requested)
+    camps_task = guarded("camps", lambda: nearby_camps(center_lat, center_lng, min(radius, 55), ""), []) if camp_requested else asyncio.sleep(0, result=[])
+    places_task = guarded("places", lambda: nearby_places(center_lat, center_lng, min(radius, 45), place_categories, "auto", user if isinstance(user, dict) else None), []) if place_categories else asyncio.sleep(0, result=[])
     excursions_task = guarded("excursions", lambda: excursions_nearby(ExcursionNearbyRequest(
         center=PlannerPoint(lat=center_lat, lng=center_lng),
         radius=radius,
@@ -6803,9 +6983,10 @@ async def nearby_smart_pack(body: NearbySmartPackRequest, user: dict | None = De
     camps, places, excursion_pack = await asyncio.gather(camps_task, places_task, excursions_task)
 
     normalized: list[dict] = []
-    if "camp" in requested or "camps" in requested:
+    if camp_requested:
         normalized.extend(filter(None, (_smart_place_from_camp(c, center_lat, center_lng, route) for c in camps[:80])))
-    normalized.extend(filter(None, (_smart_place_from_poi(p, center_lat, center_lng, route) for p in places)))
+    if place_categories:
+        normalized.extend(filter(None, (_smart_place_from_poi(p, center_lat, center_lng, route) for p in places)))
     normalized.extend(filter(None, (_smart_place_from_excursion(e, center_lat, center_lng, route) for e in (excursion_pack or {}).get("excursions", []))))
 
     deduped: list[dict] = []
@@ -6817,7 +6998,7 @@ async def nearby_smart_pack(body: NearbySmartPackRequest, user: dict | None = De
             return 9999.0
 
     normalized = _dedupe_nearby_places(normalized)
-    sorted_normalized = _balanced_nearby_places(normalized, requested, smart_dist, limit=160)
+    sorted_normalized = _balanced_nearby_places(normalized, requested, smart_dist, limit=80)
     for item in sorted(sorted_normalized, key=lambda p: (_place_type_priority(p.get("type")), _place_source_priority(p), smart_dist(p), p.get("confidence") != "high", p.get("name", ""))):
         ptype = _smart_pack_type(item.get("type"))
         if ptype not in requested and not (ptype == "attraction" and requested.intersection({"park", "historic", "climbing", "ohv", "attraction"})):
@@ -6830,7 +7011,7 @@ async def nearby_smart_pack(body: NearbySmartPackRequest, user: dict | None = De
             continue
         seen.add(key)
         deduped.append(item)
-        if len(deduped) >= 120:
+        if len(deduped) >= 50:
             break
     return {
         "center": {"lat": center_lat, "lng": center_lng},

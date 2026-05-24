@@ -245,8 +245,12 @@ export const useStore = create<AppState>((set) => ({
   },
 
   setActiveTrip: (trip, fromCache = false) => {
-    deleteTripFile();
-    sd('trailhead_active_route');
+    if (trip) saveTripFile(trip);
+    else {
+      deleteTripFile();
+      sd('trailhead_active_trip');
+      sd('trailhead_active_route');
+    }
     set({ activeTrip: trip, activeTripFromCache: fromCache });
   },
 
@@ -418,8 +422,18 @@ export const useStore = create<AppState>((set) => ({
     if (searchHistoryRaw) patch.searchHistory = JSON.parse(searchHistoryRaw);
     if (sessionRaw) patch.sessionId = sessionRaw;
     if (planRaw) sd(PLAN_KEY);
-    deleteTripFile();
-    if (activeTripRaw) sd('trailhead_active_trip');
+    const tripFromFile = await loadTripFile();
+    if (tripFromFile) {
+      patch.activeTrip = tripFromFile;
+      patch.activeTripFromCache = true;
+    } else if (activeTripRaw) {
+      try {
+        const trip = JSON.parse(activeTripRaw);
+        patch.activeTrip = trip;
+        patch.activeTripFromCache = true;
+        saveTripFile(trip);
+      } catch {}
+    }
     if (!sessionRaw) {
       // First run — persist the generated ID
       const id = useStore.getState().sessionId;

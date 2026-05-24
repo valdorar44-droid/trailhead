@@ -880,6 +880,39 @@ function shouldAutoOpenRouteAlerts(alerts: Report[], wps: WP[], userLoc: { lat: 
   });
 }
 
+function prioritizeRouteAlerts(alerts: Report[], limit = 40) {
+  const sevRank: Record<string, number> = { critical: 4, high: 3, moderate: 2, low: 1 };
+  const hiddenTraffic = alerts.filter(alert =>
+    String((alert as any).provider || '').toLowerCase() === 'tomtom'
+    && String(alert.type || '').toLowerCase() === 'traffic'
+    && !['critical', 'high'].includes(String(alert.severity || '').toLowerCase())
+    && String(alert.subtype || '').toLowerCase() !== 'summary'
+  );
+  const visible = alerts.filter(alert => !hiddenTraffic.includes(alert));
+  const sorted = visible.sort((a, b) => {
+    const aSafety = ['fire', 'smoke', 'weather', 'hazard', 'closure', 'road_closure'].includes(String(a.type || '').toLowerCase()) ? 1 : 0;
+    const bSafety = ['fire', 'smoke', 'weather', 'hazard', 'closure', 'road_closure'].includes(String(b.type || '').toLowerCase()) ? 1 : 0;
+    return bSafety - aSafety
+      || (sevRank[String(b.severity || '').toLowerCase()] ?? 0) - (sevRank[String(a.severity || '').toLowerCase()] ?? 0)
+      || Number(b.created_at || 0) - Number(a.created_at || 0);
+  }).slice(0, limit);
+  if (hiddenTraffic.length && sorted.length < limit && !sorted.some(alert => String(alert.id) === 'tomtom:traffic-summary')) {
+    sorted.push({
+      id: 'tomtom:traffic-summary',
+      lat: sorted[0]?.lat ?? 0,
+      lng: sorted[0]?.lng ?? 0,
+      type: 'traffic',
+      subtype: 'summary',
+      severity: 'low',
+      source: 'provider',
+      provider: 'tomtom',
+      description: `${hiddenTraffic.length} ordinary traffic slowdowns hidden from default route alerts.`,
+      created_at: Date.now() / 1000,
+    } as Report);
+  }
+  return sorted;
+}
+
 function conditionSourceLabel(r: Report): string {
   const provider = String(r.provider ?? '').toLowerCase();
   if (provider === 'tomtom') return 'LIVE TRAFFIC · TOMTOM';
@@ -1620,7 +1653,7 @@ const PLACE_FILTER_TYPES = [
   { id: 'climbing', label: 'Climbing', icon: 'trail-sign-outline', color: '#a855f7', group: 'explore' },
   { id: 'ohv', label: 'OHV', icon: 'car-sport-outline', color: '#d97706', group: 'explore' },
 ] as const;
-const DEFAULT_PLACE_FILTERS = ['trailhead', 'viewpoint', 'peak', 'hot_spring', 'water', 'fuel', 'propane', 'dump', 'mechanic', 'parking', 'camping'];
+const DEFAULT_PLACE_FILTERS = ['attraction', 'trailhead', 'viewpoint', 'peak', 'hot_spring', 'water', 'fuel', 'propane', 'dump', 'camping'];
 const LEGACY_DEFAULT_PLACE_FILTERS = ['trailhead', 'viewpoint', 'water', 'fuel', 'dump'];
 const ESSENTIAL_PLACE_CATEGORIES = 'camp,camping,trailhead,viewpoint,peak,hot_spring,water,mechanic,parking,dump,propane,fuel';
 const EXPLORE_PLACE_FILTER_IDS = PLACE_FILTER_TYPES.filter(t => t.group === 'explore').map(t => t.id);
@@ -3257,6 +3290,7 @@ function MapScreen() {
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   const [selectedDay, setSelectedDay]  = useState<number | null>(null);
   const [routeAlerts, setRouteAlerts]  = useState<Report[]>([]);
+  const [routeClosing, setRouteClosing] = useState(false);
   const [showAlerts,  setShowAlerts]   = useState(false);
   const [communityPins, setCommunityPins] = useState<Pin[]>([]);
   const [routeLegs,    setRouteLegs]    = useState<RouteStep[][]>([]);
@@ -4148,25 +4182,35 @@ function MapScreen() {
     const timer = setTimeout(() => {
       if (center.lat && center.lng) {
         refreshCommunityPins({ lat: center.lat!, lng: center.lng! }, 3.0, true);
-        // Load camps + POIs after the trip sheet opens so the first tap does not stall.
+      }
+      api.getAlertsAlongRoute(wps).then(alerts => {
+        const prioritized = prioritizeRouteAlerts(alerts);
+        setRouteAlerts(prioritized);
+        setShowAlerts(shouldAutoOpenRouteAlerts(prioritized, wps as WP[], userLoc));
+      }).catch(() => {});
+    }, 450);
+    const placesTimer = setTimeout(() => {
+      if (center.lat && center.lng) {
         const bounds = {
           n: center.lat! + 1.5, s: center.lat! - 1.5,
           e: center.lng! + 1.5, w: center.lng! - 1.5, zoom: MIN_CAMP_SEARCH_ZOOM,
         };
         loadCampsInArea(bounds, activeFilters);
-        fetchPois({ lat: center.lat!, lng: center.lng! });
       }
-      api.getAlertsAlongRoute(wps).then(alerts => {
-        setRouteAlerts(alerts);
-        setShowAlerts(shouldAutoOpenRouteAlerts(alerts, wps as WP[], userLoc));
-      }).catch(() => {});
+    }, 1200);
+    const poiTimer = setTimeout(() => {
+      if (center.lat && center.lng) fetchPois({ lat: center.lat!, lng: center.lng! });
       if (activeTrip.audio_guide) {
         setAudioGuide(activeTrip.audio_guide);
       } else {
         api.getAudioGuide(activeTrip.trip_id, false).then(setAudioGuide).catch(() => {});
       }
-    }, 450);
-    return () => clearTimeout(timer);
+    }, 2200);
+    return () => {
+      clearTimeout(timer);
+      clearTimeout(placesTimer);
+      clearTimeout(poiTimer);
+    };
   }, [activeTrip?.trip_id]);
 
   // ── Opportunistic background sync ──────────────────────────────────────────
@@ -4209,7 +4253,7 @@ function MapScreen() {
       const wps = usableTripWaypoints(activeTrip.plan.waypoints).filter(w => w.lat && w.lng);
       if (wps.length) {
         api.getAlertsAlongRoute(wps).then(alerts => {
-          setRouteAlerts(alerts);
+          setRouteAlerts(prioritizeRouteAlerts(alerts));
         }).catch(() => {});
       }
     },
@@ -5381,10 +5425,16 @@ function MapScreen() {
   }
 
   async function saveAndCloseRoute() {
-    await saveActiveRouteSnapshot();
-    resetMapRouteSession();
-    setActiveTrip(null);
-    router.push('/(tabs)/route-builder');
+    if (routeClosing) return;
+    setRouteClosing(true);
+    try {
+      await saveActiveRouteSnapshot();
+      resetMapRouteSession();
+      setActiveTrip(null);
+      router.push('/(tabs)/route-builder');
+    } finally {
+      setRouteClosing(false);
+    }
   }
 
   async function handleNearbyAudio() {
@@ -6779,6 +6829,21 @@ function MapScreen() {
     openPoiFeature(place);
     nativeMapRef.current?.flyTo(place.lat, place.lng, 12);
     webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: place.lat, lng: place.lng, name: place.name }));
+  }
+
+  function openTripPlacesSearch(day?: number) {
+    setSelectedDay(day ?? null);
+    setSelectedCamp(null);
+    setShowCampDetail(false);
+    setSelectedPlace(null);
+    setTappedPoi(null);
+    setTappedTrail(null);
+    setSelectedTrail(null);
+    setSelectedCommunityPin(null);
+    setSearchRouteCard(null);
+    setPanelCollapsed(true);
+    setShowPanel(false);
+    setShowSearch(true);
   }
 
   function renderNearbyPlaceCard(place: OsmPoi, compact = false) {
@@ -8515,15 +8580,21 @@ function MapScreen() {
         )}
         {activeTrip && !navMode && (
           <TouchableOpacity
-            style={s.exitTripBtn}
+            style={[s.exitTripBtn, routeClosing && { opacity: 0.55 }]}
+            disabled={routeClosing}
             onPress={() => Alert.alert('Route options', 'Save this route or clear it from the map?', [
               { text: 'Cancel', style: 'cancel' },
               { text: 'Save & Close', onPress: saveAndCloseRoute },
               { text: 'Clear Trip', style: 'destructive', onPress: async () => {
-                await saveActiveRouteSnapshot();
-                resetMapRouteSession();
-                setActiveTrip(null);
-                router.push('/(tabs)/route-builder');
+                if (routeClosing) return;
+                setRouteClosing(true);
+                try {
+                  resetMapRouteSession();
+                  setActiveTrip(null);
+                  router.push('/(tabs)/route-builder');
+                } finally {
+                  setRouteClosing(false);
+                }
               }},
             ])}
           >
@@ -12038,7 +12109,7 @@ function MapScreen() {
                               <Ionicons name="bonfire-outline" size={13} color={C.orange} />
                               <Text style={s.tripDaySmallText}>{pin || campWp ? 'SWAP' : 'CAMP'}</Text>
                             </TouchableOpacity>
-                            <TouchableOpacity style={s.tripDaySmallBtn} onPress={() => { setSelectedDay(day.day); setShowSearch(true); }}>
+                            <TouchableOpacity style={s.tripDaySmallBtn} onPress={() => openTripPlacesSearch(day.day)}>
                               <Ionicons name="trail-sign-outline" size={13} color={C.orange} />
                               <Text style={s.tripDaySmallText}>PLACES</Text>
                             </TouchableOpacity>
@@ -12887,9 +12958,10 @@ const makeStyles = (C: ColorPalette) => {
   },
   alertPillText: { color: C.red, fontSize: 10, fontFamily: mono, fontWeight: '700' },
   exitTripBtn: {
-    width: 26, height: 26, borderRadius: 13,
+    width: 44, height: 44, borderRadius: 22,
     backgroundColor: C.s3, borderWidth: 1, borderColor: C.border,
     alignItems: 'center', justifyContent: 'center', marginLeft: 4,
+    zIndex: 900, elevation: 8,
   },
   traceHud: {
     position: 'absolute',

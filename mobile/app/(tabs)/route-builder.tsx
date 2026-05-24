@@ -41,6 +41,9 @@ type BuilderStop = {
   camp?: CampsitePin;
   gas?: GasStation;
   poi?: OsmPoi;
+  campWindowStart?: number;
+  campWindowEnd?: number;
+  campWindowLabel?: string;
 };
 type SearchPlace = { name: string; lat: number; lng: number };
 type DiscoveryTab = 'camps' | 'gas' | 'poi' | 'excursions';
@@ -839,6 +842,7 @@ export default function RouteBuilderScreen() {
   const [startQuery, setStartQuery] = useState('');
   const [endQuery, setEndQuery] = useState('');
   const [buildingFramework, setBuildingFramework] = useState(false);
+  const [routeSaving, setRouteSaving] = useState(false);
   const [frameworkStatus, setFrameworkStatus] = useState('');
   const [restDays, setRestDays] = useState<number[]>([]);
   const [dayDriveTargets, setDayDriveTargets] = useState<Record<number, string>>({});
@@ -1046,9 +1050,9 @@ export default function RouteBuilderScreen() {
     CAMP_PREFERENCE_OPTIONS.find(option => option.id === campPreferenceMode)?.filters ?? []
   ), [campPreferenceMode]);
   const campPreferenceLabel = CAMP_PREFERENCE_OPTIONS.find(option => option.id === campPreferenceMode)?.label ?? 'Public';
-  const campWindowForDay = (day: number) => {
-    const lastDay = days[days.length - 1] ?? day;
-    if (campCadenceMode !== 'alternate') {
+  const campWindowFor = (day: number, sourceDays: number[] = days, cadence: CampCadenceMode = campCadenceMode) => {
+    const lastDay = sourceDays[sourceDays.length - 1] ?? day;
+    if (cadence !== 'alternate') {
       return { start: day, end: day, campDay: day, label: `Day ${day}` };
     }
     const start = Math.floor((day - 1) / 2) * 2 + 1;
@@ -1060,9 +1064,15 @@ export default function RouteBuilderScreen() {
       label: start === end ? `Day ${start}` : `Days ${start}-${end}`,
     };
   };
+  const campWindowForDay = (day: number) => campWindowFor(day);
   const dayNeedsCamp = (day: number) => {
     if (campCadenceMode === 'manual') return false;
-    if (campCadenceMode === 'alternate') return day === campWindowForDay(day).campDay;
+    if (campCadenceMode === 'alternate') return day === campWindowFor(day).campDay;
+    return true;
+  };
+  const dayNeedsCampFor = (day: number, sourceDays: number[]) => {
+    if (campCadenceMode === 'manual') return false;
+    if (campCadenceMode === 'alternate') return day === campWindowFor(day, sourceDays).campDay;
     return true;
   };
   const offlinePlaceCandidates = useMemo(() => {
@@ -2276,6 +2286,89 @@ export default function RouteBuilderScreen() {
     };
   }
 
+  async function findCampAwareAnchors(count: number, sourceDays: number[], spine: Array<{ lat: number; lng: number }>, totalMi: number) {
+    const campDays = sourceDays.filter(day => dayNeedsCampFor(day, sourceDays));
+    const windows = campDays.map(day => {
+      const targetMi = routeTargetMile(day, count, totalMi, routeStyle);
+      const searchWindowMi = Math.max(24, Math.min(70, totalMi / Math.max(2, count) * 0.55));
+      const window = campWindowFor(day, sourceDays);
+      return {
+        day,
+        start: window.start,
+        end: window.end,
+        label: window.label,
+        target_mi: targetMi,
+        search_window_mi: searchWindowMi,
+      };
+    });
+    if (!windows.length) return [];
+    try {
+      const result = await api.getRouteCampWindows({
+        route: spine,
+        windows,
+        camp_filters: campTypeFilters,
+        route_style: routeStyle,
+        max_radius: 58,
+      });
+      return result.windows.map(win => {
+        if (win.camp) {
+          return {
+            stop: {
+              id: `camp_anchor_${Date.now()}_${win.day}_${Math.random().toString(36).slice(2, 6)}`,
+              day: win.day,
+              name: win.camp.name,
+              lat: win.camp.lat,
+              lng: win.camp.lng,
+              type: 'camp' as BuilderStopType,
+              description: `Auto-picked by Trailhead for the planned ${win.label} finish. Swap it if you want a better camp or different distance.`,
+              land_type: win.camp.land_type || 'camp',
+              source: 'camp' as const,
+              camp: win.camp,
+              campWindowStart: win.start,
+              campWindowEnd: win.end,
+              campWindowLabel: win.label,
+            },
+            strong: win.strong,
+            found: win.found,
+          };
+        }
+        const fallbackPoint = pointAtRouteMile(spine, windows.find(w => w.day === win.day)?.target_mi ?? 0)
+          ?? spine[Math.min(spine.length - 1, Math.max(0, Math.round((win.day / count) * (spine.length - 1))))];
+        const target = {
+          lat: win.fallback?.lat ?? fallbackPoint.lat,
+          lng: win.fallback?.lng ?? fallbackPoint.lng,
+          name: win.fallback?.name ?? `${win.label} camp search area`,
+          description: win.fallback?.description ?? 'Camp search weak in this area. Move the day finish or scan nearby before navigation.',
+        };
+        return {
+          stop: {
+            id: `target_${Date.now()}_${win.day}_${Math.random().toString(36).slice(2, 6)}`,
+            day: win.day,
+            name: target.name,
+            lat: target.lat,
+            lng: target.lng,
+            type: 'waypoint' as BuilderStopType,
+            description: target.description,
+            land_type: 'route',
+            source: 'map' as const,
+            campWindowStart: win.start,
+            campWindowEnd: win.end,
+            campWindowLabel: win.label,
+          },
+          strong: false,
+          found: win.found,
+        };
+      });
+    } catch {
+      const anchors = [];
+      for (const day of campDays) {
+        setFrameworkStatus(`Checking camps for ${campWindowFor(day, sourceDays).label}...`);
+        anchors.push(await findCampAwareAnchor(day, count, spine, totalMi));
+      }
+      return anchors;
+    }
+  }
+
   async function buildRouteFramework() {
     setBuildingFramework(true);
     setFrameworkStatus('Building camp-aware day plan...');
@@ -2296,6 +2389,7 @@ export default function RouteBuilderScreen() {
       const plannedCount = parsePositiveNumber(plannedDays) ?? days.length ?? 3;
       const milesCount = Math.ceil(roughMiles / (parsePositiveNumber(targetMiles) ?? 180));
       const count = Math.max(1, Math.min(30, Math.round(distanceMode === 'miles' ? milesCount : plannedCount)));
+      const nextDays = Array.from({ length: count }, (_, i) => i + 1);
       const framework: BuilderStop[] = [
         { ...first, day: 1, type: first.type === 'start' ? 'start' : first.type },
       ];
@@ -2307,11 +2401,9 @@ export default function RouteBuilderScreen() {
       let weakAnchors = 0;
 
       if (tripBuildMode === 'recommended') {
-        for (let day = 1; day <= count; day++) {
-          if (!dayNeedsCamp(day)) continue;
-          const window = campWindowForDay(day);
-          setFrameworkStatus(`Checking camps for ${window.label}...`);
-          const anchor = await findCampAwareAnchor(day, count, spine, routeMiles);
+        setFrameworkStatus('Checking camp windows...');
+        const anchors = await findCampAwareAnchors(count, nextDays, spine, routeMiles);
+        for (const anchor of anchors) {
           framework.push(anchor.stop);
           if (anchor.strong) strongAnchors += 1;
           else weakAnchors += 1;
@@ -2329,7 +2421,6 @@ export default function RouteBuilderScreen() {
             source: 'map',
           }
         : { ...last, day: count });
-      const nextDays = Array.from({ length: count }, (_, i) => i + 1);
       const nextName = routeName.trim() || (tripLoop ? `${first.name.split(',')[0]} to ${last.name.split(',')[0]} Loop` : `${first.name.split(',')[0]} to ${last.name.split(',')[0]}`);
       const status = tripBuildMode === 'recommended'
         ? weakAnchors
@@ -2345,7 +2436,7 @@ export default function RouteBuilderScreen() {
       setRouteName(nextName);
       setFrameworkStatus('Route built. Opening the map...');
       await new Promise(resolve => setTimeout(resolve, 650));
-      commitTrip(buildTrip(framework, nextDays, nextName), true);
+      await commitTrip(buildTrip(framework, nextDays, nextName), true);
     } finally {
       setBuildingFramework(false);
     }
@@ -2408,11 +2499,16 @@ export default function RouteBuilderScreen() {
       lng: st.lng,
       verified_source: st.source === 'camp' ? st.camp?.verified_source ?? 'manual' : 'manual',
       verified_match: true,
+      camp_window_start: st.campWindowStart ?? campWindowFor(st.day, inputDays).start,
+      camp_window_end: st.campWindowEnd ?? campWindowFor(st.day, inputDays).end,
+      camp_window_label: st.campWindowLabel ?? campWindowFor(st.day, inputDays).label,
     }));
     const daily_itinerary = inputDays.map(day => {
       const wps = navStops.filter(st => st.day === day);
       const hasPlanningTarget = sorted.some(st => st.day === day && isFrameworkTarget(st));
       const prev = [...navStops].reverse().find(st => st.day < day) ?? null;
+      const window = campWindowFor(day, inputDays);
+      const needsWindowCamp = dayNeedsCampFor(day, inputDays);
       let miles = 0;
       if (prev && wps.length) miles += haversineMi(prev, wps[0]);
       for (let i = 1; i < wps.length; i++) miles += haversineMi(wps[i - 1], wps[i]);
@@ -2421,9 +2517,11 @@ export default function RouteBuilderScreen() {
       const rest = restDays.includes(day);
       return {
         day,
-        title: rest ? `Day ${day}: Rest / local exploring` : `Day ${day}: ${first} to ${last}`,
+        title: rest ? `Day ${day}: Rest / local exploring` : needsWindowCamp ? `${window.label} Camp: ${first} to ${last}` : `${window.label}: Travel window`,
         description: rest
           ? 'Rest day. Keep the camp, add local POIs, or set a shorter drive max.'
+          : campCadenceMode === 'alternate' && !needsWindowCamp
+          ? `${window.label} shares an overnight camp on Day ${window.end}.`
           : wps.length
           ? `Manual route day with ${wps.length} planned stop${wps.length === 1 ? '' : 's'}.`
           : hasPlanningTarget
@@ -2462,19 +2560,10 @@ export default function RouteBuilderScreen() {
     };
   }
 
-  function commitTrip(trip: TripResult, openMap = true) {
-    setRouteName(trip.plan.trip_name);
-    setActiveTrip(trip);
-    addTripToHistory({
-      trip_id: trip.trip_id,
-      trip_name: trip.plan.trip_name,
-      states: [],
-      duration_days: trip.plan.duration_days,
-      est_miles: trip.plan.total_est_miles,
-      planned_at: Date.now(),
-    });
-    saveOfflineTrip(trip).catch(() => {});
-    api.saveTrip(trip, null, {
+  async function commitTrip(trip: TripResult, openMap = true) {
+    if (routeSaving) return;
+    setRouteSaving(true);
+    const builderState = {
       stops,
       days,
       routeStyle,
@@ -2489,19 +2578,38 @@ export default function RouteBuilderScreen() {
       activePlaceFilters,
       campPreferenceMode,
       campCadenceMode,
-    }, 'mobile-route-builder').catch(() => {});
-    if (openMap) {
-      setRouteTabMode('hub');
-      router.replace('/(tabs)/map');
+    };
+    try {
+      setRouteName(trip.plan.trip_name);
+      setActiveTrip(trip);
+      addTripToHistory({
+        trip_id: trip.trip_id,
+        trip_name: trip.plan.trip_name,
+        states: [],
+        duration_days: trip.plan.duration_days,
+        est_miles: trip.plan.total_est_miles,
+        planned_at: Date.now(),
+      });
+      await saveOfflineTrip(trip);
+      api.saveTrip(trip, null, builderState, 'mobile-route-builder').catch(err => {
+        console.warn('Route Builder server save failed', err?.message ?? err);
+      });
+      if (openMap) {
+        setRouteTabMode('hub');
+        router.replace('/(tabs)/map');
+      }
+    } finally {
+      setRouteSaving(false);
     }
   }
 
   async function saveRoute(openMap = true) {
+    if (routeSaving) return;
     if (orderedStops.length < 2) {
       Alert.alert('Add more stops', 'Add at least a start and one destination before saving the route.');
       return;
     }
-    commitTrip(buildTrip(), openMap);
+    await commitTrip(buildTrip(), openMap);
   }
 
   function resetRouteDraft() {
@@ -2549,19 +2657,30 @@ export default function RouteBuilderScreen() {
   }
 
   async function saveCloseAndStartNewRoute() {
-    if (activeTrip) {
-      await saveOfflineTrip(activeTrip).catch(() => {});
-      addTripToHistory({
-        trip_id: activeTrip.trip_id,
-        trip_name: activeTrip.plan.trip_name,
-        states: activeTrip.plan.states ?? [],
-        duration_days: activeTrip.plan.duration_days ?? 0,
-        est_miles: activeTrip.plan.total_est_miles ?? activeTrip.plan.daily_itinerary?.reduce((sum, day) => sum + (day.est_miles ?? 0), 0) ?? 0,
-        planned_at: Date.now(),
-      });
+    if (routeSaving) return;
+    setRouteSaving(true);
+    try {
+      const draftTrip = orderedStops.length >= 2 ? buildTrip() : activeTrip;
+      if (draftTrip) {
+        setActiveTrip(draftTrip);
+        await saveOfflineTrip(draftTrip).catch(() => {});
+        api.saveTrip(draftTrip, null, null, 'mobile-route-builder-close').catch(err => {
+          console.warn('Route Builder close save failed', err?.message ?? err);
+        });
+        addTripToHistory({
+          trip_id: draftTrip.trip_id,
+          trip_name: draftTrip.plan.trip_name,
+          states: draftTrip.plan.states ?? [],
+          duration_days: draftTrip.plan.duration_days ?? 0,
+          est_miles: draftTrip.plan.total_est_miles ?? draftTrip.plan.daily_itinerary?.reduce((sum, day) => sum + (day.est_miles ?? 0), 0) ?? 0,
+          planned_at: Date.now(),
+        });
+      }
+      setShowNewRouteConfirm(false);
+      beginCleanNewRoute();
+    } finally {
+      setRouteSaving(false);
     }
-    setShowNewRouteConfirm(false);
-    beginCleanNewRoute();
   }
 
   function discardCloseAndStartNewRoute() {
@@ -2571,13 +2690,21 @@ export default function RouteBuilderScreen() {
 
   async function openSavedRoute(tripId: string) {
     const trip = activeTrip?.trip_id === tripId ? activeTrip : await loadOfflineTrip(tripId);
-    if (!trip) {
-      Alert.alert('Route not available offline', 'Open this trip from Plan history once online, then save it again so it appears here.');
+    if (trip) {
+      setActiveTrip(trip, activeTrip?.trip_id !== tripId);
+      setRouteTabMode('hub');
+      router.replace('/(tabs)/map');
       return;
     }
-    setActiveTrip(trip, true);
-    setRouteTabMode('hub');
-    router.replace('/(tabs)/map');
+    const serverTrip = await api.getTrip(tripId).catch(() => null);
+    if (serverTrip) {
+      await saveOfflineTrip(serverTrip).catch(() => {});
+      setActiveTrip(serverTrip, false);
+      setRouteTabMode('hub');
+      router.replace('/(tabs)/map');
+      return;
+    }
+    Alert.alert('Route unavailable', 'Trailhead could not load this route from local storage or your account.');
   }
 
   function openSavedTrailRoute(trail: OfflineTrail) {
@@ -2719,7 +2846,7 @@ export default function RouteBuilderScreen() {
     if (!hasBaseRoute) return null;
     return (
       <View style={s.routeTimelineList}>
-        {routeDayPlans.map(plan => {
+        {routeDayPlans.filter(plan => campCadenceMode !== 'alternate' || plan.needsCamp).map(plan => {
           const camp = plan.stops.find(st => st.type === 'camp' || st.type === 'motel') ?? null;
           const maxHours = parsePositiveNumber(dayDriveTargets[plan.day]) ?? planningStats.driveLimit;
           const overDailyMax = !plan.rest && plan.hours > maxHours + 0.05;
@@ -2921,7 +3048,7 @@ export default function RouteBuilderScreen() {
             </View>
             <Text style={s.routeHubTitle}>Plan a route</Text>
             <Text style={s.routeHubText}>Build a new trip with your rig, daily pace, fuel range, camps, and route style. Finished routes open on the Map workspace.</Text>
-            <TrailheadButton label="Build New Route" icon="add" variant="primary" onPress={startNewRoute} />
+              <TrailheadButton label="Build New Route" icon="add" variant="primary" onPress={startNewRoute} disabled={routeSaving} />
           </TrailheadCard>
 
           <TrailheadCard style={[s.routeHubRig, rigRouteSummary.ready && s.routeHubRigReady]}>
@@ -3037,9 +3164,9 @@ export default function RouteBuilderScreen() {
               <Text style={s.confirmText}>
                 You already have an active route open. Save and close it before starting fresh, or discard it and clear the workspace.
               </Text>
-              <TrailheadButton label="Save & Close" icon="save-outline" variant="primary" onPress={saveCloseAndStartNewRoute} style={{ alignSelf: 'stretch' }} />
-              <TrailheadButton label="Discard & Close" icon="trash-outline" variant="danger" onPress={discardCloseAndStartNewRoute} style={{ alignSelf: 'stretch' }} />
-              <TrailheadButton label="Cancel" variant="ghost" onPress={() => setShowNewRouteConfirm(false)} style={{ alignSelf: 'stretch' }} />
+              <TrailheadButton label="Save & Close" icon="save-outline" variant="primary" onPress={saveCloseAndStartNewRoute} loading={routeSaving} disabled={routeSaving} style={{ alignSelf: 'stretch' }} />
+              <TrailheadButton label="Discard & Close" icon="trash-outline" variant="danger" onPress={discardCloseAndStartNewRoute} disabled={routeSaving} style={{ alignSelf: 'stretch' }} />
+              <TrailheadButton label="Cancel" variant="ghost" onPress={() => setShowNewRouteConfirm(false)} disabled={routeSaving} style={{ alignSelf: 'stretch' }} />
             </TrailheadSheet>
           </View>
         </Modal>
@@ -3292,7 +3419,7 @@ export default function RouteBuilderScreen() {
               />
             </View>
             {hasBaseRoute ? (
-              <TouchableOpacity style={s.routeNameSave} onPress={() => saveRoute(false)}>
+              <TouchableOpacity style={[s.routeNameSave, routeSaving && { opacity: 0.55 }]} onPress={() => saveRoute(false)} disabled={routeSaving}>
                 <Ionicons name="save-outline" size={15} color={C.orange} />
                 <Text style={s.routeNameSaveText}>SAVE</Text>
               </TouchableOpacity>
@@ -3594,7 +3721,7 @@ export default function RouteBuilderScreen() {
           <Text style={s.footerMiles}>{fmtMi(totals.miles)}</Text>
           <Text style={s.footerSub}>{totals.stops} stops · {totals.camps} camps · ${Math.round(planningStats.fuelCost)} fuel · {days.length} days</Text>
         </View>
-        <TouchableOpacity style={s.previewBtn} onPress={() => saveRoute(true)}>
+        <TouchableOpacity style={[s.previewBtn, routeSaving && { opacity: 0.65 }]} onPress={() => saveRoute(true)} disabled={routeSaving}>
           <Ionicons name="map-outline" size={16} color="#fff" />
           <Text style={s.previewText}>OPEN ON MAP</Text>
         </TouchableOpacity>

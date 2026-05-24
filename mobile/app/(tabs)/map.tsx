@@ -3008,6 +3008,7 @@ function MapScreen() {
   const pendingMapSelection = useStore(st => st.pendingMapSelection);
   const setPendingMapSelection = useStore(st => st.setPendingMapSelection);
   const user = useStore(st => st.user);
+  const hasPlan = useStore(st => st.hasPlan);
   const setStoreLoc = useStore(st => st.setUserLoc);
   const setStoreToken = useStore(st => st.setMapboxToken);
   const liveReports = useStore(st => st.liveReports);
@@ -3139,6 +3140,11 @@ function MapScreen() {
   useEffect(() => {
     selectedCampRef.current = selectedCamp;
   }, [selectedCamp]);
+
+  useEffect(() => {
+    if (!selectedCamp?.id) return;
+    loadCampDetailForCamp(selectedCamp, { loadInsight: false }).catch(() => {});
+  }, [selectedCamp?.id, selectedCamp?.lat, selectedCamp?.lng]);
 
   // Field reports
   const [fieldReports,      setFieldReports]      = useState<CampFieldReport[]>([]);
@@ -5669,9 +5675,7 @@ function MapScreen() {
     setFullnessVoting(false);
   }
 
-  async function openCampDetail() {
-    if (!selectedCamp) return;
-    const camp = selectedCamp;
+  async function loadCampDetailForCamp(camp: CampsitePin, opts: { showModal?: boolean; loadInsight?: boolean } = {}) {
     setLoadingDetail(true);
     setCampInsight(null);
     setWikiArticles([]);
@@ -5684,7 +5688,7 @@ function MapScreen() {
     resetFieldReportForm();
     const minimal = minimalCampDetail(camp);
     setCampDetail(minimal);
-    setShowCampDetail(true);
+    if (opts.showModal) setShowCampDetail(true);
     setLoadingDetail(false);
     let detail: CampsiteDetail;
     try {
@@ -5697,7 +5701,7 @@ function MapScreen() {
       return;
     }
     setCampDetail(detail);
-    openCampInsight(camp, detail).catch(() => {});
+    if (opts.loadInsight) openCampInsight(camp, detail).catch(() => {});
     if (selectedCampRef.current?.id !== camp.id) {
       return;
     }
@@ -5718,6 +5722,11 @@ function MapScreen() {
     api.getCampComments(camp.id).then(r => {
       if (selectedCampRef.current?.id === camp.id) setCampComments(r);
     }).catch(() => {});
+  }
+
+  async function openCampDetail() {
+    if (!selectedCamp) return;
+    await loadCampDetailForCamp(selectedCamp, { showModal: true, loadInsight: true });
   }
 
   function closeCampDetail() {
@@ -9842,6 +9851,233 @@ function MapScreen() {
                 </Text>
               </TouchableOpacity>
             )}
+            {loadingDetail && !campDetail ? (
+              <View style={s.inlineLoadingDetail}>
+                <ActivityIndicator size="small" color={C.orange} />
+                <Text style={s.inlineLoadingText}>Loading camp details</Text>
+              </View>
+            ) : null}
+            {campDetail ? (
+              <>
+                {cleanCampDescriptionText(campDetail.description) ? (
+                  <View style={s.detailSection}>
+                    <Text style={s.detailSectionTitle}>SUMMARY</Text>
+                    <Text style={s.detailDesc}>{cleanCampDescriptionText(campDetail.description)}</Text>
+                  </View>
+                ) : null}
+
+                {[
+                  { title: 'ACCESS NOTES', text: campDetail.access_notes },
+                  { title: 'BAIL-OUT NOTES', text: campDetail.bail_out_notes },
+                  { title: 'STAY LIMIT', text: campDetail.stay_limit },
+                  { title: 'RESERVATION NOTES', text: campDetail.reservation_notes },
+                  { title: 'SOURCE CONFIDENCE', text: campDetail.source_confidence_notes },
+                  { title: 'MAX RIG LENGTH', text: campDetail.max_rig_length },
+                ].some(item => !!item.text) ? (
+                  <View style={s.detailSection}>
+                    <View style={s.sectionTitleRow}>
+                      <Text style={s.detailSectionTitle}>FIELD NOTES</Text>
+                      {user?.is_admin ? (
+                        <TouchableOpacity onPress={() => openCampEdit('admin')}>
+                          <Text style={s.sectionEditText}>EDIT</Text>
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                    {[
+                      { title: 'ACCESS NOTES', text: campDetail.access_notes },
+                      { title: 'BAIL-OUT NOTES', text: campDetail.bail_out_notes },
+                      { title: 'STAY LIMIT', text: campDetail.stay_limit },
+                      { title: 'RESERVATION NOTES', text: campDetail.reservation_notes },
+                      { title: 'SOURCE CONFIDENCE', text: campDetail.source_confidence_notes },
+                      { title: 'MAX RIG LENGTH', text: campDetail.max_rig_length },
+                    ].filter(item => !!item.text).map(item => (
+                      <View key={item.title} style={s.campNoteCard}>
+                        <Text style={s.campNoteTitle}>{item.title}</Text>
+                        <Text style={s.campNoteText}>{item.text}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+
+                {(campDetail.amenities ?? []).length > 0 ? (
+                  <View style={s.detailSection}>
+                    <View style={s.sectionTitleRow}>
+                      <Text style={s.detailSectionTitle}>FEATURES</Text>
+                      {user?.is_admin ? (
+                        <TouchableOpacity onPress={() => openCampEdit('admin')}>
+                          <Text style={s.sectionEditText}>EDIT</Text>
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                    {(['campers', 'vehicles'] as const).map(bucket => {
+                      const items = (campDetail.amenities ?? []).map(cleanDisplayLabel).filter(a => a && featureBucket(a) === bucket);
+                      if (!items.length) return null;
+                      return (
+                        <View key={bucket} style={s.featureGroup}>
+                          <Text style={s.featureGroupTitle}>{bucket === 'campers' ? 'FOR CAMPERS' : 'FOR VEHICLES'}</Text>
+                          <View style={s.featureGrid}>
+                            {items.map(a => (
+                              <View key={a} style={s.featureItem}>
+                                <Ionicons name={amenityIcon(a)} size={22} color={C.text2} />
+                                <Text style={s.featureText}>{cleanDisplayLabel(a)}</Text>
+                              </View>
+                            ))}
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                ) : null}
+
+                {(campDetail.site_types ?? []).length > 0 || (campDetail.activities ?? []).length > 0 ? (
+                  <View style={s.detailSection}>
+                    {(campDetail.site_types ?? []).length > 0 ? (
+                      <>
+                        <Text style={s.detailSectionTitle}>SITE TYPES</Text>
+                        <View style={s.featureGrid}>
+                          {(campDetail.site_types ?? []).map(cleanDisplayLabel).filter(Boolean).map(st => (
+                            <View key={st} style={s.featureItem}>
+                              <Ionicons name={siteTypeIcon(st)} size={22} color={C.green} />
+                              <Text style={s.featureText}>{cleanDisplayLabel(st)}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      </>
+                    ) : null}
+                    {(campDetail.activities ?? []).length > 0 ? (
+                      <Text style={s.detailActivities}>{(campDetail.activities ?? []).map(cleanDisplayLabel).filter(Boolean).join(' · ')}</Text>
+                    ) : null}
+                  </View>
+                ) : null}
+
+                {Number.isFinite(campDetail.lat) && Number.isFinite(campDetail.lng) && Math.abs(campDetail.lat) > 0.0001 && Math.abs(campDetail.lng) > 0.0001 ? (
+                  <View style={s.detailSection}>
+                    <Text style={s.detailSectionTitle}>COORDINATES</Text>
+                    <View style={s.coordRow}>
+                      <Text style={s.coordText}>{campDetail.lat.toFixed(6)}, {campDetail.lng.toFixed(6)}</Text>
+                      <TouchableOpacity style={s.coordCopy} onPress={() => copyCoordinates(campDetail.lat, campDetail.lng)}>
+                        <Ionicons name="copy-outline" size={14} color={C.orange} />
+                        <Text style={s.coordCopyText}>COPY</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ) : null}
+
+                {(campDetail.reviews ?? []).length > 0 ? (
+                  <View style={s.detailSection}>
+                    <Text style={s.detailSectionTitle}>{campDetail.source === 'foursquare' || campDetail.media_source === 'foursquare' ? 'FOURSQUARE TIPS' : 'GOOGLE REVIEWS'}</Text>
+                    {(campDetail.reviews ?? []).slice(0, hasPlan ? 3 : 1).map((review, idx) => (
+                      <View key={`${review.authorName}-${idx}`} style={s.campReviewCard}>
+                        <View style={s.campReviewTop}>
+                          <Text style={s.campReviewAuthor} numberOfLines={1}>{review.authorName || (campDetail.source === 'foursquare' ? 'Foursquare tip' : 'Google user')}</Text>
+                          <Text style={s.campReviewRating}>{review.rating ? `${review.rating}/5` : review.source || (campDetail.source === 'foursquare' ? 'Foursquare' : 'Google')}</Text>
+                        </View>
+                        {!!review.relativeTime && <Text style={s.campReviewMeta}>{review.relativeTime}</Text>}
+                        {!!review.text && <Text style={s.campReviewText} numberOfLines={hasPlan ? 4 : 2}>{review.text}</Text>}
+                      </View>
+                    ))}
+                    {!hasPlan && (campDetail.reviews ?? []).length > 1 ? (
+                      <TouchableOpacity style={s.lockedInlineCard} onPress={() => { setPaywallCode('camp_detail'); setPaywallMessage('Explorer unlocks deeper campground details, longer review previews, and richer camp planning context.'); setPaywallVisible(true); }}>
+                        <Ionicons name="lock-closed-outline" size={15} color={C.orange} />
+                        <Text style={s.lockedInlineText}>More review detail is included with Explorer.</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                ) : null}
+
+                <View style={s.detailSection}>
+                  <View style={s.frHeader}>
+                    <Text style={s.detailSectionTitle}>COMMENTS & QUESTIONS</Text>
+                    {campComments.length > 0 ? <Text style={s.frCount}>{campComments.length}</Text> : null}
+                  </View>
+                  {campComments.slice(0, 3).map(comment => (
+                    <View key={comment.id} style={s.campCommentCard}>
+                      <View style={s.campCommentTop}>
+                        <Text style={s.campCommentAuthor} numberOfLines={1}>{comment.username}</Text>
+                        <Text style={s.campCommentDate}>{new Date(comment.created_at * 1000).toLocaleDateString()}</Text>
+                      </View>
+                      <Text style={s.campCommentBody}>{comment.body}</Text>
+                    </View>
+                  ))}
+                  {!campComments.length && !showCampCommentForm ? <Text style={s.frEmpty}>No comments yet. Ask a question or leave a recent note.</Text> : null}
+                  {showCampCommentForm ? (
+                    <View style={s.frForm}>
+                      <Text style={s.frFormLabel}>Comment</Text>
+                      <TextInput
+                        style={s.frNoteInput}
+                        value={campCommentText}
+                        onChangeText={v => setCampCommentText(v.slice(0, 800))}
+                        placeholder="Ask a question, share a recent condition, or add a useful note..."
+                        placeholderTextColor={C.text3}
+                        multiline
+                        numberOfLines={4}
+                      />
+                      <Text style={s.frCharCount}>{campCommentText.length}/800</Text>
+                      <View style={s.frFormActions}>
+                        <TouchableOpacity style={s.frCancelBtn} onPress={() => { setShowCampCommentForm(false); setCampCommentText(''); }}>
+                          <Text style={s.frCancelText}>Cancel</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[s.frSubmitBtn, (campCommentText.trim().length < 2 || campCommentSubmitting) && { opacity: 0.5 }]}
+                          onPress={submitCampComment}
+                          disabled={campCommentText.trim().length < 2 || campCommentSubmitting}
+                        >
+                          {campCommentSubmitting ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.frSubmitText}>POST COMMENT</Text>}
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ) : user ? (
+                    <TouchableOpacity style={s.frAddBtn} onPress={() => setShowCampCommentForm(true)}>
+                      <Ionicons name="chatbubble-ellipses-outline" size={15} color={C.orange} />
+                      <Text style={s.frAddBtnText}>ADD COMMENT</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+
+                <View style={s.detailSection}>
+                  <View style={s.frHeader}>
+                    <Text style={s.detailSectionTitle}>FIELD REPORTS</Text>
+                    {fieldReportSummary && fieldReportSummary.count > 0 ? <Text style={s.frCount}>{fieldReportSummary.count}</Text> : null}
+                  </View>
+                  {fieldReports.slice(0, 3).map(fr => {
+                    const sentiment = fieldSentimentLabel(fr.sentiment);
+                    const access = fieldAccessLabel(fr.access_condition);
+                    const crowd = fieldCrowdLabel(fr.crowd_level);
+                    return (
+                      <View key={fr.id} style={s.frCard}>
+                        <View style={s.frCardTop}>
+                          <View style={[s.frIconBubble, { backgroundColor: sentiment.color + '18' }]}>
+                            <Ionicons name={sentiment.icon} size={15} color={sentiment.color} />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={s.frCardMeta}>{sentiment.label} · {fr.username}</Text>
+                            <Text style={s.frCardDate}>{fr.visited_date}</Text>
+                          </View>
+                          {fr.has_photo && <Ionicons name="camera-outline" size={13} color={C.text3} />}
+                        </View>
+                        <View style={s.frCardBadges}>
+                          <View style={s.frMiniBadge}><Ionicons name={access.icon} size={10} color={access.color} /><Text style={s.frCardBadge}>{access.label}</Text></View>
+                          <View style={s.frMiniBadge}><Ionicons name={crowd.icon} size={11} color={crowd.color} /><Text style={s.frCardBadge}>{crowd.label}</Text></View>
+                        </View>
+                        {fr.note ? <Text style={s.frCardNote} numberOfLines={3}>{fr.note}</Text> : null}
+                      </View>
+                    );
+                  })}
+                  {fieldReports.length === 0 && !showFieldReportForm ? <Text style={s.frEmpty}>No field reports yet. Be the first to check in.</Text> : null}
+                  {user && !showFieldReportForm ? (
+                    <TouchableOpacity style={s.frAddBtn} onPress={() => setShowFieldReportForm(true)}>
+                      <Ionicons name="add-circle-outline" size={15} color={C.orange} />
+                      <Text style={s.frAddBtnText}>ADD FIELD REPORT</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+
+                <TouchableOpacity style={s.lockedInlineCard} onPress={() => openCampInsight(selectedCamp, campDetail)}>
+                  <Ionicons name={hasPlan ? 'sparkles-outline' : 'lock-closed-outline'} size={15} color={C.orange} />
+                  <Text style={s.lockedInlineText}>{hasPlan ? 'Generate AI camp insight for route fit, hazards, and nearby highlights.' : 'AI camp insight uses credits or Explorer.'}</Text>
+                </TouchableOpacity>
+              </>
+            ) : null}
             {(() => {
               const key = nearbyFeedKey('camp', selectedCamp.lat, selectedCamp.lng);
               const feed = nearbyPlaceFeeds[key];
@@ -9867,14 +10103,6 @@ function MapScreen() {
                 <Ionicons name="navigate" size={13} color="#fff" />
                 <Text style={s.quickCardNavText}>NAVIGATE</Text>
               </TouchableOpacity>
-              {user?.is_admin && (
-                <TouchableOpacity style={s.quickCardFull} onPress={openCampDetail} disabled={loadingDetail}>
-                  {loadingDetail
-                    ? <ActivityIndicator size="small" color={C.orange} />
-                    : <Text style={s.quickCardFullText}>ADMIN PROFILE →</Text>
-                  }
-                </TouchableOpacity>
-              )}
             </View>
             <View style={s.quickCardSecondaryActions}>
               <TouchableOpacity
@@ -13491,6 +13719,18 @@ const makeStyles = (C: ColorPalette) => {
     paddingHorizontal: 9,
   },
   quickCardSecondaryText: { color: C.text2, fontSize: 9, fontFamily: mono, fontWeight: '900' },
+  inlineLoadingDetail: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    borderWidth: 1, borderColor: C.border, backgroundColor: C.s1,
+    borderRadius: 14, padding: 12,
+  },
+  inlineLoadingText: { color: C.text3, fontSize: 11, fontFamily: mono, fontWeight: '800' },
+  lockedInlineCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 9,
+    borderWidth: 1, borderColor: C.orange + '55', backgroundColor: C.orange + '12',
+    borderRadius: 14, padding: 12,
+  },
+  lockedInlineText: { flex: 1, color: C.text2, fontSize: 12, lineHeight: 17, fontWeight: '700' },
 
   // ── Rig compat + weather
   rigCompatBadge: {

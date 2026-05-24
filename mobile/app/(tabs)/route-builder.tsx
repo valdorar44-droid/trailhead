@@ -2898,10 +2898,9 @@ export default function RouteBuilderScreen() {
             <Text style={s.wizardEyebrow}>ROUTE BUILDER</Text>
             <Text style={s.wizardHeaderTitle}>{stepMeta}</Text>
           </View>
-          <View style={s.wizardSignal}>
-            <View style={[s.wizardSignalDot, { backgroundColor: canMoveNext ? C.green : C.orange }]} />
-            <Text style={s.wizardSignalText}>{canMoveNext ? 'READY' : 'INPUT'}</Text>
-          </View>
+          <TouchableOpacity style={s.wizardHeaderClose} onPress={() => setRouteTabMode('hub')} accessibilityLabel="Back to saved routes" activeOpacity={0.82}>
+            <Ionicons name="close" size={18} color={C.orange} />
+          </TouchableOpacity>
         </View>
         <View style={s.wizardTrack}>
           {steps.map((label, idx) => (
@@ -3156,9 +3155,6 @@ export default function RouteBuilderScreen() {
     return (
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <SafeAreaView style={s.wizardScreen}>
-          <TouchableOpacity style={s.wizardFloatingClose} onPress={() => setRouteTabMode('hub')} accessibilityLabel="Back to saved routes" activeOpacity={0.82}>
-            <Ionicons name="close" size={18} color={C.orange} />
-          </TouchableOpacity>
           {renderWizardSetup(true)}
           <PaywallModal visible={paywallVisible} code={paywallCode} message={paywallMessage} onClose={() => setPaywallVisible(false)} />
         </SafeAreaView>
@@ -3722,20 +3718,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     justifyContent: 'flex-end',
     paddingBottom: 8,
   },
-  wizardFloatingClose: {
-    position: 'absolute',
-    top: 8,
-    right: 14,
-    zIndex: 5,
-    width: 42,
-    height: 42,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: C.border,
-    borderRadius: 21,
-    backgroundColor: C.glassStrong,
-  },
   buildingScreen: {
     flex: 1,
     justifyContent: 'center',
@@ -4042,6 +4024,16 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   wizardSignalDot: { width: 6, height: 6, borderRadius: 3 },
   wizardSignalText: { color: C.text3, fontSize: 8, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
+  wizardHeaderClose: {
+    width: 42,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 21,
+    backgroundColor: C.s2,
+  },
   wizardTrack: {
     flexDirection: 'row',
     alignItems: 'center',

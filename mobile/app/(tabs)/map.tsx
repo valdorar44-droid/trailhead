@@ -1513,32 +1513,44 @@ const COMMUNITY_PIN_TYPES = [
 ] as const;
 
 const PLACE_FILTER_TYPES = [
-  { id: 'fuel', label: 'Fuel', icon: 'flash-outline', color: '#ea580c' },
-  { id: 'propane', label: 'Propane', icon: 'flame-outline', color: '#f97316' },
-  { id: 'water', label: 'Water', icon: 'water-outline', color: '#0284c7' },
-  { id: 'dump', label: 'Dump', icon: 'trash-bin-outline', color: '#a16207' },
-  { id: 'shower', label: 'Showers', icon: 'rainy-outline', color: '#06b6d4' },
-  { id: 'laundromat', label: 'Laundry', icon: 'shirt-outline', color: '#06b6d4' },
-  { id: 'lodging', label: 'Lodging', icon: 'bed-outline', color: '#6366f1' },
-  { id: 'food', label: 'Food', icon: 'restaurant-outline', color: '#06b6d4' },
-  { id: 'grocery', label: 'Groceries', icon: 'cart-outline', color: '#06b6d4' },
-  { id: 'mechanic', label: 'Mechanic', icon: 'construct-outline', color: '#f97316' },
-  { id: 'parking', label: 'Parking', icon: 'car-outline', color: '#d97706' },
-  { id: 'attraction', label: 'Attractions', icon: 'camera-outline', color: '#0ea5e9' },
-  { id: 'trailhead', label: 'Trailheads', icon: 'trail-sign-outline', color: '#22c55e' },
-  { id: 'viewpoint', label: 'Views', icon: 'flag-outline', color: '#a855f7' },
-  { id: 'peak', label: 'Peaks', icon: 'triangle-outline', color: '#92400e' },
-  { id: 'hot_spring', label: 'Hot Springs', icon: 'flame-outline', color: '#f97316' },
+  { id: 'fuel', label: 'Fuel', icon: 'flash-outline', color: '#ea580c', group: 'essentials' },
+  { id: 'propane', label: 'Propane', icon: 'flame-outline', color: '#f97316', group: 'essentials' },
+  { id: 'water', label: 'Water', icon: 'water-outline', color: '#0284c7', group: 'essentials' },
+  { id: 'dump', label: 'Dump', icon: 'trash-bin-outline', color: '#a16207', group: 'essentials' },
+  { id: 'mechanic', label: 'Mechanic', icon: 'construct-outline', color: '#f97316', group: 'essentials' },
+  { id: 'parking', label: 'Parking', icon: 'car-outline', color: '#d97706', group: 'essentials' },
+  { id: 'camping', label: 'Camps', icon: 'bonfire-outline', color: '#14b8a6', group: 'essentials' },
+  { id: 'trailhead', label: 'Trailheads', icon: 'trail-sign-outline', color: '#22c55e', group: 'essentials' },
+  { id: 'viewpoint', label: 'Views', icon: 'flag-outline', color: '#a855f7', group: 'essentials' },
+  { id: 'peak', label: 'Peaks', icon: 'triangle-outline', color: '#92400e', group: 'essentials' },
+  { id: 'hot_spring', label: 'Hot Springs', icon: 'flame-outline', color: '#f97316', group: 'essentials' },
+  { id: 'food', label: 'Food', icon: 'restaurant-outline', color: '#06b6d4', group: 'explore' },
+  { id: 'grocery', label: 'Groceries', icon: 'cart-outline', color: '#06b6d4', group: 'explore' },
+  { id: 'lodging', label: 'Lodging', icon: 'bed-outline', color: '#6366f1', group: 'explore' },
+  { id: 'attraction', label: 'Attractions', icon: 'camera-outline', color: '#0ea5e9', group: 'explore' },
+  { id: 'historic', label: 'Historic', icon: 'business-outline', color: '#0ea5e9', group: 'explore' },
+  { id: 'park', label: 'Parks', icon: 'leaf-outline', color: '#22c55e', group: 'explore' },
+  { id: 'shower', label: 'Showers', icon: 'rainy-outline', color: '#06b6d4', group: 'explore' },
+  { id: 'laundromat', label: 'Laundry', icon: 'shirt-outline', color: '#06b6d4', group: 'explore' },
+  { id: 'hardware', label: 'Hardware', icon: 'hammer-outline', color: '#06b6d4', group: 'explore' },
+  { id: 'parts', label: 'Parts', icon: 'cog-outline', color: '#06b6d4', group: 'explore' },
+  { id: 'medical', label: 'Medical', icon: 'medical-outline', color: '#06b6d4', group: 'explore' },
+  { id: 'wifi', label: 'Wifi', icon: 'wifi-outline', color: '#06b6d4', group: 'explore' },
+  { id: 'climbing', label: 'Climbing', icon: 'trail-sign-outline', color: '#a855f7', group: 'explore' },
+  { id: 'ohv', label: 'OHV', icon: 'car-sport-outline', color: '#d97706', group: 'explore' },
 ] as const;
-const DEFAULT_PLACE_FILTERS = ['trailhead', 'viewpoint', 'peak', 'hot_spring', 'attraction', 'water', 'fuel', 'propane', 'dump', 'grocery', 'mechanic', 'parking', 'camping'];
+const DEFAULT_PLACE_FILTERS = ['trailhead', 'viewpoint', 'peak', 'hot_spring', 'water', 'fuel', 'propane', 'dump', 'mechanic', 'parking', 'camping'];
 const LEGACY_DEFAULT_PLACE_FILTERS = ['trailhead', 'viewpoint', 'water', 'fuel', 'dump'];
-const SMART_PLACE_CATEGORIES = 'camp,trailhead,viewpoint,peak,hot_spring,park,historic,attraction,camping,water,grocery,mechanic,parking,dump,propane,fuel,food,lodging,shower,laundromat,hardware,medical,parts,wifi';
+const ESSENTIAL_PLACE_CATEGORIES = 'camp,camping,trailhead,viewpoint,peak,hot_spring,water,mechanic,parking,dump,propane,fuel';
+const EXPLORE_PLACE_FILTER_IDS = PLACE_FILTER_TYPES.filter(t => t.group === 'explore').map(t => t.id);
+const SMART_PLACE_CATEGORIES = ESSENTIAL_PLACE_CATEGORIES;
 const UTILITY_PLACE_TYPES = new Set(['fuel', 'propane', 'water', 'dump', 'parking']);
 const TRAIL_DISCOVERY_PIN_TYPES = new Set(['trail', 'trailhead', 'viewpoint', 'peak', 'hot_spring']);
 const DEFAULT_COMMUNITY_PIN_FILTERS = COMMUNITY_PIN_TYPES
   .filter(t => t.id !== 'gpx_import')
   .map(t => t.id);
 const MAP_FILTER_PREFS_KEY = 'trailhead_map_filter_preferences';
+const EXPLORE_CATEGORY_UNLOCK_KEY = 'trailhead_explore_category_unlock_day';
 const MIN_CAMP_SEARCH_ZOOM = 10;
 const MAX_FREECAM_CAMP_SEARCH_RADIUS_MI = 75;
 const MAX_ALL_MAP_POIS = 1200;
@@ -3158,6 +3170,8 @@ function MapScreen() {
   const [pois,     setPois]     = useState<OsmPoi[]>([]);
   const [placesLoading, setPlacesLoading] = useState(false);
   const [placesLoadedAt, setPlacesLoadedAt] = useState<number | null>(null);
+  const [exploreCategoriesUnlocked, setExploreCategoriesUnlocked] = useState(false);
+  const [categoryUnlocking, setCategoryUnlocking] = useState(false);
   const [offlinePlacePois, setOfflinePlacePois] = useState<OsmPoi[]>([]);
   const [offlinePlaceCount, setOfflinePlaceCount] = useState(0);
   const [nearbyPlaceFeeds, setNearbyPlaceFeeds] = useState<Record<string, { loading: boolean; places: OsmPoi[]; error?: string; loadedAt?: number }>>({});
@@ -3387,6 +3401,46 @@ function MapScreen() {
     };
     storage.set(MAP_FILTER_PREFS_KEY, JSON.stringify(prefs)).catch(() => {});
   }, [activeFilters, activePinFilters, activePlaceFilters, layerAva, layerFire, layerMvum, layerRadar, mapLayer, showLands, showPois, showUsgs]);
+
+  useEffect(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    storage.get(EXPLORE_CATEGORY_UNLOCK_KEY)
+      .then(value => setExploreCategoriesUnlocked(value === today))
+      .catch(() => {});
+  }, []);
+
+  const placeCategoryRequest = useCallback((filters: string[] = activePlaceFilters, unlocked = exploreCategoriesUnlocked) => {
+    const allowed = filters.filter(id => unlocked || !(EXPLORE_PLACE_FILTER_IDS as readonly string[]).includes(id));
+    const categories = new Set<string>(allowed);
+    if (categories.has('camping')) categories.add('camp');
+    return Array.from(categories).join(',') || ESSENTIAL_PLACE_CATEGORIES;
+  }, [activePlaceFilters, exploreCategoriesUnlocked]);
+
+  const unlockExploreCategories = useCallback(async () => {
+    if (categoryUnlocking) return;
+    setCategoryUnlocking(true);
+    try {
+      const res = await api.authorizePlaceCategories('town_services');
+      const today = new Date().toISOString().slice(0, 10);
+      await storage.set(EXPLORE_CATEGORY_UNLOCK_KEY, today).catch(() => {});
+      setExploreCategoriesUnlocked(true);
+      setQuickToast(res.charged ? `Explore unlocked for today · ${res.credits} credits left` : 'Explore categories unlocked');
+      if (viewportRef.current) {
+        const center = { lat: (viewportRef.current.n + viewportRef.current.s) / 2, lng: (viewportRef.current.e + viewportRef.current.w) / 2 };
+        fetchPois(center, poiRadiusForBounds(viewportRef.current), placeCategoryRequest(activePlaceFilters, true));
+      }
+    } catch (e) {
+      if (e instanceof PaywallError) {
+        setPaywallCode(e.code);
+        setPaywallMessage(e.message);
+        setPaywallVisible(true);
+      } else {
+        Alert.alert('Explore unavailable', 'Could not unlock Explore categories right now.');
+      }
+    } finally {
+      setCategoryUnlocking(false);
+    }
+  }, [activePlaceFilters, categoryUnlocking, placeCategoryRequest]);
 
   // Fetch Mapbox token + Protomaps key once on mount; fall back to cached when offline
   useEffect(() => {
@@ -4026,11 +4080,14 @@ function MapScreen() {
       const nextCard = {
         ...selectedPlace,
         ...resolvedCard,
-        photos: resolved.photos?.length ? resolved.photos : resolvedCard.photos,
+        photos: resolved.photo_candidates?.length ? resolved.photo_candidates : resolved.photos?.length ? resolved.photos : resolvedCard.photos,
       } as SearchPlace;
+      if (resolved.display_source_label) {
+        nextCard.source_label = resolved.display_source_label;
+      }
       const currentSource = String(selectedPlace.source || '').toLowerCase();
       const nextSource = String(resolvedCard.source || '').toLowerCase();
-      if (!['google', 'foursquare', 'fsq'].includes(currentSource) && ['google', 'foursquare', 'fsq'].includes(nextSource)) {
+      if (!resolved.display_source_label && !['google', 'foursquare', 'fsq'].includes(currentSource) && ['google', 'foursquare', 'fsq'].includes(nextSource)) {
         const provider = nextSource === 'google' ? 'Google Maps' : 'Foursquare';
         const baseLabel = selectedPlace.source_label || (currentSource === 'search' ? 'Map search' : selectedPlace.source || 'Map source');
         nextCard.source_label = baseLabel.includes(provider) ? baseLabel : `${baseLabel} · ${provider}`;
@@ -4184,11 +4241,12 @@ function MapScreen() {
     return Math.max(12, Math.min(32, Math.max(latMi, lngMi) * 0.65 + 6));
   }
 
-  function fetchPois(center: { lat: number; lng: number }, radius = 28) {
+  function fetchPois(center: { lat: number; lng: number }, radius = 28, categoriesOverride?: string) {
     lastPoiFetchRef.current = center;
     const seq = ++poiFetchSeqRef.current;
     setPlacesLoading(true);
-    api.getNearbySmartPack(center.lat, center.lng, radius, SMART_PLACE_CATEGORIES)
+    const categories = categoriesOverride || placeCategoryRequest();
+    api.getNearbySmartPack(center.lat, center.lng, radius, categories)
       .then(pack => {
         if (seq < poiFetchSeqRef.current - 2) return;
         const smartPois = (pack.places ?? [])
@@ -4199,7 +4257,7 @@ function MapScreen() {
         setPlacesLoadedAt(Date.now());
       })
       .catch(() => {
-        api.getNearbyPlaces(center.lat, center.lng, radius, SMART_PLACE_CATEGORIES, 'auto')
+        api.getNearbyPlaces(center.lat, center.lng, radius, categories, 'auto')
           .then(p => {
             if (seq < poiFetchSeqRef.current - 2) return;
             if (!p.length) throw new Error('empty nearby places');
@@ -5225,7 +5283,7 @@ function MapScreen() {
       const [campsResult, fullResult, smartPackResult] = await Promise.allSettled([
         api.getNearbyCamps(centerLat, centerLng, radiusMi, types),
         api.getNearbyFullness(centerLat, centerLng, radiusMi * 0.6),
-        api.getNearbySmartPack(centerLat, centerLng, Math.min(Math.max(radiusMi, 12), 45), SMART_PLACE_CATEGORIES),
+        api.getNearbySmartPack(centerLat, centerLng, Math.min(Math.max(radiusMi, 12), 45), placeCategoryRequest()),
       ]);
       const camps = campsResult.status === 'fulfilled' ? campsResult.value : [];
       if (campsResult.status === 'rejected' && campsResult.reason instanceof PaywallError) {
@@ -6561,7 +6619,8 @@ function MapScreen() {
       ...prev,
       [key]: { loading: true, places: prev[key]?.places ?? [], loadedAt: prev[key]?.loadedAt },
     }));
-    api.getNearbySmartPack(center.lat, center.lng, radius, SMART_PLACE_CATEGORIES)
+    const categories = placeCategoryRequest();
+    api.getNearbySmartPack(center.lat, center.lng, radius, categories)
       .then(pack => {
         const places = (pack.places ?? [])
           .filter(p => String(p.type) !== 'camp')
@@ -6571,7 +6630,7 @@ function MapScreen() {
         setNearbyPlaceFeeds(prev => ({ ...prev, [key]: { loading: false, places, loadedAt: Date.now() } }));
       })
       .catch(() => {
-        api.getNearbyPlaces(center.lat!, center.lng!, radius, SMART_PLACE_CATEGORIES, 'auto')
+        api.getNearbyPlaces(center.lat!, center.lng!, radius, categories, 'auto')
           .then(places => {
             setNearbyPlaceFeeds(prev => ({ ...prev, [key]: { loading: false, places: places.slice(0, 12), loadedAt: Date.now() } }));
           })
@@ -9372,19 +9431,19 @@ function MapScreen() {
               overScrollMode={Platform.OS === 'android' ? 'always' : 'auto'}
             >
               <View style={s.filterSectionHeader}>
-                <Text style={s.filterSectionTitle}>DOWNLOADED PLACES</Text>
+                <Text style={s.filterSectionTitle}>OVERLAND ESSENTIALS</Text>
                 <View style={{ flexDirection: 'row', gap: 12 }}>
                   <TouchableOpacity onPress={() => setActivePlaceFilters(DEFAULT_PLACE_FILTERS)}>
                     <Text style={s.filterClearText}>DEFAULT</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity onPress={() => setActivePlaceFilters(PLACE_FILTER_TYPES.map(t => t.id))}>
-                    <Text style={s.filterClearText}>ALL</Text>
+                  <TouchableOpacity onPress={() => setActivePlaceFilters(PLACE_FILTER_TYPES.filter(t => t.group === 'essentials').map(t => t.id))}>
+                    <Text style={s.filterClearText}>ESSENTIALS</Text>
                   </TouchableOpacity>
                 </View>
               </View>
-              <Text style={s.filterHintText}>Default keeps the map calm. Turn on lodging, food, peaks, and attractions when you want them.</Text>
+              <Text style={s.filterHintText}>Default keeps camps, trails, water, fuel, dump, propane, parking, and repair visible without town clutter.</Text>
               <View style={s.filterGrid}>
-                {PLACE_FILTER_TYPES.map(f => {
+                {PLACE_FILTER_TYPES.filter(f => f.group === 'essentials').map(f => {
                   const active = activePlaceFilters.includes(f.id);
                   return (
                     <TouchableOpacity key={f.id} style={[s.filterChip, active && { backgroundColor: f.color, borderColor: f.color }]}
@@ -9393,6 +9452,46 @@ function MapScreen() {
                       )}>
                       <Ionicons name={f.icon as any} size={13} color={active ? '#fff' : f.color} style={{ marginRight: 4 }} />
                       <Text style={[s.filterChipText, active && { color: '#fff' }]}>{f.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <View style={s.filterSectionHeader}>
+                <Text style={s.filterSectionTitle}>EXPLORE / TOWN SERVICES</Text>
+                <View style={{ flexDirection: 'row', gap: 12 }}>
+                  {exploreCategoriesUnlocked ? (
+                    <TouchableOpacity onPress={() => setActivePlaceFilters(prev => Array.from(new Set([...prev, ...EXPLORE_PLACE_FILTER_IDS])))}>
+                      <Text style={s.filterClearText}>ALL</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity onPress={unlockExploreCategories} disabled={categoryUnlocking}>
+                      <Text style={s.filterClearText}>{categoryUnlocking ? 'UNLOCKING' : 'UNLOCK'}</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+              <Text style={s.filterHintText}>Food, groceries, lodging, attractions, showers, laundry, parts, medical, wifi, and other town stops unlock with Explorer or credits for today.</Text>
+              <View style={s.filterGrid}>
+                {PLACE_FILTER_TYPES.filter(f => f.group === 'explore').map(f => {
+                  const active = activePlaceFilters.includes(f.id);
+                  const locked = !exploreCategoriesUnlocked;
+                  return (
+                    <TouchableOpacity key={f.id} style={[s.filterChip, locked && s.filterChipLocked, active && !locked && { backgroundColor: f.color, borderColor: f.color }]}
+                      onPress={() => {
+                        if (locked) {
+                          Alert.alert('Unlock Explore for today', 'Restaurants, groceries, lodging, attractions, and town services use richer provider searches. Unlock this group for today with credits, or use Explorer.', [
+                            { text: 'Cancel', style: 'cancel' },
+                            { text: 'Unlock', onPress: unlockExploreCategories },
+                          ]);
+                          return;
+                        }
+                        setActivePlaceFilters(prev =>
+                          prev.includes(f.id) ? prev.filter(x => x !== f.id) : [...prev, f.id]
+                        );
+                      }}>
+                      <Ionicons name={(locked ? 'lock-closed-outline' : f.icon) as any} size={13} color={active && !locked ? '#fff' : f.color} style={{ marginRight: 4 }} />
+                      <Text style={[s.filterChipText, active && !locked && { color: '#fff' }, locked && s.filterChipLockedText]}>{f.label}</Text>
                     </TouchableOpacity>
                   );
                 })}
@@ -9768,12 +9867,14 @@ function MapScreen() {
                 <Ionicons name="navigate" size={13} color="#fff" />
                 <Text style={s.quickCardNavText}>NAVIGATE</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={s.quickCardFull} onPress={openCampDetail} disabled={loadingDetail}>
-                {loadingDetail
-                  ? <ActivityIndicator size="small" color={C.orange} />
-                  : <Text style={s.quickCardFullText}>FULL PROFILE →</Text>
-                }
-              </TouchableOpacity>
+              {user?.is_admin && (
+                <TouchableOpacity style={s.quickCardFull} onPress={openCampDetail} disabled={loadingDetail}>
+                  {loadingDetail
+                    ? <ActivityIndicator size="small" color={C.orange} />
+                    : <Text style={s.quickCardFullText}>ADMIN PROFILE →</Text>
+                  }
+                </TouchableOpacity>
+              )}
             </View>
             <View style={s.quickCardSecondaryActions}>
               <TouchableOpacity
@@ -9809,9 +9910,9 @@ function MapScreen() {
       )}
 
       {/* ── Campsite full profile modal ── */}
-      <Modal visible={showCampDetail} animationType="slide" presentationStyle="pageSheet" onRequestClose={closeCampDetail}>
+      <Modal visible={showCampDetail && !!user?.is_admin} animationType="slide" presentationStyle="pageSheet" onRequestClose={closeCampDetail}>
         <View style={s.detailModal}>
-          {campDetail && (
+          {campDetail && user?.is_admin && (
             <ScrollView showsVerticalScrollIndicator={false}>
               {/* Photos */}
               <View style={s.detailHero}>
@@ -13280,7 +13381,9 @@ const makeStyles = (C: ColorPalette) => {
     backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
   },
   filterChipActive: { backgroundColor: '#14b8a6', borderColor: '#14b8a6' },
+  filterChipLocked: { opacity: 0.58, borderStyle: 'dashed', backgroundColor: C.s1 },
   filterChipText: { color: C.text2, fontSize: 11, fontFamily: mono, fontWeight: '600' },
+  filterChipLockedText: { color: C.text3 },
   filterGrid: {
     flexDirection: 'row', flexWrap: 'wrap', gap: 8,
     paddingHorizontal: 14, paddingTop: 8, paddingBottom: 4,

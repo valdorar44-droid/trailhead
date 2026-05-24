@@ -83,6 +83,7 @@ AI_COSTS = {
     "nearby_audio":     5,
     "explore_audio_summary": 5,
     "explore_audio_story": 10,
+    "explore_category_day": 8,
 }
 
 OFFLINE_DOWNLOAD_COSTS = {
@@ -663,6 +664,67 @@ def _paywall_detail(code: str, message: str, credits_needed: int) -> dict:
         "credits_needed": credits_needed,
         "earn_hint": True,
     }
+
+
+ESSENTIAL_PLACE_CATEGORIES = {
+    "camp", "camps", "camping", "trail", "trailhead", "viewpoint", "peak",
+    "hot_spring", "fuel", "propane", "water", "dump", "parking", "mechanic",
+}
+EXPLORE_PLACE_CATEGORIES = {
+    "food", "restaurant", "restaurants", "grocery", "shopping", "lodging",
+    "hotel", "attraction", "historic", "park", "tourism", "shower",
+    "laundromat", "laundry", "hardware", "medical", "parts", "wifi",
+    "climbing", "ohv",
+}
+EXPLORE_CATEGORY_ALIASES = {
+    "restaurant": "food",
+    "restaurants": "food",
+    "hotel": "lodging",
+    "shopping": "grocery",
+    "laundry": "laundromat",
+    "tourism": "attraction",
+}
+EXPLORE_CATEGORY_GROUP = "town_services"
+
+
+class ExploreCategoryAuthorizeRequest(BaseModel):
+    group: str = EXPLORE_CATEGORY_GROUP
+
+
+def _normalize_place_category(value: object) -> str:
+    category = re.sub(r"[^a-z0-9_]+", "", str(value or "").lower().replace(" ", "_"))
+    return EXPLORE_CATEGORY_ALIASES.get(category, category)
+
+
+def _today_key() -> str:
+    return datetime.utcnow().strftime("%Y-%m-%d")
+
+
+def _explore_category_unlock_key(user_id: int, group: str = EXPLORE_CATEGORY_GROUP) -> str:
+    clean_group = re.sub(r"[^a-z0-9_:-]+", "", (group or EXPLORE_CATEGORY_GROUP).lower()) or EXPLORE_CATEGORY_GROUP
+    return f"place_category_unlock:{user_id}:{_today_key()}:{clean_group}"
+
+
+def _has_explore_category_access(user: dict | None, group: str = EXPLORE_CATEGORY_GROUP) -> bool:
+    if not user:
+        return False
+    if user.get("is_admin") or has_active_plan(user):
+        return True
+    return bool(get_cached("campsite_cache", _explore_category_unlock_key(user["id"], group), ttl_seconds=3600 * 36))
+
+
+def _authorize_place_categories(categories: set[str], user: dict | None) -> tuple[set[str], list[str], dict]:
+    normalized = {_normalize_place_category(c) for c in categories if str(c).strip()}
+    locked = sorted(c for c in normalized if c in EXPLORE_PLACE_CATEGORIES)
+    has_access = _has_explore_category_access(user)
+    allowed = normalized if has_access else {c for c in normalized if c not in EXPLORE_PLACE_CATEGORIES}
+    metadata = {
+        "explore_group": EXPLORE_CATEGORY_GROUP,
+        "explore_unlocked": has_access,
+        "unlock_cost": AI_COSTS["explore_category_day"],
+        "locked_categories": [] if has_access else locked,
+    }
+    return allowed, ([] if has_access else locked), metadata
 
 
 # ── Core ──────────────────────────────────────────────────────────────────────
@@ -2245,6 +2307,26 @@ async def authorize_explore_audio(body: ExploreAudioAuthorizeRequest, user: dict
     set_cached("campsite_cache", unlock_key, {"mode": mode, "place_id": place_id})
     fresh = get_user_by_id(user["id"]) or user
     return {"authorized": True, "charged": cost, "credits": fresh.get("credits", 0)}
+
+
+@app.post("/api/places/categories/authorize")
+async def authorize_explore_categories(body: ExploreCategoryAuthorizeRequest, user: dict = Depends(_current_user)):
+    group = EXPLORE_CATEGORY_GROUP if body.group in {"", EXPLORE_CATEGORY_GROUP, "explore", "town"} else body.group
+    cost = AI_COSTS["explore_category_day"]
+    unlock_key = _explore_category_unlock_key(user["id"], group)
+    if user.get("is_admin") or has_active_plan(user):
+        return {"authorized": True, "charged": 0, "plan": True, "group": group, "credits": user.get("credits", 0)}
+    if get_cached("campsite_cache", unlock_key, ttl_seconds=3600 * 36):
+        return {"authorized": True, "charged": 0, "already_unlocked": True, "group": group, "credits": user.get("credits", 0)}
+    if not deduct_credits(user["id"], cost, f"Explore map categories — {group}"):
+        raise HTTPException(402, detail=_paywall_detail(
+            "category_unlock",
+            f"Explore town services cost {cost} credits for today, or are included with Explorer.",
+            cost,
+        ))
+    set_cached("campsite_cache", unlock_key, {"group": group, "date": _today_key()})
+    fresh = get_user_by_id(user["id"]) or user
+    return {"authorized": True, "charged": cost, "group": group, "credits": fresh.get("credits", 0)}
 
 
 # ── Config (public) ───────────────────────────────────────────────────────────
@@ -5927,13 +6009,17 @@ async def nearby_places(
     radius: float = 25,
     categories: str = "fuel,water,trailhead,viewpoint",
     provider: str = "auto",
+    user: dict | None = Depends(_optional_user),
 ):
     """Server-cached nearby services for app category search.
 
     This keeps public OSM services behind Trailhead caching/rate control and
     gives the app one production path for online + offline result merging.
     """
-    category_set = {re.sub(r"[^a-z0-9_]+", "", t.strip().lower()) for t in categories.split(",") if t.strip()}
+    category_set = {_normalize_place_category(t) for t in categories.split(",") if t.strip()}
+    category_set, locked_categories, access_meta = _authorize_place_categories(category_set, user if isinstance(user, dict) else None)
+    if not category_set:
+        return []
     radius_m = int(min(max(radius, 1), 45) * 1609.344)
     provider = (provider or "auto").lower().strip()
     osm_places: list[dict] = []
@@ -5969,7 +6055,14 @@ async def nearby_places(
         item["distance_mi"] = round(dist_mi(item), 2)
         merged.append(item)
     merged = _dedupe_nearby_places(merged)
-    return _balanced_nearby_places(merged, category_set, dist_mi, limit=80)
+    balanced = _balanced_nearby_places(merged, category_set, dist_mi, limit=80)
+    for item in balanced:
+        item.setdefault("category_access", {
+            "explore_unlocked": access_meta["explore_unlocked"],
+            "locked_categories": locked_categories,
+            "unlock_cost": access_meta["unlock_cost"],
+        })
+    return balanced
 
 
 @app.get("/api/places/search-card")
@@ -6035,7 +6128,7 @@ def _map_card_merge(primary: dict, secondary: dict | None) -> dict:
         return primary
     merged = dict(primary)
     for key in (
-        "id", "name", "lat", "lng", "type", "subtype", "source", "source_label",
+        "id", "name", "lat", "lng", "type", "subtype",
         "provider_place_id", "place_id", "photo_url", "summary", "address", "phone",
         "website", "rating", "rating_count", "google_maps_uri", "access_note",
     ):
@@ -6046,6 +6139,12 @@ def _map_card_merge(primary: dict, secondary: dict | None) -> dict:
             if key == "name" and merged.get("name") and primary.get("source") != "search":
                 continue
             merged[key] = value
+    secondary_source = secondary.get("source_label") or secondary.get("attribution") or secondary.get("source")
+    if secondary_source:
+        merged["enriched_by"] = secondary_source
+        if primary.get("source") == "search":
+            merged["source"] = secondary.get("source") or merged.get("source")
+            merged["source_label"] = secondary.get("source_label") or merged.get("source_label")
     for key in ("photos", "reviews", "hours"):
         if secondary.get(key):
             merged[key] = secondary.get(key)
@@ -6138,6 +6237,7 @@ async def resolve_map_card(body: MapCardResolveRequest):
     cached = get_cached("campsite_cache", cache_key, ttl_seconds=MAP_CARD_SAFE_TTL_SECONDS)
     if cached is not None:
         cached["cached"] = True
+        cached["cache_status"] = "hit"
         cached.setdefault("timings", {})["total_ms"] = round((time.time() - started) * 1000)
         return cached
 
@@ -6178,7 +6278,7 @@ async def resolve_map_card(body: MapCardResolveRequest):
         nearby_smart_pack(NearbySmartPackRequest(
             center=PlannerPoint(lat=center_lat, lng=center_lng),
             radius=28,
-            categories=["camp", "trailhead", "viewpoint", "peak", "hot_spring", "park", "historic", "climbing", "ohv", "attraction", "water", "fuel", "grocery", "mechanic", "parking"],
+            categories=["camp", "trailhead", "viewpoint", "peak", "hot_spring", "water", "fuel", "propane", "dump", "mechanic", "parking"],
             route=body.route or [],
         )),
         {"places": []},
@@ -6225,11 +6325,21 @@ async def resolve_map_card(body: MapCardResolveRequest):
     }
     card["summary"] = card.get("summary") or card.get("address") or "Selected map place."
     card["source_label"] = card.get("source_label") or card.get("source") or "Trailhead"
+    enriched_by = card.get("enriched_by")
+    display_source_label = card["source_label"]
+    if enriched_by and str(enriched_by).lower() not in str(display_source_label).lower():
+        display_source_label = f"{display_source_label} · enriched by {enriched_by}"
+    photo_candidates = card.get("photos") or ([{"url": card["photo_url"], "source": card.get("source_label", "")}] if card.get("photo_url") else [])
     response = {
         "card": card,
-        "photos": card.get("photos") or ([{"url": card["photo_url"], "source": card.get("source_label", "")}] if card.get("photo_url") else []),
+        "photos": photo_candidates,
         "sections": _map_card_sections(card, body),
         "related": related,
+        "display_source_label": display_source_label,
+        "enriched_by": enriched_by,
+        "cache_status": "miss",
+        "photo_candidates": photo_candidates,
+        "locked_sections": [],
         "partial": bool(errors),
         "errors": errors,
         "cached": False,
@@ -6476,14 +6586,17 @@ def _smart_place_from_excursion(item: dict, center_lat: float, center_lng: float
     }
 
 @app.post("/api/nearby/smart-pack")
-async def nearby_smart_pack(body: NearbySmartPackRequest):
+async def nearby_smart_pack(body: NearbySmartPackRequest, user: dict | None = Depends(_optional_user)):
     """Unified app-facing nearby discovery feed for rich place cards."""
     center_lat = float(body.center.lat)
     center_lng = float(body.center.lng)
     radius = max(2.0, min(float(body.radius or 35), 70.0))
     route = body.route or []
-    requested = {_smart_pack_type(c) for c in body.categories if str(c).strip()}
-    requested = requested or {"camp", "fuel", "propane", "water", "dump", "trailhead", "viewpoint", "peak", "hot_spring", "park", "historic", "climbing", "ohv", "attraction", "grocery", "mechanic", "parking", "camping"}
+    requested = {_normalize_place_category(c) for c in body.categories if str(c).strip()}
+    requested = requested or {"camp", "fuel", "propane", "water", "dump", "trailhead", "viewpoint", "peak", "hot_spring", "mechanic", "parking", "camping"}
+    requested, locked_categories, access_meta = _authorize_place_categories(requested, user if isinstance(user, dict) else None)
+    if not requested:
+        requested = {"fuel", "water", "trailhead", "viewpoint"}
     errors: dict[str, str] = {}
 
     async def guarded(name: str, fn, default):
@@ -6493,9 +6606,9 @@ async def nearby_smart_pack(body: NearbySmartPackRequest):
             errors[name] = str(exc)
             return default
 
-    place_categories = ",".join(sorted(requested.union({"camp", "fuel", "propane", "water", "dump", "trailhead", "viewpoint", "peak", "hot_spring", "parking", "attraction", "grocery", "mechanic", "camping"})))
+    place_categories = ",".join(sorted(requested.union({"camp", "fuel", "propane", "water", "dump", "trailhead", "viewpoint", "peak", "hot_spring", "parking", "mechanic", "camping"})))
     camps_task = guarded("camps", lambda: nearby_camps(center_lat, center_lng, min(radius, 55), ""), [])
-    places_task = guarded("places", lambda: nearby_places(center_lat, center_lng, min(radius, 45), place_categories, "auto"), [])
+    places_task = guarded("places", lambda: nearby_places(center_lat, center_lng, min(radius, 45), place_categories, "auto", user if isinstance(user, dict) else None), [])
     excursions_task = guarded("excursions", lambda: excursions_nearby(ExcursionNearbyRequest(
         center=PlannerPoint(lat=center_lat, lng=center_lng),
         radius=radius,
@@ -6541,6 +6654,10 @@ async def nearby_smart_pack(body: NearbySmartPackRequest):
         "categories": sorted(requested),
         "places": deduped,
         "errors": errors,
+        "category_access": {
+            **access_meta,
+            "locked_categories": locked_categories,
+        },
     }
 
 

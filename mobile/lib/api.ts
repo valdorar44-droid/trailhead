@@ -222,6 +222,10 @@ export const api = {
     req<{ authorized: boolean; charged: number; already_unlocked?: boolean; plan?: boolean; credits: number }>('/api/audio/explore/authorize', {
       method: 'POST', body: JSON.stringify({ place_id, mode }),
     }),
+  authorizePlaceCategories: (group = 'town_services') =>
+    req<{ authorized: boolean; charged: number; already_unlocked?: boolean; plan?: boolean; group: string; credits: number }>('/api/places/categories/authorize', {
+      method: 'POST', body: JSON.stringify({ group }),
+    }),
   ttsSource: async (text: string, mode: 'direction' | 'guide' = 'direction') => ({
     ...(mode === 'guide' && text.length > 1600
       ? { uri: `${BASE}${(await req<{ uri: string }>('/api/audio/tts-session', {
@@ -651,6 +655,12 @@ export interface NearbySmartPackResponse {
   categories: string[];
   places: NearbySmartPlace[];
   errors?: Record<string, string>;
+  category_access?: {
+    explore_group?: string;
+    explore_unlocked?: boolean;
+    unlock_cost?: number;
+    locked_categories?: string[];
+  };
 }
 export interface MapCardResolveRequest {
   kind?: 'search' | 'place' | 'poi' | 'camp' | 'trail' | string;
@@ -683,6 +693,11 @@ export interface MapCardResolveResponse {
   partial?: boolean;
   errors?: Record<string, string>;
   timings?: Record<string, number>;
+  display_source_label?: string;
+  enriched_by?: string;
+  cache_status?: string;
+  photo_candidates?: PlacePhoto[];
+  locked_sections?: Array<{ type: string; title: string; items?: unknown[] }>;
 }
 export interface TrailClaim {
   source: string;

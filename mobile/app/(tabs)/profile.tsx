@@ -165,6 +165,7 @@ export default function ProfileScreen() {
   const [contributions, setContributions] = useState<ContributorProfile | null>(null);
   const [contributionsLoading, setContributionsLoading] = useState(false);
   const [visibilitySaving, setVisibilitySaving] = useState(false);
+  const [adminClearingCampCache, setAdminClearingCampCache] = useState(false);
 
   const [editingRig, setEditingRig] = useState(false);
   const [rigDraft, setRigDraft] = useState<RigProfile>(rigProfile ?? DEFAULT_RIG);
@@ -187,6 +188,28 @@ export default function ProfileScreen() {
   function openSavedPlaceOnMap(place: SavedPlace) {
     setPendingMapSelection({ kind: 'place', place });
     router.push('/(tabs)/map');
+  }
+
+  function clearCampCacheAdmin() {
+    if (!user?.is_admin || adminClearingCampCache) return;
+    Alert.alert('Clear camp cache?', 'This clears cached camp search/detail data so popular areas reload fresh provider data.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Clear',
+        style: 'destructive',
+        onPress: async () => {
+          setAdminClearingCampCache(true);
+          try {
+            const result = await api.adminClearCampCache({ scope: 'all' });
+            Alert.alert('Camp cache cleared', `${result.deleted} cache row${result.deleted === 1 ? '' : 's'} cleared. ${result.brief_deleted || 0} AI brief row${result.brief_deleted === 1 ? '' : 's'} cleared.`);
+          } catch (e: any) {
+            Alert.alert('Could not clear cache', e?.message || 'Try again in a moment.');
+          } finally {
+            setAdminClearingCampCache(false);
+          }
+        },
+      },
+    ]);
   }
 
   // Smooth auth → main transition: dismiss keyboard, show success flash, fade out, switch view
@@ -1025,6 +1048,7 @@ export default function ProfileScreen() {
             { icon: 'trophy-outline', label: 'CONTEST', color: '#d4af37', onPress: openContest },
             { icon: 'ribbon-outline', label: 'CONTRIB', color: '#14b8a6', onPress: openContributions },
             { icon: 'sparkles-outline', label: 'WELCOME', color: '#d4af37', onPress: startWelcomePrompt },
+            ...(user?.is_admin ? [{ icon: 'refresh-circle-outline', label: adminClearingCampCache ? 'CLEARING' : 'CAMP CACHE', color: C.yellow, onPress: clearCampCacheAdmin }] : []),
             { icon: 'people',  label: 'REFER',       color: C.orange, onPress: shareReferral },
             { icon: 'checkmark-circle', label: 'TRIP PREP', color: C.green,  onPress: () => setShowChecklist(true) },
             { icon: 'help-buoy-outline', label: 'APP TOUR', color: '#3b82f6', onPress: startGuidedTour },

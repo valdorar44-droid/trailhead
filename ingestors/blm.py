@@ -126,6 +126,8 @@ def _normalize(feature: dict[str, Any], layer: int) -> dict | None:
         "photo_url": None,
         "reservable": "reservation" in " ".join(str(v).lower() for v in attrs.values() if v),
         "cost": "See BLM site" if "fee" in tags else "Check local rules",
+        "amenities": _amenities(attrs),
+        "site_types": _site_types(attrs),
         "url": url or "https://www.blm.gov/programs/recreation",
         "ada": "ada" in tags,
         "source": "blm",

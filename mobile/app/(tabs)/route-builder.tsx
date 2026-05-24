@@ -60,6 +60,10 @@ type LegSearchContext = {
 };
 type RouteDayPlan = {
   day: number;
+  campWindowLabel: string;
+  campWindowStart: number;
+  campWindowEnd: number;
+  needsCamp: boolean;
   previous: BuilderStop | null;
   target: BuilderStop | null;
   frameworkTarget: BuilderStop | null;
@@ -1042,9 +1046,23 @@ export default function RouteBuilderScreen() {
     CAMP_PREFERENCE_OPTIONS.find(option => option.id === campPreferenceMode)?.filters ?? []
   ), [campPreferenceMode]);
   const campPreferenceLabel = CAMP_PREFERENCE_OPTIONS.find(option => option.id === campPreferenceMode)?.label ?? 'Public';
+  const campWindowForDay = (day: number) => {
+    const lastDay = days[days.length - 1] ?? day;
+    if (campCadenceMode !== 'alternate') {
+      return { start: day, end: day, campDay: day, label: `Day ${day}` };
+    }
+    const start = Math.floor((day - 1) / 2) * 2 + 1;
+    const end = Math.min(start + 1, lastDay);
+    return {
+      start,
+      end,
+      campDay: end,
+      label: start === end ? `Day ${start}` : `Days ${start}-${end}`,
+    };
+  };
   const dayNeedsCamp = (day: number) => {
     if (campCadenceMode === 'manual') return false;
-    if (campCadenceMode === 'alternate') return day % 2 === 1 || day === days[days.length - 1];
+    if (campCadenceMode === 'alternate') return day === campWindowForDay(day).campDay;
     return true;
   };
   const offlinePlaceCandidates = useMemo(() => {
@@ -1162,6 +1180,10 @@ export default function RouteBuilderScreen() {
       const miles = dayMileage[day] ?? 0;
       return {
         day,
+        campWindowLabel: campWindowForDay(day).label,
+        campWindowStart: campWindowForDay(day).start,
+        campWindowEnd: campWindowForDay(day).end,
+        needsCamp: dayNeedsCamp(day),
         previous,
         target,
         frameworkTarget,
@@ -1804,6 +1826,13 @@ export default function RouteBuilderScreen() {
   }
 
   function scanDayPlan(plan: RouteDayPlan, tab: DiscoveryTab) {
+    if (tab === 'camps' && !plan.needsCamp && campCadenceMode === 'alternate') {
+      const campPlan = routeDayPlans.find(dayPlan => dayPlan.day === plan.campWindowEnd) ?? plan;
+      if (campPlan.day !== plan.day) {
+        scanDayPlan(campPlan, tab);
+        return;
+      }
+    }
     setActiveDay(plan.day);
     const from = plan.previous ?? plan.stops[0] ?? null;
     const to = tab === 'camps'
@@ -2280,7 +2309,8 @@ export default function RouteBuilderScreen() {
       if (tripBuildMode === 'recommended') {
         for (let day = 1; day <= count; day++) {
           if (!dayNeedsCamp(day)) continue;
-          setFrameworkStatus(`Checking camps near Day ${day} finish...`);
+          const window = campWindowForDay(day);
+          setFrameworkStatus(`Checking camps for ${window.label}...`);
           const anchor = await findCampAwareAnchor(day, count, spine, routeMiles);
           framework.push(anchor.stop);
           if (anchor.strong) strongAnchors += 1;
@@ -2578,6 +2608,11 @@ export default function RouteBuilderScreen() {
 
   function renderCampPreview(stop: BuilderStop, label: string, compact = false) {
     const camp = stop.camp;
+    const campFeatures = [
+      ...(camp?.site_types ?? []),
+      ...(camp?.amenities ?? []),
+      ...(camp?.tags ?? []).map(tag => tag.replace(/_/g, ' ')),
+    ].filter(Boolean).slice(0, compact ? 3 : 5).join(' · ');
     return (
       <View style={[s.selectedCampCard, compact && s.selectedCampCardCompact]}>
         <View style={[s.selectedCampPhotoWrap, compact && s.selectedCampPhotoWrapCompact]}>
@@ -2593,7 +2628,7 @@ export default function RouteBuilderScreen() {
           <Text style={s.selectedCampLabel}>{label}</Text>
           <Text style={s.selectedCampName} numberOfLines={2}>{stop.name}</Text>
           <Text style={s.selectedCampMeta} numberOfLines={2}>
-            {stop.land_type || stopLabel(stop.type)}{camp?.cost ? ` · ${camp.cost}` : ''}{restDays.includes(stop.day) ? ' · rest day' : ''}
+            {campFeatures || stop.land_type || stopLabel(stop.type)}{camp?.cost ? ` · ${camp.cost}` : ''}{restDays.includes(stop.day) ? ' · rest day' : ''}
           </Text>
           {!compact ? (
             <View style={s.campPreviewActions}>
@@ -2688,7 +2723,7 @@ export default function RouteBuilderScreen() {
           const camp = plan.stops.find(st => st.type === 'camp' || st.type === 'motel') ?? null;
           const maxHours = parsePositiveNumber(dayDriveTargets[plan.day]) ?? planningStats.driveLimit;
           const overDailyMax = !plan.rest && plan.hours > maxHours + 0.05;
-          const needsOvernight = dayNeedsCamp(plan.day) && !plan.complete;
+          const needsOvernight = plan.needsCamp && !plan.complete;
           const statusColor = overDailyMax ? C.yellow : needsOvernight ? C.orange : plan.complete ? C.green : C.text3;
           const statusText = overDailyMax
             ? `${fmtHours(plan.hours)} over ${fmtHours(maxHours)} max`
@@ -2707,7 +2742,7 @@ export default function RouteBuilderScreen() {
                 <View style={s.routeDayContent}>
                   <View style={s.routeDayHeader}>
                     <View style={{ flex: 1 }}>
-                      <Text style={s.routeDayTitle}>Day {plan.day} Camp{plan.rest ? ' · Rest' : ''}</Text>
+                      <Text style={s.routeDayTitle}>{plan.needsCamp ? `${plan.campWindowLabel} Camp` : `${plan.campWindowLabel} Travel`}{plan.rest ? ' · Rest' : ''}</Text>
                       <Text style={s.routeDayMeta}>{fmtMi(plan.miles)} · {fmtHours(plan.hours)}{plan.previous ? ` · from ${plan.previous.name.split(',')[0]}` : ''}</Text>
                     </View>
                     <View style={[s.routeDayStatusPill, { borderColor: statusColor + '66', backgroundColor: statusColor + '12' }]}>
@@ -2716,11 +2751,16 @@ export default function RouteBuilderScreen() {
                   </View>
                   {camp ? (
                     renderCampPreview(camp, plan.rest ? 'OVERNIGHT / REST CAMP' : 'OVERNIGHT CAMP')
-                  ) : (
+                  ) : plan.needsCamp ? (
                     <TouchableOpacity style={s.routeDayEmptyCamp} onPress={() => scanDayPlan(plan, 'camps')}>
                       <Ionicons name="add-circle-outline" size={18} color={C.orange} />
                       <Text style={s.routeDayEmptyCampText}>{plan.frameworkTarget ? 'Choose camp near day finish' : 'Choose overnight camp'}</Text>
                     </TouchableOpacity>
+                  ) : (
+                    <View style={s.routeDayTravelCard}>
+                      <Ionicons name="arrow-forward-circle-outline" size={18} color={C.text3} />
+                      <Text style={s.routeDayTravelText}>{plan.campWindowLabel} shares the next camp window.</Text>
+                    </View>
                   )}
                   <Text style={s.routeDayGroupLabel}>Day {plan.day} Points of Interest</Text>
                   <View style={s.routeDayActionRail}>
@@ -2787,7 +2827,7 @@ export default function RouteBuilderScreen() {
                 <Text style={s.candidateMeta} numberOfLines={2}>
                   {camp.route_distance_mi != null ? `${fmtMi(camp.route_distance_mi)} off route · ` : ''}
                   {routeProgressLabel((camp as any).route_progress) ? `${routeProgressLabel((camp as any).route_progress)} · ` : ''}
-                  {camp.land_type || 'Camp'} · {camp.cost || 'See site'}
+                  {[...(camp.site_types ?? []), ...(camp.amenities ?? []), camp.land_type || 'Camp'].filter(Boolean).slice(0, 3).join(' · ')} · {camp.cost || 'See site'}
                 </Text>
               </View>
               <TouchableOpacity style={s.useBtn} onPress={() => addCamp(camp)}>
@@ -4447,6 +4487,8 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   routeDayStatusText: { fontSize: 8, fontFamily: mono, fontWeight: '900' },
   routeDayEmptyCamp: { minHeight: 148, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9, borderWidth: 1, borderColor: C.orange + '38', borderRadius: 16, backgroundColor: C.orange + '0f', paddingHorizontal: 16 },
   routeDayEmptyCampText: { color: C.orange, fontSize: 15, fontFamily: mono, fontWeight: '900', flexShrink: 1 },
+  routeDayTravelCard: { minHeight: 104, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9, borderWidth: 1, borderColor: C.border, borderRadius: 16, backgroundColor: C.s2, paddingHorizontal: 16 },
+  routeDayTravelText: { color: C.text3, fontSize: 13, fontFamily: mono, fontWeight: '800', flexShrink: 1, textAlign: 'center' },
   routeDayGroupLabel: { color: C.text3, fontSize: 8, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8, marginTop: 2 },
   routeDayActionRail: { flexDirection: 'row', gap: 9, marginTop: 'auto' },
   routeDayActionBtn: { flex: 1, minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderColor: C.orange + '38', borderRadius: 14, backgroundColor: C.orange + '10' },

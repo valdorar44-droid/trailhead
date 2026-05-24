@@ -959,6 +959,25 @@ def set_cached(table: str, key: str, data: list):
                (key, int(time.time()), json.dumps(data)))
     db.commit(); db.close()
 
+def clear_cached_rows(table: str, prefixes: list[str] | None = None, keys: list[str] | None = None) -> int:
+    if table not in {"weather_cache", "campsite_cache", "gas_cache"}:
+        raise ValueError("unsupported cache table")
+    db = _conn()
+    deleted = 0
+    try:
+        if keys:
+            for key in keys:
+                cur = db.execute(f"DELETE FROM {table} WHERE cache_key=?", (key,))
+                deleted += cur.rowcount or 0
+        if prefixes:
+            for prefix in prefixes:
+                cur = db.execute(f"DELETE FROM {table} WHERE cache_key LIKE ?", (f"{prefix}%",))
+                deleted += cur.rowcount or 0
+        db.commit()
+        return deleted
+    finally:
+        db.close()
+
 def get_route_cached(key: str, ttl_seconds: int = 30 * 86400) -> dict | None:
     db = _conn()
     row = db.execute("SELECT fetched_at,data FROM route_cache WHERE cache_key=?", (key,)).fetchone()

@@ -29,7 +29,7 @@ from ingestors.blm import get_blm_campsites, get_blm_campsite_detail
 from ingestors.conditions import get_provider_conditions_along_route, get_provider_conditions_near, get_wfigs_fire_perimeters
 from db.store import (
     save_trip, get_trip, add_community_pin, get_community_pins, find_duplicate_community_pin,
-    save_audio_guide, get_audio_guide, get_cached, set_cached, get_route_cached, set_route_cached,
+    save_audio_guide, get_audio_guide, get_cached, set_cached, clear_cached_rows, get_route_cached, set_route_cached,
     create_user, create_oauth_user, get_user_by_oauth, link_user_oauth,
     get_user_by_email, get_user_by_username, get_user_by_id, get_user_by_referral_code,
     set_email_verification, verify_email_token, set_password_reset, reset_password_with_token,
@@ -3327,6 +3327,14 @@ class CampAdminUpdatePayload(BaseModel):
     source_confidence_notes: Optional[str] = None
     max_rig_length: Optional[str] = None
 
+class CampCacheClearPayload(BaseModel):
+    scope: str = "all"
+    source_prefix: Optional[str] = None
+    camp_id: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    radius_mi: Optional[float] = None
+
 @app.post("/api/admin/campsites/{facility_id}")
 async def admin_update_camp_detail(facility_id: str, body: CampAdminUpdatePayload,
                                    user: dict = Depends(_current_user)):
@@ -3340,6 +3348,82 @@ async def admin_update_camp_detail(facility_id: str, body: CampAdminUpdatePayloa
         elif isinstance(val, list):
             clean[key] = [str(x).strip()[:80] for x in val if str(x).strip()][:40]
     return {"ok": True, "override": set_camp_profile_override(facility_id, clean, user.get("id"))}
+
+@app.post("/api/admin/cache/camps/clear")
+async def admin_clear_camp_cache(body: CampCacheClearPayload, admin: dict = Depends(_require_admin)):
+    scope = (body.scope or "all").strip().lower()
+    prefixes: list[str] = []
+    keys: list[str] = []
+    brief_deleted = 0
+
+    if scope == "all":
+        prefixes = [
+            "ridb",
+            "ridb_search",
+            "osm_camps",
+            "osm_detail",
+            "blm_camps",
+            "blm_detail",
+            "map_card:",
+            "ai_insight_",
+            "trail_photo_wiki_",
+            "land_check:",
+        ]
+        db = sqlite3.connect(settings.db_path, timeout=30.0)
+        try:
+            cur = db.execute("DELETE FROM camp_briefs")
+            brief_deleted = cur.rowcount or 0
+            db.commit()
+        finally:
+            db.close()
+    elif scope == "source":
+        source = (body.source_prefix or "").strip().lower()
+        allowed = {"ridb", "osm", "blm", "google", "map_card", "ai_insight", "route_weather", "wiki", "land_check"}
+        if source not in allowed:
+            raise HTTPException(400, f"source_prefix must be one of {', '.join(sorted(allowed))}")
+        prefixes = [source]
+        if source == "google":
+            prefixes.extend(["google_text", "google_nearby"])
+    elif scope == "camp_id":
+        camp_id = (body.camp_id or "").strip()
+        if not camp_id:
+            raise HTTPException(400, "camp_id required")
+        clean = camp_id.replace("ridb:", "").replace("osm:", "").replace("blm:", "")
+        keys = [
+            f"ridb_detail_{clean}",
+            f"osm_detail_{clean}",
+            f"blm_detail_{clean}",
+            f"ai_insight_{clean}",
+        ]
+        prefixes = []
+        db = sqlite3.connect(settings.db_path, timeout=30.0)
+        try:
+            cur = db.execute("DELETE FROM camp_briefs WHERE facility_id=?", (clean,))
+            brief_deleted = cur.rowcount or 0
+            db.commit()
+        finally:
+            db.close()
+    elif scope == "near":
+        if body.lat is None or body.lng is None:
+            raise HTTPException(400, "lat and lng required")
+        lat2 = f"{body.lat:.2f}"
+        lng2 = f"{body.lng:.2f}"
+        lat3 = f"{body.lat:.3f}"
+        lng3 = f"{body.lng:.3f}"
+        prefixes = [
+            f"ridb_search_{lat2}_{lng2}",
+            f"ridb_{lat2}_{lng2}",
+            f"osm_camps_{lat3}_{lng3}",
+            f"blm_camps_{lat3}_{lng3}",
+            f"land_check:{lat3},{lng3}",
+            f"ai_insight_{lat3}_{lng3}",
+        ]
+    else:
+        raise HTTPException(400, "scope must be all, source, camp_id, or near")
+
+    deleted = clear_cached_rows("campsite_cache", prefixes=prefixes, keys=keys)
+    log_event(admin["id"], None, "admin_clear_camp_cache", {"scope": scope, "prefixes": prefixes, "keys": keys, "deleted": deleted, "brief_deleted": brief_deleted})
+    return {"ok": True, "deleted": deleted, "brief_deleted": brief_deleted, "scope": scope}
 
 @app.get("/api/admin/camp-edit-suggestions")
 async def admin_camp_edit_suggestions(status: Optional[str] = "pending",
@@ -5315,6 +5399,17 @@ def _camp_from_live_place(place: dict) -> dict | None:
     land_type = "RV Park" if "rv" in type_text else "Commercial Campground"
     if "rv" in type_text:
         tags.append("rv")
+    else:
+        tags.append("tent")
+    amenities: list[str] = []
+    if any(term in combined for term in ("hookup", "electric", "electrical")):
+        amenities.append("Hookups" if "hookup" in combined else "Electric")
+    if "shower" in combined:
+        amenities.append("Showers")
+    if any(term in combined for term in ("restroom", "toilet")):
+        amenities.append("Restrooms")
+    if "dump" in combined:
+        amenities.append("Dump station")
     return {
         "id": str(place.get("id") or f"{source}:camp:{lat:.5f}:{lng:.5f}"),
         "name": name,
@@ -5338,6 +5433,8 @@ def _camp_from_live_place(place: dict) -> dict | None:
         "place_id": place.get("place_id") or "",
         "photos": place.get("photos") or [],
         "reviews": place.get("reviews") or [],
+        "amenities": amenities,
+        "site_types": ["RV"] if "rv" in tags else ["Tent", "Campground"],
     }
 
 @app.get("/api/nearby-camps")

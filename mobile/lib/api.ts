@@ -208,6 +208,10 @@ export const api = {
     req<{ ok: boolean; override: Partial<CampsiteDetail> }>(`/api/admin/campsites/${encodeURIComponent(id)}`, {
       method: 'POST', body: JSON.stringify(data),
     }),
+  adminClearCampCache: (data: { scope: 'all' | 'source' | 'camp_id' | 'near'; source_prefix?: string; camp_id?: string; lat?: number; lng?: number; radius_mi?: number }) =>
+    req<{ ok: boolean; deleted: number; brief_deleted: number; scope: string }>('/api/admin/cache/camps/clear', {
+      method: 'POST', body: JSON.stringify(data),
+    }),
   submitPin: (data: PinPayload) =>
     req('/api/pins', { method: 'POST', body: JSON.stringify(data) }),
   getNearbyPins: (lat: number, lng: number, radius = 1.0) =>
@@ -502,10 +506,12 @@ export interface Campsite {
 export interface CampsitePin {
   id: string; name: string; lat: number; lng: number;
   tags: string[]; land_type: string; description: string;
+  amenities?: string[]; site_types?: string[];
   photo_url?: string; reservable: boolean; cost?: string; url: string; ada: boolean;
   route_distance_mi?: number; route_fit?: string; recommended_day?: number;
   route_progress?: number; route_progress_mi?: number; route_segment_index?: number;
   source?: string; verified_source?: string;
+  cache_status?: string; fetched_at?: number; feature_source?: string;
   rating?: number; rating_count?: number; phone?: string; address?: string;
   provider_place_id?: string; place_id?: string;
 }

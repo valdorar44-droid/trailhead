@@ -230,6 +230,7 @@ export default function PremiumPlaceSheet({
   ].map(item => mediaUrl(item.photo_url)).find(Boolean);
   const hero = photos[0]?.url || relatedHero;
   const sourceLabel = data.source_label || data.attribution || (data.source === 'google' ? 'Google' : data.source || 'Trailhead');
+  const addToRoute = () => onAddToRoute?.({ name: place.name, lat: place.lat, lng: place.lng, note: data.summary || subtitle });
   const distanceLabel = data.route_distance_mi != null && Number.isFinite(data.route_distance_mi)
     ? `${Number(data.route_distance_mi).toFixed(1)} mi off route`
     : data.distance_mi != null && Number.isFinite(data.distance_mi)
@@ -276,7 +277,7 @@ export default function PremiumPlaceSheet({
           <ScrollView
             showsVerticalScrollIndicator={false}
             scrollEnabled={stage === 'full'}
-            contentContainerStyle={s.content}
+            contentContainerStyle={[s.content, addToRoutePrimary && !!onAddToRoute && s.contentWithStickyAction]}
           >
             <TouchableOpacity style={s.hero} activeOpacity={hero ? 0.9 : 1} onPress={() => hero && setGalleryIndex(0)}>
               {hero ? (
@@ -340,7 +341,7 @@ export default function PremiumPlaceSheet({
                       label={addToRouteLabel}
                       icon="add-circle-outline"
                       variant="primary"
-                      onPress={() => onAddToRoute({ name: place.name, lat: place.lat, lng: place.lng, note: data.summary || subtitle })}
+                      onPress={addToRoute}
                       style={{ flex: 1 }}
                     />
                     <TouchableOpacity style={s.secondaryBtn} onPress={() => onNavigate(place)}>
@@ -372,7 +373,7 @@ export default function PremiumPlaceSheet({
                   </TouchableOpacity>
                 )}
                 {!!onAddToRoute && !addToRoutePrimary && (
-                  <TouchableOpacity style={s.secondaryBtn} onPress={() => onAddToRoute({ name: place.name, lat: place.lat, lng: place.lng, note: data.summary || subtitle })}>
+                  <TouchableOpacity style={s.secondaryBtn} onPress={addToRoute}>
                     <Ionicons name="add-circle-outline" size={15} color={C.text2} />
                   </TouchableOpacity>
                 )}
@@ -436,6 +437,20 @@ export default function PremiumPlaceSheet({
               </View>
             </View>
           </ScrollView>
+        )}
+        {stage !== 'peek' && addToRoutePrimary && !!onAddToRoute && (
+          <TrailheadButtonDock style={[s.stickyRouteAction, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+            <TrailheadButton
+              label={addToRouteLabel}
+              icon="add-circle-outline"
+              variant="primary"
+              onPress={addToRoute}
+              style={{ flex: 1 }}
+            />
+            <TouchableOpacity style={s.secondaryBtn} onPress={() => onNavigate(place)}>
+              <Ionicons name="navigate-outline" size={15} color={C.text2} />
+            </TouchableOpacity>
+          </TrailheadButtonDock>
         )}
       </TrailheadSheet>
       <TrailheadPhotoGallery
@@ -515,6 +530,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   tipMeta: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
   iconBtn: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: C.glassStrong, borderWidth: 1, borderColor: C.border },
   content: { paddingBottom: 22 },
+  contentWithStickyAction: { paddingBottom: 102 },
   hero: { height: 164, marginHorizontal: 12, borderRadius: 22, overflow: 'hidden', backgroundColor: C.s2 },
   heroImage: { width: '100%', height: '100%' },
   heroFallback: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: C.glassStrong },
@@ -563,6 +579,20 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   reviewMeta: { color: C.text3, fontSize: 10, fontFamily: mono },
   reviewText: { color: C.text2, fontSize: 12, lineHeight: 17 },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 9, marginTop: 2 },
+  stickyRouteAction: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.glassStrong,
+  },
   secondaryBtn: { width: 45, height: 45, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: C.glassStrong, borderWidth: 1, borderColor: C.border },
   deepActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   linkBtn: { flexDirection: 'row', alignItems: 'center', gap: 7, borderWidth: 1, borderColor: C.border, backgroundColor: C.glass, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 8 },

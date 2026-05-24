@@ -360,6 +360,8 @@ def _normalize_osm_camp(el: dict) -> dict | None:
         "photo_url": None,
         "reservable": _tag(el, "reservation", "") in ("required", "yes"),
         "cost": "Free" if fee == "no" else ("Fee Required" if fee == "yes" else "See site"),
+        "amenities": _osm_tags_to_amenities(tags_raw),
+        "site_types": _osm_site_types(tags_raw),
         "url": _tag(el, "website", "") or _osm_url(el),
         "ada": _tag(el, "wheelchair", "") in ("yes", "designated"),
         "source": "osm",

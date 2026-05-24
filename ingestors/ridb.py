@@ -73,6 +73,42 @@ def _format_cost(facility: dict) -> str:
         return "Free / Self-Issued"
     return "See Recreation.gov"
 
+def _feature_lists_from_text(*values: str) -> tuple[list[str], list[str]]:
+    combo = " ".join(v.lower() for v in values if v)
+    amenities: list[str] = []
+    site_types: list[str] = []
+    checks = [
+        (("electric", "electrical"), "Electric"),
+        (("hookup", "full service", "water/electric"), "Hookups"),
+        (("water", "potable"), "Water"),
+        (("sewer",), "Sewer"),
+        (("dump",), "Dump station"),
+        (("shower",), "Showers"),
+        (("toilet", "restroom", "vault"), "Restrooms"),
+        (("picnic",), "Picnic tables"),
+        (("fire ring", "campfire", "fire pit"), "Fire rings"),
+        (("shade",), "Shade"),
+        (("pet", "dogs"), "Pets OK"),
+        (("wifi", "internet"), "WiFi"),
+        (("ada", "accessible", "wheelchair"), "ADA"),
+    ]
+    for needles, label in checks:
+        if any(needle in combo for needle in needles) and label not in amenities:
+            amenities.append(label)
+    type_checks = [
+        (("rv", "recreational vehicle", "trailer"), "RV"),
+        (("tent",), "Tent"),
+        (("cabin",), "Cabin"),
+        (("group",), "Group"),
+        (("walk-in", "hike-in", "backcountry"), "Walk-in"),
+        (("dispersed", "primitive"), "Primitive"),
+        (("equestrian", "horse"), "Equestrian"),
+    ]
+    for needles, label in type_checks:
+        if any(needle in combo for needle in needles) and label not in site_types:
+            site_types.append(label)
+    return amenities, site_types
+
 async def get_campsites_near(lat: float, lng: float, radius_miles: float = 30) -> list[dict]:
     key = _cache_key(lat, lng, radius_miles)
     cached = get_cached("campsite_cache", key, ttl_seconds=86400)
@@ -143,6 +179,11 @@ async def get_campsites_search(lat: float, lng: float, radius_miles: float = 40,
             media = f.get("MEDIA") or []
             photo_url = next((m.get("URL") for m in media if m.get("MediaType") == "Image"), None)
             tags = _tag_facility(f)
+            amenities, site_types = _feature_lists_from_text(
+                f.get("FacilityName", ""),
+                f.get("FacilityDescription", ""),
+                f.get("FacilityTypeDescription", ""),
+            )
             sites.append({
                 "id": str(f.get("FacilityID")),
                 "name": f.get("FacilityName", "Campsite"),
@@ -153,6 +194,8 @@ async def get_campsites_search(lat: float, lng: float, radius_miles: float = 40,
                 "photo_url": photo_url,
                 "reservable": f.get("Reservable", False),
                 "cost": _format_cost(f),
+                "amenities": amenities,
+                "site_types": site_types or (["RV"] if "rv" in tags else ["Tent"] if "tent" in tags else []),
                 "url": f"https://www.recreation.gov/camping/campgrounds/{f.get('FacilityID')}",
                 "ada": f.get("FacilityAdaAccess") == "Y",
                 "source": "ridb",
@@ -211,25 +254,36 @@ async def get_facility_detail(facility_id: str) -> dict | None:
         if ct:
             site_type_set.add(ct.title())
     site_types = sorted(site_type_set)[:8]
+    text_amenities, text_site_types = _feature_lists_from_text(
+        f.get("FacilityName", ""),
+        f.get("FacilityDescription", ""),
+        f.get("FacilityTypeDescription", ""),
+    )
+    for site_type in text_site_types:
+        if site_type not in site_types:
+            site_types.append(site_type)
 
     # Amenities from attributes
     amenities: list[str] = []
     attr_map = {
-        "Shade": "Shade Shade",
-        "Fire": "Fire Fire Ring",
-        "Picnic": "Picnic Picnic Table",
-        "Water": "Water Water",
-        "Electric": "Fast Electric",
-        "Sewer": "Shower Sewer",
-        "Dump": "Dump Dump Station",
-        "Shower": "Shower Showers",
-        "Toilet": "Toilet Restrooms",
-        "Pet": "Dogs Pets OK",
-        "ADA": "ADA ADA",
-        "Hookup": "Fast Hookups",
-        "Internet": "Signal WiFi",
-        "Horse": "Horse Horse OK",
+        "Shade": "Shade",
+        "Fire": "Fire rings",
+        "Picnic": "Picnic tables",
+        "Water": "Water",
+        "Electric": "Electric",
+        "Sewer": "Sewer",
+        "Dump": "Dump station",
+        "Shower": "Showers",
+        "Toilet": "Restrooms",
+        "Pet": "Pets OK",
+        "ADA": "ADA",
+        "Hookup": "Hookups",
+        "Internet": "WiFi",
+        "Horse": "Horse OK",
     }
+    for label in text_amenities:
+        if label not in amenities:
+            amenities.append(label)
     for attr in (attrs_data.get("RECDATA") or []):
         aname = attr.get("AttributeName") or ""
         aval  = str(attr.get("AttributeValue") or "").lower()
@@ -243,8 +297,8 @@ async def get_facility_detail(facility_id: str) -> dict | None:
     for kw, label in attr_map.items():
         if kw.lower() in desc and label not in amenities:
             amenities.append(label)
-    if f.get("FacilityAdaAccess") == "Y" and "ADA ADA" not in amenities:
-        amenities.append("ADA ADA")
+    if f.get("FacilityAdaAccess") == "Y" and "ADA" not in amenities:
+        amenities.append("ADA")
 
     # Activities
     activities = [a.get("ActivityName", "") for a in (acts_data.get("RECDATA") or [])

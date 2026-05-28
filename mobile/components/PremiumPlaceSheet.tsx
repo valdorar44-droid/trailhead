@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Image,
   Linking,
@@ -9,13 +10,15 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   useWindowDimensions,
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { api, PaywallError, type PlaceDetail } from '@/lib/api';
+import { api, PaywallError, type PlaceComment, type PlaceDetail, type PlaceReservationStatus, type TrailheadPlace } from '@/lib/api';
 import { useTheme, mono, type ColorPalette } from '@/lib/design';
 import { TrailheadButton, TrailheadButtonDock, TrailheadSheet } from '@/components/TrailheadUI';
 import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
@@ -37,6 +40,8 @@ type PlaceLike = {
   address?: string;
   phone?: string;
   website?: string;
+  official_url?: string;
+  booking_url?: string;
   open_now?: boolean | null;
   rating?: number;
   rating_count?: number;
@@ -52,6 +57,36 @@ type PlaceLike = {
   rich_detail_available?: boolean;
   rich_detail_locked?: boolean;
   rich_detail_reason?: string;
+  source_badge?: string;
+  source_freshness?: string;
+  last_checked?: number;
+  waterbody_name?: string;
+  waterbody_type?: string;
+  access?: string;
+  craft?: string;
+  fishing_score?: number;
+  fishing_score_label?: string;
+  fish_species?: string[] | string;
+  stocking_notes?: string;
+  regulations_url?: string;
+  gauge_id?: string;
+  gauge_url?: string;
+  flow_cfs?: number;
+  gage_height_ft?: number;
+  observed_at?: number | string;
+  chart_source?: string;
+  chart_url?: string;
+  weather_url?: string;
+  tides_url?: string;
+  safety_url?: string;
+  navigation_feature?: string;
+  hazard_type?: string;
+  mark_color?: string;
+  mark_shape?: string;
+  light_character?: string;
+  depth_ft?: number;
+  max_draft_ft?: number;
+  navigation_note?: string;
 };
 
 type RelatedItem = {
@@ -85,8 +120,11 @@ type Props = {
   onReport?: () => void;
   onNearbyCamps?: (place: { name: string; lat: number; lng: number }) => void;
   onAddToRoute?: (place: { name: string; lat: number; lng: number; note?: string }) => void;
+  onPromoteToRoute?: (place: { name: string; lat: number; lng: number; note?: string }) => void;
   addToRouteLabel?: string;
+  promoteToRouteLabel?: string;
   addToRoutePrimary?: boolean;
+  routeContextLabel?: string;
   onRichDetailLocked?: (place: PlaceLike) => void;
   onOpenRelatedPlace?: (place: RelatedItem) => void;
   onOpenRelatedCamp?: (place: RelatedItem) => void;
@@ -98,10 +136,43 @@ function titleCase(value?: string) {
 }
 
 function sourceId(place: PlaceLike) {
-  const source = place.source || (String(place.id || '').startsWith('google:') ? 'google' : '');
-  const id = place.provider_place_id || place.place_id || String(place.id || '').replace(/^google:/, '');
+  const rawId = String(place.id || '');
+  const source = place.source || (rawId.startsWith('google:') ? 'google' : rawId.startsWith('foursquare:') ? 'foursquare' : '');
+  const id = place.provider_place_id || place.place_id || rawId.replace(/^google:/, '').replace(/^foursquare:/, '');
   const cleanSource = String(source || '').toLowerCase();
   return cleanSource && ['google', 'foursquare', 'fsq'].includes(cleanSource) && id ? { source: cleanSource, id } : null;
+}
+
+function canonicalPayload(place: PlaceLike) {
+  return {
+    id: place.id,
+    name: place.name,
+    lat: place.lat,
+    lng: place.lng,
+    source: place.source || place.attribution || place.source_label || 'map',
+    source_label: place.source_label || place.attribution,
+    provider_place_id: place.provider_place_id,
+    place_id: place.place_id,
+    category: place.type,
+    type: place.type,
+    subtype: place.subtype,
+    official_url: place.official_url || place.booking_url || place.website,
+    website: place.website || place.official_url || place.booking_url,
+    photo_url: place.photo_url,
+    summary: place.summary,
+    address: place.address,
+    phone: place.phone,
+    rating: place.rating,
+    rating_count: place.rating_count,
+    photos: place.photos,
+  };
+}
+
+function hasPaidProviderSource(place: PlaceLike | null | undefined) {
+  if (!place) return false;
+  const source = String(place.source || '').toLowerCase();
+  const rawId = String(place.id || '').toLowerCase();
+  return ['google', 'foursquare', 'fsq'].includes(source) || rawId.startsWith('google:') || rawId.startsWith('foursquare:');
 }
 
 function openNowLabel(openNow?: boolean | null) {
@@ -148,8 +219,11 @@ export default function PremiumPlaceSheet({
   onReport,
   onNearbyCamps,
   onAddToRoute,
+  onPromoteToRoute,
   addToRouteLabel = 'Add to route',
+  promoteToRouteLabel = 'Route through this',
   addToRoutePrimary = false,
+  routeContextLabel,
   onRichDetailLocked,
   onOpenRelatedPlace,
   onOpenRelatedCamp,
@@ -161,21 +235,60 @@ export default function PremiumPlaceSheet({
   const { height } = useWindowDimensions();
   const [stage, setStage] = useState<Stage>(initialStage);
   const [detail, setDetail] = useState<PlaceDetail | null>(null);
+  const [canonical, setCanonical] = useState<TrailheadPlace | null>(null);
+  const [comments, setComments] = useState<PlaceComment[]>([]);
+  const [reservation, setReservation] = useState<PlaceReservationStatus | null>(null);
   const [loading, setLoading] = useState(false);
+  const [communityBusy, setCommunityBusy] = useState(false);
   const [galleryIndex, setGalleryIndex] = useState<number | null>(null);
+  const [showCommentForm, setShowCommentForm] = useState(false);
+  const [commentText, setCommentText] = useState('');
+  const [commentPhoto, setCommentPhoto] = useState<string | null>(null);
+  const [showEditForm, setShowEditForm] = useState(false);
+  const [editField, setEditField] = useState('access_notes');
+  const [editValue, setEditValue] = useState('');
+  const [editNote, setEditNote] = useState('');
+  const [alertStart, setAlertStart] = useState('');
+  const [alertEnd, setAlertEnd] = useState('');
   const dragY = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (!place) {
       setDetail(null);
+      setCanonical(null);
+      setComments([]);
+      setReservation(null);
       return;
     }
     setStage(initialStage);
     setDetail(null);
+    setCanonical(null);
+    setComments([]);
+    setReservation(null);
+    setShowCommentForm(false);
+    setShowEditForm(false);
+    setCommentText('');
+    setCommentPhoto(null);
+    setEditValue('');
+    setEditNote('');
     setGalleryIndex(null);
+    let canonicalCancelled = false;
+    api.canonicalizePlace(canonicalPayload(place))
+      .then(({ place: canonicalPlace }) => {
+        if (canonicalCancelled) return;
+        setCanonical(canonicalPlace);
+        setComments(canonicalPlace.comments ?? []);
+        const type = String(place.type || canonicalPlace.category || '').toLowerCase();
+        const reservable = Boolean((place as any).reservable || (canonicalPlace.display_metadata as any)?.reservable);
+        if (type === 'camp' || type === 'camping' || reservable) {
+          api.getPlaceReservationStatus(canonicalPlace.trailhead_place_id)
+            .then(status => { if (!canonicalCancelled) setReservation(status); })
+            .catch(() => {});
+        }
+      })
+      .catch(() => {});
     const sid = sourceId(place);
-    if (!sid) return;
-    if (place.rich_detail_locked) return;
+    if (!sid || hasPaidProviderSource(place)) return () => { canonicalCancelled = true; };
     let cancelled = false;
     setLoading(true);
     api.getPlaceDetail(sid.source, sid.id, place.type || '')
@@ -188,7 +301,7 @@ export default function PremiumPlaceSheet({
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
-    return () => { cancelled = true; };
+    return () => { cancelled = true; canonicalCancelled = true; };
   }, [place?.id, place?.provider_place_id, place?.place_id, place?.lat, place?.lng, initialStage]);
 
   const data = detail ?? place;
@@ -223,15 +336,27 @@ export default function PremiumPlaceSheet({
   }), [dragY, stage]);
 
   if (!visible || !place || !data) return null;
-  const richDetailLocked = !!place.rich_detail_locked && !detail;
+  const richDetailLocked = (hasPaidProviderSource(place) || !!place.rich_detail_locked) && !detail;
 
-  const photos: TrailheadGalleryPhoto[] = detail?.photos?.length
+  const officialPhotos: TrailheadGalleryPhoto[] = detail?.photos?.length
     ? detail.photos.map(photo => ({ ...photo, url: mediaUrl(photo.url) }))
     : data.photos?.length
       ? data.photos.map(photo => ({ ...photo, url: mediaUrl(photo.url) }))
     : data.photo_url
       ? [{ url: mediaUrl(data.photo_url), source: data.source_label || data.source || '' }]
       : [];
+  const canonicalHero: TrailheadGalleryPhoto[] = canonical?.hero_photo_url
+    ? [{ url: mediaUrl(canonical.hero_photo_url), source: canonical.hero_photo_source === 'community' ? 'Trailhead community' : canonical.source_label || canonical.source }]
+    : [];
+  const userPhotos: TrailheadGalleryPhoto[] = (canonical?.photos ?? [])
+    .map(photo => ({ url: mediaUrl(photo.url), caption: photo.caption || undefined, source: photo.username ? `Trailhead photo by ${photo.username}` : 'Trailhead community' }))
+    .filter(photo => !!photo.url);
+  const photos = officialPhotos.length
+    ? [...officialPhotos, ...userPhotos.filter(photo => !officialPhotos.some(existing => existing.url === photo.url))]
+    : canonicalHero.length
+      ? [...canonicalHero, ...userPhotos.filter(photo => photo.url !== canonicalHero[0].url)]
+      : userPhotos;
+  const reviews = (detail?.reviews ?? []).filter(review => !['google', 'foursquare'].includes(String(review.source || '').toLowerCase()));
   const relatedHero = [
     ...(related?.places ?? []),
     ...(related?.camps ?? []),
@@ -240,6 +365,7 @@ export default function PremiumPlaceSheet({
   const hero = photos[0]?.url || relatedHero;
   const sourceLabel = data.source_label || data.attribution || (data.source === 'google' ? 'Google' : data.source || 'Trailhead');
   const addToRoute = () => onAddToRoute?.({ name: place.name, lat: place.lat, lng: place.lng, note: data.summary || subtitle });
+  const promoteToRoute = () => onPromoteToRoute?.({ name: place.name, lat: place.lat, lng: place.lng, note: data.summary || subtitle });
   const distanceLabel = data.route_distance_mi != null && Number.isFinite(data.route_distance_mi)
     ? `${Number(data.route_distance_mi).toFixed(1)} mi off route`
     : data.distance_mi != null && Number.isFinite(data.distance_mi)
@@ -251,9 +377,119 @@ export default function PremiumPlaceSheet({
     data.rating ? `${Number(data.rating).toFixed(1)} (${data.rating_count || 0})` : '',
     openNowLabel(data.open_now),
   ].filter(Boolean).join(' · ');
+  const sourceFreshness = data.source_freshness || (data.last_checked ? `Downloaded source checked ${new Date(Number(data.last_checked) * 1000).toLocaleDateString()}. Verify current access before relying on it.` : '');
+  const fishSpecies = Array.isArray(data.fish_species) ? data.fish_species.join(', ') : String(data.fish_species || '');
+  const waterFacts = data.type === 'water' ? [
+    data.waterbody_name ? ['Waterbody', data.waterbody_name] : null,
+    data.access ? ['Access', titleCase(data.access)] : null,
+    data.craft ? ['Craft', titleCase(data.craft)] : null,
+    data.fishing_score_label ? ['Fishing evidence', `${data.fishing_score_label}${data.fishing_score != null ? ` · ${data.fishing_score}/100` : ''}`] : null,
+    fishSpecies ? ['Species', fishSpecies] : null,
+    data.stocking_notes ? ['Stocking', String(data.stocking_notes)] : null,
+    data.navigation_feature ? ['Navigation feature', String(data.navigation_feature)] : null,
+    data.hazard_type ? ['Hazard', String(data.hazard_type)] : null,
+    data.mark_color ? ['Marker color', String(data.mark_color)] : null,
+    data.mark_shape ? ['Marker shape', String(data.mark_shape)] : null,
+    data.light_character ? ['Light', String(data.light_character)] : null,
+    data.depth_ft != null ? ['Depth', `${Number(data.depth_ft).toFixed(1)} ft`] : null,
+    data.max_draft_ft != null ? ['Max draft', `${Number(data.max_draft_ft).toFixed(1)} ft`] : null,
+    data.flow_cfs != null ? ['Flow', `${Number(data.flow_cfs).toLocaleString()} cfs`] : null,
+    data.gage_height_ft != null ? ['Gauge height', `${Number(data.gage_height_ft).toFixed(2)} ft`] : null,
+    data.chart_source ? ['Chart context', data.chart_source] : null,
+  ].filter(Boolean) as [string, string][] : [];
 
   const cycleStage = () => {
     setStage(current => current === 'full' ? 'half' : current === 'half' ? 'peek' : 'half');
+  };
+
+  const unlockRichDetail = async () => {
+    if (!place || loading) return;
+    const sid = sourceId(place);
+    if (!sid) return;
+    setLoading(true);
+    try {
+      await api.authorizePlaceDetail(sid.source, sid.id, place.type || '');
+      const next = await api.getPlaceDetail(sid.source, sid.id, place.type || '');
+      setDetail(next);
+    } catch (err) {
+      if (err instanceof PaywallError) onRichDetailLocked?.(place);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const pickCommunityPhoto = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') return;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      quality: 0.58,
+      base64: true,
+    });
+    if (!result.canceled && result.assets[0]?.base64) setCommentPhoto(result.assets[0].base64);
+  };
+
+  const submitComment = async () => {
+    if (!canonical || communityBusy || commentText.trim().length < 2) return;
+    setCommunityBusy(true);
+    try {
+      const res = await api.submitPlaceComment(canonical.trailhead_place_id, {
+        body: commentText.trim(),
+        photo_data: commentPhoto ?? undefined,
+        photo_caption: commentText.trim().slice(0, 120),
+      });
+      setComments(prev => [res.comment, ...prev]);
+      if (res.photo) {
+        setCanonical(prev => prev ? { ...prev, photos: [...(prev.photos ?? []), res.photo!] } : prev);
+      }
+      setCommentText('');
+      setCommentPhoto(null);
+      setShowCommentForm(false);
+    } catch (err: any) {
+      Alert.alert('Could not post', err?.status === 401 || err?.status === 403 ? 'Sign in to add place comments.' : (err?.message ?? 'Try again in a moment.'));
+    } finally {
+      setCommunityBusy(false);
+    }
+  };
+
+  const submitEdit = async () => {
+    if (!canonical || communityBusy || editValue.trim().length < 2) return;
+    setCommunityBusy(true);
+    try {
+      const res = await api.suggestPlaceEdit(canonical.trailhead_place_id, {
+        place_name: data.name,
+        field: editField,
+        value: editValue.trim(),
+        note: editNote.trim() || undefined,
+      });
+      setEditValue('');
+      setEditNote('');
+      setShowEditForm(false);
+      Alert.alert('Edit sent', `Thanks. +${res.credits_earned ?? 0} credits.`);
+    } catch (err: any) {
+      Alert.alert('Could not send edit', err?.status === 401 || err?.status === 403 ? 'Sign in to suggest place edits.' : (err?.message ?? 'Try again in a moment.'));
+    } finally {
+      setCommunityBusy(false);
+    }
+  };
+
+  const saveAvailabilityAlert = async () => {
+    if (!canonical || !reservation?.alert_supported || communityBusy) return;
+    setCommunityBusy(true);
+    try {
+      const res = await api.savePlaceReservationAlert(canonical.trailhead_place_id, {
+        start_date: alertStart.trim() || undefined,
+        end_date: alertEnd.trim() || undefined,
+        party_size: 1,
+      });
+      setReservation(prev => prev ? { ...prev, alerts: [res.alert, ...(prev.alerts ?? []).filter(a => a.id !== res.alert.id)] } : prev);
+      Alert.alert('Alert saved', 'Trailhead will hand off to the official booking source when availability is checked.');
+    } catch (err: any) {
+      Alert.alert('Could not save alert', err?.status === 401 || err?.status === 403 ? 'Sign in to save availability alerts.' : (err?.message ?? 'Try again in a moment.'));
+    } finally {
+      setCommunityBusy(false);
+    }
   };
 
   return (
@@ -305,6 +541,12 @@ export default function PremiumPlaceSheet({
 
             <View style={s.body}>
               {!!subtitle && <Text style={s.meta}>{subtitle}</Text>}
+              {!!routeContextLabel && (
+                <View style={s.routeContextPill}>
+                  <Ionicons name="git-branch-outline" size={13} color={C.orange} />
+                  <Text style={s.routeContextText} numberOfLines={2}>{routeContextLabel}</Text>
+                </View>
+              )}
               {!!data.address && (
                 <View style={s.infoRow}>
                   <Ionicons name="location-outline" size={15} color={C.text3} />
@@ -318,6 +560,65 @@ export default function PremiumPlaceSheet({
                 <View style={s.infoRow}>
                   <Ionicons name="alert-circle-outline" size={15} color={C.orange} />
                   <Text style={s.infoText} numberOfLines={3}>{data.access_note}</Text>
+                </View>
+              )}
+              {stage === 'full' && waterFacts.length > 0 ? (
+                <View style={s.section}>
+                  <Text style={s.sectionLabel}>WATER ACCESS</Text>
+                  {waterFacts.map(([label, value]) => (
+                    <View key={label} style={s.infoRow}>
+                      <Ionicons name={label === 'Fishing evidence' || label === 'Species' ? 'fish-outline' : label === 'Craft' || label === 'Navigation feature' ? 'boat-outline' : label === 'Hazard' ? 'warning-outline' : label === 'Depth' ? 'analytics-outline' : 'water-outline'} size={15} color={C.text3} />
+                      <Text style={s.infoText}>{label}: {value}</Text>
+                    </View>
+                  ))}
+                  {!!data.navigation_note && (
+                    <View style={s.infoRow}>
+                      <Ionicons name="warning-outline" size={15} color={C.orange} />
+                      <Text style={s.infoText} numberOfLines={4}>{data.navigation_note}</Text>
+                    </View>
+                  )}
+                  {!!data.regulations_url && (
+                    <TouchableOpacity style={s.linkBtn} onPress={() => Linking.openURL(String(data.regulations_url))}>
+                      <Ionicons name="document-text-outline" size={14} color={C.orange} />
+                      <Text style={[s.linkText, { color: C.orange }]}>Fishing regulations</Text>
+                    </TouchableOpacity>
+                  )}
+                  {!!data.gauge_url && (
+                    <TouchableOpacity style={s.linkBtn} onPress={() => Linking.openURL(String(data.gauge_url))}>
+                      <Ionicons name="speedometer-outline" size={14} color={C.text2} />
+                      <Text style={s.linkText}>USGS gauge</Text>
+                    </TouchableOpacity>
+                  )}
+                  {!!data.weather_url && (
+                    <TouchableOpacity style={s.linkBtn} onPress={() => Linking.openURL(String(data.weather_url))}>
+                      <Ionicons name="thunderstorm-outline" size={14} color={C.text2} />
+                      <Text style={s.linkText}>NWS forecast / alerts</Text>
+                    </TouchableOpacity>
+                  )}
+                  {!!data.tides_url && (
+                    <TouchableOpacity style={s.linkBtn} onPress={() => Linking.openURL(String(data.tides_url))}>
+                      <Ionicons name="analytics-outline" size={14} color={C.text2} />
+                      <Text style={s.linkText}>NOAA tides / currents</Text>
+                    </TouchableOpacity>
+                  )}
+                  {!!data.chart_url && (
+                    <TouchableOpacity style={s.linkBtn} onPress={() => Linking.openURL(String(data.chart_url))}>
+                      <Ionicons name="map-outline" size={14} color={C.text2} />
+                      <Text style={s.linkText}>Official chart context</Text>
+                    </TouchableOpacity>
+                  )}
+                  {!!data.safety_url && (
+                    <TouchableOpacity style={s.linkBtn} onPress={() => Linking.openURL(String(data.safety_url))}>
+                      <Ionicons name="shield-checkmark-outline" size={14} color={C.text2} />
+                      <Text style={s.linkText}>Boating safety</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              ) : null}
+              {stage === 'full' && !!sourceFreshness && (
+                <View style={s.infoRow}>
+                  <Ionicons name="cloud-done-outline" size={15} color={C.text3} />
+                  <Text style={s.infoText} numberOfLines={4}>{sourceFreshness}</Text>
                 </View>
               )}
               {stage === 'full' && (related?.loading || related?.places?.length || related?.camps?.length || related?.trails?.length || related?.error) ? (
@@ -346,15 +647,15 @@ export default function PremiumPlaceSheet({
                 <TouchableOpacity
                   style={s.richLockedCard}
                   activeOpacity={0.86}
-                  onPress={() => onRichDetailLocked?.(place)}
+                  onPress={unlockRichDetail}
                 >
                   <View style={s.richLockedTop}>
                     <View style={s.richLockedIcon}>
                       <Ionicons name="lock-closed-outline" size={15} color={C.orange} />
                     </View>
                     <View style={{ flex: 1, minWidth: 0 }}>
-                      <Text style={s.richLockedTitle}>Explorer rich details</Text>
-                      <Text style={s.richLockedText}>Photos, reviews, and full weekly hours load on demand.</Text>
+                      <Text style={s.richLockedTitle}>Show details · 5 credits</Text>
+                      <Text style={s.richLockedText}>Provider photo, contact details, and weekly hours load only when requested.</Text>
                     </View>
                   </View>
                   <View style={s.richLockedPreview}>
@@ -381,6 +682,12 @@ export default function PremiumPlaceSheet({
                     <TouchableOpacity style={s.secondaryBtn} onPress={() => onNavigate(place)}>
                       <Ionicons name="navigate-outline" size={15} color={C.text2} />
                     </TouchableOpacity>
+                    {!!onPromoteToRoute && (
+                      <TouchableOpacity style={s.secondaryWideBtn} onPress={promoteToRoute}>
+                        <Ionicons name="git-branch-outline" size={14} color={C.orange} />
+                        <Text style={s.secondaryWideText}>{promoteToRouteLabel}</Text>
+                      </TouchableOpacity>
+                    )}
                   </>
                 ) : (
                   <TrailheadButton
@@ -436,6 +743,153 @@ export default function PremiumPlaceSheet({
                 </View>
               )}
 
+              {stage === 'full' && reservation && (reservation.reservable || reservation.booking_url) ? (
+                <View style={s.communityBlock}>
+                  <View style={s.communityHeader}>
+                    <Text style={s.sectionLabel}>RESERVATIONS</Text>
+                    <Text style={s.communityCount}>{reservation.source_label || 'Official source'}</Text>
+                  </View>
+                  <Text style={s.sectionText}>{reservation.notes || reservation.source_freshness}</Text>
+                  <View style={s.dateRow}>
+                    <TextInput
+                      value={alertStart}
+                      onChangeText={setAlertStart}
+                      placeholder="Start YYYY-MM-DD"
+                      placeholderTextColor={C.text3}
+                      style={s.dateInput}
+                    />
+                    <TextInput
+                      value={alertEnd}
+                      onChangeText={setAlertEnd}
+                      placeholder="End YYYY-MM-DD"
+                      placeholderTextColor={C.text3}
+                      style={s.dateInput}
+                    />
+                  </View>
+                  <View style={s.inlineActions}>
+                    {!!reservation.check_availability_url && (
+                      <TouchableOpacity style={s.smallPrimaryBtn} onPress={() => Linking.openURL(String(reservation.check_availability_url))}>
+                        <Ionicons name="calendar-outline" size={13} color="#fff" />
+                        <Text style={s.smallPrimaryText}>{(reservation.link_label || 'Check availability').toUpperCase()}</Text>
+                      </TouchableOpacity>
+                    )}
+                    {reservation.alert_supported ? (
+                      <TouchableOpacity style={s.smallSecondaryBtn} onPress={saveAvailabilityAlert} disabled={communityBusy}>
+                        <Ionicons name="notifications-outline" size={13} color={C.orange} />
+                        <Text style={s.smallSecondaryText}>SAVE ALERT</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                </View>
+              ) : null}
+
+              {stage === 'full' && (
+                <View style={s.communityBlock}>
+                  <View style={s.communityHeader}>
+                    <Text style={s.sectionLabel}>TRAILHEAD COMMUNITY</Text>
+                    {comments.length > 0 ? <Text style={s.communityCount}>{comments.length}</Text> : null}
+                  </View>
+                  {comments.slice(0, 5).map(comment => (
+                    <View key={comment.id} style={s.commentCard}>
+                      <View style={s.commentTop}>
+                        <Text style={s.commentAuthor} numberOfLines={1}>{comment.username}</Text>
+                        <Text style={s.commentDate}>{new Date(comment.created_at * 1000).toLocaleDateString()}</Text>
+                      </View>
+                      <Text style={s.commentBody}>{comment.body}</Text>
+                      {!!comment.photos?.length && (
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.inlinePhotoRail}>
+                          {comment.photos.map(photo => (
+                            <Image key={photo.id} source={{ uri: mediaUrl(photo.url) }} style={s.inlinePhoto} resizeMode="cover" />
+                          ))}
+                        </ScrollView>
+                      )}
+                    </View>
+                  ))}
+                  {!comments.length && !showCommentForm ? <Text style={s.sectionText}>No comments yet.</Text> : null}
+                  {showCommentForm ? (
+                    <View style={s.formCard}>
+                      <TextInput
+                        value={commentText}
+                        onChangeText={v => setCommentText(v.slice(0, 1200))}
+                        placeholder="Ask a question or leave a current access note..."
+                        placeholderTextColor={C.text3}
+                        style={s.textArea}
+                        multiline
+                      />
+                      <TouchableOpacity style={s.photoAttachBtn} onPress={pickCommunityPhoto}>
+                        <Ionicons name={commentPhoto ? 'checkmark-circle-outline' : 'camera-outline'} size={14} color={commentPhoto ? C.green : C.text3} />
+                        <Text style={[s.photoAttachText, commentPhoto && { color: C.green }]}>{commentPhoto ? 'Photo attached (+5 credits)' : 'Add photo (+5 credits)'}</Text>
+                      </TouchableOpacity>
+                      <View style={s.inlineActions}>
+                        <TouchableOpacity style={s.smallSecondaryBtn} onPress={() => { setShowCommentForm(false); setCommentText(''); setCommentPhoto(null); }}>
+                          <Text style={s.smallSecondaryText}>CANCEL</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={[s.smallPrimaryBtn, (commentText.trim().length < 2 || communityBusy) && { opacity: 0.55 }]} onPress={submitComment} disabled={commentText.trim().length < 2 || communityBusy}>
+                          {communityBusy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.smallPrimaryText}>POST</Text>}
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ) : (
+                    <TouchableOpacity style={s.linkBtn} onPress={() => setShowCommentForm(true)}>
+                      <Ionicons name="chatbubble-ellipses-outline" size={14} color={C.orange} />
+                      <Text style={[s.linkText, { color: C.orange }]}>Add comment</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
+
+              {stage === 'full' && (
+                <View style={s.communityBlock}>
+                  <View style={s.communityHeader}>
+                    <Text style={s.sectionLabel}>SUGGEST EDIT</Text>
+                  </View>
+                  {showEditForm ? (
+                    <View style={s.formCard}>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.editFieldRail}>
+                        {[
+                          ['name', 'Name'], ['category', 'Type'], ['hours', 'Hours'], ['phone', 'Phone'],
+                          ['website', 'Website'], ['address', 'Address'], ['access_notes', 'Access'],
+                          ['amenities', 'Amenities'], ['reservation_info', 'Reservation'], ['closure_status', 'Status'],
+                          ['duplicate', 'Duplicate'], ['location', 'Location'],
+                        ].map(([field, label]) => (
+                          <TouchableOpacity key={field} style={[s.editFieldPill, editField === field && s.editFieldPillOn]} onPress={() => setEditField(field)}>
+                            <Text style={[s.editFieldText, editField === field && s.editFieldTextOn]}>{label}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                      <TextInput
+                        value={editValue}
+                        onChangeText={v => setEditValue(v.slice(0, 1600))}
+                        placeholder="Suggested value"
+                        placeholderTextColor={C.text3}
+                        style={s.textArea}
+                        multiline
+                      />
+                      <TextInput
+                        value={editNote}
+                        onChangeText={v => setEditNote(v.slice(0, 500))}
+                        placeholder="Optional note"
+                        placeholderTextColor={C.text3}
+                        style={s.input}
+                      />
+                      <View style={s.inlineActions}>
+                        <TouchableOpacity style={s.smallSecondaryBtn} onPress={() => { setShowEditForm(false); setEditValue(''); setEditNote(''); }}>
+                          <Text style={s.smallSecondaryText}>CANCEL</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={[s.smallPrimaryBtn, (editValue.trim().length < 2 || communityBusy) && { opacity: 0.55 }]} onPress={submitEdit} disabled={editValue.trim().length < 2 || communityBusy}>
+                          {communityBusy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.smallPrimaryText}>SEND EDIT</Text>}
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ) : (
+                    <TouchableOpacity style={s.linkBtn} onPress={() => setShowEditForm(true)}>
+                      <Ionicons name="create-outline" size={14} color={C.text2} />
+                      <Text style={s.linkText}>Suggest name, hours, access, photo, duplicate, or location fix</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
+
               {stage === 'full' && photos.length > 1 && (
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.photoRail}>
                   {photos.slice(1, 7).map((photo, idx) => (
@@ -446,14 +900,14 @@ export default function PremiumPlaceSheet({
                 </ScrollView>
               )}
 
-              {stage === 'full' && !!detail?.reviews?.length && (
+              {stage === 'full' && !!reviews.length && (
                 <View style={s.section}>
-                  <Text style={s.sectionLabel}>{data.source === 'foursquare' ? 'FOURSQUARE TIPS' : 'GOOGLE REVIEWS'}</Text>
-                  {detail.reviews.slice(0, 3).map((review, idx) => (
+                  <Text style={s.sectionLabel}>COMMUNITY NOTES</Text>
+                  {reviews.slice(0, 3).map((review, idx) => (
                     <View key={`${review.authorName}-${idx}`} style={s.reviewCard}>
                       <View style={s.reviewTop}>
-                        <Text style={s.reviewAuthor} numberOfLines={1}>{review.authorName || (data.source === 'foursquare' ? 'Foursquare tip' : 'Google user')}</Text>
-                        <Text style={s.reviewRating}>{review.rating ? `${review.rating}/5` : review.source || (data.source === 'foursquare' ? 'Foursquare' : 'Google')}</Text>
+                        <Text style={s.reviewAuthor} numberOfLines={1}>{review.authorName || 'Trailhead user'}</Text>
+                        <Text style={s.reviewRating}>{review.rating ? `${review.rating}/5` : review.source || 'Trailhead'}</Text>
                       </View>
                       {!!review.relativeTime && <Text style={s.reviewMeta}>{review.relativeTime}</Text>}
                       {!!review.text && <Text style={s.reviewText} numberOfLines={4}>{review.text}</Text>}
@@ -484,6 +938,12 @@ export default function PremiumPlaceSheet({
             <TouchableOpacity style={s.secondaryBtn} onPress={() => onNavigate(place)}>
               <Ionicons name="navigate-outline" size={15} color={C.text2} />
             </TouchableOpacity>
+            {!!onPromoteToRoute && (
+              <TouchableOpacity style={s.secondaryWideBtn} onPress={promoteToRoute}>
+                <Ionicons name="git-branch-outline" size={14} color={C.orange} />
+                <Text style={s.secondaryWideText}>{promoteToRouteLabel}</Text>
+              </TouchableOpacity>
+            )}
           </TrailheadButtonDock>
         )}
       </TrailheadSheet>
@@ -574,6 +1034,8 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   title: { color: '#fff', fontSize: 23, lineHeight: 27, fontWeight: '900', marginTop: 4 },
   body: { padding: 14, gap: 10 },
   meta: { color: C.text2, fontSize: 12, fontFamily: mono, fontWeight: '700' },
+  routeContextPill: { flexDirection: 'row', alignItems: 'flex-start', gap: 7, borderWidth: 1, borderColor: C.orange + '45', backgroundColor: C.orange + '10', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8 },
+  routeContextText: { flex: 1, color: C.orange, fontSize: 11, lineHeight: 15, fontFamily: mono, fontWeight: '800' },
   summaryText: { color: C.text2, fontSize: 13, lineHeight: 19 },
   infoRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
   infoText: { flex: 1, color: C.text2, fontSize: 13, lineHeight: 19 },
@@ -655,9 +1117,38 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     backgroundColor: C.glassStrong,
   },
   secondaryBtn: { width: 45, height: 45, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: C.glassStrong, borderWidth: 1, borderColor: C.border },
+  secondaryWideBtn: { minHeight: 45, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 16, paddingHorizontal: 11, backgroundColor: C.glassStrong, borderWidth: 1, borderColor: C.orange + '55' },
+  secondaryWideText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900' },
   deepActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   linkBtn: { flexDirection: 'row', alignItems: 'center', gap: 7, borderWidth: 1, borderColor: C.border, backgroundColor: C.glass, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 8 },
   linkText: { color: C.text2, fontSize: 11, fontWeight: '700' },
+  communityBlock: { borderTopWidth: 1, borderColor: C.border, paddingTop: 10, gap: 9 },
+  communityHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  communityCount: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '900' },
+  commentCard: { borderWidth: 1, borderColor: C.border, backgroundColor: C.s2, borderRadius: 12, padding: 10, gap: 6 },
+  commentTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  commentAuthor: { flex: 1, color: C.text, fontSize: 12, fontWeight: '800' },
+  commentDate: { color: C.text3, fontSize: 10, fontFamily: mono },
+  commentBody: { color: C.text2, fontSize: 12, lineHeight: 17 },
+  inlinePhotoRail: { gap: 8, paddingTop: 3 },
+  inlinePhoto: { width: 86, height: 62, borderRadius: 9, backgroundColor: C.s1 },
+  formCard: { borderWidth: 1, borderColor: C.border, backgroundColor: C.s1, borderRadius: 12, padding: 10, gap: 9 },
+  textArea: { minHeight: 88, color: C.text, fontSize: 13, lineHeight: 18, borderWidth: 1, borderColor: C.border, backgroundColor: C.glass, borderRadius: 10, padding: 10, textAlignVertical: 'top' },
+  input: { color: C.text, fontSize: 13, borderWidth: 1, borderColor: C.border, backgroundColor: C.glass, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 9 },
+  photoAttachBtn: { flexDirection: 'row', alignItems: 'center', gap: 7, alignSelf: 'flex-start', borderWidth: 1, borderColor: C.border, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 8 },
+  photoAttachText: { color: C.text3, fontSize: 11, fontWeight: '800' },
+  inlineActions: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
+  smallPrimaryBtn: { minHeight: 34, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: C.orange },
+  smallPrimaryText: { color: '#fff', fontSize: 10, fontFamily: mono, fontWeight: '900' },
+  smallSecondaryBtn: { minHeight: 34, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: C.border, backgroundColor: C.glass },
+  smallSecondaryText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900' },
+  editFieldRail: { gap: 7, paddingRight: 8 },
+  editFieldPill: { borderWidth: 1, borderColor: C.border, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: C.glass },
+  editFieldPillOn: { borderColor: C.orange, backgroundColor: C.orange + '16' },
+  editFieldText: { color: C.text3, fontSize: 10, fontWeight: '800' },
+  editFieldTextOn: { color: C.orange },
+  dateRow: { flexDirection: 'row', gap: 8 },
+  dateInput: { flex: 1, minWidth: 0, color: C.text, fontSize: 12, borderWidth: 1, borderColor: C.border, backgroundColor: C.glass, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 9 },
   photoRail: { gap: 9, paddingVertical: 4 },
   railPhoto: { width: 118, height: 84, borderRadius: 14, backgroundColor: C.s2 },
   sourceFooter: { borderTopWidth: 1, borderColor: C.border, paddingTop: 9, marginTop: 2 },

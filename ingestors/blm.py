@@ -6,6 +6,7 @@ Trailhead's camp and POI discovery without scraping competitor apps.
 """
 from __future__ import annotations
 
+import asyncio
 import math
 from typing import Any
 
@@ -16,9 +17,11 @@ from db.store import get_cached, set_cached
 
 BLM_RECREATION = "https://gis.blm.gov/arcgis/rest/services/recreation/BLM_Natl_Recreation_Offline/FeatureServer"
 
-# Layer 1 is camping/cabins. Layer 2 is broader recreation sites and catches
-# trailheads/access points that are often useful around overland routes.
+# Layer 1 is camping/cabins in the offline recreation service. Other layers in
+# this service include broader access/recreation points, picnic/day-use, water,
+# boat, and trailhead-like features depending on the field office schema.
 _CAMP_LAYERS = (1,)
+_RECREATION_LAYERS = (0, 1, 2, 3, 4, 5)
 
 
 def _center(geometry: dict[str, Any]) -> tuple[float, float] | None:
@@ -102,6 +105,23 @@ def _site_types(attrs: dict[str, Any]) -> list[str]:
     return types or ["BLM recreation site"]
 
 
+def _place_type(attrs: dict[str, Any]) -> str:
+    combo = " ".join(str(v).lower() for v in attrs.values() if v)
+    if any(k in combo for k in ["campground", "camping", "campsite", "cabin"]):
+        return "camp"
+    if any(k in combo for k in ["trailhead", "trail head", "trail access"]):
+        return "trailhead"
+    if any(k in combo for k in ["ohv", "off-highway", "off highway", "motorized"]):
+        return "ohv"
+    if any(k in combo for k in ["boat", "ramp", "water access", "river access"]):
+        return "water"
+    if any(k in combo for k in ["picnic", "day use", "day-use"]):
+        return "picnic"
+    if any(k in combo for k in ["visitor", "interpretive", "information"]):
+        return "visitor_center"
+    return "attraction"
+
+
 def _normalize(feature: dict[str, Any], layer: int) -> dict | None:
     coord = _center(feature.get("geometry") or {})
     if not coord:
@@ -120,6 +140,8 @@ def _normalize(feature: dict[str, Any], layer: int) -> dict | None:
         "name": _clean(name, 140),
         "lat": lat,
         "lng": lng,
+        "type": _place_type(attrs),
+        "category": _place_type(attrs),
         "tags": tags,
         "land_type": "BLM Land",
         "description": _clean(desc, 450),
@@ -132,6 +154,10 @@ def _normalize(feature: dict[str, Any], layer: int) -> dict | None:
         "ada": "ada" in tags,
         "source": "blm",
         "verified_source": "BLM Recreation",
+        "source_label": "BLM Recreation",
+        "source_badge": "Official BLM",
+        "official_url": url or "https://www.blm.gov/programs/recreation",
+        "source_freshness": "Official BLM recreation layer cached by Trailhead; verify local closures and fire restrictions with the field office.",
         "_attributes": attrs,
         "_layer": layer,
     }
@@ -184,6 +210,41 @@ async def get_blm_campsites(lat: float, lng: float, radius_miles: float = 50) ->
     merged.sort(key=lambda s: math.hypot((s["lat"] - lat) * 69, (s["lng"] - lng) * 54.6))
     set_cached("campsite_cache", key, merged)
     return merged
+
+
+async def get_blm_recreation_sites(lat: float, lng: float, radius_miles: float = 50,
+                                   categories: set[str] | None = None) -> list[dict]:
+    radius_m = int(min(max(radius_miles, 1), 120) * 1609.34)
+    category_key = ",".join(sorted(categories or [])) or "all"
+    key = f"blm_recreation_{lat:.2f}_{lng:.2f}_{radius_m}_{category_key}"
+    cached = get_cached("campsite_cache", key, ttl_seconds=3600 * 24 * 7)
+    if cached is not None:
+        return cached
+
+    wanted = {str(c).lower() for c in (categories or set())}
+    merged: list[dict] = []
+    seen: set[str] = set()
+    layer_results = await asyncio.gather(
+        *[_query_layer(layer, lat, lng, radius_m) for layer in _RECREATION_LAYERS],
+        return_exceptions=True,
+    )
+    for layer, features in zip(_RECREATION_LAYERS, layer_results):
+        if not isinstance(features, list):
+            continue
+        for feature in features:
+            site = _normalize(feature, layer)
+            if not site or site["id"] in seen:
+                continue
+            ptype = str(site.get("type") or "attraction").lower()
+            if wanted and ptype not in wanted and not (ptype == "visitor_center" and "attraction" in wanted):
+                continue
+            seen.add(site["id"])
+            site.pop("_attributes", None)
+            site.pop("_layer", None)
+            merged.append(site)
+    merged.sort(key=lambda s: math.hypot((s["lat"] - lat) * 69, (s["lng"] - lng) * 54.6))
+    set_cached("campsite_cache", key, merged[:120])
+    return merged[:120]
 
 
 async def get_blm_campsite_detail(camp_id: str) -> dict | None:
@@ -255,7 +316,11 @@ async def get_blm_campsite_detail(camp_id: str) -> dict | None:
         "ada": False,
         "phone": None,
         "url": f"{BLM_RECREATION}/{layer}/query?where=OBJECTID%3D{object_id}&outFields=*&f=html",
+        "official_url": f"{BLM_RECREATION}/{layer}/query?where=OBJECTID%3D{object_id}&outFields=*&f=html",
         "campsites_count": 0,
         "source": "blm",
         "verified_source": "BLM Recreation",
+        "source_label": "BLM Recreation",
+        "source_badge": "Official BLM",
+        "source_freshness": "Official BLM recreation layer cached by Trailhead; verify local closures and fire restrictions with the field office.",
     }

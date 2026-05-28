@@ -11,6 +11,7 @@
 export type MapMode = 'satellite' | 'topo' | 'hybrid';
 
 const TILE_BASE = 'https://tiles.gettrailhead.app';
+const API_BASE = 'https://api.gettrailhead.app';
 const GLYPH_URL = `${TILE_BASE}/api/fonts/{fontstack}/{range}.pbf`;
 
 // When the local tile server is running, tile requests go to localhost.
@@ -33,6 +34,7 @@ export function buildMapStyle(
   tileSession = 0,
   contourMode: ContourSourceMode = 'none',
   trailMode: TrailSourceMode = 'online',
+  showNautical = false,
 ): object {
   // Changing the source id (not just the URL) forces MapLibre to fully recreate
   // the source and drop its tile cache — the correct approach for cache-busting.
@@ -44,6 +46,7 @@ export function buildMapStyle(
   const contourUrl = contourMode === 'local'
     ? `http://127.0.0.1:${LOCAL_TILE_PORT}/api/contours/{z}/{x}/{y}.pbf`
     : 'https://tiles.openstreetmap.us/vector/contours-feet/{z}/{x}/{y}.mvt';
+  const hydroId = `hydro${tileSession}`;
   const trailId = `trailpacks${tileSession}`;
   const trailUrl = trailMode === 'local'
     ? `http://127.0.0.1:${LOCAL_TILE_PORT}/api/trails/{z}/{x}/{y}.pbf`
@@ -90,6 +93,31 @@ export function buildMapStyle(
       minzoom: 8,
       maxzoom: 15,
       attribution: 'OpenStreetMap, USFS MVUM',
+    };
+  }
+  if (showNautical) {
+    sources[hydroId] = {
+      type: 'vector',
+      tiles: [`${TILE_BASE}/api/hydro/tiles/mn-lotw/{z}/{x}/{y}.pbf`],
+      minzoom: 8,
+      maxzoom: 15,
+      attribution: 'Safe Water hydro awareness - not for navigation',
+    };
+    sources['noaa-charts'] = {
+      type: 'raster',
+      tiles: [`${API_BASE}/api/noaa-chart-tile/{z}/{x}/{y}`],
+      tileSize: 256,
+      minzoom: 0,
+      maxzoom: 16,
+      attribution: 'NOAA Office of Coast Survey',
+    };
+    sources['chs-nonna'] = {
+      type: 'raster',
+      tiles: [`${API_BASE}/api/chs-nonna-tile/{z}/{x}/{y}`],
+      tileSize: 256,
+      minzoom: 0,
+      maxzoom: 18,
+      attribution: 'Canadian Hydrographic Service NONNA - non-navigational bathymetry',
     };
   }
 
@@ -241,6 +269,123 @@ export function buildMapStyle(
           'text-halo-width': 1.4,
           'text-opacity': sat ? 0.9 : 0.86,
         } },
+    );
+  }
+
+  if (showNautical) {
+    layers.push(
+      {
+        id: 'chs-nonna-layer',
+        type: 'raster',
+        source: 'chs-nonna',
+        paint: {
+          'raster-opacity': sat ? 0.64 : hyb ? 0.48 : 0.52,
+          'raster-fade-duration': 120,
+        },
+      },
+      {
+        id: 'noaa-charts-layer',
+        type: 'raster',
+        source: 'noaa-charts',
+        paint: {
+          'raster-opacity': sat ? 0.68 : hyb ? 0.52 : 0.56,
+          'raster-fade-duration': 120,
+        },
+      },
+      {
+        id: 'hydro-depth-area',
+        type: 'fill',
+        source: hydroId,
+        'source-layer': 'depth_areas',
+        minzoom: 8,
+        paint: {
+          'fill-color': ['match', ['get', 'depth_band'],
+            'shallow_0_5', '#f97316',
+            'shallow_5_10', '#facc15',
+            'moderate_10_20', '#22d3ee',
+            'deep_20_40', '#0284c7',
+            'deep_40_plus', '#1d4ed8',
+            '#0ea5e9'],
+          'fill-opacity': sat ? 0.22 : hyb ? 0.24 : 0.32,
+        },
+      },
+      {
+        id: 'hydro-hazard-glow',
+        type: 'fill',
+        source: hydroId,
+        'source-layer': 'reef_hazards',
+        minzoom: 9,
+        paint: {
+          'fill-color': '#ef4444',
+          'fill-opacity': sat ? 0.18 : 0.24,
+          'fill-outline-color': '#fb923c',
+        },
+      },
+      {
+        id: 'hydro-hazard-line',
+        type: 'line',
+        source: hydroId,
+        'source-layer': 'reef_hazards',
+        minzoom: 9,
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-color': '#fb923c',
+          'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.1, 13, 2.2, 16, 3.8],
+          'line-opacity': 0.86,
+          'line-blur': 0.7,
+        },
+      },
+      {
+        id: 'hydro-depth-contour',
+        type: 'line',
+        source: hydroId,
+        'source-layer': 'depth_contours',
+        minzoom: 10,
+        filter: ['!', ['to-boolean', ['coalesce', ['get', 'idx'], false]]],
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-color': sat ? 'rgba(186,230,253,0.72)' : '#67e8f9',
+          'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.55, 13, 0.95, 16, 1.45],
+          'line-opacity': sat ? 0.68 : 0.76,
+        },
+      },
+      {
+        id: 'hydro-depth-index-contour',
+        type: 'line',
+        source: hydroId,
+        'source-layer': 'depth_contours',
+        minzoom: 9,
+        filter: ['to-boolean', ['coalesce', ['get', 'idx'], false]],
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-color': sat ? '#e0f2fe' : '#bae6fd',
+          'line-width': ['interpolate', ['linear'], ['zoom'], 9, 0.95, 13, 1.65, 16, 2.35],
+          'line-opacity': sat ? 0.76 : 0.88,
+        },
+      },
+      {
+        id: 'hydro-depth-label',
+        type: 'symbol',
+        source: hydroId,
+        'source-layer': 'hydro_labels',
+        minzoom: 12,
+        filter: ['has', 'depth_ft'],
+        layout: {
+          'symbol-placement': 'line',
+          'text-field': ['coalesce', ['get', 'depth_label'], ['concat', ['to-string', ['get', 'depth_ft']], "'"]],
+          'text-size': 10,
+          'text-font': ['Noto Sans Bold'],
+          'text-repeat': 340,
+          'text-rotation-alignment': 'map',
+          'text-keep-upright': true,
+        },
+        paint: {
+          'text-color': '#e0f2fe',
+          'text-halo-color': lwHalo,
+          'text-halo-width': 1.5,
+          'text-opacity': 0.92,
+        },
+      },
     );
   }
 

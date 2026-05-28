@@ -2,7 +2,7 @@
 Fetches federal campsites near a lat/lng. Free API — register at ridb.recreation.gov.
 """
 from __future__ import annotations
-import asyncio
+import asyncio, time
 import httpx
 from config.settings import settings
 from db.store import get_cached, set_cached
@@ -143,6 +143,12 @@ async def get_campsites_near(lat: float, lng: float, radius_miles: float = 30) -
             "description": facility.get("FacilityDescription", "")[:200],
             "reservable": facility.get("Reservable", False),
             "url": f"https://www.recreation.gov/camping/campgrounds/{facility.get('FacilityID')}",
+            "official_url": f"https://www.recreation.gov/camping/campgrounds/{facility.get('FacilityID')}",
+            "booking_url": f"https://www.recreation.gov/camping/campgrounds/{facility.get('FacilityID')}",
+            "source": "ridb",
+            "verified_source": "Recreation.gov",
+            "source_badge": "Official Recreation.gov",
+            "last_checked": int(time.time()),
         })
 
     set_cached("campsite_cache", key, sites)
@@ -197,9 +203,15 @@ async def get_campsites_search(lat: float, lng: float, radius_miles: float = 40,
                 "amenities": amenities,
                 "site_types": site_types or (["RV"] if "rv" in tags else ["Tent"] if "tent" in tags else []),
                 "url": f"https://www.recreation.gov/camping/campgrounds/{f.get('FacilityID')}",
+                "official_url": f"https://www.recreation.gov/camping/campgrounds/{f.get('FacilityID')}",
+                "booking_url": f"https://www.recreation.gov/camping/campgrounds/{f.get('FacilityID')}",
                 "ada": f.get("FacilityAdaAccess") == "Y",
                 "source": "ridb",
                 "verified_source": "Recreation.gov",
+                "source_badge": "Official Recreation.gov",
+                "source_freshness": "Official RIDB source data cached by Trailhead; verify current availability on Recreation.gov.",
+                "reservation_notes": "Use Check availability or Reserve on Recreation.gov. Trailhead does not handle checkout.",
+                "last_checked": int(time.time()),
             })
         cached = sites
         set_cached("campsite_cache", cache_key, sites)
@@ -326,9 +338,15 @@ async def get_facility_detail(facility_id: str) -> dict | None:
         "ada": f.get("FacilityAdaAccess") == "Y",
         "phone": f.get("FacilityPhone"),
         "url": f"https://www.recreation.gov/camping/campgrounds/{facility_id}",
+        "official_url": f"https://www.recreation.gov/camping/campgrounds/{facility_id}",
+        "booking_url": f"https://www.recreation.gov/camping/campgrounds/{facility_id}",
         "campsites_count": len(sites_data.get("RECDATA") or []),
         "source": "ridb",
         "verified_source": "Recreation.gov",
+        "source_badge": "Official Recreation.gov",
+        "source_freshness": "Official RIDB source data cached by Trailhead; verify current availability on Recreation.gov.",
+        "reservation_notes": "Trailhead links to official Recreation.gov booking and availability. Checkout stays on Recreation.gov.",
+        "last_checked": int(time.time()),
     }
     set_cached("campsite_cache", cache_key, result)
     return result

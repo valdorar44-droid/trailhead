@@ -40,6 +40,8 @@ class Settings:
     r2_access_key_id: str = os.environ.get("R2_ACCESS_KEY_ID", "")
     r2_secret_access_key: str = os.environ.get("R2_SECRET_ACCESS_KEY", "")
     r2_bucket: str = os.environ.get("R2_BUCKET", "trailhead-tiles")
+    r2_public_url: str = os.environ.get("R2_PUBLIC_URL", "")
+    nps_api_key: str = os.environ.get("NPS_API_KEY", "")
     apple_bundle_id: str = os.environ.get("APPLE_BUNDLE_ID", os.environ.get("IOS_BUNDLE_ID", ""))
     apple_service_id: str = os.environ.get("APPLE_SERVICE_ID", "")
     apple_issuer_id: str = os.environ.get("APPLE_ISSUER_ID", "")

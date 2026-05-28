@@ -9,7 +9,7 @@ from urllib.parse import quote
 
 import httpx
 from db.store import get_cached, set_cached
-from ingestors.provider_guard import record_provider_call, runtime_cached_call
+from ingestors.provider_guard import provider_budget_available, record_provider_call, runtime_cached_call
 
 GOOGLE_NEARBY_URL = "https://places.googleapis.com/v1/places:searchNearby"
 GOOGLE_TEXT_URL = "https://places.googleapis.com/v1/places:searchText"
@@ -86,10 +86,7 @@ RICH_SUMMARY_FIELDS = ",".join([
     "places.formattedAddress",
     "places.primaryTypeDisplayName",
     "places.types",
-    "places.rating",
-    "places.userRatingCount",
     "places.currentOpeningHours.openNow",
-    "places.photos.name",
     "places.googleMapsUri",
     "places.websiteUri",
     "places.nationalPhoneNumber",
@@ -124,11 +121,6 @@ DETAIL_FIELDS = ",".join([
     "regularOpeningHours.weekdayDescriptions",
     "photos.name",
     "photos.authorAttributions",
-    "reviews.authorAttribution",
-    "reviews.rating",
-    "reviews.relativePublishTimeDescription",
-    "reviews.text",
-    "reviews.originalText",
     "googleMapsUri",
     "websiteUri",
     "nationalPhoneNumber",
@@ -138,6 +130,13 @@ DETAIL_FIELDS = ",".join([
 
 def google_places_enabled() -> bool:
     return bool(os.getenv("GOOGLE_PLACES_API_KEY", "").strip())
+
+
+def google_passive_places_enabled() -> bool:
+    return (
+        google_places_enabled()
+        and os.getenv("GOOGLE_PASSIVE_PLACES_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+    )
 
 
 def _headers(fields: str) -> dict[str, str]:
@@ -214,22 +213,16 @@ def _summary_fields_for_category(category: str) -> str:
 
 
 def mark_google_rich_detail_gate(item: dict) -> dict:
-    category = _clean_category(item.get("type") or item.get("category"))
-    if str(item.get("source") or "").lower() == "google" and is_lightweight_google_category(category):
+    if str(item.get("source") or "").lower() == "google":
         item["rich_detail_available"] = True
         item["rich_detail_locked"] = True
-        item["rich_detail_reason"] = "explorer"
+        item["rich_detail_reason"] = "paid_provider_detail"
     return item
 
 
 def strip_lightweight_google_rich_fields(item: dict) -> dict:
     """Keep practical Google list fields for town services without rich media/review data."""
     if str(item.get("source") or "").lower() != "google":
-        return item
-    category = _clean_category(item.get("type") or item.get("category"))
-    if not is_lightweight_google_category(category):
-        item.setdefault("rich_detail_available", True)
-        item.setdefault("rich_detail_locked", False)
         return item
     for key in ("photo_url", "photos", "reviews", "rating", "rating_count"):
         item.pop(key, None)
@@ -245,8 +238,6 @@ def _normalize_place(place: dict, requested_category: str) -> dict | None:
         return None
     types = [str(t) for t in (place.get("types") or [])]
     category = _category_for_types(types, requested_category)
-    photos = place.get("photos") or []
-    photo_name = photos[0].get("name") if photos and isinstance(photos[0], dict) else ""
     type_label = str(((place.get("primaryTypeDisplayName") or {}).get("text")) or category.replace("_", " ").title())
     hours = place.get("currentOpeningHours") or {}
     normalized = {
@@ -259,6 +250,7 @@ def _normalize_place(place: dict, requested_category: str) -> dict | None:
         "type": category,
         "category": category,
         "source": "google",
+        "source_tier": "paid_gated",
         "source_label": "Google Places",
         "subtype": type_label,
         "address": place.get("formattedAddress") or "",
@@ -270,12 +262,7 @@ def _normalize_place(place: dict, requested_category: str) -> dict | None:
         "rich_detail_available": True,
         "rich_detail_locked": False,
     }
-    if is_lightweight_google_category(category):
-        return strip_lightweight_google_rich_fields(normalized)
-    normalized["rating"] = place.get("rating")
-    normalized["rating_count"] = place.get("userRatingCount")
-    normalized["photo_url"] = _photo_url(photo_name, 720)
-    return normalized
+    return strip_lightweight_google_rich_fields(normalized)
 
 
 async def get_google_places(
@@ -285,8 +272,11 @@ async def get_google_places(
     categories: Iterable[str] | None = None,
     limit_per_category: int = 10,
 ) -> list[dict]:
+    if not google_passive_places_enabled():
+        return []
+
     async def fetch_nearby_pack() -> list[dict]:
-        if not google_places_enabled():
+        if not provider_budget_available("google", "nearby"):
             return []
         if _google_permission_blocked() or _google_nearby_quota_blocked():
             return []
@@ -301,6 +291,8 @@ async def get_google_places(
         seen: set[str] = set()
         async with httpx.AsyncClient(timeout=8) as client:
             async def fetch_category(category: str) -> list[dict]:
+                if not provider_budget_available("google", "nearby"):
+                    return []
                 body = {
                     "includedTypes": GOOGLE_TYPE_MAP[category][:2],
                     "maxResultCount": max(1, min(limit_per_category, 12)),
@@ -322,6 +314,7 @@ async def get_google_places(
                         duration_ms=round((asyncio.get_running_loop().time() - t0) * 1000),
                         source_action="nearby_places",
                         premium_fields=False,
+                        source_tier="paid_gated",
                         key=f"{category}:{lat:.3f}:{lng:.3f}:{normalized_radius_m}",
                     )
                     if res.status_code in {400, 401, 403, 429}:
@@ -357,11 +350,12 @@ async def get_google_places(
     cache_key = f"google_nearby:{lat:.3f}:{lng:.3f}:{max(1000, min(int(radius_m), 50000))}:{category_key}:{limit_per_category}"
     return await runtime_cached_call(
         cache_key,
-        10 * 60,
+        20 * 60,
         fetch_nearby_pack,
         provider="google",
         endpoint="nearby",
         source_action="nearby_places",
+        source_tier="paid_gated",
         cache_empty=False,
     )
 
@@ -409,6 +403,7 @@ async def search_google_places_text(
                     duration_ms=round((asyncio.get_running_loop().time() - t0) * 1000),
                     source_action="submit_search",
                     premium_fields=False,
+                    source_tier="paid_gated",
                     key=cache_suffix,
                 )
                 if res.status_code in {400, 401, 403, 429}:
@@ -448,6 +443,8 @@ async def get_google_place_detail(place_id: str) -> dict | None:
         return None
     if _google_permission_blocked():
         return None
+    if not provider_budget_available("google", "detail"):
+        return None
     clean_id = place_id.replace("google:", "").strip()
     async def fetch_detail() -> dict | None:
         try:
@@ -461,6 +458,7 @@ async def get_google_place_detail(place_id: str) -> dict | None:
                     duration_ms=round((asyncio.get_running_loop().time() - t0) * 1000),
                     source_action="place_detail",
                     premium_fields=True,
+                    source_tier="paid_gated",
                     key=clean_id,
                 )
                 if res.status_code in {400, 401, 403, 404, 429}:
@@ -481,6 +479,7 @@ async def get_google_place_detail(place_id: str) -> dict | None:
         endpoint="detail",
         source_action="place_detail",
         premium_fields=True,
+        source_tier="paid_gated",
     )
     if not isinstance(place, dict):
         return None
@@ -488,7 +487,7 @@ async def get_google_place_detail(place_id: str) -> dict | None:
     if not summary:
         return None
     photos = []
-    for photo in (place.get("photos") or [])[:8]:
+    for photo in (place.get("photos") or [])[:1]:
         if not isinstance(photo, dict) or not photo.get("name"):
             continue
         credits = []
@@ -503,26 +502,13 @@ async def get_google_place_detail(place_id: str) -> dict | None:
             "source": "Google",
         })
     hours = place.get("currentOpeningHours") or place.get("regularOpeningHours") or {}
-    reviews = []
-    for review in (place.get("reviews") or [])[:5]:
-        if not isinstance(review, dict):
-            continue
-        author = review.get("authorAttribution") or {}
-        text_obj = review.get("text") or review.get("originalText") or {}
-        text = text_obj.get("text") if isinstance(text_obj, dict) else ""
-        reviews.append({
-            "authorName": author.get("displayName") or "Google user",
-            "rating": review.get("rating"),
-            "relativeTime": review.get("relativePublishTimeDescription") or "",
-            "text": text or "",
-            "profileUrl": author.get("uri") or "",
-            "photoUrl": author.get("photoUri") or "",
-            "source": "Google",
-        })
     return {
         **summary,
+        "rating": place.get("rating"),
+        "rating_count": place.get("userRatingCount"),
         "photos": photos,
-        "reviews": reviews,
+        "photo_url": photos[0]["url"] if photos else summary.get("photo_url", ""),
+        "reviews": [],
         "hours": hours.get("weekdayDescriptions") or [],
         "international_phone": place.get("internationalPhoneNumber") or "",
         "source_footer": "Place information from Google. Verify hours and availability before relying on them.",
@@ -533,6 +519,8 @@ async def fetch_google_photo(photo_name: str, max_width: int = 900) -> tuple[byt
     if not google_places_enabled() or not photo_name:
         return None
     if _google_permission_blocked():
+        return None
+    if not provider_budget_available("google", "photo"):
         return None
     max_width = max(120, min(int(max_width), 1600))
     url = f"https://places.googleapis.com/v1/{photo_name}/media"
@@ -547,6 +535,7 @@ async def fetch_google_photo(photo_name: str, max_width: int = 900) -> tuple[byt
                 duration_ms=round((asyncio.get_running_loop().time() - t0) * 1000),
                 source_action="photo_proxy",
                 premium_fields=True,
+                source_tier="paid_gated",
                 key=photo_name,
             )
             if res.status_code in {400, 401, 403, 404, 429}:

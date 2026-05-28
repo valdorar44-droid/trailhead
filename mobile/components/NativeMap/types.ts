@@ -18,6 +18,7 @@ export interface RouteStep {
 
 export interface WP {
   lat: number; lng: number; name: string; day: number; type: string;
+  route_point_type?: 'side_stop' | 'break' | 'through';
 }
 
 export interface RouteOpts {

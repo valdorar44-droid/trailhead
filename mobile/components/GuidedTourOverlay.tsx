@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Modal, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { Animated, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -25,7 +25,7 @@ const STEPS = [
     route: '/(tabs)/map',
     icon: 'search-outline',
     title: 'Search and navigate',
-    body: 'Search for camps, towns, gas, trailheads, or a destination. Preview the route before starting.',
+    body: 'Open Search this view, choose Camps or Trails, or search for towns, gas, trailheads, and destinations.',
     target: 'SEARCH BUTTON',
     targetKind: 'mapSearch',
     targetKey: 'map.search',
@@ -43,7 +43,7 @@ const STEPS = [
     route: '/(tabs)/map',
     icon: 'trail-sign-outline',
     title: 'Discover trails',
-    body: 'Tap the trail button to find trailheads and trail places near you. Use the CAMP/TRAIL area search when you want trails in the current map view.',
+    body: 'Use Search this view for map-area Trails, or tap the trail button for nearby trailheads and trail places.',
     target: 'TRAILS',
     targetKind: 'mapTrails',
     targetKey: 'map.trails',
@@ -51,8 +51,8 @@ const STEPS = [
   {
     route: '/(tabs)/map',
     icon: 'git-branch-outline',
-    title: 'Build trails with pins',
-    body: 'For trail routes, tap bends, forks, and the finish to add snapped anchors. Preview the line, then save or follow.',
+    title: 'Build trails for free',
+    body: 'Use the map button to drop anchors along a trail, snap the route, then preview, save, or follow.',
     target: 'PIN BUILDER',
     targetKind: 'mapTrailBuilder',
     targetKey: 'map.trailBuilder',
@@ -61,7 +61,7 @@ const STEPS = [
     route: '/(tabs)/map',
     icon: 'download-outline',
     title: 'Download before signal drops',
-    body: 'Download maps, routing, contours, trail systems, trip corridors, and place packs before you leave service.',
+    body: 'Downloads are free for everyone: Map, Navigation, Places, Topo, Trails, and Trip download.',
     target: 'OFFLINE',
     targetKind: 'mapOffline',
     targetKey: 'map.offline',
@@ -124,109 +124,15 @@ export default function GuidedTourOverlay() {
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const runId = useStore(st => st.guidedTourRunId);
-  const tourTargets = useStore(st => st.tourTargets);
+  const setGuidedTourActive = useStore(st => st.setGuidedTourActive);
   const [visible, setVisible] = useState(false);
   const [idx, setIdx] = useState(0);
   const [neverShow, setNeverShow] = useState(false);
   const [cardSide, setCardSide] = useState<'top' | 'bottom'>('top');
   const fade = useRef(new Animated.Value(0)).current;
-  const pulse = useRef(new Animated.Value(0)).current;
 
   const step = STEPS[idx];
   const isLast = idx === STEPS.length - 1;
-  const target = useMemo(() => {
-    const measured = 'targetKey' in step ? tourTargets[step.targetKey as string] : null;
-    if (measured && measured.width > 4 && measured.height > 4 && Date.now() - measured.updatedAt < 30_000) {
-      return {
-        left: measured.left,
-        top: measured.top,
-        width: measured.width,
-        height: measured.height,
-      };
-    }
-    if (step.targetKind === 'tab') {
-      const tabCount = 6;
-      const tabW = width / tabCount;
-      const boxW = Math.min(82, Math.max(48, tabW - 8));
-      return {
-        left: tabW * step.tabIndex + (tabW - boxW) / 2,
-        top: height - insets.bottom - 78,
-        width: boxW,
-        height: 62,
-      };
-    }
-    if (step.targetKind === 'mapCanvas') {
-      return {
-        left: 16,
-        top: insets.top + 110,
-        width: width - 32,
-        height: Math.min(260, height * 0.34),
-      };
-    }
-    if (step.targetKind === 'mapSearch') {
-      return {
-        left: Math.max(10, width - 70),
-        top: insets.top + 332,
-        width: 58,
-        height: 58,
-      };
-    }
-    if (step.targetKind === 'mapLayers') {
-      return {
-        left: Math.max(10, width - 70),
-        top: insets.top + 462,
-        width: 58,
-        height: 58,
-      };
-    }
-    if (step.targetKind === 'mapTrails') {
-      return {
-        left: Math.max(10, width - 70),
-        top: insets.top + 384,
-        width: 58,
-        height: 58,
-      };
-    }
-    if (step.targetKind === 'mapTrailBuilder') {
-      return {
-        left: Math.max(10, width - 70),
-        top: insets.top + 436,
-        width: 58,
-        height: 58,
-      };
-    }
-    if (step.targetKind === 'mapOffline') {
-      return {
-        left: Math.max(10, width - 70),
-        top: insets.top + 410,
-        width: 58,
-        height: 58,
-      };
-    }
-    if (step.targetKind === 'mapQuick') {
-      return {
-        left: 12,
-        top: Math.max(insets.top + 300, height - insets.bottom - 205),
-        width: 86,
-        height: 106,
-      };
-    }
-    return {
-      left: 8,
-      top: Math.max(insets.top + 128, height - insets.bottom - 284),
-      width: 142,
-      height: 112,
-    };
-  }, [height, insets.bottom, insets.top, step, tourTargets, width]);
-
-  useEffect(() => {
-    storage.get(TOUR_NEVER).then(never => {
-      if (never) return;
-      storage.get(TOUR_SEEN).then(seen => {
-        if (!seen) openTour(0);
-      }).catch(() => {});
-    }).catch(() => {});
-  }, []);
 
   useEffect(() => {
     if (runId > 0) {
@@ -236,27 +142,24 @@ export default function GuidedTourOverlay() {
   }, [runId]);
 
   useEffect(() => {
+    return () => setGuidedTourActive(false);
+  }, [setGuidedTourActive]);
+
+  useEffect(() => {
     if (!visible) return;
-    setCardSide(target.top > height * 0.45 ? 'top' : 'bottom');
     Animated.timing(fade, { toValue: 1, duration: 220, useNativeDriver: true }).start();
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, { toValue: 1, duration: 900, useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 0, duration: 900, useNativeDriver: true }),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [visible, idx, target.top, height]);
+  }, [visible, idx]);
 
   function openTour(start: number) {
     setIdx(start);
     setNeverShow(false);
+    setGuidedTourActive(true);
     setVisible(true);
     router.push(STEPS[start].route as any);
   }
 
   async function closeTour(markSeen: boolean) {
+    setGuidedTourActive(false);
     Animated.timing(fade, { toValue: 0, duration: 140, useNativeDriver: true }).start(() => setVisible(false));
     if (markSeen) await storage.set(TOUR_SEEN, 'true').catch(() => {});
     if (neverShow) await storage.set(TOUR_NEVER, 'true').catch(() => {});
@@ -283,46 +186,12 @@ export default function GuidedTourOverlay() {
 
   if (!visible) return null;
 
-  const pulseScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] });
-  const pulseOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.45, 0.9] });
-  const pad = step.targetKind === 'mapCanvas' ? 4 : 8;
-  const spotlight = {
-    left: Math.max(6, target.left - pad),
-    top: Math.max(insets.top + 4, target.top - pad),
-    width: Math.min(width - 12, target.width + pad * 2),
-    height: Math.min(height - insets.bottom - 8, target.height + pad * 2),
-  };
-  if (spotlight.left + spotlight.width > width - 6) spotlight.width = width - 6 - spotlight.left;
-  if (spotlight.top + spotlight.height > height - insets.bottom - 6) spotlight.height = height - insets.bottom - 6 - spotlight.top;
-  const targetCenterX = target.left + target.width / 2;
-  const labelTop = spotlight.top > insets.top + 48 ? spotlight.top - 38 : spotlight.top + spotlight.height + 8;
-  const labelLeft = Math.min(Math.max(12, targetCenterX - 58), width - 128);
   const cardStyle = cardSide === 'top'
     ? { top: insets.top + 18 }
     : { bottom: insets.bottom + 96 };
 
   return (
-    <Modal visible={visible} transparent animationType="none" onRequestClose={() => closeTour(false)}>
-      <Animated.View style={[s.overlay, { opacity: fade }]}>
-        <View pointerEvents="none" style={[s.dimBlock, { left: 0, top: 0, width, height: spotlight.top }]} />
-        <View pointerEvents="none" style={[s.dimBlock, { left: 0, top: spotlight.top, width: spotlight.left, height: spotlight.height }]} />
-        <View pointerEvents="none" style={[s.dimBlock, { left: spotlight.left + spotlight.width, top: spotlight.top, width: Math.max(0, width - spotlight.left - spotlight.width), height: spotlight.height }]} />
-        <View pointerEvents="none" style={[s.dimBlock, { left: 0, top: spotlight.top + spotlight.height, width, height: Math.max(0, height - spotlight.top - spotlight.height) }]} />
-        <View
-          pointerEvents="none"
-          style={[s.spotlight, { left: spotlight.left, top: spotlight.top, width: spotlight.width, height: spotlight.height }]}
-        />
-        <TouchableOpacity
-          activeOpacity={0.86}
-          onPress={next}
-          style={[s.targetTouch, { left: spotlight.left, top: spotlight.top, width: spotlight.width, height: spotlight.height }]}
-        >
-          <Animated.View style={[s.focusRing, { transform: [{ scale: pulseScale }], opacity: pulseOpacity }]} />
-        </TouchableOpacity>
-        <View style={[s.focusLabel, { left: labelLeft, top: labelTop }]}>
-          <Text style={s.focusText}>{step.target}</Text>
-        </View>
-
+    <Animated.View pointerEvents="box-none" style={[s.overlay, { opacity: fade, width, height }]}>
         <TrailheadSheet handle={false} style={[s.card, cardStyle]} contentStyle={s.cardContent}>
           <View style={s.progressRow}>
             {STEPS.map((_, i) => <View key={i} style={[s.dot, i <= idx && s.dotActive]} />)}
@@ -341,6 +210,15 @@ export default function GuidedTourOverlay() {
           </View>
 
           <Text style={s.body}>{step.body}</Text>
+          <View style={s.iconCue}>
+            <View style={s.iconCueBadge}>
+              <Ionicons name={step.icon as any} size={18} color={C.orange} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.iconCueLabel}>LOOK FOR</Text>
+              <Text style={s.iconCueText}>{step.target}</Text>
+            </View>
+          </View>
           <TouchableOpacity style={s.moveBtn} onPress={() => setCardSide(v => v === 'top' ? 'bottom' : 'top')}>
             <Ionicons name="swap-vertical-outline" size={13} color={C.text3} />
             <Text style={s.moveText}>MOVE CARD</Text>
@@ -363,53 +241,19 @@ export default function GuidedTourOverlay() {
             <TrailheadButton label={isLast ? 'Finish' : 'Next'} icon={isLast ? 'checkmark' : 'chevron-forward'} variant="primary" onPress={next} style={{ minWidth: 96 }} />
           </View>
         </TrailheadSheet>
-      </Animated.View>
-    </Modal>
+    </Animated.View>
   );
 }
 
 const makeStyles = (C: ColorPalette) => StyleSheet.create({
   overlay: {
-    flex: 1,
+    position: 'absolute',
+    top: 0,
+    left: 0,
     paddingHorizontal: 16,
+    zIndex: 10000,
+    elevation: 10000,
   },
-  dimBlock: {
-    position: 'absolute',
-    backgroundColor: 'rgba(5,10,15,0.78)',
-  },
-  spotlight: {
-    position: 'absolute',
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.26)',
-    borderWidth: 2,
-    borderColor: C.orange,
-    shadowColor: C.orange,
-    shadowOpacity: 0.55,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 0 },
-  },
-  targetTouch: {
-    position: 'absolute',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 18,
-  },
-  focusRing: {
-    width: '100%', height: '100%',
-    borderRadius: 18,
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1.5, borderColor: C.orange + 'aa',
-    backgroundColor: 'transparent',
-  },
-  focusLabel: {
-    position: 'absolute',
-    backgroundColor: C.s1,
-    borderWidth: 1, borderColor: C.orange + '55',
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-  },
-  focusText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
   card: {
     position: 'absolute',
     left: 16,
@@ -431,6 +275,30 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   title: { color: C.text, fontSize: 20, fontWeight: '900', marginTop: 2 },
   closeBtn: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s2 },
   body: { color: C.text2, fontSize: 14, lineHeight: 21, marginBottom: 14 },
+  iconCue: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderColor: C.orange + '3d',
+    borderRadius: 14,
+    backgroundColor: C.orange + '10',
+    paddingHorizontal: 11,
+    paddingVertical: 10,
+    marginBottom: 12,
+  },
+  iconCueBadge: {
+    width: 38,
+    height: 38,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.s2,
+    borderWidth: 1,
+    borderColor: C.orange + '55',
+  },
+  iconCueLabel: { color: C.text3, fontSize: 8, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
+  iconCueText: { color: C.orange, fontSize: 12, fontFamily: mono, fontWeight: '900', marginTop: 2 },
   moveBtn: {
     alignSelf: 'flex-start',
     flexDirection: 'row',

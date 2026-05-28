@@ -3,7 +3,7 @@ import type { PlacePack, PlacePackPoint } from './api';
 
 const DIR = FileSystem.documentDirectory + 'offline_place_packs/';
 const INDEX_PATH = DIR + '_index.json';
-const MAX_PLACE_PACKS = 8;
+const MAX_PLACE_PACKS = 96;
 
 export interface OfflinePlacePackSummary {
   pack_id: string;
@@ -41,11 +41,17 @@ async function writeIndex(ids: string[]) {
   await FileSystem.writeAsStringAsync(INDEX_PATH, JSON.stringify(ids));
 }
 
-export async function saveOfflinePlacePack(pack: PlacePack): Promise<void> {
+export async function saveOfflinePlacePack(pack: PlacePack, preserveIds: string[] = []): Promise<void> {
   await ensureDir();
   await FileSystem.writeAsStringAsync(packPath(pack.pack_id), JSON.stringify(pack));
   const index = await getIndex();
-  const updated = [pack.pack_id, ...index.filter(id => id !== pack.pack_id)].slice(0, MAX_PLACE_PACKS);
+  const preserve = new Set([pack.pack_id, ...preserveIds.filter(Boolean)]);
+  const ordered = [pack.pack_id, ...index.filter(id => id !== pack.pack_id)];
+  const kept: string[] = [];
+  for (const id of ordered) {
+    if (kept.length < MAX_PLACE_PACKS || preserve.has(id)) kept.push(id);
+  }
+  const updated = kept;
   const evicted = index.filter(id => !updated.includes(id));
   await Promise.all(evicted.map(id => FileSystem.deleteAsync(packPath(id), { idempotent: true }).catch(() => {})));
   await writeIndex(updated);

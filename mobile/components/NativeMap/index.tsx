@@ -20,7 +20,7 @@ import { buildMapStyle, MapMode } from './mapStyle';
 import type { ContourSourceMode, TrailSourceMode } from './mapStyle';
 import { fetchRoute, buildFallbackRoute } from './routing';
 import type { RouteResult, RouteStep, RouteOpts, MapBounds, WP } from './types';
-import type { CampsitePin, OsmPoi, Pin, Report } from '@/lib/api';
+import type { CampsitePin, OsmPoi, Pin, Report, WaterSpotCard, SuggestedWaterCorridorResponse } from '@/lib/api';
 import { useStore } from '@/lib/store';
 import { useTheme } from '@/lib/design';
 import { buildOfflineTrailGraphSelection } from '@/lib/trailGraph';
@@ -78,6 +78,9 @@ export interface NativeMapProps {
   camps:         CampsitePin[];
   gas:           { lat: number; lng: number; name: string }[];
   pois:          OsmPoi[];
+  waterNavLines?: any;
+  waterSpotCards?: WaterSpotCard[];
+  waterCorridor?: SuggestedWaterCorridorResponse | null;
   reports:       Report[];
   communityPins: Pin[];
   searchMarker:  { lat: number; lng: number; name: string } | null;
@@ -107,6 +110,7 @@ export interface NativeMapProps {
   showFire:        boolean;
   showAva:         boolean;
   showRadar:       boolean;
+  showNautical?:   boolean;
 
   // Callbacks → replaces onWebMessage
   onMapReady:       () => void;
@@ -117,6 +121,7 @@ export interface NativeMapProps {
   onCampTap:        (camp: CampsitePin) => void;
   onGasTap?:        (station: { name: string; lat: number; lng: number }) => void;
   onPoiTap?:        (poi: OsmPoi) => void;
+  onWaterSpotTap?:  (spot: WaterSpotCard) => void;
   onCommunityPinTap?: (pin: Pin) => void;
   onTileCampTap:    (name: string, kind: string, lat: number, lng: number) => void;
   onBaseCampTap:    (name: string, lat: number, lng: number, landType: string) => void;
@@ -267,8 +272,37 @@ function maneuverArrowText(step: RouteStep): string | null {
 }
 
 function campFeat(c: CampsitePin): GeoJSON.Feature {
+  const raw = [
+    ...(Array.isArray(c.tags) ? c.tags : []),
+    ...(Array.isArray(c.site_types) ? c.site_types : []),
+    c.land_type,
+    (c as any).source_badge,
+    c.verified_source,
+    c.source,
+    c.cost,
+    c.description,
+  ].filter(Boolean).join(' ').toLowerCase();
+  const kind = raw.includes('dispersed') || raw.includes('primitive') || raw.includes('boondock') ? 'dispersed'
+    : raw.includes('blm') || raw.includes('bureau of land management') ? 'blm'
+    : raw.includes('usfs') || raw.includes('national forest') || raw.includes('forest service') ? 'usfs'
+    : raw.includes('nps') || raw.includes('national park') ? 'nps'
+    : raw.includes('state park') ? 'state'
+    : raw.includes('corps') ? 'corps'
+    : raw.includes('rv') || raw.includes('hookup') || raw.includes('caravan') ? 'rv'
+    : c.reservable ? 'reservable'
+    : raw.includes('tent') ? 'tent'
+    : 'camp';
+  const code = kind === 'dispersed' ? 'd'
+    : kind === 'rv' ? 'R'
+    : kind === 'tent' ? 'T'
+    : kind === 'blm' ? 'B'
+    : kind === 'usfs' ? 'F'
+    : kind === 'nps' ? 'N'
+    : kind === 'state' ? 'S'
+    : kind === 'corps' ? 'W'
+    : 'C';
   return { type: 'Feature', geometry: { type: 'Point', coordinates: [c.lng, c.lat] },
-    properties: { id: c.id || '', name: c.name || '', land_type: c.land_type || 'Campground', cost: c.cost || '', full: (c as any).full || 0, raw: JSON.stringify(c) } };
+    properties: { id: c.id || '', name: c.name || '', land_type: c.land_type || 'Campground', camp_kind: kind, camp_code: code, cost: c.cost || '', full: (c as any).full || 0, raw: JSON.stringify(c) } };
 }
 
 function coordDistanceM(a: [number, number], b: [number, number]): number {
@@ -566,13 +600,13 @@ async function probeTileCdn(timeoutMs = 1500): Promise<boolean> {
 // ── Main component ────────────────────────────────────────────────────────────
 const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const {
-    waypoints, camps, gas, pois, reports, communityPins, searchMarker,
+    waypoints, camps, gas, pois, waterNavLines, waterSpotCards = [], waterCorridor = null, reports, communityPins, searchMarker,
     userLoc, navMode, navCameraFollow = false, nativeNavEngineActive = false, navIdx, navHeading, navSpeed,
     mapLayer, routeOpts,
     traceMode = false, traceDraftCoords = [], traceRouteCoords = [], tracePinCoords = [],
-    showLandOverlay, showUsgsOverlay, showFire, showAva, showRadar, showMvum,
+    showLandOverlay, showUsgsOverlay, showFire, showAva, showRadar, showMvum, showNautical = false,
     onMapReady, onBoundsChange, onMapGesture, onMapTap, onMapLongPress,
-    onCampTap, onGasTap, onPoiTap, onCommunityPinTap, onTileCampTap, onBaseCampTap, onTrailTap, onWaypointTap,
+    onCampTap, onGasTap, onPoiTap, onWaterSpotTap, onCommunityPinTap, onTileCampTap, onBaseCampTap, onTrailTap, onWaypointTap,
     onRouteReady, onRoutePersist, onOffRoute, onOffRouteWarn, onBackOnRoute, onRouteProgress,
     onTraceStart, onTraceMove, onTraceEnd,
   } = props;
@@ -979,8 +1013,16 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     trailHighlightRef.current = trailHighlight;
   }, [trailHighlight]);
   const waypointSignature = useMemo(
-    () => waypoints.map(w => `${w.lng.toFixed(5)},${w.lat.toFixed(5)}:${w.type}:${w.day}`).join('|'),
+    () => waypoints.map(w => `${w.lng.toFixed(5)},${w.lat.toFixed(5)}:${w.type}:${w.day}:${w.route_point_type ?? 'break'}`).join('|'),
     [waypoints],
+  );
+  const routableWaypoints = useMemo(
+    () => waypoints.filter(w => w.route_point_type !== 'side_stop'),
+    [waypoints],
+  );
+  const routePairsForWaypoints = useCallback(
+    (wps: WP[]) => wps.map(w => `${w.lng},${w.lat}`),
+    [],
   );
 
   // Route tracking ref
@@ -1000,8 +1042,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       : 'online';
   const trailMode: TrailSourceMode = localTrails ? 'local' : 'none';
   const mapStyleObj = useMemo(
-    () => buildMapStyle(mapLayer, mapboxToken || '', localTiles, tileSession, contourMode, trailMode),
-    [mapLayer, mapboxToken, localTiles, tileSession, contourMode, trailMode],
+    () => buildMapStyle(mapLayer, mapboxToken || '', localTiles, tileSession, contourMode, trailMode, showNautical),
+    [mapLayer, mapboxToken, localTiles, tileSession, contourMode, trailMode, showNautical],
   );
 
   // ── Imperative API (replaces postMessage) ───────────────────────────────────
@@ -1017,24 +1059,24 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       camRef.current?.setCamera({ centerCoordinate: [lng, lat], zoomLevel: 13, animationDuration: 250, animationMode: 'flyTo' });
     },
     loadRouteFrom(lat, lng, fromIdx) {
-      const rem = waypoints.slice(fromIdx);
-      const pairs = [`${lng},${lat}`, ...rem.map(w => `${w.lng},${w.lat}`)];
+      const rem = waypoints.slice(fromIdx).filter(w => w.route_point_type !== 'side_stop');
+      const pairs = [`${lng},${lat}`, ...routePairsForWaypoints(rem)];
       doFetchRoute(pairs, fromIdx);
     },
     loadRouteSegmentFrom(lat, lng, fromIdx, toIdx) {
       const start = Math.max(0, Math.min(fromIdx, waypoints.length - 1));
       const end = Math.max(start, Math.min(toIdx, waypoints.length - 1));
-      const rem = waypoints.slice(start, end + 1);
-      const pairs = [`${lng},${lat}`, ...rem.map(w => `${w.lng},${w.lat}`)];
+      const rem = waypoints.slice(start, end + 1).filter(w => w.route_point_type !== 'side_stop');
+      const pairs = [`${lng},${lat}`, ...routePairsForWaypoints(rem)];
       if (pairs.length >= 2) doFetchRoute(pairs, start);
     },
     rerouteFrom(lat, lng, fromIdx) {
       setPassedCoords([]);
       routeRef.current.passedIdx = 0;
       routeRef.current.passedProgressM = 0;
-      const rem = waypoints.slice(fromIdx);
+      const rem = waypoints.slice(fromIdx).filter(w => w.route_point_type !== 'side_stop');
       const pairs = rem.length
-        ? [`${lng},${lat}`, ...rem.map(w => `${w.lng},${w.lat}`)]
+        ? [`${lng},${lat}`, ...routePairsForWaypoints(rem)]
         : searchDest ? [`${lng},${lat}`, `${searchDest.lng},${searchDest.lat}`] : [];
       if (pairs.length >= 2) doFetchRoute(pairs, fromIdx);
     },
@@ -1187,7 +1229,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       onRouteReady({ coords, steps, legs, totalDistance: td, totalDuration: tt, isProper: true, fromCache: true, fromIdx: 0 });
     },
     setNavTarget(idx) { setNavTargetIdx(idx); },
-  }), [waypoints, searchDest, mapboxToken, makeRouteState]);
+  }), [waypoints, routePairsForWaypoints, searchDest, mapboxToken, makeRouteState]);
 
   const emitTracePoint = useCallback(async (
     x: number,
@@ -1270,7 +1312,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
 
   // When a new trip is planned: auto-route + fit camera to show all waypoints
   useEffect(() => {
-    if (waypoints.length < 2) return;
+    if (routableWaypoints.length < 2) return;
     routeRequestRef.current++;
     isRoutingRef.current = false;
     setRouteCoords([]);
@@ -1278,18 +1320,18 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     setPassedCoords([]);
     setBreadcrumb([]);
     routeRef.current = makeRouteState([]);
-    if (!navMode && waypoints.length > 10) {
-      const previewCoords = waypoints.map(w => [w.lng, w.lat] as [number, number]);
+    if (!navMode && routableWaypoints.length > 10) {
+      const previewCoords = routableWaypoints.map(w => [w.lng, w.lat] as [number, number]);
       setRouteCoords(previewCoords);
       setRouteSteps([]);
       routeRef.current = makeRouteState(previewCoords);
     } else {
-      doFetchRoute(waypoints.map(w => `${w.lng},${w.lat}`), 0);
+      doFetchRoute(routePairsForWaypoints(routableWaypoints), 0);
     }
     // Fit camera to the trip bounding box (skip if actively navigating)
     if (!navMode) {
-      const lngs = waypoints.map(w => w.lng);
-      const lats = waypoints.map(w => w.lat);
+      const lngs = routableWaypoints.map(w => w.lng);
+      const lats = routableWaypoints.map(w => w.lat);
       const ne: [number, number] = [Math.max(...lngs), Math.max(...lats)];
       const sw: [number, number] = [Math.min(...lngs), Math.min(...lats)];
       // Small delay lets the map finish loading the tile layer first
@@ -1367,6 +1409,38 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     type: 'Feature' as const, geometry: { type: 'Point' as const, coordinates: [p.lng, p.lat] },
     properties: { ...p, raw: JSON.stringify(p) },
   }))), [pois]);
+  const waterNavLineFC = useMemo(() => (
+    waterNavLines && Array.isArray(waterNavLines.features)
+      ? waterNavLines
+      : { type: 'FeatureCollection' as const, features: [] }
+  ), [waterNavLines]);
+  const waterSpotFC = useMemo(() => pointFC((waterSpotCards ?? []).map(card => ({
+    type: 'Feature' as const,
+    geometry: { type: 'Point' as const, coordinates: [card.lng, card.lat] },
+    properties: {
+      id: card.id,
+      name: card.name,
+      kind: card.kind,
+      species: (card.species_targets ?? []).join(', '),
+      raw: JSON.stringify(card),
+    },
+  }))), [waterSpotCards]);
+  const waterCorridorFC = useMemo(() => (
+    waterCorridor?.geometry?.coordinates?.length
+      ? {
+          type: 'FeatureCollection' as const,
+          features: [{
+            type: 'Feature' as const,
+            geometry: waterCorridor.geometry,
+            properties: {
+              status: waterCorridor.status,
+              distance_mi: waterCorridor.distance_mi,
+              source_confidence: waterCorridor.source_confidence,
+            },
+          }],
+        }
+      : { type: 'FeatureCollection' as const, features: [] as GeoJSON.Feature[] }
+  ), [waterCorridor]);
   const routeTurnFC = useMemo(() => pointFC(routeSteps.flatMap((step, idx) => {
     if (step.lat == null || step.lng == null) return [];
     const arrow = maneuverArrowText(step);
@@ -1410,10 +1484,41 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       const [lng, lat] = lngLat;
       try {
         const point = eventScreenPoint(feat);
+        const pressPoint = point ?? await mapRef.current.getPointInView([lng, lat]);
+        if (showNautical) {
+          const navRendered = await mapRef.current.queryRenderedFeaturesAtPoint(
+            pressPoint,
+            undefined,
+            ['water-nav-aid', 'water-nav-code', 'water-nav-line', 'hydro-hazard-line', 'hydro-hazard-glow', 'hydro-depth-label', 'hydro-depth-index-contour', 'hydro-depth-contour', 'hydro-depth-area']
+          );
+          const navFeatures = Array.isArray(navRendered) ? navRendered : navRendered?.features;
+          const navFeat = navFeatures?.[0];
+          if (navFeat?.properties) {
+            const coords = navFeat.geometry?.type === 'Point'
+              ? (navFeat.geometry as GeoJSON.Point).coordinates
+              : [lng, lat];
+            const layerId = navFeat.layer?.id || '';
+            onPoiTap?.(String(layerId).startsWith('hydro-')
+              ? mapHydroPoi(navFeat.properties, coords[1] ?? lat, coords[0] ?? lng)
+              : mapWaterNavigationPoi(navFeat.properties, coords[1] ?? lat, coords[0] ?? lng));
+            return;
+          }
+          const waterRendered = await mapRef.current.queryRenderedFeaturesAtPoint(
+            pressPoint,
+            undefined,
+            ['water-poly', 'water-river']
+          );
+          const waterFeatures = Array.isArray(waterRendered) ? waterRendered : waterRendered?.features;
+          const waterFeat = waterFeatures?.[0];
+          if (waterFeat?.properties) {
+            onPoiTap?.(mapWaterPoi(waterFeat.properties, lat, lng));
+            return;
+          }
+        }
         const rendered = await mapRef.current.queryRenderedFeaturesAtPoint(
-          point ?? await mapRef.current.getPointInView([lng, lat]),
+          pressPoint,
           undefined,
-          ['trail-pack-line', 'pm-pois-camp-site', 'pm-pois-camp-pitch', 'pm-pois-shelter', 'pm-pois-trailhead']
+          ['water-poly', 'water-river', 'trail-pack-line', 'pm-pois-camp-site', 'pm-pois-camp-pitch', 'pm-pois-shelter', 'pm-pois-trailhead']
         );
         const renderedFeatures = Array.isArray(rendered) ? rendered : rendered?.features;
         const tileFeat = renderedFeatures?.[0];
@@ -1431,6 +1536,10 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             onTrailTap(name, coords[1] ?? lat, coords[0] ?? lng);
             return;
           }
+          if (tileFeat.layer?.id === 'water-poly' || tileFeat.layer?.id === 'water-river') {
+            onPoiTap?.(mapWaterPoi(tileFeat.properties, lat, lng));
+            return;
+          }
           onTileCampTap(name, kind, coords[1] ?? lat, coords[0] ?? lng);
           return;
         }
@@ -1439,7 +1548,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     } else {
       onMapTap();
     }
-  }, [coordinateFromPress, onMapTap, onTileCampTap, onTrailTap]);
+  }, [coordinateFromPress, onMapTap, onPoiTap, onTileCampTap, onTrailTap, showNautical]);
 
   const handleLongPress = useCallback(async (feat: any) => {
     const lngLat = await coordinateFromPress(feat);
@@ -1748,6 +1857,183 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         </MapLibreGL.ShapeSource>
       )}
 
+      {showNautical && waterNavLineFC.features.length > 0 && (
+        <MapLibreGL.ShapeSource id="water-nav-lines" shape={waterNavLineFC}>
+          <MapLibreGL.LineLayer
+            id="water-nav-line-casing"
+            filter={['==', ['geometry-type'], 'LineString'] as any}
+            style={{
+              lineColor: '#04111f',
+              lineWidth: ['interpolate', ['linear'], ['zoom'], 8, 4, 13, 7, 16, 10],
+              lineOpacity: 0.82,
+              lineCap: 'round',
+              lineJoin: 'round',
+            }}
+          />
+          <MapLibreGL.LineLayer
+            id="water-nav-line"
+            filter={['==', ['geometry-type'], 'LineString'] as any}
+            style={{
+              lineColor: ['match', ['get', 'kind'],
+                'marked_channel', '#22c55e',
+                'recommended_track', '#38bdf8',
+                'range_line', '#f59e0b',
+                'traffic_lane', '#818cf8',
+                'deep_water_route', '#2563eb',
+                '#06b6d4'],
+              lineWidth: ['interpolate', ['linear'], ['zoom'], 8, 2, 13, 4, 16, 6],
+              lineOpacity: 0.95,
+              lineCap: 'round',
+              lineJoin: 'round',
+            }}
+          />
+          <MapLibreGL.LineLayer
+            id="water-nav-recommended-glow"
+            filter={['all', ['==', ['geometry-type'], 'LineString'], ['==', ['get', 'kind'], 'recommended_track']] as any}
+            style={{
+              lineColor: '#67e8f9',
+              lineWidth: ['interpolate', ['linear'], ['zoom'], 8, 6, 13, 11, 16, 15],
+              lineOpacity: 0.22,
+              lineBlur: 2.5,
+              lineCap: 'round',
+              lineJoin: 'round',
+            } as any}
+          />
+          <MapLibreGL.CircleLayer
+            id="water-nav-hazard-halo"
+            filter={['all', ['==', ['geometry-type'], 'Point'], ['==', ['get', 'kind'], 'water_hazard']] as any}
+            style={{
+              circleRadius: ['interpolate', ['linear'], ['zoom'], 8, 12, 13, 20, 16, 28],
+              circleColor: '#ef4444',
+              circleOpacity: 0.18,
+              circleBlur: 0.9,
+            } as any}
+          />
+          <MapLibreGL.CircleLayer
+            id="water-nav-aid"
+            filter={['==', ['geometry-type'], 'Point'] as any}
+            style={{
+              circleRadius: ['interpolate', ['linear'], ['zoom'], 8, 5, 13, 8, 16, 11],
+              circleColor: ['match', ['get', 'marker_color'],
+                'red', '#dc2626',
+                'green', '#16a34a',
+                'yellow', '#eab308',
+                'white', '#f8fafc',
+                'black', '#111827',
+                'hazard', '#ef4444',
+                'channel', '#2563eb',
+                '#7c3aed'],
+              circleOpacity: 0.94,
+              circleStrokeWidth: 2,
+              circleStrokeColor: '#fff',
+            } as any}
+          />
+          <MapLibreGL.SymbolLayer
+            id="water-nav-code"
+            filter={['==', ['geometry-type'], 'Point'] as any}
+            style={{
+              textField: ['coalesce', ['get', 'code'], 'M'],
+              textSize: 9.5,
+              textColor: '#fff',
+              textHaloColor: 'rgba(0,0,0,0.45)',
+              textHaloWidth: 0.9,
+              textFont: ['Noto Sans Bold'],
+              textAllowOverlap: true,
+              textIgnorePlacement: true,
+            } as any}
+          />
+        </MapLibreGL.ShapeSource>
+      )}
+
+      {showNautical && waterCorridorFC.features.length > 0 && (
+        <MapLibreGL.ShapeSource id="safe-water-corridor" shape={waterCorridorFC}>
+          <MapLibreGL.LineLayer
+            id="safe-water-corridor-glow"
+            style={{
+              lineColor: '#67e8f9',
+              lineWidth: ['interpolate', ['linear'], ['zoom'], 8, 9, 13, 15, 16, 20],
+              lineOpacity: 0.2,
+              lineBlur: 2.5,
+              lineCap: 'round',
+              lineJoin: 'round',
+            } as any}
+          />
+          <MapLibreGL.LineLayer
+            id="safe-water-corridor-line"
+            style={{
+              lineColor: '#67e8f9',
+              lineWidth: ['interpolate', ['linear'], ['zoom'], 8, 2.5, 13, 4.5, 16, 6],
+              lineOpacity: 0.96,
+              lineDasharray: [1.2, 1.4],
+              lineCap: 'round',
+              lineJoin: 'round',
+            } as any}
+          />
+        </MapLibreGL.ShapeSource>
+      )}
+
+      {showNautical && waterSpotFC.features.length > 0 && (
+        <MapLibreGL.ShapeSource
+          id="safe-water-spots"
+          shape={waterSpotFC}
+          onPress={e => {
+            const f = e.features?.[0];
+            if (!f || !onWaterSpotTap) return;
+            try {
+              const raw = f.properties?.raw ? JSON.parse(String(f.properties.raw)) : null;
+              if (raw) onWaterSpotTap(raw);
+            } catch {}
+          }}
+        >
+          <MapLibreGL.CircleLayer
+            id="safe-water-spot-halo"
+            style={{
+              circleRadius: ['interpolate', ['linear'], ['zoom'], 8, 12, 13, 19, 16, 26],
+              circleColor: '#3bcf8e',
+              circleOpacity: 0.16,
+              circleBlur: 0.8,
+            } as any}
+          />
+          <MapLibreGL.CircleLayer
+            id="safe-water-spot-dot"
+            style={{
+              circleRadius: ['interpolate', ['linear'], ['zoom'], 8, 6, 13, 9, 16, 12],
+              circleColor: ['match', ['get', 'kind'], 'access', '#67e8f9', 'structure', '#3bcf8e', '#d97745'],
+              circleOpacity: 0.95,
+              circleStrokeWidth: 2,
+              circleStrokeColor: '#04111f',
+            } as any}
+          />
+          <MapLibreGL.SymbolLayer
+            id="safe-water-spot-code"
+            style={{
+              textField: ['match', ['get', 'kind'], 'access', 'A', 'structure', 'S', 'F'],
+              textSize: 9,
+              textColor: '#04111f',
+              textFont: ['Noto Sans Bold'],
+              textAllowOverlap: true,
+              textIgnorePlacement: true,
+            } as any}
+          />
+          <MapLibreGL.SymbolLayer
+            id="safe-water-spot-label"
+            minZoomLevel={11}
+            style={{
+              textField: ['get', 'name'],
+              textSize: 9,
+              textFont: ['Noto Sans Regular'],
+              textOffset: [0, 1.55],
+              textAnchor: 'top',
+              textColor: '#67e8f9',
+              textHaloColor: 'rgba(0,0,0,0.78)',
+              textHaloWidth: 1.4,
+              textMaxWidth: 9,
+              textOptional: true,
+            } as any}
+          />
+        </MapLibreGL.ShapeSource>
+      )}
+
       {/* ── Campsites (clustered) ──────────────────────────────────────── */}
       {camps.length > 0 && (
         <MapLibreGL.ShapeSource
@@ -1762,7 +2048,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             id="camp-cluster"
             filter={['has', 'point_count']}
             style={{
-              circleColor: ['step', ['get', 'point_count'], '#14b8a6', 10, '#f97316', 50, '#ef4444'],
+              circleColor: ['step', ['get', 'point_count'], '#6b7280', 10, '#52525b', 50, '#3f3f46'],
               circleRadius: ['step', ['get', 'point_count'], 18, 10, 25, 50, 32],
               circleOpacity: 0.88,
               circleStrokeWidth: 2,
@@ -1783,11 +2069,17 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             filter={['!', ['has', 'point_count']]}
             style={{
               circleRadius: ['interpolate', ['linear'], ['zoom'], 9, 7, 13, 11],
-              circleColor: ['match', ['get', 'land_type'],
-                'BLM Land', '#f97316',
-                'National Forest', '#22c55e',
-                'National Park', '#3b82f6',
-                'State Park', '#8b5cf6',
+              circleColor: ['match', ['get', 'camp_kind'],
+                'dispersed', '#8b5a2b',
+                'primitive', '#92400e',
+                'rv', '#2563eb',
+                'tent', '#16a34a',
+                'blm', '#f97316',
+                'usfs', '#22c55e',
+                'nps', '#3b82f6',
+                'state', '#8b5cf6',
+                'corps', '#0284c7',
+                'reservable', '#8b5cf6',
                 '#14b8a6'],
               circleOpacity: 0.88,
               circleStrokeWidth: ['case', ['==', ['get', 'full'], 1], 3, 2],
@@ -1798,8 +2090,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             id="camp-code"
             filter={['!', ['has', 'point_count']]}
             style={{
-              textField: 'C',
-              textSize: 10,
+              textField: ['get', 'camp_code'],
+              textSize: ['case', ['==', ['get', 'camp_kind'], 'dispersed'], 11, 10],
               textFont: ['Noto Sans Medium'],
               textColor: '#fff',
               textHaloColor: 'rgba(0,0,0,0.35)',
@@ -1900,16 +2192,47 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             id="poi-circle"
             style={{
               circleRadius: ['case', ['==', ['get', 'type'], 'peak'], 9.5, 8.5],
-              circleColor: ['match', ['get', 'type'], 'trail', '#f97316', 'water', '#0284c7', 'trailhead', '#22c55e', 'viewpoint', '#a855f7', 'peak', '#92400e', 'hot_spring', '#f97316', 'fuel', '#ea580c', 'propane', '#f97316', 'dump', '#a16207', 'shower', '#06b6d4', 'laundromat', '#0891b2', 'lodging', '#6366f1', 'food', '#0ea5e9', 'grocery', '#06b6d4', 'mechanic', '#f97316', 'parking', '#d97706', 'attraction', '#0ea5e9', 'camping', '#16a34a', 'hardware', '#f59e0b', 'medical', '#ef4444', 'parts', '#f97316', 'wifi', '#2563eb', '#3b82f6'],
+              circleColor: ['case', ['==', ['get', 'type'], 'water'],
+                ['match', ['get', 'subtype'],
+                  'boat_ramp', '#1d4ed8',
+                  'paddle_launch', '#0f766e',
+                  'fishing_access', '#15803d',
+                  'marina', '#0891b2',
+                  'dock', '#0369a1',
+                  'shore_access', '#0e7490',
+                  'swimming', '#06b6d4',
+                  'gauge', '#64748b',
+                  'navigation_aid', '#7c3aed',
+                  'channel_marker', '#2563eb',
+                  'water_hazard', '#dc2626',
+                  'anchorage', '#0f766e',
+                  'lock', '#a16207',
+                  '#0284c7'],
+                ['match', ['get', 'type'], 'trail', '#f97316', 'trailhead', '#22c55e', 'viewpoint', '#a855f7', 'peak', '#92400e', 'hot_spring', '#f97316', 'fuel', '#ea580c', 'propane', '#f97316', 'dump', '#a16207', 'shower', '#06b6d4', 'laundromat', '#0891b2', 'lodging', '#6366f1', 'food', '#0ea5e9', 'grocery', '#06b6d4', 'mechanic', '#f97316', 'parking', '#d97706', 'attraction', '#0ea5e9', 'camping', '#16a34a', 'hardware', '#f59e0b', 'medical', '#ef4444', 'parts', '#f97316', 'wifi', '#2563eb', '#3b82f6']],
               circleOpacity: 0.92, circleStrokeWidth: 2, circleStrokeColor: '#fff',
             }}
           />
           <MapLibreGL.SymbolLayer
             id="poi-code"
             style={{
-              textField: ['match', ['get', 'type'],
+              textField: ['case', ['==', ['get', 'type'], 'water'],
+                ['match', ['get', 'subtype'],
+                  'boat_ramp', 'R',
+                  'paddle_launch', 'P',
+                  'fishing_access', 'F',
+                  'marina', 'M',
+                  'dock', 'D',
+                  'shore_access', 'S',
+                  'swimming', 'S',
+                  'gauge', 'G',
+                  'navigation_aid', 'A',
+                  'channel_marker', 'C',
+                  'water_hazard', '!',
+                  'anchorage', 'A',
+                  'lock', 'L',
+                  'W'],
+                ['match', ['get', 'type'],
                 'trail', POI_CODES.trail,
-                'water', POI_CODES.water,
                 'trailhead', POI_CODES.trailhead,
                 'viewpoint', POI_CODES.viewpoint,
                 'peak', POI_CODES.peak,
@@ -1930,7 +2253,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
                 'medical', POI_CODES.medical,
                 'parts', POI_CODES.parts,
                 'wifi', POI_CODES.wifi,
-                'P'],
+                'P']],
               textSize: 9.5,
               textFont: ['Noto Sans Medium'],
               textColor: '#fff',
@@ -1954,19 +2277,22 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         </MapLibreGL.ShapeSource>
       )}
 
-      {pois.slice(0, 70).map((poi, i) => (
+      {pois.slice(0, 70).map((poi, i) => {
+        const visual = poiMarkerVisual(poi);
+        return (
         <MapLibreGL.MarkerView
           key={`poi-icon-${poi.type}-${poi.name}-${poi.lat}-${poi.lng}-${i}`}
           id={`poi-icon-${i}`}
           coordinate={[poi.lng, poi.lat]}
         >
           <IconPin
-            color={poiColor(poi.type)}
-            icon={POI_ICON_NAMES[poi.type] || 'location-outline'}
+            color={visual.color}
+            icon={visual.icon}
             onPress={() => onPoiTap?.(poi)}
           />
         </MapLibreGL.MarkerView>
-      ))}
+        );
+      })}
 
       {/* ── Community pins ────────────────────────────────────────────── */}
       {communityPins.slice(0, 150).map((pin, i) => {
@@ -2147,6 +2473,159 @@ function kindLabel(kind: string): string {
   }
 }
 
+function waterKindLabel(kind?: string): string {
+  switch (String(kind || '').toLowerCase()) {
+    case 'river': return 'River';
+    case 'stream': return 'Stream';
+    case 'canal': return 'Canal';
+    case 'reservoir': return 'Reservoir';
+    case 'lake': return 'Lake';
+    default: return 'Waterbody';
+  }
+}
+
+function isLakeOfTheWoods(lat: number, lng: number, name?: string) {
+  const text = String(name || '').toLowerCase();
+  return text.includes('lake of the woods') || text.includes('lac des bois') || (lat >= 48.35 && lat <= 49.55 && lng >= -95.65 && lng <= -93.35);
+}
+
+function isLikelyCanadianWater(lat: number, lng: number, name?: string) {
+  if (isLakeOfTheWoods(lat, lng, name)) return true;
+  if (lng >= -141.5 && lng <= -52 && lat >= 49) return true;
+  if (lng >= -67.5 && lng <= -52 && lat >= 43) return true;
+  return false;
+}
+
+function waterChartContext(lat: number, lng: number, name?: string) {
+  if (isLikelyCanadianWater(lat, lng, name)) {
+    return {
+      chart_source: 'CHS NONNA bathymetry (non-navigational) for Canadian waters; Lake of the Woods also has CHS chart 6201 official chart context.',
+      chart_url: 'https://www.chs.gc.ca/data-gestion/nonna/index-eng.html',
+      safety_url: 'https://tc.canada.ca/en/marine-transportation/marine-safety/boating-safety',
+      navigation_note: 'NONNA bathymetry is not for navigation. Verify with official CHS charts, local markers, water levels, weather, and required safety gear before boating.',
+    };
+  }
+  return {
+    chart_source: 'NOAA chart layer where coverage exists; many inland lakes may not have charted depth or hazard data.',
+    chart_url: 'https://www.nauticalcharts.noaa.gov/charts/noaa-enc.html',
+    safety_url: 'https://www.uscgboating.org/',
+    navigation_note: 'Waterbody context only. Use the NOAA chart layer where available for depth soundings, channels, aids, and hazards; check NWS alerts, water levels, local closures, required safety gear, and official charts before boating.',
+  };
+}
+
+function mapWaterPoi(props: Record<string, any> | undefined, lat: number, lng: number): OsmPoi {
+  const kind = String(props?.kind || props?.water || props?.waterway || '').toLowerCase();
+  const waterbodyType = kind || 'waterbody';
+  const name = String(props?.name || waterKindLabel(kind));
+  const chart = waterChartContext(lat, lng, name);
+  return {
+    id: `map_water_${lat.toFixed(5)}_${lng.toFixed(5)}`,
+    name,
+    lat,
+    lng,
+    type: 'water',
+    category: 'water',
+    subtype: waterbodyType,
+    source: 'map_waterbody',
+    source_label: 'Map waterbody',
+    source_badge: 'Map waterbody',
+    source_freshness: 'Base map water feature. Depths, channels, hazards, and access rules require official/current sources.',
+    waterbody_name: name,
+    waterbody_type: waterbodyType,
+    access: 'see nearby access points',
+    craft: 'verify local restrictions',
+    fishing_score_label: 'Unknown fishing quality',
+    chart_source: chart.chart_source,
+    chart_url: chart.chart_url,
+    weather_url: `https://forecast.weather.gov/MapClick.php?lat=${lat.toFixed(5)}&lon=${lng.toFixed(5)}`,
+    tides_url: 'https://tidesandcurrents.noaa.gov/',
+    safety_url: chart.safety_url,
+    navigation_note: chart.navigation_note,
+  } as OsmPoi;
+}
+
+function displayWaterText(value: any): string {
+  return String(value || '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function mapWaterNavigationPoi(props: Record<string, any> | undefined, lat: number, lng: number): OsmPoi {
+  const subtype = String(props?.subtype || props?.kind || 'navigation_aid').toLowerCase();
+  const name = displayWaterText(props?.name || props?.label || props?.navigation_feature || 'Water navigation point');
+  const chart = waterChartContext(lat, lng, name);
+  return {
+    id: String(props?.id || `map_water_nav_${lat.toFixed(5)}_${lng.toFixed(5)}`),
+    name,
+    lat,
+    lng,
+    type: 'water',
+    category: 'water',
+    subtype,
+    source: 'openseamap',
+    source_label: String(props?.source || 'OpenStreetMap / OpenSeaMap'),
+    source_badge: 'OpenSeaMap / OSM',
+    source_freshness: String(props?.source_freshness || 'Open seamark data; verify against official charts and local markers.'),
+    waterbody_name: name,
+    waterbody_type: 'navigation',
+    access: 'verify locally',
+    craft: 'boating context',
+    fishing_score_label: 'Navigation context',
+    chart_source: chart.chart_source,
+    chart_url: chart.chart_url,
+    weather_url: `https://forecast.weather.gov/MapClick.php?lat=${lat.toFixed(5)}&lon=${lng.toFixed(5)}`,
+    tides_url: 'https://tidesandcurrents.noaa.gov/',
+    safety_url: chart.safety_url,
+    navigation_feature: displayWaterText(props?.navigation_feature || props?.label || props?.seamark_type || subtype),
+    hazard_type: displayWaterText(props?.hazard_type || (subtype === 'water_hazard' ? props?.seamark_type || subtype : '')),
+    mark_color: displayWaterText(props?.mark_color || props?.marker_color || ''),
+    mark_shape: displayWaterText(props?.mark_shape || ''),
+    light_character: displayWaterText(props?.light_character || ''),
+    depth_ft: Number.isFinite(Number(props?.depth_ft)) ? Number(props?.depth_ft) : undefined,
+    max_draft_ft: Number.isFinite(Number(props?.max_draft_ft)) ? Number(props?.max_draft_ft) : undefined,
+    navigation_note: String(props?.navigation_note || 'Open seamark data only. Use official charts, local markers, water levels, weather, and required safety gear before boating.'),
+  } as OsmPoi;
+}
+
+function mapHydroPoi(props: Record<string, any> | undefined, lat: number, lng: number): OsmPoi {
+  const depth = Number.isFinite(Number(props?.depth_ft ?? props?.max_depth_ft))
+    ? Number(props?.depth_ft ?? props?.max_depth_ft)
+    : undefined;
+  const hazard = displayWaterText(props?.label || props?.kind || '');
+  const name = depth != null
+    ? `${depth.toFixed(depth % 1 === 0 ? 0 : 1)} ft depth`
+    : hazard || 'Safe Water structure';
+  return {
+    id: String(props?.id || `map_hydro_${lat.toFixed(5)}_${lng.toFixed(5)}`),
+    name,
+    lat,
+    lng,
+    type: 'water',
+    category: 'water',
+    subtype: props?.hazard ? 'water_hazard' : 'bathymetry',
+    source: String(props?.source_id || props?.source || 'safe_water_hydro'),
+    source_label: String(props?.source || 'Safe Water hydro bathymetry'),
+    source_badge: 'Hydro awareness',
+    source_freshness: String(props?.source_freshness || 'Bathymetry context packaged by Trailhead; source dates and confidence vary by waterbody.'),
+    waterbody_name: 'Lake of the Woods',
+    waterbody_type: 'bathymetry',
+    access: 'verify locally',
+    craft: 'boating context',
+    fishing_score_label: 'Bathymetry context',
+    chart_source: String(props?.chart_source || 'Safe Water hydro bathymetry plus live NOAA/CHS/OpenSeaMap context where available.'),
+    chart_url: String(props?.chart_url || 'https://www.chs.gc.ca/data-gestion/nonna/index-eng.html'),
+    weather_url: `https://forecast.weather.gov/MapClick.php?lat=${lat.toFixed(5)}&lon=${lng.toFixed(5)}`,
+    tides_url: 'https://tidesandcurrents.noaa.gov/',
+    safety_url: 'https://www.uscgboating.org/',
+    navigation_feature: hazard || displayWaterText(props?.depth_band || 'Bathymetry'),
+    hazard_type: props?.hazard ? hazard : '',
+    depth_ft: depth,
+    navigation_note: String(props?.navigation_note || 'Bathymetry awareness only. Not certified navigation; verify with official charts, markers, water levels, weather, and local notices before boating.'),
+  } as OsmPoi;
+}
+
 function stateName(id: string): string {
   if (id === 'conus') return 'USA';
   return FILE_REGIONS[id as keyof typeof FILE_REGIONS]?.name ?? id.toUpperCase();
@@ -2194,6 +2673,47 @@ function poiColor(type: string): string {
     case 'wifi': return '#2563eb';
     default: return '#3b82f6';
   }
+}
+
+function waterSubtypeVisual(subtype?: string): { color: string; code: string; icon: keyof typeof Ionicons.glyphMap } {
+  switch (String(subtype || '').toLowerCase().replace(/[\s-]+/g, '_')) {
+    case 'boat_ramp':
+      return { color: '#1d4ed8', code: 'R', icon: 'boat-outline' };
+    case 'paddle_launch':
+      return { color: '#0f766e', code: 'P', icon: 'navigate-circle-outline' };
+    case 'fishing_access':
+      return { color: '#15803d', code: 'F', icon: 'fish-outline' };
+    case 'marina':
+      return { color: '#0891b2', code: 'M', icon: 'boat-outline' };
+    case 'dock':
+      return { color: '#0369a1', code: 'D', icon: 'albums-outline' };
+    case 'shore_access':
+      return { color: '#0e7490', code: 'S', icon: 'map-outline' };
+    case 'swimming':
+      return { color: '#06b6d4', code: 'S', icon: 'water-outline' };
+    case 'gauge':
+      return { color: '#64748b', code: 'G', icon: 'speedometer-outline' };
+    case 'navigation_aid':
+      return { color: '#7c3aed', code: 'A', icon: 'flag-outline' };
+    case 'channel_marker':
+      return { color: '#2563eb', code: 'C', icon: 'git-branch-outline' };
+    case 'water_hazard':
+      return { color: '#dc2626', code: '!', icon: 'warning-outline' };
+    case 'anchorage':
+      return { color: '#0f766e', code: 'A', icon: 'boat-outline' };
+    case 'lock':
+      return { color: '#a16207', code: 'L', icon: 'lock-closed-outline' };
+    default:
+      return { color: '#0284c7', code: 'W', icon: 'water-outline' };
+  }
+}
+
+function poiMarkerVisual(poi: OsmPoi): { color: string; icon: keyof typeof Ionicons.glyphMap } {
+  if (poi.type === 'water') {
+    const visual = waterSubtypeVisual(poi.subtype);
+    return { color: visual.color, icon: visual.icon };
+  }
+  return { color: poiColor(poi.type), icon: POI_ICON_NAMES[poi.type] || 'location-outline' };
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────────────

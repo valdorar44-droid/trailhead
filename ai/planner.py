@@ -325,6 +325,13 @@ TRUSTED ROUTE-CORRIDOR OUTPUT:
 - Fuel and resupply stops must be on-route towns, not broad nearby places. Prefer reliable towns over tiny settlements.
 - For off-pavement navigation, do not overpromise perfect turn-by-turn. The app can route and show the blue-dot position, but the plan should still include road names, bailout towns, and practical notes so the driver can read the map if road data is wrong.
 
+ROUTE STYLE CONTRACT:
+- Direct: fastest practical land route with minimal detours; use fuel and reliable overnights, not filler attractions.
+- Balanced: scenic roads, useful POIs, reasonable camps, and manageable drive days.
+- Wild: legal public land, primitive/dispersed or official public camps where available, rougher/off-the-beaten-path only when vehicle-safe. Avoid RV parks/private campgrounds unless the region has weak public camping supply.
+- Northeast and other public-camp-scarce regions: do not fake dispersed camping. Prefer state parks, national forests where legal, municipal/county campgrounds, or modest lodging and state that public dispersed options are limited.
+- Multi-night windows: if the user wants basecamping, reuse the same camp intentionally and mark rest/local days as zero-mile or low-mile days. Otherwise, each driving day should end at a different overnight area.
+
 TIME PLANNING:
 - Factor in realistic daily schedules. Most overlanders leave camp by 8-9am and arrive at next camp by 5-6pm — that's a 9-hour travel window.
 - Paved highway: ~60 mph average = 540 miles in 9 hours theoretical max. In practice: fuel stops, food, photos, and fatigue mean 300-350 miles is a full day. Hard cap: 350 miles.
@@ -358,6 +365,19 @@ RESPOND TO REQUESTS INTELLIGENTLY:
 client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
 HAIKU_MODEL = "claude-haiku-4-5-20251001"
 SONNET_MODEL = "claude-sonnet-4-6"
+
+
+def _daily_mile_cap(day: int, road_type: str) -> int:
+    road = str(road_type or "").lower()
+    if day == 1:
+        return 250
+    if "4wd" in road or "technical" in road:
+        return 80
+    if "dirt" in road and "paved" not in road and "mixed" not in road:
+        return 120
+    if "mixed" in road or ("dirt" in road and "paved" in road):
+        return 250
+    return 350
 
 
 def _claude(fn, max_attempts: int = 3):
@@ -831,20 +851,53 @@ def _normalize_plan(plan: dict) -> dict:
     plan["waypoints"] = normalized_wps
 
     normalized_days = []
+    planner_warnings: list[str] = []
     for idx, day in enumerate(daily[:duration], start=1):
         if not isinstance(day, dict):
             continue
+        day_num = int(day.get("day") or idx)
+        road_type = str(day.get("road_type") or "mixed")
+        try:
+            raw_miles = int(day.get("est_miles") or 0)
+        except Exception:
+            raw_miles = 0
+        cap = _daily_mile_cap(day_num, road_type)
+        est_miles = max(0, min(raw_miles, cap))
+        heads_up = str(day.get("heads_up") or "")
+        if raw_miles > cap:
+            planner_warnings.append(f"Day {day_num} was capped from {raw_miles} mi to {cap} mi for {road_type or 'mixed'} pacing.")
+            heads_up = (heads_up + " " if heads_up else "") + f"Long drive day trimmed to Trailhead's {cap} mi safety cap; rebuild with more days if needed."
         normalized_days.append({
             **day,
-            "day": int(day.get("day") or idx),
+            "day": day_num,
             "title": str(day.get("title") or f"Day {idx}"),
             "description": str(day.get("description") or "Drive, explore, and settle into camp."),
-            "est_miles": int(day.get("est_miles") or 0),
-            "road_type": str(day.get("road_type") or "mixed"),
+            "est_miles": est_miles,
+            "road_type": road_type,
             "highlights": day.get("highlights") if isinstance(day.get("highlights"), list) else [],
+            "heads_up": heads_up,
         })
     if not normalized_days:
         raise ValueError("Planner returned no usable daily itinerary")
+    required_rest_days = 3 if duration >= 12 else 2 if duration >= 8 else 1 if duration >= 5 else 0
+    rest_count = sum(1 for day in normalized_days if int(day.get("est_miles") or 0) == 0 or str(day.get("road_type") or "").lower() == "none")
+    if required_rest_days and rest_count < required_rest_days:
+        candidate_indexes = [
+            i for i, day in enumerate(normalized_days)
+            if i > 0 and i < len(normalized_days) - 1 and int(day.get("est_miles") or 0) > 0
+        ]
+        for idx in candidate_indexes[2::3] + candidate_indexes:
+            if rest_count >= required_rest_days:
+                break
+            day = normalized_days[idx]
+            day["title"] = f"Day {day['day']}: Rest Day — {str(day.get('title') or 'Local area').split(':')[-1].strip()}"
+            day["description"] = f"Rest and local exploring near the previous overnight. Keep the same camp unless Route Builder swaps it."
+            day["est_miles"] = 0
+            day["road_type"] = "none"
+            day["heads_up"] = "Same-camp rest day added for pacing."
+            rest_count += 1
+        if rest_count < required_rest_days:
+            planner_warnings.append("Long-trip rest days were requested but could not be inserted cleanly.")
     plan["daily_itinerary"] = normalized_days
 
     if not plan.get("trip_name"):
@@ -854,8 +907,21 @@ def _normalize_plan(plan: dict) -> dict:
     if not plan.get("overview"):
         plan["overview"] = "A Trailhead overland route with mapped stops, camps, fuel, and practical route notes."
     plan["overview"] = re.sub(r"^(about|overview|summary)\s*[:\-–—]?\s*", "", str(plan.get("overview") or ""), flags=re.I).strip()
-    if not plan.get("total_est_miles"):
-        plan["total_est_miles"] = sum(int(d.get("est_miles") or 0) for d in normalized_days)
+    expected_overnight_days = {
+        int(day.get("day") or 0)
+        for day in normalized_days
+        if int(day.get("est_miles") or 0) > 0 and int(day.get("day") or 0) < duration
+    }
+    overnight_days = {
+        int(wp.get("day") or 0)
+        for wp in normalized_wps
+        if wp.get("type") in {"camp", "motel"}
+    }
+    missing_overnight = sorted(day for day in expected_overnight_days if day not in overnight_days)
+    if missing_overnight:
+        planner_warnings.append(f"Missing overnight waypoint for day(s): {', '.join(str(d) for d in missing_overnight)}.")
+    plan["planner_warnings"] = [*plan.get("planner_warnings", []), *planner_warnings] if isinstance(plan.get("planner_warnings"), list) else planner_warnings
+    plan["total_est_miles"] = sum(int(d.get("est_miles") or 0) for d in normalized_days)
     return plan
 
 

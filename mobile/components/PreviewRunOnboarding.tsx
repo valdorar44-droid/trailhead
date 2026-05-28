@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Modal, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ColorPalette, mono, useTheme } from '@/lib/design';
-import { useStore } from '@/lib/store';
 import { TrailheadButton, TrailheadButtonDock, TrailheadSheet } from '@/components/TrailheadUI';
 
 type TourItem = {
@@ -15,8 +14,8 @@ type TourItem = {
 
 const TOUR_ITEMS: TourItem[] = [
   {
-    title: 'Find trails in the current map view',
-    body: 'Use the area search on Map, switch it to Trail, then search where you are looking.',
+    title: 'Search camps or trails in this view',
+    body: 'Open Search this view on Map, choose Camps or Trails, then search the map area you are looking at.',
     icon: 'trail-sign-outline',
   },
   {
@@ -25,13 +24,18 @@ const TOUR_ITEMS: TourItem[] = [
     icon: 'albums-outline',
   },
   {
+    title: 'Build a trail for free',
+    body: 'Use the map button to drop anchors along a trail, snap the route, then save or follow it.',
+    icon: 'git-branch-outline',
+  },
+  {
     title: 'Plan from the AI tab',
     body: 'Ask Trailhead for routes, rig fit, fuel, camps, weather, and trip adjustments.',
     icon: 'compass-outline',
   },
   {
     title: 'Check offline before you go',
-    body: 'Offline readiness tells you what maps, trails, reports, and routing data are loaded.',
+    body: 'Downloads are free for everyone. Offline readiness tells you what maps, trails, places, and routing data are loaded.',
     icon: 'cloud-done-outline',
   },
 ];
@@ -41,12 +45,7 @@ export default function PreviewRunOnboarding() {
   const s = useMemo(() => styles(C), [C]);
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const runId = useStore(st => st.guidedTourRunId);
   const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    if (runId > 0) setVisible(true);
-  }, [runId]);
 
   function close(action?: 'map' | 'plan') {
     setVisible(false);

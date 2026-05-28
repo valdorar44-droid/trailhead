@@ -41,6 +41,7 @@ import { TrailheadSheet } from '@/components/TrailheadUI';
 interface WebDownloadOpts { bufferKm?: number; minZ?: number; maxZ?: number; vectorOnly?: boolean; label: string; n?: number; s?: number; e?: number; w?: number; }
 
 type RegionGroupKey = 'west' | 'central' | 'southeast' | 'northeastMidwest' | 'international' | 'europe';
+const PLACE_PACK_ORDER = ['essentials', 'services', 'outdoors', 'camps', 'water'];
 
 const REGION_GROUPS: Array<{
   key: RegionGroupKey;
@@ -217,11 +218,11 @@ function StateReadinessPanel({
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
         <View style={{ flex: 1 }}>
           <Text style={{ color: ready ? C.green : C.text, fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 }}>
-            {ready ? 'REGION OFFLINE READY' : navReady ? 'NAV READY · PLACES OPTIONAL' : available ? 'REGION NEEDS DOWNLOADS' : 'REGION PACKS COMING SOON'}
+            {ready ? 'READY OFFLINE' : navReady ? 'NAVIGATION READY · PLACES OPTIONAL' : available ? 'DOWNLOADS NEEDED' : 'REGION COMING SOON'}
           </Text>
           <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 3, lineHeight: 13 }}>
             {available
-              ? 'Maps, routing, and trail systems are saved separately so you can choose only what you need.'
+              ? 'Map, navigation, places, topo, and trails are saved separately so you can choose only what you need.'
               : 'This region is coming soon. Download buttons will appear when the packs are ready.'}
           </Text>
         </View>
@@ -239,7 +240,7 @@ function StateReadinessPanel({
       </View>
       <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
         <ReadinessRow icon="map-outline" label={mapReady ? 'MAP ON DEVICE' : available ? 'MAP MISSING' : 'MAP PLANNED'} ready={mapReady} />
-        <ReadinessRow icon="git-branch-outline" label={routeReady ? 'ROUTE ON DEVICE' : available ? 'ROUTE MISSING' : 'ROUTE PLANNED'} ready={routeReady} />
+        <ReadinessRow icon="git-branch-outline" label={routeReady ? 'NAVIGATION ON DEVICE' : available ? 'NAVIGATION MISSING' : 'NAVIGATION PLANNED'} ready={routeReady} />
         <ReadinessRow icon="trail-sign-outline" label={trailReady ? 'TRAILS ON DEVICE' : trailAvailable ? 'TRAILS OPTIONAL' : 'TRAILS PLANNED'} ready={trailReady} />
         <ReadinessRow icon="analytics-outline" label={contourReady ? 'CONTOURS ON DEVICE' : contourAvailable ? 'CONTOURS OPTIONAL' : 'CONTOURS PLANNED'} ready={contourReady} />
         <ReadinessRow icon="location-outline" label={placeLabel} ready={placeReady} />
@@ -403,7 +404,7 @@ function ConusCard({
       {isComplete && (
         <View style={{ margin: 12, marginTop: 0, padding: 10, backgroundColor: C.green + '15', borderRadius: 6, borderWidth: 1, borderColor: C.green + '30' }}>
           <Text style={{ color: C.green, fontSize: 9, fontFamily: mono, fontWeight: '700', letterSpacing: 0.5 }}>
-            {completeTitle ?? '✓ FILE ON DEVICE — READY OFFLINE'}
+            {completeTitle ?? 'READY OFFLINE'}
           </Text>
           <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 2 }}>
             {completeText ?? 'File downloaded. Trailhead can use this pack when the matching offline engine is available.'}
@@ -435,7 +436,7 @@ function StateRow({ code, st, isCached, isDownloading, isActive, progress, onDow
         {isCached ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Ionicons name="checkmark-circle" size={12} color={C.green} />
-            <Text style={{ color: C.green, fontSize: 9, fontFamily: mono, fontWeight: '700' }}>CACHED</Text>
+            <Text style={{ color: C.green, fontSize: 9, fontFamily: mono, fontWeight: '700' }}>READY</Text>
             <TouchableOpacity onPress={onDelete} style={{ padding: 4 }}>
               <Ionicons name="trash-outline" size={14} color={C.red} />
             </TouchableOpacity>
@@ -463,7 +464,7 @@ function StateRow({ code, st, isCached, isDownloading, isActive, progress, onDow
         <View style={{ paddingHorizontal: 4, paddingBottom: 8 }}>
           <ShimmerBar pct={progress ?? 0} />
           <Text style={{ color: C.text3, fontSize: 8, fontFamily: mono, marginTop: 4 }}>
-            Downloading tiles — keep app open
+            Downloading map data — keep app open
           </Text>
         </View>
       )}
@@ -563,7 +564,7 @@ export default function OfflineModal({
     const points = routePoints.length >= 2 ? routePoints : waypoints;
     const bounds = routeCorridorBounds(points, 0.22);
     if (!bounds) {
-      setPackError('Route corridor needs at least two mapped trip points.');
+      setPackError('Trip download needs at least two mapped trip points.');
       return;
     }
     startMlnPack(name, bounds, 10, 15);
@@ -614,16 +615,26 @@ export default function OfflineModal({
         waypoints: mappedWaypoints.map(w => ({ lat: w.lat, lng: w.lng, name: w.name, day: w.day, type: w.type })),
         route_coords: usableRoute,
       });
-      await saveOfflinePlacePack(pack);
+      await saveOfflinePlacePack(pack, placePacks.filter(item => item.trip_id === tripId || item.region_id === selectedState).map(item => item.pack_id));
       await reloadPlacePacks();
       onOfflinePlacesChanged?.();
-      Alert.alert('Essentials saved', `${pack.points.length} places are now available with this trip offline.`);
+      Alert.alert('Trip places saved', `${pack.points.length} fuel, camp, and place pins are ready offline with this trip.`);
     } catch (e: any) {
       setPlaceError(e?.message ?? 'Could not save trip essentials.');
     } finally {
       setPlaceBusy(false);
     }
-  }, [onOfflinePlacesChanged, placeBusy, reloadPlacePacks, routeCoords, tripId, tripName, waypoints]);
+  }, [onOfflinePlacesChanged, placeBusy, placePacks, reloadPlacePacks, routeCoords, selectedState, tripId, tripName, waypoints]);
+
+  const downloadTripBundle = useCallback(async () => {
+    if (!waypoints.length) {
+      setPlaceError('Plan a trip first, then Trailhead can save its map, navigation, and places.');
+      return;
+    }
+    const name = (tripName ?? 'Trip') + '-corridor';
+    await authorizeAndRun(`trip:${name}`, 'trip_corridor', name, tripName ?? 'Trip download', () => startTripCorridor(name));
+    await downloadTripEssentials();
+  }, [authorizeAndRun, downloadTripEssentials, startTripCorridor, tripName, waypoints.length]);
 
   const deleteTripEssentials = useCallback(async (packId: string) => {
     await deleteOfflinePlacePack(packId);
@@ -634,7 +645,11 @@ export default function OfflineModal({
   const currentPlacePack = placePacks.find(pack => tripId && pack.trip_id === tripId);
   const currentManifestPlacePacks = Object.entries(placeManifest?.packs ?? {})
     .filter(([, entry]) => entry.region_id === selectedState)
-    .sort(([, a], [, b]) => a.pack_id.localeCompare(b.pack_id));
+    .sort(([, a], [, b]) => {
+      const ai = PLACE_PACK_ORDER.indexOf(a.pack_id);
+      const bi = PLACE_PACK_ORDER.indexOf(b.pack_id);
+      return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi) || a.pack_id.localeCompare(b.pack_id);
+    });
   const selectRegion = useCallback((id: string) => {
     setSelectedState(id);
     setSelectedRegionGroup(regionGroupFor(id));
@@ -646,7 +661,7 @@ export default function OfflineModal({
     setPlaceError(null);
     try {
       const pack = await api.getPlacePack(selectedState, packId);
-      await saveOfflinePlacePack(pack);
+      await saveOfflinePlacePack(pack, placePacks.filter(item => item.trip_id === tripId || item.region_id === selectedState).map(item => item.pack_id));
       await reloadPlacePacks();
       onOfflinePlacesChanged?.();
       Alert.alert('Places saved', `${pack.name} saved ${pack.points.length} places for offline use.`);
@@ -655,7 +670,7 @@ export default function OfflineModal({
     } finally {
       setPlaceBusy(false);
     }
-  }, [onOfflinePlacesChanged, placeBusy, reloadPlacePacks, selectedState]);
+  }, [onOfflinePlacesChanged, placeBusy, placePacks, reloadPlacePacks, selectedState, tripId]);
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -667,8 +682,8 @@ export default function OfflineModal({
           <View style={s.header}>
             <View style={s.headerAccent} />
             <View style={{ flex: 1 }}>
-              <Text style={s.title}>OFFLINE MAPS</Text>
-              <Text style={s.subtitle}>Download territories for dead-zone navigation</Text>
+              <Text style={s.title}>OFFLINE DOWNLOADS</Text>
+              <Text style={s.subtitle}>Map, navigation, places, topo, and trails for no-signal travel</Text>
             </View>
             <TouchableOpacity onPress={onClose} style={s.closeBtn}>
               <Ionicons name="close" size={18} color={C.text3} />
@@ -684,7 +699,7 @@ export default function OfflineModal({
                 onPress={() => setActiveTab(tab)}
               >
                 <Text style={[s.tabText, activeTab === tab && s.tabTextActive]}>
-                  {tab === 'areas' ? 'LARGE AREAS' : 'REGIONS'}
+                  {tab === 'areas' ? 'TRIP DOWNLOAD' : 'REGIONS'}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -693,7 +708,7 @@ export default function OfflineModal({
           {!user ? (
             <View style={s.noUser}>
               <Ionicons name="lock-closed-outline" size={24} color={C.text3} />
-              <Text style={s.noUserText}>SIGN IN TO DOWNLOAD OFFLINE MAPS</Text>
+              <Text style={s.noUserText}>SIGN IN TO DOWNLOAD MAPS, NAVIGATION, AND PLACES</Text>
             </View>
           ) : (
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: bottomPad + 28 }}>
@@ -727,7 +742,7 @@ export default function OfflineModal({
                   </View>
                   <ShimmerBar pct={packProgress?.percentage ?? 0} />
                   <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 4 }}>
-                    {packProgress?.completedTiles ?? 0} / {packProgress?.expectedTiles ?? '?'} tiles
+                    {packProgress?.completedTiles ?? 0} / {packProgress?.expectedTiles ?? '?'} items
                     {(packProgress?.sizeMb ?? 0) > 0 ? `  ·  ${packProgress?.sizeMb.toFixed(1)} MB` : ''}
                   </Text>
                 </View>
@@ -743,10 +758,32 @@ export default function OfflineModal({
               {/* ══════════════════ AREAS TAB ═══════════════════════════ */}
               {activeTab === 'areas' && (
                 <>
-                  <Section label="CONTINENTAL US — FILE DOWNLOAD" />
+                  <Section label="DOWNLOAD THIS TRIP" />
+                  {waypoints.length > 0 ? (
+                    <TouchableOpacity
+                      disabled={placeBusy || !!activePackName || !!webIsDownloading}
+                      style={[s.tripBundleCard, (currentPlacePack || activePackName || webIsDownloading) && { borderColor: C.green + '44' }]}
+                      onPress={downloadTripBundle}
+                    >
+                      <View style={s.tripBundleIcon}>
+                        <Ionicons name="cloud-download-outline" size={22} color={C.orange} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.tripBundleTitle}>{(tripName ?? 'CURRENT TRIP').toUpperCase()}</Text>
+                        <Text style={s.tripBundleText}>Saves route coverage plus fuel, camp, and place pins for offline discovery.</Text>
+                      </View>
+                      <StatusChip label={placeBusy || activePackName || webIsDownloading ? 'BUSY' : currentPlacePack ? 'REFRESH' : 'DOWNLOAD'} color={placeBusy || activePackName || webIsDownloading ? C.text3 : C.orange} />
+                    </TouchableOpacity>
+                  ) : (
+                    <View style={s.noTrip}>
+                      <Text style={{ color: C.text3, fontSize: 10, fontFamily: mono, textAlign: 'center' }}>
+                        PLAN A TRIP FIRST TO DOWNLOAD IT
+                      </Text>
+                    </View>
+                  )}
+                  <Section label="CONTINENTAL US — MAP" />
                   <Text style={s.hint}>
-                    Single-stream download — 100× faster than tile-by-tile.
-                    All offline downloads are included. Use Wi-Fi for large packs and keep the app open for the fastest transfer.
+                    Download large map coverage before remote travel. Use Wi-Fi for big regions and keep the app open for the fastest transfer.
                   </Text>
                   <ConusCard
                     state={conusState}
@@ -759,7 +796,7 @@ export default function OfflineModal({
                   />
 
                   {/* Trip corridor */}
-                  <Section label="TRIP CORRIDOR — ROUTE LINE DOWNLOAD" />
+                  <Section label="TRIP DOWNLOAD — MAP + NAVIGATION" />
                   {waypoints.length > 0 ? (() => {
                     const name   = (tripName ?? 'Trip') + '-corridor';
                     const cached = useNativeMap
@@ -779,7 +816,7 @@ export default function OfflineModal({
                             {(tripName ?? 'CURRENT TRIP').toUpperCase()}
                           </Text>
                           <Text style={{ color: C.text2, fontSize: 10, fontFamily: mono, marginTop: 2 }}>
-                            ~10 mi corridor · z10–z15 · vector tiles · trails + roads
+                            Route map and navigation coverage around your planned drive.
                           </Text>
                           {busy && (
                             <Text style={{ color: C.orange, fontSize: 9, fontFamily: mono, marginTop: 3 }}>
@@ -790,7 +827,7 @@ export default function OfflineModal({
                           )}
                         </View>
                         {cached
-                          ? <StatusChip label="CACHED" color={C.green} />
+                          ? <StatusChip label="READY OFFLINE" color={C.green} />
                           : <StatusChip label={busy ? 'BUSY' : 'DOWNLOAD'} color={busy ? C.text3 : C.orange} />
                         }
                       </TouchableOpacity>
@@ -798,12 +835,12 @@ export default function OfflineModal({
                   })() : (
                     <View style={s.noTrip}>
                       <Text style={{ color: C.text3, fontSize: 10, fontFamily: mono, textAlign: 'center' }}>
-                        PLAN A TRIP FIRST TO DOWNLOAD ITS CORRIDOR
+                        PLAN A TRIP FIRST TO DOWNLOAD IT
                       </Text>
                     </View>
                   )}
 
-                  <Section label="TRIP ESSENTIALS — PLACES DOWNLOAD" />
+                  <Section label="TRIP DOWNLOAD — PLACES" />
                   {waypoints.length > 0 ? (
                     <View style={[s.corridorCard, currentPlacePack && { borderLeftColor: C.green }]}>
                       <View style={{ flex: 1 }}>
@@ -811,7 +848,7 @@ export default function OfflineModal({
                           {(tripName ?? 'CURRENT TRIP').toUpperCase()} PLACES
                         </Text>
                         <Text style={{ color: C.text2, fontSize: 10, fontFamily: mono, marginTop: 2, lineHeight: 14 }}>
-                          Fuel, water, trailheads, viewpoints, peaks, and hot springs near the route. Saves to the map for offline use.
+                          Camps, fuel, water, trailheads, viewpoints, peaks, and hot springs near the route. Saves to the map for offline use.
                         </Text>
                         {currentPlacePack && (
                           <Text style={{ color: C.green, fontSize: 9, fontFamily: mono, marginTop: 4 }}>
@@ -851,7 +888,7 @@ export default function OfflineModal({
                   {/* Downloaded packs */}
                   {mlnPacks.length > 0 && (
                     <>
-                      <Section label="DOWNLOADED PACKS — TAP TO DELETE" />
+                      <Section label="READY OFFLINE — TAP TO DELETE" />
                       {mlnPacks.map(pack => (
                         <View key={pack.name} style={s.packRow}>
                           <Ionicons name="checkmark-circle" size={12} color={C.green} />
@@ -872,10 +909,9 @@ export default function OfflineModal({
               {/* ══════════════════ REGIONS TAB ═════════════════════════ */}
               {activeTab === 'regions' && (
                 <>
-                  <Section label="REGIONS — MAP + ROUTING PACKS" />
+                  <Section label="REGIONS — MAP + NAVIGATION" />
                   <Text style={s.hint}>
-                    Pick a region, then download the map file and routing graph separately. U.S. states, Canada, and Mexico are available now.
-                    Offline maps, routing, contours, trail systems, and place packs are included. Use Wi-Fi for large regions.
+                    Pick a region, then download the map and navigation packs you need. Topo, trails, and places can be added when available.
                   </Text>
 
                   <View style={s.featuredRegionRow}>
@@ -898,7 +934,7 @@ export default function OfflineModal({
                             <Text style={s.featuredRegionTitle}>{region.name}</Text>
                             <Text style={s.featuredRegionSub} numberOfLines={2}>{region.description}</Text>
                             <Text style={[s.featuredRegionStatus, mapDone && routeDone && { color: C.green }]}>
-                              {mapDone && routeDone ? `READY${contourDone ? ' · TOPO' : ''}` : `MAP ${mapDone ? 'ON' : 'OFF'} · ROUTE ${routeDone ? 'ON' : 'OFF'}`}
+                              {mapDone && routeDone ? `READY${contourDone ? ' · TOPO' : ''}` : `MAP ${mapDone ? 'ON' : 'OFF'} · NAV ${routeDone ? 'ON' : 'OFF'}`}
                             </Text>
                           </View>
                         </TouchableOpacity>
@@ -968,7 +1004,7 @@ export default function OfflineModal({
                                 </View>
                                 <Text style={s.statePickName} numberOfLines={1}>{region.name}</Text>
                                 <Text style={{ color: mapDone && routeDone ? C.green : C.text3, fontSize: 8, fontFamily: mono, marginTop: 4 }}>
-                                  {`${mapDone || mapPublished ? 'MAP' : '--'} · ${routeDone || routePublished ? 'ROUTE' : '--'} · ${trailDone || trailPublished ? 'TRAILS' : '--'} · ${contourDone || contourPublished ? 'TOPO' : '--'} · ${placesDone || placesPublished ? 'PLACES' : '--'}`}
+                                  {`${mapDone || mapPublished ? 'MAP' : '--'} · ${routeDone || routePublished ? 'NAV' : '--'} · ${trailDone || trailPublished ? 'TRAILS' : '--'} · ${contourDone || contourPublished ? 'TOPO' : '--'} · ${placesDone || placesPublished ? 'PLACES' : '--'}`}
                                 </Text>
                               </TouchableOpacity>
                             );
@@ -999,7 +1035,9 @@ export default function OfflineModal({
                     const selectedCode = selectedState === 'canada' ? 'CAN' : selectedState === 'mexico' ? 'MEX' : selectedState.toUpperCase();
                     const savedRegionPlacePacks = placePacks.filter(pack => pack.region_id === selectedState);
                     const savedRegionPlaceCount = savedRegionPlacePacks.reduce((sum, pack) => sum + (pack.point_count || 0), 0);
-                    const regionPlacesAvailable = currentManifestPlacePacks.length > 0;
+                    const waterPlacePackAvailable = currentManifestPlacePacks.some(([, entry]) => entry.pack_id === 'water');
+                    const waterPlacePackDefinition = selectedState.length === 2 ? placeManifest?.definitions?.water : undefined;
+                    const regionPlacesAvailable = currentManifestPlacePacks.length > 0 || !!waterPlacePackDefinition;
                     const regionPlacesReady = savedRegionPlacePacks.length > 0;
                     const regionPlacesLabel = regionPlacesReady
                       ? `PLACES ${savedRegionPlaceCount}`
@@ -1027,7 +1065,7 @@ export default function OfflineModal({
                               authorizeAndRun(`map:${selectedState}`, 'state_map', selectedState, `${label} map`, () => startDownload(selectedState));
                             }
                             if (routingState.status === 'idle' || routingState.status === 'error') {
-                              authorizeAndRun(`route:${selectedState}`, 'state_route', selectedState, `${label} routing`, () => startRoutingDownload(selectedState));
+                              authorizeAndRun(`route:${selectedState}`, 'state_route', selectedState, `${label} navigation`, () => startRoutingDownload(selectedState));
                             }
                             if (mapState.status === 'paused') resumeDownload(selectedState);
                             if (routingState.status === 'paused') resumeRoutingDownload(selectedState);
@@ -1050,7 +1088,7 @@ export default function OfflineModal({
                             </View>
                             <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
                               <StatusChip label={mapPublished ? 'MAP READY' : `MAP ~${mapRegion.estimatedGb} GB`} color={mapPublished ? C.green : C.text3} />
-                              <StatusChip label={routePublished ? 'ROUTE READY' : `ROUTE ~${routingRegion?.estimatedGb ?? 0} GB`} color={routePublished ? C.green : C.text3} />
+                              <StatusChip label={routePublished ? 'NAV READY' : `NAV ~${routingRegion?.estimatedGb ?? 0} GB`} color={routePublished ? C.green : C.text3} />
                             </View>
                             {'storageNote' in mapRegion && (
                               <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 10 }}>
@@ -1060,7 +1098,7 @@ export default function OfflineModal({
                           </View>
                         ) : (
                           <>
-                        <Section label={`${mapRegion.name.toUpperCase()} — MAP DETAILS`} />
+                        <Section label={`${mapRegion.name.toUpperCase()} — MAP`} />
                         <ConusCard
                           state={mapState}
                           totalBytes={getTotalBytes(selectedState)}
@@ -1074,20 +1112,20 @@ export default function OfflineModal({
                           completeText="Roads, trails, towns, parks, and labels are available offline for this region."
                         />
 
-                        <Section label={`${mapRegion.name.toUpperCase()} — ROUTING DETAILS`} />
+                        <Section label={`${mapRegion.name.toUpperCase()} — NAVIGATION`} />
                         <ConusCard
                           state={routingState}
                           totalBytes={getRoutingTotalBytes(selectedState)}
                           region={routingRegion as any}
                           code={selectedCode}
-                          onStart={() => authorizeAndRun(`route:${selectedState}`, 'state_route', selectedState, `${mapRegion.name} routing`, () => startRoutingDownload(selectedState))}
+                          onStart={() => authorizeAndRun(`route:${selectedState}`, 'state_route', selectedState, `${mapRegion.name} navigation`, () => startRoutingDownload(selectedState))}
                           onPause={() => pauseRoutingDownload(selectedState)}
                           onResume={() => resumeRoutingDownload(selectedState)}
                           onDelete={() => deleteRoutingDownload(selectedState)}
-                          completeTitle="ROUTING SAVED"
+                          completeTitle="NAVIGATION SAVED"
                           completeText="Offline driving routes can use this region without needing signal."
                         />
-                        <Section label={`${mapRegion.name.toUpperCase()} — TRAIL SYSTEMS`} />
+                        <Section label={`${mapRegion.name.toUpperCase()} — TRAILS`} />
                         {trailPublished ? (
                           <ConusCard
                             state={trailState}
@@ -1117,9 +1155,9 @@ export default function OfflineModal({
                         )}
                           </>
                         )}
-                        {currentManifestPlacePacks.length > 0 && (
+                        {(currentManifestPlacePacks.length > 0 || waterPlacePackDefinition) && (
                           <>
-                            <Section label={`${mapRegion.name.toUpperCase()} — PLACES DETAILS`} />
+                            <Section label={`${mapRegion.name.toUpperCase()} — PLACES`} />
                             {currentManifestPlacePacks.map(([manifestKey, manifestEntry]) => {
                               const saved = placePacks.find(pack => pack.region_id === selectedState && pack.pack_id === `${selectedState}-${manifestEntry.pack_id}`);
                               const def = placeManifest?.definitions?.[manifestEntry.pack_id];
@@ -1127,7 +1165,7 @@ export default function OfflineModal({
                                 <View key={manifestKey} style={[s.corridorCard, { marginBottom: 10 }, saved && { borderLeftColor: C.green }]}>
                                   <View style={{ flex: 1 }}>
                                     <Text style={{ color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '800' }}>
-                                      {(def?.name ?? manifestEntry.pack_id).toUpperCase()} PLACES
+                                      {manifestEntry.pack_id === 'camps' ? 'CAMPS' : manifestEntry.pack_id === 'water' ? 'WATER + NAV' : `${(def?.name ?? manifestEntry.pack_id).toUpperCase()} PLACES`}
                                     </Text>
                                     <Text style={{ color: C.text2, fontSize: 10, fontFamily: mono, marginTop: 2, lineHeight: 14 }}>
                                       {def?.description ?? 'Offline places saved as map pins.'}
@@ -1161,9 +1199,25 @@ export default function OfflineModal({
                                 </View>
                               );
                             })}
+                            {!waterPlacePackAvailable && waterPlacePackDefinition && (
+                              <View style={[s.corridorCard, { marginBottom: 10, opacity: 0.72 }]}>
+                                <View style={{ flex: 1 }}>
+                                  <Text style={{ color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '800' }}>
+                                    WATER + NAV
+                                  </Text>
+                                  <Text style={{ color: C.text2, fontSize: 10, fontFamily: mono, marginTop: 2, lineHeight: 14 }}>
+                                    {waterPlacePackDefinition.description}
+                                  </Text>
+                                  <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 4 }}>
+                                    Uploading for {mapRegion.name}. The download button appears here when this state pack is live.
+                                  </Text>
+                                </View>
+                                <StatusChip label="UPLOADING" color={C.orange} />
+                              </View>
+                            )}
                           </>
                         )}
-                        <Section label={`${mapRegion.name.toUpperCase()} — TOPO CONTOURS`} />
+                        <Section label={`${mapRegion.name.toUpperCase()} — TOPO`} />
                         {contourPublished ? (
                           <ConusCard
                             state={contourState}
@@ -1174,8 +1228,8 @@ export default function OfflineModal({
                             onPause={() => pauseContourDownload(selectedState)}
                             onResume={() => resumeContourDownload(selectedState)}
                             onDelete={() => deleteContourDownload(selectedState)}
-                            completeTitle="✓ CONTOURS ON DEVICE"
-                            completeText="Topo contour lines are saved as a separate overlay pack, so base maps stay lean."
+                            completeTitle="TOPO SAVED"
+                            completeText="Topo contour lines are ready as an offline map layer."
                           />
                         ) : (
                           <View style={s.contourPlannedCard}>
@@ -1250,6 +1304,17 @@ function makeStyles(C: ColorPalette) {
       flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14,
       backgroundColor: C.s1, borderRadius: 10, borderLeftWidth: 3, borderLeftColor: C.orange,
     },
+    tripBundleCard: {
+      minHeight: 82, flexDirection: 'row', alignItems: 'center', gap: 12,
+      backgroundColor: C.s1, borderRadius: 14, borderWidth: 1, borderColor: C.orange + '44',
+      padding: 14, marginBottom: 10,
+    },
+    tripBundleIcon: {
+      width: 46, height: 46, borderRadius: 14, alignItems: 'center', justifyContent: 'center',
+      backgroundColor: C.orangeGlow, borderWidth: 1, borderColor: C.orange + '55',
+    },
+    tripBundleTitle: { color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '900' },
+    tripBundleText: { color: C.text3, fontSize: 10, lineHeight: 14, marginTop: 3 },
     noTrip: {
       padding: 20, backgroundColor: C.s1, borderRadius: 10, alignItems: 'center',
       borderWidth: 1, borderColor: C.border, borderStyle: 'dashed',

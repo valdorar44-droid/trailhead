@@ -42,3 +42,32 @@ Canada should later be split into province packs so users do not have to downloa
 3. POI/place packs by region and trip corridor.
 4. Terrain/contour packs from the owned Copernicus DEM pipeline in
    `docs/offline-contour-pipeline.md`.
+
+## Planner Region Follow-Up Registry
+
+AI Planner support should stay constrained to downloadable and routable regions until each region has map coverage, navigation coverage, place-pack coverage, and camp legality guidance.
+
+Current planner regions:
+
+- United States
+- Canada
+- Mexico
+- Finland
+
+Research before enabling:
+
+- Australia
+- New Zealand
+- Norway
+- Sweden
+- Iceland
+- Spain and Portugal
+- South Africa
+
+Minimum enablement checklist:
+
+- Map pack exists and is advertised in the download manifest.
+- Navigation pack exists or the region is explicitly online-only.
+- Fuel, camp, government-place, trailhead, viewpoint, and service-place enrichment has at least one reliable source.
+- Public camping rules are summarized well enough for the planner to avoid fake dispersed-camping claims.
+- The onboarding/download UI can explain the region's offline readiness without technical pack names.

@@ -25,7 +25,7 @@ import * as FileSystem from 'expo-file-system';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useStore } from '@/lib/store';
-import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile, MapCardResolveResponse } from '@/lib/api';
+import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile, MapCardResolveResponse, WaterNavigationLinesResponse, WaterConditionsResponse, WaterSpotCard, WaterSpotCardsResponse, FishingConditionsResponse, SuggestedWaterCorridorResponse } from '@/lib/api';
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { deleteRouteGeometry, loadRouteGeometry, saveRouteGeometry } from '@/lib/offlineRoutes';
 import { loadOfflineTrail, saveOfflineTrail } from '@/lib/offlineTrails';
@@ -140,6 +140,12 @@ interface SearchPlace {
   photos?: TrailheadGalleryPhoto[];
   google_maps_uri?: string; attribution?: string;
   summary?: string; access_note?: string; distance_mi?: number; route_distance_mi?: number; confidence?: string;
+  route_progress?: number; route_progress_mi?: number; route_segment_index?: number; source_badge?: string;
+  waterbody_name?: string; waterbody_type?: string; access?: string; craft?: string;
+  fishing_score?: number; fishing_score_label?: string; fish_species?: string | string[];
+  stocking_notes?: string; regulations_url?: string; gauge_url?: string; chart_url?: string; chart_source?: string;
+  navigation_feature?: string; hazard_type?: string; mark_color?: string; mark_shape?: string; light_character?: string; depth_ft?: number; max_draft_ft?: number;
+  weather_url?: string; tides_url?: string; safety_url?: string; navigation_note?: string; source_freshness?: string;
 };
 
 type SelectedPlaceContext = {
@@ -152,8 +158,20 @@ type SelectedPlaceContext = {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type WP = { lat: number; lng: number; name: string; day: number; type: string };
+type WP = { lat: number; lng: number; name: string; day: number; type: string; route_point_type?: 'side_stop' | 'break' | 'through' };
+type TripPlaceContext = {
+  day: number;
+  label: string;
+  legLabel?: string;
+  route_distance_mi?: number;
+  route_progress?: number;
+  route_progress_mi?: number;
+  route_segment_index?: number;
+  source?: string;
+};
 type MapLayer = 'satellite' | 'topo' | 'hybrid';
+type WaterCorridorPickMode = 'start' | 'end' | null;
+type WaterCorridorPoint = { lat: number; lng: number; name: string };
 type DiscoveryMode = 'camps' | 'trails';
 type TrailDiscoveryScope = 'nearby' | 'view';
 type TrailRouteIntent = 'segment' | 'out_back' | 'loop' | 'far_end' | 'capture';
@@ -294,6 +312,8 @@ function campSummaryText(camp?: CampsitePin | null, detail?: CampsiteDetail | nu
     (detail as any)?.summary,
     detail?.description,
     camp?.description,
+    detail?.source_freshness,
+    camp?.source_freshness,
     (detail as any)?.access_note,
   ]
     .map(cleanCampDescriptionText)
@@ -421,6 +441,70 @@ function routeFitLabel(item?: { route_distance_mi?: number | null; route_progres
     routeProgressLabel(item.route_progress),
   ].filter(Boolean);
   return bits.join(' · ');
+}
+
+function campTags(camp: Partial<CampsitePin> | OsmPoi | null | undefined): string[] {
+  const anyCamp = (camp ?? {}) as any;
+  const raw = [
+    ...(Array.isArray(anyCamp.tags) ? anyCamp.tags : []),
+    ...(Array.isArray(anyCamp.site_types) ? anyCamp.site_types : []),
+    anyCamp.land_type,
+    anyCamp.source_badge,
+    anyCamp.verified_source,
+    anyCamp.source,
+    anyCamp.subtype,
+    anyCamp.cost,
+    anyCamp.description,
+  ];
+  const text = raw.filter(Boolean).join(' ').toLowerCase();
+  const tags = new Set(raw.filter(v => typeof v === 'string').map(v => String(v).toLowerCase().replace(/\s+/g, '_')));
+  if (text.includes('dispersed') || text.includes('primitive') || text.includes('boondock')) tags.add('dispersed');
+  if (text.includes('primitive')) tags.add('primitive');
+  if (text.includes('rv') || text.includes('hookup') || text.includes('caravan')) tags.add('rv');
+  if (text.includes('tent')) tags.add('tent');
+  if (text.includes('walk-in') || text.includes('walk in') || text.includes('hike-in')) tags.add('walk_in');
+  if (text.includes('blm') || text.includes('bureau_of_land_management')) tags.add('blm');
+  if (text.includes('usfs') || text.includes('national_forest') || text.includes('forest_service')) tags.add('usfs');
+  if (text.includes('nps') || text.includes('national_park')) tags.add('nps');
+  if (text.includes('state_park')) tags.add('state');
+  if (text.includes('corps') || text.includes('army_corps')) tags.add('corps');
+  if (text.includes('free') || text.includes('no_fee')) tags.add('free');
+  if (anyCamp.ada || text.includes('accessible') || text.includes('wheelchair')) tags.add('ada');
+  if (anyCamp.reservable) tags.add('reservable');
+  return Array.from(tags);
+}
+
+function campKind(camp: Partial<CampsitePin> | OsmPoi | null | undefined) {
+  const tags = new Set(campTags(camp));
+  if (tags.has('dispersed') || tags.has('primitive')) return 'dispersed';
+  if (tags.has('blm')) return 'blm';
+  if (tags.has('usfs')) return 'usfs';
+  if (tags.has('nps')) return 'nps';
+  if (tags.has('state')) return 'state';
+  if (tags.has('corps')) return 'corps';
+  if (tags.has('rv')) return 'rv';
+  if (tags.has('reservable')) return 'reservable';
+  if (tags.has('tent')) return 'tent';
+  return 'camp';
+}
+
+function campKindCode(kind: string) {
+  if (kind === 'dispersed') return 'd';
+  if (kind === 'primitive') return 'p';
+  if (kind === 'rv') return 'R';
+  if (kind === 'tent') return 'T';
+  if (kind === 'blm') return 'B';
+  if (kind === 'usfs') return 'F';
+  if (kind === 'nps') return 'N';
+  if (kind === 'state') return 'S';
+  if (kind === 'corps') return 'W';
+  return 'C';
+}
+
+function campMatchesFilters(camp: Partial<CampsitePin> | OsmPoi, filters: string[]) {
+  if (!filters.length) return true;
+  const tags = new Set(campTags(camp));
+  return filters.some(filter => tags.has(filter));
 }
 
 function trailGeometryCoords(fc?: GeoJSON.FeatureCollection | null): [number, number][] {
@@ -713,6 +797,14 @@ function routeSamplePoints(coords: [number, number][], maxSamples = 3): Array<{ 
     .map(([lng, lat]) => ({ lat, lng }));
 }
 
+function compactCoords(coords: [number, number][], maxPoints = 96): [number, number][] {
+  if (coords.length <= maxPoints) return coords;
+  return Array.from({ length: maxPoints }, (_, i) => {
+    const idx = Math.round((coords.length - 1) * (i / Math.max(1, maxPoints - 1)));
+    return coords[idx];
+  }).filter(Boolean);
+}
+
 function trailSourceLine(trail: TrailFeature, profile?: TrailProfile | null) {
   const source = profile?.source_label || trail.source_label || (trail.source === 'offline_places' ? 'Offline place pack' : trail.source === 'trailhead' ? 'Trailhead profile' : 'OpenStreetMap');
   const ts = profile?.last_checked || trail.last_checked;
@@ -806,6 +898,30 @@ function pointSegmentDistanceMi(
   const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)));
   const projected = { lat: ay + t * dy, lng: (ax + t * dx) / Math.cos(refLat) };
   return haversineKm(point.lat, point.lng, projected.lat, projected.lng) * 0.621371;
+}
+
+function pointSegmentProjection(
+  point: { lat: number; lng: number },
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number }
+) {
+  const refLat = ((point.lat + a.lat + b.lat) / 3) * Math.PI / 180;
+  const px = point.lng * Math.cos(refLat), py = point.lat;
+  const ax = a.lng * Math.cos(refLat), ay = a.lat;
+  const bx = b.lng * Math.cos(refLat), by = b.lat;
+  const dx = bx - ax, dy = by - ay;
+  if (dx === 0 && dy === 0) {
+    return {
+      progress: 0,
+      distance_mi: haversineKm(point.lat, point.lng, a.lat, a.lng) * 0.621371,
+    };
+  }
+  const progress = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)));
+  const projected = { lat: ay + progress * dy, lng: (ax + progress * dx) / Math.cos(refLat) };
+  return {
+    progress,
+    distance_mi: haversineKm(point.lat, point.lng, projected.lat, projected.lng) * 0.621371,
+  };
 }
 
 function coordDistanceM(a: [number, number], b: [number, number]): number {
@@ -1657,9 +1773,26 @@ const DEFAULT_PLACE_FILTERS = ['attraction', 'trailhead', 'viewpoint', 'peak', '
 const LEGACY_DEFAULT_PLACE_FILTERS = ['trailhead', 'viewpoint', 'water', 'fuel', 'dump'];
 const ESSENTIAL_PLACE_CATEGORIES = 'camp,camping,trailhead,viewpoint,peak,hot_spring,water,mechanic,parking,dump,propane,fuel';
 const EXPLORE_PLACE_FILTER_IDS = PLACE_FILTER_TYPES.filter(t => t.group === 'explore').map(t => t.id);
+const WATER_ACCESS_FILTER_TYPES = [
+  { id: 'fishing_access', label: 'Fishing', icon: 'fish-outline', color: '#15803d' },
+  { id: 'boat_ramp', label: 'Boat Ramps', icon: 'boat-outline', color: '#1d4ed8' },
+  { id: 'paddle_launch', label: 'Paddle', icon: 'navigate-circle-outline', color: '#0f766e' },
+  { id: 'marina', label: 'Marinas', icon: 'business-outline', color: '#0891b2' },
+  { id: 'dock', label: 'Docks', icon: 'remove-outline', color: '#0369a1' },
+  { id: 'shore_access', label: 'Shore Access', icon: 'footsteps-outline', color: '#0e7490' },
+  { id: 'navigation_aid', label: 'Buoys / Markers', icon: 'flag-outline', color: '#7c3aed' },
+  { id: 'channel_marker', label: 'Marked Channels', icon: 'git-branch-outline', color: '#2563eb' },
+  { id: 'water_hazard', label: 'Rocks / Hazards', icon: 'warning-outline', color: '#dc2626' },
+  { id: 'anchorage', label: 'Anchorages', icon: 'boat-outline', color: '#0f766e' },
+  { id: 'lock', label: 'Locks', icon: 'lock-closed-outline', color: '#a16207' },
+] as const;
+const WATER_PLACE_FILTER_IDS = new Set(['boat_ramp', 'paddle_launch', 'fishing_access', 'marina', 'dock', 'shore_access', 'swimming', 'spring', 'water_fill', 'gauge', 'navigation_aid', 'channel_marker', 'water_hazard', 'anchorage', 'lock']);
+const WATER_NAV_PLACE_FILTER_IDS = ['navigation_aid', 'channel_marker', 'water_hazard', 'anchorage', 'lock'];
+const ALL_PLACE_FILTER_IDS = [...PLACE_FILTER_TYPES.map(t => t.id), ...WATER_ACCESS_FILTER_TYPES.map(t => t.id)];
 const SMART_PLACE_CATEGORIES = ESSENTIAL_PLACE_CATEGORIES;
 const UTILITY_PLACE_TYPES = new Set(['fuel', 'propane', 'water', 'dump', 'parking']);
 const TRAIL_DISCOVERY_PIN_TYPES = new Set(['trail', 'trailhead', 'viewpoint', 'peak', 'hot_spring']);
+const CAMP_PLACE_TYPES = new Set(['camp', 'camping', 'informal_camp', 'wild_camp']);
 const DEFAULT_COMMUNITY_PIN_FILTERS = COMMUNITY_PIN_TYPES
   .filter(t => t.id !== 'gpx_import')
   .map(t => t.id);
@@ -1671,6 +1804,145 @@ const MAX_ALL_MAP_POIS = 1200;
 const MAX_VISIBLE_MAP_POIS = 450;
 const MAX_OFFLINE_POI_SCAN = 1800;
 const CAMP_FILTER_IDS = ['blm', 'usfs', 'nps', 'state', 'corps', 'dispersed', 'tent', 'rv', 'walk_in', 'free', 'ada'];
+
+function normalizedWaterSubtype(place: Pick<OsmPoi, 'type' | 'subtype'> & Record<string, any>) {
+  if (String(place.type || '') !== 'water') return '';
+  const subtype = String(place.subtype || '').toLowerCase().replace(/[\s-]+/g, '_');
+  if (subtype === 'tap' || subtype === 'drinking_water' || subtype === 'water_point' || subtype === 'fountain') return 'water';
+  if (subtype === 'spring') return 'water';
+  if (WATER_PLACE_FILTER_IDS.has(subtype)) return subtype;
+  return 'shore_access';
+}
+
+function placeMatchesFilterId(place: OsmPoi, filterId: string) {
+  if (String(place.type || '') !== 'water') {
+    return place.type === filterId || (CAMP_PLACE_TYPES.has(String(place.type || '')) && filterId === 'camping');
+  }
+  const subtype = normalizedWaterSubtype(place);
+  if (filterId === 'water') return true;
+  return subtype === filterId;
+}
+
+function placeMatchesFilters(place: OsmPoi, filters: Set<string>) {
+  if (String(place.type || '') !== 'water') {
+    return filters.has(place.type || 'poi') || (CAMP_PLACE_TYPES.has(String(place.type || '')) && filters.has('camping'));
+  }
+  const subtype = normalizedWaterSubtype(place);
+  return filters.has('water') || filters.has(subtype);
+}
+
+function categoryForPlaceFilter(filterId: string) {
+  return WATER_PLACE_FILTER_IDS.has(filterId) ? 'water' : filterId;
+}
+
+function waterKindLabel(kind?: string): string {
+  switch (String(kind || '').toLowerCase()) {
+    case 'river': return 'River';
+    case 'stream': return 'Stream';
+    case 'canal': return 'Canal';
+    case 'reservoir': return 'Reservoir';
+    case 'lake': return 'Lake';
+    default: return 'Waterbody';
+  }
+}
+
+function isLakeOfTheWoods(lat: number, lng: number, name?: string) {
+  const text = String(name || '').toLowerCase();
+  return text.includes('lake of the woods') || text.includes('lac des bois') || (lat >= 48.35 && lat <= 49.55 && lng >= -95.65 && lng <= -93.35);
+}
+
+function isLikelyCanadianWater(lat: number, lng: number, name?: string) {
+  if (isLakeOfTheWoods(lat, lng, name)) return true;
+  if (lng >= -141.5 && lng <= -52 && lat >= 49) return true;
+  if (lng >= -67.5 && lng <= -52 && lat >= 43) return true;
+  return false;
+}
+
+function waterChartContext(lat: number, lng: number, name?: string) {
+  if (isLikelyCanadianWater(lat, lng, name)) {
+    return {
+      chart_source: 'CHS NONNA bathymetry (non-navigational) for Canadian waters; Lake of the Woods also has CHS chart 6201 official chart context.',
+      chart_url: 'https://www.chs.gc.ca/data-gestion/nonna/index-eng.html',
+      safety_url: 'https://tc.canada.ca/en/marine-transportation/marine-safety/boating-safety',
+      navigation_note: 'NONNA bathymetry is not for navigation. Verify with official CHS charts, local markers, water levels, weather, and required safety gear before boating.',
+    };
+  }
+  return {
+    chart_source: 'NOAA chart layer where coverage exists; many inland lakes may not have charted depth or hazard data.',
+    chart_url: 'https://www.nauticalcharts.noaa.gov/charts/noaa-enc.html',
+    safety_url: 'https://www.uscgboating.org/',
+    navigation_note: 'Waterbody context only. Use the NOAA chart layer where available for depth soundings, channels, aids, and hazards; check NWS alerts, water levels, local closures, required safety gear, and official charts before boating.',
+  };
+}
+
+function mapWaterbodyPlace(lat: number, lng: number, name?: string, kind?: string): OsmPoi {
+  const waterbodyType = String(kind || '').toLowerCase() || 'waterbody';
+  const cleanName = cleanDisplayLabel(String(name || waterKindLabel(waterbodyType)));
+  const chart = waterChartContext(lat, lng, cleanName);
+  return {
+    id: `map_water_${lat.toFixed(5)}_${lng.toFixed(5)}`,
+    name: cleanName,
+    lat,
+    lng,
+    type: 'water',
+    category: 'water',
+    subtype: waterbodyType,
+    source: 'map_waterbody',
+    source_label: 'Map waterbody',
+    source_badge: 'Map waterbody',
+    source_freshness: 'Base map water feature. Depths, channels, hazards, and access rules require official/current sources.',
+    waterbody_name: cleanName,
+    waterbody_type: waterbodyType,
+    access: 'see nearby access points',
+    craft: 'verify local restrictions',
+    fishing_score_label: 'Unknown fishing quality',
+    chart_source: chart.chart_source,
+    chart_url: chart.chart_url,
+    weather_url: `https://forecast.weather.gov/MapClick.php?lat=${lat.toFixed(5)}&lon=${lng.toFixed(5)}`,
+    tides_url: 'https://tidesandcurrents.noaa.gov/',
+    safety_url: chart.safety_url,
+    navigation_note: chart.navigation_note,
+  } as OsmPoi;
+}
+
+function mapWaterNavigationPlace(props: Record<string, any>, lat: number, lng: number): OsmPoi {
+  const subtype = String(props.subtype || props.kind || 'navigation_aid').toLowerCase();
+  const name = cleanDisplayLabel(String(props.name || props.label || props.navigation_feature || 'Water navigation point'));
+  const chart = waterChartContext(lat, lng, name);
+  const isHazard = subtype === 'water_hazard';
+  return {
+    id: String(props.id || `map_water_nav_${lat.toFixed(5)}_${lng.toFixed(5)}`),
+    name,
+    lat,
+    lng,
+    type: 'water',
+    category: 'water',
+    subtype,
+    source: 'openseamap',
+    source_label: String(props.source || 'OpenStreetMap / OpenSeaMap'),
+    source_badge: 'OpenSeaMap / OSM',
+    source_freshness: String(props.source_freshness || 'Open seamark data; verify against official charts and local markers.'),
+    waterbody_name: name,
+    waterbody_type: 'navigation',
+    access: 'verify locally',
+    craft: 'boating context',
+    fishing_score_label: 'Navigation context',
+    chart_source: chart.chart_source,
+    chart_url: chart.chart_url,
+    weather_url: `https://forecast.weather.gov/MapClick.php?lat=${lat.toFixed(5)}&lon=${lng.toFixed(5)}`,
+    tides_url: 'https://tidesandcurrents.noaa.gov/',
+    safety_url: chart.safety_url,
+    navigation_feature: cleanDisplayLabel(String(props.navigation_feature || props.label || props.seamark_type || subtype)),
+    hazard_type: cleanDisplayLabel(String(props.hazard_type || (isHazard ? props.seamark_type || subtype : ''))),
+    mark_color: cleanDisplayLabel(String(props.mark_color || props.marker_color || '')),
+    mark_shape: cleanDisplayLabel(String(props.mark_shape || '')),
+    light_character: cleanDisplayLabel(String(props.light_character || '')),
+    depth_ft: Number.isFinite(Number(props.depth_ft)) ? Number(props.depth_ft) : undefined,
+    max_draft_ft: Number.isFinite(Number(props.max_draft_ft)) ? Number(props.max_draft_ft) : undefined,
+    navigation_note: String(props.navigation_note || 'Open seamark data only. Use official charts, local markers, water levels, weather, and required safety gear before boating.'),
+  } as OsmPoi;
+}
+
 type MapFilterPreferences = {
   mapLayer?: MapLayer;
   activeFilters?: string[];
@@ -1683,6 +1955,7 @@ type MapFilterPreferences = {
   layerAva?: boolean;
   layerRadar?: boolean;
   layerMvum?: boolean;
+  layerNautical?: boolean;
 };
 
 type CommunityPinTypeId = typeof COMMUNITY_PIN_TYPES[number]['id'];
@@ -1900,6 +2173,10 @@ function cleanDisplayLabel(value: string): string {
     .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+  const normalized = withoutEmoji.toLowerCase().replace(/_/g, ' ');
+  if (normalized === 'camp site') return 'Tent camp';
+  if (normalized === 'caravan site') return 'RV/caravan site';
+  if (normalized === 'primitive camp' || normalized === 'basic camp') return 'Primitive camp';
   const words = withoutEmoji.split(' ');
   if (words.length >= 2 && words[0].toLowerCase() === words[1].toLowerCase()) {
     return words.slice(1).join(' ');
@@ -2277,7 +2554,7 @@ const buildMapHtml = (
   var _routeLoading=false;
   var routeIsProper=false;
   var showLandOverlay=false,showUsgsOverlay=false;
-  var showTerrainLayer=false,showNaipLayer=false,showFireLayer=false,showAvaLayer=false,showRadarLayer=false,showMvumLayer=false,showRoadsLayer=false;
+  var showTerrainLayer=false,showNaipLayer=false,showFireLayer=false,showAvaLayer=false,showRadarLayer=false,showMvumLayer=false,showRoadsLayer=false,showNauticalLayer=false;
   var radarFrames=[],radarFrameIdx=0,radarTimer=null;
   var _mvumTimer=null,_roadsTimer=null;
   var routeOpts={avoidTolls:false,avoidHighways:false,backRoads:false,noFerries:false};
@@ -2295,6 +2572,7 @@ const buildMapHtml = (
   function setAvaLayer(show){showAvaLayer=show;if(!map||!mapReady)return;if(show){if(!map.getSource('ava')){map.addSource('ava',{type:'geojson',data:{type:'FeatureCollection',features:[]}});fetch('https://api.avalanche.org/v2/public/products/map-layer').then(function(r){return r.json();}).then(function(d){if(map.getSource('ava'))map.getSource('ava').setData(d);}).catch(function(){});}if(!map.getLayer('ava-fill'))map.addLayer({id:'ava-fill',type:'fill',source:'ava',paint:{'fill-color':['match',['get','danger_level'],'1','#50C878','2','#FFD700','3','#FF8C00','4','#E63946','5','#1a0a0a','#888888'],'fill-opacity':0.45}},map.getLayer('water-name')?'water-name':undefined);if(!map.getLayer('ava-line'))map.addLayer({id:'ava-line',type:'line',source:'ava',paint:{'line-color':['match',['get','danger_level'],'1','#50C878','2','#FFD700','3','#FF8C00','4','#E63946','5','#1a0a0a','#888888'],'line-width':1.5}});}else{['ava-line','ava-fill'].forEach(function(l){if(map.getLayer(l))map.removeLayer(l);});if(map.getSource('ava'))map.removeSource('ava');}}
 
   function setRadarLayer(show){showRadarLayer=show;if(!map||!mapReady)return;if(radarTimer){clearInterval(radarTimer);radarTimer=null;}if(map.getLayer('radar-layer'))map.removeLayer('radar-layer');if(map.getSource('radar'))map.removeSource('radar');if(!show)return;fetch('https://api.rainviewer.com/public/weather-maps.json').then(function(r){return r.json();}).then(function(d){radarFrames=(d.radar&&d.radar.past)||[];if(!radarFrames.length)return;radarFrameIdx=radarFrames.length-1;var ts=radarFrames[radarFrameIdx].time;map.addSource('radar',{type:'raster',tiles:['https://tilecache.rainviewer.com/v2/radar/'+ts+'/256/{z}/{x}/{y}/2/1_1.png'],tileSize:256});map.addLayer({id:'radar-layer',type:'raster',source:'radar',paint:{'raster-opacity':0.65}});radarTimer=setInterval(function(){if(!showRadarLayer||!map.getSource('radar'))return;radarFrameIdx=(radarFrameIdx+1)%radarFrames.length;map.getSource('radar').setTiles(['https://tilecache.rainviewer.com/v2/radar/'+radarFrames[radarFrameIdx].time+'/256/{z}/{x}/{y}/2/1_1.png']);},900);}).catch(function(){});}
+  function setNauticalLayer(show){showNauticalLayer=show;if(!map||!mapReady)return;['noaa-charts-layer','chs-nonna-layer'].forEach(function(l){if(map.getLayer(l))map.removeLayer(l);});['noaa-charts','chs-nonna'].forEach(function(s){if(map.getSource(s))map.removeSource(s);});if(!show)return;map.addSource('chs-nonna',{type:'raster',tiles:[apiBase+'/api/chs-nonna-tile/{z}/{x}/{y}'],tileSize:256,minzoom:0,maxzoom:18,attribution:'Canadian Hydrographic Service NONNA - non-navigational bathymetry'});map.addSource('noaa-charts',{type:'raster',tiles:[apiBase+'/api/noaa-chart-tile/{z}/{x}/{y}'],tileSize:256,minzoom:0,maxzoom:16,attribution:'NOAA Office of Coast Survey'});var before=map.getLayer('route-shadow')?'route-shadow':undefined;map.addLayer({id:'chs-nonna-layer',type:'raster',source:'chs-nonna',paint:{'raster-opacity':0.78}},before);map.addLayer({id:'noaa-charts-layer',type:'raster',source:'noaa-charts',paint:{'raster-opacity':0.82}},before);}
 
   function _fetchMvum(){if(!showMvumLayer||!map)return;var b=map.getBounds();var env=JSON.stringify({xmin:b.getWest(),ymin:b.getSouth(),xmax:b.getEast(),ymax:b.getNorth(),spatialReference:{wkid:4326}});var base='https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_MVUM_01/MapServer/';var params='where=1%3D1&geometry='+encodeURIComponent(env)+'&geometryType=esriGeometryEnvelope&inSR=4326&outSR=4326&returnGeometry=true&f=geojson&resultRecordCount=2000';var rUrl=base+'1/query?'+params+'&outFields=name%2Csymbol%2Cmvum_symbol_name%2Cpassengervehicle%2Chighclearancevehicle%2Cseasonal%2Cforestname';var tUrl=base+'2/query?'+params+'&outFields=name%2Csymbol%2Cmvum_symbol_name%2Cpassengervehicle%2Chighclearancevehicle%2Cseasonal%2Cforestname%2Ctrailstatus';Promise.all([fetch(rUrl).then(function(r){return r.json();}),fetch(tUrl).then(function(r){return r.json();})]).then(function(res){if(map.getSource('mvum-roads')&&res[0].features)map.getSource('mvum-roads').setData(res[0]);if(map.getSource('mvum-trails')&&res[1].features)map.getSource('mvum-trails').setData(res[1]);}).catch(function(){});}
 
@@ -2631,6 +2909,7 @@ const buildMapHtml = (
       if(showFireLayer)setFireLayer(true);
       if(showAvaLayer)setAvaLayer(true);
       if(showRadarLayer)setRadarLayer(true);
+      if(showNauticalLayer)setNauticalLayer(true);
       if(showMvumLayer)setMvumLayer(true);
       if(showRoadsLayer)setRoadsLayer(true);
     });
@@ -2661,6 +2940,22 @@ const buildMapHtml = (
       if(e.defaultPrevented)return;
       try{
         // Detection uses Protomaps schema - "kind" prop on pois/roads source layers.
+        // In Safe Water mode, water/chart context wins over base-map campsite POIs.
+        if(showNauticalLayer){
+          var navFs=map.queryRenderedFeatures(e.point,{layers:['water-nav-aid','water-nav-code','water-nav-line']});
+          if(navFs&&navFs.length){
+            var nf=navFs[0], np=nf.properties||{}, nc=(nf.geometry&&nf.geometry.type==='Point'&&nf.geometry.coordinates)||[e.lngLat.lng,e.lngLat.lat];
+            postRN({type:'poi_tapped',poi:Object.assign({},np,{id:np.id||('water_nav_'+e.lngLat.lat.toFixed(5)+'_'+e.lngLat.lng.toFixed(5)),lat:nc[1]||e.lngLat.lat,lng:nc[0]||e.lngLat.lng,type:'water',category:'water',subtype:np.subtype||np.kind||'channel_marker',source:'openseamap',source_label:np.source||'OpenStreetMap / OpenSeaMap',source_badge:'OpenSeaMap / OSM',navigation_feature:np.navigation_feature||np.label||np.seamark_type||np.kind,navigation_note:np.navigation_note||'Open seamark data only. Verify against official charts, local markers, water levels, and weather.'})});
+            return;
+          }
+          var safeWaterFs=map.queryRenderedFeatures(e.point,{layers:['water-poly','water-river']});
+          if(safeWaterFs&&safeWaterFs.length){
+            var swf=safeWaterFs[0];
+            var swp=swf.properties||{};
+            postRN({type:'waterbody_tapped',name:swp.name||'',kind:swp.kind||swp.water||swp.waterway||'',lat:e.lngLat.lat,lng:e.lngLat.lng});
+            return;
+          }
+        }
         // 1. Camp/shelter/trailhead POI hits — single-pixel test
         var ptFs=map.queryRenderedFeatures(e.point);
         for(var ci=0;ci<ptFs.length;ci++){
@@ -2687,6 +2982,14 @@ const buildMapHtml = (
             return;
           }
         }
+        // 3. Water polygons/lines — tap a lake/river surface for safety/chart context.
+        var waterFs=map.queryRenderedFeatures(e.point,{layers:['water-poly','water-river']});
+        if(waterFs&&waterFs.length){
+          var wf=waterFs[0];
+          var wp=wf.properties||{};
+          postRN({type:'waterbody_tapped',name:wp.name||'',kind:wp.kind||wp.water||wp.waterway||'',lat:e.lngLat.lat,lng:e.lngLat.lng});
+          return;
+        }
       }catch(x){}
       postRN({type:'map_tapped'});
     });
@@ -2705,12 +3008,27 @@ const buildMapHtml = (
   }
 
   // ── GeoJSON helpers ───────────────────────────────────────────────────────────
-  function campFeat(c){return{type:'Feature',geometry:{type:'Point',coordinates:[c.lng,c.lat]},properties:{id:c.id||'',name:c.name||'',land_type:c.land_type||'Campground',cost:c.cost||'',ada:c.ada?1:0,reservable:c.reservable?1:0,full:c.full||0,raw:JSON.stringify(c)}};}
+  function campKind(c){
+    var raw=[].concat(c.tags||[],c.site_types||[],[c.land_type,c.source_badge,c.verified_source,c.source,c.cost,c.description]).filter(Boolean).join(' ').toLowerCase();
+    if(raw.indexOf('dispersed')>=0||raw.indexOf('primitive')>=0||raw.indexOf('boondock')>=0)return'dispersed';
+    if(raw.indexOf('blm')>=0||raw.indexOf('bureau of land management')>=0)return'blm';
+    if(raw.indexOf('usfs')>=0||raw.indexOf('national forest')>=0||raw.indexOf('forest service')>=0)return'usfs';
+    if(raw.indexOf('nps')>=0||raw.indexOf('national park')>=0)return'nps';
+    if(raw.indexOf('state park')>=0)return'state';
+    if(raw.indexOf('corps')>=0)return'corps';
+    if(raw.indexOf('rv')>=0||raw.indexOf('hookup')>=0||raw.indexOf('caravan')>=0)return'rv';
+    if(c.reservable)return'reservable';
+    if(raw.indexOf('tent')>=0)return'tent';
+    return'camp';
+  }
+  function campCode(kind){return kind==='dispersed'?'d':kind==='rv'?'R':kind==='tent'?'T':kind==='blm'?'B':kind==='usfs'?'F':kind==='nps'?'N':kind==='state'?'S':kind==='corps'?'W':'C';}
+  function campFeat(c){var kind=campKind(c);return{type:'Feature',geometry:{type:'Point',coordinates:[c.lng,c.lat]},properties:{id:c.id||'',name:c.name||'',land_type:c.land_type||'Campground',camp_kind:kind,camp_code:campCode(kind),cost:c.cost||'',ada:c.ada?1:0,reservable:c.reservable?1:0,full:c.full||0,raw:JSON.stringify(c)}};}
 
   function setupSources(){
     if(!map.getSource('camps'))map.addSource('camps',{type:'geojson',data:{type:'FeatureCollection',features:[]},cluster:true,clusterMaxZoom:11,clusterRadius:45});
     if(!map.getSource('gas'))map.addSource('gas',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
     if(!map.getSource('pois'))map.addSource('pois',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
+    if(!map.getSource('water-nav-lines'))map.addSource('water-nav-lines',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
     if(!map.getSource('route'))map.addSource('route',{type:'geojson',data:{type:'Feature',geometry:{type:'LineString',coordinates:[]}}});
     if(!map.getSource('route-passed'))map.addSource('route-passed',{type:'geojson',data:{type:'Feature',geometry:{type:'LineString',coordinates:[]}}});
     if(!map.getSource('breadcrumb'))map.addSource('breadcrumb',{type:'geojson',data:{type:'Feature',geometry:{type:'LineString',coordinates:[]}}});
@@ -2724,16 +3042,22 @@ const buildMapHtml = (
     _a('route-line',{id:'route-line',type:'line',source:'route',layout:{'line-cap':'round','line-join':'round'},paint:{'line-color':'#f97316','line-width':5,'line-opacity':0.94}});
     /* Dimmed overlay for segments already driven — renders on top of route-line */
     _a('route-passed-line',{id:'route-passed-line',type:'line',source:'route-passed',layout:{'line-cap':'round','line-join':'round'},paint:{'line-color':'#374151','line-width':5,'line-opacity':0.72}});
+    _a('water-nav-line-casing',{id:'water-nav-line-casing',type:'line',source:'water-nav-lines',filter:['==',['geometry-type'],'LineString'],layout:{'line-cap':'round','line-join':'round'},paint:{'line-color':'#04111f','line-width':['interpolate',['linear'],['zoom'],8,4,13,7,16,10],'line-opacity':0.82}});
+    _a('water-nav-recommended-glow',{id:'water-nav-recommended-glow',type:'line',source:'water-nav-lines',filter:['all',['==',['geometry-type'],'LineString'],['==',['get','kind'],'recommended_track']],layout:{'line-cap':'round','line-join':'round'},paint:{'line-color':'#67e8f9','line-width':['interpolate',['linear'],['zoom'],8,6,13,11,16,15],'line-opacity':0.22,'line-blur':2.5}});
+    _a('water-nav-line',{id:'water-nav-line',type:'line',source:'water-nav-lines',filter:['==',['geometry-type'],'LineString'],layout:{'line-cap':'round','line-join':'round'},paint:{'line-color':['match',['get','kind'],'marked_channel','#22c55e','recommended_track','#38bdf8','range_line','#f59e0b','traffic_lane','#818cf8','deep_water_route','#2563eb','#06b6d4'],'line-width':['interpolate',['linear'],['zoom'],8,2,13,4,16,6],'line-opacity':0.95}});
+    _a('water-nav-hazard-halo',{id:'water-nav-hazard-halo',type:'circle',source:'water-nav-lines',filter:['all',['==',['geometry-type'],'Point'],['==',['get','kind'],'water_hazard']],paint:{'circle-radius':['interpolate',['linear'],['zoom'],8,12,13,20,16,28],'circle-color':'#ef4444','circle-opacity':0.18,'circle-blur':0.9}});
+    _a('water-nav-aid',{id:'water-nav-aid',type:'circle',source:'water-nav-lines',filter:['==',['geometry-type'],'Point'],paint:{'circle-radius':['interpolate',['linear'],['zoom'],8,5,13,8,16,11],'circle-color':['match',['get','marker_color'],'red','#dc2626','green','#16a34a','yellow','#eab308','white','#f8fafc','black','#111827','hazard','#ef4444','channel','#2563eb','#7c3aed'],'circle-opacity':0.94,'circle-stroke-width':2,'circle-stroke-color':'#fff'}});
+    _a('water-nav-code',{id:'water-nav-code',type:'symbol',source:'water-nav-lines',filter:['==',['geometry-type'],'Point'],layout:{'text-field':['coalesce',['get','code'],'M'],'text-size':9.5,'text-font':['DIN Offc Pro Medium','Arial Unicode MS Bold'],'text-allow-overlap':true,'text-ignore-placement':true},paint:{'text-color':'#fff','text-halo-color':'rgba(0,0,0,0.45)','text-halo-width':0.9}});
     _a('gas-circle',{id:'gas-circle',type:'circle',source:'gas',paint:{'circle-radius':9,'circle-color':'#eab308','circle-opacity':0.92,'circle-stroke-width':2,'circle-stroke-color':'#fff'}});
     _a('gas-code',{id:'gas-code',type:'symbol',source:'gas',layout:{'text-field':'F','text-size':10,'text-font':['DIN Offc Pro Medium','Arial Unicode MS Bold'],'text-allow-overlap':true,'text-ignore-placement':true},paint:{'text-color':'#111827','text-halo-color':'rgba(255,255,255,0.55)','text-halo-width':0.8}});
     _a('gas-label',{id:'gas-label',type:'symbol',source:'gas',filter:['>=',['zoom'],13],layout:{'text-field':['get','name'],'text-size':9,'text-offset':[0,1.5],'text-anchor':'top'},paint:{'text-color':'#f1f5f9','text-halo-color':'rgba(0,0,0,0.85)','text-halo-width':1.5}});
-    _a('poi-circle',{id:'poi-circle',type:'circle',source:'pois',paint:{'circle-radius':['case',['==',['get','type'],'peak'],9,8],'circle-color':['match',['get','type'],'trail','#f97316','water','#3b82f6','trailhead','#22c55e','trail_note','#16a34a','overlook','#0ea5e9','crossing','#0284c7','gate','#d97706','trail_closure','#dc2626','rock_art','#a855f7','cell_signal','#2563eb','trash','#64748b','wildlife','#7c3aed','viewpoint','#a855f7','peak','#92400e','hot_spring','#f97316','camp','#16a34a','informal_camp','#65a30d','wild_camp','#15803d','fuel','#ea580c','propane','#f97316','dump','#a16207','gpx_import','#64748b','#6b7280'],'circle-opacity':0.9,'circle-stroke-width':1.5,'circle-stroke-color':'#fff'}});
-    _a('poi-code',{id:'poi-code',type:'symbol',source:'pois',layout:{'text-field':['match',['get','type'],'trail','T','water','W','trailhead','T','trail_note','N','overlook','V','crossing','X','gate','G','trail_closure','C','rock_art','S','cell_signal','C','trash','R','wildlife','W','viewpoint','V','peak','P','hot_spring','H','camp','C','informal_camp','C','wild_camp','C','fuel','G','propane','P','dump','D','gpx_import','X','P'],'text-size':9.5,'text-font':['DIN Offc Pro Medium','Arial Unicode MS Bold'],'text-allow-overlap':true,'text-ignore-placement':true},paint:{'text-color':'#fff','text-halo-color':'rgba(0,0,0,0.35)','text-halo-width':0.8}});
+    _a('poi-circle',{id:'poi-circle',type:'circle',source:'pois',paint:{'circle-radius':['case',['==',['get','type'],'peak'],9,8],'circle-color':['case',['==',['get','type'],'water'],['match',['get','subtype'],'boat_ramp','#1d4ed8','paddle_launch','#0f766e','fishing_access','#15803d','marina','#0891b2','dock','#0369a1','shore_access','#0e7490','swimming','#06b6d4','gauge','#64748b','navigation_aid','#7c3aed','channel_marker','#2563eb','water_hazard','#dc2626','anchorage','#0f766e','lock','#a16207','#3b82f6'],['match',['get','type'],'trail','#f97316','trailhead','#22c55e','trail_note','#16a34a','overlook','#0ea5e9','crossing','#0284c7','gate','#d97706','trail_closure','#dc2626','rock_art','#a855f7','cell_signal','#2563eb','trash','#64748b','wildlife','#7c3aed','viewpoint','#a855f7','peak','#92400e','hot_spring','#f97316','camp','#16a34a','informal_camp','#65a30d','wild_camp','#15803d','fuel','#ea580c','propane','#f97316','dump','#a16207','gpx_import','#64748b','#6b7280']],'circle-opacity':0.9,'circle-stroke-width':1.5,'circle-stroke-color':'#fff'}});
+    _a('poi-code',{id:'poi-code',type:'symbol',source:'pois',layout:{'text-field':['case',['==',['get','type'],'water'],['match',['get','subtype'],'boat_ramp','R','paddle_launch','P','fishing_access','F','marina','M','dock','D','shore_access','S','swimming','S','gauge','G','navigation_aid','A','channel_marker','C','water_hazard','!','anchorage','A','lock','L','W'],['match',['get','type'],'trail','T','trailhead','T','trail_note','N','overlook','V','crossing','X','gate','G','trail_closure','C','rock_art','S','cell_signal','C','trash','R','wildlife','W','viewpoint','V','peak','P','hot_spring','H','camp','C','informal_camp','C','wild_camp','C','fuel','G','propane','P','dump','D','gpx_import','X','P']],'text-size':9.5,'text-font':['DIN Offc Pro Medium','Arial Unicode MS Bold'],'text-allow-overlap':true,'text-ignore-placement':true},paint:{'text-color':'#fff','text-halo-color':'rgba(0,0,0,0.35)','text-halo-width':0.8}});
     _a('poi-label',{id:'poi-label',type:'symbol',source:'pois',filter:['>=',['zoom'],12],layout:{'text-field':['case',['all',['==',['get','type'],'peak'],['has','elevation']],['concat',['get','name'],'\\n▲ ',['get','elevation']],['get','name']],'text-size':['case',['==',['get','type'],'peak'],10,9],'text-offset':[0,1.3],'text-anchor':'top','text-max-width':10},paint:{'text-color':['case',['==',['get','type'],'peak'],'#d97706','#f1f5f9'],'text-halo-color':['case',['==',['get','type'],'peak'],'rgba(255,255,255,0.95)','rgba(0,0,0,0.85)'],'text-halo-width':2}});
-    _a('camp-cluster',{id:'camp-cluster',type:'circle',source:'camps',filter:['has','point_count'],paint:{'circle-color':['step',['get','point_count'],'#14b8a6',10,'#f97316',50,'#ef4444'],'circle-radius':['step',['get','point_count'],18,10,25,50,32],'circle-opacity':0.88,'circle-stroke-width':2,'circle-stroke-color':'#fff'}});
+    _a('camp-cluster',{id:'camp-cluster',type:'circle',source:'camps',filter:['has','point_count'],paint:{'circle-color':['step',['get','point_count'],'#6b7280',10,'#52525b',50,'#3f3f46'],'circle-radius':['step',['get','point_count'],18,10,25,50,32],'circle-opacity':0.88,'circle-stroke-width':2,'circle-stroke-color':'#fff'}});
     _a('camp-count',{id:'camp-count',type:'symbol',source:'camps',filter:['has','point_count'],layout:{'text-field':'{point_count_abbreviated}','text-size':12,'text-font':['DIN Offc Pro Medium','Arial Unicode MS Bold']},paint:{'text-color':'#fff'}});
-    _a('camp-circle',{id:'camp-circle',type:'circle',source:'camps',filter:['!',['has','point_count']],paint:{'circle-radius':['interpolate',['linear'],['zoom'],9,7,13,11],'circle-color':['match',['get','land_type'],'BLM Land','#f97316','National Forest','#22c55e','National Park','#3b82f6','State Park','#8b5cf6','Campground','#14b8a6','#14b8a6'],'circle-opacity':0.88,'circle-stroke-width':['case',['==',['get','full'],1],3,2],'circle-stroke-color':['case',['==',['get','full'],1],'#ef4444','rgba(255,255,255,0.9)']}});
-    _a('camp-code',{id:'camp-code',type:'symbol',source:'camps',filter:['!',['has','point_count']],layout:{'text-field':'C','text-size':10,'text-font':['DIN Offc Pro Medium','Arial Unicode MS Bold'],'text-allow-overlap':true,'text-ignore-placement':true},paint:{'text-color':'#fff','text-halo-color':'rgba(0,0,0,0.35)','text-halo-width':0.8}});
+    _a('camp-circle',{id:'camp-circle',type:'circle',source:'camps',filter:['!',['has','point_count']],paint:{'circle-radius':['interpolate',['linear'],['zoom'],9,7,13,11],'circle-color':['match',['get','camp_kind'],'dispersed','#8b5a2b','primitive','#92400e','rv','#2563eb','tent','#16a34a','blm','#f97316','usfs','#22c55e','nps','#3b82f6','state','#8b5cf6','corps','#0284c7','reservable','#8b5cf6','#14b8a6'],'circle-opacity':0.9,'circle-stroke-width':['case',['==',['get','full'],1],3,2],'circle-stroke-color':['case',['==',['get','full'],1],'#ef4444','rgba(255,255,255,0.9)']}});
+    _a('camp-code',{id:'camp-code',type:'symbol',source:'camps',filter:['!',['has','point_count']],layout:{'text-field':['get','camp_code'],'text-size':['case',['==',['get','camp_kind'],'dispersed'],11,10],'text-font':['DIN Offc Pro Medium','Arial Unicode MS Bold'],'text-allow-overlap':true,'text-ignore-placement':true},paint:{'text-color':'#fff','text-halo-color':'rgba(0,0,0,0.35)','text-halo-width':0.8}});
     _a('camp-full-badge',{id:'camp-full-badge',type:'circle',source:'camps',filter:['all',['!',['has','point_count']],['==',['get','full'],1]],paint:{'circle-radius':5,'circle-color':'#ef4444','circle-stroke-width':1.5,'circle-stroke-color':'#fff','circle-translate':[7,-7],'circle-opacity':0.95}});
     _a('camp-label',{id:'camp-label',type:'symbol',source:'camps',filter:['all',['!',['has','point_count']],['>=',['zoom'],12]],layout:{'text-field':['get','name'],'text-size':10,'text-offset':[0,1.3],'text-anchor':'top','text-max-width':10},paint:{'text-color':'#f1f5f9','text-halo-color':'rgba(0,0,0,0.85)','text-halo-width':1.5}});
     // Guard: only register click handlers once per map instance, never on style reload
@@ -2742,8 +3066,12 @@ const buildMapHtml = (
     map.on('click','camp-cluster',function(e){var f=map.queryRenderedFeatures(e.point,{layers:['camp-cluster']});if(!f.length)return;map.getSource('camps').getClusterExpansionZoom(f[0].properties.cluster_id,function(err,zoom){if(err)return;map.easeTo({center:f[0].geometry.coordinates,zoom:zoom+0.5});});e.preventDefault();});
     map.on('click','camp-circle',function(e){if(!e.features||!e.features[0])return;var p=e.features[0].properties;var raw;try{raw=JSON.parse(p.raw||'{}');}catch(x){raw=p;}postRN({type:'campsite_tapped',id:raw.id||p.id,name:raw.name||p.name,camp:raw});e.preventDefault();});
     map.on('click','gas-circle',function(e){if(!e.features||!e.features[0])return;var p=e.features[0].properties;new maplibregl.Popup({closeButton:false,offset:12}).setLngLat(e.lngLat).setHTML('<div class="pt">F '+p.name+'</div><div class="pm">Fuel Station</div>').addTo(map);e.preventDefault();});
-    map.on('click','poi-circle',function(e){if(!e.features||!e.features[0])return;var p=e.features[0].properties;var raw;try{raw=JSON.parse(p.raw||'{}');}catch(x){raw=p;}var ic=p.type==='trail'?'T':p.type==='water'?'W':p.type==='trailhead'?'T':p.type==='viewpoint'?'V':p.type==='peak'?'P':p.type==='hot_spring'?'H':p.type==='gpx_import'?'X':p.type==='fuel'?'G':p.type==='propane'?'P':p.type==='dump'?'D':p.type&&p.type.indexOf('camp')>=0?'C':'P';if(p.type==='trail'||p.type==='trailhead'||p.type==='viewpoint'||p.type==='peak'||p.type==='hot_spring'){postRN({type:'poi_tapped',poi:Object.assign({},raw,{lat:raw.lat||e.lngLat.lat,lng:raw.lng||e.lngLat.lng,name:raw.name||p.name,type:raw.type||p.type})});}else{new maplibregl.Popup({closeButton:false,offset:12}).setLngLat(e.lngLat).setHTML('<div class="pt">'+ic+' '+p.name+'</div><div class="pm">'+p.type+'</div>').addTo(map);}e.preventDefault();});
-    ['camp-cluster','camp-circle','gas-circle','poi-circle'].forEach(function(l){map.on('mouseenter',l,function(){map.getCanvas().style.cursor='pointer';});map.on('mouseleave',l,function(){map.getCanvas().style.cursor='';});});
+    map.on('click','poi-circle',function(e){if(!e.features||!e.features[0])return;var p=e.features[0].properties;var raw;try{raw=JSON.parse(p.raw||'{}');}catch(x){raw=p;}var wc={boat_ramp:'R',paddle_launch:'P',fishing_access:'F',marina:'M',dock:'D',shore_access:'S',swimming:'S',gauge:'G',navigation_aid:'A',channel_marker:'C',water_hazard:'!',anchorage:'A',lock:'L'};var ic=p.type==='trail'?'T':p.type==='water'?(wc[p.subtype]||'W'):p.type==='trailhead'?'T':p.type==='viewpoint'?'V':p.type==='peak'?'P':p.type==='hot_spring'?'H':p.type==='gpx_import'?'X':p.type==='fuel'?'G':p.type==='propane'?'P':p.type==='dump'?'D':p.type&&p.type.indexOf('camp')>=0?'C':'P';if(p.type==='trail'||p.type==='trailhead'||p.type==='viewpoint'||p.type==='peak'||p.type==='hot_spring'){postRN({type:'poi_tapped',poi:Object.assign({},raw,{lat:raw.lat||e.lngLat.lat,lng:raw.lng||e.lngLat.lng,name:raw.name||p.name,type:raw.type||p.type})});}else{new maplibregl.Popup({closeButton:false,offset:12}).setLngLat(e.lngLat).setHTML('<div class="pt">'+ic+' '+p.name+'</div><div class="pm">'+p.type+'</div>').addTo(map);}e.preventDefault();});
+    function postWaterNavFeature(e){if(!e.features||!e.features[0])return;var f=e.features[0],p=f.properties||{},cc=(f.geometry&&f.geometry.type==='Point'&&f.geometry.coordinates)||[e.lngLat.lng,e.lngLat.lat];postRN({type:'poi_tapped',poi:Object.assign({},p,{id:p.id||('water_nav_'+e.lngLat.lat.toFixed(5)+'_'+e.lngLat.lng.toFixed(5)),lat:cc[1]||e.lngLat.lat,lng:cc[0]||e.lngLat.lng,type:'water',category:'water',subtype:p.subtype||p.kind||'channel_marker',source:'openseamap',source_label:p.source||'OpenStreetMap / OpenSeaMap',source_badge:'OpenSeaMap / OSM',navigation_feature:p.navigation_feature||p.label||p.seamark_type||p.kind,navigation_note:p.navigation_note||'Open seamark data only. Verify against official charts, local markers, water levels, and weather.'})});e.preventDefault();}
+    map.on('click','water-nav-line',postWaterNavFeature);
+    map.on('click','water-nav-aid',postWaterNavFeature);
+    map.on('click','water-nav-code',postWaterNavFeature);
+    ['camp-cluster','camp-circle','gas-circle','poi-circle','water-nav-line','water-nav-aid','water-nav-code'].forEach(function(l){map.on('mouseenter',l,function(){map.getCanvas().style.cursor='pointer';});map.on('mouseleave',l,function(){map.getCanvas().style.cursor='';});});
   }
 
   function renderWaypoints(){
@@ -2917,27 +3245,47 @@ const buildMapHtml = (
   // ── Routing ───────────────────────────────────────────────────────────────────
   function decodeP6(enc){var coords=[],i=0,lat=0,lng=0;while(i<enc.length){var b,shift=0,res=0;do{b=enc.charCodeAt(i++)-63;res|=(b&0x1f)<<shift;shift+=5;}while(b>=0x20);lat+=res&1?~(res>>1):(res>>1);shift=0;res=0;do{b=enc.charCodeAt(i++)-63;res|=(b&0x1f)<<shift;shift+=5;}while(b>=0x20);lng+=res&1?~(res>>1):(res>>1);coords.push([lng/1e6,lat/1e6]);}return coords;}
 
-  function _fallback(pairs,fromIdx){
+  function _routeLoc(raw,fallbackType){
+    if(typeof raw==='string'){var s=raw.split(',');return{lng:parseFloat(s[0]),lat:parseFloat(s[1]),type:fallbackType||'break'};}
+    var lng=Number(raw.lng!=null?raw.lng:raw.lon);
+    var lat=Number(raw.lat);
+    var type=raw.type||raw.route_point_type||fallbackType||'break';
+    return{lng:lng,lat:lat,type:type==='side_stop'?'side_stop':type==='through'?'through':'break'};
+  }
+  function _normalizeRouteLocs(items,fallbackType){
+    return (items||[]).map(function(item){return _routeLoc(item,fallbackType);}).filter(function(loc){return isFinite(loc.lat)&&isFinite(loc.lng);});
+  }
+  function _routePairs(locs){return locs.map(function(loc){return loc.lng+','+loc.lat;});}
+  function _routeRequiredLocs(locs){
+    var required=locs.filter(function(loc){return loc.type!=='side_stop';});
+    return required.length>=2?required:locs;
+  }
+  function _hasThrough(locs){return locs.some(function(loc){return loc.type==='through';});}
+  function _fallback(routeInputs,fromIdx){
     // If we already have a valid cached route, do NOT overwrite it with straight lines.
     // This preserves the stored route when the Directions API is unreachable offline.
     if(routeIsProper&&_routeCoords.length){_routeLoading=false;return;}
     routeIsProper=false;_routeLoading=false;
-    if(!pairs.length){postRN({type:'route_ready',routed:false,steps:[],legs:[],fromIdx:fromIdx||0,route_source:'fallback-line'});return;}
-    var coords=pairs.map(function(p){var s=p.split(',');return[parseFloat(s[0]),parseFloat(s[1])];});
+    var locs=_routeRequiredLocs(_normalizeRouteLocs(routeInputs));
+    if(!locs.length){postRN({type:'route_ready',routed:false,steps:[],legs:[],fromIdx:fromIdx||0,route_source:'fallback-line'});return;}
+    var coords=locs.map(function(loc){return[loc.lng,loc.lat];});
     _routeCoords=coords;routePts=coords;updateRoute();
     postRN({type:'route_ready',routed:false,steps:[],legs:[],fromIdx:fromIdx||0,route_source:'fallback-line'});
   }
 
-  async function _fetchRoute(pairs,fromIdx){
+  async function _fetchRoute(routeInputs,fromIdx){
     _routeLoading=true;
-    if(routeOpts.backRoads)return _fetchValhalla(pairs,fromIdx);
+    var locs=_normalizeRouteLocs(routeInputs);
+    if(locs.length<2)return _fallback(locs,fromIdx);
+    if(routeOpts.backRoads||_hasThrough(locs))return _fetchValhalla(locs,fromIdx);
     var excl=[];if(routeOpts.avoidTolls)excl.push('toll');if(routeOpts.avoidHighways)excl.push('motorway');if(routeOpts.noFerries)excl.push('ferry');
     var profile=(routeOpts.avoidHighways)?'driving':'driving-traffic';
+    var pairs=_routePairs(locs);
     var url='https://api.mapbox.com/directions/v5/mapbox/'+profile+'/'+pairs.join(';')+'?access_token='+mapboxToken+'&steps=true&geometries=geojson&overview=full&annotations=maxspeed&banner_instructions=true'+(excl.length?'&exclude='+excl.join(','):'');
     try{
       var ctrl=new AbortController();var tid=setTimeout(function(){ctrl.abort();},10000);
       var data=await(await fetch(url,{signal:ctrl.signal})).json();clearTimeout(tid);
-      if(!data.routes||!data.routes[0])return _fetchValhalla(pairs,fromIdx);
+      if(!data.routes||!data.routes[0])return _fetchValhalla(locs,fromIdx);
       var route=data.routes[0];
       _routeCoords=route.geometry.coordinates;routePts=_routeCoords.filter(function(_,i){return i%3===0;});updateRoute();
       var steps=[],legs=[];
@@ -2970,29 +3318,31 @@ const buildMapHtml = (
       postRN({type:'route_ready',routed:true,steps:steps,legs:legs,total_distance:route.distance,total_duration:route.duration,fromIdx:fromIdx||0,route_source:'mapbox'});
       // Persist for offline replay (RN side caches in SecureStore)
       postRN({type:'route_persist',coords:_routeCoords,steps:steps,legs:legs,total_distance:route.distance,total_duration:route.duration,route_source:'mapbox'});
-    }catch(e){_fallback(pairs,fromIdx);}
+    }catch(e){_fallback(locs,fromIdx);}
   }
 
-  async function _fetchValhalla(pairs,fromIdx){
-    var locs=pairs.map(function(p){var s=p.split(',');return{lon:parseFloat(s[0]),lat:parseFloat(s[1])};});
-    var body={locations:locs,options:routeOpts,units:'miles'};
+  async function _fetchValhalla(routeInputs,fromIdx){
+    var locs=_normalizeRouteLocs(routeInputs);
+    if(locs.length<2)return _fallback(locs,fromIdx);
+    var body={locations:locs.map(function(loc){return{lon:loc.lng,lat:loc.lat,type:loc.type||'break'};}),options:routeOpts,units:'miles'};
     try{
       var ctrl=new AbortController();var tid=setTimeout(function(){ctrl.abort();},20000);
       var res=await fetch(apiBase+'/api/route',{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
       var data=await res.json();clearTimeout(tid);
-      if(!res.ok)return _fallback(pairs,fromIdx);
-      if(!data.trip||data.trip.status!==0)return _fallback(pairs,fromIdx);
+      if(!res.ok)return _fallback(locs,fromIdx);
+      if(!data.trip||data.trip.status!==0)return _fallback(locs,fromIdx);
       var all=[],steps=[],legs=[];
       (data.trip.legs||[]).forEach(function(leg){var c=decodeP6(leg.shape||'');all=all.concat(c);var ls=[];(leg.maneuvers||[]).forEach(function(m){var dist=Math.round((m.length||0)*1609.34);var shp=c[m.begin_shape_index];var st={type:m.type===4?'arrive':m.type===1?'depart':'turn',modifier:{0:'',1:'',2:'left',3:'right',4:'arrive',5:'sharp left',6:'sharp right',7:'left',8:'right',9:'uturn',10:'slight left',11:'slight right'}[m.type]||'',name:m.street_names&&m.street_names[0]||'',distance:dist,duration:m.time||0,lat:shp?shp[1]:undefined,lng:shp?shp[0]:undefined,instruction:m.instruction||'',verbalPre:m.verbal_pre_transition_instruction||m.verbal_transition_alert_instruction||'',verbalPost:m.verbal_post_transition_instruction||'',roundaboutExit:Number.isFinite(m.roundabout_exit_count)?m.roundabout_exit_count:null};steps.push(st);ls.push(st);});legs.push(ls);});
       _routeCoords=all;routePts=all.filter(function(_,i){return i%3===0;});updateRoute();
       routeIsProper=true;_routeLoading=false;
-      postRN({type:'route_ready',routed:true,steps:steps,legs:legs,total_distance:Math.round((data.trip.summary.length||0)*1609.34),total_duration:data.trip.summary.time||0,fromIdx:fromIdx||0,route_source:'trailhead-valhalla'});
-      postRN({type:'route_persist',coords:all,steps:steps,legs:legs,total_distance:Math.round((data.trip.summary.length||0)*1609.34),total_duration:data.trip.summary.time||0,route_source:'trailhead-valhalla'});
-    }catch(e){_fallback(pairs,fromIdx);}
+      var src=data._trailhead&&data._trailhead.repair?'trailhead-valhalla-repaired':'trailhead-valhalla';
+      postRN({type:'route_ready',routed:true,steps:steps,legs:legs,total_distance:Math.round((data.trip.summary.length||0)*1609.34),total_duration:data.trip.summary.time||0,fromIdx:fromIdx||0,route_source:src});
+      postRN({type:'route_persist',coords:all,steps:steps,legs:legs,total_distance:Math.round((data.trip.summary.length||0)*1609.34),total_duration:data.trip.summary.time||0,route_source:src});
+    }catch(e){_fallback(locs,fromIdx);}
   }
 
-  async function loadRoute(){if(wps.length<2)return;await _fetchRoute(wps.map(function(w){return w.lng+','+w.lat;}),0);}
-  async function loadRouteFrom(lat,lng,fromIdx){var rem=wps.slice(fromIdx);if(!rem.length){_fallback([],fromIdx);return;}await _fetchRoute([lng+','+lat].concat(rem.map(function(w){return w.lng+','+w.lat;})),fromIdx);}
+  async function loadRoute(){if(wps.length<2)return;await _fetchRoute(wps.map(function(w){return{lng:w.lng,lat:w.lat,type:w.route_point_type||'break'};}).filter(function(loc){return loc.type!=='side_stop';}),0);}
+  async function loadRouteFrom(lat,lng,fromIdx){var rem=wps.slice(fromIdx).filter(function(w){return w.route_point_type!=='side_stop';});if(!rem.length){_fallback([],fromIdx);return;}await _fetchRoute([{lng:lng,lat:lat,type:'break'}].concat(rem.map(function(w){return{lng:w.lng,lat:w.lat,type:w.route_point_type||'break'};})),fromIdx);}
 
   // ── Message handler ───────────────────────────────────────────────────────────
   function handleMsgData(msg){
@@ -3070,7 +3420,8 @@ const buildMapHtml = (
     if(msg.type==='set_style'&&msg.style){currentStyle=msg.style;map.setStyle(buildStyle(msg.style));}
     if(msg.type==='set_land_overlay')setLandOverlay(!!msg.show);
     if(msg.type==='set_usgs_overlay')setUsgsOverlay(!!msg.show);
-    if(msg.type==='set_layer'){var _s=!!msg.show;if(msg.layer==='terrain')setTerrainLayer(_s);else if(msg.layer==='naip')setNaipLayer(_s);else if(msg.layer==='fire')setFireLayer(_s);else if(msg.layer==='ava')setAvaLayer(_s);else if(msg.layer==='radar')setRadarLayer(_s);else if(msg.layer==='mvum')setMvumLayer(_s);else if(msg.layer==='roads')setRoadsLayer(_s);}
+    if(msg.type==='set_water_nav_lines'&&map.getSource('water-nav-lines')){map.getSource('water-nav-lines').setData(msg.data||{type:'FeatureCollection',features:[]});}
+    if(msg.type==='set_layer'){var _s=!!msg.show;if(msg.layer==='terrain')setTerrainLayer(_s);else if(msg.layer==='naip')setNaipLayer(_s);else if(msg.layer==='fire')setFireLayer(_s);else if(msg.layer==='ava')setAvaLayer(_s);else if(msg.layer==='radar')setRadarLayer(_s);else if(msg.layer==='nautical')setNauticalLayer(_s);else if(msg.layer==='mvum')setMvumLayer(_s);else if(msg.layer==='roads')setRoadsLayer(_s);}
     if(msg.type==='download_tiles_bbox'){if(!downloadActive){downloadActive=true;_currentDlLabel=msg.label||'';_dlTiles(msg.n,msg.s,msg.e,msg.w,msg.minZ||10,msg.maxZ||12,!!msg.vectorOnly);}}
     if(msg.type==='download_tiles_route'){if(!downloadActive){downloadActive=true;_currentDlLabel=msg.label||'';_dlTilesRoute(msg.bufferKm||20,msg.minZ||10,msg.maxZ||16,!!msg.vectorOnly);}}
     if(msg.type==='download_tiles'){if(!downloadActive){downloadActive=true;_currentDlLabel=msg.label||'';var b=map.getBounds();_dlTiles(b.getNorth(),b.getSouth(),b.getEast(),b.getWest(),msg.minZ||10,msg.maxZ||15,!!msg.vectorOnly);}}
@@ -3232,6 +3583,7 @@ function MapScreen() {
   const removeCachedRegion = useStore(st => st.removeCachedRegion);
   const rigProfile = useStore(st => st.rigProfile);
   const weatherUnitMode = useStore(st => st.weatherUnitMode);
+  const guidedTourActive = useStore(st => st.guidedTourActive);
   const webRef       = useRef<any>(null);
   const nativeMapRef = useRef<NativeMapHandle>(null);
   const navVoiceRef  = useRef<string | undefined>(undefined);
@@ -3341,6 +3693,7 @@ function MapScreen() {
   const selectedCampRef = useRef<CampsitePin | null>(null);
   const [selectedPlace, setSelectedPlace] = useState<SearchPlace | null>(null);
   const [selectedPlaceContext, setSelectedPlaceContext] = useState<SelectedPlaceContext | null>(null);
+  const [selectedPlaceTripContext, setSelectedPlaceTripContext] = useState<TripPlaceContext | null>(null);
   const mapCardResolveCacheRef = useRef(new Map<string, { at: number; response: MapCardResolveResponse }>());
   const selectedPlaceResolveKeyRef = useRef('');
   const [campDetail,    setCampDetail]    = useState<CampsiteDetail | null>(null);
@@ -3376,6 +3729,7 @@ function MapScreen() {
   const [frPhoto,      setFrPhoto]      = useState<string | null>(null);
   const [frSubmitting, setFrSubmitting] = useState(false);
   const [campComments, setCampComments] = useState<CampComment[]>([]);
+  const [campCanonicalId, setCampCanonicalId] = useState<string | null>(null);
   const [showCampCommentForm, setShowCampCommentForm] = useState(false);
   const [campCommentText, setCampCommentText] = useState('');
   const [campCommentSubmitting, setCampCommentSubmitting] = useState(false);
@@ -3395,6 +3749,22 @@ function MapScreen() {
   const [categoryUnlocking, setCategoryUnlocking] = useState(false);
   const [offlinePlacePois, setOfflinePlacePois] = useState<OsmPoi[]>([]);
   const [offlinePlaceCount, setOfflinePlaceCount] = useState(0);
+  const [waterNavLines, setWaterNavLines] = useState<WaterNavigationLinesResponse | null>(null);
+  const [waterConditions, setWaterConditions] = useState<WaterConditionsResponse | null>(null);
+  const [waterSpotCards, setWaterSpotCards] = useState<WaterSpotCardsResponse | null>(null);
+  const [fishingConditions, setFishingConditions] = useState<FishingConditionsResponse | null>(null);
+  const [selectedWaterSpot, setSelectedWaterSpot] = useState<WaterSpotCard | null>(null);
+  const [safeWaterPanelCollapsed, setSafeWaterPanelCollapsed] = useState(false);
+  const [safeWaterDepthRange, setSafeWaterDepthRange] = useState('shallow_5_10');
+  const [safeWaterShallowHighlight, setSafeWaterShallowHighlight] = useState(true);
+  const [safeWaterHazardEmphasis, setSafeWaterHazardEmphasis] = useState(true);
+  const [safeWaterHybridOverlay, setSafeWaterHybridOverlay] = useState(false);
+  const [waterCorridor, setWaterCorridor] = useState<SuggestedWaterCorridorResponse | null>(null);
+  const [waterCorridorLoading, setWaterCorridorLoading] = useState(false);
+  const [waterCorridorError, setWaterCorridorError] = useState('');
+  const [waterCorridorStart, setWaterCorridorStart] = useState<WaterCorridorPoint | null>(null);
+  const [waterCorridorEnd, setWaterCorridorEnd] = useState<WaterCorridorPoint | null>(null);
+  const [waterCorridorPickMode, setWaterCorridorPickMode] = useState<WaterCorridorPickMode>(null);
   const [nearbyPlaceFeeds, setNearbyPlaceFeeds] = useState<Record<string, { loading: boolean; places: OsmPoi[]; error?: string; loadedAt?: number }>>({});
   const [liveRouteGas, setLiveRouteGas] = useState<Array<{ lat: number; lng: number; name: string }>>([]);
   const [liveRoutePois, setLiveRoutePois] = useState<OsmPoi[]>([]);
@@ -3404,6 +3774,8 @@ function MapScreen() {
   const pendingPoiFetchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastCampFetchRef = useRef<{lat: number; lng: number} | null>(null);
   const pendingCampFetchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastWaterNavFetchRef = useRef<{lat: number; lng: number} | null>(null);
+  const pendingWaterNavFetchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const poiCacheRef = useRef<Map<string, OsmPoi>>(new Map());
   const poiFetchSeqRef = useRef(0);
 
@@ -3470,6 +3842,7 @@ function MapScreen() {
   const [layerAva,     setLayerAva]     = useState(false);
   const [layerRadar,   setLayerRadar]   = useState(false);
   const [layerMvum,    setLayerMvum]    = useState(false);
+  const [layerNautical, setLayerNautical] = useState(false);
   const [tappedTrail, setTappedTrail] = useState<{ name: string; lat: number; lng: number; cls: string } | null>(null);
   const [tappedTileSpot, setTappedTileSpot] = useState<{ name: string; kind: string; lat: number; lng: number } | null>(null);
   const [tappedGas,  setTappedGas]  = useState<{ name: string; lat: number; lng: number } | null>(null);
@@ -3579,7 +3952,7 @@ function MapScreen() {
           const savedLayer = validMapLayer(prefs.mapLayer);
           const savedCampFilters = validIds(prefs.activeFilters, CAMP_FILTER_IDS);
           const savedPinFilters = validIds(prefs.activePinFilters, COMMUNITY_PIN_TYPES.map(t => t.id));
-          const savedPlaceFilters = validIds(prefs.activePlaceFilters, PLACE_FILTER_TYPES.map(t => t.id));
+          const savedPlaceFilters = validIds(prefs.activePlaceFilters, ALL_PLACE_FILTER_IDS);
           const nextPlaceFilters = savedPlaceFilters && savedPlaceFilters.length === LEGACY_DEFAULT_PLACE_FILTERS.length && LEGACY_DEFAULT_PLACE_FILTERS.every(id => savedPlaceFilters.includes(id))
             ? DEFAULT_PLACE_FILTERS
             : savedPlaceFilters;
@@ -3594,6 +3967,7 @@ function MapScreen() {
           if (typeof prefs.layerAva === 'boolean') setLayerAva(prefs.layerAva);
           if (typeof prefs.layerRadar === 'boolean') setLayerRadar(prefs.layerRadar);
           if (typeof prefs.layerMvum === 'boolean') setLayerMvum(prefs.layerMvum);
+          if (typeof prefs.layerNautical === 'boolean') setLayerNautical(prefs.layerNautical);
         } catch {
           storage.del(MAP_FILTER_PREFS_KEY).catch(() => {});
         }
@@ -3619,9 +3993,10 @@ function MapScreen() {
       layerAva,
       layerRadar,
       layerMvum,
+      layerNautical,
     };
     storage.set(MAP_FILTER_PREFS_KEY, JSON.stringify(prefs)).catch(() => {});
-  }, [activeFilters, activePinFilters, activePlaceFilters, layerAva, layerFire, layerMvum, layerRadar, mapLayer, showLands, showPois, showUsgs]);
+  }, [activeFilters, activePinFilters, activePlaceFilters, layerAva, layerFire, layerMvum, layerNautical, layerRadar, mapLayer, showLands, showPois, showUsgs]);
 
   useEffect(() => {
     const today = new Date().toISOString().slice(0, 10);
@@ -3632,7 +4007,7 @@ function MapScreen() {
 
   const placeCategoryRequest = useCallback((filters: string[] = activePlaceFilters, unlocked = exploreCategoriesUnlocked) => {
     const allowed = filters.filter(id => unlocked || !(EXPLORE_PLACE_FILTER_IDS as readonly string[]).includes(id));
-    const categories = new Set<string>(allowed);
+    const categories = new Set<string>(allowed.map(categoryForPlaceFilter));
     if (categories.has('camping')) categories.add('camp');
     return Array.from(categories).join(',') || ESSENTIAL_PLACE_CATEGORIES;
   }, [activePlaceFilters, exploreCategoriesUnlocked]);
@@ -3843,7 +4218,7 @@ function MapScreen() {
   const waypoints: WP[] = useMemo(() =>
     usableTripWaypoints(activeTrip?.plan.waypoints)
       .filter(w => w.lat != null && w.lng != null && isFinite(w.lat) && isFinite(w.lng))
-      .map(w => ({ lat: w.lat!, lng: w.lng!, name: w.name, day: w.day, type: w.type })),
+      .map(w => ({ lat: w.lat!, lng: w.lng!, name: w.name, day: w.day, type: w.type, route_point_type: w.route_point_type })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [activeTrip?.trip_id, geocodedCount]
   );
@@ -4290,10 +4665,14 @@ function MapScreen() {
   useEffect(() => { showPoisRef.current = showPois; }, [showPois]);
 
   useEffect(() => {
-    if (!selectedPlace) return;
+    if (!selectedPlace) {
+      setSelectedPlaceTripContext(null);
+      return;
+    }
     setSearchRouteCard(null);
     navDestRef.current = null;
     setNavDest(null);
+    setSelectedPlaceTripContext(prev => prev ?? tripPlaceContextFor(selectedPlace));
   }, [selectedPlace?.id, selectedPlace?.lat, selectedPlace?.lng]);
 
   useEffect(() => {
@@ -4392,9 +4771,51 @@ function MapScreen() {
       lat: p.lat,
       lng: p.lng,
       type: p.type || 'poi',
-      subtype: p.subtype,
+      subtype: cleanDisplayLabel(p.subtype || ''),
       elevation: p.elevation,
-      source: 'offline',
+      source: p.source || 'offline',
+      source_label: p.source_badge || p.source || 'Offline place pack',
+      address: p.address,
+      fuel_types: p.fuel_types,
+      photo_url: p.photo_url || undefined,
+      website: p.booking_url || p.official_url,
+      official_url: p.official_url,
+      booking_url: p.booking_url,
+      reservable: p.reservable,
+      tags: p.tags,
+      amenities: p.amenities,
+      site_types: p.site_types,
+      source_badge: p.source_badge,
+      source_freshness: p.source_freshness,
+      last_checked: p.last_checked,
+      waterbody_name: p.waterbody_name,
+      waterbody_type: p.waterbody_type,
+      access: p.access,
+      craft: p.craft,
+      fishing_score: p.fishing_score,
+      fishing_score_label: p.fishing_score_label,
+      fish_species: p.fish_species,
+      stocking_notes: p.stocking_notes,
+      regulations_url: p.regulations_url,
+      gauge_id: p.gauge_id,
+      gauge_url: p.gauge_url,
+      flow_cfs: p.flow_cfs,
+      gage_height_ft: p.gage_height_ft,
+      observed_at: p.observed_at,
+      chart_source: p.chart_source,
+      chart_url: p.chart_url,
+      weather_url: p.weather_url,
+      tides_url: p.tides_url,
+      safety_url: p.safety_url,
+      navigation_feature: p.navigation_feature,
+      hazard_type: p.hazard_type,
+      mark_color: p.mark_color,
+      mark_shape: p.mark_shape,
+      light_character: p.light_character,
+      depth_ft: p.depth_ft,
+      max_draft_ft: p.max_draft_ft,
+      navigation_note: p.navigation_note,
+      cache_status: 'downloaded',
     })));
   }, [activeTrip?.trip_id]);
 
@@ -4430,6 +4851,11 @@ function MapScreen() {
       reservable: !!place.website,
       cost: '',
       url: place.website || (place as any).google_maps_uri || '',
+      official_url: (place as any).official_url || place.website || '',
+      booking_url: (place as any).booking_url || '',
+      source_badge: (place as any).source_badge || place.source_label || place.attribution || place.source,
+      source_freshness: (place as any).source_freshness,
+      last_checked: (place as any).last_checked,
       ada: false,
       source: place.source,
       verified_source: place.source_label || place.attribution || place.source,
@@ -4444,6 +4870,55 @@ function MapScreen() {
       route_progress: place.route_progress,
       route_progress_mi: place.route_progress_mi,
       route_segment_index: place.route_segment_index,
+    };
+  }
+
+  function offlinePlaceToCampPin(place: OsmPoi): CampsitePin | null {
+    if (!CAMP_PLACE_TYPES.has(String(place.type || '')) || place.lat == null || place.lng == null || !isFinite(place.lat) || !isFinite(place.lng)) return null;
+    const anyPlace = place as any;
+    const source = anyPlace.source_badge || place.source_label || place.source || 'Offline place pack';
+    const bookingUrl = anyPlace.booking_url || '';
+    const officialUrl = anyPlace.official_url || place.website || '';
+    const subtype = cleanDisplayLabel(place.subtype || '');
+    const cachedNotes = [
+      subtype,
+      place.address,
+      anyPlace.source_freshness,
+      officialUrl ? 'Official link cached.' : '',
+      bookingUrl ? 'Booking link cached.' : '',
+    ].filter(Boolean).join(' ');
+    return {
+      id: String(place.id || `offline:camp:${place.lat.toFixed(5)}:${place.lng.toFixed(5)}`),
+      name: place.name || 'Downloaded camp',
+      lat: place.lat,
+      lng: place.lng,
+      tags: [
+        ...(Array.isArray(anyPlace.tags) ? anyPlace.tags : []),
+        ...(Array.isArray(anyPlace.site_types) ? anyPlace.site_types : []),
+        'downloaded',
+      ],
+      land_type: source,
+      description: cachedNotes || 'Downloaded camp point.',
+      photo_url: place.photo_url || undefined,
+      reservable: Boolean(anyPlace.reservable || bookingUrl),
+      cost: anyPlace.reservable || bookingUrl ? 'Reservable' : 'Downloaded',
+      url: bookingUrl || officialUrl,
+      official_url: officialUrl,
+      booking_url: bookingUrl,
+      source_badge: source,
+      source_freshness: anyPlace.source_freshness,
+      last_checked: anyPlace.last_checked,
+      ada: false,
+      source: place.source || 'offline',
+      verified_source: source,
+      address: place.address,
+      route_distance_mi: place.route_distance_mi,
+      route_fit: (place as any).route_fit,
+      route_progress: place.route_progress,
+      route_progress_mi: place.route_progress_mi,
+      route_segment_index: place.route_segment_index,
+      amenities: Array.isArray(anyPlace.amenities) ? anyPlace.amenities : undefined,
+      site_types: Array.isArray(anyPlace.site_types) ? anyPlace.site_types : undefined,
     };
   }
 
@@ -4540,6 +5015,105 @@ function MapScreen() {
       lastCampFetchRef.current = center;
       loadCampsInArea(bounds, activeFilters);
     }, 420);
+  }
+
+  function setWaterNavLineData(data: WaterNavigationLinesResponse | null) {
+    setWaterNavLines(data);
+    webRef.current?.postMessage(JSON.stringify({
+      type: 'set_water_nav_lines',
+      data: data ?? { type: 'FeatureCollection', features: [] },
+    }));
+  }
+
+  function queueWaterNavigationLineFetch(bounds: { n: number; s: number; e: number; w: number; zoom: number }, force = false) {
+    if (!layerNautical) return;
+    if ((bounds.zoom ?? 0) < 8) {
+      setWaterNavLineData(null);
+      return;
+    }
+    const center = { lat: (bounds.n + bounds.s) / 2, lng: (bounds.e + bounds.w) / 2 };
+    const last = lastWaterNavFetchRef.current;
+    const latSpan = Math.abs(bounds.n - bounds.s);
+    const lngSpan = Math.abs(bounds.e - bounds.w);
+    const threshold = Math.max(0.025, Math.min(0.12, Math.max(latSpan, lngSpan) * 0.28));
+    if (!force && last && Math.abs(center.lat - last.lat) < threshold && Math.abs(center.lng - last.lng) < threshold) return;
+    if (pendingWaterNavFetchRef.current) clearTimeout(pendingWaterNavFetchRef.current);
+    pendingWaterNavFetchRef.current = setTimeout(() => {
+      pendingWaterNavFetchRef.current = null;
+      lastWaterNavFetchRef.current = center;
+      api.getWaterNavigationLines(bounds.n, bounds.s, bounds.e, bounds.w)
+        .then(fc => setWaterNavLineData(fc))
+        .catch(() => setWaterNavLineData(null));
+      api.getWaterConditions(center.lat, center.lng)
+        .then(result => setWaterConditions(result))
+        .catch(() => setWaterConditions(null));
+      api.getWaterSpotCards(bounds.n, bounds.s, bounds.e, bounds.w)
+        .then(result => setWaterSpotCards(result))
+        .catch(() => setWaterSpotCards(null));
+      api.getFishingConditions(center.lat, center.lng)
+        .then(result => setFishingConditions(result))
+        .catch(() => setFishingConditions(null));
+    }, force ? 40 : 320);
+  }
+
+  useEffect(() => {
+    if (!layerNautical) {
+      lastWaterNavFetchRef.current = null;
+      if (pendingWaterNavFetchRef.current) clearTimeout(pendingWaterNavFetchRef.current);
+      setWaterNavLineData(null);
+      setWaterConditions(null);
+      setWaterSpotCards(null);
+      setFishingConditions(null);
+      setSelectedWaterSpot(null);
+      setWaterCorridor(null);
+      setWaterCorridorError('');
+      setWaterCorridorPickMode(null);
+      return;
+    }
+    if (viewportRef.current) queueWaterNavigationLineFetch(viewportRef.current, true);
+  }, [layerNautical]);
+
+  function currentWaterMapPoint(label = 'Map center'): WaterCorridorPoint | null {
+    const vp = viewportRef.current;
+    if (vp) return { lat: (vp.n + vp.s) / 2, lng: (vp.e + vp.w) / 2, name: label };
+    if (userLoc) return { lat: userLoc.lat, lng: userLoc.lng, name: 'Current location' };
+    return null;
+  }
+
+  function pointFromWaterSpot(card: WaterSpotCard): WaterCorridorPoint {
+    return { lat: card.lat, lng: card.lng, name: card.name || 'Water spot' };
+  }
+
+  function setWaterCorridorPoint(mode: Exclude<WaterCorridorPickMode, null>, point: WaterCorridorPoint) {
+    if (mode === 'start') setWaterCorridorStart(point);
+    else setWaterCorridorEnd(point);
+    setWaterCorridor(null);
+    setWaterCorridorError('');
+  }
+
+  function selectWaterSpot(card: WaterSpotCard) {
+    setSelectedWaterSpot(card);
+    setSafeWaterPanelCollapsed(false);
+    nativeMapRef.current?.flyTo(card.lat, card.lng, 12.5, card.name);
+    webRef.current?.postMessage(JSON.stringify({ type: 'fly', lat: card.lat, lng: card.lng, zoom: 12.5 }));
+  }
+
+  async function buildWaterCorridor() {
+    if (!waterCorridorStart || !waterCorridorEnd) {
+      setWaterCorridorError('Choose a start and end point.');
+      return;
+    }
+    setWaterCorridorLoading(true);
+    setWaterCorridorError('');
+    try {
+      const result = await api.getSuggestedWaterCorridor(waterCorridorStart, waterCorridorEnd);
+      setWaterCorridor(result);
+    } catch (err: any) {
+      setWaterCorridor(null);
+      setWaterCorridorError(err?.message || 'Corridor unavailable right now.');
+    } finally {
+      setWaterCorridorLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -5494,7 +6068,8 @@ function MapScreen() {
     setLayerAva(false);
     setLayerRadar(false);
     setLayerMvum(false);
-    ['fire', 'ava', 'radar', 'mvum'].forEach(key => toggleDataLayer(key, false));
+    setLayerNautical(false);
+    ['fire', 'ava', 'radar', 'mvum', 'nautical'].forEach(key => toggleDataLayer(key, false));
     storage.del(MAP_FILTER_PREFS_KEY).catch(() => {});
     setQuickToast('Map filters reset');
     setTimeout(() => setQuickToast(''), 2200);
@@ -5537,9 +6112,21 @@ function MapScreen() {
       const liveCampPins = smartPlaces
         .map(p => smartPlaceToCampPin(p as OsmPoi))
         .filter((p): p is CampsitePin => !!p);
-      const seenCampKeys = new Set<string>();
-      const mergedCamps: CampsitePin[] = [];
-      for (const camp of [...camps, ...liveCampPins]) {
+      const offlineCampPins = offlinePlacePois
+        .filter(p => CAMP_PLACE_TYPES.has(String(p.type || '')))
+        .filter(p => campMatchesFilters(p, types))
+        .filter(p => p.lat >= bounds.s && p.lat <= bounds.n && p.lng >= bounds.w && p.lng <= bounds.e)
+        .map(p => ({
+          ...p,
+          route_distance_mi: haversineKm(centerLat, centerLng, p.lat, p.lng) * 0.621371,
+        }))
+        .filter(p => (p.route_distance_mi ?? 999) <= Math.max(radiusMi, 8))
+        .sort((a, b) => (a.route_distance_mi ?? 999) - (b.route_distance_mi ?? 999))
+        .map(offlinePlaceToCampPin)
+        .filter((p): p is CampsitePin => !!p);
+    const seenCampKeys = new Set<string>();
+    const mergedCamps: CampsitePin[] = [];
+      for (const camp of [...camps, ...liveCampPins, ...offlineCampPins].filter(camp => campMatchesFilters(camp, types))) {
         const key = campKey(camp);
         const fuzzy = `${String(camp.name || '').toLowerCase().trim()}:${camp.lat.toFixed(4)}:${camp.lng.toFixed(4)}`;
         if (seenCampKeys.has(key) || seenCampKeys.has(fuzzy)) continue;
@@ -5695,6 +6282,7 @@ function MapScreen() {
         refreshCommunityPins({ lat: pinLat, lng: pinLng }, pinRadius, false);
         queueViewportPlaceFetch(bounds);
         queueViewportCampFetch(bounds);
+        queueWaterNavigationLineFetch(bounds);
       }
       if (msg.type === 'search_area') {
         // Legacy WebView button — handled by native button now, but keep as fallback
@@ -5826,7 +6414,15 @@ function MapScreen() {
         if (camp?.lat && camp?.lng) api.getWeather(camp.lat, camp.lng, 3, weatherUnitMode).then(r => setCampWeather(r)).catch(() => {});
       }
       if (msg.type === 'poi_tapped') {
-        openPoiFeature(msg.poi as OsmPoi);
+        const rawPoi = msg.poi as OsmPoi;
+        if (rawPoi?.type === 'water' && rawPoi?.source === 'openseamap') {
+          openPoiFeature(mapWaterNavigationPlace(rawPoi as any, Number(rawPoi.lat), Number(rawPoi.lng)));
+        } else {
+          openPoiFeature(rawPoi);
+        }
+      }
+      if (msg.type === 'waterbody_tapped' && Number.isFinite(Number(msg.lat)) && Number.isFinite(Number(msg.lng))) {
+        openPoiFeature(mapWaterbodyPlace(Number(msg.lat), Number(msg.lng), msg.name, msg.kind));
       }
       if (msg.type === 'trail_tapped') {
         openTrailFromPoint(msg.name, msg.lat, msg.lng, msg.cls ?? 'path');
@@ -5913,6 +6509,7 @@ function MapScreen() {
     setFieldReports([]);
     setFieldReportSummary(null);
     setCampComments([]);
+    setCampCanonicalId(null);
     setShowCampCommentForm(false);
     setCampCommentText('');
     setShowFieldReportForm(false);
@@ -5950,9 +6547,38 @@ function MapScreen() {
     api.getFieldReportSummary(camp.id).then(r => {
       if (selectedCampRef.current?.id === camp.id) setFieldReportSummary(r);
     }).catch(() => {});
-    api.getCampComments(camp.id).then(r => {
-      if (selectedCampRef.current?.id === camp.id) setCampComments(r);
-    }).catch(() => {});
+    api.canonicalizePlace({
+      id: camp.id,
+      name: camp.name,
+      lat: camp.lat,
+      lng: camp.lng,
+      source: camp.source || 'camp',
+      source_label: camp.source_badge || camp.verified_source || camp.source || camp.land_type || 'Camp source',
+      provider_place_id: camp.provider_place_id,
+      place_id: camp.place_id,
+      type: 'camp',
+      category: 'camp',
+      subtype: camp.land_type,
+      official_url: camp.official_url || camp.url,
+      booking_url: camp.booking_url,
+      url: camp.official_url || camp.url,
+      photo_url: camp.photo_url,
+      summary: camp.description,
+      address: camp.address,
+      phone: camp.phone,
+      rating: camp.rating,
+      rating_count: camp.rating_count,
+      reservable: camp.reservable,
+      amenities: camp.amenities,
+    }).then(({ place }) => {
+      if (selectedCampRef.current?.id !== camp.id) return;
+      setCampCanonicalId(place.trailhead_place_id);
+      setCampComments((place.comments ?? []) as CampComment[]);
+    }).catch(() => {
+      api.getCampComments(camp.id).then(r => {
+        if (selectedCampRef.current?.id === camp.id) setCampComments(r);
+      }).catch(() => {});
+    });
   }
 
   async function openCampDetail() {
@@ -5972,35 +6598,12 @@ function MapScreen() {
     setShowCampCommentForm(false);
     setCampCommentText('');
     setCampComments([]);
+    setCampCanonicalId(null);
     resetFieldReportForm();
   }
 
   async function enrichCampDetailWithGoogle(detail: CampsiteDetail, camp: CampsitePin): Promise<CampsiteDetail> {
-    const source = String(camp.source || detail.source || '').toLowerCase();
-    const rawId = String(camp.id || '');
-    const id = camp.provider_place_id || camp.place_id ||
-      (rawId.startsWith('google:') ? rawId.replace(/^google:/, '') : rawId.startsWith('foursquare:') ? rawId.replace(/^foursquare:/, '') : '');
-    const provider = source === 'google' || source === 'foursquare' ? source : rawId.startsWith('foursquare:') ? 'foursquare' : rawId.startsWith('google:') ? 'google' : '';
-    if (!id || !provider) return detail;
-    try {
-      const place = await api.getPlaceDetail(provider, id);
-      const providerPhotos = (place.photos ?? []).map(photo => mediaUrl(photo.url)).filter(Boolean);
-      return {
-        ...detail,
-        phone: detail.phone || place.phone,
-        address: detail.address || place.address,
-        rating: detail.rating ?? place.rating,
-        rating_count: detail.rating_count ?? place.rating_count,
-        url: detail.url || place.website || place.google_maps_uri || '',
-        photos: detail.photos?.length ? detail.photos : providerPhotos,
-        reviews: place.reviews ?? detail.reviews,
-        media_source: detail.photos?.length ? 'mixed' : provider,
-        verified_source: detail.verified_source || place.source_label || (provider === 'google' ? 'Google Places' : 'Foursquare'),
-        source: detail.source || provider,
-      };
-    } catch {
-      return detail;
-    }
+    return detail;
   }
 
   function minimalCampDetail(camp: CampsitePin): CampsiteDetail {
@@ -6017,18 +6620,24 @@ function MapScreen() {
       ada: camp.ada ?? false,
       tags: Array.isArray(camp.tags) ? camp.tags : [],
       photos: camp.photo_url ? [camp.photo_url] : [],
-      amenities: [],
-      site_types: [],
+      amenities: camp.amenities ?? [],
+      site_types: camp.site_types ?? [],
       activities: [],
       campsites_count: 0,
       source: camp.source,
-      verified_source: camp.verified_source,
+      verified_source: camp.source_badge || camp.verified_source,
       phone: camp.phone,
       address: camp.address,
       rating: camp.rating,
       rating_count: camp.rating_count,
       provider_place_id: camp.provider_place_id,
       place_id: camp.place_id,
+      official_url: camp.official_url,
+      booking_url: camp.booking_url,
+      source_badge: camp.source_badge,
+      source_freshness: camp.source_freshness,
+      source_confidence_notes: camp.source_freshness,
+      last_checked: camp.last_checked,
     } as CampsiteDetail;
   }
 
@@ -6148,8 +6757,96 @@ function MapScreen() {
       api.getFieldReportSummary(selectedCamp.id).then(setFieldReportSummary).catch(() => {});
     } catch (e: any) {
       Alert.alert('Error', e.message ?? 'Could not submit field report');
+    } finally {
+      setFrSubmitting(false);
     }
-    setFrSubmitting(false);
+  }
+
+  function renderCampFieldReportForm() {
+    return (
+      <View style={s.frForm}>
+        <Text style={s.frFormLabel}>How was it?</Text>
+        <View style={s.frPillRow}>
+          {([['loved_it','Loved it','#22c55e','heart'],['its_ok','It\'s OK','#f59e0b','thumbs-up'],['would_skip','Would skip','#ef4444','thumbs-down']] as const).map(([val, label, color, icon]) => (
+            <TouchableOpacity key={val} style={[s.frSentimentBtn, frSentiment === val && { borderColor: color, backgroundColor: color + '22' }]}
+              onPress={() => setFrSentiment(val)}>
+              <Ionicons name={icon as keyof typeof Ionicons.glyphMap} size={12} color={frSentiment === val ? color : C.text2} />
+              <Text style={[s.frSentimentBtnText, frSentiment === val && { color }]}>{label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <Text style={s.frFormLabel}>Access road</Text>
+        <View style={s.frPillRow}>
+          {([['easy','Easy'],['rough','Rough'],['four_wd_required','4WD Only']] as const).map(([val, label]) => (
+            <TouchableOpacity key={val} style={[s.frPill, frAccess === val && s.frPillActive]}
+              onPress={() => setFrAccess(val)}>
+              <Text style={[s.frPillText, frAccess === val && s.frPillTextActive]}>{label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <Text style={s.frFormLabel}>Crowd level</Text>
+        <View style={s.frPillRow}>
+          {([['empty','Empty'],['few_rigs','A few rigs'],['packed','Packed']] as const).map(([val, label]) => (
+            <TouchableOpacity key={val} style={[s.frPill, frCrowd === val && s.frPillActive]}
+              onPress={() => setFrCrowd(val)}>
+              <Text style={[s.frPillText, frCrowd === val && s.frPillTextActive]}>{label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <Text style={s.frFormLabel}>Tags (pick any)</Text>
+        <View style={s.frTagPicker}>
+          {['Great Views','Dog Friendly','Water Nearby','No Cell Signal','Fire Ring',
+            'Very Quiet','High Clearance','Good Shade','Exposed/Windy','Creek Nearby',
+            'Stargazing','Kids Friendly','Dusty Road','Fishing Nearby','Horse Friendly'].map(tag => {
+            const on = frTags.includes(tag);
+            return (
+              <TouchableOpacity key={tag}
+                style={[s.frTagPill, on && s.frTagPillOn]}
+                onPress={() => setFrTags(p => on ? p.filter(t => t !== tag) : [...p, tag])}>
+                <Text style={[s.frTagPillText, on && s.frTagPillTextOn]}>{tag}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        <Text style={s.frFormLabel}>Notes <Text style={s.frOptional}>(optional)</Text></Text>
+        <TextInput
+          style={s.frNoteInput}
+          value={frNote}
+          onChangeText={v => setFrNote(v.slice(0, 280))}
+          placeholder="Road conditions, water source, anything useful..."
+          placeholderTextColor={C.text3}
+          multiline
+          numberOfLines={3}
+        />
+        <Text style={s.frCharCount}>{frNote.length}/280</Text>
+
+        <TouchableOpacity style={s.frPhotoBtn} onPress={pickFieldReportPhoto}>
+          <Ionicons name={frPhoto ? 'checkmark-circle' : 'camera-outline'} size={16} color={frPhoto ? '#22c55e' : C.text3} />
+          <Text style={[s.frPhotoBtnText, frPhoto && { color: '#22c55e' }]}>
+            {frPhoto ? `Photo added (+${CREDIT_REWARDS.fieldReportPhotoBonus} credits)` : `Add photo (+${CREDIT_REWARDS.fieldReportPhotoBonus} credits)`}
+          </Text>
+        </TouchableOpacity>
+
+        <View style={s.frFormActions}>
+          <TouchableOpacity style={s.frCancelBtn} onPress={() => { setShowFieldReportForm(false); resetFieldReportForm(); }}>
+            <Text style={s.frCancelText}>Cancel</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[s.frSubmitBtn, (!frSentiment || !frAccess || !frCrowd || frSubmitting) && { opacity: 0.5 }]}
+            onPress={submitFieldReport}
+            disabled={!frSentiment || !frAccess || !frCrowd || frSubmitting}
+          >
+            {frSubmitting
+              ? <ActivityIndicator size="small" color="#fff" />
+              : <Text style={s.frSubmitText}>SUBMIT +{frPhoto ? 10 : 5} CREDITS</Text>}
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
   }
 
   async function submitCampComment() {
@@ -6158,15 +6855,20 @@ function MapScreen() {
     if (!detail || campCommentSubmitting || text.length < 2) return;
     setCampCommentSubmitting(true);
     try {
-      await api.submitCampComment(detail.id, {
-        camp_name: detail.name,
-        lat: detail.lat,
-        lng: detail.lng,
-        body: text,
-      });
+      if (campCanonicalId) {
+        await api.submitPlaceComment(campCanonicalId, { body: text });
+      } else {
+        await api.submitCampComment(detail.id, {
+          camp_name: detail.name,
+          lat: detail.lat,
+          lng: detail.lng,
+          body: text,
+        });
+      }
       setCampCommentText('');
       setShowCampCommentForm(false);
-      api.getCampComments(detail.id).then(setCampComments).catch(() => {});
+      if (campCanonicalId) api.getPlaceComments(campCanonicalId).then(r => setCampComments(r as CampComment[])).catch(() => {});
+      else api.getCampComments(detail.id).then(setCampComments).catch(() => {});
       setQuickToast('Comment posted');
       setTimeout(() => setQuickToast(''), 2200);
     } catch (e: any) {
@@ -6230,7 +6932,7 @@ function MapScreen() {
     const next: OsmPoi[] = [];
     const pushPoi = (p: OsmPoi | undefined | null, enforceFilter: boolean) => {
       if (!p || next.length >= MAX_ALL_MAP_POIS) return;
-      if (enforceFilter && !allowedPlaces.has(p.type || 'poi')) return;
+      if (enforceFilter && !placeMatchesFilters(p, allowedPlaces)) return;
       if (p.lat == null || p.lng == null || !isFinite(p.lat) || !isFinite(p.lng)) return;
       const key = p.id || `${p.name}:${p.lat.toFixed(4)}:${p.lng.toFixed(4)}`;
       if (seen.has(key)) return;
@@ -6361,6 +7063,7 @@ function MapScreen() {
       ) ?? null;
       const gasStops = (activeTrip.gas_stations ?? []).filter(g => (g as any).recommended_day === day.day);
       const poiStops = (activeTrip.route_pois ?? []).filter(p => (p as any).recommended_day === day.day);
+      const timelineDay = (activeTrip.timeline ?? activeTrip.plan.timeline)?.days?.find(t => t.day === day.day) ?? null;
       const forecast = campWp
         ? cachedWeather?.forecasts?.[campWp.name] ?? Object.values(cachedWeather?.forecasts ?? {})[0]
         : null;
@@ -6374,6 +7077,7 @@ function MapScreen() {
         campWp,
         gasStops,
         poiStops,
+        timelineDay,
         forecast,
         legMiles: dayMileageFromWaypoints(waypoints, day.day),
       };
@@ -6392,6 +7096,319 @@ function MapScreen() {
     };
   }, [activeTrip]);
 
+  function compactRouteForPlaces(maxPoints = 96): [number, number][] {
+    return compactCoords(lastRouteCoords, maxPoints);
+  }
+
+  function dayEndpointsForTripPlace(day: number) {
+    const overview = tripOverviewDays.find(item => item.day.day === day);
+    if (!overview) return { start: null as WP | CampsitePin | Waypoint | null, finish: null as WP | CampsitePin | Waypoint | null, legMiles: 0 };
+    const start = overview.previousCamp ?? overview.first;
+    const finish = overview.campWp ?? overview.camp ?? overview.last ?? overview.first;
+    return { start, finish, legMiles: overview.legMiles };
+  }
+
+  function routeLegCoordsForDay(day?: number | null, maxPoints = 96): [number, number][] {
+    if (!day) return compactRouteForPlaces(maxPoints);
+    const { start, finish } = dayEndpointsForTripPlace(day);
+    if (!start?.lat || !start?.lng || !finish?.lat || !finish?.lng) return compactRouteForPlaces(maxPoints);
+    if (lastRouteCoords.length >= 2) {
+      const cumulative = routeCumulativeDistances(lastRouteCoords);
+      const fromProjection = projectPointToRouteProgress({ lat: start.lat, lng: start.lng }, lastRouteCoords, cumulative);
+      const toProjection = projectPointToRouteProgress({ lat: finish.lat, lng: finish.lng }, lastRouteCoords, cumulative);
+      if (fromProjection && toProjection) {
+        const fromIdx = Math.max(0, Math.min(lastRouteCoords.length - 1, fromProjection.segmentIdx));
+        const toIdx = Math.max(0, Math.min(lastRouteCoords.length - 1, toProjection.segmentIdx + 1));
+        const first = Math.min(fromIdx, toIdx);
+        const last = Math.max(fromIdx, toIdx);
+        const slice = lastRouteCoords.slice(first, last + 1);
+        const ordered = fromProjection.progressM <= toProjection.progressM ? slice : slice.reverse();
+        if (ordered.length >= 2) return compactCoords(ordered, maxPoints);
+      }
+    }
+    return [[start.lng, start.lat], [finish.lng, finish.lat]];
+  }
+
+  function tripDayNearbyFeedKey(day?: number | null) {
+    if (!day) return '';
+    const { start, finish } = dayEndpointsForTripPlace(day);
+    if (!start?.lat || !start?.lng || !finish?.lat || !finish?.lng) return '';
+    return [
+      'day-leg',
+      day,
+      start.lat.toFixed(4),
+      start.lng.toFixed(4),
+      finish.lat.toFixed(4),
+      finish.lng.toFixed(4),
+    ].join(':');
+  }
+
+  function inferTripDayForPlace(place: { lat: number; lng: number }, explicitDay?: number | null) {
+    if (explicitDay) return explicitDay;
+    if ((place as any).recommended_day) return Number((place as any).recommended_day);
+    if (selectedDay) return selectedDay;
+    let best: { day: number; score: number } | null = null;
+    for (const overview of tripOverviewDays) {
+      const { start, finish } = dayEndpointsForTripPlace(overview.day.day);
+      if (!start?.lat || !start?.lng || !finish?.lat || !finish?.lng) continue;
+      const projection = pointSegmentProjection(place, { lat: start.lat, lng: start.lng }, { lat: finish.lat, lng: finish.lng });
+      const score = projection.distance_mi + Math.abs(projection.progress - 0.5) * 2;
+      if (!best || score < best.score) best = { day: overview.day.day, score };
+    }
+    return best?.day ?? activeTrip?.plan.daily_itinerary[0]?.day ?? 1;
+  }
+
+  function tripPlaceContextFor(place: { lat: number; lng: number; source?: string; source_label?: string; route_distance_mi?: number; route_progress?: number; route_progress_mi?: number; route_segment_index?: number }, explicitDay?: number | null): TripPlaceContext | null {
+    if (!activeTrip) return null;
+    const day = inferTripDayForPlace(place, explicitDay);
+    const { start, finish, legMiles } = dayEndpointsForTripPlace(day);
+    let routeProgress = Number.isFinite(place.route_progress as number) ? place.route_progress : undefined;
+    let routeDistance = Number.isFinite(place.route_distance_mi as number) ? place.route_distance_mi : undefined;
+    let routeProgressMi = Number.isFinite(place.route_progress_mi as number) ? place.route_progress_mi : undefined;
+    let routeSegmentIndex = Number.isFinite(place.route_segment_index as number) ? place.route_segment_index : undefined;
+    if (start?.lat && start?.lng && finish?.lat && finish?.lng) {
+      const projection = pointSegmentProjection(place, { lat: start.lat, lng: start.lng }, { lat: finish.lat, lng: finish.lng });
+      routeProgress = routeProgress ?? projection.progress;
+      routeDistance = routeDistance ?? projection.distance_mi;
+      routeProgressMi = routeProgressMi ?? (legMiles ? Math.round(legMiles * projection.progress * 10) / 10 : undefined);
+    }
+    const legLabel = routeProgressLabel(routeProgress);
+    const bits = [
+      `Day ${day}`,
+      legLabel,
+      routeProgressMi != null ? `${routeProgressMi.toFixed(routeProgressMi < 10 ? 1 : 0)} mi into leg` : '',
+      routeDistance != null ? `${routeDistance.toFixed(1)} mi off route` : '',
+    ].filter(Boolean);
+    return {
+      day,
+      label: bits.join(' · '),
+      legLabel,
+      route_distance_mi: routeDistance,
+      route_progress: routeProgress,
+      route_progress_mi: routeProgressMi,
+      route_segment_index: routeSegmentIndex,
+      source: place.source_label || place.source,
+    };
+  }
+
+  function tripPlaceCardMeta(place: OsmPoi, day?: number | null) {
+    const context = tripPlaceContextFor(place, day);
+    const source = (place as any).source_badge || place.source_label || place.attribution || place.source;
+    return [
+      context?.label,
+      place.type?.replace(/_/g, ' '),
+      !context?.route_distance_mi && (place as any).distance_mi != null ? `${Number((place as any).distance_mi).toFixed(1)} mi away` : '',
+      source,
+    ].filter(Boolean).join(' · ');
+  }
+
+  function tripDayNearbyCenters(day?: number) {
+    const overview = tripOverviewDays.find(item => item.day.day === day);
+    const { start, finish } = day ? dayEndpointsForTripPlace(day) : { start: null, finish: null };
+    const legCoords = day ? routeLegCoordsForDay(day, 24) : [];
+    const routeSamples = routeSamplePoints(legCoords.length >= 2 ? legCoords : lastRouteCoords, 3);
+    const midpoint = start?.lat && start?.lng && finish?.lat && finish?.lng
+      ? { lat: (start.lat + finish.lat) / 2, lng: (start.lng + finish.lng) / 2 }
+      : null;
+    const anchor = routeSamples[1] ?? midpoint ?? finish ?? overview?.camp ?? overview?.campWp ?? overview?.last ?? overview?.first ?? null;
+    const vp = viewportRef.current;
+    const viewportCenter = vp ? { lat: (vp.n + vp.s) / 2, lng: (vp.e + vp.w) / 2 } : null;
+    const tripEnds = day ? [] : activeTrip?.plan.waypoints ?? [];
+    return uniqueRouteContextCenters(
+      [anchor],
+      [start, midpoint, finish],
+      [tripEnds[0], tripEnds[tripEnds.length - 1]],
+      routeSamples,
+      day ? [] : [viewportCenter, userLoc],
+    );
+  }
+
+  function showPlaceAddedAlert(day: number, label: string, previousTrip: TripResult) {
+    Alert.alert(
+      `Added to Day ${day}`,
+      label || 'Place added to this trip day.',
+      [
+        {
+          text: 'Undo',
+          style: 'destructive',
+          onPress: () => {
+            setActiveTrip(previousTrip);
+            saveOfflineTrip(previousTrip).catch(() => {});
+            setQuickToast('Place add undone');
+            setTimeout(() => setQuickToast(''), 2200);
+          },
+        },
+        { text: 'Route Builder', onPress: () => router.push('/(tabs)/route-builder') },
+        { text: 'OK' },
+      ],
+    );
+  }
+
+  function clearCurrentRouteGeometry(tripId: string) {
+    setIsRouted(false);
+    setRouteSteps([]);
+    setRouteLegs([]);
+    setLastRouteCoords([]);
+    setRouteProgress(null);
+    storage.del('trailhead_active_route').catch(() => {});
+    deleteRouteGeometry(tripId).catch(() => {});
+  }
+
+  function insertTripPlaceWaypoint(original: Waypoint[], waypoint: Waypoint, context: TripPlaceContext) {
+    const nextWaypoints = [...original];
+    const dayIndexes = original
+      .map((wp, idx) => ({ wp, idx }))
+      .filter(item => item.wp.day === context.day);
+    if (!dayIndexes.length) {
+      const previousDayLast = original.reduce((last, wp, idx) => wp.day < context.day ? idx : last, -1);
+      nextWaypoints.splice(previousDayLast >= 0 ? previousDayLast + 1 : nextWaypoints.length, 0, waypoint);
+      return nextWaypoints;
+    }
+    const { start, finish } = dayEndpointsForTripPlace(context.day);
+    const targetProgress = context.route_progress ?? 0.82;
+    let insertAt = dayIndexes[dayIndexes.length - 1].idx + 1;
+    if (start?.lat && start?.lng && finish?.lat && finish?.lng) {
+      for (const { wp, idx } of dayIndexes) {
+        if (!wp.lat || !wp.lng) continue;
+        if (idx === dayIndexes[0].idx && targetProgress > 0.04) continue;
+        const wpProjection = pointSegmentProjection({ lat: wp.lat, lng: wp.lng }, { lat: start.lat, lng: start.lng }, { lat: finish.lat, lng: finish.lng });
+        const isOvernight = wp.type === 'camp' || wp.type === 'motel' || isPlanningTargetWaypoint(wp);
+        const wpProgress = isOvernight ? Math.max(wpProjection.progress, 0.96) : wpProjection.progress;
+        if (wpProgress > targetProgress + 0.025) {
+          insertAt = idx;
+          break;
+        }
+      }
+    } else {
+      const overnightIdx = dayIndexes.find(item => item.wp.type === 'camp' || item.wp.type === 'motel' || isPlanningTargetWaypoint(item.wp));
+      if (overnightIdx) insertAt = overnightIdx.idx;
+    }
+    nextWaypoints.splice(insertAt, 0, waypoint);
+    return nextWaypoints;
+  }
+
+  function addPlaceToActiveTripDay(placeInput: Partial<Omit<OsmPoi, 'type'>> & { type?: string; name: string; lat: number; lng: number; note?: string }, dayOverride?: number | null) {
+    if (!activeTrip) {
+      setSearchRouteCard({ name: placeInput.name, lat: placeInput.lat, lng: placeInput.lng, dist: userLoc ? haversineKm(userLoc.lat, userLoc.lng, placeInput.lat, placeInput.lng) : null });
+      setShowSearch(true);
+      return;
+    }
+    const place = placeInput as OsmPoi;
+    const context = tripPlaceContextFor(place, dayOverride);
+    if (!context) return;
+    const name = place.name || cleanDisplayLabel(place.type) || 'Place';
+    const placeId = String(place.id || `${place.type || 'poi'}:${name}:${place.lat.toFixed(5)}:${place.lng.toFixed(5)}`);
+    const duplicate = (activeTrip.route_pois ?? []).some(existing => {
+      const sameId = String(existing.id || '') === placeId;
+      const sameDay = Number((existing as any).recommended_day || 0) === context.day;
+      const near = existing.lat != null && existing.lng != null
+        && haversineKm(existing.lat, existing.lng, place.lat, place.lng) * 0.621371 < 0.08;
+      return sameDay && (sameId || near);
+    });
+    if (duplicate) {
+      setQuickToast(`Already on Day ${context.day}`);
+      setTimeout(() => setQuickToast(''), 2200);
+      return;
+    }
+    const routePoi: OsmPoi & { recommended_day?: number; day?: number; insert_context?: string; route_point_type?: 'side_stop' } = {
+      ...place,
+      id: placeId,
+      name,
+      type: (place.type || 'attraction') as OsmPoi['type'],
+      recommended_day: context.day,
+      day: context.day,
+      route_point_type: 'side_stop',
+      route_distance_mi: context.route_distance_mi,
+      route_progress: context.route_progress,
+      route_progress_mi: context.route_progress_mi,
+      route_segment_index: context.route_segment_index,
+      insert_context: context.label,
+    };
+    const waypoint: Waypoint = {
+      day: context.day,
+      name,
+      type: 'waypoint',
+      description: (place as any).summary || placeInput.note || place.address || `${placeTypeLabel(place.type)} added from Places nearby.`,
+      land_type: (place as any).source_badge || place.source_label || place.source || placeTypeLabel(place.type),
+      notes: [context.label, place.source_label || place.attribution || place.source].filter(Boolean).join(' · '),
+      lat: place.lat,
+      lng: place.lng,
+      route_point_type: 'side_stop',
+      verified_match: true,
+      verified_source: place.source_label || place.attribution || place.source || 'Places nearby',
+    };
+    const previousTrip = activeTrip;
+    const original = activeTrip.plan.waypoints ?? [];
+    const nextWaypoints = insertTripPlaceWaypoint(original, waypoint, context);
+    const recalculatedWps = nextWaypoints
+      .filter(w => w.lat != null && w.lng != null && isFinite(w.lat) && isFinite(w.lng))
+      .map(w => ({ ...w, lat: w.lat!, lng: w.lng! })) as WP[];
+    const nextDaily = activeTrip.plan.daily_itinerary.map(d => (
+      d.day === context.day || d.day === context.day + 1
+        ? { ...d, est_miles: dayMileageFromWaypoints(recalculatedWps, d.day) }
+        : d
+    ));
+    const addTimelineEvent = (timeline: TripResult['timeline'] | undefined) => {
+      if (!timeline?.days) return timeline;
+      return {
+        ...timeline,
+        days: timeline.days.map(day => {
+          if (day.day !== context.day) return day;
+          const exists = day.events.some(event => event.type === 'poi' && event.title === name);
+          if (exists) return day;
+          const event = {
+            type: 'poi',
+            title: name,
+            description: (place as any).summary || context.label,
+            day: context.day,
+            source: place.source_label || place.source || 'Places nearby',
+            warning_level: 'info',
+            point: { lat: place.lat, lng: place.lng },
+            route_position: {
+              route_progress: context.route_progress,
+              route_progress_mi: context.route_progress_mi,
+              route_distance_mi: context.route_distance_mi,
+              route_segment_index: context.route_segment_index,
+            },
+            quick_actions: ['navigate', 'remove', 'open_builder'],
+          };
+          const events = [...day.events];
+          const overnightIdx = events.findIndex(existing => existing.type === 'overnight');
+          events.splice(overnightIdx >= 0 ? overnightIdx : events.length, 0, event);
+          return { ...day, events };
+        }),
+      };
+    };
+    const nextTimeline = addTimelineEvent(activeTrip.timeline);
+    const nextPlanTimeline = addTimelineEvent(activeTrip.plan.timeline);
+    const nextTrip: TripResult = {
+      ...activeTrip,
+      route_pois: [routePoi, ...(activeTrip.route_pois ?? [])],
+      timeline: nextTimeline,
+      updated_at: Date.now(),
+      version: (activeTrip.version ?? 0) + 1,
+      plan: {
+        ...activeTrip.plan,
+        waypoints: nextWaypoints,
+        daily_itinerary: nextDaily,
+        timeline: nextPlanTimeline,
+      },
+    };
+    setActiveTrip(nextTrip);
+    saveOfflineTrip(nextTrip).catch(() => {});
+    setSelectedPlace(null);
+    setSelectedPlaceContext(null);
+    setSelectedPlaceTripContext(null);
+    setTappedPoi(null);
+    setShowPanel(true);
+    setPanelCollapsed(false);
+    setSelectedDay(context.day);
+    setQuickToast(`Added to Day ${context.day}`);
+    setTimeout(() => setQuickToast(''), 2600);
+    nativeMapRef.current?.flyTo(place.lat, place.lng, 12);
+    showPlaceAddedAlert(context.day, context.label, previousTrip);
+  }
+
   useEffect(() => {
     if (!selectedCamp) return;
     loadNearbyPlacesFor(nearbyFeedKey('camp', selectedCamp.lat, selectedCamp.lng), selectedCamp, 18);
@@ -6399,12 +7416,20 @@ function MapScreen() {
 
   useEffect(() => {
     if (!activeTrip || panelCollapsed) return;
-    tripOverviewDays.slice(0, 5).forEach(({ day, camp, campWp, last, first }) => {
-      const center = camp ?? campWp ?? last ?? first;
+    tripOverviewDays.forEach(({ day }) => {
+      const centers = tripDayNearbyCenters(day.day);
+      const center = centers[0];
       if (!center?.lat || !center?.lng) return;
-      loadNearbyPlacesFor(nearbyFeedKey('day', center.lat, center.lng), center, 24);
+      loadNearbyPlacesFor(
+        tripDayNearbyFeedKey(day.day) || nearbyFeedKey('day', center.lat, center.lng),
+        center,
+        30,
+        centers.slice(1),
+        day.day,
+        routeLegCoordsForDay(day.day),
+      );
     });
-  }, [activeTrip?.trip_id, panelCollapsed, tripOverviewDays.length]);
+  }, [activeTrip?.trip_id, activeTrip?.version, panelCollapsed, tripOverviewDays.length, lastRouteCoords.length]);
 
   const expandTripPanel = useCallback(() => {
     setShowPanel(true);
@@ -6422,6 +7447,7 @@ function MapScreen() {
     setShowCampDetail(false);
     setSelectedPlace(null);
     setSelectedPlaceContext(null);
+    setSelectedPlaceTripContext(null);
     setTappedPoi(null);
     setTappedTrail(null);
     setTappedTileSpot(null);
@@ -6665,10 +7691,11 @@ function MapScreen() {
   }
 
   function openInMaps() {
-    if (!waypoints.length) return;
-    const origin = `${waypoints[0].lat},${waypoints[0].lng}`;
-    const dest   = `${waypoints[waypoints.length - 1].lat},${waypoints[waypoints.length - 1].lng}`;
-    const mids   = waypoints.slice(1, -1).slice(0, 8).map(w => `${w.lat},${w.lng}`).join('|');
+    const navWaypoints = waypoints.filter(w => w.route_point_type !== 'side_stop');
+    if (!navWaypoints.length) return;
+    const origin = `${navWaypoints[0].lat},${navWaypoints[0].lng}`;
+    const dest   = `${navWaypoints[navWaypoints.length - 1].lat},${navWaypoints[navWaypoints.length - 1].lng}`;
+    const mids   = navWaypoints.slice(1, -1).slice(0, 8).map(w => `${w.lat},${w.lng}`).join('|');
     const url    = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${dest}${mids ? `&waypoints=${encodeURIComponent(mids)}` : ''}&travelmode=driving`;
     Linking.openURL(url).catch(() =>
       Linking.openURL(`maps://?saddr=${origin}&daddr=${dest}`).catch(() => {})
@@ -6823,9 +7850,10 @@ function MapScreen() {
     }).catch(() => {});
   }
 
-  function openPoiFeature(poi: OsmPoi) {
+  function openPoiFeature(poi: OsmPoi, day?: number | null) {
     setTappedPoi(null);
     setSearchRouteCard(null);
+    setSelectedPlaceTripContext(tripPlaceContextFor(poi, day));
     setSelectedPlace(poi as SearchPlace);
     setSelectedCamp(null);
     setTappedTrail(null);
@@ -6839,38 +7867,39 @@ function MapScreen() {
     return `${prefix}:${lat.toFixed(3)}:${lng.toFixed(3)}`;
   }
 
-  function openNearbyPlace(place: OsmPoi) {
+  function openNearbyPlace(place: OsmPoi, day?: number | null) {
     setSelectedCamp(null);
     setShowCampDetail(false);
     setShowPanel(false);
     setPanelCollapsed(true);
     setShowSearch(false);
     setSearchRouteCard(null);
-    openPoiFeature(place);
+    openPoiFeature(place, day);
     nativeMapRef.current?.flyTo(place.lat, place.lng, 12);
     webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: place.lat, lng: place.lng, name: place.name }));
   }
 
   function openTripPlacesSearch(day?: number) {
     setSelectedDay(day ?? null);
-    setSelectedCamp(null);
-    setShowCampDetail(false);
-    setSelectedPlace(null);
-    setTappedPoi(null);
-    setTappedTrail(null);
-    setSelectedTrail(null);
-    setSelectedCommunityPin(null);
-    setSearchRouteCard(null);
-    setPanelCollapsed(true);
-    setShowPanel(false);
-    setShowSearch(true);
+    const centers = tripDayNearbyCenters(day);
+    const anchor = centers[0] ?? null;
+    const legRoute = day ? routeLegCoordsForDay(day) : compactRouteForPlaces();
+    const feedKey = day ? tripDayNearbyFeedKey(day) : '';
+    if (anchor?.lat && anchor?.lng) {
+      loadNearbyPlacesFor(feedKey || nearbyFeedKey('day', anchor.lat, anchor.lng), anchor, 30, centers.slice(1), day, legRoute);
+      nativeMapRef.current?.flyTo(anchor.lat, anchor.lng, 11);
+    }
+    setShowPanel(true);
+    setPanelCollapsed(false);
+    setShowSearch(false);
   }
 
-  function renderNearbyPlaceCard(place: OsmPoi, compact = false) {
+  function renderNearbyPlaceCard(place: OsmPoi, compact = false, day?: number | null) {
     const photo = mediaUrl(place.photo_url);
-    const meta = [place.type?.replace(/_/g, ' '), (place as any).distance_mi != null ? `${Number((place as any).distance_mi).toFixed(1)} mi` : ''].filter(Boolean).join(' · ');
+    const meta = tripPlaceCardMeta(place, day);
+    const canAddToTrip = !!activeTrip;
     return (
-      <TouchableOpacity key={place.id || `${place.type}:${place.lat}:${place.lng}`} style={[s.nearbyPlaceCard, compact && s.nearbyPlaceCardCompact]} onPress={() => openNearbyPlace(place)} activeOpacity={0.86}>
+      <TouchableOpacity key={place.id || `${place.type}:${place.lat}:${place.lng}`} style={[s.nearbyPlaceCard, compact && s.nearbyPlaceCardCompact]} onPress={() => openNearbyPlace(place, day)} activeOpacity={0.86}>
         {photo ? (
           <Image source={{ uri: photo }} style={s.nearbyPlacePhoto} resizeMode="cover" />
         ) : (
@@ -6878,15 +7907,31 @@ function MapScreen() {
             <Ionicons name={placeTypeIcon(place.type) as any} size={18} color={C.orange} />
           </View>
         )}
+        {canAddToTrip ? (
+          <TouchableOpacity
+            style={s.nearbyPlaceAdd}
+            onPress={() => addPlaceToActiveTripDay(place, day)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons name="add" size={16} color="#fff" />
+          </TouchableOpacity>
+        ) : null}
         <View style={s.nearbyPlaceBody}>
           <Text style={s.nearbyPlaceName} numberOfLines={2}>{place.name || cleanDisplayLabel(place.type) || 'Place'}</Text>
-          <Text style={s.nearbyPlaceMeta} numberOfLines={1}>{meta}</Text>
+          <Text style={s.nearbyPlaceMeta} numberOfLines={2}>{meta}</Text>
         </View>
       </TouchableOpacity>
     );
   }
 
-  function loadNearbyPlacesFor(key: string, center?: { lat?: number | null; lng?: number | null }, radius = 22) {
+  function loadNearbyPlacesFor(
+    key: string,
+    center?: { lat?: number | null; lng?: number | null },
+    radius = 22,
+    fallbackCenters: Array<{ lat?: number | null; lng?: number | null }> = [],
+    day?: number | null,
+    routeOverride?: [number, number][],
+  ) {
     if (!key || center?.lat == null || center?.lng == null || !isFinite(center.lat) || !isFinite(center.lng)) return;
     const cached = nearbyPlaceFeeds[key];
     if (cached?.loadedAt && Date.now() - cached.loadedAt < 5 * 60_000) return;
@@ -6894,25 +7939,81 @@ function MapScreen() {
       ...prev,
       [key]: { loading: true, places: prev[key]?.places ?? [], loadedAt: prev[key]?.loadedAt },
     }));
-    const categories = placeCategoryRequest();
-    api.getNearbySmartPack(center.lat, center.lng, radius, categories)
-      .then(pack => {
-        const places = (pack.places ?? [])
-          .filter(p => String(p.type) !== 'camp')
-          .filter(p => (p.name && p.name.trim()) || UTILITY_PLACE_TYPES.has(String(p.type || '')))
-          .slice(0, 12) as OsmPoi[];
-        if (places.length === 0) throw new Error('empty smart-pack');
-        setNearbyPlaceFeeds(prev => ({ ...prev, [key]: { loading: false, places, loadedAt: Date.now() } }));
-      })
-      .catch(() => {
-        api.getNearbyPlaces(center.lat!, center.lng!, radius, categories, 'auto')
-          .then(places => {
-            setNearbyPlaceFeeds(prev => ({ ...prev, [key]: { loading: false, places: places.slice(0, 12), loadedAt: Date.now() } }));
-          })
-          .catch(() => {
-            setNearbyPlaceFeeds(prev => ({ ...prev, [key]: { loading: false, places: prev[key]?.places ?? [], error: 'Places unavailable', loadedAt: Date.now() } }));
-          });
+    const categories = placeCategoryRequest(DEFAULT_PLACE_FILTERS, true);
+    const primaryCenter = { lat: center.lat, lng: center.lng };
+    const centers = uniqueRouteContextCenters(
+      [primaryCenter],
+      fallbackCenters
+        .filter(point => point.lat != null && point.lng != null && isFinite(point.lat) && isFinite(point.lng))
+        .map(point => ({ lat: point.lat!, lng: point.lng! })),
+    );
+    const route = routeOverride?.length ? routeOverride : (day ? routeLegCoordsForDay(day) : compactRouteForPlaces());
+    const scopeOptions = day
+      ? { scope_id: key, recommended_day: day, route_scope: 'leg' as const }
+      : {};
+    const normalize = (places: OsmPoi[]) => places
+      .filter(p => String(p.type) !== 'camp')
+      .filter(p => (p.name && p.name.trim()) || UTILITY_PLACE_TYPES.has(String(p.type || '')))
+      .map(p => {
+        const context = day ? tripPlaceContextFor(p, day) : null;
+        return context ? {
+          ...p,
+          recommended_day: context.day,
+          day: context.day,
+          route_distance_mi: context.route_distance_mi ?? p.route_distance_mi,
+          route_progress: context.route_progress ?? p.route_progress,
+          route_progress_mi: context.route_progress_mi ?? p.route_progress_mi,
+          route_segment_index: context.route_segment_index ?? p.route_segment_index,
+        } as OsmPoi : p;
       });
+    const merge = (batches: OsmPoi[][]) => {
+      const seen = new Set<string>();
+      const merged: OsmPoi[] = [];
+      batches.flat().forEach(place => {
+        if (!place?.lat || !place?.lng) return;
+        const type = place.type || 'poi';
+        const key = String(place.id || `${type}:${(place.name || '').toLowerCase()}:${place.lat.toFixed(4)}:${place.lng.toFixed(4)}`);
+        const fuzzy = `${type}:${(place.name || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 32)}:${place.lat.toFixed(3)}:${place.lng.toFixed(3)}`;
+        if (seen.has(key) || seen.has(fuzzy)) return;
+        seen.add(key); seen.add(fuzzy);
+        merged.push(place);
+      });
+      return merged
+        .sort((a, b) => {
+          const ac = tripPlaceContextFor(a, day);
+          const bc = tripPlaceContextFor(b, day);
+          const ad = ac?.route_progress_mi ?? (a as any).distance_mi ?? a.route_distance_mi ?? 999;
+          const bd = bc?.route_progress_mi ?? (b as any).distance_mi ?? b.route_distance_mi ?? 999;
+          return ad - bd;
+        })
+        .slice(0, 18);
+    };
+    Promise.allSettled(
+      centers.map(point => api.getNearbySmartPack(point.lat!, point.lng!, radius, categories, route, scopeOptions).then(pack => normalize((pack.places ?? []) as OsmPoi[])))
+    ).then(async smartResults => {
+      const smartPlaces = merge(smartResults.flatMap(result => result.status === 'fulfilled' ? [result.value] : []));
+      if (smartPlaces.length) return smartPlaces;
+      const nearbyResults = await Promise.allSettled(
+        centers.map(point => api.getNearbyPlaces(point.lat!, point.lng!, radius, categories, 'auto').then(places => normalize(places)))
+      );
+      const nearby = merge(nearbyResults.flatMap(result => result.status === 'fulfilled' ? [result.value] : []));
+      if (nearby.length) return nearby;
+      return api.getOsmPois(center.lat!, center.lng!, radius, 'trailhead,viewpoint,peak,hot_spring,water,fuel,parking')
+        .then(places => normalize(places))
+        .catch(() => []);
+    }).then(places => {
+      setNearbyPlaceFeeds(prev => ({
+        ...prev,
+        [key]: {
+          loading: false,
+          places,
+          error: places.length ? undefined : 'No official or open places found near this day yet.',
+          loadedAt: Date.now(),
+        },
+      }));
+    }).catch(() => {
+      setNearbyPlaceFeeds(prev => ({ ...prev, [key]: { loading: false, places: prev[key]?.places ?? [], error: 'Places unavailable', loadedAt: Date.now() } }));
+    });
   }
 
   function searchCampsNearTrail(trail: TrailFeature) {
@@ -8157,6 +9258,41 @@ function MapScreen() {
   const layerLabel: Record<MapLayer, string> = { satellite: 'SAT', topo: 'TOPO', hybrid: 'HYB' };
   const placeFilterChanged = activePlaceFilters.length !== DEFAULT_PLACE_FILTERS.length ||
     DEFAULT_PLACE_FILTERS.some(id => !activePlaceFilters.includes(id));
+  const waterFilterBroadActive = activePlaceFilters.includes('water');
+  const waterFilterNarrowCount = activePlaceFilters.filter(id => WATER_PLACE_FILTER_IDS.has(id)).length;
+  const waterNavFeatureCount = waterNavLines?.features?.length ?? 0;
+  const waterNavPointCount = waterNavLines?.counts?.points ?? waterNavLines?.features?.filter(f => f.geometry?.type === 'Point').length ?? 0;
+  const waterNavLineCount = waterNavLines?.counts?.lines ?? waterNavLines?.features?.filter(f => f.geometry?.type === 'LineString').length ?? 0;
+  const waterNavHazardCount = waterNavLines?.counts?.hazards ?? waterNavLines?.features?.filter(f => f.properties?.kind === 'water_hazard').length ?? 0;
+  const waterNavRecommendedCount = waterNavLines?.counts?.recommended_tracks ?? waterNavLines?.features?.filter(f => f.properties?.kind === 'recommended_track').length ?? 0;
+  const waterChartSourceNames = waterNavLines?.chart_profile?.sources?.slice(0, 3).map(source => source.name).join(' + ') || 'NOAA / CHS / OpenSeaMap context';
+  const hydroCoverage = waterNavLines?.chart_profile?.hydro;
+  const licensedChart = waterNavLines?.chart_profile?.licensed_chart;
+  const depthRanges = waterNavLines?.chart_profile?.depth_ranges ?? [
+    { id: 'shallow_0_5', label: '0-5 ft', hazard: true },
+    { id: 'shallow_5_10', label: '5-10 ft' },
+    { id: 'moderate_10_20', label: '10-20 ft' },
+    { id: 'deep_20_40', label: '20-40 ft' },
+  ];
+  const offlineStatus = waterNavLines?.chart_profile?.offline_status ?? {};
+  const hydroAvailable = Boolean(hydroCoverage?.available);
+  const hydroContourCount = hydroCoverage?.counts?.contours ?? 0;
+  const hydroShallowCount = hydroCoverage?.counts?.shallow_zones ?? 0;
+  const hydroHazardCount = hydroCoverage?.counts?.hazards ?? 0;
+  const waterSpotCount = waterSpotCards?.cards?.length ?? 0;
+  const firstWaterSpot = waterSpotCards?.cards?.[0] ?? null;
+  const selectedDepthLabel = depthRanges.find(r => r.id === safeWaterDepthRange)?.label ?? '5-10 ft';
+  const safeWaterSourceDisclosure = waterSpotCards?.source_disclosure || waterNavLines?.chart_profile?.disclaimer || 'Informational only; not a certified chartplotter or official navigation source.';
+  const fishingMajorWindow = fishingConditions?.solunar?.major_window || '--';
+  const waterCorridorConflictCount = waterCorridor?.conflicts?.length ?? 0;
+  const waterConditionsLabel = waterConditions?.station
+    ? [
+        waterConditions.crossing_risk?.label ? `Risk ${waterConditions.crossing_risk.label}` : null,
+        waterConditions.wave_height_ft != null ? `${Number(waterConditions.wave_height_ft).toFixed(1)} ft waves` : null,
+        waterConditions.gust_mph != null ? `${Number(waterConditions.gust_mph).toFixed(0)} mph gusts` : waterConditions.wind_mph != null ? `${Number(waterConditions.wind_mph).toFixed(0)} mph wind` : null,
+        waterConditions.water_temp_c != null ? `${Number(waterConditions.water_temp_c).toFixed(1)} C water` : null,
+      ].filter(Boolean).join(' · ')
+    : '';
   const communityFilterChanged = activePinFilters.length !== DEFAULT_COMMUNITY_PIN_FILTERS.length ||
     DEFAULT_COMMUNITY_PIN_FILTERS.some(id => !activePinFilters.includes(id));
   const changedFilterGroupCount =
@@ -8340,6 +9476,9 @@ function MapScreen() {
           ] as any}
           gas={routeSearchGas as any}
           pois={routePois}
+          waterNavLines={waterNavLines}
+          waterSpotCards={waterSpotCards?.cards ?? []}
+          waterCorridor={waterCorridor}
           reports={mapReports}
           communityPins={displayCommunityPins}
           searchMarker={searchRouteCard ? { lat: searchRouteCard.lat, lng: searchRouteCard.lng, name: searchRouteCard.name } : null}
@@ -8363,6 +9502,7 @@ function MapScreen() {
           showFire={layerFire}
           showAva={layerAva}
           showRadar={layerRadar}
+          showNautical={layerNautical}
           onMapReady={() => {
             webLoadedRef.current = true;
             // Load camps in the current area — this is what the WebView did on map_ready.
@@ -8395,11 +9535,24 @@ function MapScreen() {
             refreshCommunityPins({ lat, lng }, radius, false);
             queueViewportPlaceFetch(b);
             queueViewportCampFetch(b);
+            queueWaterNavigationLineFetch(b);
           }}
           onMapGesture={() => {
             if (navMode) setNavCameraFollow(false);
           }}
           onMapTap={(lat, lng) => {
+            if (waterCorridorPickMode) {
+              if (lat == null || lng == null) {
+                setQuickToast('Map tap did not return a water point.');
+                setTimeout(() => setQuickToast(''), 3000);
+                return;
+              }
+              const label = waterCorridorPickMode === 'start' ? 'Corridor start' : 'Corridor end';
+              setWaterCorridorPoint(waterCorridorPickMode, { lat, lng, name: `${label} · ${lat.toFixed(4)}, ${lng.toFixed(4)}` });
+              setWaterCorridorPickMode(null);
+              setLayerNautical(true);
+              return;
+            }
             if (pinDropMode && (lat == null || lng == null)) {
               setQuickToast('Map tap did not return a coordinate. Try again.');
               setTimeout(() => setQuickToast(''), 3500);
@@ -8454,6 +9607,7 @@ function MapScreen() {
           }}
           onGasTap={station => { setTappedGas(null); setSearchRouteCard(null); setSelectedPlace({ ...station, type: 'fuel', source: 'fuel' }); setSelectedCamp(null); setTappedTrail(null); setTappedTileSpot(null); setSelectedTrail(null); }}
           onPoiTap={p => openPoiFeature(p)}
+          onWaterSpotTap={spot => selectWaterSpot(spot)}
           onCommunityPinTap={p => { setSelectedCommunityPin(p); setSelectedCamp(null); setTappedTrail(null); setTappedTileSpot(null); setTappedGas(null); setTappedPoi(null); setSelectedTrail(null); }}
           onTileCampTap={(name, kind, lat, lng) => {
             openMapTileCamp(name, kind, lat, lng);
@@ -8896,6 +10050,21 @@ function MapScreen() {
               <Text style={s.layerText}>{layerLabel[mapLayer]}</Text>
             </TouchableOpacity>
 
+            <TouchableOpacity
+              style={[s.ctrlBtn, layerNautical && { backgroundColor: '#0891b2dd', borderColor: '#67e8f9' }]}
+              onPress={() => {
+                const next = !layerNautical;
+                setLayerNautical(next);
+                toggleDataLayer('nautical', next);
+                if (next) {
+                  setSafeWaterPanelCollapsed(false);
+                  setActivePlaceFilters(prev => Array.from(new Set([...prev, ...WATER_NAV_PLACE_FILTER_IDS])));
+                }
+              }}
+            >
+              <Ionicons name="boat-outline" size={20} color={layerNautical ? '#fff' : OVR.text} />
+            </TouchableOpacity>
+
             {waypoints.length > 0 && (
               <TouchableOpacity
                 style={[s.ctrlBtn, navMode && s.ctrlBtnActive]}
@@ -9009,6 +10178,195 @@ function MapScreen() {
           </>
         )}
       </ScrollView>
+
+      {layerNautical && !navMode && !showSearch && !selectedCamp && !selectedPlace && !selectedTrail && !selectedCommunityPin && (
+        <View style={s.safeWaterPanel} pointerEvents="auto">
+          <View style={s.safeWaterHeader}>
+            <View style={s.safeWaterTitleRow}>
+              <View style={s.safeWaterIcon}>
+                <Ionicons name="boat-outline" size={15} color="#67e8f9" />
+              </View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={s.safeWaterTitle}>SAFE WATER</Text>
+                <Text style={s.safeWaterSub} numberOfLines={1}>
+                  {licensedChart?.available ? 'Licensed chart pack ready' : 'Live/public chart context · no licensed LOTW pack'}
+                </Text>
+              </View>
+            </View>
+            <TouchableOpacity style={s.safeWaterIconButton} onPress={() => setSafeWaterPanelCollapsed(v => !v)}>
+              <Ionicons name={safeWaterPanelCollapsed ? 'chevron-up' : 'chevron-down'} size={16} color={OVR.text2} />
+            </TouchableOpacity>
+          </View>
+
+          {safeWaterPanelCollapsed ? (
+            <View style={s.safeWaterCompactMetrics}>
+              <Text style={s.safeWaterCompactMetric}>{waterNavFeatureCount} marks</Text>
+              <Text style={s.safeWaterCompactMetric}>{waterNavHazardCount + hydroHazardCount} hazards</Text>
+              <Text style={s.safeWaterCompactMetric}>{waterSpotCount} spots</Text>
+            </View>
+          ) : (
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.safeWaterPanelContent}>
+              <View style={s.safeWaterMetricRow}>
+                {[
+                  { label: 'Sources', value: waterChartSourceNames, icon: 'layers-outline', tone: '#67e8f9' },
+                  { label: 'Hazards', value: String(waterNavHazardCount + hydroHazardCount), icon: 'warning-outline', tone: '#f97316' },
+                  { label: 'Spots', value: String(waterSpotCount), icon: 'fish-outline', tone: C.green },
+                  { label: 'Solunar', value: fishingMajorWindow, icon: 'moon-outline', tone: C.silverBright },
+                ].map(metric => (
+                  <View key={metric.label} style={s.safeWaterMetric}>
+                    <Ionicons name={metric.icon as any} size={13} color={metric.tone} />
+                    <Text style={s.safeWaterMetricValue} numberOfLines={1}>{metric.value}</Text>
+                    <Text style={s.safeWaterMetricLabel}>{metric.label}</Text>
+                  </View>
+                ))}
+              </View>
+
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.safeWaterDepthRow}>
+                {depthRanges.map(range => {
+                  const active = safeWaterDepthRange === range.id;
+                  return (
+                    <TouchableOpacity
+                      key={range.id}
+                      style={[s.safeWaterChip, active && s.safeWaterChipActive, range.hazard && { borderColor: '#f9731655' }]}
+                      onPress={() => setSafeWaterDepthRange(range.id)}
+                    >
+                      <Text style={[s.safeWaterChipText, active && { color: '#fff' }]}>{range.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+
+              <View style={s.safeWaterToggleGrid}>
+                {[
+                  { label: 'Shallow', active: safeWaterShallowHighlight, icon: 'analytics-outline', onPress: () => setSafeWaterShallowHighlight(v => !v), enabled: true },
+                  { label: 'Hazards', active: safeWaterHazardEmphasis, icon: 'warning-outline', onPress: () => setSafeWaterHazardEmphasis(v => !v), enabled: true },
+                  { label: safeWaterHybridOverlay ? 'Hybrid' : 'Chart', active: safeWaterHybridOverlay, icon: 'map-outline', onPress: () => { setSafeWaterHybridOverlay(v => !v); if (!safeWaterHybridOverlay) setMapLayerState('hybrid'); }, enabled: true },
+                  { label: 'Veg/Structure', active: false, icon: 'leaf-outline', onPress: () => {}, enabled: Boolean(hydroCoverage?.available) },
+                ].map(item => (
+                  <TouchableOpacity
+                    key={item.label}
+                    style={[s.safeWaterToggle, item.active && s.safeWaterToggleActive, !item.enabled && s.safeWaterToggleDisabled]}
+                    onPress={item.enabled ? item.onPress : undefined}
+                    disabled={!item.enabled}
+                  >
+                    <Ionicons name={item.icon as any} size={13} color={item.active ? '#fff' : item.enabled ? OVR.text2 : OVR.text3} />
+                    <Text style={[s.safeWaterToggleText, item.active && { color: '#fff' }]} numberOfLines={1}>{item.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <View style={s.safeWaterStatusCard}>
+                <View style={s.safeWaterStatusTop}>
+                  <Text style={s.safeWaterStatusTitle}>COVERAGE</Text>
+                  <Text style={[s.safeWaterStatusPill, licensedChart?.available ? { color: C.green, borderColor: C.green + '55' } : null]}>
+                    {licensedChart?.available ? 'OFFLINE CHART' : 'LIVE ONLY'}
+                  </Text>
+                </View>
+                <Text style={s.safeWaterStatusText}>
+                  {licensedChart?.note || 'Lake of the Woods has public/live context, but no licensed premium chart pack is integrated yet.'}
+                </Text>
+                <Text style={s.safeWaterStatusMeta} numberOfLines={2}>
+                  Offline: base {offlineStatus.base_map || 'when downloaded'} · spots {offlineStatus.user_spots || 'ready'} · charts {offlineStatus.public_live_chart || 'live only'}
+                </Text>
+              </View>
+
+              {selectedWaterSpot ? (
+                <View style={s.safeWaterSpotCard}>
+                  <View style={s.safeWaterSpotTop}>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={s.safeWaterSpotKicker}>{selectedWaterSpot.kind.toUpperCase()}</Text>
+                      <Text style={s.safeWaterSpotName} numberOfLines={1}>{selectedWaterSpot.name}</Text>
+                    </View>
+                    <TouchableOpacity style={s.safeWaterIconButton} onPress={() => setSelectedWaterSpot(null)}>
+                      <Ionicons name="close" size={14} color={OVR.text2} />
+                    </TouchableOpacity>
+                  </View>
+                  <Text style={s.safeWaterSpotText} numberOfLines={2}>
+                    {[selectedWaterSpot.depth_range_ft ? `${selectedWaterSpot.depth_range_ft.min ?? '?'}-${selectedWaterSpot.depth_range_ft.max ?? '?'} ft` : selectedDepthLabel, ...(selectedWaterSpot.structure ?? [])].filter(Boolean).join(' · ')}
+                  </Text>
+                  <Text style={s.safeWaterSourceText} numberOfLines={2}>{selectedWaterSpot.source || selectedWaterSpot.navigation_note}</Text>
+                  <View style={s.safeWaterActionRow}>
+                    <TouchableOpacity style={s.safeWaterAction} onPress={() => setWaterCorridorPoint('end', pointFromWaterSpot(selectedWaterSpot))}>
+                      <Ionicons name="flag-outline" size={12} color="#67e8f9" />
+                      <Text style={s.safeWaterActionText}>Set End</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={s.safeWaterAction} onPress={() => addSavedPlace({ id: `water:${selectedWaterSpot.id}`, name: selectedWaterSpot.name, lat: selectedWaterSpot.lat, lng: selectedWaterSpot.lng, icon: 'water', note: selectedWaterSpot.source || 'Safe Water spot', createdAt: Date.now() })}>
+                      <Ionicons name="bookmark-outline" size={12} color={C.green} />
+                      <Text style={s.safeWaterActionText}>Save</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : waterSpotCount > 0 ? (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.safeWaterSpotRow}>
+                  {waterSpotCards!.cards.map(card => (
+                    <TouchableOpacity key={card.id} style={s.safeWaterMiniSpot} onPress={() => selectWaterSpot(card)}>
+                      <Text style={s.safeWaterSpotKicker}>{card.kind.toUpperCase()}</Text>
+                      <Text style={s.safeWaterMiniSpotName} numberOfLines={1}>{card.name}</Text>
+                      <Text style={s.safeWaterMiniSpotMeta} numberOfLines={1}>{(card.species_targets ?? []).join(', ') || card.source_confidence || 'source disclosed'}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              ) : (
+                <View style={s.safeWaterStatusCard}>
+                  <Text style={s.safeWaterStatusTitle}>NO PREMIUM SPOTS IN VIEW</Text>
+                  <Text style={s.safeWaterStatusText}>{waterSpotCards?.empty_state || 'Move around Lake of the Woods or add your own saved fishing spots.'}</Text>
+                </View>
+              )}
+
+              <View style={s.safeWaterCorridorCard}>
+                <View style={s.safeWaterStatusTop}>
+                  <Text style={s.safeWaterStatusTitle}>SUGGESTED CORRIDOR</Text>
+                  <Text style={s.safeWaterStatusPill}>PLANNING ONLY</Text>
+                </View>
+                <View style={s.safeWaterCorridorPoints}>
+                  <TouchableOpacity
+                    style={s.safeWaterPointButton}
+                    onPress={() => {
+                      const point = userLoc ? { lat: userLoc.lat, lng: userLoc.lng, name: 'Current location' } : currentWaterMapPoint('Map center');
+                      if (point) setWaterCorridorPoint('start', point);
+                    }}
+                  >
+                    <Text style={s.safeWaterPointLabel}>START</Text>
+                    <Text style={s.safeWaterPointName} numberOfLines={1}>{waterCorridorStart?.name || 'Use location/center'}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={s.safeWaterPointButton}
+                    onPress={() => firstWaterSpot ? setWaterCorridorPoint('end', pointFromWaterSpot(firstWaterSpot)) : setWaterCorridorPickMode('end')}
+                  >
+                    <Text style={s.safeWaterPointLabel}>END</Text>
+                    <Text style={s.safeWaterPointName} numberOfLines={1}>{waterCorridorEnd?.name || (firstWaterSpot?.name ?? 'Tap map')}</Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={s.safeWaterActionRow}>
+                  <TouchableOpacity style={s.safeWaterAction} onPress={() => setWaterCorridorPickMode('start')}>
+                    <Ionicons name="radio-button-on-outline" size={12} color="#67e8f9" />
+                    <Text style={s.safeWaterActionText}>Pick Start</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={s.safeWaterAction} onPress={() => setWaterCorridorPickMode('end')}>
+                    <Ionicons name="flag-outline" size={12} color="#67e8f9" />
+                    <Text style={s.safeWaterActionText}>Pick End</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[s.safeWaterAction, s.safeWaterPrimaryAction]} onPress={buildWaterCorridor} disabled={waterCorridorLoading}>
+                    {waterCorridorLoading ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="git-branch-outline" size={12} color="#fff" />}
+                    <Text style={[s.safeWaterActionText, { color: '#fff' }]}>Build</Text>
+                  </TouchableOpacity>
+                </View>
+                {waterCorridorPickMode ? (
+                  <Text style={s.safeWaterStatusMeta}>Tap the map to choose corridor {waterCorridorPickMode}.</Text>
+                ) : waterCorridor ? (
+                  <Text style={s.safeWaterStatusMeta}>
+                    {waterCorridor.distance_mi.toFixed(1)} mi · {waterCorridor.eta_minutes} min · {waterCorridorConflictCount} warning{waterCorridorConflictCount === 1 ? '' : 's'} · confidence {waterCorridor.source_confidence.replace(/_/g, ' ')}
+                  </Text>
+                ) : waterCorridorError ? (
+                  <Text style={[s.safeWaterStatusMeta, { color: C.orange }]}>{waterCorridorError}</Text>
+                ) : null}
+              </View>
+
+              <Text style={s.safeWaterDisclosure}>{safeWaterSourceDisclosure}</Text>
+            </ScrollView>
+          )}
+        </View>
+      )}
 
       {selectedTrail && !navMode && !trailPinCaptureMode && trailCardCollapsed && !trailRouteBuilderOpen && (
         <View style={s.trailCollapsedWrap}>
@@ -9739,9 +11097,54 @@ function MapScreen() {
                   const active = activePlaceFilters.includes(f.id);
                   return (
                     <TouchableOpacity key={f.id} style={[s.filterChip, active && { backgroundColor: f.color, borderColor: f.color }]}
-                      onPress={() => setActivePlaceFilters(prev =>
-                        prev.includes(f.id) ? prev.filter(x => x !== f.id) : [...prev, f.id]
-                      )}>
+                      onPress={() => setActivePlaceFilters(prev => {
+                        if (f.id === 'water') {
+                          return prev.includes('water')
+                            ? prev.filter(x => x !== 'water')
+                            : [...prev.filter(x => !WATER_PLACE_FILTER_IDS.has(x)), 'water'];
+                        }
+                        return prev.includes(f.id) ? prev.filter(x => x !== f.id) : [...prev, f.id];
+                      })}>
+                      <Ionicons name={f.icon as any} size={13} color={active ? '#fff' : f.color} style={{ marginRight: 4 }} />
+                      <Text style={[s.filterChipText, active && { color: '#fff' }]}>{f.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <View style={s.filterSectionHeader}>
+                <Text style={s.filterSectionTitle}>WATER ACCESS</Text>
+                <View style={{ flexDirection: 'row', gap: 12 }}>
+                  <TouchableOpacity onPress={() => setActivePlaceFilters(prev => Array.from(new Set([...prev.filter(id => !WATER_PLACE_FILTER_IDS.has(id)), 'water'])))}>
+                    <Text style={s.filterClearText}>ALL WATER</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => {
+                    setLayerNautical(true);
+                    toggleDataLayer('nautical', true);
+                    setActivePlaceFilters(prev => Array.from(new Set([...prev.filter(id => id !== 'water'), ...WATER_NAV_PLACE_FILTER_IDS])));
+                  }}>
+                    <Text style={s.filterClearText}>SAFE WATER</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+              <Text style={s.filterHintText}>
+                {waterFilterBroadActive
+                  ? 'All water points are visible. Pick a subtype below to narrow to fishing, ramps, launches, docks, marinas, shore access, red/green buoys, marked channels, anchorages, or hazards.'
+                  : waterFilterNarrowCount > 0
+                    ? `${waterFilterNarrowCount} water subtype${waterFilterNarrowCount === 1 ? '' : 's'} selected.`
+                    : 'Pick a subtype below when you only want specific water-access or water-navigation pins.'}
+              </Text>
+              <View style={s.filterGrid}>
+                {WATER_ACCESS_FILTER_TYPES.map(f => {
+                  const active = activePlaceFilters.includes(f.id);
+                  return (
+                    <TouchableOpacity key={f.id} style={[s.filterChip, active && { backgroundColor: f.color, borderColor: f.color }]}
+                      onPress={() => setActivePlaceFilters(prev => {
+                        const withoutBroadWater = prev.filter(id => id !== 'water');
+                        return withoutBroadWater.includes(f.id)
+                          ? withoutBroadWater.filter(id => id !== f.id)
+                          : [...withoutBroadWater, f.id];
+                      })}>
                       <Ionicons name={f.icon as any} size={13} color={active ? '#fff' : f.color} style={{ marginRight: 4 }} />
                       <Text style={[s.filterChipText, active && { color: '#fff' }]}>{f.label}</Text>
                     </TouchableOpacity>
@@ -9865,15 +11268,18 @@ function MapScreen() {
         visible={!!selectedPlace && !navMode}
         initialStage="full"
         related={selectedPlaceContext ?? undefined}
+        routeContextLabel={selectedPlaceTripContext?.label}
         onClose={() => {
           if (selectedPlace?.type === 'trail' || selectedPlace?.type === 'trailhead') nativeMapRef.current?.clearTrailHighlight();
           setSelectedPlace(null);
           setSelectedPlaceContext(null);
+          setSelectedPlaceTripContext(null);
           if (activeTrip) restoreTripOverview(false);
         }}
         onNavigate={place => {
           setSelectedPlace(null);
           setSelectedPlaceContext(null);
+          setSelectedPlaceTripContext(null);
           navigateToCamp(place);
         }}
         onSave={place => {
@@ -9892,11 +11298,13 @@ function MapScreen() {
         onReport={() => {
           setSelectedPlace(null);
           setSelectedPlaceContext(null);
+          setSelectedPlaceTripContext(null);
           setQuickReport(true);
         }}
         onNearbyCamps={place => {
           setSelectedPlace(null);
           setSelectedPlaceContext(null);
+          setSelectedPlaceTripContext(null);
           const bounds = { n: place.lat + 0.35, s: place.lat - 0.35, e: place.lng + 0.35, w: place.lng - 0.35, zoom: 11 };
           setQuickToast('Searching camps nearby');
           setTimeout(() => setQuickToast(''), 2500);
@@ -9908,24 +11316,25 @@ function MapScreen() {
           }, 160);
         }}
         onAddToRoute={place => {
-          setSelectedPlace(null);
-          setSelectedPlaceContext(null);
-          setSearchRouteCard({ name: place.name, lat: place.lat, lng: place.lng, dist: userLoc ? haversineKm(userLoc.lat, userLoc.lng, place.lat, place.lng) : null });
-          setShowSearch(true);
+          addPlaceToActiveTripDay({ ...(selectedPlace ?? {}), ...place }, selectedPlaceTripContext?.day ?? selectedDay);
         }}
+        addToRoutePrimary={!!activeTrip}
+        addToRouteLabel={selectedPlaceTripContext?.day ? `Add to Day ${selectedPlaceTripContext.day}` : activeTrip ? 'Add to Trip Day' : undefined}
         onRichDetailLocked={() => {
           setPaywallCode('category_unlock');
-          setPaywallMessage('Explorer unlocks rich photos, reviews, and full weekly hours for town-service places.');
+          setPaywallMessage('Provider photo, contact details, and weekly hours load on demand for 5 credits or Explorer.');
           setPaywallVisible(true);
         }}
         onOpenRelatedPlace={place => {
           setSelectedPlace(null);
           setSelectedPlaceContext(null);
-          openNearbyPlace(place as OsmPoi);
+          setSelectedPlaceTripContext(null);
+          openNearbyPlace(place as OsmPoi, selectedPlaceTripContext?.day ?? selectedDay);
         }}
         onOpenRelatedCamp={place => {
           setSelectedPlace(null);
           setSelectedPlaceContext(null);
+          setSelectedPlaceTripContext(null);
           const camp = place as CampsitePin;
           setSelectedCamp(camp);
           setCampDetail(null); setCampInsight(null); setWikiArticles([]);
@@ -9936,6 +11345,7 @@ function MapScreen() {
         onOpenRelatedTrail={place => {
           setSelectedPlace(null);
           setSelectedPlaceContext(null);
+          setSelectedPlaceTripContext(null);
           const trailPoi = trailProfileToPoi(place as TrailProfile);
           const support = buildTrailSupport(
             { lat: trailPoi.lat, lng: trailPoi.lng },
@@ -9962,6 +11372,7 @@ function MapScreen() {
         } as any : null}
         visible={!!tappedPoi && !navMode}
         initialStage="full"
+        routeContextLabel={tappedPoi ? tripPlaceContextFor(tappedPoi)?.label : undefined}
         onClose={() => {
           setTappedPoi(null);
           if (activeTrip) restoreTripOverview(false);
@@ -9999,13 +11410,13 @@ function MapScreen() {
           }, 160);
         }}
         onAddToRoute={place => {
-          setTappedPoi(null);
-          setSearchRouteCard({ name: place.name, lat: place.lat, lng: place.lng, dist: userLoc ? haversineKm(userLoc.lat, userLoc.lng, place.lat, place.lng) : null });
-          setShowSearch(true);
+          addPlaceToActiveTripDay({ ...(tappedPoi ?? {}), ...place }, selectedDay);
         }}
+        addToRoutePrimary={!!activeTrip}
+        addToRouteLabel={activeTrip && tappedPoi ? `Add to Day ${tripPlaceContextFor(tappedPoi)?.day ?? selectedDay ?? 1}` : undefined}
         onRichDetailLocked={() => {
           setPaywallCode('category_unlock');
-          setPaywallMessage('Explorer unlocks rich photos, reviews, and full weekly hours for town-service places.');
+          setPaywallMessage('Provider photo, contact details, and weekly hours load on demand for 5 credits or Explorer.');
           setPaywallVisible(true);
         }}
       />
@@ -10365,8 +11776,8 @@ function MapScreen() {
                       </View>
                     );
                   })}
-                  {fieldReports.length === 0 && !showFieldReportForm ? <Text style={s.frEmpty}>No field reports yet. Be the first to check in.</Text> : null}
-                  {user && !showFieldReportForm ? (
+                  {fieldReports.length === 0 ? <Text style={s.frEmpty}>No field reports yet. Be the first to check in.</Text> : null}
+                  {user ? (
                     <TouchableOpacity style={s.frAddBtn} onPress={() => setShowFieldReportForm(true)}>
                       <Ionicons name="add-circle-outline" size={15} color={C.orange} />
                       <Text style={s.frAddBtnText}>ADD FIELD REPORT</Text>
@@ -10455,6 +11866,25 @@ function MapScreen() {
                 </View>
               );
             })()}
+            {(selectedCamp.reservable || String(selectedCamp.url || '').includes('recreation.gov')) && selectedCamp.url ? (
+              <View style={s.campReservationCard}>
+                <View style={s.frHeader}>
+                  <Text style={s.detailSectionTitle}>RESERVATIONS</Text>
+                  <Text style={s.frCount}>{selectedCamp.verified_source || 'OFFICIAL'}</Text>
+                </View>
+                <Text style={s.frEmpty}>Check dates and complete booking with the official source. Trailhead does not handle checkout.</Text>
+                <View style={s.quickCardSecondaryActions}>
+                  <TouchableOpacity style={s.quickCardNav} onPress={() => Linking.openURL(selectedCamp.url)}>
+                    <Ionicons name="calendar-outline" size={13} color="#fff" />
+                    <Text style={s.quickCardNavText}>CHECK AVAILABILITY</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={s.quickCardSecondaryBtn} onPress={() => Linking.openURL(selectedCamp.url)}>
+                    <Ionicons name="open-outline" size={12} color={C.text2} />
+                    <Text style={s.quickCardSecondaryText}>RESERVE</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : null}
             {/* Actions */}
             <View style={s.quickCardActions}>
               <TouchableOpacity style={s.quickCardNav} onPress={() => navigateToCamp(selectedCamp)}>
@@ -10927,101 +12357,15 @@ function MapScreen() {
                     );
                   })}
 
-                  {fieldReports.length === 0 && !showFieldReportForm && (
+                  {fieldReports.length === 0 && (
                     <Text style={s.frEmpty}>No field reports yet. Be the first to check in.</Text>
                   )}
 
-                  {/* Submission form */}
-                  {showFieldReportForm ? (
-                    <View style={s.frForm}>
-                      <Text style={s.frFormLabel}>How was it?</Text>
-                      <View style={s.frPillRow}>
-                        {([['loved_it','Loved it','#22c55e','heart'],['its_ok','It\'s OK','#f59e0b','thumbs-up'],['would_skip','Would skip','#ef4444','thumbs-down']] as const).map(([val, label, color, icon]) => (
-                          <TouchableOpacity key={val} style={[s.frSentimentBtn, frSentiment === val && { borderColor: color, backgroundColor: color + '22' }]}
-                            onPress={() => setFrSentiment(val)}>
-                            <Ionicons name={icon as keyof typeof Ionicons.glyphMap} size={12} color={frSentiment === val ? color : C.text2} />
-                            <Text style={[s.frSentimentBtnText, frSentiment === val && { color }]}>{label}</Text>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
-
-                      <Text style={s.frFormLabel}>Access road</Text>
-                      <View style={s.frPillRow}>
-                        {([['easy','Easy'],['rough','Rough'],['four_wd_required','4WD Only']] as const).map(([val, label]) => (
-                          <TouchableOpacity key={val} style={[s.frPill, frAccess === val && s.frPillActive]}
-                            onPress={() => setFrAccess(val)}>
-                            <Text style={[s.frPillText, frAccess === val && s.frPillTextActive]}>{label}</Text>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
-
-                      <Text style={s.frFormLabel}>Crowd level</Text>
-                      <View style={s.frPillRow}>
-                        {([['empty','Empty'],['few_rigs','A few rigs'],['packed','Packed']] as const).map(([val, label]) => (
-                          <TouchableOpacity key={val} style={[s.frPill, frCrowd === val && s.frPillActive]}
-                            onPress={() => setFrCrowd(val)}>
-                            <Text style={[s.frPillText, frCrowd === val && s.frPillTextActive]}>{label}</Text>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
-
-                      <Text style={s.frFormLabel}>Tags (pick any)</Text>
-                      <View style={s.frTagPicker}>
-                        {['Great Views','Dog Friendly','Water Nearby','No Cell Signal','Fire Ring',
-                          'Very Quiet','High Clearance','Good Shade','Exposed/Windy','Creek Nearby',
-                          'Stargazing','Kids Friendly','Dusty Road','Fishing Nearby','Horse Friendly'].map(tag => {
-                          const on = frTags.includes(tag);
-                          return (
-                            <TouchableOpacity key={tag}
-                              style={[s.frTagPill, on && s.frTagPillOn]}
-                              onPress={() => setFrTags(p => on ? p.filter(t => t !== tag) : [...p, tag])}>
-                              <Text style={[s.frTagPillText, on && s.frTagPillTextOn]}>{tag}</Text>
-                            </TouchableOpacity>
-                          );
-                        })}
-                      </View>
-
-                      <Text style={s.frFormLabel}>Notes <Text style={s.frOptional}>(optional)</Text></Text>
-                      <TextInput
-                        style={s.frNoteInput}
-                        value={frNote}
-                        onChangeText={v => setFrNote(v.slice(0, 280))}
-                        placeholder="Road conditions, water source, anything useful..."
-                        placeholderTextColor={C.text3}
-                        multiline
-                        numberOfLines={3}
-                      />
-                      <Text style={s.frCharCount}>{frNote.length}/280</Text>
-
-                      <TouchableOpacity style={s.frPhotoBtn} onPress={pickFieldReportPhoto}>
-                        <Ionicons name={frPhoto ? 'checkmark-circle' : 'camera-outline'} size={16} color={frPhoto ? '#22c55e' : C.text3} />
-                        <Text style={[s.frPhotoBtnText, frPhoto && { color: '#22c55e' }]}>
-                          {frPhoto ? `Photo added (+${CREDIT_REWARDS.fieldReportPhotoBonus} credits)` : `Add photo (+${CREDIT_REWARDS.fieldReportPhotoBonus} credits)`}
-                        </Text>
-                      </TouchableOpacity>
-
-                      <View style={s.frFormActions}>
-                        <TouchableOpacity style={s.frCancelBtn} onPress={() => { setShowFieldReportForm(false); resetFieldReportForm(); }}>
-                          <Text style={s.frCancelText}>Cancel</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={[s.frSubmitBtn, (!frSentiment || !frAccess || !frCrowd || frSubmitting) && { opacity: 0.5 }]}
-                          onPress={submitFieldReport}
-                          disabled={!frSentiment || !frAccess || !frCrowd || frSubmitting}
-                        >
-                          {frSubmitting
-                            ? <ActivityIndicator size="small" color="#fff" />
-                            : <Text style={s.frSubmitText}>SUBMIT +{frPhoto ? 10 : 5} CREDITS</Text>}
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  ) : (
-                    user && (
-                      <TouchableOpacity style={s.frAddBtn} onPress={() => setShowFieldReportForm(true)}>
-                        <Ionicons name="add-circle-outline" size={15} color={C.orange} />
-                        <Text style={s.frAddBtnText}>ADD FIELD REPORT</Text>
-                      </TouchableOpacity>
-                    )
+                  {user && (
+                    <TouchableOpacity style={s.frAddBtn} onPress={() => setShowFieldReportForm(true)}>
+                      <Ionicons name="add-circle-outline" size={15} color={C.orange} />
+                      <Text style={s.frAddBtnText}>ADD FIELD REPORT</Text>
+                    </TouchableOpacity>
                   )}
                 </View>
 
@@ -11060,6 +12404,32 @@ function MapScreen() {
         title={campDetail?.name || selectedCamp?.name || 'Camp'}
         onClose={() => setCampGalleryIndex(null)}
       />
+
+      <Modal
+        visible={showFieldReportForm && !!selectedCamp}
+        transparent
+        animationType="slide"
+        statusBarTranslucent
+        onRequestClose={() => { setShowFieldReportForm(false); resetFieldReportForm(); }}
+      >
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.frSheetOverlay}>
+          <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => { setShowFieldReportForm(false); resetFieldReportForm(); }} />
+          <TrailheadSheet handle style={s.frSheet} contentStyle={[s.frSheetContent, modalSheetPad]}>
+            <View style={s.frSheetHeader}>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={s.frSheetTitle}>Field report</Text>
+                <Text style={s.frSheetSub} numberOfLines={1}>{selectedCamp?.name}</Text>
+              </View>
+              <TouchableOpacity style={s.frSheetClose} onPress={() => { setShowFieldReportForm(false); resetFieldReportForm(); }}>
+                <Ionicons name="close" size={18} color={C.text2} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              {renderCampFieldReportForm()}
+            </ScrollView>
+          </TrailheadSheet>
+        </KeyboardAvoidingView>
+      </Modal>
 
       <Modal visible={showCampEdit} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowCampEdit(false)}>
         <SafeAreaView style={s.campEditModal}>
@@ -11370,7 +12740,7 @@ function MapScreen() {
                 <View style={s.trailEmptyState}>
                   <Ionicons name="trail-sign-outline" size={26} color="#16a34a" />
                   <Text style={s.trailEmptyTitle}>No trail places loaded</Text>
-                  <Text style={s.trailEmptyText}>Use the trail button for nearby trails, or switch the area search to TRAIL after panning the map.</Text>
+                  <Text style={s.trailEmptyText}>Use the trail button for nearby trails, or open Search this view and choose Trails for the visible map area.</Text>
                 </View>
               ) : trailDiscoveries.map(trail => (
                 <TouchableOpacity
@@ -11405,6 +12775,7 @@ function MapScreen() {
             {([
               { key: 'lands', label: 'Public Land Tint', sub: 'BLM/USFS/NPS color overlay. Requires signal unless cached.', icon: 'map-outline', val: showLands, color: '#22c55e', toggle: toggleLandOverlay },
               { key: 'usgs', label: 'USGS Topo + Trails', sub: 'Topo raster with contours, paths, labels, and land features.', icon: 'trail-sign-outline', val: showUsgs, color: '#0ea5e9', toggle: toggleUsgsOverlay },
+              { key: 'nautical', label: 'Safe Water Structure', sub: 'Bathymetry contours, shallow zones, hazards, open seamark lines, buoys, and markers where sources exist.', icon: 'boat-outline', val: layerNautical, color: '#0891b2', toggle: (v: boolean) => { setLayerNautical(v); toggleDataLayer('nautical', v); if (v) setActivePlaceFilters(prev => Array.from(new Set([...prev, ...WATER_NAV_PLACE_FILTER_IDS]))); } },
               { key: 'pois', label: 'Places', sub: 'Live and downloaded fuel, water, trailheads, services, viewpoints, and attractions.', icon: 'location-outline', val: showPois, color: '#3b82f6', toggle: togglePoiOverlay },
             ] as const).map(l => (
               <TouchableOpacity key={l.key} style={s.layerRow} onPress={() => l.toggle(!l.val)}>
@@ -11451,6 +12822,43 @@ function MapScreen() {
                 <View style={[s.layerDot, l.val && { backgroundColor: l.color }]} />
               </TouchableOpacity>
             ))}
+
+            {layerNautical && (
+              <View style={{ paddingHorizontal: 16, paddingBottom: 8, gap: 6 }}>
+                <Text style={s.layerSectionHead}>SAFE WATER LEGEND</Text>
+                {[
+                  { color: '#f97316', label: '0-5 ft shallow structure' },
+                  { color: '#facc15', label: '5-10 ft shallow zone' },
+                  { color: '#bae6fd', label: '5 ft contours / heavier 10 ft lines' },
+                  { color: '#38bdf8', label: 'Recommended track / open follow line' },
+                  { color: '#22c55e', label: 'Marked channel / fairway' },
+                  { color: '#f59e0b', label: 'Range or leading line' },
+                  { color: '#dc2626', label: 'Red marker' },
+                  { color: '#16a34a', label: 'Green marker' },
+                  { color: '#ef4444', label: 'Rock, wreck, obstruction, shoal, or hazard' },
+                ].map(l => (
+                  <View key={l.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <View style={{ width: 22, height: 4, backgroundColor: l.color, borderRadius: 2 }} />
+                    <Text style={{ color: C.text2, fontSize: 11, fontFamily: mono }}>{l.label}</Text>
+                  </View>
+                ))}
+                <Text style={{ color: C.text3, fontSize: 10, fontFamily: mono, lineHeight: 14 }}>
+                  {hydroAvailable
+                    ? `${hydroContourCount} bathymetry contour${hydroContourCount === 1 ? '' : 's'}, ${hydroShallowCount} shallow zone${hydroShallowCount === 1 ? '' : 's'}, ${hydroHazardCount} hydro hazard${hydroHazardCount === 1 ? '' : 's'}, ${waterNavRecommendedCount} recommended track${waterNavRecommendedCount === 1 ? '' : 's'}, and ${waterNavPointCount} buoy/nav aid pin${waterNavPointCount === 1 ? '' : 's'} loaded in this view. Sources: ${waterChartSourceNames}.`
+                    : waterNavFeatureCount > 0
+                      ? `${waterNavLineCount} open chart line${waterNavLineCount === 1 ? '' : 's'}, ${waterNavPointCount} aid/hazard pin${waterNavPointCount === 1 ? '' : 's'}, ${waterNavHazardCount} hazard${waterNavHazardCount === 1 ? '' : 's'}, and ${waterNavRecommendedCount} recommended track${waterNavRecommendedCount === 1 ? '' : 's'} loaded in this view. Hydro bathymetry coverage: ${hydroCoverage?.coverage || 'none'}. Sources: ${waterChartSourceNames}.`
+                      : 'No hydro bathymetry or open seamark chart lines are loaded in this view yet. NOAA/CHS/OpenSeaMap context may still be visible without pretending local depth contours exist.'}
+                </Text>
+                {waterConditionsLabel ? (
+                  <Text style={{ color: C.text2, fontSize: 10, fontFamily: mono, lineHeight: 14 }}>
+                    {waterConditions?.station?.name}: {waterConditionsLabel}
+                  </Text>
+                ) : null}
+                <Text style={{ color: C.text3, fontSize: 10, fontFamily: mono, lineHeight: 14 }}>
+                  Informational only; not certified chartplotter data, not turn-by-turn boat routing, and not an offline nautical chart.
+                </Text>
+              </View>
+            )}
 
             {(layerMvum || layerAva) && (
               <Text style={s.layerSectionHead}>{layerMvum ? 'MVUM LEGEND' : 'CONDITION LEGEND'}</Text>
@@ -11793,7 +13201,7 @@ function MapScreen() {
 
       {/* ── Waze-style quick report (two-step: type → subtype) ─────────────── */}
       {userLoc && !showSearch && !showDiscoveryPanel && !selectedCamp && !selectedTrail && !selectedCommunityPin && (
-        <View style={[s.quickReportWrap, navMode && s.quickReportWrapNav]} pointerEvents="box-none">
+        <View style={[s.quickReportWrap, { bottom: bottomInset + 92 }, navMode && s.quickReportWrapNav]} pointerEvents="box-none">
           {!!quickToast && (
             <View style={s.quickToast}>
               <Ionicons name="checkmark-circle" size={14} color={C.green} />
@@ -11903,7 +13311,7 @@ function MapScreen() {
       )}
 
       {/* ── Location permission prominent disclosure ── */}
-      {showLocDisclosure && (
+      {showLocDisclosure && !guidedTourActive && (
         <View style={s.locDisclosureOverlay}>
           <View style={s.locDisclosureCard}>
             <View style={s.locDisclosureIcon}>
@@ -12027,16 +13435,17 @@ function MapScreen() {
           </View>
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.tripPanelScroll}>
             <View style={s.tripTimeline}>
-              {tripOverviewDays.map(({ day, previousCamp, first, last, camp, campWp, gasStops, poiStops, waypoints: dayWps, forecast, legMiles }) => {
+              {tripOverviewDays.map(({ day, previousCamp, first, last, camp, campWp, gasStops, poiStops, timelineDay, waypoints: dayWps, forecast, legMiles }) => {
                 const pin = camp as CampsitePin | null;
                 const forecastDay = forecast?.daily;
                 const hi = forecastDay?.temperature_2m_max?.[0];
                 const lo = forecastDay?.temperature_2m_min?.[0];
                 const start = previousCamp ?? first;
                 const finish = campWp ?? camp ?? last;
+                const timelineWarning = timelineDay?.warning_level && timelineDay.warning_level !== 'info';
                 const complete = !!pin || !!campWp || day.day === tripOverviewDays.length;
-                const statusColor = complete ? C.green : C.orange;
-                const statusText = complete ? (day.day === tripOverviewDays.length ? 'finish day' : 'overnight set') : 'overnight needed';
+                const statusColor = timelineWarning ? C.yellow : complete ? C.green : C.orange;
+                const statusText = timelineWarning ? 'review' : complete ? (day.day === tripOverviewDays.length ? 'finish day' : 'overnight set') : 'overnight needed';
                 const stops = [
                   ...gasStops.map(stop => ({
                     key: `fuel_${stop.id ?? stop.name}_${day.day}`,
@@ -12051,6 +13460,9 @@ function MapScreen() {
                     sub: [routeFitLabel(stop), stop.type?.replace(/_/g, ' ') || 'Place'].filter(Boolean).join(' · '),
                   })),
                 ];
+                const timelineEvents = (timelineDay?.events ?? [])
+                  .filter(event => !['start', 'depart', 'drive', 'overnight'].includes(String(event.type)))
+                  .slice(0, 5);
                 return (
                   <TouchableOpacity
                     key={day.day}
@@ -12078,6 +13490,9 @@ function MapScreen() {
                           </View>
                         </View>
                         <Text style={s.tripTimelineRouteName} numberOfLines={2}>{start?.name ?? 'Start'} to {finish?.name ?? day.title}</Text>
+                        {timelineDay?.summary ? (
+                          <Text style={s.tripTimelineSummary} numberOfLines={3}>{timelineDay.summary}</Text>
+                        ) : null}
                         <View style={s.tripTimelineRows}>
                           <View style={s.tripTimelineStop}>
                             <View style={[s.tripTimelineIcon, { backgroundColor: C.orange + '18', borderColor: C.orange + '55' }]}>
@@ -12103,9 +13518,21 @@ function MapScreen() {
                               </View>
                             </View>
                           ))}
+                          {timelineEvents.map((event, eventIdx) => (
+                            <View key={`timeline_${day.day}_${eventIdx}_${event.title}`} style={s.tripTimelineStop}>
+                              <View style={[s.tripTimelineIcon, { backgroundColor: event.warning_level === 'warn' ? C.yellow + '18' : C.orange + '14', borderColor: event.warning_level === 'warn' ? C.yellow + '55' : C.orange + '44' }]}>
+                                <Ionicons name={event.type === 'fuel' ? 'flash-outline' : event.type === 'rest' ? 'bed-outline' : 'location-outline'} size={13} color={event.warning_level === 'warn' ? C.yellow : C.orange} />
+                              </View>
+                              <View style={{ flex: 1, minWidth: 0 }}>
+                                <Text style={s.tripTimelineStopName} numberOfLines={1}>{event.title}</Text>
+                                <Text style={s.tripTimelineStopMeta} numberOfLines={1}>{[event.source, event.description].filter(Boolean).join(' · ')}</Text>
+                              </View>
+                            </View>
+                          ))}
                           {(() => {
                             const nearbyAnchor = pin ?? campWp ?? finish ?? last ?? first;
-                            const key = nearbyAnchor?.lat && nearbyAnchor?.lng ? nearbyFeedKey('day', nearbyAnchor.lat, nearbyAnchor.lng) : '';
+                            const key = tripDayNearbyFeedKey(day.day)
+                              || (nearbyAnchor?.lat && nearbyAnchor?.lng ? nearbyFeedKey('day', nearbyAnchor.lat, nearbyAnchor.lng) : '');
                             const feed = key ? nearbyPlaceFeeds[key] : null;
                             const places = feed?.places?.slice(0, 4) ?? [];
                             if (!feed?.loading && places.length === 0) return null;
@@ -12116,14 +13543,21 @@ function MapScreen() {
                                   {feed?.loading ? <ActivityIndicator size="small" color={C.orange} /> : null}
                                 </View>
                                 {places.map(place => (
-                                  <TouchableOpacity key={place.id || `${place.type}:${place.lat}:${place.lng}`} style={s.tripPlaceRow} onPress={() => openNearbyPlace(place)} activeOpacity={0.86}>
+                                  <TouchableOpacity key={place.id || `${place.type}:${place.lat}:${place.lng}`} style={s.tripPlaceRow} onPress={() => openNearbyPlace(place, day.day)} activeOpacity={0.86}>
                                     <View style={s.tripTimelineIcon}>
                                       <Ionicons name={placeTypeIcon(place.type)} size={13} color={C.orange} />
                                     </View>
                                     <View style={{ flex: 1, minWidth: 0 }}>
                                       <Text style={s.tripTimelineStopName} numberOfLines={1}>{place.name || cleanDisplayLabel(place.type) || 'Place'}</Text>
-                                      <Text style={s.tripTimelineStopMeta} numberOfLines={1}>{[place.type?.replace(/_/g, ' '), (place as any).distance_mi != null ? `${Number((place as any).distance_mi).toFixed(1)} mi` : ''].filter(Boolean).join(' · ')}</Text>
+                                      <Text style={s.tripTimelineStopMeta} numberOfLines={2}>{tripPlaceCardMeta(place, day.day)}</Text>
                                     </View>
+                                    <TouchableOpacity
+                                      style={s.tripPlaceAddBtn}
+                                      onPress={() => addPlaceToActiveTripDay(place, day.day)}
+                                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                    >
+                                      <Ionicons name="add" size={15} color={C.orange} />
+                                    </TouchableOpacity>
                                   </TouchableOpacity>
                                 ))}
                               </View>
@@ -12386,7 +13820,7 @@ function MapScreen() {
               <View style={s.trailEmptyState}>
                 <Ionicons name="trail-sign-outline" size={26} color="#16a34a" />
                 <Text style={s.trailEmptyTitle}>No trail places loaded</Text>
-                <Text style={s.trailEmptyText}>Use the trail button for nearby trails, or switch the area search to TRAIL after panning the map.</Text>
+                <Text style={s.trailEmptyText}>Use the trail button for nearby trails, or open Search this view and choose Trails for the visible map area.</Text>
               </View>
             ) : trailDiscoveries.map(trail => (
               <TouchableOpacity
@@ -13245,6 +14679,124 @@ const makeStyles = (C: ColorPalette) => {
     shadowOffset: { width: 0, height: 16 },
     elevation: 14,
   },
+  safeWaterPanel: {
+    position: 'absolute',
+    left: 12,
+    right: 66,
+    bottom: 108,
+    maxHeight: '62%' as any,
+    backgroundColor: 'rgba(5, 10, 12, 0.86)',
+    borderWidth: 1,
+    borderColor: 'rgba(103,232,249,0.2)',
+    borderRadius: 20,
+    padding: 10,
+    gap: 9,
+    shadowColor: '#000',
+    shadowOpacity: 0.48,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 16 },
+    elevation: 18,
+  },
+  safeWaterHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  safeWaterTitleRow: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 9 },
+  safeWaterIcon: {
+    width: 34, height: 34, borderRadius: 11,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(8,145,178,0.18)',
+    borderWidth: 1, borderColor: 'rgba(103,232,249,0.35)',
+  },
+  safeWaterIconButton: {
+    width: 30, height: 30, borderRadius: 10,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
+  },
+  safeWaterTitle: { color: '#F5F5F7', fontSize: 12, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
+  safeWaterSub: { color: OVR.text3, fontSize: 9, fontFamily: mono, marginTop: 2 },
+  safeWaterPanelContent: { gap: 9, paddingBottom: 2 },
+  safeWaterCompactMetrics: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  safeWaterCompactMetric: {
+    color: '#67e8f9', fontSize: 9, fontFamily: mono, fontWeight: '800',
+    borderWidth: 1, borderColor: 'rgba(103,232,249,0.22)',
+    borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4,
+  },
+  safeWaterMetricRow: { flexDirection: 'row', gap: 7 },
+  safeWaterMetric: {
+    flex: 1, minHeight: 58, borderRadius: 12,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)',
+    backgroundColor: 'rgba(255,255,255,0.045)',
+    paddingHorizontal: 7, paddingVertical: 7, justifyContent: 'center', gap: 2,
+  },
+  safeWaterMetricValue: { color: '#F5F5F7', fontSize: 10, fontFamily: mono, fontWeight: '900' },
+  safeWaterMetricLabel: { color: OVR.text3, fontSize: 7.5, fontFamily: mono, fontWeight: '800' },
+  safeWaterDepthRow: { gap: 6, paddingVertical: 1 },
+  safeWaterChip: {
+    minHeight: 30, borderRadius: 999, borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.11)', backgroundColor: 'rgba(255,255,255,0.045)',
+    paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center',
+  },
+  safeWaterChipActive: { backgroundColor: 'rgba(8,145,178,0.75)', borderColor: 'rgba(103,232,249,0.78)' },
+  safeWaterChipText: { color: OVR.text2, fontSize: 9, fontFamily: mono, fontWeight: '900' },
+  safeWaterToggleGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  safeWaterToggle: {
+    minHeight: 34, width: '48%' as any, borderRadius: 10, borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.045)',
+    paddingHorizontal: 9, flexDirection: 'row', alignItems: 'center', gap: 6,
+  },
+  safeWaterToggleActive: { backgroundColor: 'rgba(8,145,178,0.72)', borderColor: 'rgba(103,232,249,0.68)' },
+  safeWaterToggleDisabled: { opacity: 0.45 },
+  safeWaterToggleText: { flex: 1, color: OVR.text2, fontSize: 8.5, fontFamily: mono, fontWeight: '900' },
+  safeWaterStatusCard: {
+    borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.045)', padding: 10, gap: 5,
+  },
+  safeWaterStatusTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  safeWaterStatusTitle: { flex: 1, color: OVR.text2, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
+  safeWaterStatusPill: {
+    color: '#f97316', fontSize: 8, fontFamily: mono, fontWeight: '900',
+    borderWidth: 1, borderColor: '#f9731655', borderRadius: 999,
+    paddingHorizontal: 7, paddingVertical: 3,
+  },
+  safeWaterStatusText: { color: OVR.text2, fontSize: 10, lineHeight: 14 },
+  safeWaterStatusMeta: { color: OVR.text3, fontSize: 9, fontFamily: mono, lineHeight: 13 },
+  safeWaterSpotCard: {
+    borderRadius: 13, borderWidth: 1, borderColor: 'rgba(59,207,142,0.34)',
+    backgroundColor: 'rgba(59,207,142,0.08)', padding: 10, gap: 6,
+  },
+  safeWaterSpotTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  safeWaterSpotKicker: { color: C.green, fontSize: 8, fontFamily: mono, fontWeight: '900', letterSpacing: 0.7 },
+  safeWaterSpotName: { color: OVR.text, fontSize: 13, fontWeight: '900', marginTop: 2 },
+  safeWaterSpotText: { color: OVR.text2, fontSize: 10.5, lineHeight: 15 },
+  safeWaterSourceText: { color: OVR.text3, fontSize: 9, fontFamily: mono, lineHeight: 13 },
+  safeWaterSpotRow: { gap: 8, paddingVertical: 1 },
+  safeWaterMiniSpot: {
+    width: 168, minHeight: 72, borderRadius: 12, borderWidth: 1,
+    borderColor: 'rgba(59,207,142,0.25)', backgroundColor: 'rgba(255,255,255,0.045)',
+    padding: 10, justifyContent: 'center',
+  },
+  safeWaterMiniSpotName: { color: OVR.text, fontSize: 11, fontWeight: '900', marginTop: 3 },
+  safeWaterMiniSpotMeta: { color: OVR.text3, fontSize: 9, fontFamily: mono, marginTop: 4 },
+  safeWaterCorridorCard: {
+    borderRadius: 13, borderWidth: 1, borderColor: 'rgba(103,232,249,0.22)',
+    backgroundColor: 'rgba(8,145,178,0.08)', padding: 10, gap: 8,
+  },
+  safeWaterCorridorPoints: { flexDirection: 'row', gap: 7 },
+  safeWaterPointButton: {
+    flex: 1, minHeight: 45, borderRadius: 10, borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.045)',
+    paddingHorizontal: 8, justifyContent: 'center',
+  },
+  safeWaterPointLabel: { color: '#67e8f9', fontSize: 7.5, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
+  safeWaterPointName: { color: OVR.text2, fontSize: 9, fontFamily: mono, marginTop: 3 },
+  safeWaterActionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  safeWaterAction: {
+    minHeight: 32, borderRadius: 9, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.045)', paddingHorizontal: 9,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5,
+  },
+  safeWaterPrimaryAction: { backgroundColor: 'rgba(8,145,178,0.86)', borderColor: 'rgba(103,232,249,0.68)' },
+  safeWaterActionText: { color: OVR.text2, fontSize: 8.5, fontFamily: mono, fontWeight: '900' },
+  safeWaterDisclosure: { color: OVR.text3, fontSize: 8.5, fontFamily: mono, lineHeight: 12 },
   trailOverlayContent: { paddingBottom: 6 },
   trailCollapsedWrap: {
     position: 'absolute',
@@ -13876,6 +15428,7 @@ const makeStyles = (C: ColorPalette) => {
   tripTimelineStatusPill: { maxWidth: 124, minHeight: 30, borderWidth: 1, borderRadius: 999, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 9 },
   tripTimelineStatusText: { fontSize: 8, fontFamily: mono, fontWeight: '900' },
   tripTimelineRouteName: { color: C.text, fontSize: 15, lineHeight: 20, fontWeight: '800' },
+  tripTimelineSummary: { color: C.text3, fontSize: 11, lineHeight: 16, marginTop: -4 },
   tripTimelineBadge: { borderWidth: 1, borderColor: C.green + '55', backgroundColor: C.green + '14', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
   tripTimelineTitle: { color: C.text, fontSize: 13, fontWeight: '900' },
   tripTimelineMeta: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
@@ -13888,6 +15441,7 @@ const makeStyles = (C: ColorPalette) => {
   tripPlacesHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   tripPlacesTitle: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
   tripPlaceRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  tripPlaceAddBtn: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.orange + '55', backgroundColor: C.orange + '12' },
   tripTimelineLeg: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 13 },
   tripTimelineLine: { width: 2, height: 22, borderRadius: 2, backgroundColor: C.orange + '66' },
   tripTimelineLegText: { color: C.text3, fontSize: 10, fontFamily: mono },
@@ -14044,13 +15598,15 @@ const makeStyles = (C: ColorPalette) => {
   nearbyPlacesTitle: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
   nearbyPlacesEmpty: { color: C.text3, fontSize: 11, lineHeight: 15 },
   nearbyPlaceRail: { gap: 8, paddingRight: 4 },
-  nearbyPlaceCard: { width: 142, minHeight: 132, borderWidth: 1, borderColor: C.border, backgroundColor: C.s2, borderRadius: 12, overflow: 'hidden' },
+  nearbyPlaceCard: { width: 142, minHeight: 132, borderWidth: 1, borderColor: C.border, backgroundColor: C.s2, borderRadius: 12, overflow: 'hidden', position: 'relative' },
   nearbyPlaceCardCompact: { minHeight: 112 },
   nearbyPlacePhoto: { width: '100%', height: 72, backgroundColor: C.s3 },
   nearbyPlaceIconBlock: { width: '100%', height: 72, alignItems: 'center', justifyContent: 'center', backgroundColor: C.orange + '12', borderBottomWidth: 1, borderBottomColor: C.border },
+  nearbyPlaceAdd: { position: 'absolute', top: 7, right: 7, width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: C.orange, borderWidth: 1, borderColor: 'rgba(255,255,255,0.35)' },
   nearbyPlaceBody: { padding: 9, gap: 4, minHeight: 58 },
   nearbyPlaceName: { color: C.text, fontSize: 12, lineHeight: 16, fontWeight: '800' },
   nearbyPlaceMeta: { color: C.text3, fontSize: 9, fontFamily: mono },
+  campReservationCard: { gap: 8, borderWidth: 1, borderColor: C.orange + '35', backgroundColor: C.orange + '10', borderRadius: 12, padding: 10, marginTop: 4 },
   quickCardActions: { flexDirection: 'row', gap: 8, marginTop: 2 },
   quickCardNav: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
@@ -14317,6 +15873,13 @@ const makeStyles = (C: ColorPalette) => {
   frCancelText: { color: C.text3, fontSize: 12 },
   frSubmitBtn: { flex: 2, paddingVertical: 11, borderRadius: 10, backgroundColor: C.orange, alignItems: 'center' },
   frSubmitText: { color: '#fff', fontSize: 11, fontFamily: mono, fontWeight: '800' },
+  frSheetOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.42)' },
+  frSheet: { maxHeight: '82%', borderTopLeftRadius: 20, borderTopRightRadius: 20 },
+  frSheetContent: { paddingHorizontal: 14, paddingTop: 10, gap: 10 },
+  frSheetHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingBottom: 8 },
+  frSheetTitle: { color: C.text, fontSize: 18, fontWeight: '900' },
+  frSheetSub: { color: C.text3, fontSize: 11, fontFamily: mono, marginTop: 2 },
+  frSheetClose: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s2, borderWidth: 1, borderColor: C.border },
   detailBookBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
     paddingVertical: 15, borderRadius: 14, backgroundColor: '#16a34a',
@@ -14549,7 +16112,7 @@ const makeStyles = (C: ColorPalette) => {
 
   // ── Waze-style quick report
   quickReportWrap: {
-    position: 'absolute', bottom: 132, left: 0, right: 0,
+    position: 'absolute', left: 0, right: 0,
     alignItems: 'center',
   },
   quickReportWrapNav: {

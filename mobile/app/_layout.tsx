@@ -22,6 +22,7 @@ export default function RootLayout() {
   const user         = useStore(s => s.user);
   const sessionId    = useStore(s => s.sessionId);
   const welcomePromptRunId = useStore(s => s.welcomePromptRunId);
+  const startGuidedTour = useStore(s => s.startGuidedTour);
   const router       = useRouter();
   const C            = useTheme();
   const insets       = useSafeAreaInsets();
@@ -35,7 +36,7 @@ export default function RootLayout() {
   // the latest code on every cold start with one short reload). After that
   // window we fall back to a banner so we don't interrupt active use.
   const launchAtRef = useRef(Date.now());
-  const WELCOME_SEEN_KEY = 'trailhead_welcome_contest_seen_v1';
+  const WELCOME_SEEN_KEY = 'trailhead_first_run_onboarding_seen_v2';
   const WELCOME_PENDING_ATTR_KEY = 'trailhead_welcome_contest_clicked_pending_v1';
 
   function verificationTokenFromUrl(url: string | null | undefined) {
@@ -128,6 +129,13 @@ export default function RootLayout() {
     storage.set(WELCOME_PENDING_ATTR_KEY, '1').catch(() => {});
     logWelcomeEvent('welcome_contest_cta', { source: 'first_open_modal', signed_in: !!user });
     router.push('/(tabs)/profile');
+  }
+
+  function startTourFromWelcome() {
+    setWelcomeVisible(false);
+    storage.set(WELCOME_SEEN_KEY, '1').catch(() => {});
+    startGuidedTour();
+    router.push('/(tabs)/map');
   }
 
   useEffect(() => {
@@ -277,9 +285,9 @@ export default function RootLayout() {
                   <Ionicons name="trophy-outline" size={23} color="#f8d77a" />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ color: '#d4af37', fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1.2 }}>WELCOME TO TRAILHEAD</Text>
+                  <Text style={{ color: '#d4af37', fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1.2 }}>TRAILHEAD FIELD SETUP</Text>
                   <Text style={{ color: C.text, fontSize: 22, lineHeight: 26, fontWeight: '900', marginTop: 3 }}>
-                    Plan smarter. Build the map. Win Trailhead prizes.
+                    Build routes around your rig, then make the trip ready offline.
                   </Text>
                 </View>
                 <TouchableOpacity onPress={closeWelcomeContest} style={{
@@ -291,14 +299,14 @@ export default function RootLayout() {
               </View>
 
               <Text style={{ color: C.text2, fontSize: 14, lineHeight: 21 }}>
-                Trailhead helps you find camps, trails, public-land context, weather, reports, route tools, offline packs, and field-ready navigation in one app.
+                Start with your vehicle profile, then plan with AI, build routes by day, layer the map, download the trip for free, and use community pins to keep the route current.
               </Text>
 
               <View style={{ flexDirection: 'row', gap: 8 }}>
                 {[
-                  ['Camps', 'bonfire-outline'],
-                  ['Trails', 'trail-sign-outline'],
-                  ['Offline', 'download-outline'],
+                  ['Rig', 'car-sport-outline'],
+                  ['Planner', 'sparkles-outline'],
+                  ['Offline', 'cloud-done-outline'],
                 ].map(([label, icon]) => (
                   <View key={label} style={{ flex: 1, backgroundColor: C.s2, borderWidth: 1, borderColor: C.border, borderRadius: 16, padding: 10, gap: 7 }}>
                     <Ionicons name={icon as any} size={17} color={C.orange} />
@@ -307,29 +315,40 @@ export default function RootLayout() {
                 ))}
               </View>
 
-              <View style={{ backgroundColor: C.s2, borderRadius: 18, borderWidth: 1, borderColor: '#d4af3744', padding: 14, gap: 8 }}>
-                <Text style={{ color: '#d4af37', fontSize: 30, fontFamily: mono, fontWeight: '900' }}>$1,000</Text>
-                <Text style={{ color: C.text, fontSize: 16, fontWeight: '900' }}>Register in Profile for the contributor contest.</Text>
-                <Text style={{ color: C.text3, fontSize: 12.5, lineHeight: 18 }}>
-                  Sign in or create a Profile account to join. Contest points come from useful reports, trail notes, camp updates, confirmations, and other map contributions.
-                </Text>
-                <Text style={{ color: C.text3, fontSize: 10.5, lineHeight: 15 }}>
-                  No purchase necessary. Apple is not a sponsor or involved.
-                </Text>
+              <View style={{ backgroundColor: C.s2, borderRadius: 18, borderWidth: 1, borderColor: '#d4af3744', padding: 14, gap: 10 }}>
+                {[
+                  ['Rig setup', 'Fuel range, clearance, towing, and comfort shape every route.', 'car-sport-outline'],
+                  ['AI Planner', 'Ask for the trip intent; Trailhead turns it into daily stops and warnings.', 'sparkles-outline'],
+                  ['Map search', 'Use Search this view to choose Camps or Trails, then layer public land, weather, reports, and places as you scout.', 'search-outline'],
+                  ['Trail building', 'Free from the map button: drop anchors along a trail, snap the route, then save or follow it.', 'git-branch-outline'],
+                  ['Route Builder', 'Choose Direct, Balanced, Wild, Loop, or There and back, then swap camps, fuel, and places by day.', 'map-outline'],
+                  ['Downloads', 'Free for everyone: save Map, Navigation, Places, Topo, Trails, and the Trip download before signal drops.', 'download-outline'],
+                  ['Community pins', 'Add reports, confirmations, photos, and edits that help the next driver.', 'pin-outline'],
+                ].map(([title, body, icon]) => (
+                  <View key={title} style={{ flexDirection: 'row', gap: 10, alignItems: 'flex-start' }}>
+                    <View style={{ width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: C.orange + '16', borderWidth: 1, borderColor: C.orange + '38' }}>
+                      <Ionicons name={icon as any} size={15} color={C.orange} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: C.text, fontSize: 13, fontWeight: '900' }}>{title}</Text>
+                      <Text style={{ color: C.text3, fontSize: 11.5, lineHeight: 16, marginTop: 2 }}>{body}</Text>
+                    </View>
+                  </View>
+                ))}
               </View>
 
               <View style={{ flexDirection: 'row', gap: 10 }}>
                 <TouchableOpacity
-                  onPress={closeWelcomeContest}
+                  onPress={startTourFromWelcome}
                   style={{ flex: 1, minHeight: 46, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s2, borderWidth: 1, borderColor: C.border }}
                 >
-                  <Text style={{ color: C.text2, fontSize: 12, fontFamily: mono, fontWeight: '900' }}>NOT NOW</Text>
+                  <Text style={{ color: C.text2, fontSize: 12, fontFamily: mono, fontWeight: '900' }}>SHOW ME AROUND</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   onPress={goToProfileFromWelcome}
                   style={{ flex: 1.35, minHeight: 46, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: C.orange }}
                 >
-                  <Text style={{ color: '#fff', fontSize: 12, fontFamily: mono, fontWeight: '900' }}>OPEN PROFILE</Text>
+                  <Text style={{ color: '#fff', fontSize: 12, fontFamily: mono, fontWeight: '900' }}>SET UP RIG</Text>
                 </TouchableOpacity>
               </View>
             </ScrollView>

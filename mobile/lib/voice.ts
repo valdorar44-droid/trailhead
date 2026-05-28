@@ -1,4 +1,4 @@
-import { Audio } from 'expo-av';
+import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
 import * as Speech from 'expo-speech';
 import { api } from './api';
 
@@ -11,6 +11,25 @@ type VoiceCallbacks = {
 
 let activeSound: Audio.Sound | null = null;
 let voiceRequestId = 0;
+let audioModeReady: Promise<void> | null = null;
+
+function ensureVoiceAudioMode() {
+  if (!audioModeReady) {
+    audioModeReady = Audio.setAudioModeAsync({
+      allowsRecordingIOS: false,
+      interruptionModeIOS: InterruptionModeIOS.DuckOthers,
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: true,
+      interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
+      shouldDuckAndroid: true,
+      playThroughEarpieceAndroid: false,
+    }).catch(err => {
+      audioModeReady = null;
+      throw err;
+    });
+  }
+  return audioModeReady;
+}
 
 export async function stopTrailheadVoice() {
   voiceRequestId += 1;
@@ -33,6 +52,8 @@ export async function playTrailheadVoice(text: string, mode: VoiceMode, fallback
   await stopTrailheadVoice();
   voiceRequestId = requestId;
   try {
+    await ensureVoiceAudioMode();
+    if (requestId !== voiceRequestId) return;
     const source = await api.ttsSource(clean, mode);
     if (requestId !== voiceRequestId) return;
     const { sound } = await Audio.Sound.createAsync(
@@ -56,6 +77,7 @@ export async function playTrailheadVoice(text: string, mode: VoiceMode, fallback
   } catch (err) {
     console.warn('Trailhead voice MP3 failed; falling back to device speech.', err);
     if (requestId !== voiceRequestId) return;
+    ensureVoiceAudioMode().catch(() => {});
     Speech.speak(clean, {
       rate: 0.9,
       pitch: 1,

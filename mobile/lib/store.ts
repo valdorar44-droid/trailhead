@@ -138,6 +138,7 @@ interface AppState {
   hasPlan: boolean;
   planExpiresAt: number | null;
   guidedTourRunId: number;
+  guidedTourActive: boolean;
   welcomePromptRunId: number;
   tourTargets: Record<string, TourTargetRect>;
   setAuth: (token: string, user: User) => void;
@@ -170,6 +171,7 @@ interface AppState {
   setPendingMapSelection: (selection: AppState['pendingMapSelection']) => void;
   setPlan: (active: boolean, expiresAt?: number | null) => void;
   startGuidedTour: () => void;
+  setGuidedTourActive: (active: boolean) => void;
   startWelcomePrompt: () => void;
   setTourTarget: (key: string, rect: Omit<TourTargetRect, 'updatedAt'> | null) => void;
   restoreActiveTrip: () => Promise<void>;
@@ -201,6 +203,7 @@ export const useStore = create<AppState>((set) => ({
   hasPlan: false,
   planExpiresAt: null,
   guidedTourRunId: 0,
+  guidedTourActive: false,
   welcomePromptRunId: 0,
   tourTargets: {},
 
@@ -317,7 +320,8 @@ export const useStore = create<AppState>((set) => ({
     sd(PLAN_KEY);
     set({ hasPlan: active, planExpiresAt: expiresAt });
   },
-  startGuidedTour: () => set(state => ({ guidedTourRunId: state.guidedTourRunId + 1 })),
+  startGuidedTour: () => set(state => ({ guidedTourRunId: state.guidedTourRunId + 1, guidedTourActive: true })),
+  setGuidedTourActive: (active) => set({ guidedTourActive: active }),
   startWelcomePrompt: () => set(state => ({ welcomePromptRunId: state.welcomePromptRunId + 1 })),
   setTourTarget: (key, rect) => set((state) => {
     const next = { ...state.tourTargets };

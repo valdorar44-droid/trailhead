@@ -16,12 +16,15 @@ from ingestors.osm import (
     get_hot_springs,
     get_osm_campsites,
     get_peaks,
+    get_service_places,
     get_trailheads,
     get_viewpoints,
     get_water_sources,
 )
 from ingestors.ridb import get_campsites_search
-from ingestors.blm import get_blm_campsites
+from ingestors.blm import get_blm_campsites, get_blm_recreation_sites
+from ingestors.nps import get_nps_places, nps_enabled
+from ingestors.usfs import get_usfs_recreation_sites
 
 
 def _valid_points(waypoints: list[dict]) -> list[dict]:
@@ -165,6 +168,50 @@ def _dedupe(items: list[dict]) -> list[dict]:
     return out
 
 
+def _source_rank(item: dict) -> int:
+    source = str(item.get("source") or item.get("verified_source") or item.get("source_label") or "").lower()
+    if any(token in source for token in ("nps", "national park", "blm", "usfs", "forest service", "recreation.gov", "ridb")):
+        return 0
+    if source in {"offline", "osm", "openstreetmap"}:
+        return 2
+    if "geoapify" in source:
+        return 3
+    return 4
+
+
+def _camp_quality_score(camp: dict, route_mi: float, style: str = "balanced") -> float:
+    text = " ".join(str(v or "") for v in [
+        camp.get("name"),
+        camp.get("land_type"),
+        camp.get("cost"),
+        camp.get("source"),
+        camp.get("verified_source"),
+        " ".join(camp.get("tags") or []),
+        " ".join(camp.get("amenities") or []),
+        " ".join(camp.get("site_types") or []),
+    ]).lower()
+    public = any(term in text for term in ("blm", "usfs", "national forest", "forest service", "public", "dispersed", "primitive", "free"))
+    official = any(term in text for term in ("ridb", "recreation.gov", "nps", "state park", "county park", "municipal"))
+    commercial = any(term in text for term in ("rv park", "koa", "resort", "hookup", "private"))
+    score = route_mi
+    if style == "wild":
+        score += -14 if public else 6
+        score += 14 if commercial else 0
+        score += -4 if "primitive" in text or "dispersed" in text else 0
+    elif style == "direct":
+        score += -4 if route_mi <= 6 else 0
+        score += 3 if route_mi > 12 else 0
+    else:
+        score += -7 if public else 0
+        score += -3 if official else 0
+        score += 4 if commercial else 0
+    if camp.get("photo_url"):
+        score -= 1.5
+    if camp.get("reservable") and style != "wild":
+        score -= 1
+    return score
+
+
 async def _with_timeout(coro, timeout_s: float, fallback):
     try:
         return await asyncio.wait_for(coro, timeout=timeout_s)
@@ -214,7 +261,7 @@ def annotate_waypoint_verification(
     return annotated
 
 
-async def _route_camps(waypoints: list[dict], route: list[dict]) -> list[dict]:
+async def _route_camps(waypoints: list[dict], route: list[dict], style: str = "balanced") -> list[dict]:
     camp_targets = [wp for wp in waypoints if wp.get("type") in ("camp", "motel") and wp.get("lat") and wp.get("lng")]
     targets = _merge_targets(camp_targets, _route_samples(route, max_samples=8), max_targets=14)
 
@@ -255,7 +302,7 @@ async def _route_camps(waypoints: list[dict], route: list[dict]) -> list[dict]:
         camp["route_fit"] = "on_route" if route_mi <= 3 else "short_detour" if route_mi <= 12 else "detour"
         camp["recommended_day"] = day
         camp["verified_source"] = camp.get("source") or ("ridb" if str(camp.get("id", "")).isdigit() else "osm")
-        scored.append((route_mi - quality, camp))
+        scored.append((_camp_quality_score(camp, route_mi, style) - quality * 0.3, camp))
     return [camp for _, camp in sorted(scored, key=lambda row: row[0])[:70]]
 
 
@@ -289,18 +336,33 @@ async def _route_gas(waypoints: list[dict], route: list[dict]) -> list[dict]:
     return [station for _, station in sorted(scored, key=lambda row: row[0])[:45]]
 
 
-async def _route_pois(route: list[dict]) -> list[dict]:
+async def _route_pois(waypoints: list[dict], route: list[dict]) -> list[dict]:
     samples = _route_samples(route, max_samples=6)
+    categories = {
+        "water", "trailhead", "viewpoint", "peak", "hot_spring",
+        "park", "historic", "tourism", "attraction", "visitor_center",
+        "food", "grocery", "mechanic", "lodging", "shower", "dump",
+    }
 
     async def fetch_for(wp: dict) -> list[dict]:
-        water, trailheads, viewpoints, peaks, hot_springs = await asyncio.gather(
+        tasks = [
             get_water_sources(wp["lat"], wp["lng"], radius_m=16000),
             get_trailheads(wp["lat"], wp["lng"], radius_m=24000),
             get_viewpoints(wp["lat"], wp["lng"], radius_m=24000),
             get_peaks(wp["lat"], wp["lng"], radius_m=32000),
             get_hot_springs(wp["lat"], wp["lng"], radius_m=48000),
-        )
-        return [*water, *trailheads, *viewpoints, *peaks, *hot_springs]
+            get_service_places(wp["lat"], wp["lng"], radius_m=22000, categories=categories),
+            get_blm_recreation_sites(wp["lat"], wp["lng"], radius_miles=26, categories=categories),
+            get_usfs_recreation_sites(wp["lat"], wp["lng"], radius_miles=26, categories=categories),
+        ]
+        if nps_enabled():
+            tasks.append(get_nps_places(wp["lat"], wp["lng"], radius_m=52000, categories=categories, limit=40))
+        batches = await asyncio.gather(*tasks, return_exceptions=True)
+        merged: list[dict] = []
+        for batch in batches:
+            if isinstance(batch, list):
+                merged.extend(batch)
+        return merged
 
     batches = await asyncio.gather(*[fetch_for(wp) for wp in samples], return_exceptions=True)
     pois: list[dict] = []
@@ -320,20 +382,23 @@ async def _route_pois(route: list[dict]) -> list[dict]:
             route_mi += 5
         if poi.get("type") == "hot_spring":
             route_mi -= 6
+        route_mi += _source_rank(poi) * 0.6
         poi["route_fit"] = "on_route" if raw_route_mi <= 3 else "short_detour"
+        poi["recommended_day"] = _nearest_day(poi, waypoints)
         scored.append((route_mi, poi))
     return [poi for _, poi in sorted(scored, key=lambda row: row[0])[:50]]
 
 
-async def enrich_trip_along_route(waypoints: list[dict]) -> dict:
+async def enrich_trip_along_route(waypoints: list[dict], route_style: str = "balanced") -> dict:
     route = _valid_points(waypoints)
     if len(route) < 2:
         return {"campsites": [], "gas_stations": [], "route_pois": []}
+    style = "wild" if str(route_style).lower() in {"wild", "adventure"} else str(route_style or "balanced").lower()
 
     camps, gas, pois = await asyncio.gather(
-        _with_timeout(_route_camps(waypoints, route), 24, []),
+        _with_timeout(_route_camps(waypoints, route, style), 24, []),
         _with_timeout(_route_gas(waypoints, route), 16, []),
-        _with_timeout(_route_pois(route), 14, []),
+        _with_timeout(_route_pois(waypoints, route), 14, []),
     )
     return {
         "campsites": camps,

@@ -14,7 +14,7 @@ import TourTarget from '@/components/TourTarget';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
 import { TrailheadButton, TrailheadCard, TrailheadSheet, TrailheadTopBar } from '@/components/TrailheadUI';
 import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
-import { api, ApiError, CampFullness, Campsite, CampsiteDetail, CampsiteInsight, CampsitePin, ExcursionCandidate, GasStation, GeocodePlace, OsmPoi, PaywallError, TripResult, Waypoint, WeatherForecast } from '@/lib/api';
+import { api, ApiError, CampFullness, Campsite, CampsiteDetail, CampsiteInsight, CampsitePin, CampReusePolicy, ExcursionCandidate, GasStation, GeocodePlace, OsmPoi, PaywallError, RouteStyleMode, TripResult, TripShapeMode, TripTimeline, Waypoint, WeatherForecast } from '@/lib/api';
 import { loadAllPlacePoints } from '@/lib/offlinePlacePacks';
 import { deleteOfflineTrail, listOfflineTrails, type OfflineTrail } from '@/lib/offlineTrails';
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
@@ -44,6 +44,7 @@ type BuilderStop = {
   camp?: CampsitePin;
   gas?: GasStation;
   poi?: OsmPoi;
+  routePointType?: 'side_stop' | 'through' | 'break';
   campWindowStart?: number;
   campWindowEnd?: number;
   campWindowLabel?: string;
@@ -63,6 +64,15 @@ type LegSearchContext = {
   center: { lat: number; lng: number };
   targetDay?: number;
   purpose?: 'leg' | 'overnight';
+  routeCoords?: [number, number][];
+  routeSource?: 'saved' | 'live' | 'straight';
+};
+type DiscoveryResults = {
+  camps: CampsitePin[];
+  gas: GasStation[];
+  pois: OsmPoi[];
+  excursions: ExcursionCandidate[];
+  summary: string;
 };
 type RouteDayPlan = {
   day: number;
@@ -91,7 +101,13 @@ type RouteTabMode = 'hub' | 'wizard';
 const PLACE_FILTER_TYPES = [
   { id: 'fuel', label: 'Fuel', icon: 'flash-outline', color: '#ea580c' },
   { id: 'propane', label: 'Propane', icon: 'flame-outline', color: '#f97316' },
-  { id: 'water', label: 'Water', icon: 'water-outline', color: '#0284c7' },
+  { id: 'water', label: 'Water Fill', icon: 'water-outline', color: '#0284c7' },
+  { id: 'boat_ramp', label: 'Boat Ramps', icon: 'boat-outline', color: '#1d4ed8' },
+  { id: 'paddle_launch', label: 'Paddle', icon: 'navigate-circle-outline', color: '#0f766e' },
+  { id: 'fishing_access', label: 'Fishing', icon: 'fish-outline', color: '#15803d' },
+  { id: 'marina', label: 'Marinas', icon: 'boat-outline', color: '#0891b2' },
+  { id: 'dock', label: 'Docks', icon: 'albums-outline', color: '#0369a1' },
+  { id: 'shore_access', label: 'Shore Access', icon: 'map-outline', color: '#0e7490' },
   { id: 'dump', label: 'Dump', icon: 'trash-bin-outline', color: '#a16207' },
   { id: 'shower', label: 'Showers', icon: 'rainy-outline', color: '#06b6d4' },
   { id: 'laundromat', label: 'Laundry', icon: 'shirt-outline', color: '#06b6d4' },
@@ -106,7 +122,8 @@ const PLACE_FILTER_TYPES = [
   { id: 'peak', label: 'Peaks', icon: 'triangle-outline', color: '#92400e' },
   { id: 'hot_spring', label: 'Hot Springs', icon: 'flame-outline', color: '#f97316' },
 ] as const;
-const DEFAULT_PLACE_FILTERS = ['fuel', 'propane', 'water', 'dump', 'trailhead'];
+const DEFAULT_PLACE_FILTERS = ['fuel', 'propane', 'water', 'boat_ramp', 'paddle_launch', 'fishing_access', 'marina', 'dock', 'shore_access', 'dump', 'trailhead'];
+const WATER_PLACE_FILTER_IDS = new Set(['boat_ramp', 'paddle_launch', 'fishing_access', 'marina', 'dock', 'shore_access', 'swimming', 'spring', 'water_fill', 'gauge']);
 const FUEL_POI_TYPES = 'fuel,propane';
 const ROUTE_POI_TYPES = 'water,trailhead,viewpoint,peak,hot_spring,dump,shower,laundromat,lodging,food,grocery,mechanic,parking,attraction';
 const CAMP_PREFERENCE_OPTIONS: Array<{ id: CampPreferenceMode; label: string; sub: string; icon: keyof typeof Ionicons.glyphMap; filters: string[] }> = [
@@ -120,12 +137,39 @@ const CAMP_CADENCE_OPTIONS: Array<{ id: CampCadenceMode; label: string; sub: str
   { id: 'alternate', label: 'Every other', sub: 'Camp on alternating days', icon: 'swap-horizontal-outline' },
   { id: 'manual', label: 'Manual', sub: 'Pick camps yourself', icon: 'hand-left-outline' },
 ];
+const CAMP_REUSE_OPTIONS: Array<{ id: CampReusePolicy; label: string; sub: string; icon: keyof typeof Ionicons.glyphMap }> = [
+  { id: 'different_each_night', label: 'Different camps', sub: 'Move camp each drive day', icon: 'git-branch-outline' },
+  { id: 'same_camp_window', label: 'Same camp window', sub: 'Basecamp multi-night windows', icon: 'bed-outline' },
+  { id: 'manual', label: 'Manual reuse', sub: 'You decide night by night', icon: 'hand-left-outline' },
+];
 const BUILD_STATUS_LINES = [
   'Reading the route shape',
   'Checking day pacing',
   'Scanning camp windows',
   'Balancing fuel and distance',
 ];
+const EMPTY_DISCOVERY_RESULTS: DiscoveryResults = { camps: [], gas: [], pois: [], excursions: [], summary: '' };
+
+function normalizedWaterSubtype(place: Pick<OsmPoi, 'type' | 'subtype'> & Record<string, any>) {
+  if (String(place.type || '') !== 'water') return '';
+  const subtype = String(place.subtype || '').toLowerCase().replace(/[\s-]+/g, '_');
+  if (subtype === 'tap' || subtype === 'drinking_water' || subtype === 'water_point' || subtype === 'fountain' || subtype === 'spring') return 'water';
+  if (WATER_PLACE_FILTER_IDS.has(subtype)) return subtype;
+  return 'shore_access';
+}
+
+function placeMatchesFilterId(place: OsmPoi, filterId: string) {
+  if (String(place.type || '') !== 'water') return place.type === filterId;
+  const subtype = normalizedWaterSubtype(place);
+  if (filterId === 'water') return subtype === 'water';
+  return subtype === filterId;
+}
+
+function placeMatchesFilters(place: OsmPoi, filters: string[]) {
+  if (String(place.type || '') !== 'water') return filters.includes(place.type);
+  const subtype = normalizedWaterSubtype(place);
+  return filters.includes(subtype) || (subtype === 'water' && filters.includes('water'));
+}
 
 function RouteBuildStatus({ C, message }: { C: ColorPalette; message: string }) {
   const pulse = useRef(new Animated.Value(0)).current;
@@ -357,10 +401,10 @@ function routeWindowPoints(points: Array<{ lat: number; lng: number }>, centerMi
   return out.length ? out : center ? [center] : points;
 }
 
-function routeTargetMile(day: number, count: number, totalMi: number, style: 'balanced' | 'direct' | 'adventure') {
+function routeTargetMile(day: number, count: number, totalMi: number, style: RouteStyleMode) {
   if (count <= 1) return totalMi;
   const equal = totalMi / count;
-  const firstCap = style === 'adventure' ? 130 : style === 'direct' ? 220 : 180;
+  const firstCap = style === 'wild' ? 130 : style === 'direct' ? 220 : 180;
   const firstDay = Math.max(45, Math.min(equal, firstCap, totalMi * 0.42));
   if (day <= 1) return firstDay;
   const remainingDays = Math.max(1, count - 1);
@@ -382,6 +426,26 @@ function pointSegmentProjection(point: { lat: number; lng: number }, a: { lat: n
   const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)));
   const projected = { lat: ay + t * dy, lng: (ax + t * dx) / Math.cos(refLat) };
   return { distanceMi: haversineMi(point, projected), progress: t, progressMi: haversineMi(a, b) * t };
+}
+
+function pointRouteProjection(point: { lat: number; lng: number }, coords: [number, number][]) {
+  if (coords.length < 2) return null;
+  const points = coordsToStops(coords);
+  const total = Math.max(routeDistanceMi(points), 0.0001);
+  let cumulative = 0;
+  let best: { distanceMi: number; progress: number; progressMi: number; segmentIndex: number } | null = null;
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const projection = pointSegmentProjection(point, points[i], points[i + 1]);
+    const candidate = {
+      distanceMi: projection.distanceMi,
+      progress: Math.max(0, Math.min(1, (cumulative + projection.progressMi) / total)),
+      progressMi: cumulative + projection.progressMi,
+      segmentIndex: i,
+    };
+    if (!best || candidate.distanceMi < best.distanceMi) best = candidate;
+    cumulative += haversineMi(points[i], points[i + 1]);
+  }
+  return best;
 }
 
 function routeProgressLabel(progress?: number) {
@@ -406,6 +470,10 @@ function smartPlaceToExcursion(place: OsmPoi): ExcursionCandidate {
     access_notes: (place as any).access_note || '',
     best_for: place.subtype || 'Side trip',
     distance_from_route_mi: place.route_distance_mi ?? (place as any).distance_mi,
+    route_progress: place.route_progress,
+    route_progress_mi: place.route_progress_mi,
+    route_segment_index: place.route_segment_index,
+    recommended_day: (place as any).recommended_day,
     source_confidence: (place as any).confidence || 'medium',
     offline_ready: place.source === 'offline',
     length_mi: place.length_mi,
@@ -414,12 +482,15 @@ function smartPlaceToExcursion(place: OsmPoi): ExcursionCandidate {
 }
 
 function withLegProjection<T extends { lat: number; lng: number }>(item: T, leg: LegSearchContext) {
-  const projection = pointSegmentProjection(item, leg.from, leg.to);
+  const routeProjection = leg.routeCoords && leg.routeCoords.length >= 2 ? pointRouteProjection(item, leg.routeCoords) : null;
+  const projection = routeProjection ?? pointSegmentProjection(item, leg.from, leg.to);
   return {
     ...item,
     route_distance_mi: projection.distanceMi,
     route_progress: projection.progress,
     route_progress_mi: projection.progressMi,
+    route_segment_index: routeProjection?.segmentIndex,
+    recommended_day: leg.targetDay,
   };
 }
 
@@ -545,6 +616,16 @@ function routeBufferForMiles(mi: number) {
 }
 
 function legSamplePoints(leg: LegSearchContext) {
+  if (leg.routeCoords && leg.routeCoords.length >= 2) {
+    const points = coordsToStops(leg.routeCoords);
+    const count = Math.max(3, Math.min(8, Math.ceil(leg.miles / 80) + 1));
+    const start = leg.purpose === 'overnight' ? 0.62 : 0;
+    return Array.from({ length: count }, (_, idx) => {
+      const raw = count === 1 ? 0.5 : idx / (count - 1);
+      const t = start + (1 - start) * raw;
+      return pointAtRouteMile(points, leg.miles * t) ?? leg.center;
+    });
+  }
   const count = Math.max(3, Math.min(8, Math.ceil(leg.miles / 80) + 1));
   const start = leg.purpose === 'overnight' ? 0.62 : 0;
   const end = leg.purpose === 'overnight' ? 1 : 1;
@@ -556,6 +637,43 @@ function legSamplePoints(leg: LegSearchContext) {
       lng: leg.from.lng + (leg.to.lng - leg.from.lng) * t,
     };
   });
+}
+
+function legRouteCoords(leg: LegSearchContext): [number, number][] {
+  if (leg.routeCoords && leg.routeCoords.length >= 2) return leg.routeCoords;
+  return legSamplePoints(leg).map(point => [point.lng, point.lat] as [number, number]);
+}
+
+function coordsLengthMi(coords: [number, number][]) {
+  return routeDistanceMi(coordsToStops(coords));
+}
+
+function nearestCoordIndex(coords: [number, number][], point: { lat: number; lng: number }) {
+  let best = 0;
+  let bestMi = Infinity;
+  coords.forEach(([lng, lat], idx) => {
+    const mi = haversineMi({ lat, lng }, point);
+    if (mi < bestMi) {
+      bestMi = mi;
+      best = idx;
+    }
+  });
+  return { idx: best, distanceMi: bestMi };
+}
+
+function sliceRouteCoordsBetween(
+  coords: [number, number][] | undefined,
+  from: { lat: number; lng: number },
+  to: { lat: number; lng: number },
+) {
+  if (!coords || coords.length < 2) return [];
+  const a = nearestCoordIndex(coords, from);
+  const b = nearestCoordIndex(coords, to);
+  if (a.distanceMi > 35 || b.distanceMi > 35 || a.idx === b.idx) return [];
+  const sliced = a.idx < b.idx ? coords.slice(a.idx, b.idx + 1) : coords.slice(b.idx, a.idx + 1).reverse();
+  const first: [number, number] = [from.lng, from.lat];
+  const last: [number, number] = [to.lng, to.lat];
+  return [first, ...sliced, last].filter((coord, idx, arr) => idx === 0 || coord[0] !== arr[idx - 1][0] || coord[1] !== arr[idx - 1][1]);
 }
 
 function uniqueByGeo<T extends { id?: string | number; name?: string; lat: number; lng: number }>(items: T[]) {
@@ -628,6 +746,83 @@ function poiToGasStation(point: OsmPoi): GasStation {
     route_distance_mi: point.route_distance_mi,
     route_fit: point.route_fit,
   };
+}
+
+function offlinePoiToCamp(point: OsmPoi): CampsitePin {
+  const anyPoint = point as any;
+  const subtype = normalizeCampSubtype(point.subtype || '');
+  const cachedNotes = [
+    subtype,
+    point.address,
+    anyPoint.source_freshness,
+    anyPoint.official_url ? 'Official link cached.' : '',
+    anyPoint.booking_url ? 'Booking link cached.' : '',
+  ].filter(Boolean).join(' ');
+  return {
+    id: point.id,
+    name: point.name || 'Offline camp',
+    lat: point.lat,
+    lng: point.lng,
+    tags: [
+      ...(Array.isArray(anyPoint.tags) ? anyPoint.tags : []),
+      ...(Array.isArray(anyPoint.site_types) ? anyPoint.site_types : []),
+      'downloaded',
+    ],
+    land_type: anyPoint.source_badge || subtype || 'Downloaded camp',
+    description: cachedNotes || 'Downloaded camp point.',
+    reservable: Boolean(anyPoint.reservable),
+    cost: anyPoint.reservable ? 'Reservable' : undefined,
+    url: anyPoint.booking_url || anyPoint.official_url || point.website || '',
+    photo_url: anyPoint.photo_url,
+    ada: false,
+    route_distance_mi: point.route_distance_mi,
+    route_fit: point.route_fit,
+    recommended_day: anyPoint.recommended_day,
+    verified_source: point.source_label || point.source || 'Offline pack',
+    amenities: Array.isArray(anyPoint.amenities) ? anyPoint.amenities : undefined,
+    site_types: Array.isArray(anyPoint.site_types) ? anyPoint.site_types : undefined,
+  } as CampsitePin;
+}
+
+function normalizeCampSubtype(value: string) {
+  const normalized = String(value || '').trim().toLowerCase().replace(/_/g, ' ');
+  if (normalized === 'camp site') return 'Tent camp';
+  if (normalized === 'caravan site') return 'RV/caravan site';
+  if (normalized === 'basic camp') return 'Primitive camp';
+  return String(value || '').replace(/_/g, ' ').trim();
+}
+
+function campFilterTags(camp: CampsitePin) {
+  const raw = [
+    camp.name,
+    camp.land_type,
+    camp.description,
+    camp.cost,
+    camp.source,
+    camp.verified_source,
+    (camp as any).source_badge,
+    ...(Array.isArray(camp.tags) ? camp.tags : []),
+    ...(Array.isArray(camp.site_types) ? camp.site_types : []),
+  ].filter(Boolean).join(' ').toLowerCase();
+  const tags = new Set<string>();
+  if (camp.reservable || raw.includes('reserv') || raw.includes('recreation.gov')) tags.add('reservable');
+  if (raw.includes('rv') || raw.includes('hookup') || raw.includes('caravan')) tags.add('rv');
+  if (raw.includes('tent')) tags.add('tent');
+  if (raw.includes('dispersed') || raw.includes('primitive') || raw.includes('boondock')) tags.add('dispersed');
+  if (raw.includes('free')) tags.add('free');
+  if (raw.includes('ada') || raw.includes('accessible')) tags.add('ada');
+  if (raw.includes('blm') || raw.includes('bureau of land management')) tags.add('blm');
+  if (raw.includes('usfs') || raw.includes('forest service') || raw.includes('national forest')) tags.add('usfs');
+  if (raw.includes('nps') || raw.includes('national park')) tags.add('nps');
+  if (raw.includes('state park')) tags.add('state');
+  if (raw.includes('corps')) tags.add('corps');
+  return tags;
+}
+
+function campMatchesFilters(camp: CampsitePin, filters: string[]) {
+  if (!filters.length) return true;
+  const tags = campFilterTags(camp);
+  return filters.some(filter => tags.has(filter));
 }
 
 function routeScopedOfflinePlaces(points: OsmPoi[], leg: LegSearchContext, types: string[], extraBuffer = 8) {
@@ -832,14 +1027,15 @@ export default function RouteBuilderScreen() {
   const [savedTrails, setSavedTrails] = useState<OfflineTrail[]>([]);
   const [days, setDays] = useState([1]);
   const [stops, setStops] = useState<BuilderStop[]>([]);
-  const [tripLoop, setTripLoop] = useState(false);
+  const [tripShapeMode, setTripShapeMode] = useState<TripShapeMode>('one_way');
   const [driveHoursPerDay, setDriveHoursPerDay] = useState('5');
   const [plannedDays, setPlannedDays] = useState('3');
-  const [routeStyle, setRouteStyle] = useState<'balanced' | 'direct' | 'adventure'>('balanced');
+  const [routeStyle, setRouteStyle] = useState<RouteStyleMode>('balanced');
   const [tripBuildMode, setTripBuildMode] = useState<TripBuildMode>('recommended');
   const [distanceMode, setDistanceMode] = useState<DistanceMode>('hours');
   const [campPreferenceMode, setCampPreferenceMode] = useState<CampPreferenceMode>('public');
   const [campCadenceMode, setCampCadenceMode] = useState<CampCadenceMode>('nightly');
+  const [campReusePolicy, setCampReusePolicy] = useState<CampReusePolicy>('different_each_night');
   const [wizardStep, setWizardStep] = useState(0);
   const [targetMiles, setTargetMiles] = useState('180');
   const [startQuery, setStartQuery] = useState('');
@@ -863,12 +1059,9 @@ export default function RouteBuilderScreen() {
   const [replaceStopId, setReplaceStopId] = useState<string | null>(null);
   const [discoverTab, setDiscoverTab] = useState<DiscoveryTab>('camps');
   const [discoverLoading, setDiscoverLoading] = useState(false);
-  const [discoverySummary, setDiscoverySummary] = useState('');
+  const [activeDiscoveryKey, setActiveDiscoveryKey] = useState<string | null>(null);
+  const [discoveryByKey, setDiscoveryByKey] = useState<Record<string, DiscoveryResults>>({});
   const [inlineSearch, setInlineSearch] = useState<InlineSearchState>(null);
-  const [camps, setCamps] = useState<CampsitePin[]>([]);
-  const [gas, setGas] = useState<GasStation[]>([]);
-  const [pois, setPois] = useState<OsmPoi[]>([]);
-  const [excursions, setExcursions] = useState<ExcursionCandidate[]>([]);
   const [offlinePlaces, setOfflinePlaces] = useState<OsmPoi[]>([]);
   const [activePlaceFilters, setActivePlaceFilters] = useState<string[]>(DEFAULT_PLACE_FILTERS);
   const [showPlaceFilters, setShowPlaceFilters] = useState(false);
@@ -887,6 +1080,15 @@ export default function RouteBuilderScreen() {
   const [paywallCode, setPaywallCode] = useState('camp_detail');
   const [paywallMessage, setPaywallMessage] = useState('Use credits or Explorer to open full campsite profiles. You can still add this camp to your route from the free preview.');
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const tripLoop = tripShapeMode !== 'one_way';
+  const effectiveCampReusePolicy: CampReusePolicy = tripShapeMode === 'there_and_back' ? 'same_camp_window' : campReusePolicy;
+
+  function applyTripShapeMode(mode: TripShapeMode) {
+    setTripShapeMode(mode);
+    if (mode === 'there_and_back') {
+      setCampReusePolicy('same_camp_window');
+    }
+  }
 
   useEffect(() => {
     selectedCampRef.current = selectedCamp;
@@ -933,8 +1135,40 @@ export default function RouteBuilderScreen() {
           lat: point.lat,
           lng: point.lng,
           type: point.type,
-          subtype: point.subtype,
+          subtype: normalizeCampSubtype(point.subtype || ''),
           elevation: point.elevation,
+          source: point.source || 'offline',
+          source_label: point.source_badge || point.source,
+          address: point.address,
+          photo_url: point.photo_url,
+          website: point.official_url || point.booking_url,
+          activities: point.amenities,
+          amenities: point.amenities,
+          site_types: point.site_types,
+          tags: point.tags,
+          reservable: point.reservable,
+          booking_url: point.booking_url,
+          official_url: point.official_url,
+          source_badge: point.source_badge,
+          source_freshness: point.source_freshness,
+          last_checked: point.last_checked,
+          waterbody_name: point.waterbody_name,
+          waterbody_type: point.waterbody_type,
+          access: point.access,
+          craft: point.craft,
+          fishing_score: point.fishing_score,
+          fishing_score_label: point.fishing_score_label,
+          fish_species: point.fish_species,
+          stocking_notes: point.stocking_notes,
+          regulations_url: point.regulations_url,
+          gauge_id: point.gauge_id,
+          gauge_url: point.gauge_url,
+          flow_cfs: point.flow_cfs,
+          gage_height_ft: point.gage_height_ft,
+          observed_at: point.observed_at,
+          chart_source: point.chart_source,
+          chart_url: point.chart_url,
+          navigation_note: point.navigation_note,
         })));
       })
       .catch(() => {
@@ -1006,6 +1240,7 @@ export default function RouteBuilderScreen() {
           camp,
           gas: station,
           poi,
+          routePointType: wp.route_point_type,
         };
       });
     if (!importedStops.length) return;
@@ -1046,8 +1281,14 @@ export default function RouteBuilderScreen() {
   const discoverContextLabel = legContext
     ? `${legContext.from.name.split(',')[0]} to ${legContext.to.name.split(',')[0]} · ${fmtMi(legContext.miles)}`
     : anchor ? anchor.name.split(',')[0] : 'add a stop first';
+  const activeDiscovery = activeDiscoveryKey ? discoveryByKey[activeDiscoveryKey] ?? EMPTY_DISCOVERY_RESULTS : EMPTY_DISCOVERY_RESULTS;
+  const camps = activeDiscovery.camps;
+  const gas = activeDiscovery.gas;
+  const pois = activeDiscovery.pois;
+  const excursions = activeDiscovery.excursions;
+  const discoverySummary = activeDiscovery.summary;
   const filteredOfflinePlaces = useMemo(() => (
-    offlinePlaces.filter(place => activePlaceFilters.includes(place.type))
+    offlinePlaces.filter(place => placeMatchesFilters(place, activePlaceFilters))
   ), [offlinePlaces, activePlaceFilters]);
   const campTypeFilters = useMemo(() => (
     CAMP_PREFERENCE_OPTIONS.find(option => option.id === campPreferenceMode)?.filters ?? []
@@ -1183,12 +1424,13 @@ export default function RouteBuilderScreen() {
   const routeDayPlans = useMemo<RouteDayPlan[]>(() => (
     days.map(day => {
       const wps = orderedStops.filter(st => st.day === day);
+      const routableWps = wps.filter(st => st.routePointType !== 'side_stop');
       const previous = [...orderedStops].reverse().find(st => st.day < day) ?? null;
-      const frameworkTarget = wps.find(isFrameworkTarget) ?? null;
-      const target = [...wps].reverse().find(st => st.type === 'camp' || st.type === 'motel')
+      const frameworkTarget = routableWps.find(isFrameworkTarget) ?? null;
+      const target = [...routableWps].reverse().find(st => st.type === 'camp' || st.type === 'motel')
         ?? frameworkTarget
-        ?? [...wps].reverse().find(st => st.type !== 'fuel')
-        ?? wps[wps.length - 1]
+        ?? [...routableWps].reverse().find(st => st.type !== 'fuel')
+        ?? routableWps[routableWps.length - 1]
         ?? null;
       const miles = dayMileage[day] ?? 0;
       return {
@@ -1388,48 +1630,117 @@ export default function RouteBuilderScreen() {
     }
   }
 
+  function discoveryKeyFor(tab: DiscoveryTab, target: { lat: number; lng: number }, leg: LegSearchContext | null) {
+    if (leg) {
+      return [
+        `day:${leg.targetDay ?? activeDay}`,
+        `tab:${tab}`,
+        `from:${leg.from.lat.toFixed(4)},${leg.from.lng.toFixed(4)}`,
+        `to:${leg.to.lat.toFixed(4)},${leg.to.lng.toFixed(4)}`,
+        `purpose:${leg.purpose ?? 'leg'}`,
+      ].join('|');
+    }
+    return [`day:${insertTargetDay ?? activeDay}`, `tab:${tab}`, `area:${target.lat.toFixed(4)},${target.lng.toFixed(4)}`].join('|');
+  }
+
+  function storeDiscoveryResults(key: string, patch: Partial<DiscoveryResults>) {
+    setDiscoveryByKey(prev => ({
+      ...prev,
+      [key]: { ...(prev[key] ?? EMPTY_DISCOVERY_RESULTS), ...patch },
+    }));
+  }
+
+  async function resolveLegSearchContext(leg: LegSearchContext): Promise<LegSearchContext> {
+    if (leg.routeCoords && leg.routeCoords.length >= 2) return leg;
+    const savedCoords = activeTrip?.route_geometry?.coords;
+    const savedSlice = sliceRouteCoordsBetween(savedCoords, leg.from, leg.to);
+    if (savedSlice.length >= 2) {
+      const miles = coordsLengthMi(savedSlice);
+      return {
+        ...leg,
+        miles,
+        center: pointAtRouteMile(coordsToStops(savedSlice), miles / 2) ?? leg.center,
+        routeCoords: savedSlice,
+        routeSource: 'saved',
+      };
+    }
+    try {
+      const routed = await api.buildRoute([
+        { lat: leg.from.lat, lng: leg.from.lng, type: 'break' },
+        { lat: leg.to.lat, lng: leg.to.lng, type: 'break' },
+      ], {
+        backRoads: routeStyle === 'wild',
+        avoidHighways: routeStyle === 'wild',
+        avoidTolls: true,
+        noFerries: false,
+      });
+      const coords = (routed.trip?.legs ?? []).flatMap(part => typeof part.shape === 'string' ? decodePolyline6(part.shape) : []);
+      if (coords.length >= 2) {
+        const miles = coordsLengthMi(coords);
+        return {
+          ...leg,
+          miles,
+          center: pointAtRouteMile(coordsToStops(coords), miles / 2) ?? leg.center,
+          routeCoords: coords,
+          routeSource: 'live',
+        };
+      }
+    } catch {}
+    return { ...leg, routeCoords: legRouteCoords(leg), routeSource: 'straight' };
+  }
+
   async function runDiscovery(tab: DiscoveryTab, target: { lat: number; lng: number }, leg: LegSearchContext | null, opts: { focusMap?: boolean } = {}) {
+    const key = discoveryKeyFor(tab, target, leg);
+    setActiveDiscoveryKey(key);
     const useLeg = !!leg;
     setDiscoverLoading(true);
-    setDiscoverySummary('');
+    storeDiscoveryResults(key, { summary: '' });
     if (opts.focusMap !== false) fly(target.lat, target.lng, useLeg ? 8 : 9);
     try {
+      const searchLeg = leg ? await resolveLegSearchContext(leg) : null;
       if (tab === 'camps') {
         if (useLeg) {
-          const radius = Math.max(34, Math.min(62, leg!.miles / 3.5 + 14));
+          const radius = Math.max(34, Math.min(62, searchLeg!.miles / 3.5 + 14));
           const found = uniqueByGeo((await Promise.all(
-            legSamplePoints(leg!).map(point => api.getNearbyCamps(point.lat, point.lng, radius, campTypeFilters).catch(() => []))
+            legSamplePoints(searchLeg!).map(point => api.getNearbyCamps(point.lat, point.lng, radius, campTypeFilters).catch(() => []))
           )).flat());
-          const scopedRaw = found
-              .map(camp => withLegProjection(camp, leg!))
-              .filter(camp => (camp.route_distance_mi ?? 999) <= routeBufferForMiles(leg!.miles) + 14);
-          let scoped = (leg!.purpose === 'overnight' ? overnightEndpointCamps(scopedRaw, leg!) : spreadAlongLeg(scopedRaw))
+          const offlineCamps = routeScopedOfflinePlaces(offlinePlaces, searchLeg!, ['camp'], 18)
+            .map(point => offlinePoiToCamp(point))
+            .filter(camp => campMatchesFilters(camp, campTypeFilters));
+          const scopedRaw = uniqueByGeo([...found, ...offlineCamps])
+              .map(camp => withLegProjection(camp, searchLeg!))
+              .filter(camp => campMatchesFilters(camp, campTypeFilters))
+              .filter(camp => (camp.route_distance_mi ?? 999) <= routeBufferForMiles(searchLeg!.miles) + 14);
+          let scoped = (searchLeg!.purpose === 'overnight' ? overnightEndpointCamps(scopedRaw, searchLeg!) : spreadAlongLeg(scopedRaw))
             .sort((a, b) => campPreferenceScore(a) - campPreferenceScore(b));
           let fallbackText = '';
-          if (leg!.purpose === 'overnight' && scoped.length === 0) {
-            const endpointCamps = await api.getNearbyCamps(leg!.to.lat, leg!.to.lng, 55, campTypeFilters).catch(() => []);
+          if (searchLeg!.purpose === 'overnight' && scoped.length === 0) {
+            const endpointCamps = await api.getNearbyCamps(searchLeg!.to.lat, searchLeg!.to.lng, 55, campTypeFilters).catch(() => []);
             scoped = endpointCamps
-              .map(camp => withLegProjection(camp, leg!))
-              .sort((a, b) => campPreferenceScore(a) - campPreferenceScore(b) || haversineMi(a, leg!.to) - haversineMi(b, leg!.to));
+              .map(camp => withLegProjection(camp, searchLeg!))
+              .sort((a, b) => campPreferenceScore(a) - campPreferenceScore(b) || haversineMi(a, searchLeg!.to) - haversineMi(b, searchLeg!.to));
             fallbackText = ' using the day-end area';
           }
-          setCamps(scoped);
-          setDiscoverySummary(`${scoped.length} ${campPreferenceLabel.toLowerCase()} camp${scoped.length === 1 ? '' : 's'} ${leg!.purpose === 'overnight' ? `near Day ${leg!.targetDay ?? activeDay} endpoint${fallbackText}` : 'spread along this leg'}`);
+          storeDiscoveryResults(key, { camps: scoped, summary: `${scoped.length} ${campPreferenceLabel.toLowerCase()} camp${scoped.length === 1 ? '' : 's'} ${searchLeg!.purpose === 'overnight' ? `near Day ${searchLeg!.targetDay ?? activeDay} endpoint${fallbackText}` : 'spread along this leg'}` });
         } else {
-          const found = (await api.getNearbyCamps(target.lat, target.lng, 45, campTypeFilters)).sort((a, b) => campPreferenceScore(a) - campPreferenceScore(b));
-          setCamps(found);
-          setDiscoverySummary(`${found.length} ${campPreferenceLabel.toLowerCase()} camp${found.length === 1 ? '' : 's'} near this area`);
+          const offlineCamps = areaScopedOfflinePlaces(offlinePlaces, target, ['camp'], 50)
+            .map(point => offlinePoiToCamp(point))
+            .filter(camp => campMatchesFilters(camp, campTypeFilters));
+          const found = uniqueByGeo([...(await api.getNearbyCamps(target.lat, target.lng, 45, campTypeFilters)), ...offlineCamps])
+            .filter(camp => campMatchesFilters(camp, campTypeFilters))
+            .sort((a, b) => campPreferenceScore(a) - campPreferenceScore(b));
+          storeDiscoveryResults(key, { camps: found, summary: `${found.length} ${campPreferenceLabel.toLowerCase()} camp${found.length === 1 ? '' : 's'} near this area` });
         }
       } else if (tab === 'gas') {
         if (useLeg) {
-          const radius = Math.max(32, Math.min(64, leg!.miles / 4 + 14));
+          const radius = Math.max(32, Math.min(64, searchLeg!.miles / 4 + 14));
           const nrelStations = uniqueByGeo((await Promise.all(
-            legSamplePoints(leg!).map(point => api.getGas(point.lat, point.lng, radius).catch(() => []))
+            legSamplePoints(searchLeg!).map(point => api.getGas(point.lat, point.lng, radius).catch(() => []))
           )).flat());
           const osmFuel = uniqueByGeo((await Promise.all(
-            legSamplePoints(leg!).map(point => api.getOsmPois(point.lat, point.lng, radius, FUEL_POI_TYPES).catch(() => []))
+            legSamplePoints(searchLeg!).map(point => api.getOsmPois(point.lat, point.lng, radius, FUEL_POI_TYPES).catch(() => []))
           )).flat());
-          const offlineFuel = routeScopedOfflinePlaces(offlinePlaces, leg!, ['fuel', 'propane']);
+          const offlineFuel = routeScopedOfflinePlaces(offlinePlaces, searchLeg!, ['fuel', 'propane']);
           const stations = uniqueByGeo([
             ...nrelStations,
             ...osmFuel.map(poiToGasStation),
@@ -1437,16 +1748,15 @@ export default function RouteBuilderScreen() {
           ]);
           if (stations.length === 0) {
             const nominatimFuel = uniqueByGeo((await Promise.all(
-              legSamplePoints(leg!).map(point => searchNominatimNearby('gas station', point, Math.max(radius, 45), 'fuel', 6).catch(() => []))
+              legSamplePoints(searchLeg!).map(point => searchNominatimNearby('gas station', point, Math.max(radius, 45), 'fuel', 6).catch(() => []))
             )).flat());
             stations.push(...nominatimFuel.map(poiToGasStation));
           }
           const scoped = spreadAlongLeg(stations
-            .map(st => withLegProjection(st, leg!))
-            .filter(st => (st.route_distance_mi ?? 999) <= routeBufferForMiles(leg!.miles) + 18)
+            .map(st => withLegProjection(st, searchLeg!))
+            .filter(st => (st.route_distance_mi ?? 999) <= routeBufferForMiles(searchLeg!.miles) + 18)
           );
-          setGas(scoped);
-          setDiscoverySummary(`${scoped.length} fuel stop${scoped.length === 1 ? '' : 's'} along this leg`);
+          storeDiscoveryResults(key, { gas: scoped, summary: `${scoped.length} fuel stop${scoped.length === 1 ? '' : 's'} along this leg` });
         } else {
           const [nrelStations, osmFuel] = await Promise.all([
             api.getGas(target.lat, target.lng, 35).catch(() => []),
@@ -1463,24 +1773,24 @@ export default function RouteBuilderScreen() {
             stations.push(...nominatimFuel.map(poiToGasStation));
           }
           stations.sort((a, b) => (a.route_distance_mi ?? haversineMi(a, target)) - (b.route_distance_mi ?? haversineMi(b, target)));
-          setGas(stations);
-          setDiscoverySummary(`${stations.length} fuel stop${stations.length === 1 ? '' : 's'} near this area`);
+          storeDiscoveryResults(key, { gas: stations, summary: `${stations.length} fuel stop${stations.length === 1 ? '' : 's'} near this area` });
         }
       } else if (tab === 'excursions') {
-        const center = useLeg ? leg!.center : target;
-        const radius = useLeg ? Math.max(28, Math.min(60, leg!.miles / 4 + 18)) : 45;
+        const center = useLeg ? searchLeg!.center : target;
+        const radius = useLeg ? Math.max(28, Math.min(60, searchLeg!.miles / 4 + 18)) : 45;
         const smart = await api.getNearbySmartPack(
           center.lat,
           center.lng,
           radius,
           'trailhead,viewpoint,peak,hot_spring,park,historic,climbing,ohv,attraction,water',
-          excursionRouteCoords(),
+          useLeg ? legRouteCoords(searchLeg!) : excursionRouteCoords(),
+          { scope_id: key, recommended_day: searchLeg?.targetDay ?? activeDay, route_scope: useLeg ? 'leg' : 'area' },
         ).catch(async () => {
           const found = await api.getExcursionsNearby({
             center,
             radius,
-            day: leg?.targetDay ?? activeDay,
-            route: excursionRouteCoords(),
+            day: searchLeg?.targetDay ?? activeDay,
+            route: useLeg ? legRouteCoords(searchLeg!) : excursionRouteCoords(),
             source_context: useLeg ? 'route_leg' : 'area',
             categories: ['trail', 'ohv', 'viewpoint', 'peak', 'hot_spring', 'park', 'historic', 'climbing', 'water', 'attraction'],
           }).catch(() => ({ excursions: [] }));
@@ -1495,17 +1805,17 @@ export default function RouteBuilderScreen() {
           .map(smartPlaceToExcursion)
           .filter(item => !item.sensitive_location || item.source_confidence === 'high')
           .sort((a, b) => (a.distance_from_route_mi ?? 999) - (b.distance_from_route_mi ?? 999));
-        setExcursions(scoped);
-        setDiscoverySummary(`${scoped.length} excursion${scoped.length === 1 ? '' : 's'} near ${useLeg ? 'this leg' : 'this area'}`);
+        storeDiscoveryResults(key, { excursions: scoped, summary: `${scoped.length} excursion${scoped.length === 1 ? '' : 's'} near ${useLeg ? 'this leg' : 'this area'}` });
       } else {
         if (useLeg) {
-          const radius = Math.max(24, Math.min(42, leg!.miles / 5 + 12));
+          const radius = Math.max(24, Math.min(42, searchLeg!.miles / 5 + 12));
+          const legRoute = legRouteCoords(searchLeg!);
           const found = uniqueByGeo((await Promise.all(
-            legSamplePoints(leg!).map(point => api.getNearbySmartPack(point.lat, point.lng, radius, ROUTE_POI_TYPES, excursionRouteCoords()).then(pack => pack.places as OsmPoi[]).catch(() => []))
+            legSamplePoints(searchLeg!).map(point => api.getNearbySmartPack(point.lat, point.lng, radius, ROUTE_POI_TYPES, legRoute, { scope_id: key, recommended_day: searchLeg!.targetDay ?? activeDay, route_scope: 'leg' }).then(pack => pack.places as OsmPoi[]).catch(() => []))
           )).flat());
           const offlineRoutePlaces = routeScopedOfflinePlaces(
-            offlinePlaces,
-            leg!,
+            filteredOfflinePlaces,
+            searchLeg!,
             ROUTE_POI_TYPES.split(',').filter(type => type !== 'fuel' && type !== 'propane')
           );
           const routePlaces = uniqueByGeo([...found, ...offlineRoutePlaces]);
@@ -1517,24 +1827,23 @@ export default function RouteBuilderScreen() {
               ['grocery', 'grocery'],
             ];
             const nominatimPlaces = uniqueByGeo((await Promise.all(
-              legSamplePoints(leg!).flatMap(point =>
+              legSamplePoints(searchLeg!).flatMap(point =>
                 fallbackQueries.map(([query, type]) => searchNominatimNearby(query, point, radius, type, 3).catch(() => []))
               )
             )).flat());
             routePlaces.push(...nominatimPlaces);
           }
           const scoped = spreadAlongLeg(routePlaces
-              .map(poi => withLegProjection(poi, leg!))
-              .filter(poi => poi.route_distance_mi <= routeBufferForMiles(leg!.miles) + 5)
+              .map(poi => withLegProjection(poi, searchLeg!))
+              .filter(poi => poi.route_distance_mi <= routeBufferForMiles(searchLeg!.miles) + 5)
           );
-          setPois(scoped);
-          setDiscoverySummary(`${scoped.length} place${scoped.length === 1 ? '' : 's'} along this leg`);
+          storeDiscoveryResults(key, { pois: scoped, summary: `${scoped.length} place${scoped.length === 1 ? '' : 's'} along this leg` });
         } else {
           const found = await api.getNearbySmartPack(target.lat, target.lng, 40, ROUTE_POI_TYPES, excursionRouteCoords())
             .then(pack => pack.places as OsmPoi[])
             .catch(() => api.getOsmPois(target.lat, target.lng, 40, ROUTE_POI_TYPES).catch(() => []));
           const offlineRoutePlaces = areaScopedOfflinePlaces(
-            offlinePlaces,
+            filteredOfflinePlaces,
             target,
             ROUTE_POI_TYPES.split(',').filter(type => type !== 'fuel' && type !== 'propane'),
             45
@@ -1555,8 +1864,7 @@ export default function RouteBuilderScreen() {
           const scoped = routePlaces
             .map(poi => ({ ...poi, route_distance_mi: poi.route_distance_mi ?? haversineMi(poi, target) }))
             .sort((a, b) => (a.route_distance_mi ?? 999) - (b.route_distance_mi ?? 999));
-          setPois(scoped);
-          setDiscoverySummary(`${scoped.length} place${scoped.length === 1 ? '' : 's'} near this area`);
+          storeDiscoveryResults(key, { pois: scoped, summary: `${scoped.length} place${scoped.length === 1 ? '' : 's'} near this area` });
         }
       }
     } catch {
@@ -1568,11 +1876,7 @@ export default function RouteBuilderScreen() {
   }
 
   function clearDiscoveryResults() {
-    setCamps([]);
-    setGas([]);
-    setPois([]);
-    setExcursions([]);
-    setDiscoverySummary('');
+    setActiveDiscoveryKey(null);
     setInlineSearch(null);
   }
 
@@ -1675,7 +1979,7 @@ export default function RouteBuilderScreen() {
     if (next) setTimeout(() => fly(next.lat, next.lng, 10), 90);
   }
 
-  function addPoi(poi: OsmPoi) {
+  function addPoi(poi: OsmPoi, routePointType: BuilderStop['routePointType'] = 'side_stop') {
     const type = builderTypeForPoi(poi.type);
     addStop({
       name: poi.name || poi.type,
@@ -1686,6 +1990,7 @@ export default function RouteBuilderScreen() {
       land_type: type === 'fuel' || type === 'motel' ? 'town' : 'route',
       source: 'poi',
       poi,
+      routePointType: type === 'waypoint' ? routePointType : 'break',
     });
     clearDiscoveryResults();
   }
@@ -1696,7 +2001,7 @@ export default function RouteBuilderScreen() {
       .map(st => [st.lng, st.lat] as [number, number]);
   }
 
-  function addExcursion(excursion: ExcursionCandidate) {
+  function addExcursion(excursion: ExcursionCandidate, routePointType: BuilderStop['routePointType'] = 'side_stop') {
     const poi: OsmPoi = {
       id: excursion.id,
       name: excursion.name,
@@ -1724,6 +2029,7 @@ export default function RouteBuilderScreen() {
       land_type: excursion.type,
       source: 'poi',
       poi,
+      routePointType,
     });
     clearDiscoveryResults();
   }
@@ -1740,6 +2046,9 @@ export default function RouteBuilderScreen() {
       source: 'route_builder',
       source_label: 'Route Builder',
       route_distance_mi: station.route_distance_mi,
+      route_progress: (station as any).route_progress,
+      route_progress_mi: (station as any).route_progress_mi,
+      route_segment_index: (station as any).route_segment_index,
       summary: station.address || 'Fuel stop found near this route leg.',
     };
   }
@@ -1766,6 +2075,9 @@ export default function RouteBuilderScreen() {
       source_label: poi.source_label,
       attribution: poi.attribution,
       route_distance_mi: poi.route_distance_mi,
+      route_progress: poi.route_progress,
+      route_progress_mi: poi.route_progress_mi,
+      route_segment_index: poi.route_segment_index,
       summary: poi.address || `${poi.type.replace(/_/g, ' ')} found near this route leg.`,
     };
   }
@@ -1781,6 +2093,9 @@ export default function RouteBuilderScreen() {
       source: item.source,
       source_label: item.source_label,
       route_distance_mi: item.distance_from_route_mi,
+      route_progress: (item as any).route_progress,
+      route_progress_mi: (item as any).route_progress_mi,
+      route_segment_index: (item as any).route_segment_index,
       summary: item.summary || item.why_go,
       access_note: item.access_notes || item.risk_notes,
       length_mi: item.length_mi,
@@ -1788,18 +2103,31 @@ export default function RouteBuilderScreen() {
   }
 
   function openRoutePlace(selection: RoutePlaceSelection) {
+    setActiveDay(selection.day);
+    setInsertTargetDay(selection.day);
     setSelectedRoutePlace(selection);
     fly(selection.place.lat, selection.place.lng, 13);
   }
 
-  function addSelectedRoutePlace() {
+  function selectedRoutePlaceContextLabel(selection: RoutePlaceSelection | null) {
+    if (!selection) return '';
+    const data = selection.kind === 'excursion' ? selection.place : selection.data as any;
+    return [
+      `Day ${selection.day}`,
+      routeProgressLabel(data.route_progress),
+      data.route_progress_mi != null ? `${fmtMi(Number(data.route_progress_mi))} into leg` : '',
+      data.route_distance_mi != null ? `${fmtMi(Number(data.route_distance_mi))} off route` : '',
+    ].filter(Boolean).join(' · ');
+  }
+
+  function addSelectedRoutePlace(promote = false) {
     if (!selectedRoutePlace) return;
     if (selectedRoutePlace.kind === 'gas') {
       addGas(selectedRoutePlace.data);
     } else if (selectedRoutePlace.kind === 'excursion') {
-      addExcursion(selectedRoutePlace.data);
+      addExcursion(selectedRoutePlace.data, promote ? 'through' : 'side_stop');
     } else {
-      addPoi(selectedRoutePlace.data);
+      addPoi(selectedRoutePlace.data, promote ? 'through' : 'side_stop');
     }
     setSelectedRoutePlace(null);
   }
@@ -1847,10 +2175,11 @@ export default function RouteBuilderScreen() {
       }
     }
     setActiveDay(plan.day);
-    const from = plan.previous ?? plan.stops[0] ?? null;
+    const routableStops = plan.stops.filter(st => st.routePointType !== 'side_stop');
+    const from = plan.previous ?? routableStops[0] ?? plan.stops[0] ?? null;
     const to = tab === 'camps'
       ? plan.target ?? plan.stops[plan.stops.length - 1] ?? null
-      : plan.stops[plan.stops.length - 1] ?? plan.target ?? null;
+      : routableStops[routableStops.length - 1] ?? plan.target ?? null;
     if (from && to && from.id !== to.id) {
       scanBetweenStops(from, to, tab, plan.day, tab === 'camps' ? 'overnight' : 'leg');
       return;
@@ -1968,11 +2297,12 @@ export default function RouteBuilderScreen() {
         const fallbackDetail = await enrichCampDetailWithGoogle({
           ...camp,
           photos: camp.photo_url ? [camp.photo_url] : [],
-          amenities: [],
-          site_types: camp.tags ?? [],
+          amenities: camp.amenities ?? [],
+          site_types: camp.site_types ?? camp.tags ?? [],
           activities: [],
           campsites_count: 0,
           source: camp.verified_source ?? camp.source,
+          source_confidence_notes: camp.source_freshness,
           description: stripHtml(camp.description) || 'This camp has a route preview, but a full profile has not been built yet. You can still add it to the trip and replace it later from the route.',
         } as CampsiteDetail, camp);
         if (selectedCampRef.current?.id !== camp.id) {
@@ -1999,31 +2329,7 @@ export default function RouteBuilderScreen() {
   }
 
   async function enrichCampDetailWithGoogle(detail: CampsiteDetail, camp: CampsitePin): Promise<CampsiteDetail> {
-    const source = String(camp.source || detail.source || '').toLowerCase();
-    const rawId = String(camp.id || '');
-    const id = camp.provider_place_id || camp.place_id ||
-      (rawId.startsWith('google:') ? rawId.replace(/^google:/, '') : rawId.startsWith('foursquare:') ? rawId.replace(/^foursquare:/, '') : '');
-    const provider = source === 'google' || source === 'foursquare' ? source : rawId.startsWith('foursquare:') ? 'foursquare' : rawId.startsWith('google:') ? 'google' : '';
-    if (!id || !provider) return detail;
-    try {
-      const place = await api.getPlaceDetail(provider, id);
-      const providerPhotos = (place.photos ?? []).map(photo => mediaUrl(photo.url)).filter(Boolean);
-      return {
-        ...detail,
-        phone: detail.phone || place.phone,
-        address: detail.address || place.address,
-        rating: detail.rating ?? place.rating,
-        rating_count: detail.rating_count ?? place.rating_count,
-        url: detail.url || place.website || place.google_maps_uri || '',
-        photos: detail.photos?.length ? detail.photos : providerPhotos,
-        reviews: place.reviews ?? detail.reviews,
-        media_source: detail.photos?.length ? 'mixed' : provider,
-        verified_source: detail.verified_source || place.source_label || (provider === 'google' ? 'Google Places' : 'Foursquare'),
-        source: detail.source || provider,
-      };
-    } catch {
-      return detail;
-    }
+    return detail;
   }
 
   function addDay() {
@@ -2168,16 +2474,29 @@ export default function RouteBuilderScreen() {
   }
 
   function straightRouteSpine(first: BuilderStop, last: BuilderStop, count = 60) {
+    const directMi = haversineMi(first, last);
+    const loopOffset = Math.max(22, Math.min(90, directMi * 0.12));
+    if (tripShapeMode === 'loop') {
+      const outbound = Array.from({ length: count }, (_, idx) => {
+        const t = count <= 1 ? 0 : idx / (count - 1);
+        return scenicPoint(first, last, t, loopOffset);
+      });
+      const inbound = Array.from({ length: count }, (_, idx) => {
+        const t = count <= 1 ? 0 : idx / (count - 1);
+        return scenicPoint(last, first, t, loopOffset);
+      });
+      return [...outbound, ...inbound.slice(1)];
+    }
     const points = Array.from({ length: count }, (_, idx) => {
       const t = count <= 1 ? 0 : idx / (count - 1);
       return scenicPoint(
         first,
         last,
         t,
-        routeStyle === 'adventure' ? Math.max(18, Math.min(60, haversineMi(first, last) * 0.055)) * Math.sin(Math.PI * t) : 0
+        routeStyle === 'wild' ? Math.max(18, Math.min(60, directMi * 0.055)) * Math.sin(Math.PI * t) : 0
       );
     });
-    if (tripLoop && points.length > 1) return [...points, ...points.slice(0, -1).reverse()];
+    if (tripShapeMode === 'there_and_back' && points.length > 1) return [...points, ...points.slice(0, -1).reverse()];
     return points;
   }
 
@@ -2193,23 +2512,40 @@ export default function RouteBuilderScreen() {
       return [];
     }
     try {
+      const loopOffset = Math.max(22, Math.min(120, directMi * 0.14));
+      const outboundAnchor = scenicPoint(first, last, 0.48, loopOffset);
+      const returnAnchor = scenicPoint(first, last, 0.52, -loopOffset);
       const opts = {
-        backRoads: routeStyle === 'adventure',
-        avoidHighways: routeStyle === 'adventure',
+        backRoads: routeStyle === 'wild',
+        avoidHighways: routeStyle === 'wild',
         avoidTolls: true,
         noFerries: false,
       };
-      const outbound = await api.buildRoute([
-        { lat: first.lat, lng: first.lng },
-        { lat: last.lat, lng: last.lng },
-      ], opts);
+      const outboundLocations = tripShapeMode === 'loop'
+        ? [
+            { lat: first.lat, lng: first.lng },
+            { lat: outboundAnchor.lat, lng: outboundAnchor.lng, type: 'through' as const },
+            { lat: last.lat, lng: last.lng },
+          ]
+        : [
+            { lat: first.lat, lng: first.lng },
+            { lat: last.lat, lng: last.lng },
+          ];
+      const outbound = await api.buildRoute(outboundLocations, opts);
       const outCoords = (outbound.trip?.legs ?? []).flatMap(leg => typeof leg.shape === 'string' ? decodePolyline6(leg.shape) : []);
       let points = coordsToStops(outCoords);
       if (tripLoop && points.length >= 2) {
-        const inbound = await api.buildRoute([
-          { lat: last.lat, lng: last.lng },
-          { lat: first.lat, lng: first.lng },
-        ], opts).catch(() => null);
+        const inboundLocations = tripShapeMode === 'loop'
+          ? [
+              { lat: last.lat, lng: last.lng },
+              { lat: returnAnchor.lat, lng: returnAnchor.lng, type: 'through' as const },
+              { lat: first.lat, lng: first.lng },
+            ]
+          : [
+              { lat: last.lat, lng: last.lng },
+              { lat: first.lat, lng: first.lng },
+            ];
+        const inbound = await api.buildRoute(inboundLocations, opts).catch(() => null);
         const inCoords = (inbound?.trip?.legs ?? []).flatMap(leg => typeof leg.shape === 'string' ? decodePolyline6(leg.shape) : []);
         const inPoints = coordsToStops(inCoords);
         points = inPoints.length >= 2 ? [...points, ...inPoints.slice(1)] : [...points, ...points.slice(0, -1).reverse()];
@@ -2311,6 +2647,10 @@ export default function RouteBuilderScreen() {
         windows,
         camp_filters: campTypeFilters,
         route_style: routeStyle,
+        camp_preference: campPreferenceMode,
+        region_hint: routeStates.join(','),
+        camp_reuse_policy: effectiveCampReusePolicy,
+        max_daily_drive_hours: parsePositiveNumber(driveHoursPerDay) ?? undefined,
         max_radius: 58,
       });
       return result.windows.map(win => {
@@ -2420,11 +2760,14 @@ export default function RouteBuilderScreen() {
             day: count,
             type: 'waypoint',
             name: `${first.name.split(',')[0]} return`,
-            description: 'Loop return to the route start.',
+            description: tripShapeMode === 'loop'
+              ? 'Loop return to the route start using a distinct return corridor.'
+              : 'There-and-back return to the route start.',
             source: 'map',
           }
         : { ...last, day: count });
-      const nextName = routeName.trim() || (tripLoop ? `${first.name.split(',')[0]} to ${last.name.split(',')[0]} Loop` : `${first.name.split(',')[0]} to ${last.name.split(',')[0]}`);
+      const shapeLabel = tripShapeMode === 'loop' ? 'Loop' : tripShapeMode === 'there_and_back' ? 'There and Back' : '';
+      const nextName = routeName.trim() || (tripLoop ? `${first.name.split(',')[0]} to ${last.name.split(',')[0]} ${shapeLabel}` : `${first.name.split(',')[0]} to ${last.name.split(',')[0]}`);
       const status = tripBuildMode === 'recommended'
         ? weakAnchors
           ? `${strongAnchors} camp anchor${strongAnchors === 1 ? '' : 's'} placed; ${weakAnchors} day${weakAnchors === 1 ? '' : 's'} need camp review.`
@@ -2449,13 +2792,13 @@ export default function RouteBuilderScreen() {
     const first = orderedStops[0];
     const last = orderedStops[orderedStops.length - 1];
     if (closeEnough(first, last)) {
-      setTripLoop(true);
+      setTripShapeMode('loop');
       return;
     }
     setInsertAfterId(null);
     setInsertTargetDay(null);
     setActiveDay(last.day);
-    setTripLoop(true);
+    setTripShapeMode('loop');
     const stop: BuilderStop = {
       id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       name: `${first.name.split(',')[0]} return`,
@@ -2481,6 +2824,87 @@ export default function RouteBuilderScreen() {
     return 'Manual Route';
   }
 
+  function buildBuilderTimeline(navStops: BuilderStop[], inputDays: number[], dailyItinerary: Array<{ day: number; title: string; description: string; est_miles: number; road_type: string; highlights: string[] }>): TripTimeline {
+    const timelineDays = inputDays.map(day => {
+      const dayStopsForTimeline = navStops.filter(st => st.day === day);
+      const previous = [...navStops].reverse().find(st => st.day < day && (st.type === 'camp' || st.type === 'motel')) ?? null;
+      const dayPlan = dailyItinerary.find(item => item.day === day);
+      const rest = restDays.includes(day) || dayPlan?.road_type === 'none';
+      const events = [];
+      const start = previous ?? dayStopsForTimeline[0];
+      if (start) {
+        events.push({
+          type: day === 1 ? 'start' : 'depart',
+          title: day === 1 ? 'Start' : 'Break camp',
+          description: start.description,
+          day,
+          source: sourceLabel(start.source),
+          warning_level: 'info',
+          point: { lat: start.lat, lng: start.lng },
+          quick_actions: ['navigate'],
+        });
+      }
+      events.push({
+        type: rest ? 'rest' : 'drive',
+        title: dayPlan?.title ?? `Day ${day}`,
+        description: dayPlan?.description ?? '',
+        day,
+        source: 'Route Builder',
+        warning_level: !rest && (dayPlan?.est_miles ?? 0) > ((parsePositiveNumber(dayDriveTargets[day]) ?? planningStats.driveLimit) * 42) ? 'warn' : 'info',
+        distance_mi: dayPlan?.est_miles ?? 0,
+        road_type: dayPlan?.road_type ?? 'mixed',
+        quick_actions: rest ? ['add_place', 'swap_camp'] : ['start_day', 'add_stop'],
+      });
+      for (const stop of dayStopsForTimeline) {
+        if (stop === start) continue;
+        events.push({
+          type: stop.type === 'camp' || stop.type === 'motel' ? 'overnight' : stop.type === 'fuel' ? 'fuel' : 'poi',
+          title: stop.name,
+          description: stop.description,
+          day,
+          source: stop.camp?.verified_source || stop.poi?.source_label || sourceLabel(stop.source),
+          warning_level: isFrameworkTarget(stop) ? 'warn' : 'info',
+          point: { lat: stop.lat, lng: stop.lng },
+          quick_actions: stop.type === 'camp' ? ['swap_camp', 'add_rest_day'] : ['open', 'swap_stop'],
+        });
+      }
+      if (!rest && !dayStopsForTimeline.some(st => st.type === 'camp' || st.type === 'motel') && day < inputDays.length) {
+        events.push({
+          type: 'overnight',
+          title: 'Choose overnight',
+          description: 'Pick a camp or lodging stop before using this day for navigation.',
+          day,
+          source: 'Route Builder',
+          warning_level: 'warn',
+          quick_actions: ['scan_camps', 'add_lodging'],
+        });
+      }
+      return {
+        day,
+        title: dayPlan?.title ?? `Day ${day}`,
+        summary: dayPlan?.description ?? '',
+        distance_mi: dayPlan?.est_miles ?? 0,
+        road_type: dayPlan?.road_type ?? 'mixed',
+        warning_level: events.some(event => event.warning_level === 'warn') ? 'warn' : 'info',
+        events,
+      };
+    });
+    return {
+      schema_version: 1,
+      days: timelineDays,
+      warnings: timelineDays.flatMap(day => day.events.filter(event => event.warning_level === 'warn').map(event => ({ level: 'warn', message: `Day ${day.day}: ${event.title}` }))).slice(0, 12),
+      offline_readiness: {
+        map: false,
+        navigation: false,
+        places: navStops.some(st => st.camp || st.gas || st.poi),
+        topo: false,
+        trails: false,
+        trip_download: false,
+        message: 'Download this trip to save the route corridor plus selected camps, fuel, and places.',
+      },
+    };
+  }
+
   function buildTrip(
     inputStops: BuilderStop[] = orderedStops,
     inputDays: number[] = days,
@@ -2499,6 +2923,7 @@ export default function RouteBuilderScreen() {
       land_type: st.land_type,
       lat: st.lat,
       lng: st.lng,
+      route_point_type: st.routePointType ?? (st.source === 'poi' && st.type === 'waypoint' ? 'side_stop' : 'break'),
       verified_source: st.source === 'camp' ? st.camp?.verified_source ?? 'manual' : 'manual',
       verified_match: true,
       camp_window_start: st.campWindowStart ?? campWindowFor(st.day, inputDays).start,
@@ -2530,10 +2955,11 @@ export default function RouteBuilderScreen() {
           ? 'Planning day. Pick an overnight camp before using GPS navigation.'
           : 'Open day. Add a destination, fuel, POIs, and camp.',
         est_miles: Math.round(miles),
-        road_type: rest ? 'none' : routeStyle === 'adventure' ? 'backroads' : routeStyle === 'direct' ? 'direct' : 'mixed',
+        road_type: rest ? 'none' : routeStyle === 'wild' ? 'backroads' : routeStyle === 'direct' ? 'direct' : 'mixed',
         highlights: wps.filter(st => st.type === 'waypoint' || st.type === 'camp').slice(0, 3).map(st => st.name),
       };
     });
+    const timeline = buildBuilderTimeline(navStops, inputDays, daily_itinerary);
     const campsites = navStops.filter(st => st.camp).map(st => ({ ...st.camp!, recommended_day: st.day }));
     const gas_stations = navStops.filter(st => st.gas).map(st => ({ ...st.gas!, recommended_day: st.day }));
     return {
@@ -2548,17 +2974,26 @@ export default function RouteBuilderScreen() {
         total_est_miles: Math.round(inputMiles),
         waypoints,
         daily_itinerary,
+        timeline,
+        route_preferences: {
+          route_style: routeStyle,
+          camp_preference: campPreferenceMode,
+          camp_reuse_policy: effectiveCampReusePolicy,
+          region_hint: routeStates.join(','),
+          max_daily_drive_hours: parsePositiveNumber(driveHoursPerDay),
+        },
         logistics: {
           vehicle_recommendation: `User-built ${routeStyle} route. Review road surfaces against the saved rig profile before departure.`,
           fuel_strategy: `Estimated fuel: ${Math.round(planningStats.gallons)} gal / $${Math.round(planningStats.fuelCost)} at ${planningStats.mpg} MPG and $${planningStats.price.toFixed(2)}/gal. Fuel stops are manually selected.`,
           water_strategy: 'Carry water for each day and add water POIs where needed.',
-          permits_needed: `${tripLoop ? 'Loop route. ' : ''}Check local land manager rules for selected camps and trailheads.`,
+          permits_needed: `${tripShapeMode === 'loop' ? 'Loop route. ' : tripShapeMode === 'there_and_back' ? 'There-and-back route. ' : ''}Check local land manager rules for selected camps and trailheads.`,
           best_season: `Verify seasonal closures and weather before departure. Daily drive max: ${fmtHours(planningStats.driveLimit)}.`,
         },
       },
       campsites,
       gas_stations,
       route_pois: navStops.filter(st => st.poi).map(st => st.poi!),
+      timeline,
     };
   }
 
@@ -2569,6 +3004,7 @@ export default function RouteBuilderScreen() {
       stops,
       days,
       routeStyle,
+      tripShapeMode,
       tripLoop,
       driveHoursPerDay,
       plannedDays,
@@ -2580,6 +3016,7 @@ export default function RouteBuilderScreen() {
       activePlaceFilters,
       campPreferenceMode,
       campCadenceMode,
+      campReusePolicy,
     };
     try {
       setRouteName(trip.plan.trip_name);
@@ -2621,12 +3058,13 @@ export default function RouteBuilderScreen() {
     setActiveDay(1);
     setDays([1]);
     setStops([]);
-    setTripLoop(false);
+    setTripShapeMode('one_way');
     setRouteStyle('balanced');
     setTripBuildMode('recommended');
     setDistanceMode('hours');
     setCampPreferenceMode('public');
     setCampCadenceMode('nightly');
+    setCampReusePolicy('different_each_night');
     setWizardStep(0);
     setPlannedDays('3');
     setDriveHoursPerDay('5');
@@ -2640,10 +3078,8 @@ export default function RouteBuilderScreen() {
     setImportedTripId(null);
     setSearchResults([]);
     setInlineSearch(null);
-    setCamps([]);
-    setGas([]);
-    setPois([]);
-    setExcursions([]);
+    setActiveDiscoveryKey(null);
+    setDiscoveryByKey({});
     setSelectedRoutePlace(null);
   }
 
@@ -2957,7 +3393,7 @@ export default function RouteBuilderScreen() {
               <View style={s.inlineCampBody}>
                 <Text style={s.candidateName} numberOfLines={2}>{camp.name}</Text>
                 <Text style={s.candidateMeta} numberOfLines={2}>
-                  {camp.route_distance_mi != null ? `${fmtMi(camp.route_distance_mi)} off route · ` : ''}
+                  Day {day} · {camp.route_distance_mi != null ? `${fmtMi(camp.route_distance_mi)} off route · ` : ''}
                   {routeProgressLabel((camp as any).route_progress) ? `${routeProgressLabel((camp as any).route_progress)} · ` : ''}
                   {[...(camp.site_types ?? []), ...(camp.amenities ?? []), camp.land_type || 'Camp'].filter(Boolean).slice(0, 3).join(' · ')} · {camp.cost || 'See site'}
                 </Text>
@@ -2978,7 +3414,7 @@ export default function RouteBuilderScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={s.candidateName} numberOfLines={1}>{station.name}</Text>
                 <Text style={s.candidateMeta} numberOfLines={1}>
-                  {station.route_distance_mi != null ? `${fmtMi(station.route_distance_mi)} off route · ` : ''}
+                  Day {day} · {station.route_distance_mi != null ? `${fmtMi(station.route_distance_mi)} off route · ` : ''}
                   {routeProgressLabel((station as any).route_progress) ? `${routeProgressLabel((station as any).route_progress)} · ` : ''}
                   {station.address || station.fuel_types || 'Fuel stop'}
                 </Text>
@@ -2996,7 +3432,8 @@ export default function RouteBuilderScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={s.candidateName} numberOfLines={1}>{item.name}</Text>
                 <Text style={s.candidateMeta} numberOfLines={2}>
-                  {item.distance_from_route_mi != null ? `${fmtMi(item.distance_from_route_mi)} away · ` : ''}
+                  Day {day} · {item.distance_from_route_mi != null ? `${fmtMi(item.distance_from_route_mi)} off route · ` : ''}
+                  {routeProgressLabel((item as any).route_progress) ? `${routeProgressLabel((item as any).route_progress)} · ` : ''}
                   {item.day_fit || item.type} · {item.source_label}
                 </Text>
               </View>
@@ -3016,7 +3453,7 @@ export default function RouteBuilderScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={s.candidateName} numberOfLines={1}>{poi.name || poi.type}</Text>
                 <Text style={s.candidateMeta} numberOfLines={1}>
-                  {(poi as any).route_distance_mi != null ? `${fmtMi((poi as any).route_distance_mi)} off route · ` : ''}
+                  Day {day} · {(poi as any).route_distance_mi != null ? `${fmtMi((poi as any).route_distance_mi)} off route · ` : ''}
                   {routeProgressLabel((poi as any).route_progress) ? `${routeProgressLabel((poi as any).route_progress)} · ` : ''}
                   {poi.type.replace(/_/g, ' ')}
                 </Text>
@@ -3314,27 +3751,29 @@ export default function RouteBuilderScreen() {
               })}
             </View>
             <View style={s.loopChoiceRow}>
-              <TouchableOpacity style={[s.loopChoice, !tripLoop && s.loopChoiceActive]} onPress={() => setTripLoop(false)}>
-                <Ionicons name="arrow-forward-outline" size={15} color={!tripLoop ? C.orange : C.text3} />
-                <View style={{ flex: 1 }}>
-                  <Text style={[s.loopChoiceTitle, !tripLoop && { color: C.orange }]}>One way</Text>
-                  <Text style={s.loopChoiceText}>Start and finish can be different places.</Text>
-                </View>
-              </TouchableOpacity>
-              <TouchableOpacity style={[s.loopChoice, tripLoop && s.loopChoiceActive]} onPress={() => setTripLoop(true)}>
-                <Ionicons name="repeat-outline" size={15} color={tripLoop ? C.orange : C.text3} />
-                <View style={{ flex: 1 }}>
-                  <Text style={[s.loopChoiceTitle, tripLoop && { color: C.orange }]}>Loop</Text>
-                  <Text style={s.loopChoiceText}>Build back toward the start after the turnaround.</Text>
-                </View>
-              </TouchableOpacity>
+              {([
+                { id: 'one_way' as TripShapeMode, icon: 'arrow-forward-outline' as const, title: 'One way', text: 'Start and finish can be different places.' },
+                { id: 'loop' as TripShapeMode, icon: 'sync-outline' as const, title: 'Loop', text: 'Outbound and return use different route anchors.' },
+                { id: 'there_and_back' as TripShapeMode, icon: 'repeat-outline' as const, title: 'There and back', text: 'Return to the start and reuse camp windows by default.' },
+              ]).map(shape => {
+                const active = tripShapeMode === shape.id;
+                return (
+                  <TouchableOpacity key={shape.id} style={[s.loopChoice, active && s.loopChoiceActive]} onPress={() => applyTripShapeMode(shape.id)}>
+                    <Ionicons name={shape.icon} size={15} color={active ? C.orange : C.text3} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={[s.loopChoiceTitle, active && { color: C.orange }]}>{shape.title}</Text>
+                      <Text style={s.loopChoiceText}>{shape.text}</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
             <View style={s.routeStyleRow}>
-              {(['balanced', 'direct', 'adventure'] as const).map(style => (
+              {(['balanced', 'direct', 'wild'] as const).map(style => (
                 <TouchableOpacity key={style} style={[s.routeStyleChip, routeStyle === style && s.routeStyleChipActive]} onPress={() => setRouteStyle(style)}>
-                  <Ionicons name={style === 'direct' ? 'navigate-outline' : style === 'adventure' ? 'trail-sign-outline' : 'options-outline'} size={12} color={routeStyle === style ? C.orange : C.text3} />
+                  <Ionicons name={style === 'direct' ? 'navigate-outline' : style === 'wild' ? 'trail-sign-outline' : 'options-outline'} size={12} color={routeStyle === style ? C.orange : C.text3} />
                   <Text style={[s.routeStyleText, routeStyle === style && { color: C.orange }]}>
-                    {style === 'adventure' ? 'WILD' : style.toUpperCase()}
+                    {style.toUpperCase()}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -3365,7 +3804,27 @@ export default function RouteBuilderScreen() {
               {CAMP_CADENCE_OPTIONS.map(option => {
                 const active = campCadenceMode === option.id;
                 return (
-                  <TouchableOpacity key={option.id} style={[s.campPreferenceCard, active && s.campPreferenceCardActive]} onPress={() => setCampCadenceMode(option.id)}>
+                  <TouchableOpacity key={option.id} style={[s.campPreferenceCard, active && s.campPreferenceCardActive]} onPress={() => {
+                    setCampCadenceMode(option.id);
+                    if (option.id === 'alternate') setCampReusePolicy('same_camp_window');
+                    if (option.id === 'nightly') setCampReusePolicy('different_each_night');
+                    if (option.id === 'manual') setCampReusePolicy('manual');
+                  }}>
+                    <Ionicons name={option.icon} size={16} color={active ? C.orange : C.text3} />
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={[s.campPreferenceTitle, active && { color: C.orange }]}>{option.label}</Text>
+                      <Text style={s.campPreferenceSub} numberOfLines={1}>{option.sub}</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text style={s.setupLabel}>MULTI-NIGHT CAMPS</Text>
+            <View style={s.campPreferenceGrid}>
+              {CAMP_REUSE_OPTIONS.map(option => {
+                const active = campReusePolicy === option.id;
+                return (
+                  <TouchableOpacity key={option.id} style={[s.campPreferenceCard, active && s.campPreferenceCardActive]} onPress={() => setCampReusePolicy(option.id)}>
                     <Ionicons name={option.icon} size={16} color={active ? C.orange : C.text3} />
                     <View style={{ flex: 1, minWidth: 0 }}>
                       <Text style={[s.campPreferenceTitle, active && { color: C.orange }]}>{option.label}</Text>
@@ -3556,9 +4015,12 @@ export default function RouteBuilderScreen() {
             <Ionicons name="add" size={13} color={C.orange} />
             <Text style={s.routeTimelineAddText}>DAY</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={s.routeTimelineLoop} onPress={() => setTripLoop(v => !v)}>
-            <Ionicons name={tripLoop ? 'repeat' : 'repeat-outline'} size={13} color={tripLoop ? C.green : C.text3} />
-            <Text style={[s.routeTimelineLoopText, tripLoop && { color: C.green }]}>ROUND</Text>
+          <TouchableOpacity
+            style={s.routeTimelineLoop}
+            onPress={() => applyTripShapeMode(tripShapeMode === 'one_way' ? 'loop' : tripShapeMode === 'loop' ? 'there_and_back' : 'one_way')}
+          >
+            <Ionicons name={tripShapeMode === 'loop' ? 'sync-outline' : tripShapeMode === 'there_and_back' ? 'repeat-outline' : 'arrow-forward-outline'} size={13} color={tripLoop ? C.green : C.text3} />
+            <Text style={[s.routeTimelineLoopText, tripLoop && { color: C.green }]}>{tripShapeMode === 'loop' ? 'LOOP' : tripShapeMode === 'there_and_back' ? 'RETURN' : 'ONE WAY'}</Text>
           </TouchableOpacity>
         </View>
 
@@ -4039,7 +4501,7 @@ export default function RouteBuilderScreen() {
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[s.filterGrid, { paddingBottom: bottomSheetPad + 16 }]}>
               {PLACE_FILTER_TYPES.map(f => {
                 const active = activePlaceFilters.includes(f.id);
-                const count = offlinePlaces.filter(p => p.type === f.id).length;
+                const count = offlinePlaces.filter(p => placeMatchesFilterId(p, f.id)).length;
                 return (
                   <TouchableOpacity
                     key={f.id}
@@ -4065,14 +4527,17 @@ export default function RouteBuilderScreen() {
         place={selectedRoutePlace?.place ?? null}
         visible={!!selectedRoutePlace}
         initialStage="full"
+        routeContextLabel={selectedRoutePlaceContextLabel(selectedRoutePlace)}
         onClose={() => setSelectedRoutePlace(null)}
         onNavigate={place => fly(place.lat, place.lng, 13)}
-        onAddToRoute={addSelectedRoutePlace}
+        onAddToRoute={() => addSelectedRoutePlace(false)}
+        onPromoteToRoute={() => addSelectedRoutePlace(true)}
         addToRoutePrimary
-        addToRouteLabel={`Add to Day ${selectedRoutePlace?.day ?? activeDay} Route`}
+        addToRouteLabel={`Save Day ${selectedRoutePlace?.day ?? activeDay} Side Stop`}
+        promoteToRouteLabel="Route through"
         onRichDetailLocked={() => {
           setPaywallCode('category_unlock');
-          setPaywallMessage('Explorer unlocks rich photos, reviews, and full weekly hours for town-service places.');
+          setPaywallMessage('Provider photo, contact details, and weekly hours load on demand for 5 credits or Explorer.');
           setPaywallVisible(true);
         }}
       />

@@ -15,7 +15,7 @@ from urllib.parse import quote
 
 import httpx
 from db.store import get_cached, set_cached
-from ingestors.provider_guard import record_provider_call, runtime_cached_call
+from ingestors.provider_guard import provider_budget_available, record_provider_call, runtime_cached_call
 
 FSQ_SEARCH_URL = "https://places-api.foursquare.com/places/search"
 FSQ_DETAIL_URL = "https://places-api.foursquare.com/places/{fsq_id}"
@@ -42,6 +42,8 @@ FSQ_CATEGORY_QUERIES: dict[str, str] = {
     "medical": "pharmacy",
     "laundromat": "laundromat",
     "wifi": "wifi",
+    "parking": "parking",
+    "dump": "dump station",
 }
 
 FSQ_BUSINESS_CATEGORIES = frozenset(FSQ_CATEGORY_QUERIES)
@@ -75,7 +77,6 @@ FSQ_DETAIL_FIELDS = ",".join([
     "rating",
     "stats",
     "photos",
-    "tips",
     "description",
     "email",
     "social_media",
@@ -117,7 +118,15 @@ def foursquare_enabled() -> bool:
 
 
 def foursquare_search_enabled() -> bool:
-    return os.getenv("FOURSQUARE_SEARCH_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+    return os.getenv("FOURSQUARE_SEARCH_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
+
+
+def foursquare_passive_places_enabled() -> bool:
+    return (
+        foursquare_enabled()
+        and foursquare_search_enabled()
+        and os.getenv("FOURSQUARE_PASSIVE_PLACES_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+    )
 
 
 def foursquare_detail_enabled() -> bool:
@@ -260,7 +269,6 @@ def _normalize_place(place: dict, category: str) -> dict | None:
     category_names = _category_names(place)
     subtype = category_names[0] if category_names else ""
     normalized_category = "camp" if category in {"camp", "camps", "rv_park"} else category
-    photos = _normalize_photos(place, limit=3)
     stats = place.get("stats") if isinstance(place.get("stats"), dict) else {}
     rating = place.get("rating")
     try:
@@ -277,6 +285,7 @@ def _normalize_place(place: dict, category: str) -> dict | None:
         "type": normalized_category,
         "category": normalized_category,
         "source": "foursquare",
+        "source_tier": "paid_gated",
         "source_label": "Foursquare",
         "subtype": subtype,
         "address": _address(place.get("location") or {}),
@@ -284,11 +293,9 @@ def _normalize_place(place: dict, category: str) -> dict | None:
         "website": place.get("website") or "",
         "phone": place.get("tel") or place.get("phone") or "",
         "open_now": (place.get("hours") or {}).get("open_now"),
-        "rating": rating,
-        "rating_count": stats.get("total_ratings") or stats.get("total_tips"),
-        "photo_url": photos[0]["url"] if photos else "",
-        "photos": photos,
-        "reviews": _normalize_tips(place, limit=3),
+        "rich_detail_available": True,
+        "rich_detail_locked": True,
+        "rich_detail_reason": "paid_provider_detail",
         "summary": str(place.get("description") or "").strip(),
         "fuel_types": "gas" if category == "fuel" else ("propane" if category == "propane" else ""),
         "elevation": "",
@@ -301,6 +308,8 @@ async def _search_category(lat: float, lng: float, radius_m: int, category: str,
         log.info("Foursquare Places disabled: FOURSQUARE_API_KEY is not set")
         return []
     if _foursquare_blocked():
+        return []
+    if not provider_budget_available("foursquare", "search"):
         return []
 
     params = {
@@ -322,6 +331,7 @@ async def _search_category(lat: float, lng: float, radius_m: int, category: str,
                 duration_ms=round((asyncio.get_running_loop().time() - t0) * 1000),
                 source_action="nearby_places",
                 premium_fields=False,
+                source_tier="paid_gated",
                 key=f"{category}:{lat:.3f}:{lng:.3f}:{radius_m}",
             )
             if res.status_code in {401, 403, 429}:
@@ -343,15 +353,18 @@ async def _search_category(lat: float, lng: float, radius_m: int, category: str,
 
 
 async def get_foursquare_place_detail(fsq_id: str) -> dict | None:
-    """Return live Foursquare detail/photos/tips for a selected place.
+    """Return live Foursquare detail/contact/photo fields for a selected place.
 
     Search can return enough for a preview, but the full card should fetch a
     detail payload on demand so we do not have to persist rich Foursquare data.
+    Provider tips/reviews are intentionally excluded from user-facing payloads.
     """
     clean_id = quote(str(fsq_id or "").replace("foursquare:", "").strip(), safe="")
     if not clean_id or not foursquare_enabled() or not foursquare_detail_enabled() or not foursquare_premium_fields_enabled():
         return None
     if _foursquare_blocked():
+        return None
+    if not provider_budget_available("foursquare", "detail"):
         return None
 
     async def fetch_detail() -> dict | None:
@@ -370,6 +383,7 @@ async def get_foursquare_place_detail(fsq_id: str) -> dict | None:
                     duration_ms=round((asyncio.get_running_loop().time() - t0) * 1000),
                     source_action="place_detail",
                     premium_fields=True,
+                    source_tier="paid_gated",
                     key=clean_id,
                 )
                 if res.status_code in {400, 401, 403, 404, 429}:
@@ -391,6 +405,7 @@ async def get_foursquare_place_detail(fsq_id: str) -> dict | None:
         endpoint="detail",
         source_action="place_detail",
         premium_fields=True,
+        source_tier="paid_gated",
     )
     if not isinstance(body, dict):
         return None
@@ -398,8 +413,7 @@ async def get_foursquare_place_detail(fsq_id: str) -> dict | None:
     normalized = _normalize_place(body, "poi")
     if not normalized:
         return None
-    photos = _normalize_photos(body, limit=8)
-    reviews = _normalize_tips(body, limit=5)
+    photos = _normalize_photos(body, limit=1)
     hours = body.get("hours") if isinstance(body.get("hours"), dict) else {}
     display_hours = hours.get("display")
     if isinstance(display_hours, str):
@@ -411,7 +425,8 @@ async def get_foursquare_place_detail(fsq_id: str) -> dict | None:
     return {
         **normalized,
         "photos": photos,
-        "reviews": reviews,
+        "photo_url": photos[0]["url"] if photos else normalized.get("photo_url", ""),
+        "reviews": [],
         "hours": hours_list,
         "media_source": "foursquare" if photos else "",
         "source_footer": "Place information from Foursquare. Verify hours, access, and availability before relying on it.",
@@ -426,25 +441,42 @@ async def get_foursquare_places(
     limit_per_category: int = 12,
 ) -> list[dict]:
     """Return cached Foursquare places for selected business-like categories."""
+    if not foursquare_passive_places_enabled():
+        return []
+
     requested = sorted(
         {c for c in (categories or []) if c in FSQ_BUSINESS_CATEGORIES},
         key=lambda c: (FSQ_CATEGORY_PRIORITY.get(c, 50), c),
     )
-    if not requested or not foursquare_enabled() or not foursquare_search_enabled():
+    if not requested:
         return []
 
-    merged: list[dict] = []
-    seen: set[str] = set()
-    batches = await asyncio.gather(
-        *(_search_category(lat, lng, radius_m, category, min(limit_per_category, 10)) for category in requested[:6]),
-        return_exceptions=True,
+    async def fetch_pack() -> list[dict]:
+        merged: list[dict] = []
+        seen: set[str] = set()
+        batches = await asyncio.gather(
+            *(_search_category(lat, lng, radius_m, category, min(limit_per_category, 10)) for category in requested[:6]),
+            return_exceptions=True,
+        )
+        for batch in batches:
+            if not isinstance(batch, list):
+                continue
+            for place in batch:
+                key = str(place.get("id") or "")
+                if key and key not in seen:
+                    seen.add(key)
+                    merged.append(place)
+        return merged
+
+    category_key = ",".join(requested)
+    cache_key = f"foursquare_search:{lat:.3f}:{lng:.3f}:{max(1000, min(int(radius_m), 72000))}:{category_key}:{limit_per_category}"
+    return await runtime_cached_call(
+        cache_key,
+        20 * 60,
+        fetch_pack,
+        provider="foursquare",
+        endpoint="search",
+        source_action="nearby_places",
+        source_tier="paid_gated",
+        cache_empty=False,
     )
-    for batch in batches:
-        if not isinstance(batch, list):
-            continue
-        for place in batch:
-            key = str(place.get("id") or "")
-            if key and key not in seen:
-                seen.add(key)
-                merged.append(place)
-    return merged

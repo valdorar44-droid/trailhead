@@ -17,9 +17,9 @@ import { PMTiles } from "pmtiles";
 // Each is a small focused byte-range read — no full file download needed.
 
 class R2Source {
-  constructor(bucket) {
+  constructor(bucket, key = "us.pmtiles") {
     this.bucket = bucket;
-    this._key = "us.pmtiles";
+    this._key = key;
   }
 
   getKey() {
@@ -47,11 +47,15 @@ class R2Source {
 // The PMTiles library caches the parsed root + leaf directories internally,
 // so warm requests skip all but the final tile-data read from R2.
 const _pmCache = new WeakMap();
-function getPMTiles(env) {
+function getPMTiles(env, key = "us.pmtiles") {
   if (!_pmCache.has(env.TILES_BUCKET)) {
-    _pmCache.set(env.TILES_BUCKET, new PMTiles(new R2Source(env.TILES_BUCKET)));
+    _pmCache.set(env.TILES_BUCKET, new Map());
   }
-  return _pmCache.get(env.TILES_BUCKET);
+  const bucketCache = _pmCache.get(env.TILES_BUCKET);
+  if (!bucketCache.has(key)) {
+    bucketCache.set(key, new PMTiles(new R2Source(env.TILES_BUCKET, key)));
+  }
+  return bucketCache.get(key);
 }
 
 function vectorTileHeaders(source, contentLength = null) {
@@ -276,6 +280,36 @@ export default {
       return new Response(null, { status: 204, headers: { "Access-Control-Allow-Origin": "*" } });
     }
 
+    // ── Safe Water hydro vector tiles ────────────────────────────────────────
+    // Hydro PMTiles are separate from land contours. They carry bathymetry
+    // awareness layers only and are not certified navigation data.
+    const hydroTileMatch = path.match(/^\/api\/hydro\/tiles\/([a-z0-9-]{2,24})\/(\d+)\/(\d+)\/(\d+)\.pbf$/);
+    if (hydroTileMatch) {
+      const [, region, zRaw, xRaw, yRaw] = hydroTileMatch;
+      const [z, x, y] = [zRaw, xRaw, yRaw].map(Number);
+      const key = `hydro/${region}.pmtiles`;
+      const cacheKey = new Request(`https://tiles.gettrailhead.app/v1${path}`);
+      const cfCache = caches.default;
+      const cached = await cfCache.match(cacheKey);
+      if (cached) return cached;
+      try {
+        const meta = await env.TILES_BUCKET.head(key).catch(() => null);
+        if (!meta) return new Response(null, { status: 204, headers: { "Access-Control-Allow-Origin": "*" } });
+        const pm = getPMTiles(env, key);
+        const tile = await pm.getZxy(z, x, y);
+        if (tile && tile.data && (tile.data.byteLength > 0 || tile.data.length > 0)) {
+          const resp = new Response(tile.data, {
+            headers: vectorTileHeaders(`R2:${key}`, String(tile.data.byteLength ?? tile.data.length)),
+          });
+          ctx.waitUntil(cfCache.put(cacheKey, resp.clone()));
+          return resp;
+        }
+      } catch (e) {
+        console.error(`Hydro PMTiles error ${region} z=${z}/${x}/${y}:`, e.message);
+      }
+      return new Response(null, { status: 204, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+
     // ── Static assets (MapLibre GL JS + CSS) — cached at edge for 7 days ────
     if (path.startsWith("/assets/")) {
       const cacheKey = new Request(`https://tiles.gettrailhead.app${path}`);
@@ -455,6 +489,62 @@ export default {
       };
       if (contentRange) headers['Content-Range'] = contentRange;
 
+      return new Response(obj.body, { status, headers });
+    }
+
+    // ── Safe Water hydro PMTiles downloads ──────────────────────────────────
+    if (path === '/api/hydro/manifest.json') {
+      const manifestObj = await env.TILES_BUCKET.get('hydro/manifest.json').catch(() => null);
+      if (manifestObj) {
+        return new Response(manifestObj.body, {
+          headers: {
+            'Content-Type':                'application/json',
+            'Access-Control-Allow-Origin': '*',
+            'Cache-Control':               'public, max-age=300',
+          },
+        });
+      }
+      return Response.json({ version: 1, mode: 'safe_water_awareness', packs: {}, regions: [] }, {
+        headers: { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=60' },
+      });
+    }
+
+    const hydroPackMatch = path.match(/^\/api\/hydro\/([a-z0-9-]{2,24}\.pmtiles)$/);
+    if (hydroPackMatch) {
+      const fileName = hydroPackMatch[1];
+      const key = `hydro/${fileName}`;
+      const meta = await env.TILES_BUCKET.head(key).catch(() => null);
+      if (!meta) return new Response('Hydro pack not found', { status: 404, headers: { 'Access-Control-Allow-Origin': '*' } });
+
+      const totalSize = meta.size;
+      const rangeHeader = request.headers.get('Range');
+      let r2opts = {};
+      let status = 200;
+      let contentRange = null;
+      let contentLength = totalSize;
+      if (rangeHeader) {
+        const m = rangeHeader.match(/bytes=(\d+)-(\d*)/);
+        if (m) {
+          const offset = parseInt(m[1]);
+          const endByte = m[2] ? parseInt(m[2]) : totalSize - 1;
+          const length = endByte - offset + 1;
+          r2opts = { range: { offset, length } };
+          contentRange = `bytes ${offset}-${endByte}/${totalSize}`;
+          contentLength = length;
+          status = 206;
+        }
+      }
+
+      const obj = await env.TILES_BUCKET.get(key, r2opts).catch(() => null);
+      if (!obj) return new Response('Hydro pack not found', { status: 404, headers: { 'Access-Control-Allow-Origin': '*' } });
+      const headers = {
+        'Content-Type':                'application/vnd.pmtiles',
+        'Accept-Ranges':               'bytes',
+        'Content-Length':              String(contentLength),
+        'Access-Control-Allow-Origin': '*',
+        'Cache-Control':               'no-cache',
+      };
+      if (contentRange) headers['Content-Range'] = contentRange;
       return new Response(obj.body, { status, headers });
     }
 

@@ -1,6 +1,6 @@
 """SQLite WAL store. Schema + queries."""
 from __future__ import annotations
-import sqlite3, json, time, math, hashlib, random, secrets
+import sqlite3, json, time, math, hashlib, random, secrets, re
 from config.settings import settings
 
 # Report expiry by type (seconds)
@@ -300,6 +300,82 @@ def init_db():
             body        TEXT NOT NULL,
             created_at  INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS places (
+            trailhead_place_id TEXT PRIMARY KEY,
+            source             TEXT NOT NULL,
+            source_priority    INTEGER NOT NULL DEFAULT 50,
+            source_label       TEXT,
+            source_place_id    TEXT,
+            name               TEXT NOT NULL,
+            lat                REAL NOT NULL,
+            lng                REAL NOT NULL,
+            category           TEXT,
+            subtype            TEXT,
+            official_url       TEXT,
+            provider_ids       TEXT NOT NULL DEFAULT '{}',
+            provenance         TEXT NOT NULL DEFAULT '{}',
+            hero_photo_url     TEXT,
+            display_metadata   TEXT NOT NULL DEFAULT '{}',
+            last_seen          INTEGER NOT NULL,
+            created_at         INTEGER NOT NULL,
+            updated_at         INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS place_comments (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            trailhead_place_id  TEXT NOT NULL,
+            user_id             INTEGER NOT NULL REFERENCES users(id),
+            username            TEXT NOT NULL,
+            body                TEXT NOT NULL,
+            status              TEXT NOT NULL DEFAULT 'visible',
+            created_at          INTEGER NOT NULL,
+            FOREIGN KEY (trailhead_place_id) REFERENCES places(trailhead_place_id)
+        );
+        CREATE TABLE IF NOT EXISTS place_photos (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            trailhead_place_id  TEXT NOT NULL,
+            user_id             INTEGER NOT NULL REFERENCES users(id),
+            username            TEXT NOT NULL,
+            comment_id          INTEGER,
+            object_key          TEXT,
+            url                 TEXT,
+            caption             TEXT,
+            source              TEXT NOT NULL DEFAULT 'user',
+            status              TEXT NOT NULL DEFAULT 'visible',
+            content_type        TEXT NOT NULL DEFAULT 'image/jpeg',
+            photo_data          TEXT,
+            credits_awarded     INTEGER NOT NULL DEFAULT 0,
+            created_at          INTEGER NOT NULL,
+            FOREIGN KEY (trailhead_place_id) REFERENCES places(trailhead_place_id),
+            FOREIGN KEY (comment_id) REFERENCES place_comments(id)
+        );
+        CREATE TABLE IF NOT EXISTS place_edit_suggestions (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            trailhead_place_id  TEXT NOT NULL,
+            place_name          TEXT NOT NULL,
+            user_id             INTEGER,
+            username            TEXT,
+            field               TEXT NOT NULL,
+            value               TEXT NOT NULL,
+            note                TEXT,
+            status              TEXT NOT NULL DEFAULT 'pending',
+            created_at          INTEGER NOT NULL,
+            FOREIGN KEY (trailhead_place_id) REFERENCES places(trailhead_place_id)
+        );
+        CREATE TABLE IF NOT EXISTS place_reservation_alerts (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            trailhead_place_id  TEXT NOT NULL,
+            user_id             INTEGER NOT NULL REFERENCES users(id),
+            start_date          TEXT,
+            end_date            TEXT,
+            party_size          INTEGER,
+            source              TEXT,
+            booking_url         TEXT,
+            status              TEXT NOT NULL DEFAULT 'active',
+            created_at          INTEGER NOT NULL,
+            updated_at          INTEGER NOT NULL,
+            UNIQUE(trailhead_place_id, user_id, start_date, end_date),
+            FOREIGN KEY (trailhead_place_id) REFERENCES places(trailhead_place_id)
+        );
         CREATE TABLE IF NOT EXISTS trail_field_reports (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
             trail_id         TEXT NOT NULL,
@@ -433,6 +509,12 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_trail_field_reports_trail ON trail_field_reports(trail_id, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_trail_profiles_geo ON trail_profiles(lat, lng)",
         "CREATE INDEX IF NOT EXISTS idx_trail_edit_suggestions_status ON trail_edit_suggestions(status, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_places_geo ON places(lat, lng)",
+        "CREATE INDEX IF NOT EXISTS idx_places_source ON places(source, source_place_id)",
+        "CREATE INDEX IF NOT EXISTS idx_place_comments_place ON place_comments(trailhead_place_id, status, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_place_photos_place ON place_photos(trailhead_place_id, status, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_place_edit_suggestions_status ON place_edit_suggestions(status, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_place_reservation_alerts_user ON place_reservation_alerts(user_id, status, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_fullness_geo ON camp_fullness(lat, lng, status, expires_at)",
         "CREATE INDEX IF NOT EXISTS idx_credits_user ON credit_transactions(user_id, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_analytics_session ON analytics_events(session_id, event_type)",
@@ -584,6 +666,88 @@ def init_db():
             body        TEXT NOT NULL,
             created_at  INTEGER NOT NULL
         )""",
+        """CREATE TABLE IF NOT EXISTS places (
+            trailhead_place_id TEXT PRIMARY KEY,
+            source             TEXT NOT NULL,
+            source_priority    INTEGER NOT NULL DEFAULT 50,
+            source_label       TEXT,
+            source_place_id    TEXT,
+            name               TEXT NOT NULL,
+            lat                REAL NOT NULL,
+            lng                REAL NOT NULL,
+            category           TEXT,
+            subtype            TEXT,
+            official_url       TEXT,
+            provider_ids       TEXT NOT NULL DEFAULT '{}',
+            provenance         TEXT NOT NULL DEFAULT '{}',
+            hero_photo_url     TEXT,
+            display_metadata   TEXT NOT NULL DEFAULT '{}',
+            last_seen          INTEGER NOT NULL,
+            created_at         INTEGER NOT NULL,
+            updated_at         INTEGER NOT NULL
+        )""",
+        """CREATE TABLE IF NOT EXISTS place_comments (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            trailhead_place_id  TEXT NOT NULL,
+            user_id             INTEGER NOT NULL REFERENCES users(id),
+            username            TEXT NOT NULL,
+            body                TEXT NOT NULL,
+            status              TEXT NOT NULL DEFAULT 'visible',
+            created_at          INTEGER NOT NULL,
+            FOREIGN KEY (trailhead_place_id) REFERENCES places(trailhead_place_id)
+        )""",
+        """CREATE TABLE IF NOT EXISTS place_photos (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            trailhead_place_id  TEXT NOT NULL,
+            user_id             INTEGER NOT NULL REFERENCES users(id),
+            username            TEXT NOT NULL,
+            comment_id          INTEGER,
+            object_key          TEXT,
+            url                 TEXT,
+            caption             TEXT,
+            source              TEXT NOT NULL DEFAULT 'user',
+            status              TEXT NOT NULL DEFAULT 'visible',
+            content_type        TEXT NOT NULL DEFAULT 'image/jpeg',
+            photo_data          TEXT,
+            credits_awarded     INTEGER NOT NULL DEFAULT 0,
+            created_at          INTEGER NOT NULL,
+            FOREIGN KEY (trailhead_place_id) REFERENCES places(trailhead_place_id),
+            FOREIGN KEY (comment_id) REFERENCES place_comments(id)
+        )""",
+        """CREATE TABLE IF NOT EXISTS place_edit_suggestions (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            trailhead_place_id  TEXT NOT NULL,
+            place_name          TEXT NOT NULL,
+            user_id             INTEGER,
+            username            TEXT,
+            field               TEXT NOT NULL,
+            value               TEXT NOT NULL,
+            note                TEXT,
+            status              TEXT NOT NULL DEFAULT 'pending',
+            created_at          INTEGER NOT NULL,
+            FOREIGN KEY (trailhead_place_id) REFERENCES places(trailhead_place_id)
+        )""",
+        """CREATE TABLE IF NOT EXISTS place_reservation_alerts (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            trailhead_place_id  TEXT NOT NULL,
+            user_id             INTEGER NOT NULL REFERENCES users(id),
+            start_date          TEXT,
+            end_date            TEXT,
+            party_size          INTEGER,
+            source              TEXT,
+            booking_url         TEXT,
+            status              TEXT NOT NULL DEFAULT 'active',
+            created_at          INTEGER NOT NULL,
+            updated_at          INTEGER NOT NULL,
+            UNIQUE(trailhead_place_id, user_id, start_date, end_date),
+            FOREIGN KEY (trailhead_place_id) REFERENCES places(trailhead_place_id)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_places_geo ON places(lat, lng)",
+        "CREATE INDEX IF NOT EXISTS idx_places_source ON places(source, source_place_id)",
+        "CREATE INDEX IF NOT EXISTS idx_place_comments_place ON place_comments(trailhead_place_id, status, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_place_photos_place ON place_photos(trailhead_place_id, status, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_place_edit_suggestions_status ON place_edit_suggestions(status, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_place_reservation_alerts_user ON place_reservation_alerts(user_id, status, created_at)",
         """CREATE TABLE IF NOT EXISTS trail_field_reports (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
             trail_id         TEXT NOT NULL,
@@ -1176,6 +1340,9 @@ def _delete_user_full(user_id: int) -> None:
     db.execute("DELETE FROM report_interactions WHERE user_id=?",    (user_id,))
     db.execute("DELETE FROM camp_field_reports  WHERE user_id=?",    (user_id,))
     db.execute("DELETE FROM camp_comments       WHERE user_id=?",    (user_id,))
+    db.execute("DELETE FROM place_reservation_alerts WHERE user_id=?", (user_id,))
+    db.execute("DELETE FROM place_photos        WHERE user_id=?",    (user_id,))
+    db.execute("DELETE FROM place_comments      WHERE user_id=?",    (user_id,))
     db.execute("DELETE FROM trail_field_reports WHERE user_id=?",    (user_id,))
     db.execute("DELETE FROM camp_fullness_votes WHERE user_id=?",    (user_id,))
     db.execute("DELETE FROM camp_fullness       WHERE reporter_id=?", (user_id,))
@@ -1223,6 +1390,10 @@ def _contest_source_type(reason: str) -> str | None:
         return "camp_field_report"
     if r.startswith("Trail report for"):
         return "trail_field_report"
+    if r.startswith("Place photo:"):
+        return "place_photo"
+    if r.startswith("Place edit suggestion:"):
+        return "place_edit_suggestion"
     if r.startswith("Camp edit suggestion:"):
         return "camp_edit"
     if r.startswith("Reported camp full:") or r.startswith("Confirmed camp full:") or r.startswith("Camp report confirmed:") or r.startswith("Cleared camp full report:"):
@@ -2029,8 +2200,9 @@ def _contributor_stats(db: sqlite3.Connection, user_id: int) -> tuple[dict, list
     photo_reports = db.execute(
         """SELECT
               (SELECT COUNT(*) FROM camp_field_reports WHERE user_id=? AND COALESCE(photo_data,'')!='') +
-              (SELECT COUNT(*) FROM trail_field_reports WHERE user_id=? AND COALESCE(photo_data,'')!='') AS c""",
-        (user_id, user_id),
+              (SELECT COUNT(*) FROM trail_field_reports WHERE user_id=? AND COALESCE(photo_data,'')!='') +
+              (SELECT COUNT(*) FROM place_photos WHERE user_id=? AND status!='removed') AS c""",
+        (user_id, user_id, user_id),
     ).fetchone()["c"]
     report_rows = int(db.execute("SELECT COUNT(*) AS c FROM reports WHERE user_id=?", (user_id,)).fetchone()["c"])
     pin_rows = int(db.execute("SELECT COUNT(*) AS c FROM community_pins WHERE user_id=?", (user_id,)).fetchone()["c"])
@@ -2042,7 +2214,7 @@ def _contributor_stats(db: sqlite3.Connection, user_id: int) -> tuple[dict, list
         "trail_reports": trail_reports,
         "confirmations": int(counts.get("report_confirmation", 0)),
         "photos": int(photo_reports or 0),
-        "edits": int(counts.get("camp_edit_suggestion", 0)),
+        "edits": int(counts.get("camp_edit_suggestion", 0) + counts.get("place_edit_suggestion", 0)),
         "camp_status": int(counts.get("camp_status", 0)),
         "signal_water_road": int(counts.get("report_confirmation", 0) + counts.get("report_upvote", 0)),
     }
@@ -2053,6 +2225,8 @@ def _contributor_stats(db: sqlite3.Connection, user_id: int) -> tuple[dict, list
         "report_upvote": "Helpful votes",
         "streak_bonus": "Streak bonuses",
         "camp_edit_suggestion": "Camp edits",
+        "place_edit_suggestion": "Place edits",
+        "place_photo": "Place photos",
         "camp_status": "Camp status updates",
     }
     recent = [
@@ -2894,6 +3068,491 @@ def get_camp_comments(camp_id: str, limit: int = 50) -> list[dict]:
            ORDER BY created_at DESC LIMIT ?""",
         (camp_id, limit),
     ).fetchall()
+    db.close()
+    return [dict(r) for r in rows]
+
+
+# ── Canonical places / all-pin community layer ───────────────────────────────
+
+PLACE_PHOTO_CREDITS = 5
+PLACE_EDIT_CREDITS = 3
+OFFICIAL_PLACE_SOURCES = {"nps", "ridb", "recreation.gov", "blm", "usfs", "fs", "usda"}
+PAID_PROVIDER_SOURCES = {"google", "google_places", "foursquare", "fsq"}
+
+PLACE_METADATA_KEYS = {
+    "summary", "description", "address", "phone", "website", "url", "hours",
+    "amenities", "activities", "access_note", "access_notes", "reservation_notes",
+    "booking_url", "reservable", "rating", "rating_count", "source_badge",
+    "source_freshness", "verified_source", "land_type", "cost",
+}
+
+def _place_source_clean(value: object) -> str:
+    source = str(value or "").strip().lower()
+    source = source.replace("google places", "google").replace("recreationgov", "recreation.gov")
+    source = re.sub(r"[^a-z0-9_.:-]+", "_", source)[:60]
+    return source or "community"
+
+def _place_source_priority(source: str, source_label: str | None = None) -> int:
+    source = _place_source_clean(source)
+    label = str(source_label or "").lower()
+    if source in {"trailhead", "admin", "community"} or "trailhead" in label:
+        return 0
+    if source in OFFICIAL_PLACE_SOURCES or any(token in label for token in ("national park service", "recreation.gov", "ridb", "blm", "forest service", "usfs")):
+        return 10
+    if source == "geoapify" or "geoapify" in label:
+        return 30
+    if source in {"osm", "openstreetmap", "offline"} or "openstreetmap" in label:
+        return 40
+    if source in PAID_PROVIDER_SOURCES or any(token in label for token in ("google", "foursquare")):
+        return 90
+    return 50
+
+def _place_normalized_name(name: str) -> str:
+    clean = re.sub(r"\s+", " ", str(name or "").strip().lower())
+    clean = re.sub(r"\([^)]*\)", " ", clean)
+    clean = re.sub(r"[^a-z0-9]+", "-", clean).strip("-")
+    return clean[:80] or "place"
+
+def _place_provider_id(payload: dict, source: str) -> str:
+    candidates = [
+        payload.get("source_place_id"),
+        payload.get("provider_place_id"),
+        payload.get("place_id"),
+        payload.get("facility_id"),
+        payload.get("parkCode"),
+        payload.get("park_code"),
+        payload.get("id"),
+    ]
+    for value in candidates:
+        raw = str(value or "").strip()
+        if not raw or raw.startswith("thp_"):
+            continue
+        if raw.startswith(f"{source}:"):
+            raw = raw[len(source) + 1:]
+        return re.sub(r"[^a-zA-Z0-9_.:-]+", "_", raw)[:180]
+    return ""
+
+def canonical_place_id(payload: dict) -> str:
+    source = _place_source_clean(payload.get("source") or payload.get("attribution") or payload.get("source_label"))
+    source_place_id = _place_provider_id(payload, source)
+    if source_place_id:
+        stable = f"{source}:{source_place_id}"
+    else:
+        name = _place_normalized_name(str(payload.get("name") or payload.get("title") or "place"))
+        try:
+            lat = round(float(payload.get("lat")), 5)
+            lng = round(float(payload.get("lng")), 5)
+        except Exception:
+            lat = lng = 0.0
+        stable = f"{source}:{name}:{lat:.5f}:{lng:.5f}"
+    return "thp_" + hashlib.sha1(stable.encode("utf-8")).hexdigest()[:24]
+
+def _place_json(raw: object, fallback):
+    if raw in (None, ""):
+        return fallback
+    if isinstance(raw, (dict, list)):
+        return raw
+    try:
+        return json.loads(str(raw))
+    except Exception:
+        return fallback
+
+def _decode_place(row: sqlite3.Row | dict) -> dict:
+    d = dict(row)
+    d["provider_ids"] = _place_json(d.get("provider_ids"), {})
+    d["provenance"] = _place_json(d.get("provenance"), {})
+    d["display_metadata"] = _place_json(d.get("display_metadata"), {})
+    for key, value in list(d["display_metadata"].items()):
+        d.setdefault(key, value)
+    return d
+
+def _place_public_photos(db: sqlite3.Connection, trailhead_place_id: str, limit: int = 24) -> list[dict]:
+    rows = db.execute(
+        """SELECT id,username,comment_id,url,caption,source,status,credits_awarded,created_at
+           FROM place_photos
+           WHERE trailhead_place_id=? AND status='visible'
+           ORDER BY created_at ASC LIMIT ?""",
+        (trailhead_place_id, limit),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+def _place_public_comments(db: sqlite3.Connection, trailhead_place_id: str, limit: int = 50) -> list[dict]:
+    rows = db.execute(
+        """SELECT c.id,c.username,c.body,c.created_at,
+                  COALESCE(
+                    json_group_array(
+                      CASE WHEN p.id IS NOT NULL THEN json_object('id',p.id,'url',p.url,'caption',p.caption,'source',p.source,'created_at',p.created_at) END
+                    ),
+                    '[]'
+                  ) AS photos_json
+           FROM place_comments c
+           LEFT JOIN place_photos p ON p.comment_id=c.id AND p.status='visible'
+           WHERE c.trailhead_place_id=? AND c.status='visible'
+           GROUP BY c.id
+           ORDER BY c.created_at DESC LIMIT ?""",
+        (trailhead_place_id, limit),
+    ).fetchall()
+    comments: list[dict] = []
+    for row in rows:
+        d = dict(row)
+        raw = _place_json(d.pop("photos_json", "[]"), [])
+        d["photos"] = [p for p in raw if isinstance(p, dict) and p.get("id")]
+        comments.append(d)
+    return comments
+
+def upsert_canonical_place(payload: dict) -> dict:
+    name = re.sub(r"\s+", " ", str(payload.get("name") or payload.get("title") or "").strip())[:220]
+    if not name:
+        raise ValueError("place name is required")
+    try:
+        lat = float(payload.get("lat"))
+        lng = float(payload.get("lng"))
+    except Exception as exc:
+        raise ValueError("place lat/lng are required") from exc
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        raise ValueError("place lat/lng out of range")
+
+    source = _place_source_clean(payload.get("source") or payload.get("attribution") or payload.get("source_label"))
+    source_label = str(payload.get("source_label") or payload.get("verified_source") or payload.get("attribution") or source).strip()[:180]
+    source_place_id = _place_provider_id(payload, source)
+    priority = _place_source_priority(source, source_label)
+    place_id = canonical_place_id(payload)
+    now = int(time.time())
+    category = str(payload.get("category") or payload.get("type") or payload.get("kind") or "place").strip()[:80]
+    subtype = str(payload.get("subtype") or payload.get("land_type") or "").strip()[:120]
+    paid_source = source in PAID_PROVIDER_SOURCES
+    official_url = ""
+    if not paid_source:
+        official_url = str(payload.get("official_url") or payload.get("url") or payload.get("website") or "").strip()[:900]
+
+    incoming_provider_ids = {}
+    if source_place_id:
+        incoming_provider_ids[source] = source_place_id
+    for key in ("google_place_id", "foursquare_id", "ridb_id", "nps_id", "osm_id", "geoapify_place_id", "blm_id", "usfs_id"):
+        value = str(payload.get(key) or "").strip()
+        if value:
+            incoming_provider_ids[key.replace("_place_id", "").replace("_id", "")] = value[:180]
+
+    incoming_meta: dict = {}
+    if not paid_source:
+        for key in PLACE_METADATA_KEYS:
+            value = payload.get(key)
+            if value not in (None, "", []):
+                incoming_meta[key] = value
+    incoming_hero = "" if paid_source else str(payload.get("hero_photo_url") or payload.get("photo_url") or "").strip()[:1200]
+    photos = payload.get("photos")
+    if not incoming_hero and not paid_source and isinstance(photos, list) and photos:
+        first = photos[0]
+        if isinstance(first, dict):
+            incoming_hero = str(first.get("url") or "").strip()[:1200]
+        else:
+            incoming_hero = str(first or "").strip()[:1200]
+
+    provenance = {
+        "source": source,
+        "source_label": source_label,
+        "source_place_id": source_place_id,
+        "priority": priority,
+        "last_seen": now,
+    }
+
+    db = _conn()
+    existing = db.execute("SELECT * FROM places WHERE trailhead_place_id=?", (place_id,)).fetchone()
+    if existing:
+        current = _decode_place(existing)
+        current_priority = int(current.get("source_priority") or 50)
+        incoming_wins = priority <= current_priority
+        provider_ids = {**(current.get("provider_ids") or {}), **incoming_provider_ids}
+        metadata = dict(current.get("display_metadata") or {})
+        if incoming_wins:
+            metadata.update(incoming_meta)
+        else:
+            for key, value in incoming_meta.items():
+                metadata.setdefault(key, value)
+        existing_provenance = current.get("provenance") or {}
+        sources = dict(existing_provenance.get("sources") or {})
+        sources[source] = provenance
+        merged_provenance = {**existing_provenance, "sources": sources, "last_seen": now}
+        db.execute(
+            """UPDATE places SET
+                 source=?, source_priority=?, source_label=?, source_place_id=?,
+                 name=?, lat=?, lng=?, category=?, subtype=?,
+                 official_url=COALESCE(NULLIF(?,''), official_url),
+                 provider_ids=?, provenance=?, hero_photo_url=COALESCE(NULLIF(?,''), hero_photo_url),
+                 display_metadata=?, last_seen=?, updated_at=?
+               WHERE trailhead_place_id=?""",
+            (
+                source if incoming_wins else current["source"],
+                priority if incoming_wins else current_priority,
+                source_label if incoming_wins else current.get("source_label"),
+                source_place_id if incoming_wins else current.get("source_place_id"),
+                name if incoming_wins else current["name"],
+                lat if incoming_wins else current["lat"],
+                lng if incoming_wins else current["lng"],
+                category if incoming_wins else current.get("category"),
+                subtype if incoming_wins else current.get("subtype"),
+                official_url,
+                json.dumps(provider_ids),
+                json.dumps(merged_provenance),
+                incoming_hero,
+                json.dumps(metadata),
+                now,
+                now,
+                place_id,
+            ),
+        )
+    else:
+        db.execute(
+            """INSERT INTO places
+               (trailhead_place_id,source,source_priority,source_label,source_place_id,name,lat,lng,
+                category,subtype,official_url,provider_ids,provenance,hero_photo_url,display_metadata,
+                last_seen,created_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                place_id, source, priority, source_label, source_place_id, name, lat, lng,
+                category, subtype, official_url, json.dumps(incoming_provider_ids),
+                json.dumps({"sources": {source: provenance}, "last_seen": now}),
+                incoming_hero or None, json.dumps(incoming_meta), now, now, now,
+            ),
+        )
+    row = db.execute("SELECT * FROM places WHERE trailhead_place_id=?", (place_id,)).fetchone()
+    db.commit()
+    photos_out = _place_public_photos(db, place_id, 24)
+    comments_out = _place_public_comments(db, place_id, 50)
+    db.close()
+    decoded = _decode_place(row)
+    decoded["photos"] = photos_out
+    decoded["comments"] = comments_out
+    if not decoded.get("hero_photo_url") and photos_out:
+        decoded["hero_photo_url"] = photos_out[0].get("url")
+        decoded["hero_photo_source"] = "community"
+    return decoded
+
+def get_place(trailhead_place_id: str) -> dict | None:
+    db = _conn()
+    row = db.execute("SELECT * FROM places WHERE trailhead_place_id=?", (trailhead_place_id,)).fetchone()
+    if not row:
+        db.close()
+        return None
+    place = _decode_place(row)
+    photos = _place_public_photos(db, trailhead_place_id, 24)
+    comments = _place_public_comments(db, trailhead_place_id, 50)
+    if not place.get("hero_photo_url") and photos:
+        place["hero_photo_url"] = photos[0].get("url")
+        place["hero_photo_source"] = "community"
+    place["photos"] = photos
+    place["comments"] = comments
+    db.close()
+    return place
+
+def add_place_comment(trailhead_place_id: str, user_id: int, username: str, body: str) -> dict:
+    now = int(time.time())
+    db = _conn()
+    cur = db.execute(
+        """INSERT INTO place_comments (trailhead_place_id,user_id,username,body,status,created_at)
+           VALUES (?,?,?,?, 'visible', ?)""",
+        (trailhead_place_id, user_id, username, body[:1200], now),
+    )
+    db.commit()
+    comment = db.execute(
+        "SELECT id,username,body,created_at FROM place_comments WHERE id=?",
+        (cur.lastrowid,),
+    ).fetchone()
+    db.close()
+    return dict(comment) if comment else {"id": cur.lastrowid, "created_at": now}
+
+def get_place_comments(trailhead_place_id: str, limit: int = 50) -> list[dict]:
+    db = _conn()
+    comments = _place_public_comments(db, trailhead_place_id, limit)
+    db.close()
+    return comments
+
+def add_place_photo(
+    trailhead_place_id: str,
+    user_id: int,
+    username: str,
+    *,
+    comment_id: int | None = None,
+    object_key: str | None = None,
+    url: str | None = None,
+    caption: str | None = None,
+    photo_data: str | None = None,
+    content_type: str = "image/jpeg",
+) -> dict:
+    now = int(time.time())
+    db = _conn()
+    cur = db.execute(
+        """INSERT INTO place_photos
+           (trailhead_place_id,user_id,username,comment_id,object_key,url,caption,source,status,content_type,photo_data,credits_awarded,created_at)
+           VALUES (?,?,?,?,?,?,?,?, 'visible', ?, ?, ?, ?)""",
+        (
+            trailhead_place_id, user_id, username, comment_id, object_key, url,
+            (caption or "")[:500] or None, "user", content_type[:120], photo_data,
+            PLACE_PHOTO_CREDITS, now,
+        ),
+    )
+    photo_id = cur.lastrowid
+    if not url:
+        url = f"/api/places/photos/{photo_id}/image"
+        db.execute("UPDATE place_photos SET url=? WHERE id=?", (url, photo_id))
+    place = db.execute("SELECT name FROM places WHERE trailhead_place_id=?", (trailhead_place_id,)).fetchone()
+    label = (place["name"] if place else trailhead_place_id)[:80]
+    db.execute("UPDATE users SET credits=credits+? WHERE id=?", (PLACE_PHOTO_CREDITS, user_id))
+    db.execute(
+        "INSERT INTO credit_transactions (user_id,amount,reason,created_at) VALUES (?,?,?,?)",
+        (user_id, PLACE_PHOTO_CREDITS, f"Place photo: {label}", now),
+    )
+    _record_contest_event_db(db, user_id, PLACE_PHOTO_CREDITS, f"Place photo: {label}", "place_photo", str(photo_id), now)
+    row = db.execute(
+        """SELECT id,trailhead_place_id,username,comment_id,object_key,url,caption,source,status,credits_awarded,created_at
+           FROM place_photos WHERE id=?""",
+        (photo_id,),
+    ).fetchone()
+    db.commit(); db.close()
+    return dict(row)
+
+def get_place_photo_image(photo_id: int) -> dict | None:
+    db = _conn()
+    row = db.execute(
+        "SELECT id,content_type,photo_data,status FROM place_photos WHERE id=?",
+        (photo_id,),
+    ).fetchone()
+    db.close()
+    return dict(row) if row and row["status"] == "visible" and row["photo_data"] else None
+
+def get_place_photos(trailhead_place_id: str, limit: int = 50) -> list[dict]:
+    db = _conn()
+    photos = _place_public_photos(db, trailhead_place_id, limit)
+    db.close()
+    return photos
+
+def add_place_edit_suggestion(trailhead_place_id: str, place_name: str, user_id: int | None,
+                              username: str | None, field: str, value: str,
+                              note: str | None = None) -> dict:
+    now = int(time.time())
+    db = _conn()
+    cur = db.execute(
+        """INSERT INTO place_edit_suggestions
+           (trailhead_place_id,place_name,user_id,username,field,value,note,status,created_at)
+           VALUES (?,?,?,?,?,?,?,?,?)""",
+        (trailhead_place_id, place_name[:180], user_id, username, field[:80], value[:8000], note[:800] if note else None, "pending", now),
+    )
+    suggestion_id = cur.lastrowid
+    if user_id:
+        db.execute("UPDATE users SET credits=credits+? WHERE id=?", (PLACE_EDIT_CREDITS, user_id))
+        db.execute(
+            "INSERT INTO credit_transactions (user_id,amount,reason,created_at) VALUES (?,?,?,?)",
+            (user_id, PLACE_EDIT_CREDITS, f"Place edit suggestion: {place_name[:80]}", now),
+        )
+        _record_contest_event_db(db, user_id, PLACE_EDIT_CREDITS, f"Place edit suggestion: {place_name[:80]}", "place_edit_suggestion", str(suggestion_id), now)
+    db.commit(); db.close()
+    return {"id": suggestion_id, "status": "pending", "credits_earned": PLACE_EDIT_CREDITS if user_id else 0}
+
+def get_place_edit_suggestions(status: str | None = "pending", limit: int = 200) -> list[dict]:
+    db = _conn()
+    if status:
+        rows = db.execute(
+            "SELECT * FROM place_edit_suggestions WHERE status=? ORDER BY created_at DESC LIMIT ?",
+            (status, limit),
+        ).fetchall()
+    else:
+        rows = db.execute("SELECT * FROM place_edit_suggestions ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+    db.close()
+    return [dict(r) for r in rows]
+
+def update_place_edit_suggestion_status(suggestion_id: int, status: str) -> bool:
+    db = _conn()
+    cur = db.execute("UPDATE place_edit_suggestions SET status=? WHERE id=?", (status, suggestion_id))
+    db.commit(); db.close()
+    return cur.rowcount > 0
+
+def list_place_comments(status: str | None = "visible", limit: int = 200) -> list[dict]:
+    db = _conn()
+    if status:
+        rows = db.execute(
+            """SELECT c.*,p.name AS place_name FROM place_comments c
+               LEFT JOIN places p ON p.trailhead_place_id=c.trailhead_place_id
+               WHERE c.status=? ORDER BY c.created_at DESC LIMIT ?""",
+            (status, limit),
+        ).fetchall()
+    else:
+        rows = db.execute(
+            """SELECT c.*,p.name AS place_name FROM place_comments c
+               LEFT JOIN places p ON p.trailhead_place_id=c.trailhead_place_id
+               ORDER BY c.created_at DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    db.close()
+    return [dict(r) for r in rows]
+
+def update_place_comment_status(comment_id: int, status: str) -> bool:
+    db = _conn()
+    cur = db.execute("UPDATE place_comments SET status=? WHERE id=?", (status, comment_id))
+    db.commit(); db.close()
+    return cur.rowcount > 0
+
+def list_place_photos(status: str | None = "visible", limit: int = 200) -> list[dict]:
+    db = _conn()
+    if status:
+        rows = db.execute(
+            """SELECT ph.id,ph.trailhead_place_id,ph.user_id,ph.username,ph.comment_id,ph.object_key,ph.url,
+                      ph.caption,ph.source,ph.status,ph.credits_awarded,ph.created_at,p.name AS place_name
+               FROM place_photos ph LEFT JOIN places p ON p.trailhead_place_id=ph.trailhead_place_id
+               WHERE ph.status=? ORDER BY ph.created_at DESC LIMIT ?""",
+            (status, limit),
+        ).fetchall()
+    else:
+        rows = db.execute(
+            """SELECT ph.id,ph.trailhead_place_id,ph.user_id,ph.username,ph.comment_id,ph.object_key,ph.url,
+                      ph.caption,ph.source,ph.status,ph.credits_awarded,ph.created_at,p.name AS place_name
+               FROM place_photos ph LEFT JOIN places p ON p.trailhead_place_id=ph.trailhead_place_id
+               ORDER BY ph.created_at DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    db.close()
+    return [dict(r) for r in rows]
+
+def update_place_photo_status(photo_id: int, status: str) -> bool:
+    db = _conn()
+    cur = db.execute("UPDATE place_photos SET status=? WHERE id=?", (status, photo_id))
+    db.commit(); db.close()
+    return cur.rowcount > 0
+
+def save_place_reservation_alert(trailhead_place_id: str, user_id: int, start_date: str | None,
+                                 end_date: str | None, party_size: int | None,
+                                 source: str | None, booking_url: str | None) -> dict:
+    now = int(time.time())
+    db = _conn()
+    db.execute(
+        """INSERT INTO place_reservation_alerts
+           (trailhead_place_id,user_id,start_date,end_date,party_size,source,booking_url,status,created_at,updated_at)
+           VALUES (?,?,?,?,?,?,?,'active',?,?)
+           ON CONFLICT(trailhead_place_id,user_id,start_date,end_date) DO UPDATE SET
+             party_size=excluded.party_size, source=excluded.source, booking_url=excluded.booking_url,
+             status='active', updated_at=excluded.updated_at""",
+        (trailhead_place_id, user_id, start_date, end_date, party_size, source, booking_url, now, now),
+    )
+    row = db.execute(
+        """SELECT * FROM place_reservation_alerts
+           WHERE trailhead_place_id=? AND user_id=? AND COALESCE(start_date,'')=COALESCE(?, '') AND COALESCE(end_date,'')=COALESCE(?, '')
+           ORDER BY updated_at DESC LIMIT 1""",
+        (trailhead_place_id, user_id, start_date, end_date),
+    ).fetchone()
+    db.commit(); db.close()
+    return dict(row) if row else {}
+
+def get_place_reservation_alerts(trailhead_place_id: str, user_id: int | None = None) -> list[dict]:
+    db = _conn()
+    if user_id:
+        rows = db.execute(
+            "SELECT * FROM place_reservation_alerts WHERE trailhead_place_id=? AND user_id=? AND status='active' ORDER BY updated_at DESC",
+            (trailhead_place_id, user_id),
+        ).fetchall()
+    else:
+        rows = db.execute(
+            "SELECT * FROM place_reservation_alerts WHERE trailhead_place_id=? AND status='active' ORDER BY updated_at DESC",
+            (trailhead_place_id,),
+        ).fetchall()
     db.close()
     return [dict(r) for r in rows]
 

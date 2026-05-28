@@ -247,6 +247,10 @@ export const api = {
     req<{ authorized: boolean; charged: number; already_unlocked?: boolean; plan?: boolean; group: string; credits: number }>('/api/places/categories/authorize', {
       method: 'POST', body: JSON.stringify({ group }),
     }),
+  authorizePlaceDetail: (source: string, place_id: string, category = '') =>
+    req<{ authorized: boolean; charged: number; already_unlocked?: boolean; plan?: boolean; credits: number }>('/api/places/detail/authorize', {
+      method: 'POST', body: JSON.stringify({ source, place_id, category }),
+    }),
   ttsSource: async (text: string, mode: 'direction' | 'guide' = 'direction') => ({
     ...(mode === 'guide' && text.length > 1600
       ? { uri: `${BASE}${(await req<{ uri: string }>('/api/audio/tts-session', {
@@ -283,19 +287,70 @@ export const api = {
     req<CampsitePin[]>(`/api/camps/bbox?n=${n}&s=${s}&e=${e}&w=${w}&types=${types.join(',')}`),
   getOsmPois: (lat: number, lng: number, radius = 30, types = 'water,trailhead,viewpoint') =>
     req<OsmPoi[]>(`/api/osm-pois?lat=${lat}&lng=${lng}&radius=${radius}&types=${types}`),
-  getNearbyPlaces: (lat: number, lng: number, radius = 25, categories = 'fuel,water,trailhead,viewpoint', provider: 'auto' | 'google' | 'foursquare' | 'osm' = 'auto') =>
+  getNearbyPlaces: (lat: number, lng: number, radius = 25, categories = 'fuel,water,trailhead,viewpoint', provider: 'auto' | 'geoapify' | 'google' | 'foursquare' | 'osm' | 'nps' | 'blm' | 'usfs' = 'auto') =>
     guardedRequest(
       `nearby:${provider}:${stableNumber(lat)}:${stableNumber(lng)}:${Math.round(radius)}:${categories.split(',').map(c => c.trim()).filter(Boolean).sort().join(',')}`,
       5 * 60_000,
       () => req<OsmPoi[]>(`/api/places/nearby?lat=${lat}&lng=${lng}&radius=${radius}&categories=${encodeURIComponent(categories)}&provider=${encodeURIComponent(provider)}`),
     ),
-  getNearbySmartPack: (lat: number, lng: number, radius = 35, categories = 'camp,trailhead,viewpoint,peak,hot_spring,park,historic,climbing,ohv,attraction,camping,water,grocery,mechanic,parking,dump,propane,fuel', route?: [number, number][]) =>
+  getWaterNavigationLines: (n: number, s: number, e: number, w: number) =>
     guardedRequest(
-      `smart-pack:${stableNumber(lat)}:${stableNumber(lng)}:${Math.round(radius)}:${categories.split(',').map(c => c.trim()).filter(Boolean).sort().join(',')}:${stableRouteKey(route)}`,
+      `water-nav-lines:${stableNumber(n, 3)}:${stableNumber(s, 3)}:${stableNumber(e, 3)}:${stableNumber(w, 3)}`,
+      20 * 60_000,
+      () => req<WaterNavigationLinesResponse>(`/api/water/navigation-lines?n=${n}&s=${s}&e=${e}&w=${w}`),
+    ),
+  getWaterConditions: (lat: number, lng: number) =>
+    guardedRequest(
+      `water-conditions:${stableNumber(lat, 2)}:${stableNumber(lng, 2)}`,
+      10 * 60_000,
+      () => req<WaterConditionsResponse>(`/api/water/conditions?lat=${lat}&lng=${lng}`),
+    ),
+  getHydroChartProfile: (n: number, s: number, e: number, w: number) =>
+    guardedRequest(
+      `hydro-chart-profile:${stableNumber(n, 3)}:${stableNumber(s, 3)}:${stableNumber(e, 3)}:${stableNumber(w, 3)}`,
+      20 * 60_000,
+      () => req<HydroChartProfileResponse>(`/api/hydro/chart-profile?n=${n}&s=${s}&e=${e}&w=${w}`),
+    ),
+  getWaterSpotCards: (n: number, s: number, e: number, w: number) =>
+    guardedRequest(
+      `water-spot-cards:${stableNumber(n, 3)}:${stableNumber(s, 3)}:${stableNumber(e, 3)}:${stableNumber(w, 3)}`,
+      20 * 60_000,
+      () => req<WaterSpotCardsResponse>(`/api/water/spot-cards?n=${n}&s=${s}&e=${e}&w=${w}`),
+    ),
+  getFishingConditions: (lat: number, lng: number) =>
+    guardedRequest(
+      `fishing-conditions:${stableNumber(lat, 2)}:${stableNumber(lng, 2)}`,
+      10 * 60_000,
+      () => req<FishingConditionsResponse>(`/api/water/fishing-conditions?lat=${lat}&lng=${lng}`),
+    ),
+  getSuggestedWaterCorridor: (start: { lat: number; lng: number }, end: { lat: number; lng: number }, draftFt?: number) => {
+    const qs = new URLSearchParams({
+      start_lat: String(start.lat),
+      start_lng: String(start.lng),
+      end_lat: String(end.lat),
+      end_lng: String(end.lng),
+    });
+    if (draftFt != null) qs.set('draft_ft', String(draftFt));
+    return guardedRequest(
+      `water-corridor:${stableNumber(start.lat, 3)}:${stableNumber(start.lng, 3)}:${stableNumber(end.lat, 3)}:${stableNumber(end.lng, 3)}:${draftFt ?? ''}`,
+      10 * 60_000,
+      () => req<SuggestedWaterCorridorResponse>(`/api/water/suggested-corridor?${qs.toString()}`),
+    );
+  },
+  getNearbySmartPack: (
+    lat: number,
+    lng: number,
+    radius = 35,
+    categories = 'camp,trailhead,viewpoint,peak,hot_spring,park,historic,climbing,ohv,attraction,camping,water,grocery,mechanic,parking,dump,propane,fuel',
+    route?: [number, number][],
+    options: { scope_id?: string; recommended_day?: number; route_scope?: 'leg' | 'route' | 'area' } = {},
+  ) =>
+    guardedRequest(
+      `smart-pack:${stableNumber(lat)}:${stableNumber(lng)}:${Math.round(radius)}:${categories.split(',').map(c => c.trim()).filter(Boolean).sort().join(',')}:${stableRouteKey(route)}:${options.scope_id ?? ''}:${options.recommended_day ?? ''}:${options.route_scope ?? ''}`,
       5 * 60_000,
       () => req<NearbySmartPackResponse>('/api/nearby/smart-pack', {
         method: 'POST',
-        body: JSON.stringify({ center: { lat, lng }, radius, categories: categories.split(',').filter(Boolean), route }),
+        body: JSON.stringify({ center: { lat, lng }, radius, categories: categories.split(',').filter(Boolean), route, ...options }),
       }),
     ),
   getPlaceDetail: (source: string, placeId: string, category = '') =>
@@ -304,6 +359,37 @@ export const api = {
       15 * 60_000,
       () => req<PlaceDetail>(`/api/places/${encodeURIComponent(source)}/${encodeURIComponent(placeId)}/detail${category ? `?category=${encodeURIComponent(category)}` : ''}`),
     ),
+  canonicalizePlace: (data: CanonicalPlacePayload) =>
+    req<{ trailhead_place_id: string; place: TrailheadPlace }>('/api/places/canonicalize', {
+      method: 'POST', body: JSON.stringify(data),
+    }),
+  getCanonicalPlace: (trailheadPlaceId: string) =>
+    req<TrailheadPlace>(`/api/places/${encodeURIComponent(trailheadPlaceId)}`),
+  getPlaceComments: (trailheadPlaceId: string) =>
+    req<PlaceComment[]>(`/api/places/${encodeURIComponent(trailheadPlaceId)}/comments`),
+  submitPlaceComment: (trailheadPlaceId: string, data: PlaceCommentPayload) =>
+    req<{ comment: PlaceComment; photo?: TrailheadPlacePhoto | null; credits_earned: number; new_balance: number }>(`/api/places/${encodeURIComponent(trailheadPlaceId)}/comments`, {
+      method: 'POST', body: JSON.stringify(data),
+    }),
+  uploadPlacePhoto: (trailheadPlaceId: string, data: PlacePhotoPayload) =>
+    req<TrailheadPlacePhoto & { credits_earned: number; new_balance: number }>(`/api/places/${encodeURIComponent(trailheadPlaceId)}/photos`, {
+      method: 'POST', body: JSON.stringify(data),
+    }),
+  suggestPlaceEdit: (trailheadPlaceId: string, data: PlaceEditSuggestionPayload) =>
+    req<{ id: number; status: string; credits_earned: number; new_balance: number }>(`/api/places/${encodeURIComponent(trailheadPlaceId)}/edit-suggestions`, {
+      method: 'POST', body: JSON.stringify(data),
+    }),
+  getPlaceReservationStatus: (trailheadPlaceId: string, startDate = '', endDate = '') => {
+    const qs = new URLSearchParams();
+    if (startDate) qs.set('start_date', startDate);
+    if (endDate) qs.set('end_date', endDate);
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return req<PlaceReservationStatus>(`/api/places/${encodeURIComponent(trailheadPlaceId)}/reservation-status${suffix}`);
+  },
+  savePlaceReservationAlert: (trailheadPlaceId: string, data: PlaceReservationAlertPayload) =>
+    req<{ ok: boolean; alert: PlaceReservationAlert }>(`/api/places/${encodeURIComponent(trailheadPlaceId)}/reservation-alerts`, {
+      method: 'POST', body: JSON.stringify(data),
+    }),
   discoverTrails: (params: TrailDiscoverParams) => {
     const qs = new URLSearchParams({ mode: params.mode ?? 'nearby', limit: String(params.limit ?? 60) });
     if (params.lat != null) qs.set('lat', String(params.lat));
@@ -460,6 +546,7 @@ export interface GeocodePlace {
 export interface TripResult {
   trip_id: string; plan: TripPlan; campsites: Campsite[]; gas_stations: GasStation[];
   route_pois?: OsmPoi[];
+  timeline?: TripTimeline;
   audio_guide?: Record<string, string>;
   route_geometry?: SavedRouteGeometryPayload;
   builder_state?: Record<string, unknown>;
@@ -486,10 +573,64 @@ export interface TripPlan {
   trip_name: string; overview: string; duration_days: number;
   states: string[]; total_est_miles: number;
   waypoints: Waypoint[]; daily_itinerary: DayPlan[]; logistics: Logistics;
+  timeline?: TripTimeline;
+  route_preferences?: {
+    route_style?: RouteStyleMode;
+    camp_preference?: string;
+    camp_reuse_policy?: CampReusePolicy;
+    region_hint?: string;
+    max_daily_drive_hours?: number | null;
+  };
+  planner_warnings?: string[];
+}
+export type RouteStyleMode = 'direct' | 'balanced' | 'wild';
+export type TripShapeMode = 'one_way' | 'loop' | 'there_and_back';
+export type CampReusePolicy = 'different_each_night' | 'same_camp_window' | 'manual';
+export interface TripTimelineEvent {
+  type: 'start' | 'depart' | 'drive' | 'fuel' | 'poi' | 'overnight' | 'rest' | string;
+  title: string;
+  description?: string;
+  day: number;
+  source?: string;
+  warning_level?: 'info' | 'review' | 'warn' | string;
+  point?: { lat: number; lng: number } | null;
+  route_position?: {
+    route_progress?: number;
+    route_progress_mi?: number;
+    route_distance_mi?: number;
+    route_segment_index?: number;
+  };
+  distance_mi?: number;
+  road_type?: string;
+  quick_actions?: string[];
+}
+export interface TripTimelineDay {
+  day: number;
+  title: string;
+  summary?: string;
+  distance_mi?: number;
+  road_type?: string;
+  warning_level?: 'info' | 'review' | 'warn' | string;
+  events: TripTimelineEvent[];
+}
+export interface TripTimeline {
+  schema_version: number;
+  days: TripTimelineDay[];
+  warnings?: Array<{ level: string; message?: string }>;
+  offline_readiness?: {
+    map?: boolean;
+    navigation?: boolean;
+    places?: boolean;
+    topo?: boolean;
+    trails?: boolean;
+    trip_download?: boolean;
+    message?: string;
+  };
 }
 export interface Waypoint {
   day: number; name: string; type: string; description: string;
   land_type: string; notes?: string; lat?: number; lng?: number;
+  route_point_type?: 'side_stop' | 'break' | 'through';
   verified_match?: boolean; verified_distance_mi?: number; verified_name?: string;
   verified_source?: string; needs_review?: boolean; verification_note?: string;
   camp_window_start?: number; camp_window_end?: number; camp_window_label?: string;
@@ -514,6 +655,8 @@ export interface CampsitePin {
   tags: string[]; land_type: string; description: string;
   amenities?: string[]; site_types?: string[];
   photo_url?: string; reservable: boolean; cost?: string; url: string; ada: boolean;
+  official_url?: string; booking_url?: string; source_badge?: string; source_freshness?: string; last_checked?: number;
+  link_label?: 'Reserve' | 'Official page' | 'Search official site' | string;
   route_distance_mi?: number; route_fit?: string; recommended_day?: number;
   route_progress?: number; route_progress_mi?: number; route_segment_index?: number;
   source?: string; verified_source?: string;
@@ -533,7 +676,11 @@ export interface RouteCampWindowsRequest {
   route: Array<{ lat: number; lng: number }>;
   windows: RouteCampWindowInput[];
   camp_filters?: string[];
-  route_style?: string;
+  route_style?: RouteStyleMode | 'adventure';
+  camp_preference?: string;
+  region_hint?: string;
+  camp_reuse_policy?: CampReusePolicy;
+  max_daily_drive_hours?: number;
   max_radius?: number;
 }
 export interface RouteCampWindowResult {
@@ -676,6 +823,8 @@ export interface OsmPoi {
   address?: string;
   phone?: string;
   website?: string;
+  official_url?: string;
+  booking_url?: string;
   open_now?: boolean | null;
   rating?: number;
   rating_count?: number;
@@ -688,9 +837,238 @@ export interface OsmPoi {
   rich_detail_locked?: boolean;
   rich_detail_reason?: string;
   activities?: string[];
+  source_badge?: string;
+  source_freshness?: string;
   last_checked?: number;
   route_distance_mi?: number; route_fit?: string;
   route_progress?: number; route_progress_mi?: number; route_segment_index?: number;
+  waterbody_name?: string;
+  waterbody_type?: string;
+  access?: string;
+  craft?: string;
+  fishing_score?: number;
+  fishing_score_label?: string;
+  fish_species?: string[] | string;
+  stocking_notes?: string;
+  regulations_url?: string;
+  gauge_id?: string;
+  gauge_url?: string;
+  flow_cfs?: number;
+  gage_height_ft?: number;
+  observed_at?: number | string;
+  chart_source?: string;
+  chart_url?: string;
+  weather_url?: string;
+  tides_url?: string;
+  safety_url?: string;
+  navigation_feature?: string;
+  hazard_type?: string;
+  mark_color?: string;
+  mark_shape?: string;
+  light_character?: string;
+  depth_ft?: number;
+  max_draft_ft?: number;
+  navigation_note?: string;
+}
+
+export interface WaterNavigationLineFeature {
+  type: 'Feature';
+  geometry: { type: 'LineString'; coordinates: [number, number][] } | { type: 'Point'; coordinates: [number, number] };
+  properties: {
+    id?: string;
+    name?: string;
+    kind?: 'marked_channel' | 'recommended_track' | 'range_line' | 'traffic_lane' | 'deep_water_route' | 'water_follow_line' | 'navigation_aid' | 'channel_marker' | 'water_hazard' | 'anchorage' | 'lock' | string;
+    subtype?: string;
+    label?: string;
+    code?: string;
+    marker_color?: string;
+    navigation_feature?: string;
+    hazard_type?: string;
+    mark_color?: string;
+    mark_shape?: string;
+    light_character?: string;
+    depth?: string;
+    depth_ft?: number;
+    source?: string;
+    source_freshness?: string;
+    seamark_type?: string;
+    waterway?: string;
+    max_draft?: string;
+    max_draft_ft?: number;
+    navigation_note?: string;
+  };
+}
+export interface MarineChartSource {
+  id: string;
+  name: string;
+  role: string;
+  status: string;
+  offline: boolean;
+  confidence: string;
+  url?: string;
+  station_id?: string;
+  note?: string;
+}
+export interface HydroCoverageRegion {
+  id: string;
+  name: string;
+  file?: string;
+  available?: boolean;
+  confidence?: string;
+  status?: string;
+  offline?: boolean;
+  coverage_note?: string;
+  counts?: Record<string, number>;
+}
+export interface HydroCoverageProfile {
+  available: boolean;
+  coverage: 'available' | 'live_only' | 'planned' | 'none' | string;
+  regions: HydroCoverageRegion[];
+  counts: {
+    contours?: number;
+    shallow_zones?: number;
+    hazards?: number;
+    labels?: number;
+  };
+  layers?: string[];
+  warning?: string;
+}
+export interface MarineChartProfile {
+  mode: string;
+  region: string;
+  sources: MarineChartSource[];
+  provider_capabilities?: Record<string, {
+    provider_class?: string;
+    status?: string;
+    offline?: string;
+    coverage_confidence?: string;
+    supports_depth_ranges?: boolean;
+    supports_hazards?: boolean;
+    supports_structure?: boolean;
+    supports_corridors?: boolean;
+    note?: string;
+  }>;
+  licensed_chart?: {
+    available?: boolean;
+    status?: string;
+    offline_ready?: boolean;
+    coverage_confidence?: string;
+    note?: string;
+  };
+  offline_status?: Record<string, string>;
+  depth_ranges?: Array<{ id: string; label: string; hazard?: boolean }>;
+  hazard_summary?: {
+    hydro_hazards?: number;
+    open_seamark_hazards?: string | number;
+    source_confidence?: string;
+  };
+  corridor_availability?: {
+    status?: string;
+    licensed_provider_required_for_premium_confidence?: boolean;
+    turn_by_turn?: boolean;
+    certified_navigation?: boolean;
+  };
+  hydro?: HydroCoverageProfile | null;
+  recommended_next_pipeline?: string;
+  disclaimer?: string;
+}
+export interface HydroChartProfileResponse {
+  mode: string;
+  hydro?: HydroCoverageProfile | null;
+  chart_profile?: MarineChartProfile;
+}
+export interface WaterConditionsResponse {
+  station?: {
+    id: string;
+    name: string;
+    lat: number;
+    lng: number;
+    provider?: string;
+    source_url?: string;
+    distance_mi?: number;
+  } | null;
+  observed_at?: number | null;
+  wind_dir_deg?: number | null;
+  wind_kt?: number | null;
+  wind_mph?: number | null;
+  gust_kt?: number | null;
+  gust_mph?: number | null;
+  wave_height_m?: number | null;
+  wave_height_ft?: number | null;
+  dominant_period_s?: number | null;
+  average_period_s?: number | null;
+  air_temp_c?: number | null;
+  water_temp_c?: number | null;
+  pressure_hpa?: number | null;
+  crossing_risk?: { score?: number; label?: string };
+  source?: string;
+  source_url?: string;
+  note?: string;
+  error?: string;
+  navigation_note?: string;
+}
+export interface WaterNavigationLinesResponse {
+  type: 'FeatureCollection';
+  features: WaterNavigationLineFeature[];
+  source?: string;
+  generated_at?: number;
+  note?: string;
+  error?: string;
+  counts?: {
+    lines?: number;
+    points?: number;
+    hazards?: number;
+    aids?: number;
+    recommended_tracks?: number;
+  };
+  chart_profile?: MarineChartProfile;
+}
+export interface WaterSpotCard {
+  id: string;
+  name: string;
+  kind: 'structure' | 'access' | 'spot' | string;
+  lat: number;
+  lng: number;
+  species_targets?: string[];
+  depth_range_ft?: { min?: number; max?: number; source?: string };
+  structure?: string[];
+  best_context?: string[];
+  actions?: string[];
+  source?: string;
+  source_confidence?: string;
+  navigation_note?: string;
+}
+export interface WaterSpotCardsResponse {
+  mode: string;
+  region: string;
+  cards: WaterSpotCard[];
+  empty_state?: string | null;
+  source_disclosure?: string;
+}
+export interface FishingConditionsResponse {
+  mode: string;
+  station?: WaterConditionsResponse['station'];
+  solunar?: {
+    status?: string;
+    major_window?: string;
+    minor_window?: string;
+    source?: string;
+  };
+  weather_source?: string;
+  source_disclosure?: string;
+  navigation_note?: string;
+}
+export interface SuggestedWaterCorridorResponse {
+  mode: string;
+  status: string;
+  geometry: { type: 'LineString'; coordinates: [number, number][] };
+  distance_mi: number;
+  eta_minutes: number;
+  conflicts: Array<{ kind: string; severity: string; note: string }>;
+  source_confidence: string;
+  turn_by_turn: boolean;
+  certified_navigation: boolean;
+  navigation_note: string;
 }
 export interface PlacePhoto {
   url: string;
@@ -706,6 +1084,130 @@ export interface PlaceReview {
   profileUrl?: string;
   photoUrl?: string;
   source?: string;
+}
+export interface CanonicalPlacePayload {
+  id?: string | number;
+  name: string;
+  lat: number;
+  lng: number;
+  source?: string;
+  source_label?: string;
+  source_place_id?: string;
+  provider_place_id?: string;
+  place_id?: string;
+  category?: string;
+  type?: string;
+  subtype?: string;
+  official_url?: string;
+  url?: string;
+  website?: string;
+  photo_url?: string | null;
+  hero_photo_url?: string | null;
+  summary?: string;
+  description?: string;
+  address?: string;
+  phone?: string;
+  rating?: number;
+  rating_count?: number;
+  reservable?: boolean;
+  booking_url?: string;
+  reservation_notes?: string;
+  amenities?: string[];
+  activities?: string[];
+  photos?: Array<PlacePhoto | string>;
+  metadata?: Record<string, unknown>;
+}
+export interface TrailheadPlacePhoto {
+  id: number;
+  trailhead_place_id?: string;
+  username?: string;
+  comment_id?: number | null;
+  object_key?: string | null;
+  url: string;
+  caption?: string | null;
+  source?: string;
+  status?: string;
+  credits_awarded?: number;
+  created_at: number;
+}
+export interface PlaceComment {
+  id: number;
+  username: string;
+  body: string;
+  created_at: number;
+  photos?: TrailheadPlacePhoto[];
+}
+export interface TrailheadPlace {
+  trailhead_place_id: string;
+  source: string;
+  source_label?: string;
+  source_place_id?: string;
+  source_priority?: number;
+  name: string;
+  lat: number;
+  lng: number;
+  category?: string;
+  subtype?: string;
+  official_url?: string;
+  hero_photo_url?: string | null;
+  hero_photo_source?: string;
+  provider_ids?: Record<string, string>;
+  provenance?: Record<string, unknown>;
+  display_metadata?: Record<string, unknown>;
+  photos: TrailheadPlacePhoto[];
+  comments: PlaceComment[];
+  last_seen?: number;
+}
+export interface PlaceCommentPayload {
+  body: string;
+  photo_data?: string;
+  photo_caption?: string;
+}
+export interface PlacePhotoPayload {
+  photo_data: string;
+  caption?: string;
+  comment_id?: number;
+  content_type?: string;
+}
+export interface PlaceEditSuggestionPayload {
+  place_name?: string;
+  field: string;
+  value: string;
+  note?: string;
+}
+export interface PlaceReservationAlert {
+  id: number;
+  trailhead_place_id: string;
+  user_id: number;
+  start_date?: string | null;
+  end_date?: string | null;
+  party_size?: number | null;
+  source?: string | null;
+  booking_url?: string | null;
+  status: string;
+  created_at: number;
+  updated_at: number;
+}
+export interface PlaceReservationAlertPayload {
+  start_date?: string;
+  end_date?: string;
+  party_size?: number;
+}
+export interface PlaceReservationStatus {
+  trailhead_place_id: string;
+  source: string;
+  source_label?: string;
+  official: boolean;
+  reservable: boolean;
+  booking_url?: string;
+  check_availability_url?: string;
+  link_label?: 'Reserve' | 'Official page' | 'Search official site' | string;
+  link_confidence?: 'verified' | 'source' | 'fallback' | 'none' | string;
+  availability_supported: boolean;
+  alert_supported: boolean;
+  alerts: PlaceReservationAlert[];
+  source_freshness?: string;
+  notes?: string;
 }
 export interface PlaceDetail extends OsmPoi {
   photos?: PlacePhoto[];
@@ -852,6 +1354,43 @@ export interface PlacePackPoint {
   address?: string;
   fuel_types?: string;
   elevation?: string;
+  official_url?: string;
+  booking_url?: string;
+  photo_url?: string | null;
+  reservable?: boolean;
+  tags?: string[];
+  amenities?: string[];
+  site_types?: string[];
+  source_badge?: string;
+  source_freshness?: string;
+  last_checked?: number;
+  waterbody_name?: string;
+  waterbody_type?: string;
+  access?: string;
+  craft?: string;
+  fishing_score?: number;
+  fishing_score_label?: string;
+  fish_species?: string[] | string;
+  stocking_notes?: string;
+  regulations_url?: string;
+  gauge_id?: string;
+  gauge_url?: string;
+  flow_cfs?: number;
+  gage_height_ft?: number;
+  observed_at?: number | string;
+  chart_source?: string;
+  chart_url?: string;
+  weather_url?: string;
+  tides_url?: string;
+  safety_url?: string;
+  navigation_feature?: string;
+  hazard_type?: string;
+  mark_color?: string;
+  mark_shape?: string;
+  light_character?: string;
+  depth_ft?: number;
+  max_draft_ft?: number;
+  navigation_note?: string;
 }
 export interface PlacePack {
   schema_version: number;
@@ -975,6 +1514,11 @@ export interface ExcursionCandidate {
   risk_notes?: string;
   best_for?: string;
   distance_from_route_mi?: number;
+  route_distance_mi?: number;
+  route_progress?: number;
+  route_progress_mi?: number;
+  route_segment_index?: number;
+  recommended_day?: number;
   detour_mi?: number;
   drive_time_min?: number;
   day_fit?: string;

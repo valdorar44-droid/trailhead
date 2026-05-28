@@ -1064,8 +1064,12 @@ export interface SuggestedWaterCorridorResponse {
   geometry: { type: 'LineString'; coordinates: [number, number][] };
   distance_mi: number;
   eta_minutes: number;
-  conflicts: Array<{ kind: string; severity: string; note: string }>;
+  conflicts: Array<{ kind: string; severity: string; note: string; lat?: number; lng?: number }>;
   source_confidence: string;
+  source_disclosure?: string;
+  route_points?: Array<{ name: string; lat: number; lng: number; kind?: string; note?: string }>;
+  chart_source?: string;
+  live_offline_gaps?: string[];
   turn_by_turn: boolean;
   certified_navigation: boolean;
   navigation_note: string;

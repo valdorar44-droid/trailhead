@@ -53,6 +53,59 @@ export interface SavedPlace {
   createdAt: number;
 }
 
+export interface WaterSpot {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  kind: 'structure' | 'access' | 'spot' | 'saved';
+  depthRangeFt?: { min?: number; max?: number; source?: string };
+  structure?: string[];
+  speciesTargets?: string[];
+  source?: string;
+  sourceConfidence?: string;
+  note?: string;
+  createdAt: number;
+}
+
+export interface CatchLog {
+  id: string;
+  species: string;
+  count: number;
+  lengthIn?: number;
+  weightLb?: number;
+  baitLure?: string;
+  technique?: string;
+  depthFt?: number;
+  waterTempF?: number;
+  weatherSnapshot?: string;
+  solunarSnapshot?: string;
+  photoUri?: string | null;
+  notes?: string;
+  privacy: 'private';
+  lat?: number;
+  lng?: number;
+  spotId?: string;
+  routeId?: string;
+  createdAt: number;
+}
+
+export interface WaterRoute {
+  id: string;
+  name: string;
+  start: { lat: number; lng: number; name: string };
+  end: { lat: number; lng: number; name: string };
+  geometry: [number, number][];
+  distanceMi: number;
+  etaMinutes: number;
+  conflicts: Array<{ kind: string; severity: string; note: string }>;
+  sourceConfidence: string;
+  chartSource?: string;
+  liveOfflineGaps?: string[];
+  disclaimer: string;
+  createdAt: number;
+}
+
 export interface MarkerGroup {
   id: string;
   name: string;
@@ -127,6 +180,9 @@ interface AppState {
   cachedRegions: string[];
   favoriteCamps: CampsitePin[];
   savedPlaces: SavedPlace[];
+  waterSpots: WaterSpot[];
+  catchLogs: CatchLog[];
+  waterRoutes: WaterRoute[];
   markerGroups: MarkerGroup[];
   searchHistory: SearchHistoryItem[];
   offlineTripIds: string[];
@@ -160,6 +216,12 @@ interface AppState {
   toggleFavorite: (camp: CampsitePin) => void;
   addSavedPlace: (p: SavedPlace) => void;
   removeSavedPlace: (id: string) => void;
+  addWaterSpot: (spot: WaterSpot) => void;
+  removeWaterSpot: (id: string) => void;
+  addCatchLog: (log: CatchLog) => void;
+  removeCatchLog: (id: string) => void;
+  addWaterRoute: (route: WaterRoute) => void;
+  removeWaterRoute: (id: string) => void;
   addMarkerGroup: (g: MarkerGroup) => void;
   updateMarkerGroup: (id: string, updates: Partial<MarkerGroup>) => void;
   removeMarkerGroup: (id: string) => void;
@@ -192,6 +254,9 @@ export const useStore = create<AppState>((set) => ({
   cachedRegions: [],
   favoriteCamps: [],
   savedPlaces: [],
+  waterSpots: [],
+  catchLogs: [],
+  waterRoutes: [],
   markerGroups: [],
   searchHistory: [],
   offlineTripIds: [],
@@ -228,6 +293,9 @@ export const useStore = create<AppState>((set) => ({
     sd('trailhead_favorites');
     sd('trailhead_active_trip');
     sd('trailhead_active_route');
+    sd('trailhead_water_spots');
+    sd('trailhead_catch_logs');
+    sd('trailhead_water_routes');
     sd(PLAN_KEY);
     sd('trailhead_iap_pending');
     ss('trailhead_session', freshSession);
@@ -240,6 +308,9 @@ export const useStore = create<AppState>((set) => ({
       rigProfile: null,
       tripHistory: [],
       favoriteCamps: [],
+      waterSpots: [],
+      catchLogs: [],
+      waterRoutes: [],
       pendingMapSelection: null,
       sessionId: freshSession,
       hasPlan: false,
@@ -355,6 +426,39 @@ export const useStore = create<AppState>((set) => ({
     return { savedPlaces: updated };
   }),
 
+  addWaterSpot: (spot) => set((state) => {
+    const updated = [spot, ...state.waterSpots.filter(x => x.id !== spot.id)].slice(0, 500);
+    ss('trailhead_water_spots', JSON.stringify(updated));
+    return { waterSpots: updated };
+  }),
+  removeWaterSpot: (id) => set((state) => {
+    const updated = state.waterSpots.filter(x => x.id !== id);
+    ss('trailhead_water_spots', JSON.stringify(updated));
+    return { waterSpots: updated };
+  }),
+
+  addCatchLog: (log) => set((state) => {
+    const updated = [log, ...state.catchLogs.filter(x => x.id !== log.id)].slice(0, 1000);
+    ss('trailhead_catch_logs', JSON.stringify(updated));
+    return { catchLogs: updated };
+  }),
+  removeCatchLog: (id) => set((state) => {
+    const updated = state.catchLogs.filter(x => x.id !== id);
+    ss('trailhead_catch_logs', JSON.stringify(updated));
+    return { catchLogs: updated };
+  }),
+
+  addWaterRoute: (route) => set((state) => {
+    const updated = [route, ...state.waterRoutes.filter(x => x.id !== route.id)].slice(0, 100);
+    ss('trailhead_water_routes', JSON.stringify(updated));
+    return { waterRoutes: updated };
+  }),
+  removeWaterRoute: (id) => set((state) => {
+    const updated = state.waterRoutes.filter(x => x.id !== id);
+    ss('trailhead_water_routes', JSON.stringify(updated));
+    return { waterRoutes: updated };
+  }),
+
   addMarkerGroup: (g) => set((state) => {
     const updated = [...state.markerGroups, g];
     ss('trailhead_marker_groups', JSON.stringify(updated));
@@ -387,7 +491,7 @@ export const useStore = create<AppState>((set) => ({
 (async () => {
   try {
     const [rigRaw, historyRaw, themeRaw, weatherUnitsRaw, sessionRaw, favRaw, cachedRegionsRaw, activeTripRaw, planRaw,
-           savedPlacesRaw, markerGroupsRaw, searchHistoryRaw, tokenRaw, userRaw] = await Promise.all([
+           savedPlacesRaw, waterSpotsRaw, catchLogsRaw, waterRoutesRaw, markerGroupsRaw, searchHistoryRaw, tokenRaw, userRaw] = await Promise.all([
       sg('trailhead_rig'),
       sg('trailhead_history'),
       sg('trailhead_theme'),
@@ -398,6 +502,9 @@ export const useStore = create<AppState>((set) => ({
       sg('trailhead_active_trip'),
       sg(PLAN_KEY),
       sg('trailhead_saved_places'),
+      sg('trailhead_water_spots'),
+      sg('trailhead_catch_logs'),
+      sg('trailhead_water_routes'),
       sg('trailhead_marker_groups'),
       sg('trailhead_search_history'),
       sg('trailhead_token'),
@@ -422,6 +529,9 @@ export const useStore = create<AppState>((set) => ({
     if (favRaw) patch.favoriteCamps = JSON.parse(favRaw);
     if (cachedRegionsRaw) patch.cachedRegions = JSON.parse(cachedRegionsRaw);
     if (savedPlacesRaw) patch.savedPlaces = JSON.parse(savedPlacesRaw);
+    if (waterSpotsRaw) patch.waterSpots = JSON.parse(waterSpotsRaw);
+    if (catchLogsRaw) patch.catchLogs = JSON.parse(catchLogsRaw);
+    if (waterRoutesRaw) patch.waterRoutes = JSON.parse(waterRoutesRaw);
     if (markerGroupsRaw) patch.markerGroups = JSON.parse(markerGroupsRaw);
     if (searchHistoryRaw) patch.searchHistory = JSON.parse(searchHistoryRaw);
     if (sessionRaw) patch.sessionId = sessionRaw;

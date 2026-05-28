@@ -24,7 +24,7 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as FileSystem from 'expo-file-system';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useStore } from '@/lib/store';
+import { useStore, type WaterSpot, type CatchLog, type WaterRoute } from '@/lib/store';
 import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile, MapCardResolveResponse, WaterNavigationLinesResponse, WaterConditionsResponse, WaterSpotCard, WaterSpotCardsResponse, FishingConditionsResponse, SuggestedWaterCorridorResponse } from '@/lib/api';
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { deleteRouteGeometry, loadRouteGeometry, saveRouteGeometry } from '@/lib/offlineRoutes';
@@ -172,6 +172,18 @@ type TripPlaceContext = {
 type MapLayer = 'satellite' | 'topo' | 'hybrid';
 type WaterCorridorPickMode = 'start' | 'end' | null;
 type WaterCorridorPoint = { lat: number; lng: number; name: string };
+type SafeWaterHubTab = 'route' | 'spots' | 'catch' | 'conditions' | 'offline';
+type CatchDraft = {
+  species: string;
+  count: string;
+  lengthIn: string;
+  weightLb: string;
+  baitLure: string;
+  technique: string;
+  depthFt: string;
+  waterTempF: string;
+  notes: string;
+};
 type DiscoveryMode = 'camps' | 'trails';
 type TrailDiscoveryScope = 'nearby' | 'view';
 type TrailRouteIntent = 'segment' | 'out_back' | 'loop' | 'far_end' | 'capture';
@@ -1169,6 +1181,21 @@ function formatDist(km: number) {
   if (mi < 0.05) return 'ARRIVING';
   if (mi < 0.12) return `${Math.round(mi * 5280)} ft`;
   return mi >= 10 ? `${Math.round(mi)} mi` : `${mi.toFixed(1)} mi`;
+}
+
+function formatWaterMiles(mi?: number | null) {
+  if (mi == null || !Number.isFinite(mi)) return '--';
+  if (mi < 0.1) return `${Math.max(20, Math.round(mi * 5280))} ft`;
+  return mi >= 10 ? `${Math.round(mi)} mi` : `${mi.toFixed(1)} mi`;
+}
+
+function newLocalWaterId(prefix: string) {
+  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function parseOptionalNumber(value: string): number | undefined {
+  const n = Number(String(value || '').trim());
+  return Number.isFinite(n) ? n : undefined;
 }
 
 function speakDistanceKm(km: number): string {
@@ -3765,6 +3792,22 @@ function MapScreen() {
   const [waterCorridorStart, setWaterCorridorStart] = useState<WaterCorridorPoint | null>(null);
   const [waterCorridorEnd, setWaterCorridorEnd] = useState<WaterCorridorPoint | null>(null);
   const [waterCorridorPickMode, setWaterCorridorPickMode] = useState<WaterCorridorPickMode>(null);
+  const [safeWaterHubTab, setSafeWaterHubTab] = useState<SafeWaterHubTab>('route');
+  const [waterRouteReview, setWaterRouteReview] = useState<WaterRoute | null>(null);
+  const [waterFollowRoute, setWaterFollowRoute] = useState<WaterRoute | null>(null);
+  const [catchLogVisible, setCatchLogVisible] = useState(false);
+  const [catchDraft, setCatchDraft] = useState<CatchDraft>({
+    species: '',
+    count: '1',
+    lengthIn: '',
+    weightLb: '',
+    baitLure: '',
+    technique: '',
+    depthFt: '',
+    waterTempF: '',
+    notes: '',
+  });
+  const [catchLogContext, setCatchLogContext] = useState<{ spot?: WaterSpotCard | WaterSpot; route?: WaterRoute; lat?: number; lng?: number } | null>(null);
   const [nearbyPlaceFeeds, setNearbyPlaceFeeds] = useState<Record<string, { loading: boolean; places: OsmPoi[]; error?: string; loadedAt?: number }>>({});
   const [liveRouteGas, setLiveRouteGas] = useState<Array<{ lat: number; lng: number; name: string }>>([]);
   const [liveRoutePois, setLiveRoutePois] = useState<OsmPoi[]>([]);
@@ -3806,6 +3849,12 @@ function MapScreen() {
   const favoriteCamps  = useStore(s => s.favoriteCamps);
   const toggleFavorite = useStore(s => s.toggleFavorite);
   const addSavedPlace = useStore(s => s.addSavedPlace);
+  const waterSpots = useStore(s => s.waterSpots);
+  const addWaterSpot = useStore(s => s.addWaterSpot);
+  const catchLogs = useStore(s => s.catchLogs);
+  const addCatchLog = useStore(s => s.addCatchLog);
+  const waterRoutes = useStore(s => s.waterRoutes);
+  const addWaterRoute = useStore(s => s.addWaterRoute);
 
   // Route brief
   const [routeBrief,    setRouteBrief]    = useState<RouteBrief | null>(null);
@@ -5084,11 +5133,72 @@ function MapScreen() {
     return { lat: card.lat, lng: card.lng, name: card.name || 'Water spot' };
   }
 
+  function waterSpotToCard(spot: WaterSpot): WaterSpotCard {
+    return {
+      id: spot.id,
+      name: spot.name,
+      kind: spot.kind || 'saved',
+      lat: spot.lat,
+      lng: spot.lng,
+      species_targets: spot.speciesTargets,
+      depth_range_ft: spot.depthRangeFt,
+      structure: spot.structure,
+      source: spot.source || 'Private on-device spot',
+      source_confidence: spot.sourceConfidence || 'user_saved',
+      navigation_note: spot.note || 'Private fishing spot. Informational only; not certified navigation.',
+    };
+  }
+
+  function saveWaterSpotFromCard(card: WaterSpotCard) {
+    const spot: WaterSpot = {
+      id: card.id.startsWith('local_water_') ? card.id : `local_water_${card.id}`,
+      name: card.name || 'Saved water spot',
+      lat: card.lat,
+      lng: card.lng,
+      kind: (card.kind as WaterSpot['kind']) || 'spot',
+      depthRangeFt: card.depth_range_ft,
+      structure: card.structure,
+      speciesTargets: card.species_targets,
+      source: card.source || card.navigation_note || 'Safe Water spot card',
+      sourceConfidence: card.source_confidence || 'source_disclosed',
+      note: card.navigation_note,
+      createdAt: Date.now(),
+    };
+    addWaterSpot(spot);
+    addSavedPlace({ id: `water:${spot.id}`, name: spot.name, lat: spot.lat, lng: spot.lng, icon: 'water', note: spot.source, createdAt: spot.createdAt });
+    setQuickToast('Private water spot saved');
+    setTimeout(() => setQuickToast(''), 2400);
+  }
+
+  function routeFromCorridor(result: SuggestedWaterCorridorResponse): WaterRoute {
+    const stamp = Date.now();
+    return {
+      id: newLocalWaterId('water_route'),
+      name: `${waterCorridorStart?.name || 'Start'} to ${waterCorridorEnd?.name || 'End'}`,
+      start: waterCorridorStart || { lat: result.geometry.coordinates[0]?.[1] ?? 0, lng: result.geometry.coordinates[0]?.[0] ?? 0, name: 'Start' },
+      end: waterCorridorEnd || {
+        lat: result.geometry.coordinates[result.geometry.coordinates.length - 1]?.[1] ?? 0,
+        lng: result.geometry.coordinates[result.geometry.coordinates.length - 1]?.[0] ?? 0,
+        name: 'End',
+      },
+      geometry: result.geometry.coordinates,
+      distanceMi: result.distance_mi,
+      etaMinutes: result.eta_minutes,
+      conflicts: result.conflicts || [],
+      sourceConfidence: result.source_confidence || 'public_context',
+      chartSource: result.chart_source || result.source_disclosure || waterChartSourceNames,
+      liveOfflineGaps: result.live_offline_gaps,
+      disclaimer: result.navigation_note || safeWaterSourceDisclosure,
+      createdAt: stamp,
+    };
+  }
+
   function setWaterCorridorPoint(mode: Exclude<WaterCorridorPickMode, null>, point: WaterCorridorPoint) {
     if (mode === 'start') setWaterCorridorStart(point);
     else setWaterCorridorEnd(point);
     setWaterCorridor(null);
     setWaterCorridorError('');
+    setWaterRouteReview(null);
   }
 
   function selectWaterSpot(card: WaterSpotCard) {
@@ -5108,12 +5218,79 @@ function MapScreen() {
     try {
       const result = await api.getSuggestedWaterCorridor(waterCorridorStart, waterCorridorEnd);
       setWaterCorridor(result);
+      const route = routeFromCorridor(result);
+      addWaterRoute(route);
+      setWaterRouteReview(route);
+      setSafeWaterHubTab('route');
+      setQuickToast('Water route draft saved');
+      setTimeout(() => setQuickToast(''), 2400);
     } catch (err: any) {
       setWaterCorridor(null);
       setWaterCorridorError(err?.message || 'Corridor unavailable right now.');
     } finally {
       setWaterCorridorLoading(false);
     }
+  }
+
+  function openCatchLog(context?: { spot?: WaterSpotCard | WaterSpot; route?: WaterRoute; lat?: number; lng?: number }) {
+    const spot = context?.spot;
+    const route = context?.route;
+    const depth = spot && 'depth_range_ft' in spot
+      ? spot.depth_range_ft?.min ?? spot.depth_range_ft?.max
+      : spot && 'depthRangeFt' in spot
+        ? spot.depthRangeFt?.min ?? spot.depthRangeFt?.max
+        : undefined;
+    setCatchLogContext(context ?? null);
+    setCatchDraft({
+      species: '',
+      count: '1',
+      lengthIn: '',
+      weightLb: '',
+      baitLure: '',
+      technique: '',
+      depthFt: depth != null ? String(depth) : '',
+      waterTempF: waterConditions?.water_temp_c != null ? String(Math.round(Number(waterConditions.water_temp_c) * 9 / 5 + 32)) : '',
+      notes: route ? `Route: ${route.name}` : '',
+    });
+    setCatchLogVisible(true);
+  }
+
+  function saveCatchLog() {
+    const species = catchDraft.species.trim();
+    if (!species) {
+      setQuickToast('Add a species first');
+      setTimeout(() => setQuickToast(''), 2200);
+      return;
+    }
+    const spot = catchLogContext?.spot;
+    const route = catchLogContext?.route;
+    const lat = catchLogContext?.lat ?? spot?.lat ?? route?.end.lat;
+    const lng = catchLogContext?.lng ?? spot?.lng ?? route?.end.lng;
+    const log: CatchLog = {
+      id: newLocalWaterId('catch'),
+      species,
+      count: Math.max(1, Math.round(parseOptionalNumber(catchDraft.count) ?? 1)),
+      lengthIn: parseOptionalNumber(catchDraft.lengthIn),
+      weightLb: parseOptionalNumber(catchDraft.weightLb),
+      baitLure: catchDraft.baitLure.trim() || undefined,
+      technique: catchDraft.technique.trim() || undefined,
+      depthFt: parseOptionalNumber(catchDraft.depthFt),
+      waterTempF: parseOptionalNumber(catchDraft.waterTempF),
+      weatherSnapshot: waterConditionsLabel || undefined,
+      solunarSnapshot: fishingMajorWindow || undefined,
+      notes: catchDraft.notes.trim() || undefined,
+      privacy: 'private',
+      lat,
+      lng,
+      spotId: spot?.id,
+      routeId: route?.id,
+      createdAt: Date.now(),
+    };
+    addCatchLog(log);
+    setCatchLogVisible(false);
+    setSafeWaterHubTab('catch');
+    setQuickToast('Private catch logged');
+    setTimeout(() => setQuickToast(''), 2400);
   }
 
   useEffect(() => {
@@ -9279,8 +9456,18 @@ function MapScreen() {
   const hydroContourCount = hydroCoverage?.counts?.contours ?? 0;
   const hydroShallowCount = hydroCoverage?.counts?.shallow_zones ?? 0;
   const hydroHazardCount = hydroCoverage?.counts?.hazards ?? 0;
-  const waterSpotCount = waterSpotCards?.cards?.length ?? 0;
-  const firstWaterSpot = waterSpotCards?.cards?.[0] ?? null;
+  const localWaterSpotCards = useMemo(() => waterSpots.map(waterSpotToCard), [waterSpots]);
+  const allWaterSpotCards = useMemo(() => {
+    const seen = new Set<string>();
+    return [...localWaterSpotCards, ...(waterSpotCards?.cards ?? [])].filter(card => {
+      const key = `${card.id}:${card.lat.toFixed(5)}:${card.lng.toFixed(5)}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [localWaterSpotCards, waterSpotCards]);
+  const waterSpotCount = allWaterSpotCards.length;
+  const firstWaterSpot = allWaterSpotCards[0] ?? null;
   const selectedDepthLabel = depthRanges.find(r => r.id === safeWaterDepthRange)?.label ?? '5-10 ft';
   const safeWaterSourceDisclosure = waterSpotCards?.source_disclosure || waterNavLines?.chart_profile?.disclaimer || 'Informational only; not a certified chartplotter or official navigation source.';
   const fishingMajorWindow = fishingConditions?.solunar?.major_window || '--';
@@ -9293,6 +9480,42 @@ function MapScreen() {
         waterConditions.water_temp_c != null ? `${Number(waterConditions.water_temp_c).toFixed(1)} C water` : null,
       ].filter(Boolean).join(' · ')
     : '';
+  const activeWaterRouteReview = waterRouteReview || waterRoutes[0] || null;
+  const waterFollowMetrics = useMemo(() => {
+    if (!waterFollowRoute || !userLoc || waterFollowRoute.geometry.length < 2) return null;
+    const cumulative = routeCumulativeDistances(waterFollowRoute.geometry);
+    const projected = projectPointToRouteProgress(userLoc, waterFollowRoute.geometry, cumulative);
+    if (!projected) return null;
+    const totalM = cumulative[cumulative.length - 1] ?? waterFollowRoute.distanceMi * 1609.34;
+    const remainingM = Math.max(0, totalM - projected.progressM);
+    const nextIdx = Math.min(
+      waterFollowRoute.geometry.length - 1,
+      Math.max(1, waterFollowRoute.geometry.findIndex((_, idx) => idx > projected.segmentIdx + 1) || projected.segmentIdx + 1),
+    );
+    const nextCoord = waterFollowRoute.geometry[nextIdx] ?? waterFollowRoute.geometry[waterFollowRoute.geometry.length - 1];
+    const nextPoint = { lat: nextCoord[1], lng: nextCoord[0], name: nextIdx >= waterFollowRoute.geometry.length - 1 ? waterFollowRoute.end.name : `Waypoint ${nextIdx}` };
+    const nextDistanceMi = haversineKm(userLoc.lat, userLoc.lng, nextPoint.lat, nextPoint.lng) * 0.621371;
+    const hazardDistances = (waterNavLines?.features ?? [])
+      .filter(f => f.geometry?.type === 'Point' && String(f.properties?.kind || '').includes('hazard'))
+      .map(f => {
+        const coords = f.geometry.coordinates as [number, number];
+        return haversineKm(userLoc.lat, userLoc.lng, coords[1], coords[0]) * 0.621371;
+      })
+      .filter(Number.isFinite)
+      .sort((a, b) => a - b);
+    const hazardMi = hazardDistances[0] ?? null;
+    const eta = userSpeed && userSpeed > 0.8 ? Math.round(remainingM / userSpeed / 60) : waterFollowRoute.etaMinutes;
+    return {
+      nextPoint,
+      nextDistanceMi,
+      remainingMi: remainingM / 1609.34,
+      etaMinutes: Math.max(1, eta),
+      offCorridorMi: projected.distanceM / 1609.34,
+      offCorridor: projected.distanceM > 240,
+      hazardMi,
+      bearing: calcBearing(userLoc.lat, userLoc.lng, nextPoint.lat, nextPoint.lng),
+    };
+  }, [waterFollowRoute, userLoc, userSpeed, waterNavLines]);
   const communityFilterChanged = activePinFilters.length !== DEFAULT_COMMUNITY_PIN_FILTERS.length ||
     DEFAULT_COMMUNITY_PIN_FILTERS.some(id => !activePinFilters.includes(id));
   const changedFilterGroupCount =
@@ -9477,7 +9700,7 @@ function MapScreen() {
           gas={routeSearchGas as any}
           pois={routePois}
           waterNavLines={waterNavLines}
-          waterSpotCards={waterSpotCards?.cards ?? []}
+          waterSpotCards={allWaterSpotCards}
           waterCorridor={waterCorridor}
           reports={mapReports}
           communityPins={displayCommunityPins}
@@ -10187,9 +10410,9 @@ function MapScreen() {
                 <Ionicons name="boat-outline" size={15} color="#67e8f9" />
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={s.safeWaterTitle}>SAFE WATER</Text>
+                <Text style={s.safeWaterTitle}>SAFE WATER HUB</Text>
                 <Text style={s.safeWaterSub} numberOfLines={1}>
-                  {licensedChart?.available ? 'Licensed chart pack ready' : 'Live/public chart context · no licensed LOTW pack'}
+                  {waterFollowRoute ? 'Water Follow Mode ready' : licensedChart?.available ? 'Licensed chart pack ready' : 'Private planning · public chart context'}
                 </Text>
               </View>
             </View>
@@ -10203,9 +10426,30 @@ function MapScreen() {
               <Text style={s.safeWaterCompactMetric}>{waterNavFeatureCount} marks</Text>
               <Text style={s.safeWaterCompactMetric}>{waterNavHazardCount + hydroHazardCount} hazards</Text>
               <Text style={s.safeWaterCompactMetric}>{waterSpotCount} spots</Text>
+              <Text style={s.safeWaterCompactMetric}>{waterRoutes.length} routes</Text>
             </View>
           ) : (
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.safeWaterPanelContent}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.safeWaterTabs}>
+                {([
+                  { id: 'route', label: 'Route', icon: 'git-branch-outline' },
+                  { id: 'spots', label: 'Spots', icon: 'fish-outline' },
+                  { id: 'catch', label: 'Catch', icon: 'journal-outline' },
+                  { id: 'conditions', label: 'Conditions', icon: 'partly-sunny-outline' },
+                  { id: 'offline', label: 'Offline', icon: 'cloud-offline-outline' },
+                ] as const).map(tab => {
+                  const active = safeWaterHubTab === tab.id;
+                  return (
+                    <TouchableOpacity key={tab.id} style={[s.safeWaterTab, active && s.safeWaterTabActive]} onPress={() => setSafeWaterHubTab(tab.id)}>
+                      <Ionicons name={tab.icon as any} size={13} color={active ? '#fff' : OVR.text2} />
+                      <Text style={[s.safeWaterTabText, active && { color: '#fff' }]}>{tab.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+
+              {safeWaterHubTab === 'conditions' && (
+                <>
               <View style={s.safeWaterMetricRow}>
                 {[
                   { label: 'Sources', value: waterChartSourceNames, icon: 'layers-outline', tone: '#67e8f9' },
@@ -10269,7 +10513,11 @@ function MapScreen() {
                   Offline: base {offlineStatus.base_map || 'when downloaded'} · spots {offlineStatus.user_spots || 'ready'} · charts {offlineStatus.public_live_chart || 'live only'}
                 </Text>
               </View>
+                </>
+              )}
 
+              {safeWaterHubTab === 'spots' && (
+                <>
               {selectedWaterSpot ? (
                 <View style={s.safeWaterSpotCard}>
                   <View style={s.safeWaterSpotTop}>
@@ -10286,19 +10534,23 @@ function MapScreen() {
                   </Text>
                   <Text style={s.safeWaterSourceText} numberOfLines={2}>{selectedWaterSpot.source || selectedWaterSpot.navigation_note}</Text>
                   <View style={s.safeWaterActionRow}>
-                    <TouchableOpacity style={s.safeWaterAction} onPress={() => setWaterCorridorPoint('end', pointFromWaterSpot(selectedWaterSpot))}>
+                    <TouchableOpacity style={s.safeWaterAction} onPress={() => { setWaterCorridorPoint('end', pointFromWaterSpot(selectedWaterSpot)); setSafeWaterHubTab('route'); }}>
                       <Ionicons name="flag-outline" size={12} color="#67e8f9" />
                       <Text style={s.safeWaterActionText}>Set End</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={s.safeWaterAction} onPress={() => addSavedPlace({ id: `water:${selectedWaterSpot.id}`, name: selectedWaterSpot.name, lat: selectedWaterSpot.lat, lng: selectedWaterSpot.lng, icon: 'water', note: selectedWaterSpot.source || 'Safe Water spot', createdAt: Date.now() })}>
+                    <TouchableOpacity style={s.safeWaterAction} onPress={() => saveWaterSpotFromCard(selectedWaterSpot)}>
                       <Ionicons name="bookmark-outline" size={12} color={C.green} />
                       <Text style={s.safeWaterActionText}>Save</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={s.safeWaterAction} onPress={() => openCatchLog({ spot: selectedWaterSpot })}>
+                      <Ionicons name="fish-outline" size={12} color={C.green} />
+                      <Text style={s.safeWaterActionText}>Catch</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
               ) : waterSpotCount > 0 ? (
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.safeWaterSpotRow}>
-                  {waterSpotCards!.cards.map(card => (
+                  {allWaterSpotCards.map(card => (
                     <TouchableOpacity key={card.id} style={s.safeWaterMiniSpot} onPress={() => selectWaterSpot(card)}>
                       <Text style={s.safeWaterSpotKicker}>{card.kind.toUpperCase()}</Text>
                       <Text style={s.safeWaterMiniSpotName} numberOfLines={1}>{card.name}</Text>
@@ -10312,7 +10564,11 @@ function MapScreen() {
                   <Text style={s.safeWaterStatusText}>{waterSpotCards?.empty_state || 'Move around Lake of the Woods or add your own saved fishing spots.'}</Text>
                 </View>
               )}
+                </>
+              )}
 
+              {safeWaterHubTab === 'route' && (
+                <>
               <View style={s.safeWaterCorridorCard}>
                 <View style={s.safeWaterStatusTop}>
                   <Text style={s.safeWaterStatusTitle}>SUGGESTED CORRIDOR</Text>
@@ -10362,9 +10618,146 @@ function MapScreen() {
                 ) : null}
               </View>
 
+              {activeWaterRouteReview ? (
+                <View style={s.safeWaterRouteReview}>
+                  <View style={s.safeWaterStatusTop}>
+                    <Text style={s.safeWaterStatusTitle}>ROUTE REVIEW</Text>
+                    <Text style={s.safeWaterStatusPill}>{activeWaterRouteReview.conflicts.length} WARNINGS</Text>
+                  </View>
+                  <Text style={s.safeWaterSpotName} numberOfLines={1}>{activeWaterRouteReview.name}</Text>
+                  <View style={s.safeWaterMetricRow}>
+                    <View style={s.safeWaterMetric}><Text style={s.safeWaterMetricValue}>{activeWaterRouteReview.distanceMi.toFixed(1)}</Text><Text style={s.safeWaterMetricLabel}>MI</Text></View>
+                    <View style={s.safeWaterMetric}><Text style={s.safeWaterMetricValue}>{activeWaterRouteReview.etaMinutes}</Text><Text style={s.safeWaterMetricLabel}>MIN</Text></View>
+                    <View style={s.safeWaterMetric}><Text style={s.safeWaterMetricValue}>{activeWaterRouteReview.sourceConfidence.replace(/_/g, ' ')}</Text><Text style={s.safeWaterMetricLabel}>SOURCE</Text></View>
+                  </View>
+                  {activeWaterRouteReview.conflicts.slice(0, 2).map((conflict, idx) => (
+                    <Text key={`${conflict.kind}-${idx}`} style={s.safeWaterStatusMeta} numberOfLines={2}>
+                      {conflict.severity.toUpperCase()} · {conflict.note}
+                    </Text>
+                  ))}
+                  <Text style={s.safeWaterSourceText} numberOfLines={2}>{activeWaterRouteReview.chartSource || waterChartSourceNames}</Text>
+                  <View style={s.safeWaterActionRow}>
+                    <TouchableOpacity style={[s.safeWaterAction, s.safeWaterPrimaryAction]} onPress={() => { setWaterFollowRoute(activeWaterRouteReview); setSafeWaterPanelCollapsed(true); }}>
+                      <Ionicons name="navigate-outline" size={12} color="#fff" />
+                      <Text style={[s.safeWaterActionText, { color: '#fff' }]}>Follow</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={s.safeWaterAction} onPress={() => openCatchLog({ route: activeWaterRouteReview })}>
+                      <Ionicons name="fish-outline" size={12} color={C.green} />
+                      <Text style={s.safeWaterActionText}>Catch</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={s.safeWaterAction} onPress={() => { setQuickTypeIdx(null); setQuickReport(true); }}>
+                      <Ionicons name="warning-outline" size={12} color="#f59e0b" />
+                      <Text style={s.safeWaterActionText}>Report</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : null}
+                </>
+              )}
+
+              {safeWaterHubTab === 'catch' && (
+                <>
+                  <View style={s.safeWaterActionRow}>
+                    <TouchableOpacity style={[s.safeWaterAction, s.safeWaterPrimaryAction]} onPress={() => openCatchLog({ spot: selectedWaterSpot ?? firstWaterSpot ?? undefined })}>
+                      <Ionicons name="add-outline" size={13} color="#fff" />
+                      <Text style={[s.safeWaterActionText, { color: '#fff' }]}>Log Catch</Text>
+                    </TouchableOpacity>
+                  </View>
+                  {catchLogs.length ? (
+                    <View style={s.safeWaterList}>
+                      {catchLogs.slice(0, 6).map(log => (
+                        <View key={log.id} style={s.safeWaterListItem}>
+                          <View style={s.safeWaterListIcon}>
+                            <Ionicons name="journal-outline" size={14} color={C.green} />
+                          </View>
+                          <View style={{ flex: 1, minWidth: 0 }}>
+                            <Text style={s.safeWaterMiniSpotName} numberOfLines={1}>{log.count} {log.species}</Text>
+                            <Text style={s.safeWaterMiniSpotMeta} numberOfLines={1}>{[log.lengthIn ? `${log.lengthIn} in` : null, log.weightLb ? `${log.weightLb} lb` : null, log.depthFt ? `${log.depthFt} ft` : null, 'private'].filter(Boolean).join(' · ')}</Text>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  ) : (
+                    <View style={s.safeWaterStatusCard}>
+                      <Text style={s.safeWaterStatusTitle}>NO CATCH LOGS</Text>
+                      <Text style={s.safeWaterStatusText}>Catch entries stay private and on this device.</Text>
+                    </View>
+                  )}
+                </>
+              )}
+
+              {safeWaterHubTab === 'offline' && (
+                <>
+                  <View style={s.safeWaterStatusCard}>
+                    <View style={s.safeWaterStatusTop}>
+                      <Text style={s.safeWaterStatusTitle}>SOURCE STATUS</Text>
+                      <Text style={[s.safeWaterStatusPill, licensedChart?.available ? { color: C.green, borderColor: C.green + '55' } : null]}>
+                        {licensedChart?.available ? 'OFFLINE CHART' : 'NO LICENSED CHART'}
+                      </Text>
+                    </View>
+                    <Text style={s.safeWaterStatusText}>
+                      {licensedChart?.note || 'Lake of the Woods has public/live context, but no licensed premium chart pack is integrated yet.'}
+                    </Text>
+                    <Text style={s.safeWaterStatusMeta} numberOfLines={3}>
+                      Offline: base {offlineStatus.base_map || 'when downloaded'} · private spots ready · public charts {offlineStatus.public_live_chart || 'live only'}
+                    </Text>
+                  </View>
+                  <View style={s.safeWaterMetricRow}>
+                    <View style={s.safeWaterMetric}><Text style={s.safeWaterMetricValue}>{waterSpots.length}</Text><Text style={s.safeWaterMetricLabel}>PRIVATE SPOTS</Text></View>
+                    <View style={s.safeWaterMetric}><Text style={s.safeWaterMetricValue}>{catchLogs.length}</Text><Text style={s.safeWaterMetricLabel}>CATCHES</Text></View>
+                    <View style={s.safeWaterMetric}><Text style={s.safeWaterMetricValue}>{waterRoutes.length}</Text><Text style={s.safeWaterMetricLabel}>ROUTES</Text></View>
+                  </View>
+                </>
+              )}
+
               <Text style={s.safeWaterDisclosure}>{safeWaterSourceDisclosure}</Text>
             </ScrollView>
           )}
+        </View>
+      )}
+
+      {waterFollowRoute && !navMode && (
+        <View style={s.waterFollowHud} pointerEvents="auto">
+          <View style={s.waterFollowTop}>
+            <View style={s.waterFollowCompass}>
+              <ThreeNeedleCompass heading={userHeading} bearing={waterFollowMetrics?.bearing ?? null} compact />
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={s.waterFollowLabel}>WATER FOLLOW</Text>
+              <Text style={s.waterFollowTitle} numberOfLines={1}>{waterFollowMetrics?.nextPoint.name || waterFollowRoute.end.name}</Text>
+              <Text style={s.waterFollowMeta} numberOfLines={1}>
+                {waterFollowMetrics ? `${formatWaterMiles(waterFollowMetrics.nextDistanceMi)} to point · ${formatWaterMiles(waterFollowMetrics.remainingMi)} left` : `${waterFollowRoute.distanceMi.toFixed(1)} mi corridor`}
+              </Text>
+            </View>
+            <TouchableOpacity style={s.safeWaterIconButton} onPress={() => setWaterFollowRoute(null)}>
+              <Ionicons name="close" size={14} color={OVR.text2} />
+            </TouchableOpacity>
+          </View>
+          <View style={s.waterFollowStrip}>
+            <View style={s.waterFollowStat}>
+              <Text style={s.waterFollowValue}>{speedMph !== null ? Math.round(speedMph) : '--'}</Text>
+              <Text style={s.waterFollowUnit}>MPH</Text>
+            </View>
+            <View style={s.waterFollowStat}>
+              <Text style={s.waterFollowValue}>{waterFollowMetrics?.etaMinutes ?? waterFollowRoute.etaMinutes}</Text>
+              <Text style={s.waterFollowUnit}>MIN</Text>
+            </View>
+            <View style={s.waterFollowStat}>
+              <Text style={[s.waterFollowValue, waterFollowMetrics?.hazardMi != null && waterFollowMetrics.hazardMi < 0.25 && { color: '#f97316' }]}>
+                {waterFollowMetrics?.hazardMi != null ? formatWaterMiles(waterFollowMetrics.hazardMi) : '--'}
+              </Text>
+              <Text style={s.waterFollowUnit}>HAZARD</Text>
+            </View>
+          </View>
+          {waterFollowMetrics?.offCorridor ? (
+            <View style={s.waterFollowWarn}>
+              <Ionicons name="warning-outline" size={14} color="#f97316" />
+              <Text style={s.waterFollowWarnText}>OFF CORRIDOR · {formatWaterMiles(waterFollowMetrics.offCorridorMi)}</Text>
+            </View>
+          ) : null}
+          <Text style={s.waterFollowDisclosure} numberOfLines={2}>
+            Waypoint prompts only. Not certified navigation or turn-by-turn marine routing.
+          </Text>
         </View>
       )}
 
@@ -12529,6 +12922,40 @@ function MapScreen() {
         </TouchableOpacity>
       </Modal>
 
+      <Modal visible={catchLogVisible} animationType="slide" transparent onRequestClose={() => setCatchLogVisible(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.modalOverlay}>
+          <TrailheadSheet handle={false} style={s.catchLogSheet} contentStyle={s.catchLogContent}>
+            <View style={s.safeWaterHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.safeWaterTitle}>CATCH LOG</Text>
+                <Text style={s.safeWaterSub}>PRIVATE · ON DEVICE</Text>
+              </View>
+              <TouchableOpacity style={s.safeWaterIconButton} onPress={() => setCatchLogVisible(false)}>
+                <Ionicons name="close" size={14} color={OVR.text2} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.catchLogFields}>
+              <TextInput style={s.catchInput} value={catchDraft.species} onChangeText={species => setCatchDraft(p => ({ ...p, species }))} placeholder="Species" placeholderTextColor={OVR.text3} />
+              <View style={s.catchGrid}>
+                <TextInput style={s.catchInput} value={catchDraft.count} onChangeText={count => setCatchDraft(p => ({ ...p, count }))} placeholder="Count" placeholderTextColor={OVR.text3} keyboardType="number-pad" />
+                <TextInput style={s.catchInput} value={catchDraft.lengthIn} onChangeText={lengthIn => setCatchDraft(p => ({ ...p, lengthIn }))} placeholder="Length in" placeholderTextColor={OVR.text3} keyboardType="decimal-pad" />
+                <TextInput style={s.catchInput} value={catchDraft.weightLb} onChangeText={weightLb => setCatchDraft(p => ({ ...p, weightLb }))} placeholder="Weight lb" placeholderTextColor={OVR.text3} keyboardType="decimal-pad" />
+                <TextInput style={s.catchInput} value={catchDraft.depthFt} onChangeText={depthFt => setCatchDraft(p => ({ ...p, depthFt }))} placeholder="Depth ft" placeholderTextColor={OVR.text3} keyboardType="decimal-pad" />
+              </View>
+              <TextInput style={s.catchInput} value={catchDraft.baitLure} onChangeText={baitLure => setCatchDraft(p => ({ ...p, baitLure }))} placeholder="Bait or lure" placeholderTextColor={OVR.text3} />
+              <TextInput style={s.catchInput} value={catchDraft.technique} onChangeText={technique => setCatchDraft(p => ({ ...p, technique }))} placeholder="Technique" placeholderTextColor={OVR.text3} />
+              <TextInput style={s.catchInput} value={catchDraft.waterTempF} onChangeText={waterTempF => setCatchDraft(p => ({ ...p, waterTempF }))} placeholder="Water temp F" placeholderTextColor={OVR.text3} keyboardType="decimal-pad" />
+              <TextInput style={[s.catchInput, s.catchNotes]} value={catchDraft.notes} onChangeText={notes => setCatchDraft(p => ({ ...p, notes }))} placeholder="Notes" placeholderTextColor={OVR.text3} multiline />
+              <Text style={s.safeWaterDisclosure}>{[waterConditionsLabel, fishingMajorWindow !== '--' ? `Solunar ${fishingMajorWindow}` : null].filter(Boolean).join(' · ') || 'Private catch log'}</Text>
+            </ScrollView>
+            <TouchableOpacity style={[s.safeWaterAction, s.safeWaterPrimaryAction, s.catchSaveBtn]} onPress={saveCatchLog}>
+              <Ionicons name="checkmark-outline" size={14} color="#fff" />
+              <Text style={[s.safeWaterActionText, { color: '#fff' }]}>Save Catch</Text>
+            </TouchableOpacity>
+          </TrailheadSheet>
+        </KeyboardAvoidingView>
+      </Modal>
+
       {/* ── Offline Map Download Modal — native MLN pack system ── */}
       <OfflineModal
         visible={showOfflineModal}
@@ -14682,7 +15109,7 @@ const makeStyles = (C: ColorPalette) => {
   safeWaterPanel: {
     position: 'absolute',
     left: 12,
-    right: 66,
+    right: 12,
     bottom: 108,
     maxHeight: '62%' as any,
     backgroundColor: 'rgba(5, 10, 12, 0.86)',
@@ -14714,6 +15141,14 @@ const makeStyles = (C: ColorPalette) => {
   safeWaterTitle: { color: '#F5F5F7', fontSize: 12, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
   safeWaterSub: { color: OVR.text3, fontSize: 9, fontFamily: mono, marginTop: 2 },
   safeWaterPanelContent: { gap: 9, paddingBottom: 2 },
+  safeWaterTabs: { gap: 6, paddingVertical: 1 },
+  safeWaterTab: {
+    minHeight: 31, borderRadius: 999, borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.11)', backgroundColor: 'rgba(255,255,255,0.045)',
+    paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5,
+  },
+  safeWaterTabActive: { backgroundColor: 'rgba(8,145,178,0.78)', borderColor: 'rgba(103,232,249,0.72)' },
+  safeWaterTabText: { color: OVR.text2, fontSize: 8.5, fontFamily: mono, fontWeight: '900' },
   safeWaterCompactMetrics: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   safeWaterCompactMetric: {
     color: '#67e8f9', fontSize: 9, fontFamily: mono, fontWeight: '800',
@@ -14780,6 +15215,10 @@ const makeStyles = (C: ColorPalette) => {
     borderRadius: 13, borderWidth: 1, borderColor: 'rgba(103,232,249,0.22)',
     backgroundColor: 'rgba(8,145,178,0.08)', padding: 10, gap: 8,
   },
+  safeWaterRouteReview: {
+    borderRadius: 13, borderWidth: 1, borderColor: 'rgba(103,232,249,0.28)',
+    backgroundColor: 'rgba(103,232,249,0.08)', padding: 10, gap: 8,
+  },
   safeWaterCorridorPoints: { flexDirection: 'row', gap: 7 },
   safeWaterPointButton: {
     flex: 1, minHeight: 45, borderRadius: 10, borderWidth: 1,
@@ -14797,6 +15236,63 @@ const makeStyles = (C: ColorPalette) => {
   safeWaterPrimaryAction: { backgroundColor: 'rgba(8,145,178,0.86)', borderColor: 'rgba(103,232,249,0.68)' },
   safeWaterActionText: { color: OVR.text2, fontSize: 8.5, fontFamily: mono, fontWeight: '900' },
   safeWaterDisclosure: { color: OVR.text3, fontSize: 8.5, fontFamily: mono, lineHeight: 12 },
+  safeWaterList: { gap: 7 },
+  safeWaterListItem: {
+    minHeight: 52, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.045)', paddingHorizontal: 9, paddingVertical: 8,
+    flexDirection: 'row', alignItems: 'center', gap: 9,
+  },
+  safeWaterListIcon: {
+    width: 32, height: 32, borderRadius: 10, borderWidth: 1,
+    borderColor: 'rgba(103,232,249,0.28)', backgroundColor: 'rgba(8,145,178,0.12)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  waterFollowHud: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    top: 98,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(103,232,249,0.28)',
+    backgroundColor: 'rgba(5,10,12,0.88)',
+    padding: 10,
+    gap: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.48,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 14 },
+    elevation: 18,
+  },
+  waterFollowTop: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  waterFollowCompass: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center' },
+  waterFollowLabel: { color: '#67e8f9', fontSize: 8, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
+  waterFollowTitle: { color: OVR.text, fontSize: 14, fontWeight: '900', marginTop: 2 },
+  waterFollowMeta: { color: OVR.text3, fontSize: 9, fontFamily: mono, marginTop: 2 },
+  waterFollowStrip: { flexDirection: 'row', gap: 7 },
+  waterFollowStat: {
+    flex: 1, minHeight: 47, borderRadius: 11, borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)',
+    backgroundColor: 'rgba(255,255,255,0.045)', alignItems: 'center', justifyContent: 'center',
+  },
+  waterFollowValue: { color: OVR.text, fontSize: 15, fontFamily: mono, fontWeight: '900' },
+  waterFollowUnit: { color: OVR.text3, fontSize: 7.5, fontFamily: mono, fontWeight: '900', marginTop: 1 },
+  waterFollowWarn: {
+    minHeight: 30, borderRadius: 10, borderWidth: 1, borderColor: '#f9731655',
+    backgroundColor: '#f9731614', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+  },
+  waterFollowWarnText: { color: '#f97316', fontSize: 9, fontFamily: mono, fontWeight: '900' },
+  waterFollowDisclosure: { color: OVR.text3, fontSize: 8.5, fontFamily: mono, lineHeight: 12 },
+  catchLogSheet: { maxHeight: '82%' as any, borderTopLeftRadius: 20, borderTopRightRadius: 20 },
+  catchLogContent: { padding: 14, gap: 10 },
+  catchLogFields: { gap: 8, paddingBottom: 6 },
+  catchGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  catchInput: {
+    minHeight: 42, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.045)', color: OVR.text, paddingHorizontal: 10,
+    fontSize: 12, fontFamily: mono,
+  },
+  catchNotes: { minHeight: 76, paddingTop: 10, textAlignVertical: 'top' },
+  catchSaveBtn: { minHeight: 42 },
   trailOverlayContent: { paddingBottom: 6 },
   trailCollapsedWrap: {
     position: 'absolute',

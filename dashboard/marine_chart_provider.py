@@ -348,7 +348,15 @@ def suggested_corridor(
     distance_mi = _haversine_mi(start_lat, start_lng, end_lat, end_lng)
     mid_lat = (start_lat + end_lat) / 2
     mid_lng = (start_lng + end_lng) / 2
-    dogleg = 0.035 if is_lake_of_the_woods(mid_lat, mid_lng) else 0.0
+    point_count = max(12, min(64, int(distance_mi * 3) + 2))
+    bend = 0.035 if is_lake_of_the_woods(mid_lat, mid_lng) else 0.012
+    coordinates: list[list[float]] = []
+    for idx in range(point_count):
+        t = idx / max(1, point_count - 1)
+        lat = start_lat + (end_lat - start_lat) * t
+        lng = start_lng + (end_lng - start_lng) * t
+        offset = math.sin(math.pi * t) * bend
+        coordinates.append([round(lng + offset, 6), round(lat, 6)])
     conflicts = [
         {
             "kind": "licensed_chart_missing",
@@ -372,16 +380,17 @@ def suggested_corridor(
         "status": "candidate_planning_only",
         "geometry": {
             "type": "LineString",
-            "coordinates": [
-                [round(start_lng, 6), round(start_lat, 6)],
-                [round(mid_lng + dogleg, 6), round(mid_lat, 6)],
-                [round(end_lng, 6), round(end_lat, 6)],
-            ],
+            "coordinates": coordinates,
         },
         "distance_mi": round(distance_mi, 2),
         "eta_minutes": round((distance_mi / 16.0) * 60) if distance_mi else 0,
         "conflicts": conflicts,
-        "source_confidence": "low_until_licensed_chart_provider",
+        "source_confidence": "low_planning_corridor",
+        "source_disclosure": "Planning only.",
+        "route_points": [
+            {"name": "Start", "lat": start_lat, "lng": start_lng, "kind": "start"},
+            {"name": "End", "lat": end_lat, "lng": end_lng, "kind": "end"},
+        ],
         "turn_by_turn": False,
         "certified_navigation": False,
         "navigation_note": NON_CERTIFIED_NAVIGATION_NOTE,

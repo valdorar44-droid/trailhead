@@ -1,3 +1,5 @@
+import json
+
 from dashboard.hydro_provider import (
     HYDRO_LAYERS,
     classify_hazard,
@@ -6,6 +8,7 @@ from dashboard.hydro_provider import (
     is_index_depth,
     read_hydro_manifest,
 )
+from dashboard.water_routing_provider import route_with_water_graph, water_graph_manifest
 from dashboard.marine_chart_provider import (
     MarineBounds,
     fishing_conditions,
@@ -75,6 +78,7 @@ def test_suggested_corridor_stays_planning_only():
     )
 
     assert corridor["status"] == "candidate_planning_only"
+    assert len(corridor["geometry"]["coordinates"]) > 3
     assert corridor["turn_by_turn"] is False
     assert corridor["certified_navigation"] is False
     assert any(conflict["kind"] == "licensed_chart_missing" for conflict in corridor["conflicts"])
@@ -87,3 +91,42 @@ def test_fishing_conditions_are_labeled_heuristic():
     assert conditions["station"]["id"] == "45148"
     assert conditions["solunar"]["status"] == "heuristic_placeholder"
     assert "planning context only" in conditions["source_disclosure"]
+
+
+def test_water_route_graph_manifest_and_route(tmp_path):
+    graph = {
+        "version": 1,
+        "mode": "safe_water_advisory_routing",
+        "region": "test-enc",
+        "name": "Test ENC",
+        "bounds": {"north": 49.1, "south": 48.9, "east": -94.1, "west": -94.5},
+        "source": {"name": "Test ENC graph"},
+        "confidence": "official_test_graph",
+        "counts": {"nodes": 3, "edges": 2},
+        "nodes": [
+            [-94.40, 49.00],
+            [-94.30, 49.02],
+            [-94.20, 49.04],
+        ],
+        "edges": [
+            [0, 1, 7600.0, "RECTRC", ""],
+            [1, 2, 7600.0, "RECTRC", ""],
+        ],
+    }
+    (tmp_path / "test-enc.graph.json").write_text(json.dumps(graph))
+
+    manifest = water_graph_manifest(tmp_path)
+    assert manifest["regions"][0]["id"] == "test-enc"
+    assert manifest["regions"][0]["counts"]["edges"] == 2
+
+    route = route_with_water_graph(
+        start_lat=49.0005,
+        start_lng=-94.4005,
+        end_lat=49.0395,
+        end_lng=-94.2005,
+        data_dir=tmp_path,
+    )
+    assert route is not None
+    assert route["source"] == "Test ENC graph"
+    assert route["source_confidence"] == "official_test_graph"
+    assert len(route["coordinates"]) >= 3

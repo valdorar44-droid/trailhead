@@ -15,7 +15,7 @@ type TourItem = {
 const TOUR_ITEMS: TourItem[] = [
   {
     title: 'Search camps or trails in this view',
-    body: 'Open Search this view on Map, choose Camps or Trails, then search the map area you are looking at.',
+    body: 'Use the Map search and filter controls to find camps, trails, and places in the area you are viewing.',
     icon: 'trail-sign-outline',
   },
   {

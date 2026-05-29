@@ -1,7 +1,8 @@
 import React, { forwardRef, useImperativeHandle } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import type { CampsitePin, Pin, Report } from '@/lib/api';
+import type { CampsitePin, Pin, Report, SuggestedWaterCorridorResponse, WaterSpotCard } from '@/lib/api';
+import type { WaterRoute } from '@/lib/store';
 import { useTheme } from '@/lib/design';
 import type { RouteOpts, RouteResult, RouteStep, MapBounds, WP } from './types';
 
@@ -31,6 +32,10 @@ export interface NativeMapProps {
   camps:         CampsitePin[];
   gas:           { lat: number; lng: number; name: string }[];
   pois:          { lat: number; lng: number; name: string; type: string }[];
+  waterNavLines?: any;
+  waterSpotCards?: WaterSpotCard[];
+  waterCorridor?: SuggestedWaterCorridorResponse | null;
+  waterFollowRoute?: WaterRoute | null;
   reports:       Report[];
   communityPins: Pin[];
   searchMarker:  { lat: number; lng: number; name: string } | null;

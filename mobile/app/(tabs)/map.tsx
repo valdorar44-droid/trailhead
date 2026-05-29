@@ -134,6 +134,7 @@ type RouteOpts = { avoidTolls: boolean; avoidHighways: boolean; backRoads: boole
 
 interface SearchPlace {
   lat: number; lng: number; name: string; dist?: number | null;
+  isCurrentLocation?: boolean;
   id?: string; source?: string; source_label?: string; place_id?: string; provider_place_id?: string;
   type?: string; subtype?: string; address?: string; phone?: string; website?: string;
   open_now?: boolean | null; rating?: number; rating_count?: number; photo_url?: string | null;
@@ -1187,6 +1188,17 @@ function formatWaterMiles(mi?: number | null) {
   if (mi == null || !Number.isFinite(mi)) return '--';
   if (mi < 0.1) return `${Math.max(20, Math.round(mi * 5280))} ft`;
   return mi >= 10 ? `${Math.round(mi)} mi` : `${mi.toFixed(1)} mi`;
+}
+
+function compactWaterSource(value?: string | null) {
+  const raw = String(value || '').toLowerCase();
+  if (!raw) return 'Open';
+  if (raw.includes('licensed')) return 'Chart';
+  if (raw.includes('user') || raw.includes('private')) return 'Private';
+  if (raw.includes('low')) return 'Low';
+  if (raw.includes('official')) return 'Official';
+  if (raw.includes('open') || raw.includes('source')) return 'Open';
+  return String(value).replace(/_/g, ' ').split(/\s+/).slice(0, 2).join(' ');
 }
 
 function newLocalWaterId(prefix: string) {
@@ -3644,7 +3656,7 @@ function MapScreen() {
   const [userSpeed,     setUserSpeed]     = useState<number | null>(null);
   const [userHeading,   setUserHeading]   = useState<number | null>(null);
   const [quickReport,   setQuickReport]   = useState(false);
-  const [controlsCollapsed, setControlsCollapsed] = useState(false);
+  const [showMapDrawer, setShowMapDrawer] = useState(false);
   const [discoveryMode, setDiscoveryMode] = useState<DiscoveryMode>('camps');
   const [trailDiscoveryScope, setTrailDiscoveryScope] = useState<TrailDiscoveryScope>('view');
   const [trailDiscoveryOrigin, setTrailDiscoveryOrigin] = useState<{ lat: number; lng: number } | null>(null);
@@ -3795,6 +3807,7 @@ function MapScreen() {
   const [safeWaterHubTab, setSafeWaterHubTab] = useState<SafeWaterHubTab>('route');
   const [waterRouteReview, setWaterRouteReview] = useState<WaterRoute | null>(null);
   const [waterFollowRoute, setWaterFollowRoute] = useState<WaterRoute | null>(null);
+  const waterFollowActive = Boolean(waterFollowRoute && !navMode);
   const [catchLogVisible, setCatchLogVisible] = useState(false);
   const [catchDraft, setCatchDraft] = useState<CatchDraft>({
     species: '',
@@ -3892,6 +3905,10 @@ function MapScreen() {
   const [layerRadar,   setLayerRadar]   = useState(false);
   const [layerMvum,    setLayerMvum]    = useState(false);
   const [layerNautical, setLayerNautical] = useState(false);
+  const safeWaterPlanningActive = Boolean(layerNautical && !navMode && !waterFollowActive);
+  const safeWaterSheetOwnsPage = Boolean(
+    safeWaterPlanningActive && (!safeWaterPanelCollapsed || waterRouteReview || waterCorridorPickMode),
+  );
   const [tappedTrail, setTappedTrail] = useState<{ name: string; lat: number; lng: number; cls: string } | null>(null);
   const [tappedTileSpot, setTappedTileSpot] = useState<{ name: string; kind: string; lat: number; lng: number } | null>(null);
   const [tappedGas,  setTappedGas]  = useState<{ name: string; lat: number; lng: number } | null>(null);
@@ -4147,6 +4164,9 @@ function MapScreen() {
   useEffect(() => {
     setTabBarHidden(
       navMode
+      || waterFollowActive
+      || safeWaterSheetOwnsPage
+      || showMapDrawer
       || showSearch
       || showFilterSheet
       || showLayerSheet
@@ -4166,10 +4186,38 @@ function MapScreen() {
     );
     return () => setTabBarHidden(false);
   }, [
-    navMode, showSearch, showFilterSheet, showLayerSheet, searchRouteCard, selectedCamp, selectedPlace, selectedTrail,
+    navMode, waterFollowActive, safeWaterSheetOwnsPage, showMapDrawer, showSearch, showFilterSheet, showLayerSheet, searchRouteCard, selectedCamp, selectedPlace, selectedTrail,
     selectedCommunityPin, tappedPoi, tappedGas, tappedTileSpot, tappedTrail,
     tappedWp, pendingPin, trailPinCaptureMode, trailRouteBuilderOpen, setTabBarHidden,
   ]);
+
+  useEffect(() => {
+    if (!waterFollowActive) return;
+    setQuickReport(false);
+    setShowSearch(false);
+    setShowMapDrawer(false);
+    setShowDiscoveryPanel(false);
+    setShowFilterSheet(false);
+    setShowLayerSheet(false);
+    setSelectedCamp(null);
+    setSelectedPlace(null);
+    setSelectedTrail(null);
+    setSelectedCommunityPin(null);
+    setTappedPoi(null);
+    setTappedGas(null);
+    setTappedTileSpot(null);
+    setTappedTrail(null);
+    setTappedWp(null);
+    setPendingPin(null);
+    setCampPickerVisible(false);
+    setCatchLogVisible(false);
+    setTrailPinCaptureMode(false);
+    setTrailRouteBuilderOpen(false);
+  }, [waterFollowActive]);
+
+  useEffect(() => {
+    if (navMode || showSearch || waterFollowActive) setShowMapDrawer(false);
+  }, [navMode, showSearch, waterFollowActive]);
   useEffect(() => { isReroutingRef.current = isRerouting; }, [isRerouting]);
 
   // Sync report refs + push combined list to WebView whenever either changes
@@ -5125,7 +5173,7 @@ function MapScreen() {
   function currentWaterMapPoint(label = 'Map center'): WaterCorridorPoint | null {
     const vp = viewportRef.current;
     if (vp) return { lat: (vp.n + vp.s) / 2, lng: (vp.e + vp.w) / 2, name: label };
-    if (userLoc) return { lat: userLoc.lat, lng: userLoc.lng, name: 'Current location' };
+    if (userLoc) return { lat: userLoc.lat, lng: userLoc.lng, name: 'Location' };
     return null;
   }
 
@@ -5143,9 +5191,9 @@ function MapScreen() {
       species_targets: spot.speciesTargets,
       depth_range_ft: spot.depthRangeFt,
       structure: spot.structure,
-      source: spot.source || 'Private on-device spot',
+      source: spot.source || 'Private',
       source_confidence: spot.sourceConfidence || 'user_saved',
-      navigation_note: spot.note || 'Private fishing spot. Informational only; not certified navigation.',
+      navigation_note: spot.note || 'Private',
     };
   }
 
@@ -5210,7 +5258,7 @@ function MapScreen() {
 
   async function buildWaterCorridor() {
     if (!waterCorridorStart || !waterCorridorEnd) {
-      setWaterCorridorError('Choose a start and end point.');
+      setWaterCorridorError('Set start/end.');
       return;
     }
     setWaterCorridorLoading(true);
@@ -5222,7 +5270,7 @@ function MapScreen() {
       addWaterRoute(route);
       setWaterRouteReview(route);
       setSafeWaterHubTab('route');
-      setQuickToast('Water route draft saved');
+      setQuickToast('Route saved');
       setTimeout(() => setQuickToast(''), 2400);
     } catch (err: any) {
       setWaterCorridor(null);
@@ -5837,6 +5885,52 @@ function MapScreen() {
     setNavMode(true);
     focusNavigationCamera();
     setShowSearch(false);
+  }
+
+  function previewSearchRoute(origin: SearchPlace, destination: SearchPlace) {
+    const dist = haversineKm(origin.lat, origin.lng, destination.lat, destination.lng);
+    const dest = { ...destination, dist, source: destination.source || 'search', type: destination.type || 'poi' };
+    Keyboard.dismiss();
+    if (navMode) endNavigation();
+    setRouteProgress(null);
+    setRouteFromCache(false);
+    setRouteDebug('');
+    setSearchRouteCard(dest);
+    setSelectedPlace(null);
+    navDestRef.current = { lat: dest.lat, lng: dest.lng, name: dest.name, day: 0, type: 'waypoint' };
+    setNavDest(navDestRef.current);
+    webRef.current?.postMessage(JSON.stringify({
+      type: 'route_to_search',
+      lat: dest.lat, lng: dest.lng,
+      name: dest.name,
+      userLat: origin.lat, userLng: origin.lng,
+    }));
+    nativeMapRef.current?.routeToSearch(dest.lat, dest.lng, dest.name, origin.lat, origin.lng);
+    nativeMapRef.current?.flyTo((origin.lat + dest.lat) / 2, (origin.lng + dest.lng) / 2);
+  }
+
+  function centerMapOnUser() {
+    if (!userLoc) return;
+    webRef.current?.postMessage(JSON.stringify({ type: 'locate', lat: userLoc.lat, lng: userLoc.lng }));
+    nativeMapRef.current?.locate(userLoc.lat, userLoc.lng);
+    const deg = 0.35;
+    const b = { n: userLoc.lat + deg, s: userLoc.lat - deg, e: userLoc.lng + deg, w: userLoc.lng - deg, zoom: 10 };
+    viewportRef.current = b;
+    loadCampsInArea(b, activeFilters);
+  }
+
+  function openSafeWaterMode() {
+    setLayerNautical(true);
+    toggleDataLayer('nautical', true);
+    setSafeWaterPanelCollapsed(false);
+    setActivePlaceFilters(prev => Array.from(new Set([...prev, ...WATER_NAV_PLACE_FILTER_IDS])));
+    setShowMapDrawer(false);
+  }
+
+  function openTrailDiscoveryFromDrawer() {
+    setDiscoveryMode('trails');
+    setShowMapDrawer(false);
+    runTrailDiscoverySearch('nearby');
   }
 
   async function openCampInsight(camp: CampsitePin, detail?: CampsiteDetail | null): Promise<boolean> {
@@ -7637,6 +7731,25 @@ function MapScreen() {
     setPanelCollapsed(!expanded);
     Haptics.selectionAsync().catch(() => {});
   }, [activeTrip?.trip_id, navMode]);
+  const canOpenMapDrawer = !navMode && !waterFollowActive && !showSearch;
+  const openMapDrawer = useCallback(() => {
+    if (!canOpenMapDrawer) return;
+    setShowMapDrawer(true);
+    Haptics.selectionAsync().catch(() => {});
+  }, [canOpenMapDrawer]);
+  const drawerEdgePan = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => false,
+    onMoveShouldSetPanResponder: (_, gesture) => (
+      canOpenMapDrawer && gesture.dx > 8 && Math.abs(gesture.dy) < 24 && Math.abs(gesture.dx) > Math.abs(gesture.dy)
+    ),
+    onMoveShouldSetPanResponderCapture: (_, gesture) => (
+      canOpenMapDrawer && gesture.dx > 8 && Math.abs(gesture.dy) < 24 && Math.abs(gesture.dx) > Math.abs(gesture.dy)
+    ),
+    onPanResponderTerminationRequest: () => false,
+    onPanResponderRelease: (_, gesture) => {
+      if (gesture.dx > 22 || gesture.vx > 0.24) openMapDrawer();
+    },
+  }), [canOpenMapDrawer, openMapDrawer]);
   const collapsedPanelPan = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => false,
     onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dy) > 6 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
@@ -7885,20 +7998,11 @@ function MapScreen() {
       Alert.alert('Location Needed', 'Enable location services to navigate.');
       return;
     }
-    if (navMode) endNavigation();
-    setRouteProgress(null);
-    const dest: WP = { lat: camp.lat, lng: camp.lng, name: camp.name, day: 0, type: 'camp' };
-    navDestRef.current = dest;
-    setNavDest(dest);
-    webRef.current?.postMessage(JSON.stringify({
-      type: 'route_to_search',
-      lat: dest.lat, lng: dest.lng, name: dest.name,
-      userLat: userLoc.lat, userLng: userLoc.lng,
-    }));
-    nativeMapRef.current?.routeToSearch(dest.lat, dest.lng, dest.name, userLoc.lat, userLoc.lng);
-    setNavMode(true);
-    focusNavigationCamera();
-    setShowSearch(false);
+    previewSearchRoute(
+      { name: 'My Location', lat: userLoc.lat, lng: userLoc.lng, isCurrentLocation: true },
+      { lat: camp.lat, lng: camp.lng, name: camp.name, type: 'camp' },
+    );
+    setShowSearch(true);
   }
 
   function openTrailFeature(feature: TrailFeature) {
@@ -8295,15 +8399,6 @@ function MapScreen() {
     setShowTrailList(false);
     setMapMoved(false);
     setTimeout(() => setSearchResult(null), 2400);
-  }
-
-  async function runDiscoverySearch() {
-    if (isLoadingAreaCamps || isSearchingTrails || !viewportRef.current) return;
-    setDiscoveryMode('trails');
-    await Promise.allSettled([
-      loadCampsInArea(viewportRef.current, activeFilters),
-      runTrailDiscoverySearch('view'),
-    ]);
   }
 
   function selectTrailFromDiscovery(trail: TrailFeature) {
@@ -9522,6 +9617,17 @@ function MapScreen() {
     (activeFilters.length > 0 ? 1 : 0) +
     (communityFilterChanged ? 1 : 0) +
     (placeFilterChanged ? 1 : 0);
+  const showMapStatusBar = Boolean(
+    !navMode &&
+    !waterFollowActive &&
+    (
+      activeTrip ||
+      isDownloading ||
+      routeAlerts.length > 0 ||
+      (safeWaterPlanningActive && waterRouteReview)
+    )
+  );
+  const compassTop = Math.max(insets.top + 10, 18);
 
   const nativeNavigationPanel = navMode ? (
     <TrailheadSheet handle={false} style={s.navHud} contentStyle={s.navHudInner}>
@@ -9627,12 +9733,6 @@ function MapScreen() {
             <Text style={[s.navStepsBtnText, isRerouting && { color: OVR.text3 }]}>REROUTE</Text>
           </TouchableOpacity>
         )}
-        {userLoc && (
-          <TouchableOpacity style={[s.navReportBtn, quickReport && s.navReportBtnActive]} onPress={() => { setQuickTypeIdx(null); setQuickReport(p => !p); }} hitSlop={14}>
-            <Ionicons name="warning" size={13} color={quickReport ? '#fff' : C.orange} />
-            <Text style={[s.navReportBtnText, quickReport && { color: '#fff' }]}>REPORT</Text>
-          </TouchableOpacity>
-        )}
       </View>
 
     </TrailheadSheet>
@@ -9693,7 +9793,7 @@ function MapScreen() {
         <NativeMap
           ref={nativeMapRef}
           waypoints={waypoints}
-          camps={[
+          camps={waterFollowActive ? [] : [
             ...(activeTrip?.campsites ?? []).filter(c => c.lat != null && c.lng != null && isFinite(c.lat) && isFinite(c.lng)),
             ...areaCamps.filter(c => c.lat != null && c.lng != null),
           ] as any}
@@ -9702,8 +9802,9 @@ function MapScreen() {
           waterNavLines={waterNavLines}
           waterSpotCards={allWaterSpotCards}
           waterCorridor={waterCorridor}
-          reports={mapReports}
-          communityPins={displayCommunityPins}
+          waterFollowRoute={waterFollowRoute}
+          reports={safeWaterPlanningActive || waterFollowActive ? [] : mapReports}
+          communityPins={safeWaterPlanningActive || waterFollowActive ? [] : displayCommunityPins}
           searchMarker={searchRouteCard ? { lat: searchRouteCard.lat, lng: searchRouteCard.lng, name: searchRouteCard.name } : null}
           userLoc={userLoc}
           navMode={navMode}
@@ -9766,11 +9867,11 @@ function MapScreen() {
           onMapTap={(lat, lng) => {
             if (waterCorridorPickMode) {
               if (lat == null || lng == null) {
-                setQuickToast('Map tap did not return a water point.');
+                setQuickToast('Tap again.');
                 setTimeout(() => setQuickToast(''), 3000);
                 return;
               }
-              const label = waterCorridorPickMode === 'start' ? 'Corridor start' : 'Corridor end';
+              const label = waterCorridorPickMode === 'start' ? 'Start' : 'End';
               setWaterCorridorPoint(waterCorridorPickMode, { lat, lng, name: `${label} · ${lat.toFixed(4)}, ${lng.toFixed(4)}` });
               setWaterCorridorPickMode(null);
               setLayerNautical(true);
@@ -9949,31 +10050,99 @@ function MapScreen() {
         </View>
       )}
 
-      {/* Top bar */}
-      <View style={s.topBar}>
+      {canOpenMapDrawer && (
+        <TourTarget id="map.tools" style={[s.mapDrawerToggleTarget, { top: compassTop }]}>
+          <TouchableOpacity
+            style={s.mapDrawerToggle}
+            onPress={openMapDrawer}
+            activeOpacity={0.84}
+            hitSlop={10}
+          >
+            <Ionicons name="menu-outline" size={21} color={OVR.text} />
+          </TouchableOpacity>
+        </TourTarget>
+      )}
+
+      {canOpenMapDrawer && (
+        <TouchableOpacity
+          style={[s.mapDrawerEdgePull, { top: compassTop + 58 }]}
+          onPress={openMapDrawer}
+          activeOpacity={0.8}
+          {...drawerEdgePan.panHandlers}
+        >
+          <View style={s.mapDrawerEdgeGrip} />
+        </TouchableOpacity>
+      )}
+
+      {showMapDrawer && (
+        <View style={s.mapDrawerOverlay} pointerEvents="auto">
+          <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => setShowMapDrawer(false)} />
+          <View style={[s.mapDrawer, { paddingTop: insets.top + 18, paddingBottom: bottomInset + 16 }]}>
+            <View style={s.mapDrawerHeader}>
+              <View>
+                <Text style={s.mapDrawerTitle}>Map tools</Text>
+                <Text style={s.mapDrawerSub}>Scout, route, water, layers</Text>
+              </View>
+              <TouchableOpacity style={s.mapDrawerClose} onPress={() => setShowMapDrawer(false)}>
+                <Ionicons name="close" size={17} color={OVR.text2} />
+              </TouchableOpacity>
+            </View>
+            <View style={s.mapDrawerSection}>
+              {[
+                { label: 'Search route', sub: 'Start, destination, preview', icon: 'search-outline', tone: '#60a5fa', action: () => { setShowMapDrawer(false); setShowSearch(true); } },
+                { label: 'Trails', sub: 'Nearby trail discovery', icon: 'trail-sign-outline', tone: '#22c55e', action: openTrailDiscoveryFromDrawer },
+                { label: 'Layers', sub: 'Map, land, weather, MVUM', icon: 'layers-outline', tone: C.silverBright, action: () => { setShowMapDrawer(false); setShowLayerSheet(true); } },
+                { label: 'Filters', sub: 'Camps, places, community pins', icon: 'filter-outline', tone: C.orange, action: () => { setShowMapDrawer(false); setShowFilterSheet(true); } },
+                { label: 'Offline maps', sub: 'Download and readiness', icon: 'cloud-download-outline', tone: '#a3e635', action: () => { setShowMapDrawer(false); setShowOfflineModal(true); } },
+                { label: 'Trail builder', sub: 'Pin and snap a trail route', icon: 'git-branch-outline', tone: '#22c55e', action: () => { setShowMapDrawer(false); trailPinCaptureMode ? clearTrailPinCapture() : beginTrailPinCapture(); } },
+                { label: `Map style: ${layerLabel[mapLayer]}`, sub: 'Cycle topo, satellite, hybrid', icon: 'map-outline', tone: '#38bdf8', action: () => { switchLayer(); } },
+                { label: nearbyLoading ? 'Loading guide' : 'Audio guide', sub: nearbyNarration ? 'Replay nearby context' : 'What is around me', icon: 'headset-outline', tone: C.orange, action: () => { handleNearbyAudio(); } },
+              ].map(item => (
+                <TouchableOpacity key={item.label} style={s.mapDrawerRow} onPress={item.action} activeOpacity={0.84}>
+                  <View style={[s.mapDrawerRowIcon, { borderColor: item.tone + '55', backgroundColor: item.tone + '14' }]}>
+                    <Ionicons name={item.icon as any} size={16} color={item.tone} />
+                  </View>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={s.mapDrawerRowTitle} numberOfLines={1}>{item.label}</Text>
+                    <Text style={s.mapDrawerRowSub} numberOfLines={1}>{item.sub}</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={15} color={OVR.text3} />
+                </TouchableOpacity>
+              ))}
+            </View>
+            <View style={s.mapDrawerPrimary}>
+              <TouchableOpacity style={[s.mapDrawerFeature, layerNautical && s.mapDrawerFeatureActive]} onPress={openSafeWaterMode}>
+                <View style={[s.mapDrawerFeatureIcon, { backgroundColor: '#0891b222', borderColor: '#67e8f966' }]}>
+                  <Ionicons name="boat-outline" size={20} color="#67e8f9" />
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={s.mapDrawerFeatureTitle}>Safe Water</Text>
+                  <Text style={s.mapDrawerFeatureSub} numberOfLines={2}>Routes, fishing spots, catches, and water conditions.</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={17} color={OVR.text3} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
+
+      {/* Route/status bar */}
+      {showMapStatusBar && <View style={s.topBar}>
         <TouchableOpacity
           style={s.topBarMain}
           activeOpacity={activeTrip && !navMode ? 0.78 : 1}
           onPress={() => restoreTripOverview(true)}
           disabled={!activeTrip || navMode}
         >
-          <View style={[s.topBarDot, navMode && { backgroundColor: C.orange }]} />
+          <View style={[s.topBarDot, safeWaterPlanningActive && { backgroundColor: '#67e8f9' }]} />
           <Text style={s.topBarText} numberOfLines={1}>
             {isDownloading
               ? `CACHING ${downloadProgress}% · ${downloadSaved.toLocaleString()} COORDS · ${downloadMB} MB`
-              : offlineWarning && navMode
-                ? 'OFFLINE MAPS NEEDED - TAP MAP BUTTON TO DOWNLOAD'
-                : isRerouting
-                ? 'RECALCULATING ROUTE...'
-                : navMode
-                  ? navDest && waypoints.length === 0
-                    ? isApproaching ? `ARRIVING · ${navDest.name}` : `NAVIGATING TO ${navDest.name.split(',')[0].toUpperCase()}`
-                    : isApproaching
-                      ? `ARRIVING · ${waypoints[navIdx]?.name ?? ''}`
-                      : isProceeding
-                        ? `PROCEED TO STOP ${navIdx + 1}/${waypoints.length}`
-                        : `NAVIGATING · STOP ${navIdx + 1}/${waypoints.length} · ${isRouted ? routeHudLabel : 'OFF-ROAD'}`
-                  : activeTrip ? activeTrip.plan.trip_name.toUpperCase() : 'NO ACTIVE TRIP'}
+              : isRerouting
+              ? 'RECALCULATING ROUTE...'
+              : safeWaterPlanningActive && waterRouteReview
+                ? 'WATER ROUTE REVIEW'
+                : activeTrip ? activeTrip.plan.trip_name.toUpperCase() : 'ROUTE'}
           </Text>
         </TouchableOpacity>
         {routeAlerts.length > 0 && (
@@ -10005,7 +10174,7 @@ function MapScreen() {
             <Ionicons name="close" size={14} color={C.text2} />
           </TouchableOpacity>
         )}
-      </View>
+      </View>}
 
       {/* Offline mode banners */}
       {activeTripFromCache && isActuallyOffline && (
@@ -10042,43 +10211,8 @@ function MapScreen() {
         </View>
       )}
 
-      {!activeTrip && !navMode && !showSearch && !selectedCamp && !selectedPlace && !selectedTrail && !selectedCommunityPin && (
-        <View style={s.exploreSearchWrap} pointerEvents="box-none">
-          <View
-            style={s.exploreSearchPill}
-          >
-            <TouchableOpacity
-              style={s.exploreSearchMain}
-              activeOpacity={0.9}
-              onPress={runDiscoverySearch}
-            >
-              <Ionicons name="search" size={15} color={OVR.text2} />
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={s.exploreSearchText} numberOfLines={1}>Search this view</Text>
-                <Text style={s.exploreSearchSub} numberOfLines={1}>
-                  {isLoadingAreaCamps || isSearchingTrails
-                    ? 'Finding camps and trails'
-                    : mapZoom >= 10
-                    ? placesLoading
-                      ? 'Loading nearby places'
-                      : explorePlaceCards.length
-                        ? `${explorePlaceCards.length} places nearby`
-                        : 'Move the map to discover places'
-                    : 'Move closer to discover camps, fuel, water, trails'}
-                </Text>
-              </View>
-            </TouchableOpacity>
-            {placesLoading ? <ActivityIndicator size="small" color="#3b82f6" /> : (
-              <TouchableOpacity style={s.exploreFilterBtn} onPress={() => setShowFilterSheet(true)} activeOpacity={0.86}>
-                <Ionicons name="options-outline" size={15} color={OVR.text2} />
-              </TouchableOpacity>
-            )}
-          </View>
-        </View>
-      )}
-
-      {!trailPinCaptureMode && !navMode && userHeading !== null && !showSearch && (
-        <View style={s.compassPill}>
+      {!trailPinCaptureMode && !navMode && !activeTrip && !safeWaterPlanningActive && !waterFollowActive && userHeading !== null && !showSearch && (
+        <View style={[s.compassPill, { top: compassTop, left: 68 }]}>
           <ThreeNeedleCompass heading={userHeading} bearing={null} compact />
           <View>
             <Text style={s.compassDir}>{compassDir(userHeading)}</Text>
@@ -10095,7 +10229,7 @@ function MapScreen() {
         </View>
       )}
 
-      {trailTraceMode && !navMode && (
+      {trailTraceMode && !navMode && !waterFollowActive && (
         <View style={s.traceHud} pointerEvents="auto">
           <View style={s.traceHudIcon}>
             <Ionicons name="analytics-outline" size={18} color="#22c55e" />
@@ -10112,7 +10246,7 @@ function MapScreen() {
         </View>
       )}
 
-      {trailPinCaptureMode && !navMode && (
+      {trailPinCaptureMode && !navMode && !waterFollowActive && (
         <View style={s.trailRouteBuilderWrap} pointerEvents="auto">
           <TrailheadSheet contentStyle={s.trailCaptureSheetContent}>
             <View style={s.trailCompactMessage}>
@@ -10187,7 +10321,7 @@ function MapScreen() {
       )}
 
       {/* Land check card — appears on long-press, auto-dismisses after 8s */}
-      {(landCheckLoading || landCheck) && (
+      {!safeWaterPlanningActive && !waterFollowActive && (landCheckLoading || landCheck) && (
         <TouchableOpacity
           activeOpacity={0.92}
           style={s.landCheckCard}
@@ -10242,177 +10376,54 @@ function MapScreen() {
 
       {/* Controls — hidden during nav (panel covers them and they serve no purpose while driving) */}
       <ScrollView
-        pointerEvents={navMode || showDiscoveryPanel || (!!selectedTrail && !trailCardCollapsed) || trailRouteBuilderOpen ? 'none' : 'auto'}
+        pointerEvents={navMode || safeWaterSheetOwnsPage || showDiscoveryPanel || (!!selectedTrail && !trailCardCollapsed) || trailRouteBuilderOpen ? 'none' : 'auto'}
         style={[
           s.controls,
-          (navMode || showDiscoveryPanel || (!!selectedTrail && !trailCardCollapsed) || trailRouteBuilderOpen) && { opacity: 0 },
+          (navMode || safeWaterSheetOwnsPage || showDiscoveryPanel || (!!selectedTrail && !trailCardCollapsed) || trailRouteBuilderOpen) && { opacity: 0 },
         ]}
         contentContainerStyle={s.controlsInner}
         showsVerticalScrollIndicator={false}
         bounces={false}
       >
-        <TouchableOpacity style={s.ctrlBtn} onPress={() => setControlsCollapsed(v => !v)}>
-          <Ionicons name={controlsCollapsed ? 'chevron-down' : 'chevron-up'} size={20} color={C.text} />
+        <TouchableOpacity style={s.ctrlBtn} onPress={centerMapOnUser} disabled={!userLoc}>
+          <Ionicons name="locate" size={20} color={userLoc ? OVR.text : OVR.text3} />
         </TouchableOpacity>
 
-        {!controlsCollapsed && (
-          <>
-            <TouchableOpacity style={s.ctrlBtn} onPress={() => {
-              if (!userLoc) return;
-              webRef.current?.postMessage(JSON.stringify({ type: 'locate', lat: userLoc.lat, lng: userLoc.lng }));
-              nativeMapRef.current?.locate(userLoc.lat, userLoc.lng);
-              const deg = 0.35;
-              const b = { n: userLoc.lat + deg, s: userLoc.lat - deg, e: userLoc.lng + deg, w: userLoc.lng - deg, zoom: 10 };
-              viewportRef.current = b;
-              loadCampsInArea(b, activeFilters);
-            }}>
-              <Ionicons name="locate" size={20} color={OVR.text} />
-            </TouchableOpacity>
+        {!waterFollowActive && <TourTarget id="map.search">
+          <TouchableOpacity
+            style={[s.ctrlBtn, showSearch && { backgroundColor: '#3b82f6dd', borderColor: '#3b82f6' }]}
+            onPress={() => { setShowSearch(p => !p); setSearchResults([]); setSearchQuery(''); }}
+          >
+            <Ionicons name="search" size={20} color={showSearch ? '#fff' : OVR.text} />
+          </TouchableOpacity>
+        </TourTarget>}
 
-            <TouchableOpacity style={s.ctrlBtn} onPress={switchLayer}>
-              <Text style={s.layerText}>{layerLabel[mapLayer]}</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[s.ctrlBtn, layerNautical && { backgroundColor: '#0891b2dd', borderColor: '#67e8f9' }]}
-              onPress={() => {
-                const next = !layerNautical;
-                setLayerNautical(next);
-                toggleDataLayer('nautical', next);
-                if (next) {
-                  setSafeWaterPanelCollapsed(false);
-                  setActivePlaceFilters(prev => Array.from(new Set([...prev, ...WATER_NAV_PLACE_FILTER_IDS])));
-                }
-              }}
-            >
-              <Ionicons name="boat-outline" size={20} color={layerNautical ? '#fff' : OVR.text} />
-            </TouchableOpacity>
-
-            {waypoints.length > 0 && (
-              <TouchableOpacity
-                style={[s.ctrlBtn, navMode && s.ctrlBtnActive]}
-                onPress={() => {
-                  if (navMode) { endNavigation(); return; }
-                  const days = [...new Set(waypoints.map(w => w.day))].sort((a, b) => a - b);
-                  if (days.length <= 1) { startDayNav('all'); return; }
-                  setShowDayModal(true);
-                }}
-              >
-                <Ionicons name="navigate" size={20} color={navMode ? '#fff' : OVR.text} />
-              </TouchableOpacity>
-            )}
-
-            <TourTarget id="map.search">
-              <TouchableOpacity
-                style={[s.ctrlBtn, showSearch && { backgroundColor: '#3b82f6dd', borderColor: '#3b82f6' }]}
-                onPress={() => { setShowSearch(p => !p); setSearchResults([]); setSearchQuery(''); }}
-              >
-                <Ionicons name="search" size={20} color={showSearch ? '#fff' : OVR.text} />
-              </TouchableOpacity>
-            </TourTarget>
-
-            {waypoints.length > 0 && (
-              <TouchableOpacity
-                style={[s.ctrlBtn, isDownloading && { backgroundColor: C.orange + 'dd', borderColor: C.orange }]}
-                onPress={() => {
-                  if (USE_NATIVE_MAP) {
-                    setShowOfflineModal(true);
-                    return;
-                  }
-                  if (isDownloading) {
-                    webRef.current?.postMessage(JSON.stringify({ type: 'cancel_download' }));
-                    setIsDownloading(false);
-                  } else {
-                    const vpLabel = 'area-' + Date.now();
-                    setIsDownloading(true);
-                    setDownloadLabel(vpLabel);
-                    webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles', label: vpLabel, minZ: 10, maxZ: 17 }));
-                  }
-                }}
-              >
-                <Ionicons
-                  name={isDownloading ? 'close-circle-outline' : offlineSaved ? 'cloud-done-outline' : 'cloud-download-outline'}
-                  size={20}
-                  color={isDownloading ? '#fff' : offlineSaved ? OVR.text2 : OVR.text}
-                />
-              </TouchableOpacity>
-            )}
-
-            <TouchableOpacity
-              style={[s.ctrlBtn, showFilterSheet && s.ctrlBtnActive]}
-              onPress={() => setShowFilterSheet(true)}
-            >
-              <Ionicons name="filter" size={20} color={showFilterSheet ? '#fff' : OVR.text} />
-            </TouchableOpacity>
-
-            <TourTarget id="map.trails">
-              <TouchableOpacity
-                style={[s.ctrlBtn, showDiscoveryPanel && trailDiscoveryScope === 'nearby' && { backgroundColor: C.orange + 'dd', borderColor: C.orange }]}
-                onPress={() => {
-                  setDiscoveryMode('trails');
-                  if (showDiscoveryPanel && trailDiscoveryScope === 'nearby') {
-                    setShowDiscoveryPanel(false);
-                  } else {
-                    runTrailDiscoverySearch('nearby');
-                  }
-                }}
-              >
-                <Ionicons name="trail-sign-outline" size={20} color={showDiscoveryPanel && trailDiscoveryScope === 'nearby' ? '#fff' : OVR.text} />
-              </TouchableOpacity>
-            </TourTarget>
-
-            <TourTarget id="map.trailBuilder">
-              <TouchableOpacity
-                style={[s.ctrlBtn, trailPinCaptureMode && { backgroundColor: '#22c55edd', borderColor: '#22c55e' }]}
-                onPress={trailPinCaptureMode ? clearTrailPinCapture : beginTrailPinCapture}
-              >
-                <Ionicons name="git-branch-outline" size={20} color={trailPinCaptureMode ? '#fff' : OVR.text} />
-              </TouchableOpacity>
-            </TourTarget>
-
-            <TourTarget id="map.offline">
-              <TouchableOpacity
-                style={[s.ctrlBtn, { borderColor: C.border }]}
-                onPress={() => setShowOfflineModal(true)}
-              >
-                <Ionicons name="map-outline" size={18} color={C.text2} />
-              </TouchableOpacity>
-            </TourTarget>
-
-            <TourTarget id="map.layers">
-              <TouchableOpacity
-              style={[s.ctrlBtn, showLayerSheet && s.ctrlBtnActive]}
-                onPress={() => setShowLayerSheet(true)}
-              >
-                <Ionicons name="layers-outline" size={20} color={showLayerSheet ? '#fff' : OVR.text} />
-              </TouchableOpacity>
-            </TourTarget>
-
-            <TouchableOpacity
-              style={[s.ctrlBtn, nearbyNarration != null && { backgroundColor: '#f97316dd', borderColor: '#f97316' }]}
-              onPress={nearbyLoading ? undefined : handleNearbyAudio}
-              disabled={nearbyLoading}
-            >
-              {nearbyLoading
-                ? <ActivityIndicator size="small" color={C.orange} />
-                : <Ionicons name="headset-outline" size={20} color={nearbyNarration != null ? '#fff' : OVR.text} />
-              }
-            </TouchableOpacity>
-          </>
+        {!waterFollowActive && waypoints.length > 0 && (
+          <TouchableOpacity
+            style={[s.ctrlBtn, navMode && s.ctrlBtnActive]}
+            onPress={() => {
+              if (navMode) { endNavigation(); return; }
+              const days = [...new Set(waypoints.map(w => w.day))].sort((a, b) => a - b);
+              if (days.length <= 1) { startDayNav('all'); return; }
+              setShowDayModal(true);
+            }}
+          >
+            <Ionicons name="navigate" size={20} color={navMode ? '#fff' : OVR.text} />
+          </TouchableOpacity>
         )}
       </ScrollView>
 
-      {layerNautical && !navMode && !showSearch && !selectedCamp && !selectedPlace && !selectedTrail && !selectedCommunityPin && (
-        <View style={s.safeWaterPanel} pointerEvents="auto">
+      {safeWaterPlanningActive && !showSearch && !selectedCamp && !selectedPlace && !selectedTrail && !selectedCommunityPin && (
+        <View style={[s.safeWaterPanel, safeWaterSheetOwnsPage && s.safeWaterPanelTakeover]} pointerEvents="auto">
           <View style={s.safeWaterHeader}>
             <View style={s.safeWaterTitleRow}>
               <View style={s.safeWaterIcon}>
                 <Ionicons name="boat-outline" size={15} color="#67e8f9" />
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={s.safeWaterTitle}>SAFE WATER HUB</Text>
+                <Text style={s.safeWaterTitle}>SAFE WATER</Text>
                 <Text style={s.safeWaterSub} numberOfLines={1}>
-                  {waterFollowRoute ? 'Water Follow Mode ready' : licensedChart?.available ? 'Licensed chart pack ready' : 'Private planning · public chart context'}
+                  {licensedChart?.available ? 'Chart' : 'Planning'}
                 </Text>
               </View>
             </View>
@@ -10424,7 +10435,7 @@ function MapScreen() {
           {safeWaterPanelCollapsed ? (
             <View style={s.safeWaterCompactMetrics}>
               <Text style={s.safeWaterCompactMetric}>{waterNavFeatureCount} marks</Text>
-              <Text style={s.safeWaterCompactMetric}>{waterNavHazardCount + hydroHazardCount} hazards</Text>
+              <Text style={s.safeWaterCompactMetric}>{waterNavHazardCount + hydroHazardCount} warn</Text>
               <Text style={s.safeWaterCompactMetric}>{waterSpotCount} spots</Text>
               <Text style={s.safeWaterCompactMetric}>{waterRoutes.length} routes</Text>
             </View>
@@ -10452,8 +10463,8 @@ function MapScreen() {
                 <>
               <View style={s.safeWaterMetricRow}>
                 {[
-                  { label: 'Sources', value: waterChartSourceNames, icon: 'layers-outline', tone: '#67e8f9' },
-                  { label: 'Hazards', value: String(waterNavHazardCount + hydroHazardCount), icon: 'warning-outline', tone: '#f97316' },
+                  { label: 'Source', value: compactWaterSource(waterChartSourceNames), icon: 'layers-outline', tone: '#67e8f9' },
+                  { label: 'Warn', value: String(waterNavHazardCount + hydroHazardCount), icon: 'warning-outline', tone: '#f97316' },
                   { label: 'Spots', value: String(waterSpotCount), icon: 'fish-outline', tone: C.green },
                   { label: 'Solunar', value: fishingMajorWindow, icon: 'moon-outline', tone: C.silverBright },
                 ].map(metric => (
@@ -10485,7 +10496,7 @@ function MapScreen() {
                   { label: 'Shallow', active: safeWaterShallowHighlight, icon: 'analytics-outline', onPress: () => setSafeWaterShallowHighlight(v => !v), enabled: true },
                   { label: 'Hazards', active: safeWaterHazardEmphasis, icon: 'warning-outline', onPress: () => setSafeWaterHazardEmphasis(v => !v), enabled: true },
                   { label: safeWaterHybridOverlay ? 'Hybrid' : 'Chart', active: safeWaterHybridOverlay, icon: 'map-outline', onPress: () => { setSafeWaterHybridOverlay(v => !v); if (!safeWaterHybridOverlay) setMapLayerState('hybrid'); }, enabled: true },
-                  { label: 'Veg/Structure', active: false, icon: 'leaf-outline', onPress: () => {}, enabled: Boolean(hydroCoverage?.available) },
+                  { label: 'Structure', active: false, icon: 'leaf-outline', onPress: () => {}, enabled: Boolean(hydroCoverage?.available) },
                 ].map(item => (
                   <TouchableOpacity
                     key={item.label}
@@ -10501,16 +10512,13 @@ function MapScreen() {
 
               <View style={s.safeWaterStatusCard}>
                 <View style={s.safeWaterStatusTop}>
-                  <Text style={s.safeWaterStatusTitle}>COVERAGE</Text>
+                  <Text style={s.safeWaterStatusTitle}>CHART</Text>
                   <Text style={[s.safeWaterStatusPill, licensedChart?.available ? { color: C.green, borderColor: C.green + '55' } : null]}>
-                    {licensedChart?.available ? 'OFFLINE CHART' : 'LIVE ONLY'}
+                    {licensedChart?.available ? 'OFFLINE' : 'NO CHART'}
                   </Text>
                 </View>
-                <Text style={s.safeWaterStatusText}>
-                  {licensedChart?.note || 'Lake of the Woods has public/live context, but no licensed premium chart pack is integrated yet.'}
-                </Text>
                 <Text style={s.safeWaterStatusMeta} numberOfLines={2}>
-                  Offline: base {offlineStatus.base_map || 'when downloaded'} · spots {offlineStatus.user_spots || 'ready'} · charts {offlineStatus.public_live_chart || 'live only'}
+                  Base {offlineStatus.base_map || 'offline'} · spots {offlineStatus.user_spots || 'ready'} · charts {offlineStatus.public_live_chart || 'live'}
                 </Text>
               </View>
                 </>
@@ -10554,14 +10562,14 @@ function MapScreen() {
                     <TouchableOpacity key={card.id} style={s.safeWaterMiniSpot} onPress={() => selectWaterSpot(card)}>
                       <Text style={s.safeWaterSpotKicker}>{card.kind.toUpperCase()}</Text>
                       <Text style={s.safeWaterMiniSpotName} numberOfLines={1}>{card.name}</Text>
-                      <Text style={s.safeWaterMiniSpotMeta} numberOfLines={1}>{(card.species_targets ?? []).join(', ') || card.source_confidence || 'source disclosed'}</Text>
+                      <Text style={s.safeWaterMiniSpotMeta} numberOfLines={1}>{(card.species_targets ?? []).join(', ') || compactWaterSource(card.source_confidence)}</Text>
                     </TouchableOpacity>
                   ))}
                 </ScrollView>
               ) : (
                 <View style={s.safeWaterStatusCard}>
-                  <Text style={s.safeWaterStatusTitle}>NO PREMIUM SPOTS IN VIEW</Text>
-                  <Text style={s.safeWaterStatusText}>{waterSpotCards?.empty_state || 'Move around Lake of the Woods or add your own saved fishing spots.'}</Text>
+                  <Text style={s.safeWaterStatusTitle}>NO SPOTS</Text>
+                  <Text style={s.safeWaterStatusText}>Move map.</Text>
                 </View>
               )}
                 </>
@@ -10571,36 +10579,36 @@ function MapScreen() {
                 <>
               <View style={s.safeWaterCorridorCard}>
                 <View style={s.safeWaterStatusTop}>
-                  <Text style={s.safeWaterStatusTitle}>SUGGESTED CORRIDOR</Text>
-                  <Text style={s.safeWaterStatusPill}>PLANNING ONLY</Text>
+                  <Text style={s.safeWaterStatusTitle}>CORRIDOR</Text>
+                  <Text style={s.safeWaterStatusPill}>PLANNING</Text>
                 </View>
                 <View style={s.safeWaterCorridorPoints}>
                   <TouchableOpacity
                     style={s.safeWaterPointButton}
                     onPress={() => {
-                      const point = userLoc ? { lat: userLoc.lat, lng: userLoc.lng, name: 'Current location' } : currentWaterMapPoint('Map center');
+                      const point = userLoc ? { lat: userLoc.lat, lng: userLoc.lng, name: 'Location' } : currentWaterMapPoint('Map center');
                       if (point) setWaterCorridorPoint('start', point);
                     }}
                   >
                     <Text style={s.safeWaterPointLabel}>START</Text>
-                    <Text style={s.safeWaterPointName} numberOfLines={1}>{waterCorridorStart?.name || 'Use location/center'}</Text>
+                    <Text style={s.safeWaterPointName} numberOfLines={1}>{waterCorridorStart?.name || 'Location'}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={s.safeWaterPointButton}
                     onPress={() => firstWaterSpot ? setWaterCorridorPoint('end', pointFromWaterSpot(firstWaterSpot)) : setWaterCorridorPickMode('end')}
                   >
                     <Text style={s.safeWaterPointLabel}>END</Text>
-                    <Text style={s.safeWaterPointName} numberOfLines={1}>{waterCorridorEnd?.name || (firstWaterSpot?.name ?? 'Tap map')}</Text>
+                    <Text style={s.safeWaterPointName} numberOfLines={1}>{waterCorridorEnd?.name || (firstWaterSpot?.name ?? 'Tap')}</Text>
                   </TouchableOpacity>
                 </View>
                 <View style={s.safeWaterActionRow}>
                   <TouchableOpacity style={s.safeWaterAction} onPress={() => setWaterCorridorPickMode('start')}>
                     <Ionicons name="radio-button-on-outline" size={12} color="#67e8f9" />
-                    <Text style={s.safeWaterActionText}>Pick Start</Text>
+                    <Text style={s.safeWaterActionText}>Start</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={s.safeWaterAction} onPress={() => setWaterCorridorPickMode('end')}>
                     <Ionicons name="flag-outline" size={12} color="#67e8f9" />
-                    <Text style={s.safeWaterActionText}>Pick End</Text>
+                    <Text style={s.safeWaterActionText}>End</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={[s.safeWaterAction, s.safeWaterPrimaryAction]} onPress={buildWaterCorridor} disabled={waterCorridorLoading}>
                     {waterCorridorLoading ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="git-branch-outline" size={12} color="#fff" />}
@@ -10608,10 +10616,10 @@ function MapScreen() {
                   </TouchableOpacity>
                 </View>
                 {waterCorridorPickMode ? (
-                  <Text style={s.safeWaterStatusMeta}>Tap the map to choose corridor {waterCorridorPickMode}.</Text>
+                  <Text style={s.safeWaterStatusMeta}>Tap map.</Text>
                 ) : waterCorridor ? (
                   <Text style={s.safeWaterStatusMeta}>
-                    {waterCorridor.distance_mi.toFixed(1)} mi · {waterCorridor.eta_minutes} min · {waterCorridorConflictCount} warning{waterCorridorConflictCount === 1 ? '' : 's'} · confidence {waterCorridor.source_confidence.replace(/_/g, ' ')}
+                    {waterCorridor.distance_mi.toFixed(1)} mi · {waterCorridor.eta_minutes} min · {waterCorridorConflictCount} warn · {compactWaterSource(waterCorridor.source_confidence)}
                   </Text>
                 ) : waterCorridorError ? (
                   <Text style={[s.safeWaterStatusMeta, { color: C.orange }]}>{waterCorridorError}</Text>
@@ -10621,21 +10629,16 @@ function MapScreen() {
               {activeWaterRouteReview ? (
                 <View style={s.safeWaterRouteReview}>
                   <View style={s.safeWaterStatusTop}>
-                    <Text style={s.safeWaterStatusTitle}>ROUTE REVIEW</Text>
-                    <Text style={s.safeWaterStatusPill}>{activeWaterRouteReview.conflicts.length} WARNINGS</Text>
+                    <Text style={s.safeWaterStatusTitle}>REVIEW</Text>
+                    <Text style={s.safeWaterStatusPill}>{activeWaterRouteReview.conflicts.length} WARN</Text>
                   </View>
                   <Text style={s.safeWaterSpotName} numberOfLines={1}>{activeWaterRouteReview.name}</Text>
                   <View style={s.safeWaterMetricRow}>
                     <View style={s.safeWaterMetric}><Text style={s.safeWaterMetricValue}>{activeWaterRouteReview.distanceMi.toFixed(1)}</Text><Text style={s.safeWaterMetricLabel}>MI</Text></View>
                     <View style={s.safeWaterMetric}><Text style={s.safeWaterMetricValue}>{activeWaterRouteReview.etaMinutes}</Text><Text style={s.safeWaterMetricLabel}>MIN</Text></View>
-                    <View style={s.safeWaterMetric}><Text style={s.safeWaterMetricValue}>{activeWaterRouteReview.sourceConfidence.replace(/_/g, ' ')}</Text><Text style={s.safeWaterMetricLabel}>SOURCE</Text></View>
+                    <View style={s.safeWaterMetric}><Text style={s.safeWaterMetricValue}>{compactWaterSource(activeWaterRouteReview.sourceConfidence)}</Text><Text style={s.safeWaterMetricLabel}>SOURCE</Text></View>
                   </View>
-                  {activeWaterRouteReview.conflicts.slice(0, 2).map((conflict, idx) => (
-                    <Text key={`${conflict.kind}-${idx}`} style={s.safeWaterStatusMeta} numberOfLines={2}>
-                      {conflict.severity.toUpperCase()} · {conflict.note}
-                    </Text>
-                  ))}
-                  <Text style={s.safeWaterSourceText} numberOfLines={2}>{activeWaterRouteReview.chartSource || waterChartSourceNames}</Text>
+                  <Text style={s.safeWaterSourceText} numberOfLines={1}>{activeWaterRouteReview.chartSource || waterChartSourceNames}</Text>
                   <View style={s.safeWaterActionRow}>
                     <TouchableOpacity style={[s.safeWaterAction, s.safeWaterPrimaryAction]} onPress={() => { setWaterFollowRoute(activeWaterRouteReview); setSafeWaterPanelCollapsed(true); }}>
                       <Ionicons name="navigate-outline" size={12} color="#fff" />
@@ -10644,10 +10647,6 @@ function MapScreen() {
                     <TouchableOpacity style={s.safeWaterAction} onPress={() => openCatchLog({ route: activeWaterRouteReview })}>
                       <Ionicons name="fish-outline" size={12} color={C.green} />
                       <Text style={s.safeWaterActionText}>Catch</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={s.safeWaterAction} onPress={() => { setQuickTypeIdx(null); setQuickReport(true); }}>
-                      <Ionicons name="warning-outline" size={12} color="#f59e0b" />
-                      <Text style={s.safeWaterActionText}>Report</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -10660,7 +10659,7 @@ function MapScreen() {
                   <View style={s.safeWaterActionRow}>
                     <TouchableOpacity style={[s.safeWaterAction, s.safeWaterPrimaryAction]} onPress={() => openCatchLog({ spot: selectedWaterSpot ?? firstWaterSpot ?? undefined })}>
                       <Ionicons name="add-outline" size={13} color="#fff" />
-                      <Text style={[s.safeWaterActionText, { color: '#fff' }]}>Log Catch</Text>
+                      <Text style={[s.safeWaterActionText, { color: '#fff' }]}>Log</Text>
                     </TouchableOpacity>
                   </View>
                   {catchLogs.length ? (
@@ -10679,8 +10678,8 @@ function MapScreen() {
                     </View>
                   ) : (
                     <View style={s.safeWaterStatusCard}>
-                      <Text style={s.safeWaterStatusTitle}>NO CATCH LOGS</Text>
-                      <Text style={s.safeWaterStatusText}>Catch entries stay private and on this device.</Text>
+                      <Text style={s.safeWaterStatusTitle}>NO CATCH</Text>
+                      <Text style={s.safeWaterStatusText}>Private.</Text>
                     </View>
                   )}
                 </>
@@ -10690,16 +10689,13 @@ function MapScreen() {
                 <>
                   <View style={s.safeWaterStatusCard}>
                     <View style={s.safeWaterStatusTop}>
-                      <Text style={s.safeWaterStatusTitle}>SOURCE STATUS</Text>
+                      <Text style={s.safeWaterStatusTitle}>OFFLINE</Text>
                       <Text style={[s.safeWaterStatusPill, licensedChart?.available ? { color: C.green, borderColor: C.green + '55' } : null]}>
-                        {licensedChart?.available ? 'OFFLINE CHART' : 'NO LICENSED CHART'}
+                        {licensedChart?.available ? 'CHART' : 'NO CHART'}
                       </Text>
                     </View>
-                    <Text style={s.safeWaterStatusText}>
-                      {licensedChart?.note || 'Lake of the Woods has public/live context, but no licensed premium chart pack is integrated yet.'}
-                    </Text>
                     <Text style={s.safeWaterStatusMeta} numberOfLines={3}>
-                      Offline: base {offlineStatus.base_map || 'when downloaded'} · private spots ready · public charts {offlineStatus.public_live_chart || 'live only'}
+                      Base {offlineStatus.base_map || 'offline'} · spots ready · charts {offlineStatus.public_live_chart || 'live'}
                     </Text>
                   </View>
                   <View style={s.safeWaterMetricRow}>
@@ -10710,7 +10706,7 @@ function MapScreen() {
                 </>
               )}
 
-              <Text style={s.safeWaterDisclosure}>{safeWaterSourceDisclosure}</Text>
+              <Text style={s.safeWaterDisclosure}>Planning only · no licensed chart</Text>
             </ScrollView>
           )}
         </View>
@@ -10723,10 +10719,10 @@ function MapScreen() {
               <ThreeNeedleCompass heading={userHeading} bearing={waterFollowMetrics?.bearing ?? null} compact />
             </View>
             <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={s.waterFollowLabel}>WATER FOLLOW</Text>
+              <Text style={s.waterFollowLabel}>FOLLOW</Text>
               <Text style={s.waterFollowTitle} numberOfLines={1}>{waterFollowMetrics?.nextPoint.name || waterFollowRoute.end.name}</Text>
               <Text style={s.waterFollowMeta} numberOfLines={1}>
-                {waterFollowMetrics ? `${formatWaterMiles(waterFollowMetrics.nextDistanceMi)} to point · ${formatWaterMiles(waterFollowMetrics.remainingMi)} left` : `${waterFollowRoute.distanceMi.toFixed(1)} mi corridor`}
+                {waterFollowMetrics ? `${formatWaterMiles(waterFollowMetrics.nextDistanceMi)} · ${formatWaterMiles(waterFollowMetrics.remainingMi)} left` : `${waterFollowRoute.distanceMi.toFixed(1)} mi`}
               </Text>
             </View>
             <TouchableOpacity style={s.safeWaterIconButton} onPress={() => setWaterFollowRoute(null)}>
@@ -10740,7 +10736,7 @@ function MapScreen() {
             </View>
             <View style={s.waterFollowStat}>
               <Text style={s.waterFollowValue}>{waterFollowMetrics?.etaMinutes ?? waterFollowRoute.etaMinutes}</Text>
-              <Text style={s.waterFollowUnit}>MIN</Text>
+              <Text style={s.waterFollowUnit}>ETA</Text>
             </View>
             <View style={s.waterFollowStat}>
               <Text style={[s.waterFollowValue, waterFollowMetrics?.hazardMi != null && waterFollowMetrics.hazardMi < 0.25 && { color: '#f97316' }]}>
@@ -10755,9 +10751,7 @@ function MapScreen() {
               <Text style={s.waterFollowWarnText}>OFF CORRIDOR · {formatWaterMiles(waterFollowMetrics.offCorridorMi)}</Text>
             </View>
           ) : null}
-          <Text style={s.waterFollowDisclosure} numberOfLines={2}>
-            Waypoint prompts only. Not certified navigation or turn-by-turn marine routing.
-          </Text>
+          <Text style={s.waterFollowDisclosure} numberOfLines={1}>Planning only · no licensed chart</Text>
         </View>
       )}
 
@@ -11425,6 +11419,7 @@ function MapScreen() {
               nativeMapRef.current?.flyTo(place.lat, place.lng);
               webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: place.lat, lng: place.lng, name: place.name }));
             }}
+            onPreviewRoute={previewSearchRoute}
             onStartNav={() => { setShowSearch(false); navigateToSearch(); }}
             onSelectOnMap={() => { setShowSearch(false); setSelectOnMapMode(true); }}
             onClose={() => { setShowSearch(false); setSearchRouteCard(null); }}
@@ -11658,7 +11653,7 @@ function MapScreen() {
 
       <PremiumPlaceSheet
         place={selectedPlace}
-        visible={!!selectedPlace && !navMode}
+        visible={!!selectedPlace && !navMode && !safeWaterPlanningActive}
         initialStage="full"
         related={selectedPlaceContext ?? undefined}
         routeContextLabel={selectedPlaceTripContext?.label}
@@ -11763,7 +11758,7 @@ function MapScreen() {
           source_label: tappedPoi.source_label || (tappedPoi.source === 'google' ? 'Google Places' : 'Map source'),
           summary: (tappedPoi as any).summary || tappedPoi.address || `${cleanDisplayLabel(tappedPoi.type)} selected from the map.`,
         } as any : null}
-        visible={!!tappedPoi && !navMode}
+        visible={!!tappedPoi && !navMode && !safeWaterPlanningActive}
         initialStage="full"
         routeContextLabel={tappedPoi ? tripPlaceContextFor(tappedPoi)?.label : undefined}
         onClose={() => {
@@ -11815,7 +11810,7 @@ function MapScreen() {
       />
 
       {/* ── Campsite quick card ── */}
-      {selectedCamp && !navMode && (
+      {selectedCamp && !navMode && !safeWaterPlanningActive && (
         <TrailheadSheet handle={false} style={s.quickCard} contentStyle={s.quickCardShell}>
           <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
             {/* Photo / placeholder */}
@@ -13167,7 +13162,7 @@ function MapScreen() {
                 <View style={s.trailEmptyState}>
                   <Ionicons name="trail-sign-outline" size={26} color="#16a34a" />
                   <Text style={s.trailEmptyTitle}>No trail places loaded</Text>
-                  <Text style={s.trailEmptyText}>Use the trail button for nearby trails, or open Search this view and choose Trails for the visible map area.</Text>
+                  <Text style={s.trailEmptyText}>Use the trail button for nearby trails, or open the right-side search and filter controls to scan this area.</Text>
                 </View>
               ) : trailDiscoveries.map(trail => (
                 <TouchableOpacity
@@ -13519,17 +13514,6 @@ function MapScreen() {
             </TouchableOpacity>
           )}
 
-          {userLoc && (
-            <TouchableOpacity
-              style={[s.navReportBtn, quickReport && s.navReportBtnActive]}
-              onPress={() => { setQuickTypeIdx(null); setQuickReport(p => !p); }}
-              hitSlop={12}
-            >
-              <Ionicons name="warning" size={13} color={quickReport ? '#fff' : '#f59e0b'} />
-              <Text style={[s.navReportBtnText, quickReport && { color: '#fff' }]}>REPORT</Text>
-            </TouchableOpacity>
-          )}
-
         </View>
 
         {/* Steps list */}
@@ -13627,8 +13611,8 @@ function MapScreen() {
       })()}
 
       {/* ── Waze-style quick report (two-step: type → subtype) ─────────────── */}
-      {userLoc && !showSearch && !showDiscoveryPanel && !selectedCamp && !selectedTrail && !selectedCommunityPin && (
-        <View style={[s.quickReportWrap, { bottom: bottomInset + 92 }, navMode && s.quickReportWrapNav]} pointerEvents="box-none">
+      {userLoc && !navMode && !safeWaterPlanningActive && !waterFollowActive && !showSearch && !showMapDrawer && !showDiscoveryPanel && !selectedCamp && !selectedPlace && !tappedPoi && !selectedTrail && !selectedCommunityPin && (
+        <View style={[s.quickReportWrap, { bottom: bottomInset + 78 }]} pointerEvents="box-none">
           {!!quickToast && (
             <View style={s.quickToast}>
               <Ionicons name="checkmark-circle" size={14} color={C.green} />
@@ -13714,26 +13698,15 @@ function MapScreen() {
               )}
             </View>
           )}
-          {!navMode && (
-            <TourTarget id="map.pinReport">
-              <View style={s.quickReportFabRow}>
-                <TouchableOpacity
-                  style={[s.quickReportFab, pinDropMode && { backgroundColor: '#f97316', borderColor: '#f97316' }]}
-                  onPress={() => beginCommunityPinDrop(false)}
-                >
-                  <Ionicons name="location-outline" size={13} color={pinDropMode ? '#fff' : '#f97316'} />
-                  <Text style={[s.quickReportFabText, pinDropMode && s.quickReportFabTextActive]}>PIN</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[s.quickReportFab, quickReport && s.quickReportFabActive]}
-                  onPress={() => { setQuickTypeIdx(null); setQuickReport(p => !p); }}
-                >
-                  <Ionicons name="warning" size={13} color={quickReport ? '#fff' : '#f59e0b'} />
-                  <Text style={[s.quickReportFabText, quickReport && s.quickReportFabTextActive]}>REPORT</Text>
-                </TouchableOpacity>
-              </View>
-            </TourTarget>
-          )}
+          <TourTarget id="map.pinReport">
+            <TouchableOpacity
+              style={[s.quickReportFab, pinDropMode && { backgroundColor: '#f97316', borderColor: '#f97316' }]}
+              onPress={() => beginCommunityPinDrop(false)}
+            >
+              <Ionicons name="location-outline" size={15} color={pinDropMode ? '#fff' : '#f97316'} />
+              <Text style={[s.quickReportFabText, pinDropMode && s.quickReportFabTextActive]}>PIN</Text>
+            </TouchableOpacity>
+          </TourTarget>
         </View>
       )}
 
@@ -14247,7 +14220,7 @@ function MapScreen() {
               <View style={s.trailEmptyState}>
                 <Ionicons name="trail-sign-outline" size={26} color="#16a34a" />
                 <Text style={s.trailEmptyTitle}>No trail places loaded</Text>
-                <Text style={s.trailEmptyText}>Use the trail button for nearby trails, or open Search this view and choose Trails for the visible map area.</Text>
+                <Text style={s.trailEmptyText}>Use the trail button for nearby trails, or open the right-side search and filter controls to scan this area.</Text>
               </View>
             ) : trailDiscoveries.map(trail => (
               <TouchableOpacity
@@ -14814,50 +14787,6 @@ const makeStyles = (C: ColorPalette) => {
   topBarMain: { flex: 1, minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 8 },
   topBarDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: C.orange },
   topBarText: { color: OVR.text, fontSize: 10, fontFamily: mono, flex: 1, letterSpacing: 0.5 },
-  exploreSearchWrap: {
-    position: 'absolute',
-    top: 102,
-    left: 116,
-    right: 76,
-    zIndex: 120,
-  },
-  exploreSearchPill: {
-    height: 50,
-    borderRadius: 16,
-    paddingRight: 8,
-    backgroundColor: 'rgba(5,5,5,0.68)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    shadowColor: '#000',
-    shadowOpacity: 0.36,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 12,
-  },
-  exploreSearchMain: {
-    flex: 1,
-    height: 50,
-    paddingLeft: 12,
-    paddingRight: 6,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  exploreSearchText: { color: OVR.text, fontSize: 13, fontWeight: '800' },
-  exploreSearchSub: { color: OVR.text3, fontSize: 9.5, fontFamily: mono, marginTop: 2 },
-  exploreFilterBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.07)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
   alertPill: {
     backgroundColor: C.red + '22', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3,
     borderWidth: 1, borderColor: C.red,
@@ -15008,6 +14937,143 @@ const makeStyles = (C: ColorPalette) => {
     borderColor: 'rgba(245,245,247,0.26)',
     shadowOpacity: 0.24,
   },
+  mapDrawerToggleTarget: {
+    position: 'absolute',
+    left: 16,
+    width: 44,
+    height: 44,
+    zIndex: 20,
+    elevation: 20,
+  },
+  mapDrawerToggle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(5,5,5,0.56)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.24,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 14,
+  },
+  mapDrawerEdgePull: {
+    position: 'absolute',
+    left: 0,
+    width: 24,
+    height: 64,
+    borderTopRightRadius: 14,
+    borderBottomRightRadius: 14,
+    backgroundColor: 'rgba(5,5,5,0.46)',
+    borderTopWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 19,
+    elevation: 19,
+    shadowColor: '#000',
+    shadowOpacity: 0.22,
+    shadowRadius: 10,
+    shadowOffset: { width: 4, height: 6 },
+  },
+  mapDrawerEdgeGrip: {
+    width: 3,
+    height: 28,
+    borderRadius: 2,
+    backgroundColor: 'rgba(245,245,247,0.55)',
+  },
+  mapDrawerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 12000,
+    elevation: 120,
+    backgroundColor: 'rgba(0,0,0,0.36)',
+  },
+  mapDrawer: {
+    width: '88%' as any,
+    maxWidth: 335,
+    height: '100%' as any,
+    backgroundColor: 'rgba(8,11,15,0.96)',
+    borderRightWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    paddingHorizontal: 14,
+    shadowColor: '#000',
+    shadowOpacity: 0.48,
+    shadowRadius: 28,
+    shadowOffset: { width: 12, height: 0 },
+    elevation: 121,
+  },
+  mapDrawerHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingBottom: 14,
+  },
+  mapDrawerTitle: { color: OVR.text, fontSize: 19, fontWeight: '900' },
+  mapDrawerSub: { color: OVR.text3, fontSize: 11, fontFamily: mono, marginTop: 3 },
+  mapDrawerClose: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mapDrawerPrimary: { paddingTop: 10, paddingBottom: 10 },
+  mapDrawerFeature: {
+    minHeight: 78,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(103,232,249,0.24)',
+    backgroundColor: 'rgba(8,145,178,0.1)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 12,
+  },
+  mapDrawerFeatureActive: {
+    backgroundColor: 'rgba(8,145,178,0.22)',
+    borderColor: 'rgba(103,232,249,0.58)',
+  },
+  mapDrawerFeatureIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mapDrawerFeatureTitle: { color: OVR.text, fontSize: 14, fontWeight: '900' },
+  mapDrawerFeatureSub: { color: OVR.text3, fontSize: 10.5, lineHeight: 14, marginTop: 3 },
+  mapDrawerSection: { gap: 7 },
+  mapDrawerRow: {
+    minHeight: 54,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.09)',
+    backgroundColor: 'rgba(255,255,255,0.045)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 10,
+  },
+  mapDrawerRowIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mapDrawerRowTitle: { color: OVR.text, fontSize: 12, fontWeight: '900' },
+  mapDrawerRowSub: { color: OVR.text3, fontSize: 9.5, fontFamily: mono, marginTop: 2 },
   discoveryModeWrap: {
     position: 'absolute',
     left: 14,
@@ -15123,6 +15189,10 @@ const makeStyles = (C: ColorPalette) => {
     shadowRadius: 28,
     shadowOffset: { width: 0, height: 16 },
     elevation: 18,
+  },
+  safeWaterPanelTakeover: {
+    bottom: 24,
+    maxHeight: '70%' as any,
   },
   safeWaterHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   safeWaterTitleRow: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 9 },
@@ -15251,8 +15321,11 @@ const makeStyles = (C: ColorPalette) => {
     position: 'absolute',
     left: 12,
     right: 12,
-    top: 98,
-    borderRadius: 18,
+    bottom: 18,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    borderBottomLeftRadius: 16,
+    borderBottomRightRadius: 16,
     borderWidth: 1,
     borderColor: 'rgba(103,232,249,0.28)',
     backgroundColor: 'rgba(5,10,12,0.88)',
@@ -15261,7 +15334,7 @@ const makeStyles = (C: ColorPalette) => {
     shadowColor: '#000',
     shadowOpacity: 0.48,
     shadowRadius: 24,
-    shadowOffset: { width: 0, height: 14 },
+    shadowOffset: { width: 0, height: -12 },
     elevation: 18,
   },
   waterFollowTop: { flexDirection: 'row', alignItems: 'center', gap: 9 },
@@ -15438,7 +15511,7 @@ const makeStyles = (C: ColorPalette) => {
   discoveryEmptyText: { color: OVR.text3, fontSize: 11, lineHeight: 16, textAlign: 'center' },
   layerText: { color: OVR.text2, fontSize: 9, fontFamily: mono, fontWeight: '800', letterSpacing: 0.5 },
   compassPill: {
-    position: 'absolute', top: 106, left: 16,
+    position: 'absolute', top: 18, left: 16,
     flexDirection: 'row', alignItems: 'center', gap: 8,
     backgroundColor: OVR.bg, borderRadius: 18,
     borderWidth: 1, borderColor: OVR.border,
@@ -15692,14 +15765,6 @@ const makeStyles = (C: ColorPalette) => {
     paddingHorizontal: 12, paddingVertical: 10, borderRadius: 11,
     borderWidth: 1, borderColor: OVR.border, backgroundColor: OVR.border2,
   },
-  navReportBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
-    paddingHorizontal: 12, paddingVertical: 10, borderRadius: 11,
-    borderWidth: 1, borderColor: C.orange + '55', backgroundColor: C.orange + '14',
-    marginLeft: 'auto' as any,
-  },
-  navReportBtnActive: { backgroundColor: C.orange, borderColor: C.orange },
-  navReportBtnText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 0.4 },
   dlBar: {
     position: 'absolute', top: 92, left: 16, right: 16,
     height: 3, borderRadius: 1.5, backgroundColor: C.border, overflow: 'hidden',
@@ -16608,11 +16673,9 @@ const makeStyles = (C: ColorPalette) => {
 
   // ── Waze-style quick report
   quickReportWrap: {
-    position: 'absolute', left: 0, right: 0,
-    alignItems: 'center',
-  },
-  quickReportWrapNav: {
-    bottom: 400,
+    position: 'absolute',
+    right: 16,
+    alignItems: 'flex-end',
   },
   quickToast: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
@@ -16630,12 +16693,6 @@ const makeStyles = (C: ColorPalette) => {
     alignSelf: 'center',
     shadowColor: '#000', shadowOpacity: 0.38, shadowRadius: 22, shadowOffset: { width: 0, height: 12 },
   },
-  quickReportFabRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
   quickReportBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     paddingHorizontal: 14, paddingVertical: 12,
@@ -16649,20 +16706,11 @@ const makeStyles = (C: ColorPalette) => {
     alignItems: 'center',
   },
   quickReportFab: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
+    flexDirection: 'row', alignItems: 'center', gap: 5,
     backgroundColor: 'rgba(8,8,10,0.74)', borderRadius: 24,
-    paddingHorizontal: 15, paddingVertical: 10,
+    paddingHorizontal: 12, paddingVertical: 9,
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)',
     shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.32, shadowRadius: 14,
-  },
-  quickReportFabActive: {
-    backgroundColor: C.orange, borderColor: C.orange,
-    shadowColor: C.orange,
-    shadowOpacity: 0.34,
-    shadowRadius: 16,
-  },
-  quickReportFabNav: {
-    backgroundColor: 'rgba(8,8,10,0.82)', borderColor: C.orange + '55',
   },
   quickReportFabText: { color: OVR.text2, fontSize: 11, fontFamily: mono, fontWeight: '900' },
   quickReportFabTextActive: { color: '#fff' },

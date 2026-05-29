@@ -319,7 +319,7 @@ export default function RootLayout() {
                 {[
                   ['Rig setup', 'Fuel range, clearance, towing, and comfort shape every route.', 'car-sport-outline'],
                   ['AI Planner', 'Ask for the trip intent; Trailhead turns it into daily stops and warnings.', 'sparkles-outline'],
-                  ['Map search', 'Use Search this view to choose Camps or Trails, then layer public land, weather, reports, and places as you scout.', 'search-outline'],
+                  ['Map search', 'Use the Map search and filter controls for camps, trails, public land, weather, reports, and places as you scout.', 'search-outline'],
                   ['Trail building', 'Free from the map button: drop anchors along a trail, snap the route, then save or follow it.', 'git-branch-outline'],
                   ['Route Builder', 'Choose Direct, Balanced, Wild, Loop, or There and back, then swap camps, fuel, and places by day.', 'map-outline'],
                   ['Downloads', 'Free for everyone: save Map, Navigation, Places, Topo, Trails, and the Trip download before signal drops.', 'download-outline'],

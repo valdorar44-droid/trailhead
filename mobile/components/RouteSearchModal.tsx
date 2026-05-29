@@ -20,6 +20,7 @@ export interface SearchPlace {
   name: string;
   lat: number;
   lng: number;
+  isCurrentLocation?: boolean;
   dist?: number | null;
   id?: string;
   source?: string;
@@ -54,6 +55,7 @@ export interface RouteSearchModalProps {
   onCampTap?: (camp: CampsitePin) => void;  // opens camp detail card
   onLoadSavedTrip?: (tripId: string) => void;  // load a previously planned trip
   onSelectDest: (place: SearchPlace) => void;
+  onPreviewRoute?: (origin: SearchPlace, destination: SearchPlace) => void;
   onStartNav: () => void;
   onSelectOnMap: () => void;
   onClose: () => void;
@@ -64,6 +66,7 @@ export interface RouteSearchModalProps {
 
 type ModalView = 'picker' | 'searching' | 'route';
 type SearchTab = 'history' | 'nearby' | 'categories';
+type RouteEndpoint = 'origin' | 'destination';
 
 // Overpass API categories — overlander-focused supply stops
 const CATEGORIES = [
@@ -286,7 +289,7 @@ const GROUP_COLORS = ['#ef4444', '#f5a623', '#14b8a6', '#38bdf8', '#eab308', '#2
 
 export default function RouteSearchModal({
   visible, userLoc, camps, gas, pois, communityPins, routeOpts, routeCoords, contextLoading = false,
-  onCampTap, onLoadSavedTrip, onSelectDest, onStartNav, onSelectOnMap, onClose,
+  onCampTap, onLoadSavedTrip, onSelectDest, onPreviewRoute, onStartNav, onSelectOnMap, onClose,
   routeCard, onClearRoute, onOpenRouteOpts,
 }: RouteSearchModalProps) {
   const C = useTheme();
@@ -312,6 +315,8 @@ export default function RouteSearchModal({
   const [view, setView]           = useState<ModalView>('picker');
   const [tab, setTab]             = useState<SearchTab>('history');
   const [query, setQuery]         = useState('');
+  const [activeEndpoint, setActiveEndpoint] = useState<RouteEndpoint>('destination');
+  const [routeOrigin, setRouteOrigin] = useState<SearchPlace | null>(null);
   const [results, setResults]     = useState<SearchPlace[]>([]);
   const [searching, setSearching] = useState(false);
   const [activeCat, setActiveCat] = useState<string | null>(null);
@@ -323,6 +328,13 @@ export default function RouteSearchModal({
   const [newGroupIcon, setNewGroupIcon] = useState(GROUP_ICONS[0]);
   const [offlineTrips, setOfflineTrips] = useState<Array<{ trip_id: string; plan: { trip_name: string; states?: string[]; duration_days?: number } }>>([]);
   const inputRef = useRef<TextInput>(null);
+  const currentLocationPlace = userLoc ? {
+    name: 'My Location',
+    lat: userLoc.lat,
+    lng: userLoc.lng,
+    isCurrentLocation: true,
+  } : null;
+  const activeOrigin = routeOrigin ?? currentLocationPlace;
 
   // Switch to route view when a route card arrives
   useEffect(() => {
@@ -333,6 +345,11 @@ export default function RouteSearchModal({
   useEffect(() => {
     if (visible && !routeCard) { setView('picker'); setQuery(''); setResults([]); }
   }, [visible]);
+
+  useEffect(() => {
+    if (!visible) return;
+    if (currentLocationPlace && (!routeOrigin || routeOrigin.isCurrentLocation)) setRouteOrigin(currentLocationPlace);
+  }, [visible, userLoc?.lat, userLoc?.lng]);
 
   useEffect(() => {
     if (!visible) return;
@@ -466,13 +483,28 @@ export default function RouteSearchModal({
     }
   }, [userLoc, camps, gas, pois]);
 
+  const previewRoute = useCallback((origin: SearchPlace | null, destination: SearchPlace) => {
+    const previewOrigin = origin ?? currentLocationPlace;
+    if (!previewOrigin) {
+      onSelectDest(destination);
+      return;
+    }
+    if (onPreviewRoute) onPreviewRoute(previewOrigin, destination);
+    else onSelectDest(destination);
+  }, [currentLocationPlace, onPreviewRoute, onSelectDest]);
+
   const selectPlace = useCallback((place: SearchPlace) => {
     addSearchHistory({ name: place.name, lat: place.lat, lng: place.lng, searchedAt: Date.now() });
-    onSelectDest(place);
+    if (activeEndpoint === 'origin') {
+      setRouteOrigin(place);
+      if (routeCard) previewRoute(place, routeCard);
+    } else {
+      previewRoute(activeOrigin, place);
+    }
     setQuery('');
     setResults([]);
     setView('route');
-  }, [addSearchHistory, onSelectDest]);
+  }, [activeEndpoint, activeOrigin, addSearchHistory, previewRoute, routeCard]);
 
   const saveCurrentPlace = useCallback((place: SearchPlace) => {
     const p: SavedPlace = {
@@ -536,7 +568,7 @@ export default function RouteSearchModal({
             <TextInput ref={inputRef} style={s.searchInput} value={query} onChangeText={setQuery}
               onSubmitEditing={() => { Keyboard.dismiss(); doSearch(); }}
               onBlur={() => Keyboard.dismiss()}
-              placeholder="Type to search all" placeholderTextColor={C.text3}
+              placeholder={activeEndpoint === 'origin' ? 'Start address or place' : 'Destination address or place'} placeholderTextColor={C.text3}
               returnKeyType="search" blurOnSubmit autoFocus />
             {searching
               ? <ActivityIndicator size="small" color={C.orange} />
@@ -709,11 +741,21 @@ export default function RouteSearchModal({
 
   // ── View: Route ready ────────────────────────────────────────────────────────
   if (view === 'route' && routeCard) {
+    const canStart = Boolean(activeOrigin?.isCurrentLocation);
     return (
       <TrailheadSheet handle={false} style={[s.sheet, { maxHeight: sheetMaxHeight }]} contentStyle={[s.sheetContent, { paddingBottom: bottomPad }]}>
         <View style={s.handle} />
         <View style={s.routeHeader}>
-          <Ionicons name="car" size={24} color={C.text2} />
+          <View style={s.routeHeaderIcon}>
+            <Ionicons name="navigate" size={18} color="#fff" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={s.routeTitle}>Route preview</Text>
+            <Text style={s.routeSubtitle}>{canStart ? 'Ready from your current location' : 'Preview from a custom start'}</Text>
+          </View>
+          <TouchableOpacity onPress={onClose} style={s.routeCloseBtn}>
+            <Ionicons name="close" size={18} color={C.text3} />
+          </TouchableOpacity>
         </View>
         <View style={s.fromToBlock}>
           <View style={s.fromToLine}>
@@ -723,29 +765,35 @@ export default function RouteSearchModal({
               <View style={[s.dot, { backgroundColor: C.orange }]} />
             </View>
             <View style={{ flex: 1 }}>
-              <View style={s.fromToRow}>
+              <TouchableOpacity style={s.fromToRow} onPress={() => { setActiveEndpoint('origin'); setView('searching'); setTab('history'); setQuery(''); setResults([]); setTimeout(() => inputRef.current?.focus(), 100); }}>
                 <Text style={s.fromToLabel}>FROM</Text>
-                <Text style={s.fromToValue} numberOfLines={1}>My Position</Text>
-              </View>
-              <View style={[s.fromToRow, { marginTop: 10 }]}>
+                <Text style={s.fromToValue} numberOfLines={1}>{activeOrigin?.name ?? 'Choose start'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[s.fromToRow, { marginTop: 10 }]} onPress={() => { setActiveEndpoint('destination'); setView('searching'); setTab('history'); setQuery(''); setResults([]); setTimeout(() => inputRef.current?.focus(), 100); }}>
                 <Text style={s.fromToLabel}>TO</Text>
                 <Text style={s.fromToValue} numberOfLines={1}>{routeCard.name.split(',')[0]}</Text>
-              </View>
+              </TouchableOpacity>
             </View>
             <View style={{ gap: 8 }}>
               <TouchableOpacity style={s.swapBtn}
                 onPress={() => {
-                  // Swap: navigate FROM destination BACK to user position
-                  if (routeCard && userLoc) {
-                    const swapped: SearchPlace = { name: 'My Position', lat: userLoc.lat, lng: userLoc.lng };
-                    onSelectDest({ ...routeCard }); // re-trigger route calc from new origin
+                  if (routeCard && activeOrigin) {
+                    const nextOrigin = { ...routeCard };
+                    const nextDest = { ...activeOrigin, isCurrentLocation: activeOrigin.isCurrentLocation };
+                    setRouteOrigin(nextOrigin);
+                    previewRoute(nextOrigin, nextDest);
                   }
                 }}>
                 <Ionicons name="swap-vertical" size={16} color={C.text2} />
               </TouchableOpacity>
               <TouchableOpacity style={s.swapBtn}
-                onPress={() => { setView('searching'); setTab('history'); }}>
-                <Ionicons name="add" size={16} color={C.text2} />
+                onPress={() => {
+                  setRouteOrigin(currentLocationPlace);
+                  if (currentLocationPlace) previewRoute(currentLocationPlace, routeCard);
+                }}
+                disabled={!currentLocationPlace}
+              >
+                <Ionicons name="locate" size={16} color={C.text2} />
               </TouchableOpacity>
             </View>
           </View>
@@ -765,20 +813,26 @@ export default function RouteSearchModal({
         <View style={s.routeActions}>
           <TouchableOpacity style={s.settingsBtn} onPress={onOpenRouteOpts}>
             <Ionicons name="options-outline" size={14} color={C.orange} />
-            <Text style={s.settingsBtnText}>Settings</Text>
+            <Text style={s.settingsBtnText}>Route options</Text>
           </TouchableOpacity>
           <TouchableOpacity style={s.settingsBtn}>
             <Ionicons name="volume-high-outline" size={14} color={C.orange} />
             <Text style={s.settingsBtnText}>Audio On</Text>
           </TouchableOpacity>
         </View>
+        {!canStart && (
+          <View style={s.previewNotice}>
+            <Ionicons name="information-circle-outline" size={14} color={C.text3} />
+            <Text style={s.previewNoticeText}>Start is available when FROM is My Location. Custom starts are route previews.</Text>
+          </View>
+        )}
         <View style={[s.startCancelRow, { paddingBottom: Math.max(bottomPad - 8, 10) }]}>
           <TouchableOpacity style={s.cancelBtn} onPress={() => { onClearRoute(); setView('picker'); }}>
             <Text style={s.cancelBtnText}>Cancel</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={s.startBtn} onPress={onStartNav}>
+          <TouchableOpacity style={[s.startBtn, !canStart && s.startBtnDisabled]} onPress={canStart ? onStartNav : undefined} disabled={!canStart}>
             <Ionicons name="navigate" size={18} color="#fff" />
-            <Text style={s.startBtnText}>Start</Text>
+            <Text style={s.startBtnText}>{canStart ? 'Start' : 'Preview only'}</Text>
           </TouchableOpacity>
         </View>
       </TrailheadSheet>
@@ -805,8 +859,8 @@ export default function RouteSearchModal({
       >
         {/* Search / Address quick actions */}
         <View style={s.quickCard}>
-          <TouchableOpacity style={s.quickRow} onPress={() => { setView('searching'); setTab('history'); setTimeout(() => inputRef.current?.focus(), 100); }}>
-            <Text style={s.quickRowText}>Search</Text>
+          <TouchableOpacity style={s.quickRow} onPress={() => { setActiveEndpoint('destination'); setView('searching'); setTab('history'); setTimeout(() => inputRef.current?.focus(), 100); }}>
+            <Text style={s.quickRowText}>Plan a route</Text>
             <Ionicons name="search" size={18} color={C.orange} />
           </TouchableOpacity>
           <View style={s.quickDivider} />
@@ -985,7 +1039,7 @@ export default function RouteSearchModal({
 
         {/* Change destination */}
         <TouchableOpacity style={s.swapRow}
-          onPress={() => { setView('searching'); setTab('history'); }}>
+          onPress={() => { setActiveEndpoint('destination'); setView('searching'); setTab('history'); }}>
           <Text style={s.quickRowText}>Change destination</Text>
           <Ionicons name="search" size={18} color={C.orange} />
         </TouchableOpacity>
@@ -1085,13 +1139,17 @@ const styles = (C: ReturnType<typeof useTheme>) => StyleSheet.create({
   resultDist: { color: C.text3, fontSize: 11, fontFamily: mono },
 
   // Route view
-  routeHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 4, paddingBottom: 8 },
-  fromToBlock: { paddingHorizontal: 16, paddingBottom: 12 },
+  routeHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingTop: 4, paddingBottom: 10 },
+  routeHeaderIcon: { width: 38, height: 38, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: C.orange, shadowColor: C.orange, shadowOpacity: 0.28, shadowRadius: 14 },
+  routeTitle: { color: C.text, fontSize: 17, fontWeight: '800' },
+  routeSubtitle: { color: C.text3, fontSize: 11, marginTop: 2 },
+  routeCloseBtn: { width: 34, height: 34, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s2, borderWidth: 1, borderColor: C.border },
+  fromToBlock: { marginHorizontal: 16, marginBottom: 12, padding: 12, borderRadius: 16, backgroundColor: C.s2, borderWidth: 1, borderColor: C.border },
   fromToLine: { flexDirection: 'row', alignItems: 'stretch', gap: 12 },
   dotLine: { width: 20, alignItems: 'center', paddingTop: 4 },
   dot: { width: 12, height: 12, borderRadius: 6 },
   dotConnector: { width: 2, flex: 1, backgroundColor: C.border, marginVertical: 4 },
-  fromToRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  fromToRow: { minHeight: 34, flexDirection: 'row', alignItems: 'center', gap: 8 },
   fromToLabel: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '700', width: 34 },
   fromToValue: { color: C.text, fontSize: 14, fontWeight: '500', flex: 1 },
   swapBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: C.s2, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center' },
@@ -1103,7 +1161,10 @@ const styles = (C: ReturnType<typeof useTheme>) => StyleSheet.create({
   cancelBtn: { flex: 1, paddingVertical: 13, borderRadius: 12, backgroundColor: C.s2, alignItems: 'center', borderWidth: 1, borderColor: C.border },
   cancelBtnText: { color: C.text2, fontSize: 14, fontWeight: '600' },
   startBtn: { flex: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 13, borderRadius: 12, backgroundColor: C.orange },
+  startBtnDisabled: { backgroundColor: C.s3, opacity: 0.72 },
   startBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  previewNotice: { marginHorizontal: 16, marginBottom: 12, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 12, borderWidth: 1, borderColor: C.border, backgroundColor: C.s2, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  previewNoticeText: { flex: 1, color: C.text3, fontSize: 11, lineHeight: 15 },
 
   // Categories
   catGrid: { flexDirection: 'row', flexWrap: 'wrap', padding: 12, gap: 10 },

@@ -14,12 +14,25 @@ import TourTarget from '@/components/TourTarget';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
 import { TrailheadButton, TrailheadCard, TrailheadSheet, TrailheadTopBar } from '@/components/TrailheadUI';
 import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
-import { api, ApiError, CampFullness, Campsite, CampsiteDetail, CampsiteInsight, CampsitePin, CampReusePolicy, ExcursionCandidate, GasStation, GeocodePlace, OsmPoi, PaywallError, RouteStyleMode, TripResult, TripShapeMode, TripTimeline, Waypoint, WeatherForecast } from '@/lib/api';
+import { api, ApiError, CampFullness, Campsite, CampsiteDetail, CampsiteInsight, CampsitePin, CampReusePolicy, ExcursionCandidate, GasStation, GeocodePlace, OsmPoi, PaywallError, RouteStyleMode, SavedRouteGeometryPayload, TripResult, TripShapeMode, TripTimeline, Waypoint, WeatherForecast } from '@/lib/api';
 import { loadAllPlacePoints } from '@/lib/offlinePlacePacks';
 import { deleteOfflineTrail, listOfflineTrails, type OfflineTrail } from '@/lib/offlineTrails';
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { useStore } from '@/lib/store';
 import { useTheme, mono, ColorPalette, RADIUS } from '@/lib/design';
+import {
+  ROUTE_BUILDER_AUDIT_MATRIX,
+  buildRouteLocationsForShape,
+  computeDaySegmentsFromRouteGeometry,
+  computeTripReadiness,
+  filterDurableNavigationStops,
+  fmtDistance as fmtUnitDistance,
+  fmtFuelVolumeFromMiles,
+  providerGeometryFromRoute,
+  routeUnitsParam,
+  savedGeometryFromCoords,
+  type ProviderRouteGeometry,
+} from '@/lib/routeBuilder';
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
 const ROUTE_BUILDER_LOAD_VIDEO = require('../../assets/route-builder-load.mp4');
@@ -48,6 +61,7 @@ type BuilderStop = {
   campWindowStart?: number;
   campWindowEnd?: number;
   campWindowLabel?: string;
+  routeShapeRole?: 'start' | 'destination' | 'outbound_anchor' | 'return_anchor' | 'overnight' | 'side_stop';
 };
 type SearchPlace = { name: string; lat: number; lng: number };
 type DiscoveryTab = 'camps' | 'gas' | 'poi' | 'excursions';
@@ -80,6 +94,9 @@ type RouteDayPlan = {
   campWindowStart: number;
   campWindowEnd: number;
   needsCamp: boolean;
+  needsOvernight: boolean;
+  hasOvernight: boolean;
+  needsReview: boolean;
   previous: BuilderStop | null;
   target: BuilderStop | null;
   frameworkTarget: BuilderStop | null;
@@ -143,7 +160,7 @@ const CAMP_REUSE_OPTIONS: Array<{ id: CampReusePolicy; label: string; sub: strin
   { id: 'manual', label: 'Manual reuse', sub: 'You decide night by night', icon: 'hand-left-outline' },
 ];
 const BUILD_STATUS_LINES = [
-  'Reading the route shape',
+  'Reading the trip outline',
   'Checking day pacing',
   'Scanning camp windows',
   'Balancing fuel and distance',
@@ -208,7 +225,7 @@ function RouteBuildStatus({ C, message }: { C: ColorPalette; message: string }) 
           <View style={[statusS.dot, { backgroundColor: C.orange }]} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={[statusS.kicker, { color: C.orange }]}>ROUTE INTELLIGENCE</Text>
+          <Text style={[statusS.kicker, { color: C.orange }]}>TRIP OUTLINE</Text>
           <Text style={[statusS.title, { color: C.text }]}>{message || BUILD_STATUS_LINES[lineIdx]}</Text>
           <Text style={[statusS.sub, { color: C.text3 }]}>{BUILD_STATUS_LINES[lineIdx]}</Text>
         </View>
@@ -895,6 +912,24 @@ function isFrameworkManagedStop(stop: BuilderStop) {
   return isFrameworkTarget(stop) || /Auto-picked by Trailhead/i.test(stop.description);
 }
 
+function stopRouteOrderWeight(stop: BuilderStop) {
+  if (stop.routeShapeRole === 'start') return 0;
+  if (stop.type === 'start') return 2;
+  if (stop.routeShapeRole === 'destination') return 60;
+  if (stop.routeShapeRole === 'outbound_anchor') return 65;
+  if (stop.routeShapeRole === 'overnight') return 80;
+  if (stop.routeShapeRole === 'return_anchor') return 100;
+  return 50;
+}
+
+function orderBuilderStops(stops: BuilderStop[]) {
+  return [...stops].sort((a, b) => (
+    a.day - b.day
+    || stopRouteOrderWeight(a) - stopRouteOrderWeight(b)
+    || stops.indexOf(a) - stops.indexOf(b)
+  ));
+}
+
 function landColor(lt?: string | null) {
   if (!lt) return { bg: '#f1f5f9', text: '#475569', border: '#cbd5e1' };
   const l = lt.toLowerCase();
@@ -1048,6 +1083,7 @@ export default function RouteBuilderScreen() {
   const [gasPrice, setGasPrice] = useState('3.65');
   const [stateGasPrices, setStateGasPrices] = useState<Record<string, number>>({});
   const [gasPriceStatus, setGasPriceStatus] = useState<'idle' | 'loading' | 'live' | 'fallback'>('idle');
+  const [routeGeometry, setRouteGeometry] = useState<ProviderRouteGeometry | null>(null);
   const [importedTripId, setImportedTripId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
@@ -1082,6 +1118,7 @@ export default function RouteBuilderScreen() {
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const tripLoop = tripShapeMode !== 'one_way';
   const effectiveCampReusePolicy: CampReusePolicy = tripShapeMode === 'there_and_back' ? 'same_camp_window' : campReusePolicy;
+  const fmtRouteDistance = (mi: number) => fmtUnitDistance(mi, weatherUnitMode);
 
   function applyTripShapeMode(mode: TripShapeMode) {
     setTripShapeMode(mode);
@@ -1252,12 +1289,20 @@ export default function RouteBuilderScreen() {
     setDays(importedDays.length ? importedDays : [1]);
     setActiveDay(importedStops[0]?.day ?? 1);
     setRouteName(activeTrip.plan.trip_name || '');
+    const saved = activeTrip.route_geometry;
+    if (saved?.coords?.length) {
+      setRouteGeometry(savedGeometryFromCoords(
+        saved.coords,
+        saved.totalDistance ?? saved.total_distance,
+        saved.totalDuration ?? saved.total_duration,
+      ));
+    }
     setImportedTripId(activeTrip.trip_id);
   }, [activeTrip, importedTripId, routeTabMode, stops.length]);
 
   const dayStops = stops.filter(st => st.day === activeDay);
   const selectedInsertStop = stops.find(st => st.id === insertAfterId) ?? null;
-  const orderedStops = [...stops].sort((a, b) => a.day - b.day || stops.indexOf(a) - stops.indexOf(b));
+  const orderedStops = orderBuilderStops(stops);
   const anchor = [...dayStops].reverse()[0] ?? [...stops].reverse()[0] ?? (userLoc ? { lat: userLoc.lat, lng: userLoc.lng, name: 'Current location' } : null);
   const selectedStopIndex = selectedInsertStop ? orderedStops.findIndex(st => st.id === selectedInsertStop.id) : -1;
   const selectedNextStop = selectedStopIndex >= 0 ? orderedStops[selectedStopIndex + 1] ?? null : null;
@@ -1279,7 +1324,7 @@ export default function RouteBuilderScreen() {
       }
     : null;
   const discoverContextLabel = legContext
-    ? `${legContext.from.name.split(',')[0]} to ${legContext.to.name.split(',')[0]} · ${fmtMi(legContext.miles)}`
+    ? `${legContext.from.name.split(',')[0]} to ${legContext.to.name.split(',')[0]} · ${fmtRouteDistance(legContext.miles)}`
     : anchor ? anchor.name.split(',')[0] : 'add a stop first';
   const activeDiscovery = activeDiscoveryKey ? discoveryByKey[activeDiscoveryKey] ?? EMPTY_DISCOVERY_RESULTS : EMPTY_DISCOVERY_RESULTS;
   const camps = activeDiscovery.camps;
@@ -1319,6 +1364,14 @@ export default function RouteBuilderScreen() {
     if (campCadenceMode === 'alternate') return day === campWindowFor(day, sourceDays).campDay;
     return true;
   };
+  const dayNeedsOvernight = (day: number) => {
+    if (campCadenceMode === 'manual') return true;
+    return dayNeedsCamp(day);
+  };
+  const dayNeedsOvernightFor = (day: number, sourceDays: number[]) => {
+    if (campCadenceMode === 'manual') return true;
+    return dayNeedsCampFor(day, sourceDays);
+  };
   const offlinePlaceCandidates = useMemo(() => {
     const target = legContext ? legContext.center : anchor;
     if (!target) return [];
@@ -1336,6 +1389,16 @@ export default function RouteBuilderScreen() {
   const discoveryPois = useMemo(() => dedupePois([...pois, ...offlinePlaceCandidates]), [pois, offlinePlaceCandidates]);
   const routeStateMiles = useMemo(() => sampleRouteStates(orderedStops, tripLoop), [orderedStops, tripLoop]);
   const routeStates = useMemo(() => Object.keys(routeStateMiles).sort((a, b) => routeStateMiles[b] - routeStateMiles[a]), [routeStateMiles]);
+  const routeDaySegments = useMemo(() => {
+    if (!routeGeometry || routeGeometry.coords.length < 2) return [];
+    return computeDaySegmentsFromRouteGeometry({
+      geometry: routeGeometry,
+      days,
+      maxDriveHoursByDay: Object.fromEntries(days.map(day => [day, parsePositiveNumber(dayDriveTargets[day]) ?? undefined])),
+      defaultMaxDriveHours: parsePositiveNumber(driveHoursPerDay) ?? 5,
+      campWindowForDay: day => campWindowFor(day),
+    });
+  }, [routeGeometry, days, dayDriveTargets, driveHoursPerDay, campCadenceMode]);
 
   useEffect(() => {
     const missing = routeStates.filter(state => stateGasPrices[state] == null).slice(0, 6);
@@ -1364,11 +1427,13 @@ export default function RouteBuilderScreen() {
   }, [routeStates.join(','), stateGasPrices]);
 
   const totals = useMemo(() => {
-    let miles = 0;
-    for (let i = 1; i < orderedStops.length; i++) miles += haversineMi(orderedStops[i - 1], orderedStops[i]);
-    if (tripLoop && orderedStops.length > 2) miles += haversineMi(orderedStops[orderedStops.length - 1], orderedStops[0]);
+    let miles = routeGeometry?.totalDistanceMi && routeGeometry.totalDistanceMi > 0 ? routeGeometry.totalDistanceMi : 0;
+    if (!miles) {
+      for (let i = 1; i < orderedStops.length; i++) miles += haversineMi(orderedStops[i - 1], orderedStops[i]);
+      if (tripLoop && orderedStops.length > 2) miles += haversineMi(orderedStops[orderedStops.length - 1], orderedStops[0]);
+    }
     return { miles, stops: orderedStops.length, camps: orderedStops.filter(st => st.type === 'camp').length };
-  }, [orderedStops, tripLoop]);
+  }, [orderedStops, routeGeometry?.totalDistanceMi, tripLoop]);
   const planningStats = useMemo(() => {
     const mpg = estimateMpg(rigProfile);
     const fallbackPrice = parsePositiveNumber(gasPrice) ?? 3.65;
@@ -1395,7 +1460,7 @@ export default function RouteBuilderScreen() {
     if (!rigProfile || (!rigProfile.make && !rigProfile.model && !rigProfile.vehicle_type)) {
       return {
         title: 'No rig profile yet',
-        meta: `${planningStats.mpg} MPG fallback · add rig specs in Profile`,
+        meta: `${weatherUnitMode === 'metric' ? `${(235.214583 / Math.max(1, planningStats.mpg)).toFixed(1)} L/100km` : `${planningStats.mpg} MPG`} fallback · add rig specs in Profile`,
         ready: false,
       };
     }
@@ -1403,15 +1468,17 @@ export default function RouteBuilderScreen() {
     const specs = [
       rigProfile.vehicle_type,
       rigProfile.drive,
-      rigProfile.fuel_range_miles ? `${rigProfile.fuel_range_miles} mi range` : null,
-      `${planningStats.mpg} MPG`,
+      rigProfile.fuel_range_miles ? `${fmtRouteDistance(parsePositiveNumber(rigProfile.fuel_range_miles) ?? 0)} range` : null,
+      weatherUnitMode === 'metric' ? `${(235.214583 / Math.max(1, planningStats.mpg)).toFixed(1)} L/100km` : `${planningStats.mpg} MPG`,
       rigProfile.is_towing ? 'towing' : null,
     ].filter(Boolean).join(' · ');
     return { title, meta: specs, ready: true };
   }, [planningStats.mpg, rigProfile]);
   const dayMileage = useMemo(() => {
     const out: Record<number, number> = {};
+    for (const segment of routeDaySegments) out[segment.day] = segment.providerDistanceMi;
     for (const day of days) {
+      if (out[day] != null) continue;
       const prev = [...orderedStops].reverse().find(st => st.day < day) ?? null;
       const wps = orderedStops.filter(st => st.day === day);
       let miles = 0;
@@ -1420,7 +1487,7 @@ export default function RouteBuilderScreen() {
       out[day] = miles;
     }
     return out;
-  }, [days, orderedStops]);
+  }, [days, orderedStops, routeDaySegments]);
   const routeDayPlans = useMemo<RouteDayPlan[]>(() => (
     days.map(day => {
       const wps = orderedStops.filter(st => st.day === day);
@@ -1433,23 +1500,30 @@ export default function RouteBuilderScreen() {
         ?? routableWps[routableWps.length - 1]
         ?? null;
       const miles = dayMileage[day] ?? 0;
+      const providerSegment = routeDaySegments.find(segment => segment.day === day);
+      const hasOvernight = wps.some(st => st.type === 'camp' || st.type === 'motel');
+      const needsOvernight = dayNeedsOvernight(day);
+      const needsReview = Boolean(frameworkTarget) || (needsOvernight && !hasOvernight);
       return {
         day,
         campWindowLabel: campWindowForDay(day).label,
         campWindowStart: campWindowForDay(day).start,
         campWindowEnd: campWindowForDay(day).end,
         needsCamp: dayNeedsCamp(day),
+        needsOvernight,
+        hasOvernight,
+        needsReview,
         previous,
         target,
         frameworkTarget,
         stops: wps,
         miles,
-        hours: estimateMovingHours(miles),
+        hours: providerSegment?.providerDurationHours ?? estimateMovingHours(miles),
         rest: restDays.includes(day),
-        complete: !dayNeedsCamp(day) || (!!target && !isFrameworkTarget(target) && (target.type === 'camp' || target.type === 'motel')),
+        complete: !needsOvernight || (hasOvernight && !frameworkTarget),
       };
     })
-  ), [days, orderedStops, dayMileage, restDays, campCadenceMode]);
+  ), [days, orderedStops, dayMileage, routeDaySegments, restDays, campCadenceMode]);
   const hasBaseRoute = orderedStops.length >= 2;
   const realOvernights = routeDayPlans.filter(day => day.complete).length;
   const setupProgress = useMemo(() => {
@@ -1463,38 +1537,22 @@ export default function RouteBuilderScreen() {
     ? `${orderedStops[0].name.split(',')[0]} to ${orderedStops[orderedStops.length - 1].name.split(',')[0]}`
     : 'Build a base route first';
   const activeDayDriveLimit = parsePositiveNumber(dayDriveTargets[activeDay]) ?? planningStats.driveLimit;
+  const tripReadiness = useMemo(() => computeTripReadiness({
+    stops: orderedStops,
+    geometry: routeGeometry,
+    daySegments: routeDaySegments,
+    days,
+    dayNeedsOvernight,
+    restDays,
+    fuelRangeMi: planningStats.range,
+  }), [orderedStops, routeGeometry, routeDaySegments, days, restDays, planningStats.range, campCadenceMode]);
   const routeChecks = useMemo(() => {
-    const checks: { level: 'ok' | 'warn'; label: string; text: string }[] = [];
+    const checks: { level: 'ok' | 'warn'; label: string; text: string }[] = [...tripReadiness.tasks];
     if (orderedStops.length < 2) {
       checks.push({ level: 'warn', label: 'Need route', text: 'Add a start and at least one destination.' });
     }
-    const noCampDays = days.filter(day => dayNeedsCamp(day) && !orderedStops.some(st => st.day === day && (st.type === 'camp' || st.type === 'motel')));
-    if (noCampDays.length) {
-      checks.push({ level: 'warn', label: 'Overnight', text: `Add camp/lodging for day ${noCampDays[0]}.` });
-    } else if (orderedStops.length) {
-      checks.push({
-        level: 'ok',
-        label: 'Overnight',
-        text: campCadenceMode === 'manual' ? 'Manual camp cadence selected.' : 'Required overnight stops are set.',
-      });
-    }
-    const weakTarget = orderedStops.find(st => isFrameworkTarget(st) && /camp search weak/i.test(st.description));
-    if (weakTarget) {
-      checks.push({ level: 'warn', label: 'Camp search', text: `Day ${weakTarget.day} needs a better camp area before navigation.` });
-    } else if (frameworkStatus && orderedStops.some(isFrameworkTarget)) {
-      checks.push({ level: 'ok', label: 'Framework', text: frameworkStatus });
-    }
-    const longDays = days.filter(day => !restDays.includes(day) && estimateMovingHours(dayMileage[day] ?? 0) > (parsePositiveNumber(dayDriveTargets[day]) ?? planningStats.driveLimit));
-    if (longDays.length) {
-      const limit = parsePositiveNumber(dayDriveTargets[longDays[0]]) ?? planningStats.driveLimit;
-      checks.push({ level: 'warn', label: 'Drive time', text: `Day ${longDays[0]} is about ${fmtHours(estimateMovingHours(dayMileage[longDays[0]]))}, over the ${fmtHours(limit)} max.` });
-    } else if (orderedStops.length > 1) {
-      checks.push({ level: 'ok', label: 'Pace', text: `Days stay under the ${fmtHours(planningStats.driveLimit)} max.` });
-    }
     const fuelCount = orderedStops.filter(st => st.type === 'fuel').length;
-    if ((planningStats.range && totals.miles > planningStats.range * 0.7 && fuelCount === 0) || (!planningStats.range && totals.miles > 160 && fuelCount === 0)) {
-      checks.push({ level: 'warn', label: 'Fuel', text: planningStats.range ? `Rig range is about ${Math.round(planningStats.range)} mi. Add fuel before remote stretches.` : 'Add at least one fuel stop before remote stretches.' });
-    } else if (fuelCount > 0) {
+    if (!checks.some(check => check.label === 'Fuel') && fuelCount > 0) {
       checks.push({ level: 'ok', label: 'Fuel', text: `${fuelCount} fuel stop${fuelCount === 1 ? '' : 's'} added.` });
     }
     const driveCapacity = days
@@ -1504,9 +1562,9 @@ export default function RouteBuilderScreen() {
       checks.push({ level: 'warn', label: 'Schedule', text: `This route needs more than the selected ${days.length} day${days.length === 1 ? '' : 's'} at the current daily max.` });
     }
     return checks.slice(0, 3);
-  }, [days, orderedStops, dayMileage, totals.miles, planningStats.driveLimit, planningStats.range, dayDriveTargets, restDays, frameworkStatus, campCadenceMode]);
+  }, [days, orderedStops, totals.miles, planningStats.driveLimit, dayDriveTargets, restDays, tripReadiness.tasks]);
   const discoverEmptyText = discoverTab === 'camps'
-    ? 'Tap scan to find legal camps near the selected leg or route anchor.'
+    ? 'Tap scan to find legal camps near the selected leg or route point.'
     : discoverTab === 'gas'
       ? 'Tap scan to find fuel between the selected stops.'
       : discoverTab === 'excursions'
@@ -1572,6 +1630,7 @@ export default function RouteBuilderScreen() {
       description: 'Route start from current location.',
       land_type: 'route',
       source: 'map',
+      routeShapeRole: 'start',
     };
     setStops(prev => {
       const withoutOldStart = prev.filter((st, idx) => !(idx === 0 && st.type === 'start'));
@@ -1583,8 +1642,8 @@ export default function RouteBuilderScreen() {
   }
 
   function rebalanceFrameworkTargets(prev: BuilderStop[], anchor: BuilderStop): BuilderStop[] {
-    if (tripLoop) return prev;
-    const sorted = [...prev].sort((a, b) => a.day - b.day || prev.indexOf(a) - prev.indexOf(b));
+    if (tripShapeMode === 'loop') return prev;
+    const sorted = orderBuilderStops(prev);
     const final = sorted[sorted.length - 1] ?? null;
     if (!final || final.day <= anchor.day) return prev;
     return prev.map(st => {
@@ -1601,7 +1660,7 @@ export default function RouteBuilderScreen() {
         lat: anchor.lat + (final.lat - anchor.lat) * t,
         lng: anchor.lng + (final.lng - anchor.lng) * t,
         land_type: 'route',
-        description: `Rebalanced after selecting ${anchor.name.split(',')[0]}. Search this leg for camps, fuel, and POIs before navigation.`,
+        description: `Updated after selecting ${anchor.name.split(',')[0]}. Search this leg for camps, fuel, and places before navigation.`,
       };
     });
   }
@@ -1673,7 +1732,7 @@ export default function RouteBuilderScreen() {
         avoidHighways: routeStyle === 'wild',
         avoidTolls: true,
         noFerries: false,
-      });
+      }, routeUnitsParam(weatherUnitMode));
       const coords = (routed.trip?.legs ?? []).flatMap(part => typeof part.shape === 'string' ? decodePolyline6(part.shape) : []);
       if (coords.length >= 2) {
         const miles = coordsLengthMi(coords);
@@ -1906,6 +1965,7 @@ export default function RouteBuilderScreen() {
       land_type: camp.land_type || 'camp',
       source: 'camp',
       camp,
+      routeShapeRole: 'overnight',
     };
     if (replaceStopId) {
       setStops(prev => {
@@ -1955,6 +2015,7 @@ export default function RouteBuilderScreen() {
       source: 'camp',
       camp,
       day: stopDay,
+      routeShapeRole: 'overnight',
     });
     clearDiscoveryResults();
     setInsertAfterId(null);
@@ -2115,8 +2176,8 @@ export default function RouteBuilderScreen() {
     return [
       `Day ${selection.day}`,
       routeProgressLabel(data.route_progress),
-      data.route_progress_mi != null ? `${fmtMi(Number(data.route_progress_mi))} into leg` : '',
-      data.route_distance_mi != null ? `${fmtMi(Number(data.route_distance_mi))} off route` : '',
+      data.route_progress_mi != null ? `${fmtRouteDistance(Number(data.route_progress_mi))} into leg` : '',
+      data.route_distance_mi != null ? `${fmtRouteDistance(Number(data.route_distance_mi))} off route` : '',
     ].filter(Boolean).join(' · ');
   }
 
@@ -2390,7 +2451,7 @@ export default function RouteBuilderScreen() {
   async function addDestinationFromSetup(manageLoading = true) {
     const q = endQuery.trim();
     if (!q) {
-      Alert.alert('Destination needed', 'Enter the place you want to end up at, then build the route framework.');
+      Alert.alert('Destination needed', 'Enter the place you want to end up at, then build the trip outline.');
       return null;
     }
     if (manageLoading) setBuildingFramework(true);
@@ -2413,6 +2474,7 @@ export default function RouteBuilderScreen() {
           description: 'Route start.',
           land_type: 'route',
           source: 'search',
+          routeShapeRole: 'start',
         };
       } else if (!start && userLoc) {
         start = {
@@ -2425,6 +2487,7 @@ export default function RouteBuilderScreen() {
           description: 'Route start.',
           land_type: 'route',
           source: 'map' as const,
+          routeShapeRole: 'start',
         };
       } else if (!start && !startQ) {
         const loc = await getRouteBuilderLocation();
@@ -2439,6 +2502,7 @@ export default function RouteBuilderScreen() {
           description: 'Route start.',
           land_type: 'route',
           source: 'map' as const,
+          routeShapeRole: 'start',
         };
       }
       const [place] = await geocodePlaces(q);
@@ -2460,6 +2524,7 @@ export default function RouteBuilderScreen() {
         description: 'Route destination.',
         land_type: 'route',
         source: 'search',
+        routeShapeRole: 'destination',
       };
       const next = orderedStops.length
         ? [start, ...orderedStops.slice(1, Math.max(1, orderedStops.length - 1)), destination]
@@ -2501,63 +2566,85 @@ export default function RouteBuilderScreen() {
   }
 
   async function buildRouteSpine(first: BuilderStop, last: BuilderStop) {
-    const fallback = straightRouteSpine(first, last);
-    if (closeEnough(first, last)) return fallback;
+    if (closeEnough(first, last)) {
+      setRouteGeometry(null);
+      return [];
+    }
     const directMi = haversineMi(first, last);
     if (directMi > 2800 && Math.abs(first.lng - last.lng) > 45) {
       Alert.alert(
         'Route needs correction',
-        'Those anchors look like an unsupported long jump. Add realistic land-route stops or keep this route inside Trailhead supported regions.'
+        'Those route points look like an unsupported long jump. Add realistic land-route stops or keep this route inside Trailhead supported regions.'
       );
+      setRouteGeometry(null);
       return [];
     }
     try {
-      const loopOffset = Math.max(22, Math.min(120, directMi * 0.14));
-      const outboundAnchor = scenicPoint(first, last, 0.48, loopOffset);
-      const returnAnchor = scenicPoint(first, last, 0.52, -loopOffset);
       const opts = {
         backRoads: routeStyle === 'wild',
         avoidHighways: routeStyle === 'wild',
         avoidTolls: true,
         noFerries: false,
       };
-      const outboundLocations = tripShapeMode === 'loop'
-        ? [
-            { lat: first.lat, lng: first.lng },
-            { lat: outboundAnchor.lat, lng: outboundAnchor.lng, type: 'through' as const },
-            { lat: last.lat, lng: last.lng },
-          ]
-        : [
-            { lat: first.lat, lng: first.lng },
-            { lat: last.lat, lng: last.lng },
-          ];
-      const outbound = await api.buildRoute(outboundLocations, opts);
-      const outCoords = (outbound.trip?.legs ?? []).flatMap(leg => typeof leg.shape === 'string' ? decodePolyline6(leg.shape) : []);
-      let points = coordsToStops(outCoords);
-      if (tripLoop && points.length >= 2) {
-        const inboundLocations = tripShapeMode === 'loop'
-          ? [
-              { lat: last.lat, lng: last.lng },
-              { lat: returnAnchor.lat, lng: returnAnchor.lng, type: 'through' as const },
-              { lat: first.lat, lng: first.lng },
-            ]
-          : [
-              { lat: last.lat, lng: last.lng },
-              { lat: first.lat, lng: first.lng },
-            ];
-        const inbound = await api.buildRoute(inboundLocations, opts).catch(() => null);
-        const inCoords = (inbound?.trip?.legs ?? []).flatMap(leg => typeof leg.shape === 'string' ? decodePolyline6(leg.shape) : []);
-        const inPoints = coordsToStops(inCoords);
-        points = inPoints.length >= 2 ? [...points, ...inPoints.slice(1)] : [...points, ...points.slice(0, -1).reverse()];
+      const locations = buildRouteLocationsForShape({
+        shape: tripShapeMode,
+        start: first,
+        destination: last,
+        routeStyle,
+      });
+      const units = routeUnitsParam(weatherUnitMode);
+      const routed = await api.buildRoute(locations.map(loc => ({ lat: loc.lat, lng: loc.lng, type: loc.type })), opts, units);
+      const geometry = providerGeometryFromRoute(routed, units);
+      if (geometry.coords.length >= 2) {
+        setRouteGeometry(geometry);
+        return coordsToStops(geometry.coords);
       }
-      return points.length >= 2 ? points : fallback;
+      setRouteGeometry(null);
+      Alert.alert('Route unavailable', 'Trailhead could not build a road route for this outline. Add a road anchor, allow ferries, or save it as a draft after choosing real stops.');
+      return [];
     } catch (e: any) {
+      setRouteGeometry(null);
       if (e instanceof ApiError && e.status === 422) {
         const detail: any = e.detail;
         Alert.alert('Route needs correction', detail?.reason || e.message || 'This route cannot be built safely.');
         return [];
       }
-      return fallback;
+      Alert.alert('Route unavailable', 'Trailhead could not build a road route right now. Try a shorter leg, add a road anchor, or check signal.');
+      return [];
+    }
+  }
+
+  async function buildSavedRouteGeometry(inputStops: BuilderStop[]): Promise<SavedRouteGeometryPayload | null> {
+    const navStops = filterDurableNavigationStops(orderBuilderStops(inputStops));
+    if (navStops.length < 2) return null;
+    try {
+      const units = routeUnitsParam(weatherUnitMode);
+      const routed = await api.buildRoute(
+        navStops.map(st => ({
+          lat: st.lat,
+          lng: st.lng,
+          type: st.routePointType === 'through' ? 'through' as const : 'break' as const,
+        })),
+        {
+          backRoads: routeStyle === 'wild',
+          avoidHighways: routeStyle === 'wild',
+          avoidTolls: true,
+          noFerries: false,
+        },
+        units,
+      );
+      const geometry = providerGeometryFromRoute(routed, units);
+      if (geometry.coords.length < 2) return null;
+      setRouteGeometry(geometry);
+      return {
+        coords: geometry.coords,
+        totalDistance: geometry.totalDistanceMi * 1609.344,
+        totalDuration: geometry.totalDurationHours * 3600,
+        source: geometry.engine ?? 'route-builder',
+        ts: Date.now(),
+      };
+    } catch {
+      return null;
     }
   }
 
@@ -2602,6 +2689,7 @@ export default function RouteBuilderScreen() {
           land_type: best.land_type || 'camp',
           source: 'camp' as const,
           camp: best,
+          routeShapeRole: 'overnight' as const,
         },
         strong,
         found: scored.length,
@@ -2616,9 +2704,10 @@ export default function RouteBuilderScreen() {
         lat: target.lat,
         lng: target.lng,
         type: 'waypoint' as BuilderStopType,
-        description: 'Camp search weak in this area. Move the day finish or scan nearby before navigation.',
+        description: 'Review this day. Move the day finish or choose a camp nearby before navigation.',
         land_type: 'route',
         source: 'map' as const,
+        routeShapeRole: 'outbound_anchor' as const,
       },
       strong: false,
       found: 0,
@@ -2670,6 +2759,7 @@ export default function RouteBuilderScreen() {
               campWindowStart: win.start,
               campWindowEnd: win.end,
               campWindowLabel: win.label,
+              routeShapeRole: 'overnight' as const,
             },
             strong: win.strong,
             found: win.found,
@@ -2681,7 +2771,7 @@ export default function RouteBuilderScreen() {
           lat: win.fallback?.lat ?? fallbackPoint.lat,
           lng: win.fallback?.lng ?? fallbackPoint.lng,
           name: win.fallback?.name ?? `${win.label} camp search area`,
-          description: win.fallback?.description ?? 'Camp search weak in this area. Move the day finish or scan nearby before navigation.',
+          description: win.fallback?.description ?? 'Review this day. Move the day finish or choose a camp nearby before navigation.',
         };
         return {
           stop: {
@@ -2697,6 +2787,7 @@ export default function RouteBuilderScreen() {
             campWindowStart: win.start,
             campWindowEnd: win.end,
             campWindowLabel: win.label,
+            routeShapeRole: 'outbound_anchor' as const,
           },
           strong: false,
           found: win.found,
@@ -2714,7 +2805,7 @@ export default function RouteBuilderScreen() {
 
   async function buildRouteFramework() {
     setBuildingFramework(true);
-    setFrameworkStatus('Building camp-aware day plan...');
+    setFrameworkStatus('Building trip outline...');
     let base = orderedStops;
     try {
       if (endQuery.trim()) {
@@ -2734,7 +2825,7 @@ export default function RouteBuilderScreen() {
       const count = Math.max(1, Math.min(30, Math.round(distanceMode === 'miles' ? milesCount : plannedCount)));
       const nextDays = Array.from({ length: count }, (_, i) => i + 1);
       const framework: BuilderStop[] = [
-        { ...first, day: 1, type: first.type === 'start' ? 'start' : first.type },
+        { ...first, day: 1, type: first.type === 'start' ? 'start' : first.type, routeShapeRole: 'start' },
       ];
 
       const spine = await buildRouteSpine(first, last);
@@ -2753,26 +2844,40 @@ export default function RouteBuilderScreen() {
         }
       }
 
-      framework.push(tripLoop
-        ? {
-            ...first,
-            id: `return_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-            day: count,
-            type: 'waypoint',
-            name: `${first.name.split(',')[0]} return`,
-            description: tripShapeMode === 'loop'
-              ? 'Loop return to the route start using a distinct return corridor.'
-              : 'There-and-back return to the route start.',
-            source: 'map',
-          }
-        : { ...last, day: count });
+      if (tripLoop) {
+        framework.push({
+          ...last,
+          id: `dest_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          day: Math.max(1, Math.min(count, Math.ceil(count / 2))),
+          type: 'waypoint',
+          description: tripShapeMode === 'loop'
+            ? 'Outbound destination before the distinct return corridor.'
+            : 'Turnaround destination before returning to the start.',
+          source: last.source ?? 'search',
+          routeShapeRole: 'destination',
+        });
+        framework.push({
+          ...first,
+          id: `return_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          day: count,
+          type: 'waypoint',
+          name: `${first.name.split(',')[0]} return`,
+          description: tripShapeMode === 'loop'
+            ? 'Loop return to the route start using a distinct return corridor.'
+            : 'There-and-back return to the route start.',
+          source: 'map',
+          routeShapeRole: 'return_anchor',
+        });
+      } else {
+        framework.push({ ...last, day: count, routeShapeRole: 'destination' });
+      }
       const shapeLabel = tripShapeMode === 'loop' ? 'Loop' : tripShapeMode === 'there_and_back' ? 'There and Back' : '';
       const nextName = routeName.trim() || (tripLoop ? `${first.name.split(',')[0]} to ${last.name.split(',')[0]} ${shapeLabel}` : `${first.name.split(',')[0]} to ${last.name.split(',')[0]}`);
       const status = tripBuildMode === 'recommended'
         ? weakAnchors
-          ? `${strongAnchors} camp anchor${strongAnchors === 1 ? '' : 's'} placed; ${weakAnchors} day${weakAnchors === 1 ? '' : 's'} need camp review.`
-          : `${strongAnchors} camp anchor${strongAnchors === 1 ? '' : 's'} placed from route search.`
-        : 'Blank route ready for hand-building.';
+          ? `${strongAnchors} camp stop${strongAnchors === 1 ? '' : 's'} placed; ${weakAnchors} day${weakAnchors === 1 ? '' : 's'} need review.`
+          : `${strongAnchors} camp stop${strongAnchors === 1 ? '' : 's'} placed from route search.`
+        : 'Route ready for hand-building.';
       setFrameworkStatus(status);
       setDays(nextDays);
       setStops(framework);
@@ -2781,7 +2886,7 @@ export default function RouteBuilderScreen() {
       setInsertTargetDay(null);
       setRouteName(nextName);
       setFrameworkStatus('Route built. Preparing your trip overview...');
-      await commitTrip(buildTrip(framework, nextDays, nextName), true, ROUTE_BUILDER_MAP_SETTLE_MS);
+      await commitTrip(buildTrip(framework, nextDays, nextName), true, ROUTE_BUILDER_MAP_SETTLE_MS, framework);
     } finally {
       setBuildingFramework(false);
     }
@@ -2910,11 +3015,12 @@ export default function RouteBuilderScreen() {
     inputDays: number[] = days,
     nameOverride?: string,
   ): TripResult {
-    const sorted = [...inputStops].sort((a, b) => a.day - b.day || inputStops.indexOf(a) - inputStops.indexOf(b));
-    const navStops = sorted;
-    let inputMiles = 0;
-    for (let i = 1; i < sorted.length; i += 1) inputMiles += haversineMi(sorted[i - 1], sorted[i]);
-    if (tripLoop && sorted.length > 2) inputMiles += haversineMi(sorted[sorted.length - 1], sorted[0]);
+    const sorted = orderBuilderStops(inputStops);
+    const navStops = filterDurableNavigationStops(sorted);
+    let inputMiles = routeGeometry?.totalDistanceMi && routeGeometry.totalDistanceMi > 0 ? routeGeometry.totalDistanceMi : 0;
+    if (!inputMiles) {
+      for (let i = 1; i < navStops.length; i += 1) inputMiles += haversineMi(navStops[i - 1], navStops[i]);
+    }
     const waypoints: Waypoint[] = navStops.map(st => ({
       day: st.day,
       name: st.name,
@@ -2935,10 +3041,13 @@ export default function RouteBuilderScreen() {
       const hasPlanningTarget = sorted.some(st => st.day === day && isFrameworkTarget(st));
       const prev = [...navStops].reverse().find(st => st.day < day) ?? null;
       const window = campWindowFor(day, inputDays);
-      const needsWindowCamp = dayNeedsCampFor(day, inputDays);
-      let miles = 0;
-      if (prev && wps.length) miles += haversineMi(prev, wps[0]);
-      for (let i = 1; i < wps.length; i++) miles += haversineMi(wps[i - 1], wps[i]);
+      const needsWindowCamp = dayNeedsOvernightFor(day, inputDays);
+      const providerSegment = routeDaySegments.find(segment => segment.day === day);
+      let miles = providerSegment?.providerDistanceMi ?? 0;
+      if (!miles) {
+        if (prev && wps.length) miles += haversineMi(prev, wps[0]);
+        for (let i = 1; i < wps.length; i++) miles += haversineMi(wps[i - 1], wps[i]);
+      }
       const first = wps[0]?.name?.split(',')[0] ?? 'Start';
       const last = wps[wps.length - 1]?.name?.split(',')[0] ?? (hasPlanningTarget ? 'overnight camp needed' : 'Finish');
       const rest = restDays.includes(day);
@@ -2962,6 +3071,7 @@ export default function RouteBuilderScreen() {
     const timeline = buildBuilderTimeline(navStops, inputDays, daily_itinerary);
     const campsites = navStops.filter(st => st.camp).map(st => ({ ...st.camp!, recommended_day: st.day }));
     const gas_stations = navStops.filter(st => st.gas).map(st => ({ ...st.gas!, recommended_day: st.day }));
+    const routePois = sorted.filter(st => st.poi).map(st => ({ ...st.poi!, recommended_day: st.day }));
     return {
       trip_id: importedTripId ? `${importedTripId}_edited_${Date.now()}` : `manual_${Date.now()}`,
       plan: {
@@ -2984,7 +3094,7 @@ export default function RouteBuilderScreen() {
         },
         logistics: {
           vehicle_recommendation: `User-built ${routeStyle} route. Review road surfaces against the saved rig profile before departure.`,
-          fuel_strategy: `Estimated fuel: ${Math.round(planningStats.gallons)} gal / $${Math.round(planningStats.fuelCost)} at ${planningStats.mpg} MPG and $${planningStats.price.toFixed(2)}/gal. Fuel stops are manually selected.`,
+          fuel_strategy: `Estimated fuel: ${fmtFuelVolumeFromMiles(totals.miles, planningStats.mpg, weatherUnitMode)} / $${Math.round(planningStats.fuelCost)}. Fuel stops are manually selected.`,
           water_strategy: 'Carry water for each day and add water POIs where needed.',
           permits_needed: `${tripShapeMode === 'loop' ? 'Loop route. ' : tripShapeMode === 'there_and_back' ? 'There-and-back route. ' : ''}Check local land manager rules for selected camps and trailheads.`,
           best_season: `Verify seasonal closures and weather before departure. Daily drive max: ${fmtHours(planningStats.driveLimit)}.`,
@@ -2992,16 +3102,34 @@ export default function RouteBuilderScreen() {
       },
       campsites,
       gas_stations,
-      route_pois: navStops.filter(st => st.poi).map(st => st.poi!),
+      route_pois: routePois,
       timeline,
     };
   }
 
-  async function commitTrip(trip: TripResult, openMap = true, settleBeforeOpenMs = 0) {
+  async function commitTrip(trip: TripResult, openMap = true, settleBeforeOpenMs = 0, inputStops: BuilderStop[] = orderedStops) {
     if (routeSaving) return;
     setRouteSaving(true);
+    const routeGeometryPayload = await buildSavedRouteGeometry(inputStops)
+      ?? (routeGeometry?.coords?.length
+        ? {
+            coords: routeGeometry.coords,
+            totalDistance: routeGeometry.totalDistanceMi * 1609.344,
+            totalDuration: routeGeometry.totalDurationHours * 3600,
+            source: routeGeometry.engine ?? routeGeometry.source,
+            ts: Date.now(),
+          } satisfies SavedRouteGeometryPayload
+        : null);
+    const savedMiles = routeGeometryPayload?.totalDistance ? routeGeometryPayload.totalDistance / 1609.344 : null;
+    const tripToSave: TripResult = routeGeometryPayload ? {
+      ...trip,
+      route_geometry: routeGeometryPayload,
+      plan: savedMiles
+        ? { ...trip.plan, total_est_miles: Math.round(savedMiles) }
+        : trip.plan,
+    } : trip;
     const builderState = {
-      stops,
+      stops: inputStops,
       days,
       routeStyle,
       tripShapeMode,
@@ -3019,18 +3147,18 @@ export default function RouteBuilderScreen() {
       campReusePolicy,
     };
     try {
-      setRouteName(trip.plan.trip_name);
-      setActiveTrip(trip);
+      setRouteName(tripToSave.plan.trip_name);
+      setActiveTrip(tripToSave);
       addTripToHistory({
-        trip_id: trip.trip_id,
-        trip_name: trip.plan.trip_name,
+        trip_id: tripToSave.trip_id,
+        trip_name: tripToSave.plan.trip_name,
         states: [],
-        duration_days: trip.plan.duration_days,
-        est_miles: trip.plan.total_est_miles,
+        duration_days: tripToSave.plan.duration_days,
+        est_miles: tripToSave.plan.total_est_miles,
         planned_at: Date.now(),
       });
-      await saveOfflineTrip(trip);
-      api.saveTrip(trip, null, builderState, 'mobile-route-builder').catch(err => {
+      await saveOfflineTrip(tripToSave);
+      api.saveTrip(tripToSave, routeGeometryPayload, builderState, 'mobile-route-builder').catch(err => {
         console.warn('Route Builder server save failed', err?.message ?? err);
       });
       if (openMap) {
@@ -3103,17 +3231,19 @@ export default function RouteBuilderScreen() {
     try {
       const draftTrip = orderedStops.length >= 2 ? buildTrip() : activeTrip;
       if (draftTrip) {
-        setActiveTrip(draftTrip);
-        await saveOfflineTrip(draftTrip).catch(() => {});
-        api.saveTrip(draftTrip, null, null, 'mobile-route-builder-close').catch(err => {
+        const geometryPayload = orderedStops.length >= 2 ? await buildSavedRouteGeometry(orderedStops) : null;
+        const tripToSave = geometryPayload ? { ...draftTrip, route_geometry: geometryPayload } : draftTrip;
+        setActiveTrip(tripToSave);
+        await saveOfflineTrip(tripToSave).catch(() => {});
+        api.saveTrip(tripToSave, geometryPayload, null, 'mobile-route-builder-close').catch(err => {
           console.warn('Route Builder close save failed', err?.message ?? err);
         });
         addTripToHistory({
-          trip_id: draftTrip.trip_id,
-          trip_name: draftTrip.plan.trip_name,
-          states: draftTrip.plan.states ?? [],
-          duration_days: draftTrip.plan.duration_days ?? 0,
-          est_miles: draftTrip.plan.total_est_miles ?? draftTrip.plan.daily_itinerary?.reduce((sum, day) => sum + (day.est_miles ?? 0), 0) ?? 0,
+          trip_id: tripToSave.trip_id,
+          trip_name: tripToSave.plan.trip_name,
+          states: tripToSave.plan.states ?? [],
+          duration_days: tripToSave.plan.duration_days ?? 0,
+          est_miles: tripToSave.plan.total_est_miles ?? tripToSave.plan.daily_itinerary?.reduce((sum, day) => sum + (day.est_miles ?? 0), 0) ?? 0,
           planned_at: Date.now(),
         });
       }
@@ -3170,7 +3300,7 @@ export default function RouteBuilderScreen() {
   function savedTrailDistance(trail: OfflineTrail) {
     const line = trail.geometry.features.find(feature => feature.geometry?.type === 'LineString');
     const distance = Number((line?.properties as any)?.distance_m);
-    if (Number.isFinite(distance) && distance > 0) return fmtMi(distance / 1609.344);
+    if (Number.isFinite(distance) && distance > 0) return fmtRouteDistance(distance / 1609.344);
     return 'saved trail';
   }
 
@@ -3228,7 +3358,7 @@ export default function RouteBuilderScreen() {
     const mpg = Math.max(1, planningStats.mpg || 1);
     const gallons = miles / mpg;
     const cost = gallons * planningStats.price;
-    return `${gallons < 1 ? gallons.toFixed(1) : Math.round(gallons)} gal · $${Math.max(1, Math.round(cost))}`;
+    return `${fmtFuelVolumeFromMiles(miles, mpg, weatherUnitMode)} · $${Math.max(1, Math.round(cost))}`;
   }
 
   function stopCardLabel(stop: BuilderStop) {
@@ -3291,15 +3421,15 @@ export default function RouteBuilderScreen() {
           const camp = plan.stops.find(st => st.type === 'camp' || st.type === 'motel') ?? null;
           const maxHours = parsePositiveNumber(dayDriveTargets[plan.day]) ?? planningStats.driveLimit;
           const overDailyMax = !plan.rest && plan.hours > maxHours + 0.05;
-          const needsOvernight = plan.needsCamp && !plan.complete;
+          const needsOvernight = plan.needsOvernight && !plan.complete;
           const statusColor = overDailyMax ? C.yellow : needsOvernight ? C.orange : plan.complete ? C.green : C.text3;
           const statusText = overDailyMax
             ? `${fmtHours(plan.hours)} over ${fmtHours(maxHours)} max`
             : needsOvernight
-              ? 'overnight needed'
+              ? 'choose a camp'
               : plan.complete
                 ? 'overnight set'
-                : campCadenceMode === 'manual' ? 'manual camp' : 'travel day';
+                : 'travel day';
           return (
             <View key={plan.day} style={s.routeDayWrap}>
               <TouchableOpacity activeOpacity={0.9} style={[s.routeDaySection, activeDay === plan.day && s.routeDaySectionActive]} onPress={() => setActiveDay(plan.day)}>
@@ -3310,8 +3440,8 @@ export default function RouteBuilderScreen() {
                 <View style={s.routeDayContent}>
                   <View style={s.routeDayHeader}>
                     <View style={{ flex: 1 }}>
-                      <Text style={s.routeDayTitle}>{plan.needsCamp ? `${plan.campWindowLabel} Camp` : `${plan.campWindowLabel} Travel`}{plan.rest ? ' · Rest' : ''}</Text>
-                      <Text style={s.routeDayMeta}>{fmtMi(plan.miles)} · {fmtHours(plan.hours)}{plan.previous ? ` · from ${plan.previous.name.split(',')[0]}` : ''}</Text>
+                      <Text style={s.routeDayTitle}>{plan.needsOvernight ? `${plan.campWindowLabel} Camp` : `${plan.campWindowLabel} Travel`}{plan.rest ? ' · Rest' : ''}</Text>
+                      <Text style={s.routeDayMeta}>{fmtRouteDistance(plan.miles)} · {fmtHours(plan.hours)}{plan.previous ? ` · from ${plan.previous.name.split(',')[0]}` : ''}</Text>
                     </View>
                     <View style={[s.routeDayStatusPill, { borderColor: statusColor + '66', backgroundColor: statusColor + '12' }]}>
                       <Text style={[s.routeDayStatusText, { color: statusColor }]} numberOfLines={1}>{statusText}</Text>
@@ -3319,10 +3449,10 @@ export default function RouteBuilderScreen() {
                   </View>
                   {camp ? (
                     renderCampPreview(camp, plan.rest ? 'OVERNIGHT / REST CAMP' : 'OVERNIGHT CAMP')
-                  ) : plan.needsCamp ? (
+                  ) : plan.needsOvernight ? (
                     <TouchableOpacity style={s.routeDayEmptyCamp} onPress={() => scanDayPlan(plan, 'camps')}>
                       <Ionicons name="add-circle-outline" size={18} color={C.orange} />
-                      <Text style={s.routeDayEmptyCampText}>{plan.frameworkTarget ? 'Choose camp near day finish' : 'Choose overnight camp'}</Text>
+                      <Text style={s.routeDayEmptyCampText}>{plan.frameworkTarget ? 'Choose camp near day finish' : 'Choose overnight'}</Text>
                     </TouchableOpacity>
                   ) : (
                     <View style={s.routeDayTravelCard}>
@@ -3393,7 +3523,7 @@ export default function RouteBuilderScreen() {
               <View style={s.inlineCampBody}>
                 <Text style={s.candidateName} numberOfLines={2}>{camp.name}</Text>
                 <Text style={s.candidateMeta} numberOfLines={2}>
-                  Day {day} · {camp.route_distance_mi != null ? `${fmtMi(camp.route_distance_mi)} off route · ` : ''}
+                  Day {day} · {camp.route_distance_mi != null ? `${fmtRouteDistance(camp.route_distance_mi)} off route · ` : ''}
                   {routeProgressLabel((camp as any).route_progress) ? `${routeProgressLabel((camp as any).route_progress)} · ` : ''}
                   {[...(camp.site_types ?? []), ...(camp.amenities ?? []), camp.land_type || 'Camp'].filter(Boolean).slice(0, 3).join(' · ')} · {camp.cost || 'See site'}
                 </Text>
@@ -3414,7 +3544,7 @@ export default function RouteBuilderScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={s.candidateName} numberOfLines={1}>{station.name}</Text>
                 <Text style={s.candidateMeta} numberOfLines={1}>
-                  Day {day} · {station.route_distance_mi != null ? `${fmtMi(station.route_distance_mi)} off route · ` : ''}
+                  Day {day} · {station.route_distance_mi != null ? `${fmtRouteDistance(station.route_distance_mi)} off route · ` : ''}
                   {routeProgressLabel((station as any).route_progress) ? `${routeProgressLabel((station as any).route_progress)} · ` : ''}
                   {station.address || station.fuel_types || 'Fuel stop'}
                 </Text>
@@ -3432,7 +3562,7 @@ export default function RouteBuilderScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={s.candidateName} numberOfLines={1}>{item.name}</Text>
                 <Text style={s.candidateMeta} numberOfLines={2}>
-                  Day {day} · {item.distance_from_route_mi != null ? `${fmtMi(item.distance_from_route_mi)} off route · ` : ''}
+                  Day {day} · {item.distance_from_route_mi != null ? `${fmtRouteDistance(item.distance_from_route_mi)} off route · ` : ''}
                   {routeProgressLabel((item as any).route_progress) ? `${routeProgressLabel((item as any).route_progress)} · ` : ''}
                   {item.day_fit || item.type} · {item.source_label}
                 </Text>
@@ -3453,7 +3583,7 @@ export default function RouteBuilderScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={s.candidateName} numberOfLines={1}>{poi.name || poi.type}</Text>
                 <Text style={s.candidateMeta} numberOfLines={1}>
-                  Day {day} · {(poi as any).route_distance_mi != null ? `${fmtMi((poi as any).route_distance_mi)} off route · ` : ''}
+                  Day {day} · {(poi as any).route_distance_mi != null ? `${fmtRouteDistance((poi as any).route_distance_mi)} off route · ` : ''}
                   {routeProgressLabel((poi as any).route_progress) ? `${routeProgressLabel((poi as any).route_progress)} · ` : ''}
                   {poi.type.replace(/_/g, ' ')}
                 </Text>
@@ -3706,7 +3836,7 @@ export default function RouteBuilderScreen() {
             <View style={s.wizardPane}>
             <View style={s.wizardQuestion}>
               <Text style={s.wizardTitle}>Where are you headed?</Text>
-              <Text style={s.wizardHelp}>Pick the final destination first. Trailhead will build day finishes around route shape, camp search, and realistic pacing.</Text>
+              <Text style={s.wizardHelp}>Pick the final destination first. Trailhead will build day finishes around your trip outline, camp search, and realistic pacing.</Text>
             </View>
             <View style={s.setupInputWrap}>
               <Text style={s.setupLabel}>DESTINATION</Text>
@@ -3753,7 +3883,7 @@ export default function RouteBuilderScreen() {
             <View style={s.loopChoiceRow}>
               {([
                 { id: 'one_way' as TripShapeMode, icon: 'arrow-forward-outline' as const, title: 'One way', text: 'Start and finish can be different places.' },
-                { id: 'loop' as TripShapeMode, icon: 'sync-outline' as const, title: 'Loop', text: 'Outbound and return use different route anchors.' },
+                { id: 'loop' as TripShapeMode, icon: 'sync-outline' as const, title: 'Loop', text: 'Outbound and return use different route points.' },
                 { id: 'there_and_back' as TripShapeMode, icon: 'repeat-outline' as const, title: 'There and back', text: 'Return to the start and reuse camp windows by default.' },
               ]).map(shape => {
                 const active = tripShapeMode === shape.id;
@@ -3997,7 +4127,7 @@ export default function RouteBuilderScreen() {
           <View style={s.workspaceHandleSummary}>
             <View>
               <Text style={s.workspaceSheetTitle}>{resolvedRouteName()}</Text>
-              <Text style={s.workspaceSheetMeta}>{fmtMi(totals.miles)} · {fmtHours(planningStats.driveHours)} · {days.length} days · {totals.camps} camps</Text>
+              <Text style={s.workspaceSheetMeta}>{fmtRouteDistance(totals.miles)} · {fmtHours(planningStats.driveHours)} · {days.length} days · {totals.camps} camps</Text>
             </View>
             <Ionicons name="map-outline" size={18} color={C.text3} />
           </View>
@@ -4112,7 +4242,7 @@ export default function RouteBuilderScreen() {
         <View style={s.sectionHeader}>
           <Text style={s.sectionTitle}>DAY {activeDay} ITINERARY</Text>
           <Text style={s.sectionMeta}>
-            {restDays.includes(activeDay) ? 'rest day' : `${fmtMi(dayMileage[activeDay] ?? 0)} · ${fmtHours(estimateMovingHours(dayMileage[activeDay] ?? 0))}`}
+            {restDays.includes(activeDay) ? 'rest day' : `${fmtRouteDistance(dayMileage[activeDay] ?? 0)} · ${fmtHours(routeDayPlans.find(plan => plan.day === activeDay)?.hours ?? estimateMovingHours(dayMileage[activeDay] ?? 0))}`}
           </Text>
         </View>
         <View style={s.dayControlRow}>
@@ -4182,7 +4312,7 @@ export default function RouteBuilderScreen() {
                 <View style={s.legCard}>
                   <View style={s.legLine} />
                   <View style={{ flex: 1 }}>
-                    <Text style={s.legMeta}>{fmtMi(legMiles)} · {fmtHours(estimateMovingHours(legMiles))}</Text>
+                    <Text style={s.legMeta}>{fmtRouteDistance(legMiles)} · {fmtHours(estimateMovingHours(legMiles))}</Text>
                     <Text style={s.legFuel}>{legFuelLabel(legMiles)}</Text>
                     <Text style={s.legText} numberOfLines={1}>to {next.name}</Text>
                   </View>
@@ -4208,7 +4338,7 @@ export default function RouteBuilderScreen() {
 
       {!keyboardVisible && <View style={[s.footer, { bottom: 18 + bottomInset }]} pointerEvents="box-none">
         <View>
-          <Text style={s.footerMiles}>{fmtMi(totals.miles)}</Text>
+          <Text style={s.footerMiles}>{fmtRouteDistance(totals.miles)}</Text>
           <Text style={s.footerSub}>{totals.stops} stops · {totals.camps} camps · ${Math.round(planningStats.fuelCost)} fuel · {days.length} days</Text>
         </View>
         <TouchableOpacity style={[s.previewBtn, routeSaving && { opacity: 0.65 }]} onPress={() => saveRoute(true)} disabled={routeSaving}>

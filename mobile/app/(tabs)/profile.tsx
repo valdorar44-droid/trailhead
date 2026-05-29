@@ -32,6 +32,13 @@ import {
   type GpxImportBatch,
 } from '@/lib/gpxImport';
 import { CREDIT_REWARDS } from '@/lib/credits';
+import {
+  displayConsumptionToMpg,
+  displayToMiles,
+  milesToDisplay,
+  mpgToDisplayConsumption,
+  resolveUnitMode,
+} from '@/lib/routeBuilder';
 
 type AppleAuthModule = typeof import('expo-apple-authentication');
 const AppleAuthentication: AppleAuthModule | null = (() => {
@@ -118,6 +125,7 @@ export default function ProfileScreen() {
   const setThemeMode   = useStore(st => st.setThemeMode);
   const weatherUnitMode = useStore(st => st.weatherUnitMode);
   const setWeatherUnitMode = useStore(st => st.setWeatherUnitMode);
+  const resolvedUnitMode = resolveUnitMode(weatherUnitMode);
   const favoriteCamps  = useStore(st => st.favoriteCamps);
   const toggleFavorite = useStore(st => st.toggleFavorite);
   const savedPlaces = useStore(st => st.savedPlaces);
@@ -1229,18 +1237,18 @@ export default function ProfileScreen() {
               {rigSection === 'advanced' && (
                 <>
                   {/* Fuel range */}
-                  <Text style={s.rigFormLabel}>FUEL RANGE (MILES)</Text>
-                  <TextInput style={s.rigInput} placeholder="e.g. 400 — AI uses this for fuel stop planning"
+                  <Text style={s.rigFormLabel}>FUEL RANGE ({resolvedUnitMode === 'metric' ? 'KM' : 'MILES'})</Text>
+                  <TextInput style={s.rigInput} placeholder={resolvedUnitMode === 'metric' ? 'e.g. 640 — used for fuel stop planning' : 'e.g. 400 — used for fuel stop planning'}
                     placeholderTextColor={C.text3}
-                    value={rigDraft.fuel_range_miles ?? ''}
-                    onChangeText={v => setRigDraft(d => ({ ...d, fuel_range_miles: v }))}
+                    value={rigDraft.fuel_range_miles ? String(Math.round(milesToDisplay(Number(rigDraft.fuel_range_miles), weatherUnitMode))) : ''}
+                    onChangeText={v => setRigDraft(d => ({ ...d, fuel_range_miles: displayToMiles(v, weatherUnitMode) }))}
                     keyboardType="numeric" />
 
-                  <Text style={s.rigFormLabel}>REAL-WORLD MPG</Text>
-                  <TextInput style={s.rigInput} placeholder="e.g. 14.5 — used for route fuel estimates"
+                  <Text style={s.rigFormLabel}>{resolvedUnitMode === 'metric' ? 'REAL-WORLD L/100KM' : 'REAL-WORLD MPG'}</Text>
+                  <TextInput style={s.rigInput} placeholder={resolvedUnitMode === 'metric' ? 'e.g. 16.2 — used for route fuel estimates' : 'e.g. 14.5 — used for route fuel estimates'}
                     placeholderTextColor={C.text3}
-                    value={rigDraft.fuel_mpg ?? ''}
-                    onChangeText={v => setRigDraft(d => ({ ...d, fuel_mpg: v }))}
+                    value={rigDraft.fuel_mpg ? mpgToDisplayConsumption(Number(rigDraft.fuel_mpg), weatherUnitMode) : ''}
+                    onChangeText={v => setRigDraft(d => ({ ...d, fuel_mpg: displayConsumptionToMpg(v, weatherUnitMode) }))}
                     keyboardType="decimal-pad" />
 
                   {/* Locking diffs */}
@@ -1605,14 +1613,14 @@ export default function ProfileScreen() {
 
         <View style={s.weatherUnitsCard}>
           <View style={{ flex: 1 }}>
-            <Text style={s.themeToggleLabel}>WEATHER UNITS</Text>
-            <Text style={s.themeToggleSub}>Auto uses °F in the U.S. and °C elsewhere</Text>
+            <Text style={s.themeToggleLabel}>UNITS</Text>
+            <Text style={s.themeToggleSub}>Auto uses miles, gallons, and °F in the U.S.; metric elsewhere</Text>
           </View>
           <View style={s.weatherUnitsSegment}>
             {[
               ['auto', 'AUTO'],
-              ['imperial', '°F'],
-              ['metric', '°C'],
+              ['imperial', 'MI'],
+              ['metric', 'KM'],
             ].map(([mode, label]) => {
               const active = weatherUnitMode === mode;
               return (

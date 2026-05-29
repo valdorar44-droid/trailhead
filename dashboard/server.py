@@ -1,6 +1,6 @@
 """Trailhead FastAPI server. All API routes."""
 from __future__ import annotations
-import asyncio, os, json, uuid, secrets, xml.etree.ElementTree as ET, time, hashlib, re, sqlite3, smtplib, html, base64, binascii, math
+import asyncio, os, json, uuid, secrets, xml.etree.ElementTree as ET, time, hashlib, re, sqlite3, smtplib, html, base64, binascii, math, heapq
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from email.utils import formataddr
@@ -31,6 +31,7 @@ from dashboard.marine_chart_provider import (
     suggested_corridor,
 )
 from dashboard.hydro_provider import LOCAL_HYDRO_DIR, HYDRO_DIR, hydro_profile, read_hydro_manifest
+from dashboard.water_routing_provider import route_with_water_graph, water_graph_manifest
 from ingestors.ridb import get_campsites_near, get_campsites_search, get_facility_detail
 from ingestors.osm import get_osm_campsites, get_osm_campsite_detail, get_water_sources, get_trailheads, get_trails, get_viewpoints, get_peaks, get_hot_springs, get_fuel_stations, get_service_places
 from ingestors.foursquare import FSQ_BUSINESS_CATEGORIES, foursquare_enabled, get_foursquare_place_detail, get_foursquare_places
@@ -7336,6 +7337,11 @@ async def hydro_chart_profile(n: float, s: float, e: float, w: float):
     }
 
 
+@app.get("/api/water/route-graphs/manifest.json")
+async def water_route_graphs_manifest():
+    return water_graph_manifest()
+
+
 @app.get("/api/hydro/{region}.pmtiles")
 async def hydro_pmtiles(region: str):
     if not re.fullmatch(r"[a-z0-9-]{2,24}", region):
@@ -7415,13 +7421,59 @@ async def water_suggested_corridor(
     for lng in (start_lng, end_lng):
         if not -180 <= lng <= 180:
             raise HTTPException(400, "Invalid longitude")
-    return suggested_corridor(
+    corridor = suggested_corridor(
         start_lat=start_lat,
         start_lng=start_lng,
         end_lat=end_lat,
         end_lng=end_lng,
         draft_ft=draft_ft,
     )
+    graph_line = route_with_water_graph(
+        start_lat=start_lat,
+        start_lng=start_lng,
+        end_lat=end_lat,
+        end_lng=end_lng,
+    )
+    if graph_line:
+        corridor["geometry"] = {"type": "LineString", "coordinates": graph_line["coordinates"]}
+        corridor["distance_mi"] = graph_line.get("distance_mi") or corridor["distance_mi"]
+        corridor["eta_minutes"] = round((float(corridor["distance_mi"]) / 16.0) * 60) if corridor.get("distance_mi") else corridor["eta_minutes"]
+        corridor["source_confidence"] = graph_line["source_confidence"]
+        corridor["chart_source"] = graph_line["source"]
+        corridor["source_disclosure"] = "Chart graph."
+        corridor["conflicts"].append({
+            "kind": graph_line["source_confidence"],
+            "severity": "notice",
+            "note": "Chart graph used where available.",
+        })
+        corridor["route_points"] = [
+            {"name": "Start", "lat": start_lat, "lng": start_lng, "kind": "start"},
+            {"name": "Graph", "lat": start_lat, "lng": start_lng, "kind": "chart_graph"},
+            {"name": "End", "lat": end_lat, "lng": end_lng, "kind": "end"},
+        ]
+        return corridor
+    try:
+        open_line = await _open_water_nav_corridor(start_lat, start_lng, end_lat, end_lng)
+    except Exception:
+        open_line = None
+    if open_line:
+        corridor["geometry"] = {"type": "LineString", "coordinates": open_line["coordinates"]}
+        corridor["distance_mi"] = open_line.get("distance_mi") or corridor["distance_mi"]
+        corridor["eta_minutes"] = round((float(corridor["distance_mi"]) / 16.0) * 60) if corridor.get("distance_mi") else corridor["eta_minutes"]
+        corridor["source_confidence"] = "open_seamark_graph_advisory" if open_line.get("graph") else "open_seamark_advisory"
+        corridor["chart_source"] = open_line["source"]
+        corridor["source_disclosure"] = "Open seamark graph." if open_line.get("graph") else "Open seamark line."
+        corridor["conflicts"].append({
+            "kind": corridor["source_confidence"],
+            "severity": "notice",
+            "note": "Open seamark graph used where available." if open_line.get("graph") else "Open seamark line used where available.",
+        })
+        corridor["route_points"] = [
+            {"name": "Start", "lat": start_lat, "lng": start_lng, "kind": "start"},
+            {"name": "Graph" if open_line.get("graph") else "Line", "lat": start_lat, "lng": start_lng, "kind": "open_seamark_graph" if open_line.get("graph") else "open_seamark_line"},
+            {"name": "End", "lat": end_lat, "lng": end_lng, "kind": "end"},
+        ]
+    return corridor
 
 
 # ── Land legality check ───────────────────────────────────────────────────────
@@ -7849,6 +7901,201 @@ async def _post_overpass_json(query: str, *, user_agent: str, timeout_seconds: f
             except Exception as exc:
                 errors.append(f"{url}: {type(exc).__name__}: {exc}")
     raise RuntimeError("; ".join(errors[-3:]) or "Overpass unavailable")
+
+
+def _water_coord_key(coord: list[float] | tuple[float, float]) -> str:
+    return f"{round(float(coord[0]), 5):.5f},{round(float(coord[1]), 5):.5f}"
+
+
+def _water_dedupe_coords(coords: list[list[float]]) -> list[list[float]]:
+    deduped: list[list[float]] = []
+    for coord in coords:
+        if len(coord) < 2:
+            continue
+        item = [round(float(coord[0]), 6), round(float(coord[1]), 6)]
+        if not deduped or item != deduped[-1]:
+            deduped.append(item)
+    return deduped
+
+
+def _water_route_graph_path(
+    *,
+    start_lat: float,
+    start_lng: float,
+    end_lat: float,
+    end_lng: float,
+    features: list[dict],
+) -> dict | None:
+    node_coords: dict[str, list[float]] = {}
+    graph: dict[str, list[tuple[str, float]]] = {}
+    source_names: set[str] = set()
+
+    for feature in features:
+        coords = (feature.get("geometry") or {}).get("coordinates") or []
+        props = feature.get("properties") or {}
+        clean = [
+            [float(coord[0]), float(coord[1])]
+            for coord in coords
+            if isinstance(coord, (list, tuple)) and len(coord) >= 2
+        ]
+        if len(clean) < 2:
+            continue
+        source_names.add(str(props.get("name") or props.get("label") or props.get("source") or "Open seamark line"))
+        previous_key = ""
+        previous_coord: list[float] | None = None
+        for coord in clean:
+            key = _water_coord_key(coord)
+            node_coords.setdefault(key, [round(coord[0], 6), round(coord[1], 6)])
+            graph.setdefault(key, [])
+            if previous_key and previous_coord:
+                weight = _haversine_m(previous_coord[1], previous_coord[0], coord[1], coord[0])
+                if weight > 0:
+                    graph[previous_key].append((key, weight))
+                    graph[key].append((previous_key, weight))
+            previous_key = key
+            previous_coord = coord
+
+    if len(node_coords) < 2:
+        return None
+
+    def nearest_nodes(lat: float, lng: float, limit: int = 5) -> list[tuple[str, float]]:
+        scored = [
+            (key, _haversine_m(lat, lng, coord[1], coord[0]))
+            for key, coord in node_coords.items()
+        ]
+        scored.sort(key=lambda item: item[1])
+        return scored[:limit]
+
+    direct_m = max(1.0, _haversine_m(start_lat, start_lng, end_lat, end_lng))
+    snap_limit_m = max(900.0, min(4200.0, direct_m * 0.35))
+    start_key = "__start__"
+    end_key = "__end__"
+    node_coords[start_key] = [round(start_lng, 6), round(start_lat, 6)]
+    node_coords[end_key] = [round(end_lng, 6), round(end_lat, 6)]
+    graph[start_key] = []
+    graph[end_key] = []
+
+    for key, dist in nearest_nodes(start_lat, start_lng):
+        if dist <= snap_limit_m:
+            graph[start_key].append((key, dist))
+            graph.setdefault(key, []).append((start_key, dist))
+    for key, dist in nearest_nodes(end_lat, end_lng):
+        if dist <= snap_limit_m:
+            graph[end_key].append((key, dist))
+            graph.setdefault(key, []).append((end_key, dist))
+
+    if not graph[start_key] or not graph[end_key]:
+        return None
+
+    queue: list[tuple[float, str]] = [(0.0, start_key)]
+    distances: dict[str, float] = {start_key: 0.0}
+    parents: dict[str, str] = {}
+    while queue:
+        cost, key = heapq.heappop(queue)
+        if key == end_key:
+            break
+        if cost > distances.get(key, math.inf):
+            continue
+        for next_key, weight in graph.get(key, []):
+            next_cost = cost + weight
+            if next_cost < distances.get(next_key, math.inf):
+                distances[next_key] = next_cost
+                parents[next_key] = key
+                heapq.heappush(queue, (next_cost, next_key))
+
+    route_cost = distances.get(end_key)
+    if route_cost is None or not math.isfinite(route_cost):
+        return None
+    if route_cost > max(6500.0, direct_m * 4.5):
+        return None
+
+    keys: list[str] = []
+    cursor = end_key
+    while cursor:
+        keys.append(cursor)
+        if cursor == start_key:
+            break
+        cursor = parents.get(cursor, "")
+    if not keys or keys[-1] != start_key:
+        return None
+    keys.reverse()
+
+    coords = _water_dedupe_coords([node_coords[key] for key in keys if key in node_coords])
+    if len(coords) < 2:
+        return None
+    return {
+        "coordinates": coords[:320],
+        "distance_mi": round(route_cost / 1609.344, 2),
+        "source": "OpenStreetMap / OpenSeaMap graph",
+        "source_names": sorted(source_names)[:6],
+        "graph": True,
+        "snap_limit_m": round(snap_limit_m),
+    }
+
+
+async def _open_water_nav_corridor(start_lat: float, start_lng: float, end_lat: float, end_lng: float) -> dict | None:
+    n = max(start_lat, end_lat) + 0.18
+    s = min(start_lat, end_lat) - 0.18
+    e = max(start_lng, end_lng) + 0.18
+    w = min(start_lng, end_lng) - 0.18
+    if abs(n - s) > 4.5 or abs(e - w) > 4.5:
+        return None
+    bbox = f"{s},{w},{n},{e}"
+    query = f"""[out:json][timeout:18];
+(
+  way["seamark:type"~"{WATER_NAV_LINE_PATTERN}",i]({bbox});
+  way["waterway"="fairway"]({bbox});
+  way["seamark:recommended_track:category"]({bbox});
+  way["seamark:recommended_track:maximum_draught"]({bbox});
+  way["seamark:fairway:category"]({bbox});
+);
+out tags geom 900;
+"""
+    payload, _, _ = await _post_overpass_json(query, user_agent="Trailhead/1.0 (water corridor)", timeout_seconds=22)
+    line_features: list[dict] = []
+    candidates: list[tuple[float, list[list[float]], dict]] = []
+    direct_mi = max(0.1, _haversine_m(start_lat, start_lng, end_lat, end_lng) / 1609.344)
+    for el in payload.get("elements") or []:
+        feature = _water_nav_line_feature(el)
+        coords = feature.get("geometry", {}).get("coordinates") if feature else None
+        if not coords or len(coords) < 2:
+            continue
+        line_features.append(feature)
+        first = coords[0]
+        last = coords[-1]
+        forward_score = (
+            _haversine_m(start_lat, start_lng, first[1], first[0])
+            + _haversine_m(end_lat, end_lng, last[1], last[0])
+        ) / 1609.344
+        reverse_score = (
+            _haversine_m(start_lat, start_lng, last[1], last[0])
+            + _haversine_m(end_lat, end_lng, first[1], first[0])
+        ) / 1609.344
+        oriented = coords if forward_score <= reverse_score else list(reversed(coords))
+        score = min(forward_score, reverse_score)
+        if score <= max(8.0, direct_mi * 0.75):
+            candidates.append((score, oriented, feature.get("properties", {})))
+    graph_route = _water_route_graph_path(
+        start_lat=start_lat,
+        start_lng=start_lng,
+        end_lat=end_lat,
+        end_lng=end_lng,
+        features=line_features,
+    )
+    if graph_route:
+        return graph_route
+    if not candidates:
+        return None
+    _, line_coords, props = min(candidates, key=lambda item: (item[0], -len(item[1])))
+    coords = [[round(start_lng, 6), round(start_lat, 6)]]
+    coords.extend([[round(float(lng), 6), round(float(lat), 6)] for lng, lat in line_coords])
+    coords.append([round(end_lng, 6), round(end_lat, 6)])
+    deduped = _water_dedupe_coords(coords)
+    return {
+        "coordinates": deduped[:220],
+        "source": str(props.get("source") or "OpenStreetMap / OpenSeaMap"),
+        "source_names": [str(props.get("name") or props.get("label") or "Open seamark line")],
+    }
 
 
 @app.get("/api/water/navigation-lines")

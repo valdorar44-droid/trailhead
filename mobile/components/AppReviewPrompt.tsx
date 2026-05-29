@@ -49,7 +49,7 @@ export default function AppReviewPrompt({ visible, onClose }: Props) {
             </View>
 
             <Text style={s.kicker}>TRAILHEAD REVIEW</Text>
-            <Text style={s.title}>Enjoying the route intelligence?</Text>
+            <Text style={s.title}>Enjoying Route Builder?</Text>
             <Text style={s.body}>
               A quick App Store review helps more overlanders find better camps, safer routes, and cleaner trip plans.
             </Text>

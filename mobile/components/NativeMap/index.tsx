@@ -21,6 +21,7 @@ import type { ContourSourceMode, TrailSourceMode } from './mapStyle';
 import { fetchRoute, buildFallbackRoute } from './routing';
 import type { RouteResult, RouteStep, RouteOpts, MapBounds, WP } from './types';
 import type { CampsitePin, OsmPoi, Pin, Report, WaterSpotCard, SuggestedWaterCorridorResponse } from '@/lib/api';
+import type { WaterRoute } from '@/lib/store';
 import { useStore } from '@/lib/store';
 import { useTheme } from '@/lib/design';
 import { buildOfflineTrailGraphSelection } from '@/lib/trailGraph';
@@ -81,6 +82,7 @@ export interface NativeMapProps {
   waterNavLines?: any;
   waterSpotCards?: WaterSpotCard[];
   waterCorridor?: SuggestedWaterCorridorResponse | null;
+  waterFollowRoute?: WaterRoute | null;
   reports:       Report[];
   communityPins: Pin[];
   searchMarker:  { lat: number; lng: number; name: string } | null;
@@ -600,7 +602,7 @@ async function probeTileCdn(timeoutMs = 1500): Promise<boolean> {
 // ── Main component ────────────────────────────────────────────────────────────
 const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const {
-    waypoints, camps, gas, pois, waterNavLines, waterSpotCards = [], waterCorridor = null, reports, communityPins, searchMarker,
+    waypoints, camps, gas, pois, waterNavLines, waterSpotCards = [], waterCorridor = null, waterFollowRoute = null, reports, communityPins, searchMarker,
     userLoc, navMode, navCameraFollow = false, nativeNavEngineActive = false, navIdx, navHeading, navSpeed,
     mapLayer, routeOpts,
     traceMode = false, traceDraftCoords = [], traceRouteCoords = [], tracePinCoords = [],
@@ -1425,22 +1427,36 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       raw: JSON.stringify(card),
     },
   }))), [waterSpotCards]);
-  const waterCorridorFC = useMemo(() => (
-    waterCorridor?.geometry?.coordinates?.length
-      ? {
-          type: 'FeatureCollection' as const,
-          features: [{
-            type: 'Feature' as const,
-            geometry: waterCorridor.geometry,
-            properties: {
-              status: waterCorridor.status,
-              distance_mi: waterCorridor.distance_mi,
-              source_confidence: waterCorridor.source_confidence,
-            },
-          }],
-        }
-      : { type: 'FeatureCollection' as const, features: [] as GeoJSON.Feature[] }
-  ), [waterCorridor]);
+  const waterCorridorFC = useMemo(() => {
+    const coords = waterCorridor?.geometry?.coordinates ?? waterFollowRoute?.geometry ?? [];
+    if (!coords.length) return { type: 'FeatureCollection' as const, features: [] as GeoJSON.Feature[] };
+    const features: GeoJSON.Feature[] = [{
+      type: 'Feature' as const,
+      geometry: { type: 'LineString' as const, coordinates: coords },
+      properties: {
+        status: waterCorridor?.status ?? 'following',
+        distance_mi: waterCorridor?.distance_mi ?? waterFollowRoute?.distanceMi ?? 0,
+        source_confidence: waterCorridor?.source_confidence ?? waterFollowRoute?.sourceConfidence ?? '',
+      },
+    }];
+    const start = coords[0];
+    const end = coords[coords.length - 1];
+    const next = coords[Math.min(coords.length - 1, Math.max(1, Math.floor(coords.length * 0.28)))];
+    [
+      { coord: start, role: 'start', label: 'S' },
+      { coord: next, role: 'next', label: 'N' },
+      { coord: end, role: 'end', label: 'E' },
+    ].forEach(item => {
+      if (!item.coord) return;
+      features.push({
+        type: 'Feature' as const,
+        geometry: { type: 'Point' as const, coordinates: item.coord },
+        properties: { role: item.role, label: item.label },
+      });
+    });
+    return { type: 'FeatureCollection' as const, features };
+  }, [waterCorridor, waterFollowRoute]);
+  const waterRouteVisualActive = waterCorridorFC.features.length > 0 && (showNautical || !!waterFollowRoute);
   const routeTurnFC = useMemo(() => pointFC(routeSteps.flatMap((step, idx) => {
     if (step.lat == null || step.lng == null) return [];
     const arrow = maneuverArrowText(step);
@@ -1772,7 +1788,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       )}
 
       {/* ── Route line ────────────────────────────────────────────────── */}
-      {routeCoords.length > 0 && (
+      {routeCoords.length > 0 && !waterRouteVisualActive && (
         <MapLibreGL.ShapeSource id="route" shape={lineFC(routeCoords)}>
           <MapLibreGL.LineLayer
             id="route-shadow"
@@ -1805,7 +1821,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         </MapLibreGL.ShapeSource>
       )}
 
-      {routeTurnFC.features.length > 0 && (
+      {routeTurnFC.features.length > 0 && !waterRouteVisualActive && (
         <MapLibreGL.ShapeSource id="route-turns" shape={routeTurnFC}>
           <MapLibreGL.SymbolLayer
             id="route-turn-shadows"
@@ -1838,7 +1854,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       )}
 
       {/* ── Passed route dimmed overlay ───────────────────────────────── */}
-      {passedCoords.length > 1 && (
+      {passedCoords.length > 1 && !waterRouteVisualActive && (
         <MapLibreGL.ShapeSource id="route-passed" shape={lineFC(passedCoords)}>
           <MapLibreGL.LineLayer
             id="route-passed-line"
@@ -1848,7 +1864,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       )}
 
       {/* ── Breadcrumb trail ──────────────────────────────────────────── */}
-      {breadcrumb.length > 1 && (
+      {breadcrumb.length > 1 && !waterRouteVisualActive && (
         <MapLibreGL.ShapeSource id="breadcrumb" shape={lineFC(breadcrumb)}>
           <MapLibreGL.LineLayer
             id="breadcrumb-line"
@@ -1859,46 +1875,50 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
 
       {showNautical && waterNavLineFC.features.length > 0 && (
         <MapLibreGL.ShapeSource id="water-nav-lines" shape={waterNavLineFC}>
-          <MapLibreGL.LineLayer
-            id="water-nav-line-casing"
-            filter={['==', ['geometry-type'], 'LineString'] as any}
-            style={{
-              lineColor: '#04111f',
-              lineWidth: ['interpolate', ['linear'], ['zoom'], 8, 4, 13, 7, 16, 10],
-              lineOpacity: 0.82,
-              lineCap: 'round',
-              lineJoin: 'round',
-            }}
-          />
-          <MapLibreGL.LineLayer
-            id="water-nav-line"
-            filter={['==', ['geometry-type'], 'LineString'] as any}
-            style={{
-              lineColor: ['match', ['get', 'kind'],
-                'marked_channel', '#22c55e',
-                'recommended_track', '#38bdf8',
-                'range_line', '#f59e0b',
-                'traffic_lane', '#818cf8',
-                'deep_water_route', '#2563eb',
-                '#06b6d4'],
-              lineWidth: ['interpolate', ['linear'], ['zoom'], 8, 2, 13, 4, 16, 6],
-              lineOpacity: 0.95,
-              lineCap: 'round',
-              lineJoin: 'round',
-            }}
-          />
-          <MapLibreGL.LineLayer
-            id="water-nav-recommended-glow"
-            filter={['all', ['==', ['geometry-type'], 'LineString'], ['==', ['get', 'kind'], 'recommended_track']] as any}
-            style={{
-              lineColor: '#67e8f9',
-              lineWidth: ['interpolate', ['linear'], ['zoom'], 8, 6, 13, 11, 16, 15],
-              lineOpacity: 0.22,
-              lineBlur: 2.5,
-              lineCap: 'round',
-              lineJoin: 'round',
-            } as any}
-          />
+          {!waterFollowRoute && (
+            <>
+              <MapLibreGL.LineLayer
+                id="water-nav-line-casing"
+                filter={['==', ['geometry-type'], 'LineString'] as any}
+                style={{
+                  lineColor: '#04111f',
+                  lineWidth: ['interpolate', ['linear'], ['zoom'], 8, 4, 13, 7, 16, 10],
+                  lineOpacity: 0.82,
+                  lineCap: 'round',
+                  lineJoin: 'round',
+                }}
+              />
+              <MapLibreGL.LineLayer
+                id="water-nav-line"
+                filter={['==', ['geometry-type'], 'LineString'] as any}
+                style={{
+                  lineColor: ['match', ['get', 'kind'],
+                    'marked_channel', '#22c55e',
+                    'recommended_track', '#38bdf8',
+                    'range_line', '#f59e0b',
+                    'traffic_lane', '#818cf8',
+                    'deep_water_route', '#2563eb',
+                    '#06b6d4'],
+                  lineWidth: ['interpolate', ['linear'], ['zoom'], 8, 2, 13, 4, 16, 6],
+                  lineOpacity: 0.95,
+                  lineCap: 'round',
+                  lineJoin: 'round',
+                }}
+              />
+              <MapLibreGL.LineLayer
+                id="water-nav-recommended-glow"
+                filter={['all', ['==', ['geometry-type'], 'LineString'], ['==', ['get', 'kind'], 'recommended_track']] as any}
+                style={{
+                  lineColor: '#67e8f9',
+                  lineWidth: ['interpolate', ['linear'], ['zoom'], 8, 6, 13, 11, 16, 15],
+                  lineOpacity: 0.22,
+                  lineBlur: 2.5,
+                  lineCap: 'round',
+                  lineJoin: 'round',
+                } as any}
+              />
+            </>
+          )}
           <MapLibreGL.CircleLayer
             id="water-nav-hazard-halo"
             filter={['all', ['==', ['geometry-type'], 'Point'], ['==', ['get', 'kind'], 'water_hazard']] as any}
@@ -1945,28 +1965,67 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         </MapLibreGL.ShapeSource>
       )}
 
-      {showNautical && waterCorridorFC.features.length > 0 && (
+      {waterRouteVisualActive && (
         <MapLibreGL.ShapeSource id="safe-water-corridor" shape={waterCorridorFC}>
           <MapLibreGL.LineLayer
-            id="safe-water-corridor-glow"
+            id="safe-water-corridor-band"
+            filter={['==', ['geometry-type'], 'LineString'] as any}
             style={{
               lineColor: '#67e8f9',
-              lineWidth: ['interpolate', ['linear'], ['zoom'], 8, 9, 13, 15, 16, 20],
-              lineOpacity: 0.2,
-              lineBlur: 2.5,
+              lineWidth: ['interpolate', ['linear'], ['zoom'], 8, 16, 13, 28, 16, 40],
+              lineOpacity: 0.18,
+              lineBlur: 1.5,
+              lineCap: 'round',
+              lineJoin: 'round',
+            } as any}
+          />
+          <MapLibreGL.LineLayer
+            id="safe-water-corridor-casing"
+            filter={['==', ['geometry-type'], 'LineString'] as any}
+            style={{
+              lineColor: '#03131d',
+              lineWidth: ['interpolate', ['linear'], ['zoom'], 8, 7, 13, 11, 16, 15],
+              lineOpacity: 0.92,
               lineCap: 'round',
               lineJoin: 'round',
             } as any}
           />
           <MapLibreGL.LineLayer
             id="safe-water-corridor-line"
+            filter={['==', ['geometry-type'], 'LineString'] as any}
             style={{
               lineColor: '#67e8f9',
-              lineWidth: ['interpolate', ['linear'], ['zoom'], 8, 2.5, 13, 4.5, 16, 6],
+              lineWidth: ['interpolate', ['linear'], ['zoom'], 8, 3, 13, 5, 16, 7],
               lineOpacity: 0.96,
-              lineDasharray: [1.2, 1.4],
               lineCap: 'round',
               lineJoin: 'round',
+            } as any}
+          />
+          <MapLibreGL.SymbolLayer
+            id="safe-water-corridor-arrows"
+            filter={['==', ['geometry-type'], 'LineString'] as any}
+            style={{
+              symbolPlacement: 'line',
+              symbolSpacing: ['interpolate', ['linear'], ['zoom'], 8, 120, 13, 80, 16, 54],
+              textField: '›',
+              textSize: ['interpolate', ['linear'], ['zoom'], 8, 18, 13, 24, 16, 30],
+              textColor: '#e0fbff',
+              textHaloColor: '#03131d',
+              textHaloWidth: 1.4,
+              textKeepUpright: false,
+              textAllowOverlap: true,
+              textIgnorePlacement: true,
+            } as any}
+          />
+          <MapLibreGL.CircleLayer
+            id="safe-water-corridor-knots"
+            filter={['==', ['geometry-type'], 'Point'] as any}
+            style={{
+              circleRadius: ['match', ['get', 'role'], 'next', 6.5, 5.5],
+              circleColor: ['match', ['get', 'role'], 'start', '#22c55e', 'end', '#f97316', '#67e8f9'],
+              circleStrokeColor: '#03131d',
+              circleStrokeWidth: 2.5,
+              circleOpacity: 0.98,
             } as any}
           />
         </MapLibreGL.ShapeSource>

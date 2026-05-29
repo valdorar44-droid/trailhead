@@ -5919,7 +5919,24 @@ function MapScreen() {
     loadCampsInArea(b, activeFilters);
   }
 
-  function openSafeWaterMode() {
+  function closeSafeWaterMode() {
+    setLayerNautical(false);
+    toggleDataLayer('nautical', false);
+    setSafeWaterPanelCollapsed(false);
+    setSelectedWaterSpot(null);
+    setWaterCorridor(null);
+    setWaterCorridorError('');
+    setWaterCorridorPickMode(null);
+    setWaterRouteReview(null);
+    setWaterFollowRoute(null);
+    setShowMapDrawer(false);
+  }
+
+  function toggleSafeWaterMode() {
+    if (layerNautical || waterFollowActive) {
+      closeSafeWaterMode();
+      return;
+    }
     setLayerNautical(true);
     toggleDataLayer('nautical', true);
     setSafeWaterPanelCollapsed(false);
@@ -10111,15 +10128,17 @@ function MapScreen() {
               ))}
             </View>
             <View style={s.mapDrawerPrimary}>
-              <TouchableOpacity style={[s.mapDrawerFeature, layerNautical && s.mapDrawerFeatureActive]} onPress={openSafeWaterMode}>
+              <TouchableOpacity style={[s.mapDrawerFeature, layerNautical && s.mapDrawerFeatureActive]} onPress={toggleSafeWaterMode}>
                 <View style={[s.mapDrawerFeatureIcon, { backgroundColor: '#0891b222', borderColor: '#67e8f966' }]}>
                   <Ionicons name="boat-outline" size={20} color="#67e8f9" />
                 </View>
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={s.mapDrawerFeatureTitle}>Safe Water</Text>
-                  <Text style={s.mapDrawerFeatureSub} numberOfLines={2}>Routes, fishing spots, catches, and water conditions.</Text>
+                  <Text style={s.mapDrawerFeatureSub} numberOfLines={2}>
+                    {layerNautical ? 'On. Tap to turn off.' : 'Routes, fishing spots, catches, and water conditions.'}
+                  </Text>
                 </View>
-                <Ionicons name="chevron-forward" size={17} color={OVR.text3} />
+                <Ionicons name={layerNautical ? 'close-circle-outline' : 'chevron-forward'} size={17} color={OVR.text3} />
               </TouchableOpacity>
             </View>
           </View>
@@ -13197,7 +13216,7 @@ function MapScreen() {
             {([
               { key: 'lands', label: 'Public Land Tint', sub: 'BLM/USFS/NPS color overlay. Requires signal unless cached.', icon: 'map-outline', val: showLands, color: '#22c55e', toggle: toggleLandOverlay },
               { key: 'usgs', label: 'USGS Topo + Trails', sub: 'Topo raster with contours, paths, labels, and land features.', icon: 'trail-sign-outline', val: showUsgs, color: '#0ea5e9', toggle: toggleUsgsOverlay },
-              { key: 'nautical', label: 'Safe Water Structure', sub: 'Bathymetry contours, shallow zones, hazards, open seamark lines, buoys, and markers where sources exist.', icon: 'boat-outline', val: layerNautical, color: '#0891b2', toggle: (v: boolean) => { setLayerNautical(v); toggleDataLayer('nautical', v); if (v) setActivePlaceFilters(prev => Array.from(new Set([...prev, ...WATER_NAV_PLACE_FILTER_IDS]))); } },
+              { key: 'nautical', label: 'Safe Water Structure', sub: 'Bathymetry contours, shallow zones, hazards, open seamark lines, buoys, and markers where sources exist.', icon: 'boat-outline', val: layerNautical, color: '#0891b2', toggle: (v: boolean) => { if (!v) { closeSafeWaterMode(); return; } setLayerNautical(true); toggleDataLayer('nautical', true); if (v) setActivePlaceFilters(prev => Array.from(new Set([...prev, ...WATER_NAV_PLACE_FILTER_IDS]))); } },
               { key: 'pois', label: 'Places', sub: 'Live and downloaded fuel, water, trailheads, services, viewpoints, and attractions.', icon: 'location-outline', val: showPois, color: '#3b82f6', toggle: togglePoiOverlay },
             ] as const).map(l => (
               <TouchableOpacity key={l.key} style={s.layerRow} onPress={() => l.toggle(!l.val)}>

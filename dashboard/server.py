@@ -2189,7 +2189,8 @@ async def route_proxy(body: RouteRequest):
     payload = _route_payload(route_locations, body.options, body.units)
     cache_key = _route_cache_key(payload)
     cached = get_route_cached(cache_key)
-    if cached:
+    cached_osrm_fallback = bool(cached and cached.get("_fallback", {}).get("engine") == "osrm")
+    if cached and not cached_osrm_fallback:
         cached_engine = "osrm-fallback" if cached.get("_fallback", {}).get("engine") == "osrm" else "valhalla"
         cached["_trailhead"] = {"engine": cached_engine, "cache": "hit", "cache_key": cache_key}
         return cached
@@ -2211,6 +2212,15 @@ async def route_proxy(body: RouteRequest):
         valhalla_error = "Valhalla route timed out"
     except Exception as e:
         valhalla_error = f"Valhalla route failed: {e}"
+
+    if cached_osrm_fallback and cached:
+        cached["_trailhead"] = {
+            "engine": "osrm-fallback",
+            "cache": "stale-fallback-hit",
+            "cache_key": cache_key,
+            "valhalla_error": valhalla_error,
+        }
+        return cached
 
     repair_locations = route_locations
     dropped_optional = len(locations) - len(repair_locations)

@@ -5,4 +5,12 @@ export const ROUTE_BUILDER_AUDIT_MATRIX = [
   'Moab to Big Sur · balanced · 5 days · manual camp cadence',
   'Moab to Big Sur · wild · 5 days · loop',
   'Moab to Big Sur · wild · 5 days · there and back',
+  'San Francisco to Los Angeles · balanced · popular corridor',
+  'Denver to Moab · wild · mountain/desert corridor',
+  'Seattle to Banff · balanced · cross-border corridor',
+  'Reykjavik to Akureyri · balanced · international',
+  'Paris to Chamonix · balanced · international mountains',
+  'Tokyo to Kyoto · balanced · international urban corridor',
+  'Sydney to Melbourne · balanced · international long drive',
+  'Honolulu to Big Sur · unsupported long jump',
 ] as const;

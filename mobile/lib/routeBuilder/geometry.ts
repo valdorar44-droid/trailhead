@@ -1,5 +1,5 @@
 import type { RouteBuildResult, RouteStyleMode, TripShapeMode } from '@/lib/api';
-import type { DayRouteSegment, ProviderRouteGeometry, RouteBuilderStopLike } from './model';
+import type { DayRouteSegment, ProviderRouteGeometry, RouteBuilderStopLike, RouteShapeDayRole } from './model';
 
 const MI_PER_METER = 1 / 1609.344;
 
@@ -133,6 +133,8 @@ export function providerGeometryFromRoute(result: RouteBuildResult | null | unde
   const coords = (result?.trip?.legs ?? []).flatMap(leg => typeof leg.shape === 'string' ? decodePolyline6(leg.shape) : []);
   const summaryLength = Number(result?.trip?.summary?.length);
   const summaryTime = Number(result?.trip?.summary?.time);
+  const engine = result?._trailhead?.engine;
+  const fallbackEngine = engine === 'osrm-fallback' || (result as any)?._fallback?.engine === 'osrm';
   const totalDistanceMi = Number.isFinite(summaryLength) && summaryLength > 0
     ? summaryLength * (units === 'kilometers' ? 0.621371 : 1)
     : routeDistanceMi(coordsToPoints(coords));
@@ -141,9 +143,22 @@ export function providerGeometryFromRoute(result: RouteBuildResult | null | unde
     totalDistanceMi,
     totalDurationHours: Number.isFinite(summaryTime) && summaryTime > 0 ? summaryTime / 3600 : Math.max(0, totalDistanceMi / 42),
     source: coords.length >= 2 ? 'provider' : 'none',
-    confidence: coords.length >= 2 ? 'high' : 'none',
-    engine: result?._trailhead?.engine,
+    confidence: coords.length >= 2 ? (fallbackEngine ? 'medium' : 'high') : 'none',
+    engine,
   };
+}
+
+export function routeShapeDayRole(shape: TripShapeMode, day: number, days: number[]): RouteShapeDayRole {
+  if (shape === 'one_way') return 'one_way';
+  const ordered = days.length ? [...days].sort((a, b) => a - b) : [day];
+  const lastDay = ordered[ordered.length - 1] ?? day;
+  const midpoint = Math.max(1, Math.min(lastDay, Math.ceil(lastDay / 2)));
+  if (shape === 'there_and_back' || shape === 'loop') {
+    if (day < midpoint) return 'outbound';
+    if (day === midpoint) return 'turnaround';
+    return 'return';
+  }
+  return 'one_way';
 }
 
 export function savedGeometryFromCoords(
@@ -170,6 +185,7 @@ export function computeDaySegmentsFromRouteGeometry(input: {
   maxDriveHoursByDay?: Record<number, number | undefined>;
   defaultMaxDriveHours?: number | null;
   campWindowForDay?: (day: number) => { start: number; end: number; label: string };
+  shape?: TripShapeMode;
 }): DayRouteSegment[] {
   const days = input.days.length ? input.days : [1];
   const points = coordsToPoints(input.geometry.coords);
@@ -195,6 +211,7 @@ export function computeDaySegmentsFromRouteGeometry(input: {
       overDailyMax: hours > maxHours + 0.05,
       routeSource: input.geometry.source,
       confidence: input.geometry.confidence,
+      routeShapeRole: input.shape ? routeShapeDayRole(input.shape, day, days) : undefined,
     };
   });
 }

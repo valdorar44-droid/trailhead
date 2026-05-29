@@ -1,5 +1,6 @@
 import {
   buildRouteLocationsForShape,
+  buildRouteBuilderSession,
   computeDaySegmentsFromRouteGeometry,
   computeTripReadiness,
   filterDurableNavigationStops,
@@ -43,6 +44,21 @@ const daySegments = computeDaySegmentsFromRouteGeometry({
   defaultMaxDriveHours: 5,
 });
 assertRouteBuilderContract(daySegments.length === 4 && daySegments[0].providerDistanceMi === 175, 'provider day segmentation');
+assertRouteBuilderContract(
+  computeDaySegmentsFromRouteGeometry({
+    geometry: {
+      coords: [[-109.5498, 38.5733], [-121.8081, 36.2704], [-109.5498, 38.5733]],
+      totalDistanceMi: 1400,
+      totalDurationHours: 32,
+      source: 'provider',
+      confidence: 'high',
+    },
+    days: [1, 2, 3, 4, 5],
+    defaultMaxDriveHours: 8,
+    shape: 'there_and_back',
+  }).some(segment => segment.routeShapeRole === 'return'),
+  'there-and-back day role segmentation',
+);
 
 const readiness = computeTripReadiness({
   stops: durableStops,
@@ -60,6 +76,33 @@ const readiness = computeTripReadiness({
 });
 assertRouteBuilderContract(readiness.tasks.some(task => task.label === 'Fuel' && task.level === 'warn'), 'fuel readiness warning');
 
+const session = buildRouteBuilderSession({
+  intent: {
+    shape: 'there_and_back',
+    routeStyle: 'wild',
+    campReusePolicy: 'same_camp_window',
+    days: [1, 2],
+    maxDriveHoursPerDay: 5,
+  },
+  stops: [
+    { day: 1, name: 'Moab', lat: moab.lat, lng: moab.lng, type: 'start', routeShapeRole: 'start' },
+    { day: 1, name: 'Day 1 camp search area', lat: 38, lng: -110, type: 'waypoint', source: 'map', routeShapeRole: 'outbound_anchor' },
+    { day: 2, name: 'Big Sur', lat: bigSur.lat, lng: bigSur.lng, type: 'waypoint', routeShapeRole: 'destination' },
+  ],
+  geometry: {
+    coords: [[-109.5498, 38.5733], [-121.8081, 36.2704], [-109.5498, 38.5733]],
+    totalDistanceMi: 1400,
+    totalDurationHours: 32,
+    source: 'provider',
+    confidence: 'medium',
+    engine: 'osrm-fallback',
+  },
+  dayNeedsOvernight: day => day === 1,
+});
+assertRouteBuilderContract(session.temporaryAnchors.length === 1, 'session tracks temporary anchors');
+assertRouteBuilderContract(session.issues.some(issue => issue.code === 'provider_route_low_confidence'), 'session flags fallback routing');
+assertRouteBuilderContract(!session.navigationReady, 'temporary anchor blocks navigation readiness');
+
 assertRouteBuilderContract(ROUTE_BUILDER_AUDIT_MATRIX.some(item => /Moab to Big Sur/.test(item) && /there and back/.test(item)), 'Moab to Big Sur audit coverage');
 
 export const routeBuilderContractCases = {
@@ -69,4 +112,5 @@ export const routeBuilderContractCases = {
   durableStops,
   daySegments,
   readiness,
+  session,
 };

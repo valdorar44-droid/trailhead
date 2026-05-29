@@ -22,9 +22,9 @@ import { useStore } from '@/lib/store';
 import { useTheme, mono, ColorPalette, RADIUS } from '@/lib/design';
 import {
   ROUTE_BUILDER_AUDIT_MATRIX,
+  buildRouteBuilderSession,
   buildRouteLocationsForShape,
   computeDaySegmentsFromRouteGeometry,
-  computeTripReadiness,
   filterDurableNavigationStops,
   fmtDistance as fmtUnitDistance,
   fmtFuelVolumeFromMiles,
@@ -32,6 +32,7 @@ import {
   routeUnitsParam,
   savedGeometryFromCoords,
   type ProviderRouteGeometry,
+  type RouteBuilderIntent,
 } from '@/lib/routeBuilder';
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
@@ -114,6 +115,10 @@ type InlineSearchState = {
 type TripBuildMode = 'recommended' | 'blank';
 type DistanceMode = 'hours' | 'miles';
 type RouteTabMode = 'hub' | 'wizard';
+type RouteSpineBuild = {
+  spine: Array<{ lat: number; lng: number }>;
+  geometry: ProviderRouteGeometry;
+};
 
 const PLACE_FILTER_TYPES = [
   { id: 'fuel', label: 'Fuel', icon: 'flash-outline', color: '#ea580c' },
@@ -1119,6 +1124,14 @@ export default function RouteBuilderScreen() {
   const tripLoop = tripShapeMode !== 'one_way';
   const effectiveCampReusePolicy: CampReusePolicy = tripShapeMode === 'there_and_back' ? 'same_camp_window' : campReusePolicy;
   const fmtRouteDistance = (mi: number) => fmtUnitDistance(mi, weatherUnitMode);
+  const builderIntentFor = (inputDays: number[] = days): RouteBuilderIntent => ({
+    shape: tripShapeMode,
+    routeStyle,
+    campReusePolicy: effectiveCampReusePolicy,
+    days: inputDays,
+    maxDriveHoursPerDay: parsePositiveNumber(driveHoursPerDay),
+    targetMilesPerDay: parsePositiveNumber(targetMiles),
+  });
 
   function applyTripShapeMode(mode: TripShapeMode) {
     setTripShapeMode(mode);
@@ -1397,8 +1410,9 @@ export default function RouteBuilderScreen() {
       maxDriveHoursByDay: Object.fromEntries(days.map(day => [day, parsePositiveNumber(dayDriveTargets[day]) ?? undefined])),
       defaultMaxDriveHours: parsePositiveNumber(driveHoursPerDay) ?? 5,
       campWindowForDay: day => campWindowFor(day),
+      shape: tripShapeMode,
     });
-  }, [routeGeometry, days, dayDriveTargets, driveHoursPerDay, campCadenceMode]);
+  }, [routeGeometry, days, dayDriveTargets, driveHoursPerDay, campCadenceMode, tripShapeMode]);
 
   useEffect(() => {
     const missing = routeStates.filter(state => stateGasPrices[state] == null).slice(0, 6);
@@ -1456,6 +1470,17 @@ export default function RouteBuilderScreen() {
       driveHours: estimateMovingHours(totals.miles),
     };
   }, [driveHoursPerDay, gasPrice, rigProfile, routeStateMiles, stateGasPrices, totals.miles]);
+  const routeBuildSession = useMemo(() => buildRouteBuilderSession({
+    intent: builderIntentFor(days),
+    stops: orderedStops,
+    geometry: routeGeometry,
+    restDays,
+    fuelRangeMi: planningStats.range,
+    dayNeedsOvernight,
+    campWindowForDay: day => campWindowFor(day),
+    maxDriveHoursByDay: Object.fromEntries(days.map(day => [day, parsePositiveNumber(dayDriveTargets[day]) ?? undefined])),
+    existingDaySegments: routeDaySegments,
+  }), [orderedStops, routeGeometry, routeDaySegments, days, restDays, planningStats.range, campCadenceMode, dayDriveTargets, tripShapeMode, routeStyle, effectiveCampReusePolicy, driveHoursPerDay, targetMiles]);
   const rigRouteSummary = useMemo(() => {
     if (!rigProfile || (!rigProfile.make && !rigProfile.model && !rigProfile.vehicle_type)) {
       return {
@@ -1537,15 +1562,7 @@ export default function RouteBuilderScreen() {
     ? `${orderedStops[0].name.split(',')[0]} to ${orderedStops[orderedStops.length - 1].name.split(',')[0]}`
     : 'Build a base route first';
   const activeDayDriveLimit = parsePositiveNumber(dayDriveTargets[activeDay]) ?? planningStats.driveLimit;
-  const tripReadiness = useMemo(() => computeTripReadiness({
-    stops: orderedStops,
-    geometry: routeGeometry,
-    daySegments: routeDaySegments,
-    days,
-    dayNeedsOvernight,
-    restDays,
-    fuelRangeMi: planningStats.range,
-  }), [orderedStops, routeGeometry, routeDaySegments, days, restDays, planningStats.range, campCadenceMode]);
+  const tripReadiness = routeBuildSession.readiness;
   const routeChecks = useMemo(() => {
     const checks: { level: 'ok' | 'warn'; label: string; text: string }[] = [...tripReadiness.tasks];
     if (orderedStops.length < 2) {
@@ -2565,10 +2582,10 @@ export default function RouteBuilderScreen() {
     return points;
   }
 
-  async function buildRouteSpine(first: BuilderStop, last: BuilderStop) {
+  async function buildRouteSpine(first: BuilderStop, last: BuilderStop): Promise<RouteSpineBuild | null> {
     if (closeEnough(first, last)) {
       setRouteGeometry(null);
-      return [];
+      return null;
     }
     const directMi = haversineMi(first, last);
     if (directMi > 2800 && Math.abs(first.lng - last.lng) > 45) {
@@ -2577,7 +2594,7 @@ export default function RouteBuilderScreen() {
         'Those route points look like an unsupported long jump. Add realistic land-route stops or keep this route inside Trailhead supported regions.'
       );
       setRouteGeometry(null);
-      return [];
+      return null;
     }
     try {
       const opts = {
@@ -2597,20 +2614,20 @@ export default function RouteBuilderScreen() {
       const geometry = providerGeometryFromRoute(routed, units);
       if (geometry.coords.length >= 2) {
         setRouteGeometry(geometry);
-        return coordsToStops(geometry.coords);
+        return { spine: coordsToStops(geometry.coords), geometry };
       }
       setRouteGeometry(null);
       Alert.alert('Route unavailable', 'Trailhead could not build a road route for this outline. Add a road anchor, allow ferries, or save it as a draft after choosing real stops.');
-      return [];
+      return null;
     } catch (e: any) {
       setRouteGeometry(null);
       if (e instanceof ApiError && e.status === 422) {
         const detail: any = e.detail;
         Alert.alert('Route needs correction', detail?.reason || e.message || 'This route cannot be built safely.');
-        return [];
+        return null;
       }
       Alert.alert('Route unavailable', 'Trailhead could not build a road route right now. Try a shorter leg, add a road anchor, or check signal.');
-      return [];
+      return null;
     }
   }
 
@@ -2643,7 +2660,8 @@ export default function RouteBuilderScreen() {
         source: geometry.engine ?? 'route-builder',
         ts: Date.now(),
       };
-    } catch {
+    } catch (err) {
+      console.warn('Route Builder geometry save route failed', err instanceof Error ? err.message : err);
       return null;
     }
   }
@@ -2742,7 +2760,31 @@ export default function RouteBuilderScreen() {
         max_daily_drive_hours: parsePositiveNumber(driveHoursPerDay) ?? undefined,
         max_radius: 58,
       });
-      return result.windows.map(win => {
+      const weakWindows = result.windows
+        .filter(win => !win.camp || !win.strong)
+        .map(win => windows.find(window => window.day === win.day))
+        .filter((win): win is typeof windows[number] => !!win);
+      const widenedByDay = new Map<number, any>();
+      if (weakWindows.length && campPreferenceMode !== 'any') {
+        setFrameworkStatus('Widening camp search for thin areas...');
+        const widened = await api.getRouteCampWindows({
+          route: spine,
+          windows: weakWindows,
+          camp_filters: [],
+          route_style: routeStyle,
+          camp_preference: 'any',
+          region_hint: routeStates.join(','),
+          camp_reuse_policy: effectiveCampReusePolicy,
+          max_daily_drive_hours: parsePositiveNumber(driveHoursPerDay) ?? undefined,
+          max_radius: 75,
+        }).catch(() => null);
+        for (const win of widened?.windows ?? []) {
+          if (win.camp) widenedByDay.set(win.day, { ...win, widened: true });
+        }
+      }
+      return result.windows.map(originalWin => {
+        const win = widenedByDay.get(originalWin.day) ?? originalWin;
+        const widened = Boolean((win as any).widened);
         if (win.camp) {
           return {
             stop: {
@@ -2752,7 +2794,9 @@ export default function RouteBuilderScreen() {
               lat: win.camp.lat,
               lng: win.camp.lng,
               type: 'camp' as BuilderStopType,
-              description: `Auto-picked by Trailhead for the planned ${win.label} finish. Swap it if you want a better camp or different distance.`,
+              description: widened
+                ? `Auto-picked after widening the camp search for the planned ${win.label} finish. Review fit before navigation.`
+                : `Auto-picked by Trailhead for the planned ${win.label} finish. Swap it if you want a better camp or different distance.`,
               land_type: win.camp.land_type || 'camp',
               source: 'camp' as const,
               camp: win.camp,
@@ -2761,7 +2805,7 @@ export default function RouteBuilderScreen() {
               campWindowLabel: win.label,
               routeShapeRole: 'overnight' as const,
             },
-            strong: win.strong,
+            strong: widened ? false : win.strong,
             found: win.found,
           };
         }
@@ -2828,8 +2872,9 @@ export default function RouteBuilderScreen() {
         { ...first, day: 1, type: first.type === 'start' ? 'start' : first.type, routeShapeRole: 'start' },
       ];
 
-      const spine = await buildRouteSpine(first, last);
-      if (spine.length < 2) return;
+      const spineBuild = await buildRouteSpine(first, last);
+      if (!spineBuild || spineBuild.spine.length < 2) return;
+      const { spine, geometry: buildGeometry } = spineBuild;
       const routeMiles = routeDistanceMi(spine) || roughMiles;
       let strongAnchors = 0;
       let weakAnchors = 0;
@@ -2886,7 +2931,14 @@ export default function RouteBuilderScreen() {
       setInsertTargetDay(null);
       setRouteName(nextName);
       setFrameworkStatus('Route built. Preparing your trip overview...');
-      await commitTrip(buildTrip(framework, nextDays, nextName), true, ROUTE_BUILDER_MAP_SETTLE_MS, framework);
+      await commitTrip(
+        buildTrip(framework, nextDays, nextName, buildGeometry),
+        true,
+        ROUTE_BUILDER_MAP_SETTLE_MS,
+        framework,
+        nextDays,
+        nextName,
+      );
     } finally {
       setBuildingFramework(false);
     }
@@ -3014,13 +3066,28 @@ export default function RouteBuilderScreen() {
     inputStops: BuilderStop[] = orderedStops,
     inputDays: number[] = days,
     nameOverride?: string,
+    geometryOverride?: ProviderRouteGeometry | null,
   ): TripResult {
     const sorted = orderBuilderStops(inputStops);
     const navStops = filterDurableNavigationStops(sorted);
-    let inputMiles = routeGeometry?.totalDistanceMi && routeGeometry.totalDistanceMi > 0 ? routeGeometry.totalDistanceMi : 0;
+    const geometryForTrip = geometryOverride ?? routeGeometry;
+    const session = buildRouteBuilderSession({
+      intent: builderIntentFor(inputDays),
+      stops: sorted,
+      geometry: geometryForTrip,
+      restDays,
+      fuelRangeMi: planningStats.range,
+      dayNeedsOvernight: day => dayNeedsOvernightFor(day, inputDays),
+      campWindowForDay: day => campWindowFor(day, inputDays),
+      maxDriveHoursByDay: Object.fromEntries(inputDays.map(day => [day, parsePositiveNumber(dayDriveTargets[day]) ?? undefined])),
+      existingDaySegments: routeDaySegments,
+    });
+    const tripDaySegments = session.daySegments;
+    let inputMiles = geometryForTrip?.totalDistanceMi && geometryForTrip.totalDistanceMi > 0 ? geometryForTrip.totalDistanceMi : 0;
     if (!inputMiles) {
       for (let i = 1; i < navStops.length; i += 1) inputMiles += haversineMi(navStops[i - 1], navStops[i]);
     }
+    const tripFuelCost = (inputMiles / Math.max(1, planningStats.mpg)) * planningStats.price;
     const waypoints: Waypoint[] = navStops.map(st => ({
       day: st.day,
       name: st.name,
@@ -3042,7 +3109,7 @@ export default function RouteBuilderScreen() {
       const prev = [...navStops].reverse().find(st => st.day < day) ?? null;
       const window = campWindowFor(day, inputDays);
       const needsWindowCamp = dayNeedsOvernightFor(day, inputDays);
-      const providerSegment = routeDaySegments.find(segment => segment.day === day);
+      const providerSegment = tripDaySegments.find(segment => segment.day === day);
       let miles = providerSegment?.providerDistanceMi ?? 0;
       if (!miles) {
         if (prev && wps.length) miles += haversineMi(prev, wps[0]);
@@ -3094,7 +3161,7 @@ export default function RouteBuilderScreen() {
         },
         logistics: {
           vehicle_recommendation: `User-built ${routeStyle} route. Review road surfaces against the saved rig profile before departure.`,
-          fuel_strategy: `Estimated fuel: ${fmtFuelVolumeFromMiles(totals.miles, planningStats.mpg, weatherUnitMode)} / $${Math.round(planningStats.fuelCost)}. Fuel stops are manually selected.`,
+          fuel_strategy: `Estimated fuel: ${fmtFuelVolumeFromMiles(inputMiles, planningStats.mpg, weatherUnitMode)} / $${Math.round(tripFuelCost)}. Fuel stops are manually selected.`,
           water_strategy: 'Carry water for each day and add water POIs where needed.',
           permits_needed: `${tripShapeMode === 'loop' ? 'Loop route. ' : tripShapeMode === 'there_and_back' ? 'There-and-back route. ' : ''}Check local land manager rules for selected camps and trailheads.`,
           best_season: `Verify seasonal closures and weather before departure. Daily drive max: ${fmtHours(planningStats.driveLimit)}.`,
@@ -3107,7 +3174,14 @@ export default function RouteBuilderScreen() {
     };
   }
 
-  async function commitTrip(trip: TripResult, openMap = true, settleBeforeOpenMs = 0, inputStops: BuilderStop[] = orderedStops) {
+  async function commitTrip(
+    trip: TripResult,
+    openMap = true,
+    settleBeforeOpenMs = 0,
+    inputStops: BuilderStop[] = orderedStops,
+    inputDays: number[] = days,
+    nameOverride?: string,
+  ) {
     if (routeSaving) return;
     setRouteSaving(true);
     const routeGeometryPayload = await buildSavedRouteGeometry(inputStops)
@@ -3120,17 +3194,25 @@ export default function RouteBuilderScreen() {
             ts: Date.now(),
           } satisfies SavedRouteGeometryPayload
         : null);
+    const geometryForTrip = routeGeometryPayload?.coords?.length
+      ? savedGeometryFromCoords(
+          routeGeometryPayload.coords,
+          routeGeometryPayload.totalDistance ?? (routeGeometryPayload as any).total_distance,
+          routeGeometryPayload.totalDuration ?? (routeGeometryPayload as any).total_duration,
+        )
+      : routeGeometry;
+    const rebuiltTrip = buildTrip(inputStops, inputDays, nameOverride ?? trip.plan.trip_name, geometryForTrip);
     const savedMiles = routeGeometryPayload?.totalDistance ? routeGeometryPayload.totalDistance / 1609.344 : null;
     const tripToSave: TripResult = routeGeometryPayload ? {
-      ...trip,
+      ...rebuiltTrip,
       route_geometry: routeGeometryPayload,
       plan: savedMiles
-        ? { ...trip.plan, total_est_miles: Math.round(savedMiles) }
-        : trip.plan,
-    } : trip;
+        ? { ...rebuiltTrip.plan, total_est_miles: Math.round(savedMiles) }
+        : rebuiltTrip.plan,
+    } : rebuiltTrip;
     const builderState = {
       stops: inputStops,
-      days,
+      days: inputDays,
       routeStyle,
       tripShapeMode,
       tripLoop,
@@ -3229,9 +3311,16 @@ export default function RouteBuilderScreen() {
     if (routeSaving) return;
     setRouteSaving(true);
     try {
-      const draftTrip = orderedStops.length >= 2 ? buildTrip() : activeTrip;
+      const geometryPayload = orderedStops.length >= 2 ? await buildSavedRouteGeometry(orderedStops) : null;
+      const geometryForDraft = geometryPayload?.coords?.length
+        ? savedGeometryFromCoords(
+            geometryPayload.coords,
+            geometryPayload.totalDistance ?? (geometryPayload as any).total_distance,
+            geometryPayload.totalDuration ?? (geometryPayload as any).total_duration,
+          )
+        : routeGeometry;
+      const draftTrip = orderedStops.length >= 2 ? buildTrip(orderedStops, days, undefined, geometryForDraft) : activeTrip;
       if (draftTrip) {
-        const geometryPayload = orderedStops.length >= 2 ? await buildSavedRouteGeometry(orderedStops) : null;
         const tripToSave = geometryPayload ? { ...draftTrip, route_geometry: geometryPayload } : draftTrip;
         setActiveTrip(tripToSave);
         await saveOfflineTrip(tripToSave).catch(() => {});

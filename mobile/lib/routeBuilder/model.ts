@@ -42,6 +42,8 @@ export type ProviderRouteGeometry = {
   engine?: string;
 };
 
+export type RouteShapeDayRole = 'outbound' | 'turnaround' | 'return' | 'one_way';
+
 export type DayRouteSegment = {
   day: number;
   startPoint: { lat: number; lng: number };
@@ -55,6 +57,7 @@ export type DayRouteSegment = {
   overDailyMax: boolean;
   routeSource: ProviderRouteGeometry['source'];
   confidence: ProviderRouteGeometry['confidence'];
+  routeShapeRole?: RouteShapeDayRole;
 };
 
 export type TripReadinessTask = {
@@ -67,4 +70,29 @@ export type TripReadiness = {
   navigationReady: boolean;
   routeReady: boolean;
   tasks: TripReadinessTask[];
+};
+
+export type RouteBuildIssue = {
+  code:
+    | 'provider_route_missing'
+    | 'provider_route_low_confidence'
+    | 'temporary_anchor'
+    | 'missing_overnight'
+    | 'over_daily_max'
+    | 'fuel_range'
+    | 'camp_search_widened';
+  level: 'info' | 'warn' | 'block';
+  day?: number;
+  message: string;
+};
+
+export type RouteBuildSession<TStop extends RouteBuilderStopLike = RouteBuilderStopLike> = {
+  intent: RouteBuilderIntent;
+  geometry: ProviderRouteGeometry | null;
+  daySegments: DayRouteSegment[];
+  durableStops: TStop[];
+  temporaryAnchors: TStop[];
+  issues: RouteBuildIssue[];
+  readiness: TripReadiness;
+  navigationReady: boolean;
 };

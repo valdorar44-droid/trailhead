@@ -690,7 +690,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const [initialCenter] = useState<[number, number]>(() =>
     waypoints[0] ? [waypoints[0].lng, waypoints[0].lat] : [-98.5, 39.5]
   );
-  const [initialZoom] = useState<number>(() => waypoints.length > 1 ? 7 : 10);
+  const [initialZoom] = useState<number>(() => waypoints.length === 0 ? 3.7 : waypoints.length > 1 ? 7 : 10);
   const mapboxToken = useStore(s => s.mapboxToken);
   const activeTrip  = useStore(s => s.activeTrip);
   const C = useTheme();

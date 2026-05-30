@@ -2926,7 +2926,7 @@ const buildMapHtml = (
     // Default 16 creates a URLSession backlog — tiles wait for each other.
     maplibregl.config.MAX_PARALLEL_IMAGE_REQUESTS=6;
     map=new maplibregl.Map({container:'map',style:buildStyle(currentStyle),
-      center:[${centerLng},${centerLat}],zoom:${waypoints.length > 1 ? 7 : 10},
+      center:[${centerLng},${centerLat}],zoom:${waypoints.length === 0 ? 3.7 : waypoints.length > 1 ? 7 : 10},
       attributionControl:false,pitchWithRotate:false,
       fadeDuration:0,
       maxTileCacheSize:2000,
@@ -5892,6 +5892,7 @@ function MapScreen() {
   }
 
   function previewSearchRoute(origin: SearchPlace, destination: SearchPlace) {
+    if (!Number.isFinite(origin.lat) || !Number.isFinite(origin.lng) || !Number.isFinite(destination.lat) || !Number.isFinite(destination.lng)) return;
     const dist = haversineKm(origin.lat, origin.lng, destination.lat, destination.lng);
     const dest = { ...destination, dist, source: destination.source || 'search', type: destination.type || 'poi' };
     Keyboard.dismiss();
@@ -5910,7 +5911,7 @@ function MapScreen() {
       userLat: origin.lat, userLng: origin.lng,
     }));
     nativeMapRef.current?.routeToSearch(dest.lat, dest.lng, dest.name, origin.lat, origin.lng);
-    nativeMapRef.current?.flyTo((origin.lat + dest.lat) / 2, (origin.lng + dest.lng) / 2);
+    nativeMapRef.current?.flyTo(dest.lat, dest.lng, 12, dest.name);
   }
 
   function centerMapOnUser() {
@@ -7805,7 +7806,7 @@ function MapScreen() {
   );
 
   const centerLat = waypoints[0]?.lat ?? 39.5;
-  const centerLng = waypoints[0]?.lng ?? -111.0;
+  const centerLng = waypoints[0]?.lng ?? -98.5;
 
   const mapHtml = useMemo(() =>
     buildMapHtml(centerLat, centerLng, waypoints, campsites, gas, pinList),

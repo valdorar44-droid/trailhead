@@ -115,6 +115,14 @@ function distanceMi(origin: { lat: number; lng: number }, point: { lat: number; 
   return haversineKm(origin, point) * 0.621371;
 }
 
+function hasUsableCoordinate(place: { lat?: number; lng?: number } | null | undefined) {
+  return !!place
+    && Number.isFinite(place.lat)
+    && Number.isFinite(place.lng)
+    && Math.abs(place.lat as number) <= 90
+    && Math.abs(place.lng as number) <= 180;
+}
+
 function scopedNearby<T extends { lat: number; lng: number; name?: string }>(
   origin: { lat: number; lng: number },
   items: T[],
@@ -379,6 +387,7 @@ export default function RouteSearchModal({
       const places = await api.geocodePlaces(query.trim(), 8);
       setResults(places
         .map(place => ({ name: place.name, lat: place.lat, lng: place.lng, dist: userLoc ? haversineKm(userLoc, place) : null, source: place.source, place_id: place.place_id }))
+        .filter(hasUsableCoordinate)
         .sort((a, b) => (a.dist ?? 9999) - (b.dist ?? 9999)));
     } catch { setResults([]); }
     setSearching(false);
@@ -494,6 +503,7 @@ export default function RouteSearchModal({
   }, [currentLocationPlace, onPreviewRoute, onSelectDest]);
 
   const selectPlace = useCallback((place: SearchPlace) => {
+    if (!hasUsableCoordinate(place)) return;
     addSearchHistory({ name: place.name, lat: place.lat, lng: place.lng, searchedAt: Date.now() });
     if (activeEndpoint === 'origin') {
       setRouteOrigin(place);

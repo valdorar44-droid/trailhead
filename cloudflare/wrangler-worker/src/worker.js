@@ -70,6 +70,77 @@ function vectorTileHeaders(source, contentLength = null) {
   return headers;
 }
 
+const TRAIL_REGION_BOUNDS = {
+  ak: { n: 71.4, s: 54.6, e: -130.0, w: -168.0 },
+  al: { n: 35.0, s: 30.2, e: -84.9, w: -88.5 },
+  ar: { n: 36.5, s: 33.0, e: -89.6, w: -94.6 },
+  az: { n: 37.0, s: 31.3, e: -109.0, w: -114.8 },
+  ca: { n: 42.0, s: 32.5, e: -114.1, w: -124.4 },
+  co: { n: 41.0, s: 37.0, e: -102.0, w: -109.1 },
+  ct: { n: 42.1, s: 41.0, e: -71.8, w: -73.7 },
+  de: { n: 39.8, s: 38.4, e: -75.0, w: -75.8 },
+  fl: { n: 31.0, s: 24.5, e: -80.0, w: -87.6 },
+  ga: { n: 35.0, s: 30.4, e: -80.8, w: -85.6 },
+  hi: { n: 22.2, s: 18.9, e: -154.8, w: -160.2 },
+  ia: { n: 43.5, s: 40.4, e: -90.1, w: -96.6 },
+  id: { n: 49.0, s: 42.0, e: -111.0, w: -117.2 },
+  il: { n: 42.5, s: 36.9, e: -87.0, w: -91.5 },
+  in: { n: 41.8, s: 37.8, e: -84.8, w: -88.1 },
+  ks: { n: 40.0, s: 36.9, e: -94.6, w: -102.1 },
+  ky: { n: 39.1, s: 36.5, e: -81.9, w: -89.6 },
+  la: { n: 33.0, s: 28.9, e: -88.8, w: -94.0 },
+  ma: { n: 42.9, s: 41.2, e: -69.9, w: -73.5 },
+  md: { n: 39.7, s: 37.9, e: -75.0, w: -79.5 },
+  me: { n: 47.5, s: 43.1, e: -66.9, w: -71.1 },
+  mi: { n: 48.3, s: 41.7, e: -82.4, w: -90.4 },
+  mn: { n: 49.4, s: 43.5, e: -89.5, w: -97.2 },
+  mo: { n: 40.6, s: 35.9, e: -89.1, w: -95.8 },
+  ms: { n: 35.0, s: 30.2, e: -88.1, w: -91.7 },
+  mt: { n: 49.0, s: 44.4, e: -104.0, w: -116.0 },
+  nc: { n: 36.6, s: 33.8, e: -75.5, w: -84.3 },
+  nd: { n: 49.0, s: 45.9, e: -96.6, w: -104.1 },
+  ne: { n: 43.0, s: 40.0, e: -95.3, w: -104.1 },
+  nh: { n: 45.3, s: 42.7, e: -70.6, w: -72.6 },
+  nj: { n: 41.4, s: 38.9, e: -73.9, w: -75.6 },
+  nm: { n: 37.0, s: 31.3, e: -103.0, w: -109.1 },
+  nv: { n: 42.0, s: 35.0, e: -114.0, w: -120.0 },
+  ny: { n: 45.0, s: 40.5, e: -71.8, w: -79.8 },
+  oh: { n: 42.0, s: 38.4, e: -80.5, w: -84.8 },
+  ok: { n: 37.0, s: 33.6, e: -94.4, w: -103.0 },
+  or: { n: 46.3, s: 41.9, e: -116.5, w: -124.6 },
+  pa: { n: 42.3, s: 39.7, e: -74.7, w: -80.5 },
+  ri: { n: 42.0, s: 41.1, e: -71.1, w: -71.9 },
+  sc: { n: 35.2, s: 32.0, e: -78.5, w: -83.4 },
+  sd: { n: 45.9, s: 42.5, e: -96.4, w: -104.1 },
+  tn: { n: 36.7, s: 35.0, e: -81.6, w: -90.3 },
+  tx: { n: 36.5, s: 25.8, e: -93.5, w: -106.6 },
+  ut: { n: 42.0, s: 36.9, e: -109.0, w: -114.1 },
+  va: { n: 39.5, s: 36.5, e: -75.2, w: -83.7 },
+  vt: { n: 45.0, s: 42.7, e: -71.5, w: -73.4 },
+  wa: { n: 49.0, s: 45.5, e: -116.9, w: -124.7 },
+  wi: { n: 47.1, s: 42.5, e: -86.2, w: -92.9 },
+  wv: { n: 40.6, s: 37.2, e: -77.7, w: -82.6 },
+  wy: { n: 45.0, s: 41.0, e: -104.1, w: -111.1 },
+};
+
+function tileCenter(z, x, y) {
+  const n = 2 ** z;
+  const lon = ((x + 0.5) / n) * 360 - 180;
+  const mercatorY = Math.PI * (1 - (2 * (y + 0.5)) / n);
+  const lat = Math.atan(Math.sinh(mercatorY)) * 180 / Math.PI;
+  return { lat, lon };
+}
+
+function trailRegionForTile(z, x, y) {
+  const center = tileCenter(z, x, y);
+  for (const [id, b] of Object.entries(TRAIL_REGION_BOUNDS)) {
+    if (center.lat >= b.s && center.lat <= b.n && center.lon >= b.w && center.lon <= b.e) {
+      return { id, center };
+    }
+  }
+  return { id: null, center };
+}
+
 async function streamR2Parts(bucket, parts, start = 0, end = null) {
   const encoder = new TextEncoder();
   return new ReadableStream({
@@ -160,6 +231,27 @@ export default {
       }
     }
 
+    // ── Trail tile diagnostic endpoint ───────────────────────────────────────
+    if (path === "/api/admin/trail-tile-test") {
+      const z = Number(url.searchParams.get("z") ?? "10");
+      const x = Number(url.searchParams.get("x") ?? "200");
+      const y = Number(url.searchParams.get("y") ?? "392");
+      const region = Number.isInteger(z) && Number.isInteger(x) && Number.isInteger(y)
+        ? trailRegionForTile(z, x, y)
+        : { id: null, center: null };
+      const key = region.id ? `trails/${region.id}.pmtiles` : null;
+      const result = { z, x, y, center: region.center, region: region.id, key, found: false, bytes: 0 };
+      if (!key) return Response.json(result);
+      try {
+        const tile = await getPMTiles(env, key).getZxy(z, x, y);
+        result.found = Boolean(tile?.data && (tile.data.byteLength > 0 || tile.data.length > 0));
+        result.bytes = tile?.data?.byteLength ?? tile?.data?.length ?? 0;
+      } catch (e) {
+        result.error = e.message;
+      }
+      return Response.json(result);
+    }
+
     // ── GraphHopper pinned trail route proxy ─────────────────────────────────
     // Keeps the GraphHopper API key out of the mobile bundle while we test
     // whether its OSM walking/hiking graph handles trail anchors better.
@@ -221,6 +313,52 @@ export default {
           "Access-Control-Allow-Origin": "*",
           "Access-Control-Allow-Methods": "POST, OPTIONS",
           "Access-Control-Allow-Headers": "Content-Type",
+        },
+      });
+    }
+
+    // ── Online trail pack vector tiles ───────────────────────────────────────
+    const trailMatch = path.match(/^\/api\/trails\/(\d+)\/(\d+)\/(\d+)\.pbf$/);
+    if (trailMatch) {
+      const [z, x, y] = trailMatch.slice(1).map(Number);
+      const { id: regionId, center } = trailRegionForTile(z, x, y);
+      if (!regionId) {
+        return new Response(null, {
+          status: 204,
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "public, max-age=300",
+            "X-Trail-Region": "none",
+          },
+        });
+      }
+
+      const key = `trails/${regionId}.pmtiles`;
+      const cacheKey = new Request(`https://tiles.gettrailhead.app/v1${path}`);
+      const cfCache = caches.default;
+      const cached = await cfCache.match(cacheKey);
+      if (cached) return cached;
+
+      try {
+        const tile = await getPMTiles(env, key).getZxy(z, x, y);
+        if (tile && tile.data && (tile.data.byteLength > 0 || tile.data.length > 0)) {
+          const headers = vectorTileHeaders(`TRAIL_R2:${regionId}`, String(tile.data.byteLength ?? tile.data.length));
+          headers["X-Trail-Region"] = regionId;
+          const resp = new Response(request.method === "HEAD" ? null : tile.data, { headers });
+          if (request.method !== "HEAD") ctx.waitUntil(cfCache.put(cacheKey, resp.clone()));
+          return resp;
+        }
+      } catch (e) {
+        console.error(`Trail PMTiles error key=${key} region=${regionId} z=${z}/${x}/${y} center=${center.lat.toFixed(5)},${center.lon.toFixed(5)}:`, e.message);
+      }
+
+      return new Response(null, {
+        status: 204,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "public, max-age=300",
+          "X-Trail-Region": regionId,
+          "X-Trail-Source": "MISS",
         },
       });
     }

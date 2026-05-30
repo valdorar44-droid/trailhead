@@ -108,6 +108,7 @@ export interface NativeMapProps {
   showLandOverlay: boolean;
   showUsgsOverlay: boolean;
   showTerrain:     boolean;
+  showTrailOverlay?: boolean;
   showMvum:        boolean;
   showFire:        boolean;
   showAva:         boolean;
@@ -606,7 +607,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     userLoc, navMode, navCameraFollow = false, nativeNavEngineActive = false, navIdx, navHeading, navSpeed,
     mapLayer, routeOpts,
     traceMode = false, traceDraftCoords = [], traceRouteCoords = [], tracePinCoords = [],
-    showLandOverlay, showUsgsOverlay, showFire, showAva, showRadar, showMvum, showNautical = false,
+    showLandOverlay, showUsgsOverlay, showFire, showAva, showRadar, showTrailOverlay = true, showMvum, showNautical = false,
     onMapReady, onBoundsChange, onMapGesture, onMapTap, onMapLongPress,
     onCampTap, onGasTap, onPoiTap, onWaterSpotTap, onCommunityPinTap, onTileCampTap, onBaseCampTap, onTrailTap, onWaypointTap,
     onRouteReady, onRoutePersist, onOffRoute, onOffRouteWarn, onBackOnRoute, onRouteProgress,
@@ -857,6 +858,13 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           (lng as number) >= b.w && (lng as number) <= b.e
         )
       : null;
+    if (Number.isFinite(lat) && Number.isFinite(lng) && !match) {
+      const ts = tileServer as any;
+      if (ts?.clearTrails) await ts.clearTrails().catch(() => {});
+      loadedTrailRef.current = null;
+      setLocalTrails(false);
+      return;
+    }
     const chosen = match ?? files[0];
     await switchTrailFile(chosen.path, chosen.sizeMb);
   }, [getDownloadedTrailFiles, switchTrailFile]);
@@ -1042,7 +1050,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     : localContours
       ? 'local'
       : 'online';
-  const trailMode: TrailSourceMode = localTrails ? 'local' : 'none';
+  const trailMode: TrailSourceMode = showTrailOverlay ? (localTrails ? 'local' : 'online') : 'none';
   const mapStyleObj = useMemo(
     () => buildMapStyle(mapLayer, mapboxToken || '', localTiles, tileSession, contourMode, trailMode, showNautical),
     [mapLayer, mapboxToken, localTiles, tileSession, contourMode, trailMode, showNautical],

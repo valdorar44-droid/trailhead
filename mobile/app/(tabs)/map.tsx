@@ -1990,6 +1990,7 @@ type MapFilterPreferences = {
   showLands?: boolean;
   showUsgs?: boolean;
   showPois?: boolean;
+  layerTrails?: boolean;
   layerFire?: boolean;
   layerAva?: boolean;
   layerRadar?: boolean;
@@ -3900,6 +3901,7 @@ function MapScreen() {
 
   // Dynamic map layers
   const [showLayerSheet, setShowLayerSheet] = useState(false);
+  const [layerTrails, setLayerTrails] = useState(true);
   const [layerFire,    setLayerFire]    = useState(false);
   const [layerAva,     setLayerAva]     = useState(false);
   const [layerRadar,   setLayerRadar]   = useState(false);
@@ -4029,6 +4031,7 @@ function MapScreen() {
           if (typeof prefs.showLands === 'boolean') setShowLands(prefs.showLands);
           if (typeof prefs.showUsgs === 'boolean') setShowUsgs(prefs.showUsgs);
           if (typeof prefs.showPois === 'boolean') setShowPois(prefs.showPois);
+          if (typeof prefs.layerTrails === 'boolean') setLayerTrails(prefs.layerTrails);
           if (typeof prefs.layerFire === 'boolean') setLayerFire(prefs.layerFire);
           if (typeof prefs.layerAva === 'boolean') setLayerAva(prefs.layerAva);
           if (typeof prefs.layerRadar === 'boolean') setLayerRadar(prefs.layerRadar);
@@ -4055,6 +4058,7 @@ function MapScreen() {
       showLands,
       showUsgs,
       showPois,
+      layerTrails,
       layerFire,
       layerAva,
       layerRadar,
@@ -4062,7 +4066,7 @@ function MapScreen() {
       layerNautical,
     };
     storage.set(MAP_FILTER_PREFS_KEY, JSON.stringify(prefs)).catch(() => {});
-  }, [activeFilters, activePinFilters, activePlaceFilters, layerAva, layerFire, layerMvum, layerNautical, layerRadar, mapLayer, showLands, showPois, showUsgs]);
+  }, [activeFilters, activePinFilters, activePlaceFilters, layerAva, layerFire, layerMvum, layerNautical, layerRadar, layerTrails, mapLayer, showLands, showPois, showUsgs]);
 
   useEffect(() => {
     const today = new Date().toISOString().slice(0, 10);
@@ -6352,6 +6356,7 @@ function MapScreen() {
     toggleLandOverlay(false);
     toggleUsgsOverlay(false);
     togglePoiOverlay(false);
+    setLayerTrails(true);
     setLayerFire(false);
     setLayerAva(false);
     setLayerRadar(false);
@@ -9839,6 +9844,7 @@ function MapScreen() {
           showLandOverlay={showLands}
           showUsgsOverlay={showUsgs}
           showTerrain={false}
+          showTrailOverlay={layerTrails}
           showMvum={layerMvum}
           showFire={layerFire}
           showAva={layerAva}
@@ -13216,8 +13222,9 @@ function MapScreen() {
             {([
               { key: 'lands', label: 'Public Land Tint', sub: 'BLM/USFS/NPS color overlay. Requires signal unless cached.', icon: 'map-outline', val: showLands, color: '#22c55e', toggle: toggleLandOverlay },
               { key: 'usgs', label: 'USGS Topo + Trails', sub: 'Topo raster with contours, paths, labels, and land features.', icon: 'trail-sign-outline', val: showUsgs, color: '#0ea5e9', toggle: toggleUsgsOverlay },
-              { key: 'nautical', label: 'Safe Water Structure', sub: 'Bathymetry contours, shallow zones, hazards, open seamark lines, buoys, and markers where sources exist.', icon: 'boat-outline', val: layerNautical, color: '#0891b2', toggle: (v: boolean) => { if (!v) { closeSafeWaterMode(); return; } setLayerNautical(true); toggleDataLayer('nautical', true); if (v) setActivePlaceFilters(prev => Array.from(new Set([...prev, ...WATER_NAV_PLACE_FILTER_IDS]))); } },
               { key: 'pois', label: 'Places', sub: 'Live and downloaded fuel, water, trailheads, services, viewpoints, and attractions.', icon: 'location-outline', val: showPois, color: '#3b82f6', toggle: togglePoiOverlay },
+              { key: 'trails', label: 'Offroad Trails', sub: 'Color-coded 4x4, hiking, bike, horse, and restricted trail lines.', icon: 'trail-sign-outline', val: layerTrails, color: '#22c55e', toggle: setLayerTrails },
+              { key: 'nautical', label: 'Safe Water Structure', sub: 'Bathymetry contours, shallow zones, hazards, open seamark lines, buoys, and markers where sources exist.', icon: 'boat-outline', val: layerNautical, color: '#0891b2', toggle: (v: boolean) => { if (!v) { closeSafeWaterMode(); return; } setLayerNautical(true); toggleDataLayer('nautical', true); if (v) setActivePlaceFilters(prev => Array.from(new Set([...prev, ...WATER_NAV_PLACE_FILTER_IDS]))); } },
             ] as const).map(l => (
               <TouchableOpacity key={l.key} style={s.layerRow} onPress={() => l.toggle(!l.val)}>
                 <View style={[s.layerRowIcon, l.val && { backgroundColor: l.color }]}>
@@ -13250,7 +13257,7 @@ function MapScreen() {
             ))}
 
             {([
-              { key: 'mvum', label: 'MVUM — USFS Roads & Trails', sub: 'Legal motorized access lines. Informational, not turn-by-turn routing.', icon: 'car-outline', val: layerMvum, set: setLayerMvum, color: '#22c55e' },
+              { key: 'mvum', label: 'MVUM — Legal Access', sub: 'USFS motor-vehicle-use context where available. Informational, not turn-by-turn routing.', icon: 'car-outline', val: layerMvum, set: setLayerMvum, color: '#22c55e' },
             ] as const).map(l => (
               <TouchableOpacity key={l.key} style={s.layerRow} onPress={() => { const nv = !l.val; l.set(nv); toggleDataLayer(l.key, nv); }}>
                 <View style={[s.layerRowIcon, l.val && { backgroundColor: l.color }]}>
@@ -13301,11 +13308,27 @@ function MapScreen() {
               </View>
             )}
 
-            {(layerMvum || layerAva) && (
-              <Text style={s.layerSectionHead}>{layerMvum ? 'MVUM LEGEND' : 'CONDITION LEGEND'}</Text>
+            {(layerTrails || layerMvum || layerAva) && (
+              <Text style={s.layerSectionHead}>{layerTrails ? 'OFFROAD TRAILS LEGEND' : layerMvum ? 'MVUM LEGEND' : 'CONDITION LEGEND'}</Text>
             )}
-            {(layerMvum || layerAva) && (
+            {(layerTrails || layerMvum || layerAva) && (
               <View style={{ paddingHorizontal: 16, paddingBottom: 8, gap: 6 }}>
+                {layerTrails && [
+                  { color: '#22c55e', label: 'Motorized / 4x4 / track' },
+                  { color: '#1d8cff', label: 'Hiking / general trail' },
+                  { color: '#f97316', label: 'Bike / MTB' },
+                  { color: '#a855f7', label: 'Horse / equestrian' },
+                  { color: '#ef4444', label: 'Restricted / closed where tagged' },
+                  { color: '#94a3b8', label: 'Unknown / unclassified' },
+                ].map(l => (
+                  <View key={l.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <View style={{ width: 22, height: 4, backgroundColor: l.color, borderRadius: 2 }} />
+                    <Text style={{ color: C.text2, fontSize: 11, fontFamily: mono }}>{l.label}</Text>
+                  </View>
+                ))}
+                {layerTrails && layerMvum && (
+                  <Text style={[s.layerSectionHead, { paddingHorizontal: 0, marginTop: 10 }]}>MVUM LEGEND</Text>
+                )}
                 {layerMvum && [
                   { color: '#22c55e', label: 'Open to all vehicles' },
                   { color: '#f97316', label: 'High clearance required' },
@@ -13319,7 +13342,7 @@ function MapScreen() {
                 ))}
                 {layerMvum && (
                   <Text style={{ color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 }}>
-                    MVUM colors apply only to the USFS MVUM overlay, not every trail line.
+                    MVUM is a legal-access overlay. Offroad Trails shows broader trail-pack classifications.
                   </Text>
                 )}
                 {layerAva && layerMvum && (

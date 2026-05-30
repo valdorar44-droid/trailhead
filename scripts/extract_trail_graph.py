@@ -307,6 +307,28 @@ def allowed_uses(props: Dict[str, Any]) -> List[str]:
     return sorted(set(uses))
 
 
+def trail_visual_class(props: Dict[str, Any], class_name: str | None = None, uses: List[str] | None = None) -> str:
+    cls = (class_name or route_class(props)).lower()
+    use_set = set(uses if uses is not None else allowed_uses(props))
+    access = str(props.get("access") or "").lower()
+    motor_access = str(props.get("motor_vehicle") or props.get("vehicle") or props.get("motorcar") or "").lower()
+    route = str(props.get("route") or "").lower()
+
+    if access in {"private", "no"} or (cls in {"track", "mvum"} and motor_access in {"private", "no"}):
+        return "restricted"
+    if props.get("mvum_symbol") or props.get("mvum_symbol_name"):
+        return "motorized"
+    if use_set.intersection({"motor_vehicle", "motorcar", "atv", "motorcycle"}) or cls in {"track", "mvum"}:
+        return "motorized"
+    if "bicycle" in use_set or route in {"mtb", "bicycle"} or cls in {"cycleway", "mtb", "bicycle"}:
+        return "bike"
+    if "horse" in use_set or route == "horse" or cls == "bridleway":
+        return "horse"
+    if "foot" in use_set or route in {"hiking", "foot"} or cls in {"path", "footway", "steps", "hiking", "foot"}:
+        return "hike"
+    return "unknown"
+
+
 def is_trail_feature(props: Dict[str, Any]) -> bool:
     highway = str(props.get("highway") or "").lower()
     route = str(props.get("route") or "").lower()
@@ -348,6 +370,7 @@ def build_packs(source: Dict[str, Any], region: str, dense_graph: bool = False) 
             line_len = line_length(coords)
             if line_len < 8:
                 continue
+            uses = allowed_uses(props)
 
             display_props = {
                 "trail_id": trail_id,
@@ -355,8 +378,9 @@ def build_packs(source: Dict[str, Any], region: str, dense_graph: bool = False) 
                 "segment_id": segment_id,
                 "name": name,
                 "route_class": class_name,
+                "trail_visual_class": trail_visual_class(props, class_name, uses),
                 "source": str(props.get("source") or "open"),
-                "allowed_uses": ",".join(allowed_uses(props)),
+                "allowed_uses": ",".join(uses),
                 "surface": str(props.get("surface") or ""),
                 "difficulty": str(props.get("sac_scale") or props.get("difficulty") or ""),
                 "ref": str(props.get("ref") or ""),
@@ -409,7 +433,8 @@ def build_packs(source: Dict[str, Any], region: str, dense_graph: bool = False) 
                         "length_m": distance_m(coords[idx - 1], coords[idx]),
                         "name": name,
                         "route_class": class_name,
-                        "allowed_uses": allowed_uses(props),
+                        "trail_visual_class": display_props["trail_visual_class"],
+                        "allowed_uses": uses,
                         "surface": display_props["surface"],
                         "difficulty": display_props["difficulty"],
                         "source": display_props["source"],
@@ -429,7 +454,8 @@ def build_packs(source: Dict[str, Any], region: str, dense_graph: bool = False) 
                     "length_m": line_len,
                     "name": name,
                     "route_class": class_name,
-                    "allowed_uses": allowed_uses(props),
+                    "trail_visual_class": display_props["trail_visual_class"],
+                    "allowed_uses": uses,
                     "surface": display_props["surface"],
                     "difficulty": display_props["difficulty"],
                     "source": display_props["source"],
@@ -668,6 +694,7 @@ def write_trail_pmtiles(
                 "name": "String",
                 "route_class": "String",
                 "allowed_uses": "String",
+                "trail_visual_class": "String",
                 "source": "String",
             },
         }],

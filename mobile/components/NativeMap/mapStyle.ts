@@ -56,6 +56,29 @@ export function buildMapStyle(
   const lwHalo = sat ? 'rgba(0,0,0,0.85)' : '#13161c';
   const showContours = contourMode !== 'none' && !sat;
   const showTrailPack = trailMode !== 'none';
+  const trailVisualClass = [
+    'coalesce',
+    ['get', 'trail_visual_class'],
+    [
+      'match',
+      ['coalesce', ['get', 'route_class'], ['get', 'kind'], 'unknown'],
+      'mvum', 'motorized',
+      'motorized', 'motorized',
+      'track', 'motorized',
+      'bike', 'bike',
+      'bicycle', 'bike',
+      'mtb', 'bike',
+      'cycleway', 'bike',
+      'horse', 'horse',
+      'bridleway', 'horse',
+      'hike', 'hike',
+      'hiking', 'hike',
+      'foot', 'hike',
+      'footway', 'hike',
+      'path', 'hike',
+      'unknown',
+    ],
+  ];
 
   const sources: Record<string, object> = {
     [pmId]: {
@@ -229,29 +252,30 @@ export function buildMapStyle(
   if (showTrailPack) {
     layers.push(
       { id: 'trail-pack-casing', type: 'line', source: trailId, 'source-layer': 'trails',
-        minzoom: 10,
+        minzoom: 9,
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
-          'line-color': sat ? 'rgba(10,12,18,0.78)' : '#10140f',
-          'line-width': ['interpolate', ['linear'], ['zoom'], 10, 2.3, 13, 3.9, 16, 7.5],
-          'line-opacity': sat ? 0.74 : 0.66,
+          'line-color': sat || hyb ? 'rgba(3,7,18,0.86)' : '#10140f',
+          'line-width': ['interpolate', ['linear'], ['zoom'], 9, 2.4, 12, 3.8, 15, 7.2],
+          'line-opacity': sat || hyb ? 0.86 : 0.7,
         } },
       { id: 'trail-pack-line', type: 'line', source: trailId, 'source-layer': 'trails',
-        minzoom: 10,
+        minzoom: 9,
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
           'line-color': [
             'match',
-            ['coalesce', ['get', 'route_class'], ['get', 'kind'], 'trail'],
-            'mvum', '#22c55e',
-            'motorized', '#f97316',
-            'bike', '#38bdf8',
-            'hike', '#f59e0b',
-            '#f59e0b',
+            trailVisualClass,
+            'motorized', '#22c55e',
+            'hike', '#1d8cff',
+            'bike', '#f97316',
+            'horse', '#a855f7',
+            'restricted', '#ef4444',
+            'unknown', sat || hyb ? '#0f172a' : '#94a3b8',
+            '#94a3b8',
           ],
-          'line-width': ['interpolate', ['linear'], ['zoom'], 10, 1.1, 13, 2.1, 16, 4.2],
-          'line-opacity': sat ? 0.92 : 0.84,
-          'line-dasharray': [3, 1.5],
+          'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.35, 12, 2.15, 15, 4.8],
+          'line-opacity': sat || hyb ? 0.96 : 0.9,
         } },
       { id: 'trail-pack-label', type: 'symbol', source: trailId, 'source-layer': 'trails',
         minzoom: 13,

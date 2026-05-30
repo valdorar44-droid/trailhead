@@ -52,6 +52,7 @@ export interface NativeMapProps {
   tracePinCoords?: [number, number][];
   showLandOverlay: boolean;
   showUsgsOverlay: boolean;
+  showTrailOverlay?: boolean;
   showTerrain:     boolean;
   showMvum:        boolean;
   showFire:        boolean;

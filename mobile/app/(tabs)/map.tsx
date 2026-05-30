@@ -3920,6 +3920,7 @@ function MapScreen() {
   const [trailCardCollapsed, setTrailCardCollapsed] = useState(false);
   const [showTrailList, setShowTrailList] = useState(false);
   const [trailRouteBuilderOpen, setTrailRouteBuilderOpen] = useState(false);
+  const [savedTrailRouteOpenId, setSavedTrailRouteOpenId] = useState<string | null>(null);
   const [trailRouteBuilding, setTrailRouteBuilding] = useState(false);
   const [trailRoutePlans, setTrailRoutePlans] = useState<TrailRoutePlan[]>([]);
   const [selectedTrailRoutePlanId, setSelectedTrailRoutePlanId] = useState<TrailRouteIntent | null>(null);
@@ -5426,12 +5427,14 @@ function MapScreen() {
       if (cancelled) return;
       setPendingSavedTrailId(null);
       if (!saved) {
+        setSavedTrailRouteOpenId(null);
         setQuickToast('Saved trail route is not available');
         setTimeout(() => setQuickToast(''), 2600);
         return;
       }
       const coords = primaryTrailLine(saved.geometry, [saved.trail.lng, saved.trail.lat]);
       if (coords.length < 2) {
+        setSavedTrailRouteOpenId(null);
         openTrailFeature(saved.trail);
         setQuickToast('Trail profile opened');
         setTimeout(() => setQuickToast(''), 2200);
@@ -5452,6 +5455,7 @@ function MapScreen() {
       setSelectedTrail(saved.trail);
       setTrailCardCollapsed(true);
       setTrailRouteBuilderOpen(true);
+      setSavedTrailRouteOpenId(saved.id);
       setTrailRoutePlans([plan]);
       setSelectedTrailRoutePlanId('capture');
       setTrailRouteBuilderError('');
@@ -8032,6 +8036,7 @@ function MapScreen() {
     nativeMapRef.current?.highlightTrail(feature.lat, feature.lng, feature.name);
     setSelectedTrailProfile(null);
     setTrailRouteBuilderOpen(false);
+    setSavedTrailRouteOpenId(null);
     setTrailRoutePlans([]);
     setSelectedTrailRoutePlanId(null);
     setTrailRouteBuilderError('');
@@ -8973,6 +8978,7 @@ function MapScreen() {
 
   function clearTrailRoutePreview() {
     setTrailRouteBuilderOpen(false);
+    setSavedTrailRouteOpenId(null);
     setTrailRoutePlans([]);
     setSelectedTrailRoutePlanId(null);
     setTrailRouteBuilderError('');
@@ -8998,8 +9004,36 @@ function MapScreen() {
     }
   }
 
+  function closeTrailRouteBuilderPanel() {
+    if (savedTrailRouteOpenId && selectedTrail && trailRoutePlans.length > 0) {
+      setTrailRouteBuilderOpen(false);
+      setTrailCardCollapsed(true);
+      setTrailPinCaptureMode(false);
+      return;
+    }
+    clearTrailRoutePreview();
+    setTrailCardCollapsed(false);
+  }
+
+  function reopenSavedTrailRouteBuilder() {
+    if (!savedTrailRouteOpenId || !selectedTrail) {
+      setTrailCardCollapsed(false);
+      return;
+    }
+    const plan = trailRoutePlans.find(p => p.id === selectedTrailRoutePlanId) ?? trailRoutePlans[0];
+    if (!plan) {
+      setTrailCardCollapsed(false);
+      return;
+    }
+    setTrailCardCollapsed(true);
+    setTrailRouteBuilderOpen(true);
+    setSelectedTrailRoutePlanId(plan.id);
+    previewTrailRoutePlan(selectedTrail, plan);
+  }
+
   function beginTrailTrace() {
     if (navMode) return;
+    setSavedTrailRouteOpenId(null);
     setSelectedCamp(null);
     setSelectedCommunityPin(null);
     setTappedPoi(null);
@@ -9128,6 +9162,7 @@ function MapScreen() {
 
   function beginTrailPinCapture() {
     if (navMode) return;
+    setSavedTrailRouteOpenId(null);
     setSelectedCamp(null);
     setSelectedCommunityPin(null);
     setTappedPoi(null);
@@ -10786,9 +10821,9 @@ function MapScreen() {
           <TouchableOpacity
             style={s.trailCollapsedTab}
             activeOpacity={0.86}
-            onPress={() => setTrailCardCollapsed(false)}
+            onPress={savedTrailRouteOpenId ? reopenSavedTrailRouteBuilder : () => setTrailCardCollapsed(false)}
           >
-            <Ionicons name={trailIcon(selectedTrail.type) as any} size={16} color={trailColor(selectedTrail.type)} />
+            <Ionicons name={savedTrailRouteOpenId ? 'git-branch-outline' : trailIcon(selectedTrail.type) as any} size={16} color={trailColor(selectedTrail.type)} />
             <Text style={s.trailCollapsedText} numberOfLines={1}>{selectedTrail.name}</Text>
             <Ionicons name="chevron-up" size={15} color={OVR.text3} />
           </TouchableOpacity>
@@ -10797,6 +10832,7 @@ function MapScreen() {
             activeOpacity={0.82}
             onPress={() => {
               nativeMapRef.current?.clearTrailHighlight();
+              clearTrailRoutePreview();
               setTrailCardCollapsed(false);
               setSelectedTrail(null);
             }}
@@ -11101,10 +11137,7 @@ function MapScreen() {
               </View>
               <TouchableOpacity
                 style={s.discoveryPanelClose}
-                onPress={() => {
-                  clearTrailRoutePreview();
-                  setTrailCardCollapsed(false);
-                }}
+                onPress={closeTrailRouteBuilderPanel}
               >
                 <Ionicons name="close" size={15} color={OVR.text2} />
               </TouchableOpacity>
@@ -11210,10 +11243,7 @@ function MapScreen() {
                 <View style={s.trailRouteBuilderActions}>
                   <TouchableOpacity
                     style={s.trailRouteSecondaryBtn}
-                    onPress={() => {
-                      clearTrailRoutePreview();
-                      setTrailCardCollapsed(false);
-                    }}
+                    onPress={closeTrailRouteBuilderPanel}
                   >
                     <Ionicons name="chevron-back" size={14} color={OVR.text2} />
                     <Text style={s.trailRouteSecondaryText}>BACK</Text>

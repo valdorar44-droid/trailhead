@@ -13314,12 +13314,8 @@ function MapScreen() {
             {(layerTrails || layerMvum || layerAva) && (
               <View style={{ paddingHorizontal: 16, paddingBottom: 8, gap: 6 }}>
                 {layerTrails && [
-                  { color: '#22c55e', label: 'Motorized / 4x4 / track' },
-                  { color: '#1d8cff', label: 'Hiking / general trail' },
-                  { color: '#f97316', label: 'Bike / MTB' },
-                  { color: '#a855f7', label: 'Horse / equestrian' },
-                  { color: '#ef4444', label: 'Restricted / closed where tagged' },
-                  { color: '#94a3b8', label: 'Unknown / unclassified' },
+                  { color: '#22c55e', label: 'Tracks / dirt roads' },
+                  { color: '#1d8cff', label: 'Paths / trails' },
                 ].map(l => (
                   <View key={l.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                     <View style={{ width: 22, height: 4, backgroundColor: l.color, borderRadius: 2 }} />

@@ -25,7 +25,7 @@ import type { WaterRoute } from '@/lib/store';
 import { useStore } from '@/lib/store';
 import { useTheme } from '@/lib/design';
 import { buildOfflineTrailGraphSelection } from '@/lib/trailGraph';
-import { CACHE_OFFLINE_DIR, CONTOUR_DIR, OFFLINE_DIR, FILE_REGIONS, TRAIL_REGIONS } from '@/lib/useOfflineFiles';
+import { CACHE_OFFLINE_DIR, CONTOUR_DIR, OFFLINE_DIR, FILE_REGIONS } from '@/lib/useOfflineFiles';
 import { saveRouteGeometry } from '@/lib/offlineRoutes';
 import * as FileSystem from 'expo-file-system';
 import * as Location from 'expo-location';
@@ -49,18 +49,6 @@ const LEGACY_OFFLINE_DIR = `${FileSystem.documentDirectory}offline/`;
 const CACHE_CONTOUR_DIR = `${FileSystem.cacheDirectory}offline/contours/`;
 const TRAIL_DIR = `${OFFLINE_DIR}trails/`;
 const CACHE_TRAIL_DIR = `${CACHE_OFFLINE_DIR}trails/`;
-
-type TrailRegionScope = { id: string; bounds: { n: number; s: number; e: number; w: number } };
-const TRAIL_REGION_SCOPES: TrailRegionScope[] = Object.entries(TRAIL_REGIONS)
-  .map(([id, region]) => ({ id, bounds: region.bounds }));
-
-function findTrailRegionScope(lat?: number, lng?: number): TrailRegionScope | null {
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-  return TRAIL_REGION_SCOPES.find(({ bounds: b }) =>
-    (lat as number) >= b.s && (lat as number) <= b.n &&
-    (lng as number) >= b.w && (lng as number) <= b.e
-  ) ?? null;
-}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 export type { WP, RouteOpts, MapBounds, RouteResult, RouteStep } from './types';
@@ -709,7 +697,6 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const [localTiles,   setLocalTiles]   = useState(false);
   const [localContours, setLocalContours] = useState(false);
   const [localTrails, setLocalTrails] = useState(false);
-  const [onlineTrailRegion, setOnlineTrailRegion] = useState<TrailRegionScope | null>(null);
   const [tileDebug,    setTileDebug]    = useState('Checking maps');
   const [tileSession,  setTileSession]  = useState(() => Date.now());
   const trailHighlightRef = useRef<GeoJSON.FeatureCollection>(emptyFC());
@@ -856,33 +843,12 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     }
   }, []);
 
-  const loadBestTrailFile = useCallback(async (lat?: number, lng?: number) => {
-    const onlineScope = findTrailRegionScope(lat, lng);
-    setOnlineTrailRegion(prev => prev?.id === onlineScope?.id ? prev : onlineScope);
-    const files = await getDownloadedTrailFiles();
-    if (files.length === 0) {
-      const ts = tileServer as any;
-      if (ts?.clearTrails) await ts.clearTrails().catch(() => {});
-      loadedTrailRef.current = null;
-      setLocalTrails(false);
-      return;
-    }
-    const match = Number.isFinite(lat) && Number.isFinite(lng)
-      ? files.find(({ bounds: b }) =>
-          (lat as number) >= b.s && (lat as number) <= b.n &&
-          (lng as number) >= b.w && (lng as number) <= b.e
-        )
-      : null;
-    if (Number.isFinite(lat) && Number.isFinite(lng) && !match) {
-      const ts = tileServer as any;
-      if (ts?.clearTrails) await ts.clearTrails().catch(() => {});
-      loadedTrailRef.current = null;
-      setLocalTrails(false);
-      return;
-    }
-    const chosen = match ?? files[0];
-    await switchTrailFile(chosen.path, chosen.sizeMb);
-  }, [getDownloadedTrailFiles, switchTrailFile]);
+  const loadBestTrailFile = useCallback(async () => {
+    const ts = tileServer as any;
+    if (ts?.clearTrails) await ts.clearTrails().catch(() => {});
+    loadedTrailRef.current = null;
+    setLocalTrails(false);
+  }, []);
 
   const ensureRouteTileFile = useCallback(async (pairs: string[]) => {
     if (!tileServer?.switchState || pairs.length < 2) return;
@@ -1015,7 +981,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           );
           if (match) best = match;
           await loadBestContourFile(pos.coords.latitude, pos.coords.longitude);
-          await loadBestTrailFile(pos.coords.latitude, pos.coords.longitude);
+          await loadBestTrailFile();
         }
       } catch { await loadBestContourFile(); await loadBestTrailFile(); }
       setTileDebug(`${files.length} region map${files.length === 1 ? '' : 's'} saved`);
@@ -1067,8 +1033,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       : 'online';
   const trailMode: TrailSourceMode = showTrailOverlay ? (localTrails ? 'local' : 'online') : 'none';
   const mapStyleObj = useMemo(
-    () => buildMapStyle(mapLayer, mapboxToken || '', localTiles, tileSession, contourMode, trailMode, showNautical, onlineTrailRegion),
-    [mapLayer, mapboxToken, localTiles, tileSession, contourMode, trailMode, showNautical, onlineTrailRegion],
+    () => buildMapStyle(mapLayer, mapboxToken || '', localTiles, tileSession, contourMode, trailMode, showNautical),
+    [mapLayer, mapboxToken, localTiles, tileSession, contourMode, trailMode, showNautical],
   );
 
   // ── Imperative API (replaces postMessage) ───────────────────────────────────
@@ -1606,7 +1572,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     onBoundsChange({ n, s, e, w, zoom: zoomLevel || 10 });
     if (showMvum) fetchMvum({ n, s, e, w });
     loadBestContourFile((n + s) / 2, (e + w) / 2).catch(() => {});
-    loadBestTrailFile((n + s) / 2, (e + w) / 2).catch(() => {});
+    loadBestTrailFile().catch(() => {});
 
     // Auto-switch region file as map pans only when the live CDN is unreachable.
     // While online, always keep live tiles active even if a downloaded region covers

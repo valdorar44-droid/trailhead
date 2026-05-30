@@ -26,7 +26,6 @@ const TOPO_WATER = '#061a2f';
 const WETLAND_KINDS = ['wetland', 'marsh', 'swamp', 'bog', 'mud', 'saltmarsh', 'tidalflat', 'wetland_noveg'];
 export type ContourSourceMode = 'none' | 'online' | 'local';
 export type TrailSourceMode = 'none' | 'online' | 'local';
-export type TrailRegionScope = { id: string; bounds: { n: number; s: number; e: number; w: number } };
 
 export function buildMapStyle(
   mode: MapMode,
@@ -36,7 +35,6 @@ export function buildMapStyle(
   contourMode: ContourSourceMode = 'none',
   trailMode: TrailSourceMode = 'online',
   showNautical = false,
-  trailRegion: TrailRegionScope | null = null,
 ): object {
   // Changing the source id (not just the URL) forces MapLibre to fully recreate
   // the source and drop its tile cache — the correct approach for cache-busting.
@@ -52,9 +50,7 @@ export function buildMapStyle(
   const trailId = `trailpacks${tileSession}`;
   const trailUrl = trailMode === 'local'
     ? `http://127.0.0.1:${LOCAL_TILE_PORT}/api/trails/{z}/{x}/{y}.pbf`
-    : trailRegion?.id
-      ? `${TILE_BASE}/api/trails/${trailRegion.id}/{z}/{x}/{y}.pbf`
-      : `${TILE_BASE}/api/trails/{z}/{x}/{y}.pbf`;
+    : `${TILE_BASE}/api/trails/{z}/{x}/{y}.pbf`;
   const sat = mode === 'satellite';
   const hyb = mode === 'hybrid';
   const lwHalo = sat ? 'rgba(0,0,0,0.85)' : '#13161c';
@@ -122,10 +118,6 @@ export function buildMapStyle(
       maxzoom: 15,
       attribution: 'OpenStreetMap, USFS MVUM',
     };
-    if (trailRegion?.bounds) {
-      const b = trailRegion.bounds;
-      trailSource.bounds = [b.w, b.s, b.e, b.n];
-    }
     sources[trailId] = trailSource;
   }
   if (showNautical) {

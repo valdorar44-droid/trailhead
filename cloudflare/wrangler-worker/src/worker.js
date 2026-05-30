@@ -318,10 +318,13 @@ export default {
     }
 
     // ── Online trail pack vector tiles ───────────────────────────────────────
-    const trailMatch = path.match(/^\/api\/trails\/(\d+)\/(\d+)\/(\d+)\.pbf$/);
+    const trailMatch = path.match(/^\/api\/trails(?:\/([a-z]{2,6}))?\/(\d+)\/(\d+)\/(\d+)\.pbf$/);
     if (trailMatch) {
-      const [z, x, y] = trailMatch.slice(1).map(Number);
-      const { id: regionId, center } = trailRegionForTile(z, x, y);
+      const requestedRegionId = trailMatch[1] || null;
+      const [z, x, y] = trailMatch.slice(2).map(Number);
+      const center = tileCenter(z, x, y);
+      const detected = requestedRegionId ? { id: requestedRegionId, center } : trailRegionForTile(z, x, y);
+      const regionId = detected.id;
       if (!regionId) {
         return new Response(null, {
           status: 204,

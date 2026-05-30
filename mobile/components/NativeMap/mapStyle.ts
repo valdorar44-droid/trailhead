@@ -26,6 +26,7 @@ const TOPO_WATER = '#061a2f';
 const WETLAND_KINDS = ['wetland', 'marsh', 'swamp', 'bog', 'mud', 'saltmarsh', 'tidalflat', 'wetland_noveg'];
 export type ContourSourceMode = 'none' | 'online' | 'local';
 export type TrailSourceMode = 'none' | 'online' | 'local';
+export type TrailRegionScope = { id: string; bounds: { n: number; s: number; e: number; w: number } };
 
 export function buildMapStyle(
   mode: MapMode,
@@ -35,6 +36,7 @@ export function buildMapStyle(
   contourMode: ContourSourceMode = 'none',
   trailMode: TrailSourceMode = 'online',
   showNautical = false,
+  trailRegion: TrailRegionScope | null = null,
 ): object {
   // Changing the source id (not just the URL) forces MapLibre to fully recreate
   // the source and drop its tile cache — the correct approach for cache-busting.
@@ -50,12 +52,14 @@ export function buildMapStyle(
   const trailId = `trailpacks${tileSession}`;
   const trailUrl = trailMode === 'local'
     ? `http://127.0.0.1:${LOCAL_TILE_PORT}/api/trails/{z}/{x}/{y}.pbf`
-    : `${TILE_BASE}/api/trails/{z}/{x}/{y}.pbf`;
+    : trailRegion?.id
+      ? `${TILE_BASE}/api/trails/${trailRegion.id}/{z}/{x}/{y}.pbf`
+      : `${TILE_BASE}/api/trails/{z}/{x}/{y}.pbf`;
   const sat = mode === 'satellite';
   const hyb = mode === 'hybrid';
   const lwHalo = sat ? 'rgba(0,0,0,0.85)' : '#13161c';
   const showContours = contourMode !== 'none' && !sat;
-  const showTrailPack = trailMode !== 'none';
+  const showTrailPack = trailMode === 'local' || (trailMode === 'online' && Boolean(trailRegion?.id));
   const trailVisualClass = [
     'coalesce',
     ['get', 'trail_visual_class'],
@@ -110,13 +114,18 @@ export function buildMapStyle(
     };
   }
   if (showTrailPack) {
-    sources[trailId] = {
+    const trailSource: Record<string, unknown> = {
       type: 'vector',
       tiles: [trailUrl],
       minzoom: 8,
       maxzoom: 15,
       attribution: 'OpenStreetMap, USFS MVUM',
     };
+    if (trailRegion?.bounds) {
+      const b = trailRegion.bounds;
+      trailSource.bounds = [b.w, b.s, b.e, b.n];
+    }
+    sources[trailId] = trailSource;
   }
   if (showNautical) {
     sources[hydroId] = {
@@ -252,15 +261,15 @@ export function buildMapStyle(
   if (showTrailPack) {
     layers.push(
       { id: 'trail-pack-casing', type: 'line', source: trailId, 'source-layer': 'trails',
-        minzoom: 9,
+        minzoom: 8,
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
           'line-color': sat || hyb ? 'rgba(3,7,18,0.86)' : '#10140f',
-          'line-width': ['interpolate', ['linear'], ['zoom'], 9, 2.4, 12, 3.8, 15, 7.2],
+          'line-width': ['interpolate', ['linear'], ['zoom'], 8, 1.8, 12, 3.8, 15, 7.2],
           'line-opacity': sat || hyb ? 0.86 : 0.7,
         } },
       { id: 'trail-pack-line', type: 'line', source: trailId, 'source-layer': 'trails',
-        minzoom: 9,
+        minzoom: 8,
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
           'line-color': [
@@ -274,7 +283,7 @@ export function buildMapStyle(
             'unknown', sat || hyb ? '#0f172a' : '#94a3b8',
             '#94a3b8',
           ],
-          'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.35, 12, 2.15, 15, 4.8],
+          'line-width': ['interpolate', ['linear'], ['zoom'], 8, 1.0, 12, 2.15, 15, 4.8],
           'line-opacity': sat || hyb ? 0.96 : 0.9,
         } },
       { id: 'trail-pack-label', type: 'symbol', source: trailId, 'source-layer': 'trails',

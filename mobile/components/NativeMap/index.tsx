@@ -25,7 +25,7 @@ import type { WaterRoute } from '@/lib/store';
 import { useStore } from '@/lib/store';
 import { useTheme } from '@/lib/design';
 import { buildOfflineTrailGraphSelection } from '@/lib/trailGraph';
-import { CACHE_OFFLINE_DIR, CONTOUR_DIR, OFFLINE_DIR, FILE_REGIONS } from '@/lib/useOfflineFiles';
+import { CACHE_OFFLINE_DIR, CONTOUR_DIR, OFFLINE_DIR, FILE_REGIONS, TRAIL_REGIONS } from '@/lib/useOfflineFiles';
 import { saveRouteGeometry } from '@/lib/offlineRoutes';
 import * as FileSystem from 'expo-file-system';
 import * as Location from 'expo-location';
@@ -49,6 +49,18 @@ const LEGACY_OFFLINE_DIR = `${FileSystem.documentDirectory}offline/`;
 const CACHE_CONTOUR_DIR = `${FileSystem.cacheDirectory}offline/contours/`;
 const TRAIL_DIR = `${OFFLINE_DIR}trails/`;
 const CACHE_TRAIL_DIR = `${CACHE_OFFLINE_DIR}trails/`;
+
+type TrailRegionScope = { id: string; bounds: { n: number; s: number; e: number; w: number } };
+const TRAIL_REGION_SCOPES: TrailRegionScope[] = Object.entries(TRAIL_REGIONS)
+  .map(([id, region]) => ({ id, bounds: region.bounds }));
+
+function findTrailRegionScope(lat?: number, lng?: number): TrailRegionScope | null {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return TRAIL_REGION_SCOPES.find(({ bounds: b }) =>
+    (lat as number) >= b.s && (lat as number) <= b.n &&
+    (lng as number) >= b.w && (lng as number) <= b.e
+  ) ?? null;
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 export type { WP, RouteOpts, MapBounds, RouteResult, RouteStep } from './types';
@@ -697,6 +709,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const [localTiles,   setLocalTiles]   = useState(false);
   const [localContours, setLocalContours] = useState(false);
   const [localTrails, setLocalTrails] = useState(false);
+  const [onlineTrailRegion, setOnlineTrailRegion] = useState<TrailRegionScope | null>(null);
   const [tileDebug,    setTileDebug]    = useState('Checking maps');
   const [tileSession,  setTileSession]  = useState(() => Date.now());
   const trailHighlightRef = useRef<GeoJSON.FeatureCollection>(emptyFC());
@@ -844,6 +857,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   }, []);
 
   const loadBestTrailFile = useCallback(async (lat?: number, lng?: number) => {
+    const onlineScope = findTrailRegionScope(lat, lng);
+    setOnlineTrailRegion(prev => prev?.id === onlineScope?.id ? prev : onlineScope);
     const files = await getDownloadedTrailFiles();
     if (files.length === 0) {
       const ts = tileServer as any;
@@ -1052,8 +1067,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       : 'online';
   const trailMode: TrailSourceMode = showTrailOverlay ? (localTrails ? 'local' : 'online') : 'none';
   const mapStyleObj = useMemo(
-    () => buildMapStyle(mapLayer, mapboxToken || '', localTiles, tileSession, contourMode, trailMode, showNautical),
-    [mapLayer, mapboxToken, localTiles, tileSession, contourMode, trailMode, showNautical],
+    () => buildMapStyle(mapLayer, mapboxToken || '', localTiles, tileSession, contourMode, trailMode, showNautical, onlineTrailRegion),
+    [mapLayer, mapboxToken, localTiles, tileSession, contourMode, trailMode, showNautical, onlineTrailRegion],
   );
 
   // ── Imperative API (replaces postMessage) ───────────────────────────────────

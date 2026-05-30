@@ -8867,7 +8867,7 @@ function MapScreen() {
         };
     await saveOfflineTrail({
       id: `trail:${trail.id}`,
-      trail: { ...trail, support: { ...trail.support, offlineReady: coords.length >= 2, readinessLabel: coords.length >= 2 ? 'Trail downloaded for offline follow mode' : 'Trailhead saved; graph pack needed for full trail nav' } },
+      trail: { ...trail, support: { ...trail.support, offlineReady: coords.length >= 2, readinessLabel: coords.length >= 2 ? 'Trail downloaded for offline follow' : 'Download this region for full trail follow' } },
       geometry: packGeometry,
       savedAt: Date.now(),
       source: coords.length >= 2 ? 'highlight' : 'manual',
@@ -8878,7 +8878,7 @@ function MapScreen() {
       lat: trail.lat,
       lng: trail.lng,
       icon: 'flag',
-      note: coords.length >= 2 ? `Offline trail · ${coords.length} points` : 'Saved trailhead · graph pending',
+      note: coords.length >= 2 ? `Offline trail · ${coords.length} points` : 'Saved trailhead · download region for follow',
       createdAt: Date.now(),
     });
     setSelectedTrail(prev => prev?.id === trail.id
@@ -8902,8 +8902,8 @@ function MapScreen() {
     const baseDistance = trailCoordsDistanceM(clean);
     const complex = featureCount > 1 || clean.length > 260;
     const complexWarnings = [
-      complex ? 'This looks like a complex trail system, so Trailhead will only follow the preview line you select.' : 'Preview before starting; Trailhead will not add hidden connectors.',
-      graphReady ? '' : 'Download this region for stronger offline trail routing.',
+      complex ? 'This trail has multiple branches. Choose the line you want to follow.' : 'Review the line before saving or starting.',
+      graphReady ? '' : 'Download this region for better offline follow.',
     ].filter(Boolean);
     const plans: TrailRoutePlan[] = [withTrailElevation({
       id: 'segment',
@@ -8914,7 +8914,7 @@ function MapScreen() {
       distanceM: baseDistance,
       confidence: graphReady ? 'high' : 'medium',
       warnings: graphReady ? ['Follows the selected trail line.'] : complexWarnings,
-      engine: graphReady ? 'Offline ready' : 'Preview line',
+      engine: graphReady ? 'Saved offline' : 'Route line',
     })];
 
     const reversed = clean.slice(0, -1).reverse();
@@ -8927,7 +8927,7 @@ function MapScreen() {
       distanceM: baseDistance * 2,
       confidence: 'high',
       warnings: ['Good option for unclear trail systems because it returns on the same confirmed line.'],
-      engine: 'Preview line',
+      engine: 'Route line',
     }));
 
     if (trailEndpointDistanceM(clean) <= 350 && clean.length >= 8) {
@@ -8940,7 +8940,7 @@ function MapScreen() {
         distanceM: baseDistance,
         confidence: 'high',
         warnings: ['Loop detected from the selected line. Confirm direction before starting.'],
-        engine: 'Preview line',
+        engine: 'Route line',
       }));
     }
 
@@ -8953,7 +8953,7 @@ function MapScreen() {
       distanceM: baseDistance,
       confidence: complex ? 'low' : 'medium',
       warnings: complexWarnings,
-      engine: graphReady ? 'Offline ready' : 'Preview line',
+      engine: graphReady ? 'Saved offline' : 'Route line',
     }));
 
     return plans;
@@ -9101,8 +9101,8 @@ function MapScreen() {
     const midpoint = captured[Math.floor(captured.length / 2)];
     const feature: TrailFeature = {
       id: `captured:${Date.now()}`,
-      name: graphSnapped ? 'Captured trail route' : 'Trace preview route',
-      subtitle: `${fmtTrailRouteDistance(distanceM)} · ${fmtTrailRouteTime(distanceM)} · ${graphSnapped ? 'clean route' : 'rough trace'}`,
+      name: graphSnapped ? 'Captured trail route' : 'Drawn trail route',
+      subtitle: `${fmtTrailRouteDistance(distanceM)} · ${fmtTrailRouteTime(distanceM)} · ${graphSnapped ? 'trail line' : 'drawn line'}`,
       type: 'trail',
       source: 'trip',
       lat: midpoint[1],
@@ -9119,7 +9119,7 @@ function MapScreen() {
     };
       const plan: TrailRoutePlan = withTrailElevation({
         id: 'capture',
-        title: graphSnapped ? 'Captured trail route' : 'Rough trace preview',
+        title: graphSnapped ? 'Captured trail route' : 'Drawn trail route',
         subtitle: `Trace route · ${fmtTrailElevation(estimateTrailElevation(captured))}`,
         icon: graphSnapped ? 'git-branch-outline' : 'analytics-outline',
         coords: captured,
@@ -9127,8 +9127,8 @@ function MapScreen() {
         confidence: graphSnapped ? 'high' : 'low',
         warnings: [graphSnapped
           ? 'Built from the trail line inside your traced area.'
-          : 'This is only a rough finger trace. Use pinned routing for a cleaner route.'],
-        engine: graphSnapped ? 'Clean route' : 'Manual trace',
+          : 'Drawn by hand. Add pins at bends and forks for a cleaner route.'],
+        engine: graphSnapped ? 'Trail line' : 'Drawn line',
       });
     setSelectedTrail(feature);
     setTrailTraceDraft(rough);
@@ -9262,7 +9262,7 @@ function MapScreen() {
       setTrailTraceRoute([]);
       if (nextAnchors.length >= 2) {
         trailAutoBuildCountRef.current += 1;
-        setQuickToast('Snapping preview...');
+        setQuickToast('Building route...');
         await capturePinnedTrailRoute(nextAnchors, { previewOnly: true });
       } else if (!geometry?.features?.length || !snap || snap.distanceM > 180) {
         setQuickToast('Start set. Tap the next trail point.');
@@ -9315,12 +9315,12 @@ function MapScreen() {
     }
     setTrailRouteBuilderError('');
     setTrailRouteSegmentStatus(pins.slice(0, -1).map((_, idx) => ({ label: `${idx + 1}-${idx + 2}`, status: 'fallback', engine: 'Queued' })));
-    setQuickToast(previewOnly ? 'Snapping preview...' : 'Building trail route...');
+    setQuickToast(previewOnly ? 'Building route...' : 'Building trail route...');
 
     try {
       let clean: [number, number][] = [];
       let engineLabel = 'Trail route';
-      let engineWarning = 'Built from your pins. Preview the line before saving.';
+      let engineWarning = 'Built from your pins. Review the line before saving.';
       let engineConfidence: TrailRoutePlan['confidence'] = 'high';
       let segmentStatuses: TrailRouteSegmentStatus[] = [];
       let routedDistanceM = 0;
@@ -9352,7 +9352,7 @@ function MapScreen() {
             status: idx < segmentStatuses.length && segmentStatuses[idx].status === 'failed' ? 'fallback' : 'ok',
             engine: 'Adjusted',
           }));
-          engineWarning = 'Built with a fallback route pass. Preview the line before saving.';
+          engineWarning = 'Built with an adjusted route pass. Review the line before saving.';
         } catch (graphHopperErr: any) {
           try {
             const mapboxRoute = await fetchMapboxPinnedTrailRoute(pins);
@@ -9366,7 +9366,7 @@ function MapScreen() {
               status: idx < segmentStatuses.length && segmentStatuses[idx].status === 'failed' ? 'fallback' : 'ok',
               engine: 'Adjusted',
             }));
-            engineWarning = 'Built with a lower-confidence route pass. Add pins at tight bends if the line cuts corners.';
+            engineWarning = 'Add pins at tight bends if the line cuts corners.';
           } catch (mapboxErr: any) {
             const captured: [number, number][] = [];
             const localStatuses: TrailRouteSegmentStatus[] = [];
@@ -9385,7 +9385,7 @@ function MapScreen() {
             engineLabel = 'Trail route';
             engineConfidence = 'low';
             segmentStatuses = localStatuses;
-            engineWarning = 'Built from the visible trail line. Add pins around curves if the preview cuts corners.';
+            engineWarning = 'Add pins around curves if the line cuts corners.';
           }
         }
       }
@@ -9447,7 +9447,7 @@ function MapScreen() {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       }
     } catch (err: any) {
-      const message = err?.message ?? 'Pinned trail capture failed. Add more pins around forks or bends.';
+      const message = err?.message ?? 'Could not build that trail route. Add pins around forks or bends.';
       setTrailRouteBuilderError(message);
       setQuickToast(message);
       setTimeout(() => setQuickToast(''), 5200);
@@ -9467,6 +9467,18 @@ function MapScreen() {
     setLastRouteCoords(plan.coords);
     setIsRouted(true);
     nativeMapRef.current?.restoreRoute(plan.coords, steps, [steps], plan.distanceM, Math.max(60, plan.distanceM / 1.35));
+  }
+
+  function trailRoutePlanStatus(plan: TrailRoutePlan) {
+    if (plan.confidence === 'high') return { label: 'READY', color: C.orange, icon: 'checkmark-circle-outline' as const };
+    if (plan.confidence === 'medium') return { label: 'CHECK LINE', color: C.yellow, icon: 'eye-outline' as const };
+    return { label: 'ADD PINS', color: C.red, icon: 'add-circle-outline' as const };
+  }
+
+  function trailRouteSegmentLabel(segment: TrailRouteSegmentStatus) {
+    if (segment.status === 'ok') return 'Ready';
+    if (segment.status === 'fallback') return 'Adjusted';
+    return 'Add pin';
   }
 
   async function hydrateTrailRoutePlanElevation(plan: TrailRoutePlan) {
@@ -10298,7 +10310,7 @@ function MapScreen() {
           <View style={{ flex: 1 }}>
             <Text style={s.traceHudTitle}>TRACE TRAIL</Text>
             <Text style={s.traceHudText}>
-              Drag a rough corridor from start to finish. Lift to snap it to the trail graph.
+              Draw from start to finish. Lift to clean up the line.
             </Text>
           </View>
           <TouchableOpacity style={s.traceHudCancel} onPress={clearTrailTrace}>
@@ -11128,11 +11140,11 @@ function MapScreen() {
         <View style={s.trailRouteBuilderWrap}>
           <TrailheadSheet contentStyle={s.trailRouteBuilderBlur}>
             <View style={s.trailRouteBuilderHeader}>
-              <View style={[s.trailIconBadge, { backgroundColor: trailColor(selectedTrail.type) + '22', borderColor: trailColor(selectedTrail.type) + '66' }]}>
-                <Ionicons name="git-branch-outline" size={18} color={trailColor(selectedTrail.type)} />
+              <View style={[s.trailIconBadge, { backgroundColor: C.orangeGlow, borderColor: C.orange + '66' }]}>
+                <Ionicons name="git-branch-outline" size={18} color={C.orange} />
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={s.trailRouteEyebrow}>TRAIL ROUTE BUILDER</Text>
+                <Text style={s.trailRouteEyebrow}>TRAIL BUILDER</Text>
                 <Text style={s.trailRouteTitle} numberOfLines={1}>{selectedTrail.name}</Text>
               </View>
               <TouchableOpacity
@@ -11141,17 +11153,6 @@ function MapScreen() {
               >
                 <Ionicons name="close" size={15} color={OVR.text2} />
               </TouchableOpacity>
-            </View>
-
-            <View style={s.trailRouteStatusRow}>
-              <View style={s.trailRouteStatusPill}>
-                <Ionicons name="map-outline" size={13} color={C.silverBright} />
-                <Text style={s.trailRouteStatusText}>Preview first</Text>
-              </View>
-              <View style={s.trailRouteStatusPill}>
-                <Ionicons name="warning-outline" size={13} color={C.orange} />
-                <Text style={s.trailRouteStatusText}>No auto-start</Text>
-              </View>
             </View>
 
             <TrailheadMetricRow
@@ -11166,7 +11167,7 @@ function MapScreen() {
             {trailRouteBuilding ? (
               <View style={s.trailRouteLoading}>
                 <ActivityIndicator color={C.orange} />
-                <Text style={s.trailRouteLoadingText}>Reading selected trail geometry</Text>
+                <Text style={s.trailRouteLoadingText}>Building trail route</Text>
               </View>
             ) : trailRouteBuilderError ? (
               <View style={s.trailRouteError}>
@@ -11178,19 +11179,20 @@ function MapScreen() {
                 <View style={s.trailRoutePlanList}>
                   {trailRoutePlans.map(plan => {
                     const active = selectedTrailRoutePlanId === plan.id;
-                    const tone = plan.confidence === 'high' ? C.green : plan.confidence === 'medium' ? C.orange : C.red;
+                    const status = trailRoutePlanStatus(plan);
+                    const tone = active ? C.orange : status.color;
                     return (
                       <TouchableOpacity
                         key={plan.id}
                         activeOpacity={0.86}
-                        style={[s.trailRoutePlanCard, active && { borderColor: C.orange, backgroundColor: 'rgba(249,115,22,0.12)' }]}
+                        style={[s.trailRoutePlanCard, active && { borderColor: C.orange, backgroundColor: C.orangeGlow }]}
                         onPress={() => {
                           setSelectedTrailRoutePlanId(plan.id);
                           previewTrailRoutePlan(selectedTrail, plan);
                         }}
                       >
-                        <View style={[s.trailRoutePlanIcon, { borderColor: tone + '66', backgroundColor: tone + '18' }]}>
-                          <Ionicons name={plan.icon as any} size={17} color={tone} />
+                        <View style={[s.trailRoutePlanIcon, { borderColor: tone + '66', backgroundColor: active ? C.orangeGlow : tone + '14' }]}>
+                          <Ionicons name={status.icon as any} size={17} color={tone} />
                         </View>
                         <View style={{ flex: 1, minWidth: 0 }}>
                           <View style={s.trailRoutePlanTop}>
@@ -11199,9 +11201,8 @@ function MapScreen() {
                           </View>
                           <Text style={s.trailRoutePlanSub} numberOfLines={1}>{plan.subtitle}</Text>
                           <View style={s.trailRoutePlanMetaRow}>
-                            <Text style={[s.trailRoutePlanConfidence, { color: tone }]}>{plan.confidence.toUpperCase()} CONFIDENCE</Text>
+                            <Text style={[s.trailRoutePlanConfidence, { color: tone }]}>{status.label}</Text>
                             <Text style={s.trailRoutePlanEngine} numberOfLines={1}>{fmtTrailElevation(plan)}</Text>
-                            {!!plan.engine && <Text style={s.trailRoutePlanEngine} numberOfLines={1}>{plan.engine}</Text>}
                           </View>
                         </View>
                         {active && <Ionicons name="checkmark-circle" size={18} color={C.orange} />}
@@ -11230,7 +11231,7 @@ function MapScreen() {
                             size={12}
                             color={color}
                           />
-                          <Text style={[s.trailSegmentText, { color }]} numberOfLines={1}>{segment.label} {segment.engine}</Text>
+                          <Text style={[s.trailSegmentText, { color }]} numberOfLines={1}>Section {idx + 1} {trailRouteSegmentLabel(segment)}</Text>
                         </View>
                       );
                     })}

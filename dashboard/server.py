@@ -6483,6 +6483,55 @@ def _camp_pref_score(camp: dict, route_style: str = "balanced", camp_preference:
             pass
     return score
 
+def _camp_text(camp: dict) -> str:
+    return " ".join(str(v or "") for v in [
+        camp.get("name"),
+        camp.get("land_type"),
+        camp.get("source"),
+        camp.get("verified_source"),
+        camp.get("cost"),
+        " ".join(camp.get("tags") or []),
+        " ".join(camp.get("amenities") or []),
+        " ".join(camp.get("site_types") or []),
+        camp.get("description"),
+    ]).lower()
+
+def _camp_matches_filters(camp: dict, type_filters: list[str]) -> bool:
+    if not type_filters:
+        return True
+    text = _camp_text(camp)
+    tags = {str(t or "").lower() for t in camp.get("tags") or []}
+    for raw in type_filters:
+        f = str(raw or "").lower().strip()
+        if not f:
+            continue
+        if f in tags or f in text:
+            return True
+        if f in {"public", "blm", "usfs", "dispersed", "free"} and any(term in text for term in ("blm", "usfs", "national forest", "forest service", "public", "dispersed", "primitive", "free")):
+            return True
+        if f == "tent" and not any(term in text for term in ("rv resort", "koa", "hookup-only")):
+            return True
+        if f == "reservable" and any(term in text for term in ("reservable", "reservation", "recreation.gov", "state park", "nps", "national park")):
+            return True
+    return False
+
+def _route_fit_label(route_distance: float) -> str:
+    if route_distance <= 5:
+        return "on_route"
+    if route_distance <= 18:
+        return "short_detour"
+    if route_distance <= 38:
+        return "detour"
+    return "review"
+
+def _camp_source_confidence(camp: dict) -> str:
+    source = f"{camp.get('source') or ''} {camp.get('verified_source') or ''}".lower()
+    if any(term in source for term in ("ridb", "recreation.gov", "nps", "blm")):
+        return "high"
+    if any(term in source for term in ("osm", "openstreetmap", "geoapify")):
+        return "medium"
+    return "review"
+
 async def _select_camp_for_window(
     window: RouteCampWindow,
     points: list[dict],
@@ -6497,16 +6546,25 @@ async def _select_camp_for_window(
     label = window.label or (f"Day {window.day}" if window.start == window.end else f"Days {window.start}-{window.end}")
     target = _point_at_route_mile(points, window.target_mi) or points[min(len(points) - 1, max(0, window.day - 1))]
     samples = _route_window_samples(points, window.target_mi, max(12.0, window.search_window_mi), max_samples=6)
-    radius = max(24.0, min(max_radius, window.search_window_mi * 0.75))
+    base_radius = max(24.0, min(max_radius, window.search_window_mi * 0.75))
+    filter_key = sorted(type_filters)
+    pass_defs: list[dict] = []
+    if type_filters:
+        pass_defs.append({"name": "preferred", "filters": type_filters, "radius": base_radius, "strict": True})
+        pass_defs.append({"name": "preferred_wide", "filters": [], "radius": min(max_radius, max(base_radius * 1.25, 45.0)), "strict": False})
+    pass_defs.append({"name": "any_legal", "filters": [], "radius": min(max_radius, max(base_radius * 1.55, 58.0)), "strict": False})
+    if route_style == "wild" or str(camp_preference or "").lower() == "public":
+        pass_defs.append({"name": "wide_review", "filters": [], "radius": min(max(max_radius, 82.0), max(base_radius * 1.9, 72.0)), "strict": False})
+    pass_defs.append({"name": "target_review", "filters": [], "radius": min(120.0, max(max_radius, base_radius * 2.2, 105.0)), "strict": False, "target_only": True})
     key_payload = {
-        "v": 2,
+        "v": 5,
         "route": [[round(p["lat"], 3), round(p["lng"], 3)] for p in samples],
         "window": [window.day, window.start, window.end, round(window.target_mi, 1), round(window.search_window_mi, 1)],
-        "filters": sorted(type_filters),
+        "filters": filter_key,
         "style": route_style,
         "camp_preference": camp_preference,
         "region_hint": region_hint,
-        "radius": round(radius),
+        "passes": [(p["name"], round(float(p["radius"])), bool(p.get("target_only"))) for p in pass_defs],
     }
     cache_key = "route_camp_window:" + hashlib.sha1(json.dumps(key_payload, sort_keys=True).encode()).hexdigest()[:24]
     cached = get_cached("campsite_cache", cache_key, ttl_seconds=3600 * 24)
@@ -6514,37 +6572,87 @@ async def _select_camp_for_window(
         cached["cache_status"] = "hit"
         return cached
     try:
-        async with sem:
-            results = await asyncio.gather(*[
-                asyncio.wait_for(nearby_camps(sample["lat"], sample["lng"], radius, ",".join(type_filters)), timeout=8.0)
-                for sample in samples
-            ], return_exceptions=True)
-        found = _merge_camp_sources(*[r for r in results if isinstance(r, list)], type_filters=type_filters)
-        scored = []
-        for camp in found:
-            try:
-                route_distance = min(_haversine_m(float(camp["lat"]), float(camp["lng"]), s["lat"], s["lng"]) / 1609.344 for s in samples)
-                endpoint_distance = _haversine_m(float(camp["lat"]), float(camp["lng"]), target["lat"], target["lng"]) / 1609.344
-            except Exception:
-                continue
-            camp = {**camp, "route_distance_mi": round(route_distance, 2), "route_progress": (window.target_mi / total_mi if total_mi > 0 else 0), "route_progress_mi": round(window.target_mi, 1)}
-            scored.append((
-                endpoint_distance * 0.75
-                + route_distance * (0.75 if route_style == "direct" else 0.9)
-                + _camp_pref_score(camp, route_style, camp_preference, region_hint),
-                camp,
-            ))
-        scored.sort(key=lambda item: item[0])
-        best = scored[0][1] if scored else None
+        by_key: dict[str, dict] = {}
+        search_passes: list[dict] = []
+        for pass_def in pass_defs:
+            radius = float(pass_def["radius"])
+            filters = list(pass_def["filters"])
+            pass_samples = [target] if pass_def.get("target_only") else samples
+            async with sem:
+                results = await asyncio.gather(*[
+                    asyncio.wait_for(nearby_camps(sample["lat"], sample["lng"], radius, ",".join(filters)), timeout=8.0)
+                    for sample in pass_samples
+                ], return_exceptions=True)
+            found = _merge_camp_sources(*[r for r in results if isinstance(r, list)], type_filters=filters or None)
+            kept = 0
+            for camp in found:
+                if pass_def["strict"] and not _camp_matches_filters(camp, type_filters):
+                    continue
+                try:
+                    route_distance = min(_haversine_m(float(camp["lat"]), float(camp["lng"]), s["lat"], s["lng"]) / 1609.344 for s in samples)
+                    endpoint_distance = _haversine_m(float(camp["lat"]), float(camp["lng"]), target["lat"], target["lng"]) / 1609.344
+                except Exception:
+                    continue
+                preferred_match = _camp_matches_filters(camp, type_filters)
+                camp = {
+                    **camp,
+                    "route_distance_mi": round(route_distance, 2),
+                    "route_fit": _route_fit_label(route_distance),
+                    "route_progress": round(window.target_mi / total_mi, 4) if total_mi > 0 else 0,
+                    "route_progress_mi": round(window.target_mi, 1),
+                    "endpoint_distance_mi": round(endpoint_distance, 2),
+                    "recommended_day": window.day,
+                    "search_pass": pass_def["name"],
+                    "source_confidence": _camp_source_confidence(camp),
+                    "preference_match": preferred_match,
+                }
+                score = (
+                    endpoint_distance * (0.62 if route_style != "direct" else 0.82)
+                    + route_distance * (0.78 if route_style == "direct" else 0.95)
+                    + _camp_pref_score(camp, route_style, camp_preference, region_hint)
+                    + (0 if preferred_match or not type_filters else 14)
+                    + (0 if pass_def["name"] in {"preferred", "preferred_wide"} else 6 if pass_def["name"] == "any_legal" else 12)
+                )
+                camp["_score"] = round(score, 3)
+                key = _camp_merge_key(camp)
+                if key not in by_key or float(camp["_score"]) < float(by_key[key].get("_score", 999999)):
+                    by_key[key] = camp
+                    kept += 1
+            search_passes.append({"name": pass_def["name"], "radius_mi": round(radius, 1), "filters": filters, "found": len(found), "kept": kept, "target_only": bool(pass_def.get("target_only"))})
+            if len(by_key) >= 18 and (pass_def["name"] == "preferred" or not type_filters):
+                break
+        scored = sorted(by_key.values(), key=lambda c: float(c.get("_score", 999999)))
+        candidates = [{k: v for k, v in camp.items() if k != "_score"} for camp in scored[:18]]
+        best = candidates[0] if candidates else None
+        best_route_distance = float(best.get("route_distance_mi") or 999) if best else 999
+        best_endpoint_distance = float(best.get("endpoint_distance_mi") or 999) if best else 999
+        preferred_best = bool(best and (best.get("preference_match") or not type_filters))
+        strong = bool(best and best_route_distance <= 28 and best_endpoint_distance <= 55 and (preferred_best or str(camp_preference or "").lower() == "any"))
+        confidence = "strong" if strong else "review" if best else "missing"
+        coverage_status = "ready" if strong else "review" if best else "sparse"
+        reason = (
+            "Strong overnight option found."
+            if strong else
+            "Showing the best legal overnight option; review fit before navigation."
+            if best else
+            "No overnight option found near this day yet. Keep it as a review stop or choose a camp manually."
+        )
         response = {
             "day": window.day,
             "start": window.start,
             "end": window.end,
             "label": label,
             "camp": best,
-            "fallback": None if best else {"lat": target["lat"], "lng": target["lng"], "name": f"{label} camp search area", "description": "Camp search weak in this area. Move the day finish or scan nearby before navigation."},
-            "strong": bool(best and float(best.get("route_distance_mi") or 999) <= 22 and (_haversine_m(float(best["lat"]), float(best["lng"]), target["lat"], target["lng"]) / 1609.344) <= 42),
-            "found": len(scored),
+            "selected": best,
+            "candidates": candidates,
+            "fallback": None if best else {"lat": target["lat"], "lng": target["lng"], "name": f"{label} overnight area", "description": "Review this day. Choose an overnight stop before navigation."},
+            "strong": strong,
+            "confidence": confidence,
+            "coverage_status": coverage_status,
+            "reason": reason,
+            "search_radius_mi": max((p["radius_mi"] for p in search_passes), default=round(base_radius, 1)),
+            "search_passes": search_passes,
+            "found": len(candidates),
             "cache_status": "miss",
         }
     except Exception as exc:
@@ -6554,8 +6662,15 @@ async def _select_camp_for_window(
             "end": window.end,
             "label": label,
             "camp": None,
-            "fallback": {"lat": target["lat"], "lng": target["lng"], "name": f"{label} camp search area", "description": "Camp search failed for this window. Scan nearby before navigation."},
+            "selected": None,
+            "candidates": [],
+            "fallback": {"lat": target["lat"], "lng": target["lng"], "name": f"{label} overnight area", "description": "Review this day. Choose an overnight stop before navigation."},
             "strong": False,
+            "confidence": "missing",
+            "coverage_status": "sparse",
+            "reason": "Overnight search failed for this day.",
+            "search_radius_mi": round(base_radius, 1),
+            "search_passes": [],
             "found": 0,
             "cache_status": "error",
             "error": str(exc),
@@ -6580,7 +6695,7 @@ async def route_camp_windows(body: RouteCampWindowsRequest):
             window,
             points,
             type_filters,
-            max(25.0, min(float(body.max_radius or 58), 75.0)),
+            max(25.0, min(float(body.max_radius or 58), 120.0)),
             total_mi,
             sem,
             route_style=route_style,

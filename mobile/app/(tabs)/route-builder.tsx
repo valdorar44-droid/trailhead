@@ -165,9 +165,9 @@ const CAMP_REUSE_OPTIONS: Array<{ id: CampReusePolicy; label: string; sub: strin
   { id: 'manual', label: 'Manual reuse', sub: 'You decide night by night', icon: 'hand-left-outline' },
 ];
 const BUILD_STATUS_LINES = [
-  'Reading the trip outline',
-  'Checking day pacing',
-  'Scanning camp windows',
+  'Setting up your trip',
+  'Checking the route',
+  'Finding overnight options',
   'Balancing fuel and distance',
 ];
 const EMPTY_DISCOVERY_RESULTS: DiscoveryResults = { camps: [], gas: [], pois: [], excursions: [], summary: '' };
@@ -910,11 +910,11 @@ function sourceLabel(source?: BuilderStop['source']) {
 }
 
 function isFrameworkTarget(stop: BuilderStop) {
-  return stop.source === 'map' && stop.type === 'waypoint' && /(target area|camp search area)/i.test(stop.name);
+  return stop.source === 'map' && stop.type === 'waypoint' && /(target area|camp search area|overnight area)/i.test(stop.name);
 }
 
 function isFrameworkManagedStop(stop: BuilderStop) {
-  return isFrameworkTarget(stop) || /Auto-picked by Trailhead/i.test(stop.description);
+  return isFrameworkTarget(stop) || /Picked for|Auto-picked by Trailhead/i.test(stop.description);
 }
 
 function stopRouteOrderWeight(stop: BuilderStop) {
@@ -1673,7 +1673,7 @@ export default function RouteBuilderScreen() {
         camp: undefined,
         gas: undefined,
         poi: undefined,
-        name: `Day ${st.day} camp search area`,
+        name: `Day ${st.day} overnight area`,
         lat: anchor.lat + (final.lat - anchor.lat) * t,
         lng: anchor.lng + (final.lng - anchor.lng) * t,
         land_type: 'route',
@@ -2005,7 +2005,7 @@ export default function RouteBuilderScreen() {
       setTimeout(() => fly(camp.lat, camp.lng, 12), 80);
       return;
     }
-    const targetDay = legContext ? stopDay : null;
+    const targetDay = insertTargetDay ?? activeDay;
     const frameworkTarget = targetDay
       ? orderedStops.find(st => st.day === targetDay && isFrameworkTarget(st))
       : null;
@@ -2230,7 +2230,7 @@ export default function RouteBuilderScreen() {
   function scanBetweenStops(from: BuilderStop, to: BuilderStop, tab: DiscoveryTab, targetDay = from.day, purpose: LegSearchContext['purpose'] = 'leg', inline = true) {
     const miles = haversineMi(from, to);
     const leg = { from, to, miles, center: midpoint(from, to), targetDay, purpose };
-    setInsertAfterId(from.id);
+    setInsertAfterId(stops.some(stop => stop.id === from.id) ? from.id : null);
     setInsertTargetDay(targetDay);
     setActiveDay(targetDay);
     setDiscoverTab(tab);
@@ -2254,10 +2254,40 @@ export default function RouteBuilderScreen() {
     }
     setActiveDay(plan.day);
     const routableStops = plan.stops.filter(st => st.routePointType !== 'side_stop');
-    const from = plan.previous ?? routableStops[0] ?? plan.stops[0] ?? null;
+    const providerSegment = routeDaySegments.find(segment => segment.day === plan.day);
+    const segmentStart: BuilderStop | null = providerSegment
+      ? {
+          id: `day_${plan.day}_route_start`,
+          day: plan.day,
+          name: `Day ${plan.day} start`,
+          lat: providerSegment.startPoint.lat,
+          lng: providerSegment.startPoint.lng,
+          type: 'waypoint',
+          description: 'Temporary day route point.',
+          land_type: 'route',
+          source: 'map',
+          routePointType: 'through',
+        }
+      : null;
+    const segmentEnd: BuilderStop | null = providerSegment
+      ? {
+          id: `day_${plan.day}_route_end`,
+          day: plan.day,
+          name: `Day ${plan.day} area`,
+          lat: providerSegment.endPoint.lat,
+          lng: providerSegment.endPoint.lng,
+          type: 'waypoint',
+          description: 'Temporary day route point.',
+          land_type: 'route',
+          source: 'map',
+          routePointType: 'through',
+          routeShapeRole: 'outbound_anchor',
+        }
+      : null;
+    const from = plan.previous ?? routableStops[0] ?? segmentStart ?? plan.stops[0] ?? null;
     const to = tab === 'camps'
-      ? plan.target ?? plan.stops[plan.stops.length - 1] ?? null
-      : routableStops[routableStops.length - 1] ?? plan.target ?? null;
+      ? plan.target ?? segmentEnd ?? plan.stops[plan.stops.length - 1] ?? null
+      : routableStops[routableStops.length - 1] ?? plan.target ?? segmentEnd ?? null;
     if (from && to && from.id !== to.id) {
       scanBetweenStops(from, to, tab, plan.day, tab === 'camps' ? 'overnight' : 'leg');
       return;
@@ -2288,7 +2318,7 @@ export default function RouteBuilderScreen() {
       return;
     }
     setInlineSearch(null);
-    Alert.alert('Start the route first', 'Add a start location and destination, then Trailhead can search camps, fuel, and places for each day.');
+    Alert.alert('Pick a route point', 'Add a start and destination, or tap a place on the map so Trailhead can search nearby options.');
   }
 
   function replaceCampStop(stop: BuilderStop) {
@@ -2703,7 +2733,7 @@ export default function RouteBuilderScreen() {
           lat: best.lat,
           lng: best.lng,
           type: 'camp' as BuilderStopType,
-          description: `Auto-picked by Trailhead near the planned Day ${day} finish. Swap it if you want a better camp or different distance.`,
+          description: `Picked for Day ${day}. Swap it if you want a different camp or distance.`,
           land_type: best.land_type || 'camp',
           source: 'camp' as const,
           camp: best,
@@ -2718,11 +2748,11 @@ export default function RouteBuilderScreen() {
       stop: {
         id: `target_${Date.now()}_${day}_${Math.random().toString(36).slice(2, 6)}`,
         day,
-        name: `Day ${day} camp search area`,
+        name: `Day ${day} overnight area`,
         lat: target.lat,
         lng: target.lng,
         type: 'waypoint' as BuilderStopType,
-        description: 'Review this day. Move the day finish or choose a camp nearby before navigation.',
+        description: 'Review this day. Choose an overnight stop before navigation.',
         land_type: 'route',
         source: 'map' as const,
         routeShapeRole: 'outbound_anchor' as const,
@@ -2758,55 +2788,37 @@ export default function RouteBuilderScreen() {
         region_hint: routeStates.join(','),
         camp_reuse_policy: effectiveCampReusePolicy,
         max_daily_drive_hours: parsePositiveNumber(driveHoursPerDay) ?? undefined,
-        max_radius: 58,
+        max_radius: 90,
       });
-      const weakWindows = result.windows
-        .filter(win => !win.camp || !win.strong)
-        .map(win => windows.find(window => window.day === win.day))
-        .filter((win): win is typeof windows[number] => !!win);
-      const widenedByDay = new Map<number, any>();
-      if (weakWindows.length && campPreferenceMode !== 'any') {
-        setFrameworkStatus('Widening camp search for thin areas...');
-        const widened = await api.getRouteCampWindows({
-          route: spine,
-          windows: weakWindows,
-          camp_filters: [],
-          route_style: routeStyle,
-          camp_preference: 'any',
-          region_hint: routeStates.join(','),
-          camp_reuse_policy: effectiveCampReusePolicy,
-          max_daily_drive_hours: parsePositiveNumber(driveHoursPerDay) ?? undefined,
-          max_radius: 75,
-        }).catch(() => null);
-        for (const win of widened?.windows ?? []) {
-          if (win.camp) widenedByDay.set(win.day, { ...win, widened: true });
-        }
-      }
       return result.windows.map(originalWin => {
-        const win = widenedByDay.get(originalWin.day) ?? originalWin;
-        const widened = Boolean((win as any).widened);
-        if (win.camp) {
+        const win = originalWin;
+        const selectedCamp = win.selected ?? win.camp ?? win.candidates?.[0] ?? null;
+        if (selectedCamp) {
+          const needsReview = win.confidence !== 'strong' && !win.strong;
           return {
             stop: {
               id: `camp_anchor_${Date.now()}_${win.day}_${Math.random().toString(36).slice(2, 6)}`,
               day: win.day,
-              name: win.camp.name,
-              lat: win.camp.lat,
-              lng: win.camp.lng,
+              name: selectedCamp.name,
+              lat: selectedCamp.lat,
+              lng: selectedCamp.lng,
               type: 'camp' as BuilderStopType,
-              description: widened
-                ? `Auto-picked after widening the camp search for the planned ${win.label} finish. Review fit before navigation.`
-                : `Auto-picked by Trailhead for the planned ${win.label} finish. Swap it if you want a better camp or different distance.`,
-              land_type: win.camp.land_type || 'camp',
+              description: needsReview
+                ? `Review this overnight option for ${win.label}. Swap it if you want a better fit.`
+                : `Picked for ${win.label}. Swap it if you want a different camp or distance.`,
+              land_type: selectedCamp.land_type || 'camp',
               source: 'camp' as const,
-              camp: win.camp,
+              camp: {
+                ...selectedCamp,
+                source_freshness: selectedCamp.source_freshness || win.reason,
+              },
               campWindowStart: win.start,
               campWindowEnd: win.end,
               campWindowLabel: win.label,
               routeShapeRole: 'overnight' as const,
             },
-            strong: widened ? false : win.strong,
-            found: win.found,
+            strong: !needsReview,
+            found: win.found ?? win.candidates?.length ?? 1,
           };
         }
         const fallbackPoint = pointAtRouteMile(spine, windows.find(w => w.day === win.day)?.target_mi ?? 0)
@@ -2814,8 +2826,8 @@ export default function RouteBuilderScreen() {
         const target = {
           lat: win.fallback?.lat ?? fallbackPoint.lat,
           lng: win.fallback?.lng ?? fallbackPoint.lng,
-          name: win.fallback?.name ?? `${win.label} camp search area`,
-          description: win.fallback?.description ?? 'Review this day. Move the day finish or choose a camp nearby before navigation.',
+          name: win.fallback?.name ?? `${win.label} overnight area`,
+          description: win.fallback?.description ?? 'Review this day. Choose an overnight stop before navigation.',
         };
         return {
           stop: {
@@ -2840,7 +2852,7 @@ export default function RouteBuilderScreen() {
     } catch {
       const anchors = [];
       for (const day of campDays) {
-        setFrameworkStatus(`Checking camps for ${campWindowFor(day, sourceDays).label}...`);
+        setFrameworkStatus(`Finding overnight options for ${campWindowFor(day, sourceDays).label}...`);
         anchors.push(await findCampAwareAnchor(day, count, spine, totalMi));
       }
       return anchors;
@@ -2849,7 +2861,7 @@ export default function RouteBuilderScreen() {
 
   async function buildRouteFramework() {
     setBuildingFramework(true);
-    setFrameworkStatus('Building trip outline...');
+    setFrameworkStatus('Setting up your trip...');
     let base = orderedStops;
     try {
       if (endQuery.trim()) {
@@ -2880,7 +2892,7 @@ export default function RouteBuilderScreen() {
       let weakAnchors = 0;
 
       if (tripBuildMode === 'recommended') {
-        setFrameworkStatus('Checking camp windows...');
+        setFrameworkStatus('Finding overnight options...');
         const anchors = await findCampAwareAnchors(count, nextDays, spine, routeMiles);
         for (const anchor of anchors) {
           framework.push(anchor.stop);
@@ -3541,7 +3553,7 @@ export default function RouteBuilderScreen() {
                   ) : plan.needsOvernight ? (
                     <TouchableOpacity style={s.routeDayEmptyCamp} onPress={() => scanDayPlan(plan, 'camps')}>
                       <Ionicons name="add-circle-outline" size={18} color={C.orange} />
-                      <Text style={s.routeDayEmptyCampText}>{plan.frameworkTarget ? 'Choose camp near day finish' : 'Choose overnight'}</Text>
+                      <Text style={s.routeDayEmptyCampText}>Choose overnight</Text>
                     </TouchableOpacity>
                   ) : (
                     <View style={s.routeDayTravelCard}>
@@ -3925,7 +3937,7 @@ export default function RouteBuilderScreen() {
             <View style={s.wizardPane}>
             <View style={s.wizardQuestion}>
               <Text style={s.wizardTitle}>Where are you headed?</Text>
-              <Text style={s.wizardHelp}>Pick the final destination first. Trailhead will build day finishes around your trip outline, camp search, and realistic pacing.</Text>
+              <Text style={s.wizardHelp}>Pick the final destination first. Trailhead will set up the route, days, and camp search.</Text>
             </View>
             <View style={s.setupInputWrap}>
               <Text style={s.setupLabel}>DESTINATION</Text>
@@ -3973,7 +3985,7 @@ export default function RouteBuilderScreen() {
               {([
                 { id: 'one_way' as TripShapeMode, icon: 'arrow-forward-outline' as const, title: 'One way', text: 'Start and finish can be different places.' },
                 { id: 'loop' as TripShapeMode, icon: 'sync-outline' as const, title: 'Loop', text: 'Outbound and return use different route points.' },
-                { id: 'there_and_back' as TripShapeMode, icon: 'repeat-outline' as const, title: 'There and back', text: 'Return to the start and reuse camp windows by default.' },
+                { id: 'there_and_back' as TripShapeMode, icon: 'repeat-outline' as const, title: 'There and back', text: 'Return to the start and reuse overnight areas by default.' },
               ]).map(shape => {
                 const active = tripShapeMode === shape.id;
                 return (
@@ -4160,30 +4172,14 @@ export default function RouteBuilderScreen() {
 
           <View style={s.buildingHeroCopy}>
             <Text style={s.buildingEyebrow}>TRAILHEAD ROUTE BUILDER</Text>
-            <Text style={s.buildingHeadline}>Dialing in your trip overview</Text>
+            <Text style={s.buildingHeadline}>Building your trip</Text>
             <Text style={s.buildingSubtitle}>
-              {frameworkStatus || 'Tracing the route, checking camp windows, and staging the map before it opens.'}
+              {frameworkStatus || 'Checking route and overnight options...'}
             </Text>
           </View>
 
           <View style={s.buildingBottomPanel}>
             <RouteBuildStatus C={C} message={frameworkStatus} />
-            <View style={s.buildingChecklist}>
-              {[
-                'Route spine',
-                'Daily pacing',
-                'Camp windows',
-                'Trip overview',
-              ].map(label => (
-                <View key={label} style={s.buildingChecklistRow}>
-                  <Ionicons name="radio-button-on" size={10} color={C.orange} />
-                  <Text style={s.buildingChecklistText}>{label}</Text>
-                </View>
-              ))}
-            </View>
-            <Text style={s.buildingNote}>
-              Keeping this open a moment longer so camps, places, and route context are ready when the map appears.
-            </Text>
           </View>
         </View>
         <PaywallModal visible={paywallVisible} code={paywallCode} message={paywallMessage} onClose={() => setPaywallVisible(false)} />
@@ -4801,11 +4797,11 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   buildingVideoContent: {
     flex: 1,
     paddingHorizontal: 18,
-    justifyContent: 'space-between',
+    justifyContent: 'center',
+    gap: 22,
   },
   buildingVideoTop: {
-    minHeight: 44,
-    alignItems: 'flex-end',
+    alignItems: 'center',
   },
   buildingLivePill: {
     minHeight: 34,
@@ -4821,18 +4817,19 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   buildingLiveText: { color: '#fff', fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
   buildingHeroCopy: {
     gap: 10,
-    paddingRight: 18,
+    alignItems: 'center',
+    paddingHorizontal: 10,
   },
   buildingEyebrow: { color: '#f97316', fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 1.5 },
-  buildingHeadline: { color: '#fff', fontSize: 38, lineHeight: 42, fontWeight: '900' },
-  buildingSubtitle: { color: 'rgba(255,255,255,0.82)', fontSize: 15, lineHeight: 21, maxWidth: 340 },
+  buildingHeadline: { color: '#fff', fontSize: 38, lineHeight: 42, fontWeight: '900', textAlign: 'center' },
+  buildingSubtitle: { color: 'rgba(255,255,255,0.82)', fontSize: 15, lineHeight: 21, maxWidth: 340, textAlign: 'center' },
   buildingBottomPanel: {
-    gap: 14,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.18)',
     borderRadius: 20,
     backgroundColor: 'rgba(5,5,5,0.62)',
     padding: 14,
+    alignSelf: 'stretch',
   },
   buildingChecklist: {
     borderWidth: 1,

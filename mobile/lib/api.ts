@@ -689,8 +689,15 @@ export interface RouteCampWindowResult {
   end: number;
   label: string;
   camp: CampsitePin | null;
+  selected?: CampsitePin | null;
+  candidates?: CampsitePin[];
   fallback: { lat: number; lng: number; name: string; description: string } | null;
   strong: boolean;
+  confidence?: 'strong' | 'review' | 'missing' | string;
+  coverage_status?: 'ready' | 'review' | 'sparse' | string;
+  reason?: string;
+  search_radius_mi?: number;
+  search_passes?: Array<{ name: string; radius_mi: number; filters?: string[]; found: number; kept?: number; target_only?: boolean }>;
   found: number;
   cache_status?: string;
   error?: string;

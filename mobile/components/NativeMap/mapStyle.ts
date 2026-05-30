@@ -8,7 +8,7 @@
  * City labels use Protomaps "rank" (NOT "population_rank") — lower rank = bigger city.
  */
 
-export type MapMode = 'satellite' | 'topo' | 'hybrid';
+export type MapMode = 'satellite' | 'topo' | 'hybrid' | 'light' | 'city' | 'contrast' | 'desert' | 'snow' | 'dark' | 'red';
 
 const TILE_BASE = 'https://tiles.gettrailhead.app';
 const API_BASE = 'https://api.gettrailhead.app';
@@ -23,6 +23,30 @@ export const LOCAL_TILE_PORT = 57832;
 const TOPO_LAND = '#182118';
 const TOPO_LAND_EARTH = '#1b261c';
 const TOPO_WATER = '#061a2f';
+const MAP_STYLE_PALETTES: Record<Exclude<MapMode, 'satellite' | 'hybrid'>, {
+  land: string;
+  earth: string;
+  water: string;
+  park: string;
+  forest: string;
+  grass: string;
+  residential: string;
+  wetland: string;
+  minorRoad: string;
+  majorRoad: string;
+  trunkRoad: string;
+  casing: string;
+  halo: string;
+}> = {
+  topo: { land: TOPO_LAND, earth: TOPO_LAND_EARTH, water: TOPO_WATER, park: '#1a3322', forest: '#162818', grass: '#1e2818', residential: '#252830', wetland: '#1b2f21', minorRoad: '#7a7d88', majorRoad: '#b88838', trunkRoad: '#e89428', casing: '#0e1118', halo: '#13161c' },
+  light: { land: '#f6f7f2', earth: '#f0f2ea', water: '#b9d8ed', park: '#dbeed4', forest: '#d4ead0', grass: '#e4efd5', residential: '#eceff3', wetland: '#c9dfd0', minorRoad: '#9ca3af', majorRoad: '#d18a2d', trunkRoad: '#f97316', casing: '#ffffff', halo: '#ffffff' },
+  city: { land: '#eef1f4', earth: '#e6eaf0', water: '#a8cfe8', park: '#d8ead7', forest: '#cfe4d1', grass: '#dfead0', residential: '#d8dde5', wetland: '#c5d9d2', minorRoad: '#7b8494', majorRoad: '#d99028', trunkRoad: '#ea580c', casing: '#ffffff', halo: '#f8fafc' },
+  contrast: { land: '#05070b', earth: '#080c12', water: '#003b5c', park: '#12391f', forest: '#0f2f18', grass: '#26320f', residential: '#151923', wetland: '#113225', minorRoad: '#f8fafc', majorRoad: '#fbbf24', trunkRoad: '#fb923c', casing: '#000000', halo: '#020617' },
+  desert: { land: '#2a2418', earth: '#30291b', water: '#083f4c', park: '#33411f', forest: '#29351c', grass: '#3b351d', residential: '#3a3124', wetland: '#28422e', minorRoad: '#a38b67', majorRoad: '#d48b39', trunkRoad: '#f59e0b', casing: '#171108', halo: '#1f170d' },
+  snow: { land: '#e7edf2', earth: '#dde6ee', water: '#8fc0de', park: '#d5e2dd', forest: '#c9d8d2', grass: '#dce7df', residential: '#d4dce5', wetland: '#c1d8da', minorRoad: '#64748b', majorRoad: '#d08a2e', trunkRoad: '#ea580c', casing: '#f8fafc', halo: '#f8fafc' },
+  dark: { land: '#0b1020', earth: '#101827', water: '#08233d', park: '#102719', forest: '#0f2117', grass: '#1d2615', residential: '#1c2433', wetland: '#123026', minorRoad: '#818cf8', majorRoad: '#d6a143', trunkRoad: '#fbbf24', casing: '#020617', halo: '#020617' },
+  red: { land: '#12090b', earth: '#180d10', water: '#1e1b4b', park: '#251112', forest: '#211011', grass: '#2a1610', residential: '#201013', wetland: '#1f191f', minorRoad: '#fca5a5', majorRoad: '#ef4444', trunkRoad: '#f97316', casing: '#060202', halo: '#080303' },
+};
 const WETLAND_KINDS = ['wetland', 'marsh', 'swamp', 'bog', 'mud', 'saltmarsh', 'tidalflat', 'wetland_noveg'];
 export type ContourSourceMode = 'none' | 'online' | 'local';
 export type TrailSourceMode = 'none' | 'online' | 'local';
@@ -53,7 +77,8 @@ export function buildMapStyle(
     : `${TILE_BASE}/api/trails/{z}/{x}/{y}.pbf`;
   const sat = mode === 'satellite';
   const hyb = mode === 'hybrid';
-  const lwHalo = sat ? 'rgba(0,0,0,0.85)' : '#13161c';
+  const palette = MAP_STYLE_PALETTES[sat || hyb ? 'topo' : mode];
+  const lwHalo = sat ? 'rgba(0,0,0,0.85)' : palette.halo;
   const showContours = contourMode !== 'none' && !sat;
   const showTrailPack = trailMode === 'local';
   const trailVisualClass = [
@@ -152,7 +177,7 @@ export function buildMapStyle(
   const layers: object[] = [
     // Background must read as land, not water. Some vector tiles are sparse or
     // resolve late, so a navy background makes random land areas look flooded.
-    { id: 'bg', type: 'background', paint: { 'background-color': sat ? '#000' : TOPO_LAND } },
+    { id: 'bg', type: 'background', paint: { 'background-color': sat ? '#000' : palette.land } },
   ];
 
   if (sources['sat']) {
@@ -166,22 +191,22 @@ export function buildMapStyle(
     // Earth fill - lighter than background so continents always read at any zoom
     { id: 'earth', type: 'fill', source: pmId, 'source-layer': 'earth',
       filter: ['==', ['get', 'kind'], 'earth'],
-      paint: { 'fill-color': TOPO_LAND_EARTH, 'fill-opacity': fillOp } },
+      paint: { 'fill-color': palette.earth, 'fill-opacity': fillOp } },
 
     // Landuse
     { id: 'lu-park', type: 'fill', source: pmId, 'source-layer': 'landuse',
       filter: ['in', ['get', 'kind'], ['literal', ['national_park', 'park', 'nature_reserve', 'protected_area']]],
-      paint: { 'fill-color': '#1a3322', 'fill-opacity': sat ? 0 : hyb ? 0.4 : 0.9 } },
+      paint: { 'fill-color': palette.park, 'fill-opacity': sat ? 0 : hyb ? 0.4 : 0.9 } },
     { id: 'lu-forest', type: 'fill', source: pmId, 'source-layer': 'landuse',
       filter: ['in', ['get', 'kind'], ['literal', ['forest', 'wood']]],
-      paint: { 'fill-color': '#162818', 'fill-opacity': sat ? 0 : hyb ? 0.35 : 0.85 } },
+      paint: { 'fill-color': palette.forest, 'fill-opacity': sat ? 0 : hyb ? 0.35 : 0.85 } },
     { id: 'lu-grass', type: 'fill', source: pmId, 'source-layer': 'landuse',
       filter: ['in', ['get', 'kind'], ['literal', ['grassland', 'meadow']]],
-      paint: { 'fill-color': '#1e2818', 'fill-opacity': sat ? 0 : hyb ? 0.25 : 0.6 } },
+      paint: { 'fill-color': palette.grass, 'fill-opacity': sat ? 0 : hyb ? 0.25 : 0.6 } },
     { id: 'lu-residential', type: 'fill', source: pmId, 'source-layer': 'landuse',
       filter: ['in', ['get', 'kind'], ['literal', ['residential', 'urban_area']]],
       minzoom: 9,
-      paint: { 'fill-color': '#252830', 'fill-opacity': sat ? 0 : 0.5 } },
+      paint: { 'fill-color': palette.residential, 'fill-opacity': sat ? 0 : 0.5 } },
 
     // Some high-zoom Protomaps water tiles include wetlands/marshes. They are
     // land on satellite, so draw them as marsh instead of solid lake water.
@@ -190,7 +215,7 @@ export function buildMapStyle(
         ['==', ['geometry-type'], 'Polygon'],
         ['in', ['coalesce', ['get', 'kind'], ''], ['literal', WETLAND_KINDS]],
       ],
-      paint: { 'fill-color': '#1b2f21', 'fill-opacity': sat ? 0 : hyb ? 0.28 : 0.72 } },
+      paint: { 'fill-color': palette.wetland, 'fill-opacity': sat ? 0 : hyb ? 0.28 : 0.72 } },
 
     // Water - clearly distinguishable deep blue even at z4. Exclude marsh-like
     // polygons so trail zoom does not randomly make land look flooded.
@@ -199,11 +224,11 @@ export function buildMapStyle(
         ['==', ['geometry-type'], 'Polygon'],
         ['!', ['in', ['coalesce', ['get', 'kind'], 'water'], ['literal', WETLAND_KINDS]]],
       ],
-      paint: { 'fill-color': sat ? 'rgba(12,30,53,0)' : TOPO_WATER, 'fill-opacity': hyb ? 0.5 : 1 } },
+      paint: { 'fill-color': sat ? 'rgba(12,30,53,0)' : palette.water, 'fill-opacity': hyb ? 0.5 : 1 } },
     { id: 'water-river', type: 'line', source: pmId, 'source-layer': 'water',
       filter: ['in', ['get', 'kind'], ['literal', ['river', 'stream', 'canal']]],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: { 'line-color': TOPO_WATER, 'line-width': ['interpolate', ['linear'], ['zoom'], 5, 0.5, 10, 1.5, 15, 3], 'line-opacity': roadOp } },
+      paint: { 'line-color': palette.water, 'line-width': ['interpolate', ['linear'], ['zoom'], 5, 0.5, 10, 1.5, 15, 3], 'line-opacity': roadOp } },
   );
 
   if (showContours) {
@@ -448,7 +473,7 @@ export function buildMapStyle(
     { id: 'road-minor', type: 'line', source: pmId, 'source-layer': 'roads',
       filter: ['==', ['get', 'kind'], 'minor_road'], minzoom: 9,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: { 'line-color': sat ? '#e0e0e0' : '#7a7d88',
+      paint: { 'line-color': sat ? '#e0e0e0' : palette.minorRoad,
         'line-width': ['interpolate', ['linear'], ['zoom'], 9, 0.7, 14, 2.8, 17, 8],
         'line-opacity': roadOp } },
 
@@ -456,13 +481,13 @@ export function buildMapStyle(
     { id: 'road-major-case', type: 'line', source: pmId, 'source-layer': 'roads',
       filter: ['in', ['get', 'kind'], ['literal', ['major_road', 'medium_road']]],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: { 'line-color': '#0e1118',
+      paint: { 'line-color': sat ? '#0e1118' : palette.casing,
         'line-width': ['interpolate', ['linear'], ['zoom'], 4, 1.5, 8, 4, 12, 7, 16, 14],
         'line-opacity': roadOp } },
     { id: 'road-major', type: 'line', source: pmId, 'source-layer': 'roads',
       filter: ['in', ['get', 'kind'], ['literal', ['major_road', 'medium_road']]],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: { 'line-color': sat ? '#fde68a' : '#b88838',
+      paint: { 'line-color': sat ? '#fde68a' : palette.majorRoad,
         'line-width': ['interpolate', ['linear'], ['zoom'], 4, 1, 8, 3, 12, 5.5, 16, 11],
         'line-opacity': roadOp } },
 
@@ -470,13 +495,13 @@ export function buildMapStyle(
     { id: 'road-trunk-case', type: 'line', source: pmId, 'source-layer': 'roads',
       filter: ['==', ['get', 'kind'], 'highway'],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: { 'line-color': '#0e1118',
+      paint: { 'line-color': sat ? '#0e1118' : palette.casing,
         'line-width': ['interpolate', ['linear'], ['zoom'], 3, 3, 6, 5, 10, 8, 15, 16],
         'line-opacity': roadOp } },
     { id: 'road-trunk', type: 'line', source: pmId, 'source-layer': 'roads',
       filter: ['==', ['get', 'kind'], 'highway'],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: { 'line-color': sat ? '#fbbf24' : '#e89428',
+      paint: { 'line-color': sat ? '#fbbf24' : palette.trunkRoad,
         'line-width': ['interpolate', ['linear'], ['zoom'], 3, 2, 6, 3.5, 10, 6, 15, 12],
         'line-opacity': roadOp } },
 

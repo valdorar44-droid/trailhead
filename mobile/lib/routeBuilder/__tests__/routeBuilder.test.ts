@@ -4,6 +4,7 @@ import {
   computeDaySegmentsFromRouteGeometry,
   computeTripReadiness,
   filterDurableNavigationStops,
+  rebalanceAfterCampSelection,
   ROUTE_BUILDER_AUDIT_MATRIX,
 } from '@/lib/routeBuilder';
 
@@ -25,7 +26,7 @@ assertRouteBuilderContract(thereAndBack.length === 3 && thereAndBack[2].role ===
 
 const durableStops = filterDurableNavigationStops([
   { day: 1, name: 'Moab', lat: moab.lat, lng: moab.lng, type: 'start', routeShapeRole: 'start' },
-  { day: 1, name: 'Day 1 camp search area', lat: 38, lng: -110, type: 'waypoint', source: 'map', routeShapeRole: 'outbound_anchor' },
+  { day: 1, name: 'Day 1 overnight area', lat: 38, lng: -110, type: 'waypoint', source: 'map', routeShapeRole: 'outbound_anchor' },
   { day: 1, name: 'Fuel', lat: 38.2, lng: -110.1, type: 'fuel' },
   { day: 1, name: 'Viewpoint', lat: 38.3, lng: -110.2, type: 'waypoint', routePointType: 'side_stop' },
   { day: 2, name: 'Camp', lat: 37.9, lng: -111, type: 'camp' },
@@ -86,7 +87,7 @@ const session = buildRouteBuilderSession({
   },
   stops: [
     { day: 1, name: 'Moab', lat: moab.lat, lng: moab.lng, type: 'start', routeShapeRole: 'start' },
-    { day: 1, name: 'Day 1 camp search area', lat: 38, lng: -110, type: 'waypoint', source: 'map', routeShapeRole: 'outbound_anchor' },
+    { day: 1, name: 'Day 1 overnight area', lat: 38, lng: -110, type: 'waypoint', source: 'map', routeShapeRole: 'outbound_anchor' },
     { day: 2, name: 'Big Sur', lat: bigSur.lat, lng: bigSur.lng, type: 'waypoint', routeShapeRole: 'destination' },
   ],
   geometry: {
@@ -102,6 +103,21 @@ const session = buildRouteBuilderSession({
 assertRouteBuilderContract(session.temporaryAnchors.length === 1, 'session tracks temporary anchors');
 assertRouteBuilderContract(session.issues.some(issue => issue.code === 'provider_route_low_confidence'), 'session flags fallback routing');
 assertRouteBuilderContract(!session.navigationReady, 'temporary anchor blocks navigation readiness');
+
+const rebalanced = rebalanceAfterCampSelection({
+  selectedDay: 1,
+  selectedCamp: { day: 1, name: 'Selected Camp', lat: 38, lng: -110, type: 'camp' },
+  finalStop: { day: 4, name: 'Big Sur', lat: bigSur.lat, lng: bigSur.lng, type: 'waypoint' },
+  stops: [
+    { day: 1, name: 'Moab', lat: moab.lat, lng: moab.lng, type: 'start', routeShapeRole: 'start' },
+    { day: 1, name: 'Selected Camp', lat: 38, lng: -110, type: 'camp' },
+    { day: 2, name: 'Day 2 overnight area', lat: 37, lng: -112, type: 'waypoint', source: 'map', routeShapeRole: 'outbound_anchor' },
+    { day: 3, name: 'Day 3 overnight area', lat: 36.5, lng: -118, type: 'waypoint', source: 'map', routeShapeRole: 'outbound_anchor' },
+    { day: 4, name: 'Big Sur', lat: bigSur.lat, lng: bigSur.lng, type: 'waypoint', routeShapeRole: 'destination' },
+  ],
+});
+const updatedDayTwo = rebalanced.find(stop => stop.day === 2 && /overnight area/i.test(stop.name));
+assertRouteBuilderContract(!!updatedDayTwo && updatedDayTwo.lat !== 37 && /Updated after selecting/i.test((updatedDayTwo as { description?: string }).description ?? ''), 'selected camp rebalances downstream targets');
 
 assertRouteBuilderContract(ROUTE_BUILDER_AUDIT_MATRIX.some(item => /Moab to Big Sur/.test(item) && /there and back/.test(item)), 'Moab to Big Sur audit coverage');
 

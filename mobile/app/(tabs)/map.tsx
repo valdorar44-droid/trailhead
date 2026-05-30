@@ -170,7 +170,7 @@ type TripPlaceContext = {
   route_segment_index?: number;
   source?: string;
 };
-type MapLayer = 'satellite' | 'topo' | 'hybrid';
+type MapLayer = 'satellite' | 'topo' | 'hybrid' | 'light' | 'city' | 'contrast' | 'desert' | 'snow' | 'dark' | 'red';
 type WaterCorridorPickMode = 'start' | 'end' | null;
 type WaterCorridorPoint = { lat: number; lng: number; name: string };
 type SafeWaterHubTab = 'route' | 'spots' | 'catch' | 'conditions' | 'offline';
@@ -2017,7 +2017,18 @@ function validIds(values: unknown, allowed: readonly string[]) {
 }
 
 function validMapLayer(value: unknown): MapLayer | null {
-  return value === 'satellite' || value === 'topo' || value === 'hybrid' ? value : null;
+  return value === 'satellite'
+    || value === 'topo'
+    || value === 'hybrid'
+    || value === 'light'
+    || value === 'city'
+    || value === 'contrast'
+    || value === 'desert'
+    || value === 'snow'
+    || value === 'dark'
+    || value === 'red'
+    ? value
+    : null;
 }
 
 type PinField = {
@@ -2507,6 +2518,13 @@ const MAP_MODES: Record<string, string> = {
   satellite: 'satellite',
   topo:      'topo',
   hybrid:    'hybrid',
+  light:     'light',
+  city:      'city',
+  contrast:  'contrast',
+  desert:    'desert',
+  snow:      'snow',
+  dark:      'dark',
+  red:       'red',
 };
 
 const buildMapHtml = (
@@ -2687,9 +2705,20 @@ const buildMapHtml = (
     var roadOpacity=sat?0.0:1.0;
     var labelOpacity=sat?0.0:1.0;
     var fillOpacity=sat?0.0:(hyb?0.40:1.0);
-    var lwHalo=sat?'rgba(0,0,0,0.85)':'#1c1f26';
+    var palettes={
+      topo:['#1c1f26','#272a30','#1a2940','#2a3f2c','#243325','#2c3327','#2b2e34','#6e7079','#a8896a','#d8a23a','#1c1f26'],
+      light:['#f6f7f2','#f0f2ea','#b9d8ed','#dbeed4','#d4ead0','#e4efd5','#eceff3','#9ca3af','#d18a2d','#f97316','#ffffff'],
+      city:['#eef1f4','#e6eaf0','#a8cfe8','#d8ead7','#cfe4d1','#dfead0','#d8dde5','#7b8494','#d99028','#ea580c','#ffffff'],
+      contrast:['#05070b','#080c12','#003b5c','#12391f','#0f2f18','#26320f','#151923','#f8fafc','#fbbf24','#fb923c','#000000'],
+      desert:['#2a2418','#30291b','#083f4c','#33411f','#29351c','#3b351d','#3a3124','#a38b67','#d48b39','#f59e0b','#171108'],
+      snow:['#e7edf2','#dde6ee','#8fc0de','#d5e2dd','#c9d8d2','#dce7df','#d4dce5','#64748b','#d08a2e','#ea580c','#f8fafc'],
+      dark:['#0b1020','#101827','#08233d','#102719','#0f2117','#1d2615','#1c2433','#818cf8','#d6a143','#fbbf24','#020617'],
+      red:['#12090b','#180d10','#1e1b4b','#251112','#211011','#2a1610','#201013','#fca5a5','#ef4444','#f97316','#060202']
+    };
+    var pal=palettes[(sat||hyb)?'topo':mode]||palettes.topo;
+    var lwHalo=sat?'rgba(0,0,0,0.85)':pal[10];
     var layers=[
-      {id:'bg',type:'background',paint:{'background-color':sat?'#000':'#1c1f26'}},
+      {id:'bg',type:'background',paint:{'background-color':sat?'#000':pal[0]}},
     ];
     if(sources.sat){
       layers.push({id:'satellite',type:'raster',source:'sat',paint:{'raster-opacity':1.0,'raster-fade-duration':200}});
@@ -2698,34 +2727,34 @@ const buildMapHtml = (
       // ── Earth + landcover (low-zoom continents, then refined inland) ─────────
       {id:'earth',type:'fill',source:'pm','source-layer':'earth',
         filter:['==',['get','kind'],'earth'],
-        paint:{'fill-color':'#272a30','fill-opacity':fillOpacity}},
+        paint:{'fill-color':pal[1],'fill-opacity':fillOpacity}},
       {id:'earth-cliff',type:'fill',source:'pm','source-layer':'earth',
         filter:['==',['get','kind'],'cliff'],
         paint:{'fill-color':'#3b3f48','fill-opacity':sat?0.0:0.7}},
       // ── Landuse (parks/forests/grass) ────────────────────────────────────────
       {id:'lu-park',type:'fill',source:'pm','source-layer':'landuse',
         filter:['in',['get','kind'],['literal',['national_park','park','nature_reserve','protected_area']]],
-        paint:{'fill-color':'#2a3f2c','fill-opacity':sat?0.0:(hyb?0.35:0.92)}},
+        paint:{'fill-color':pal[3],'fill-opacity':sat?0.0:(hyb?0.35:0.92)}},
       {id:'lu-forest',type:'fill',source:'pm','source-layer':'landuse',
         filter:['in',['get','kind'],['literal',['forest','wood']]],
-        paint:{'fill-color':'#243325','fill-opacity':sat?0.0:(hyb?0.30:0.8)}},
+        paint:{'fill-color':pal[4],'fill-opacity':sat?0.0:(hyb?0.30:0.8)}},
       {id:'lu-grass',type:'fill',source:'pm','source-layer':'landuse',
         filter:['in',['get','kind'],['literal',['grassland','meadow']]],
-        paint:{'fill-color':'#2c3327','fill-opacity':sat?0.0:(hyb?0.25:0.55)}},
+        paint:{'fill-color':pal[5],'fill-opacity':sat?0.0:(hyb?0.25:0.55)}},
       {id:'lu-farmland',type:'fill',source:'pm','source-layer':'landuse',
         filter:['==',['get','kind'],'farmland'],
         paint:{'fill-color':'#2e2f29','fill-opacity':sat?0.0:(hyb?0.2:0.45)}},
       {id:'lu-residential',type:'fill',source:'pm','source-layer':'landuse',
         filter:['in',['get','kind'],['literal',['residential','urban_area']]],
         minzoom:9,
-        paint:{'fill-color':'#2b2e34','fill-opacity':sat?0.0:0.5}},
+        paint:{'fill-color':pal[6],'fill-opacity':sat?0.0:0.5}},
       // ── Water polygons + rivers ──────────────────────────────────────────────
       {id:'water-poly',type:'fill',source:'pm','source-layer':'water',
-        paint:{'fill-color':sat?'rgba(12,30,53,0.0)':'#1a2940','fill-opacity':hyb?0.45:1.0}},
+        paint:{'fill-color':sat?'rgba(12,30,53,0.0)':pal[2],'fill-opacity':hyb?0.45:1.0}},
       {id:'water-river',type:'line',source:'pm','source-layer':'water',
         filter:['in',['get','kind'],['literal',['river','stream','canal']]],
         layout:{'line-cap':'round','line-join':'round'},
-        paint:{'line-color':'#1a2940','line-width':['interpolate',['linear'],['zoom'],8,0.5,12,1.6,15,3],'line-opacity':roadOpacity}},
+        paint:{'line-color':pal[2],'line-width':['interpolate',['linear'],['zoom'],8,0.5,12,1.6,15,3],'line-opacity':roadOpacity}},
       // ── Park boundary line — outlines national parks/wilderness even when fill is dim ─
       {id:'lu-park-line',type:'line',source:'pm','source-layer':'landuse',
         filter:['in',['get','kind'],['literal',['national_park','nature_reserve','protected_area']]],
@@ -2747,23 +2776,23 @@ const buildMapHtml = (
       {id:'road-minor',type:'line',source:'pm','source-layer':'roads',
         filter:['==',['get','kind'],'minor_road'],minzoom:9,
         layout:{'line-cap':'round','line-join':'round'},
-        paint:{'line-color':sat?'#fff':'#6e7079','line-width':['interpolate',['linear'],['zoom'],11,0.4,14,1.8,17,6],'line-opacity':roadOpacity}},
+        paint:{'line-color':sat?'#fff':pal[7],'line-width':['interpolate',['linear'],['zoom'],11,0.4,14,1.8,17,6],'line-opacity':roadOpacity}},
       {id:'road-major-case',type:'line',source:'pm','source-layer':'roads',
         filter:['in',['get','kind'],['literal',['major_road','medium_road']]],
         layout:{'line-cap':'round','line-join':'round'},
-        paint:{'line-color':sat?'#0008':'#1c1f26','line-width':['interpolate',['linear'],['zoom'],7,0.7,12,3.6,16,10],'line-opacity':roadOpacity}},
+        paint:{'line-color':sat?'#0008':pal[10],'line-width':['interpolate',['linear'],['zoom'],7,0.7,12,3.6,16,10],'line-opacity':roadOpacity}},
       {id:'road-major',type:'line',source:'pm','source-layer':'roads',
         filter:['in',['get','kind'],['literal',['major_road','medium_road']]],
         layout:{'line-cap':'round','line-join':'round'},
-        paint:{'line-color':sat?'#fde68a':'#a8896a','line-width':['interpolate',['linear'],['zoom'],7,0.6,12,2.6,16,8],'line-opacity':roadOpacity}},
+        paint:{'line-color':sat?'#fde68a':pal[8],'line-width':['interpolate',['linear'],['zoom'],7,0.6,12,2.6,16,8],'line-opacity':roadOpacity}},
       {id:'road-trunk-case',type:'line',source:'pm','source-layer':'roads',
         filter:['==',['get','kind'],'highway'],
         layout:{'line-cap':'round','line-join':'round'},
-        paint:{'line-color':sat?'#0008':'#1c1f26','line-width':['interpolate',['linear'],['zoom'],5,2.4,10,6,15,12],'line-opacity':roadOpacity}},
+        paint:{'line-color':sat?'#0008':pal[10],'line-width':['interpolate',['linear'],['zoom'],5,2.4,10,6,15,12],'line-opacity':roadOpacity}},
       {id:'road-trunk',type:'line',source:'pm','source-layer':'roads',
         filter:['==',['get','kind'],'highway'],
         layout:{'line-cap':'round','line-join':'round'},
-        paint:{'line-color':sat?'#fbbf24':'#d8a23a','line-width':['interpolate',['linear'],['zoom'],5,1.4,10,3.6,15,8],'line-opacity':roadOpacity}},
+        paint:{'line-color':sat?'#fbbf24':pal[9],'line-width':['interpolate',['linear'],['zoom'],5,1.4,10,3.6,15,8],'line-opacity':roadOpacity}},
       // ── Boundaries ───────────────────────────────────────────────────────────
       {id:'boundary-region',type:'line',source:'pm','source-layer':'boundaries',
         filter:['==',['get','kind'],'region'],
@@ -3901,6 +3930,7 @@ function MapScreen() {
 
   // Dynamic map layers
   const [showLayerSheet, setShowLayerSheet] = useState(false);
+  const [showMapStyleSheet, setShowMapStyleSheet] = useState(false);
   const [layerTrails, setLayerTrails] = useState(true);
   const [layerFire,    setLayerFire]    = useState(false);
   const [layerAva,     setLayerAva]     = useState(false);
@@ -4175,6 +4205,7 @@ function MapScreen() {
       || showSearch
       || showFilterSheet
       || showLayerSheet
+      || showMapStyleSheet
       || (showSearch && !!searchRouteCard)
       || !!selectedCamp
       || !!selectedPlace
@@ -4191,7 +4222,7 @@ function MapScreen() {
     );
     return () => setTabBarHidden(false);
   }, [
-    navMode, waterFollowActive, safeWaterSheetOwnsPage, showMapDrawer, showSearch, showFilterSheet, showLayerSheet, searchRouteCard, selectedCamp, selectedPlace, selectedTrail,
+    navMode, waterFollowActive, safeWaterSheetOwnsPage, showMapDrawer, showSearch, showFilterSheet, showLayerSheet, showMapStyleSheet, searchRouteCard, selectedCamp, selectedPlace, selectedTrail,
     selectedCommunityPin, tappedPoi, tappedGas, tappedTileSpot, tappedTrail,
     tappedWp, pendingPin, trailPinCaptureMode, trailRouteBuilderOpen, setTabBarHidden,
   ]);
@@ -6098,13 +6129,25 @@ function MapScreen() {
   async function openCampPicker(day?: number) {
     if (!activeTrip) return;
     const nextDay = day ?? selectedDay ?? activeTrip.plan.daily_itinerary[0]?.day ?? 1;
-    const { endpoint, previous } = tripDayCampContext(nextDay);
+    let { endpoint, previous } = tripDayCampContext(nextDay);
     setCampPickerDay(nextDay);
     setCampPickerVisible(true);
     setCampPickerError('');
     setCampCandidates([]);
     if (!endpoint) {
-      setCampPickerError('This day needs a mapped end point before camps can be searched nearby.');
+      const fallback = tripDayNearbyCenters(nextDay)[0] ?? previous;
+      if (fallback?.lat && fallback?.lng) {
+        endpoint = {
+          day: nextDay,
+          name: `Day ${nextDay} area`,
+          lat: fallback.lat,
+          lng: fallback.lng,
+          type: 'waypoint',
+        } as Waypoint;
+      }
+    }
+    if (!endpoint) {
+      setCampPickerError('Pick a spot on the map or add a stop for this day, then search overnight options.');
       return;
     }
     setCampPickerLoading(true);
@@ -6187,7 +6230,7 @@ function MapScreen() {
       notes: [
         camp.cost ? `Cost: ${camp.cost}` : null,
         camp.reservable ? 'Reservable' : 'First-come or dispersed',
-        camp.route_distance_mi != null ? `${camp.route_distance_mi.toFixed(1)} mi from day route anchor` : null,
+        camp.route_distance_mi != null ? `${camp.route_distance_mi.toFixed(1)} mi from this day` : null,
       ].filter(Boolean).join(' · '),
       lat: camp.lat,
       lng: camp.lng,
@@ -6346,6 +6389,10 @@ function MapScreen() {
 
   function switchLayer() {
     const next: MapLayer = mapLayer === 'satellite' ? 'topo' : mapLayer === 'topo' ? 'hybrid' : 'satellite';
+    applyMapLayer(next);
+  }
+
+  function applyMapLayer(next: MapLayer) {
     setMapLayerState(next);
     webRef.current?.postMessage(JSON.stringify({
       type: 'set_style',
@@ -9597,7 +9644,30 @@ function MapScreen() {
     Alert.alert('Get Directions', name.split(',')[0], choices);
   }
 
-  const layerLabel: Record<MapLayer, string> = { satellite: 'SAT', topo: 'TOPO', hybrid: 'HYB' };
+  const layerLabel: Record<MapLayer, string> = {
+    satellite: 'Satellite',
+    topo: 'Topo',
+    hybrid: 'Hybrid',
+    light: 'Light',
+    city: 'City',
+    contrast: 'Contrast',
+    desert: 'Desert',
+    snow: 'Snow',
+    dark: 'Dark',
+    red: 'Red',
+  };
+  const mapStyleOptions: Array<{ id: MapLayer; title: string; sub: string; colors: [string, string, string] }> = [
+    { id: 'topo', title: 'Trailhead Topo', sub: 'Trails, terrain, public land', colors: ['#182118', '#25633a', '#061a2f'] },
+    { id: 'satellite', title: 'Satellite', sub: 'Imagery-first map', colors: ['#111827', '#4b5563', '#1f2937'] },
+    { id: 'hybrid', title: 'Hybrid', sub: 'Imagery with labels', colors: ['#101827', '#6b7280', '#f59e0b'] },
+    { id: 'light', title: 'Light', sub: 'Bright road view', colors: ['#f8fafc', '#dbeafe', '#2563eb'] },
+    { id: 'city', title: 'City', sub: 'Clear streets and places', colors: ['#f3f4f6', '#cbd5e1', '#0284c7'] },
+    { id: 'contrast', title: 'High Contrast', sub: 'Maximum line clarity', colors: ['#020617', '#f8fafc', '#f97316'] },
+    { id: 'desert', title: 'Desert', sub: 'Dry terrain and washes', colors: ['#2a2418', '#9a6a32', '#0e7490'] },
+    { id: 'snow', title: 'Snow', sub: 'Winter terrain view', colors: ['#e5edf4', '#94a3b8', '#2563eb'] },
+    { id: 'dark', title: 'Dark Road', sub: 'Low-glare roads', colors: ['#0b1020', '#334155', '#fbbf24'] },
+    { id: 'red', title: 'Red / Night', sub: 'Night-friendly contrast', colors: ['#12090b', '#7f1d1d', '#ef4444'] },
+  ];
   const placeFilterChanged = activePlaceFilters.length !== DEFAULT_PLACE_FILTERS.length ||
     DEFAULT_PLACE_FILTERS.some(id => !activePlaceFilters.includes(id));
   const waterFilterBroadActive = activePlaceFilters.includes('water');
@@ -10152,7 +10222,6 @@ function MapScreen() {
             <View style={s.mapDrawerHeader}>
               <View>
                 <Text style={s.mapDrawerTitle}>Map tools</Text>
-                <Text style={s.mapDrawerSub}>Scout, route, water, layers</Text>
               </View>
               <TouchableOpacity style={s.mapDrawerClose} onPress={() => setShowMapDrawer(false)}>
                 <Ionicons name="close" size={17} color={OVR.text2} />
@@ -10166,7 +10235,7 @@ function MapScreen() {
                 { label: 'Filters', sub: 'Camps, places, community pins', icon: 'filter-outline', tone: C.orange, action: () => { setShowMapDrawer(false); setShowFilterSheet(true); } },
                 { label: 'Offline maps', sub: 'Download and readiness', icon: 'cloud-download-outline', tone: '#a3e635', action: () => { setShowMapDrawer(false); setShowOfflineModal(true); } },
                 { label: 'Trail builder', sub: 'Pin and snap a trail route', icon: 'git-branch-outline', tone: '#22c55e', action: () => { setShowMapDrawer(false); trailPinCaptureMode ? clearTrailPinCapture() : beginTrailPinCapture(); } },
-                { label: `Map style: ${layerLabel[mapLayer]}`, sub: 'Cycle topo, satellite, hybrid', icon: 'map-outline', tone: '#38bdf8', action: () => { switchLayer(); } },
+                { label: `Map style: ${layerLabel[mapLayer]}`, sub: 'Choose a base map', icon: 'map-outline', tone: '#38bdf8', action: () => { setShowMapDrawer(false); setShowMapStyleSheet(true); } },
                 { label: nearbyLoading ? 'Loading guide' : 'Audio guide', sub: nearbyNarration ? 'Replay nearby context' : 'What is around me', icon: 'headset-outline', tone: C.orange, action: () => { handleNearbyAudio(); } },
               ].map(item => (
                 <TouchableOpacity key={item.label} style={s.mapDrawerRow} onPress={item.action} activeOpacity={0.84}>
@@ -10180,20 +10249,6 @@ function MapScreen() {
                   <Ionicons name="chevron-forward" size={15} color={OVR.text3} />
                 </TouchableOpacity>
               ))}
-            </View>
-            <View style={s.mapDrawerPrimary}>
-              <TouchableOpacity style={[s.mapDrawerFeature, layerNautical && s.mapDrawerFeatureActive]} onPress={toggleSafeWaterMode}>
-                <View style={[s.mapDrawerFeatureIcon, { backgroundColor: '#0891b222', borderColor: '#67e8f966' }]}>
-                  <Ionicons name="boat-outline" size={20} color="#67e8f9" />
-                </View>
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={s.mapDrawerFeatureTitle}>Safe Water</Text>
-                  <Text style={s.mapDrawerFeatureSub} numberOfLines={2}>
-                    {layerNautical ? 'On. Tap to turn off.' : 'Routes, fishing spots, catches, and water conditions.'}
-                  </Text>
-                </View>
-                <Ionicons name={layerNautical ? 'close-circle-outline' : 'chevron-forward'} size={17} color={OVR.text3} />
-              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -13043,6 +13098,50 @@ function MapScreen() {
         webDownloadLabel={downloadLabel}
       />
 
+      <Modal visible={showMapStyleSheet && !navMode} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setShowMapStyleSheet(false)}>
+        <TouchableOpacity style={s.mapStyleOverlay} activeOpacity={1} onPress={() => setShowMapStyleSheet(false)}>
+          <TouchableOpacity activeOpacity={1} style={[s.mapStyleSheet, { paddingBottom: bottomInset + 16 }]} onPress={() => {}}>
+            <View style={s.mapStyleHeader}>
+              <View>
+                <Text style={s.mapStyleTitle}>Map style</Text>
+                <Text style={s.mapStyleSub}>Choose how the map looks.</Text>
+              </View>
+              <TouchableOpacity style={s.mapDrawerClose} onPress={() => setShowMapStyleSheet(false)}>
+                <Ionicons name="close" size={17} color={OVR.text2} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.mapStyleGrid}>
+              {mapStyleOptions.map(option => {
+                const active = option.id === mapLayer;
+                return (
+                  <TouchableOpacity
+                    key={option.id}
+                    style={[s.mapStyleCard, active && s.mapStyleCardActive]}
+                    activeOpacity={0.86}
+                    onPress={() => {
+                      applyMapLayer(option.id);
+                      setShowMapStyleSheet(false);
+                    }}
+                  >
+                    <View style={[s.mapStylePreview, { backgroundColor: option.colors[0] }]}>
+                      <View style={[s.mapStylePreviewWater, { backgroundColor: option.colors[2] }]} />
+                      <View style={[s.mapStylePreviewLand, { backgroundColor: option.colors[1] }]} />
+                      <View style={s.mapStylePreviewRoad} />
+                      <View style={[s.mapStylePreviewRoad, s.mapStylePreviewRoadAlt]} />
+                    </View>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={s.mapStyleCardTitle} numberOfLines={1}>{option.title}</Text>
+                      <Text style={s.mapStyleCardSub} numberOfLines={1}>{option.sub}</Text>
+                    </View>
+                    {active && <Ionicons name="checkmark-circle" size={18} color={C.green} />}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
       {/* ── Route Brief Modal ── */}
       <Modal visible={showRouteBrief} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowRouteBrief(false)}>
         <View style={s.detailModal}>
@@ -14043,7 +14142,7 @@ function MapScreen() {
                             )}
                             <View style={s.tripTimelineCampBody}>
                               <Text style={s.tripTimelineCampLabel}>{day.day === tripOverviewDays.length ? 'FINISH / OVERNIGHT' : 'OVERNIGHT CAMP'}</Text>
-                              <Text style={s.tripTimelineCampName} numberOfLines={2}>{pin?.name ?? campWp?.name ?? finish?.name ?? 'Choose camp near day finish'}</Text>
+                              <Text style={s.tripTimelineCampName} numberOfLines={2}>{pin?.name ?? campWp?.name ?? finish?.name ?? 'Choose overnight'}</Text>
                               <Text style={s.tripTimelineCampMeta} numberOfLines={2}>
                                 {pin ? [routeFitLabel(pin), pin.land_type || 'Camp', pin.cost || ''].filter(Boolean).join(' · ') : 'Choose a verified overnight before starting this day'}
                               </Text>
@@ -15144,6 +15243,90 @@ const makeStyles = (C: ColorPalette) => {
   },
   mapDrawerRowTitle: { color: OVR.text, fontSize: 12, fontWeight: '900' },
   mapDrawerRowSub: { color: OVR.text3, fontSize: 9.5, fontFamily: mono, marginTop: 2 },
+  mapStyleOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.48)',
+  },
+  mapStyleSheet: {
+    maxHeight: '78%' as any,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    backgroundColor: 'rgba(8,11,15,0.98)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    paddingTop: 16,
+    paddingHorizontal: 14,
+  },
+  mapStyleHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingBottom: 12,
+  },
+  mapStyleTitle: { color: OVR.text, fontSize: 18, fontWeight: '900' },
+  mapStyleSub: { color: OVR.text3, fontSize: 11, marginTop: 3 },
+  mapStyleGrid: { gap: 8, paddingBottom: 8 },
+  mapStyleCard: {
+    minHeight: 68,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.09)',
+    backgroundColor: 'rgba(255,255,255,0.045)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 10,
+  },
+  mapStyleCardActive: {
+    borderColor: C.green + '80',
+    backgroundColor: C.green + '12',
+  },
+  mapStylePreview: {
+    width: 58,
+    height: 44,
+    borderRadius: 8,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  mapStylePreviewWater: {
+    position: 'absolute',
+    right: -8,
+    top: -10,
+    width: 34,
+    height: 64,
+    borderRadius: 18,
+    transform: [{ rotate: '16deg' }],
+  },
+  mapStylePreviewLand: {
+    position: 'absolute',
+    left: 5,
+    bottom: 5,
+    width: 25,
+    height: 17,
+    borderRadius: 9,
+    opacity: 0.82,
+  },
+  mapStylePreviewRoad: {
+    position: 'absolute',
+    left: -5,
+    top: 17,
+    width: 70,
+    height: 3,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.82)',
+    transform: [{ rotate: '-17deg' }],
+  },
+  mapStylePreviewRoadAlt: {
+    top: 28,
+    height: 2,
+    opacity: 0.7,
+    transform: [{ rotate: '13deg' }],
+  },
+  mapStyleCardTitle: { color: OVR.text, fontSize: 12.5, fontWeight: '900' },
+  mapStyleCardSub: { color: OVR.text3, fontSize: 10, marginTop: 2 },
   discoveryModeWrap: {
     position: 'absolute',
     left: 14,

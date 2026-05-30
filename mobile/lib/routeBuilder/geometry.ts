@@ -219,7 +219,7 @@ export function computeDaySegmentsFromRouteGeometry(input: {
 export function isTemporaryRouteAnchor(stop: RouteBuilderStopLike) {
   if (stop.routePointType === 'side_stop' || stop.routeShapeRole === 'side_stop') return false;
   if (stop.routeShapeRole === 'outbound_anchor' && stop.source === 'map') return true;
-  if (/target area|camp search area|route sketch/i.test(`${stop.name} ${stop.description ?? ''}`)) return true;
+  if (/target area|camp search area|overnight area|route sketch/i.test(`${stop.name} ${stop.description ?? ''}`)) return true;
   return false;
 }
 
@@ -248,7 +248,7 @@ export function rebalanceAfterCampSelection<T extends RouteBuilderStopLike>(inpu
       ...stop,
       lat: input.selectedCamp.lat + (final.lat - input.selectedCamp.lat) * t,
       lng: input.selectedCamp.lng + (final.lng - input.selectedCamp.lng) * t,
-      name: `Day ${stop.day} camp search area`,
+      name: `Day ${stop.day} overnight area`,
       description: `Updated after selecting ${input.selectedCamp.name.split(',')[0]}. Choose a camp before navigation.`,
       camp: undefined,
       gas: undefined,

@@ -181,13 +181,17 @@ function ReadinessRow({ icon, label, ready }: { icon: keyof typeof Ionicons.glyp
   const C = useTheme();
   const color = ready ? C.green : C.text3;
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexGrow: 1, flexBasis: '47%', minWidth: 132, backgroundColor: C.s2, borderRadius: 8, borderWidth: 1, borderColor: ready ? C.green + '30' : C.border, paddingHorizontal: 8, paddingVertical: 7 }}>
       <Ionicons name={ready ? 'checkmark-circle' : icon} size={13} color={color} />
-      <Text style={{ color, fontSize: 9, fontFamily: mono, fontWeight: '800' }} numberOfLines={1}>
+      <Text style={{ color, fontSize: 9, fontFamily: mono, fontWeight: '800', flexShrink: 1 }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
         {label}
       </Text>
     </View>
   );
+}
+
+function displayDownloadName(name: string) {
+  return name.replace(/-corridor\b/i, ' offline area').replace(/\bcorridor\b/gi, 'offline area');
 }
 
 function StateReadinessPanel({
@@ -217,12 +221,12 @@ function StateReadinessPanel({
     <View style={{ backgroundColor: ready ? C.green + '12' : C.s1, borderColor: ready ? C.green + '35' : C.border, borderWidth: 1, borderRadius: 10, padding: 12, marginBottom: 12 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
         <View style={{ flex: 1 }}>
-          <Text style={{ color: ready ? C.green : C.text, fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 }}>
-            {ready ? 'READY OFFLINE' : navReady ? 'NAVIGATION READY · PLACES OPTIONAL' : available ? 'DOWNLOADS NEEDED' : 'REGION COMING SOON'}
+          <Text style={{ color: ready ? C.green : C.text, fontSize: 12, fontFamily: mono, fontWeight: '900', letterSpacing: 0.4 }}>
+            {ready ? 'READY OFFLINE' : navReady ? 'READY TO NAVIGATE' : available ? 'DOWNLOADS NEEDED' : 'COMING SOON'}
           </Text>
-          <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 3, lineHeight: 13 }}>
+          <Text style={{ color: C.text3, fontSize: 10, marginTop: 3, lineHeight: 14 }}>
             {available
-              ? 'Map, navigation, places, topo, and trails are saved separately so you can choose only what you need.'
+              ? 'Download the map and navigation first. Add places, topo, and trails when you need them.'
               : 'This region is coming soon. Download buttons will appear when the packs are ready.'}
           </Text>
         </View>
@@ -233,16 +237,16 @@ function StateReadinessPanel({
             style={{ borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: busy ? C.s2 : C.orangeGlow, borderWidth: 1, borderColor: busy ? C.border : C.orange + '55' }}
           >
             <Text style={{ color: busy ? C.text3 : C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900' }}>
-              {busy ? 'BUSY' : 'GET MISSING'}
+              {busy ? 'BUSY' : 'DOWNLOAD'}
             </Text>
           </TouchableOpacity>
         )}
       </View>
-      <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
-        <ReadinessRow icon="map-outline" label={mapReady ? 'MAP ON DEVICE' : available ? 'MAP MISSING' : 'MAP PLANNED'} ready={mapReady} />
-        <ReadinessRow icon="git-branch-outline" label={routeReady ? 'NAVIGATION ON DEVICE' : available ? 'NAVIGATION MISSING' : 'NAVIGATION PLANNED'} ready={routeReady} />
-        <ReadinessRow icon="trail-sign-outline" label={trailReady ? 'TRAILS ON DEVICE' : trailAvailable ? 'TRAILS OPTIONAL' : 'TRAILS PLANNED'} ready={trailReady} />
-        <ReadinessRow icon="analytics-outline" label={contourReady ? 'CONTOURS ON DEVICE' : contourAvailable ? 'CONTOURS OPTIONAL' : 'CONTOURS PLANNED'} ready={contourReady} />
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+        <ReadinessRow icon="map-outline" label={mapReady ? 'Map saved' : available ? 'Map needed' : 'Map planned'} ready={mapReady} />
+        <ReadinessRow icon="git-branch-outline" label={routeReady ? 'Navigation saved' : available ? 'Navigation needed' : 'Navigation planned'} ready={routeReady} />
+        <ReadinessRow icon="trail-sign-outline" label={trailReady ? 'Trails saved' : trailAvailable ? 'Trails optional' : 'Trails planned'} ready={trailReady} />
+        <ReadinessRow icon="analytics-outline" label={contourReady ? 'Topo saved' : contourAvailable ? 'Topo optional' : 'Topo planned'} ready={contourReady} />
         <ReadinessRow icon="location-outline" label={placeLabel} ready={placeReady} />
       </View>
     </View>
@@ -407,7 +411,7 @@ function ConusCard({
             {completeTitle ?? 'READY OFFLINE'}
           </Text>
           <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 2 }}>
-            {completeText ?? 'File downloaded. Trailhead can use this pack when the matching offline engine is available.'}
+            {completeText ?? 'Saved on this device for offline use.'}
           </Text>
         </View>
       )}
@@ -731,7 +735,7 @@ export default function OfflineModal({
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                     <View style={s.pingDot} />
                     <Text style={{ color: C.orange, fontSize: 11, fontFamily: mono, fontWeight: '700', flex: 1 }}>
-                      {activePackName.toUpperCase()}
+                      {displayDownloadName(activePackName).toUpperCase()}
                     </Text>
                     <Text style={{ color: C.orange, fontSize: 13, fontFamily: mono, fontWeight: '900' }}>
                       {Math.round(packProgress?.percentage ?? 0)}%
@@ -808,7 +812,7 @@ export default function OfflineModal({
                         disabled={busy}
                         style={[s.corridorCard, cached && { borderLeftColor: C.green }]}
                         onPress={() => {
-                          authorizeAndRun(`corridor:${name}`, 'trip_corridor', name, tripName ?? 'Trip corridor', () => startTripCorridor(name));
+                          authorizeAndRun(`corridor:${name}`, 'trip_corridor', name, tripName ?? 'Trip download', () => startTripCorridor(name));
                         }}
                       >
                         <View style={{ flex: 1 }}>
@@ -820,9 +824,7 @@ export default function OfflineModal({
                           </Text>
                           {busy && (
                             <Text style={{ color: C.orange, fontSize: 9, fontFamily: mono, marginTop: 3 }}>
-                              {useNativeMap
-                                ? `${Math.round(packProgress?.percentage ?? 0)}% downloaded`
-                                : `${webDownloadProgress ?? 0}% downloaded — check map`}
+                              {`${useNativeMap ? Math.round(packProgress?.percentage ?? 0) : webDownloadProgress ?? 0}% downloaded`}
                             </Text>
                           )}
                         </View>
@@ -892,7 +894,7 @@ export default function OfflineModal({
                       {mlnPacks.map(pack => (
                         <View key={pack.name} style={s.packRow}>
                           <Ionicons name="checkmark-circle" size={12} color={C.green} />
-                          <Text style={s.packName} numberOfLines={1}>{pack.name}</Text>
+                          <Text style={s.packName} numberOfLines={1}>{displayDownloadName(pack.name)}</Text>
                           {pack.sizeMb > 0 && (
                             <Text style={s.packSize}>{pack.sizeMb.toFixed(0)} MB</Text>
                           )}
@@ -1004,7 +1006,7 @@ export default function OfflineModal({
                                 </View>
                                 <Text style={s.statePickName} numberOfLines={1}>{region.name}</Text>
                                 <Text style={{ color: mapDone && routeDone ? C.green : C.text3, fontSize: 8, fontFamily: mono, marginTop: 4 }}>
-                                  {`${mapDone || mapPublished ? 'MAP' : '--'} · ${routeDone || routePublished ? 'NAV' : '--'} · ${trailDone || trailPublished ? 'TRAILS' : '--'} · ${contourDone || contourPublished ? 'TOPO' : '--'} · ${placesDone || placesPublished ? 'PLACES' : '--'}`}
+                                  {mapDone && routeDone ? 'Ready offline' : available ? 'Map + nav available' : 'Coming soon'}
                                 </Text>
                               </TouchableOpacity>
                             );
@@ -1040,8 +1042,8 @@ export default function OfflineModal({
                     const regionPlacesAvailable = currentManifestPlacePacks.length > 0 || !!waterPlacePackDefinition;
                     const regionPlacesReady = savedRegionPlacePacks.length > 0;
                     const regionPlacesLabel = regionPlacesReady
-                      ? `PLACES ${savedRegionPlaceCount}`
-                      : regionPlacesAvailable ? 'PLACES MISSING' : 'PLACES PLANNED';
+                      ? `${savedRegionPlaceCount} places`
+                      : regionPlacesAvailable ? 'Places needed' : 'Places planned';
                     return (
                       <>
                         <StateReadinessPanel
@@ -1079,16 +1081,16 @@ export default function OfflineModal({
                               </View>
                               <View style={{ flex: 1 }}>
                                 <Text style={{ color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '900' }}>
-                                  {mapRegion.name.toUpperCase()} PACKS ARE BEING PREPARED
+                                  {mapRegion.name.toUpperCase()} DOWNLOADS ARE BEING PREPARED
                                 </Text>
-                                <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 3, lineHeight: 13 }}>
+                                <Text style={{ color: C.text3, fontSize: 10, marginTop: 3, lineHeight: 14 }}>
                                   Download buttons will appear as soon as this region is ready.
                                 </Text>
                               </View>
                             </View>
                             <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-                              <StatusChip label={mapPublished ? 'MAP READY' : `MAP ~${mapRegion.estimatedGb} GB`} color={mapPublished ? C.green : C.text3} />
-                              <StatusChip label={routePublished ? 'NAV READY' : `NAV ~${routingRegion?.estimatedGb ?? 0} GB`} color={routePublished ? C.green : C.text3} />
+                              <StatusChip label={mapPublished ? 'MAP READY' : `MAP ${mapRegion.estimatedGb} GB`} color={mapPublished ? C.green : C.text3} />
+                              <StatusChip label={routePublished ? 'NAV READY' : `NAV ${routingRegion?.estimatedGb ?? 0} GB`} color={routePublished ? C.green : C.text3} />
                             </View>
                             {'storageNote' in mapRegion && (
                               <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 10 }}>
@@ -1145,9 +1147,9 @@ export default function OfflineModal({
                               <Ionicons name="trail-sign-outline" size={18} color={C.orange} />
                             </View>
                             <View style={{ flex: 1 }}>
-                              <Text style={s.contourPlannedTitle}>TRAIL PACK PLANNED</Text>
+                              <Text style={s.contourPlannedTitle}>TRAIL DOWNLOAD PLANNED</Text>
                               <Text style={s.contourPlannedText}>
-                                Downloadable trail systems for this region are coming soon. The MVUM layer can still help check legal motorized access where available.
+                                Downloadable trail lines for this region are coming soon. MVUM can still help check legal motorized access where available.
                               </Text>
                               <Text style={s.contourPlannedMeta}>Estimated starting size: ~{trailRegion?.estimatedGb ?? 0.1} GB</Text>
                             </View>
@@ -1165,7 +1167,7 @@ export default function OfflineModal({
                                 <View key={manifestKey} style={[s.corridorCard, { marginBottom: 10 }, saved && { borderLeftColor: C.green }]}>
                                   <View style={{ flex: 1 }}>
                                     <Text style={{ color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '800' }}>
-                                      {manifestEntry.pack_id === 'camps' ? 'CAMPS' : manifestEntry.pack_id === 'water' ? 'WATER + NAV' : `${(def?.name ?? manifestEntry.pack_id).toUpperCase()} PLACES`}
+                                      {manifestEntry.pack_id === 'camps' ? 'CAMPS' : manifestEntry.pack_id === 'water' ? 'WATER' : `${(def?.name ?? manifestEntry.pack_id).toUpperCase()} PLACES`}
                                     </Text>
                                     <Text style={{ color: C.text2, fontSize: 10, fontFamily: mono, marginTop: 2, lineHeight: 14 }}>
                                       {def?.description ?? 'Offline places saved as map pins.'}
@@ -1203,7 +1205,7 @@ export default function OfflineModal({
                               <View style={[s.corridorCard, { marginBottom: 10, opacity: 0.72 }]}>
                                 <View style={{ flex: 1 }}>
                                   <Text style={{ color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '800' }}>
-                                    WATER + NAV
+                                    WATER
                                   </Text>
                                   <Text style={{ color: C.text2, fontSize: 10, fontFamily: mono, marginTop: 2, lineHeight: 14 }}>
                                     {waterPlacePackDefinition.description}
@@ -1237,7 +1239,7 @@ export default function OfflineModal({
                               <Ionicons name="analytics-outline" size={18} color={C.orange} />
                             </View>
                             <View style={{ flex: 1 }}>
-                              <Text style={s.contourPlannedTitle}>CONTOUR PACK PLANNED</Text>
+                              <Text style={s.contourPlannedTitle}>TOPO DOWNLOAD PLANNED</Text>
                               <Text style={s.contourPlannedText}>
                                 Topo contour downloads for this region are coming soon. They will appear as an optional map layer.
                               </Text>

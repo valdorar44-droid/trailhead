@@ -131,6 +131,7 @@ export default function ProfileScreen() {
   const savedPlaces = useStore(st => st.savedPlaces);
   const removeSavedPlace = useStore(st => st.removeSavedPlace);
   const setPendingMapSelection = useStore(st => st.setPendingMapSelection);
+  const setPendingSavedTrailId = useStore(st => st.setPendingSavedTrailId);
   const [view, setView] = useState<'main' | 'login' | 'register' | 'forgot'>(!user ? 'login' : 'main');
   const [authSuccess, setAuthSuccess] = useState('');  // brief success message before switching to main
   const authFade = useRef(new Animated.Value(1)).current;
@@ -194,6 +195,11 @@ export default function ProfileScreen() {
   }
 
   function openSavedPlaceOnMap(place: SavedPlace) {
+    if (place.id.startsWith('captured:') || place.id.startsWith('trail:')) {
+      setPendingSavedTrailId(place.id);
+      router.push('/(tabs)/map');
+      return;
+    }
     setPendingMapSelection({ kind: 'place', place });
     router.push('/(tabs)/map');
   }

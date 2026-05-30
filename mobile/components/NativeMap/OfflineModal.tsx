@@ -40,6 +40,21 @@ import { TrailheadSheet } from '@/components/TrailheadUI';
 
 interface WebDownloadOpts { bufferKm?: number; minZ?: number; maxZ?: number; vectorOnly?: boolean; label: string; n?: number; s?: number; e?: number; w?: number; }
 
+export interface OfflineAreaSelection {
+  label: string;
+  bounds: [[number, number], [number, number]];
+  n: number;
+  s: number;
+  e: number;
+  w: number;
+  minZoom: number;
+  maxZoom: number;
+  detail: 'standard' | 'high';
+  estimatedItems: number;
+  estimatedMb: number;
+  spanMi: number;
+}
+
 type RegionGroupKey = 'west' | 'central' | 'southeast' | 'northeastMidwest' | 'international' | 'europe';
 const PLACE_PACK_ORDER = ['essentials', 'services', 'outdoors', 'camps', 'water'];
 
@@ -118,6 +133,8 @@ interface Props {
   webDownloadMB?:       string;
   webCachedRegions?:    string[];
   webDownloadLabel?:    string;
+  selectedArea?:         OfflineAreaSelection | null;
+  onStartAreaSelect?:    () => void;
 }
 
 // ── Shimmer animation for active progress bar ────────────────────────────────
@@ -482,6 +499,7 @@ export default function OfflineModal({
   onOfflinePlacesChanged,
   onWebDownloadBbox, onWebDownloadRoute, onWebCancelDownload, onWebClearRegion,
   webIsDownloading, webDownloadProgress, webDownloadMB, webCachedRegions, webDownloadLabel,
+  selectedArea, onStartAreaSelect,
 }: Props) {
   const user        = useStore(st => st.user);
   const mapboxToken = useStore(st => st.mapboxToken);
@@ -640,6 +658,32 @@ export default function OfflineModal({
     await downloadTripEssentials();
   }, [authorizeAndRun, downloadTripEssentials, startTripCorridor, tripName, waypoints.length]);
 
+  const downloadSelectedArea = useCallback(async () => {
+    if (!selectedArea) return;
+    await authorizeAndRun(
+      `area:${selectedArea.label}`,
+      'trip_corridor',
+      selectedArea.label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'selected-area',
+      selectedArea.label,
+      () => {
+        if (!useNativeMap) {
+          onWebDownloadBbox?.({
+            label: selectedArea.label,
+            n: selectedArea.n,
+            s: selectedArea.s,
+            e: selectedArea.e,
+            w: selectedArea.w,
+            minZ: selectedArea.minZoom,
+            maxZ: selectedArea.maxZoom,
+            vectorOnly: true,
+          });
+          return;
+        }
+        return startMlnPack(selectedArea.label, selectedArea.bounds, selectedArea.minZoom, selectedArea.maxZoom);
+      },
+    );
+  }, [authorizeAndRun, onWebDownloadBbox, selectedArea, startMlnPack, useNativeMap]);
+
   const deleteTripEssentials = useCallback(async (packId: string) => {
     await deleteOfflinePlacePack(packId);
     await reloadPlacePacks();
@@ -762,6 +806,38 @@ export default function OfflineModal({
               {/* ══════════════════ AREAS TAB ═══════════════════════════ */}
               {activeTab === 'areas' && (
                 <>
+                  <Section label="SELECT AN AREA" />
+                  <View style={s.customAreaCard}>
+                    <View style={s.customAreaTop}>
+                      <View style={s.customAreaIcon}>
+                        <Ionicons name="scan-outline" size={20} color={C.orange} />
+                      </View>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={s.customAreaTitle}>{selectedArea ? selectedArea.label.toUpperCase() : 'DRAW A DOWNLOAD BOX'}</Text>
+                        <Text style={s.customAreaText}>
+                          {selectedArea
+                            ? `${selectedArea.detail === 'high' ? 'High' : 'Standard'} detail · about ${Math.max(1, Math.round(selectedArea.estimatedMb))} MB · ${Math.round(selectedArea.spanMi)} mi wide`
+                            : 'Pick a small area on the map, resize it, then save full map detail for that box.'}
+                        </Text>
+                      </View>
+                      <StatusChip label={selectedArea ? 'SELECTED' : 'MAP'} color={selectedArea ? C.green : C.orange} />
+                    </View>
+                    <View style={s.customAreaActions}>
+                      <TouchableOpacity style={s.customAreaSecondary} onPress={onStartAreaSelect}>
+                        <Ionicons name={selectedArea ? 'resize-outline' : 'expand-outline'} size={13} color={C.text2} />
+                        <Text style={s.customAreaSecondaryText}>{selectedArea ? 'CHANGE AREA' : 'CHOOSE AREA'}</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        disabled={!selectedArea || !!activePackName || !!webIsDownloading}
+                        style={[s.customAreaPrimary, (!selectedArea || activePackName || webIsDownloading) && { opacity: 0.55 }]}
+                        onPress={downloadSelectedArea}
+                      >
+                        <Ionicons name="cloud-download-outline" size={13} color="#fff" />
+                        <Text style={s.customAreaPrimaryText}>{activePackName || webIsDownloading ? 'DOWNLOADING' : 'DOWNLOAD'}</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
                   <Section label="DOWNLOAD THIS TRIP" />
                   {waypoints.length > 0 ? (
                     <TouchableOpacity
@@ -1295,6 +1371,28 @@ function makeStyles(C: ColorPalette) {
     storageTitle: { color: C.text, fontSize: 11, fontFamily: mono, fontWeight: '900' },
     storageText: { color: C.text3, fontSize: 9.5, fontFamily: mono, marginTop: 2 },
     storageEstimate: { color: C.text3, fontSize: 9, fontFamily: mono, maxWidth: 126, textAlign: 'right', lineHeight: 13 },
+    customAreaCard: {
+      backgroundColor: C.s1, borderRadius: 14, borderWidth: 1, borderColor: C.orange + '38',
+      padding: 14, marginBottom: 10,
+    },
+    customAreaTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+    customAreaIcon: {
+      width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center',
+      backgroundColor: C.orangeGlow, borderWidth: 1, borderColor: C.orange + '55',
+    },
+    customAreaTitle: { color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '900', letterSpacing: 0.4 },
+    customAreaText: { color: C.text3, fontSize: 10, lineHeight: 14, marginTop: 3 },
+    customAreaActions: { flexDirection: 'row', gap: 9, marginTop: 12 },
+    customAreaSecondary: {
+      flex: 1, minHeight: 40, borderRadius: 11, borderWidth: 1, borderColor: C.border,
+      backgroundColor: C.s2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7,
+    },
+    customAreaSecondaryText: { color: C.text2, fontSize: 10, fontFamily: mono, fontWeight: '900' },
+    customAreaPrimary: {
+      flex: 1, minHeight: 40, borderRadius: 11, backgroundColor: C.orange,
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7,
+    },
+    customAreaPrimaryText: { color: '#fff', fontSize: 10, fontFamily: mono, fontWeight: '900' },
     packProgressCard: {
       backgroundColor: C.s1, borderRadius: 10, padding: 12, marginBottom: 10,
       borderWidth: 1, borderColor: C.orange + '40', borderLeftWidth: 3, borderLeftColor: C.orange,

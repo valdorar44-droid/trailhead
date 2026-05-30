@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Linking, Animated
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import NativeMap, { type NativeMapHandle } from '@/components/NativeMap';
 import RouteSearchModal from '@/components/RouteSearchModal';
-import OfflineModal from '@/components/NativeMap/OfflineModal';
+import OfflineModal, { type OfflineAreaSelection } from '@/components/NativeMap/OfflineModal';
 import TourTarget from '@/components/TourTarget';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
 import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
@@ -68,6 +68,40 @@ const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhea
 function mediaUrl(url?: string | null) {
   if (!url) return '';
   return url.startsWith('/') ? `${API_BASE_URL}${url}` : url;
+}
+
+type OfflineAreaDetail = 'standard' | 'high';
+type OfflineAreaBox = { x: number; y: number; width: number; height: number };
+
+function clampNumber(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function lngToTileX(lng: number, zoom: number) {
+  return Math.floor(((lng + 180) / 360) * Math.pow(2, zoom));
+}
+
+function latToTileY(lat: number, zoom: number) {
+  const rad = lat * Math.PI / 180;
+  return Math.floor((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2 * Math.pow(2, zoom));
+}
+
+function estimateOfflineItems(n: number, s: number, e: number, w: number, minZoom: number, maxZoom: number) {
+  let total = 0;
+  for (let z = minZoom; z <= maxZoom; z += 1) {
+    const maxTile = Math.pow(2, z) - 1;
+    const x1 = clampNumber(lngToTileX(w, z), 0, maxTile);
+    const x2 = clampNumber(lngToTileX(e, z), 0, maxTile);
+    const y1 = clampNumber(latToTileY(n, z), 0, maxTile);
+    const y2 = clampNumber(latToTileY(s, z), 0, maxTile);
+    total += (Math.abs(x2 - x1) + 1) * (Math.abs(y2 - y1) + 1);
+  }
+  return total;
+}
+
+function estimateOfflineAreaMb(items: number, detail: OfflineAreaDetail) {
+  const perItemMb = detail === 'high' ? 0.018 : 0.014;
+  return Math.max(6, Math.round(items * perItemMb));
 }
 
 // ─── US State bounding boxes for offline download ─────────────────────────────
@@ -3731,6 +3765,17 @@ function MapScreen() {
   const [downloadSaved, setDownloadSaved] = useState(0);
   const [downloadMB, setDownloadMB] = useState('0');
   const [downloadLabel, setDownloadLabel] = useState('');
+  const [offlineAreaPicker, setOfflineAreaPicker] = useState(false);
+  const [offlineAreaDetail, setOfflineAreaDetail] = useState<OfflineAreaDetail>('high');
+  const [offlineAreaBox, setOfflineAreaBox] = useState<OfflineAreaBox>(() => ({
+    x: Math.max(28, windowWidth * 0.14),
+    y: Math.max(insets.top + 92, windowHeight * 0.22),
+    width: Math.max(220, windowWidth * 0.72),
+    height: Math.max(190, windowHeight * 0.34),
+  }));
+  const [selectedOfflineArea, setSelectedOfflineArea] = useState<OfflineAreaSelection | null>(null);
+  const offlineAreaBoxRef = useRef(offlineAreaBox);
+  const offlineAreaDragStartRef = useRef(offlineAreaBox);
   const offlineSaved = cachedRegions.length > 0;
   const [mapboxToken,   setMapboxToken]   = useState('');
   const [protomapsKey,  setProtomapsKey]  = useState('');
@@ -4036,6 +4081,120 @@ function MapScreen() {
 
   const [nearbyLoading,   setNearbyLoading]   = useState(false);
   const [nearbyNarration, setNearbyNarration] = useState<string | null>(null);
+
+  useEffect(() => {
+    offlineAreaBoxRef.current = offlineAreaBox;
+  }, [offlineAreaBox]);
+
+  const clampOfflineAreaBox = useCallback((box: OfflineAreaBox): OfflineAreaBox => {
+    const minWidth = Math.min(170, Math.max(128, windowWidth - 48));
+    const minHeight = 132;
+    const topLimit = Math.max(insets.top + 74, 86);
+    const bottomLimit = Math.max(topLimit + minHeight + 20, windowHeight - bottomInset - 166);
+    const maxWidth = Math.max(minWidth, windowWidth - 24);
+    const maxHeight = Math.max(minHeight, bottomLimit - topLimit);
+    const width = clampNumber(box.width, minWidth, maxWidth);
+    const height = clampNumber(box.height, minHeight, maxHeight);
+    return {
+      x: clampNumber(box.x, 12, Math.max(12, windowWidth - width - 12)),
+      y: clampNumber(box.y, topLimit, Math.max(topLimit, bottomLimit - height)),
+      width,
+      height,
+    };
+  }, [bottomInset, insets.top, windowHeight, windowWidth]);
+
+  const offlineAreaSelection = useMemo<OfflineAreaSelection | null>(() => {
+    const vp = viewportRef.current;
+    if (!vp || !Number.isFinite(vp.n) || !Number.isFinite(vp.s) || !Number.isFinite(vp.e) || !Number.isFinite(vp.w)) return null;
+    const left = clampNumber(offlineAreaBox.x / Math.max(1, windowWidth), 0, 1);
+    const right = clampNumber((offlineAreaBox.x + offlineAreaBox.width) / Math.max(1, windowWidth), 0, 1);
+    const top = clampNumber(offlineAreaBox.y / Math.max(1, windowHeight), 0, 1);
+    const bottom = clampNumber((offlineAreaBox.y + offlineAreaBox.height) / Math.max(1, windowHeight), 0, 1);
+    const latSpan = vp.n - vp.s;
+    const lngSpan = vp.e - vp.w;
+    const n = vp.n - latSpan * top;
+    const sLat = vp.n - latSpan * bottom;
+    const wLng = vp.w + lngSpan * left;
+    const eLng = vp.w + lngSpan * right;
+    const minZoom = 10;
+    const maxZoom = offlineAreaDetail === 'high' ? 16 : 14;
+    const estimatedItems = estimateOfflineItems(n, sLat, eLng, wLng, minZoom, maxZoom);
+    const centerLat = (n + sLat) / 2;
+    const widthMi = Math.abs(eLng - wLng) * 69 * Math.max(0.15, Math.cos(centerLat * Math.PI / 180));
+    const heightMi = Math.abs(n - sLat) * 69;
+    return {
+      label: offlineAreaDetail === 'high' ? 'High detail area' : 'Standard area',
+      bounds: [[wLng, sLat], [eLng, n]],
+      n,
+      s: sLat,
+      e: eLng,
+      w: wLng,
+      minZoom,
+      maxZoom,
+      detail: offlineAreaDetail,
+      estimatedItems,
+      estimatedMb: estimateOfflineAreaMb(estimatedItems, offlineAreaDetail),
+      spanMi: Math.max(widthMi, heightMi),
+    };
+  }, [offlineAreaBox, offlineAreaDetail, mapZoom, windowHeight, windowWidth]);
+
+  const offlineAreaTooLarge = Boolean(offlineAreaSelection && (offlineAreaSelection.estimatedItems > 260_000 || offlineAreaSelection.estimatedMb > 4200));
+
+  const offlineAreaMoveResponder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => offlineAreaPicker,
+    onMoveShouldSetPanResponder: () => offlineAreaPicker,
+    onPanResponderGrant: () => { offlineAreaDragStartRef.current = offlineAreaBoxRef.current; },
+    onPanResponderMove: (_, gesture) => {
+      const start = offlineAreaDragStartRef.current;
+      setOfflineAreaBox(clampOfflineAreaBox({ ...start, x: start.x + gesture.dx, y: start.y + gesture.dy }));
+    },
+  }), [clampOfflineAreaBox, offlineAreaPicker]);
+
+  const offlineAreaResizeResponder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => offlineAreaPicker,
+    onMoveShouldSetPanResponder: () => offlineAreaPicker,
+    onPanResponderGrant: () => { offlineAreaDragStartRef.current = offlineAreaBoxRef.current; },
+    onPanResponderMove: (_, gesture) => {
+      const start = offlineAreaDragStartRef.current;
+      setOfflineAreaBox(clampOfflineAreaBox({ ...start, width: start.width + gesture.dx, height: start.height + gesture.dy }));
+    },
+  }), [clampOfflineAreaBox, offlineAreaPicker]);
+
+  const offlineAreaResizeNorthWestResponder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => offlineAreaPicker,
+    onMoveShouldSetPanResponder: () => offlineAreaPicker,
+    onPanResponderGrant: () => { offlineAreaDragStartRef.current = offlineAreaBoxRef.current; },
+    onPanResponderMove: (_, gesture) => {
+      const start = offlineAreaDragStartRef.current;
+      setOfflineAreaBox(clampOfflineAreaBox({
+        x: start.x + gesture.dx,
+        y: start.y + gesture.dy,
+        width: start.width - gesture.dx,
+        height: start.height - gesture.dy,
+      }));
+    },
+  }), [clampOfflineAreaBox, offlineAreaPicker]);
+
+  const startOfflineAreaPicker = useCallback(() => {
+    setShowOfflineModal(false);
+    setShowMapDrawer(false);
+    setOfflineAreaBox(prev => clampOfflineAreaBox(prev));
+    setOfflineAreaPicker(true);
+    setQuickToast('Resize the box around the area you want offline.');
+    setTimeout(() => setQuickToast(''), 3600);
+  }, [clampOfflineAreaBox]);
+
+  const confirmOfflineAreaPicker = useCallback(() => {
+    if (!offlineAreaSelection || offlineAreaTooLarge) {
+      setQuickToast(offlineAreaTooLarge ? 'Shrink the box or use Standard detail.' : 'Move the map, then choose the area again.');
+      setTimeout(() => setQuickToast(''), 3600);
+      return;
+    }
+    const stamp = new Date().toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    setSelectedOfflineArea({ ...offlineAreaSelection, label: `Offline area ${stamp}` });
+    setOfflineAreaPicker(false);
+    setShowOfflineModal(true);
+  }, [offlineAreaSelection, offlineAreaTooLarge]);
 
   useEffect(() => {
     trailTraceDraftRef.current = trailTraceDraft;
@@ -10254,6 +10413,74 @@ function MapScreen() {
         </View>
       )}
 
+      {offlineAreaPicker && (
+        <View style={s.offlineAreaOverlay} pointerEvents="box-none">
+          <View style={s.offlineAreaTopPill} pointerEvents="auto">
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={s.offlineAreaTitle}>Offline area</Text>
+              <Text style={s.offlineAreaSub} numberOfLines={1}>
+                {offlineAreaSelection
+                  ? `${offlineAreaDetail === 'high' ? 'High detail' : 'Standard'} · ~${Math.max(1, Math.round(offlineAreaSelection.estimatedMb))} MB · ${Math.round(offlineAreaSelection.spanMi)} mi`
+                  : 'Move the map, then resize the box.'}
+              </Text>
+            </View>
+            <TouchableOpacity style={s.offlineAreaClose} onPress={() => setOfflineAreaPicker(false)}>
+              <Ionicons name="close" size={15} color={OVR.text2} />
+            </TouchableOpacity>
+          </View>
+
+          <View
+            pointerEvents="auto"
+            {...offlineAreaMoveResponder.panHandlers}
+            style={[
+              s.offlineAreaBox,
+              offlineAreaTooLarge && s.offlineAreaBoxWarn,
+              {
+                left: offlineAreaBox.x,
+                top: offlineAreaBox.y,
+                width: offlineAreaBox.width,
+                height: offlineAreaBox.height,
+              },
+            ]}
+          >
+            <View style={s.offlineAreaBoxGrid} />
+            <View style={[s.offlineAreaCorner, s.offlineAreaCornerNW]} {...offlineAreaResizeNorthWestResponder.panHandlers} />
+            <View style={[s.offlineAreaCorner, s.offlineAreaCornerSE]} {...offlineAreaResizeResponder.panHandlers} />
+            <Text style={s.offlineAreaBoxText}>Drag to move</Text>
+          </View>
+
+          <View style={[s.offlineAreaPanel, { paddingBottom: bottomInset }]} pointerEvents="auto">
+            <View style={s.offlineAreaSegment}>
+              {(['standard', 'high'] as const).map(detail => {
+                const active = offlineAreaDetail === detail;
+                return (
+                  <TouchableOpacity key={detail} style={[s.offlineAreaSegmentBtn, active && s.offlineAreaSegmentBtnActive]} onPress={() => setOfflineAreaDetail(detail)}>
+                    <Ionicons name={detail === 'high' ? 'scan-outline' : 'map-outline'} size={13} color={active ? '#fff' : OVR.text2} />
+                    <Text style={[s.offlineAreaSegmentText, active && s.offlineAreaSegmentTextActive]}>{detail === 'high' ? 'High detail' : 'Standard'}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            {offlineAreaTooLarge && (
+              <Text style={s.offlineAreaWarning}>Shrink the box or use Standard detail for a faster download.</Text>
+            )}
+            <View style={s.offlineAreaActions}>
+              <TouchableOpacity style={s.offlineAreaSecondaryBtn} onPress={() => setOfflineAreaPicker(false)}>
+                <Text style={s.offlineAreaSecondaryText}>CANCEL</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.offlineAreaPrimaryBtn, offlineAreaTooLarge && { opacity: 0.55 }]}
+                disabled={offlineAreaTooLarge}
+                onPress={confirmOfflineAreaPicker}
+              >
+                <Ionicons name="checkmark-outline" size={14} color="#fff" />
+                <Text style={s.offlineAreaPrimaryText}>USE THIS AREA</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
+
       {/* Route/status bar */}
       {showMapStatusBar && <View style={s.topBar}>
         <TouchableOpacity
@@ -13073,6 +13300,8 @@ function MapScreen() {
         tripName={activeTrip?.plan?.trip_name ?? null}
         useNativeMap={USE_NATIVE_MAP}
         onOfflinePlacesChanged={reloadOfflinePlacePois}
+        selectedArea={selectedOfflineArea}
+        onStartAreaSelect={startOfflineAreaPicker}
         onWebDownloadBbox={opts => {
           webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles_bbox', ...opts }));
           setIsDownloading(true); setDownloadLabel(opts.label);
@@ -16889,6 +17118,62 @@ const makeStyles = (C: ColorPalette) => {
   offlineNoTrip: { color: C.text3, fontSize: 11, textAlign: 'center', marginTop: 6 },
   offlineCachedBar: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 10, marginTop: 6, borderTopWidth: 1, borderColor: C.border },
   offlineCachedText: { color: C.text3, fontSize: 10, fontFamily: mono, flex: 1 },
+  offlineAreaOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 240, elevation: 240 },
+  offlineAreaTopPill: {
+    position: 'absolute', top: 58, left: 14, right: 14,
+    minHeight: 58, borderRadius: 16, borderWidth: 1, borderColor: C.orange + '55',
+    backgroundColor: C.bg + 'F2', flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingHorizontal: 13, shadowColor: '#000', shadowOpacity: 0.28, shadowRadius: 18, shadowOffset: { width: 0, height: 8 },
+  },
+  offlineAreaTitle: { color: C.text, fontSize: 13, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
+  offlineAreaSub: { color: C.text3, fontSize: 10, marginTop: 2 },
+  offlineAreaClose: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s2, borderWidth: 1, borderColor: C.border },
+  offlineAreaBox: {
+    position: 'absolute', borderWidth: 2, borderColor: C.orange,
+    backgroundColor: C.orange + '17', borderRadius: 10, overflow: 'visible',
+    shadowColor: C.orange, shadowOpacity: 0.25, shadowRadius: 16, shadowOffset: { width: 0, height: 8 },
+  },
+  offlineAreaBoxWarn: { borderColor: C.yellow, backgroundColor: C.yellow + '16', shadowColor: C.yellow },
+  offlineAreaBoxGrid: {
+    ...StyleSheet.absoluteFillObject, borderRadius: 8,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)',
+  },
+  offlineAreaCorner: {
+    position: 'absolute', width: 30, height: 30, borderRadius: 15,
+    backgroundColor: C.orange, borderWidth: 2, borderColor: '#fff',
+  },
+  offlineAreaCornerNW: { left: -15, top: -15 },
+  offlineAreaCornerSE: { right: -15, bottom: -15 },
+  offlineAreaBoxText: {
+    position: 'absolute', alignSelf: 'center', top: 10,
+    color: '#fff', fontSize: 10, fontFamily: mono, fontWeight: '900',
+    backgroundColor: 'rgba(0,0,0,0.35)', borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4,
+  },
+  offlineAreaPanel: {
+    position: 'absolute', left: 12, right: 12, bottom: 0,
+    borderTopLeftRadius: 18, borderTopRightRadius: 18, borderWidth: 1, borderColor: C.border,
+    backgroundColor: C.bg + 'F7', padding: 12, gap: 10,
+  },
+  offlineAreaSegment: { flexDirection: 'row', gap: 8 },
+  offlineAreaSegmentBtn: {
+    flex: 1, minHeight: 40, borderRadius: 12, borderWidth: 1, borderColor: C.border,
+    backgroundColor: C.s2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7,
+  },
+  offlineAreaSegmentBtnActive: { backgroundColor: C.orange, borderColor: C.orange },
+  offlineAreaSegmentText: { color: C.text2, fontSize: 10, fontFamily: mono, fontWeight: '900' },
+  offlineAreaSegmentTextActive: { color: '#fff' },
+  offlineAreaWarning: { color: C.yellow, fontSize: 10, lineHeight: 14 },
+  offlineAreaActions: { flexDirection: 'row', gap: 9 },
+  offlineAreaSecondaryBtn: {
+    flex: 0.8, minHeight: 42, borderRadius: 12, borderWidth: 1, borderColor: C.border,
+    backgroundColor: C.s2, alignItems: 'center', justifyContent: 'center',
+  },
+  offlineAreaSecondaryText: { color: C.text2, fontSize: 10, fontFamily: mono, fontWeight: '900' },
+  offlineAreaPrimaryBtn: {
+    flex: 1.2, minHeight: 42, borderRadius: 12, backgroundColor: C.orange,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7,
+  },
+  offlineAreaPrimaryText: { color: '#fff', fontSize: 10, fontFamily: mono, fontWeight: '900' },
 
   // ── Route brief
   readinessRow: {

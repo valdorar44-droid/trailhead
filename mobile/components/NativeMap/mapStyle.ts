@@ -56,7 +56,6 @@ export function buildMapStyle(
   const lwHalo = sat ? 'rgba(0,0,0,0.85)' : '#13161c';
   const showContours = contourMode !== 'none' && !sat;
   const showTrailPack = trailMode === 'local';
-  const showOffroadBaseColors = trailMode !== 'none';
   const trailVisualClass = [
     'coalesce',
     ['get', 'trail_visual_class'],
@@ -425,23 +424,19 @@ export function buildMapStyle(
 
     // Dirt roads / tracks
     { id: 'road-other', type: 'line', source: pmId, 'source-layer': 'roads',
-      filter: ['==', ['get', 'kind'], 'other'], minzoom: showOffroadBaseColors ? 9 : 12,
+      filter: ['==', ['get', 'kind'], 'other'], minzoom: 12,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: { 'line-color': showOffroadBaseColors ? '#22c55e' : sat ? 'rgba(255,255,255,0.5)' : '#5a4a2c',
-        'line-width': showOffroadBaseColors
-          ? ['interpolate', ['linear'], ['zoom'], 9, 0.85, 12, 1.55, 16, 3.2]
-          : ['interpolate', ['linear'], ['zoom'], 12, 0.5, 16, 2],
-        'line-opacity': showOffroadBaseColors ? (sat || hyb ? 0.96 : 0.9) : roadOp } },
+      paint: { 'line-color': sat ? 'rgba(255,255,255,0.5)' : '#5a4a2c',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.5, 16, 2],
+        'line-dasharray': [2, 2], 'line-opacity': roadOp } },
 
     // Trails
     { id: 'road-path', type: 'line', source: pmId, 'source-layer': 'roads',
-      filter: ['==', ['get', 'kind'], 'path'], minzoom: showOffroadBaseColors ? 9 : 11,
+      filter: ['==', ['get', 'kind'], 'path'], minzoom: 11,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: { 'line-color': showOffroadBaseColors ? '#1d8cff' : sat ? 'rgba(167,139,250,0.8)' : '#9a7840',
-        'line-width': showOffroadBaseColors
-          ? ['interpolate', ['linear'], ['zoom'], 9, 0.8, 12, 1.45, 16, 3.0]
-          : ['interpolate', ['linear'], ['zoom'], 11, 0.8, 16, 2.5],
-        'line-opacity': showOffroadBaseColors ? (sat || hyb ? 0.96 : 0.9) : roadOp } },
+      paint: { 'line-color': sat ? 'rgba(167,139,250,0.8)' : '#9a7840',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 11, 0.8, 16, 2.5],
+        'line-dasharray': [3, 2], 'line-opacity': roadOp } },
 
     // Minor roads (show from z9)
     { id: 'road-minor-case', type: 'line', source: pmId, 'source-layer': 'roads',

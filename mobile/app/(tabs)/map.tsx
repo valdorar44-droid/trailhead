@@ -13224,7 +13224,7 @@ function MapScreen() {
               { key: 'lands', label: 'Public Land Tint', sub: 'BLM/USFS/NPS color overlay. Requires signal unless cached.', icon: 'map-outline', val: showLands, color: '#22c55e', toggle: toggleLandOverlay },
               { key: 'usgs', label: 'USGS Topo + Trails', sub: 'Topo raster with contours, paths, labels, and land features.', icon: 'trail-sign-outline', val: showUsgs, color: '#0ea5e9', toggle: toggleUsgsOverlay },
               { key: 'pois', label: 'Places', sub: 'Live and downloaded fuel, water, trailheads, services, viewpoints, and attractions.', icon: 'location-outline', val: showPois, color: '#3b82f6', toggle: togglePoiOverlay },
-              { key: 'trails', label: 'Offroad Trails', sub: 'Color-coded 4x4, hiking, bike, horse, and restricted trail lines.', icon: 'trail-sign-outline', val: layerTrails, color: '#22c55e', toggle: setLayerTrails },
+              { key: 'trails', label: 'Offroad Trails', sub: 'Subtle dashed roads and paths until classified trail tiles are rebuilt.', icon: 'trail-sign-outline', val: layerTrails, color: '#22c55e', toggle: setLayerTrails },
               { key: 'nautical', label: 'Safe Water Structure', sub: 'Bathymetry contours, shallow zones, hazards, open seamark lines, buoys, and markers where sources exist.', icon: 'boat-outline', val: layerNautical, color: '#0891b2', toggle: (v: boolean) => { if (!v) { closeSafeWaterMode(); return; } setLayerNautical(true); toggleDataLayer('nautical', true); if (v) setActivePlaceFilters(prev => Array.from(new Set([...prev, ...WATER_NAV_PLACE_FILTER_IDS]))); } },
             ] as const).map(l => (
               <TouchableOpacity key={l.key} style={s.layerRow} onPress={() => l.toggle(!l.val)}>
@@ -13339,7 +13339,7 @@ function MapScreen() {
                 ))}
                 {layerMvum && (
                   <Text style={{ color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 }}>
-                    MVUM is a legal-access overlay. Offroad Trails shows broader trail-pack classifications.
+                    MVUM is a legal-access overlay. Offroad Trails uses subdued base-map roads and paths until classified trail tiles are rebuilt.
                   </Text>
                 )}
                 {layerAva && layerMvum && (

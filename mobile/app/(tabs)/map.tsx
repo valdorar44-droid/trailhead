@@ -72,6 +72,7 @@ function mediaUrl(url?: string | null) {
 
 type OfflineAreaDetail = 'standard' | 'high';
 type OfflineAreaBox = { x: number; y: number; width: number; height: number };
+const SAVED_OFFLINE_AREAS_KEY = 'trailhead_saved_offline_areas_v1';
 
 function clampNumber(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
@@ -109,6 +110,49 @@ function formatOfflineAreaSqMi(areaSqMi: number) {
   if (areaSqMi >= 10_000) return `${(Math.round(areaSqMi / 100) * 100).toLocaleString()} sq mi`;
   if (areaSqMi >= 100) return `${Math.round(areaSqMi).toLocaleString()} sq mi`;
   return `${Math.max(1, Math.round(areaSqMi)).toLocaleString()} sq mi`;
+}
+
+function makeOfflineAreaId() {
+  return `area-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function cleanOfflineAreaLabel(label: string) {
+  return label.trim().replace(/\s+/g, ' ').slice(0, 42);
+}
+
+function normalizeSavedOfflineArea(area: Partial<OfflineAreaSelection> | null | undefined): OfflineAreaSelection | null {
+  if (!area || !Number.isFinite(area.n) || !Number.isFinite(area.s) || !Number.isFinite(area.e) || !Number.isFinite(area.w)) return null;
+  const n = Number(area.n);
+  const sLat = Number(area.s);
+  const e = Number(area.e);
+  const w = Number(area.w);
+  const centerLat = (n + sLat) / 2;
+  const widthMi = Math.abs(e - w) * 69 * Math.max(0.15, Math.cos(centerLat * Math.PI / 180));
+  const heightMi = Math.abs(n - sLat) * 69;
+  const detail = area.detail === 'standard' ? 'standard' : 'high';
+  const minZoom = Number.isFinite(area.minZoom) ? Number(area.minZoom) : 10;
+  const maxZoom = Number.isFinite(area.maxZoom) ? Number(area.maxZoom) : detail === 'high' ? 16 : 14;
+  const estimatedItems = Number.isFinite(area.estimatedItems)
+    ? Number(area.estimatedItems)
+    : estimateOfflineItems(n, sLat, e, w, minZoom, maxZoom);
+  return {
+    id: String(area.id || makeOfflineAreaId()),
+    label: cleanOfflineAreaLabel(String(area.label || 'Offline area')) || 'Offline area',
+    bounds: [[w, sLat], [e, n]],
+    n,
+    s: sLat,
+    e,
+    w,
+    minZoom,
+    maxZoom,
+    detail,
+    estimatedItems,
+    estimatedMb: Number.isFinite(area.estimatedMb) ? Number(area.estimatedMb) : estimateOfflineAreaMb(estimatedItems, detail),
+    spanMi: Number.isFinite(area.spanMi) ? Number(area.spanMi) : Math.max(widthMi, heightMi),
+    areaSqMi: Number.isFinite(area.areaSqMi) ? Number(area.areaSqMi) : Math.max(1, widthMi * heightMi),
+    createdAt: Number.isFinite(area.createdAt) ? Number(area.createdAt) : Date.now(),
+    updatedAt: Number.isFinite(area.updatedAt) ? Number(area.updatedAt) : Date.now(),
+  };
 }
 
 // ─── US State bounding boxes for offline download ─────────────────────────────
@@ -3781,6 +3825,8 @@ function MapScreen() {
     height: Math.max(190, windowHeight * 0.34),
   }));
   const [selectedOfflineArea, setSelectedOfflineArea] = useState<OfflineAreaSelection | null>(null);
+  const [savedOfflineAreas, setSavedOfflineAreas] = useState<OfflineAreaSelection[]>([]);
+  const [offlineAreaEditingId, setOfflineAreaEditingId] = useState<string | null>(null);
   const offlineAreaBoxRef = useRef(offlineAreaBox);
   const offlineAreaDragStartRef = useRef(offlineAreaBox);
   const offlineSaved = cachedRegions.length > 0;
@@ -4093,6 +4139,27 @@ function MapScreen() {
     offlineAreaBoxRef.current = offlineAreaBox;
   }, [offlineAreaBox]);
 
+  useEffect(() => {
+    let cancelled = false;
+    storage.get(SAVED_OFFLINE_AREAS_KEY).then(raw => {
+      if (cancelled || !raw) return;
+      try {
+        const parsed = JSON.parse(raw);
+        const areas = Array.isArray(parsed)
+          ? parsed.map(normalizeSavedOfflineArea).filter(Boolean) as OfflineAreaSelection[]
+          : [];
+        setSavedOfflineAreas(areas);
+        setSelectedOfflineArea(prev => prev ?? areas[0] ?? null);
+      } catch {}
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  const persistSavedOfflineAreas = useCallback((areas: OfflineAreaSelection[]) => {
+    setSavedOfflineAreas(areas);
+    storage.set(SAVED_OFFLINE_AREAS_KEY, JSON.stringify(areas)).catch(() => {});
+  }, []);
+
   const clampOfflineAreaBox = useCallback((box: OfflineAreaBox): OfflineAreaBox => {
     const minWidth = Math.min(170, Math.max(128, windowWidth - 48));
     const minHeight = 132;
@@ -4129,8 +4196,11 @@ function MapScreen() {
     const centerLat = (n + sLat) / 2;
     const widthMi = Math.abs(eLng - wLng) * 69 * Math.max(0.15, Math.cos(centerLat * Math.PI / 180));
     const heightMi = Math.abs(n - sLat) * 69;
+    const now = Date.now();
+    const editingArea = selectedOfflineArea && offlineAreaEditingId === selectedOfflineArea.id ? selectedOfflineArea : null;
     return {
-      label: offlineAreaDetail === 'high' ? 'High detail area' : 'Standard area',
+      id: editingArea?.id ?? makeOfflineAreaId(),
+      label: editingArea?.label ?? (offlineAreaDetail === 'high' ? 'High detail area' : 'Standard area'),
       bounds: [[wLng, sLat], [eLng, n]],
       n,
       s: sLat,
@@ -4143,8 +4213,10 @@ function MapScreen() {
       estimatedMb: estimateOfflineAreaMb(estimatedItems, offlineAreaDetail),
       spanMi: Math.max(widthMi, heightMi),
       areaSqMi: Math.max(1, widthMi * heightMi),
+      createdAt: editingArea?.createdAt ?? now,
+      updatedAt: now,
     };
-  }, [offlineAreaBox, offlineAreaDetail, mapZoom, windowHeight, windowWidth]);
+  }, [offlineAreaBox, offlineAreaDetail, mapZoom, offlineAreaEditingId, selectedOfflineArea, windowHeight, windowWidth]);
 
   const offlineAreaTooLarge = Boolean(offlineAreaSelection && (offlineAreaSelection.estimatedItems > 260_000 || offlineAreaSelection.estimatedMb > 4200));
 
@@ -4183,14 +4255,61 @@ function MapScreen() {
     },
   }), [clampOfflineAreaBox, offlineAreaPicker]);
 
-  const startOfflineAreaPicker = useCallback(() => {
+  const boxForSavedOfflineArea = useCallback((area: OfflineAreaSelection): OfflineAreaBox | null => {
+    const vp = viewportRef.current;
+    if (!vp || !Number.isFinite(vp.n) || !Number.isFinite(vp.s) || !Number.isFinite(vp.e) || !Number.isFinite(vp.w)) return null;
+    const latSpan = vp.n - vp.s;
+    const lngSpan = vp.e - vp.w;
+    if (Math.abs(latSpan) < 0.0001 || Math.abs(lngSpan) < 0.0001) return null;
+    const left = (area.w - vp.w) / lngSpan;
+    const right = (area.e - vp.w) / lngSpan;
+    const top = (vp.n - area.n) / latSpan;
+    const bottom = (vp.n - area.s) / latSpan;
+    if (![left, right, top, bottom].every(Number.isFinite)) return null;
+    const x = left * windowWidth;
+    const y = top * windowHeight;
+    const width = (right - left) * windowWidth;
+    const height = (bottom - top) * windowHeight;
+    if (width < 40 || height < 40) return null;
+    return clampOfflineAreaBox({ x, y, width, height });
+  }, [clampOfflineAreaBox, windowHeight, windowWidth]);
+
+  const startOfflineAreaPicker = useCallback((areaToEdit?: OfflineAreaSelection | null) => {
     setShowOfflineModal(false);
     setShowMapDrawer(false);
-    setOfflineAreaBox(prev => clampOfflineAreaBox(prev));
+    setOfflineAreaEditingId(areaToEdit?.id ?? null);
+    if (areaToEdit) {
+      setSelectedOfflineArea(areaToEdit);
+      const restoredBox = boxForSavedOfflineArea(areaToEdit);
+      setOfflineAreaBox(prev => restoredBox ?? clampOfflineAreaBox(prev));
+    } else {
+      setOfflineAreaBox(prev => clampOfflineAreaBox(prev));
+    }
     setOfflineAreaPicker(true);
-    setQuickToast('Resize the box around the area you want offline.');
+    setQuickToast(areaToEdit ? 'Adjust the saved offline area.' : 'Resize the box around the area you want offline.');
     setTimeout(() => setQuickToast(''), 3600);
-  }, [clampOfflineAreaBox]);
+  }, [boxForSavedOfflineArea, clampOfflineAreaBox]);
+
+  const selectSavedOfflineArea = useCallback((area: OfflineAreaSelection) => {
+    setSelectedOfflineArea(area);
+    setOfflineAreaDetail(area.detail);
+    setOfflineAreaEditingId(area.id);
+  }, []);
+
+  const renameSavedOfflineArea = useCallback((areaId: string, label: string) => {
+    const cleaned = cleanOfflineAreaLabel(label);
+    setSelectedOfflineArea(prev => prev?.id === areaId ? { ...prev, label, updatedAt: Date.now() } : prev);
+    if (!cleaned && label.length > 0) return;
+    const next = savedOfflineAreas.map(area => area.id === areaId ? { ...area, label: cleaned || label, updatedAt: Date.now() } : area);
+    persistSavedOfflineAreas(next);
+  }, [persistSavedOfflineAreas, savedOfflineAreas]);
+
+  const deleteSavedOfflineArea = useCallback((areaId: string) => {
+    const next = savedOfflineAreas.filter(area => area.id !== areaId);
+    persistSavedOfflineAreas(next);
+    setSelectedOfflineArea(prev => prev?.id === areaId ? next[0] ?? null : prev);
+    setOfflineAreaEditingId(prev => prev === areaId ? null : prev);
+  }, [persistSavedOfflineAreas, savedOfflineAreas]);
 
   const confirmOfflineAreaPicker = useCallback(() => {
     if (!offlineAreaSelection || offlineAreaTooLarge) {
@@ -4199,10 +4318,20 @@ function MapScreen() {
       return;
     }
     const stamp = new Date().toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-    setSelectedOfflineArea({ ...offlineAreaSelection, label: `Offline area ${stamp}` });
+    const prior = savedOfflineAreas.find(area => area.id === offlineAreaSelection.id);
+    const savedArea = {
+      ...offlineAreaSelection,
+      label: prior?.label ?? (offlineAreaSelection.label === 'High detail area' || offlineAreaSelection.label === 'Standard area' ? `Offline area ${stamp}` : offlineAreaSelection.label),
+      createdAt: prior?.createdAt ?? offlineAreaSelection.createdAt ?? Date.now(),
+      updatedAt: Date.now(),
+    };
+    const next = [savedArea, ...savedOfflineAreas.filter(area => area.id !== savedArea.id)].slice(0, 20);
+    persistSavedOfflineAreas(next);
+    setSelectedOfflineArea(savedArea);
+    setOfflineAreaEditingId(savedArea.id);
     setOfflineAreaPicker(false);
     setShowOfflineModal(true);
-  }, [offlineAreaSelection, offlineAreaTooLarge]);
+  }, [offlineAreaSelection, offlineAreaTooLarge, persistSavedOfflineAreas, savedOfflineAreas]);
 
   useEffect(() => {
     trailTraceDraftRef.current = trailTraceDraft;
@@ -13310,7 +13439,11 @@ function MapScreen() {
         useNativeMap={USE_NATIVE_MAP}
         onOfflinePlacesChanged={reloadOfflinePlacePois}
         selectedArea={selectedOfflineArea}
+        savedAreas={savedOfflineAreas}
         onStartAreaSelect={startOfflineAreaPicker}
+        onSelectArea={selectSavedOfflineArea}
+        onRenameArea={renameSavedOfflineArea}
+        onDeleteArea={deleteSavedOfflineArea}
         onWebDownloadBbox={opts => {
           webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles_bbox', ...opts }));
           setIsDownloading(true); setDownloadLabel(opts.label);

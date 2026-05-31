@@ -10,7 +10,7 @@
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Alert, Modal, View, Text, TouchableOpacity, ScrollView,
+  Alert, Modal, View, Text, TouchableOpacity, ScrollView, TextInput,
   StyleSheet, Animated, Easing, Platform, useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -41,6 +41,7 @@ import { TrailheadSheet } from '@/components/TrailheadUI';
 interface WebDownloadOpts { bufferKm?: number; minZ?: number; maxZ?: number; vectorOnly?: boolean; label: string; n?: number; s?: number; e?: number; w?: number; }
 
 export interface OfflineAreaSelection {
+  id: string;
   label: string;
   bounds: [[number, number], [number, number]];
   n: number;
@@ -54,6 +55,8 @@ export interface OfflineAreaSelection {
   estimatedMb: number;
   spanMi: number;
   areaSqMi: number;
+  createdAt?: number;
+  updatedAt?: number;
 }
 
 type RegionGroupKey = 'west' | 'central' | 'southeast' | 'northeastMidwest' | 'international' | 'europe';
@@ -135,7 +138,11 @@ interface Props {
   webCachedRegions?:    string[];
   webDownloadLabel?:    string;
   selectedArea?:         OfflineAreaSelection | null;
-  onStartAreaSelect?:    () => void;
+  savedAreas?:           OfflineAreaSelection[];
+  onStartAreaSelect?:    (area?: OfflineAreaSelection | null) => void;
+  onSelectArea?:         (area: OfflineAreaSelection) => void;
+  onRenameArea?:         (areaId: string, label: string) => void;
+  onDeleteArea?:         (areaId: string) => void;
 }
 
 // ── Shimmer animation for active progress bar ────────────────────────────────
@@ -500,7 +507,7 @@ export default function OfflineModal({
   onOfflinePlacesChanged,
   onWebDownloadBbox, onWebDownloadRoute, onWebCancelDownload, onWebClearRegion,
   webIsDownloading, webDownloadProgress, webDownloadMB, webCachedRegions, webDownloadLabel,
-  selectedArea, onStartAreaSelect,
+  selectedArea, savedAreas = [], onStartAreaSelect, onSelectArea, onRenameArea, onDeleteArea,
 }: Props) {
   const user        = useStore(st => st.user);
   const mapboxToken = useStore(st => st.mapboxToken);
@@ -685,6 +692,25 @@ export default function OfflineModal({
     );
   }, [authorizeAndRun, onWebDownloadBbox, selectedArea, startMlnPack, useNativeMap]);
 
+  const confirmDeleteArea = useCallback((area: OfflineAreaSelection) => {
+    Alert.alert(
+      'Delete offline area?',
+      `${area.label} will be removed from your saved area list.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            onWebClearRegion?.(area.label);
+            deleteMlnPack(area.label).catch(() => {});
+            onDeleteArea?.(area.id);
+          },
+        },
+      ],
+    );
+  }, [deleteMlnPack, onDeleteArea, onWebClearRegion]);
+
   const deleteTripEssentials = useCallback(async (packId: string) => {
     await deleteOfflinePlacePack(packId);
     await reloadPlacePacks();
@@ -823,10 +849,30 @@ export default function OfflineModal({
                       </View>
                       <StatusChip label={selectedArea ? 'SELECTED' : 'MAP'} color={selectedArea ? C.green : C.orange} />
                     </View>
+                    {selectedArea && (
+                      <View style={s.customAreaNameRow}>
+                        <Ionicons name="pencil-outline" size={13} color={C.text3} />
+                        <TextInput
+                          value={selectedArea.label}
+                          onChangeText={text => onRenameArea?.(selectedArea.id, text)}
+                          placeholder="Area name"
+                          placeholderTextColor={C.text3}
+                          style={s.customAreaNameInput}
+                          maxLength={42}
+                          returnKeyType="done"
+                        />
+                      </View>
+                    )}
                     <View style={s.customAreaActions}>
-                      <TouchableOpacity style={s.customAreaSecondary} onPress={onStartAreaSelect}>
+                      {selectedArea && (
+                        <TouchableOpacity style={s.customAreaSecondary} onPress={() => onStartAreaSelect?.(null)}>
+                          <Ionicons name="add-outline" size={13} color={C.text2} />
+                          <Text style={s.customAreaSecondaryText}>NEW AREA</Text>
+                        </TouchableOpacity>
+                      )}
+                      <TouchableOpacity style={s.customAreaSecondary} onPress={() => onStartAreaSelect?.(selectedArea ?? null)}>
                         <Ionicons name={selectedArea ? 'resize-outline' : 'expand-outline'} size={13} color={C.text2} />
-                        <Text style={s.customAreaSecondaryText}>{selectedArea ? 'CHANGE AREA' : 'CHOOSE AREA'}</Text>
+                        <Text style={s.customAreaSecondaryText}>{selectedArea ? 'ADJUST' : 'CHOOSE AREA'}</Text>
                       </TouchableOpacity>
                       <TouchableOpacity
                         disabled={!selectedArea || !!activePackName || !!webIsDownloading}
@@ -836,8 +882,43 @@ export default function OfflineModal({
                         <Ionicons name="cloud-download-outline" size={13} color="#fff" />
                         <Text style={s.customAreaPrimaryText}>{activePackName || webIsDownloading ? 'DOWNLOADING' : 'DOWNLOAD'}</Text>
                       </TouchableOpacity>
+                      {selectedArea && (
+                        <TouchableOpacity style={s.customAreaDeleteBtn} onPress={() => confirmDeleteArea(selectedArea)}>
+                          <Ionicons name="trash-outline" size={15} color={C.red} />
+                        </TouchableOpacity>
+                      )}
                     </View>
                   </View>
+
+                  {savedAreas.length > 0 && (
+                    <>
+                      <Section label="SAVED AREAS" />
+                      {savedAreas.map(area => {
+                        const active = selectedArea?.id === area.id;
+                        return (
+                          <View key={area.id} style={[s.savedAreaRow, active && s.savedAreaRowActive]}>
+                            <TouchableOpacity style={s.savedAreaMain} onPress={() => onSelectArea?.(area)}>
+                              <Text style={s.savedAreaTitle} numberOfLines={1}>{area.label}</Text>
+                              <Text style={s.savedAreaMeta} numberOfLines={1}>
+                                {area.detail === 'high' ? 'High detail' : 'Standard'} · {Math.round(area.areaSqMi).toLocaleString()} sq mi · ~{Math.max(1, Math.round(area.estimatedMb))} MB
+                              </Text>
+                            </TouchableOpacity>
+                            {active ? <StatusChip label="SELECTED" color={C.green} /> : (
+                              <TouchableOpacity style={s.savedAreaAction} onPress={() => onSelectArea?.(area)}>
+                                <Text style={s.savedAreaActionText}>SELECT</Text>
+                              </TouchableOpacity>
+                            )}
+                            <TouchableOpacity style={s.savedAreaIconBtn} onPress={() => { onSelectArea?.(area); onStartAreaSelect?.(area); }}>
+                              <Ionicons name="resize-outline" size={14} color={C.text2} />
+                            </TouchableOpacity>
+                            <TouchableOpacity style={s.savedAreaIconBtn} onPress={() => confirmDeleteArea(area)}>
+                              <Ionicons name="trash-outline" size={14} color={C.red} />
+                            </TouchableOpacity>
+                          </View>
+                        );
+                      })}
+                    </>
+                  )}
 
                   <Section label="DOWNLOAD THIS TRIP" />
                   {waypoints.length > 0 ? (
@@ -1383,17 +1464,48 @@ function makeStyles(C: ColorPalette) {
     },
     customAreaTitle: { color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '900', letterSpacing: 0.4 },
     customAreaText: { color: C.text3, fontSize: 10, lineHeight: 14, marginTop: 3 },
-    customAreaActions: { flexDirection: 'row', gap: 9, marginTop: 12 },
+    customAreaNameRow: {
+      flexDirection: 'row', alignItems: 'center', gap: 8,
+      minHeight: 42, borderRadius: 11, borderWidth: 1, borderColor: C.border,
+      backgroundColor: C.s2, paddingHorizontal: 10, marginTop: 12,
+    },
+    customAreaNameInput: {
+      flex: 1, color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '800',
+      paddingVertical: Platform.OS === 'ios' ? 10 : 7,
+    },
+    customAreaActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 9, marginTop: 12 },
     customAreaSecondary: {
-      flex: 1, minHeight: 40, borderRadius: 11, borderWidth: 1, borderColor: C.border,
+      flexGrow: 1, flexBasis: 112, minHeight: 40, borderRadius: 11, borderWidth: 1, borderColor: C.border,
       backgroundColor: C.s2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7,
     },
     customAreaSecondaryText: { color: C.text2, fontSize: 10, fontFamily: mono, fontWeight: '900' },
     customAreaPrimary: {
-      flex: 1, minHeight: 40, borderRadius: 11, backgroundColor: C.orange,
+      flexGrow: 1, flexBasis: 120, minHeight: 40, borderRadius: 11, backgroundColor: C.orange,
       flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7,
     },
     customAreaPrimaryText: { color: '#fff', fontSize: 10, fontFamily: mono, fontWeight: '900' },
+    customAreaDeleteBtn: {
+      width: 44, minHeight: 40, borderRadius: 11, borderWidth: 1, borderColor: C.red + '40',
+      backgroundColor: C.red + '12', alignItems: 'center', justifyContent: 'center',
+    },
+    savedAreaRow: {
+      flexDirection: 'row', alignItems: 'center', gap: 8,
+      backgroundColor: C.s1, borderRadius: 12, borderWidth: 1, borderColor: C.border,
+      padding: 10, marginBottom: 8,
+    },
+    savedAreaRowActive: { borderColor: C.green + '55', backgroundColor: C.green + '10' },
+    savedAreaMain: { flex: 1, minWidth: 0 },
+    savedAreaTitle: { color: C.text, fontSize: 11, fontFamily: mono, fontWeight: '900' },
+    savedAreaMeta: { color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 3 },
+    savedAreaAction: {
+      borderRadius: 8, borderWidth: 1, borderColor: C.orange + '45',
+      backgroundColor: C.orangeGlow, paddingHorizontal: 9, paddingVertical: 7,
+    },
+    savedAreaActionText: { color: C.orange, fontSize: 8, fontFamily: mono, fontWeight: '900' },
+    savedAreaIconBtn: {
+      width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
+      backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
+    },
     packProgressCard: {
       backgroundColor: C.s1, borderRadius: 10, padding: 12, marginBottom: 10,
       borderWidth: 1, borderColor: C.orange + '40', borderLeftWidth: 3, borderLeftColor: C.orange,

@@ -53,6 +53,7 @@ export interface OfflineAreaSelection {
   estimatedItems: number;
   estimatedMb: number;
   spanMi: number;
+  areaSqMi: number;
 }
 
 type RegionGroupKey = 'west' | 'central' | 'southeast' | 'northeastMidwest' | 'international' | 'europe';
@@ -816,7 +817,7 @@ export default function OfflineModal({
                         <Text style={s.customAreaTitle}>{selectedArea ? selectedArea.label.toUpperCase() : 'DRAW A DOWNLOAD BOX'}</Text>
                         <Text style={s.customAreaText}>
                           {selectedArea
-                            ? `${selectedArea.detail === 'high' ? 'High' : 'Standard'} detail · about ${Math.max(1, Math.round(selectedArea.estimatedMb))} MB · ${Math.round(selectedArea.spanMi)} mi wide`
+                            ? `${selectedArea.detail === 'high' ? 'High' : 'Standard'} detail · ${Math.round(selectedArea.areaSqMi).toLocaleString()} sq mi · about ${Math.max(1, Math.round(selectedArea.estimatedMb))} MB`
                             : 'Pick a small area on the map, resize it, then save full map detail for that box.'}
                         </Text>
                       </View>

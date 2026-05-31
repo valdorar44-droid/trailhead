@@ -104,6 +104,13 @@ function estimateOfflineAreaMb(items: number, detail: OfflineAreaDetail) {
   return Math.max(6, Math.round(items * perItemMb));
 }
 
+function formatOfflineAreaSqMi(areaSqMi: number) {
+  if (!Number.isFinite(areaSqMi)) return '0 sq mi';
+  if (areaSqMi >= 10_000) return `${(Math.round(areaSqMi / 100) * 100).toLocaleString()} sq mi`;
+  if (areaSqMi >= 100) return `${Math.round(areaSqMi).toLocaleString()} sq mi`;
+  return `${Math.max(1, Math.round(areaSqMi)).toLocaleString()} sq mi`;
+}
+
 // ─── US State bounding boxes for offline download ─────────────────────────────
 
 const US_STATES: Record<string, { name: string; n: number; s: number; e: number; w: number; icon: keyof typeof Ionicons.glyphMap }> = {
@@ -4135,6 +4142,7 @@ function MapScreen() {
       estimatedItems,
       estimatedMb: estimateOfflineAreaMb(estimatedItems, offlineAreaDetail),
       spanMi: Math.max(widthMi, heightMi),
+      areaSqMi: Math.max(1, widthMi * heightMi),
     };
   }, [offlineAreaBox, offlineAreaDetail, mapZoom, windowHeight, windowWidth]);
 
@@ -4360,6 +4368,7 @@ function MapScreen() {
       navMode
       || waterFollowActive
       || safeWaterSheetOwnsPage
+      || offlineAreaPicker
       || showMapDrawer
       || showSearch
       || showFilterSheet
@@ -4381,7 +4390,7 @@ function MapScreen() {
     );
     return () => setTabBarHidden(false);
   }, [
-    navMode, waterFollowActive, safeWaterSheetOwnsPage, showMapDrawer, showSearch, showFilterSheet, showLayerSheet, showMapStyleSheet, searchRouteCard, selectedCamp, selectedPlace, selectedTrail,
+    navMode, waterFollowActive, safeWaterSheetOwnsPage, offlineAreaPicker, showMapDrawer, showSearch, showFilterSheet, showLayerSheet, showMapStyleSheet, searchRouteCard, selectedCamp, selectedPlace, selectedTrail,
     selectedCommunityPin, tappedPoi, tappedGas, tappedTileSpot, tappedTrail,
     tappedWp, pendingPin, trailPinCaptureMode, trailRouteBuilderOpen, setTabBarHidden,
   ]);
@@ -10420,7 +10429,7 @@ function MapScreen() {
               <Text style={s.offlineAreaTitle}>Offline area</Text>
               <Text style={s.offlineAreaSub} numberOfLines={1}>
                 {offlineAreaSelection
-                  ? `${offlineAreaDetail === 'high' ? 'High detail' : 'Standard'} · ~${Math.max(1, Math.round(offlineAreaSelection.estimatedMb))} MB · ${Math.round(offlineAreaSelection.spanMi)} mi`
+                  ? `${offlineAreaDetail === 'high' ? 'High detail' : 'Standard'} · ${formatOfflineAreaSqMi(offlineAreaSelection.areaSqMi)} · ~${Math.max(1, Math.round(offlineAreaSelection.estimatedMb))} MB`
                   : 'Move the map, then resize the box.'}
               </Text>
             </View>
@@ -10449,7 +10458,7 @@ function MapScreen() {
             <Text style={s.offlineAreaBoxText}>Drag to move</Text>
           </View>
 
-          <View style={[s.offlineAreaPanel, { paddingBottom: bottomInset }]} pointerEvents="auto">
+          <View style={[s.offlineAreaPanel, { paddingBottom: bottomInset + 12 }]} pointerEvents="auto">
             <View style={s.offlineAreaSegment}>
               {(['standard', 'high'] as const).map(detail => {
                 const active = offlineAreaDetail === detail;

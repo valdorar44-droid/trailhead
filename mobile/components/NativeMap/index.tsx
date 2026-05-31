@@ -607,7 +607,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     userLoc, navMode, navCameraFollow = false, nativeNavEngineActive = false, navIdx, navHeading, navSpeed,
     mapLayer, routeOpts,
     traceMode = false, traceDraftCoords = [], traceRouteCoords = [], tracePinCoords = [],
-    showLandOverlay, showUsgsOverlay, showFire, showAva, showRadar, showTrailOverlay = true, showMvum, showNautical = false,
+    showLandOverlay, showUsgsOverlay, showTerrain, showFire, showAva, showRadar, showTrailOverlay = true, showMvum, showNautical = false,
     onMapReady, onBoundsChange, onMapGesture, onMapTap, onMapLongPress,
     onCampTap, onGasTap, onPoiTap, onWaterSpotTap, onCommunityPinTap, onTileCampTap, onBaseCampTap, onTrailTap, onWaypointTap,
     onRouteReady, onRoutePersist, onOffRoute, onOffRouteWarn, onBackOnRoute, onRouteProgress,
@@ -1033,9 +1033,19 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       : 'online';
   const trailMode: TrailSourceMode = showTrailOverlay ? (localTrails ? 'local' : 'online') : 'none';
   const mapStyleObj = useMemo(
-    () => buildMapStyle(mapLayer, mapboxToken || '', localTiles, tileSession, contourMode, trailMode, showNautical),
-    [mapLayer, mapboxToken, localTiles, tileSession, contourMode, trailMode, showNautical],
+    () => buildMapStyle(mapLayer, mapboxToken || '', localTiles, tileSession, contourMode, trailMode, showNautical, showTerrain),
+    [mapLayer, mapboxToken, localTiles, tileSession, contourMode, trailMode, showNautical, showTerrain],
   );
+
+  useEffect(() => {
+    if (navMode) return;
+    lastCamRef.current = Date.now();
+    camRef.current?.setCamera({
+      pitch: showTerrain ? 52 : 0,
+      animationDuration: 320,
+      animationMode: 'easeTo',
+    } as any);
+  }, [navMode, showTerrain]);
 
   // ── Imperative API (replaces postMessage) ───────────────────────────────────
   useImperativeHandle(ref, () => ({

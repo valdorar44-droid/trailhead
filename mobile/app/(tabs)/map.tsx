@@ -2076,6 +2076,7 @@ type MapFilterPreferences = {
   showUsgs?: boolean;
   showPois?: boolean;
   layerTrails?: boolean;
+  map3dEnabled?: boolean;
   layerFire?: boolean;
   layerAva?: boolean;
   layerRadar?: boolean;
@@ -4029,6 +4030,7 @@ function MapScreen() {
   // Dynamic map layers
   const [showLayerSheet, setShowLayerSheet] = useState(false);
   const [showMapStyleSheet, setShowMapStyleSheet] = useState(false);
+  const [map3dEnabled, setMap3dEnabled] = useState(false);
   const [layerTrails, setLayerTrails] = useState(true);
   const [layerFire,    setLayerFire]    = useState(false);
   const [layerAva,     setLayerAva]     = useState(false);
@@ -4358,6 +4360,7 @@ function MapScreen() {
           if (typeof prefs.showLands === 'boolean') setShowLands(prefs.showLands);
           if (typeof prefs.showUsgs === 'boolean') setShowUsgs(prefs.showUsgs);
           if (typeof prefs.showPois === 'boolean') setShowPois(prefs.showPois);
+          if (typeof prefs.map3dEnabled === 'boolean') setMap3dEnabled(prefs.map3dEnabled);
           if (typeof prefs.layerTrails === 'boolean') setLayerTrails(prefs.layerTrails);
           if (typeof prefs.layerFire === 'boolean') setLayerFire(prefs.layerFire);
           if (typeof prefs.layerAva === 'boolean') setLayerAva(prefs.layerAva);
@@ -4385,6 +4388,7 @@ function MapScreen() {
       showLands,
       showUsgs,
       showPois,
+      map3dEnabled,
       layerTrails,
       layerFire,
       layerAva,
@@ -4393,7 +4397,7 @@ function MapScreen() {
       layerNautical,
     };
     storage.set(MAP_FILTER_PREFS_KEY, JSON.stringify(prefs)).catch(() => {});
-  }, [activeFilters, activePinFilters, activePlaceFilters, layerAva, layerFire, layerMvum, layerNautical, layerRadar, layerTrails, mapLayer, showLands, showPois, showUsgs]);
+  }, [activeFilters, activePinFilters, activePlaceFilters, layerAva, layerFire, layerMvum, layerNautical, layerRadar, layerTrails, map3dEnabled, mapLayer, showLands, showPois, showUsgs]);
 
   useEffect(() => {
     const today = new Date().toISOString().slice(0, 10);
@@ -6697,8 +6701,20 @@ function MapScreen() {
     }));
   }
 
+  function toggleMap3d() {
+    const next = !map3dEnabled;
+    setMap3dEnabled(next);
+    webRef.current?.postMessage(JSON.stringify({ type: 'set_layer', layer: 'terrain', show: next }));
+    if (next && !mapboxToken) {
+      setQuickToast('3D view on. Terrain detail loads where available.');
+      setTimeout(() => setQuickToast(''), 3200);
+    }
+    Haptics.selectionAsync().catch(() => {});
+  }
+
   function resetMapFilterPreferences() {
     setMapLayerState('topo');
+    setMap3dEnabled(false);
     setActiveFilters([]);
     setActivePinFilters(DEFAULT_COMMUNITY_PIN_FILTERS);
     setActivePlaceFilters(DEFAULT_PLACE_FILTERS);
@@ -9965,6 +9981,123 @@ function MapScreen() {
     { id: 'dark', title: 'Dark Road', sub: 'Low-glare roads', colors: ['#0b1020', '#334155', '#fbbf24'] },
     { id: 'red', title: 'Red / Night', sub: 'Night-friendly contrast', colors: ['#12090b', '#7f1d1d', '#ef4444'] },
   ];
+  const renderLayerMiniPreview = (layer: { key: string; color: string; icon: keyof typeof Ionicons.glyphMap; val: boolean }) => {
+    const baseStyle = [s.layerTogglePreview, { borderColor: layer.color + '55', backgroundColor: layer.color + '14' }];
+    const activeDot = layer.val ? <View style={[s.layerToggleOnDot, { backgroundColor: layer.color }]} /> : null;
+    if (layer.key === '3d') {
+      return (
+        <View style={baseStyle}>
+          <View style={[s.layerPreviewHorizon, { backgroundColor: '#38bdf8' + '24' }]} />
+          <View style={[s.layerPreviewPeak, { backgroundColor: '#365314' }]} />
+          <View style={[s.layerPreviewPeak, s.layerPreviewPeakAlt, { backgroundColor: '#65a30d' }]} />
+          <View style={[s.layerPreviewBuilding, { left: 46, height: 28 }]} />
+          <View style={[s.layerPreviewBuilding, { left: 57, height: 18, opacity: 0.75 }]} />
+          {activeDot}
+        </View>
+      );
+    }
+    if (layer.key === 'lands') {
+      return (
+        <View style={baseStyle}>
+          <View style={[s.layerPreviewPatch, { left: 8, top: 10, width: 42, height: 26, backgroundColor: '#22c55e55' }]} />
+          <View style={[s.layerPreviewPatch, { right: 10, bottom: 8, width: 34, height: 24, backgroundColor: '#f59e0b4c' }]} />
+          <View style={[s.layerPreviewLine, { top: 39, left: -5, backgroundColor: '#ffffffa8', transform: [{ rotate: '-13deg' }] }]} />
+          {activeDot}
+        </View>
+      );
+    }
+    if (layer.key === 'usgs') {
+      return (
+        <View style={baseStyle}>
+          {[10, 22, 34, 46].map((top, idx) => (
+            <View key={top} style={[s.layerPreviewContour, { top, left: idx % 2 ? 8 : -8, borderColor: '#d97706aa' }]} />
+          ))}
+          <View style={[s.layerPreviewLine, { top: 30, backgroundColor: '#0ea5e9aa', transform: [{ rotate: '18deg' }] }]} />
+          {activeDot}
+        </View>
+      );
+    }
+    if (layer.key === 'pois') {
+      return (
+        <View style={baseStyle}>
+          {[['#f97316', 12, 16], ['#38bdf8', 34, 10], ['#22c55e', 54, 28], ['#eab308', 24, 38]].map(([color, left, top]) => (
+            <View key={`${left}-${top}`} style={[s.layerPreviewPin, { left: Number(left), top: Number(top), backgroundColor: String(color) }]} />
+          ))}
+          <View style={[s.layerPreviewLine, { top: 34, backgroundColor: '#ffffff66' }]} />
+          {activeDot}
+        </View>
+      );
+    }
+    if (layer.key === 'trails') {
+      return (
+        <View style={baseStyle}>
+          <View style={[s.layerPreviewTrailDash, { left: 5, top: 40, transform: [{ rotate: '-14deg' }] }]} />
+          <View style={[s.layerPreviewTrailDash, { left: 26, top: 35, transform: [{ rotate: '-14deg' }] }]} />
+          <View style={[s.layerPreviewTrailDash, { left: 47, top: 29, transform: [{ rotate: '-14deg' }] }]} />
+          <View style={[s.layerPreviewLine, { top: 19, backgroundColor: '#ef4444aa', transform: [{ rotate: '10deg' }] }]} />
+          {activeDot}
+        </View>
+      );
+    }
+    if (layer.key === 'nautical') {
+      return (
+        <View style={baseStyle}>
+          <View style={[s.layerPreviewWaterBand, { backgroundColor: '#0891b255' }]} />
+          <View style={[s.layerPreviewLine, { top: 37, backgroundColor: '#38bdf8cc', transform: [{ rotate: '-8deg' }] }]} />
+          <View style={[s.layerPreviewHazard, { left: 48, top: 16 }]} />
+          <View style={[s.layerPreviewBuoy, { left: 19, top: 27, backgroundColor: '#22c55e' }]} />
+          {activeDot}
+        </View>
+      );
+    }
+    if (layer.key === 'fire') {
+      return (
+        <View style={baseStyle}>
+          <View style={[s.layerPreviewPatch, { left: 15, top: 12, width: 46, height: 35, backgroundColor: '#ef444455' }]} />
+          <View style={[s.layerPreviewPatch, { left: 29, top: 20, width: 26, height: 19, backgroundColor: '#f97316aa' }]} />
+          <Ionicons name="flame" size={16} color="#fff" />
+          {activeDot}
+        </View>
+      );
+    }
+    if (layer.key === 'ava') {
+      return (
+        <View style={baseStyle}>
+          {['#22c55e', '#facc15', '#f97316', '#ef4444'].map((color, idx) => (
+            <View key={color} style={[s.layerPreviewAvaBand, { left: idx * 19, backgroundColor: color }]} />
+          ))}
+          <View style={[s.layerPreviewPeak, { backgroundColor: '#ffffff55', bottom: -6 }]} />
+          {activeDot}
+        </View>
+      );
+    }
+    if (layer.key === 'radar') {
+      return (
+        <View style={baseStyle}>
+          <View style={[s.layerPreviewRadarRing, { width: 58, height: 58, borderColor: '#06b6d455' }]} />
+          <View style={[s.layerPreviewRadarRing, { width: 36, height: 36, borderColor: '#22c55e88' }]} />
+          <View style={[s.layerPreviewPatch, { width: 26, height: 18, top: 16, left: 32, backgroundColor: '#facc1555' }]} />
+          {activeDot}
+        </View>
+      );
+    }
+    if (layer.key === 'mvum') {
+      return (
+        <View style={baseStyle}>
+          <View style={[s.layerPreviewLine, { top: 17, backgroundColor: '#22c55e', transform: [{ rotate: '7deg' }] }]} />
+          <View style={[s.layerPreviewLine, { top: 32, backgroundColor: '#f97316', transform: [{ rotate: '-18deg' }] }]} />
+          <View style={[s.layerPreviewLine, { top: 47, backgroundColor: '#ef4444', transform: [{ rotate: '16deg' }] }]} />
+          {activeDot}
+        </View>
+      );
+    }
+    return (
+      <View style={baseStyle}>
+        <Ionicons name={layer.icon as any} size={22} color={layer.val ? '#fff' : layer.color} />
+        {activeDot}
+      </View>
+    );
+  };
   const placeFilterChanged = activePlaceFilters.length !== DEFAULT_PLACE_FILTERS.length ||
     DEFAULT_PLACE_FILTERS.some(id => !activePlaceFilters.includes(id));
   const waterFilterBroadActive = activePlaceFilters.includes('water');
@@ -10258,7 +10391,7 @@ function MapScreen() {
           tracePinCoords={trailPinCaptureMode ? trailCapturePins : []}
           showLandOverlay={showLands}
           showUsgsOverlay={showUsgs}
-          showTerrain={false}
+          showTerrain={map3dEnabled && !navMode}
           showTrailOverlay={layerTrails}
           showMvum={layerMvum}
           showFire={layerFire}
@@ -10528,11 +10661,10 @@ function MapScreen() {
               {[
                 { label: 'Search route', sub: 'Start, destination, preview', icon: 'search-outline', tone: '#60a5fa', action: () => { setShowMapDrawer(false); setShowSearch(true); } },
                 { label: 'Trails', sub: 'Nearby trail discovery', icon: 'trail-sign-outline', tone: '#22c55e', action: openTrailDiscoveryFromDrawer },
-                { label: 'Layers', sub: 'Map, land, weather, MVUM', icon: 'layers-outline', tone: C.silverBright, action: () => { setShowMapDrawer(false); setShowLayerSheet(true); } },
+                { label: 'Layers', sub: 'Styles, 3D, land, weather', icon: 'layers-outline', tone: C.silverBright, action: () => { setShowMapDrawer(false); setShowLayerSheet(true); } },
                 { label: 'Filters', sub: 'Camps, places, community pins', icon: 'filter-outline', tone: C.orange, action: () => { setShowMapDrawer(false); setShowFilterSheet(true); } },
                 { label: 'Offline maps', sub: 'Download and readiness', icon: 'cloud-download-outline', tone: '#a3e635', action: () => { setShowMapDrawer(false); setShowOfflineModal(true); } },
                 { label: 'Trail builder', sub: 'Pin and snap a trail route', icon: 'git-branch-outline', tone: '#22c55e', action: () => { setShowMapDrawer(false); trailPinCaptureMode ? clearTrailPinCapture() : beginTrailPinCapture(); } },
-                { label: `Map style: ${layerLabel[mapLayer]}`, sub: 'Choose a base map', icon: 'map-outline', tone: '#38bdf8', action: () => { setShowMapDrawer(false); setShowMapStyleSheet(true); } },
                 { label: nearbyLoading ? 'Loading guide' : 'Audio guide', sub: nearbyNarration ? 'Replay nearby context' : 'What is around me', icon: 'headset-outline', tone: C.orange, action: () => { handleNearbyAudio(); } },
               ].map(item => (
                 <TouchableOpacity key={item.label} style={s.mapDrawerRow} onPress={item.action} activeOpacity={0.84}>
@@ -10878,6 +11010,28 @@ function MapScreen() {
         showsVerticalScrollIndicator={false}
         bounces={false}
       >
+        {!waterFollowActive && (
+          <TouchableOpacity
+            style={[s.ctrlBtn, s.ctrlBtnWide]}
+            onPress={() => setShowLayerSheet(true)}
+            activeOpacity={0.84}
+          >
+            <Ionicons name="layers-outline" size={17} color={OVR.text} />
+            <Text style={s.ctrlBtnText}>Layers</Text>
+          </TouchableOpacity>
+        )}
+
+        {!waterFollowActive && (
+          <TouchableOpacity
+            style={[s.ctrlBtn, s.ctrlBtnWide, map3dEnabled && s.ctrlBtnActive]}
+            onPress={toggleMap3d}
+            activeOpacity={0.84}
+          >
+            <Ionicons name={map3dEnabled ? 'cube' : 'cube-outline'} size={17} color={map3dEnabled ? '#fff' : OVR.text} />
+            <Text style={[s.ctrlBtnText, map3dEnabled && { color: '#fff' }]}>{map3dEnabled ? '2D' : '3D'}</Text>
+          </TouchableOpacity>
+        )}
+
         <TouchableOpacity style={s.ctrlBtn} onPress={centerMapOnUser} disabled={!userLoc}>
           <Ionicons name="locate" size={20} color={userLoc ? OVR.text : OVR.text3} />
         </TouchableOpacity>
@@ -13720,58 +13874,59 @@ function MapScreen() {
             </ScrollView>
           ) : (
           <ScrollView showsVerticalScrollIndicator={false}>
-            <Text style={s.layerSectionHead}>MAP OVERLAYS</Text>
-            {([
-              { key: 'lands', label: 'Public Land Tint', sub: 'BLM/USFS/NPS color overlay. Requires signal unless cached.', icon: 'map-outline', val: showLands, color: '#22c55e', toggle: toggleLandOverlay },
-              { key: 'usgs', label: 'USGS Topo + Trails', sub: 'Topo raster with contours, paths, labels, and land features.', icon: 'trail-sign-outline', val: showUsgs, color: '#0ea5e9', toggle: toggleUsgsOverlay },
-              { key: 'pois', label: 'Places', sub: 'Live and downloaded fuel, water, trailheads, services, viewpoints, and attractions.', icon: 'location-outline', val: showPois, color: '#3b82f6', toggle: togglePoiOverlay },
-              { key: 'trails', label: 'Offroad Trails', sub: 'Subtle dashed roads and paths until classified trail tiles are rebuilt.', icon: 'trail-sign-outline', val: layerTrails, color: '#22c55e', toggle: setLayerTrails },
-              { key: 'nautical', label: 'Safe Water Structure', sub: 'Bathymetry contours, shallow zones, hazards, open seamark lines, buoys, and markers where sources exist.', icon: 'boat-outline', val: layerNautical, color: '#0891b2', toggle: (v: boolean) => { if (!v) { closeSafeWaterMode(); return; } setLayerNautical(true); toggleDataLayer('nautical', true); if (v) setActivePlaceFilters(prev => Array.from(new Set([...prev, ...WATER_NAV_PLACE_FILTER_IDS]))); } },
-            ] as const).map(l => (
-              <TouchableOpacity key={l.key} style={s.layerRow} onPress={() => l.toggle(!l.val)}>
-                <View style={[s.layerRowIcon, l.val && { backgroundColor: l.color }]}>
-                  <Ionicons name={l.icon as any} size={16} color={l.val ? '#fff' : C.text2} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.layerRowLabel}>{l.label}</Text>
-                  <Text style={s.layerRowSub}>{l.sub}</Text>
-                </View>
-                <View style={[s.layerDot, l.val && { backgroundColor: l.color }]} />
-              </TouchableOpacity>
-            ))}
-
-            <Text style={s.layerSectionHead}>CONDITIONS HUB</Text>
-            {([
-              { key: 'fire',  label: 'Active Wildfires',   sub: 'Cached WFIGS perimeters plus FIRMS detections in route alerts.', icon: 'flame-outline', val: layerFire,  set: setLayerFire,  color: '#ef4444' },
-              { key: 'ava',   label: 'Avalanche Zones',    sub: 'Avalanche.org danger zones. Requires signal.', icon: 'snow-outline',  val: layerAva,   set: setLayerAva,   color: '#3b82f6' },
-              { key: 'radar', label: 'Rain Radar',         sub: 'Latest radar raster; weather and AQI warnings flow into alerts.', icon: 'rainy-outline', val: layerRadar, set: setLayerRadar, color: '#06b6d4' },
-            ] as const).map(l => (
-              <TouchableOpacity key={l.key} style={s.layerRow} onPress={() => { const nv = !l.val; l.set(nv); toggleDataLayer(l.key, nv); }}>
-                <View style={[s.layerRowIcon, l.val && { backgroundColor: l.color }]}>
-                  <Ionicons name={l.icon as any} size={16} color={l.val ? '#fff' : C.text2} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.layerRowLabel}>{l.label}</Text>
-                  <Text style={s.layerRowSub}>{l.sub}</Text>
-                </View>
-                <View style={[s.layerDot, l.val && { backgroundColor: l.color }]} />
-              </TouchableOpacity>
-            ))}
-
-            {([
-              { key: 'mvum', label: 'MVUM — Legal Access', sub: 'USFS motor-vehicle-use context where available. Informational, not turn-by-turn routing.', icon: 'car-outline', val: layerMvum, set: setLayerMvum, color: '#22c55e' },
-            ] as const).map(l => (
-              <TouchableOpacity key={l.key} style={s.layerRow} onPress={() => { const nv = !l.val; l.set(nv); toggleDataLayer(l.key, nv); }}>
-                <View style={[s.layerRowIcon, l.val && { backgroundColor: l.color }]}>
-                  <Ionicons name={l.icon as any} size={16} color={l.val ? '#fff' : C.text2} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.layerRowLabel}>{l.label}</Text>
-                  <Text style={s.layerRowSub}>{l.sub}</Text>
-                </View>
-                <View style={[s.layerDot, l.val && { backgroundColor: l.color }]} />
-              </TouchableOpacity>
-            ))}
+            <Text style={s.layerSectionHead}>MAP STYLES + LAYERS</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={s.layerStyleCarousel}
+            >
+              {mapStyleOptions.map(option => {
+                const active = option.id === mapLayer;
+                return (
+                  <TouchableOpacity
+                    key={option.id}
+                    style={[s.layerStyleCard, active && s.layerStyleCardActive]}
+                    activeOpacity={0.86}
+                    onPress={() => applyMapLayer(option.id)}
+                  >
+                    <View style={[s.layerStylePreview, { backgroundColor: option.colors[0] }]}>
+                      <View style={[s.mapStylePreviewWater, { backgroundColor: option.colors[2] }]} />
+                      <View style={[s.mapStylePreviewLand, { backgroundColor: option.colors[1] }]} />
+                      <View style={s.mapStylePreviewRoad} />
+                      <View style={[s.mapStylePreviewRoad, s.mapStylePreviewRoadAlt]} />
+                    </View>
+                    <View style={s.layerStyleCardText}>
+                      <Text style={s.layerStyleTitle} numberOfLines={1}>{option.title}</Text>
+                      <Text style={s.layerStyleSub} numberOfLines={1}>{option.sub}</Text>
+                    </View>
+                    {active && <Ionicons name="checkmark-circle" size={17} color={C.green} />}
+                  </TouchableOpacity>
+                );
+              })}
+              {([
+                { key: '3d', label: map3dEnabled ? '2D View' : '3D Terrain', sub: map3dEnabled ? 'Return to flat map' : 'Tilted terrain and buildings', icon: map3dEnabled ? 'map-outline' : 'cube-outline', val: map3dEnabled, color: '#a3e635', toggle: (_v: boolean) => toggleMap3d() },
+                { key: 'lands', label: 'Public Land', sub: 'BLM / USFS / parks tint', icon: 'map-outline', val: showLands, color: '#22c55e', toggle: toggleLandOverlay },
+                { key: 'usgs', label: 'USGS Topo', sub: 'Topo raster + trails', icon: 'trail-sign-outline', val: showUsgs, color: '#0ea5e9', toggle: toggleUsgsOverlay },
+                { key: 'pois', label: 'Places', sub: 'Fuel, water, services', icon: 'location-outline', val: showPois, color: '#3b82f6', toggle: togglePoiOverlay },
+                { key: 'trails', label: 'Offroad', sub: 'Tracks and paths', icon: 'trail-sign-outline', val: layerTrails, color: '#22c55e', toggle: setLayerTrails },
+                { key: 'nautical', label: 'Safe Water', sub: 'Structure and hazards', icon: 'boat-outline', val: layerNautical, color: '#0891b2', toggle: (v: boolean) => { if (!v) { closeSafeWaterMode(); return; } setLayerNautical(true); toggleDataLayer('nautical', true); setActivePlaceFilters(prev => Array.from(new Set([...prev, ...WATER_NAV_PLACE_FILTER_IDS]))); } },
+                { key: 'fire', label: 'Wildfire', sub: 'Active fire perimeters', icon: 'flame-outline', val: layerFire, color: '#ef4444', toggle: (v: boolean) => { setLayerFire(v); toggleDataLayer('fire', v); } },
+                { key: 'ava', label: 'Avalanche', sub: 'Danger zones', icon: 'snow-outline', val: layerAva, color: '#3b82f6', toggle: (v: boolean) => { setLayerAva(v); toggleDataLayer('ava', v); } },
+                { key: 'radar', label: 'Radar', sub: 'Rain radar', icon: 'rainy-outline', val: layerRadar, color: '#06b6d4', toggle: (v: boolean) => { setLayerRadar(v); toggleDataLayer('radar', v); } },
+                { key: 'mvum', label: 'MVUM', sub: 'Legal access', icon: 'car-outline', val: layerMvum, color: '#22c55e', toggle: (v: boolean) => { setLayerMvum(v); toggleDataLayer('mvum', v); } },
+              ] as Array<{ key: string; label: string; sub: string; icon: keyof typeof Ionicons.glyphMap; val: boolean; color: string; toggle: (v: boolean) => void }>).map(layer => (
+                <TouchableOpacity
+                  key={layer.key}
+                  style={[s.layerToggleCard, layer.val && { borderColor: layer.color + '88', backgroundColor: layer.color + '16' }]}
+                  activeOpacity={0.86}
+                  onPress={() => layer.toggle(!layer.val)}
+                >
+                  {renderLayerMiniPreview(layer)}
+                  <Text style={s.layerStyleTitle} numberOfLines={1}>{layer.label}</Text>
+                  <Text style={s.layerStyleSub} numberOfLines={1}>{layer.sub}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
 
             {layerNautical && (
               <View style={{ paddingHorizontal: 16, paddingBottom: 8, gap: 6 }}>
@@ -15472,6 +15627,14 @@ const makeStyles = (C: ColorPalette) => {
     shadowOffset: { width: 0, height: 0 },
     elevation: 12,
   },
+  ctrlBtnWide: {
+    width: 86,
+    paddingHorizontal: 12,
+    borderRadius: 22,
+    flexDirection: 'row',
+    gap: 6,
+  },
+  ctrlBtnText: { color: OVR.text, fontSize: 10, fontFamily: mono, fontWeight: '900' },
   ctrlBtnActive: {
     backgroundColor: 'rgba(245,245,247,0.14)',
     borderColor: 'rgba(245,245,247,0.26)',
@@ -18114,6 +18277,177 @@ const makeStyles = (C: ColorPalette) => {
   layerSectionHead: {
     color: C.text3, fontSize: 10, fontWeight: '800', fontFamily: mono, letterSpacing: 1.5,
     paddingHorizontal: 16, paddingTop: 18, paddingBottom: 8,
+  },
+  layerStyleCarousel: {
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingBottom: 14,
+  },
+  layerStyleCard: {
+    width: 156,
+    minHeight: 146,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.s1,
+    padding: 10,
+    gap: 9,
+  },
+  layerStyleCardActive: {
+    borderColor: C.green + '88',
+    backgroundColor: C.green + '12',
+  },
+  layerStylePreview: {
+    height: 76,
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  layerStyleCardText: {
+    minHeight: 32,
+  },
+  layerStyleTitle: {
+    color: C.text,
+    fontSize: 12,
+    fontFamily: mono,
+    fontWeight: '900',
+  },
+  layerStyleSub: {
+    color: C.text3,
+    fontSize: 9,
+    fontFamily: mono,
+    marginTop: 2,
+  },
+  layerToggleCard: {
+    width: 156,
+    minHeight: 146,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.s1,
+    padding: 10,
+    gap: 8,
+  },
+  layerTogglePreview: {
+    height: 76,
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  layerToggleOnDot: {
+    position: 'absolute',
+    right: 8,
+    top: 8,
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: '#fff',
+  },
+  layerPreviewHorizon: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    height: 30,
+  },
+  layerPreviewPeak: {
+    position: 'absolute',
+    left: 9,
+    bottom: -16,
+    width: 50,
+    height: 50,
+    borderRadius: 8,
+    transform: [{ rotate: '45deg' }],
+  },
+  layerPreviewPeakAlt: {
+    left: 34,
+    bottom: -24,
+    width: 58,
+    height: 58,
+    opacity: 0.9,
+  },
+  layerPreviewBuilding: {
+    position: 'absolute',
+    bottom: 10,
+    width: 8,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.68)',
+  },
+  layerPreviewPatch: {
+    position: 'absolute',
+    borderRadius: 18,
+  },
+  layerPreviewLine: {
+    position: 'absolute',
+    left: -8,
+    width: 102,
+    height: 4,
+    borderRadius: 4,
+  },
+  layerPreviewContour: {
+    position: 'absolute',
+    width: 82,
+    height: 28,
+    borderRadius: 28,
+    borderWidth: 1,
+    opacity: 0.88,
+  },
+  layerPreviewPin: {
+    position: 'absolute',
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  layerPreviewTrailDash: {
+    position: 'absolute',
+    width: 16,
+    height: 5,
+    borderRadius: 5,
+    backgroundColor: '#22c55e',
+  },
+  layerPreviewWaterBand: {
+    position: 'absolute',
+    left: -16,
+    right: -16,
+    top: 26,
+    height: 36,
+    borderRadius: 26,
+    transform: [{ rotate: '-8deg' }],
+  },
+  layerPreviewHazard: {
+    position: 'absolute',
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#fff',
+    backgroundColor: '#ef4444',
+  },
+  layerPreviewBuoy: {
+    position: 'absolute',
+    width: 10,
+    height: 18,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: '#fff',
+  },
+  layerPreviewAvaBand: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: 20,
+    opacity: 0.72,
+  },
+  layerPreviewRadarRing: {
+    position: 'absolute',
+    borderRadius: 40,
+    borderWidth: 2,
   },
   layerRow: {
     flexDirection: 'row', alignItems: 'center', gap: 12,

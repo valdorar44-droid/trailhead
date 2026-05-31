@@ -59,6 +59,7 @@ export function buildMapStyle(
   contourMode: ContourSourceMode = 'none',
   trailMode: TrailSourceMode = 'online',
   showNautical = false,
+  showTerrain = false,
 ): object {
   // Changing the source id (not just the URL) forces MapLibre to fully recreate
   // the source and drop its tile cache — the correct approach for cache-busting.
@@ -81,6 +82,7 @@ export function buildMapStyle(
   const lwHalo = sat ? 'rgba(0,0,0,0.85)' : palette.halo;
   const showContours = contourMode !== 'none' && !sat;
   const showTrailPack = trailMode === 'local';
+  const demId = `dem${tileSession}`;
   const trailVisualClass = [
     'coalesce',
     ['get', 'trail_visual_class'],
@@ -123,6 +125,15 @@ export function buildMapStyle(
       tiles: [`https://api.mapbox.com/v4/mapbox.satellite/{z}/{x}/{y}@2x.jpg90?access_token=${mapboxToken}`],
       tileSize: 512,
       maxzoom: 19,
+    };
+  }
+  if (showTerrain && mapboxToken) {
+    sources[demId] = {
+      type: 'raster-dem',
+      tiles: [`https://api.mapbox.com/raster/v1/mapbox.mapbox-terrain-dem-v1/{z}/{x}/{y}.webp?access_token=${mapboxToken}`],
+      tileSize: 512,
+      maxzoom: 14,
+      encoding: 'mapbox',
     };
   }
   if (showContours) {
@@ -184,6 +195,18 @@ export function buildMapStyle(
     layers.push({
       id: 'satellite', type: 'raster', source: 'sat',
       paint: { 'raster-opacity': 1, 'raster-fade-duration': 0 },
+    });
+  }
+  if (showTerrain && mapboxToken) {
+    layers.push({
+      id: 'terrain-hillshade', type: 'hillshade', source: demId,
+      paint: {
+        'hillshade-shadow-color': sat ? '#111827' : '#2f2618',
+        'hillshade-highlight-color': sat ? '#f8fafc' : '#d1b27b',
+        'hillshade-accent-color': sat ? '#475569' : '#8b6b3d',
+        'hillshade-exaggeration': sat ? 0.26 : 0.38,
+        'hillshade-opacity': sat ? 0.34 : 0.42,
+      },
     });
   }
 
@@ -535,6 +558,30 @@ export function buildMapStyle(
       filter: ['==', ['get', 'kind'], 'trailhead'],
       paint: { 'circle-radius': 5, 'circle-color': '#22c55e', 'circle-stroke-width': 1.5, 'circle-stroke-color': '#fff', 'circle-opacity': labelOp } },
 
+    ...(showTerrain ? [
+      { id: 'building-extrusion', type: 'fill-extrusion', source: pmId, 'source-layer': 'buildings',
+        minzoom: 15,
+        filter: ['any', ['has', 'height'], ['has', 'render_height'], ['has', 'levels']],
+        paint: {
+          'fill-extrusion-color': sat ? '#d6d3d1' : '#3d4654',
+          'fill-extrusion-opacity': sat ? 0.42 : 0.34,
+          'fill-extrusion-height': [
+            'case',
+            ['has', 'height'], ['to-number', ['get', 'height']],
+            ['has', 'render_height'], ['to-number', ['get', 'render_height']],
+            ['has', 'levels'], ['*', ['to-number', ['get', 'levels']], 3],
+            10,
+          ],
+          'fill-extrusion-base': [
+            'case',
+            ['has', 'min_height'], ['to-number', ['get', 'min_height']],
+            ['has', 'render_min_height'], ['to-number', ['get', 'render_min_height']],
+            0,
+          ],
+          'fill-extrusion-vertical-gradient': true,
+        } },
+    ] : []),
+
     // Labels
     { id: 'water-name', type: 'symbol', source: pmId, 'source-layer': 'water',
       filter: ['has', 'name'], minzoom: 7,
@@ -674,6 +721,7 @@ export function buildMapStyle(
     version: 8 as const,
     sources,
     glyphs: GLYPH_URL,
+    ...(showTerrain && mapboxToken ? { terrain: { source: demId, exaggeration: 1.45 } } : {}),
     layers,
   };
 }

@@ -15,7 +15,7 @@ import { api, ApiError, PaywallError, TripResult, TrailDNA } from '@/lib/api';
 import PaywallModal from '@/components/PaywallModal';
 import AppReviewPrompt from '@/components/AppReviewPrompt';
 import TourTarget from '@/components/TourTarget';
-import { TrailheadButton, TrailheadButtonDock, TrailheadCard, TrailheadTopBar } from '@/components/TrailheadUI';
+import { TrailheadButton, TrailheadButtonDock, TrailheadCard } from '@/components/TrailheadUI';
 import { useStore } from '@/lib/store';
 import { useTheme, useTag, mono, ColorPalette } from '@/lib/design';
 import { saveOfflineTrip, loadOfflineTrip } from '@/lib/offlineTrips';
@@ -461,28 +461,27 @@ export default function PlanScreen() {
       />
 
       {/* ── Header ── */}
-      <TrailheadTopBar
-        title="TRAILHEAD"
-        subtitle="AI OVERLAND GUIDE"
-        icon="compass-outline"
-        style={s.header}
-        right={(
-          <>
-            {user && (
-              <TouchableOpacity style={s.creditPill} onPress={() => setPaywallVisible(true)}>
-                <Ionicons name="flash" size={12} color={C.orange} />
-                <Text style={s.creditPillText}>{user.credits}</Text>
-              </TouchableOpacity>
-            )}
-            {(planPhase === 'active' || planPhase === 'editing') && (
-              <View style={s.editBadge}>
-                <Ionicons name="pencil" size={11} color={C.gold} />
-                <Text style={s.editBadgeText}>EDIT</Text>
-              </View>
-            )}
-          </>
+      <View style={s.header}>
+        <View style={s.logoBadge}>
+          <Image source={TRAILHEAD_LOGO} style={s.logoBadgeImage} resizeMode="cover" />
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={s.logoName}>Trailhead</Text>
+          <Text style={s.logoTag}>OVERLAND GUIDE</Text>
+        </View>
+        {user && (
+          <TouchableOpacity style={s.creditPill} onPress={() => setPaywallVisible(true)}>
+            <Ionicons name="flash" size={12} color={C.orange} />
+            <Text style={s.creditPillText}>{user.credits}</Text>
+          </TouchableOpacity>
         )}
-      />
+        {(planPhase === 'active' || planPhase === 'editing') && (
+          <View style={s.editBadge}>
+            <Ionicons name="pencil" size={11} color={C.gold} />
+            <Text style={s.editBadgeText}>EDIT</Text>
+          </View>
+        )}
+      </View>
 
       {/* ── Offline saved toast ── */}
       {offlineToast && (
@@ -1132,9 +1131,19 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   // Header
   header: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 18, paddingVertical: 13,
-    borderBottomWidth: 1, borderColor: C.border,
-    backgroundColor: C.glassStrong,
+    marginHorizontal: 14,
+    marginTop: 8,
+    marginBottom: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: C.border2,
+    backgroundColor: C.bg === '#050505' ? 'rgba(17,20,24,0.88)' : C.glassStrong,
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
   },
   logoBadge: {
     width: 36, height: 36, borderRadius: 14,

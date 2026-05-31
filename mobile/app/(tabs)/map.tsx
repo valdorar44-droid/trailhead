@@ -8124,19 +8124,6 @@ function MapScreen() {
     setShowMapDrawer(true);
     Haptics.selectionAsync().catch(() => {});
   }, [canOpenMapDrawer]);
-  const drawerEdgePan = useMemo(() => PanResponder.create({
-    onStartShouldSetPanResponder: () => false,
-    onMoveShouldSetPanResponder: (_, gesture) => (
-      canOpenMapDrawer && gesture.dx > 8 && Math.abs(gesture.dy) < 24 && Math.abs(gesture.dx) > Math.abs(gesture.dy)
-    ),
-    onMoveShouldSetPanResponderCapture: (_, gesture) => (
-      canOpenMapDrawer && gesture.dx > 8 && Math.abs(gesture.dy) < 24 && Math.abs(gesture.dx) > Math.abs(gesture.dy)
-    ),
-    onPanResponderTerminationRequest: () => false,
-    onPanResponderRelease: (_, gesture) => {
-      if (gesture.dx > 22 || gesture.vx > 0.24) openMapDrawer();
-    },
-  }), [canOpenMapDrawer, openMapDrawer]);
   const collapsedPanelPan = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => false,
     onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dy) > 6 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
@@ -10197,7 +10184,7 @@ function MapScreen() {
       (safeWaterPlanningActive && waterRouteReview)
     )
   );
-  const compassTop = Math.max(insets.top + 10, 18);
+  const compassTop = Math.max(insets.top + 6, 14);
 
   const nativeNavigationPanel = navMode ? (
     <TrailheadSheet handle={false} style={s.navHud} contentStyle={s.navHudInner}>
@@ -10634,17 +10621,6 @@ function MapScreen() {
         </TourTarget>
       )}
 
-      {canOpenMapDrawer && (
-        <TouchableOpacity
-          style={[s.mapDrawerEdgePull, { top: compassTop + 58 }]}
-          onPress={openMapDrawer}
-          activeOpacity={0.8}
-          {...drawerEdgePan.panHandlers}
-        >
-          <View style={s.mapDrawerEdgeGrip} />
-        </TouchableOpacity>
-      )}
-
       {showMapDrawer && (
         <View style={s.mapDrawerOverlay} pointerEvents="auto">
           <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => setShowMapDrawer(false)} />
@@ -11012,23 +10988,23 @@ function MapScreen() {
       >
         {!waterFollowActive && (
           <TouchableOpacity
-            style={[s.ctrlBtn, s.ctrlBtnWide]}
+            style={s.ctrlBtn}
             onPress={() => setShowLayerSheet(true)}
             activeOpacity={0.84}
+            accessibilityLabel="Open layers"
           >
             <Ionicons name="layers-outline" size={17} color={OVR.text} />
-            <Text style={s.ctrlBtnText}>Layers</Text>
           </TouchableOpacity>
         )}
 
         {!waterFollowActive && (
           <TouchableOpacity
-            style={[s.ctrlBtn, s.ctrlBtnWide, map3dEnabled && s.ctrlBtnActive]}
+            style={[s.ctrlBtn, map3dEnabled && s.ctrlBtnActive]}
             onPress={toggleMap3d}
             activeOpacity={0.84}
+            accessibilityLabel={map3dEnabled ? 'Turn off 3D map' : 'Turn on 3D map'}
           >
             <Ionicons name={map3dEnabled ? 'cube' : 'cube-outline'} size={17} color={map3dEnabled ? '#fff' : OVR.text} />
-            <Text style={[s.ctrlBtnText, map3dEnabled && { color: '#fff' }]}>{map3dEnabled ? '2D' : '3D'}</Text>
           </TouchableOpacity>
         )}
 
@@ -13816,10 +13792,18 @@ function MapScreen() {
       <Modal
         visible={showLayerSheet}
         animationType="slide"
-        presentationStyle="pageSheet"
+        transparent
+        presentationStyle="overFullScreen"
         onRequestClose={() => showTrailList ? setShowTrailList(false) : setShowLayerSheet(false)}
       >
-        <View style={s.layerSheet}>
+        <View style={s.layerModalOverlay}>
+          <TouchableOpacity
+            style={s.layerBackdropHit}
+            activeOpacity={1}
+            onPress={() => { setShowTrailList(false); setShowLayerSheet(false); }}
+          />
+        <View style={[s.layerSheet, showTrailList ? s.layerSheetTall : s.layerSheetHalf]}>
+          <View style={s.layerSheetHandle} />
           <View style={s.layerSheetHeader}>
             {showTrailList ? (
               <TouchableOpacity onPress={() => setShowTrailList(false)}>
@@ -13827,7 +13811,7 @@ function MapScreen() {
               </TouchableOpacity>
             ) : null}
             <View style={{ flex: 1 }}>
-              <Text style={s.layerSheetTitle}>{showTrailList ? 'TRAIL DISCOVERY' : 'MAP LAYERS'}</Text>
+              <Text style={s.layerSheetTitle}>{showTrailList ? 'TRAIL DISCOVERY' : 'LAYERS'}</Text>
               {showTrailList ? (
                 <Text style={s.trailListSub}>{trailDiscoveries.length ? `${trailDiscoveries.length} trail places loaded` : 'Search near you or in the visible map area'}</Text>
               ) : null}
@@ -13873,8 +13857,8 @@ function MapScreen() {
               ))}
             </ScrollView>
           ) : (
-          <ScrollView showsVerticalScrollIndicator={false}>
-            <Text style={s.layerSectionHead}>MAP STYLES + LAYERS</Text>
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.layerSheetContent}>
+            <Text style={s.layerSectionHead}>MAP STYLE</Text>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -13903,6 +13887,14 @@ function MapScreen() {
                   </TouchableOpacity>
                 );
               })}
+            </ScrollView>
+
+            <Text style={s.layerSectionHead}>LAYERS</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={s.layerStyleCarousel}
+            >
               {([
                 { key: '3d', label: map3dEnabled ? '2D View' : '3D Terrain', sub: map3dEnabled ? 'Return to flat map' : 'Tilted terrain and buildings', icon: map3dEnabled ? 'map-outline' : 'cube-outline', val: map3dEnabled, color: '#a3e635', toggle: (_v: boolean) => toggleMap3d() },
                 { key: 'lands', label: 'Public Land', sub: 'BLM / USFS / parks tint', icon: 'map-outline', val: showLands, color: '#22c55e', toggle: toggleLandOverlay },
@@ -14022,6 +14014,7 @@ function MapScreen() {
             <View style={{ height: 40 }} />
           </ScrollView>
           )}
+        </View>
         </View>
       </Modal>
 
@@ -15627,14 +15620,6 @@ const makeStyles = (C: ColorPalette) => {
     shadowOffset: { width: 0, height: 0 },
     elevation: 12,
   },
-  ctrlBtnWide: {
-    width: 86,
-    paddingHorizontal: 12,
-    borderRadius: 22,
-    flexDirection: 'row',
-    gap: 6,
-  },
-  ctrlBtnText: { color: OVR.text, fontSize: 10, fontFamily: mono, fontWeight: '900' },
   ctrlBtnActive: {
     backgroundColor: 'rgba(245,245,247,0.14)',
     borderColor: 'rgba(245,245,247,0.26)',
@@ -18267,45 +18252,86 @@ const makeStyles = (C: ColorPalette) => {
   pinTextArea: { minHeight: 74, textAlignVertical: 'top' },
 
   // Layer sheet
-  layerSheet: { flex: 1, backgroundColor: C.bg },
+  layerModalOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.18)',
+  },
+  layerBackdropHit: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  layerSheet: {
+    backgroundColor: C.bg,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    borderColor: C.border,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOpacity: 0.32,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: -10 },
+    elevation: 24,
+  },
+  layerSheetHalf: {
+    maxHeight: '56%',
+    minHeight: 390,
+  },
+  layerSheetTall: {
+    maxHeight: '82%',
+    minHeight: 520,
+  },
+  layerSheetHandle: {
+    width: 42,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: C.border,
+    alignSelf: 'center',
+    marginTop: 9,
+    marginBottom: 4,
+  },
   layerSheetHeader: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 18, paddingTop: 18, paddingBottom: 12,
+    paddingHorizontal: 18, paddingTop: 8, paddingBottom: 10,
     borderBottomWidth: 1, borderBottomColor: C.border,
   },
   layerSheetTitle: { color: C.text, fontSize: 14, fontWeight: '900', fontFamily: mono, letterSpacing: 1 },
+  layerSheetContent: {
+    paddingBottom: 16,
+  },
   layerSectionHead: {
     color: C.text3, fontSize: 10, fontWeight: '800', fontFamily: mono, letterSpacing: 1.5,
-    paddingHorizontal: 16, paddingTop: 18, paddingBottom: 8,
+    paddingHorizontal: 16, paddingTop: 12, paddingBottom: 7,
   },
   layerStyleCarousel: {
     gap: 10,
     paddingHorizontal: 16,
-    paddingBottom: 14,
+    paddingBottom: 10,
   },
   layerStyleCard: {
-    width: 156,
-    minHeight: 146,
-    borderRadius: 16,
+    width: 142,
+    minHeight: 128,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: C.border,
     backgroundColor: C.s1,
-    padding: 10,
-    gap: 9,
+    padding: 9,
+    gap: 7,
   },
   layerStyleCardActive: {
     borderColor: C.green + '88',
     backgroundColor: C.green + '12',
   },
   layerStylePreview: {
-    height: 76,
-    borderRadius: 12,
+    height: 64,
+    borderRadius: 11,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.14)',
   },
   layerStyleCardText: {
-    minHeight: 32,
+    minHeight: 30,
   },
   layerStyleTitle: {
     color: C.text,
@@ -18320,18 +18346,18 @@ const makeStyles = (C: ColorPalette) => {
     marginTop: 2,
   },
   layerToggleCard: {
-    width: 156,
-    minHeight: 146,
-    borderRadius: 16,
+    width: 142,
+    minHeight: 128,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: C.border,
     backgroundColor: C.s1,
-    padding: 10,
-    gap: 8,
+    padding: 9,
+    gap: 7,
   },
   layerTogglePreview: {
-    height: 76,
-    borderRadius: 12,
+    height: 64,
+    borderRadius: 11,
     overflow: 'hidden',
     borderWidth: 1,
     alignItems: 'center',

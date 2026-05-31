@@ -11004,7 +11004,9 @@ function MapScreen() {
             activeOpacity={0.84}
             accessibilityLabel={map3dEnabled ? 'Turn off 3D map' : 'Turn on 3D map'}
           >
-            <Ionicons name={map3dEnabled ? 'cube' : 'cube-outline'} size={17} color={map3dEnabled ? '#fff' : OVR.text} />
+            <Text style={[s.map3dToggleText, map3dEnabled && s.map3dToggleTextActive]}>
+              {map3dEnabled ? '2D' : '3D'}
+            </Text>
           </TouchableOpacity>
         )}
 
@@ -15624,6 +15626,16 @@ const makeStyles = (C: ColorPalette) => {
     backgroundColor: 'rgba(245,245,247,0.14)',
     borderColor: 'rgba(245,245,247,0.26)',
     shadowOpacity: 0.24,
+  },
+  map3dToggleText: {
+    color: OVR.text,
+    fontSize: 11,
+    fontFamily: mono,
+    fontWeight: '900',
+    letterSpacing: 0.4,
+  },
+  map3dToggleTextActive: {
+    color: '#fff',
   },
   mapDrawerToggleTarget: {
     position: 'absolute',

@@ -191,6 +191,9 @@ td.name{color:var(--text);font-weight:600;}
       <div class="nav-item" onclick="showPage('contest',this)">
         <span class="nav-icon">CT</span><span class="nav-label">Contest</span>
       </div>
+      <div class="nav-item" onclick="showPage('extreme',this)">
+        <span class="nav-icon">EX</span><span class="nav-label">Extreme</span>
+      </div>
       <div class="nav-item" onclick="showPage('bugs',this)">
         <span class="nav-icon">BG</span><span class="nav-label">Bug Reports</span>
       </div>
@@ -233,6 +236,51 @@ td.name{color:var(--text);font-weight:600;}
           <div id="users-more" style="padding:12px;text-align:center;display:none;">
             <button class="btn btn-ghost" onclick="loadUsersMore()">Load more</button>
           </div>
+        </div>
+      </div>
+
+      <!-- Extreme Explorer -->
+      <div class="page" id="page-extreme">
+        <div class="page-title">Extreme Explorer</div>
+        <div class="page-sub">Hidden-beta mode controls, sessions, and recent premium events.</div>
+        <div class="stats-grid" id="extreme-stats"></div>
+        <div style="display:grid;grid-template-columns:minmax(280px,.8fr) 1.2fr;gap:16px;align-items:start;">
+          <div class="card">
+            <div class="section-label">BETA CONFIG</div>
+            <div id="extreme-controls" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;"></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
+              <input id="extreme-surfaces" class="login-input" placeholder="map,route_builder,navigation">
+              <input id="extreme-cost-cap" class="login-input" type="number" placeholder="Daily cap cents">
+              <input id="extreme-persona" class="login-input" placeholder="Co-Pilot persona">
+              <input id="extreme-voice" class="login-input" placeholder="Voice key">
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+              <button class="btn btn-primary btn-sm" onclick="saveExtremeConfig()">Save controls</button>
+              <button class="btn btn-danger btn-sm" onclick="quickExtremeKill()">Kill switch</button>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+              <input id="extreme-grant-email" class="login-input" style="flex:1;min-width:180px;" placeholder="beta user email">
+              <button class="btn btn-ghost btn-sm" onclick="grantExtremeBeta()">Grant beta</button>
+            </div>
+            <div id="extreme-config" style="display:flex;flex-direction:column;gap:10px;color:var(--text2);font-size:12px;line-height:1.5;"></div>
+          </div>
+          <div class="card table-wrap">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+              <div class="section-label" style="margin:0;">RECENT SESSIONS</div>
+              <button class="btn btn-ghost btn-sm" onclick="loadExtreme()">Refresh</button>
+            </div>
+            <table>
+              <thead><tr><th>Session</th><th>User</th><th>Surface</th><th>Status</th><th>Started</th></tr></thead>
+              <tbody id="extreme-sessions"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card table-wrap" style="margin-top:16px;">
+          <div class="section-label">RECENT LEDGER EVENTS</div>
+          <table>
+            <thead><tr><th>Event</th><th>User</th><th>Surface</th><th>Trip</th><th>Time</th></tr></thead>
+            <tbody id="extreme-events"></tbody>
+          </table>
         </div>
       </div>
 
@@ -549,6 +597,7 @@ function showPage(name, el) {
   if (name === 'camp-edits') loadCampEdits();
   if (name === 'audio-guides') loadAudioGuidePlaces();
   if (name === 'contest') loadContest();
+  if (name === 'extreme') loadExtreme();
   if (name === 'bugs')     loadBugs();
 }
 
@@ -644,7 +693,7 @@ function renderUsers(users, append) {
     const restricted = u.reporting_restricted_until && u.reporting_restricted_until > now;
     const joined = new Date(u.created_at * 1000).toLocaleDateString();
     const planActive = u.plan_type && u.plan_type !== 'free' && u.plan_expires_at && u.plan_expires_at > now;
-    const planLabel = planActive ? 'EXPLORER' : 'FREE';
+    const planLabel = planActive ? String(u.plan_type || 'explorer').replace('_', ' ').toUpperCase() : 'FREE';
     const planExpiry = planActive ? `<div class="mono" style="font-size:10px;color:var(--text3);margin-top:3px;">until ${new Date(u.plan_expires_at * 1000).toLocaleDateString()}</div>` : '';
     const roleBadge = u.is_admin
       ? `<span class="badge badge-orange">ADMIN</span>`
@@ -671,6 +720,8 @@ function renderUsers(users, append) {
           <option value="" selected>Set plan</option>
           <option value="free">Free</option>
           <option value="explorer">Explorer</option>
+          <option value="extreme_beta">Extreme Beta</option>
+          <option value="extreme">Extreme</option>
         </select>
         <button class="btn btn-ghost btn-sm" onclick="openCreditModal(${u.id})">Credits</button>
         <button class="btn btn-ghost btn-sm" onclick="toggleAdmin(${u.id}, ${u.is_admin})">${u.is_admin?'Remove Admin':'Make Admin'}</button>
@@ -718,10 +769,10 @@ async function toggleAdmin(userId, currentState) {
 
 async function setUserPlan(userId, planType, selectEl) {
   if (!planType) return;
-  const label = planType === 'free' ? 'Free' : 'Explorer';
+  const label = planType === 'free' ? 'Free' : planType.replace('_', ' ');
   const message = planType === 'free'
     ? 'Switch this user to Free? This clears their backend plan and the app will remove Explorer on next sync.'
-    : 'Grant Explorer from the admin dashboard for testing? This does not create an Apple subscription.';
+    : `Grant ${label} from the admin dashboard for testing? This does not create a store subscription.`;
   if (!confirm(message)) {
     selectEl.value = '';
     return;
@@ -748,6 +799,142 @@ async function banUser(userId, username) {
     toast(`${username} banned`, 'ok');
     loadUsers();
   } catch(e) { toast('Error: ' + e.message, 'err'); }
+}
+
+// ── Extreme Explorer ─────────────────────────────────────────────────────────
+
+async function loadExtreme() {
+  try {
+    const data = await api('/api/admin/extreme');
+    const cfg = data.config || {};
+    const flags = cfg.feature_flags || {};
+    const summary = data.summary_24h || {};
+    renderExtremeControls(cfg);
+    document.getElementById('extreme-stats').innerHTML = [
+      { label:'BETA ACTIVE', val: cfg.beta_active ? 'ON' : 'OFF', sub: cfg.kill_switch ? 'kill switch active' : cfg.master_enabled ? 'server flag armed' : 'Railway flag off' },
+      { label:'ADMIN ENABLED', val: cfg.enabled ? 'YES' : 'NO', sub: cfg.entitled ? 'entitled account' : 'not entitled' },
+      { label:'ACTIVE SESSIONS', val: summary.active_sessions || 0, sub: 'currently unexpired' },
+      { label:'NAVIGATION', val: flags.navigation ? 'ON' : 'OFF', sub: 'explicit auth only' },
+      { label:'VOICE', val: flags.voice ? 'ON' : 'OFF', sub: 'press-to-talk first' },
+      { label:'MAPGPT PILOT', val: flags.mapgpt_pilot ? 'ON' : 'OFF', sub: 'separate pilot flag' },
+    ].map(c => `
+      <div class="stat-card">
+        <div class="stat-label">${c.label}</div>
+        <div class="stat-val">${String(c.val)}</div>
+        <div class="stat-sub">${esc(c.sub || '')}</div>
+      </div>`).join('');
+
+    document.getElementById('extreme-config').innerHTML = [
+      `Master env enabled: <b>${cfg.master_enabled ? 'yes' : 'no'}</b>`,
+      `Kill switch: <b>${cfg.kill_switch ? 'on' : 'off'}</b>`,
+      `Allowed surfaces: <b>${esc((cfg.allowed_surfaces || []).join(', ') || 'none')}</b>`,
+      `Styles: <b>${esc(Object.keys(cfg.style_uris || {}).join(', '))}</b>`,
+      `Weather layers: <b>${esc(((cfg.weather || {}).layers || []).map(l => l.label).join(', '))}</b>`,
+      `Co-Pilot persona: <b>${esc((cfg.copilot || {}).persona || '')}</b>`,
+      `Daily cost cap: <b>$${(Number((cfg.cost_caps || {}).daily_cents || 0) / 100).toFixed(2)}</b>`,
+      `Beta emails from env: <b>${esc(((data.env || {}).beta_emails || []).join(', ') || 'none')}</b>`,
+      `Dashboard overrides: <b>${esc(Object.keys(cfg.admin_overrides || {}).join(', ') || 'none')}</b>`,
+    ].map(x => `<div>${x}</div>`).join('');
+
+    document.getElementById('extreme-sessions').innerHTML = (data.recent_sessions || []).map(s => `
+      <tr>
+        <td class="mono" style="font-size:10px;">${esc(s.session_id || '')}</td>
+        <td>${esc(s.username || s.email || 'user ' + s.user_id)}</td>
+        <td class="mono">${esc(s.surface || '')}</td>
+        <td><span class="badge ${s.status === 'active' ? 'badge-green' : 'badge-gray'}">${esc(s.status || '')}</span></td>
+        <td class="mono">${s.started_at ? new Date(s.started_at * 1000).toLocaleString() : ''}</td>
+      </tr>
+    `).join('') || '<tr><td colspan="5" style="color:var(--text3);text-align:center;padding:24px;">No Extreme sessions yet</td></tr>';
+
+    document.getElementById('extreme-events').innerHTML = (data.recent_events || []).map(e => `
+      <tr>
+        <td class="mono">${esc(e.event_type || '')}</td>
+        <td>${esc(e.username || e.email || 'user ' + e.user_id)}</td>
+        <td class="mono">${esc(e.surface || '')}</td>
+        <td class="mono" style="font-size:10px;">${esc(e.trip_id || '')}</td>
+        <td class="mono">${e.created_at ? new Date(e.created_at * 1000).toLocaleString() : ''}</td>
+      </tr>
+    `).join('') || '<tr><td colspan="5" style="color:var(--text3);text-align:center;padding:24px;">No Extreme events yet</td></tr>';
+  } catch(e) { toast('Error loading Extreme: ' + e.message, 'err'); }
+}
+
+function renderExtremeControls(cfg) {
+  const flags = cfg.feature_flags || {};
+  const controls = [
+    ['enabled', 'Beta enabled', !!cfg.beta_active && !cfg.kill_switch],
+    ['kill_switch', 'Kill switch', !!cfg.kill_switch],
+    ['navigation_enabled', 'Guidance', !!flags.navigation],
+    ['weather_enabled', 'Weather', !!flags.weather],
+    ['voice_enabled', 'Voice', !!flags.voice],
+    ['copilot_enabled', 'Co-Pilot', !!flags.copilot],
+    ['native_mode_enabled', 'Native mode', !!flags.native_mode],
+    ['mapgpt_pilot_enabled', 'MapGPT pilot', !!flags.mapgpt_pilot],
+    ['atlas_pilot_enabled', 'Atlas pilot', !!flags.atlas_pilot],
+  ];
+  document.getElementById('extreme-controls').innerHTML = controls.map(([key, label, checked]) => `
+    <label style="display:flex;align-items:center;gap:8px;background:var(--s3);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text2);font-size:12px;">
+      <input type="checkbox" id="extreme-${key}" ${checked ? 'checked' : ''}>
+      <span>${label}</span>
+    </label>
+  `).join('');
+  document.getElementById('extreme-surfaces').value = (cfg.allowed_surfaces || []).join(',');
+  document.getElementById('extreme-cost-cap').value = Number((cfg.cost_caps || {}).daily_cents || 0);
+  document.getElementById('extreme-persona').value = (cfg.copilot || {}).persona || '';
+  document.getElementById('extreme-voice').value = (cfg.copilot || {}).voice || '';
+}
+
+function extremeChecked(key) {
+  return !!document.getElementById(`extreme-${key}`)?.checked;
+}
+
+async function saveExtremeConfig() {
+  const surfaces = document.getElementById('extreme-surfaces').value.split(',').map(s => s.trim()).filter(Boolean);
+  const body = {
+    enabled: extremeChecked('enabled'),
+    kill_switch: extremeChecked('kill_switch'),
+    navigation_enabled: extremeChecked('navigation_enabled'),
+    weather_enabled: extremeChecked('weather_enabled'),
+    voice_enabled: extremeChecked('voice_enabled'),
+    copilot_enabled: extremeChecked('copilot_enabled'),
+    native_mode_enabled: extremeChecked('native_mode_enabled'),
+    mapgpt_pilot_enabled: extremeChecked('mapgpt_pilot_enabled'),
+    atlas_pilot_enabled: extremeChecked('atlas_pilot_enabled'),
+    allowed_surfaces: surfaces,
+    cost_cap_cents_daily: Number(document.getElementById('extreme-cost-cap').value || 0),
+    copilot_persona: document.getElementById('extreme-persona').value,
+    copilot_voice: document.getElementById('extreme-voice').value,
+  };
+  try {
+    await api('/api/admin/extreme/config', { method:'POST', body: JSON.stringify(body) });
+    toast('Extreme controls saved', 'ok');
+    loadExtreme();
+  } catch(e) { toast('Extreme save failed: ' + e.message, 'err'); }
+}
+
+async function quickExtremeKill() {
+  if (!confirm('Turn on the Extreme kill switch? This blocks beta access immediately.')) return;
+  try {
+    await api('/api/admin/extreme/config', { method:'POST', body: JSON.stringify({ kill_switch: true }) });
+    toast('Extreme kill switch enabled', 'ok');
+    loadExtreme();
+  } catch(e) { toast('Kill switch failed: ' + e.message, 'err'); }
+}
+
+async function grantExtremeBeta() {
+  const email = document.getElementById('extreme-grant-email').value.trim();
+  if (!email) { toast('Enter a user email', 'err'); return; }
+  if (!confirm(`Grant Extreme beta to ${email}?`)) return;
+  try {
+    await api('/api/admin/extreme/grant', {
+      method:'POST',
+      body: JSON.stringify({ email, plan_type: 'extreme_beta', duration_days: 366 })
+    });
+    toast('Extreme beta granted', 'ok');
+    document.getElementById('extreme-grant-email').value = '';
+    loadExtreme();
+    usersOffset = 0;
+    loadUsers();
+  } catch(e) { toast('Grant failed: ' + e.message, 'err'); }
 }
 
 // ── Contest ──────────────────────────────────────────────────────────────────

@@ -70,6 +70,10 @@ from db.store import (
     report_camp_full, confirm_camp_full, dispute_camp_full, get_camp_fullness, get_fullness_nearby,
     log_event, cleanup_stale_data,
     get_camp_brief, set_camp_brief, has_active_plan, activate_plan, use_free_camp_search,
+    has_extreme_plan, create_extreme_demo_session, end_extreme_demo_session,
+    log_extreme_ledger_event, save_extreme_trip_metadata, stage_extreme_copilot_action,
+    list_extreme_sessions, list_extreme_ledger_events, get_extreme_ledger_summary,
+    get_extreme_admin_config, set_extreme_admin_config,
     authorize_offline_download,
     save_push_token, get_push_token,
     list_user_trips, save_account_trip, save_trip_geometry,
@@ -1033,6 +1037,357 @@ class AnalyticsEventRequest(BaseModel):
     event_type: str
     session_id: str = ""
     event_data: dict = Field(default_factory=dict)
+
+class ExtremeCheckpoint(BaseModel):
+    id: str
+    type: str
+    title: str
+    note: str = ""
+    lat: float
+    lng: float
+    day: int = 1
+    sequence: int = 0
+    status: str = "planned"
+    source: str = "trailhead"
+    source_id: str = ""
+    confidence: str = "estimated"
+    expires_at: Optional[int] = None
+
+class TripMemory(BaseModel):
+    vehicle: Optional[dict] = None
+    range: Optional[dict] = None
+    clearance: Optional[dict] = None
+    trailer: Optional[dict] = None
+    comfort_level: str = ""
+    preferred_stays: list[str] = Field(default_factory=list)
+    avoid_rules: list[str] = Field(default_factory=list)
+    public_private_preference: str = ""
+    offline_readiness: dict = Field(default_factory=dict)
+    risk_notes: list[str] = Field(default_factory=list)
+    recent_user_edits: list[dict] = Field(default_factory=list)
+
+class ExtremeSessionAuthorizeRequest(BaseModel):
+    surface: str = "map"
+    trip_id: Optional[str] = None
+    checkpoints: list[ExtremeCheckpoint] = Field(default_factory=list)
+    trip_memory: Optional[TripMemory] = None
+    metadata: dict = Field(default_factory=dict)
+
+class ExtremeNavigationAuthorizeRequest(BaseModel):
+    surface: str = "navigation"
+    trip_id: Optional[str] = None
+    route_id: Optional[str] = None
+    route_summary: dict = Field(default_factory=dict)
+    trip_memory: Optional[TripMemory] = None
+    metadata: dict = Field(default_factory=dict)
+    acknowledged_billing: bool = False
+    navigation_mode: str = "route_guidance"
+
+class ExtremeSessionEndRequest(BaseModel):
+    session_id: str
+    reason: str = "ended"
+
+class ExtremeLedgerRequest(BaseModel):
+    session_id: Optional[str] = None
+    event_type: str
+    surface: str = "map"
+    trip_id: Optional[str] = None
+    event_data: dict = Field(default_factory=dict)
+
+class ExtremeCopilotCommandRequest(BaseModel):
+    session_id: Optional[str] = None
+    trip_id: Optional[str] = None
+    command: str
+    mode: str = "text"
+    context: dict = Field(default_factory=dict)
+
+class ExtremeRouteRiskRequest(BaseModel):
+    trip_id: Optional[str] = None
+    route: list[dict] = Field(default_factory=list)
+    checkpoints: list[ExtremeCheckpoint] = Field(default_factory=list)
+    metadata: dict = Field(default_factory=dict)
+
+class AdminExtremeConfigBody(BaseModel):
+    enabled: Optional[bool] = None
+    kill_switch: Optional[bool] = None
+    allowed_surfaces: Optional[list[str]] = None
+    navigation_enabled: Optional[bool] = None
+    weather_enabled: Optional[bool] = None
+    voice_enabled: Optional[bool] = None
+    copilot_enabled: Optional[bool] = None
+    native_mode_enabled: Optional[bool] = None
+    mapgpt_pilot_enabled: Optional[bool] = None
+    atlas_pilot_enabled: Optional[bool] = None
+    max_demo_session_seconds: Optional[int] = None
+    max_navigation_session_seconds: Optional[int] = None
+    cost_cap_cents_daily: Optional[int] = None
+    copilot_persona: Optional[str] = None
+    copilot_voice: Optional[str] = None
+
+class AdminExtremeGrantBody(BaseModel):
+    user_id: Optional[int] = None
+    email: str = ""
+    plan_type: str = "extreme_beta"
+    duration_days: int = 366
+
+EXTREME_STYLE_LABELS = {
+    "standard": "Standard",
+    "live_road": "Live Road",
+    "satellite_trail": "Satellite Trail",
+    "3d_terrain": "3D Terrain",
+    "night_drive": "Night Drive",
+    "weather_watch": "Weather Watch",
+    "outdoors": "Outdoors",
+}
+
+EXTREME_WEATHER_LAYERS = [
+    {"id": "radar", "label": "Radar", "enabled_by_default": True},
+    {"id": "precipitation", "label": "Precipitation", "enabled_by_default": True},
+    {"id": "temperature", "label": "Temperature", "enabled_by_default": False},
+    {"id": "wind", "label": "Wind", "enabled_by_default": False},
+    {"id": "satellite", "label": "Satellite", "enabled_by_default": False},
+]
+
+EXTREME_COPILOT_ACTIONS = {
+    "add_fuel": "Add fuel",
+    "review_private_stay": "Review private stay",
+    "mark_checkpoint": "Mark checkpoint",
+    "show_weather": "Show weather",
+    "download_trip": "Download trip",
+    "review_reroute": "Review reroute",
+    "start_guidance": "Start guidance",
+}
+
+def _extreme_allowed_surfaces() -> list[str]:
+    allowed = []
+    for raw in (settings.extreme_allowed_surfaces or "").split(","):
+        clean = re.sub(r"[^a-z0-9_]+", "", raw.strip().lower().replace("-", "_"))
+        if clean:
+            allowed.append(clean)
+    return list(dict.fromkeys(allowed or ["map", "route_builder"]))
+
+def _extreme_style_uris() -> dict:
+    return {
+        "standard": settings.extreme_style_standard,
+        "live_road": settings.extreme_style_live_road,
+        "satellite_trail": settings.extreme_style_satellite_trail,
+        "3d_terrain": settings.extreme_style_3d_terrain,
+        "night_drive": settings.extreme_style_night_drive,
+        "weather_watch": settings.extreme_style_weather_watch,
+        "outdoors": settings.extreme_style_outdoors,
+    }
+
+def _bool_override(overrides: dict, key: str, default: bool) -> bool:
+    value = overrides.get(key)
+    return bool(default) if value is None else bool(value)
+
+def _int_override(overrides: dict, key: str, default: int, min_value: int, max_value: int) -> int:
+    value = overrides.get(key)
+    try:
+        parsed = int(default if value is None else value)
+    except (TypeError, ValueError):
+        parsed = int(default)
+    return max(min_value, min(parsed, max_value))
+
+def _str_override(overrides: dict, key: str, default: str, max_len: int = 160) -> str:
+    value = overrides.get(key)
+    text = str(default if value is None else value).strip()
+    return text[:max_len]
+
+def _extreme_runtime_overrides() -> dict:
+    try:
+        return get_extreme_admin_config()
+    except Exception:
+        return {"_meta": {}}
+
+def _extreme_allowed_surfaces_from_overrides(overrides: dict) -> list[str]:
+    raw = overrides.get("allowed_surfaces")
+    if isinstance(raw, list):
+        source = ",".join(str(item) for item in raw)
+    elif isinstance(raw, str):
+        source = raw
+    else:
+        source = settings.extreme_allowed_surfaces or ""
+    allowed = []
+    for item in source.split(","):
+        clean = _clean_extreme_surface(item)
+        if clean:
+            allowed.append(clean)
+    return list(dict.fromkeys(allowed or ["map", "route_builder"]))
+
+def _extreme_feature_flags(beta_active: bool, overrides: dict) -> dict:
+    return {
+        "native_mode": bool(beta_active and _bool_override(overrides, "native_mode_enabled", settings.extreme_native_mode_enabled)),
+        "search": bool(beta_active and _bool_override(overrides, "search_enabled", settings.extreme_search_enabled)),
+        "weather": bool(beta_active and _bool_override(overrides, "weather_enabled", settings.extreme_weather_enabled)),
+        "navigation": bool(beta_active and _bool_override(overrides, "navigation_enabled", settings.extreme_navigation_enabled)),
+        "voice": bool(beta_active and _bool_override(overrides, "voice_enabled", settings.extreme_voice_enabled)),
+        "copilot": bool(beta_active and _bool_override(overrides, "copilot_enabled", settings.extreme_copilot_enabled)),
+        "mapgpt_pilot": bool(beta_active and _bool_override(overrides, "mapgpt_pilot_enabled", settings.extreme_mapgpt_pilot_enabled)),
+        "atlas_pilot": bool(beta_active and _bool_override(overrides, "atlas_pilot_enabled", settings.extreme_atlas_pilot_enabled)),
+    }
+
+def _extreme_config_for_user(user: dict | None) -> dict:
+    overrides = _extreme_runtime_overrides()
+    db_kill_switch = _bool_override(overrides, "kill_switch", False)
+    kill_switch = bool(settings.extreme_kill_switch or db_kill_switch)
+    master_enabled = bool(settings.extreme_enabled)
+    db_enabled = _bool_override(overrides, "enabled", True)
+    beta_active = bool(master_enabled and db_enabled and not kill_switch)
+    entitled = has_extreme_plan(user)
+    allowed_surfaces = _extreme_allowed_surfaces_from_overrides(overrides) if beta_active else []
+    feature_flags = _extreme_feature_flags(beta_active, overrides)
+    max_demo_session_seconds = _int_override(overrides, "max_demo_session_seconds", settings.extreme_max_demo_session_seconds, 60, 7200)
+    max_navigation_session_seconds = _int_override(overrides, "max_navigation_session_seconds", settings.extreme_max_navigation_session_seconds, 300, 86400)
+    return {
+        "tier_name": "Extreme Explorer",
+        "enabled": bool(beta_active and entitled),
+        "entitled": bool(entitled),
+        "kill_switch": kill_switch,
+        "master_enabled": master_enabled,
+        "beta_active": beta_active,
+        "allowed_surfaces": allowed_surfaces,
+        "style_uris": _extreme_style_uris(),
+        "style_labels": EXTREME_STYLE_LABELS,
+        "mapbox_public_token": settings.mapbox_token,
+        "max_demo_session_seconds": max_demo_session_seconds,
+        "max_navigation_session_seconds": max_navigation_session_seconds,
+        "feature_flags": feature_flags,
+        "weather": {
+            "enabled": feature_flags["weather"],
+            "layers": EXTREME_WEATHER_LAYERS,
+        },
+        "copilot": {
+            "enabled": feature_flags["copilot"],
+            "voice_enabled": feature_flags["voice"],
+            "press_to_talk": feature_flags["voice"],
+            "wake_phrase": False,
+            "persona": _str_override(overrides, "copilot_persona", settings.extreme_copilot_persona, 160),
+            "voice": _str_override(overrides, "copilot_voice", settings.extreme_copilot_voice, 80),
+            "actions": EXTREME_COPILOT_ACTIONS,
+            "requires_confirmation": True,
+        },
+        "navigation": {
+            "enabled": feature_flags["navigation"],
+            "requires_explicit_authorization": True,
+            "max_session_seconds": max_navigation_session_seconds,
+            "free_drive": False,
+        },
+        "cost_caps": {
+            "daily_cents": _int_override(overrides, "cost_cap_cents_daily", settings.extreme_cost_cap_cents_daily, 0, 1_000_000),
+        },
+        "pilot_flags": {
+            "mapgpt": feature_flags["mapgpt_pilot"],
+            "atlas": feature_flags["atlas_pilot"],
+        },
+        "admin_overrides": {k: v for k, v in overrides.items() if not str(k).startswith("_")},
+        "admin_override_meta": overrides.get("_meta", {}),
+        "guardrails": {
+            "navigation_sessions": feature_flags["navigation"],
+            "free_drive": False,
+            "mapgpt": feature_flags["mapgpt_pilot"],
+            "offline_mapbox_packs": False,
+            "permanent_copilot_mutations": False,
+        },
+    }
+
+def _clean_extreme_surface(surface: str) -> str:
+    return re.sub(r"[^a-z0-9_]+", "", str(surface or "map").lower().replace("-", "_"))[:40] or "map"
+
+def _clean_extreme_event_type(event_type: str) -> str:
+    clean = re.sub(r"[^a-z0-9_.:-]+", "", str(event_type or "").lower())[:80]
+    if not clean:
+        raise HTTPException(400, "Invalid ledger event")
+    return clean
+
+def _clean_extreme_session_id(session_id: str | None) -> str | None:
+    clean = re.sub(r"[^a-zA-Z0-9_.:-]+", "", (session_id or "").strip())[:120]
+    return clean or None
+
+def _classify_extreme_command(command: str) -> tuple[str, str]:
+    text = (command or "").lower()
+    if re.search(r"\bfuel|gas|range|empty\b", text):
+        return "add_fuel", "Fuel stop staged for review."
+    if re.search(r"\bstay|camp|sleep|overnight|private\b", text):
+        return "review_private_stay", "Stay options staged for review."
+    if re.search(r"\bweather|storm|rain|snow|wind|heat|cold|risk\b", text):
+        return "show_weather", "Weather checks staged for review."
+    if re.search(r"\boffline|download|save\b", text):
+        return "download_trip", "Trip download staged for review."
+    if re.search(r"\breroute|avoid|detour|alternate\b", text):
+        return "review_reroute", "Route change staged for review."
+    if re.search(r"\bnavigate|guidance|directions|start\b", text):
+        return "start_guidance", "Guidance request staged for confirmation."
+    return "mark_checkpoint", "Checkpoint staged for review."
+
+def _extreme_weather_risk_points(body: ExtremeRouteRiskRequest) -> list[dict]:
+    points: list[dict] = []
+    for cp in body.checkpoints[:20]:
+        if str(cp.type).lower() == "weather":
+            points.append(cp.dict())
+    if points:
+        return points[:12]
+    route = [p for p in body.route if isinstance(p, dict)]
+    if len(route) >= 3:
+        candidates = [route[len(route) // 3], route[(len(route) * 2) // 3]]
+    else:
+        candidates = route[:2]
+    for idx, point in enumerate(candidates):
+        try:
+            lat = float(point.get("lat"))
+            lng = float(point.get("lng"))
+        except (TypeError, ValueError):
+            continue
+        if -90 <= lat <= 90 and -180 <= lng <= 180:
+            points.append({
+                "id": f"weather-risk-{idx + 1}",
+                "type": "weather",
+                "title": "Weather review",
+                "note": "Review route conditions before this stretch.",
+                "lat": lat,
+                "lng": lng,
+                "day": int(point.get("day") or idx + 1),
+                "sequence": idx + 1,
+                "status": "suggested",
+                "source": "trailhead",
+                "source_id": "",
+                "confidence": "estimated",
+                "expires_at": None,
+            })
+    return points[:12]
+
+def _admin_extreme_config_values(body: AdminExtremeConfigBody) -> dict:
+    values: dict = {}
+    bool_keys = (
+        "enabled", "kill_switch", "navigation_enabled", "weather_enabled",
+        "voice_enabled", "copilot_enabled", "native_mode_enabled",
+        "mapgpt_pilot_enabled", "atlas_pilot_enabled",
+    )
+    for key in bool_keys:
+        value = getattr(body, key)
+        if value is not None:
+            values[key] = bool(value)
+    if body.allowed_surfaces is not None:
+        surfaces = []
+        for surface in body.allowed_surfaces[:12]:
+            clean = _clean_extreme_surface(surface)
+            if clean:
+                surfaces.append(clean)
+        values["allowed_surfaces"] = list(dict.fromkeys(surfaces or ["map", "route_builder"]))
+    int_specs = {
+        "max_demo_session_seconds": (60, 7200),
+        "max_navigation_session_seconds": (300, 86400),
+        "cost_cap_cents_daily": (0, 1_000_000),
+    }
+    for key, (min_value, max_value) in int_specs.items():
+        value = getattr(body, key)
+        if value is not None:
+            values[key] = max(min_value, min(int(value), max_value))
+    if body.copilot_persona is not None:
+        values["copilot_persona"] = " ".join(body.copilot_persona.split())[:160]
+    if body.copilot_voice is not None:
+        values["copilot_voice"] = re.sub(r"[^a-zA-Z0-9_.:-]+", "_", body.copilot_voice.strip())[:80]
+    return values
 
 
 def _normalize_place_category(value: object) -> str:
@@ -3215,6 +3570,209 @@ def get_config():
         "protomaps_key": settings.protomaps_key,
         "google_oauth_client_id": (_oauth_client_ids("google") or [""])[0],
         "apple_service_id": settings.apple_service_id,
+    }
+
+@app.get("/api/extreme/config")
+def extreme_config(user: dict = Depends(_current_user)):
+    return _extreme_config_for_user(user)
+
+@app.post("/api/extreme/session/authorize")
+def extreme_authorize_session(body: ExtremeSessionAuthorizeRequest, user: dict = Depends(_current_user)):
+    config = _extreme_config_for_user(user)
+    surface = _clean_extreme_surface(body.surface)
+    if config["kill_switch"]:
+        raise HTTPException(403, {"code": "extreme_disabled", "message": "Extreme Explorer is temporarily unavailable."})
+    if not config["beta_active"] or surface not in config["allowed_surfaces"]:
+        raise HTTPException(403, {"code": "extreme_unavailable", "message": "Extreme Explorer is not available here yet."})
+    if not config["entitled"]:
+        raise HTTPException(403, {"code": "extreme_hidden_beta", "message": "Extreme Explorer is in hidden beta for selected accounts."})
+
+    trip_id = (body.trip_id or "").strip()[:120] or None
+    checkpoints = [cp.dict() for cp in body.checkpoints[:80]]
+    trip_memory = body.trip_memory.dict() if body.trip_memory else {}
+    if trip_id and (checkpoints or trip_memory):
+        save_extreme_trip_metadata(user["id"], trip_id, checkpoints, trip_memory)
+    session = create_extreme_demo_session(
+        user["id"],
+        surface,
+        trip_id,
+        config["max_demo_session_seconds"],
+        {"checkpoint_count": len(checkpoints), **(body.metadata or {})},
+    )
+    log_extreme_ledger_event(
+        user["id"],
+        "demo_session_started",
+        session["session_id"],
+        surface,
+        trip_id,
+        {"checkpoint_count": len(checkpoints)},
+    )
+    return {
+        "authorized": True,
+        "session_id": session["session_id"],
+        "expires_at": session["expires_at"],
+        "max_demo_session_seconds": config["max_demo_session_seconds"],
+        "navigation_session_authorized": False,
+    }
+
+@app.post("/api/extreme/session/end")
+def extreme_end_session(body: ExtremeSessionEndRequest, user: dict = Depends(_current_user)):
+    clean_session = _clean_extreme_session_id(body.session_id)
+    if not clean_session:
+        raise HTTPException(400, "session_id is required")
+    ended = end_extreme_demo_session(user["id"], clean_session, _clean_extreme_event_type(body.reason or "ended"))
+    if not ended:
+        raise HTTPException(404, "Session not found")
+    log_extreme_ledger_event(
+        user["id"],
+        "demo_session_ended",
+        clean_session,
+        ended.get("surface"),
+        ended.get("trip_id"),
+        {"reason": body.reason or "ended"},
+    )
+    return {"ok": True, "session_id": clean_session, "status": ended.get("status"), "ended_at": ended.get("ended_at")}
+
+@app.post("/api/extreme/navigation/authorize")
+def extreme_authorize_navigation(body: ExtremeNavigationAuthorizeRequest, user: dict = Depends(_current_user)):
+    config = _extreme_config_for_user(user)
+    surface = _clean_extreme_surface(body.surface or "navigation")
+    nav_mode = _clean_extreme_event_type(body.navigation_mode or "route_guidance")
+    if config["kill_switch"]:
+        raise HTTPException(403, {"code": "extreme_disabled", "message": "Extreme Explorer is temporarily unavailable."})
+    if not config["enabled"] or not config["entitled"]:
+        raise HTTPException(403, {"code": "extreme_hidden_beta", "message": "Extreme Explorer is in hidden beta for selected accounts."})
+    if not config["feature_flags"]["navigation"] or surface not in config["allowed_surfaces"]:
+        raise HTTPException(403, {"code": "extreme_navigation_disabled", "message": "Guided navigation is not enabled for this beta."})
+    if nav_mode in {"free_drive", "free-drive"}:
+        raise HTTPException(400, {"code": "extreme_free_drive_blocked", "message": "Free drive is not available in this beta."})
+    if not body.acknowledged_billing:
+        raise HTTPException(400, {"code": "extreme_navigation_confirmation_required", "message": "Confirm guided navigation before starting."})
+
+    trip_id = (body.trip_id or "").strip()[:120] or None
+    route_id = (body.route_id or "").strip()[:120] or None
+    trip_memory = body.trip_memory.dict() if body.trip_memory else {}
+    if trip_id and trip_memory:
+        save_extreme_trip_metadata(user["id"], trip_id, [], trip_memory)
+    metadata = {
+        "mode": "guided_navigation",
+        "route_id": route_id,
+        "route_summary": body.route_summary or {},
+        "navigation_billing_acknowledged": True,
+        **(body.metadata or {}),
+    }
+    session = create_extreme_demo_session(
+        user["id"],
+        surface,
+        trip_id,
+        config["max_navigation_session_seconds"],
+        metadata,
+    )
+    log_extreme_ledger_event(
+        user["id"],
+        "guided_navigation_authorized",
+        session["session_id"],
+        surface,
+        trip_id,
+        metadata,
+    )
+    return {
+        "authorized": True,
+        "session_id": session["session_id"],
+        "expires_at": session["expires_at"],
+        "max_navigation_session_seconds": config["max_navigation_session_seconds"],
+        "navigation_session_authorized": True,
+        "free_drive_authorized": False,
+        "route_id": route_id,
+    }
+
+@app.post("/api/extreme/ledger")
+def extreme_ledger(body: ExtremeLedgerRequest, user: dict = Depends(_current_user)):
+    config = _extreme_config_for_user(user)
+    if not config["beta_active"]:
+        raise HTTPException(403, {"code": "extreme_unavailable", "message": "Extreme Explorer is not available."})
+    if not config["entitled"]:
+        raise HTTPException(403, {"code": "extreme_hidden_beta", "message": "Extreme Explorer is in hidden beta for selected accounts."})
+    surface = _clean_extreme_surface(body.surface)
+    event_type = _clean_extreme_event_type(body.event_type)
+    clean_session = _clean_extreme_session_id(body.session_id)
+    trip_id = (body.trip_id or "").strip()[:120] or None
+    event_id = log_extreme_ledger_event(user["id"], event_type, clean_session, surface, trip_id, body.event_data or {})
+    return {"ok": True, "event_id": event_id}
+
+@app.get("/api/extreme/weather/layers")
+def extreme_weather_layers(user: dict = Depends(_current_user)):
+    config = _extreme_config_for_user(user)
+    if not config["enabled"]:
+        raise HTTPException(403, {"code": "extreme_hidden_beta", "message": "Extreme Explorer is in hidden beta for selected accounts."})
+    return config["weather"]
+
+@app.post("/api/extreme/weather/route-risk")
+def extreme_weather_route_risk(body: ExtremeRouteRiskRequest, user: dict = Depends(_current_user)):
+    config = _extreme_config_for_user(user)
+    if not config["enabled"]:
+        raise HTTPException(403, {"code": "extreme_hidden_beta", "message": "Extreme Explorer is in hidden beta for selected accounts."})
+    if not config["feature_flags"]["weather"]:
+        raise HTTPException(403, {"code": "extreme_weather_disabled", "message": "Weather Watch is not enabled for this beta."})
+    trip_id = (body.trip_id or "").strip()[:120] or None
+    risks = _extreme_weather_risk_points(body)
+    log_extreme_ledger_event(
+        user["id"],
+        "weather_route_risk_previewed",
+        None,
+        "weather",
+        trip_id,
+        {"risk_count": len(risks), **(body.metadata or {})},
+    )
+    return {
+        "enabled": True,
+        "layers": EXTREME_WEATHER_LAYERS,
+        "risk_checkpoints": risks,
+        "summary": "Weather checks are staged along the route for review.",
+    }
+
+@app.post("/api/extreme/copilot/command")
+def extreme_copilot_command(body: ExtremeCopilotCommandRequest, user: dict = Depends(_current_user)):
+    config = _extreme_config_for_user(user)
+    if not config["enabled"]:
+        raise HTTPException(403, {"code": "extreme_hidden_beta", "message": "Extreme Explorer is in hidden beta for selected accounts."})
+    if not config["feature_flags"]["copilot"]:
+        raise HTTPException(403, {"code": "extreme_copilot_disabled", "message": "Co-Pilot is not enabled for this beta."})
+    command = " ".join(str(body.command or "").split())[:800]
+    if not command:
+        raise HTTPException(400, "command is required")
+    mode = _clean_extreme_event_type(body.mode or "text")
+    if mode == "voice" and not config["feature_flags"]["voice"]:
+        raise HTTPException(403, {"code": "extreme_voice_disabled", "message": "Voice commands are not enabled for this beta."})
+    action_type, response = _classify_extreme_command(command)
+    clean_session = _clean_extreme_session_id(body.session_id)
+    trip_id = (body.trip_id or "").strip()[:120] or None
+    payload = {
+        "response": response,
+        "requires_confirmation": True,
+        "context": body.context or {},
+        "mode": mode,
+    }
+    action = stage_extreme_copilot_action(user["id"], command, action_type, clean_session, trip_id, payload)
+    log_extreme_ledger_event(
+        user["id"],
+        "copilot_action_staged",
+        clean_session,
+        "copilot",
+        trip_id,
+        {"action_id": action["id"], "action_type": action_type, "mode": mode},
+    )
+    return {
+        "ok": True,
+        "action": {
+            "id": action["id"],
+            "type": action_type,
+            "label": EXTREME_COPILOT_ACTIONS.get(action_type, "Review"),
+            "status": "staged",
+            "requires_confirmation": True,
+            "payload": action.get("payload") or payload,
+        },
+        "message": response,
     }
 
 
@@ -6027,6 +6585,56 @@ async def admin_users(search: str = "", limit: int = 50, offset: int = 0,
                       admin: dict = Depends(_require_admin)):
     return get_all_users(search, limit, offset)
 
+@app.get("/api/admin/extreme")
+async def admin_extreme(admin: dict = Depends(_require_admin)):
+    since = int(time.time()) - 86400
+    return {
+        "config": _extreme_config_for_user(admin),
+        "env": {
+            "enabled": bool(settings.extreme_enabled),
+            "kill_switch": bool(settings.extreme_kill_switch),
+            "allowed_surfaces": _extreme_allowed_surfaces(),
+            "beta_user_ids": [v for v in (settings.extreme_beta_user_ids or "").split(",") if v.strip()],
+            "beta_emails": [v for v in (settings.extreme_beta_emails or "").split(",") if v.strip()],
+        },
+        "summary_24h": get_extreme_ledger_summary(since),
+        "recent_sessions": list_extreme_sessions(50),
+        "recent_events": list_extreme_ledger_events(100),
+    }
+
+@app.post("/api/admin/extreme/config")
+async def admin_update_extreme_config(body: AdminExtremeConfigBody, admin: dict = Depends(_require_admin)):
+    values = _admin_extreme_config_values(body)
+    if not values:
+        raise HTTPException(400, "No Extreme config values provided")
+    overrides = set_extreme_admin_config(values, admin.get("id"))
+    log_event(admin["id"], None, "admin_extreme_config_update", {"keys": sorted(values.keys())})
+    return {
+        "ok": True,
+        "overrides": {k: v for k, v in overrides.items() if not str(k).startswith("_")},
+        "config": _extreme_config_for_user(admin),
+    }
+
+@app.post("/api/admin/extreme/grant")
+async def admin_extreme_grant(body: AdminExtremeGrantBody, admin: dict = Depends(_require_admin)):
+    plan = (body.plan_type or "extreme_beta").strip().lower()
+    if plan not in {"extreme_beta", "extreme"}:
+        raise HTTPException(400, "plan_type must be extreme_beta or extreme")
+    target = get_user_by_id(body.user_id) if body.user_id else None
+    if not target and body.email:
+        target = get_user_by_email(body.email.strip().lower())
+    if not target:
+        raise HTTPException(404, "User not found")
+    days = min(max(int(body.duration_days or 366), 1), 3660)
+    expires_at = int(time.time()) + days * 86400
+    updated = set_user_plan(target["id"], plan, expires_at)
+    log_event(admin["id"], None, "admin_extreme_beta_grant", {
+        "target_user_id": target["id"],
+        "plan_type": plan,
+        "expires_at": expires_at,
+    })
+    return {"ok": True, "user": updated, "plan_type": plan, "plan_expires_at": expires_at}
+
 @app.get("/api/admin/contest/overview")
 async def admin_contest_overview(month: str = "", year: str = "",
                                  admin: dict = Depends(_require_admin)):
@@ -6184,13 +6792,13 @@ async def admin_toggle_admin(user_id: int, admin: dict = Depends(_require_admin)
 async def admin_set_user_plan(user_id: int, body: AdminPlanBody,
                               admin: dict = Depends(_require_admin)):
     plan = body.plan_type.strip().lower()
-    if plan not in {"free", "explorer"}:
-        raise HTTPException(400, "plan_type must be free or explorer")
+    if plan not in {"free", "explorer", "extreme_beta", "extreme"}:
+        raise HTTPException(400, "plan_type must be free, explorer, extreme_beta, or extreme")
     user = get_user_by_id(user_id)
     if not user:
         raise HTTPException(404, "User not found")
     expires_at = None
-    if plan == "explorer":
+    if plan in {"explorer", "extreme_beta", "extreme"}:
         days = min(max(body.duration_days, 1), 3660)
         expires_at = int(time.time()) + days * 86400
     updated = set_user_plan(user_id, plan, expires_at)

@@ -497,6 +497,54 @@ def init_db():
             created_at  INTEGER NOT NULL,
             updated_at  INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS extreme_demo_sessions (
+            session_id  TEXT PRIMARY KEY,
+            user_id     INTEGER NOT NULL REFERENCES users(id),
+            surface     TEXT NOT NULL,
+            trip_id     TEXT,
+            status      TEXT NOT NULL DEFAULT 'active',
+            started_at  INTEGER NOT NULL,
+            ended_at    INTEGER,
+            expires_at  INTEGER NOT NULL,
+            metadata    TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE TABLE IF NOT EXISTS extreme_ledger_events (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id  TEXT,
+            user_id     INTEGER NOT NULL REFERENCES users(id),
+            event_type  TEXT NOT NULL,
+            surface     TEXT,
+            trip_id     TEXT,
+            event_data  TEXT NOT NULL DEFAULT '{}',
+            created_at  INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS extreme_trip_metadata (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id      INTEGER NOT NULL REFERENCES users(id),
+            trip_id      TEXT NOT NULL,
+            checkpoints  TEXT NOT NULL DEFAULT '[]',
+            trip_memory  TEXT NOT NULL DEFAULT '{}',
+            updated_at   INTEGER NOT NULL,
+            UNIQUE(user_id, trip_id)
+        );
+        CREATE TABLE IF NOT EXISTS extreme_copilot_actions (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id      INTEGER NOT NULL REFERENCES users(id),
+            session_id   TEXT,
+            trip_id      TEXT,
+            command      TEXT NOT NULL,
+            action_type  TEXT NOT NULL,
+            status       TEXT NOT NULL DEFAULT 'staged',
+            payload      TEXT NOT NULL DEFAULT '{}',
+            created_at   INTEGER NOT NULL,
+            confirmed_at INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS extreme_admin_config (
+            config_key  TEXT PRIMARY KEY,
+            value_json  TEXT NOT NULL,
+            updated_by  INTEGER REFERENCES users(id),
+            updated_at  INTEGER NOT NULL
+        );
     """)
     # Performance indexes (IF NOT EXISTS is safe to re-run)
     for idx_sql in [
@@ -529,6 +577,10 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_contest_awards_period ON contest_awards(period_year, period_month, prize_type)",
         "CREATE INDEX IF NOT EXISTS idx_contributor_badges_user ON contributor_badges(user_id, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_map_contributor_applications_status ON map_contributor_applications(status, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_extreme_sessions_user ON extreme_demo_sessions(user_id, started_at)",
+        "CREATE INDEX IF NOT EXISTS idx_extreme_ledger_session ON extreme_ledger_events(session_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_extreme_trip_metadata_user ON extreme_trip_metadata(user_id, updated_at)",
+        "CREATE INDEX IF NOT EXISTS idx_extreme_copilot_user ON extreme_copilot_actions(user_id, created_at)",
     ]:
         try:
             db.execute(idx_sql)
@@ -896,6 +948,58 @@ def init_db():
             created_at  INTEGER NOT NULL,
             updated_at  INTEGER NOT NULL
         )""",
+        """CREATE TABLE IF NOT EXISTS extreme_demo_sessions (
+            session_id  TEXT PRIMARY KEY,
+            user_id     INTEGER NOT NULL REFERENCES users(id),
+            surface     TEXT NOT NULL,
+            trip_id     TEXT,
+            status      TEXT NOT NULL DEFAULT 'active',
+            started_at  INTEGER NOT NULL,
+            ended_at    INTEGER,
+            expires_at  INTEGER NOT NULL,
+            metadata    TEXT NOT NULL DEFAULT '{}'
+        )""",
+        """CREATE TABLE IF NOT EXISTS extreme_ledger_events (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id  TEXT,
+            user_id     INTEGER NOT NULL REFERENCES users(id),
+            event_type  TEXT NOT NULL,
+            surface     TEXT,
+            trip_id     TEXT,
+            event_data  TEXT NOT NULL DEFAULT '{}',
+            created_at  INTEGER NOT NULL
+        )""",
+        """CREATE TABLE IF NOT EXISTS extreme_trip_metadata (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id      INTEGER NOT NULL REFERENCES users(id),
+            trip_id      TEXT NOT NULL,
+            checkpoints  TEXT NOT NULL DEFAULT '[]',
+            trip_memory  TEXT NOT NULL DEFAULT '{}',
+            updated_at   INTEGER NOT NULL,
+            UNIQUE(user_id, trip_id)
+        )""",
+        """CREATE TABLE IF NOT EXISTS extreme_copilot_actions (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id      INTEGER NOT NULL REFERENCES users(id),
+            session_id   TEXT,
+            trip_id      TEXT,
+            command      TEXT NOT NULL,
+            action_type  TEXT NOT NULL,
+            status       TEXT NOT NULL DEFAULT 'staged',
+            payload      TEXT NOT NULL DEFAULT '{}',
+            created_at   INTEGER NOT NULL,
+            confirmed_at INTEGER
+        )""",
+        """CREATE TABLE IF NOT EXISTS extreme_admin_config (
+            config_key  TEXT PRIMARY KEY,
+            value_json  TEXT NOT NULL,
+            updated_by  INTEGER REFERENCES users(id),
+            updated_at  INTEGER NOT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_extreme_sessions_user ON extreme_demo_sessions(user_id, started_at)",
+        "CREATE INDEX IF NOT EXISTS idx_extreme_ledger_session ON extreme_ledger_events(session_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_extreme_trip_metadata_user ON extreme_trip_metadata(user_id, updated_at)",
+        "CREATE INDEX IF NOT EXISTS idx_extreme_copilot_user ON extreme_copilot_actions(user_id, created_at)",
     ]:
         try:
             db.execute(sql)
@@ -2842,6 +2946,227 @@ def has_active_plan(user: dict) -> bool:
     if expires is None:
         return False
     return int(time.time()) < expires
+
+def _csv_set(value: str) -> set[str]:
+    return {item.strip().lower() for item in (value or "").split(",") if item.strip()}
+
+def get_extreme_admin_config() -> dict:
+    db = _conn()
+    rows = db.execute("SELECT config_key, value_json, updated_by, updated_at FROM extreme_admin_config").fetchall()
+    db.close()
+    config: dict = {}
+    meta: dict = {}
+    for row in rows:
+        key = row["config_key"]
+        try:
+            config[key] = json.loads(row["value_json"])
+        except Exception:
+            config[key] = None
+        meta[key] = {"updated_by": row["updated_by"], "updated_at": row["updated_at"]}
+    config["_meta"] = meta
+    return config
+
+def set_extreme_admin_config(values: dict, updated_by: int | None = None) -> dict:
+    now = int(time.time())
+    db = _conn()
+    for key, value in (values or {}).items():
+        clean_key = re.sub(r"[^a-z0-9_.:-]+", "_", str(key or "").strip().lower())[:80]
+        if not clean_key or clean_key.startswith("_"):
+            continue
+        db.execute(
+            """INSERT INTO extreme_admin_config (config_key,value_json,updated_by,updated_at)
+               VALUES (?,?,?,?)
+               ON CONFLICT(config_key) DO UPDATE SET
+                 value_json=excluded.value_json,
+                 updated_by=excluded.updated_by,
+                 updated_at=excluded.updated_at""",
+            (clean_key, json.dumps(value), updated_by, now),
+        )
+    db.commit()
+    db.close()
+    return get_extreme_admin_config()
+
+def has_extreme_plan(user: dict | None) -> bool:
+    """Hidden beta entitlement for Extreme Explorer before public products exist."""
+    if not user:
+        return False
+    if user.get("is_admin"):
+        return True
+    plan = str(user.get("plan_type") or "free").strip().lower()
+    if plan in {"extreme", "extreme_beta"}:
+        expires = user.get("plan_expires_at")
+        return expires is None or int(time.time()) < int(expires)
+    beta_ids = _csv_set(settings.extreme_beta_user_ids)
+    beta_emails = _csv_set(settings.extreme_beta_emails)
+    return str(user.get("id")) in beta_ids or str(user.get("email") or "").lower() in beta_emails
+
+def create_extreme_demo_session(user_id: int, surface: str, trip_id: str | None,
+                                ttl_seconds: int, metadata: dict | None = None) -> dict:
+    now = int(time.time())
+    session_id = f"extreme_{secrets.token_hex(12)}"
+    db = _conn()
+    db.execute(
+        """INSERT INTO extreme_demo_sessions
+           (session_id,user_id,surface,trip_id,status,started_at,expires_at,metadata)
+           VALUES (?,?,?,?,?,?,?,?)""",
+        (session_id, user_id, surface, trip_id, "active", now, now + max(60, ttl_seconds), json.dumps(metadata or {})),
+    )
+    db.commit(); db.close()
+    return {
+        "session_id": session_id,
+        "user_id": user_id,
+        "surface": surface,
+        "trip_id": trip_id,
+        "status": "active",
+        "started_at": now,
+        "expires_at": now + max(60, ttl_seconds),
+    }
+
+def end_extreme_demo_session(user_id: int, session_id: str, reason: str = "ended") -> dict | None:
+    db = _conn()
+    row = db.execute(
+        "SELECT * FROM extreme_demo_sessions WHERE user_id=? AND session_id=?",
+        (user_id, session_id),
+    ).fetchone()
+    if not row:
+        db.close()
+        return None
+    now = int(time.time())
+    db.execute(
+        "UPDATE extreme_demo_sessions SET status=?, ended_at=? WHERE user_id=? AND session_id=?",
+        (reason[:40] or "ended", now, user_id, session_id),
+    )
+    db.commit()
+    updated = db.execute("SELECT * FROM extreme_demo_sessions WHERE session_id=?", (session_id,)).fetchone()
+    db.close()
+    return dict(updated) if updated else None
+
+def log_extreme_ledger_event(user_id: int, event_type: str, session_id: str | None = None,
+                             surface: str | None = None, trip_id: str | None = None,
+                             event_data: dict | None = None) -> int:
+    db = _conn()
+    cur = db.execute(
+        """INSERT INTO extreme_ledger_events
+           (session_id,user_id,event_type,surface,trip_id,event_data,created_at)
+           VALUES (?,?,?,?,?,?,?)""",
+        (session_id, user_id, event_type, surface, trip_id, json.dumps(event_data or {}), int(time.time())),
+    )
+    event_id = cur.lastrowid
+    db.commit(); db.close()
+    return event_id
+
+def save_extreme_trip_metadata(user_id: int, trip_id: str, checkpoints: list | None = None,
+                               trip_memory: dict | None = None) -> dict:
+    clean_trip_id = str(trip_id or "").strip()[:120]
+    if not clean_trip_id:
+        raise ValueError("trip_id is required")
+    now = int(time.time())
+    db = _conn()
+    db.execute(
+        """INSERT INTO extreme_trip_metadata (user_id,trip_id,checkpoints,trip_memory,updated_at)
+           VALUES (?,?,?,?,?)
+           ON CONFLICT(user_id, trip_id) DO UPDATE SET
+             checkpoints=excluded.checkpoints,
+             trip_memory=excluded.trip_memory,
+             updated_at=excluded.updated_at""",
+        (user_id, clean_trip_id, json.dumps(checkpoints or []), json.dumps(trip_memory or {}), now),
+    )
+    db.commit(); db.close()
+    return {"trip_id": clean_trip_id, "checkpoints": checkpoints or [], "trip_memory": trip_memory or {}, "updated_at": now}
+
+def stage_extreme_copilot_action(user_id: int, command: str, action_type: str,
+                                 session_id: str | None = None, trip_id: str | None = None,
+                                 payload: dict | None = None) -> dict:
+    now = int(time.time())
+    db = _conn()
+    cur = db.execute(
+        """INSERT INTO extreme_copilot_actions
+           (user_id,session_id,trip_id,command,action_type,status,payload,created_at)
+           VALUES (?,?,?,?,?,?,?,?)""",
+        (
+            user_id,
+            session_id,
+            trip_id,
+            str(command or "").strip()[:800],
+            str(action_type or "review").strip()[:80],
+            "staged",
+            json.dumps(payload or {}),
+            now,
+        ),
+    )
+    action_id = cur.lastrowid
+    db.commit()
+    row = db.execute("SELECT * FROM extreme_copilot_actions WHERE id=?", (action_id,)).fetchone()
+    db.close()
+    out = dict(row) if row else {"id": action_id, "status": "staged"}
+    try:
+        out["payload"] = json.loads(out.get("payload") or "{}")
+    except Exception:
+        out["payload"] = {}
+    return out
+
+def list_extreme_sessions(limit: int = 50) -> list[dict]:
+    db = _conn()
+    rows = db.execute(
+        """SELECT s.*, u.username, u.email
+           FROM extreme_demo_sessions s
+           LEFT JOIN users u ON u.id=s.user_id
+           ORDER BY s.started_at DESC LIMIT ?""",
+        (max(1, min(limit, 200)),),
+    ).fetchall()
+    db.close()
+    out = []
+    for row in rows:
+        item = dict(row)
+        try:
+            item["metadata"] = json.loads(item.get("metadata") or "{}")
+        except Exception:
+            item["metadata"] = {}
+        out.append(item)
+    return out
+
+def list_extreme_ledger_events(limit: int = 100) -> list[dict]:
+    db = _conn()
+    rows = db.execute(
+        """SELECT e.*, u.username, u.email
+           FROM extreme_ledger_events e
+           LEFT JOIN users u ON u.id=e.user_id
+           ORDER BY e.created_at DESC LIMIT ?""",
+        (max(1, min(limit, 300)),),
+    ).fetchall()
+    db.close()
+    out = []
+    for row in rows:
+        item = dict(row)
+        try:
+            item["event_data"] = json.loads(item.get("event_data") or "{}")
+        except Exception:
+            item["event_data"] = {}
+        out.append(item)
+    return out
+
+def get_extreme_ledger_summary(since: int | None = None) -> dict:
+    db = _conn()
+    where = "WHERE created_at>=?" if since else ""
+    params = (since,) if since else ()
+    events = db.execute(
+        f"SELECT event_type, COUNT(*) as count FROM extreme_ledger_events {where} GROUP BY event_type ORDER BY count DESC",
+        params,
+    ).fetchall()
+    sessions = db.execute(
+        f"SELECT status, COUNT(*) as count FROM extreme_demo_sessions {'WHERE started_at>=?' if since else ''} GROUP BY status",
+        params,
+    ).fetchall()
+    active = db.execute(
+        "SELECT COUNT(*) as count FROM extreme_demo_sessions WHERE status='active' AND expires_at>?",
+        (int(time.time()),),
+    ).fetchone()
+    db.close()
+    return {
+        "events_by_type": [{"event_type": r["event_type"], "count": r["count"]} for r in events],
+        "sessions_by_status": [{"status": r["status"], "count": r["count"]} for r in sessions],
+        "active_sessions": int(active["count"] if active else 0),
+    }
 
 def authorize_offline_download(user: dict, asset_type: str, region_id: str, cost: int, reason: str) -> dict:
     """Authorize one offline map/routing asset.

@@ -26,7 +26,7 @@ import * as FileSystem from 'expo-file-system';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useStore, type WaterSpot, type CatchLog, type WaterRoute } from '@/lib/store';
-import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile, MapCardResolveResponse, WaterNavigationLinesResponse, WaterConditionsResponse, WaterSpotCard, WaterSpotCardsResponse, FishingConditionsResponse, SuggestedWaterCorridorResponse } from '@/lib/api';
+import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile, MapCardResolveResponse, WaterNavigationLinesResponse, WaterConditionsResponse, WaterSpotCard, WaterSpotCardsResponse, FishingConditionsResponse, SuggestedWaterCorridorResponse, type ExtremeConfig } from '@/lib/api';
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { deleteRouteGeometry, loadRouteGeometry, saveRouteGeometry } from '@/lib/offlineRoutes';
 import { loadOfflineTrail, saveOfflineTrail } from '@/lib/offlineTrails';
@@ -3775,6 +3775,7 @@ function MapScreen() {
   const webRef       = useRef<any>(null);
   const nativeMapRef = useRef<NativeMapHandle>(null);
   const navVoiceRef  = useRef<string | undefined>(undefined);
+  const [extremeConfig, setExtremeConfig] = useState<ExtremeConfig | null>(null);
 
   // Load best available TTS voice — prefer natural iOS voices over robotic default
   useEffect(() => {
@@ -3788,6 +3789,30 @@ function MapScreen() {
       navVoiceRef.current = best?.identifier;
     }).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    if (!user) {
+      setExtremeConfig(null);
+      return () => { mounted = false; };
+    }
+    api.getExtremeConfig()
+      .then(cfg => { if (mounted) setExtremeConfig(cfg); })
+      .catch(() => { if (mounted) setExtremeConfig(null); });
+    return () => { mounted = false; };
+  }, [user?.id]);
+
+  const extremeMapSurfaceAvailable = !!extremeConfig?.beta_active
+    && !extremeConfig.kill_switch
+    && extremeConfig.allowed_surfaces.includes('map');
+
+  function openExtremeExplorer(surface: 'map' | 'route_builder' = 'map') {
+    if (!extremeConfig?.enabled) {
+      Alert.alert('Extreme Explorer', 'Extreme Explorer is in hidden beta for selected accounts.');
+      return;
+    }
+    router.push({ pathname: '/extreme-explorer', params: { surface } } as any);
+  }
 
   const safeSpeech = (text: string, opts?: Parameters<typeof Speech.speak>[1]) => {
     try {
@@ -14592,6 +14617,15 @@ function MapScreen() {
               <Ionicons name="albums-outline" size={13} color={C.orange} />
               <Text style={s.tripPanelEditText}>ROUTES</Text>
             </TouchableOpacity>
+            {extremeMapSurfaceAvailable && (
+              <TouchableOpacity
+                style={[s.tripPanelExtreme, !extremeConfig?.enabled && { opacity: 0.68 }]}
+                onPress={() => openExtremeExplorer('map')}
+              >
+                <Ionicons name="sparkles-outline" size={13} color="#f8fafc" />
+                <Text style={s.tripPanelExtremeText}>EXTREME</Text>
+              </TouchableOpacity>
+            )}
           </View>
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.tripPanelScroll}>
             <View style={s.tripTimeline}>
@@ -16791,6 +16825,8 @@ const makeStyles = (C: ColorPalette) => {
   tripPanelEditText: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900' },
   tripPanelSave: { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderColor: C.green + '55', backgroundColor: C.green + '10', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7 },
   tripPanelSaveText: { color: C.green, fontSize: 9, fontFamily: mono, fontWeight: '900' },
+  tripPanelExtreme: { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderColor: '#fb923c88', backgroundColor: '#f97316', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7 },
+  tripPanelExtremeText: { color: '#fff', fontSize: 9, fontFamily: mono, fontWeight: '900' },
   tripPrimaryActions: { flexDirection: 'row', gap: 8, paddingHorizontal: 14, paddingBottom: 10 },
   tripStartBtn: { flex: 1, minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: C.green, borderRadius: 12 },
   tripStartText: { color: '#fff', fontSize: 12, fontFamily: mono, fontWeight: '900', letterSpacing: 0.7 },

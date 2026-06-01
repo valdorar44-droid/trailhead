@@ -14,7 +14,7 @@ import TourTarget from '@/components/TourTarget';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
 import { TrailheadButton, TrailheadCard, TrailheadSheet, TrailheadTopBar } from '@/components/TrailheadUI';
 import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
-import { api, ApiError, CampFullness, Campsite, CampsiteDetail, CampsiteInsight, CampsitePin, CampReusePolicy, ExcursionCandidate, FuelEstimate, GasStation, GeocodePlace, OsmPoi, PaywallError, RouteStyleMode, SavedRouteGeometryPayload, TripResult, TripShapeMode, TripTimeline, Waypoint, WeatherForecast } from '@/lib/api';
+import { api, ApiError, CampFullness, Campsite, CampsiteDetail, CampsiteInsight, CampsitePin, CampReusePolicy, ExcursionCandidate, FuelEstimate, GasStation, GeocodePlace, OsmPoi, PaywallError, RouteStyleMode, SavedRouteGeometryPayload, TripResult, TripShapeMode, TripTimeline, Waypoint, WeatherForecast, type ExtremeConfig } from '@/lib/api';
 import { loadAllPlacePoints } from '@/lib/offlinePlacePacks';
 import { deleteOfflineTrail, listOfflineTrails, type OfflineTrail } from '@/lib/offlineTrails';
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
@@ -1083,6 +1083,7 @@ export default function RouteBuilderScreen() {
   const router = useRouter();
   const activeTrip = useStore(st => st.activeTrip);
   const setActiveTrip = useStore(st => st.setActiveTrip);
+  const user = useStore(st => st.user);
   const addTripToHistory = useStore(st => st.addTripToHistory);
   const tripHistory = useStore(st => st.tripHistory);
   const setTabBarHidden = useStore(st => st.setTabBarHidden);
@@ -1156,9 +1157,21 @@ export default function RouteBuilderScreen() {
   const [paywallCode, setPaywallCode] = useState('camp_detail');
   const [paywallMessage, setPaywallMessage] = useState('Use credits or Explorer to open full campsite profiles. You can still add this camp to your route from the free preview.');
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [extremeConfig, setExtremeConfig] = useState<ExtremeConfig | null>(null);
   const tripLoop = tripShapeMode !== 'one_way';
   const effectiveCampReusePolicy: CampReusePolicy = tripShapeMode === 'there_and_back' ? 'same_camp_window' : campReusePolicy;
   const fmtRouteDistance = (mi: number) => fmtUnitDistance(mi, weatherUnitMode);
+  const extremeRouteBuilderAvailable = !!extremeConfig?.beta_active
+    && !extremeConfig.kill_switch
+    && extremeConfig.allowed_surfaces.includes('route_builder');
+
+  function openExtremeExplorer() {
+    if (!extremeConfig?.enabled) {
+      Alert.alert('Extreme Explorer', 'Extreme Explorer is in hidden beta for selected accounts.');
+      return;
+    }
+    router.push({ pathname: '/extreme-explorer', params: { surface: 'route_builder' } } as any);
+  }
   const builderIntentFor = (inputDays: number[] = days): RouteBuilderIntent => ({
     shape: tripShapeMode,
     routeStyle,
@@ -1208,6 +1221,18 @@ export default function RouteBuilderScreen() {
     setTabBarHidden(routeTabMode !== 'hub' || keyboardVisible);
     return () => setTabBarHidden(false);
   }, [keyboardVisible, routeTabMode, setTabBarHidden]);
+
+  useEffect(() => {
+    let mounted = true;
+    if (!user) {
+      setExtremeConfig(null);
+      return () => { mounted = false; };
+    }
+    api.getExtremeConfig()
+      .then(cfg => { if (mounted) setExtremeConfig(cfg); })
+      .catch(() => { if (mounted) setExtremeConfig(null); });
+    return () => { mounted = false; };
+  }, [user?.id]);
 
   useEffect(() => {
     let mounted = true;
@@ -3769,7 +3794,16 @@ export default function RouteBuilderScreen() {
             </View>
             <Text style={s.routeHubTitle}>Plan a route</Text>
             <Text style={s.routeHubText}>Build a new trip with your rig, daily pace, fuel range, camps, and route style. Finished routes open on the Map workspace.</Text>
-              <TrailheadButton label="Build New Route" icon="add" variant="primary" onPress={startNewRoute} disabled={routeSaving} />
+            <TrailheadButton label="Build New Route" icon="add" variant="primary" onPress={startNewRoute} disabled={routeSaving} />
+            {extremeRouteBuilderAvailable && (
+              <TouchableOpacity
+                style={[s.routeHubExtremeBtn, !extremeConfig?.enabled && { opacity: 0.66 }]}
+                onPress={openExtremeExplorer}
+              >
+                <Ionicons name="sparkles-outline" size={15} color="#fff" />
+                <Text style={s.routeHubExtremeText}>EXTREME EXPLORER</Text>
+              </TouchableOpacity>
+            )}
           </TrailheadCard>
 
           <TrailheadCard style={[s.routeHubRig, rigRouteSummary.ready && s.routeHubRigReady]}>
@@ -3823,6 +3857,23 @@ export default function RouteBuilderScreen() {
                     <Ionicons name="map-outline" size={13} color={C.green} />
                     <Text style={s.savedRouteOpenText}>OPEN ON MAP</Text>
                   </View>
+                  {extremeRouteBuilderAvailable && (
+                    <TouchableOpacity
+                      style={[s.savedRouteExtreme, !extremeConfig?.enabled && { opacity: 0.66 }]}
+                      onPress={(event: any) => {
+                        event.stopPropagation?.();
+                        if (!extremeConfig?.enabled) {
+                          openExtremeExplorer();
+                          return;
+                        }
+                        openSavedRoute(route.trip_id).then(() => {
+                          setTimeout(openExtremeExplorer, 120);
+                        }).catch(() => {});
+                      }}
+                    >
+                      <Ionicons name="sparkles-outline" size={13} color="#fff" />
+                    </TouchableOpacity>
+                  )}
                 </View>
               </TrailheadCard>
             ))
@@ -4972,6 +5023,18 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     shadowColor: C.orange, shadowOpacity: 0.22, shadowRadius: 18, shadowOffset: { width: 0, height: 0 },
   },
   routeHubPrimaryText: { color: '#fff', fontSize: 11, fontFamily: mono, fontWeight: '900' },
+  routeHubExtremeBtn: {
+    minHeight: 46,
+    borderRadius: 16,
+    backgroundColor: '#f97316',
+    borderWidth: 1,
+    borderColor: '#fb923c88',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  routeHubExtremeText: { color: '#fff', fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 0.6 },
   routeHubRig: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     borderWidth: 1, borderColor: C.border, borderRadius: 18,
@@ -5022,6 +5085,16 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   savedRouteOpen: {
     flex: 1, minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7,
     borderWidth: 1, borderColor: C.border, borderRadius: 14, backgroundColor: C.s2,
+  },
+  savedRouteExtreme: {
+    width: 48,
+    minHeight: 48,
+    borderRadius: 14,
+    backgroundColor: '#f97316',
+    borderWidth: 1,
+    borderColor: '#fb923c88',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   savedRouteOpenText: { color: C.silverBright, fontSize: 9, fontFamily: mono, fontWeight: '900' },
   savedTrailCard: {

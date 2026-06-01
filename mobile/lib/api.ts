@@ -170,6 +170,37 @@ export const api = {
   adminRemovePhoto:  (reportId: number) => req<{ ok: boolean }>(`/api/admin/reports/${reportId}/remove-photo`, { method: 'POST' }),
   adminExpireReport: (reportId: number) => req<{ ok: boolean }>(`/api/admin/reports/${reportId}/expire`, { method: 'POST' }),
   getConfig: () => req<{ mapbox_token: string; protomaps_key?: string }>('/api/config'),
+  getExtremeConfig: () => req<ExtremeConfig>('/api/extreme/config'),
+  authorizeExtremeSession: (data: ExtremeSessionAuthorizeRequest) =>
+    req<ExtremeSessionAuthorizeResponse>('/api/extreme/session/authorize', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  endExtremeSession: (session_id: string, reason = 'ended') =>
+    req<{ ok: boolean; session_id: string; status: string; ended_at?: number }>('/api/extreme/session/end', {
+      method: 'POST',
+      body: JSON.stringify({ session_id, reason }),
+    }),
+  logExtremeLedger: (data: ExtremeLedgerRequest) =>
+    req<{ ok: boolean; event_id: number }>('/api/extreme/ledger', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  authorizeExtremeNavigation: (data: ExtremeNavigationAuthorizeRequest) =>
+    req<ExtremeNavigationAuthorizeResponse>('/api/extreme/navigation/authorize', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  extremeWeatherRouteRisk: (data: ExtremeRouteRiskRequest) =>
+    req<ExtremeRouteRiskResponse>('/api/extreme/weather/route-risk', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  extremeCopilotCommand: (data: ExtremeCopilotCommandRequest) =>
+    req<ExtremeCopilotCommandResponse>('/api/extreme/copilot/command', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
   geocodePlaces: (query: string, limit = 8) => {
     const normalized = normalizeRequestText(query);
     if (normalized.length < 2) return Promise.resolve([]);
@@ -541,6 +572,159 @@ export interface User {
   reporting_restricted_until?: number;
   is_admin?: boolean;
   email_verified?: boolean | number;
+}
+export type ExtremeSurface = 'map' | 'route_builder' | 'navigation' | 'copilot' | 'weather';
+export type ExtremeCheckpointType = 'start' | 'fuel' | 'stay' | 'camp' | 'food' | 'repair' | 'viewpoint' | 'weather' | 'finish' | string;
+export interface ExtremeCheckpoint {
+  id: string;
+  type: ExtremeCheckpointType;
+  title: string;
+  note: string;
+  lat: number;
+  lng: number;
+  day: number;
+  sequence: number;
+  status: 'planned' | 'suggested' | 'confirmed' | 'review' | string;
+  source: 'trailhead' | 'user' | 'community' | 'offline' | string;
+  source_id?: string;
+  confidence?: 'high' | 'medium' | 'low' | 'estimated' | string;
+  expires_at?: number | null;
+}
+export interface TripMemory {
+  vehicle?: Record<string, unknown>;
+  range?: Record<string, unknown>;
+  clearance?: Record<string, unknown>;
+  trailer?: Record<string, unknown>;
+  comfort_level?: string;
+  preferred_stays?: string[];
+  avoid_rules?: string[];
+  public_private_preference?: string;
+  offline_readiness?: Record<string, unknown>;
+  risk_notes?: string[];
+  recent_user_edits?: Record<string, unknown>[];
+}
+export interface ExtremeConfig {
+  tier_name: 'Extreme Explorer' | string;
+  enabled: boolean;
+  entitled: boolean;
+  kill_switch: boolean;
+  beta_active: boolean;
+  allowed_surfaces: ExtremeSurface[] | string[];
+  style_uris: Record<'standard' | 'live_road' | 'satellite_trail' | '3d_terrain' | 'night_drive' | 'weather_watch' | 'outdoors', string>;
+  style_labels: Record<string, string>;
+  mapbox_public_token: string;
+  max_demo_session_seconds: number;
+  max_navigation_session_seconds?: number;
+  feature_flags?: {
+    native_mode: boolean;
+    search: boolean;
+    weather: boolean;
+    navigation: boolean;
+    voice: boolean;
+    copilot: boolean;
+    mapgpt_pilot: boolean;
+    atlas_pilot: boolean;
+  };
+  weather?: {
+    enabled: boolean;
+    layers: Array<{ id: string; label: string; enabled_by_default?: boolean }>;
+  };
+  copilot?: {
+    enabled: boolean;
+    voice_enabled: boolean;
+    press_to_talk: boolean;
+    wake_phrase: boolean;
+    persona: string;
+    voice: string;
+    actions: Record<string, string>;
+    requires_confirmation: boolean;
+  };
+  navigation?: {
+    enabled: boolean;
+    requires_explicit_authorization: boolean;
+    max_session_seconds: number;
+    free_drive: boolean;
+  };
+  cost_caps?: { daily_cents: number };
+  pilot_flags?: { mapgpt: boolean; atlas: boolean };
+  guardrails: {
+    navigation_sessions: boolean;
+    free_drive: boolean;
+    mapgpt: boolean;
+    offline_mapbox_packs: boolean;
+    permanent_copilot_mutations?: boolean;
+  };
+}
+export interface ExtremeSessionAuthorizeRequest {
+  surface: ExtremeSurface;
+  trip_id?: string | null;
+  checkpoints?: ExtremeCheckpoint[];
+  trip_memory?: TripMemory;
+  metadata?: Record<string, unknown>;
+}
+export interface ExtremeSessionAuthorizeResponse {
+  authorized: boolean;
+  session_id: string;
+  expires_at: number;
+  max_demo_session_seconds: number;
+  navigation_session_authorized: false;
+}
+export interface ExtremeNavigationAuthorizeRequest {
+  surface: 'navigation';
+  trip_id?: string | null;
+  route_id?: string | null;
+  route_summary?: Record<string, unknown>;
+  trip_memory?: TripMemory;
+  metadata?: Record<string, unknown>;
+  acknowledged_billing: boolean;
+  navigation_mode?: 'route_guidance' | string;
+}
+export interface ExtremeNavigationAuthorizeResponse {
+  authorized: boolean;
+  session_id: string;
+  expires_at: number;
+  max_navigation_session_seconds: number;
+  navigation_session_authorized: true;
+  free_drive_authorized: false;
+  route_id?: string | null;
+}
+export interface ExtremeLedgerRequest {
+  session_id?: string | null;
+  event_type: string;
+  surface: ExtremeSurface;
+  trip_id?: string | null;
+  event_data?: Record<string, unknown>;
+}
+export interface ExtremeRouteRiskRequest {
+  trip_id?: string | null;
+  route: Array<{ lat: number; lng: number; day?: number }>;
+  checkpoints?: ExtremeCheckpoint[];
+  metadata?: Record<string, unknown>;
+}
+export interface ExtremeRouteRiskResponse {
+  enabled: boolean;
+  layers: Array<{ id: string; label: string; enabled_by_default?: boolean }>;
+  risk_checkpoints: ExtremeCheckpoint[];
+  summary: string;
+}
+export interface ExtremeCopilotCommandRequest {
+  session_id?: string | null;
+  trip_id?: string | null;
+  command: string;
+  mode?: 'text' | 'voice' | string;
+  context?: Record<string, unknown>;
+}
+export interface ExtremeCopilotCommandResponse {
+  ok: boolean;
+  message: string;
+  action: {
+    id: number;
+    type: string;
+    label: string;
+    status: 'staged' | string;
+    requires_confirmation: boolean;
+    payload?: Record<string, unknown>;
+  };
 }
 export interface GeocodePlace {
   name: string;

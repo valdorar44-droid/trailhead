@@ -114,6 +114,24 @@ Ledger fields:
 
 ## Premium Experience
 
+### Current Implementation Chunk
+
+The first implementation chunk is Premium Map Demo only:
+
+- Hidden beta config and entitlement endpoints.
+- Demo session authorization/end/ledger for non-navigation browsing.
+- Trailhead-owned checkpoint and trip-memory contracts.
+- Mobile entry points from Map and Route Builder when the server allows the beta surface.
+- A separate Extreme Explorer preview screen with a premium map loading moment, animated route line, popping places/checkpoints, style choices, and text-only Co-Pilot tray.
+
+This chunk still excludes:
+
+- Real guided navigation billing sessions.
+- Free Drive.
+- `startTripSession`.
+- Production MapGPT calls.
+- Permanent Co-Pilot trip mutations without explicit confirmation.
+
 ### Map Loading Moment
 
 Target the polished demo feel:
@@ -163,6 +181,29 @@ Co-Pilot remains Trailhead-owned:
 - It can ask Mapbox for map/search/nav/weather context.
 - It uses Trailhead data for camps, private stays, public-land rules, route readiness, offline packs, trails, water, and reports.
 - It writes trip memory and checkpoint state to Trailhead, not Mapbox.
+
+### Follow-On: Voice Co-Pilot
+
+Next add-on set should make Co-Pilot voice activated, similar to the MapGPT demo lane, but overland-specific and Trailhead-owned:
+
+- Wake/press-to-talk entry from Extreme Explorer, Guided Nav, and route review.
+- Speech recognition with visible listening/thinking/confirming states.
+- Spoken responses for route decisions, weather risk, fuel gaps, overnight planning, and trail/road conditions.
+- Command routing that can use Mapbox map/search/nav/weather context where licensed, while keeping overland memory, camps, private stays, public-land rules, offline readiness, reports, trails, and water context in Trailhead.
+- Confirmation gates for every permanent action: add stop, replace stay, change route, mark checkpoint, download trip, or start guidance.
+- Overland commands beyond generic navigation:
+  - "Find legal camp before dark."
+  - "Add fuel before the remote stretch."
+  - "Avoid shelf roads with the trailer."
+  - "Show bailout towns."
+  - "Warn me before last reliable signal."
+  - "Download everything for this route."
+  - "Switch to public land only."
+  - "Find repair within 30 miles."
+- A server-side command ledger for cost, safety, entitlement, and action audit.
+- A customization dashboard for enabled commands, voice personality, confirmation strictness, preferred providers, overland constraints, and kill switches.
+
+Guardrail for this follow-on: MapGPT/UX Framework can be piloted, but Trailhead should retain the source of truth for trip state, private selections, checkpoints, memory, and user-confirmed mutations.
 
 ### Checkpoints
 
@@ -432,6 +473,15 @@ Checkpoint:
 - Test weather/fuel/voice assistant features.
 - Test custom Trailhead map layers.
 - Decide whether to adopt, wrap, or copy patterns using lower-level SDKs.
+
+### Checkpoint I: Pre-Rebuild Controls
+
+- Add dashboard-backed Extreme config overrides.
+- Keep Railway `EXTREME_ENABLED` and `EXTREME_KILL_SWITCH` as master safety gates.
+- Add admin beta grants for `extreme_beta` accounts without public products.
+- Show recent Extreme sessions, ledger events, and 24h activity.
+- Keep Navigation, Weather, Voice, MapGPT, Atlas, and Native Mode separately switchable.
+- Verify dashboard switches cannot enable features while the master kill switch is on.
 
 ## Open Questions
 

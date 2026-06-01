@@ -383,7 +383,7 @@ async def get_geoapify_places(
     cache_lng = _cache_coord(lng)
     cache_radius = _cache_radius(radius_m)
     limit = max(40, min(int(limit_per_category or 20) * max(1, min(len(requested), 6)), 120))
-    cache_key = f"geoapify_places:v2:{cache_lat:.2f}:{cache_lng:.2f}:{cache_radius}:{category_key}:{limit}"
+    cache_key = f"geoapify_places:v3:{cache_lat:.2f}:{cache_lng:.2f}:{cache_radius}:{category_key}:{limit}"
     cached = get_cached("campsite_cache", cache_key, ttl_seconds=GEOAPIFY_PLACES_TTL_SECONDS)
     if cached is not None:
         record_provider_call(

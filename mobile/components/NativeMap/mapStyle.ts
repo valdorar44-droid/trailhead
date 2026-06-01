@@ -201,11 +201,11 @@ export function buildMapStyle(
     layers.push({
       id: 'terrain-hillshade', type: 'hillshade', source: demId,
       paint: {
-        'hillshade-shadow-color': sat ? '#111827' : '#2f2618',
-        'hillshade-highlight-color': sat ? '#f8fafc' : '#d1b27b',
-        'hillshade-accent-color': sat ? '#475569' : '#8b6b3d',
-        'hillshade-exaggeration': sat ? 0.26 : 0.38,
-        'hillshade-opacity': sat ? 0.34 : 0.42,
+        'hillshade-shadow-color': sat || hyb ? '#0f172a' : '#2f2618',
+        'hillshade-highlight-color': sat || hyb ? '#fff7ed' : '#d1b27b',
+        'hillshade-accent-color': sat || hyb ? '#64748b' : '#8b6b3d',
+        'hillshade-exaggeration': sat || hyb ? 0.62 : 0.5,
+        'hillshade-opacity': sat || hyb ? 0.46 : 0.48,
       },
     });
   }
@@ -261,18 +261,18 @@ export function buildMapStyle(
         filter: ['!', ['to-boolean', ['coalesce', ['get', 'idx'], false]]],
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
-          'line-color': hyb ? 'rgba(242,196,121,0.56)' : '#8a7652',
+          'line-color': hyb ? 'rgba(255,218,151,0.62)' : '#8a7652',
           'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.35, 13, 0.65, 16, 1.05],
-          'line-opacity': hyb ? 0.58 : 0.66,
+          'line-opacity': hyb ? 0.66 : 0.66,
         } },
       { id: 'contour-index-line', type: 'line', source: contourId, 'source-layer': 'contours',
         minzoom: 9,
         filter: ['to-boolean', ['coalesce', ['get', 'idx'], false]],
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
-          'line-color': hyb ? 'rgba(255,213,138,0.78)' : '#a38a5c',
+          'line-color': hyb ? 'rgba(255,226,166,0.9)' : '#a38a5c',
           'line-width': ['interpolate', ['linear'], ['zoom'], 9, 0.65, 13, 1.05, 16, 1.6],
-          'line-opacity': hyb ? 0.72 : 0.82,
+          'line-opacity': hyb ? 0.86 : 0.82,
         } },
       { id: 'contour-label', type: 'symbol', source: contourId, 'source-layer': 'contours',
         minzoom: 12,
@@ -283,17 +283,17 @@ export function buildMapStyle(
             'case',
             ['==', ['get', 'unit'], 'm'],
             ['concat', ['to-string', ['get', 'ele']], ' m'],
-            ['concat', ['to-string', ['get', 'ele']], "'"],
+            ['concat', ['to-string', ['get', 'ele']], ' ft'],
           ],
-          'text-size': 9,
+          'text-size': ['interpolate', ['linear'], ['zoom'], 12, 9, 15, 11],
           'text-font': ['Noto Sans Medium'],
           'text-repeat': 500,
         },
         paint: {
-          'text-color': hyb ? '#ffe0a3' : '#b39a68',
+          'text-color': hyb ? '#ffe7b8' : '#b39a68',
           'text-halo-color': lwHalo,
-          'text-halo-width': 1.3,
-          'text-opacity': hyb ? 0.78 : 0.88,
+          'text-halo-width': hyb ? 2 : 1.3,
+          'text-opacity': hyb ? 0.95 : 0.88,
         } },
     );
   }
@@ -563,8 +563,8 @@ export function buildMapStyle(
         minzoom: 15,
         filter: ['any', ['has', 'height'], ['has', 'render_height'], ['has', 'levels']],
         paint: {
-          'fill-extrusion-color': sat ? '#d6d3d1' : '#3d4654',
-          'fill-extrusion-opacity': sat ? 0.42 : 0.34,
+          'fill-extrusion-color': sat || hyb ? '#e7e5e4' : '#3d4654',
+          'fill-extrusion-opacity': sat || hyb ? 0.52 : 0.36,
           'fill-extrusion-height': [
             'case',
             ['has', 'height'], ['to-number', ['get', 'height']],
@@ -721,7 +721,7 @@ export function buildMapStyle(
     version: 8 as const,
     sources,
     glyphs: GLYPH_URL,
-    ...(showTerrain && mapboxToken ? { terrain: { source: demId, exaggeration: 1.45 } } : {}),
+    ...(showTerrain && mapboxToken ? { terrain: { source: demId, exaggeration: hyb ? 1.85 : 1.6 } } : {}),
     layers,
   };
 }

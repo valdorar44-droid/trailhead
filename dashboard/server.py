@@ -4380,6 +4380,94 @@ async def gas(lat: float, lng: float, radius: float = 25):
     return merged[:100]
 
 
+FUEL_PRICE_FALLBACK = 3.65
+FUEL_REGION_PRICES = {
+    "west": 4.45,
+    "rockies": 3.55,
+    "midwest": 3.35,
+    "south": 3.25,
+    "northeast": 3.55,
+    "national": FUEL_PRICE_FALLBACK,
+}
+FUEL_STATE_REGION = {
+    **dict.fromkeys(["CA", "OR", "WA", "NV", "AK", "HI"], "west"),
+    **dict.fromkeys(["AZ", "CO", "ID", "MT", "NM", "UT", "WY"], "rockies"),
+    **dict.fromkeys(["IA", "IL", "IN", "KS", "MI", "MN", "MO", "ND", "NE", "OH", "SD", "WI"], "midwest"),
+    **dict.fromkeys(["AL", "AR", "FL", "GA", "KY", "LA", "MS", "NC", "OK", "SC", "TN", "TX", "VA", "WV"], "south"),
+    **dict.fromkeys(["CT", "DC", "DE", "MA", "MD", "ME", "NH", "NJ", "NY", "PA", "RI", "VT"], "northeast"),
+}
+
+
+async def _latest_eia_regular_price() -> dict | None:
+    cache_key = "fuel:eia:regular:national"
+    cached = get_cached("gas_cache", cache_key, ttl_seconds=3600 * 12)
+    if cached is not None:
+        return cached
+    params = {
+        "frequency": "weekly",
+        "data[0]": "value",
+        "facets[series][]": "EMM_EPMR_PTE_NUS_DPG",
+        "sort[0][column]": "period",
+        "sort[0][direction]": "desc",
+        "length": "1",
+    }
+    if settings.eia_api_key:
+        params["api_key"] = settings.eia_api_key
+    try:
+        async with httpx.AsyncClient(timeout=8, headers={"User-Agent": "TrailheadFuel/1.0"}) as client:
+            resp = await client.get("https://api.eia.gov/v2/petroleum/pri/gnd/data/", params=params)
+            resp.raise_for_status()
+            row = (resp.json().get("response", {}).get("data") or [None])[0] or {}
+            value = float(row.get("value"))
+            if value > 0:
+                payload = {
+                    "price_per_gallon": round(value, 3),
+                    "source": "EIA weekly regular gasoline average",
+                    "confidence": "medium",
+                    "updated_at": row.get("period") or datetime.now(timezone.utc).isoformat(),
+                }
+                set_cached("gas_cache", cache_key, payload)
+                return payload
+    except Exception:
+        return None
+    return None
+
+
+@app.get("/api/fuel/estimate")
+async def fuel_estimate(miles: float = 0, mpg: float = 0, states: str = "", unit: str = "imperial"):
+    safe_miles = max(0.0, float(miles or 0))
+    safe_mpg = max(1.0, float(mpg or 0) if mpg else 0.0)
+    if safe_mpg <= 1.0:
+        safe_mpg = 18.0
+    route_states = [s.strip().upper() for s in states.split(",") if len(s.strip()) == 2]
+    live = await _latest_eia_regular_price()
+    if live:
+        price = float(live["price_per_gallon"])
+        source = live["source"]
+        confidence = live["confidence"]
+        updated_at = live["updated_at"]
+    else:
+        regions = [FUEL_STATE_REGION.get(s, "national") for s in route_states] or ["national"]
+        price = sum(FUEL_REGION_PRICES.get(region, FUEL_PRICE_FALLBACK) for region in regions) / max(1, len(regions))
+        source = "Regional fuel estimate"
+        confidence = "estimated"
+        updated_at = datetime.now(timezone.utc).isoformat()
+    gallons = safe_miles / safe_mpg if safe_miles > 0 else 0.0
+    liters = gallons * 3.785411784
+    return {
+        "miles": round(safe_miles, 1),
+        "mpg": round(safe_mpg, 2),
+        "gallons": round(gallons, 2),
+        "liters": round(liters, 1),
+        "estimated_cost": round(gallons * price, 2),
+        "price_per_gallon": round(price, 3),
+        "source": source,
+        "confidence": confidence,
+        "updated_at": updated_at,
+        "unit": "metric" if unit == "metric" else "imperial",
+    }
+
+
 # ── Camp fullness ──────────────────────────────────────────────────────────────
 
 class CampFullRequest(BaseModel):

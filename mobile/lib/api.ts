@@ -198,6 +198,12 @@ export const api = {
     req<CampsitePin[]>(`/api/campsites/search?lat=${lat}&lng=${lng}&radius=${radius}&types=${types.join(',')}`),
   getGas: (lat: number, lng: number, radius = 25) =>
     req<GasStation[]>(`/api/gas?lat=${lat}&lng=${lng}&radius=${radius}`),
+  getFuelEstimate: (miles: number, mpg: number, states: string[] = [], unit: WeatherUnitMode = 'imperial') =>
+    guardedRequest(
+      `fuel-estimate:${Math.round(miles)}:${Math.round(mpg * 10) / 10}:${states.slice().sort().join(',')}:${unit}`,
+      30 * 60_000,
+      () => req<FuelEstimate>(`/api/fuel/estimate?miles=${encodeURIComponent(String(Math.max(0, miles)))}&mpg=${encodeURIComponent(String(Math.max(1, mpg)))}&states=${encodeURIComponent(states.join(','))}&unit=${encodeURIComponent(unit === 'metric' ? 'metric' : 'imperial')}`),
+    ),
   getCampsiteDetail: (id: string) =>
     req<CampsiteDetail>(`/api/campsites/${encodeURIComponent(id)}/detail`),
   suggestCampsiteEdit: (id: string, data: CampEditSuggestionPayload) =>
@@ -722,8 +728,21 @@ export interface CampsiteDetail extends CampsitePin {
 export interface GasStation {
   id: number | string; name: string; lat: number; lng: number;
   fuel_types: string; address: string;
+  price?: number; price_source?: string; price_updated_at?: string;
   route_distance_mi?: number; route_fit?: string; recommended_day?: number;
   route_progress?: number; route_progress_mi?: number; route_segment_index?: number;
+}
+export interface FuelEstimate {
+  miles: number;
+  mpg: number;
+  gallons: number;
+  liters: number;
+  estimated_cost: number;
+  price_per_gallon: number;
+  source: string;
+  confidence: 'high' | 'medium' | 'estimated' | string;
+  updated_at: string;
+  unit: 'imperial' | 'metric';
 }
 export interface Report {
   id: number | string; lat: number; lng: number; type: string; subtype: string;
@@ -822,7 +841,7 @@ export interface PinPayload {
 }
 export interface OsmPoi {
   id: string; name: string; lat: number; lng: number;
-  type: 'camp' | 'water' | 'trail' | 'trailhead' | 'viewpoint' | 'peak' | 'hot_spring' | 'fuel' | 'propane' | 'dump' | 'shower' | 'laundromat' | 'lodging' | 'food' | 'grocery' | 'mechanic' | 'parking' | 'attraction' | 'hardware' | 'camping' | 'medical' | 'parts' | 'wifi' | 'poi'; subtype?: string; elevation?: string;
+  type: 'camp' | 'water' | 'trail' | 'trailhead' | 'viewpoint' | 'peak' | 'hot_spring' | 'fuel' | 'propane' | 'dump' | 'shower' | 'laundromat' | 'lodging' | 'farm_stay' | 'ranch' | 'winery' | 'glamping' | 'private_camp' | 'food' | 'grocery' | 'mechanic' | 'parking' | 'attraction' | 'hardware' | 'camping' | 'medical' | 'parts' | 'wifi' | 'poi'; subtype?: string; elevation?: string;
   source?: string;
   source_label?: string;
   provider_place_id?: string;

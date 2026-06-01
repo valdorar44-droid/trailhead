@@ -1026,23 +1026,24 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const routeRef = useRef(makeRouteState([]));
 
   // MLRN v10 uses `mapStyle` — accepts string (style URL) or object (inline JSON).
-  const contourMode: ContourSourceMode = mapLayer === 'satellite'
+  const effectiveMapLayer: MapMode = showTerrain && mapboxToken ? 'hybrid' : mapLayer;
+  const contourMode: ContourSourceMode = effectiveMapLayer === 'satellite'
     ? 'none'
     : localContours
       ? 'local'
       : 'online';
   const trailMode: TrailSourceMode = showTrailOverlay ? (localTrails ? 'local' : 'online') : 'none';
   const mapStyleObj = useMemo(
-    () => buildMapStyle(mapLayer, mapboxToken || '', localTiles, tileSession, contourMode, trailMode, showNautical, showTerrain),
-    [mapLayer, mapboxToken, localTiles, tileSession, contourMode, trailMode, showNautical, showTerrain],
+    () => buildMapStyle(effectiveMapLayer, mapboxToken || '', localTiles, tileSession, contourMode, trailMode, showNautical, showTerrain),
+    [effectiveMapLayer, mapboxToken, localTiles, tileSession, contourMode, trailMode, showNautical, showTerrain],
   );
 
   useEffect(() => {
     if (navMode) return;
     lastCamRef.current = Date.now();
     camRef.current?.setCamera({
-      pitch: showTerrain ? 52 : 0,
-      animationDuration: 320,
+      pitch: showTerrain ? 68 : 0,
+      animationDuration: 520,
       animationMode: 'easeTo',
     } as any);
   }, [navMode, showTerrain]);
@@ -1671,12 +1672,13 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         defaultSettings={{
           centerCoordinate: initialCenter,
           zoomLevel: initialZoom,
+          pitch: showTerrain ? 68 : 0,
           animationDuration: 0,
         }}
         followUserLocation={navMode && navCameraFollow}
         followUserMode={(navSpeed ?? 0) > 1.2 ? MapLibreGL.UserTrackingMode.FollowWithCourse : MapLibreGL.UserTrackingMode.FollowWithHeading}
         followZoomLevel={(navSpeed ?? 0) > 20 ? 15.5 : (navSpeed ?? 0) > 9 ? 16.2 : 17}
-        followPitch={(navSpeed ?? 0) > 2.2 ? 45 : 0}
+        followPitch={showTerrain ? 62 : (navSpeed ?? 0) > 2.2 ? 45 : 0}
         onUserTrackingModeChange={(event: any) => {
           if (navMode && event?.nativeEvent?.payload?.followUserLocation === false) onMapGesture?.();
         }}

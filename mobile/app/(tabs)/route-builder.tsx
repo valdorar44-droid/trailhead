@@ -14,7 +14,7 @@ import TourTarget from '@/components/TourTarget';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
 import { TrailheadButton, TrailheadCard, TrailheadSheet, TrailheadTopBar } from '@/components/TrailheadUI';
 import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
-import { api, ApiError, CampFullness, Campsite, CampsiteDetail, CampsiteInsight, CampsitePin, CampReusePolicy, ExcursionCandidate, GasStation, GeocodePlace, OsmPoi, PaywallError, RouteStyleMode, SavedRouteGeometryPayload, TripResult, TripShapeMode, TripTimeline, Waypoint, WeatherForecast } from '@/lib/api';
+import { api, ApiError, CampFullness, Campsite, CampsiteDetail, CampsiteInsight, CampsitePin, CampReusePolicy, ExcursionCandidate, FuelEstimate, GasStation, GeocodePlace, OsmPoi, PaywallError, RouteStyleMode, SavedRouteGeometryPayload, TripResult, TripShapeMode, TripTimeline, Waypoint, WeatherForecast } from '@/lib/api';
 import { loadAllPlacePoints } from '@/lib/offlinePlacePacks';
 import { deleteOfflineTrail, listOfflineTrails, type OfflineTrail } from '@/lib/offlineTrails';
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
@@ -69,7 +69,7 @@ type BuilderStop = {
 };
 type SearchPlace = { name: string; lat: number; lng: number };
 type DiscoveryTab = 'camps' | 'gas' | 'poi' | 'excursions';
-type CampPreferenceMode = 'public' | 'developed' | 'rv' | 'any';
+type CampPreferenceMode = 'public' | 'developed' | 'rv' | 'private' | 'any';
 type CampCadenceMode = 'nightly' | 'alternate' | 'manual';
 type RoutePlaceSelection =
   | { kind: 'gas'; day: number; place: any; data: GasStation }
@@ -137,6 +137,11 @@ const PLACE_FILTER_TYPES = [
   { id: 'shower', label: 'Showers', icon: 'rainy-outline', color: '#06b6d4' },
   { id: 'laundromat', label: 'Laundry', icon: 'shirt-outline', color: '#06b6d4' },
   { id: 'lodging', label: 'Lodging', icon: 'bed-outline', color: '#6366f1' },
+  { id: 'farm_stay', label: 'Farm Stays', icon: 'home-outline', color: '#65a30d' },
+  { id: 'ranch', label: 'Ranches', icon: 'home-outline', color: '#a16207' },
+  { id: 'winery', label: 'Wineries', icon: 'wine-outline', color: '#7c3aed' },
+  { id: 'glamping', label: 'Glamping', icon: 'sparkles-outline', color: '#0ea5e9' },
+  { id: 'private_camp', label: 'Private Camps', icon: 'key-outline', color: '#16a34a' },
   { id: 'food', label: 'Food', icon: 'restaurant-outline', color: '#06b6d4' },
   { id: 'grocery', label: 'Groceries', icon: 'cart-outline', color: '#06b6d4' },
   { id: 'mechanic', label: 'Mechanic', icon: 'construct-outline', color: '#f97316' },
@@ -150,11 +155,12 @@ const PLACE_FILTER_TYPES = [
 const DEFAULT_PLACE_FILTERS = ['fuel', 'propane', 'water', 'boat_ramp', 'paddle_launch', 'fishing_access', 'marina', 'dock', 'shore_access', 'dump', 'trailhead'];
 const WATER_PLACE_FILTER_IDS = new Set(['boat_ramp', 'paddle_launch', 'fishing_access', 'marina', 'dock', 'shore_access', 'swimming', 'spring', 'water_fill', 'gauge']);
 const FUEL_POI_TYPES = 'fuel,propane';
-const ROUTE_POI_TYPES = 'water,trailhead,viewpoint,peak,hot_spring,dump,shower,laundromat,lodging,food,grocery,mechanic,parking,attraction';
+const ROUTE_POI_TYPES = 'water,trailhead,viewpoint,peak,hot_spring,dump,shower,laundromat,lodging,farm_stay,ranch,winery,glamping,private_camp,food,grocery,mechanic,parking,attraction';
 const CAMP_PREFERENCE_OPTIONS: Array<{ id: CampPreferenceMode; label: string; sub: string; icon: keyof typeof Ionicons.glyphMap; filters: string[] }> = [
   { id: 'public', label: 'Public', sub: 'BLM / USFS first', icon: 'trail-sign-outline', filters: ['blm', 'usfs', 'dispersed', 'free', 'tent'] },
   { id: 'developed', label: 'Developed', sub: 'Parks + reservable', icon: 'bonfire-outline', filters: ['tent', 'reservable', 'state', 'nps', 'usfs'] },
   { id: 'rv', label: 'RV', sub: 'Hookups + parks', icon: 'car-sport-outline', filters: ['rv', 'reservable'] },
+  { id: 'private', label: 'Private stays', sub: 'Farms, ranches, glamping', icon: 'home-outline', filters: ['private', 'farm', 'ranch', 'winery', 'glamping', 'rv'] },
   { id: 'any', label: 'Any legal', sub: 'Broad search', icon: 'map-outline', filters: [] },
 ];
 const CAMP_CADENCE_OPTIONS: Array<{ id: CampCadenceMode; label: string; sub: string; icon: keyof typeof Ionicons.glyphMap }> = [
@@ -625,15 +631,30 @@ function sampleRouteStates(stops: BuilderStop[], loop: boolean) {
   return out;
 }
 
-async function fetchAaaStateRegular(state: string) {
-  const name = STATE_INFO[state]?.name;
-  if (!name) return null;
-  const res = await fetch(`https://gasprices.aaa.com/?state=${encodeURIComponent(state)}`);
-  const html = await res.text();
-  const stateAvg = html.match(new RegExp(`Today[^$]+${name.replace(/\s+/g, '\\s+')}\\s+Avg\\.\\s+\\$([0-9.]+)`, 'i'));
-  const currentAvg = html.match(/<td>\s*Current Avg\.\s*<\/td>\s*<td>\s*\$([0-9.]+)/i);
-  const value = Number(stateAvg?.[1] ?? currentAvg?.[1]);
-  return Number.isFinite(value) && value > 0 ? value : null;
+function estimateShapeMiles(stops: BuilderStop[], shape: TripShapeMode) {
+  if (stops.length < 2) return 0;
+  let miles = routeDistanceMi(stops);
+  const first = stops[0];
+  const last = stops[stops.length - 1];
+  if ((shape === 'loop' || shape === 'there_and_back') && first && last) {
+    miles += haversineMi(last, first);
+  }
+  if (!miles && first && last) {
+    const locations = buildRouteLocationsForShape({
+      shape,
+      start: first,
+      destination: last,
+      routeStyle: 'balanced',
+    });
+    miles = routeDistanceMi(locations);
+  }
+  return miles;
+}
+
+function fuelSourceLabel(estimate: FuelEstimate | null, hasRigMpg: boolean) {
+  if (!hasRigMpg) return 'Add MPG in Profile';
+  if (!estimate) return 'Using rig profile';
+  return estimate.confidence === 'estimated' ? 'Estimated' : 'Using rig profile';
 }
 
 function routeBufferForMiles(mi: number) {
@@ -841,6 +862,11 @@ function campFilterTags(camp: CampsitePin) {
   if (raw.includes('nps') || raw.includes('national park')) tags.add('nps');
   if (raw.includes('state park')) tags.add('state');
   if (raw.includes('corps')) tags.add('corps');
+  if (raw.includes('private')) tags.add('private');
+  if (raw.includes('farm')) tags.add('farm');
+  if (raw.includes('ranch')) tags.add('ranch');
+  if (raw.includes('winery') || raw.includes('vineyard')) tags.add('winery');
+  if (raw.includes('glamping') || raw.includes('yurt') || raw.includes('cabin')) tags.add('glamping');
   return tags;
 }
 
@@ -1094,9 +1120,8 @@ export default function RouteBuilderScreen() {
   const [frameworkStatus, setFrameworkStatus] = useState('');
   const [restDays, setRestDays] = useState<number[]>([]);
   const [dayDriveTargets, setDayDriveTargets] = useState<Record<number, string>>({});
-  const [gasPrice, setGasPrice] = useState('3.65');
-  const [stateGasPrices, setStateGasPrices] = useState<Record<string, number>>({});
-  const [gasPriceStatus, setGasPriceStatus] = useState<'idle' | 'loading' | 'live' | 'fallback'>('idle');
+  const gasPrice = '3.65';
+  const [fuelEstimate, setFuelEstimate] = useState<FuelEstimate | null>(null);
   const [routeGeometry, setRouteGeometry] = useState<ProviderRouteGeometry | null>(null);
   const [importedTripId, setImportedTripId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -1423,49 +1448,17 @@ export default function RouteBuilderScreen() {
     });
   }, [routeGeometry, days, dayDriveTargets, driveHoursPerDay, campCadenceMode, tripShapeMode]);
 
-  useEffect(() => {
-    const missing = routeStates.filter(state => stateGasPrices[state] == null).slice(0, 6);
-    if (!missing.length) {
-      if (routeStates.length && Object.keys(stateGasPrices).length) setGasPriceStatus('live');
-      return;
-    }
-    let cancelled = false;
-    setGasPriceStatus('loading');
-    Promise.all(missing.map(async state => [state, await fetchAaaStateRegular(state)] as const))
-      .then(entries => {
-        if (cancelled) return;
-        const next: Record<string, number> = {};
-        for (const [state, price] of entries) if (price) next[state] = price;
-        if (Object.keys(next).length) {
-          setStateGasPrices(prev => ({ ...prev, ...next }));
-          setGasPriceStatus('live');
-        } else {
-          setGasPriceStatus('fallback');
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setGasPriceStatus('fallback');
-      });
-    return () => { cancelled = true; };
-  }, [routeStates.join(','), stateGasPrices]);
-
   const totals = useMemo(() => {
     let miles = routeGeometry?.totalDistanceMi && routeGeometry.totalDistanceMi > 0 ? routeGeometry.totalDistanceMi : 0;
-    if (!miles) {
-      for (let i = 1; i < orderedStops.length; i++) miles += haversineMi(orderedStops[i - 1], orderedStops[i]);
-      if (tripLoop && orderedStops.length > 2) miles += haversineMi(orderedStops[orderedStops.length - 1], orderedStops[0]);
-    }
+    if (!miles) miles = routeDaySegments.reduce((sum, segment) => sum + (segment.providerDistanceMi || 0), 0);
+    if (!miles) miles = estimateShapeMiles(orderedStops, tripShapeMode);
     return { miles, stops: orderedStops.length, camps: orderedStops.filter(st => st.type === 'camp').length };
-  }, [orderedStops, routeGeometry?.totalDistanceMi, tripLoop]);
+  }, [orderedStops, routeGeometry?.totalDistanceMi, routeDaySegments, tripShapeMode]);
   const planningStats = useMemo(() => {
     const mpg = estimateMpg(rigProfile);
-    const fallbackPrice = parsePositiveNumber(gasPrice) ?? 3.65;
-    const weightedGallons = Object.entries(routeStateMiles).reduce((sum, [state, miles]) => {
-      const price = stateGasPrices[state] ?? fallbackPrice;
-      return sum + (miles / mpg) * price;
-    }, 0);
+    const fallbackPrice = parsePositiveNumber(gasPrice) ?? fuelEstimate?.price_per_gallon ?? 3.65;
     const gallons = totals.miles / mpg;
-    const fuelCost = totals.miles > 0 ? (Object.keys(routeStateMiles).length ? weightedGallons : gallons * fallbackPrice) : 0;
+    const fuelCost = totals.miles > 0 ? fuelEstimate?.estimated_cost ?? gallons * fallbackPrice : 0;
     const price = gallons > 0 ? fuelCost / gallons : fallbackPrice;
     const driveLimit = parsePositiveNumber(driveHoursPerDay) ?? 5;
     const range = parsePositiveNumber(rigProfile?.fuel_range_miles);
@@ -1478,7 +1471,25 @@ export default function RouteBuilderScreen() {
       range,
       driveHours: estimateMovingHours(totals.miles),
     };
-  }, [driveHoursPerDay, gasPrice, rigProfile, routeStateMiles, stateGasPrices, totals.miles]);
+  }, [driveHoursPerDay, fuelEstimate, gasPrice, rigProfile, totals.miles]);
+
+  useEffect(() => {
+    if (!totals.miles) {
+      setFuelEstimate(null);
+      return;
+    }
+    let cancelled = false;
+    api.getFuelEstimate(totals.miles, planningStats.mpg, routeStates.slice(0, 6), weatherUnitMode)
+      .then(estimate => {
+        if (cancelled) return;
+        setFuelEstimate(estimate);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setFuelEstimate(null);
+      });
+    return () => { cancelled = true; };
+  }, [planningStats.mpg, routeStates.join(','), totals.miles, weatherUnitMode]);
   const routeBuildSession = useMemo(() => buildRouteBuilderSession({
     intent: builderIntentFor(days),
     stops: orderedStops,
@@ -1589,6 +1600,12 @@ export default function RouteBuilderScreen() {
     const fuelCount = orderedStops.filter(st => st.type === 'fuel').length;
     if (!checks.some(check => check.label === 'Fuel') && fuelCount > 0) {
       checks.push({ level: 'ok', label: 'Fuel', text: `${fuelCount} fuel stop${fuelCount === 1 ? '' : 's'} added.` });
+    } else if (!checks.some(check => check.label === 'Fuel') && totals.miles > 0) {
+      checks.push({
+        level: planningStats.range && totals.miles > planningStats.range * 0.7 ? 'warn' : 'ok',
+        label: 'Fuel',
+        text: `${fmtFuelVolumeFromMiles(totals.miles, planningStats.mpg, weatherUnitMode)} · $${Math.round(planningStats.fuelCost)} ${fuelSourceLabel(fuelEstimate, !!parsePositiveNumber(rigProfile?.fuel_mpg)).toLowerCase()}.`,
+      });
     }
     const driveCapacity = days
       .filter(day => !restDays.includes(day))
@@ -1598,7 +1615,7 @@ export default function RouteBuilderScreen() {
     }
     checks.push({ level: routeOfflineReadiness.ready ? 'ok' : 'warn', label: 'Offline', text: routeOfflineReadiness.message });
     return checks.slice(0, 5);
-  }, [days, orderedStops, totals.miles, planningStats.driveLimit, dayDriveTargets, restDays, tripReadiness.tasks, routeOfflineReadiness.ready, routeOfflineReadiness.message]);
+  }, [days, orderedStops, totals.miles, planningStats.driveLimit, planningStats.fuelCost, planningStats.mpg, planningStats.range, weatherUnitMode, fuelEstimate, rigProfile?.fuel_mpg, dayDriveTargets, restDays, tripReadiness.tasks, routeOfflineReadiness.ready, routeOfflineReadiness.message]);
   const discoverEmptyText = discoverTab === 'camps'
     ? 'Tap scan to find legal camps near the selected leg or route point.'
     : discoverTab === 'gas'
@@ -1696,8 +1713,10 @@ export default function RouteBuilderScreen() {
     const isPublic = /(blm|usfs|forest|public|dispersed|free|boondock)/i.test(text);
     const isRv = /(rv|hookup|koa|resort)/i.test(text);
     const isReservable = /(reservable|reservation|state|nps|recreation\.gov|developed)/i.test(text);
+    const isPrivateStay = /(private|farm|ranch|winery|vineyard|glamping|yurt|cabin|hipcamp|harvest)/i.test(text);
     const distance = camp.route_distance_mi ?? 0;
     if (campPreferenceMode === 'rv') return distance + (isRv ? -14 : 8) + (isReservable ? -3 : 0);
+    if (campPreferenceMode === 'private') return distance + (isPrivateStay ? -14 : 10) + (isReservable ? -4 : 0) + (isPublic ? 6 : 0);
     if (campPreferenceMode === 'developed') return distance + (isReservable ? -10 : 0) + (isPublic ? -4 : 0) + (isRv ? 3 : 0);
     if (campPreferenceMode === 'public') return distance + (isPublic ? -16 : 8) + (isRv ? 18 : 0);
     return distance + (isPublic ? -6 : 0) + (isRv ? 3 : 0);
@@ -4462,7 +4481,9 @@ export default function RouteBuilderScreen() {
       {!keyboardVisible && <View style={[s.footer, { bottom: 18 + bottomInset }]} pointerEvents="box-none">
         <View>
           <Text style={s.footerMiles}>{fmtRouteDistance(totals.miles)}</Text>
-          <Text style={s.footerSub}>{totals.stops} stops · {totals.camps} camps · ${Math.round(planningStats.fuelCost)} fuel · {days.length} days</Text>
+          <Text style={s.footerSub}>
+            {totals.stops} stops · {totals.camps} camps · {fmtFuelVolumeFromMiles(totals.miles, planningStats.mpg, weatherUnitMode)} / ${totals.miles > 0 ? Math.max(1, Math.round(planningStats.fuelCost)) : 0} · {fuelSourceLabel(fuelEstimate, !!parsePositiveNumber(rigProfile?.fuel_mpg))}
+          </Text>
         </View>
         <TouchableOpacity style={[s.previewBtn, routeSaving && { opacity: 0.65 }]} onPress={() => saveRoute(true)} disabled={routeSaving}>
           <Ionicons name="map-outline" size={16} color="#fff" />

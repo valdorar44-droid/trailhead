@@ -9,6 +9,7 @@ const CAMP_PREFS = {
   public: ['blm', 'usfs', 'dispersed', 'free', 'tent'],
   developed: ['tent', 'reservable', 'state', 'nps', 'usfs'],
   rv: ['rv', 'reservable'],
+  private: ['private', 'farm', 'ranch', 'winery', 'glamping', 'private_camp'],
   any: [],
 };
 
@@ -24,12 +25,14 @@ const BASE_ROUTES = [
 
 const SMOKE_CASES = [
   { route: 'moab-big-sur', shape: 'one_way', style: 'wild', campPreference: 'public', cadence: 'nightly', reuse: 'different_each_night', days: 7, hours: 5 },
+  { route: 'moab-big-sur', shape: 'one_way', style: 'wild', campPreference: 'private', cadence: 'nightly', reuse: 'different_each_night', days: 7, hours: 5 },
   { route: 'moab-big-sur', shape: 'one_way', style: 'wild', campPreference: 'any', cadence: 'nightly', reuse: 'different_each_night', days: 7, hours: 5 },
-  { route: 'moab-big-sur', shape: 'there_and_back', style: 'wild', campPreference: 'any', cadence: 'nightly', reuse: 'same_camp_window', days: 7, hours: 5 },
+  { route: 'moab-big-sur', shape: 'there_and_back', style: 'wild', campPreference: 'private', cadence: 'nightly', reuse: 'same_camp_window', days: 7, hours: 5 },
   { route: 'moab-big-sur', shape: 'loop', style: 'balanced', campPreference: 'developed', cadence: 'alternate', reuse: 'same_camp_window', days: 5, hours: 5 },
-  { route: 'denver-moab', shape: 'one_way', style: 'wild', campPreference: 'public', cadence: 'manual', reuse: 'manual', days: 5, hours: 4 },
+  { route: 'denver-moab', shape: 'one_way', style: 'wild', campPreference: 'private', cadence: 'manual', reuse: 'manual', days: 5, hours: 4 },
   { route: 'seattle-banff', shape: 'one_way', style: 'balanced', campPreference: 'any', cadence: 'nightly', reuse: 'different_each_night', days: 5, hours: 6 },
-  { route: 'paris-chamonix', shape: 'one_way', style: 'direct', campPreference: 'developed', cadence: 'nightly', reuse: 'different_each_night', days: 3, hours: 6 },
+  { route: 'paris-chamonix', shape: 'one_way', style: 'direct', campPreference: 'private', cadence: 'nightly', reuse: 'different_each_night', days: 3, hours: 6 },
+  { route: 'reykjavik-akureyri', shape: 'one_way', style: 'balanced', campPreference: 'private', cadence: 'nightly', reuse: 'different_each_night', days: 5, hours: 5 },
   { route: 'reykjavik-akureyri', shape: 'there_and_back', style: 'balanced', campPreference: 'any', cadence: 'alternate', reuse: 'same_camp_window', days: 4, hours: 5 },
   { route: 'sf-la', shape: 'one_way', style: 'direct', campPreference: 'any', cadence: 'nightly', reuse: 'different_each_night', days: 3, hours: 6 },
   { route: 'honolulu-big-sur', shape: 'one_way', style: 'balanced', campPreference: 'any', cadence: 'nightly', reuse: 'different_each_night', days: 3, hours: 5 },
@@ -41,7 +44,7 @@ function fullCases() {
   for (const route of primary) {
     for (const shape of ['one_way', 'loop', 'there_and_back']) {
       for (const style of ['direct', 'balanced', 'wild']) {
-        for (const campPreference of ['public', 'developed', 'rv', 'any']) {
+        for (const campPreference of ['public', 'developed', 'rv', 'private', 'any']) {
           for (const days of [3, 5, 7]) {
             cases.push({
               route,
@@ -60,7 +63,7 @@ function fullCases() {
   }
   for (const route of ['seattle-banff', 'paris-chamonix', 'reykjavik-akureyri']) {
     for (const style of ['direct', 'balanced', 'wild']) {
-      for (const campPreference of ['developed', 'any']) {
+      for (const campPreference of ['developed', 'private', 'any']) {
         cases.push({ route, shape: 'one_way', style, campPreference, cadence: 'nightly', reuse: 'different_each_night', days: 5, hours: 6 });
       }
     }
@@ -276,7 +279,7 @@ async function runCase(item) {
     region_hint: base.region,
     camp_reuse_policy: item.reuse,
     max_daily_drive_hours: item.hours,
-    max_radius: item.campPreference === 'any' ? 115 : 100,
+    max_radius: item.campPreference === 'any' || item.campPreference === 'private' ? 115 : 100,
   });
   const campEval = evaluateCampWindows(item, result.windows || [], base);
   report.camps = campEval;

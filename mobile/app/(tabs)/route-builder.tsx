@@ -137,11 +137,12 @@ const PLACE_FILTER_TYPES = [
   { id: 'shower', label: 'Showers', icon: 'rainy-outline', color: '#06b6d4' },
   { id: 'laundromat', label: 'Laundry', icon: 'shirt-outline', color: '#06b6d4' },
   { id: 'lodging', label: 'Lodging', icon: 'bed-outline', color: '#6366f1' },
-  { id: 'farm_stay', label: 'Farm Stays', icon: 'home-outline', color: '#65a30d' },
+  { id: 'private_stay', label: 'Private Stays', icon: 'home-outline', color: '#0ea5e9' },
+  { id: 'farm_stay', label: 'Farm stays', icon: 'home-outline', color: '#65a30d' },
   { id: 'ranch', label: 'Ranches', icon: 'home-outline', color: '#a16207' },
   { id: 'winery', label: 'Wineries', icon: 'wine-outline', color: '#7c3aed' },
   { id: 'glamping', label: 'Glamping', icon: 'sparkles-outline', color: '#0ea5e9' },
-  { id: 'private_camp', label: 'Private Camps', icon: 'key-outline', color: '#16a34a' },
+  { id: 'private_camp', label: 'Private camps', icon: 'key-outline', color: '#16a34a' },
   { id: 'food', label: 'Food', icon: 'restaurant-outline', color: '#06b6d4' },
   { id: 'grocery', label: 'Groceries', icon: 'cart-outline', color: '#06b6d4' },
   { id: 'mechanic', label: 'Mechanic', icon: 'construct-outline', color: '#f97316' },
@@ -155,12 +156,12 @@ const PLACE_FILTER_TYPES = [
 const DEFAULT_PLACE_FILTERS = ['fuel', 'propane', 'water', 'boat_ramp', 'paddle_launch', 'fishing_access', 'marina', 'dock', 'shore_access', 'dump', 'trailhead'];
 const WATER_PLACE_FILTER_IDS = new Set(['boat_ramp', 'paddle_launch', 'fishing_access', 'marina', 'dock', 'shore_access', 'swimming', 'spring', 'water_fill', 'gauge']);
 const FUEL_POI_TYPES = 'fuel,propane';
-const ROUTE_POI_TYPES = 'water,trailhead,viewpoint,peak,hot_spring,dump,shower,laundromat,lodging,farm_stay,ranch,winery,glamping,private_camp,food,grocery,mechanic,parking,attraction';
+const ROUTE_POI_TYPES = 'water,trailhead,viewpoint,peak,hot_spring,dump,shower,laundromat,lodging,private_stay,farm_stay,ranch,winery,glamping,private_camp,food,grocery,mechanic,parking,attraction';
 const CAMP_PREFERENCE_OPTIONS: Array<{ id: CampPreferenceMode; label: string; sub: string; icon: keyof typeof Ionicons.glyphMap; filters: string[] }> = [
   { id: 'public', label: 'Public', sub: 'BLM / USFS first', icon: 'trail-sign-outline', filters: ['blm', 'usfs', 'dispersed', 'free', 'tent'] },
   { id: 'developed', label: 'Developed', sub: 'Parks + reservable', icon: 'bonfire-outline', filters: ['tent', 'reservable', 'state', 'nps', 'usfs'] },
   { id: 'rv', label: 'RV', sub: 'Hookups + parks', icon: 'car-sport-outline', filters: ['rv', 'reservable'] },
-  { id: 'private', label: 'Private stays', sub: 'Farms, ranches, glamping', icon: 'home-outline', filters: ['private', 'farm', 'ranch', 'winery', 'glamping', 'rv'] },
+  { id: 'private', label: 'Private Stays', sub: 'Farms, ranches, glamping', icon: 'home-outline', filters: ['private', 'farm', 'ranch', 'winery', 'glamping', 'private_camp'] },
   { id: 'any', label: 'Any legal', sub: 'Broad search', icon: 'map-outline', filters: [] },
 ];
 const CAMP_CADENCE_OPTIONS: Array<{ id: CampCadenceMode; label: string; sub: string; icon: keyof typeof Ionicons.glyphMap }> = [

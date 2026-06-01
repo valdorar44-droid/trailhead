@@ -34,6 +34,7 @@ GEOAPIFY_CATEGORY_MAP: dict[str, list[str]] = {
     "food": ["catering.restaurant", "catering.fast_food", "catering.cafe"],
     "grocery": ["commercial.supermarket", "commercial.food_and_drink", "commercial.convenience"],
     "lodging": ["accommodation.hotel", "accommodation.motel", "accommodation.hostel"],
+    "private_stay": ["accommodation.guest_house", "tourism.sights", "camping.camp_site", "camping.caravan_site"],
     "farm_stay": ["accommodation.guest_house", "tourism.sights"],
     "ranch": ["accommodation.guest_house", "tourism.sights"],
     "winery": ["catering.restaurant", "tourism.sights"],
@@ -64,6 +65,7 @@ GEOAPIFY_CATEGORY_PRIORITY = {
     "camp": 5,
     "camps": 5,
     "rv_park": 5,
+    "private_stay": 6,
     "private_camp": 6,
     "glamping": 6,
     "farm_stay": 7,
@@ -129,6 +131,9 @@ def _category_from_feature(props: dict, requested_category: str) -> str:
     raw = _raw_tags(props)
     raw_text = " ".join(f"{k}={v}" for k, v in raw.items()).lower()
     text = " ".join([requested_category, *categories, str(props.get("name") or ""), raw_text]).lower()
+    private_stay_categories = {"private_stay", "farm_stay", "ranch", "winery", "glamping", "private_camp"}
+    if requested_category in private_stay_categories:
+        return requested_category
     if "camping.caravan_site" in categories or "camping.camp_site" in categories:
         return "camp"
     if "fuel:propane" in text or "propane" in text:

@@ -561,6 +561,11 @@ function campTags(camp: Partial<CampsitePin> | OsmPoi | null | undefined): strin
   if (text.includes('dispersed') || text.includes('primitive') || text.includes('boondock')) tags.add('dispersed');
   if (text.includes('primitive')) tags.add('primitive');
   if (text.includes('rv') || text.includes('hookup') || text.includes('caravan')) tags.add('rv');
+  if (text.includes('private_stay') || text.includes('private stay') || text.includes('private_camp') || text.includes('private camp')) tags.add('private');
+  if (text.includes('farm_stay') || text.includes('farm stay') || text.includes('farm')) { tags.add('private'); tags.add('farm'); }
+  if (text.includes('ranch')) { tags.add('private'); tags.add('ranch'); }
+  if (text.includes('winery') || text.includes('vineyard')) { tags.add('private'); tags.add('winery'); }
+  if (text.includes('glamping') || text.includes('yurt') || text.includes('cabin')) { tags.add('private'); tags.add('glamping'); }
   if (text.includes('tent')) tags.add('tent');
   if (text.includes('walk-in') || text.includes('walk in') || text.includes('hike-in')) tags.add('walk_in');
   if (text.includes('blm') || text.includes('bureau_of_land_management')) tags.add('blm');
@@ -831,6 +836,12 @@ function placeTypeIcon(type?: string): keyof typeof Ionicons.glyphMap {
     case 'propane': return 'flame-outline';
     case 'water': return 'water-outline';
     case 'dump': return 'trash-bin-outline';
+    case 'private_stay':
+    case 'farm_stay':
+    case 'ranch':
+    case 'glamping':
+    case 'private_camp': return 'home-outline';
+    case 'winery': return 'wine-outline';
     case 'grocery': return 'cart-outline';
     case 'mechanic':
     case 'parts': return 'construct-outline';
@@ -850,6 +861,12 @@ function placeTypeColor(type?: string) {
     case 'propane': return '#f97316';
     case 'water': return '#0284c7';
     case 'dump': return '#a16207';
+    case 'private_stay':
+    case 'farm_stay': return '#65a30d';
+    case 'ranch': return '#a16207';
+    case 'winery': return '#7c3aed';
+    case 'glamping': return '#0ea5e9';
+    case 'private_camp': return '#16a34a';
     case 'grocery': return '#06b6d4';
     case 'mechanic':
     case 'parts': return '#f97316';
@@ -1837,6 +1854,7 @@ const COMMUNITY_PIN_TYPES = [
   { id: 'camp', label: 'Camp', icon: 'bonfire-outline', color: '#16a34a', group: 'Camps' },
   { id: 'informal_camp', label: 'Informal', icon: 'business-outline', color: '#65a30d', group: 'Camps' },
   { id: 'wild_camp', label: 'Wild Camp', icon: 'moon-outline', color: '#15803d', group: 'Camps' },
+  { id: 'private_stay', label: 'Private Stay', icon: 'home-outline', color: '#0ea5e9', group: 'Camps' },
   { id: 'fuel', label: 'Gas', icon: 'flash-outline', color: '#ea580c', group: 'Services' },
   { id: 'propane', label: 'Propane', icon: 'flame-outline', color: '#f97316', group: 'Services' },
   { id: 'water', label: 'Water', icon: 'water-outline', color: '#0284c7', group: 'Services' },
@@ -1880,6 +1898,12 @@ const PLACE_FILTER_TYPES = [
   { id: 'viewpoint', label: 'Views', icon: 'flag-outline', color: '#a855f7', group: 'essentials' },
   { id: 'peak', label: 'Peaks', icon: 'triangle-outline', color: '#92400e', group: 'essentials' },
   { id: 'hot_spring', label: 'Hot Springs', icon: 'flame-outline', color: '#f97316', group: 'essentials' },
+  { id: 'private_stay', label: 'Private Stays', icon: 'home-outline', color: '#0ea5e9', group: 'stays' },
+  { id: 'farm_stay', label: 'Farm stays', icon: 'home-outline', color: '#65a30d', group: 'stays' },
+  { id: 'ranch', label: 'Ranches', icon: 'home-outline', color: '#a16207', group: 'stays' },
+  { id: 'winery', label: 'Wineries', icon: 'wine-outline', color: '#7c3aed', group: 'stays' },
+  { id: 'glamping', label: 'Glamping', icon: 'sparkles-outline', color: '#0ea5e9', group: 'stays' },
+  { id: 'private_camp', label: 'Private camps', icon: 'key-outline', color: '#16a34a', group: 'stays' },
   { id: 'food', label: 'Food', icon: 'restaurant-outline', color: '#06b6d4', group: 'explore' },
   { id: 'grocery', label: 'Groceries', icon: 'cart-outline', color: '#06b6d4', group: 'explore' },
   { id: 'lodging', label: 'Lodging', icon: 'bed-outline', color: '#6366f1', group: 'explore' },
@@ -1897,7 +1921,7 @@ const PLACE_FILTER_TYPES = [
 ] as const;
 const DEFAULT_PLACE_FILTERS = ['attraction', 'trailhead', 'viewpoint', 'peak', 'hot_spring', 'water', 'fuel', 'propane', 'dump', 'camping'];
 const LEGACY_DEFAULT_PLACE_FILTERS = ['trailhead', 'viewpoint', 'water', 'fuel', 'dump'];
-const ESSENTIAL_PLACE_CATEGORIES = 'camp,camping,trailhead,viewpoint,peak,hot_spring,water,mechanic,parking,dump,propane,fuel';
+const ESSENTIAL_PLACE_CATEGORIES = 'camp,camping,trailhead,viewpoint,peak,hot_spring,water,mechanic,parking,dump,propane,fuel,private_stay,farm_stay,ranch,winery,glamping,private_camp';
 const EXPLORE_PLACE_FILTER_IDS = PLACE_FILTER_TYPES.filter(t => t.group === 'explore').map(t => t.id);
 const WATER_ACCESS_FILTER_TYPES = [
   { id: 'fishing_access', label: 'Fishing', icon: 'fish-outline', color: '#15803d' },
@@ -1918,7 +1942,7 @@ const ALL_PLACE_FILTER_IDS = [...PLACE_FILTER_TYPES.map(t => t.id), ...WATER_ACC
 const SMART_PLACE_CATEGORIES = ESSENTIAL_PLACE_CATEGORIES;
 const UTILITY_PLACE_TYPES = new Set(['fuel', 'propane', 'water', 'dump', 'parking']);
 const TRAIL_DISCOVERY_PIN_TYPES = new Set(['trail', 'trailhead', 'viewpoint', 'peak', 'hot_spring']);
-const CAMP_PLACE_TYPES = new Set(['camp', 'camping', 'informal_camp', 'wild_camp']);
+const CAMP_PLACE_TYPES = new Set(['camp', 'camping', 'informal_camp', 'wild_camp', 'private_stay', 'farm_stay', 'ranch', 'winery', 'glamping', 'private_camp']);
 const DEFAULT_COMMUNITY_PIN_FILTERS = COMMUNITY_PIN_TYPES
   .filter(t => t.id !== 'gpx_import')
   .map(t => t.id);
@@ -1929,7 +1953,7 @@ const MAX_FREECAM_CAMP_SEARCH_RADIUS_MI = 75;
 const MAX_ALL_MAP_POIS = 1200;
 const MAX_VISIBLE_MAP_POIS = 450;
 const MAX_OFFLINE_POI_SCAN = 1800;
-const CAMP_FILTER_IDS = ['blm', 'usfs', 'nps', 'state', 'corps', 'dispersed', 'tent', 'rv', 'walk_in', 'free', 'ada'];
+const CAMP_FILTER_IDS = ['blm', 'usfs', 'nps', 'state', 'corps', 'dispersed', 'tent', 'rv', 'walk_in', 'free', 'ada', 'private', 'farm', 'ranch', 'winery', 'glamping', 'private_camp'];
 
 function normalizedWaterSubtype(place: Pick<OsmPoi, 'type' | 'subtype'> & Record<string, any>) {
   if (String(place.type || '') !== 'water') return '';
@@ -2152,6 +2176,13 @@ const COMMUNITY_PIN_FIELDS: Partial<Record<CommunityPinTypeId, PinField[]>> = {
     { key: 'vehicle_fit', label: 'Vehicle fit', kind: 'select', options: ['Truck/van', 'High clearance', '4WD required', 'Walk-in only'] },
     { key: 'surface', label: 'Surface', kind: 'select', options: ['Dirt', 'Gravel', 'Sand', 'Rock', 'Mud'] },
     { key: 'privacy', label: 'Privacy', kind: 'select', options: ['Secluded', 'Visible from road', 'Shared area'] },
+  ],
+  private_stay: [
+    { key: 'stay_type', label: 'Stay type', kind: 'select', options: ['Farm stay', 'Ranch', 'Winery', 'Glamping', 'Private camp'] },
+    { key: 'access', label: 'Access', kind: 'select', options: ['Public listing', 'Customers only', 'Invite only', 'Unknown'] },
+    { key: 'confidence', label: 'Confidence', kind: 'select', options: ['Seen recently', 'Source only', 'Rumor', 'Needs review'] },
+    { key: 'vehicle_fit', label: 'Vehicle fit', kind: 'select', options: ['Car', 'Truck/van', 'Trailer', 'Big rig'] },
+    { key: 'contact_note', label: 'Contact note', placeholder: 'Optional public note, no private contact info' },
   ],
   water: [
     { key: 'potable', label: 'Potable', kind: 'select', options: ['Yes', 'No', 'Unknown'] },
@@ -12159,6 +12190,30 @@ function MapScreen() {
               </View>
 
               <View style={s.filterSectionHeader}>
+                <Text style={s.filterSectionTitle}>STAYS</Text>
+                <View style={{ flexDirection: 'row', gap: 12 }}>
+                  <TouchableOpacity onPress={() => setActivePlaceFilters(prev => Array.from(new Set([...prev, 'private_stay', 'farm_stay', 'ranch', 'winery', 'glamping', 'private_camp'])))}>
+                    <Text style={s.filterClearText}>PRIVATE STAYS</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+              <Text style={s.filterHintText}>Discovery only. Use source details and local rules to confirm access before making it an overnight stop.</Text>
+              <View style={s.filterGrid}>
+                {PLACE_FILTER_TYPES.filter(f => f.group === 'stays').map(f => {
+                  const active = activePlaceFilters.includes(f.id);
+                  return (
+                    <TouchableOpacity key={f.id} style={[s.filterChip, active && { backgroundColor: f.color, borderColor: f.color }]}
+                      onPress={() => setActivePlaceFilters(prev =>
+                        prev.includes(f.id) ? prev.filter(x => x !== f.id) : [...prev, f.id]
+                      )}>
+                      <Ionicons name={f.icon as any} size={13} color={active ? '#fff' : f.color} style={{ marginRight: 4 }} />
+                      <Text style={[s.filterChipText, active && { color: '#fff' }]}>{f.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <View style={s.filterSectionHeader}>
                 <Text style={s.filterSectionTitle}>EXPLORE / TOWN SERVICES</Text>
                 <View style={{ flexDirection: 'row', gap: 12 }}>
                   {exploreCategoriesUnlocked ? (
@@ -12220,6 +12275,12 @@ function MapScreen() {
                   { id: 'walk_in', label: 'Walk-in', icon: 'walk-outline' as const },
                   { id: 'free', label: 'Free', icon: 'pricetag-outline' as const },
                   { id: 'ada', label: 'ADA', icon: 'accessibility-outline' as const },
+                  { id: 'private', label: 'Private Stays', icon: 'home-outline' as const },
+                  { id: 'farm', label: 'Farm stays', icon: 'leaf-outline' as const },
+                  { id: 'ranch', label: 'Ranches', icon: 'home-outline' as const },
+                  { id: 'winery', label: 'Wineries', icon: 'wine-outline' as const },
+                  { id: 'glamping', label: 'Glamping', icon: 'sparkles-outline' as const },
+                  { id: 'private_camp', label: 'Private camps', icon: 'key-outline' as const },
                 ] as const).map(f => {
                   const active = activeFilters.includes(f.id);
                   return (

@@ -78,6 +78,9 @@ const CATEGORIES = [
     ['amenity','camping'],   ['tourism','wilderness_hut'], ['tourism','alpine_hut'],
     ['leisure','nature_reserve'], ['boundary','national_park'],
   ] as string[][] },
+  { id: 'private_stays', label: 'Private Stays', icon: 'home-outline', color: '#0ea5e9', tags: [
+    ['tourism','camp_site'], ['tourism','guest_house'], ['tourism','chalet'], ['tourism','apartment'],
+  ] as string[][] },
   { id: 'fuel',      label: 'Fuel',          icon: 'flash-outline',        color: '#eab308', tags: [['amenity','fuel']] },
   { id: 'grocery',   label: 'Grocery',        icon: 'cart-outline',         color: '#22c55e', tags: [['shop','supermarket'],['shop','grocery'],['shop','convenience']] },
   { id: 'mechanic',  label: 'Mechanic',       icon: 'build-outline',        color: '#f97316', tags: [['shop','car_repair'],['shop','vehicle']] },
@@ -158,6 +161,7 @@ function categoryTypes(catId: string) {
     parts: ['parts', 'mechanic'],
     trails: ['trail', 'trailhead', 'viewpoint', 'peak', 'hot_spring'],
     camping: ['camping'],
+    private_stays: ['private_stay', 'farm_stay', 'ranch', 'winery', 'glamping', 'private_camp'],
     laundry: ['laundromat'],
     medical: ['medical'],
     wifi: ['wifi', 'food'],
@@ -401,7 +405,7 @@ export default function RouteSearchModal({
     if (!cat) return;
     setCatSearching(true);
     try {
-      const radiusMi = ['camps', 'fuel', 'propane', 'mechanic', 'hardware', 'tires', 'parts', 'camping', 'medical'].includes(catId)
+      const radiusMi = ['camps', 'private_stays', 'fuel', 'propane', 'mechanic', 'hardware', 'tires', 'parts', 'camping', 'medical'].includes(catId)
         ? WIDE_CATEGORY_RADIUS_MI
         : DEFAULT_CATEGORY_RADIUS_MI;
       if (catId === 'fuel') {
@@ -452,6 +456,43 @@ export default function RouteSearchModal({
           .map(c => ({ name: c.name || 'Camp', lat: c.lat, lng: c.lng, dist: haversineKm(userLoc, c), _camp: c }))] as any)
           .sort((a, b) => (a.dist ?? 999) - (b.dist ?? 999))
           .slice(0, 30));
+      } else if (catId === 'private_stays') {
+        const types = categoryTypes(catId);
+        const localPlaces = pois
+          .filter(p => types.includes(p.type || '') && distanceMi(userLoc, p) <= radiusMi)
+          .map(p => ({ ...p, name: p.name || 'Private Stay', dist: haversineKm(userLoc, p) }));
+        const liveCamps = await api.getNearbyCamps(userLoc.lat, userLoc.lng, radiusMi, ['private', 'farm', 'ranch', 'winery', 'glamping', 'private_camp']);
+        const livePlaces = await api.getNearbyPlaces(userLoc.lat, userLoc.lng, radiusMi, types.join(','));
+        setCatResults(dedupePlaces([
+          ...liveCamps
+            .filter(c => c.lat && c.lng && distanceMi(userLoc, c) <= radiusMi)
+            .map(c => ({ name: c.name || 'Private Stay', lat: c.lat, lng: c.lng, dist: haversineKm(userLoc, c), _camp: c, type: 'private_stay', source: c.source, source_label: c.source_badge || c.verified_source })),
+          ...localPlaces,
+          ...livePlaces
+            .filter(p => p.lat != null && p.lng != null && distanceMi(userLoc, p) <= radiusMi)
+            .map(p => ({
+              name: p.name || p.type.replace('_', ' '),
+              lat: p.lat,
+              lng: p.lng,
+              dist: haversineKm(userLoc, p),
+              id: p.id,
+              source: p.source,
+              source_label: p.source_label,
+              place_id: p.place_id,
+              provider_place_id: p.provider_place_id,
+              type: p.type,
+              subtype: p.subtype,
+              address: p.address,
+              phone: p.phone,
+              website: p.website,
+              open_now: p.open_now,
+              rating: p.rating,
+              rating_count: p.rating_count,
+              photo_url: p.photo_url,
+              google_maps_uri: p.google_maps_uri,
+              attribution: p.attribution,
+            })),
+        ]).sort((a, b) => (a.dist ?? 999) - (b.dist ?? 999)).slice(0, 30));
       } else {
         const types = categoryTypes(catId);
         const local = pois
@@ -711,7 +752,7 @@ export default function RouteSearchModal({
                     )}
                     {catResults.map((r: any, i: number) => {
                       const cat = CATEGORIES.find(c => c.id === activeCat);
-                      const isCamp = activeCat === 'camps';
+                      const isCamp = activeCat === 'camps' || activeCat === 'private_stays';
                       return (
                         <TouchableOpacity key={i} style={s.resultRow} onPress={() => selectPlace(r)}>
                           {r.photo_url ? (

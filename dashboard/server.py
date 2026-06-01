@@ -4119,11 +4119,15 @@ async def campsites_search(
         # Anonymous: treated as one-time per session via anon check
         if request:
             _anon_check(_client_ip(request), "search")
-    ridb, blm = await asyncio.gather(
+    private_categories = _private_stay_categories_for_filters(type_filters)
+    ridb, blm, geoapify_live, fsq_live = await asyncio.gather(
         get_campsites_search(lat, lng, radius_miles=radius, type_filters=type_filters),
         get_blm_campsites(lat, lng, radius_miles=radius),
+        get_geoapify_places(lat, lng, radius_m=int(min(radius, 45) * 1609.344), categories=private_categories, limit_per_category=20) if private_categories and geoapify_passive_places_enabled() else asyncio.sleep(0, result=[]),
+        get_foursquare_places(lat, lng, radius_m=int(min(radius, 45) * 1609.344), categories=private_categories, limit_per_category=12) if private_categories and foursquare_enabled() else asyncio.sleep(0, result=[]),
     )
-    return _merge_camp_sources(ridb, blm, type_filters=type_filters)[:80]
+    live_camps = [camp for camp in (_camp_from_live_place(p) for p in [*geoapify_live, *fsq_live]) if camp]
+    return _merge_camp_sources(ridb, blm, live_camps, type_filters=type_filters)[:80]
 
 @app.get("/api/campsites/{facility_id}/detail")
 async def campsite_detail(facility_id: str):
@@ -4988,7 +4992,7 @@ async def trail_report_photo(trail_id: str, report_id: int):
 # ── Community pins ─────────────────────────────────────────────────────────────
 
 VALID_PIN_TYPES = {
-    "camp", "informal_camp", "wild_camp", "fuel", "propane", "water", "dump",
+    "camp", "informal_camp", "wild_camp", "private_stay", "fuel", "propane", "water", "dump",
     "parking", "mechanic", "restaurant", "attraction", "shopping", "medical",
     "pet", "laundromat", "shower", "wifi", "checkpoint", "road_report",
     "trailhead", "trail_note", "overlook", "crossing", "gate", "trail_closure",
@@ -6355,12 +6359,45 @@ def _merge_camp_record(existing: dict, incoming: dict) -> dict:
         merged["reviews"] = secondary.get("reviews")
     return merged
 
+PRIVATE_STAY_PLACE_TYPES = {"private_stay", "farm_stay", "ranch", "winery", "glamping", "private_camp"}
+PRIVATE_STAY_FILTERS = {"private", "private_stay", "farm", "farm_stay", "ranch", "winery", "glamping", "private_camp"}
+
+def _private_stay_requested(type_filters: list[str] | None = None) -> bool:
+    return bool({str(t or "").lower().strip() for t in (type_filters or [])}.intersection(PRIVATE_STAY_FILTERS))
+
+def _private_stay_categories_for_filters(type_filters: list[str] | None = None) -> set[str]:
+    filters = {str(t or "").lower().strip() for t in (type_filters or [])}
+    if not filters.intersection(PRIVATE_STAY_FILTERS):
+        return set()
+    categories = {"private_stay", "private_camp"}
+    if "farm" in filters or "farm_stay" in filters or "private" in filters:
+        categories.add("farm_stay")
+    if "ranch" in filters or "private" in filters:
+        categories.add("ranch")
+    if "winery" in filters or "private" in filters:
+        categories.add("winery")
+    if "glamping" in filters or "private" in filters:
+        categories.add("glamping")
+    return categories
+
+def _private_stay_label(place_type: str, text: str = "") -> str:
+    value = f"{place_type} {text}".lower()
+    if "winery" in value or "vineyard" in value:
+        return "Winery Stay"
+    if "ranch" in value:
+        return "Ranch Stay"
+    if "glamping" in value or "yurt" in value or "cabin" in value:
+        return "Glamping"
+    if "farm" in value:
+        return "Farm Stay"
+    return "Private Camp"
+
 def _merge_camp_sources(*sources: list[dict], type_filters: list[str] | None = None) -> list[dict]:
     seen_ids: set[str] = set()
     merged: list[dict] = []
     for source in sources:
         for camp in source:
-            if type_filters and not any(t in camp.get("tags", []) for t in type_filters):
+            if type_filters and not _camp_matches_filters(camp, type_filters):
                 continue
             camp_id = str(camp.get("id") or "")
             if camp_id in seen_ids:
@@ -6384,7 +6421,7 @@ def _merge_camp_sources(*sources: list[dict], type_filters: list[str] | None = N
     return sorted(merged, key=_camp_source_rank)
 
 def _camp_from_live_place(place: dict) -> dict | None:
-    """Convert commercial campground/RV park provider results into camp pins."""
+    """Convert provider campground/private-stay results into overnight pins."""
     try:
         lat = float(place.get("lat"))
         lng = float(place.get("lng"))
@@ -6395,17 +6432,27 @@ def _camp_from_live_place(place: dict) -> dict | None:
         return None
     source = str(place.get("source") or "places").lower()
     subtype = str(place.get("subtype") or "").strip()
-    type_text = f"{subtype} {place.get('type') or ''}".lower()
-    if str(place.get("type") or "").lower() != "camp":
+    place_type = str(place.get("type") or "").lower()
+    type_text = f"{subtype} {place_type}".lower()
+    is_private_stay = place_type in PRIVATE_STAY_PLACE_TYPES
+    if place_type != "camp" and not is_private_stay:
         return None
     non_camp = ("college", "university", "school", "campus", "summer camp", "boot camp", "training camp")
     campish = ("campground", "camp ground", "campsite", "camp site", "rv park", "recreational vehicle", "caravan")
     combined = f"{name} {type_text} {place.get('address') or ''}".lower()
-    if any(term in combined for term in non_camp) or not any(term in combined for term in campish):
+    if any(term in combined for term in non_camp):
+        return None
+    if not is_private_stay and not any(term in combined for term in campish):
         return None
     tags = ["commercial", "campground"]
-    land_type = "RV Park" if "rv" in type_text else "Commercial Campground"
-    if "rv" in type_text:
+    if is_private_stay:
+        tags.extend(["private", "private_stay", place_type])
+        if place_type == "farm_stay":
+            tags.append("farm")
+        land_type = _private_stay_label(place_type, combined)
+    else:
+        land_type = "RV Park" if "rv" in type_text else "Commercial Campground"
+    if "rv" in type_text and not is_private_stay:
         tags.append("rv")
     else:
         tags.append("tent")
@@ -6425,9 +6472,9 @@ def _camp_from_live_place(place: dict) -> dict | None:
         "lng": lng,
         "tags": tags,
         "land_type": land_type,
-        "description": _planner_clean_text(place.get("summary") or place.get("address") or subtype or "Commercial campground found from live place data.", 360),
+        "description": _planner_clean_text(place.get("summary") or place.get("address") or subtype or f"{land_type} found from available place data. Confirm access and overnight rules before relying on it.", 360),
         "photo_url": place.get("photo_url") or "",
-        "reservable": bool(place.get("website")),
+        "reservable": False,
         "cost": "",
         "url": place.get("website") or place.get("google_maps_uri") or "",
         "ada": False,
@@ -6438,24 +6485,30 @@ def _camp_from_live_place(place: dict) -> dict | None:
         "address": place.get("address") or "",
         "provider_place_id": place.get("provider_place_id") or place.get("place_id") or "",
         "place_id": place.get("place_id") or "",
+        "source_badge": place.get("source_label") or place.get("attribution") or source.title(),
+        "source_confidence": "medium" if source in {"geoapify", "foursquare", "fsq"} else "review",
+        "link_label": "Official page",
         "rich_detail_available": bool(place.get("rich_detail_available", source in {"google", "foursquare", "fsq"})),
         "rich_detail_locked": bool(place.get("rich_detail_locked", source in {"google", "foursquare", "fsq"})),
         "rich_detail_reason": place.get("rich_detail_reason") or ("paid_provider_detail" if source in {"google", "foursquare", "fsq"} else ""),
         "amenities": amenities,
-        "site_types": ["RV"] if "rv" in tags else ["Tent", "Campground"],
+        "site_types": [land_type] if is_private_stay else (["RV"] if "rv" in tags else ["Tent", "Campground"]),
     }
 
 @app.get("/api/nearby-camps")
 async def nearby_camps(lat: float, lng: float, radius: float = 50, types: str = ""):
     """Aggregate legal camp sources near a point, no trip required."""
     type_filters = [t.strip() for t in types.split(",") if t.strip()] if types else None
-    ridb, blm, osm, geoapify_live = await asyncio.gather(
+    private_categories = _private_stay_categories_for_filters(type_filters)
+    live_categories = {"camp"} | private_categories
+    ridb, blm, osm, geoapify_live, fsq_live = await asyncio.gather(
         get_campsites_search(lat, lng, radius_miles=radius, type_filters=type_filters),
         get_blm_campsites(lat, lng, radius_miles=radius),
         get_osm_campsites(lat, lng, radius_m=int(min(radius, 60) * 1600)),
-        get_geoapify_places(lat, lng, radius_m=int(min(radius, 45) * 1609.344), categories={"camp"}, limit_per_category=20) if geoapify_passive_places_enabled() else asyncio.sleep(0, result=[]),
+        get_geoapify_places(lat, lng, radius_m=int(min(radius, 45) * 1609.344), categories=live_categories, limit_per_category=20) if geoapify_passive_places_enabled() else asyncio.sleep(0, result=[]),
+        get_foursquare_places(lat, lng, radius_m=int(min(radius, 45) * 1609.344), categories=private_categories, limit_per_category=12) if private_categories and foursquare_enabled() else asyncio.sleep(0, result=[]),
     )
-    live_camps = [camp for camp in (_camp_from_live_place(p) for p in [*geoapify_live]) if camp]
+    live_camps = [camp for camp in (_camp_from_live_place(p) for p in [*geoapify_live, *fsq_live]) if camp]
     return _merge_camp_sources(ridb, blm, osm, live_camps, type_filters=type_filters)[:160]
 
 
@@ -6543,13 +6596,19 @@ def _camp_pref_score(camp: dict, route_style: str = "balanced", camp_preference:
     public = any(term in combined for term in ("blm", "usfs", "national forest", "forest service", "public", "dispersed", "primitive", "free"))
     official_developed = any(term in combined for term in ("ridb", "recreation.gov", "nps", "state park", "county park", "municipal"))
     rv_private = any(term in combined for term in ("rv park", "rv resort", "koa", "hookup", "electric", "private campground"))
+    private_stay = any(term in combined for term in ("private_stay", "private stay", "farm stay", "ranch stay", "winery stay", "vineyard", "glamping", "private camp"))
     score = 0.0
     if preference == "rv":
         score += -12 if rv_private else 5
         score += -4 if camp.get("reservable") else 0
+    elif preference == "private":
+        score += -16 if private_stay else 8
+        score += -4 if any(term in combined for term in ("farm", "ranch", "winery", "vineyard", "glamping")) else 0
+        score += 6 if public else 0
     elif preference == "developed":
         score += -10 if official_developed else 0
         score += -4 if public else 0
+        score += -4 if private_stay and limited_public else 0
         score += 2 if rv_private else 0
     elif preference == "any":
         score += -5 if public or official_developed else 0
@@ -6595,6 +6654,8 @@ def _camp_matches_filters(camp: dict, type_filters: list[str]) -> bool:
             continue
         if f in tags or f in text:
             return True
+        if f in {"private", "private_stay", "farm", "farm_stay", "ranch", "winery", "glamping", "private_camp"} and any(term in text for term in ("private_stay", "private stay", "farm stay", "farm", "ranch", "winery", "vineyard", "glamping", "private camp")):
+            return True
         if f in {"public", "blm", "usfs", "dispersed", "free"} and any(term in text for term in ("blm", "usfs", "national forest", "forest service", "public", "dispersed", "primitive", "free")):
             return True
         if f == "tent" and not any(term in text for term in ("rv resort", "koa", "hookup-only")):
@@ -6616,7 +6677,7 @@ def _camp_source_confidence(camp: dict) -> str:
     source = f"{camp.get('source') or ''} {camp.get('verified_source') or ''}".lower()
     if any(term in source for term in ("ridb", "recreation.gov", "nps", "blm")):
         return "high"
-    if any(term in source for term in ("osm", "openstreetmap", "geoapify")):
+    if any(term in source for term in ("osm", "openstreetmap", "geoapify", "foursquare", "fsq")):
         return "medium"
     return "review"
 
@@ -6813,14 +6874,18 @@ async def camps_bbox(n: float, s: float, e: float, w: float, types: str = ""):
     radius_miles = min(max(lat_span_mi, lng_span_mi) / 2 + 5, 120)
     radius_m = int(radius_miles * 1600)
     type_filters = [t.strip() for t in types.split(",") if t.strip()] if types else None
-    ridb, blm, osm = await asyncio.gather(
+    private_categories = _private_stay_categories_for_filters(type_filters)
+    ridb, blm, osm, geoapify_live, fsq_live = await asyncio.gather(
         get_campsites_search(lat, lng, radius_miles=radius_miles, type_filters=type_filters),
         get_blm_campsites(lat, lng, radius_miles=radius_miles),
         get_osm_campsites(lat, lng, radius_m=min(radius_m, 120000)),
+        get_geoapify_places(lat, lng, radius_m=int(min(radius_miles, 45) * 1609.344), categories=private_categories, limit_per_category=20) if private_categories and geoapify_passive_places_enabled() else asyncio.sleep(0, result=[]),
+        get_foursquare_places(lat, lng, radius_m=int(min(radius_miles, 45) * 1609.344), categories=private_categories, limit_per_category=12) if private_categories and foursquare_enabled() else asyncio.sleep(0, result=[]),
     )
+    live_camps = [camp for camp in (_camp_from_live_place(p) for p in [*geoapify_live, *fsq_live]) if camp]
     in_box = [
         [c for c in source if s <= c.get("lat", 999) <= n and w <= c.get("lng", 999) <= e]
-        for source in (ridb, blm, osm)
+        for source in (ridb, blm, osm, live_camps)
     ]
     return _merge_camp_sources(*in_box, type_filters=type_filters)[:200]
 

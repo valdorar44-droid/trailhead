@@ -269,6 +269,58 @@ Fallback:
 
 - Continue Open-Meteo/Trailhead weather where Mapbox Weather access is unavailable or too costly.
 
+## Native Build Prep
+
+Native Mapbox rendering is prepared for the next binary build:
+
+- React Native package pinned to `@rnmapbox/maps@10.2.7`.
+- The latest `10.3.x` line requires React Native `>=0.79`; Trailhead is currently on React Native `0.76.3`, so do not upgrade this package until the Expo/RN upgrade lands.
+- Expo config plugin added with `RNMapboxMapsImpl: mapbox`.
+- Native Maps SDK version pinned through `RNMapboxMapsVersion`, defaulting to `11.16.0`.
+- iOS microphone usage text added for the future voice Co-Pilot path.
+- Android already includes `RECORD_AUDIO`.
+
+Build secrets:
+
+- EAS native builds must provide `RNMAPBOX_MAPS_DOWNLOAD_TOKEN` with Mapbox `DOWNLOADS:READ` scope.
+- Do not commit the downloads token to `app.config.js`, `eas.json`, or source control.
+- The public runtime map token remains server-issued by `GET /api/extreme/config`.
+- Railway Mapbox variables do not automatically satisfy EAS native build credentials; mirror the downloads token into EAS build environment before starting Android/iOS rebuilds.
+
+Scope boundary:
+
+- This only prepares native Mapbox Maps rendering.
+- Mapbox Search SDK, Navigation SDK, Weather, UX Framework, and MapGPT still need their native bridge/build slices.
+- Do not start `startTripSession`, Free Drive, or Active Guidance from this prep.
+
+## MapGPT / UX Framework Access Request
+
+Request Mapbox pilot/production clarification before building the voice-first stack around MapGPT:
+
+- Product: Trailhead Extreme Explorer hidden beta.
+- Surfaces: iOS and Android, selected accounts only, no public launch until terms, cost, and privacy are approved.
+- Use case: voice Co-Pilot for overland route planning, route review, guided navigation, fuel gaps, legal camp discovery, private stays, weather risk, offline readiness, bailout towns, vehicle constraints, and checkpoint management.
+- Trailhead-owned data: trip memory, camps, private stays, public/private preference, public-land context, saved places, reports, offline packs, route-builder changes, checkpoints, and user-confirmed trip mutations.
+- Mapbox context requested: map state, search results, route state, navigation progress, traffic/incidents, Weather Along Route, and UX Framework assistant events where licensed.
+- Customization request: custom assistant name/persona, optional voice/face settings if available, command allowlist, confirmation strictness, dashboard controls, and kill switches.
+
+Questions for Mapbox:
+
+- Is MapGPT available for consumer mobile apps outside Mapbox Dash, and under what approval terms?
+- Can Trailhead register custom action handlers for fuel, stay review, camp review, weather, route changes, offline download, checkpoint marking, and guidance start?
+- Can MapGPT call into Trailhead-owned private data without Mapbox retaining or training on that data?
+- What data retention, privacy, logging, and deletion controls apply to voice transcripts and assistant events?
+- What production SLA, pricing, metering, rate limits, and session billing apply?
+- Can the UX Framework assistant coexist with custom native layers, private Trailhead overlays, and separate Trailhead entitlement gates?
+- Can the assistant be configured or disabled remotely per account, platform, and beta surface?
+
+Pilot guardrail:
+
+- MapGPT and UX Framework stay behind server flags.
+- All permanent actions require visible user confirmation.
+- The backend command ledger must record command intent, proposed action, confirmation state, cost category, and kill-switch state.
+- If MapGPT terms or customization are not acceptable, build the Trailhead voice Co-Pilot with lower-level speech, LLM/tool routing, Maps/Search/Navigation/Weather SDK context, and Trailhead-owned action handlers.
+
 ### Places / Search
 
 Use Mapbox Search SDK for Extreme mode:

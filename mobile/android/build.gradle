@@ -7,6 +7,8 @@ buildscript {
         compileSdkVersion = Integer.parseInt(findProperty('android.compileSdkVersion') ?: '35')
         targetSdkVersion = Integer.parseInt(findProperty('android.targetSdkVersion') ?: '34')
         kotlinVersion = findProperty('android.kotlinVersion') ?: '1.9.25'
+        RNMapboxMapsImpl = findProperty('expoRNMapboxMapsImpl') ?: 'mapbox'
+        RNMapboxMapsVersion = findProperty('expoRNMapboxMapsVersion') ?: '11.16.0'
 
         ndkVersion = "26.1.10909125"
     }
@@ -36,6 +38,17 @@ allprojects {
 
         google()
         mavenCentral()
+        maven {
+            url 'https://api.mapbox.com/downloads/v2/releases/maven'
+            def token = project.properties['MAPBOX_DOWNLOADS_TOKEN'] ?: System.getenv('RNMAPBOX_MAPS_DOWNLOAD_TOKEN')
+            if (token) {
+                authentication { basic(BasicAuthentication) }
+                credentials {
+                    username = 'mapbox'
+                    password = token
+                }
+            }
+        }
         maven { url 'https://www.jitpack.io' }
     }
 }

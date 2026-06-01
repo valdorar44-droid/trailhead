@@ -28,7 +28,7 @@ GEOAPIFY_CATEGORY_MAP: dict[str, list[str]] = {
     "rv_park": ["camping.caravan_site"],
     "fuel": ["service.vehicle.fuel"],
     "propane": ["service.vehicle.fuel"],
-    "dump": ["amenity.toilet", "camping"],
+    "dump": ["amenity.toilet"],
     "parking": ["parking"],
     "water": ["amenity.drinking_water", "natural.water"],
     "food": ["catering.restaurant", "catering.fast_food", "catering.cafe"],

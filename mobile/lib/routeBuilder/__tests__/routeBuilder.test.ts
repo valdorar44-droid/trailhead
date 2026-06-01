@@ -7,6 +7,7 @@ import {
   rebalanceAfterCampSelection,
   ROUTE_BUILDER_AUDIT_MATRIX,
 } from '@/lib/routeBuilder';
+import { computeOfflineReadiness } from '@/lib/offlineReadiness';
 
 const moab = { lat: 38.5733, lng: -109.5498 };
 const bigSur = { lat: 36.2704, lng: -121.8081 };
@@ -118,6 +119,51 @@ const rebalanced = rebalanceAfterCampSelection({
 });
 const updatedDayTwo = rebalanced.find(stop => stop.day === 2 && /overnight area/i.test(stop.name));
 assertRouteBuilderContract(!!updatedDayTwo && updatedDayTwo.lat !== 37 && /Updated after selecting/i.test((updatedDayTwo as { description?: string }).description ?? ''), 'selected camp rebalances downstream targets');
+assertRouteBuilderContract(rebalanced.some(stop => stop.day === 1 && stop.type === 'camp' && stop.name === 'Selected Camp'), 'selected camp remains day endpoint');
+
+const thereBackRebalanced = rebalanceAfterCampSelection({
+  selectedDay: 3,
+  selectedCamp: { day: 3, name: 'Turnaround Camp', lat: 37.1, lng: -116.2, type: 'camp', routeShapeRole: 'overnight' },
+  finalStop: { day: 7, name: 'Moab return', lat: moab.lat, lng: moab.lng, type: 'start', routeShapeRole: 'return_anchor' },
+  stops: [
+    { day: 1, name: 'Moab', lat: moab.lat, lng: moab.lng, type: 'start', routeShapeRole: 'start' },
+    { day: 3, name: 'Turnaround Camp', lat: 37.1, lng: -116.2, type: 'camp', routeShapeRole: 'overnight' },
+    { day: 4, name: 'Day 4 overnight area', lat: 36.7, lng: -117.5, type: 'waypoint', source: 'map', routeShapeRole: 'outbound_anchor' },
+    { day: 5, name: 'Day 5 overnight area', lat: 37.4, lng: -114, type: 'waypoint', source: 'map', routeShapeRole: 'outbound_anchor' },
+    { day: 7, name: 'Moab return', lat: moab.lat, lng: moab.lng, type: 'start', routeShapeRole: 'return_anchor' },
+  ],
+});
+assertRouteBuilderContract(
+  thereBackRebalanced.some(stop => stop.day === 4 && stop.lng !== -117.5),
+  'there-and-back rebalances return days after camp selection',
+);
+
+const noRouteSession = buildRouteBuilderSession({
+  intent: {
+    shape: 'one_way',
+    routeStyle: 'balanced',
+    campReusePolicy: 'different_each_night',
+    days: [1],
+  },
+  stops: [
+    { day: 1, name: 'Moab', lat: moab.lat, lng: moab.lng, type: 'start' },
+    { day: 1, name: 'Big Sur', lat: bigSur.lat, lng: bigSur.lng, type: 'waypoint' },
+  ],
+  geometry: { coords: [], totalDistanceMi: 0, totalDurationHours: 0, source: 'none', confidence: 'none' },
+  dayNeedsOvernight: () => false,
+});
+assertRouteBuilderContract(!noRouteSession.navigationReady && noRouteSession.issues.some(issue => issue.code === 'provider_route_missing'), 'no-route state blocks navigation readiness');
+
+const offline = computeOfflineReadiness({
+  points: [moab, bigSur],
+  getMapState: id => ({ status: id === 'ut' || id === 'ca' ? 'complete' : 'idle' }),
+  getRoutingState: id => ({ status: id === 'ut' ? 'complete' : 'idle' }),
+  getContourState: () => ({ status: 'idle' }),
+  getTrailState: () => ({ status: 'idle' }),
+  placesReady: true,
+});
+assertRouteBuilderContract(offline.regionIds.includes('ut') && offline.regionIds.includes('ca'), 'offline readiness finds route regions');
+assertRouteBuilderContract(!offline.ready && offline.rows.some(row => row.key === 'navigation' && !row.ready), 'offline readiness reports missing downloads');
 
 assertRouteBuilderContract(ROUTE_BUILDER_AUDIT_MATRIX.some(item => /Moab to Big Sur/.test(item) && /there and back/.test(item)), 'Moab to Big Sur audit coverage');
 

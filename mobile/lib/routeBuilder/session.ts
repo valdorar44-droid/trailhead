@@ -53,13 +53,13 @@ export function buildRouteBuilderSession<TStop extends RouteBuilderStopLike>(inp
     issues.push({
       code: 'provider_route_missing',
       level: 'block',
-      message: 'Provider route geometry is missing.',
+      message: 'Road route is missing.',
     });
   } else if (geometry?.confidence === 'medium' || geometry?.engine === 'osrm-fallback') {
     issues.push({
       code: 'provider_route_low_confidence',
       level: 'warn',
-      message: 'Route used fallback routing; review wild/backroad fit before navigation.',
+      message: 'Route built with a fallback path. Review it before navigation.',
     });
   }
   for (const anchor of temporaryAnchors) {
@@ -67,7 +67,7 @@ export function buildRouteBuilderSession<TStop extends RouteBuilderStopLike>(inp
       code: 'temporary_anchor',
       level: 'warn',
       day: anchor.day,
-      message: `Day ${anchor.day} still has a planning anchor instead of a real stop.`,
+      message: `Day ${anchor.day} still needs a picked stop.`,
     });
   }
   for (const day of input.intent.days) {
@@ -110,4 +110,3 @@ export function buildRouteBuilderSession<TStop extends RouteBuilderStopLike>(inp
     navigationReady: readiness.navigationReady && !issues.some(issue => issue.level === 'block'),
   };
 }
-

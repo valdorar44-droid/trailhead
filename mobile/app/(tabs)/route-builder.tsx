@@ -20,6 +20,8 @@ import { deleteOfflineTrail, listOfflineTrails, type OfflineTrail } from '@/lib/
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { useStore } from '@/lib/store';
 import { useTheme, mono, ColorPalette, RADIUS } from '@/lib/design';
+import { computeOfflineReadiness } from '@/lib/offlineReadiness';
+import { useOfflineFiles } from '@/lib/useOfflineFiles';
 import {
   ROUTE_BUILDER_AUDIT_MATRIX,
   buildRouteBuilderSession,
@@ -29,6 +31,7 @@ import {
   fmtDistance as fmtUnitDistance,
   fmtFuelVolumeFromMiles,
   providerGeometryFromRoute,
+  rebalanceAfterCampSelection,
   routeUnitsParam,
   savedGeometryFromCoords,
   type ProviderRouteGeometry,
@@ -1061,6 +1064,12 @@ export default function RouteBuilderScreen() {
   const rigProfile = useStore(st => st.rigProfile);
   const weatherUnitMode = useStore(st => st.weatherUnitMode);
   const setPendingSavedTrailId = useStore(st => st.setPendingSavedTrailId);
+  const {
+    getState: getOfflineMapState,
+    getRoutingState: getOfflineRoutingState,
+    getContourState: getOfflineContourState,
+    getTrailState: getOfflineTrailState,
+  } = useOfflineFiles();
 
   const [activeDay, setActiveDay] = useState(1);
   const [routeTabMode, setRouteTabMode] = useState<RouteTabMode>('hub');
@@ -1481,6 +1490,15 @@ export default function RouteBuilderScreen() {
     maxDriveHoursByDay: Object.fromEntries(days.map(day => [day, parsePositiveNumber(dayDriveTargets[day]) ?? undefined])),
     existingDaySegments: routeDaySegments,
   }), [orderedStops, routeGeometry, routeDaySegments, days, restDays, planningStats.range, campCadenceMode, dayDriveTargets, tripShapeMode, routeStyle, effectiveCampReusePolicy, driveHoursPerDay, targetMiles]);
+  const routeOfflineReadiness = useMemo(() => computeOfflineReadiness({
+    coords: routeGeometry?.coords,
+    points: orderedStops,
+    getMapState: getOfflineMapState,
+    getRoutingState: getOfflineRoutingState,
+    getContourState: getOfflineContourState,
+    getTrailState: getOfflineTrailState,
+    placesReady: orderedStops.some(st => st.camp || st.gas || st.poi),
+  }), [routeGeometry?.coords, orderedStops, getOfflineMapState, getOfflineRoutingState, getOfflineContourState, getOfflineTrailState]);
   const rigRouteSummary = useMemo(() => {
     if (!rigProfile || (!rigProfile.make && !rigProfile.model && !rigProfile.vehicle_type)) {
       return {
@@ -1578,8 +1596,9 @@ export default function RouteBuilderScreen() {
     if (totals.miles > driveCapacity && orderedStops.length > 1) {
       checks.push({ level: 'warn', label: 'Schedule', text: `This route needs more than the selected ${days.length} day${days.length === 1 ? '' : 's'} at the current daily max.` });
     }
-    return checks.slice(0, 3);
-  }, [days, orderedStops, totals.miles, planningStats.driveLimit, dayDriveTargets, restDays, tripReadiness.tasks]);
+    checks.push({ level: routeOfflineReadiness.ready ? 'ok' : 'warn', label: 'Offline', text: routeOfflineReadiness.message });
+    return checks.slice(0, 5);
+  }, [days, orderedStops, totals.miles, planningStats.driveLimit, dayDriveTargets, restDays, tripReadiness.tasks, routeOfflineReadiness.ready, routeOfflineReadiness.message]);
   const discoverEmptyText = discoverTab === 'camps'
     ? 'Tap scan to find legal camps near the selected leg or route point.'
     : discoverTab === 'gas'
@@ -1659,27 +1678,17 @@ export default function RouteBuilderScreen() {
   }
 
   function rebalanceFrameworkTargets(prev: BuilderStop[], anchor: BuilderStop): BuilderStop[] {
-    if (tripShapeMode === 'loop') return prev;
     const sorted = orderBuilderStops(prev);
     const final = sorted[sorted.length - 1] ?? null;
-    if (!final || final.day <= anchor.day) return prev;
-    return prev.map(st => {
-      if (st.day <= anchor.day || st.day >= final.day || !isFrameworkManagedStop(st)) return st;
-      const t = (st.day - anchor.day) / (final.day - anchor.day);
-      return {
-        ...st,
-        type: 'waypoint' as BuilderStopType,
-        source: 'map' as const,
-        camp: undefined,
-        gas: undefined,
-        poi: undefined,
-        name: `Day ${st.day} overnight area`,
-        lat: anchor.lat + (final.lat - anchor.lat) * t,
-        lng: anchor.lng + (final.lng - anchor.lng) * t,
-        land_type: 'route',
-        description: `Updated after selecting ${anchor.name.split(',')[0]}. Search this leg for camps, fuel, and places before navigation.`,
-      };
-    });
+    return (rebalanceAfterCampSelection({
+      stops: prev,
+      selectedCamp: anchor,
+      selectedDay: anchor.day,
+      finalStop: final,
+    }) as BuilderStop[]).map(st => isFrameworkManagedStop(st)
+      ? { ...st, type: 'waypoint' as BuilderStopType, land_type: 'route' }
+      : st
+    );
   }
 
   function campPreferenceScore(camp: CampsitePin) {
@@ -3063,13 +3072,15 @@ export default function RouteBuilderScreen() {
       days: timelineDays,
       warnings: timelineDays.flatMap(day => day.events.filter(event => event.warning_level === 'warn').map(event => ({ level: 'warn', message: `Day ${day.day}: ${event.title}` }))).slice(0, 12),
       offline_readiness: {
-        map: false,
-        navigation: false,
-        places: navStops.some(st => st.camp || st.gas || st.poi),
-        topo: false,
-        trails: false,
-        trip_download: false,
-        message: 'Download this trip to save the route corridor plus selected camps, fuel, and places.',
+        map: routeOfflineReadiness.rows.find(row => row.key === 'map')?.ready ?? false,
+        navigation: routeOfflineReadiness.rows.find(row => row.key === 'navigation')?.ready ?? false,
+        places: routeOfflineReadiness.rows.find(row => row.key === 'places')?.ready ?? navStops.some(st => st.camp || st.gas || st.poi),
+        topo: routeOfflineReadiness.rows.find(row => row.key === 'topo')?.ready ?? false,
+        trails: routeOfflineReadiness.rows.find(row => row.key === 'trails')?.ready ?? false,
+        trip_download: routeOfflineReadiness.ready,
+        message: routeOfflineReadiness.ready
+          ? 'Trip downloads are ready.'
+          : 'Download the missing route area before leaving signal.',
       },
     };
   }
@@ -3271,6 +3282,23 @@ export default function RouteBuilderScreen() {
     if (routeSaving) return;
     if (orderedStops.length < 2) {
       Alert.alert('Add more stops', 'Add at least a start and one destination before saving the route.');
+      return;
+    }
+    const draftWarnings = routeBuildSession.issues.filter(issue =>
+      issue.code === 'temporary_anchor'
+      || issue.code === 'missing_overnight'
+      || issue.code === 'over_daily_max'
+      || issue.code === 'fuel_range'
+    );
+    if (openMap && draftWarnings.length) {
+      Alert.alert(
+        'Save as draft?',
+        `${draftWarnings[0].message} You can save it now, but review the trip before navigation.`,
+        [
+          { text: 'Keep editing', style: 'cancel' },
+          { text: 'Save draft', onPress: () => { commitTrip(buildTrip(), openMap).catch(() => {}); } },
+        ],
+      );
       return;
     }
     await commitTrip(buildTrip(), openMap);
@@ -4288,8 +4316,8 @@ export default function RouteBuilderScreen() {
         <View style={s.readinessCard}>
           <View style={s.readinessTop}>
             <View>
-              <Text style={s.readinessTitle}>Route readiness</Text>
-              <Text style={s.readinessSub}>Saved routes are available offline from search and trip history.</Text>
+              <Text style={s.readinessTitle}>Trip readiness</Text>
+              <Text style={s.readinessSub}>Camps, fuel, route, and downloads to check before leaving signal.</Text>
             </View>
             <View style={[s.readinessBadge, routeChecks.some(c => c.level === 'warn') ? s.readinessBadgeWarn : s.readinessBadgeOk]}>
               <Text style={[s.readinessBadgeText, routeChecks.some(c => c.level === 'warn') ? { color: C.yellow } : { color: C.green }]}>
@@ -4308,6 +4336,16 @@ export default function RouteBuilderScreen() {
               </View>
             ))}
           </View>
+          {routeOfflineReadiness.regionNames.length ? (
+            <View style={s.offlineMiniGrid}>
+              {routeOfflineReadiness.rows.map(row => (
+                <View key={row.key} style={[s.offlineMiniPill, row.ready ? s.offlineMiniPillReady : row.needed ? s.offlineMiniPillWarn : null]}>
+                  <Ionicons name={row.ready ? 'checkmark-circle-outline' : row.needed ? 'cloud-download-outline' : 'remove-circle-outline'} size={12} color={row.ready ? C.green : row.needed ? C.yellow : C.text3} />
+                  <Text style={[s.offlineMiniText, row.ready ? { color: C.green } : row.needed ? { color: C.yellow } : null]}>{row.label}</Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
         </View>
 
         {searchResults.length > 0 && (
@@ -5327,6 +5365,11 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   checkRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 7 },
   checkLabel: { color: C.text3, fontSize: 8, fontFamily: mono, fontWeight: '900', letterSpacing: 0.6 },
   checkText: { color: C.text2, fontSize: 11, lineHeight: 16, marginTop: 1 },
+  offlineMiniGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingTop: 2 },
+  offlineMiniPill: { minHeight: 26, flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderColor: C.border, borderRadius: 999, paddingHorizontal: 8, backgroundColor: C.s2 },
+  offlineMiniPillReady: { borderColor: C.green + '55', backgroundColor: C.green + '10' },
+  offlineMiniPillWarn: { borderColor: C.yellow + '55', backgroundColor: C.yellow + '10' },
+  offlineMiniText: { color: C.text3, fontSize: 8.5, fontFamily: mono, fontWeight: '900' },
   resultsBox: { borderWidth: 1, borderColor: C.border, borderRadius: 12, overflow: 'hidden' },
   resultRow: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 11, borderBottomWidth: 1, borderColor: C.border, backgroundColor: C.s1 },
   resultName: { color: C.text, fontSize: 13, fontWeight: '700' },

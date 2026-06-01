@@ -14,9 +14,9 @@ export function computeTripReadiness(input: {
   const rest = new Set(input.restDays ?? []);
   const geometryReady = !!input.geometry && input.geometry.coords.length >= 2 && input.geometry.source !== 'sketch' && input.geometry.source !== 'none';
   if (!geometryReady) {
-    tasks.push({ level: 'warn', label: 'Route ready', text: 'Build a provider route before navigation.' });
+    tasks.push({ level: 'warn', label: 'Route ready', text: 'Build a road route before using navigation.' });
   } else {
-    tasks.push({ level: 'ok', label: 'Route ready', text: 'Provider route geometry is saved.' });
+    tasks.push({ level: 'ok', label: 'Route ready', text: input.geometry?.confidence === 'medium' ? 'Route built. Review it before leaving.' : 'Road route is saved.' });
   }
 
   const missingOvernight = input.days.filter(day => !rest.has(day) && input.dayNeedsOvernight(day) && !input.stops.some(stop => stop.day === day && (stop.type === 'camp' || stop.type === 'motel')));
@@ -28,14 +28,14 @@ export function computeTripReadiness(input: {
 
   const temporary = input.stops.find(isTemporaryRouteAnchor);
   if (temporary) {
-    tasks.push({ level: 'warn', label: 'Review this day', text: `Day ${temporary.day} still needs a real stop.` });
+    tasks.push({ level: 'warn', label: 'Review this day', text: `Day ${temporary.day} still needs a picked stop.` });
   }
 
   const longDay = input.daySegments?.find(segment => segment.overDailyMax);
   if (longDay) {
-    tasks.push({ level: 'warn', label: 'Drive time', text: `Day ${longDay.day} is over the daily max.` });
+    tasks.push({ level: 'warn', label: 'Drive time', text: `Day ${longDay.day} is over your daily max.` });
   } else if (input.daySegments?.length) {
-    tasks.push({ level: 'ok', label: 'Pace', text: 'Daily drive windows fit the current max.' });
+    tasks.push({ level: 'ok', label: 'Pace', text: 'Daily drive times fit your max.' });
   }
 
   if (input.fuelRangeMi && input.geometry?.totalDistanceMi && input.geometry.totalDistanceMi > input.fuelRangeMi * 0.7 && !input.stops.some(stop => stop.type === 'fuel')) {

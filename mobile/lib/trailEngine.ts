@@ -15,6 +15,10 @@ export type TrailSupport = {
   nearestWaterDistanceMi?: number;
 };
 
+export type TrailConfidence = 'official' | 'verified' | 'community' | 'map_derived' | 'estimated';
+export type TrailOpenStatus = 'open' | 'seasonal' | 'closed' | 'unknown';
+export type TrailVehicleFit = '2wd' | 'high_clearance' | '4x4' | 'unknown';
+
 export type TrailFeature = {
   id: string;
   name: string;
@@ -35,6 +39,11 @@ export type TrailFeature = {
   last_checked?: number;
   summary?: string;
   difficulty?: string;
+  confidence?: TrailConfidence;
+  open_status?: TrailOpenStatus;
+  vehicle_fit?: TrailVehicleFit;
+  surface?: string;
+  managing_agency?: string;
 };
 
 type Point = { lat: number; lng: number };
@@ -71,6 +80,36 @@ function titleFor(type: TrailFeatureType): string {
     case 'road': return 'Forest Road';
     default: return 'Trail';
   }
+}
+
+export function trailSourceLabel(feature: Pick<TrailFeature, 'source' | 'source_label'>): string {
+  if (feature.source_label) return feature.source_label;
+  switch (feature.source) {
+    case 'mvum': return 'Motorized access map';
+    case 'offline_places': return 'Saved places';
+    case 'map_tile': return 'Map source';
+    case 'community': return 'Community';
+    case 'trip': return 'Saved trip';
+    case 'trailhead': return 'Trailhead';
+    default: return 'OSM';
+  }
+}
+
+export function trailConfidenceLabel(feature: Pick<TrailFeature, 'confidence' | 'source'>): string {
+  if (feature.confidence === 'official') return 'Official';
+  if (feature.confidence === 'verified') return 'Verified';
+  if (feature.confidence === 'community') return 'Community';
+  if (feature.confidence === 'estimated') return 'Estimated';
+  if (feature.source === 'mvum') return 'Official';
+  if (feature.source === 'community') return 'Community';
+  return 'Map-derived';
+}
+
+export function trailVehicleFitLabel(feature: Pick<TrailFeature, 'vehicle_fit' | 'type'>): string {
+  if (feature.vehicle_fit === '2wd') return '2WD';
+  if (feature.vehicle_fit === 'high_clearance') return 'High clearance';
+  if (feature.vehicle_fit === '4x4') return '4x4';
+  return feature.type === 'road' ? 'Rig fit unknown' : 'Fit unknown';
 }
 
 function isInsideApproxRadius(center: Point, point: Point, radiusMi: number): boolean {
@@ -184,6 +223,9 @@ export function featureFromPoi(
     length_mi: poi.length_mi,
     activities: poi.activities,
     last_checked: poi.last_checked,
+    confidence: source === 'trailhead' ? 'verified' : source === 'offline_places' ? 'map_derived' : 'map_derived',
+    open_status: 'unknown',
+    vehicle_fit: 'unknown',
   };
 }
 
@@ -206,6 +248,10 @@ export function featureFromMapTrail(
     subtitle: cls === 'track' ? 'Dirt track / forest road' : 'Trail / path',
     score: support.campsNearby * 3 + support.waterNearby * 2 + support.reportsNearby,
     support,
+    confidence: cls === 'track' ? 'official' : 'map_derived',
+    open_status: 'unknown',
+    vehicle_fit: cls === 'track' ? 'high_clearance' : 'unknown',
+    surface: cls === 'track' ? 'Dirt / forest road' : undefined,
   };
 }
 

@@ -7,6 +7,7 @@ import OfflineModal, { type OfflineAreaSelection } from '@/components/NativeMap/
 import TourTarget from '@/components/TourTarget';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
 import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
+import { TrailDetailFacts } from '@/components/trails/TrailDetailSheet';
 import {
   TrailheadButton,
   TrailheadButtonDock,
@@ -38,6 +39,7 @@ import {
   featureFromMapTrail,
   trailColor,
   trailIcon,
+  trailSourceLabel,
   type TrailFeature,
 } from '@/lib/trailEngine';
 import {
@@ -904,7 +906,7 @@ function compactCoords(coords: [number, number][], maxPoints = 96): [number, num
 }
 
 function trailSourceLine(trail: TrailFeature, profile?: TrailProfile | null) {
-  const source = profile?.source_label || trail.source_label || (trail.source === 'offline_places' ? 'Offline place pack' : trail.source === 'trailhead' ? 'Trailhead profile' : 'OpenStreetMap');
+  const source = profile?.source_label || trailSourceLabel(trail);
   const ts = profile?.last_checked || trail.last_checked;
   if (!ts) return source;
   const date = new Date(ts * 1000);
@@ -11459,13 +11461,20 @@ function MapScreen() {
             <Ionicons name={selectedTrail.support.offlineReady ? 'cloud-done-outline' : 'cloud-download-outline'} size={15} color={selectedTrail.support.offlineReady ? C.green : C.orange} />
             <Text style={s.trailReadinessText}>{selectedTrail.support.readinessLabel}</Text>
           </View>
+          <TrailDetailFacts
+            trail={selectedTrail}
+            textColor={OVR.text2}
+            mutedColor={OVR.text2}
+            borderColor={OVR.border}
+            surfaceColor={OVR.bg2}
+          />
           {(selectedTrailProfile?.summary || selectedTrail.summary) && (
             <View style={s.trailStoryPanel}>
-              <Text style={s.trailReportTitle}>WHY THIS TRAIL MATTERS</Text>
+              <Text style={s.trailReportTitle}>TRAIL NOTES</Text>
               <Text style={s.trailStoryText}>{selectedTrailProfile?.summary || selectedTrail.summary}</Text>
               {!!selectedTrailProfile?.provenance && (
                 <Text style={s.trailStorySource} numberOfLines={2}>
-                  Facts are source-backed where available. {trailSourceLine(selectedTrail, selectedTrailProfile)}
+                  Source-backed where available. {trailSourceLine(selectedTrail, selectedTrailProfile)}
                 </Text>
               )}
             </View>

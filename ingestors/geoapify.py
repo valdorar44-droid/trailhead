@@ -81,6 +81,8 @@ GEOAPIFY_CATEGORY_PRIORITY = {
     "propane": 17,
 }
 
+PRIVATE_STAY_CATEGORIES = {"private_stay", "farm_stay", "ranch", "winery", "glamping", "private_camp"}
+
 
 def geoapify_enabled() -> bool:
     return bool(os.getenv("GEOAPIFY_API_KEY", "").strip())
@@ -126,14 +128,48 @@ def _raw_tags(props: dict) -> dict:
     return {}
 
 
+def _private_stay_category_from_feature(props: dict, requested_category: str) -> str | None:
+    categories = [str(c).lower() for c in (props.get("categories") or [])]
+    raw = _raw_tags(props)
+    text = " ".join([
+        *categories,
+        str(props.get("name") or ""),
+        str(props.get("category") or ""),
+        str(props.get("formatted") or ""),
+        " ".join(f"{k}={v}" for k, v in raw.items()),
+    ]).lower()
+    has_accommodation = any(c.startswith("accommodation.") for c in categories) or "guest_house" in text
+    has_camp = "camping.camp_site" in categories or "camping.caravan_site" in categories
+    has_stay_word = any(term in text for term in (
+        "stay", "lodging", "guest house", "guest_house", "bed and breakfast", "b&b",
+        "inn", "cabin", "yurt", "treehouse", "tiny home", "tiny house",
+    ))
+    if "winery" in text or "vineyard" in text:
+        return "winery"
+    if "ranch" in text and (has_accommodation or has_stay_word):
+        return "ranch"
+    if any(term in text for term in ("glamping", "yurt", "treehouse", "tiny home", "tiny house")):
+        return "glamping"
+    if "farm stay" in text or ("farm" in text and (has_accommodation or has_stay_word)):
+        return "farm_stay"
+    if "private camp" in text or "private campground" in text:
+        return "private_camp"
+    if requested_category == "private_camp" and has_camp and any(term in text for term in ("private", "resort", "cabin", "glamping")):
+        return "private_camp"
+    if requested_category == "glamping" and has_camp and any(term in text for term in ("resort", "cabin", "yurt", "glamping")):
+        return "glamping"
+    if requested_category == "private_stay" and has_accommodation and not any(term in text for term in ("restaurant", "cafe", "bar", "sushi", "cuisine")):
+        return "private_stay"
+    return None
+
+
 def _category_from_feature(props: dict, requested_category: str) -> str:
     categories = [str(c).lower() for c in (props.get("categories") or [])]
     raw = _raw_tags(props)
     raw_text = " ".join(f"{k}={v}" for k, v in raw.items()).lower()
     text = " ".join([requested_category, *categories, str(props.get("name") or ""), raw_text]).lower()
-    private_stay_categories = {"private_stay", "farm_stay", "ranch", "winery", "glamping", "private_camp"}
-    if requested_category in private_stay_categories:
-        return requested_category
+    if requested_category in PRIVATE_STAY_CATEGORIES:
+        return _private_stay_category_from_feature(props, requested_category) or ""
     if "camping.caravan_site" in categories or "camping.camp_site" in categories:
         return "camp"
     if "fuel:propane" in text or "propane" in text:
@@ -175,6 +211,8 @@ def _normalize_feature(feature: dict, requested_category: str) -> dict | None:
         return None
     lat, lng = coord
     category = _category_from_feature(props, requested_category)
+    if not category:
+        return None
     contact = props.get("contact") if isinstance(props.get("contact"), dict) else {}
     return {
         "id": f"geoapify:{place_id or f'{category}_{lat:.5f}_{lng:.5f}'}",

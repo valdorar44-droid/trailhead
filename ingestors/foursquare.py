@@ -124,6 +124,7 @@ _FSQ_CAMP_DENY = (
     "fraternity",
     "sorority",
 )
+_FSQ_PRIVATE_STAY_CATEGORIES = {"private_stay", "farm_stay", "ranch", "winery", "glamping", "private_camp"}
 
 def foursquare_enabled() -> bool:
     return bool(os.getenv("FOURSQUARE_API_KEY", "").strip())
@@ -210,13 +211,28 @@ def _category_names(place: dict) -> list[str]:
 
 
 def _is_camp_result(place: dict, requested_category: str) -> bool:
-    if requested_category not in {"camp", "camps", "rv_park"}:
-        return True
     text = " ".join([
         str(place.get("name") or ""),
         str(place.get("description") or ""),
         " ".join(_category_names(place)),
     ]).lower()
+    if requested_category in _FSQ_PRIVATE_STAY_CATEGORIES:
+        if requested_category == "winery":
+            return "winery" in text or "vineyard" in text
+        if requested_category == "ranch":
+            return "ranch" in text
+        if requested_category == "farm_stay":
+            return "farm stay" in text or ("farm" in text and any(term in text for term in ("stay", "lodging", "guest house", "bed and breakfast", "b&b")))
+        if requested_category == "glamping":
+            return any(term in text for term in ("glamping", "yurt", "cabin", "treehouse", "tiny home", "tiny house"))
+        if requested_category == "private_camp":
+            return any(term in text for term in ("private camp", "private campground", "glamping", "yurt", "cabin"))
+        return any(term in text for term in (
+            "private stay", "farm stay", "ranch stay", "winery", "vineyard",
+            "glamping", "private camp", "guest house", "bed and breakfast", "b&b",
+        ))
+    if requested_category not in {"camp", "camps", "rv_park"}:
+        return True
     if any(term in text for term in _FSQ_CAMP_DENY):
         return False
     return any(term in text for term in _FSQ_CAMP_ALLOW)

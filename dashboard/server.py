@@ -6362,6 +6362,19 @@ def _merge_camp_record(existing: dict, incoming: dict) -> dict:
 PRIVATE_STAY_PLACE_TYPES = {"private_stay", "farm_stay", "ranch", "winery", "glamping", "private_camp"}
 PRIVATE_STAY_FILTERS = {"private", "private_stay", "farm", "farm_stay", "ranch", "winery", "glamping", "private_camp"}
 
+def _private_stay_only_place_request(categories: set[str]) -> bool:
+    normalized = {_normalize_place_category(c) for c in categories if str(c).strip()}
+    return bool(normalized) and normalized.issubset(PRIVATE_STAY_PLACE_TYPES | {"private"})
+
+def _private_stay_place_types_for_request(categories: set[str]) -> set[str]:
+    normalized = {_normalize_place_category(c) for c in categories if str(c).strip()}
+    if normalized.intersection({"private", "private_stay"}):
+        return set(PRIVATE_STAY_PLACE_TYPES)
+    return normalized.intersection(PRIVATE_STAY_PLACE_TYPES)
+
+def _private_stay_place_type(item: dict) -> str:
+    return _smart_pack_type(item.get("type") or item.get("category"))
+
 def _private_stay_requested(type_filters: list[str] | None = None) -> bool:
     return bool({str(t or "").lower().strip() for t in (type_filters or [])}.intersection(PRIVATE_STAY_FILTERS))
 
@@ -8513,8 +8526,12 @@ async def nearby_places(
     gives the app one production path for online + offline result merging.
     """
     requested_categories = {_normalize_place_category(t) for t in categories.split(",") if t.strip()}
+    private_stay_only = _private_stay_only_place_request(requested_categories)
+    private_stay_allowed_types = _private_stay_place_types_for_request(requested_categories) if private_stay_only else set()
     category_set, locked_categories, access_meta = _authorize_place_categories(requested_categories, user if isinstance(user, dict) else None)
     official_category_set = _official_free_categories_for_request(requested_categories)
+    if private_stay_only:
+        official_category_set = set()
     if provider in {"nps", "blm", "usfs"}:
         official_category_set = official_category_set or requested_categories
     discovery_categories = category_set | official_category_set
@@ -8547,7 +8564,7 @@ async def nearby_places(
         geoapify_places = await get_geoapify_places(lat, lng, radius_m=radius_m, categories=category_set)
     if provider == "foursquare" and foursquare_enabled() and category_set.intersection(FSQ_BUSINESS_CATEGORIES):
         fsq_places = await get_foursquare_places(lat, lng, radius_m=radius_m, categories=category_set)
-    if provider in {"auto", "osm"} and category_set:
+    if provider in {"auto", "osm"} and category_set and not private_stay_only:
         osm_places = await get_service_places(lat, lng, radius_m=radius_m, categories=category_set)
         if category_set.intersection({"fuel", "propane"}):
             dedicated_fuel = await get_fuel_stations(lat, lng, radius_m=int(min(max(radius, 1), 25) * 1609.344))
@@ -8579,6 +8596,8 @@ async def nearby_places(
         merged.append(item)
     merged = _dedupe_nearby_places(merged)
     balanced = _balanced_nearby_places(merged, discovery_categories, dist_mi, limit=80)
+    if private_stay_only:
+        balanced = [item for item in balanced if _private_stay_place_type(item) in private_stay_allowed_types]
     for item in balanced:
         strip_lightweight_google_rich_fields(item)
         if _is_official_free_place(item):

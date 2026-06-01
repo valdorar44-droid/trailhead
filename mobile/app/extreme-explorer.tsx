@@ -3,16 +3,17 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
-  SafeAreaView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Speech from 'expo-speech';
 import { WebView } from 'react-native-webview';
+import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
 import { api, ExtremeCheckpoint, ExtremeConfig, ExtremeSurface, OsmPoi, TripMemory } from '@/lib/api';
 import { useTheme, mono } from '@/lib/design';
 import { useStore } from '@/lib/store';
@@ -25,6 +26,16 @@ type DemoPlace = {
   lat: number;
   lng: number;
   day?: number;
+  source?: string;
+  source_label?: string;
+  address?: string;
+  phone?: string;
+  website?: string;
+  photo_url?: string | null;
+  rating?: number;
+  rating_count?: number;
+  route_distance_mi?: number;
+  confidence?: string;
 };
 
 type DemoPayload = {
@@ -40,6 +51,29 @@ type DemoPayload = {
   weatherLayers: NonNullable<ExtremeConfig['weather']>['layers'];
   copilotVoice: boolean;
   navigationEnabled: boolean;
+  safeTop: number;
+  safeBottom: number;
+};
+
+type ExtremePlaceCard = {
+  id?: string;
+  name: string;
+  lat: number;
+  lng: number;
+  type?: string;
+  subtype?: string;
+  source?: string;
+  source_label?: string;
+  address?: string;
+  phone?: string;
+  website?: string;
+  photo_url?: string | null;
+  rating?: number;
+  rating_count?: number;
+  summary?: string;
+  access_note?: string;
+  route_distance_mi?: number;
+  confidence?: string;
 };
 
 const STYLE_ORDER: Array<keyof ExtremeConfig['style_uris']> = [
@@ -126,6 +160,16 @@ function placeFromPoi(p: OsmPoi, idx: number): DemoPlace | null {
     lat: Number(p.lat),
     lng: Number(p.lng),
     day: Number((p as any).recommended_day || 0) || undefined,
+    source: p.source,
+    source_label: p.source_label || p.source_badge,
+    address: p.address,
+    phone: p.phone,
+    website: p.website || p.official_url,
+    photo_url: p.photo_url,
+    rating: p.rating,
+    rating_count: p.rating_count,
+    route_distance_mi: p.route_distance_mi,
+    confidence: (p as any).confidence,
   };
 }
 
@@ -176,6 +220,76 @@ function placesFromTrip(trip: ReturnType<typeof useStore.getState>['activeTrip']
   return places.slice(0, 48);
 }
 
+function routeAnchor(route: [number, number][], checkpoints: ExtremeCheckpoint[]) {
+  const source = route.length ? route : checkpoints.map(cp => [cp.lng, cp.lat] as [number, number]);
+  if (!source.length) return { lat: 38.5733, lng: -109.5498 };
+  const mid = source[Math.floor(source.length / 2)];
+  return { lat: Number(mid[1]), lng: Number(mid[0]) };
+}
+
+function fallbackPlaces(route: [number, number][], checkpoints: ExtremeCheckpoint[]): DemoPlace[] {
+  const source = route.length > 1 ? route : checkpoints.map(cp => [cp.lng, cp.lat] as [number, number]);
+  if (!source.length) return [];
+  const pick = (ratio: number) => source[Math.max(0, Math.min(source.length - 1, Math.floor((source.length - 1) * ratio)))];
+  const defs = [
+    { id: 'extreme-fuel-check', type: 'fuel', title: 'Fuel before remote stretch', note: 'Staged for range review before the next low-service section.', ratio: 0.28 },
+    { id: 'extreme-stay-check', type: 'private_stay', title: 'Stay options near tonight', note: 'Review camps and private stays that fit the current day window.', ratio: 0.62 },
+    { id: 'extreme-repair-check', type: 'repair', title: 'Repair and parts check', note: 'Useful stop to keep in the plan before leaving larger towns.', ratio: 0.42 },
+    { id: 'extreme-weather-check', type: 'weather_risk', title: 'Weather watch point', note: 'Check wind, heat, and precipitation timing before this segment.', ratio: 0.78 },
+    { id: 'extreme-viewpoint-check', type: 'viewpoint', title: 'Scenic pullout candidate', note: 'Optional stop if daylight and route timing still work.', ratio: 0.5 },
+  ];
+  return defs.map((def, idx) => {
+    const [lng, lat] = pick(def.ratio);
+    const offset = (idx - 2) * 0.018;
+    return {
+      id: def.id,
+      type: def.type,
+      title: def.title,
+      note: def.note,
+      lat: Number(lat) + offset,
+      lng: Number(lng) - offset,
+      source: 'trailhead',
+      source_label: 'Trailhead preview',
+      confidence: 'estimated',
+    };
+  }).filter(p => finiteCoord(p.lat, p.lng));
+}
+
+function mergePlaces(places: DemoPlace[]) {
+  const seen = new Set<string>();
+  const out: DemoPlace[] = [];
+  for (const place of places) {
+    if (!finiteCoord(place.lat, place.lng)) continue;
+    const key = `${place.id || place.title}:${place.lat.toFixed(4)}:${place.lng.toFixed(4)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(place);
+  }
+  return out.slice(0, 64);
+}
+
+function placeCardFromDemo(place: DemoPlace): ExtremePlaceCard {
+  return {
+    id: place.id,
+    name: place.title || 'Place',
+    lat: place.lat,
+    lng: place.lng,
+    type: place.type,
+    source: place.source || 'extreme',
+    source_label: place.source_label || 'Premium discovery',
+    address: place.address,
+    phone: place.phone,
+    website: place.website,
+    photo_url: place.photo_url,
+    rating: place.rating,
+    rating_count: place.rating_count,
+    summary: place.note,
+    access_note: place.day ? `Suggested for day ${place.day}` : undefined,
+    route_distance_mi: place.route_distance_mi,
+    confidence: place.confidence,
+  };
+}
+
 function tripMemoryFromState(rigProfile: ReturnType<typeof useStore.getState>['rigProfile']): TripMemory {
   const rangeMiles = Number((rigProfile as any)?.fuel_range_miles || 0);
   return {
@@ -216,6 +330,10 @@ function routeForRisk(route: [number, number][]) {
 
 function makeHtml(payload: DemoPayload) {
   const data = escapeHtmlJson(payload);
+  const stylebarTop = Math.max(16, Math.round(payload.safeTop + 58));
+  const trayBottom = Math.max(14, Math.round(payload.safeBottom + 14));
+  const mapTopPadding = Math.max(120, Math.round(payload.safeTop + 128));
+  const mapBottomPadding = Math.max(230, Math.round(payload.safeBottom + 240));
   return `<!doctype html>
 <html>
 <head>
@@ -231,7 +349,7 @@ function makeHtml(payload: DemoPayload) {
     @keyframes pulse { from { transform: scale(.92); opacity: .65; } to { transform: scale(1.04); opacity: 1; } }
     .load-title { font-weight: 900; letter-spacing: .12em; font-size: 12px; }
     .load-sub { color: #94a3b8; font-size: 12px; margin-top: 8px; line-height: 1.35; }
-    .marker { width: 30px; height: 30px; border-radius: 15px; display: grid; place-items: center; color: #fff; font-size: 11px; font-weight: 900; border: 2px solid rgba(255,255,255,.88); box-shadow: 0 8px 24px rgba(0,0,0,.36); transform: scale(.2); opacity: 0; transition: transform .42s cubic-bezier(.2,1.3,.25,1), opacity .28s ease; }
+    .marker { width: 30px; height: 30px; border-radius: 15px; display: grid; place-items: center; color: #fff; font-size: 11px; font-weight: 900; border: 2px solid rgba(255,255,255,.88); box-shadow: 0 8px 24px rgba(0,0,0,.36); transform: scale(.2); opacity: 0; transition: transform .42s cubic-bezier(.2,1.3,.25,1), opacity .28s ease; cursor: pointer; }
     .marker.show { transform: scale(1); opacity: 1; }
     .place { background: #0ea5e9; }
     .fuel { background: #f97316; }
@@ -243,10 +361,10 @@ function makeHtml(payload: DemoPayload) {
     .checkpoint { width: 34px; height: 34px; border-radius: 12px; background: #111827; color: #f8fafc; border-color: #f97316; }
     .popup { max-width: 220px; font: 12px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
     .popup b { display:block; margin-bottom: 3px; }
-    .stylebar { position: absolute; top: 14px; left: 12px; right: 12px; display: flex; gap: 8px; overflow-x: auto; z-index: 3; padding-bottom: 4px; }
+    .stylebar { position: absolute; top: ${stylebarTop}px; left: 12px; right: 12px; display: flex; gap: 8px; overflow-x: auto; z-index: 3; padding-bottom: 4px; }
     .stylebar button { white-space: nowrap; border: 1px solid rgba(255,255,255,.18); background: rgba(8,12,18,.78); color: #dbe4ef; border-radius: 999px; padding: 9px 12px; font-size: 11px; font-weight: 800; backdrop-filter: blur(14px); }
     .stylebar button.active { background: #f97316; border-color: #fb923c; color: white; }
-    .tray { position: absolute; left: 12px; right: 12px; bottom: 14px; z-index: 3; background: rgba(8,12,18,.86); border: 1px solid rgba(255,255,255,.16); border-radius: 22px; padding: 14px; color: #f8fafc; backdrop-filter: blur(18px); box-shadow: 0 -16px 46px rgba(0,0,0,.32); }
+    .tray { position: absolute; left: 12px; right: 12px; bottom: ${trayBottom}px; z-index: 3; background: rgba(8,12,18,.86); border: 1px solid rgba(255,255,255,.16); border-radius: 22px; padding: 14px; color: #f8fafc; backdrop-filter: blur(18px); box-shadow: 0 -16px 46px rgba(0,0,0,.32); }
     .tray-top { display:flex; gap:10px; align-items:center; margin-bottom:8px; }
     .orb { width: 30px; height: 30px; border-radius: 12px; background: #f97316; box-shadow: 0 0 26px rgba(249,115,22,.34); }
     .tray-title { font-size: 11px; font-weight: 900; letter-spacing: .14em; color: #fb923c; }
@@ -256,6 +374,7 @@ function makeHtml(payload: DemoPayload) {
     .chips button.primary { background: #f97316; border-color: #fb923c; }
     .mode-badges { display:flex; gap:6px; overflow-x:auto; padding-top: 9px; }
     .mode-badges span { white-space:nowrap; border:1px solid rgba(255,255,255,.12); color:#cbd5e1; border-radius:999px; padding:5px 8px; font-size:9px; font-weight:900; letter-spacing:.08em; }
+    .mapboxgl-ctrl-top-right { top: ${stylebarTop + 52}px; }
   </style>
 </head>
 <body>
@@ -283,6 +402,7 @@ function makeHtml(payload: DemoPayload) {
     const demo = ${data};
     mapboxgl.accessToken = demo.token || '';
     const fallbackCenter = demo.route[0] || [-109.55, 38.57];
+    let markers = [];
     const map = new mapboxgl.Map({
       container: 'map',
       style: demo.styles[demo.activeStyle] || demo.styles.standard,
@@ -338,20 +458,33 @@ function makeHtml(payload: DemoPayload) {
       if (t.includes('weather') || t.includes('risk')) return 'weather_risk';
       return 'place';
     }
+    function clearMarkers() {
+      markers.forEach(marker => marker.remove());
+      markers = [];
+    }
+    function selectPlace(point, source) {
+      window.ReactNativeWebView?.postMessage(JSON.stringify({ type: 'place', source, place: point }));
+    }
     function addMarker(point, idx, checkpoint) {
       const el = document.createElement('div');
       el.className = checkpoint ? 'marker checkpoint' : 'marker ' + markerClass(point.type);
       el.textContent = checkpoint ? String(point.sequence || idx + 1) : labelFor(point.type, point.day);
       const popup = new mapboxgl.Popup({ offset: 18, closeButton: false, className: 'popup' })
         .setHTML('<b>' + String(point.title || 'Stop').replace(/[<>&]/g, '') + '</b>' + String(point.note || '').replace(/[<>&]/g, ''));
-      new mapboxgl.Marker({ element: el, anchor: 'center' })
+      el.addEventListener('click', event => {
+        event.stopPropagation();
+        selectPlace(point, checkpoint ? 'checkpoint' : 'place');
+      });
+      const marker = new mapboxgl.Marker({ element: el, anchor: 'center' })
         .setLngLat([point.lng, point.lat])
         .setPopup(popup)
         .addTo(map);
+      markers.push(marker);
       setTimeout(() => el.classList.add('show'), 520 + idx * 80);
     }
     function renderRoute() {
       if (!map.isStyleLoaded()) return;
+      clearMarkers();
       if (demo.activeStyle === '3d_terrain') {
         if (!map.getSource('mapbox-dem')) {
           map.addSource('mapbox-dem', { type: 'raster-dem', url: 'mapbox://mapbox.mapbox-terrain-dem-v1', tileSize: 512, maxzoom: 14 });
@@ -368,7 +501,7 @@ function makeHtml(payload: DemoPayload) {
           map.addLayer({ id: 'route-anim-line', type: 'line', source: 'route-anim', paint: { 'line-color': '#f97316', 'line-width': 5, 'line-opacity': .96 } });
         }
         const b = boundsFor(demo.route);
-        if (!b.isEmpty()) map.fitBounds(b, { padding: { top: 96, bottom: 210, left: 40, right: 40 }, duration: 950, maxZoom: 12 });
+        if (!b.isEmpty()) map.fitBounds(b, { padding: { top: ${mapTopPadding}, bottom: ${mapBottomPadding}, left: 40, right: 40 }, duration: 950, maxZoom: 12 });
         const start = performance.now();
         const duration = 1700;
         function tick(now) {
@@ -387,6 +520,13 @@ function makeHtml(payload: DemoPayload) {
       }, 900);
     }
     map.on('load', renderRoute);
+    map.on('click', event => {
+      window.ReactNativeWebView?.postMessage(JSON.stringify({
+        type: 'map_tap',
+        lng: event.lngLat.lng,
+        lat: event.lngLat.lat
+      }));
+    });
     document.querySelectorAll('.chips button').forEach(btn => {
       btn.addEventListener('click', () => window.ReactNativeWebView?.postMessage(JSON.stringify({ type: 'chip', action: btn.dataset.action })));
     });
@@ -399,6 +539,7 @@ export default function ExtremeExplorerScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ surface?: string }>();
   const C = useTheme();
+  const insets = useSafeAreaInsets();
   const activeTrip = useStore(st => st.activeTrip);
   const rigProfile = useStore(st => st.rigProfile);
   const sessionIdRef = useRef<string | null>(null);
@@ -406,11 +547,19 @@ export default function ExtremeExplorerScreen() {
   const [config, setConfig] = useState<ExtremeConfig | null>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'blocked' | 'error'>('loading');
   const [message, setMessage] = useState('Loading Extreme Explorer');
+  const [discoveredPlaces, setDiscoveredPlaces] = useState<DemoPlace[]>([]);
+  const [selectedPlace, setSelectedPlace] = useState<ExtremePlaceCard | null>(null);
+  const [relatedPlaces, setRelatedPlaces] = useState<ExtremePlaceCard[]>([]);
+  const [relatedLoading, setRelatedLoading] = useState(false);
   const surface: ExtremeSurface = params.surface === 'route_builder' ? 'route_builder' : 'map';
 
   const route = useMemo(() => routeFromTrip(activeTrip), [activeTrip?.trip_id, activeTrip?.route_geometry?.ts]);
   const checkpoints = useMemo(() => checkpointsFromTrip(activeTrip), [activeTrip?.trip_id, activeTrip?.updated_at, activeTrip?.version]);
-  const places = useMemo(() => placesFromTrip(activeTrip), [activeTrip?.trip_id, activeTrip?.updated_at, activeTrip?.version]);
+  const tripPlaces = useMemo(() => placesFromTrip(activeTrip), [activeTrip?.trip_id, activeTrip?.updated_at, activeTrip?.version]);
+  const places = useMemo(() => {
+    const seed = tripPlaces.length + discoveredPlaces.length > 0 ? [] : fallbackPlaces(route, checkpoints);
+    return mergePlaces([...tripPlaces, ...discoveredPlaces, ...seed]);
+  }, [checkpoints, discoveredPlaces, route, tripPlaces]);
   const tripMemory = useMemo(() => tripMemoryFromState(rigProfile), [rigProfile]);
   const summary = useMemo(() => coPilotSummary(places), [places]);
 
@@ -479,7 +628,28 @@ export default function ExtremeExplorerScreen() {
         navigationSessionIdRef.current = null;
       }
     };
-  }, [activeTrip?.trip_id, checkpoints, places.length, route.length, surface, tripMemory]);
+  }, [activeTrip?.trip_id, checkpoints, route.length, surface, tripMemory]);
+
+  useEffect(() => {
+    if (status !== 'ready') return;
+    let cancelled = false;
+    const anchor = routeAnchor(route, checkpoints);
+    api.getNearbyPlaces(
+      anchor.lat,
+      anchor.lng,
+      45,
+      'fuel,propane,water,dump,private_stay,camp,food,grocery,mechanic,viewpoint,trailhead,hardware,camping,medical,parts,wifi',
+      'auto',
+    )
+      .then(results => {
+        if (cancelled) return;
+        setDiscoveredPlaces(results.map(placeFromPoi).filter(Boolean) as DemoPlace[]);
+      })
+      .catch(() => {
+        if (!cancelled) setDiscoveredPlaces([]);
+      });
+    return () => { cancelled = true; };
+  }, [checkpoints, route, status]);
 
   const payload = useMemo<DemoPayload | null>(() => {
     if (!config) return null;
@@ -497,8 +667,10 @@ export default function ExtremeExplorerScreen() {
       weatherLayers: config.weather?.enabled ? (config.weather.layers ?? []) : [],
       copilotVoice: !!config.copilot?.voice_enabled,
       navigationEnabled: !!config.navigation?.enabled && config.allowed_surfaces.includes('navigation'),
+      safeTop: insets.top,
+      safeBottom: insets.bottom,
     };
-  }, [activeTrip?.plan.trip_name, checkpoints, config, places, route, summary]);
+  }, [activeTrip?.plan.trip_name, checkpoints, config, insets.bottom, insets.top, places, route, summary]);
 
   function speak(message: string) {
     if (!config?.copilot?.voice_enabled) return;
@@ -543,6 +715,80 @@ export default function ExtremeExplorerScreen() {
       metadata: { source: Platform.OS },
     });
     return risk.summary;
+  }
+
+  function showPlaceCard(place: ExtremePlaceCard) {
+    setSelectedPlace(place);
+    setRelatedLoading(true);
+    setRelatedPlaces([]);
+    const nearbyCategories = 'fuel,water,private_stay,camp,food,grocery,mechanic,viewpoint,trailhead,hardware,camping,medical,parts,wifi';
+    Promise.all([
+      api.resolveMapCard({
+        kind: 'poi',
+        id: place.id,
+        source: place.source,
+        source_label: place.source_label,
+        name: place.name,
+        lat: place.lat,
+        lng: place.lng,
+        type: place.type,
+        subtype: place.subtype,
+        photo_url: place.photo_url,
+        summary: place.summary,
+        address: place.address,
+        rating: place.rating,
+        rating_count: place.rating_count,
+        route,
+      }).catch(() => null),
+      api.getNearbyPlaces(place.lat, place.lng, 18, nearbyCategories, 'auto').catch(() => [] as OsmPoi[]),
+    ]).then(([resolved, nearby]) => {
+      const resolvedCard = resolved?.card ? {
+        ...place,
+        ...resolved.card,
+        name: resolved.card.name || place.name,
+        lat: Number(resolved.card.lat ?? place.lat),
+        lng: Number(resolved.card.lng ?? place.lng),
+        summary: resolved.card.summary || place.summary,
+      } : place;
+      setSelectedPlace(resolvedCard);
+      const related = [
+        ...(resolved?.related?.places ?? []),
+        ...(resolved?.related?.camps ?? []),
+        ...nearby,
+      ]
+        .filter(item => finiteCoord(item.lat, item.lng))
+        .map((item, idx) => ({
+          id: String((item as any).id ?? (item as any).place_id ?? `related-${idx}`),
+          name: safeText((item as any).name || (item as any).title, 'Nearby option'),
+          lat: Number(item.lat),
+          lng: Number(item.lng),
+          type: String((item as any).type || (item as any).subtype || 'place'),
+          subtype: (item as any).subtype,
+          source: (item as any).source,
+          source_label: (item as any).source_label || (item as any).source_badge,
+          photo_url: (item as any).photo_url,
+          route_distance_mi: (item as any).route_distance_mi || (item as any).distance_mi,
+          summary: (item as any).summary || (item as any).address,
+        }))
+        .slice(0, 8);
+      setRelatedPlaces(related);
+    }).finally(() => {
+      setRelatedLoading(false);
+    });
+  }
+
+  function showMapTap(lat: number, lng: number) {
+    showPlaceCard({
+      id: `tap-${lat.toFixed(5)}-${lng.toFixed(5)}`,
+      name: 'Map point',
+      lat,
+      lng,
+      type: 'poi',
+      source: 'trailhead',
+      source_label: 'Map selection',
+      summary: 'Tap nearby options below, or stage this point as a route checkpoint.',
+      confidence: 'selected',
+    });
   }
 
   function confirmGuidance() {
@@ -619,6 +865,27 @@ export default function ExtremeExplorerScreen() {
         event_data: { style: data.key },
       }).catch(() => {});
     }
+    if (data.type === 'place' && data.place) {
+      const place = placeCardFromDemo(data.place);
+      showPlaceCard(place);
+      api.logExtremeLedger({
+        session_id: sessionIdRef.current,
+        event_type: `map_${data.source || 'place'}_selected`,
+        surface,
+        trip_id: activeTrip?.trip_id ?? null,
+        event_data: { id: place.id, type: place.type, title: place.name },
+      }).catch(() => {});
+    }
+    if (data.type === 'map_tap' && finiteCoord(data.lat, data.lng)) {
+      showMapTap(Number(data.lat), Number(data.lng));
+      api.logExtremeLedger({
+        session_id: sessionIdRef.current,
+        event_type: 'map_tapped',
+        surface,
+        trip_id: activeTrip?.trip_id ?? null,
+        event_data: { lat: data.lat, lng: data.lng },
+      }).catch(() => {});
+    }
   }
 
   if (status !== 'ready' || !payload) {
@@ -647,7 +914,7 @@ export default function ExtremeExplorerScreen() {
         allowsInlineMediaPlayback
         style={styles.web}
       />
-      <SafeAreaView pointerEvents="box-none" style={styles.chrome}>
+      <View pointerEvents="box-none" style={[styles.chrome, { top: insets.top + 8 }]}>
         <TouchableOpacity style={styles.closeBtn} onPress={() => router.back()}>
           <Ionicons name="chevron-back" size={20} color="#f8fafc" />
         </TouchableOpacity>
@@ -655,7 +922,72 @@ export default function ExtremeExplorerScreen() {
           <Text style={styles.titleKicker}>EXTREME EXPLORER</Text>
           <Text style={styles.titleText} numberOfLines={1}>{activeTrip?.plan.trip_name ?? 'Premium map preview'}</Text>
         </View>
-      </SafeAreaView>
+      </View>
+      <PremiumPlaceSheet
+        place={selectedPlace}
+        visible={!!selectedPlace}
+        initialStage="half"
+        related={{ loading: relatedLoading, places: relatedPlaces, camps: [], trails: [] }}
+        routeContextLabel="Extreme Explorer"
+        addToRouteLabel="Stage checkpoint"
+        promoteToRouteLabel="Route through"
+        onClose={() => setSelectedPlace(null)}
+        onNavigate={place => {
+          showPlaceCard({ ...place, type: 'poi', source: 'trailhead', source_label: 'Map selection' });
+        }}
+        onSave={place => {
+          stageCopilotCommand('mark_checkpoint').then(text => {
+            Alert.alert('Co-Pilot', text || `${place.name} staged for review.`);
+          }).catch(() => Alert.alert('Co-Pilot', `${place.name} staged for review.`));
+        }}
+        onAddToRoute={place => {
+          stageCopilotCommand('mark_checkpoint').then(text => {
+            Alert.alert('Co-Pilot', text || `${place.name} staged as a checkpoint.`);
+          }).catch(() => Alert.alert('Co-Pilot', `${place.name} staged as a checkpoint.`));
+        }}
+        onPromoteToRoute={place => {
+          stageCopilotCommand('mark_checkpoint').then(text => {
+            Alert.alert('Co-Pilot', text || `${place.name} staged for route review.`);
+          }).catch(() => Alert.alert('Co-Pilot', `${place.name} staged for route review.`));
+        }}
+        onReport={() => Alert.alert('Report', 'Field reports stay in Trailhead mode for this beta slice.')}
+        onNearbyCamps={place => {
+          showPlaceCard({ ...place, type: 'camp', source: 'trailhead', source_label: 'Camp search' });
+        }}
+        onOpenRelatedPlace={place => showPlaceCard({
+          id: String(place.id ?? ''),
+          name: safeText(place.name, 'Nearby option'),
+          lat: place.lat,
+          lng: place.lng,
+          type: place.type,
+          subtype: place.subtype,
+          source_label: place.source_label,
+          photo_url: place.photo_url,
+          route_distance_mi: place.route_distance_mi || place.distance_mi,
+        })}
+        onOpenRelatedCamp={place => showPlaceCard({
+          id: String(place.id ?? ''),
+          name: safeText(place.name, 'Camp option'),
+          lat: place.lat,
+          lng: place.lng,
+          type: place.type || 'camp',
+          subtype: place.subtype,
+          source_label: place.source_label,
+          photo_url: place.photo_url,
+          route_distance_mi: place.route_distance_mi || place.distance_mi,
+        })}
+        onOpenRelatedTrail={place => showPlaceCard({
+          id: String(place.id ?? ''),
+          name: safeText(place.name, 'Trail option'),
+          lat: place.lat,
+          lng: place.lng,
+          type: place.type || 'trail',
+          subtype: place.subtype,
+          source_label: place.source_label,
+          photo_url: place.photo_url,
+          route_distance_mi: place.route_distance_mi || place.distance_mi,
+        })}
+      />
     </View>
   );
 }
@@ -665,7 +997,6 @@ const styles = StyleSheet.create({
   web: { flex: 1, backgroundColor: '#070a0d' },
   chrome: {
     position: 'absolute',
-    top: 0,
     left: 0,
     right: 0,
     flexDirection: 'row',

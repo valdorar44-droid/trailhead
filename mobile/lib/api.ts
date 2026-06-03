@@ -800,6 +800,7 @@ export interface CopilotContext {
     visible_layers?: string[];
     selected_place?: Record<string, unknown> | null;
     current_results?: Array<Record<string, unknown>>;
+    visible_map_features?: Array<MapSelectableFeature>;
     active_pins?: Array<Record<string, unknown>>;
     current_screen?: string;
   };
@@ -825,10 +826,27 @@ export interface CopilotContext {
   app?: Record<string, unknown>;
   safety?: Record<string, unknown>;
 }
+export interface MapSelectableFeature {
+  feature_id: string;
+  result_index: number;
+  name: string;
+  lat: number;
+  lng: number;
+  type: string;
+  subtype?: string | null;
+  source?: string | null;
+  source_label?: string | null;
+  source_layer?: string | null;
+  distance_mi?: number | null;
+  address?: string | null;
+  rating?: number | null;
+  summary?: string | null;
+  place?: Record<string, unknown> | null;
+}
 export interface MapActionRequest {
   id?: number;
   action_id: string;
-  action_type: 'getMapContext' | 'searchPlaces' | 'searchTrails' | 'selectPlace' | 'flyToPlace' | 'toggleLayer' | 'setMapStyle' | 'buildRoute' | 'modifyRoute' | 'dropPin' | 'saveTrip' | 'downloadOfflineArea' | 'explainVisibleArea' | 'askForConfirmation' | string;
+  action_type: 'getMapContext' | 'searchPlaces' | 'searchTrails' | 'selectPlace' | 'selectRenderedFeature' | 'flyToPlace' | 'toggleLayer' | 'setMapStyle' | 'buildRoute' | 'modifyRoute' | 'dropPin' | 'saveTrip' | 'downloadOfflineArea' | 'explainVisibleArea' | 'askForConfirmation' | string;
   args: Record<string, unknown>;
   requires_confirmation: boolean;
   cost_class: string;

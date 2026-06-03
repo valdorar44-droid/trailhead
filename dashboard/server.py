@@ -1265,6 +1265,7 @@ EXTREME_COPILOT_ACTIONS = {
     "searchPlaces": "Search places",
     "searchTrails": "Search trails",
     "selectPlace": "Select place",
+    "selectRenderedFeature": "Select visible map feature",
     "flyToPlace": "Fly to place",
     "toggleLayer": "Toggle layer",
     "setMapStyle": "Set map style",
@@ -1313,7 +1314,7 @@ EXTREME_COPILOT_CONFIRM_ACTIONS = {
 TRAILHEAD_COPILOT_CAPABILITY_REGISTRY = {
     "map": {
         "summary": "Search, fly, select cards, preview routes, toggle layers, change styles, radar, public lands, topo, satellite, nautical, pins, camps, trails, places.",
-        "commands": ["searchPlaces", "searchTrails", "selectPlace", "flyToPlace", "toggleLayer", "setMapStyle", "buildRoute", "dropPin"],
+        "commands": ["searchPlaces", "searchTrails", "selectPlace", "selectRenderedFeature", "flyToPlace", "toggleLayer", "setMapStyle", "buildRoute", "dropPin"],
         "confirmation": ["dropPin"],
     },
     "navigation": {
@@ -1587,7 +1588,7 @@ def _copilot_realtime_tools() -> list[dict]:
                 "action_type": {
                     "type": "string",
                     "enum": [
-                        "getMapContext", "searchPlaces", "searchTrails", "selectPlace", "flyToPlace",
+                        "getMapContext", "searchPlaces", "searchTrails", "selectPlace", "selectRenderedFeature", "flyToPlace",
                         "toggleLayer", "setMapStyle", "buildRoute", "startNavigation", "modifyRoute", "dropPin",
                         "saveTrip", "downloadOfflineArea", "openRouteBuilderDraft", "updateRouteBuilderDraft",
                         "buildRouteBuilderFramework", "readRouteBuilderContext", "openGuide", "playTripGuide",
@@ -1614,9 +1615,10 @@ def _copilot_realtime_instructions(wake_phrase: bool) -> str:
         "For campground searches near a named place, call searchPlaces with args.category=\"camp\", args.query set to the place name, "
         "and args.open_card=true when the user asks for one campground or the best/top option. "
         "For restaurants, food, scenic viewpoints, landmarks, or attractions near a named place, call searchPlaces with args.category set to "
-        "\"food\", \"viewpoint\", or \"attraction\", args.query set to the named place, and args.open_card=true so the map can show a result list and card. "
+        "\"food\", \"viewpoint\", or \"attraction\" and args.query set to the named place; set args.open_card=true only when the user asks to open the best/top/first option. "
         "For cuisine followups such as pizza, tacos, burgers, coffee, BBQ, sushi, or Italian, call searchPlaces with args.category=\"food\" and args.keyword set to the cuisine; do not geocode the cuisine as a destination. "
-        "For followups like \"open the second one\" use selectPlace. For \"route me there\" use buildRoute to preview only. "
+        "When explainVisibleArea returns visible_map_features, use selectRenderedFeature with feature_id or result_index to open one of those rendered map places. "
+        "For followups like \"open the second one\" use selectRenderedFeature when the prior answer described visible map features, otherwise use selectPlace for search results. For \"route me there\" use buildRoute to preview only. "
         "For \"start navigation\" or \"navigate there\" use startNavigation with confirmation. "
         "For full multi-day planning such as \"plan/build/create a 5-day dispersed route from Moab to Big Sur\", call buildRouteBuilderFramework with start, destination, days, routeStyle, campPreference, fuelStrategy, poiPreferences, and rig profile context. Only use openRouteBuilderDraft when the user asks to open or prefill a draft without building. "
         "Ignore tiny fragments, map labels, loading copy, and background speech that are not clear user commands. "
@@ -1893,15 +1895,17 @@ def _build_extreme_map_action(command: str, context: dict, provider: str = "trai
         action_type = "searchPlaces"
         query = _extract_place_query(command)
         keyword = _extract_food_keyword(command)
-        args = {"category": "food", "route_scoped": route_active, "near": center, "query": query, "keyword": keyword, "open_card": True, "limit": 8}
-        map_updates = {"result_list": True, "open_card": True, "category": "food", "query": query, "keyword": keyword}
+        open_card = bool(re.search(r"\b(best|top|first|nearest|closest|open|show me one|pick one)\b", text))
+        args = {"category": "food", "route_scoped": route_active, "near": center, "query": query, "keyword": keyword, "open_card": open_card, "limit": 8}
+        map_updates = {"result_list": True, "open_card": open_card, "category": "food", "query": query, "keyword": keyword}
         message = f"{keyword.title() if keyword else 'Food'} search staged near {query}." if query else f"{keyword.title() if keyword else 'Food'} search staged for the current map view."
     elif re.search(r"\b(cool places?|things to do|views?|viewpoints?|scenic|overlook|vista|landmarks?|attractions?|sights?)\b", text):
         action_type = "searchPlaces"
         query = _extract_place_query(command)
         category = "viewpoint" if re.search(r"\b(views?|viewpoints?|scenic|overlook|vista)\b", text) else "attraction"
-        args = {"category": category, "route_scoped": route_active, "near": center, "query": query, "open_card": True, "limit": 8}
-        map_updates = {"result_list": True, "open_card": True, "category": category, "query": query}
+        open_card = bool(re.search(r"\b(best|top|first|nearest|closest|open|show me one|pick one)\b", text))
+        args = {"category": category, "route_scoped": route_active, "near": center, "query": query, "open_card": open_card, "limit": 8}
+        map_updates = {"result_list": True, "open_card": open_card, "category": category, "query": query}
         message = f"{'Viewpoint' if category == 'viewpoint' else 'Attraction'} search staged near {query}." if query else "Place search staged for the current map view."
     elif re.search(r"\btrail|trailhead|hike|peak|hot spring\b", text):
         action_type = "searchTrails"
@@ -1939,7 +1943,8 @@ def _build_extreme_map_action(command: str, context: dict, provider: str = "trai
         message = "Route change staged for confirmation."
         requires_confirmation = True
     elif re.search(r"\b(select|choose|open|take me to)\b.*\b(first|second|third|1|2|3|result)\b|\b(first|second|third) result\b", text):
-        action_type = "selectPlace"
+        visible_features = map_ctx.get("visible_map_features") if isinstance(map_ctx.get("visible_map_features"), list) else []
+        action_type = "selectRenderedFeature" if visible_features and not (map_ctx.get("current_results") or []) else "selectPlace"
         if re.search(r"\bthird\b|\b3\b", text):
             index = 2
         elif re.search(r"\bsecond\b|\b2\b", text):

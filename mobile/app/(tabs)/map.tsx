@@ -26,7 +26,7 @@ import * as FileSystem from 'expo-file-system';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useStore, type WaterSpot, type CatchLog, type WaterRoute } from '@/lib/store';
-import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile, MapCardResolveResponse, WaterNavigationLinesResponse, WaterConditionsResponse, WaterSpotCard, WaterSpotCardsResponse, FishingConditionsResponse, SuggestedWaterCorridorResponse, type ExtremeConfig, type CopilotContext, type MapActionRequest } from '@/lib/api';
+import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile, MapCardResolveResponse, WaterNavigationLinesResponse, WaterConditionsResponse, WaterSpotCard, WaterSpotCardsResponse, FishingConditionsResponse, SuggestedWaterCorridorResponse, type ExtremeConfig, type CopilotContext, type MapActionRequest, type MapSelectableFeature } from '@/lib/api';
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { deleteRouteGeometry, loadRouteGeometry, saveRouteGeometry } from '@/lib/offlineRoutes';
 import { loadOfflineTrail, saveOfflineTrail } from '@/lib/offlineTrails';
@@ -1050,6 +1050,59 @@ function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number) {
   const a = Math.sin(dLat / 2) ** 2 +
     Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function selectableFeatureKey(source: string, name: string, lat: number, lng: number, id?: string | null) {
+  return String(id || `${source}:${name}:${lat.toFixed(5)}:${lng.toFixed(5)}`).slice(0, 180);
+}
+
+function selectableFeatureFromPlace(
+  place: SearchPlace,
+  resultIndex: number,
+  source: string,
+  center?: { lat: number; lng: number } | null,
+): MapSelectableFeature | null {
+  const lat = Number(place.lat);
+  const lng = Number(place.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  const name = String(place.name || place.type || 'Place').trim();
+  if (!name || name.length < 2) return null;
+  return {
+    feature_id: selectableFeatureKey(source, name, lat, lng, place.id || place.place_id || place.provider_place_id),
+    result_index: resultIndex,
+    name,
+    lat,
+    lng,
+    type: String(place.type || 'poi'),
+    subtype: place.subtype || null,
+    source: place.source || source,
+    source_label: place.source_label || place.source_badge || (source === 'copilot_result' ? 'Copilot result' : 'Map feature'),
+    source_layer: (place as any).source_layer || null,
+    distance_mi: place.distance_mi ?? (place.dist != null ? place.dist * 0.621371 : center ? haversineKm(center.lat, center.lng, lat, lng) * 0.621371 : null),
+    address: place.address || null,
+    rating: place.rating ?? null,
+    summary: place.summary || null,
+    place: place as unknown as Record<string, unknown>,
+  };
+}
+
+function searchPlaceFromSelectableFeature(feature: MapSelectableFeature): SearchPlace {
+  const raw = feature.place && typeof feature.place === 'object' ? feature.place as Partial<SearchPlace> : {};
+  return {
+    ...raw,
+    id: String(raw.id || feature.feature_id),
+    name: String(raw.name || feature.name || 'Place'),
+    lat: Number(raw.lat ?? feature.lat),
+    lng: Number(raw.lng ?? feature.lng),
+    type: String(raw.type || feature.type || 'poi'),
+    subtype: raw.subtype || feature.subtype || undefined,
+    source: raw.source || feature.source || 'rendered_map',
+    source_label: raw.source_label || feature.source_label || 'Rendered map',
+    address: raw.address || feature.address || undefined,
+    rating: raw.rating ?? feature.rating ?? undefined,
+    summary: raw.summary || feature.summary || 'Selected from the visible map.',
+    distance_mi: raw.distance_mi ?? feature.distance_mi ?? undefined,
+  };
 }
 
 function pointSegmentDistanceMi(
@@ -3193,6 +3246,57 @@ const buildMapHtml = (
     map.on('rotate',function(){
       if(userMarker&&smoothedHdg>=0){var svg=userMarker.getElement().querySelector('svg');if(svg)svg.style.transform='rotate('+(smoothedHdg-map.getBearing())+'deg)';}
     });
+    function renderedPlaceType(props){
+      var raw=String((props&&((props.maki)||(props.class)||(props.type)||(props.category)||(props.group)||(props.kind)))||'').toLowerCase();
+      if(/camp|caravan|rv/.test(raw))return'camp';
+      if(/trailhead/.test(raw))return'trailhead';
+      if(/trail|hiking/.test(raw))return'trail';
+      if(/fuel|gas|charging/.test(raw))return'fuel';
+      if(/restaurant|cafe|bar|food|pizza/.test(raw))return'food';
+      if(/grocery|supermarket|market/.test(raw))return'grocery';
+      if(/hotel|lodg|motel/.test(raw))return'lodging';
+      if(/view|attraction|museum|monument|landmark/.test(raw))return'attraction';
+      if(/water|drinking/.test(raw))return'water';
+      return'poi';
+    }
+    function renderedFeatureScore(f){
+      var p=f&&f.properties||{};
+      var lid=String((f&&f.layer&&f.layer.id)||(f&&f.sourceLayer)||(f&&f.source)||'').toLowerCase();
+      var raw=String((p.maki||p.class||p.type||p.category||p.group||p.kind||p.poi_category)||'').toLowerCase();
+      var score=100;
+      if(lid.indexOf('poi')>=0)score-=55;
+      if(lid.indexOf('place')>=0)score-=28;
+      if(lid.indexOf('label')>=0)score-=18;
+      if(f&&f.geometry&&f.geometry.type==='Point')score-=14;
+      if(/restaurant|cafe|bar|food|pizza|fuel|gas|grocery|hotel|view|attraction|museum|monument|landmark|trail|hiking|park|camp|caravan|rv/.test(raw))score-=30;
+      if(lid.indexOf('building')>=0)score+=16;
+      if(lid.indexOf('road')>=0||lid.indexOf('boundary')>=0||lid.indexOf('landuse')>=0)score+=45;
+      if(/country|state|province|city|town|village|neighborhood|postcode|address|road|street|motorway|water|ocean|landuse/.test(raw))score+=45;
+      return score;
+    }
+    function renderedFeatureToPoi(f,lngLat){
+      var p=f&&f.properties||{};
+      var lid=String((f&&f.layer&&f.layer.id)||(f&&f.sourceLayer)||(f&&f.source)||'').toLowerCase();
+      if(lid.indexOf('trailhead-web-route')>=0||lid.indexOf('route-line')>=0||lid.indexOf('route-shadow')>=0||lid.indexOf('breadcrumb')>=0)return null;
+      var name=String(p.name||p.name_en||p.name_script||p.name_local||p.brand||p.full_address||'').trim();
+      if(!name||name.length<2)return null;
+      var cc=f&&f.geometry&&f.geometry.type==='Point'&&f.geometry.coordinates;
+      var lng=Number(cc&&cc[0]);var lat=Number(cc&&cc[1]);
+      if(!isFinite(lat)||!isFinite(lng)){lat=lngLat.lat;lng=lngLat.lng;}
+      var subtype=String(p.maki||p.class||p.category||p.type||p.group||p.kind||'').replace(/[_-]+/g,' ').trim();
+      return{id:String(p.id||p.mapbox_id||('rendered:'+name+':'+lat.toFixed(5)+':'+lng.toFixed(5))).slice(0,180),name:name,lat:lat,lng:lng,type:renderedPlaceType(p),subtype:subtype||'rendered place',source:'rendered_map',source_label:'Rendered map',source_layer:lid,provider_place_id:p.mapbox_id||p.id,place_id:p.mapbox_id||p.id,source_badge:'Map feature',source_freshness:'Selected from rendered map data.',summary:(subtype||'Place')+' selected from the map.'};
+    }
+    function pickRenderedPlaceFeature(features,lngLat){
+      if(!features||!features.length)return null;
+      var best=null,bestScore=9999;
+      for(var i=0;i<features.length;i++){
+        var poi=renderedFeatureToPoi(features[i],lngLat);
+        if(!poi)continue;
+        var score=renderedFeatureScore(features[i]);
+        if(score<bestScore){bestScore=score;best=poi;}
+      }
+      return best;
+    }
     map.on('click',function(e){
       if(e.defaultPrevented)return;
       try{
@@ -3245,6 +3349,12 @@ const buildMapHtml = (
           var wf=waterFs[0];
           var wp=wf.properties||{};
           postRN({type:'waterbody_tapped',name:wp.name||'',kind:wp.kind||wp.water||wp.waterway||'',lat:e.lngLat.lat,lng:e.lngLat.lng});
+          return;
+        }
+        // 4. Generic rendered labels/icons — classic MapLibre/Protomaps/Mapbox places.
+        var genericPoi=pickRenderedPlaceFeature([].concat(ptFs||[],boxFs||[]),e.lngLat);
+        if(genericPoi){
+          postRN({type:'poi_tapped',poi:genericPoi});
           return;
         }
       }catch(x){}
@@ -3322,8 +3432,8 @@ const buildMapHtml = (
     _clicksSetup=true;
     map.on('click','camp-cluster',function(e){var f=map.queryRenderedFeatures(e.point,{layers:['camp-cluster']});if(!f.length)return;map.getSource('camps').getClusterExpansionZoom(f[0].properties.cluster_id,function(err,zoom){if(err)return;map.easeTo({center:f[0].geometry.coordinates,zoom:zoom+0.5});});e.preventDefault();});
     map.on('click','camp-circle',function(e){if(!e.features||!e.features[0])return;var p=e.features[0].properties;var raw;try{raw=JSON.parse(p.raw||'{}');}catch(x){raw=p;}postRN({type:'campsite_tapped',id:raw.id||p.id,name:raw.name||p.name,camp:raw});e.preventDefault();});
-    map.on('click','gas-circle',function(e){if(!e.features||!e.features[0])return;var p=e.features[0].properties;new maplibregl.Popup({closeButton:false,offset:12}).setLngLat(e.lngLat).setHTML('<div class="pt">F '+p.name+'</div><div class="pm">Fuel Station</div>').addTo(map);e.preventDefault();});
-    map.on('click','poi-circle',function(e){if(!e.features||!e.features[0])return;var p=e.features[0].properties;var raw;try{raw=JSON.parse(p.raw||'{}');}catch(x){raw=p;}var wc={boat_ramp:'R',paddle_launch:'P',fishing_access:'F',marina:'M',dock:'D',shore_access:'S',swimming:'S',gauge:'G',navigation_aid:'A',channel_marker:'C',water_hazard:'!',anchorage:'A',lock:'L'};var ic=p.type==='trail'?'T':p.type==='water'?(wc[p.subtype]||'W'):p.type==='trailhead'?'T':p.type==='viewpoint'?'V':p.type==='peak'?'P':p.type==='hot_spring'?'H':p.type==='gpx_import'?'X':p.type==='fuel'?'G':p.type==='propane'?'P':p.type==='dump'?'D':p.type&&p.type.indexOf('camp')>=0?'C':'P';if(p.type==='trail'||p.type==='trailhead'||p.type==='viewpoint'||p.type==='peak'||p.type==='hot_spring'){postRN({type:'poi_tapped',poi:Object.assign({},raw,{lat:raw.lat||e.lngLat.lat,lng:raw.lng||e.lngLat.lng,name:raw.name||p.name,type:raw.type||p.type})});}else{new maplibregl.Popup({closeButton:false,offset:12}).setLngLat(e.lngLat).setHTML('<div class="pt">'+ic+' '+p.name+'</div><div class="pm">'+p.type+'</div>').addTo(map);}e.preventDefault();});
+    map.on('click','gas-circle',function(e){if(!e.features||!e.features[0])return;var p=e.features[0].properties||{};postRN({type:'poi_tapped',poi:{id:p.id||('fuel:'+e.lngLat.lat.toFixed(5)+':'+e.lngLat.lng.toFixed(5)),name:p.name||'Fuel',lat:e.lngLat.lat,lng:e.lngLat.lng,type:'fuel',subtype:'fuel station',source:'fuel',source_label:'Fuel'}});e.preventDefault();});
+    map.on('click','poi-circle',function(e){if(!e.features||!e.features[0])return;var p=e.features[0].properties||{};var raw;try{raw=JSON.parse(p.raw||'{}');}catch(x){raw=p;}postRN({type:'poi_tapped',poi:Object.assign({},raw,{id:raw.id||p.id||((p.type||'poi')+':'+e.lngLat.lat.toFixed(5)+':'+e.lngLat.lng.toFixed(5)),lat:raw.lat||e.lngLat.lat,lng:raw.lng||e.lngLat.lng,name:raw.name||p.name||'Place',type:raw.type||p.type||'poi',subtype:raw.subtype||p.subtype||'',source:raw.source||'trailhead_poi',source_label:raw.source_label||raw.source_badge||'Trailhead place'})});e.preventDefault();});
     function postWaterNavFeature(e){if(!e.features||!e.features[0])return;var f=e.features[0],p=f.properties||{},cc=(f.geometry&&f.geometry.type==='Point'&&f.geometry.coordinates)||[e.lngLat.lng,e.lngLat.lat];postRN({type:'poi_tapped',poi:Object.assign({},p,{id:p.id||('water_nav_'+e.lngLat.lat.toFixed(5)+'_'+e.lngLat.lng.toFixed(5)),lat:cc[1]||e.lngLat.lat,lng:cc[0]||e.lngLat.lng,type:'water',category:'water',subtype:p.subtype||p.kind||'channel_marker',source:'openseamap',source_label:p.source||'OpenStreetMap / OpenSeaMap',source_badge:'OpenSeaMap / OSM',navigation_feature:p.navigation_feature||p.label||p.seamark_type||p.kind,navigation_note:p.navigation_note||'Open seamark data only. Verify against official charts, local markers, water levels, and weather.'})});e.preventDefault();}
     map.on('click','water-nav-line',postWaterNavFeature);
     map.on('click','water-nav-aid',postWaterNavFeature);
@@ -4149,6 +4259,7 @@ function MapScreen() {
   const [searchResults,setSearchResults] = useState<SearchPlace[]>([]);
   const [copilotResults, setCopilotResults] = useState<SearchPlace[]>([]);
   const [copilotResultScope, setCopilotResultScope] = useState<CopilotResultScope | null>(null);
+  const [visibleRenderedFeatures, setVisibleRenderedFeatures] = useState<MapSelectableFeature[]>([]);
   const [showSearch,   setShowSearch]   = useState(false);
   const [searchMode, setSearchMode] = useState<'browse' | 'route_pick'>('browse');
   const [isSearching,  setIsSearching]  = useState(false);
@@ -4336,6 +4447,7 @@ function MapScreen() {
   const pendingCampFetchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastWaterNavFetchRef = useRef<{lat: number; lng: number} | null>(null);
   const pendingWaterNavFetchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingRenderedFeatureRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const poiCacheRef = useRef<Map<string, OsmPoi>>(new Map());
   const poiFetchSeqRef = useRef(0);
 
@@ -5817,6 +5929,22 @@ function MapScreen() {
     }, 260);
   }
 
+  function queueRenderedFeatureRefresh(bounds: { n: number; s: number; e: number; w: number; zoom: number }) {
+    if ((bounds.zoom ?? 0) < 9) {
+      setVisibleRenderedFeatures([]);
+      return;
+    }
+    if (pendingRenderedFeatureRef.current) clearTimeout(pendingRenderedFeatureRef.current);
+    pendingRenderedFeatureRef.current = setTimeout(() => {
+      pendingRenderedFeatureRef.current = null;
+      nativeMapRef.current?.queryVisibleFeatures?.()
+        .then(features => {
+          setVisibleRenderedFeatures((features ?? []).slice(0, 24).map((feature, idx) => ({ ...feature, result_index: idx })));
+        })
+        .catch(() => {});
+    }, 360);
+  }
+
   function queueViewportCampFetch(bounds: { n: number; s: number; e: number; w: number; zoom: number }) {
     if ((bounds.zoom ?? 0) < MIN_CAMP_SEARCH_ZOOM) return;
     const center = { lat: (bounds.n + bounds.s) / 2, lng: (bounds.e + bounds.w) / 2 };
@@ -6847,6 +6975,7 @@ function MapScreen() {
           ...copilotResults.slice(0, 8).map(copilotPlacePayload),
           ...areaCamps.slice(0, Math.max(0, 8 - copilotResults.length)).map(copilotCampPayload),
         ],
+        visible_map_features: visibleMapFeatures.slice(0, 16),
         active_pins: displayCommunityPins.slice(0, 24).map(p => ({ lat: p.lat, lng: p.lng, name: p.name, type: p.type })),
       },
       route: {
@@ -7202,7 +7331,7 @@ function MapScreen() {
     setShowSearch(false);
     setShowDiscoveryPanel(false);
 
-    const shouldOpenCard = results.length > 0 && (args.open_card !== false);
+    const shouldOpenCard = results.length > 0 && args.open_card === true;
     if (shouldOpenCard) openCopilotPlaceCard(results[0]);
     else setSelectedPlace(null);
 
@@ -7264,15 +7393,29 @@ function MapScreen() {
       const currentResults = (copilotResults.length ? copilotResults : searchResults)
         .slice(0, 8)
         .map(copilotPlacePayload);
+      const renderedFeatures = visibleMapFeatures
+        .slice(0, 12)
+        .map(feature => ({
+          feature_id: feature.feature_id,
+          result_index: feature.result_index,
+          name: feature.name,
+          type: feature.type,
+          subtype: feature.subtype,
+          lat: feature.lat,
+          lng: feature.lng,
+          source: feature.source_label || feature.source,
+          distance_mi: feature.distance_mi ?? null,
+        }));
       const selected = context.map?.selected_place as Record<string, unknown> | null | undefined;
       const visibleLayers = context.map?.visible_layers ?? [];
       const counts = {
-        places: routePois.filter(inView).length,
+        places: Math.max(routePois.filter(inView).length, visibleMapFeatures.length),
         camps: trailSupportCamps.filter(inView).length,
         trails: trailDiscoveries.filter(inView).length,
         pins: displayCommunityPins.filter(inView).length,
       };
       const named = [
+        ...renderedFeatures.slice(0, 5).map(p => p.name),
         ...currentResults.slice(0, 3).map(p => p.name),
         ...visibleCamps.slice(0, 2).map(c => c.name),
         ...visibleTrails.slice(0, 2).map(t => t.name),
@@ -7291,8 +7434,10 @@ function MapScreen() {
           visible_layers: visibleLayers,
           selected: selected ? { name: selected.name, type: selected.type, lat: selected.lat, lng: selected.lng } : null,
           current_results: currentResults,
+          visible_map_features: renderedFeatures,
           counts,
           examples: {
+            rendered_features: renderedFeatures,
             camps: visibleCamps,
             trails: visibleTrails,
             places: visiblePlaces,
@@ -7416,6 +7561,40 @@ function MapScreen() {
       setShowDiscoveryPanel(true);
       return { applied: true, opened: 'trail_discovery' };
     }
+    if (type === 'selectRenderedFeature') {
+      const rawIndex = args.result_index ?? args.index ?? args.number;
+      const featureId = String(args.feature_id || args.id || '').trim();
+      const rawName = String(args.name || args.place || args.target || '').trim().toLowerCase();
+      let feature: MapSelectableFeature | undefined;
+      if (featureId) {
+        feature = visibleMapFeatures.find(item => item.feature_id === featureId || String(item.place?.id || '') === featureId);
+      }
+      if (!feature && rawIndex != null) {
+        const numeric = Math.max(0, Number(rawIndex));
+        const idx = args.number != null && args.result_index == null ? Math.max(0, numeric - 1) : numeric;
+        feature = visibleMapFeatures[idx];
+      }
+      if (!feature && rawName) {
+        feature = visibleMapFeatures.find(item => item.name.toLowerCase().includes(rawName) || rawName.includes(item.name.toLowerCase()));
+      }
+      if (!feature) {
+        setShowExtremeCopilot(true);
+        setQuickToast('No visible map feature matched.');
+        setTimeout(() => setQuickToast(''), 2400);
+        return { applied: false, status: 'failed', reason: 'no_visible_feature', spoken_summary: 'I could not match that to a visible map feature. Ask what I see, then choose by number or name.' };
+      }
+      const place = searchPlaceFromSelectableFeature(feature);
+      openCopilotPlaceCard(place);
+      setShowExtremeCopilot(false);
+      return {
+        applied: true,
+        status: 'applied',
+        selected: feature.name,
+        selected_type: feature.type || 'place',
+        selected_place: copilotPlacePayload(place),
+        spoken_summary: `Opening ${feature.name}.`,
+      };
+    }
     if (type === 'selectPlace') {
       const index = Math.max(0, Number(args.result_index || 0));
       const desiredCategory = String(args.category || args.kind || args.result_type || copilotResultScope?.category || '').toLowerCase();
@@ -7431,6 +7610,13 @@ function MapScreen() {
         openCopilotPlaceCard(place);
         setShowExtremeCopilot(false);
         return { applied: true, status: 'applied', selected: place.name, selected_type: place.type || 'place', place: copilotPlacePayload(place) };
+      }
+      const renderedFeature = visibleMapFeatures[index] ?? visibleMapFeatures[index - 1];
+      if (renderedFeature) {
+        const renderedPlace = searchPlaceFromSelectableFeature(renderedFeature);
+        openCopilotPlaceCard(renderedPlace);
+        setShowExtremeCopilot(false);
+        return { applied: true, status: 'applied', selected: renderedFeature.name, selected_type: renderedFeature.type || 'place', selected_place: copilotPlacePayload(renderedPlace) };
       }
       if (wantsPlace || copilotResultScope?.kind === 'place') {
         setShowExtremeCopilot(true);
@@ -8492,6 +8678,7 @@ function MapScreen() {
         queueViewportPlaceFetch(bounds);
         queueViewportCampFetch(bounds);
         queueWaterNavigationLineFetch(bounds);
+        queueRenderedFeatureRefresh(bounds);
       }
       if (msg.type === 'search_area') {
         // Legacy WebView button — handled by native button now, but keep as fallback
@@ -9204,6 +9391,15 @@ function MapScreen() {
     }
     return next;
   }, [activeTrip?.trip_id, allMapPois, liveRouteGas]);
+  const visibleCommunityPins = useMemo(() => {
+    if (activePinFilters.length === 0) return [];
+    const allowed = new Set(activePinFilters);
+    return communityPins.filter(p => allowed.has(normalizedCommunityPinType(p)));
+  }, [communityPins, activePinFilters]);
+  const displayCommunityPins = useMemo(() =>
+    visibleCommunityPins.map(p => ({ ...p, type: normalizedCommunityPinType(p) })),
+    [visibleCommunityPins]
+  );
   const routePois = useMemo(() => {
     const trailPinsActive = showTrailList || showDiscoveryPanel || discoveryMode === 'trails';
     const seen = new Set<string>();
@@ -9225,6 +9421,69 @@ function MapScreen() {
     for (const p of allMapPois) pushPoi(p);
     return next;
   }, [allMapPois, discoveryMode, showDiscoveryPanel, showTrailList, trailSourcePois]);
+  const visibleMapFeatures = useMemo(() => {
+    const vp = viewportRef.current;
+    const center = vp
+      ? { lat: (vp.n + vp.s) / 2, lng: (vp.e + vp.w) / 2 }
+      : userLoc;
+    const inView = (place: { lat?: number | null; lng?: number | null }) => {
+      if (!vp) return true;
+      const lat = Number(place.lat);
+      const lng = Number(place.lng);
+      return Number.isFinite(lat) && Number.isFinite(lng) && lat >= vp.s && lat <= vp.n && lng >= vp.w && lng <= vp.e;
+    };
+    const seen = new Set<string>();
+    const next: MapSelectableFeature[] = [];
+    const push = (feature: MapSelectableFeature | null | undefined) => {
+      if (!feature || next.length >= 32) return;
+      if (!inView(feature)) return;
+      const key = `${feature.name.toLowerCase()}:${feature.lat.toFixed(4)}:${feature.lng.toFixed(4)}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      next.push({ ...feature, result_index: next.length });
+    };
+    for (const place of copilotResults) push(selectableFeatureFromPlace(place, next.length, 'copilot_result', center));
+    for (const place of searchResults) push(selectableFeatureFromPlace(place, next.length, 'search_result', center));
+    for (const feature of visibleRenderedFeatures) push({ ...feature, result_index: next.length });
+    for (const poi of routePois) push(selectableFeatureFromPlace(poi as unknown as SearchPlace, next.length, 'trailhead_poi', center));
+    for (const camp of areaCamps) {
+      push(selectableFeatureFromPlace({
+        id: camp.id,
+        name: camp.name || 'Camp',
+        lat: camp.lat,
+        lng: camp.lng,
+        type: 'camp',
+        source: camp.verified_source || camp.source_badge || camp.source || 'camp',
+        source_label: camp.source_badge || camp.verified_source || camp.source || 'Camp',
+        rating: camp.rating,
+        rating_count: camp.rating_count,
+        summary: camp.description || camp.land_type || 'Camp',
+      }, next.length, 'camp', center));
+    }
+    for (const pin of displayCommunityPins) {
+      push(selectableFeatureFromPlace({
+        id: String(pin.id || ''),
+        name: pin.name || 'Community pin',
+        lat: pin.lat,
+        lng: pin.lng,
+        type: pin.type || 'poi',
+        source: 'community_pin',
+        source_label: 'Community pin',
+        summary: pin.description || 'Community map pin',
+      }, next.length, 'community_pin', center));
+    }
+    return next.map((feature, idx) => ({ ...feature, result_index: idx }));
+  }, [
+    areaCamps,
+    copilotResults,
+    displayCommunityPins,
+    placesLoadedAt,
+    routePois,
+    searchResults,
+    userLoc?.lat,
+    userLoc?.lng,
+    visibleRenderedFeatures,
+  ]);
   const explorePlaceCards = useMemo(() => {
     const vp = viewportRef.current;
     const center = vp
@@ -9694,15 +9953,6 @@ function MapScreen() {
       if (gesture.dy > 12 || gesture.vy > 0.25) collapseTripPanel();
     },
   }), [collapseTripPanel]);
-  const visibleCommunityPins = useMemo(() => {
-    if (activePinFilters.length === 0) return [];
-    const allowed = new Set(activePinFilters);
-    return communityPins.filter(p => allowed.has(normalizedCommunityPinType(p)));
-  }, [communityPins, activePinFilters]);
-  const displayCommunityPins = useMemo(() =>
-    visibleCommunityPins.map(p => ({ ...p, type: normalizedCommunityPinType(p) })),
-    [visibleCommunityPins]
-  );
   const pinList = useMemo(() =>
     displayCommunityPins.map(p => ({ lat: p.lat, lng: p.lng, name: p.name, type: p.type })),
     [displayCommunityPins]
@@ -11986,6 +12236,7 @@ function MapScreen() {
             queueViewportPlaceFetch(b);
             queueViewportCampFetch(b);
             queueWaterNavigationLineFetch(b);
+            queueRenderedFeatureRefresh(b);
           }}
           onMapGesture={() => {
             if (navMode) setNavCameraFollow(false);
@@ -12401,7 +12652,7 @@ function MapScreen() {
         </View>
       )}
 
-      {copilotResults.length > 0 && !navMode && !safeWaterPlanningActive && !waterFollowActive && !showSearch && (
+      {copilotResults.length > 0 && !selectedPlace && !selectedCamp && !selectedTrail && !selectedCommunityPin && !navMode && !safeWaterPlanningActive && !waterFollowActive && !showSearch && (
         <View style={s.copilotResultRail} pointerEvents="auto">
           <View style={s.copilotResultHeader}>
             <View style={s.copilotResultTitleWrap}>

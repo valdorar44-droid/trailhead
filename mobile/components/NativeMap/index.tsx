@@ -21,7 +21,7 @@ import { buildMapStyle, MapMode } from './mapStyle';
 import type { ContourSourceMode, PremiumMapStyle, TrailSourceMode } from './mapStyle';
 import { fetchRoute, buildFallbackRoute } from './routing';
 import type { RouteProviderMode, RouteResult, RouteStep, RouteOpts, MapBounds, WP } from './types';
-import type { CampsitePin, OsmPoi, Pin, Report, WaterSpotCard, SuggestedWaterCorridorResponse } from '@/lib/api';
+import type { CampsitePin, MapSelectableFeature, OsmPoi, Pin, Report, WaterSpotCard, SuggestedWaterCorridorResponse } from '@/lib/api';
 import type { WaterRoute } from '@/lib/store';
 import { useStore } from '@/lib/store';
 import { useTheme } from '@/lib/design';
@@ -94,6 +94,7 @@ export interface NativeMapHandle {
   getTrailHighlight: () => GeoJSON.FeatureCollection;
   captureTrailAt: (lat: number, lng: number, name?: string) => Promise<GeoJSON.FeatureCollection>;
   screenToCoordinate: (x: number, y: number) => Promise<[number, number] | null>;
+  queryVisibleFeatures: () => Promise<MapSelectableFeature[]>;
   getVisibleCenter: () => Promise<[number, number] | null>;
   getVisibleBounds: () => Promise<MapBounds | null>;
   restoreRoute:   (coords: [number,number][], steps: RouteStep[], legs: RouteStep[][], td: number, tt: number) => void;
@@ -1247,6 +1248,25 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         return null;
       }
     },
+    async queryVisibleFeatures() {
+      if (!mapRef.current) return [];
+      try {
+        const screen = Dimensions.get('window');
+        const bounds = await mapRef.current.getVisibleBounds().catch(() => null);
+        const center = bounds
+          ? { lat: (Number(bounds[0]?.[1]) + Number(bounds[1]?.[1])) / 2, lng: (Number(bounds[0]?.[0]) + Number(bounds[1]?.[0])) / 2 }
+          : null;
+        const rectFound = await (mapRef.current as any).queryRenderedFeaturesInRect?.(
+          [0, 0, screen.width, screen.height],
+          undefined,
+          undefined,
+        ).catch(() => null);
+        const rectFeatures = Array.isArray(rectFound) ? rectFound : rectFound?.features;
+        return normalizeRenderedFeatureList(rectFeatures, center);
+      } catch {
+        return [];
+      }
+    },
     async getVisibleCenter() {
       if (!mapRef.current) return null;
       try {
@@ -1608,30 +1628,28 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           onTileCampTap(name, kind, coords[1] ?? lat, coords[0] ?? lng);
           return;
         }
-        if (isExtremeMapbox) {
-          const mapboxRendered: any[] = [];
-          const [px, py] = pressPoint.map(Number);
-          if (Number.isFinite(px) && Number.isFinite(py)) {
-            const rectFound = await (mapRef.current as any).queryRenderedFeaturesInRect?.(
-              [px - 36, py - 36, 72, 72],
-              undefined,
-              undefined,
-            ).catch(() => null);
-            const rectFeatures = Array.isArray(rectFound) ? rectFound : rectFound?.features;
-            if (Array.isArray(rectFeatures)) mapboxRendered.push(...rectFeatures);
-          }
-          const pointFound = await mapRef.current.queryRenderedFeaturesAtPoint(
-            pressPoint,
+        const mapboxRendered: any[] = [];
+        const [px, py] = pressPoint.map(Number);
+        if (Number.isFinite(px) && Number.isFinite(py)) {
+          const rectFound = await (mapRef.current as any).queryRenderedFeaturesInRect?.(
+            [px - 36, py - 36, 72, 72],
             undefined,
             undefined,
-          );
-          const pointFeatures = Array.isArray(pointFound) ? pointFound : pointFound?.features;
-          if (Array.isArray(pointFeatures)) mapboxRendered.push(...pointFeatures);
-          const mapboxPoi = bestMapboxPoiFromFeatures(mapboxRendered, lat, lng);
-          if (mapboxPoi) {
-            onPoiTap?.(mapboxPoi);
-            return;
-          }
+          ).catch(() => null);
+          const rectFeatures = Array.isArray(rectFound) ? rectFound : rectFound?.features;
+          if (Array.isArray(rectFeatures)) mapboxRendered.push(...rectFeatures);
+        }
+        const pointFound = await mapRef.current.queryRenderedFeaturesAtPoint(
+          pressPoint,
+          undefined,
+          undefined,
+        );
+        const pointFeatures = Array.isArray(pointFound) ? pointFound : pointFound?.features;
+        if (Array.isArray(pointFeatures)) mapboxRendered.push(...pointFeatures);
+        const mapboxPoi = bestMapboxPoiFromFeatures(mapboxRendered, lat, lng);
+        if (mapboxPoi) {
+          onPoiTap?.(mapboxPoi);
+          return;
         }
       } catch { /* queryRenderedFeatures may not be supported — fall through */ }
       onMapTap(lat, lng);
@@ -2649,7 +2667,7 @@ function mapboxFeaturePickScore(feature: any): number {
 function mapMapboxFeatureToPoi(feature: any, fallbackLat: number, fallbackLng: number): OsmPoi | null {
   const props = feature?.properties ?? {};
   const layerId = String(feature?.layer?.id || feature?.sourceLayer || feature?.source || '').toLowerCase();
-  if (layerId.includes('trailhead-web-route') || layerId.includes('route') || layerId.includes('trailhead')) return null;
+  if (layerId.includes('trailhead-web-route') || layerId.includes('route-line') || layerId.includes('route-shadow') || layerId.includes('breadcrumb')) return null;
   const name = String(
     props.name
     || props.name_en
@@ -2677,6 +2695,7 @@ function mapMapboxFeatureToPoi(feature: any, fallbackLat: number, fallbackLng: n
     subtype: subtype || 'mapbox place',
     source: 'mapbox_feature',
     source_label: 'Mapbox',
+    source_layer: layerId,
     provider_place_id: props.mapbox_id || props.id,
     place_id: props.mapbox_id || props.id,
     attribution: 'Mapbox',
@@ -2692,6 +2711,83 @@ function bestMapboxPoiFromFeatures(features: any[] | undefined, fallbackLat: num
     .map(feature => ({ poi: mapMapboxFeatureToPoi(feature, fallbackLat, fallbackLng), score: mapboxFeaturePickScore(feature) }))
     .filter((item): item is { poi: OsmPoi; score: number } => !!item.poi)
     .sort((a, b) => a.score - b.score)[0]?.poi ?? null;
+}
+
+function selectableFeatureFromPoi(poi: OsmPoi, resultIndex: number, sourceLayer?: string | null, center?: { lat: number; lng: number } | null): MapSelectableFeature | null {
+  const lat = Number(poi.lat);
+  const lng = Number(poi.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  const name = String(poi.name || poi.type || 'Place').trim();
+  if (!name || name.length < 2) return null;
+  const featureId = String(
+    poi.id
+    || poi.place_id
+    || poi.provider_place_id
+    || `${poi.source || 'rendered'}:${name}:${lat.toFixed(5)}:${lng.toFixed(5)}`
+  ).slice(0, 180);
+  return {
+    feature_id: featureId,
+    result_index: resultIndex,
+    name,
+    lat,
+    lng,
+    type: String(poi.type || 'poi'),
+    subtype: poi.subtype || null,
+    source: poi.source || 'rendered_map',
+    source_label: poi.source_label || poi.source_badge || 'Rendered map',
+    source_layer: sourceLayer || (poi as any).source_layer || null,
+    distance_mi: center ? haversineMiles(center.lat, center.lng, lat, lng) : null,
+    address: poi.address || null,
+    rating: poi.rating ?? null,
+    summary: (poi as any).summary || poi.source_freshness || null,
+    place: poi as unknown as Record<string, unknown>,
+  };
+}
+
+function normalizeRenderedFeatureList(features: any[] | undefined, center?: { lat: number; lng: number } | null): MapSelectableFeature[] {
+  if (!Array.isArray(features) || !features.length) return [];
+  const seen = new Set<string>();
+  const scored = features
+    .map(feature => {
+      const props = feature?.properties ?? {};
+      const coords = feature?.geometry?.type === 'Point' && Array.isArray(feature.geometry.coordinates)
+        ? feature.geometry.coordinates
+        : center
+          ? [center.lng, center.lat]
+          : null;
+      const lng = Number(coords?.[0]);
+      const lat = Number(coords?.[1]);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+      const poi = mapMapboxFeatureToPoi(feature, lat, lng);
+      if (!poi) return null;
+      const layerId = String(feature?.layer?.id || feature?.sourceLayer || feature?.source || '').toLowerCase();
+      const score = mapboxFeaturePickScore(feature)
+        + (String(props.name || '').trim() ? 0 : 40)
+        + (feature?.geometry?.type === 'Point' ? 0 : 24);
+      return { poi, layerId, score };
+    })
+    .filter((item): item is { poi: OsmPoi; layerId: string; score: number } => !!item)
+    .sort((a, b) => a.score - b.score);
+  const out: MapSelectableFeature[] = [];
+  for (const item of scored) {
+    const lat = Number(item.poi.lat);
+    const lng = Number(item.poi.lng);
+    const key = `${String(item.poi.name || '').toLowerCase()}:${lat.toFixed(4)}:${lng.toFixed(4)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const feature = selectableFeatureFromPoi(item.poi, out.length, item.layerId, center);
+    if (feature) out.push(feature);
+    if (out.length >= 24) break;
+  }
+  return out.map((feature, idx) => ({ ...feature, result_index: idx }));
+}
+
+function haversineMiles(lat1: number, lng1: number, lat2: number, lng2: number) {
+  const R = 3958.8;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 function waterKindLabel(kind?: string): string {

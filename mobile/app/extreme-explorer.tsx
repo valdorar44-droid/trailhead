@@ -382,20 +382,11 @@ function makeHtml(payload: DemoPayload) {
   <div id="loading" class="loading"><div class="load-card"><div class="pulse"></div><div class="load-title">EXTREME EXPLORER</div><div class="load-sub">Loading premium route preview</div></div></div>
   <div class="stylebar" id="stylebar"></div>
   <div class="tray">
-    <div class="tray-top"><div class="orb"></div><div><div class="tray-title">CO-PILOT</div><div class="tray-text">${payload.summary.replace(/[<>&]/g, '')}</div></div></div>
-    <div class="chips">
-      <button class="primary" data-action="${payload.copilotVoice ? 'voice_command' : 'mark_checkpoint'}">${payload.copilotVoice ? 'Voice' : 'Ask'}</button>
-      <button data-action="add_fuel">Add fuel</button>
-      <button data-action="review_stay">Review stays</button>
-      <button data-action="mark_checkpoint">Mark checkpoint</button>
-      <button data-action="show_weather">Show weather</button>
-      <button data-action="start_guidance">Start guidance</button>
-      <button data-action="download_trip">Download trip</button>
-    </div>
+    <div class="tray-top"><div class="orb"></div><div><div class="tray-title">PREMIUM MAP</div><div class="tray-text">${payload.summary.replace(/[<>&]/g, '')}</div></div></div>
     <div class="mode-badges">
       <span>${payload.navigationEnabled ? 'GUIDANCE READY' : 'GUIDANCE LOCKED'}</span>
       <span>${payload.weatherLayers.length ? 'WEATHER WATCH' : 'WEATHER LOCKED'}</span>
-      <span>${payload.copilotVoice ? 'VOICE READY' : 'TEXT COMMANDS'}</span>
+      <span>COMMANDS HIDDEN</span>
     </div>
   </div>
   <script>
@@ -665,7 +656,7 @@ export default function ExtremeExplorerScreen() {
       tripName: activeTrip?.plan.trip_name ?? 'Extreme Explorer',
       features: config.feature_flags,
       weatherLayers: config.weather?.enabled ? (config.weather.layers ?? []) : [],
-      copilotVoice: !!config.copilot?.voice_enabled,
+      copilotVoice: false,
       navigationEnabled: !!config.navigation?.enabled && config.allowed_surfaces.includes('navigation'),
       safeTop: insets.top,
       safeBottom: insets.bottom,
@@ -673,9 +664,7 @@ export default function ExtremeExplorerScreen() {
   }, [activeTrip?.plan.trip_name, checkpoints, config, insets.bottom, insets.top, places, route, summary]);
 
   function speak(message: string) {
-    if (!config?.copilot?.voice_enabled) return;
-    Speech.stop();
-    Speech.speak(message, { rate: 0.96, pitch: 1.0 });
+    return;
   }
 
   async function stageCopilotCommand(action: string) {
@@ -853,7 +842,7 @@ export default function ExtremeExplorerScreen() {
         data.action === 'show_weather' ? previewWeather().catch((error: any) => error?.message ?? '') : Promise.resolve(''),
       ]).then(([message, weather]) => {
         const text = weather || message || 'Action staged for review.';
-        Alert.alert('Co-Pilot', text);
+        Alert.alert('Premium Map', text);
       });
     }
     if (data.type === 'style') {
@@ -936,19 +925,13 @@ export default function ExtremeExplorerScreen() {
           showPlaceCard({ ...place, type: 'poi', source: 'trailhead', source_label: 'Map selection' });
         }}
         onSave={place => {
-          stageCopilotCommand('mark_checkpoint').then(text => {
-            Alert.alert('Co-Pilot', text || `${place.name} staged for review.`);
-          }).catch(() => Alert.alert('Co-Pilot', `${place.name} staged for review.`));
+          Alert.alert('Premium Map', `${place.name} staged for review.`);
         }}
         onAddToRoute={place => {
-          stageCopilotCommand('mark_checkpoint').then(text => {
-            Alert.alert('Co-Pilot', text || `${place.name} staged as a checkpoint.`);
-          }).catch(() => Alert.alert('Co-Pilot', `${place.name} staged as a checkpoint.`));
+          Alert.alert('Premium Map', `${place.name} staged as a checkpoint.`);
         }}
         onPromoteToRoute={place => {
-          stageCopilotCommand('mark_checkpoint').then(text => {
-            Alert.alert('Co-Pilot', text || `${place.name} staged for route review.`);
-          }).catch(() => Alert.alert('Co-Pilot', `${place.name} staged for route review.`));
+          Alert.alert('Premium Map', `${place.name} staged for route review.`);
         }}
         onReport={() => Alert.alert('Report', 'Field reports stay in Trailhead mode for this beta slice.')}
         onNearbyCamps={place => {

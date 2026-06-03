@@ -14,11 +14,16 @@ import TourTarget from '@/components/TourTarget';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
 import { TrailheadButton, TrailheadCard, TrailheadSheet, TrailheadTopBar } from '@/components/TrailheadUI';
 import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
-import { api, ApiError, CampFullness, Campsite, CampsiteDetail, CampsiteInsight, CampsitePin, CampReusePolicy, ExcursionCandidate, FuelEstimate, GasStation, GeocodePlace, OsmPoi, PaywallError, RouteStyleMode, SavedRouteGeometryPayload, TripResult, TripShapeMode, TripTimeline, Waypoint, WeatherForecast, type ExtremeConfig } from '@/lib/api';
+import { api, ApiError, CampFullness, Campsite, CampsiteDetail, CampsiteInsight, CampsitePin, CampReusePolicy, ExcursionCandidate, FuelEstimate, GasStation, GeocodePlace, OsmPoi, PaywallError, RouteStyleMode, SavedRouteGeometryPayload, TripResult, TripShapeMode, TripTimeline, Waypoint, WeatherForecast } from '@/lib/api';
 import { loadAllPlacePoints } from '@/lib/offlinePlacePacks';
 import { deleteOfflineTrail, listOfflineTrails, type OfflineTrail } from '@/lib/offlineTrails';
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { useStore } from '@/lib/store';
+import {
+  clearTrailheadRouteBuilderDraft,
+  loadTrailheadRouteBuilderDraft,
+  type TrailheadRouteBuilderDraft,
+} from '@/lib/copilotCapabilities';
 import { useTheme, mono, ColorPalette, RADIUS } from '@/lib/design';
 import { computeOfflineReadiness } from '@/lib/offlineReadiness';
 import { useOfflineFiles } from '@/lib/useOfflineFiles';
@@ -1120,6 +1125,7 @@ export default function RouteBuilderScreen() {
   const [buildingFramework, setBuildingFramework] = useState(false);
   const [routeSaving, setRouteSaving] = useState(false);
   const [frameworkStatus, setFrameworkStatus] = useState('');
+  const [copilotAutoBuildRunId, setCopilotAutoBuildRunId] = useState(0);
   const [restDays, setRestDays] = useState<number[]>([]);
   const [dayDriveTargets, setDayDriveTargets] = useState<Record<number, string>>({});
   const gasPrice = '3.65';
@@ -1157,21 +1163,9 @@ export default function RouteBuilderScreen() {
   const [paywallCode, setPaywallCode] = useState('camp_detail');
   const [paywallMessage, setPaywallMessage] = useState('Use credits or Explorer to open full campsite profiles. You can still add this camp to your route from the free preview.');
   const [keyboardVisible, setKeyboardVisible] = useState(false);
-  const [extremeConfig, setExtremeConfig] = useState<ExtremeConfig | null>(null);
   const tripLoop = tripShapeMode !== 'one_way';
   const effectiveCampReusePolicy: CampReusePolicy = tripShapeMode === 'there_and_back' ? 'same_camp_window' : campReusePolicy;
   const fmtRouteDistance = (mi: number) => fmtUnitDistance(mi, weatherUnitMode);
-  const extremeRouteBuilderAvailable = !!extremeConfig?.beta_active
-    && !extremeConfig.kill_switch
-    && extremeConfig.allowed_surfaces.includes('route_builder');
-
-  function openExtremeExplorer() {
-    if (!extremeConfig?.enabled) {
-      Alert.alert('Extreme Explorer', 'Extreme Explorer is in hidden beta for selected accounts.');
-      return;
-    }
-    router.push({ pathname: '/extreme-explorer', params: { surface: 'route_builder' } } as any);
-  }
   const builderIntentFor = (inputDays: number[] = days): RouteBuilderIntent => ({
     shape: tripShapeMode,
     routeStyle,
@@ -1186,6 +1180,33 @@ export default function RouteBuilderScreen() {
     if (mode === 'there_and_back') {
       setCampReusePolicy('same_camp_window');
     }
+  }
+
+  function applyCopilotDraft(draft: TrailheadRouteBuilderDraft) {
+    if (draft.days) {
+      const count = Math.max(1, Math.min(30, Math.round(draft.days)));
+      setPlannedDays(String(count));
+      setDays(Array.from({ length: count }, (_, idx) => idx + 1));
+    }
+    if (draft.start) setStartQuery(draft.start);
+    if (draft.destination) setEndQuery(draft.destination);
+    if (draft.tripShape) applyTripShapeMode(draft.tripShape);
+    if (draft.routeStyle) setRouteStyle(draft.routeStyle);
+    if (draft.campPreference) setCampPreferenceMode(draft.campPreference);
+    if (draft.campReuse) setCampReusePolicy(draft.campReuse);
+    if (draft.driveHours) {
+      setDistanceMode('hours');
+      setDriveHoursPerDay(String(draft.driveHours));
+    }
+    if (draft.targetMiles) {
+      setDistanceMode('miles');
+      setTargetMiles(String(draft.targetMiles));
+    }
+    if (draft.restDays?.length) setRestDays(draft.restDays);
+    setTripBuildMode('recommended');
+    setRouteTabMode('wizard');
+    setWizardStep(draft.start && draft.destination ? 3 : draft.destination ? 1 : 0);
+    if (draft.autoBuild) setCopilotAutoBuildRunId(Date.now());
   }
 
   useEffect(() => {
@@ -1223,16 +1244,14 @@ export default function RouteBuilderScreen() {
   }, [keyboardVisible, routeTabMode, setTabBarHidden]);
 
   useEffect(() => {
-    let mounted = true;
-    if (!user) {
-      setExtremeConfig(null);
-      return () => { mounted = false; };
-    }
-    api.getExtremeConfig()
-      .then(cfg => { if (mounted) setExtremeConfig(cfg); })
-      .catch(() => { if (mounted) setExtremeConfig(null); });
-    return () => { mounted = false; };
-  }, [user?.id]);
+    let cancelled = false;
+    loadTrailheadRouteBuilderDraft().then(draft => {
+      if (cancelled || !draft) return;
+      applyCopilotDraft(draft);
+      clearTrailheadRouteBuilderDraft().catch(() => {});
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -2913,6 +2932,64 @@ export default function RouteBuilderScreen() {
     }
   }
 
+  async function findFuelStopsForRoute(count: number, spine: Array<{ lat: number; lng: number }>, totalMi: number) {
+    const rigRange = parsePositiveNumber(rigProfile?.fuel_range_miles);
+    const inferredRange = Math.max(180, Math.min(320, planningStats.mpg * 15));
+    const usableRange = Math.max(120, Math.min(500, rigRange ?? inferredRange));
+    if (totalMi < usableRange * 0.75) return [] as BuilderStop[];
+    const intervalMi = Math.max(95, Math.min(260, usableRange * 0.68));
+    const targetMiles: number[] = [];
+    for (let mile = intervalMi; mile < totalMi - Math.min(60, intervalMi * 0.45); mile += intervalMi) {
+      targetMiles.push(mile);
+      if (targetMiles.length >= 8) break;
+    }
+    const placed: GasStation[] = [];
+    const stops: BuilderStop[] = [];
+    for (const targetMi of targetMiles) {
+      const target = pointAtRouteMile(spine, targetMi);
+      if (!target) continue;
+      setFrameworkStatus(`Checking fuel around mile ${Math.round(targetMi)}...`);
+      const radius = Math.max(28, Math.min(55, intervalMi * 0.22));
+      const [liveGas, osmFuel] = await Promise.all([
+        api.getGas(target.lat, target.lng, radius).catch(() => [] as GasStation[]),
+        api.getOsmPois(target.lat, target.lng, radius, FUEL_POI_TYPES).catch(() => [] as OsmPoi[]),
+      ]);
+      const offlineFuel = areaScopedOfflinePlaces(offlinePlaces, target, ['fuel', 'propane'], radius + 12).map(poiToGasStation);
+      const candidates = uniqueByGeo([
+        ...liveGas,
+        ...osmFuel.map(poiToGasStation),
+        ...offlineFuel,
+      ])
+        .filter(station => !placed.some(existing => haversineMi(existing, station) < 45))
+        .map(station => ({
+          ...station,
+          route_distance_mi: haversineMi(station, target),
+          route_progress: totalMi > 0 ? targetMi / totalMi : 0,
+          route_progress_mi: targetMi,
+        }))
+        .filter(station => (station.route_distance_mi ?? 999) <= radius + 8)
+        .sort((a, b) => (a.route_distance_mi ?? 999) - (b.route_distance_mi ?? 999));
+      const best = candidates[0];
+      if (!best) continue;
+      placed.push(best);
+      const day = Math.max(1, Math.min(count, Math.ceil((targetMi / Math.max(totalMi, 1)) * count)));
+      stops.push({
+        id: `fuel_anchor_${Date.now()}_${day}_${Math.random().toString(36).slice(2, 6)}`,
+        day,
+        name: best.name || 'Fuel stop',
+        lat: best.lat,
+        lng: best.lng,
+        type: 'fuel',
+        description: `Auto-added because this route may exceed usable rig range (${Math.round(usableRange)} mi).`,
+        land_type: 'town',
+        source: 'gas',
+        gas: best,
+        routePointType: 'break',
+      });
+    }
+    return stops;
+  }
+
   async function buildRouteFramework() {
     setBuildingFramework(true);
     setFrameworkStatus('Setting up your trip...');
@@ -2954,6 +3031,9 @@ export default function RouteBuilderScreen() {
           else weakAnchors += 1;
         }
       }
+      setFrameworkStatus('Checking fuel range and resupply...');
+      const fuelStops = await findFuelStopsForRoute(count, spine, routeMiles);
+      framework.push(...fuelStops);
 
       if (tripLoop) {
         framework.push({
@@ -2986,8 +3066,8 @@ export default function RouteBuilderScreen() {
       const nextName = routeName.trim() || (tripLoop ? `${first.name.split(',')[0]} to ${last.name.split(',')[0]} ${shapeLabel}` : `${first.name.split(',')[0]} to ${last.name.split(',')[0]}`);
       const status = tripBuildMode === 'recommended'
         ? weakAnchors
-          ? `${strongAnchors} camp stop${strongAnchors === 1 ? '' : 's'} placed; ${weakAnchors} day${weakAnchors === 1 ? '' : 's'} need review.`
-          : `${strongAnchors} camp stop${strongAnchors === 1 ? '' : 's'} placed from route search.`
+          ? `${strongAnchors} camp stop${strongAnchors === 1 ? '' : 's'} placed; ${weakAnchors} day${weakAnchors === 1 ? '' : 's'} need review.${fuelStops.length ? ` ${fuelStops.length} fuel stop${fuelStops.length === 1 ? '' : 's'} added.` : ''}`
+          : `${strongAnchors} camp stop${strongAnchors === 1 ? '' : 's'} placed from route search.${fuelStops.length ? ` ${fuelStops.length} fuel stop${fuelStops.length === 1 ? '' : 's'} added.` : ''}`
         : 'Route ready for hand-building.';
       setFrameworkStatus(status);
       setDays(nextDays);
@@ -3009,6 +3089,14 @@ export default function RouteBuilderScreen() {
       setBuildingFramework(false);
     }
   }
+
+  useEffect(() => {
+    if (!copilotAutoBuildRunId || buildingFramework) return;
+    const timer = setTimeout(() => {
+      buildRouteFramework().catch(() => {});
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [copilotAutoBuildRunId]);
 
   function closeLoopToStart() {
     if (orderedStops.length < 2) return;
@@ -3795,15 +3883,6 @@ export default function RouteBuilderScreen() {
             <Text style={s.routeHubTitle}>Plan a route</Text>
             <Text style={s.routeHubText}>Build a new trip with your rig, daily pace, fuel range, camps, and route style. Finished routes open on the Map workspace.</Text>
             <TrailheadButton label="Build New Route" icon="add" variant="primary" onPress={startNewRoute} disabled={routeSaving} />
-            {extremeRouteBuilderAvailable && (
-              <TouchableOpacity
-                style={[s.routeHubExtremeBtn, !extremeConfig?.enabled && { opacity: 0.66 }]}
-                onPress={openExtremeExplorer}
-              >
-                <Ionicons name="sparkles-outline" size={15} color="#fff" />
-                <Text style={s.routeHubExtremeText}>EXTREME EXPLORER</Text>
-              </TouchableOpacity>
-            )}
           </TrailheadCard>
 
           <TrailheadCard style={[s.routeHubRig, rigRouteSummary.ready && s.routeHubRigReady]}>
@@ -3857,23 +3936,6 @@ export default function RouteBuilderScreen() {
                     <Ionicons name="map-outline" size={13} color={C.green} />
                     <Text style={s.savedRouteOpenText}>OPEN ON MAP</Text>
                   </View>
-                  {extremeRouteBuilderAvailable && (
-                    <TouchableOpacity
-                      style={[s.savedRouteExtreme, !extremeConfig?.enabled && { opacity: 0.66 }]}
-                      onPress={(event: any) => {
-                        event.stopPropagation?.();
-                        if (!extremeConfig?.enabled) {
-                          openExtremeExplorer();
-                          return;
-                        }
-                        openSavedRoute(route.trip_id).then(() => {
-                          setTimeout(openExtremeExplorer, 120);
-                        }).catch(() => {});
-                      }}
-                    >
-                      <Ionicons name="sparkles-outline" size={13} color="#fff" />
-                    </TouchableOpacity>
-                  )}
                 </View>
               </TrailheadCard>
             ))

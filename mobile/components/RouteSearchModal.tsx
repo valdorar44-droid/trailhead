@@ -44,6 +44,7 @@ export interface SearchPlace {
 
 export interface RouteSearchModalProps {
   visible: boolean;
+  mode?: 'browse' | 'route_pick';
   userLoc: { lat: number; lng: number } | null;
   camps: CampsitePin[];
   gas: { lat: number; lng: number; name: string }[];
@@ -52,6 +53,7 @@ export interface RouteSearchModalProps {
   routeOpts: { avoidHighways?: boolean; avoidTolls?: boolean; backRoads?: boolean };
   routeCoords?: [number, number][];  // [lng, lat] for elevation profile
   contextLoading?: boolean;
+  extremeSearchEnabled?: boolean;
   onCampTap?: (camp: CampsitePin) => void;  // opens camp detail card
   onLoadSavedTrip?: (tripId: string) => void;  // load a previously planned trip
   onSelectDest: (place: SearchPlace) => void;
@@ -147,6 +149,10 @@ function dedupePlaces<T extends SearchPlace>(items: T[]): T[] {
     seen.add(key);
     return true;
   });
+}
+
+function isTemporaryMapboxPlace(place: SearchPlace | null | undefined) {
+  return place?.source === 'mapbox_search' || place?.source_label === 'Mapbox Search' || place?.attribution === 'Mapbox';
 }
 
 function categoryTypes(catId: string) {
@@ -300,7 +306,8 @@ const GROUP_ICONS = ['flag', 'star', 'bonfire-outline', 'water', 'car-sport-outl
 const GROUP_COLORS = ['#ef4444', '#f5a623', '#14b8a6', '#38bdf8', '#eab308', '#22c55e', '#a855f7', '#6366f1'];
 
 export default function RouteSearchModal({
-  visible, userLoc, camps, gas, pois, communityPins, routeOpts, routeCoords, contextLoading = false,
+  visible, mode = 'route_pick', userLoc, camps, gas, pois, communityPins, routeOpts, routeCoords, contextLoading = false,
+  extremeSearchEnabled = false,
   onCampTap, onLoadSavedTrip, onSelectDest, onPreviewRoute, onStartNav, onSelectOnMap, onClose,
   routeCard, onClearRoute, onOpenRouteOpts,
 }: RouteSearchModalProps) {
@@ -340,6 +347,7 @@ export default function RouteSearchModal({
   const [newGroupIcon, setNewGroupIcon] = useState(GROUP_ICONS[0]);
   const [offlineTrips, setOfflineTrips] = useState<Array<{ trip_id: string; plan: { trip_name: string; states?: string[]; duration_days?: number } }>>([]);
   const inputRef = useRef<TextInput>(null);
+  const extremeSearchSessionRef = useRef<{ token: string; expiresAt: number } | null>(null);
   const currentLocationPlace = userLoc ? {
     name: 'My Location',
     lat: userLoc.lat,
@@ -377,6 +385,106 @@ export default function RouteSearchModal({
       .catch(() => setOfflineTrips([]));
   }, [visible]);
 
+  const getExtremeSearchSession = useCallback(async () => {
+    const now = Date.now();
+    if (extremeSearchSessionRef.current && extremeSearchSessionRef.current.expiresAt > now + 15_000) {
+      return extremeSearchSessionRef.current.token;
+    }
+    const session = await api.extremeSearchSession({ surface: 'route_search_modal' });
+    const token = session.session_token;
+    extremeSearchSessionRef.current = {
+      token,
+      expiresAt: now + Math.max(30, session.expires_in_seconds || 180) * 1000,
+    };
+    return token;
+  }, []);
+
+  const mapboxFeatureToPlace = useCallback((feature: any): SearchPlace | null => {
+    const coords = feature?.geometry?.coordinates;
+    const lng = Number(coords?.[0]);
+    const lat = Number(coords?.[1]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    const props = feature?.properties ?? {};
+    const name = String(props.name || props.full_address || props.place_formatted || feature?.text || 'Mapbox place');
+    return {
+      name,
+      lat,
+      lng,
+      dist: userLoc ? haversineKm(userLoc, { lat, lng }) : null,
+      source: 'mapbox_search',
+      source_label: 'Mapbox Search',
+      place_id: props.mapbox_id || feature?.id,
+      provider_place_id: props.mapbox_id || feature?.id,
+      type: props.feature_type || props.poi_category?.[0] || 'poi',
+      address: props.full_address || props.place_formatted,
+      attribution: 'Mapbox',
+    };
+  }, [userLoc]);
+
+  const searchExtremePlaces = useCallback(async (text: string) => {
+    const token = await getExtremeSearchSession();
+    const proximity = userLoc ? `${userLoc.lng},${userLoc.lat}` : '';
+    const suggested = await api.extremeSearchSuggest({
+      q: text,
+      session_token: token,
+      proximity,
+      origin: proximity,
+      limit: 6,
+      language: 'en',
+    });
+    const suggestions = (suggested.suggestions ?? []).slice(0, 6);
+    const retrieved = await Promise.all(suggestions.map(async (suggestion: any) => {
+      const mapboxId = suggestion.mapbox_id || suggestion.mapbox_id_value || suggestion.id;
+      if (!mapboxId) return null;
+      try {
+        const data = await api.extremeSearchRetrieve({
+          mapbox_id: String(mapboxId),
+          session_token: token,
+          proximity,
+          origin: proximity,
+          language: 'en',
+        });
+        return (data.features ?? []).map(mapboxFeatureToPlace).filter(Boolean) as SearchPlace[];
+      } catch {
+        return null;
+      }
+    }));
+    return dedupePlaces(retrieved.flat().filter(Boolean) as SearchPlace[])
+      .filter(hasUsableCoordinate)
+      .sort((a, b) => (a.dist ?? 9999) - (b.dist ?? 9999));
+  }, [getExtremeSearchSession, mapboxFeatureToPlace, userLoc]);
+
+  const searchExtremeCategory = useCallback(async (catId: string) => {
+    if (!extremeSearchEnabled || !userLoc) return [] as SearchPlace[];
+    const categoryMap: Record<string, string> = {
+      camps: 'campground',
+      private_stays: 'campground',
+      fuel: 'gas station',
+      grocery: 'grocery',
+      mechanic: 'mechanic',
+      hardware: 'hardware',
+      propane: 'propane',
+      tires: 'tire shop',
+      parts: 'auto parts',
+      trails: 'trailhead',
+      camping: 'outdoor gear',
+      laundry: 'laundry',
+      medical: 'pharmacy',
+      water: 'drinking water',
+      wifi: 'library',
+    };
+    const data = await api.extremeSearchCategory({
+      category: categoryMap[catId] ?? catId,
+      proximity: `${userLoc.lng},${userLoc.lat}`,
+      limit: 10,
+      language: 'en',
+    });
+    return (data.features ?? [])
+      .map(mapboxFeatureToPlace)
+      .filter(Boolean)
+      .filter(hasUsableCoordinate) as SearchPlace[];
+  }, [extremeSearchEnabled, mapboxFeatureToPlace, userLoc]);
+
   const doSearch = useCallback(async () => {
     if (!query.trim()) return;
     const coord = parseCoordinateQuery(query);
@@ -388,14 +496,18 @@ export default function RouteSearchModal({
     }
     setSearching(true);
     try {
-      const places = await api.geocodePlaces(query.trim(), 8);
-      setResults(places
-        .map(place => ({ name: place.name, lat: place.lat, lng: place.lng, dist: userLoc ? haversineKm(userLoc, place) : null, source: place.source, place_id: place.place_id }))
-        .filter(hasUsableCoordinate)
-        .sort((a, b) => (a.dist ?? 9999) - (b.dist ?? 9999)));
+      if (extremeSearchEnabled) {
+        setResults(await searchExtremePlaces(query.trim()));
+      } else {
+        const places = await api.geocodePlaces(query.trim(), 8);
+        setResults(places
+          .map(place => ({ name: place.name, lat: place.lat, lng: place.lng, dist: userLoc ? haversineKm(userLoc, place) : null, source: place.source, place_id: place.place_id }))
+          .filter(hasUsableCoordinate)
+          .sort((a, b) => (a.dist ?? 9999) - (b.dist ?? 9999)));
+      }
     } catch { setResults([]); }
     setSearching(false);
-  }, [query, userLoc]);
+  }, [query, userLoc, extremeSearchEnabled, searchExtremePlaces]);
 
   const pickCategory = useCallback(async (catId: string) => {
     setActiveCat(catId);
@@ -408,10 +520,11 @@ export default function RouteSearchModal({
       const radiusMi = ['camps', 'private_stays', 'fuel', 'propane', 'mechanic', 'hardware', 'tires', 'parts', 'camping', 'medical'].includes(catId)
         ? WIDE_CATEGORY_RADIUS_MI
         : DEFAULT_CATEGORY_RADIUS_MI;
+      const extremeCategoryResults = await searchExtremeCategory(catId).catch(() => [] as SearchPlace[]);
       if (catId === 'fuel') {
         const loadedFuel = scopedNearby(userLoc, gas, radiusMi, g => g.name || 'Fuel');
         const liveFuel = await api.getGas(userLoc.lat, userLoc.lng, radiusMi);
-        setCatResults(dedupePlaces([...loadedFuel, ...liveFuel
+        setCatResults(dedupePlaces([...extremeCategoryResults, ...loadedFuel, ...liveFuel
           .map(g => ({
             name: g.name || 'Fuel',
             lat: g.lat,
@@ -428,7 +541,7 @@ export default function RouteSearchModal({
           .filter(p => p.type === 'water' && distanceMi(userLoc, p) <= radiusMi)
           .map(p => ({ ...p, name: p.name || (p.subtype === 'fountain' ? 'Fountain' : 'Water Source'), dist: haversineKm(userLoc, p) }));
         const liveWater = await api.getOsmPois(userLoc.lat, userLoc.lng, radiusMi, 'water');
-        setCatResults(dedupePlaces([...loadedWater, ...liveWater
+        setCatResults(dedupePlaces([...extremeCategoryResults, ...loadedWater, ...liveWater
           .map(p => ({
             name: p.name || (p.subtype === 'fountain' ? 'Fountain' : 'Water Source'),
             lat: p.lat,
@@ -451,7 +564,7 @@ export default function RouteSearchModal({
           .filter(c => c.lat && c.lng && distanceMi(userLoc, c) <= radiusMi)
           .map(c => ({ name: c.name || 'Camp', lat: c.lat, lng: c.lng, dist: haversineKm(userLoc, c), _camp: c }));
         const liveCamps = await api.getNearbyCamps(userLoc.lat, userLoc.lng, radiusMi, []);
-        setCatResults(dedupePlaces([...localCamps, ...liveCamps
+        setCatResults(dedupePlaces([...extremeCategoryResults, ...localCamps, ...liveCamps
           .filter(c => c.lat && c.lng && distanceMi(userLoc, c) <= radiusMi)
           .map(c => ({ name: c.name || 'Camp', lat: c.lat, lng: c.lng, dist: haversineKm(userLoc, c), _camp: c }))] as any)
           .sort((a, b) => (a.dist ?? 999) - (b.dist ?? 999))
@@ -464,6 +577,7 @@ export default function RouteSearchModal({
         const liveCamps = await api.getNearbyCamps(userLoc.lat, userLoc.lng, radiusMi, ['private', 'farm', 'ranch', 'winery', 'glamping', 'private_camp']);
         const livePlaces = await api.getNearbyPlaces(userLoc.lat, userLoc.lng, radiusMi, types.join(','));
         setCatResults(dedupePlaces([
+          ...extremeCategoryResults,
           ...liveCamps
             .filter(c => c.lat && c.lng && distanceMi(userLoc, c) <= radiusMi)
             .map(c => ({ name: c.name || 'Private Stay', lat: c.lat, lng: c.lng, dist: haversineKm(userLoc, c), _camp: c, type: 'private_stay', source: c.source, source_label: c.source_badge || c.verified_source })),
@@ -499,7 +613,7 @@ export default function RouteSearchModal({
           .filter(p => types.includes(p.type || '') && distanceMi(userLoc, p) <= radiusMi)
           .map(p => ({ ...p, name: p.name || (p.type || 'place').replace('_', ' '), dist: haversineKm(userLoc, p) }));
         const live = await api.getNearbyPlaces(userLoc.lat, userLoc.lng, radiusMi, types.join(','));
-        setCatResults(dedupePlaces([...local, ...live
+        setCatResults(dedupePlaces([...extremeCategoryResults, ...local, ...live
           .filter(p => p.lat != null && p.lng != null && distanceMi(userLoc, p) <= radiusMi)
             .map(p => ({
               name: p.name || p.type.replace('_', ' '),
@@ -531,7 +645,7 @@ export default function RouteSearchModal({
     } finally {
       setCatSearching(false);
     }
-  }, [userLoc, camps, gas, pois]);
+  }, [userLoc, camps, gas, pois, searchExtremeCategory]);
 
   const previewRoute = useCallback((origin: SearchPlace | null, destination: SearchPlace) => {
     const previewOrigin = origin ?? currentLocationPlace;
@@ -545,7 +659,17 @@ export default function RouteSearchModal({
 
   const selectPlace = useCallback((place: SearchPlace) => {
     if (!hasUsableCoordinate(place)) return;
-    addSearchHistory({ name: place.name, lat: place.lat, lng: place.lng, searchedAt: Date.now() });
+    if (!isTemporaryMapboxPlace(place)) {
+      addSearchHistory({ name: place.name, lat: place.lat, lng: place.lng, searchedAt: Date.now() });
+    }
+    if (mode === 'browse') {
+      onSelectDest(place);
+      setQuery('');
+      setResults([]);
+      setCatResults([]);
+      setActiveCat(null);
+      return;
+    }
     if (activeEndpoint === 'origin') {
       setRouteOrigin(place);
       if (routeCard) previewRoute(place, routeCard);
@@ -555,9 +679,10 @@ export default function RouteSearchModal({
     setQuery('');
     setResults([]);
     setView('route');
-  }, [activeEndpoint, activeOrigin, addSearchHistory, previewRoute, routeCard]);
+  }, [activeEndpoint, activeOrigin, addSearchHistory, mode, onSelectDest, previewRoute, routeCard]);
 
   const saveCurrentPlace = useCallback((place: SearchPlace) => {
+    if (isTemporaryMapboxPlace(place)) return;
     const p: SavedPlace = {
       id: `sp_${Date.now()}`,
       name: place.name.split(',')[0],
@@ -653,9 +778,11 @@ export default function RouteSearchModal({
                   <Text style={s.resultSub} numberOfLines={1}>{r.name.split(',').slice(1, 3).join(',').trim()}</Text>
                 </View>
                 {r.dist != null && <Text style={s.resultDist}>{fmtDist(r.dist)}</Text>}
-                <TouchableOpacity onPress={() => saveCurrentPlace(r)} style={{ padding: 6 }}>
-                  <Ionicons name="star-outline" size={16} color={C.text3} />
-                </TouchableOpacity>
+                {!isTemporaryMapboxPlace(r) && (
+                  <TouchableOpacity onPress={() => saveCurrentPlace(r)} style={{ padding: 6 }}>
+                    <Ionicons name="star-outline" size={16} color={C.text3} />
+                  </TouchableOpacity>
+                )}
               </TouchableOpacity>
             ))}
 

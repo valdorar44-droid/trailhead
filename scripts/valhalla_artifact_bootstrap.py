@@ -37,15 +37,54 @@ def main() -> int:
     target_dir = Path(env("VALHALLA_DATA_DIR", "/custom_files"))
     artifact_key = env("VALHALLA_ARTIFACT_KEY")
     expected_sha = env("VALHALLA_ARTIFACT_SHA256")
-    if not artifact_key:
-        print("VALHALLA_ARTIFACT_KEY is not set", file=sys.stderr)
-        return 2
-
     tiles_dir = target_dir / "valhalla_tiles"
     config_path = target_dir / "valhalla.json"
     ready_marker = target_dir / ".artifact-ready"
-    if tiles_dir.exists() and config_path.exists() and ready_marker.exists():
+    def graph_exists() -> bool:
+        return (target_dir / "index.bin").exists() and any((target_dir / level).is_dir() for level in ("0", "1", "2"))
+
+    def ensure_config() -> int:
+        if config_path.exists():
+            return 0
+        if not graph_exists():
+            return 4
+        print(f"Generating Valhalla config for graph in {target_dir}")
+        with config_path.open("w") as fh:
+            subprocess.check_call(
+                ["valhalla_build_config", "--mjolnir-tile-dir", str(target_dir)],
+                stdout=fh,
+            )
+        return 0
+
+    if config_path.exists() and (tiles_dir.exists() or graph_exists()) and ready_marker.exists():
         print("Valhalla artifact already extracted")
+        return 0
+    if graph_exists():
+        rc = ensure_config()
+        if rc:
+            print("Existing graph is missing a usable Valhalla config", file=sys.stderr)
+            return rc
+        ready_marker.write_text("mounted-graph")
+        print("Mounted Valhalla graph ready")
+        return 0
+
+    local_artifact = target_dir / "valhalla_tiles.tar"
+    if not artifact_key:
+        if not local_artifact.exists():
+            print("VALHALLA_ARTIFACT_KEY is not set and /custom_files/valhalla_tiles.tar is missing", file=sys.stderr)
+            return 2
+        print(f"Extracting mounted artifact {local_artifact}")
+        if tiles_dir.exists():
+            shutil.rmtree(tiles_dir)
+        if config_path.exists():
+            config_path.unlink()
+        ready_marker.unlink(missing_ok=True)
+        subprocess.check_call(["tar", "-xf", str(local_artifact), "-C", str(target_dir)])
+        if not tiles_dir.exists() or not config_path.exists():
+            print("Mounted artifact did not contain valhalla_tiles and valhalla.json", file=sys.stderr)
+            return 4
+        ready_marker.write_text(str(local_artifact))
+        print("Mounted Valhalla artifact extracted")
         return 0
 
     account_id = env("R2_ACCOUNT_ID")

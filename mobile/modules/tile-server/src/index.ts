@@ -4,6 +4,15 @@ const M = requireOptionalNativeModule('TileServerModule');
 
 export const TILE_SERVER_PORT = 57832;
 
+export type ExtremeMapboxCapabilities = {
+  supported: boolean;
+  renderer: 'metal' | 'vulkan' | 'opengl' | 'unlinked';
+  reason?: string;
+  androidApi?: number;
+  androidVulkanVersion?: number;
+  androidArm64?: boolean;
+};
+
 /** Start the HTTP server socket (call once on app launch). */
 export async function startServer(): Promise<void> {
   if (!M) throw new Error('TileServerModule not in binary');
@@ -56,6 +65,14 @@ export async function stopServer(): Promise<void> {
 export async function isRunning(): Promise<boolean> {
   if (!M) return false;
   return M.isRunning();
+}
+
+/** Hardware gate for EXTREME's native Mapbox preview path. */
+export async function getExtremeMapboxCapabilities(): Promise<ExtremeMapboxCapabilities> {
+  if (!M?.getExtremeMapboxCapabilities) {
+    return { supported: false, renderer: 'unlinked', reason: 'capability_probe_unlinked' };
+  }
+  return M.getExtremeMapboxCapabilities();
 }
 
 /** Calculate a local Valhalla route from a downloaded routing pack tarball. */

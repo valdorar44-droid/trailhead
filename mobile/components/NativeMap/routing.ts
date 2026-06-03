@@ -10,10 +10,11 @@
  */
 
 import * as FileSystem from 'expo-file-system';
-import type { RouteStep } from './types';
+import type { RouteProviderMode, RouteStep } from './types';
 import { fetchJSOfflineRoute, ENABLE_JS_OFFLINE_ROUTER, getLastOfflineRouterDebug } from './offlineRouter';
 import { diagnoseValhalla, routeValhalla } from 'expo-valhalla-routing';
 import { ROUTING_REGIONS } from '../../lib/useOfflineFiles';
+import { api } from '../../lib/api';
 
 export interface RouteResult {
   coords:        [number, number][];
@@ -211,6 +212,7 @@ export async function fetchRoute(
   fromIdx:     number,
   mapboxToken: string,
   routeOpts:   RouteOpts,
+  providerMode: RouteProviderMode = 'trailhead',
 ): Promise<RouteResult> {
   console.log('[fetchRoute] pairs:', pairs);
   const nativeOfflineErrors: string[] = [];
@@ -285,6 +287,17 @@ export async function fetchRoute(
     return buildNoRoute(pairs, `${nativeDebug}${debug}`);
   }
 
+  if (providerMode === 'extreme-mapbox') {
+    try {
+      const route = await fetchExtremeMapbox(pairs, fromIdx, routeOpts);
+      console.log('[fetchRoute] EXTREME Mapbox route — saving to cache');
+      await saveRoute(pairs, route);
+      return route;
+    } catch (e) {
+      console.warn('[fetchRoute] EXTREME Mapbox route failed', e);
+    }
+  }
+
   // C. Online: for overland-style routes, prefer our Valhalla service. Racing
   // Mapbox here lets paved/highway routes win before Valhalla can return.
   const onlineEngines = routeOpts.backRoads || routeOpts.avoidHighways
@@ -350,6 +363,83 @@ export async function fetchRoute(
   return buildNoRoute(pairs, `${nativeDebug}${debug}`);
 }
 
+function parseMapboxDirectionsRoute(data: any, source: string, label: string): RouteResult {
+  if (!data.routes?.length) throw new Error('no routes');
+  const route = data.routes[0];
+  const steps: RouteStep[] = [];
+  const legs: RouteStep[][] = [];
+  for (const leg of route.legs ?? []) {
+    const ls: RouteStep[] = [];
+    for (const s of leg.steps ?? []) {
+      if (s.distance <= 0 && s.maneuver?.type !== 'arrive') continue;
+      const loc = s.maneuver?.location;
+      const lanes = s.intersections?.slice().reverse().reduce((found: any, isc: any) => {
+        if (found !== undefined) return found;
+        return isc.lanes?.length
+          ? isc.lanes.map((l: any) => ({ indications: l.indications ?? [], valid: l.valid === true, active: l.active === true }))
+          : undefined;
+      }, undefined);
+      const banner = s.bannerInstructions?.[0]?.primary;
+      const bannerText = [banner?.text, banner?.modifier ? '' : null].filter(Boolean).join(' ').trim();
+      const instruction = s.maneuver?.instruction || bannerText || '';
+      const st: RouteStep = {
+        type: s.maneuver?.type ?? 'turn',
+        modifier: s.maneuver?.modifier ?? '',
+        name: s.name ?? '',
+        distance: s.distance,
+        duration: s.duration,
+        lat: loc?.[1],
+        lng: loc?.[0],
+        instruction,
+        verbalPre: s.voiceInstructions?.[0]?.announcement ?? instruction,
+        verbalPost: s.maneuver?.instruction ?? '',
+        roundaboutExit: Number.isFinite(s.maneuver?.exit) ? s.maneuver.exit : null,
+        lanes: lanes?.length ? lanes : undefined,
+        speedLimit: null,
+      };
+      steps.push(st); ls.push(st);
+    }
+    legs.push(ls);
+  }
+  return sourceRoute({
+    coords: route.geometry.coordinates,
+    steps,
+    legs,
+    totalDistance: route.distance,
+    totalDuration: route.duration,
+    isProper: true,
+  }, source, label);
+}
+
+async function fetchExtremeMapbox(
+  pairs: string[],
+  _from: number,
+  opts: RouteOpts,
+): Promise<RouteResult> {
+  const coordinates = pairs
+    .map(parsePair)
+    .filter((coord): coord is [number, number] => !!coord);
+  const exclude = [
+    opts.avoidTolls ? 'toll' : '',
+    opts.avoidHighways ? 'motorway' : '',
+    opts.noFerries ? 'ferry' : '',
+  ].filter(Boolean);
+  const data = await api.extremeDirections({
+    coordinates,
+    profile: opts.backRoads ? 'mapbox/driving' : 'mapbox/driving-traffic',
+    steps: true,
+    alternatives: false,
+    overview: 'full',
+    annotations: ['congestion', 'duration', 'distance'].join(','),
+    exclude: exclude.join(','),
+    metadata: {
+      source: 'native_map_route_preview',
+      exclude: exclude.join(','),
+    },
+  });
+  return parseMapboxDirectionsRoute(data, 'extreme-mapbox-directions', 'EXTREME Mapbox Directions');
+}
+
 // ── Engine 1: Mapbox Directions ───────────────────────────────────────────────
 async function fetchMapbox(
   pairs:  string[],
@@ -373,48 +463,7 @@ async function fetchMapbox(
   const tid  = setTimeout(() => ctrl.abort(), 10000);
   const data = await fetch(url, { signal: ctrl.signal }).then(r => r.json());
   clearTimeout(tid);
-  if (!data.routes?.length) throw new Error('no routes');
-
-  const route  = data.routes[0];
-  const steps: RouteStep[] = [];
-  const legs:  RouteStep[][] = [];
-
-  for (const leg of route.legs ?? []) {
-    const ls: RouteStep[] = [];
-    for (const s of leg.steps ?? []) {
-      if (s.distance <= 0 && s.maneuver?.type !== 'arrive') continue;
-      const loc = s.maneuver?.location;
-      const lanes = s.intersections?.slice().reverse().reduce((found: any, isc: any) => {
-        if (found !== undefined) return found;
-        return isc.lanes?.length
-          ? isc.lanes.map((l: any) => ({ indications: l.indications ?? [], valid: l.valid === true, active: l.active === true }))
-          : undefined;
-      }, undefined);
-      const banner = s.bannerInstructions?.[0]?.primary;
-      const bannerText = [banner?.text, banner?.modifier ? '' : null].filter(Boolean).join(' ').trim();
-      const instruction = s.maneuver?.instruction || bannerText || '';
-      const st: RouteStep = {
-        type:       s.maneuver?.type ?? 'turn',
-        modifier:   s.maneuver?.modifier ?? '',
-        name:       s.name ?? '',
-        distance:   s.distance,
-        duration:   s.duration,
-        lat:        loc?.[1],
-        lng:        loc?.[0],
-        instruction,
-        verbalPre:  s.voiceInstructions?.[0]?.announcement ?? instruction,
-        verbalPost: s.maneuver?.instruction ?? '',
-        roundaboutExit: Number.isFinite(s.maneuver?.exit) ? s.maneuver.exit : null,
-        lanes:      lanes?.length ? lanes : undefined,
-        speedLimit: null,
-      };
-      steps.push(st); ls.push(st);
-    }
-    legs.push(ls);
-  }
-
-  return sourceRoute({ coords: route.geometry.coordinates, steps, legs,
-           totalDistance: route.distance, totalDuration: route.duration, isProper: true }, 'mapbox', 'Mapbox');
+  return parseMapboxDirectionsRoute(data, 'mapbox', 'Mapbox');
 }
 
 // ── Engine 2: Trailhead Valhalla proxy ────────────────────────────────────────

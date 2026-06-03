@@ -1,0 +1,10 @@
+{
+  "platforms": ["ios", "android"],
+  "ios": {
+    "podspecPath": "AudioRoute.podspec",
+    "modules": ["AudioRouteModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.audioroute.AudioRouteModule"]
+  }
+}

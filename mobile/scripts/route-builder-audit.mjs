@@ -4,6 +4,7 @@ import http from 'node:http';
 
 const API_BASE = process.env.TRAILHEAD_API_BASE || 'https://api.gettrailhead.app';
 const FULL = process.env.TRAILHEAD_ROUTE_AUDIT_FULL === '1';
+const REQUEST_TIMEOUT_MS = Number(process.env.TRAILHEAD_ROUTE_AUDIT_TIMEOUT_MS || 120000);
 
 const CAMP_PREFS = {
   public: ['blm', 'usfs', 'dispersed', 'free', 'tent'],
@@ -83,7 +84,7 @@ function postJson(path, body) {
       path: `${url.pathname}${url.search}`,
       port: url.port || 443,
       headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) },
-      timeout: 60000,
+      timeout: REQUEST_TIMEOUT_MS,
     }, res => {
       let raw = '';
       res.setEncoding('utf8');

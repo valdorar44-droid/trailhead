@@ -201,6 +201,56 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  extremeCopilotSession: (data: ExtremeCopilotSessionRequest) =>
+    req<ExtremeCopilotSessionResponse>('/api/extreme/copilot/session', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  extremeCopilotMessage: (data: ExtremeCopilotMessageRequest) =>
+    req<ExtremeCopilotMessageResponse>('/api/extreme/copilot/message', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  confirmExtremeCopilotAction: (data: ExtremeCopilotConfirmRequest) =>
+    req<ExtremeCopilotConfirmResponse>('/api/extreme/copilot/action/confirm', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  createRealtimeCopilotSession: (data: RealtimeCopilotSessionRequest = {}) =>
+    req<RealtimeCopilotSessionResponse>('/api/extreme/copilot/realtime-session', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  extremeSearchSession: (metadata: Record<string, unknown> = {}) =>
+    req<ExtremeSearchSessionResponse>('/api/extreme/search/session', {
+      method: 'POST',
+      body: JSON.stringify({ metadata }),
+    }),
+  extremeSearchSuggest: (data: ExtremeSearchSuggestRequest) =>
+    req<ExtremeSearchResponse>('/api/extreme/search/suggest', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  extremeSearchRetrieve: (data: ExtremeSearchRetrieveRequest) =>
+    req<ExtremeSearchResponse>('/api/extreme/search/retrieve', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  extremeSearchCategory: (data: ExtremeSearchCategoryRequest) =>
+    req<ExtremeSearchResponse>('/api/extreme/search/category', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  extremeSearchReverse: (data: ExtremeSearchReverseRequest) =>
+    req<ExtremeSearchResponse>('/api/extreme/search/reverse', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  extremeDirections: (data: ExtremeDirectionsRequest) =>
+    req<ExtremeDirectionsResponse>('/api/extreme/directions', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
   geocodePlaces: (query: string, limit = 8) => {
     const normalized = normalizeRequestText(query);
     if (normalized.length < 2) return Promise.resolve([]);
@@ -226,7 +276,8 @@ export const api = {
   getCampsites: (lat: number, lng: number, radius = 25) =>
     req<Campsite[]>(`/api/campsites?lat=${lat}&lng=${lng}&radius=${radius}`),
   searchCampsites: (lat: number, lng: number, radius = 40, types: string[] = []) =>
-    req<CampsitePin[]>(`/api/campsites/search?lat=${lat}&lng=${lng}&radius=${radius}&types=${types.join(',')}`),
+    req<CampsitePin[]>(`/api/campsites/search?lat=${lat}&lng=${lng}&radius=${radius}&types=${types.join(',')}`)
+      .then(canonicalizeCampsitePins),
   getGas: (lat: number, lng: number, radius = 25) =>
     req<GasStation[]>(`/api/gas?lat=${lat}&lng=${lng}&radius=${radius}`),
   getFuelEstimate: (miles: number, mpg: number, states: string[] = [], unit: WeatherUnitMode = 'imperial') =>
@@ -314,14 +365,16 @@ export const api = {
 
   // Discovery
   getNearbyCamps: (lat: number, lng: number, radius = 50, types: string[] = []) =>
-    req<CampsitePin[]>(`/api/nearby-camps?lat=${lat}&lng=${lng}&radius=${radius}&types=${types.join(',')}`),
+    req<CampsitePin[]>(`/api/nearby-camps?lat=${lat}&lng=${lng}&radius=${radius}&types=${types.join(',')}`)
+      .then(canonicalizeCampsitePins),
   getRouteCampWindows: (data: RouteCampWindowsRequest) =>
     req<RouteCampWindowsResponse>('/api/route/camp-windows', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
   getCampsBbox: (n: number, s: number, e: number, w: number, types: string[] = []) =>
-    req<CampsitePin[]>(`/api/camps/bbox?n=${n}&s=${s}&e=${e}&w=${w}&types=${types.join(',')}`),
+    req<CampsitePin[]>(`/api/camps/bbox?n=${n}&s=${s}&e=${e}&w=${w}&types=${types.join(',')}`)
+      .then(canonicalizeCampsitePins),
   getOsmPois: (lat: number, lng: number, radius = 30, types = 'water,trailhead,viewpoint') =>
     req<OsmPoi[]>(`/api/osm-pois?lat=${lat}&lng=${lng}&radius=${radius}&types=${types}`),
   getNearbyPlaces: (lat: number, lng: number, radius = 25, categories = 'fuel,water,trailhead,viewpoint', provider: 'auto' | 'geoapify' | 'google' | 'foursquare' | 'osm' | 'nps' | 'blm' | 'usfs' = 'auto') =>
@@ -573,7 +626,7 @@ export interface User {
   is_admin?: boolean;
   email_verified?: boolean | number;
 }
-export type ExtremeSurface = 'map' | 'route_builder' | 'navigation' | 'copilot' | 'weather';
+export type ExtremeSurface = 'map_layers' | 'map' | 'route_builder' | 'navigation' | 'copilot' | 'weather';
 export type ExtremeCheckpointType = 'start' | 'fuel' | 'stay' | 'camp' | 'food' | 'repair' | 'viewpoint' | 'weather' | 'finish' | string;
 export interface ExtremeCheckpoint {
   id: string;
@@ -627,6 +680,8 @@ export interface ExtremeConfig {
   };
   weather?: {
     enabled: boolean;
+    provider?: 'mapbox' | 'trailhead' | string;
+    mapbox_conditions_enabled?: boolean;
     layers: Array<{ id: string; label: string; enabled_by_default?: boolean }>;
   };
   copilot?: {
@@ -724,7 +779,208 @@ export interface ExtremeCopilotCommandResponse {
     status: 'staged' | string;
     requires_confirmation: boolean;
     payload?: Record<string, unknown>;
+    map_action?: MapActionRequest;
   };
+}
+export interface CopilotContext {
+  user?: {
+    location?: { lat: number; lng: number; accuracy?: number | null } | null;
+    location_permission?: 'granted' | 'denied' | 'undetermined' | string;
+    heading?: number | null;
+    speed?: number | null;
+    plan_tier?: string;
+    admin?: boolean;
+    rig_profile?: Record<string, unknown> | null;
+  };
+  map?: {
+    center?: { lat: number; lng: number } | null;
+    zoom?: number;
+    bounds?: Record<string, number> | null;
+    active_style?: string;
+    visible_layers?: string[];
+    selected_place?: Record<string, unknown> | null;
+    current_results?: Array<Record<string, unknown>>;
+    active_pins?: Array<Record<string, unknown>>;
+    current_screen?: string;
+  };
+  route?: {
+    active_route?: boolean;
+    destination?: Record<string, unknown> | null;
+    eta?: number | null;
+    distance?: number | null;
+    upcoming_turns?: Array<Record<string, unknown>>;
+    route_provider?: string;
+    route_id?: string | null;
+    nav_mode?: boolean;
+    route_ready?: boolean;
+  };
+  trip?: {
+    active_trip?: string | null;
+    selected_day?: number | null;
+    route_builder_draft?: Record<string, unknown> | null;
+    saved_stops?: Array<Record<string, unknown>>;
+    offline_status?: Record<string, unknown>;
+    current_screen?: string;
+  };
+  app?: Record<string, unknown>;
+  safety?: Record<string, unknown>;
+}
+export interface MapActionRequest {
+  id?: number;
+  action_id: string;
+  action_type: 'getMapContext' | 'searchPlaces' | 'searchTrails' | 'selectPlace' | 'flyToPlace' | 'toggleLayer' | 'setMapStyle' | 'buildRoute' | 'modifyRoute' | 'dropPin' | 'saveTrip' | 'downloadOfflineArea' | 'explainVisibleArea' | 'askForConfirmation' | string;
+  args: Record<string, unknown>;
+  requires_confirmation: boolean;
+  cost_class: string;
+  surface: ExtremeSurface | string;
+  provider: string;
+  status?: string;
+  label?: string;
+}
+export interface MapActionResult {
+  ok: boolean;
+  message: string;
+  map_updates: Record<string, unknown>;
+  status?: 'staged' | 'confirmed' | 'applied' | 'failed' | 'canceled' | string;
+  spoken_summary?: string;
+  results?: Array<Record<string, unknown>>;
+  selected?: Record<string, unknown> | null;
+  requires_confirmation?: boolean;
+  selected_place?: Record<string, unknown> | null;
+  route_preview?: Record<string, unknown> | null;
+  location_status?: Record<string, unknown> | null;
+  navigation?: Record<string, unknown> | null;
+  route_builder_draft?: Record<string, unknown> | null;
+  current_screen?: string | null;
+  failure_reason?: string | null;
+  ledger_id?: number | null;
+  error_code?: string | null;
+}
+export interface ExtremeCopilotSessionRequest {
+  surface?: ExtremeSurface | string;
+  trip_id?: string | null;
+  context?: CopilotContext;
+  metadata?: Record<string, unknown>;
+}
+export interface ExtremeCopilotSessionResponse {
+  ok: boolean;
+  session_id: string;
+  expires_at: number;
+  provider: string;
+  voice_enabled: boolean;
+  ledger_id?: number;
+}
+export interface ExtremeCopilotMessageRequest {
+  session_id?: string | null;
+  trip_id?: string | null;
+  message: string;
+  mode?: 'text' | 'voice' | string;
+  context?: CopilotContext;
+  provider?: string;
+}
+export interface ExtremeCopilotMessageResponse {
+  ok: boolean;
+  session_id?: string | null;
+  provider: string;
+  message: string;
+  action: MapActionRequest;
+  result: MapActionResult;
+}
+export interface ExtremeCopilotConfirmRequest {
+  action_id: number;
+  confirmed: boolean;
+  client_result?: Record<string, unknown>;
+}
+export interface ExtremeCopilotConfirmResponse {
+  ok: boolean;
+  action_id: number;
+  status: string;
+  confirmed: boolean;
+  ledger_id?: number;
+}
+export interface RealtimeCopilotSessionRequest {
+  session_id?: string | null;
+  voice?: string;
+  mode?: 'push_to_talk' | 'wake_phrase' | string;
+  wake_phrase?: boolean;
+  context?: CopilotContext;
+}
+export interface RealtimeCopilotSessionResponse {
+  ok?: boolean;
+  client_secret?: string | { value?: string; expires_at?: number; [key: string]: unknown };
+  session_id?: string;
+  expires_at?: number;
+  model?: string;
+  fallback_model?: string;
+  voice?: string;
+  provider?: string;
+  wake_phrase?: boolean;
+  [key: string]: unknown;
+}
+export interface ExtremeSearchSessionResponse {
+  session_token: string;
+  temporary_use_only: boolean;
+  expires_in_seconds: number;
+}
+export interface ExtremeSearchSuggestRequest {
+  q: string;
+  session_token: string;
+  proximity?: string;
+  origin?: string;
+  bbox?: string;
+  country?: string;
+  types?: string;
+  language?: string;
+  limit?: number;
+}
+export interface ExtremeSearchRetrieveRequest {
+  mapbox_id: string;
+  session_token: string;
+  language?: string;
+  proximity?: string;
+  origin?: string;
+}
+export interface ExtremeSearchCategoryRequest {
+  category: string;
+  proximity?: string;
+  bbox?: string;
+  country?: string;
+  language?: string;
+  limit?: number;
+}
+export interface ExtremeSearchReverseRequest {
+  lat: number;
+  lng: number;
+  language?: string;
+  limit?: number;
+  country?: string;
+  types?: string;
+}
+export interface ExtremeDirectionsRequest {
+  coordinates: Array<[number, number]>;
+  profile?: 'mapbox/driving-traffic' | 'mapbox/driving' | 'mapbox/walking' | 'mapbox/cycling' | string;
+  steps?: boolean;
+  alternatives?: boolean;
+  annotations?: string;
+  exclude?: string;
+  language?: string;
+  voice_units?: 'imperial' | 'metric' | string;
+  overview?: 'full' | 'simplified' | 'false' | string;
+  metadata?: Record<string, unknown>;
+}
+export interface ExtremeSearchResponse {
+  suggestions?: any[];
+  features?: any[];
+  _trailhead?: { temporary_use_only?: boolean; [key: string]: unknown };
+  [key: string]: unknown;
+}
+export interface ExtremeDirectionsResponse {
+  routes?: any[];
+  waypoints?: any[];
+  code?: string;
+  message?: string;
+  _trailhead?: { engine?: string; temporary_use_only?: boolean; [key: string]: unknown };
+  [key: string]: unknown;
 }
 export interface GeocodePlace {
   name: string;
@@ -853,6 +1109,76 @@ export interface CampsitePin {
   cache_status?: string; fetched_at?: number; feature_source?: string;
   rating?: number; rating_count?: number; phone?: string; address?: string;
   provider_place_id?: string; place_id?: string;
+}
+
+function campSourceBadge(camp: Partial<CampsitePin> & Record<string, any>): string {
+  const raw = String(camp.source_badge || camp.verified_source || camp.source || camp.feature_source || '').toLowerCase();
+  if (raw.includes('ridb') || raw.includes('recreation')) return 'Recreation.gov';
+  if (raw.includes('nps')) return 'NPS';
+  if (raw.includes('blm')) return 'BLM';
+  if (raw.includes('usfs') || raw.includes('forest')) return 'USFS';
+  if (raw.includes('mapbox')) return 'Mapbox';
+  if (raw.includes('geoapify')) return 'Geoapify';
+  if (raw.includes('osm') || raw.includes('openstreetmap')) return 'OSM';
+  if (raw.includes('community')) return 'Community';
+  return camp.source_badge || camp.verified_source || 'Camp source';
+}
+
+function inferCampLandType(camp: Partial<CampsitePin> & Record<string, any>): string {
+  const haystack = [
+    camp.land_type, camp.source_badge, camp.verified_source, camp.source, camp.feature_source,
+    camp.description, ...(Array.isArray(camp.tags) ? camp.tags : []),
+  ].join(' ').toLowerCase();
+  if (haystack.includes('private') || haystack.includes('farm') || haystack.includes('ranch') || haystack.includes('winery') || haystack.includes('glamping')) return 'private';
+  if (haystack.includes('blm')) return 'BLM';
+  if (haystack.includes('usfs') || haystack.includes('forest')) return 'USFS';
+  if (haystack.includes('nps') || haystack.includes('national park')) return 'NPS';
+  if (haystack.includes('state park')) return 'state';
+  if (haystack.includes('dispersed')) return 'dispersed';
+  return camp.land_type || 'campground';
+}
+
+function canonicalizeCampsitePin(raw: CampsitePin): CampsitePin {
+  const camp = { ...(raw || {}) } as CampsitePin & Record<string, any>;
+  const tags = Array.isArray(camp.tags) ? camp.tags.filter(Boolean).map(String) : [];
+  const amenities = Array.isArray(camp.amenities) ? camp.amenities.filter(Boolean).map(String) : [];
+  const siteTypes = Array.isArray(camp.site_types) ? camp.site_types.filter(Boolean).map(String) : [];
+  const sourceBadge = campSourceBadge(camp);
+  const landType = inferCampLandType(camp);
+  const id = String(camp.id || camp.provider_place_id || camp.place_id || `${sourceBadge}:${camp.name}:${camp.lat}:${camp.lng}`);
+  const name = String(camp.name || camp.description || 'Camp').trim();
+  const description = String(camp.description || (landType === 'private' ? 'Private stay candidate.' : 'Camp candidate.')).trim();
+  const url = String(camp.url || camp.booking_url || camp.official_url || '');
+  const normalizedTags = Array.from(new Set([
+    ...tags,
+    'camp',
+    landType,
+    sourceBadge,
+  ].filter(Boolean)));
+  return {
+    ...camp,
+    id,
+    name,
+    lat: Number(camp.lat),
+    lng: Number(camp.lng),
+    tags: normalizedTags,
+    land_type: landType,
+    description,
+    amenities,
+    site_types: siteTypes.length ? siteTypes : normalizedTags.filter(tag => /tent|rv|cabin|dispersed|private|camp/i.test(tag)),
+    reservable: Boolean(camp.reservable || camp.booking_url),
+    url,
+    ada: Boolean(camp.ada),
+    source_badge: sourceBadge,
+    verified_source: camp.verified_source || sourceBadge,
+    link_label: camp.link_label || (camp.booking_url ? 'Reserve' : camp.official_url ? 'Official page' : 'Search official site'),
+  };
+}
+
+function canonicalizeCampsitePins(items: CampsitePin[]): CampsitePin[] {
+  return (items || [])
+    .map(canonicalizeCampsitePin)
+    .filter(camp => Number.isFinite(camp.lat) && Number.isFinite(camp.lng) && Math.abs(camp.lat) <= 90 && Math.abs(camp.lng) <= 180);
 }
 export interface RouteCampWindowInput {
   day: number;

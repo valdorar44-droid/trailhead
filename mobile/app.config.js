@@ -50,6 +50,7 @@ module.exports = {
         'android.permission.ACCESS_BACKGROUND_LOCATION',
         'android.permission.FOREGROUND_SERVICE',
         'android.permission.FOREGROUND_SERVICE_LOCATION',
+        'android.permission.MODIFY_AUDIO_SETTINGS',
         'android.permission.RECEIVE_BOOT_COMPLETED',
         'android.permission.VIBRATE',
         'android.permission.RECORD_AUDIO',
@@ -93,6 +94,7 @@ module.exports = {
           },
         },
       ],
+      '@config-plugins/react-native-webrtc',
       [
         '@rnmapbox/maps',
         {

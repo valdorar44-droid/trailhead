@@ -8,7 +8,18 @@
  * City labels use Protomaps "rank" (NOT "population_rank") — lower rank = bigger city.
  */
 
-export type MapMode = 'satellite' | 'topo' | 'hybrid' | 'light' | 'city' | 'contrast' | 'desert' | 'snow' | 'dark' | 'red';
+export type MapMode = 'satellite' | 'topo' | 'hybrid' | 'light' | 'city' | 'contrast' | 'desert' | 'snow' | 'dark' | 'red' | 'extreme';
+export type PremiumMapStyle =
+  | 'standard'
+  | 'standard_satellite'
+  | 'satellite_streets'
+  | 'streets'
+  | 'outdoors'
+  | 'navigation_day'
+  | 'navigation_night'
+  | 'dawn'
+  | 'dusk'
+  | 'night';
 
 const TILE_BASE = 'https://tiles.gettrailhead.app';
 const API_BASE = 'https://api.gettrailhead.app';
@@ -23,7 +34,7 @@ export const LOCAL_TILE_PORT = 57832;
 const TOPO_LAND = '#182118';
 const TOPO_LAND_EARTH = '#1b261c';
 const TOPO_WATER = '#061a2f';
-const MAP_STYLE_PALETTES: Record<Exclude<MapMode, 'satellite' | 'hybrid'>, {
+const MAP_STYLE_PALETTES: Record<Exclude<MapMode, 'satellite' | 'hybrid' | 'extreme'>, {
   land: string;
   earth: string;
   water: string;
@@ -60,6 +71,7 @@ export function buildMapStyle(
   trailMode: TrailSourceMode = 'online',
   showNautical = false,
   showTerrain = false,
+  premiumStyle: PremiumMapStyle = 'standard',
 ): object {
   // Changing the source id (not just the URL) forces MapLibre to fully recreate
   // the source and drop its tile cache — the correct approach for cache-busting.
@@ -77,10 +89,12 @@ export function buildMapStyle(
     ? `http://127.0.0.1:${LOCAL_TILE_PORT}/api/trails/{z}/{x}/{y}.pbf`
     : `${TILE_BASE}/api/trails/{z}/{x}/{y}.pbf`;
   const sat = mode === 'satellite';
+  const isExtreme = mode === 'extreme';
   const hyb = mode === 'hybrid';
-  const palette = MAP_STYLE_PALETTES[sat || hyb ? 'topo' : mode];
+  const mapboxRasterBase = sat || hyb || isExtreme;
+  const palette = MAP_STYLE_PALETTES[mapboxRasterBase ? 'topo' : mode];
   const lwHalo = sat ? 'rgba(0,0,0,0.85)' : palette.halo;
-  const showContours = contourMode !== 'none' && !sat;
+  const showContours = contourMode !== 'none' && !sat && !isExtreme;
   const showTrailPack = trailMode === 'local';
   const demId = `dem${tileSession}`;
   const trailVisualClass = [
@@ -119,10 +133,19 @@ export function buildMapStyle(
     },
   };
 
-  if ((sat || hyb) && mapboxToken) {
+  if (mapboxRasterBase && mapboxToken) {
+    const mapboxStyle = premiumStyle === 'satellite_streets'
+      ? 'satellite-streets-v12'
+      : premiumStyle === 'outdoors'
+        ? 'outdoors-v12'
+        : premiumStyle === 'night'
+          ? 'dark-v11'
+          : 'streets-v12';
     sources['sat'] = {
       type: 'raster',
-      tiles: [`https://api.mapbox.com/v4/mapbox.satellite/{z}/{x}/{y}@2x.jpg90?access_token=${mapboxToken}`],
+      tiles: [isExtreme
+        ? `https://api.mapbox.com/styles/v1/mapbox/${mapboxStyle}/tiles/512/{z}/{x}/{y}@2x?access_token=${mapboxToken}`
+        : `https://api.mapbox.com/v4/mapbox.satellite/{z}/{x}/{y}@2x.jpg90?access_token=${mapboxToken}`],
       tileSize: 512,
       maxzoom: 19,
     };
@@ -188,7 +211,7 @@ export function buildMapStyle(
   const layers: object[] = [
     // Background must read as land, not water. Some vector tiles are sparse or
     // resolve late, so a navy background makes random land areas look flooded.
-    { id: 'bg', type: 'background', paint: { 'background-color': sat ? '#000' : palette.land } },
+    { id: 'bg', type: 'background', paint: { 'background-color': mapboxRasterBase ? '#000' : palette.land } },
   ];
 
   if (sources['sat']) {
@@ -201,16 +224,17 @@ export function buildMapStyle(
     layers.push({
       id: 'terrain-hillshade', type: 'hillshade', source: demId,
       paint: {
-        'hillshade-shadow-color': sat || hyb ? '#0f172a' : '#2f2618',
-        'hillshade-highlight-color': sat || hyb ? '#fff7ed' : '#d1b27b',
-        'hillshade-accent-color': sat || hyb ? '#64748b' : '#8b6b3d',
-        'hillshade-exaggeration': sat || hyb ? 0.62 : 0.5,
-        'hillshade-opacity': sat || hyb ? 0.46 : 0.48,
+        'hillshade-shadow-color': mapboxRasterBase ? '#0f172a' : '#2f2618',
+        'hillshade-highlight-color': mapboxRasterBase ? '#fff7ed' : '#d1b27b',
+        'hillshade-accent-color': mapboxRasterBase ? '#64748b' : '#8b6b3d',
+        'hillshade-exaggeration': mapboxRasterBase ? 0.62 : 0.5,
+        'hillshade-opacity': mapboxRasterBase ? 0.46 : 0.48,
       },
     });
   }
 
-  layers.push(
+  if (!isExtreme) {
+    layers.push(
     // Earth fill - lighter than background so continents always read at any zoom
     { id: 'earth', type: 'fill', source: pmId, 'source-layer': 'earth',
       filter: ['==', ['get', 'kind'], 'earth'],
@@ -252,7 +276,8 @@ export function buildMapStyle(
       filter: ['in', ['get', 'kind'], ['literal', ['river', 'stream', 'canal']]],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: { 'line-color': palette.water, 'line-width': ['interpolate', ['linear'], ['zoom'], 5, 0.5, 10, 1.5, 15, 3], 'line-opacity': roadOp } },
-  );
+    );
+  }
 
   if (showContours) {
     layers.push(
@@ -304,9 +329,9 @@ export function buildMapStyle(
         minzoom: 8,
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
-          'line-color': sat || hyb ? 'rgba(3,7,18,0.86)' : '#10140f',
+          'line-color': mapboxRasterBase ? 'rgba(3,7,18,0.86)' : '#10140f',
           'line-width': ['interpolate', ['linear'], ['zoom'], 8, 1.8, 12, 3.8, 15, 7.2],
-          'line-opacity': sat || hyb ? 0.86 : 0.7,
+          'line-opacity': mapboxRasterBase ? 0.86 : 0.7,
         } },
       { id: 'trail-pack-line', type: 'line', source: trailId, 'source-layer': 'trails',
         minzoom: 8,
@@ -320,11 +345,11 @@ export function buildMapStyle(
             'bike', '#f97316',
             'horse', '#a855f7',
             'restricted', '#ef4444',
-            'unknown', sat || hyb ? '#0f172a' : '#94a3b8',
+            'unknown', mapboxRasterBase ? '#0f172a' : '#94a3b8',
             '#94a3b8',
           ],
           'line-width': ['interpolate', ['linear'], ['zoom'], 8, 1.0, 12, 2.15, 15, 4.8],
-          'line-opacity': sat || hyb ? 0.96 : 0.9,
+          'line-opacity': mapboxRasterBase ? 0.96 : 0.9,
         } },
       { id: 'trail-pack-label', type: 'symbol', source: trailId, 'source-layer': 'trails',
         minzoom: 13,
@@ -352,7 +377,7 @@ export function buildMapStyle(
         type: 'raster',
         source: 'chs-nonna',
         paint: {
-          'raster-opacity': sat ? 0.64 : hyb ? 0.48 : 0.52,
+          'raster-opacity': sat || isExtreme ? 0.64 : hyb ? 0.48 : 0.52,
           'raster-fade-duration': 120,
         },
       },
@@ -361,7 +386,7 @@ export function buildMapStyle(
         type: 'raster',
         source: 'noaa-charts',
         paint: {
-          'raster-opacity': sat ? 0.68 : hyb ? 0.52 : 0.56,
+          'raster-opacity': sat || isExtreme ? 0.68 : hyb ? 0.52 : 0.56,
           'raster-fade-duration': 120,
         },
       },
@@ -379,7 +404,7 @@ export function buildMapStyle(
             'deep_20_40', '#0284c7',
             'deep_40_plus', '#1d4ed8',
             '#0ea5e9'],
-          'fill-opacity': sat ? 0.22 : hyb ? 0.24 : 0.32,
+          'fill-opacity': sat || isExtreme ? 0.22 : hyb ? 0.24 : 0.32,
         },
       },
       {
@@ -462,7 +487,8 @@ export function buildMapStyle(
     );
   }
 
-  layers.push(
+  if (!isExtreme) {
+    layers.push(
 
     // Park outlines visible from z6
     { id: 'lu-park-line', type: 'line', source: pmId, 'source-layer': 'landuse',
@@ -563,8 +589,8 @@ export function buildMapStyle(
         minzoom: 15,
         filter: ['any', ['has', 'height'], ['has', 'render_height'], ['has', 'levels']],
         paint: {
-          'fill-extrusion-color': sat || hyb ? '#e7e5e4' : '#3d4654',
-          'fill-extrusion-opacity': sat || hyb ? 0.52 : 0.36,
+          'fill-extrusion-color': mapboxRasterBase ? '#e7e5e4' : '#3d4654',
+          'fill-extrusion-opacity': mapboxRasterBase ? 0.52 : 0.36,
           'fill-extrusion-height': [
             'case',
             ['has', 'height'], ['to-number', ['get', 'height']],
@@ -715,13 +741,14 @@ export function buildMapStyle(
       filter: ['all', ['==', ['get', 'kind'], 'locality'], ['>', ['coalesce', ['get', 'rank'], 99], 7]],
       layout: { 'text-field': ['get', 'name'], 'text-size': 11, 'text-font': ['Noto Sans Regular'] },
       paint: { 'text-color': '#a3aab9', 'text-halo-color': lwHalo, 'text-halo-width': 1.8, 'text-opacity': labelOp } },
-  );
+    );
+  }
 
   return {
     version: 8 as const,
     sources,
     glyphs: GLYPH_URL,
-    ...(showTerrain && mapboxToken ? { terrain: { source: demId, exaggeration: hyb ? 1.85 : 1.6 } } : {}),
+    ...(showTerrain && mapboxToken ? { terrain: { source: demId, exaggeration: hyb || isExtreme ? 1.85 : 1.6 } } : {}),
     layers,
   };
 }

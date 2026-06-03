@@ -13,13 +13,14 @@ import React, {
 } from 'react';
 import { Dimensions, PanResponder, TouchableOpacity, View, StyleSheet, Text } from 'react-native';
 import MapLibreGL from '@maplibre/maplibre-react-native';
+import MapboxGL from '@rnmapbox/maps';
 import { Ionicons } from '@expo/vector-icons';
 import { storage } from '@/lib/storage';
 
 import { buildMapStyle, MapMode } from './mapStyle';
-import type { ContourSourceMode, TrailSourceMode } from './mapStyle';
+import type { ContourSourceMode, PremiumMapStyle, TrailSourceMode } from './mapStyle';
 import { fetchRoute, buildFallbackRoute } from './routing';
-import type { RouteResult, RouteStep, RouteOpts, MapBounds, WP } from './types';
+import type { RouteProviderMode, RouteResult, RouteStep, RouteOpts, MapBounds, WP } from './types';
 import type { CampsitePin, OsmPoi, Pin, Report, WaterSpotCard, SuggestedWaterCorridorResponse } from '@/lib/api';
 import type { WaterRoute } from '@/lib/store';
 import { useStore } from '@/lib/store';
@@ -49,6 +50,32 @@ const LEGACY_OFFLINE_DIR = `${FileSystem.documentDirectory}offline/`;
 const CACHE_CONTOUR_DIR = `${FileSystem.cacheDirectory}offline/contours/`;
 const TRAIL_DIR = `${OFFLINE_DIR}trails/`;
 const CACHE_TRAIL_DIR = `${CACHE_OFFLINE_DIR}trails/`;
+
+const MAPBOX_STYLE_URLS: Record<PremiumMapStyle, string> = {
+  standard: 'mapbox://styles/mapbox/standard',
+  standard_satellite: 'mapbox://styles/mapbox/standard-satellite',
+  satellite_streets: 'mapbox://styles/mapbox/satellite-streets-v12',
+  streets: 'mapbox://styles/mapbox/streets-v12',
+  outdoors: 'mapbox://styles/mapbox/outdoors-v12',
+  navigation_day: 'mapbox://styles/mapbox/navigation-day-v1',
+  navigation_night: 'mapbox://styles/mapbox/navigation-night-v1',
+  dawn: 'mapbox://styles/mapbox/standard',
+  dusk: 'mapbox://styles/mapbox/standard',
+  night: 'mapbox://styles/mapbox/standard',
+};
+
+const MAPBOX_LIGHT_PRESETS: Partial<Record<PremiumMapStyle, 'dawn' | 'day' | 'dusk' | 'night'>> = {
+  standard: 'day',
+  standard_satellite: 'day',
+  streets: 'day',
+  outdoors: 'day',
+  satellite_streets: 'day',
+  navigation_day: 'day',
+  navigation_night: 'night',
+  dawn: 'dawn',
+  dusk: 'dusk',
+  night: 'night',
+};
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 export type { WP, RouteOpts, MapBounds, RouteResult, RouteStep } from './types';
@@ -98,6 +125,8 @@ export interface NativeMapProps {
 
   // Config
   mapLayer:  MapMode;
+  premiumMapStyle?: PremiumMapStyle;
+  routeProviderMode?: RouteProviderMode;
   routeOpts: RouteOpts;
   traceMode?: boolean;
   traceDraftCoords?: [number, number][];
@@ -605,7 +634,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const {
     waypoints, camps, gas, pois, waterNavLines, waterSpotCards = [], waterCorridor = null, waterFollowRoute = null, reports, communityPins, searchMarker,
     userLoc, navMode, navCameraFollow = false, nativeNavEngineActive = false, navIdx, navHeading, navSpeed,
-    mapLayer, routeOpts,
+    mapLayer, routeProviderMode = 'trailhead', routeOpts,
     traceMode = false, traceDraftCoords = [], traceRouteCoords = [], tracePinCoords = [],
     showLandOverlay, showUsgsOverlay, showTerrain, showFire, showAva, showRadar, showTrailOverlay = true, showMvum, showNautical = false,
     onMapReady, onBoundsChange, onMapGesture, onMapTap, onMapLongPress,
@@ -614,8 +643,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     onTraceStart, onTraceMove, onTraceEnd,
   } = props;
 
-  const mapRef = useRef<MapLibreGL.MapViewRef>(null);
-  const camRef = useRef<MapLibreGL.CameraRef>(null);
+  const mapRef = useRef<any>(null);
+  const camRef = useRef<any>(null);
 
   // ── Overlay data ──────────────────────────────────────────────────────────────
   const [fireData,   setFireData]   = useState<GeoJSON.FeatureCollection | null>(null);
@@ -694,6 +723,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const mapboxToken = useStore(s => s.mapboxToken);
   const activeTrip  = useStore(s => s.activeTrip);
   const C = useTheme();
+  const isExtremeMapbox = mapLayer === 'extreme' && !!mapboxToken;
+  const MapGL: any = isExtremeMapbox ? MapboxGL : MapLibreGL;
   const [localTiles,   setLocalTiles]   = useState(false);
   const [localContours, setLocalContours] = useState(false);
   const [localTrails, setLocalTrails] = useState(false);
@@ -1026,7 +1057,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const routeRef = useRef(makeRouteState([]));
 
   // MLRN v10 uses `mapStyle` — accepts string (style URL) or object (inline JSON).
-  const effectiveMapLayer: MapMode = showTerrain && mapboxToken ? 'hybrid' : mapLayer;
+  const effectiveMapLayer: MapMode = mapLayer === 'extreme' ? 'extreme' : showTerrain && mapboxToken ? 'hybrid' : mapLayer;
   const contourMode: ContourSourceMode = effectiveMapLayer === 'satellite'
     ? 'none'
     : localContours
@@ -1034,9 +1065,27 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       : 'online';
   const trailMode: TrailSourceMode = showTrailOverlay ? (localTrails ? 'local' : 'online') : 'none';
   const mapStyleObj = useMemo(
-    () => buildMapStyle(effectiveMapLayer, mapboxToken || '', localTiles, tileSession, contourMode, trailMode, showNautical, showTerrain),
-    [effectiveMapLayer, mapboxToken, localTiles, tileSession, contourMode, trailMode, showNautical, showTerrain],
+    () => buildMapStyle(effectiveMapLayer, mapboxToken || '', localTiles, tileSession, contourMode, trailMode, showNautical, showTerrain, props.premiumMapStyle),
+    [effectiveMapLayer, mapboxToken, localTiles, tileSession, contourMode, trailMode, showNautical, showTerrain, props.premiumMapStyle],
   );
+  const premiumStyle = props.premiumMapStyle ?? 'standard';
+  const mapboxStyleURL = MAPBOX_STYLE_URLS[premiumStyle] ?? MAPBOX_STYLE_URLS.standard;
+  const mapboxStyleImportConfig = useMemo(() => {
+    const lightPreset = MAPBOX_LIGHT_PRESETS[premiumStyle] ?? (showTerrain ? 'day' : 'day');
+    return {
+      lightPreset,
+      show3dObjects: showTerrain ? 'true' : 'false',
+      showPointOfInterestLabels: 'true',
+      showRoadLabels: 'true',
+      showPlaceLabels: 'true',
+      theme: premiumStyle === 'night' || premiumStyle === 'navigation_night' ? 'monochrome' : 'default',
+    };
+  }, [premiumStyle, showTerrain]);
+
+  useEffect(() => {
+    if (!mapboxToken) return;
+    MapboxGL.setAccessToken(mapboxToken).catch(() => {});
+  }, [mapboxToken]);
 
   useEffect(() => {
     if (navMode) return;
@@ -1119,7 +1168,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           const layerIds = ['trail-pack-line', 'road-path', 'road-other', 'mvum-trails-line', 'mvum-roads-line'];
           const rendered: any[] = [];
           const screen = Dimensions.get('window');
-          const rect = [cx - 170, cy - 170, cx + 170, cy + 170];
+          const rect = [cx - 170, cy - 170, 340, 340];
           const rectFound = await (mapRef.current as any).queryRenderedFeaturesInRect?.(
             rect,
             undefined,
@@ -1166,7 +1215,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         const layerIds = ['trail-pack-line', 'road-path', 'road-other', 'mvum-trails-line', 'mvum-roads-line'];
         const rendered: any[] = [];
         const rectFound = await (mapRef.current as any).queryRenderedFeaturesInRect?.(
-          [cx - 150, cy - 150, cx + 150, cy + 150],
+          [cx - 150, cy - 150, 300, 300],
           undefined,
           layerIds,
         ).catch(() => null);
@@ -1281,7 +1330,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         await ensureRouteTileFile(pairs);
       }
       if (requestId !== routeRequestRef.current) return;
-      const result = await fetchRoute(pairs, fromIdx, mapboxToken || '', routeOpts);
+      const result = await fetchRoute(pairs, fromIdx, mapboxToken || '', routeOpts, routeProviderMode);
       if (requestId !== routeRequestRef.current) return;
       setRouteCoords(result.coords);
       setRouteSteps(result.steps);
@@ -1310,7 +1359,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     } finally {
       if (requestId === routeRequestRef.current) isRoutingRef.current = false;
     }
-  }, [mapboxToken, routeOpts, waypoints, activeTrip, onRouteReady, onRoutePersist, ensureRouteTileFile, makeRouteState]);
+  }, [mapboxToken, routeOpts, routeProviderMode, waypoints, activeTrip, onRouteReady, onRoutePersist, ensureRouteTileFile, makeRouteState]);
 
   // When a new trip is planned: auto-route + fit camera to show all waypoints
   useEffect(() => {
@@ -1559,12 +1608,37 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           onTileCampTap(name, kind, coords[1] ?? lat, coords[0] ?? lng);
           return;
         }
+        if (isExtremeMapbox) {
+          const mapboxRendered: any[] = [];
+          const [px, py] = pressPoint.map(Number);
+          if (Number.isFinite(px) && Number.isFinite(py)) {
+            const rectFound = await (mapRef.current as any).queryRenderedFeaturesInRect?.(
+              [px - 36, py - 36, 72, 72],
+              undefined,
+              undefined,
+            ).catch(() => null);
+            const rectFeatures = Array.isArray(rectFound) ? rectFound : rectFound?.features;
+            if (Array.isArray(rectFeatures)) mapboxRendered.push(...rectFeatures);
+          }
+          const pointFound = await mapRef.current.queryRenderedFeaturesAtPoint(
+            pressPoint,
+            undefined,
+            undefined,
+          );
+          const pointFeatures = Array.isArray(pointFound) ? pointFound : pointFound?.features;
+          if (Array.isArray(pointFeatures)) mapboxRendered.push(...pointFeatures);
+          const mapboxPoi = bestMapboxPoiFromFeatures(mapboxRendered, lat, lng);
+          if (mapboxPoi) {
+            onPoiTap?.(mapboxPoi);
+            return;
+          }
+        }
       } catch { /* queryRenderedFeatures may not be supported — fall through */ }
       onMapTap(lat, lng);
     } else {
       onMapTap();
     }
-  }, [coordinateFromPress, onMapTap, onPoiTap, onTileCampTap, onTrailTap, showNautical]);
+  }, [coordinateFromPress, isExtremeMapbox, onMapTap, onPoiTap, onTileCampTap, onTrailTap, showNautical]);
 
   const handleLongPress = useCallback(async (feat: any) => {
     const lngLat = await coordinateFromPress(feat);
@@ -1644,10 +1718,11 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <View style={styles.mapRoot}>
-      <MapLibreGL.MapView
+      <MapGL.MapView
         ref={mapRef}
         style={StyleSheet.absoluteFillObject}
-        mapStyle={mapStyleObj}
+        {...(isExtremeMapbox ? { styleURL: mapboxStyleURL } : { mapStyle: mapStyleObj })}
+        projection={isExtremeMapbox ? 'globe' : undefined}
         onPress={handlePress}
         onLongPress={handleLongPress}
         onRegionWillChange={(feature: any) => {
@@ -1663,11 +1738,18 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         rotateEnabled
         pitchEnabled
       >
+        {isExtremeMapbox && mapboxStyleURL.includes('/standard') && MapGL.StyleImport ? (
+          <MapGL.StyleImport
+            id="basemap"
+            existing
+            config={mapboxStyleImportConfig}
+          />
+        ) : null}
 
       {/* ── Camera ────────────────────────────────────────────────────── */}
       {/* Initial placement is default-only. Navigation follow and explicit
           locate actions are the only code paths that should recenter later. */}
-      <MapLibreGL.Camera
+      <MapGL.Camera
         ref={camRef}
         defaultSettings={{
           centerCoordinate: initialCenter,
@@ -1676,7 +1758,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           animationDuration: 0,
         }}
         followUserLocation={navMode && navCameraFollow}
-        followUserMode={(navSpeed ?? 0) > 1.2 ? MapLibreGL.UserTrackingMode.FollowWithCourse : MapLibreGL.UserTrackingMode.FollowWithHeading}
+        followUserMode={(navSpeed ?? 0) > 1.2 ? MapGL.UserTrackingMode.FollowWithCourse : MapGL.UserTrackingMode.FollowWithHeading}
         followZoomLevel={(navSpeed ?? 0) > 20 ? 15.5 : (navSpeed ?? 0) > 9 ? 16.2 : 17}
         followPitch={showTerrain ? 62 : (navSpeed ?? 0) > 2.2 ? 45 : 0}
         onUserTrackingModeChange={(event: any) => {
@@ -1685,7 +1767,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       />
 
       {/* ── User location ─────────────────────────────────────────────── */}
-      <MapLibreGL.UserLocation
+      <MapGL.UserLocation
         visible={!!userLoc}
         renderMode="normal"
         showsUserHeadingIndicator
@@ -1693,8 +1775,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       />
 
       {trailHighlight.features.length > 0 && (
-        <MapLibreGL.ShapeSource id="selected-trail-highlight" shape={trailHighlight}>
-          <MapLibreGL.LineLayer
+        <MapGL.ShapeSource id="selected-trail-highlight" shape={trailHighlight}>
+          <MapGL.LineLayer
             id="selected-trail-highlight-glow"
             style={{
               lineColor: '#f97316',
@@ -1704,7 +1786,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               lineJoin: 'round',
             } as any}
           />
-          <MapLibreGL.LineLayer
+          <MapGL.LineLayer
             id="selected-trail-highlight-line"
             style={{
               lineColor: '#ffb000',
@@ -1714,7 +1796,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               lineJoin: 'round',
             } as any}
           />
-          <MapLibreGL.LineLayer
+          <MapGL.LineLayer
             id="selected-trail-highlight-core"
             style={{
               lineColor: '#ffffff',
@@ -1724,24 +1806,24 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               lineJoin: 'round',
             } as any}
           />
-        </MapLibreGL.ShapeSource>
+        </MapGL.ShapeSource>
       )}
 
       {traceDraftCoords.length > 1 && (
-        <MapLibreGL.ShapeSource id="trail-trace-draft" shape={lineFC(traceDraftCoords)}>
-          <MapLibreGL.LineLayer
+        <MapGL.ShapeSource id="trail-trace-draft" shape={lineFC(traceDraftCoords)}>
+          <MapGL.LineLayer
             id="trail-trace-draft-glow"
             style={{ lineColor: '#38bdf8', lineWidth: 11, lineBlur: 4, lineOpacity: 0.22, lineCap: 'round', lineJoin: 'round' }}
           />
-          <MapLibreGL.LineLayer
+          <MapGL.LineLayer
             id="trail-trace-draft-line"
             style={{ lineColor: '#38bdf8', lineWidth: 4.2, lineOpacity: 0.92, lineCap: 'round', lineJoin: 'round', lineDasharray: [0.8, 1.4] }}
           />
-        </MapLibreGL.ShapeSource>
+        </MapGL.ShapeSource>
       )}
 
       {tracePinCoords.length > 0 && (
-        <MapLibreGL.ShapeSource
+        <MapGL.ShapeSource
           id="trail-capture-pins"
           shape={pointFC(tracePinCoords.map((coord, idx) => ({
             type: 'Feature',
@@ -1749,7 +1831,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             properties: { idx: idx + 1 },
           })))}
         >
-          <MapLibreGL.CircleLayer
+          <MapGL.CircleLayer
             id="trail-capture-pin-dot"
             style={{
               circleRadius: 8,
@@ -1759,7 +1841,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               circleStrokeColor: '#fff',
             }}
           />
-          <MapLibreGL.SymbolLayer
+          <MapGL.SymbolLayer
             id="trail-capture-pin-label"
             style={{
               textField: ['to-string', ['get', 'idx']],
@@ -1772,35 +1854,35 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               textIgnorePlacement: true,
             } as any}
           />
-        </MapLibreGL.ShapeSource>
+        </MapGL.ShapeSource>
       )}
 
       {traceRouteCoords.length > 1 && (
-        <MapLibreGL.ShapeSource id="trail-trace-route" shape={lineFC(traceRouteCoords)}>
-          <MapLibreGL.LineLayer
+        <MapGL.ShapeSource id="trail-trace-route" shape={lineFC(traceRouteCoords)}>
+          <MapGL.LineLayer
             id="trail-trace-route-glow"
             style={{ lineColor: '#f97316', lineWidth: 13, lineBlur: 5, lineOpacity: 0.28, lineCap: 'round', lineJoin: 'round' }}
           />
-          <MapLibreGL.LineLayer
+          <MapGL.LineLayer
             id="trail-trace-route-line"
             style={{ lineColor: '#ff8a2a', lineWidth: 5.5, lineOpacity: 0.96, lineCap: 'round', lineJoin: 'round' }}
           />
-        </MapLibreGL.ShapeSource>
+        </MapGL.ShapeSource>
       )}
 
       {/* ── Route line ────────────────────────────────────────────────── */}
       {routeCoords.length > 0 && !waterRouteVisualActive && (
-        <MapLibreGL.ShapeSource id="route" shape={lineFC(routeCoords)}>
-          <MapLibreGL.LineLayer
+        <MapGL.ShapeSource id="route" shape={lineFC(routeCoords)}>
+          <MapGL.LineLayer
             id="route-shadow"
             style={{ lineColor: 'rgba(0,0,0,0.35)', lineWidth: 9, lineBlur: 5, lineTranslate: [0, 2] }}
           />
-          <MapLibreGL.LineLayer
+          <MapGL.LineLayer
             id="route-line"
             style={{ lineColor: '#f97316', lineWidth: 5, lineCap: 'round', lineJoin: 'round', lineOpacity: 0.94 }}
           />
           {/* Direction arrows along route — ASCII > rotated along line direction */}
-          <MapLibreGL.SymbolLayer
+          <MapGL.SymbolLayer
             id="route-arrows"
             minZoomLevel={9}
             style={{
@@ -1819,12 +1901,12 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               textLetterSpacing: 0,
             } as any}
           />
-        </MapLibreGL.ShapeSource>
+        </MapGL.ShapeSource>
       )}
 
       {routeTurnFC.features.length > 0 && !waterRouteVisualActive && (
-        <MapLibreGL.ShapeSource id="route-turns" shape={routeTurnFC}>
-          <MapLibreGL.SymbolLayer
+        <MapGL.ShapeSource id="route-turns" shape={routeTurnFC}>
+          <MapGL.SymbolLayer
             id="route-turn-shadows"
             minZoomLevel={12}
             style={{
@@ -1837,7 +1919,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               textAllowOverlap: true,
             } as any}
           />
-          <MapLibreGL.SymbolLayer
+          <MapGL.SymbolLayer
             id="route-turn-arrows"
             minZoomLevel={12}
             style={{
@@ -1851,34 +1933,34 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               textAllowOverlap: true,
             } as any}
           />
-        </MapLibreGL.ShapeSource>
+        </MapGL.ShapeSource>
       )}
 
       {/* ── Passed route dimmed overlay ───────────────────────────────── */}
       {passedCoords.length > 1 && !waterRouteVisualActive && (
-        <MapLibreGL.ShapeSource id="route-passed" shape={lineFC(passedCoords)}>
-          <MapLibreGL.LineLayer
+        <MapGL.ShapeSource id="route-passed" shape={lineFC(passedCoords)}>
+          <MapGL.LineLayer
             id="route-passed-line"
             style={{ lineColor: '#374151', lineWidth: 5, lineCap: 'round', lineJoin: 'round', lineOpacity: 0.72 }}
           />
-        </MapLibreGL.ShapeSource>
+        </MapGL.ShapeSource>
       )}
 
       {/* ── Breadcrumb trail ──────────────────────────────────────────── */}
       {breadcrumb.length > 1 && !waterRouteVisualActive && (
-        <MapLibreGL.ShapeSource id="breadcrumb" shape={lineFC(breadcrumb)}>
-          <MapLibreGL.LineLayer
+        <MapGL.ShapeSource id="breadcrumb" shape={lineFC(breadcrumb)}>
+          <MapGL.LineLayer
             id="breadcrumb-line"
             style={{ lineColor: '#3b82f6', lineWidth: 2.5, lineOpacity: 0.8, lineDasharray: [2, 4] }}
           />
-        </MapLibreGL.ShapeSource>
+        </MapGL.ShapeSource>
       )}
 
       {showNautical && waterNavLineFC.features.length > 0 && (
-        <MapLibreGL.ShapeSource id="water-nav-lines" shape={waterNavLineFC}>
+        <MapGL.ShapeSource id="water-nav-lines" shape={waterNavLineFC}>
           {!waterFollowRoute && (
             <>
-              <MapLibreGL.LineLayer
+              <MapGL.LineLayer
                 id="water-nav-line-casing"
                 filter={['==', ['geometry-type'], 'LineString'] as any}
                 style={{
@@ -1889,7 +1971,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
                   lineJoin: 'round',
                 }}
               />
-              <MapLibreGL.LineLayer
+              <MapGL.LineLayer
                 id="water-nav-line"
                 filter={['==', ['geometry-type'], 'LineString'] as any}
                 style={{
@@ -1906,7 +1988,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
                   lineJoin: 'round',
                 }}
               />
-              <MapLibreGL.LineLayer
+              <MapGL.LineLayer
                 id="water-nav-recommended-glow"
                 filter={['all', ['==', ['geometry-type'], 'LineString'], ['==', ['get', 'kind'], 'recommended_track']] as any}
                 style={{
@@ -1920,7 +2002,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               />
             </>
           )}
-          <MapLibreGL.CircleLayer
+          <MapGL.CircleLayer
             id="water-nav-hazard-halo"
             filter={['all', ['==', ['geometry-type'], 'Point'], ['==', ['get', 'kind'], 'water_hazard']] as any}
             style={{
@@ -1930,7 +2012,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               circleBlur: 0.9,
             } as any}
           />
-          <MapLibreGL.CircleLayer
+          <MapGL.CircleLayer
             id="water-nav-aid"
             filter={['==', ['geometry-type'], 'Point'] as any}
             style={{
@@ -1949,7 +2031,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               circleStrokeColor: '#fff',
             } as any}
           />
-          <MapLibreGL.SymbolLayer
+          <MapGL.SymbolLayer
             id="water-nav-code"
             filter={['==', ['geometry-type'], 'Point'] as any}
             style={{
@@ -1963,12 +2045,12 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               textIgnorePlacement: true,
             } as any}
           />
-        </MapLibreGL.ShapeSource>
+        </MapGL.ShapeSource>
       )}
 
       {waterRouteVisualActive && (
-        <MapLibreGL.ShapeSource id="safe-water-corridor" shape={waterCorridorFC}>
-          <MapLibreGL.LineLayer
+        <MapGL.ShapeSource id="safe-water-corridor" shape={waterCorridorFC}>
+          <MapGL.LineLayer
             id="safe-water-corridor-band"
             filter={['==', ['geometry-type'], 'LineString'] as any}
             style={{
@@ -1980,7 +2062,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               lineJoin: 'round',
             } as any}
           />
-          <MapLibreGL.LineLayer
+          <MapGL.LineLayer
             id="safe-water-corridor-casing"
             filter={['==', ['geometry-type'], 'LineString'] as any}
             style={{
@@ -1991,7 +2073,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               lineJoin: 'round',
             } as any}
           />
-          <MapLibreGL.LineLayer
+          <MapGL.LineLayer
             id="safe-water-corridor-line"
             filter={['==', ['geometry-type'], 'LineString'] as any}
             style={{
@@ -2002,7 +2084,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               lineJoin: 'round',
             } as any}
           />
-          <MapLibreGL.SymbolLayer
+          <MapGL.SymbolLayer
             id="safe-water-corridor-arrows"
             filter={['==', ['geometry-type'], 'LineString'] as any}
             style={{
@@ -2018,7 +2100,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               textIgnorePlacement: true,
             } as any}
           />
-          <MapLibreGL.CircleLayer
+          <MapGL.CircleLayer
             id="safe-water-corridor-knots"
             filter={['==', ['geometry-type'], 'Point'] as any}
             style={{
@@ -2029,14 +2111,14 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               circleOpacity: 0.98,
             } as any}
           />
-        </MapLibreGL.ShapeSource>
+        </MapGL.ShapeSource>
       )}
 
       {showNautical && waterSpotFC.features.length > 0 && (
-        <MapLibreGL.ShapeSource
+        <MapGL.ShapeSource
           id="safe-water-spots"
           shape={waterSpotFC}
-          onPress={e => {
+          onPress={(e: any) => {
             const f = e.features?.[0];
             if (!f || !onWaterSpotTap) return;
             try {
@@ -2045,7 +2127,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             } catch {}
           }}
         >
-          <MapLibreGL.CircleLayer
+          <MapGL.CircleLayer
             id="safe-water-spot-halo"
             style={{
               circleRadius: ['interpolate', ['linear'], ['zoom'], 8, 12, 13, 19, 16, 26],
@@ -2054,7 +2136,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               circleBlur: 0.8,
             } as any}
           />
-          <MapLibreGL.CircleLayer
+          <MapGL.CircleLayer
             id="safe-water-spot-dot"
             style={{
               circleRadius: ['interpolate', ['linear'], ['zoom'], 8, 6, 13, 9, 16, 12],
@@ -2064,7 +2146,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               circleStrokeColor: '#04111f',
             } as any}
           />
-          <MapLibreGL.SymbolLayer
+          <MapGL.SymbolLayer
             id="safe-water-spot-code"
             style={{
               textField: ['match', ['get', 'kind'], 'access', 'A', 'structure', 'S', 'F'],
@@ -2075,7 +2157,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               textIgnorePlacement: true,
             } as any}
           />
-          <MapLibreGL.SymbolLayer
+          <MapGL.SymbolLayer
             id="safe-water-spot-label"
             minZoomLevel={11}
             style={{
@@ -2091,12 +2173,12 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               textOptional: true,
             } as any}
           />
-        </MapLibreGL.ShapeSource>
+        </MapGL.ShapeSource>
       )}
 
       {/* ── Campsites (clustered) ──────────────────────────────────────── */}
       {camps.length > 0 && (
-        <MapLibreGL.ShapeSource
+        <MapGL.ShapeSource
           id="camps"
           shape={campFC}
           cluster
@@ -2104,7 +2186,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           clusterRadius={45}
           onPress={handleCampPress}
         >
-          <MapLibreGL.CircleLayer
+          <MapGL.CircleLayer
             id="camp-cluster"
             filter={['has', 'point_count']}
             style={{
@@ -2115,7 +2197,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               circleStrokeColor: '#fff',
             }}
           />
-          <MapLibreGL.SymbolLayer
+          <MapGL.SymbolLayer
             id="camp-count"
             filter={['has', 'point_count']}
             style={{
@@ -2124,7 +2206,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               textSize: 12,
             }}
           />
-          <MapLibreGL.CircleLayer
+          <MapGL.CircleLayer
             id="camp-circle"
             filter={['!', ['has', 'point_count']]}
             style={{
@@ -2146,7 +2228,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               circleStrokeColor: ['case', ['==', ['get', 'full'], 1], '#ef4444', 'rgba(255,255,255,0.9)'],
             }}
           />
-          <MapLibreGL.SymbolLayer
+          <MapGL.SymbolLayer
             id="camp-code"
             filter={['!', ['has', 'point_count']]}
             style={{
@@ -2161,7 +2243,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             } as any}
           />
           {/* Camp name labels — visible from z11, hidden when clustered */}
-          <MapLibreGL.SymbolLayer
+          <MapGL.SymbolLayer
             id="camp-name"
             minZoomLevel={11}
             filter={['!', ['has', 'point_count']]}
@@ -2174,14 +2256,14 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               textOptional: true,
             } as any}
           />
-        </MapLibreGL.ShapeSource>
+        </MapGL.ShapeSource>
       )}
 
       {/* ── Gas stations ──────────────────────────────────────────────── */}
       {gas.length > 0 && (
-        <MapLibreGL.ShapeSource
+        <MapGL.ShapeSource
           id="gas" shape={gasFC}
-          onPress={e => {
+          onPress={(e: any) => {
             const f = e.features?.[0];
             if (f && onGasTap) {
               const [lng, lat] = (f.geometry as any).coordinates;
@@ -2189,11 +2271,11 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             }
           }}
         >
-          <MapLibreGL.CircleLayer
+          <MapGL.CircleLayer
             id="gas-circle"
             style={{ circleRadius: 9, circleColor: '#eab308', circleOpacity: 0.92, circleStrokeWidth: 2, circleStrokeColor: '#fff' }}
           />
-          <MapLibreGL.SymbolLayer
+          <MapGL.SymbolLayer
             id="gas-code"
             style={{
               textField: 'F',
@@ -2206,7 +2288,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               textAllowOverlap: true,
             } as any}
           />
-          <MapLibreGL.SymbolLayer
+          <MapGL.SymbolLayer
             id="gas-label"
             minZoomLevel={11}
             style={{
@@ -2217,11 +2299,11 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               textMaxWidth: 8, textIgnorePlacement: false, textAllowOverlap: false,
             } as any}
           />
-        </MapLibreGL.ShapeSource>
+        </MapGL.ShapeSource>
       )}
 
       {gas.slice(0, 60).map((station, i) => (
-        <MapLibreGL.MarkerView
+        <MapGL.MarkerView
           key={`gas-icon-${station.name}-${station.lat}-${station.lng}-${i}`}
           id={`gas-icon-${i}`}
           coordinate={[station.lng, station.lat]}
@@ -2231,14 +2313,14 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             icon="flash-outline"
             onPress={() => onGasTap?.({ name: station.name || 'Gas Station', lat: station.lat, lng: station.lng })}
           />
-        </MapLibreGL.MarkerView>
+        </MapGL.MarkerView>
       ))}
 
       {/* ── POIs (water, trailheads, viewpoints, peaks) ───────────────── */}
       {pois.length > 0 && (
-        <MapLibreGL.ShapeSource
+        <MapGL.ShapeSource
           id="pois" shape={poiFC}
-          onPress={e => {
+          onPress={(e: any) => {
             const f = e.features?.[0];
             if (f && onPoiTap) {
               const [lng, lat] = (f.geometry as any).coordinates;
@@ -2248,7 +2330,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             }
           }}
         >
-          <MapLibreGL.CircleLayer
+          <MapGL.CircleLayer
             id="poi-circle"
             style={{
               circleRadius: ['case', ['==', ['get', 'type'], 'peak'], 9.5, 8.5],
@@ -2272,7 +2354,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               circleOpacity: 0.92, circleStrokeWidth: 2, circleStrokeColor: '#fff',
             }}
           />
-          <MapLibreGL.SymbolLayer
+          <MapGL.SymbolLayer
             id="poi-code"
             style={{
               textField: ['case', ['==', ['get', 'type'], 'water'],
@@ -2323,7 +2405,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               textAllowOverlap: true,
             } as any}
           />
-          <MapLibreGL.SymbolLayer
+          <MapGL.SymbolLayer
             id="poi-label"
             minZoomLevel={11}
             style={{
@@ -2334,13 +2416,13 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               textMaxWidth: 8, textIgnorePlacement: false, textAllowOverlap: false,
             } as any}
           />
-        </MapLibreGL.ShapeSource>
+        </MapGL.ShapeSource>
       )}
 
       {pois.slice(0, 70).map((poi, i) => {
         const visual = poiMarkerVisual(poi);
         return (
-        <MapLibreGL.MarkerView
+        <MapGL.MarkerView
           key={`poi-icon-${poi.type}-${poi.name}-${poi.lat}-${poi.lng}-${i}`}
           id={`poi-icon-${i}`}
           coordinate={[poi.lng, poi.lat]}
@@ -2350,7 +2432,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             icon={visual.icon}
             onPress={() => onPoiTap?.(poi)}
           />
-        </MapLibreGL.MarkerView>
+        </MapGL.MarkerView>
         );
       })}
 
@@ -2358,7 +2440,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       {communityPins.slice(0, 150).map((pin, i) => {
         const visual = communityPinVisual(pin.type);
         return (
-          <MapLibreGL.MarkerView
+          <MapGL.MarkerView
             key={`community-pin-${pin.id}-${pin.lat}-${pin.lng}-${i}`}
             id={`community-pin-${pin.id}-${i}`}
             coordinate={[pin.lng, pin.lat]}
@@ -2368,35 +2450,35 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               icon={visual.icon}
               onPress={() => onCommunityPinTap?.(pin)}
             />
-          </MapLibreGL.MarkerView>
+          </MapGL.MarkerView>
         );
       })}
 
       {/* ── Radar (RainViewer) ───────────────────────────────────────── */}
       {showRadar && radarUrl && (
-        <MapLibreGL.RasterSource id="radar-overlay" tileUrlTemplates={[radarUrl]} tileSize={256}>
-          <MapLibreGL.RasterLayer id="radar-layer" style={{ rasterOpacity: 0.65 }} />
-        </MapLibreGL.RasterSource>
+        <MapGL.RasterSource id="radar-overlay" tileUrlTemplates={[radarUrl]} tileSize={256}>
+          <MapGL.RasterLayer id="radar-layer" style={{ rasterOpacity: 0.65 }} />
+        </MapGL.RasterSource>
       )}
 
       {/* ── Active wildfires (USFS) ───────────────────────────────────── */}
       {showFire && fireData && (
-        <MapLibreGL.ShapeSource id="fire-overlay" shape={fireData}>
-          <MapLibreGL.FillLayer
+        <MapGL.ShapeSource id="fire-overlay" shape={fireData}>
+          <MapGL.FillLayer
             id="fire-fill"
             style={{ fillColor: '#dc2626', fillOpacity: 0.3 }}
           />
-          <MapLibreGL.LineLayer
+          <MapGL.LineLayer
             id="fire-line"
             style={{ lineColor: '#ef4444', lineWidth: 1.5, lineOpacity: 0.85 }}
           />
-        </MapLibreGL.ShapeSource>
+        </MapGL.ShapeSource>
       )}
 
       {/* ── Avalanche danger zones ────────────────────────────────────── */}
       {showAva && avaData && (
-        <MapLibreGL.ShapeSource id="ava-overlay" shape={avaData}>
-          <MapLibreGL.FillLayer
+        <MapGL.ShapeSource id="ava-overlay" shape={avaData}>
+          <MapGL.FillLayer
             id="ava-fill"
             style={{
               fillColor: ['match', ['get', 'danger_level'],
@@ -2405,13 +2487,13 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               fillOpacity: 0.45,
             }}
           />
-        </MapLibreGL.ShapeSource>
+        </MapGL.ShapeSource>
       )}
 
       {/* ── MVUM — USFS Motor Vehicle Use Map ────────────────────────── */}
       {showMvum && mvumRoads && (
-        <MapLibreGL.ShapeSource id="mvum-roads" shape={mvumRoads}>
-          <MapLibreGL.LineLayer
+        <MapGL.ShapeSource id="mvum-roads" shape={mvumRoads}>
+          <MapGL.LineLayer
             id="mvum-roads-line"
             style={{
               lineColor: ['case',
@@ -2422,68 +2504,68 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               lineOpacity: 0.85,
             }}
           />
-        </MapLibreGL.ShapeSource>
+        </MapGL.ShapeSource>
       )}
       {showMvum && mvumTrails && (
-        <MapLibreGL.ShapeSource id="mvum-trails" shape={mvumTrails}>
-          <MapLibreGL.LineLayer
+        <MapGL.ShapeSource id="mvum-trails" shape={mvumTrails}>
+          <MapGL.LineLayer
             id="mvum-trails-line"
             style={{ lineColor: '#a855f7', lineWidth: 1.5, lineOpacity: 0.8, lineDasharray: [3, 2] }}
           />
-        </MapLibreGL.ShapeSource>
+        </MapGL.ShapeSource>
       )}
 
       {/* ── BLM / Land ownership overlay ─────────────────────────────── */}
       {showLandOverlay && (
-        <MapLibreGL.RasterSource
+        <MapGL.RasterSource
           id="land-overlay"
           tileUrlTemplates={[`${API_BASE_URL}/api/land-tile/{z}/{y}/{x}`]}
           tileSize={256}
           minZoomLevel={4}
           maxZoomLevel={15}
         >
-          <MapLibreGL.RasterLayer
+          <MapGL.RasterLayer
             id="land-overlay-layer"
             style={{ rasterOpacity: 0.45 }}
           />
-        </MapLibreGL.RasterSource>
+        </MapGL.RasterSource>
       )}
 
       {/* ── USGS Topo overlay ─────────────────────────────────────────── */}
       {showUsgsOverlay && (
-        <MapLibreGL.RasterSource
+        <MapGL.RasterSource
           id="usgs-overlay"
           tileUrlTemplates={['https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}']}
           tileSize={256}
           minZoomLevel={4}
           maxZoomLevel={16}
         >
-          <MapLibreGL.RasterLayer
+          <MapGL.RasterLayer
             id="usgs-overlay-layer"
             style={{ rasterOpacity: 0.7 }}
           />
-        </MapLibreGL.RasterSource>
+        </MapGL.RasterSource>
       )}
 
       {/* ── Report markers ────────────────────────────────────────────── */}
       {reports.map(r => (
-        <MapLibreGL.MarkerView key={`rep-${r.id}`} id={`rep-${r.id}`} coordinate={[r.lng, r.lat]}>
+        <MapGL.MarkerView key={`rep-${r.id}`} id={`rep-${r.id}`} coordinate={[r.lng, r.lat]}>
           <ReportDot type={r.type} subtype={r.subtype} />
-        </MapLibreGL.MarkerView>
+        </MapGL.MarkerView>
       ))}
 
       {/* ── Search marker ─────────────────────────────────────────────── */}
       {searchMarker && (
-        <MapLibreGL.MarkerView id="search" coordinate={[searchMarker.lng, searchMarker.lat]}>
+        <MapGL.MarkerView id="search" coordinate={[searchMarker.lng, searchMarker.lat]}>
           <View style={styles.searchMarker}>
             <View style={styles.searchPin} />
           </View>
-        </MapLibreGL.MarkerView>
+        </MapGL.MarkerView>
       )}
 
       {/* ── Waypoint markers ──────────────────────────────────────────── */}
       {waypoints.map((wp, i) => (
-        <MapLibreGL.MarkerView
+        <MapGL.MarkerView
           key={`wp-${i}-${wp.lat}-${wp.lng}`}
           id={`wp-${i}`}
           coordinate={[wp.lng, wp.lat]}
@@ -2494,9 +2576,9 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             isNavTarget={navMode && i === navTargetIdx}
             onPress={() => onWaypointTap(i, wp.name)}
           />
-        </MapLibreGL.MarkerView>
+        </MapGL.MarkerView>
       ))}
-      </MapLibreGL.MapView>
+      </MapGL.MapView>
       {traceMode && (
         <View
           style={StyleSheet.absoluteFillObject}
@@ -2531,6 +2613,85 @@ function kindLabel(kind: string): string {
     case 'shelter':    return 'Trail Shelter';
     default:           return 'Camp';
   }
+}
+
+function mapboxPlaceType(props: Record<string, any>): OsmPoi['type'] {
+  const raw = String(props?.maki || props?.class || props?.type || props?.category || props?.group || '').toLowerCase();
+  if (/(camp|caravan|rv)/.test(raw)) return 'camp';
+  if (/(trail|hiking|park)/.test(raw)) return 'trailhead';
+  if (/(fuel|gas|charging)/.test(raw)) return 'fuel';
+  if (/(restaurant|cafe|bar|food)/.test(raw)) return 'food';
+  if (/(grocery|supermarket|shop|market)/.test(raw)) return 'grocery';
+  if (/(hotel|lodg|motel)/.test(raw)) return 'lodging';
+  if (/(view|attraction|museum|monument|landmark)/.test(raw)) return 'attraction';
+  if (/(water|drinking)/.test(raw)) return 'water';
+  return 'poi';
+}
+
+function mapboxFeaturePickScore(feature: any): number {
+  const props = feature?.properties ?? {};
+  const layerId = String(feature?.layer?.id || feature?.sourceLayer || feature?.source || '').toLowerCase();
+  const raw = String(props.maki || props.class || props.type || props.category || props.group || props.poi_category || '').toLowerCase();
+  const hasPoiSignal = !!String(props.maki || props.poi_category || props.category || props.type || '').trim();
+  let score = 100;
+  if (layerId.includes('poi')) score -= 55;
+  if (layerId.includes('label')) score -= 18;
+  if (layerId.includes('transit') || layerId.includes('airport')) score -= 20;
+  if (feature?.geometry?.type === 'Point') score -= 14;
+  if (hasPoiSignal) score -= 12;
+  if (/(restaurant|cafe|bar|food|pizza|fuel|gas|charging|grocery|supermarket|shop|market|hotel|lodg|motel|view|attraction|museum|monument|landmark|water|drinking|trail|hiking|park|camp|caravan|rv)/.test(raw)) score -= 30;
+  if (layerId.includes('building')) score += 16;
+  if (layerId.includes('road') || layerId.includes('boundary') || layerId.includes('landuse')) score += 40;
+  if (/(country|state|province|settlement|city|town|village|neighborhood|postcode|address|road|street|motorway|primary|secondary|water|ocean|landuse)/.test(raw)) score += 45;
+  return score;
+}
+
+function mapMapboxFeatureToPoi(feature: any, fallbackLat: number, fallbackLng: number): OsmPoi | null {
+  const props = feature?.properties ?? {};
+  const layerId = String(feature?.layer?.id || feature?.sourceLayer || feature?.source || '').toLowerCase();
+  if (layerId.includes('trailhead-web-route') || layerId.includes('route') || layerId.includes('trailhead')) return null;
+  const name = String(
+    props.name
+    || props.name_en
+    || props.name_script
+    || props.name_local
+    || props.brand
+    || props.full_address
+    || ''
+  ).trim();
+  if (!name || name.length < 2) return null;
+  const coords = feature?.geometry?.type === 'Point' && Array.isArray(feature.geometry.coordinates)
+    ? feature.geometry.coordinates
+    : [fallbackLng, fallbackLat];
+  const lng = Number(coords[0]);
+  const lat = Number(coords[1]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  const type = mapboxPlaceType(props);
+  const subtype = String(props.maki || props.class || props.category || props.type || props.group || '').replace(/[_-]+/g, ' ').trim();
+  return {
+    id: `mapbox_feature:${String(props.mapbox_id || props.id || `${lat.toFixed(5)}:${lng.toFixed(5)}:${name}`).slice(0, 160)}`,
+    name,
+    lat,
+    lng,
+    type,
+    subtype: subtype || 'mapbox place',
+    source: 'mapbox_feature',
+    source_label: 'Mapbox',
+    provider_place_id: props.mapbox_id || props.id,
+    place_id: props.mapbox_id || props.id,
+    attribution: 'Mapbox',
+    source_badge: 'Mapbox basemap',
+    source_freshness: 'Temporary Mapbox basemap feature. Save only if you want to create a Trailhead-owned place.',
+    summary: `${subtype || 'Place'} selected from the EXTREME Mapbox basemap.`,
+  } as OsmPoi;
+}
+
+function bestMapboxPoiFromFeatures(features: any[] | undefined, fallbackLat: number, fallbackLng: number): OsmPoi | null {
+  if (!Array.isArray(features) || !features.length) return null;
+  return features
+    .map(feature => ({ poi: mapMapboxFeatureToPoi(feature, fallbackLat, fallbackLng), score: mapboxFeaturePickScore(feature) }))
+    .filter((item): item is { poi: OsmPoi; score: number } => !!item.poi)
+    .sort((a, b) => a.score - b.score)[0]?.poi ?? null;
 }
 
 function waterKindLabel(kind?: string): string {

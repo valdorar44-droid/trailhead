@@ -3105,6 +3105,49 @@ def stage_extreme_copilot_action(user_id: int, command: str, action_type: str,
         out["payload"] = {}
     return out
 
+def confirm_extreme_copilot_action(user_id: int, action_id: int, confirmed: bool,
+                                   client_result: dict | None = None) -> dict | None:
+    db = _conn()
+    row = db.execute(
+        "SELECT * FROM extreme_copilot_actions WHERE id=? AND user_id=?",
+        (action_id, user_id),
+    ).fetchone()
+    if not row:
+        db.close()
+        return None
+    payload = {}
+    try:
+        payload = json.loads(row["payload"] or "{}")
+    except Exception:
+        payload = {}
+    payload["confirmation"] = {
+        "confirmed": bool(confirmed),
+        "client_result": client_result or {},
+        "at": int(time.time()),
+    }
+    if not confirmed:
+        status = "canceled"
+    else:
+        result = client_result or {}
+        status = "failed" if result.get("applied") is False or result.get("error") else "applied"
+    payload["confirmation"]["status"] = status
+    confirmed_at = int(time.time()) if confirmed else None
+    db.execute(
+        "UPDATE extreme_copilot_actions SET status=?, payload=?, confirmed_at=? WHERE id=? AND user_id=?",
+        (status, json.dumps(payload), confirmed_at, action_id, user_id),
+    )
+    db.commit()
+    updated = db.execute("SELECT * FROM extreme_copilot_actions WHERE id=? AND user_id=?", (action_id, user_id)).fetchone()
+    db.close()
+    if not updated:
+        return None
+    out = dict(updated)
+    try:
+        out["payload"] = json.loads(out.get("payload") or "{}")
+    except Exception:
+        out["payload"] = {}
+    return out
+
 def list_extreme_sessions(limit: int = 50) -> list[dict]:
     db = _conn()
     rows = db.execute(

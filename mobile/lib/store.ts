@@ -245,7 +245,7 @@ export const useStore = create<AppState>((set) => ({
   activeTrip: null,
   rigProfile: null,
   tripHistory: [],
-  themeMode: 'dark',
+  themeMode: 'light',
   weatherUnitMode: 'auto',
   userLoc: null,
   mapboxToken: '',
@@ -524,7 +524,7 @@ export const useStore = create<AppState>((set) => ({
       ss('trailhead_rig', JSON.stringify(rigFromFile));
     }
     if (historyRaw) patch.tripHistory = JSON.parse(historyRaw);
-    patch.themeMode = themeRaw === 'light' ? 'light' : 'dark';
+    patch.themeMode = themeRaw === 'dark' ? 'dark' : 'light';
     patch.weatherUnitMode = weatherUnitsRaw === 'imperial' || weatherUnitsRaw === 'metric' ? weatherUnitsRaw : 'auto';
     if (favRaw) patch.favoriteCamps = JSON.parse(favRaw);
     if (cachedRegionsRaw) patch.cachedRegions = JSON.parse(cachedRegionsRaw);

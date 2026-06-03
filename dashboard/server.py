@@ -71,7 +71,7 @@ from db.store import (
     log_event, cleanup_stale_data,
     get_camp_brief, set_camp_brief, has_active_plan, activate_plan, use_free_camp_search,
     has_extreme_plan, create_extreme_demo_session, end_extreme_demo_session,
-    log_extreme_ledger_event, save_extreme_trip_metadata, stage_extreme_copilot_action,
+    log_extreme_ledger_event, save_extreme_trip_metadata, stage_extreme_copilot_action, confirm_extreme_copilot_action,
     list_extreme_sessions, list_extreme_ledger_events, get_extreme_ledger_summary,
     get_extreme_admin_config, set_extreme_admin_config,
     authorize_offline_download,
@@ -1101,10 +1101,121 @@ class ExtremeCopilotCommandRequest(BaseModel):
     mode: str = "text"
     context: dict = Field(default_factory=dict)
 
+class CopilotContext(BaseModel):
+    user: dict = Field(default_factory=dict)
+    map: dict = Field(default_factory=dict)
+    route: dict = Field(default_factory=dict)
+    trip: dict = Field(default_factory=dict)
+    safety: dict = Field(default_factory=dict)
+
+class ExtremeCopilotSessionRequest(BaseModel):
+    surface: str = "map_layers"
+    trip_id: Optional[str] = None
+    context: CopilotContext = Field(default_factory=CopilotContext)
+    metadata: dict = Field(default_factory=dict)
+
+class ExtremeCopilotMessageRequest(BaseModel):
+    session_id: Optional[str] = None
+    trip_id: Optional[str] = None
+    message: str
+    mode: str = "text"
+    context: CopilotContext = Field(default_factory=CopilotContext)
+    provider: str = "trailhead_openai"
+
+class ExtremeCopilotConfirmRequest(BaseModel):
+    action_id: int
+    confirmed: bool = True
+    client_result: dict = Field(default_factory=dict)
+
+class RealtimeCopilotSessionRequest(BaseModel):
+    session_id: Optional[str] = None
+    voice: str = ""
+    mode: str = "push_to_talk"
+    wake_phrase: bool = False
+    context: CopilotContext = Field(default_factory=CopilotContext)
+
+class MapActionRequest(BaseModel):
+    action_id: str
+    action_type: str
+    args: dict = Field(default_factory=dict)
+    requires_confirmation: bool = False
+    cost_class: str = "local"
+    surface: str = "map_layers"
+    provider: str = "trailhead_openai"
+
+class MapActionResult(BaseModel):
+    ok: bool
+    message: str
+    map_updates: dict = Field(default_factory=dict)
+    status: Optional[str] = None
+    spoken_summary: Optional[str] = None
+    results: list[dict] = Field(default_factory=list)
+    selected: Optional[dict] = None
+    requires_confirmation: Optional[bool] = None
+    selected_place: Optional[dict] = None
+    route_preview: Optional[dict] = None
+    location_status: Optional[dict] = None
+    navigation: Optional[dict] = None
+    route_builder_draft: Optional[dict] = None
+    current_screen: Optional[str] = None
+    failure_reason: Optional[str] = None
+    ledger_id: Optional[int] = None
+    error_code: Optional[str] = None
+
 class ExtremeRouteRiskRequest(BaseModel):
     trip_id: Optional[str] = None
     route: list[dict] = Field(default_factory=list)
     checkpoints: list[ExtremeCheckpoint] = Field(default_factory=list)
+    metadata: dict = Field(default_factory=dict)
+
+class ExtremeSearchSessionRequest(BaseModel):
+    surface: str = "map_layers"
+    metadata: dict = Field(default_factory=dict)
+
+class ExtremeSearchSuggestRequest(BaseModel):
+    q: str
+    session_token: str
+    proximity: str = ""
+    origin: str = ""
+    bbox: str = ""
+    country: str = ""
+    types: str = ""
+    language: str = "en"
+    limit: int = 8
+
+class ExtremeSearchRetrieveRequest(BaseModel):
+    mapbox_id: str
+    session_token: str
+    language: str = "en"
+    proximity: str = ""
+    origin: str = ""
+
+class ExtremeSearchCategoryRequest(BaseModel):
+    category: str
+    proximity: str = ""
+    bbox: str = ""
+    country: str = ""
+    language: str = "en"
+    limit: int = 10
+
+class ExtremeSearchReverseRequest(BaseModel):
+    lat: float
+    lng: float
+    language: str = "en"
+    limit: int = 5
+    country: str = ""
+    types: str = ""
+
+class ExtremeDirectionsRequest(BaseModel):
+    coordinates: list[list[float]] = Field(default_factory=list)
+    profile: str = "mapbox/driving-traffic"
+    steps: bool = True
+    alternatives: bool = False
+    annotations: str = ""
+    exclude: str = ""
+    language: str = "en"
+    voice_units: str = "imperial"
+    overview: str = "full"
     metadata: dict = Field(default_factory=dict)
 
 class AdminExtremeConfigBody(BaseModel):
@@ -1115,6 +1226,7 @@ class AdminExtremeConfigBody(BaseModel):
     weather_enabled: Optional[bool] = None
     voice_enabled: Optional[bool] = None
     copilot_enabled: Optional[bool] = None
+    copilot_wake_phrase_enabled: Optional[bool] = None
     native_mode_enabled: Optional[bool] = None
     mapgpt_pilot_enabled: Optional[bool] = None
     atlas_pilot_enabled: Optional[bool] = None
@@ -1149,6 +1261,31 @@ EXTREME_WEATHER_LAYERS = [
 ]
 
 EXTREME_COPILOT_ACTIONS = {
+    "getMapContext": "Get map context",
+    "searchPlaces": "Search places",
+    "searchTrails": "Search trails",
+    "selectPlace": "Select place",
+    "flyToPlace": "Fly to place",
+    "toggleLayer": "Toggle layer",
+    "setMapStyle": "Set map style",
+    "buildRoute": "Build route",
+    "startNavigation": "Start navigation",
+    "modifyRoute": "Modify route",
+    "dropPin": "Drop pin",
+    "saveTrip": "Save trip",
+    "downloadOfflineArea": "Download offline area",
+    "openRouteBuilderDraft": "Open Route Builder draft",
+    "updateRouteBuilderDraft": "Update Route Builder draft",
+    "buildRouteBuilderFramework": "Build Route Builder framework",
+    "readRouteBuilderContext": "Read Route Builder context",
+    "openGuide": "Open Guide",
+    "playTripGuide": "Play trip guide",
+    "openReports": "Open reports",
+    "stageReport": "Stage report",
+    "openOfflineDownloads": "Open offline downloads",
+    "openRigProfile": "Open rig profile",
+    "explainVisibleArea": "Explain visible area",
+    "askForConfirmation": "Ask for confirmation",
     "add_fuel": "Add fuel",
     "review_private_stay": "Review private stay",
     "mark_checkpoint": "Mark checkpoint",
@@ -1157,6 +1294,62 @@ EXTREME_COPILOT_ACTIONS = {
     "review_reroute": "Review reroute",
     "start_guidance": "Start guidance",
 }
+EXTREME_COPILOT_PROVIDERS = {
+    "trailhead_openai",
+    "mapbox_mapgpt_private_preview",
+    "mapbox_mcp",
+    "openai_with_mapbox_tools",
+}
+EXTREME_COPILOT_CONFIRM_ACTIONS = {
+    "startNavigation",
+    "modifyRoute",
+    "dropPin",
+    "saveTrip",
+    "downloadOfflineArea",
+    "stageReport",
+    "playTripGuide",
+    "askForConfirmation",
+}
+TRAILHEAD_COPILOT_CAPABILITY_REGISTRY = {
+    "map": {
+        "summary": "Search, fly, select cards, preview routes, toggle layers, change styles, radar, public lands, topo, satellite, nautical, pins, camps, trails, places.",
+        "commands": ["searchPlaces", "searchTrails", "selectPlace", "flyToPlace", "toggleLayer", "setMapStyle", "buildRoute", "dropPin"],
+        "confirmation": ["dropPin"],
+    },
+    "navigation": {
+        "summary": "buildRoute previews an animated route line. startNavigation is a separate confirmed action and must not claim success without client navigation state.",
+        "commands": ["buildRoute", "startNavigation"],
+        "required_context": ["current location", "destination"],
+        "confirmation": ["startNavigation"],
+    },
+    "route_builder": {
+        "summary": "Multi-day trip planning belongs in Route Builder or AI Planner, not simple map routing. Full plan/build/create requests should run the Route Builder framework, not only open the draft.",
+        "commands": ["openRouteBuilderDraft", "updateRouteBuilderDraft", "buildRouteBuilderFramework", "readRouteBuilderContext"],
+        "fields": ["start", "destination", "stops", "days", "tripShape", "routeStyle", "campPreference", "campReuse", "driveHours", "targetMiles", "restDays", "rigConstraints", "fuelStrategy", "poiPreferences"],
+        "vocabulary": {
+            "wild": ["wild", "adventure", "backroads"],
+            "direct": ["direct", "fastest"],
+            "balanced": ["scenic but sane", "balanced"],
+            "public_camps": ["dispersed", "boondock", "free", "blm", "usfs", "public land"],
+            "private_camps": ["private stays", "farm", "ranch", "winery", "glamping"],
+            "same_camp_window": ["same camp", "basecamp", "there and back"],
+            "different_each_night": ["different camps", "each night"],
+        },
+    },
+    "app": {
+        "summary": "Guide, reports, offline downloads, profile/rig, paid route brief, packing list, weather/safety, water, and community pins are supported workflows.",
+        "commands": ["openGuide", "playTripGuide", "openReports", "stageReport", "openOfflineDownloads", "openRigProfile"],
+        "confirmation": ["playTripGuide", "stageReport", "downloadOfflineArea", "saveTrip"],
+    },
+}
+
+def _copilot_capability_summary() -> str:
+    lines = []
+    for domain, data in TRAILHEAD_COPILOT_CAPABILITY_REGISTRY.items():
+        commands = ", ".join(data.get("commands", []))
+        lines.append(f"{domain}: {data.get('summary', '')} Tools: {commands}.")
+    return " ".join(lines)
+EXTREME_ADMIN_SURFACES = ["map_layers", "map", "route_builder", "navigation", "weather", "copilot"]
 
 def _extreme_allowed_surfaces() -> list[str]:
     allowed = []
@@ -1164,7 +1357,7 @@ def _extreme_allowed_surfaces() -> list[str]:
         clean = re.sub(r"[^a-z0-9_]+", "", raw.strip().lower().replace("-", "_"))
         if clean:
             allowed.append(clean)
-    return list(dict.fromkeys(allowed or ["map", "route_builder"]))
+    return list(dict.fromkeys(allowed or ["map_layers"]))
 
 def _extreme_style_uris() -> dict:
     return {
@@ -1213,7 +1406,7 @@ def _extreme_allowed_surfaces_from_overrides(overrides: dict) -> list[str]:
         clean = _clean_extreme_surface(item)
         if clean:
             allowed.append(clean)
-    return list(dict.fromkeys(allowed or ["map", "route_builder"]))
+    return list(dict.fromkeys(allowed or ["map_layers"]))
 
 def _extreme_feature_flags(beta_active: bool, overrides: dict) -> dict:
     return {
@@ -1231,12 +1424,27 @@ def _extreme_config_for_user(user: dict | None) -> dict:
     overrides = _extreme_runtime_overrides()
     db_kill_switch = _bool_override(overrides, "kill_switch", False)
     kill_switch = bool(settings.extreme_kill_switch or db_kill_switch)
+    is_admin = bool(user and user.get("is_admin"))
     master_enabled = bool(settings.extreme_enabled)
     db_enabled = _bool_override(overrides, "enabled", True)
-    beta_active = bool(master_enabled and db_enabled and not kill_switch)
+    beta_active = bool(((master_enabled and db_enabled) or is_admin) and not kill_switch)
     entitled = has_extreme_plan(user)
-    allowed_surfaces = _extreme_allowed_surfaces_from_overrides(overrides) if beta_active else []
+    if beta_active and is_admin:
+        allowed_surfaces = list(dict.fromkeys([*_extreme_allowed_surfaces_from_overrides(overrides), *EXTREME_ADMIN_SURFACES]))
+    else:
+        allowed_surfaces = _extreme_allowed_surfaces_from_overrides(overrides) if beta_active else []
     feature_flags = _extreme_feature_flags(beta_active, overrides)
+    if beta_active and is_admin:
+        feature_flags.update({
+            "native_mode": True,
+            "search": True,
+            "weather": True,
+            "navigation": True,
+            "voice": True,
+            "copilot": True,
+            "mapgpt_pilot": True,
+            "atlas_pilot": True,
+        })
     max_demo_session_seconds = _int_override(overrides, "max_demo_session_seconds", settings.extreme_max_demo_session_seconds, 60, 7200)
     max_navigation_session_seconds = _int_override(overrides, "max_navigation_session_seconds", settings.extreme_max_navigation_session_seconds, 300, 86400)
     return {
@@ -1255,13 +1463,15 @@ def _extreme_config_for_user(user: dict | None) -> dict:
         "feature_flags": feature_flags,
         "weather": {
             "enabled": feature_flags["weather"],
+            "provider": "mapbox" if settings.extreme_mapbox_weather_enabled else "trailhead",
+            "mapbox_conditions_enabled": bool(feature_flags["weather"] and settings.extreme_mapbox_weather_enabled),
             "layers": EXTREME_WEATHER_LAYERS,
         },
         "copilot": {
             "enabled": feature_flags["copilot"],
             "voice_enabled": feature_flags["voice"],
             "press_to_talk": feature_flags["voice"],
-            "wake_phrase": False,
+            "wake_phrase": bool(feature_flags["voice"] and _bool_override(overrides, "copilot_wake_phrase_enabled", settings.extreme_copilot_wake_phrase_enabled)),
             "persona": _str_override(overrides, "copilot_persona", settings.extreme_copilot_persona, 160),
             "voice": _str_override(overrides, "copilot_voice", settings.extreme_copilot_voice, 80),
             "actions": EXTREME_COPILOT_ACTIONS,
@@ -1320,6 +1530,461 @@ def _classify_extreme_command(command: str) -> tuple[str, str]:
         return "start_guidance", "Guidance request staged for confirmation."
     return "mark_checkpoint", "Checkpoint staged for review."
 
+def _require_extreme_copilot(user: dict, voice: bool = False) -> dict:
+    config = _extreme_config_for_user(user)
+    if config["kill_switch"]:
+        raise HTTPException(403, {"code": "extreme_disabled", "message": "Extreme Explorer is temporarily unavailable."})
+    if not config["enabled"] or not config["entitled"]:
+        raise HTTPException(403, {"code": "extreme_hidden_beta", "message": "Extreme Explorer is in hidden beta for selected accounts."})
+    if "copilot" not in config["allowed_surfaces"] and "map_layers" not in config["allowed_surfaces"]:
+        raise HTTPException(403, {"code": "extreme_copilot_unavailable", "message": "EXTREME Copilot is not available on this surface."})
+    if not config["feature_flags"]["copilot"]:
+        raise HTTPException(403, {"code": "extreme_copilot_disabled", "message": "Co-Pilot is not enabled for this beta."})
+    if voice and not config["feature_flags"]["voice"]:
+        raise HTTPException(403, {"code": "extreme_voice_disabled", "message": "Voice commands are not enabled for this beta."})
+    return config
+
+def _copilot_context_dict(ctx: CopilotContext | dict | None) -> dict:
+    if isinstance(ctx, CopilotContext):
+        data = ctx.dict()
+    elif isinstance(ctx, dict):
+        data = ctx
+    else:
+        data = {}
+    return {
+        "user": data.get("user") if isinstance(data.get("user"), dict) else {},
+        "map": data.get("map") if isinstance(data.get("map"), dict) else {},
+        "route": data.get("route") if isinstance(data.get("route"), dict) else {},
+        "trip": data.get("trip") if isinstance(data.get("trip"), dict) else {},
+        "safety": data.get("safety") if isinstance(data.get("safety"), dict) else {},
+    }
+
+def _copilot_provider(provider: str = "") -> str:
+    clean = re.sub(r"[^a-z0-9_]+", "", str(provider or "").lower())[:80]
+    return clean if clean in EXTREME_COPILOT_PROVIDERS else "trailhead_openai"
+
+def _openai_realtime_model(fallback: bool = False) -> str:
+    raw = settings.openai_realtime_fallback_model if fallback else settings.openai_realtime_model
+    clean = re.sub(r"[^a-zA-Z0-9_.:-]+", "", str(raw or ""))[:80]
+    return clean or ("gpt-realtime-mini" if fallback else "gpt-realtime-2")
+
+def _openai_realtime_voice(raw: str = "") -> str:
+    clean = re.sub(r"[^a-zA-Z0-9_.:-]+", "", str(raw or "").strip().lower())[:80]
+    known = {"alloy", "ash", "ballad", "cedar", "coral", "echo", "marin", "sage", "shimmer", "verse"}
+    if clean == "trailhead":
+        return "marin"
+    return clean if clean in known else "marin"
+
+def _copilot_realtime_tools() -> list[dict]:
+    return [{
+        "type": "function",
+        "name": "map_action",
+        "description": "Stage a Trailhead map action. The mobile client executes this through the same MapActionRequest executor used by text Copilot.",
+        "parameters": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "action_type": {
+                    "type": "string",
+                    "enum": [
+                        "getMapContext", "searchPlaces", "searchTrails", "selectPlace", "flyToPlace",
+                        "toggleLayer", "setMapStyle", "buildRoute", "startNavigation", "modifyRoute", "dropPin",
+                        "saveTrip", "downloadOfflineArea", "openRouteBuilderDraft", "updateRouteBuilderDraft",
+                        "buildRouteBuilderFramework", "readRouteBuilderContext", "openGuide", "playTripGuide",
+                        "openReports", "stageReport", "openOfflineDownloads", "openRigProfile",
+                        "explainVisibleArea", "askForConfirmation",
+                    ],
+                },
+                "args": {"type": "object"},
+                "requires_confirmation": {"type": "boolean"},
+                "label": {"type": "string"},
+            },
+            "required": ["action_type", "args", "requires_confirmation"],
+        },
+    }]
+
+def _copilot_realtime_instructions(wake_phrase: bool) -> str:
+    capabilities = _copilot_capability_summary()
+    base = (
+        "You are Trailhead Copilot, a concise overland map voice assistant. "
+        f"Trailhead capabilities: {capabilities} "
+        "Use map_action for map changes. Keep spoken confirmations short. "
+        "For questions about what is visible, call map_action with explainVisibleArea and answer from the tool output. "
+        "For fly-to commands with a named place, call flyToPlace with args.target.name set to the place name. "
+        "For campground searches near a named place, call searchPlaces with args.category=\"camp\", args.query set to the place name, "
+        "and args.open_card=true when the user asks for one campground or the best/top option. "
+        "For restaurants, food, scenic viewpoints, landmarks, or attractions near a named place, call searchPlaces with args.category set to "
+        "\"food\", \"viewpoint\", or \"attraction\", args.query set to the named place, and args.open_card=true so the map can show a result list and card. "
+        "For cuisine followups such as pizza, tacos, burgers, coffee, BBQ, sushi, or Italian, call searchPlaces with args.category=\"food\" and args.keyword set to the cuisine; do not geocode the cuisine as a destination. "
+        "For followups like \"open the second one\" use selectPlace. For \"route me there\" use buildRoute to preview only. "
+        "For \"start navigation\" or \"navigate there\" use startNavigation with confirmation. "
+        "For full multi-day planning such as \"plan/build/create a 5-day dispersed route from Moab to Big Sur\", call buildRouteBuilderFramework with start, destination, days, routeStyle, campPreference, fuelStrategy, poiPreferences, and rig profile context. Only use openRouteBuilderDraft when the user asks to open or prefill a draft without building. "
+        "Ignore tiny fragments, map labels, loading copy, and background speech that are not clear user commands. "
+        "After every tool call, answer only from returned tool output; do not invent camps or claim map results without tool data. "
+        "Speak brief audio responses for driving, such as \"I found three camps\" or \"Confirm to route there.\" "
+        "Never create pins, save trips, start navigation, modify active routes, stage reports, make paid calls, "
+        "or start offline downloads without confirmation."
+    )
+    if not wake_phrase:
+        return base + " Push-to-talk is active, so respond directly to the user's current utterance."
+    return base + (
+        " Wake phrase mode is active. Do not respond and do not call tools until the user says "
+        "\"Hey Trailhead\" or \"Trailhead\" near the start of the utterance. If speech is not addressed "
+        "to Trailhead, stay silent. After handling one request, return to waiting for the wake phrase."
+    )
+
+def _valid_context_point(point: dict | None) -> dict | None:
+    if not isinstance(point, dict):
+        return None
+    try:
+        lat = float(point.get("lat"))
+        lng = float(point.get("lng"))
+    except (TypeError, ValueError):
+        return None
+    if -90 <= lat <= 90 and -180 <= lng <= 180:
+        return {"lat": lat, "lng": lng}
+    return None
+
+def _extract_place_query(command: str) -> str:
+    text = str(command or "")
+    match = re.search(r"\b(?:near|around|by|in|at)\s+([a-zA-Z0-9 .,'-]{2,90})", text)
+    if not match:
+        return ""
+    query = match.group(1)
+    query = re.split(r"\b(?:for|with|that|and|then|please)\b", query, maxsplit=1, flags=re.I)[0]
+    query = re.sub(r"\b(?:campgrounds?|campsites?|camps?|rv parks?|trails?|fuel|gas|propane|restaurants?|food|eat|dining|viewpoints?|views?|scenic|cool places?|attractions?|landmarks?|nearby|around|area|map|view)\b", " ", query, flags=re.I)
+    query = re.sub(r"\s+", " ", query).strip(" .,'-")
+    if query.lower() in {"me", "here", "my location", "current location", "current view", "map view", "this area"}:
+        return ""
+    return query[:80]
+
+def _extract_food_keyword(command: str) -> str:
+    text = str(command or "").lower()
+    keyword_specs = [
+        ("pizza", r"\bpizza\b"),
+        ("tacos", r"\b(tacos?|mexican)\b"),
+        ("burgers", r"\b(burgers?|burger joint)\b"),
+        ("coffee", r"\b(coffee|cafe)\b"),
+        ("breakfast", r"\bbreakfast\b"),
+        ("barbecue", r"\b(bbq|barbecue)\b"),
+        ("sushi", r"\bsushi\b"),
+        ("thai", r"\bthai\b"),
+        ("italian", r"\bitalian\b"),
+        ("sandwiches", r"\b(sandwiches?|deli)\b"),
+    ]
+    for keyword, pattern in keyword_specs:
+        if re.search(pattern, text):
+            return keyword
+    return ""
+
+def _clean_route_builder_place(value: str) -> str:
+    clean = re.split(r"\b(?:for|with|using|and make|make it|different camps|same camp|basecamp|route style|camp preference|please)\b", value, maxsplit=1, flags=re.I)[0]
+    clean = re.sub(r"\b(?:mostly|camping|camps?|campsites?|campgrounds?|wild|adventure|backroads|direct|fastest|balanced|scenic but sane|dispersed|boondock|free|blm|usfs|public land|private stays?|farm|ranch|winery|glamping|rv|developed|reservable|route|trip|plan|days?|nights?)\b", " ", clean, flags=re.I)
+    return re.sub(r"\s+", " ", clean).strip(" .,'-")[:120]
+
+def _route_builder_draft_from_text(command: str, context: dict | None = None) -> dict:
+    text = (command or "").lower()
+    draft: dict = {"source": "copilot", "originalCommand": str(command or "")[:500]}
+    days_match = re.search(r"\b(\d{1,2})\s*-?\s*(?:day|days|night|nights)\b", text)
+    if days_match:
+        draft["days"] = max(1, min(30, int(days_match.group(1))))
+    hours_match = re.search(r"\b(\d{1,2}(?:\.\d+)?)\s*(?:hours?|hrs?)\b", text)
+    if hours_match:
+        draft["driveHours"] = max(1, min(14, float(hours_match.group(1))))
+    miles_match = re.search(r"\b(\d{2,3})\s*(?:mi|mile|miles)\b", text)
+    if miles_match:
+        draft["targetMiles"] = max(20, min(700, int(miles_match.group(1))))
+    to_from = re.search(r"\b(?:to|toward)\s+([a-zA-Z0-9 .,'-]{2,120}?)\s+from\s+([a-zA-Z0-9 .,'-]{2,140})", command, flags=re.I)
+    from_to = re.search(r"\bfrom\s+([a-zA-Z0-9 .,'-]{2,120}?)\s+(?:to|through|toward)\s+([a-zA-Z0-9 .,'-]{2,140})", command, flags=re.I)
+    if to_from:
+        dest = _clean_route_builder_place(to_from.group(1))
+        start = _clean_route_builder_place(to_from.group(2))
+        if start:
+            draft["start"] = start
+        if dest:
+            draft["destination"] = dest
+    elif from_to:
+        start = _clean_route_builder_place(from_to.group(1))
+        dest = _clean_route_builder_place(from_to.group(2))
+        if start:
+            draft["start"] = start
+        if dest:
+            draft["destination"] = dest
+    elif re.search(r"\b(?:to|toward)\s+[a-zA-Z0-9 .,'-]{2,120}", command, flags=re.I):
+        dest_match = re.search(r"\b(?:to|toward)\s+([a-zA-Z0-9 .,'-]{2,120})", command, flags=re.I)
+        dest = _clean_route_builder_place(dest_match.group(1)) if dest_match else ""
+        if dest:
+            draft["destination"] = dest
+    if re.search(r"\b(wild|adventure|backroads?|dirt|remote)\b", text):
+        draft["routeStyle"] = "wild"
+    elif re.search(r"\b(direct|fastest|quickest)\b", text):
+        draft["routeStyle"] = "direct"
+    elif re.search(r"\b(scenic but sane|balanced|scenic)\b", text):
+        draft["routeStyle"] = "balanced"
+    if re.search(r"\b(dispersed|boondock|boondocking|free|blm|usfs|forest service|public lands?)\b", text):
+        draft["campPreference"] = "public"
+    elif re.search(r"\b(private stays?|farm|ranch|winery|glamping|hipcamp)\b", text):
+        draft["campPreference"] = "private"
+    elif re.search(r"\b(rv|developed|reservable|hookups?)\b", text):
+        draft["campPreference"] = "rv" if "rv" in text else "developed"
+    poi_preferences = []
+    poi_specs = [
+        ("fuel", r"\b(fuel|gas|propane|resupply)\b"),
+        ("water", r"\b(water|fill water|water fill)\b"),
+        ("trailhead", r"\b(trailheads?|hikes?|hiking)\b"),
+        ("viewpoint", r"\b(viewpoints?|views?|overlooks?|scenic stops?)\b"),
+        ("hot_spring", r"\b(hot springs?)\b"),
+        ("food", r"\b(food|restaurants?|dinner|lunch|coffee)\b"),
+        ("grocery", r"\b(grocer(?:y|ies)|supplies)\b"),
+        ("mechanic", r"\b(mechanic|repair|service)\b"),
+        ("attraction", r"\b(attractions?|historic|landmarks?)\b"),
+    ]
+    for key, pattern in poi_specs:
+        if re.search(pattern, text):
+            poi_preferences.append(key)
+    if poi_preferences:
+        draft["poiPreferences"] = list(dict.fromkeys(poi_preferences))
+    draft["fuelStrategy"] = "auto_when_needed"
+    if re.search(r"\b(same camp|basecamp|base camp|there and back|out and back)\b", text):
+        draft["campReuse"] = "same_camp_window"
+        if re.search(r"\b(there and back|out and back)\b", text):
+            draft["tripShape"] = "there_and_back"
+    elif re.search(r"\b(different camps?|each night|new camp)\b", text):
+        draft["campReuse"] = "different_each_night"
+    if re.search(r"\b(loop|round trip)\b", text):
+        draft["tripShape"] = "loop"
+    elif "tripShape" not in draft and re.search(r"\b(one way|one-way)\b", text):
+        draft["tripShape"] = "one_way"
+    if re.search(r"\b(use my rig|rig profile|vehicle profile|trailer|clearance)\b", text):
+        draft["useRigProfile"] = True
+        user_ctx = (context or {}).get("user") if isinstance((context or {}).get("user"), dict) else {}
+        rig = user_ctx.get("rig_profile") if isinstance(user_ctx, dict) else None
+        if isinstance(rig, dict):
+            draft["rigConstraints"] = rig
+    else:
+        user_ctx = (context or {}).get("user") if isinstance((context or {}).get("user"), dict) else {}
+        rig = user_ctx.get("rig_profile") if isinstance(user_ctx, dict) else None
+        if isinstance(rig, dict):
+            draft["useRigProfile"] = True
+            draft["rigConstraints"] = rig
+    return draft
+
+def _is_route_builder_request(text: str) -> bool:
+    return bool(
+        re.search(r"\b(route builder|trip builder|ai planner|plan|build|create|draft)\b", text)
+        and re.search(r"\b(route|trip|itinerary|days?|nights?|from\b.*\bto\b|camp|camps|dispersed|boondock|wild|private stays?)\b", text)
+        and not re.search(r"\b(route me|directions|navigate there|start navigation|guidance)\b", text)
+    )
+
+def _route_builder_should_auto_build(text: str, draft: dict) -> bool:
+    if not _is_route_builder_request(text):
+        return False
+    if re.search(r"\b(open|show|draft|prefill|set up|fill in)\b", text) and not re.search(r"\b(plan|build|create|generate)\b", text):
+        return False
+    return bool(re.search(r"\b(plan|build|create|generate|make me|make a|route planner|itinerary)\b", text) and (draft.get("destination") or draft.get("start") or draft.get("days")))
+
+def _build_extreme_map_action(command: str, context: dict, provider: str = "trailhead_openai") -> dict:
+    text = (command or "").lower()
+    provider = _copilot_provider(provider)
+    map_ctx = context.get("map") or {}
+    route_ctx = context.get("route") or {}
+    trip_ctx = context.get("trip") or {}
+    user_ctx = context.get("user") or {}
+    center = _valid_context_point(map_ctx.get("center")) or _valid_context_point(user_ctx.get("location"))
+    route_active = bool(route_ctx.get("active_route") or route_ctx.get("destination") or trip_ctx.get("active_trip"))
+
+    action_type = "explainVisibleArea"
+    args: dict = {"scope": "visible_area"}
+    message = "I can explain this area or stage a map action."
+    map_updates: dict = {"assistant_panel": True}
+    selected_place = None
+    route_preview = None
+    route_builder_draft = None
+    cost_class = "local"
+    requires_confirmation = False
+
+    if re.search(r"\bwhat can i do|help|capabilities|how do i\b", text):
+        action_type = "getMapContext"
+        args = {"scope": "current_screen", "capabilities": TRAILHEAD_COPILOT_CAPABILITY_REGISTRY}
+        map_updates = {"assistant_panel": True}
+        message = "I can help with this screen, map search, route previews, Route Builder, Guide, reports, offline, rig profile, and safety workflows."
+    elif re.search(r"\b(build it|create it|run it|generate it|finish the route|build the framework)\b", text):
+        action_type = "buildRouteBuilderFramework"
+        args = {"draft": _route_builder_draft_from_text(command, context)}
+        args["draft"]["autoBuild"] = True
+        route_builder_draft = args["draft"]
+        map_updates = {"open_route_builder": True, "route_builder_auto_build": True}
+        message = "Route Builder is building the trip framework."
+    elif _is_route_builder_request(text):
+        draft = _route_builder_draft_from_text(command, context)
+        if _route_builder_should_auto_build(text, draft):
+            draft["autoBuild"] = True
+            action_type = "buildRouteBuilderFramework"
+            map_updates = {"open_route_builder": True, "route_builder_auto_build": True}
+            message = "Route Builder is building the trip framework."
+        else:
+            action_type = "openRouteBuilderDraft"
+            map_updates = {"open_route_builder": True, "route_builder_draft": True}
+            message = "Route Builder draft ready."
+        args = {"draft": draft}
+        route_builder_draft = args["draft"]
+    elif re.search(r"\b(make it|change it|update (the )?draft|different camps?|same camp|basecamp|private stays?|dispersed|boondock|direct|fastest|wild|scenic but sane|use my rig|rig profile)\b", text) and not re.search(r"\b(route me|navigate|start navigation|open (my )?rig|show (my )?rig)\b", text):
+        action_type = "updateRouteBuilderDraft"
+        args = {"draft": _route_builder_draft_from_text(command, context)}
+        route_builder_draft = args["draft"]
+        map_updates = {"route_builder_draft": True}
+        message = "Route Builder draft updated."
+    elif re.search(r"\b(start navigation|start guidance|navigate there|navigate to it|begin navigation|go there now)\b", text):
+        action_type = "startNavigation"
+        args = {"instruction": command[:240], "destination": route_ctx.get("destination") or map_ctx.get("selected_place"), "require_location": True}
+        map_updates = {"navigation": {"requested": True}, "route_preview": True}
+        route_preview = {"status": "requires_confirmation", "instruction": command[:240]}
+        message = "Confirm to start navigation."
+        requires_confirmation = True
+    elif re.search(r"\b(open|show|go to)\s+(the\s+)?guide\b|\baudio guide\b", text):
+        action_type = "playTripGuide" if re.search(r"\b(play|read|generate)\b", text) else "openGuide"
+        args = {"trip_id": trip_ctx.get("active_trip") or trip_ctx.get("trip_id"), "play": action_type == "playTripGuide"}
+        map_updates = {"open_guide": True}
+        message = "Guide opened." if action_type == "openGuide" else "Trip guide needs confirmation before generating or playing."
+        requires_confirmation = action_type == "playTripGuide"
+    elif re.search(r"\breports?|alerts?|road condition|hazard|closure|washout\b", text):
+        action_type = "stageReport" if re.search(r"\b(add|create|submit|report)\b", text) and not re.search(r"\b(show|what|nearby|open)\b", text) else "openReports"
+        args = {"near": center, "report_type": "road_condition", "needs_location": action_type == "stageReport"}
+        map_updates = {"open_reports": True}
+        message = "Reports opened." if action_type == "openReports" else "Report creation needs confirmation and location."
+        requires_confirmation = action_type == "stageReport"
+    elif re.search(r"\b(show|open)\s+(offline|downloads?)\b", text):
+        action_type = "openOfflineDownloads"
+        args = {"target": "active_trip" if trip_ctx.get("active_trip") else "visible_area"}
+        map_updates = {"open_offline_download": True}
+        message = "Offline downloads opened."
+    elif re.search(r"\b(rig profile|vehicle profile|my rig|open rig)\b", text):
+        action_type = "openRigProfile"
+        args = {"read_context": True, "rig_profile": user_ctx.get("rig_profile")}
+        map_updates = {"open_rig_profile": True}
+        message = "Rig profile opened."
+    elif re.search(r"\bradar|weather|storm|rain|snow|wind|heat|cold|risk\b", text):
+        action_type = "toggleLayer"
+        args = {"layer": "radar", "show": True, "route_risk": route_active}
+        map_updates = {"layers": {"radar": True}, "weather_route_risk": route_active}
+        message = "Weather radar is ready to turn on."
+    elif re.search(r"\b(public lands?|land ownership|blm|usfs|forest service|bureau of land management)\b", text):
+        action_type = "toggleLayer"
+        args = {"layer": "lands", "show": not re.search(r"\boff|hide|disable\b", text)}
+        map_updates = {"layers": {"lands": args["show"]}}
+        message = "Public lands layer is ready."
+    elif re.search(r"\b(satellite|sat view|aerial)\b", text):
+        action_type = "setMapStyle"
+        args = {"style": "satellite"}
+        map_updates = {"map_style": "satellite"}
+        message = "Satellite map staged."
+    elif re.search(r"\b(topo|topographic|terrain map|contours?)\b", text):
+        action_type = "setMapStyle"
+        args = {"style": "topo"}
+        map_updates = {"map_style": "topo"}
+        message = "Topo map staged."
+    elif re.search(r"\bfuel|gas|propane|range|empty\b", text):
+        action_type = "searchPlaces"
+        category = "propane" if "propane" in text else "fuel"
+        args = {"category": category, "route_scoped": route_active, "near": center}
+        map_updates = {"open_search": True, "search_mode": "browse", "category": category}
+        message = "Fuel search staged near your route or map view." if category == "fuel" else "Propane search staged near your route or map view."
+    elif re.search(r"\b(food|restaurant|eat|dining|dinner|lunch|breakfast|cafe|coffee|bar|pizza|tacos?|mexican|burgers?|bbq|barbecue|sushi|thai|italian|sandwiches?|deli)\b", text):
+        action_type = "searchPlaces"
+        query = _extract_place_query(command)
+        keyword = _extract_food_keyword(command)
+        args = {"category": "food", "route_scoped": route_active, "near": center, "query": query, "keyword": keyword, "open_card": True, "limit": 8}
+        map_updates = {"result_list": True, "open_card": True, "category": "food", "query": query, "keyword": keyword}
+        message = f"{keyword.title() if keyword else 'Food'} search staged near {query}." if query else f"{keyword.title() if keyword else 'Food'} search staged for the current map view."
+    elif re.search(r"\b(cool places?|things to do|views?|viewpoints?|scenic|overlook|vista|landmarks?|attractions?|sights?)\b", text):
+        action_type = "searchPlaces"
+        query = _extract_place_query(command)
+        category = "viewpoint" if re.search(r"\b(views?|viewpoints?|scenic|overlook|vista)\b", text) else "attraction"
+        args = {"category": category, "route_scoped": route_active, "near": center, "query": query, "open_card": True, "limit": 8}
+        map_updates = {"result_list": True, "open_card": True, "category": category, "query": query}
+        message = f"{'Viewpoint' if category == 'viewpoint' else 'Attraction'} search staged near {query}." if query else "Place search staged for the current map view."
+    elif re.search(r"\btrail|trailhead|hike|peak|hot spring\b", text):
+        action_type = "searchTrails"
+        args = {"category": "trails", "route_scoped": route_active, "near": center}
+        map_updates = {"open_discovery": True, "discovery_mode": "trails"}
+        message = "Trail discovery staged for the current map view."
+    elif re.search(r"\bcamp|campsite|sleep|overnight|stay|rv park|private\b", text):
+        action_type = "searchPlaces"
+        query = _extract_place_query(command)
+        args = {"category": "camp", "route_scoped": route_active, "near": center, "query": query, "open_card": bool(query)}
+        map_updates = {"open_discovery": True, "discovery_mode": "camps", "query": query}
+        message = f"Camp search staged near {query}." if query else "Camp search staged for the current map view."
+    elif re.search(r"\bdrop (a )?pin|mark here|save pin|pin here\b", text):
+        action_type = "dropPin"
+        args = {"at": center, "pin_type": "camp" if "camp" in text else "other"}
+        map_updates = {"pin_drop": {"at": center}}
+        message = "Pin creation needs confirmation before it is saved."
+        requires_confirmation = True
+    elif re.search(r"\boffline|download\b", text):
+        action_type = "downloadOfflineArea"
+        args = {"target": "active_trip" if trip_ctx.get("active_trip") else "visible_area", "bounds": map_ctx.get("bounds")}
+        map_updates = {"open_offline_download": True}
+        message = "Offline download needs confirmation before it starts."
+        requires_confirmation = True
+    elif re.search(r"\bsave (this )?trip|save route|save plan\b", text):
+        action_type = "saveTrip"
+        args = {"trip_id": trip_ctx.get("active_trip") or trip_ctx.get("trip_id")}
+        message = "Trip save needs confirmation."
+        requires_confirmation = True
+    elif re.search(r"\breroute|avoid|detour|alternate|change route|modify route\b", text):
+        action_type = "modifyRoute"
+        args = {"instruction": command[:240], "route_id": route_ctx.get("route_id")}
+        map_updates = {"route_preview": True}
+        route_preview = {"status": "staged", "instruction": command[:240]}
+        message = "Route change staged for confirmation."
+        requires_confirmation = True
+    elif re.search(r"\b(select|choose|open|take me to)\b.*\b(first|second|third|1|2|3|result)\b|\b(first|second|third) result\b", text):
+        action_type = "selectPlace"
+        if re.search(r"\bthird\b|\b3\b", text):
+            index = 2
+        elif re.search(r"\bsecond\b|\b2\b", text):
+            index = 1
+        else:
+            index = 0
+        args = {"result_index": index}
+        map_updates = {"select_result_index": index}
+        selected_place = {"result_index": index}
+        message = "Selection staged from the current result list."
+    elif re.search(r"\broute me|directions|guidance\b", text):
+        action_type = "buildRoute"
+        args = {"instruction": command[:240], "destination": route_ctx.get("destination") or map_ctx.get("selected_place")}
+        map_updates = {"route_preview": True, "open_search": not bool(args.get("destination"))}
+        route_preview = {"status": "preview", "instruction": command[:240]}
+        message = "Route preview staged. Confirm separately before starting navigation."
+        requires_confirmation = False
+    elif re.search(r"\bfly|zoom|center|show me|go to|take me to\b", text):
+        action_type = "flyToPlace"
+        query = ""
+        query_match = re.search(r"\b(?:fly|zoom|center|show me|go to|take me to)\s+(?:the map\s+)?(?:to|on|at|around)?\s*([a-z0-9 .,'-]{2,80})", text)
+        if query_match:
+            query = re.sub(r"\b(?:please|map|view|area|there|here)\b", " ", query_match.group(1), flags=re.I).strip(" .,'-")
+        target = {"name": query} if query else (map_ctx.get("selected_place") or center)
+        args = {"target": target, "query": query, "zoom": 13}
+        map_updates = {"fly_to": args}
+        message = "Map move staged."
+
+    if action_type in EXTREME_COPILOT_CONFIRM_ACTIONS:
+        requires_confirmation = True
+    return {
+        "action_id": f"copilot_{uuid.uuid4().hex[:12]}",
+        "action_type": action_type,
+        "args": args,
+        "requires_confirmation": requires_confirmation,
+        "cost_class": cost_class,
+        "surface": "map_layers",
+        "provider": provider,
+        "message": message,
+        "map_updates": map_updates,
+        "selected_place": selected_place,
+        "route_preview": route_preview,
+        "route_builder_draft": route_builder_draft,
+    }
+
 def _extreme_weather_risk_points(body: ExtremeRouteRiskRequest) -> list[dict]:
     points: list[dict] = []
     for cp in body.checkpoints[:20]:
@@ -1360,7 +2025,7 @@ def _admin_extreme_config_values(body: AdminExtremeConfigBody) -> dict:
     values: dict = {}
     bool_keys = (
         "enabled", "kill_switch", "navigation_enabled", "weather_enabled",
-        "voice_enabled", "copilot_enabled", "native_mode_enabled",
+        "voice_enabled", "copilot_enabled", "copilot_wake_phrase_enabled", "native_mode_enabled",
         "mapgpt_pilot_enabled", "atlas_pilot_enabled",
     )
     for key in bool_keys:
@@ -1373,7 +2038,7 @@ def _admin_extreme_config_values(body: AdminExtremeConfigBody) -> dict:
             clean = _clean_extreme_surface(surface)
             if clean:
                 surfaces.append(clean)
-        values["allowed_surfaces"] = list(dict.fromkeys(surfaces or ["map", "route_builder"]))
+        values["allowed_surfaces"] = list(dict.fromkeys(surfaces or ["map_layers"]))
     int_specs = {
         "max_demo_session_seconds": (60, 7200),
         "max_navigation_session_seconds": (300, 86400),
@@ -2503,8 +3168,9 @@ async def route_health():
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             res = await client.get(url)
-            checks.append({"engine": "valhalla", "url": _valhalla_base_url(), "ok": res.status_code < 500, "status": res.status_code})
-            if res.status_code < 500:
+            valhalla_ok = 200 <= res.status_code < 300
+            checks.append({"engine": "valhalla", "url": _valhalla_base_url(), "ok": valhalla_ok, "status": res.status_code})
+            if valhalla_ok:
                 return {"ok": True, "engine": "valhalla", "status": res.status_code, "checks": checks}
     except Exception as e:
         checks.append({"engine": "valhalla", "url": _valhalla_base_url(), "ok": False, "error": str(e)})
@@ -3700,6 +4366,211 @@ def extreme_ledger(body: ExtremeLedgerRequest, user: dict = Depends(_current_use
     event_id = log_extreme_ledger_event(user["id"], event_type, clean_session, surface, trip_id, body.event_data or {})
     return {"ok": True, "event_id": event_id}
 
+def _require_extreme_map_layers(user: dict) -> dict:
+    config = _extreme_config_for_user(user)
+    if config["kill_switch"]:
+        raise HTTPException(403, {"code": "extreme_disabled", "message": "Extreme Explorer is temporarily unavailable."})
+    if not config["enabled"] or not config["entitled"]:
+        raise HTTPException(403, {"code": "extreme_hidden_beta", "message": "Extreme Explorer is in hidden beta for selected accounts."})
+    if "map_layers" not in config["allowed_surfaces"]:
+        raise HTTPException(403, {"code": "extreme_unavailable", "message": "Extreme map layers are not available here yet."})
+    if not settings.mapbox_token:
+        raise HTTPException(503, {"code": "mapbox_unconfigured", "message": "Mapbox is not configured."})
+    return config
+
+def _clean_mapbox_param(value: str, pattern: str, max_len: int = 160) -> str:
+    return re.sub(pattern, "", str(value or "").strip())[:max_len]
+
+def _searchbox_params(base: dict) -> dict:
+    params = {"access_token": settings.mapbox_token}
+    for key, value in base.items():
+        text = str(value or "").strip()
+        if text:
+            params[key] = text
+    return params
+
+def _mapbox_session_hash(session_token: str) -> str:
+    token = str(session_token or "").encode("utf-8")
+    return hashlib.sha1(token).hexdigest()[:16] if token else ""
+
+async def _mapbox_get(url: str, params: dict) -> dict:
+    async with httpx.AsyncClient(timeout=8) as client:
+        res = await client.get(url, params=params)
+    if res.status_code >= 400:
+        detail = res.json() if res.headers.get("content-type", "").startswith("application/json") else {"message": res.text[:500]}
+        raise HTTPException(res.status_code, detail)
+    return res.json()
+
+def _mapbox_directions_url(profile: str, coords: list[str]) -> str:
+    return f"https://api.mapbox.com/directions/v5/{profile}/{';'.join(coords)}"
+
+@app.post("/api/extreme/search/session")
+def extreme_search_session(body: ExtremeSearchSessionRequest, user: dict = Depends(_current_user)):
+    config = _require_extreme_map_layers(user)
+    if not config["feature_flags"]["search"]:
+        raise HTTPException(403, {"code": "extreme_search_disabled", "message": "Extreme search is not enabled for this beta."})
+    session_token = str(uuid.uuid4())
+    log_extreme_ledger_event(
+        user["id"],
+        "mapbox_search_session_created",
+        None,
+        "map_layers",
+        None,
+        {"session_token_hash": _mapbox_session_hash(session_token), **(body.metadata or {})},
+    )
+    return {
+        "session_token": session_token,
+        "temporary_use_only": True,
+        "expires_in_seconds": 180,
+    }
+
+@app.post("/api/extreme/search/suggest")
+async def extreme_search_suggest(body: ExtremeSearchSuggestRequest, user: dict = Depends(_current_user)):
+    config = _require_extreme_map_layers(user)
+    if not config["feature_flags"]["search"]:
+        raise HTTPException(403, {"code": "extreme_search_disabled", "message": "Extreme search is not enabled for this beta."})
+    query = " ".join(str(body.q or "").split())[:256]
+    token = _clean_mapbox_param(body.session_token, r"[^a-zA-Z0-9_.:-]+", 120)
+    if len(query) < 2 or not token:
+        raise HTTPException(400, "q and session_token are required")
+    params = _searchbox_params({
+        "q": query,
+        "session_token": token,
+        "proximity": _clean_mapbox_param(body.proximity, r"[^0-9,.\-]+", 80),
+        "origin": _clean_mapbox_param(body.origin, r"[^0-9,.\-]+", 80),
+        "bbox": _clean_mapbox_param(body.bbox, r"[^0-9,.\-]+", 120),
+        "country": _clean_countrycodes(body.country),
+        "types": _clean_mapbox_param(body.types, r"[^a-zA-Z0-9_,]+", 120),
+        "language": _clean_mapbox_param(body.language, r"[^a-zA-Z,\-]+", 40) or "en",
+        "limit": str(max(1, min(int(body.limit or 8), 10))),
+    })
+    data = await _mapbox_get("https://api.mapbox.com/search/searchbox/v1/suggest", params)
+    log_extreme_ledger_event(
+        user["id"],
+        "mapbox_search_suggest",
+        None,
+        "map_layers",
+        None,
+        {"session_token_hash": _mapbox_session_hash(token), "q_len": len(query), "count": len(data.get("suggestions", []))},
+    )
+    data["_trailhead"] = {"temporary_use_only": True}
+    return data
+
+@app.post("/api/extreme/search/retrieve")
+async def extreme_search_retrieve(body: ExtremeSearchRetrieveRequest, user: dict = Depends(_current_user)):
+    config = _require_extreme_map_layers(user)
+    if not config["feature_flags"]["search"]:
+        raise HTTPException(403, {"code": "extreme_search_disabled", "message": "Extreme search is not enabled for this beta."})
+    mapbox_id = _clean_mapbox_param(body.mapbox_id, r"[^a-zA-Z0-9_=:.+\-/]+", 300)
+    token = _clean_mapbox_param(body.session_token, r"[^a-zA-Z0-9_.:-]+", 120)
+    if not mapbox_id or not token:
+        raise HTTPException(400, "mapbox_id and session_token are required")
+    params = _searchbox_params({
+        "session_token": token,
+        "language": _clean_mapbox_param(body.language, r"[^a-zA-Z,\-]+", 40) or "en",
+        "proximity": _clean_mapbox_param(body.proximity, r"[^0-9,.\-]+", 80),
+        "origin": _clean_mapbox_param(body.origin, r"[^0-9,.\-]+", 80),
+    })
+    data = await _mapbox_get(f"https://api.mapbox.com/search/searchbox/v1/retrieve/{quote(mapbox_id, safe='')}", params)
+    log_extreme_ledger_event(
+        user["id"],
+        "mapbox_search_retrieve",
+        None,
+        "map_layers",
+        None,
+        {"session_token_hash": _mapbox_session_hash(token), "feature_count": len(data.get("features", []))},
+    )
+    data["_trailhead"] = {"temporary_use_only": True}
+    return data
+
+@app.post("/api/extreme/search/category")
+async def extreme_search_category(body: ExtremeSearchCategoryRequest, user: dict = Depends(_current_user)):
+    config = _require_extreme_map_layers(user)
+    if not config["feature_flags"]["search"]:
+        raise HTTPException(403, {"code": "extreme_search_disabled", "message": "Extreme search is not enabled for this beta."})
+    category = _clean_mapbox_param(body.category, r"[^a-zA-Z0-9_\- ]+", 80)
+    if not category:
+        raise HTTPException(400, "category is required")
+    params = _searchbox_params({
+        "proximity": _clean_mapbox_param(body.proximity, r"[^0-9,.\-]+", 80),
+        "bbox": _clean_mapbox_param(body.bbox, r"[^0-9,.\-]+", 120),
+        "country": _clean_countrycodes(body.country),
+        "language": _clean_mapbox_param(body.language, r"[^a-zA-Z,\-]+", 40) or "en",
+        "limit": str(max(1, min(int(body.limit or 10), 10))),
+    })
+    data = await _mapbox_get(f"https://api.mapbox.com/search/searchbox/v1/category/{quote(category, safe='')}", params)
+    log_extreme_ledger_event(user["id"], "mapbox_search_category", None, "map_layers", None, {"category": category, "feature_count": len(data.get("features", []))})
+    data["_trailhead"] = {"temporary_use_only": True}
+    return data
+
+@app.post("/api/extreme/search/reverse")
+async def extreme_search_reverse(body: ExtremeSearchReverseRequest, user: dict = Depends(_current_user)):
+    config = _require_extreme_map_layers(user)
+    if not config["feature_flags"]["search"]:
+        raise HTTPException(403, {"code": "extreme_search_disabled", "message": "Extreme search is not enabled for this beta."})
+    lat = float(body.lat)
+    lng = float(body.lng)
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        raise HTTPException(400, "lat/lng out of range")
+    params = _searchbox_params({
+        "latitude": f"{lat:.7f}",
+        "longitude": f"{lng:.7f}",
+        "language": _clean_mapbox_param(body.language, r"[^a-zA-Z,\-]+", 40) or "en",
+        "limit": str(max(1, min(int(body.limit or 5), 10))),
+        "country": _clean_countrycodes(body.country),
+        "types": _clean_mapbox_param(body.types, r"[^a-zA-Z0-9_,]+", 120),
+    })
+    data = await _mapbox_get("https://api.mapbox.com/search/searchbox/v1/reverse", params)
+    log_extreme_ledger_event(user["id"], "mapbox_search_reverse", None, "map_layers", None, {"feature_count": len(data.get("features", []))})
+    data["_trailhead"] = {"temporary_use_only": True}
+    return data
+
+@app.post("/api/extreme/directions")
+async def extreme_directions(body: ExtremeDirectionsRequest, user: dict = Depends(_current_user)):
+    config = _require_extreme_map_layers(user)
+    if not config["feature_flags"]["navigation"]:
+        raise HTTPException(403, {"code": "extreme_navigation_disabled", "message": "Mapbox routing is not enabled for this beta."})
+    profile = body.profile if body.profile in {"mapbox/driving-traffic", "mapbox/driving", "mapbox/walking", "mapbox/cycling"} else "mapbox/driving-traffic"
+    coords: list[str] = []
+    for point in body.coordinates[:25]:
+        if not isinstance(point, list) or len(point) < 2:
+            continue
+        try:
+            lng = float(point[0])
+            lat = float(point[1])
+        except (TypeError, ValueError):
+            continue
+        if -180 <= lng <= 180 and -90 <= lat <= 90:
+            coords.append(f"{lng:.6f},{lat:.6f}")
+    if len(coords) < 2:
+        raise HTTPException(400, "At least two valid [lng,lat] coordinates are required")
+    params = {
+        "access_token": settings.mapbox_token,
+        "geometries": "geojson",
+        "overview": body.overview if body.overview in {"full", "simplified", "false"} else "full",
+        "steps": "true" if body.steps else "false",
+        "alternatives": "true" if body.alternatives else "false",
+        "language": _clean_mapbox_param(body.language, r"[^a-zA-Z,\-]+", 40) or "en",
+        "voice_units": "metric" if body.voice_units == "metric" else "imperial",
+    }
+    annotations = _clean_mapbox_param(body.annotations, r"[^a-zA-Z_,]+", 80)
+    if annotations:
+        params["annotations"] = annotations
+    exclude = _clean_mapbox_param(body.exclude, r"[^a-zA-Z_,]+", 80)
+    if exclude:
+        params["exclude"] = exclude
+    data = await _mapbox_get(_mapbox_directions_url(profile, coords), params)
+    log_extreme_ledger_event(
+        user["id"],
+        "mapbox_directions_route",
+        None,
+        "map_layers",
+        None,
+        {"profile": profile, "coordinate_count": len(coords), "route_count": len(data.get("routes", [])), **(body.metadata or {})},
+    )
+    data["_trailhead"] = {"engine": "mapbox-directions", "temporary_use_only": True}
+    return data
+
 @app.get("/api/extreme/weather/layers")
 def extreme_weather_layers(user: dict = Depends(_current_user)):
     config = _extreme_config_for_user(user)
@@ -3733,25 +4604,22 @@ def extreme_weather_route_risk(body: ExtremeRouteRiskRequest, user: dict = Depen
 
 @app.post("/api/extreme/copilot/command")
 def extreme_copilot_command(body: ExtremeCopilotCommandRequest, user: dict = Depends(_current_user)):
-    config = _extreme_config_for_user(user)
-    if not config["enabled"]:
-        raise HTTPException(403, {"code": "extreme_hidden_beta", "message": "Extreme Explorer is in hidden beta for selected accounts."})
-    if not config["feature_flags"]["copilot"]:
-        raise HTTPException(403, {"code": "extreme_copilot_disabled", "message": "Co-Pilot is not enabled for this beta."})
+    config = _require_extreme_copilot(user, voice=str(body.mode or "").lower() == "voice")
     command = " ".join(str(body.command or "").split())[:800]
     if not command:
         raise HTTPException(400, "command is required")
     mode = _clean_extreme_event_type(body.mode or "text")
-    if mode == "voice" and not config["feature_flags"]["voice"]:
-        raise HTTPException(403, {"code": "extreme_voice_disabled", "message": "Voice commands are not enabled for this beta."})
     action_type, response = _classify_extreme_command(command)
+    context = _copilot_context_dict(body.context or {})
+    map_action = _build_extreme_map_action(command, context)
     clean_session = _clean_extreme_session_id(body.session_id)
     trip_id = (body.trip_id or "").strip()[:120] or None
     payload = {
         "response": response,
-        "requires_confirmation": True,
-        "context": body.context or {},
+        "requires_confirmation": bool(map_action["requires_confirmation"]),
+        "context": context,
         "mode": mode,
+        "map_action": map_action,
     }
     action = stage_extreme_copilot_action(user["id"], command, action_type, clean_session, trip_id, payload)
     log_extreme_ledger_event(
@@ -3760,7 +4628,16 @@ def extreme_copilot_command(body: ExtremeCopilotCommandRequest, user: dict = Dep
         clean_session,
         "copilot",
         trip_id,
-        {"action_id": action["id"], "action_type": action_type, "mode": mode},
+        {
+            "action_id": action["id"],
+            "action_type": action_type,
+            "map_action_type": map_action["action_type"],
+            "mode": mode,
+            "provider": map_action["provider"],
+            "prompt_class": action_type,
+            "result_status": "staged",
+            "cost_bucket": map_action["cost_class"],
+        },
     )
     return {
         "ok": True,
@@ -3769,11 +4646,231 @@ def extreme_copilot_command(body: ExtremeCopilotCommandRequest, user: dict = Dep
             "type": action_type,
             "label": EXTREME_COPILOT_ACTIONS.get(action_type, "Review"),
             "status": "staged",
-            "requires_confirmation": True,
+            "requires_confirmation": bool(map_action["requires_confirmation"]),
             "payload": action.get("payload") or payload,
+            "map_action": map_action,
         },
-        "message": response,
+        "message": map_action["message"] or response,
     }
+
+@app.post("/api/extreme/copilot/session")
+def extreme_copilot_session(body: ExtremeCopilotSessionRequest, user: dict = Depends(_current_user)):
+    config = _require_extreme_copilot(user)
+    surface = _clean_extreme_surface(body.surface or "map_layers")
+    if surface not in config["allowed_surfaces"] and surface != "copilot":
+        raise HTTPException(403, {"code": "extreme_copilot_surface_disabled", "message": "Copilot is not enabled on this surface."})
+    trip_id = (body.trip_id or "").strip()[:120] or None
+    context = _copilot_context_dict(body.context)
+    session = create_extreme_demo_session(
+        user["id"],
+        "copilot",
+        trip_id,
+        config["max_demo_session_seconds"],
+        {
+            "surface": surface,
+            "provider": "trailhead_openai",
+            "context_keys": [key for key, value in context.items() if value],
+            **(body.metadata or {}),
+        },
+    )
+    event_id = log_extreme_ledger_event(
+        user["id"],
+        "copilot_session_started",
+        session["session_id"],
+        "copilot",
+        trip_id,
+        {"surface": surface, "provider": "trailhead_openai"},
+    )
+    return {
+        "ok": True,
+        "session_id": session["session_id"],
+        "expires_at": session["expires_at"],
+        "provider": "trailhead_openai",
+        "voice_enabled": bool(config["feature_flags"]["voice"]),
+        "ledger_id": event_id,
+    }
+
+@app.post("/api/extreme/copilot/message")
+def extreme_copilot_message(body: ExtremeCopilotMessageRequest, user: dict = Depends(_current_user)):
+    config = _require_extreme_copilot(user, voice=str(body.mode or "").lower() == "voice")
+    message = " ".join(str(body.message or "").split())[:1200]
+    if not message:
+        raise HTTPException(400, "message is required")
+    mode = _clean_extreme_event_type(body.mode or "text")
+    provider = _copilot_provider(body.provider)
+    context = _copilot_context_dict(body.context)
+    map_action = _build_extreme_map_action(message, context, provider)
+    legacy_action_type, legacy_message = _classify_extreme_command(message)
+    clean_session = _clean_extreme_session_id(body.session_id)
+    trip_id = (body.trip_id or "").strip()[:120] or None
+    payload = {
+        "schema_version": 1,
+        "response": map_action["message"] or legacy_message,
+        "requires_confirmation": bool(map_action["requires_confirmation"]),
+        "mode": mode,
+        "provider": provider,
+        "map_action": map_action,
+        "context": context,
+    }
+    staged = stage_extreme_copilot_action(user["id"], message, map_action["action_type"], clean_session, trip_id, payload)
+    ledger_id = log_extreme_ledger_event(
+        user["id"],
+        "copilot_map_action_staged",
+        clean_session,
+        "copilot",
+        trip_id,
+        {
+            "action_id": staged["id"],
+            "action_type": map_action["action_type"],
+            "prompt_class": legacy_action_type,
+            "chosen_tool": map_action["action_type"],
+            "result_status": "staged",
+            "latency_ms": 0,
+            "cost_bucket": map_action["cost_class"],
+            "requires_confirmation": bool(map_action["requires_confirmation"]),
+            "provider": provider,
+        },
+    )
+    action_request = {
+        **{key: map_action[key] for key in ("action_id", "action_type", "args", "requires_confirmation", "cost_class", "surface", "provider")},
+        "id": staged["id"],
+        "status": "staged",
+        "label": EXTREME_COPILOT_ACTIONS.get(map_action["action_type"], "Review"),
+    }
+    result = {
+        "ok": True,
+        "message": map_action["message"] or legacy_message,
+        "map_updates": map_action["map_updates"],
+        "status": "staged",
+        "spoken_summary": map_action["message"] or legacy_message,
+        "selected_place": map_action["selected_place"],
+        "route_preview": map_action["route_preview"],
+        "route_builder_draft": map_action.get("route_builder_draft"),
+        "current_screen": (context.get("map") or {}).get("current_screen") or (context.get("trip") or {}).get("current_screen"),
+        "failure_reason": None,
+        "ledger_id": ledger_id,
+        "error_code": None,
+    }
+    return {
+        "ok": True,
+        "session_id": clean_session,
+        "provider": provider,
+        "message": result["message"],
+        "action": action_request,
+        "result": result,
+    }
+
+@app.post("/api/extreme/copilot/action/confirm")
+def extreme_copilot_action_confirm(body: ExtremeCopilotConfirmRequest, user: dict = Depends(_current_user)):
+    _require_extreme_copilot(user)
+    action = confirm_extreme_copilot_action(user["id"], int(body.action_id), bool(body.confirmed), body.client_result or {})
+    if not action:
+        raise HTTPException(404, "Copilot action not found")
+    payload = action.get("payload") or {}
+    map_action = payload.get("map_action") if isinstance(payload.get("map_action"), dict) else {}
+    ledger_id = log_extreme_ledger_event(
+        user["id"],
+        "copilot_action_confirmation",
+        action.get("session_id"),
+        "copilot",
+        action.get("trip_id"),
+        {
+            "action_id": action["id"],
+            "action_type": map_action.get("action_type") or action.get("action_type"),
+            "confirmation_outcome": "confirmed" if body.confirmed else "rejected",
+            "result_status": action.get("status"),
+            "cost_bucket": map_action.get("cost_class", "local"),
+        },
+    )
+    return {
+        "ok": True,
+        "action_id": action["id"],
+        "status": action.get("status"),
+        "confirmed": bool(body.confirmed),
+        "ledger_id": ledger_id,
+    }
+
+@app.post("/api/extreme/copilot/realtime-session")
+def extreme_copilot_realtime_session(body: RealtimeCopilotSessionRequest, user: dict = Depends(_current_user)):
+    config = _require_extreme_copilot(user, voice=True)
+    api_key = settings.openai_api_key or os.environ.get("OPENAI_API_KEY", "")
+    if not api_key:
+        raise HTTPException(503, {"code": "realtime_unconfigured", "message": "Realtime voice is not configured for this beta."})
+    voice = _openai_realtime_voice(body.voice or config["copilot"]["voice"])
+    wake_requested = bool(body.wake_phrase or str(body.mode or "").lower() == "wake_phrase")
+    wake_enabled = bool((config.get("copilot") or {}).get("wake_phrase"))
+    if wake_requested and not wake_enabled:
+        raise HTTPException(403, {"code": "extreme_wake_phrase_disabled", "message": "Wake phrase mode is not enabled for this beta."})
+    wake_phrase = bool(wake_requested and wake_enabled)
+    model = _openai_realtime_model(False)
+    fallback_model = _openai_realtime_model(True)
+    session_id = _clean_extreme_session_id(body.session_id) or f"extreme_rt_{uuid.uuid4().hex[:16]}"
+    context = _copilot_context_dict(body.context)
+    log_extreme_ledger_event(
+        user["id"],
+        "copilot_realtime_session_requested",
+        session_id,
+        "copilot",
+        None,
+        {"voice": voice, "model": model, "fallback_model": fallback_model, "wake_phrase": wake_phrase, "raw_audio_stored": False},
+    )
+    safety_id = hashlib.sha256(f"trailhead:{user['id']}".encode("utf-8")).hexdigest()
+    session_config = {
+        "session": {
+            "type": "realtime",
+            "model": model,
+            "instructions": _copilot_realtime_instructions(wake_phrase),
+            "audio": {
+                "output": {"voice": voice},
+                "input": {
+                    "turn_detection": {
+                        "type": "server_vad",
+                        "threshold": 0.75,
+                        "prefix_padding_ms": 450,
+                        "silence_duration_ms": 950,
+                        "create_response": True,
+                        "interrupt_response": False,
+                    },
+                    "noise_reduction": {"type": "near_field"},
+                },
+            },
+            "tools": _copilot_realtime_tools(),
+            "tool_choice": "auto",
+        }
+    }
+    try:
+        with httpx.Client(timeout=12.0) as client:
+            response = client.post(
+                "https://api.openai.com/v1/realtime/client_secrets",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                    "OpenAI-Safety-Identifier": safety_id,
+                },
+                json=session_config,
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(503, {"code": "realtime_openai_unavailable", "message": str(exc)[:240]})
+    if response.status_code >= 400:
+        detail = response.text[:500]
+        raise HTTPException(response.status_code, {"code": "realtime_openai_error", "message": detail})
+    data = response.json()
+    log_extreme_ledger_event(
+        user["id"],
+        "copilot_realtime_session_created",
+        session_id,
+        "copilot",
+        None,
+        {"voice": voice, "model": model, "wake_phrase": wake_phrase, "raw_audio_stored": False},
+    )
+    data["ok"] = True
+    data["session_id"] = session_id
+    data["provider"] = "openai_realtime"
+    data["model"] = model
+    data["fallback_model"] = fallback_model
+    data["voice"] = voice
+    data["wake_phrase"] = wake_phrase
+    return data
 
 
 def _clean_countrycodes(countrycodes: str = "") -> str:

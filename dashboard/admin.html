@@ -249,7 +249,7 @@ td.name{color:var(--text);font-weight:600;}
             <div class="section-label">BETA CONFIG</div>
             <div id="extreme-controls" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;"></div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
-              <input id="extreme-surfaces" class="login-input" placeholder="map,route_builder,navigation">
+              <input id="extreme-surfaces" class="login-input" placeholder="map_layers,navigation">
               <input id="extreme-cost-cap" class="login-input" type="number" placeholder="Daily cap cents">
               <input id="extreme-persona" class="login-input" placeholder="Co-Pilot persona">
               <input id="extreme-voice" class="login-input" placeholder="Voice key">
@@ -867,6 +867,7 @@ function renderExtremeControls(cfg) {
     ['weather_enabled', 'Weather', !!flags.weather],
     ['voice_enabled', 'Voice', !!flags.voice],
     ['copilot_enabled', 'Co-Pilot', !!flags.copilot],
+    ['copilot_wake_phrase_enabled', 'Wake phrase', !!((cfg.copilot || {}).wake_phrase)],
     ['native_mode_enabled', 'Native mode', !!flags.native_mode],
     ['mapgpt_pilot_enabled', 'MapGPT pilot', !!flags.mapgpt_pilot],
     ['atlas_pilot_enabled', 'Atlas pilot', !!flags.atlas_pilot],
@@ -896,6 +897,7 @@ async function saveExtremeConfig() {
     weather_enabled: extremeChecked('weather_enabled'),
     voice_enabled: extremeChecked('voice_enabled'),
     copilot_enabled: extremeChecked('copilot_enabled'),
+    copilot_wake_phrase_enabled: extremeChecked('copilot_wake_phrase_enabled'),
     native_mode_enabled: extremeChecked('native_mode_enabled'),
     mapgpt_pilot_enabled: extremeChecked('mapgpt_pilot_enabled'),
     atlas_pilot_enabled: extremeChecked('atlas_pilot_enabled'),

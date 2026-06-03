@@ -71,6 +71,14 @@ public class TileServerModule: Module {
             promise.resolve(TileServer.shared.running)
         }
 
+        AsyncFunction("getExtremeMapboxCapabilities") { (promise: Promise) in
+            promise.resolve([
+                "supported": true,
+                "renderer": "metal",
+                "reason": "supported"
+            ])
+        }
+
         AsyncFunction("routeValhalla") { (packPath: String, requestJson: String, promise: Promise) in
             promise.reject("ERR_VALHALLA_ROUTE", "Valhalla engine is not linked in this preview binary")
         }

@@ -6991,12 +6991,12 @@ function MapScreen() {
     return /^(me|my location|current location|selected place|current result)$/i.test(clean) ? '' : clean.slice(0, 80);
   }
 
-  async function resolveCopilotDestination(args: Record<string, unknown> = {}) {
+  async function resolveCopilotDestination(args: Record<string, unknown> = {}, candidates: MapSelectableFeature[] = visibleMapFeatures) {
     const query = copilotRouteDestinationQuery(args).toLowerCase();
-    const visibleMatch = findVisibleCandidate(args);
+    const visibleMatch = findVisibleCandidate(args, candidates);
     if (visibleMatch.feature && !visibleMatch.ambiguous) return enrichRenderedFeaturePlace(visibleMatch.feature);
     if (query) {
-      const rendered = visibleMapFeatures.find(item => placeTextMatches(item.name, query) || (item.aliases ?? []).some(alias => placeTextMatches(alias, query)));
+      const rendered = candidates.find(item => placeTextMatches(item.name, query) || (item.aliases ?? []).some(alias => placeTextMatches(alias, query)));
       if (rendered) return enrichRenderedFeaturePlace(rendered);
       const result = [...copilotResults, ...searchResults].find(item => placeTextMatches(item.name, query));
       if (result) return result;
@@ -7317,20 +7317,45 @@ function MapScreen() {
     };
   }
 
-  function findVisibleCandidate(args: Record<string, unknown>) {
+  function normalizeVisibleCandidateList(candidates: MapSelectableFeature[]) {
+    const seen = new Set<string>();
+    const next: MapSelectableFeature[] = [];
+    for (const feature of candidates) {
+      if (!feature || !Number.isFinite(Number(feature.lat)) || !Number.isFinite(Number(feature.lng))) continue;
+      const key = `${String(feature.name || '').toLowerCase()}:${Number(feature.lat).toFixed(4)}:${Number(feature.lng).toFixed(4)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      next.push({ ...feature, result_index: next.length });
+      if (next.length >= 32) break;
+    }
+    return next;
+  }
+
+  async function getVisibleCandidateSnapshot() {
+    const rendered = await (
+      nativeMapRef.current?.getVisibleMapCandidates?.()
+      ?? nativeMapRef.current?.queryVisibleFeatures?.()
+      ?? Promise.resolve([])
+    ).catch(() => []);
+    const renderedList = Array.isArray(rendered) ? rendered.slice(0, 24).map((feature, idx) => ({ ...feature, result_index: idx })) : [];
+    if (renderedList.length) setVisibleRenderedFeatures(renderedList);
+    return normalizeVisibleCandidateList([...renderedList, ...visibleMapFeatures]);
+  }
+
+  function findVisibleCandidate(args: Record<string, unknown>, candidates: MapSelectableFeature[] = visibleMapFeatures) {
     const rawIndex = args.result_index ?? args.index ?? args.number;
     const featureId = String(args.feature_id || args.id || '').trim();
     if (featureId) {
-      const feature = visibleMapFeatures.find(item => item.feature_id === featureId || String(item.place?.id || '') === featureId);
+      const feature = candidates.find(item => item.feature_id === featureId || String(item.place?.id || '') === featureId);
       return { feature, ambiguous: false, matches: feature ? [feature] : [] };
     }
     if (rawIndex != null) {
       const numeric = Math.max(0, Number(rawIndex));
       const idx = args.number != null && args.result_index == null ? Math.max(0, numeric - 1) : numeric;
-      const feature = visibleMapFeatures[idx];
+      const feature = candidates[idx];
       return { feature, ambiguous: false, matches: feature ? [feature] : [] };
     }
-    const matches = visibleMapFeatures.filter(feature => candidateMatchesRequest(feature, args));
+    const matches = candidates.filter(feature => candidateMatchesRequest(feature, args));
     return {
       feature: matches.length === 1 ? matches[0] : matches[0],
       ambiguous: matches.length > 1,
@@ -7581,6 +7606,7 @@ function MapScreen() {
       };
     }
     if (type === 'getMapContext' || type === 'explainVisibleArea' || type === 'getVisibleMapCandidates') {
+      const visibleCandidates = await getVisibleCandidateSnapshot();
       const context = buildCopilotContext();
       const vp = viewportRef.current;
       const inView = (place: { lat?: number | null; lng?: number | null }) => {
@@ -7604,13 +7630,13 @@ function MapScreen() {
       const currentResults = (copilotResults.length ? copilotResults : searchResults)
         .slice(0, 8)
         .map(copilotPlacePayload);
-      const renderedFeatures = visibleMapFeatures
+      const renderedFeatures = visibleCandidates
         .slice(0, 12)
         .map(visibleCandidatePayload);
       const selected = context.map?.selected_place as Record<string, unknown> | null | undefined;
       const visibleLayers = context.map?.visible_layers ?? [];
       const counts = {
-        places: Math.max(routePois.filter(inView).length, visibleMapFeatures.length),
+        places: Math.max(routePois.filter(inView).length, visibleCandidates.length),
         camps: trailSupportCamps.filter(inView).length,
         trails: trailDiscoveries.filter(inView).length,
         pins: displayCommunityPins.filter(inView).length,
@@ -7768,7 +7794,8 @@ function MapScreen() {
       return { applied: true, opened: 'trail_discovery' };
     }
     if (type === 'selectRenderedFeature' || type === 'selectVisiblePlace' || type === 'openSelectedPlaceCard') {
-      const { feature, ambiguous, matches } = findVisibleCandidate(args);
+      const visibleCandidates = await getVisibleCandidateSnapshot();
+      const { feature, ambiguous, matches } = findVisibleCandidate(args, visibleCandidates);
       if (!feature) {
         setShowExtremeCopilot(true);
         setQuickToast('No visible map feature matched.');
@@ -7816,8 +7843,8 @@ function MapScreen() {
         return { applied: true, status: 'applied', selected: place.name, selected_type: place.type || 'place', place: copilotPlacePayload(place) };
       }
       const renderedFeature = requestedName
-        ? visibleMapFeatures.find(item => item.feature_id.toLowerCase() === requestedName || placeTextMatches(item.name, requestedName) || (item.aliases ?? []).some(alias => placeTextMatches(alias, requestedName)))
-        : visibleMapFeatures[index];
+        ? (await getVisibleCandidateSnapshot()).find(item => item.feature_id.toLowerCase() === requestedName || placeTextMatches(item.name, requestedName) || (item.aliases ?? []).some(alias => placeTextMatches(alias, requestedName)))
+        : (await getVisibleCandidateSnapshot())[index];
       if (renderedFeature) {
         const renderedPlace = await enrichRenderedFeaturePlace(renderedFeature);
         openCopilotPlaceCard(renderedPlace);
@@ -7932,8 +7959,9 @@ function MapScreen() {
     }
     if (type === 'buildRoute' || type === 'modifyRoute' || type === 'routeToSelectedPlace') {
       const hasVisibleTargetArgs = !!(args.feature_id || args.id || args.result_index != null || args.index != null || args.number != null || args.type || args.kind || args.category || args.place_type || args.position || args.screen_position || args.side || args.name || args.place);
+      const visibleCandidates = hasVisibleTargetArgs ? await getVisibleCandidateSnapshot() : visibleMapFeatures;
       if (hasVisibleTargetArgs) {
-        const visibleTarget = findVisibleCandidate(args);
+        const visibleTarget = findVisibleCandidate(args, visibleCandidates);
         if (visibleTarget.ambiguous) {
           return {
             applied: false,
@@ -7944,7 +7972,7 @@ function MapScreen() {
           };
         }
       }
-      const dest = await resolveCopilotDestination(args);
+      const dest = await resolveCopilotDestination(args, visibleCandidates);
       setShowExtremeCopilot(false);
       const location = await ensureCopilotLocation();
       if (dest && location.loc) {
@@ -9671,9 +9699,9 @@ function MapScreen() {
         aliases: feature.aliases?.length ? feature.aliases : [feature.name, feature.subtype, feature.type, feature.address].filter((item): item is string => !!item),
       });
     };
+    for (const feature of visibleRenderedFeatures) push({ ...feature, result_index: next.length });
     for (const place of copilotResults) push(selectableFeatureFromPlace(place, next.length, 'copilot_result', center));
     for (const place of searchResults) push(selectableFeatureFromPlace(place, next.length, 'search_result', center));
-    for (const feature of visibleRenderedFeatures) push({ ...feature, result_index: next.length });
     for (const poi of routePois) push(selectableFeatureFromPlace(poi as unknown as SearchPlace, next.length, 'trailhead_poi', center));
     for (const camp of areaCamps) {
       push(selectableFeatureFromPlace({

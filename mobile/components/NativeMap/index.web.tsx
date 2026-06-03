@@ -95,16 +95,16 @@ const noop = () => {};
 const MAPBOX_GL_VERSION = 'v3.11.1';
 
 const MAPBOX_STYLE_URLS: Record<PremiumMapStyle, string> = {
-  standard: 'mapbox://styles/mapbox/standard',
-  standard_satellite: 'mapbox://styles/mapbox/standard-satellite',
+  standard: 'mapbox://styles/mapbox/streets-v12',
+  standard_satellite: 'mapbox://styles/mapbox/satellite-streets-v12',
   satellite_streets: 'mapbox://styles/mapbox/satellite-streets-v12',
   streets: 'mapbox://styles/mapbox/streets-v12',
   outdoors: 'mapbox://styles/mapbox/outdoors-v12',
   navigation_day: 'mapbox://styles/mapbox/navigation-day-v1',
   navigation_night: 'mapbox://styles/mapbox/navigation-night-v1',
-  dawn: 'mapbox://styles/mapbox/standard',
-  dusk: 'mapbox://styles/mapbox/standard',
-  night: 'mapbox://styles/mapbox/standard',
+  dawn: 'mapbox://styles/mapbox/streets-v12',
+  dusk: 'mapbox://styles/mapbox/streets-v12',
+  night: 'mapbox://styles/mapbox/navigation-night-v1',
 };
 
 const MAPBOX_LIGHT_PRESETS: Partial<Record<PremiumMapStyle, 'dawn' | 'day' | 'dusk' | 'night'>> = {

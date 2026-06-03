@@ -52,16 +52,19 @@ const TRAIL_DIR = `${OFFLINE_DIR}trails/`;
 const CACHE_TRAIL_DIR = `${CACHE_OFFLINE_DIR}trails/`;
 
 const MAPBOX_STYLE_URLS: Record<PremiumMapStyle, string> = {
-  standard: 'mapbox://styles/mapbox/standard',
-  standard_satellite: 'mapbox://styles/mapbox/standard-satellite',
+  // Mapbox Standard exposes basemap POIs through SDK featuresets/interactions,
+  // not regular queryRenderedFeatures calls. RNMapbox v10 does not expose that
+  // featureset API here, so EXTREME uses queryable classic styles for place taps.
+  standard: 'mapbox://styles/mapbox/streets-v12',
+  standard_satellite: 'mapbox://styles/mapbox/satellite-streets-v12',
   satellite_streets: 'mapbox://styles/mapbox/satellite-streets-v12',
   streets: 'mapbox://styles/mapbox/streets-v12',
   outdoors: 'mapbox://styles/mapbox/outdoors-v12',
   navigation_day: 'mapbox://styles/mapbox/navigation-day-v1',
   navigation_night: 'mapbox://styles/mapbox/navigation-night-v1',
-  dawn: 'mapbox://styles/mapbox/standard',
-  dusk: 'mapbox://styles/mapbox/standard',
-  night: 'mapbox://styles/mapbox/standard',
+  dawn: 'mapbox://styles/mapbox/streets-v12',
+  dusk: 'mapbox://styles/mapbox/streets-v12',
+  night: 'mapbox://styles/mapbox/navigation-night-v1',
 };
 
 const MAPBOX_LIGHT_PRESETS: Partial<Record<PremiumMapStyle, 'dawn' | 'day' | 'dusk' | 'night'>> = {
@@ -1171,7 +1174,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           const layerIds = ['trail-pack-line', 'road-path', 'road-other', 'mvum-trails-line', 'mvum-roads-line'];
           const rendered: any[] = [];
           const screen = Dimensions.get('window');
-          const rect = [cx - 170, cy - 170, 340, 340];
+          const rect = renderedQueryRectAroundPoint(cx, cy, 170);
           const rectFound = await (mapRef.current as any).queryRenderedFeaturesInRect?.(
             rect,
             undefined,
@@ -1180,7 +1183,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           const rectFeatures = Array.isArray(rectFound) ? rectFound : rectFound?.features;
           if (Array.isArray(rectFeatures)) rendered.push(...rectFeatures);
           const viewportFound = await (mapRef.current as any).queryRenderedFeaturesInRect?.(
-            [0, 0, screen.width, screen.height],
+            renderedQueryViewportRect(screen),
             undefined,
             layerIds,
           ).catch(() => null);
@@ -1218,7 +1221,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         const layerIds = ['trail-pack-line', 'road-path', 'road-other', 'mvum-trails-line', 'mvum-roads-line'];
         const rendered: any[] = [];
         const rectFound = await (mapRef.current as any).queryRenderedFeaturesInRect?.(
-          [cx - 150, cy - 150, 300, 300],
+          renderedQueryRectAroundPoint(cx, cy, 150),
           undefined,
           layerIds,
         ).catch(() => null);
@@ -1262,7 +1265,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
         const rendered: any[] = [];
         const rectFound = await (mapRef.current as any).queryRenderedFeaturesInRect?.(
-          [px - 42, py - 42, 84, 84],
+          renderedQueryRectAroundPoint(px, py, 42),
           undefined,
           undefined,
         ).catch(() => null);
@@ -1287,7 +1290,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           ? { lat: (Number(bounds[0]?.[1]) + Number(bounds[1]?.[1])) / 2, lng: (Number(bounds[0]?.[0]) + Number(bounds[1]?.[0])) / 2 }
           : null;
         const rectFound = await (mapRef.current as any).queryRenderedFeaturesInRect?.(
-          [0, 0, screen.width, screen.height],
+          renderedQueryViewportRect(screen),
           undefined,
           undefined,
         ).catch(() => null);
@@ -1323,7 +1326,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           ? { lat: (Number(bounds[0]?.[1]) + Number(bounds[1]?.[1])) / 2, lng: (Number(bounds[0]?.[0]) + Number(bounds[1]?.[0])) / 2 }
           : null;
         const rectFound = await (mapRef.current as any).queryRenderedFeaturesInRect?.(
-          [0, 0, screen.width, screen.height],
+          renderedQueryViewportRect(screen),
           undefined,
           undefined,
         ).catch(() => null);
@@ -1715,7 +1718,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         const [px, py] = pressPoint.map(Number);
         if (Number.isFinite(px) && Number.isFinite(py)) {
           const rectFound = await (mapRef.current as any).queryRenderedFeaturesInRect?.(
-            [px - 36, py - 36, 72, 72],
+            renderedQueryRectAroundPoint(px, py, 36),
             undefined,
             undefined,
           ).catch(() => null);
@@ -2823,6 +2826,17 @@ function screenPositionLabel(x: number, y: number, screen = Dimensions.get('wind
   if (ny < 0.28) return 'top';
   if (ny > 0.68) return 'bottom';
   return nx < 0.5 ? 'left' : 'right';
+}
+
+function renderedQueryRectAroundPoint(x: number, y: number, radius: number): [number, number, number, number] {
+  const px = Number(x);
+  const py = Number(y);
+  const r = Math.max(1, Number(radius) || 1);
+  return [py - r, px - r, py + r, px + r];
+}
+
+function renderedQueryViewportRect(screen = Dimensions.get('window')): [number, number, number, number] {
+  return [0, 0, Math.max(1, Number(screen.height) || 1), Math.max(1, Number(screen.width) || 1)];
 }
 
 function selectableFeatureFromPoi(poi: OsmPoi, resultIndex: number, sourceLayer?: string | null, center?: { lat: number; lng: number } | null): MapSelectableFeature | null {

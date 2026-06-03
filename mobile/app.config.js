@@ -2,7 +2,7 @@ module.exports = {
   expo: {
     name: 'Trailhead',
     slug: 'trailhead',
-    version: '1.0.2',
+    version: '1.0.3',
     runtimeVersion: 'native-20260603-1',
     updates: { url: 'https://u.expo.dev/92c016d2-6e63-480e-a483-a6898d7e77d5' },
     orientation: 'portrait',

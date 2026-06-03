@@ -72,6 +72,11 @@ import { AUDIO_LOCATION_TASK } from '@/lib/backgroundTasks';
 
 const WebView: any = Platform.OS === 'web' ? View : require('react-native-webview').WebView;
 let LottieView: any = null;
+try {
+  LottieView = Platform.OS === 'web' ? null : require('lottie-react-native').default;
+} catch {
+  LottieView = null;
+}
 const USE_IOS_NATIVE_NAV_ENGINE = Platform.OS === 'ios' && hasNativeNavigationEngine();
 const STADIA_API_KEY = process.env.EXPO_PUBLIC_STADIA_API_KEY ?? '4d2b6230-f506-42ca-b556-35f419510aa2';
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';

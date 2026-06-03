@@ -838,15 +838,21 @@ export interface MapSelectableFeature {
   source_label?: string | null;
   source_layer?: string | null;
   distance_mi?: number | null;
+  screen_x?: number | null;
+  screen_y?: number | null;
+  screen_position?: 'left' | 'right' | 'top' | 'bottom' | 'center' | string | null;
+  confidence?: 'high' | 'medium' | 'low' | string | null;
+  aliases?: string[];
   address?: string | null;
   rating?: number | null;
   summary?: string | null;
+  raw_feature?: Record<string, unknown> | null;
   place?: Record<string, unknown> | null;
 }
 export interface MapActionRequest {
   id?: number;
   action_id: string;
-  action_type: 'getMapContext' | 'searchPlaces' | 'searchTrails' | 'selectPlace' | 'selectRenderedFeature' | 'flyToPlace' | 'toggleLayer' | 'setMapStyle' | 'buildRoute' | 'modifyRoute' | 'dropPin' | 'saveTrip' | 'downloadOfflineArea' | 'explainVisibleArea' | 'askForConfirmation' | string;
+  action_type: 'getMapContext' | 'getVisibleMapCandidates' | 'searchPlaces' | 'searchTrails' | 'selectPlace' | 'selectRenderedFeature' | 'selectVisiblePlace' | 'searchAndSelectPlace' | 'openSelectedPlaceCard' | 'routeToSelectedPlace' | 'flyToPlace' | 'toggleLayer' | 'setMapStyle' | 'buildRoute' | 'modifyRoute' | 'dropPin' | 'saveTrip' | 'downloadOfflineArea' | 'explainVisibleArea' | 'askForConfirmation' | string;
   args: Record<string, unknown>;
   requires_confirmation: boolean;
   cost_class: string;

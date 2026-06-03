@@ -94,7 +94,9 @@ export interface NativeMapHandle {
   getTrailHighlight: () => GeoJSON.FeatureCollection;
   captureTrailAt: (lat: number, lng: number, name?: string) => Promise<GeoJSON.FeatureCollection>;
   screenToCoordinate: (x: number, y: number) => Promise<[number, number] | null>;
+  selectFeatureAtScreenPoint: (x: number, y: number) => Promise<MapSelectableFeature | null>;
   queryVisibleFeatures: () => Promise<MapSelectableFeature[]>;
+  getVisibleMapCandidates: () => Promise<MapSelectableFeature[]>;
   getVisibleCenter: () => Promise<[number, number] | null>;
   getVisibleBounds: () => Promise<MapBounds | null>;
   restoreRoute:   (coords: [number,number][], steps: RouteStep[], legs: RouteStep[][], td: number, tt: number) => void;
@@ -1248,6 +1250,34 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         return null;
       }
     },
+    async selectFeatureAtScreenPoint(x, y) {
+      if (!mapRef.current) return null;
+      const px = Number(x);
+      const py = Number(y);
+      if (!Number.isFinite(px) || !Number.isFinite(py)) return null;
+      try {
+        const coord = await mapRef.current.getCoordinateFromView([px, py]).catch(() => null);
+        const lng = Number(coord?.[0]);
+        const lat = Number(coord?.[1]);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+        const rendered: any[] = [];
+        const rectFound = await (mapRef.current as any).queryRenderedFeaturesInRect?.(
+          [px - 42, py - 42, 84, 84],
+          undefined,
+          undefined,
+        ).catch(() => null);
+        const rectFeatures = Array.isArray(rectFound) ? rectFound : rectFound?.features;
+        if (Array.isArray(rectFeatures)) rendered.push(...rectFeatures);
+        const pointFound = await mapRef.current.queryRenderedFeaturesAtPoint([px, py], undefined, undefined).catch(() => null);
+        const pointFeatures = Array.isArray(pointFound) ? pointFound : pointFound?.features;
+        if (Array.isArray(pointFeatures)) rendered.push(...pointFeatures);
+        const poi = bestMapboxPoiFromFeatures(rendered, lat, lng);
+        const feature = poi ? selectableFeatureFromPoi(poi, 0, (poi as any).source_layer || null, null) : null;
+        return feature ? { ...feature, screen_x: px, screen_y: py, screen_position: screenPositionLabel(px, py), confidence: 'high' } : null;
+      } catch {
+        return null;
+      }
+    },
     async queryVisibleFeatures() {
       if (!mapRef.current) return [];
       try {
@@ -1262,7 +1292,60 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           undefined,
         ).catch(() => null);
         const rectFeatures = Array.isArray(rectFound) ? rectFound : rectFound?.features;
-        return normalizeRenderedFeatureList(rectFeatures, center);
+        const features = normalizeRenderedFeatureList(rectFeatures, center);
+        const enriched: MapSelectableFeature[] = [];
+        for (const feature of features) {
+          let sx: number | null = null;
+          let sy: number | null = null;
+          try {
+            const point = await mapRef.current.getPointInView([feature.lng, feature.lat]);
+            sx = Number(point?.[0]);
+            sy = Number(point?.[1]);
+          } catch {}
+          enriched.push({
+            ...feature,
+            screen_x: Number.isFinite(sx) ? sx : null,
+            screen_y: Number.isFinite(sy) ? sy : null,
+            screen_position: Number.isFinite(sx) && Number.isFinite(sy) ? screenPositionLabel(sx!, sy!, screen) : feature.screen_position ?? null,
+          });
+        }
+        return enriched;
+      } catch {
+        return [];
+      }
+    },
+    async getVisibleMapCandidates() {
+      if (!mapRef.current) return [];
+      try {
+        const screen = Dimensions.get('window');
+        const bounds = await mapRef.current.getVisibleBounds().catch(() => null);
+        const center = bounds
+          ? { lat: (Number(bounds[0]?.[1]) + Number(bounds[1]?.[1])) / 2, lng: (Number(bounds[0]?.[0]) + Number(bounds[1]?.[0])) / 2 }
+          : null;
+        const rectFound = await (mapRef.current as any).queryRenderedFeaturesInRect?.(
+          [0, 0, screen.width, screen.height],
+          undefined,
+          undefined,
+        ).catch(() => null);
+        const rectFeatures = Array.isArray(rectFound) ? rectFound : rectFound?.features;
+        const features = normalizeRenderedFeatureList(rectFeatures, center);
+        const enriched: MapSelectableFeature[] = [];
+        for (const feature of features) {
+          let sx: number | null = null;
+          let sy: number | null = null;
+          try {
+            const point = await mapRef.current.getPointInView([feature.lng, feature.lat]);
+            sx = Number(point?.[0]);
+            sy = Number(point?.[1]);
+          } catch {}
+          enriched.push({
+            ...feature,
+            screen_x: Number.isFinite(sx) ? sx : null,
+            screen_y: Number.isFinite(sy) ? sy : null,
+            screen_position: Number.isFinite(sx) && Number.isFinite(sy) ? screenPositionLabel(sx!, sy!, screen) : feature.screen_position ?? null,
+          });
+        }
+        return enriched;
       } catch {
         return [];
       }
@@ -2712,6 +2795,14 @@ function mapMapboxFeatureToPoi(feature: any, fallbackLat: number, fallbackLng: n
     source_badge: 'Mapbox basemap',
     source_freshness: 'Temporary Mapbox basemap feature. Save only if you want to create a Trailhead-owned place.',
     summary: `${subtype || 'Place'} selected from the EXTREME Mapbox basemap.`,
+    raw_feature: {
+      id: feature?.id,
+      layer: feature?.layer,
+      source: feature?.source,
+      sourceLayer: feature?.sourceLayer,
+      properties: props,
+      geometry: feature?.geometry,
+    },
   } as OsmPoi;
 }
 
@@ -2721,6 +2812,17 @@ function bestMapboxPoiFromFeatures(features: any[] | undefined, fallbackLat: num
     .map(feature => ({ poi: mapMapboxFeatureToPoi(feature, fallbackLat, fallbackLng), score: mapboxFeaturePickScore(feature) }))
     .filter((item): item is { poi: OsmPoi; score: number } => !!item.poi)
     .sort((a, b) => a.score - b.score)[0]?.poi ?? null;
+}
+
+function screenPositionLabel(x: number, y: number, screen = Dimensions.get('window')): MapSelectableFeature['screen_position'] {
+  const w = Math.max(1, Number(screen.width) || 1);
+  const h = Math.max(1, Number(screen.height) || 1);
+  const nx = x / w;
+  const ny = y / h;
+  if (nx >= 0.34 && nx <= 0.66 && ny >= 0.28 && ny <= 0.68) return 'center';
+  if (ny < 0.28) return 'top';
+  if (ny > 0.68) return 'bottom';
+  return nx < 0.5 ? 'left' : 'right';
 }
 
 function selectableFeatureFromPoi(poi: OsmPoi, resultIndex: number, sourceLayer?: string | null, center?: { lat: number; lng: number } | null): MapSelectableFeature | null {
@@ -2747,9 +2849,12 @@ function selectableFeatureFromPoi(poi: OsmPoi, resultIndex: number, sourceLayer?
     source_label: poi.source_label || poi.source_badge || 'Rendered map',
     source_layer: sourceLayer || (poi as any).source_layer || null,
     distance_mi: center ? haversineMiles(center.lat, center.lng, lat, lng) : null,
+    confidence: poi.source === 'mapbox_feature' || poi.source === 'rendered_map' ? 'medium' : 'high',
+    aliases: [name, poi.subtype, poi.source_label, poi.source_badge].filter((item): item is string => !!item),
     address: poi.address || null,
     rating: poi.rating ?? null,
     summary: (poi as any).summary || poi.source_freshness || null,
+    raw_feature: (poi as any).raw_feature || null,
     place: poi as unknown as Record<string, unknown>,
   };
 }

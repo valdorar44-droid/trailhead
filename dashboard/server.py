@@ -1262,10 +1262,15 @@ EXTREME_WEATHER_LAYERS = [
 
 EXTREME_COPILOT_ACTIONS = {
     "getMapContext": "Get map context",
+    "getVisibleMapCandidates": "Get visible map candidates",
     "searchPlaces": "Search places",
     "searchTrails": "Search trails",
     "selectPlace": "Select place",
     "selectRenderedFeature": "Select visible map feature",
+    "selectVisiblePlace": "Select visible place",
+    "searchAndSelectPlace": "Search and select place",
+    "openSelectedPlaceCard": "Open selected place card",
+    "routeToSelectedPlace": "Route to selected place",
     "flyToPlace": "Fly to place",
     "toggleLayer": "Toggle layer",
     "setMapStyle": "Set map style",
@@ -1314,7 +1319,7 @@ EXTREME_COPILOT_CONFIRM_ACTIONS = {
 TRAILHEAD_COPILOT_CAPABILITY_REGISTRY = {
     "map": {
         "summary": "Search, fly, select cards, preview routes, toggle layers, change styles, radar, public lands, topo, satellite, nautical, pins, camps, trails, places.",
-        "commands": ["searchPlaces", "searchTrails", "selectPlace", "selectRenderedFeature", "flyToPlace", "toggleLayer", "setMapStyle", "buildRoute", "dropPin"],
+        "commands": ["getVisibleMapCandidates", "searchPlaces", "searchTrails", "selectPlace", "selectRenderedFeature", "selectVisiblePlace", "searchAndSelectPlace", "openSelectedPlaceCard", "routeToSelectedPlace", "flyToPlace", "toggleLayer", "setMapStyle", "buildRoute", "dropPin"],
         "confirmation": ["dropPin"],
     },
     "navigation": {
@@ -1588,7 +1593,9 @@ def _copilot_realtime_tools() -> list[dict]:
                 "action_type": {
                     "type": "string",
                     "enum": [
-                        "getMapContext", "searchPlaces", "searchTrails", "selectPlace", "selectRenderedFeature", "flyToPlace",
+                        "getMapContext", "getVisibleMapCandidates", "searchPlaces", "searchTrails", "selectPlace",
+                        "selectRenderedFeature", "selectVisiblePlace", "searchAndSelectPlace", "openSelectedPlaceCard",
+                        "routeToSelectedPlace", "flyToPlace",
                         "toggleLayer", "setMapStyle", "buildRoute", "startNavigation", "modifyRoute", "dropPin",
                         "saveTrip", "downloadOfflineArea", "openRouteBuilderDraft", "updateRouteBuilderDraft",
                         "buildRouteBuilderFramework", "readRouteBuilderContext", "openGuide", "playTripGuide",
@@ -1617,8 +1624,10 @@ def _copilot_realtime_instructions(wake_phrase: bool) -> str:
         "For restaurants, food, scenic viewpoints, landmarks, or attractions near a named place, call searchPlaces with args.category set to "
         "\"food\", \"viewpoint\", or \"attraction\" and args.query set to the named place; set args.open_card=true only when the user asks to open the best/top/first option. "
         "For cuisine followups such as pizza, tacos, burgers, coffee, BBQ, sushi, or Italian, call searchPlaces with args.category=\"food\" and args.keyword set to the cuisine; do not geocode the cuisine as a destination. "
-        "When explainVisibleArea returns visible_map_features, use selectRenderedFeature with feature_id or result_index to open one of those rendered map places. "
-        "For followups like \"open the second one\" use selectRenderedFeature when the prior answer described visible map features, otherwise use selectPlace for search results. For \"route me there\" use buildRoute to preview only. "
+        "Never simulate tapping Trailhead controls. For visible labels/icons on the map, call getVisibleMapCandidates, then selectVisiblePlace with feature_id, result_index, type, name, and/or screen_position. "
+        "If multiple visible candidates match, ask which one instead of choosing randomly. "
+        "For followups like \"open the second one\" use selectVisiblePlace when the prior answer described visible map candidates, otherwise use selectPlace for search results. "
+        "For \"route me there\" use routeToSelectedPlace or buildRoute to preview only; use the selected card/current result, not a random nearby place. "
         "For \"start navigation\" or \"navigate there\" use startNavigation with confirmation. "
         "For full multi-day planning such as \"plan/build/create a 5-day dispersed route from Moab to Big Sur\", call buildRouteBuilderFramework with start, destination, days, routeStyle, campPreference, fuelStrategy, poiPreferences, and rig profile context. Only use openRouteBuilderDraft when the user asks to open or prefill a draft without building. "
         "Ignore tiny fragments, map labels, loading copy, and background speech that are not clear user commands. "
@@ -1691,6 +1700,33 @@ def _extract_route_query(command: str) -> str:
     if query.lower() in {"me", "my location", "current location", "selected place", "current result"}:
         return ""
     return query[:80]
+
+def _visible_selection_args(command: str) -> dict:
+    text = str(command or "").lower()
+    args: dict = {}
+    for pos in ("left", "right", "center", "top", "bottom"):
+        if re.search(rf"\b(?:on|to|at|near|in)\s+(?:the\s+)?{pos}\b|\b{pos}\s+(?:side|area)\b", text):
+            args["screen_position"] = pos
+            break
+    type_specs = [
+        ("lodging", r"\b(hotel|motel|lodging|stay)\b"),
+        ("food", r"\b(restaurant|food|bar|cafe|coffee|bakery|pizza|burger|eat)\b"),
+        ("grocery", r"\b(grocery|market|supermarket)\b"),
+        ("fuel", r"\b(fuel|gas|charging)\b"),
+        ("attraction", r"\b(museum|attraction|park|theater|theatre|school|landmark)\b"),
+        ("shop", r"\b(shop|store|retail)\b"),
+    ]
+    for kind, pattern in type_specs:
+        if re.search(pattern, text):
+            args["type"] = kind
+            break
+    name_match = re.search(r"\b(?:open|select|choose|route(?: me)? to|directions to|take me to)\s+(?:the\s+)?([a-zA-Z0-9 .,'-]{2,80})", command, flags=re.I)
+    if name_match:
+        raw = re.sub(r"\b(?:on the left|on the right|near the center|in the center|at the top|at the bottom|nearby|visible|that|this|place|result)\b", " ", name_match.group(1), flags=re.I)
+        raw = re.sub(r"\s+", " ", raw).strip(" .,'-")
+        if raw and raw.lower() not in {"hotel", "restaurant", "bar", "place", "one", "result"}:
+            args["name"] = raw[:80]
+    return args
 
 def _clean_route_builder_place(value: str) -> str:
     clean = re.split(r"\b(?:for|with|using|and make|make it|different camps|same camp|basecamp|route style|camp preference|please)\b", value, maxsplit=1, flags=re.I)[0]
@@ -1964,14 +2000,20 @@ def _build_extreme_map_action(command: str, context: dict, provider: str = "trai
             index = 1
         else:
             index = 0
-        args = {"result_index": index}
+        args = {"result_index": index, **_visible_selection_args(command)}
         map_updates = {"select_result_index": index}
         selected_place = {"result_index": index}
         message = "Selection staged from the current result list."
+    elif re.search(r"\b(open|select|choose)\b.*\b(hotel|motel|restaurant|bar|cafe|coffee|shop|store|museum|park|on the left|on the right|near the center|in the center)\b", text):
+        action_type = "selectVisiblePlace"
+        args = _visible_selection_args(command)
+        map_updates = {"select_visible_place": args}
+        message = "Visible place selection staged."
     elif re.search(r"\broute me|directions|guidance|preview (a )?route|route to\b", text):
-        action_type = "buildRoute"
+        visible_args = _visible_selection_args(command)
+        action_type = "routeToSelectedPlace" if visible_args and re.search(r"\b(that|this|visible|on the left|on the right|near the center|in the center|hotel|restaurant|bar|cafe|shop|store|museum)\b", text) else "buildRoute"
         query = _extract_route_query(command)
-        args = {"instruction": command[:240], "destination": route_ctx.get("destination") or map_ctx.get("selected_place"), "query": query}
+        args = {"instruction": command[:240], "destination": route_ctx.get("destination") or map_ctx.get("selected_place"), "query": query, **visible_args}
         map_updates = {"route_preview": True, "open_search": not bool(args.get("destination"))}
         route_preview = {"status": "preview", "instruction": command[:240]}
         message = "Route preview staged. Confirm separately before starting navigation."

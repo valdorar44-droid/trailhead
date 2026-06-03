@@ -1056,6 +1056,34 @@ function selectableFeatureKey(source: string, name: string, lat: number, lng: nu
   return String(id || `${source}:${name}:${lat.toFixed(5)}:${lng.toFixed(5)}`).slice(0, 180);
 }
 
+function normalizedPlaceText(value: unknown) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function placeTextMatches(haystack: unknown, needle: unknown) {
+  const hay = normalizedPlaceText(haystack);
+  const ndl = normalizedPlaceText(needle);
+  if (!hay || !ndl) return false;
+  return hay.includes(ndl) || ndl.includes(hay);
+}
+
+function screenPositionFromBounds(place: { lat: number; lng: number }, bounds?: { n: number; s: number; e: number; w: number } | null): MapSelectableFeature['screen_position'] {
+  if (!bounds) return null;
+  const latSpan = Math.max(0.000001, bounds.n - bounds.s);
+  const lngSpan = Math.max(0.000001, bounds.e - bounds.w);
+  const x = (place.lng - bounds.w) / lngSpan;
+  const y = (bounds.n - place.lat) / latSpan;
+  if (x >= 0.34 && x <= 0.66 && y >= 0.28 && y <= 0.68) return 'center';
+  if (y < 0.28) return 'top';
+  if (y > 0.68) return 'bottom';
+  return x < 0.5 ? 'left' : 'right';
+}
+
 function selectableFeatureFromPlace(
   place: SearchPlace,
   resultIndex: number,
@@ -1079,9 +1107,15 @@ function selectableFeatureFromPlace(
     source_label: place.source_label || place.source_badge || (source === 'copilot_result' ? 'Copilot result' : 'Map feature'),
     source_layer: (place as any).source_layer || null,
     distance_mi: place.distance_mi ?? (place.dist != null ? place.dist * 0.621371 : center ? haversineKm(center.lat, center.lng, lat, lng) * 0.621371 : null),
+    screen_x: (place as any).screen_x ?? null,
+    screen_y: (place as any).screen_y ?? null,
+    screen_position: (place as any).screen_position ?? null,
+    confidence: (place as any).confidence || (place.source === 'mapbox_search' || place.source === 'mapbox_feature' ? 'high' : 'medium'),
+    aliases: [place.name, place.subtype, place.type, place.address, place.source_label].filter((item): item is string => !!item),
     address: place.address || null,
     rating: place.rating ?? null,
     summary: place.summary || null,
+    raw_feature: (place as any).raw_feature || null,
     place: place as unknown as Record<string, unknown>,
   };
 }
@@ -3356,7 +3390,7 @@ const buildMapHtml = (
         // 4. Generic rendered labels/icons — classic MapLibre/Protomaps/Mapbox places.
         var genericPoi=pickRenderedPlaceFeature([].concat(ptFs||[],boxFs||[]),e.lngLat);
         if(genericPoi){
-          postRN({type:'poi_tapped',poi:genericPoi});
+          postRN({type:'map_feature_selected',poi:genericPoi});
           return;
         }
       }catch(x){}
@@ -6959,10 +6993,12 @@ function MapScreen() {
 
   async function resolveCopilotDestination(args: Record<string, unknown> = {}) {
     const query = copilotRouteDestinationQuery(args).toLowerCase();
+    const visibleMatch = findVisibleCandidate(args);
+    if (visibleMatch.feature && !visibleMatch.ambiguous) return enrichRenderedFeaturePlace(visibleMatch.feature);
     if (query) {
-      const rendered = visibleMapFeatures.find(item => item.name.toLowerCase().includes(query) || query.includes(item.name.toLowerCase()));
-      if (rendered) return searchPlaceFromSelectableFeature(rendered);
-      const result = [...copilotResults, ...searchResults].find(item => item.name.toLowerCase().includes(query) || query.includes(item.name.toLowerCase()));
+      const rendered = visibleMapFeatures.find(item => placeTextMatches(item.name, query) || (item.aliases ?? []).some(alias => placeTextMatches(alias, query)));
+      if (rendered) return enrichRenderedFeaturePlace(rendered);
+      const result = [...copilotResults, ...searchResults].find(item => placeTextMatches(item.name, query));
       if (result) return result;
       const geocoded = await api.geocodePlaces(query, 1).catch(() => []);
       const place = geocoded[0];
@@ -7241,6 +7277,132 @@ function MapScreen() {
     };
   }
 
+  function featureTypeMatches(feature: MapSelectableFeature, raw: string) {
+    if (!raw) return true;
+    const hay = [feature.type, feature.subtype, feature.name, ...(feature.aliases ?? [])].map(normalizedPlaceText).join(' ');
+    const needle = normalizedPlaceText(raw);
+    if (!needle) return true;
+    if (hay.includes(needle)) return true;
+    if (/(hotel|motel|lodging|stay)/.test(needle)) return /(hotel|motel|lodg|stay)/.test(hay);
+    if (/(restaurant|food|eat|bar|coffee|cafe|bakery|pizza|burger)/.test(needle)) return /(restaurant|food|bar|coffee|cafe|bakery|pizza|burger|sandwich)/.test(hay);
+    if (/(shop|store|retail)/.test(needle)) return /(shop|store|retail|market|grocery)/.test(hay);
+    if (/(museum|attraction|theater|theatre|school|park)/.test(needle)) return /(museum|attraction|theater|theatre|school|park|landmark)/.test(hay);
+    return false;
+  }
+
+  function candidateMatchesRequest(feature: MapSelectableFeature, args: Record<string, unknown>) {
+    const query = String(args.name || args.place || args.query || args.destination || args.target || '').trim();
+    const kind = String(args.kind || args.type || args.category || args.place_type || '').trim();
+    const position = String(args.position || args.screen_position || args.side || '').trim().toLowerCase();
+    const textMatch = query ? [feature.name, ...(feature.aliases ?? [])].some(value => placeTextMatches(value, query)) || featureTypeMatches(feature, query) : true;
+    const kindMatch = kind ? featureTypeMatches(feature, kind) : true;
+    const posMatch = position ? String(feature.screen_position || '').toLowerCase() === position : true;
+    return textMatch && kindMatch && posMatch;
+  }
+
+  function visibleCandidatePayload(feature: MapSelectableFeature) {
+    return {
+      feature_id: feature.feature_id,
+      result_index: feature.result_index,
+      name: feature.name,
+      type: feature.type,
+      subtype: feature.subtype,
+      lat: feature.lat,
+      lng: feature.lng,
+      source: feature.source_label || feature.source,
+      distance_mi: feature.distance_mi ?? null,
+      screen_position: feature.screen_position ?? null,
+      confidence: feature.confidence ?? null,
+      aliases: feature.aliases ?? [],
+    };
+  }
+
+  function findVisibleCandidate(args: Record<string, unknown>) {
+    const rawIndex = args.result_index ?? args.index ?? args.number;
+    const featureId = String(args.feature_id || args.id || '').trim();
+    if (featureId) {
+      const feature = visibleMapFeatures.find(item => item.feature_id === featureId || String(item.place?.id || '') === featureId);
+      return { feature, ambiguous: false, matches: feature ? [feature] : [] };
+    }
+    if (rawIndex != null) {
+      const numeric = Math.max(0, Number(rawIndex));
+      const idx = args.number != null && args.result_index == null ? Math.max(0, numeric - 1) : numeric;
+      const feature = visibleMapFeatures[idx];
+      return { feature, ambiguous: false, matches: feature ? [feature] : [] };
+    }
+    const matches = visibleMapFeatures.filter(feature => candidateMatchesRequest(feature, args));
+    return {
+      feature: matches.length === 1 ? matches[0] : matches[0],
+      ambiguous: matches.length > 1,
+      matches,
+    };
+  }
+
+  async function enrichRenderedFeaturePlace(feature: MapSelectableFeature): Promise<SearchPlace> {
+    const base = searchPlaceFromSelectableFeature(feature);
+    if (!extremeMapLayerActive || !extremeConfig?.feature_flags?.search) return base;
+    const center = { lat: feature.lat, lng: feature.lng };
+    const language = 'en,fr';
+    const mapboxId = String(base.provider_place_id || base.place_id || feature.place?.provider_place_id || feature.place?.place_id || '').trim();
+    try {
+      let retrieved: any = null;
+      if (mapboxId) {
+        const session = await api.extremeSearchSession({ source: 'rendered_feature_retrieve' });
+        retrieved = await api.extremeSearchRetrieve({
+          mapbox_id: mapboxId,
+          session_token: session.session_token,
+          language,
+          proximity: `${feature.lng},${feature.lat}`,
+          origin: `${feature.lng},${feature.lat}`,
+        });
+      } else if (feature.name) {
+        const session = await api.extremeSearchSession({ source: 'rendered_feature_suggest' });
+        const vp = viewportRef.current;
+        const suggestions = await api.extremeSearchSuggest({
+          q: feature.name,
+          session_token: session.session_token,
+          proximity: `${feature.lng},${feature.lat}`,
+          origin: `${feature.lng},${feature.lat}`,
+          bbox: vp ? `${vp.w},${vp.s},${vp.e},${vp.n}` : '',
+          types: 'poi,place,address',
+          language,
+          limit: 5,
+        });
+        const best = (suggestions.suggestions ?? []).find((item: any) => {
+          const name = item?.name || item?.text || item?.full_address || '';
+          return placeTextMatches(name, feature.name) || placeTextMatches(feature.name, name);
+        }) ?? suggestions.suggestions?.[0];
+        const bestId = best?.mapbox_id || best?.id;
+        if (bestId) {
+          retrieved = await api.extremeSearchRetrieve({
+            mapbox_id: bestId,
+            session_token: session.session_token,
+            language,
+            proximity: `${feature.lng},${feature.lat}`,
+            origin: `${feature.lng},${feature.lat}`,
+          });
+        }
+      }
+      const retrievedFeature = retrieved?.features?.[0];
+      const enriched = retrievedFeature ? mapboxFeatureToCopilotPlace(retrievedFeature, center, feature.type || 'poi') : null;
+      if (!enriched) return base;
+      const distanceM = haversineKm(feature.lat, feature.lng, enriched.lat, enriched.lng) * 1000;
+      if (Number.isFinite(distanceM) && distanceM > 300) return base;
+      return {
+        ...base,
+        ...enriched,
+        name: enriched.name || base.name,
+        type: base.type === 'poi' ? (enriched.type || base.type) : base.type,
+        subtype: enriched.subtype || base.subtype,
+        source: 'mapbox_search',
+        source_label: 'Mapbox Search',
+        summary: enriched.summary || base.summary || 'Selected from the visible map and resolved through Mapbox Search.',
+      };
+    } catch {
+      return base;
+    }
+  }
+
   function osmPoiToCopilotPlace(poi: OsmPoi, center: { lat: number; lng: number }, fallbackCategory: string): SearchPlace | null {
     const lat = Number(poi.lat);
     const lng = Number(poi.lng);
@@ -7418,7 +7580,7 @@ function MapScreen() {
         spoken_summary: 'That tap is on a Trailhead control, not the map. Tap the map surface or name the place instead.',
       };
     }
-    if (type === 'getMapContext' || type === 'explainVisibleArea') {
+    if (type === 'getMapContext' || type === 'explainVisibleArea' || type === 'getVisibleMapCandidates') {
       const context = buildCopilotContext();
       const vp = viewportRef.current;
       const inView = (place: { lat?: number | null; lng?: number | null }) => {
@@ -7444,17 +7606,7 @@ function MapScreen() {
         .map(copilotPlacePayload);
       const renderedFeatures = visibleMapFeatures
         .slice(0, 12)
-        .map(feature => ({
-          feature_id: feature.feature_id,
-          result_index: feature.result_index,
-          name: feature.name,
-          type: feature.type,
-          subtype: feature.subtype,
-          lat: feature.lat,
-          lng: feature.lng,
-          source: feature.source_label || feature.source,
-          distance_mi: feature.distance_mi ?? null,
-        }));
+        .map(visibleCandidatePayload);
       const selected = context.map?.selected_place as Record<string, unknown> | null | undefined;
       const visibleLayers = context.map?.visible_layers ?? [];
       const counts = {
@@ -7495,6 +7647,11 @@ function MapScreen() {
           route: context.route,
         },
       };
+    }
+    if (type === 'searchAndSelectPlace') {
+      const query = String(args.query || args.place || args.name || args.destination || '').trim();
+      if (!query) return { applied: false, status: 'failed', reason: 'missing_query', spoken_summary: 'Tell me the place to search for.' };
+      return runCopilotPoiSearch(args.category || args.type || args.kind || 'poi', { ...args, query, open_card: true });
     }
     if (type === 'toggleLayer') {
       const layerAlias = String(args.layer || '').toLowerCase();
@@ -7610,29 +7767,24 @@ function MapScreen() {
       setShowDiscoveryPanel(true);
       return { applied: true, opened: 'trail_discovery' };
     }
-    if (type === 'selectRenderedFeature') {
-      const rawIndex = args.result_index ?? args.index ?? args.number;
-      const featureId = String(args.feature_id || args.id || '').trim();
-      const rawName = String(args.name || args.place || args.target || '').trim().toLowerCase();
-      let feature: MapSelectableFeature | undefined;
-      if (featureId) {
-        feature = visibleMapFeatures.find(item => item.feature_id === featureId || String(item.place?.id || '') === featureId);
-      }
-      if (!feature && rawIndex != null) {
-        const numeric = Math.max(0, Number(rawIndex));
-        const idx = args.number != null && args.result_index == null ? Math.max(0, numeric - 1) : numeric;
-        feature = visibleMapFeatures[idx];
-      }
-      if (!feature && rawName) {
-        feature = visibleMapFeatures.find(item => item.name.toLowerCase().includes(rawName) || rawName.includes(item.name.toLowerCase()));
-      }
+    if (type === 'selectRenderedFeature' || type === 'selectVisiblePlace' || type === 'openSelectedPlaceCard') {
+      const { feature, ambiguous, matches } = findVisibleCandidate(args);
       if (!feature) {
         setShowExtremeCopilot(true);
         setQuickToast('No visible map feature matched.');
         setTimeout(() => setQuickToast(''), 2400);
         return { applied: false, status: 'failed', reason: 'no_visible_feature', spoken_summary: 'I could not match that to a visible map feature. Ask what I see, then choose by number or name.' };
       }
-      const place = searchPlaceFromSelectableFeature(feature);
+      if (ambiguous && !args.result_index && !args.feature_id && !args.id) {
+        return {
+          applied: false,
+          status: 'failed',
+          reason: 'ambiguous_visible_feature',
+          candidates: matches.slice(0, 6).map(visibleCandidatePayload),
+          spoken_summary: `I see more than one match: ${matches.slice(0, 3).map(item => item.name).join(', ')}. Which one?`,
+        };
+      }
+      const place = await enrichRenderedFeaturePlace(feature);
       openCopilotPlaceCard(place);
       setShowExtremeCopilot(false);
       return {
@@ -7664,10 +7816,10 @@ function MapScreen() {
         return { applied: true, status: 'applied', selected: place.name, selected_type: place.type || 'place', place: copilotPlacePayload(place) };
       }
       const renderedFeature = requestedName
-        ? visibleMapFeatures.find(item => item.feature_id.toLowerCase() === requestedName || item.name.toLowerCase().includes(requestedName) || requestedName.includes(item.name.toLowerCase()))
+        ? visibleMapFeatures.find(item => item.feature_id.toLowerCase() === requestedName || placeTextMatches(item.name, requestedName) || (item.aliases ?? []).some(alias => placeTextMatches(alias, requestedName)))
         : visibleMapFeatures[index];
       if (renderedFeature) {
-        const renderedPlace = searchPlaceFromSelectableFeature(renderedFeature);
+        const renderedPlace = await enrichRenderedFeaturePlace(renderedFeature);
         openCopilotPlaceCard(renderedPlace);
         setShowExtremeCopilot(false);
         return { applied: true, status: 'applied', selected: renderedFeature.name, selected_type: renderedFeature.type || 'place', selected_place: copilotPlacePayload(renderedPlace) };
@@ -7778,7 +7930,20 @@ function MapScreen() {
       router.push('/(tabs)/profile');
       return { applied: true, status: 'applied', opened: 'rig_profile', rig_profile: rigProfile ?? null };
     }
-    if (type === 'buildRoute' || type === 'modifyRoute') {
+    if (type === 'buildRoute' || type === 'modifyRoute' || type === 'routeToSelectedPlace') {
+      const hasVisibleTargetArgs = !!(args.feature_id || args.id || args.result_index != null || args.index != null || args.number != null || args.type || args.kind || args.category || args.place_type || args.position || args.screen_position || args.side || args.name || args.place);
+      if (hasVisibleTargetArgs) {
+        const visibleTarget = findVisibleCandidate(args);
+        if (visibleTarget.ambiguous) {
+          return {
+            applied: false,
+            status: 'failed',
+            reason: 'ambiguous_route_destination',
+            candidates: visibleTarget.matches.slice(0, 6).map(visibleCandidatePayload),
+            spoken_summary: `I see more than one matching destination: ${visibleTarget.matches.slice(0, 3).map(item => item.name).join(', ')}. Which one should I route to?`,
+          };
+        }
+      }
       const dest = await resolveCopilotDestination(args);
       setShowExtremeCopilot(false);
       const location = await ensureCopilotLocation();
@@ -8871,6 +9036,10 @@ function MapScreen() {
           openPoiFeature(rawPoi);
         }
       }
+      if (msg.type === 'map_feature_selected') {
+        const rawPoi = msg.poi as OsmPoi;
+        if (rawPoi) openPoiFeature(rawPoi);
+      }
       if (msg.type === 'waterbody_tapped' && Number.isFinite(Number(msg.lat)) && Number.isFinite(Number(msg.lng))) {
         openPoiFeature(mapWaterbodyPlace(Number(msg.lat), Number(msg.lng), msg.name, msg.kind));
       }
@@ -9494,7 +9663,13 @@ function MapScreen() {
       const key = `${feature.name.toLowerCase()}:${feature.lat.toFixed(4)}:${feature.lng.toFixed(4)}`;
       if (seen.has(key)) return;
       seen.add(key);
-      next.push({ ...feature, result_index: next.length });
+      next.push({
+        ...feature,
+        result_index: next.length,
+        screen_position: feature.screen_position ?? screenPositionFromBounds(feature, vp),
+        confidence: feature.confidence || (feature.source === 'copilot_result' || feature.source === 'search_result' ? 'high' : 'medium'),
+        aliases: feature.aliases?.length ? feature.aliases : [feature.name, feature.subtype, feature.type, feature.address].filter((item): item is string => !!item),
+      });
     };
     for (const place of copilotResults) push(selectableFeatureFromPlace(place, next.length, 'copilot_result', center));
     for (const place of searchResults) push(selectableFeatureFromPlace(place, next.length, 'search_result', center));
@@ -10364,15 +10539,30 @@ function MapScreen() {
   }
 
   function openPoiFeature(poi: OsmPoi, day?: number | null) {
+    const place = poi as SearchPlace;
     setTappedPoi(null);
     setSearchRouteCard(null);
     setSelectedPlaceTripContext(tripPlaceContextFor(poi, day));
-    setSelectedPlace(poi as SearchPlace);
+    setSelectedPlace(place);
     setSelectedCamp(null);
     setTappedTrail(null);
     setTappedTileSpot(null);
     setSelectedCommunityPin(null);
     setSelectedTrail(null);
+    const source = String(poi.source || '').toLowerCase();
+    if (source === 'mapbox_feature' || source === 'rendered_map') {
+      const feature = selectableFeatureFromPlace(place, 0, source, userLoc ?? null);
+      if (feature) {
+        enrichRenderedFeaturePlace(feature).then(enriched => {
+          setSelectedPlace(current => {
+            if (!current) return current;
+            const sameId = current.id && place.id && current.id === place.id;
+            const sameCoords = Math.abs(current.lat - place.lat) < 0.00001 && Math.abs(current.lng - place.lng) < 0.00001;
+            return sameId || sameCoords ? { ...current, ...enriched } : current;
+          });
+        }).catch(() => {});
+      }
+    }
   }
 
   function nearbyFeedKey(prefix: string, lat?: number | null, lng?: number | null) {
@@ -16526,7 +16716,7 @@ function MapScreen() {
       })()}
 
       {extremeCopilotAvailable && !navMode && !safeWaterPlanningActive && !waterFollowActive && !showExtremeCopilot && (
-        <View style={[s.extremeCopilotDock, { bottom: bottomInset + 132 }]}>
+        <View style={[s.extremeCopilotDock, { bottom: bottomInset + 132 }]} pointerEvents="box-none">
           <TouchableOpacity
             style={s.extremeCopilotFab}
             activeOpacity={0.88}

@@ -1,7 +1,7 @@
 import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import type { CampsitePin, Pin, Report, SuggestedWaterCorridorResponse, WaterSpotCard } from '@/lib/api';
+import type { CampsitePin, MapSelectableFeature, Pin, Report, SuggestedWaterCorridorResponse, WaterSpotCard } from '@/lib/api';
 import type { WaterRoute } from '@/lib/store';
 import { useStore } from '@/lib/store';
 import { useTheme } from '@/lib/design';
@@ -24,6 +24,9 @@ export interface NativeMapHandle {
   getTrailHighlight: () => GeoJSON.FeatureCollection;
   captureTrailAt: (lat: number, lng: number, name?: string) => Promise<GeoJSON.FeatureCollection>;
   screenToCoordinate: (x: number, y: number) => Promise<[number, number] | null>;
+  selectFeatureAtScreenPoint: (x: number, y: number) => Promise<MapSelectableFeature | null>;
+  queryVisibleFeatures: () => Promise<MapSelectableFeature[]>;
+  getVisibleMapCandidates: () => Promise<MapSelectableFeature[]>;
   getVisibleCenter: () => Promise<[number, number] | null>;
   getVisibleBounds: () => Promise<MapBounds | null>;
   restoreRoute:   (coords: [number,number][], steps: RouteStep[], legs: RouteStep[][], td: number, tt: number) => void;
@@ -333,6 +336,40 @@ function bestWebMapboxPlaceFromFeatures(features: any[], fallbackLat: number, fa
     .sort((a, b) => a.score - b.score)[0]?.place ?? null;
 }
 
+function webScreenPosition(x: number, y: number, width: number, height: number): MapSelectableFeature['screen_position'] {
+  const nx = x / Math.max(1, width);
+  const ny = y / Math.max(1, height);
+  if (nx >= 0.34 && nx <= 0.66 && ny >= 0.28 && ny <= 0.68) return 'center';
+  if (ny < 0.28) return 'top';
+  if (ny > 0.68) return 'bottom';
+  return nx < 0.5 ? 'left' : 'right';
+}
+
+function webPlaceToCandidate(place: any, idx: number, map: any): MapSelectableFeature | null {
+  if (!place || !Number.isFinite(Number(place.lat)) || !Number.isFinite(Number(place.lng))) return null;
+  const point = map?.project?.([place.lng, place.lat]);
+  const canvas = map?.getCanvas?.();
+  return {
+    feature_id: String(place.id || place.place_id || place.provider_place_id || `${place.source || 'web'}:${place.name}:${place.lat}:${place.lng}`).slice(0, 180),
+    result_index: idx,
+    name: place.name || 'Place',
+    lat: Number(place.lat),
+    lng: Number(place.lng),
+    type: place.type || 'poi',
+    subtype: place.subtype || null,
+    source: place.source || 'mapbox_feature',
+    source_label: place.source_label || 'Mapbox',
+    source_layer: place.source_layer || null,
+    screen_x: Number.isFinite(point?.x) ? point.x : null,
+    screen_y: Number.isFinite(point?.y) ? point.y : null,
+    screen_position: Number.isFinite(point?.x) && Number.isFinite(point?.y) ? webScreenPosition(point.x, point.y, canvas?.clientWidth || 1, canvas?.clientHeight || 1) : null,
+    confidence: 'medium',
+    aliases: [place.name, place.type, place.subtype].filter(Boolean),
+    summary: place.summary || null,
+    place,
+  };
+}
+
 const mapboxContainerStyle: React.CSSProperties = {
   position: 'absolute',
   inset: 0,
@@ -368,6 +405,59 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     screenToCoordinate: async (x: number, y: number) => {
       const point = mapRef.current?.unproject?.([x, y]);
       return point ? [point.lng, point.lat] : null;
+    },
+    selectFeatureAtScreenPoint: async (x: number, y: number) => {
+      const map = mapRef.current;
+      if (!map) return null;
+      const point = map.unproject?.([x, y]);
+      if (!point) return null;
+      const box = [[x - 42, y - 42], [x + 42, y + 42]];
+      const features = [
+        ...(map.queryRenderedFeatures?.(box) ?? []),
+        ...(map.queryRenderedFeatures?.([x, y]) ?? []),
+      ];
+      const place = bestWebMapboxPlaceFromFeatures(features, point.lat, point.lng);
+      return webPlaceToCandidate(place, 0, map);
+    },
+    queryVisibleFeatures: async () => {
+      const map = mapRef.current;
+      if (!map) return [];
+      const canvas = map.getCanvas?.();
+      const features = map.queryRenderedFeatures?.([[0, 0], [canvas?.clientWidth || 1, canvas?.clientHeight || 1]]) ?? [];
+      const seen = new Set<string>();
+      const candidates: MapSelectableFeature[] = [];
+      for (const item of features
+        .map((feature: any) => ({ place: mapWebMapboxFeatureToPlace(feature, 0, 0), score: mapWebMapboxFeaturePickScore(feature) }))
+        .filter((item: any) => item.place)
+        .sort((a: any, b: any) => a.score - b.score)) {
+        const key = `${String(item.place.name || '').toLowerCase()}:${Number(item.place.lat).toFixed(4)}:${Number(item.place.lng).toFixed(4)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const candidate = webPlaceToCandidate(item.place, candidates.length, map);
+        if (candidate) candidates.push(candidate);
+        if (candidates.length >= 24) break;
+      }
+      return candidates;
+    },
+    getVisibleMapCandidates: async () => {
+      const map = mapRef.current;
+      if (!map) return [];
+      const canvas = map.getCanvas?.();
+      const features = map.queryRenderedFeatures?.([[0, 0], [canvas?.clientWidth || 1, canvas?.clientHeight || 1]]) ?? [];
+      const seen = new Set<string>();
+      const candidates: MapSelectableFeature[] = [];
+      for (const item of features
+        .map((feature: any) => ({ place: mapWebMapboxFeatureToPlace(feature, 0, 0), score: mapWebMapboxFeaturePickScore(feature) }))
+        .filter((item: any) => item.place)
+        .sort((a: any, b: any) => a.score - b.score)) {
+        const key = `${String(item.place.name || '').toLowerCase()}:${Number(item.place.lat).toFixed(4)}:${Number(item.place.lng).toFixed(4)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const candidate = webPlaceToCandidate(item.place, candidates.length, map);
+        if (candidate) candidates.push(candidate);
+        if (candidates.length >= 24) break;
+      }
+      return candidates;
     },
     getVisibleCenter: async () => {
       const center = mapRef.current?.getCenter?.();

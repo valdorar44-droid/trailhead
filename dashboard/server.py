@@ -1679,6 +1679,19 @@ def _extract_food_keyword(command: str) -> str:
             return keyword
     return ""
 
+def _extract_route_query(command: str) -> str:
+    text = str(command or "")
+    match = re.search(r"\b(?:route|directions|guidance|preview\s+(?:a\s+)?route|route me|take me|navigate)\s+(?:me\s+)?(?:to|for|toward|there to)?\s*([a-zA-Z0-9 .,'-]{2,90})", text, flags=re.I)
+    if not match:
+        return ""
+    query = match.group(1)
+    query = re.split(r"\b(?:and|then|please|now|with|avoid|using)\b", query, maxsplit=1, flags=re.I)[0]
+    query = re.sub(r"\b(?:route|directions|guidance|preview|there|here|map|view|area)\b", " ", query, flags=re.I)
+    query = re.sub(r"\s+", " ", query).strip(" .,'-")
+    if query.lower() in {"me", "my location", "current location", "selected place", "current result"}:
+        return ""
+    return query[:80]
+
 def _clean_route_builder_place(value: str) -> str:
     clean = re.split(r"\b(?:for|with|using|and make|make it|different camps|same camp|basecamp|route style|camp preference|please)\b", value, maxsplit=1, flags=re.I)[0]
     clean = re.sub(r"\b(?:mostly|camping|camps?|campsites?|campgrounds?|wild|adventure|backroads|direct|fastest|balanced|scenic but sane|dispersed|boondock|free|blm|usfs|public land|private stays?|farm|ranch|winery|glamping|rv|developed|reservable|route|trip|plan|days?|nights?)\b", " ", clean, flags=re.I)
@@ -1942,12 +1955,12 @@ def _build_extreme_map_action(command: str, context: dict, provider: str = "trai
         route_preview = {"status": "staged", "instruction": command[:240]}
         message = "Route change staged for confirmation."
         requires_confirmation = True
-    elif re.search(r"\b(select|choose|open|take me to)\b.*\b(first|second|third|1|2|3|result)\b|\b(first|second|third) result\b", text):
+    elif re.search(r"\b(select|choose|open|take me to)\b.*\b(first|second|third|1|2|3|result)\b|\b(first|second|third) result\b|\b(another|next one|next result|show another|open another)\b", text):
         visible_features = map_ctx.get("visible_map_features") if isinstance(map_ctx.get("visible_map_features"), list) else []
         action_type = "selectRenderedFeature" if visible_features and not (map_ctx.get("current_results") or []) else "selectPlace"
         if re.search(r"\bthird\b|\b3\b", text):
             index = 2
-        elif re.search(r"\bsecond\b|\b2\b", text):
+        elif re.search(r"\bsecond\b|\b2\b|\banother\b|\bnext one\b|\bnext result\b|\bshow another\b|\bopen another\b", text):
             index = 1
         else:
             index = 0
@@ -1955,9 +1968,10 @@ def _build_extreme_map_action(command: str, context: dict, provider: str = "trai
         map_updates = {"select_result_index": index}
         selected_place = {"result_index": index}
         message = "Selection staged from the current result list."
-    elif re.search(r"\broute me|directions|guidance\b", text):
+    elif re.search(r"\broute me|directions|guidance|preview (a )?route|route to\b", text):
         action_type = "buildRoute"
-        args = {"instruction": command[:240], "destination": route_ctx.get("destination") or map_ctx.get("selected_place")}
+        query = _extract_route_query(command)
+        args = {"instruction": command[:240], "destination": route_ctx.get("destination") or map_ctx.get("selected_place"), "query": query}
         map_updates = {"route_preview": True, "open_search": not bool(args.get("destination"))}
         route_preview = {"status": "preview", "instruction": command[:240]}
         message = "Route preview staged. Confirm separately before starting navigation."

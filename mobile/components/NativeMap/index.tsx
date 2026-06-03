@@ -2634,22 +2634,31 @@ function kindLabel(kind: string): string {
 }
 
 function mapboxPlaceType(props: Record<string, any>): OsmPoi['type'] {
-  const raw = String(props?.maki || props?.class || props?.type || props?.category || props?.group || '').toLowerCase();
+  const raw = String(
+    props?.maki
+    || props?.poi_category
+    || props?.category
+    || props?.class
+    || props?.type
+    || props?.group
+    || ''
+  ).toLowerCase();
   if (/(camp|caravan|rv)/.test(raw)) return 'camp';
-  if (/(trail|hiking|park)/.test(raw)) return 'trailhead';
   if (/(fuel|gas|charging)/.test(raw)) return 'fuel';
-  if (/(restaurant|cafe|bar|food)/.test(raw)) return 'food';
+  if (/(restaurant|cafe|bar|pub|bakery|food|pizza|burger|sandwich|coffee)/.test(raw)) return 'food';
   if (/(grocery|supermarket|shop|market)/.test(raw)) return 'grocery';
   if (/(hotel|lodg|motel)/.test(raw)) return 'lodging';
   if (/(view|attraction|museum|monument|landmark)/.test(raw)) return 'attraction';
   if (/(water|drinking)/.test(raw)) return 'water';
+  if (/(trailhead|trail|hiking)/.test(raw)) return 'trailhead';
+  if (/\bpark\b/.test(raw)) return 'attraction';
   return 'poi';
 }
 
 function mapboxFeaturePickScore(feature: any): number {
   const props = feature?.properties ?? {};
   const layerId = String(feature?.layer?.id || feature?.sourceLayer || feature?.source || '').toLowerCase();
-  const raw = String(props.maki || props.class || props.type || props.category || props.group || props.poi_category || '').toLowerCase();
+  const raw = String(props.maki || props.poi_category || props.category || props.class || props.type || props.group || '').toLowerCase();
   const hasPoiSignal = !!String(props.maki || props.poi_category || props.category || props.type || '').trim();
   let score = 100;
   if (layerId.includes('poi')) score -= 55;
@@ -2657,7 +2666,8 @@ function mapboxFeaturePickScore(feature: any): number {
   if (layerId.includes('transit') || layerId.includes('airport')) score -= 20;
   if (feature?.geometry?.type === 'Point') score -= 14;
   if (hasPoiSignal) score -= 12;
-  if (/(restaurant|cafe|bar|food|pizza|fuel|gas|charging|grocery|supermarket|shop|market|hotel|lodg|motel|view|attraction|museum|monument|landmark|water|drinking|trail|hiking|park|camp|caravan|rv)/.test(raw)) score -= 30;
+  if (/(restaurant|cafe|bar|pub|bakery|food|pizza|burger|sandwich|coffee|fuel|gas|charging|grocery|supermarket|shop|market|hotel|lodg|motel|view|attraction|museum|monument|landmark|water|drinking|trail|hiking|park|camp|caravan|rv)/.test(raw)) score -= 30;
+  if (/(restaurant|cafe|bar|pub|bakery|food|pizza|burger|sandwich|coffee|hotel|lodg|motel)/.test(raw)) score -= 18;
   if (layerId.includes('building')) score += 16;
   if (layerId.includes('road') || layerId.includes('boundary') || layerId.includes('landuse')) score += 40;
   if (/(country|state|province|settlement|city|town|village|neighborhood|postcode|address|road|street|motorway|primary|secondary|water|ocean|landuse)/.test(raw)) score += 45;
@@ -2685,7 +2695,7 @@ function mapMapboxFeatureToPoi(feature: any, fallbackLat: number, fallbackLng: n
   const lat = Number(coords[1]);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   const type = mapboxPlaceType(props);
-  const subtype = String(props.maki || props.class || props.category || props.type || props.group || '').replace(/[_-]+/g, ' ').trim();
+  const subtype = String(props.maki || props.poi_category || props.category || props.class || props.type || props.group || '').replace(/[_-]+/g, ' ').trim();
   return {
     id: `mapbox_feature:${String(props.mapbox_id || props.id || `${lat.toFixed(5)}:${lng.toFixed(5)}:${name}`).slice(0, 160)}`,
     name,

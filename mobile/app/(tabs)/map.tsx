@@ -3247,28 +3247,30 @@ const buildMapHtml = (
       if(userMarker&&smoothedHdg>=0){var svg=userMarker.getElement().querySelector('svg');if(svg)svg.style.transform='rotate('+(smoothedHdg-map.getBearing())+'deg)';}
     });
     function renderedPlaceType(props){
-      var raw=String((props&&((props.maki)||(props.class)||(props.type)||(props.category)||(props.group)||(props.kind)))||'').toLowerCase();
+      var raw=String((props&&((props.maki)||(props.poi_category)||(props.category)||(props.class)||(props.type)||(props.group)||(props.kind)))||'').toLowerCase();
       if(/camp|caravan|rv/.test(raw))return'camp';
-      if(/trailhead/.test(raw))return'trailhead';
-      if(/trail|hiking/.test(raw))return'trail';
       if(/fuel|gas|charging/.test(raw))return'fuel';
-      if(/restaurant|cafe|bar|food|pizza/.test(raw))return'food';
+      if(/restaurant|cafe|bar|pub|bakery|food|pizza|burger|sandwich|coffee/.test(raw))return'food';
       if(/grocery|supermarket|market/.test(raw))return'grocery';
       if(/hotel|lodg|motel/.test(raw))return'lodging';
       if(/view|attraction|museum|monument|landmark/.test(raw))return'attraction';
       if(/water|drinking/.test(raw))return'water';
+      if(/trailhead/.test(raw))return'trailhead';
+      if(/trail|hiking/.test(raw))return'trail';
+      if(/\bpark\b/.test(raw))return'attraction';
       return'poi';
     }
     function renderedFeatureScore(f){
       var p=f&&f.properties||{};
       var lid=String((f&&f.layer&&f.layer.id)||(f&&f.sourceLayer)||(f&&f.source)||'').toLowerCase();
-      var raw=String((p.maki||p.class||p.type||p.category||p.group||p.kind||p.poi_category)||'').toLowerCase();
+      var raw=String((p.maki||p.poi_category||p.category||p.class||p.type||p.group||p.kind)||'').toLowerCase();
       var score=100;
       if(lid.indexOf('poi')>=0)score-=55;
       if(lid.indexOf('place')>=0)score-=28;
       if(lid.indexOf('label')>=0)score-=18;
       if(f&&f.geometry&&f.geometry.type==='Point')score-=14;
-      if(/restaurant|cafe|bar|food|pizza|fuel|gas|grocery|hotel|view|attraction|museum|monument|landmark|trail|hiking|park|camp|caravan|rv/.test(raw))score-=30;
+      if(/restaurant|cafe|bar|pub|bakery|food|pizza|burger|sandwich|coffee|fuel|gas|grocery|hotel|lodg|motel|view|attraction|museum|monument|landmark|trail|hiking|park|camp|caravan|rv/.test(raw))score-=30;
+      if(/restaurant|cafe|bar|pub|bakery|food|pizza|burger|sandwich|coffee|hotel|lodg|motel/.test(raw))score-=18;
       if(lid.indexOf('building')>=0)score+=16;
       if(lid.indexOf('road')>=0||lid.indexOf('boundary')>=0||lid.indexOf('landuse')>=0)score+=45;
       if(/country|state|province|city|town|village|neighborhood|postcode|address|road|street|motorway|water|ocean|landuse/.test(raw))score+=45;
@@ -3283,7 +3285,7 @@ const buildMapHtml = (
       var cc=f&&f.geometry&&f.geometry.type==='Point'&&f.geometry.coordinates;
       var lng=Number(cc&&cc[0]);var lat=Number(cc&&cc[1]);
       if(!isFinite(lat)||!isFinite(lng)){lat=lngLat.lat;lng=lngLat.lng;}
-      var subtype=String(p.maki||p.class||p.category||p.type||p.group||p.kind||'').replace(/[_-]+/g,' ').trim();
+      var subtype=String(p.maki||p.poi_category||p.category||p.class||p.type||p.group||p.kind||'').replace(/[_-]+/g,' ').trim();
       return{id:String(p.id||p.mapbox_id||('rendered:'+name+':'+lat.toFixed(5)+':'+lng.toFixed(5))).slice(0,180),name:name,lat:lat,lng:lng,type:renderedPlaceType(p),subtype:subtype||'rendered place',source:'rendered_map',source_label:'Rendered map',source_layer:lid,provider_place_id:p.mapbox_id||p.id,place_id:p.mapbox_id||p.id,source_badge:'Map feature',source_freshness:'Selected from rendered map data.',summary:(subtype||'Place')+' selected from the map.'};
     }
     function pickRenderedPlaceFeature(features,lngLat){
@@ -5659,7 +5661,7 @@ function MapScreen() {
       ? 'trail'
       : selectedPlace.type === 'camp'
         ? 'camp'
-        : selectedPlaceSource === 'search' || selectedPlaceSource === 'mapbox_feature' || selectedPlaceSource === 'mapbox_search'
+        : selectedPlaceSource === 'search' || selectedPlaceSource === 'mapbox_feature' || selectedPlaceSource === 'mapbox_search' || selectedPlaceSource === 'rendered_map'
           ? 'search'
           : 'place';
     api.resolveMapCard({
@@ -6929,6 +6931,53 @@ function MapScreen() {
     return (searchRouteCard ?? selectedPlace ?? copilotResults[0] ?? (selectedCamp ? { ...selectedCamp, type: 'camp' } : null)) as SearchPlace | null;
   }
 
+  function copilotRouteDestinationQuery(args: Record<string, unknown> = {}) {
+    const target = args.target && typeof args.target === 'object' ? args.target as Record<string, unknown> : {};
+    const destination = args.destination && typeof args.destination === 'object' ? args.destination as Record<string, unknown> : {};
+    const directValues = [
+      typeof args.destination === 'string' ? args.destination : '',
+      typeof args.target === 'string' ? args.target : '',
+      args.query,
+      args.place,
+      args.location,
+      target.name,
+      destination.name,
+    ];
+    for (const value of directValues) {
+      const clean = String(value || '').trim();
+      if (clean.length >= 2 && !/^(there|here|me|my location|current location|selected place|current result)$/i.test(clean)) return clean;
+    }
+    const instruction = String(args.instruction || '').trim();
+    const match = instruction.match(/\b(?:route|directions|guidance|preview\s+(?:a\s+)?route|route me|take me|navigate)\s+(?:me\s+)?(?:to|for|toward|there to)?\s*([a-z0-9 .,'-]{2,90})/i);
+    if (!match) return '';
+    const clean = match[1]
+      .replace(/\b(?:please|preview|route|directions|guidance|there|here|now)\b/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .replace(/^[ .,'-]+|[ .,'-]+$/g, '');
+    return /^(me|my location|current location|selected place|current result)$/i.test(clean) ? '' : clean.slice(0, 80);
+  }
+
+  async function resolveCopilotDestination(args: Record<string, unknown> = {}) {
+    const query = copilotRouteDestinationQuery(args).toLowerCase();
+    if (query) {
+      const rendered = visibleMapFeatures.find(item => item.name.toLowerCase().includes(query) || query.includes(item.name.toLowerCase()));
+      if (rendered) return searchPlaceFromSelectableFeature(rendered);
+      const result = [...copilotResults, ...searchResults].find(item => item.name.toLowerCase().includes(query) || query.includes(item.name.toLowerCase()));
+      if (result) return result;
+      const geocoded = await api.geocodePlaces(query, 1).catch(() => []);
+      const place = geocoded[0];
+      if (place && Number.isFinite(place.lat) && Number.isFinite(place.lng)) {
+        return {
+          ...place,
+          type: 'poi',
+          source: place.source || 'geocode',
+          source_label: 'Geocode',
+        } as SearchPlace;
+      }
+    }
+    return currentCopilotDestination(args);
+  }
+
   async function writeRouteBuilderDraft(raw: unknown, autoBuild = false) {
     const source = raw && typeof raw === 'object' ? raw as TrailheadRouteBuilderDraft : {};
     return saveTrailheadRouteBuilderDraft({
@@ -7597,6 +7646,7 @@ function MapScreen() {
     }
     if (type === 'selectPlace') {
       const index = Math.max(0, Number(args.result_index || 0));
+      const requestedName = String(args.name || args.place || args.target || args.feature_id || '').trim().toLowerCase();
       const desiredCategory = String(args.category || args.kind || args.result_type || copilotResultScope?.category || '').toLowerCase();
       const wantsCamp = /camp|campground|campsite/.test(desiredCategory) || copilotResultScope?.kind === 'camp';
       const wantsTrail = /trail|hike/.test(desiredCategory) || copilotResultScope?.kind === 'trail';
@@ -7605,13 +7655,17 @@ function MapScreen() {
         || copilotResults.length > 0
         || searchResults.length > 0;
       const activePlaceResults = copilotResults.length ? copilotResults : (copilotResultScope?.kind === 'place' || searchResults.length ? searchResults : []);
-      const place = activePlaceResults[index];
+      const place = requestedName
+        ? activePlaceResults.find(item => item.name.toLowerCase().includes(requestedName) || requestedName.includes(item.name.toLowerCase()))
+        : activePlaceResults[index];
       if (place) {
         openCopilotPlaceCard(place);
         setShowExtremeCopilot(false);
         return { applied: true, status: 'applied', selected: place.name, selected_type: place.type || 'place', place: copilotPlacePayload(place) };
       }
-      const renderedFeature = visibleMapFeatures[index] ?? visibleMapFeatures[index - 1];
+      const renderedFeature = requestedName
+        ? visibleMapFeatures.find(item => item.feature_id.toLowerCase() === requestedName || item.name.toLowerCase().includes(requestedName) || requestedName.includes(item.name.toLowerCase()))
+        : visibleMapFeatures[index];
       if (renderedFeature) {
         const renderedPlace = searchPlaceFromSelectableFeature(renderedFeature);
         openCopilotPlaceCard(renderedPlace);
@@ -7725,7 +7779,7 @@ function MapScreen() {
       return { applied: true, status: 'applied', opened: 'rig_profile', rig_profile: rigProfile ?? null };
     }
     if (type === 'buildRoute' || type === 'modifyRoute') {
-      const dest = currentCopilotDestination(args);
+      const dest = await resolveCopilotDestination(args);
       setShowExtremeCopilot(false);
       const location = await ensureCopilotLocation();
       if (dest && location.loc) {
@@ -7749,7 +7803,7 @@ function MapScreen() {
       return { applied: false, status: 'failed', reason: 'missing_destination', spoken_summary: 'Tell me the destination first, or select a visible result.' };
     }
     if (type === 'startNavigation') {
-      const dest = currentCopilotDestination(args);
+      const dest = await resolveCopilotDestination(args);
       const location = await ensureCopilotLocation();
       setShowExtremeCopilot(false);
       if (!location.loc) {
@@ -12312,7 +12366,7 @@ function MapScreen() {
               addTrailCaptureAnchor([lng, lat]);
               return;
             }
-            if (lat != null && lng != null && await openExtremeReversePlace(lat, lng)) {
+            if (lat != null && lng != null && visibleMapFeatures.length === 0 && await openExtremeReversePlace(lat, lng)) {
               return;
             }
             nativeMapRef.current?.clearTrailHighlight();

@@ -95,16 +95,16 @@ const noop = () => {};
 const MAPBOX_GL_VERSION = 'v3.11.1';
 
 const MAPBOX_STYLE_URLS: Record<PremiumMapStyle, string> = {
-  standard: 'mapbox://styles/mapbox/streets-v12',
-  standard_satellite: 'mapbox://styles/mapbox/satellite-streets-v12',
+  standard: 'mapbox://styles/mapbox/standard',
+  standard_satellite: 'mapbox://styles/mapbox/standard-satellite',
   satellite_streets: 'mapbox://styles/mapbox/satellite-streets-v12',
   streets: 'mapbox://styles/mapbox/streets-v12',
   outdoors: 'mapbox://styles/mapbox/outdoors-v12',
   navigation_day: 'mapbox://styles/mapbox/navigation-day-v1',
   navigation_night: 'mapbox://styles/mapbox/navigation-night-v1',
-  dawn: 'mapbox://styles/mapbox/streets-v12',
-  dusk: 'mapbox://styles/mapbox/streets-v12',
-  night: 'mapbox://styles/mapbox/navigation-night-v1',
+  dawn: 'mapbox://styles/mapbox/standard',
+  dusk: 'mapbox://styles/mapbox/standard',
+  night: 'mapbox://styles/mapbox/standard',
 };
 
 const MAPBOX_LIGHT_PRESETS: Partial<Record<PremiumMapStyle, 'dawn' | 'day' | 'dusk' | 'night'>> = {
@@ -159,14 +159,19 @@ function loadMapboxGl() {
   return mapboxGlPromise;
 }
 
-function styleConfig(style: PremiumMapStyle) {
+function styleConfig(style: PremiumMapStyle, showTerrain = true) {
   return {
     basemap: {
       lightPreset: MAPBOX_LIGHT_PRESETS[style] ?? 'day',
-      show3dObjects: true,
+      show3dObjects: showTerrain,
+      show3dBuildings: showTerrain,
+      show3dLandmarks: showTerrain,
+      showLandmarkIcons: true,
+      showLandmarkIconLabels: true,
       showPlaceLabels: true,
       showRoadLabels: true,
       showPointOfInterestLabels: true,
+      showPointofInterestLabels: true,
       showTransitLabels: false,
     },
   };
@@ -492,10 +497,10 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           style: MAPBOX_STYLE_URLS[premiumStyle] ?? MAPBOX_STYLE_URLS.standard,
           center: initialCenter,
           zoom: props.userLoc || props.searchMarker ? 11 : 5,
-          pitch: 56,
+          pitch: props.showTerrain ? 56 : 0,
           bearing: -18,
           projection: 'globe',
-          config: styleConfig(premiumStyle),
+          config: styleConfig(premiumStyle, props.showTerrain),
         });
         mapRef.current.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'top-right');
         mapRef.current.on('load', () => {
@@ -539,17 +544,17 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   useEffect(() => {
     if (!isExtremeWeb || !mapRef.current) return;
     routeReadyRef.current = false;
-    mapRef.current.setStyle(MAPBOX_STYLE_URLS[premiumStyle] ?? MAPBOX_STYLE_URLS.standard, { config: styleConfig(premiumStyle) });
+    mapRef.current.setStyle(MAPBOX_STYLE_URLS[premiumStyle] ?? MAPBOX_STYLE_URLS.standard, { config: styleConfig(premiumStyle, props.showTerrain) });
     mapRef.current.once('style.load', () => {
       routeReadyRef.current = true;
       syncWebRoute(mapRef.current, props.waypoints);
       if (mapRef.current?.setConfigProperty) {
-        Object.entries(styleConfig(premiumStyle).basemap).forEach(([key, value]) => {
+        Object.entries(styleConfig(premiumStyle, props.showTerrain).basemap).forEach(([key, value]) => {
           mapRef.current.setConfigProperty('basemap', key, value);
         });
       }
     });
-  }, [isExtremeWeb, premiumStyle]);
+  }, [isExtremeWeb, premiumStyle, props.showTerrain]);
 
   useEffect(() => {
     if (!isExtremeWeb || !mapRef.current || !routeReadyRef.current) return;

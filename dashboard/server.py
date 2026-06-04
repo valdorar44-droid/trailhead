@@ -1667,7 +1667,7 @@ def _extract_place_query(command: str) -> str:
         return ""
     query = match.group(1)
     query = re.split(r"\b(?:for|with|that|and|then|please)\b", query, maxsplit=1, flags=re.I)[0]
-    query = re.sub(r"\b(?:campgrounds?|campsites?|camps?|rv parks?|trails?|fuel|gas|propane|restaurants?|food|eat|dining|viewpoints?|views?|scenic|cool places?|attractions?|landmarks?|nearby|around|area|map|view)\b", " ", query, flags=re.I)
+    query = re.sub(r"\b(?:campgrounds?|campsites?|camps?|rv parks?|trails?|fuel|gas|propane|restaurants?|food|eat|dining|hotels?|motels?|lodg(?:e|ing)|places? to stay|inns?|hostels?|viewpoints?|views?|scenic|cool places?|attractions?|landmarks?|nearby|around|area|map|view)\b", " ", query, flags=re.I)
     query = re.sub(r"\s+", " ", query).strip(" .,'-")
     if query.lower() in {"me", "here", "my location", "current location", "current view", "map view", "this area"}:
         return ""
@@ -1992,6 +1992,13 @@ def _build_extreme_map_action(command: str, context: dict, provider: str = "trai
         args = {"category": category, "route_scoped": route_active, "near": center, "query": query, "open_card": open_card, "limit": 8}
         map_updates = {"result_list": True, "open_card": open_card, "category": category, "query": query}
         message = f"{'Viewpoint' if category == 'viewpoint' else 'Attraction'} search staged near {query}." if query else "Place search staged for the current map view."
+    elif re.search(r"\b(hotels?|motels?|lodg(?:e|ing)|places? to stay|inns?|hostels?)\b", text):
+        action_type = "searchPlaces"
+        query = _extract_place_query(command)
+        open_card = bool(re.search(r"\b(best|top|first|nearest|closest|open|show me one|pick one)\b", text))
+        args = {"category": "lodging", "route_scoped": route_active, "near": center, "query": query, "open_card": open_card, "limit": 8}
+        map_updates = {"result_list": True, "open_card": open_card, "category": "lodging", "query": query}
+        message = f"Lodging search staged near {query}." if query else "Lodging search staged for the current map view."
     elif re.search(r"\btrail|trailhead|hike|peak|hot spring\b", text):
         action_type = "searchTrails"
         args = {"category": "trails", "route_scoped": route_active, "near": center}

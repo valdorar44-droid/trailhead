@@ -6828,9 +6828,13 @@ function MapScreen() {
       const nextLat = Number(coords[1]);
       if (!name || !Number.isFinite(nextLat) || !Number.isFinite(nextLng)) return false;
       const tapDistanceM = haversineKm(lat, lng, nextLat, nextLng) * 1000;
-      if (!Number.isFinite(tapDistanceM) || tapDistanceM > 80) return false;
+      if (!Number.isFinite(tapDistanceM) || tapDistanceM > 220) return false;
       const type = String(props.poi_category?.[0] || props.feature_type || props.category || 'poi').toLowerCase().replace(/[^a-z0-9_]+/g, '_') || 'poi';
       setSearchRouteCard(null);
+      setShowSearch(false);
+      setShowDiscoveryPanel(false);
+      setCopilotResults([]);
+      setCopilotResultScope(null);
       setSelectedPlace({
         name,
         lat: nextLat,
@@ -7531,6 +7535,12 @@ function MapScreen() {
     return { n: point.lat + span, s: point.lat - span, e: point.lng + span, w: point.lng - span, zoom };
   }
 
+  function copilotSearchBbox(center: { lat: number; lng: number }, radiusMi: number) {
+    const latSpan = Math.max(0.015, Math.min(1.2, radiusMi / 69));
+    const lngSpan = Math.max(0.015, Math.min(1.2, radiusMi / Math.max(18, 69 * Math.cos(center.lat * Math.PI / 180))));
+    return `${(center.lng - lngSpan).toFixed(6)},${(center.lat - latSpan).toFixed(6)},${(center.lng + lngSpan).toFixed(6)},${(center.lat + latSpan).toFixed(6)}`;
+  }
+
   function copilotCampPayload(camp: CampsitePin) {
     return {
       id: camp.id,
@@ -7582,6 +7592,9 @@ function MapScreen() {
     if (/(cool|attraction|sight|landmark|place|things to do)/.test(value)) {
       return { id: 'attraction', label: 'places', provider: 'attraction', nearby: 'attraction,viewpoint,historic,park', radius: 25 };
     }
+    if (/(hotel|motel|lodg|stay|inn|hostel)/.test(value)) {
+      return { id: 'lodging', label: 'lodging', provider: 'hotel', nearby: 'lodging,hotel,motel', radius: 18 };
+    }
     if (/(fuel|gas)/.test(value)) return { id: 'fuel', label: 'fuel', provider: 'gas station', nearby: 'fuel', radius: 25 };
     if (/propane/.test(value)) return { id: 'propane', label: 'propane', provider: 'propane', nearby: 'propane', radius: 35 };
     if (/grocery/.test(value)) return { id: 'grocery', label: 'groceries', provider: 'grocery', nearby: 'grocery', radius: 18 };
@@ -7612,6 +7625,73 @@ function MapScreen() {
       address: props.full_address || props.place_formatted || props.address,
       attribution: 'Mapbox',
     };
+  }
+
+  async function runMapboxSuggestPlaceSearch(q: string, center: { lat: number; lng: number }, category: string, limit: number, bbox: string): Promise<SearchPlace[]> {
+    const clean = q.trim();
+    if (!clean || !extremeConfig?.feature_flags?.search) return [];
+    try {
+      const session = await api.extremeSearchSession({ source: 'copilot_text_place_search', q: clean.slice(0, 80) });
+      const suggestions = await api.extremeSearchSuggest({
+        q: clean,
+        session_token: session.session_token,
+        proximity: `${center.lng},${center.lat}`,
+        origin: `${center.lng},${center.lat}`,
+        bbox,
+        types: 'poi,place,address',
+        language: 'en',
+        limit: Math.min(limit, 10),
+      });
+      const candidates = (suggestions.suggestions ?? [])
+        .map((item: any) => item?.mapbox_id || item?.id)
+        .filter(Boolean)
+        .slice(0, Math.min(limit, 8));
+      const retrieved = await Promise.all(candidates.map((mapboxId: string) =>
+        api.extremeSearchRetrieve({
+          mapbox_id: mapboxId,
+          session_token: session.session_token,
+          language: 'en',
+          proximity: `${center.lng},${center.lat}`,
+          origin: `${center.lng},${center.lat}`,
+        }).catch(() => null),
+      ));
+      return retrieved
+        .flatMap(data => data?.features ?? [])
+        .map(feature => mapboxFeatureToCopilotPlace(feature, center, category))
+        .filter(Boolean) as SearchPlace[];
+    } catch {
+      return [];
+    }
+  }
+
+  async function getMapboxViewportCandidates(limit = 24): Promise<MapSelectableFeature[]> {
+    if (!extremeMapLayerActive || !extremeConfig?.feature_flags?.search) return [];
+    const vp = viewportRef.current;
+    const center = vp
+      ? { lat: (vp.n + vp.s) / 2, lng: (vp.e + vp.w) / 2 }
+      : userLoc;
+    if (!center) return [];
+    const bbox = vp
+      ? `${vp.w.toFixed(6)},${vp.s.toFixed(6)},${vp.e.toFixed(6)},${vp.n.toFixed(6)}`
+      : copilotSearchBbox(center, 18);
+    const categories = ['restaurant', 'cafe', 'hotel', 'attraction', 'museum'];
+    const places = (await Promise.all(categories.map(category =>
+      api.extremeSearchCategory({
+        category,
+        proximity: `${center.lng},${center.lat}`,
+        bbox,
+        limit: Math.max(3, Math.min(6, Math.ceil(limit / categories.length))),
+        language: 'en',
+      })
+        .then(data => (data.features ?? [])
+          .map(feature => mapboxFeatureToCopilotPlace(feature, center, category === 'hotel' ? 'lodging' : category))
+          .filter(Boolean) as SearchPlace[])
+        .catch(() => []),
+    ))).flat();
+    return dedupeCopilotPlaces(places)
+      .slice(0, limit)
+      .map((place, idx) => selectableFeatureFromPlace(place, idx, 'mapbox_search_visible', center))
+      .filter(Boolean) as MapSelectableFeature[];
   }
 
   function featureTypeMatches(feature: MapSelectableFeature, raw: string) {
@@ -7675,8 +7755,9 @@ function MapScreen() {
       ?? Promise.resolve([])
     ).catch(() => []);
     const renderedList = Array.isArray(rendered) ? rendered.slice(0, 24).map((feature, idx) => ({ ...feature, result_index: idx })) : [];
+    const mapboxSearchList = renderedList.length >= 10 ? [] : await getMapboxViewportCandidates(24 - renderedList.length).catch(() => []);
     if (renderedList.length) setVisibleRenderedFeatures(renderedList);
-    return normalizeVisibleCandidateList([...renderedList, ...visibleMapFeatures]);
+    return normalizeVisibleCandidateList([...renderedList, ...mapboxSearchList, ...visibleMapFeatures]);
   }
 
   function findVisibleCandidate(args: Record<string, unknown>, candidates: MapSelectableFeature[] = visibleMapFeatures) {
@@ -7792,7 +7873,17 @@ function MapScreen() {
       seen.add(key);
       out.push(item);
     }
-    return out.sort((a, b) => (a.distance_mi ?? a.dist ?? 9999) - (b.distance_mi ?? b.dist ?? 9999));
+    const sourceRank = (place: SearchPlace) => {
+      const source = String(place.source || place.source_label || '').toLowerCase();
+      if (source.includes('mapbox')) return 0;
+      if (source.includes('trailhead') || source.includes('saved') || source.includes('community')) return 1;
+      return 2;
+    };
+    return out.sort((a, b) =>
+      sourceRank(a) - sourceRank(b)
+      || (a.distance_mi ?? a.dist ?? 9999) - (b.distance_mi ?? b.dist ?? 9999)
+      || String(a.name || '').localeCompare(String(b.name || '')),
+    );
   }
 
   function openCopilotCampCard(camp: CampsitePin) {
@@ -7867,6 +7958,7 @@ function MapScreen() {
 
     const limit = Math.max(1, Math.min(Number(args.limit || args.result_limit || 8), 12));
     const radius = Math.max(4, Math.min(Number(args.radius_mi || category.radius), 45));
+    const bbox = copilotSearchBbox(center, radius);
     nativeMapRef.current?.flyTo(center.lat, center.lng, query ? 13 : 12, searchedNear);
     webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: center.lat, lng: center.lng, zoom: query ? 13 : 12, name: searchedNear }));
 
@@ -7876,12 +7968,23 @@ function MapScreen() {
         api.extremeSearchCategory({
           category: keyword || category.provider,
           proximity: `${center.lng},${center.lat}`,
+          bbox,
           limit,
           language: 'en',
         })
           .then(data => (data.features ?? []).map(feature => mapboxFeatureToCopilotPlace(feature, center, category.id)).filter(Boolean) as SearchPlace[])
           .catch(() => []),
       );
+      const textQueries = Array.from(new Set([
+        keyword || '',
+        keyword && category.provider && keyword !== category.provider ? `${keyword} ${category.provider}` : '',
+        !keyword && category.id === 'food' ? 'restaurants' : '',
+        !keyword && category.id === 'attraction' ? 'things to do' : '',
+        !keyword && category.id === 'lodging' ? 'hotels' : '',
+      ].filter(Boolean)));
+      for (const textQuery of textQueries.slice(0, 2)) {
+        searches.push(runMapboxSuggestPlaceSearch(textQuery, center, category.id, limit, bbox));
+      }
     }
     searches.push(
       api.getNearbyPlaces(center.lat, center.lng, radius, category.nearby, 'auto')
@@ -12962,7 +13065,7 @@ function MapScreen() {
               addTrailCaptureAnchor([lng, lat]);
               return;
             }
-            if (lat != null && lng != null && visibleMapFeatures.length === 0 && await openExtremeReversePlace(lat, lng)) {
+            if (lat != null && lng != null && await openExtremeReversePlace(lat, lng)) {
               return;
             }
             nativeMapRef.current?.clearTrailHighlight();

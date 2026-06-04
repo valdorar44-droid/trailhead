@@ -52,19 +52,16 @@ const TRAIL_DIR = `${OFFLINE_DIR}trails/`;
 const CACHE_TRAIL_DIR = `${CACHE_OFFLINE_DIR}trails/`;
 
 const MAPBOX_STYLE_URLS: Record<PremiumMapStyle, string> = {
-  // Mapbox Standard exposes basemap POIs through SDK featuresets/interactions,
-  // not regular queryRenderedFeatures calls. RNMapbox v10 does not expose that
-  // featureset API here, so EXTREME uses queryable classic styles for place taps.
-  standard: 'mapbox://styles/mapbox/streets-v12',
-  standard_satellite: 'mapbox://styles/mapbox/satellite-streets-v12',
+  standard: 'mapbox://styles/mapbox/standard',
+  standard_satellite: 'mapbox://styles/mapbox/standard-satellite',
   satellite_streets: 'mapbox://styles/mapbox/satellite-streets-v12',
   streets: 'mapbox://styles/mapbox/streets-v12',
   outdoors: 'mapbox://styles/mapbox/outdoors-v12',
   navigation_day: 'mapbox://styles/mapbox/navigation-day-v1',
   navigation_night: 'mapbox://styles/mapbox/navigation-night-v1',
-  dawn: 'mapbox://styles/mapbox/streets-v12',
-  dusk: 'mapbox://styles/mapbox/streets-v12',
-  night: 'mapbox://styles/mapbox/navigation-night-v1',
+  dawn: 'mapbox://styles/mapbox/standard',
+  dusk: 'mapbox://styles/mapbox/standard',
+  night: 'mapbox://styles/mapbox/standard',
 };
 
 const MAPBOX_LIGHT_PRESETS: Partial<Record<PremiumMapStyle, 'dawn' | 'day' | 'dusk' | 'night'>> = {
@@ -1081,7 +1078,12 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     return {
       lightPreset,
       show3dObjects: showTerrain ? 'true' : 'false',
+      show3dBuildings: showTerrain ? 'true' : 'false',
+      show3dLandmarks: showTerrain ? 'true' : 'false',
+      showLandmarkIcons: 'true',
+      showLandmarkIconLabels: 'true',
       showPointOfInterestLabels: 'true',
+      showPointofInterestLabels: 'true',
       showRoadLabels: 'true',
       showPlaceLabels: 'true',
       theme: premiumStyle === 'night' || premiumStyle === 'navigation_night' ? 'monochrome' : 'default',

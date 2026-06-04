@@ -6820,7 +6820,7 @@ function MapScreen() {
       const nextLat = Number(coords[1]);
       if (!name || !Number.isFinite(nextLat) || !Number.isFinite(nextLng)) return false;
       const tapDistanceM = haversineKm(lat, lng, nextLat, nextLng) * 1000;
-      if (!Number.isFinite(tapDistanceM) || tapDistanceM > 220) return false;
+      if (!Number.isFinite(tapDistanceM) || tapDistanceM > 70) return false;
       const type = String(props.poi_category?.[0] || props.feature_type || props.category || 'poi').toLowerCase().replace(/[^a-z0-9_]+/g, '_') || 'poi';
       setSearchRouteCard(null);
       setShowSearch(false);
@@ -7824,6 +7824,7 @@ function MapScreen() {
     const center = { lat: feature.lat, lng: feature.lng };
     const language = 'en,fr';
     const mapboxId = String(base.provider_place_id || base.place_id || feature.place?.provider_place_id || feature.place?.place_id || '').trim();
+    const renderedOnly = ['mapbox_feature', 'rendered_map'].includes(String(base.source || feature.source || '').toLowerCase());
     try {
       let retrieved: any = null;
       if (mapboxId) {
@@ -7835,7 +7836,7 @@ function MapScreen() {
           proximity: `${feature.lng},${feature.lat}`,
           origin: `${feature.lng},${feature.lat}`,
         });
-      } else if (feature.name) {
+      } else if (!renderedOnly && feature.name) {
         const session = await api.extremeSearchSession({ source: 'rendered_feature_suggest' });
         const vp = viewportRef.current;
         const suggestions = await api.extremeSearchSuggest({
@@ -7867,7 +7868,22 @@ function MapScreen() {
       const enriched = retrievedFeature ? mapboxFeatureToCopilotPlace(retrievedFeature, center, feature.type || 'poi') : null;
       if (!enriched) return base;
       const distanceM = haversineKm(feature.lat, feature.lng, enriched.lat, enriched.lng) * 1000;
-      if (Number.isFinite(distanceM) && distanceM > 300) return base;
+      if (!Number.isFinite(distanceM) || distanceM > (renderedOnly ? 80 : 180)) return base;
+      if (renderedOnly) {
+        return {
+          ...base,
+          address: enriched.address || base.address,
+          rating: enriched.rating ?? base.rating,
+          rating_count: enriched.rating_count ?? base.rating_count,
+          phone: enriched.phone || base.phone,
+          website: enriched.website || base.website,
+          photo_url: enriched.photo_url || base.photo_url,
+          photos: (enriched as any).photos || (base as any).photos,
+          provider_place_id: base.provider_place_id || enriched.provider_place_id,
+          place_id: base.place_id || enriched.place_id,
+          summary: enriched.summary || base.summary || 'Selected from the visible map.',
+        };
+      }
       return {
         ...base,
         ...enriched,

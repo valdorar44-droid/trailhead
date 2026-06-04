@@ -1880,6 +1880,14 @@ def _build_extreme_map_action(command: str, context: dict, provider: str = "trai
         args = {"source": "active_route_scout"}
         map_updates = {"open_route_builder": True, "route_scout_save": True}
         message = "Route Scout will save this to Route Builder."
+    elif route_scout_active and re.search(r"\b(build it|create it|run it|generate it|finish the route|build the framework|make it|change it|update it|different camps?|same camp|basecamp|private stays?|dispersed|boondock|direct|fastest|wild|scenic but sane|use my rig|rig profile|vehicle profile)\b", text) and not re.search(r"\b(route builder|trip builder|builder|draft|prefill|open (my )?rig|show (my )?rig|edit (my )?rig|set up (my )?rig)\b", text):
+        draft = dict(route_scout_ctx.get("draftArgs") if isinstance(route_scout_ctx.get("draftArgs"), dict) else {})
+        draft.update(_route_builder_draft_from_text(command, context))
+        action_type = "startRouteScout"
+        args = {"draft": draft}
+        route_builder_draft = draft
+        map_updates = {"route_scout": True, "route_scout_tune": True}
+        message = "Route Scout is updating the map preview."
     elif re.search(r"\b(build it|create it|run it|generate it|finish the route|build the framework)\b", text):
         action_type = "buildRouteBuilderFramework"
         args = {"draft": _route_builder_draft_from_text(command, context)}
@@ -1907,7 +1915,7 @@ def _build_extreme_map_action(command: str, context: dict, provider: str = "trai
             message = "Route Builder draft ready."
         args = {"draft": draft}
         route_builder_draft = args["draft"]
-    elif re.search(r"\b(make it|change it|update (the )?draft|different camps?|same camp|basecamp|private stays?|dispersed|boondock|direct|fastest|wild|scenic but sane|use my rig|rig profile)\b", text) and not re.search(r"\b(route me|navigate|start navigation|open (my )?rig|show (my )?rig)\b", text):
+    elif re.search(r"\b(make it|change it|update (the )?draft|different camps?|same camp|basecamp|private stays?|dispersed|boondock|direct|fastest|wild|scenic but sane|use my rig|rig profile)\b", text) and not re.search(r"\b(route me|navigate|start navigation|open (my )?rig|show (my )?rig|edit (my )?rig|set up (my )?rig)\b", text):
         action_type = "updateRouteBuilderDraft"
         args = {"draft": _route_builder_draft_from_text(command, context)}
         route_builder_draft = args["draft"]
@@ -1937,7 +1945,7 @@ def _build_extreme_map_action(command: str, context: dict, provider: str = "trai
         args = {"target": "active_trip" if trip_ctx.get("active_trip") else "visible_area"}
         map_updates = {"open_offline_download": True}
         message = "Offline downloads opened."
-    elif re.search(r"\b(rig profile|vehicle profile|my rig|open rig)\b", text):
+    elif re.search(r"\b(open|show|edit|set up|go to)\s+(my\s+)?(rig|rig profile|vehicle profile)\b|\b(open|show|edit)\s+profile\b", text):
         action_type = "openRigProfile"
         args = {"read_context": True, "rig_profile": user_ctx.get("rig_profile")}
         map_updates = {"open_rig_profile": True}
@@ -8423,10 +8431,12 @@ def _camp_pref_score(camp: dict, route_style: str = "balanced", camp_preference:
     else:
         score += -14 if public else 4
         score += -5 if official_developed and limited_public else 0
-        score += 18 if rv_private and not limited_public else 4 if rv_private else 0
+        score += 26 if rv_private else 0
+        score += 8 if private_stay and not limited_public else 0
     if style == "wild":
         score += -8 if public else 5
-        score += 18 if rv_private and not limited_public else 0
+        score += 30 if rv_private else 0
+        score += 8 if camp.get("reservable") else 0
     elif style == "direct":
         score += 3 if public and not camp.get("reservable") else 0
         score += -2 if camp.get("reservable") else 0
@@ -8513,7 +8523,7 @@ async def _select_camp_for_window(
         pass_defs.append({"name": "wide_review", "filters": [], "radius": min(max(max_radius, 82.0), max(base_radius * 1.9, 72.0)), "strict": False})
     pass_defs.append({"name": "target_review", "filters": [], "radius": min(120.0, max(max_radius, base_radius * 2.2, 105.0)), "strict": False, "target_only": True})
     key_payload = {
-        "v": 5,
+        "v": 6,
         "route": [[round(p["lat"], 3), round(p["lng"], 3)] for p in samples],
         "window": [window.day, window.start, window.end, round(window.target_mi, 1), round(window.search_window_mi, 1)],
         "filters": filter_key,

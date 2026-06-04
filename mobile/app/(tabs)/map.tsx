@@ -1259,6 +1259,27 @@ function routeScoutWindows(days: number, totalMiles: number): RouteCampWindowInp
   });
 }
 
+function routeScoutCampFilters(preference: string, style: string, currentFilters: string[]): string[] {
+  const pref = String(preference || '').toLowerCase();
+  const routeStyle = String(style || '').toLowerCase();
+  const filters = new Set<string>();
+  if (pref === 'rv') {
+    ['rv', 'reservable'].forEach(item => filters.add(item));
+  } else if (pref === 'private') {
+    ['private_stay', 'farm', 'ranch', 'winery', 'glamping'].forEach(item => filters.add(item));
+  } else if (pref === 'developed') {
+    ['tent', 'reservable', 'state', 'nps', 'usfs'].forEach(item => filters.add(item));
+  } else if (pref === 'any') {
+    currentFilters
+      .filter(item => /^(blm|usfs|dispersed|free|tent|rv|reservable|state|nps|private_stay|farm|ranch|winery|glamping)$/i.test(String(item)))
+      .forEach(item => filters.add(String(item).toLowerCase()));
+  } else {
+    ['public', 'blm', 'usfs', 'dispersed', 'free', 'tent'].forEach(item => filters.add(item));
+  }
+  if (routeStyle === 'wild') ['public', 'blm', 'usfs', 'dispersed', 'free', 'tent'].forEach(item => filters.add(item));
+  return Array.from(filters);
+}
+
 function dayMileageFromWaypoints(wps: WP[], day: number) {
   const ordered = [...wps].sort((a, b) => a.day - b.day);
   const dayWps = ordered.filter(w => w.day === day);
@@ -7228,11 +7249,11 @@ function MapScreen() {
     const campResponse = await api.getRouteCampWindows({
       route: coords.map((coord: [number, number]) => ({ lat: coord[1], lng: coord[0] })),
       windows,
-      camp_filters: activeFilters,
+      camp_filters: routeScoutCampFilters(scoutArgs.campPreference, scoutArgs.routeStyle, activeFilters),
       route_style: scoutArgs.routeStyle as 'direct' | 'balanced' | 'wild',
       camp_preference: scoutArgs.campPreference,
       max_daily_drive_hours: scoutArgs.driveHours ?? undefined,
-      max_radius: 90,
+      max_radius: scoutArgs.routeStyle === 'wild' || scoutArgs.campPreference === 'public' ? 120 : 95,
     }).catch((error: any) => ({ windows: [], errors: { route_scout: error?.message || 'camp search failed' } }));
     const scoutWindows = campResponse.windows ?? [];
     const selectedCamps = scoutWindows
@@ -7300,7 +7321,7 @@ function MapScreen() {
     };
     setRouteScout(next);
     const focusStop = stops.find(stop => stop.type === 'camp') ?? stops[Math.min(1, stops.length - 1)] ?? null;
-    if (focusStop) setTimeout(() => nativeMapRef.current?.flyTo(focusStop.lat, focusStop.lng, 8, focusStop.name), 350);
+    if (focusStop) setTimeout(() => nativeMapRef.current?.flyTo(focusStop.lat, focusStop.lng, focusStop.type === 'camp' ? 10.5 : 8.5, focusStop.name), 350);
     return {
       applied: true,
       status: nextStatus,

@@ -1849,6 +1849,16 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             config={mapboxStyleImportConfig}
           />
         ) : null}
+        {isExtremeMapbox && showTerrain && MapGL.RasterDemSource && MapGL.Terrain ? (
+          <MapGL.RasterDemSource
+            id="trailhead-mapbox-dem"
+            tileUrlTemplates={[`https://api.mapbox.com/raster/v1/mapbox.mapbox-terrain-dem-v1/{z}/{x}/{y}.webp?access_token=${mapboxToken}`]}
+            maxZoomLevel={14}
+            tileSize={512}
+          >
+            <MapGL.Terrain sourceID="trailhead-mapbox-dem" style={{ exaggeration: 1.55 }} />
+          </MapGL.RasterDemSource>
+        ) : null}
 
       {/* ── Camera ────────────────────────────────────────────────────── */}
       {/* Initial placement is default-only. Navigation follow and explicit

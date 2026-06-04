@@ -256,6 +256,16 @@ class ExtremeExplorerTests(unittest.TestCase):
                 }
             }
         })
+        scout_rig_tune = _build_extreme_map_action("use my rig profile and keep it dispersed", {
+            "user": {"rig_profile": {"vehicle_type": "truck", "fuel_range_miles": 240}},
+            "route": {
+                "route_scout": {
+                    "status": "ready",
+                    "draftArgs": {"start": "Moab", "destination": "Big Sur", "days": 5, "routeStyle": "wild"},
+                }
+            },
+            "app": {"route_scout_enabled": True},
+        })
         builder_draft = _build_extreme_map_action("open a route builder draft from Moab to Big Sur", context)
         builder_update = _build_extreme_map_action("Make it private stays", context)
         builder_build = _build_extreme_map_action("Build it", context)
@@ -322,6 +332,9 @@ class ExtremeExplorerTests(unittest.TestCase):
         self.assertEqual(scout_followup["action_type"], "startRouteScout")
         self.assertEqual(scout_followup["args"]["draft"]["driveHours"], 5)
         self.assertEqual(scout_followup["args"]["draft"]["destination"], "Big Sur")
+        self.assertEqual(scout_rig_tune["action_type"], "startRouteScout")
+        self.assertTrue(scout_rig_tune["args"]["draft"]["useRigProfile"])
+        self.assertEqual(scout_rig_tune["args"]["draft"]["campPreference"], "public")
         self.assertEqual(builder_draft["action_type"], "openRouteBuilderDraft")
         self.assertEqual(builder_update["action_type"], "updateRouteBuilderDraft")
         self.assertEqual(builder_update["args"]["draft"]["campPreference"], "private")

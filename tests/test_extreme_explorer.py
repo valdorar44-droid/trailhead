@@ -219,6 +219,7 @@ class ExtremeExplorerTests(unittest.TestCase):
             "user": {"location": {"lat": 38.1, "lng": -120.2}},
             "map": {"center": {"lat": 38.2, "lng": -120.3}, "zoom": 10},
             "route": {"active_route": True},
+            "app": {"route_scout_enabled": True},
         }
         rig_context = {
             "user": {
@@ -226,6 +227,7 @@ class ExtremeExplorerTests(unittest.TestCase):
                 "rig_profile": {"vehicle_type": "truck", "fuel_range_miles": 240, "mpg": 15},
             },
             "map": {"center": {"lat": 38.2, "lng": -120.3}, "zoom": 10},
+            "app": {"route_scout_enabled": True},
         }
 
         fuel = _build_extreme_map_action("find fuel before the remote stretch", context)
@@ -246,6 +248,14 @@ class ExtremeExplorerTests(unittest.TestCase):
         nav = _build_extreme_map_action("start navigation", context)
         builder = _build_extreme_map_action("Plan a wild dispersed 5-day route from Moab to Big Sur", context)
         builder_reversed = _build_extreme_map_action("plan 5 days to Big Sur from Moab dispersed mostly camping", rig_context)
+        scout_followup = _build_extreme_map_action("5 hours", {
+            "route": {
+                "route_scout": {
+                    "status": "needs_input",
+                    "draftArgs": {"start": "Moab", "destination": "Big Sur", "days": 5, "routeStyle": "wild"},
+                }
+            }
+        })
         builder_draft = _build_extreme_map_action("open a route builder draft from Moab to Big Sur", context)
         builder_update = _build_extreme_map_action("Make it private stays", context)
         builder_build = _build_extreme_map_action("Build it", context)
@@ -295,21 +305,23 @@ class ExtremeExplorerTests(unittest.TestCase):
         self.assertEqual(fly["args"]["query"], "big sur")
         self.assertEqual(nav["action_type"], "startNavigation")
         self.assertTrue(nav["requires_confirmation"])
-        self.assertEqual(builder["action_type"], "buildRouteBuilderFramework")
+        self.assertEqual(builder["action_type"], "startRouteScout")
         self.assertEqual(builder["args"]["draft"]["routeStyle"], "wild")
         self.assertEqual(builder["args"]["draft"]["campPreference"], "public")
         self.assertEqual(builder["args"]["draft"]["days"], 5)
         self.assertEqual(builder["args"]["draft"]["start"].lower(), "moab")
         self.assertEqual(builder["args"]["draft"]["destination"].lower(), "big sur")
-        self.assertTrue(builder["args"]["draft"]["autoBuild"])
         self.assertEqual(builder["args"]["draft"]["fuelStrategy"], "auto_when_needed")
-        self.assertEqual(builder_reversed["action_type"], "buildRouteBuilderFramework")
+        self.assertEqual(builder_reversed["action_type"], "startRouteScout")
         self.assertEqual(builder_reversed["args"]["draft"]["campPreference"], "public")
         self.assertEqual(builder_reversed["args"]["draft"]["days"], 5)
         self.assertEqual(builder_reversed["args"]["draft"]["start"].lower(), "moab")
         self.assertEqual(builder_reversed["args"]["draft"]["destination"].lower(), "big sur")
         self.assertTrue(builder_reversed["args"]["draft"]["useRigProfile"])
         self.assertEqual(builder_reversed["args"]["draft"]["rigConstraints"]["fuel_range_miles"], 240)
+        self.assertEqual(scout_followup["action_type"], "startRouteScout")
+        self.assertEqual(scout_followup["args"]["draft"]["driveHours"], 5)
+        self.assertEqual(scout_followup["args"]["draft"]["destination"], "Big Sur")
         self.assertEqual(builder_draft["action_type"], "openRouteBuilderDraft")
         self.assertEqual(builder_update["action_type"], "updateRouteBuilderDraft")
         self.assertEqual(builder_update["args"]["draft"]["campPreference"], "private")

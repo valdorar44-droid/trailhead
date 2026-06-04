@@ -814,6 +814,7 @@ export interface CopilotContext {
     route_id?: string | null;
     nav_mode?: boolean;
     route_ready?: boolean;
+    route_scout?: RouteScoutState | Record<string, unknown> | null;
   };
   trip?: {
     active_trip?: string | null;
@@ -849,10 +850,40 @@ export interface MapSelectableFeature {
   raw_feature?: Record<string, unknown> | null;
   place?: Record<string, unknown> | null;
 }
+export interface RouteScoutStop {
+  day: number;
+  name: string;
+  lat: number;
+  lng: number;
+  type: 'start' | 'camp' | 'destination' | 'review' | string;
+  label?: string;
+  confidence?: string;
+  progress_mi?: number | null;
+  camp?: CampsitePin | null;
+  reason?: string | null;
+}
+export interface RouteScoutState {
+  status: 'idle' | 'scouting' | 'needs_input' | 'ready' | 'review' | 'failed' | string;
+  message: string;
+  startName?: string;
+  destinationName?: string;
+  days?: number;
+  driveHours?: number | null;
+  routeStyle?: RouteStyleMode | string;
+  campPreference?: string;
+  totalMiles?: number;
+  totalDurationHours?: number;
+  routeCoords?: [number, number][];
+  stops?: RouteScoutStop[];
+  windows?: RouteCampWindowResult[];
+  missingDays?: number[];
+  draftArgs?: Record<string, unknown>;
+  spoken_summary?: string;
+}
 export interface MapActionRequest {
   id?: number;
   action_id: string;
-  action_type: 'getMapContext' | 'getVisibleMapCandidates' | 'searchPlaces' | 'searchTrails' | 'selectPlace' | 'selectRenderedFeature' | 'selectVisiblePlace' | 'searchAndSelectPlace' | 'openSelectedPlaceCard' | 'routeToSelectedPlace' | 'flyToPlace' | 'toggleLayer' | 'setMapStyle' | 'buildRoute' | 'modifyRoute' | 'dropPin' | 'saveTrip' | 'downloadOfflineArea' | 'explainVisibleArea' | 'askForConfirmation' | string;
+  action_type: 'getMapContext' | 'getVisibleMapCandidates' | 'searchPlaces' | 'searchTrails' | 'selectPlace' | 'selectRenderedFeature' | 'selectVisiblePlace' | 'searchAndSelectPlace' | 'openSelectedPlaceCard' | 'routeToSelectedPlace' | 'flyToPlace' | 'toggleLayer' | 'setMapStyle' | 'buildRoute' | 'modifyRoute' | 'startRouteScout' | 'saveScoutToRouteBuilder' | 'dropPin' | 'saveTrip' | 'downloadOfflineArea' | 'explainVisibleArea' | 'askForConfirmation' | string;
   args: Record<string, unknown>;
   requires_confirmation: boolean;
   cost_class: string;
@@ -1228,6 +1259,8 @@ export interface RouteCampWindowResult {
   start: number;
   end: number;
   label: string;
+  target_mi?: number;
+  search_window_mi?: number;
   camp: CampsitePin | null;
   selected?: CampsitePin | null;
   candidates?: CampsitePin[];

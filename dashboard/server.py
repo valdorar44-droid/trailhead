@@ -1275,6 +1275,8 @@ EXTREME_COPILOT_ACTIONS = {
     "toggleLayer": "Toggle layer",
     "setMapStyle": "Set map style",
     "buildRoute": "Build route",
+    "startRouteScout": "Scout multi-day route",
+    "saveScoutToRouteBuilder": "Save scout to Route Builder",
     "startNavigation": "Start navigation",
     "modifyRoute": "Modify route",
     "dropPin": "Drop pin",
@@ -1324,12 +1326,12 @@ TRAILHEAD_COPILOT_CAPABILITY_REGISTRY = {
     },
     "navigation": {
         "summary": "buildRoute previews an animated route line. startNavigation is a separate confirmed action and must not claim success without client navigation state.",
-        "commands": ["buildRoute", "startNavigation"],
+        "commands": ["buildRoute", "startRouteScout", "saveScoutToRouteBuilder", "startNavigation"],
         "required_context": ["current location", "destination"],
         "confirmation": ["startNavigation"],
     },
     "route_builder": {
-        "summary": "Multi-day trip planning belongs in Route Builder or AI Planner, not simple map routing. Full plan/build/create requests should run the Route Builder framework, not only open the draft.",
+        "summary": "Multi-day trip planning starts as a map-first Route Scout. Use Route Builder only when the user asks for builder/draft/save/export, or after scout results are ready.",
         "commands": ["openRouteBuilderDraft", "updateRouteBuilderDraft", "buildRouteBuilderFramework", "readRouteBuilderContext"],
         "fields": ["start", "destination", "stops", "days", "tripShape", "routeStyle", "campPreference", "campReuse", "driveHours", "targetMiles", "restDays", "rigConstraints", "fuelStrategy", "poiPreferences"],
         "vocabulary": {
@@ -1596,7 +1598,7 @@ def _copilot_realtime_tools() -> list[dict]:
                         "getMapContext", "getVisibleMapCandidates", "searchPlaces", "searchTrails", "selectPlace",
                         "selectRenderedFeature", "selectVisiblePlace", "searchAndSelectPlace", "openSelectedPlaceCard",
                         "routeToSelectedPlace", "flyToPlace",
-                        "toggleLayer", "setMapStyle", "buildRoute", "startNavigation", "modifyRoute", "dropPin",
+                        "toggleLayer", "setMapStyle", "buildRoute", "startRouteScout", "saveScoutToRouteBuilder", "startNavigation", "modifyRoute", "dropPin",
                         "saveTrip", "downloadOfflineArea", "openRouteBuilderDraft", "updateRouteBuilderDraft",
                         "buildRouteBuilderFramework", "readRouteBuilderContext", "openGuide", "playTripGuide",
                         "openReports", "stageReport", "openOfflineDownloads", "openRigProfile",
@@ -1629,7 +1631,9 @@ def _copilot_realtime_instructions(wake_phrase: bool) -> str:
         "For followups like \"open the second one\" use selectVisiblePlace when the prior answer described visible map candidates, otherwise use selectPlace for search results. "
         "For \"route me there\" use routeToSelectedPlace or buildRoute to preview only; use the selected card/current result, not a random nearby place. "
         "For \"start navigation\" or \"navigate there\" use startNavigation with confirmation. "
-        "For full multi-day planning such as \"plan/build/create a 5-day dispersed route from Moab to Big Sur\", call buildRouteBuilderFramework with start, destination, days, routeStyle, campPreference, fuelStrategy, poiPreferences, and rig profile context. Only use openRouteBuilderDraft when the user asks to open or prefill a draft without building. "
+        "For full multi-day planning such as \"plan/build/create a 5-day dispersed route from Moab to Big Sur\", call startRouteScout with start, destination, days, driveHours when known, routeStyle, campPreference, fuelStrategy, poiPreferences, and rig profile context. "
+        "If the user gives a follow-up drive time such as \"5 hours\" while a route scout is active, call startRouteScout again with the prior scout context plus driveHours. "
+        "Only use Route Builder actions when the user explicitly asks to open, save, export, or prefill Route Builder. "
         "Ignore tiny fragments, map labels, loading copy, and background speech that are not clear user commands. "
         "After every tool call, answer only from returned tool output; do not invent camps or claim map results without tool data. "
         "Speak brief audio responses for driving, such as \"I found three camps\" or \"Confirm to route there.\" "
@@ -1841,8 +1845,12 @@ def _build_extreme_map_action(command: str, context: dict, provider: str = "trai
     route_ctx = context.get("route") or {}
     trip_ctx = context.get("trip") or {}
     user_ctx = context.get("user") or {}
+    app_ctx = context.get("app") if isinstance(context.get("app"), dict) else {}
     center = _valid_context_point(map_ctx.get("center")) or _valid_context_point(user_ctx.get("location"))
     route_active = bool(route_ctx.get("active_route") or route_ctx.get("destination") or trip_ctx.get("active_trip"))
+    route_scout_ctx = route_ctx.get("route_scout") if isinstance(route_ctx.get("route_scout"), dict) else {}
+    route_scout_capable = bool(app_ctx.get("route_scout_enabled") or route_scout_ctx)
+    route_scout_active = bool(route_scout_ctx and route_scout_ctx.get("status") not in {None, "", "idle", "failed"})
 
     action_type = "explainVisibleArea"
     args: dict = {"scope": "visible_area"}
@@ -1859,6 +1867,19 @@ def _build_extreme_map_action(command: str, context: dict, provider: str = "trai
         args = {"scope": "current_screen", "capabilities": TRAILHEAD_COPILOT_CAPABILITY_REGISTRY}
         map_updates = {"assistant_panel": True}
         message = "I can help with this screen, map search, route previews, Route Builder, Guide, reports, offline, rig profile, and safety workflows."
+    elif route_scout_active and re.search(r"\b(\d{1,2}(?:\.\d+)?)\s*(?:hours?|hrs?)\b", text):
+        draft = dict(route_scout_ctx.get("draftArgs") if isinstance(route_scout_ctx.get("draftArgs"), dict) else {})
+        draft.update(_route_builder_draft_from_text(command, context))
+        action_type = "startRouteScout"
+        args = {"draft": draft}
+        route_builder_draft = draft
+        map_updates = {"route_scout": True, "route_scout_tune": True}
+        message = "Route Scout is tuning the daily drive window."
+    elif route_scout_active and re.search(r"\b(save|send|export|open)\b.*\b(route builder|builder|draft)\b|\broute builder\b.*\b(save|send|open)\b", text):
+        action_type = "saveScoutToRouteBuilder"
+        args = {"source": "active_route_scout"}
+        map_updates = {"open_route_builder": True, "route_scout_save": True}
+        message = "Route Scout will save this to Route Builder."
     elif re.search(r"\b(build it|create it|run it|generate it|finish the route|build the framework)\b", text):
         action_type = "buildRouteBuilderFramework"
         args = {"draft": _route_builder_draft_from_text(command, context)}
@@ -1868,7 +1889,14 @@ def _build_extreme_map_action(command: str, context: dict, provider: str = "trai
         message = "Route Builder is building the trip framework."
     elif _is_route_builder_request(text):
         draft = _route_builder_draft_from_text(command, context)
-        if _route_builder_should_auto_build(text, draft):
+        explicit_builder = bool(re.search(r"\b(route builder|trip builder|builder|draft|prefill)\b", text))
+        if route_scout_capable and not explicit_builder and _route_builder_should_auto_build(text, draft):
+            action_type = "startRouteScout"
+            args = {"draft": draft}
+            route_builder_draft = draft
+            map_updates = {"route_scout": True, "route_preview": True}
+            message = "Route Scout is plotting the route and looking for overnight stops."
+        elif _route_builder_should_auto_build(text, draft):
             draft["autoBuild"] = True
             action_type = "buildRouteBuilderFramework"
             map_updates = {"open_route_builder": True, "route_builder_auto_build": True}

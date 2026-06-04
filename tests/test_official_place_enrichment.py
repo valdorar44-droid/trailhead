@@ -59,6 +59,55 @@ class OfficialPlaceEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(places[0]["official_free"])
         self.assertEqual(places[0]["category_access"]["official_free_categories"], ["attraction"])
 
+    async def test_nearby_places_does_not_return_legacy_place_providers(self):
+        osm_place = {
+            "id": "osm_food_1",
+            "name": "Open Cafe",
+            "lat": 48.858,
+            "lng": 2.294,
+            "type": "food",
+            "source": "osm",
+            "source_label": "OpenStreetMap",
+        }
+        with (
+            patch.object(server, "get_service_places", new=AsyncMock(return_value=[osm_place])),
+            patch.object(server, "get_fuel_stations", new=AsyncMock(return_value=[])),
+        ):
+            places = await server.nearby_places(
+                48.858,
+                2.294,
+                radius=2,
+                categories="food",
+                provider="auto",
+                user={"id": 1, "credits": 0, "is_admin": True},
+            )
+
+        self.assertEqual([p["source"] for p in places], ["osm"])
+        self.assertFalse(any(str(p.get("source")).lower() in server.LEGACY_PLACE_PROVIDERS for p in places))
+
+    async def test_search_place_card_returns_plain_map_search_card(self):
+        card = await server.search_place_card("Hotel Gustave", 48.85, 2.29)
+
+        self.assertEqual(card["source"], "search")
+        self.assertEqual(card["source_label"], "Map search")
+        self.assertNotIn("google_maps_uri", card)
+
+    def test_legacy_provider_card_fields_are_scrubbed(self):
+        stale = {
+            "source": "google",
+            "source_label": "Google Places",
+            "name": "Old Provider Place",
+            "photo_url": "https://example.com/photo.jpg",
+            "google_maps_uri": "https://maps.google.example",
+            "rich_detail_locked": True,
+        }
+
+        cleaned = server.strip_lightweight_google_rich_fields(stale)
+
+        self.assertNotIn("photo_url", cleaned)
+        self.assertNotIn("google_maps_uri", cleaned)
+        self.assertNotIn("rich_detail_locked", cleaned)
+
 
 if __name__ == "__main__":
     unittest.main()

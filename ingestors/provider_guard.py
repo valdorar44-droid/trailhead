@@ -15,20 +15,12 @@ _RECENT_CALLS: deque[dict[str, Any]] = deque(maxlen=500)
 _RUNTIME_CACHE: dict[str, tuple[float, Any]] = {}
 _IN_FLIGHT: dict[str, asyncio.Task] = {}
 
-PAID_OR_FRAGILE_PROVIDERS = {"google", "foursquare", "elevenlabs", "anthropic"}
-HOSTED_LIGHTWEIGHT_PROVIDERS = {"geoapify", "locationiq"}
+PAID_OR_FRAGILE_PROVIDERS = {"elevenlabs", "anthropic"}
+HOSTED_LIGHTWEIGHT_PROVIDERS = {"locationiq"}
 LIVE_FREE_PROVIDERS = {"nps", "ridb", "blm", "usfs", "wikimedia", "wikipedia", "overpass", "nominatim", "mapbox"}
 OWNED_FREE_PROVIDERS = {"trailhead", "community", "osm", "openstreetmap", "overture", "offline", "place_pack", "explore"}
 
-PROVIDER_BUDGETS: dict[tuple[str, str], tuple[int, int]] = {
-    ("google", "nearby"): (45, 60),
-    ("google", "detail"): (12, 60),
-    ("google", "photo"): (8, 60),
-    ("foursquare", "search"): (30, 60),
-    ("foursquare", "detail"): (8, 60),
-    ("geoapify", "places"): (18, 60),
-    ("geoapify", "detail"): (8, 60),
-}
+PROVIDER_BUDGETS: dict[tuple[str, str], tuple[int, int]] = {}
 
 
 def source_tier_for_provider(provider: str) -> str:

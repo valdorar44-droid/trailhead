@@ -4817,12 +4817,12 @@ export default function RouteBuilderScreen() {
                 )}
                 {(campDetail.reviews ?? []).length > 0 && (
                   <TrailheadCard style={s.detailSection}>
-                    <Text style={s.detailSectionTitle}>{campDetail.source === 'foursquare' || campDetail.media_source === 'foursquare' ? 'FOURSQUARE TIPS' : 'GOOGLE REVIEWS'}</Text>
+                    <Text style={s.detailSectionTitle}>REVIEWS</Text>
                     {(campDetail.reviews ?? []).slice(0, 3).map((review, idx) => (
                       <View key={`${review.authorName}-${idx}`} style={s.campReviewCard}>
                         <View style={s.campReviewTop}>
-                          <Text style={s.campReviewAuthor} numberOfLines={1}>{review.authorName || (campDetail.source === 'foursquare' ? 'Foursquare tip' : 'Google user')}</Text>
-                          <Text style={s.campReviewRating}>{review.rating ? `${review.rating}/5` : review.source || (campDetail.source === 'foursquare' ? 'Foursquare' : 'Google')}</Text>
+                          <Text style={s.campReviewAuthor} numberOfLines={1}>{review.authorName || 'Review'}</Text>
+                          <Text style={s.campReviewRating}>{review.rating ? `${review.rating}/5` : review.source || 'Provider'}</Text>
                         </View>
                         {!!review.relativeTime && <Text style={s.campReviewMeta}>{review.relativeTime}</Text>}
                         {!!review.text && <Text style={s.campReviewText} numberOfLines={4}>{review.text}</Text>}

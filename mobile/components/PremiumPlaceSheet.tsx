@@ -169,10 +169,7 @@ function canonicalPayload(place: PlaceLike) {
 }
 
 function hasPaidProviderSource(place: PlaceLike | null | undefined) {
-  if (!place) return false;
-  const source = String(place.source || '').toLowerCase();
-  const rawId = String(place.id || '').toLowerCase();
-  return ['google', 'foursquare', 'fsq'].includes(source) || rawId.startsWith('google:') || rawId.startsWith('foursquare:');
+  return false;
 }
 
 function openNowLabel(openNow?: boolean | null) {
@@ -363,7 +360,7 @@ export default function PremiumPlaceSheet({
     ...(related?.trails ?? []),
   ].map(item => mediaUrl(item.photo_url)).find(Boolean);
   const hero = photos[0]?.url || relatedHero;
-  const sourceLabel = data.source_label || data.attribution || (data.source === 'google' ? 'Google' : data.source || 'Trailhead');
+  const sourceLabel = data.source_label || data.attribution || data.source || 'Trailhead';
   const addToRoute = () => onAddToRoute?.({ name: place.name, lat: place.lat, lng: place.lng, note: data.summary || subtitle });
   const promoteToRoute = () => onPromoteToRoute?.({ name: place.name, lat: place.lat, lng: place.lng, note: data.summary || subtitle });
   const distanceLabel = data.route_distance_mi != null && Number.isFinite(data.route_distance_mi)
@@ -728,12 +725,6 @@ export default function PremiumPlaceSheet({
                       <Text style={[s.linkText, { color: C.orange }]}>Nearby camps</Text>
                     </TouchableOpacity>
                   )}
-                  {!!data.google_maps_uri && (
-                    <TouchableOpacity style={s.linkBtn} onPress={() => Linking.openURL(String(data.google_maps_uri))}>
-                      <Ionicons name="map-outline" size={14} color={C.text2} />
-                      <Text style={s.linkText}>Open in Google Maps</Text>
-                    </TouchableOpacity>
-                  )}
                   {!!onReport && (
                     <TouchableOpacity style={s.linkBtn} onPress={onReport}>
                       <Ionicons name="warning-outline" size={14} color={C.orange} />
@@ -918,9 +909,7 @@ export default function PremiumPlaceSheet({
 
               <View style={s.sourceFooter}>
                 <Text style={s.sourceText} numberOfLines={2}>
-                  {data.source === 'google' || data.attribution === 'Google'
-                    ? 'Google'
-                    : sourceLabel}{photos[0]?.credit ? ` · Photo: ${photos[0].credit}` : ''}
+                  {sourceLabel}{photos[0]?.credit ? ` · Photo: ${photos[0].credit}` : ''}
                 </Text>
               </View>
             </View>

@@ -1267,7 +1267,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
         const rendered: any[] = [];
         const rectFound = await (mapRef.current as any).queryRenderedFeaturesInRect?.(
-          renderedQueryRectAroundPoint(px, py, 42),
+          renderedQueryRectAroundPoint(px, py, 72),
           undefined,
           undefined,
         ).catch(() => null);
@@ -1720,7 +1720,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         const [px, py] = pressPoint.map(Number);
         if (Number.isFinite(px) && Number.isFinite(py)) {
           const rectFound = await (mapRef.current as any).queryRenderedFeaturesInRect?.(
-            renderedQueryRectAroundPoint(px, py, 36),
+            renderedQueryRectAroundPoint(px, py, 72),
             undefined,
             undefined,
           ).catch(() => null);
@@ -2737,8 +2737,12 @@ function mapboxPlaceType(props: Record<string, any>): OsmPoi['type'] {
     || props?.poi_category
     || props?.category
     || props?.class
+    || props?.feature_type
+    || props?.icon
+    || props?.symbol
     || props?.type
     || props?.group
+    || props?.kind
     || ''
   ).toLowerCase();
   if (/(camp|caravan|rv)/.test(raw)) return 'camp';
@@ -2756,17 +2760,22 @@ function mapboxPlaceType(props: Record<string, any>): OsmPoi['type'] {
 function mapboxFeaturePickScore(feature: any): number {
   const props = feature?.properties ?? {};
   const layerId = String(feature?.layer?.id || feature?.sourceLayer || feature?.source || '').toLowerCase();
-  const raw = String(props.maki || props.poi_category || props.category || props.class || props.type || props.group || '').toLowerCase();
-  const hasPoiSignal = !!String(props.maki || props.poi_category || props.category || props.type || '').trim();
+  const raw = String(props.maki || props.poi_category || props.category || props.class || props.feature_type || props.icon || props.symbol || props.type || props.group || props.kind || '').toLowerCase();
+  const name = String(props.name || props.name_en || props.name_script || props.name_local || props.brand || props.full_address || '').trim();
+  const hasPoiSignal = !!String(props.maki || props.poi_category || props.category || props.feature_type || props.icon || props.symbol || props.type || '').trim();
   let score = 100;
   if (layerId.includes('poi')) score -= 55;
+  if (layerId.includes('point-of-interest')) score -= 55;
+  if (layerId.includes('place-label') || layerId.includes('poi-label')) score -= 38;
   if (layerId.includes('label')) score -= 18;
   if (layerId.includes('transit') || layerId.includes('airport')) score -= 20;
   if (feature?.geometry?.type === 'Point') score -= 14;
+  if (name) score -= 10;
   if (hasPoiSignal) score -= 12;
-  if (/(restaurant|cafe|bar|pub|bakery|food|pizza|burger|sandwich|coffee|fuel|gas|charging|grocery|supermarket|shop|market|hotel|lodg|motel|view|attraction|museum|monument|landmark|water|drinking|trail|hiking|park|camp|caravan|rv)/.test(raw)) score -= 30;
+  if (props.mapbox_id || props.id) score -= 8;
+  if (/(restaurant|cafe|bar|pub|bakery|food|pizza|burger|sandwich|coffee|fuel|gas|charging|grocery|supermarket|shop|market|hotel|lodg|motel|view|attraction|museum|monument|landmark|tourist|art|gallery|water|drinking|trail|hiking|park|camp|caravan|rv)/.test(raw)) score -= 30;
   if (/(restaurant|cafe|bar|pub|bakery|food|pizza|burger|sandwich|coffee|hotel|lodg|motel)/.test(raw)) score -= 18;
-  if (layerId.includes('building')) score += 16;
+  if (layerId.includes('building')) score += name && hasPoiSignal ? 4 : 26;
   if (layerId.includes('road') || layerId.includes('boundary') || layerId.includes('landuse')) score += 40;
   if (/(country|state|province|settlement|city|town|village|neighborhood|postcode|address|road|street|motorway|primary|secondary|water|ocean|landuse)/.test(raw)) score += 45;
   return score;
@@ -2782,7 +2791,13 @@ function mapMapboxFeatureToPoi(feature: any, fallbackLat: number, fallbackLng: n
     || props.name_script
     || props.name_local
     || props.brand
+    || props.name_ja
+    || props.name_fr
+    || props.name_de
+    || props.name_es
     || props.full_address
+    || props.place_name
+    || props.label
     || ''
   ).trim();
   if (!name || name.length < 2) return null;
@@ -2793,7 +2808,7 @@ function mapMapboxFeatureToPoi(feature: any, fallbackLat: number, fallbackLng: n
   const lat = Number(coords[1]);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   const type = mapboxPlaceType(props);
-  const subtype = String(props.maki || props.poi_category || props.category || props.class || props.type || props.group || '').replace(/[_-]+/g, ' ').trim();
+  const subtype = String(props.maki || props.poi_category || props.category || props.class || props.feature_type || props.icon || props.symbol || props.type || props.group || props.kind || '').replace(/[_-]+/g, ' ').trim();
   return {
     id: `mapbox_feature:${String(props.mapbox_id || props.id || `${lat.toFixed(5)}:${lng.toFixed(5)}:${name}`).slice(0, 160)}`,
     name,
@@ -2844,11 +2859,12 @@ function renderedQueryRectAroundPoint(x: number, y: number, radius: number): [nu
   const px = Number(x);
   const py = Number(y);
   const r = Math.max(1, Number(radius) || 1);
-  return [py - r, px - r, py + r, px + r];
+  // RNMapbox expects a screen-space rectangle as [x, y, width, height].
+  return [px - r, py - r, r * 2, r * 2];
 }
 
 function renderedQueryViewportRect(screen = Dimensions.get('window')): [number, number, number, number] {
-  return [0, 0, Math.max(1, Number(screen.height) || 1), Math.max(1, Number(screen.width) || 1)];
+  return [0, 0, Math.max(1, Number(screen.width) || 1), Math.max(1, Number(screen.height) || 1)];
 }
 
 function selectableFeatureFromPoi(poi: OsmPoi, resultIndex: number, sourceLayer?: string | null, center?: { lat: number; lng: number } | null): MapSelectableFeature | null {

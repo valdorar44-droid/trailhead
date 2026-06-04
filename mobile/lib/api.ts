@@ -1173,7 +1173,7 @@ function campSourceBadge(camp: Partial<CampsitePin> & Record<string, any>): stri
   if (raw.includes('blm')) return 'BLM';
   if (raw.includes('usfs') || raw.includes('forest')) return 'USFS';
   if (raw.includes('mapbox')) return 'Mapbox';
-  if (raw.includes('geoapify')) return 'Geoapify';
+  if (raw.includes('geoapify')) return 'Map data';
   if (raw.includes('osm') || raw.includes('openstreetmap')) return 'OSM';
   if (raw.includes('community')) return 'Community';
   return camp.source_badge || camp.verified_source || 'Camp source';

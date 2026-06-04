@@ -5708,14 +5708,6 @@ function MapScreen() {
       if (resolved.display_source_label) {
         nextCard.source_label = resolved.display_source_label;
       }
-      const currentSource = String(selectedPlace.source || '').toLowerCase();
-      const nextSource = String(resolvedCard.source || '').toLowerCase();
-      if (!resolved.display_source_label && !['google', 'foursquare', 'fsq'].includes(currentSource) && ['google', 'foursquare', 'fsq'].includes(nextSource)) {
-        const provider = nextSource === 'google' ? 'Google Maps' : 'Foursquare';
-        const baseLabel = selectedPlace.source_label || (currentSource === 'search' ? 'Map search' : selectedPlace.source || 'Map source');
-        nextCard.source_label = baseLabel.includes(provider) ? baseLabel : `${baseLabel} · ${provider}`;
-        nextCard.attribution = resolvedCard.source_label || resolvedCard.attribution || provider;
-      }
       setSelectedPlace(current => {
         if (!current || Math.abs(current.lat - selectedPlace.lat) > 0.02 || Math.abs(current.lng - selectedPlace.lng) > 0.02) return current;
         return { ...current, ...nextCard };
@@ -6835,6 +6827,7 @@ function MapScreen() {
       setShowDiscoveryPanel(false);
       setCopilotResults([]);
       setCopilotResultScope(null);
+      setSearchResults([]);
       setSelectedPlace({
         name,
         lat: nextLat,
@@ -7664,6 +7657,50 @@ function MapScreen() {
     }
   }
 
+  async function resolveMapboxSearchAnchor(q: string): Promise<{ lat: number; lng: number; name?: string } | null> {
+    const clean = q.trim();
+    if (!clean || !extremeMapLayerActive || !extremeConfig?.feature_flags?.search) return null;
+    const vp = viewportRef.current;
+    const center = vp
+      ? { lat: (vp.n + vp.s) / 2, lng: (vp.e + vp.w) / 2 }
+      : userLoc;
+    try {
+      const session = await api.extremeSearchSession({ source: 'copilot_anchor_search', q: clean.slice(0, 80) });
+      const suggestions = await api.extremeSearchSuggest({
+        q: clean,
+        session_token: session.session_token,
+        proximity: center ? `${center.lng},${center.lat}` : '',
+        origin: center ? `${center.lng},${center.lat}` : '',
+        bbox: vp ? `${vp.w},${vp.s},${vp.e},${vp.n}` : '',
+        types: 'poi,place,address',
+        language: 'en,fr',
+        limit: 4,
+      });
+      const best = suggestions.suggestions?.[0];
+      const mapboxId = best?.mapbox_id || best?.id;
+      if (!mapboxId) return null;
+      const retrieved = await api.extremeSearchRetrieve({
+        mapbox_id: mapboxId,
+        session_token: session.session_token,
+        language: 'en,fr',
+        proximity: center ? `${center.lng},${center.lat}` : '',
+        origin: center ? `${center.lng},${center.lat}` : '',
+      });
+      const feature = retrieved.features?.[0];
+      const coords = feature?.geometry?.type === 'Point' && Array.isArray(feature.geometry.coordinates)
+        ? feature.geometry.coordinates
+        : null;
+      const lng = Number(coords?.[0]);
+      const lat = Number(coords?.[1]);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+      const props = feature?.properties ?? {};
+      const name = String(props.name || props.full_address || props.place_formatted || clean).trim();
+      return { lat, lng, name };
+    } catch {
+      return null;
+    }
+  }
+
   async function getMapboxViewportCandidates(limit = 24): Promise<MapSelectableFeature[]> {
     if (!extremeMapLayerActive || !extremeConfig?.feature_flags?.search) return [];
     const vp = viewportRef.current;
@@ -7918,6 +7955,7 @@ function MapScreen() {
     };
     setShowDiscoveryPanel(false);
     setShowSearch(false);
+    setSearchResults([]);
     setSelectedCamp(null);
     setTappedTrail(null);
     setTappedTileSpot(null);
@@ -7943,11 +7981,17 @@ function MapScreen() {
         : userLoc);
     let searchedNear = query || 'current view';
     if (query) {
-      const places = await api.geocodePlaces(query, 1);
-      const place = places[0];
-      if (!place) return { applied: false, status: 'failed', reason: 'place_not_found', query };
-      center = { lat: place.lat, lng: place.lng, name: place.name || query };
-      searchedNear = place.name || query;
+      const anchor = await resolveMapboxSearchAnchor(query);
+      if (anchor) {
+        center = anchor;
+        searchedNear = anchor.name || query;
+      } else {
+        const places = await api.geocodePlaces(query, 1);
+        const place = places[0];
+        if (!place) return { applied: false, status: 'failed', reason: 'place_not_found', query };
+        center = { lat: place.lat, lng: place.lng, name: place.name || query };
+        searchedNear = place.name || query;
+      }
     }
     if (!center) {
       setShowExtremeCopilot(true);
@@ -11044,6 +11088,7 @@ function MapScreen() {
     setShowDiscoveryPanel(false);
     setCopilotResults([]);
     setCopilotResultScope(null);
+    setSearchResults([]);
     setSearchRouteCard(null);
     setSelectedPlaceTripContext(tripPlaceContextFor(poi, day));
     setSelectedPlace({
@@ -15552,12 +15597,12 @@ function MapScreen() {
 
                 {(campDetail.reviews ?? []).length > 0 ? (
                   <View style={s.detailSection}>
-                    <Text style={s.detailSectionTitle}>{campDetail.source === 'foursquare' || campDetail.media_source === 'foursquare' ? 'FOURSQUARE TIPS' : 'GOOGLE REVIEWS'}</Text>
+                    <Text style={s.detailSectionTitle}>REVIEWS</Text>
                     {(campDetail.reviews ?? []).slice(0, hasPlan ? 3 : 1).map((review, idx) => (
                       <View key={`${review.authorName}-${idx}`} style={s.campReviewCard}>
                         <View style={s.campReviewTop}>
-                          <Text style={s.campReviewAuthor} numberOfLines={1}>{review.authorName || (campDetail.source === 'foursquare' ? 'Foursquare tip' : 'Google user')}</Text>
-                          <Text style={s.campReviewRating}>{review.rating ? `${review.rating}/5` : review.source || (campDetail.source === 'foursquare' ? 'Foursquare' : 'Google')}</Text>
+                          <Text style={s.campReviewAuthor} numberOfLines={1}>{review.authorName || 'Review'}</Text>
+                          <Text style={s.campReviewRating}>{review.rating ? `${review.rating}/5` : review.source || 'Provider'}</Text>
                         </View>
                         {!!review.relativeTime && <Text style={s.campReviewMeta}>{review.relativeTime}</Text>}
                         {!!review.text && <Text style={s.campReviewText} numberOfLines={hasPlan ? 4 : 2}>{review.text}</Text>}
@@ -16038,12 +16083,12 @@ function MapScreen() {
 
                 {(campDetail.reviews ?? []).length > 0 && (
                   <View style={s.detailSection}>
-                    <Text style={s.detailSectionTitle}>{campDetail.source === 'foursquare' || campDetail.media_source === 'foursquare' ? 'FOURSQUARE TIPS' : 'GOOGLE REVIEWS'}</Text>
+                    <Text style={s.detailSectionTitle}>REVIEWS</Text>
                     {(campDetail.reviews ?? []).slice(0, 3).map((review, idx) => (
                       <View key={`${review.authorName}-${idx}`} style={s.campReviewCard}>
                         <View style={s.campReviewTop}>
-                          <Text style={s.campReviewAuthor} numberOfLines={1}>{review.authorName || (campDetail.source === 'foursquare' ? 'Foursquare tip' : 'Google user')}</Text>
-                          <Text style={s.campReviewRating}>{review.rating ? `${review.rating}/5` : review.source || (campDetail.source === 'foursquare' ? 'Foursquare' : 'Google')}</Text>
+                          <Text style={s.campReviewAuthor} numberOfLines={1}>{review.authorName || 'Review'}</Text>
+                          <Text style={s.campReviewRating}>{review.rating ? `${review.rating}/5` : review.source || 'Provider'}</Text>
                         </View>
                         {!!review.relativeTime && <Text style={s.campReviewMeta}>{review.relativeTime}</Text>}
                         {!!review.text && <Text style={s.campReviewText} numberOfLines={4}>{review.text}</Text>}

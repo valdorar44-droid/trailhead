@@ -34,18 +34,8 @@ from dashboard.hydro_provider import LOCAL_HYDRO_DIR, HYDRO_DIR, hydro_profile, 
 from dashboard.water_routing_provider import route_with_water_graph, water_graph_manifest
 from ingestors.ridb import get_campsites_near, get_campsites_search, get_facility_detail
 from ingestors.osm import get_osm_campsites, get_osm_campsite_detail, get_water_sources, get_trailheads, get_trails, get_viewpoints, get_peaks, get_hot_springs, get_fuel_stations, get_service_places
-from ingestors.foursquare import FSQ_BUSINESS_CATEGORIES, foursquare_enabled, get_foursquare_place_detail, get_foursquare_places
-from ingestors.geoapify import geoapify_passive_places_enabled, get_geoapify_places
 from ingestors.nps import get_nps_places, nps_enabled
 from ingestors.usfs import get_usfs_recreation_sites
-from ingestors.google_places import (
-    fetch_google_photo,
-    get_google_place_detail,
-    get_google_places,
-    google_places_enabled,
-    search_google_places_text,
-    strip_lightweight_google_rich_fields,
-)
 from ingestors.provider_guard import provider_call_snapshot, record_provider_call, runtime_cached_call
 from ingestors.blm import get_blm_campsites, get_blm_campsite_detail, get_blm_recreation_sites
 from ingestors.conditions import get_provider_conditions_along_route, get_provider_conditions_near, get_wfigs_fire_perimeters
@@ -102,6 +92,37 @@ from db.store import (
     submit_map_contributor_application, get_map_contributor_applications,
     update_map_contributor_application_status,
 )
+
+LEGACY_PLACE_PROVIDERS = {"google", "foursquare", "fsq", "geoapify"}
+
+def _legacy_place_source(value: object) -> bool:
+    text = str(value or "").lower()
+    return any(source in text for source in LEGACY_PLACE_PROVIDERS)
+
+def strip_lightweight_google_rich_fields(place: dict) -> dict:
+    """Compatibility scrubber for old cached provider records.
+
+    Runtime place discovery no longer uses Google/Foursquare/Geoapify. This
+    keeps stale cached objects from leaking paid/legacy provider fields through
+    shared card/smart-pack code paths.
+    """
+    if not isinstance(place, dict):
+        return place
+    if _legacy_place_source(place.get("source")) or _legacy_place_source(place.get("source_label")):
+        for key in (
+            "google_maps_uri",
+            "reviews",
+            "hours",
+            "photos",
+            "photo_url",
+            "provider_place_id",
+            "place_id",
+            "rich_detail_available",
+            "rich_detail_locked",
+            "rich_detail_reason",
+        ):
+            place.pop(key, None)
+    return place
 
 # ── Credit economy ─────────────────────────────────────────────────────────────
 
@@ -3960,24 +3981,9 @@ async def authorize_explore_categories(body: ExploreCategoryAuthorizeRequest, us
 @app.post("/api/places/detail/authorize")
 async def authorize_paid_place_detail(body: PlaceDetailAuthorizeRequest, user: dict = Depends(_current_user)):
     source = (body.source or "").lower().strip()
-    if source not in {"google", "foursquare", "fsq"} or not str(body.place_id or "").strip():
-        raise HTTPException(400, "Unsupported paid place provider")
-    source = "foursquare" if source == "fsq" else source
-    cost = AI_COSTS["paid_place_detail"]
-    unlock_key = _paid_place_detail_unlock_key(user["id"], source, body.place_id)
-    if user.get("is_admin") or has_active_plan(user):
-        return {"authorized": True, "charged": 0, "plan": True, "credits": user.get("credits", 0)}
-    if get_cached("campsite_cache", unlock_key, ttl_seconds=3600 * 24):
-        return {"authorized": True, "charged": 0, "already_unlocked": True, "credits": user.get("credits", 0)}
-    if not deduct_credits(user["id"], cost, f"Paid place detail - {source}:{body.place_id}"):
-        raise HTTPException(402, detail=_paywall_detail(
-            "paid_place_detail",
-            f"Provider photos and full details cost {cost} credits, or are included with Explorer.",
-            cost,
-        ))
-    set_cached("campsite_cache", unlock_key, {"source": source, "place_id": body.place_id, "date": _today_key()})
-    fresh = get_user_by_id(user["id"]) or user
-    return {"authorized": True, "charged": cost, "credits": fresh.get("credits", 0)}
+    if source in LEGACY_PLACE_PROVIDERS:
+        raise HTTPException(410, "Legacy paid place providers are disabled")
+    raise HTTPException(400, "Unsupported paid place provider")
 
 
 def _place_payload_dict(body: CanonicalPlacePayload) -> dict:
@@ -5878,15 +5884,11 @@ async def campsites_search(
         # Anonymous: treated as one-time per session via anon check
         if request:
             _anon_check(_client_ip(request), "search")
-    private_categories = _private_stay_categories_for_filters(type_filters)
-    ridb, blm, geoapify_live, fsq_live = await asyncio.gather(
+    ridb, blm = await asyncio.gather(
         get_campsites_search(lat, lng, radius_miles=radius, type_filters=type_filters),
         get_blm_campsites(lat, lng, radius_miles=radius),
-        get_geoapify_places(lat, lng, radius_m=int(min(radius, 45) * 1609.344), categories=private_categories, limit_per_category=20) if private_categories and geoapify_passive_places_enabled() else asyncio.sleep(0, result=[]),
-        get_foursquare_places(lat, lng, radius_m=int(min(radius, 45) * 1609.344), categories=private_categories, limit_per_category=12) if private_categories and foursquare_enabled() else asyncio.sleep(0, result=[]),
     )
-    live_camps = [camp for camp in (_camp_from_live_place(p) for p in [*geoapify_live, *fsq_live]) if camp]
-    return _merge_camp_sources(ridb, blm, live_camps, type_filters=type_filters)[:80]
+    return _merge_camp_sources(ridb, blm, type_filters=type_filters)[:80]
 
 @app.get("/api/campsites/{facility_id}/detail")
 async def campsite_detail(facility_id: str):
@@ -6115,16 +6117,15 @@ async def gas(lat: float, lng: float, radius: float = 25):
     from ingestors.nrel import get_fuel_near
     radius_m = int(min(max(radius, 1), 45) * 1609.344)
     osm_radius_m = int(min(max(radius, 1), 25) * 1609.344)
-    nrel, osm, hosted = await asyncio.gather(
+    nrel, osm = await asyncio.gather(
         get_fuel_near(lat, lng, radius_miles=radius),
         get_fuel_stations(lat, lng, radius_m=osm_radius_m),
-        get_geoapify_places(lat, lng, radius_m=radius_m, categories={"fuel", "propane"}, limit_per_category=30) if geoapify_passive_places_enabled() else asyncio.sleep(0, result=[]),
         return_exceptions=True,
     )
     merged: list[dict] = []
     seen = set()
     max_distance_m = float(min(max(radius, 1), 45)) * 1609.344
-    for batch in (osm if isinstance(osm, list) else [], hosted if isinstance(hosted, list) else [], nrel if isinstance(nrel, list) else []):
+    for batch in (osm if isinstance(osm, list) else [], nrel if isinstance(nrel, list) else []):
         for item in batch:
             try:
                 item_lat = float(item.get("lat"))
@@ -8131,11 +8132,9 @@ def _camp_source_rank(camp: dict) -> int:
         return 0
     if "blm" in source or "blm" in verified:
         return 1
-    if "google" in source or "google" in verified:
-        return 2
     if "osm" in source or "openstreetmap" in verified:
         return 3
-    if "foursquare" in source or "foursquare" in verified:
+    if _legacy_place_source(source) or _legacy_place_source(verified):
         return 5
     return 4
 
@@ -8148,7 +8147,7 @@ def _camp_distance_m(a: dict, b: dict) -> float:
 def _merge_camp_record(existing: dict, incoming: dict) -> dict:
     primary, secondary = (incoming, existing) if _camp_source_rank(incoming) < _camp_source_rank(existing) else (existing, incoming)
     merged = dict(primary)
-    secondary_paid = str(secondary.get("source") or "").lower() in {"google", "foursquare", "fsq"}
+    secondary_paid = _legacy_place_source(secondary.get("source"))
     merged["alternate_sources"] = sorted(set([
         *(existing.get("alternate_sources") or []),
         *(incoming.get("alternate_sources") or []),
@@ -8301,18 +8300,18 @@ def _camp_from_live_place(place: dict) -> dict | None:
         "url": place.get("website") or place.get("google_maps_uri") or "",
         "ada": False,
         "source": source,
-        "source_tier": "paid_gated" if source in {"google", "foursquare", "fsq"} else ("hosted_lightweight" if source == "geoapify" else ""),
+        "source_tier": "",
         "verified_source": place.get("source_label") or place.get("attribution") or source.title(),
         "phone": place.get("phone") or "",
         "address": place.get("address") or "",
         "provider_place_id": place.get("provider_place_id") or place.get("place_id") or "",
         "place_id": place.get("place_id") or "",
         "source_badge": place.get("source_label") or place.get("attribution") or source.title(),
-        "source_confidence": "medium" if source in {"geoapify", "foursquare", "fsq"} else "review",
+        "source_confidence": "review",
         "link_label": "Official page",
-        "rich_detail_available": bool(place.get("rich_detail_available", source in {"google", "foursquare", "fsq"})),
-        "rich_detail_locked": bool(place.get("rich_detail_locked", source in {"google", "foursquare", "fsq"})),
-        "rich_detail_reason": place.get("rich_detail_reason") or ("paid_provider_detail" if source in {"google", "foursquare", "fsq"} else ""),
+        "rich_detail_available": False,
+        "rich_detail_locked": False,
+        "rich_detail_reason": "",
         "amenities": amenities,
         "site_types": [land_type] if is_private_stay else (["RV"] if "rv" in tags else ["Tent", "Campground"]),
     }
@@ -8321,17 +8320,12 @@ def _camp_from_live_place(place: dict) -> dict | None:
 async def nearby_camps(lat: float, lng: float, radius: float = 50, types: str = ""):
     """Aggregate legal camp sources near a point, no trip required."""
     type_filters = [t.strip() for t in types.split(",") if t.strip()] if types else None
-    private_categories = _private_stay_categories_for_filters(type_filters)
-    live_categories = {"camp"} | private_categories
-    ridb, blm, osm, geoapify_live, fsq_live = await asyncio.gather(
+    ridb, blm, osm = await asyncio.gather(
         get_campsites_search(lat, lng, radius_miles=radius, type_filters=type_filters),
         get_blm_campsites(lat, lng, radius_miles=radius),
         get_osm_campsites(lat, lng, radius_m=int(min(radius, 60) * 1600)),
-        get_geoapify_places(lat, lng, radius_m=int(min(radius, 45) * 1609.344), categories=live_categories, limit_per_category=20) if geoapify_passive_places_enabled() else asyncio.sleep(0, result=[]),
-        get_foursquare_places(lat, lng, radius_m=int(min(radius, 45) * 1609.344), categories=private_categories, limit_per_category=12) if private_categories and foursquare_enabled() else asyncio.sleep(0, result=[]),
     )
-    live_camps = [camp for camp in (_camp_from_live_place(p) for p in [*geoapify_live, *fsq_live]) if camp]
-    return _merge_camp_sources(ridb, blm, osm, live_camps, type_filters=type_filters)[:160]
+    return _merge_camp_sources(ridb, blm, osm, type_filters=type_filters)[:160]
 
 
 def _route_points_from_body(route: list[dict]) -> list[dict]:
@@ -8501,7 +8495,7 @@ def _camp_source_confidence(camp: dict) -> str:
     source = f"{camp.get('source') or ''} {camp.get('verified_source') or ''}".lower()
     if any(term in source for term in ("ridb", "recreation.gov", "nps", "blm")):
         return "high"
-    if any(term in source for term in ("osm", "openstreetmap", "geoapify", "foursquare", "fsq")):
+    if any(term in source for term in ("osm", "openstreetmap")):
         return "medium"
     return "review"
 
@@ -8698,18 +8692,14 @@ async def camps_bbox(n: float, s: float, e: float, w: float, types: str = ""):
     radius_miles = min(max(lat_span_mi, lng_span_mi) / 2 + 5, 120)
     radius_m = int(radius_miles * 1600)
     type_filters = [t.strip() for t in types.split(",") if t.strip()] if types else None
-    private_categories = _private_stay_categories_for_filters(type_filters)
-    ridb, blm, osm, geoapify_live, fsq_live = await asyncio.gather(
+    ridb, blm, osm = await asyncio.gather(
         get_campsites_search(lat, lng, radius_miles=radius_miles, type_filters=type_filters),
         get_blm_campsites(lat, lng, radius_miles=radius_miles),
         get_osm_campsites(lat, lng, radius_m=min(radius_m, 120000)),
-        get_geoapify_places(lat, lng, radius_m=int(min(radius_miles, 45) * 1609.344), categories=private_categories, limit_per_category=20) if private_categories and geoapify_passive_places_enabled() else asyncio.sleep(0, result=[]),
-        get_foursquare_places(lat, lng, radius_m=int(min(radius_miles, 45) * 1609.344), categories=private_categories, limit_per_category=12) if private_categories and foursquare_enabled() else asyncio.sleep(0, result=[]),
     )
-    live_camps = [camp for camp in (_camp_from_live_place(p) for p in [*geoapify_live, *fsq_live]) if camp]
     in_box = [
         [c for c in source if s <= c.get("lat", 999) <= n and w <= c.get("lng", 999) <= e]
-        for source in (ridb, blm, osm, live_camps)
+        for source in (ridb, blm, osm)
     ]
     return _merge_camp_sources(*in_box, type_filters=type_filters)[:200]
 
@@ -8969,7 +8959,7 @@ def _excursion_source_confidence(source: str) -> str:
     source = (source or "").lower()
     if source in {"nps", "blm", "ridb", "recreation.gov", "trailhead", "community"}:
         return "high"
-    if source in {"osm", "wikipedia", "openbeta", "google", "google places"}:
+    if source in {"osm", "wikipedia", "openbeta"}:
         return "medium"
     return "low"
 
@@ -10352,9 +10342,6 @@ async def nearby_places(
     provider = (provider or "auto").lower().strip()
     osm_places: list[dict] = []
     official_places: list[dict] = []
-    google_places: list[dict] = []
-    geoapify_places: list[dict] = []
-    fsq_places: list[dict] = []
 
     official_tasks = []
     if provider in {"auto", "nps"} and nps_enabled() and official_category_set.intersection({"park", "historic", "attraction", "tourism", "camp", "camping", "visitor_center"}):
@@ -10369,12 +10356,6 @@ async def nearby_places(
             if isinstance(batch, list):
                 official_places.extend(batch)
 
-    if provider == "google" and google_places_enabled() and category_set:
-        google_places = await get_google_places(lat, lng, radius_m=radius_m, categories=category_set)
-    if provider in {"auto", "geoapify"} and geoapify_passive_places_enabled() and category_set:
-        geoapify_places = await get_geoapify_places(lat, lng, radius_m=radius_m, categories=category_set)
-    if provider == "foursquare" and foursquare_enabled() and category_set.intersection(FSQ_BUSINESS_CATEGORIES):
-        fsq_places = await get_foursquare_places(lat, lng, radius_m=radius_m, categories=category_set)
     if provider in {"auto", "osm"} and category_set and not private_stay_only:
         osm_places = await get_service_places(lat, lng, radius_m=radius_m, categories=category_set)
         if category_set.intersection({"fuel", "propane"}):
@@ -10392,7 +10373,7 @@ async def nearby_places(
 
     merged: list[dict] = []
     seen: set[str] = set()
-    for item in [*official_places, *osm_places, *geoapify_places, *google_places, *fsq_places]:
+    for item in [*official_places, *osm_places]:
         name = str(item.get("name") or "").lower().strip()
         coord_key = f"{item.get('type')}:{name}:{round(float(item.get('lat', 0)), 4)}:{round(float(item.get('lng', 0)), 4)}"
         key = str(item.get("id") or coord_key)
@@ -10415,12 +10396,6 @@ async def nearby_places(
             item["official_free"] = True
             item.setdefault("source_badge", item.get("source_label") or item.get("verified_source") or "Open official data")
             item.setdefault("source_freshness", "Official/open source data cached by Trailhead; verify current closures, hours, fees, and access with the source.")
-        if str(item.get("source") or "").lower() in {"google", "foursquare"}:
-            item["rich_detail_available"] = True
-            item["rich_detail_locked"] = True
-            item["rich_detail_reason"] = "paid_provider_detail"
-        if item.get("rich_detail_locked") and access_meta["explore_unlocked"]:
-            item["rich_detail_locked"] = str(item.get("source") or "").lower() in {"google", "foursquare"}
         item.setdefault("category_access", {
             "explore_unlocked": access_meta["explore_unlocked"],
             "locked_categories": locked_categories,
@@ -10436,20 +10411,6 @@ async def search_place_card(q: str, lat: float | None = None, lng: float | None 
     query = (q or "").strip()
     if not query:
         return None
-    google_hits = await search_google_places_text(query, lat, lng, radius_m=50000, limit=6)
-    if google_hits:
-        def score(item: dict) -> tuple[float, int]:
-            dist = 999999.0
-            if lat is not None and lng is not None:
-                try:
-                    dist = _haversine_m(float(lat), float(lng), float(item.get("lat")), float(item.get("lng")))
-                except Exception:
-                    pass
-            media_penalty = 0 if item.get("photo_url") else 1
-            return (dist, media_penalty)
-        best = sorted(google_hits, key=score)[0]
-        best["summary"] = best.get("summary") or best.get("address") or best.get("subtype") or "Selected map place."
-        return best
     if lat is not None and lng is not None:
         return {
             "id": f"search:{query.lower().replace(' ', '-')[:40]}:{float(lat):.5f}:{float(lng):.5f}",
@@ -10568,7 +10529,6 @@ def _map_card_sections(card: dict, body: MapCardResolveRequest) -> list[dict]:
 MAP_CARD_SAFE_TTL_SECONDS = 3600 * 24 * 7
 MAP_CARD_PASSIVE_SOURCES = {
     "osm",
-    "geoapify",
     "ridb",
     "recreation.gov",
     "blm",
@@ -10604,11 +10564,12 @@ def _contains_restricted_provider(value: object) -> bool:
                 "maps.google",
                 "foursquare.com",
                 "4sqi.net",
+                "geoapify.com",
             )
         )
     if isinstance(value, dict):
         source = str(value.get("source") or value.get("source_label") or value.get("attribution") or "").lower()
-        if "google" in source or "foursquare" in source or source == "fsq":
+        if _legacy_place_source(source):
             return True
         return any(_contains_restricted_provider(v) for v in value.values())
     if isinstance(value, list):
@@ -10618,7 +10579,7 @@ def _contains_restricted_provider(value: object) -> bool:
 
 def _map_card_cacheable(body: MapCardResolveRequest, response: dict) -> bool:
     source = str(body.source or "").lower()
-    if source in {"google", "foursquare", "fsq"}:
+    if source in LEGACY_PLACE_PROVIDERS:
         return False
     return not _contains_restricted_provider(response)
 
@@ -10655,23 +10616,14 @@ async def resolve_map_card(body: MapCardResolveRequest, user: dict | None = Depe
     provider = (body.source or "").lower()
     provider_id = body.provider_place_id or body.place_id or ""
     raw_id = str(body.id or "")
-    if not provider_id and raw_id.startswith(("google:", "foursquare:")):
+    if not provider_id and raw_id.startswith(("google:", "foursquare:", "geoapify:")):
         provider, provider_id = raw_id.split(":", 1)
 
     timings: dict[str, int] = {}
     detail_task = None
-    if provider in {"google", "foursquare", "fsq"} and provider_id:
-        detail_task = guarded("detail", place_detail(provider, provider_id, body.type or body.kind or "", user if isinstance(user, dict) else None), None)
-    elif body.kind == "search" and provider not in MAP_CARD_PASSIVE_SOURCES and body.name:
-        detail_task = guarded(
-            "text_search",
-            search_google_places_text(body.name, center_lat, center_lng, radius_m=50000, limit=5),
-            [],
-        )
-    else:
-        async def no_detail():
-            return None, 0
-        detail_task = no_detail()
+    async def no_detail():
+        return None, 0
+    detail_task = no_detail()
 
     is_trailish = body.kind == "trail" or _smart_pack_type(body.type) in {"trail", "trailhead", "ohv"}
     photos_task = guarded("trail_photos", _open_trail_photos(body.name, center_lat, center_lng), []) if is_trailish else None
@@ -10696,22 +10648,7 @@ async def resolve_map_card(body: MapCardResolveRequest, user: dict | None = Depe
     else:
         (detail_value, detail_ms), (related_pack, nearby_ms), (trail_pack, trails_ms) = await asyncio.gather(detail_task, nearby_task, trails_task)
         photos = []
-    if provider in {"google", "foursquare", "fsq"} and provider_id:
-        timings["detail_ms"] = detail_ms
-        detail = detail_value
-    elif body.kind == "search" and provider not in MAP_CARD_PASSIVE_SOURCES and body.name:
-        timings["text_search_ms"] = detail_ms
-        hits = detail_value if isinstance(detail_value, list) else []
-        hits = [hit for hit in hits if _outdoor_google_match_ok(body, hit)]
-        detail = sorted(
-            hits,
-            key=lambda item: (
-                _haversine_m(center_lat, center_lng, float(item.get("lat")), float(item.get("lng"))),
-                0 if item.get("photo_url") else 1,
-            ),
-        )[0] if hits else None
-    else:
-        detail = None
+    detail = None
     timings["nearby_ms"] = nearby_ms
     timings["trails_ms"] = trails_ms
 
@@ -10817,13 +10754,9 @@ def _place_source_priority(item: dict) -> int:
         return 0
     if source in {"ridb", "blm", "nps", "usfs", "recreation.gov"} or any(v in verified for v in ("ridb", "blm", "nps", "recreation.gov", "forest service", "usfs")):
         return 1
-    if "geoapify" in source or "geoapify" in verified:
-        return 2
     if source in {"offline", "osm", "openstreetmap"}:
         return 3
-    if "google" in source or "google" in verified:
-        return 8
-    if "foursquare" in source or "foursquare" in verified:
+    if _legacy_place_source(source) or _legacy_place_source(verified):
         return 8
     return 5
 
@@ -10968,7 +10901,7 @@ def _smart_place_from_poi(item: dict, center_lat: float, center_lng: float, rout
         "lng": lng,
         "type": ptype,
         "source": source,
-        "source_label": item.get("source_label") or item.get("attribution") or ("Google" if source == "google" else "Open place data"),
+        "source_label": item.get("source_label") or item.get("attribution") or "Open place data",
         "confidence": _excursion_source_confidence(source),
         "distance_mi": round(_haversine_m(center_lat, center_lng, lat, lng) / 1609.344, 2),
         "route_distance_mi": _excursion_route_distance_mi(center_lat, center_lng, {"lat": lat, "lng": lng}, route),
@@ -11080,12 +11013,6 @@ async def nearby_smart_pack(body: NearbySmartPackRequest, user: dict | None = De
             item["official_free"] = True
             item.setdefault("source_badge", item.get("source_label") or item.get("verified_source") or "Open official data")
             item.setdefault("source_freshness", "Official/open source data cached by Trailhead; verify current closures, hours, fees, and access with the source.")
-        if str(item.get("source") or "").lower() in {"google", "foursquare"}:
-            item["rich_detail_available"] = True
-            item["rich_detail_locked"] = True
-            item["rich_detail_reason"] = "paid_provider_detail"
-        if item.get("rich_detail_locked") and access_meta["explore_unlocked"]:
-            item["rich_detail_locked"] = str(item.get("source") or "").lower() in {"google", "foursquare"}
         ptype = _smart_pack_type(item.get("type"))
         if ptype not in display_requested and not (ptype == "attraction" and display_requested.intersection({"park", "historic", "climbing", "ohv", "attraction"})):
             continue
@@ -11120,43 +11047,18 @@ async def nearby_smart_pack(body: NearbySmartPackRequest, user: dict | None = De
 async def place_detail(source: str, place_id: str, category: str = "", user: dict | None = Depends(_optional_user)):
     """Return selected-place details for rich cards.
 
-    Google details are fetched on demand. Other providers may already include
-    the practical list fields, so callers should keep showing the summary if
-    this endpoint returns 404.
+    Legacy paid place providers are no longer used for Trailhead cards. Mapbox
+    Search results are resolved through the Extreme Search Box proxy instead.
     """
     source = (source or "").lower().strip()
-    if source == "google":
-        if not _has_paid_place_detail_access(user if isinstance(user, dict) else None, source, place_id):
-            raise HTTPException(402, detail=_paywall_detail(
-                "paid_place_detail",
-                f"Provider photos and full details cost {AI_COSTS['paid_place_detail']} credits, or are included with Explorer.",
-                AI_COSTS["paid_place_detail"],
-            ))
-        detail = await get_google_place_detail(place_id)
-        if not detail:
-            raise HTTPException(404, "Google place detail unavailable")
-        return detail
-    if source in {"foursquare", "fsq"}:
-        if not _has_paid_place_detail_access(user if isinstance(user, dict) else None, "foursquare", place_id):
-            raise HTTPException(402, detail=_paywall_detail(
-                "paid_place_detail",
-                f"Provider photos and full details cost {AI_COSTS['paid_place_detail']} credits, or are included with Explorer.",
-                AI_COSTS["paid_place_detail"],
-            ))
-        detail = await get_foursquare_place_detail(place_id)
-        if not detail:
-            raise HTTPException(404, "Foursquare place detail unavailable")
-        return detail
+    if source in LEGACY_PLACE_PROVIDERS:
+        raise HTTPException(410, "Legacy place provider details are disabled")
     raise HTTPException(404, "Place detail unavailable for this provider")
 
 
 @app.get("/api/places/google/photo")
 async def google_place_photo(name: str, max_width: int = 900):
-    photo = await fetch_google_photo(name, max_width=max_width)
-    if not photo:
-        raise HTTPException(404, "Place photo unavailable")
-    body, media_type = photo
-    return Response(content=body, media_type=media_type, headers={"Cache-Control": "private, max-age=86400"})
+    raise HTTPException(410, "Google place photos are disabled")
 
 
 # ── Offline trip essentials packs ─────────────────────────────────────────────

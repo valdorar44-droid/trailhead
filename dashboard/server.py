@@ -1652,7 +1652,8 @@ def _copilot_realtime_instructions(wake_phrase: bool) -> str:
         "For followups like \"open the second one\" use selectVisiblePlace when the prior answer described visible map candidates, otherwise use selectPlace for search results. "
         "For \"route me there\" use routeToSelectedPlace or buildRoute to preview only; use the selected card/current result, not a random nearby place. "
         "For \"start navigation\" or \"navigate there\" use startNavigation with confirmation. "
-        "For full multi-day planning such as \"plan/build/create a 5-day dispersed route from Moab to Big Sur\", call startRouteScout with start, destination, days, driveHours when known, routeStyle, campPreference, fuelStrategy, poiPreferences, and rig profile context. "
+        "For full multi-day planning such as \"plan/build/create a 5-day dispersed route from Moab to Big Sur\", call startRouteScout with start, destination, days, driveHours when known, routeStyle, campPreference, campPhotoOnly when they ask for camps with photos/pictures only, fuelStrategy, poiPreferences, and rig profile context. "
+        "Treat driveHours as the user's maximum drive time per day across the requested days, not a required exact daily duration. "
         "If the user gives a follow-up drive time such as \"5 hours\" while a route scout is active, call startRouteScout again with the prior scout context plus driveHours. "
         "Only use Route Builder actions when the user explicitly asks to open, save, export, or prefill Route Builder. "
         "Ignore tiny fragments, map labels, loading copy, and background speech that are not clear user commands. "
@@ -1803,6 +1804,8 @@ def _route_builder_draft_from_text(command: str, context: dict | None = None) ->
         draft["campPreference"] = "private"
     elif re.search(r"\b(rv|developed|reservable|hookups?)\b", text):
         draft["campPreference"] = "rv" if "rv" in text else "developed"
+    if re.search(r"\b(?:photos?|pictures?|images?)\s*(?:only|required|preferred)?\b|\b(?:with|that have)\s+(?:photos?|pictures?|images?)\b", text):
+        draft["campPhotoOnly"] = True
     poi_preferences = []
     poi_specs = [
         ("fuel", r"\b(fuel|gas|propane|resupply)\b"),
@@ -1883,7 +1886,7 @@ def _build_extreme_map_action(command: str, context: dict, provider: str = "trai
     cost_class = "local"
     requires_confirmation = False
 
-    if re.search(r"\bwhat can i do|help|capabilities|how do i\b", text):
+    if re.search(r"(?:^|\s)/help\b|\bwhat can (?:i|you) do\b|\bhelp\b|\bcapabilities\b|\bhow do i\b", text):
         action_type = "getMapContext"
         args = {"scope": "current_screen", "capabilities": TRAILHEAD_COPILOT_CAPABILITY_REGISTRY}
         map_updates = {"assistant_panel": True}
@@ -3193,6 +3196,7 @@ class RouteCampWindowsRequest(BaseModel):
     camp_filters: list[str] = Field(default_factory=list)
     route_style: str = "balanced"
     camp_preference: str = "public"
+    require_photos: bool = False
     region_hint: str = ""
     camp_reuse_policy: str = "different_each_night"
     max_daily_drive_hours: Optional[float] = None
@@ -8820,6 +8824,12 @@ def _camp_source_confidence(camp: dict) -> str:
         return "medium"
     return "review"
 
+def _camp_has_media(camp: dict) -> bool:
+    if camp.get("photo_url") or camp.get("hero_photo_url") or camp.get("primary_image") or camp.get("image_url"):
+        return True
+    photos = camp.get("photos") or camp.get("photo_candidates") or camp.get("images") or []
+    return isinstance(photos, list) and any(bool(photo.get("url") if isinstance(photo, dict) else photo) for photo in photos)
+
 async def _select_camp_for_window(
     window: RouteCampWindow,
     points: list[dict],
@@ -8829,6 +8839,7 @@ async def _select_camp_for_window(
     sem: asyncio.Semaphore,
     route_style: str = "balanced",
     camp_preference: str = "public",
+    require_photos: bool = False,
     region_hint: str = "",
 ) -> dict:
     label = window.label or (f"Day {window.day}" if window.start == window.end else f"Days {window.start}-{window.end}")
@@ -8845,12 +8856,13 @@ async def _select_camp_for_window(
         pass_defs.append({"name": "wide_review", "filters": [], "radius": min(max(max_radius, 82.0), max(base_radius * 1.9, 72.0)), "strict": False})
     pass_defs.append({"name": "target_review", "filters": [], "radius": min(120.0, max(max_radius, base_radius * 2.2, 105.0)), "strict": False, "target_only": True})
     key_payload = {
-        "v": 6,
+        "v": 8,
         "route": [[round(p["lat"], 3), round(p["lng"], 3)] for p in samples],
         "window": [window.day, window.start, window.end, round(window.target_mi, 1), round(window.search_window_mi, 1)],
         "filters": filter_key,
         "style": route_style,
         "camp_preference": camp_preference,
+        "require_photos": require_photos,
         "region_hint": region_hint,
         "passes": [(p["name"], round(float(p["radius"])), bool(p.get("target_only"))) for p in pass_defs],
     }
@@ -8876,6 +8888,9 @@ async def _select_camp_for_window(
             for camp in found:
                 if pass_def["strict"] and not _camp_matches_filters(camp, type_filters):
                     continue
+                has_media = _camp_has_media(camp)
+                if require_photos and not has_media:
+                    continue
                 try:
                     route_distance = min(_haversine_m(float(camp["lat"]), float(camp["lng"]), s["lat"], s["lng"]) / 1609.344 for s in samples)
                     endpoint_distance = _haversine_m(float(camp["lat"]), float(camp["lng"]), target["lat"], target["lng"]) / 1609.344
@@ -8893,11 +8908,13 @@ async def _select_camp_for_window(
                     "search_pass": pass_def["name"],
                     "source_confidence": _camp_source_confidence(camp),
                     "preference_match": preferred_match,
+                    "has_photos": has_media,
                 }
                 score = (
                     endpoint_distance * (0.62 if route_style != "direct" else 0.82)
                     + route_distance * (0.78 if route_style == "direct" else 0.95)
                     + _camp_pref_score(camp, route_style, camp_preference, region_hint)
+                    + (-8 if has_media else 0)
                     + (0 if preferred_match or not type_filters else 14)
                     + (0 if pass_def["name"] in {"preferred", "preferred_wide"} else 6 if pass_def["name"] == "any_legal" else 12)
                 )
@@ -8912,8 +8929,8 @@ async def _select_camp_for_window(
         scored = sorted(by_key.values(), key=lambda c: float(c.get("_score", 999999)))
         candidates = [{k: v for k, v in camp.items() if k != "_score"} for camp in scored[:18]]
         best = candidates[0] if candidates else None
-        best_route_distance = float(best.get("route_distance_mi") or 999) if best else 999
-        best_endpoint_distance = float(best.get("endpoint_distance_mi") or 999) if best else 999
+        best_route_distance = float(best.get("route_distance_mi") if best.get("route_distance_mi") is not None else 999) if best else 999
+        best_endpoint_distance = float(best.get("endpoint_distance_mi") if best.get("endpoint_distance_mi") is not None else 999) if best else 999
         preferred_best = bool(best and (best.get("preference_match") or not type_filters))
         strong = bool(best and best_route_distance <= 28 and best_endpoint_distance <= 55 and (preferred_best or str(camp_preference or "").lower() == "any"))
         confidence = "strong" if strong else "review" if best else "missing"
@@ -8921,6 +8938,8 @@ async def _select_camp_for_window(
         reason = (
             "Strong overnight option found."
             if strong else
+            "No photo-backed overnight option matched this window. Pick a camp manually or turn off Photos only."
+            if require_photos and not best else
             "Showing the best legal overnight option; review fit before navigation."
             if best else
             "No overnight option found near this day yet. Keep it as a review stop or choose a camp manually."
@@ -8930,6 +8949,8 @@ async def _select_camp_for_window(
             "start": window.start,
             "end": window.end,
             "label": label,
+            "target_mi": window.target_mi,
+            "search_window_mi": window.search_window_mi,
             "camp": best,
             "selected": best,
             "candidates": candidates,
@@ -8949,6 +8970,8 @@ async def _select_camp_for_window(
             "start": window.start,
             "end": window.end,
             "label": label,
+            "target_mi": window.target_mi,
+            "search_window_mi": window.search_window_mi,
             "camp": None,
             "selected": None,
             "candidates": [],
@@ -8988,6 +9011,7 @@ async def route_camp_windows(body: RouteCampWindowsRequest):
             sem,
             route_style=route_style,
             camp_preference=body.camp_preference,
+            require_photos=body.require_photos,
             region_hint=body.region_hint,
         )
         for window in windows

@@ -57,6 +57,7 @@ class Settings:
     nasa_firms_map_key: str = os.environ.get("NASA_FIRMS_MAP_KEY", "")
     google_oauth_client_ids: str = os.environ.get("GOOGLE_OAUTH_CLIENT_IDS", "")
     valhalla_url: str = os.environ.get("VALHALLA_URL", "https://valhalla1.openstreetmap.de")
+    valhalla_area_urls: str = os.environ.get("VALHALLA_AREA_URLS", "")
     route_fallback_urls: str = os.environ.get("ROUTE_FALLBACK_URLS", "https://routing.openstreetmap.de/routed-car")
     smtp_host: str = os.environ.get("SMTP_HOST", "")
     smtp_port: int = int(os.environ.get("SMTP_PORT", "587"))

@@ -208,5 +208,123 @@ class CampLinkResolverTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("recreation.gov/search", resolved["url"])
 
 
+class ValhallaAreaRoutingTests(unittest.IsolatedAsyncioTestCase):
+    def tearDown(self):
+        server.settings.valhalla_url = "https://valhalla1.openstreetmap.de"
+        server.settings.valhalla_area_urls = ""
+
+    def test_valhalla_area_selector_uses_matching_bounds(self):
+        server.settings.valhalla_area_urls = (
+            '[{"id":"midwest","url":"http://midwest:8002",'
+            '"bounds":{"s":36,"w":-98,"n":50,"e":-80},"states":["MN","WI","IL","IN","MI","OH"]}]'
+        )
+
+        target = server._select_valhalla_target([
+            {"lat": 41.8781, "lon": -87.6298},
+            {"lat": 42.3314, "lon": -83.0458},
+        ])
+
+        self.assertEqual(target["id"], "midwest")
+        self.assertEqual(target["url"], "http://midwest:8002")
+
+    def test_valhalla_area_selector_falls_back_for_cross_area_route(self):
+        server.settings.valhalla_url = "http://default:8002"
+        server.settings.valhalla_area_urls = (
+            '[{"id":"midwest","url":"http://midwest:8002",'
+            '"bounds":{"s":36,"w":-98,"n":50,"e":-80}}]'
+        )
+
+        target = server._select_valhalla_target([
+            {"lat": 41.8781, "lon": -87.6298},
+            {"lat": 34.0522, "lon": -118.2437},
+        ])
+
+        self.assertEqual(target["id"], "default")
+        self.assertEqual(target["url"], "http://default:8002")
+
+    def test_route_cache_key_includes_valhalla_target(self):
+        payload = server._route_payload(
+            [{"lat": 41.8781, "lon": -87.6298}, {"lat": 42.3314, "lon": -83.0458}],
+            server.RouteOptions(),
+            "miles",
+        )
+
+        self.assertNotEqual(
+            server._route_cache_key(payload, "midwest"),
+            server._route_cache_key(payload, "east"),
+        )
+
+    async def test_coverage_probe_posts_to_selected_area_url(self):
+        server.settings.valhalla_area_urls = (
+            '[{"id":"west","url":"http://west:8002",'
+            '"bounds":{"s":31,"w":-125,"n":50,"e":-102}}]'
+        )
+        seen = {}
+
+        class FakeResponse:
+            status_code = 200
+            text = ""
+
+            def json(self):
+                return {"trip": {"status": 0, "status_message": "Found route", "summary": {"length": 12.5, "time": 900}}}
+
+        class FakeClient:
+            async def post(self, url, json, timeout):
+                seen["url"] = url
+                return FakeResponse()
+
+        probe = next(p for p in server.VALHALLA_COVERAGE_PROBES if p["id"] == "moab_big_sur")
+        result = await server._run_valhalla_coverage_probe(FakeClient(), probe)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["target"], "west")
+        self.assertEqual(seen["url"], "http://west:8002/route")
+
+    async def test_route_proxy_drops_optional_side_stops_before_valhalla(self):
+        server.settings.valhalla_url = "http://default:8002"
+        seen = {}
+
+        class FakeResponse:
+            status_code = 200
+            text = ""
+
+            def json(self):
+                return {"trip": {"status": 0, "status_message": "Found route", "summary": {"length": 10, "time": 600}}}
+
+        class FakeClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            async def post(self, url, json):
+                seen["url"] = url
+                seen["payload"] = json
+                return FakeResponse()
+
+        body = server.RouteRequest(
+            locations=[
+                {"lat": 38.5733, "lon": -109.5498, "type": "break"},
+                {"lat": 38.57, "lon": -109.54, "type": "side_stop"},
+                {"lat": 38.5677, "lon": -109.5271, "type": "break"},
+            ],
+            options=server.RouteOptions(),
+            units="miles",
+        )
+
+        with (
+            patch.object(server, "get_route_cached", return_value=None),
+            patch.object(server, "set_route_cached"),
+            patch.object(server.httpx, "AsyncClient", return_value=FakeClient()),
+        ):
+            result = await server.route_proxy(body)
+
+        self.assertEqual(seen["url"], "http://default:8002/route")
+        self.assertEqual(len(seen["payload"]["locations"]), 2)
+        self.assertTrue(all(loc["type"] == "break" for loc in seen["payload"]["locations"]))
+        self.assertEqual(result["_trailhead"]["engine"], "valhalla")
+
+
 if __name__ == "__main__":
     unittest.main()

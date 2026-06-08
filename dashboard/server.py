@@ -3032,6 +3032,109 @@ class RouteRequest(BaseModel):
     options: RouteOptions = Field(default_factory=RouteOptions)
     units: str = "miles"
 
+VALHALLA_COVERAGE_PROBES: list[dict] = [
+    {
+        "id": "moab_big_sur",
+        "label": "Moab, UT to Big Sur, CA",
+        "region": "southwest_to_california",
+        "expected_engine": "valhalla",
+        "locations": [
+            {"name": "Moab, UT", "lat": 38.5733, "lon": -109.5498},
+            {"name": "Big Sur, CA", "lat": 36.2704, "lon": -121.8081},
+        ],
+    },
+    {
+        "id": "las_vegas_moab",
+        "label": "Las Vegas, NV to Moab, UT",
+        "region": "southwest",
+        "expected_engine": "valhalla",
+        "locations": [
+            {"name": "Las Vegas, NV", "lat": 36.1699, "lon": -115.1398},
+            {"name": "Moab, UT", "lat": 38.5733, "lon": -109.5498},
+        ],
+    },
+    {
+        "id": "sf_los_angeles",
+        "label": "San Francisco, CA to Los Angeles, CA",
+        "region": "california",
+        "expected_engine": "valhalla",
+        "locations": [
+            {"name": "San Francisco, CA", "lat": 37.7749, "lon": -122.4194},
+            {"name": "Los Angeles, CA", "lat": 34.0522, "lon": -118.2437},
+        ],
+    },
+    {
+        "id": "seattle_spokane",
+        "label": "Seattle, WA to Spokane, WA",
+        "region": "pacific_northwest",
+        "expected_engine": "valhalla",
+        "locations": [
+            {"name": "Seattle, WA", "lat": 47.6062, "lon": -122.3321},
+            {"name": "Spokane, WA", "lat": 47.6588, "lon": -117.4260},
+        ],
+    },
+    {
+        "id": "portland_eugene",
+        "label": "Portland, OR to Eugene, OR",
+        "region": "pacific_northwest",
+        "expected_engine": "valhalla",
+        "locations": [
+            {"name": "Portland, OR", "lat": 45.5152, "lon": -122.6784},
+            {"name": "Eugene, OR", "lat": 44.0521, "lon": -123.0868},
+        ],
+    },
+    {
+        "id": "seattle_boise",
+        "label": "Seattle, WA to Boise, ID",
+        "region": "pacific_northwest_to_idaho",
+        "expected_engine": "valhalla",
+        "locations": [
+            {"name": "Seattle, WA", "lat": 47.6062, "lon": -122.3321},
+            {"name": "Boise, ID", "lat": 43.6150, "lon": -116.2023},
+        ],
+    },
+    {
+        "id": "boise_missoula",
+        "label": "Boise, ID to Missoula, MT",
+        "region": "idaho_to_montana",
+        "expected_engine": "valhalla",
+        "locations": [
+            {"name": "Boise, ID", "lat": 43.6150, "lon": -116.2023},
+            {"name": "Missoula, MT", "lat": 46.8721, "lon": -113.9940},
+        ],
+    },
+    {
+        "id": "salt_lake_denver",
+        "label": "Salt Lake City, UT to Denver, CO",
+        "region": "utah_to_colorado",
+        "expected_engine": "valhalla",
+        "locations": [
+            {"name": "Salt Lake City, UT", "lat": 40.7608, "lon": -111.8910},
+            {"name": "Denver, CO", "lat": 39.7392, "lon": -104.9903},
+        ],
+    },
+    {
+        "id": "phoenix_albuquerque",
+        "label": "Phoenix, AZ to Albuquerque, NM",
+        "region": "arizona_to_new_mexico",
+        "expected_engine": "valhalla",
+        "locations": [
+            {"name": "Phoenix, AZ", "lat": 33.4484, "lon": -112.0740},
+            {"name": "Albuquerque, NM", "lat": 35.0844, "lon": -106.6504},
+        ],
+    },
+    {
+        "id": "cheyenne_denver",
+        "label": "Cheyenne, WY to Denver, CO",
+        "region": "wyoming_to_colorado",
+        "expected_engine": "valhalla",
+        "locations": [
+            {"name": "Cheyenne, WY", "lat": 41.1400, "lon": -104.8202},
+            {"name": "Denver, CO", "lat": 39.7392, "lon": -104.9903},
+        ],
+    },
+]
+
 class AccountTripRequest(BaseModel):
     trip: dict
     request: str = ""
@@ -3114,8 +3217,81 @@ class MapCardResolveRequest(BaseModel):
     rating_count: Optional[int] = None
     route: list[list[float]] = Field(default_factory=list)
 
+def _parse_valhalla_area_urls() -> list[dict]:
+    raw = (getattr(settings, "valhalla_area_urls", "") or "").strip()
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        parsed = []
+        for chunk in raw.split(";"):
+            parts = [p.strip() for p in chunk.split("|")]
+            if len(parts) < 6:
+                continue
+            try:
+                parsed.append({
+                    "id": parts[0],
+                    "url": parts[1],
+                    "bounds": {
+                        "s": float(parts[2]),
+                        "w": float(parts[3]),
+                        "n": float(parts[4]),
+                        "e": float(parts[5]),
+                    },
+                })
+            except ValueError:
+                continue
+    if isinstance(parsed, dict):
+        parsed = parsed.get("areas") or []
+    areas: list[dict] = []
+    for idx, item in enumerate(parsed if isinstance(parsed, list) else []):
+        if not isinstance(item, dict):
+            continue
+        url = str(item.get("url") or "").strip().rstrip("/")
+        bounds = item.get("bounds") or {}
+        try:
+            area = {
+                "id": str(item.get("id") or item.get("name") or f"area_{idx}").strip(),
+                "url": url,
+                "bounds": {
+                    "s": float(bounds["s"]),
+                    "w": float(bounds["w"]),
+                    "n": float(bounds["n"]),
+                    "e": float(bounds["e"]),
+                },
+                "states": item.get("states") or [],
+                "priority": int(item.get("priority") or 100),
+            }
+        except (KeyError, TypeError, ValueError):
+            continue
+        if area["id"] and area["url"]:
+            areas.append(area)
+    return sorted(areas, key=lambda a: (a["priority"], a["id"]))
+
 def _valhalla_base_url() -> str:
     return settings.valhalla_url.rstrip("/")
+
+def _default_valhalla_target() -> dict:
+    return {"id": "default", "url": _valhalla_base_url(), "bounds": None, "states": [], "priority": 9999}
+
+def _valhalla_targets() -> list[dict]:
+    areas = _parse_valhalla_area_urls()
+    default = _default_valhalla_target()
+    return areas + [default] if areas else [default]
+
+def _location_in_bounds(loc: dict, bounds: dict) -> bool:
+    lat = float(loc["lat"])
+    lon = float(loc["lon"])
+    return float(bounds["s"]) <= lat <= float(bounds["n"]) and float(bounds["w"]) <= lon <= float(bounds["e"])
+
+def _select_valhalla_target(locations: list[dict]) -> dict:
+    required = _route_required_locations(locations)
+    for target in _parse_valhalla_area_urls():
+        bounds = target.get("bounds")
+        if bounds and all(_location_in_bounds(loc, bounds) for loc in required):
+            return target
+    return _default_valhalla_target()
 
 def _route_fallback_urls() -> list[str]:
     raw = getattr(settings, "route_fallback_urls", "") or ""
@@ -3134,8 +3310,9 @@ def _valhalla_costing_options(opts: RouteOptions) -> dict:
         }
     }
 
-def _route_cache_key(payload: dict) -> str:
+def _route_cache_key(payload: dict, target_id: str = "default") -> str:
     canonical = {
+        "target": target_id,
         "locations": [
             {
                 "lat": round(float(loc["lat"]), 5),
@@ -3286,19 +3463,148 @@ async def _route_with_osrm(client: httpx.AsyncClient, locations: list[dict], uni
             last_error = f"{base}: {exc}"
     raise RuntimeError(last_error)
 
+def _valhalla_probe_payload(probe: dict, units: str = "miles") -> dict:
+    opts = RouteOptions()
+    locations = [{"lat": loc["lat"], "lon": loc["lon"], "type": "break"} for loc in probe["locations"]]
+    return _route_payload(locations, opts, units)
+
+def _valhalla_probe_result(probe: dict, *, ok: bool, **updates) -> dict:
+    locations = [
+        {
+            "name": loc.get("name"),
+            "lat": loc.get("lat"),
+            "lon": loc.get("lon"),
+        }
+        for loc in probe.get("locations", [])
+    ]
+    result = {
+        "id": probe["id"],
+        "label": probe["label"],
+        "region": probe["region"],
+        "expected_engine": probe.get("expected_engine", "valhalla"),
+        "ok": ok,
+        "engine": "valhalla" if ok else "none",
+        "locations": locations,
+    }
+    result.update(updates)
+    return result
+
+async def _run_valhalla_coverage_probe(client: httpx.AsyncClient, probe: dict, *, timeout_s: float = 20.0) -> dict:
+    payload = _valhalla_probe_payload(probe)
+    target = _select_valhalla_target(payload["locations"])
+    try:
+        res = await client.post(f"{target['url']}/route", json=payload, timeout=timeout_s)
+    except httpx.TimeoutException:
+        return _valhalla_probe_result(probe, ok=False, error="Valhalla route timed out", fallback_expected=True, target=target["id"])
+    except Exception as exc:
+        return _valhalla_probe_result(probe, ok=False, error=f"Valhalla route failed: {exc}", fallback_expected=True, target=target["id"])
+
+    result_meta = {"status": res.status_code, "target": target["id"]}
+    if res.status_code >= 400:
+        error_text = res.text[:500] if res.text else f"HTTP {res.status_code}"
+        valhalla_status = None
+        try:
+            error_data = res.json()
+            error_text = str(error_data.get("error") or error_data.get("message") or error_text)[:500]
+            valhalla_status = error_data.get("error_code") or error_data.get("status_code")
+        except Exception:
+            pass
+        return _valhalla_probe_result(
+            probe,
+            ok=False,
+            error=error_text,
+            valhalla_status=valhalla_status,
+            fallback_expected=True,
+            **result_meta,
+        )
+
+    try:
+        data = res.json()
+    except Exception:
+        return _valhalla_probe_result(probe, ok=False, error="Valhalla returned non-JSON response", fallback_expected=True, **result_meta)
+
+    trip = data.get("trip") or {}
+    summary = trip.get("summary") or {}
+    if trip.get("status") == 0:
+        return _valhalla_probe_result(
+            probe,
+            ok=True,
+            engine="valhalla",
+            fallback_expected=False,
+            status_message=trip.get("status_message") or "Found route",
+            length=summary.get("length"),
+            time=summary.get("time"),
+            **result_meta,
+        )
+    return _valhalla_probe_result(
+        probe,
+        ok=False,
+        error=trip.get("status_message") or "Valhalla returned no navigable route",
+        fallback_expected=True,
+        valhalla_status=trip.get("status"),
+        **result_meta,
+    )
+
+@app.get("/api/admin/routing-coverage-diagnostic")
+async def routing_coverage_diagnostic():
+    started = time.time()
+    targets = _valhalla_targets()
+    target_health: list[dict] = []
+    async with httpx.AsyncClient(timeout=20) as client:
+        for target in targets:
+            health: dict = {"ok": False, "engine": "valhalla", "target": target["id"], "url": target["url"]}
+            try:
+                res = await client.get(f"{target['url']}/status", timeout=5)
+                health.update({"ok": 200 <= res.status_code < 300, "status": res.status_code})
+                if res.status_code < 400:
+                    try:
+                        status_data = res.json()
+                        health["valhalla_version"] = status_data.get("version")
+                        health["tileset_last_modified"] = status_data.get("tileset_last_modified")
+                        health["has_tileset_last_modified"] = bool(status_data.get("tileset_last_modified"))
+                    except Exception:
+                        health["status_parse_error"] = "Valhalla status was not JSON"
+            except Exception as exc:
+                health.update({"ok": False, "error": str(exc)})
+            target_health.append(health)
+        probes = await asyncio.gather(*[_run_valhalla_coverage_probe(client, probe) for probe in VALHALLA_COVERAGE_PROBES])
+
+    passed = sum(1 for probe in probes if probe.get("ok"))
+    failed = len(probes) - passed
+    failed_regions = sorted({probe["region"] for probe in probes if not probe.get("ok")})
+    return {
+        "ok": any(h.get("ok") for h in target_health) and failed == 0,
+        "engine_url": _valhalla_base_url(),
+        "targets": target_health,
+        "health": target_health[0] if target_health else {"ok": False},
+        "probes": probes,
+        "summary": {
+            "passed": passed,
+            "failed": failed,
+            "failed_regions": failed_regions,
+            "elapsed_ms": round((time.time() - started) * 1000),
+        },
+    }
+
 @app.get("/api/route/health")
 async def route_health():
-    url = f"{_valhalla_base_url()}/status"
     checks: list[dict] = []
-    try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            res = await client.get(url)
-            valhalla_ok = 200 <= res.status_code < 300
-            checks.append({"engine": "valhalla", "url": _valhalla_base_url(), "ok": valhalla_ok, "status": res.status_code})
-            if valhalla_ok:
-                return {"ok": True, "engine": "valhalla", "status": res.status_code, "checks": checks}
-    except Exception as e:
-        checks.append({"engine": "valhalla", "url": _valhalla_base_url(), "ok": False, "error": str(e)})
+    async with httpx.AsyncClient(timeout=5) as client:
+        for target in _valhalla_targets():
+            try:
+                res = await client.get(f"{target['url']}/status")
+                valhalla_ok = 200 <= res.status_code < 300
+                checks.append({
+                    "engine": "valhalla",
+                    "target": target["id"],
+                    "url": target["url"],
+                    "ok": valhalla_ok,
+                    "status": res.status_code,
+                })
+            except Exception as e:
+                checks.append({"engine": "valhalla", "target": target["id"], "url": target["url"], "ok": False, "error": str(e)})
+    if any(check.get("engine") == "valhalla" and check.get("ok") for check in checks):
+        return {"ok": True, "engine": "valhalla", "checks": checks}
     sample = [{"lat": 38.5733, "lon": -109.5498}, {"lat": 38.5677, "lon": -109.5271}]
     try:
         async with httpx.AsyncClient(timeout=8) as client:
@@ -3333,23 +3639,24 @@ async def route_proxy(body: RouteRequest):
         raise HTTPException(422, validation)
 
     payload = _route_payload(route_locations, body.options, body.units)
-    cache_key = _route_cache_key(payload)
+    target = _select_valhalla_target(payload["locations"])
+    cache_key = _route_cache_key(payload, target["id"])
     cached = get_route_cached(cache_key)
     cached_osrm_fallback = bool(cached and cached.get("_fallback", {}).get("engine") == "osrm")
     if cached and not cached_osrm_fallback:
         cached_engine = "osrm-fallback" if cached.get("_fallback", {}).get("engine") == "osrm" else "valhalla"
-        cached["_trailhead"] = {"engine": cached_engine, "cache": "hit", "cache_key": cache_key}
+        cached["_trailhead"] = {"engine": cached_engine, "cache": "hit", "cache_key": cache_key, "valhalla_target": target["id"]}
         return cached
 
     valhalla_error = ""
     try:
         async with httpx.AsyncClient(timeout=20) as client:
-            res = await client.post(f"{_valhalla_base_url()}/route", json=payload)
+            res = await client.post(f"{target['url']}/route", json=payload)
             if res.status_code < 400:
                 data = res.json()
                 if data.get("trip", {}).get("status") == 0:
                     set_route_cached(cache_key, payload, data)
-                    data["_trailhead"] = {"engine": "valhalla", "cache": "miss", "cache_key": cache_key}
+                    data["_trailhead"] = {"engine": "valhalla", "cache": "miss", "cache_key": cache_key, "valhalla_target": target["id"]}
                     return data
                 valhalla_error = data.get("trip", {}).get("status_message") or "Valhalla returned no navigable route"
             else:
@@ -3364,6 +3671,7 @@ async def route_proxy(body: RouteRequest):
             "engine": "osrm-fallback",
             "cache": "stale-fallback-hit",
             "cache_key": cache_key,
+            "valhalla_target": target["id"],
             "valhalla_error": valhalla_error,
         }
         return cached
@@ -3372,13 +3680,15 @@ async def route_proxy(body: RouteRequest):
     dropped_optional = len(locations) - len(repair_locations)
     if dropped_optional > 0:
         repair_payload = _route_payload(repair_locations, body.options, body.units)
-        repair_cache_key = _route_cache_key(repair_payload)
+        repair_target = _select_valhalla_target(repair_payload["locations"])
+        repair_cache_key = _route_cache_key(repair_payload, repair_target["id"])
         cached_repair = get_route_cached(repair_cache_key)
         if cached_repair:
             cached_repair["_trailhead"] = {
                 "engine": "valhalla",
                 "cache": "hit",
                 "cache_key": repair_cache_key,
+                "valhalla_target": repair_target["id"],
                 "repair": "dropped_optional_points",
                 "dropped_optional_points": dropped_optional,
                 "message": "Route kept. Optional side stops are saved as pins, not navigation stops.",
@@ -3388,7 +3698,7 @@ async def route_proxy(body: RouteRequest):
             return cached_repair
         try:
             async with httpx.AsyncClient(timeout=20) as client:
-                res = await client.post(f"{_valhalla_base_url()}/route", json=repair_payload)
+                res = await client.post(f"{repair_target['url']}/route", json=repair_payload)
                 if res.status_code < 400:
                     data = res.json()
                     if data.get("trip", {}).get("status") == 0:
@@ -3397,6 +3707,7 @@ async def route_proxy(body: RouteRequest):
                             "engine": "valhalla",
                             "cache": "miss",
                             "cache_key": repair_cache_key,
+                            "valhalla_target": repair_target["id"],
                             "repair": "dropped_optional_points",
                             "dropped_optional_points": dropped_optional,
                             "message": "Route kept. Optional side stops are saved as pins, not navigation stops.",
@@ -3417,13 +3728,15 @@ async def route_proxy(body: RouteRequest):
         if data.get("trip", {}).get("status") == 0:
             if dropped_optional > 0:
                 repair_payload = _route_payload(repair_locations, body.options, body.units)
-                set_route_cached(_route_cache_key(repair_payload), repair_payload, data)
+                repair_target = _select_valhalla_target(repair_payload["locations"])
+                set_route_cached(_route_cache_key(repair_payload, repair_target["id"]), repair_payload, data)
             else:
                 set_route_cached(cache_key, payload, data)
         data["_trailhead"] = {
             "engine": "osrm-fallback",
             "cache": "miss",
             "cache_key": cache_key,
+            "valhalla_target": target["id"],
             "fallback_url": base,
             "valhalla_error": valhalla_error,
         }

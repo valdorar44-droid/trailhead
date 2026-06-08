@@ -3641,11 +3641,16 @@ async def route_proxy(body: RouteRequest):
     payload = _route_payload(route_locations, body.options, body.units)
     target = _select_valhalla_target(payload["locations"])
     cache_key = _route_cache_key(payload, target["id"])
+    dropped_optional = len(locations) - len(route_locations)
     cached = get_route_cached(cache_key)
     cached_osrm_fallback = bool(cached and cached.get("_fallback", {}).get("engine") == "osrm")
     if cached and not cached_osrm_fallback:
         cached_engine = "osrm-fallback" if cached.get("_fallback", {}).get("engine") == "osrm" else "valhalla"
         cached["_trailhead"] = {"engine": cached_engine, "cache": "hit", "cache_key": cache_key, "valhalla_target": target["id"]}
+        if dropped_optional > 0:
+            cached["_trailhead"]["repair"] = "dropped_optional_points"
+            cached["_trailhead"]["dropped_optional_points"] = dropped_optional
+            cached["_trailhead"]["message"] = "Route kept. Optional side stops are saved as pins, not navigation stops."
         return cached
 
     valhalla_error = ""
@@ -3657,6 +3662,10 @@ async def route_proxy(body: RouteRequest):
                 if data.get("trip", {}).get("status") == 0:
                     set_route_cached(cache_key, payload, data)
                     data["_trailhead"] = {"engine": "valhalla", "cache": "miss", "cache_key": cache_key, "valhalla_target": target["id"]}
+                    if dropped_optional > 0:
+                        data["_trailhead"]["repair"] = "dropped_optional_points"
+                        data["_trailhead"]["dropped_optional_points"] = dropped_optional
+                        data["_trailhead"]["message"] = "Route kept. Optional side stops are saved as pins, not navigation stops."
                     return data
                 valhalla_error = data.get("trip", {}).get("status_message") or "Valhalla returned no navigable route"
             else:
@@ -3677,7 +3686,6 @@ async def route_proxy(body: RouteRequest):
         return cached
 
     repair_locations = route_locations
-    dropped_optional = len(locations) - len(repair_locations)
     if dropped_optional > 0:
         repair_payload = _route_payload(repair_locations, body.options, body.units)
         repair_target = _select_valhalla_target(repair_payload["locations"])

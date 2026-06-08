@@ -324,6 +324,8 @@ class ValhallaAreaRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(seen["payload"]["locations"]), 2)
         self.assertTrue(all(loc["type"] == "break" for loc in seen["payload"]["locations"]))
         self.assertEqual(result["_trailhead"]["engine"], "valhalla")
+        self.assertEqual(result["_trailhead"]["repair"], "dropped_optional_points")
+        self.assertEqual(result["_trailhead"]["dropped_optional_points"], 1)
 
 
 if __name__ == "__main__":

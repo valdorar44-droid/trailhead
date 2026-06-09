@@ -3850,6 +3850,7 @@ const buildMapHtml = (
     if(!map.getSource('gas'))map.addSource('gas',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
     if(!map.getSource('pois'))map.addSource('pois',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
     if(!map.getSource('water-nav-lines'))map.addSource('water-nav-lines',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
+    if(!map.getSource('route-scout-preview'))map.addSource('route-scout-preview',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
     if(!map.getSource('route'))map.addSource('route',{type:'geojson',data:{type:'Feature',geometry:{type:'LineString',coordinates:[]}}});
     if(!map.getSource('route-passed'))map.addSource('route-passed',{type:'geojson',data:{type:'Feature',geometry:{type:'LineString',coordinates:[]}}});
     if(!map.getSource('breadcrumb'))map.addSource('breadcrumb',{type:'geojson',data:{type:'Feature',geometry:{type:'LineString',coordinates:[]}}});
@@ -3859,6 +3860,11 @@ const buildMapHtml = (
   function setupLayers(){
     var _a=function(id,def){if(!map.getLayer(id))map.addLayer(def);};
     _a('breadcrumb',{id:'breadcrumb',type:'line',source:'breadcrumb',paint:{'line-color':'#3b82f6','line-width':2.5,'line-opacity':0.8,'line-dasharray':[2,4]}});
+    _a('route-scout-glow',{id:'route-scout-glow',type:'line',source:'route-scout-preview',filter:['==',['geometry-type'],'LineString'],layout:{'line-cap':'round','line-join':'round'},paint:{'line-color':'#f97316','line-width':11,'line-opacity':0.18,'line-blur':4}});
+    _a('route-scout-line',{id:'route-scout-line',type:'line',source:'route-scout-preview',filter:['==',['geometry-type'],'LineString'],layout:{'line-cap':'round','line-join':'round'},paint:{'line-color':'#fb923c','line-width':4,'line-opacity':0.82,'line-dasharray':[1.2,1.1]}});
+    _a('route-scout-ring',{id:'route-scout-ring',type:'circle',source:'route-scout-preview',filter:['==',['geometry-type'],'Point'],paint:{'circle-radius':['case',['==',['get','role'],'focus'],18,13],'circle-color':['case',['==',['get','role'],'camp_window'],'#22c55e','#f97316'],'circle-opacity':0.16,'circle-stroke-width':2,'circle-stroke-color':['case',['==',['get','role'],'camp_window'],'#22c55e','#f97316'],'circle-stroke-opacity':0.9}});
+    _a('route-scout-dot',{id:'route-scout-dot',type:'circle',source:'route-scout-preview',filter:['==',['geometry-type'],'Point'],paint:{'circle-radius':5,'circle-color':['case',['==',['get','role'],'camp_window'],'#22c55e','#f97316'],'circle-opacity':0.95,'circle-stroke-width':1.5,'circle-stroke-color':'#fff'}});
+    _a('route-scout-label',{id:'route-scout-label',type:'symbol',source:'route-scout-preview',filter:['==',['geometry-type'],'Point'],layout:{'text-field':['get','name'],'text-size':10,'text-offset':[0,1.5],'text-anchor':'top','text-max-width':10},paint:{'text-color':'#f8fafc','text-halo-color':'rgba(0,0,0,0.82)','text-halo-width':1.5}});
     _a('route-shadow',{id:'route-shadow',type:'line',source:'route',layout:{'line-cap':'round','line-join':'round'},paint:{'line-color':'rgba(0,0,0,0.35)','line-width':9,'line-blur':5,'line-translate':[0,2]}});
     _a('route-line',{id:'route-line',type:'line',source:'route',layout:{'line-cap':'round','line-join':'round'},paint:{'line-color':'#f97316','line-width':5,'line-opacity':0.94}});
     /* Dimmed overlay for segments already driven — renders on top of route-line */
@@ -3941,6 +3947,22 @@ const buildMapHtml = (
   }
   function updateRoute(){rebuildRouteCum();if(!map||!map.getSource('route'))return;map.getSource('route').setData({type:'Feature',geometry:{type:'LineString',coordinates:_routeCoords}});}
   function updateBreadcrumb(){if(!map||!map.getSource('breadcrumb'))return;map.getSource('breadcrumb').setData({type:'Feature',geometry:{type:'LineString',coordinates:breadcrumbPts}});}
+  function updateRouteScoutPreview(coords,targets){
+    if(!map||!map.getSource('route-scout-preview'))return;
+    var features=[];
+    if(coords&&coords.length>=2){
+      features.push({type:'Feature',geometry:{type:'LineString',coordinates:coords},properties:{role:'corridor'}});
+    }
+    (targets||[]).forEach(function(t,i){
+      var lat=Number(t.lat),lng=Number(t.lng);
+      if(!isFinite(lat)||!isFinite(lng))return;
+      features.push({type:'Feature',geometry:{type:'Point',coordinates:[lng,lat]},properties:{name:t.name||('Check '+(i+1)),role:t.role||'focus'}});
+    });
+    map.getSource('route-scout-preview').setData({type:'FeatureCollection',features:features});
+  }
+  function clearRouteScoutPreview(){
+    if(map&&map.getSource('route-scout-preview'))map.getSource('route-scout-preview').setData({type:'FeatureCollection',features:[]});
+  }
 
   var _passedRouteIdx=0,_passedRouteProgress=0,_passedRouteCoords=[];
   function resetPassedRoute(){_passedRouteIdx=0;_passedRouteProgress=0;_passedRouteCoords=[];if(map&&map.getSource('route-passed'))map.getSource('route-passed').setData({type:'Feature',geometry:{type:'LineString',coordinates:[]}});}
@@ -4204,6 +4226,14 @@ const buildMapHtml = (
       _routeCoords=msg.coords;routePts=_routeCoords.filter(function(_,i){return i%3===0;});updateRoute();
       routeIsProper=true;
       postRN({type:'route_ready',routed:true,steps:msg.steps||[],legs:msg.legs||[],total_distance:msg.total_distance,total_duration:msg.total_duration,fromIdx:0,fromCache:true,route_source:'restored-cache'});
+    }
+    if(msg.type==='route_scout_clear'){clearRouteScoutPreview();}
+    if((msg.type==='route_scout_preview_start'||msg.type==='route_scout_preview_update')){
+      updateRouteScoutPreview(Array.isArray(msg.coords)?msg.coords:[],Array.isArray(msg.targets)?msg.targets:[]);
+    }
+    if(msg.type==='route_scout_focus'&&msg.lat){
+      map.flyTo({center:[msg.lng,msg.lat],zoom:msg.zoom||9,duration:850});
+      updateRouteScoutPreview([], [{lat:msg.lat,lng:msg.lng,name:msg.name||'Checking area',role:'focus'}]);
     }
     if(msg.type==='fly_to'&&msg.lat){
       map.flyTo({center:[msg.lng,msg.lat],zoom:msg.zoom||14,duration:600});
@@ -4804,6 +4834,8 @@ function MapScreen() {
   const renderedMapboxEnrichmentSeqRef = useRef(0);
   const renderedMapboxEnrichmentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [routeScout, setRouteScout] = useState<RouteScoutState | null>(null);
+  const routeScoutOperationRef = useRef(0);
+  const routeScoutTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const recentRouteScoutActionRef = useRef<{ at: number; action: 'start' | 'save' } | null>(null);
   const mapCardResolveCacheRef = useRef(new Map<string, { at: number; response: MapCardResolveResponse }>());
   const selectedPlaceResolveKeyRef = useRef('');
@@ -7776,6 +7808,161 @@ function MapScreen() {
     }));
   }
 
+  function clearRouteScoutTimers() {
+    routeScoutTimersRef.current.forEach(timer => clearTimeout(timer));
+    routeScoutTimersRef.current = [];
+  }
+
+  function postRouteScoutMapMessage(payload: Record<string, unknown>) {
+    webRef.current?.postMessage(JSON.stringify(payload));
+  }
+
+  function clearRouteScoutPreview() {
+    postRouteScoutMapMessage({ type: 'route_scout_clear' });
+  }
+
+  function closeRouteScout() {
+    routeScoutOperationRef.current += 1;
+    clearRouteScoutTimers();
+    clearRouteScoutPreview();
+    setRouteScout(null);
+  }
+
+  useEffect(() => () => {
+    clearRouteScoutTimers();
+    clearRouteScoutPreview();
+  }, []);
+
+  function routeScoutPhase(
+    operationId: number,
+    phase: NonNullable<RouteScoutState['phase']>,
+    message: string,
+    progressPct: number,
+    focusTarget?: RouteScoutState['focusTarget'],
+  ) {
+    if (routeScoutOperationRef.current !== operationId) return;
+    setRouteScout(prev => {
+      if (!prev || prev.operationId !== operationId) return prev;
+      return {
+        ...prev,
+        status: 'scouting',
+        phase,
+        phaseLabel: message,
+        message,
+        progressPct: Math.max(0, Math.min(100, Math.round(progressPct))),
+        focusTarget: focusTarget ?? prev.focusTarget,
+      };
+    });
+    if (focusTarget?.lat && focusTarget?.lng) {
+      nativeMapRef.current?.flyTo(focusTarget.lat, focusTarget.lng, focusTarget.zoom ?? 8.5, focusTarget.name);
+      postRouteScoutMapMessage({
+        type: 'route_scout_focus',
+        lat: focusTarget.lat,
+        lng: focusTarget.lng,
+        zoom: focusTarget.zoom ?? 8.5,
+        name: focusTarget.name,
+      });
+    }
+  }
+
+  function scheduleRouteScoutPhase(
+    operationId: number,
+    delayMs: number,
+    phase: NonNullable<RouteScoutState['phase']>,
+    message: string,
+    progressPct: number,
+    focusTarget?: RouteScoutState['focusTarget'],
+  ) {
+    const timer = setTimeout(() => routeScoutPhase(operationId, phase, message, progressPct, focusTarget), delayMs);
+    routeScoutTimersRef.current.push(timer);
+  }
+
+  function updateRouteScoutPreview(
+    operationId: number,
+    coords: [number, number][],
+    targets: Array<{ name?: string; lat: number; lng: number; role?: string }> = [],
+    revealPct = 1,
+  ) {
+    if (routeScoutOperationRef.current !== operationId) return;
+    if (coords.length < 2 && !targets.length) return;
+    const safePct = Math.max(0.05, Math.min(1, revealPct));
+    const visibleCount = coords.length >= 2 ? Math.max(2, Math.min(coords.length, Math.round(coords.length * safePct))) : 0;
+    postRouteScoutMapMessage({
+      type: 'route_scout_preview_update',
+      coords: visibleCount ? coords.slice(0, visibleCount) : [],
+      targets,
+    });
+  }
+
+  function routeScoutTargetPoints(
+    coords: [number, number][],
+    cumulative: number[],
+    windows: RouteCampWindowInput[],
+  ): Array<{ name: string; lat: number; lng: number; role: string; zoom: number }> {
+    return windows
+      .map(win => {
+        const point = routePointAtDistance(coords, cumulative, Number(win.target_mi ?? ((win.start + win.end) / 2)) * 1609.344);
+        return point ? { name: win.label || `Day ${win.day}`, lat: point.lat, lng: point.lng, role: 'camp_window', zoom: 9.3 } : null;
+      })
+      .filter((item): item is { name: string; lat: number; lng: number; role: string; zoom: number } => !!item);
+  }
+
+  function scheduleRouteSketch(
+    operationId: number,
+    coords: [number, number][],
+    targets: Array<{ name?: string; lat: number; lng: number; role?: string }> = [],
+  ) {
+    [0.18, 0.42, 0.68, 1].forEach((pct, idx) => {
+      const timer = setTimeout(() => updateRouteScoutPreview(operationId, coords, targets, pct), idx * 520);
+      routeScoutTimersRef.current.push(timer);
+    });
+  }
+
+  function buildRouteScoutSummary(args: {
+    startName: string;
+    destinationName: string;
+    days: number;
+    driveHours: number | null;
+    routeStyle: string;
+    totalMiles: number;
+    stops: RouteScoutState['stops'];
+    windows?: RouteCampWindowResult[];
+    missingDays: number[];
+  }) {
+    const stayStops = (args.stops ?? []).filter(stop => stop.type === 'camp');
+    const reviewStops = (args.stops ?? []).filter(stop => stop.type === 'review');
+    const miles = Math.round(args.totalMiles || 0);
+    const driveWindow = args.driveHours ? ` with about ${args.driveHours} hours of driving per day` : '';
+    const stayText = stayStops.length
+      ? `Overnights are ${stayStops.map(stop => `${stop.label || `Day ${stop.day}`} at ${stop.name}`).join('; ')}.`
+      : reviewStops.length
+        ? `I marked ${reviewStops.length} overnight area${reviewStops.length === 1 ? '' : 's'} for review before you lock camps.`
+        : 'I did not lock overnight stays yet.';
+    const styleText = args.routeStyle === 'wild'
+      ? 'I weighted the scout toward public-land and quieter camp options.'
+      : args.routeStyle === 'direct'
+        ? 'I kept the drive more direct and used camp windows near the route.'
+        : 'I balanced drive time with useful overnight windows.';
+    const dayBriefs = (args.windows ?? [])
+      .slice()
+      .sort((a, b) => a.day - b.day)
+      .slice(0, 4)
+      .map(win => {
+        const stop = stayStops.find(item => item.day === win.day) ?? reviewStops.find(item => item.day === win.day);
+        const target = stop?.type === 'camp'
+          ? `stay at ${stop.name}`
+          : `review ${stop?.name || win.fallback?.name || win.label}`;
+        const reason = String(win.reason || win.fallback?.description || '').trim();
+        const note = reason ? ` ${reason.replace(/\s+/g, ' ').slice(0, 120)}` : ' Look for fuel, viewpoints, trailheads, and town services before locking the day.';
+        return `Day ${win.day}: ${target}.${note}`;
+      });
+    const dayText = dayBriefs.length ? ` ${dayBriefs.join(' ')}` : '';
+    const reviewText = args.missingDays.length
+      ? ` Review day${args.missingDays.length === 1 ? '' : 's'} ${args.missingDays.join(', ')} before starting navigation.`
+      : '';
+    return `Route summary: ${args.startName} to ${args.destinationName}, about ${miles} miles over ${args.days} days${driveWindow}. ${styleText} ${stayText}${dayText} Watch the route corridor for addable fuel, viewpoint, trailhead, food, and town stops around each overnight window.${reviewText}`;
+  }
+
   function routeScoutArgsFromAction(args: Record<string, unknown> = {}) {
     const draft = args.draft && typeof args.draft === 'object' ? args.draft as Record<string, unknown> : {};
     const previous = routeScout?.draftArgs ?? {};
@@ -7826,11 +8013,19 @@ function MapScreen() {
   }
 
   async function startCopilotRouteScout(args: Record<string, unknown> = {}) {
+    const operationId = routeScoutOperationRef.current + 1;
+    routeScoutOperationRef.current = operationId;
+    clearRouteScoutTimers();
+    clearRouteScoutPreview();
     const scoutArgs = routeScoutArgsFromAction(args);
     if (!scoutArgs.destinationRaw) {
       const next: RouteScoutState = {
         status: 'needs_input',
         message: 'Tell me the destination for this route.',
+        operationId,
+        phase: 'starting',
+        phaseLabel: 'Destination needed',
+        progressPct: 0,
         days: scoutArgs.days,
         driveHours: scoutArgs.driveHours,
         routeStyle: scoutArgs.routeStyle,
@@ -7853,22 +8048,37 @@ function MapScreen() {
     setSearchRouteCard(null);
     setRouteScout({
       status: 'scouting',
-      message: 'Plotting the main route...',
+      message: 'Building the route. Checking the corridor and overnight windows...',
+      operationId,
+      phase: 'starting',
+      phaseLabel: 'Building route',
+      progressPct: 5,
       days: scoutArgs.days,
       driveHours: scoutArgs.driveHours,
       routeStyle: scoutArgs.routeStyle,
       campPreference: scoutArgs.campPreference,
       draftArgs: scoutArgs.merged,
+      spoken_summary: 'Building the route. I am checking the corridor and overnight windows now.',
     });
+    scheduleRouteScoutPhase(operationId, 900, 'plotting', 'Resolving start and destination...', 12);
 
     const [start, destination] = await Promise.all([
       resolveScoutEndpoint(scoutArgs.startRaw || 'current location', 'start'),
       resolveScoutEndpoint(scoutArgs.destinationRaw, 'destination'),
     ]);
+    if (routeScoutOperationRef.current !== operationId) {
+      return { applied: false, status: 'cancelled', reason: 'route_scout_cancelled' };
+    }
     if (!start || !destination) {
+      clearRouteScoutTimers();
+      clearRouteScoutPreview();
       const next: RouteScoutState = {
         status: 'failed',
         message: !start ? 'I could not resolve the route start.' : 'I could not resolve the route destination.',
+        operationId,
+        phase: 'starting',
+        phaseLabel: 'Could not resolve route',
+        progressPct: 0,
         days: scoutArgs.days,
         driveHours: scoutArgs.driveHours,
         routeStyle: scoutArgs.routeStyle,
@@ -7882,6 +8092,16 @@ function MapScreen() {
 
     nativeMapRef.current?.flyTo(start.lat, start.lng, 9, start.name);
     webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: start.lat, lng: start.lng, zoom: 9, name: start.name }));
+    routeScoutPhase(operationId, 'plotting', `Plotting ${start.name} to ${destination.name}...`, 22, { name: start.name, lat: start.lat, lng: start.lng, zoom: 8.6 });
+    scheduleRouteScoutPhase(operationId, 1100, 'plotting', `Checking the destination near ${destination.name}...`, 30, { name: destination.name, lat: destination.lat, lng: destination.lng, zoom: 8.4 });
+    postRouteScoutMapMessage({
+      type: 'route_scout_preview_start',
+      coords: [[start.lng, start.lat], [destination.lng, destination.lat]],
+      targets: [
+        { name: start.name, lat: start.lat, lng: start.lng, role: 'start' },
+        { name: destination.name, lat: destination.lat, lng: destination.lng, role: 'destination' },
+      ],
+    });
 
     const directions = await api.extremeDirections({
       coordinates: [[start.lng, start.lat], [destination.lng, destination.lat]],
@@ -7898,10 +8118,19 @@ function MapScreen() {
     const coords: [number, number][] = (rawCoords || [])
       .map((coord: any) => [Number(coord?.[0]), Number(coord?.[1])] as [number, number])
       .filter((coord: [number, number]) => Number.isFinite(coord[0]) && Number.isFinite(coord[1]));
+    if (routeScoutOperationRef.current !== operationId) {
+      return { applied: false, status: 'cancelled', reason: 'route_scout_cancelled' };
+    }
     if (coords.length < 2) {
+      clearRouteScoutTimers();
+      clearRouteScoutPreview();
       const next: RouteScoutState = {
         status: 'failed',
         message: 'I could not draw a route between those places.',
+        operationId,
+        phase: 'plotting',
+        phaseLabel: 'Route not found',
+        progressPct: 0,
         startName: start.name,
         destinationName: destination.name,
         days: scoutArgs.days,
@@ -7919,19 +8148,42 @@ function MapScreen() {
     const totalDistanceM = Number(route?.distance) || cumulative[cumulative.length - 1] || 0;
     const totalMiles = totalDistanceM / 1609.344;
     const totalDuration = Number(route?.duration) || 0;
-    drawScoutRoute(coords, totalDistanceM, totalDuration);
     const windows = routeScoutWindows(scoutArgs.days, totalMiles);
+    const previewTargets = routeScoutTargetPoints(coords, cumulative, windows);
+    scheduleRouteSketch(operationId, coords, [
+      { name: start.name, lat: start.lat, lng: start.lng, role: 'start' },
+      ...previewTargets,
+      { name: destination.name, lat: destination.lat, lng: destination.lng, role: 'destination' },
+    ]);
+    routeScoutPhase(operationId, 'windows', `Route sketched. Checking ${windows.length} overnight windows...`, 45);
+    previewTargets.slice(0, 4).forEach((target, idx) => {
+      scheduleRouteScoutPhase(operationId, 850 + idx * 1050, 'windows', `Checking ${target.name}...`, 50 + idx * 5, target);
+    });
     setRouteScout(prev => ({
       ...(prev ?? {}),
       status: 'scouting',
       message: `Route drawn. Searching ${windows.length} overnight windows...`,
+      operationId,
+      phase: 'windows',
+      phaseLabel: 'Checking overnight windows',
+      progressPct: 48,
       startName: start.name,
       destinationName: destination.name,
       totalMiles,
       totalDurationHours: totalDuration ? totalDuration / 3600 : undefined,
       routeCoords: coords,
+      previewStops: previewTargets.map((target, idx) => ({
+        day: idx + 1,
+        name: target.name,
+        lat: target.lat,
+        lng: target.lng,
+        type: 'review',
+        label: target.name,
+        source: 'route_scout_preview',
+      })),
       draftArgs: { ...scoutArgs.merged, start: start.name, destination: destination.name, days: scoutArgs.days, campPhotoOnly: scoutArgs.campPhotoOnly },
     }));
+    scheduleRouteScoutPhase(operationId, 2200, 'camps', 'Searching real camp options near those windows...', 68);
 
     const campResponse = await api.getRouteCampWindows({
       route: coords.map((coord: [number, number]) => ({ lat: coord[1], lng: coord[0] })),
@@ -7943,6 +8195,10 @@ function MapScreen() {
       max_daily_drive_hours: scoutArgs.driveHours ?? undefined,
       max_radius: scoutArgs.routeStyle === 'wild' || scoutArgs.campPreference === 'public' ? 120 : 95,
     }).catch((error: any) => ({ windows: [], errors: { route_scout: error?.message || 'camp search failed' } }));
+    if (routeScoutOperationRef.current !== operationId) {
+      return { applied: false, status: 'cancelled', reason: 'route_scout_cancelled' };
+    }
+    routeScoutPhase(operationId, 'finalizing', 'Finalizing the line and overnight stops...', 88);
     const scoutWindows = campResponse.windows ?? [];
     const selectedCamps = scoutWindows
       .map(win => win.selected ?? win.camp ?? win.candidates?.[0] ?? null)
@@ -7991,14 +8247,32 @@ function MapScreen() {
     ];
     const missingDays = scoutWindows.filter(win => !(win.selected ?? win.camp ?? win.candidates?.[0])).map(win => win.day);
     const nextStatus = missingDays.length ? 'review' : scoutArgs.driveHours ? 'ready' : 'needs_input';
-    const nextMessage = missingDays.length
+    const resultMessage = missingDays.length
       ? `${missingDays.length} overnight ${missingDays.length === 1 ? 'stop needs' : 'stops need'} review.`
       : scoutArgs.driveHours
         ? `Found ${selectedCamps.length} overnight ${selectedCamps.length === 1 ? 'stop' : 'stops'} along the route.`
         : `Found ${selectedCamps.length} overnight ${selectedCamps.length === 1 ? 'stop' : 'stops'}. Tell me your preferred daily drive time to tune it.`;
+    const nextMessage = buildRouteScoutSummary({
+      startName: start.name,
+      destinationName: destination.name,
+      days: scoutArgs.days,
+      driveHours: scoutArgs.driveHours,
+      routeStyle: scoutArgs.routeStyle,
+      totalMiles,
+      stops,
+      windows: scoutWindows,
+      missingDays,
+    });
+    clearRouteScoutTimers();
+    clearRouteScoutPreview();
+    drawScoutRoute(coords, totalDistanceM, totalDuration);
     const next: RouteScoutState = {
       status: nextStatus,
       message: nextMessage,
+      operationId,
+      phase: 'finalizing',
+      phaseLabel: resultMessage,
+      progressPct: 100,
       startName: start.name,
       destinationName: destination.name,
       days: scoutArgs.days,
@@ -16361,19 +16635,29 @@ function MapScreen() {
                 </Text>
               </View>
             </View>
-            <TouchableOpacity onPress={() => setRouteScout(null)} hitSlop={10}>
+            <TouchableOpacity onPress={closeRouteScout} hitSlop={10}>
               <Ionicons name="close" size={15} color={OVR.text3} />
             </TouchableOpacity>
           </View>
-          <Text style={s.routeScoutMessage} numberOfLines={2}>{routeScout.message}</Text>
+          {routeScout.status === 'scouting' && (
+            <View style={s.routeScoutProgressWrap}>
+              <View style={s.routeScoutProgressTrack}>
+                <View style={[s.routeScoutProgressFill, { width: `${Math.max(6, Math.min(100, routeScout.progressPct ?? 8))}%` }]} />
+              </View>
+              <Text style={s.routeScoutPhaseText} numberOfLines={1}>
+                {routeScout.phaseLabel || routeScout.message}
+              </Text>
+            </View>
+          )}
+          <Text style={s.routeScoutMessage} numberOfLines={routeScout.status === 'scouting' ? 2 : 6}>{routeScout.message}</Text>
           <View style={s.routeScoutStats}>
             <Text style={s.routeScoutStat}>{routeScout.days ? `${routeScout.days} days` : 'Days TBD'}</Text>
             <Text style={s.routeScoutStat}>{routeScout.driveHours ? `${routeScout.driveHours}h/day` : 'Drive time TBD'}</Text>
             <Text style={s.routeScoutStat}>{routeScout.totalMiles ? `${Math.round(routeScout.totalMiles)} mi` : 'Routing'}</Text>
           </View>
-          {(routeScout.stops?.length ?? 0) > 0 && (
+          {(((routeScout.stops?.length ?? 0) > 0) || ((routeScout.previewStops?.length ?? 0) > 0)) && (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.routeScoutStops}>
-              {(routeScout.stops ?? []).slice(0, 10).map((stop, idx) => (
+              {(routeScout.stops ?? routeScout.previewStops ?? []).slice(0, 10).map((stop, idx) => (
                 <TouchableOpacity
                   key={`${stop.type}-${stop.day}-${stop.lat}-${stop.lng}-${idx}`}
                   style={[s.routeScoutStop, stop.type === 'review' && s.routeScoutStopReview]}
@@ -22771,6 +23055,21 @@ const makeStyles = (C: ColorPalette) => {
   routeScoutTitleWrap: { flex: 1, flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
   routeScoutTitle: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 0.7 },
   routeScoutSub: { color: OVR.text3, fontSize: 10, fontFamily: mono, marginTop: 2, letterSpacing: 0 },
+  routeScoutProgressWrap: { marginTop: 9, gap: 6 },
+  routeScoutProgressTrack: {
+    height: 4,
+    borderRadius: 999,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: OVR.border2,
+  },
+  routeScoutProgressFill: {
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: C.orange,
+  },
+  routeScoutPhaseText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 0 },
   routeScoutMessage: { color: OVR.text2, fontSize: 12, lineHeight: 17, marginTop: 8 },
   routeScoutStats: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 9 },
   routeScoutStat: {

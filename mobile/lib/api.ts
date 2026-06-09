@@ -905,6 +905,12 @@ export interface RouteScoutStop {
 export interface RouteScoutState {
   status: 'idle' | 'scouting' | 'needs_input' | 'ready' | 'review' | 'failed' | string;
   message: string;
+  operationId?: number | string;
+  phase?: 'starting' | 'plotting' | 'windows' | 'camps' | 'services' | 'finalizing' | string;
+  phaseLabel?: string;
+  progressPct?: number;
+  focusTarget?: { name?: string; lat: number; lng: number; zoom?: number } | null;
+  previewStops?: RouteScoutStop[];
   startName?: string;
   destinationName?: string;
   days?: number;

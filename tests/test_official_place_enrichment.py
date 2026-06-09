@@ -108,6 +108,39 @@ class OfficialPlaceEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("google_maps_uri", cleaned)
         self.assertNotIn("rich_detail_locked", cleaned)
 
+    def test_mapbox_camp_selection_is_overnight_card_candidate(self):
+        body = server.MapCardResolveRequest(
+            kind="search",
+            source="rendered_mapbox_standard",
+            source_label="Mapbox Standard",
+            name="Sand Flats Recreation Area Group Campsites",
+            lat=38.5676967,
+            lng=-109.5270932,
+            type="poi",
+            subtype="campground",
+            raw_feature={"properties": {"class": "camp_site", "maki": "campsite"}},
+        )
+        card = server._map_card_base_from_request(body)
+
+        self.assertTrue(server._map_card_is_overnight(body, card))
+        fallback = server._map_card_overnight_fallback(body, card)
+        self.assertEqual(fallback["type"], "camp")
+        self.assertIn("camp", fallback["tags"])
+
+    def test_mapbox_campus_is_not_overnight_card_candidate(self):
+        body = server.MapCardResolveRequest(
+            kind="search",
+            source="rendered_mapbox_standard",
+            name="Campbell University",
+            lat=35.409,
+            lng=-78.739,
+            type="poi",
+            subtype="university campus",
+        )
+        card = server._map_card_base_from_request(body)
+
+        self.assertFalse(server._map_card_is_overnight(body, card))
+
 
 if __name__ == "__main__":
     unittest.main()

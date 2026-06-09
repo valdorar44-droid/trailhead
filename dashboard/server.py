@@ -3207,8 +3207,16 @@ class MapCardResolveRequest(BaseModel):
     id: Optional[str] = None
     source: Optional[str] = None
     source_label: Optional[str] = None
+    selection_source: Optional[str] = None
+    feature_id: Optional[str] = None
     provider_place_id: Optional[str] = None
     place_id: Optional[str] = None
+    source_layer: Optional[str] = None
+    screen_x: Optional[float] = None
+    screen_y: Optional[float] = None
+    screen_position: Optional[str] = None
+    selection_confidence: Optional[str] = None
+    raw_feature: Optional[dict] = None
     name: str = ""
     lat: float
     lng: float
@@ -10784,8 +10792,16 @@ def _map_card_base_from_request(body: MapCardResolveRequest) -> dict:
         "subtype": body.subtype or card_type,
         "source": source,
         "source_label": body.source_label or ("Trailhead trail" if card_type == "trail" else "Map search" if source == "search" else body.source or "Map source"),
+        "selection_source": body.selection_source or source,
+        "feature_id": body.feature_id,
         "provider_place_id": body.provider_place_id,
         "place_id": body.place_id,
+        "source_layer": body.source_layer,
+        "screen_x": body.screen_x,
+        "screen_y": body.screen_y,
+        "screen_position": body.screen_position,
+        "selection_confidence": body.selection_confidence,
+        "raw_feature": body.raw_feature,
         "photo_url": body.photo_url,
         "summary": body.summary or ("Mapped trail route with nearby support context from Trailhead." if card_type == "trail" else "Selected map place."),
         "address": body.address,
@@ -10847,6 +10863,171 @@ def _outdoor_google_match_ok(body: MapCardResolveRequest, item: dict) -> bool:
     return True
 
 
+MAP_CARD_OVERNIGHT_TYPES = {
+    "camp",
+    "camping",
+    "campground",
+    "campsite",
+    "rv",
+    "rv_park",
+    "caravan",
+    "lodging",
+    "hotel",
+    "motel",
+    "stay",
+    "private_stay",
+    "farm_stay",
+    "ranch",
+    "winery",
+    "glamping",
+    "private_camp",
+}
+MAP_CARD_OVERNIGHT_RE = re.compile(
+    r"\b(campgrounds?|camp\s*sites?|campsites?|rv\s*(park|resort|camp)?|caravan|overnight|"
+    r"places?\s+to\s+stay|lodg(?:e|ing)|hotel|motel|hostel|inn|cabin|glamping|hipcamp|"
+    r"farm\s*stay|ranch\s*stay|winery\s*stay|private\s*(camp|stay))\b",
+    re.I,
+)
+MAP_CARD_NON_OVERNIGHT_CAMP_RE = re.compile(r"\b(campus|summer camp|boot camp|training camp|campbell)\b", re.I)
+
+
+def _map_card_search_text(body: MapCardResolveRequest, card: dict | None = None) -> str:
+    values: list[str] = []
+    for source in (body.__dict__, card or {}):
+        if not isinstance(source, dict):
+            continue
+        for key in ("kind", "type", "subtype", "name", "source_layer", "source", "source_label", "summary", "address"):
+            value = source.get(key)
+            if value not in (None, "", []):
+                values.append(str(value))
+        raw = source.get("raw_feature")
+        if isinstance(raw, dict):
+            props = raw.get("properties") if isinstance(raw.get("properties"), dict) else raw
+            for key in ("class", "type", "kind", "category", "maki", "name", "subclass"):
+                value = props.get(key) if isinstance(props, dict) else None
+                if value not in (None, "", []):
+                    values.append(str(value))
+    return " ".join(values)
+
+
+def _map_card_is_overnight(body: MapCardResolveRequest, card: dict | None = None) -> bool:
+    typed = {
+        _smart_pack_type(value)
+        for value in (
+            body.kind,
+            body.type,
+            body.subtype,
+            (card or {}).get("type"),
+            (card or {}).get("subtype"),
+        )
+        if value
+    }
+    if typed.intersection(MAP_CARD_OVERNIGHT_TYPES):
+        return True
+    text = _map_card_search_text(body, card)
+    if MAP_CARD_NON_OVERNIGHT_CAMP_RE.search(text):
+        return False
+    return bool(MAP_CARD_OVERNIGHT_RE.search(text))
+
+
+def _map_card_overnight_fallback(body: MapCardResolveRequest, card: dict) -> dict:
+    text = _map_card_search_text(body, card).lower()
+    is_private = any(token in text for token in ("farm", "ranch", "winery", "glamping", "private", "hipcamp"))
+    is_lodging = any(token in text for token in ("hotel", "motel", "lodging", "hostel", "inn", "cabin")) and "camp" not in text
+    is_rv = "rv" in text or "caravan" in text
+    if is_private:
+        land_type = _private_stay_label(_smart_pack_type(card.get("type") or body.type or "private_stay"), text)
+        tags = ["private", "private_stay", "stay"]
+    elif is_lodging:
+        land_type = "Lodging"
+        tags = ["stay", "lodging"]
+    elif is_rv:
+        land_type = "RV Park"
+        tags = ["camp", "rv", "campground"]
+    else:
+        land_type = "Campground"
+        tags = ["camp", "campground", "tent"]
+    return {
+        "id": str(card.get("id") or f"map_card:overnight:{float(body.lat):.5f}:{float(body.lng):.5f}"),
+        "name": card.get("name") or body.name or "Overnight stop",
+        "lat": float(card.get("lat") or body.lat),
+        "lng": float(card.get("lng") or body.lng),
+        "type": "private_stay" if is_private else "camp",
+        "subtype": card.get("subtype") or body.subtype or land_type,
+        "tags": tags,
+        "land_type": land_type,
+        "description": card.get("summary") or card.get("address") or "Map-sourced overnight option. Verify current access, booking rules, fees, and stay limits before relying on it.",
+        "photo_url": card.get("photo_url") or "",
+        "photos": card.get("photos") or [],
+        "reservable": False,
+        "cost": card.get("cost") or "",
+        "url": card.get("website") or card.get("url") or "",
+        "official_url": card.get("official_url") or "",
+        "booking_url": card.get("booking_url") or "",
+        "ada": False,
+        "source": card.get("source") or body.source or "map",
+        "verified_source": card.get("source_label") or body.source_label or "Map source",
+        "source_badge": card.get("source_label") or body.source_label or "Map source",
+        "rating": card.get("rating"),
+        "rating_count": card.get("rating_count"),
+        "phone": card.get("phone") or "",
+        "address": card.get("address") or body.address or "",
+        "provider_place_id": card.get("provider_place_id") or body.provider_place_id or body.place_id or "",
+        "place_id": card.get("place_id") or body.place_id or "",
+        "source_confidence": "review",
+        "link_label": "Official page",
+        "rich_detail_available": False,
+        "rich_detail_reason": "Mapbox rendered place upgraded into Trailhead's overnight card flow; confirm details with the source.",
+        "amenities": card.get("amenities") or [],
+        "site_types": card.get("site_types") or ([land_type] if is_private or is_lodging else (["RV"] if is_rv else ["Tent", "Campground"])),
+    }
+
+
+def _map_card_camp_match_score(body: MapCardResolveRequest, camp: dict) -> float:
+    try:
+        distance_m = _haversine_m(float(body.lat), float(body.lng), float(camp.get("lat")), float(camp.get("lng")))
+    except Exception:
+        return 999999.0
+    body_token = _camp_cluster_name(body.name)
+    camp_token = _camp_cluster_name(camp.get("name"))
+    score = distance_m
+    if body_token and camp_token:
+        if body_token == camp_token:
+            score -= 900
+        elif body_token in camp_token or camp_token in body_token:
+            score -= 600
+    score += _camp_source_rank(camp) * 80
+    return score
+
+
+async def _resolve_map_card_overnight(body: MapCardResolveRequest, card: dict) -> tuple[dict | None, dict | None]:
+    if not _map_card_is_overnight(body, card):
+        return None, None
+    candidates = await nearby_camps(body.lat, body.lng, radius=12, types="")
+    close = [
+        camp for camp in candidates
+        if isinstance(camp, dict)
+        and camp.get("lat") is not None
+        and camp.get("lng") is not None
+        and _camp_distance_m({"lat": body.lat, "lng": body.lng}, camp) <= 1800
+    ]
+    matched = min(close, key=lambda camp: _map_card_camp_match_score(body, camp), default=None)
+    if not matched:
+        fallback = _map_card_overnight_fallback(body, card)
+        return fallback, None
+    detail = None
+    camp_id = str(matched.get("id") or "")
+    if camp_id and not camp_id.startswith(("osm_", "blm_", "geoapify:", "mapbox:", "map_card:")):
+        try:
+            detail = await get_facility_detail(camp_id)
+        except Exception:
+            detail = None
+    enriched = {**matched, **(detail or {})}
+    if detail and not enriched.get("description"):
+        enriched["description"] = detail.get("description")
+    return enriched, detail
+
+
 def _map_card_sections(card: dict, body: MapCardResolveRequest) -> list[dict]:
     sections: list[dict] = []
     if card.get("hours"):
@@ -10862,7 +11043,7 @@ def _map_card_sections(card: dict, body: MapCardResolveRequest) -> list[dict]:
                 "Verify current access, closures, road difficulty, and legality with the land manager.",
             ],
         })
-    if body.kind == "camp" or _smart_pack_type(card.get("type")) == "camp":
+    if body.kind == "camp" or _smart_pack_type(card.get("type")) == "camp" or _map_card_is_overnight(body, card):
         sections.append({
             "type": "access",
             "title": "Camp access",
@@ -10894,7 +11075,7 @@ def _map_card_cache_key(body: MapCardResolveRequest) -> str:
         f"{float(body.lat):.4f}",
         f"{float(body.lng):.4f}",
     ])
-    return f"map_card_v3:{hashlib.sha1(base.encode()).hexdigest()[:24]}"
+    return f"map_card_v4:{hashlib.sha1(base.encode()).hexdigest()[:24]}"
 
 
 def _contains_restricted_provider(value: object) -> bool:
@@ -10987,20 +11168,50 @@ async def resolve_map_card(body: MapCardResolveRequest, user: dict | None = Depe
         trails_discover(lat=center_lat, lng=center_lng, radius=35, mode="nearby", limit=12),
         {"trails": []},
     )
-    if photos_task:
-        (detail_value, detail_ms), (photos, photos_ms), (related_pack, nearby_ms), (trail_pack, trails_ms) = await asyncio.gather(detail_task, photos_task, nearby_task, trails_task)
+    overnight_task = guarded("overnight_card", _resolve_map_card_overnight(body, base), (None, None)) if _map_card_is_overnight(body, base) else None
+    if photos_task and overnight_task:
+        (detail_value, detail_ms), (photos, photos_ms), (related_pack, nearby_ms), (trail_pack, trails_ms), ((camp_card, camp_detail), overnight_ms) = await asyncio.gather(detail_task, photos_task, nearby_task, trails_task, overnight_task)
         timings["trail_photos_ms"] = photos_ms
+        timings["overnight_ms"] = overnight_ms
+    elif photos_task:
+        (detail_value, detail_ms), (photos, photos_ms), (related_pack, nearby_ms), (trail_pack, trails_ms) = await asyncio.gather(detail_task, photos_task, nearby_task, trails_task)
+        camp_card = None
+        camp_detail = None
+        timings["trail_photos_ms"] = photos_ms
+    elif overnight_task:
+        (detail_value, detail_ms), (related_pack, nearby_ms), (trail_pack, trails_ms), ((camp_card, camp_detail), overnight_ms) = await asyncio.gather(detail_task, nearby_task, trails_task, overnight_task)
+        photos = []
+        timings["overnight_ms"] = overnight_ms
     else:
         (detail_value, detail_ms), (related_pack, nearby_ms), (trail_pack, trails_ms) = await asyncio.gather(detail_task, nearby_task, trails_task)
         photos = []
+        camp_card = None
+        camp_detail = None
     detail = None
     timings["nearby_ms"] = nearby_ms
     timings["trails_ms"] = trails_ms
 
     card = _map_card_merge(base, detail)
+    if camp_card:
+        card = _map_card_merge(card, camp_card)
+        card["type"] = "camp"
+        card["subtype"] = camp_card.get("land_type") or camp_card.get("subtype") or card.get("subtype") or "camp"
+        for key in (
+            "tags", "land_type", "amenities", "site_types", "activities", "cost", "reservable",
+            "url", "official_url", "booking_url", "ada", "verified_source", "source_badge",
+            "source_freshness", "reservation_notes", "last_checked", "campsites_count",
+        ):
+            value = camp_card.get(key)
+            if value not in (None, "", []):
+                card[key] = value
     if photos and not card.get("photos"):
         card["photos"] = photos
         card["photo_url"] = card.get("photo_url") or photos[0].get("url")
+    if camp_card and camp_card.get("photos") and not card.get("photos"):
+        card["photos"] = camp_card.get("photos")
+        if not card.get("photo_url"):
+            first_photo = (camp_card.get("photos") or [None])[0]
+            card["photo_url"] = first_photo.get("url") if isinstance(first_photo, dict) else first_photo
 
     smart_places = (related_pack or {}).get("places") or []
     related = {
@@ -11031,6 +11242,8 @@ async def resolve_map_card(body: MapCardResolveRequest, user: dict | None = Depe
         "photos": photo_candidates,
         "sections": _map_card_sections(card, body),
         "related": related,
+        "camp": camp_card,
+        "camp_detail": camp_detail,
         "display_source_label": display_source_label,
         "enriched_by": enriched_by,
         "cache_status": "miss",

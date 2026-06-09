@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from email.message import EmailMessage
 from email.utils import formataddr
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -3295,6 +3295,10 @@ class MapCardResolveRequest(BaseModel):
     address: Optional[str] = None
     rating: Optional[float] = None
     rating_count: Optional[int] = None
+    country_code: Optional[str] = None
+    country: Optional[str] = None
+    region: Optional[str] = None
+    bbox: Optional[list[float]] = None
     route: list[list[float]] = Field(default_factory=list)
 
 def _parse_valhalla_area_urls() -> list[dict]:
@@ -6677,6 +6681,12 @@ async def campsite_detail(facility_id: str):
             detail["mobile_coverage"] = await get_mobile_coverage(float(detail["lat"]), float(detail["lng"]))
         except Exception:
             pass
+    if detail.get("lat") and detail.get("lng"):
+        try:
+            related, status, _ = await _build_place_context(float(detail["lat"]), float(detail["lng"]), "camp", camp_detail=detail)
+            detail = _merge_context_rails_into_detail(detail, related, status)
+        except Exception:
+            detail = _merge_context_rails_into_detail(detail, {}, None)
     override = get_camp_profile_override(facility_id)
     if override:
         detail = {**detail, **override, "admin_edited": True}
@@ -6686,11 +6696,26 @@ async def campsite_detail(facility_id: str):
 async def campsite_site_detail(facility_id: str, campsite_id: str):
     site_detail = await get_ridb_campsite_detail(facility_id, campsite_id)
     if site_detail:
+        parent_detail = None
+        try:
+            parent_detail = await get_facility_detail(facility_id)
+        except Exception:
+            parent_detail = None
+        if parent_detail:
+            for key in ("things_to_do", "things_to_see", "visitor_centers", "campgrounds_nearby", "trip_services", "activities", "amenities", "site_types", "links"):
+                if parent_detail.get(key) and not site_detail.get(key):
+                    site_detail[key] = parent_detail.get(key)
         try:
             if site_detail.get("lat") and site_detail.get("lng"):
                 site_detail["mobile_coverage"] = await get_mobile_coverage(float(site_detail["lat"]), float(site_detail["lng"]))
         except Exception:
             pass
+        try:
+            if site_detail.get("lat") and site_detail.get("lng"):
+                related, status, _ = await _build_place_context(float(site_detail["lat"]), float(site_detail["lng"]), "camp", camp_detail=parent_detail or site_detail)
+                site_detail = _merge_context_rails_into_detail(site_detail, related, status)
+        except Exception:
+            site_detail = _merge_context_rails_into_detail(site_detail, {}, None)
         return site_detail
     detail = await get_facility_detail(facility_id)
     if not detail:
@@ -11370,7 +11395,90 @@ def _broad_place_display_type(body: MapCardResolveRequest | None = None, card: d
     return "Place"
 
 
-async def _open_place_wiki_profile(name: str, lat: float, lng: float) -> dict | None:
+def _town_profile_cache_key(name: str, lat: float, lng: float, region: str = "", country: str = "", provider_id: str = "") -> str:
+    clean = re.sub(r"\s+", " ", str(name or "").lower()).strip()
+    region_key = re.sub(r"[^a-z0-9]+", "-", str(region or "").lower()).strip("-")
+    country_key = re.sub(r"[^a-z0-9]+", "-", str(country or "").lower()).strip("-")
+    provider_key = re.sub(r"[^a-z0-9:._-]+", "-", str(provider_id or "").lower()).strip("-")
+    base = f"{clean}|{region_key}|{country_key}|{provider_key}|{float(lat):.3f}|{float(lng):.3f}"
+    return f"town_profile_v2:{hashlib.sha1(base.encode()).hexdigest()[:24]}"
+
+
+def _town_name_candidates(name: str) -> list[str]:
+    raw_parts = [part.strip() for part in re.split(r",|\|", str(name or "")) if part.strip()]
+    candidates = []
+    if raw_parts:
+        candidates.append(raw_parts[0])
+        if len(raw_parts) >= 2:
+            candidates.append(f"{raw_parts[0]}, {raw_parts[1]}")
+    clean = re.sub(r"\s+", " ", str(name or "").strip())
+    if clean:
+        candidates.append(clean)
+    out: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = candidate.lower()
+        if key not in seen:
+            seen.add(key)
+            out.append(candidate)
+    return out
+
+
+def _wikidata_image_url(filename: object, width: int = 1200) -> str:
+    raw = str(filename or "").strip()
+    if not raw:
+        return ""
+    raw = raw.removeprefix("File:").strip().replace(" ", "_")
+    digest = hashlib.md5(raw.encode("utf-8")).hexdigest()
+    quoted = quote(raw, safe="()'!,.-_")
+    return f"https://upload.wikimedia.org/wikipedia/commons/thumb/{digest[0]}/{digest[:2]}/{quoted}/{width}px-{quoted}"
+
+
+async def _wikidata_profile(qid: str, client: httpx.AsyncClient | None = None) -> dict | None:
+    clean_qid = re.sub(r"[^Q0-9]", "", str(qid or "").upper())
+    if not clean_qid.startswith("Q"):
+        return None
+    close_client = client is None
+    if client is None:
+        client = httpx.AsyncClient(timeout=7.0, headers={"User-Agent": "TrailheadPlaceCards/1.0"})
+    try:
+        resp = await client.get(
+            "https://www.wikidata.org/wiki/Special:EntityData/{qid}.json".format(qid=clean_qid),
+        )
+        resp.raise_for_status()
+        entity = ((resp.json().get("entities") or {}).get(clean_qid) or {})
+        claims = entity.get("claims") or {}
+        labels = entity.get("labels") or {}
+        descriptions = entity.get("descriptions") or {}
+        sitelinks = entity.get("sitelinks") or {}
+        image_file = ""
+        p18 = claims.get("P18") or []
+        if p18:
+            image_file = (((p18[0].get("mainsnak") or {}).get("datavalue") or {}).get("value") or "")
+        wikipedia_title = ((sitelinks.get("enwiki") or {}).get("title") or "")
+        profile = {
+            "name": (labels.get("en") or {}).get("value") or "",
+            "summary": (descriptions.get("en") or {}).get("value") or "",
+            "wikidata_id": clean_qid,
+            "wikipedia_title": wikipedia_title,
+            "official_url": f"https://www.wikidata.org/wiki/{clean_qid}",
+            "source": "wikidata",
+            "source_label": "Wikidata",
+            "source_badge": "Wikidata / Wikimedia",
+        }
+        image_url = _wikidata_image_url(image_file)
+        if image_url:
+            profile["photo_url"] = image_url
+            profile["photos"] = [{"url": image_url, "caption": profile["name"] or wikipedia_title, "credit": "Wikimedia Commons", "source": "Wikidata"}]
+        return profile
+    except Exception:
+        return None
+    finally:
+        if close_client:
+            await client.aclose()
+
+
+async def _open_place_wiki_profile(name: str, lat: float, lng: float, client: httpx.AsyncClient | None = None) -> dict | None:
     clean = re.sub(r"\s+", " ", (name or "").strip())
     if not clean or len(clean) < 2:
         return None
@@ -11379,65 +11487,250 @@ async def _open_place_wiki_profile(name: str, lat: float, lng: float) -> dict | 
     cached = get_cached("campsite_cache", cache_key, ttl_seconds=3600 * 24 * 30)
     if cached is not None:
         return cached or None
+    close_client = client is None
     try:
-        async with httpx.AsyncClient(timeout=7.0, headers={"User-Agent": "TrailheadPlaceCards/1.0"}) as client:
+        if client is None:
+            client = httpx.AsyncClient(timeout=7.0, headers={"User-Agent": "TrailheadPlaceCards/1.0"})
+        resp = await client.get(
+            "https://en.wikipedia.org/w/api.php",
+            params={
+                "action": "query",
+                "format": "json",
+                "generator": "search",
+                "gsrsearch": search_name,
+                "gsrlimit": 5,
+                "prop": "extracts|pageimages|info|coordinates|pageprops",
+                "exintro": True,
+                "explaintext": True,
+                "exsentences": 3,
+                "piprop": "original|thumbnail",
+                "pithumbsize": 1100,
+                "inprop": "url",
+                "coprop": "type",
+                "origin": "*",
+            },
+        )
+        resp.raise_for_status()
+        pages = (resp.json().get("query") or {}).get("pages") or {}
+        name_norm = re.sub(r"[^a-z0-9]+", " ", search_name.lower()).strip()
+        best: dict | None = None
+        best_score = 999999.0
+        for page in pages.values():
+            title = str(page.get("title") or "")
+            title_norm = re.sub(r"[^a-z0-9]+", " ", title.lower()).strip()
+            if name_norm and name_norm not in title_norm and title_norm not in name_norm:
+                continue
+            coords = page.get("coordinates") or []
+            dist_m = 0.0
+            if coords:
+                coord = coords[0]
+                try:
+                    dist_m = _haversine_m(lat, lng, float(coord.get("lat")), float(coord.get("lon")))
+                except Exception:
+                    dist_m = 999999.0
+            score = dist_m + abs(len(title_norm) - len(name_norm)) * 25
+            if score < best_score:
+                best = page
+                best_score = score
+        if not best:
+            set_cached("campsite_cache", cache_key, {})
+            return None
+        image = (best.get("original") or {}).get("source") or (best.get("thumbnail") or {}).get("source") or ""
+        qid = ((best.get("pageprops") or {}).get("wikibase_item") or "")
+        profile = {
+            "name": best.get("title") or search_name,
+            "summary": _planner_clean_text(best.get("extract") or "", 700),
+            "photo_url": image,
+            "photos": [{"url": image, "caption": best.get("title") or search_name, "credit": "Wikipedia / Wikimedia Commons", "source": "Wikipedia"}] if image else [],
+            "official_url": best.get("fullurl") or "",
+            "wikidata_id": qid,
+            "wikipedia_title": best.get("title") or "",
+            "source": "wikipedia",
+            "source_label": "Wikipedia",
+            "source_badge": "Wikipedia / Wikimedia",
+            "source_freshness": "Wikipedia/Wikimedia context cached by Trailhead; verify current local conditions with official sources.",
+            "last_checked": int(time.time()),
+        }
+        set_cached("campsite_cache", cache_key, profile)
+        return profile
+    except Exception:
+        set_cached("campsite_cache", cache_key, {})
+        return None
+    finally:
+        if close_client and client is not None:
+            await client.aclose()
+
+
+async def _nominatim_town_profile(name: str, lat: float, lng: float, client: httpx.AsyncClient) -> dict | None:
+    candidates = _town_name_candidates(name)
+    try:
+        for query in candidates:
             resp = await client.get(
-                "https://en.wikipedia.org/w/api.php",
+                "https://nominatim.openstreetmap.org/search",
                 params={
-                    "action": "query",
-                    "format": "json",
-                    "generator": "search",
-                    "gsrsearch": search_name,
-                    "gsrlimit": 5,
-                    "prop": "extracts|pageimages|info|coordinates",
-                    "exintro": True,
-                    "explaintext": True,
-                    "exsentences": 3,
-                    "piprop": "original|thumbnail",
-                    "pithumbsize": 1100,
-                    "inprop": "url",
-                    "coprop": "type",
-                    "origin": "*",
+                    "q": query,
+                    "format": "jsonv2",
+                    "limit": 5,
+                    "addressdetails": 1,
+                    "extratags": 1,
+                    "namedetails": 1,
                 },
             )
             resp.raise_for_status()
-            pages = (resp.json().get("query") or {}).get("pages") or {}
-            name_norm = re.sub(r"[^a-z0-9]+", " ", search_name.lower()).strip()
-            best: dict | None = None
+            records = resp.json() if isinstance(resp.json(), list) else []
+            best = None
             best_score = 999999.0
-            for page in pages.values():
-                title = str(page.get("title") or "")
-                title_norm = re.sub(r"[^a-z0-9]+", " ", title.lower()).strip()
-                if name_norm and name_norm not in title_norm and title_norm not in name_norm:
-                    continue
-                coords = page.get("coordinates") or []
-                dist_m = 0.0
-                if coords:
-                    coord = coords[0]
-                    try:
-                        dist_m = _haversine_m(lat, lng, float(coord.get("lat")), float(coord.get("lon")))
-                    except Exception:
-                        dist_m = 999999.0
-                score = dist_m + abs(len(title_norm) - len(name_norm)) * 25
+            for record in records:
+                try:
+                    dist = _haversine_m(lat, lng, float(record.get("lat")), float(record.get("lon")))
+                except Exception:
+                    dist = 999999.0
+                rtype = _smart_pack_type(record.get("type") or record.get("class"))
+                type_penalty = 0 if rtype in BROAD_MAP_PLACE_TYPES or str(record.get("class")) == "place" else 180000
+                score = dist + type_penalty
                 if score < best_score:
-                    best = page
+                    best = record
                     best_score = score
             if not best:
-                set_cached("campsite_cache", cache_key, {})
-                return None
-            image = (best.get("original") or {}).get("source") or (best.get("thumbnail") or {}).get("source") or ""
+                continue
+            extratags = best.get("extratags") if isinstance(best.get("extratags"), dict) else {}
+            namedetails = best.get("namedetails") if isinstance(best.get("namedetails"), dict) else {}
+            address = best.get("address") if isinstance(best.get("address"), dict) else {}
+            image = extratags.get("image") or ""
+            if image and not str(image).startswith(("http://", "https://")):
+                image = ""
+            wikipedia = extratags.get("wikipedia") or ""
+            wiki_title = wikipedia.split(":", 1)[1] if ":" in wikipedia else wikipedia
             profile = {
-                "summary": _planner_clean_text(best.get("extract") or "", 700),
-                "photo_url": image,
-                "photos": [{"url": image, "caption": best.get("title") or search_name, "credit": "Wikipedia / Wikimedia Commons", "source": "Wikipedia"}] if image else [],
-                "official_url": best.get("fullurl") or "",
-                "source": "wikipedia",
-                "source_label": "Wikipedia",
-                "source_badge": "Wikipedia / Wikimedia",
-                "source_freshness": "Wikipedia/Wikimedia context cached by Trailhead; verify current local conditions with official sources.",
+                "name": namedetails.get("name") or best.get("name") or (candidates[0] if candidates else name),
+                "lat": float(best.get("lat") or lat),
+                "lng": float(best.get("lon") or lng),
+                "display_name": best.get("display_name") or "",
+                "country": address.get("country") or "",
+                "region": address.get("state") or address.get("region") or address.get("county") or "",
+                "county": address.get("county") or "",
+                "wikidata_id": extratags.get("wikidata") or "",
+                "wikipedia_title": wiki_title,
+                "source": "osm",
+                "source_label": "OpenStreetMap",
+                "source_badge": "OpenStreetMap / Nominatim",
+                "source_freshness": "OpenStreetMap/Nominatim place identity cached by Trailhead; verify current local conditions with official sources.",
                 "last_checked": int(time.time()),
             }
-            set_cached("campsite_cache", cache_key, profile)
+            if image:
+                profile["photo_url"] = image
+                profile["photos"] = [{"url": image, "caption": profile["name"], "credit": "OpenStreetMap linked open image", "source": "OpenStreetMap"}]
+            return profile
+    except Exception:
+        return None
+    return None
+
+
+async def _geonames_town_profile(name: str, lat: float, lng: float, client: httpx.AsyncClient) -> dict | None:
+    username = getattr(settings, "geonames_username", "") or ""
+    if not username:
+        return None
+    try:
+        resp = await client.get(
+            "http://api.geonames.org/findNearbyWikipediaJSON",
+            params={"lat": lat, "lng": lng, "radius": 20, "maxRows": 8, "username": username},
+        )
+        resp.raise_for_status()
+        records = (resp.json() or {}).get("geonames") or []
+        first_name = (_town_name_candidates(name) or [name])[0].lower()
+        best = None
+        for record in records:
+            title = str(record.get("title") or "").lower()
+            if first_name in title or title in first_name:
+                best = record
+                break
+        best = best or (records[0] if records else None)
+        if not best:
+            return None
+        thumb = best.get("thumbnailImg") or ""
+        return {
+            "name": best.get("title") or name,
+            "summary": _planner_clean_text(best.get("summary") or "", 700),
+            "lat": float(best.get("lat") or lat),
+            "lng": float(best.get("lng") or lng),
+            "photo_url": thumb,
+            "photos": [{"url": thumb, "caption": best.get("title") or name, "credit": "GeoNames / Wikipedia", "source": "GeoNames"}] if thumb else [],
+            "official_url": best.get("wikipediaUrl") if str(best.get("wikipediaUrl") or "").startswith("http") else (f"https://{best.get('wikipediaUrl')}" if best.get("wikipediaUrl") else ""),
+            "source": "geonames",
+            "source_label": "GeoNames",
+            "source_badge": "GeoNames / Wikipedia",
+            "source_freshness": "GeoNames/Wikipedia context cached by Trailhead; verify current local conditions with official sources.",
+            "last_checked": int(time.time()),
+        }
+    except Exception:
+        return None
+
+
+def _merge_town_profiles(*profiles: dict | None) -> dict | None:
+    merged: dict = {}
+    sources: list[str] = []
+    for profile in profiles:
+        if not isinstance(profile, dict) or not profile:
+            continue
+        for key, value in profile.items():
+            if key == "photos":
+                existing = merged.get("photos") or []
+                next_photos = value if isinstance(value, list) else []
+                for photo in next_photos:
+                    url = photo.get("url") if isinstance(photo, dict) else str(photo or "")
+                    if url and all((p.get("url") if isinstance(p, dict) else p) != url for p in existing):
+                        existing.append(photo)
+                if existing:
+                    merged["photos"] = existing[:8]
+                continue
+            if value not in (None, "", []) and not merged.get(key):
+                merged[key] = value
+        source_label = profile.get("source_label") or profile.get("source_badge") or profile.get("source")
+        if source_label and source_label not in sources:
+            sources.append(str(source_label))
+    if not merged:
+        return None
+    if not merged.get("photo_url") and merged.get("photos"):
+        first = merged["photos"][0]
+        merged["photo_url"] = first.get("url") if isinstance(first, dict) else first
+    if sources:
+        merged["source_label"] = sources[0]
+        merged["source_badge"] = " · ".join(sources[:3])
+    merged.setdefault("source", "town_profile")
+    merged.setdefault("photo_status", "town_profile" if merged.get("photo_url") else "placeholder")
+    merged.setdefault("last_checked", int(time.time()))
+    return merged
+
+
+async def _open_town_profile(card: dict, body: MapCardResolveRequest) -> dict | None:
+    name = str(card.get("name") or body.name or "").strip()
+    if not name:
+        return None
+    lat = float(card.get("lat") or body.lat)
+    lng = float(card.get("lng") or body.lng)
+    cache_key = _town_profile_cache_key(
+        name,
+        lat,
+        lng,
+        region=str(card.get("region") or ""),
+        country=str(card.get("country") or ""),
+        provider_id=str(body.provider_place_id or body.place_id or body.id or ""),
+    )
+    cached = get_cached("campsite_cache", cache_key, ttl_seconds=3600 * 24 * 30)
+    if cached is not None:
+        return cached or None
+    try:
+        async with httpx.AsyncClient(timeout=8.0, headers={"User-Agent": "TrailheadTownProfiles/1.0"}) as client:
+            osm_profile = await _nominatim_town_profile(name, lat, lng, client)
+            wikidata_profile = await _wikidata_profile((osm_profile or {}).get("wikidata_id") or "", client) if osm_profile else None
+            wiki_name = (osm_profile or {}).get("wikipedia_title") or (wikidata_profile or {}).get("wikipedia_title") or name
+            wiki_profile = await _open_place_wiki_profile(str(wiki_name), lat, lng, client)
+            geonames_profile = await _geonames_town_profile(name, lat, lng, client)
+            profile = _merge_town_profiles(osm_profile, wikidata_profile, wiki_profile, geonames_profile)
+            if profile:
+                profile["id"] = f"town_profile:{hashlib.sha1(f'{name}:{lat:.3f}:{lng:.3f}'.encode()).hexdigest()[:16]}"
+                profile["source_freshness"] = profile.get("source_freshness") or "Open town profile data cached by Trailhead; verify current conditions with official local sources."
+            set_cached("campsite_cache", cache_key, profile or {})
             return profile
     except Exception:
         set_cached("campsite_cache", cache_key, {})
@@ -11475,6 +11768,10 @@ def _map_card_base_from_request(body: MapCardResolveRequest) -> dict:
         "address": body.address,
         "rating": body.rating,
         "rating_count": body.rating_count,
+        "country_code": body.country_code,
+        "country": body.country,
+        "region": body.region,
+        "bbox": body.bbox,
         "photo_status": "open_photo" if body.photo_url else "placeholder",
     }
 
@@ -11810,6 +12107,124 @@ def _is_weak_card_summary(value: object) -> bool:
     return clean.startswith("loading place details")
 
 
+PLACE_CONTEXT_CATEGORIES = [
+    "camp",
+    "trailhead",
+    "viewpoint",
+    "peak",
+    "hot_spring",
+    "water",
+    "fuel",
+    "propane",
+    "dump",
+    "mechanic",
+    "parking",
+    "grocery",
+    "food",
+    "park",
+    "historic",
+    "attraction",
+    "visitor_center",
+    "event",
+    "tour",
+    "permit",
+    "climbing",
+    "ohv",
+]
+
+
+def _place_context_radius(card_type: str) -> float:
+    ctype = _smart_pack_type(card_type)
+    if ctype in {"city", "town", "locality", "place", "region", "neighborhood"}:
+        return 55.0
+    if ctype in {"camp", "camping", "campground"}:
+        return 38.0
+    return 32.0
+
+
+def _context_status(related: dict, errors: dict | None = None) -> dict:
+    rail_counts = {
+        key: len(related.get(key) or [])
+        for key in ("things_to_see", "things_to_do", "campgrounds_nearby", "trails", "trip_services", "visitor_centers")
+    }
+    total = sum(rail_counts.values())
+    return {
+        "status": "full" if total >= 6 and not errors else "partial" if total > 0 else "empty",
+        "rail_counts": rail_counts,
+        "errors": errors or {},
+    }
+
+
+async def _build_place_context(
+    lat: float,
+    lng: float,
+    card_type: str = "place",
+    route: list[list[float]] | None = None,
+    camp_detail: dict | None = None,
+    user: dict | None = None,
+) -> tuple[dict, dict, dict]:
+    errors: dict[str, str] = {}
+
+    async def guarded(name: str, coro, default, timeout: float = 14.0):
+        try:
+            return await asyncio.wait_for(coro, timeout=timeout)
+        except Exception as exc:
+            errors[name] = str(exc)[:160]
+            return default
+
+    radius = _place_context_radius(card_type)
+    nearby_task = guarded(
+        "nearby",
+        nearby_smart_pack(NearbySmartPackRequest(
+            center=PlannerPoint(lat=float(lat), lng=float(lng)),
+            radius=radius,
+            categories=PLACE_CONTEXT_CATEGORIES,
+            route=route or [],
+        ), user=user),
+        {"places": []},
+        timeout=16.0,
+    )
+    trails_task = guarded(
+        "trails",
+        trails_discover(lat=float(lat), lng=float(lng), radius=min(radius, 55), mode="nearby", limit=16),
+        {"trails": []},
+        timeout=10.0,
+    )
+    related_pack, trail_pack = await asyncio.gather(nearby_task, trails_task)
+    related = _related_rails_from_places((related_pack or {}).get("places") or [], (trail_pack or {}).get("trails", []), camp_detail)
+    status = _context_status(related, errors)
+    related["context_status"] = status
+    related["rail_status"] = status
+    return related, status, errors
+
+
+PLACE_CONTEXT_RAIL_KEYS = ("things_to_do", "things_to_see", "visitor_centers", "campgrounds_nearby", "trip_services", "trails")
+
+
+def _merge_context_rails_into_detail(detail: dict, related: dict | None, status: dict | None = None) -> dict:
+    if not isinstance(detail, dict):
+        return detail
+    merged = dict(detail)
+    related = related or {}
+    for key in PLACE_CONTEXT_RAIL_KEYS:
+        current = [item for item in (merged.get(key) or []) if isinstance(item, dict)]
+        normalized_current = [_normalize_related_rail_item(item) for item in current]
+        incoming = [item for item in (related.get(key) or []) if isinstance(item, dict)]
+        if normalized_current:
+            merged[key] = normalized_current
+        elif incoming:
+            merged[key] = incoming
+    if related.get("camps") and not merged.get("campgrounds_nearby"):
+        merged["campgrounds_nearby"] = related.get("camps")
+    if status:
+        merged["context_status"] = status
+        merged["rail_status"] = status
+    elif related.get("context_status"):
+        merged["context_status"] = related.get("context_status")
+        merged["rail_status"] = related.get("rail_status") or related.get("context_status")
+    return merged
+
+
 MAP_CARD_SAFE_TTL_SECONDS = 3600 * 24 * 7
 MAP_CARD_PASSIVE_SOURCES = {
     "osm",
@@ -11911,19 +12326,21 @@ async def resolve_map_card(body: MapCardResolveRequest, user: dict | None = Depe
 
     is_trailish = body.kind == "trail" or _smart_pack_type(body.type) in {"trail", "trailhead", "ohv"}
     photos_task = guarded("trail_photos", _open_trail_photos(body.name, center_lat, center_lng), []) if is_trailish else None
+    context_type = "locality" if _is_broad_map_place(body, base) else _smart_pack_type(base.get("type") or body.type or body.kind or "place")
+    context_radius = _place_context_radius(context_type)
     nearby_task = guarded(
         "nearby",
         nearby_smart_pack(NearbySmartPackRequest(
             center=PlannerPoint(lat=center_lat, lng=center_lng),
-            radius=28,
-            categories=["camp", "trailhead", "viewpoint", "peak", "hot_spring", "water", "fuel", "propane", "dump", "mechanic", "parking", "attraction", "event"],
+            radius=context_radius,
+            categories=PLACE_CONTEXT_CATEGORIES,
             route=body.route or [],
-        )),
+        ), user=user if isinstance(user, dict) else None),
         {"places": []},
     )
     trails_task = guarded(
         "trails",
-        trails_discover(lat=center_lat, lng=center_lng, radius=35, mode="nearby", limit=12),
+        trails_discover(lat=center_lat, lng=center_lng, radius=min(context_radius, 55), mode="nearby", limit=16),
         {"trails": []},
     )
     overnight_task = guarded("overnight_card", _resolve_map_card_overnight(body, base), (None, None), timeout=8.0) if _map_card_is_overnight(body, base) else None
@@ -11976,30 +12393,31 @@ async def resolve_map_card(body: MapCardResolveRequest, user: dict | None = Depe
     smart_places = (related_pack or {}).get("places") or []
     related = _related_rails_from_places(smart_places, (trail_pack or {}).get("trails", []), camp_detail)
     if _is_broad_map_place(body, card):
-        wiki_profile, wiki_ms = await guarded(
-            "place_wiki",
-            _open_place_wiki_profile(card.get("name") or body.name, center_lat, center_lng),
+        town_profile, town_ms = await guarded(
+            "town_profile",
+            _open_town_profile(card, body),
             None,
-            timeout=3.5,
+            timeout=8.0,
         )
-        timings["place_wiki_ms"] = wiki_ms
-        if wiki_profile:
-            wiki_summary = wiki_profile.get("summary")
-            wiki_photos = wiki_profile.get("photos") or []
-            if _is_weak_card_summary(card.get("summary")) and wiki_summary:
-                card["summary"] = wiki_summary
-                card["description"] = wiki_summary
-            if not card.get("photo_url") and wiki_profile.get("photo_url"):
-                card["photo_url"] = wiki_profile.get("photo_url")
-                card["photos"] = wiki_photos
+        timings["town_profile_ms"] = town_ms
+        if town_profile:
+            town_summary = town_profile.get("summary")
+            town_photos = town_profile.get("photos") or []
+            if _is_weak_card_summary(card.get("summary")) and town_summary:
+                card["summary"] = town_summary
+                card["description"] = town_summary
+            if not card.get("photo_url") and town_profile.get("photo_url"):
+                card["photo_url"] = town_profile.get("photo_url")
+                card["photos"] = town_photos
                 card["photo_status"] = "open_photo"
-            if wiki_profile.get("official_url") and not card.get("official_url"):
-                card["official_url"] = wiki_profile.get("official_url")
-                card["website"] = wiki_profile.get("official_url")
-            card["enriched_by"] = wiki_profile.get("source_label") or "Wikipedia"
-            card.setdefault("source_badge", wiki_profile.get("source_badge"))
-            card.setdefault("source_freshness", wiki_profile.get("source_freshness"))
-            card.setdefault("last_checked", wiki_profile.get("last_checked"))
+            if town_profile.get("official_url") and not card.get("official_url"):
+                card["official_url"] = town_profile.get("official_url")
+                card["website"] = town_profile.get("official_url")
+            card["town_profile"] = town_profile
+            card["enriched_by"] = town_profile.get("source_label") or "Open town profile"
+            card.setdefault("source_badge", town_profile.get("source_badge"))
+            card.setdefault("source_freshness", town_profile.get("source_freshness"))
+            card.setdefault("last_checked", town_profile.get("last_checked"))
     card = _normalize_map_card_display(card, body)
     if _is_weak_card_summary(card.get("summary")):
         ctype = _smart_pack_type(card.get("type"))
@@ -12017,6 +12435,9 @@ async def resolve_map_card(body: MapCardResolveRequest, user: dict | None = Depe
         else:
             card["summary"] = card.get("address") or "Selected map place."
     card["source_label"] = card.get("source_label") or card.get("source") or "Trailhead"
+    context_status = _context_status(related, errors)
+    related["context_status"] = context_status
+    related["rail_status"] = context_status
     enriched_by = card.get("enriched_by")
     display_source_label = card["source_label"]
     if enriched_by and str(enriched_by).lower() not in str(display_source_label).lower():
@@ -12036,6 +12457,8 @@ async def resolve_map_card(body: MapCardResolveRequest, user: dict | None = Depe
         "locked_sections": [],
         "partial": bool(errors),
         "errors": errors,
+        "context_status": context_status,
+        "rail_status": context_status,
         "cached": False,
         "cache_ttl_seconds": MAP_CARD_SAFE_TTL_SECONDS if _map_card_cacheable(body, {"card": card, "photos": card.get("photos") or [], "related": related}) else 0,
         "timings": {**timings, "total_ms": round((time.time() - started) * 1000)},

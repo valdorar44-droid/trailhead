@@ -6212,6 +6212,10 @@ function MapScreen() {
       address: selectedPlace.address,
       rating: selectedPlace.rating,
       rating_count: selectedPlace.rating_count,
+      country_code: selectedPlace.country_code,
+      country: selectedPlace.country,
+      region: selectedPlace.region,
+      bbox: selectedPlace.bbox,
     }).then(resolved => {
       if (cancelled) return;
       mapCardResolveCacheRef.current.set(resolveKey, { at: Date.now(), response: resolved });

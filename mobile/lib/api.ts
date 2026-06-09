@@ -1419,6 +1419,8 @@ export interface CampsiteDetail extends CampsitePin {
   visitor_centers?: NearbySmartPlace[];
   campgrounds_nearby?: NearbySmartPlace[];
   trip_services?: NearbySmartPlace[];
+  context_status?: PlaceContextStatus;
+  rail_status?: PlaceContextStatus;
   permits?: NearbySmartPlace[];
   tours?: NearbySmartPlace[];
   events?: NearbySmartPlace[];
@@ -1433,6 +1435,11 @@ export interface CampsiteDetail extends CampsitePin {
   reviews?: PlaceReview[];
   provider_notices?: Array<{ label?: string; text?: string }>;
   media_source?: 'trailhead' | 'ridb' | 'blm' | 'osm' | 'google' | 'mixed' | string;
+}
+export interface PlaceContextStatus {
+  status?: 'full' | 'partial' | 'empty' | string;
+  rail_counts?: Record<string, number>;
+  errors?: Record<string, string>;
 }
 export interface GasStation {
   id: number | string; name: string; lat: number; lng: number;
@@ -2030,6 +2037,10 @@ export interface MapCardResolveRequest {
   address?: string;
   rating?: number;
   rating_count?: number;
+  country_code?: string | null;
+  country?: string | null;
+  region?: string | null;
+  bbox?: number[] | null;
   route?: [number, number][];
 }
 export interface MapCardResolveResponse {
@@ -2047,7 +2058,11 @@ export interface MapCardResolveResponse {
     campgrounds_nearby?: NearbySmartPlace[];
     trip_services?: NearbySmartPlace[];
     trails?: TrailProfile[];
+    context_status?: PlaceContextStatus;
+    rail_status?: PlaceContextStatus;
   };
+  context_status?: PlaceContextStatus;
+  rail_status?: PlaceContextStatus;
   partial?: boolean;
   errors?: Record<string, string>;
   timings?: Record<string, number>;

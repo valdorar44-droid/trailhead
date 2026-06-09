@@ -111,6 +111,36 @@ class OfficialPlaceEnrichmentTests(unittest.TestCase):
         self.assertEqual(record["summary"], "")
         self.assertEqual(record["description"], "")
 
+    def test_merge_town_profiles_prefers_own_photo_and_sources(self):
+        profile = server._merge_town_profiles(
+            {"name": "Seattle", "wikidata_id": "Q5083", "source_label": "OpenStreetMap"},
+            {"photo_url": "https://upload.wikimedia.org/seattle.jpg", "photos": [{"url": "https://upload.wikimedia.org/seattle.jpg", "source": "Wikidata"}], "source_label": "Wikidata"},
+            {"summary": "Seattle is a city in Washington.", "official_url": "https://en.wikipedia.org/wiki/Seattle", "source_label": "Wikipedia"},
+        )
+
+        self.assertEqual(profile["photo_url"], "https://upload.wikimedia.org/seattle.jpg")
+        self.assertIn("Seattle is a city", profile["summary"])
+        self.assertIn("OpenStreetMap", profile["source_badge"])
+        self.assertIn("Wikidata", profile["source_badge"])
+
+    def test_merge_context_rails_into_detail_keeps_existing_and_fills_missing(self):
+        detail = {
+            "name": "Camp",
+            "things_to_do": [{"name": "Existing Tour", "type": "tour", "lat": 1, "lng": 1}],
+        }
+        related = {
+            "things_to_do": [{"name": "Nearby Event", "type": "event", "lat": 1, "lng": 1}],
+            "things_to_see": [{"name": "Scenic View", "type": "viewpoint", "lat": 1, "lng": 1}],
+            "trip_services": [{"name": "Water", "type": "water", "lat": 1, "lng": 1}],
+        }
+
+        merged = server._merge_context_rails_into_detail(detail, related, {"status": "partial"})
+
+        self.assertEqual([p["name"] for p in merged["things_to_do"]], ["Existing Tour"])
+        self.assertEqual([p["name"] for p in merged["things_to_see"]], ["Scenic View"])
+        self.assertEqual([p["name"] for p in merged["trip_services"]], ["Water"])
+        self.assertEqual(merged["context_status"]["status"], "partial")
+
 
 class OfficialPlaceEndpointTests(unittest.IsolatedAsyncioTestCase):
     async def test_nearby_places_returns_official_explore_category_without_unlock(self):
@@ -229,7 +259,7 @@ class OfficialPlaceEndpointTests(unittest.IsolatedAsyncioTestCase):
             patch.object(server, "set_cached", return_value=None),
             patch.object(server, "nearby_smart_pack", new=AsyncMock(return_value={"places": [event]})),
             patch.object(server, "trails_discover", new=AsyncMock(return_value={"trails": []})),
-            patch.object(server, "_open_place_wiki_profile", new=AsyncMock(return_value=wiki_profile)),
+            patch.object(server, "_open_town_profile", new=AsyncMock(return_value=wiki_profile)),
         ):
             result = await server.resolve_map_card(server.MapCardResolveRequest(
                 kind="search",
@@ -239,6 +269,8 @@ class OfficialPlaceEndpointTests(unittest.IsolatedAsyncioTestCase):
                 lat=35.1983,
                 lng=-111.6513,
                 type="place",
+                country="United States",
+                region="Arizona",
             ), user=None)
 
         self.assertEqual(result["card"]["display_type"], "City")
@@ -246,6 +278,7 @@ class OfficialPlaceEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(result["card"]["photo_url"], event["photo_url"])
         self.assertIn("northern Arizona", result["card"]["summary"])
         self.assertEqual(result["related"]["things_to_do"][0]["name"], "Volleyball Camp")
+        self.assertEqual(result["related"]["context_status"]["rail_counts"]["things_to_do"], 1)
 
     def test_legacy_provider_card_fields_are_scrubbed(self):
         stale = {

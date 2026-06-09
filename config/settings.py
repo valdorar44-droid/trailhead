@@ -51,6 +51,7 @@ class Settings:
     fcc_vizmo_enabled: bool = os.environ.get("FCC_VIZMO_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
     fcc_bdc_mobile_data_date: str = os.environ.get("FCC_BDC_MOBILE_DATA_DATE", "")
     fcc_bdc_mobile_source_url: str = os.environ.get("FCC_BDC_MOBILE_SOURCE_URL", "https://broadbandmap.fcc.gov/data-download/nationwide-data")
+    geonames_username: str = os.environ.get("GEONAMES_USERNAME", "")
     secret_key: str = os.environ.get("SECRET_KEY", "trailhead-dev-secret-change-in-prod")
     db_path: str = os.environ.get("TRAILHEAD_DB_PATH", "/data/trailhead.db" if os.path.isdir("/data") else "./trailhead.db")
     stripe_secret_key: str = os.environ.get("STRIPE_SECRET_KEY", "")

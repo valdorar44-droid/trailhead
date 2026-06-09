@@ -11593,7 +11593,7 @@ def _map_card_cache_key(body: MapCardResolveRequest) -> str:
         f"{float(body.lat):.4f}",
         f"{float(body.lng):.4f}",
     ])
-    return f"map_card_v6:{hashlib.sha1(base.encode()).hexdigest()[:24]}"
+    return f"map_card_v7:{hashlib.sha1(base.encode()).hexdigest()[:24]}"
 
 
 def _contains_restricted_provider(value: object) -> bool:

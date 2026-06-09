@@ -5466,6 +5466,8 @@ function MapScreen() {
       || showFilterSheet
       || showLayerSheet
       || showMapStyleSheet
+      || mapWeatherEnabled
+      || showMapWeatherSheet
       || (showSearch && !!searchRouteCard)
       || !!selectedCamp
       || !!selectedPlace
@@ -5482,7 +5484,7 @@ function MapScreen() {
     );
     return () => setTabBarHidden(false);
   }, [
-    navMode, waterFollowActive, safeWaterSheetOwnsPage, offlineAreaPicker, showMapDrawer, showSearch, showFilterSheet, showLayerSheet, showMapStyleSheet, searchRouteCard, selectedCamp, selectedPlace, selectedTrail,
+    navMode, waterFollowActive, safeWaterSheetOwnsPage, offlineAreaPicker, showMapDrawer, showSearch, showFilterSheet, showLayerSheet, showMapStyleSheet, mapWeatherEnabled, showMapWeatherSheet, searchRouteCard, selectedCamp, selectedPlace, selectedTrail,
     selectedCommunityPin, tappedPoi, tappedGas, tappedTileSpot, tappedTrail,
     tappedWp, pendingPin, trailPinCaptureMode, trailRouteBuilderOpen, setTabBarHidden,
   ]);
@@ -15548,6 +15550,30 @@ function MapScreen() {
       (safeWaterPlanningActive && waterRouteReview)
     )
   );
+  const mapSheetOpen = Boolean(
+    mapWeatherEnabled ||
+    showMapWeatherSheet ||
+    showSearch ||
+    !!searchRouteCard ||
+    showDiscoveryPanel ||
+    !!routeScout ||
+    !!selectedCamp ||
+    !!selectedPlace ||
+    !!selectedTrail ||
+    !!selectedCommunityPin ||
+    !!tappedPoi ||
+    !!tappedGas ||
+    !!tappedTileSpot ||
+    !!tappedTrail ||
+    !!tappedWp ||
+    !!pendingPin ||
+    showMapDrawer ||
+    showFilterSheet ||
+    showLayerSheet ||
+    showMapStyleSheet ||
+    offlineAreaPicker ||
+    trailRouteBuilderOpen
+  );
   const compassTop = Math.max(insets.top + 6, 14);
 
   const nativeNavigationPanel = navMode ? (
@@ -16076,7 +16102,7 @@ function MapScreen() {
                             setShowMapWeatherSheet(true);
                           }}
                         >
-                          <Ionicons name="chevron-up" size={15} color="#29323f" />
+                          <Ionicons name="chevron-up" size={15} color={C.text2} />
                         </TouchableOpacity>
                         <TouchableOpacity
                           style={s.mapWeatherPeekIconBtn}
@@ -16086,7 +16112,7 @@ function MapScreen() {
                             setShowMapWeatherSheet(false);
                           }}
                         >
-                          <Ionicons name="close" size={14} color="#29323f" />
+                          <Ionicons name="close" size={14} color={C.text2} />
                         </TouchableOpacity>
                       </View>
                     </View>
@@ -16569,10 +16595,10 @@ function MapScreen() {
 
       {/* Controls — hidden during nav (panel covers them and they serve no purpose while driving) */}
       <ScrollView
-        pointerEvents={navMode || safeWaterSheetOwnsPage || showDiscoveryPanel || (!!selectedTrail && !trailCardCollapsed) || trailRouteBuilderOpen ? 'none' : 'auto'}
+        pointerEvents={navMode || safeWaterSheetOwnsPage || mapSheetOpen || (!!selectedTrail && !trailCardCollapsed) ? 'none' : 'auto'}
         style={[
           s.controls,
-          (navMode || safeWaterSheetOwnsPage || showDiscoveryPanel || (!!selectedTrail && !trailCardCollapsed) || trailRouteBuilderOpen) && { opacity: 0 },
+          (navMode || safeWaterSheetOwnsPage || mapSheetOpen || (!!selectedTrail && !trailCardCollapsed)) && { opacity: 0 },
         ]}
         contentContainerStyle={s.controlsInner}
         showsVerticalScrollIndicator={false}
@@ -20596,7 +20622,7 @@ function MapScreen() {
         );
       })()}
 
-      {extremeCopilotAvailable && !navMode && !mapWeatherEnabled && !safeWaterPlanningActive && !waterFollowActive && !showExtremeCopilot && (!showDiscoveryPanel || extremeCopilotVoiceActive) && (
+      {extremeCopilotAvailable && !navMode && !mapSheetOpen && !safeWaterPlanningActive && !waterFollowActive && !showExtremeCopilot && (
         <View style={[s.extremeCopilotDock, { bottom: bottomInset + 92 }]} pointerEvents="box-none">
           <TouchableOpacity
             style={s.extremeCopilotFab}
@@ -21774,6 +21800,22 @@ function overlayPalette(C: ColorPalette) {
 
 const makeStyles = (C: ColorPalette) => {
   const OVR = overlayPalette(C);
+  const light = String(C.bg || '').toLowerCase() === '#f7f8f6';
+  const navSurface = light ? 'rgba(248,250,247,0.98)' : 'rgba(17,24,39,0.96)';
+  const navSurfaceStrong = light ? 'rgba(255,255,255,0.99)' : 'rgba(8,13,23,0.98)';
+  const navSurfaceSoft = light ? '#eef2ec' : C.s2;
+  const navBorder = light ? 'rgba(15,23,42,0.12)' : 'rgba(255,255,255,0.14)';
+  const navDivider = light ? 'rgba(15,23,42,0.10)' : 'rgba(255,255,255,0.10)';
+  const navText = light ? '#101820' : '#ffffff';
+  const navText2 = light ? '#29323f' : 'rgba(255,255,255,0.86)';
+  const navText3 = light ? '#69736f' : 'rgba(255,255,255,0.58)';
+  const weatherSurface = light ? '#f8faf7' : 'rgba(17,24,39,0.98)';
+  const weatherSurfaceSoft = light ? '#eef2ec' : 'rgba(255,255,255,0.06)';
+  const weatherBorder = light ? 'rgba(148,163,184,0.34)' : 'rgba(56,189,248,0.30)';
+  const weatherText = light ? '#101820' : '#f8fafc';
+  const weatherText2 = light ? '#52606d' : '#cbd5e1';
+  const weatherText3 = light ? '#6b7280' : '#94a3b8';
+  const weatherButton = light ? '#edf1ec' : 'rgba(255,255,255,0.08)';
   return StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
   map: { flex: 1 },
@@ -22810,9 +22852,9 @@ const makeStyles = (C: ColorPalette) => {
     elevation: 100,
   },
   navHud: {
-    backgroundColor: 'rgba(17,24,39,0.96)',
+    backgroundColor: navSurface,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
+    borderColor: navBorder,
     borderRadius: 18,
     overflow: 'hidden',
     shadowColor: '#000',
@@ -22852,9 +22894,9 @@ const makeStyles = (C: ColorPalette) => {
     right: 12,
     bottom: 258,
     maxHeight: 320,
-    backgroundColor: 'rgba(17,24,39,0.97)',
+    backgroundColor: navSurface,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
+    borderColor: navBorder,
     borderRadius: 18,
     overflow: 'hidden',
     zIndex: 10002,
@@ -22872,28 +22914,28 @@ const makeStyles = (C: ColorPalette) => {
     paddingHorizontal: 14,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: C.border,
+    borderBottomColor: navDivider,
   },
-  navTurnsTitle: { color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
-  navTurnsSub: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
+  navTurnsTitle: { color: navText, fontSize: 12, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
+  navTurnsSub: { color: navText3, fontSize: 10, fontFamily: mono, marginTop: 2 },
   navTurnsClose: {
     width: 32,
     height: 32,
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: C.s2,
+    backgroundColor: navSurfaceSoft,
     borderWidth: 1,
-    borderColor: C.border,
+    borderColor: navBorder,
   },
 
   turnStripWrap: { overflow: 'hidden' },
   turnStrip: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     paddingHorizontal: 12, paddingVertical: 9,
-    backgroundColor: 'rgba(8,13,23,0.98)',
+    backgroundColor: navSurfaceStrong,
     borderBottomWidth: 1,
-    borderColor: 'rgba(255,255,255,0.10)',
+    borderColor: navDivider,
   },
   turnIconWrap: {
     width: 46, height: 46, alignItems: 'center', justifyContent: 'center',
@@ -22904,9 +22946,9 @@ const makeStyles = (C: ColorPalette) => {
     overflow: 'hidden',
   },
   turnInfo: { flex: 1, justifyContent: 'center' },
-  turnDist: { color: '#fff', fontSize: 20, fontFamily: mono, fontWeight: '900', letterSpacing: 0, lineHeight: 24 },
-  turnLabel: { color: 'rgba(255,255,255,0.86)', fontSize: 13, fontWeight: '800', marginTop: 1, letterSpacing: 0 },
-  turnRoad: { color: 'rgba(255,255,255,0.58)', fontSize: 11, lineHeight: 15, marginTop: 1 },
+  turnDist: { color: navText, fontSize: 20, fontFamily: mono, fontWeight: '900', letterSpacing: 0, lineHeight: 24 },
+  turnLabel: { color: navText2, fontSize: 13, fontWeight: '800', marginTop: 1, letterSpacing: 0 },
+  turnRoad: { color: navText3, fontSize: 11, lineHeight: 15, marginTop: 1 },
   currentRoadPill: {
     marginHorizontal: 14,
     marginTop: 8,
@@ -22919,11 +22961,11 @@ const makeStyles = (C: ColorPalette) => {
     paddingHorizontal: 11,
     paddingVertical: 7,
     borderRadius: 8,
-    backgroundColor: C.s2,
+    backgroundColor: navSurfaceSoft,
     borderWidth: 1,
-    borderColor: C.border,
+    borderColor: navBorder,
   },
-  currentRoadText: { color: C.text2, fontSize: 12, fontWeight: '800', letterSpacing: 0 },
+  currentRoadText: { color: navText2, fontSize: 12, fontWeight: '800', letterSpacing: 0 },
   stepProgressBg: {
     height: 4, backgroundColor: 'rgba(249,115,22,0.15)',
     borderTopWidth: 1, borderColor: 'rgba(249,115,22,0.1)',
@@ -22934,21 +22976,21 @@ const makeStyles = (C: ColorPalette) => {
   },
   laneRow: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: C.s1, paddingHorizontal: 14, paddingVertical: 6,
+    backgroundColor: navSurfaceSoft, paddingHorizontal: 14, paddingVertical: 6,
     borderTopWidth: 1, borderColor: 'rgba(249,115,22,0.15)',
   },
   laneLabel: { color: C.text3, fontSize: 9, fontFamily: mono, marginRight: 4, letterSpacing: 1 },
   laneBox: {
-    width: 26, height: 22, borderRadius: 5, borderWidth: 1, borderColor: C.border,
-    alignItems: 'center', justifyContent: 'center', backgroundColor: C.s2,
+    width: 26, height: 22, borderRadius: 5, borderWidth: 1, borderColor: navBorder,
+    alignItems: 'center', justifyContent: 'center', backgroundColor: navSurface,
   },
   laneBoxActive: { borderColor: '#f97316', backgroundColor: 'rgba(249,115,22,0.15)' },
   thenRow: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     paddingHorizontal: 12, paddingVertical: 5,
-    backgroundColor: C.s2, borderTopWidth: 1, borderTopColor: C.border,
+    backgroundColor: navSurfaceSoft, borderTopWidth: 1, borderTopColor: navDivider,
   },
-  thenText: { color: C.text3, fontSize: 11, flex: 1, letterSpacing: 0 },
+  thenText: { color: navText3, fontSize: 11, flex: 1, letterSpacing: 0 },
 
   offRouteWarnBar: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
@@ -22965,21 +23007,21 @@ const makeStyles = (C: ColorPalette) => {
   navStrip: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     paddingHorizontal: 12, paddingVertical: 8,
-    borderBottomWidth: 1, borderColor: 'rgba(255,255,255,0.10)',
+    borderBottomWidth: 1, borderColor: navDivider,
   },
   navBearing: { alignItems: 'center', justifyContent: 'center', width: 46 },
   navBearingText: { color: C.orange, fontSize: 18, fontWeight: '900', fontFamily: mono },
   navDistBlock: { flex: 1, alignItems: 'center' },
-  navDistVal: { color: C.text, fontSize: 24, fontFamily: mono, fontWeight: '900', letterSpacing: 0 },
-  navEta: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '800', marginTop: 2, letterSpacing: 0.4 },
-  navRemaining: { color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 2, opacity: 0.7 },
+  navDistVal: { color: navText, fontSize: 24, fontFamily: mono, fontWeight: '900', letterSpacing: 0 },
+  navEta: { color: navText3, fontSize: 10, fontFamily: mono, fontWeight: '800', marginTop: 2, letterSpacing: 0.4 },
+  navRemaining: { color: navText3, fontSize: 9, fontFamily: mono, marginTop: 2, opacity: 0.7 },
   navSpeedBlock: { alignItems: 'center', width: 50 },
   navSpeedVal: { color: C.text2, fontSize: 22, fontWeight: '700', fontFamily: mono },
 
   navTarget: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     paddingHorizontal: 12, paddingVertical: 8,
-    borderBottomWidth: 1, borderColor: 'rgba(255,255,255,0.10)',
+    borderBottomWidth: 1, borderColor: navDivider,
   },
   navTargetBadge: {
     backgroundColor: C.orange + '12', borderRadius: 999, borderWidth: 1, borderColor: C.orange + '44',
@@ -22987,8 +23029,8 @@ const makeStyles = (C: ColorPalette) => {
   },
   navTargetBadgeText: { color: C.orange, fontSize: 8, fontFamily: mono, fontWeight: '900' },
   navTargetInfo: { flex: 1 },
-  navTargetName: { color: C.text, fontSize: 14, fontWeight: '800', letterSpacing: 0 },
-  navTargetMeta: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
+  navTargetName: { color: navText, fontSize: 14, fontWeight: '800', letterSpacing: 0 },
+  navTargetMeta: { color: navText3, fontSize: 10, fontFamily: mono, marginTop: 2 },
 
   navActions: {
     flexDirection: 'row', gap: 8,
@@ -23003,13 +23045,13 @@ const makeStyles = (C: ColorPalette) => {
   navStepsBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
     paddingHorizontal: 12, paddingVertical: 10, borderRadius: 11,
-    borderWidth: 1, borderColor: C.border, backgroundColor: C.s2,
+    borderWidth: 1, borderColor: navBorder, backgroundColor: navSurfaceSoft,
   },
-  navStepsBtnText: { color: C.text2, fontSize: 10, fontFamily: mono, fontWeight: '800', letterSpacing: 0.4 },
+  navStepsBtnText: { color: navText2, fontSize: 10, fontFamily: mono, fontWeight: '800', letterSpacing: 0.4 },
   navRerouteBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
     paddingHorizontal: 12, paddingVertical: 10, borderRadius: 11,
-    borderWidth: 1, borderColor: C.border, backgroundColor: C.s2,
+    borderWidth: 1, borderColor: navBorder, backgroundColor: navSurfaceSoft,
   },
   dlBar: {
     position: 'absolute', top: 92, left: 16, right: 16,
@@ -23488,20 +23530,20 @@ const makeStyles = (C: ColorPalette) => {
   mapWeatherCrosshairLineV: { position: 'absolute', width: 2, height: 46, borderRadius: 1, backgroundColor: '#38bdf8' },
   mapWeatherCrosshairDot: { width: 14, height: 14, borderRadius: 7, backgroundColor: C.bg, borderWidth: 2, borderColor: '#38bdf8' },
   mapWeatherPeekSheet: { position: 'absolute', left: 12, right: 12, zIndex: 130, elevation: 130, alignItems: 'stretch' },
-  mapWeatherPeekCard: { minHeight: 204, borderRadius: 24, borderWidth: 1, borderColor: 'rgba(148,163,184,0.34)', backgroundColor: '#f8faf7', paddingHorizontal: 14, paddingTop: 8, paddingBottom: 16, shadowColor: '#000', shadowOpacity: 0.22, shadowRadius: 24, shadowOffset: { width: 0, height: 12 }, elevation: 28 },
+  mapWeatherPeekCard: { minHeight: 204, borderRadius: 24, borderWidth: 1, borderColor: weatherBorder, backgroundColor: weatherSurface, paddingHorizontal: 14, paddingTop: 8, paddingBottom: 16, shadowColor: '#000', shadowOpacity: light ? 0.22 : 0.34, shadowRadius: 24, shadowOffset: { width: 0, height: 12 }, elevation: 28 },
   mapWeatherPeekHandleRow: { minHeight: 30, alignItems: 'center', justifyContent: 'center' },
-  mapWeatherGrabber: { width: 48, height: 5, borderRadius: 3, backgroundColor: 'rgba(15,23,42,0.18)' },
+  mapWeatherGrabber: { width: 48, height: 5, borderRadius: 3, backgroundColor: light ? 'rgba(15,23,42,0.18)' : 'rgba(255,255,255,0.22)' },
   mapWeatherPeekActions: { position: 'absolute', right: 0, top: 0, flexDirection: 'row', alignItems: 'center', gap: 6 },
-  mapWeatherPeekIconBtn: { width: 34, height: 34, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: '#edf1ec', borderWidth: 1, borderColor: 'rgba(15,23,42,0.12)' },
+  mapWeatherPeekIconBtn: { width: 34, height: 34, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: weatherButton, borderWidth: 1, borderColor: weatherBorder },
   mapWeatherPeekMain: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   mapWeatherPeekIcon: { width: 54, height: 54, borderRadius: 18, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#38bdf866', backgroundColor: '#e8f7fb' },
-  mapWeatherPeekKicker: { color: '#117ea2', fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
-  mapWeatherPeekTitle: { color: '#101820', fontSize: 19, fontWeight: '900', letterSpacing: 0, marginTop: 3 },
-  mapWeatherPeekSub: { color: '#52606d', fontSize: 10.5, fontFamily: mono, marginTop: 3 },
+  mapWeatherPeekKicker: { color: light ? '#117ea2' : '#38bdf8', fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
+  mapWeatherPeekTitle: { color: weatherText, fontSize: 19, fontWeight: '900', letterSpacing: 0, marginTop: 3 },
+  mapWeatherPeekSub: { color: weatherText2, fontSize: 10.5, fontFamily: mono, marginTop: 3 },
   mapWeatherPeekMetrics: { flexDirection: 'row', gap: 8, marginTop: 14 },
-  mapWeatherPeekMetric: { flex: 1, minHeight: 58, borderWidth: 1, borderColor: 'rgba(15,23,42,0.10)', backgroundColor: '#eef2ec', borderRadius: 14, paddingHorizontal: 7, paddingVertical: 8, justifyContent: 'center' },
-  mapWeatherPeekMetricValue: { color: '#101820', fontSize: 11, fontFamily: mono, fontWeight: '900', textAlign: 'center' },
-  mapWeatherPeekMetricLabel: { color: '#6b7280', fontSize: 8, fontFamily: mono, fontWeight: '800', textAlign: 'center', marginTop: 3 },
+  mapWeatherPeekMetric: { flex: 1, minHeight: 58, borderWidth: 1, borderColor: weatherBorder, backgroundColor: weatherSurfaceSoft, borderRadius: 14, paddingHorizontal: 7, paddingVertical: 8, justifyContent: 'center' },
+  mapWeatherPeekMetricValue: { color: weatherText, fontSize: 11, fontFamily: mono, fontWeight: '900', textAlign: 'center' },
+  mapWeatherPeekMetricLabel: { color: weatherText3, fontSize: 8, fontFamily: mono, fontWeight: '800', textAlign: 'center', marginTop: 3 },
   mapWeatherSheetHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 12, borderBottomWidth: 1, borderColor: C.border },
   mapWeatherSheetKicker: { color: '#38bdf8', fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
   mapWeatherSheetTitle: { color: C.text, fontSize: 20, fontWeight: '900', marginTop: 3 },
@@ -24073,11 +24115,11 @@ const makeStyles = (C: ColorPalette) => {
   // ── Nav speed circle + limit badge
   navSpeedCircle: {
     width: 58, height: 58, borderRadius: 29,
-    backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
+    backgroundColor: navSurfaceSoft, borderWidth: 1, borderColor: navBorder,
     alignItems: 'center', justifyContent: 'center',
   },
-  navSpeedBig: { color: C.text, fontSize: 24, fontFamily: mono, fontWeight: '900', lineHeight: 27 },
-  navSpeedUnit: { color: C.text3, fontSize: 7, fontFamily: mono, letterSpacing: 0.5 },
+  navSpeedBig: { color: navText, fontSize: 24, fontFamily: mono, fontWeight: '900', lineHeight: 27 },
+  navSpeedUnit: { color: navText3, fontSize: 7, fontFamily: mono, letterSpacing: 0.5 },
   navSpeedSign: {
     width: 42, borderRadius: 3,
     borderWidth: 3, borderColor: '#111',

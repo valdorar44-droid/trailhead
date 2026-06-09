@@ -545,6 +545,59 @@ def init_db():
             updated_by  INTEGER REFERENCES users(id),
             updated_at  INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS push_campaigns (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            campaign_key  TEXT NOT NULL UNIQUE,
+            campaign_type TEXT NOT NULL,
+            audience_json TEXT NOT NULL DEFAULT '{}',
+            title         TEXT NOT NULL,
+            body          TEXT NOT NULL,
+            deeplink      TEXT,
+            payload_json  TEXT NOT NULL DEFAULT '{}',
+            status        TEXT NOT NULL DEFAULT 'draft',
+            created_by    INTEGER REFERENCES users(id),
+            estimated_recipients INTEGER NOT NULL DEFAULT 0,
+            sent_count    INTEGER NOT NULL DEFAULT 0,
+            failed_count  INTEGER NOT NULL DEFAULT 0,
+            test_only     INTEGER NOT NULL DEFAULT 0,
+            created_at    INTEGER NOT NULL,
+            sent_at       INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS push_campaign_deliveries (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            campaign_id   INTEGER NOT NULL REFERENCES push_campaigns(id) ON DELETE CASCADE,
+            user_id       INTEGER REFERENCES users(id),
+            push_token    TEXT NOT NULL,
+            delivery_status TEXT NOT NULL DEFAULT 'queued',
+            response_json TEXT,
+            error_text    TEXT,
+            created_at    INTEGER NOT NULL,
+            sent_at       INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS support_threads (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id       INTEGER NOT NULL REFERENCES users(id),
+            category      TEXT NOT NULL DEFAULT 'support',
+            subject       TEXT NOT NULL,
+            status        TEXT NOT NULL DEFAULT 'open',
+            opened_by     TEXT NOT NULL DEFAULT 'user',
+            created_by_admin INTEGER REFERENCES users(id),
+            last_message_at INTEGER NOT NULL,
+            created_at    INTEGER NOT NULL,
+            updated_at    INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS support_messages (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            thread_id     INTEGER NOT NULL REFERENCES support_threads(id) ON DELETE CASCADE,
+            sender_role   TEXT NOT NULL,
+            sender_user_id INTEGER REFERENCES users(id),
+            sender_admin_id INTEGER REFERENCES users(id),
+            body          TEXT NOT NULL,
+            meta_json     TEXT NOT NULL DEFAULT '{}',
+            created_at    INTEGER NOT NULL,
+            read_by_user_at INTEGER,
+            read_by_admin_at INTEGER
+        );
     """)
     # Performance indexes (IF NOT EXISTS is safe to re-run)
     for idx_sql in [
@@ -581,6 +634,10 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_extreme_ledger_session ON extreme_ledger_events(session_id, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_extreme_trip_metadata_user ON extreme_trip_metadata(user_id, updated_at)",
         "CREATE INDEX IF NOT EXISTS idx_extreme_copilot_user ON extreme_copilot_actions(user_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_push_campaigns_created ON push_campaigns(created_at, status)",
+        "CREATE INDEX IF NOT EXISTS idx_push_campaign_deliveries_campaign ON push_campaign_deliveries(campaign_id, delivery_status, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_support_threads_user ON support_threads(user_id, last_message_at, status)",
+        "CREATE INDEX IF NOT EXISTS idx_support_messages_thread ON support_messages(thread_id, created_at)",
     ]:
         try:
             db.execute(idx_sql)
@@ -3317,6 +3374,354 @@ def get_push_token(user_id: int) -> str | None:
     row = db.execute("SELECT push_token FROM users WHERE id=?", (user_id,)).fetchone()
     db.close()
     return row["push_token"] if row else None
+
+def _push_audience_where(audience: dict | None, now: int) -> tuple[str, list]:
+    audience = audience or {}
+    segment = str(audience.get("segment") or "active_recent").strip().lower()
+    active_days = int(audience.get("active_within_days") or 30)
+    credits_lte = audience.get("credits_lte")
+    where = [
+        "COALESCE(u.push_token,'') != ''",
+    ]
+    params: list = []
+    if segment == "active_plan":
+        where.append("u.plan_type != 'free'")
+        where.append("COALESCE(u.plan_expires_at, 0) > ?")
+        params.append(now)
+    elif segment == "free_users":
+        where.append("(u.plan_type = 'free' OR COALESCE(u.plan_expires_at, 0) <= ?)")
+        params.append(now)
+    elif segment == "admins":
+        where.append("u.is_admin = 1")
+    elif segment == "low_credits":
+        where.append("u.is_admin = 0")
+        where.append("COALESCE(u.credits, 0) <= ?")
+        params.append(int(credits_lte if credits_lte is not None else 200))
+    elif segment == "all_users":
+        pass
+    else:
+        cutoff = now - max(1, active_days) * 86400
+        where.append(
+            "EXISTS (SELECT 1 FROM analytics_events ae WHERE ae.user_id = u.id AND ae.created_at >= ?)"
+        )
+        params.append(cutoff)
+    return " AND ".join(where), params
+
+def get_push_campaign_recipients(audience: dict | None, limit: int | None = None) -> list[dict]:
+    db = _conn()
+    now = int(time.time())
+    where_sql, params = _push_audience_where(audience, now)
+    limit_sql = f" LIMIT {int(limit)}" if limit and limit > 0 else ""
+    rows = db.execute(
+        f"""SELECT u.id, u.username, u.email, u.push_token, u.credits, u.plan_type, u.plan_expires_at, u.is_admin
+            FROM users u
+            WHERE {where_sql}
+            ORDER BY u.id ASC{limit_sql}""",
+        params,
+    ).fetchall()
+    db.close()
+    return [dict(r) for r in rows]
+
+def count_push_campaign_recipients(audience: dict | None) -> int:
+    db = _conn()
+    now = int(time.time())
+    where_sql, params = _push_audience_where(audience, now)
+    row = db.execute(
+        f"SELECT COUNT(*) AS count FROM users u WHERE {where_sql}",
+        params,
+    ).fetchone()
+    db.close()
+    return int(row["count"] or 0) if row else 0
+
+def create_push_campaign(campaign_key: str, campaign_type: str, audience: dict, title: str, body: str,
+                         deeplink: str | None, payload: dict | None, created_by: int | None,
+                         estimated_recipients: int, test_only: bool = False, status: str = "queued") -> int:
+    db = _conn()
+    now = int(time.time())
+    cur = db.execute(
+        """INSERT INTO push_campaigns
+           (campaign_key,campaign_type,audience_json,title,body,deeplink,payload_json,status,created_by,
+            estimated_recipients,test_only,created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            campaign_key,
+            campaign_type,
+            json.dumps(audience or {}),
+            title,
+            body,
+            deeplink,
+            json.dumps(payload or {}),
+            status,
+            created_by,
+            int(estimated_recipients or 0),
+            1 if test_only else 0,
+            now,
+        ),
+    )
+    campaign_id = int(cur.lastrowid)
+    db.commit()
+    db.close()
+    return campaign_id
+
+def record_push_campaign_delivery(campaign_id: int, user_id: int | None, push_token: str,
+                                  delivery_status: str, response: dict | None = None,
+                                  error_text: str | None = None) -> None:
+    db = _conn()
+    now = int(time.time())
+    db.execute(
+        """INSERT INTO push_campaign_deliveries
+           (campaign_id,user_id,push_token,delivery_status,response_json,error_text,created_at,sent_at)
+           VALUES (?,?,?,?,?,?,?,?)""",
+        (
+            campaign_id,
+            user_id,
+            push_token,
+            delivery_status,
+            json.dumps(response or {}) if response is not None else None,
+            error_text,
+            now,
+            now if delivery_status in {"sent", "ok"} else None,
+        ),
+    )
+    db.commit()
+    db.close()
+
+def finalize_push_campaign(campaign_id: int, sent_count: int, failed_count: int, status: str = "sent") -> None:
+    db = _conn()
+    db.execute(
+        "UPDATE push_campaigns SET status=?, sent_count=?, failed_count=?, sent_at=? WHERE id=?",
+        (status, int(sent_count or 0), int(failed_count or 0), int(time.time()), campaign_id),
+    )
+    db.commit()
+    db.close()
+
+def list_push_campaigns(limit: int = 40) -> list[dict]:
+    db = _conn()
+    rows = db.execute(
+        """SELECT c.*, u.username AS created_by_username
+           FROM push_campaigns c
+           LEFT JOIN users u ON u.id = c.created_by
+           ORDER BY c.created_at DESC
+           LIMIT ?""",
+        (limit,),
+    ).fetchall()
+    db.close()
+    items = []
+    for row in rows:
+        item = dict(row)
+        item["audience"] = json.loads(item.get("audience_json") or "{}")
+        item["payload"] = json.loads(item.get("payload_json") or "{}")
+        items.append(item)
+    return items
+
+def get_push_campaign(campaign_id: int) -> dict | None:
+    db = _conn()
+    row = db.execute(
+        """SELECT c.*, u.username AS created_by_username
+           FROM push_campaigns c
+           LEFT JOIN users u ON u.id = c.created_by
+           WHERE c.id=?""",
+        (campaign_id,),
+    ).fetchone()
+    if not row:
+        db.close()
+        return None
+    item = dict(row)
+    item["audience"] = json.loads(item.get("audience_json") or "{}")
+    item["payload"] = json.loads(item.get("payload_json") or "{}")
+    deliveries = db.execute(
+        """SELECT id, user_id, push_token, delivery_status, response_json, error_text, created_at, sent_at
+           FROM push_campaign_deliveries
+           WHERE campaign_id=?
+           ORDER BY created_at DESC
+           LIMIT 200""",
+        (campaign_id,),
+    ).fetchall()
+    db.close()
+    item["deliveries"] = [
+        {
+            **dict(d),
+            "response": json.loads(d["response_json"]) if d["response_json"] else None,
+        }
+        for d in deliveries
+    ]
+    return item
+
+def _decode_support_thread_row(row: sqlite3.Row | dict) -> dict:
+    item = dict(row)
+    if "last_meta_json" in item:
+        item["last_meta"] = json.loads(item["last_meta_json"]) if item.get("last_meta_json") else {}
+    if "meta_json" in item:
+        item["meta"] = json.loads(item["meta_json"]) if item.get("meta_json") else {}
+    return item
+
+def create_support_thread(user_id: int, subject: str, category: str = "support", opened_by: str = "user",
+                          initial_body: str | None = None, admin_id: int | None = None,
+                          meta: dict | None = None) -> int:
+    db = _conn()
+    now = int(time.time())
+    cur = db.execute(
+        """INSERT INTO support_threads
+           (user_id,category,subject,status,opened_by,created_by_admin,last_message_at,created_at,updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?)""",
+        (user_id, category[:60], subject[:160], "open", opened_by[:20], admin_id, now, now, now),
+    )
+    thread_id = int(cur.lastrowid)
+    if initial_body:
+        db.execute(
+            """INSERT INTO support_messages
+               (thread_id,sender_role,sender_user_id,sender_admin_id,body,meta_json,created_at,read_by_user_at,read_by_admin_at)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            (
+                thread_id,
+                "admin" if admin_id else "user",
+                None if admin_id else user_id,
+                admin_id,
+                initial_body[:4000],
+                json.dumps(meta or {}),
+                now,
+                now if admin_id else None,
+                now if not admin_id else None,
+            ),
+        )
+    db.commit()
+    db.close()
+    return thread_id
+
+def list_support_threads_for_user(user_id: int) -> list[dict]:
+    db = _conn()
+    rows = db.execute(
+        """SELECT t.*,
+                  (SELECT body FROM support_messages sm WHERE sm.thread_id=t.id ORDER BY sm.created_at DESC, sm.id DESC LIMIT 1) AS last_message_body,
+                  (SELECT meta_json FROM support_messages sm WHERE sm.thread_id=t.id ORDER BY sm.created_at DESC, sm.id DESC LIMIT 1) AS last_meta_json,
+                  (SELECT COUNT(*) FROM support_messages sm WHERE sm.thread_id=t.id AND sm.sender_role='admin' AND sm.read_by_user_at IS NULL) AS unread_count
+           FROM support_threads t
+           WHERE t.user_id=?
+           ORDER BY t.last_message_at DESC, t.id DESC""",
+        (user_id,),
+    ).fetchall()
+    db.close()
+    return [_decode_support_thread_row(r) for r in rows]
+
+def list_support_threads_admin(status: str | None = None, search: str = "", limit: int = 120) -> list[dict]:
+    db = _conn()
+    where = []
+    params: list = []
+    if status:
+        where.append("t.status=?")
+        params.append(status)
+    if search.strip():
+        like = f"%{search.strip()}%"
+        where.append("(u.username LIKE ? OR u.email LIKE ? OR t.subject LIKE ?)")
+        params.extend([like, like, like])
+    where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+    rows = db.execute(
+        f"""SELECT t.*, u.username, u.email,
+                  (SELECT body FROM support_messages sm WHERE sm.thread_id=t.id ORDER BY sm.created_at DESC, sm.id DESC LIMIT 1) AS last_message_body,
+                  (SELECT meta_json FROM support_messages sm WHERE sm.thread_id=t.id ORDER BY sm.created_at DESC, sm.id DESC LIMIT 1) AS last_meta_json,
+                  (SELECT COUNT(*) FROM support_messages sm WHERE sm.thread_id=t.id AND sm.sender_role='user' AND sm.read_by_admin_at IS NULL) AS unread_count
+           FROM support_threads t
+           JOIN users u ON u.id=t.user_id
+           {where_sql}
+           ORDER BY t.last_message_at DESC, t.id DESC
+           LIMIT ?""",
+        params + [limit],
+    ).fetchall()
+    db.close()
+    return [_decode_support_thread_row(r) for r in rows]
+
+def get_support_thread(thread_id: int, user_id: int | None = None, admin: bool = False) -> dict | None:
+    db = _conn()
+    if admin:
+        row = db.execute(
+            """SELECT t.*, u.username, u.email
+               FROM support_threads t
+               JOIN users u ON u.id=t.user_id
+               WHERE t.id=?""",
+            (thread_id,),
+        ).fetchone()
+    else:
+        row = db.execute(
+            """SELECT t.*, u.username, u.email
+               FROM support_threads t
+               JOIN users u ON u.id=t.user_id
+               WHERE t.id=? AND t.user_id=?""",
+            (thread_id, user_id),
+        ).fetchone()
+    if not row:
+        db.close()
+        return None
+    item = dict(row)
+    messages = db.execute(
+        """SELECT * FROM support_messages
+           WHERE thread_id=?
+           ORDER BY created_at ASC, id ASC""",
+        (thread_id,),
+    ).fetchall()
+    now = int(time.time())
+    if admin:
+        db.execute(
+            "UPDATE support_messages SET read_by_admin_at=? WHERE thread_id=? AND sender_role='user' AND read_by_admin_at IS NULL",
+            (now, thread_id),
+        )
+    else:
+        db.execute(
+            "UPDATE support_messages SET read_by_user_at=? WHERE thread_id=? AND sender_role='admin' AND read_by_user_at IS NULL",
+            (now, thread_id),
+        )
+    db.commit()
+    db.close()
+    item["messages"] = [_decode_support_thread_row(m) for m in messages]
+    return item
+
+def add_support_message(thread_id: int, sender_role: str, body: str, user_id: int | None = None,
+                        admin_id: int | None = None, meta: dict | None = None) -> dict | None:
+    db = _conn()
+    thread = db.execute("SELECT * FROM support_threads WHERE id=?", (thread_id,)).fetchone()
+    if not thread:
+        db.close()
+        return None
+    now = int(time.time())
+    cur = db.execute(
+        """INSERT INTO support_messages
+           (thread_id,sender_role,sender_user_id,sender_admin_id,body,meta_json,created_at,read_by_user_at,read_by_admin_at)
+           VALUES (?,?,?,?,?,?,?,?,?)""",
+        (
+            thread_id,
+            sender_role[:20],
+            user_id,
+            admin_id,
+            body[:4000],
+            json.dumps(meta or {}),
+            now,
+            now if sender_role == "user" else None,
+            now if sender_role == "admin" else None,
+        ),
+    )
+    db.execute(
+        "UPDATE support_threads SET status='open', last_message_at=?, updated_at=? WHERE id=?",
+        (now, now, thread_id),
+    )
+    db.commit()
+    db.close()
+    return {
+        "id": int(cur.lastrowid),
+        "thread_id": thread_id,
+        "sender_role": sender_role,
+        "sender_user_id": user_id,
+        "sender_admin_id": admin_id,
+        "body": body[:4000],
+        "meta": meta or {},
+        "created_at": now,
+    }
+
+def update_support_thread_status(thread_id: int, status: str) -> bool:
+    db = _conn()
+    cur = db.execute("UPDATE support_threads SET status=?, updated_at=? WHERE id=?", (status[:20], int(time.time()), thread_id))
+    db.commit()
+    ok = cur.rowcount > 0
+    db.close()
+    return ok
 
 
 # ── Plan jobs (async background trip planning) ────────────────────────────────

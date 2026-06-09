@@ -121,6 +121,36 @@ td.name{color:var(--text);font-weight:600;}
 .contest-award-meta{color:var(--text3);font-size:11px;font-family:var(--mono);line-height:1.5;}
 .contest-award-controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
 .contest-note{background:var(--s2);border:1px solid var(--border);border-radius:8px;padding:7px 9px;color:var(--text);font-size:12px;outline:none;flex:1;min-width:150px;}
+.push-grid{display:grid;grid-template-columns:minmax(320px,1fr) minmax(320px,1fr);gap:16px;align-items:start;}
+.push-stack{display:flex;flex-direction:column;gap:12px;}
+.push-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.push-preview{background:var(--s3);border:1px solid var(--border);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:8px;}
+.push-preview-title{color:var(--text);font-size:13px;font-weight:900;}
+.push-preview-meta{color:var(--text3);font-size:11px;font-family:var(--mono);line-height:1.5;}
+.push-history{display:flex;flex-direction:column;gap:10px;}
+.push-history-card{background:var(--s3);border:1px solid var(--border);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:8px;}
+.push-history-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
+.push-history-title{color:var(--text);font-size:13px;font-weight:900;}
+.push-history-sub{color:var(--text3);font-size:10px;font-family:var(--mono);line-height:1.5;}
+.push-sample{display:flex;flex-wrap:wrap;gap:8px;}
+.push-chip{border:1px solid var(--border);background:var(--s2);border-radius:999px;padding:5px 8px;color:var(--text2);font-size:11px;font-family:var(--mono);}
+.support-admin-grid{display:grid;grid-template-columns:minmax(320px,380px) minmax(360px,1fr);gap:16px;align-items:start;}
+.support-admin-stack{display:flex;flex-direction:column;gap:12px;}
+.support-thread-list{display:flex;flex-direction:column;gap:10px;max-height:calc(100vh - 270px);overflow:auto;padding-right:4px;}
+.support-thread-card{background:var(--s3);border:1px solid var(--border);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:7px;cursor:pointer;}
+.support-thread-card.active{border-color:var(--orange);box-shadow:0 0 0 1px rgba(249,115,22,.18);}
+.support-thread-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
+.support-thread-subject{color:var(--text);font-size:13px;font-weight:900;}
+.support-thread-meta{color:var(--text3);font-size:10px;font-family:var(--mono);line-height:1.5;}
+.support-thread-body{color:var(--text2);font-size:12px;line-height:1.5;}
+.support-compose-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.support-message-list{display:flex;flex-direction:column;gap:10px;max-height:420px;overflow:auto;padding-right:4px;}
+.support-message-bubble{border-radius:14px;padding:12px;border:1px solid var(--border);display:flex;flex-direction:column;gap:6px;}
+.support-message-admin{background:rgba(249,115,22,.12);border-color:rgba(249,115,22,.35);}
+.support-message-user{background:var(--s3);}
+.support-message-role{color:var(--orange);font-size:10px;font-family:var(--mono);font-weight:800;}
+.support-message-meta{color:var(--text3);font-size:10px;font-family:var(--mono);}
+.support-empty{color:var(--text3);font-size:13px;}
 .debug-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:12px;}
 .debug-card{background:var(--s3);border:1px solid var(--border);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:9px;}
 .debug-card.hot{border-color:var(--yellow);box-shadow:0 0 0 1px rgba(234,179,8,.08);}
@@ -199,6 +229,12 @@ td.name{color:var(--text);font-weight:600;}
       </div>
       <div class="nav-item" onclick="showPage('contest',this)">
         <span class="nav-icon">CT</span><span class="nav-label">Contest</span>
+      </div>
+      <div class="nav-item" onclick="showPage('push-campaigns',this)">
+        <span class="nav-icon">PS</span><span class="nav-label">Push</span>
+      </div>
+      <div class="nav-item" onclick="showPage('messages',this)">
+        <span class="nav-icon">MSG</span><span class="nav-label">Messages</span>
       </div>
       <div class="nav-item" onclick="showPage('extreme',this)">
         <span class="nav-icon">EX</span><span class="nav-label">Extreme</span>
@@ -495,6 +531,157 @@ td.name{color:var(--text);font-weight:600;}
         </div>
       </div>
 
+      <!-- Push Campaigns -->
+      <div class="page" id="page-push-campaigns">
+        <div class="page-title">Push Campaigns</div>
+        <div class="page-sub">Send admin announcements, credit promos, contest reminders, and community event alerts.</div>
+        <div class="push-grid">
+          <div class="push-stack">
+            <div class="card">
+              <div class="section-label">COMPOSE</div>
+              <div class="push-form-grid" style="margin-bottom:10px;">
+                <div>
+                  <div class="modal-label">CAMPAIGN TYPE</div>
+                  <select id="push-type" class="filter-input">
+                    <option value="admin_campaign">Admin campaign</option>
+                    <option value="credits_promo">Credits promo</option>
+                    <option value="contest">Contest reminder</option>
+                    <option value="community_event">Community event</option>
+                  </select>
+                </div>
+                <div>
+                  <div class="modal-label">AUDIENCE</div>
+                  <select id="push-audience" class="filter-input">
+                    <option value="active_recent">Recently active users</option>
+                    <option value="active_plan">Active plan users</option>
+                    <option value="free_users">Free users</option>
+                    <option value="low_credits">Low-credit users</option>
+                    <option value="all_users">All users with push</option>
+                    <option value="admins">Admins only</option>
+                  </select>
+                </div>
+              </div>
+              <div class="push-form-grid" style="margin-bottom:10px;">
+                <div>
+                  <div class="modal-label">ACTIVE WITHIN DAYS</div>
+                  <input id="push-active-days" class="filter-input" type="number" value="30">
+                </div>
+                <div>
+                  <div class="modal-label">CREDITS LTE</div>
+                  <input id="push-credits-lte" class="filter-input" type="number" value="200">
+                </div>
+              </div>
+              <div style="margin-bottom:10px;">
+                <div class="modal-label">TITLE</div>
+                <input id="push-title" class="modal-input" maxlength="120" value="Drop by today and plan a route for a chance to win credits.">
+              </div>
+              <div style="margin-bottom:10px;">
+                <div class="modal-label">BODY</div>
+                <textarea id="push-body" class="story-textarea" style="min-height:110px;font-family:inherit;font-size:14px;">Trailhead is running a community push today. Open the app, build a route, and check in on the latest challenge.</textarea>
+              </div>
+              <div class="push-form-grid" style="margin-bottom:10px;">
+                <div>
+                  <div class="modal-label">DEEPLINK</div>
+                  <input id="push-deeplink" class="modal-input" value="/(tabs)/guide">
+                </div>
+                <div>
+                  <div class="modal-label">CAMPAIGN TAG</div>
+                  <input id="push-tag" class="modal-input" placeholder="route_credit_drop">
+                </div>
+              </div>
+              <div class="push-form-grid" style="margin-bottom:10px;">
+                <div>
+                  <div class="modal-label">PROMO CREDITS</div>
+                  <input id="push-credits" class="filter-input" type="number" placeholder="Optional">
+                </div>
+                <div style="display:flex;align-items:end;">
+                  <label class="push-chip" style="display:inline-flex;align-items:center;gap:8px;">
+                    <input id="push-test-only" type="checkbox">
+                    Admin test only
+                  </label>
+                </div>
+              </div>
+              <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                <button class="btn btn-ghost" onclick="previewPushCampaign()">Preview</button>
+                <button class="btn btn-primary" onclick="sendPushCampaign()">Send Push</button>
+                <button class="btn btn-ghost" onclick="loadPushCampaigns()">Refresh History</button>
+              </div>
+            </div>
+            <div class="push-preview">
+              <div class="push-preview-title">Preview</div>
+              <div id="push-preview-meta" class="push-preview-meta">Preview the campaign to estimate recipients.</div>
+              <div id="push-preview-samples" class="push-sample"></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="section-label">RECENT CAMPAIGNS</div>
+            <div id="push-history" class="push-history"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Messages -->
+      <div class="page" id="page-messages">
+        <div class="page-title">Messages</div>
+        <div class="page-sub">Admin and customer-service threads. Use this to contact winners, answer support questions, and collect payout details.</div>
+        <div class="support-admin-grid">
+          <div class="support-admin-stack">
+            <div class="card">
+              <div class="section-label">THREADS</div>
+              <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+                <input id="support-search" class="filter-input" style="width:100%;" placeholder="Search by username, email, or subject" oninput="loadSupportThreads()">
+              </div>
+              <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+                <select id="support-status-filter" class="filter-input" style="width:150px;" onchange="loadSupportThreads()">
+                  <option value="">All statuses</option>
+                  <option value="open">Open</option>
+                  <option value="closed">Closed</option>
+                </select>
+                <button class="btn btn-ghost" onclick="loadSupportThreads()">Refresh</button>
+              </div>
+              <div id="support-thread-list" class="support-thread-list"></div>
+            </div>
+            <div class="card">
+              <div class="section-label">START THREAD</div>
+              <div class="support-compose-grid" style="margin-bottom:10px;">
+                <div>
+                  <div class="modal-label">USER ID</div>
+                  <input id="support-new-user-id" class="modal-input" type="number" placeholder="Winner or customer user id">
+                </div>
+                <div>
+                  <div class="modal-label">CATEGORY</div>
+                  <select id="support-new-category" class="filter-input" style="width:100%;">
+                    <option value="support">Support</option>
+                    <option value="winner_payout">Winner payout</option>
+                    <option value="community_event">Community event</option>
+                    <option value="contest">Contest</option>
+                    <option value="credits">Credits</option>
+                  </select>
+                </div>
+              </div>
+              <div style="margin-bottom:10px;">
+                <div class="modal-label">SUBJECT</div>
+                <input id="support-new-subject" class="modal-input" maxlength="160" placeholder="Trailhead support">
+              </div>
+              <div style="margin-bottom:12px;">
+                <div class="modal-label">OPENING MESSAGE</div>
+                <textarea id="support-new-body" class="story-textarea" style="min-height:120px;font-family:inherit;font-size:14px;" placeholder="Write the first message to the user here."></textarea>
+              </div>
+              <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                <button class="btn btn-primary" onclick="startSupportThread()">Start Thread</button>
+                <button class="btn btn-ghost" onclick="prefillWinnerMessage()">Winner Template</button>
+              </div>
+            </div>
+          </div>
+          <div class="support-admin-stack">
+            <div class="card">
+              <div class="section-label">THREAD DETAIL</div>
+              <div id="support-thread-detail" class="support-empty">Select a thread to read and reply.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Bug Reports -->
       <div class="page" id="page-bugs">
         <div class="page-title">Bug Reports</div>
@@ -546,6 +733,8 @@ let audioGuidePlaces = [];
 let selectedAudioGuidePlaceId = null;
 let storyFontSize = 15;
 let extremeDebugEvents = [];
+let adminSupportThreads = [];
+let selectedAdminSupportThreadId = null;
 
 // ── Auth ────────────────────────────────────────────────────────────────────
 
@@ -617,6 +806,8 @@ function showPage(name, el) {
   if (name === 'camp-edits') loadCampEdits();
   if (name === 'audio-guides') loadAudioGuidePlaces();
   if (name === 'contest') loadContest();
+  if (name === 'push-campaigns') loadPushCampaigns();
+  if (name === 'messages') loadSupportThreads();
   if (name === 'extreme') loadExtreme();
   if (name === 'bugs')     loadBugs();
 }
@@ -1088,6 +1279,7 @@ function renderContestAwards(awards) {
           ${['selected','notified','paid','void'].map(s => `<option value="${s}" ${a.status === s ? 'selected' : ''}>${s}</option>`).join('')}
         </select>
         <button class="btn btn-ghost btn-sm" onclick="updateContestAward(${a.id})">Save</button>
+        ${a.winner_user_id ? `<button class="btn btn-ghost btn-sm" onclick="openSupportTabFromAward(${a.winner_user_id}, decodeURIComponent('${encodeURIComponent(a.winner_username || '')}'), decodeURIComponent('${encodeURIComponent(a.prize_label || a.prize_type || 'Contest payout')}'))">Message Winner</button>` : ''}
       </div>
     </div>
   `).join('') || '<div style="color:var(--text3);font-size:13px;">No awards recorded yet.</div>';
@@ -1162,6 +1354,266 @@ async function updateContestAward(id) {
     toast('Award updated', 'ok');
     loadContest();
   } catch(e) { toast('Award update failed: ' + e.message, 'err'); }
+}
+
+function buildPushCampaignBody() {
+  const segment = document.getElementById('push-audience').value;
+  const activeWithinDays = parseInt(document.getElementById('push-active-days').value || '30', 10);
+  const creditsLteRaw = document.getElementById('push-credits-lte').value.trim();
+  const promoCreditsRaw = document.getElementById('push-credits').value.trim();
+  return {
+    title: document.getElementById('push-title').value.trim(),
+    body: document.getElementById('push-body').value.trim(),
+    campaign_type: document.getElementById('push-type').value,
+    audience: {
+      segment,
+      active_within_days: Number.isFinite(activeWithinDays) ? activeWithinDays : 30,
+      credits_lte: creditsLteRaw ? parseInt(creditsLteRaw, 10) : null,
+    },
+    deeplink: document.getElementById('push-deeplink').value.trim(),
+    campaign_tag: document.getElementById('push-tag').value.trim(),
+    credits: promoCreditsRaw ? parseInt(promoCreditsRaw, 10) : null,
+    data: {},
+    test_only: !!document.getElementById('push-test-only').checked,
+  };
+}
+
+function renderPushCampaigns(campaigns) {
+  const el = document.getElementById('push-history');
+  el.innerHTML = (campaigns || []).map(c => `
+    <div class="push-history-card">
+      <div class="push-history-top">
+        <div>
+          <div class="push-history-title">${esc(c.title || c.campaign_type)}</div>
+          <div class="push-history-sub">
+            ${esc(c.campaign_type || 'admin_campaign')} · ${esc((c.audience || {}).segment || 'unknown')}<br>
+            ${new Date((Number(c.created_at) || 0) * 1000).toLocaleString()} · by ${esc(c.created_by_username || 'admin')}
+          </div>
+        </div>
+        <span class="badge ${c.failed_count > 0 ? 'badge-yellow' : 'badge-green'}">${esc((c.status || 'sent').toUpperCase())}</span>
+      </div>
+      <div class="push-preview-meta">
+        Est. ${Number(c.estimated_recipients || 0).toLocaleString()} · Sent ${Number(c.sent_count || 0).toLocaleString()} · Failed ${Number(c.failed_count || 0).toLocaleString()}${c.test_only ? ' · ADMIN TEST' : ''}
+      </div>
+      <div class="push-preview-meta">${esc(c.body || '')}</div>
+    </div>
+  `).join('') || '<div style="color:var(--text3);font-size:13px;">No push campaigns yet.</div>';
+}
+
+async function loadPushCampaigns() {
+  try {
+    const data = await api('/api/admin/push-campaigns');
+    renderPushCampaigns(data.campaigns || []);
+  } catch(e) {
+    toast('Error loading push campaigns: ' + e.message, 'err');
+  }
+}
+
+async function previewPushCampaign() {
+  try {
+    const data = await api('/api/admin/push-campaigns/preview', {
+      method: 'POST',
+      body: JSON.stringify(buildPushCampaignBody()),
+    });
+    document.getElementById('push-preview-meta').textContent =
+      `${data.campaign_type} -> ${data.deeplink} · estimated ${Number(data.estimated_recipients || 0).toLocaleString()} recipients`;
+    document.getElementById('push-preview-samples').innerHTML = (data.sample_recipients || []).map(user => (
+      `<span class="push-chip">${esc(user.username || user.email || 'user')} · ${esc(user.plan_type || 'free')}</span>`
+    )).join('') || '<span class="push-chip">No sample recipients</span>';
+    toast(`Preview ready for ${Number(data.estimated_recipients || 0).toLocaleString()} recipients`, 'ok');
+  } catch(e) {
+    toast('Preview failed: ' + e.message, 'err');
+  }
+}
+
+async function sendPushCampaign() {
+  const body = buildPushCampaignBody();
+  if (!body.title) { toast('Enter a title', 'err'); return; }
+  if (!body.body) { toast('Enter a body', 'err'); return; }
+  if (!confirm(`Send this push campaign now${body.test_only ? ' to admins only' : ''}?`)) return;
+  try {
+    const data = await api('/api/admin/push-campaigns/send', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    toast(`Push sent to ${Number(data.sent_count || 0).toLocaleString()} devices`, 'ok');
+    loadPushCampaigns();
+    previewPushCampaign();
+  } catch(e) {
+    toast('Push send failed: ' + e.message, 'err');
+  }
+}
+
+function prefillWinnerMessage() {
+  document.getElementById('support-new-category').value = 'winner_payout';
+  if (!document.getElementById('support-new-subject').value.trim()) {
+    document.getElementById('support-new-subject').value = 'Trailhead prize payout';
+  }
+  if (!document.getElementById('support-new-body').value.trim()) {
+    document.getElementById('support-new-body').value = 'You have a Trailhead payout ready. Reply here with your preferred payment method and any required details so we can complete the transfer.';
+  }
+}
+
+function openSupportTabFromAward(userId, username, prizeLabel) {
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  const nav = Array.from(document.querySelectorAll('.nav-item')).find(el => el.textContent.includes('Messages'));
+  if (nav) nav.classList.add('active');
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-messages').classList.add('active');
+  document.getElementById('support-new-user-id').value = String(userId || '');
+  document.getElementById('support-new-category').value = 'winner_payout';
+  document.getElementById('support-new-subject').value = `${prizeLabel || 'Trailhead payout'} for ${username || 'winner'}`;
+  document.getElementById('support-new-body').value = `Hi ${username || ''}, you have a Trailhead payout ready. Reply here with your preferred payment method so we can finish the transfer.`;
+  loadSupportThreads();
+}
+
+function renderSupportThreads(threads) {
+  const el = document.getElementById('support-thread-list');
+  el.innerHTML = (threads || []).map(thread => `
+    <div class="support-thread-card ${thread.id === selectedAdminSupportThreadId ? 'active' : ''}" onclick="selectSupportThread(${thread.id})">
+      <div class="support-thread-top">
+        <div>
+          <div class="support-thread-subject">${esc(thread.subject || 'Trailhead support')}</div>
+          <div class="support-thread-meta">
+            #${thread.id} · ${esc(thread.username || thread.email || `user ${thread.user_id}`)} · ${esc(thread.category || 'support')}<br>
+            ${new Date((Number(thread.last_message_at) || 0) * 1000).toLocaleString()}
+          </div>
+        </div>
+        <span class="badge ${thread.status === 'closed' ? 'badge-gray' : thread.unread_count > 0 ? 'badge-yellow' : 'badge-green'}">${thread.unread_count > 0 ? `${thread.unread_count} NEW` : esc((thread.status || 'open').toUpperCase())}</span>
+      </div>
+      <div class="support-thread-body">${esc(thread.last_message_body || 'No messages yet.')}</div>
+    </div>
+  `).join('') || '<div class="support-empty">No message threads found.</div>';
+}
+
+function renderSupportThreadDetail(thread) {
+  const el = document.getElementById('support-thread-detail');
+  if (!thread) {
+    el.innerHTML = '<div class="support-empty">Select a thread to read and reply.</div>';
+    return;
+  }
+  el.innerHTML = `
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:14px;">
+      <div>
+        <div class="support-thread-subject">${esc(thread.subject || 'Trailhead support')}</div>
+        <div class="support-thread-meta">
+          User #${thread.user_id} · ${esc(thread.username || thread.email || 'unknown')} · ${esc(thread.category || 'support')}<br>
+          Opened ${new Date((Number(thread.created_at) || 0) * 1000).toLocaleString()} · status ${esc(thread.status || 'open')}
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn btn-ghost btn-sm" onclick="setSupportThreadStatus('open')">Reopen</button>
+        <button class="btn btn-ghost btn-sm" onclick="setSupportThreadStatus('closed')">Close</button>
+      </div>
+    </div>
+    <div class="support-message-list">
+      ${(thread.messages || []).map(msg => `
+        <div class="support-message-bubble ${msg.sender_role === 'admin' ? 'support-message-admin' : 'support-message-user'}">
+          <div class="support-message-role">${msg.sender_role === 'admin' ? 'TRAILHEAD' : 'USER'}</div>
+          <div>${esc(msg.body || '')}</div>
+          <div class="support-message-meta">${new Date((Number(msg.created_at) || 0) * 1000).toLocaleString()}</div>
+        </div>
+      `).join('') || '<div class="support-empty">No messages yet.</div>'}
+    </div>
+    <div style="margin-top:14px;">
+      <div class="modal-label">REPLY</div>
+      <textarea id="support-reply-body" class="story-textarea" style="min-height:120px;font-family:inherit;font-size:14px;" placeholder="Write your reply here."></textarea>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px;">
+      <label class="push-chip" style="display:inline-flex;align-items:center;gap:8px;">
+        <input id="support-close-after-send" type="checkbox">
+        Close after send
+      </label>
+      <button class="btn btn-primary" onclick="sendSupportReply()">Send Reply</button>
+    </div>
+  `;
+}
+
+async function loadSupportThreads(preferredThreadId = null) {
+  try {
+    const search = document.getElementById('support-search').value.trim();
+    const status = document.getElementById('support-status-filter').value;
+    const qs = new URLSearchParams();
+    if (search) qs.set('search', search);
+    if (status) qs.set('status', status);
+    const data = await api(`/api/admin/support/threads${qs.toString() ? '?' + qs.toString() : ''}`);
+    adminSupportThreads = data.threads || [];
+    renderSupportThreads(adminSupportThreads);
+    const nextId = preferredThreadId || selectedAdminSupportThreadId || adminSupportThreads[0]?.id || null;
+    if (nextId) {
+      await selectSupportThread(nextId);
+    } else {
+      selectedAdminSupportThreadId = null;
+      renderSupportThreadDetail(null);
+    }
+  } catch(e) {
+    toast('Error loading support threads: ' + e.message, 'err');
+  }
+}
+
+async function selectSupportThread(threadId) {
+  selectedAdminSupportThreadId = threadId;
+  renderSupportThreads(adminSupportThreads);
+  try {
+    const detail = await api(`/api/admin/support/threads/${threadId}`);
+    adminSupportThreads = adminSupportThreads.map(thread => thread.id === detail.id ? { ...thread, ...detail, unread_count: 0 } : thread);
+    renderSupportThreads(adminSupportThreads);
+    renderSupportThreadDetail(detail);
+  } catch(e) {
+    toast('Error loading thread: ' + e.message, 'err');
+  }
+}
+
+async function startSupportThread() {
+  const userId = parseInt(document.getElementById('support-new-user-id').value || '', 10);
+  const subject = document.getElementById('support-new-subject').value.trim();
+  const category = document.getElementById('support-new-category').value;
+  const body = document.getElementById('support-new-body').value.trim();
+  if (!Number.isFinite(userId) || userId <= 0) { toast('Enter a valid user id', 'err'); return; }
+  if (!subject) { toast('Enter a subject', 'err'); return; }
+  if (!body) { toast('Enter a message body', 'err'); return; }
+  try {
+    const data = await api('/api/admin/support/threads/start', {
+      method: 'POST',
+      body: JSON.stringify({ user_id: userId, subject, category, body }),
+    });
+    toast('Support thread started', 'ok');
+    document.getElementById('support-new-body').value = '';
+    await loadSupportThreads(data.thread_id);
+  } catch(e) {
+    toast('Could not start thread: ' + e.message, 'err');
+  }
+}
+
+async function sendSupportReply() {
+  if (!selectedAdminSupportThreadId) { toast('Select a thread first', 'err'); return; }
+  const body = document.getElementById('support-reply-body').value.trim();
+  const closeAfterSend = !!document.getElementById('support-close-after-send').checked;
+  if (!body) { toast('Enter a reply', 'err'); return; }
+  try {
+    await api(`/api/admin/support/threads/${selectedAdminSupportThreadId}/message`, {
+      method: 'POST',
+      body: JSON.stringify({ body, close_after_send: closeAfterSend }),
+    });
+    toast('Reply sent', 'ok');
+    await loadSupportThreads(selectedAdminSupportThreadId);
+  } catch(e) {
+    toast('Reply failed: ' + e.message, 'err');
+  }
+}
+
+async function setSupportThreadStatus(status) {
+  if (!selectedAdminSupportThreadId) return;
+  try {
+    await api(`/api/admin/support/threads/${selectedAdminSupportThreadId}/status`, {
+      method: 'POST',
+      body: JSON.stringify({ status }),
+    });
+    toast(`Thread marked ${status}`, 'ok');
+    await loadSupportThreads(selectedAdminSupportThreadId);
+  } catch(e) {
+    toast('Status update failed: ' + e.message, 'err');
+  }
 }
 
 // ── Reports ───────────────────────────────────────────────────────────────────

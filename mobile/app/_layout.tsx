@@ -202,7 +202,15 @@ export default function RootLayout() {
 
     const notifSub = Notifications.addNotificationResponseReceivedListener(async response => {
       const data = response.notification.request.content.data as any;
-      if (data?.type === 'trip_ready' && data?.job_id) {
+      if (typeof data?.deeplink === 'string' && data.deeplink.trim().startsWith('/')) {
+        const base = data.deeplink.trim();
+        if (data?.support_thread_id) {
+          const joiner = base.includes('?') ? '&' : '?';
+          router.push(`${base}${joiner}support_thread_id=${encodeURIComponent(String(data.support_thread_id))}` as any);
+        } else {
+          router.push(base as any);
+        }
+      } else if (data?.type === 'trip_ready' && data?.job_id) {
         // User tapped "your route is ready" notification — fetch and load the trip
         try {
           const job = await api.getPlanJob(data.job_id);
@@ -213,6 +221,10 @@ export default function RootLayout() {
         } catch {}
       } else if (data?.type === 'trail_alert') {
         router.push('/(tabs)/report');
+      } else if (data?.type === 'contest' || data?.type === 'credits_promo') {
+        router.push('/(tabs)/profile');
+      } else if (data?.type === 'community_event' || data?.type === 'admin_campaign') {
+        router.push('/(tabs)/guide');
       } else {
         router.push('/(tabs)/guide');
       }

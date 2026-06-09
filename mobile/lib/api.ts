@@ -115,6 +115,14 @@ export const api = {
 
   registerPushToken: (token: string) =>
     req('/api/push-token', { method: 'POST', body: JSON.stringify({ token }) }),
+  getSupportInbox: () =>
+    req<{ threads: SupportThread[]; unread_count: number }>('/api/support/inbox'),
+  getSupportThread: (threadId: number) =>
+    req<SupportThread>(`/api/support/threads/${threadId}`),
+  sendSupportMessage: (data: { thread_id?: number; subject?: string; category?: string; body: string }) =>
+    req<{ ok: boolean; thread_id: number; message?: SupportMessage | null }>('/api/support/inbox/message', {
+      method: 'POST', body: JSON.stringify(data),
+    }),
   chat: (message: string, sessionId: string, currentTrip?: TripResult | null, rigContext?: Record<string, unknown> | null) =>
     req<ChatResponse>('/api/chat', { method: 'POST', body: JSON.stringify({ message, session_id: sessionId, current_trip: currentTrip ?? undefined, rig_context: rigContext ?? undefined }) }),
   getTrip: (id: string) => req<TripResult>(`/api/trip/${id}`),
@@ -653,6 +661,33 @@ export interface User {
   reporting_restricted_until?: number;
   is_admin?: boolean;
   email_verified?: boolean | number;
+}
+export interface SupportMessage {
+  id: number;
+  thread_id: number;
+  sender_role: 'user' | 'admin' | string;
+  sender_user_id?: number | null;
+  sender_admin_id?: number | null;
+  body: string;
+  created_at: number;
+  meta?: Record<string, unknown>;
+}
+export interface SupportThread {
+  id: number;
+  user_id: number;
+  username?: string;
+  email?: string;
+  category: string;
+  subject: string;
+  status: string;
+  opened_by: string;
+  created_by_admin?: number | null;
+  last_message_at: number;
+  created_at: number;
+  updated_at: number;
+  unread_count?: number;
+  last_message_body?: string;
+  messages?: SupportMessage[];
 }
 export type ExtremeSurface = 'map_layers' | 'map' | 'route_builder' | 'navigation' | 'copilot' | 'weather';
 export type ExtremeCheckpointType = 'start' | 'fuel' | 'stay' | 'camp' | 'food' | 'repair' | 'viewpoint' | 'weather' | 'finish' | string;

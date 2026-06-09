@@ -67,6 +67,11 @@ from db.store import (
     get_extreme_admin_config, set_extreme_admin_config,
     authorize_offline_download,
     save_push_token, get_push_token,
+    get_push_campaign_recipients, count_push_campaign_recipients,
+    create_push_campaign, record_push_campaign_delivery, finalize_push_campaign,
+    list_push_campaigns, get_push_campaign,
+    create_support_thread, list_support_threads_for_user, list_support_threads_admin,
+    get_support_thread, add_support_message, update_support_thread_status,
     list_user_trips, save_account_trip, save_trip_geometry,
     create_plan_job, get_plan_job, update_plan_job,
     submit_field_report, get_field_reports, get_field_report_summary,
@@ -1258,6 +1263,38 @@ class AdminExtremeConfigBody(BaseModel):
     max_demo_session_seconds: Optional[int] = None
     max_navigation_session_seconds: Optional[int] = None
     cost_cap_cents_daily: Optional[int] = None
+
+class AdminPushAudience(BaseModel):
+    segment: str = "active_recent"
+    active_within_days: Optional[int] = 30
+    credits_lte: Optional[int] = None
+
+class AdminPushCampaignBody(BaseModel):
+    title: str
+    body: str
+    campaign_type: str = "admin_campaign"
+    audience: AdminPushAudience = Field(default_factory=AdminPushAudience)
+    deeplink: Optional[str] = None
+    data: dict = Field(default_factory=dict)
+    credits: Optional[int] = None
+    campaign_tag: Optional[str] = None
+    test_only: bool = False
+
+class SupportInboxMessageBody(BaseModel):
+    thread_id: Optional[int] = None
+    subject: Optional[str] = None
+    category: str = "support"
+    body: str
+
+class AdminSupportThreadCreateBody(BaseModel):
+    user_id: int
+    subject: str
+    category: str = "support"
+    body: str
+
+class AdminSupportThreadMessageBody(BaseModel):
+    body: str
+    close_after_send: bool = False
     copilot_persona: Optional[str] = None
     copilot_voice: Optional[str] = None
 
@@ -2903,18 +2940,107 @@ async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depend
             "outline": response.get("outline"), "trail_dna": trail_dna}
 
 
-async def _send_expo_push(token: str, title: str, body_text: str, data: dict) -> None:
-    """Fire-and-forget Expo push notification."""
+async def _send_expo_push(token: str, title: str, body_text: str, data: dict) -> dict:
+    """Best-effort Expo push notification. Returns a structured result."""
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            await client.post(
+            response = await client.post(
                 "https://exp.host/--/api/v2/push/send",
                 json={"to": token, "title": title, "body": body_text,
                       "data": data, "sound": "default", "priority": "high"},
                 headers={"Accept": "application/json", "Content-Type": "application/json"},
             )
-    except Exception:
-        pass  # push is best-effort; never block the main flow
+        payload = response.json() if response.content else {}
+        if response.is_success:
+            return {"ok": True, "response": payload}
+        return {"ok": False, "error": response.text[:400], "response": payload}
+    except Exception as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+def _normalize_admin_push_payload(body: AdminPushCampaignBody) -> tuple[str, str, dict]:
+    campaign_type = re.sub(r"[^a-z0-9_:-]+", "_", str(body.campaign_type or "admin_campaign").strip().lower())[:60] or "admin_campaign"
+    deeplink = str(body.deeplink or "").strip() or "/(tabs)/guide"
+    payload = dict(body.data or {})
+    payload["type"] = campaign_type
+    payload["deeplink"] = deeplink
+    if body.credits is not None:
+        payload["credits"] = int(body.credits)
+    if body.campaign_tag:
+        payload["campaign_tag"] = re.sub(r"[^a-z0-9_:-]+", "_", str(body.campaign_tag).strip().lower())[:80]
+    return campaign_type, deeplink, payload
+
+async def _send_admin_push_campaign(body: AdminPushCampaignBody, admin: dict) -> dict:
+    campaign_type, deeplink, payload = _normalize_admin_push_payload(body)
+    audience = body.audience.model_dump()
+    recipients = get_push_campaign_recipients(audience)
+    if body.test_only:
+        recipients = [row for row in recipients if int(row.get("is_admin") or 0) == 1]
+    estimated = len(recipients)
+    if estimated <= 0:
+        raise HTTPException(400, "No recipients match this audience")
+    campaign_key = f"push_{uuid.uuid4().hex[:16]}"
+    campaign_id = create_push_campaign(
+        campaign_key=campaign_key,
+        campaign_type=campaign_type,
+        audience=audience,
+        title=body.title.strip()[:120],
+        body=body.body.strip()[:300],
+        deeplink=deeplink,
+        payload=payload,
+        created_by=admin["id"],
+        estimated_recipients=estimated,
+        test_only=body.test_only,
+        status="sending",
+    )
+    sent_count = 0
+    failed_count = 0
+    for offset in range(0, len(recipients), 50):
+        batch = recipients[offset:offset + 50]
+        results = await asyncio.gather(*[
+            _send_expo_push(
+                str(recipient["push_token"]),
+                body.title.strip()[:120],
+                body.body.strip()[:300],
+                {**payload, "campaign_id": campaign_id, "campaign_key": campaign_key},
+            )
+            for recipient in batch
+        ])
+        for recipient, result in zip(batch, results):
+            ok = bool(result.get("ok"))
+            if ok:
+                sent_count += 1
+            else:
+                failed_count += 1
+            record_push_campaign_delivery(
+                campaign_id=campaign_id,
+                user_id=recipient.get("id"),
+                push_token=str(recipient.get("push_token") or ""),
+                delivery_status="sent" if ok else "failed",
+                response=result.get("response"),
+                error_text=result.get("error"),
+            )
+        if offset + 50 < len(recipients):
+            await asyncio.sleep(0.35)
+    finalize_push_campaign(campaign_id, sent_count=sent_count, failed_count=failed_count, status="sent")
+    log_event(admin["id"], None, "admin_push_campaign_send", {
+        "campaign_id": campaign_id,
+        "campaign_type": campaign_type,
+        "test_only": body.test_only,
+        "estimated": estimated,
+        "sent": sent_count,
+        "failed": failed_count,
+        "audience": audience,
+    })
+    return {
+        "campaign_id": campaign_id,
+        "campaign_key": campaign_key,
+        "campaign_type": campaign_type,
+        "estimated_recipients": estimated,
+        "sent_count": sent_count,
+        "failed_count": failed_count,
+        "test_only": body.test_only,
+        "deeplink": deeplink,
+    }
 
 
 async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, cost: int) -> None:
@@ -3088,6 +3214,45 @@ async def register_push_token(body: PushTokenRequest, user: dict = Depends(_curr
     """Store the device's Expo push token so the server can notify on job completion."""
     save_push_token(user["id"], body.token)
     return {"ok": True}
+
+@app.get("/api/support/inbox")
+async def support_inbox(user: dict = Depends(_current_user)):
+    threads = list_support_threads_for_user(user["id"])
+    return {
+        "threads": threads,
+        "unread_count": sum(int(t.get("unread_count") or 0) for t in threads),
+    }
+
+@app.get("/api/support/threads/{thread_id}")
+async def support_thread_detail(thread_id: int, user: dict = Depends(_current_user)):
+    thread = get_support_thread(thread_id, user_id=user["id"], admin=False)
+    if not thread:
+        raise HTTPException(404, "Thread not found")
+    return thread
+
+@app.post("/api/support/inbox/message")
+async def support_inbox_message(body: SupportInboxMessageBody, user: dict = Depends(_current_user)):
+    text = body.body.strip()
+    if not text:
+        raise HTTPException(400, "Message body is required")
+    if body.thread_id:
+        thread = get_support_thread(body.thread_id, user_id=user["id"], admin=False)
+        if not thread:
+            raise HTTPException(404, "Thread not found")
+        message = add_support_message(body.thread_id, "user", text, user_id=user["id"])
+        thread_id = body.thread_id
+    else:
+        subject = (body.subject or "Trailhead support").strip()[:160] or "Trailhead support"
+        thread_id = create_support_thread(
+            user_id=user["id"],
+            subject=subject,
+            category=(body.category or "support").strip().lower()[:60] or "support",
+            opened_by="user",
+            initial_body=text,
+        )
+        message = None
+    log_event(user["id"], None, "support_user_message", {"thread_id": thread_id, "category": body.category})
+    return {"ok": True, "thread_id": thread_id, "message": message}
 
 
 # ── Routing ───────────────────────────────────────────────────────────────────
@@ -8736,6 +8901,141 @@ async def admin_contest_award_status(award_id: int, body: AdminContestAwardStatu
     if not award:
         raise HTTPException(400, "Invalid award or status")
     return {"ok": True, "award": award}
+
+@app.post("/api/admin/push-campaigns/preview")
+async def admin_push_campaign_preview(body: AdminPushCampaignBody,
+                                      admin: dict = Depends(_require_admin)):
+    audience = body.audience.model_dump()
+    if body.test_only:
+        recipients = [row for row in get_push_campaign_recipients(audience, limit=25) if int(row.get("is_admin") or 0) == 1]
+        count = len([row for row in get_push_campaign_recipients(audience) if int(row.get("is_admin") or 0) == 1])
+    else:
+        count = count_push_campaign_recipients(audience)
+        recipients = get_push_campaign_recipients(audience, limit=5)
+    campaign_type, deeplink, payload = _normalize_admin_push_payload(body)
+    return {
+        "ok": True,
+        "campaign_type": campaign_type,
+        "deeplink": deeplink,
+        "payload": payload,
+        "audience": audience,
+        "estimated_recipients": count,
+        "sample_recipients": [
+            {
+                "id": row["id"],
+                "username": row["username"],
+                "email": row["email"],
+                "plan_type": row["plan_type"],
+                "credits": row["credits"],
+                "is_admin": bool(row["is_admin"]),
+            }
+            for row in recipients
+        ],
+    }
+
+@app.post("/api/admin/push-campaigns/send")
+async def admin_push_campaign_send(body: AdminPushCampaignBody,
+                                   admin: dict = Depends(_require_admin)):
+    if not body.title.strip():
+        raise HTTPException(400, "Title is required")
+    if not body.body.strip():
+        raise HTTPException(400, "Body is required")
+    result = await _send_admin_push_campaign(body, admin)
+    return {"ok": True, **result}
+
+@app.get("/api/admin/push-campaigns")
+async def admin_push_campaign_list(admin: dict = Depends(_require_admin)):
+    return {"campaigns": list_push_campaigns(60)}
+
+@app.get("/api/admin/push-campaigns/{campaign_id}")
+async def admin_push_campaign_detail(campaign_id: int,
+                                     admin: dict = Depends(_require_admin)):
+    campaign = get_push_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(404, "Campaign not found")
+    return campaign
+
+@app.get("/api/admin/support/threads")
+async def admin_support_threads(search: str = "", status: str = "",
+                                admin: dict = Depends(_require_admin)):
+    return {"threads": list_support_threads_admin(status.strip() or None, search.strip(), 200)}
+
+@app.get("/api/admin/support/threads/{thread_id}")
+async def admin_support_thread_detail(thread_id: int,
+                                      admin: dict = Depends(_require_admin)):
+    thread = get_support_thread(thread_id, admin=True)
+    if not thread:
+        raise HTTPException(404, "Thread not found")
+    return thread
+
+@app.post("/api/admin/support/threads/start")
+async def admin_support_thread_start(body: AdminSupportThreadCreateBody,
+                                     admin: dict = Depends(_require_admin)):
+    message = body.body.strip()
+    subject = body.subject.strip()
+    if not subject:
+        raise HTTPException(400, "Subject is required")
+    if not message:
+        raise HTTPException(400, "Message body is required")
+    target = get_user_by_id(body.user_id)
+    if not target:
+        raise HTTPException(404, "User not found")
+    thread_id = create_support_thread(
+        user_id=body.user_id,
+        subject=subject,
+        category=(body.category or "support").strip().lower()[:60] or "support",
+        opened_by="admin",
+        initial_body=message,
+        admin_id=admin["id"],
+    )
+    push_token = get_push_token(body.user_id)
+    if push_token:
+        await _send_expo_push(
+            push_token,
+            title="Trailhead support message",
+            body_text=subject[:140],
+            data={"type": "admin_campaign", "deeplink": "/(tabs)/profile?support=1", "support_thread_id": thread_id},
+        )
+    log_event(admin["id"], None, "admin_support_thread_start", {"thread_id": thread_id, "target_user_id": body.user_id, "category": body.category})
+    return {"ok": True, "thread_id": thread_id}
+
+@app.post("/api/admin/support/threads/{thread_id}/message")
+async def admin_support_thread_message(thread_id: int, body: AdminSupportThreadMessageBody,
+                                       admin: dict = Depends(_require_admin)):
+    text = body.body.strip()
+    if not text:
+        raise HTTPException(400, "Message body is required")
+    thread = get_support_thread(thread_id, admin=True)
+    if not thread:
+        raise HTTPException(404, "Thread not found")
+    message = add_support_message(thread_id, "admin", text, admin_id=admin["id"])
+    if not message:
+        raise HTTPException(404, "Thread not found")
+    if body.close_after_send:
+        update_support_thread_status(thread_id, "closed")
+    push_token = get_push_token(int(thread["user_id"]))
+    if push_token:
+        await _send_expo_push(
+            push_token,
+            title="New Trailhead message",
+            body_text=text[:140],
+            data={"type": "admin_campaign", "deeplink": "/(tabs)/profile?support=1", "support_thread_id": thread_id},
+        )
+    log_event(admin["id"], None, "admin_support_thread_message", {"thread_id": thread_id, "close_after_send": body.close_after_send})
+    return {"ok": True, "message": message}
+
+@app.post("/api/admin/support/threads/{thread_id}/status")
+async def admin_support_thread_status(thread_id: int, body: dict,
+                                      admin: dict = Depends(_require_admin)):
+    status = str(body.get("status", "")).strip().lower()
+    if status not in {"open", "closed"}:
+        raise HTTPException(400, "Status must be open or closed")
+    thread = get_support_thread(thread_id, admin=True)
+    if not thread:
+        raise HTTPException(404, "Thread not found")
+    update_support_thread_status(thread_id, status)
+    log_event(admin["id"], None, "admin_support_thread_status", {"thread_id": thread_id, "status": status})
+    return {"ok": True, "status": status}
 
 @app.get("/api/admin/map-contributor-applications")
 async def admin_map_contributor_applications(status: Optional[str] = "pending",

@@ -4,7 +4,7 @@ import {
   TextInput, Alert, Share, Linking, ActivityIndicator, Image, Modal, Animated, Keyboard, Switch, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
@@ -12,7 +12,7 @@ import { storage } from '@/lib/storage';
 import * as Updates from 'expo-updates';
 import Constants from 'expo-constants';
 import * as Application from 'expo-application';
-import { api, ApiError, ContestStatus, ContributorProfile } from '@/lib/api';
+import { api, ApiError, ContestStatus, ContributorProfile, SupportThread } from '@/lib/api';
 import { useStore, RigProfile, SavedPlace, TripHistoryItem } from '@/lib/store';
 import PaywallModal from '@/components/PaywallModal';
 import TourTarget from '@/components/TourTarget';
@@ -118,6 +118,7 @@ export default function ProfileScreen() {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
   const router = useRouter();
+  const params = useLocalSearchParams<{ support?: string; support_thread_id?: string }>();
   const { user, rigProfile, setAuth, clearAuth, setRigProfile } = useStore();
   const tripHistory    = useStore(st => st.tripHistory);
   const removeTripFromHistory = useStore(st => st.removeTripFromHistory);
@@ -173,6 +174,13 @@ export default function ProfileScreen() {
   const [showContributions, setShowContributions] = useState(false);
   const [contributions, setContributions] = useState<ContributorProfile | null>(null);
   const [contributionsLoading, setContributionsLoading] = useState(false);
+  const [showSupportInbox, setShowSupportInbox] = useState(false);
+  const [supportThreads, setSupportThreads] = useState<SupportThread[]>([]);
+  const [supportUnreadCount, setSupportUnreadCount] = useState(0);
+  const [supportLoading, setSupportLoading] = useState(false);
+  const [supportSelectedThreadId, setSupportSelectedThreadId] = useState<number | null>(null);
+  const [supportDraft, setSupportDraft] = useState('');
+  const [supportSending, setSupportSending] = useState(false);
   const [visibilitySaving, setVisibilitySaving] = useState(false);
   const [adminClearingCampCache, setAdminClearingCampCache] = useState(false);
 
@@ -244,6 +252,20 @@ export default function ProfileScreen() {
   useEffect(() => {
     if (user && view !== 'main') setView('main');
   }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    loadSupportInbox(false).catch(() => {});
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user || params.support !== '1') return;
+    const threadIdRaw = Array.isArray(params.support_thread_id) ? params.support_thread_id[0] : params.support_thread_id;
+    const threadId = threadIdRaw ? parseInt(String(threadIdRaw), 10) : NaN;
+    openSupportInbox(Number.isFinite(threadId) ? threadId : null).catch(() => {});
+  }, [params.support, params.support_thread_id, user?.id]);
+
+  const selectedSupportThread = supportThreads.find(thread => thread.id === supportSelectedThreadId) ?? null;
 
   useEffect(() => {
     let alive = true;
@@ -323,6 +345,77 @@ export default function ProfileScreen() {
       Alert.alert('Privacy update failed', e?.message ?? 'Could not update profile visibility.');
     } finally {
       setVisibilitySaving(false);
+    }
+  }
+
+  async function loadSupportInbox(openModal = false, preferredThreadId?: number | null) {
+    if (!user) return;
+    if (openModal) setShowSupportInbox(true);
+    setSupportLoading(true);
+    try {
+      const inbox = await api.getSupportInbox();
+      setSupportThreads(inbox.threads || []);
+      setSupportUnreadCount(inbox.unread_count || 0);
+      const nextThreadId = preferredThreadId
+        ?? supportSelectedThreadId
+        ?? inbox.threads?.[0]?.id
+        ?? null;
+      if (nextThreadId) {
+        const detail = await api.getSupportThread(nextThreadId);
+        setSupportThreads(prev => prev.map(thread => thread.id === detail.id ? detail : thread));
+        setSupportSelectedThreadId(detail.id);
+      } else {
+        setSupportSelectedThreadId(null);
+      }
+    } catch (e: any) {
+      if (openModal) Alert.alert('Inbox unavailable', e?.message ?? 'Could not load messages right now.');
+    } finally {
+      setSupportLoading(false);
+    }
+  }
+
+  async function openSupportInbox(threadId?: number | null) {
+    await loadSupportInbox(true, threadId ?? null);
+  }
+
+  async function openSupportThread(threadId: number) {
+    setSupportSelectedThreadId(threadId);
+    setSupportLoading(true);
+    try {
+      const detail = await api.getSupportThread(threadId);
+      setSupportThreads(prev => {
+        const others = prev.filter(thread => thread.id !== detail.id);
+        return [detail, ...others];
+      });
+      setSupportUnreadCount(prev => {
+        const prior = supportThreads.find(thread => thread.id === threadId);
+        return Math.max(0, prev - Number(prior?.unread_count || 0));
+      });
+    } catch (e: any) {
+      Alert.alert('Thread unavailable', e?.message ?? 'Could not open that message thread.');
+    } finally {
+      setSupportLoading(false);
+    }
+  }
+
+  async function sendSupportReply() {
+    const text = supportDraft.trim();
+    if (!text || supportSending) return;
+    setSupportSending(true);
+    try {
+      const selectedThread = supportThreads.find(thread => thread.id === supportSelectedThreadId) ?? null;
+      const response = await api.sendSupportMessage({
+        thread_id: selectedThread?.id,
+        subject: selectedThread?.subject || 'Trailhead support',
+        category: selectedThread?.category || 'support',
+        body: text,
+      });
+      setSupportDraft('');
+      await loadSupportInbox(true, response.thread_id);
+    } catch (e: any) {
+      Alert.alert('Message failed', e?.message ?? 'Could not send your message.');
+    } finally {
+      setSupportSending(false);
     }
   }
 
@@ -1079,6 +1172,36 @@ export default function ProfileScreen() {
           ))}
         </ScrollView>
 
+        <TouchableOpacity style={s.supportCard} onPress={() => openSupportInbox()} activeOpacity={0.9}>
+          <View style={s.supportCardTop}>
+            <View style={s.supportCardIcon}>
+              <Ionicons name="notifications-outline" size={18} color={C.orange} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.supportCardKicker}>NOTIFICATION BOARD</Text>
+              <Text style={s.supportCardTitle}>Admin and customer service messages</Text>
+            </View>
+            {supportUnreadCount > 0 ? (
+              <View style={s.supportUnreadBadge}>
+                <Text style={s.supportUnreadText}>{supportUnreadCount}</Text>
+              </View>
+            ) : null}
+          </View>
+          <Text style={s.supportCardBody}>
+            {supportThreads[0]?.last_message_body
+              ? supportThreads[0].last_message_body
+              : 'Support replies, payout questions, contest follow-ups, and account messages will show up here.'}
+          </Text>
+          <View style={s.supportMetaRow}>
+            <Text style={s.supportMetaText}>
+              {supportThreads.length
+                ? `${supportThreads.length} thread${supportThreads.length === 1 ? '' : 's'}`
+                : 'No threads yet'}
+            </Text>
+            <Text style={s.supportMetaAction}>OPEN</Text>
+          </View>
+        </TouchableOpacity>
+
         {/* My Rig */}
         <View style={s.rigCard}>
           <View style={s.rigHeader}>
@@ -1694,6 +1817,83 @@ export default function ProfileScreen() {
           )}
         </View>
 
+        <Modal visible={showSupportInbox} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowSupportInbox(false)}>
+          <SafeAreaView style={s.contestModal}>
+            <TrailheadTopBar
+              title="INBOX"
+              subtitle="Support and admin messages"
+              icon="mail-outline"
+              style={s.contestModalHeader}
+              right={(
+                <TouchableOpacity style={s.contestClose} onPress={() => setShowSupportInbox(false)}>
+                  <Ionicons name="close" size={20} color={C.text} />
+                </TouchableOpacity>
+              )}
+            />
+            {supportLoading && !supportThreads.length ? (
+              <View style={s.contestLoading}>
+                <ActivityIndicator color={C.orange} />
+                <Text style={s.contestMuted}>Loading your message board...</Text>
+              </View>
+            ) : (
+              <ScrollView contentContainerStyle={s.contestScroll}>
+                <TrailheadCard style={s.supportModalCard}>
+                  <Text style={s.sectionLabel}>THREADS</Text>
+                  {(supportThreads || []).length ? supportThreads.map(thread => (
+                    <TouchableOpacity key={thread.id} style={[s.supportThreadRow, selectedSupportThread?.id === thread.id && s.supportThreadRowActive]} onPress={() => openSupportThread(thread.id)}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.supportThreadSubject} numberOfLines={1}>{thread.subject}</Text>
+                        <Text style={s.supportThreadMeta} numberOfLines={2}>
+                          {thread.last_message_body || 'Open this thread to read the latest message.'}
+                        </Text>
+                      </View>
+                      {Number(thread.unread_count || 0) > 0 ? (
+                        <View style={s.supportUnreadBadge}>
+                          <Text style={s.supportUnreadText}>{thread.unread_count}</Text>
+                        </View>
+                      ) : null}
+                    </TouchableOpacity>
+                  )) : (
+                    <Text style={s.contestMuted}>No admin or support threads yet. Send a message below to start one.</Text>
+                  )}
+                </TrailheadCard>
+
+                <TrailheadCard style={s.supportModalCard}>
+                  <Text style={s.sectionLabel}>{selectedSupportThread?.subject || 'NEW SUPPORT MESSAGE'}</Text>
+                  <View style={s.supportMessageList}>
+                    {(selectedSupportThread?.messages || []).length ? selectedSupportThread!.messages!.map(msg => (
+                      <View key={msg.id} style={[s.supportBubble, msg.sender_role === 'admin' ? s.supportBubbleAdmin : s.supportBubbleUser]}>
+                        <Text style={s.supportBubbleRole}>{msg.sender_role === 'admin' ? 'Trailhead' : 'You'}</Text>
+                        <Text style={s.supportBubbleBody}>{msg.body}</Text>
+                      </View>
+                    )) : (
+                      <Text style={s.contestMuted}>Start a thread here for customer service, account help, or winner payout details.</Text>
+                    )}
+                  </View>
+                  <TextInput
+                    style={s.supportComposer}
+                    placeholder={selectedSupportThread ? 'Reply to this thread…' : 'Write a message to Trailhead support…'}
+                    placeholderTextColor={C.text3}
+                    value={supportDraft}
+                    onChangeText={setSupportDraft}
+                    multiline
+                    maxLength={1200}
+                    textAlignVertical="top"
+                  />
+                  <TrailheadButton
+                    label={supportSending ? 'SENDING...' : 'SEND MESSAGE'}
+                    icon="send-outline"
+                    variant="primary"
+                    loading={supportSending}
+                    onPress={sendSupportReply}
+                    disabled={supportSending || !supportDraft.trim()}
+                  />
+                </TrailheadCard>
+              </ScrollView>
+            )}
+          </SafeAreaView>
+        </Modal>
+
         <Modal visible={showContributorApply} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowContributorApply(false)}>
           <SafeAreaView style={[s.container, { padding: 0 }]}>
             <View style={s.bugModal}>
@@ -2289,6 +2489,29 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     borderWidth: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s2,
   },
   quickActionLabel: { color: C.text3, fontSize: 8.5, fontFamily: mono, letterSpacing: 0.5, textAlign: 'center' },
+  supportCard: { backgroundColor: C.s2, borderRadius: 18, borderWidth: 1, borderColor: C.border, padding: 14, gap: 10 },
+  supportCardTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  supportCardIcon: { width: 38, height: 38, borderRadius: 14, backgroundColor: C.orangeGlow, borderWidth: 1, borderColor: C.orange + '44', alignItems: 'center', justifyContent: 'center' },
+  supportCardKicker: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.9 },
+  supportCardTitle: { color: C.text, fontSize: 16, fontWeight: '900', marginTop: 2 },
+  supportCardBody: { color: C.text2, fontSize: 12.5, lineHeight: 18 },
+  supportMetaRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  supportMetaText: { color: C.text3, fontSize: 11, fontFamily: mono },
+  supportMetaAction: { color: C.orange, fontSize: 11, fontFamily: mono, fontWeight: '900' },
+  supportUnreadBadge: { minWidth: 24, height: 24, paddingHorizontal: 7, borderRadius: 999, backgroundColor: C.orange, alignItems: 'center', justifyContent: 'center' },
+  supportUnreadText: { color: '#fff', fontSize: 10, fontFamily: mono, fontWeight: '900' },
+  supportModalCard: { backgroundColor: C.s2, borderRadius: 20, borderWidth: 1, borderColor: C.border, padding: 14, gap: 12 },
+  supportThreadRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: C.border },
+  supportThreadRowActive: { backgroundColor: C.s3, borderRadius: 14, paddingHorizontal: 10, marginHorizontal: -4 },
+  supportThreadSubject: { color: C.text, fontSize: 13, fontWeight: '800' },
+  supportThreadMeta: { color: C.text3, fontSize: 11, lineHeight: 16, marginTop: 3 },
+  supportMessageList: { gap: 10 },
+  supportBubble: { borderRadius: 16, padding: 12, borderWidth: 1 },
+  supportBubbleAdmin: { backgroundColor: C.orangeGlow, borderColor: C.orange + '33' },
+  supportBubbleUser: { backgroundColor: C.s3, borderColor: C.border },
+  supportBubbleRole: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.7, marginBottom: 5 },
+  supportBubbleBody: { color: C.text, fontSize: 13, lineHeight: 19 },
+  supportComposer: { minHeight: 96, borderRadius: 16, borderWidth: 1, borderColor: C.border, backgroundColor: C.s3, color: C.text, padding: 12, fontSize: 14 },
 
   contributionCard: {
     backgroundColor: C.s2, borderRadius: 24, borderWidth: 1, borderColor: '#14b8a655',

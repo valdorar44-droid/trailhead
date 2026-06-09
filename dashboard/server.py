@@ -6830,6 +6830,7 @@ async def admin_clear_camp_cache(body: CampCacheClearPayload, admin: dict = Depe
         keys = [
             f"ridb_detail_{clean}",
             f"ridb_detail_v2_{clean}",
+            f"ridb_detail_v3_{clean}",
             f"osm_detail_{clean}",
             f"blm_detail_{clean}",
             f"ai_insight_{clean}",
@@ -11592,7 +11593,7 @@ def _map_card_cache_key(body: MapCardResolveRequest) -> str:
         f"{float(body.lat):.4f}",
         f"{float(body.lng):.4f}",
     ])
-    return f"map_card_v5:{hashlib.sha1(base.encode()).hexdigest()[:24]}"
+    return f"map_card_v6:{hashlib.sha1(base.encode()).hexdigest()[:24]}"
 
 
 def _contains_restricted_provider(value: object) -> bool:

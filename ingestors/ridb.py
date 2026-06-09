@@ -562,7 +562,7 @@ def _land_label(tags: list[str]) -> str:
     return "Federal Campground"
 
 async def get_facility_detail(facility_id: str) -> dict | None:
-    cache_key = f"ridb_detail_v2_{facility_id}"
+    cache_key = f"ridb_detail_v3_{facility_id}"
     cached = get_cached("campsite_cache", cache_key, ttl_seconds=86400 * 7)
     if cached is not None:
         return cached

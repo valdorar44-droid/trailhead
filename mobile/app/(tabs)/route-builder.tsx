@@ -964,10 +964,33 @@ function campsiteToPin(camp: Campsite): CampsitePin {
   };
 }
 
+function campMediaUrl(value: unknown): string {
+  if (!value) return '';
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'object') return String((value as { url?: unknown; uri?: unknown }).url || (value as { uri?: unknown }).uri || '').trim();
+  return '';
+}
+
+function isGeneratedCampPlaceholder(url: string) {
+  const value = url.toLowerCase();
+  return !value || /placeholder|generated|trailhead-placeholder|\/api\/camps\/placeholder/.test(value);
+}
+
 function campHasPhotos(camp: Partial<CampsitePin> & Record<string, any>) {
-  if (camp.photo_url || camp.hero_photo_url || camp.primary_image || camp.image_url) return true;
-  const photos = camp.photos ?? camp.photo_candidates ?? camp.images ?? [];
-  return Array.isArray(photos) && photos.some(photo => !!(typeof photo === 'string' ? photo : photo?.url));
+  if (camp.photo_status === 'official' || Number(camp.site_media_count) > 0) return true;
+  const candidates = [
+    camp.photo_url,
+    camp.hero_photo_url,
+    camp.primary_image,
+    camp.image_url,
+    ...(Array.isArray(camp.photos) ? camp.photos : []),
+    ...(Array.isArray(camp.photo_candidates) ? camp.photo_candidates : []),
+    ...(Array.isArray(camp.images) ? camp.images : []),
+    ...(Array.isArray(camp.other_images) ? camp.other_images : []),
+  ].map(campMediaUrl).filter(Boolean);
+  if (candidates.some(url => !isGeneratedCampPlaceholder(url))) return true;
+  const fallbackChain = Array.isArray(camp.photo_fallback_chain) ? camp.photo_fallback_chain.join(' ').toLowerCase() : '';
+  return Boolean(candidates.length && fallbackChain && !/generated|placeholder/.test(fallbackChain));
 }
 
 function filterCampsByPhotoMode<T extends CampsitePin>(camps: T[], photoOnly: boolean) {
@@ -1976,6 +1999,19 @@ export default function RouteBuilderScreen() {
               .map(camp => withLegProjection(camp, searchLeg!))
               .sort((a, b) => campPreferenceScore(a) - campPreferenceScore(b) || haversineMi(a, searchLeg!.to) - haversineMi(b, searchLeg!.to));
             fallbackText = ' using the day-end area';
+            if (scoped.length === 0 && campPhotoOnly && endpointCamps.length > 0) {
+              scoped = endpointCamps
+                .filter(camp => campMatchesFilters(camp, campTypeFilters))
+                .map(camp => ({
+                  ...withLegProjection(camp, searchLeg!),
+                  photo_status: 'missing',
+                  route_fit: camp.route_fit || 'No photo fallback',
+                  photo_fallback_reason: 'Photos only found no photo-backed camp near this overnight endpoint.',
+                }))
+                .sort((a, b) => campPreferenceScore(a) - campPreferenceScore(b) || haversineMi(a, searchLeg!.to) - haversineMi(b, searchLeg!.to))
+                .slice(0, 3);
+              fallbackText = ' using a no-photo fallback near the day-end area';
+            }
           }
           storeDiscoveryResults(key, { camps: scoped, summary: `${scoped.length} ${campPhotoOnly ? 'photo-backed ' : ''}${campPreferenceLabel.toLowerCase()} camp${scoped.length === 1 ? '' : 's'} ${searchLeg!.purpose === 'overnight' ? `near Day ${searchLeg!.targetDay ?? activeDay} endpoint${fallbackText}` : 'spread along this leg'}` });
         } else {
@@ -3906,6 +3942,7 @@ export default function RouteBuilderScreen() {
                 <Text style={s.candidateMeta} numberOfLines={2}>
                   Day {day} · {camp.route_distance_mi != null ? `${fmtRouteDistance(camp.route_distance_mi)} off route · ` : ''}
                   {routeProgressLabel((camp as any).route_progress) ? `${routeProgressLabel((camp as any).route_progress)} · ` : ''}
+                  {(camp as any).photo_status === 'missing' ? 'No photo fallback · ' : ''}
                   {[...(camp.site_types ?? []), ...(camp.amenities ?? []), camp.land_type || 'Camp'].filter(Boolean).slice(0, 3).join(' · ')} · {camp.cost || 'See site'}
                 </Text>
               </View>
@@ -4982,6 +5019,81 @@ export default function RouteBuilderScreen() {
 	                            <View style={s.siteBody}>
 	                              <Text style={s.siteName} numberOfLines={2}>{item.name || `Activity ${idx + 1}`}</Text>
 	                              <Text style={s.siteMeta} numberOfLines={2}>{[item.type, item.fee_text, item.source_badge].filter(Boolean).join(' · ')}</Text>
+	                            </View>
+	                          </TouchableOpacity>
+	                        );
+	                      })}
+	                    </ScrollView>
+	                  </TrailheadCard>
+	                ) : null}
+	                {(campDetail.things_to_see ?? []).length > 0 ? (
+	                  <TrailheadCard style={s.detailSection}>
+	                    <Text style={s.detailSectionTitle}>THINGS TO SEE</Text>
+	                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.siteRail}>
+	                      {(campDetail.things_to_see ?? []).slice(0, 12).map((item: any, idx) => {
+	                        const photo = campPhotoUrl(item.photo_url || item.photos?.[0]);
+	                        return (
+	                          <TouchableOpacity key={item.id || `${item.name}-${idx}`} style={s.sitePhotoCard} activeOpacity={0.86} onPress={() => item.official_url || item.booking_url ? Linking.openURL(item.official_url || item.booking_url) : undefined}>
+	                            {photo ? (
+	                              <Image source={{ uri: photo }} style={s.sitePhoto} resizeMode="cover" />
+	                            ) : (
+	                              <View style={s.sitePlaceholder}>
+	                                <Ionicons name="camera-outline" size={22} color={C.orange} />
+	                              </View>
+	                            )}
+	                            <View style={s.siteBody}>
+	                              <Text style={s.siteName} numberOfLines={2}>{item.name || `Place ${idx + 1}`}</Text>
+	                              <Text style={s.siteMeta} numberOfLines={2}>{[item.type, item.source_badge || item.source_label].filter(Boolean).join(' · ')}</Text>
+	                            </View>
+	                          </TouchableOpacity>
+	                        );
+	                      })}
+	                    </ScrollView>
+	                  </TrailheadCard>
+	                ) : null}
+	                {(campDetail.visitor_centers ?? []).length > 0 ? (
+	                  <TrailheadCard style={s.detailSection}>
+	                    <Text style={s.detailSectionTitle}>VISITOR CENTERS</Text>
+	                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.siteRail}>
+	                      {(campDetail.visitor_centers ?? []).slice(0, 8).map((item: any, idx) => {
+	                        const photo = campPhotoUrl(item.photo_url || item.photos?.[0]);
+	                        return (
+	                          <TouchableOpacity key={item.id || `${item.name}-${idx}`} style={s.sitePhotoCard} activeOpacity={0.86} onPress={() => item.official_url || item.booking_url ? Linking.openURL(item.official_url || item.booking_url) : undefined}>
+	                            {photo ? (
+	                              <Image source={{ uri: photo }} style={s.sitePhoto} resizeMode="cover" />
+	                            ) : (
+	                              <View style={s.sitePlaceholder}>
+	                                <Ionicons name="information-circle-outline" size={22} color={C.orange} />
+	                              </View>
+	                            )}
+	                            <View style={s.siteBody}>
+	                              <Text style={s.siteName} numberOfLines={2}>{item.name || `Visitor center ${idx + 1}`}</Text>
+	                              <Text style={s.siteMeta} numberOfLines={2}>{[item.type, item.source_badge || item.source_label].filter(Boolean).join(' · ')}</Text>
+	                            </View>
+	                          </TouchableOpacity>
+	                        );
+	                      })}
+	                    </ScrollView>
+	                  </TrailheadCard>
+	                ) : null}
+	                {(campDetail.campgrounds_nearby ?? []).length > 0 ? (
+	                  <TrailheadCard style={s.detailSection}>
+	                    <Text style={s.detailSectionTitle}>CAMPGROUNDS NEARBY</Text>
+	                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.siteRail}>
+	                      {(campDetail.campgrounds_nearby ?? []).slice(0, 8).map((item: any, idx) => {
+	                        const photo = campPhotoUrl(item.photo_url || item.photos?.[0]);
+	                        return (
+	                          <TouchableOpacity key={item.id || `${item.name}-${idx}`} style={s.sitePhotoCard} activeOpacity={0.86} onPress={() => item.official_url || item.booking_url || item.url ? Linking.openURL(item.official_url || item.booking_url || item.url) : undefined}>
+	                            {photo ? (
+	                              <Image source={{ uri: photo }} style={s.sitePhoto} resizeMode="cover" />
+	                            ) : (
+	                              <View style={s.sitePlaceholder}>
+	                                <Ionicons name="bonfire-outline" size={22} color={C.orange} />
+	                              </View>
+	                            )}
+	                            <View style={s.siteBody}>
+	                              <Text style={s.siteName} numberOfLines={2}>{item.name || `Campground ${idx + 1}`}</Text>
+	                              <Text style={s.siteMeta} numberOfLines={2}>{[item.distance_mi ? `${Number(item.distance_mi).toFixed(1)} mi` : '', item.source_badge || item.source_label].filter(Boolean).join(' · ')}</Text>
 	                            </View>
 	                          </TouchableOpacity>
 	                        );

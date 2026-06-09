@@ -29,16 +29,20 @@ class OfficialPlaceEnrichmentTests(unittest.TestCase):
     def test_related_rails_keep_dumps_out_of_things_to_do(self):
         places = [
             {"id": "view-1", "name": "Canyon Overlook", "lat": 38.0, "lng": -109.0, "type": "viewpoint"},
+            {"id": "trail-1", "name": "Canyon Trail", "lat": 38.01, "lng": -109.01, "type": "trail"},
+            {"id": "visitor-1", "name": "Visitor Center", "lat": 38.02, "lng": -109.02, "type": "visitor_center"},
             {"id": "dump-1", "name": "Dump Station", "lat": 38.0, "lng": -109.0, "type": "dump"},
             {"id": "camp-1", "name": "Nearby Camp", "lat": 38.0, "lng": -109.0, "type": "camp"},
         ]
 
         rails = server._related_rails_from_places(places, [], None)
 
-        self.assertEqual([p["name"] for p in rails["things_to_do"]], ["Canyon Overlook"])
+        self.assertEqual([p["name"] for p in rails["things_to_do"]], ["Canyon Trail"])
+        self.assertEqual([p["name"] for p in rails["things_to_see"]], ["Canyon Overlook"])
+        self.assertEqual([p["name"] for p in rails["visitor_centers"]], ["Visitor Center"])
         self.assertEqual([p["name"] for p in rails["trip_services"]], ["Dump Station"])
         self.assertEqual([p["name"] for p in rails["campgrounds_nearby"]], ["Nearby Camp"])
-        self.assertEqual(rails["places"], rails["things_to_do"])
+        self.assertEqual([p["name"] for p in rails["places"]], ["Canyon Trail", "Canyon Overlook", "Visitor Center"])
         self.assertEqual(rails["camps"], rails["campgrounds_nearby"])
 
 

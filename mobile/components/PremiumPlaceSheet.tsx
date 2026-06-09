@@ -123,6 +123,8 @@ type Props = {
     places?: RelatedItem[];
     camps?: RelatedItem[];
     things_to_do?: RelatedItem[];
+    things_to_see?: RelatedItem[];
+    visitor_centers?: RelatedItem[];
     campgrounds_nearby?: RelatedItem[];
     trip_services?: RelatedItem[];
     trails?: RelatedItem[];
@@ -659,7 +661,7 @@ export default function PremiumPlaceSheet({
                   <Text style={s.infoText} numberOfLines={4}>{sourceFreshness}</Text>
                 </View>
               )}
-              {stage === 'full' && (related?.loading || related?.things_to_do?.length || related?.places?.length || related?.campgrounds_nearby?.length || related?.camps?.length || related?.trip_services?.length || related?.trails?.length || related?.error) ? (
+              {stage === 'full' && (related?.loading || related?.things_to_do?.length || related?.places?.length || related?.things_to_see?.length || related?.visitor_centers?.length || related?.campgrounds_nearby?.length || related?.camps?.length || related?.trip_services?.length || related?.trails?.length || related?.error) ? (
                 <View style={s.relatedBlock}>
                   <View style={s.relatedHeader}>
                     <Text style={s.sectionLabel}>NEARBY CONTEXT</Text>
@@ -669,6 +671,8 @@ export default function PremiumPlaceSheet({
                     <Text style={s.sectionText}>{related.error}</Text>
                   )}
                   <RelatedRail title="Things to do" items={(related?.things_to_do ?? related?.places ?? []).slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
+                  <RelatedRail title="Things to see" items={(related?.things_to_see ?? []).slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
+                  <RelatedRail title="Visitor centers" items={(related?.visitor_centers ?? []).slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
                   <RelatedRail title="Campgrounds nearby" items={(related?.campgrounds_nearby ?? related?.camps ?? []).slice(0, 8)} onPress={onOpenRelatedCamp} C={C} styles={s} />
                   <RelatedRail title="Trails" items={(related?.trails ?? []).slice(0, 8)} onPress={onOpenRelatedTrail} C={C} styles={s} />
                   <RelatedRail title="Trip services" items={(related?.trip_services ?? []).slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />

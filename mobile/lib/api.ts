@@ -1230,6 +1230,18 @@ export interface CampsitePin {
   amenities?: string[]; site_types?: string[];
   photos?: string[] | Array<{ url?: string; source?: string; caption?: string; credit?: string }>;
   photo_url?: string; reservable: boolean; cost?: string; url: string; ada: boolean;
+  photo_candidates?: string[] | Array<{ url?: string; source?: string; caption?: string; credit?: string }>;
+  hero_photo_url?: string | null; primary_image?: string | null; image_url?: string | null; images?: string[];
+  site_media_count?: number; photo_fallback_chain?: string[]; photo_status?: 'official' | 'fallback' | 'missing' | string;
+  price_summary?: {
+    label?: string; min?: number; median?: number | null; max?: number;
+    sample_count?: number; last_year?: number | null; source?: string; freshness?: string;
+  };
+  things_to_do?: NearbySmartPlace[];
+  things_to_see?: NearbySmartPlace[];
+  visitor_centers?: NearbySmartPlace[];
+  campgrounds_nearby?: NearbySmartPlace[];
+  trip_services?: NearbySmartPlace[];
   official_url?: string; booking_url?: string; source_badge?: string; source_freshness?: string; last_checked?: number;
   link_label?: 'Reserve' | 'Official page' | 'Search official site' | string;
   route_distance_mi?: number; route_fit?: string; recommended_day?: number;
@@ -1373,6 +1385,8 @@ export interface CampsiteDetail extends CampsitePin {
     sample_count?: number; last_year?: number | null; source?: string; freshness?: string;
   };
   things_to_do?: NearbySmartPlace[];
+  things_to_see?: NearbySmartPlace[];
+  visitor_centers?: NearbySmartPlace[];
   campgrounds_nearby?: NearbySmartPlace[];
   trip_services?: NearbySmartPlace[];
   permits?: NearbySmartPlace[];
@@ -1988,6 +2002,8 @@ export interface MapCardResolveResponse {
     places?: NearbySmartPlace[];
     camps?: NearbySmartPlace[];
     things_to_do?: NearbySmartPlace[];
+    things_to_see?: NearbySmartPlace[];
+    visitor_centers?: NearbySmartPlace[];
     campgrounds_nearby?: NearbySmartPlace[];
     trip_services?: NearbySmartPlace[];
     trails?: TrailProfile[];

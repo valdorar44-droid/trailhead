@@ -482,42 +482,16 @@ function copilotMapChromePalette(params: {
   map3dEnabled: boolean;
   colors: ColorPalette;
 }) {
-  const styleKey = `${params.mapLayer}:${params.premiumMapStyle}`.toLowerCase();
-  const darkMap = params.map3dEnabled
-    || params.mapLayer === 'extreme'
-    || /dark|night|satellite|hybrid|navigation_night/.test(styleKey);
-  if (darkMap) {
-    return {
-      button: {
-        backgroundColor: 'rgba(255,255,255,0.94)',
-        borderColor: 'rgba(17,24,39,0.42)',
-        shadowColor: '#000',
-        shadowOpacity: 0.42,
-      },
-      buttonActive: {
-        backgroundColor: params.colors.orange,
-        borderColor: '#ffffff',
-      },
-      text: '#111827',
-      textMuted: '#4b5563',
-      activeText: '#ffffff',
-      toast: {
-        backgroundColor: 'rgba(255,255,255,0.96)',
-        borderColor: 'rgba(17,24,39,0.18)',
-      },
-      toastText: '#1f2937',
-    };
-  }
   return {
     button: {
-      backgroundColor: 'rgba(17,24,39,0.92)',
-      borderColor: 'rgba(255,255,255,0.72)',
+      backgroundColor: 'rgba(17,24,39,0.94)',
+      borderColor: 'rgba(255,255,255,0.12)',
       shadowColor: '#000',
-      shadowOpacity: params.appTheme === 'light' ? 0.24 : 0.34,
+      shadowOpacity: 0.34,
     },
     buttonActive: {
       backgroundColor: params.colors.orange,
-      borderColor: '#ffffff',
+      borderColor: 'rgba(255,255,255,0.82)',
     },
     text: '#ffffff',
     textMuted: 'rgba(255,255,255,0.62)',
@@ -536,6 +510,8 @@ type SelectedPlaceContext = {
   camps: CampsitePin[];
   trails: TrailProfile[];
   things_to_do?: OsmPoi[];
+  things_to_see?: OsmPoi[];
+  visitor_centers?: OsmPoi[];
   campgrounds_nearby?: CampsitePin[];
   trip_services?: OsmPoi[];
   error?: string;
@@ -2414,6 +2390,9 @@ const WATER_NAV_PLACE_FILTER_IDS = ['navigation_aid', 'channel_marker', 'water_h
 const ALL_PLACE_FILTER_IDS = [...PLACE_FILTER_TYPES.map(t => t.id), ...WATER_ACCESS_FILTER_TYPES.map(t => t.id)];
 const SMART_PLACE_CATEGORIES = ESSENTIAL_PLACE_CATEGORIES;
 const UTILITY_PLACE_TYPES = new Set(['fuel', 'propane', 'water', 'dump', 'parking']);
+const TRIP_SERVICE_PLACE_TYPES = new Set(['fuel', 'propane', 'water', 'dump', 'parking', 'mechanic', 'grocery', 'food', 'hardware', 'parts']);
+const VISITOR_CENTER_PLACE_TYPES = new Set(['visitor_center', 'visitor center', 'ranger_station', 'visitor']);
+const THINGS_TO_SEE_PLACE_TYPES = new Set(['viewpoint', 'overlook', 'vista', 'peak', 'park', 'historic', 'attraction', 'monument', 'museum']);
 const TRAIL_DISCOVERY_PIN_TYPES = new Set(['trail', 'trailhead', 'viewpoint', 'peak', 'hot_spring']);
 const CAMP_PLACE_TYPES = new Set(['camp', 'camping', 'informal_camp', 'wild_camp', 'private_stay', 'farm_stay', 'ranch', 'winery', 'glamping', 'private_camp']);
 const DEFAULT_COMMUNITY_PIN_FILTERS = COMMUNITY_PIN_TYPES
@@ -4308,7 +4287,7 @@ function TrailGuideAvatar({
   const pulse = useRef(new Animated.Value(0)).current;
   const active = state !== 'idle' && state !== 'disconnected';
   const tone = trailGuideTone(state, colors);
-  const dim = size === 'sheet' ? 46 : 52;
+  const dim = size === 'sheet' ? 54 : 68;
 
   useEffect(() => {
     pulse.stopAnimation();
@@ -4330,16 +4309,28 @@ function TrailGuideAvatar({
   const ringOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.22, 0.62] });
 
   return (
-    <View style={{ alignItems: 'center', gap: 3 }}>
+    <View style={{ alignItems: 'center', gap: 4 }}>
       <View style={{ width: dim, height: dim, alignItems: 'center', justifyContent: 'center' }}>
         <Animated.View
           pointerEvents="none"
           style={{
             position: 'absolute',
-            width: dim,
-            height: dim,
-            borderRadius: dim / 2,
-            borderWidth: 1.5,
+            width: dim + 14,
+            height: dim + 14,
+            borderRadius: (dim + 14) / 2,
+            backgroundColor: tone,
+            opacity: active ? ringOpacity.interpolate({ inputRange: [0.22, 0.62], outputRange: [0.10, 0.22] }) : 0.08,
+            transform: [{ scale: active ? ringScale : 1 }],
+          }}
+        />
+        <Animated.View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            width: dim + 4,
+            height: dim + 4,
+            borderRadius: (dim + 4) / 2,
+            borderWidth: 2,
             borderColor: tone,
             opacity: active ? ringOpacity : 0.18,
             transform: [{ scale: active ? ringScale : 1 }],
@@ -4347,20 +4338,20 @@ function TrailGuideAvatar({
         />
         <View
           style={{
-            width: dim - 6,
-            height: dim - 6,
-            borderRadius: (dim - 6) / 2,
+            width: dim,
+            height: dim,
+            borderRadius: dim / 2,
             overflow: 'hidden',
             alignItems: 'center',
             justifyContent: 'center',
-            backgroundColor: colors.bg,
-            borderWidth: 1,
-            borderColor: tone,
+            backgroundColor: '#0b1117',
+            borderWidth: 1.5,
+            borderColor: active ? tone : 'rgba(255,255,255,0.16)',
             shadowColor: tone,
-            shadowOpacity: active ? 0.28 : 0.14,
-            shadowRadius: active ? 18 : 10,
-            shadowOffset: { width: 0, height: 4 },
-            elevation: 10,
+            shadowOpacity: active ? 0.38 : 0.18,
+            shadowRadius: active ? 24 : 14,
+            shadowOffset: { width: 0, height: 8 },
+            elevation: 16,
           }}
         >
           {LottieView ? (
@@ -4368,18 +4359,19 @@ function TrailGuideAvatar({
               source={TRAIL_GUIDE_LOTTIE[state]}
               autoPlay
               loop
-              style={{ position: 'absolute', width: dim, height: dim, opacity: 0.18 }}
+              style={{ width: dim + 2, height: dim + 2 }}
             />
-          ) : null}
-          <View style={{ width: dim - 14, height: dim - 14, borderRadius: (dim - 14) / 2, borderWidth: 2, borderColor: tone, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.s1 }}>
-            <View style={{ position: 'absolute', top: 4, width: 12, height: 12, borderRadius: 6, backgroundColor: colors.silverBright, shadowColor: colors.silverBright, shadowOpacity: active ? 0.55 : 0.22, shadowRadius: 8 }} />
-            <View style={{ position: 'absolute', top: 14, left: 10, right: 10, height: 1.5, borderRadius: 1, backgroundColor: colors.green, opacity: 0.75, transform: [{ rotate: '-8deg' }] }} />
-            <View style={{ position: 'absolute', top: 20, left: 9, right: 9, height: 1.5, borderRadius: 1, backgroundColor: colors.silverBright, opacity: 0.54, transform: [{ rotate: '5deg' }] }} />
-            <View style={{ position: 'absolute', top: 26, left: 12, right: 12, height: 1.5, borderRadius: 1, backgroundColor: colors.green, opacity: 0.58, transform: [{ rotate: '-5deg' }] }} />
-            <Ionicons name="compass-outline" size={dim === 46 ? 24 : 28} color={tone} />
-            <View style={{ position: 'absolute', right: 4, bottom: 4, width: 14, height: 14, borderRadius: 7, backgroundColor: tone, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.bg }}>
-              <Ionicons name={state === 'listening' || state === 'userSpeaking' ? 'mic' : state === 'noMicPermission' ? 'mic-off' : 'radio-outline'} size={8} color={colors.bg} />
+          ) : (
+            <View style={{ width: dim - 12, height: dim - 12, borderRadius: (dim - 12) / 2, borderWidth: 2, borderColor: tone, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.s1 }}>
+              <View style={{ position: 'absolute', top: 6, width: 14, height: 14, borderRadius: 7, backgroundColor: colors.silverBright, shadowColor: colors.silverBright, shadowOpacity: active ? 0.55 : 0.22, shadowRadius: 8 }} />
+              <View style={{ position: 'absolute', top: 18, left: 11, right: 11, height: 1.5, borderRadius: 1, backgroundColor: colors.green, opacity: 0.75, transform: [{ rotate: '-8deg' }] }} />
+              <View style={{ position: 'absolute', top: 25, left: 10, right: 10, height: 1.5, borderRadius: 1, backgroundColor: colors.silverBright, opacity: 0.54, transform: [{ rotate: '5deg' }] }} />
+              <View style={{ position: 'absolute', top: 32, left: 14, right: 14, height: 1.5, borderRadius: 1, backgroundColor: colors.green, opacity: 0.58, transform: [{ rotate: '-5deg' }] }} />
+              <Ionicons name="compass-outline" size={dim === 54 ? 27 : 34} color={tone} />
             </View>
+          )}
+          <View style={{ position: 'absolute', right: 4, bottom: 4, width: 18, height: 18, borderRadius: 9, backgroundColor: tone, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#0b1117' }}>
+            <Ionicons name={state === 'listening' || state === 'userSpeaking' ? 'mic' : state === 'noMicPermission' ? 'mic-off' : 'radio-outline'} size={10} color="#0b1117" />
           </View>
         </View>
       </View>
@@ -6030,6 +6022,8 @@ function MapScreen() {
         ? { ...current, ...nextCard }
         : current);
       const smartPlaces = resolved.related?.things_to_do ?? resolved.related?.places ?? [];
+      const smartSights = resolved.related?.things_to_see ?? [];
+      const smartVisitorCenters = resolved.related?.visitor_centers ?? [];
       const smartServices = resolved.related?.trip_services ?? [];
       const smartCamps = (resolved.related?.campgrounds_nearby ?? resolved.related?.camps ?? [])
         .map(p => smartPlaceToCampPin(p as OsmPoi))
@@ -6041,9 +6035,11 @@ function MapScreen() {
         camps: smartCamps,
         trails,
         things_to_do: smartPlaces.filter(p => p.name && p.name.trim()) as OsmPoi[],
+        things_to_see: smartSights.filter(p => p.name && p.name.trim()) as OsmPoi[],
+        visitor_centers: smartVisitorCenters.filter(p => p.name && p.name.trim()) as OsmPoi[],
         campgrounds_nearby: smartCamps,
         trip_services: smartServices.filter(p => (p.name && p.name.trim()) || UTILITY_PLACE_TYPES.has(String(p.type || ''))) as OsmPoi[],
-        error: !smartPlaces.length && !smartCamps.length && !trails.length && !smartServices.length ? 'No nearby camps, trails, or useful places loaded yet.' : undefined,
+        error: !smartPlaces.length && !smartSights.length && !smartVisitorCenters.length && !smartCamps.length && !trails.length && !smartServices.length ? 'No nearby camps, trails, or useful places loaded yet.' : undefined,
       });
     };
     const cached = mapCardResolveCacheRef.current.get(resolveKey);
@@ -6056,6 +6052,8 @@ function MapScreen() {
         camps: prev?.camps ?? [],
         trails: prev?.trails ?? [],
         things_to_do: prev?.things_to_do ?? [],
+        things_to_see: prev?.things_to_see ?? [],
+        visitor_centers: prev?.visitor_centers ?? [],
         campgrounds_nearby: prev?.campgrounds_nearby ?? [],
         trip_services: prev?.trip_services ?? [],
       }));
@@ -6098,7 +6096,7 @@ function MapScreen() {
       mergeResolvedCard(resolved);
     }).catch(() => {
       selectedPlaceResolveKeyRef.current = '';
-      if (!cancelled) setSelectedPlaceContext({ loading: false, places: [], camps: [], trails: [], error: 'Nearby context unavailable.' });
+      if (!cancelled) setSelectedPlaceContext({ loading: false, places: [], camps: [], trails: [], things_to_do: [], things_to_see: [], visitor_centers: [], campgrounds_nearby: [], trip_services: [], error: 'Nearby context unavailable.' });
     });
     return () => { cancelled = true; };
   }, [selectedPlace?.id, selectedPlace?.name, selectedPlace?.lat, selectedPlace?.lng, navMode]);
@@ -6248,9 +6246,12 @@ function MapScreen() {
     ].filter(Boolean)));
     const landType = source.land_type || source.subtype || (privateStay ? 'Private Stay' : lodging ? 'Lodging' : rv ? 'RV Park' : 'Campground');
     const photoUrl = firstMapCardPhotoUrl(source, resolved);
+    const selectedOfficialId = String(place.id || '').startsWith('ridb') || /ridb|recreation\.gov/i.test(String(place.source || place.source_label || source.source || source.source_badge || ''));
+    const stableId = selectedOfficialId && place.id ? String(place.id) : String(source.id || place.id || `mapcard:camp:${lat.toFixed(5)}:${lng.toFixed(5)}`);
+    const stableName = selectedOfficialId && place.name ? String(place.name) : String(source.name || place.name || (lodging ? 'Stay option' : 'Campground'));
     return {
-      id: String(source.id || place.id || `mapcard:camp:${lat.toFixed(5)}:${lng.toFixed(5)}`),
-      name: String(source.name || place.name || (lodging ? 'Stay option' : 'Campground')),
+      id: stableId,
+      name: stableName,
       lat,
       lng,
       tags,
@@ -6274,6 +6275,15 @@ function MapScreen() {
       link_label: source.link_label,
       rating: source.rating ?? place.rating,
       rating_count: source.rating_count ?? place.rating_count,
+      price_summary: source.price_summary,
+      things_to_do: source.things_to_do,
+      things_to_see: source.things_to_see,
+      visitor_centers: source.visitor_centers,
+      campgrounds_nearby: source.campgrounds_nearby,
+      trip_services: source.trip_services,
+      site_media_count: source.site_media_count,
+      photo_fallback_chain: source.photo_fallback_chain,
+      photo_status: source.photo_status,
       phone: source.phone || place.phone,
       address: source.address || place.address,
       provider_place_id: source.provider_place_id || place.provider_place_id,
@@ -11569,6 +11579,14 @@ function MapScreen() {
     stopTrailheadVoice();
   }
 
+  function clearRoutePreviewSession() {
+    resetMapRouteSession();
+    setShowSearch(false);
+    setSearchResults([]);
+    setSearchQuery('');
+    setSearchMode('browse');
+  }
+
   async function saveAndCloseRoute() {
     if (routeClosing) return;
     setRouteClosing(true);
@@ -13681,6 +13699,25 @@ function MapScreen() {
     );
   }
 
+  function nearbyType(place: Partial<OsmPoi> | null | undefined) {
+    return String(place?.type || (place as any)?.category || '').toLowerCase().replace(/[\s-]+/g, '_');
+  }
+
+  function isTripServicePlace(place: Partial<OsmPoi> | null | undefined) {
+    return TRIP_SERVICE_PLACE_TYPES.has(nearbyType(place));
+  }
+
+  function isVisitorCenterPlace(place: Partial<OsmPoi> | null | undefined) {
+    const type = nearbyType(place);
+    const name = String(place?.name || '').toLowerCase();
+    return VISITOR_CENTER_PLACE_TYPES.has(type) || /visitor\s+center|ranger\s+station/.test(name);
+  }
+
+  function isSightPlace(place: Partial<OsmPoi> | null | undefined) {
+    const type = nearbyType(place);
+    return THINGS_TO_SEE_PLACE_TYPES.has(type);
+  }
+
   function loadNearbyPlacesFor(
     key: string,
     center?: { lat?: number | null; lng?: number | null },
@@ -15308,6 +15345,18 @@ function MapScreen() {
   const compassTop = Math.max(insets.top + 6, 14);
 
   const nativeNavigationPanel = navMode ? (
+    <Animated.View
+      pointerEvents="box-none"
+      style={[
+        s.navHudAnimated,
+        {
+          opacity: navAnim,
+          transform: [{
+            translateY: navAnim.interpolate({ inputRange: [0, 1], outputRange: [28, 0] }),
+          }],
+        },
+      ]}
+    >
     <TrailheadSheet handle={false} style={s.navHud} contentStyle={s.navHudInner}>
       <View style={s.turnStrip}>
         <View style={s.turnIconWrap}>
@@ -15414,6 +15463,7 @@ function MapScreen() {
       </View>
 
     </TrailheadSheet>
+    </Animated.View>
   ) : null;
 
   const nativeTurnListPanel = navMode && showSteps && routeSteps.length > 0 ? (
@@ -17314,8 +17364,11 @@ function MapScreen() {
             onPreviewRoute={previewSearchRoute}
             onStartNav={() => { setShowSearch(false); navigateToSearch(); }}
             onSelectOnMap={() => { setShowSearch(false); setSelectOnMapMode(true); }}
-            onClose={() => { setShowSearch(false); setSearchRouteCard(null); }}
-            onClearRoute={() => { setSearchRouteCard(null); navDestRef.current = null; setNavDest(null); }}
+            onClose={() => {
+              if (searchRouteCard || navDestRef.current || lastRouteCoords.length > 0 || isRouted || navMode) clearRoutePreviewSession();
+              else setShowSearch(false);
+            }}
+            onClearRoute={clearRoutePreviewSession}
             onOpenRouteOpts={() => setShowRouteOpts(true)}
           />
         </View>
@@ -18219,6 +18272,75 @@ function MapScreen() {
 	                    </ScrollView>
 	                  </View>
 	                ) : null}
+	                {(campDetail.things_to_see ?? []).length > 0 ? (
+	                  <View style={s.detailSection}>
+	                    <Text style={s.detailSectionTitle}>THINGS TO SEE</Text>
+	                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.siteRail}>
+	                      {(campDetail.things_to_see ?? []).slice(0, 12).map((item: any, idx) => {
+	                        const photo = campPhotoUrl(item.photo_url || item.photos?.[0]);
+	                        return (
+	                          <TouchableOpacity key={item.id || `${item.name}-${idx}`} style={s.sitePhotoCard} activeOpacity={0.86} onPress={() => item.official_url || item.booking_url ? Linking.openURL(item.official_url || item.booking_url) : undefined}>
+	                            {photo ? <Image source={{ uri: photo }} style={s.sitePhoto} resizeMode="cover" /> : (
+	                              <View style={s.sitePlaceholder}>
+	                                <Ionicons name="camera-outline" size={22} color={C.orange} />
+	                              </View>
+	                            )}
+	                            <View style={s.siteBody}>
+	                              <Text style={s.siteName} numberOfLines={2}>{item.name || `Place ${idx + 1}`}</Text>
+	                              <Text style={s.siteMeta} numberOfLines={2}>{[cleanDisplayLabel(item.type), item.source_badge || item.source_label].filter(Boolean).join(' · ')}</Text>
+	                            </View>
+	                          </TouchableOpacity>
+	                        );
+	                      })}
+	                    </ScrollView>
+	                  </View>
+	                ) : null}
+	                {(campDetail.visitor_centers ?? []).length > 0 ? (
+	                  <View style={s.detailSection}>
+	                    <Text style={s.detailSectionTitle}>VISITOR CENTERS</Text>
+	                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.siteRail}>
+	                      {(campDetail.visitor_centers ?? []).slice(0, 8).map((item: any, idx) => {
+	                        const photo = campPhotoUrl(item.photo_url || item.photos?.[0]);
+	                        return (
+	                          <TouchableOpacity key={item.id || `${item.name}-${idx}`} style={s.sitePhotoCard} activeOpacity={0.86} onPress={() => item.official_url || item.booking_url ? Linking.openURL(item.official_url || item.booking_url) : undefined}>
+	                            {photo ? <Image source={{ uri: photo }} style={s.sitePhoto} resizeMode="cover" /> : (
+	                              <View style={s.sitePlaceholder}>
+	                                <Ionicons name="information-circle-outline" size={22} color={C.orange} />
+	                              </View>
+	                            )}
+	                            <View style={s.siteBody}>
+	                              <Text style={s.siteName} numberOfLines={2}>{item.name || `Visitor center ${idx + 1}`}</Text>
+	                              <Text style={s.siteMeta} numberOfLines={2}>{[cleanDisplayLabel(item.type), item.source_badge || item.source_label].filter(Boolean).join(' · ')}</Text>
+	                            </View>
+	                          </TouchableOpacity>
+	                        );
+	                      })}
+	                    </ScrollView>
+	                  </View>
+	                ) : null}
+	                {(campDetail.campgrounds_nearby ?? []).length > 0 ? (
+	                  <View style={s.detailSection}>
+	                    <Text style={s.detailSectionTitle}>CAMPGROUNDS NEARBY</Text>
+	                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.siteRail}>
+	                      {(campDetail.campgrounds_nearby ?? []).slice(0, 8).map((item: any, idx) => {
+	                        const photo = campPhotoUrl(item.photo_url || item.photos?.[0]);
+	                        return (
+	                          <TouchableOpacity key={item.id || `${item.name}-${idx}`} style={s.sitePhotoCard} activeOpacity={0.86} onPress={() => item.official_url || item.booking_url || item.url ? Linking.openURL(item.official_url || item.booking_url || item.url) : undefined}>
+	                            {photo ? <Image source={{ uri: photo }} style={s.sitePhoto} resizeMode="cover" /> : (
+	                              <View style={s.sitePlaceholder}>
+	                                <Ionicons name="bonfire-outline" size={22} color={C.orange} />
+	                              </View>
+	                            )}
+	                            <View style={s.siteBody}>
+	                              <Text style={s.siteName} numberOfLines={2}>{item.name || `Campground ${idx + 1}`}</Text>
+	                              <Text style={s.siteMeta} numberOfLines={2}>{[item.distance_mi ? `${Number(item.distance_mi).toFixed(1)} mi` : '', item.source_badge || item.source_label].filter(Boolean).join(' · ')}</Text>
+	                            </View>
+	                          </TouchableOpacity>
+	                        );
+	                      })}
+	                    </ScrollView>
+	                  </View>
+	                ) : null}
 
                 {Number.isFinite(campDetail.lat) && Number.isFinite(campDetail.lng) && Math.abs(campDetail.lat) > 0.0001 && Math.abs(campDetail.lng) > 0.0001 ? (
                   <View style={s.detailSection}>
@@ -18407,18 +18529,54 @@ function MapScreen() {
             {(() => {
               const key = nearbyFeedKey('camp', selectedCamp.lat, selectedCamp.lng);
               const feed = nearbyPlaceFeeds[key];
+              const feedPlaces = feed?.places ?? [];
+              const visitorCenters = feedPlaces.filter(isVisitorCenterPlace);
+              const tripServices = feedPlaces.filter(isTripServicePlace);
+              const sights = feedPlaces.filter(place => !isTripServicePlace(place) && !isVisitorCenterPlace(place) && isSightPlace(place));
+              const things = feedPlaces.filter(place => !isTripServicePlace(place) && !isVisitorCenterPlace(place) && !isSightPlace(place));
               return (
                 <View style={s.nearbyPlacesBlock}>
                   <View style={s.nearbyPlacesHeader}>
-                    <Text style={s.nearbyPlacesTitle}>PLACES NEARBY</Text>
+                    <Text style={s.nearbyPlacesTitle}>NEARBY GUIDE</Text>
                     {feed?.loading ? <ActivityIndicator size="small" color={C.orange} /> : null}
                   </View>
-                  {!feed?.loading && !feed?.places?.length ? (
+                  {!feed?.loading && !feedPlaces.length ? (
                     <Text style={s.nearbyPlacesEmpty}>{feed?.error ?? 'No useful nearby places loaded yet'}</Text>
                   ) : (
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.nearbyPlaceRail}>
-                      {(feed?.places ?? []).slice(0, 10).map(place => renderNearbyPlaceCard(place))}
-                    </ScrollView>
+                    <>
+                      {things.length > 0 ? (
+                        <>
+                          <Text style={s.nearbyPlacesTitle}>THINGS TO DO</Text>
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.nearbyPlaceRail}>
+                            {things.slice(0, 10).map(place => renderNearbyPlaceCard(place))}
+                          </ScrollView>
+                        </>
+                      ) : null}
+                      {sights.length > 0 ? (
+                        <>
+                          <Text style={s.nearbyPlacesTitle}>THINGS TO SEE</Text>
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.nearbyPlaceRail}>
+                            {sights.slice(0, 10).map(place => renderNearbyPlaceCard(place))}
+                          </ScrollView>
+                        </>
+                      ) : null}
+                      {visitorCenters.length > 0 ? (
+                        <>
+                          <Text style={s.nearbyPlacesTitle}>VISITOR CENTERS</Text>
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.nearbyPlaceRail}>
+                            {visitorCenters.slice(0, 8).map(place => renderNearbyPlaceCard(place))}
+                          </ScrollView>
+                        </>
+                      ) : null}
+                      {tripServices.length > 0 ? (
+                        <>
+                          <Text style={s.nearbyPlacesTitle}>TRIP SERVICES</Text>
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.nearbyPlaceRail}>
+                            {tripServices.slice(0, 8).map(place => renderNearbyPlaceCard(place))}
+                          </ScrollView>
+                        </>
+                      ) : null}
+                    </>
                   )}
                 </View>
               );
@@ -18781,18 +18939,54 @@ function MapScreen() {
                 {(() => {
                   const key = nearbyFeedKey('camp', campDetail.lat, campDetail.lng);
                   const feed = nearbyPlaceFeeds[key];
+                  const feedPlaces = feed?.places ?? [];
+                  const visitorCenters = feedPlaces.filter(isVisitorCenterPlace);
+                  const tripServices = feedPlaces.filter(isTripServicePlace);
+                  const sights = feedPlaces.filter(place => !isTripServicePlace(place) && !isVisitorCenterPlace(place) && isSightPlace(place));
+                  const things = feedPlaces.filter(place => !isTripServicePlace(place) && !isVisitorCenterPlace(place) && !isSightPlace(place));
                   return (
                     <View style={s.detailSection}>
                       <View style={s.nearbyPlacesHeader}>
-                        <Text style={s.detailSectionTitle}>PLACES NEARBY</Text>
+                        <Text style={s.detailSectionTitle}>NEARBY GUIDE</Text>
                         {feed?.loading ? <ActivityIndicator size="small" color={C.orange} /> : null}
                       </View>
-                      {!feed?.loading && !feed?.places?.length ? (
+                      {!feed?.loading && !feedPlaces.length ? (
                         <Text style={s.nearbyPlacesEmpty}>{feed?.error ?? 'No nearby discovery loaded yet'}</Text>
                       ) : (
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.nearbyPlaceRail}>
-                          {(feed?.places ?? []).slice(0, 12).map(place => renderNearbyPlaceCard(place))}
-                        </ScrollView>
+                        <>
+                          {things.length > 0 ? (
+                            <>
+                              <Text style={s.nearbyPlacesTitle}>THINGS TO DO</Text>
+                              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.nearbyPlaceRail}>
+                                {things.slice(0, 12).map(place => renderNearbyPlaceCard(place))}
+                              </ScrollView>
+                            </>
+                          ) : null}
+                          {sights.length > 0 ? (
+                            <>
+                              <Text style={s.nearbyPlacesTitle}>THINGS TO SEE</Text>
+                              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.nearbyPlaceRail}>
+                                {sights.slice(0, 12).map(place => renderNearbyPlaceCard(place))}
+                              </ScrollView>
+                            </>
+                          ) : null}
+                          {visitorCenters.length > 0 ? (
+                            <>
+                              <Text style={s.nearbyPlacesTitle}>VISITOR CENTERS</Text>
+                              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.nearbyPlaceRail}>
+                                {visitorCenters.slice(0, 8).map(place => renderNearbyPlaceCard(place))}
+                              </ScrollView>
+                            </>
+                          ) : null}
+                          {tripServices.length > 0 ? (
+                            <>
+                              <Text style={s.nearbyPlacesTitle}>TRIP SERVICES</Text>
+                              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.nearbyPlaceRail}>
+                                {tripServices.slice(0, 8).map(place => renderNearbyPlaceCard(place))}
+                              </ScrollView>
+                            </>
+                          ) : null}
+                        </>
                       )}
                     </View>
                   );
@@ -22219,19 +22413,24 @@ const makeStyles = (C: ColorPalette) => {
   alertDesc: { color: OVR.text3, fontSize: 11 },
 
   // ── Nav HUD
-  navHud: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: C.s1,
-    borderTopWidth: 1, borderColor: C.border,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    overflow: 'hidden',
+  navHudAnimated: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    bottom: 92,
     zIndex: 10000,
     elevation: 100,
+  },
+  navHud: {
+    backgroundColor: 'rgba(17,24,39,0.96)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    borderRadius: 24,
+    overflow: 'hidden',
     shadowColor: '#000',
-    shadowOpacity: 0.32,
-    shadowRadius: 28,
-    shadowOffset: { width: 0, height: -14 },
+    shadowOpacity: 0.34,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 12 },
   },
   navHudInner: {
     padding: 0,
@@ -22263,11 +22462,11 @@ const makeStyles = (C: ColorPalette) => {
     position: 'absolute',
     left: 12,
     right: 12,
-    bottom: 274,
+    bottom: 258,
     maxHeight: 320,
-    backgroundColor: C.s1,
+    backgroundColor: 'rgba(17,24,39,0.97)',
     borderWidth: 1,
-    borderColor: C.border,
+    borderColor: 'rgba(255,255,255,0.14)',
     borderRadius: 18,
     overflow: 'hidden',
     zIndex: 10002,
@@ -22302,31 +22501,31 @@ const makeStyles = (C: ColorPalette) => {
 
   turnStripWrap: { overflow: 'hidden' },
   turnStrip: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 16, paddingVertical: 14,
-    backgroundColor: C.s2,
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingHorizontal: 12, paddingVertical: 10,
+    backgroundColor: 'rgba(8,13,23,0.98)',
     borderBottomWidth: 1,
-    borderColor: C.border,
+    borderColor: 'rgba(255,255,255,0.10)',
   },
   turnIconWrap: {
-    width: 64, height: 64, alignItems: 'center', justifyContent: 'center',
-    borderRadius: 22,
+    width: 50, height: 50, alignItems: 'center', justifyContent: 'center',
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: C.border,
-    backgroundColor: C.s1,
+    borderColor: 'rgba(249,115,22,0.40)',
+    backgroundColor: 'rgba(249,115,22,0.10)',
     overflow: 'hidden',
   },
   turnInfo: { flex: 1, justifyContent: 'center' },
-  turnDist: { color: C.text, fontSize: 28, fontWeight: '900', letterSpacing: 0, lineHeight: 33 },
-  turnLabel: { color: C.text2, fontSize: 13, fontWeight: '800', marginTop: 2, letterSpacing: 0 },
-  turnRoad: { color: C.text3, fontSize: 12, marginTop: 1 },
+  turnDist: { color: '#fff', fontSize: 22, fontWeight: '900', letterSpacing: 0, lineHeight: 26 },
+  turnLabel: { color: 'rgba(255,255,255,0.84)', fontSize: 12, fontWeight: '800', marginTop: 1, letterSpacing: 0 },
+  turnRoad: { color: 'rgba(255,255,255,0.58)', fontSize: 11, marginTop: 1 },
   navSourceRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
-    paddingHorizontal: 14,
-    paddingTop: 10,
-    paddingBottom: 2,
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 0,
   },
   navSourcePill: {
     minHeight: 28,
@@ -22334,11 +22533,11 @@ const makeStyles = (C: ColorPalette) => {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingHorizontal: 10,
+    paddingHorizontal: 9,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: C.border,
-    backgroundColor: C.s2,
+    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
   },
   navSourceText: { fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.6, flexShrink: 1 },
   currentRoadPill: {
@@ -22398,8 +22597,8 @@ const makeStyles = (C: ColorPalette) => {
 
   navStrip: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: 1, borderColor: C.border,
+    paddingHorizontal: 12, paddingVertical: 9,
+    borderBottomWidth: 1, borderColor: 'rgba(255,255,255,0.10)',
   },
   navBearing: { alignItems: 'center', justifyContent: 'center', width: 46 },
   navBearingText: { color: C.orange, fontSize: 18, fontWeight: '900', fontFamily: mono },
@@ -22412,8 +22611,8 @@ const makeStyles = (C: ColorPalette) => {
 
   navTarget: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingHorizontal: 16, paddingVertical: 10,
-    borderBottomWidth: 1, borderColor: C.border,
+    paddingHorizontal: 12, paddingVertical: 9,
+    borderBottomWidth: 1, borderColor: 'rgba(255,255,255,0.10)',
   },
   navTargetBadge: {
     backgroundColor: C.orange + '12', borderRadius: 999, borderWidth: 1, borderColor: C.orange + '44',
@@ -22426,7 +22625,7 @@ const makeStyles = (C: ColorPalette) => {
 
   navActions: {
     flexDirection: 'row', gap: 8,
-    paddingHorizontal: 14, paddingVertical: 10, paddingBottom: 24,
+    paddingHorizontal: 12, paddingVertical: 9,
   },
   navEndBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 5,

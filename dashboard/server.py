@@ -11717,7 +11717,7 @@ async def resolve_map_card(body: MapCardResolveRequest, user: dict | None = Depe
             "tags", "land_type", "amenities", "site_types", "activities", "cost", "reservable",
             "url", "official_url", "booking_url", "ada", "verified_source", "source_badge",
             "source_freshness", "reservation_notes", "last_checked", "campsites_count",
-            "price_summary", "things_to_do", "permits", "tours", "events", "links",
+            "price_summary", "things_to_do", "things_to_see", "visitor_centers", "campgrounds_nearby", "permits", "tours", "events", "links",
             "site_media_count", "photo_fallback_chain",
         ):
             value = camp_card.get(key)
@@ -11804,19 +11804,14 @@ TRIP_SERVICE_PLACE_TYPES = {"fuel", "propane", "dump", "parking", "mechanic", "w
 THINGS_TO_DO_PLACE_TYPES = {
     "trail",
     "trailhead",
-    "viewpoint",
-    "peak",
     "hot_spring",
-    "park",
-    "historic",
-    "attraction",
-    "visitor_center",
     "climbing",
     "ohv",
     "permit",
     "tour",
     "event",
 }
+THINGS_TO_SEE_PLACE_TYPES = {"viewpoint", "peak", "park", "historic", "attraction"}
 
 
 def _place_type_priority(value: object) -> int:
@@ -11825,6 +11820,8 @@ def _place_type_priority(value: object) -> int:
 
 def _related_rails_from_places(smart_places: list[dict], trails: list[dict], camp_detail: dict | None = None) -> dict:
     things: list[dict] = []
+    sights: list[dict] = []
+    visitor_centers: list[dict] = []
     camps: list[dict] = []
     services: list[dict] = []
     seen: set[str] = set()
@@ -11845,6 +11842,10 @@ def _related_rails_from_places(smart_places: list[dict], trails: list[dict], cam
             add(camps, item)
         elif ptype in TRIP_SERVICE_PLACE_TYPES:
             add(services, item)
+        elif ptype == "visitor_center":
+            add(visitor_centers, item)
+        elif ptype in THINGS_TO_SEE_PLACE_TYPES:
+            add(sights, item)
         else:
             add(things, item)
 
@@ -11879,9 +11880,11 @@ def _related_rails_from_places(smart_places: list[dict], trails: list[dict], cam
             add(things, card)
 
     return {
-        "places": things[:14],
+        "places": (things + sights + visitor_centers)[:14],
         "camps": camps[:10],
         "things_to_do": things[:16],
+        "things_to_see": sights[:16],
+        "visitor_centers": visitor_centers[:12],
         "campgrounds_nearby": camps[:12],
         "trip_services": services[:12],
         "trails": (trails or [])[:10],

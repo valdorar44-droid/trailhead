@@ -11289,12 +11289,159 @@ async def search_place_card(q: str, lat: float | None = None, lng: float | None 
             "name": query,
             "lat": float(lat),
             "lng": float(lng),
-            "type": "poi",
+            "type": "locality" if _query_looks_like_locality(query) else "poi",
+            "subtype": "City" if _query_looks_like_locality(query) else "poi",
+            "display_type": "City" if _query_looks_like_locality(query) else "Place",
             "source": "search",
             "source_label": "Map search",
             "summary": "Selected map place.",
+            "photo_status": "placeholder",
         }
     return None
+
+
+BROAD_MAP_PLACE_TYPES = {
+    "place",
+    "locality",
+    "city",
+    "town",
+    "village",
+    "hamlet",
+    "municipality",
+    "neighborhood",
+    "suburb",
+    "district",
+    "region",
+}
+
+
+def _query_looks_like_locality(query: str) -> bool:
+    clean = re.sub(r"\s+", " ", str(query or "")).strip().lower()
+    if not clean:
+        return False
+    parts = [part.strip() for part in clean.split(",") if part.strip()]
+    return len(parts) >= 2 and not re.search(r"\d", clean) and all(len(part) > 1 for part in parts[:2])
+
+
+def _is_broad_map_place(body: MapCardResolveRequest | None = None, card: dict | None = None) -> bool:
+    typed = {
+        _smart_pack_type(value)
+        for value in (
+            getattr(body, "kind", None),
+            getattr(body, "type", None),
+            getattr(body, "subtype", None),
+            (card or {}).get("type"),
+            (card or {}).get("subtype"),
+        )
+        if value
+    }
+    source = " ".join(str(value or "").lower() for value in (
+        getattr(body, "source", None),
+        getattr(body, "source_label", None),
+        getattr(body, "selection_source", None),
+        (card or {}).get("source"),
+        (card or {}).get("source_label"),
+    ))
+    name = str((card or {}).get("name") or getattr(body, "name", "") or "")
+    if typed.intersection(BROAD_MAP_PLACE_TYPES) and any(token in source for token in ("search", "mapbox", "map search", "geocode")):
+        return True
+    return any(token in source for token in ("search", "mapbox", "geocode")) and _query_looks_like_locality(name)
+
+
+def _broad_place_display_type(body: MapCardResolveRequest | None = None, card: dict | None = None) -> str:
+    typed = {
+        _smart_pack_type(value)
+        for value in (
+            getattr(body, "type", None),
+            getattr(body, "subtype", None),
+            (card or {}).get("type"),
+            (card or {}).get("subtype"),
+        )
+        if value
+    }
+    if typed.intersection({"neighborhood", "suburb", "district"}):
+        return "Neighborhood"
+    if "region" in typed:
+        return "Region"
+    if typed.intersection({"village", "hamlet"}):
+        return "Town"
+    if typed.intersection({"city", "town", "municipality", "locality", "place"}) or _query_looks_like_locality(str((card or {}).get("name") or getattr(body, "name", "") or "")):
+        return "City"
+    return "Place"
+
+
+async def _open_place_wiki_profile(name: str, lat: float, lng: float) -> dict | None:
+    clean = re.sub(r"\s+", " ", (name or "").strip())
+    if not clean or len(clean) < 2:
+        return None
+    search_name = clean.split(",", 1)[0].strip() or clean
+    cache_key = f"place_wiki_{hashlib.sha1(f'{search_name}:{lat:.3f}:{lng:.3f}'.encode()).hexdigest()[:16]}"
+    cached = get_cached("campsite_cache", cache_key, ttl_seconds=3600 * 24 * 30)
+    if cached is not None:
+        return cached or None
+    try:
+        async with httpx.AsyncClient(timeout=7.0, headers={"User-Agent": "TrailheadPlaceCards/1.0"}) as client:
+            resp = await client.get(
+                "https://en.wikipedia.org/w/api.php",
+                params={
+                    "action": "query",
+                    "format": "json",
+                    "generator": "search",
+                    "gsrsearch": search_name,
+                    "gsrlimit": 5,
+                    "prop": "extracts|pageimages|info|coordinates",
+                    "exintro": True,
+                    "explaintext": True,
+                    "exsentences": 3,
+                    "piprop": "original|thumbnail",
+                    "pithumbsize": 1100,
+                    "inprop": "url",
+                    "coprop": "type",
+                    "origin": "*",
+                },
+            )
+            resp.raise_for_status()
+            pages = (resp.json().get("query") or {}).get("pages") or {}
+            name_norm = re.sub(r"[^a-z0-9]+", " ", search_name.lower()).strip()
+            best: dict | None = None
+            best_score = 999999.0
+            for page in pages.values():
+                title = str(page.get("title") or "")
+                title_norm = re.sub(r"[^a-z0-9]+", " ", title.lower()).strip()
+                if name_norm and name_norm not in title_norm and title_norm not in name_norm:
+                    continue
+                coords = page.get("coordinates") or []
+                dist_m = 0.0
+                if coords:
+                    coord = coords[0]
+                    try:
+                        dist_m = _haversine_m(lat, lng, float(coord.get("lat")), float(coord.get("lon")))
+                    except Exception:
+                        dist_m = 999999.0
+                score = dist_m + abs(len(title_norm) - len(name_norm)) * 25
+                if score < best_score:
+                    best = page
+                    best_score = score
+            if not best:
+                set_cached("campsite_cache", cache_key, {})
+                return None
+            image = (best.get("original") or {}).get("source") or (best.get("thumbnail") or {}).get("source") or ""
+            profile = {
+                "summary": _planner_clean_text(best.get("extract") or "", 700),
+                "photo_url": image,
+                "photos": [{"url": image, "caption": best.get("title") or search_name, "credit": "Wikipedia / Wikimedia Commons", "source": "Wikipedia"}] if image else [],
+                "official_url": best.get("fullurl") or "",
+                "source": "wikipedia",
+                "source_label": "Wikipedia",
+                "source_badge": "Wikipedia / Wikimedia",
+                "source_freshness": "Wikipedia/Wikimedia context cached by Trailhead; verify current local conditions with official sources.",
+                "last_checked": int(time.time()),
+            }
+            set_cached("campsite_cache", cache_key, profile)
+            return profile
+    except Exception:
+        set_cached("campsite_cache", cache_key, {})
+        return None
 
 
 def _map_card_base_from_request(body: MapCardResolveRequest) -> dict:
@@ -11302,13 +11449,15 @@ def _map_card_base_from_request(body: MapCardResolveRequest) -> dict:
     kind = _smart_pack_type(body.kind or body.type or "place")
     name = re.sub(r"\s+", " ", (body.name or kind.replace("_", " ").title()).strip())
     card_type = _smart_pack_type(body.type or ("trail" if kind == "trail" else "camp" if kind == "camp" else "poi"))
+    display_type = _broad_place_display_type(body) if _is_broad_map_place(body) else None
     return {
         "id": body.id or f"{source}:{card_type}:{float(body.lat):.5f}:{float(body.lng):.5f}",
         "name": name or "Selected place",
         "lat": float(body.lat),
         "lng": float(body.lng),
-        "type": card_type,
-        "subtype": body.subtype or card_type,
+        "type": "locality" if display_type in {"City", "Town", "Neighborhood", "Region"} and card_type in {"place", "poi"} else card_type,
+        "subtype": display_type or body.subtype or card_type,
+        "display_type": display_type,
         "source": source,
         "source_label": body.source_label or ("Trailhead trail" if card_type == "trail" else "Map search" if source == "search" else body.source or "Map source"),
         "selection_source": body.selection_source or source,
@@ -11326,6 +11475,7 @@ def _map_card_base_from_request(body: MapCardResolveRequest) -> dict:
         "address": body.address,
         "rating": body.rating,
         "rating_count": body.rating_count,
+        "photo_status": "open_photo" if body.photo_url else "placeholder",
     }
 
 
@@ -11598,6 +11748,68 @@ def _map_card_sections(card: dict, body: MapCardResolveRequest) -> list[dict]:
     return sections
 
 
+def _normalize_map_card_display(card: dict, body: MapCardResolveRequest) -> dict:
+    normalized = dict(card)
+    ctype = _smart_pack_type(normalized.get("type"))
+    name_text = str(normalized.get("name") or "")
+    if _is_broad_map_place(body, normalized):
+        display = _broad_place_display_type(body, normalized)
+        normalized["type"] = "locality" if display in {"City", "Town", "Neighborhood", "Region"} else ctype
+        normalized["subtype"] = display
+        normalized["display_type"] = display
+        normalized.setdefault("source_label", "Map search")
+        normalized.setdefault("photo_status", "open_photo" if normalized.get("photo_url") or normalized.get("photos") else "placeholder")
+    elif ctype == "camp":
+        display = "Group Site" if re.search(r"\b(group\s+sites?|group\s+campsites?)\b", name_text, re.I) else "Campground"
+        normalized["display_type"] = display
+        normalized["subtype"] = normalized.get("land_type") or display
+        normalized.setdefault("photo_status", "facility" if normalized.get("photo_url") or normalized.get("photos") else "placeholder")
+    elif ctype == "event":
+        normalized["display_type"] = "Event"
+        normalized.setdefault("subtype", "Event")
+    else:
+        display = {
+            "trail": "Trail",
+            "trailhead": "Trailhead",
+            "viewpoint": "Viewpoint",
+            "peak": "Peak",
+            "hot_spring": "Hot Spring",
+            "water": "Water",
+            "dump": "Dump",
+            "fuel": "Fuel",
+            "propane": "Propane",
+            "mechanic": "Mechanic",
+            "grocery": "Grocery",
+            "food": "Food",
+            "visitor_center": "Visitor Center",
+            "park": "Park",
+            "historic": "Historic Site",
+            "attraction": "Attraction",
+        }.get(ctype)
+        if display:
+            normalized["display_type"] = display
+            normalized.setdefault("subtype", display)
+    if not normalized.get("photo_status"):
+        normalized["photo_status"] = "open_photo" if normalized.get("photo_url") or normalized.get("photos") else "placeholder"
+    return normalized
+
+
+def _is_weak_card_summary(value: object) -> bool:
+    clean = re.sub(r"\s+", " ", str(value or "")).strip().lower()
+    if not clean:
+        return True
+    weak = {
+        "selected map place.",
+        "selected map place",
+        "place",
+        "poi",
+        "places",
+    }
+    if clean in weak:
+        return True
+    return clean.startswith("loading place details")
+
+
 MAP_CARD_SAFE_TTL_SECONDS = 3600 * 24 * 7
 MAP_CARD_PASSIVE_SOURCES = {
     "osm",
@@ -11622,7 +11834,7 @@ def _map_card_cache_key(body: MapCardResolveRequest) -> str:
         f"{float(body.lat):.4f}",
         f"{float(body.lng):.4f}",
     ])
-    return f"map_card_v10:{hashlib.sha1(base.encode()).hexdigest()[:24]}"
+    return f"map_card_v11:{hashlib.sha1(base.encode()).hexdigest()[:24]}"
 
 
 def _contains_restricted_provider(value: object) -> bool:
@@ -11763,7 +11975,33 @@ async def resolve_map_card(body: MapCardResolveRequest, user: dict | None = Depe
 
     smart_places = (related_pack or {}).get("places") or []
     related = _related_rails_from_places(smart_places, (trail_pack or {}).get("trails", []), camp_detail)
-    if not card.get("summary") or card.get("summary") == "Selected map place.":
+    if _is_broad_map_place(body, card):
+        wiki_profile, wiki_ms = await guarded(
+            "place_wiki",
+            _open_place_wiki_profile(card.get("name") or body.name, center_lat, center_lng),
+            None,
+            timeout=3.5,
+        )
+        timings["place_wiki_ms"] = wiki_ms
+        if wiki_profile:
+            wiki_summary = wiki_profile.get("summary")
+            wiki_photos = wiki_profile.get("photos") or []
+            if _is_weak_card_summary(card.get("summary")) and wiki_summary:
+                card["summary"] = wiki_summary
+                card["description"] = wiki_summary
+            if not card.get("photo_url") and wiki_profile.get("photo_url"):
+                card["photo_url"] = wiki_profile.get("photo_url")
+                card["photos"] = wiki_photos
+                card["photo_status"] = "open_photo"
+            if wiki_profile.get("official_url") and not card.get("official_url"):
+                card["official_url"] = wiki_profile.get("official_url")
+                card["website"] = wiki_profile.get("official_url")
+            card["enriched_by"] = wiki_profile.get("source_label") or "Wikipedia"
+            card.setdefault("source_badge", wiki_profile.get("source_badge"))
+            card.setdefault("source_freshness", wiki_profile.get("source_freshness"))
+            card.setdefault("last_checked", wiki_profile.get("last_checked"))
+    card = _normalize_map_card_display(card, body)
+    if _is_weak_card_summary(card.get("summary")):
         ctype = _smart_pack_type(card.get("type"))
         if ctype == "peak":
             card["summary"] = "Mapped peak or summit feature. Verify route, access, weather, and exposure before using it as a destination."
@@ -11773,6 +12011,9 @@ async def resolve_map_card(body: MapCardResolveRequest, user: dict | None = Depe
             card["summary"] = "Mapped trail access point. Check current closures, parking rules, and trail conditions before heading out."
         elif ctype == "hot_spring":
             card["summary"] = "Mapped hot spring or public bath feature. Verify access, rules, fees, and current conditions before visiting."
+        elif _is_broad_map_place(body, card):
+            display = card.get("display_type") or "place"
+            card["summary"] = f"Selected {str(display).lower()} with nearby camps, trails, scenic places, events, and trip services from open source data."
         else:
             card["summary"] = card.get("address") or "Selected map place."
     card["source_label"] = card.get("source_label") or card.get("source") or "Trailhead"
@@ -11865,6 +12106,7 @@ def _related_rails_from_places(smart_places: list[dict], trails: list[dict], cam
         return bool(item.get("photo_url") or item.get("photos")) and str(item.get("photo_status") or "") != "placeholder"
 
     def add(bucket: list[dict], item: dict):
+        item = _normalize_related_rail_item(item)
         try:
             key = str(item.get("id") or f"{item.get('type')}:{item.get('name')}:{round(float(item.get('lat', 0)), 4)}:{round(float(item.get('lng', 0)), 4)}")
         except Exception:
@@ -11916,6 +12158,8 @@ def _related_rails_from_places(smart_places: list[dict], trails: list[dict], cam
         if ptype == "camp":
             add(camps, item)
         elif ptype in TRIP_SERVICE_PLACE_TYPES:
+            if _is_low_value_generic_blm_place(item):
+                continue
             add(services, item)
         elif ptype == "visitor_center":
             add(visitor_centers, item)
@@ -11939,6 +12183,8 @@ def _related_rails_from_places(smart_places: list[dict], trails: list[dict], cam
     for trail in (trails or [])[:8]:
         if not isinstance(trail, dict):
             continue
+        raw_photos = trail.get("photos") if isinstance(trail.get("photos"), list) else []
+        first_photo = raw_photos[0].get("url") if raw_photos and isinstance(raw_photos[0], dict) else (raw_photos[0] if raw_photos else trail.get("photo_url"))
         card = {
             "id": trail.get("id"),
             "name": trail.get("name"),
@@ -11948,7 +12194,7 @@ def _related_rails_from_places(smart_places: list[dict], trails: list[dict], cam
             "subtype": trail.get("difficulty") or "trail",
             "source": trail.get("source"),
             "source_label": trail.get("source_label") or trail.get("source") or "Trailhead trails",
-            "photo_url": (trail.get("photos") or [None])[0] if isinstance(trail.get("photos"), list) else trail.get("photo_url"),
+            "photo_url": first_photo,
             "summary": trail.get("summary") or trail.get("description"),
             "length_mi": trail.get("length_mi"),
             "distance_mi": trail.get("distance_mi"),
@@ -11978,6 +12224,42 @@ def _related_rails_from_places(smart_places: list[dict], trails: list[dict], cam
         "trip_services": rail(collapse_services(services), 4),
         "trails": (trails or [])[:10],
     }
+
+
+def _normalize_related_rail_item(item: dict) -> dict:
+    normalized = dict(item)
+    ptype = _smart_pack_type(normalized.get("type") or normalized.get("category"))
+    source_label = normalized.get("source_label") or normalized.get("source_badge") or normalized.get("verified_source") or normalized.get("attribution") or normalized.get("source")
+    if source_label:
+        normalized["source_label"] = source_label
+    display = {
+        "camp": "Group Site" if re.search(r"\b(group\s+sites?|group\s+campsites?)\b", str(normalized.get("name") or ""), re.I) else "Campground",
+        "trail": "Trail",
+        "trailhead": "Trailhead",
+        "viewpoint": "Viewpoint",
+        "peak": "Peak",
+        "hot_spring": "Hot Spring",
+        "event": "Event",
+        "visitor_center": "Visitor Center",
+        "park": "Park",
+        "historic": "Historic Site",
+        "attraction": "Attraction",
+        "water": "Water",
+        "dump": "Dump",
+        "fuel": "Fuel",
+        "propane": "Propane",
+        "mechanic": "Mechanic",
+        "grocery": "Grocery",
+        "food": "Food",
+        "parking": "Parking",
+    }.get(ptype)
+    if display:
+        normalized["display_type"] = display
+        if not normalized.get("subtype") or _smart_pack_type(normalized.get("subtype")) in {"poi", "place"}:
+            normalized["subtype"] = display
+    if not normalized.get("photo_status"):
+        normalized["photo_status"] = "open_photo" if normalized.get("photo_url") or normalized.get("photos") else "placeholder"
+    return normalized
 
 
 def _is_low_value_generic_blm_place(item: dict | None, keep_services: bool = False) -> bool:

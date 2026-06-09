@@ -1551,6 +1551,7 @@ export interface PinPayload {
 export interface OsmPoi {
   id: string; name: string; lat: number; lng: number;
   type: 'camp' | 'water' | 'trail' | 'trailhead' | 'viewpoint' | 'peak' | 'hot_spring' | 'fuel' | 'propane' | 'dump' | 'shower' | 'laundromat' | 'lodging' | 'private_stay' | 'farm_stay' | 'ranch' | 'winery' | 'glamping' | 'private_camp' | 'food' | 'grocery' | 'mechanic' | 'parking' | 'attraction' | 'hardware' | 'camping' | 'medical' | 'parts' | 'wifi' | 'poi'; subtype?: string; elevation?: string;
+  display_type?: string;
   source?: string;
   source_label?: string;
   provider_place_id?: string;
@@ -1597,6 +1598,7 @@ export interface OsmPoi {
   activities?: string[];
   source_badge?: string;
   source_freshness?: string;
+  photo_status?: string;
   last_checked?: number;
   route_distance_mi?: number; route_fit?: string;
   route_progress?: number; route_progress_mi?: number; route_segment_index?: number;

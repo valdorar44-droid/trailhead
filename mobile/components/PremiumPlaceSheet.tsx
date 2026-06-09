@@ -37,6 +37,7 @@ type PlaceLike = {
   place_id?: string;
   type?: string;
   subtype?: string;
+  display_type?: string;
   address?: string;
   phone?: string;
   website?: string;
@@ -76,6 +77,7 @@ type PlaceLike = {
   rich_detail_reason?: string;
   source_badge?: string;
   source_freshness?: string;
+  photo_status?: string;
   last_checked?: number;
   waterbody_name?: string;
   waterbody_type?: string;
@@ -113,10 +115,13 @@ type RelatedItem = {
   lng: number;
   type?: string;
   subtype?: string;
+  display_type?: string;
+  source?: string;
   source_label?: string;
   distance_mi?: number;
   route_distance_mi?: number;
   photo_url?: string | null;
+  photo_status?: string;
   length_mi?: number | null;
 };
 
@@ -199,6 +204,15 @@ function isTransientMapboxPlace(place: PlaceLike | null | undefined) {
   return source === 'rendered_mapbox_standard' || source === 'mapbox_feature' || source === 'rendered_map' || source === 'mapbox_search';
 }
 
+function isBroadDestinationCard(place: PlaceLike | null | undefined) {
+  const type = String(place?.type || '').toLowerCase().replace(/[\s-]+/g, '_');
+  const subtype = String(place?.subtype || place?.display_type || '').toLowerCase().replace(/[\s-]+/g, '_');
+  const source = String(place?.source || place?.source_label || '').toLowerCase();
+  const broadTypes = new Set(['place', 'locality', 'city', 'town', 'village', 'hamlet', 'municipality', 'neighborhood', 'suburb', 'district', 'region']);
+  if (broadTypes.has(type) || broadTypes.has(subtype)) return true;
+  return source.includes('map search') && String(place?.name || '').includes(',');
+}
+
 function openNowLabel(openNow?: boolean | null) {
   if (openNow === true) return 'Open now';
   if (openNow === false) return 'Closed now';
@@ -277,8 +291,9 @@ function itemIcon(type?: string): keyof typeof Ionicons.glyphMap {
 
 function itemMeta(item: RelatedItem) {
   const distance = item.route_distance_mi ?? item.distance_mi;
+  const label = item.source_label || item.display_type || titleCase(item.subtype || item.type);
   return [
-    item.length_mi != null ? `${Number(item.length_mi).toFixed(Number(item.length_mi) >= 10 ? 0 : 1)} mi trail` : titleCase(item.subtype || item.type),
+    item.length_mi != null ? `${Number(item.length_mi).toFixed(Number(item.length_mi) >= 10 ? 0 : 1)} mi trail` : label,
     distance != null && Number.isFinite(Number(distance)) ? `${Number(distance).toFixed(1)} mi` : '',
   ].filter(Boolean).join(' · ');
 }
@@ -441,13 +456,17 @@ export default function PremiumPlaceSheet({
       ? [...canonicalHero, ...userPhotos.filter(photo => photo.url !== canonicalHero[0].url)]
       : userPhotos;
   const reviews = (detail?.reviews ?? []).filter(review => !['google', 'foursquare'].includes(String(review.source || '').toLowerCase()));
-  const relatedHero = [
+  const broadDestination = isBroadDestinationCard(data);
+  const relatedHero = broadDestination ? '' : [
     ...(related?.things_to_do ?? []),
     ...(related?.places ?? []),
     ...(related?.campgrounds_nearby ?? []),
     ...(related?.camps ?? []),
     ...(related?.trails ?? []),
-  ].map(item => mediaUrl(item.photo_url)).find(Boolean);
+  ]
+    .filter(item => String(item.type || '').toLowerCase() !== 'event')
+    .map(item => mediaUrl(item.photo_url))
+    .find(Boolean);
   const hero = photos[0]?.url || relatedHero;
   const sourceLabel = data.source_label || data.attribution || data.source || 'Trailhead';
   const addToRoute = () => onAddToRoute?.({ name: place.name, lat: place.lat, lng: place.lng, note: data.summary || subtitle });
@@ -603,7 +622,7 @@ export default function PremiumPlaceSheet({
           <View style={s.tipRow}>
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={s.tipTitle} numberOfLines={1}>{data.name}</Text>
-              <Text style={s.tipMeta} numberOfLines={1}>{subtitle || sourceLabel}</Text>
+              <Text style={s.tipMeta} numberOfLines={1}>{subtitle || data.display_type || sourceLabel}</Text>
             </View>
             {loading ? <ActivityIndicator color={C.orange} size="small" /> : null}
             <TouchableOpacity style={s.iconBtn} onPress={onClose}>
@@ -742,9 +761,19 @@ export default function PremiumPlaceSheet({
                   {!!related?.error && !related?.loading && (
                     <Text style={s.sectionText}>{related.error}</Text>
                   )}
-                  <RelatedRail title="Things to do" items={(related?.things_to_do ?? related?.places ?? []).slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
-                  <RelatedRail title="Things to see" items={(related?.things_to_see ?? []).slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
-                  <RelatedRail title="Visitor centers" items={(related?.visitor_centers ?? []).slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
+                  {broadDestination ? (
+                    <>
+                      <RelatedRail title="Things to see" items={(related?.things_to_see ?? []).slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
+                      <RelatedRail title="Visitor centers" items={(related?.visitor_centers ?? []).slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
+                      <RelatedRail title="Things to do" items={(related?.things_to_do ?? related?.places ?? []).slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
+                    </>
+                  ) : (
+                    <>
+                      <RelatedRail title="Things to do" items={(related?.things_to_do ?? related?.places ?? []).slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
+                      <RelatedRail title="Things to see" items={(related?.things_to_see ?? []).slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
+                      <RelatedRail title="Visitor centers" items={(related?.visitor_centers ?? []).slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
+                    </>
+                  )}
                   <RelatedRail title="Campgrounds nearby" items={(related?.campgrounds_nearby ?? related?.camps ?? []).slice(0, 8)} onPress={onOpenRelatedCamp} C={C} styles={s} />
                   <RelatedRail title="Trails" items={(related?.trails ?? []).slice(0, 8)} onPress={onOpenRelatedTrail} C={C} styles={s} />
                   <RelatedRail title="Trip services" items={(related?.trip_services ?? []).slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />

@@ -38,6 +38,33 @@ def _clean(value: object, limit: int = 500) -> str:
     return " ".join(str(value or "").split())[:limit]
 
 
+_WEAK_ENDPOINT_TEXT = {
+    "",
+    "place",
+    "places",
+    "thingstodo",
+    "things to do",
+    "visitorcenter",
+    "visitor center",
+    "visitor centers",
+    "campground",
+    "campgrounds",
+}
+
+
+def _meaningful_text(*values: object, limit: int = 650) -> str:
+    for value in values:
+        clean = _clean(value, limit)
+        normalized = re.sub(r"[^a-z0-9]+", " ", clean.lower()).strip()
+        if normalized in _WEAK_ENDPOINT_TEXT:
+            continue
+        if len(normalized) < 16 and normalized in {"places", "attraction", "camp", "park"}:
+            continue
+        if clean:
+            return clean
+    return ""
+
+
 def _latlng(item: dict[str, Any]) -> tuple[float, float] | None:
     lat = item.get("latitude") or item.get("lat")
     lng = item.get("longitude") or item.get("lng")
@@ -162,8 +189,8 @@ def _endpoint_record(endpoint: str, item: dict, park: dict, center_lat: float, c
         "type": kind,
         "category": kind,
         "subtype": endpoint.replace("thingstodo", "Things to do").replace("visitorcenters", "Visitor center").title(),
-        "summary": _clean(item.get("shortDescription") or item.get("description") or "", 650),
-        "description": _clean(item.get("description") or item.get("shortDescription") or "", 1200),
+        "summary": _meaningful_text(item.get("shortDescription"), item.get("description"), limit=650),
+        "description": _meaningful_text(item.get("description"), item.get("shortDescription"), limit=1200),
         "photo_url": photo_url,
         "photos": photos,
         "activities": [a.get("name") for a in (item.get("activities") or []) if isinstance(a, dict) and a.get("name")][:12],

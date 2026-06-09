@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 import dashboard.server as server
+import ingestors.nps as nps
 
 
 class OfficialPlaceEnrichmentTests(unittest.TestCase):
@@ -85,6 +86,30 @@ class OfficialPlaceEnrichmentTests(unittest.TestCase):
         self.assertNotIn("BLM Recreation Site", [p["name"] for p in rails["things_to_see"]])
         self.assertIn("Fisher Towers Trailhead", [p["name"] for p in rails["things_to_do"]])
         self.assertIn("Canyon Viewpoint", [p["name"] for p in rails["things_to_see"]])
+
+    def test_related_rails_drop_generic_blm_services_without_photos(self):
+        places = [
+            {"id": "blm-water", "name": "BLM Recreation Site", "lat": 38.0, "lng": -109.0, "type": "water", "source": "blm", "source_label": "Official BLM"},
+            {"id": "named-water", "name": "Portal Trail Water", "lat": 38.01, "lng": -109.01, "type": "water", "source": "osm", "source_label": "OpenStreetMap"},
+        ]
+
+        rails = server._related_rails_from_places(places, [], None)
+
+        self.assertNotIn("BLM Recreation Site", [p["name"] for p in rails["trip_services"]])
+        self.assertIn("Portal Trail Water", [p["name"] for p in rails["trip_services"]])
+
+    def test_nps_endpoint_record_suppresses_category_summary(self):
+        record = nps._endpoint_record(
+            "places",
+            {"id": "park-avenue", "title": "Park Avenue Viewpoint and Trail", "latitude": "38.624", "longitude": "-109.600", "shortDescription": "Places", "description": ""},
+            {"parkCode": "arch", "url": "https://www.nps.gov/arch/index.htm"},
+            38.57,
+            -109.52,
+        )
+
+        self.assertIsNotNone(record)
+        self.assertEqual(record["summary"], "")
+        self.assertEqual(record["description"], "")
 
 
 class OfficialPlaceEndpointTests(unittest.IsolatedAsyncioTestCase):
@@ -176,6 +201,51 @@ class OfficialPlaceEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(card["source"], "search")
         self.assertEqual(card["source_label"], "Map search")
         self.assertNotIn("google_maps_uri", card)
+
+    async def test_map_card_locality_uses_own_open_photo_not_event_photo(self):
+        event = {
+            "id": "event-1",
+            "name": "Volleyball Camp",
+            "lat": 35.2,
+            "lng": -111.65,
+            "type": "event",
+            "source": "active",
+            "source_label": "Active",
+            "photo_url": "https://cdn.example/event-logo.jpg",
+        }
+        wiki_profile = {
+            "summary": "Flagstaff is a northern Arizona city near public lands and mountain recreation.",
+            "photo_url": "https://cdn.example/flagstaff.jpg",
+            "photos": [{"url": "https://cdn.example/flagstaff.jpg", "source": "Wikipedia"}],
+            "official_url": "https://en.wikipedia.org/wiki/Flagstaff,_Arizona",
+            "source_label": "Wikipedia",
+            "source_badge": "Wikipedia / Wikimedia",
+            "source_freshness": "Wikipedia cached.",
+            "last_checked": 1,
+        }
+
+        with (
+            patch.object(server, "get_cached", return_value=None),
+            patch.object(server, "set_cached", return_value=None),
+            patch.object(server, "nearby_smart_pack", new=AsyncMock(return_value={"places": [event]})),
+            patch.object(server, "trails_discover", new=AsyncMock(return_value={"trails": []})),
+            patch.object(server, "_open_place_wiki_profile", new=AsyncMock(return_value=wiki_profile)),
+        ):
+            result = await server.resolve_map_card(server.MapCardResolveRequest(
+                kind="search",
+                source="mapbox",
+                source_label="Mapbox geocode",
+                name="Flagstaff, Arizona, United States",
+                lat=35.1983,
+                lng=-111.6513,
+                type="place",
+            ), user=None)
+
+        self.assertEqual(result["card"]["display_type"], "City")
+        self.assertEqual(result["card"]["photo_url"], "https://cdn.example/flagstaff.jpg")
+        self.assertNotEqual(result["card"]["photo_url"], event["photo_url"])
+        self.assertIn("northern Arizona", result["card"]["summary"])
+        self.assertEqual(result["related"]["things_to_do"][0]["name"], "Volleyball Camp")
 
     def test_legacy_provider_card_fields_are_scrubbed(self):
         stale = {

@@ -60,6 +60,21 @@ class OfficialPlaceEnrichmentTests(unittest.TestCase):
         self.assertEqual(rails["things_to_see"][0]["photo_status"], "open_photo")
         self.assertEqual(rails["things_to_do"][0]["photo_status"], "placeholder")
 
+    def test_related_rails_drop_generic_blm_without_photos(self):
+        places = [
+            {"id": "blm-generic-1", "name": "BLM Recreation Site", "lat": 38.0, "lng": -109.0, "type": "trailhead", "source": "blm", "source_label": "Official BLM"},
+            {"id": "blm-generic-2", "name": "BLM Recreation Site", "lat": 38.01, "lng": -109.01, "type": "viewpoint", "source": "blm", "source_label": "Official BLM"},
+            {"id": "blm-real", "name": "Fisher Towers Trailhead", "lat": 38.72, "lng": -109.31, "type": "trailhead", "source": "blm", "source_label": "Official BLM", "photo_url": "https://cdn.example/fisher.jpg"},
+            {"id": "view-real", "name": "Canyon Viewpoint", "lat": 38.2, "lng": -109.2, "type": "viewpoint", "source": "nps", "source_label": "National Park Service", "photo_url": "https://cdn.example/view.jpg"},
+        ]
+
+        rails = server._related_rails_from_places(places, [], None)
+
+        self.assertNotIn("BLM Recreation Site", [p["name"] for p in rails["things_to_do"]])
+        self.assertNotIn("BLM Recreation Site", [p["name"] for p in rails["things_to_see"]])
+        self.assertIn("Fisher Towers Trailhead", [p["name"] for p in rails["things_to_do"]])
+        self.assertIn("Canyon Viewpoint", [p["name"] for p in rails["things_to_see"]])
+
 
 class OfficialPlaceEndpointTests(unittest.IsolatedAsyncioTestCase):
     async def test_nearby_places_returns_official_explore_category_without_unlock(self):

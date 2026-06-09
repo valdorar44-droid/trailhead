@@ -792,6 +792,8 @@ function campMobileCoverage(detail?: CampsiteDetail | null, camp?: CampsitePin |
 }
 
 function normalizeCampDetailArrays(detail: CampsiteDetail): CampsiteDetail {
+  const usefulRail = (items: any[] | undefined, keepServices = false) =>
+    (Array.isArray(items) ? items : []).filter(item => !isLowValueGenericBlmPlace(item, keepServices));
   return {
     ...detail,
     tags: Array.isArray(detail.tags) ? detail.tags : [],
@@ -801,12 +803,23 @@ function normalizeCampDetailArrays(detail: CampsiteDetail): CampsiteDetail {
     activities: Array.isArray(detail.activities) ? detail.activities : [],
     campsites: Array.isArray(detail.campsites) ? detail.campsites : [],
     reviews: Array.isArray((detail as any).reviews) ? (detail as any).reviews : [],
-    things_to_do: Array.isArray(detail.things_to_do) ? detail.things_to_do : [],
-    things_to_see: Array.isArray(detail.things_to_see) ? detail.things_to_see : [],
+    things_to_do: usefulRail(detail.things_to_do),
+    things_to_see: usefulRail(detail.things_to_see),
     visitor_centers: Array.isArray(detail.visitor_centers) ? detail.visitor_centers : [],
     campgrounds_nearby: Array.isArray(detail.campgrounds_nearby) ? detail.campgrounds_nearby : [],
-    trip_services: Array.isArray(detail.trip_services) ? detail.trip_services : [],
+    trip_services: usefulRail(detail.trip_services, true),
   } as CampsiteDetail;
+}
+
+function isLowValueGenericBlmPlace(place: Partial<OsmPoi> | null | undefined, keepServices = false) {
+  if (!place) return false;
+  const type = String(place.type || (place as any).category || '').toLowerCase().replace(/[\s-]+/g, '_');
+  if (keepServices && TRIP_SERVICE_PLACE_TYPES.has(type)) return false;
+  const name = String(place.name || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const source = String((place as any).source || (place as any).source_label || (place as any).source_badge || (place as any).attribution || '').toLowerCase();
+  const hasPhoto = !!((place as any).photo_url || ((place as any).photos || [])[0]);
+  const lowName = !name || ['blm recreation site', 'recreation site', 'trailhead', 'viewpoint', 'parking', 'campground', 'campsite'].includes(name);
+  return source.includes('blm') && lowName && !hasPhoto;
 }
 
 type SavedAiKind = 'route_brief' | 'packing_list';
@@ -13843,7 +13856,7 @@ function MapScreen() {
   }
 
   function renderNearbyPlaceCard(place: OsmPoi, compact = false, day?: number | null) {
-    const photo = mediaUrl(place.photo_url);
+    const photo = nearbyPlacePhoto(place);
     const meta = tripPlaceCardMeta(place, day);
     const canAddToTrip = !!activeTrip;
     return (
@@ -13891,6 +13904,24 @@ function MapScreen() {
     return THINGS_TO_SEE_PLACE_TYPES.has(type);
   }
 
+  function nearbyPlacePhoto(place: Partial<OsmPoi> | null | undefined) {
+    const photos = (place as any)?.photos;
+    const first = Array.isArray(photos) ? photos[0] : null;
+    return mediaUrl((place as any)?.photo_url || (typeof first === 'string' ? first : first?.url));
+  }
+
+  function photoBackedNearbyPlace(place: Partial<OsmPoi> | null | undefined) {
+    return !!nearbyPlacePhoto(place) && String((place as any)?.photo_status || '').toLowerCase() !== 'placeholder';
+  }
+
+  function qualityGuideRail(items: OsmPoi[], options: { photoFirst?: boolean; keepServices?: boolean } = {}) {
+    const cleaned = items.filter(item => !isLowValueGenericBlmPlace(item, !!options.keepServices));
+    if (!options.photoFirst) return cleaned;
+    const photoBacked = cleaned.filter(photoBackedNearbyPlace);
+    const named = cleaned.filter(item => !photoBackedNearbyPlace(item) && !['trailhead', 'viewpoint', 'parking', 'campground', 'campsite'].includes(String(item.name || '').toLowerCase().trim()));
+    return photoBacked.length ? [...photoBacked, ...named].slice(0, Math.max(photoBacked.length, 4)) : named;
+  }
+
   function loadNearbyPlacesFor(
     key: string,
     center?: { lat?: number | null; lng?: number | null },
@@ -13927,6 +13958,7 @@ function MapScreen() {
       : {};
     const normalize = (places: OsmPoi[]) => places
       .filter(p => String(p.type) !== 'camp')
+      .filter(p => !isLowValueGenericBlmPlace(p, isTripServicePlace(p)))
       .filter(p => (p.name && p.name.trim()) || UTILITY_PLACE_TYPES.has(String(p.type || '')))
       .map(p => {
         const context = day ? tripPlaceContextFor(p, day) : null;
@@ -13953,6 +13985,7 @@ function MapScreen() {
         merged.push(place);
       });
       return merged
+        .filter(place => !isLowValueGenericBlmPlace(place, isTripServicePlace(place)))
         .sort((a, b) => {
           const ac = tripPlaceContextFor(a, day);
           const bc = tripPlaceContextFor(b, day);
@@ -15522,7 +15555,7 @@ function MapScreen() {
       pointerEvents="box-none"
       style={[
         s.navHudAnimated,
-        { bottom: bottomInset + 18 },
+        { bottom: bottomInset + 6 },
         {
           opacity: navAnim,
           transform: [{
@@ -15560,13 +15593,6 @@ function MapScreen() {
           </Text>
         </View>
       </View>
-
-      {displayStepRoad(nextStep) ? (
-        <View style={s.currentRoadPill}>
-          <Ionicons name="git-branch-outline" size={13} color={C.orange} />
-          <Text style={s.currentRoadText} numberOfLines={1}>{displayStepRoad(nextStep)}</Text>
-        </View>
-      ) : null}
 
       <View style={s.navStrip}>
         <View style={s.navSpeedCircle}>
@@ -16023,7 +16049,7 @@ function MapScreen() {
               <View style={s.mapWeatherCrosshairDot} />
             </View>
           </View>
-          <View style={[s.mapWeatherPeekSheet, { bottom: bottomInset + 78 }]} pointerEvents="box-none">
+          <View style={[s.mapWeatherPeekSheet, { bottom: Math.max(bottomInset + 8, 14) }]} pointerEvents="box-none">
             <TouchableOpacity style={s.mapWeatherPeekCard} activeOpacity={0.9} onPress={() => setShowMapWeatherSheet(true)}>
               {(() => {
                 const current = mapWeather?.current;
@@ -16050,7 +16076,7 @@ function MapScreen() {
                             setShowMapWeatherSheet(true);
                           }}
                         >
-                          <Ionicons name="chevron-up" size={15} color={C.text2} />
+                          <Ionicons name="chevron-up" size={15} color="#29323f" />
                         </TouchableOpacity>
                         <TouchableOpacity
                           style={s.mapWeatherPeekIconBtn}
@@ -16060,7 +16086,7 @@ function MapScreen() {
                             setShowMapWeatherSheet(false);
                           }}
                         >
-                          <Ionicons name="close" size={14} color={C.text2} />
+                          <Ionicons name="close" size={14} color="#29323f" />
                         </TouchableOpacity>
                       </View>
                     </View>
@@ -16084,7 +16110,7 @@ function MapScreen() {
                     </View>
                     <View style={s.mapWeatherPeekMetrics}>
                       <View style={s.mapWeatherPeekMetric}>
-                        <Text style={s.mapWeatherPeekMetricValue}>{weatherTemp(high, units)} / {weatherTemp(low, units)}</Text>
+                              <Text style={s.mapWeatherPeekMetricValue}>{weatherTemp(high, units)} / {weatherTemp(low, units)}</Text>
                         <Text style={s.mapWeatherPeekMetricLabel}>high / low</Text>
                       </View>
                       <View style={s.mapWeatherPeekMetric}>
@@ -18783,11 +18809,11 @@ function MapScreen() {
             {(() => {
               const key = nearbyFeedKey('camp', selectedCamp.lat, selectedCamp.lng);
               const feed = nearbyPlaceFeeds[key];
-              const feedPlaces = feed?.places ?? [];
-              const visitorCenters = feedPlaces.filter(isVisitorCenterPlace);
-              const tripServices = feedPlaces.filter(isTripServicePlace);
-              const sights = feedPlaces.filter(place => !isTripServicePlace(place) && !isVisitorCenterPlace(place) && isSightPlace(place));
-              const things = feedPlaces.filter(place => !isTripServicePlace(place) && !isVisitorCenterPlace(place) && !isSightPlace(place));
+              const feedPlaces = (feed?.places ?? []).filter(place => !isLowValueGenericBlmPlace(place, isTripServicePlace(place)));
+              const visitorCenters = qualityGuideRail(feedPlaces.filter(isVisitorCenterPlace), { photoFirst: true });
+              const tripServices = qualityGuideRail(feedPlaces.filter(isTripServicePlace), { keepServices: true });
+              const sights = qualityGuideRail(feedPlaces.filter(place => !isTripServicePlace(place) && !isVisitorCenterPlace(place) && isSightPlace(place)), { photoFirst: true });
+              const things = qualityGuideRail(feedPlaces.filter(place => !isTripServicePlace(place) && !isVisitorCenterPlace(place) && !isSightPlace(place)), { photoFirst: true });
               return (
                 <View style={s.nearbyPlacesBlock}>
                   <View style={s.nearbyPlacesHeader}>
@@ -19211,11 +19237,11 @@ function MapScreen() {
                 {(() => {
                   const key = nearbyFeedKey('camp', campDetail.lat, campDetail.lng);
                   const feed = nearbyPlaceFeeds[key];
-                  const feedPlaces = feed?.places ?? [];
-                  const visitorCenters = feedPlaces.filter(isVisitorCenterPlace);
-                  const tripServices = feedPlaces.filter(isTripServicePlace);
-                  const sights = feedPlaces.filter(place => !isTripServicePlace(place) && !isVisitorCenterPlace(place) && isSightPlace(place));
-                  const things = feedPlaces.filter(place => !isTripServicePlace(place) && !isVisitorCenterPlace(place) && !isSightPlace(place));
+                  const feedPlaces = (feed?.places ?? []).filter(place => !isLowValueGenericBlmPlace(place, isTripServicePlace(place)));
+                  const visitorCenters = qualityGuideRail(feedPlaces.filter(isVisitorCenterPlace), { photoFirst: true });
+                  const tripServices = qualityGuideRail(feedPlaces.filter(isTripServicePlace), { keepServices: true });
+                  const sights = qualityGuideRail(feedPlaces.filter(place => !isTripServicePlace(place) && !isVisitorCenterPlace(place) && isSightPlace(place)), { photoFirst: true });
+                  const things = qualityGuideRail(feedPlaces.filter(place => !isTripServicePlace(place) && !isVisitorCenterPlace(place) && !isSightPlace(place)), { photoFirst: true });
                   return (
                     <View style={s.detailSection}>
                       <View style={s.nearbyPlacesHeader}>
@@ -20570,8 +20596,8 @@ function MapScreen() {
         );
       })()}
 
-      {extremeCopilotAvailable && !navMode && !safeWaterPlanningActive && !waterFollowActive && !showExtremeCopilot && (!showDiscoveryPanel || extremeCopilotVoiceActive) && (
-        <View style={[s.extremeCopilotDock, { bottom: bottomInset + 84 }]} pointerEvents="box-none">
+      {extremeCopilotAvailable && !navMode && !mapWeatherEnabled && !safeWaterPlanningActive && !waterFollowActive && !showExtremeCopilot && (!showDiscoveryPanel || extremeCopilotVoiceActive) && (
+        <View style={[s.extremeCopilotDock, { bottom: bottomInset + 92 }]} pointerEvents="box-none">
           <TouchableOpacity
             style={s.extremeCopilotFab}
             activeOpacity={0.88}
@@ -22779,7 +22805,7 @@ const makeStyles = (C: ColorPalette) => {
     position: 'absolute',
     left: 12,
     right: 12,
-    bottom: 76,
+    bottom: 58,
     zIndex: 10000,
     elevation: 100,
   },
@@ -23434,15 +23460,15 @@ const makeStyles = (C: ColorPalette) => {
   nearbyPlacesHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   nearbyPlacesTitle: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
   nearbyPlacesEmpty: { color: C.text3, fontSize: 11, lineHeight: 15 },
-  nearbyPlaceRail: { gap: 8, paddingRight: 4 },
-  nearbyPlaceCard: { width: 142, minHeight: 132, borderWidth: 1, borderColor: C.border, backgroundColor: C.s2, borderRadius: 12, overflow: 'hidden', position: 'relative' },
-  nearbyPlaceCardCompact: { minHeight: 112 },
-  nearbyPlacePhoto: { width: '100%', height: 72, backgroundColor: C.s3 },
-  nearbyPlaceIconBlock: { width: '100%', height: 72, alignItems: 'center', justifyContent: 'center', backgroundColor: C.orange + '12', borderBottomWidth: 1, borderBottomColor: C.border },
+  nearbyPlaceRail: { gap: 10, paddingRight: 6 },
+  nearbyPlaceCard: { width: 158, minHeight: 154, borderWidth: 1, borderColor: 'rgba(15,23,42,0.10)', backgroundColor: '#f8faf7', borderRadius: 14, overflow: 'hidden', position: 'relative' },
+  nearbyPlaceCardCompact: { minHeight: 126 },
+  nearbyPlacePhoto: { width: '100%', height: 90, backgroundColor: '#dfe6dc' },
+  nearbyPlaceIconBlock: { width: '100%', height: 90, alignItems: 'center', justifyContent: 'center', backgroundColor: '#ede8e0', borderBottomWidth: 1, borderBottomColor: 'rgba(15,23,42,0.08)' },
   nearbyPlaceAdd: { position: 'absolute', top: 7, right: 7, width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: C.orange, borderWidth: 1, borderColor: 'rgba(255,255,255,0.35)' },
-  nearbyPlaceBody: { padding: 9, gap: 4, minHeight: 58 },
-  nearbyPlaceName: { color: C.text, fontSize: 12, lineHeight: 16, fontWeight: '800' },
-  nearbyPlaceMeta: { color: C.text3, fontSize: 9, fontFamily: mono },
+  nearbyPlaceBody: { padding: 10, gap: 4, minHeight: 64 },
+  nearbyPlaceName: { color: '#101820', fontSize: 13, lineHeight: 17, fontWeight: '900', letterSpacing: 0 },
+  nearbyPlaceMeta: { color: '#69736f', fontSize: 9.5, lineHeight: 13, fontFamily: mono },
   siteRail: { gap: 8, paddingRight: 4, paddingTop: 2 },
   sitePhotoCard: { width: 148, borderWidth: 1, borderColor: C.border, backgroundColor: C.s2, borderRadius: 12, overflow: 'hidden' },
   sitePhoto: { width: '100%', height: 80, backgroundColor: C.s3 },
@@ -23461,21 +23487,21 @@ const makeStyles = (C: ColorPalette) => {
   mapWeatherCrosshairLineH: { position: 'absolute', width: 46, height: 2, borderRadius: 1, backgroundColor: '#38bdf8' },
   mapWeatherCrosshairLineV: { position: 'absolute', width: 2, height: 46, borderRadius: 1, backgroundColor: '#38bdf8' },
   mapWeatherCrosshairDot: { width: 14, height: 14, borderRadius: 7, backgroundColor: C.bg, borderWidth: 2, borderColor: '#38bdf8' },
-  mapWeatherPeekSheet: { position: 'absolute', left: 10, right: 10, zIndex: 67, alignItems: 'stretch' },
-  mapWeatherPeekCard: { minHeight: 152, borderTopLeftRadius: 18, borderTopRightRadius: 18, borderBottomLeftRadius: 14, borderBottomRightRadius: 14, borderWidth: 1, borderColor: '#38bdf855', backgroundColor: 'rgba(13,20,31,0.96)', paddingHorizontal: 12, paddingTop: 7, paddingBottom: 12, shadowColor: '#000', shadowOpacity: 0.32, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 18 },
-  mapWeatherPeekHandleRow: { minHeight: 28, alignItems: 'center', justifyContent: 'center' },
-  mapWeatherGrabber: { width: 42, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.28)' },
+  mapWeatherPeekSheet: { position: 'absolute', left: 12, right: 12, zIndex: 130, elevation: 130, alignItems: 'stretch' },
+  mapWeatherPeekCard: { minHeight: 204, borderRadius: 24, borderWidth: 1, borderColor: 'rgba(148,163,184,0.34)', backgroundColor: '#f8faf7', paddingHorizontal: 14, paddingTop: 8, paddingBottom: 16, shadowColor: '#000', shadowOpacity: 0.22, shadowRadius: 24, shadowOffset: { width: 0, height: 12 }, elevation: 28 },
+  mapWeatherPeekHandleRow: { minHeight: 30, alignItems: 'center', justifyContent: 'center' },
+  mapWeatherGrabber: { width: 48, height: 5, borderRadius: 3, backgroundColor: 'rgba(15,23,42,0.18)' },
   mapWeatherPeekActions: { position: 'absolute', right: 0, top: 0, flexDirection: 'row', alignItems: 'center', gap: 6 },
-  mapWeatherPeekIconBtn: { width: 28, height: 28, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s2, borderWidth: 1, borderColor: C.border },
-  mapWeatherPeekMain: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  mapWeatherPeekIcon: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#38bdf866', backgroundColor: '#38bdf814' },
-  mapWeatherPeekKicker: { color: '#38bdf8', fontSize: 8.5, fontFamily: mono, fontWeight: '900', letterSpacing: 0.7 },
-  mapWeatherPeekTitle: { color: C.text, fontSize: 18, fontWeight: '900', letterSpacing: 0, marginTop: 2 },
-  mapWeatherPeekSub: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 3 },
-  mapWeatherPeekMetrics: { flexDirection: 'row', gap: 7, marginTop: 11 },
-  mapWeatherPeekMetric: { flex: 1, minHeight: 48, borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)', backgroundColor: 'rgba(255,255,255,0.045)', borderRadius: 10, paddingHorizontal: 7, paddingVertical: 7, justifyContent: 'center' },
-  mapWeatherPeekMetricValue: { color: C.text, fontSize: 11, fontFamily: mono, fontWeight: '900', textAlign: 'center' },
-  mapWeatherPeekMetricLabel: { color: C.text3, fontSize: 8, fontFamily: mono, fontWeight: '800', textAlign: 'center', marginTop: 2 },
+  mapWeatherPeekIconBtn: { width: 34, height: 34, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: '#edf1ec', borderWidth: 1, borderColor: 'rgba(15,23,42,0.12)' },
+  mapWeatherPeekMain: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  mapWeatherPeekIcon: { width: 54, height: 54, borderRadius: 18, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#38bdf866', backgroundColor: '#e8f7fb' },
+  mapWeatherPeekKicker: { color: '#117ea2', fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
+  mapWeatherPeekTitle: { color: '#101820', fontSize: 19, fontWeight: '900', letterSpacing: 0, marginTop: 3 },
+  mapWeatherPeekSub: { color: '#52606d', fontSize: 10.5, fontFamily: mono, marginTop: 3 },
+  mapWeatherPeekMetrics: { flexDirection: 'row', gap: 8, marginTop: 14 },
+  mapWeatherPeekMetric: { flex: 1, minHeight: 58, borderWidth: 1, borderColor: 'rgba(15,23,42,0.10)', backgroundColor: '#eef2ec', borderRadius: 14, paddingHorizontal: 7, paddingVertical: 8, justifyContent: 'center' },
+  mapWeatherPeekMetricValue: { color: '#101820', fontSize: 11, fontFamily: mono, fontWeight: '900', textAlign: 'center' },
+  mapWeatherPeekMetricLabel: { color: '#6b7280', fontSize: 8, fontFamily: mono, fontWeight: '800', textAlign: 'center', marginTop: 3 },
   mapWeatherSheetHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 12, borderBottomWidth: 1, borderColor: C.border },
   mapWeatherSheetKicker: { color: '#38bdf8', fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
   mapWeatherSheetTitle: { color: C.text, fontSize: 20, fontWeight: '900', marginTop: 3 },

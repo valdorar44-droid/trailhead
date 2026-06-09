@@ -11612,7 +11612,7 @@ def _map_card_cache_key(body: MapCardResolveRequest) -> str:
         f"{float(body.lat):.4f}",
         f"{float(body.lng):.4f}",
     ])
-    return f"map_card_v7:{hashlib.sha1(base.encode()).hexdigest()[:24]}"
+    return f"map_card_v8:{hashlib.sha1(base.encode()).hexdigest()[:24]}"
 
 
 def _contains_restricted_provider(value: object) -> bool:
@@ -11851,13 +11851,6 @@ def _related_rails_from_places(smart_places: list[dict], trails: list[dict], cam
             return f"generic:{_smart_pack_type(item.get('type'))}:{name}"
         return ""
 
-    def is_generic_blm(item: dict) -> bool:
-        name = re.sub(r"[^a-z0-9]+", " ", str(item.get("name") or "").lower()).strip()
-        source = str(item.get("source") or item.get("source_label") or item.get("attribution") or "").lower()
-        if "blm" not in source:
-            return False
-        return name in {"", "blm recreation site", "recreation site"}
-
     def photo_backed(item: dict) -> bool:
         return bool(item.get("photo_url") or item.get("photos")) and str(item.get("photo_status") or "") != "placeholder"
 
@@ -11887,10 +11880,10 @@ def _related_rails_from_places(smart_places: list[dict], trails: list[dict], cam
         elif ptype == "visitor_center":
             add(visitor_centers, item)
         elif ptype in THINGS_TO_SEE_PLACE_TYPES:
-            if not is_generic_blm(item) and (photo_backed(item) or not generic_key(item)):
+            if not _is_low_value_generic_blm_place(item) and (photo_backed(item) or not generic_key(item)):
                 add(sights, item)
         else:
-            if not is_generic_blm(item) and (photo_backed(item) or not generic_key(item)):
+            if not _is_low_value_generic_blm_place(item) and (photo_backed(item) or not generic_key(item)):
                 add(things, item)
 
     if camp_detail:
@@ -11945,6 +11938,19 @@ def _related_rails_from_places(smart_places: list[dict], trails: list[dict], cam
         "trip_services": rail(services, 8),
         "trails": (trails or [])[:10],
     }
+
+
+def _is_low_value_generic_blm_place(item: dict | None, keep_services: bool = False) -> bool:
+    if not isinstance(item, dict):
+        return False
+    ptype = _smart_pack_type(item.get("type") or item.get("category"))
+    if keep_services and ptype in TRIP_SERVICE_PLACE_TYPES:
+        return False
+    name = re.sub(r"[^a-z0-9]+", " ", str(item.get("name") or "").lower()).strip()
+    source = str(item.get("source") or item.get("source_label") or item.get("source_badge") or item.get("attribution") or "").lower()
+    has_photo = bool(item.get("photo_url") or item.get("photos"))
+    low_name = name in {"", "blm recreation site", "recreation site", "trailhead", "viewpoint", "parking", "campground", "campsite"}
+    return "blm" in source and low_name and not has_photo
 
 
 def _place_cluster_name(value: object) -> str:
@@ -12249,6 +12255,7 @@ async def nearby_smart_pack(body: NearbySmartPackRequest, user: dict | None = De
     if len(route_points) >= 2:
         for item in normalized:
             _annotate_route_candidate(item, route_points, body.recommended_day)
+    normalized = [item for item in normalized if not _is_low_value_generic_blm_place(item, keep_services=True)]
 
     deduped: list[dict] = []
     seen: set[str] = set()
@@ -12263,6 +12270,7 @@ async def nearby_smart_pack(body: NearbySmartPackRequest, user: dict | None = De
 
     normalized = await _enrich_nearby_card_photos(normalized)
     normalized = _dedupe_nearby_places(normalized)
+    normalized = [item for item in normalized if not _is_low_value_generic_blm_place(item, keep_services=True)]
     if route_scope == "leg" and len(route_points) >= 2:
         sorted_normalized = sorted(normalized, key=lambda p: (smart_dist(p), _place_type_priority(p.get("type")), _place_source_priority(p), p.get("confidence") != "high", p.get("name", "")))[:100]
     else:
@@ -12275,6 +12283,8 @@ async def nearby_smart_pack(body: NearbySmartPackRequest, user: dict | None = De
             item.setdefault("source_badge", item.get("source_label") or item.get("verified_source") or "Open official data")
             item.setdefault("source_freshness", "Official/open source data cached by Trailhead; verify current closures, hours, fees, and access with the source.")
         ptype = _smart_pack_type(item.get("type"))
+        if _is_low_value_generic_blm_place(item, keep_services=True):
+            continue
         if ptype not in display_requested and not (ptype == "attraction" and display_requested.intersection({"park", "historic", "climbing", "ohv", "attraction"})):
             continue
         try:

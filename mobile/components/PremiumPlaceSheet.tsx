@@ -43,10 +43,21 @@ type PlaceLike = {
   official_url?: string;
   booking_url?: string;
   open_now?: boolean | null;
+  hours?: string[];
+  open_hours?: string[] | string | Record<string, unknown> | null;
+  hours_label?: string | null;
   rating?: number;
   rating_count?: number;
+  average_rating?: number;
+  review_count?: number;
   photo_url?: string | null;
   photos?: TrailheadGalleryPhoto[];
+  primary_image?: string | null;
+  other_images?: string[];
+  mapbox_categories?: string[];
+  brand?: string | null;
+  enrichment_source?: string;
+  enrichment_status?: string;
   google_maps_uri?: string;
   attribution?: string;
   summary?: string;
@@ -172,6 +183,11 @@ function hasPaidProviderSource(place: PlaceLike | null | undefined) {
   return false;
 }
 
+function isTransientMapboxPlace(place: PlaceLike | null | undefined) {
+  const source = String(place?.source || '').toLowerCase();
+  return source === 'rendered_mapbox_standard' || source === 'mapbox_feature' || source === 'rendered_map' || source === 'mapbox_search';
+}
+
 function openNowLabel(openNow?: boolean | null) {
   if (openNow === true) return 'Open now';
   if (openNow === false) return 'Closed now';
@@ -181,6 +197,16 @@ function openNowLabel(openNow?: boolean | null) {
 function mediaUrl(url?: string | null) {
   if (!url) return '';
   return url.startsWith('/') ? `${API_BASE}${url}` : url;
+}
+
+function normalizeHours(value: PlaceLike['open_hours'], label?: string | null) {
+  if (Array.isArray(value)) return value.map(line => String(line || '').trim()).filter(Boolean);
+  if (typeof value === 'string') return value.split(/\n|;/).map(line => line.trim()).filter(Boolean);
+  if (value && typeof value === 'object') {
+    const raw = (value as any).weekday_text || (value as any).periods || (value as any).data || [];
+    if (Array.isArray(raw)) return raw.map(line => String(line || '').trim()).filter(Boolean);
+  }
+  return label ? [label] : [];
 }
 
 function itemIcon(type?: string): keyof typeof Ionicons.glyphMap {
@@ -269,6 +295,8 @@ export default function PremiumPlaceSheet({
     setEditValue('');
     setEditNote('');
     setGalleryIndex(null);
+    setLoading(false);
+    if (isTransientMapboxPlace(place)) return;
     let canonicalCancelled = false;
     api.canonicalizePlace(canonicalPayload(place))
       .then(({ place: canonicalPlace }) => {
@@ -299,7 +327,7 @@ export default function PremiumPlaceSheet({
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; canonicalCancelled = true; };
-  }, [place?.id, place?.provider_place_id, place?.place_id, place?.lat, place?.lng, initialStage]);
+  }, [place?.id, place?.name, place?.lat, place?.lng, initialStage]);
 
   const data = detail ?? place;
   const maxFull = Math.min(height * 0.84, height - Math.max(insets.top + 22, 54));
@@ -342,14 +370,21 @@ export default function PremiumPlaceSheet({
     : data.photo_url
       ? [{ url: mediaUrl(data.photo_url), source: data.source_label || data.source || '' }]
       : [];
+  const mapboxPhotos: TrailheadGalleryPhoto[] = [
+    data.primary_image,
+    ...(data.other_images ?? []),
+  ]
+    .map(url => mediaUrl(url))
+    .filter(Boolean)
+    .map((url, idx) => ({ id: -1000 - idx, url, source: data.source_label || data.enrichment_source || 'Mapbox' }));
   const canonicalHero: TrailheadGalleryPhoto[] = canonical?.hero_photo_url
     ? [{ url: mediaUrl(canonical.hero_photo_url), source: canonical.hero_photo_source === 'community' ? 'Trailhead community' : canonical.source_label || canonical.source }]
     : [];
   const userPhotos: TrailheadGalleryPhoto[] = (canonical?.photos ?? [])
     .map(photo => ({ url: mediaUrl(photo.url), caption: photo.caption || undefined, source: photo.username ? `Trailhead photo by ${photo.username}` : 'Trailhead community' }))
     .filter(photo => !!photo.url);
-  const photos = officialPhotos.length
-    ? [...officialPhotos, ...userPhotos.filter(photo => !officialPhotos.some(existing => existing.url === photo.url))]
+  const photos = officialPhotos.length || mapboxPhotos.length
+    ? [...officialPhotos, ...mapboxPhotos.filter(photo => !officialPhotos.some(existing => existing.url === photo.url)), ...userPhotos.filter(photo => ![...officialPhotos, ...mapboxPhotos].some(existing => existing.url === photo.url))]
     : canonicalHero.length
       ? [...canonicalHero, ...userPhotos.filter(photo => photo.url !== canonicalHero[0].url)]
       : userPhotos;
@@ -369,11 +404,12 @@ export default function PremiumPlaceSheet({
       ? `${Number(data.distance_mi).toFixed(1)} mi away`
       : '';
   const subtitle = [
-    titleCase(data.subtype || data.type),
+    data.brand || titleCase(data.subtype || data.type),
     distanceLabel,
-    data.rating ? `${Number(data.rating).toFixed(1)} (${data.rating_count || 0})` : '',
+    data.rating || data.average_rating ? `${Number(data.rating ?? data.average_rating).toFixed(1)} (${data.rating_count ?? data.review_count ?? 0})` : '',
     openNowLabel(data.open_now),
   ].filter(Boolean).join(' · ');
+  const hours = detail?.hours?.length ? detail.hours : data.hours?.length ? data.hours : normalizeHours(data.open_hours, data.hours_label);
   const sourceFreshness = data.source_freshness || (data.last_checked ? `Downloaded source checked ${new Date(Number(data.last_checked) * 1000).toLocaleDateString()}. Verify current access before relying on it.` : '');
   const fishSpecies = Array.isArray(data.fish_species) ? data.fish_species.join(', ') : String(data.fish_species || '');
   const waterFacts = data.type === 'water' ? [
@@ -632,10 +668,10 @@ export default function PremiumPlaceSheet({
                   <RelatedRail title="Trails" items={(related?.trails ?? []).slice(0, 8)} onPress={onOpenRelatedTrail} C={C} styles={s} />
                 </View>
               ) : null}
-              {stage === 'full' && !!detail?.hours?.length && (
+              {stage === 'full' && !!hours.length && (
                 <View style={s.section}>
                   <Text style={s.sectionLabel}>HOURS</Text>
-                  {detail.hours.slice(0, 7).map(line => (
+                  {hours.slice(0, 7).map(line => (
                     <Text key={line} style={s.sectionText}>{line}</Text>
                   ))}
                 </View>

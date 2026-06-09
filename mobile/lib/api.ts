@@ -261,6 +261,26 @@ export const api = {
       () => req<GeocodePlace[]>(`/api/geocode?q=${encodeURIComponent(normalized)}&limit=${safeLimit}`),
     );
   },
+  resolveGeocodePlace: (query: string, limit = 8) => {
+    const normalized = normalizeRequestText(query);
+    if (normalized.length < 2) {
+      return Promise.resolve({
+        status: 'not_found',
+        query: normalized,
+        normalized_query: normalized,
+        selected: null,
+        alternatives: [],
+        rejected: [],
+        reason: 'empty_query',
+      } as GeocodeResolveResponse);
+    }
+    const safeLimit = Math.max(2, Math.min(Math.round(limit || 8), 10));
+    return guardedRequest(
+      `geocode-resolve:${normalized}:${safeLimit}`,
+      10 * 60_000,
+      () => req<GeocodeResolveResponse>(`/api/geocode/resolve?q=${encodeURIComponent(normalized)}&limit=${safeLimit}`),
+    );
+  },
   getSearchPlaceCard: (query: string, lat: number, lng: number) =>
     guardedRequest(
       `search-card:${normalizeRequestText(query)}:${stableNumber(lat)}:${stableNumber(lng)}`,
@@ -800,7 +820,13 @@ export interface CopilotContext {
     visible_layers?: string[];
     selected_place?: Record<string, unknown> | null;
     current_results?: Array<Record<string, unknown>>;
+    current_result_set_id?: string | null;
+    current_place_results?: Array<Record<string, unknown>>;
+    current_camp_results?: Array<Record<string, unknown>>;
+    current_trail_results?: Array<Record<string, unknown>>;
+    visible_result_set_id?: string | null;
     visible_map_features?: Array<MapSelectableFeature>;
+    query_context?: Record<string, unknown> | null;
     active_pins?: Array<Record<string, unknown>>;
     current_screen?: string;
   };
@@ -829,6 +855,8 @@ export interface CopilotContext {
 }
 export interface MapSelectableFeature {
   feature_id: string;
+  result_id?: string;
+  result_set_id?: string;
   result_index: number;
   name: string;
   lat: number;
@@ -856,7 +884,11 @@ export interface RouteScoutStop {
   lat: number;
   lng: number;
   type: 'start' | 'camp' | 'destination' | 'review' | string;
+  routePointType?: 'side_stop' | 'break' | 'through';
+  routeShapeRole?: 'start' | 'destination' | 'outbound_anchor' | 'return_anchor' | 'overnight' | 'side_stop';
   label?: string;
+  description?: string;
+  source?: string;
   confidence?: string;
   progress_mi?: number | null;
   camp?: CampsitePin | null;
@@ -883,7 +915,7 @@ export interface RouteScoutState {
 export interface MapActionRequest {
   id?: number;
   action_id: string;
-  action_type: 'getMapContext' | 'getVisibleMapCandidates' | 'searchPlaces' | 'searchTrails' | 'selectPlace' | 'selectRenderedFeature' | 'selectVisiblePlace' | 'searchAndSelectPlace' | 'openSelectedPlaceCard' | 'routeToSelectedPlace' | 'flyToPlace' | 'toggleLayer' | 'setMapStyle' | 'buildRoute' | 'modifyRoute' | 'startRouteScout' | 'saveScoutToRouteBuilder' | 'dropPin' | 'saveTrip' | 'downloadOfflineArea' | 'explainVisibleArea' | 'askForConfirmation' | string;
+  action_type: 'getMapContext' | 'getVisibleMapCandidates' | 'searchPlaces' | 'searchTrails' | 'selectPlace' | 'selectRenderedFeature' | 'selectVisiblePlace' | 'searchAndSelectPlace' | 'openSelectedPlaceCard' | 'routeToSelectedPlace' | 'flyToPlace' | 'zoomMap' | 'setMapZoom' | 'toggleLayer' | 'setMapStyle' | 'buildRoute' | 'modifyRoute' | 'startRouteScout' | 'saveScoutToRouteBuilder' | 'dropPin' | 'saveTrip' | 'downloadOfflineArea' | 'explainVisibleArea' | 'askForConfirmation' | string;
   args: Record<string, unknown>;
   requires_confirmation: boolean;
   cost_class: string;
@@ -1043,6 +1075,38 @@ export interface GeocodePlace {
   lng: number;
   source?: string;
   place_id?: string;
+  provider_place_id?: string;
+  feature_type?: string;
+  place_types?: string[];
+  category?: string;
+  relevance?: number;
+  country_code?: string | null;
+  country?: string | null;
+  region?: string | null;
+  bbox?: number[] | null;
+  confidence?: string;
+  score?: number;
+}
+export interface GeocodeRejectedPlace {
+  name?: string;
+  lat?: number;
+  lng?: number;
+  country_code?: string | null;
+  feature_type?: string | null;
+  place_id?: string | number | null;
+  score?: number;
+  reason?: string;
+}
+export interface GeocodeResolveResponse {
+  status: 'resolved' | 'ambiguous' | 'mismatch' | 'not_found' | string;
+  query: string;
+  normalized_query?: string;
+  selected?: GeocodePlace | null;
+  alternatives?: GeocodePlace[];
+  rejected?: GeocodeRejectedPlace[];
+  reason?: string;
+  countrycodes?: string;
+  retry_of?: string;
 }
 export interface TripResult {
   trip_id: string; plan: TripPlan; campsites: Campsite[]; gas_stations: GasStation[];
@@ -1078,6 +1142,7 @@ export interface TripPlan {
   route_preferences?: {
     route_style?: RouteStyleMode;
     camp_preference?: string;
+    require_photos?: boolean;
     camp_reuse_policy?: CampReusePolicy;
     region_hint?: string;
     max_daily_drive_hours?: number | null;
@@ -1155,6 +1220,7 @@ export interface CampsitePin {
   id: string; name: string; lat: number; lng: number;
   tags: string[]; land_type: string; description: string;
   amenities?: string[]; site_types?: string[];
+  photos?: string[] | Array<{ url?: string; source?: string; caption?: string; credit?: string }>;
   photo_url?: string; reservable: boolean; cost?: string; url: string; ada: boolean;
   official_url?: string; booking_url?: string; source_badge?: string; source_freshness?: string; last_checked?: number;
   link_label?: 'Reserve' | 'Official page' | 'Search official site' | string;
@@ -1249,6 +1315,7 @@ export interface RouteCampWindowsRequest {
   camp_filters?: string[];
   route_style?: RouteStyleMode | 'adventure';
   camp_preference?: string;
+  require_photos?: boolean;
   region_hint?: string;
   camp_reuse_policy?: CampReusePolicy;
   max_daily_drive_hours?: number;
@@ -1282,6 +1349,16 @@ export interface RouteCampWindowsResponse {
 export interface CampsiteDetail extends CampsitePin {
   photos: string[]; amenities: string[]; site_types: string[];
   activities: string[]; phone?: string; campsites_count: number;
+  campsites?: Array<{
+    id?: string; name?: string; type?: string; loop?: string;
+    max_people?: string; equipment_length?: string; driveway?: string; surface?: string;
+    accessible?: boolean; shade?: boolean; fire?: boolean; pets?: boolean; hookups?: boolean;
+    check_in?: string; check_out?: string; reserve_type?: string;
+    photos?: string[]; photo_url?: string | null;
+    source_badge?: string; verified_source?: string;
+  }>;
+  site_media_count?: number;
+  photo_fallback_chain?: string[];
   admin_edited?: boolean;
   access_notes?: string;
   bail_out_notes?: string;
@@ -1419,12 +1496,28 @@ export interface OsmPoi {
   official_url?: string;
   booking_url?: string;
   open_now?: boolean | null;
+  hours?: string[];
+  open_hours?: string[] | string | Record<string, unknown> | null;
+  hours_label?: string | null;
   rating?: number;
   rating_count?: number;
+  average_rating?: number;
+  review_count?: number;
   google_maps_uri?: string;
   attribution?: string;
   profile_id?: string;
   photo_url?: string | null;
+  primary_image?: string | null;
+  other_images?: string[];
+  mapbox_id?: string | null;
+  mapbox_categories?: string[];
+  brand?: string | null;
+  external_ids?: Record<string, unknown>;
+  routable_points?: Array<{ name?: string | null; lat: number; lng: number }>;
+  eta_minutes?: number | null;
+  distance_meters?: number | null;
+  enrichment_source?: 'mapbox_standard' | 'mapbox_searchbox_rest' | 'mapbox_search_sdk' | 'none' | string;
+  enrichment_status?: 'pending' | 'enriched' | 'unavailable' | 'failed' | string;
   length_mi?: number | null;
   rich_detail_available?: boolean;
   rich_detail_locked?: boolean;
@@ -1843,8 +1936,16 @@ export interface MapCardResolveRequest {
   id?: string;
   source?: string;
   source_label?: string;
+  selection_source?: string;
+  feature_id?: string;
   provider_place_id?: string;
   place_id?: string;
+  source_layer?: string | null;
+  screen_x?: number | null;
+  screen_y?: number | null;
+  screen_position?: string | null;
+  selection_confidence?: string | null;
+  raw_feature?: Record<string, unknown> | null;
   name: string;
   lat: number;
   lng: number;
@@ -1859,6 +1960,8 @@ export interface MapCardResolveRequest {
 }
 export interface MapCardResolveResponse {
   card: PlaceDetail;
+  camp?: CampsitePin | null;
+  camp_detail?: CampsiteDetail | null;
   photos?: PlacePhoto[];
   sections?: Array<{ type: string; title: string; items?: unknown[] }>;
   related?: {

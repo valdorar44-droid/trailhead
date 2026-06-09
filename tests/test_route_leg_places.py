@@ -254,6 +254,26 @@ class ValhallaAreaRoutingTests(unittest.IsolatedAsyncioTestCase):
             server._route_cache_key(payload, "east"),
         )
 
+    async def test_coverage_probe_reports_valhalla_success(self):
+        class FakeResponse:
+            status_code = 200
+            text = ""
+
+            def json(self):
+                return {"trip": {"status": 0, "status_message": "Found route", "summary": {"length": 12.5, "time": 900}}}
+
+        class FakeClient:
+            async def post(self, url, json, timeout):
+                return FakeResponse()
+
+        probe = server.VALHALLA_COVERAGE_PROBES[0]
+        result = await server._run_valhalla_coverage_probe(FakeClient(), probe)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["engine"], "valhalla")
+        self.assertFalse(result["fallback_expected"])
+        self.assertEqual(result["length"], 12.5)
+
     async def test_coverage_probe_posts_to_selected_area_url(self):
         server.settings.valhalla_area_urls = (
             '[{"id":"west","url":"http://west:8002",'
@@ -279,6 +299,46 @@ class ValhallaAreaRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["target"], "west")
         self.assertEqual(seen["url"], "http://west:8002/route")
+
+    async def test_coverage_probe_marks_missing_edges_as_expected_fallback(self):
+        class FakeResponse:
+            status_code = 200
+            text = ""
+
+            def json(self):
+                return {"trip": {"status": 171, "status_message": "No suitable edges near location"}}
+
+        class FakeClient:
+            async def post(self, url, json, timeout):
+                return FakeResponse()
+
+        probe = next(p for p in server.VALHALLA_COVERAGE_PROBES if p["id"] == "seattle_boise")
+        result = await server._run_valhalla_coverage_probe(FakeClient(), probe)
+
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["fallback_expected"])
+        self.assertEqual(result["error"], "No suitable edges near location")
+        self.assertEqual(result["region"], "pacific_northwest_to_idaho")
+
+    async def test_coverage_probe_parses_valhalla_http_error_json(self):
+        class FakeResponse:
+            status_code = 400
+            text = '{"error_code":171,"error":"No suitable edges near location"}'
+
+            def json(self):
+                return {"error_code": 171, "error": "No suitable edges near location"}
+
+        class FakeClient:
+            async def post(self, url, json, timeout):
+                return FakeResponse()
+
+        probe = server.VALHALLA_COVERAGE_PROBES[3]
+        result = await server._run_valhalla_coverage_probe(FakeClient(), probe)
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status"], 400)
+        self.assertEqual(result["valhalla_status"], 171)
+        self.assertEqual(result["error"], "No suitable edges near location")
 
     async def test_route_proxy_drops_optional_side_stops_before_valhalla(self):
         server.settings.valhalla_url = "http://default:8002"

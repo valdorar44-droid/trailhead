@@ -23,6 +23,7 @@ import {
   clearTrailheadRouteBuilderDraft,
   loadTrailheadRouteBuilderDraft,
   type TrailheadRouteBuilderDraft,
+  type TrailheadRouteBuilderDraftStop,
 } from '@/lib/copilotCapabilities';
 import { useTheme, mono, ColorPalette, RADIUS } from '@/lib/design';
 import { computeOfflineReadiness } from '@/lib/offlineReadiness';
@@ -50,6 +51,34 @@ const ROUTE_BUILDER_MAP_SETTLE_MS = 2800;
 function mediaUrl(url?: string | null) {
   if (!url) return '';
   return url.startsWith('/') ? `${API_BASE_URL}${url}` : url;
+}
+
+function campPhotoUrl(photo: unknown): string {
+  if (typeof photo === 'string') return mediaUrl(photo);
+  if (photo && typeof photo === 'object') {
+    const value = (photo as { url?: string | null }).url;
+    return mediaUrl(value);
+  }
+  return '';
+}
+
+function campPhotoItems(camp?: Partial<CampsitePin> | null, detail?: Partial<CampsiteDetail> | null): TrailheadGalleryPhoto[] {
+  const items: TrailheadGalleryPhoto[] = [];
+  const seen = new Set<string>();
+  const push = (photo: unknown, source?: string) => {
+    const url = campPhotoUrl(photo);
+    if (!url || seen.has(url)) return;
+    seen.add(url);
+    const photoSource = typeof photo === 'object' && photo
+      ? ((photo as { source?: string; credit?: string; caption?: string }).source || source)
+      : source;
+    items.push({ url, source: photoSource || detail?.media_source || detail?.verified_source || camp?.verified_source || camp?.source_badge || camp?.source || 'Trailhead' });
+  };
+  (detail?.photos ?? []).forEach(photo => push(photo, detail?.media_source || detail?.verified_source));
+  (detail?.campsites ?? []).forEach(site => (site.photos ?? []).forEach(photo => push(photo, site.source_badge || site.verified_source || 'Recreation.gov')));
+  (camp?.photos ?? []).forEach(photo => push(photo, camp?.verified_source || camp?.source_badge || camp?.source));
+  push(camp?.photo_url, camp?.verified_source || camp?.source_badge || camp?.source);
+  return items;
 }
 
 type BuilderStopType = 'start' | 'fuel' | 'waypoint' | 'camp' | 'motel';
@@ -935,6 +964,16 @@ function campsiteToPin(camp: Campsite): CampsitePin {
   };
 }
 
+function campHasPhotos(camp: Partial<CampsitePin> & Record<string, any>) {
+  if (camp.photo_url || camp.hero_photo_url || camp.primary_image || camp.image_url) return true;
+  const photos = camp.photos ?? camp.photo_candidates ?? camp.images ?? [];
+  return Array.isArray(photos) && photos.some(photo => !!(typeof photo === 'string' ? photo : photo?.url));
+}
+
+function filterCampsByPhotoMode<T extends CampsitePin>(camps: T[], photoOnly: boolean) {
+  return photoOnly ? camps.filter(campHasPhotos) : camps;
+}
+
 function sourceLabel(source?: BuilderStop['source']) {
   if (source === 'camp') return 'verified camp';
   if (source === 'gas') return 'fuel search';
@@ -968,6 +1007,60 @@ function orderBuilderStops(stops: BuilderStop[]) {
     || stopRouteOrderWeight(a) - stopRouteOrderWeight(b)
     || stops.indexOf(a) - stops.indexOf(b)
   ));
+}
+
+function builderStopFromCopilotDraft(stop: string | TrailheadRouteBuilderDraftStop, index: number, dayCount: number): BuilderStop | null {
+  if (typeof stop === 'string') return null;
+  const lat = Number(stop.lat);
+  const lng = Number(stop.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || !stop.name?.trim()) return null;
+  const rawType = String(stop.type || '').toLowerCase();
+  const routePointType = stop.routePointType === 'side_stop' || stop.routePointType === 'through' || stop.routePointType === 'break'
+    ? stop.routePointType
+    : undefined;
+  const routeShapeRole = stop.routeShapeRole === 'start'
+    || stop.routeShapeRole === 'destination'
+    || stop.routeShapeRole === 'outbound_anchor'
+    || stop.routeShapeRole === 'return_anchor'
+    || stop.routeShapeRole === 'overnight'
+    || stop.routeShapeRole === 'side_stop'
+    ? stop.routeShapeRole
+    : undefined;
+  const type: BuilderStopType = rawType === 'start'
+    ? 'start'
+    : rawType === 'camp' || rawType === 'motel'
+      ? rawType
+      : rawType === 'fuel'
+        ? 'fuel'
+        : 'waypoint';
+  const day = type === 'start'
+    ? 1
+    : rawType === 'destination'
+      ? Math.max(1, dayCount)
+      : Math.max(1, Math.min(dayCount, Math.round(Number(stop.day) || index + 1)));
+  return {
+    id: stop.id || `copilot_${Date.now()}_${index}`,
+    day,
+    name: stop.name.trim(),
+    lat,
+    lng,
+    type,
+    description: stop.description || (type === 'camp' ? 'Picked by Trailhead Copilot route scout.' : 'Added by Trailhead Copilot route scout.'),
+    land_type: stop.label || '',
+    source: stop.source === 'camp' || stop.source === 'gas' || stop.source === 'poi' || stop.source === 'search' || stop.source === 'map'
+      ? stop.source
+      : type === 'camp' || type === 'motel'
+        ? 'camp'
+        : 'map',
+    routePointType: routePointType ?? (type === 'fuel' ? 'side_stop' : 'break'),
+    routeShapeRole: routeShapeRole ?? (type === 'start'
+      ? 'start'
+      : rawType === 'destination'
+        ? 'destination'
+        : type === 'camp' || type === 'motel'
+          ? 'overnight'
+          : undefined),
+  };
 }
 
 function landColor(lt?: string | null) {
@@ -1116,6 +1209,7 @@ export default function RouteBuilderScreen() {
   const [tripBuildMode, setTripBuildMode] = useState<TripBuildMode>('recommended');
   const [distanceMode, setDistanceMode] = useState<DistanceMode>('hours');
   const [campPreferenceMode, setCampPreferenceMode] = useState<CampPreferenceMode>('public');
+  const [campPhotoOnly, setCampPhotoOnly] = useState(false);
   const [campCadenceMode, setCampCadenceMode] = useState<CampCadenceMode>('nightly');
   const [campReusePolicy, setCampReusePolicy] = useState<CampReusePolicy>('different_each_night');
   const [wizardStep, setWizardStep] = useState(0);
@@ -1157,6 +1251,7 @@ export default function RouteBuilderScreen() {
   const [campInsight, setCampInsight] = useState<CampsiteInsight | null>(null);
   const [showCampDetail, setShowCampDetail] = useState(false);
   const [campGalleryIndex, setCampGalleryIndex] = useState<number | null>(null);
+  const [quickCampPhotoIndex, setQuickCampPhotoIndex] = useState(0);
   const [detailLoading, setDetailLoading] = useState(false);
   const [showNewRouteConfirm, setShowNewRouteConfirm] = useState(false);
   const [paywallVisible, setPaywallVisible] = useState(false);
@@ -1183,16 +1278,17 @@ export default function RouteBuilderScreen() {
   }
 
   function applyCopilotDraft(draft: TrailheadRouteBuilderDraft) {
+    const dayCount = draft.days ? Math.max(1, Math.min(30, Math.round(draft.days))) : days.length || 1;
     if (draft.days) {
-      const count = Math.max(1, Math.min(30, Math.round(draft.days)));
-      setPlannedDays(String(count));
-      setDays(Array.from({ length: count }, (_, idx) => idx + 1));
+      setPlannedDays(String(dayCount));
+      setDays(Array.from({ length: dayCount }, (_, idx) => idx + 1));
     }
     if (draft.start) setStartQuery(draft.start);
     if (draft.destination) setEndQuery(draft.destination);
     if (draft.tripShape) applyTripShapeMode(draft.tripShape);
     if (draft.routeStyle) setRouteStyle(draft.routeStyle);
     if (draft.campPreference) setCampPreferenceMode(draft.campPreference);
+    setCampPhotoOnly(draft.campPhotoOnly === true);
     if (draft.campReuse) setCampReusePolicy(draft.campReuse);
     if (draft.driveHours) {
       setDistanceMode('hours');
@@ -1203,6 +1299,15 @@ export default function RouteBuilderScreen() {
       setTargetMiles(String(draft.targetMiles));
     }
     if (draft.restDays?.length) setRestDays(draft.restDays);
+    const draftStops = Array.isArray(draft.stops)
+      ? draft.stops.map((stop, idx) => builderStopFromCopilotDraft(stop, idx, dayCount)).filter((stop): stop is BuilderStop => !!stop)
+      : [];
+    if (draftStops.length >= 2) {
+      setStops(orderBuilderStops(draftStops));
+      setActiveDay(Math.max(1, draftStops.find(stop => stop.type !== 'start')?.day ?? 1));
+      setInsertAfterId(null);
+      setInsertTargetDay(null);
+    }
     setTripBuildMode('recommended');
     setRouteTabMode('wizard');
     setWizardStep(draft.start && draft.destination ? 3 : draft.destination ? 1 : 0);
@@ -1211,6 +1316,7 @@ export default function RouteBuilderScreen() {
 
   useEffect(() => {
     selectedCampRef.current = selectedCamp;
+    setQuickCampPhotoIndex(0);
   }, [selectedCamp]);
 
   useEffect(() => {
@@ -1760,11 +1866,12 @@ export default function RouteBuilderScreen() {
     const isReservable = /(reservable|reservation|state|nps|recreation\.gov|developed)/i.test(text);
     const isPrivateStay = /(private|farm|ranch|winery|vineyard|glamping|yurt|cabin|hipcamp|harvest)/i.test(text);
     const distance = camp.route_distance_mi ?? 0;
-    if (campPreferenceMode === 'rv') return distance + (isRv ? -14 : 8) + (isReservable ? -3 : 0);
-    if (campPreferenceMode === 'private') return distance + (isPrivateStay ? -14 : 10) + (isReservable ? -4 : 0) + (isPublic ? 6 : 0);
-    if (campPreferenceMode === 'developed') return distance + (isReservable ? -10 : 0) + (isPublic ? -4 : 0) + (isRv ? 3 : 0);
-    if (campPreferenceMode === 'public') return distance + (isPublic ? -16 : 8) + (isRv ? 18 : 0);
-    return distance + (isPublic ? -6 : 0) + (isRv ? 3 : 0);
+    const photoAdjust = campHasPhotos(camp) ? -8 : (campPhotoOnly ? 60 : 0);
+    if (campPreferenceMode === 'rv') return distance + photoAdjust + (isRv ? -14 : 8) + (isReservable ? -3 : 0);
+    if (campPreferenceMode === 'private') return distance + photoAdjust + (isPrivateStay ? -14 : 10) + (isReservable ? -4 : 0) + (isPublic ? 6 : 0);
+    if (campPreferenceMode === 'developed') return distance + photoAdjust + (isReservable ? -10 : 0) + (isPublic ? -4 : 0) + (isRv ? 3 : 0);
+    if (campPreferenceMode === 'public') return distance + photoAdjust + (isPublic ? -16 : 8) + (isRv ? 18 : 0);
+    return distance + photoAdjust + (isPublic ? -6 : 0) + (isRv ? 3 : 0);
   }
 
   async function runSearch() {
@@ -1856,7 +1963,7 @@ export default function RouteBuilderScreen() {
           const offlineCamps = routeScopedOfflinePlaces(offlinePlaces, searchLeg!, ['camp'], 18)
             .map(point => offlinePoiToCamp(point))
             .filter(camp => campMatchesFilters(camp, campTypeFilters));
-          const scopedRaw = uniqueByGeo([...found, ...offlineCamps])
+          const scopedRaw = filterCampsByPhotoMode(uniqueByGeo([...found, ...offlineCamps]), campPhotoOnly)
               .map(camp => withLegProjection(camp, searchLeg!))
               .filter(camp => campMatchesFilters(camp, campTypeFilters))
               .filter(camp => (camp.route_distance_mi ?? 999) <= routeBufferForMiles(searchLeg!.miles) + 14);
@@ -1865,20 +1972,20 @@ export default function RouteBuilderScreen() {
           let fallbackText = '';
           if (searchLeg!.purpose === 'overnight' && scoped.length === 0) {
             const endpointCamps = await api.getNearbyCamps(searchLeg!.to.lat, searchLeg!.to.lng, 55, campTypeFilters).catch(() => []);
-            scoped = endpointCamps
+            scoped = filterCampsByPhotoMode(endpointCamps, campPhotoOnly)
               .map(camp => withLegProjection(camp, searchLeg!))
               .sort((a, b) => campPreferenceScore(a) - campPreferenceScore(b) || haversineMi(a, searchLeg!.to) - haversineMi(b, searchLeg!.to));
             fallbackText = ' using the day-end area';
           }
-          storeDiscoveryResults(key, { camps: scoped, summary: `${scoped.length} ${campPreferenceLabel.toLowerCase()} camp${scoped.length === 1 ? '' : 's'} ${searchLeg!.purpose === 'overnight' ? `near Day ${searchLeg!.targetDay ?? activeDay} endpoint${fallbackText}` : 'spread along this leg'}` });
+          storeDiscoveryResults(key, { camps: scoped, summary: `${scoped.length} ${campPhotoOnly ? 'photo-backed ' : ''}${campPreferenceLabel.toLowerCase()} camp${scoped.length === 1 ? '' : 's'} ${searchLeg!.purpose === 'overnight' ? `near Day ${searchLeg!.targetDay ?? activeDay} endpoint${fallbackText}` : 'spread along this leg'}` });
         } else {
           const offlineCamps = areaScopedOfflinePlaces(offlinePlaces, target, ['camp'], 50)
             .map(point => offlinePoiToCamp(point))
             .filter(camp => campMatchesFilters(camp, campTypeFilters));
-          const found = uniqueByGeo([...(await api.getNearbyCamps(target.lat, target.lng, 45, campTypeFilters)), ...offlineCamps])
+          const found = filterCampsByPhotoMode(uniqueByGeo([...(await api.getNearbyCamps(target.lat, target.lng, 45, campTypeFilters)), ...offlineCamps]), campPhotoOnly)
             .filter(camp => campMatchesFilters(camp, campTypeFilters))
             .sort((a, b) => campPreferenceScore(a) - campPreferenceScore(b));
-          storeDiscoveryResults(key, { camps: found, summary: `${found.length} ${campPreferenceLabel.toLowerCase()} camp${found.length === 1 ? '' : 's'} near this area` });
+          storeDiscoveryResults(key, { camps: found, summary: `${found.length} ${campPhotoOnly ? 'photo-backed ' : ''}${campPreferenceLabel.toLowerCase()} camp${found.length === 1 ? '' : 's'} near this area` });
         }
       } else if (tab === 'gas') {
         if (useLeg) {
@@ -2441,6 +2548,14 @@ export default function RouteBuilderScreen() {
     fly(camp.lat, camp.lng, 13);
     api.getWeather(camp.lat, camp.lng, 3, weatherUnitMode).then(setCampWeather).catch(() => {});
     if (camp.id) api.getCampFullness(camp.id).then(setCampFullness).catch(() => {});
+    if (camp.id) {
+      api.getCampsiteDetail(camp.id)
+        .then(detail => enrichCampDetailWithGoogle(detail, camp))
+        .then(detail => {
+          if (selectedCampRef.current?.id === camp.id) setCampDetail({ ...detail, description: stripHtml(detail.description) });
+        })
+        .catch(() => {});
+    }
   }
 
   async function loadFullCampDetail() {
@@ -2858,6 +2973,7 @@ export default function RouteBuilderScreen() {
         camp_filters: campTypeFilters,
         route_style: routeStyle,
         camp_preference: campPreferenceMode,
+        require_photos: campPhotoOnly,
         region_hint: routeStates.join(','),
         camp_reuse_policy: effectiveCampReusePolicy,
         max_daily_drive_hours: parsePositiveNumber(driveHoursPerDay) ?? undefined,
@@ -3311,6 +3427,7 @@ export default function RouteBuilderScreen() {
         route_preferences: {
           route_style: routeStyle,
           camp_preference: campPreferenceMode,
+          require_photos: campPhotoOnly,
           camp_reuse_policy: effectiveCampReusePolicy,
           region_hint: routeStates.join(','),
           max_daily_drive_hours: parsePositiveNumber(driveHoursPerDay),
@@ -3381,6 +3498,7 @@ export default function RouteBuilderScreen() {
       dayDriveTargets,
       activePlaceFilters,
       campPreferenceMode,
+      campPhotoOnly,
       campCadenceMode,
       campReusePolicy,
     };
@@ -3446,6 +3564,7 @@ export default function RouteBuilderScreen() {
     setTripBuildMode('recommended');
     setDistanceMode('hours');
     setCampPreferenceMode('public');
+    setCampPhotoOnly(false);
     setCampCadenceMode('nightly');
     setCampReusePolicy('different_each_night');
     setWizardStep(0);
@@ -4191,6 +4310,18 @@ export default function RouteBuilderScreen() {
                 );
               })}
             </View>
+            <TouchableOpacity
+              style={[s.campPhotoToggle, campPhotoOnly && s.campPhotoToggleActive]}
+              onPress={() => setCampPhotoOnly(value => !value)}
+              activeOpacity={0.82}
+            >
+              <Ionicons name={campPhotoOnly ? 'images' : 'images-outline'} size={16} color={campPhotoOnly ? C.orange : C.text3} />
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={[s.campPreferenceTitle, campPhotoOnly && { color: C.orange }]}>Photos only</Text>
+                <Text style={s.campPreferenceSub} numberOfLines={1}>Require camp media when placing overnight stops</Text>
+              </View>
+              <Ionicons name={campPhotoOnly ? 'checkmark-circle' : 'ellipse-outline'} size={16} color={campPhotoOnly ? C.orange : C.text3} />
+            </TouchableOpacity>
             <Text style={s.setupLabel}>CAMP CADENCE</Text>
             <View style={s.campPreferenceGrid}>
               {CAMP_CADENCE_OPTIONS.map(option => {
@@ -4608,18 +4739,38 @@ export default function RouteBuilderScreen() {
       <Modal visible={!!selectedCamp} transparent animationType="slide" onRequestClose={() => setSelectedCamp(null)}>
         <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setSelectedCamp(null)}>
           <TrailheadSheet handle={false} style={s.quickCard} contentStyle={[s.quickCardSheetContent, { paddingBottom: bottomSheetPad }]}>
-            <TouchableOpacity style={s.quickCardImg} activeOpacity={selectedCamp?.photo_url ? 0.88 : 1} onPress={() => selectedCamp?.photo_url && setCampGalleryIndex(0)}>
-              {selectedCamp?.photo_url ? (
-                <Image source={{ uri: selectedCamp.photo_url }} style={s.quickCardPhoto} resizeMode="cover" />
-              ) : (
-                <View style={[s.quickCardPhotoPlaceholder, { backgroundColor: landColor(selectedCamp?.land_type).bg }]}>
-                  <Ionicons name="bonfire-outline" size={34} color={landColor(selectedCamp?.land_type).text} />
-                  <Text style={[s.placeholderLand, { color: landColor(selectedCamp?.land_type).text }]}>
-                    {(selectedCamp?.land_type || 'CAMP').toUpperCase().slice(0, 12)}
-                  </Text>
-                </View>
-              )}
-            </TouchableOpacity>
+            {(() => {
+              const photos = campPhotoItems(selectedCamp, campDetail);
+              const safeIndex = photos.length ? quickCampPhotoIndex % photos.length : 0;
+              const activePhoto = photos[safeIndex];
+              return (
+                <TouchableOpacity style={s.quickCardImg} activeOpacity={activePhoto ? 0.88 : 1} onPress={() => activePhoto && setCampGalleryIndex(safeIndex)}>
+                  {activePhoto ? (
+                    <Image source={{ uri: activePhoto.url }} style={s.quickCardPhoto} resizeMode="cover" />
+                  ) : (
+                    <View style={[s.quickCardPhotoPlaceholder, { backgroundColor: landColor(selectedCamp?.land_type).bg }]}>
+                      <Ionicons name="bonfire-outline" size={34} color={landColor(selectedCamp?.land_type).text} />
+                      <Text style={[s.placeholderLand, { color: landColor(selectedCamp?.land_type).text }]}>
+                        {(selectedCamp?.land_type || 'CAMP').toUpperCase().slice(0, 12)}
+                      </Text>
+                    </View>
+                  )}
+                  {photos.length > 1 ? (
+                    <>
+                      <View style={s.quickPhotoControls} pointerEvents="box-none">
+                        <TouchableOpacity style={s.quickPhotoArrow} onPress={event => { event.stopPropagation(); setQuickCampPhotoIndex((safeIndex - 1 + photos.length) % photos.length); }}>
+                          <Ionicons name="chevron-back" size={18} color="#fff" />
+                        </TouchableOpacity>
+                        <TouchableOpacity style={s.quickPhotoArrow} onPress={event => { event.stopPropagation(); setQuickCampPhotoIndex((safeIndex + 1) % photos.length); }}>
+                          <Ionicons name="chevron-forward" size={18} color="#fff" />
+                        </TouchableOpacity>
+                      </View>
+                      <Text style={s.quickPhotoCount}>{safeIndex + 1}/{photos.length}</Text>
+                    </>
+                  ) : null}
+                </TouchableOpacity>
+              );
+            })()}
             <View style={s.quickCardBody}>
               <View style={s.quickCardHeader}>
                 <Text style={s.quickCardName} numberOfLines={2}>{selectedCamp?.name}</Text>
@@ -4775,6 +4926,38 @@ export default function RouteBuilderScreen() {
                     </View>
                   </TrailheadCard>
                 )}
+                {(campDetail.campsites ?? []).some(site => site.name || site.photo_url || site.photos?.length) ? (
+                  <TrailheadCard style={s.detailSection}>
+                    <Text style={s.detailSectionTitle}>SITES</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.siteRail}>
+                      {(campDetail.campsites ?? []).slice(0, 12).map((site, idx) => {
+                        const photo = campPhotoUrl(site.photo_url || site.photos?.[0]);
+                        const meta = [
+                          site.type,
+                          site.max_people ? `${site.max_people} people` : '',
+                          site.equipment_length ? `${site.equipment_length} ft` : '',
+                          site.surface,
+                          site.accessible ? 'ADA' : '',
+                        ].filter(Boolean).join(' · ');
+                        return (
+                          <View key={site.id || `${site.name}-${idx}`} style={s.sitePhotoCard}>
+                            {photo ? (
+                              <Image source={{ uri: photo }} style={s.sitePhoto} resizeMode="cover" />
+                            ) : (
+                              <View style={s.sitePlaceholder}>
+                                <Ionicons name="bonfire-outline" size={22} color={C.orange} />
+                              </View>
+                            )}
+                            <View style={s.siteBody}>
+                              <Text style={s.siteName} numberOfLines={2}>{site.name || `Site ${idx + 1}`}</Text>
+                              <Text style={s.siteMeta} numberOfLines={2}>{meta || site.source_badge || 'Recreation.gov site'}</Text>
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </ScrollView>
+                  </TrailheadCard>
+                ) : null}
                 {(campDetail.activities ?? []).length > 0 && (
                   <TrailheadCard style={s.detailSection}>
                     <Text style={s.detailSectionTitle}>ACTIVITIES</Text>
@@ -4847,14 +5030,7 @@ export default function RouteBuilderScreen() {
 
       <TrailheadPhotoGallery
         visible={campGalleryIndex !== null}
-        photos={(campDetail?.photos?.length
-          ? campDetail.photos.map(url => ({
-              url: mediaUrl(url),
-              source: campDetail?.media_source || campDetail?.verified_source || campDetail?.source || 'Trailhead',
-            }))
-          : selectedCamp?.photo_url
-            ? [{ url: mediaUrl(selectedCamp.photo_url), source: selectedCamp.verified_source || selectedCamp.source || 'Trailhead' }]
-            : []) as TrailheadGalleryPhoto[]}
+        photos={campPhotoItems(selectedCamp, campDetail)}
         initialIndex={campGalleryIndex ?? 0}
         title={campDetail?.name || selectedCamp?.name || 'Camp'}
         onClose={() => setCampGalleryIndex(null)}
@@ -5434,6 +5610,21 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     paddingVertical: 9,
   },
   campPreferenceCardActive: { borderColor: C.orange + '77', backgroundColor: C.orange + '12' },
+  campPhotoToggle: {
+    marginTop: 8,
+    marginBottom: 10,
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 15,
+    backgroundColor: C.s2,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  campPhotoToggleActive: { borderColor: C.orange + '77', backgroundColor: C.orange + '12' },
   campPreferenceTitle: { color: C.text2, fontSize: 11, fontFamily: mono, fontWeight: '900' },
   campPreferenceSub: { color: C.text3, fontSize: 9, marginTop: 2 },
   routeNameOptions: { flexDirection: 'row', alignItems: 'stretch', gap: 8 },
@@ -5730,11 +5921,46 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     maxHeight: '86%',
   },
   quickCardSheetContent: { padding: 0 },
-  quickCardImg: { width: '100%' },
+  quickCardImg: { width: '100%', position: 'relative', overflow: 'hidden' },
   quickCardPhoto: { width: '100%', height: 176, borderTopLeftRadius: 20, borderTopRightRadius: 20 },
   quickCardPhotoPlaceholder: {
     width: '100%', height: 142, alignItems: 'center', justifyContent: 'center',
     borderTopLeftRadius: 20, borderTopRightRadius: 20, gap: 5,
+  },
+  quickPhotoControls: {
+    position: 'absolute',
+    left: 10,
+    right: 10,
+    top: 70,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  quickPhotoArrow: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.42)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.24)',
+  },
+  quickPhotoCount: {
+    position: 'absolute',
+    left: 12,
+    top: 12,
+    overflow: 'hidden',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: 'rgba(0,0,0,0.42)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+    color: '#fff',
+    fontSize: 9,
+    fontFamily: mono,
+    fontWeight: '900',
   },
   placeholderLand: { fontSize: 9, fontFamily: mono, fontWeight: '800', marginTop: 2 },
   quickCardBody: { padding: 14, paddingBottom: 28, gap: 6 },
@@ -5755,6 +5981,13 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     borderWidth: 1, borderColor: C.border, backgroundColor: C.s2,
   },
   qTagText: { color: C.text2, fontSize: 9, fontFamily: mono, fontWeight: '700' },
+  siteRail: { gap: 8, paddingRight: 4, paddingTop: 2 },
+  sitePhotoCard: { width: 148, borderWidth: 1, borderColor: C.border, backgroundColor: C.s2, borderRadius: 12, overflow: 'hidden' },
+  sitePhoto: { width: '100%', height: 80, backgroundColor: C.s3 },
+  sitePlaceholder: { width: '100%', height: 80, alignItems: 'center', justifyContent: 'center', backgroundColor: C.orange + '12', borderBottomWidth: 1, borderBottomColor: C.border },
+  siteBody: { padding: 9, gap: 4, minHeight: 62 },
+  siteName: { color: C.text, fontSize: 12, lineHeight: 15, fontWeight: '900' },
+  siteMeta: { color: C.text3, fontSize: 9, lineHeight: 13, fontFamily: mono },
   quickCardCost: { color: C.green, fontSize: 11, fontFamily: mono, fontWeight: '700' },
   quickCardDesc: { color: C.text2, fontSize: 12, lineHeight: 17 },
   quickCardActions: { flexDirection: 'row', gap: 8, marginTop: 2 },

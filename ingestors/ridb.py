@@ -109,6 +109,146 @@ def _feature_lists_from_text(*values: str) -> tuple[list[str], list[str]]:
             site_types.append(label)
     return amenities, site_types
 
+_FALSEY_ATTR_VALUES = {"", "false", "0", "n", "no", "none", "na", "n/a", "not applicable"}
+
+def _as_records(data: dict | list | None) -> list[dict]:
+    if isinstance(data, dict):
+        records = data.get("RECDATA")
+        if isinstance(records, list):
+            return [r for r in records if isinstance(r, dict)]
+        return [data] if data else []
+    if isinstance(data, list):
+        return [r for r in data if isinstance(r, dict)]
+    return []
+
+def _image_urls(records: list[dict], limit: int = 12) -> list[str]:
+    urls: list[str] = []
+    for media in records:
+        url = media.get("URL") or media.get("URLFull") or media.get("MediaURL")
+        media_type = str(media.get("MediaType") or media.get("EntityMediaType") or "").lower()
+        if url and (not media_type or "image" in media_type or "photo" in media_type):
+            if url not in urls:
+                urls.append(str(url))
+        if len(urls) >= limit:
+            break
+    return urls
+
+def _attr_pairs(attrs: list[dict]) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    for attr in attrs:
+        name = str(attr.get("AttributeName") or attr.get("Name") or attr.get("Attribute") or "").strip()
+        value = str(attr.get("AttributeValue") or attr.get("Value") or "").strip()
+        if name or value:
+            pairs.append((name, value))
+    return pairs
+
+def _attr_value(attrs: list[dict], *needles: str) -> str:
+    lowered = [needle.lower() for needle in needles]
+    for name, value in _attr_pairs(attrs):
+        haystack = name.lower()
+        if all(needle in haystack for needle in lowered) and value.lower() not in _FALSEY_ATTR_VALUES:
+            return value
+    return ""
+
+def _attr_truthy(attrs: list[dict], *needles: str) -> bool:
+    value = _attr_value(attrs, *needles)
+    if not value:
+        return False
+    return value.lower() not in _FALSEY_ATTR_VALUES
+
+def _record_value(record: dict, *keys: str) -> str:
+    for key in keys:
+        value = record.get(key)
+        if value not in (None, "", []):
+            return str(value).strip()
+    return ""
+
+def _normalize_campsite_record(campsite: dict, attrs: list[dict] | None = None, media: list[dict] | None = None) -> dict:
+    attrs = attrs or []
+    media = media or []
+    campsite_id = _record_value(campsite, "CampsiteID", "CampsiteId", "FacilityID", "id")
+    name = _record_value(campsite, "CampsiteName", "Site", "Name") or f"Site {campsite_id}".strip()
+    campsite_type = _record_value(campsite, "CampsiteType", "TypeOfUse", "SiteType")
+    max_people = (
+        _record_value(campsite, "MaxNumPeople", "CapacityRating", "Capacity")
+        or _attr_value(attrs, "max", "people")
+        or _attr_value(attrs, "capacity")
+    )
+    equipment_length = (
+        _record_value(campsite, "MaxVehicleLength", "MaxEquipmentLength")
+        or _attr_value(attrs, "max", "vehicle")
+        or _attr_value(attrs, "max", "equipment")
+        or _attr_value(attrs, "driveway", "length")
+    )
+    driveway = (
+        _record_value(campsite, "DrivewayLength", "DrivewayEntry")
+        or _attr_value(attrs, "driveway")
+    )
+    surface = _attr_value(attrs, "surface") or _record_value(campsite, "DrivewaySurface")
+    reserve_type = _record_value(campsite, "TypeOfUse", "Reservable", "AvailabilityStatus") or _attr_value(attrs, "reserve")
+    check_in = _record_value(campsite, "CheckinTime", "CheckInTime") or _attr_value(attrs, "check", "in")
+    check_out = _record_value(campsite, "CheckoutTime", "CheckOutTime") or _attr_value(attrs, "check", "out")
+    photos = _image_urls(media)
+    accessible = (
+        _record_value(campsite, "CampsiteAccessible", "Accessible", "AdaAccess").upper() == "Y"
+        or _attr_truthy(attrs, "accessible")
+        or _attr_truthy(attrs, "ada")
+    )
+    flags = {
+        "shade": _attr_truthy(attrs, "shade"),
+        "fire": _attr_truthy(attrs, "fire") or _attr_truthy(attrs, "campfire"),
+        "pets": _attr_truthy(attrs, "pet"),
+        "hookups": _attr_truthy(attrs, "hookup") or _attr_truthy(attrs, "electric") or _attr_truthy(attrs, "water", "hookup"),
+    }
+    amenities: list[str] = []
+    for enabled, label in (
+        (accessible, "ADA"),
+        (flags["shade"], "Shade"),
+        (flags["fire"], "Fire rings"),
+        (flags["pets"], "Pets OK"),
+        (flags["hookups"], "Hookups"),
+        (_attr_truthy(attrs, "water"), "Water"),
+        (_attr_truthy(attrs, "sewer"), "Sewer"),
+    ):
+        if enabled and label not in amenities:
+            amenities.append(label)
+    return {
+        "id": campsite_id,
+        "name": name,
+        "type": campsite_type,
+        "loop": _record_value(campsite, "Loop", "LoopName"),
+        "max_people": max_people,
+        "equipment_length": equipment_length,
+        "driveway": driveway,
+        "surface": surface,
+        "accessible": accessible,
+        "shade": flags["shade"],
+        "fire": flags["fire"],
+        "pets": flags["pets"],
+        "hookups": flags["hookups"],
+        "check_in": check_in,
+        "check_out": check_out,
+        "reserve_type": reserve_type,
+        "amenities": amenities,
+        "photos": photos,
+        "photo_url": photos[0] if photos else None,
+        "source": "ridb",
+        "verified_source": "Recreation.gov",
+        "source_badge": "Official Recreation.gov",
+    }
+
+def _dedupe(values: list[str], limit: int = 16) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+        if len(result) >= limit:
+            break
+    return result
+
 async def get_campsites_near(lat: float, lng: float, radius_miles: float = 30) -> list[dict]:
     key = _cache_key(lat, lng, radius_miles)
     cached = get_cached("campsite_cache", key, ttl_seconds=86400)
@@ -228,7 +368,7 @@ def _land_label(tags: list[str]) -> str:
     return "Federal Campground"
 
 async def get_facility_detail(facility_id: str) -> dict | None:
-    cache_key = f"ridb_detail_{facility_id}"
+    cache_key = f"ridb_detail_v2_{facility_id}"
     cached = get_cached("campsite_cache", cache_key, ttl_seconds=86400 * 7)
     if cached is not None:
         return cached
@@ -250,14 +390,43 @@ async def get_facility_detail(facility_id: str) -> dict | None:
             _get(f"facilities/{facility_id}/facilityattributes"),
             _get(f"facilities/{facility_id}/activities"),
         )
+        base_campsites = _as_records(sites_data)
+
+        async def _enrich_site(site: dict) -> dict:
+            campsite_id = _record_value(site, "CampsiteID", "CampsiteId", "id")
+            if not campsite_id:
+                return _normalize_campsite_record(site)
+            detail_data, site_attrs_data, site_media_data = await asyncio.gather(
+                _get(f"campsites/{campsite_id}"),
+                _get(f"campsites/{campsite_id}/attributes"),
+                _get(f"campsites/{campsite_id}/media"),
+            )
+            detail_records = _as_records(detail_data)
+            detail = detail_records[0] if detail_records else (detail_data if isinstance(detail_data, dict) else {})
+            if not isinstance(detail, dict) or not detail:
+                detail = site
+            else:
+                detail = {**site, **detail}
+            return _normalize_campsite_record(detail, _as_records(site_attrs_data), _as_records(site_media_data))
+
+        campsite_details = await asyncio.gather(*[_enrich_site(site) for site in base_campsites[:24]]) if base_campsites else []
 
     f = facility_data if isinstance(facility_data, dict) and "FacilityID" in facility_data else {}
     if not f:
         return None
 
     # Photos
-    photos = [m["URL"] for m in (media_data.get("RECDATA") or [])
-              if m.get("MediaType") == "Image" and m.get("URL")][:8]
+    facility_photos = _image_urls(_as_records(media_data), limit=12)
+    site_photo_urls: list[str] = []
+    for site in sorted(
+        campsite_details,
+        key=lambda item: (
+            0 if "group" in f"{item.get('name', '')} {item.get('type', '')}".lower() else 1,
+            0 if item.get("photos") else 1,
+        ),
+    ):
+        site_photo_urls.extend(site.get("photos") or [])
+    photos = _dedupe([*site_photo_urls, *facility_photos], limit=16)
 
     # Site types
     site_type_set: set[str] = set()
@@ -265,6 +434,10 @@ async def get_facility_detail(facility_id: str) -> dict | None:
         ct = s.get("CampsiteType") or ""
         if ct:
             site_type_set.add(ct.title())
+    for site in campsite_details:
+        ct = site.get("type") or ""
+        if ct:
+            site_type_set.add(str(ct).title())
     site_types = sorted(site_type_set)[:8]
     text_amenities, text_site_types = _feature_lists_from_text(
         f.get("FacilityName", ""),
@@ -311,6 +484,10 @@ async def get_facility_detail(facility_id: str) -> dict | None:
             amenities.append(label)
     if f.get("FacilityAdaAccess") == "Y" and "ADA" not in amenities:
         amenities.append("ADA")
+    for site in campsite_details:
+        for label in site.get("amenities") or []:
+            if label not in amenities:
+                amenities.append(label)
 
     # Activities
     activities = [a.get("ActivityName", "") for a in (acts_data.get("RECDATA") or [])
@@ -330,8 +507,11 @@ async def get_facility_detail(facility_id: str) -> dict | None:
         "description": (f.get("FacilityDescription") or "")[:1000],
         "photos": photos,
         "photo_url": photos[0] if photos else None,
+        "media_source": "ridb_campsite" if site_photo_urls else ("ridb" if facility_photos else ""),
+        "photo_fallback_chain": ["campsite_media", "facility_media", "trailhead_placeholder"],
         "amenities": amenities[:12],
         "site_types": site_types,
+        "campsites": campsite_details,
         "activities": activities,
         "reservable": f.get("Reservable", False),
         "cost": _format_cost(f),
@@ -341,6 +521,7 @@ async def get_facility_detail(facility_id: str) -> dict | None:
         "official_url": f"https://www.recreation.gov/camping/campgrounds/{facility_id}",
         "booking_url": f"https://www.recreation.gov/camping/campgrounds/{facility_id}",
         "campsites_count": len(sites_data.get("RECDATA") or []),
+        "site_media_count": len(_dedupe(site_photo_urls, limit=999)),
         "source": "ridb",
         "verified_source": "Recreation.gov",
         "source_badge": "Official Recreation.gov",

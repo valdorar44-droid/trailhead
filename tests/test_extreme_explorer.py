@@ -9,6 +9,9 @@ from dashboard.server import (
     _extreme_config_for_user,
     _mapbox_directions_url,
     _mapbox_session_hash,
+    _canonical_landmark_geocode,
+    _countrycodes_for_query,
+    _resolve_geocode_candidates,
 )
 from db import store
 
@@ -160,6 +163,73 @@ class ExtremeExplorerTests(unittest.TestCase):
         self.assertNotEqual(hashed, token)
         self.assertEqual(_mapbox_session_hash(""), "")
 
+    def test_canonical_landmark_geocode_prefers_eiffel_tower_not_roads(self):
+        hit = _canonical_landmark_geocode("bring me to the eifel tower")
+
+        self.assertEqual(hit[0]["name"], "Eiffel Tower, Paris, France")
+        self.assertAlmostEqual(hit[0]["lat"], 48.85837, places=4)
+        self.assertEqual(_canonical_landmark_geocode("Eiffel Tower Road"), [])
+
+    def test_geocode_resolver_enforces_explicit_country(self):
+        self.assertEqual(_countrycodes_for_query("take me to Paris France"), "fr")
+        result = _resolve_geocode_candidates("Paris France", [
+            {
+                "name": "Paris, Texas, United States",
+                "lat": 33.6609,
+                "lng": -95.5555,
+                "source": "mapbox",
+                "place_id": "place.paris-tx",
+                "feature_type": "place",
+                "place_types": ["place"],
+                "country_code": "us",
+                "relevance": 0.99,
+            },
+            {
+                "name": "Paris, France",
+                "lat": 48.8566,
+                "lng": 2.3522,
+                "source": "mapbox",
+                "place_id": "place.paris-fr",
+                "feature_type": "place",
+                "place_types": ["place"],
+                "country_code": "fr",
+                "relevance": 0.98,
+            },
+        ], "fr")
+
+        self.assertEqual(result["status"], "resolved")
+        self.assertEqual(result["selected"]["country_code"], "fr")
+        self.assertEqual(result["selected"]["name"], "Paris, France")
+        self.assertEqual(result["rejected"][0]["reason"], "country_mismatch")
+
+    def test_geocode_resolver_keeps_explicit_roads_possible(self):
+        result = _resolve_geocode_candidates("Eiffel Tower Road", [
+            {
+                "name": "Eiffel Tower Road, Missouri, United States",
+                "lat": 37.0,
+                "lng": -93.0,
+                "source": "mapbox",
+                "place_id": "address.road",
+                "feature_type": "street",
+                "place_types": ["street"],
+                "country_code": "us",
+                "relevance": 0.9,
+            },
+            {
+                "name": "Eiffel Tower, Paris, France",
+                "lat": 48.85837,
+                "lng": 2.29448,
+                "source": "trailhead_landmark",
+                "place_id": "trailhead_landmark:eiffel_tower",
+                "feature_type": "landmark",
+                "place_types": ["poi", "landmark"],
+                "country_code": "fr",
+                "relevance": 1.0,
+            },
+        ], "")
+
+        self.assertEqual(result["selected"]["name"], "Eiffel Tower Road, Missouri, United States")
+
     def test_env_kill_switch_overrides_dashboard(self):
         store.set_extreme_admin_config({"enabled": True, "kill_switch": False, "navigation_enabled": True})
         settings.extreme_kill_switch = True
@@ -246,8 +316,24 @@ class ExtremeExplorerTests(unittest.TestCase):
         views = _build_extreme_map_action("show me cool views near Big Sur", context)
         hotels = _build_extreme_map_action("show hotels near the Eiffel Tower", context)
         fly = _build_extreme_map_action("go to Big Sur", context)
+        zoom_in = _build_extreme_map_action("zoom in", context)
+        zoom_out = _build_extreme_map_action("zoom out", context)
+        zoom_visible = _build_extreme_map_action("zoom in on the hotel on the left", context)
+        stable_second = _build_extreme_map_action("open the second result", {
+            "map": {
+                "center": {"lat": 38.2, "lng": -120.3},
+                "current_result_set_id": "places_123",
+                "current_results": [
+                    {"result_set_id": "places_123", "result_id": "place:first", "id": "first", "name": "First Cafe", "type": "food"},
+                    {"result_set_id": "places_123", "result_id": "place:second", "id": "second", "name": "Second Cafe", "type": "food"},
+                ],
+            },
+        })
+        ambiguous_places = _build_extreme_map_action("find places nearby", context)
         nav = _build_extreme_map_action("start navigation", context)
         builder = _build_extreme_map_action("Plan a wild dispersed 5-day route from Moab to Big Sur", context)
+        builder_shorthand = _build_extreme_map_action("Build Moab to Big Sur", context)
+        builder_route_from = _build_extreme_map_action("Route from Moab to Big Sur", context)
         builder_reversed = _build_extreme_map_action("plan 5 days to Big Sur from Moab dispersed mostly camping", rig_context)
         scout_followup = _build_extreme_map_action("5 hours", {
             "route": {
@@ -288,6 +374,13 @@ class ExtremeExplorerTests(unittest.TestCase):
         self.assertEqual(pin["args"]["pin_type"], "other")
         self.assertEqual(second["action_type"], "selectPlace")
         self.assertEqual(second["args"]["result_index"], 1)
+        self.assertEqual(stable_second["action_type"], "selectPlace")
+        self.assertEqual(stable_second["args"]["result_set_id"], "places_123")
+        self.assertEqual(stable_second["args"]["result_id"], "place:second")
+        self.assertEqual(stable_second["args"]["name"], "Second Cafe")
+        self.assertEqual(ambiguous_places["action_type"], "askForConfirmation")
+        self.assertEqual(ambiguous_places["args"]["reason"], "ambiguous_place_category")
+        self.assertIn("lodging", ambiguous_places["args"]["options"])
         self.assertEqual(lands["action_type"], "toggleLayer")
         self.assertEqual(lands["args"]["layer"], "lands")
         self.assertEqual(satellite["action_type"], "setMapStyle")
@@ -317,6 +410,13 @@ class ExtremeExplorerTests(unittest.TestCase):
         self.assertEqual(hotels["args"]["query"].lower(), "the eiffel tower")
         self.assertEqual(fly["action_type"], "flyToPlace")
         self.assertEqual(fly["args"]["query"], "big sur")
+        self.assertEqual(zoom_in["action_type"], "zoomMap")
+        self.assertEqual(zoom_in["args"]["direction"], "in")
+        self.assertEqual(zoom_out["action_type"], "zoomMap")
+        self.assertEqual(zoom_out["args"]["direction"], "out")
+        self.assertEqual(zoom_visible["action_type"], "zoomMap")
+        self.assertEqual(zoom_visible["args"]["type"], "lodging")
+        self.assertEqual(zoom_visible["args"]["screen_position"], "left")
         self.assertEqual(nav["action_type"], "startNavigation")
         self.assertTrue(nav["requires_confirmation"])
         self.assertEqual(builder["action_type"], "startRouteScout")
@@ -326,6 +426,12 @@ class ExtremeExplorerTests(unittest.TestCase):
         self.assertEqual(builder["args"]["draft"]["start"].lower(), "moab")
         self.assertEqual(builder["args"]["draft"]["destination"].lower(), "big sur")
         self.assertEqual(builder["args"]["draft"]["fuelStrategy"], "auto_when_needed")
+        self.assertEqual(builder_shorthand["action_type"], "startRouteScout")
+        self.assertEqual(builder_shorthand["args"]["draft"]["start"].lower(), "moab")
+        self.assertEqual(builder_shorthand["args"]["draft"]["destination"].lower(), "big sur")
+        self.assertEqual(builder_route_from["action_type"], "startRouteScout")
+        self.assertEqual(builder_route_from["args"]["draft"]["start"].lower(), "moab")
+        self.assertEqual(builder_route_from["args"]["draft"]["destination"].lower(), "big sur")
         self.assertEqual(builder_reversed["action_type"], "startRouteScout")
         self.assertEqual(builder_reversed["args"]["draft"]["campPreference"], "public")
         self.assertEqual(builder_reversed["args"]["draft"]["days"], 5)

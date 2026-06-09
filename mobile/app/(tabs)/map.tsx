@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useMemo, useCallback, Component } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Linking, Animated, TextInput, ActivityIndicator, Modal, Image, Share, Alert, AppState, Keyboard, KeyboardAvoidingView, Platform, PanResponder, useWindowDimensions, InteractionManager } from 'react-native';
+import { requireOptionalNativeModule } from 'expo-modules-core';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import NativeMap, { type NativeMapHandle } from '@/components/NativeMap';
 import RouteSearchModal from '@/components/RouteSearchModal';
@@ -26,7 +27,7 @@ import * as FileSystem from 'expo-file-system';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useStore, type WaterSpot, type CatchLog, type WaterRoute } from '@/lib/store';
-import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile, MapCardResolveResponse, WaterNavigationLinesResponse, WaterConditionsResponse, WaterSpotCard, WaterSpotCardsResponse, FishingConditionsResponse, SuggestedWaterCorridorResponse, type ExtremeConfig, type CopilotContext, type MapActionRequest, type MapSelectableFeature, type RouteCampWindowInput, type RouteCampWindowResult, type RouteScoutState } from '@/lib/api';
+import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile, MapCardResolveResponse, WaterNavigationLinesResponse, WaterConditionsResponse, WaterSpotCard, WaterSpotCardsResponse, FishingConditionsResponse, SuggestedWaterCorridorResponse, type GeocodePlace, type ExtremeConfig, type CopilotContext, type MapActionRequest, type MapSelectableFeature, type RouteCampWindowInput, type RouteCampWindowResult, type RouteScoutState } from '@/lib/api';
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { deleteRouteGeometry, loadRouteGeometry, saveRouteGeometry } from '@/lib/offlineRoutes';
 import { loadOfflineTrail, saveOfflineTrail } from '@/lib/offlineTrails';
@@ -68,6 +69,19 @@ import {
   type TrailheadRouteBuilderDraft,
 } from '@/lib/copilotCapabilities';
 import { markReviewPromptShown, recordReviewMoment } from '@/lib/reviewPrompt';
+
+type MapboxNativeEnrichmentModule = {
+  enrichPlace?: (data: {
+    name?: string;
+    lat: number;
+    lng: number;
+    mapbox_id?: string | null;
+    category?: string | null;
+    radius_meters?: number;
+  }) => Promise<Record<string, unknown> | null>;
+};
+const mapboxNativeEnrichment = requireOptionalNativeModule<MapboxNativeEnrichmentModule>('TrailheadMapboxStandardInteractions');
+const ENABLE_NATIVE_MAPBOX_SEARCH_ENRICHMENT = false;
 import { AUDIO_LOCATION_TASK } from '@/lib/backgroundTasks';
 
 const WebView: any = Platform.OS === 'web' ? View : require('react-native-webview').WebView;
@@ -97,6 +111,34 @@ const TRAIL_GUIDE_LOTTIE: Record<TrailGuideAvatarState, any> = {
 function mediaUrl(url?: string | null) {
   if (!url) return '';
   return url.startsWith('/') ? `${API_BASE_URL}${url}` : url;
+}
+
+function campPhotoUrl(photo: unknown): string {
+  if (typeof photo === 'string') return mediaUrl(photo);
+  if (photo && typeof photo === 'object') {
+    const value = (photo as { url?: string | null }).url;
+    return mediaUrl(value);
+  }
+  return '';
+}
+
+function campPhotoItems(camp?: Partial<CampsitePin> | null, detail?: Partial<CampsiteDetail> | null): TrailheadGalleryPhoto[] {
+  const items: TrailheadGalleryPhoto[] = [];
+  const seen = new Set<string>();
+  const push = (photo: unknown, source?: string) => {
+    const url = campPhotoUrl(photo);
+    if (!url || seen.has(url)) return;
+    seen.add(url);
+    const photoSource = typeof photo === 'object' && photo
+      ? ((photo as { source?: string; credit?: string; caption?: string }).source || source)
+      : source;
+    items.push({ url, source: photoSource || detail?.media_source || detail?.verified_source || camp?.verified_source || camp?.source_badge || camp?.source || 'Trailhead' });
+  };
+  (detail?.photos ?? []).forEach(photo => push(photo, detail?.media_source || detail?.verified_source));
+  (detail?.campsites ?? []).forEach(site => (site.photos ?? []).forEach(photo => push(photo, site.source_badge || site.verified_source || 'Recreation.gov')));
+  (camp?.photos ?? []).forEach(photo => push(photo, camp?.verified_source || camp?.source_badge || camp?.source));
+  push(camp?.photo_url, camp?.verified_source || camp?.source_badge || camp?.source);
+  return items;
 }
 
 type OfflineAreaDetail = 'standard' | 'high';
@@ -250,9 +292,22 @@ interface SearchPlace {
   lat: number; lng: number; name: string; dist?: number | null;
   isCurrentLocation?: boolean;
   id?: string; source?: string; source_label?: string; place_id?: string; provider_place_id?: string;
+  result_id?: string; result_set_id?: string;
+  selection_source?: string; feature_id?: string; source_layer?: string | null;
+  screen_x?: number | null; screen_y?: number | null; screen_position?: string | null;
+  selection_confidence?: string | null; raw_feature?: Record<string, unknown> | null;
+  country_code?: string | null; country?: string | null; region?: string | null; bbox?: number[] | null;
+  geocode_status?: string; geocode_reason?: string; geocode_query?: string;
   type?: string; subtype?: string; address?: string; phone?: string; website?: string;
   open_now?: boolean | null; rating?: number; rating_count?: number; photo_url?: string | null;
   photos?: TrailheadGalleryPhoto[];
+  hours?: string[]; open_hours?: string[] | string | Record<string, unknown> | null; hours_label?: string | null;
+  average_rating?: number; review_count?: number;
+  primary_image?: string | null; other_images?: string[];
+  mapbox_id?: string | null; mapbox_categories?: string[]; brand?: string | null; external_ids?: Record<string, unknown>;
+  routable_points?: Array<{ name?: string | null; lat: number; lng: number }>;
+  eta_minutes?: number | null; distance_meters?: number | null;
+  enrichment_source?: string; enrichment_status?: string;
   google_maps_uri?: string; attribution?: string;
   summary?: string; access_note?: string; distance_mi?: number; route_distance_mi?: number; confidence?: string;
   route_progress?: number; route_progress_mi?: number; route_segment_index?: number; source_badge?: string;
@@ -267,8 +322,213 @@ type CopilotResultScope = {
   kind: 'place' | 'camp' | 'trail';
   category?: string;
   keyword?: string;
+  resultSetId?: string;
   ts: number;
 };
+
+type CopilotResultKind = 'place' | 'camp' | 'trail' | 'visible';
+type CopilotMapBounds = { n: number; s: number; e: number; w: number; zoom?: number };
+type CopilotQueryCandidate = {
+  result_set_id?: string | null;
+  result_id?: string | null;
+  feature_id?: string | null;
+  result_index?: number | null;
+  name?: string | null;
+  type?: string | null;
+  source?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+  screen_position?: string | null;
+  distance_mi?: number | null;
+};
+type CopilotQueryContext = {
+  query_id: string;
+  result_set_id?: string | null;
+  source: string;
+  query?: string | null;
+  category?: string | null;
+  keyword?: string | null;
+  created_at: number;
+  center?: { lat: number; lng: number; name?: string | null } | null;
+  bounds?: CopilotMapBounds | null;
+  bbox?: string | null;
+  zoom?: number | null;
+  radius_mi?: number | null;
+  feature_count?: number;
+  candidates?: CopilotQueryCandidate[];
+};
+type CopilotResultSnapshot = {
+  kind: CopilotResultKind;
+  resultSetId: string;
+  category?: string;
+  keyword?: string;
+  createdAt: number;
+  queryContext?: CopilotQueryContext | null;
+  places?: SearchPlace[];
+  camps?: CampsitePin[];
+  trails?: TrailFeature[];
+  features?: MapSelectableFeature[];
+};
+type CopilotSelectedResult = {
+  kind: CopilotResultKind;
+  resultSetId?: string;
+  resultId?: string;
+  place?: SearchPlace;
+  camp?: CampsitePin;
+  trail?: TrailFeature;
+  feature?: MapSelectableFeature;
+  selectedAt: number;
+};
+
+const RENDERED_MAPBOX_PLACE_SOURCES = new Set(['rendered_mapbox_standard', 'mapbox_feature', 'rendered_map']);
+function isRenderedMapboxPlaceSource(source: unknown) {
+  return RENDERED_MAPBOX_PLACE_SOURCES.has(String(source || '').toLowerCase());
+}
+
+const OVERNIGHT_PLACE_TYPES = new Set([
+  'camp', 'camping', 'campground', 'campsite', 'rv', 'rv_park', 'caravan',
+  'lodging', 'hotel', 'motel', 'stay', 'private_stay', 'farm_stay', 'ranch',
+  'winery', 'glamping', 'private_camp',
+]);
+const OVERNIGHT_PLACE_RE = /\b(campgrounds?|camp\s*sites?|campsites?|rv\s*(park|resort|camp)?|caravan|overnight|places?\s+to\s+stay|lodg(?:e|ing)|hotel|motel|hostel|inn|cabin|glamping|hipcamp|farm\s*stay|ranch\s*stay|winery\s*stay|private\s*(camp|stay))\b/i;
+const NON_OVERNIGHT_CAMP_RE = /\b(campus|summer camp|boot camp|training camp|campbell)\b/i;
+
+function overnightPlaceText(place: Record<string, any> | null | undefined) {
+  if (!place) return '';
+  const anyPlace = place as Record<string, unknown>;
+  const parts: string[] = [];
+  ['type', 'subtype', 'name', 'source_layer', 'source', 'source_label', 'source_badge', 'land_type', 'description', 'summary', 'address'].forEach(key => {
+    const value = anyPlace[key];
+    if (value != null && value !== '') parts.push(String(value));
+  });
+  const categories = anyPlace.mapbox_categories;
+  if (Array.isArray(categories)) parts.push(categories.map(String).join(' '));
+  const raw = anyPlace.raw_feature;
+  if (raw && typeof raw === 'object') {
+    const props = (raw as any).properties && typeof (raw as any).properties === 'object' ? (raw as any).properties : raw as Record<string, unknown>;
+    ['class', 'type', 'kind', 'category', 'maki', 'name', 'subclass'].forEach(key => {
+      const value = (props as Record<string, unknown>)[key];
+      if (value != null && value !== '') parts.push(String(value));
+    });
+  }
+  return parts.join(' ');
+}
+
+function isOvernightPlaceLike(place: Record<string, any> | null | undefined) {
+  if (!place) return false;
+  const anyPlace = place as Record<string, unknown>;
+  const typed = [anyPlace.type, anyPlace.subtype].map(value => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '_'));
+  if (typed.some(type => OVERNIGHT_PLACE_TYPES.has(type))) return true;
+  const text = overnightPlaceText(place);
+  if (NON_OVERNIGHT_CAMP_RE.test(text)) return false;
+  return OVERNIGHT_PLACE_RE.test(text);
+}
+
+const COPILOT_QUERY_CONTEXT_TTL_MS = 5 * 60 * 1000;
+
+function bboxStringFromBounds(bounds?: CopilotMapBounds | null) {
+  if (!bounds) return '';
+  const w = Number(bounds.w);
+  const s = Number(bounds.s);
+  const e = Number(bounds.e);
+  const n = Number(bounds.n);
+  if (![w, s, e, n].every(Number.isFinite)) return '';
+  return `${w.toFixed(6)},${s.toFixed(6)},${e.toFixed(6)},${n.toFixed(6)}`;
+}
+
+function boundsFromBboxString(bbox?: string | null, zoom?: number | null): CopilotMapBounds | null {
+  const parts = String(bbox || '').split(',').map(value => Number(value.trim()));
+  if (parts.length < 4 || !parts.slice(0, 4).every(Number.isFinite)) return null;
+  return {
+    w: parts[0],
+    s: parts[1],
+    e: parts[2],
+    n: parts[3],
+    ...(Number.isFinite(Number(zoom)) ? { zoom: Number(zoom) } : {}),
+  };
+}
+
+function boundsCenter(bounds?: CopilotMapBounds | null) {
+  if (!bounds) return null;
+  const n = Number(bounds.n);
+  const s = Number(bounds.s);
+  const e = Number(bounds.e);
+  const w = Number(bounds.w);
+  if (![n, s, e, w].every(Number.isFinite)) return null;
+  return { lat: (n + s) / 2, lng: (e + w) / 2 };
+}
+
+function pointInBounds(point: { lat?: number | null; lng?: number | null }, bounds?: CopilotMapBounds | null, paddingDeg = 0) {
+  if (!bounds) return true;
+  const lat = Number(point.lat);
+  const lng = Number(point.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  const north = Math.max(Number(bounds.n), Number(bounds.s)) + paddingDeg;
+  const south = Math.min(Number(bounds.n), Number(bounds.s)) - paddingDeg;
+  const east = Number(bounds.e);
+  const west = Number(bounds.w);
+  if (!Number.isFinite(north) || !Number.isFinite(south) || !Number.isFinite(east) || !Number.isFinite(west)) return true;
+  const latOk = lat >= south && lat <= north;
+  const lngOk = west <= east
+    ? lng >= west - paddingDeg && lng <= east + paddingDeg
+    : lng >= west - paddingDeg || lng <= east + paddingDeg;
+  return latOk && lngOk;
+}
+
+function copilotMapChromePalette(params: {
+  appTheme: string;
+  mapLayer: MapLayer;
+  premiumMapStyle: PremiumMapStyle;
+  map3dEnabled: boolean;
+  colors: ColorPalette;
+}) {
+  const styleKey = `${params.mapLayer}:${params.premiumMapStyle}`.toLowerCase();
+  const darkMap = params.map3dEnabled
+    || params.mapLayer === 'extreme'
+    || /dark|night|satellite|hybrid|navigation_night/.test(styleKey);
+  if (darkMap) {
+    return {
+      button: {
+        backgroundColor: 'rgba(255,255,255,0.94)',
+        borderColor: 'rgba(17,24,39,0.42)',
+        shadowColor: '#000',
+        shadowOpacity: 0.42,
+      },
+      buttonActive: {
+        backgroundColor: params.colors.orange,
+        borderColor: '#ffffff',
+      },
+      text: '#111827',
+      textMuted: '#4b5563',
+      activeText: '#ffffff',
+      toast: {
+        backgroundColor: 'rgba(255,255,255,0.96)',
+        borderColor: 'rgba(17,24,39,0.18)',
+      },
+      toastText: '#1f2937',
+    };
+  }
+  return {
+    button: {
+      backgroundColor: 'rgba(17,24,39,0.92)',
+      borderColor: 'rgba(255,255,255,0.72)',
+      shadowColor: '#000',
+      shadowOpacity: params.appTheme === 'light' ? 0.24 : 0.34,
+    },
+    buttonActive: {
+      backgroundColor: params.colors.orange,
+      borderColor: '#ffffff',
+    },
+    text: '#ffffff',
+    textMuted: 'rgba(255,255,255,0.62)',
+    activeText: '#ffffff',
+    toast: {
+      backgroundColor: 'rgba(17,24,39,0.94)',
+      borderColor: 'rgba(255,255,255,0.18)',
+    },
+    toastText: '#f9fafb',
+  };
+}
 
 type SelectedPlaceContext = {
   loading: boolean;
@@ -1097,6 +1357,8 @@ function selectableFeatureFromPlace(
   if (!name || name.length < 2) return null;
   return {
     feature_id: selectableFeatureKey(source, name, lat, lng, place.id || place.place_id || place.provider_place_id),
+    result_id: place.result_id || selectableFeatureKey(source, name, lat, lng, place.id || place.place_id || place.provider_place_id),
+    result_set_id: place.result_set_id,
     result_index: resultIndex,
     name,
     lat,
@@ -1110,7 +1372,7 @@ function selectableFeatureFromPlace(
     screen_x: (place as any).screen_x ?? null,
     screen_y: (place as any).screen_y ?? null,
     screen_position: (place as any).screen_position ?? null,
-    confidence: (place as any).confidence || (place.source === 'mapbox_search' || place.source === 'mapbox_feature' ? 'high' : 'medium'),
+    confidence: (place as any).selection_confidence || (place as any).confidence || (place.source === 'mapbox_search' || place.source === 'rendered_mapbox_standard' || place.source === 'mapbox_feature' ? 'high' : 'medium'),
     aliases: [place.name, place.subtype, place.type, place.address, place.source_label].filter((item): item is string => !!item),
     address: place.address || null,
     rating: place.rating ?? null,
@@ -1122,9 +1384,13 @@ function selectableFeatureFromPlace(
 
 function searchPlaceFromSelectableFeature(feature: MapSelectableFeature): SearchPlace {
   const raw = feature.place && typeof feature.place === 'object' ? feature.place as Partial<SearchPlace> : {};
+  const source = String(raw.source || feature.source || '').toLowerCase();
+  const isMapboxRendered = ['rendered_mapbox_standard', 'mapbox_feature', 'rendered_map'].includes(source);
   return {
     ...raw,
     id: String(raw.id || feature.feature_id),
+    result_id: raw.result_id || feature.result_id,
+    result_set_id: raw.result_set_id || feature.result_set_id,
     name: String(raw.name || feature.name || 'Place'),
     lat: Number(raw.lat ?? feature.lat),
     lng: Number(raw.lng ?? feature.lng),
@@ -1132,9 +1398,19 @@ function searchPlaceFromSelectableFeature(feature: MapSelectableFeature): Search
     subtype: raw.subtype || feature.subtype || undefined,
     source: raw.source || feature.source || 'rendered_map',
     source_label: raw.source_label || feature.source_label || 'Rendered map',
+    selection_source: raw.selection_source || feature.source || undefined,
+    feature_id: raw.feature_id || feature.feature_id,
+    provider_place_id: raw.provider_place_id || String((feature.place as any)?.provider_place_id || ''),
+    place_id: raw.place_id || String((feature.place as any)?.place_id || ''),
+    source_layer: raw.source_layer || feature.source_layer || undefined,
+    screen_x: raw.screen_x ?? feature.screen_x ?? undefined,
+    screen_y: raw.screen_y ?? feature.screen_y ?? undefined,
+    screen_position: raw.screen_position ?? feature.screen_position ?? undefined,
+    selection_confidence: raw.selection_confidence || feature.confidence || undefined,
+    raw_feature: raw.raw_feature || feature.raw_feature || undefined,
     address: raw.address || feature.address || undefined,
     rating: raw.rating ?? feature.rating ?? undefined,
-    summary: raw.summary || feature.summary || 'Selected from the visible map.',
+    summary: raw.summary || feature.summary || (isMapboxRendered ? undefined : 'Selected from the visible map.'),
     distance_mi: raw.distance_mi ?? feature.distance_mi ?? undefined,
   };
 }
@@ -3376,7 +3652,7 @@ const buildMapHtml = (
       var lng=Number(cc&&cc[0]);var lat=Number(cc&&cc[1]);
       if(!isFinite(lat)||!isFinite(lng)){lat=lngLat.lat;lng=lngLat.lng;}
       var subtype=String(p.maki||p.poi_category||p.category||p.class||p.type||p.group||p.kind||'').replace(/[_-]+/g,' ').trim();
-      return{id:String(p.id||p.mapbox_id||('rendered:'+name+':'+lat.toFixed(5)+':'+lng.toFixed(5))).slice(0,180),name:name,lat:lat,lng:lng,type:renderedPlaceType(p),subtype:subtype||'rendered place',source:'rendered_map',source_label:'Rendered map',source_layer:lid,provider_place_id:p.mapbox_id||p.id,place_id:p.mapbox_id||p.id,source_badge:'Map feature',source_freshness:'Selected from rendered map data.',summary:(subtype||'Place')+' selected from the map.'};
+      return{id:String(p.id||p.mapbox_id||('rendered:'+name+':'+lat.toFixed(5)+':'+lng.toFixed(5))).slice(0,180),name:name,lat:lat,lng:lng,type:renderedPlaceType(p),subtype:subtype||'rendered place',source:'rendered_mapbox_standard',selection_source:'rendered_mapbox_standard',source_label:'Mapbox Standard',source_layer:lid,feature_id:p.mapbox_id||p.id,provider_place_id:p.mapbox_id||p.id,place_id:p.mapbox_id||p.id,mapbox_id:p.mapbox_id||p.id,source_badge:'Mapbox basemap',enrichment_source:'mapbox_standard',enrichment_status:'pending',raw_feature:{id:f&&f.id,layer:f&&f.layer,source:f&&f.source,sourceLayer:f&&f.sourceLayer,properties:p,geometry:f&&f.geometry}};
     }
     function pickRenderedPlaceFeature(features,lngLat){
       if(!features||!features.length)return null;
@@ -4351,7 +4627,15 @@ function MapScreen() {
   const [searchResults,setSearchResults] = useState<SearchPlace[]>([]);
   const [copilotResults, setCopilotResults] = useState<SearchPlace[]>([]);
   const [copilotResultScope, setCopilotResultScope] = useState<CopilotResultScope | null>(null);
+  const [copilotDebugTranscript, setCopilotDebugTranscript] = useState('');
   const [visibleRenderedFeatures, setVisibleRenderedFeatures] = useState<MapSelectableFeature[]>([]);
+  const copilotResultSeqRef = useRef(0);
+  const copilotQuerySeqRef = useRef(0);
+  const copilotResultSnapshotRef = useRef<CopilotResultSnapshot | null>(null);
+  const copilotVisibleSnapshotRef = useRef<CopilotResultSnapshot | null>(null);
+  const copilotQueryContextRef = useRef<CopilotQueryContext | null>(null);
+  const lastSelectedCopilotResultRef = useRef<CopilotSelectedResult | null>(null);
+  const lastAdminCopilotDebugRef = useRef<{ key: string; at: number } | null>(null);
   const [showSearch,   setShowSearch]   = useState(false);
   const [searchMode, setSearchMode] = useState<'browse' | 'route_pick'>('browse');
   const [isSearching,  setIsSearching]  = useState(false);
@@ -4409,12 +4693,17 @@ function MapScreen() {
   const [selectedPlace, setSelectedPlace] = useState<SearchPlace | null>(null);
   const [selectedPlaceContext, setSelectedPlaceContext] = useState<SelectedPlaceContext | null>(null);
   const [selectedPlaceTripContext, setSelectedPlaceTripContext] = useState<TripPlaceContext | null>(null);
+  const recentRenderedMapboxSelectionRef = useRef<{ at: number; lat: number; lng: number; key: string } | null>(null);
+  const renderedMapboxEnrichmentSeqRef = useRef(0);
+  const renderedMapboxEnrichmentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [routeScout, setRouteScout] = useState<RouteScoutState | null>(null);
+  const recentRouteScoutActionRef = useRef<{ at: number; action: 'start' | 'save' } | null>(null);
   const mapCardResolveCacheRef = useRef(new Map<string, { at: number; response: MapCardResolveResponse }>());
   const selectedPlaceResolveKeyRef = useRef('');
   const [campDetail,    setCampDetail]    = useState<CampsiteDetail | null>(null);
   const [showCampDetail,setShowCampDetail] = useState(false);
   const [campGalleryIndex, setCampGalleryIndex] = useState<number | null>(null);
+  const [quickCampPhotoIndex, setQuickCampPhotoIndex] = useState(0);
   const [showCampEdit, setShowCampEdit] = useState(false);
   const [campEditMode, setCampEditMode] = useState<'suggest' | 'admin'>('suggest');
   const [campEditDraft, setCampEditDraft] = useState<CampEditDraft | null>(null);
@@ -4423,6 +4712,7 @@ function MapScreen() {
 
   useEffect(() => {
     selectedCampRef.current = selectedCamp;
+    setQuickCampPhotoIndex(0);
   }, [selectedCamp]);
 
   useEffect(() => {
@@ -4611,6 +4901,13 @@ function MapScreen() {
   const [showLayerSheet, setShowLayerSheet] = useState(false);
   const [showMapStyleSheet, setShowMapStyleSheet] = useState(false);
   const [map3dEnabled, setMap3dEnabled] = useState(false);
+  const mapChrome = useMemo(() => copilotMapChromePalette({
+    appTheme: themeMode,
+    mapLayer,
+    premiumMapStyle,
+    map3dEnabled,
+    colors: C,
+  }), [C, map3dEnabled, mapLayer, premiumMapStyle, themeMode]);
   const [layerTrails, setLayerTrails] = useState(true);
   const [layerFire,    setLayerFire]    = useState(false);
   const [layerAva,     setLayerAva]     = useState(false);
@@ -5697,9 +5994,23 @@ function MapScreen() {
     const resolveKey = `${selectedPlace.id || selectedPlace.source || 'place'}:${selectedPlace.name}:${selectedPlace.lat.toFixed(5)}:${selectedPlace.lng.toFixed(5)}`;
     if (selectedPlaceResolveKeyRef.current === resolveKey) return;
     selectedPlaceResolveKeyRef.current = resolveKey;
+    const selectedPlaceSource = String(selectedPlace.source || selectedPlace.selection_source || '').toLowerCase();
     let cancelled = false;
     const mergeResolvedCard = (resolved: MapCardResolveResponse) => {
       const resolvedCard = (resolved.card as any) ?? {};
+      const shouldOpenCampCard = !!resolved.camp || !!resolved.camp_detail || isOvernightPlaceLike(selectedPlace) || isOvernightPlaceLike(resolvedCard);
+      if (shouldOpenCampCard) {
+        const camp = resolvedMapCardToCampPin(selectedPlace, resolved);
+        if (camp) {
+          setSelectedCamp(camp);
+          setCampDetail(null); setCampInsight(null); setWikiArticles([]);
+          setCampFullness(null); setCampWeather(null);
+          setSelectedPlace(null);
+          setSelectedPlaceContext(null);
+          setSelectedPlaceTripContext(null);
+          return;
+        }
+      }
       const nextCard = {
         ...selectedPlace,
         ...resolvedCard,
@@ -5739,12 +6050,11 @@ function MapScreen() {
         trails: prev?.trails ?? [],
       }));
     }
-    const selectedPlaceSource = String(selectedPlace.source || '').toLowerCase();
     const selectedPlaceResolveKind = selectedPlace.type === 'trail' || selectedPlace.type === 'trailhead'
       ? 'trail'
-      : selectedPlace.type === 'camp'
+      : selectedPlace.type === 'camp' || isOvernightPlaceLike(selectedPlace)
         ? 'camp'
-        : selectedPlaceSource === 'search' || selectedPlaceSource === 'mapbox_feature' || selectedPlaceSource === 'mapbox_search' || selectedPlaceSource === 'rendered_map'
+      : selectedPlaceSource === 'search' || selectedPlaceSource === 'rendered_mapbox_standard' || selectedPlaceSource === 'mapbox_feature' || selectedPlaceSource === 'mapbox_search' || selectedPlaceSource === 'rendered_map'
           ? 'search'
           : 'place';
     api.resolveMapCard({
@@ -5752,8 +6062,16 @@ function MapScreen() {
       id: selectedPlace.id,
       source: selectedPlace.source,
       source_label: selectedPlace.source_label,
+      selection_source: selectedPlace.selection_source,
+      feature_id: selectedPlace.feature_id,
       provider_place_id: selectedPlace.provider_place_id,
       place_id: selectedPlace.place_id,
+      source_layer: selectedPlace.source_layer,
+      screen_x: selectedPlace.screen_x,
+      screen_y: selectedPlace.screen_y,
+      screen_position: selectedPlace.screen_position,
+      selection_confidence: selectedPlace.selection_confidence,
+      raw_feature: selectedPlace.raw_feature,
       name: selectedPlace.name,
       lat: selectedPlace.lat,
       lng: selectedPlace.lng,
@@ -5845,20 +6163,24 @@ function MapScreen() {
   }
 
   function smartPlaceToCampPin(place: OsmPoi): CampsitePin | null {
-    if (String(place.type) !== 'camp' || place.lat == null || place.lng == null || !isFinite(place.lat) || !isFinite(place.lng)) return null;
+    if (!isOvernightPlaceLike(place) || place.lat == null || place.lng == null || !isFinite(place.lat) || !isFinite(place.lng)) return null;
     const subtype = String(place.subtype || '').toLowerCase();
     const source = String(place.source || '').toLowerCase();
-    const commercial = source === 'google' || source === 'foursquare' || subtype.includes('rv') || subtype.includes('commercial');
+    const text = overnightPlaceText(place).toLowerCase();
+    const privateStay = /(private|farm|ranch|winery|glamping|hipcamp)/.test(text);
+    const lodging = /(hotel|motel|lodg|hostel|inn|cabin)/.test(text) && !/camp/.test(text);
+    const commercial = source === 'google' || source === 'foursquare' || subtype.includes('rv') || subtype.includes('commercial') || privateStay || lodging;
+    const rv = subtype.includes('rv') || /\brv\b|caravan/.test(text);
     return {
       id: String(place.id || `${source || 'places'}:camp:${place.lat.toFixed(5)}:${place.lng.toFixed(5)}`),
-      name: place.name || 'Campground',
+      name: place.name || (lodging ? 'Stay option' : 'Campground'),
       lat: place.lat,
       lng: place.lng,
       tags: [
-        commercial ? 'commercial' : 'campground',
-        subtype.includes('rv') ? 'rv' : 'tent',
+        privateStay ? 'private_stay' : lodging ? 'stay' : commercial ? 'commercial' : 'campground',
+        rv ? 'rv' : lodging ? 'lodging' : 'tent',
       ],
-      land_type: subtype.includes('rv') ? 'RV Park' : commercial ? 'Commercial Campground' : 'Campground',
+      land_type: privateStay ? 'Private Stay' : lodging ? 'Lodging' : rv ? 'RV Park' : commercial ? 'Commercial Campground' : 'Campground',
       description: (place as any).summary || place.address || place.subtype || 'Camp option near this area.',
       photo_url: place.photo_url || undefined,
       reservable: !!place.website,
@@ -5883,6 +6205,74 @@ function MapScreen() {
       route_progress: place.route_progress,
       route_progress_mi: place.route_progress_mi,
       route_segment_index: place.route_segment_index,
+    };
+  }
+
+  function firstMapCardPhotoUrl(source: any, resolved?: MapCardResolveResponse | null): string | undefined {
+    const pools = [source?.photos, resolved?.photo_candidates, resolved?.photos].filter(Array.isArray) as any[][];
+    for (const pool of pools) {
+      for (const item of pool) {
+        const url = typeof item === 'string' ? item : item?.url;
+        if (typeof url === 'string' && url.trim()) return url;
+      }
+    }
+    return typeof source?.photo_url === 'string' && source.photo_url.trim() ? source.photo_url : undefined;
+  }
+
+  function resolvedMapCardToCampPin(place: SearchPlace, resolved: MapCardResolveResponse): CampsitePin | null {
+    const source: any = resolved.camp || resolved.camp_detail || resolved.card || place;
+    const lat = Number(source.lat ?? place.lat);
+    const lng = Number(source.lng ?? place.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    const merged = { ...place, ...source };
+    if (!isOvernightPlaceLike(merged) && !resolved.camp && !resolved.camp_detail) return null;
+    const text = overnightPlaceText(merged).toLowerCase();
+    const privateStay = /(private|farm|ranch|winery|glamping|hipcamp)/.test(text);
+    const lodging = /(hotel|motel|lodg|hostel|inn|cabin)/.test(text) && !/camp/.test(text);
+    const rv = /\brv\b|caravan/.test(text);
+    const rawTags = Array.isArray(source.tags) ? source.tags.map(String) : Array.isArray((place as any).tags) ? (place as any).tags.map(String) : [];
+    const tags = Array.from(new Set([
+      ...rawTags,
+      privateStay ? 'private_stay' : lodging ? 'stay' : 'camp',
+      rv ? 'rv' : lodging ? 'lodging' : 'campground',
+    ].filter(Boolean)));
+    const landType = source.land_type || source.subtype || (privateStay ? 'Private Stay' : lodging ? 'Lodging' : rv ? 'RV Park' : 'Campground');
+    const photoUrl = firstMapCardPhotoUrl(source, resolved);
+    return {
+      id: String(source.id || place.id || `mapcard:camp:${lat.toFixed(5)}:${lng.toFixed(5)}`),
+      name: String(source.name || place.name || (lodging ? 'Stay option' : 'Campground')),
+      lat,
+      lng,
+      tags,
+      land_type: String(landType),
+      description: String(source.description || source.summary || place.summary || place.address || 'Overnight option from the selected map feature. Verify access, fees, stay limits, and booking rules.'),
+      amenities: Array.isArray(source.amenities) ? source.amenities : undefined,
+      site_types: Array.isArray(source.site_types) ? source.site_types : undefined,
+      photos: Array.isArray(source.photos) ? source.photos : resolved.photo_candidates?.length ? resolved.photo_candidates : resolved.photos,
+      photo_url: photoUrl,
+      reservable: Boolean(source.reservable || source.booking_url),
+      cost: String(source.cost || ''),
+      url: String(source.url || source.website || source.booking_url || source.official_url || ''),
+      official_url: String(source.official_url || source.website || ''),
+      booking_url: String(source.booking_url || ''),
+      ada: Boolean(source.ada),
+      source: String(source.source || place.source || 'map'),
+      verified_source: String(source.verified_source || source.source_badge || source.source_label || place.source_label || 'Map source'),
+      source_badge: String(source.source_badge || source.verified_source || source.source_label || place.source_label || 'Map source'),
+      source_freshness: source.source_freshness,
+      last_checked: source.last_checked,
+      link_label: source.link_label,
+      rating: source.rating ?? place.rating,
+      rating_count: source.rating_count ?? place.rating_count,
+      phone: source.phone || place.phone,
+      address: source.address || place.address,
+      provider_place_id: source.provider_place_id || place.provider_place_id,
+      place_id: source.place_id || place.place_id,
+      route_distance_mi: source.route_distance_mi ?? place.route_distance_mi,
+      route_fit: source.route_fit,
+      route_progress: source.route_progress ?? place.route_progress,
+      route_progress_mi: source.route_progress_mi ?? place.route_progress_mi,
+      route_segment_index: source.route_segment_index ?? place.route_segment_index,
     };
   }
 
@@ -5961,6 +6351,12 @@ function MapScreen() {
   }
 
   function fetchPois(center: { lat: number; lng: number }, radius = 28, categoriesOverride?: string) {
+    if (extremeMapLayerActive) {
+      setPlacesLoading(false);
+      setPois([]);
+      webRef.current?.postMessage(JSON.stringify({ type: 'clear_pois' }));
+      return;
+    }
     lastPoiFetchRef.current = center;
     const seq = ++poiFetchSeqRef.current;
     setPlacesLoading(true);
@@ -6775,11 +7171,22 @@ function MapScreen() {
     setIsSearching(true);
     setSearchRouteCard(null);
     try {
-      const places = await api.geocodePlaces(searchQuery.trim(), 6);
+      const resolved = await api.resolveGeocodePlace(searchQuery.trim(), 8).catch(() => null);
+      const places = resolved?.selected
+        ? [resolved.selected, ...(resolved.alternatives ?? [])]
+        : await api.geocodePlaces(searchQuery.trim(), 6);
       const sorted = userLoc
         ? places.slice().sort((a, b) => haversineKm(userLoc.lat, userLoc.lng, a.lat, a.lng) - haversineKm(userLoc.lat, userLoc.lng, b.lat, b.lng))
         : places;
-      setSearchResults(sorted.map(place => ({ ...place, source: place.source || 'search', type: 'poi' })));
+      setSearchResults(sorted.map(place => ({
+        ...place,
+        source: place.source || 'search',
+        source_label: place.source === 'mapbox' ? 'Mapbox geocode' : place.source === 'trailhead_landmark' ? 'Trailhead landmark' : 'Map search',
+        type: place.feature_type || place.category || 'poi',
+        geocode_status: resolved?.status,
+        geocode_reason: resolved?.reason,
+        geocode_query: searchQuery.trim(),
+      })));
     } catch (e: any) {
       setSearchResults([]);
       setSearchResults([{ lat: 0, lng: 0, name: '__error__' }]);
@@ -6790,15 +7197,15 @@ function MapScreen() {
   function selectSearchResult(place: SearchPlace) {
     const dist = userLoc ? haversineKm(userLoc.lat, userLoc.lng, place.lat, place.lng) : null;
     const basePlace = { ...place, dist, source: place.source || 'search', type: place.type || 'poi' };
+    const isMapboxPlace = String(basePlace.source || '').toLowerCase().includes('mapbox');
     setSearchRouteCard(basePlace);
     setSelectedPlace({
       ...basePlace,
-      summary: basePlace.summary || 'Loading place details, nearby camps, trails, and useful stops...',
+      summary: basePlace.summary || (isMapboxPlace ? undefined : 'Loading place details, nearby camps, trails, and useful stops...'),
       source_label: basePlace.source_label || 'Map search',
     });
     setSearchResults([]);
-    webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: place.lat, lng: place.lng, name: place.name }));
-    nativeMapRef.current?.flyTo(place.lat, place.lng);
+    focusPlaceCamera(basePlace, 14, searchQuery);
   }
 
   async function openExtremeReversePlace(lat: number, lng: number) {
@@ -6840,7 +7247,8 @@ function MapScreen() {
         place_id: props.mapbox_id,
         address: props.full_address || props.place_formatted || props.address,
         attribution: 'Mapbox',
-        summary: 'Temporary Mapbox Search result selected from the EXTREME map. Save it only if you want to create a Trailhead-owned place.',
+        enrichment_source: 'mapbox_searchbox_rest',
+        enrichment_status: 'unavailable',
       });
       setSelectedCamp(null);
       setTappedTrail(null);
@@ -6849,7 +7257,7 @@ function MapScreen() {
       setTappedPoi(null);
       setSelectedCommunityPin(null);
       setSelectedTrail(null);
-      nativeMapRef.current?.flyTo(nextLat, nextLng, 15, name);
+      focusPlaceCamera({ name, lat: nextLat, lng: nextLng, type, subtype: String(props.poi_category?.[0] || props.feature_type || props.category || '') }, 15, type);
       return true;
     } catch {
       return false;
@@ -7016,7 +7424,15 @@ function MapScreen() {
     if (explicit && Number.isFinite(explicit.lat) && Number.isFinite(explicit.lng)) {
       return { name: explicit.name || 'Destination', lat: explicit.lat, lng: explicit.lng, type: 'poi' } as SearchPlace;
     }
-    return (searchRouteCard ?? selectedPlace ?? copilotResults[0] ?? (selectedCamp ? { ...selectedCamp, type: 'camp' } : null)) as SearchPlace | null;
+    const selected = lastSelectedCopilotResultRef.current;
+    if (selected?.place) return selected.place;
+    if (selected?.feature) return searchPlaceFromSelectableFeature(selected.feature);
+    if (selected?.camp) return { ...selected.camp, type: 'camp', source: selected.camp.source || 'camp' } as SearchPlace;
+    if (selectedPlace) return selectedPlace;
+    if (searchRouteCard) return searchRouteCard;
+    if (copilotResultScope?.kind === 'place') return copilotResults[0] ?? searchResults[0] ?? null;
+    if (copilotResultScope?.kind === 'camp' && selectedCamp) return { ...selectedCamp, type: 'camp', source: selectedCamp.source || 'camp' } as SearchPlace;
+    return null;
   }
 
   function copilotRouteDestinationQuery(args: Record<string, unknown> = {}) {
@@ -7047,25 +7463,148 @@ function MapScreen() {
 
   async function resolveCopilotDestination(args: Record<string, unknown> = {}, candidates: MapSelectableFeature[] = visibleMapFeatures) {
     const query = copilotRouteDestinationQuery(args).toLowerCase();
-    const visibleMatch = findVisibleCandidate(args, candidates);
-    if (visibleMatch.feature && !visibleMatch.ambiguous) return enrichRenderedFeaturePlace(visibleMatch.feature);
+    const activeKind = copilotResultSnapshotRef.current?.kind ?? copilotResultScope?.kind ?? null;
+    const targetedRequest = !!(
+      query
+      || requestedResultIdFromArgs(args)
+      || requestedResultSetIdFromArgs(args)
+      || resultIndexFromArgs(args) != null
+      || copilotHasVisibleTargetArgs(args)
+    );
+    if (activeKind === 'camp') {
+      const resultCamp = resolveCampResultFromArgs(args);
+      if (resultCamp) {
+        const campSnap = copilotResultSnapshotRef.current?.kind === 'camp' ? copilotResultSnapshotRef.current : null;
+        const guard = copilotSelectionGuard(resultCamp, args, copilotSnapshotContext(campSnap));
+        if (!guard.ok) {
+          logCopilotMapTelemetry('copilot_selection_guard_failed', {
+            reason: guard.reason,
+            requested: args,
+            candidate: copilotCandidateSummary(resultCamp as unknown as Partial<SearchPlace & MapSelectableFeature & CampsitePin>, resultIndexFromArgs(args) ?? 0),
+            query_context: guard.query_context,
+            route_resolution: true,
+          });
+          return null;
+        }
+        return { ...resultCamp, type: 'camp', source: resultCamp.source || 'camp' } as SearchPlace;
+      }
+    }
+    if (activeKind === 'trail') {
+      const resultTrail = resolveTrailResultFromArgs(args);
+      if (resultTrail) {
+        const trailSnap = copilotResultSnapshotRef.current?.kind === 'trail' ? copilotResultSnapshotRef.current : null;
+        const guard = copilotSelectionGuard(resultTrail, args, copilotSnapshotContext(trailSnap));
+        if (!guard.ok) {
+          logCopilotMapTelemetry('copilot_selection_guard_failed', {
+            reason: guard.reason,
+            requested: args,
+            candidate: copilotCandidateSummary(resultTrail as unknown as Record<string, any>, resultIndexFromArgs(args) ?? 0),
+            query_context: guard.query_context,
+            route_resolution: true,
+          });
+          return null;
+        }
+        return {
+          id: resultTrail.profile_id || resultTrail.id,
+          name: resultTrail.name,
+          lat: resultTrail.lat,
+          lng: resultTrail.lng,
+          type: resultTrail.type || 'trail',
+          subtype: resultTrail.subtitle,
+          source: resultTrail.profile_id ? 'trailhead' : 'map',
+          source_label: resultTrail.profile_id ? 'Trailhead trail' : 'Map trail',
+          provider_place_id: resultTrail.profile_id,
+          photo_url: resultTrail.photo_url || null,
+          summary: resultTrail.summary || 'Mapped trail route with nearby support context from Trailhead.',
+        } as SearchPlace;
+      }
+    }
+    const resultPlace = resolvePlaceResultFromArgs(args);
+    if (resultPlace) {
+      const placeSnap = copilotResultSnapshotRef.current?.kind === 'place' ? copilotResultSnapshotRef.current : null;
+      const guard = copilotSelectionGuard(resultPlace, args, copilotSnapshotContext(placeSnap));
+      if (!guard.ok) {
+        logCopilotMapTelemetry('copilot_selection_guard_failed', {
+          reason: guard.reason,
+          requested: args,
+          candidate: copilotCandidateSummary(resultPlace, resultIndexFromArgs(args) ?? 0),
+          query_context: guard.query_context,
+          route_resolution: true,
+        });
+        return null;
+      }
+      return resultPlace;
+    }
+    const resultCamp = resolveCampResultFromArgs(args);
+    if (resultCamp && copilotResultScope?.kind === 'camp') {
+      const campSnap = copilotResultSnapshotRef.current?.kind === 'camp' ? copilotResultSnapshotRef.current : null;
+      const guard = copilotSelectionGuard(resultCamp, args, copilotSnapshotContext(campSnap));
+      if (!guard.ok) {
+        logCopilotMapTelemetry('copilot_selection_guard_failed', {
+          reason: guard.reason,
+          requested: args,
+          candidate: copilotCandidateSummary(resultCamp as unknown as Partial<SearchPlace & MapSelectableFeature & CampsitePin>, resultIndexFromArgs(args) ?? 0),
+          query_context: guard.query_context,
+          route_resolution: true,
+        });
+        return null;
+      }
+      return { ...resultCamp, type: 'camp', source: resultCamp.source || 'camp' } as SearchPlace;
+    }
+    if (!query && !copilotHasVisibleTargetArgs(args)) return currentCopilotDestination(args);
+    if (copilotHasVisibleTargetArgs(args) && (args.feature_id || args.result_set_id || args.result_id || args.screen_position || args.position || args.side || args.name || args.place)) {
+      const snapshotFeature = resolveVisibleFeatureFromSnapshot(args);
+      if (snapshotFeature) {
+        const guard = copilotSelectionGuard(snapshotFeature, args, copilotVisibleSnapshotRef.current?.queryContext ?? copilotQueryContextRef.current);
+        if (!guard.ok) {
+          logCopilotMapTelemetry('copilot_selection_guard_failed', {
+            reason: guard.reason,
+            requested: args,
+            candidate: copilotCandidateSummary(snapshotFeature, snapshotFeature.result_index),
+            query_context: guard.query_context,
+            route_resolution: true,
+          });
+          return null;
+        }
+        return enrichRenderedFeaturePlace(snapshotFeature);
+      }
+      const visibleMatch = findVisibleCandidate(args, candidates);
+      if (visibleMatch.feature && !visibleMatch.ambiguous) {
+        const guard = copilotSelectionGuard(visibleMatch.feature, args, copilotVisibleSnapshotRef.current?.queryContext ?? copilotQueryContextRef.current);
+        if (!guard.ok) {
+          logCopilotMapTelemetry('copilot_selection_guard_failed', {
+            reason: guard.reason,
+            requested: args,
+            candidate: copilotCandidateSummary(visibleMatch.feature, visibleMatch.feature.result_index),
+            query_context: guard.query_context,
+            route_resolution: true,
+          });
+          return null;
+        }
+        return enrichRenderedFeaturePlace(visibleMatch.feature);
+      }
+    }
     if (query) {
-      const rendered = candidates.find(item => placeTextMatches(item.name, query) || (item.aliases ?? []).some(alias => placeTextMatches(alias, query)));
+      const rendered = candidates.find(item => placeTextMatches(item.name, query));
       if (rendered) return enrichRenderedFeaturePlace(rendered);
       const result = [...copilotResults, ...searchResults].find(item => placeTextMatches(item.name, query));
       if (result) return result;
-      const geocoded = await api.geocodePlaces(query, 1).catch(() => []);
-      const place = geocoded[0];
+      const place = await resolveVerifiedGeocodePlace(query, {
+        center: boundsCenter(currentCopilotBounds()) ?? userLoc,
+        source: 'copilot_route_destination',
+        allowAmbiguous: true,
+      });
       if (place && Number.isFinite(place.lat) && Number.isFinite(place.lng)) {
         return {
           ...place,
-          type: 'poi',
+          type: place.type || 'poi',
           source: place.source || 'geocode',
           source_label: 'Geocode',
         } as SearchPlace;
       }
+      return null;
     }
-    return currentCopilotDestination(args);
+    return targetedRequest ? null : currentCopilotDestination(args);
   }
 
   function drawScoutRoute(coords: [number, number][], totalDistance = 0, totalDuration = 0) {
@@ -7102,6 +7641,7 @@ function MapScreen() {
     const driveHours = Number.isFinite(driveHoursValue) && driveHoursValue > 0 ? Math.max(1, Math.min(14, driveHoursValue)) : null;
     const routeStyle = String(merged.routeStyle ?? merged.route_style ?? routeScout?.routeStyle ?? 'balanced').toLowerCase();
     const campPreference = String(merged.campPreference ?? merged.camp_preference ?? routeScout?.campPreference ?? 'public').toLowerCase();
+    const campPhotoOnly = merged.campPhotoOnly === true || merged.requirePhotos === true || merged.require_photos === true || merged.photosOnly === true;
     return {
       merged,
       startRaw,
@@ -7110,6 +7650,7 @@ function MapScreen() {
       driveHours,
       routeStyle: routeStyle === 'wild' || routeStyle === 'direct' ? routeStyle : 'balanced',
       campPreference,
+      campPhotoOnly,
       poiPreferences: Array.isArray(merged.poiPreferences) ? merged.poiPreferences : Array.isArray(merged.poi_preferences) ? merged.poi_preferences : [],
     };
   }
@@ -7128,8 +7669,11 @@ function MapScreen() {
       if (role === 'start' && userLoc) return { name: 'My Location', lat: userLoc.lat, lng: userLoc.lng, isCurrentLocation: true, type: 'poi', source: 'location' } as SearchPlace;
       return null;
     }
-    const results = await api.geocodePlaces(query, 1).catch(() => []);
-    const place = results[0];
+    const place = await resolveVerifiedGeocodePlace(query, {
+      center: boundsCenter(currentCopilotBounds()) ?? userLoc,
+      source: `route_scout_${role}`,
+      allowAmbiguous: true,
+    });
     return place && Number.isFinite(place.lat) && Number.isFinite(place.lng)
       ? { ...place, name: place.name || query, type: 'poi', source: place.source || 'geocode', source_label: 'Geocode' } as SearchPlace
       : null;
@@ -7240,7 +7784,7 @@ function MapScreen() {
       totalMiles,
       totalDurationHours: totalDuration ? totalDuration / 3600 : undefined,
       routeCoords: coords,
-      draftArgs: { ...scoutArgs.merged, start: start.name, destination: destination.name, days: scoutArgs.days },
+      draftArgs: { ...scoutArgs.merged, start: start.name, destination: destination.name, days: scoutArgs.days, campPhotoOnly: scoutArgs.campPhotoOnly },
     }));
 
     const campResponse = await api.getRouteCampWindows({
@@ -7249,6 +7793,7 @@ function MapScreen() {
       camp_filters: routeScoutCampFilters(scoutArgs.campPreference, scoutArgs.routeStyle, activeFilters),
       route_style: scoutArgs.routeStyle as 'direct' | 'balanced' | 'wild',
       camp_preference: scoutArgs.campPreference,
+      require_photos: scoutArgs.campPhotoOnly,
       max_daily_drive_hours: scoutArgs.driveHours ?? undefined,
       max_radius: scoutArgs.routeStyle === 'wild' || scoutArgs.campPreference === 'public' ? 120 : 95,
     }).catch((error: any) => ({ windows: [], errors: { route_scout: error?.message || 'camp search failed' } }));
@@ -7271,25 +7816,32 @@ function MapScreen() {
       webRef.current?.postMessage(JSON.stringify({ type: 'set_camps', pins: selectedCamps }));
     }
     const stops = [
-      { day: 0, name: start.name, lat: start.lat, lng: start.lng, type: 'start', label: 'Start' },
+      { day: 0, name: start.name, lat: start.lat, lng: start.lng, type: 'start', label: 'Start', routePointType: 'break' as const, routeShapeRole: 'start' as const, source: 'copilot' },
       ...scoutWindows.map(win => {
         const camp = win.selected ?? win.camp ?? win.candidates?.[0] ?? null;
         const targetMi = win.target_mi ?? (win.start + win.end) / 2;
         const fallbackPoint = routePointAtDistance(coords, cumulative, targetMi * 1609.344);
+        const hasCamp = !!camp;
         return {
           day: win.day,
           name: camp?.name || win.fallback?.name || `Review ${win.label}`,
           lat: camp?.lat ?? win.fallback?.lat ?? fallbackPoint?.lat ?? start.lat,
           lng: camp?.lng ?? win.fallback?.lng ?? fallbackPoint?.lng ?? start.lng,
-          type: camp ? 'camp' : 'review',
+          type: hasCamp ? 'camp' : 'review',
           label: win.label,
           confidence: win.confidence || (win.strong ? 'strong' : 'review'),
           progress_mi: targetMi,
           camp,
           reason: win.reason || null,
+          description: hasCamp
+            ? (camp?.description || 'Picked by Trailhead Copilot route scout.')
+            : (win.reason || 'Temporary overnight search area. Pick a camp before navigation.'),
+          source: hasCamp ? 'camp' : 'map',
+          routePointType: hasCamp ? 'break' as const : 'through' as const,
+          routeShapeRole: hasCamp ? 'overnight' as const : 'outbound_anchor' as const,
         };
       }),
-      { day: scoutArgs.days, name: destination.name, lat: destination.lat, lng: destination.lng, type: 'destination', label: 'Finish' },
+      { day: scoutArgs.days, name: destination.name, lat: destination.lat, lng: destination.lng, type: 'destination', label: 'Finish', routePointType: 'break' as const, routeShapeRole: 'destination' as const, source: 'copilot' },
     ];
     const missingDays = scoutWindows.filter(win => !(win.selected ?? win.camp ?? win.candidates?.[0])).map(win => win.day);
     const nextStatus = missingDays.length ? 'review' : scoutArgs.driveHours ? 'ready' : 'needs_input';
@@ -7313,10 +7865,11 @@ function MapScreen() {
       stops,
       windows: scoutWindows,
       missingDays,
-      draftArgs: { ...scoutArgs.merged, start: start.name, destination: destination.name, days: scoutArgs.days, driveHours: scoutArgs.driveHours, routeStyle: scoutArgs.routeStyle, campPreference: scoutArgs.campPreference },
+      draftArgs: { ...scoutArgs.merged, start: start.name, destination: destination.name, days: scoutArgs.days, driveHours: scoutArgs.driveHours, routeStyle: scoutArgs.routeStyle, campPreference: scoutArgs.campPreference, campPhotoOnly: scoutArgs.campPhotoOnly },
       spoken_summary: nextMessage,
     };
     setRouteScout(next);
+    recentRouteScoutActionRef.current = { at: Date.now(), action: 'start' };
     const focusStop = stops.find(stop => stop.type === 'camp') ?? stops[Math.min(1, stops.length - 1)] ?? null;
     if (focusStop) setTimeout(() => nativeMapRef.current?.flyTo(focusStop.lat, focusStop.lng, focusStop.type === 'camp' ? 10.5 : 8.5, focusStop.name), 350);
     return {
@@ -7346,6 +7899,19 @@ function MapScreen() {
     const center = vp
       ? { lat: (vp.n + vp.s) / 2, lng: (vp.e + vp.w) / 2 }
       : userLoc;
+    const currentSnap = copilotResultSnapshotRef.current;
+    const visibleSnap = copilotVisibleSnapshotRef.current;
+    const fallbackPlaceResults = !currentSnap
+      ? (copilotResults.length ? copilotResults : searchResults).slice(0, 8).map(copilotPlacePayload)
+      : [];
+    const currentPlaceResults = currentSnap?.kind === 'place'
+      ? (currentSnap.places ?? []).slice(0, 8).map(copilotPlacePayload)
+      : fallbackPlaceResults;
+    const currentCampResults = currentSnap?.kind === 'camp'
+      ? (currentSnap.camps ?? []).slice(0, 8).map(copilotCampPayload)
+      : areaCamps.slice(0, 8).map(copilotCampPayload);
+    const activeTrailResults = currentSnap?.kind === 'trail' ? (currentSnap.trails ?? []) : trailDiscoveries;
+    const currentTrailResults = activeTrailResults.slice(0, 8).map((trail, idx) => copilotTrailPayload(trail, idx));
     return {
       user: {
         location: userLoc,
@@ -7358,7 +7924,7 @@ function MapScreen() {
       },
       map: {
         center,
-        zoom: mapZoom,
+        zoom: vp?.zoom ?? mapZoom,
         bounds: vp,
         active_style: mapLayer,
         visible_layers: [
@@ -7374,11 +7940,18 @@ function MapScreen() {
         ].filter(Boolean),
         selected_place: (selectedPlace ?? selectedCamp ?? selectedTrail ?? selectedCommunityPin ?? null) as Record<string, unknown> | null,
         current_screen: 'map',
-        current_results: [
-          ...copilotResults.slice(0, 8).map(copilotPlacePayload),
-          ...areaCamps.slice(0, Math.max(0, 8 - copilotResults.length)).map(copilotCampPayload),
-        ],
-        visible_map_features: visibleMapFeatures.slice(0, 16),
+        current_result_set_id: currentSnap?.resultSetId ?? null,
+        current_results: currentSnap?.kind === 'camp'
+          ? currentCampResults
+          : currentSnap?.kind === 'trail'
+            ? currentTrailResults
+            : currentPlaceResults,
+        current_place_results: currentPlaceResults,
+        current_camp_results: currentCampResults,
+        current_trail_results: currentTrailResults,
+        visible_result_set_id: visibleSnap?.resultSetId ?? null,
+        visible_map_features: (visibleSnap?.features?.length ? visibleSnap.features : visibleMapFeatures).slice(0, 16),
+        query_context: copilotQueryContextPayload(copilotSnapshotContext(currentSnap) ?? copilotSnapshotContext(visibleSnap)),
         active_pins: displayCommunityPins.slice(0, 24).map(p => ({ lat: p.lat, lng: p.lng, name: p.name, type: p.type })),
       },
       route: {
@@ -7534,9 +8107,601 @@ function MapScreen() {
     return `${(center.lng - lngSpan).toFixed(6)},${(center.lat - latSpan).toFixed(6)},${(center.lng + lngSpan).toFixed(6)},${(center.lat + latSpan).toFixed(6)}`;
   }
 
+  function currentCopilotBounds(): CopilotMapBounds | null {
+    const vp = viewportRef.current;
+    if (!vp) return null;
+    return { n: vp.n, s: vp.s, e: vp.e, w: vp.w, zoom: vp.zoom };
+  }
+
+  function copilotCandidateSummary(item: Record<string, any> | null | undefined, idx = 0): CopilotQueryCandidate {
+    const record = item ?? {};
+    const lat = Number(record.lat);
+    const lng = Number(record.lng);
+    return {
+      result_set_id: record.result_set_id || null,
+      result_id: record.result_id || record.feature_id || record.id || null,
+      feature_id: record.feature_id || null,
+      result_index: Number.isFinite(Number(record.result_index)) ? Number(record.result_index) : idx,
+      name: record.name || null,
+      type: record.type || record.land_type || null,
+      source: record.source_label || record.source_badge || record.verified_source || record.source || null,
+      lat: Number.isFinite(lat) ? lat : null,
+      lng: Number.isFinite(lng) ? lng : null,
+      screen_position: record.screen_position || null,
+      distance_mi: Number.isFinite(Number(record.distance_mi)) ? Number(record.distance_mi) : null,
+    };
+  }
+
+  function createCopilotQueryContext(input: Partial<CopilotQueryContext> & { source: string }): CopilotQueryContext {
+    const bounds = input.bounds
+      ?? boundsFromBboxString(input.bbox, input.zoom ?? mapZoom)
+      ?? currentCopilotBounds();
+    const fallbackCenter = boundsCenter(bounds) ?? userLoc;
+    const inputCenter = input.center && Number.isFinite(Number(input.center.lat)) && Number.isFinite(Number(input.center.lng))
+      ? { lat: Number(input.center.lat), lng: Number(input.center.lng), name: input.center.name ?? null }
+      : null;
+    const center = inputCenter ?? (fallbackCenter ? { lat: fallbackCenter.lat, lng: fallbackCenter.lng } : null);
+    const candidates = (input.candidates ?? []).slice(0, 24);
+    copilotQuerySeqRef.current += 1;
+    return {
+      query_id: input.query_id || `query_${Date.now().toString(36)}_${copilotQuerySeqRef.current}`,
+      result_set_id: input.result_set_id ?? null,
+      source: input.source,
+      query: input.query ?? null,
+      category: input.category ?? null,
+      keyword: input.keyword ?? null,
+      created_at: input.created_at || Date.now(),
+      center,
+      bounds,
+      bbox: input.bbox || bboxStringFromBounds(bounds),
+      zoom: input.zoom ?? bounds?.zoom ?? mapZoom ?? null,
+      radius_mi: input.radius_mi ?? null,
+      feature_count: input.feature_count ?? candidates.length,
+      candidates,
+    };
+  }
+
+  function copilotQueryContextPayload(context: CopilotQueryContext | null = copilotQueryContextRef.current) {
+    if (!context) return null;
+    return {
+      ...context,
+      age_ms: Date.now() - context.created_at,
+      candidates: (context.candidates ?? []).slice(0, 12),
+    };
+  }
+
+  function copilotDebugJson(value: unknown, max = 4000) {
+    try {
+      return JSON.stringify(value ?? null, null, 2).slice(0, max);
+    } catch {
+      return String(value ?? '').slice(0, max);
+    }
+  }
+
+  function copilotDebugActionPayload(action?: MapActionRequest | null) {
+    if (!action) return null;
+    return {
+      id: action.id ?? null,
+      action_id: action.action_id,
+      action_type: action.action_type,
+      label: action.label ?? null,
+      requires_confirmation: !!action.requires_confirmation,
+      args: action.args ?? {},
+      status: action.status ?? null,
+      provider: action.provider,
+    };
+  }
+
+  function formatAdminCopilotDebugTranscript(payload: Record<string, any>) {
+    const lines: string[] = [];
+    const map = payload.map ?? {};
+    const result = payload.result_context ?? {};
+    const details = payload.details ?? {};
+    lines.push('Trailhead Copilot map debug');
+    lines.push(`time: ${payload.created_at_iso || new Date().toISOString()}`);
+    lines.push(`reason: ${payload.reason || 'manual'}`);
+    lines.push(`user: ${payload.user || 'admin'}`);
+    lines.push(`style: ${map.active_style || 'unknown'} / ${map.premium_style || 'standard'} / 3d=${map.map3d_enabled ? 'on' : 'off'}`);
+    lines.push(`center: ${map.center ? `${Number(map.center.lat).toFixed(6)}, ${Number(map.center.lng).toFixed(6)}` : 'unknown'} zoom=${map.zoom ?? 'unknown'}`);
+    lines.push(`bounds: ${map.bbox || 'unknown'}`);
+    lines.push(`selected: ${map.selected ? `${map.selected.name || 'unnamed'} (${map.selected.type || map.selected.source || 'place'})` : 'none'}`);
+    lines.push(`current_result_set_id: ${result.current_result_set_id || 'none'} kind=${result.current_kind || 'none'} count=${result.current_count ?? 0}`);
+    lines.push(`visible_result_set_id: ${result.visible_result_set_id || 'none'} count=${result.visible_count ?? 0}`);
+    lines.push(`active_query_context: ${result.query_context?.result_set_id || 'none'} age_ms=${result.query_context?.age_ms ?? 'n/a'} reason=${details.reason || details.selection_guard?.reason || ''}`);
+    lines.push('');
+    lines.push('Messages:');
+    (payload.messages ?? []).forEach((msg: any) => {
+      lines.push(`- ${msg.role}: ${String(msg.text || '').replace(/\s+/g, ' ').slice(0, 500)}`);
+      if (msg.action_type) lines.push(`  action: ${msg.action_type} id=${msg.action_id || ''}`);
+    });
+    lines.push('');
+    lines.push('Requested action / guard:');
+    lines.push(copilotDebugJson({
+      action: payload.action,
+      details,
+    }, 4500));
+    lines.push('');
+    lines.push('Current result candidates:');
+    lines.push(copilotDebugJson(result.current_results ?? [], 4500));
+    lines.push('');
+    lines.push('Visible map candidates:');
+    lines.push(copilotDebugJson(result.visible_features ?? [], 4500));
+    lines.push('');
+    lines.push('Query context:');
+    lines.push(copilotDebugJson(result.query_context ?? null, 4500));
+    return lines.join('\n').slice(0, 24000);
+  }
+
+  function buildAdminCopilotDebugPayload(reason: string, details: Record<string, unknown> = {}) {
+    const now = Date.now();
+    const currentSnap = copilotResultSnapshotRef.current;
+    const visibleSnap = copilotVisibleSnapshotRef.current;
+    const queryContext = copilotQueryContextPayload(
+      copilotSnapshotContext(currentSnap)
+      ?? copilotSnapshotContext(visibleSnap)
+      ?? copilotQueryContextRef.current,
+    );
+    const vp = currentCopilotBounds();
+    const center = boundsCenter(vp) ?? userLoc;
+    const currentResults = currentSnap?.kind === 'camp'
+      ? (currentSnap.camps ?? []).slice(0, 12).map(copilotCampPayload)
+      : currentSnap?.kind === 'place'
+        ? (currentSnap.places ?? []).slice(0, 12).map(copilotPlacePayload)
+        : currentSnap?.kind === 'trail'
+          ? (currentSnap.trails ?? []).slice(0, 12).map((trail, idx) => copilotTrailPayload(trail, idx))
+        : (copilotResults.length ? copilotResults : searchResults).slice(0, 12).map(copilotPlacePayload);
+    const visibleFeatures = (visibleSnap?.features?.length ? visibleSnap.features : visibleMapFeatures)
+      .slice(0, 16)
+      .map(visibleCandidatePayload);
+    const selected = selectedPlace ?? selectedCamp ?? selectedTrail ?? selectedCommunityPin ?? null;
+    const payload: Record<string, any> = {
+      schema_version: 1,
+      reason,
+      created_at: now,
+      created_at_iso: new Date(now).toISOString(),
+      user: user?.username || user?.email || `user:${user?.id ?? 'unknown'}`,
+      session_id: extremeCopilotSessionId,
+      trip_id: activeTrip?.trip_id ?? null,
+      messages: extremeCopilotMessages.slice(-10).map(msg => ({
+        role: msg.role,
+        text: msg.text,
+        action_type: msg.action?.action_type ?? null,
+        action_id: msg.action?.action_id ?? null,
+      })),
+      action: copilotDebugActionPayload(pendingCopilotAction),
+      details,
+      map: {
+        center,
+        zoom: vp?.zoom ?? mapZoom,
+        bounds: vp,
+        bbox: bboxStringFromBounds(vp),
+        active_style: mapLayer,
+        premium_style: premiumMapStyle,
+        map3d_enabled: map3dEnabled,
+        layers: [
+          showLands ? 'lands' : '',
+          showUsgs ? 'usgs' : '',
+          showPois ? 'pois' : '',
+          layerTrails ? 'trails' : '',
+          layerFire ? 'fire' : '',
+          layerAva ? 'avalanche' : '',
+          layerRadar ? 'radar' : '',
+          layerMvum ? 'mvum' : '',
+          layerNautical ? 'nautical' : '',
+        ].filter(Boolean),
+        selected: selected
+          ? {
+              name: (selected as any).name ?? null,
+              type: (selected as any).type ?? (selected as any).land_type ?? null,
+              source: (selected as any).source ?? (selected as any).source_label ?? (selected as any).verified_source ?? null,
+              lat: (selected as any).lat ?? null,
+              lng: (selected as any).lng ?? null,
+              result_id: (selected as any).result_id ?? null,
+              result_set_id: (selected as any).result_set_id ?? null,
+            }
+          : null,
+      },
+      result_context: {
+        current_kind: currentSnap?.kind ?? copilotResultScope?.kind ?? null,
+        current_scope: copilotResultScope,
+        current_result_set_id: currentSnap?.resultSetId ?? copilotResultScope?.resultSetId ?? null,
+        current_count: currentResults.length,
+        current_results: currentResults,
+        visible_result_set_id: visibleSnap?.resultSetId ?? null,
+        visible_count: visibleFeatures.length,
+        visible_features: visibleFeatures,
+        query_context: queryContext,
+        last_selected: lastSelectedCopilotResultRef.current
+          ? {
+              kind: lastSelectedCopilotResultRef.current.kind,
+              resultSetId: lastSelectedCopilotResultRef.current.resultSetId ?? null,
+              resultId: lastSelectedCopilotResultRef.current.resultId ?? null,
+              selectedAt: lastSelectedCopilotResultRef.current.selectedAt,
+            }
+          : null,
+      },
+    };
+    payload.transcript = formatAdminCopilotDebugTranscript(payload);
+    return payload;
+  }
+
+  async function recordAdminCopilotDebugSnapshot(
+    reason: string,
+    details: Record<string, unknown> = {},
+    options: { appendMessage?: boolean; force?: boolean } = {},
+  ) {
+    if (!user?.is_admin) return null;
+    const payload = buildAdminCopilotDebugPayload(reason, details);
+    const key = [
+      reason,
+      String((details as any).reason || (details as any).fallback_reason || ''),
+      payload.result_context?.current_result_set_id || '',
+      payload.result_context?.visible_result_set_id || '',
+      (details as any).requested?.result_id || (details as any).requested?.feature_id || (details as any).requested?.result_index || '',
+    ].join('|');
+    const last = lastAdminCopilotDebugRef.current;
+    if (!options.force && last?.key === key && Date.now() - last.at < 2500) return payload;
+    lastAdminCopilotDebugRef.current = { key, at: Date.now() };
+    setCopilotDebugTranscript(payload.transcript);
+    api.logExtremeLedger({
+      session_id: extremeCopilotSessionId ?? undefined,
+      event_type: 'copilot_admin_debug_snapshot',
+      surface: 'map_layers',
+      trip_id: activeTrip?.trip_id ?? undefined,
+      event_data: payload,
+    }).catch(() => {});
+    if (options.appendMessage) {
+      appendCopilotMessage({
+        id: `copilot-debug-${Date.now()}`,
+        role: 'assistant',
+        text: `Admin debug transcript recorded.\n\n${payload.transcript.slice(0, 3200)}`,
+      });
+    }
+    return payload;
+  }
+
+  function logCopilotMapTelemetry(eventType: string, eventData: Record<string, unknown>) {
+    api.logExtremeLedger({
+      event_type: eventType,
+      surface: 'map_layers',
+      event_data: {
+        active_style: mapLayer,
+        premium_style: premiumMapStyle,
+        map3d_enabled: map3dEnabled,
+        map_zoom: mapZoom,
+        viewport_bbox: bboxStringFromBounds(currentCopilotBounds()),
+        ...eventData,
+      },
+    }).catch(() => {});
+    if (eventType === 'copilot_selection_guard_failed') {
+      recordAdminCopilotDebugSnapshot('selection_guard_failed', eventData).catch(() => {});
+    }
+  }
+
+  function activateCopilotQueryContext(context: CopilotQueryContext) {
+    copilotQueryContextRef.current = context;
+    logCopilotMapTelemetry('copilot_query_region_started', {
+      query_id: context.query_id,
+      result_set_id: context.result_set_id ?? null,
+      source: context.source,
+      query: context.query ?? null,
+      category: context.category ?? null,
+      keyword: context.keyword ?? null,
+      bbox: context.bbox ?? null,
+      center: context.center ?? null,
+      radius_mi: context.radius_mi ?? null,
+      feature_count: context.feature_count ?? 0,
+    });
+    return context;
+  }
+
+  function copilotSnapshotContext(snapshot?: CopilotResultSnapshot | null) {
+    return snapshot?.queryContext ?? copilotQueryContextRef.current;
+  }
+
+  function copilotSelectionGuard(
+    item: { lat?: number | null; lng?: number | null; name?: string | null; type?: string | null },
+    args: Record<string, unknown>,
+    context?: CopilotQueryContext | null,
+  ) {
+    const requestedId = requestedResultIdFromArgs(args);
+    const requestedSetId = requestedResultSetIdFromArgs(args);
+    const requestedIndex = resultIndexFromArgs(args);
+    const needsFreshContext = !requestedId && (requestedIndex != null || !!requestedSetId);
+    if (!context) {
+      return needsFreshContext
+        ? { ok: false, reason: 'stale_query_context', query_context: null }
+        : { ok: true, reason: 'no_query_context', query_context: null };
+    }
+    if (requestedSetId && context.result_set_id && requestedSetId !== context.result_set_id) {
+      return { ok: false, reason: 'result_set_mismatch', query_context: copilotQueryContextPayload(context) };
+    }
+    if (needsFreshContext && Date.now() - context.created_at > COPILOT_QUERY_CONTEXT_TTL_MS) {
+      return { ok: false, reason: 'stale_query_context', query_context: copilotQueryContextPayload(context) };
+    }
+    const bounds = context.bounds ?? boundsFromBboxString(context.bbox, context.zoom);
+    if (bounds && !pointInBounds(item, bounds, 0.025)) {
+      return { ok: false, reason: 'region_mismatch', query_context: copilotQueryContextPayload(context) };
+    }
+    const radius = Number(context.radius_mi);
+    if (context.center && Number.isFinite(radius) && radius > 0) {
+      const lat = Number(item.lat);
+      const lng = Number(item.lng);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        const distanceMi = haversineKm(context.center.lat, context.center.lng, lat, lng) * 0.621371;
+        if (distanceMi > radius + Math.max(2, radius * 0.2)) {
+          return { ok: false, reason: 'region_mismatch', query_context: copilotQueryContextPayload(context), distance_mi: distanceMi };
+        }
+        return { ok: true, reason: 'matched', query_context: copilotQueryContextPayload(context), distance_mi: distanceMi };
+      }
+    }
+    return { ok: true, reason: 'matched', query_context: copilotQueryContextPayload(context) };
+  }
+
+  function filterCopilotPlacesToRegion(
+    places: SearchPlace[],
+    region: {
+      source: string;
+      bounds?: CopilotMapBounds | null;
+      bbox?: string | null;
+      center?: { lat: number; lng: number } | null;
+      radius_mi?: number | null;
+      category?: string | null;
+      query?: string | null;
+    },
+  ) {
+    const regionBounds = region.bounds as CopilotMapBounds | null | undefined;
+    const bounds = regionBounds ?? boundsFromBboxString(region.bbox);
+    const radius = Number(region.radius_mi);
+    const accepted: SearchPlace[] = [];
+    const rejected: CopilotQueryCandidate[] = [];
+    places.forEach((place, idx) => {
+      const inBounds = bounds ? pointInBounds(place, bounds, 0.025) : true;
+      let inRadius = true;
+      if (region.center && Number.isFinite(radius) && radius > 0) {
+        const distanceMi = haversineKm(region.center.lat, region.center.lng, place.lat, place.lng) * 0.621371;
+        inRadius = distanceMi <= radius + Math.max(2, radius * 0.2);
+      }
+      if (inBounds && inRadius) accepted.push(place);
+      else rejected.push(copilotCandidateSummary(place, idx));
+    });
+    if (rejected.length) {
+      logCopilotMapTelemetry('copilot_selection_guard_failed', {
+        reason: 'provider_result_out_of_region',
+        source: region.source,
+        category: region.category ?? null,
+        query: region.query ?? null,
+        bbox: region.bbox ?? bboxStringFromBounds(bounds),
+        center: region.center ?? null,
+        radius_mi: region.radius_mi ?? null,
+        rejected_count: rejected.length,
+        rejected: rejected.slice(0, 12),
+      });
+    }
+    return accepted;
+  }
+
+  function nextCopilotResultSetId(kind: CopilotResultKind) {
+    copilotResultSeqRef.current += 1;
+    return `${kind}_${Date.now().toString(36)}_${copilotResultSeqRef.current}`;
+  }
+
+  function stableCopilotResultId(kind: CopilotResultKind, item: Record<string, any>, idx: number) {
+    const explicit = item.result_id || item.feature_id || item.id || item.place_id || item.provider_place_id || item.mapbox_id;
+    const name = String(item.name || kind || 'result').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 70);
+    const lat = Number(item.lat);
+    const lng = Number(item.lng);
+    const coord = Number.isFinite(lat) && Number.isFinite(lng) ? `${lat.toFixed(5)}_${lng.toFixed(5)}` : String(idx);
+    return `${kind}:${String(explicit || `${name}:${coord}:${idx}`).slice(0, 180)}`;
+  }
+
+  function withPlaceResultIds(items: SearchPlace[], resultSetId: string): SearchPlace[] {
+    return items.map((item, idx) => ({
+      ...item,
+      result_set_id: item.result_set_id || resultSetId,
+      result_id: item.result_id || stableCopilotResultId('place', item as Record<string, any>, idx),
+    }));
+  }
+
+  function withVisibleResultIds(items: MapSelectableFeature[], resultSetId: string): MapSelectableFeature[] {
+    return items.map((item, idx) => ({
+      ...item,
+      result_set_id: item.result_set_id || resultSetId,
+      result_id: item.result_id || stableCopilotResultId('visible', item as Record<string, any>, idx),
+      result_index: idx,
+    }));
+  }
+
+  function campResultId(camp: CampsitePin, idx: number) {
+    return stableCopilotResultId('camp', camp as unknown as Record<string, any>, idx);
+  }
+
+  function trailResultId(trail: TrailFeature, idx: number) {
+    return stableCopilotResultId('trail', trail as unknown as Record<string, any>, idx);
+  }
+
+  function storeCopilotPlaceResults(
+    items: SearchPlace[],
+    category?: string,
+    keyword?: string,
+    options: { keepSelected?: boolean; queryContext?: Partial<CopilotQueryContext> | null } = {},
+  ) {
+    const resultSetId = nextCopilotResultSetId('place');
+    const places = withPlaceResultIds(items, resultSetId);
+    const queryContext = options.queryContext
+      ? activateCopilotQueryContext(createCopilotQueryContext({
+          ...options.queryContext,
+          source: options.queryContext.source || 'copilot_place_search',
+          result_set_id: resultSetId,
+          category: category ?? options.queryContext.category ?? null,
+          keyword: keyword ?? options.queryContext.keyword ?? null,
+          feature_count: places.length,
+          candidates: places.slice(0, 24).map((place, idx) => copilotCandidateSummary(place, idx)),
+        }))
+      : null;
+    copilotResultSnapshotRef.current = { kind: 'place', resultSetId, category, keyword, createdAt: Date.now(), places, queryContext };
+    if (!options.keepSelected) lastSelectedCopilotResultRef.current = null;
+    setCopilotResults(places);
+    setSearchResults(places);
+    setCopilotResultScope({ kind: 'place', category, keyword: keyword || undefined, resultSetId, ts: Date.now() });
+    if (queryContext) {
+      logCopilotMapTelemetry('copilot_candidates_resolved', {
+        query_id: queryContext.query_id,
+        result_set_id: resultSetId,
+        source: queryContext.source,
+        bbox: queryContext.bbox ?? null,
+        center: queryContext.center ?? null,
+        candidate_count: places.length,
+        candidates: queryContext.candidates?.slice(0, 12) ?? [],
+      });
+    }
+    return { resultSetId, places, queryContext };
+  }
+
+  function storeCopilotCampResults(camps: CampsitePin[], category = 'camp', options: { queryContext?: Partial<CopilotQueryContext> | null } = {}) {
+    const resultSetId = nextCopilotResultSetId('camp');
+    const queryContext = options.queryContext
+      ? activateCopilotQueryContext(createCopilotQueryContext({
+          ...options.queryContext,
+          source: options.queryContext.source || 'copilot_camp_search',
+          result_set_id: resultSetId,
+          category,
+          feature_count: camps.length,
+          candidates: camps.slice(0, 24).map((camp, idx) => ({
+            ...copilotCandidateSummary(camp as unknown as Partial<SearchPlace & MapSelectableFeature & CampsitePin>, idx),
+            result_id: campResultId(camp, idx),
+            result_set_id: resultSetId,
+          })),
+        }))
+      : null;
+    copilotResultSnapshotRef.current = { kind: 'camp', resultSetId, category, createdAt: Date.now(), camps, queryContext };
+    lastSelectedCopilotResultRef.current = null;
+    setCopilotResults([]);
+    setSearchResults([]);
+    setCopilotResultScope({ kind: 'camp', category, resultSetId, ts: Date.now() });
+    if (queryContext) {
+      logCopilotMapTelemetry('copilot_candidates_resolved', {
+        query_id: queryContext.query_id,
+        result_set_id: resultSetId,
+        source: queryContext.source,
+        bbox: queryContext.bbox ?? null,
+        center: queryContext.center ?? null,
+        candidate_count: camps.length,
+        candidates: queryContext.candidates?.slice(0, 12) ?? [],
+      });
+    }
+    return { resultSetId, camps, queryContext };
+  }
+
+  function storeCopilotTrailResults(trails: TrailFeature[], category = 'trails', options: { queryContext?: Partial<CopilotQueryContext> | null } = {}) {
+    const resultSetId = nextCopilotResultSetId('trail');
+    const queryContext = options.queryContext
+      ? activateCopilotQueryContext(createCopilotQueryContext({
+          ...options.queryContext,
+          source: options.queryContext.source || 'copilot_trail_search',
+          result_set_id: resultSetId,
+          category,
+          feature_count: trails.length,
+          candidates: trails.slice(0, 24).map((trail, idx) => ({
+            ...copilotCandidateSummary(trail as unknown as Record<string, any>, idx),
+            result_id: trailResultId(trail, idx),
+            result_set_id: resultSetId,
+            type: trail.type || 'trail',
+          })),
+        }))
+      : null;
+    copilotResultSnapshotRef.current = { kind: 'trail', resultSetId, category, createdAt: Date.now(), trails, queryContext };
+    lastSelectedCopilotResultRef.current = null;
+    setCopilotResults([]);
+    setSearchResults([]);
+    setCopilotResultScope({ kind: 'trail', category, resultSetId, ts: Date.now() });
+    if (queryContext) {
+      logCopilotMapTelemetry('copilot_candidates_resolved', {
+        query_id: queryContext.query_id,
+        result_set_id: resultSetId,
+        source: queryContext.source,
+        bbox: queryContext.bbox ?? null,
+        center: queryContext.center ?? null,
+        candidate_count: trails.length,
+        candidates: queryContext.candidates?.slice(0, 12) ?? [],
+      });
+    }
+    return { resultSetId, trails, queryContext };
+  }
+
+  function storeCopilotVisibleResults(features: MapSelectableFeature[], options: { queryContext?: Partial<CopilotQueryContext> | null } = {}) {
+    const resultSetId = nextCopilotResultSetId('visible');
+    const stamped = withVisibleResultIds(features, resultSetId);
+    const queryContext = activateCopilotQueryContext(createCopilotQueryContext({
+      ...(options.queryContext ?? {}),
+      source: options.queryContext?.source || 'visible_map_candidates',
+      result_set_id: resultSetId,
+      category: options.queryContext?.category ?? 'visible',
+      feature_count: stamped.length,
+      candidates: stamped.slice(0, 24).map((feature, idx) => copilotCandidateSummary(feature, idx)),
+    }));
+    copilotVisibleSnapshotRef.current = { kind: 'visible', resultSetId, createdAt: Date.now(), features: stamped, queryContext };
+    logCopilotMapTelemetry('copilot_candidates_resolved', {
+      query_id: queryContext.query_id,
+      result_set_id: resultSetId,
+      source: queryContext.source,
+      bbox: queryContext.bbox ?? null,
+      center: queryContext.center ?? null,
+      candidate_count: stamped.length,
+      candidates: queryContext.candidates?.slice(0, 12) ?? [],
+    });
+    return stamped;
+  }
+
+  function clearCopilotResultSession() {
+    copilotResultSnapshotRef.current = null;
+    copilotQueryContextRef.current = null;
+    lastSelectedCopilotResultRef.current = null;
+    setCopilotResults([]);
+    setSearchResults([]);
+    setCopilotResultScope(null);
+  }
+
+  function markSelectedCopilotPlace(place: SearchPlace) {
+    lastSelectedCopilotResultRef.current = {
+      kind: 'place',
+      resultSetId: place.result_set_id,
+      resultId: place.result_id || stableCopilotResultId('place', place as Record<string, any>, 0),
+      place,
+      selectedAt: Date.now(),
+    };
+  }
+
+  function markSelectedCopilotCamp(camp: CampsitePin) {
+    const snap = copilotResultSnapshotRef.current?.kind === 'camp' ? copilotResultSnapshotRef.current : null;
+    const idx = snap?.camps?.findIndex(item => String(item.id || '') === String(camp.id || '') || (Math.abs(item.lat - camp.lat) < 0.00001 && Math.abs(item.lng - camp.lng) < 0.00001)) ?? -1;
+    lastSelectedCopilotResultRef.current = {
+      kind: 'camp',
+      resultSetId: snap?.resultSetId,
+      resultId: idx >= 0 ? campResultId(camp, idx) : stableCopilotResultId('camp', camp as unknown as Record<string, any>, 0),
+      camp,
+      selectedAt: Date.now(),
+    };
+  }
+
+  function markSelectedCopilotFeature(feature: MapSelectableFeature, place?: SearchPlace) {
+    lastSelectedCopilotResultRef.current = {
+      kind: 'visible',
+      resultSetId: feature.result_set_id,
+      resultId: feature.result_id || feature.feature_id,
+      feature,
+      place,
+      selectedAt: Date.now(),
+    };
+  }
+
   function copilotCampPayload(camp: CampsitePin) {
+    const snap = copilotResultSnapshotRef.current?.kind === 'camp' ? copilotResultSnapshotRef.current : null;
+    const idx = snap?.camps?.findIndex(item => item === camp || String(item.id || '') === String(camp.id || '')) ?? -1;
     return {
       id: camp.id,
+      result_set_id: snap?.resultSetId || null,
+      result_id: idx >= 0 ? campResultId(camp, idx) : null,
       name: camp.name || 'Camp',
       lat: camp.lat,
       lng: camp.lng,
@@ -7551,15 +8716,43 @@ function MapScreen() {
     };
   }
 
+  function copilotTrailPayload(trail: TrailFeature, indexHint = 0) {
+    const snap = copilotResultSnapshotRef.current?.kind === 'trail' ? copilotResultSnapshotRef.current : null;
+    const idx = snap?.trails?.findIndex(item => item === trail || String(item.id || '') === String(trail.id || '')) ?? indexHint;
+    return {
+      id: trail.id || trail.profile_id || `${trail.lat}:${trail.lng}`,
+      result_set_id: snap?.resultSetId || null,
+      result_id: idx >= 0 ? trailResultId(trail, idx) : trailResultId(trail, indexHint),
+      name: trail.name || 'Trail',
+      lat: trail.lat,
+      lng: trail.lng,
+      type: trail.type || 'trail',
+      subtype: trail.subtitle || null,
+      source: trail.source || (trail.profile_id ? 'Trailhead trail' : 'Map trail'),
+      score: trail.score ?? null,
+      distance_mi: trail.distanceMi ?? null,
+      photo_url: trail.photo_url || null,
+    };
+  }
+
   function copilotPlacePayload(place: SearchPlace) {
     return {
       id: place.id || place.place_id || place.provider_place_id || null,
+      result_set_id: place.result_set_id || null,
+      result_id: place.result_id || null,
+      feature_id: place.feature_id || null,
       name: place.name || 'Place',
       lat: place.lat,
       lng: place.lng,
       type: place.type || 'poi',
       subtype: place.subtype || null,
       source: place.source_label || place.source || null,
+      selection_source: place.selection_source || place.source || null,
+      source_layer: place.source_layer || null,
+      screen_x: place.screen_x ?? null,
+      screen_y: place.screen_y ?? null,
+      screen_position: place.screen_position ?? null,
+      selection_confidence: place.selection_confidence || place.confidence || null,
       address: place.address || null,
       distance_mi: place.distance_mi ?? (place.dist != null ? place.dist * 0.621371 : null),
       rating: place.rating ?? null,
@@ -7571,12 +8764,84 @@ function MapScreen() {
     };
   }
 
+  function spokenSummaryPart(value: unknown, max = 90) {
+    const clean = cleanCampDescriptionText(String(value || '')).replace(/\s+/g, ' ').trim();
+    if (!clean || /^null|undefined|nan$/i.test(clean)) return '';
+    return clean.length > max ? `${clean.slice(0, max - 1).trim()}...` : clean;
+  }
+
+  function distanceSpokenSummary(value: unknown) {
+    const miles = Number(value);
+    if (!Number.isFinite(miles) || miles <= 0) return '';
+    if (miles < 0.2) return 'very close by';
+    if (miles < 10) return `${miles.toFixed(1)} miles away`;
+    return `${Math.round(miles)} miles away`;
+  }
+
+  function placeSelectionSpokenSummary(place: SearchPlace, verb = 'I picked') {
+    const name = spokenSummaryPart(place.name, 70) || 'that place';
+    const kind = spokenSummaryPart(place.subtype || place.type || '', 40).replace(/_/g, ' ');
+    const parts: string[] = [];
+    if (kind && !/^(poi|place)$/i.test(kind)) parts.push(kind);
+    const rating = Number(place.rating ?? place.average_rating);
+    const ratingCount = Number(place.rating_count ?? place.review_count);
+    if (Number.isFinite(rating) && rating > 0) {
+      parts.push(`${rating.toFixed(1)} stars${Number.isFinite(ratingCount) && ratingCount > 0 ? ` from ${Math.round(ratingCount)} reviews` : ''}`);
+    }
+    if (place.open_now === true) parts.push('open now');
+    else if (place.open_now === false) parts.push('may be closed now');
+    const distance = distanceSpokenSummary(place.distance_mi ?? (place.dist != null ? place.dist * 0.621371 : null));
+    if (distance) parts.push(distance);
+    const address = spokenSummaryPart(place.address, 74);
+    if (address) parts.push(address);
+    const summary = spokenSummaryPart(place.summary || place.access_note || '', 120);
+    if (summary && parts.length < 3 && !/^loading place details/i.test(summary)) parts.push(summary);
+    const detail = parts.slice(0, 3).join('; ');
+    return detail
+      ? `${verb} ${name}. ${detail}. The card is open.`
+      : `${verb} ${name}. I do not have rich details yet, but the card is open.`;
+  }
+
+  function campSelectionSpokenSummary(camp: CampsitePin, fullness?: CampFullness | null, verb = 'I picked') {
+    const name = spokenSummaryPart(camp.name, 70) || 'that camp';
+    const parts: string[] = [];
+    const land = spokenSummaryPart(camp.land_type || camp.verified_source || camp.source_badge || camp.source || 'campground', 40);
+    if (land) parts.push(land);
+    const cost = spokenSummaryPart(camp.cost, 60);
+    if (cost && !/^see site$/i.test(cost)) parts.push(cost);
+    if (camp.reservable) parts.push('reservable');
+    const rating = Number(camp.rating);
+    const ratingCount = Number(camp.rating_count);
+    if (Number.isFinite(rating) && rating > 0) {
+      parts.push(`${rating.toFixed(1)} stars${Number.isFinite(ratingCount) && ratingCount > 0 ? ` from ${Math.round(ratingCount)} reviews` : ''}`);
+    }
+    const distance = distanceSpokenSummary(camp.route_distance_mi);
+    if (distance) parts.push(distance);
+    if (fullness?.status === 'full') {
+      parts.unshift(`recently reported full${fullness.confirmations ? ` with ${fullness.confirmations} confirmations` : ''}`);
+    } else if (fullness?.status === 'open') {
+      parts.unshift('not currently reported full');
+    }
+    const description = spokenSummaryPart(camp.description, 110);
+    if (description && parts.length < 3 && !/^camp candidate/i.test(description)) parts.push(description);
+    const detail = parts.slice(0, 4).join('; ');
+    return detail
+      ? `${verb} ${name}. ${detail}. The camp card is open.`
+      : `${verb} ${name}. I do not have fullness or price details yet, but the camp card is open.`;
+  }
+
+  async function campSelectionSpokenSummaryWithFullness(camp: CampsitePin, verb = 'I picked') {
+    const fullness = camp?.id ? await api.getCampFullness(camp.id).catch(() => null) : null;
+    if (fullness) setCampFullness(fullness);
+    return campSelectionSpokenSummary(camp, fullness, verb);
+  }
+
   function normalizeCopilotPlaceCategory(raw: unknown) {
     const value = String(raw || 'poi').trim().toLowerCase().replace(/[_-]+/g, ' ');
-    if (/(pizza|tacos?|mexican|burgers?|bbq|barbecue|sushi|thai|italian|sandwiches?|deli)/.test(value)) {
+    if (/(pizza|tacos?|mexican|burgers?|bbq|barbecue|sushi|thai|italian|sandwiches?|deli|brewery|breweries|brewing|beer|pubs?)/.test(value)) {
       return { id: 'food', label: value, provider: value, nearby: 'food', radius: 12 };
     }
-    if (/(food|restaurant|eat|dining|dinner|lunch|breakfast|cafe|coffee|bar)/.test(value)) {
+    if (/(food|restaurant|eat|dining|dinner|lunch|breakfast|cafe|coffee|bar|drink)/.test(value)) {
       return { id: 'food', label: 'food', provider: 'restaurant', nearby: 'food', radius: 12 };
     }
     if (/(view|viewpoint|scenic|overlook|vista|photo)/.test(value)) {
@@ -7596,13 +8861,159 @@ function MapScreen() {
     return { id: value || 'poi', label: value || 'places', provider: value || 'poi', nearby: value || 'poi', radius: 20 };
   }
 
+  function mapboxFirstString(...values: unknown[]): string {
+    for (const value of values) {
+      if (Array.isArray(value)) {
+        const nested: string = mapboxFirstString(...value);
+        if (nested) return nested;
+        continue;
+      }
+      const clean = String(value ?? '').trim();
+      if (clean) return clean;
+    }
+    return '';
+  }
+
+  function mapboxFirstNumber(...values: unknown[]) {
+    for (const value of values) {
+      const numeric = Number(value);
+      if (Number.isFinite(numeric)) return numeric;
+    }
+    return undefined;
+  }
+
+  function mapboxFirstBoolean(...values: unknown[]) {
+    for (const value of values) {
+      if (typeof value === 'boolean') return value;
+      if (typeof value === 'string') {
+        const clean = value.trim().toLowerCase();
+        if (clean === 'true' || clean === 'open') return true;
+        if (clean === 'false' || clean === 'closed') return false;
+      }
+    }
+    return null;
+  }
+
+  function mapboxArrayStrings(...values: unknown[]): string[] {
+    const out: string[] = [];
+    const push = (value: unknown) => {
+      if (!value) return;
+      if (Array.isArray(value)) {
+        value.forEach(push);
+        return;
+      }
+      if (typeof value === 'object') {
+        const record = value as Record<string, unknown>;
+        push(record.name || record.id || record.label || record.text);
+        return;
+      }
+      const clean = String(value).trim();
+      if (clean) out.push(clean);
+    };
+    values.forEach(push);
+    return Array.from(new Set(out));
+  }
+
+  function mapboxOpenHours(...values: unknown[]): string[] {
+    const out: string[] = [];
+    const push = (value: unknown) => {
+      if (!value) return;
+      if (typeof value === 'string') {
+        value.split(/\n|;/).map(line => line.trim()).filter(Boolean).forEach(line => out.push(line));
+        return;
+      }
+      if (Array.isArray(value)) {
+        value.forEach(push);
+        return;
+      }
+      if (typeof value === 'object') {
+        const record = value as Record<string, unknown>;
+        push(record.weekday_text || record.weekdays || record.days || record.periods || record.text || record.label || record.formatted);
+      }
+    };
+    values.forEach(push);
+    return Array.from(new Set(out)).slice(0, 7);
+  }
+
+  function mapboxObject(value: unknown): Record<string, unknown> {
+    return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  }
+
+  function mapboxPhotoCandidates(...values: unknown[]): TrailheadGalleryPhoto[] {
+    const urls: string[] = [];
+    const pushUrl = (value: unknown) => {
+      if (!value) return;
+      if (typeof value === 'string') {
+        const clean = value.trim();
+        if (/^https?:\/\//i.test(clean)) urls.push(clean);
+        return;
+      }
+      if (Array.isArray(value)) {
+        value.forEach(pushUrl);
+        return;
+      }
+      if (typeof value === 'object') {
+        const record = value as Record<string, unknown>;
+        pushUrl(record.url || record.href || record.photo_url || record.image_url);
+      }
+    };
+    values.forEach(pushUrl);
+    return Array.from(new Set(urls)).slice(0, 8).map((url, idx) => ({
+      id: -1 - idx,
+      url,
+      source: 'Mapbox',
+      caption: undefined,
+      status: 'approved',
+      created_at: 0,
+    }));
+  }
+
+  function mapboxCategoryText(value: unknown): string {
+    if (Array.isArray(value)) return value.map(item => String(item || '').trim()).filter(Boolean).join(', ');
+    return String(value || '').trim();
+  }
+
   function mapboxFeatureToCopilotPlace(feature: any, center: { lat: number; lng: number }, category: string): SearchPlace | null {
     const coords = feature?.geometry?.coordinates;
     const lng = Number(coords?.[0]);
     const lat = Number(coords?.[1]);
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
     const props = feature?.properties ?? {};
-    const name = String(props.name || props.full_address || props.place_formatted || feature?.text || 'Mapbox place');
+    const metadata = mapboxObject(props.metadata);
+    const metadataData = mapboxObject((metadata as any).data);
+    const coordinates = mapboxObject(props.coordinates);
+    const externalIds = mapboxObject(props.external_ids || metadata.external_ids || metadataData.external_ids);
+    const categoryList = mapboxArrayStrings(props.poi_category, props.poi_category_ids, props.category, props.categories, metadata.poi_category, metadata.category, metadata.categories, metadataData.poi_category, metadataData.category);
+    const categoryText = mapboxCategoryText(categoryList.length ? categoryList : props.poi_category || props.category || metadata.poi_category || metadata.category);
+    const name = mapboxFirstString(props.name, props.full_address, props.place_formatted, feature?.text, 'Mapbox place');
+    const address = mapboxFirstString(
+      props.full_address,
+      props.place_formatted,
+      props.address,
+      props.address_line1,
+      metadata.full_address,
+      metadata.place_formatted,
+      metadata.address,
+    );
+    const phone = mapboxFirstString(props.phone, props.tel, props.telephone, metadata.phone, metadata.tel, metadata.telephone, metadataData.phone, metadataData.tel);
+    const website = mapboxFirstString(props.website, props.url, metadata.website, metadata.url, metadata.homepage, metadataData.website, metadataData.url);
+    const photos = mapboxPhotoCandidates(props.photos, props.photo, props.photo_url, props.image_url, metadata.primaryImage, metadata.primary_image, metadata.otherImages, metadata.other_images, metadata.images, metadataData.photos, metadataData.photo, metadataData.photo_url, metadataData.image_url);
+    const photoUrl = photos[0]?.url || null;
+    const rating = mapboxFirstNumber(props.rating, props.average_rating, metadata.rating, metadata.averageRating, metadata.average_rating, metadataData.rating, metadataData.average_rating);
+    const ratingCount = mapboxFirstNumber(props.rating_count, props.user_ratings_total, props.review_count, metadata.rating_count, metadata.reviewCount, metadata.review_count, metadataData.rating_count, metadataData.review_count);
+    const openNow = mapboxFirstBoolean(props.open_now, props.is_open, metadata.open_now, metadata.is_open, metadataData.open_now, metadataData.is_open);
+    const hours = mapboxOpenHours(props.hours, props.open_hours, props.opening_hours, metadata.openHours, metadata.open_hours, metadata.opening_hours, metadataData.openHours, metadataData.open_hours, metadataData.opening_hours);
+    const mapboxId = mapboxFirstString(props.mapbox_id, props.id, feature?.id);
+    const brand = mapboxFirstString(props.brand, props.brand_id, metadata.brand, metadataData.brand);
+    const routablePoints: SearchPlace['routable_points'] = [];
+    if (Array.isArray(coordinates.routable_points)) {
+      coordinates.routable_points.forEach((point: any) => {
+        const pointCoords = Array.isArray(point?.coordinates) ? point.coordinates : Array.isArray(point) ? point : [];
+        const pointLng = Number(pointCoords[0] ?? point?.longitude ?? point?.lng);
+        const pointLat = Number(pointCoords[1] ?? point?.latitude ?? point?.lat);
+        if (Number.isFinite(pointLat) && Number.isFinite(pointLng)) routablePoints.push({ name: point?.name || null, lat: pointLat, lng: pointLng });
+      });
+    }
     return {
       name,
       lat,
@@ -7611,12 +9022,140 @@ function MapScreen() {
       distance_mi: haversineKm(center.lat, center.lng, lat, lng) * 0.621371,
       source: 'mapbox_search',
       source_label: 'Mapbox Search',
-      place_id: props.mapbox_id || feature?.id,
-      provider_place_id: props.mapbox_id || feature?.id,
-      type: category || props.feature_type || props.poi_category?.[0] || 'poi',
-      subtype: String(props.poi_category?.[0] || props.feature_type || '').replace(/[_-]+/g, ' '),
-      address: props.full_address || props.place_formatted || props.address,
+      place_id: mapboxId || undefined,
+      provider_place_id: mapboxId || undefined,
+      mapbox_id: mapboxId || undefined,
+      type: category || props.feature_type || categoryText || 'poi',
+      subtype: String(categoryText || props.feature_type || '').replace(/[_-]+/g, ' '),
+      address: address || undefined,
+      phone: phone || undefined,
+      website: website || undefined,
+      open_now: openNow,
+      hours: hours.length ? hours : undefined,
+      open_hours: hours.length ? hours : undefined,
+      rating,
+      rating_count: ratingCount,
+      average_rating: rating,
+      review_count: ratingCount,
+      photo_url: photoUrl,
+      photos: photos.length ? photos : undefined,
+      primary_image: photoUrl,
+      other_images: photos.slice(1).map(photo => photo.url),
+      mapbox_categories: categoryList.length ? categoryList : undefined,
+      brand: brand || undefined,
+      external_ids: Object.keys(externalIds).length ? externalIds : undefined,
+      routable_points: routablePoints.length ? routablePoints : undefined,
+      eta_minutes: mapboxFirstNumber(props.eta, props.estimated_time, metadata.eta, metadata.estimated_time) ?? null,
+      distance_meters: mapboxFirstNumber(props.distance, metadata.distance) ?? null,
       attribution: 'Mapbox',
+      enrichment_source: 'mapbox_searchbox_rest',
+      enrichment_status: (phone || website || rating || ratingCount || photoUrl || hours.length || address) ? 'enriched' : 'unavailable',
+      raw_feature: {
+        id: mapboxId || null,
+        source: 'mapbox_search',
+        external_ids: externalIds,
+        properties: props,
+      },
+    };
+  }
+
+  function mapboxNativeResultToPlace(raw: Record<string, unknown> | null | undefined, center: { lat: number; lng: number }, category: string): SearchPlace | null {
+    if (!raw) return null;
+    const lat = Number(raw.lat);
+    const lng = Number(raw.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    const metadata = mapboxObject(raw.metadata);
+    const name = mapboxFirstString(raw.name, metadata.name, 'Mapbox place');
+    const address = mapboxFirstString(raw.address, raw.description, metadata.address, metadata.formatted_address);
+    const phone = mapboxFirstString(raw.phone, metadata.phone);
+    const website = mapboxFirstString(raw.website, metadata.website);
+    const photos = mapboxPhotoCandidates(raw.primary_image, raw.other_images, raw.photos, metadata.primary_image, metadata.other_images);
+    const categories = mapboxArrayStrings(raw.categories, raw.category_ids, metadata.categories);
+    const rating = mapboxFirstNumber(raw.rating, raw.average_rating, metadata.rating, metadata.average_rating);
+    const ratingCount = mapboxFirstNumber(raw.rating_count, raw.review_count, metadata.rating_count, metadata.review_count);
+    const hours = mapboxOpenHours(raw.hours, raw.open_hours, raw.hours_label, metadata.open_hours);
+    const mapboxId = mapboxFirstString(raw.mapbox_id, raw.id);
+    return {
+      name,
+      lat,
+      lng,
+      dist: userLoc ? haversineKm(userLoc.lat, userLoc.lng, lat, lng) : haversineKm(center.lat, center.lng, lat, lng),
+      distance_mi: haversineKm(center.lat, center.lng, lat, lng) * 0.621371,
+      source: 'mapbox_search',
+      source_label: 'Mapbox Search SDK',
+      place_id: mapboxId || undefined,
+      provider_place_id: mapboxId || undefined,
+      mapbox_id: mapboxId || undefined,
+      type: category || categories[0] || 'poi',
+      subtype: categories.join(', ') || category || undefined,
+      address: address || undefined,
+      phone: phone || undefined,
+      website: website || undefined,
+      open_now: mapboxFirstBoolean(raw.open_now, metadata.open_now),
+      hours: hours.length ? hours : undefined,
+      open_hours: hours.length ? hours : undefined,
+      rating,
+      rating_count: ratingCount,
+      average_rating: rating,
+      review_count: ratingCount,
+      photo_url: photos[0]?.url || undefined,
+      photos: photos.length ? photos : undefined,
+      primary_image: photos[0]?.url || undefined,
+      other_images: photos.slice(1).map(photo => photo.url),
+      mapbox_categories: categories.length ? categories : undefined,
+      brand: mapboxFirstString(raw.brand, metadata.brand) || undefined,
+      external_ids: mapboxObject(raw.external_ids),
+      routable_points: Array.isArray(raw.routable_points) ? raw.routable_points as SearchPlace['routable_points'] : undefined,
+      eta_minutes: mapboxFirstNumber(raw.eta_minutes, raw.estimated_time) ?? null,
+      distance_meters: mapboxFirstNumber(raw.distance_meters) ?? null,
+      attribution: 'Mapbox',
+      enrichment_source: 'mapbox_search_sdk',
+      enrichment_status: (phone || website || rating || ratingCount || photos.length || hours.length || address) ? 'enriched' : 'unavailable',
+      raw_feature: {
+        id: mapboxId || null,
+        source: 'mapbox_search_sdk',
+        properties: raw,
+      },
+    };
+  }
+
+  function mergeRenderedMapboxDetails(base: SearchPlace, enriched: SearchPlace, feature: MapSelectableFeature): SearchPlace {
+    return {
+      ...base,
+      address: enriched.address || base.address,
+      rating: enriched.rating ?? base.rating,
+      rating_count: enriched.rating_count ?? base.rating_count,
+      average_rating: enriched.average_rating ?? base.average_rating,
+      review_count: enriched.review_count ?? base.review_count,
+      open_now: enriched.open_now ?? base.open_now,
+      hours: enriched.hours || base.hours,
+      open_hours: enriched.open_hours || base.open_hours,
+      hours_label: enriched.hours_label || base.hours_label,
+      phone: enriched.phone || base.phone,
+      website: enriched.website || base.website,
+      photo_url: enriched.photo_url || base.photo_url,
+      photos: (enriched as any).photos || (base as any).photos,
+      primary_image: enriched.primary_image || base.primary_image,
+      other_images: enriched.other_images || base.other_images,
+      mapbox_id: base.mapbox_id || enriched.mapbox_id,
+      mapbox_categories: enriched.mapbox_categories || base.mapbox_categories,
+      brand: enriched.brand || base.brand,
+      external_ids: enriched.external_ids || base.external_ids,
+      routable_points: enriched.routable_points || base.routable_points,
+      eta_minutes: enriched.eta_minutes ?? base.eta_minutes,
+      distance_meters: enriched.distance_meters ?? base.distance_meters,
+      provider_place_id: base.provider_place_id || enriched.provider_place_id,
+      place_id: base.place_id || enriched.place_id,
+      selection_source: base.selection_source || 'rendered_mapbox_standard',
+      feature_id: base.feature_id || feature.feature_id,
+      source_layer: base.source_layer || feature.source_layer || undefined,
+      screen_x: base.screen_x ?? feature.screen_x ?? undefined,
+      screen_y: base.screen_y ?? feature.screen_y ?? undefined,
+      screen_position: base.screen_position ?? feature.screen_position ?? undefined,
+      selection_confidence: base.selection_confidence || feature.confidence || undefined,
+      raw_feature: base.raw_feature || feature.raw_feature || enriched.raw_feature || undefined,
+      enrichment_source: enriched.enrichment_source || base.enrichment_source || 'mapbox_searchbox_rest',
+      enrichment_status: enriched.enrichment_status || base.enrichment_status || 'unavailable',
     };
   }
 
@@ -7676,26 +9215,29 @@ function MapScreen() {
         language: 'en,fr',
         limit: 4,
       });
-      const best = suggestions.suggestions?.[0];
-      const mapboxId = best?.mapbox_id || best?.id;
-      if (!mapboxId) return null;
-      const retrieved = await api.extremeSearchRetrieve({
-        mapbox_id: mapboxId,
-        session_token: session.session_token,
-        language: 'en,fr',
-        proximity: center ? `${center.lng},${center.lat}` : '',
-        origin: center ? `${center.lng},${center.lat}` : '',
-      });
-      const feature = retrieved.features?.[0];
-      const coords = feature?.geometry?.type === 'Point' && Array.isArray(feature.geometry.coordinates)
-        ? feature.geometry.coordinates
-        : null;
-      const lng = Number(coords?.[0]);
-      const lat = Number(coords?.[1]);
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-      const props = feature?.properties ?? {};
-      const name = String(props.name || props.full_address || props.place_formatted || clean).trim();
-      return { lat, lng, name };
+      const candidates = (suggestions.suggestions ?? [])
+        .map((item: any) => item?.mapbox_id || item?.id)
+        .filter(Boolean)
+        .slice(0, 4);
+      if (!candidates.length) return null;
+      const retrieved = await Promise.all(candidates.map((mapboxId: string) =>
+        api.extremeSearchRetrieve({
+          mapbox_id: mapboxId,
+          session_token: session.session_token,
+          language: 'en,fr',
+          proximity: center ? `${center.lng},${center.lat}` : '',
+          origin: center ? `${center.lng},${center.lat}` : '',
+        }).catch(() => null),
+      ));
+      const places = retrieved
+        .flatMap(data => data?.features ?? [])
+        .map(feature => mapboxFeatureToCopilotPlace(feature, center ?? userLoc ?? { lat: 0, lng: 0 }, 'anchor'))
+        .filter(Boolean) as SearchPlace[];
+      if (!places.length) return null;
+      const rankCenter = center ?? { lat: places[0].lat, lng: places[0].lng };
+      const picked = rankCopilotPlacesForSearch(places, rankCenter, 'anchor', clean)[0];
+      if (!picked || !Number.isFinite(picked.lat) || !Number.isFinite(picked.lng)) return null;
+      return { lat: picked.lat, lng: picked.lng, name: picked.name || clean };
     } catch {
       return null;
     }
@@ -7725,7 +9267,15 @@ function MapScreen() {
           .filter(Boolean) as SearchPlace[])
         .catch(() => []),
     ))).flat();
-    return dedupeCopilotPlaces(places)
+    const filtered = filterCopilotPlacesToRegion(dedupeCopilotPlaces(places), {
+      source: 'mapbox_viewport_candidates',
+      bounds: vp,
+      bbox,
+      center,
+      radius_mi: vp ? null : 18,
+      category: 'visible',
+    });
+    return rankCopilotPlacesForSearch(filtered, center, 'visible')
       .slice(0, limit)
       .map((place, idx) => selectableFeatureFromPlace(place, idx, 'mapbox_search_visible', center))
       .filter(Boolean) as MapSelectableFeature[];
@@ -7754,9 +9304,130 @@ function MapScreen() {
     return textMatch && kindMatch && posMatch;
   }
 
+  function resultIndexFromArgs(args: Record<string, unknown>) {
+    const raw = args.result_index ?? args.index ?? args.number;
+    if (raw == null) return null;
+    const numeric = Number(raw);
+    if (!Number.isFinite(numeric)) return null;
+    if (args.number != null && args.result_index == null && args.index == null) {
+      return Math.max(0, Math.round(numeric) - 1);
+    }
+    return Math.max(0, Math.round(numeric));
+  }
+
+  function requestedResultIdFromArgs(args: Record<string, unknown>) {
+    return String(args.result_id || args.feature_id || args.id || '').trim();
+  }
+
+  function requestedResultSetIdFromArgs(args: Record<string, unknown>) {
+    return String(args.result_set_id || args.resultSetId || '').trim();
+  }
+
+  function requestedPlaceNameFromArgs(args: Record<string, unknown>) {
+    return String(args.name || args.place || args.target || args.destination || '').trim();
+  }
+
+  function resolvePlaceResultFromArgs(args: Record<string, unknown>): SearchPlace | null {
+    const currentSnap = copilotResultSnapshotRef.current;
+    if (currentSnap && currentSnap.kind !== 'place') return null;
+    const snap = currentSnap?.kind === 'place' ? currentSnap : null;
+    const active = (snap?.places?.length ? snap.places : (copilotResults.length ? copilotResults : searchResults));
+    if (!active.length) return null;
+    const requestedSetId = requestedResultSetIdFromArgs(args);
+    if (requestedSetId && (!snap?.resultSetId || requestedSetId !== snap.resultSetId)) return null;
+    const requestedId = requestedResultIdFromArgs(args);
+    if (requestedId) {
+      const idMatch = active.find(item =>
+        [item.result_id, item.feature_id, item.id, item.place_id, item.provider_place_id, item.mapbox_id]
+          .map(value => String(value || '').trim())
+          .some(value => value && value === requestedId)
+      );
+      if (idMatch) return idMatch;
+    }
+    const requestedName = requestedPlaceNameFromArgs(args);
+    if (requestedName) {
+      const nameMatch = active.find(item => placeTextMatches(item.name, requestedName) || placeTextMatches(requestedName, item.name));
+      if (nameMatch) return nameMatch;
+    }
+    const idx = resultIndexFromArgs(args);
+    return idx == null ? null : active[idx] ?? null;
+  }
+
+  function resolveCampResultFromArgs(args: Record<string, unknown>): CampsitePin | null {
+    const snap = copilotResultSnapshotRef.current?.kind === 'camp' ? copilotResultSnapshotRef.current : null;
+    const active = snap?.camps?.length ? snap.camps : areaCamps;
+    if (!active.length) return null;
+    const requestedSetId = requestedResultSetIdFromArgs(args);
+    if (requestedSetId && (!snap?.resultSetId || requestedSetId !== snap.resultSetId)) return null;
+    const requestedId = requestedResultIdFromArgs(args);
+    if (requestedId) {
+      const idMatch = active.find((item, idx) =>
+        String(item.id || '') === requestedId || campResultId(item, idx) === requestedId
+      );
+      if (idMatch) return idMatch;
+    }
+    const requestedName = requestedPlaceNameFromArgs(args);
+    if (requestedName) {
+      const nameMatch = active.find(item => placeTextMatches(item.name, requestedName) || placeTextMatches(requestedName, item.name));
+      if (nameMatch) return nameMatch;
+    }
+    const idx = resultIndexFromArgs(args);
+    return idx == null ? null : active[idx] ?? null;
+  }
+
+  function resolveTrailResultFromArgs(args: Record<string, unknown>): TrailFeature | null {
+    const snap = copilotResultSnapshotRef.current?.kind === 'trail' ? copilotResultSnapshotRef.current : null;
+    const active = snap?.trails?.length ? snap.trails : trailDiscoveries;
+    if (!active.length) return null;
+    const requestedSetId = requestedResultSetIdFromArgs(args);
+    if (requestedSetId && (!snap?.resultSetId || requestedSetId !== snap.resultSetId)) return null;
+    const requestedId = requestedResultIdFromArgs(args);
+    if (requestedId) {
+      const idMatch = active.find((item, idx) =>
+        [item.id, item.profile_id, trailResultId(item, idx)]
+          .map(value => String(value || '').trim())
+          .some(value => value && value === requestedId)
+      );
+      if (idMatch) return idMatch;
+    }
+    const requestedName = requestedPlaceNameFromArgs(args);
+    if (requestedName) {
+      const nameMatch = active.find(item => placeTextMatches(item.name, requestedName) || placeTextMatches(requestedName, item.name));
+      if (nameMatch) return nameMatch;
+    }
+    const idx = resultIndexFromArgs(args);
+    return idx == null ? null : active[idx] ?? null;
+  }
+
+  function resolveVisibleFeatureFromSnapshot(args: Record<string, unknown>): MapSelectableFeature | null {
+    const snap = copilotVisibleSnapshotRef.current;
+    const active = snap?.features ?? [];
+    if (!active.length) return null;
+    const requestedSetId = requestedResultSetIdFromArgs(args);
+    if (requestedSetId && snap?.resultSetId && requestedSetId !== snap.resultSetId) return null;
+    const requestedId = requestedResultIdFromArgs(args);
+    if (requestedId) {
+      const idMatch = active.find(item =>
+        [item.result_id, item.feature_id]
+          .map(value => String(value || '').trim())
+          .some(value => value && value === requestedId)
+      );
+      if (idMatch) return idMatch;
+    }
+    const requestedName = requestedPlaceNameFromArgs(args);
+    if (requestedName) {
+      const nameMatch = active.find(item => candidateMatchesRequest(item, args));
+      if (nameMatch) return nameMatch;
+    }
+    const idx = resultIndexFromArgs(args);
+    return idx == null ? null : active[idx] ?? null;
+  }
+
   function visibleCandidatePayload(feature: MapSelectableFeature) {
     return {
       feature_id: feature.feature_id,
+      result_set_id: feature.result_set_id || null,
+      result_id: feature.result_id || feature.feature_id,
       result_index: feature.result_index,
       name: feature.name,
       type: feature.type,
@@ -7764,7 +9435,10 @@ function MapScreen() {
       lat: feature.lat,
       lng: feature.lng,
       source: feature.source_label || feature.source,
+      source_layer: feature.source_layer ?? null,
       distance_mi: feature.distance_mi ?? null,
+      screen_x: feature.screen_x ?? null,
+      screen_y: feature.screen_y ?? null,
       screen_position: feature.screen_position ?? null,
       confidence: feature.confidence ?? null,
       aliases: feature.aliases ?? [],
@@ -7785,7 +9459,49 @@ function MapScreen() {
     return next;
   }
 
+  function currentCopilotMapPoint(): { lat: number; lng: number; name?: string } | null {
+    const vp = viewportRef.current;
+    if (vp) return { lat: (vp.n + vp.s) / 2, lng: (vp.e + vp.w) / 2, name: 'current map view' };
+    return userLoc ? { lat: userLoc.lat, lng: userLoc.lng, name: 'current location' } : null;
+  }
+
+  function copilotHasVisibleTargetArgs(args: Record<string, unknown>) {
+    return !!(
+      args.feature_id
+      || args.id
+      || args.result_index != null
+      || args.index != null
+      || args.number != null
+      || args.type
+      || args.kind
+      || args.category
+      || args.place_type
+      || args.position
+      || args.screen_position
+      || args.side
+      || args.name
+      || args.place
+    );
+  }
+
+  async function syncCopilotVisibleBounds() {
+    const bounds = await (nativeMapRef.current?.getVisibleBounds?.() ?? Promise.resolve(null)).catch(() => null);
+    if (!bounds) return viewportRef.current;
+    viewportRef.current = bounds;
+    if (Number.isFinite(Number(bounds.zoom))) setMapZoom(Number(bounds.zoom));
+    return bounds;
+  }
+
+  function candidateInCurrentView(feature: MapSelectableFeature) {
+    const vp = viewportRef.current;
+    if (!vp) return true;
+    const lat = Number(feature.lat);
+    const lng = Number(feature.lng);
+    return Number.isFinite(lat) && Number.isFinite(lng) && lat >= vp.s && lat <= vp.n && lng >= vp.w && lng <= vp.e;
+  }
+
   async function getVisibleCandidateSnapshot() {
+    const bounds = await syncCopilotVisibleBounds();
     const rendered = await (
       nativeMapRef.current?.getVisibleMapCandidates?.()
       ?? nativeMapRef.current?.queryVisibleFeatures?.()
@@ -7793,24 +9509,111 @@ function MapScreen() {
     ).catch(() => []);
     const renderedList = Array.isArray(rendered) ? rendered.slice(0, 24).map((feature, idx) => ({ ...feature, result_index: idx })) : [];
     const mapboxSearchList = renderedList.length >= 10 ? [] : await getMapboxViewportCandidates(24 - renderedList.length).catch(() => []);
-    if (renderedList.length) setVisibleRenderedFeatures(renderedList);
-    return normalizeVisibleCandidateList([...renderedList, ...mapboxSearchList, ...visibleMapFeatures]);
+    const normalized = normalizeVisibleCandidateList([...renderedList, ...mapboxSearchList, ...visibleMapFeatures.filter(candidateInCurrentView)]);
+    const activeBounds = (bounds as CopilotMapBounds | null) ?? currentCopilotBounds();
+    const stamped = storeCopilotVisibleResults(normalized, {
+      queryContext: {
+        source: 'visible_map_candidates',
+        bounds: activeBounds,
+        bbox: bboxStringFromBounds(activeBounds),
+        center: boundsCenter(activeBounds) ?? userLoc,
+        zoom: activeBounds?.zoom ?? mapZoom,
+        category: 'visible',
+      },
+    });
+    setVisibleRenderedFeatures(stamped.slice(0, 24).map((feature, idx) => ({ ...feature, result_index: idx })));
+    return stamped;
+  }
+
+  function copilotZoomDirection(args: Record<string, unknown>) {
+    const raw = String(args.direction || args.zoom_direction || args.intent || args.mode || (typeof args.zoom === 'string' ? args.zoom : '')).toLowerCase();
+    return /out|back|wide|farther|away/.test(raw) ? 'out' : 'in';
+  }
+
+  function copilotZoomLevel(args: Record<string, unknown>, hasFocus: boolean) {
+    const explicit = Number(args.zoom ?? args.target_zoom ?? args.set_zoom ?? args.level);
+    if (Number.isFinite(explicit)) return clampNumber(explicit, 3, 18);
+    const direction = copilotZoomDirection(args);
+    const rawDelta = Number(args.delta ?? args.amount ?? args.steps);
+    const delta = Number.isFinite(rawDelta) && rawDelta !== 0 ? Math.min(4, Math.abs(rawDelta)) : 1.4;
+    const current = Number.isFinite(Number(mapZoom)) ? Number(mapZoom) : Number(viewportRef.current?.zoom ?? 10);
+    if (hasFocus && direction === 'in') return clampNumber(Math.max(current, 16), 3, 18);
+    return clampNumber(current + (direction === 'out' ? -delta : delta), 3, 18);
+  }
+
+  async function runCopilotZoomMap(args: Record<string, unknown>) {
+    await syncCopilotVisibleBounds();
+    const hasTargetArgs = copilotHasVisibleTargetArgs(args);
+    const snapshotFeature = hasTargetArgs ? resolveVisibleFeatureFromSnapshot(args) : null;
+    const candidates = hasTargetArgs && !snapshotFeature ? await getVisibleCandidateSnapshot() : (copilotVisibleSnapshotRef.current?.features ?? []);
+    const match = snapshotFeature
+      ? { feature: snapshotFeature, ambiguous: false, matches: [snapshotFeature] }
+      : hasTargetArgs ? findVisibleCandidate(args, candidates) : { feature: null, ambiguous: false, matches: [] as MapSelectableFeature[] };
+    if (match.ambiguous && !args.result_index && !args.feature_id && !args.id) {
+      return {
+        applied: false,
+        status: 'failed',
+        reason: 'ambiguous_zoom_target',
+        candidates: match.matches.slice(0, 6).map(visibleCandidatePayload),
+        spoken_summary: `I see more than one matching visible place: ${match.matches.slice(0, 3).map(item => item.name).join(', ')}. Which one should I zoom to?`,
+      };
+    }
+    const explicitTarget = copilotActionPoint(args.target) || copilotActionPoint(args.near);
+    const feature = match.feature ?? null;
+    const focus = explicitTarget ?? (feature ? { lat: feature.lat, lng: feature.lng, name: feature.name } : null);
+    const nextZoom = copilotZoomLevel(args, !!focus);
+    const appliedZoom = await (nativeMapRef.current?.setZoom?.(nextZoom, focus) ?? Promise.resolve(null)).catch(() => null);
+    const finalZoom = Number.isFinite(Number(appliedZoom)) ? Number(appliedZoom) : nextZoom;
+    if (focus) {
+      webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: focus.lat, lng: focus.lng, zoom: finalZoom, name: focus.name }));
+    } else {
+      const nativeCenter = await (nativeMapRef.current?.getVisibleCenter?.() ?? Promise.resolve(null)).catch(() => null);
+      const center = nativeCenter ? { lng: Number(nativeCenter[0]), lat: Number(nativeCenter[1]) } : currentCopilotMapPoint();
+      if (center && Number.isFinite(center.lat) && Number.isFinite(center.lng)) {
+        webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: center.lat, lng: center.lng, zoom: finalZoom, name: 'current map view' }));
+      }
+    }
+    if (viewportRef.current) viewportRef.current = { ...viewportRef.current, zoom: finalZoom };
+    setMapZoom(finalZoom);
+    await new Promise<void>(resolve => setTimeout(resolve, 380));
+    await syncCopilotVisibleBounds();
+    const refreshed = await getVisibleCandidateSnapshot();
+    const visible = refreshed.slice(0, 16).map(visibleCandidatePayload);
+    const names = visible.slice(0, 4).map(item => item.name).filter(Boolean);
+    const direction = copilotZoomDirection(args);
+    return {
+      applied: true,
+      status: 'applied',
+      zoom: finalZoom,
+      direction,
+      target: feature ? visibleCandidatePayload(feature) : focus,
+      visible_map_features: visible,
+      query_context: copilotQueryContextPayload(copilotVisibleSnapshotRef.current?.queryContext ?? copilotQueryContextRef.current),
+      spoken_summary: names.length
+        ? `Zoomed ${direction}. I can see ${names.join(', ')}.`
+        : `Zoomed ${direction}.`,
+    };
   }
 
   function findVisibleCandidate(args: Record<string, unknown>, candidates: MapSelectableFeature[] = visibleMapFeatures) {
+    const requestedSetId = requestedResultSetIdFromArgs(args);
+    const scopedCandidates = requestedSetId ? candidates.filter(item => item.result_set_id === requestedSetId) : candidates;
     const rawIndex = args.result_index ?? args.index ?? args.number;
-    const featureId = String(args.feature_id || args.id || '').trim();
+    const featureId = requestedResultIdFromArgs(args);
     if (featureId) {
-      const feature = candidates.find(item => item.feature_id === featureId || String(item.place?.id || '') === featureId);
+      const feature = scopedCandidates.find(item =>
+        item.feature_id === featureId
+        || item.result_id === featureId
+        || String(item.place?.id || '') === featureId
+      );
       return { feature, ambiguous: false, matches: feature ? [feature] : [] };
     }
     if (rawIndex != null) {
-      const numeric = Math.max(0, Number(rawIndex));
-      const idx = args.number != null && args.result_index == null ? Math.max(0, numeric - 1) : numeric;
-      const feature = candidates[idx];
+      const idx = resultIndexFromArgs(args) ?? 0;
+      const feature = scopedCandidates[idx];
       return { feature, ambiguous: false, matches: feature ? [feature] : [] };
     }
-    const matches = candidates.filter(feature => candidateMatchesRequest(feature, args));
+    const matches = scopedCandidates.filter(feature => candidateMatchesRequest(feature, args));
     return {
       feature: matches.length === 1 ? matches[0] : matches[0],
       ambiguous: matches.length > 1,
@@ -7824,8 +9627,25 @@ function MapScreen() {
     const center = { lat: feature.lat, lng: feature.lng };
     const language = 'en,fr';
     const mapboxId = String(base.provider_place_id || base.place_id || feature.place?.provider_place_id || feature.place?.place_id || '').trim();
-    const renderedOnly = ['mapbox_feature', 'rendered_map'].includes(String(base.source || feature.source || '').toLowerCase());
+    const renderedOnly = ['rendered_mapbox_standard', 'mapbox_feature', 'rendered_map'].includes(String(base.source || feature.source || '').toLowerCase());
     try {
+      if (ENABLE_NATIVE_MAPBOX_SEARCH_ENRICHMENT && renderedOnly && mapboxNativeEnrichment?.enrichPlace && feature.name) {
+        const nativeRaw = await mapboxNativeEnrichment.enrichPlace({
+          name: feature.name,
+          lat: feature.lat,
+          lng: feature.lng,
+          mapbox_id: mapboxId || undefined,
+          category: feature.type || feature.subtype || undefined,
+          radius_meters: 90,
+        }).catch(() => null);
+        const nativeEnriched = mapboxNativeResultToPlace(nativeRaw, center, feature.type || 'poi');
+        if (nativeEnriched) {
+          const nativeDistanceM = haversineKm(feature.lat, feature.lng, nativeEnriched.lat, nativeEnriched.lng) * 1000;
+          if (Number.isFinite(nativeDistanceM) && nativeDistanceM <= 90 && (!feature.name || placeTextMatches(nativeEnriched.name, feature.name))) {
+            return mergeRenderedMapboxDetails(base, nativeEnriched, feature);
+          }
+        }
+      }
       let retrieved: any = null;
       if (mapboxId) {
         const session = await api.extremeSearchSession({ source: 'rendered_feature_retrieve' });
@@ -7836,7 +9656,7 @@ function MapScreen() {
           proximity: `${feature.lng},${feature.lat}`,
           origin: `${feature.lng},${feature.lat}`,
         });
-      } else if (!renderedOnly && feature.name) {
+      } else if (feature.name) {
         const session = await api.extremeSearchSession({ source: 'rendered_feature_suggest' });
         const vp = viewportRef.current;
         const suggestions = await api.extremeSearchSuggest({
@@ -7849,10 +9669,11 @@ function MapScreen() {
           language,
           limit: 5,
         });
-        const best = (suggestions.suggestions ?? []).find((item: any) => {
+        const matched = (suggestions.suggestions ?? []).find((item: any) => {
           const name = item?.name || item?.text || item?.full_address || '';
           return placeTextMatches(name, feature.name) || placeTextMatches(feature.name, name);
-        }) ?? suggestions.suggestions?.[0];
+        });
+        const best = matched ?? (renderedOnly ? null : suggestions.suggestions?.[0]);
         const bestId = best?.mapbox_id || best?.id;
         if (bestId) {
           retrieved = await api.extremeSearchRetrieve({
@@ -7869,20 +9690,9 @@ function MapScreen() {
       if (!enriched) return base;
       const distanceM = haversineKm(feature.lat, feature.lng, enriched.lat, enriched.lng) * 1000;
       if (!Number.isFinite(distanceM) || distanceM > (renderedOnly ? 80 : 180)) return base;
+      if (renderedOnly && feature.name && !placeTextMatches(enriched.name, feature.name)) return base;
       if (renderedOnly) {
-        return {
-          ...base,
-          address: enriched.address || base.address,
-          rating: enriched.rating ?? base.rating,
-          rating_count: enriched.rating_count ?? base.rating_count,
-          phone: enriched.phone || base.phone,
-          website: enriched.website || base.website,
-          photo_url: enriched.photo_url || base.photo_url,
-          photos: (enriched as any).photos || (base as any).photos,
-          provider_place_id: base.provider_place_id || enriched.provider_place_id,
-          place_id: base.place_id || enriched.place_id,
-          summary: enriched.summary || base.summary || 'Selected from the visible map.',
-        };
+        return mergeRenderedMapboxDetails(base, enriched, feature);
       }
       return {
         ...base,
@@ -7892,7 +9702,7 @@ function MapScreen() {
         subtype: enriched.subtype || base.subtype,
         source: 'mapbox_search',
         source_label: 'Mapbox Search',
-        summary: enriched.summary || base.summary || 'Selected from the visible map and resolved through Mapbox Search.',
+        summary: enriched.summary || base.summary,
       };
     } catch {
       return base;
@@ -7939,7 +9749,227 @@ function MapScreen() {
     );
   }
 
+  function copilotStablePlaceKey(place: SearchPlace) {
+    return [
+      String(place.provider_place_id || place.place_id || place.mapbox_id || place.id || '').toLowerCase(),
+      String(place.name || '').toLowerCase(),
+      Number(place.lat).toFixed(5),
+      Number(place.lng).toFixed(5),
+      String(place.source || place.source_label || '').toLowerCase(),
+    ].join('|');
+  }
+
+  function copilotSearchSourceRank(place: SearchPlace) {
+    const source = String(place.source || place.source_label || '').toLowerCase();
+    if (source.includes('mapbox')) return 0;
+    if (source.includes('trailhead')) return 8;
+    if (source.includes('geoapify')) return 10;
+    if (source.includes('osm') || source.includes('openstreetmap')) return 12;
+    if (source.includes('community') || source.includes('saved')) return 14;
+    return 18;
+  }
+
+  function placeMatchesCopilotSearchText(place: SearchPlace, text: string) {
+    const clean = text.trim();
+    if (!clean) return true;
+    if (placeMatchesCopilotKeyword(place, clean)) return true;
+    const hay = [
+      place.name,
+      place.type,
+      place.subtype,
+      place.source_label,
+      place.address,
+      ...(place.mapbox_categories ?? []),
+    ].map(normalizedPlaceText).filter(Boolean).join(' ');
+    const needle = normalizedPlaceText(clean);
+    return !!needle && (hay.includes(needle) || placeTextMatches(place.name, clean));
+  }
+
+  function copilotCategoryPenalty(place: SearchPlace, categoryId: string, keyword: string) {
+    const hay = [
+      place.name,
+      place.type,
+      place.subtype,
+      place.source_label,
+      place.address,
+      ...(place.mapbox_categories ?? []),
+    ].map(value => String(value || '').toLowerCase()).join(' ');
+    const keywordPenalty = keyword && !placeMatchesCopilotSearchText(place, keyword) ? 45 : 0;
+    if (categoryId === 'food') return keywordPenalty + (/\b(restaurant|food|bar|cafe|coffee|bakery|pizza|burger|sandwich|deli|taco|bbq|sushi|thai|italian)\b/.test(hay) ? 0 : 80);
+    if (categoryId === 'lodging') return keywordPenalty + (/\b(hotel|motel|lodg|inn|hostel|stay)\b/.test(hay) ? 0 : 80);
+    if (categoryId === 'fuel') return keywordPenalty + (/\b(fuel|gas|charging)\b/.test(hay) ? 0 : 80);
+    if (categoryId === 'grocery') return keywordPenalty + (/\b(grocery|market|supermarket)\b/.test(hay) ? 0 : 80);
+    if (categoryId === 'viewpoint') return keywordPenalty + (/\b(view|viewpoint|scenic|overlook|vista)\b/.test(hay) ? 0 : 30);
+    if (categoryId === 'attraction') return keywordPenalty + (/\b(attraction|museum|monument|landmark|historic|park|theater|tourism)\b/.test(hay) ? 0 : 25);
+    return keywordPenalty;
+  }
+
+  function rankCopilotPlacesForSearch(
+    places: SearchPlace[],
+    center: { lat: number; lng: number },
+    categoryId: string,
+    keyword = '',
+  ) {
+    return [...places].sort((a, b) => {
+      const distanceA = Number.isFinite(Number(a.distance_mi)) ? Number(a.distance_mi) : haversineKm(center.lat, center.lng, a.lat, a.lng) * 0.621371;
+      const distanceB = Number.isFinite(Number(b.distance_mi)) ? Number(b.distance_mi) : haversineKm(center.lat, center.lng, b.lat, b.lng) * 0.621371;
+      const ratingA = Number.isFinite(Number(a.rating ?? a.average_rating)) ? Number(a.rating ?? a.average_rating) : 0;
+      const ratingB = Number.isFinite(Number(b.rating ?? b.average_rating)) ? Number(b.rating ?? b.average_rating) : 0;
+      const scoreA =
+        copilotCategoryPenalty(a, categoryId, keyword)
+        + copilotSearchSourceRank(a)
+        + Math.min(distanceA, 50)
+        - Math.min(ratingA, 5) * 1.5;
+      const scoreB =
+        copilotCategoryPenalty(b, categoryId, keyword)
+        + copilotSearchSourceRank(b)
+        + Math.min(distanceB, 50)
+        - Math.min(ratingB, 5) * 1.5;
+      return scoreA - scoreB
+        || distanceA - distanceB
+        || String(a.name || '').localeCompare(String(b.name || ''))
+        || copilotStablePlaceKey(a).localeCompare(copilotStablePlaceKey(b));
+    });
+  }
+
+  function pickDeterministicGeocodePlace<T extends { name?: string; lat: number; lng: number; source?: string; place_id?: string; feature_type?: string; place_types?: string[]; category?: string; relevance?: number }>(
+    query: string,
+    places: T[],
+    center?: { lat: number; lng: number } | null,
+  ): T | null {
+    const valid = places.filter(place => Number.isFinite(Number(place.lat)) && Number.isFinite(Number(place.lng)));
+    if (!valid.length) return null;
+    const needle = normalizedPlaceText(query);
+    const localIntent = /\b(near me|nearby|around here|closest|current view|in this area|by me|near my location)\b/i.test(query);
+    const roadLike = /\b(road|rd|street|st|avenue|ave|boulevard|blvd|drive|dr|lane|ln|way|court|ct|highway|hwy|route|rte|county road|circle|cir|trail)\b/;
+    const addressLikeTypes = new Set(['address', 'street', 'postcode', 'neighborhood', 'locality']);
+    const poiLikeTypes = new Set(['poi', 'landmark', 'place', 'tourism', 'attraction', 'historic', 'monument', 'museum', 'park']);
+    const scoreText = (place: T) => {
+      const name = normalizedPlaceText(place.name);
+      if (!needle || !name) return 20;
+      if (name === needle) return 0;
+      if (name.startsWith(needle) && roadLike.test(name.replace(needle, ''))) return 18;
+      if (name.startsWith(needle) || needle.startsWith(name)) return 4;
+      if (name.includes(needle) || needle.includes(name)) return 8;
+      return 35;
+    };
+    const scoreFeature = (place: T) => {
+      const name = normalizedPlaceText(place.name);
+      const types = [
+        place.feature_type,
+        place.category,
+        ...(Array.isArray(place.place_types) ? place.place_types : []),
+      ].map(value => normalizedPlaceText(String(value || ''))).filter(Boolean);
+      const typeText = types.join(' ');
+      let score = 0;
+      if (types.some(type => poiLikeTypes.has(type)) || /\b(tourism|attraction|monument|landmark|historic|museum|tower)\b/.test(typeText)) score -= 18;
+      if (types.some(type => addressLikeTypes.has(type)) || /\b(address|street|road|highway|residential)\b/.test(typeText)) score += 28;
+      if (roadLike.test(name) && !roadLike.test(needle)) score += 24;
+      if (/\b(tower|monument|museum|park|falls|arch|canyon|mount|mt|peak|castle|bridge)\b/.test(needle) && !roadLike.test(name)) score -= 8;
+      const relevance = Number(place.relevance);
+      if (Number.isFinite(relevance)) score -= Math.min(Math.max(relevance, 0), 1) * 4;
+      return score;
+    };
+    const scoreDistance = (place: T) => center
+      ? Math.min(haversineKm(center.lat, center.lng, place.lat, place.lng) * 0.621371, localIntent ? 250 : 1200) * (localIntent ? 0.03 : 0.002)
+      : 0;
+    return [...valid].sort((a, b) =>
+      (scoreText(a) + scoreFeature(a)) - (scoreText(b) + scoreFeature(b))
+      || scoreDistance(a) - scoreDistance(b)
+      || String(a.name || '').localeCompare(String(b.name || ''))
+      || Number(a.lat).toFixed(5).localeCompare(Number(b.lat).toFixed(5))
+      || Number(a.lng).toFixed(5).localeCompare(Number(b.lng).toFixed(5))
+      || String(a.place_id || a.source || '').localeCompare(String(b.place_id || b.source || '')),
+    )[0] ?? null;
+  }
+
+  function geocodePlaceToSearchPlace(place: GeocodePlace, query: string, status = 'resolved', reason = ''): SearchPlace {
+    return {
+      ...place,
+      name: place.name || query,
+      type: place.feature_type || place.category || 'poi',
+      source: place.source || 'geocode',
+      source_label: place.source === 'trailhead_landmark' ? 'Trailhead landmark' : place.source === 'mapbox' ? 'Mapbox geocode' : 'Geocode',
+      provider_place_id: place.provider_place_id || place.place_id,
+      selection_source: place.source === 'mapbox' ? 'mapbox_search' : 'map_point',
+      selection_confidence: place.confidence || (status === 'resolved' ? 'high' : 'medium'),
+      geocode_status: status,
+      geocode_reason: reason,
+      geocode_query: query,
+    };
+  }
+
+  async function resolveVerifiedGeocodePlace(query: string, options: { allowAmbiguous?: boolean; center?: { lat: number; lng: number } | null; source?: string } = {}): Promise<SearchPlace | null> {
+    const cleanQuery = String(query || '').trim();
+    if (cleanQuery.length < 2) return null;
+    const resolved = await api.resolveGeocodePlace(cleanQuery, 8).catch((error: any) => {
+      logCopilotMapTelemetry('copilot_geocode_resolve_failed', {
+        query: cleanQuery,
+        source: options.source || null,
+        error: String(error?.message || error || 'unknown').slice(0, 240),
+      });
+      return null;
+    });
+    if (resolved) {
+      logCopilotMapTelemetry('copilot_geocode_resolved', {
+        query: cleanQuery,
+        normalized_query: resolved.normalized_query || cleanQuery,
+        source: options.source || null,
+        status: resolved.status,
+        reason: resolved.reason || null,
+        countrycodes: resolved.countrycodes || null,
+        selected: resolved.selected ? {
+          name: resolved.selected.name,
+          lat: resolved.selected.lat,
+          lng: resolved.selected.lng,
+          country_code: resolved.selected.country_code || null,
+          feature_type: resolved.selected.feature_type || null,
+          place_id: resolved.selected.place_id || null,
+          score: resolved.selected.score ?? null,
+        } : null,
+        rejected: (resolved.rejected || []).slice(0, 5),
+      });
+      const selected = resolved.selected;
+      if (selected && Number.isFinite(Number(selected.lat)) && Number.isFinite(Number(selected.lng)) && (resolved.status === 'resolved' || resolved.status === 'ambiguous' || options.allowAmbiguous)) {
+        return geocodePlaceToSearchPlace(selected, cleanQuery, resolved.status, resolved.reason || '');
+      }
+      if (resolved.status === 'ambiguous' && !options.allowAmbiguous) return null;
+    }
+    const places = await api.geocodePlaces(cleanQuery, 5).catch(() => []);
+    const fallback = pickDeterministicGeocodePlace(cleanQuery, places, options.center ?? boundsCenter(currentCopilotBounds()) ?? userLoc);
+    return fallback && Number.isFinite(fallback.lat) && Number.isFinite(fallback.lng)
+      ? geocodePlaceToSearchPlace(fallback, cleanQuery, 'fallback', 'legacy_geocode_rank')
+      : null;
+  }
+
+  function campStableSearchKey(camp: CampsitePin) {
+    return [
+      String(camp.id || '').toLowerCase(),
+      String(camp.name || '').toLowerCase(),
+      Number(camp.lat).toFixed(5),
+      Number(camp.lng).toFixed(5),
+      String(camp.verified_source || camp.source_badge || camp.source || '').toLowerCase(),
+    ].join('|');
+  }
+
+  function rankCopilotCampsForSearch(camps: CampsitePin[], center: { lat: number; lng: number }) {
+    return [...camps].sort((a, b) => {
+      const distanceA = Number.isFinite(Number(a.route_distance_mi)) ? Number(a.route_distance_mi) : haversineKm(center.lat, center.lng, a.lat, a.lng) * 0.621371;
+      const distanceB = Number.isFinite(Number(b.route_distance_mi)) ? Number(b.route_distance_mi) : haversineKm(center.lat, center.lng, b.lat, b.lng) * 0.621371;
+      const ratingA = Number.isFinite(Number(a.rating)) ? Number(a.rating) : 0;
+      const ratingB = Number.isFinite(Number(b.rating)) ? Number(b.rating) : 0;
+      const fullA = (a as any).full ? 40 : 0;
+      const fullB = (b as any).full ? 40 : 0;
+      return fullA - fullB
+        || distanceA - distanceB
+        || ratingB - ratingA
+        || String(a.name || '').localeCompare(String(b.name || ''))
+        || campStableSearchKey(a).localeCompare(campStableSearchKey(b));
+    });
+  }
+
   function openCopilotCampCard(camp: CampsitePin) {
+    markSelectedCopilotCamp(camp);
     setShowDiscoveryPanel(false);
     setShowSearch(false);
     setSelectedPlace(null);
@@ -7959,15 +9989,48 @@ function MapScreen() {
     }
   }
 
-  function openCopilotPlaceCard(place: SearchPlace) {
+  function isLandmarkLikePlace(place: Partial<SearchPlace> | null | undefined, categoryHint = '') {
+    const hay = [
+      categoryHint,
+      place?.name,
+      place?.type,
+      place?.subtype,
+      place?.source_layer,
+      ...(place?.mapbox_categories ?? []),
+    ].map(value => String(value || '').toLowerCase()).join(' ');
+    return /\b(landmark|monument|attraction|museum|tower|castle|cathedral|statue|historic|tourism|viewpoint|eiffel)\b/.test(hay);
+  }
+
+  function focusPlaceCamera(place: Pick<SearchPlace, 'lat' | 'lng' | 'name' | 'type' | 'subtype' | 'source_layer' | 'mapbox_categories'>, zoom = 13, categoryHint = '') {
+    const landmark3d = map3dEnabled && !navMode && isLandmarkLikePlace(place, categoryHint);
+    if (landmark3d && nativeMapRef.current?.flyToCamera) {
+      const scenicZoom = clampNumber(Math.max(15.6, Math.min(16.8, zoom || 16)), 3, 18);
+      nativeMapRef.current.flyToCamera({
+        lat: place.lat,
+        lng: place.lng,
+        zoom: scenicZoom,
+        pitch: 64,
+        bearing: -28,
+        duration: 760,
+        mode: 'flyTo',
+      });
+      webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: place.lat, lng: place.lng, zoom: scenicZoom, pitch: 64, bearing: -28, name: place.name }));
+      return;
+    }
+    nativeMapRef.current?.flyTo(place.lat, place.lng, zoom, place.name);
+    webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: place.lat, lng: place.lng, zoom, name: place.name }));
+  }
+
+  function openCopilotPlaceCard(place: SearchPlace, focusZoom = 13) {
     const dist = userLoc ? haversineKm(userLoc.lat, userLoc.lng, place.lat, place.lng) : place.dist ?? null;
+    const isMapboxPlace = String(place.source || place.source_label || '').toLowerCase().includes('mapbox');
     const next = {
       ...place,
       dist,
       source: place.source || 'search',
       source_label: place.source_label || 'Map search',
       type: place.type || 'poi',
-      summary: place.summary || 'Loading place details, nearby camps, trails, and useful stops...',
+      summary: place.summary || (isMapboxPlace ? undefined : 'Loading place details, nearby camps, trails, and useful stops...'),
     };
     setShowDiscoveryPanel(false);
     setShowSearch(false);
@@ -7981,8 +10044,8 @@ function MapScreen() {
     setSelectedCommunityPin(null);
     setSearchRouteCard(null);
     setSelectedPlace(next);
-    nativeMapRef.current?.flyTo(next.lat, next.lng, 13, next.name);
-    webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: next.lat, lng: next.lng, zoom: 13, name: next.name }));
+    markSelectedCopilotPlace(next);
+    focusPlaceCamera(next, focusZoom, String(place.type || place.subtype || ''));
   }
 
   async function runCopilotPoiSearch(categoryRaw: unknown, args: Record<string, unknown>) {
@@ -8002,8 +10065,7 @@ function MapScreen() {
         center = anchor;
         searchedNear = anchor.name || query;
       } else {
-        const places = await api.geocodePlaces(query, 1);
-        const place = places[0];
+        const place = await resolveVerifiedGeocodePlace(query, { center, source: 'copilot_place_search_anchor', allowAmbiguous: true });
         if (!place) return { applied: false, status: 'failed', reason: 'place_not_found', query };
         center = { lat: place.lat, lng: place.lng, name: place.name || query };
         searchedNear = place.name || query;
@@ -8019,8 +10081,7 @@ function MapScreen() {
     const limit = Math.max(1, Math.min(Number(args.limit || args.result_limit || 8), 12));
     const radius = Math.max(4, Math.min(Number(args.radius_mi || category.radius), 45));
     const bbox = copilotSearchBbox(center, radius);
-    nativeMapRef.current?.flyTo(center.lat, center.lng, query ? 13 : 12, searchedNear);
-    webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: center.lat, lng: center.lng, zoom: query ? 13 : 12, name: searchedNear }));
+    focusPlaceCamera({ lat: center.lat, lng: center.lng, name: searchedNear, type: category.id, subtype: category.label }, query ? 13 : 12, `${category.id} ${query}`);
 
     const searches: Promise<SearchPlace[]>[] = [];
     if (extremeConfig?.feature_flags?.search) {
@@ -8046,28 +10107,50 @@ function MapScreen() {
         searches.push(runMapboxSuggestPlaceSearch(textQuery, center, category.id, limit, bbox));
       }
     }
-    searches.push(
-      api.getNearbyPlaces(center.lat, center.lng, radius, category.nearby, 'auto')
-        .then(places => places.map(place => osmPoiToCopilotPlace(place, center, category.id)).filter(Boolean) as SearchPlace[])
-        .catch(() => []),
-    );
-    searches.push(
-      api.getNearbySmartPack(center.lat, center.lng, radius, category.nearby)
-        .then(pack => ((pack.places ?? []) as OsmPoi[]).map(place => osmPoiToCopilotPlace(place, center, category.id)).filter(Boolean) as SearchPlace[])
-        .catch(() => []),
-    );
+    if (!extremeMapLayerActive || !extremeConfig?.feature_flags?.search) {
+      searches.push(
+        api.getNearbyPlaces(center.lat, center.lng, radius, category.nearby, 'auto')
+          .then(places => places.map(place => osmPoiToCopilotPlace(place, center, category.id)).filter(Boolean) as SearchPlace[])
+          .catch(() => []),
+      );
+      searches.push(
+        api.getNearbySmartPack(center.lat, center.lng, radius, category.nearby)
+          .then(pack => ((pack.places ?? []) as OsmPoi[]).map(place => osmPoiToCopilotPlace(place, center, category.id)).filter(Boolean) as SearchPlace[])
+          .catch(() => []),
+      );
+    }
 
-    const allResults = dedupeCopilotPlaces((await Promise.all(searches)).flat());
+    const allResults = filterCopilotPlacesToRegion(dedupeCopilotPlaces((await Promise.all(searches)).flat()), {
+      source: 'copilot_place_search',
+      bounds: boundsFromBboxString(bbox, query ? 13 : 12),
+      bbox,
+      center,
+      radius_mi: radius,
+      category: category.id,
+      query,
+    });
     const keywordMatches = keyword ? allResults.filter(place => placeMatchesCopilotKeyword(place, keyword)) : allResults;
-    const results = (keywordMatches.length ? keywordMatches : allResults).slice(0, limit);
-    setCopilotResults(results);
-    setCopilotResultScope({ kind: 'place', category: category.id, keyword: keyword || undefined, ts: Date.now() });
-    setSearchResults(results);
+    const rankedResults = rankCopilotPlacesForSearch(keywordMatches.length ? keywordMatches : allResults, center, category.id, keyword);
+    const rawResults = rankedResults.slice(0, limit);
+    const { resultSetId, places: results, queryContext } = storeCopilotPlaceResults(rawResults, category.id, keyword || undefined, {
+      queryContext: {
+        source: 'copilot_place_search',
+        query: query || null,
+        category: category.id,
+        keyword: keyword || null,
+        center,
+        bounds: boundsFromBboxString(bbox, query ? 13 : 12),
+        bbox,
+        zoom: query ? 13 : 12,
+        radius_mi: radius,
+      },
+    });
     setSearchMode('browse');
     setShowSearch(false);
     setShowDiscoveryPanel(false);
 
     const shouldOpenCard = results.length > 0 && args.open_card === true;
+    const openedPlaceSummary = shouldOpenCard ? placeSelectionSpokenSummary(results[0]) : '';
     if (shouldOpenCard) openCopilotPlaceCard(results[0]);
     else setSelectedPlace(null);
 
@@ -8075,7 +10158,9 @@ function MapScreen() {
     const names = examples.map(place => place.name).filter(Boolean);
     const resultLabel = keyword || category.label;
     const spokenSummary = results.length
-      ? `I found ${results.length} ${resultLabel} near ${searchedNear}. ${shouldOpenCard ? `Opening ${names[0]}.` : `Top options: ${names.slice(0, 3).join(', ')}.`}`
+      ? shouldOpenCard
+        ? `I found ${results.length} ${resultLabel} near ${searchedNear}. ${openedPlaceSummary}`
+        : `I found ${results.length} ${resultLabel} near ${searchedNear}. Top options: ${names.slice(0, 3).join(', ')}.`
       : `I did not find ${resultLabel} near ${searchedNear} in this data set.`;
     setQuickToast(spokenSummary);
     setTimeout(() => setQuickToast(''), 3400);
@@ -8087,7 +10172,9 @@ function MapScreen() {
       keyword: keyword || null,
       searched_near: searchedNear,
       center,
+      query_context: copilotQueryContextPayload(queryContext),
       count: results.length,
+      result_set_id: resultSetId,
       selected: shouldOpenCard ? copilotPlacePayload(results[0]) : null,
       results: examples,
       spoken_summary: spokenSummary,
@@ -8097,6 +10184,10 @@ function MapScreen() {
   async function executeCopilotAction(action: MapActionRequest): Promise<Record<string, unknown>> {
     const type = action.action_type;
     const args = action.args || {};
+    const copilotSheetWasOpen = showExtremeCopilot;
+    const closeCopilotForMapAction = () => {
+      if (!copilotSheetWasOpen) setShowExtremeCopilot(false);
+    };
     if (copilotHitsReservedUi(args)) {
       return {
         applied: false,
@@ -8127,9 +10218,24 @@ function MapScreen() {
         .filter(inView)
         .slice(0, 6)
         .map(t => ({ name: t.name || 'Trail', lat: t.lat, lng: t.lng, score: t.score }));
-      const currentResults = (copilotResults.length ? copilotResults : searchResults)
-        .slice(0, 8)
-        .map(copilotPlacePayload);
+      const currentSnap = copilotResultSnapshotRef.current;
+      const fallbackCurrentPlaceResults = !currentSnap
+        ? (copilotResults.length ? copilotResults : searchResults).slice(0, 8).map(copilotPlacePayload)
+        : [];
+      const currentPlaceResults = currentSnap?.kind === 'place'
+        ? (currentSnap.places ?? []).slice(0, 8).map(copilotPlacePayload)
+        : fallbackCurrentPlaceResults;
+      const currentCampResults = currentSnap?.kind === 'camp'
+        ? (currentSnap.camps ?? []).slice(0, 8).map(copilotCampPayload)
+        : visibleCamps;
+      const currentTrailResults = currentSnap?.kind === 'trail'
+        ? (currentSnap.trails ?? []).slice(0, 8).map((trail, idx) => copilotTrailPayload(trail, idx))
+        : visibleTrails;
+      const currentNamedResults = currentSnap?.kind === 'camp'
+        ? currentCampResults
+        : currentSnap?.kind === 'trail'
+          ? currentTrailResults
+          : currentPlaceResults;
       const renderedFeatures = visibleCandidates
         .slice(0, 12)
         .map(visibleCandidatePayload);
@@ -8143,7 +10249,7 @@ function MapScreen() {
       };
       const named = [
         ...renderedFeatures.slice(0, 5).map(p => p.name),
-        ...currentResults.slice(0, 3).map(p => p.name),
+        ...currentNamedResults.slice(0, 3).map(p => p.name),
         ...visibleCamps.slice(0, 2).map(c => c.name),
         ...visibleTrails.slice(0, 2).map(t => t.name),
         ...visiblePlaces.slice(0, 2).map(p => p.name),
@@ -8160,8 +10266,13 @@ function MapScreen() {
           style: context.map?.active_style ?? null,
           visible_layers: visibleLayers,
           selected: selected ? { name: selected.name, type: selected.type, lat: selected.lat, lng: selected.lng } : null,
-          current_results: currentResults,
+          current_result_set_id: currentSnap?.resultSetId ?? null,
+          current_results: currentSnap?.kind === 'camp' ? currentCampResults : currentPlaceResults,
+          current_place_results: currentPlaceResults,
+          current_camp_results: currentCampResults,
+          visible_result_set_id: copilotVisibleSnapshotRef.current?.resultSetId ?? null,
           visible_map_features: renderedFeatures,
+          query_context: copilotQueryContextPayload(copilotVisibleSnapshotRef.current?.queryContext ?? copilotQueryContextRef.current),
           counts,
           examples: {
             rendered_features: renderedFeatures,
@@ -8173,6 +10284,21 @@ function MapScreen() {
           route: context.route,
         },
       };
+    }
+    if (type === 'askForConfirmation') {
+      setShowExtremeCopilot(true);
+      const question = String(args.question || 'What should I search for?');
+      const options = Array.isArray(args.options) ? args.options.map(item => String(item)).filter(Boolean) : [];
+      return {
+        applied: false,
+        status: 'needs_input',
+        question,
+        options,
+        spoken_summary: options.length ? `${question} ${options.join(', ')}.` : question,
+      };
+    }
+    if (type === 'zoomMap' || type === 'setMapZoom') {
+      return runCopilotZoomMap(args);
     }
     if (type === 'searchAndSelectPlace') {
       const query = String(args.query || args.place || args.name || args.destination || '').trim();
@@ -8231,9 +10357,9 @@ function MapScreen() {
     }
     if (type === 'searchPlaces') {
       const category = String(args.category || '');
-      setShowExtremeCopilot(false);
+      closeCopilotForMapAction();
       if (category === 'camp') {
-        setCopilotResults([]);
+        clearCopilotResultSession();
         setCopilotResultScope({ kind: 'camp', category: 'camp', ts: Date.now() });
         setDiscoveryMode('camps');
         setShowDiscoveryPanel(true);
@@ -8245,8 +10371,7 @@ function MapScreen() {
             : userLoc);
         let searchedNear = query || 'current view';
         if (query) {
-          const places = await api.geocodePlaces(query, 1);
-          const place = places[0];
+          const place = await resolveVerifiedGeocodePlace(query, { center, source: 'copilot_camp_search_anchor', allowAmbiguous: true });
           if (!place) return { applied: false, reason: 'place_not_found', query };
           center = { lat: place.lat, lng: place.lng };
           searchedNear = place.name || query;
@@ -8262,13 +10387,31 @@ function MapScreen() {
         nativeMapRef.current?.flyTo(center.lat, center.lng, 11, searchedNear);
         webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: center.lat, lng: center.lng, zoom: 11, name: searchedNear }));
         const camps = await loadCampsInArea(bounds, activeFilters) ?? [];
+        const { resultSetId, queryContext } = storeCopilotCampResults(camps, 'camp', {
+          queryContext: {
+            source: 'copilot_camp_search',
+            query: query || null,
+            category: 'camp',
+            center,
+            bounds,
+            bbox: bboxStringFromBounds(bounds),
+            zoom: bounds.zoom,
+            radius_mi: query ? 32 : 24,
+          },
+        });
         const shouldOpenCard = camps.length > 0 && (args.open_card === true || !!query);
-        if (shouldOpenCard) openCopilotCampCard(camps[0]);
+        let openedCampSummary = '';
+        if (shouldOpenCard) {
+          openCopilotCampCard(camps[0]);
+          openedCampSummary = await campSelectionSpokenSummaryWithFullness(camps[0]);
+        }
         else setShowDiscoveryPanel(true);
         const examples = camps.slice(0, 6).map(copilotCampPayload);
         const names = examples.map(camp => camp.name).filter(Boolean);
         const spokenSummary = camps.length
-          ? `I found ${camps.length} camps near ${searchedNear}. ${shouldOpenCard ? `Opening ${names[0]}.` : `Top options: ${names.slice(0, 3).join(', ')}.`}`
+          ? shouldOpenCard
+            ? `I found ${camps.length} camps near ${searchedNear}. ${openedCampSummary}`
+            : `I found ${camps.length} camps near ${searchedNear}. Top options: ${names.slice(0, 3).join(', ')}.`
           : `I did not find camps near ${searchedNear} in this data set.`;
         setQuickToast(camps.length ? spokenSummary : `No camps found near ${searchedNear}.`);
         setTimeout(() => setQuickToast(''), 3200);
@@ -8277,7 +10420,9 @@ function MapScreen() {
           opened: shouldOpenCard ? 'camp_card' : 'camp_discovery',
           searched_near: searchedNear,
           center,
+          query_context: copilotQueryContextPayload(queryContext),
           count: camps.length,
+          result_set_id: resultSetId,
           selected: shouldOpenCard ? copilotCampPayload(camps[0]) : null,
           camps: examples,
           spoken_summary: spokenSummary,
@@ -8286,18 +10431,42 @@ function MapScreen() {
       return runCopilotPoiSearch(category || args.type || args.intent || 'poi', args);
     }
     if (type === 'searchTrails') {
-      setShowExtremeCopilot(false);
-      setCopilotResultScope({ kind: 'trail', category: 'trails', ts: Date.now() });
+      closeCopilotForMapAction();
+      clearCopilotResultSession();
+      const bounds = currentCopilotBounds();
+      const { resultSetId, trails, queryContext } = storeCopilotTrailResults(trailDiscoveries, 'trails', {
+        queryContext: {
+          source: 'copilot_trail_search',
+          query: copilotQueryFromArgs(args) || null,
+          category: 'trails',
+          center: boundsCenter(bounds) ?? userLoc ?? null,
+          bounds,
+          bbox: bboxStringFromBounds(bounds),
+          zoom: bounds?.zoom ?? mapZoom,
+          radius_mi: null,
+        },
+      });
       setDiscoveryMode('trails');
       setTrailDiscoveryScope('view');
       setShowDiscoveryPanel(true);
-      return { applied: true, opened: 'trail_discovery' };
+      const examples = trails.slice(0, 6).map((trail, idx) => copilotTrailPayload(trail, idx));
+      return {
+        applied: true,
+        opened: 'trail_discovery',
+        result_set_id: resultSetId,
+        query_context: copilotQueryContextPayload(queryContext),
+        count: trails.length,
+        trails: examples,
+      };
     }
     if (type === 'selectRenderedFeature' || type === 'selectVisiblePlace' || type === 'openSelectedPlaceCard') {
-      const visibleCandidates = await getVisibleCandidateSnapshot();
-      const { feature, ambiguous, matches } = findVisibleCandidate(args, visibleCandidates);
+      const snapshotFeature = resolveVisibleFeatureFromSnapshot(args);
+      const visibleCandidates = snapshotFeature ? (copilotVisibleSnapshotRef.current?.features ?? []) : await getVisibleCandidateSnapshot();
+      const resolved = snapshotFeature
+        ? { feature: snapshotFeature, ambiguous: false, matches: [snapshotFeature] }
+        : findVisibleCandidate(args, visibleCandidates);
+      const { feature, ambiguous, matches } = resolved;
       if (!feature) {
-        setShowExtremeCopilot(true);
         setQuickToast('No visible map feature matched.');
         setTimeout(() => setQuickToast(''), 2400);
         return { applied: false, status: 'failed', reason: 'no_visible_feature', spoken_summary: 'I could not match that to a visible map feature. Ask what I see, then choose by number or name.' };
@@ -8311,65 +10480,213 @@ function MapScreen() {
           spoken_summary: `I see more than one match: ${matches.slice(0, 3).map(item => item.name).join(', ')}. Which one?`,
         };
       }
+      const guard = copilotSelectionGuard(feature, args, copilotVisibleSnapshotRef.current?.queryContext ?? copilotQueryContextRef.current);
+      if (!guard.ok) {
+        logCopilotMapTelemetry('copilot_selection_guard_failed', {
+          reason: guard.reason,
+          requested: args,
+          candidate: copilotCandidateSummary(feature, feature.result_index),
+          query_context: guard.query_context,
+        });
+        setQuickToast('Refresh visible map results.');
+        setTimeout(() => setQuickToast(''), 2400);
+        return {
+          applied: false,
+          status: 'failed',
+          reason: guard.reason,
+          selection_guard: guard,
+          spoken_summary: 'That visible result no longer matches the active map region. Ask what I see or search again.',
+        };
+      }
       const place = await enrichRenderedFeaturePlace(feature);
-      openCopilotPlaceCard(place);
-      setShowExtremeCopilot(false);
+      const requestedSelectionZoom = Number(args.zoom ?? args.target_zoom);
+      const selectionZoom = Number.isFinite(requestedSelectionZoom)
+        ? clampNumber(Math.max(mapZoom, requestedSelectionZoom), 3, 18)
+        : clampNumber(Math.max(mapZoom, 16), 3, 18);
+      openCopilotPlaceCard(place, selectionZoom);
+      markSelectedCopilotFeature(feature, place);
+      logCopilotMapTelemetry('copilot_selection_resolved', {
+        source: 'visible_map_feature',
+        chosen_source: feature.source || feature.source_label || null,
+        chosen_name: feature.name,
+        chosen_type: feature.type || null,
+        chosen_coordinates: { lat: feature.lat, lng: feature.lng },
+        result_set_id: feature.result_set_id || null,
+        result_id: feature.result_id || feature.feature_id,
+        selection_guard: guard,
+      });
+      closeCopilotForMapAction();
       return {
         applied: true,
         status: 'applied',
         selected: feature.name,
         selected_type: feature.type || 'place',
         selected_place: copilotPlacePayload(place),
-        spoken_summary: `Opening ${feature.name}.`,
+        zoom: selectionZoom,
+        spoken_summary: placeSelectionSpokenSummary(place, 'I picked'),
       };
     }
     if (type === 'selectPlace') {
-      const index = Math.max(0, Number(args.result_index || 0));
-      const requestedName = String(args.name || args.place || args.target || args.feature_id || '').trim().toLowerCase();
-      const desiredCategory = String(args.category || args.kind || args.result_type || copilotResultScope?.category || '').toLowerCase();
-      const wantsCamp = /camp|campground|campsite/.test(desiredCategory) || copilotResultScope?.kind === 'camp';
-      const wantsTrail = /trail|hike/.test(desiredCategory) || copilotResultScope?.kind === 'trail';
-      const wantsPlace = /place|poi|food|restaurant|pizza|taco|burger|coffee|view|attraction|fuel|gas|grocery|mechanic/.test(desiredCategory)
-        || copilotResultScope?.kind === 'place'
-        || copilotResults.length > 0
-        || searchResults.length > 0;
-      const activePlaceResults = copilotResults.length ? copilotResults : (copilotResultScope?.kind === 'place' || searchResults.length ? searchResults : []);
-      const place = requestedName
-        ? activePlaceResults.find(item => item.name.toLowerCase().includes(requestedName) || requestedName.includes(item.name.toLowerCase()))
-        : activePlaceResults[index];
-      if (place) {
-        openCopilotPlaceCard(place);
-        setShowExtremeCopilot(false);
-        return { applied: true, status: 'applied', selected: place.name, selected_type: place.type || 'place', place: copilotPlacePayload(place) };
-      }
-      const renderedFeature = requestedName
-        ? (await getVisibleCandidateSnapshot()).find(item => item.feature_id.toLowerCase() === requestedName || placeTextMatches(item.name, requestedName) || (item.aliases ?? []).some(alias => placeTextMatches(alias, requestedName)))
-        : (await getVisibleCandidateSnapshot())[index];
-      if (renderedFeature) {
-        const renderedPlace = await enrichRenderedFeaturePlace(renderedFeature);
-        openCopilotPlaceCard(renderedPlace);
-        setShowExtremeCopilot(false);
-        return { applied: true, status: 'applied', selected: renderedFeature.name, selected_type: renderedFeature.type || 'place', selected_place: copilotPlacePayload(renderedPlace) };
-      }
-      if (wantsPlace || copilotResultScope?.kind === 'place') {
-        setShowExtremeCopilot(true);
-        setQuickToast('No current place result at that number.');
-        setTimeout(() => setQuickToast(''), 2400);
-        return { applied: false, status: 'failed', reason: 'no_place_result', result_index: index, spoken_summary: 'I do not have a place result at that number. Try the pizza or food search again.' };
-      }
-      const camp = areaCamps[index];
-      if (wantsCamp && camp) {
+      const desiredCategory = String(args.category || args.kind || args.type || args.result_type || '').toLowerCase();
+      const activeKind = copilotResultSnapshotRef.current?.kind ?? copilotResultScope?.kind ?? null;
+      const requestedSetId = requestedResultSetIdFromArgs(args);
+      const activeSetId = copilotResultSnapshotRef.current?.resultSetId || copilotResultScope?.resultSetId || '';
+      const targetsActiveSet = !!requestedSetId && !!activeSetId && requestedSetId === activeSetId;
+      const explicitCamp = /camp|campground|campsite/.test(desiredCategory);
+      const explicitTrail = /trail|hike|offroad|track/.test(desiredCategory);
+      const explicitPlace = /place|poi|food|restaurant|pizza|taco|burger|coffee|view|attraction|landmark|lodging|hotel|motel|stay|fuel|gas|grocery|mechanic/.test(desiredCategory);
+      const wantsCamp = explicitCamp || (!explicitPlace && !explicitTrail && (activeKind === 'camp' || (targetsActiveSet && copilotResultSnapshotRef.current?.kind === 'camp')));
+      const wantsTrail = explicitTrail || (!explicitPlace && !explicitCamp && (activeKind === 'trail' || (targetsActiveSet && copilotResultSnapshotRef.current?.kind === 'trail')));
+      const wantsPlace = explicitPlace || (!explicitCamp && !explicitTrail && (activeKind === 'place' || (!activeKind && (copilotResults.length > 0 || searchResults.length > 0))));
+
+      if (wantsCamp) {
+        const camp = resolveCampResultFromArgs(args);
+        if (!camp) {
+          setQuickToast('No current camp result matched.');
+          setTimeout(() => setQuickToast(''), 2400);
+          return {
+            applied: false,
+            status: 'failed',
+            reason: 'no_camp_result',
+            result_index: resultIndexFromArgs(args),
+            result_set_id: requestedSetId || activeSetId || null,
+            spoken_summary: 'I do not have that camp result in the current camp list. Search camps again or choose by number from the current list.',
+          };
+        }
+        const campSnap = copilotResultSnapshotRef.current?.kind === 'camp' ? copilotResultSnapshotRef.current : null;
+        const guard = copilotSelectionGuard(camp, args, copilotSnapshotContext(campSnap));
+        if (!guard.ok) {
+          logCopilotMapTelemetry('copilot_selection_guard_failed', {
+            reason: guard.reason,
+            requested: args,
+            candidate: copilotCandidateSummary(camp as unknown as Partial<SearchPlace & MapSelectableFeature & CampsitePin>, resultIndexFromArgs(args) ?? 0),
+            query_context: guard.query_context,
+          });
+          setQuickToast('Camp results need refresh.');
+          setTimeout(() => setQuickToast(''), 2400);
+          return {
+            applied: false,
+            status: 'failed',
+            reason: guard.reason,
+            selection_guard: guard,
+            result_index: resultIndexFromArgs(args),
+            spoken_summary: 'That camp result no longer matches the active search region. Search camps again.',
+          };
+        }
         openCopilotCampCard(camp);
-        setShowExtremeCopilot(false);
-        return { applied: true, selected: camp.name, selected_type: 'camp', camp: copilotCampPayload(camp) };
+        const spokenSummary = await campSelectionSpokenSummaryWithFullness(camp);
+        logCopilotMapTelemetry('copilot_selection_resolved', {
+          source: 'camp_result',
+          chosen_source: camp.verified_source || camp.source_badge || camp.source || null,
+          chosen_name: camp.name,
+          chosen_type: 'camp',
+          chosen_coordinates: { lat: camp.lat, lng: camp.lng },
+          result_set_id: campSnap?.resultSetId || null,
+          result_id: campResultId(camp, resultIndexFromArgs(args) ?? 0),
+          selection_guard: guard,
+        });
+        closeCopilotForMapAction();
+        return { applied: true, selected: camp.name, selected_type: 'camp', camp: copilotCampPayload(camp), selection_guard: guard, spoken_summary: spokenSummary };
       }
-      const trail = trailDiscoveries[index];
-      if (wantsTrail && trail) {
+
+      if (wantsTrail) {
+        const trail = resolveTrailResultFromArgs(args);
+        if (!trail) {
+          setQuickToast('No current trail result matched.');
+          setTimeout(() => setQuickToast(''), 2400);
+          return {
+            applied: false,
+            status: 'failed',
+            reason: 'no_trail_result',
+            result_index: resultIndexFromArgs(args),
+            result_set_id: requestedSetId || activeSetId || null,
+            spoken_summary: 'I do not have that trail result in the current trail list. Search trails again or choose by number from the current list.',
+          };
+        }
+        const trailSnap = copilotResultSnapshotRef.current?.kind === 'trail' ? copilotResultSnapshotRef.current : null;
+        const guard = copilotSelectionGuard(trail, args, copilotSnapshotContext(trailSnap));
+        if (!guard.ok) {
+          logCopilotMapTelemetry('copilot_selection_guard_failed', {
+            reason: guard.reason,
+            requested: args,
+            candidate: copilotCandidateSummary(trail as unknown as Record<string, any>, resultIndexFromArgs(args) ?? 0),
+            query_context: guard.query_context,
+          });
+          setQuickToast('Trail results need refresh.');
+          setTimeout(() => setQuickToast(''), 2400);
+          return {
+            applied: false,
+            status: 'failed',
+            reason: guard.reason,
+            selection_guard: guard,
+            result_index: resultIndexFromArgs(args),
+            result_set_id: requestedSetId || trailSnap?.resultSetId || null,
+            spoken_summary: 'That trail result no longer matches the active search region. Search trails again.',
+          };
+        }
+        const idx = trailSnap?.trails?.findIndex(item => String(item.id || '') === String(trail.id || '') || (Math.abs(item.lat - trail.lat) < 0.00001 && Math.abs(item.lng - trail.lng) < 0.00001)) ?? resultIndexFromArgs(args) ?? 0;
+        lastSelectedCopilotResultRef.current = {
+          kind: 'trail',
+          resultSetId: trailSnap?.resultSetId,
+          resultId: idx >= 0 ? trailResultId(trail, idx) : trailResultId(trail, 0),
+          trail,
+          selectedAt: Date.now(),
+        };
         openTrailFeature(trail);
-        setShowExtremeCopilot(false);
-        return { applied: true, selected: trail.name, selected_type: 'trail' };
+        closeCopilotForMapAction();
+        return { applied: true, selected: trail.name, selected_type: 'trail', selection_guard: guard };
       }
-      setShowExtremeCopilot(true);
+
+      if (wantsPlace) {
+        const place = resolvePlaceResultFromArgs(args);
+        if (!place) {
+          setQuickToast('No current place result matched.');
+          setTimeout(() => setQuickToast(''), 2400);
+          return {
+            applied: false,
+            status: 'failed',
+            reason: 'no_place_result',
+            result_index: resultIndexFromArgs(args),
+            result_set_id: requestedSetId || activeSetId || null,
+            spoken_summary: 'I do not have that place result in the current search list. Search food, lodging, or attractions again.',
+          };
+        }
+        const placeSnap = copilotResultSnapshotRef.current?.kind === 'place' ? copilotResultSnapshotRef.current : null;
+        const guard = copilotSelectionGuard(place, args, copilotSnapshotContext(placeSnap));
+        if (!guard.ok) {
+          logCopilotMapTelemetry('copilot_selection_guard_failed', {
+            reason: guard.reason,
+            requested: args,
+            candidate: copilotCandidateSummary(place, resultIndexFromArgs(args) ?? 0),
+            query_context: guard.query_context,
+          });
+          setQuickToast('Search results need refresh.');
+          setTimeout(() => setQuickToast(''), 2400);
+          return {
+            applied: false,
+            status: 'failed',
+            reason: guard.reason,
+            selection_guard: guard,
+            result_index: resultIndexFromArgs(args),
+            result_set_id: requestedSetId || place.result_set_id || null,
+            spoken_summary: 'That result no longer matches the active search region. Search again or ask what I see.',
+          };
+        }
+        openCopilotPlaceCard(place);
+        const spokenSummary = placeSelectionSpokenSummary(place);
+        logCopilotMapTelemetry('copilot_selection_resolved', {
+          source: 'place_result',
+          chosen_source: place.source || place.source_label || null,
+          chosen_name: place.name,
+          chosen_type: place.type || null,
+          chosen_coordinates: { lat: place.lat, lng: place.lng },
+          result_set_id: place.result_set_id || null,
+          result_id: place.result_id || place.id || null,
+          selection_guard: guard,
+        });
+        closeCopilotForMapAction();
+        return { applied: true, status: 'applied', selected: place.name, selected_type: place.type || 'place', place: copilotPlacePayload(place), selection_guard: guard, spoken_summary: spokenSummary };
+      }
       setQuickToast('No Copilot result list yet.');
       setTimeout(() => setQuickToast(''), 2400);
       return { applied: false, status: 'failed', reason: 'no_result_list', spoken_summary: 'I do not have a result list to choose from yet.' };
@@ -8379,23 +10696,41 @@ function MapScreen() {
       const lat = Number(target.lat);
       const lng = Number(target.lng);
       if (Number.isFinite(lat) && Number.isFinite(lng)) {
-        nativeMapRef.current?.flyTo(lat, lng, Number(args.zoom || 13), target.name);
-        webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat, lng, zoom: Number(args.zoom || 13), name: target.name }));
-        return { applied: true, flown_to: target.name || 'target', lat, lng };
+        focusPlaceCamera({ lat, lng, name: target.name || 'target', type: String(target.type || args.category || '') }, Number(args.zoom || 13), String(args.query || target.name || ''));
+        return { applied: true, flown_to: target.name || 'target', lat, lng, spoken_summary: `Moving the map to ${target.name || 'that place'}.` };
       }
       const query = String(target.name || args.query || args.place || args.destination || args.location || '').trim();
       if (query.length >= 2) {
-        const places = await api.geocodePlaces(query, 1);
-        const place = places[0];
+        const place = await resolveVerifiedGeocodePlace(query, {
+          center: boundsCenter(currentCopilotBounds()) ?? userLoc,
+          source: 'copilot_fly_to',
+          allowAmbiguous: true,
+        });
         if (place && Number.isFinite(place.lat) && Number.isFinite(place.lng)) {
           const zoom = Number(args.zoom || 12);
-          nativeMapRef.current?.flyTo(place.lat, place.lng, zoom, place.name || query);
-          webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: place.lat, lng: place.lng, zoom, name: place.name || query }));
+          focusPlaceCamera({ ...place, name: place.name || query }, zoom, query);
           setQuickToast(`Map moved to ${place.name || query}.`);
           setTimeout(() => setQuickToast(''), 2200);
-          return { applied: true, flown_to: place.name || query, lat: place.lat, lng: place.lng, source: place.source || 'geocode' };
+          return {
+            applied: true,
+            status: 'applied',
+            flown_to: place.name || query,
+            lat: place.lat,
+            lng: place.lng,
+            source: place.source || 'geocode',
+            geocode_status: place.geocode_status || null,
+            geocode_reason: place.geocode_reason || null,
+            country_code: place.country_code || null,
+            spoken_summary: `Moving the map to ${place.name || query}.`,
+          };
         }
-        return { applied: false, reason: 'place_not_found', query };
+        return {
+          applied: false,
+          status: 'failed',
+          reason: 'place_not_found_or_ambiguous',
+          query,
+          spoken_summary: `I could not verify the exact place for ${query}. Try adding a country, state, or nearby city.`,
+        };
       }
       return { applied: false, reason: 'missing_target' };
     }
@@ -8410,22 +10745,29 @@ function MapScreen() {
       const draft = await writeRouteBuilderDraft({
         ...routeScout.draftArgs,
         source: 'copilot_route_scout',
+        autoBuild: false,
         start: routeScout.startName || routeScout.draftArgs.start,
         destination: routeScout.destinationName || routeScout.draftArgs.destination,
         days: routeScout.days,
         driveHours: routeScout.driveHours,
         routeStyle: routeScout.routeStyle,
         campPreference: routeScout.campPreference,
+        campPhotoOnly: routeScout.draftArgs?.campPhotoOnly === true || routeScout.draftArgs?.require_photos === true,
         stops: scoutStops
-          .filter(stop => stop.type !== 'review')
           .map(stop => ({
             day: stop.day,
             name: stop.name,
             lat: stop.lat,
             lng: stop.lng,
-            type: stop.type === 'destination' ? 'waypoint' : stop.type,
+            type: stop.type === 'review' ? 'waypoint' : stop.type,
+            label: stop.label,
+            description: stop.description || stop.reason || (stop.type === 'review' ? 'Temporary overnight search area. Pick a camp before navigation.' : undefined),
+            source: stop.source || (stop.type === 'camp' ? 'camp' : 'copilot'),
+            routePointType: stop.routePointType || (stop.type === 'review' ? 'through' : 'break'),
+            routeShapeRole: stop.routeShapeRole || (stop.type === 'review' ? 'outbound_anchor' : stop.type === 'camp' ? 'overnight' : stop.type === 'destination' ? 'destination' : stop.type === 'start' ? 'start' : undefined),
           })),
-      }, true);
+      }, false);
+      recentRouteScoutActionRef.current = { at: Date.now(), action: 'save' };
       setShowExtremeCopilot(false);
       router.push('/(tabs)/route-builder');
       return { applied: true, status: 'applied', opened: 'route_builder', route_builder_draft: draft, spoken_summary: 'Route scout saved to Route Builder.' };
@@ -8484,12 +10826,34 @@ function MapScreen() {
       return { applied: true, status: 'applied', opened: 'offline_downloads' };
     }
     if (type === 'openRigProfile') {
+      const recentScout = recentRouteScoutActionRef.current;
+      const accidentalAfterScout = action.provider === 'openai_realtime'
+        && recentScout
+        && Date.now() - recentScout.at < 20000
+        && args.explicit_request !== true
+        && args.user_confirmed !== true;
+      if (accidentalAfterScout) {
+        return {
+          applied: false,
+          status: 'blocked',
+          reason: 'profile_open_blocked_after_route_scout',
+          spoken_summary: 'The route scout is still active. I will stay on the planned trip unless you explicitly ask to open the rig profile.',
+        };
+      }
       setShowExtremeCopilot(false);
       router.push('/(tabs)/profile');
       return { applied: true, status: 'applied', opened: 'rig_profile', rig_profile: rigProfile ?? null };
     }
     if (type === 'buildRoute' || type === 'modifyRoute' || type === 'routeToSelectedPlace') {
-      const hasVisibleTargetArgs = !!(args.feature_id || args.id || args.result_index != null || args.index != null || args.number != null || args.type || args.kind || args.category || args.place_type || args.position || args.screen_position || args.side || args.name || args.place);
+      const hasCurrentResultTarget = !!(resolvePlaceResultFromArgs(args) || resolveCampResultFromArgs(args) || resolveTrailResultFromArgs(args));
+      const hasVisibleTargetArgs = !hasCurrentResultTarget && !!(
+        args.feature_id
+        || args.screen_position
+        || args.position
+        || args.side
+        || args.result_set_id === copilotVisibleSnapshotRef.current?.resultSetId
+        || (args.result_id && copilotVisibleSnapshotRef.current?.features?.some(item => item.result_id === args.result_id || item.feature_id === args.result_id))
+      );
       const visibleCandidates = hasVisibleTargetArgs ? await getVisibleCandidateSnapshot() : visibleMapFeatures;
       if (hasVisibleTargetArgs) {
         const visibleTarget = findVisibleCandidate(args, visibleCandidates);
@@ -8504,7 +10868,7 @@ function MapScreen() {
         }
       }
       const dest = await resolveCopilotDestination(args, visibleCandidates);
-      setShowExtremeCopilot(false);
+      closeCopilotForMapAction();
       const location = await ensureCopilotLocation();
       if (dest && location.loc) {
         previewSearchRoute({ name: 'My Location', lat: location.loc.lat, lng: location.loc.lng, isCurrentLocation: true }, dest as SearchPlace);
@@ -8521,7 +10885,6 @@ function MapScreen() {
       if (!location.loc) {
         return { applied: false, status: 'failed', location_status: location.status, reason: 'location_required', spoken_summary: 'Location is needed before I can preview that route.' };
       }
-      setShowExtremeCopilot(true);
       setQuickToast('Tell Copilot the destination first.');
       setTimeout(() => setQuickToast(''), 2600);
       return { applied: false, status: 'failed', reason: 'missing_destination', spoken_summary: 'Tell me the destination first, or select a visible result.' };
@@ -8529,12 +10892,11 @@ function MapScreen() {
     if (type === 'startNavigation') {
       const dest = await resolveCopilotDestination(args);
       const location = await ensureCopilotLocation();
-      setShowExtremeCopilot(false);
+      closeCopilotForMapAction();
       if (!location.loc) {
         return { applied: false, status: 'failed', location_status: location.status, navigation: { active: false }, reason: 'location_required', spoken_summary: 'Location is needed before navigation can start.' };
       }
       if (!dest) {
-        setShowExtremeCopilot(true);
         setQuickToast('Tell Copilot the destination first.');
         setTimeout(() => setQuickToast(''), 2600);
         return { applied: false, status: 'failed', location_status: location.status, navigation: { active: false }, reason: 'missing_destination', spoken_summary: 'Tell me where to navigate first, or select a visible result.' };
@@ -8586,15 +10948,35 @@ function MapScreen() {
 
   async function runCopilotAction(action: MapActionRequest, confirmed: boolean): Promise<Record<string, unknown>> {
     let clientResult: Record<string, unknown> = { confirmed };
+    const actionResultText = (result: Record<string, unknown>) => {
+      const spoken = typeof result.spoken_summary === 'string' ? result.spoken_summary.trim() : '';
+      if (spoken) return spoken;
+      const message = typeof result.message === 'string' ? result.message.trim() : '';
+      if (message) return message;
+      if (result.applied === false) {
+        const reason = typeof result.reason === 'string' ? result.reason.replace(/_/g, ' ') : 'the action did not apply';
+        return `I could not complete that: ${reason}.`;
+      }
+      if (action.action_type === 'searchPlaces' && Number.isFinite(Number(result.count))) {
+        const count = Number(result.count);
+        const category = String(result.category || action.args?.category || 'places');
+        return count ? `I found ${count} ${category} results.` : `I did not find ${category} in this area.`;
+      }
+      return 'Action applied.';
+    };
     try {
       if (confirmed) clientResult = await executeCopilotAction(action);
       if (typeof action.id === 'number') {
         await api.confirmExtremeCopilotAction({ action_id: action.id, confirmed, client_result: clientResult });
       }
+      const responseText = confirmed ? actionResultText(clientResult) : 'Action canceled.';
+      if (confirmed && responseText && responseText !== 'Action applied.') {
+        setExtremeCopilotVoiceStatus(responseText);
+      }
       appendCopilotMessage({
         id: `copilot-confirm-${Date.now()}`,
         role: 'assistant',
-        text: confirmed ? (clientResult.applied === false ? 'Action failed.' : 'Action applied.') : 'Action canceled.',
+        text: responseText,
       });
     } catch (e: any) {
       clientResult = { confirmed, applied: false, error: e?.message || 'client_action_failed' };
@@ -8708,6 +11090,30 @@ function MapScreen() {
         text: 'Trail Guide ready.',
       });
     }
+  }
+
+  async function shareAdminCopilotDebugTranscript() {
+    if (!user?.is_admin) return;
+    const payload = await recordAdminCopilotDebugSnapshot(
+      'manual_admin_debug_share',
+      {
+        pending_action: copilotDebugActionPayload(pendingCopilotAction),
+        current_input: extremeCopilotInput.trim() || null,
+      },
+      { force: true, appendMessage: true },
+    );
+    const transcript = payload?.transcript || copilotDebugTranscript;
+    if (!transcript) {
+      setQuickToast('No debug transcript available.');
+      setTimeout(() => setQuickToast(''), 2200);
+      return;
+    }
+    try {
+      await Share.share({
+        title: 'Trailhead Copilot map debug',
+        message: transcript,
+      });
+    } catch {}
   }
 
   async function submitCopilotMessage(raw?: string) {
@@ -9308,7 +11714,10 @@ function MapScreen() {
         mergedCamps.push(camp);
         if (mergedCamps.length >= 180) break;
       }
-      const tagged = mergedCamps.map(c => ({ ...c, full: fullIds.has(c.id) ? 1 : 0 }));
+      const tagged = rankCopilotCampsForSearch(
+        mergedCamps.map(c => ({ ...c, full: fullIds.has(c.id) ? 1 : 0 })),
+        { lat: centerLat, lng: centerLng },
+      );
       const smartNonCampPois = smartPlaces
         .filter(p => String(p.type) !== 'camp')
         .filter(p => (p.name && p.name.trim()) || UTILITY_PLACE_TYPES.has(String(p.type || ''))) as OsmPoi[];
@@ -9632,11 +12041,8 @@ function MapScreen() {
         // Silently upgrade to full camp data if our backend has it
         api.getNearbyCamps(msg.lat, msg.lng, 2).then(results => {
           if (!results.length) return;
-          const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
-          const tapped = norm(msg.name);
-          const match = results.find(r =>
-            norm(r.name).includes(tapped.slice(0, 8)) || tapped.includes(norm(r.name).slice(0, 8))
-          ) ?? results[0];
+          const match = strictBackendCampMatch(minPin, results);
+          if (!match) return;
           // Only update if user hasn't closed/changed the card
           setSelectedCamp(prev => prev?.id === minId ? match : prev);
         }).catch(() => {});
@@ -10225,6 +12631,7 @@ function MapScreen() {
       next.push({
         ...feature,
         result_index: next.length,
+        result_id: feature.result_id || stableCopilotResultId('visible', feature as unknown as Record<string, any>, next.length),
         screen_position: feature.screen_position ?? screenPositionFromBounds(feature, vp),
         confidence: feature.confidence || (feature.source === 'copilot_result' || feature.source === 'search_result' ? 'high' : 'medium'),
         aliases: feature.aliases?.length ? feature.aliases : [feature.name, feature.subtype, feature.type, feature.address].filter((item): item is string => !!item),
@@ -11063,6 +13470,34 @@ function MapScreen() {
     };
   }
 
+  function campTileNameToken(value: string) {
+    return value.toLowerCase().replace(/\b(campground|camp ground|camp|campsite|camp site|site|area|rv|park|dispersed|spot|shelter)\b/g, ' ').replace(/[^a-z0-9]/g, '');
+  }
+
+  function strictBackendCampMatch(tapped: Pick<CampsitePin, 'name' | 'lat' | 'lng'>, results: CampsitePin[]) {
+    const tappedToken = campTileNameToken(tapped.name || '');
+    const usable = results
+      .filter(camp => Number.isFinite(camp.lat) && Number.isFinite(camp.lng))
+      .map(camp => ({
+        camp,
+        distanceKm: haversineKm(tapped.lat, tapped.lng, camp.lat, camp.lng),
+        token: campTileNameToken(camp.name || ''),
+      }))
+      .filter(item => Number.isFinite(item.distanceKm));
+    const named = usable
+      .filter(item => {
+        if (item.distanceKm > 0.5) return false;
+        if (tappedToken.length < 5 || item.token.length < 5) return false;
+        return item.token.includes(tappedToken.slice(0, 10)) || tappedToken.includes(item.token.slice(0, 10));
+      })
+      .sort((a, b) => a.distanceKm - b.distanceKm)[0];
+    if (named) return named.camp;
+    const coordinateExact = usable
+      .filter(item => item.distanceKm <= 0.08)
+      .sort((a, b) => a.distanceKm - b.distanceKm)[0];
+    return coordinateExact?.camp ?? null;
+  }
+
   function openMapTileCamp(name: string, kind: string, lat: number, lng: number, landType?: string) {
     const pin = mapTileCampPin(name, kind, lat, lng, landType);
     setTappedPoi(null);
@@ -11085,20 +13520,74 @@ function MapScreen() {
 
     api.getNearbyCamps(lat, lng, 2).then(results => {
       if (!results.length) return;
-      const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
-      const tapped = norm(pin.name);
-      const named = results.find(r => {
-        const rn = norm(r.name);
-        return rn && tapped && (rn.includes(tapped.slice(0, 8)) || tapped.includes(rn.slice(0, 8)));
-      });
-      const match = named ?? results[0];
+      const match = strictBackendCampMatch(pin, results);
+      if (!match) return;
       setSelectedCamp(prev => prev?.id === pin.id ? match : prev);
       if (match?.id) api.getCampFullness(match.id).then(r => setCampFullness(r)).catch(() => {});
     }).catch(() => {});
   }
 
+  function renderedMapboxPlaceKey(place: Pick<SearchPlace, 'id' | 'name' | 'lat' | 'lng' | 'place_id' | 'provider_place_id'>) {
+    return String(place.id || place.place_id || place.provider_place_id || `${place.name}:${place.lat.toFixed(5)}:${place.lng.toFixed(5)}`);
+  }
+
+  function cancelRenderedMapboxEnrichment({ clearRecent = true }: { clearRecent?: boolean } = {}) {
+    renderedMapboxEnrichmentSeqRef.current += 1;
+    if (renderedMapboxEnrichmentTimerRef.current) {
+      clearTimeout(renderedMapboxEnrichmentTimerRef.current);
+      renderedMapboxEnrichmentTimerRef.current = null;
+    }
+    if (clearRecent) recentRenderedMapboxSelectionRef.current = null;
+  }
+
+  function shouldIgnoreRecentRenderedMapboxFallbackTap(lat?: number, lng?: number) {
+    const recent = recentRenderedMapboxSelectionRef.current;
+    if (!recent || Date.now() - recent.at > 2500) return false;
+    if (lat == null || lng == null || !Number.isFinite(lat) || !Number.isFinite(lng)) return true;
+    const distanceKm = haversineKm(lat, lng, recent.lat, recent.lng);
+    return Number.isFinite(distanceKm) && distanceKm < 0.18;
+  }
+
+  function scheduleRenderedMapboxEnrichment(place: SearchPlace, feature: MapSelectableFeature) {
+    const key = renderedMapboxPlaceKey(place);
+    const seq = ++renderedMapboxEnrichmentSeqRef.current;
+    if (renderedMapboxEnrichmentTimerRef.current) clearTimeout(renderedMapboxEnrichmentTimerRef.current);
+    renderedMapboxEnrichmentTimerRef.current = setTimeout(() => {
+      renderedMapboxEnrichmentTimerRef.current = null;
+      InteractionManager.runAfterInteractions(() => {
+        if (renderedMapboxEnrichmentSeqRef.current !== seq) return;
+        enrichRenderedFeaturePlace(feature).then(enriched => {
+          if (renderedMapboxEnrichmentSeqRef.current !== seq) return;
+          setSelectedPlace(current => {
+            if (!current || renderedMapboxPlaceKey(current) !== key) return current;
+            return { ...current, ...enriched };
+          });
+        }).catch(() => {});
+      });
+    }, 700);
+  }
+
   function openPoiFeature(poi: OsmPoi, day?: number | null) {
     const place = poi as SearchPlace;
+    const source = String(poi.source || '').toLowerCase();
+    const renderedMapbox = isRenderedMapboxPlaceSource(source);
+    cancelRenderedMapboxEnrichment({ clearRecent: !renderedMapbox });
+    const nextPlace = {
+      ...place,
+      source: place.source || 'map',
+      source_label: place.source_label || place.source_badge || 'Map source',
+      summary: renderedMapbox
+        ? place.summary || place.address
+        : place.summary || place.address || `${cleanDisplayLabel(place.type || 'place')} selected from the map.`,
+    } as SearchPlace;
+    if (renderedMapbox) {
+      recentRenderedMapboxSelectionRef.current = {
+        at: Date.now(),
+        lat: nextPlace.lat,
+        lng: nextPlace.lng,
+        key: renderedMapboxPlaceKey(nextPlace),
+      };
+    }
     setTappedPoi(null);
     setShowSearch(false);
     setShowDiscoveryPanel(false);
@@ -11107,31 +13596,16 @@ function MapScreen() {
     setSearchResults([]);
     setSearchRouteCard(null);
     setSelectedPlaceTripContext(tripPlaceContextFor(poi, day));
-    setSelectedPlace({
-      ...place,
-      source: place.source || 'map',
-      source_label: place.source_label || place.source_badge || 'Map source',
-      summary: place.summary || place.address || `${cleanDisplayLabel(place.type || 'place')} selected from the map.`,
-    });
+    setSelectedPlace(nextPlace);
     setSelectedCamp(null);
     setTappedTrail(null);
     setTappedTileSpot(null);
     setTappedGas(null);
     setSelectedCommunityPin(null);
     setSelectedTrail(null);
-    const source = String(poi.source || '').toLowerCase();
-    if (source === 'mapbox_feature' || source === 'rendered_map') {
-      const feature = selectableFeatureFromPlace(place, 0, source, userLoc ?? null);
-      if (feature) {
-        enrichRenderedFeaturePlace(feature).then(enriched => {
-          setSelectedPlace(current => {
-            if (!current) return current;
-            const sameId = current.id && place.id && current.id === place.id;
-            const sameCoords = Math.abs(current.lat - place.lat) < 0.00001 && Math.abs(current.lng - place.lng) < 0.00001;
-            return sameId || sameCoords ? { ...current, ...enriched } : current;
-          });
-        }).catch(() => {});
-      }
+    if (renderedMapbox) {
+      const feature = selectableFeatureFromPlace(nextPlace, 0, source, userLoc ?? null);
+      if (feature) scheduleRenderedMapboxEnrichment(nextPlace, feature);
     }
   }
 
@@ -11206,6 +13680,13 @@ function MapScreen() {
     routeOverride?: [number, number][],
   ) {
     if (!key || center?.lat == null || center?.lng == null || !isFinite(center.lat) || !isFinite(center.lng)) return;
+    if (extremeMapLayerActive) {
+      setNearbyPlaceFeeds(prev => ({
+        ...prev,
+        [key]: { loading: false, places: [], error: undefined, loadedAt: Date.now() },
+      }));
+      return;
+    }
     const cached = nearbyPlaceFeeds[key];
     if (cached?.loadedAt && Date.now() - cached.loadedAt < 5 * 60_000) return;
     setNearbyPlaceFeeds(prev => ({
@@ -12849,14 +15330,14 @@ function MapScreen() {
 
       <View style={s.navSourceRow}>
         <View style={[s.navSourcePill, isRerouting && { borderColor: C.orange + '55', backgroundColor: C.orange + '14' }]}>
-          <Ionicons name={isRerouting ? 'git-compare-outline' : routeFromCache ? 'cloud-offline-outline' : 'git-branch-outline'} size={12} color={isRerouting ? C.orange : C.silverBright} />
-          <Text style={[s.navSourceText, { color: isRerouting ? C.orange : OVR.text2 }]} numberOfLines={1}>
+          <Ionicons name={isRerouting ? 'git-compare-outline' : routeFromCache ? 'cloud-offline-outline' : 'git-branch-outline'} size={12} color={isRerouting ? C.orange : C.text2} />
+          <Text style={[s.navSourceText, { color: isRerouting ? C.orange : C.text2 }]} numberOfLines={1}>
             {isRerouting ? 'REROUTING' : routeHudLabel}
           </Text>
         </View>
         <View style={[s.navSourcePill, proceedToRoute || offRouteWarn ? { borderColor: C.orange + '55', backgroundColor: C.orange + '14' } : null]}>
           <Ionicons name={proceedToRoute || offRouteWarn ? 'warning-outline' : 'checkmark-circle-outline'} size={12} color={proceedToRoute || offRouteWarn ? C.orange : C.green} />
-          <Text style={[s.navSourceText, { color: proceedToRoute || offRouteWarn ? C.orange : OVR.text2 }]} numberOfLines={1}>
+          <Text style={[s.navSourceText, { color: proceedToRoute || offRouteWarn ? C.orange : C.text2 }]} numberOfLines={1}>
             {proceedToRoute ? 'PROCEED TO LINE' : offRouteWarn ? 'OFF ROUTE WARNING' : 'ON ROUTE'}
           </Text>
         </View>
@@ -12875,7 +15356,7 @@ function MapScreen() {
           <Text style={s.navSpeedUnit}>MPH</Text>
         </View>
         <View style={s.navDistBlock}>
-          <Text style={[s.navDistVal, isApproaching && { color: C.silverBright }]}>
+          <Text style={[s.navDistVal, isApproaching && { color: C.green }]}>
             {remainingKm !== null ? formatDist(remainingKm) : distKm !== null ? formatDist(distKm) : '--'}
           </Text>
           <Text style={s.navEta}>{etaMins !== null ? `ARRIVE ${etaClockTime(etaMins)}` : 'DISTANCE REMAINING'}</Text>
@@ -12910,14 +15391,14 @@ function MapScreen() {
         </TouchableOpacity>
         {routeSteps.length > 0 && (
           <TouchableOpacity style={s.navStepsBtn} onPress={() => setShowSteps(p => !p)} hitSlop={14}>
-            <Ionicons name="list-outline" size={14} color={OVR.text2} />
+            <Ionicons name="list-outline" size={14} color={C.text2} />
             <Text style={s.navStepsBtnText}>TURNS {showSteps ? '▲' : '▼'}</Text>
           </TouchableOpacity>
         )}
         {isRouted && userLoc && (
           <TouchableOpacity style={s.navRerouteBtn} onPress={manualReroute} disabled={isRerouting} hitSlop={14}>
-            <Ionicons name="refresh-outline" size={14} color={isRerouting ? OVR.text3 : OVR.text2} />
-            <Text style={[s.navStepsBtnText, isRerouting && { color: OVR.text3 }]}>REROUTE</Text>
+            <Ionicons name="refresh-outline" size={14} color={isRerouting ? C.text3 : C.text2} />
+            <Text style={[s.navStepsBtnText, isRerouting && { color: C.text3 }]}>REROUTE</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -12933,7 +15414,7 @@ function MapScreen() {
           <Text style={s.navTurnsSub}>{routeSteps.length} maneuvers on this route</Text>
         </View>
         <TouchableOpacity style={s.navTurnsClose} onPress={() => setShowSteps(false)} hitSlop={12}>
-          <Ionicons name="close" size={16} color={OVR.text2} />
+          <Ionicons name="close" size={16} color={C.text2} />
         </TouchableOpacity>
       </View>
       <ScrollView style={s.stepsListDetached} showsVerticalScrollIndicator={false}>
@@ -12943,14 +15424,14 @@ function MapScreen() {
           const isPast = i < stepIdx;
           return (
             <View key={i} style={[s.stepRow, i === 0 && s.stepRowFirst, isActive && s.stepRowActive]}>
-              <Ionicons name={stepIcon(step.type, step.modifier) as any} size={16} color={isActive ? '#fff' : isPast ? OVR.text3 + '55' : OVR.text3} />
+              <Ionicons name={stepIcon(step.type, step.modifier) as any} size={16} color={isActive ? '#fff' : isPast ? C.text3 + '55' : C.text3} />
               <View style={s.stepInfo}>
-                <Text style={[s.stepLabel, isActive && { color: '#fff' }, isPast && { color: OVR.text3, opacity: 0.4 }]}>
+                <Text style={[s.stepLabel, isActive && { color: '#fff' }, isPast && { color: C.text3, opacity: 0.4 }]}>
                   {displayStepLabel(step)}
                 </Text>
                 {displayStepRoad(step) ? <Text style={[s.stepRoad, isPast && { opacity: 0.4 }]} numberOfLines={1}>{displayStepRoad(step)}</Text> : null}
               </View>
-              <Text style={[s.stepDist, isActive && { color: '#f97316' }, isPast && { opacity: 0.4 }]}>
+              <Text style={[s.stepDist, isActive && { color: C.orange }, isPast && { opacity: 0.4 }]}>
                 {isActive && stepDistM !== null ? formatStepDist(stepDistM) : formatStepDist(step.distance)}
               </Text>
             </View>
@@ -12967,7 +15448,7 @@ function MapScreen() {
       hitSlop={12}
       activeOpacity={0.82}
     >
-      <Ionicons name={navCameraFollow ? 'navigate' : 'locate'} size={20} color="#fff" />
+      <Ionicons name={navCameraFollow ? 'navigate' : 'locate'} size={20} color={navCameraFollow ? '#fff' : C.text} />
     </TouchableOpacity>
   ) : null;
 
@@ -13126,9 +15607,8 @@ function MapScreen() {
               addTrailCaptureAnchor([lng, lat]);
               return;
             }
-            if (lat != null && lng != null && await openExtremeReversePlace(lat, lng)) {
-              return;
-            }
+            if (shouldIgnoreRecentRenderedMapboxFallbackTap(lat, lng)) return;
+            cancelRenderedMapboxEnrichment();
             nativeMapRef.current?.clearTrailHighlight();
             setTrailCardCollapsed(false);
               setSelectedCamp(null); setSelectedPlace(null); setTappedTrail(null); setTappedTileSpot(null); setTappedGas(null); setTappedPoi(null); setSelectedCommunityPin(null); setSelectedTrail(null);
@@ -13265,12 +15745,12 @@ function MapScreen() {
       {canOpenMapDrawer && (
         <TourTarget id="map.tools" style={[s.mapDrawerToggleTarget, { top: compassTop }]}>
           <TouchableOpacity
-            style={s.mapDrawerToggle}
+            style={[s.mapDrawerToggle, mapChrome.button]}
             onPress={openMapDrawer}
             activeOpacity={0.84}
             hitSlop={10}
           >
-            <Ionicons name="menu-outline" size={21} color={OVR.text} />
+            <Ionicons name="menu-outline" size={21} color={mapChrome.text} />
           </TouchableOpacity>
         </TourTarget>
       )}
@@ -13284,7 +15764,7 @@ function MapScreen() {
                 <Text style={s.mapDrawerTitle}>Map tools</Text>
               </View>
               <TouchableOpacity style={s.mapDrawerClose} onPress={() => setShowMapDrawer(false)}>
-                <Ionicons name="close" size={17} color={OVR.text2} />
+                <Ionicons name="close" size={17} color={C.text2} />
               </TouchableOpacity>
             </View>
             <View style={s.mapDrawerSection}>
@@ -13305,7 +15785,7 @@ function MapScreen() {
                     <Text style={s.mapDrawerRowTitle} numberOfLines={1}>{item.label}</Text>
                     <Text style={s.mapDrawerRowSub} numberOfLines={1}>{item.sub}</Text>
                   </View>
-                  <Ionicons name="chevron-forward" size={15} color={OVR.text3} />
+                  <Ionicons name="chevron-forward" size={15} color={C.text3} />
                 </TouchableOpacity>
               ))}
             </View>
@@ -13541,7 +16021,7 @@ function MapScreen() {
               <Ionicons name="sparkles-outline" size={13} color={C.orange} />
               <Text style={s.copilotResultTitle}>COPILOT RESULTS</Text>
             </View>
-            <TouchableOpacity onPress={() => { setCopilotResults([]); setCopilotResultScope(null); }} hitSlop={10}>
+            <TouchableOpacity onPress={() => { clearCopilotResultSession(); setSearchResults([]); }} hitSlop={10}>
               <Ionicons name="close" size={15} color={OVR.text3} />
             </TouchableOpacity>
           </View>
@@ -13554,8 +16034,12 @@ function MapScreen() {
               >
                 <Text style={s.copilotResultName} numberOfLines={1}>{place.name}</Text>
                 <Text style={s.copilotResultMeta} numberOfLines={1}>
-                  {(place.type || 'place').replace(/[_-]+/g, ' ')}
+                  {(place.brand || place.subtype || place.type || 'place').replace(/[_-]+/g, ' ')}
                   {place.distance_mi != null ? ` · ${place.distance_mi.toFixed(place.distance_mi >= 10 ? 0 : 1)} mi` : ''}
+                  {place.rating != null ? ` · ${Number(place.rating).toFixed(1)}` : ''}
+                </Text>
+                <Text style={s.copilotResultMeta} numberOfLines={1}>
+                  {place.address || place.source_label || place.source || 'Map result'}
                 </Text>
                 <View style={s.copilotResultActions}>
                   <TouchableOpacity
@@ -13580,11 +16064,11 @@ function MapScreen() {
       )}
 
       {!trailPinCaptureMode && !navMode && !activeTrip && !safeWaterPlanningActive && !waterFollowActive && userHeading !== null && !showSearch && (
-        <View style={[s.compassPill, { top: compassTop, left: 68 }]}>
+        <View style={[s.compassPill, mapChrome.toast, { top: compassTop, left: 68 }]}>
           <ThreeNeedleCompass heading={userHeading} bearing={null} compact />
           <View>
-            <Text style={s.compassDir}>{compassDir(userHeading)}</Text>
-            <Text style={s.compassDeg}>{Math.round(userHeading)}°</Text>
+            <Text style={[s.compassDir, { color: mapChrome.toastText }]}>{compassDir(userHeading)}</Text>
+            <Text style={[s.compassDeg, { color: mapChrome.textMuted }]}>{Math.round(userHeading)}°</Text>
           </View>
         </View>
       )}
@@ -13592,7 +16076,7 @@ function MapScreen() {
       {/* Sync toast — flashes briefly when signal restores and weather is refreshed */}
       {!!syncToast && (
         <View style={s.syncToast}>
-          <Ionicons name="wifi" size={11} color="#22c55e" />
+          <Ionicons name="wifi" size={11} color={C.orange} />
           <Text style={s.syncToastText}>{syncToast}</Text>
         </View>
       )}
@@ -13755,57 +16239,57 @@ function MapScreen() {
       >
         {!waterFollowActive && (
           <TouchableOpacity
-            style={s.ctrlBtn}
+            style={[s.ctrlBtn, mapChrome.button]}
             onPress={() => setShowLayerSheet(true)}
             activeOpacity={0.84}
             accessibilityLabel="Open layers"
           >
-            <Ionicons name="layers-outline" size={17} color={OVR.text} />
+            <Ionicons name="layers-outline" size={17} color={mapChrome.text} />
           </TouchableOpacity>
         )}
 
         {!waterFollowActive && (
           <TouchableOpacity
-            style={[s.ctrlBtn, map3dEnabled && s.ctrlBtnActive]}
+            style={[s.ctrlBtn, mapChrome.button, map3dEnabled && s.ctrlBtnActive, map3dEnabled && mapChrome.buttonActive]}
             onPress={toggleMap3d}
             activeOpacity={0.84}
             accessibilityLabel={map3dEnabled ? 'Turn off 3D map' : 'Turn on 3D map'}
           >
-            <Text style={[s.map3dToggleText, map3dEnabled && s.map3dToggleTextActive]}>
+            <Text style={[s.map3dToggleText, { color: map3dEnabled ? mapChrome.activeText : mapChrome.text }, map3dEnabled && s.map3dToggleTextActive]}>
               {map3dEnabled ? '2D' : '3D'}
             </Text>
           </TouchableOpacity>
         )}
 
-        <TouchableOpacity style={s.ctrlBtn} onPress={centerMapOnUser} disabled={!userLoc}>
-          <Ionicons name="locate" size={20} color={userLoc ? OVR.text : OVR.text3} />
+        <TouchableOpacity style={[s.ctrlBtn, mapChrome.button, !userLoc && { opacity: 0.62 }]} onPress={centerMapOnUser} disabled={!userLoc}>
+          <Ionicons name="locate" size={20} color={userLoc ? mapChrome.text : mapChrome.textMuted} />
         </TouchableOpacity>
 
         {!waterFollowActive && <TourTarget id="map.search">
           <TouchableOpacity
-            style={[s.ctrlBtn, showSearch && { backgroundColor: '#3b82f6dd', borderColor: '#3b82f6' }]}
+            style={[s.ctrlBtn, mapChrome.button, showSearch && { backgroundColor: '#2563eb', borderColor: '#fff' }]}
             onPress={() => { setSearchMode('browse'); setShowSearch(p => !p); setSearchResults([]); setSearchQuery(''); }}
           >
-            <Ionicons name="search" size={20} color={showSearch ? '#fff' : OVR.text} />
+            <Ionicons name="search" size={20} color={showSearch ? '#fff' : mapChrome.text} />
           </TouchableOpacity>
         </TourTarget>}
 
         {!waterFollowActive && (
           <TourTarget id="map.pinReport">
             <TouchableOpacity
-              style={[s.ctrlBtn, pinDropMode && { backgroundColor: C.orange, borderColor: C.orange }]}
+              style={[s.ctrlBtn, mapChrome.button, pinDropMode && mapChrome.buttonActive]}
               onPress={() => beginCommunityPinDrop(false)}
               activeOpacity={0.84}
               accessibilityLabel={pinDropMode ? 'Cancel or continue placing community pin' : 'Drop community pin'}
             >
-              <Ionicons name="location-outline" size={20} color={pinDropMode ? '#fff' : OVR.text} />
+              <Ionicons name="location-outline" size={20} color={pinDropMode ? mapChrome.activeText : mapChrome.text} />
             </TouchableOpacity>
           </TourTarget>
         )}
 
         {!waterFollowActive && waypoints.length > 0 && (
           <TouchableOpacity
-            style={[s.ctrlBtn, navMode && s.ctrlBtnActive]}
+            style={[s.ctrlBtn, mapChrome.button, navMode && s.ctrlBtnActive, navMode && mapChrome.buttonActive]}
             onPress={() => {
               if (navMode) { endNavigation(); return; }
               const days = [...new Set(waypoints.map(w => w.day))].sort((a, b) => a - b);
@@ -13813,7 +16297,7 @@ function MapScreen() {
               setShowDayModal(true);
             }}
           >
-            <Ionicons name="navigate" size={20} color={navMode ? '#fff' : OVR.text} />
+            <Ionicons name="navigate" size={20} color={navMode ? mapChrome.activeText : mapChrome.text} />
           </TouchableOpacity>
         )}
       </ScrollView>
@@ -14181,7 +16665,7 @@ function MapScreen() {
               setSelectedTrail(null);
             }}
           >
-            <Ionicons name="close" size={15} color="#fff" />
+            <Ionicons name="close" size={15} color={OVR.text2} />
           </TouchableOpacity>
         </View>
       )}
@@ -14620,16 +17104,16 @@ function MapScreen() {
       {showDiscoveryPanel && !navMode && !selectedCamp && !selectedCommunityPin && !selectedTrail && (
         <View style={s.discoveryPanel}>
           <View style={s.discoveryPanelHeader}>
-            <View>
-              <Text style={s.discoveryPanelTitle}>{trailDiscoveryScope === 'nearby' ? 'CAMPS + TRAILS NEAR YOU' : 'CAMPS + TRAILS IN VIEW'}</Text>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={s.discoveryPanelTitle}>{trailDiscoveryScope === 'nearby' ? 'Nearby camps & trails' : 'In-view camps & trails'}</Text>
               <Text style={s.discoveryPanelSub}>
                 {trailDiscoveries.length || areaCamps.length
-                  ? 'Same in-view search. Tap any card for details.'
-                  : 'No camps or trails found in this view yet. Pan, move closer, and search again.'}
+                  ? 'Current map results. Tap one to open details.'
+                  : 'No camps or trails found in this view. Pan, zoom in, or search nearby.'}
               </Text>
             </View>
             <TouchableOpacity style={s.discoveryPanelClose} onPress={() => setShowDiscoveryPanel(false)}>
-              <Ionicons name="close" size={15} color={OVR.text2} />
+              <Ionicons name="close" size={16} color={C.text2} />
             </TouchableOpacity>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.discoveryCats}>
@@ -14644,10 +17128,10 @@ function MapScreen() {
               return <Text key={type} style={s.discoveryCatPill}>{label} {count}</Text>;
             })}
           </ScrollView>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.discoveryCardRail}>
+          <ScrollView showsVerticalScrollIndicator={false} style={s.discoveryCardList} contentContainerStyle={s.discoveryCardRail}>
             {trailDiscoveries.length === 0 && areaCamps.length === 0 ? (
               <View style={s.discoveryEmpty}>
-                <Ionicons name="map-outline" size={20} color={OVR.text3} />
+                <Ionicons name="map-outline" size={20} color={C.text3} />
                 <Text style={s.discoveryEmptyText}>No camps or trails found in this view. Pan, move closer, or search a nearby area.</Text>
               </View>
             ) : (<>
@@ -14674,7 +17158,7 @@ function MapScreen() {
                           <Ionicons name="bonfire-outline" size={22} color={C.green} />
                         </View>
                         <View style={s.discoveryTrailPhotoHint}>
-                          <Ionicons name="map-outline" size={13} color={OVR.text3} />
+                          <Ionicons name="map-outline" size={13} color={C.text3} />
                           <Text style={s.discoveryTrailHeroHint}>{camp.source || camp.land_type || 'Camp'}</Text>
                         </View>
                       </>
@@ -14690,7 +17174,7 @@ function MapScreen() {
                     </View>
                     <View style={s.discoveryTrailFooter}>
                       <Text style={s.discoveryTrailPreview}>Camp details</Text>
-                      <Ionicons name="chevron-forward" size={15} color={OVR.text3} />
+                      <Ionicons name="chevron-forward" size={15} color={C.text3} />
                     </View>
                   </View>
                 </TouchableOpacity>
@@ -14706,7 +17190,7 @@ function MapScreen() {
                         <Ionicons name={trailIcon(trail.type) as any} size={22} color={trailColor(trail.type)} />
                       </View>
                       <View style={s.discoveryTrailPhotoHint}>
-                        <Ionicons name="image-outline" size={13} color={OVR.text3} />
+                        <Ionicons name="image-outline" size={13} color={C.text3} />
                         <Text style={s.discoveryTrailHeroHint}>{trail.source === 'offline_places' ? 'Offline result' : 'Open source'}</Text>
                       </View>
                     </>
@@ -14723,7 +17207,7 @@ function MapScreen() {
                   </View>
                   <View style={s.discoveryTrailFooter}>
                     <Text style={s.discoveryTrailPreview}>{trail.source === 'trailhead' ? 'Source-backed profile' : 'Preview'}</Text>
-                    <Ionicons name="chevron-forward" size={15} color={OVR.text3} />
+                    <Ionicons name="chevron-forward" size={15} color={C.text3} />
                   </View>
                 </View>
               </TouchableOpacity>
@@ -14880,7 +17364,15 @@ function MapScreen() {
             )}
 
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.extremeCopilotChips}>
+              {user?.is_admin && (
+                <TouchableOpacity style={[s.extremeCopilotChip, s.extremeCopilotDebugChip]} onPress={shareAdminCopilotDebugTranscript} disabled={extremeCopilotBusy}>
+                  <Ionicons name="bug-outline" size={13} color={C.yellow} />
+                  <Text style={[s.extremeCopilotChipText, s.extremeCopilotDebugChipText]}>debug transcript</Text>
+                </TouchableOpacity>
+              )}
               {[
+                'what can you do?',
+                'plan 5 days with public camps and photos',
                 'show camps near my route',
                 'find fuel nearby',
                 'turn on radar',
@@ -14932,7 +17424,7 @@ function MapScreen() {
               <TextInput
                 value={extremeCopilotInput}
                 onChangeText={setExtremeCopilotInput}
-                placeholder="Ask Copilot to work the map"
+                placeholder="Ask Copilot to work the map, or ask what it can do"
                 placeholderTextColor={OVR.text3}
                 style={s.extremeCopilotInput}
                 returnKeyType="send"
@@ -15205,13 +17697,15 @@ function MapScreen() {
         related={selectedPlaceContext ?? undefined}
         routeContextLabel={selectedPlaceTripContext?.label}
         onClose={() => {
-          if (selectedPlace?.type === 'trail' || selectedPlace?.type === 'trailhead') nativeMapRef.current?.clearTrailHighlight();
+          cancelRenderedMapboxEnrichment();
           setSelectedPlace(null);
           setSelectedPlaceContext(null);
           setSelectedPlaceTripContext(null);
+          if (selectedPlace?.type === 'trail' || selectedPlace?.type === 'trailhead') nativeMapRef.current?.clearTrailHighlight();
           if (activeTrip) restoreTripOverview(false);
         }}
         onNavigate={place => {
+          cancelRenderedMapboxEnrichment();
           setSelectedPlace(null);
           setSelectedPlaceContext(null);
           setSelectedPlaceTripContext(null);
@@ -15231,12 +17725,14 @@ function MapScreen() {
           setTimeout(() => setQuickToast(''), 2200);
         }}
         onReport={() => {
+          cancelRenderedMapboxEnrichment();
           setSelectedPlace(null);
           setSelectedPlaceContext(null);
           setSelectedPlaceTripContext(null);
           setQuickReport(true);
         }}
         onNearbyCamps={place => {
+          cancelRenderedMapboxEnrichment();
           setSelectedPlace(null);
           setSelectedPlaceContext(null);
           setSelectedPlaceTripContext(null);
@@ -15261,12 +17757,14 @@ function MapScreen() {
           setPaywallVisible(true);
         }}
         onOpenRelatedPlace={place => {
+          cancelRenderedMapboxEnrichment();
           setSelectedPlace(null);
           setSelectedPlaceContext(null);
           setSelectedPlaceTripContext(null);
           openNearbyPlace(place as OsmPoi, selectedPlaceTripContext?.day ?? selectedDay);
         }}
         onOpenRelatedCamp={place => {
+          cancelRenderedMapboxEnrichment();
           setSelectedPlace(null);
           setSelectedPlaceContext(null);
           setSelectedPlaceTripContext(null);
@@ -15278,6 +17776,7 @@ function MapScreen() {
           webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: camp.lat, lng: camp.lng, name: camp.name }));
         }}
         onOpenRelatedTrail={place => {
+          cancelRenderedMapboxEnrichment();
           setSelectedPlace(null);
           setSelectedPlaceContext(null);
           setSelectedPlaceTripContext(null);
@@ -15303,7 +17802,9 @@ function MapScreen() {
         place={tappedPoi ? {
           ...tappedPoi,
           source_label: tappedPoi.source_label || 'Map source',
-          summary: (tappedPoi as any).summary || tappedPoi.address || `${cleanDisplayLabel(tappedPoi.type)} selected from the map.`,
+          summary: ['rendered_mapbox_standard', 'mapbox_feature', 'rendered_map'].includes(String(tappedPoi.source || '').toLowerCase())
+            ? (tappedPoi as any).summary || tappedPoi.address
+            : (tappedPoi as any).summary || tappedPoi.address || `${cleanDisplayLabel(tappedPoi.type)} selected from the map.`,
         } as any : null}
         visible={!!tappedPoi && !navMode && !safeWaterPlanningActive}
         initialStage="full"
@@ -15361,39 +17862,57 @@ function MapScreen() {
         <TrailheadSheet handle={false} style={s.quickCard} contentStyle={s.quickCardShell}>
           <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
             {/* Photo / placeholder */}
-            <TouchableOpacity style={s.quickCardImg} activeOpacity={selectedCamp.photo_url ? 0.88 : 1} onPress={() => selectedCamp.photo_url && setCampGalleryIndex(0)}>
-              {selectedCamp.photo_url
-                ? <Image source={{ uri: selectedCamp.photo_url }} style={s.quickCardPhoto} resizeMode="cover" />
-                : <View style={[s.quickCardPhotoPlaceholder, { backgroundColor: landColor(selectedCamp.land_type).bg }]}>
-                    <Ionicons name={(selectedCamp.tags ?? []).includes('rv') ? 'car-outline' : (selectedCamp.tags ?? []).includes('dispersed') ? 'moon-outline' : 'bonfire-outline'} size={34} color={landColor(selectedCamp.land_type).text} />
-                    <Text style={{ fontSize: 9, color: landColor(selectedCamp.land_type).text, fontFamily: mono, marginTop: 4, fontWeight: '700' }}>
-                      {(selectedCamp.land_type || 'CAMP').toUpperCase().slice(0, 12)}
-                    </Text>
+            {(() => {
+              const photos = campPhotoItems(selectedCamp, campDetail);
+              const safeIndex = photos.length ? quickCampPhotoIndex % photos.length : 0;
+              const activePhoto = photos[safeIndex];
+              return (
+                <TouchableOpacity style={s.quickCardImg} activeOpacity={activePhoto ? 0.88 : 1} onPress={() => activePhoto && setCampGalleryIndex(safeIndex)}>
+                  {activePhoto
+                    ? <Image source={{ uri: activePhoto.url }} style={s.quickCardPhoto} resizeMode="cover" />
+                    : <View style={[s.quickCardPhotoPlaceholder, { backgroundColor: landColor(selectedCamp.land_type).bg }]}>
+                        <Ionicons name={(selectedCamp.tags ?? []).includes('rv') ? 'car-outline' : (selectedCamp.tags ?? []).includes('dispersed') ? 'moon-outline' : 'bonfire-outline'} size={34} color={landColor(selectedCamp.land_type).text} />
+                        <Text style={{ fontSize: 9, color: landColor(selectedCamp.land_type).text, fontFamily: mono, marginTop: 4, fontWeight: '700' }}>
+                          {(selectedCamp.land_type || 'CAMP').toUpperCase().slice(0, 12)}
+                        </Text>
+                      </View>
+                  }
+                  <View style={s.quickCardHeroShade} />
+                  {photos.length > 1 ? (
+                    <View style={s.quickPhotoControls} pointerEvents="box-none">
+                      <TouchableOpacity style={s.quickPhotoArrow} onPress={event => { event.stopPropagation(); setQuickCampPhotoIndex((safeIndex - 1 + photos.length) % photos.length); }}>
+                        <Ionicons name="chevron-back" size={18} color="#fff" />
+                      </TouchableOpacity>
+                      <TouchableOpacity style={s.quickPhotoArrow} onPress={event => { event.stopPropagation(); setQuickCampPhotoIndex((safeIndex + 1) % photos.length); }}>
+                        <Ionicons name="chevron-forward" size={18} color="#fff" />
+                      </TouchableOpacity>
+                    </View>
+                  ) : null}
+                  {photos.length > 1 ? <Text style={s.quickPhotoCount}>{safeIndex + 1}/{photos.length}</Text> : null}
+                  <View style={s.quickCardHeroActions}>
+                    <TouchableOpacity
+                      style={s.quickCardHeroIcon}
+                      onPress={() => toggleFavorite(selectedCamp)}
+                    >
+                      <Ionicons
+                        name={favoriteCamps.some(f => f.id === selectedCamp.id) ? 'heart' : 'heart-outline'}
+                        size={17}
+                        color={favoriteCamps.some(f => f.id === selectedCamp.id) ? '#ef4444' : '#fff'}
+                      />
+                    </TouchableOpacity>
+                    <TouchableOpacity style={s.quickCardHeroIcon} onPress={() => { setSelectedCamp(null); setCampFullness(null); setCampWeather(null); }}>
+                      <Ionicons name="close" size={17} color="#fff" />
+                    </TouchableOpacity>
                   </View>
-              }
-              <View style={s.quickCardHeroShade} />
-              <View style={s.quickCardHeroActions}>
-                <TouchableOpacity
-                  style={s.quickCardHeroIcon}
-                  onPress={() => toggleFavorite(selectedCamp)}
-                >
-                  <Ionicons
-                    name={favoriteCamps.some(f => f.id === selectedCamp.id) ? 'heart' : 'heart-outline'}
-                    size={17}
-                    color={favoriteCamps.some(f => f.id === selectedCamp.id) ? '#ef4444' : '#fff'}
-                  />
+                  <View style={s.quickCardHeroText}>
+                    <Text style={s.quickCardHeroKicker} numberOfLines={1}>
+                      {(selectedCamp.verified_source || selectedCamp.source || selectedCamp.land_type || 'Trailhead camp').toUpperCase()}
+                    </Text>
+                    <Text style={s.quickCardHeroTitle} numberOfLines={2}>{selectedCamp.name}</Text>
+                  </View>
                 </TouchableOpacity>
-                <TouchableOpacity style={s.quickCardHeroIcon} onPress={() => { setSelectedCamp(null); setCampFullness(null); setCampWeather(null); }}>
-                  <Ionicons name="close" size={17} color="#fff" />
-                </TouchableOpacity>
-              </View>
-              <View style={s.quickCardHeroText}>
-                <Text style={s.quickCardHeroKicker} numberOfLines={1}>
-                  {(selectedCamp.verified_source || selectedCamp.source || selectedCamp.land_type || 'Trailhead camp').toUpperCase()}
-                </Text>
-                <Text style={s.quickCardHeroTitle} numberOfLines={2}>{selectedCamp.name}</Text>
-              </View>
-            </TouchableOpacity>
+              );
+            })()}
             <View style={s.quickCardBody}>
             {/* Land badge */}
             {selectedCamp.land_type ? (
@@ -15418,8 +17937,8 @@ function MapScreen() {
                 </View>
               ))}
               {selectedCamp.ada && (
-                <View style={[s.qTag, { borderColor: '#3b82f6', backgroundColor: '#eff6ff' }]}>
-                  <Text style={[s.qTagText, { color: '#1d4ed8' }]}>ADA</Text>
+                <View style={[s.qTag, { borderColor: C.blueGlow + '66', backgroundColor: C.blueGlow + '16' }]}>
+                  <Text style={[s.qTagText, { color: C.blueGlow }]}>ADA</Text>
                 </View>
               )}
             </View>
@@ -15595,6 +18114,39 @@ function MapScreen() {
                     {activityItems.length > 0 ? (
                       <Text style={s.detailActivities}>{activityItems.join(' · ')}</Text>
                     ) : null}
+                  </View>
+                ) : null}
+
+                {(campDetail.campsites ?? []).some(site => site.name || site.photo_url || site.photos?.length) ? (
+                  <View style={s.detailSection}>
+                    <Text style={s.detailSectionTitle}>SITES</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.siteRail}>
+                      {(campDetail.campsites ?? []).slice(0, 12).map((site, idx) => {
+                        const photo = campPhotoUrl(site.photo_url || site.photos?.[0]);
+                        const meta = [
+                          site.type,
+                          site.max_people ? `${site.max_people} people` : '',
+                          site.equipment_length ? `${site.equipment_length} ft` : '',
+                          site.surface,
+                          site.accessible ? 'ADA' : '',
+                        ].filter(Boolean).join(' · ');
+                        return (
+                          <View key={site.id || `${site.name}-${idx}`} style={s.sitePhotoCard}>
+                            {photo ? (
+                              <Image source={{ uri: photo }} style={s.sitePhoto} resizeMode="cover" />
+                            ) : (
+                              <View style={s.sitePlaceholder}>
+                                <Ionicons name="bonfire-outline" size={22} color={C.orange} />
+                              </View>
+                            )}
+                            <View style={s.siteBody}>
+                              <Text style={s.siteName} numberOfLines={2}>{site.name || `Site ${idx + 1}`}</Text>
+                              <Text style={s.siteMeta} numberOfLines={2}>{meta || site.source_badge || 'Recreation.gov site'}</Text>
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </ScrollView>
                   </View>
                 ) : null}
 
@@ -16037,6 +18589,39 @@ function MapScreen() {
                   </View>
                 )}
 
+                {(campDetail.campsites ?? []).some(site => site.name || site.photo_url || site.photos?.length) ? (
+                  <View style={s.detailSection}>
+                    <Text style={s.detailSectionTitle}>Sites</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.siteRail}>
+                      {(campDetail.campsites ?? []).slice(0, 12).map((site, idx) => {
+                        const photo = campPhotoUrl(site.photo_url || site.photos?.[0]);
+                        const meta = [
+                          site.type,
+                          site.max_people ? `${site.max_people} people` : '',
+                          site.equipment_length ? `${site.equipment_length} ft` : '',
+                          site.surface,
+                          site.accessible ? 'ADA' : '',
+                        ].filter(Boolean).join(' · ');
+                        return (
+                          <View key={site.id || `${site.name}-${idx}`} style={s.sitePhotoCard}>
+                            {photo ? (
+                              <Image source={{ uri: photo }} style={s.sitePhoto} resizeMode="cover" />
+                            ) : (
+                              <View style={s.sitePlaceholder}>
+                                <Ionicons name="bonfire-outline" size={22} color={C.orange} />
+                              </View>
+                            )}
+                            <View style={s.siteBody}>
+                              <Text style={s.siteName} numberOfLines={2}>{site.name || `Site ${idx + 1}`}</Text>
+                              <Text style={s.siteMeta} numberOfLines={2}>{meta || site.source_badge || 'Recreation.gov site'}</Text>
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </ScrollView>
+                  </View>
+                ) : null}
+
                 {/* Activities */}
                 {(campDetail.activities ?? []).length > 0 && (
                   <View style={s.detailSection}>
@@ -16330,11 +18915,7 @@ function MapScreen() {
 
       <TrailheadPhotoGallery
         visible={campGalleryIndex !== null}
-        photos={(campDetail?.photos?.length
-          ? campDetail.photos.map(url => ({ url: mediaUrl(url), source: campDetail.media_source || campDetail.verified_source || campDetail.source || 'Trailhead' }))
-          : selectedCamp?.photo_url
-            ? [{ url: mediaUrl(selectedCamp.photo_url), source: selectedCamp.verified_source || selectedCamp.source || 'Trailhead' }]
-            : []) as TrailheadGalleryPhoto[]}
+        photos={campPhotoItems(selectedCamp, campDetail)}
         initialIndex={campGalleryIndex ?? 0}
         title={campDetail?.name || selectedCamp?.name || 'Camp'}
         onClose={() => setCampGalleryIndex(null)}
@@ -17079,7 +19660,7 @@ function MapScreen() {
 
         {/* Turn instruction strip — arriving / rerouting / proceed-to-route / normal */}
         {navMode && isApproaching ? (
-          <View style={[s.turnStrip, { backgroundColor: '#0d2a16' }]}>
+          <View style={[s.turnStrip, { backgroundColor: C.green + '14', borderColor: C.green + '33' }]}>
             <View style={[s.turnIconWrap, { borderColor: '#22c55e77', backgroundColor: '#22c55e22' }]}>
               <Ionicons name="flag-outline" size={28} color="#22c55e" />
             </View>
@@ -17092,20 +19673,20 @@ function MapScreen() {
             )}
           </View>
         ) : navMode && isRerouting ? (
-          <View style={[s.turnStrip, { backgroundColor: '#92400e' }]}>
-            <ActivityIndicator color="#fff" size="small" style={{ marginRight: 12 }} />
+          <View style={[s.turnStrip, { backgroundColor: C.orange + '18', borderColor: C.orange + '44' }]}>
+            <ActivityIndicator color={C.orange} size="small" style={{ marginRight: 12 }} />
             <View style={s.turnInfo}>
-              <Text style={s.turnLabel}>Recalculating...</Text>
+              <Text style={[s.turnLabel, { color: C.orange }]}>Recalculating...</Text>
               <Text style={s.turnRoad}>Off route — finding new path</Text>
             </View>
           </View>
         ) : navMode && proceedToRoute ? (
-          <View style={[s.turnStrip, { backgroundColor: '#1e3a5f' }]}>
+          <View style={[s.turnStrip, { backgroundColor: C.blueGlow + '14', borderColor: C.blueGlow + '44' }]}>
             <View style={s.turnIconWrap}>
-              <Ionicons name="navigate-outline" size={28} color="#fff" />
+              <Ionicons name="navigate-outline" size={28} color={C.blueGlow} />
             </View>
             <View style={s.turnInfo}>
-              <Text style={s.turnLabel}>Proceed to route</Text>
+              <Text style={[s.turnLabel, { color: C.blueGlow }]}>Proceed to route</Text>
               <Text style={s.turnRoad} numberOfLines={1}>Head toward the route</Text>
             </View>
             <Text style={s.turnDist}>{formatStepDist(stepDistM!)}</Text>
@@ -17139,7 +19720,7 @@ function MapScreen() {
                     <Ionicons
                       name={laneArrowIcon(lane.indications[0] ?? 'straight') as any}
                       size={13}
-                      color={lane.valid ? '#f97316' : OVR.text3 + '44'}
+                      color={lane.valid ? C.orange : C.text3 + '44'}
                     />
                   </View>
                 ))}
@@ -17149,7 +19730,7 @@ function MapScreen() {
             {afterStep && stepDistM !== null && stepDistM < (announceDists(speedMph)[0] * 1.2) &&
               afterStep.type !== 'arrive' && (
               <View style={s.thenRow}>
-                <Ionicons name={stepIcon(afterStep.type, afterStep.modifier) as any} size={14} color="rgba(255,255,255,0.5)" />
+                <Ionicons name={stepIcon(afterStep.type, afterStep.modifier) as any} size={14} color={C.text3} />
                 <Text style={s.thenText} numberOfLines={1}>
                   then {displayStepLabel(afterStep)} · {formatStepDist(afterStep.distance)}
                 </Text>
@@ -17208,8 +19789,8 @@ function MapScreen() {
         {/* Next waypoint */}
         {navTarget && !isApproaching && (
           <View style={s.navTarget}>
-            <View style={[s.navTargetBadge, isProceeding && { backgroundColor: '#1e3a5f', borderColor: '#3b82f6' }]}>
-              <Text style={[s.navTargetBadgeText, isProceeding && { color: '#60a5fa' }]}>
+            <View style={[s.navTargetBadge, isProceeding && { backgroundColor: C.blueGlow + '18', borderColor: C.blueGlow + '55' }]}>
+              <Text style={[s.navTargetBadgeText, isProceeding && { color: C.blueGlow }]}>
                 {isProceeding ? 'PROCEED TO' : 'NEXT STOP'}
               </Text>
             </View>
@@ -17226,8 +19807,8 @@ function MapScreen() {
 
         {navMode && !navTarget && (
           <View style={s.navTarget}>
-            <View style={[s.navTargetBadge, { backgroundColor: '#1e3a5f', borderColor: '#3b82f6' }]}>
-              <Text style={[s.navTargetBadgeText, { color: '#60a5fa' }]}>NAVIGATION</Text>
+            <View style={[s.navTargetBadge, { backgroundColor: C.blueGlow + '18', borderColor: C.blueGlow + '55' }]}>
+              <Text style={[s.navTargetBadgeText, { color: C.blueGlow }]}>NAVIGATION</Text>
             </View>
             <View style={s.navTargetInfo}>
               <Text style={s.navTargetName} numberOfLines={1}>Route active</Text>
@@ -17245,15 +19826,15 @@ function MapScreen() {
 
           {routeSteps.length > 0 && (
             <TouchableOpacity style={s.navStepsBtn} onPress={() => setShowSteps(p => !p)} hitSlop={12}>
-              <Ionicons name="list-outline" size={14} color={OVR.text2} />
+              <Ionicons name="list-outline" size={14} color={C.text2} />
               <Text style={s.navStepsBtnText}>TURNS {showSteps ? '▲' : '▼'}</Text>
             </TouchableOpacity>
           )}
 
           {isRouted && userLoc && (
             <TouchableOpacity style={s.navRerouteBtn} onPress={manualReroute} disabled={isRerouting} hitSlop={12}>
-              <Ionicons name="refresh-outline" size={14} color={isRerouting ? OVR.text3 : OVR.text2} />
-              <Text style={[s.navStepsBtnText, isRerouting && { color: OVR.text3 }]}>REROUTE</Text>
+              <Ionicons name="refresh-outline" size={14} color={isRerouting ? C.text3 : C.text2} />
+              <Text style={[s.navStepsBtnText, isRerouting && { color: C.text3 }]}>REROUTE</Text>
             </TouchableOpacity>
           )}
 
@@ -17271,15 +19852,15 @@ function MapScreen() {
                   <Ionicons
                     name={stepIcon(step.type, step.modifier) as any}
                     size={16}
-                    color={isActive ? '#fff' : isPast ? OVR.text3 + '55' : OVR.text3}
+                    color={isActive ? '#fff' : isPast ? C.text3 + '55' : C.text3}
                   />
                   <View style={s.stepInfo}>
-                    <Text style={[s.stepLabel, isActive && { color: '#fff' }, isPast && { color: OVR.text3, opacity: 0.4 }]}>
+                    <Text style={[s.stepLabel, isActive && { color: '#fff' }, isPast && { color: C.text3, opacity: 0.4 }]}>
                       {displayStepLabel(step)}
                     </Text>
                     {displayStepRoad(step) ? <Text style={[s.stepRoad, isPast && { opacity: 0.4 }]} numberOfLines={1}>{displayStepRoad(step)}</Text> : null}
                   </View>
-                  <Text style={[s.stepDist, isActive && { color: '#f97316' }, isPast && { opacity: 0.4 }]}>
+                  <Text style={[s.stepDist, isActive && { color: C.orange }, isPast && { opacity: 0.4 }]}>
                     {isActive && stepDistM !== null ? formatStepDist(stepDistM) : formatStepDist(step.distance)}
                   </Text>
                 </View>
@@ -17353,8 +19934,8 @@ function MapScreen() {
         );
       })()}
 
-      {extremeCopilotAvailable && !navMode && !safeWaterPlanningActive && !waterFollowActive && !showExtremeCopilot && (
-        <View style={[s.extremeCopilotDock, { bottom: bottomInset + 132 }]} pointerEvents="box-none">
+      {extremeCopilotAvailable && !navMode && !safeWaterPlanningActive && !waterFollowActive && !showExtremeCopilot && (!showDiscoveryPanel || extremeCopilotVoiceActive) && (
+        <View style={[s.extremeCopilotDock, { bottom: bottomInset + (showDiscoveryPanel ? 444 : 132) }]} pointerEvents="box-none">
           <TouchableOpacity
             style={s.extremeCopilotFab}
             activeOpacity={0.88}
@@ -17380,9 +19961,9 @@ function MapScreen() {
       {(!!quickToast || quickReport) && userLoc && !navMode && !safeWaterPlanningActive && !waterFollowActive && !showSearch && !showMapDrawer && !showDiscoveryPanel && !selectedCamp && !selectedPlace && !tappedPoi && !selectedTrail && !selectedCommunityPin && (
         <View style={[s.quickReportWrap, { bottom: bottomInset + 78 }]} pointerEvents="box-none">
           {!!quickToast && (
-            <View style={s.quickToast}>
-              <Ionicons name="checkmark-circle" size={14} color={C.green} />
-              <Text style={s.quickToastText}>{quickToast}</Text>
+            <View style={[s.quickToast, mapChrome.toast]}>
+              <Ionicons name="information-circle-outline" size={14} color={C.orange} />
+              <Text style={[s.quickToastText, { color: mapChrome.toastText }]}>{quickToast}</Text>
             </View>
           )}
           {quickReport && (
@@ -18525,7 +21106,8 @@ const LIGHT_OVR = {
 };
 
 function overlayPalette(C: ColorPalette) {
-  return DARK_OVR;
+  const bg = String(C.bg || '').toLowerCase();
+  return bg.includes('f7') || bg.includes('fff') || bg.includes('250') ? LIGHT_OVR : DARK_OVR;
 }
 
 const makeStyles = (C: ColorPalette) => {
@@ -18716,9 +21298,9 @@ const makeStyles = (C: ColorPalette) => {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: 'rgba(5,5,5,0.56)',
+    backgroundColor: OVR.bg,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: OVR.border,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',
@@ -18734,11 +21316,11 @@ const makeStyles = (C: ColorPalette) => {
     height: 64,
     borderTopRightRadius: 14,
     borderBottomRightRadius: 14,
-    backgroundColor: 'rgba(5,5,5,0.46)',
+    backgroundColor: OVR.bg,
     borderTopWidth: 1,
     borderRightWidth: 1,
     borderBottomWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: OVR.border,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 19,
@@ -18752,7 +21334,7 @@ const makeStyles = (C: ColorPalette) => {
     width: 3,
     height: 28,
     borderRadius: 2,
-    backgroundColor: 'rgba(245,245,247,0.55)',
+    backgroundColor: OVR.text3,
   },
   mapDrawerOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -18764,12 +21346,12 @@ const makeStyles = (C: ColorPalette) => {
     width: '88%' as any,
     maxWidth: 335,
     height: '100%' as any,
-    backgroundColor: 'rgba(8,11,15,0.96)',
+    backgroundColor: C.s1,
     borderRightWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: C.border,
     paddingHorizontal: 14,
     shadowColor: '#000',
-    shadowOpacity: 0.48,
+    shadowOpacity: 0.26,
     shadowRadius: 28,
     shadowOffset: { width: 12, height: 0 },
     elevation: 121,
@@ -18781,15 +21363,15 @@ const makeStyles = (C: ColorPalette) => {
     gap: 12,
     paddingBottom: 14,
   },
-  mapDrawerTitle: { color: OVR.text, fontSize: 19, fontWeight: '900' },
-  mapDrawerSub: { color: OVR.text3, fontSize: 11, fontFamily: mono, marginTop: 3 },
+  mapDrawerTitle: { color: C.text, fontSize: 19, fontWeight: '900' },
+  mapDrawerSub: { color: C.text3, fontSize: 11, marginTop: 3 },
   mapDrawerClose: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: C.s2,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: C.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -18817,15 +21399,15 @@ const makeStyles = (C: ColorPalette) => {
     alignItems: 'center',
     justifyContent: 'center',
   },
-  mapDrawerFeatureTitle: { color: OVR.text, fontSize: 14, fontWeight: '900' },
-  mapDrawerFeatureSub: { color: OVR.text3, fontSize: 10.5, lineHeight: 14, marginTop: 3 },
+  mapDrawerFeatureTitle: { color: C.text, fontSize: 14, fontWeight: '900' },
+  mapDrawerFeatureSub: { color: C.text3, fontSize: 10.5, lineHeight: 14, marginTop: 3 },
   mapDrawerSection: { gap: 7 },
   mapDrawerRow: {
     minHeight: 54,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.09)',
-    backgroundColor: 'rgba(255,255,255,0.045)',
+    borderColor: C.border,
+    backgroundColor: C.s2,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
@@ -18839,8 +21421,8 @@ const makeStyles = (C: ColorPalette) => {
     alignItems: 'center',
     justifyContent: 'center',
   },
-  mapDrawerRowTitle: { color: OVR.text, fontSize: 12, fontWeight: '900' },
-  mapDrawerRowSub: { color: OVR.text3, fontSize: 9.5, fontFamily: mono, marginTop: 2 },
+  mapDrawerRowTitle: { color: C.text, fontSize: 12.5, fontWeight: '900' },
+  mapDrawerRowSub: { color: C.text3, fontSize: 10.5, marginTop: 2 },
   mapStyleOverlay: {
     flex: 1,
     justifyContent: 'flex-end',
@@ -19019,37 +21601,41 @@ const makeStyles = (C: ColorPalette) => {
   discoverySearchText: { color: '#F5F5F7', fontSize: 10, fontFamily: mono, fontWeight: '800', letterSpacing: 0.5 },
   discoveryPanel: {
     position: 'absolute',
-    left: 14,
-    right: 14,
-    bottom: 126,
-    maxHeight: 292,
-    backgroundColor: 'rgba(8,8,10,0.72)',
+    left: 10,
+    right: 10,
+    bottom: 118,
+    maxHeight: 360,
+    backgroundColor: C.s1,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.09)',
-    borderRadius: 24,
+    borderColor: C.border,
+    borderRadius: 18,
     padding: 12,
     shadowColor: '#000',
-    shadowOpacity: 0.46,
-    shadowRadius: 28,
-    shadowOffset: { width: 0, height: 16 },
-    elevation: 14,
+    shadowOpacity: 0.24,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 28,
   },
   trailOverlayCard: {
     position: 'absolute',
-    left: 14,
-    right: 14,
-    bottom: 126,
-    maxHeight: '64%' as any,
-    backgroundColor: 'rgba(8,8,10,0.72)',
+    left: 10,
+    right: 10,
+    bottom: 0,
+    maxHeight: '84%' as any,
+    backgroundColor: C.s1,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.09)',
-    borderRadius: 22,
-    padding: 10,
+    borderColor: C.border,
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    padding: 12,
+    paddingTop: 14,
     shadowColor: '#000',
-    shadowOpacity: 0.46,
-    shadowRadius: 28,
-    shadowOffset: { width: 0, height: 16 },
-    elevation: 14,
+    shadowOpacity: 0.32,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: -8 },
+    elevation: 28,
   },
   safeWaterPanel: {
     position: 'absolute',
@@ -19245,7 +21831,7 @@ const makeStyles = (C: ColorPalette) => {
   },
   catchNotes: { minHeight: 76, paddingTop: 10, textAlignVertical: 'top' },
   catchSaveBtn: { minHeight: 42 },
-  trailOverlayContent: { paddingBottom: 6 },
+  trailOverlayContent: { paddingBottom: 12 },
   trailCollapsedWrap: {
     position: 'absolute',
     left: 14,
@@ -19262,9 +21848,9 @@ const makeStyles = (C: ColorPalette) => {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: 'rgba(8,8,10,0.78)',
+    backgroundColor: C.s1,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: C.border,
     borderRadius: 999,
     paddingHorizontal: 13,
     shadowColor: '#000',
@@ -19273,111 +21859,120 @@ const makeStyles = (C: ColorPalette) => {
     shadowOffset: { width: 0, height: 6 },
     elevation: 12,
   },
-  trailCollapsedText: { color: '#F5F5F7', fontSize: 12, fontWeight: '800', flex: 1 },
+  trailCollapsedText: { color: C.text, fontSize: 12, fontWeight: '800', flex: 1 },
   trailMapCloseBtn: {
     width: 38,
     height: 38,
     borderRadius: 19,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(5,5,5,0.62)',
+    backgroundColor: C.s1,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: C.border,
   },
-  discoveryPanelHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
-  discoveryPanelTitle: { color: OVR.text, fontSize: 13, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
-  discoveryPanelSub: { color: OVR.text3, fontSize: 10, lineHeight: 14, marginTop: 2, maxWidth: 285 },
-  discoveryPanelClose: { marginLeft: 'auto', width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: OVR.border2 },
-  discoveryCats: { gap: 7, paddingTop: 10, paddingBottom: 8 },
+  discoveryPanelHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 8 },
+  discoveryPanelTitle: { color: C.text, fontSize: 17, lineHeight: 21, fontWeight: '900', letterSpacing: 0 },
+  discoveryPanelSub: { color: C.text3, fontSize: 12, lineHeight: 16, marginTop: 2 },
+  discoveryPanelClose: { marginLeft: 'auto', width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s2, borderWidth: 1, borderColor: C.border },
+  discoveryCats: { gap: 7, paddingTop: 0, paddingBottom: 10 },
   discoveryCatPill: {
-    color: OVR.text2,
-    fontSize: 9,
-    fontFamily: mono,
-    fontWeight: '900',
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-    borderRadius: 10,
-    backgroundColor: OVR.border2,
+    color: C.text2,
+    fontSize: 10,
+    fontWeight: '800',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: C.s2,
+    borderWidth: 1,
+    borderColor: C.border,
     overflow: 'hidden',
   },
   discoveryList: { maxHeight: 210 },
-  discoveryCardRail: { gap: 10, paddingRight: 4 },
+  discoveryCardList: { maxHeight: 238 },
+  discoveryCardRail: { gap: 8, paddingBottom: 2 },
   discoveryTrailCard: {
-    width: 238,
-    backgroundColor: 'rgba(255,255,255,0.055)',
+    minHeight: 112,
+    width: '100%',
+    flexDirection: 'row',
+    backgroundColor: C.s2,
     borderWidth: 1,
-    borderColor: OVR.border,
-    borderRadius: 14,
+    borderColor: C.border,
+    borderRadius: 12,
     overflow: 'hidden',
   },
   discoveryTrailHero: {
-    height: 88,
-    borderBottomWidth: 1,
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    padding: 10,
+    width: 92,
+    minHeight: 112,
+    borderRightWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.s1,
+    padding: 9,
     justifyContent: 'space-between',
   },
   discoveryTrailPhoto: {
     ...StyleSheet.absoluteFillObject,
     width: '100%',
     height: '100%',
-    opacity: 0.82,
+    opacity: 0.92,
   },
   discoveryTrailHeroIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
+    width: 38,
+    height: 38,
+    borderRadius: 11,
     alignItems: 'center',
     justifyContent: 'center',
   },
   discoveryTrailHeroHint: {
-    color: OVR.text3,
+    color: C.text3,
     fontSize: 9,
-    fontFamily: mono,
-    fontWeight: '800',
+    fontWeight: '700',
   },
   discoveryTrailPhotoHint: {
     position: 'absolute',
-    right: 10,
-    top: 14,
+    left: 8,
+    right: 8,
+    bottom: 8,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: 'rgba(0,0,0,0.22)',
+    backgroundColor: C.s2,
     borderWidth: 1,
-    borderColor: OVR.border,
-    borderRadius: 999,
-    paddingHorizontal: 7,
+    borderColor: C.border,
+    borderRadius: 8,
+    paddingHorizontal: 6,
     paddingVertical: 4,
   },
   discoveryDifficulty: {
     alignSelf: 'flex-start',
-    color: OVR.text2,
+    color: C.text2,
     fontSize: 9,
-    fontFamily: mono,
-    fontWeight: '900',
-    backgroundColor: 'rgba(0,0,0,0.28)',
+    fontWeight: '800',
+    backgroundColor: C.s2,
+    borderWidth: 1,
+    borderColor: C.border,
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 3,
     overflow: 'hidden',
   },
-  discoveryTrailCardBody: { padding: 10 },
-  discoveryTrailName: { color: OVR.text, fontSize: 13, fontWeight: '900', lineHeight: 17, minHeight: 34 },
-  discoveryTrailMeta: { color: OVR.text3, fontSize: 10, fontFamily: mono, marginTop: 3 },
+  discoveryTrailCardBody: { flex: 1, minWidth: 0, padding: 11, justifyContent: 'space-between' },
+  discoveryTrailName: { color: C.text, fontSize: 14, fontWeight: '900', lineHeight: 18 },
+  discoveryTrailMeta: { color: C.text3, fontSize: 11, lineHeight: 15, marginTop: 4 },
   discoveryTrailStats: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 9 },
   discoveryTrailStat: {
-    color: OVR.text2,
-    fontSize: 9,
-    fontFamily: mono,
-    backgroundColor: OVR.border2,
+    color: C.text2,
+    fontSize: 10,
+    fontWeight: '700',
+    backgroundColor: C.s1,
+    borderWidth: 1,
+    borderColor: C.border,
     borderRadius: 999,
-    paddingHorizontal: 7,
-    paddingVertical: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
     overflow: 'hidden',
   },
-  discoveryTrailFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 },
-  discoveryTrailPreview: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900' },
+  discoveryTrailFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 },
+  discoveryTrailPreview: { color: C.orange, fontSize: 11, fontWeight: '900' },
   discoveryTrailRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -19386,8 +21981,8 @@ const makeStyles = (C: ColorPalette) => {
     borderTopWidth: 1,
     borderColor: OVR.border2,
   },
-  discoveryEmpty: { alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 24, paddingHorizontal: 18 },
-  discoveryEmptyText: { color: OVR.text3, fontSize: 11, lineHeight: 16, textAlign: 'center' },
+  discoveryEmpty: { alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 24, paddingHorizontal: 18, borderWidth: 1, borderColor: C.border, backgroundColor: C.s2, borderRadius: 12 },
+  discoveryEmptyText: { color: C.text3, fontSize: 12, lineHeight: 17, textAlign: 'center' },
   routeScoutPanel: {
     position: 'absolute',
     left: 12,
@@ -19469,12 +22064,12 @@ const makeStyles = (C: ColorPalette) => {
     left: 12,
     right: 12,
     bottom: 118,
-    backgroundColor: 'rgba(10,15,18,0.92)',
+    backgroundColor: OVR.bg2,
     borderWidth: 1,
     borderColor: OVR.border,
-    borderRadius: 14,
-    paddingTop: 9,
-    paddingBottom: 10,
+    borderRadius: 12,
+    paddingTop: 10,
+    paddingBottom: 11,
     zIndex: 9000,
     elevation: 90,
     shadowColor: '#000',
@@ -19490,27 +22085,27 @@ const makeStyles = (C: ColorPalette) => {
     marginBottom: 8,
   },
   copilotResultTitleWrap: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  copilotResultTitle: { color: OVR.text2, fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 0.6 },
+  copilotResultTitle: { color: OVR.text, fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 0.4 },
   copilotResultScroll: { gap: 8, paddingHorizontal: 11 },
   copilotResultCard: {
-    width: 188,
-    minHeight: 76,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: OVR.border2,
-    backgroundColor: 'rgba(255,255,255,0.055)',
-    padding: 9,
-  },
-  copilotResultName: { color: OVR.text, fontSize: 13, fontWeight: '900', letterSpacing: 0 },
-  copilotResultMeta: { color: OVR.text3, fontSize: 10, fontFamily: mono, marginTop: 4, letterSpacing: 0 },
-  copilotResultActions: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 9 },
-  copilotResultIconBtn: {
-    width: 30,
-    height: 26,
+    width: 208,
+    minHeight: 92,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: OVR.border2,
-    backgroundColor: 'rgba(255,255,255,0.055)',
+    borderColor: OVR.border,
+    backgroundColor: C.s2,
+    padding: 10,
+  },
+  copilotResultName: { color: C.text, fontSize: 14, fontWeight: '800', letterSpacing: 0, lineHeight: 18 },
+  copilotResultMeta: { color: C.text3, fontSize: 11, marginTop: 5, letterSpacing: 0, lineHeight: 15 },
+  copilotResultActions: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 10 },
+  copilotResultIconBtn: {
+    width: 32,
+    height: 30,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.s1,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -19546,15 +22141,15 @@ const makeStyles = (C: ColorPalette) => {
   // ── Nav HUD
   navHud: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: 'rgba(8,8,10,0.82)',
-    borderTopWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: C.s1,
+    borderTopWidth: 1, borderColor: C.border,
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     overflow: 'hidden',
     zIndex: 10000,
     elevation: 100,
     shadowColor: '#000',
-    shadowOpacity: 0.46,
+    shadowOpacity: 0.32,
     shadowRadius: 28,
     shadowOffset: { width: 0, height: -14 },
   },
@@ -19567,12 +22162,12 @@ const makeStyles = (C: ColorPalette) => {
     top: 142,
     width: 48,
     height: 48,
-    borderRadius: 16,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(15,23,42,0.94)',
+    backgroundColor: C.s1,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.16)',
+    borderColor: C.border,
     zIndex: 10001,
     elevation: 101,
     shadowColor: '#000',
@@ -19581,8 +22176,8 @@ const makeStyles = (C: ColorPalette) => {
     shadowRadius: 10,
   },
   navLocateBtnFollowing: {
-    backgroundColor: '#f97316',
-    borderColor: '#fed7aa',
+    backgroundColor: C.orange,
+    borderColor: C.orange,
   },
   navTurnsSheet: {
     position: 'absolute',
@@ -19590,9 +22185,9 @@ const makeStyles = (C: ColorPalette) => {
     right: 12,
     bottom: 274,
     maxHeight: 320,
-    backgroundColor: 'rgba(8,8,10,0.94)',
+    backgroundColor: C.s1,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
+    borderColor: C.border,
     borderRadius: 18,
     overflow: 'hidden',
     zIndex: 10002,
@@ -19610,41 +22205,41 @@ const makeStyles = (C: ColorPalette) => {
     paddingHorizontal: 14,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.08)',
+    borderBottomColor: C.border,
   },
-  navTurnsTitle: { color: OVR.text, fontSize: 12, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
-  navTurnsSub: { color: OVR.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
+  navTurnsTitle: { color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
+  navTurnsSub: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
   navTurnsClose: {
     width: 32,
     height: 32,
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: OVR.border2,
+    backgroundColor: C.s2,
     borderWidth: 1,
-    borderColor: OVR.border,
+    borderColor: C.border,
   },
 
   turnStripWrap: { overflow: 'hidden' },
   turnStrip: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     paddingHorizontal: 16, paddingVertical: 14,
-    backgroundColor: 'rgba(5,5,5,0.28)',
+    backgroundColor: C.s2,
     borderBottomWidth: 1,
-    borderColor: 'rgba(255,255,255,0.07)',
+    borderColor: C.border,
   },
   turnIconWrap: {
     width: 64, height: 64, alignItems: 'center', justifyContent: 'center',
     borderRadius: 22,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    backgroundColor: 'rgba(255,255,255,0.055)',
+    borderColor: C.border,
+    backgroundColor: C.s1,
     overflow: 'hidden',
   },
   turnInfo: { flex: 1, justifyContent: 'center' },
-  turnDist: { color: OVR.text, fontSize: 28, fontWeight: '900', letterSpacing: 0, lineHeight: 33 },
-  turnLabel: { color: OVR.text2, fontSize: 13, fontWeight: '800', marginTop: 2, letterSpacing: 0 },
-  turnRoad: { color: OVR.text3, fontSize: 12, marginTop: 1 },
+  turnDist: { color: C.text, fontSize: 28, fontWeight: '900', letterSpacing: 0, lineHeight: 33 },
+  turnLabel: { color: C.text2, fontSize: 13, fontWeight: '800', marginTop: 2, letterSpacing: 0 },
+  turnRoad: { color: C.text3, fontSize: 12, marginTop: 1 },
   navSourceRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -19662,8 +22257,8 @@ const makeStyles = (C: ColorPalette) => {
     paddingHorizontal: 10,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.11)',
-    backgroundColor: 'rgba(255,255,255,0.045)',
+    borderColor: C.border,
+    backgroundColor: C.s2,
   },
   navSourceText: { fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.6, flexShrink: 1 },
   currentRoadPill: {
@@ -19678,11 +22273,11 @@ const makeStyles = (C: ColorPalette) => {
     paddingHorizontal: 11,
     paddingVertical: 7,
     borderRadius: 8,
-    backgroundColor: 'rgba(10,15,18,0.68)',
+    backgroundColor: C.s2,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.16)',
+    borderColor: C.border,
   },
-  currentRoadText: { color: OVR.text2, fontSize: 12, fontWeight: '800', letterSpacing: 0 },
+  currentRoadText: { color: C.text2, fontSize: 12, fontWeight: '800', letterSpacing: 0 },
   stepProgressBg: {
     height: 4, backgroundColor: 'rgba(249,115,22,0.15)',
     borderTopWidth: 1, borderColor: 'rgba(249,115,22,0.1)',
@@ -19693,21 +22288,21 @@ const makeStyles = (C: ColorPalette) => {
   },
   laneRow: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: 'rgba(255,255,255,0.035)', paddingHorizontal: 14, paddingVertical: 6,
+    backgroundColor: C.s1, paddingHorizontal: 14, paddingVertical: 6,
     borderTopWidth: 1, borderColor: 'rgba(249,115,22,0.15)',
   },
-  laneLabel: { color: OVR.text3, fontSize: 9, fontFamily: mono, marginRight: 4, letterSpacing: 1 },
+  laneLabel: { color: C.text3, fontSize: 9, fontFamily: mono, marginRight: 4, letterSpacing: 1 },
   laneBox: {
-    width: 26, height: 22, borderRadius: 5, borderWidth: 1, borderColor: OVR.border,
-    alignItems: 'center', justifyContent: 'center', backgroundColor: OVR.border2,
+    width: 26, height: 22, borderRadius: 5, borderWidth: 1, borderColor: C.border,
+    alignItems: 'center', justifyContent: 'center', backgroundColor: C.s2,
   },
   laneBoxActive: { borderColor: '#f97316', backgroundColor: 'rgba(249,115,22,0.15)' },
   thenRow: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     paddingHorizontal: 12, paddingVertical: 5,
-    backgroundColor: 'rgba(0,0,0,0.25)', borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.07)',
+    backgroundColor: C.s2, borderTopWidth: 1, borderTopColor: C.border,
   },
-  thenText: { color: OVR.text3, fontSize: 11, flex: 1, letterSpacing: 0 },
+  thenText: { color: C.text3, fontSize: 11, flex: 1, letterSpacing: 0 },
 
   offRouteWarnBar: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
@@ -19724,21 +22319,21 @@ const makeStyles = (C: ColorPalette) => {
   navStrip: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: 1, borderColor: 'rgba(255,255,255,0.07)',
+    borderBottomWidth: 1, borderColor: C.border,
   },
   navBearing: { alignItems: 'center', justifyContent: 'center', width: 46 },
   navBearingText: { color: C.orange, fontSize: 18, fontWeight: '900', fontFamily: mono },
   navDistBlock: { flex: 1, alignItems: 'center' },
-  navDistVal: { color: OVR.text, fontSize: 27, fontWeight: '900', letterSpacing: 0 },
-  navEta: { color: OVR.text3, fontSize: 10, fontFamily: mono, fontWeight: '800', marginTop: 2, letterSpacing: 0.4 },
-  navRemaining: { color: OVR.text3, fontSize: 9, fontFamily: mono, marginTop: 2, opacity: 0.7 },
+  navDistVal: { color: C.text, fontSize: 27, fontWeight: '900', letterSpacing: 0 },
+  navEta: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '800', marginTop: 2, letterSpacing: 0.4 },
+  navRemaining: { color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 2, opacity: 0.7 },
   navSpeedBlock: { alignItems: 'center', width: 50 },
-  navSpeedVal: { color: OVR.text2, fontSize: 22, fontWeight: '700', fontFamily: mono },
+  navSpeedVal: { color: C.text2, fontSize: 22, fontWeight: '700', fontFamily: mono },
 
   navTarget: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     paddingHorizontal: 16, paddingVertical: 10,
-    borderBottomWidth: 1, borderColor: 'rgba(255,255,255,0.07)',
+    borderBottomWidth: 1, borderColor: C.border,
   },
   navTargetBadge: {
     backgroundColor: C.orange + '12', borderRadius: 999, borderWidth: 1, borderColor: C.orange + '44',
@@ -19746,8 +22341,8 @@ const makeStyles = (C: ColorPalette) => {
   },
   navTargetBadgeText: { color: C.orange, fontSize: 8, fontFamily: mono, fontWeight: '900' },
   navTargetInfo: { flex: 1 },
-  navTargetName: { color: OVR.text, fontSize: 15, fontWeight: '800' },
-  navTargetMeta: { color: OVR.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
+  navTargetName: { color: C.text, fontSize: 15, fontWeight: '800' },
+  navTargetMeta: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
 
   navActions: {
     flexDirection: 'row', gap: 8,
@@ -19762,13 +22357,13 @@ const makeStyles = (C: ColorPalette) => {
   navStepsBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
     paddingHorizontal: 12, paddingVertical: 10, borderRadius: 11,
-    borderWidth: 1, borderColor: OVR.border, backgroundColor: OVR.border2,
+    borderWidth: 1, borderColor: C.border, backgroundColor: C.s2,
   },
-  navStepsBtnText: { color: OVR.text2, fontSize: 10, fontFamily: mono, fontWeight: '800', letterSpacing: 0.4 },
+  navStepsBtnText: { color: C.text2, fontSize: 10, fontFamily: mono, fontWeight: '800', letterSpacing: 0.4 },
   navRerouteBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
     paddingHorizontal: 12, paddingVertical: 10, borderRadius: 11,
-    borderWidth: 1, borderColor: OVR.border, backgroundColor: OVR.border2,
+    borderWidth: 1, borderColor: C.border, backgroundColor: C.s2,
   },
   dlBar: {
     position: 'absolute', top: 92, left: 16, right: 16,
@@ -19862,15 +22457,15 @@ const makeStyles = (C: ColorPalette) => {
   searchAreaTextCamps: { color: C.green },
   searchAreaTextTrails: { color: C.orange },
 
-  stepsList: { maxHeight: 200, borderTopWidth: 1, borderColor: OVR.border },
+  stepsList: { maxHeight: 200, borderTopWidth: 1, borderColor: C.border },
   stepsListDetached: { maxHeight: 248 },
-  stepRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 9, borderBottomWidth: 1, borderColor: OVR.border2 },
-  stepRowFirst: { backgroundColor: OVR.border2 },
-  stepRowActive: { backgroundColor: '#f97316' + '22', borderLeftWidth: 3, borderLeftColor: '#f97316' },
+  stepRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 9, borderBottomWidth: 1, borderColor: C.border },
+  stepRowFirst: { backgroundColor: C.s2 },
+  stepRowActive: { backgroundColor: C.orange + '22', borderLeftWidth: 3, borderLeftColor: C.orange },
   stepInfo: { flex: 1 },
-  stepLabel: { color: OVR.text2, fontSize: 11, fontFamily: mono, fontWeight: '700' },
-  stepRoad: { color: OVR.text3, fontSize: 10, marginTop: 1, fontFamily: mono },
-  stepDist: { color: OVR.text3, fontSize: 10, fontFamily: mono },
+  stepLabel: { color: C.text2, fontSize: 11, fontFamily: mono, fontWeight: '700' },
+  stepRoad: { color: C.text3, fontSize: 10, marginTop: 1, fontFamily: mono },
+  stepDist: { color: C.text3, fontSize: 10, fontFamily: mono },
 
   // ── Search overlay
   searchSheet: {
@@ -20121,17 +22716,71 @@ const makeStyles = (C: ColorPalette) => {
   // ── Campsite quick card
   quickCard: {
     position: 'absolute', bottom: 0, left: 10, right: 10,
-    maxHeight: '86%',
+    maxHeight: '84%',
     overflow: 'hidden',
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.s1,
+    shadowColor: '#000',
+    shadowOpacity: 0.32,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: -8 },
     elevation: 40, zIndex: 1000,
   },
   quickCardShell: { padding: 0 },
-  quickCardImg: { width: '100%', height: 190, position: 'relative', overflow: 'hidden' },
+  quickCardImg: {
+    height: 164,
+    marginHorizontal: 12,
+    marginTop: 12,
+    borderRadius: 22,
+    position: 'relative',
+    overflow: 'hidden',
+    backgroundColor: C.s2,
+  },
   quickCardPhoto: { width: '100%', height: '100%' },
   quickCardPhotoPlaceholder: {
     width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', gap: 2,
   },
   quickCardHeroShade: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.28)' },
+  quickPhotoControls: {
+    position: 'absolute',
+    left: 10,
+    right: 10,
+    top: '42%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  quickPhotoArrow: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.42)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.24)',
+  },
+  quickPhotoCount: {
+    position: 'absolute',
+    left: 12,
+    top: 12,
+    overflow: 'hidden',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: 'rgba(0,0,0,0.42)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+    color: '#fff',
+    fontSize: 9,
+    fontFamily: mono,
+    fontWeight: '900',
+  },
   quickCardHeroActions: { position: 'absolute', top: 12, right: 12, flexDirection: 'row', gap: 8 },
   quickCardHeroIcon: {
     width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center',
@@ -20140,7 +22789,7 @@ const makeStyles = (C: ColorPalette) => {
   quickCardHeroText: { position: 'absolute', left: 15, right: 76, bottom: 14 },
   quickCardHeroKicker: { color: '#fff', fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8, opacity: 0.9 },
   quickCardHeroTitle: { color: '#fff', fontSize: 22, lineHeight: 27, fontWeight: '900', marginTop: 4 },
-  quickCardBody: { padding: 14, paddingBottom: 28, gap: 8 },
+  quickCardBody: { padding: 14, paddingBottom: 30, gap: 10 },
   quickCardHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
   quickCardName: { color: C.text, fontSize: 15, fontWeight: '800', flex: 1, lineHeight: 20 },
   quickCardClose: {
@@ -20148,13 +22797,13 @@ const makeStyles = (C: ColorPalette) => {
     alignItems: 'center', justifyContent: 'center',
   },
   landBadge: {
-    alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3,
-    borderRadius: 6, borderWidth: 1,
+    alignSelf: 'flex-start', paddingHorizontal: 9, paddingVertical: 5,
+    borderRadius: 999, borderWidth: 1,
   },
   landBadgeText: { fontSize: 9, fontFamily: mono, fontWeight: '800', letterSpacing: 0.5 },
   quickCardSource: { color: C.text3, fontSize: 10, lineHeight: 14, fontFamily: mono, fontWeight: '700' },
   quickCardTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
-  quickCardCost: { color: C.green, fontSize: 11, fontFamily: mono, fontWeight: '700' },
+  quickCardCost: { color: C.green, fontSize: 11, fontFamily: mono, fontWeight: '800' },
   quickCardTripBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
     paddingVertical: 8, borderRadius: 10,
@@ -20174,12 +22823,20 @@ const makeStyles = (C: ColorPalette) => {
   nearbyPlaceBody: { padding: 9, gap: 4, minHeight: 58 },
   nearbyPlaceName: { color: C.text, fontSize: 12, lineHeight: 16, fontWeight: '800' },
   nearbyPlaceMeta: { color: C.text3, fontSize: 9, fontFamily: mono },
+  siteRail: { gap: 8, paddingRight: 4, paddingTop: 2 },
+  sitePhotoCard: { width: 148, borderWidth: 1, borderColor: C.border, backgroundColor: C.s2, borderRadius: 12, overflow: 'hidden' },
+  sitePhoto: { width: '100%', height: 80, backgroundColor: C.s3 },
+  sitePlaceholder: { width: '100%', height: 80, alignItems: 'center', justifyContent: 'center', backgroundColor: C.orange + '12', borderBottomWidth: 1, borderBottomColor: C.border },
+  siteBody: { padding: 9, gap: 4, minHeight: 62 },
+  siteName: { color: C.text, fontSize: 12, lineHeight: 15, fontWeight: '900' },
+  siteMeta: { color: C.text3, fontSize: 9, lineHeight: 13, fontFamily: mono },
   campReservationCard: { gap: 8, borderWidth: 1, borderColor: C.orange + '35', backgroundColor: C.orange + '10', borderRadius: 12, padding: 10, marginTop: 4 },
   quickCardActions: { flexDirection: 'row', gap: 8, marginTop: 2 },
   quickCardNav: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
-    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10,
-    backgroundColor: '#16a34a',
+    minHeight: 44,
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12,
+    backgroundColor: C.green,
   },
   quickCardNavText: { color: '#fff', fontSize: 11, fontFamily: mono, fontWeight: '700' },
   quickCardFull: {
@@ -20198,7 +22855,7 @@ const makeStyles = (C: ColorPalette) => {
     gap: 5,
     borderWidth: 1,
     borderColor: C.border,
-    borderRadius: 10,
+    borderRadius: 12,
     backgroundColor: C.s2,
     paddingHorizontal: 9,
   },
@@ -20266,8 +22923,8 @@ const makeStyles = (C: ColorPalette) => {
 
   // ── Camp fullness UI
   fullnessBanner: {
-    backgroundColor: '#fef2f2', borderWidth: 1, borderColor: '#fca5a5',
-    borderRadius: 8, padding: 8, gap: 6,
+    backgroundColor: C.red + '12', borderWidth: 1, borderColor: C.red + '44',
+    borderRadius: 12, padding: 10, gap: 7,
   },
   fullnessBannerTop: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   fullnessBannerText: { flex: 1, color: C.red, fontSize: 10, fontFamily: mono, fontWeight: '800' },
@@ -20282,14 +22939,14 @@ const makeStyles = (C: ColorPalette) => {
   fullnessOpenText: { color: C.green, fontSize: 10, fontFamily: mono, fontWeight: '700' },
   reportFullBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
-    paddingVertical: 6, paddingHorizontal: 10, borderRadius: 7,
+    paddingVertical: 7, paddingHorizontal: 10, borderRadius: 999,
     borderWidth: 1, borderColor: C.gold + '88', backgroundColor: C.s2,
     alignSelf: 'flex-start',
   },
   reportFullText: { color: C.gold, fontSize: 10, fontFamily: mono, fontWeight: '700' },
 
   qTag: {
-    paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6,
+    paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999,
     borderWidth: 1, borderColor: C.border, backgroundColor: C.s2,
   },
   qTagText: { color: C.text2, fontSize: 9, fontFamily: mono, fontWeight: '700' },
@@ -20719,11 +23376,11 @@ const makeStyles = (C: ColorPalette) => {
   // ── Nav speed circle + limit badge
   navSpeedCircle: {
     width: 62, height: 62, borderRadius: 31,
-    backgroundColor: 'rgba(255,255,255,0.045)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.11)',
+    backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
     alignItems: 'center', justifyContent: 'center',
   },
-  navSpeedBig: { color: OVR.text, fontSize: 26, fontWeight: '900', lineHeight: 28 },
-  navSpeedUnit: { color: OVR.text3, fontSize: 7, fontFamily: mono, letterSpacing: 0.5 },
+  navSpeedBig: { color: C.text, fontSize: 26, fontWeight: '900', lineHeight: 28 },
+  navSpeedUnit: { color: C.text3, fontSize: 7, fontFamily: mono, letterSpacing: 0.5 },
   navSpeedSign: {
     width: 42, borderRadius: 3,
     borderWidth: 3, borderColor: '#111',
@@ -20742,13 +23399,13 @@ const makeStyles = (C: ColorPalette) => {
   },
   quickToast: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: OVR.bg, borderRadius: 20,
+    backgroundColor: OVR.bg2, borderRadius: 16,
     paddingHorizontal: 12, paddingVertical: 7,
-    borderWidth: 1, borderColor: C.green,
+    borderWidth: 1, borderColor: OVR.border,
     marginBottom: 8,
     alignSelf: 'center',
   },
-  quickToastText: { color: C.green, fontSize: 11, fontFamily: mono, fontWeight: '700' },
+  quickToastText: { color: OVR.text2, fontSize: 11, fontFamily: mono, fontWeight: '700' },
   quickReportPanel: {
     backgroundColor: 'rgba(8,8,10,0.88)', borderRadius: 18,
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
@@ -20980,8 +23637,8 @@ const makeStyles = (C: ColorPalette) => {
     borderRadius: 14,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: OVR.border,
-    backgroundColor: OVR.bg2,
+    borderColor: C.border,
+    backgroundColor: C.s2,
     marginTop: 10,
     marginBottom: 10,
   },
@@ -21005,11 +23662,11 @@ const makeStyles = (C: ColorPalette) => {
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 22,
-    backgroundColor: OVR.border2,
+    backgroundColor: C.s2,
   },
   trailHeroGrid: { ...StyleSheet.absoluteFillObject, opacity: 0.42 },
-  trailHeroVLine: { position: 'absolute', top: 0, bottom: 0, width: 1, backgroundColor: OVR.border },
-  trailHeroHLine: { position: 'absolute', left: 0, right: 0, height: 1, backgroundColor: OVR.border },
+  trailHeroVLine: { position: 'absolute', top: 0, bottom: 0, width: 1, backgroundColor: C.border },
+  trailHeroHLine: { position: 'absolute', left: 0, right: 0, height: 1, backgroundColor: C.border },
   trailHeroRouteLine: {
     position: 'absolute',
     left: 48,
@@ -21022,42 +23679,42 @@ const makeStyles = (C: ColorPalette) => {
     opacity: 0.36,
     transform: [{ rotate: '-8deg' }],
   },
-  trailHeroFallbackTitle: { color: OVR.text, fontSize: 12, fontWeight: '900', marginTop: 8 },
-  trailHeroFallbackSub: { color: OVR.text3, fontSize: 10.5, lineHeight: 15, textAlign: 'center', marginTop: 4 },
+  trailHeroFallbackTitle: { color: C.text, fontSize: 12, fontWeight: '900', marginTop: 8 },
+  trailHeroFallbackSub: { color: C.text3, fontSize: 10.5, lineHeight: 15, textAlign: 'center', marginTop: 4 },
   trailMetric: {
     flex: 1,
-    backgroundColor: OVR.bg2,
+    backgroundColor: C.s2,
     borderWidth: 1,
-    borderColor: OVR.border,
+    borderColor: C.border,
     borderRadius: 11,
     paddingVertical: 7,
     alignItems: 'center',
   },
-  trailMetricValue: { color: OVR.text, fontSize: 15, fontWeight: '900', fontFamily: mono },
-  trailMetricLabel: { color: OVR.text3, fontSize: 7.5, fontWeight: '800', fontFamily: mono, marginTop: 1 },
+  trailMetricValue: { color: C.text, fontSize: 15, fontWeight: '900', fontFamily: mono },
+  trailMetricLabel: { color: C.text3, fontSize: 7.5, fontWeight: '800', fontFamily: mono, marginTop: 1 },
   trailReadiness: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,
-    backgroundColor: OVR.bg2,
+    backgroundColor: C.s2,
     borderWidth: 1,
-    borderColor: OVR.border,
+    borderColor: C.border,
     borderRadius: 11,
     paddingHorizontal: 10,
     paddingVertical: 7,
     marginBottom: 8,
   },
-  trailReadinessText: { color: OVR.text2, fontSize: 10.5, fontFamily: mono, flex: 1 },
+  trailReadinessText: { color: C.text2, fontSize: 10.5, fontFamily: mono, flex: 1 },
   trailStoryPanel: {
-    backgroundColor: OVR.bg2,
+    backgroundColor: C.s2,
     borderWidth: 1,
-    borderColor: OVR.border,
+    borderColor: C.border,
     borderRadius: 12,
     padding: 10,
     marginBottom: 9,
   },
-  trailStoryText: { color: OVR.text2, fontSize: 11.5, lineHeight: 17, marginTop: 7 },
-  trailStorySource: { color: OVR.text3, fontSize: 9.5, fontFamily: mono, lineHeight: 14, marginTop: 8 },
+  trailStoryText: { color: C.text2, fontSize: 11.5, lineHeight: 17, marginTop: 7 },
+  trailStorySource: { color: C.text3, fontSize: 9.5, fontFamily: mono, lineHeight: 14, marginTop: 8 },
   trailIntelList: {
     gap: 5,
     marginBottom: 9,
@@ -21066,18 +23723,18 @@ const makeStyles = (C: ColorPalette) => {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,
-    backgroundColor: OVR.bg2,
+    backgroundColor: C.s2,
     borderWidth: 1,
-    borderColor: OVR.border,
+    borderColor: C.border,
     borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 7,
   },
-  trailIntelText: { color: OVR.text2, fontSize: 10.5, flex: 1 },
+  trailIntelText: { color: C.text2, fontSize: 10.5, flex: 1 },
   trailPreviewPanel: {
-    backgroundColor: OVR.bg2,
+    backgroundColor: C.s2,
     borderWidth: 1,
-    borderColor: OVR.border,
+    borderColor: C.border,
     borderRadius: 12,
     padding: 10,
     marginBottom: 9,
@@ -21087,54 +23744,54 @@ const makeStyles = (C: ColorPalette) => {
   trailPreviewEmpty: {
     minHeight: 54,
     borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.045)',
+    backgroundColor: C.s1,
     borderWidth: 1,
-    borderColor: OVR.border,
+    borderColor: C.border,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 9,
     paddingHorizontal: 11,
     paddingVertical: 10,
   },
-  trailPreviewEmptyText: { color: OVR.text3, fontSize: 10.5, lineHeight: 15, flex: 1 },
+  trailPreviewEmptyText: { color: C.text3, fontSize: 10.5, lineHeight: 15, flex: 1 },
   trailPhotoStripPanel: {
-    backgroundColor: OVR.bg2,
+    backgroundColor: C.s2,
     borderWidth: 1,
-    borderColor: OVR.border,
+    borderColor: C.border,
     borderRadius: 12,
     padding: 10,
     marginBottom: 9,
   },
   trailPhotoStrip: { gap: 8, paddingRight: 4 },
-  trailReportPhoto: { width: 94, height: 70, borderRadius: 10, backgroundColor: OVR.border2 },
+  trailReportPhoto: { width: 94, height: 70, borderRadius: 10, backgroundColor: C.s1 },
   trailReportPanel: {
-    backgroundColor: OVR.bg2,
+    backgroundColor: C.s2,
     borderWidth: 1,
-    borderColor: OVR.border,
+    borderColor: C.border,
     borderRadius: 12,
     padding: 10,
     marginBottom: 9,
   },
   trailReportHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, marginBottom: 8 },
-  trailReportTitle: { color: OVR.text, fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 0.7 },
-  trailReportSub: { color: OVR.text3, fontSize: 10.5, marginTop: 2, lineHeight: 14 },
+  trailReportTitle: { color: C.text, fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 0.7 },
+  trailReportSub: { color: C.text3, fontSize: 10.5, marginTop: 2, lineHeight: 14 },
   trailReportTags: { gap: 6, paddingBottom: 8 },
   trailReportTag: {
-    color: OVR.text2,
+    color: C.text2,
     fontSize: 9,
     fontFamily: mono,
-    backgroundColor: OVR.border2,
+    backgroundColor: C.s1,
     borderWidth: 1,
-    borderColor: OVR.border,
+    borderColor: C.border,
     borderRadius: 999,
     paddingHorizontal: 7,
     paddingVertical: 3,
     overflow: 'hidden',
   },
   trailReportCard: {
-    backgroundColor: 'rgba(255,255,255,0.045)',
+    backgroundColor: C.s1,
     borderWidth: 1,
-    borderColor: OVR.border,
+    borderColor: C.border,
     borderRadius: 10,
     padding: 9,
     marginBottom: 7,
@@ -21143,8 +23800,8 @@ const makeStyles = (C: ColorPalette) => {
   trailActionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   trailSheetAction: { minWidth: '47%' as any },
   trailSheetMutedAction: {
-    borderColor: 'rgba(255,255,255,0.13)',
-    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderColor: C.border,
+    backgroundColor: C.s1,
   },
   trailRouteBuilderWrap: {
     position: 'absolute',
@@ -21799,11 +24456,11 @@ const makeStyles = (C: ColorPalette) => {
   syncToast: {
     position: 'absolute', bottom: 110, alignSelf: 'center',
     flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: 'rgba(10,25,10,0.92)', borderRadius: 20,
+    backgroundColor: OVR.bg2, borderRadius: 16,
     paddingHorizontal: 14, paddingVertical: 8,
-    borderWidth: 1, borderColor: 'rgba(34,197,94,0.45)',
+    borderWidth: 1, borderColor: OVR.border,
   },
-  syncToastText: { color: '#22c55e', fontSize: 11, fontFamily: mono, fontWeight: '700', letterSpacing: 0.3 },
+  syncToastText: { color: OVR.text2, fontSize: 11, fontFamily: mono, fontWeight: '700', letterSpacing: 0.2 },
 
   // ── "What's here?" narration card ────────────────────────────────────────────
   narrationCard: {
@@ -22031,7 +24688,10 @@ const makeStyles = (C: ColorPalette) => {
   },
   extremeCopilotChip: {
     minHeight: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'center',
+    gap: 6,
     borderRadius: 999,
     borderWidth: 1,
     borderColor: C.border,
@@ -22043,6 +24703,14 @@ const makeStyles = (C: ColorPalette) => {
     fontSize: 10,
     fontFamily: mono,
     fontWeight: '700',
+  },
+  extremeCopilotDebugChip: {
+    borderColor: C.yellow + '66',
+    backgroundColor: C.yellow + '12',
+  },
+  extremeCopilotDebugChipText: {
+    color: C.yellow,
+    fontWeight: '900',
   },
   extremeCopilotVoiceRow: {
     flexDirection: 'row',

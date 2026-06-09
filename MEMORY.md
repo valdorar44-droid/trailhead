@@ -156,6 +156,353 @@ Verification:
 - `cd mobile && NODE_OPTIONS=--max-old-space-size=4096 npx tsc --noEmit` passed.
 - `git diff --check` passed.
 
+## Valhalla Rolling GA/FL Build
+
+Date: 2026-06-08.
+
+Built and validated a rolling Southeast GA/FL Valhalla artifact on `trailhead-valhalla` only. Live production services were not changed.
+
+States in this artifact:
+
+- Georgia
+- Florida
+
+Build notes:
+
+- Downloaded current Geofabrik PBFs locally, staged them through R2 signed URLs, and copied them onto the Railway volume using `valhalla-volume-helper-nginx`.
+- Moved prior South-Central active PBFs to `.hold` and preserved `/custom_files/south-central-valhalla_tiles.tar`.
+- Built from `/custom_files/georgia-260608.osm.pbf` and `/custom_files/florida-260608.osm.pbf`.
+- Build completed successfully and loaded `647` tiles.
+- Saved named artifact: `/custom_files/southeast-ga-fl-valhalla_tiles.tar` (`1.6G`).
+
+Validation probes passed:
+
+- Atlanta -> Miami: `663.3648 mi`
+- Atlanta -> Jacksonville: `346.103 mi`
+- Tampa -> Tallahassee: `277.2222 mi`
+
+Final rolling service settings:
+
+- `force_rebuild=False`
+- `use_tiles_ignore_pbf=True`
+- `build_admins=False`
+- `build_time_zones=False`
+- `server_threads=2`
+
+Restart validation showed `Jumping directly to the tile loading!` and `Tile extract successfully loaded with tile count: 647`.
+
+Cleaned helper temp URL variables `TEMP_URL_GA` and `TEMP_URL_FL`, plus local temp files under `/tmp`.
+
+## Valhalla Rolling Texas Build
+
+Date: 2026-06-08.
+
+Built and validated a rolling Texas-only Valhalla artifact on `trailhead-valhalla` only. Live production services were not changed.
+
+States in this artifact:
+
+- Texas
+
+Build notes:
+
+- Downloaded current Geofabrik Texas PBF locally, staged it through R2 signed URL, and copied it onto the Railway volume using `valhalla-volume-helper-nginx`.
+- Moved GA/FL active PBFs to `.hold` and preserved `/custom_files/southeast-ga-fl-valhalla_tiles.tar`.
+- Built from `/custom_files/texas-260608.osm.pbf`.
+- Build completed successfully and loaded `1303` tiles.
+- Saved named artifact: `/custom_files/texas-valhalla_tiles.tar` (`1.5G`).
+
+Validation probes passed:
+
+- Dallas -> Houston: `239.4144 mi`
+- Austin -> San Antonio: `79.9105 mi`
+- El Paso -> Dallas: `636.1428 mi`
+- Houston -> Big Bend: `652.9315 mi`
+
+Final rolling service settings:
+
+- `force_rebuild=False`
+- `use_tiles_ignore_pbf=True`
+- `build_admins=False`
+- `build_time_zones=False`
+- `server_threads=2`
+
+Restart validation showed `Jumping directly to the tile loading!` and `Tile extract successfully loaded with tile count: 1303`.
+
+Cleaned helper temp URL variable `TEMP_URL_TX`, plus local temp files under `/tmp`.
+
+## Valhalla Rolling Central Plains Build
+
+Date: 2026-06-08.
+
+Built and validated a rolling Central Plains Valhalla artifact on `trailhead-valhalla` only. Live production services were not changed.
+
+States in this artifact:
+
+- North Dakota
+- South Dakota
+- Nebraska
+- Kansas
+- Iowa
+- Missouri
+
+Build notes:
+
+- Downloaded current Geofabrik PBFs locally, staged them through R2 signed URLs, and copied them onto the Railway volume using `valhalla-volume-helper-nginx`.
+- Moved Texas active PBF to `.hold` and preserved `/custom_files/texas-valhalla_tiles.tar`.
+- Built from:
+  - `/custom_files/north-dakota-260608.osm.pbf`
+  - `/custom_files/south-dakota-260608.osm.pbf`
+  - `/custom_files/nebraska-260608.osm.pbf`
+  - `/custom_files/kansas-260608.osm.pbf`
+  - `/custom_files/iowa-260608.osm.pbf`
+  - `/custom_files/missouri-260608.osm.pbf`
+- Build completed successfully and loaded `2368` tiles.
+- Saved named artifact: `/custom_files/central-plains-valhalla_tiles.tar` (`1.4G`).
+- Valhalla emitted the standard multi-PBF warning and duplicate warnings during validation; they were not fatal.
+
+Validation probes passed:
+
+- Fargo -> Kansas City: `601.3471 mi`
+- Omaha -> Des Moines: `134.3189 mi`
+- Sioux Falls -> Bismarck: `430.9984 mi`
+- Wichita -> St Louis: `441.5893 mi`
+
+Final rolling service settings:
+
+- `force_rebuild=False`
+- `use_tiles_ignore_pbf=True`
+- `build_admins=False`
+- `build_time_zones=False`
+- `server_threads=2`
+
+Restart validation showed `Jumping directly to the tile loading!` and `Tile extract successfully loaded with tile count: 2368`.
+
+Cleaned helper temp URL variables `TEMP_URL_ND`, `TEMP_URL_SD`, `TEMP_URL_NE`, `TEMP_URL_KS`, `TEMP_URL_IA`, and `TEMP_URL_MO`, plus local temp files under `/tmp`.
+
+## Valhalla Rolling Midwest/Great Lakes Build
+
+Date: 2026-06-08.
+
+Built and validated a rolling Midwest/Great Lakes Valhalla artifact on `trailhead-valhalla` only. Live production services were not changed.
+
+States in this artifact:
+
+- Minnesota
+- Wisconsin
+- Illinois
+- Indiana
+- Michigan
+- Ohio
+
+Build notes:
+
+- Downloaded current Geofabrik PBFs locally, staged them through R2 signed URLs, and copied them onto the Railway volume using `valhalla-volume-helper-nginx`.
+- Moved Central Plains active PBFs to `.hold` and preserved `/custom_files/central-plains-valhalla_tiles.tar`.
+- Built from:
+  - `/custom_files/minnesota-260608.osm.pbf`
+  - `/custom_files/wisconsin-260608.osm.pbf`
+  - `/custom_files/illinois-260608.osm.pbf`
+  - `/custom_files/indiana-260608.osm.pbf`
+  - `/custom_files/michigan-260608.osm.pbf`
+  - `/custom_files/ohio-260608.osm.pbf`
+- Build completed successfully and loaded `1972` tiles.
+- Saved named artifact: `/custom_files/midwest-great-lakes-valhalla_tiles.tar` (`3.6G`).
+- Valhalla emitted the standard multi-PBF warning plus density/duplicate warnings; they were not fatal.
+
+Validation probes passed:
+
+- Chicago -> Detroit: `283.0 mi`
+- Minneapolis -> Milwaukee: `337.0 mi`
+- Indianapolis -> Columbus: `175.6 mi`
+- Cleveland -> Grand Rapids: `299.7 mi`
+
+Final rolling service settings:
+
+- `force_rebuild=False`
+- `use_tiles_ignore_pbf=True`
+- `build_admins=False`
+- `build_time_zones=False`
+- `server_threads=2`
+
+Restart validation showed `Jumping directly to the tile loading!` and `Tile extract successfully loaded with tile count: 1972`.
+
+Cleaned helper temp URL variables `TEMP_URL_MN`, `TEMP_URL_WI`, `TEMP_URL_IL`, `TEMP_URL_IN`, `TEMP_URL_MI`, and `TEMP_URL_OH`, plus local temp files under `/tmp`.
+
+Current rolling `trailhead-valhalla` active artifact is Midwest/Great Lakes. This supersedes the older note that the rolling service was Connecticut-only during the lower-Hudson investigation.
+
+## Route Builder Copilot And Valhalla South-Central
+
+Backend Route Builder copilot fix:
+
+- Fixed `_route_builder_draft_from_text` / `_is_route_builder_request` so command-style trip prompts are treated as Route Scout drafts:
+  - `create a route from Moab to Big Sur` -> `startRouteScout`
+  - `Build Moab to Big Sur` -> `startRouteScout`
+  - `Route from Moab to Big Sur` -> `startRouteScout`
+- Kept point-to-point preview behavior intact:
+  - `preview a route to the Eiffel Tower` still -> `buildRoute`
+- Added regression assertions in `tests/test_extreme_explorer.py`.
+- Verification passed:
+  - `python3 -m unittest tests.test_extreme_explorer`
+- Deployed API service `trailhead` with Railway deployment:
+  - `c9583158-d240-49cc-a475-464a43dcf53b`
+  - Status: `SUCCESS`
+
+Valhalla South-Central rolling build:
+
+- Service used: `trailhead-valhalla` only. This is the rolling/test builder, not the live production Valhalla target used by the API.
+- Built local-file batch:
+  - `AL, AR, KY, LA, MS, OK, TN`
+- Railway direct Geofabrik downloads failed from the Valhalla container with `curl: (7)` to `download.geofabrik.de`, so the PBFs were downloaded locally, staged to R2, then copied into the rolling Valhalla volume via temporarily attaching `trailhead-valhalla-volume` to `valhalla-volume-helper-nginx`.
+- Important helper gotcha:
+  - `railway ssh` does not forward stdin reliably here; `cat > file < local.pbf` and remote `tee` created zero-byte files.
+  - The reliable copy path was R2 signed URL variables + helper-side `wget`, after temporarily attaching the rolling volume to the helper.
+  - Helper BusyBox command quoting needs literal quotes around the remote `sh -c` command.
+- Build result:
+  - Successfully built `/custom_files/alabama-260607.osm.pbf /custom_files/arkansas-260607.osm.pbf /custom_files/kentucky-260607.osm.pbf /custom_files/louisiana-260607.osm.pbf /custom_files/mississippi-260607.osm.pbf /custom_files/oklahoma-260607.osm.pbf /custom_files/tennessee-260607.osm.pbf`
+  - `1875` tiles loaded
+  - Active artifact: `/custom_files/valhalla_tiles.tar`
+  - Named saved artifact: `/custom_files/south-central-valhalla_tiles.tar` (`1.9G`)
+- Validation from inside the Valhalla container passed:
+  - `/status` healthy, Valhalla `3.5.1-49b40b7f2`, `route` action available
+  - Birmingham -> Nashville: `191.8 mi`
+  - Little Rock -> Oklahoma City: `339.5 mi`
+  - New Orleans -> Jackson: `186.3 mi`
+  - Louisville -> Memphis: `386.7 mi`
+- Final rolling service variables:
+  - `force_rebuild=False`
+  - `use_tiles_ignore_pbf=True`
+  - `build_admins=False`
+  - `build_time_zones=False`
+  - `server_threads=2`
+  - no `tile_urls`
+  - temporary signed URL vars deleted
+- Restart after setting no-rebuild loaded the completed tile extract directly:
+  - `INFO: Jumping directly to the tile loading!`
+  - `Tile extract successfully loaded with tile count: 1875`
+
+Next Valhalla areas:
+
+- South-Central succeeded; next candidates are `GA/FL`, then `TX`, then remaining Midwest/East gaps.
+- For large batches or repeated multi-PBF issues, use the same area strategy and circle back rather than blocking on one state.
+- `TX` and `FL` are large but locally downloadable; direct Railway Geofabrik download should not be assumed to work.
+
+## Valhalla Area Graph Rollout
+
+Date/context:
+
+- June 6, 2026.
+- User clarified Trailhead is not using Foursquare for this pass; focus is Valhalla routing.
+- Full-US Valhalla build/service had issues, so routing graphs should be built and validated by areas.
+
+Current live state:
+
+- Production API `VALHALLA_URL` now points at `http://trailhead-valhalla-us.railway.internal:8002`.
+- `trailhead-valhalla-us` is healthy and contains the expanded West area:
+  - California
+  - Nevada
+  - Utah
+  - Arizona
+  - New Mexico
+  - Colorado
+  - Wyoming
+  - Montana
+  - Idaho
+  - Oregon
+  - Washington
+- `trailhead-valhalla-west2` remains available as the older CA/NV/UT-only service.
+- `/api/route/health` confirmed the live API can reach `trailhead-valhalla-us`; the old `/api/admin/routing-coverage-diagnostic` endpoint currently returns 404.
+
+Per-state R2 routing packs:
+
+- R2 `routing/manifest.json` contains all 50 states plus Canada, Mexico, and Finland as individual `routing/*.tar` packs.
+- There is no published `routing/valhalla/manifest.json` for the newer combined artifact path.
+
+Expanded-West build:
+
+- Repurposed unhealthy `trailhead-valhalla-us` service as the expanded-West candidate builder so the live `west2` service stays online.
+- Removed stale full-US volume files from `trailhead-valhalla-us`:
+  - old `us-260528.osm.pbf`
+  - old `valhalla_tiles`
+  - old `valhalla.json`
+  - old tile/tar/hash leftovers
+- Set `trailhead-valhalla-us` `tile_urls` to:
+  - CA, NV, UT, AZ, NM, CO, WY, MT, ID, OR, WA
+- Supporting variables on `trailhead-valhalla-us`:
+  - `force_rebuild=True`
+  - `build_admins=False`
+  - `build_time_zones=False`
+  - `server_threads=2`
+- Clean redeploy downloaded all 11 state PBFs, built `valhalla_tiles`, created `valhalla_tiles.tar`, and started Valhalla.
+- `https://trailhead-valhalla-us-production.up.railway.app/status` returned Valhalla `3.5.1-49b40b7f`, tile extract `6120`, and `available_actions` including `route`.
+- Direct probes against `trailhead-valhalla-us` passed for:
+  - Seattle -> Spokane
+  - Portland -> Eugene
+  - Seattle -> Boise
+  - Boise -> Missoula
+  - Salt Lake City -> Denver
+  - Phoenix -> Albuquerque
+  - Cheyenne -> Denver
+  - Moab -> Big Sur
+  - Las Vegas -> Moab
+  - San Francisco -> Los Angeles
+
+East-safe build:
+
+- Repurposed old crashed `trailhead-valhalla-west` service as the East builder so `trailhead-valhalla-us` can keep serving production.
+- Cleared stale/broken CA volume files after the first redeploy crashed on `california-latest.osm.pbf` with `PBF error: unexpected EOF`.
+- Initial 15-state East build with `ME,NH,VT,MA,RI,CT,NY,NJ,PA,DE,MD,VA,WV,NC,SC` repeatedly failed during tile generation:
+  - failing tile: `2/754983/0`
+  - error: `vector::_M_range_check`
+  - approximate tile area: lower Hudson / NY-NJ-CT
+- Removed `NY`, `NJ`, and `CT` from this build to avoid the deterministic Valhalla tile crash.
+- Final `trailhead-valhalla-west` `tile_urls` are:
+  - ME, NH, VT, MA, RI, PA, DE, MD, VA, WV, NC, SC
+- Build completed successfully:
+  - `valhalla_tiles.tar` created
+  - tile extract loaded with `1525` tiles
+  - `valhalla_tiles.tar` size is about `3.5G`
+  - volume size after cleanup is about `5.6G`
+- Supporting variables on `trailhead-valhalla-west`:
+  - `force_rebuild=False`
+  - `build_admins=False`
+  - `build_time_zones=False`
+  - `server_threads=2`
+- Validation from inside the Railway container passed:
+  - `/status` healthy, Valhalla `3.5.1-49b40b7f2`, `route` action available
+  - Boston -> Portland, ME: `106.7 mi`
+  - Philadelphia -> Pittsburgh: `305.3 mi`
+  - Washington, DC -> Richmond: `107.1 mi`
+  - Asheville -> Charleston: `267.5 mi`
+- Restart after setting `force_rebuild=False` loaded the completed tile extract directly and did not rebuild.
+- Do not switch production API to this service as a replacement for expanded West. Backend currently has a single `VALHALLA_URL`; using West plus East together needs either area-aware backend routing or a later combined artifact.
+- Combined `NY,NJ,CT` still needs a separate fix; do not retry that same separate-PBF multi-state build blindly.
+
+Lower-Hudson follow-up:
+
+- Used `trailhead-valhalla` as an isolated lower-Hudson test service with volume `trailhead-valhalla-volume` at `/custom_files`.
+- Railway could not download directly from Geofabrik inside the Valhalla service, so the three dated PBFs were downloaded locally, uploaded to R2, then copied into the volume through `valhalla-volume-helper-nginx`.
+- The direct three-state local-file build `CT,NJ,NY` still reproduced the same crash:
+  - failing tile: `2/754983/0`
+  - error: `vector::_M_range_check: __n (which is 0) >= this->size() (which is 0)`
+- Individual state builds all succeeded:
+  - `NY` only: built `353` tiles, saved artifact as `/custom_files/ny-valhalla_tiles.tar`, validated NYC -> Albany and Buffalo -> Rochester.
+  - `NJ` only: built `67` tiles, saved artifact as `/custom_files/nj-valhalla_tiles.tar`, validated Newark -> Camden.
+  - `CT` only: built `55` tiles, active artifact remains `/custom_files/valhalla_tiles.tar` and was also copied to `/custom_files/ct-valhalla_tiles.tar`, validated Hartford -> New Haven.
+- `trailhead-valhalla` is currently a Connecticut-only test service with:
+  - `force_rebuild=False`
+  - `use_tiles_ignore_pbf=True`
+  - `build_admins=False`
+  - `build_time_zones=False`
+  - `server_threads=2`
+- Conclusion: `NY`, `NJ`, and `CT` are individually buildable; the deterministic failure is in combining those separate extracts. Next lower-Hudson attempt should try a merged PBF or separate area routing services, not the same multi-PBF `CT,NJ,NY` build.
+
+Next area builds:
+
+- Do not start a full-US graph again until area services are stable.
+- Suggested next candidate areas:
+  - South: `TX,OK,AR,LA,MS,AL,GA,FL,TN,KY`
+  - Midwest/Central: `ND,SD,NE,KS,MN,IA,MO,WI,IL,IN,MI,OH`
+
 ## Route Builder / Auth Product Rules
 
 - Keep Google auth hidden until the Google OAuth client, redirect URI, and mobile callback have been configured and tested. Apple Sign In is the active social sign-in path.

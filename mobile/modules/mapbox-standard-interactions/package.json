@@ -1,0 +1,16 @@
+{
+  "name": "expo-mapbox-standard-interactions",
+  "version": "1.0.0",
+  "description": "Trailhead Mapbox Standard featureset interaction bridge",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "expo": {
+    "autolinking": {
+      "nativeModulesDir": "."
+    }
+  },
+  "peerDependencies": {
+    "expo": "*",
+    "expo-modules-core": "*"
+  }
+}

@@ -80,6 +80,43 @@ function stringifyToolOutput(value: unknown): string {
   }
 }
 
+function redactCoordinateFields(value: unknown, depth = 0): unknown {
+  if (depth > 4) return undefined;
+  if (Array.isArray(value)) return value.slice(0, 8).map(item => redactCoordinateFields(item, depth + 1)).filter(item => item !== undefined);
+  if (!value || typeof value !== 'object') return value;
+  const out: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (/^(lat|lng|lon|longitude|latitude|coordinates?|geometry|bbox|bounds|screen_x|screen_y|raw_feature|routeCoords)$/i.test(key)) continue;
+    if (/(?:_id|id)$/i.test(key) && key !== 'result_id') continue;
+    const redacted = redactCoordinateFields(entry, depth + 1);
+    if (redacted !== undefined) out[key] = redacted;
+  }
+  return out;
+}
+
+function compactToolOutputSummary(output: Record<string, unknown> | void): string {
+  if (!output) return 'The action was applied.';
+  const selected = typeof output.selected === 'string' ? output.selected : '';
+  const flownTo = typeof output.flown_to === 'string' ? output.flown_to : '';
+  const opened = typeof output.opened === 'string' ? output.opened.replace(/_/g, ' ') : '';
+  const count = Number(output.count);
+  if (flownTo) return `Moved the map to ${flownTo}.`;
+  if (selected) return `Selected ${selected}.`;
+  if (opened) return `Opened ${opened}.`;
+  if (Number.isFinite(count)) return `Found ${count} results.`;
+  return 'The map action was applied.';
+}
+
+function toolResponseInstructions(output: Record<string, unknown> | void): string {
+  const summary = typeof output?.spoken_summary === 'string' ? output.spoken_summary.trim() : '';
+  if (summary) {
+    return `The Trailhead map action has already been applied. Give a brief spoken confirmation based only on this result: "${summary}". Do not read coordinates, ids, or raw debug fields aloud unless the user explicitly asks. Do not call another tool unless the user asks a new follow-up.`;
+  }
+  const compact = compactToolOutputSummary(output);
+  const safeOutput = stringifyToolOutput(redactCoordinateFields(output ?? {}));
+  return `The Trailhead map action has already been applied. Say this briefly: "${compact}" Use this sanitized context only if needed: ${safeOutput}. Do not read coordinates, ids, or raw debug fields aloud unless the user explicitly asks. Do not call another tool unless the user asks a new follow-up.`;
+}
+
 function transcriptFromEvent(event: any): string {
   const type = String(event?.type || '');
   if (type.startsWith('conversation.item.input_audio_transcription') || type.startsWith('input_audio_buffer.')) return '';
@@ -138,15 +175,21 @@ export async function startRealtimeCopilotSession(options: StartRealtimeCopilotO
         } catch (e: any) {
           output = { applied: false, error: e?.message || 'tool_call_failed' };
         }
+        const toolOutput = output ?? { applied: true };
         sendRealtimeEvent(dc, {
           type: 'conversation.item.create',
           item: {
             type: 'function_call_output',
             call_id: toolCall.callId,
-            output: stringifyToolOutput(output ?? { applied: true }),
+            output: stringifyToolOutput(toolOutput),
           },
         });
-        sendRealtimeEvent(dc, { type: 'response.create' });
+        sendRealtimeEvent(dc, {
+          type: 'response.create',
+          response: {
+            instructions: toolResponseInstructions(toolOutput as Record<string, unknown>),
+          },
+        });
       }
     } catch {
       // Ignore non-JSON data channel frames.

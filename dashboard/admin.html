@@ -121,6 +121,15 @@ td.name{color:var(--text);font-weight:600;}
 .contest-award-meta{color:var(--text3);font-size:11px;font-family:var(--mono);line-height:1.5;}
 .contest-award-controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
 .contest-note{background:var(--s2);border:1px solid var(--border);border-radius:8px;padding:7px 9px;color:var(--text);font-size:12px;outline:none;flex:1;min-width:150px;}
+.debug-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:12px;}
+.debug-card{background:var(--s3);border:1px solid var(--border);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:9px;}
+.debug-card.hot{border-color:var(--yellow);box-shadow:0 0 0 1px rgba(234,179,8,.08);}
+.debug-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
+.debug-title{color:var(--text);font-size:13px;font-weight:900;line-height:18px;}
+.debug-meta{color:var(--text3);font-size:10px;font-family:var(--mono);line-height:1.5;}
+.debug-reason{display:inline-block;color:var(--yellow);font-size:10px;font-family:var(--mono);font-weight:900;background:rgba(234,179,8,.12);border:1px solid rgba(234,179,8,.45);border-radius:999px;padding:3px 7px;}
+.debug-pre{max-height:190px;overflow:auto;white-space:pre-wrap;background:var(--s2);border:1px solid var(--border);border-radius:10px;padding:10px;color:var(--text2);font-size:10.5px;line-height:1.45;font-family:var(--mono);}
+.debug-actions{display:flex;gap:8px;flex-wrap:wrap;}
 
 /* ── Modal ─────────────────────────────────────────────────────────────── */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);display:none;align-items:center;justify-content:center;z-index:1000;}
@@ -281,6 +290,16 @@ td.name{color:var(--text);font-weight:600;}
             <thead><tr><th>Event</th><th>User</th><th>Surface</th><th>Trip</th><th>Time</th></tr></thead>
             <tbody id="extreme-events"></tbody>
           </table>
+        </div>
+        <div class="card" style="margin-top:16px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;">
+            <div>
+              <div class="section-label" style="margin-bottom:4px;">COPILOT MAP DEBUG</div>
+              <div style="color:var(--text3);font-size:12px;">Admin-only selection/context mismatch snapshots and copyable transcripts.</div>
+            </div>
+            <button class="btn btn-ghost btn-sm" onclick="loadExtreme()">Refresh</button>
+          </div>
+          <div id="extreme-debug-events" class="debug-grid"></div>
         </div>
       </div>
 
@@ -526,6 +545,7 @@ let allReports = [];
 let audioGuidePlaces = [];
 let selectedAudioGuidePlaceId = null;
 let storyFontSize = 15;
+let extremeDebugEvents = [];
 
 // ── Auth ────────────────────────────────────────────────────────────────────
 
@@ -855,7 +875,93 @@ async function loadExtreme() {
         <td class="mono">${e.created_at ? new Date(e.created_at * 1000).toLocaleString() : ''}</td>
       </tr>
     `).join('') || '<tr><td colspan="5" style="color:var(--text3);text-align:center;padding:24px;">No Extreme events yet</td></tr>';
+    extremeDebugEvents = data.debug_events || [];
+    renderExtremeDebugEvents(extremeDebugEvents);
   } catch(e) { toast('Error loading Extreme: ' + e.message, 'err'); }
+}
+
+function debugEventTitle(event) {
+  const data = event.event_data || {};
+  const reason = data.reason || data.reason_code || data.details?.reason || event.event_type || 'debug';
+  const guard = data.details?.selection_guard?.reason || data.details?.reason || '';
+  return guard && guard !== reason ? `${reason} / ${guard}` : reason;
+}
+
+function debugEventTranscript(event) {
+  const data = event.event_data || {};
+  if (data.transcript) return String(data.transcript);
+  return JSON.stringify(data, null, 2);
+}
+
+function renderExtremeDebugEvents(events) {
+  const el = document.getElementById('extreme-debug-events');
+  if (!el) return;
+  el.innerHTML = (events || []).map((event, idx) => {
+    const data = event.event_data || {};
+    const map = data.map || {};
+    const result = data.result_context || {};
+    const details = data.details || {};
+    const title = debugEventTitle(event);
+    const transcript = debugEventTranscript(event).slice(0, 1400);
+    const user = event.username || event.email || data.user || `user ${event.user_id || ''}`;
+    const hot = /mismatch|stale|region|guard|failed/i.test(`${title} ${event.event_type}`);
+    return `
+      <div class="debug-card ${hot ? 'hot' : ''}">
+        <div class="debug-top">
+          <div>
+            <div class="debug-title">${esc(title)}</div>
+            <div class="debug-meta">
+              ${esc(user)} · ${event.created_at ? new Date(event.created_at * 1000).toLocaleString() : ''}<br>
+              style ${esc(map.active_style || '')} · zoom ${esc(map.zoom ?? '')}<br>
+              current ${esc(result.current_result_set_id || 'none')} · visible ${esc(result.visible_result_set_id || 'none')}
+            </div>
+          </div>
+          <span class="debug-reason">${esc(event.event_type || 'debug')}</span>
+        </div>
+        <div class="debug-meta">
+          requested: ${esc(details.requested?.result_id || details.requested?.feature_id || details.requested?.result_index || details.requested?.name || 'none')}
+          · candidate: ${esc(details.candidate?.name || details.chosen_name || 'none')}
+        </div>
+        <pre class="debug-pre">${esc(transcript)}</pre>
+        <div class="debug-actions">
+          <button class="btn btn-ghost btn-sm" onclick="copyExtremeDebugTranscript(${idx})">Copy transcript</button>
+          <button class="btn btn-ghost btn-sm" onclick="copyExtremeDebugJson(${idx})">Copy JSON</button>
+        </div>
+      </div>
+    `;
+  }).join('') || '<div style="color:var(--text3);font-size:13px;">No Copilot map debug snapshots yet. Use the admin Debug transcript button in the app or trigger a selection mismatch.</div>';
+}
+
+async function copyText(text, label = 'Copied') {
+  try {
+    if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
+    else {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    toast(label, 'ok');
+  } catch(e) {
+    toast('Copy failed: ' + e.message, 'err');
+  }
+}
+
+function copyExtremeDebugTranscript(idx) {
+  const event = extremeDebugEvents[idx];
+  if (!event) return;
+  copyText(debugEventTranscript(event), 'Debug transcript copied');
+}
+
+function copyExtremeDebugJson(idx) {
+  const event = extremeDebugEvents[idx];
+  if (!event) return;
+  copyText(JSON.stringify(event, null, 2), 'Debug JSON copied');
 }
 
 function renderExtremeControls(cfg) {

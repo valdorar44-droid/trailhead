@@ -35,6 +35,7 @@ from dashboard.water_routing_provider import route_with_water_graph, water_graph
 from ingestors.ridb import get_campsites_near, get_campsites_search, get_facility_detail
 from ingestors.osm import get_osm_campsites, get_osm_campsite_detail, get_water_sources, get_trailheads, get_trails, get_viewpoints, get_peaks, get_hot_springs, get_fuel_stations, get_service_places
 from ingestors.nps import get_nps_places, nps_enabled
+from ingestors.geoapify import get_geoapify_places
 from ingestors.usfs import get_usfs_recreation_sites
 from ingestors.provider_guard import provider_call_snapshot, record_provider_call, runtime_cached_call
 from ingestors.blm import get_blm_campsites, get_blm_campsite_detail, get_blm_recreation_sites
@@ -93,7 +94,7 @@ from db.store import (
     update_map_contributor_application_status,
 )
 
-LEGACY_PLACE_PROVIDERS = {"google", "foursquare", "fsq", "geoapify"}
+LEGACY_PLACE_PROVIDERS = {"google", "foursquare", "fsq"}
 
 def _legacy_place_source(value: object) -> bool:
     text = str(value or "").lower()
@@ -102,9 +103,10 @@ def _legacy_place_source(value: object) -> bool:
 def strip_lightweight_google_rich_fields(place: dict) -> dict:
     """Compatibility scrubber for old cached provider records.
 
-    Runtime place discovery no longer uses Google/Foursquare/Geoapify. This
-    keeps stale cached objects from leaking paid/legacy provider fields through
-    shared card/smart-pack code paths.
+    Runtime place discovery no longer uses Google/Foursquare. This keeps stale
+    cached objects from leaking paid/legacy provider fields through shared
+    card/smart-pack code paths. Geoapify remains allowed as a lightweight
+    hosted/open-data coverage source.
     """
     if not isinstance(place, dict):
         return place
@@ -1293,6 +1295,8 @@ EXTREME_COPILOT_ACTIONS = {
     "openSelectedPlaceCard": "Open selected place card",
     "routeToSelectedPlace": "Route to selected place",
     "flyToPlace": "Fly to place",
+    "zoomMap": "Zoom map",
+    "setMapZoom": "Set map zoom",
     "toggleLayer": "Toggle layer",
     "setMapStyle": "Set map style",
     "buildRoute": "Build route",
@@ -1341,8 +1345,8 @@ EXTREME_COPILOT_CONFIRM_ACTIONS = {
 }
 TRAILHEAD_COPILOT_CAPABILITY_REGISTRY = {
     "map": {
-        "summary": "Search, fly, select cards, preview routes, toggle layers, change styles, radar, public lands, topo, satellite, nautical, pins, camps, trails, places.",
-        "commands": ["getVisibleMapCandidates", "searchPlaces", "searchTrails", "selectPlace", "selectRenderedFeature", "selectVisiblePlace", "searchAndSelectPlace", "openSelectedPlaceCard", "routeToSelectedPlace", "flyToPlace", "toggleLayer", "setMapStyle", "buildRoute", "dropPin"],
+        "summary": "Search, fly, zoom, select cards, preview routes, toggle layers, change styles, radar, public lands, topo, satellite, nautical, pins, camps, trails, places.",
+        "commands": ["getVisibleMapCandidates", "searchPlaces", "searchTrails", "selectPlace", "selectRenderedFeature", "selectVisiblePlace", "searchAndSelectPlace", "openSelectedPlaceCard", "routeToSelectedPlace", "flyToPlace", "zoomMap", "toggleLayer", "setMapStyle", "buildRoute", "dropPin"],
         "confirmation": ["dropPin"],
     },
     "navigation": {
@@ -1618,7 +1622,7 @@ def _copilot_realtime_tools() -> list[dict]:
                     "enum": [
                         "getMapContext", "getVisibleMapCandidates", "searchPlaces", "searchTrails", "selectPlace",
                         "selectRenderedFeature", "selectVisiblePlace", "searchAndSelectPlace", "openSelectedPlaceCard",
-                        "routeToSelectedPlace", "flyToPlace",
+                        "routeToSelectedPlace", "flyToPlace", "zoomMap", "setMapZoom",
                         "toggleLayer", "setMapStyle", "buildRoute", "startRouteScout", "saveScoutToRouteBuilder", "startNavigation", "modifyRoute", "dropPin",
                         "saveTrip", "downloadOfflineArea", "openRouteBuilderDraft", "updateRouteBuilderDraft",
                         "buildRouteBuilderFramework", "readRouteBuilderContext", "openGuide", "playTripGuide",
@@ -1642,20 +1646,26 @@ def _copilot_realtime_instructions(wake_phrase: bool) -> str:
         "Use map_action for map changes. Keep spoken confirmations short. "
         "For questions about what is visible, call map_action with explainVisibleArea and answer from the tool output. "
         "For fly-to commands with a named place, call flyToPlace with args.target.name set to the place name. "
+        "For famous landmarks or named attractions such as Eiffel Tower, Golden Gate Bridge, Grand Canyon, Arches, museums, monuments, or parks, use flyToPlace with only the landmark name unless the user gives a specific city/region; do not choose similarly named roads or addresses. "
+        "For zoom in/out commands, call zoomMap with args.direction=\"in\" or \"out\" and answer from the returned visible_map_features; for zooming to a visible icon, include the visible candidate feature_id, result_index, type, or screen_position. "
+        "For broad discovery requests like \"find places\" or \"where should I stop\", ask the user to choose camps, lodging, food, fuel, attractions, or trails before searching. Do not default to camps. "
         "For campground searches near a named place, call searchPlaces with args.category=\"camp\", args.query set to the place name, "
         "and args.open_card=true when the user asks for one campground or the best/top option. "
         "For restaurants, food, scenic viewpoints, landmarks, or attractions near a named place, call searchPlaces with args.category set to "
         "\"food\", \"viewpoint\", or \"attraction\" and args.query set to the named place; set args.open_card=true only when the user asks to open the best/top/first option. "
-        "For cuisine followups such as pizza, tacos, burgers, coffee, BBQ, sushi, or Italian, call searchPlaces with args.category=\"food\" and args.keyword set to the cuisine; do not geocode the cuisine as a destination. "
+        "For cuisine or drink followups such as pizza, tacos, burgers, coffee, BBQ, sushi, Italian, breweries, beer, or pubs, call searchPlaces with args.category=\"food\" and args.keyword set to the cuisine/drink; do not geocode the cuisine/drink as a destination. "
         "Never simulate tapping Trailhead controls. For visible labels/icons on the map, call getVisibleMapCandidates, then selectVisiblePlace with feature_id, result_index, type, name, and/or screen_position. "
         "If multiple visible candidates match, ask which one instead of choosing randomly. "
-        "For followups like \"open the second one\" use selectVisiblePlace when the prior answer described visible map candidates, otherwise use selectPlace for search results. "
+        "When a tool returns query_context, keep using its result_set_id/result_id for followups; do not select by plain index from a different or stale region. "
+        "For followups like \"open the second one\", prefer result_id and result_set_id from the prior tool output; use selectVisiblePlace only when the prior answer described visible map candidates, otherwise use selectPlace for search results. "
+        "If selection returns stale_query_context or region_mismatch, refresh getVisibleMapCandidates or searchPlaces in the current requested region before selecting again. "
         "For \"route me there\" use routeToSelectedPlace or buildRoute to preview only; use the selected card/current result, not a random nearby place. "
         "For \"start navigation\" or \"navigate there\" use startNavigation with confirmation. "
         "For full multi-day planning such as \"plan/build/create a 5-day dispersed route from Moab to Big Sur\", call startRouteScout with start, destination, days, driveHours when known, routeStyle, campPreference, campPhotoOnly when they ask for camps with photos/pictures only, fuelStrategy, poiPreferences, and rig profile context. "
         "Treat driveHours as the user's maximum drive time per day across the requested days, not a required exact daily duration. "
         "If the user gives a follow-up drive time such as \"5 hours\" while a route scout is active, call startRouteScout again with the prior scout context plus driveHours. "
         "Only use Route Builder actions when the user explicitly asks to open, save, export, or prefill Route Builder. "
+        "Never call openRigProfile during or immediately after route planning. Only call openRigProfile when the user explicitly says open/show/edit/set up my rig profile; include args.explicit_request=true. "
         "Ignore tiny fragments, map labels, loading copy, and background speech that are not clear user commands. "
         "After every tool call, answer only from returned tool output; do not invent camps or claim map results without tool data. "
         "Speak brief audio responses for driving, such as \"I found three camps\" or \"Confirm to route there.\" "
@@ -1747,11 +1757,24 @@ def _visible_selection_args(command: str) -> dict:
             args["type"] = kind
             break
     name_match = re.search(r"\b(?:open|select|choose|route(?: me)? to|directions to|take me to)\s+(?:the\s+)?([a-zA-Z0-9 .,'-]{2,80})", command, flags=re.I)
+    if not name_match:
+        name_match = re.search(r"\bzoom\s+(?:in\s+|out\s+)?(?:on|to|at)\s+(?:the\s+)?([a-zA-Z0-9 .,'-]{2,80})", command, flags=re.I)
     if name_match:
         raw = re.sub(r"\b(?:on the left|on the right|near the center|in the center|at the top|at the bottom|nearby|visible|that|this|place|result)\b", " ", name_match.group(1), flags=re.I)
         raw = re.sub(r"\s+", " ", raw).strip(" .,'-")
         if raw and raw.lower() not in {"hotel", "restaurant", "bar", "place", "one", "result"}:
             args["name"] = raw[:80]
+    return args
+
+def _copilot_result_selection_args(items: object, index: int) -> dict:
+    if not isinstance(items, list) or index < 0 or index >= len(items):
+        return {"result_index": index}
+    item = items[index] if isinstance(items[index], dict) else {}
+    args = {"result_index": index}
+    for key in ("result_set_id", "result_id", "feature_id", "id", "name", "type", "category", "screen_position"):
+        value = item.get(key)
+        if value is not None and value != "":
+            args[key] = value
     return args
 
 def _clean_route_builder_place(value: str) -> str:
@@ -1773,6 +1796,11 @@ def _route_builder_draft_from_text(command: str, context: dict | None = None) ->
         draft["targetMiles"] = max(20, min(700, int(miles_match.group(1))))
     to_from = re.search(r"\b(?:to|toward)\s+([a-zA-Z0-9 .,'-]{2,120}?)\s+from\s+([a-zA-Z0-9 .,'-]{2,140})", command, flags=re.I)
     from_to = re.search(r"\bfrom\s+([a-zA-Z0-9 .,'-]{2,120}?)\s+(?:to|through|toward)\s+([a-zA-Z0-9 .,'-]{2,140})", command, flags=re.I)
+    bare_to = re.search(
+        r"^\s*(?:please\s+)?(?:plan|build|create|generate|draft|make(?:\s+me|\s+a)?|route)\b\s*(?:a|an|my)?\s*(?:route|trip|itinerary)?\s+(?!to\b)([a-zA-Z0-9 .,'-]{2,120}?)\s+(?:to|through|toward)\s+([a-zA-Z0-9 .,'-]{2,140})",
+        command,
+        flags=re.I,
+    )
     if to_from:
         dest = _clean_route_builder_place(to_from.group(1))
         start = _clean_route_builder_place(to_from.group(2))
@@ -1783,6 +1811,13 @@ def _route_builder_draft_from_text(command: str, context: dict | None = None) ->
     elif from_to:
         start = _clean_route_builder_place(from_to.group(1))
         dest = _clean_route_builder_place(from_to.group(2))
+        if start:
+            draft["start"] = start
+        if dest:
+            draft["destination"] = dest
+    elif bare_to:
+        start = _clean_route_builder_place(bare_to.group(1))
+        dest = _clean_route_builder_place(bare_to.group(2))
         if start:
             draft["start"] = start
         if dest:
@@ -1849,9 +1884,16 @@ def _route_builder_draft_from_text(command: str, context: dict | None = None) ->
     return draft
 
 def _is_route_builder_request(text: str) -> bool:
+    explicit_pair = bool(
+        re.search(r"\bfrom\b.+\b(?:to|through|toward)\b", text)
+        and re.search(r"\b(route|trip|itinerary|plan|build|create|draft|generate|make)\b", text)
+    )
+    command_pair = bool(re.search(r"\b(?:plan|build|create|generate|draft|make(?: me| a)?)\b.+\b(?:to|through|toward)\b", text))
     return bool(
-        re.search(r"\b(route builder|trip builder|ai planner|plan|build|create|draft)\b", text)
+        (re.search(r"\b(route builder|trip builder|ai planner|plan|build|create|draft)\b", text)
         and re.search(r"\b(route|trip|itinerary|days?|nights?|from\b.*\bto\b|camp|camps|dispersed|boondock|wild|private stays?)\b", text)
+        or explicit_pair
+        or command_pair)
         and not re.search(r"\b(route me|directions|navigate there|start navigation|guidance)\b", text)
     )
 
@@ -1860,7 +1902,7 @@ def _route_builder_should_auto_build(text: str, draft: dict) -> bool:
         return False
     if re.search(r"\b(open|show|draft|prefill|set up|fill in)\b", text) and not re.search(r"\b(plan|build|create|generate)\b", text):
         return False
-    return bool(re.search(r"\b(plan|build|create|generate|make me|make a|route planner|itinerary)\b", text) and (draft.get("destination") or draft.get("start") or draft.get("days")))
+    return bool(re.search(r"\b(plan|build|create|generate|make me|make a|route planner|itinerary)\b|\broute\s+from\b", text) and (draft.get("destination") or draft.get("start") or draft.get("days")))
 
 def _build_extreme_map_action(command: str, context: dict, provider: str = "trailhead_openai") -> dict:
     text = (command or "").lower()
@@ -1971,7 +2013,7 @@ def _build_extreme_map_action(command: str, context: dict, provider: str = "trai
         message = "Offline downloads opened."
     elif re.search(r"\b(open|show|edit|set up|go to)\s+(my\s+)?(rig|rig profile|vehicle profile)\b|\b(open|show|edit)\s+profile\b", text):
         action_type = "openRigProfile"
-        args = {"read_context": True, "rig_profile": user_ctx.get("rig_profile")}
+        args = {"read_context": True, "explicit_request": True, "rig_profile": user_ctx.get("rig_profile")}
         map_updates = {"open_rig_profile": True}
         message = "Rig profile opened."
     elif re.search(r"\bradar|weather|storm|rain|snow|wind|heat|cold|risk\b", text):
@@ -1994,6 +2036,25 @@ def _build_extreme_map_action(command: str, context: dict, provider: str = "trai
         args = {"style": "topo"}
         map_updates = {"map_style": "topo"}
         message = "Topo map staged."
+    elif re.search(r"\b(zoom\s+(?:in|out)|zoom\s+(?:closer|back|wide)|closer|pull back|back out|wider view|more detail)\b", text):
+        direction = "out" if re.search(r"\b(zoom\s+out|zoom\s+back|pull back|back out|wider view|wide|farther)\b", text) else "in"
+        visible_args = _visible_selection_args(command)
+        args = {"direction": direction, "delta": 1.4, "refresh_visible": True, **visible_args}
+        if re.search(r"\b(that|this|there|selected)\b", text) and isinstance(map_ctx.get("selected_place"), dict):
+            args["target"] = map_ctx.get("selected_place")
+        action_type = "zoomMap"
+        map_updates = {"zoom": args}
+        message = "Map zoom staged."
+    elif re.search(r"\b(find|show|search|look for|suggest|recommend)\b.*\b(places?|somewhere|stops?|options?|things?)\b", text) and not re.search(r"\b(food|restaurant|eat|dining|dinner|lunch|breakfast|cafe|coffee|bar|pizza|tacos?|mexican|burgers?|bbq|barbecue|sushi|thai|italian|sandwiches?|deli|hotels?|motels?|lodg(?:e|ing)|camp|campsite|trail|trailhead|hike|fuel|gas|propane|views?|viewpoints?|scenic|overlook|vista|landmarks?|attractions?|sights?)\b", text):
+        action_type = "askForConfirmation"
+        args = {
+            "question": "What kind of places should I search for?",
+            "options": ["camps", "lodging", "food", "fuel", "attractions", "trails"],
+            "near": center,
+            "reason": "ambiguous_place_category",
+        }
+        map_updates = {"needs_category": True, "options": args["options"]}
+        message = "Choose a category first: camps, lodging, food, fuel, attractions, or trails."
     elif re.search(r"\bfuel|gas|propane|range|empty\b", text):
         action_type = "searchPlaces"
         category = "propane" if "propane" in text else "fuel"
@@ -2060,14 +2121,19 @@ def _build_extreme_map_action(command: str, context: dict, provider: str = "trai
         requires_confirmation = True
     elif re.search(r"\b(select|choose|open|take me to)\b.*\b(first|second|third|1|2|3|result)\b|\b(first|second|third) result\b|\b(another|next one|next result|show another|open another)\b", text):
         visible_features = map_ctx.get("visible_map_features") if isinstance(map_ctx.get("visible_map_features"), list) else []
-        action_type = "selectRenderedFeature" if visible_features and not (map_ctx.get("current_results") or []) else "selectPlace"
+        current_results = map_ctx.get("current_results") if isinstance(map_ctx.get("current_results"), list) else []
+        action_type = "selectVisiblePlace" if visible_features and not current_results else "selectPlace"
         if re.search(r"\bthird\b|\b3\b", text):
             index = 2
         elif re.search(r"\bsecond\b|\b2\b|\banother\b|\bnext one\b|\bnext result\b|\bshow another\b|\bopen another\b", text):
             index = 1
         else:
             index = 0
-        args = {"result_index": index, **_visible_selection_args(command)}
+        args = _copilot_result_selection_args(visible_features if action_type == "selectVisiblePlace" else current_results, index)
+        for key, value in _visible_selection_args(command).items():
+            if key == "name" and args.get("result_id"):
+                continue
+            args[key] = value
         map_updates = {"select_result_index": index}
         selected_place = {"result_index": index}
         message = "Selection staged from the current result list."
@@ -3591,32 +3657,34 @@ async def routing_coverage_diagnostic():
         "health": target_health[0] if target_health else {"ok": False},
         "probes": probes,
         "summary": {
+            "total": len(probes),
             "passed": passed,
             "failed": failed,
             "failed_regions": failed_regions,
             "elapsed_ms": round((time.time() - started) * 1000),
+            "duration_ms": round((time.time() - started) * 1000),
         },
+        "next_actions": [
+            "If Pacific Northwest probes fail while R2 routing/wa.tar and routing/or.tar exist, rebuild or remount the live West2 graph before switching traffic.",
+            "If all probes pass on a candidate full-US service, point VALHALLA_URL at that service and rerun this diagnostic.",
+        ],
     }
 
 @app.get("/api/route/health")
 async def route_health():
     checks: list[dict] = []
+    valhalla_ok = False
     async with httpx.AsyncClient(timeout=5) as client:
         for target in _valhalla_targets():
             try:
                 res = await client.get(f"{target['url']}/status")
-                valhalla_ok = 200 <= res.status_code < 300
-                checks.append({
-                    "engine": "valhalla",
-                    "target": target["id"],
-                    "url": target["url"],
-                    "ok": valhalla_ok,
-                    "status": res.status_code,
-                })
+                ok = 200 <= res.status_code < 300
+                valhalla_ok = valhalla_ok or ok
+                checks.append({"engine": "valhalla", "target": target["id"], "url": target["url"], "ok": ok, "status": res.status_code})
             except Exception as e:
                 checks.append({"engine": "valhalla", "target": target["id"], "url": target["url"], "ok": False, "error": str(e)})
-    if any(check.get("engine") == "valhalla" and check.get("ok") for check in checks):
-        return {"ok": True, "engine": "valhalla", "checks": checks}
+    if valhalla_ok:
+        return {"ok": True, "engine": "valhalla", "status": 200, "checks": checks}
     sample = [{"lat": 38.5733, "lon": -109.5498}, {"lat": 38.5677, "lon": -109.5271}]
     try:
         async with httpx.AsyncClient(timeout=8) as client:
@@ -3658,7 +3726,7 @@ async def route_proxy(body: RouteRequest):
     cached_osrm_fallback = bool(cached and cached.get("_fallback", {}).get("engine") == "osrm")
     if cached and not cached_osrm_fallback:
         cached_engine = "osrm-fallback" if cached.get("_fallback", {}).get("engine") == "osrm" else "valhalla"
-        cached["_trailhead"] = {"engine": cached_engine, "cache": "hit", "cache_key": cache_key, "valhalla_target": target["id"]}
+        cached["_trailhead"] = {"engine": cached_engine, "cache": "hit", "cache_key": cache_key, "valhalla_target": target["id"], "target": target["id"]}
         if dropped_optional > 0:
             cached["_trailhead"]["repair"] = "dropped_optional_points"
             cached["_trailhead"]["dropped_optional_points"] = dropped_optional
@@ -3673,7 +3741,7 @@ async def route_proxy(body: RouteRequest):
                 data = res.json()
                 if data.get("trip", {}).get("status") == 0:
                     set_route_cached(cache_key, payload, data)
-                    data["_trailhead"] = {"engine": "valhalla", "cache": "miss", "cache_key": cache_key, "valhalla_target": target["id"]}
+                    data["_trailhead"] = {"engine": "valhalla", "cache": "miss", "cache_key": cache_key, "valhalla_target": target["id"], "target": target["id"]}
                     if dropped_optional > 0:
                         data["_trailhead"]["repair"] = "dropped_optional_points"
                         data["_trailhead"]["dropped_optional_points"] = dropped_optional
@@ -3693,6 +3761,7 @@ async def route_proxy(body: RouteRequest):
             "cache": "stale-fallback-hit",
             "cache_key": cache_key,
             "valhalla_target": target["id"],
+            "target": target["id"],
             "valhalla_error": valhalla_error,
         }
         return cached
@@ -3709,6 +3778,7 @@ async def route_proxy(body: RouteRequest):
                 "cache": "hit",
                 "cache_key": repair_cache_key,
                 "valhalla_target": repair_target["id"],
+                "target": repair_target["id"],
                 "repair": "dropped_optional_points",
                 "dropped_optional_points": dropped_optional,
                 "message": "Route kept. Optional side stops are saved as pins, not navigation stops.",
@@ -3728,6 +3798,7 @@ async def route_proxy(body: RouteRequest):
                             "cache": "miss",
                             "cache_key": repair_cache_key,
                             "valhalla_target": repair_target["id"],
+                            "target": repair_target["id"],
                             "repair": "dropped_optional_points",
                             "dropped_optional_points": dropped_optional,
                             "message": "Route kept. Optional side stops are saved as pins, not navigation stops.",
@@ -3757,6 +3828,7 @@ async def route_proxy(body: RouteRequest):
             "cache": "miss",
             "cache_key": cache_key,
             "valhalla_target": target["id"],
+            "target": target["id"],
             "fallback_url": base,
             "valhalla_error": valhalla_error,
         }
@@ -4847,6 +4919,32 @@ async def _mapbox_get(url: str, params: dict) -> dict:
 def _mapbox_directions_url(profile: str, coords: list[str]) -> str:
     return f"https://api.mapbox.com/directions/v5/{profile}/{';'.join(coords)}"
 
+def _mapbox_feature_coordinate_summary(items: object, limit: int = 8) -> list[dict]:
+    if not isinstance(items, list):
+        return []
+    summary: list[dict] = []
+    for item in items[:limit]:
+        if not isinstance(item, dict):
+            continue
+        props = item.get("properties") if isinstance(item.get("properties"), dict) else item
+        geometry = item.get("geometry") if isinstance(item.get("geometry"), dict) else {}
+        coords = geometry.get("coordinates") if isinstance(geometry, dict) else None
+        lng = lat = None
+        if isinstance(coords, list) and len(coords) >= 2:
+            try:
+                lng = round(float(coords[0]), 6)
+                lat = round(float(coords[1]), 6)
+            except (TypeError, ValueError):
+                lng = lat = None
+        summary.append({
+            "name": str(props.get("name") or props.get("full_address") or props.get("place_formatted") or props.get("text") or "")[:120],
+            "mapbox_id": str(props.get("mapbox_id") or props.get("id") or item.get("mapbox_id") or item.get("id") or "")[:180],
+            "type": str(props.get("feature_type") or props.get("type") or props.get("category") or "")[:80],
+            "lat": lat,
+            "lng": lng,
+        })
+    return summary
+
 @app.post("/api/extreme/search/session")
 def extreme_search_session(body: ExtremeSearchSessionRequest, user: dict = Depends(_current_user)):
     config = _require_extreme_map_layers(user)
@@ -4894,7 +4992,16 @@ async def extreme_search_suggest(body: ExtremeSearchSuggestRequest, user: dict =
         None,
         "map_layers",
         None,
-        {"session_token_hash": _mapbox_session_hash(token), "q_len": len(query), "count": len(data.get("suggestions", []))},
+        {
+            "session_token_hash": _mapbox_session_hash(token),
+            "q_len": len(query),
+            "count": len(data.get("suggestions", [])),
+            "bbox": params.get("bbox", ""),
+            "proximity": params.get("proximity", ""),
+            "origin": params.get("origin", ""),
+            "types": params.get("types", ""),
+            "feature_coordinates": _mapbox_feature_coordinate_summary(data.get("suggestions", [])),
+        },
     )
     data["_trailhead"] = {"temporary_use_only": True}
     return data
@@ -4921,7 +5028,13 @@ async def extreme_search_retrieve(body: ExtremeSearchRetrieveRequest, user: dict
         None,
         "map_layers",
         None,
-        {"session_token_hash": _mapbox_session_hash(token), "feature_count": len(data.get("features", []))},
+        {
+            "session_token_hash": _mapbox_session_hash(token),
+            "feature_count": len(data.get("features", [])),
+            "proximity": params.get("proximity", ""),
+            "origin": params.get("origin", ""),
+            "feature_coordinates": _mapbox_feature_coordinate_summary(data.get("features", [])),
+        },
     )
     data["_trailhead"] = {"temporary_use_only": True}
     return data
@@ -4942,7 +5055,20 @@ async def extreme_search_category(body: ExtremeSearchCategoryRequest, user: dict
         "limit": str(max(1, min(int(body.limit or 10), 10))),
     })
     data = await _mapbox_get(f"https://api.mapbox.com/search/searchbox/v1/category/{quote(category, safe='')}", params)
-    log_extreme_ledger_event(user["id"], "mapbox_search_category", None, "map_layers", None, {"category": category, "feature_count": len(data.get("features", []))})
+    log_extreme_ledger_event(
+        user["id"],
+        "mapbox_search_category",
+        None,
+        "map_layers",
+        None,
+        {
+            "category": category,
+            "feature_count": len(data.get("features", [])),
+            "bbox": params.get("bbox", ""),
+            "proximity": params.get("proximity", ""),
+            "feature_coordinates": _mapbox_feature_coordinate_summary(data.get("features", [])),
+        },
+    )
     data["_trailhead"] = {"temporary_use_only": True}
     return data
 
@@ -4964,7 +5090,20 @@ async def extreme_search_reverse(body: ExtremeSearchReverseRequest, user: dict =
         "types": _clean_mapbox_param(body.types, r"[^a-zA-Z0-9_,]+", 120),
     })
     data = await _mapbox_get("https://api.mapbox.com/search/searchbox/v1/reverse", params)
-    log_extreme_ledger_event(user["id"], "mapbox_search_reverse", None, "map_layers", None, {"feature_count": len(data.get("features", []))})
+    log_extreme_ledger_event(
+        user["id"],
+        "mapbox_search_reverse",
+        None,
+        "map_layers",
+        None,
+        {
+            "feature_count": len(data.get("features", [])),
+            "lat": round(lat, 7),
+            "lng": round(lng, 7),
+            "types": params.get("types", ""),
+            "feature_coordinates": _mapbox_feature_coordinate_summary(data.get("features", [])),
+        },
+    )
     data["_trailhead"] = {"temporary_use_only": True}
     return data
 
@@ -5324,19 +5463,227 @@ def _clean_countrycodes(countrycodes: str = "") -> str:
             codes.append(code)
     return ",".join(dict.fromkeys(codes))
 
+COUNTRY_QUERY_HINTS = {
+    "finland": "fi", "suomi": "fi", "helsinki": "fi", "turku": "fi", "tampere": "fi", "rovaniemi": "fi",
+    "canada": "ca", "alberta": "ca", "british columbia": "ca", "ontario": "ca", "quebec": "ca", "vancouver": "ca", "banff": "ca",
+    "mexico": "mx", "baja": "mx", "sonora": "mx", "chihuahua": "mx", "oaxaca": "mx", "mexico city": "mx",
+    "united states": "us", "usa": "us", "u.s.a": "us", "u.s.": "us",
+    "france": "fr", "paris france": "fr", "paris, france": "fr", "eiffel tower": "fr", "eifel tower": "fr", "louvre": "fr",
+    "italy": "it", "rome": "it", "venice": "it", "florence": "it",
+    "spain": "es", "barcelona": "es", "madrid": "es",
+    "united kingdom": "gb", "uk": "gb", "england": "gb", "london": "gb",
+    "germany": "de", "berlin": "de", "munich": "de",
+    "japan": "jp", "tokyo": "jp", "kyoto": "jp",
+    "australia": "au", "sydney": "au", "melbourne": "au",
+}
+
 def _countrycodes_for_query(query: str) -> str:
     text = (query or "").lower()
     matches = []
-    hints = {
-        "finland": "fi", "suomi": "fi", "helsinki": "fi", "turku": "fi", "tampere": "fi", "rovaniemi": "fi",
-        "canada": "ca", "alberta": "ca", "british columbia": "ca", "ontario": "ca", "quebec": "ca",
-        "mexico": "mx", "baja": "mx", "sonora": "mx", "chihuahua": "mx", "oaxaca": "mx",
-        "united states": "us", "usa": "us",
-    }
-    for needle, code in hints.items():
+    for needle, code in COUNTRY_QUERY_HINTS.items():
         if needle in text and code not in matches:
             matches.append(code)
     return ",".join(matches)
+
+def _normalize_geocode_text(value: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", str(value or "").lower())).strip()
+
+def _country_code_from_mapbox_context(feature: dict) -> tuple[str | None, str | None, str | None]:
+    country_code = None
+    country_name = None
+    region_name = None
+    for item in feature.get("context") or []:
+        if not isinstance(item, dict):
+            continue
+        item_id = str(item.get("id") or "")
+        text = str(item.get("text") or "")
+        short_code = str(item.get("short_code") or "").lower()
+        if item_id.startswith("country"):
+            country_name = text or country_name
+            if short_code:
+                country_code = short_code.split("-")[0]
+        elif item_id.startswith("region"):
+            region_name = text or region_name
+    return country_code, country_name, region_name
+
+def _geocode_place_matches_country(place: dict, country_filter: str) -> bool:
+    filters = {code for code in _clean_countrycodes(country_filter).split(",") if code}
+    if not filters:
+        return True
+    country_code = str(place.get("country_code") or "").lower()
+    if country_code:
+        return country_code in filters
+    hay = _normalize_geocode_text(" ".join([
+        str(place.get("name") or ""),
+        str(place.get("country") or ""),
+        str(place.get("region") or ""),
+    ]))
+    country_names = {
+        "fr": ["france"],
+        "us": ["united states", "usa"],
+        "ca": ["canada"],
+        "mx": ["mexico"],
+        "fi": ["finland", "suomi"],
+        "gb": ["united kingdom", "england"],
+        "it": ["italy"],
+        "es": ["spain"],
+        "de": ["germany"],
+        "jp": ["japan"],
+        "au": ["australia"],
+    }
+    return any(any(_normalize_geocode_text(name) in hay for name in country_names.get(code, [])) for code in filters)
+
+def _geocode_candidate_score(query: str, place: dict, country_filter: str = "") -> float:
+    needle = _normalize_geocode_text(query)
+    name = _normalize_geocode_text(str(place.get("name") or ""))
+    types = " ".join(_normalize_geocode_text(str(value or "")) for value in [
+        place.get("feature_type"),
+        place.get("category"),
+        *(place.get("place_types") if isinstance(place.get("place_types"), list) else []),
+    ])
+    score = 0.0
+    if needle and name:
+        if name == needle:
+            score -= 20
+        elif name.startswith(needle) or needle.startswith(name):
+            score -= 10
+        elif needle in name or name in needle:
+            score -= 5
+        else:
+            score += 14
+    if country_filter and not _geocode_place_matches_country(place, country_filter):
+        score += 500
+    road_words = r"\b(road|rd|street|st|avenue|ave|boulevard|blvd|drive|dr|lane|ln|way|highway|hwy|route|rte)\b"
+    query_is_road = bool(re.search(road_words, needle))
+    name_is_road = bool(re.search(road_words, name))
+    if name_is_road and not query_is_road:
+        score += 60
+    if re.search(r"\b(address|street|postcode|neighborhood|locality)\b", types) and not query_is_road:
+        score += 20
+    if re.search(r"\b(place|poi|landmark|tourism|attraction|historic|monument|museum|park|locality)\b", types):
+        score -= 10
+    relevance = place.get("relevance")
+    try:
+        score -= max(0.0, min(float(relevance), 1.0)) * 8
+    except (TypeError, ValueError):
+        pass
+    return score
+
+def _resolve_geocode_candidates(query: str, places: list[dict], country_filter: str = "") -> dict:
+    valid = [
+        place for place in places
+        if isinstance(place, dict)
+        and isinstance(place.get("lat"), (int, float))
+        and isinstance(place.get("lng"), (int, float))
+    ]
+    if not valid:
+        return {"status": "not_found", "query": query, "normalized_query": query, "selected": None, "alternatives": [], "rejected": [], "reason": "no_candidates"}
+    ranked = sorted(valid, key=lambda place: (
+        _geocode_candidate_score(query, place, country_filter),
+        str(place.get("name") or ""),
+        float(place.get("lat") or 0),
+        float(place.get("lng") or 0),
+    ))
+    selected = ranked[0]
+    rejected = [
+        {
+            "name": place.get("name"),
+            "lat": place.get("lat"),
+            "lng": place.get("lng"),
+            "country_code": place.get("country_code"),
+            "feature_type": place.get("feature_type"),
+            "place_id": place.get("place_id"),
+            "score": round(_geocode_candidate_score(query, place, country_filter), 3),
+            "reason": "country_mismatch" if country_filter and not _geocode_place_matches_country(place, country_filter) else "lower_rank",
+        }
+        for place in ranked[1:8]
+    ]
+    if country_filter and not _geocode_place_matches_country(selected, country_filter):
+        return {
+            "status": "mismatch",
+            "query": query,
+            "normalized_query": query,
+            "selected": None,
+            "alternatives": ranked[:6],
+            "rejected": rejected,
+            "reason": "explicit_country_mismatch",
+            "countrycodes": country_filter,
+        }
+    runner_up = ranked[1] if len(ranked) > 1 else None
+    margin = (_geocode_candidate_score(query, runner_up, country_filter) - _geocode_candidate_score(query, selected, country_filter)) if runner_up else 999
+    status = "ambiguous" if runner_up and margin < 3 and not country_filter else "resolved"
+    return {
+        "status": status,
+        "query": query,
+        "normalized_query": query,
+        "selected": {
+            **selected,
+            "confidence": "high" if status == "resolved" and margin >= 8 else "medium",
+            "score": round(_geocode_candidate_score(query, selected, country_filter), 3),
+        },
+        "alternatives": ranked[1:6],
+        "rejected": rejected,
+        "reason": "close_candidates" if status == "ambiguous" else "best_verified_candidate",
+        "countrycodes": country_filter,
+    }
+
+FAMOUS_LANDMARK_GEOCODES = [
+    {
+        "aliases": ["eiffel tower", "eifel tower", "tour eiffel"],
+        "name": "Eiffel Tower, Paris, France",
+        "lat": 48.85837,
+        "lng": 2.29448,
+        "category": "landmark",
+    },
+    {
+        "aliases": ["golden gate bridge"],
+        "name": "Golden Gate Bridge, San Francisco, California",
+        "lat": 37.81993,
+        "lng": -122.47826,
+        "category": "landmark",
+    },
+    {
+        "aliases": ["grand canyon", "grand canyon national park"],
+        "name": "Grand Canyon National Park, Arizona",
+        "lat": 36.05444,
+        "lng": -112.14011,
+        "category": "park",
+    },
+    {
+        "aliases": ["delicate arch"],
+        "name": "Delicate Arch, Arches National Park, Utah",
+        "lat": 38.74362,
+        "lng": -109.49929,
+        "category": "landmark",
+    },
+    {
+        "aliases": ["half dome"],
+        "name": "Half Dome, Yosemite National Park, California",
+        "lat": 37.74604,
+        "lng": -119.53319,
+        "category": "landmark",
+    },
+]
+
+def _canonical_landmark_geocode(query: str) -> list[dict]:
+    text = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", (query or "").lower())).strip()
+    if not text or re.search(r"\b(road|rd|street|st|lane|ln|drive|dr|way|avenue|ave|boulevard|blvd|highway|hwy|route)\b", text):
+        return []
+    for landmark in FAMOUS_LANDMARK_GEOCODES:
+        if any(alias in text for alias in landmark["aliases"]):
+            return [{
+                "name": landmark["name"],
+                "lat": landmark["lat"],
+                "lng": landmark["lng"],
+                "source": "trailhead_landmark",
+                "place_id": f"trailhead_landmark:{landmark['aliases'][0].replace(' ', '_')}",
+                "feature_type": "landmark",
+                "place_types": ["poi", "landmark"],
+                "category": landmark["category"],
+                "relevance": 1.0,
+                "country_code": "fr" if "eiffel" in landmark["aliases"][0] else "us",
+            }]
+    return []
 
 @app.get("/api/geocode")
 async def geocode_places(q: str, limit: int = 8, countrycodes: str = ""):
@@ -5345,6 +5692,9 @@ async def geocode_places(q: str, limit: int = 8, countrycodes: str = ""):
         return []
     limit = max(1, min(int(limit or 8), 10))
     country_filter = _clean_countrycodes(countrycodes) or _countrycodes_for_query(query)
+    canonical_landmarks = _canonical_landmark_geocode(query)
+    if canonical_landmarks:
+        return canonical_landmarks[:limit]
 
     async def fetch_geocode() -> list[dict]:
         token = settings.mapbox_token
@@ -5372,17 +5722,31 @@ async def geocode_places(q: str, limit: int = 8, countrycodes: str = ""):
                     for feat in resp.json().get("features", [])[:limit]:
                         coords = feat.get("geometry", {}).get("coordinates") or []
                         if len(coords) >= 2:
+                            place_types = feat.get("place_type") if isinstance(feat.get("place_type"), list) else []
+                            properties = feat.get("properties") if isinstance(feat.get("properties"), dict) else {}
+                            country_code, country_name, region_name = _country_code_from_mapbox_context(feat)
                             places.append({
                                 "name": feat.get("place_name") or feat.get("text") or query,
                                 "lat": float(coords[1]),
                                 "lng": float(coords[0]),
+                                "source": "mapbox",
+                                "place_id": feat.get("id"),
+                                "feature_type": place_types[0] if place_types else None,
+                                "place_types": place_types,
+                                "category": properties.get("category"),
+                                "relevance": feat.get("relevance"),
+                                "country_code": country_code,
+                                "country": country_name,
+                                "region": region_name,
+                                "bbox": feat.get("bbox") if isinstance(feat.get("bbox"), list) else None,
+                                "provider_place_id": properties.get("mapbox_id") or feat.get("id"),
                             })
                     if places:
-                        return places
+                        return [*canonical_landmarks, *[place for place in places if place.get("place_id") not in {item.get("place_id") for item in canonical_landmarks}]][:limit]
                 except Exception:
                     pass
             try:
-                params = {"format": "json", "limit": limit, "q": query}
+                params = {"format": "json", "limit": limit, "q": query, "addressdetails": 1}
                 if country_filter:
                     params["countrycodes"] = country_filter
                 t0 = time.time()
@@ -5404,13 +5768,27 @@ async def geocode_places(q: str, limit: int = 8, countrycodes: str = ""):
                     if not p.get("lat") or not p.get("lon"):
                         continue
                     display = p.get("display_name") or query
+                    address = p.get("address") if isinstance(p.get("address"), dict) else {}
                     places.append({
                         "name": ", ".join(display.split(",")[:3]),
                         "lat": float(p["lat"]),
                         "lng": float(p["lon"]),
+                        "source": "nominatim",
+                        "place_id": p.get("osm_id"),
+                        "feature_type": p.get("type"),
+                        "place_types": [p.get("class"), p.get("type")],
+                        "category": p.get("class"),
+                        "relevance": float(p.get("importance") or 0),
+                        "country_code": str(address.get("country_code") or "").lower() or None,
+                        "country": address.get("country"),
+                        "region": address.get("state") or address.get("province") or address.get("region"),
+                        "bbox": [float(v) for v in p.get("boundingbox", [])] if isinstance(p.get("boundingbox"), list) and len(p.get("boundingbox")) == 4 else None,
+                        "provider_place_id": p.get("osm_id"),
                     })
-                return places
+                return [*canonical_landmarks, *[place for place in places if place.get("place_id") not in {item.get("place_id") for item in canonical_landmarks}]][:limit]
             except Exception as e:
+                if canonical_landmarks:
+                    return canonical_landmarks[:limit]
                 raise HTTPException(502, f"Geocode failed: {e}")
 
     cache_key = f"geocode:{query.lower()}:{country_filter}:{limit}"
@@ -5422,6 +5800,35 @@ async def geocode_places(q: str, limit: int = 8, countrycodes: str = ""):
         endpoint="search",
         source_action="submit_search",
     )
+
+@app.get("/api/geocode/resolve")
+async def resolve_geocode_place(q: str, limit: int = 8, countrycodes: str = ""):
+    query = (q or "").strip()
+    if not query:
+        return {"status": "not_found", "query": "", "normalized_query": "", "selected": None, "alternatives": [], "rejected": [], "reason": "empty_query"}
+    limit = max(2, min(int(limit or 8), 10))
+    country_filter = _clean_countrycodes(countrycodes) or _countrycodes_for_query(query)
+    normalized_query = re.sub(r"\s+", " ", query).strip()
+    places = await geocode_places(normalized_query, limit, country_filter)
+    result = _resolve_geocode_candidates(normalized_query, places, country_filter)
+    if result.get("status") in {"mismatch", "not_found"} and country_filter:
+        strict_query = normalized_query
+        first_country = country_filter.split(",")[0]
+        country_names = {
+            "fr": "France", "us": "United States", "ca": "Canada", "mx": "Mexico", "fi": "Finland",
+            "gb": "United Kingdom", "it": "Italy", "es": "Spain", "de": "Germany", "jp": "Japan", "au": "Australia",
+        }
+        suffix = country_names.get(first_country)
+        if suffix and _normalize_geocode_text(suffix) not in _normalize_geocode_text(strict_query):
+            strict_query = f"{normalized_query}, {suffix}"
+        retry_places = await geocode_places(strict_query, limit, country_filter)
+        retry_result = _resolve_geocode_candidates(strict_query, retry_places, country_filter)
+        retry_result["query"] = query
+        retry_result["normalized_query"] = strict_query
+        retry_result["retry_of"] = normalized_query
+        if retry_result.get("status") in {"resolved", "ambiguous"}:
+            return retry_result
+    return result
 
 
 # ── Self-hosted vector tiles (Protomaps proxy) ────────────────────────────────
@@ -6381,6 +6788,7 @@ async def admin_clear_camp_cache(body: CampCacheClearPayload, admin: dict = Depe
         clean = camp_id.replace("ridb:", "").replace("osm:", "").replace("blm:", "")
         keys = [
             f"ridb_detail_{clean}",
+            f"ridb_detail_v2_{clean}",
             f"osm_detail_{clean}",
             f"blm_detail_{clean}",
             f"ai_insight_{clean}",
@@ -8123,6 +8531,14 @@ async def admin_users(search: str = "", limit: int = 50, offset: int = 0,
 @app.get("/api/admin/extreme")
 async def admin_extreme(admin: dict = Depends(_require_admin)):
     since = int(time.time()) - 86400
+    recent_events = list_extreme_ledger_events(200)
+    debug_event_types = {
+        "copilot_admin_debug_snapshot",
+        "copilot_selection_guard_failed",
+        "copilot_selection_resolved",
+        "copilot_candidates_resolved",
+        "copilot_query_region_started",
+    }
     return {
         "config": _extreme_config_for_user(admin),
         "env": {
@@ -8134,7 +8550,8 @@ async def admin_extreme(admin: dict = Depends(_require_admin)):
         },
         "summary_24h": get_extreme_ledger_summary(since),
         "recent_sessions": list_extreme_sessions(50),
-        "recent_events": list_extreme_ledger_events(100),
+        "recent_events": recent_events[:100],
+        "debug_events": [event for event in recent_events if event.get("event_type") in debug_event_types][:40],
     }
 
 @app.post("/api/admin/extreme/config")
@@ -8653,12 +9070,15 @@ def _camp_from_live_place(place: dict) -> dict | None:
 async def nearby_camps(lat: float, lng: float, radius: float = 50, types: str = ""):
     """Aggregate legal camp sources near a point, no trip required."""
     type_filters = [t.strip() for t in types.split(",") if t.strip()] if types else None
-    ridb, blm, osm = await asyncio.gather(
+    private_stay_categories = _private_stay_categories_for_filters(type_filters)
+    ridb, blm, osm, hosted_private = await asyncio.gather(
         get_campsites_search(lat, lng, radius_miles=radius, type_filters=type_filters),
         get_blm_campsites(lat, lng, radius_miles=radius),
         get_osm_campsites(lat, lng, radius_m=int(min(radius, 60) * 1600)),
+        get_geoapify_places(lat, lng, radius_m=int(min(radius, 45) * 1609.344), categories=private_stay_categories, limit_per_category=12) if private_stay_categories else asyncio.sleep(0, result=[]),
     )
-    return _merge_camp_sources(ridb, blm, osm, type_filters=type_filters)[:160]
+    hosted_camps = [_camp_from_live_place(place) for place in hosted_private if isinstance(place, dict)]
+    return _merge_camp_sources(ridb, blm, osm, [c for c in hosted_camps if c], type_filters=type_filters)[:160]
 
 
 def _route_points_from_body(route: list[dict]) -> list[dict]:
@@ -8765,11 +9185,11 @@ def _camp_pref_score(camp: dict, route_style: str = "balanced", camp_preference:
     else:
         score += -14 if public else 4
         score += -5 if official_developed and limited_public else 0
-        score += 26 if rv_private else 0
+        score += (12 if limited_public else 26) if rv_private else 0
         score += 8 if private_stay and not limited_public else 0
     if style == "wild":
         score += -8 if public else 5
-        score += 30 if rv_private else 0
+        score += (18 if limited_public else 30) if rv_private else 0
         score += 8 if camp.get("reservable") else 0
     elif style == "direct":
         score += 3 if public and not camp.get("reservable") else 0
@@ -10694,6 +11114,7 @@ async def nearby_places(
     radius_m = int(min(max(radius, 1), 45) * 1609.344)
     provider = (provider or "auto").lower().strip()
     osm_places: list[dict] = []
+    geoapify_places: list[dict] = []
     official_places: list[dict] = []
 
     official_tasks = []
@@ -10717,6 +11138,9 @@ async def nearby_places(
                 osm_places.extend(dedicated_fuel)
             elif "propane" in category_set:
                 osm_places.extend([p for p in dedicated_fuel if str(p.get("fuel_types") or "").lower().find("propane") >= 0])
+    if provider in {"auto", "geoapify"} and category_set:
+        geoapify_categories = category_set if not private_stay_only else private_stay_allowed_types
+        geoapify_places = await get_geoapify_places(lat, lng, radius_m=radius_m, categories=geoapify_categories, limit_per_category=18)
 
     def dist_mi(item: dict) -> float:
         try:
@@ -10726,7 +11150,7 @@ async def nearby_places(
 
     merged: list[dict] = []
     seen: set[str] = set()
-    for item in [*official_places, *osm_places]:
+    for item in [*official_places, *osm_places, *geoapify_places]:
         name = str(item.get("name") or "").lower().strip()
         coord_key = f"{item.get('type')}:{name}:{round(float(item.get('lat', 0)), 4)}:{round(float(item.get('lng', 0)), 4)}"
         key = str(item.get("id") or coord_key)
@@ -11055,6 +11479,7 @@ def _map_card_sections(card: dict, body: MapCardResolveRequest) -> list[dict]:
 MAP_CARD_SAFE_TTL_SECONDS = 3600 * 24 * 7
 MAP_CARD_PASSIVE_SOURCES = {
     "osm",
+    "geoapify",
     "ridb",
     "recreation.gov",
     "blm",
@@ -11075,7 +11500,7 @@ def _map_card_cache_key(body: MapCardResolveRequest) -> str:
         f"{float(body.lat):.4f}",
         f"{float(body.lng):.4f}",
     ])
-    return f"map_card_v4:{hashlib.sha1(base.encode()).hexdigest()[:24]}"
+    return f"map_card_v5:{hashlib.sha1(base.encode()).hexdigest()[:24]}"
 
 
 def _contains_restricted_provider(value: object) -> bool:
@@ -11090,7 +11515,6 @@ def _contains_restricted_provider(value: object) -> bool:
                 "maps.google",
                 "foursquare.com",
                 "4sqi.net",
-                "geoapify.com",
             )
         )
     if isinstance(value, dict):

@@ -59,7 +59,7 @@ class OfficialPlaceEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(places[0]["official_free"])
         self.assertEqual(places[0]["category_access"]["official_free_categories"], ["attraction"])
 
-    async def test_nearby_places_does_not_return_legacy_place_providers(self):
+    async def test_nearby_places_does_not_return_google_or_foursquare_providers(self):
         osm_place = {
             "id": "osm_food_1",
             "name": "Open Cafe",
@@ -84,6 +84,31 @@ class OfficialPlaceEndpointTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual([p["source"] for p in places], ["osm"])
         self.assertFalse(any(str(p.get("source")).lower() in server.LEGACY_PLACE_PROVIDERS for p in places))
+
+    async def test_nearby_places_restores_geoapify_hosted_places(self):
+        geoapify_place = {
+            "id": "geoapify_food_1",
+            "name": "Hosted Cafe",
+            "lat": 48.858,
+            "lng": 2.294,
+            "type": "food",
+            "source": "geoapify",
+            "source_label": "Geoapify",
+        }
+        with (
+            patch.object(server, "get_service_places", new=AsyncMock(return_value=[])),
+            patch.object(server, "get_geoapify_places", new=AsyncMock(return_value=[geoapify_place])),
+        ):
+            places = await server.nearby_places(
+                48.858,
+                2.294,
+                radius=2,
+                categories="food",
+                provider="auto",
+                user={"id": 1, "credits": 0, "is_admin": True},
+            )
+
+        self.assertEqual([p["source"] for p in places], ["geoapify"])
 
     async def test_search_place_card_returns_plain_map_search_card(self):
         card = await server.search_place_card("Hotel Gustave", 48.85, 2.29)

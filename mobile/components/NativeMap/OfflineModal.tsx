@@ -117,6 +117,14 @@ function regionGroupFor(id: string): RegionGroupKey {
   return REGION_GROUPS.find(group => group.ids.includes(id))?.key ?? 'west';
 }
 
+function regionCodeFor(id: string) {
+  if (id === 'canada') return 'CAN';
+  if (id === 'mexico') return 'MEX';
+  if (id === 'fi') return 'FIN';
+  if (id === 'conus') return 'US';
+  return id.toUpperCase();
+}
+
 interface Props {
   visible:     boolean;
   onClose:     () => void;
@@ -220,8 +228,10 @@ function displayDownloadName(name: string) {
 }
 
 function StateReadinessPanel({
-  mapReady, routeReady, contourReady, contourAvailable, trailReady, trailAvailable, placeReady, placeAvailable, placeLabel, mapBusy, routeBusy, contourBusy, trailBusy, available, onDownloadMissing,
+  regionCode, regionName, mapReady, routeReady, contourReady, contourAvailable, trailReady, trailAvailable, placeReady, placeAvailable, placeLabel, mapBusy, routeBusy, contourBusy, trailBusy, available, onDownloadMissing,
 }: {
+  regionCode: string;
+  regionName: string;
   mapReady: boolean;
   routeReady: boolean;
   contourReady: boolean;
@@ -242,17 +252,27 @@ function StateReadinessPanel({
   const navReady = mapReady && routeReady;
   const ready = navReady && (!trailAvailable || trailReady) && (!placeAvailable || placeReady);
   const busy = mapBusy || routeBusy || contourBusy || trailBusy;
+  const statusParts = [
+    mapReady ? 'Map saved' : available ? 'Map ready to download' : 'Map pending',
+    routeReady ? 'Nav saved' : available ? 'Nav ready to download' : 'Nav pending',
+    trailAvailable ? (trailReady ? 'Trails saved' : 'Trails optional') : null,
+    contourAvailable ? (contourReady ? 'Topo saved' : 'Topo optional') : null,
+    placeAvailable ? placeLabel : null,
+  ].filter(Boolean);
   return (
-    <View style={{ backgroundColor: ready ? C.green + '12' : C.s1, borderColor: ready ? C.green + '35' : C.border, borderWidth: 1, borderRadius: 10, padding: 12, marginBottom: 12 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-        <View style={{ flex: 1 }}>
-          <Text style={{ color: ready ? C.green : C.text, fontSize: 12, fontFamily: mono, fontWeight: '900', letterSpacing: 0.4 }}>
-            {ready ? 'READY OFFLINE' : navReady ? 'READY TO NAVIGATE' : available ? 'DOWNLOADS NEEDED' : 'COMING SOON'}
+    <View style={{ backgroundColor: ready ? C.green + '10' : C.s1, borderColor: ready ? C.green + '35' : C.border, borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 12 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+        <View style={{ width: 64, height: 58, borderRadius: 12, backgroundColor: C.s2, borderWidth: 1, borderColor: ready ? C.green + '55' : C.orange + '45', alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ color: ready ? C.green : C.orange, fontSize: regionCode.length > 2 ? 20 : 24, fontFamily: mono, fontWeight: '900', letterSpacing: 1 }}>
+            {regionCode}
           </Text>
-          <Text style={{ color: C.text3, fontSize: 10, marginTop: 3, lineHeight: 14 }}>
-            {available
-              ? 'Download the map and navigation first. Add places, topo, and trails when you need them.'
-              : 'This region is coming soon. Download buttons will appear when the packs are ready.'}
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={{ color: C.text, fontSize: 14, fontFamily: mono, fontWeight: '900' }} numberOfLines={1}>
+            {regionName}
+          </Text>
+          <Text style={{ color: C.text3, fontSize: 10, marginTop: 4, lineHeight: 14 }} numberOfLines={2}>
+            {statusParts.join(' · ')}
           </Text>
         </View>
         {!navReady && available && (
@@ -266,13 +286,6 @@ function StateReadinessPanel({
             </Text>
           </TouchableOpacity>
         )}
-      </View>
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
-        <ReadinessRow icon="map-outline" label={mapReady ? 'Map saved' : available ? 'Map needed' : 'Map planned'} ready={mapReady} />
-        <ReadinessRow icon="git-branch-outline" label={routeReady ? 'Navigation saved' : available ? 'Navigation needed' : 'Navigation planned'} ready={routeReady} />
-        <ReadinessRow icon="trail-sign-outline" label={trailReady ? 'Trails saved' : trailAvailable ? 'Trails optional' : 'Trails planned'} ready={trailReady} />
-        <ReadinessRow icon="analytics-outline" label={contourReady ? 'Topo saved' : contourAvailable ? 'Topo optional' : 'Topo planned'} ready={contourReady} />
-        <ReadinessRow icon="location-outline" label={placeLabel} ready={placeReady} />
       </View>
     </View>
   );
@@ -303,14 +316,17 @@ function ConusCard({
   const isError    = state.status === 'error';
   const accentColor = isComplete ? C.green : isActive || isPaused ? C.orange : C.border;
   const iconBorderColor = code ? (accentColor === C.border ? C.orange + '40' : accentColor + '80') : C.border;
+  const sizeText = isComplete
+    ? `${fmtBytes(state.fileSizeMb * 1_048_576)} saved`
+    : totalBytes > 0 ? fmtBytes(totalBytes) : `~${region.estimatedGb} GB`;
 
   return (
     <View style={{ borderLeftWidth: 3, borderLeftColor: accentColor, backgroundColor: C.s1, borderRadius: 10, overflow: 'hidden' }}>
       {/* Header row */}
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', padding: 14, paddingBottom: isActive || isPaused ? 8 : 14 }}>
-        <View style={{ width: 44, height: 44, backgroundColor: C.s2, borderRadius: 8, alignItems: 'center', justifyContent: 'center', marginRight: 12, borderWidth: 1, borderColor: iconBorderColor }}>
+        <View style={{ width: 58, height: 52, backgroundColor: C.s2, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginRight: 12, borderWidth: 1, borderColor: iconBorderColor }}>
           {code ? (
-            <Text style={{ fontSize: 13, fontFamily: mono, fontWeight: '900', color: isComplete ? C.green : C.orange, letterSpacing: 1 }}>{code}</Text>
+            <Text style={{ fontSize: code.length > 2 ? 19 : 23, fontFamily: mono, fontWeight: '900', color: isComplete ? C.green : C.orange, letterSpacing: 1 }}>{code}</Text>
           ) : (
             <Ionicons name="earth-outline" size={22} color={C.text2} />
           )}
@@ -318,29 +334,18 @@ function ConusCard({
 
         <View style={{ flex: 1 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 3 }}>
-            <Text style={{ color: C.text, fontSize: 13, fontFamily: mono, fontWeight: '900' }}>{region.name.toUpperCase()}</Text>
+            <Text style={{ color: C.text, fontSize: 13, fontFamily: mono, fontWeight: '900' }}>{region.name}</Text>
             {isComplete && <StatusChip label="OFFLINE READY" color={C.green} />}
             {isActive   && <StatusChip label="DOWNLOADING"   color={C.orange} />}
             {isPaused   && <StatusChip label="PAUSED"        color={C.orange} />}
             {isError    && <StatusChip label="ERROR"         color={C.red} />}
           </View>
-          <Text style={{ color: C.text2, fontSize: 10, fontFamily: mono }}>{region.description}</Text>
+          <Text style={{ color: isComplete ? C.green : C.text3, fontSize: 10, fontFamily: mono, fontWeight: isComplete ? '700' : '500' }}>{sizeText}</Text>
           {state.details ? (
             <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 3 }} numberOfLines={2}>
               {state.details}
             </Text>
           ) : null}
-          <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
-            {isComplete ? (
-              <Text style={{ color: C.green, fontSize: 10, fontFamily: mono, fontWeight: '700' }}>
-                {fmtBytes(state.fileSizeMb * 1_048_576)} on device
-              </Text>
-            ) : (
-              <Text style={{ color: C.text3, fontSize: 10, fontFamily: mono }}>
-                {totalBytes > 0 ? fmtBytes(totalBytes) : `~${region.estimatedGb} GB`}
-              </Text>
-            )}
-          </View>
         </View>
 
         {/* Action buttons */}
@@ -758,7 +763,7 @@ export default function OfflineModal({
             <View style={s.headerAccent} />
             <View style={{ flex: 1 }}>
               <Text style={s.title}>OFFLINE DOWNLOADS</Text>
-              <Text style={s.subtitle}>Map, navigation, places, topo, and trails for no-signal travel</Text>
+              <Text style={s.subtitle}>Regional packs for no-signal travel</Text>
             </View>
             <TouchableOpacity onPress={onClose} style={s.closeBtn}>
               <Ionicons name="close" size={18} color={C.text3} />
@@ -1069,9 +1074,9 @@ export default function OfflineModal({
               {/* ══════════════════ REGIONS TAB ═════════════════════════ */}
               {activeTab === 'regions' && (
                 <>
-                  <Section label="REGIONS — MAP + NAVIGATION" />
+                  <Section label="REGIONS" />
                   <Text style={s.hint}>
-                    Pick a region, then download the map and navigation packs you need. Topo, trails, and places can be added when available.
+                    Pick a region, then download the packs you want for remote travel.
                   </Text>
 
                   <View style={s.featuredRegionRow}>
@@ -1081,6 +1086,7 @@ export default function OfflineModal({
                       const routeDone = getRoutingState(id).status === 'complete';
                       const contourDone = getContourState(id).status === 'complete';
                       const selected = selectedState === id;
+                      const code = regionCodeFor(id);
                       return (
                         <TouchableOpacity
                           key={id}
@@ -1088,13 +1094,15 @@ export default function OfflineModal({
                           style={[s.featuredRegionCard, selected && s.featuredRegionCardActive]}
                         >
                           <View style={s.featuredRegionIcon}>
-                            <Text style={[s.featuredRegionCode, selected && { color: C.orange }]}>{id === 'canada' ? 'CAN' : 'MEX'}</Text>
+                            <Text style={[s.featuredRegionCode, selected && { color: C.orange }]}>{code}</Text>
                           </View>
                           <View style={{ flex: 1 }}>
                             <Text style={s.featuredRegionTitle}>{region.name}</Text>
-                            <Text style={s.featuredRegionSub} numberOfLines={2}>{region.description}</Text>
+                            <Text style={s.featuredRegionSub} numberOfLines={1}>
+                              {mapDone && routeDone ? 'Saved on this device' : `~${region.estimatedGb} GB`}
+                            </Text>
                             <Text style={[s.featuredRegionStatus, mapDone && routeDone && { color: C.green }]}>
-                              {mapDone && routeDone ? `READY${contourDone ? ' · TOPO' : ''}` : `MAP ${mapDone ? 'ON' : 'OFF'} · NAV ${routeDone ? 'ON' : 'OFF'}`}
+                              {mapDone && routeDone ? `SAVED${contourDone ? ' · TOPO' : ''}` : 'DOWNLOAD'}
                             </Text>
                           </View>
                         </TouchableOpacity>
@@ -1147,7 +1155,7 @@ export default function OfflineModal({
                             const trailPublished = isTrailPublished(id);
                             const available = mapPublished && routePublished;
                             const selected = selectedState === id;
-                            const code = id === 'canada' ? 'CAN' : id === 'mexico' ? 'MEX' : id.toUpperCase();
+                            const code = regionCodeFor(id);
                             return (
                               <TouchableOpacity
                                 key={id}
@@ -1164,7 +1172,7 @@ export default function OfflineModal({
                                 </View>
                                 <Text style={s.statePickName} numberOfLines={1}>{region.name}</Text>
                                 <Text style={{ color: mapDone && routeDone ? C.green : C.text3, fontSize: 8, fontFamily: mono, marginTop: 4 }}>
-                                  {mapDone && routeDone ? 'Ready offline' : available ? 'Map + nav available' : 'Coming soon'}
+                                  {mapDone && routeDone ? 'Saved' : available ? `~${region.estimatedGb} GB` : 'Pending'}
                                 </Text>
                               </TouchableOpacity>
                             );
@@ -1192,7 +1200,7 @@ export default function OfflineModal({
                     const routeBusy = routingState.status === 'downloading' || routingState.status === 'paused';
                     const contourBusy = contourState.status === 'downloading' || contourState.status === 'paused';
                     const trailBusy = trailState.status === 'downloading' || trailState.status === 'paused';
-                    const selectedCode = selectedState === 'canada' ? 'CAN' : selectedState === 'mexico' ? 'MEX' : selectedState.toUpperCase();
+                    const selectedCode = regionCodeFor(selectedState);
                     const savedRegionPlacePacks = placePacks.filter(pack => pack.region_id === selectedState);
                     const savedRegionPlaceCount = savedRegionPlacePacks.reduce((sum, pack) => sum + (pack.point_count || 0), 0);
                     const waterPlacePackAvailable = currentManifestPlacePacks.some(([, entry]) => entry.pack_id === 'water');
@@ -1205,6 +1213,8 @@ export default function OfflineModal({
                     return (
                       <>
                         <StateReadinessPanel
+                          regionCode={selectedCode}
+                          regionName={mapRegion.name}
                           mapReady={mapState.status === 'complete'}
                           routeReady={routingState.status === 'complete'}
                           contourReady={contourState.status === 'complete'}
@@ -1242,7 +1252,7 @@ export default function OfflineModal({
                                   {mapRegion.name.toUpperCase()} DOWNLOADS ARE BEING PREPARED
                                 </Text>
                                 <Text style={{ color: C.text3, fontSize: 10, marginTop: 3, lineHeight: 14 }}>
-                                  Download buttons will appear as soon as this region is ready.
+                                Download buttons will appear as soon as this region is ready.
                                 </Text>
                               </View>
                             </View>
@@ -1546,10 +1556,10 @@ function makeStyles(C: ColorPalette) {
     },
     featuredRegionCardActive: { borderColor: C.orange, backgroundColor: C.orangeGlow },
     featuredRegionIcon: {
-      width: 42, height: 42, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
+      width: 58, height: 52, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
       borderWidth: 1, borderColor: C.orange + '45', backgroundColor: C.s2,
     },
-    featuredRegionCode: { color: C.text, fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
+    featuredRegionCode: { color: C.text, fontSize: 19, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
     featuredRegionTitle: { color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '900' },
     featuredRegionSub: { color: C.text3, fontSize: 9, fontFamily: mono, lineHeight: 13, marginTop: 3 },
     featuredRegionStatus: { color: C.text3, fontSize: 8, fontFamily: mono, fontWeight: '900', marginTop: 6 },
@@ -1574,7 +1584,7 @@ function makeStyles(C: ColorPalette) {
       borderRadius: 8, borderWidth: 1, borderColor: C.border, backgroundColor: C.s1,
     },
     statePickTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6 },
-    statePickCode: { color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
+    statePickCode: { color: C.text, fontSize: 20, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
     statePickName: { color: C.text2, fontSize: 9, fontFamily: mono, marginTop: 2 },
     contourPlannedCard: {
       flexDirection: 'row', gap: 12, padding: 14,

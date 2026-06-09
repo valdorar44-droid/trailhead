@@ -1,0 +1,7 @@
+{
+  "platforms": ["ios"],
+  "ios": {
+    "podspecPath": "MapboxStandardInteractions.podspec",
+    "modules": ["TrailheadMapboxStandardInteractions"]
+  }
+}

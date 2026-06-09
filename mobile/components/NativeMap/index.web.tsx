@@ -11,8 +11,21 @@ import type { PremiumMapStyle } from './mapStyle';
 
 export type { WP, RouteOpts, MapBounds, RouteResult, RouteStep } from './types';
 
+export type NativeMapCameraOptions = {
+  lat: number;
+  lng: number;
+  zoom?: number;
+  pitch?: number;
+  bearing?: number;
+  duration?: number;
+  mode?: 'flyTo' | 'easeTo' | string;
+};
+
 export interface NativeMapHandle {
   flyTo:          (lat: number, lng: number, zoom?: number, name?: string) => void;
+  flyToCamera:    (options: NativeMapCameraOptions) => void;
+  setZoom:        (zoom: number, focus?: { lat?: number; lng?: number } | null) => Promise<number | null>;
+  zoomBy:         (delta: number, focus?: { lat?: number; lng?: number } | null) => Promise<number | null>;
   locate:         (lat: number, lng: number) => void;
   loadRouteFrom:  (lat: number, lng: number, fromIdx: number) => void;
   rerouteFrom:    (lat: number, lng: number, fromIdx: number) => void;
@@ -192,6 +205,11 @@ function currentBounds(map: any): MapBounds {
   const sw = bounds.getSouthWest();
   const ne = bounds.getNorthEast();
   return { w: sw.lng, s: sw.lat, e: ne.lng, n: ne.lat, zoom: map.getZoom?.() ?? 0 };
+}
+
+function clampMapZoom(value: number, fallback = 11) {
+  const zoom = Number.isFinite(Number(value)) ? Number(value) : fallback;
+  return Math.max(3, Math.min(18, zoom));
 }
 
 function syncWebRoute(map: any, waypoints: WP[]) {
@@ -397,6 +415,46 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
 
   useImperativeHandle(ref, () => ({
     flyTo: (lat: number, lng: number, zoom = 11) => mapRef.current?.flyTo?.({ center: [lng, lat], zoom, essential: true }),
+    flyToCamera: (options: NativeMapCameraOptions) => {
+      const map = mapRef.current;
+      const lat = Number(options.lat);
+      const lng = Number(options.lng);
+      if (!map || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      const camera: Record<string, any> = {
+        center: [lng, lat],
+        duration: Number.isFinite(Number(options.duration)) ? Number(options.duration) : 520,
+        essential: true,
+      };
+      if (Number.isFinite(Number(options.zoom))) camera.zoom = clampMapZoom(Number(options.zoom));
+      if (Number.isFinite(Number(options.pitch))) camera.pitch = Math.max(0, Math.min(75, Number(options.pitch)));
+      if (Number.isFinite(Number(options.bearing))) camera.bearing = Number(options.bearing);
+      if (options.mode === 'easeTo' && map.easeTo) map.easeTo(camera);
+      else map.flyTo?.(camera);
+    },
+    setZoom: async (zoom: number, focus?: { lat?: number; lng?: number } | null) => {
+      const map = mapRef.current;
+      if (!map) return null;
+      const nextZoom = clampMapZoom(zoom);
+      const lat = Number(focus?.lat);
+      const lng = Number(focus?.lng);
+      const center = Number.isFinite(lat) && Number.isFinite(lng) ? [lng, lat] : undefined;
+      if (map.easeTo) map.easeTo({ ...(center ? { center } : {}), zoom: nextZoom, duration: 240, essential: true });
+      else map.setZoom?.(nextZoom);
+      return nextZoom;
+    },
+    zoomBy: async (delta: number, focus?: { lat?: number; lng?: number } | null) => {
+      const map = mapRef.current;
+      if (!map) return null;
+      const current = Number(map.getZoom?.());
+      const base = Number.isFinite(current) ? current : 11;
+      const nextZoom = clampMapZoom(base + (Number.isFinite(Number(delta)) ? Number(delta) : 1));
+      const lat = Number(focus?.lat);
+      const lng = Number(focus?.lng);
+      const center = Number.isFinite(lat) && Number.isFinite(lng) ? [lng, lat] : undefined;
+      if (map.easeTo) map.easeTo({ ...(center ? { center } : {}), zoom: nextZoom, duration: 240, essential: true });
+      else map.setZoom?.(nextZoom);
+      return nextZoom;
+    },
     locate: (lat: number, lng: number) => mapRef.current?.flyTo?.({ center: [lng, lat], zoom: 13, essential: true }),
     loadRouteFrom: noop,
     rerouteFrom: noop,

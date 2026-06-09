@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Image,
   Modal,
@@ -36,14 +36,29 @@ export default function TrailheadPhotoGallery({ visible, photos, initialIndex = 
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const scrollRef = useRef<ScrollView | null>(null);
-  const safePhotos = photos.filter(photo => !!photo.url);
+  const safePhotos = useMemo(() => photos.filter(photo => !!photo.url), [photos]);
   const startIndex = Math.max(0, Math.min(initialIndex, Math.max(safePhotos.length - 1, 0)));
   const [index, setIndex] = useState(startIndex);
   const active = safePhotos[index];
 
+  useEffect(() => {
+    if (!visible) return;
+    setIndex(startIndex);
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo({ x: startIndex * width, animated: false });
+    });
+  }, [startIndex, visible, width]);
+
   const handleMomentumEnd = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const next = Math.round(event.nativeEvent.contentOffset.x / Math.max(width, 1));
     setIndex(Math.max(0, Math.min(next, safePhotos.length - 1)));
+  };
+
+  const goTo = (nextIndex: number) => {
+    if (!safePhotos.length) return;
+    const normalized = (nextIndex + safePhotos.length) % safePhotos.length;
+    setIndex(normalized);
+    scrollRef.current?.scrollTo({ x: normalized * width, animated: true });
   };
 
   if (!visible || !safePhotos.length) return null;
@@ -75,6 +90,16 @@ export default function TrailheadPhotoGallery({ visible, photos, initialIndex = 
             </View>
           ))}
         </ScrollView>
+        {safePhotos.length > 1 ? (
+          <>
+            <TouchableOpacity style={[s.arrowBtn, s.arrowLeft]} onPress={() => goTo(index - 1)} activeOpacity={0.82}>
+              <Ionicons name="chevron-back" size={24} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity style={[s.arrowBtn, s.arrowRight]} onPress={() => goTo(index + 1)} activeOpacity={0.82}>
+              <Ionicons name="chevron-forward" size={24} color="#fff" />
+            </TouchableOpacity>
+          </>
+        ) : null}
         <View style={[s.footer, { paddingBottom: Math.max(insets.bottom + 10, 22) }]}>
           <Text style={s.caption} numberOfLines={2}>
             {[active?.caption, active?.credit ? `Photo: ${active.credit}` : '', active?.source].filter(Boolean).join(' · ')}
@@ -116,6 +141,21 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   scroller: { flex: 1 },
   slide: { alignItems: 'center', justifyContent: 'center' },
   image: { width: '100%', height: '100%' },
+  arrowBtn: {
+    position: 'absolute',
+    top: '47%',
+    zIndex: 3,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.42)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+  },
+  arrowLeft: { left: 14 },
+  arrowRight: { right: 14 },
   footer: {
     position: 'absolute',
     left: 0,

@@ -12,6 +12,7 @@ import React, {
   useMemo, useRef, useState,
 } from 'react';
 import { Dimensions, PanResponder, TouchableOpacity, View, StyleSheet, Text } from 'react-native';
+import { EventEmitter, requireNativeModule } from 'expo-modules-core';
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import MapboxGL from '@rnmapbox/maps';
 import { Ionicons } from '@expo/vector-icons';
@@ -37,6 +38,17 @@ type TileServerModule = typeof import('expo-tile-server');
 let tileServer: TileServerModule | null = null;
 let tileServerRequireError = '';
 try { tileServer = require('expo-tile-server'); } catch (e: any) { tileServerRequireError = e?.message ?? 'require failed'; }
+
+type MapboxStandardInteractionsModule = {
+  enable?: () => Promise<boolean>;
+  disable?: () => Promise<boolean>;
+};
+let mapboxStandardInteractions: MapboxStandardInteractionsModule | null = null;
+let mapboxStandardInteractionEvents: any = null;
+try {
+  mapboxStandardInteractions = requireNativeModule<MapboxStandardInteractionsModule>('TrailheadMapboxStandardInteractions');
+  mapboxStandardInteractionEvents = new EventEmitter(mapboxStandardInteractions as any);
+} catch {}
 
 const TILE_BASE_URL = 'https://tiles.gettrailhead.app';
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
@@ -80,8 +92,21 @@ const MAPBOX_LIGHT_PRESETS: Partial<Record<PremiumMapStyle, 'dawn' | 'day' | 'du
 // ── Types ─────────────────────────────────────────────────────────────────────
 export type { WP, RouteOpts, MapBounds, RouteResult, RouteStep } from './types';
 
+export type NativeMapCameraOptions = {
+  lat: number;
+  lng: number;
+  zoom?: number;
+  pitch?: number;
+  bearing?: number;
+  duration?: number;
+  mode?: 'flyTo' | 'easeTo' | string;
+};
+
 export interface NativeMapHandle {
   flyTo:          (lat: number, lng: number, zoom?: number, name?: string) => void;
+  flyToCamera:    (options: NativeMapCameraOptions) => void;
+  setZoom:        (zoom: number, focus?: { lat?: number; lng?: number } | null) => Promise<number | null>;
+  zoomBy:         (delta: number, focus?: { lat?: number; lng?: number } | null) => Promise<number | null>;
   locate:         (lat: number, lng: number) => void;
   loadRouteFrom:  (lat: number, lng: number, fromIdx: number) => void;
   loadRouteSegmentFrom: (lat: number, lng: number, fromIdx: number, toIdx: number) => void;
@@ -648,6 +673,12 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
 
   const mapRef = useRef<any>(null);
   const camRef = useRef<any>(null);
+  const lastNativeStandardTapRef = useRef<{ at: number; lat: number; lng: number } | null>(null);
+  const onPoiTapRef = useRef(onPoiTap);
+
+  useEffect(() => {
+    onPoiTapRef.current = onPoiTap;
+  }, [onPoiTap]);
 
   // ── Overlay data ──────────────────────────────────────────────────────────────
   const [fireData,   setFireData]   = useState<GeoJSON.FeatureCollection | null>(null);
@@ -1096,6 +1127,38 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   }, [mapboxToken]);
 
   useEffect(() => {
+    if (!isExtremeMapbox || !mapboxStandardInteractions?.enable || !mapboxStandardInteractionEvents) return;
+    let mounted = true;
+    let attempts = 0;
+    let retry: ReturnType<typeof setTimeout> | null = null;
+    const sub = mapboxStandardInteractionEvents.addListener('onStandardFeatureTap', (event: any) => {
+      if (!mounted) return;
+      const poi = mapboxStandardFeatureEventToPoi(event);
+      if (poi) {
+        lastNativeStandardTapRef.current = { at: Date.now(), lat: poi.lat, lng: poi.lng };
+        onPoiTapRef.current?.(poi);
+      }
+    });
+    const enable = () => {
+      attempts += 1;
+      mapboxStandardInteractions?.enable?.()
+        .then(ok => {
+          if (!ok && mounted && attempts < 6) retry = setTimeout(enable, 350);
+        })
+        .catch(() => {
+          if (mounted && attempts < 6) retry = setTimeout(enable, 350);
+        });
+    };
+    enable();
+    return () => {
+      mounted = false;
+      if (retry) clearTimeout(retry);
+      sub.remove();
+      mapboxStandardInteractions?.disable?.().catch(() => {});
+    };
+  }, [isExtremeMapbox]);
+
+  useEffect(() => {
     if (navMode) return;
     lastCamRef.current = Date.now();
     camRef.current?.setCamera({
@@ -1111,6 +1174,52 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       lastFlyToRef.current = Date.now();
       lastCamRef.current = Date.now();
       camRef.current?.setCamera({ centerCoordinate: [lng, lat], zoomLevel: zoom, animationDuration: 250, animationMode: 'flyTo' });
+    },
+    flyToCamera(options) {
+      const lat = Number(options.lat);
+      const lng = Number(options.lng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      lastFlyToRef.current = Date.now();
+      lastCamRef.current = Date.now();
+      camRef.current?.setCamera({
+        centerCoordinate: [lng, lat],
+        ...(Number.isFinite(Number(options.zoom)) ? { zoomLevel: clampMapZoom(Number(options.zoom), 14) } : {}),
+        ...(Number.isFinite(Number(options.pitch)) ? { pitch: Math.max(0, Math.min(75, Number(options.pitch))) } : {}),
+        ...(Number.isFinite(Number(options.bearing)) ? { heading: Number(options.bearing) } : {}),
+        animationDuration: Number.isFinite(Number(options.duration)) ? Number(options.duration) : 520,
+        animationMode: options.mode || 'flyTo',
+      } as any);
+    },
+    async setZoom(zoom, focus) {
+      const nextZoom = clampMapZoom(Number(zoom), 12);
+      const lat = Number(focus?.lat);
+      const lng = Number(focus?.lng);
+      const hasFocus = Number.isFinite(lat) && Number.isFinite(lng);
+      lastCamRef.current = Date.now();
+      camRef.current?.setCamera({
+        ...(hasFocus ? { centerCoordinate: [lng, lat] } : {}),
+        zoomLevel: nextZoom,
+        animationDuration: 240,
+        animationMode: 'easeTo',
+      } as any);
+      return nextZoom;
+    },
+    async zoomBy(delta, focus) {
+      if (!mapRef.current) return null;
+      const current = await mapRef.current.getZoom().catch(() => null);
+      const base = Number.isFinite(Number(current)) ? Number(current) : 12;
+      const nextZoom = clampMapZoom(base + (Number.isFinite(Number(delta)) ? Number(delta) : 1), base);
+      const lat = Number(focus?.lat);
+      const lng = Number(focus?.lng);
+      const hasFocus = Number.isFinite(lat) && Number.isFinite(lng);
+      lastCamRef.current = Date.now();
+      camRef.current?.setCamera({
+        ...(hasFocus ? { centerCoordinate: [lng, lat] } : {}),
+        zoomLevel: nextZoom,
+        animationDuration: 240,
+        animationMode: 'easeTo',
+      } as any);
+      return nextZoom;
     },
     locate(lat, lng) {
       lastFlyToRef.current = Date.now();
@@ -1655,6 +1764,11 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     const lngLat = await coordinateFromPress(feat);
     if (lngLat && mapRef.current) {
       const [lng, lat] = lngLat;
+      const nativeTap = lastNativeStandardTapRef.current;
+      if (nativeTap && Date.now() - nativeTap.at < 2500) {
+        const distanceMiles = haversineMiles(lat, lng, nativeTap.lat, nativeTap.lng);
+        if (Number.isFinite(distanceMiles) && distanceMiles < 0.08) return;
+      }
       try {
         const point = eventScreenPoint(feat);
         const pressPoint = point ?? await mapRef.current.getPointInView([lng, lat]);
@@ -2816,15 +2930,18 @@ function mapMapboxFeatureToPoi(feature: any, fallbackLat: number, fallbackLng: n
     lng,
     type,
     subtype: subtype || 'mapbox place',
-    source: 'mapbox_feature',
-    source_label: 'Mapbox',
+    source: 'rendered_mapbox_standard',
+    selection_source: 'rendered_mapbox_standard',
+    source_label: 'Mapbox Standard',
     source_layer: layerId,
+    feature_id: props.mapbox_id || props.id || feature?.id,
     provider_place_id: props.mapbox_id || props.id,
     place_id: props.mapbox_id || props.id,
+    mapbox_id: props.mapbox_id || props.id || feature?.id,
     attribution: 'Mapbox',
     source_badge: 'Mapbox basemap',
-    source_freshness: 'Temporary Mapbox basemap feature. Save only if you want to create a Trailhead-owned place.',
-    summary: `${subtype || 'Place'} selected from the EXTREME Mapbox basemap.`,
+    enrichment_source: 'mapbox_standard',
+    enrichment_status: 'pending',
     raw_feature: {
       id: feature?.id,
       layer: feature?.layer,
@@ -2859,12 +2976,12 @@ function renderedQueryRectAroundPoint(x: number, y: number, radius: number): [nu
   const px = Number(x);
   const py = Number(y);
   const r = Math.max(1, Number(radius) || 1);
-  // RNMapbox expects a screen-space rectangle as [x, y, width, height].
-  return [px - r, py - r, r * 2, r * 2];
+  // RNMapbox iOS expects a screen-space rectangle as [top, right, bottom, left].
+  return [py - r, px + r, py + r, px - r];
 }
 
 function renderedQueryViewportRect(screen = Dimensions.get('window')): [number, number, number, number] {
-  return [0, 0, Math.max(1, Number(screen.width) || 1), Math.max(1, Number(screen.height) || 1)];
+  return [0, Math.max(1, Number(screen.width) || 1), Math.max(1, Number(screen.height) || 1), 0];
 }
 
 function selectableFeatureFromPoi(poi: OsmPoi, resultIndex: number, sourceLayer?: string | null, center?: { lat: number; lng: number } | null): MapSelectableFeature | null {
@@ -2891,7 +3008,7 @@ function selectableFeatureFromPoi(poi: OsmPoi, resultIndex: number, sourceLayer?
     source_label: poi.source_label || poi.source_badge || 'Rendered map',
     source_layer: sourceLayer || (poi as any).source_layer || null,
     distance_mi: center ? haversineMiles(center.lat, center.lng, lat, lng) : null,
-    confidence: poi.source === 'mapbox_feature' || poi.source === 'rendered_map' ? 'medium' : 'high',
+    confidence: poi.source === 'rendered_mapbox_standard' || poi.source === 'mapbox_feature' || poi.source === 'rendered_map' ? 'medium' : 'high',
     aliases: [name, poi.subtype, poi.source_label, poi.source_badge].filter((item): item is string => !!item),
     address: poi.address || null,
     rating: poi.rating ?? null,
@@ -2939,12 +3056,65 @@ function normalizeRenderedFeatureList(features: any[] | undefined, center?: { la
   return out.map((feature, idx) => ({ ...feature, result_index: idx }));
 }
 
+function mapboxStandardFeatureEventToPoi(event: any): OsmPoi | null {
+  const lat = Number(event?.lat);
+  const lng = Number(event?.lng);
+  const name = String(event?.name || '').trim();
+  if (!name || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  const raw = event?.properties && typeof event.properties === 'object' ? event.properties : {};
+  const type = mapboxPlaceType({
+    ...raw,
+    maki: event?.maki,
+    category: event?.category,
+    class: event?.class,
+    group: event?.group,
+    feature_type: event?.featureset,
+  });
+  const providerId = String(event?.mapbox_id || event?.feature_id || '').trim();
+  const subtype = String(event?.maki || event?.category || event?.class || event?.group || event?.featureset || '').replace(/[_-]+/g, ' ').trim();
+  return {
+    id: `mapbox_standard:${String(providerId || `${lat.toFixed(5)}:${lng.toFixed(5)}:${name}`).slice(0, 160)}`,
+    name,
+    lat,
+    lng,
+    type,
+    subtype: subtype || 'mapbox standard feature',
+    source: 'rendered_mapbox_standard',
+    selection_source: 'rendered_mapbox_standard',
+    source_label: 'Mapbox Standard',
+    source_layer: event?.featureset || null,
+    feature_id: providerId || null,
+    provider_place_id: providerId || null,
+    place_id: providerId || null,
+    screen_x: Number.isFinite(Number(event?.screen_x)) ? Number(event.screen_x) : null,
+    screen_y: Number.isFinite(Number(event?.screen_y)) ? Number(event.screen_y) : null,
+    screen_position: event?.screen_position || null,
+    selection_confidence: event?.selection_confidence || 'high',
+    attribution: 'Mapbox',
+    source_badge: 'Mapbox basemap',
+    mapbox_id: providerId || null,
+    enrichment_source: 'mapbox_standard',
+    enrichment_status: 'pending',
+    raw_feature: {
+      id: providerId || null,
+      source: 'mapbox_standard_feature',
+      properties: raw,
+      event,
+    },
+  } as OsmPoi;
+}
+
 function haversineMiles(lat1: number, lng1: number, lat2: number, lng2: number) {
   const R = 3958.8;
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLng = (lng2 - lng1) * Math.PI / 180;
   const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function clampMapZoom(value: number, fallback = 12) {
+  const zoom = Number.isFinite(value) ? value : fallback;
+  return Math.max(3, Math.min(18, zoom));
 }
 
 function waterKindLabel(kind?: string): string {

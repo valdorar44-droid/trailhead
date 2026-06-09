@@ -20,10 +20,26 @@ scripts/build_valhalla_artifact.sh \
   --label us-full
 ```
 
+For a smaller West-expanded service, build one combined graph from the western
+state extracts instead of deploying separate per-state tar files:
+
+```bash
+scripts/build_valhalla_artifact.sh \
+  --workdir /mnt/nvme/valhalla-west-expanded \
+  --states CA,NV,UT,AZ,NM,CO,WY,MT,ID,OR,WA \
+  --label west-expanded
+```
+
 The output is:
 
 ```text
 /mnt/nvme/valhalla-us/us-full-valhalla.tar.zst
+```
+
+For the West-expanded example, the output is:
+
+```text
+/mnt/nvme/valhalla-west-expanded/west-expanded-valhalla.tar.zst
 ```
 
 ## Upload To R2
@@ -41,6 +57,15 @@ python3 scripts/publish_valhalla_artifact.py \
   --artifact /mnt/nvme/valhalla-us/us-full-valhalla.tar.zst \
   --key routing/valhalla/us-full.tar.zst \
   --label us-full
+```
+
+For West-expanded:
+
+```bash
+python3 scripts/publish_valhalla_artifact.py \
+  --artifact /mnt/nvme/valhalla-west-expanded/west-expanded-valhalla.tar.zst \
+  --key routing/valhalla/west-expanded.tar.zst \
+  --label west-expanded
 ```
 
 This updates:
@@ -67,6 +92,9 @@ VALHALLA_ARTIFACT_KEY=routing/valhalla/us-full.tar.zst
 VALHALLA_DATA_DIR=/custom_files
 ```
 
+Use `VALHALLA_ARTIFACT_KEY=routing/valhalla/west-expanded.tar.zst` for the
+West-expanded service.
+
 Optional integrity variable from the upload output:
 
 ```text
@@ -92,6 +120,13 @@ Route probes:
 
 - Moab -> Big Sur
 - Denver -> Moab
+- Seattle -> Spokane
+- Portland -> Eugene
+- Seattle -> Boise
+- Boise -> Missoula
+- Salt Lake City -> Denver
+- Phoenix -> Albuquerque
+- Cheyenne -> Denver
 - NYC -> Asheville
 
 After the direct staging probes pass, switch API `VALHALLA_URL` to the staging
@@ -99,5 +134,6 @@ service private URL and verify:
 
 ```bash
 curl -s https://api.gettrailhead.app/api/route/health
+curl -s https://api.gettrailhead.app/api/admin/routing-coverage-diagnostic
 cd mobile && npm run audit:routes
 ```

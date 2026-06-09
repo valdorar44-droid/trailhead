@@ -5,17 +5,32 @@ export const TRAILHEAD_COPILOT_ROUTE_BUILDER_DRAFT_KEY = 'trailhead_copilot_rout
 
 export type CopilotCampPreference = 'public' | 'private' | 'rv' | 'developed' | 'any';
 
+export type TrailheadRouteBuilderDraftStop = {
+  id?: string;
+  day?: number;
+  name: string;
+  lat?: number;
+  lng?: number;
+  type?: 'start' | 'fuel' | 'waypoint' | 'camp' | 'motel' | string;
+  routePointType?: 'side_stop' | 'break' | 'through';
+  routeShapeRole?: 'start' | 'destination' | 'outbound_anchor' | 'return_anchor' | 'overnight' | 'side_stop';
+  label?: string;
+  description?: string;
+  source?: string;
+};
+
 export type TrailheadRouteBuilderDraft = {
   id?: string;
   source?: 'copilot' | 'manual' | string;
   updatedAt?: number;
   start?: string;
   destination?: string;
-  stops?: string[];
+  stops?: Array<string | TrailheadRouteBuilderDraftStop>;
   days?: number;
   tripShape?: TripShapeMode;
   routeStyle?: RouteStyleMode;
   campPreference?: CopilotCampPreference;
+  campPhotoOnly?: boolean;
   campReuse?: CampReusePolicy;
   driveHours?: number;
   targetMiles?: number;
@@ -35,6 +50,36 @@ export const TRAILHEAD_COPILOT_CAPABILITY_SUMMARY = [
   'Guide, reports, offline downloads, rig profile, paid trip outputs, weather, safety, water, and community pins are first-class workflows.',
 ];
 
+function cleanDraftStop(value: unknown): string | TrailheadRouteBuilderDraftStop | null {
+  if (typeof value === 'string') {
+    const stop = value.trim();
+    return stop ? stop.slice(0, 160) : null;
+  }
+  if (!value || typeof value !== 'object') return null;
+  const input = value as Record<string, unknown>;
+  const name = typeof input.name === 'string' ? input.name.trim().slice(0, 160) : '';
+  if (!name) return null;
+  const lat = Number(input.lat);
+  const lng = Number(input.lng);
+  const day = Number(input.day);
+  const stop: TrailheadRouteBuilderDraftStop = {
+    id: typeof input.id === 'string' ? input.id.slice(0, 120) : undefined,
+    day: Number.isFinite(day) ? Math.max(0, Math.min(30, Math.round(day))) : undefined,
+    name,
+    type: typeof input.type === 'string' ? input.type.slice(0, 40) : undefined,
+    routePointType: input.routePointType === 'side_stop' || input.routePointType === 'through' || input.routePointType === 'break' ? input.routePointType : undefined,
+    routeShapeRole: input.routeShapeRole === 'start' || input.routeShapeRole === 'destination' || input.routeShapeRole === 'outbound_anchor' || input.routeShapeRole === 'return_anchor' || input.routeShapeRole === 'overnight' || input.routeShapeRole === 'side_stop' ? input.routeShapeRole : undefined,
+    label: typeof input.label === 'string' ? input.label.slice(0, 80) : undefined,
+    description: typeof input.description === 'string' ? input.description.slice(0, 240) : undefined,
+    source: typeof input.source === 'string' ? input.source.slice(0, 80) : undefined,
+  };
+  if (Number.isFinite(lat) && Number.isFinite(lng)) {
+    stop.lat = lat;
+    stop.lng = lng;
+  }
+  return stop;
+}
+
 function cleanDraft(value: unknown): TrailheadRouteBuilderDraft {
   const input = value && typeof value === 'object' ? value as Record<string, unknown> : {};
   const days = Number(input.days);
@@ -52,11 +97,12 @@ function cleanDraft(value: unknown): TrailheadRouteBuilderDraft {
     updatedAt: Number.isFinite(Number(input.updatedAt)) ? Number(input.updatedAt) : Date.now(),
     start: typeof input.start === 'string' ? input.start.trim().slice(0, 120) : undefined,
     destination: typeof input.destination === 'string' ? input.destination.trim().slice(0, 120) : undefined,
-    stops: Array.isArray(input.stops) ? input.stops.map(String).map(s => s.trim()).filter(Boolean).slice(0, 12) : undefined,
+    stops: Array.isArray(input.stops) ? input.stops.map(cleanDraftStop).filter((stop): stop is string | TrailheadRouteBuilderDraftStop => !!stop).slice(0, 24) : undefined,
     days: Number.isFinite(days) ? Math.max(1, Math.min(30, Math.round(days))) : undefined,
     tripShape,
     routeStyle,
     campPreference,
+    campPhotoOnly: input.campPhotoOnly === true || input.requirePhotos === true || input.require_photos === true || input.photosOnly === true,
     campReuse,
     driveHours: Number.isFinite(driveHours) ? Math.max(1, Math.min(14, driveHours)) : undefined,
     targetMiles: Number.isFinite(targetMiles) ? Math.max(20, Math.min(700, Math.round(targetMiles))) : undefined,

@@ -44,9 +44,10 @@ export type TrailheadRouteBuilderDraft = {
 };
 
 export const TRAILHEAD_COPILOT_CAPABILITY_SUMMARY = [
-  'Map can search, fly, select cards, preview routes, toggle layers, change style, show radar, public lands, topo, satellite, nautical, pins, camps, trails, and places.',
+  'Map can search, fly, select cards, preview routes, toggle layers, change style, show radar, public lands, topo, satellite, nautical, pins, camps, group sites, trails, and places.',
   'Navigation only starts through startNavigation after explicit confirmation and a usable current location.',
-  'Route Builder handles multi-day trip drafts with start, destination, stops, days, shape, route style, camp preference, camp reuse, drive hours, target miles, rest days, and rig constraints.',
+  'Route Builder handles multi-day trip drafts with start, destination, stops, days, shape, route style, camp preference, camp reuse, drive hours, target miles, rest days, rig constraints, official camp details, group-site fit, nearby things to do, nearby campgrounds, and trip services.',
+  'Recreation.gov/RIDB permits, tours, tickets, lotteries, and campsite bookings are assisted official handoffs; Trailhead can open, remind, and plan around them, but does not checkout or enter lotteries directly.',
   'Guide, reports, offline downloads, rig profile, paid trip outputs, weather, safety, water, and community pins are first-class workflows.',
 ];
 

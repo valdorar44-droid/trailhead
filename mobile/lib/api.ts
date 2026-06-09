@@ -306,8 +306,16 @@ export const api = {
       30 * 60_000,
       () => req<FuelEstimate>(`/api/fuel/estimate?miles=${encodeURIComponent(String(Math.max(0, miles)))}&mpg=${encodeURIComponent(String(Math.max(1, mpg)))}&states=${encodeURIComponent(states.join(','))}&unit=${encodeURIComponent(unit === 'metric' ? 'metric' : 'imperial')}`),
     ),
-  getCampsiteDetail: (id: string) =>
-    req<CampsiteDetail>(`/api/campsites/${encodeURIComponent(id)}/detail`),
+  getCampsiteDetail: (id: string) => {
+    const raw = String(id || '');
+    if (raw.startsWith('ridb_site:')) {
+      const [, facilityId, campsiteId] = raw.split(':');
+      if (facilityId && campsiteId) {
+        return req<CampsiteDetail>(`/api/campsites/${encodeURIComponent(facilityId)}/sites/${encodeURIComponent(campsiteId)}/detail`);
+      }
+    }
+    return req<CampsiteDetail>(`/api/campsites/${encodeURIComponent(id)}/detail`);
+  },
   suggestCampsiteEdit: (id: string, data: CampEditSuggestionPayload) =>
     req<{ id: number; status: string; credits_earned: number; new_balance: number }>(`/api/campsites/${encodeURIComponent(id)}/suggest-edit`, {
       method: 'POST', body: JSON.stringify(data),
@@ -1351,6 +1359,7 @@ export interface CampsiteDetail extends CampsitePin {
   activities: string[]; phone?: string; campsites_count: number;
   campsites?: Array<{
     id?: string; name?: string; type?: string; loop?: string;
+    map_card_id?: string; facility_id?: string; lat?: number | null; lng?: number | null;
     max_people?: string; equipment_length?: string; driveway?: string; surface?: string;
     accessible?: boolean; shade?: boolean; fire?: boolean; pets?: boolean; hookups?: boolean;
     check_in?: string; check_out?: string; reserve_type?: string;
@@ -1359,6 +1368,17 @@ export interface CampsiteDetail extends CampsitePin {
   }>;
   site_media_count?: number;
   photo_fallback_chain?: string[];
+  price_summary?: {
+    label?: string; min?: number; median?: number | null; max?: number;
+    sample_count?: number; last_year?: number | null; source?: string; freshness?: string;
+  };
+  things_to_do?: NearbySmartPlace[];
+  campgrounds_nearby?: NearbySmartPlace[];
+  trip_services?: NearbySmartPlace[];
+  permits?: NearbySmartPlace[];
+  tours?: NearbySmartPlace[];
+  events?: NearbySmartPlace[];
+  links?: Array<{ title?: string; type?: string; description?: string; url?: string; source_badge?: string }>;
   admin_edited?: boolean;
   access_notes?: string;
   bail_out_notes?: string;
@@ -1967,6 +1987,9 @@ export interface MapCardResolveResponse {
   related?: {
     places?: NearbySmartPlace[];
     camps?: NearbySmartPlace[];
+    things_to_do?: NearbySmartPlace[];
+    campgrounds_nearby?: NearbySmartPlace[];
+    trip_services?: NearbySmartPlace[];
     trails?: TrailProfile[];
   };
   partial?: boolean;

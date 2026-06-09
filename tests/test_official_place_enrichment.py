@@ -26,6 +26,21 @@ class OfficialPlaceEnrichmentTests(unittest.TestCase):
         self.assertTrue(server._is_official_free_place({"source": "wikipedia", "source_label": "Wikipedia"}))
         self.assertFalse(server._is_official_free_place({"source": "google", "source_label": "Google Places"}))
 
+    def test_related_rails_keep_dumps_out_of_things_to_do(self):
+        places = [
+            {"id": "view-1", "name": "Canyon Overlook", "lat": 38.0, "lng": -109.0, "type": "viewpoint"},
+            {"id": "dump-1", "name": "Dump Station", "lat": 38.0, "lng": -109.0, "type": "dump"},
+            {"id": "camp-1", "name": "Nearby Camp", "lat": 38.0, "lng": -109.0, "type": "camp"},
+        ]
+
+        rails = server._related_rails_from_places(places, [], None)
+
+        self.assertEqual([p["name"] for p in rails["things_to_do"]], ["Canyon Overlook"])
+        self.assertEqual([p["name"] for p in rails["trip_services"]], ["Dump Station"])
+        self.assertEqual([p["name"] for p in rails["campgrounds_nearby"]], ["Nearby Camp"])
+        self.assertEqual(rails["places"], rails["things_to_do"])
+        self.assertEqual(rails["camps"], rails["campgrounds_nearby"])
+
 
 class OfficialPlaceEndpointTests(unittest.IsolatedAsyncioTestCase):
     async def test_nearby_places_returns_official_explore_category_without_unlock(self):

@@ -6645,6 +6645,47 @@ async def campsite_detail(facility_id: str):
         detail = {**detail, **override, "admin_edited": True}
     return detail
 
+@app.get("/api/campsites/{facility_id}/sites/{campsite_id}/detail")
+async def campsite_site_detail(facility_id: str, campsite_id: str):
+    detail = await get_facility_detail(facility_id)
+    if not detail:
+        raise HTTPException(status_code=404, detail="Facility not found")
+    site = next(
+        (
+            item for item in (detail.get("campsites") or [])
+            if str(item.get("id") or "") == str(campsite_id)
+            or str(item.get("map_card_id") or "") == f"ridb_site:{facility_id}:{campsite_id}"
+        ),
+        None,
+    )
+    if not site:
+        raise HTTPException(status_code=404, detail="Campsite not found")
+    photos = site.get("photos") or detail.get("photos") or []
+    return {
+        **site,
+        "id": f"ridb_site:{facility_id}:{campsite_id}",
+        "facility_id": str(facility_id),
+        "campsite_id": str(campsite_id),
+        "parent_campground": {
+            "id": str(facility_id),
+            "name": detail.get("name"),
+            "lat": detail.get("lat"),
+            "lng": detail.get("lng"),
+            "official_url": detail.get("official_url"),
+            "booking_url": detail.get("booking_url"),
+        },
+        "lat": site.get("lat") if site.get("lat") is not None else detail.get("lat"),
+        "lng": site.get("lng") if site.get("lng") is not None else detail.get("lng"),
+        "photos": photos,
+        "photo_url": site.get("photo_url") or (photos[0] if photos else detail.get("photo_url")),
+        "source": "ridb",
+        "verified_source": "Recreation.gov",
+        "source_badge": "Official Recreation.gov",
+        "reservation_notes": "Trailhead links to the official Recreation.gov campground page. Checkout stays on Recreation.gov.",
+        "booking_url": detail.get("booking_url"),
+        "official_url": detail.get("official_url"),
+    }
+
 class CampEditSuggestionPayload(BaseModel):
     camp_name: str
     lat: float
@@ -11335,6 +11376,8 @@ def _map_card_search_text(body: MapCardResolveRequest, card: dict | None = None)
 
 
 def _map_card_is_overnight(body: MapCardResolveRequest, card: dict | None = None) -> bool:
+    if str(body.id or "").startswith("ridb_site:"):
+        return True
     typed = {
         _smart_pack_type(value)
         for value in (
@@ -11427,6 +11470,55 @@ def _map_card_camp_match_score(body: MapCardResolveRequest, camp: dict) -> float
 async def _resolve_map_card_overnight(body: MapCardResolveRequest, card: dict) -> tuple[dict | None, dict | None]:
     if not _map_card_is_overnight(body, card):
         return None, None
+    raw_id = str(body.id or "")
+    if raw_id.startswith("ridb_site:"):
+        parts = raw_id.split(":", 2)
+        if len(parts) == 3:
+            facility_id, site_id = parts[1], parts[2]
+            try:
+                detail = await get_facility_detail(facility_id)
+            except Exception:
+                detail = None
+            if detail:
+                site = next(
+                    (
+                        item for item in (detail.get("campsites") or [])
+                        if str(item.get("id") or "") == site_id or str(item.get("map_card_id") or "") == raw_id
+                    ),
+                    None,
+                )
+                if site:
+                    photos = site.get("photos") or detail.get("photos") or []
+                    lat = site.get("lat") if site.get("lat") is not None else detail.get("lat")
+                    lng = site.get("lng") if site.get("lng") is not None else detail.get("lng")
+                    site_card = {
+                        **detail,
+                        **site,
+                        "id": raw_id,
+                        "facility_id": facility_id,
+                        "campsite_id": site_id,
+                        "parent_campground": {
+                            "id": facility_id,
+                            "name": detail.get("name"),
+                            "lat": detail.get("lat"),
+                            "lng": detail.get("lng"),
+                            "official_url": detail.get("official_url"),
+                            "booking_url": detail.get("booking_url"),
+                        },
+                        "name": site.get("name") or detail.get("name"),
+                        "lat": lat,
+                        "lng": lng,
+                        "type": "camp",
+                        "subtype": site.get("type") or "campsite",
+                        "description": site.get("description") or f"{site.get('name') or 'Campsite'} at {detail.get('name')}.",
+                        "photos": photos,
+                        "photo_url": site.get("photo_url") or (photos[0] if photos else detail.get("photo_url")),
+                        "source": "ridb",
+                        "verified_source": "Recreation.gov",
+                        "source_badge": "Official Recreation.gov",
+                        "reservation_notes": "Trailhead links to the official Recreation.gov campground page. Checkout stays on Recreation.gov.",
+                    }
+                    return site_card, {**detail, "selected_site": site_card}
     candidates = await nearby_camps(body.lat, body.lng, radius=12, types="")
     close = [
         camp for camp in candidates
@@ -11624,6 +11716,8 @@ async def resolve_map_card(body: MapCardResolveRequest, user: dict | None = Depe
             "tags", "land_type", "amenities", "site_types", "activities", "cost", "reservable",
             "url", "official_url", "booking_url", "ada", "verified_source", "source_badge",
             "source_freshness", "reservation_notes", "last_checked", "campsites_count",
+            "price_summary", "things_to_do", "permits", "tours", "events", "links",
+            "site_media_count", "photo_fallback_chain",
         ):
             value = camp_card.get(key)
             if value not in (None, "", []):
@@ -11638,11 +11732,7 @@ async def resolve_map_card(body: MapCardResolveRequest, user: dict | None = Depe
             card["photo_url"] = first_photo.get("url") if isinstance(first_photo, dict) else first_photo
 
     smart_places = (related_pack or {}).get("places") or []
-    related = {
-        "places": [p for p in smart_places if _smart_pack_type(p.get("type")) != "camp"][:14],
-        "camps": [p for p in smart_places if _smart_pack_type(p.get("type")) == "camp"][:10],
-        "trails": (trail_pack or {}).get("trails", [])[:10],
-    }
+    related = _related_rails_from_places(smart_places, (trail_pack or {}).get("trails", []), camp_detail)
     if not card.get("summary") or card.get("summary") == "Selected map place.":
         ctype = _smart_pack_type(card.get("type"))
         if ctype == "peak":
@@ -11709,10 +11799,92 @@ OUTDOOR_PLACE_PRIORITY = {
     "fuel": 27,
 }
 UTILITY_PLACE_TYPES = {"fuel", "propane", "dump", "parking"}
+TRIP_SERVICE_PLACE_TYPES = {"fuel", "propane", "dump", "parking", "mechanic", "water", "grocery", "food", "hardware", "parts"}
+THINGS_TO_DO_PLACE_TYPES = {
+    "trail",
+    "trailhead",
+    "viewpoint",
+    "peak",
+    "hot_spring",
+    "park",
+    "historic",
+    "attraction",
+    "visitor_center",
+    "climbing",
+    "ohv",
+    "permit",
+    "tour",
+    "event",
+}
 
 
 def _place_type_priority(value: object) -> int:
     return OUTDOOR_PLACE_PRIORITY.get(_smart_pack_type(value), 50)
+
+
+def _related_rails_from_places(smart_places: list[dict], trails: list[dict], camp_detail: dict | None = None) -> dict:
+    things: list[dict] = []
+    camps: list[dict] = []
+    services: list[dict] = []
+    seen: set[str] = set()
+
+    def add(bucket: list[dict], item: dict):
+        try:
+            key = str(item.get("id") or f"{item.get('type')}:{item.get('name')}:{round(float(item.get('lat', 0)), 4)}:{round(float(item.get('lng', 0)), 4)}")
+        except Exception:
+            key = str(item.get("id") or f"{item.get('type')}:{item.get('name')}")
+        if key in seen:
+            return
+        seen.add(key)
+        bucket.append(item)
+
+    for item in smart_places or []:
+        ptype = _smart_pack_type(item.get("type") or item.get("category"))
+        if ptype == "camp":
+            add(camps, item)
+        elif ptype in TRIP_SERVICE_PLACE_TYPES:
+            add(services, item)
+        else:
+            add(things, item)
+
+    if camp_detail:
+        for item in (camp_detail.get("things_to_do") or camp_detail.get("tours") or [])[:16]:
+            if not isinstance(item, dict):
+                continue
+            ptype = _smart_pack_type(item.get("type"))
+            if ptype in {"permit", "tour", "event"}:
+                add(things, item)
+
+    # Keep trail profiles as their own rail, but mirror lightweight trail cards
+    # into Things to do so the first nearby rail behaves like an audio guide.
+    for trail in (trails or [])[:8]:
+        if not isinstance(trail, dict):
+            continue
+        card = {
+            "id": trail.get("id"),
+            "name": trail.get("name"),
+            "lat": trail.get("lat"),
+            "lng": trail.get("lng"),
+            "type": "trail",
+            "subtype": trail.get("difficulty") or "trail",
+            "source": trail.get("source"),
+            "source_label": trail.get("source_label") or trail.get("source") or "Trailhead trails",
+            "photo_url": (trail.get("photos") or [None])[0] if isinstance(trail.get("photos"), list) else trail.get("photo_url"),
+            "summary": trail.get("summary") or trail.get("description"),
+            "length_mi": trail.get("length_mi"),
+            "distance_mi": trail.get("distance_mi"),
+        }
+        if card.get("name") and card.get("lat") is not None and card.get("lng") is not None:
+            add(things, card)
+
+    return {
+        "places": things[:14],
+        "camps": camps[:10],
+        "things_to_do": things[:16],
+        "campgrounds_nearby": camps[:12],
+        "trip_services": services[:12],
+        "trails": (trails or [])[:10],
+    }
 
 
 def _place_cluster_name(value: object) -> str:

@@ -103,6 +103,7 @@ Route Builder context:
 - Do not treat "Day N target area" or purple planning pins as real destinations. Those are temporary manual-builder anchors only.
 - If the edit changes an overnight camp, make that camp the day's final overnight waypoint and let the next day naturally depart from it.
 - Exact camp/fuel/POI cards can be refined in Route Builder after the rebuild; your edit should keep the route sequence, day numbers, and waypoint types clean.
+- Camp cards may include official Recreation.gov/RIDB group-site details, price summaries, nearby things to do, nearby campgrounds, trip services, permit entrances, tours, and events. Use those when present; do not treat dump/fuel/propane stops as attractions.
 
 Return ONLY valid JSON (no markdown, no extra text):
 {
@@ -134,6 +135,8 @@ TRAILHEAD ROUTE BUILDER CONTRACT:
 - Waypoints set trip intent and day flow. Route Builder and map enrichment add verified camp cards, fuel cards, POIs, photos, and nearby options along the route.
 - Every non-rest driving day should end with one camp or motel waypoint so Route Builder can show it as the overnight stop and start the next day from there.
 - Use geocodeable named anchors for day endpoints. Do not invent exact campsite coordinates or fake verified campground names.
+- If the user needs a group site, RV length, pets, shade, fire rings, ADA access, hookups, tours, permits, lotteries, or timed entry, encode that need in waypoint notes so Route Builder can select official RIDB/Recreation.gov cards.
+- Recreation.gov/RIDB checkout, tickets, permits, and lotteries are official handoffs. Do not claim Trailhead can book, hold, purchase, or enter lotteries directly.
 - For dispersed or low-cost camp requests, encode the intent in the waypoint name, description, land_type, and notes, then anchor it to a real town, public-land area, canyon, road, or landmark.
 - For private stay requests, use type "camp" with land_type "private" and natural wording such as farm stay, winery stay, private camp, glamping, or comfort night. Anchor it to a real town/region and let Route Builder find matching private-stay candidates.
 - Do not claim a private stay is bookable, available, verified, or affiliated. Write it as an overnight intent to review in Route Builder.

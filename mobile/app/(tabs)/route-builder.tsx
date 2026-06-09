@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput,
   ActivityIndicator, Animated, Easing, Keyboard, Modal, Alert, Image, Platform,
-  useWindowDimensions, KeyboardAvoidingView,
+  useWindowDimensions, KeyboardAvoidingView, Linking,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -4886,14 +4886,20 @@ export default function RouteBuilderScreen() {
                       <Text style={[s.qTagText, { color: '#1d4ed8' }]}>ADA</Text>
                     </View>
                   )}
-                </View>
-                <View style={s.detailMeta}>
-                  <Text style={s.detailCost}>{campDetail.cost || 'See site'}</Text>
-                  {(campDetail.verified_source || campDetail.source) ? (
-                    <Text style={s.detailSiteCount}>{(campDetail.verified_source || campDetail.source || '').toUpperCase()}</Text>
-                  ) : null}
-                  {campDetail.campsites_count > 0 && <Text style={s.detailSiteCount}>{campDetail.campsites_count} sites</Text>}
-                </View>
+	                </View>
+	                <View style={s.detailMeta}>
+	                  <Text style={s.detailCost}>{campDetail.price_summary?.label || campDetail.cost || 'See site'}</Text>
+	                  {(campDetail.verified_source || campDetail.source) ? (
+	                    <Text style={s.detailSiteCount}>{(campDetail.verified_source || campDetail.source || '').toUpperCase()}</Text>
+	                  ) : null}
+	                  {campDetail.campsites_count > 0 && <Text style={s.detailSiteCount}>{campDetail.campsites_count} sites</Text>}
+	                </View>
+	                {campDetail.price_summary?.freshness ? (
+	                  <TrailheadCard style={s.detailSection}>
+	                    <Text style={s.detailSectionTitle}>PRICE SOURCE</Text>
+	                    <Text style={s.detailActivities}>{campDetail.price_summary.freshness}</Text>
+	                  </TrailheadCard>
+	                ) : null}
                 {campDetail.description ? (
                   <TrailheadCard style={s.detailSection}>
                     <Text style={s.detailSectionTitle}>ABOUT</Text>
@@ -4957,8 +4963,33 @@ export default function RouteBuilderScreen() {
                       })}
                     </ScrollView>
                   </TrailheadCard>
-                ) : null}
-                {(campDetail.activities ?? []).length > 0 && (
+	                ) : null}
+	                {(campDetail.things_to_do ?? []).length > 0 ? (
+	                  <TrailheadCard style={s.detailSection}>
+	                    <Text style={s.detailSectionTitle}>THINGS TO DO</Text>
+	                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.siteRail}>
+	                      {(campDetail.things_to_do ?? []).slice(0, 12).map((item: any, idx) => {
+	                        const photo = campPhotoUrl(item.photo_url || item.photos?.[0]);
+	                        return (
+	                          <TouchableOpacity key={item.id || `${item.name}-${idx}`} style={s.sitePhotoCard} activeOpacity={0.86} onPress={() => item.official_url || item.booking_url ? Linking.openURL(item.official_url || item.booking_url) : undefined}>
+	                            {photo ? (
+	                              <Image source={{ uri: photo }} style={s.sitePhoto} resizeMode="cover" />
+	                            ) : (
+	                              <View style={s.sitePlaceholder}>
+	                                <Ionicons name={item.type === 'tour' ? 'ticket-outline' : item.type === 'permit' ? 'document-text-outline' : 'flag-outline'} size={22} color={C.orange} />
+	                              </View>
+	                            )}
+	                            <View style={s.siteBody}>
+	                              <Text style={s.siteName} numberOfLines={2}>{item.name || `Activity ${idx + 1}`}</Text>
+	                              <Text style={s.siteMeta} numberOfLines={2}>{[item.type, item.fee_text, item.source_badge].filter(Boolean).join(' · ')}</Text>
+	                            </View>
+	                          </TouchableOpacity>
+	                        );
+	                      })}
+	                    </ScrollView>
+	                  </TrailheadCard>
+	                ) : null}
+	                {(campDetail.activities ?? []).length > 0 && (
                   <TrailheadCard style={s.detailSection}>
                     <Text style={s.detailSectionTitle}>ACTIVITIES</Text>
                     <Text style={s.detailActivities}>{(campDetail.activities ?? []).join(' · ')}</Text>

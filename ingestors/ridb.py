@@ -2,7 +2,7 @@
 Fetches federal campsites near a lat/lng. Free API — register at ridb.recreation.gov.
 """
 from __future__ import annotations
-import asyncio, time
+import asyncio, re, time
 import httpx
 from config.settings import settings
 from db.store import get_cached, set_cached
@@ -133,6 +133,12 @@ def _image_urls(records: list[dict], limit: int = 12) -> list[str]:
             break
     return urls
 
+def _clean_text(value: object, limit: int = 600) -> str:
+    text = re.sub(r"<[^>]+>", " ", str(value or ""))
+    text = re.sub(r"&nbsp;|&amp;", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:limit]
+
 def _attr_pairs(attrs: list[dict]) -> list[tuple[str, str]]:
     pairs: list[tuple[str, str]] = []
     for attr in attrs:
@@ -162,6 +168,186 @@ def _record_value(record: dict, *keys: str) -> str:
         if value not in (None, "", []):
             return str(value).strip()
     return ""
+
+def _record_float(record: dict, *keys: str) -> float | None:
+    for key in keys:
+        value = record.get(key)
+        if value in (None, "", []):
+            continue
+        try:
+            return float(value)
+        except Exception:
+            pass
+    geo = record.get("GEOJSON")
+    if isinstance(geo, dict):
+        coords = geo.get("COORDINATES") or geo.get("coordinates")
+        if isinstance(coords, list) and len(coords) >= 2:
+            try:
+                if any("lat" in key.lower() for key in keys):
+                    return float(coords[1])
+                if any("lng" in key.lower() or "lon" in key.lower() for key in keys):
+                    return float(coords[0])
+            except Exception:
+                return None
+    return None
+
+def _money_values(text: str) -> list[float]:
+    values: list[float] = []
+    for match in re.finditer(r"\$\s*([0-9]+(?:\.[0-9]{1,2})?)", text or ""):
+        try:
+            values.append(float(match.group(1)))
+        except Exception:
+            pass
+    return values
+
+def _fmt_money(value: float) -> str:
+    return f"${int(value)}" if float(value).is_integer() else f"${value:.2f}"
+
+def build_price_summary(facility: dict, reservation_records: list[dict] | None = None) -> dict:
+    """Summarize price signals without implying live Recreation.gov availability."""
+    reservation_records = reservation_records or []
+    fee_text = _clean_text(
+        " ".join(str(facility.get(key) or "") for key in (
+            "FacilityUseFeeDescription",
+            "RecAreaFeeDescription",
+            "FacilityDescription",
+        )),
+        1200,
+    )
+    text_prices = _money_values(fee_text)
+    paid: list[float] = []
+    years: list[int] = []
+    for record in reservation_records:
+        if str(record.get("FacilityID") or "") != str(facility.get("FacilityID") or ""):
+            continue
+        for key in ("UseFee", "TotalBeforeTax", "TotalPaid"):
+            raw = str(record.get(key) or "").replace("$", "").replace(",", "").strip()
+            try:
+                value = float(raw)
+            except Exception:
+                continue
+            nights = 1
+            try:
+                nights = max(1, int(float(record.get("Nights") or 1)))
+            except Exception:
+                pass
+            if value > 0:
+                paid.append(round(value / nights, 2))
+                break
+        for key in ("StartDate", "OrderDate", "EndDate"):
+            match = re.search(r"(20[0-9]{2}|19[0-9]{2})", str(record.get(key) or ""))
+            if match:
+                years.append(int(match.group(1)))
+                break
+    if paid:
+        ordered = sorted(paid)
+        mid = ordered[len(ordered) // 2]
+        return {
+            "label": f"Typical paid stays: {_fmt_money(ordered[0])}-{_fmt_money(ordered[-1])}/night",
+            "min": ordered[0],
+            "median": mid,
+            "max": ordered[-1],
+            "sample_count": len(ordered),
+            "last_year": max(years) if years else None,
+            "source": "RIDB historical reservations",
+            "freshness": "Historical Recreation.gov reservation records; verify current price and availability on Recreation.gov.",
+        }
+    if text_prices:
+        low, high = min(text_prices), max(text_prices)
+        label = f"Listed fee text: {_fmt_money(low)}" if low == high else f"Listed fee text: {_fmt_money(low)}-{_fmt_money(high)}"
+        return {
+            "label": label,
+            "min": low,
+            "median": None,
+            "max": high,
+            "sample_count": 0,
+            "source": "RIDB facility fee text",
+            "freshness": "Official RIDB fee text; verify current price and availability on Recreation.gov.",
+        }
+    if facility.get("Reservable"):
+        return {
+            "label": "Reservable; verify current price on Recreation.gov",
+            "sample_count": 0,
+            "source": "RIDB facility metadata",
+            "freshness": "RIDB does not expose live checkout pricing for this card.",
+        }
+    return {
+        "label": "No fee listed",
+        "sample_count": 0,
+        "source": "RIDB facility metadata",
+        "freshness": "Verify current fees, passes, and local rules with the source.",
+    }
+
+def _normalize_link(record: dict) -> dict:
+    return {
+        "id": _record_value(record, "EntityLinkID", "LinkID", "id"),
+        "title": _record_value(record, "Title", "LinkType") or "Official link",
+        "type": _record_value(record, "LinkType", "Type"),
+        "description": _clean_text(record.get("Description"), 240),
+        "url": _record_value(record, "URL", "ResourceLink"),
+        "source": "ridb",
+        "source_badge": "Official Recreation.gov",
+    }
+
+def _normalize_adventure(record: dict, kind: str, facility_id: str = "") -> dict:
+    if kind == "permit":
+        item_id = _record_value(record, "PermitEntranceID", "id")
+        name = _record_value(record, "PermitEntranceName", "Name") or "Permit entrance"
+        desc = _record_value(record, "PermitEntranceDescription", "Description")
+        lat = _record_float(record, "Latitude", "PermitEntranceLatitude")
+        lng = _record_float(record, "Longitude", "PermitEntranceLongitude")
+        accessible = bool(record.get("PermitEntranceAccessible"))
+        zones = [
+            _record_value(zone, "Zone", "PermitEntranceZone")
+            for zone in _as_records(record.get("ZONES"))
+        ]
+        attrs = _as_records(record.get("ATTRIBUTES"))
+        url = _record_value(record, "ResourceLink", "URL") or f"https://www.recreation.gov/permits/{facility_id or record.get('FacilityID') or item_id}"
+    elif kind == "tour":
+        item_id = _record_value(record, "TourID", "id")
+        name = _record_value(record, "TourName", "Name") or "Tour"
+        desc = _record_value(record, "TourDescription", "Description")
+        lat = _record_float(record, "Latitude", "TourLatitude")
+        lng = _record_float(record, "Longitude", "TourLongitude")
+        accessible = bool(record.get("TourAccessible"))
+        zones = []
+        attrs = _as_records(record.get("ATTRIBUTES"))
+        url = _record_value(record, "ResourceLink", "URL") or f"https://www.recreation.gov/ticket/facility/{facility_id or record.get('FacilityID') or item_id}"
+    else:
+        item_id = _record_value(record, "EventID", "id")
+        name = _record_value(record, "EventName", "Name") or "Event"
+        desc = _record_value(record, "EventDescription", "Description")
+        lat = _record_float(record, "Latitude", "EventLatitude")
+        lng = _record_float(record, "Longitude", "EventLongitude")
+        accessible = bool(record.get("EventAdaAccess") or record.get("AdaAccess"))
+        zones = []
+        attrs = _as_records(record.get("ATTRIBUTES"))
+        url = _record_value(record, "ResourceLink", "URL")
+    photos = _image_urls(_as_records(record.get("ENTITYMEDIA") or record.get("MEDIA")))
+    fee_text = _attr_value(attrs, "fee") or _record_value(record, "FeeDescription", "UseFeeDescription", "EventFeeDescription")
+    return {
+        "id": f"ridb_{kind}:{item_id}" if item_id else f"ridb_{kind}:{facility_id}:{name[:40]}",
+        "ridb_id": item_id,
+        "facility_id": str(facility_id or record.get("FacilityID") or ""),
+        "name": name,
+        "type": kind,
+        "subtype": _record_value(record, "PermitEntranceType", "TourType", "EventTypeDescription"),
+        "description": _clean_text(desc, 500),
+        "lat": lat,
+        "lng": lng,
+        "duration_minutes": record.get("TourDuration"),
+        "accessible": accessible,
+        "zones": [z for z in zones if z][:12],
+        "fee_text": _clean_text(fee_text, 240),
+        "photos": photos,
+        "photo_url": photos[0] if photos else None,
+        "official_url": url,
+        "booking_url": url,
+        "source": "ridb",
+        "verified_source": "Recreation.gov",
+        "source_badge": "Official Recreation.gov",
+        "reservation_notes": "Trailhead helps you plan and links to the official source. Checkout, tickets, permits, and lotteries stay on Recreation.gov.",
+    }
 
 def _normalize_campsite_record(campsite: dict, attrs: list[dict] | None = None, media: list[dict] | None = None) -> dict:
     attrs = attrs or []
@@ -212,9 +398,16 @@ def _normalize_campsite_record(campsite: dict, attrs: list[dict] | None = None, 
     ):
         if enabled and label not in amenities:
             amenities.append(label)
-    return {
+    lat = _record_float(campsite, "CampsiteLatitude", "Latitude", "lat")
+    lng = _record_float(campsite, "CampsiteLongitude", "Longitude", "lng", "lon")
+    facility_id = _record_value(campsite, "FacilityID", "ParentFacilityID")
+    result = {
         "id": campsite_id,
+        "map_card_id": f"ridb_site:{facility_id}:{campsite_id}" if facility_id and campsite_id else "",
+        "facility_id": facility_id,
         "name": name,
+        "lat": lat,
+        "lng": lng,
         "type": campsite_type,
         "loop": _record_value(campsite, "Loop", "LoopName"),
         "max_people": max_people,
@@ -236,6 +429,7 @@ def _normalize_campsite_record(campsite: dict, attrs: list[dict] | None = None, 
         "verified_source": "Recreation.gov",
         "source_badge": "Official Recreation.gov",
     }
+    return result
 
 def _dedupe(values: list[str], limit: int = 16) -> list[str]:
     seen: set[str] = set()
@@ -383,12 +577,17 @@ async def get_facility_detail(facility_id: str) -> dict | None:
             except Exception:
                 return {}
 
-        facility_data, media_data, sites_data, attrs_data, acts_data = await asyncio.gather(
+        facility_data, media_data, sites_data, attrs_data, acts_data, addresses_data, links_data, permits_data, tours_data, events_data = await asyncio.gather(
             _get(f"facilities/{facility_id}"),
             _get(f"facilities/{facility_id}/media"),
             _get(f"facilities/{facility_id}/campsites"),
             _get(f"facilities/{facility_id}/facilityattributes"),
             _get(f"facilities/{facility_id}/activities"),
+            _get(f"facilities/{facility_id}/facilityaddresses"),
+            _get(f"facilities/{facility_id}/links"),
+            _get(f"facilities/{facility_id}/permitentrances"),
+            _get(f"facilities/{facility_id}/tours"),
+            _get(f"facilities/{facility_id}/events"),
         )
         base_campsites = _as_records(sites_data)
 
@@ -407,9 +606,55 @@ async def get_facility_detail(facility_id: str) -> dict | None:
                 detail = site
             else:
                 detail = {**site, **detail}
+            detail.setdefault("FacilityID", str(facility_id))
             return _normalize_campsite_record(detail, _as_records(site_attrs_data), _as_records(site_media_data))
 
         campsite_details = await asyncio.gather(*[_enrich_site(site) for site in base_campsites[:24]]) if base_campsites else []
+
+        async def _enrich_permit(record: dict) -> dict:
+            permit_id = _record_value(record, "PermitEntranceID", "id")
+            if not permit_id:
+                return _normalize_adventure(record, "permit", str(facility_id))
+            detail_data, attrs_data2, zones_data = await asyncio.gather(
+                _get(f"permitentrances/{permit_id}"),
+                _get(f"permitentrances/{permit_id}/attributes"),
+                _get(f"permitentrances/{permit_id}/zones"),
+            )
+            detail_records = _as_records(detail_data)
+            detail = detail_records[0] if detail_records else (detail_data if isinstance(detail_data, dict) else {})
+            merged = {**record, **(detail if isinstance(detail, dict) else {})}
+            merged["ATTRIBUTES"] = _as_records(attrs_data2) or _as_records(merged.get("ATTRIBUTES"))
+            merged["ZONES"] = _as_records(zones_data) or _as_records(merged.get("ZONES"))
+            return _normalize_adventure(merged, "permit", str(facility_id))
+
+        async def _enrich_tour(record: dict) -> dict:
+            tour_id = _record_value(record, "TourID", "id")
+            if not tour_id:
+                return _normalize_adventure(record, "tour", str(facility_id))
+            detail_data, attrs_data2 = await asyncio.gather(
+                _get(f"tours/{tour_id}"),
+                _get(f"tours/{tour_id}/attributes"),
+            )
+            detail_records = _as_records(detail_data)
+            detail = detail_records[0] if detail_records else (detail_data if isinstance(detail_data, dict) else {})
+            merged = {**record, **(detail if isinstance(detail, dict) else {})}
+            merged["ATTRIBUTES"] = _as_records(attrs_data2) or _as_records(merged.get("ATTRIBUTES"))
+            return _normalize_adventure(merged, "tour", str(facility_id))
+
+        async def _enrich_event(record: dict) -> dict:
+            event_id = _record_value(record, "EventID", "id")
+            if not event_id:
+                return _normalize_adventure(record, "event", str(facility_id))
+            detail_data = await _get(f"events/{event_id}")
+            detail_records = _as_records(detail_data)
+            detail = detail_records[0] if detail_records else (detail_data if isinstance(detail_data, dict) else {})
+            return _normalize_adventure({**record, **(detail if isinstance(detail, dict) else {})}, "event", str(facility_id))
+
+        permit_cards, tour_cards, event_cards = await asyncio.gather(
+            asyncio.gather(*[_enrich_permit(record) for record in _as_records(permits_data)[:12]]) if _as_records(permits_data) else asyncio.sleep(0, result=[]),
+            asyncio.gather(*[_enrich_tour(record) for record in _as_records(tours_data)[:12]]) if _as_records(tours_data) else asyncio.sleep(0, result=[]),
+            asyncio.gather(*[_enrich_event(record) for record in _as_records(events_data)[:12]]) if _as_records(events_data) else asyncio.sleep(0, result=[]),
+        )
 
     f = facility_data if isinstance(facility_data, dict) and "FacilityID" in facility_data else {}
     if not f:
@@ -492,6 +737,25 @@ async def get_facility_detail(facility_id: str) -> dict | None:
     # Activities
     activities = [a.get("ActivityName", "") for a in (acts_data.get("RECDATA") or [])
                   if a.get("ActivityName")][:12]
+    links = [_normalize_link(link) for link in _as_records(links_data) if _normalize_link(link).get("url")][:12]
+    addresses = _as_records(addresses_data)
+    address = next(
+        (
+            ", ".join(
+                part for part in [
+                    _record_value(addr, "FacilityStreetAddress1"),
+                    _record_value(addr, "City"),
+                    _record_value(addr, "AddressStateCode"),
+                    _record_value(addr, "PostalCode"),
+                ]
+                if part
+            )
+            for addr in addresses
+            if _record_value(addr, "FacilityStreetAddress1", "City", "AddressStateCode")
+        ),
+        "",
+    )
+    price_summary = build_price_summary(f)
 
     tags = _tag_facility(f)
     lat_f = f.get("FacilityLatitude")
@@ -513,13 +777,20 @@ async def get_facility_detail(facility_id: str) -> dict | None:
         "site_types": site_types,
         "campsites": campsite_details,
         "activities": activities,
+        "things_to_do": [*tour_cards, *permit_cards, *event_cards][:16],
+        "permits": permit_cards,
+        "tours": tour_cards,
+        "events": event_cards,
         "reservable": f.get("Reservable", False),
         "cost": _format_cost(f),
+        "price_summary": price_summary,
         "ada": f.get("FacilityAdaAccess") == "Y",
         "phone": f.get("FacilityPhone"),
+        "address": address,
+        "links": links,
         "url": f"https://www.recreation.gov/camping/campgrounds/{facility_id}",
-        "official_url": f"https://www.recreation.gov/camping/campgrounds/{facility_id}",
-        "booking_url": f"https://www.recreation.gov/camping/campgrounds/{facility_id}",
+        "official_url": f.get("FacilityReservationURL") or f"https://www.recreation.gov/camping/campgrounds/{facility_id}",
+        "booking_url": f.get("FacilityReservationURL") or f"https://www.recreation.gov/camping/campgrounds/{facility_id}",
         "campsites_count": len(sites_data.get("RECDATA") or []),
         "site_media_count": len(_dedupe(site_photo_urls, limit=999)),
         "source": "ridb",

@@ -535,6 +535,9 @@ type SelectedPlaceContext = {
   places: OsmPoi[];
   camps: CampsitePin[];
   trails: TrailProfile[];
+  things_to_do?: OsmPoi[];
+  campgrounds_nearby?: CampsitePin[];
+  trip_services?: OsmPoi[];
   error?: string;
 };
 
@@ -6026,17 +6029,21 @@ function MapScreen() {
       setSearchRouteCard(current => current && Math.abs(current.lat - selectedPlace.lat) < 0.02 && Math.abs(current.lng - selectedPlace.lng) < 0.02
         ? { ...current, ...nextCard }
         : current);
-      const smartPlaces = resolved.related?.places ?? [];
-      const smartCamps = (resolved.related?.camps ?? [])
+      const smartPlaces = resolved.related?.things_to_do ?? resolved.related?.places ?? [];
+      const smartServices = resolved.related?.trip_services ?? [];
+      const smartCamps = (resolved.related?.campgrounds_nearby ?? resolved.related?.camps ?? [])
         .map(p => smartPlaceToCampPin(p as OsmPoi))
         .filter((p): p is CampsitePin => !!p);
       const trails = resolved.related?.trails ?? [];
       setSelectedPlaceContext({
         loading: false,
-        places: smartPlaces.filter(p => (p.name && p.name.trim()) || UTILITY_PLACE_TYPES.has(String(p.type || ''))) as OsmPoi[],
+        places: smartPlaces.filter(p => p.name && p.name.trim()) as OsmPoi[],
         camps: smartCamps,
         trails,
-        error: !smartPlaces.length && !smartCamps.length && !trails.length ? 'No nearby camps, trails, or useful places loaded yet.' : undefined,
+        things_to_do: smartPlaces.filter(p => p.name && p.name.trim()) as OsmPoi[],
+        campgrounds_nearby: smartCamps,
+        trip_services: smartServices.filter(p => (p.name && p.name.trim()) || UTILITY_PLACE_TYPES.has(String(p.type || ''))) as OsmPoi[],
+        error: !smartPlaces.length && !smartCamps.length && !trails.length && !smartServices.length ? 'No nearby camps, trails, or useful places loaded yet.' : undefined,
       });
     };
     const cached = mapCardResolveCacheRef.current.get(resolveKey);
@@ -6048,6 +6055,9 @@ function MapScreen() {
         places: prev?.places ?? [],
         camps: prev?.camps ?? [],
         trails: prev?.trails ?? [],
+        things_to_do: prev?.things_to_do ?? [],
+        campgrounds_nearby: prev?.campgrounds_nearby ?? [],
+        trip_services: prev?.trip_services ?? [],
       }));
     }
     const selectedPlaceResolveKind = selectedPlace.type === 'trail' || selectedPlace.type === 'trailhead'
@@ -18026,12 +18036,23 @@ function MapScreen() {
               const activityItems = derivedCampActivities(selectedCamp, campDetail);
               return (
               <>
-                {summaryText ? (
-                  <View style={s.detailSection}>
-                    <Text style={s.detailSectionTitle}>SUMMARY</Text>
-                    <Text style={s.detailDesc}>{summaryText}</Text>
-                  </View>
-                ) : null}
+	                {summaryText ? (
+	                  <View style={s.detailSection}>
+	                    <Text style={s.detailSectionTitle}>SUMMARY</Text>
+	                    <Text style={s.detailDesc}>{summaryText}</Text>
+	                  </View>
+	                ) : null}
+
+	                {campDetail.price_summary?.label ? (
+	                  <View style={s.detailSection}>
+	                    <Text style={s.detailSectionTitle}>PRICE</Text>
+	                    <View style={s.campNoteCard}>
+	                      <Text style={s.campNoteTitle}>{campDetail.price_summary.source || 'RIDB PRICE SIGNAL'}</Text>
+	                      <Text style={s.campNoteText}>{campDetail.price_summary.label}</Text>
+	                      {!!campDetail.price_summary.freshness && <Text style={s.campNoteText}>{campDetail.price_summary.freshness}</Text>}
+	                    </View>
+	                  </View>
+	                ) : null}
 
                 {[
                   { title: 'ACCESS NOTES', text: campDetail.access_notes },
@@ -18117,10 +18138,10 @@ function MapScreen() {
                   </View>
                 ) : null}
 
-                {(campDetail.campsites ?? []).some(site => site.name || site.photo_url || site.photos?.length) ? (
-                  <View style={s.detailSection}>
-                    <Text style={s.detailSectionTitle}>SITES</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.siteRail}>
+	                {(campDetail.campsites ?? []).some(site => site.name || site.photo_url || site.photos?.length) ? (
+	                  <View style={s.detailSection}>
+	                    <Text style={s.detailSectionTitle}>SITES</Text>
+	                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.siteRail}>
                       {(campDetail.campsites ?? []).slice(0, 12).map((site, idx) => {
                         const photo = campPhotoUrl(site.photo_url || site.photos?.[0]);
                         const meta = [
@@ -18130,25 +18151,74 @@ function MapScreen() {
                           site.surface,
                           site.accessible ? 'ADA' : '',
                         ].filter(Boolean).join(' · ');
-                        return (
-                          <View key={site.id || `${site.name}-${idx}`} style={s.sitePhotoCard}>
-                            {photo ? (
-                              <Image source={{ uri: photo }} style={s.sitePhoto} resizeMode="cover" />
-                            ) : (
+	                        const siteCardId = site.map_card_id || (campDetail.id && site.id ? `ridb_site:${campDetail.id}:${site.id}` : site.id);
+	                        return (
+	                          <TouchableOpacity
+	                            key={site.id || `${site.name}-${idx}`}
+	                            style={s.sitePhotoCard}
+	                            activeOpacity={0.86}
+	                            onPress={() => {
+	                              const sitePhotos = site.photos?.length ? site.photos : campDetail.photos;
+	                              setSelectedCamp({
+	                                ...selectedCamp,
+	                                ...campDetail,
+	                                id: siteCardId || selectedCamp.id,
+	                                name: site.name || selectedCamp.name,
+	                                lat: Number(site.lat ?? campDetail.lat ?? selectedCamp.lat),
+	                                lng: Number(site.lng ?? campDetail.lng ?? selectedCamp.lng),
+	                                type: 'camp',
+	                                land_type: site.type || campDetail.land_type,
+	                                description: `${site.name || 'Campsite'} at ${campDetail.name}`,
+	                                photo_url: site.photo_url || sitePhotos?.[0] || campDetail.photo_url,
+	                                photos: sitePhotos,
+	                                source: 'ridb',
+	                                verified_source: site.verified_source || campDetail.verified_source,
+	                                source_badge: site.source_badge || campDetail.source_badge,
+	                              } as CampsitePin);
+	                              setCampDetail({ ...campDetail, selected_site: site } as any);
+	                            }}
+	                          >
+	                            {photo ? (
+	                              <Image source={{ uri: photo }} style={s.sitePhoto} resizeMode="cover" />
+	                            ) : (
                               <View style={s.sitePlaceholder}>
                                 <Ionicons name="bonfire-outline" size={22} color={C.orange} />
                               </View>
                             )}
                             <View style={s.siteBody}>
                               <Text style={s.siteName} numberOfLines={2}>{site.name || `Site ${idx + 1}`}</Text>
-                              <Text style={s.siteMeta} numberOfLines={2}>{meta || site.source_badge || 'Recreation.gov site'}</Text>
-                            </View>
-                          </View>
-                        );
-                      })}
-                    </ScrollView>
-                  </View>
-                ) : null}
+	                              <Text style={s.siteMeta} numberOfLines={2}>{meta || site.source_badge || 'Recreation.gov site'}</Text>
+	                            </View>
+	                          </TouchableOpacity>
+	                        );
+	                      })}
+	                    </ScrollView>
+	                  </View>
+	                ) : null}
+
+	                {(campDetail.things_to_do ?? []).length > 0 ? (
+	                  <View style={s.detailSection}>
+	                    <Text style={s.detailSectionTitle}>THINGS TO DO</Text>
+	                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.siteRail}>
+	                      {(campDetail.things_to_do ?? []).slice(0, 12).map((item: any, idx) => {
+	                        const photo = campPhotoUrl(item.photo_url || item.photos?.[0]);
+	                        return (
+	                          <TouchableOpacity key={item.id || `${item.name}-${idx}`} style={s.sitePhotoCard} activeOpacity={0.86} onPress={() => item.official_url || item.booking_url ? Linking.openURL(item.official_url || item.booking_url) : undefined}>
+	                            {photo ? <Image source={{ uri: photo }} style={s.sitePhoto} resizeMode="cover" /> : (
+	                              <View style={s.sitePlaceholder}>
+	                                <Ionicons name={item.type === 'tour' ? 'ticket-outline' : item.type === 'permit' ? 'document-text-outline' : 'flag-outline'} size={22} color={C.orange} />
+	                              </View>
+	                            )}
+	                            <View style={s.siteBody}>
+	                              <Text style={s.siteName} numberOfLines={2}>{item.name || `Activity ${idx + 1}`}</Text>
+	                              <Text style={s.siteMeta} numberOfLines={2}>{[cleanDisplayLabel(item.type), item.fee_text, item.source_badge].filter(Boolean).join(' · ')}</Text>
+	                            </View>
+	                          </TouchableOpacity>
+	                        );
+	                      })}
+	                    </ScrollView>
+	                  </View>
+	                ) : null}
 
                 {Number.isFinite(campDetail.lat) && Number.isFinite(campDetail.lng) && Math.abs(campDetail.lat) > 0.0001 && Math.abs(campDetail.lng) > 0.0001 ? (
                   <View style={s.detailSection}>
@@ -18487,13 +18557,23 @@ function MapScreen() {
                   )}
                 </View>
 
-                {/* Cost + sites count */}
-                <View style={s.detailMeta}>
-                  <Text style={s.detailCost}>{campDetail.cost}</Text>
-                  {campDetail.campsites_count > 0 && (
-                    <Text style={s.detailSiteCount}>{campDetail.campsites_count} sites</Text>
-                  )}
-                </View>
+	                {/* Cost + sites count */}
+	                <View style={s.detailMeta}>
+	                  <Text style={s.detailCost}>{campDetail.price_summary?.label || campDetail.cost}</Text>
+	                  {campDetail.campsites_count > 0 && (
+	                    <Text style={s.detailSiteCount}>{campDetail.campsites_count} sites</Text>
+	                  )}
+	                </View>
+
+	                {campDetail.price_summary?.freshness ? (
+	                  <View style={s.detailSection}>
+	                    <Text style={s.detailSectionTitle}>PRICE SOURCE</Text>
+	                    <View style={s.campNoteCard}>
+	                      <Text style={s.campNoteTitle}>{campDetail.price_summary.source || 'RIDB PRICE SIGNAL'}</Text>
+	                      <Text style={s.campNoteText}>{campDetail.price_summary.freshness}</Text>
+	                    </View>
+	                  </View>
+	                ) : null}
 
                 {/* Description */}
                 {cleanCampDescriptionText(campDetail.description) ? (

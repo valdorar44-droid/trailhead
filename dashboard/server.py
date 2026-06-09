@@ -4038,17 +4038,19 @@ async def route_weather(body: RouteWeatherRequest):
 @app.get("/api/weather")
 async def weather_forecast(lat: float, lng: float, days: int = 7, units: str = "auto"):
     unit_meta = _weather_units_for(lat, lng, units)
-    cache_key = f"weather:{lat:.2f},{lng:.2f}:{unit_meta['mode']}"
+    cache_key = f"weather_v2:{lat:.2f},{lng:.2f}:{unit_meta['mode']}:{min(days, 14)}"
     cached = get_cached("weather_cache", cache_key, ttl_seconds=3600)
     if cached:
         return cached
 
     async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.get(
+        forecast_task = client.get(
             "https://api.open-meteo.com/v1/forecast",
             params={
                 "latitude": lat, "longitude": lng,
-                "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max,weathercode",
+                "current": "temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m",
+                "hourly": "temperature_2m,relative_humidity_2m,precipitation_probability,precipitation,weather_code,wind_speed_10m",
+                "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,windspeed_10m_max,wind_gusts_10m_max,weathercode,uv_index_max",
                 "temperature_unit": unit_meta["temperature_unit"],
                 "windspeed_unit": unit_meta["windspeed_unit"],
                 "precipitation_unit": unit_meta["precipitation_unit"],
@@ -4056,9 +4058,36 @@ async def weather_forecast(lat: float, lng: float, days: int = 7, units: str = "
                 "forecast_days": min(days, 14),
             }
         )
+        air_task = client.get(
+            "https://air-quality-api.open-meteo.com/v1/air-quality",
+            params={
+                "latitude": lat,
+                "longitude": lng,
+                "current": "us_aqi,pm2_5,pm10,ozone,nitrogen_dioxide",
+                "hourly": "us_aqi,pm2_5,pm10,ozone,grass_pollen,ragweed_pollen,birch_pollen",
+                "timezone": "auto",
+                "forecast_days": min(days, 5),
+            },
+        )
+        r, air = await asyncio.gather(forecast_task, air_task, return_exceptions=True)
+        if isinstance(r, Exception):
+            raise r
         r.raise_for_status()
         data = r.json()
+        if not isinstance(air, Exception):
+            try:
+                air.raise_for_status()
+                data["air_quality"] = air.json()
+            except Exception:
+                data["air_quality"] = {"available": False}
+        else:
+            data["air_quality"] = {"available": False}
     data["trailhead_units"] = unit_meta
+    data["source_label"] = "Open-Meteo"
+    data["health_summary"] = {
+        "air_quality_source": "Open-Meteo air quality" if data.get("air_quality", {}).get("current") else "Unavailable",
+        "advisory": "Weather, air quality, pollen, and UV forecasts are modeled estimates. Verify severe weather with official alerts before travel.",
+    }
 
     set_cached("weather_cache", cache_key, data)
     return data
@@ -11822,6 +11851,16 @@ def _related_rails_from_places(smart_places: list[dict], trails: list[dict], cam
             return f"generic:{_smart_pack_type(item.get('type'))}:{name}"
         return ""
 
+    def is_generic_blm(item: dict) -> bool:
+        name = re.sub(r"[^a-z0-9]+", " ", str(item.get("name") or "").lower()).strip()
+        source = str(item.get("source") or item.get("source_label") or item.get("attribution") or "").lower()
+        if "blm" not in source:
+            return False
+        return name in {"", "blm recreation site", "recreation site"}
+
+    def photo_backed(item: dict) -> bool:
+        return bool(item.get("photo_url") or item.get("photos")) and str(item.get("photo_status") or "") != "placeholder"
+
     def add(bucket: list[dict], item: dict):
         try:
             key = str(item.get("id") or f"{item.get('type')}:{item.get('name')}:{round(float(item.get('lat', 0)), 4)}:{round(float(item.get('lng', 0)), 4)}")
@@ -11848,9 +11887,11 @@ def _related_rails_from_places(smart_places: list[dict], trails: list[dict], cam
         elif ptype == "visitor_center":
             add(visitor_centers, item)
         elif ptype in THINGS_TO_SEE_PLACE_TYPES:
-            add(sights, item)
+            if not is_generic_blm(item) and (photo_backed(item) or not generic_key(item)):
+                add(sights, item)
         else:
-            add(things, item)
+            if not is_generic_blm(item) and (photo_backed(item) or not generic_key(item)):
+                add(things, item)
 
     if camp_detail:
         for item in (camp_detail.get("things_to_do") or camp_detail.get("tours") or [])[:16]:

@@ -49,7 +49,7 @@ class ActiveIngestorTests(unittest.TestCase):
         self.assertEqual(normalized["source_label"], "ACTIVE")
 
 
-class FccIngestorTests(unittest.TestCase):
+class FccIngestorTests(unittest.IsolatedAsyncioTestCase):
     def test_mobile_coverage_normalization_labels_provider_and_technology(self):
         record = fcc.normalize_mobile_coverage_record(
             {
@@ -69,6 +69,22 @@ class FccIngestorTests(unittest.TestCase):
         self.assertEqual(record["download_mbps"], 43.25)
         self.assertEqual(record["sample_count"], 12)
         self.assertEqual(record["source_label"], "FCC modeled")
+
+    async def test_mobile_coverage_metadata_only_is_not_available(self):
+        original_runtime_cached_call = fcc.runtime_cached_call
+
+        async def fake_runtime_cached_call(*args, **kwargs):
+            return []
+
+        fcc.runtime_cached_call = fake_runtime_cached_call
+        try:
+            result = await fcc.get_mobile_coverage(12.345, -98.765)
+        finally:
+            fcc.runtime_cached_call = original_runtime_cached_call
+
+        self.assertFalse(result["available"])
+        self.assertEqual(result["records"], [])
+        self.assertEqual(result["modeled_source"]["status"], "metadata_only")
 
 
 if __name__ == "__main__":

@@ -131,7 +131,7 @@ def _vizmo_records(data: Any) -> list[dict]:
 
 
 async def get_mobile_coverage(lat: float, lng: float) -> dict:
-    cache_key = f"fcc_mobile_coverage:{float(lat):.3f}:{float(lng):.3f}:v1"
+    cache_key = f"fcc_mobile_coverage:{float(lat):.3f}:{float(lng):.3f}:v2"
     cached = get_cached("campsite_cache", cache_key, ttl_seconds=3600 * 24 * 7)
     if cached is not None:
         record_provider_call("fcc", "mobile_coverage", cache_status="hit", source_action="camp_mobile_coverage", key=cache_key)
@@ -158,9 +158,10 @@ async def get_mobile_coverage(lat: float, lng: float) -> dict:
         endpoint="vizmo",
         source_action="camp_mobile_coverage",
     )
+    records = [record for record in (crowdsourced or []) if isinstance(record, dict)]
     result = {
-        "available": bool(crowdsourced or settings.fcc_bdc_mobile_source_url),
-        "records": crowdsourced[:8],
+        "available": bool(records),
+        "records": records[:8],
         "modeled_source": {
             "source": "fcc_bdc",
             "source_label": "FCC modeled",

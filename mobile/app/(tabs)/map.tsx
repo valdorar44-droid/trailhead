@@ -775,6 +775,7 @@ function campMobileCoverage(detail?: CampsiteDetail | null, camp?: CampsitePin |
   const coverage = detail?.mobile_coverage || camp?.mobile_coverage;
   if (!coverage) return null;
   const records = Array.isArray(coverage.records) ? coverage.records.filter(Boolean) : [];
+  if (!coverage.available || records.length === 0) return null;
   const primary = records.find(r => r.provider || r.technology || r.availability_class) || null;
   const label = primary
     ? [primary.provider, primary.technology, cleanDisplayLabel(primary.availability_class || '')].filter(Boolean).join(' · ')
@@ -788,6 +789,24 @@ function campMobileCoverage(detail?: CampsiteDetail | null, camp?: CampsitePin |
     source: primary?.source_label || coverage.modeled_source?.source_label || coverage.source_label || 'FCC modeled',
     disclaimer: coverage.disclaimer || 'FCC mobile data is advisory and not a guarantee of service at camp.',
   };
+}
+
+function normalizeCampDetailArrays(detail: CampsiteDetail): CampsiteDetail {
+  return {
+    ...detail,
+    tags: Array.isArray(detail.tags) ? detail.tags : [],
+    photos: Array.isArray(detail.photos) ? detail.photos : [],
+    amenities: Array.isArray(detail.amenities) ? detail.amenities : [],
+    site_types: Array.isArray(detail.site_types) ? detail.site_types : [],
+    activities: Array.isArray(detail.activities) ? detail.activities : [],
+    campsites: Array.isArray(detail.campsites) ? detail.campsites : [],
+    reviews: Array.isArray((detail as any).reviews) ? (detail as any).reviews : [],
+    things_to_do: Array.isArray(detail.things_to_do) ? detail.things_to_do : [],
+    things_to_see: Array.isArray(detail.things_to_see) ? detail.things_to_see : [],
+    visitor_centers: Array.isArray(detail.visitor_centers) ? detail.visitor_centers : [],
+    campgrounds_nearby: Array.isArray(detail.campgrounds_nearby) ? detail.campgrounds_nearby : [],
+    trip_services: Array.isArray(detail.trip_services) ? detail.trip_services : [],
+  } as CampsiteDetail;
 }
 
 type SavedAiKind = 'route_brief' | 'packing_list';
@@ -3096,6 +3115,27 @@ function weatherIonIcon(code: number): keyof typeof Ionicons.glyphMap {
   return 'thunderstorm-outline';
 }
 
+function weatherSummaryLabel(code?: number | null) {
+  const value = Number(code ?? 3);
+  if (value === 0) return 'Clear';
+  if (value <= 2) return 'Partly cloudy';
+  if (value <= 48) return 'Cloudy';
+  if (value <= 67) return 'Rain';
+  if (value <= 77) return 'Snow';
+  if (value <= 82) return 'Showers';
+  return 'Storms';
+}
+
+function weatherTemp(value?: number | null, units?: WeatherForecast['trailhead_units']) {
+  if (!Number.isFinite(Number(value))) return '--';
+  return `${Math.round(Number(value))}${units?.temperature_label ?? '°'}`;
+}
+
+function firstNumber(values?: Array<number | null> | null) {
+  const value = Array.isArray(values) ? values.find(v => Number.isFinite(Number(v))) : null;
+  return Number.isFinite(Number(value)) ? Number(value) : null;
+}
+
 function rigCompatibility(camp: CampsitePin, rig: import('@/lib/store').RigProfile | null): { ok: boolean; msg: string } | null {
   if (!rig) return null;
   const tags = Array.isArray(camp.tags) ? camp.tags : [];
@@ -4373,25 +4413,33 @@ function TrailGuideAvatar({
             elevation: 16,
           }}
         >
-          {LottieView ? (
-            <LottieView
-              source={TRAIL_GUIDE_LOTTIE[state]}
-              autoPlay
-              loop
-              style={{ width: dim + 2, height: dim + 2 }}
-            />
-          ) : (
-            <View style={{ width: dim - 12, height: dim - 12, borderRadius: (dim - 12) / 2, borderWidth: 2, borderColor: tone, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.s1 }}>
-              <View style={{ position: 'absolute', top: 6, width: 14, height: 14, borderRadius: 7, backgroundColor: colors.silverBright, shadowColor: colors.silverBright, shadowOpacity: active ? 0.55 : 0.22, shadowRadius: 8 }} />
-              <View style={{ position: 'absolute', top: 18, left: 11, right: 11, height: 1.5, borderRadius: 1, backgroundColor: colors.green, opacity: 0.75, transform: [{ rotate: '-8deg' }] }} />
-              <View style={{ position: 'absolute', top: 25, left: 10, right: 10, height: 1.5, borderRadius: 1, backgroundColor: colors.silverBright, opacity: 0.54, transform: [{ rotate: '5deg' }] }} />
-              <View style={{ position: 'absolute', top: 32, left: 14, right: 14, height: 1.5, borderRadius: 1, backgroundColor: colors.green, opacity: 0.58, transform: [{ rotate: '-5deg' }] }} />
-              <Ionicons name="compass-outline" size={dim === 54 ? 27 : 34} color={tone} />
-            </View>
-          )}
-          <View style={{ position: 'absolute', right: 4, bottom: 4, width: 18, height: 18, borderRadius: 9, backgroundColor: tone, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#0b1117' }}>
-            <Ionicons name={state === 'listening' || state === 'userSpeaking' ? 'mic' : state === 'noMicPermission' ? 'mic-off' : 'radio-outline'} size={10} color="#0b1117" />
-          </View>
+	          {LottieView ? (
+	            <LottieView
+	              source={TRAIL_GUIDE_LOTTIE[state]}
+	              autoPlay
+	              loop
+	              style={{ width: dim + 2, height: dim + 2 }}
+	            />
+	          ) : (
+	            <View style={{ width: dim - 12, height: dim - 12, borderRadius: (dim - 12) / 2, borderWidth: 2, borderColor: tone, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.s1 }}>
+	              <View style={{ position: 'absolute', top: 6, width: 14, height: 14, borderRadius: 7, backgroundColor: colors.silverBright, shadowColor: colors.silverBright, shadowOpacity: active ? 0.55 : 0.22, shadowRadius: 8 }} />
+	              <View style={{ position: 'absolute', top: 18, left: 11, right: 11, height: 1.5, borderRadius: 1, backgroundColor: colors.green, opacity: 0.75, transform: [{ rotate: '-8deg' }] }} />
+	              <View style={{ position: 'absolute', top: 25, left: 10, right: 10, height: 1.5, borderRadius: 1, backgroundColor: colors.silverBright, opacity: 0.54, transform: [{ rotate: '5deg' }] }} />
+	              <View style={{ position: 'absolute', top: 32, left: 14, right: 14, height: 1.5, borderRadius: 1, backgroundColor: colors.green, opacity: 0.58, transform: [{ rotate: '-5deg' }] }} />
+	              <Ionicons name="compass-outline" size={dim === 54 ? 27 : 34} color={tone} />
+	            </View>
+	          )}
+	          <View pointerEvents="none" style={{ position: 'absolute', width: dim - 10, height: dim - 10, borderRadius: (dim - 10) / 2, alignItems: 'center', justifyContent: 'center' }}>
+	            <View style={{ position: 'absolute', width: dim - 18, height: dim - 18, borderRadius: (dim - 18) / 2, borderWidth: 1.4, borderColor: tone, opacity: 0.72 }} />
+	            <View style={{ position: 'absolute', top: dim * 0.21, width: 0, height: 0, borderLeftWidth: dim * 0.16, borderRightWidth: dim * 0.16, borderBottomWidth: dim * 0.24, borderLeftColor: 'transparent', borderRightColor: 'transparent', borderBottomColor: colors.silverBright, opacity: 0.92 }} />
+	            <View style={{ position: 'absolute', top: dim * 0.28, left: dim * 0.18, width: 0, height: 0, borderLeftWidth: dim * 0.14, borderRightWidth: dim * 0.14, borderBottomWidth: dim * 0.20, borderLeftColor: 'transparent', borderRightColor: 'transparent', borderBottomColor: '#24342e', opacity: 0.96 }} />
+	            <View style={{ position: 'absolute', top: dim * 0.54, width: dim * 0.34, height: 3, borderRadius: 3, backgroundColor: tone, transform: [{ rotate: '-18deg' }] }} />
+	            <View style={{ position: 'absolute', top: dim * 0.63, width: dim * 0.26, height: 3, borderRadius: 3, backgroundColor: colors.silverBright, opacity: 0.86, transform: [{ rotate: '16deg' }] }} />
+	            <Ionicons name="navigate" size={dim === 54 ? 15 : 18} color={tone} style={{ position: 'absolute', top: dim * 0.16, right: dim * 0.18, transform: [{ rotate: '28deg' }] }} />
+	          </View>
+	          <View style={{ position: 'absolute', right: 4, bottom: 4, width: 18, height: 18, borderRadius: 9, backgroundColor: tone, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#0b1117' }}>
+	            <Ionicons name={state === 'listening' || state === 'userSpeaking' ? 'mic' : state === 'noMicPermission' ? 'mic-off' : 'radio-outline'} size={10} color="#0b1117" />
+	          </View>
         </View>
       </View>
       {!!label && (
@@ -4870,6 +4918,14 @@ function MapScreen() {
 
   // Camp card extras
   const [campWeather,    setCampWeather]    = useState<WeatherForecast | null>(null);
+  const [mapWeatherEnabled, setMapWeatherEnabled] = useState(false);
+  const [mapWeatherCenter, setMapWeatherCenter] = useState<{ lat: number; lng: number } | null>(null);
+  const [mapWeather, setMapWeather] = useState<WeatherForecast | null>(null);
+  const [mapWeatherLoading, setMapWeatherLoading] = useState(false);
+  const [mapWeatherError, setMapWeatherError] = useState('');
+  const [showMapWeatherSheet, setShowMapWeatherSheet] = useState(false);
+  const mapWeatherTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mapWeatherSeqRef = useRef(0);
 
   // Favorites
   const favoriteCamps  = useStore(s => s.favoriteCamps);
@@ -11649,6 +11705,49 @@ function MapScreen() {
     }
   }
 
+  function mapCenterFromBounds(bounds?: { n: number; s: number; e: number; w: number } | null) {
+    if (!bounds) return null;
+    const lat = (Number(bounds.n) + Number(bounds.s)) / 2;
+    const lng = (Number(bounds.e) + Number(bounds.w)) / 2;
+    return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+  }
+
+  function queueMapWeatherFetch(center: { lat: number; lng: number }, immediate = false) {
+    setMapWeatherCenter(center);
+    setMapWeatherError('');
+    if (mapWeatherTimerRef.current) clearTimeout(mapWeatherTimerRef.current);
+    const seq = ++mapWeatherSeqRef.current;
+    mapWeatherTimerRef.current = setTimeout(() => {
+      setMapWeatherLoading(true);
+      api.getWeather(center.lat, center.lng, 7, weatherUnitMode)
+        .then(result => {
+          if (mapWeatherSeqRef.current !== seq) return;
+          setMapWeather(result);
+          setMapWeatherError('');
+        })
+        .catch(() => {
+          if (mapWeatherSeqRef.current !== seq) return;
+          setMapWeatherError('Weather unavailable');
+        })
+        .finally(() => {
+          if (mapWeatherSeqRef.current === seq) setMapWeatherLoading(false);
+        });
+    }, immediate ? 0 : 650);
+  }
+
+  function handleWeatherBounds(bounds: { n: number; s: number; e: number; w: number }) {
+    if (!mapWeatherEnabled) return;
+    const center = mapCenterFromBounds(bounds);
+    if (center) queueMapWeatherFetch(center);
+  }
+
+  function openMapWeatherTool() {
+    setShowMapDrawer(false);
+    setMapWeatherEnabled(true);
+    const center = mapCenterFromBounds(viewportRef.current) || userLoc;
+    if (center) queueMapWeatherFetch(center, true);
+  }
+
   function copyCoordinates(lat: number, lng: number) {
     Share.share({ message: `${lat.toFixed(6)}, ${lng.toFixed(6)}` });
   }
@@ -11913,6 +12012,7 @@ function MapScreen() {
         queueViewportCampFetch(bounds);
         queueWaterNavigationLineFetch(bounds);
         queueRenderedFeatureRefresh(bounds);
+        handleWeatherBounds(bounds);
       }
       if (msg.type === 'search_area') {
         // Legacy WebView button — handled by native button now, but keep as fallback
@@ -12155,6 +12255,7 @@ function MapScreen() {
     } catch {
       detail = minimal;
     }
+    detail = normalizeCampDetailArrays(detail);
     detail = await enrichCampDetailWithGoogle(detail, camp);
     if (selectedCampRef.current?.id !== camp.id) {
       return;
@@ -12212,6 +12313,64 @@ function MapScreen() {
     });
   }
 
+  async function openCampSiteCard(site: NonNullable<CampsiteDetail['campsites']>[number], parentDetail: CampsiteDetail, parentCamp: CampsitePin) {
+    const facilityId = String(site.facility_id || parentDetail.id || parentCamp.id || '').replace(/^ridb_site:[^:]+:.+$/, '');
+    const siteId = String(site.id || '').replace(/^ridb_site:[^:]+:/, '');
+    const siteCardId = site.map_card_id || (facilityId && siteId ? `ridb_site:${facilityId}:${siteId}` : site.id || '');
+    if (!siteCardId) return;
+    setLoadingDetail(true);
+    setQuickCampPhotoIndex(0);
+    setCampInsight(null);
+    setWikiArticles([]);
+    setCampFullness(null);
+    setCampWeather(null);
+    try {
+      const detail = normalizeCampDetailArrays(await api.getCampsiteDetail(String(siteCardId)));
+      const photos = campPhotoItems(detail as unknown as CampsitePin, detail);
+      const firstPhoto = photos[0]?.url || campPhotoUrl(detail.photo_url || detail.photos?.[0]);
+      const sitePin = {
+        ...parentCamp,
+        ...detail,
+        id: detail.id || String(siteCardId),
+        name: detail.name || site.name || parentCamp.name,
+        lat: Number(detail.lat ?? site.lat ?? parentDetail.lat ?? parentCamp.lat),
+        lng: Number(detail.lng ?? site.lng ?? parentDetail.lng ?? parentCamp.lng),
+        type: 'camp',
+        land_type: detail.land_type || site.type || parentDetail.land_type || parentCamp.land_type,
+        description: detail.description || `${site.name || 'Campsite'} at ${parentDetail.name || parentCamp.name}`,
+        photos: detail.photos?.length ? detail.photos : (firstPhoto ? [firstPhoto] : []),
+        photo_url: firstPhoto || detail.photo_url || parentCamp.photo_url,
+        url: detail.url || detail.booking_url || detail.official_url || parentCamp.url,
+        source: detail.source || 'ridb',
+        verified_source: detail.verified_source || detail.source_badge || parentDetail.verified_source || 'Recreation.gov',
+        source_badge: detail.source_badge || parentDetail.source_badge || 'Recreation.gov',
+        parent_campground: (detail as any).parent_campground || {
+          id: parentDetail.id,
+          name: parentDetail.name,
+          lat: parentDetail.lat,
+          lng: parentDetail.lng,
+          official_url: parentDetail.official_url || parentDetail.url,
+          booking_url: parentDetail.booking_url,
+        },
+      } as CampsitePin;
+      setSelectedCamp(sitePin);
+      setCampDetail(detail);
+      api.getCampFullness(sitePin.id).then(r => {
+        if (selectedCampRef.current?.id === sitePin.id) setCampFullness(r);
+      }).catch(() => {});
+      if (Number.isFinite(sitePin.lat) && Number.isFinite(sitePin.lng)) {
+        api.getWeather(sitePin.lat, sitePin.lng, 3, weatherUnitMode).then(r => {
+          if (selectedCampRef.current?.id === sitePin.id) setCampWeather(r);
+        }).catch(() => {});
+      }
+    } catch {
+      setQuickToast('Could not load this Recreation.gov site');
+      setTimeout(() => setQuickToast(''), 2800);
+    } finally {
+      setLoadingDetail(false);
+    }
+  }
+
   async function openCampDetail() {
     if (!selectedCamp) return;
     await loadCampDetailForCamp(selectedCamp, { showModal: true, loadInsight: true });
@@ -12250,9 +12409,9 @@ function MapScreen() {
       url: camp.url ?? '',
       ada: camp.ada ?? false,
       tags: Array.isArray(camp.tags) ? camp.tags : [],
-      photos: camp.photo_url ? [camp.photo_url] : [],
-      amenities: camp.amenities ?? [],
-      site_types: camp.site_types ?? [],
+      photos: Array.isArray(camp.photos) && camp.photos.length ? (camp.photos as any) : (camp.photo_url ? [camp.photo_url] : []),
+      amenities: Array.isArray(camp.amenities) ? camp.amenities : [],
+      site_types: Array.isArray(camp.site_types) ? camp.site_types : [],
       activities: [],
       campsites_count: 0,
       source: camp.source,
@@ -13214,11 +13373,6 @@ function MapScreen() {
   const distKm    = userLoc && navTarget ? haversineKm(userLoc.lat, userLoc.lng, navTarget.lat, navTarget.lng) : null;
   const bearing   = userLoc && navTarget ? calcBearing(userLoc.lat, userLoc.lng, navTarget.lat, navTarget.lng) : null;
   const speedMph  = userSpeed !== null && userSpeed > 0 ? userSpeed * 2.237 : null;
-  const routeHudLabel = routeFromCache
-    ? 'CACHED ROUTE'
-    : routeSourceDebug
-      ? routeSourceDebug.toUpperCase().slice(0, 28)
-      : 'ROUTED';
   const selectedTrailRoutePlan = trailRoutePlans.find(p => p.id === selectedTrailRoutePlanId) ?? trailRoutePlans[0] ?? null;
   const previewTrailDistanceM = selectedTrailRoutePlan?.distanceM ?? (trailTraceRoute.length > 1 ? trailCoordsDistanceM(trailTraceRoute) : 0);
   const elevationHydrationRef = useRef<Set<string>>(new Set());
@@ -15368,6 +15522,7 @@ function MapScreen() {
       pointerEvents="box-none"
       style={[
         s.navHudAnimated,
+        { bottom: bottomInset + 18 },
         {
           opacity: navAnim,
           transform: [{
@@ -15402,21 +15557,6 @@ function MapScreen() {
           </Text>
           <Text style={s.turnRoad} numberOfLines={1}>
             {displayStepRoad(nextStep) || navTarget?.name || 'Waiting for route details'}
-          </Text>
-        </View>
-      </View>
-
-      <View style={s.navSourceRow}>
-        <View style={[s.navSourcePill, isRerouting && { borderColor: C.orange + '55', backgroundColor: C.orange + '14' }]}>
-          <Ionicons name={isRerouting ? 'git-compare-outline' : routeFromCache ? 'cloud-offline-outline' : 'git-branch-outline'} size={12} color={isRerouting ? C.orange : C.text2} />
-          <Text style={[s.navSourceText, { color: isRerouting ? C.orange : C.text2 }]} numberOfLines={1}>
-            {isRerouting ? 'REROUTING' : routeHudLabel}
-          </Text>
-        </View>
-        <View style={[s.navSourcePill, proceedToRoute || offRouteWarn ? { borderColor: C.orange + '55', backgroundColor: C.orange + '14' } : null]}>
-          <Ionicons name={proceedToRoute || offRouteWarn ? 'warning-outline' : 'checkmark-circle-outline'} size={12} color={proceedToRoute || offRouteWarn ? C.orange : C.green} />
-          <Text style={[s.navSourceText, { color: proceedToRoute || offRouteWarn ? C.orange : C.text2 }]} numberOfLines={1}>
-            {proceedToRoute ? 'PROCEED TO LINE' : offRouteWarn ? 'OFF ROUTE WARNING' : 'ON ROUTE'}
           </Text>
         </View>
       </View>
@@ -15611,6 +15751,7 @@ function MapScreen() {
             queueViewportCampFetch(b);
             queueWaterNavigationLineFetch(b);
             queueRenderedFeatureRefresh(b);
+            handleWeatherBounds(b);
           }}
           onMapGesture={() => {
             if (navMode) setNavCameraFollow(false);
@@ -15850,8 +15991,9 @@ function MapScreen() {
               {[
                 { label: 'Search places', sub: 'Find and fly to a place', icon: 'search-outline', tone: '#60a5fa', action: () => { setShowMapDrawer(false); setSearchMode('browse'); setShowSearch(true); } },
                 { label: 'Trails', sub: 'Nearby trail discovery', icon: 'trail-sign-outline', tone: '#22c55e', action: openTrailDiscoveryFromDrawer },
-                { label: 'Layers', sub: 'Styles, 3D, land, weather', icon: 'layers-outline', tone: C.silverBright, action: () => { setShowMapDrawer(false); setShowLayerSheet(true); } },
-                { label: 'Filters', sub: 'Camps, places, community pins', icon: 'filter-outline', tone: C.orange, action: () => { setShowMapDrawer(false); setShowFilterSheet(true); } },
+	                { label: 'Layers', sub: 'Styles, 3D, land, weather', icon: 'layers-outline', tone: C.silverBright, action: () => { setShowMapDrawer(false); setShowLayerSheet(true); } },
+	                { label: 'Weather', sub: 'Forecast at map center', icon: 'cloud-outline', tone: '#38bdf8', action: openMapWeatherTool },
+	                { label: 'Filters', sub: 'Camps, places, community pins', icon: 'filter-outline', tone: C.orange, action: () => { setShowMapDrawer(false); setShowFilterSheet(true); } },
                 { label: 'Offline maps', sub: 'Download and readiness', icon: 'cloud-download-outline', tone: '#a3e635', action: () => { setShowMapDrawer(false); setShowOfflineModal(true); } },
                 { label: 'Trail builder', sub: 'Pin and snap a trail route', icon: 'git-branch-outline', tone: '#22c55e', action: () => { setShowMapDrawer(false); trailPinCaptureMode ? clearTrailPinCapture() : beginTrailPinCapture(); } },
                 { label: nearbyLoading ? 'Loading guide' : 'Audio guide', sub: nearbyNarration ? 'Replay nearby context' : 'What is around me', icon: 'headset-outline', tone: C.orange, action: () => { handleNearbyAudio(); } },
@@ -15870,6 +16012,100 @@ function MapScreen() {
             </View>
           </View>
         </View>
+      )}
+
+      {mapWeatherEnabled && !navMode && !safeWaterPlanningActive && !waterFollowActive && (
+        <>
+          <View style={s.mapWeatherOverlay} pointerEvents="box-none">
+            <View style={s.mapWeatherCrosshair} pointerEvents="none">
+              <View style={s.mapWeatherCrosshairLineH} />
+              <View style={s.mapWeatherCrosshairLineV} />
+              <View style={s.mapWeatherCrosshairDot} />
+            </View>
+          </View>
+          <View style={[s.mapWeatherPeekSheet, { bottom: bottomInset + 78 }]} pointerEvents="box-none">
+            <TouchableOpacity style={s.mapWeatherPeekCard} activeOpacity={0.9} onPress={() => setShowMapWeatherSheet(true)}>
+              {(() => {
+                const current = mapWeather?.current;
+                const code = Number(current?.weather_code ?? mapWeather?.daily?.weathercode?.[0] ?? 3);
+                const high = mapWeather?.daily?.temperature_2m_max?.[0];
+                const low = mapWeather?.daily?.temperature_2m_min?.[0];
+                const precip = firstNumber([
+                  mapWeather?.daily?.precipitation_probability_max?.[0] ?? null,
+                  current?.precipitation ?? null,
+                  mapWeather?.daily?.precipitation_sum?.[0] ?? null,
+                ]);
+                const wind = Math.round(Number(current?.wind_speed_10m ?? 0));
+                const units = mapWeather?.trailhead_units;
+                const aqi = mapWeather?.air_quality?.current?.us_aqi;
+                return (
+                  <>
+                    <View style={s.mapWeatherPeekHandleRow}>
+                      <View style={s.mapWeatherGrabber} />
+                      <View style={s.mapWeatherPeekActions}>
+                        <TouchableOpacity
+                          style={s.mapWeatherPeekIconBtn}
+                          onPress={event => {
+                            event.stopPropagation();
+                            setShowMapWeatherSheet(true);
+                          }}
+                        >
+                          <Ionicons name="chevron-up" size={15} color={C.text2} />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={s.mapWeatherPeekIconBtn}
+                          onPress={event => {
+                            event.stopPropagation();
+                            setMapWeatherEnabled(false);
+                            setShowMapWeatherSheet(false);
+                          }}
+                        >
+                          <Ionicons name="close" size={14} color={C.text2} />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                    <View style={s.mapWeatherPeekMain}>
+                      <View style={s.mapWeatherPeekIcon}>
+                        {mapWeatherLoading ? (
+                          <ActivityIndicator size="small" color="#38bdf8" />
+                        ) : (
+                          <Ionicons name={weatherIonIcon(code)} size={24} color="#38bdf8" />
+                        )}
+                      </View>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={s.mapWeatherPeekKicker}>WEATHER AT MAP CENTER</Text>
+                        <Text style={s.mapWeatherPeekTitle} numberOfLines={1}>
+                          {mapWeatherError || `${weatherTemp(current?.temperature_2m, units)} · ${weatherSummaryLabel(code)}`}
+                        </Text>
+                        <Text style={s.mapWeatherPeekSub} numberOfLines={1}>
+                          {mapWeatherCenter ? `${mapWeatherCenter.lat.toFixed(4)}, ${mapWeatherCenter.lng.toFixed(4)}` : 'Move map to inspect'}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={s.mapWeatherPeekMetrics}>
+                      <View style={s.mapWeatherPeekMetric}>
+                        <Text style={s.mapWeatherPeekMetricValue}>{weatherTemp(high, units)} / {weatherTemp(low, units)}</Text>
+                        <Text style={s.mapWeatherPeekMetricLabel}>high / low</Text>
+                      </View>
+                      <View style={s.mapWeatherPeekMetric}>
+                        <Text style={s.mapWeatherPeekMetricValue}>{precip != null ? `${Math.round(precip)}%` : '--'}</Text>
+                        <Text style={s.mapWeatherPeekMetricLabel}>precip</Text>
+                      </View>
+                      <View style={s.mapWeatherPeekMetric}>
+                        <Text style={s.mapWeatherPeekMetricValue}>{wind || '--'} {units?.wind_label ?? ''}</Text>
+                        <Text style={s.mapWeatherPeekMetricLabel}>wind</Text>
+                      </View>
+                      <View style={s.mapWeatherPeekMetric}>
+                        <Text style={s.mapWeatherPeekMetricValue}>{aqi ?? '--'}</Text>
+                        <Text style={s.mapWeatherPeekMetricLabel}>AQI</Text>
+                      </View>
+                    </View>
+                  </>
+                );
+              })()}
+            </TouchableOpacity>
+          </View>
+        </>
       )}
 
       {offlineAreaPicker && (
@@ -18233,7 +18469,7 @@ function MapScreen() {
 	                    <Text style={s.detailSectionTitle}>SITES</Text>
 	                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.siteRail}>
                       {(campDetail.campsites ?? []).slice(0, 12).map((site, idx) => {
-                        const photo = campPhotoUrl(site.photo_url || site.photos?.[0]);
+	                        const photo = campPhotoUrl(site.photo_url || site.photos?.[0] || campDetail.photo_url || campDetail.photos?.[0]);
                         const meta = [
                           site.type,
                           site.max_people ? `${site.max_people} people` : '',
@@ -18243,31 +18479,12 @@ function MapScreen() {
                         ].filter(Boolean).join(' · ');
 	                        const siteCardId = site.map_card_id || (campDetail.id && site.id ? `ridb_site:${campDetail.id}:${site.id}` : site.id);
 	                        return (
-	                          <TouchableOpacity
-	                            key={site.id || `${site.name}-${idx}`}
-	                            style={s.sitePhotoCard}
-	                            activeOpacity={0.86}
-	                            onPress={() => {
-	                              const sitePhotos = site.photos?.length ? site.photos : campDetail.photos;
-	                              setSelectedCamp({
-	                                ...selectedCamp,
-	                                ...campDetail,
-	                                id: siteCardId || selectedCamp.id,
-	                                name: site.name || selectedCamp.name,
-	                                lat: Number(site.lat ?? campDetail.lat ?? selectedCamp.lat),
-	                                lng: Number(site.lng ?? campDetail.lng ?? selectedCamp.lng),
-	                                type: 'camp',
-	                                land_type: site.type || campDetail.land_type,
-	                                description: `${site.name || 'Campsite'} at ${campDetail.name}`,
-	                                photo_url: site.photo_url || sitePhotos?.[0] || campDetail.photo_url,
-	                                photos: sitePhotos,
-	                                source: 'ridb',
-	                                verified_source: site.verified_source || campDetail.verified_source,
-	                                source_badge: site.source_badge || campDetail.source_badge,
-	                              } as CampsitePin);
-	                              setCampDetail({ ...campDetail, selected_site: site } as any);
-	                            }}
-	                          >
+		                          <TouchableOpacity
+		                            key={site.id || `${site.name}-${idx}`}
+		                            style={s.sitePhotoCard}
+		                            activeOpacity={0.86}
+		                            onPress={() => openCampSiteCard(site, campDetail, selectedCamp)}
+		                          >
 	                            {photo ? (
 	                              <Image source={{ uri: photo }} style={s.sitePhoto} resizeMode="cover" />
 	                            ) : (
@@ -18742,7 +18959,7 @@ function MapScreen() {
                       <Text style={[s.detailLandText, { color: landColor(campDetail.land_type).text }]}>{campDetail.land_type.toUpperCase()}</Text>
                     </View>
                   ) : null}
-                  {campDetail.tags.map(cleanDisplayLabel).filter(Boolean).map(t => (
+                  {(campDetail.tags ?? []).map(cleanDisplayLabel).filter(Boolean).map(t => (
                     <View key={t} style={s.qTag}><Text style={s.qTagText}>{t.replace(/_/g, ' ').toUpperCase()}</Text></View>
                   ))}
                   {campDetail.ada && (
@@ -18887,7 +19104,7 @@ function MapScreen() {
                     <Text style={s.detailSectionTitle}>Sites</Text>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.siteRail}>
                       {(campDetail.campsites ?? []).slice(0, 12).map((site, idx) => {
-                        const photo = campPhotoUrl(site.photo_url || site.photos?.[0]);
+	                        const photo = campPhotoUrl(site.photo_url || site.photos?.[0] || campDetail.photo_url || campDetail.photos?.[0]);
                         const meta = [
                           site.type,
                           site.max_people ? `${site.max_people} people` : '',
@@ -19249,6 +19466,96 @@ function MapScreen() {
         title={campDetail?.name || selectedCamp?.name || 'Camp'}
         onClose={() => setCampGalleryIndex(null)}
       />
+
+      <Modal visible={showMapWeatherSheet} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowMapWeatherSheet(false)}>
+        <SafeAreaView style={[s.detailModal, { backgroundColor: C.bg }]}>
+          <View style={s.mapWeatherSheetHeader}>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={s.mapWeatherSheetKicker}>WEATHER AT MAP CENTER</Text>
+              <Text style={s.mapWeatherSheetTitle} numberOfLines={1}>
+                {mapWeatherCenter ? `${mapWeatherCenter.lat.toFixed(4)}, ${mapWeatherCenter.lng.toFixed(4)}` : 'Map center'}
+              </Text>
+            </View>
+            <TouchableOpacity style={s.detailClose} onPress={() => setShowMapWeatherSheet(false)}>
+              <Ionicons name="close" size={18} color={C.text2} />
+            </TouchableOpacity>
+          </View>
+          <ScrollView contentContainerStyle={s.mapWeatherSheetContent} showsVerticalScrollIndicator={false}>
+            {mapWeather ? (() => {
+              const current = mapWeather.current;
+              const code = Number(current?.weather_code ?? mapWeather.daily.weathercode?.[0] ?? 3);
+              const units = mapWeather.trailhead_units;
+              const airCurrent = mapWeather.air_quality?.current;
+              return (
+                <>
+                  <View style={s.mapWeatherCurrentCard}>
+                    <Ionicons name={weatherIonIcon(code)} size={36} color="#38bdf8" />
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={s.mapWeatherCurrentTemp}>{weatherTemp(current?.temperature_2m, units)}</Text>
+                      <Text style={s.mapWeatherCurrentMeta}>{weatherSummaryLabel(code)} · feels {weatherTemp(current?.apparent_temperature, units)}</Text>
+                    </View>
+                    <View style={s.mapWeatherMetricStack}>
+                      <Text style={s.mapWeatherMetric}>{Math.round(Number(current?.wind_speed_10m ?? 0))} {units?.wind_label ?? ''}</Text>
+                      <Text style={s.mapWeatherMetricSub}>wind</Text>
+                    </View>
+                  </View>
+
+                  <View style={s.detailSection}>
+                    <Text style={s.detailSectionTitle}>NEXT HOURS</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.mapWeatherHourlyRail}>
+                      {(mapWeather.hourly?.time ?? []).slice(0, 12).map((time, idx) => (
+                        <View key={`${time}-${idx}`} style={s.mapWeatherHourCard}>
+                          <Text style={s.mapWeatherHourTime}>{new Date(time).getHours().toString().padStart(2, '0')}</Text>
+                          <Ionicons name={weatherIonIcon(Number(mapWeather.hourly?.weather_code?.[idx] ?? code))} size={17} color="#38bdf8" />
+                          <Text style={s.mapWeatherHourTemp}>{weatherTemp(mapWeather.hourly?.temperature_2m?.[idx], units)}</Text>
+                          <Text style={s.mapWeatherHourRain}>{Math.round(Number(mapWeather.hourly?.precipitation_probability?.[idx] ?? 0))}%</Text>
+                        </View>
+                      ))}
+                    </ScrollView>
+                  </View>
+
+                  <View style={s.detailSection}>
+                    <Text style={s.detailSectionTitle}>7 DAY FORECAST</Text>
+                    {(mapWeather.daily.time ?? []).slice(0, 7).map((day, idx) => (
+                      <View key={day} style={s.mapWeatherDayRow}>
+                        <Text style={s.mapWeatherDayName}>{idx === 0 ? 'Today' : new Date(day).toLocaleDateString(undefined, { weekday: 'short' })}</Text>
+                        <Ionicons name={weatherIonIcon(Number(mapWeather.daily.weathercode?.[idx] ?? code))} size={17} color="#38bdf8" />
+                        <Text style={s.mapWeatherDayTemp}>{weatherTemp(mapWeather.daily.temperature_2m_max?.[idx], units)} / {weatherTemp(mapWeather.daily.temperature_2m_min?.[idx], units)}</Text>
+                        <Text style={s.mapWeatherDayMeta}>{Math.round(Number(mapWeather.daily.precipitation_probability_max?.[idx] ?? 0))}% · UV {Math.round(Number(mapWeather.daily.uv_index_max?.[idx] ?? 0))}</Text>
+                      </View>
+                    ))}
+                  </View>
+
+                  <View style={s.detailSection}>
+                    <Text style={s.detailSectionTitle}>AIR & HEALTH</Text>
+                    <View style={s.mapWeatherHealthGrid}>
+                      <View style={s.mapWeatherHealthCard}>
+                        <Text style={s.mapWeatherHealthLabel}>AQI</Text>
+                        <Text style={s.mapWeatherHealthValue}>{airCurrent?.us_aqi ?? '--'}</Text>
+                      </View>
+                      <View style={s.mapWeatherHealthCard}>
+                        <Text style={s.mapWeatherHealthLabel}>PM2.5</Text>
+                        <Text style={s.mapWeatherHealthValue}>{airCurrent?.pm2_5 ?? '--'}</Text>
+                      </View>
+                      <View style={s.mapWeatherHealthCard}>
+                        <Text style={s.mapWeatherHealthLabel}>Ozone</Text>
+                        <Text style={s.mapWeatherHealthValue}>{airCurrent?.ozone ?? '--'}</Text>
+                      </View>
+                    </View>
+                    <Text style={s.mapWeatherDisclaimer}>{mapWeather.health_summary?.advisory || 'Weather and health data are modeled estimates. Verify severe weather with official alerts before travel.'}</Text>
+                  </View>
+                  <Text style={s.mapWeatherSource}>{mapWeather.source_label || 'Open-Meteo'}</Text>
+                </>
+              );
+            })() : (
+              <View style={s.inlineLoadingDetail}>
+                <ActivityIndicator size="small" color="#38bdf8" />
+                <Text style={s.inlineLoadingText}>{mapWeatherError || 'Loading weather'}</Text>
+              </View>
+            )}
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
 
       <Modal
         visible={showFieldReportForm && !!selectedCamp}
@@ -20264,7 +20571,7 @@ function MapScreen() {
       })()}
 
       {extremeCopilotAvailable && !navMode && !safeWaterPlanningActive && !waterFollowActive && !showExtremeCopilot && (!showDiscoveryPanel || extremeCopilotVoiceActive) && (
-        <View style={[s.extremeCopilotDock, { bottom: bottomInset + (showDiscoveryPanel ? 444 : 132) }]} pointerEvents="box-none">
+        <View style={[s.extremeCopilotDock, { bottom: bottomInset + 84 }]} pointerEvents="box-none">
           <TouchableOpacity
             style={s.extremeCopilotFab}
             activeOpacity={0.88}
@@ -22472,7 +22779,7 @@ const makeStyles = (C: ColorPalette) => {
     position: 'absolute',
     left: 12,
     right: 12,
-    bottom: 92,
+    bottom: 76,
     zIndex: 10000,
     elevation: 100,
   },
@@ -22480,12 +22787,12 @@ const makeStyles = (C: ColorPalette) => {
     backgroundColor: 'rgba(17,24,39,0.96)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.14)',
-    borderRadius: 24,
+    borderRadius: 18,
     overflow: 'hidden',
     shadowColor: '#000',
-    shadowOpacity: 0.34,
-    shadowRadius: 22,
-    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.3,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
   },
   navHudInner: {
     padding: 0,
@@ -22557,47 +22864,26 @@ const makeStyles = (C: ColorPalette) => {
   turnStripWrap: { overflow: 'hidden' },
   turnStrip: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingHorizontal: 12, paddingVertical: 10,
+    paddingHorizontal: 12, paddingVertical: 9,
     backgroundColor: 'rgba(8,13,23,0.98)',
     borderBottomWidth: 1,
     borderColor: 'rgba(255,255,255,0.10)',
   },
   turnIconWrap: {
-    width: 50, height: 50, alignItems: 'center', justifyContent: 'center',
-    borderRadius: 18,
+    width: 46, height: 46, alignItems: 'center', justifyContent: 'center',
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: 'rgba(249,115,22,0.40)',
     backgroundColor: 'rgba(249,115,22,0.10)',
     overflow: 'hidden',
   },
   turnInfo: { flex: 1, justifyContent: 'center' },
-  turnDist: { color: '#fff', fontSize: 22, fontWeight: '900', letterSpacing: 0, lineHeight: 26 },
-  turnLabel: { color: 'rgba(255,255,255,0.84)', fontSize: 12, fontWeight: '800', marginTop: 1, letterSpacing: 0 },
-  turnRoad: { color: 'rgba(255,255,255,0.58)', fontSize: 11, marginTop: 1 },
-  navSourceRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingTop: 8,
-    paddingBottom: 0,
-  },
-  navSourcePill: {
-    minHeight: 28,
-    maxWidth: '48%' as any,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 9,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    backgroundColor: 'rgba(255,255,255,0.06)',
-  },
-  navSourceText: { fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.6, flexShrink: 1 },
+  turnDist: { color: '#fff', fontSize: 20, fontFamily: mono, fontWeight: '900', letterSpacing: 0, lineHeight: 24 },
+  turnLabel: { color: 'rgba(255,255,255,0.86)', fontSize: 13, fontWeight: '800', marginTop: 1, letterSpacing: 0 },
+  turnRoad: { color: 'rgba(255,255,255,0.58)', fontSize: 11, lineHeight: 15, marginTop: 1 },
   currentRoadPill: {
     marginHorizontal: 14,
-    marginTop: 10,
+    marginTop: 8,
     marginBottom: 2,
     alignSelf: 'flex-start',
     maxWidth: '88%',
@@ -22652,13 +22938,13 @@ const makeStyles = (C: ColorPalette) => {
 
   navStrip: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 12, paddingVertical: 9,
+    paddingHorizontal: 12, paddingVertical: 8,
     borderBottomWidth: 1, borderColor: 'rgba(255,255,255,0.10)',
   },
   navBearing: { alignItems: 'center', justifyContent: 'center', width: 46 },
   navBearingText: { color: C.orange, fontSize: 18, fontWeight: '900', fontFamily: mono },
   navDistBlock: { flex: 1, alignItems: 'center' },
-  navDistVal: { color: C.text, fontSize: 27, fontWeight: '900', letterSpacing: 0 },
+  navDistVal: { color: C.text, fontSize: 24, fontFamily: mono, fontWeight: '900', letterSpacing: 0 },
   navEta: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '800', marginTop: 2, letterSpacing: 0.4 },
   navRemaining: { color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 2, opacity: 0.7 },
   navSpeedBlock: { alignItems: 'center', width: 50 },
@@ -22666,7 +22952,7 @@ const makeStyles = (C: ColorPalette) => {
 
   navTarget: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingHorizontal: 12, paddingVertical: 9,
+    paddingHorizontal: 12, paddingVertical: 8,
     borderBottomWidth: 1, borderColor: 'rgba(255,255,255,0.10)',
   },
   navTargetBadge: {
@@ -22675,12 +22961,12 @@ const makeStyles = (C: ColorPalette) => {
   },
   navTargetBadgeText: { color: C.orange, fontSize: 8, fontFamily: mono, fontWeight: '900' },
   navTargetInfo: { flex: 1 },
-  navTargetName: { color: C.text, fontSize: 15, fontWeight: '800' },
+  navTargetName: { color: C.text, fontSize: 14, fontWeight: '800', letterSpacing: 0 },
   navTargetMeta: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
 
   navActions: {
     flexDirection: 'row', gap: 8,
-    paddingHorizontal: 12, paddingVertical: 9,
+    paddingHorizontal: 12, paddingVertical: 8,
   },
   navEndBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
@@ -23170,6 +23456,51 @@ const makeStyles = (C: ColorPalette) => {
   mobileCoverageMetric: { color: C.blueGlow, fontSize: 10, lineHeight: 14, fontFamily: mono, fontWeight: '900' },
   mobileCoverageSource: { color: C.text3, fontSize: 9, lineHeight: 13, fontFamily: mono, fontWeight: '900' },
   mobileCoverageNote: { color: C.text3, fontSize: 10, lineHeight: 14 },
+  mapWeatherOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', zIndex: 66 },
+  mapWeatherCrosshair: { width: 52, height: 52, alignItems: 'center', justifyContent: 'center' },
+  mapWeatherCrosshairLineH: { position: 'absolute', width: 46, height: 2, borderRadius: 1, backgroundColor: '#38bdf8' },
+  mapWeatherCrosshairLineV: { position: 'absolute', width: 2, height: 46, borderRadius: 1, backgroundColor: '#38bdf8' },
+  mapWeatherCrosshairDot: { width: 14, height: 14, borderRadius: 7, backgroundColor: C.bg, borderWidth: 2, borderColor: '#38bdf8' },
+  mapWeatherPeekSheet: { position: 'absolute', left: 10, right: 10, zIndex: 67, alignItems: 'stretch' },
+  mapWeatherPeekCard: { minHeight: 152, borderTopLeftRadius: 18, borderTopRightRadius: 18, borderBottomLeftRadius: 14, borderBottomRightRadius: 14, borderWidth: 1, borderColor: '#38bdf855', backgroundColor: 'rgba(13,20,31,0.96)', paddingHorizontal: 12, paddingTop: 7, paddingBottom: 12, shadowColor: '#000', shadowOpacity: 0.32, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 18 },
+  mapWeatherPeekHandleRow: { minHeight: 28, alignItems: 'center', justifyContent: 'center' },
+  mapWeatherGrabber: { width: 42, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.28)' },
+  mapWeatherPeekActions: { position: 'absolute', right: 0, top: 0, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  mapWeatherPeekIconBtn: { width: 28, height: 28, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s2, borderWidth: 1, borderColor: C.border },
+  mapWeatherPeekMain: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  mapWeatherPeekIcon: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#38bdf866', backgroundColor: '#38bdf814' },
+  mapWeatherPeekKicker: { color: '#38bdf8', fontSize: 8.5, fontFamily: mono, fontWeight: '900', letterSpacing: 0.7 },
+  mapWeatherPeekTitle: { color: C.text, fontSize: 18, fontWeight: '900', letterSpacing: 0, marginTop: 2 },
+  mapWeatherPeekSub: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 3 },
+  mapWeatherPeekMetrics: { flexDirection: 'row', gap: 7, marginTop: 11 },
+  mapWeatherPeekMetric: { flex: 1, minHeight: 48, borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)', backgroundColor: 'rgba(255,255,255,0.045)', borderRadius: 10, paddingHorizontal: 7, paddingVertical: 7, justifyContent: 'center' },
+  mapWeatherPeekMetricValue: { color: C.text, fontSize: 11, fontFamily: mono, fontWeight: '900', textAlign: 'center' },
+  mapWeatherPeekMetricLabel: { color: C.text3, fontSize: 8, fontFamily: mono, fontWeight: '800', textAlign: 'center', marginTop: 2 },
+  mapWeatherSheetHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 12, borderBottomWidth: 1, borderColor: C.border },
+  mapWeatherSheetKicker: { color: '#38bdf8', fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
+  mapWeatherSheetTitle: { color: C.text, fontSize: 20, fontWeight: '900', marginTop: 3 },
+  mapWeatherSheetContent: { padding: 16, paddingBottom: 100 },
+  mapWeatherCurrentCard: { minHeight: 112, flexDirection: 'row', alignItems: 'center', gap: 14, borderWidth: 1, borderColor: '#38bdf844', backgroundColor: '#38bdf810', borderRadius: 16, padding: 14, marginBottom: 18 },
+  mapWeatherCurrentTemp: { color: C.text, fontSize: 34, fontWeight: '900' },
+  mapWeatherCurrentMeta: { color: C.text3, fontSize: 12, marginTop: 3 },
+  mapWeatherMetricStack: { alignItems: 'flex-end' },
+  mapWeatherMetric: { color: '#38bdf8', fontSize: 13, fontFamily: mono, fontWeight: '900' },
+  mapWeatherMetricSub: { color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 2 },
+  mapWeatherHourlyRail: { gap: 8, paddingRight: 4 },
+  mapWeatherHourCard: { width: 70, minHeight: 96, alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderColor: C.border, borderRadius: 12, backgroundColor: C.s2 },
+  mapWeatherHourTime: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900' },
+  mapWeatherHourTemp: { color: C.text, fontSize: 13, fontWeight: '900' },
+  mapWeatherHourRain: { color: '#38bdf8', fontSize: 9, fontFamily: mono, fontWeight: '900' },
+  mapWeatherDayRow: { minHeight: 46, flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: 1, borderColor: C.border },
+  mapWeatherDayName: { width: 64, color: C.text, fontSize: 12, fontWeight: '900' },
+  mapWeatherDayTemp: { flex: 1, color: C.text2, fontSize: 12, fontFamily: mono, fontWeight: '900' },
+  mapWeatherDayMeta: { color: C.text3, fontSize: 10, fontFamily: mono },
+  mapWeatherHealthGrid: { flexDirection: 'row', gap: 8 },
+  mapWeatherHealthCard: { flex: 1, minHeight: 72, borderWidth: 1, borderColor: C.border, borderRadius: 12, backgroundColor: C.s2, padding: 10, justifyContent: 'center' },
+  mapWeatherHealthLabel: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900' },
+  mapWeatherHealthValue: { color: C.text, fontSize: 18, fontWeight: '900', marginTop: 4 },
+  mapWeatherDisclaimer: { color: C.text3, fontSize: 11, lineHeight: 16, marginTop: 10 },
+  mapWeatherSource: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', textAlign: 'center' },
   campReservationCard: { gap: 8, borderWidth: 1, borderColor: C.orange + '35', backgroundColor: C.orange + '10', borderRadius: 12, padding: 10, marginTop: 4 },
   quickCardActions: { flexDirection: 'row', gap: 8, marginTop: 2 },
   quickCardNav: {
@@ -23715,11 +24046,11 @@ const makeStyles = (C: ColorPalette) => {
 
   // ── Nav speed circle + limit badge
   navSpeedCircle: {
-    width: 62, height: 62, borderRadius: 31,
+    width: 58, height: 58, borderRadius: 29,
     backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
     alignItems: 'center', justifyContent: 'center',
   },
-  navSpeedBig: { color: C.text, fontSize: 26, fontWeight: '900', lineHeight: 28 },
+  navSpeedBig: { color: C.text, fontSize: 24, fontFamily: mono, fontWeight: '900', lineHeight: 27 },
   navSpeedUnit: { color: C.text3, fontSize: 7, fontFamily: mono, letterSpacing: 0.5 },
   navSpeedSign: {
     width: 42, borderRadius: 3,

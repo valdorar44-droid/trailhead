@@ -2355,8 +2355,47 @@ export interface WeatherForecast {
     temperature_2m_max: number[];
     temperature_2m_min: number[];
     precipitation_sum: number[];
+    precipitation_probability_max?: number[];
     windspeed_10m_max: number[];
+    wind_gusts_10m_max?: number[];
     weathercode: number[];
+    uv_index_max?: number[];
+  };
+  current?: {
+    time?: string;
+    temperature_2m?: number;
+    relative_humidity_2m?: number;
+    apparent_temperature?: number;
+    precipitation?: number;
+    weather_code?: number;
+    wind_speed_10m?: number;
+    wind_direction_10m?: number;
+    wind_gusts_10m?: number;
+  };
+  hourly?: {
+    time?: string[];
+    temperature_2m?: number[];
+    relative_humidity_2m?: number[];
+    precipitation_probability?: number[];
+    precipitation?: number[];
+    weather_code?: number[];
+    wind_speed_10m?: number[];
+  };
+  air_quality?: {
+    available?: boolean;
+    current?: {
+      us_aqi?: number;
+      pm2_5?: number;
+      pm10?: number;
+      ozone?: number;
+      nitrogen_dioxide?: number;
+    };
+    hourly?: Record<string, Array<number | null> | string[]>;
+  };
+  source_label?: string;
+  health_summary?: {
+    air_quality_source?: string;
+    advisory?: string;
   };
 }
 export interface RouteWeatherResult {

@@ -32,7 +32,7 @@ from dashboard.marine_chart_provider import (
 )
 from dashboard.hydro_provider import LOCAL_HYDRO_DIR, HYDRO_DIR, hydro_profile, read_hydro_manifest
 from dashboard.water_routing_provider import route_with_water_graph, water_graph_manifest
-from ingestors.ridb import get_campsites_near, get_campsites_search, get_facility_detail
+from ingestors.ridb import get_campsites_near, get_campsites_search, get_facility_detail, get_campsite_detail as get_ridb_campsite_detail
 from ingestors.osm import get_osm_campsites, get_osm_campsite_detail, get_water_sources, get_trailheads, get_trails, get_viewpoints, get_peaks, get_hot_springs, get_fuel_stations, get_service_places
 from ingestors.nps import get_nps_places, nps_enabled
 from ingestors.geoapify import get_geoapify_places
@@ -93,6 +93,8 @@ from db.store import (
     submit_map_contributor_application, get_map_contributor_applications,
     update_map_contributor_application_status,
 )
+from ingestors.active import get_active_activities, get_active_campgrounds
+from ingestors.fcc import get_mobile_coverage
 
 LEGACY_PLACE_PROVIDERS = {"google", "foursquare", "fsq"}
 
@@ -6624,11 +6626,12 @@ async def campsites_search(
         # Anonymous: treated as one-time per session via anon check
         if request:
             _anon_check(_client_ip(request), "search")
-    ridb, blm = await asyncio.gather(
+    ridb, blm, active = await asyncio.gather(
         get_campsites_search(lat, lng, radius_miles=radius, type_filters=type_filters),
         get_blm_campsites(lat, lng, radius_miles=radius),
+        get_active_campgrounds(lat, lng, radius_miles=radius, filters={"group_site": bool(type_filters and "group" in type_filters)}),
     )
-    return _merge_camp_sources(ridb, blm, type_filters=type_filters)[:80]
+    return _merge_camp_sources(ridb, blm, active, type_filters=type_filters)[:80]
 
 @app.get("/api/campsites/{facility_id}/detail")
 async def campsite_detail(facility_id: str):
@@ -6640,6 +6643,11 @@ async def campsite_detail(facility_id: str):
         detail = await get_facility_detail(facility_id)
     if not detail:
         raise HTTPException(status_code=404, detail="Facility not found")
+    if detail.get("lat") and detail.get("lng") and not detail.get("mobile_coverage"):
+        try:
+            detail["mobile_coverage"] = await get_mobile_coverage(float(detail["lat"]), float(detail["lng"]))
+        except Exception:
+            pass
     override = get_camp_profile_override(facility_id)
     if override:
         detail = {**detail, **override, "admin_edited": True}
@@ -6647,6 +6655,14 @@ async def campsite_detail(facility_id: str):
 
 @app.get("/api/campsites/{facility_id}/sites/{campsite_id}/detail")
 async def campsite_site_detail(facility_id: str, campsite_id: str):
+    site_detail = await get_ridb_campsite_detail(facility_id, campsite_id)
+    if site_detail:
+        try:
+            if site_detail.get("lat") and site_detail.get("lng"):
+                site_detail["mobile_coverage"] = await get_mobile_coverage(float(site_detail["lat"]), float(site_detail["lng"]))
+        except Exception:
+            pass
+        return site_detail
     detail = await get_facility_detail(facility_id)
     if not detail:
         raise HTTPException(status_code=404, detail="Facility not found")
@@ -7196,7 +7212,7 @@ async def _open_trail_photos(name: str, lat: float, lng: float) -> list[dict]:
                     "action": "query",
                     "format": "json",
                     "generator": "search",
-                    "gsrsearch": f'"{clean}" trail',
+                    "gsrsearch": f'"{clean}"',
                     "gsrlimit": 3,
                     "prop": "pageimages|info",
                     "piprop": "original|thumbnail",
@@ -8924,6 +8940,8 @@ def _camp_source_rank(camp: dict) -> int:
         return 0
     if "blm" in source or "blm" in verified:
         return 1
+    if "active" in source or "reserveamerica" in verified:
+        return 2
     if "osm" in source or "openstreetmap" in verified:
         return 3
     if _legacy_place_source(source) or _legacy_place_source(verified):
@@ -9113,14 +9131,20 @@ async def nearby_camps(lat: float, lng: float, radius: float = 50, types: str = 
     """Aggregate legal camp sources near a point, no trip required."""
     type_filters = [t.strip() for t in types.split(",") if t.strip()] if types else None
     private_stay_categories = _private_stay_categories_for_filters(type_filters)
-    ridb, blm, osm, hosted_private = await asyncio.gather(
+    active_filters = {
+        "group_site": bool(type_filters and "group" in type_filters),
+        "rv": bool(type_filters and "rv" in type_filters),
+        "tent": bool(type_filters and "tent" in type_filters),
+    }
+    ridb, blm, osm, active, hosted_private = await asyncio.gather(
         get_campsites_search(lat, lng, radius_miles=radius, type_filters=type_filters),
         get_blm_campsites(lat, lng, radius_miles=radius),
         get_osm_campsites(lat, lng, radius_m=int(min(radius, 60) * 1600)),
+        get_active_campgrounds(lat, lng, radius_miles=radius, filters=active_filters),
         get_geoapify_places(lat, lng, radius_m=int(min(radius, 45) * 1609.344), categories=private_stay_categories, limit_per_category=12) if private_stay_categories else asyncio.sleep(0, result=[]),
     )
     hosted_camps = [_camp_from_live_place(place) for place in hosted_private if isinstance(place, dict)]
-    return _merge_camp_sources(ridb, blm, osm, [c for c in hosted_camps if c], type_filters=type_filters)[:160]
+    return _merge_camp_sources(ridb, blm, osm, active, [c for c in hosted_camps if c], type_filters=type_filters)[:160]
 
 
 def _route_points_from_body(route: list[dict]) -> list[dict]:
@@ -9772,7 +9796,7 @@ def _excursion_route_distance_mi(center_lat: float, center_lng: float, item: dic
 
 def _excursion_source_confidence(source: str) -> str:
     source = (source or "").lower()
-    if source in {"nps", "blm", "ridb", "recreation.gov", "trailhead", "community"}:
+    if source in {"nps", "blm", "ridb", "recreation.gov", "active", "trailhead", "community"}:
         return "high"
     if source in {"osm", "wikipedia", "openbeta"}:
         return "medium"
@@ -11477,49 +11501,15 @@ async def _resolve_map_card_overnight(body: MapCardResolveRequest, card: dict) -
         if len(parts) == 3:
             facility_id, site_id = parts[1], parts[2]
             try:
-                detail = await get_facility_detail(facility_id)
+                site_card = await get_ridb_campsite_detail(facility_id, site_id)
             except Exception:
-                detail = None
-            if detail:
-                site = next(
-                    (
-                        item for item in (detail.get("campsites") or [])
-                        if str(item.get("id") or "") == site_id or str(item.get("map_card_id") or "") == raw_id
-                    ),
-                    None,
-                )
-                if site:
-                    photos = site.get("photos") or detail.get("photos") or []
-                    lat = site.get("lat") if site.get("lat") is not None else detail.get("lat")
-                    lng = site.get("lng") if site.get("lng") is not None else detail.get("lng")
-                    site_card = {
-                        **detail,
-                        **site,
-                        "id": raw_id,
-                        "facility_id": facility_id,
-                        "campsite_id": site_id,
-                        "parent_campground": {
-                            "id": facility_id,
-                            "name": detail.get("name"),
-                            "lat": detail.get("lat"),
-                            "lng": detail.get("lng"),
-                            "official_url": detail.get("official_url"),
-                            "booking_url": detail.get("booking_url"),
-                        },
-                        "name": site.get("name") or detail.get("name"),
-                        "lat": lat,
-                        "lng": lng,
-                        "type": "camp",
-                        "subtype": site.get("type") or "campsite",
-                        "description": site.get("description") or f"{site.get('name') or 'Campsite'} at {detail.get('name')}.",
-                        "photos": photos,
-                        "photo_url": site.get("photo_url") or (photos[0] if photos else detail.get("photo_url")),
-                        "source": "ridb",
-                        "verified_source": "Recreation.gov",
-                        "source_badge": "Official Recreation.gov",
-                        "reservation_notes": "Trailhead links to the official Recreation.gov campground page. Checkout stays on Recreation.gov.",
-                    }
-                    return site_card, {**detail, "selected_site": site_card}
+                site_card = None
+            if site_card:
+                try:
+                    parent = await get_facility_detail(facility_id)
+                except Exception:
+                    parent = None
+                return site_card, {**(parent or {}), "selected_site": site_card}
     candidates = await nearby_camps(body.lat, body.lng, radius=12, types="")
     close = [
         camp for camp in candidates
@@ -11675,7 +11665,7 @@ async def resolve_map_card(body: MapCardResolveRequest, user: dict | None = Depe
         nearby_smart_pack(NearbySmartPackRequest(
             center=PlannerPoint(lat=center_lat, lng=center_lng),
             radius=28,
-            categories=["camp", "trailhead", "viewpoint", "peak", "hot_spring", "water", "fuel", "propane", "dump", "mechanic", "parking"],
+            categories=["camp", "trailhead", "viewpoint", "peak", "hot_spring", "water", "fuel", "propane", "dump", "mechanic", "parking", "attraction", "event"],
             route=body.route or [],
         )),
         {"places": []},
@@ -11718,7 +11708,7 @@ async def resolve_map_card(body: MapCardResolveRequest, user: dict | None = Depe
             "url", "official_url", "booking_url", "ada", "verified_source", "source_badge",
             "source_freshness", "reservation_notes", "last_checked", "campsites_count",
             "price_summary", "things_to_do", "things_to_see", "visitor_centers", "campgrounds_nearby", "permits", "tours", "events", "links",
-            "site_media_count", "photo_fallback_chain",
+            "site_media_count", "photo_fallback_chain", "photo_status", "mobile_coverage",
         ):
             value = camp_card.get(key)
             if value not in (None, "", []):
@@ -11826,14 +11816,27 @@ def _related_rails_from_places(smart_places: list[dict], trails: list[dict], cam
     services: list[dict] = []
     seen: set[str] = set()
 
+    def generic_key(item: dict) -> str:
+        name = re.sub(r"[^a-z0-9]+", " ", str(item.get("name") or "").lower()).strip()
+        if name in {"blm recreation site", "recreation site", "campground", "campsite", "visitor center", "trailhead", "viewpoint", "parking"}:
+            return f"generic:{_smart_pack_type(item.get('type'))}:{name}"
+        return ""
+
     def add(bucket: list[dict], item: dict):
         try:
             key = str(item.get("id") or f"{item.get('type')}:{item.get('name')}:{round(float(item.get('lat', 0)), 4)}:{round(float(item.get('lng', 0)), 4)}")
         except Exception:
             key = str(item.get("id") or f"{item.get('type')}:{item.get('name')}")
+        gkey = generic_key(item)
+        if gkey and gkey in seen:
+            return
         if key in seen:
             return
         seen.add(key)
+        if gkey:
+            seen.add(gkey)
+        item.setdefault("photo_status", "open_photo" if item.get("photo_url") or item.get("photos") else "placeholder")
+        item.setdefault("_rail_order", len(seen))
         bucket.append(item)
 
     for item in smart_places or []:
@@ -11879,14 +11882,26 @@ def _related_rails_from_places(smart_places: list[dict], trails: list[dict], cam
         if card.get("name") and card.get("lat") is not None and card.get("lng") is not None:
             add(things, card)
 
+    def rail(items: list[dict], limit: int) -> list[dict]:
+        ranked = sorted(
+            items,
+            key=lambda item: (
+                0 if item.get("photo_url") or item.get("photos") else 1,
+                _place_source_priority(item),
+                float(item.get("distance_mi") or item.get("route_distance_mi") or 9999),
+                int(item.get("_rail_order") or 0),
+            ),
+        )[:limit]
+        return [{k: v for k, v in item.items() if k != "_rail_order"} for item in ranked]
+
     return {
-        "places": (things + sights + visitor_centers)[:14],
-        "camps": camps[:10],
-        "things_to_do": things[:16],
-        "things_to_see": sights[:16],
-        "visitor_centers": visitor_centers[:12],
-        "campgrounds_nearby": camps[:12],
-        "trip_services": services[:12],
+        "places": [*rail(things, 16), *rail(sights, 16), *rail(visitor_centers, 12)][:14],
+        "camps": rail(camps, 10),
+        "things_to_do": rail(things, 16),
+        "things_to_see": rail(sights, 16),
+        "visitor_centers": rail(visitor_centers, 12),
+        "campgrounds_nearby": rail(camps, 12),
+        "trip_services": rail(services, 8),
         "trails": (trails or [])[:10],
     }
 
@@ -11912,6 +11927,8 @@ def _place_source_priority(item: dict) -> int:
         return 0
     if source in {"ridb", "blm", "nps", "usfs", "recreation.gov"} or any(v in verified for v in ("ridb", "blm", "nps", "recreation.gov", "forest service", "usfs")):
         return 1
+    if source in {"active"} or "reserveamerica" in verified:
+        return 2
     if source in {"offline", "osm", "openstreetmap"}:
         return 3
     if _legacy_place_source(source) or _legacy_place_source(verified):
@@ -11922,7 +11939,7 @@ def _place_source_priority(item: dict) -> int:
 def _merge_place_record(existing: dict, incoming: dict) -> dict:
     primary, secondary = (incoming, existing) if _place_source_priority(incoming) < _place_source_priority(existing) else (existing, incoming)
     merged = dict(primary)
-    for key in ("photo_url", "summary", "address", "phone", "website", "rating", "rating_count", "google_maps_uri", "provider_place_id", "place_id"):
+    for key in ("photo_url", "photo_status", "summary", "address", "phone", "website", "rating", "rating_count", "google_maps_uri", "provider_place_id", "place_id"):
         if not merged.get(key):
             merged[key] = secondary.get(key)
     for key in ("photos", "reviews"):
@@ -12026,13 +12043,15 @@ def _smart_place_from_camp(camp: dict, center_lat: float, center_lng: float, rou
         "type": "camp",
         "subtype": camp.get("land_type") or "camp",
         "source": source,
-        "source_label": "Camp data",
+        "source_label": camp.get("source_badge") or camp.get("verified_source") or camp.get("source_label") or "Camp data",
         "confidence": _excursion_source_confidence(source),
         "distance_mi": round(_haversine_m(center_lat, center_lng, lat, lng) / 1609.344, 2),
         "route_distance_mi": _excursion_route_distance_mi(center_lat, center_lng, {"lat": lat, "lng": lng}, route),
         "summary": _planner_clean_text(camp.get("description") or camp.get("land_type") or "Camp option near this area.", 260),
         "access_note": "Verify current access, fees, stay limits, fire restrictions, and road conditions before camping.",
         "photo_url": camp.get("photo_url"),
+        "photos": camp.get("photos") or ([camp.get("photo_url")] if camp.get("photo_url") else []),
+        "photo_status": camp.get("photo_status") or ("facility" if camp.get("photo_url") else "placeholder"),
         "website": camp.get("url"),
         "attribution": camp.get("verified_source") or camp.get("source") or "Trailhead",
     }
@@ -12096,6 +12115,46 @@ def _smart_place_from_excursion(item: dict, center_lat: float, center_lng: float
         "activities": item.get("activities") or [],
     }
 
+async def _enrich_nearby_card_photos(items: list[dict], limit: int = 24) -> list[dict]:
+    """Attach open/official photo status to nearby cards before mobile sees them."""
+    enrichable_types = THINGS_TO_DO_PLACE_TYPES | THINGS_TO_SEE_PLACE_TYPES | {"visitor_center", "camp"}
+    sem = asyncio.Semaphore(4)
+
+    async def enrich_one(item: dict) -> dict:
+        if not isinstance(item, dict):
+            return item
+        photos = item.get("photos") if isinstance(item.get("photos"), list) else []
+        if item.get("photo_url") or photos:
+            item.setdefault("photo_status", "facility" if _smart_pack_type(item.get("type")) == "camp" else "open_photo")
+            return item
+        ptype = _smart_pack_type(item.get("type"))
+        name = re.sub(r"\s+", " ", str(item.get("name") or "").strip())
+        generic = name.lower() in {"", "blm recreation site", "recreation site", "trailhead", "viewpoint", "campground", "campsite"}
+        if ptype not in enrichable_types or generic:
+            item["photo_status"] = "placeholder"
+            return item
+        try:
+            async with sem:
+                found = await _open_trail_photos(name, float(item.get("lat")), float(item.get("lng")))
+        except Exception:
+            found = []
+        if found:
+            item["photos"] = found
+            item["photo_url"] = found[0].get("url") if isinstance(found[0], dict) else found[0]
+            item["photo_status"] = "open_photo"
+            item.setdefault("source_badge", item.get("source_label") or item.get("source") or "Open photo")
+        else:
+            item["photo_status"] = "placeholder"
+        return item
+
+    head = items[:limit]
+    tail = items[limit:]
+    enriched = await asyncio.gather(*(enrich_one(dict(item)) for item in head))
+    for item in tail:
+        if isinstance(item, dict):
+            item.setdefault("photo_status", "open_photo" if item.get("photo_url") or item.get("photos") else "placeholder")
+    return [*enriched, *tail]
+
 @app.post("/api/nearby/smart-pack")
 async def nearby_smart_pack(body: NearbySmartPackRequest, user: dict | None = Depends(_optional_user)):
     """Unified app-facing nearby discovery feed for rich place cards."""
@@ -12127,6 +12186,7 @@ async def nearby_smart_pack(body: NearbySmartPackRequest, user: dict | None = De
     camps_task = guarded("camps", lambda: nearby_camps(center_lat, center_lng, min(radius, 55), ""), []) if camp_requested else asyncio.sleep(0, result=[])
     places_task = guarded("places", lambda: nearby_places(center_lat, center_lng, min(radius, 45), place_categories, "auto", user if isinstance(user, dict) else None), [], timeout=14.0) if place_categories else asyncio.sleep(0, result=[])
     fuel_task = guarded("fuel", lambda: get_fuel_stations(center_lat, center_lng, radius_m=int(min(max(radius, 1), 25) * 1609.344)), [], timeout=8.0) if display_requested.intersection({"fuel", "propane"}) else asyncio.sleep(0, result=[])
+    active_activity_task = guarded("active_activities", lambda: get_active_activities(center_lat, center_lng, radius_miles=min(radius, 45), limit=30), [], timeout=8.0) if display_requested.intersection({"event", "attraction", "park", "historic", "trailhead", "tour"}) else asyncio.sleep(0, result=[])
     excursions_task = guarded("excursions", lambda: excursions_nearby(ExcursionNearbyRequest(
         center=PlannerPoint(lat=center_lat, lng=center_lng),
         radius=radius,
@@ -12134,7 +12194,7 @@ async def nearby_smart_pack(body: NearbySmartPackRequest, user: dict | None = De
         route=route,
         source_context="smart_pack",
     )), {"excursions": []})
-    camps, places, fuel_places, excursion_pack = await asyncio.gather(camps_task, places_task, fuel_task, excursions_task)
+    camps, places, fuel_places, active_activities, excursion_pack = await asyncio.gather(camps_task, places_task, fuel_task, active_activity_task, excursions_task)
 
     normalized: list[dict] = []
     if camp_requested:
@@ -12143,6 +12203,7 @@ async def nearby_smart_pack(body: NearbySmartPackRequest, user: dict | None = De
         normalized.extend(filter(None, (_smart_place_from_poi(p, center_lat, center_lng, route) for p in places)))
     if display_requested.intersection({"fuel", "propane"}):
         normalized.extend(filter(None, (_smart_place_from_poi(p, center_lat, center_lng, route) for p in fuel_places)))
+    normalized.extend(filter(None, (_smart_place_from_poi(p, center_lat, center_lng, route) for p in active_activities)))
     normalized.extend(filter(None, (_smart_place_from_excursion(e, center_lat, center_lng, route) for e in (excursion_pack or {}).get("excursions", []))))
     if len(route_points) >= 2:
         for item in normalized:
@@ -12159,6 +12220,7 @@ async def nearby_smart_pack(body: NearbySmartPackRequest, user: dict | None = De
         except Exception:
             return 9999.0
 
+    normalized = await _enrich_nearby_card_photos(normalized)
     normalized = _dedupe_nearby_places(normalized)
     if route_scope == "leg" and len(route_points) >= 2:
         sorted_normalized = sorted(normalized, key=lambda p: (smart_dist(p), _place_type_priority(p.get("type")), _place_source_priority(p), p.get("confidence") != "high", p.get("name", "")))[:100]

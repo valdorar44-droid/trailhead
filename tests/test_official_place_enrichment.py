@@ -45,6 +45,21 @@ class OfficialPlaceEnrichmentTests(unittest.TestCase):
         self.assertEqual([p["name"] for p in rails["places"]], ["Canyon Trail", "Canyon Overlook", "Visitor Center"])
         self.assertEqual(rails["camps"], rails["campgrounds_nearby"])
 
+    def test_related_rails_include_photo_status_and_cap_services(self):
+        places = [
+            {"id": f"dump-{i}", "name": f"Dump Station {i}", "lat": 38.0 + i / 1000, "lng": -109.0, "type": "dump"}
+            for i in range(14)
+        ] + [
+            {"id": "view-1", "name": "Canyon Overlook", "lat": 38.0, "lng": -109.0, "type": "viewpoint", "photo_url": "https://cdn.example/view.jpg"},
+            {"id": "trail-1", "name": "Canyon Trail", "lat": 38.01, "lng": -109.01, "type": "trail"},
+        ]
+
+        rails = server._related_rails_from_places(places, [], None)
+
+        self.assertEqual(len(rails["trip_services"]), 8)
+        self.assertEqual(rails["things_to_see"][0]["photo_status"], "open_photo")
+        self.assertEqual(rails["things_to_do"][0]["photo_status"], "placeholder")
+
 
 class OfficialPlaceEndpointTests(unittest.IsolatedAsyncioTestCase):
     async def test_nearby_places_returns_official_explore_category_without_unlock(self):

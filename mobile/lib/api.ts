@@ -1224,6 +1224,34 @@ export interface Campsite {
   route_progress?: number; route_progress_mi?: number; route_segment_index?: number;
   verified_source?: string;
 }
+export interface MobileCoverageRecord {
+  provider?: string;
+  technology?: string;
+  availability_class?: string;
+  signal?: string | number | null;
+  download_mbps?: number | null;
+  upload_mbps?: number | null;
+  sample_count?: number | null;
+  data_date?: string;
+  source?: string;
+  source_label?: string;
+}
+
+export interface MobileCoverageSummary {
+  available?: boolean;
+  records?: MobileCoverageRecord[];
+  modeled_source?: {
+    source?: string;
+    source_label?: string;
+    data_date?: string;
+    url?: string;
+    status?: string;
+  };
+  source_label?: string;
+  disclaimer?: string;
+  last_checked?: number;
+}
+
 export interface CampsitePin {
   id: string; name: string; lat: number; lng: number;
   tags: string[]; land_type: string; description: string;
@@ -1233,6 +1261,7 @@ export interface CampsitePin {
   photo_candidates?: string[] | Array<{ url?: string; source?: string; caption?: string; credit?: string }>;
   hero_photo_url?: string | null; primary_image?: string | null; image_url?: string | null; images?: string[];
   site_media_count?: number; photo_fallback_chain?: string[]; photo_status?: 'official' | 'fallback' | 'missing' | string;
+  mobile_coverage?: MobileCoverageSummary | null;
   price_summary?: {
     label?: string; min?: number; median?: number | null; max?: number;
     sample_count?: number; last_year?: number | null; source?: string; freshness?: string;

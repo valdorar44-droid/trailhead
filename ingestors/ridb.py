@@ -425,6 +425,7 @@ def _normalize_campsite_record(campsite: dict, attrs: list[dict] | None = None, 
         "amenities": amenities,
         "photos": photos,
         "photo_url": photos[0] if photos else None,
+        "photo_status": "campsite" if photos else "placeholder",
         "source": "ridb",
         "verified_source": "Recreation.gov",
         "source_badge": "Official Recreation.gov",
@@ -532,6 +533,7 @@ async def get_campsites_search(lat: float, lng: float, radius_miles: float = 40,
                 "land_type": _land_label(tags),
                 "description": (f.get("FacilityDescription") or "")[:300],
                 "photo_url": photo_url,
+                "photo_status": "facility" if photo_url else "placeholder",
                 "reservable": f.get("Reservable", False),
                 "cost": _format_cost(f),
                 "amenities": amenities,
@@ -560,6 +562,90 @@ def _land_label(tags: list[str]) -> str:
     if "blm" in tags: return "BLM Land"
     if "state" in tags: return "State Park"
     return "Federal Campground"
+
+async def get_campsite_detail(facility_id: str, campsite_id: str) -> dict | None:
+    """Fetch a single RIDB campsite directly, independent of facility-site caps."""
+    facility_id = str(facility_id or "").strip()
+    campsite_id = str(campsite_id or "").strip()
+    if not facility_id or not campsite_id:
+        return None
+    cache_key = f"ridb_site_detail_v2_{facility_id}_{campsite_id}"
+    cached = get_cached("campsite_cache", cache_key, ttl_seconds=86400 * 7)
+    if cached is not None:
+        return cached
+
+    headers = {"apikey": settings.ridb_api_key} if settings.ridb_api_key else {}
+    async with httpx.AsyncClient(timeout=20) as client:
+        async def _get(path: str, **params):
+            try:
+                r = await client.get(f"{RIDB_BASE}/{path}", params={"limit": 50, **params}, headers=headers)
+                r.raise_for_status()
+                return r.json()
+            except Exception:
+                return {}
+
+        detail_data, attrs_data, site_media_data, facility_data, facility_media_data = await asyncio.gather(
+            _get(f"campsites/{campsite_id}"),
+            _get(f"campsites/{campsite_id}/attributes"),
+            _get(f"campsites/{campsite_id}/media"),
+            _get(f"facilities/{facility_id}"),
+            _get(f"facilities/{facility_id}/media"),
+        )
+
+    detail_records = _as_records(detail_data)
+    site_raw = detail_records[0] if detail_records else (detail_data if isinstance(detail_data, dict) else {})
+    if not isinstance(site_raw, dict) or not site_raw:
+        return None
+    site_raw = {**site_raw, "FacilityID": facility_id, "CampsiteID": campsite_id}
+    site = _normalize_campsite_record(site_raw, _as_records(attrs_data), _as_records(site_media_data))
+    facility = facility_data if isinstance(facility_data, dict) and facility_data.get("FacilityID") else {}
+    facility_photos = _image_urls(_as_records(facility_media_data), limit=12)
+    site_photos = site.get("photos") or []
+    photos = _dedupe([*site_photos, *facility_photos], limit=16)
+    lat = site.get("lat") if site.get("lat") is not None else _record_float(facility, "FacilityLatitude", "Latitude")
+    lng = site.get("lng") if site.get("lng") is not None else _record_float(facility, "FacilityLongitude", "Longitude", "lng")
+    facility_url = (
+        _record_value(facility, "FacilityReservationURL", "ReservationURL")
+        or f"https://www.recreation.gov/camping/campgrounds/{facility_id}"
+    )
+    result = {
+        **site,
+        "id": f"ridb_site:{facility_id}:{campsite_id}",
+        "map_card_id": f"ridb_site:{facility_id}:{campsite_id}",
+        "facility_id": facility_id,
+        "campsite_id": campsite_id,
+        "parent_campground": {
+            "id": facility_id,
+            "name": facility.get("FacilityName") or "",
+            "lat": _record_float(facility, "FacilityLatitude", "Latitude"),
+            "lng": _record_float(facility, "FacilityLongitude", "Longitude", "lng"),
+            "official_url": facility_url,
+            "booking_url": facility_url,
+        },
+        "name": site.get("name") or f"Site {campsite_id}",
+        "lat": lat,
+        "lng": lng,
+        "type": "camp",
+        "subtype": site.get("type") or "campsite",
+        "land_type": site.get("type") or _land_label(_tag_facility(facility)) if facility else "Recreation.gov site",
+        "description": f"{site.get('name') or f'Site {campsite_id}'} at {facility.get('FacilityName') or 'Recreation.gov campground'}.",
+        "photos": photos,
+        "photo_url": site.get("photo_url") or (photos[0] if photos else None),
+        "photo_status": "campsite" if site_photos else ("facility" if facility_photos else "placeholder"),
+        "media_source": "ridb_campsite" if site_photos else ("ridb" if facility_photos else ""),
+        "photo_fallback_chain": ["campsite_media", "facility_media", "open_photo", "trailhead_placeholder"],
+        "source": "ridb",
+        "verified_source": "Recreation.gov",
+        "source_badge": "Official Recreation.gov",
+        "source_freshness": "Official RIDB source data cached by Trailhead; verify current availability on Recreation.gov.",
+        "reservation_notes": "Trailhead links to the official Recreation.gov campground page. Checkout stays on Recreation.gov.",
+        "booking_url": facility_url,
+        "official_url": facility_url,
+        "url": facility_url,
+        "last_checked": int(time.time()),
+    }
+    set_cached("campsite_cache", cache_key, result)
+    return result
 
 async def get_facility_detail(facility_id: str) -> dict | None:
     cache_key = f"ridb_detail_v3_{facility_id}"
@@ -771,6 +857,7 @@ async def get_facility_detail(facility_id: str) -> dict | None:
         "description": (f.get("FacilityDescription") or "")[:1000],
         "photos": photos,
         "photo_url": photos[0] if photos else None,
+        "photo_status": "campsite" if site_photo_urls else ("facility" if facility_photos else "placeholder"),
         "media_source": "ridb_campsite" if site_photo_urls else ("ridb" if facility_photos else ""),
         "photo_fallback_chain": ["campsite_media", "facility_media", "trailhead_placeholder"],
         "amenities": amenities[:12],

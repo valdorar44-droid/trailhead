@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from ingestors import ridb
 
@@ -90,6 +91,68 @@ class RidbCampsiteMediaTests(unittest.TestCase):
         self.assertEqual(normalized["photo_url"], "https://cdn.example/permit.jpg")
         self.assertIn("Needles", normalized["zones"])
         self.assertIn("Checkout", normalized["reservation_notes"])
+
+    def test_campsite_record_marks_photo_status(self):
+        normalized = ridb._normalize_campsite_record(
+            {"CampsiteID": "456", "FacilityID": "100", "CampsiteName": "Site 456"},
+            [],
+            [{"MediaType": "Image", "URL": "https://cdn.example/site.jpg"}],
+        )
+
+        self.assertEqual(normalized["photo_status"], "campsite")
+        self.assertEqual(normalized["map_card_id"], "ridb_site:100:456")
+
+
+class RidbDirectSiteDetailTests(unittest.IsolatedAsyncioTestCase):
+    async def test_direct_site_detail_fetches_site_without_facility_campsite_page(self):
+        calls: list[str] = []
+
+        class FakeResponse:
+            def __init__(self, path: str):
+                self.path = path
+                self.status_code = 200
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                if self.path.endswith("/campsites/456"):
+                    return {"CampsiteID": "456", "CampsiteName": "Remote Group Site", "CampsiteType": "GROUP STANDARD AREA"}
+                if self.path.endswith("/campsites/456/attributes"):
+                    return {"RECDATA": [{"AttributeName": "Max Num People", "AttributeValue": "35"}]}
+                if self.path.endswith("/campsites/456/media"):
+                    return {"RECDATA": [{"MediaType": "Image", "URL": "https://cdn.example/group.jpg"}]}
+                if self.path.endswith("/facilities/100"):
+                    return {"FacilityID": "100", "FacilityName": "Parent Camp", "FacilityLatitude": "45.1", "FacilityLongitude": "-93.2"}
+                if self.path.endswith("/facilities/100/media"):
+                    return {"RECDATA": [{"MediaType": "Image", "URL": "https://cdn.example/facility.jpg"}]}
+                return {}
+
+        class FakeClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def get(self, url, params=None, headers=None):
+                path = url.split("/api/v1/", 1)[-1]
+                calls.append(path)
+                return FakeResponse(url)
+
+        with (
+            patch.object(ridb, "get_cached", return_value=None),
+            patch.object(ridb, "set_cached"),
+            patch.object(ridb.httpx, "AsyncClient", return_value=FakeClient()),
+        ):
+            detail = await ridb.get_campsite_detail("100", "456")
+
+        self.assertEqual(detail["id"], "ridb_site:100:456")
+        self.assertEqual(detail["name"], "Remote Group Site")
+        self.assertEqual(detail["photo_url"], "https://cdn.example/group.jpg")
+        self.assertEqual(detail["photo_status"], "campsite")
+        self.assertEqual(detail["parent_campground"]["name"], "Parent Camp")
+        self.assertNotIn("facilities/100/campsites", calls)
 
 
 if __name__ == "__main__":

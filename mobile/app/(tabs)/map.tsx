@@ -771,6 +771,25 @@ function derivedCampActivities(camp?: CampsitePin | null, detail?: CampsiteDetai
   return uniqueCleanLabels(raw).filter(label => campOptionGroup(label) === 'activity').slice(0, 8);
 }
 
+function campMobileCoverage(detail?: CampsiteDetail | null, camp?: CampsitePin | null) {
+  const coverage = detail?.mobile_coverage || camp?.mobile_coverage;
+  if (!coverage) return null;
+  const records = Array.isArray(coverage.records) ? coverage.records.filter(Boolean) : [];
+  const primary = records.find(r => r.provider || r.technology || r.availability_class) || null;
+  const label = primary
+    ? [primary.provider, primary.technology, cleanDisplayLabel(primary.availability_class || '')].filter(Boolean).join(' · ')
+    : [coverage.modeled_source?.source_label || coverage.source_label || 'FCC modeled', coverage.modeled_source?.data_date].filter(Boolean).join(' · ');
+  const metric = primary && (primary.download_mbps || primary.upload_mbps)
+    ? [primary.download_mbps ? `${primary.download_mbps} down` : '', primary.upload_mbps ? `${primary.upload_mbps} up` : ''].filter(Boolean).join(' / ')
+    : '';
+  return {
+    label,
+    metric,
+    source: primary?.source_label || coverage.modeled_source?.source_label || coverage.source_label || 'FCC modeled',
+    disclaimer: coverage.disclaimer || 'FCC mobile data is advisory and not a guarantee of service at camp.',
+  };
+}
+
 type SavedAiKind = 'route_brief' | 'packing_list';
 type SavedAiPayload = RouteBrief | PackingList;
 
@@ -18107,6 +18126,24 @@ function MapScreen() {
 	                  </View>
 	                ) : null}
 
+	                {(() => {
+	                  const coverage = campMobileCoverage(campDetail, selectedCamp);
+	                  return coverage ? (
+	                    <View style={s.detailSection}>
+	                      <Text style={s.detailSectionTitle}>MOBILE COVERAGE</Text>
+	                      <View style={s.mobileCoverageCard}>
+	                        <View style={s.mobileCoverageTop}>
+	                          <Ionicons name="cellular-outline" size={16} color={C.blueGlow} />
+	                          <Text style={s.mobileCoverageLabel} numberOfLines={2}>{coverage.label || coverage.source}</Text>
+	                        </View>
+	                        {!!coverage.metric && <Text style={s.mobileCoverageMetric}>{coverage.metric}</Text>}
+	                        <Text style={s.mobileCoverageSource}>{coverage.source}</Text>
+	                        <Text style={s.mobileCoverageNote}>{coverage.disclaimer}</Text>
+	                      </View>
+	                    </View>
+	                  ) : null;
+	                })()}
+
                 {[
                   { title: 'ACCESS NOTES', text: campDetail.access_notes },
                   { title: 'BAIL-OUT NOTES', text: campDetail.bail_out_notes },
@@ -18732,6 +18769,24 @@ function MapScreen() {
 	                    </View>
 	                  </View>
 	                ) : null}
+
+	                {(() => {
+	                  const coverage = campMobileCoverage(campDetail, selectedCamp);
+	                  return coverage ? (
+	                    <View style={s.detailSection}>
+	                      <Text style={s.detailSectionTitle}>MOBILE COVERAGE</Text>
+	                      <View style={s.mobileCoverageCard}>
+	                        <View style={s.mobileCoverageTop}>
+	                          <Ionicons name="cellular-outline" size={16} color={C.blueGlow} />
+	                          <Text style={s.mobileCoverageLabel} numberOfLines={2}>{coverage.label || coverage.source}</Text>
+	                        </View>
+	                        {!!coverage.metric && <Text style={s.mobileCoverageMetric}>{coverage.metric}</Text>}
+	                        <Text style={s.mobileCoverageSource}>{coverage.source}</Text>
+	                        <Text style={s.mobileCoverageNote}>{coverage.disclaimer}</Text>
+	                      </View>
+	                    </View>
+	                  ) : null;
+	                })()}
 
                 {/* Description */}
                 {cleanCampDescriptionText(campDetail.description) ? (
@@ -23109,6 +23164,12 @@ const makeStyles = (C: ColorPalette) => {
   siteBody: { padding: 9, gap: 4, minHeight: 62 },
   siteName: { color: C.text, fontSize: 12, lineHeight: 15, fontWeight: '900' },
   siteMeta: { color: C.text3, fontSize: 9, lineHeight: 13, fontFamily: mono },
+  mobileCoverageCard: { gap: 6, borderWidth: 1, borderColor: C.blueGlow + '35', backgroundColor: C.blueGlow + '10', borderRadius: 12, padding: 10 },
+  mobileCoverageTop: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  mobileCoverageLabel: { flex: 1, color: C.text, fontSize: 12, lineHeight: 16, fontWeight: '900' },
+  mobileCoverageMetric: { color: C.blueGlow, fontSize: 10, lineHeight: 14, fontFamily: mono, fontWeight: '900' },
+  mobileCoverageSource: { color: C.text3, fontSize: 9, lineHeight: 13, fontFamily: mono, fontWeight: '900' },
+  mobileCoverageNote: { color: C.text3, fontSize: 10, lineHeight: 14 },
   campReservationCard: { gap: 8, borderWidth: 1, borderColor: C.orange + '35', backgroundColor: C.orange + '10', borderRadius: 12, padding: 10, marginTop: 4 },
   quickCardActions: { flexDirection: 'row', gap: 8, marginTop: 2 },
   quickCardNav: {

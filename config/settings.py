@@ -41,6 +41,16 @@ class Settings:
     nrel_api_key: str = os.environ.get("NREL_API_KEY", "DEMO_KEY")
     eia_api_key: str = os.environ.get("EIA_API_KEY", "")
     ridb_api_key: str = os.environ.get("RIDB_API_KEY", "")
+    active_campground_api_key: str = os.environ.get("ACTIVE_CAMPGROUND_API_KEY", "")
+    active_activity_search_api_key: str = os.environ.get("ACTIVE_ACTIVITY_SEARCH_API_KEY", "")
+    # Dormant until provider access and terms are confirmed.
+    active_net_us_api_key: str = os.environ.get("ACTIVE_NET_US_API_KEY", "")
+    active_net_ca_api_key: str = os.environ.get("ACTIVE_NET_CA_API_KEY", "")
+    active_trainer_api_key: str = os.environ.get("ACTIVE_TRAINER_API_KEY", "")
+    active_net_enabled: bool = os.environ.get("ACTIVE_NET_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+    fcc_vizmo_enabled: bool = os.environ.get("FCC_VIZMO_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+    fcc_bdc_mobile_data_date: str = os.environ.get("FCC_BDC_MOBILE_DATA_DATE", "")
+    fcc_bdc_mobile_source_url: str = os.environ.get("FCC_BDC_MOBILE_SOURCE_URL", "https://broadbandmap.fcc.gov/data-download/nationwide-data")
     secret_key: str = os.environ.get("SECRET_KEY", "trailhead-dev-secret-change-in-prod")
     db_path: str = os.environ.get("TRAILHEAD_DB_PATH", "/data/trailhead.db" if os.path.isdir("/data") else "./trailhead.db")
     stripe_secret_key: str = os.environ.get("STRIPE_SECRET_KEY", "")

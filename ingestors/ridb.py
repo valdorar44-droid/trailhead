@@ -64,14 +64,46 @@ def _tag_facility(facility: dict) -> list[str]:
     return list(tags)
 
 def _format_cost(facility: dict) -> str:
+    fee_text = " ".join(str(facility.get(key) or "") for key in (
+        "FacilityUseFeeDescription",
+        "RecAreaFeeDescription",
+        "FacilityDescription",
+    )).lower()
+    money = _money_values(fee_text) if "_money_values" in globals() else []
+    if money:
+        low, high = min(money), max(money)
+        return f"Reservable · {_fmt_money(low)}-{_fmt_money(high)}/night" if low != high else f"Reservable · {_fmt_money(low)}/night"
+    if any(k in fee_text for k in ["no fee", "no charge", "fee free", "free camp", "no cost"]):
+        return "Free"
     if facility.get("Reservable"):
-        return "Reservable · Est. $10-30/night"
+        return "Reservable · Verify fee"
     desc = (facility.get("FacilityDescription") or "").lower()
     if any(k in desc for k in ["no fee", "free", "no charge"]):
         return "Free"
     if "dispersed" in desc or not facility.get("Reservable"):
         return "Free / Self-Issued"
     return "See Recreation.gov"
+
+def split_historic_provider_notices(value: object, *, current_year: int | None = None) -> tuple[str, list[dict]]:
+    """Move old date-specific operational notices out of the lead description."""
+    text = _clean_text(value, 5000) if "_clean_text" in globals() else re.sub(r"\s+", " ", str(value or "")).strip()
+    if not text:
+        return "", []
+    current_year = current_year or time.gmtime().tm_year
+    notices: list[dict] = []
+    kept: list[str] = []
+    parts = re.split(r"(?<=[.!?])\s+", text)
+    for part in parts:
+        clean = part.strip()
+        if not clean:
+            continue
+        years = [int(y) for y in re.findall(r"\b(19[0-9]{2}|20[0-9]{2})\b", clean)]
+        looks_operational = re.search(r"\b(attention|notice|closed|closure|reopen|reopened|construction|maintenance|unavailable|no access)\b", clean, re.I)
+        if years and looks_operational and max(years) <= current_year - 2:
+            notices.append({"label": "Historic provider notice", "text": clean})
+        else:
+            kept.append(clean)
+    return " ".join(kept).strip(), notices
 
 def _feature_lists_from_text(*values: str) -> tuple[list[str], list[str]]:
     combo = " ".join(v.lower() for v in values if v)
@@ -525,13 +557,15 @@ async def get_campsites_search(lat: float, lng: float, radius_miles: float = 40,
                 f.get("FacilityDescription", ""),
                 f.get("FacilityTypeDescription", ""),
             )
+            clean_description, provider_notices = split_historic_provider_notices(f.get("FacilityDescription") or "")
             sites.append({
                 "id": str(f.get("FacilityID")),
                 "name": f.get("FacilityName", "Campsite"),
                 "lat": float(lat_f), "lng": float(lng_f),
                 "tags": tags,
                 "land_type": _land_label(tags),
-                "description": (f.get("FacilityDescription") or "")[:300],
+                "description": clean_description[:700],
+                "provider_notices": provider_notices,
                 "photo_url": photo_url,
                 "photo_status": "facility" if photo_url else "placeholder",
                 "reservable": f.get("Reservable", False),
@@ -847,6 +881,7 @@ async def get_facility_detail(facility_id: str) -> dict | None:
     lat_f = f.get("FacilityLatitude")
     lng_f = f.get("FacilityLongitude")
 
+    clean_description, provider_notices = split_historic_provider_notices(f.get("FacilityDescription") or "")
     result = {
         "id": str(facility_id),
         "name": f.get("FacilityName", ""),
@@ -854,7 +889,8 @@ async def get_facility_detail(facility_id: str) -> dict | None:
         "lng": float(lng_f) if lng_f else 0,
         "tags": tags,
         "land_type": _land_label(tags),
-        "description": (f.get("FacilityDescription") or "")[:1000],
+        "description": clean_description[:2000],
+        "provider_notices": provider_notices,
         "photos": photos,
         "photo_url": photos[0] if photos else None,
         "photo_status": "campsite" if site_photo_urls else ("facility" if facility_photos else "placeholder"),

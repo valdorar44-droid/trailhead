@@ -61,7 +61,13 @@ type PlaceLike = {
   google_maps_uri?: string;
   attribution?: string;
   summary?: string;
+  description?: string;
+  details?: string;
   access_note?: string;
+  registration_url?: string;
+  start_date?: string;
+  end_date?: string;
+  price?: string;
   distance_mi?: number;
   route_distance_mi?: number;
   confidence?: string;
@@ -202,6 +208,47 @@ function openNowLabel(openNow?: boolean | null) {
 function mediaUrl(url?: string | null) {
   if (!url) return '';
   return url.startsWith('/') ? `${API_BASE}${url}` : url;
+}
+
+function cleanDetailText(value?: string | null) {
+  return String(value ?? '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function ExpandableText({
+  text,
+  style,
+  linkColor,
+  previewChars = 460,
+  previewLines = 6,
+}: {
+  text?: string | null;
+  style: any;
+  linkColor: string;
+  previewChars?: number;
+  previewLines?: number;
+}) {
+  const clean = cleanDetailText(text);
+  const [expanded, setExpanded] = useState(false);
+  if (!clean) return null;
+  const shouldClamp = clean.length > previewChars;
+  const preview = shouldClamp && !expanded ? `${clean.slice(0, previewChars).replace(/\s+\S*$/, '').trim()}...` : clean;
+  return (
+    <View>
+      <Text style={style} numberOfLines={expanded ? undefined : previewLines}>{preview}</Text>
+      {shouldClamp ? (
+        <TouchableOpacity style={{ alignSelf: 'flex-start', marginTop: 6 }} onPress={() => setExpanded(value => !value)} activeOpacity={0.78}>
+          <Text style={{ color: linkColor, fontSize: 11, fontFamily: mono, fontWeight: '900' }}>{expanded ? 'LESS' : 'MORE'}</Text>
+        </TouchableOpacity>
+      ) : null}
+    </View>
+  );
 }
 
 function normalizeHours(value: PlaceLike['open_hours'], label?: string | null) {
@@ -418,6 +465,13 @@ export default function PremiumPlaceSheet({
   ].filter(Boolean).join(' · ');
   const hours = detail?.hours?.length ? detail.hours : data.hours?.length ? data.hours : normalizeHours(data.open_hours, data.hours_label);
   const sourceFreshness = data.source_freshness || (data.last_checked ? `Downloaded source checked ${new Date(Number(data.last_checked) * 1000).toLocaleDateString()}. Verify current access before relying on it.` : '');
+  const providerDetails = cleanDetailText(data.description || data.details);
+  const summaryText = cleanDetailText(data.summary);
+  const showProviderDetails = providerDetails && providerDetails !== summaryText;
+  const eventFacts = [
+    data.start_date ? ['Date', data.end_date && data.end_date !== data.start_date ? `${data.start_date} to ${data.end_date}` : data.start_date] : null,
+    data.price ? ['Price', String(data.price)] : null,
+  ].filter(Boolean) as [string, string][];
   const fishSpecies = Array.isArray(data.fish_species) ? data.fish_species.join(', ') : String(data.fish_species || '');
   const waterFacts = data.type === 'water' ? [
     data.waterbody_name ? ['Waterbody', data.waterbody_name] : null,
@@ -593,8 +647,26 @@ export default function PremiumPlaceSheet({
                   <Text style={s.infoText} numberOfLines={2}>{data.address}</Text>
                 </View>
               )}
-              {!!data.summary && (
-                <Text style={s.summaryText} numberOfLines={stage === 'full' ? 6 : 3}>{data.summary}</Text>
+              {!!summaryText && (
+                <ExpandableText
+                  text={summaryText}
+                  style={s.summaryText}
+                  linkColor={C.orange}
+                  previewLines={stage === 'full' ? 6 : 3}
+                  previewChars={stage === 'full' ? 520 : 260}
+                />
+              )}
+              {stage === 'full' && eventFacts.map(([label, value]) => (
+                <View key={label} style={s.infoRow}>
+                  <Ionicons name={label === 'Price' ? 'cash-outline' : 'calendar-outline'} size={15} color={C.text3} />
+                  <Text style={s.infoText}>{label}: {value}</Text>
+                </View>
+              ))}
+              {stage === 'full' && !!showProviderDetails && (
+                <View style={s.section}>
+                  <Text style={s.sectionLabel}>PROVIDER DETAILS</Text>
+                  <ExpandableText text={providerDetails} style={s.sectionText} linkColor={C.orange} previewChars={720} previewLines={7} />
+                </View>
               )}
               {!!data.access_note && (
                 <View style={s.infoRow}>
@@ -746,8 +818,8 @@ export default function PremiumPlaceSheet({
                     <Ionicons name="call-outline" size={15} color={C.text2} />
                   </TouchableOpacity>
                 )}
-                {!!data.website && (
-                  <TouchableOpacity style={s.secondaryBtn} onPress={() => Linking.openURL(String(data.website))}>
+                {!!(data.registration_url || data.booking_url || data.official_url || data.website) && (
+                  <TouchableOpacity style={s.secondaryBtn} onPress={() => Linking.openURL(String(data.registration_url || data.booking_url || data.official_url || data.website))}>
                     <Ionicons name="globe-outline" size={15} color={C.text2} />
                   </TouchableOpacity>
                 )}

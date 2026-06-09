@@ -1279,6 +1279,7 @@ export interface CampsitePin {
   cache_status?: string; fetched_at?: number; feature_source?: string;
   rating?: number; rating_count?: number; phone?: string; address?: string;
   provider_place_id?: string; place_id?: string;
+  provider_notices?: Array<{ label?: string; text?: string }>;
 }
 
 function campSourceBadge(camp: Partial<CampsitePin> & Record<string, any>): string {
@@ -1430,6 +1431,7 @@ export interface CampsiteDetail extends CampsitePin {
   source_confidence_notes?: string;
   max_rig_length?: string;
   reviews?: PlaceReview[];
+  provider_notices?: Array<{ label?: string; text?: string }>;
   media_source?: 'trailhead' | 'ridb' | 'blm' | 'osm' | 'google' | 'mixed' | string;
 }
 export interface GasStation {
@@ -1558,6 +1560,13 @@ export interface OsmPoi {
   website?: string;
   official_url?: string;
   booking_url?: string;
+  registration_url?: string;
+  summary?: string;
+  description?: string;
+  details?: string;
+  start_date?: string;
+  end_date?: string;
+  price?: string;
   open_now?: boolean | null;
   hours?: string[];
   open_hours?: string[] | string | Record<string, unknown> | null;

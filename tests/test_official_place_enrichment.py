@@ -56,9 +56,20 @@ class OfficialPlaceEnrichmentTests(unittest.TestCase):
 
         rails = server._related_rails_from_places(places, [], None)
 
-        self.assertEqual(len(rails["trip_services"]), 8)
+        self.assertEqual(len(rails["trip_services"]), 4)
         self.assertEqual(rails["things_to_see"][0]["photo_status"], "open_photo")
         self.assertEqual(rails["things_to_do"][0]["photo_status"], "placeholder")
+
+    def test_related_rails_collapse_repeated_named_services(self):
+        places = [
+            {"id": "dump-1", "name": "Potash Road", "lat": 38.57, "lng": -109.52, "type": "dump", "source": "geoapify"},
+            {"id": "dump-2", "name": "Potash Road", "lat": 38.572, "lng": -109.522, "type": "dump", "source": "osm"},
+            {"id": "water-1", "name": "Potash Road", "lat": 38.573, "lng": -109.523, "type": "water", "source": "geoapify"},
+        ]
+
+        rails = server._related_rails_from_places(places, [], None)
+
+        self.assertEqual([p["name"] for p in rails["trip_services"]].count("Potash Road"), 2)
 
     def test_related_rails_drop_generic_blm_without_photos(self):
         places = [
@@ -214,6 +225,36 @@ class OfficialPlaceEndpointTests(unittest.IsolatedAsyncioTestCase):
         card = server._map_card_base_from_request(body)
 
         self.assertFalse(server._map_card_is_overnight(body, card))
+
+    async def test_ridb_numeric_map_card_uses_direct_facility_detail(self):
+        body = server.MapCardResolveRequest(
+            kind="camp",
+            source="ridb",
+            source_label="Recreation.gov",
+            id="266144",
+            name="Sand Flats Recreation Area Group Campsites",
+            lat=38.5676972,
+            lng=-109.5270972,
+            type="camp",
+            subtype="campground",
+        )
+        card = server._map_card_base_from_request(body)
+        detail = {
+            "id": "266144",
+            "name": "Sand Flats Recreation Area Group Campsites",
+            "lat": 38.5676972,
+            "lng": -109.5270972,
+            "type": "camp",
+            "description": "Official Recreation.gov facility detail.",
+            "source": "ridb",
+            "source_badge": "Official Recreation.gov",
+        }
+
+        with patch.object(server, "get_facility_detail", new=AsyncMock(return_value=detail)):
+            camp, camp_detail = await server._resolve_map_card_overnight(body, card)
+
+        self.assertEqual(camp["id"], "266144")
+        self.assertEqual(camp_detail["description"], "Official Recreation.gov facility detail.")
 
 
 if __name__ == "__main__":

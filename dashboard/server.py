@@ -3252,8 +3252,8 @@ class NearbySmartPackRequest(BaseModel):
 
 class RouteCampWindow(BaseModel):
     day: int
-    start: int
-    end: int
+    start: float
+    end: float
     label: str = ""
     target_mi: float
     search_window_mi: float = 45
@@ -9379,7 +9379,7 @@ async def _select_camp_for_window(
         pass_defs.append({"name": "wide_review", "filters": [], "radius": min(max(max_radius, 82.0), max(base_radius * 1.9, 72.0)), "strict": False})
     pass_defs.append({"name": "target_review", "filters": [], "radius": min(120.0, max(max_radius, base_radius * 2.2, 105.0)), "strict": False, "target_only": True})
     key_payload = {
-        "v": 8,
+        "v": 9,
         "route": [[round(p["lat"], 3), round(p["lng"], 3)] for p in samples],
         "window": [window.day, window.start, window.end, round(window.target_mi, 1), round(window.search_window_mi, 1)],
         "filters": filter_key,
@@ -11336,8 +11336,10 @@ def _map_card_merge(primary: dict, secondary: dict | None) -> dict:
     preserve_primary_type = _smart_pack_type(primary.get("type")) in {"peak", "viewpoint", "trailhead", "hot_spring", "trail"}
     for key in (
         "id", "name", "lat", "lng", "type", "subtype",
-        "provider_place_id", "place_id", "photo_url", "summary", "address", "phone",
+        "provider_place_id", "place_id", "photo_url", "summary", "description", "details", "address", "phone",
         "website", "rating", "rating_count", "google_maps_uri", "access_note",
+        "official_url", "booking_url", "registration_url", "start_date", "end_date", "price",
+        "source_freshness", "source_badge",
     ):
         value = secondary.get(key)
         if value not in (None, "", []):
@@ -11539,6 +11541,14 @@ async def _resolve_map_card_overnight(body: MapCardResolveRequest, card: dict) -
                 except Exception:
                     parent = None
                 return site_card, {**(parent or {}), "selected_site": site_card}
+    source_text = f"{body.source or ''} {body.source_label or ''} {card.get('source') or ''} {card.get('source_label') or ''}".lower()
+    if raw_id.isdigit() and any(token in source_text for token in ("ridb", "recreation.gov", "recreation")):
+        try:
+            detail = await get_facility_detail(raw_id)
+        except Exception:
+            detail = None
+        if detail:
+            return detail, detail
     candidates = await nearby_camps(body.lat, body.lng, radius=12, types="")
     close = [
         camp for camp in candidates
@@ -11612,7 +11622,7 @@ def _map_card_cache_key(body: MapCardResolveRequest) -> str:
         f"{float(body.lat):.4f}",
         f"{float(body.lng):.4f}",
     ])
-    return f"map_card_v8:{hashlib.sha1(base.encode()).hexdigest()[:24]}"
+    return f"map_card_v10:{hashlib.sha1(base.encode()).hexdigest()[:24]}"
 
 
 def _contains_restricted_provider(value: object) -> bool:
@@ -11666,10 +11676,10 @@ async def resolve_map_card(body: MapCardResolveRequest, user: dict | None = Depe
         cached.setdefault("timings", {})["total_ms"] = round((time.time() - started) * 1000)
         return cached
 
-    async def guarded(name: str, coro, default):
+    async def guarded(name: str, coro, default, timeout: float = 2.8):
         t0 = time.time()
         try:
-            value = await asyncio.wait_for(coro, timeout=2.8)
+            value = await asyncio.wait_for(coro, timeout=timeout)
             return value, round((time.time() - t0) * 1000)
         except Exception as exc:
             errors[name] = str(exc)[:160]
@@ -11704,7 +11714,7 @@ async def resolve_map_card(body: MapCardResolveRequest, user: dict | None = Depe
         trails_discover(lat=center_lat, lng=center_lng, radius=35, mode="nearby", limit=12),
         {"trails": []},
     )
-    overnight_task = guarded("overnight_card", _resolve_map_card_overnight(body, base), (None, None)) if _map_card_is_overnight(body, base) else None
+    overnight_task = guarded("overnight_card", _resolve_map_card_overnight(body, base), (None, None), timeout=8.0) if _map_card_is_overnight(body, base) else None
     if photos_task and overnight_task:
         (detail_value, detail_ms), (photos, photos_ms), (related_pack, nearby_ms), (trail_pack, trails_ms), ((camp_card, camp_detail), overnight_ms) = await asyncio.gather(detail_task, photos_task, nearby_task, trails_task, overnight_task)
         timings["trail_photos_ms"] = photos_ms
@@ -11737,7 +11747,7 @@ async def resolve_map_card(body: MapCardResolveRequest, user: dict | None = Depe
             "url", "official_url", "booking_url", "ada", "verified_source", "source_badge",
             "source_freshness", "reservation_notes", "last_checked", "campsites_count",
             "price_summary", "things_to_do", "things_to_see", "visitor_centers", "campgrounds_nearby", "permits", "tours", "events", "links",
-            "site_media_count", "photo_fallback_chain", "photo_status", "mobile_coverage",
+            "site_media_count", "photo_fallback_chain", "photo_status", "mobile_coverage", "provider_notices",
         ):
             value = camp_card.get(key)
             if value not in (None, "", []):
@@ -11871,6 +11881,36 @@ def _related_rails_from_places(smart_places: list[dict], trails: list[dict], cam
         item.setdefault("_rail_order", len(seen))
         bucket.append(item)
 
+    def service_cluster_key(item: dict) -> str:
+        ptype = _smart_pack_type(item.get("type") or item.get("category"))
+        if ptype not in TRIP_SERVICE_PLACE_TYPES:
+            return ""
+        name = re.sub(r"[^a-z0-9]+", " ", str(item.get("name") or "").lower()).strip()
+        if not name:
+            return ""
+        generic = {"dump station", "rv dump", "water", "potable water", "fuel", "gas station", "parking"}
+        return f"{ptype}:{name if name not in generic else name}:{round(float(item.get('lat') or 0), 2)}:{round(float(item.get('lng') or 0), 2)}"
+
+    def collapse_services(items: list[dict]) -> list[dict]:
+        out: list[dict] = []
+        for item in sorted(items, key=lambda p: (_place_source_priority(p), float(p.get("distance_mi") or p.get("route_distance_mi") or 9999))):
+            key = service_cluster_key(item)
+            merged = False
+            for idx, existing in enumerate(out):
+                same_named = key and key == service_cluster_key(existing)
+                near_named = (
+                    _smart_pack_type(item.get("type")) == _smart_pack_type(existing.get("type"))
+                    and _place_cluster_name(item.get("name")) == _place_cluster_name(existing.get("name"))
+                    and _place_distance_m(item, existing) <= 805
+                )
+                if same_named or near_named:
+                    out[idx] = _merge_place_record(existing, item)
+                    merged = True
+                    break
+            if not merged:
+                out.append(item)
+        return out
+
     for item in smart_places or []:
         ptype = _smart_pack_type(item.get("type") or item.get("category"))
         if ptype == "camp":
@@ -11935,7 +11975,7 @@ def _related_rails_from_places(smart_places: list[dict], trails: list[dict], cam
         "things_to_see": rail(sights, 16),
         "visitor_centers": rail(visitor_centers, 12),
         "campgrounds_nearby": rail(camps, 12),
-        "trip_services": rail(services, 8),
+        "trip_services": rail(collapse_services(services), 4),
         "trails": (trails or [])[:10],
     }
 
@@ -12130,6 +12170,8 @@ def _smart_place_from_poi(item: dict, center_lat: float, center_lng: float, rout
         "distance_mi": round(_haversine_m(center_lat, center_lng, lat, lng) / 1609.344, 2),
         "route_distance_mi": _excursion_route_distance_mi(center_lat, center_lng, {"lat": lat, "lng": lng}, route),
         "summary": _planner_clean_text(item.get("summary") or item.get("description") or item.get("address") or item.get("subtype") or "", 300),
+        "description": _planner_clean_text(item.get("description") or item.get("details") or item.get("summary") or "", 5000),
+        "details": _planner_clean_text(item.get("details") or "", 5000),
     }
     return strip_lightweight_google_rich_fields(normalized)
 

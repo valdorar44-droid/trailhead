@@ -266,6 +266,16 @@ def normalize_activity(record: dict[str, Any], center_lat: float | None = None, 
     end_date = _first(asset, "activityEndDate", "endDate", "end_date")
     price = _active_price(asset.get("assetPrices") or _first(asset, "price", "fees", "fee"))
     photo = _active_photo_url(_first(asset, "logoUrlAdr", "imageUrl", "photoUrl"))
+    description = _clean(
+        asset.get("assetDescriptions")
+        or _first(asset, "description", "assetDsc", "summary", "shortDescription"),
+        5000,
+    )
+    details = _clean(
+        _first(asset, "details", "programDescription", "activityDescription", "longDescription", "registrationInfo"),
+        5000,
+    )
+    summary = _clean(description or details, 420)
     out = {
         "id": f"active_activity:{activity_id or f'{lat:.5f}:{lng:.5f}:{name[:32]}'}",
         "name": name,
@@ -274,7 +284,9 @@ def normalize_activity(record: dict[str, Any], center_lat: float | None = None, 
         "type": "event" if start_date else "attraction",
         "category": "event" if start_date else "attraction",
         "subtype": _clean(_first(asset, "activityName", "assetType", "category"), 120),
-        "summary": _clean(asset.get("assetDescriptions") or _first(asset, "description", "summary", "assetDsc"), 420),
+        "summary": summary,
+        "description": description,
+        "details": details,
         "photo_url": photo or None,
         "photos": [photo] if photo else [],
         "photo_status": "open_photo" if photo else "placeholder",

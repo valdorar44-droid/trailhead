@@ -696,6 +696,38 @@ function compactText(value: string, max = 520): string {
   return `${clipped.slice(0, cut > 220 ? cut : max - 1).trim()}...`;
 }
 
+function ExpandableDetailText({
+  text,
+  style,
+  linkColor,
+  previewChars = 560,
+  previewLines = 7,
+}: {
+  text?: string | null;
+  style: any;
+  linkColor: string;
+  previewChars?: number;
+  previewLines?: number;
+}) {
+  const cleaned = cleanCampDescriptionText(text);
+  const [expanded, setExpanded] = useState(false);
+  if (!cleaned) return null;
+  const shouldClamp = cleaned.length > previewChars;
+  const preview = shouldClamp && !expanded ? `${cleaned.slice(0, previewChars).replace(/\s+\S*$/, '').trim()}...` : cleaned;
+  return (
+    <View>
+      <Text style={style} numberOfLines={expanded ? undefined : previewLines}>{preview}</Text>
+      {shouldClamp ? (
+        <TouchableOpacity style={{ alignSelf: 'flex-start', marginTop: 7 }} onPress={() => setExpanded(value => !value)} activeOpacity={0.78}>
+          <Text style={{ color: linkColor, fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 0.4 }}>
+            {expanded ? 'LESS' : 'MORE'}
+          </Text>
+        </TouchableOpacity>
+      ) : null}
+    </View>
+  );
+}
+
 function campSummaryText(camp?: CampsitePin | null, detail?: CampsiteDetail | null): string {
   const addressKey = cleanCampDescriptionText(detail?.address || camp?.address || '').toLowerCase();
   const candidates = [
@@ -711,7 +743,7 @@ function campSummaryText(camp?: CampsitePin | null, detail?: CampsiteDetail | nu
     .filter(text => !addressKey || text.toLowerCase() !== addressKey)
     .filter(text => !/^[-\d.,\s]+$/.test(text));
   const useful = candidates.find(text => text.length >= 26) ?? candidates[0] ?? '';
-  if (useful) return compactText(useful);
+  if (useful) return useful;
   const type = cleanDisplayLabel(camp?.land_type || camp?.tags?.[0] || 'campground') || 'Campground';
   const where = (detail?.address || camp?.address) ? ` near ${detail?.address || camp?.address}` : '';
   return `${type}${where}. Verify current access, rules, fees, road conditions, and availability before relying on it.`;
@@ -18399,7 +18431,18 @@ function MapScreen() {
 	                {summaryText ? (
 	                  <View style={s.detailSection}>
 	                    <Text style={s.detailSectionTitle}>SUMMARY</Text>
-	                    <Text style={s.detailDesc}>{summaryText}</Text>
+	                    <ExpandableDetailText text={summaryText} style={s.detailDesc} linkColor={C.orange} />
+	                  </View>
+	                ) : null}
+	                {campDetail.provider_notices?.length ? (
+	                  <View style={s.detailSection}>
+	                    <Text style={s.detailSectionTitle}>PROVIDER NOTICES</Text>
+	                    {campDetail.provider_notices.slice(0, 3).map((notice, idx) => (
+	                      <View key={`${notice.label || 'notice'}-${idx}`} style={s.campNoteCard}>
+	                        <Text style={s.campNoteTitle}>{notice.label || 'PROVIDER NOTICE'}</Text>
+	                        <ExpandableDetailText text={notice.text} style={s.campNoteText} linkColor={C.orange} previewChars={420} previewLines={4} />
+	                      </View>
+	                    ))}
 	                  </View>
 	                ) : null}
 
@@ -19061,7 +19104,18 @@ function MapScreen() {
                 {cleanCampDescriptionText(campDetail.description) ? (
                   <View style={s.detailSection}>
                     <Text style={s.detailSectionTitle}>Summary</Text>
-                    <Text style={s.detailDesc}>{cleanCampDescriptionText(campDetail.description)}</Text>
+                    <ExpandableDetailText text={cleanCampDescriptionText(campDetail.description)} style={s.detailDesc} linkColor={C.orange} />
+                  </View>
+                ) : null}
+                {campDetail.provider_notices?.length ? (
+                  <View style={s.detailSection}>
+                    <Text style={s.detailSectionTitle}>Provider notices</Text>
+                    {campDetail.provider_notices.slice(0, 3).map((notice, idx) => (
+                      <View key={`${notice.label || 'notice'}-${idx}`} style={s.campNoteCard}>
+                        <Text style={s.campNoteTitle}>{notice.label || 'PROVIDER NOTICE'}</Text>
+                        <ExpandableDetailText text={notice.text} style={s.campNoteText} linkColor={C.orange} previewChars={420} previewLines={4} />
+                      </View>
+                    ))}
                   </View>
                 ) : null}
 

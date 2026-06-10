@@ -85,6 +85,7 @@ mkdir -p valhalla_tiles
 
 docker run --rm \
   -v "$WORKDIR:/custom_files" \
+  --user "$(id -u):$(id -g)" \
   --entrypoint /bin/bash \
   "$IMAGE" \
   -lc "

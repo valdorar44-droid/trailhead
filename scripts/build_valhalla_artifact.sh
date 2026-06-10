@@ -85,8 +85,9 @@ mkdir -p valhalla_tiles
 
 docker run --rm \
   -v "$WORKDIR:/custom_files" \
+  --entrypoint /bin/bash \
   "$IMAGE" \
-  /bin/bash -lc "
+  -lc "
     valhalla_build_config \
       --mjolnir-tile-dir /custom_files/valhalla_tiles \
       --mjolnir-tile-extract /custom_files/${LABEL}-tiles.tar \
@@ -116,8 +117,8 @@ tar -C "$WORKDIR" -cf "${LABEL}-valhalla.tar" valhalla_tiles valhalla.json
 if command -v zstd >/dev/null 2>&1; then
   zstd -T0 -19 "${LABEL}-valhalla.tar" -o "${LABEL}-valhalla.tar.zst"
 else
-  docker run --rm -v "$WORKDIR:/custom_files" ubuntu:24.04 \
-    /bin/bash -lc "apt-get update && apt-get install -y zstd && zstd -T0 -19 /custom_files/${LABEL}-valhalla.tar -o /custom_files/${LABEL}-valhalla.tar.zst"
+  docker run --rm -v "$WORKDIR:/custom_files" --entrypoint /bin/bash ubuntu:24.04 \
+    -lc "apt-get update && apt-get install -y zstd && zstd -T0 -19 /custom_files/${LABEL}-valhalla.tar -o /custom_files/${LABEL}-valhalla.tar.zst"
 fi
 
 echo "$WORKDIR/${LABEL}-valhalla.tar.zst"

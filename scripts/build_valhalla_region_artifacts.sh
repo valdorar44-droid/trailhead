@@ -61,14 +61,18 @@ for region in "${targets[@]}"; do
   states="${REGION_STATES[$region]}"
   workdir="$BASE_WORKDIR/$region"
   echo "=== Building Valhalla region: $region ($states)"
-  artifact_path="$("$ROOT_DIR/scripts/build_valhalla_artifact.sh" \
+  "$ROOT_DIR/scripts/build_valhalla_artifact.sh" \
     --workdir "$workdir" \
     --states "$states" \
-    --label "$region")"
+    --label "$region"
+  artifact_path="$workdir/$region-valhalla.tar.zst"
+  if [[ ! -s "$artifact_path" ]]; then
+    echo "Missing expected artifact after build: $artifact_path" >&2
+    exit 1
+  fi
   echo "=== Publishing $artifact_path"
   python3 "$ROOT_DIR/scripts/publish_valhalla_artifact.py" \
     --artifact "$artifact_path" \
     --key "routing/valhalla/$region.tar.zst" \
     --label "$region"
 done
-

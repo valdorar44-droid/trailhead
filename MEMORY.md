@@ -156,6 +156,90 @@ Verification:
 - `cd mobile && NODE_OPTIONS=--max-old-space-size=4096 npx tsc --noEmit` passed.
 - `git diff --check` passed.
 
+## Valhalla Regional Build Resume Note
+
+Goal:
+
+- Get Route Builder and Co-Pilot using Valhalla across all 50 states without a single giant full-US Valhalla build.
+- R2 already has all 50 per-state routing packs under `routing/{state}.tar`, but those cannot be safely runtime-merged into one connected Valhalla service.
+- Correct fix is true connected regional Valhalla builds from grouped state PBFs, then deploy/wire regional Valhalla services.
+
+What happened:
+
+- Production baseline after stabilizing:
+  - `/api/route` returns routes in all 50 state smoke tests.
+  - Only 11/50 states are currently Valhalla.
+  - 39/50 states use `osrm-fallback`.
+  - No route failures in baseline.
+- Temporarily tested expanded Midwest service by extracting multiple per-state `routing/*.tar` packs together.
+  - Bootstrap worked, but the graph was not valid enough.
+  - Several states returned `No suitable edges near location`.
+  - API `VALHALLA_AREA_URLS` was reset to `[]` so production does not use that broken regional target.
+- Added and pushed tooling in commit `8ea5355`:
+  - `docker/valhalla-artifact/valhalla_artifact_bootstrap.py`
+  - `scripts/build_valhalla_region_artifacts.sh`
+  - `scripts/probe_routing_50_states.py`
+
+Current blocker:
+
+- The WSL terminal started the regional build and downloaded west PBFs, then failed at:
+
+```text
+docker: command not found
+```
+
+- User is installing/enabling Docker Desktop WSL integration and needs to log out of Windows and back in for Docker to appear in Ubuntu.
+
+Resume after Windows logout/login:
+
+```bash
+cd /home/sean/.openclaw/workspace/trailhead
+docker --version
+docker run --rm hello-world
+```
+
+If Docker works:
+
+```bash
+cd /home/sean/.openclaw/workspace/trailhead
+railway run --service trailhead bash
+export VALHALLA_REGION_WORKDIR=/home/sean/valhalla-region-builds
+scripts/build_valhalla_region_artifacts.sh all
+```
+
+Notes:
+
+- Do not use `/mnt/nvme`; it failed with permission denied on this WSL machine.
+- Use `/home/sean/valhalla-region-builds`.
+- The previous west PBF downloads should already be in `/home/sean/valhalla-region-builds/west` and should be reused.
+- Do not paste literal `...` into `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, or `R2_SECRET_ACCESS_KEY`.
+- Prefer `railway run --service trailhead bash` so R2 secrets come from Railway and are not pasted manually.
+
+After regional artifacts finish:
+
+1. Confirm R2 has:
+   - `routing/valhalla/west.tar.zst`
+   - `routing/valhalla/great_lakes.tar.zst`
+   - `routing/valhalla/plains.tar.zst`
+   - `routing/valhalla/south_central.tar.zst`
+   - `routing/valhalla/southeast.tar.zst`
+   - `routing/valhalla/northeast.tar.zst`
+   - `routing/valhalla/alaska.tar.zst`
+   - `routing/valhalla/hawaii.tar.zst`
+2. Deploy/wire regional Valhalla services to those true regional artifacts.
+3. Set API `VALHALLA_AREA_URLS` with regional bounds only after each service passes direct probes.
+4. Run:
+
+```bash
+scripts/probe_routing_50_states.py
+```
+
+Success target:
+
+- `valhalla: 50`
+- `osrm_fallback: 0`
+- `failed: []`
+
 ## Valhalla Rolling GA/FL Build
 
 Date: 2026-06-08.

@@ -88,16 +88,29 @@ docker run --rm \
   --entrypoint /bin/bash \
   "$IMAGE" \
   -lc "
-    valhalla_build_config \
-      --mjolnir-tile-dir /custom_files/valhalla_tiles \
-      --mjolnir-tile-extract /custom_files/${LABEL}-tiles.tar \
-      > /custom_files/valhalla.json
+    set -euo pipefail
     python3 - <<'PY'
 import json
 from pathlib import Path
 path = Path('/custom_files/valhalla.json')
-config = json.loads(path.read_text())
-config.setdefault('mjolnir', {})['concurrency'] = int('${THREADS}')
+config = {
+    'mjolnir': {
+        'tile_dir': '/custom_files/valhalla_tiles',
+        'tile_extract': '/custom_files/${LABEL}-tiles.tar',
+        'concurrency': int('${THREADS}'),
+        'include_driveways': True,
+        'include_construction': False,
+        'data_processing': {'infer_turn_channels': True},
+    },
+    'loki': {
+        'actions': ['locate', 'route', 'sources_to_targets', 'optimized_route', 'isochrone'],
+        'use_connectivity': True,
+    },
+    'thor': {'source_to_target_algorithm': 'select_optimal'},
+    'service_limits': {
+        'auto': {'max_distance': 12000000, 'max_locations': 80},
+    },
+}
 config['mjolnir']['include_driveways'] = True
 config['mjolnir']['include_construction'] = False
 config['mjolnir'].setdefault('data_processing', {})['infer_turn_channels'] = True

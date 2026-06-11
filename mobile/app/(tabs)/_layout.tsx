@@ -5,14 +5,14 @@ import GuidedTourOverlay from '@/components/GuidedTourOverlay';
 import PreviewRunOnboarding from '@/components/PreviewRunOnboarding';
 
 export const unstable_settings = {
-  initialRouteName: 'map',
+  initialRouteName: 'guide',
 };
 
 export default function TabLayout() {
   return (
     <>
       <Tabs
-        initialRouteName="map"
+        initialRouteName="guide"
         screenOptions={{
           headerShown: false,
           tabBarStyle: { position: 'absolute', backgroundColor: 'transparent', borderTopWidth: 0, elevation: 0 },

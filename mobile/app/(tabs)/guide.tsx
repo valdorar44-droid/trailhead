@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator,
-  Image, Modal, Linking, TextInput,
+  Image, Modal, Linking, TextInput, useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
@@ -135,6 +135,13 @@ function mediaUrl(url?: string | null) {
   return url.startsWith('/') ? `${API_BASE}${url}` : url;
 }
 
+function timeGreeting(date = new Date()) {
+  const hour = date.getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  return 'Good evening';
+}
+
 function campImageUrl(camp: CampsitePin) {
   const direct = camp.photo_url || camp.hero_photo_url || camp.primary_image || camp.image_url;
   if (direct) return mediaUrl(direct);
@@ -169,7 +176,9 @@ export default function GuideScreen() {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const router = useRouter();
+  const user = useStore(st => st.user);
   const activeTrip = useStore(st => st.activeTrip);
   const setActiveTrip = useStore(st => st.setActiveTrip);
   const userLoc = useStore(st => st.userLoc);
@@ -316,6 +325,18 @@ export default function GuideScreen() {
   }, [activeTrip?.trip_id, weatherUnitMode]);
 
   const waypoints = useMemo(() => activeTrip?.plan.waypoints.filter(w => w.lat && w.lng) ?? [], [activeTrip?.trip_id]);
+  const displayName = useMemo(() => (user?.username || 'Explorer').trim().split(/\s+/)[0] || 'Explorer', [user?.username]);
+  const heroHeight = Math.max(280, Math.min(340, Math.round(windowHeight * 0.39)));
+  const heroImage = useMemo(() => {
+    const images = explorePlaces
+      .filter(place => ['camping', 'trails', 'parks'].includes(groupForExplorePlace(place)))
+      .map(place => place.summary.image_url || place.summary.thumbnail_url)
+      .filter(Boolean) as string[];
+    if (!images.length) return '';
+    const now = new Date();
+    const dayKey = Math.floor((Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) - Date.UTC(now.getFullYear(), 0, 0)) / 86400000);
+    return mediaUrl(images[dayKey % images.length]);
+  }, [explorePlaces]);
   const rankedExplore = useMemo(() => {
     const places = explorePlaces.map(place => {
       const loc = place.summary.lat != null && place.summary.lng != null
@@ -666,6 +687,65 @@ export default function GuideScreen() {
     );
   }
 
+  function renderLandingHeader() {
+    return (
+      <View style={s.landingHeader}>
+        <View style={[s.heroShell, { height: heroHeight }]}>
+          {heroImage ? (
+            <Image source={{ uri: heroImage }} style={s.heroImage} resizeMode="cover" />
+          ) : (
+            <View style={s.heroImageFallback}>
+              <Ionicons name="compass-outline" size={44} color="#fff" />
+            </View>
+          )}
+          <View style={s.heroOverlay} />
+          <View style={s.heroContent}>
+            <Text style={s.heroGreeting}>{timeGreeting()}, {displayName}</Text>
+            <Text style={s.heroTitle}>Find your next adventure</Text>
+            <Text style={s.heroSub}>Campsites, trails, parks, and stories from one place.</Text>
+            <View style={s.heroSearch}>
+              <Ionicons name="search-outline" size={19} color="rgba(15,23,42,0.55)" />
+              <TextInput
+                value={exploreQuery}
+                onChangeText={setExploreQuery}
+                placeholder="Search destinations or activities"
+                placeholderTextColor="rgba(15,23,42,0.48)"
+                style={s.heroSearchInput}
+                returnKeyType="search"
+              />
+              {!!exploreQuery ? (
+                <TouchableOpacity onPress={() => setExploreQuery('')} style={s.heroSearchIconBtn}>
+                  <Ionicons name="close" size={15} color="rgba(15,23,42,0.55)" />
+                </TouchableOpacity>
+              ) : (
+                <View style={s.heroSearchIconBtn}>
+                  <Ionicons name="options-outline" size={18} color="rgba(15,23,42,0.62)" />
+                </View>
+              )}
+            </View>
+          </View>
+        </View>
+
+        <View style={s.tabs}>
+          {(['explore', 'narrations', 'weather'] as const).map(t => (
+            <TouchableOpacity key={t} style={[s.tab, tab === t && s.tabActive]} onPress={() => setTab(t)}>
+              <View style={s.tabInner}>
+                <Ionicons
+                  name={t === 'explore' ? 'compass-outline' : t === 'narrations' ? 'mic-outline' : 'partly-sunny-outline'}
+                  size={15}
+                  color={tab === t ? C.orange : C.text3}
+                />
+                <Text style={[s.tabText, tab === t && s.tabTextActive]}>
+                  {t === 'explore' ? 'EXPLORE' : t === 'narrations' ? 'GUIDES' : 'WEATHER'}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+    );
+  }
+
   async function whatIsHere() {
     setNearbyLoading(true);
     setNearbyNarration('');
@@ -700,80 +780,31 @@ export default function GuideScreen() {
 
   return (
     <SafeAreaView style={s.container}>
-      <TrailheadTopBar
-        title="EXPLORE"
-        subtitle={activeTrip?.plan.trip_name ?? 'Featured places, route stories, and weather'}
-        icon="compass-outline"
-        style={s.header}
-        right={(
-          <View style={s.headerRight}>
-          {tab === 'narrations' && (
-            <TouchableOpacity
-              style={[s.autoBtn, autoPlay && s.autoBtnOn]}
-              onPress={() => Object.keys(guide).length > 0 && setAutoPlay(p => !p)}
-            >
-              <Ionicons name={autoPlay ? 'radio' : 'radio-outline'} size={14}
-                color={autoPlay ? C.orange : C.text3} />
-              <Text style={[s.autoBtnText, autoPlay && { color: C.orange }]}>AUTO</Text>
-            </TouchableOpacity>
-          )}
-          </View>
-        )}
-      />
-
-      <View style={s.tabs}>
-        {(['explore', 'narrations', 'weather'] as const).map(t => (
-          <TouchableOpacity key={t} style={[s.tab, tab === t && s.tabActive]} onPress={() => setTab(t)}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-              <Ionicons
-                name={t === 'explore' ? 'compass-outline' : t === 'narrations' ? 'mic-outline' : 'partly-sunny-outline'}
-                size={13}
-                color={tab === t ? C.orange : C.text3}
-              />
-              <Text style={[s.tabText, tab === t && s.tabTextActive]}>
-                {t === 'explore' ? 'EXPLORE' : t === 'narrations' ? 'NARRATIONS' : 'WEATHER'}
-              </Text>
-            </View>
-          </TouchableOpacity>
-        ))}
-      </View>
-
       <ScrollView style={s.scroll} contentContainerStyle={s.scrollContent}>
+        {renderLandingHeader()}
+
         {tab === 'explore' && (
           <>
-            <View style={s.exploreHero}>
-              <View style={s.exploreHeroText}>
-                <Text style={s.exploreEyebrow}>EXPLORE</Text>
-                <Text style={s.exploreTitle}>Find the next stop</Text>
-                <Text style={s.exploreSub}>Browse camping, trails, water, parks, services, nearby places, and trip stories from one place.</Text>
+            <View style={s.guideCallout}>
+              <View style={s.guideCalloutIcon}>
+                <Ionicons name="sparkles-outline" size={24} color={C.orange} />
               </View>
-              <Ionicons name="compass-outline" size={30} color={C.orange} />
+              <View style={s.guideCalloutText}>
+                <Text style={s.guideCalloutTitle}>Ask Trail Guide</Text>
+                <Text style={s.guideCalloutSub}>Outdoor ideas, route stories, and nearby finds.</Text>
+              </View>
+              <TouchableOpacity style={s.guideCalloutAction} onPress={whatIsHere} disabled={nearbyLoading}>
+                {nearbyLoading ? <ActivityIndicator color={C.orange} size="small" /> : <Ionicons name="pulse-outline" size={19} color={C.orange} />}
+              </TouchableOpacity>
             </View>
 
-            <View style={s.exploreSearch}>
-              <Ionicons name="search-outline" size={18} color={C.text3} />
-              <TextInput
-                value={exploreQuery}
-                onChangeText={setExploreQuery}
-                placeholder="Search destinations or activities"
-                placeholderTextColor={C.text3}
-                style={s.exploreSearchInput}
-                returnKeyType="search"
-              />
-              {!!exploreQuery && (
-                <TouchableOpacity onPress={() => setExploreQuery('')} style={s.exploreSearchClear}>
-                  <Ionicons name="close" size={14} color={C.text3} />
-                </TouchableOpacity>
-              )}
-            </View>
-
-            <View style={s.categoryGrid}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.categoryStrip}>
               {EXPLORE_CATEGORY_BUTTONS.map(item => {
                 const active = item.label === 'Nearby' ? exploreMode === 'nearby' : exploreCategory === item.label && exploreMode !== 'nearby';
                 return (
                   <TouchableOpacity
                     key={item.label}
-                    style={[s.categoryTile, active && { borderColor: item.color, backgroundColor: item.color + '18' }]}
+                    style={[s.categoryPill, active && { borderColor: item.color, backgroundColor: item.color + '18' }]}
                     activeOpacity={0.86}
                     onPress={() => {
                       if (item.label === 'Nearby') {
@@ -785,14 +816,14 @@ export default function GuideScreen() {
                       }
                     }}
                   >
-                    <View style={[s.categoryTileIcon, { backgroundColor: item.color + '18', borderColor: item.color + '44' }]}>
-                      <Ionicons name={item.icon as any} size={21} color={item.color} />
-                    </View>
-                    <Text style={s.categoryTileText} numberOfLines={2}>{item.label}</Text>
+                    <Ionicons name={item.icon as any} size={18} color={item.color} />
+                    <Text style={[s.categoryPillText, active && { color: item.color }]} numberOfLines={1}>
+                      {item.label === 'Nearby' ? 'Near Me' : item.label}
+                    </Text>
                   </TouchableOpacity>
                 );
               })}
-            </View>
+            </ScrollView>
 
             <View style={s.modeRow}>
               {(['featured', 'nearby', 'trip'] as const).map(mode => (
@@ -883,6 +914,22 @@ export default function GuideScreen() {
 
         {tab === 'narrations' && (
           <>
+            {!!activeTrip && Object.keys(guide).length > 0 && (
+              <View style={s.narrationToolbar}>
+                <View>
+                  <Text style={s.exploreSectionTitle}>TRIP GUIDES</Text>
+                  <Text style={s.exploreSectionSub}>{Object.keys(guide).length} narrations ready</Text>
+                </View>
+                <TouchableOpacity
+                  style={[s.autoBtn, autoPlay && s.autoBtnOn]}
+                  onPress={() => setAutoPlay(p => !p)}
+                >
+                  <Ionicons name={autoPlay ? 'radio' : 'radio-outline'} size={14}
+                    color={autoPlay ? C.orange : C.text3} />
+                  <Text style={[s.autoBtnText, autoPlay && { color: C.orange }]}>AUTO</Text>
+                </TouchableOpacity>
+              </View>
+            )}
             {!activeTrip && (
               <View style={s.emptyState}>
                 <Ionicons name="mic-outline" size={48} color={C.text3} />
@@ -1286,13 +1333,39 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   autoBtnOn: { borderColor: C.orange, backgroundColor: C.orangeGlow },
   autoBtnText: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '700' },
-  tabs: { flexDirection: 'row', borderBottomWidth: 1, borderColor: C.border, backgroundColor: C.s1 },
-  tab: { flex: 1, paddingVertical: 11, alignItems: 'center', borderBottomWidth: 2, borderBottomColor: 'transparent' },
+  landingHeader: { marginHorizontal: -14, marginTop: -14, backgroundColor: C.s1, borderBottomWidth: 1, borderColor: C.border },
+  heroShell: { height: 330, backgroundColor: C.s1, overflow: 'hidden' },
+  heroImage: { width: '100%', height: '100%' },
+  heroImageFallback: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#1f2937' },
+  heroOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.32)' },
+  heroContent: { position: 'absolute', left: 18, right: 18, bottom: 18 },
+  heroGreeting: { color: '#fff', fontSize: 16, lineHeight: 21, fontWeight: '800' },
+  heroTitle: { color: '#fff', fontSize: 42, lineHeight: 44, fontWeight: '900', marginTop: 8 },
+  heroSub: { color: 'rgba(255,255,255,0.92)', fontSize: 17, lineHeight: 24, fontWeight: '700', marginTop: 10, maxWidth: 330 },
+  heroSearch: {
+    minHeight: 58,
+    marginTop: 24,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+  },
+  heroSearchInput: { flex: 1, minWidth: 0, color: '#111827', fontSize: 16, paddingVertical: 13 },
+  heroSearchIconBtn: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
+  tabs: { flexDirection: 'row', backgroundColor: C.s1 },
+  tab: { flex: 1, paddingVertical: 12, alignItems: 'center', borderBottomWidth: 2, borderBottomColor: 'transparent' },
   tabActive: { borderBottomColor: C.orange },
-  tabText: { color: C.text3, fontSize: 11, fontFamily: mono },
+  tabInner: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  tabText: { color: C.text3, fontSize: 11, fontFamily: mono, fontWeight: '900' },
   tabTextActive: { color: C.orange },
   scroll: { flex: 1 },
-  scrollContent: { padding: 14, gap: 12, paddingBottom: 122 },
+  scrollContent: { padding: 14, gap: 11, paddingBottom: 122 },
   loadRow: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     padding: 16, backgroundColor: C.s2, borderRadius: 12, borderWidth: 1, borderColor: C.border,
@@ -1326,11 +1399,42 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: C.s2,
   },
-  modeRow: { flexDirection: 'row', backgroundColor: C.s1, borderRadius: 13, borderWidth: 1, borderColor: C.border, padding: 4, gap: 4 },
-  modeBtn: { flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 10 },
+  modeRow: { flexDirection: 'row', backgroundColor: C.s1, borderRadius: 16, borderWidth: 1, borderColor: C.border, padding: 4, gap: 4 },
+  modeBtn: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 12 },
   modeBtnActive: { backgroundColor: C.orangeGlow },
   modeBtnText: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '800' },
   modeBtnTextActive: { color: C.orange },
+  guideCallout: {
+    minHeight: 76,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: C.orange + '26',
+    backgroundColor: C.orangeGlow,
+    paddingHorizontal: 13,
+    paddingVertical: 12,
+  },
+  guideCalloutIcon: { width: 48, height: 48, borderRadius: 14, borderWidth: 1, borderColor: C.orange + '28', backgroundColor: C.s1, alignItems: 'center', justifyContent: 'center' },
+  guideCalloutText: { flex: 1, minWidth: 0 },
+  guideCalloutTitle: { color: C.orange, fontSize: 15, lineHeight: 19, fontWeight: '900' },
+  guideCalloutSub: { color: C.text2, fontSize: 12, lineHeight: 17, marginTop: 2 },
+  guideCalloutAction: { width: 42, height: 42, borderRadius: 21, backgroundColor: C.s1, borderWidth: 1, borderColor: C.orange + '28', alignItems: 'center', justifyContent: 'center' },
+  narrationToolbar: { minHeight: 58, borderRadius: 16, borderWidth: 1, borderColor: C.border, backgroundColor: C.s1, paddingHorizontal: 13, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  categoryStrip: { gap: 9, paddingRight: 8 },
+  categoryPill: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingHorizontal: 12,
+    borderRadius: 13,
+    backgroundColor: C.s1,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  categoryPillText: { color: C.text, fontSize: 12, fontWeight: '900' },
   categoryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   categoryTile: {
     width: '48%', minHeight: 92, borderRadius: 8,

@@ -52,8 +52,8 @@ export default function TabLayout() {
         <Tabs.Screen
           name="guide"
           options={{
-            title: 'GUIDE',
-            tabBarIcon: ({ color, size }) => <Ionicons name="headset-outline" size={size} color={color} />,
+            title: 'EXPLORE',
+            tabBarIcon: ({ color, size }) => <Ionicons name="compass-outline" size={size} color={color} />,
           }}
         />
         <Tabs.Screen

@@ -376,7 +376,7 @@ export default function PlanScreen() {
           {
             role: 'ai',
             text: isRateLimit
-              ? 'The guide is busy for a moment. Tap Retry in about 30 seconds and I’ll pick it back up.'
+              ? 'The planner is busy for a moment. Tap Retry in about 30 seconds and I’ll pick it back up.'
               : isRouteValidation
               ? e.message
               : e.message?.includes('taking longer')
@@ -422,7 +422,7 @@ export default function PlanScreen() {
         <View style={s.loginGateLogo}>
           <Image source={TRAILHEAD_LOGO} style={s.loginGateLogoImage} resizeMode="cover" />
         </View>
-        <Text style={s.loginGateTitle}>AI Trip Planning</Text>
+        <Text style={s.loginGateTitle}>Trip Planning</Text>
         <Text style={s.loginGateSub}>
           Build multi-day overland routes with fuel, legal camp options, weather, land context, offline downloads, and road-condition reports matched to your rig.
         </Text>
@@ -467,7 +467,7 @@ export default function PlanScreen() {
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={s.logoName}>Trailhead</Text>
-          <Text style={s.logoTag}>OVERLAND GUIDE</Text>
+          <Text style={s.logoTag}>OVERLAND PLANNER</Text>
         </View>
         {user && (
           <TouchableOpacity style={s.creditPill} onPress={() => setPaywallVisible(true)}>
@@ -1039,7 +1039,7 @@ function TripCard({ trip, C, onViewMap, onViewGuide, onNextLeg }: {
       {/* Hero */}
       <View style={{ backgroundColor: C.s1, padding: 14, borderBottomWidth: 1, borderColor: C.border }}>
         <View style={{ marginBottom: 4 }}>
-          <Text style={{ color: C.orange, fontSize: 8.5, fontFamily: mono, letterSpacing: 1.2 }}>✦ AI TRIP PLAN READY</Text>
+          <Text style={{ color: C.orange, fontSize: 8.5, fontFamily: mono, letterSpacing: 1.2 }}>TRIP PLAN READY</Text>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
           <View style={{ flex: 1 }}>
@@ -1089,7 +1089,7 @@ function TripCard({ trip, C, onViewMap, onViewGuide, onNextLeg }: {
         </TouchableOpacity>
         <TouchableOpacity onPress={onViewGuide} style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 14, paddingVertical: 11, borderRadius: 8, borderWidth: 1, borderColor: C.border, backgroundColor: C.s3 }}>
           <Ionicons name="headset-outline" size={15} color={C.text2} />
-          <Text style={{ color: C.text2, fontSize: 11, fontFamily: mono }}>GUIDE</Text>
+          <Text style={{ color: C.text2, fontSize: 11, fontFamily: mono }}>EXPLORE</Text>
         </TouchableOpacity>
       </View>
       {/* Plan Next Leg — shown when trip is at or near the 14-day cap */}

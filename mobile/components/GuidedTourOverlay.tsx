@@ -77,10 +77,10 @@ const STEPS = [
   },
   {
     route: '/(tabs)/guide',
-    icon: 'headset-outline',
+    icon: 'compass-outline',
     title: 'Explore and listen',
-    body: 'Guide has Explore cards, Summary and Full Story audio, trip narrations, weather, and What’s Around Me.',
-    target: 'GUIDE TAB',
+    body: 'Explore has place cards, Summary and Full Story audio, trip narrations, weather, and What’s Around Me.',
+    target: 'EXPLORE TAB',
     targetKind: 'tab',
     tabIndex: 4,
     targetKey: 'guide.audio',
@@ -98,7 +98,7 @@ const STEPS = [
   {
     route: '/(tabs)',
     icon: 'compass-outline',
-    title: 'Ask the AI planner',
+    title: 'Plan a trip',
     body: 'Tell Trailhead where you want to go, how many days you have, and what your rig can handle.',
     target: 'PLAN TAB',
     targetKind: 'tab',

@@ -29,7 +29,7 @@ const TOUR_ITEMS: TourItem[] = [
     icon: 'git-branch-outline',
   },
   {
-    title: 'Plan from the AI tab',
+    title: 'Plan from the Plan tab',
     body: 'Ask Trailhead for routes, rig fit, fuel, camps, weather, and trip adjustments.',
     icon: 'compass-outline',
   },

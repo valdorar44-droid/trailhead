@@ -180,15 +180,22 @@ What happened:
   - `scripts/build_valhalla_region_artifacts.sh`
   - `scripts/probe_routing_50_states.py`
 
-Current blocker:
+Current state after WSL crash recovery:
 
-- The WSL terminal started the regional build and downloaded west PBFs, then failed at:
+- The WSL terminal crash killed the original regional build.
+- The survived west `valhalla_tiles` output was preserved manually:
+  - Plain tar: `/home/sean/valhalla-region-builds/west/west-valhalla.tar` (`18G`)
+  - Compressed artifact: `/home/sean/valhalla-region-builds/west/west-valhalla.tar.zst` (`3.1G`)
+  - Published R2 key: `routing/valhalla/west.tar.zst`
+  - SHA-256: `e1323f1b862ed421adb327c8a9f352110d540f8d943f48cd9ce401c6222b1605`
+- Docker is still not visible from Ubuntu:
 
 ```text
 docker: command not found
 ```
 
-- User is installing/enabling Docker Desktop WSL integration and needs to log out of Windows and back in for Docker to appear in Ubuntu.
+- `/mnt/c/Program Files/Docker/Docker/resources/bin/docker.exe --version` also fails from WSL with `UtilBindVsockAnyPort`, so Docker Desktop WSL integration still needs to be fixed before remaining regional builds can run.
+- User is installing/enabling Docker Desktop WSL integration and may need to log out of Windows and back in for Docker to appear in Ubuntu.
 
 Resume after Windows logout/login:
 
@@ -204,14 +211,14 @@ If Docker works:
 cd /home/sean/.openclaw/workspace/trailhead
 railway run --service trailhead bash
 export VALHALLA_REGION_WORKDIR=/home/sean/valhalla-region-builds
-scripts/build_valhalla_region_artifacts.sh all
+scripts/build_valhalla_region_artifacts.sh great_lakes plains south_central southeast northeast alaska hawaii
 ```
 
 Notes:
 
 - Do not use `/mnt/nvme`; it failed with permission denied on this WSL machine.
 - Use `/home/sean/valhalla-region-builds`.
-- The previous west PBF downloads should already be in `/home/sean/valhalla-region-builds/west` and should be reused.
+- West is already published; do not rerun `all` unless you intentionally want to rebuild and republish west.
 - Do not paste literal `...` into `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, or `R2_SECRET_ACCESS_KEY`.
 - Prefer `railway run --service trailhead bash` so R2 secrets come from Railway and are not pasted manually.
 

@@ -13,7 +13,7 @@ const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   map: 'map-outline',
   'route-builder': 'trail-sign-outline',
   report: 'warning-outline',
-  guide: 'headset-outline',
+  guide: 'compass-outline',
   profile: 'person-outline',
 };
 

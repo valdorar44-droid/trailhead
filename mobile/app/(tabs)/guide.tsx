@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator,
-  Image, Modal, Linking,
+  Image, Modal, Linking, TextInput,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
@@ -17,8 +17,18 @@ import { storage } from '@/lib/storage';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 import { playTrailheadVoice, stopTrailheadVoice } from '@/lib/voice';
 
-const EXPLORE_CACHE_KEY = 'trailhead_explore_catalog_v1';
+const EXPLORE_CACHE_KEY = 'trailhead_explore_catalog_v2';
 const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
+const EXPLORE_CATEGORY_BUTTONS = [
+  { key: 'camping', label: 'Camping', icon: 'bonfire-outline', color: '#16a34a' },
+  { key: 'glamping', label: 'Glamping', icon: 'sparkles-outline', color: '#0ea5e9' },
+  { key: 'huts_lodging', label: 'Huts & Lodging', icon: 'bed-outline', color: '#6366f1' },
+  { key: 'trails', label: 'Trails', icon: 'trail-sign-outline', color: '#f97316' },
+  { key: 'water', label: 'Water', icon: 'water-outline', color: '#0284c7' },
+  { key: 'parks', label: 'Parks', icon: 'leaf-outline', color: '#22c55e' },
+  { key: 'services', label: 'Services', icon: 'build-outline', color: '#eab308' },
+  { key: 'nearby', label: 'Nearby', icon: 'locate-outline', color: '#a855f7' },
+] as const;
 
 const WMO_ICON: Record<number, keyof typeof Ionicons.glyphMap> = {
   0: 'sunny-outline', 1: 'partly-sunny-outline', 2: 'partly-sunny-outline', 3: 'cloud-outline',
@@ -61,13 +71,47 @@ function fmtMi(mi?: number | null) {
   return mi >= 10 ? `${Math.round(mi)} mi` : `${mi.toFixed(1)} mi`;
 }
 
-function exploreIcon(category: string): keyof typeof Ionicons.glyphMap {
+function exploreIcon(category: string, group?: string): keyof typeof Ionicons.glyphMap {
+  const g = (group || '').toLowerCase();
+  if (g === 'camping') return 'bonfire-outline';
+  if (g === 'glamping') return 'sparkles-outline';
+  if (g === 'huts_lodging') return 'bed-outline';
+  if (g === 'trails') return 'trail-sign-outline';
+  if (g === 'water') return 'water-outline';
+  if (g === 'services') return 'build-outline';
   const c = category.toLowerCase();
+  if (c.includes('camp')) return 'bonfire-outline';
+  if (c.includes('glamp')) return 'sparkles-outline';
+  if (/hut|lodg|cabin|hotel|motel|stay/.test(c)) return 'bed-outline';
+  if (/trail|hike|ohv|climb/.test(c)) return 'trail-sign-outline';
   if (c.includes('historic')) return 'library-outline';
   if (c.includes('monument')) return 'business-outline';
   if (c.includes('park')) return 'leaf-outline';
   if (c.includes('shore') || c.includes('lake')) return 'water-outline';
   return 'sparkles-outline';
+}
+
+function groupForExplorePlace(place: ExplorePlaceProfile) {
+  const group = place.summary.explore_group;
+  if (group) return group;
+  const c = (place.summary.category || '').toLowerCase();
+  if (c.includes('camp')) return 'camping';
+  if (c.includes('glamp')) return 'glamping';
+  if (/hut|lodg|cabin|hotel|motel|stay/.test(c)) return 'huts_lodging';
+  if (/trail|hike|ohv|climb/.test(c)) return 'trails';
+  if (/water|lake|river|shore|beach|marina|boat/.test(c)) return 'water';
+  if (/service|fuel|food|grocery|repair|medical|wifi|laundry|shower/.test(c)) return 'services';
+  return 'parks';
+}
+
+function keyForExploreSelection(selected: string) {
+  return EXPLORE_CATEGORY_BUTTONS.find(item => item.label === selected)?.key || '';
+}
+
+function categoryMatchesExploreSelection(place: ExplorePlaceProfile, selected: string) {
+  if (selected === 'All') return true;
+  const selectedKey = keyForExploreSelection(selected);
+  return selectedKey ? groupForExplorePlace(place) === selectedKey : (place.summary.category || '') === selected;
 }
 
 function storyTextForPlace(place: ExplorePlaceProfile) {
@@ -111,6 +155,7 @@ export default function GuideScreen() {
   const [tab, setTab] = useState<'explore' | 'narrations' | 'weather'>('explore');
   const [exploreMode, setExploreMode] = useState<'featured' | 'nearby' | 'trip'>('featured');
   const [exploreCategory, setExploreCategory] = useState('All');
+  const [exploreQuery, setExploreQuery] = useState('');
   const [profileReadMode, setProfileReadMode] = useState<'summary' | 'story'>('summary');
   const [explorePlaces, setExplorePlaces] = useState<ExplorePlaceProfile[]>([]);
   const [liveExplorePlaces, setLiveExplorePlaces] = useState<OsmPoi[]>([]);
@@ -205,14 +250,6 @@ export default function GuideScreen() {
   }, [activeTrip?.trip_id, weatherUnitMode]);
 
   const waypoints = useMemo(() => activeTrip?.plan.waypoints.filter(w => w.lat && w.lng) ?? [], [activeTrip?.trip_id]);
-  const categories = useMemo(() => {
-    const set = new Set(['All']);
-    for (const place of explorePlaces) {
-      if (place.summary.category) set.add(place.summary.category);
-    }
-    return Array.from(set).slice(0, 10);
-  }, [explorePlaces]);
-
   const rankedExplore = useMemo(() => {
     const places = explorePlaces.map(place => {
       const loc = place.summary.lat != null && place.summary.lng != null
@@ -238,16 +275,41 @@ export default function GuideScreen() {
       }
       return { place, distance, day };
     });
-    const filtered = places.filter(({ place }) =>
-      exploreCategory === 'All' || place.summary.category === exploreCategory
-    );
+    const query = exploreQuery.trim().toLowerCase();
+    const filtered = places.filter(({ place }) => {
+      const categoryOk = categoryMatchesExploreSelection(place, exploreCategory);
+      if (!categoryOk) return false;
+      if (!query) return true;
+      return [
+        place.summary.title,
+        place.summary.category,
+        place.summary.state,
+        place.summary.hook,
+        place.summary.short_description,
+        place.profile.summary,
+      ].filter(Boolean).join(' ').toLowerCase().includes(query);
+    });
     if (exploreMode === 'featured') {
       return filtered.sort((a, b) => a.place.summary.rank - b.place.summary.rank);
     }
     return filtered
       .filter(item => item.distance == null || item.distance < (exploreMode === 'trip' ? 250 : 1200))
       .sort((a, b) => (a.distance ?? 99999) - (b.distance ?? 99999));
-  }, [explorePlaces, exploreCategory, exploreMode, userLoc?.lat, userLoc?.lng, waypoints]);
+  }, [explorePlaces, exploreCategory, exploreMode, exploreQuery, userLoc?.lat, userLoc?.lng, waypoints]);
+
+  const featuredSections = useMemo(() => {
+    if (exploreCategory !== 'All' || exploreMode !== 'featured') return [];
+    return EXPLORE_CATEGORY_BUTTONS
+      .filter(item => !['nearby', 'services'].includes(item.key))
+      .map(item => ({
+        item,
+        rows: rankedExplore
+          .filter(({ place }) => groupForExplorePlace(place) === item.key)
+          .sort((a, b) => (a.place.summary.hero_rank ?? a.place.summary.rank) - (b.place.summary.hero_rank ?? b.place.summary.rank))
+          .slice(0, 8),
+      }))
+      .filter(section => section.rows.length > 0);
+  }, [exploreCategory, exploreMode, rankedExplore]);
 
   async function generateGuide() {
     if (!activeTrip || guideLoading) return;
@@ -368,6 +430,60 @@ export default function GuideScreen() {
     router.push('/(tabs)/map');
   }
 
+  function renderExploreCard(
+    item: { place: ExplorePlaceProfile; distance?: number | null; day?: number },
+    idx: number,
+    compact = false,
+  ) {
+    const { place, distance, day } = item;
+    const img = mediaUrl(place.summary.image_url || place.summary.thumbnail_url);
+    const group = groupForExplorePlace(place);
+    const badge = place.summary.badges?.[0] || place.summary.category;
+    const isPlaying = playing === `explore:${place.id}`;
+    return (
+      <TouchableOpacity
+        key={place.id}
+        style={[compact ? s.exploreRailCard : s.exploreCard, idx === 0 && s.exploreCardLead]}
+        activeOpacity={0.88}
+        onPress={() => setSelectedExplore(place)}
+      >
+        <View style={[s.exploreImageWrap, compact && s.exploreRailImageWrap]}>
+          {img ? (
+            <Image source={{ uri: img }} style={s.exploreImage} resizeMode="cover" />
+          ) : (
+            <View style={s.exploreImageFallback}>
+              <Ionicons name={exploreIcon(place.summary.category, group)} size={30} color={C.orange} />
+            </View>
+          )}
+          <View style={s.exploreImageShade} />
+          <View style={s.exploreBadge}>
+            <Ionicons name={exploreIcon(place.summary.category, group)} size={11} color="#fff" />
+            <Text style={s.exploreBadgeText}>{String(badge).toUpperCase()}</Text>
+          </View>
+        </View>
+        <View style={s.exploreBody}>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={[s.exploreName, compact && s.exploreRailName]} numberOfLines={2}>{place.summary.title}</Text>
+            <Text style={s.exploreMeta} numberOfLines={1}>
+              {day ? `Day ${day} · ` : ''}{distance != null ? `${fmtMi(distance)} · ` : ''}{place.summary.state}
+            </Text>
+            <Text style={s.exploreDesc} numberOfLines={compact ? 2 : 3}>{place.summary.hook || place.summary.short_description}</Text>
+          </View>
+          {!compact && (
+            <View style={s.exploreActions}>
+              <TouchableOpacity style={[s.circleBtn, isPlaying && s.circleBtnActive]} onPress={() => playExplore(place)}>
+                <Ionicons name={isPlaying ? 'stop' : 'play'} size={16} color={isPlaying ? '#fff' : C.orange} />
+              </TouchableOpacity>
+              <TouchableOpacity style={s.circleBtn} onPress={() => navigateExplore(place)}>
+                <Ionicons name="navigate-outline" size={16} color={C.orange} />
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+      </TouchableOpacity>
+    );
+  }
+
   async function whatIsHere() {
     setNearbyLoading(true);
     setNearbyNarration('');
@@ -403,9 +519,9 @@ export default function GuideScreen() {
   return (
     <SafeAreaView style={s.container}>
       <TrailheadTopBar
-        title="AUDIO GUIDE"
-        subtitle={activeTrip?.plan.trip_name ?? 'Featured places, stories, and trip audio'}
-        icon="headset-outline"
+        title="EXPLORE"
+        subtitle={activeTrip?.plan.trip_name ?? 'Featured places, route stories, and weather'}
+        icon="compass-outline"
         style={s.header}
         right={(
           <View style={s.headerRight}>
@@ -443,14 +559,58 @@ export default function GuideScreen() {
       <ScrollView style={s.scroll} contentContainerStyle={s.scrollContent}>
         {tab === 'explore' && (
           <>
-            <TrailheadCard style={s.exploreHero}>
+            <View style={s.exploreHero}>
               <View style={s.exploreHeroText}>
-                <Text style={s.exploreEyebrow}>FEATURED GUIDE</Text>
-                <Text style={s.exploreTitle}>Stories worth the detour</Text>
-                <Text style={s.exploreSub}>Open cards instantly, read official NPS details, listen, or route there. Audio costs 5 credits for Summary or 10 for Full Story unless you have Explorer.</Text>
+                <Text style={s.exploreEyebrow}>EXPLORE</Text>
+                <Text style={s.exploreTitle}>Find the next stop</Text>
+                <Text style={s.exploreSub}>Browse camping, trails, water, parks, services, nearby places, and trip stories from one place.</Text>
               </View>
-              <Ionicons name="sparkles-outline" size={30} color={C.orange} />
-            </TrailheadCard>
+              <Ionicons name="compass-outline" size={30} color={C.orange} />
+            </View>
+
+            <View style={s.exploreSearch}>
+              <Ionicons name="search-outline" size={18} color={C.text3} />
+              <TextInput
+                value={exploreQuery}
+                onChangeText={setExploreQuery}
+                placeholder="Search destinations or activities"
+                placeholderTextColor={C.text3}
+                style={s.exploreSearchInput}
+                returnKeyType="search"
+              />
+              {!!exploreQuery && (
+                <TouchableOpacity onPress={() => setExploreQuery('')} style={s.exploreSearchClear}>
+                  <Ionicons name="close" size={14} color={C.text3} />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <View style={s.categoryGrid}>
+              {EXPLORE_CATEGORY_BUTTONS.map(item => {
+                const active = item.label === 'Nearby' ? exploreMode === 'nearby' : exploreCategory === item.label && exploreMode !== 'nearby';
+                return (
+                  <TouchableOpacity
+                    key={item.label}
+                    style={[s.categoryTile, active && { borderColor: item.color, backgroundColor: item.color + '18' }]}
+                    activeOpacity={0.86}
+                    onPress={() => {
+                      if (item.label === 'Nearby') {
+                        setExploreMode('nearby');
+                        setExploreCategory('All');
+                      } else {
+                        setExploreMode(exploreMode === 'nearby' ? 'featured' : exploreMode);
+                        setExploreCategory(active ? 'All' : item.label);
+                      }
+                    }}
+                  >
+                    <View style={[s.categoryTileIcon, { backgroundColor: item.color + '18', borderColor: item.color + '44' }]}>
+                      <Ionicons name={item.icon as any} size={21} color={item.color} />
+                    </View>
+                    <Text style={s.categoryTileText} numberOfLines={2}>{item.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
 
             <View style={s.modeRow}>
               {(['featured', 'nearby', 'trip'] as const).map(mode => (
@@ -466,13 +626,12 @@ export default function GuideScreen() {
               ))}
             </View>
 
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.categoryRow}>
-              {categories.map(cat => (
-                <TouchableOpacity key={cat} style={[s.categoryChip, exploreCategory === cat && s.categoryChipActive]} onPress={() => setExploreCategory(cat)}>
-                  <Text style={[s.categoryText, exploreCategory === cat && s.categoryTextActive]}>{cat.toUpperCase()}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+            {exploreCategory !== 'All' && (
+              <TouchableOpacity style={s.clearCategoryBtn} onPress={() => setExploreCategory('All')}>
+                <Ionicons name="close" size={14} color={C.orange} />
+                <Text style={s.clearCategoryText}>Show all Explore places</Text>
+              </TouchableOpacity>
+            )}
 
             {exploreMode === 'nearby' && (
               <View style={s.livePlacesBlock}>
@@ -501,6 +660,13 @@ export default function GuideScreen() {
               </View>
             )}
 
+            <View style={s.exploreSectionHeader}>
+              <Text style={s.exploreSectionTitle}>
+                {exploreMode === 'nearby' ? 'NEARBY PLACES' : exploreMode === 'trip' ? 'ALONG YOUR TRIP' : exploreCategory === 'All' ? 'FEATURED PLACES' : exploreCategory.toUpperCase()}
+              </Text>
+              <Text style={s.exploreSectionSub}>{rankedExplore.length} shown</Text>
+            </View>
+
             {exploreLoading && (
               <View style={s.loadRow}>
                 <ActivityIndicator color={C.orange} />
@@ -513,45 +679,23 @@ export default function GuideScreen() {
                 <Text style={s.emptySub}>{exploreError}</Text>
               </View>
             )}
-            {rankedExplore.map(({ place, distance, day }, idx) => {
-              const img = place.summary.image_url || place.summary.thumbnail_url;
-              const isPlaying = playing === `explore:${place.id}`;
-              return (
-                <TouchableOpacity key={place.id} style={[s.exploreCard, idx === 0 && s.exploreCardLead]} activeOpacity={0.88} onPress={() => setSelectedExplore(place)}>
-                  <View style={s.exploreImageWrap}>
-                    {img ? (
-                      <Image source={{ uri: img }} style={s.exploreImage} resizeMode="cover" />
-                    ) : (
-                      <View style={s.exploreImageFallback}>
-                        <Ionicons name={exploreIcon(place.summary.category)} size={30} color={C.orange} />
-                      </View>
-                    )}
-                    <View style={s.exploreImageShade} />
-                    <View style={s.exploreBadge}>
-                      <Ionicons name={exploreIcon(place.summary.category)} size={11} color="#fff" />
-                      <Text style={s.exploreBadgeText}>{place.summary.category.toUpperCase()}</Text>
-                    </View>
+            {featuredSections.length > 0 ? (
+              featuredSections.map(section => (
+                <View key={section.item.key} style={s.exploreRailSection}>
+                  <View style={s.exploreSectionHeader}>
+                    <Text style={s.exploreSectionTitle}>{section.item.label.toUpperCase()}</Text>
+                    <TouchableOpacity onPress={() => setExploreCategory(section.item.label)}>
+                      <Text style={s.exploreSectionLink}>VIEW ALL</Text>
+                    </TouchableOpacity>
                   </View>
-                  <View style={s.exploreBody}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={s.exploreName} numberOfLines={2}>{place.summary.title}</Text>
-                      <Text style={s.exploreMeta} numberOfLines={1}>
-                        {day ? `Day ${day} · ` : ''}{distance != null ? `${fmtMi(distance)} · ` : ''}{place.summary.state}
-                      </Text>
-                      <Text style={s.exploreDesc} numberOfLines={3}>{place.summary.hook || place.summary.short_description}</Text>
-                    </View>
-                    <View style={s.exploreActions}>
-                      <TouchableOpacity style={[s.circleBtn, isPlaying && s.circleBtnActive]} onPress={() => playExplore(place)}>
-                        <Ionicons name={isPlaying ? 'stop' : 'play'} size={16} color={isPlaying ? '#fff' : C.orange} />
-                      </TouchableOpacity>
-                      <TouchableOpacity style={s.circleBtn} onPress={() => navigateExplore(place)}>
-                        <Ionicons name="navigate-outline" size={16} color={C.orange} />
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.exploreRail}>
+                    {section.rows.map((item, idx) => renderExploreCard(item, idx, true))}
+                  </ScrollView>
+                </View>
+              ))
+            ) : (
+              rankedExplore.map((item, idx) => renderExploreCard(item, idx))
+            )}
           </>
         )}
 
@@ -620,7 +764,7 @@ export default function GuideScreen() {
             <TourTarget id="guide.audio">
               <View style={s.nearbyCard}>
                 <Text style={s.nearbyLabel}>WHAT'S AROUND ME?</Text>
-                <Text style={s.nearbySub}>AI narration for your current GPS location. Costs 5 credits unless you have Explorer and can take up to a minute to load.</Text>
+                <Text style={s.nearbySub}>Location narration for your current GPS position. Costs 5 credits unless you have Explorer and can take up to a minute to load.</Text>
                 {!!nearbyNarration && <Text style={s.nearbyText}>{nearbyNarration}</Text>}
                 <TouchableOpacity style={s.nearbyBtn} onPress={whatIsHere} disabled={nearbyLoading}>
                   {nearbyLoading
@@ -728,7 +872,7 @@ export default function GuideScreen() {
           {selectedExplore && (
             <>
               <TrailheadTopBar
-                title="GUIDE CARD"
+                title="PLACE CARD"
                 subtitle={selectedExplore.summary.title}
                 icon="headset-outline"
                 style={[s.profileModalHeader, { paddingTop: Math.max(insets.top + 6, 14) }]}
@@ -741,10 +885,10 @@ export default function GuideScreen() {
               <ScrollView contentContainerStyle={s.profileScroll}>
                 <View style={s.profileHero}>
                   {selectedExplore.summary.image_url || selectedExplore.summary.thumbnail_url ? (
-                    <Image source={{ uri: selectedExplore.summary.image_url || selectedExplore.summary.thumbnail_url || '' }} style={s.profileImage} resizeMode="cover" />
+                    <Image source={{ uri: mediaUrl(selectedExplore.summary.image_url || selectedExplore.summary.thumbnail_url || '') }} style={s.profileImage} resizeMode="cover" />
                   ) : (
                     <View style={s.profileImageFallback}>
-                      <Ionicons name={exploreIcon(selectedExplore.summary.category)} size={42} color={C.orange} />
+                      <Ionicons name={exploreIcon(selectedExplore.summary.category, selectedExplore.summary.explore_group)} size={42} color={C.orange} />
                     </View>
                   )}
                   <View style={s.profileShade} />
@@ -891,7 +1035,7 @@ export default function GuideScreen() {
                               onPress={() => item.url && Linking.openURL(item.url)}
                             >
                               {!!item.image_url && (
-                                <Image source={{ uri: item.image_url }} style={s.npsMiniImage} resizeMode="cover" />
+                                <Image source={{ uri: mediaUrl(item.image_url) }} style={s.npsMiniImage} resizeMode="cover" />
                               )}
                               <View style={s.npsMiniBody}>
                                 <Text style={s.npsMiniTitle} numberOfLines={2}>{item.title}</Text>
@@ -923,7 +1067,7 @@ export default function GuideScreen() {
                 <TouchableOpacity
                   style={s.sourceBtn}
                   onPress={() => {
-                    const url = selectedExplore.source_pack?.official_url || selectedExplore.summary.source_url;
+                    const url = selectedExplore.source_pack?.booking_url || selectedExplore.source_pack?.official_url || selectedExplore.summary.source_url;
                     if (url) Linking.openURL(url);
                   }}
                 >
@@ -972,18 +1116,67 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   loadText: { color: C.text2, fontSize: 13 },
   exploreHero: {
     flexDirection: 'row', gap: 12, alignItems: 'center',
-    backgroundColor: C.s2, borderRadius: 18, borderWidth: 1, borderColor: C.orange + '35',
-    padding: 16,
+    paddingHorizontal: 2, paddingVertical: 4,
   },
   exploreHeroText: { flex: 1 },
   exploreEyebrow: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
   exploreTitle: { color: C.text, fontSize: 22, fontWeight: '900', marginTop: 5 },
   exploreSub: { color: C.text2, fontSize: 13, lineHeight: 19, marginTop: 6 },
+  exploreSearch: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.s1,
+    paddingHorizontal: 13,
+  },
+  exploreSearchInput: { flex: 1, minWidth: 0, color: C.text, fontSize: 15, paddingVertical: 12 },
+  exploreSearchClear: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.s2,
+  },
   modeRow: { flexDirection: 'row', backgroundColor: C.s1, borderRadius: 13, borderWidth: 1, borderColor: C.border, padding: 4, gap: 4 },
   modeBtn: { flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 10 },
   modeBtnActive: { backgroundColor: C.orangeGlow },
   modeBtnText: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '800' },
   modeBtnTextActive: { color: C.orange },
+  categoryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  categoryTile: {
+    width: '48%', minHeight: 92, borderRadius: 8,
+    backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
+    padding: 12, justifyContent: 'space-between',
+  },
+  categoryTileIcon: {
+    width: 38, height: 38, borderRadius: 8,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1,
+  },
+  categoryTileText: { color: C.text, fontSize: 14, lineHeight: 18, fontWeight: '900', marginTop: 10 },
+  clearCategoryBtn: {
+    alignSelf: 'flex-start', minHeight: 34, flexDirection: 'row', alignItems: 'center', gap: 6,
+    borderRadius: 8, borderWidth: 1, borderColor: C.orange + '44',
+    backgroundColor: C.orangeGlow, paddingHorizontal: 10,
+  },
+  clearCategoryText: { color: C.orange, fontSize: 11, fontFamily: mono, fontWeight: '900' },
+  exploreSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginTop: 4,
+  },
+  exploreSectionTitle: { color: C.text3, fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
+  exploreSectionSub: { color: C.text3, fontSize: 10, fontFamily: mono },
+  exploreSectionLink: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900' },
+  exploreRailSection: { gap: 9 },
+  exploreRail: { gap: 12, paddingRight: 8 },
   categoryRow: { gap: 8, paddingVertical: 2 },
   categoryChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: C.border, backgroundColor: C.s1 },
   categoryChipActive: { borderColor: C.orange, backgroundColor: C.orangeGlow },
@@ -998,8 +1191,10 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   livePlaceName: { color: C.text, fontSize: 13, fontWeight: '900' },
   livePlaceMeta: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 3 },
   exploreCard: { backgroundColor: C.s2, borderRadius: 16, borderWidth: 1, borderColor: C.border, overflow: 'hidden' },
+  exploreRailCard: { width: 264, backgroundColor: C.s2, borderRadius: 12, borderWidth: 1, borderColor: C.border, overflow: 'hidden' },
   exploreCardLead: { borderColor: C.orange + '45' },
   exploreImageWrap: { height: 154, backgroundColor: C.s1 },
+  exploreRailImageWrap: { height: 126 },
   exploreImage: { width: '100%', height: '100%' },
   exploreImageFallback: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s1 },
   exploreImageShade: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.18)' },
@@ -1007,6 +1202,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   exploreBadgeText: { color: '#fff', fontSize: 8, fontFamily: mono, fontWeight: '900' },
   exploreBody: { flexDirection: 'row', gap: 12, padding: 14 },
   exploreName: { color: C.text, fontSize: 18, fontWeight: '900', lineHeight: 22 },
+  exploreRailName: { fontSize: 15, lineHeight: 19 },
   exploreMeta: { color: C.orange, fontSize: 10, fontFamily: mono, marginTop: 5, fontWeight: '800' },
   exploreDesc: { color: C.text2, fontSize: 13, lineHeight: 19, marginTop: 8 },
   exploreActions: { gap: 8, justifyContent: 'center' },

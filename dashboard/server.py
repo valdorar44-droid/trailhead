@@ -233,10 +233,13 @@ WEB_DIST = Path(__file__).parent / "site" / "dist"
 BLOG_INDEX = Path(__file__).parent / "blog.html"
 BLOG_DIR = Path(__file__).parent / "blog"
 EXPLORE_CATALOG = Path(__file__).parent / "explore_catalog_v1.json"
+EXPLORE_ASSETS = Path(__file__).parent / "explore_assets"
 APP_ICON = Path(__file__).resolve().parents[1] / "mobile" / "assets" / "icon.png"
 
 app = FastAPI(title="Trailhead API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+if EXPLORE_ASSETS.exists():
+    app.mount("/assets/explore", StaticFiles(directory=str(EXPLORE_ASSETS)), name="explore-assets")
 if (WEB_DIST / "_astro").exists():
     app.mount("/_astro", StaticFiles(directory=str(WEB_DIST / "_astro")), name="astro-assets")
 if (WEB_DIST / "assets").exists():

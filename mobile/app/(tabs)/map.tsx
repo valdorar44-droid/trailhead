@@ -2489,6 +2489,25 @@ const MAX_ALL_MAP_POIS = 1200;
 const MAX_VISIBLE_MAP_POIS = 450;
 const MAX_OFFLINE_POI_SCAN = 1800;
 const CAMP_FILTER_IDS = ['blm', 'usfs', 'nps', 'state', 'corps', 'dispersed', 'tent', 'rv', 'walk_in', 'free', 'ada', 'private', 'farm', 'ranch', 'winery', 'glamping', 'private_camp'];
+const CAMP_FILTER_OPTIONS = [
+  { id: 'blm', label: 'BLM', icon: 'earth-outline' as const },
+  { id: 'usfs', label: 'National Forest', icon: 'leaf-outline' as const },
+  { id: 'nps', label: 'National Park', icon: 'triangle-outline' as const },
+  { id: 'state', label: 'State Park', icon: 'map-outline' as const },
+  { id: 'corps', label: 'Corps / Lake', icon: 'water-outline' as const },
+  { id: 'dispersed', label: 'Dispersed', icon: 'radio-button-off-outline' as const },
+  { id: 'tent', label: 'Tent Sites', icon: 'home-outline' as const },
+  { id: 'rv', label: 'RV / Hookups', icon: 'car-outline' as const },
+  { id: 'walk_in', label: 'Walk-in', icon: 'walk-outline' as const },
+  { id: 'free', label: 'Free', icon: 'pricetag-outline' as const },
+  { id: 'ada', label: 'Accessible', icon: 'accessibility-outline' as const },
+  { id: 'private', label: 'Private Stays', icon: 'home-outline' as const },
+  { id: 'farm', label: 'Farm Stays', icon: 'leaf-outline' as const },
+  { id: 'ranch', label: 'Ranches', icon: 'home-outline' as const },
+  { id: 'winery', label: 'Wineries', icon: 'wine-outline' as const },
+  { id: 'glamping', label: 'Glamping', icon: 'sparkles-outline' as const },
+  { id: 'private_camp', label: 'Private Camps', icon: 'key-outline' as const },
+] as const;
 
 function normalizedWaterSubtype(place: Pick<OsmPoi, 'type' | 'subtype'> & Record<string, any>) {
   if (String(place.type || '') !== 'water') return '';
@@ -2633,6 +2652,9 @@ type MapFilterPreferences = {
   activeFilters?: string[];
   activePinFilters?: string[];
   activePlaceFilters?: string[];
+  showCampPins?: boolean;
+  showPlacePins?: boolean;
+  showCommunityPins?: boolean;
   showLands?: boolean;
   showUsgs?: boolean;
   showPois?: boolean;
@@ -4571,6 +4593,58 @@ function CampEditOptionSection({
   );
 }
 
+function PremiumActionSheetHeader({
+  title, subtitle, icon, iconColor, onClose, styles, colors,
+}: {
+  title: string;
+  subtitle?: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  iconColor: string;
+  onClose: () => void;
+  styles: any;
+  colors: ColorPalette;
+}) {
+  return (
+    <View style={styles.premiumSheetHeader}>
+      <View style={[styles.premiumSheetIcon, { backgroundColor: iconColor + '18', borderColor: iconColor + '55' }]}>
+        <Ionicons name={icon} size={18} color={iconColor} />
+      </View>
+      <View style={styles.premiumSheetHeaderText}>
+        <Text style={styles.premiumSheetTitle} numberOfLines={1}>{title}</Text>
+        {!!subtitle && <Text style={styles.premiumSheetSub} numberOfLines={1}>{subtitle}</Text>}
+      </View>
+      <TouchableOpacity style={styles.premiumSheetClose} onPress={onClose}>
+        <Ionicons name="close" size={18} color={colors.text2} />
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+function PremiumActionButton({
+  label, icon, onPress, styles, tone, primary = false, disabled = false, loading = false,
+}: {
+  label: string;
+  icon?: keyof typeof Ionicons.glyphMap;
+  onPress: () => void;
+  styles: any;
+  tone: string;
+  primary?: boolean;
+  disabled?: boolean;
+  loading?: boolean;
+}) {
+  return (
+    <TouchableOpacity
+      style={[primary ? styles.premiumPrimaryAction : styles.premiumSecondaryAction, !primary && { borderColor: tone + '44' }, disabled && { opacity: 0.55 }]}
+      onPress={onPress}
+      disabled={disabled}
+      activeOpacity={0.84}
+    >
+      {loading ? <ActivityIndicator size="small" color={primary ? '#fff' : tone} /> : icon ? <Ionicons name={icon} size={15} color={primary ? '#fff' : tone} /> : null}
+      <Text style={primary ? styles.premiumPrimaryActionText : [styles.premiumSecondaryActionText, { color: tone }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 function MapScreen() {
@@ -4805,6 +4879,10 @@ function MapScreen() {
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
   const [activePinFilters, setActivePinFilters] = useState<string[]>(DEFAULT_COMMUNITY_PIN_FILTERS);
   const [activePlaceFilters, setActivePlaceFilters] = useState<string[]>(DEFAULT_PLACE_FILTERS);
+  const [showCampPins, setShowCampPins] = useState(true);
+  const [showPlacePins, setShowPlacePins] = useState(true);
+  const [showCommunityPins, setShowCommunityPins] = useState(true);
+  const [expandedFilterSections, setExpandedFilterSections] = useState<string[]>(['map-content', 'camps', 'places']);
   const filterPrefsLoadedRef = useRef(false);
   const [pinDropMode, setPinDropMode] = useState(false);
   const [pendingPin, setPendingPin] = useState<{ lat: number; lng: number } | null>(null);
@@ -5381,6 +5459,9 @@ function MapScreen() {
           if (savedCampFilters) setActiveFilters(savedCampFilters);
           if (savedPinFilters) setActivePinFilters(savedPinFilters);
           if (nextPlaceFilters) setActivePlaceFilters(nextPlaceFilters);
+          setShowCampPins(typeof prefs.showCampPins === 'boolean' ? prefs.showCampPins : true);
+          setShowPlacePins(typeof prefs.showPlacePins === 'boolean' ? prefs.showPlacePins : true);
+          setShowCommunityPins(typeof prefs.showCommunityPins === 'boolean' ? prefs.showCommunityPins : true);
           if (typeof prefs.showLands === 'boolean') setShowLands(prefs.showLands);
           if (typeof prefs.showUsgs === 'boolean') setShowUsgs(prefs.showUsgs);
           if (typeof prefs.showPois === 'boolean') setShowPois(prefs.showPois);
@@ -5409,6 +5490,9 @@ function MapScreen() {
       activeFilters,
       activePinFilters,
       activePlaceFilters,
+      showCampPins,
+      showPlacePins,
+      showCommunityPins,
       showLands,
       showUsgs,
       showPois,
@@ -5421,7 +5505,7 @@ function MapScreen() {
       layerNautical,
     };
     storage.set(MAP_FILTER_PREFS_KEY, JSON.stringify(prefs)).catch(() => {});
-  }, [activeFilters, activePinFilters, activePlaceFilters, layerAva, layerFire, layerMvum, layerNautical, layerRadar, layerTrails, map3dEnabled, mapLayer, showLands, showPois, showUsgs]);
+  }, [activeFilters, activePinFilters, activePlaceFilters, layerAva, layerFire, layerMvum, layerNautical, layerRadar, layerTrails, map3dEnabled, mapLayer, showCampPins, showCommunityPins, showLands, showPlacePins, showPois, showUsgs]);
 
   useEffect(() => {
     const today = new Date().toISOString().slice(0, 10);
@@ -6096,10 +6180,14 @@ function MapScreen() {
 
   // ── Reload camps in current viewport whenever filters change ──────────────
   useEffect(() => {
+    if (!showCampPins) {
+      setAreaCamps([]);
+      return;
+    }
     if (!viewportRef.current) return;
     lastCampFetchRef.current = null;
     loadCampsInArea(viewportRef.current, activeFilters);
-  }, [activeFilters]);
+  }, [activeFilters, showCampPins]);
 
   // Auto-load camps when userLoc first becomes available + map is ready
   const autoLoadedRef = useRef(false);
@@ -6109,9 +6197,9 @@ function MapScreen() {
     const deg = 0.5;
     const bounds = { n: userLoc.lat + deg, s: userLoc.lat - deg, e: userLoc.lng + deg, w: userLoc.lng - deg, zoom: 10 };
     viewportRef.current = bounds;
-    loadCampsInArea(bounds, activeFilters);
+    if (showCampPins) loadCampsInArea(bounds, activeFilters);
     refreshCommunityPins(userLoc, 3.0, true);
-  }, [userLoc]);
+  }, [userLoc, showCampPins]);
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', state => {
@@ -11226,7 +11314,7 @@ function MapScreen() {
     if (type === 'openGuide' || type === 'playTripGuide') {
       setShowExtremeCopilot(false);
       router.push('/(tabs)/guide');
-      return { applied: true, status: 'applied', opened: 'guide', play_requested: type === 'playTripGuide', spoken_summary: type === 'playTripGuide' ? 'Guide opened for trip audio.' : 'Guide opened.' };
+      return { applied: true, status: 'applied', opened: 'explore', play_requested: type === 'playTripGuide', spoken_summary: type === 'playTripGuide' ? 'Explore opened for trip audio.' : 'Explore opened.' };
     }
     if (type === 'openReports') {
       setShowExtremeCopilot(false);
@@ -12110,6 +12198,9 @@ function MapScreen() {
     setActiveFilters([]);
     setActivePinFilters(DEFAULT_COMMUNITY_PIN_FILTERS);
     setActivePlaceFilters(DEFAULT_PLACE_FILTERS);
+    setShowCampPins(true);
+    setShowPlacePins(true);
+    setShowCommunityPins(true);
     toggleLandOverlay(false);
     toggleUsgsOverlay(false);
     togglePoiOverlay(false);
@@ -12126,6 +12217,10 @@ function MapScreen() {
   }
 
   async function loadCampsInArea(bounds: { n: number; s: number; e: number; w: number; zoom: number }, types: string[]): Promise<CampsitePin[] | null> {
+    if (!showCampPins) {
+      setAreaCamps([]);
+      return null;
+    }
     if ((bounds.zoom ?? 0) < MIN_CAMP_SEARCH_ZOOM) {
       setSearchResult({ count: -2 });
       setTimeout(() => setSearchResult(null), 3000);
@@ -13042,6 +13137,7 @@ function MapScreen() {
     ...areaCamps.filter(c => c.lat != null && c.lng != null && isFinite(c.lat) && isFinite(c.lng)),
   ], [activeTrip?.trip_id, areaCamps]);
   const allMapPois = useMemo(() => {
+    if (!showPlacePins) return [];
     const allowedPlaces = new Set(activePlaceFilters);
     const seen = new Set<string>();
     const next: OsmPoi[] = [];
@@ -13064,7 +13160,7 @@ function MapScreen() {
       if (next.length >= MAX_ALL_MAP_POIS || scannedOffline >= MAX_OFFLINE_POI_SCAN) break;
     }
     return next;
-  }, [activeTrip?.trip_id, activePlaceFilters, liveRoutePois, offlinePlacePois, pois]);
+  }, [activeTrip?.trip_id, activePlaceFilters, liveRoutePois, offlinePlacePois, pois, showPlacePins]);
   const trailSourcePois = useMemo(() => {
     const seen = new Set<string>();
     const next: OsmPoi[] = [];
@@ -13111,10 +13207,11 @@ function MapScreen() {
     return next;
   }, [activeTrip?.trip_id, allMapPois, liveRouteGas]);
   const visibleCommunityPins = useMemo(() => {
+    if (!showCommunityPins) return [];
     if (activePinFilters.length === 0) return [];
     const allowed = new Set(activePinFilters);
     return communityPins.filter(p => allowed.has(normalizedCommunityPinType(p)));
-  }, [communityPins, activePinFilters]);
+  }, [communityPins, activePinFilters, showCommunityPins]);
   const displayCommunityPins = useMemo(() =>
     visibleCommunityPins.map(p => ({ ...p, type: normalizedCommunityPinType(p) })),
     [visibleCommunityPins]
@@ -13172,19 +13269,21 @@ function MapScreen() {
     for (const place of copilotResults) push(selectableFeatureFromPlace(place, next.length, 'copilot_result', center));
     for (const place of searchResults) push(selectableFeatureFromPlace(place, next.length, 'search_result', center));
     for (const poi of routePois) push(selectableFeatureFromPlace(poi as unknown as SearchPlace, next.length, 'trailhead_poi', center));
-    for (const camp of areaCamps) {
-      push(selectableFeatureFromPlace({
-        id: camp.id,
-        name: camp.name || 'Camp',
-        lat: camp.lat,
-        lng: camp.lng,
-        type: 'camp',
-        source: camp.verified_source || camp.source_badge || camp.source || 'camp',
-        source_label: camp.source_badge || camp.verified_source || camp.source || 'Camp',
-        rating: camp.rating,
-        rating_count: camp.rating_count,
-        summary: camp.description || camp.land_type || 'Camp',
-      }, next.length, 'camp', center));
+    if (showCampPins) {
+      for (const camp of areaCamps) {
+        push(selectableFeatureFromPlace({
+          id: camp.id,
+          name: camp.name || 'Camp',
+          lat: camp.lat,
+          lng: camp.lng,
+          type: 'camp',
+          source: camp.verified_source || camp.source_badge || camp.source || 'camp',
+          source_label: camp.source_badge || camp.verified_source || camp.source || 'Camp',
+          rating: camp.rating,
+          rating_count: camp.rating_count,
+          summary: camp.description || camp.land_type || 'Camp',
+        }, next.length, 'camp', center));
+      }
     }
     for (const pin of displayCommunityPins) {
       push(selectableFeatureFromPlace({
@@ -13206,6 +13305,7 @@ function MapScreen() {
     placesLoadedAt,
     routePois,
     searchResults,
+    showCampPins,
     userLoc?.lat,
     userLoc?.lng,
     visibleRenderedFeatures,
@@ -15734,16 +15834,20 @@ function MapScreen() {
         </View>
       );
     }
-    if (layer.key === 'radar') {
-      return (
-        <View style={baseStyle}>
-          <View style={[s.layerPreviewRadarRing, { width: 58, height: 58, borderColor: '#06b6d455' }]} />
-          <View style={[s.layerPreviewRadarRing, { width: 36, height: 36, borderColor: '#22c55e88' }]} />
-          <View style={[s.layerPreviewPatch, { width: 26, height: 18, top: 16, left: 32, backgroundColor: '#facc1555' }]} />
-          {activeDot}
-        </View>
-      );
-    }
+	    if (layer.key === 'radar') {
+	      return (
+	        <View style={baseStyle}>
+	          <View style={[s.layerPreviewRainBand, { left: 8, top: 34, backgroundColor: '#22c55e88' }]} />
+	          <View style={[s.layerPreviewRainBand, { left: 22, top: 25, backgroundColor: '#38bdf8aa', transform: [{ rotate: '-18deg' }] }]} />
+	          <View style={[s.layerPreviewRainBand, { left: 42, top: 38, backgroundColor: '#facc15aa', transform: [{ rotate: '16deg' }] }]} />
+	          <View style={s.layerPreviewCloud}>
+	            <Ionicons name="rainy-outline" size={22} color="#e0f2fe" />
+	          </View>
+	          <View style={s.layerPreviewRadarSweep} />
+	          {activeDot}
+	        </View>
+	      );
+	    }
     if (layer.key === 'mvum') {
       return (
         <View style={baseStyle}>
@@ -15847,9 +15951,96 @@ function MapScreen() {
   const communityFilterChanged = activePinFilters.length !== DEFAULT_COMMUNITY_PIN_FILTERS.length ||
     DEFAULT_COMMUNITY_PIN_FILTERS.some(id => !activePinFilters.includes(id));
   const changedFilterGroupCount =
-    (activeFilters.length > 0 ? 1 : 0) +
-    (communityFilterChanged ? 1 : 0) +
-    (placeFilterChanged ? 1 : 0);
+    (!showCampPins || activeFilters.length > 0 ? 1 : 0) +
+    (!showCommunityPins || communityFilterChanged ? 1 : 0) +
+    (!showPlacePins || placeFilterChanged ? 1 : 0);
+  const campFilterSummary = showCampPins
+    ? activeFilters.length > 0 ? `${activeFilters.length} selected` : 'All camp types'
+    : 'Hidden';
+  const placeFilterSummary = showPlacePins
+    ? `${activePlaceFilters.length} selected`
+    : 'Hidden';
+  const communityFilterSummary = showCommunityPins
+    ? `${activePinFilters.length} visible`
+    : 'Hidden';
+  const mapContentSummary = [
+    showCampPins ? 'Camps' : null,
+    showPlacePins ? 'Places' : null,
+    showCommunityPins ? 'Community' : null,
+  ].filter(Boolean).join(' · ') || 'Map pins hidden';
+  const toggleFilterSection = (section: string) => {
+    setExpandedFilterSections(prev => prev.includes(section) ? prev.filter(item => item !== section) : [...prev, section]);
+  };
+  const toggleFilterId = (setter: (updater: (prev: string[]) => string[]) => void, id: string) => {
+    setter(prev => prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]);
+  };
+  const applyMapFilterPreset = (preset: 'default' | 'overland' | 'camps' | 'water' | 'hideCommunity') => {
+    if (preset === 'default') {
+      setShowCampPins(true);
+      setShowPlacePins(true);
+      setShowCommunityPins(true);
+      setActiveFilters([]);
+      setActivePlaceFilters(DEFAULT_PLACE_FILTERS);
+      setActivePinFilters(DEFAULT_COMMUNITY_PIN_FILTERS);
+      return;
+    }
+    if (preset === 'overland') {
+      setShowCampPins(true);
+      setShowPlacePins(true);
+      setShowCommunityPins(true);
+      setActiveFilters(['blm', 'usfs', 'dispersed', 'free']);
+      setActivePlaceFilters(Array.from(new Set([...DEFAULT_PLACE_FILTERS, 'mechanic', 'parking', 'private_stay', 'glamping'])));
+      setActivePinFilters(DEFAULT_COMMUNITY_PIN_FILTERS);
+      return;
+    }
+    if (preset === 'camps') {
+      setShowCampPins(true);
+      setShowPlacePins(false);
+      setShowCommunityPins(false);
+      setActiveFilters([]);
+      return;
+    }
+    if (preset === 'water') {
+      setShowCampPins(false);
+      setShowPlacePins(true);
+      setShowCommunityPins(false);
+      setActivePlaceFilters(Array.from(new Set(['water', ...WATER_NAV_PLACE_FILTER_IDS])));
+      setLayerNautical(true);
+      toggleDataLayer('nautical', true);
+      return;
+    }
+    setShowCommunityPins(false);
+  };
+  const renderFilterCheckRows = (
+    options: readonly { id: string; label: string; icon: keyof typeof Ionicons.glyphMap; color?: string }[],
+    selected: string[],
+    onToggle: (id: string) => void,
+    disabledIds = new Set<string>(),
+  ) => (
+    <View style={s.filterOptionList}>
+      {options.map(item => {
+        const active = selected.includes(item.id);
+        const locked = disabledIds.has(item.id);
+        return (
+          <TouchableOpacity
+            key={item.id}
+            style={[s.filterOptionRow, locked && s.filterOptionRowDisabled]}
+            activeOpacity={0.82}
+            onPress={() => locked ? Alert.alert('Unlock Explore for today', 'Town services use richer provider searches. Unlock this group for today with credits, or use Explorer.', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Unlock', onPress: unlockExploreCategories },
+            ]) : onToggle(item.id)}
+          >
+            <View style={[s.filterOptionCheck, active && { backgroundColor: item.color || C.orange, borderColor: item.color || C.orange }]}>
+              {active ? <Ionicons name="checkmark" size={14} color="#fff" /> : null}
+            </View>
+            <Ionicons name={(locked ? 'lock-closed-outline' : item.icon) as any} size={18} color={locked ? C.text3 : item.color || C.text2} />
+            <Text style={[s.filterOptionText, locked && { color: C.text3 }]} numberOfLines={1}>{item.label}</Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
   const showMapStatusBar = Boolean(
     !navMode &&
     !waterFollowActive &&
@@ -16042,7 +16233,7 @@ function MapScreen() {
         <NativeMap
           ref={nativeMapRef}
           waypoints={waypoints}
-          camps={waterFollowActive ? [] : [
+          camps={waterFollowActive || !showCampPins ? [] : [
             ...(activeTrip?.campsites ?? []).filter(c => c.lat != null && c.lng != null && isFinite(c.lat) && isFinite(c.lng)),
             ...areaCamps.filter(c => c.lat != null && c.lng != null),
           ] as any}
@@ -16358,7 +16549,7 @@ function MapScreen() {
 	                { label: 'Filters', sub: 'Camps, places, community pins', icon: 'filter-outline', tone: C.orange, action: () => { setShowMapDrawer(false); setShowFilterSheet(true); } },
                 { label: 'Offline maps', sub: 'Download and readiness', icon: 'cloud-download-outline', tone: '#a3e635', action: () => { setShowMapDrawer(false); setShowOfflineModal(true); } },
                 { label: 'Trail builder', sub: 'Pin and snap a trail route', icon: 'git-branch-outline', tone: '#22c55e', action: () => { setShowMapDrawer(false); trailPinCaptureMode ? clearTrailPinCapture() : beginTrailPinCapture(); } },
-                { label: nearbyLoading ? 'Loading guide' : 'Audio guide', sub: nearbyNarration ? 'Replay nearby context' : 'What is around me', icon: 'headset-outline', tone: C.orange, action: () => { handleNearbyAudio(); } },
+                { label: nearbyLoading ? 'Loading audio' : 'Nearby audio', sub: nearbyNarration ? 'Replay nearby context' : 'What is around me', icon: 'headset-outline', tone: C.orange, action: () => { handleNearbyAudio(); } },
               ].map(item => (
                 <TouchableOpacity key={item.label} style={s.mapDrawerRow} onPress={item.action} activeOpacity={0.84}>
                   <View style={[s.mapDrawerRowIcon, { borderColor: item.tone + '55', backgroundColor: item.tone + '14' }]}>
@@ -18167,212 +18358,203 @@ function MapScreen() {
               bounces={Platform.OS !== 'android'}
               overScrollMode={Platform.OS === 'android' ? 'always' : 'auto'}
             >
-              <View style={s.filterSectionHeader}>
-                <Text style={s.filterSectionTitle}>OVERLAND ESSENTIALS</Text>
-                <View style={{ flexDirection: 'row', gap: 12 }}>
-                  <TouchableOpacity onPress={() => setActivePlaceFilters(DEFAULT_PLACE_FILTERS)}>
-                    <Text style={s.filterClearText}>DEFAULT</Text>
+              <View style={s.filterPresetWrap}>
+                {[
+                  ['default', 'Default'],
+                  ['overland', 'Overland'],
+                  ['camps', 'Camps Only'],
+                  ['water', 'Safe Water'],
+                  ['hideCommunity', 'Hide Community'],
+                ].map(([id, label]) => (
+                  <TouchableOpacity key={id} style={s.filterPresetBtn} onPress={() => applyMapFilterPreset(id as any)} activeOpacity={0.82}>
+                    <Text style={s.filterPresetText}>{label}</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity onPress={() => setActivePlaceFilters(PLACE_FILTER_TYPES.filter(t => t.group === 'essentials').map(t => t.id))}>
-                    <Text style={s.filterClearText}>ESSENTIALS</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-              <Text style={s.filterHintText}>Default keeps camps, trails, water, fuel, dump, propane, parking, and repair visible without town clutter.</Text>
-              <View style={s.filterGrid}>
-                {PLACE_FILTER_TYPES.filter(f => f.group === 'essentials').map(f => {
-                  const active = activePlaceFilters.includes(f.id);
-                  return (
-                    <TouchableOpacity key={f.id} style={[s.filterChip, active && { backgroundColor: f.color, borderColor: f.color }]}
-                      onPress={() => setActivePlaceFilters(prev => {
-                        if (f.id === 'water') {
-                          return prev.includes('water')
-                            ? prev.filter(x => x !== 'water')
-                            : [...prev.filter(x => !WATER_PLACE_FILTER_IDS.has(x)), 'water'];
-                        }
-                        return prev.includes(f.id) ? prev.filter(x => x !== f.id) : [...prev, f.id];
-                      })}>
-                      <Ionicons name={f.icon as any} size={13} color={active ? '#fff' : f.color} style={{ marginRight: 4 }} />
-                      <Text style={[s.filterChipText, active && { color: '#fff' }]}>{f.label}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
+                ))}
               </View>
 
-              <View style={s.filterSectionHeader}>
-                <Text style={s.filterSectionTitle}>WATER ACCESS</Text>
-                <View style={{ flexDirection: 'row', gap: 12 }}>
-                  <TouchableOpacity onPress={() => setActivePlaceFilters(prev => Array.from(new Set([...prev.filter(id => !WATER_PLACE_FILTER_IDS.has(id)), 'water'])))}>
-                    <Text style={s.filterClearText}>ALL WATER</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => {
-                    setLayerNautical(true);
-                    toggleDataLayer('nautical', true);
-                    setActivePlaceFilters(prev => Array.from(new Set([...prev.filter(id => id !== 'water'), ...WATER_NAV_PLACE_FILTER_IDS])));
-                  }}>
-                    <Text style={s.filterClearText}>SAFE WATER</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-              <Text style={s.filterHintText}>
-                {waterFilterBroadActive
-                  ? 'All water points are visible. Pick a subtype below to narrow to fishing, ramps, launches, docks, marinas, shore access, red/green buoys, marked channels, anchorages, or hazards.'
-                  : waterFilterNarrowCount > 0
-                    ? `${waterFilterNarrowCount} water subtype${waterFilterNarrowCount === 1 ? '' : 's'} selected.`
-                    : 'Pick a subtype below when you only want specific water-access or water-navigation pins.'}
-              </Text>
-              <View style={s.filterGrid}>
-                {WATER_ACCESS_FILTER_TYPES.map(f => {
-                  const active = activePlaceFilters.includes(f.id);
-                  return (
-                    <TouchableOpacity key={f.id} style={[s.filterChip, active && { backgroundColor: f.color, borderColor: f.color }]}
-                      onPress={() => setActivePlaceFilters(prev => {
-                        const withoutBroadWater = prev.filter(id => id !== 'water');
-                        return withoutBroadWater.includes(f.id)
-                          ? withoutBroadWater.filter(id => id !== f.id)
-                          : [...withoutBroadWater, f.id];
-                      })}>
-                      <Ionicons name={f.icon as any} size={13} color={active ? '#fff' : f.color} style={{ marginRight: 4 }} />
-                      <Text style={[s.filterChipText, active && { color: '#fff' }]}>{f.label}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-
-              <View style={s.filterSectionHeader}>
-                <Text style={s.filterSectionTitle}>STAYS</Text>
-                <View style={{ flexDirection: 'row', gap: 12 }}>
-                  <TouchableOpacity onPress={() => setActivePlaceFilters(prev => Array.from(new Set([...prev, 'private_stay', 'farm_stay', 'ranch', 'winery', 'glamping', 'private_camp'])))}>
-                    <Text style={s.filterClearText}>PRIVATE STAYS</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-              <Text style={s.filterHintText}>Discovery only. Use source details and local rules to confirm access before making it an overnight stop.</Text>
-              <View style={s.filterGrid}>
-                {PLACE_FILTER_TYPES.filter(f => f.group === 'stays').map(f => {
-                  const active = activePlaceFilters.includes(f.id);
-                  return (
-                    <TouchableOpacity key={f.id} style={[s.filterChip, active && { backgroundColor: f.color, borderColor: f.color }]}
-                      onPress={() => setActivePlaceFilters(prev =>
-                        prev.includes(f.id) ? prev.filter(x => x !== f.id) : [...prev, f.id]
-                      )}>
-                      <Ionicons name={f.icon as any} size={13} color={active ? '#fff' : f.color} style={{ marginRight: 4 }} />
-                      <Text style={[s.filterChipText, active && { color: '#fff' }]}>{f.label}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-
-              <View style={s.filterSectionHeader}>
-                <Text style={s.filterSectionTitle}>EXPLORE / TOWN SERVICES</Text>
-                <View style={{ flexDirection: 'row', gap: 12 }}>
-                  {exploreCategoriesUnlocked ? (
-                    <TouchableOpacity onPress={() => setActivePlaceFilters(prev => Array.from(new Set([...prev, ...EXPLORE_PLACE_FILTER_IDS])))}>
-                      <Text style={s.filterClearText}>ALL</Text>
-                    </TouchableOpacity>
-                  ) : (
-                    <TouchableOpacity onPress={unlockExploreCategories} disabled={categoryUnlocking}>
-                      <Text style={s.filterClearText}>{categoryUnlocking ? 'UNLOCKING' : 'UNLOCK'}</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              </View>
-              <Text style={s.filterHintText}>Food, groceries, lodging, attractions, showers, laundry, parts, medical, wifi, and other town stops unlock with Explorer or credits for today.</Text>
-              <View style={s.filterGrid}>
-                {PLACE_FILTER_TYPES.filter(f => f.group === 'explore').map(f => {
-                  const active = activePlaceFilters.includes(f.id);
-                  const locked = !exploreCategoriesUnlocked;
-                  return (
-                    <TouchableOpacity key={f.id} style={[s.filterChip, locked && s.filterChipLocked, active && !locked && { backgroundColor: f.color, borderColor: f.color }]}
-                      onPress={() => {
-                        if (locked) {
-                          Alert.alert('Unlock Explore for today', 'Restaurants, groceries, lodging, attractions, and town services use richer provider searches. Unlock this group for today with credits, or use Explorer.', [
-                            { text: 'Cancel', style: 'cancel' },
-                            { text: 'Unlock', onPress: unlockExploreCategories },
-                          ]);
-                          return;
-                        }
-                        setActivePlaceFilters(prev =>
-                          prev.includes(f.id) ? prev.filter(x => x !== f.id) : [...prev, f.id]
-                        );
-                      }}>
-                      <Ionicons name={(locked ? 'lock-closed-outline' : f.icon) as any} size={13} color={active && !locked ? '#fff' : f.color} style={{ marginRight: 4 }} />
-                      <Text style={[s.filterChipText, active && !locked && { color: '#fff' }, locked && s.filterChipLockedText]}>{f.label}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-
-              <View style={s.filterSectionHeader}>
-                <Text style={s.filterSectionTitle}>CAMPS</Text>
-                {activeFilters.length > 0 && (
-                  <TouchableOpacity onPress={() => setActiveFilters([])}>
-                    <Text style={s.filterClearText}>RESET</Text>
-                  </TouchableOpacity>
+              <View style={s.filterGroup}>
+                <TouchableOpacity style={s.filterSectionRow} onPress={() => toggleFilterSection('map-content')} activeOpacity={0.84}>
+                  <View style={s.filterSectionIcon}><Ionicons name="map-outline" size={18} color={C.orange} /></View>
+                  <View style={s.filterSectionCopy}>
+                    <Text style={s.filterSectionRowTitle}>Map Content</Text>
+                    <Text style={s.filterSectionRowSub} numberOfLines={1}>{mapContentSummary}</Text>
+                  </View>
+                  <Ionicons name={expandedFilterSections.includes('map-content') ? 'chevron-up' : 'chevron-down'} size={18} color={C.text3} />
+                </TouchableOpacity>
+                {expandedFilterSections.includes('map-content') && (
+                  <View style={s.filterToggleList}>
+                    {[
+                      ['showCampPins', 'Camps', 'All camp pins and route camps', showCampPins, setShowCampPins, 'bonfire-outline'],
+                      ['showPlacePins', 'Places', 'Trailheads, services, parks, water, and stops', showPlacePins, setShowPlacePins, 'location-outline'],
+                      ['showCommunityPins', 'Community Pins', 'Shared road, camp, service, and trail notes', showCommunityPins, setShowCommunityPins, 'people-outline'],
+                    ].map(([key, title, sub, value, setter, icon]) => {
+                      const enabled = Boolean(value);
+                      return (
+                        <TouchableOpacity key={String(key)} style={s.filterToggleRow} onPress={() => (setter as (v: boolean) => void)(!enabled)} activeOpacity={0.82}>
+                          <Ionicons name={icon as any} size={18} color={enabled ? C.orange : C.text3} />
+                          <View style={s.filterSectionCopy}>
+                            <Text style={s.filterOptionText}>{title as string}</Text>
+                            <Text style={s.filterSectionRowSub} numberOfLines={1}>{sub as string}</Text>
+                          </View>
+                          <View style={[s.filterSwitch, enabled && s.filterSwitchOn]}>
+                            <View style={[s.filterSwitchKnob, enabled && s.filterSwitchKnobOn]} />
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
                 )}
               </View>
-              <Text style={s.filterHintText}>No camp chips means all camps. Select chips only when you want to narrow campsite search results.</Text>
-              <View style={s.filterGrid}>
-                {([
-                  { id: 'blm', label: 'BLM', icon: 'earth-outline' as const },
-                  { id: 'usfs', label: 'Nat. Forest', icon: 'leaf-outline' as const },
-                  { id: 'nps', label: 'Nat. Park', icon: 'triangle-outline' as const },
-                  { id: 'state', label: 'State Park', icon: 'map-outline' as const },
-                  { id: 'corps', label: 'Corps / Lake', icon: 'water-outline' as const },
-                  { id: 'dispersed', label: 'Dispersed', icon: 'radio-button-off-outline' as const },
-                  { id: 'tent', label: 'Tent Sites', icon: 'home-outline' as const },
-                  { id: 'rv', label: 'RV / Hookups', icon: 'car-outline' as const },
-                  { id: 'walk_in', label: 'Walk-in', icon: 'walk-outline' as const },
-                  { id: 'free', label: 'Free', icon: 'pricetag-outline' as const },
-                  { id: 'ada', label: 'ADA', icon: 'accessibility-outline' as const },
-                  { id: 'private', label: 'Private Stays', icon: 'home-outline' as const },
-                  { id: 'farm', label: 'Farm stays', icon: 'leaf-outline' as const },
-                  { id: 'ranch', label: 'Ranches', icon: 'home-outline' as const },
-                  { id: 'winery', label: 'Wineries', icon: 'wine-outline' as const },
-                  { id: 'glamping', label: 'Glamping', icon: 'sparkles-outline' as const },
-                  { id: 'private_camp', label: 'Private camps', icon: 'key-outline' as const },
-                ] as const).map(f => {
-                  const active = activeFilters.includes(f.id);
-                  return (
-                    <TouchableOpacity key={f.id} style={[s.filterChip, active && s.filterChipActive]}
-                      onPress={() => setActiveFilters(prev =>
-                        prev.includes(f.id) ? prev.filter(x => x !== f.id) : [...prev, f.id]
-                      )}>
-                      <Ionicons name={f.icon} size={13} color={active ? '#fff' : OVR.text2} style={{ marginRight: 4 }} />
-                      <Text style={[s.filterChipText, active && { color: '#fff' }]}>{f.label}</Text>
-                    </TouchableOpacity>
-                  );
+
+              <View style={s.filterGroup}>
+                <TouchableOpacity style={s.filterSectionRow} onPress={() => toggleFilterSection('camps')} activeOpacity={0.84}>
+                  <View style={s.filterSectionIcon}><Ionicons name="bonfire-outline" size={18} color="#14b8a6" /></View>
+                  <View style={s.filterSectionCopy}>
+                    <Text style={s.filterSectionRowTitle}>Camps</Text>
+                    <Text style={s.filterSectionRowSub} numberOfLines={1}>{campFilterSummary}</Text>
+                  </View>
+                  {activeFilters.length > 0 && <TouchableOpacity onPress={() => setActiveFilters([])} hitSlop={8}><Text style={s.filterClearText}>RESET</Text></TouchableOpacity>}
+                  <Ionicons name={expandedFilterSections.includes('camps') ? 'chevron-up' : 'chevron-down'} size={18} color={C.text3} />
+                </TouchableOpacity>
+                {expandedFilterSections.includes('camps') && (
+                  <>
+                    <Text style={s.filterHintText}>No refinements means all camp types. Turn Camps off above to hide the group.</Text>
+                    {renderFilterCheckRows(CAMP_FILTER_OPTIONS, activeFilters, id => toggleFilterId(setActiveFilters, id))}
+                  </>
+                )}
+              </View>
+
+              <View style={s.filterGroup}>
+                <TouchableOpacity style={s.filterSectionRow} onPress={() => toggleFilterSection('places')} activeOpacity={0.84}>
+                  <View style={s.filterSectionIcon}><Ionicons name="location-outline" size={18} color="#0ea5e9" /></View>
+                  <View style={s.filterSectionCopy}>
+                    <Text style={s.filterSectionRowTitle}>Places</Text>
+                    <Text style={s.filterSectionRowSub} numberOfLines={1}>{placeFilterSummary}</Text>
+                  </View>
+                  <TouchableOpacity onPress={() => setActivePlaceFilters(DEFAULT_PLACE_FILTERS)} hitSlop={8}><Text style={s.filterClearText}>DEFAULT</Text></TouchableOpacity>
+                  <Ionicons name={expandedFilterSections.includes('places') ? 'chevron-up' : 'chevron-down'} size={18} color={C.text3} />
+                </TouchableOpacity>
+                {expandedFilterSections.includes('places') && (
+                  <>
+                    <Text style={s.filterHintText}>Default keeps camps, trails, water, fuel, dump, propane, parking, and repair visible without town clutter.</Text>
+                    {renderFilterCheckRows(PLACE_FILTER_TYPES.filter(f => f.group === 'essentials'), activePlaceFilters, id => {
+                      if (id === 'water') {
+                        setActivePlaceFilters(prev => prev.includes('water') ? prev.filter(x => x !== 'water') : [...prev.filter(x => !WATER_PLACE_FILTER_IDS.has(x)), 'water']);
+                      } else {
+                        toggleFilterId(setActivePlaceFilters, id);
+                      }
+                    })}
+                  </>
+                )}
+              </View>
+
+              <View style={s.filterGroup}>
+                <TouchableOpacity style={s.filterSectionRow} onPress={() => toggleFilterSection('water')} activeOpacity={0.84}>
+                  <View style={s.filterSectionIcon}><Ionicons name="boat-outline" size={18} color="#0891b2" /></View>
+                  <View style={s.filterSectionCopy}>
+                    <Text style={s.filterSectionRowTitle}>Water</Text>
+                    <Text style={s.filterSectionRowSub} numberOfLines={1}>{waterFilterBroadActive ? 'All water points' : waterFilterNarrowCount > 0 ? `${waterFilterNarrowCount} selected` : 'Choose water access types'}</Text>
+                  </View>
+                  <TouchableOpacity onPress={() => applyMapFilterPreset('water')} hitSlop={8}><Text style={s.filterClearText}>SAFE WATER</Text></TouchableOpacity>
+                  <Ionicons name={expandedFilterSections.includes('water') ? 'chevron-up' : 'chevron-down'} size={18} color={C.text3} />
+                </TouchableOpacity>
+                {expandedFilterSections.includes('water') && renderFilterCheckRows(WATER_ACCESS_FILTER_TYPES, activePlaceFilters, id => {
+                  setActivePlaceFilters(prev => {
+                    const withoutBroadWater = prev.filter(item => item !== 'water');
+                    return withoutBroadWater.includes(id) ? withoutBroadWater.filter(item => item !== id) : [...withoutBroadWater, id];
+                  });
                 })}
               </View>
 
-              <View style={s.filterSectionHeader}>
-                <Text style={s.filterSectionTitle}>COMMUNITY PINS</Text>
-                <View style={{ flexDirection: 'row', gap: 12 }}>
-                  <TouchableOpacity onPress={() => setActivePinFilters(DEFAULT_COMMUNITY_PIN_FILTERS)}>
-                    <Text style={s.filterClearText}>DEFAULT</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => setActivePinFilters(COMMUNITY_PIN_TYPES.map(t => t.id))}>
+              <View style={s.filterGroup}>
+                <TouchableOpacity style={s.filterSectionRow} onPress={() => toggleFilterSection('stays')} activeOpacity={0.84}>
+                  <View style={s.filterSectionIcon}><Ionicons name="bed-outline" size={18} color="#6366f1" /></View>
+                  <View style={s.filterSectionCopy}>
+                    <Text style={s.filterSectionRowTitle}>Camps & Stays</Text>
+                    <Text style={s.filterSectionRowSub} numberOfLines={1}>Private stays, glamping, lodging-style camps</Text>
+                  </View>
+                  <TouchableOpacity onPress={() => setActivePlaceFilters(prev => Array.from(new Set([...prev, 'private_stay', 'farm_stay', 'ranch', 'winery', 'glamping', 'private_camp'])))} hitSlop={8}>
                     <Text style={s.filterClearText}>ALL</Text>
                   </TouchableOpacity>
-                </View>
+                  <Ionicons name={expandedFilterSections.includes('stays') ? 'chevron-up' : 'chevron-down'} size={18} color={C.text3} />
+                </TouchableOpacity>
+                {expandedFilterSections.includes('stays') && renderFilterCheckRows(PLACE_FILTER_TYPES.filter(f => f.group === 'stays'), activePlaceFilters, id => toggleFilterId(setActivePlaceFilters, id))}
               </View>
-              <View style={s.pinFilterHint}>
-                <Ionicons name="shield-checkmark-outline" size={12} color={OVR.text3} />
-                <Text style={s.pinFilterHintText}>Selected pin chips are visible. Default shows community cards and hides GPX imports.</Text>
+
+              <View style={s.filterGroup}>
+                <TouchableOpacity style={s.filterSectionRow} onPress={() => toggleFilterSection('explore-services')} activeOpacity={0.84}>
+                  <View style={s.filterSectionIcon}><Ionicons name="sparkles-outline" size={18} color="#06b6d4" /></View>
+                  <View style={s.filterSectionCopy}>
+                    <Text style={s.filterSectionRowTitle}>Explore & Services</Text>
+                    <Text style={s.filterSectionRowSub} numberOfLines={1}>Food, groceries, lodging, attractions, parts, medical, wifi</Text>
+                  </View>
+                  {!exploreCategoriesUnlocked && <TouchableOpacity onPress={unlockExploreCategories} disabled={categoryUnlocking} hitSlop={8}><Text style={s.filterClearText}>{categoryUnlocking ? 'OPENING' : 'OPEN'}</Text></TouchableOpacity>}
+                  <Ionicons name={expandedFilterSections.includes('explore-services') ? 'chevron-up' : 'chevron-down'} size={18} color={C.text3} />
+                </TouchableOpacity>
+                {expandedFilterSections.includes('explore-services') && renderFilterCheckRows(
+                  PLACE_FILTER_TYPES.filter(f => f.group === 'explore'),
+                  activePlaceFilters,
+                  id => toggleFilterId(setActivePlaceFilters, id),
+                  exploreCategoriesUnlocked ? new Set<string>() : new Set(EXPLORE_PLACE_FILTER_IDS),
+                )}
               </View>
-              <View style={s.filterGrid}>
-                {COMMUNITY_PIN_TYPES.map(f => {
-                  const active = activePinFilters.includes(f.id);
-                  return (
-                    <TouchableOpacity key={f.id} style={[s.filterChip, active && { backgroundColor: f.color, borderColor: f.color }]}
-                      onPress={() => setActivePinFilters(prev =>
-                        prev.includes(f.id) ? prev.filter(x => x !== f.id) : [...prev, f.id]
-                      )}>
-                      <Ionicons name={f.icon as any} size={13} color={active ? '#fff' : f.color} style={{ marginRight: 4 }} />
-                      <Text style={[s.filterChipText, active && { color: '#fff' }]}>{f.label}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
+
+              <View style={s.filterGroup}>
+                <TouchableOpacity style={s.filterSectionRow} onPress={() => toggleFilterSection('community')} activeOpacity={0.84}>
+                  <View style={s.filterSectionIcon}><Ionicons name="people-outline" size={18} color="#22c55e" /></View>
+                  <View style={s.filterSectionCopy}>
+                    <Text style={s.filterSectionRowTitle}>Community Pins</Text>
+                    <Text style={s.filterSectionRowSub} numberOfLines={1}>{communityFilterSummary}</Text>
+                  </View>
+                  <TouchableOpacity onPress={() => setActivePinFilters(DEFAULT_COMMUNITY_PIN_FILTERS)} hitSlop={8}><Text style={s.filterClearText}>DEFAULT</Text></TouchableOpacity>
+                  <Ionicons name={expandedFilterSections.includes('community') ? 'chevron-up' : 'chevron-down'} size={18} color={C.text3} />
+                </TouchableOpacity>
+                {expandedFilterSections.includes('community') && (
+                  <>
+                    <View style={s.pinFilterHint}>
+                      <Ionicons name="shield-checkmark-outline" size={12} color={OVR.text3} />
+                      <Text style={s.pinFilterHintText}>Default shows shared pins and keeps GPX imports hidden.</Text>
+                    </View>
+                    {renderFilterCheckRows(COMMUNITY_PIN_TYPES, activePinFilters, id => toggleFilterId(setActivePinFilters, id))}
+                  </>
+                )}
+              </View>
+
+              <View style={s.filterGroup}>
+                <TouchableOpacity style={s.filterSectionRow} onPress={() => toggleFilterSection('weather-layers')} activeOpacity={0.84}>
+                  <View style={s.filterSectionIcon}><Ionicons name="partly-sunny-outline" size={18} color="#f59e0b" /></View>
+                  <View style={s.filterSectionCopy}>
+                    <Text style={s.filterSectionRowTitle}>Weather & Layers</Text>
+                    <Text style={s.filterSectionRowSub} numberOfLines={1}>Radar, trails, MVUM, land, and public data overlays</Text>
+                  </View>
+                  <Ionicons name={expandedFilterSections.includes('weather-layers') ? 'chevron-up' : 'chevron-down'} size={18} color={C.text3} />
+                </TouchableOpacity>
+                {expandedFilterSections.includes('weather-layers') && (
+                  <View style={s.filterToggleList}>
+                    {[
+                      ['Trails', 'Trail overlays on the map', layerTrails, setLayerTrails, 'trail-sign-outline'],
+                      ['Radar', 'Weather radar layer', layerRadar, (v: boolean) => { setLayerRadar(v); toggleDataLayer('radar', v); }, 'rainy-outline'],
+                      ['MVUM', 'Motor vehicle use map layer', layerMvum, (v: boolean) => { setLayerMvum(v); toggleDataLayer('mvum', v); }, 'trail-sign-outline'],
+                      ['Safe Water', 'Navigation markers and hazards', layerNautical, (v: boolean) => { if (!v) { closeSafeWaterMode(); return; } setLayerNautical(true); toggleDataLayer('nautical', true); setActivePlaceFilters(prev => Array.from(new Set([...prev, ...WATER_NAV_PLACE_FILTER_IDS]))); }, 'boat-outline'],
+                      ['Public Land', 'Public land overlay', showLands, toggleLandOverlay, 'map-outline'],
+                      ['USGS', 'USGS map overlay', showUsgs, toggleUsgsOverlay, 'layers-outline'],
+                    ].map(([title, sub, value, setter, icon]) => {
+                      const enabled = Boolean(value);
+                      return (
+                        <TouchableOpacity key={String(title)} style={s.filterToggleRow} onPress={() => (setter as (v: boolean) => void)(!enabled)} activeOpacity={0.82}>
+                          <Ionicons name={icon as any} size={18} color={enabled ? C.orange : C.text3} />
+                          <View style={s.filterSectionCopy}>
+                            <Text style={s.filterOptionText}>{title as string}</Text>
+                            <Text style={s.filterSectionRowSub} numberOfLines={1}>{sub as string}</Text>
+                          </View>
+                          <View style={[s.filterSwitch, enabled && s.filterSwitchOn]}>
+                            <View style={[s.filterSwitchKnob, enabled && s.filterSwitchKnobOn]} />
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                )}
               </View>
               {Platform.OS === 'android' ? <View style={{ height: filterBottomSpacer }} /> : null}
             </ScrollView>
@@ -19104,7 +19286,7 @@ function MapScreen() {
                 {(campInsight || loadingInsight) ? (
                   <View style={s.detailSection}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                      <Text style={s.detailSectionTitle}>AI INSIGHT</Text>
+	                      <Text style={s.detailSectionTitle}>CAMP INSIGHT</Text>
                       {loadingInsight ? <ActivityIndicator size="small" color={C.orange} /> : null}
                       {campInsight?.star_rating ? <Text style={s.aiStars}>{campInsight.star_rating}/5</Text> : null}
                     </View>
@@ -19131,15 +19313,15 @@ function MapScreen() {
                       </View>
                     ) : null}
                   </View>
-                ) : hasPlan ? (
-                  <TouchableOpacity style={s.lockedInlineCard} onPress={() => openCampInsight(selectedCamp, campDetail)}>
-                    <Ionicons name="sparkles-outline" size={15} color={C.orange} />
-                    <Text style={s.lockedInlineText}>Generate AI camp insight for route fit, hazards, and nearby highlights.</Text>
-                  </TouchableOpacity>
-                ) : (
-                  <TouchableOpacity style={s.lockedAiPreview} onPress={() => openCampInsight(selectedCamp, campDetail)} activeOpacity={0.9}>
-                    <View style={s.lockedAiPreviewTop}>
-                      <Text style={s.detailSectionTitle}>AI INSIGHT</Text>
+	                ) : hasPlan ? (
+	                  <TouchableOpacity style={s.lockedInlineCard} onPress={() => openCampInsight(selectedCamp, campDetail)}>
+	                    <Ionicons name="sparkles-outline" size={15} color={C.orange} />
+	                    <Text style={s.lockedInlineText}>Generate camp insight for route fit, hazards, and nearby highlights.</Text>
+	                  </TouchableOpacity>
+	                ) : (
+	                  <TouchableOpacity style={s.lockedAiPreview} onPress={() => openCampInsight(selectedCamp, campDetail)} activeOpacity={0.9}>
+	                    <View style={s.lockedAiPreviewTop}>
+	                      <Text style={s.detailSectionTitle}>CAMP INSIGHT</Text>
                       <View style={s.lockedAiBadge}>
                         <Ionicons name="lock-closed-outline" size={12} color={C.orange} />
                         <Text style={s.lockedAiBadgeText}>UNLOCK</Text>
@@ -19154,9 +19336,9 @@ function MapScreen() {
                         <View style={[s.lockedAiPill, { width: 118 }]} />
                       </View>
                     </View>
-                    <View style={s.lockedAiOverlay}>
-                      <Ionicons name="sparkles-outline" size={17} color={C.orange} />
-                      <Text style={s.lockedAiOverlayText}>Unlock full AI camp fit, hazards, best season, and nearby highlights with credits or Explorer.</Text>
+	                    <View style={s.lockedAiOverlay}>
+	                      <Ionicons name="sparkles-outline" size={17} color={C.orange} />
+	                      <Text style={s.lockedAiOverlayText}>Unlock full camp fit, hazards, best season, and nearby highlights with credits or Explorer.</Text>
                     </View>
                   </TouchableOpacity>
                 )}
@@ -19174,7 +19356,7 @@ function MapScreen() {
               return (
                 <View style={s.nearbyPlacesBlock}>
                   <View style={s.nearbyPlacesHeader}>
-                    <Text style={s.nearbyPlacesTitle}>NEARBY GUIDE</Text>
+	                    <Text style={s.nearbyPlacesTitle}>NEARBY PLACES</Text>
                     {feed?.loading ? <ActivityIndicator size="small" color={C.orange} /> : null}
                   </View>
                   {!feed?.loading && !feedPlaces.length ? (
@@ -19551,11 +19733,11 @@ function MapScreen() {
                   ) : null}
                 </View>
 
-                {/* AI Insight */}
+	                {/* Camp insight */}
                 {(campInsight || loadingInsight) && (
                   <View style={s.detailSection}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 }}>
-                      <Text style={s.detailSectionTitle}>AI Insight</Text>
+	                      <Text style={s.detailSectionTitle}>Camp Insight</Text>
                       {campInsight?.star_rating && (
                         <Text style={s.aiStars}>{campInsight.star_rating}/5</Text>
                       )}
@@ -19613,7 +19795,7 @@ function MapScreen() {
                   return (
                     <View style={s.detailSection}>
                       <View style={s.nearbyPlacesHeader}>
-                        <Text style={s.detailSectionTitle}>NEARBY GUIDE</Text>
+	                        <Text style={s.detailSectionTitle}>NEARBY PLACES</Text>
                         {feed?.loading ? <ActivityIndicator size="small" color={C.orange} /> : null}
                       </View>
                       {!feed?.loading && !feedPlaces.length ? (
@@ -19960,16 +20142,17 @@ function MapScreen() {
       >
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.frSheetOverlay}>
           <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => { setShowFieldReportForm(false); resetFieldReportForm(); }} />
-          <TrailheadSheet handle style={s.frSheet} contentStyle={[s.frSheetContent, modalSheetPad]}>
-            <View style={s.frSheetHeader}>
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={s.frSheetTitle}>Field report</Text>
-                <Text style={s.frSheetSub} numberOfLines={1}>{selectedCamp?.name}</Text>
-              </View>
-              <TouchableOpacity style={s.frSheetClose} onPress={() => { setShowFieldReportForm(false); resetFieldReportForm(); }}>
-                <Ionicons name="close" size={18} color={C.text2} />
-              </TouchableOpacity>
-            </View>
+          <TrailheadSheet handle={false} style={s.frSheet} contentStyle={[s.frSheetContent, modalSheetPad]}>
+            <View style={s.daySheetHandle} />
+            <PremiumActionSheetHeader
+              title="Field Report"
+              subtitle={selectedCamp?.name}
+              icon="clipboard-outline"
+              iconColor={C.orange}
+              onClose={() => { setShowFieldReportForm(false); resetFieldReportForm(); }}
+              styles={s}
+              colors={C}
+            />
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               {renderCampFieldReportForm()}
             </ScrollView>
@@ -21922,44 +22105,55 @@ function MapScreen() {
           <Modal visible transparent animationType="slide" onRequestClose={() => setCommunityUpdatePin(null)}>
             <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.modalOverlay}>
               <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setCommunityUpdatePin(null)} />
-              <TrailheadSheet handle={false} style={[s.wpSheet, modalSheetPad]} contentStyle={{ padding: 0 }}>
-                <View style={s.daySheetHandle} />
-                <View style={s.pinSheetHeader}>
-                  <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={s.daySheetTitle}>SUGGEST PLACE UPDATE</Text>
-                    <Text style={s.daySheetSub} numberOfLines={1}>{communityUpdatePin.name || meta.label}</Text>
-                  </View>
-                  <TouchableOpacity style={s.pinCloseBtn} onPress={() => setCommunityUpdatePin(null)}>
-                    <Ionicons name="close" size={16} color={OVR.text2} />
-                  </TouchableOpacity>
-                </View>
-                <View style={[s.pinTrustChip, { alignSelf: 'flex-start', marginBottom: 10 }]}>
-                  <Ionicons name={meta.icon as any} size={12} color={meta.color} />
-                  <Text style={s.pinTrustText}>{meta.label.toUpperCase()} · REVIEWED BEFORE CANONICAL</Text>
-                </View>
-                <TextInput
-                  value={communityUpdateNote}
-                  onChangeText={setCommunityUpdateNote}
-                  placeholder="What changed? Add access, hours, condition, duplicate note, better name, or verification details..."
-                  placeholderTextColor={OVR.text3}
-                  style={[s.pinInput, s.pinTextArea, { minHeight: 128 }]}
-                  maxLength={700}
-                  multiline
-                  autoFocus
-                />
-                <Text style={s.communityContextNote}>
-                  Suggestions do not overwrite the original community place until reviewed. They help admins and trusted contributors clean up the map.
-                </Text>
-                <View style={s.wpSheetActions}>
-                  <TouchableOpacity style={s.wpSheetNavBtn} onPress={submitCommunityUpdate} disabled={communityUpdateSubmitting}>
-                    {communityUpdateSubmitting ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="checkmark" size={14} color="#fff" />}
-                    <Text style={s.wpSheetNavText}>SUBMIT UPDATE</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={s.wpSheetDayBtn} onPress={() => setCommunityUpdatePin(null)}>
-                    <Text style={s.wpSheetDayText}>CANCEL</Text>
-                  </TouchableOpacity>
-                </View>
-              </TrailheadSheet>
+	              <TrailheadSheet handle={false} style={[s.wpSheet, modalSheetPad]} contentStyle={{ padding: 0 }}>
+	                <View style={s.daySheetHandle} />
+	                <PremiumActionSheetHeader
+	                  title="Suggest Update"
+	                  subtitle={communityUpdatePin.name || meta.label}
+	                  icon={meta.icon as any}
+	                  iconColor={meta.color}
+	                  onClose={() => setCommunityUpdatePin(null)}
+	                  styles={s}
+	                  colors={C}
+	                />
+	                <View style={s.premiumFormBody}>
+	                  <View style={[s.pinTrustChip, { alignSelf: 'flex-start' }]}>
+	                    <Ionicons name={meta.icon as any} size={12} color={meta.color} />
+	                    <Text style={s.pinTrustText}>{meta.label.toUpperCase()} · REVIEWED BEFORE PUBLISHING</Text>
+	                  </View>
+	                  <TextInput
+	                    value={communityUpdateNote}
+	                    onChangeText={setCommunityUpdateNote}
+	                    placeholder="Access, hours, condition, duplicate note, better name, or verification details"
+	                    placeholderTextColor={OVR.text3}
+	                    style={[s.pinInput, s.pinTextArea, { minHeight: 128 }]}
+	                    maxLength={700}
+	                    multiline
+	                    autoFocus
+	                  />
+	                  <Text style={s.communityContextNote}>
+	                    Suggestions do not overwrite the original community place until reviewed.
+	                  </Text>
+	                  <View style={s.premiumActionRow}>
+	                    <PremiumActionButton
+	                      label="Submit Update"
+	                      icon="checkmark"
+	                      onPress={submitCommunityUpdate}
+	                      styles={s}
+	                      tone={C.orange}
+	                      primary
+	                      disabled={communityUpdateSubmitting}
+	                      loading={communityUpdateSubmitting}
+	                    />
+	                    <PremiumActionButton
+	                      label="Cancel"
+	                      onPress={() => setCommunityUpdatePin(null)}
+	                      styles={s}
+	                      tone={OVR.text2}
+	                    />
+	                  </View>
+	                </View>
+	              </TrailheadSheet>
             </KeyboardAvoidingView>
           </Modal>
         );
@@ -21970,91 +22164,103 @@ function MapScreen() {
         <Modal visible transparent animationType="slide" onRequestClose={() => setPendingPin(null)}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.modalOverlay}>
             <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setPendingPin(null)} />
-            <TrailheadSheet handle={false} style={[s.wpSheet, modalSheetPad]} contentStyle={{ padding: 0 }}>
-              <View style={s.daySheetHandle} />
-              <View style={s.pinSheetHeader}>
-                <View>
-                  <Text style={s.daySheetTitle}>DROP COMMUNITY PIN</Text>
-                  <Text style={s.daySheetSub}>{pendingPin.lat.toFixed(5)}, {pendingPin.lng.toFixed(5)}</Text>
-                </View>
-                <TouchableOpacity style={s.pinCloseBtn} onPress={() => setPendingPin(null)}>
-                  <Ionicons name="close" size={16} color={OVR.text2} />
-                </TouchableOpacity>
-              </View>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.pinTypeScroll}>
-                {COMMUNITY_PIN_TYPES.map(t => {
-                  const active = pinType === t.id;
-                  return (
-                    <TouchableOpacity
-                      key={t.id}
-                      style={[s.pinTypeChip, { borderColor: t.color + '55', backgroundColor: active ? t.color : t.color + '18' }]}
-                      onPress={() => { setPinType(t.id); setPinDetails({}); }}
-                    >
-                      <Ionicons name={t.icon as any} size={15} color={active ? '#fff' : t.color} />
-                      <Text style={[s.pinTypeText, { color: active ? '#fff' : t.color }]}>{t.label}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-              <TextInput
-                value={pinName}
-                onChangeText={setPinName}
-                placeholder={`${communityPinMeta(pinType).label} name`}
-                placeholderTextColor={OVR.text3}
-                style={s.pinInput}
-                maxLength={80}
-              />
-              <TextInput
-                value={pinDescription}
-                onChangeText={setPinDescription}
-                placeholder="Extra notes, access details, hours, current condition..."
-                placeholderTextColor={OVR.text3}
-                style={[s.pinInput, s.pinTextArea]}
-                maxLength={500}
-                multiline
-              />
-              <View style={s.pinFieldWrap}>
-                {pinFields(pinType).map(field => (
-                  <View key={field.key} style={s.pinFieldBlock}>
-                    <Text style={s.pinFieldLabel}>{field.label}</Text>
-                    {field.kind === 'select' && field.options ? (
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.pinOptionRow}>
-                        {field.options.map(option => {
-                          const active = pinDetails[field.key] === option;
-                          return (
-                            <TouchableOpacity
-                              key={option}
-                              style={[s.pinOptionChip, active && { backgroundColor: communityPinMeta(pinType).color, borderColor: communityPinMeta(pinType).color }]}
-                              onPress={() => setPinDetails(prev => ({ ...prev, [field.key]: active ? '' : option }))}
-                            >
-                              <Text style={[s.pinOptionText, active && { color: '#fff' }]}>{option}</Text>
-                            </TouchableOpacity>
-                          );
-                        })}
-                      </ScrollView>
-                    ) : (
-                      <TextInput
-                        value={pinDetails[field.key] ?? ''}
-                        onChangeText={value => setPinDetails(prev => ({ ...prev, [field.key]: value }))}
-                        placeholder={field.placeholder ?? field.label}
-                        placeholderTextColor={OVR.text3}
-                        style={s.pinMiniInput}
-                        maxLength={120}
-                      />
-                    )}
-                  </View>
-                ))}
-              </View>
-              <View style={s.wpSheetActions}>
-                <TouchableOpacity style={s.wpSheetNavBtn} onPress={submitCommunityPin} disabled={pinSubmitting}>
-                  {pinSubmitting ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="checkmark" size={14} color="#fff" />}
-                  <Text style={s.wpSheetNavText}>ADD PIN</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={s.wpSheetDayBtn} onPress={() => setPendingPin(null)}>
-                  <Text style={s.wpSheetDayText}>CANCEL</Text>
-                </TouchableOpacity>
-              </View>
-            </TrailheadSheet>
+	            <TrailheadSheet handle={false} style={[s.wpSheet, modalSheetPad]} contentStyle={{ padding: 0 }}>
+	              <View style={s.daySheetHandle} />
+	              <PremiumActionSheetHeader
+	                title="Drop Pin"
+	                subtitle={`${pendingPin.lat.toFixed(5)}, ${pendingPin.lng.toFixed(5)}`}
+	                icon={communityPinMeta(pinType).icon as any}
+	                iconColor={communityPinMeta(pinType).color}
+	                onClose={() => setPendingPin(null)}
+	                styles={s}
+	                colors={C}
+	              />
+	              <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={s.premiumFormBody}>
+	                <Text style={s.communitySectionLabel}>PIN TYPE</Text>
+	                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.pinTypeScroll}>
+	                  {COMMUNITY_PIN_TYPES.map(t => {
+	                    const active = pinType === t.id;
+	                    return (
+	                      <TouchableOpacity
+	                        key={t.id}
+	                        style={[s.pinTypeChip, { borderColor: t.color + '55', backgroundColor: active ? t.color : t.color + '18' }]}
+	                        onPress={() => { setPinType(t.id); setPinDetails({}); }}
+	                      >
+	                        <Ionicons name={t.icon as any} size={15} color={active ? '#fff' : t.color} />
+	                        <Text style={[s.pinTypeText, { color: active ? '#fff' : t.color }]}>{t.label}</Text>
+	                      </TouchableOpacity>
+	                    );
+	                  })}
+	                </ScrollView>
+	                <TextInput
+	                  value={pinName}
+	                  onChangeText={setPinName}
+	                  placeholder={`${communityPinMeta(pinType).label} name`}
+	                  placeholderTextColor={OVR.text3}
+	                  style={s.pinInput}
+	                  maxLength={80}
+	                />
+	                <TextInput
+	                  value={pinDescription}
+	                  onChangeText={setPinDescription}
+	                  placeholder="Notes, access details, hours, or current condition"
+	                  placeholderTextColor={OVR.text3}
+	                  style={[s.pinInput, s.pinTextArea]}
+	                  maxLength={500}
+	                  multiline
+	                />
+	                <View style={s.pinFieldWrap}>
+	                  {pinFields(pinType).map(field => (
+	                    <View key={field.key} style={s.pinFieldBlock}>
+	                      <Text style={s.pinFieldLabel}>{field.label}</Text>
+	                      {field.kind === 'select' && field.options ? (
+	                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.pinOptionRow}>
+	                          {field.options.map(option => {
+	                            const active = pinDetails[field.key] === option;
+	                            return (
+	                              <TouchableOpacity
+	                                key={option}
+	                                style={[s.pinOptionChip, active && { backgroundColor: communityPinMeta(pinType).color, borderColor: communityPinMeta(pinType).color }]}
+	                                onPress={() => setPinDetails(prev => ({ ...prev, [field.key]: active ? '' : option }))}
+	                              >
+	                                <Text style={[s.pinOptionText, active && { color: '#fff' }]}>{option}</Text>
+	                              </TouchableOpacity>
+	                            );
+	                          })}
+	                        </ScrollView>
+	                      ) : (
+	                        <TextInput
+	                          value={pinDetails[field.key] ?? ''}
+	                          onChangeText={value => setPinDetails(prev => ({ ...prev, [field.key]: value }))}
+	                          placeholder={field.placeholder ?? field.label}
+	                          placeholderTextColor={OVR.text3}
+	                          style={s.pinMiniInput}
+	                          maxLength={120}
+	                        />
+	                      )}
+	                    </View>
+	                  ))}
+	                </View>
+	                <View style={s.premiumActionRow}>
+	                  <PremiumActionButton
+	                    label="Add Pin"
+	                    icon="checkmark"
+	                    onPress={submitCommunityPin}
+	                    styles={s}
+	                    tone={communityPinMeta(pinType).color}
+	                    primary
+	                    disabled={pinSubmitting}
+	                    loading={pinSubmitting}
+	                  />
+	                  <PremiumActionButton
+	                    label="Cancel"
+	                    onPress={() => setPendingPin(null)}
+	                    styles={s}
+	                    tone={OVR.text2}
+	                  />
+	                </View>
+	              </ScrollView>
+	            </TrailheadSheet>
           </KeyboardAvoidingView>
         </Modal>
       )}
@@ -23719,6 +23925,47 @@ const makeStyles = (C: ColorPalette) => {
     backgroundColor: C.s1, borderWidth: 1, borderColor: C.border,
   },
   filterResetText: { color: '#14b8a6', fontSize: 9, fontFamily: mono, fontWeight: '900' },
+  filterPresetWrap: {
+    flexDirection: 'row', flexWrap: 'wrap', gap: 8,
+    paddingHorizontal: 14, paddingTop: 12, paddingBottom: 10,
+  },
+  filterPresetBtn: {
+    minHeight: 34, alignItems: 'center', justifyContent: 'center',
+    paddingHorizontal: 12, borderRadius: 8,
+    backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
+  },
+  filterPresetText: { color: C.text2, fontSize: 10, fontFamily: mono, fontWeight: '900' },
+  filterGroup: {
+    marginHorizontal: 12, marginBottom: 10,
+    borderRadius: 8, borderWidth: 1, borderColor: C.border,
+    backgroundColor: C.s1, overflow: 'hidden',
+  },
+  filterSectionRow: {
+    minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingHorizontal: 12, paddingVertical: 10,
+  },
+  filterSectionIcon: {
+    width: 34, height: 34, borderRadius: 8, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
+  },
+  filterSectionCopy: { flex: 1, minWidth: 0 },
+  filterSectionRowTitle: { color: C.text, fontSize: 14, lineHeight: 18, fontWeight: '900' },
+  filterSectionRowSub: { color: C.text3, fontSize: 11, lineHeight: 15, marginTop: 2 },
+  filterToggleList: { borderTopWidth: 1, borderColor: C.border, backgroundColor: C.bg },
+  filterToggleRow: {
+    minHeight: 54, flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingHorizontal: 12, paddingVertical: 10,
+    borderBottomWidth: 1, borderColor: C.border,
+  },
+  filterSwitch: {
+    width: 42, height: 24, borderRadius: 12, padding: 3,
+    backgroundColor: C.s3, borderWidth: 1, borderColor: C.border,
+  },
+  filterSwitchOn: { backgroundColor: '#14b8a6', borderColor: '#14b8a6' },
+  filterSwitchKnob: {
+    width: 16, height: 16, borderRadius: 8, backgroundColor: C.text3,
+  },
+  filterSwitchKnobOn: { backgroundColor: '#fff', transform: [{ translateX: 18 }] },
   filterBar: {
     position: 'absolute', top: 92, left: 0, right: 0,
     backgroundColor: OVR.bg2, borderBottomWidth: 1, borderColor: OVR.border,
@@ -23734,6 +23981,18 @@ const makeStyles = (C: ColorPalette) => {
   filterChipLocked: { opacity: 0.58, borderStyle: 'dashed', backgroundColor: C.s1 },
   filterChipText: { color: C.text2, fontSize: 11, fontFamily: mono, fontWeight: '600' },
   filterChipLockedText: { color: C.text3 },
+  filterOptionList: { borderTopWidth: 1, borderColor: C.border, backgroundColor: C.bg },
+  filterOptionRow: {
+    minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingHorizontal: 12, paddingVertical: 9,
+    borderBottomWidth: 1, borderColor: C.border,
+  },
+  filterOptionRowDisabled: { opacity: 0.62 },
+  filterOptionCheck: {
+    width: 20, height: 20, borderRadius: 6, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: C.border2, backgroundColor: C.s2,
+  },
+  filterOptionText: { flex: 1, minWidth: 0, color: C.text, fontSize: 13, lineHeight: 18, fontWeight: '800' },
   filterGrid: {
     flexDirection: 'row', flexWrap: 'wrap', gap: 8,
     paddingHorizontal: 14, paddingTop: 8, paddingBottom: 4,
@@ -25066,8 +25325,66 @@ const makeStyles = (C: ColorPalette) => {
     alignItems: 'center', justifyContent: 'center',
     borderWidth: 2, borderColor: '#fff',
   },
-  pinDescription: { color: OVR.text2, fontSize: 12, lineHeight: 17, marginTop: 8 },
-  pinSheetHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 },
+	  pinDescription: { color: OVR.text2, fontSize: 12, lineHeight: 17, marginTop: 8 },
+  premiumSheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    paddingHorizontal: 14,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderColor: OVR.border,
+  },
+  premiumSheetIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
+  premiumSheetHeaderText: { flex: 1, minWidth: 0 },
+  premiumSheetTitle: { color: OVR.text, fontSize: 16, lineHeight: 20, fontWeight: '900' },
+  premiumSheetSub: { color: OVR.text3, fontSize: 11, lineHeight: 15, marginTop: 2 },
+  premiumSheetClose: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: OVR.border2,
+    borderWidth: 1,
+    borderColor: OVR.border,
+  },
+  premiumFormBody: { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 10 },
+  premiumActionRow: { flexDirection: 'row', gap: 9, marginTop: 4, paddingBottom: 4 },
+  premiumPrimaryAction: {
+    flex: 1.2,
+    minHeight: 44,
+    borderRadius: 12,
+    backgroundColor: C.orange,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    paddingHorizontal: 10,
+  },
+  premiumPrimaryActionText: { color: '#fff', fontSize: 10.5, fontFamily: mono, fontWeight: '900' },
+  premiumSecondaryAction: {
+    flex: 0.8,
+    minHeight: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: OVR.border,
+    backgroundColor: OVR.border2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    paddingHorizontal: 10,
+  },
+  premiumSecondaryActionText: { fontSize: 10.5, fontFamily: mono, fontWeight: '900' },
+	  pinSheetHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 },
   pinCloseBtn: {
     width: 30, height: 30, borderRadius: 15,
     alignItems: 'center', justifyContent: 'center',
@@ -25504,10 +25821,40 @@ const makeStyles = (C: ColorPalette) => {
     width: 20,
     opacity: 0.72,
   },
-  layerPreviewRadarRing: {
+	  layerPreviewRadarRing: {
+	    position: 'absolute',
+	    borderRadius: 40,
+	    borderWidth: 2,
+	  },
+  layerPreviewRainBand: {
     position: 'absolute',
-    borderRadius: 40,
-    borderWidth: 2,
+    width: 28,
+    height: 14,
+    borderRadius: 8,
+    opacity: 0.9,
+  },
+  layerPreviewCloud: {
+    position: 'absolute',
+    left: 18,
+    top: 11,
+    width: 38,
+    height: 30,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(14,165,233,0.82)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.55)',
+  },
+  layerPreviewRadarSweep: {
+    position: 'absolute',
+    left: 34,
+    top: 30,
+    width: 34,
+    height: 3,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.78)',
+    transform: [{ rotate: '-24deg' }],
   },
   layerRow: {
     flexDirection: 'row', alignItems: 'center', gap: 12,

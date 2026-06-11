@@ -667,7 +667,7 @@ export default function ProfileScreen() {
   function shareReferral() {
     if (!user) return;
     Share.share({
-      message: `Join me on Trailhead — the AI adventure planner for overlanders!\nUse my code ${user.referral_code} to sign up and we both earn credits.\nhttps://api.gettrailhead.app`,
+      message: `Join me on Trailhead — the adventure planner for overlanders.\nUse my code ${user.referral_code} to sign up and we both earn credits.\nhttps://api.gettrailhead.app`,
       title: 'Join Trailhead',
     });
   }
@@ -851,7 +851,7 @@ export default function ProfileScreen() {
           <Image source={require('@/assets/icon.png')} style={s.authIcon} />
           <View>
             <Text style={s.authWordmark}>TRAILHEAD</Text>
-            <Text style={s.authTagline}>AI OVERLAND GUIDE</Text>
+            <Text style={s.authTagline}>OVERLAND PLANNER</Text>
           </View>
         </View>
         <View style={s.verifyCard}>
@@ -894,7 +894,7 @@ export default function ProfileScreen() {
               <Image source={require('@/assets/icon.png')} style={s.authIcon} />
               <View>
                 <Text style={s.authWordmark}>TRAILHEAD</Text>
-                <Text style={s.authTagline}>AI OVERLAND GUIDE</Text>
+                <Text style={s.authTagline}>OVERLAND PLANNER</Text>
               </View>
             </View>
             <Text style={s.authHeading}>Welcome back</Text>
@@ -953,7 +953,7 @@ export default function ProfileScreen() {
           <Image source={require('@/assets/icon.png')} style={s.authIcon} />
           <View>
             <Text style={s.authWordmark}>TRAILHEAD</Text>
-            <Text style={s.authTagline}>AI OVERLAND GUIDE</Text>
+            <Text style={s.authTagline}>OVERLAND PLANNER</Text>
           </View>
         </View>
         <Text style={s.authHeading}>Reset password</Text>
@@ -999,7 +999,7 @@ export default function ProfileScreen() {
               <Image source={require('@/assets/icon.png')} style={s.authIcon} />
               <View>
                 <Text style={s.authWordmark}>TRAILHEAD</Text>
-                <Text style={s.authTagline}>AI OVERLAND GUIDE</Text>
+                <Text style={s.authTagline}>OVERLAND PLANNER</Text>
               </View>
             </View>
             <Text style={s.authHeading}>Create account</Text>

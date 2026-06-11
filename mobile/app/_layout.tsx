@@ -311,7 +311,7 @@ export default function RootLayout() {
               </View>
 
               <Text style={{ color: C.text2, fontSize: 14, lineHeight: 21 }}>
-                Start with your vehicle profile, then plan with AI, build routes by day, layer the map, download the trip for free, and use community pins to keep the route current.
+                Start with your vehicle profile, then plan a route, build days, layer the map, download the trip for free, and use community pins to keep the route current.
               </Text>
 
               <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -330,7 +330,7 @@ export default function RootLayout() {
               <View style={{ backgroundColor: C.s2, borderRadius: 18, borderWidth: 1, borderColor: '#d4af3744', padding: 14, gap: 10 }}>
                 {[
                   ['Rig setup', 'Fuel range, clearance, towing, and comfort shape every route.', 'car-sport-outline'],
-                  ['AI Planner', 'Ask for the trip intent; Trailhead turns it into daily stops and warnings.', 'sparkles-outline'],
+                  ['Trip Planner', 'Enter the trip intent; Trailhead turns it into daily stops and warnings.', 'sparkles-outline'],
                   ['Map search', 'Use the Map search and filter controls for camps, trails, public land, weather, reports, and places as you scout.', 'search-outline'],
                   ['Trail building', 'Free from the map button: drop anchors along a trail, snap the route, then save or follow it.', 'git-branch-outline'],
                   ['Route Builder', 'Choose Direct, Balanced, Wild, Loop, or There and back, then swap camps, fuel, and places by day.', 'map-outline'],

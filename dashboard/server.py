@@ -9483,9 +9483,7 @@ def _camp_from_live_place(place: dict) -> dict | None:
         "site_types": [land_type] if is_private_stay else (["RV"] if "rv" in tags else ["Tent", "Campground"]),
     }
 
-@app.get("/api/nearby-camps")
-async def nearby_camps(lat: float, lng: float, radius: float = 50, types: str = ""):
-    """Aggregate legal camp sources near a point, no trip required."""
+async def _aggregate_nearby_camps(lat: float, lng: float, radius: float = 50, types: str = "") -> list[dict]:
     type_filters = [t.strip() for t in types.split(",") if t.strip()] if types else None
     private_stay_categories = _private_stay_categories_for_filters(type_filters)
     active_filters = {
@@ -9502,6 +9500,12 @@ async def nearby_camps(lat: float, lng: float, radius: float = 50, types: str = 
     )
     hosted_camps = [_camp_from_live_place(place) for place in hosted_private if isinstance(place, dict)]
     return _merge_camp_sources(ridb, blm, osm, active, [c for c in hosted_camps if c], type_filters=type_filters)[:160]
+
+
+@app.get("/api/nearby-camps")
+async def nearby_camps(lat: float, lng: float, radius: float = 50, types: str = ""):
+    """Aggregate legal camp sources near a point, no trip required."""
+    return await _aggregate_nearby_camps(lat, lng, radius, types)
 
 
 def _route_points_from_body(route: list[dict]) -> list[dict]:
@@ -13590,6 +13594,131 @@ async def explore_places(
         places = sorted(places, key=lambda p: (p.get("summary") or {}).get("rank", 9999))
     limit = max(1, min(limit, 100))
     return {**catalog, "places": places[:limit], "mode": mode}
+
+
+def _find_explore_place(place_id: str) -> dict | None:
+    for place in _load_explore_catalog().get("places") or []:
+        if str(place.get("id") or "") == str(place_id):
+            return place
+    return None
+
+
+def _explore_camp_radius_mi(place: dict, requested: float | None = None) -> float:
+    if requested is not None:
+        return max(5.0, min(float(requested), 75.0))
+    summary = place.get("summary") or {}
+    source_pack = place.get("source_pack") or {}
+    raw = (
+        source_pack.get("camp_search_radius_mi")
+        or summary.get("camp_search_radius_mi")
+        or place.get("camp_search_radius_mi")
+    )
+    try:
+        if raw is not None:
+            return max(5.0, min(float(raw), 75.0))
+    except Exception:
+        pass
+    group = str(summary.get("explore_group") or "").lower()
+    return 45.0 if group in {"camping", "parks"} else 35.0
+
+
+def _camp_image_value(camp: dict) -> str:
+    for key in ("photo_url", "hero_photo_url", "primary_image", "image_url"):
+        val = camp.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    for key in ("photos", "images", "photo_candidates"):
+        vals = camp.get(key)
+        if not isinstance(vals, list):
+            continue
+        for item in vals:
+            if isinstance(item, str) and item.strip():
+                return item.strip()
+            if isinstance(item, dict):
+                val = item.get("url") or item.get("src")
+                if isinstance(val, str) and val.strip():
+                    return val.strip()
+    return ""
+
+
+def _explore_area_image_url(place: dict) -> str:
+    summary = place.get("summary") or {}
+    source_pack = place.get("source_pack") or {}
+    for val in (
+        summary.get("image_url"),
+        summary.get("thumbnail_url"),
+        source_pack.get("image_asset"),
+    ):
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    for photo in source_pack.get("photos") or []:
+        if isinstance(photo, dict) and isinstance(photo.get("url"), str) and photo["url"].strip():
+            return photo["url"].strip()
+    return ""
+
+
+def _rank_explore_camps(camps: list[dict], place: dict, lat: float, lng: float) -> list[dict]:
+    area_image = _explore_area_image_url(place)
+    ranked: list[dict] = []
+    for idx, camp in enumerate(camps or []):
+        if not isinstance(camp, dict):
+            continue
+        enriched = dict(camp)
+        try:
+            dist_m = _haversine_m(lat, lng, float(enriched.get("lat")), float(enriched.get("lng")))
+            enriched["distance_mi"] = round(dist_m / 1609.344, 1)
+        except Exception:
+            enriched["distance_mi"] = None
+        has_source_photo = bool(_camp_image_value(enriched))
+        if not has_source_photo and area_image:
+            enriched["photo_url"] = area_image
+            enriched["photo_status"] = "area_fallback"
+        source = " ".join(str(enriched.get(k) or "") for k in ("source_badge", "verified_source", "source"))
+        score = 0
+        if has_source_photo:
+            score += 100
+        elif area_image:
+            score += 20
+        if re.search(r"recreation|nps|national park|official", source, re.I):
+            score += 30
+        if enriched.get("reservable"):
+            score += 10
+        if enriched.get("cost"):
+            score += 3
+        dist = enriched.get("distance_mi")
+        if isinstance(dist, (int, float)):
+            score -= min(float(dist), 80.0) * 0.35
+        enriched["_explore_rank_score"] = round(score, 3)
+        enriched["_explore_original_index"] = idx
+        ranked.append(enriched)
+    ranked.sort(key=lambda c: (-(c.get("_explore_rank_score") or 0), c.get("distance_mi") if isinstance(c.get("distance_mi"), (int, float)) else 999, c.get("_explore_original_index") or 0))
+    for camp in ranked:
+        camp.pop("_explore_rank_score", None)
+        camp.pop("_explore_original_index", None)
+    return ranked
+
+
+@app.get("/api/explore/places/{place_id}/campgrounds")
+async def explore_place_campgrounds(place_id: str, radius: float | None = None, limit: int = 24, types: str = ""):
+    place = _find_explore_place(place_id)
+    if not place:
+        raise HTTPException(404, "Explore place not found")
+    summary = place.get("summary") or {}
+    lat = summary.get("lat")
+    lng = summary.get("lng")
+    if not isinstance(lat, (int, float)) or not isinstance(lng, (int, float)):
+        raise HTTPException(400, "Explore place has no map coordinates")
+    radius_mi = _explore_camp_radius_mi(place, radius)
+    limit = max(1, min(int(limit), 48))
+    camps = await _aggregate_nearby_camps(float(lat), float(lng), radius_mi, types)
+    ranked = _rank_explore_camps(camps, place, float(lat), float(lng))
+    return {
+        "place_id": place_id,
+        "center": {"lat": float(lat), "lng": float(lng), "name": summary.get("title") or place_id},
+        "radius_mi": radius_mi,
+        "count": len(ranked),
+        "campgrounds": ranked[:limit],
+    }
 
 
 # ── Wikipedia nearby ──────────────────────────────────────────────────────────

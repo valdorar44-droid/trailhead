@@ -12,12 +12,13 @@ import PaywallModal from '@/components/PaywallModal';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
 import { TrailheadButton, TrailheadButtonDock, TrailheadCard, TrailheadTopBar } from '@/components/TrailheadUI';
 import { useStore } from '@/lib/store';
-import { api, PaywallError, type ExplorePlaceProfile, type ExploreSourcePackItem, type OsmPoi } from '@/lib/api';
+import { api, PaywallError, type CampsitePin, type ExplorePlaceProfile, type ExploreSourcePackItem, type OsmPoi } from '@/lib/api';
 import { storage } from '@/lib/storage';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 import { playTrailheadVoice, stopTrailheadVoice } from '@/lib/voice';
 
 const EXPLORE_CACHE_KEY = 'trailhead_explore_catalog_v2';
+const EXPLORE_CAMPGROUNDS_CACHE_PREFIX = 'trailhead_explore_campgrounds_v1:';
 const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
 const EXPLORE_CATEGORY_BUTTONS = [
   { key: 'camping', label: 'Camping', icon: 'bonfire-outline', color: '#16a34a' },
@@ -134,6 +135,36 @@ function mediaUrl(url?: string | null) {
   return url.startsWith('/') ? `${API_BASE}${url}` : url;
 }
 
+function campImageUrl(camp: CampsitePin) {
+  const direct = camp.photo_url || camp.hero_photo_url || camp.primary_image || camp.image_url;
+  if (direct) return mediaUrl(direct);
+  for (const item of [...(camp.photos ?? []), ...(camp.photo_candidates ?? [])]) {
+    if (typeof item === 'string' && item) return mediaUrl(item);
+    if (item && typeof item === 'object' && item.url) return mediaUrl(item.url);
+  }
+  return '';
+}
+
+function campMetaLine(camp: CampsitePin) {
+  return [
+    camp.source_badge || camp.verified_source || camp.source,
+    camp.land_type,
+    typeof (camp as any).distance_mi === 'number' ? fmtMi((camp as any).distance_mi) : '',
+  ].filter(Boolean).join(' · ');
+}
+
+function shouldLoadExploreCamps(place: ExplorePlaceProfile) {
+  return ['camping', 'glamping', 'huts_lodging', 'trails', 'parks'].includes(groupForExplorePlace(place));
+}
+
+function exploreCampRailTitle(place: ExplorePlaceProfile) {
+  const group = groupForExplorePlace(place);
+  if (group === 'glamping') return 'STAYS NEAR THIS AREA';
+  if (group === 'huts_lodging') return 'HUTS, CABINS & CAMPS NEARBY';
+  if (group === 'trails') return 'CAMPS NEAR THIS TRAIL AREA';
+  return 'CAMPGROUNDS IN THIS AREA';
+}
+
 export default function GuideScreen() {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
@@ -144,6 +175,7 @@ export default function GuideScreen() {
   const userLoc = useStore(st => st.userLoc);
   const weatherUnitMode = useStore(st => st.weatherUnitMode);
   const setPendingNavigatePlace = useStore(st => st.setPendingNavigatePlace);
+  const setPendingMapSelection = useStore(st => st.setPendingMapSelection);
   const [guide, setGuide] = useState<Record<string, string>>({});
   const [guideLoading, setGuideLoading] = useState(false);
   const [guideError, setGuideError] = useState('');
@@ -158,6 +190,9 @@ export default function GuideScreen() {
   const [exploreQuery, setExploreQuery] = useState('');
   const [profileReadMode, setProfileReadMode] = useState<'summary' | 'story'>('summary');
   const [explorePlaces, setExplorePlaces] = useState<ExplorePlaceProfile[]>([]);
+  const [exploreCampgroundsById, setExploreCampgroundsById] = useState<Record<string, CampsitePin[]>>({});
+  const [exploreCampLoadingId, setExploreCampLoadingId] = useState<string | null>(null);
+  const [exploreCampErrors, setExploreCampErrors] = useState<Record<string, string>>({});
   const [liveExplorePlaces, setLiveExplorePlaces] = useState<OsmPoi[]>([]);
   const [exploreLoading, setExploreLoading] = useState(false);
   const [liveExploreLoading, setLiveExploreLoading] = useState(false);
@@ -216,6 +251,37 @@ export default function GuideScreen() {
       });
     return () => { cancelled = true; };
   }, [exploreMode, userLoc?.lat, userLoc?.lng]);
+
+  useEffect(() => {
+    if (!selectedExplore || !shouldLoadExploreCamps(selectedExplore)) return;
+    const placeId = selectedExplore.id;
+    let cancelled = false;
+    const cacheKey = `${EXPLORE_CAMPGROUNDS_CACHE_PREFIX}${placeId}`;
+    storage.get(cacheKey).then(raw => {
+      if (cancelled || !raw || exploreCampgroundsById[placeId]?.length) return;
+      try {
+        const cached = JSON.parse(raw);
+        if (Array.isArray(cached?.campgrounds)) {
+          setExploreCampgroundsById(prev => ({ ...prev, [placeId]: cached.campgrounds }));
+        }
+      } catch {}
+    }).catch(() => {});
+    setExploreCampLoadingId(placeId);
+    api.getExploreCampgrounds(placeId)
+      .then(res => {
+        if (cancelled) return;
+        setExploreCampgroundsById(prev => ({ ...prev, [placeId]: res.campgrounds ?? [] }));
+        setExploreCampErrors(prev => ({ ...prev, [placeId]: '' }));
+        storage.set(cacheKey, JSON.stringify({ campgrounds: res.campgrounds ?? [], fetched_at: Date.now() })).catch(() => {});
+      })
+      .catch(() => {
+        if (!cancelled) setExploreCampErrors(prev => ({ ...prev, [placeId]: 'Campgrounds unavailable right now.' }));
+      })
+      .finally(() => {
+        if (!cancelled) setExploreCampLoadingId(current => current === placeId ? null : current);
+      });
+    return () => { cancelled = true; };
+  }, [selectedExplore?.id]);
 
   useEffect(() => {
     if (!activeTrip) {
@@ -425,7 +491,24 @@ export default function GuideScreen() {
   function showExploreOnMap(place: ExplorePlaceProfile) {
     const { lat, lng, title } = place.summary;
     if (lat == null || lng == null) return;
-    setPendingNavigatePlace({ lat: Number(lat), lng: Number(lng), name: title });
+    setPendingMapSelection({
+      kind: 'place',
+      place: {
+        id: `explore-area:${place.id}`,
+        name: title,
+        lat: Number(lat),
+        lng: Number(lng),
+        icon: 'pin',
+        note: place.summary.short_description || place.summary.hook || 'Explore area',
+        createdAt: Date.now(),
+      },
+    });
+    setSelectedExplore(null);
+    router.push('/(tabs)/map');
+  }
+
+  function showExploreCampOnMap(camp: CampsitePin) {
+    setPendingMapSelection({ kind: 'camp', camp });
     setSelectedExplore(null);
     router.push('/(tabs)/map');
   }
@@ -474,7 +557,7 @@ export default function GuideScreen() {
               activeOpacity={0.82}
             >
               <Ionicons name="map-outline" size={13} color={C.orange} />
-              <Text style={s.exploreMapLinkText}>SHOW ON MAP</Text>
+              <Text style={s.exploreMapLinkText}>SHOW AREA</Text>
             </TouchableOpacity>
           </View>
           {!compact && (
@@ -486,6 +569,100 @@ export default function GuideScreen() {
           )}
         </View>
       </TouchableOpacity>
+    );
+  }
+
+  function renderExploreCampgrounds(place: ExplorePlaceProfile) {
+    if (!shouldLoadExploreCamps(place)) return null;
+    const camps = exploreCampgroundsById[place.id] ?? [];
+    const loading = exploreCampLoadingId === place.id && camps.length === 0;
+    const error = exploreCampErrors[place.id];
+    return (
+      <TrailheadCard style={s.campgroundSection}>
+        <View style={s.campgroundSectionTop}>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={s.profileLabel}>{exploreCampRailTitle(place)}</Text>
+            <Text style={s.campgroundSectionSub}>
+              {camps.length ? `${camps.length} nearby campground cards` : 'Nearby campground cards with photos, fees, and official links'}
+            </Text>
+          </View>
+          <TouchableOpacity style={s.campgroundAreaBtn} onPress={() => showExploreOnMap(place)}>
+            <Ionicons name="map-outline" size={14} color={C.orange} />
+            <Text style={s.campgroundAreaBtnText}>AREA</Text>
+          </TouchableOpacity>
+        </View>
+        {loading ? (
+          <View style={s.campgroundLoadRow}>
+            <ActivityIndicator color={C.orange} size="small" />
+            <Text style={s.campgroundLoadText}>Loading campgrounds...</Text>
+          </View>
+        ) : camps.length ? (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.campgroundRail}>
+            {camps.slice(0, 12).map(camp => {
+              const image = campImageUrl(camp);
+              const officialUrl = camp.booking_url || camp.official_url || camp.url;
+              const areaFallback = camp.photo_status === 'area_fallback';
+              return (
+                <TouchableOpacity
+                  key={camp.id}
+                  style={s.campgroundCard}
+                  activeOpacity={0.88}
+                  onPress={() => showExploreCampOnMap(camp)}
+                >
+                  <View style={s.campgroundImageWrap}>
+                    {image ? (
+                      <Image source={{ uri: image }} style={s.campgroundImage} resizeMode="cover" />
+                    ) : (
+                      <View style={s.campgroundImageFallback}>
+                        <Ionicons name="bonfire-outline" size={28} color={C.orange} />
+                      </View>
+                    )}
+                    <View style={s.campgroundImageShade} />
+                    <View style={s.campgroundBadge}>
+                      <Text style={s.campgroundBadgeText}>
+                        {(camp.source_badge || camp.verified_source || camp.source || 'Camp').toUpperCase()}
+                      </Text>
+                    </View>
+                    {areaFallback && (
+                      <View style={s.campgroundPhotoNote}>
+                        <Text style={s.campgroundPhotoNoteText}>AREA PHOTO</Text>
+                      </View>
+                    )}
+                  </View>
+                  <View style={s.campgroundBody}>
+                    <Text style={s.campgroundName} numberOfLines={2}>{camp.name}</Text>
+                    <Text style={s.campgroundMeta} numberOfLines={1}>{campMetaLine(camp)}</Text>
+                    {!!camp.cost && <Text style={s.campgroundCost} numberOfLines={1}>{camp.cost}</Text>}
+                    <View style={s.campgroundTags}>
+                      {(camp.tags ?? []).slice(0, 3).map(tag => (
+                        <View key={`${camp.id}-${tag}`} style={s.campgroundTag}>
+                          <Text style={s.campgroundTagText}>{tag.replace(/_/g, ' ').toUpperCase()}</Text>
+                        </View>
+                      ))}
+                    </View>
+                    <View style={s.campgroundActions}>
+                      <TouchableOpacity style={s.campgroundOpenBtn} onPress={() => showExploreCampOnMap(camp)}>
+                        <Ionicons name="map-outline" size={13} color="#fff" />
+                        <Text style={s.campgroundOpenText}>OPEN CAMP</Text>
+                      </TouchableOpacity>
+                      {!!officialUrl && (
+                        <TouchableOpacity style={s.campgroundSourceBtn} onPress={() => Linking.openURL(officialUrl)}>
+                          <Ionicons name="open-outline" size={13} color={C.text2} />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        ) : (
+          <View style={s.campgroundEmpty}>
+            <Ionicons name="map-outline" size={22} color={C.text3} />
+            <Text style={s.campgroundEmptyText}>{error || 'No campground cards found nearby yet.'}</Text>
+          </View>
+        )}
+      </TrailheadCard>
     );
   }
 
@@ -912,12 +1089,14 @@ export default function GuideScreen() {
                     style={{ flex: 1 }}
                   />
                   <TrailheadButton
-                    label="Show on Map"
+                    label="Show Area"
                     icon="map-outline"
                     onPress={() => showExploreOnMap(selectedExplore)}
                     style={{ flex: 1 }}
                   />
                 </TrailheadButtonDock>
+
+                {renderExploreCampgrounds(selectedExplore)}
 
                 <View style={s.readModeRow}>
                   {(['summary', 'story'] as const).map(mode => (
@@ -1283,6 +1462,36 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   readModeText: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '900' },
   readModeTextActive: { color: C.orange },
   profileSection: { marginHorizontal: 14, marginTop: 10, backgroundColor: C.s2, borderRadius: 14, borderWidth: 1, borderColor: C.border, padding: 14 },
+  campgroundSection: { marginHorizontal: 14, marginTop: 2, marginBottom: 8, backgroundColor: C.s2, borderRadius: 14, borderWidth: 1, borderColor: C.border, padding: 14 },
+  campgroundSectionTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  campgroundSectionSub: { color: C.text3, fontSize: 12, lineHeight: 17 },
+  campgroundAreaBtn: { height: 36, paddingHorizontal: 10, borderRadius: 10, borderWidth: 1, borderColor: C.orange + '55', backgroundColor: C.orangeGlow, flexDirection: 'row', alignItems: 'center', gap: 5 },
+  campgroundAreaBtnText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900' },
+  campgroundLoadRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 18 },
+  campgroundLoadText: { color: C.text3, fontSize: 12, fontWeight: '700' },
+  campgroundRail: { gap: 12, paddingTop: 12, paddingRight: 2 },
+  campgroundCard: { width: 236, backgroundColor: C.s1, borderRadius: 12, borderWidth: 1, borderColor: C.border, overflow: 'hidden' },
+  campgroundImageWrap: { height: 126, backgroundColor: C.s2 },
+  campgroundImage: { width: '100%', height: '100%' },
+  campgroundImageFallback: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s1 },
+  campgroundImageShade: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.16)' },
+  campgroundBadge: { position: 'absolute', left: 9, top: 9, maxWidth: 168, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 999, backgroundColor: 'rgba(15,23,42,0.78)' },
+  campgroundBadgeText: { color: '#fff', fontSize: 8, fontFamily: mono, fontWeight: '900', letterSpacing: 0.4 },
+  campgroundPhotoNote: { position: 'absolute', right: 9, bottom: 9, paddingHorizontal: 7, paddingVertical: 4, borderRadius: 999, backgroundColor: 'rgba(15,23,42,0.72)' },
+  campgroundPhotoNoteText: { color: '#fff', fontSize: 8, fontFamily: mono, fontWeight: '900', letterSpacing: 0.4 },
+  campgroundBody: { padding: 11, gap: 7 },
+  campgroundName: { color: C.text, fontSize: 15, lineHeight: 19, fontWeight: '900' },
+  campgroundMeta: { color: C.text3, fontSize: 11, fontWeight: '700' },
+  campgroundCost: { color: C.orange, fontSize: 12, fontWeight: '900' },
+  campgroundTags: { minHeight: 24, flexDirection: 'row', flexWrap: 'wrap', gap: 5 },
+  campgroundTag: { borderWidth: 1, borderColor: C.border, backgroundColor: C.s2, borderRadius: 999, paddingHorizontal: 7, paddingVertical: 4 },
+  campgroundTagText: { color: C.text3, fontSize: 8, fontFamily: mono, fontWeight: '900' },
+  campgroundActions: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 2 },
+  campgroundOpenBtn: { flex: 1, height: 34, borderRadius: 9, backgroundColor: C.orange, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  campgroundOpenText: { color: '#fff', fontSize: 10, fontFamily: mono, fontWeight: '900' },
+  campgroundSourceBtn: { width: 34, height: 34, borderRadius: 9, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s2 },
+  campgroundEmpty: { marginTop: 12, paddingVertical: 18, borderRadius: 12, borderWidth: 1, borderColor: C.border, backgroundColor: C.s1, alignItems: 'center', gap: 7 },
+  campgroundEmptyText: { color: C.text3, fontSize: 12, fontWeight: '700', textAlign: 'center' },
   profileHook: { color: C.text, fontSize: 17, lineHeight: 25, fontWeight: '800' },
   storyReadBox: { maxHeight: 390, borderRadius: 12, backgroundColor: C.s1, borderWidth: 1, borderColor: C.border, paddingHorizontal: 12, paddingVertical: 10 },
   storySentence: { color: C.text2, fontSize: 17, lineHeight: 28, fontWeight: '600' },

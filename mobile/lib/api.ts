@@ -359,6 +359,9 @@ export const api = {
     }
     return req<ExploreCatalog>(`/api/explore/places?${qs.toString()}`);
   },
+  getExploreCampgrounds: (placeId: string, limit = 24) =>
+    req<ExploreCampgroundsResponse>(`/api/explore/places/${encodeURIComponent(placeId)}/campgrounds?limit=${limit}`)
+      .then(res => ({ ...res, campgrounds: canonicalizeCampsitePins(res.campgrounds ?? []) })),
   nearbyAudio: (lat: number, lng: number, location_name = '') =>
     req<{ narration: string }>('/api/audio/nearby', {
       method: 'POST', body: JSON.stringify({ lat, lng, location_name }),
@@ -2337,6 +2340,13 @@ export interface ExploreCatalog {
   future_pack_compatible?: boolean;
   mode?: string;
   places: ExplorePlaceProfile[];
+}
+export interface ExploreCampgroundsResponse {
+  place_id: string;
+  center: { lat: number; lng: number; name?: string };
+  radius_mi: number;
+  count: number;
+  campgrounds: CampsitePin[];
 }
 export interface WikiArticle {
   title: string; lat: number; lng: number; dist_m: number; extract: string; url: string;

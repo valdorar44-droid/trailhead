@@ -7096,6 +7096,7 @@ function MapScreen() {
       return;
     }
     const place = pendingMapSelection.place;
+    const isExploreArea = String(place.id || '').startsWith('explore-area:');
     setSelectedCamp(null);
     setCampDetail(null);
     setCampInsight(null);
@@ -7106,8 +7107,8 @@ function MapScreen() {
       lat: place.lat,
       lng: place.lng,
       type: place.icon === 'fuel' ? 'fuel' : place.icon === 'water' ? 'water' : place.icon === 'camp' ? 'camp' : 'poi',
-      source: 'saved',
-      source_label: 'Saved location',
+      source: isExploreArea ? 'explore' : 'saved',
+      source_label: isExploreArea ? 'Explore area' : 'Saved location',
       summary: place.note || 'Saved location',
     });
     nativeMapRef.current?.flyTo(place.lat, place.lng, 12, place.name);

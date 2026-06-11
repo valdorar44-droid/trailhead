@@ -4673,6 +4673,8 @@ function MapScreen() {
   const setPendingNavigatePlace = useStore(st => st.setPendingNavigatePlace);
   const pendingMapSelection = useStore(st => st.pendingMapSelection);
   const setPendingMapSelection = useStore(st => st.setPendingMapSelection);
+  const pendingStartCopilotVoice = useStore(st => st.pendingStartCopilotVoice);
+  const setPendingStartCopilotVoice = useStore(st => st.setPendingStartCopilotVoice);
   const user = useStore(st => st.user);
   const hasPlan = useStore(st => st.hasPlan);
   const setStoreLoc = useStore(st => st.setUserLoc);
@@ -11596,10 +11598,33 @@ function MapScreen() {
       appendCopilotMessage({
         id: `copilot-welcome-${Date.now()}`,
         role: 'assistant',
-        text: 'Trail Guide ready.',
+        text: 'Co-Pilot ready.',
       });
     }
   }
+
+  useEffect(() => {
+    if (!pendingStartCopilotVoice) return;
+    if (!extremeConfig) return;
+    setPendingStartCopilotVoice(false);
+    setShowSearch(false);
+    setShowMapDrawer(false);
+    setShowDiscoveryPanel(false);
+    setSelectedCamp(null);
+    setSelectedPlace(null);
+    setSelectedTrail(null);
+    setSelectedCommunityPin(null);
+    setTappedTrail(null);
+    setTappedTileSpot(null);
+    setTappedGas(null);
+    setTappedPoi(null);
+    if (extremeCopilotAvailable && extremeConfig?.copilot?.voice_enabled) {
+      startCopilotVoice('push_to_talk');
+    } else {
+      setQuickToast('Co-Pilot voice unavailable.');
+      setTimeout(() => setQuickToast(''), 2600);
+    }
+  }, [pendingStartCopilotVoice, extremeConfig, extremeCopilotAvailable, setPendingStartCopilotVoice]);
 
   async function shareAdminCopilotDebugTranscript() {
     if (!user?.is_admin) return;
@@ -18200,7 +18225,7 @@ function MapScreen() {
             <View style={s.extremeCopilotHeader}>
               <TrailGuideAvatar state={trailGuideAvatarState} colors={C} size="sheet" />
               <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={s.extremeCopilotTitle}>Trail Guide</Text>
+                <Text style={s.extremeCopilotTitle}>Co-Pilot</Text>
                 <Text style={s.extremeCopilotSub} numberOfLines={1}>
                   {trailGuideSheetSub}
                 </Text>
@@ -21163,7 +21188,7 @@ function MapScreen() {
               }
             }}
             disabled={extremeCopilotVoiceBusy}
-            accessibilityLabel={extremeCopilotVoiceActive ? 'Stop Trail Guide microphone' : 'Start Trail Guide microphone'}
+            accessibilityLabel={extremeCopilotVoiceActive ? 'Stop Co-Pilot microphone' : 'Start Co-Pilot microphone'}
             accessibilityHint="Long press to open text Copilot."
           >
             <TrailGuideAvatar state={trailGuideAvatarState} colors={C} label={trailGuideDockLabel} />

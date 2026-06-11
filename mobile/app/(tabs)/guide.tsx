@@ -185,6 +185,7 @@ export default function GuideScreen() {
   const weatherUnitMode = useStore(st => st.weatherUnitMode);
   const setPendingNavigatePlace = useStore(st => st.setPendingNavigatePlace);
   const setPendingMapSelection = useStore(st => st.setPendingMapSelection);
+  const setPendingStartCopilotVoice = useStore(st => st.setPendingStartCopilotVoice);
   const [guide, setGuide] = useState<Record<string, string>>({});
   const [guideLoading, setGuideLoading] = useState(false);
   const [guideError, setGuideError] = useState('');
@@ -534,6 +535,11 @@ export default function GuideScreen() {
     router.push('/(tabs)/map');
   }
 
+  function startCopilotVoiceFromExplore() {
+    setPendingStartCopilotVoice(true);
+    router.push('/(tabs)/map');
+  }
+
   function renderExploreCard(
     item: { place: ExplorePlaceProfile; distance?: number | null; day?: number },
     idx: number,
@@ -787,14 +793,14 @@ export default function GuideScreen() {
           <>
             <View style={s.guideCallout}>
               <View style={s.guideCalloutIcon}>
-                <Ionicons name="sparkles-outline" size={24} color={C.orange} />
+                <Ionicons name="mic-outline" size={24} color={C.orange} />
               </View>
               <View style={s.guideCalloutText}>
-                <Text style={s.guideCalloutTitle}>Ask Trail Guide</Text>
-                <Text style={s.guideCalloutSub}>Outdoor ideas, route stories, and nearby finds.</Text>
+                <Text style={s.guideCalloutTitle}>Co-Pilot</Text>
+                <Text style={s.guideCalloutSub}>Tap to talk through routes, camps, map layers, and trip next steps.</Text>
               </View>
-              <TouchableOpacity style={s.guideCalloutAction} onPress={whatIsHere} disabled={nearbyLoading}>
-                {nearbyLoading ? <ActivityIndicator color={C.orange} size="small" /> : <Ionicons name="pulse-outline" size={19} color={C.orange} />}
+              <TouchableOpacity style={s.guideCalloutAction} onPress={startCopilotVoiceFromExplore}>
+                <Ionicons name="mic" size={19} color={C.orange} />
               </TouchableOpacity>
             </View>
 

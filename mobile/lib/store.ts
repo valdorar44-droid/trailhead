@@ -190,6 +190,7 @@ interface AppState {
   pendingSavedTrailId: string | null;
   pendingNavigatePlace: { lat: number; lng: number; name: string } | null;
   pendingMapSelection: { kind: 'camp'; camp: CampsitePin } | { kind: 'place'; place: SavedPlace } | null;
+  pendingStartCopilotVoice: boolean;
   tabBarHidden: boolean;
   hasPlan: boolean;
   planExpiresAt: number | null;
@@ -231,6 +232,7 @@ interface AppState {
   setPendingSavedTrailId: (id: string | null) => void;
   setPendingNavigatePlace: (place: { lat: number; lng: number; name: string } | null) => void;
   setPendingMapSelection: (selection: AppState['pendingMapSelection']) => void;
+  setPendingStartCopilotVoice: (start: boolean) => void;
   setPlan: (active: boolean, expiresAt?: number | null) => void;
   startGuidedTour: () => void;
   setGuidedTourActive: (active: boolean) => void;
@@ -264,6 +266,7 @@ export const useStore = create<AppState>((set) => ({
   pendingSavedTrailId: null,
   pendingNavigatePlace: null,
   pendingMapSelection: null,
+  pendingStartCopilotVoice: false,
   tabBarHidden: false,
   hasPlan: false,
   planExpiresAt: null,
@@ -387,6 +390,7 @@ export const useStore = create<AppState>((set) => ({
   setPendingSavedTrailId: (id) => set({ pendingSavedTrailId: id }),
   setPendingNavigatePlace: (place) => set({ pendingNavigatePlace: place }),
   setPendingMapSelection: (selection) => set({ pendingMapSelection: selection }),
+  setPendingStartCopilotVoice: (start) => set({ pendingStartCopilotVoice: start }),
   setPlan: (active, expiresAt = null) => {
     sd(PLAN_KEY);
     set({ hasPlan: active, planExpiresAt: expiresAt });

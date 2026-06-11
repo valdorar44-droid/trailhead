@@ -422,7 +422,7 @@ export default function GuideScreen() {
     }
   }
 
-  function navigateExplore(place: ExplorePlaceProfile) {
+  function showExploreOnMap(place: ExplorePlaceProfile) {
     const { lat, lng, title } = place.summary;
     if (lat == null || lng == null) return;
     setPendingNavigatePlace({ lat: Number(lat), lng: Number(lng), name: title });
@@ -468,14 +468,19 @@ export default function GuideScreen() {
               {day ? `Day ${day} · ` : ''}{distance != null ? `${fmtMi(distance)} · ` : ''}{place.summary.state}
             </Text>
             <Text style={s.exploreDesc} numberOfLines={compact ? 2 : 3}>{place.summary.hook || place.summary.short_description}</Text>
+            <TouchableOpacity
+              style={s.exploreMapLink}
+              onPress={() => showExploreOnMap(place)}
+              activeOpacity={0.82}
+            >
+              <Ionicons name="map-outline" size={13} color={C.orange} />
+              <Text style={s.exploreMapLinkText}>SHOW ON MAP</Text>
+            </TouchableOpacity>
           </View>
           {!compact && (
             <View style={s.exploreActions}>
               <TouchableOpacity style={[s.circleBtn, isPlaying && s.circleBtnActive]} onPress={() => playExplore(place)}>
                 <Ionicons name={isPlaying ? 'stop' : 'play'} size={16} color={isPlaying ? '#fff' : C.orange} />
-              </TouchableOpacity>
-              <TouchableOpacity style={s.circleBtn} onPress={() => navigateExplore(place)}>
-                <Ionicons name="navigate-outline" size={16} color={C.orange} />
               </TouchableOpacity>
             </View>
           )}
@@ -907,9 +912,9 @@ export default function GuideScreen() {
                     style={{ flex: 1 }}
                   />
                   <TrailheadButton
-                    label="Navigate"
-                    icon="navigate-outline"
-                    onPress={() => navigateExplore(selectedExplore)}
+                    label="Show on Map"
+                    icon="map-outline"
+                    onPress={() => showExploreOnMap(selectedExplore)}
                     style={{ flex: 1 }}
                   />
                 </TrailheadButtonDock>
@@ -1205,6 +1210,20 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   exploreRailName: { fontSize: 15, lineHeight: 19 },
   exploreMeta: { color: C.orange, fontSize: 10, fontFamily: mono, marginTop: 5, fontWeight: '800' },
   exploreDesc: { color: C.text2, fontSize: 13, lineHeight: 19, marginTop: 8 },
+  exploreMapLink: {
+    alignSelf: 'flex-start',
+    minHeight: 30,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 10,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: C.orange + '44',
+    backgroundColor: C.orangeGlow,
+  },
+  exploreMapLinkText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900' },
   exploreActions: { gap: 8, justifyContent: 'center' },
   circleBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.orange + '55', backgroundColor: C.s1 },
   circleBtnActive: { backgroundColor: C.orange, borderColor: C.orange },

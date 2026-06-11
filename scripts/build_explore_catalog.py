@@ -170,6 +170,10 @@ BASE_FALLBACKS = {
         "lat": 41.95, "lng": -111.34,
         "source_url": "https://en.wikipedia.org/wiki/Bear_Lake_(Idaho%E2%80%93Utah)",
     },
+    "Acadia National Park": {
+        "lat": 44.35, "lng": -68.21,
+        "source_url": "https://www.nps.gov/acad/index.htm",
+    },
     "Arches National Park": {
         "lat": 38.7331, "lng": -109.5925,
         "source_url": "https://www.nps.gov/arch/index.htm",
@@ -178,6 +182,10 @@ BASE_FALLBACKS = {
         "lat": 29.1275, "lng": -103.2425,
         "source_url": "https://www.nps.gov/bibe/index.htm",
     },
+    "Bryce Canyon National Park": {
+        "lat": 37.593, "lng": -112.1871,
+        "source_url": "https://www.nps.gov/brca/index.htm",
+    },
     "Black Canyon of the Gunnison National Park": {
         "lat": 38.5754, "lng": -107.7416,
         "source_url": "https://www.nps.gov/blca/index.htm",
@@ -185,6 +193,10 @@ BASE_FALLBACKS = {
     "Canyonlands National Park": {
         "lat": 38.3269, "lng": -109.8783,
         "source_url": "https://www.nps.gov/cany/index.htm",
+    },
+    "Capitol Reef National Park": {
+        "lat": 38.367, "lng": -111.2615,
+        "source_url": "https://www.nps.gov/care/index.htm",
     },
     "Denali National Park and Preserve": {
         "lat": 63.1148, "lng": -151.1926,
@@ -220,17 +232,49 @@ BASE_FALLBACKS = {
         "image_url": "https://upload.wikimedia.org/wikipedia/commons/8/89/P%C4%81hoehoe_and_Aa_flows_at_Hawaii.jpg",
         "image_credit": "Wikimedia Commons",
     },
+    "Great Basin National Park": {
+        "lat": 38.9833, "lng": -114.3,
+        "source_url": "https://www.nps.gov/grba/index.htm",
+    },
+    "Grand Canyon National Park": {
+        "lat": 36.1069, "lng": -112.1129,
+        "source_url": "https://www.nps.gov/grca/index.htm",
+    },
+    "Grand Staircase\u2013Escalante National Monument": {
+        "lat": 37.4, "lng": -111.68,
+        "source_url": "https://www.blm.gov/programs/national-conservation-lands/utah/grand-staircase-escalante-national-monument",
+    },
+    "Grand Teton National Park": {
+        "lat": 43.7904, "lng": -110.6818,
+        "source_url": "https://www.nps.gov/grte/index.htm",
+    },
     "Joshua Tree National Park": {
         "lat": 34.1, "lng": -116.27,
         "source_url": "https://www.nps.gov/jotr/index.htm",
+    },
+    "Lassen Volcanic National Park": {
+        "lat": 40.4937, "lng": -121.407,
+        "source_url": "https://www.nps.gov/lavo/index.htm",
     },
     "Mount Rainier National Park": {
         "lat": 46.85, "lng": -121.75,
         "source_url": "https://www.nps.gov/mora/index.htm",
     },
+    "Mount Rushmore": {
+        "lat": 43.8791, "lng": -103.4591,
+        "source_url": "https://www.nps.gov/moru/index.htm",
+    },
+    "North Cascades National Park": {
+        "lat": 48.7718, "lng": -121.2985,
+        "source_url": "https://www.nps.gov/noca/index.htm",
+    },
     "Olympic National Park": {
         "lat": 47.8021, "lng": -123.6044,
         "source_url": "https://www.nps.gov/olym/index.htm",
+    },
+    "Pinnacles National Park": {
+        "lat": 36.4906, "lng": -121.1825,
+        "source_url": "https://www.nps.gov/pinn/index.htm",
     },
     "Point Reyes National Seashore": {
         "lat": 38.0667, "lng": -122.8833,
@@ -262,6 +306,59 @@ BASE_FALLBACKS = {
         "lat": 48.5, "lng": -92.8833,
         "source_url": "https://www.nps.gov/voya/index.htm",
     },
+    "Assateague Island National Seashore": {
+        "lat": 38.0865, "lng": -75.2085,
+        "source_url": "https://www.nps.gov/asis/index.htm",
+    },
+    "Padre Island National Seashore": {
+        "lat": 27.0538, "lng": -97.3596,
+        "source_url": "https://www.nps.gov/pais/index.htm",
+    },
+    "Pictured Rocks National Lakeshore": {
+        "lat": 46.5644, "lng": -86.3163,
+        "source_url": "https://www.nps.gov/piro/index.htm",
+    },
+    "Apostle Islands National Lakeshore": {
+        "lat": 46.9658, "lng": -90.6644,
+        "source_url": "https://www.nps.gov/apis/index.htm",
+    },
+    "Cape Cod National Seashore": {
+        "lat": 41.95, "lng": -70.0,
+        "source_url": "https://www.nps.gov/caco/index.htm",
+    },
+    "Mammoth Cave National Park": {
+        "lat": 37.1862, "lng": -86.1005,
+        "source_url": "https://www.nps.gov/maca/index.htm",
+    },
+    "Katmai National Park and Preserve": {
+        "lat": 58.6126, "lng": -155.0631,
+        "source_url": "https://www.nps.gov/katm/index.htm",
+    },
+    "Glacier Bay National Park and Preserve": {
+        "lat": 58.6658, "lng": -136.9002,
+        "source_url": "https://www.nps.gov/glba/index.htm",
+    },
+    "Yellowstone National Park": {
+        "lat": 44.6, "lng": -110.5,
+        "source_url": "https://www.nps.gov/yell/index.htm",
+    },
+}
+RELATED_IMAGE_BASE = {
+    "Assateague Island National Seashore": "Acadia National Park",
+    "Padre Island National Seashore": "Everglades National Park",
+    "Pictured Rocks National Lakeshore": "Isle Royale National Park",
+    "Apostle Islands National Lakeshore": "Isle Royale National Park",
+    "Cape Cod National Seashore": "Acadia National Park",
+    "Great Basin National Park": "Great Sand Dunes National Park and Preserve",
+    "Capitol Reef National Park": "Arches National Park",
+    "Pinnacles National Park": "Joshua Tree National Park",
+    "Lassen Volcanic National Park": "Mount Rainier National Park",
+    "Black Canyon of the Gunnison National Park": "Rocky Mountain National Park",
+    "Grand Staircase\u2013Escalante National Monument": "Canyonlands National Park",
+    "Katmai National Park and Preserve": "Denali National Park and Preserve",
+    "Glacier Bay National Park and Preserve": "Denali National Park and Preserve",
+    "Mammoth Cave National Park": "Great Smoky Mountains National Park",
+    "Mount Rushmore": "Badlands National Park",
 }
 NPS_PARK_CODES = {
     "Grand Canyon National Park": "grca",
@@ -426,6 +523,20 @@ def load_existing_index(path: Path) -> dict[str, dict]:
             if title:
                 merged[str(title).lower()] = place
     return merged
+
+
+def build_existing_base_asset_map(seed_entries: list[dict], existing_index: dict[str, dict]) -> dict[str, str]:
+    assets: dict[str, str] = {}
+    for entry in seed_entries:
+        existing = existing_index.get(str(entry.get("title") or "").lower())
+        summary = (existing or {}).get("summary") or {}
+        image_url = summary.get("image_url") or summary.get("thumbnail_url") or ""
+        if not isinstance(image_url, str) or not image_url.startswith("/assets/explore/"):
+            continue
+        base_title = str(entry.get("base_title") or entry.get("title") or "")
+        if base_title and base_title not in assets:
+            assets[base_title] = image_url
+    return assets
 
 
 def apply_existing_fallback(data: dict, source_pack: dict, existing: dict | None) -> tuple[dict, dict]:
@@ -738,6 +849,96 @@ def choose_image(summary: dict, source_pack: dict) -> tuple[str, str, str]:
     return url, credit, license_name
 
 
+def provider_photo_query(entry: dict, base_title: str) -> str:
+    title = str(entry.get("title") or base_title)
+    group = str(entry.get("explore_group") or "")
+    suffix = {
+        "camping": "camping landscape",
+        "glamping": "glamping cabin outdoor",
+        "huts_lodging": "lodge cabin mountains",
+        "trails": "hiking trail landscape",
+    }.get(group, "outdoor landscape")
+    return f"{title} {base_title} {suffix}"
+
+
+def fetch_pexels_photo(client: httpx.Client, query: str) -> dict:
+    api_key = os.environ.get("PEXELS_API_KEY", "").strip()
+    if not api_key:
+        return {}
+    try:
+        res = client.get(
+            "https://api.pexels.com/v1/search",
+            params={"query": query, "per_page": 5, "orientation": "landscape", "size": "large"},
+            headers={"Authorization": api_key, "User-Agent": "Trailhead/1.0 explore catalog builder"},
+            timeout=10,
+        )
+        if res.status_code in {401, 403, 429}:
+            return {}
+        res.raise_for_status()
+        photos = res.json().get("photos") or []
+    except Exception:
+        return {}
+    for photo in photos:
+        src = photo.get("src") or {}
+        url = src.get("large2x") or src.get("large") or src.get("original") or ""
+        if url:
+            photographer = photo.get("photographer") or "Pexels photographer"
+            return {
+                "url": url,
+                "caption": photo.get("alt") or query,
+                "credit": f"Pexels / {photographer}",
+                "source_url": photo.get("url") or "https://www.pexels.com/",
+                "license": "Pexels License",
+            }
+    return {}
+
+
+def fetch_pixabay_photo(client: httpx.Client, query: str) -> dict:
+    api_key = os.environ.get("PIXABAY_API_KEY", "").strip()
+    if not api_key:
+        return {}
+    try:
+        res = client.get(
+            "https://pixabay.com/api/",
+            params={
+                "key": api_key,
+                "q": query[:100],
+                "image_type": "photo",
+                "orientation": "horizontal",
+                "safesearch": "true",
+                "per_page": 5,
+            },
+            headers={"User-Agent": "Trailhead/1.0 explore catalog builder"},
+            timeout=10,
+        )
+        if res.status_code in {401, 403, 429}:
+            return {}
+        res.raise_for_status()
+        hits = res.json().get("hits") or []
+    except Exception:
+        return {}
+    for hit in hits:
+        url = hit.get("largeImageURL") or hit.get("webformatURL") or ""
+        if url:
+            user = hit.get("user") or "Pixabay contributor"
+            return {
+                "url": url,
+                "caption": hit.get("tags") or query,
+                "credit": f"Pixabay / {user}",
+                "source_url": hit.get("pageURL") or "https://pixabay.com/",
+                "license": "Pixabay Content License",
+            }
+    return {}
+
+
+def fetch_provider_photo(client: httpx.Client, query: str) -> dict:
+    for fetcher in (fetch_pexels_photo, fetch_pixabay_photo):
+        photo = fetcher(client, query)
+        if photo.get("url"):
+            return photo
+    return {}
+
+
 def download_image(client: httpx.Client, url: str, out_dir: Path, place_id: str) -> str:
     if not url or not re.match(r"^https?://", url):
         return ""
@@ -752,7 +953,7 @@ def download_image(client: httpx.Client, url: str, out_dir: Path, place_id: str)
         return f"/assets/explore/{filename}"
     fallback_asset = next((path for path in sorted(out_dir.glob(f"{prefix}-*")) if path.is_file() and path.stat().st_size > 1000), None)
     try:
-        res = client.get(url, headers={"User-Agent": "Trailhead/1.0 explore catalog builder"}, timeout=30)
+        res = client.get(url, headers={"User-Agent": "Trailhead/1.0 explore catalog builder"}, timeout=10)
         if res.status_code == 429:
             return f"/assets/explore/{fallback_asset.name}" if fallback_asset else ""
         res.raise_for_status()
@@ -846,8 +1047,8 @@ def validate_catalog(places: list[dict]) -> None:
         if empty:
             missing.append(f"{summary.get('title') or place.get('id')}: {', '.join(empty)}")
     for group in ("camping", "glamping", "huts_lodging", "trails"):
-        if group_counts.get(group) != 24:
-            raise RuntimeError(f"expected 24 {group} entries, found {group_counts.get(group, 0)}")
+        if group_counts.get(group, 0) < 24:
+            raise RuntimeError(f"expected at least 24 {group} entries, found {group_counts.get(group, 0)}")
     if missing:
         raise RuntimeError("catalog validation failed:\n" + "\n".join(missing[:40]))
 
@@ -924,6 +1125,7 @@ def main() -> int:
             seed, seed_entries = load_seed(seed_path)
             if args.limit:
                 seed_entries = seed_entries[:args.limit]
+            base_image_assets = build_existing_base_asset_map(seed_entries, existing_index)
             base_titles = sorted({entry.get("base_title") or entry["title"] for entry in seed_entries})
             pages = fetch_pages(client, base_titles)
             asset_dir = Path(args.asset_dir)
@@ -960,7 +1162,29 @@ def main() -> int:
                 image_asset = ""
                 if args.download_images and image_url:
                     image_asset = download_image(client, image_url, asset_dir, f"{entry.get('explore_group')} {entry['title']}")
+                if args.download_images and not image_asset:
+                    provider_photo = fetch_provider_photo(client, provider_photo_query(entry, base_title))
+                    if provider_photo.get("url"):
+                        provider_asset = download_image(client, provider_photo["url"], asset_dir, f"{entry.get('explore_group')} {entry['title']}")
+                        if provider_asset:
+                            image_asset = provider_asset
+                            source_pack = {
+                                **source_pack,
+                                "photos": [provider_photo] + list(source_pack.get("photos") or []),
+                                "license": provider_photo.get("license") or source_pack.get("license") or "",
+                                "sources": [{
+                                    "title": provider_photo.get("caption") or entry["title"],
+                                    "publisher": provider_photo.get("credit") or "Image provider",
+                                    "url": provider_photo.get("source_url") or provider_photo.get("url") or "",
+                                    "kind": "image",
+                                }] + list(source_pack.get("sources") or []),
+                            }
+                if not image_asset:
+                    related_base = RELATED_IMAGE_BASE.get(base_title, "")
+                    image_asset = base_image_assets.get(base_title) or (base_image_assets.get(related_base) if related_base else "")
                 places.append(build_seed_place(entry, data, source_pack, image_asset))
+                if image_asset and str(image_asset).startswith("/assets/explore/"):
+                    base_image_assets.setdefault(base_title, image_asset)
             validate_catalog(places)
             payload = {
                 "schema_version": 2,

@@ -9,9 +9,13 @@ type VoiceCallbacks = {
   onFinish?: () => void;
 };
 
+const COPILOT_LISTENING_CUE = require('../assets/trail-guide/copilot-listening.wav');
+
 let activeSound: Audio.Sound | null = null;
+let activeCueSound: Audio.Sound | null = null;
 let voiceRequestId = 0;
 let audioModeReady: Promise<void> | null = null;
+let cueAudioModeReady: Promise<void> | null = null;
 
 function ensureVoiceAudioMode() {
   if (!audioModeReady) {
@@ -31,6 +35,24 @@ function ensureVoiceAudioMode() {
   return audioModeReady;
 }
 
+function ensureCueAudioMode() {
+  if (!cueAudioModeReady) {
+    cueAudioModeReady = Audio.setAudioModeAsync({
+      allowsRecordingIOS: true,
+      interruptionModeIOS: InterruptionModeIOS.DuckOthers,
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: true,
+      interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
+      shouldDuckAndroid: true,
+      playThroughEarpieceAndroid: false,
+    }).catch(err => {
+      cueAudioModeReady = null;
+      throw err;
+    });
+  }
+  return cueAudioModeReady;
+}
+
 export async function stopTrailheadVoice() {
   voiceRequestId += 1;
   try {
@@ -41,6 +63,30 @@ export async function stopTrailheadVoice() {
       await sound.stopAsync().catch(() => {});
       await sound.unloadAsync().catch(() => {});
     }
+  } catch {}
+}
+
+export async function playTrailheadCue(name: 'copilotListening') {
+  try {
+    await ensureCueAudioMode();
+    if (activeCueSound) {
+      const sound = activeCueSound;
+      activeCueSound = null;
+      await sound.stopAsync().catch(() => {});
+      await sound.unloadAsync().catch(() => {});
+    }
+    const cueSource = { copilotListening: COPILOT_LISTENING_CUE }[name];
+    const { sound } = await Audio.Sound.createAsync(
+      cueSource,
+      { shouldPlay: true, volume: 0.72 },
+      status => {
+        if ('didJustFinish' in status && status.didJustFinish) {
+          sound.unloadAsync().catch(() => {});
+          if (activeCueSound === sound) activeCueSound = null;
+        }
+      },
+    );
+    activeCueSound = sound;
   } catch {}
 }
 

@@ -60,7 +60,7 @@ import AppReviewPrompt from '@/components/AppReviewPrompt';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 import { CREDIT_REWARDS } from '@/lib/credits';
 import { useConnectivitySync } from '@/lib/connectivitySync';
-import { playTrailheadVoice, stopTrailheadVoice } from '@/lib/voice';
+import { playTrailheadCue, playTrailheadVoice, stopTrailheadVoice } from '@/lib/voice';
 import { startRealtimeCopilotSession } from '@/lib/realtimeCopilot';
 import {
   loadTrailheadRouteBuilderDraft,
@@ -11552,9 +11552,14 @@ function MapScreen() {
         wake_phrase: mode === 'wake_phrase',
         context: buildCopilotContext(),
       });
+      let listeningCuePlayed = false;
       const handle = await startRealtimeCopilotSession({
         tokenResponse,
         onStatus: status => {
+          if (status === 'connected' && !listeningCuePlayed) {
+            listeningCuePlayed = true;
+            playTrailheadCue('copilotListening');
+          }
           setExtremeCopilotVoiceStatus(
             status === 'connected' ? (mode === 'wake_phrase' ? 'Wake phrase armed.' : 'Listening...')
               : status === 'requesting_microphone' ? 'Opening microphone...'

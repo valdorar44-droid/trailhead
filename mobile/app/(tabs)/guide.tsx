@@ -10,7 +10,7 @@ import { useRouter } from 'expo-router';
 import TourTarget from '@/components/TourTarget';
 import PaywallModal from '@/components/PaywallModal';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
-import { TrailheadButton, TrailheadButtonDock, TrailheadCard, TrailheadTopBar } from '@/components/TrailheadUI';
+import { TrailheadButton, TrailheadButtonDock, TrailheadCard } from '@/components/TrailheadUI';
 import { useStore } from '@/lib/store';
 import { api, PaywallError, type CampsitePin, type ExplorePlaceProfile, type ExploreSourcePackItem, type OsmPoi } from '@/lib/api';
 import { storage } from '@/lib/storage';
@@ -1103,20 +1103,9 @@ export default function GuideScreen() {
       />
 
       <Modal visible={!!selectedExplore} animationType="slide" onRequestClose={() => setSelectedExplore(null)}>
-        <SafeAreaView style={s.modal}>
+        <View style={s.modal}>
           {selectedExplore && (
             <>
-              <TrailheadTopBar
-                title="PLACE CARD"
-                subtitle={selectedExplore.summary.title}
-                icon="headset-outline"
-                style={[s.profileModalHeader, { paddingTop: Math.max(insets.top + 6, 14) }]}
-                right={(
-                  <TouchableOpacity style={s.profileModalClose} onPress={() => setSelectedExplore(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                    <Ionicons name="close" size={22} color={C.text} />
-                  </TouchableOpacity>
-                )}
-              />
               <ScrollView contentContainerStyle={s.profileScroll}>
                 <View style={s.profileHero}>
                   {selectedExplore.summary.image_url || selectedExplore.summary.thumbnail_url ? (
@@ -1131,6 +1120,13 @@ export default function GuideScreen() {
                     <Text style={s.profileCategory}>{selectedExplore.summary.category.toUpperCase()} · {selectedExplore.summary.state}</Text>
                     <Text style={s.profileTitle}>{selectedExplore.summary.title}</Text>
                   </View>
+                  <TouchableOpacity
+                    style={[s.profileHeroClose, { top: Math.max(insets.top + 10, 18) }]}
+                    onPress={() => setSelectedExplore(null)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Ionicons name="close" size={22} color="#fff" />
+                  </TouchableOpacity>
                 </View>
 
                 <TrailheadButtonDock style={s.profileActions}>
@@ -1314,7 +1310,7 @@ export default function GuideScreen() {
               </ScrollView>
             </>
           )}
-        </SafeAreaView>
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -1551,15 +1547,12 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   emptySub: { color: C.text3, fontSize: 13, textAlign: 'center', maxWidth: 280, lineHeight: 20 },
   modal: { flex: 1, backgroundColor: C.bg },
   profileScroll: { paddingBottom: 34 },
-  profileModalHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingBottom: 10, borderBottomWidth: 1, borderColor: C.border, backgroundColor: C.s1 },
-  profileModalKicker: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
-  profileModalName: { color: C.text, fontSize: 14, fontWeight: '900', marginTop: 2 },
-  profileModalClose: { width: 44, height: 44, borderRadius: 22, backgroundColor: C.s2, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center' },
   profileHero: { height: 310, backgroundColor: C.s1 },
   profileImage: { width: '100%', height: '100%' },
   profileImageFallback: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s1 },
   profileShade: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.28)' },
   profileHeroText: { position: 'absolute', left: 18, right: 18, bottom: 20 },
+  profileHeroClose: { position: 'absolute', right: 14, width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(0,0,0,0.36)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.32)', alignItems: 'center', justifyContent: 'center' },
   profileCategory: { color: C.orange, fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 0.7 },
   profileTitle: { color: '#fff', fontSize: 31, lineHeight: 36, fontWeight: '900', marginTop: 6 },
   profileActions: { flexDirection: 'row', gap: 10, padding: 14 },

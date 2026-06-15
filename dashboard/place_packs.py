@@ -19,7 +19,7 @@ from dashboard.pmtiles_states import STATE_BBOXES, REGION_BBOXES
 from ingestors.blm import get_blm_campsites, get_blm_recreation_sites
 from ingestors.nps import get_nps_places, nps_enabled
 from ingestors.osm import get_osm_outdoor_stays
-from ingestors.pakistan_curated import get_pakistan_curated_stays
+from ingestors.pakistan_curated import get_pakistan_curated_places, get_pakistan_curated_services, get_pakistan_curated_stays
 from ingestors.ridb import get_campsites_search
 from ingestors.usfs import get_usfs_recreation_sites
 
@@ -40,8 +40,8 @@ PACK_DEFINITIONS = {
     "services": {
         "id": "services",
         "name": "Services",
-        "description": "Fuel, propane, water, dump stations, showers, laundry, groceries, and mechanics.",
-        "categories": ["fuel", "propane", "water", "dump", "shower", "laundromat", "grocery", "mechanic"],
+        "description": "Fuel, water, dump stations, showers, laundry, groceries, food, lodging, mechanics, medical, and practical support stops.",
+        "categories": ["fuel", "propane", "water", "dump", "shower", "laundromat", "grocery", "food", "lodging", "mechanic", "parking", "medical", "hardware", "parts", "wifi", "checkpost"],
     },
     "outdoors": {
         "id": "outdoors",
@@ -60,6 +60,12 @@ PACK_DEFINITIONS = {
         "name": "Water Access",
         "description": "Boat ramps, paddle launches, marinas, docks, shore fishing access, water fill points, and mapped boating aids or hazards where source data exists.",
         "categories": ["water"],
+    },
+    "trek_places": {
+        "id": "trek_places",
+        "name": "Trek Places",
+        "description": "Downloaded trek context: trailheads, passes, glaciers, bridges, checkposts, settlements, viewpoints, water, peaks, and support landmarks.",
+        "categories": ["trailhead", "viewpoint", "peak", "pass", "glacier", "bridge", "checkpost", "settlement", "water", "attraction", "medical", "camp"],
     },
 }
 
@@ -196,6 +202,18 @@ def _node_coord(el: dict) -> tuple[float, float] | None:
 
 def _classify_osm(el: dict) -> str | None:
     tags = el.get("tags") or {}
+    if tags.get("mountain_pass") == "yes" or tags.get("natural") == "saddle":
+        return "pass"
+    if tags.get("natural") == "glacier":
+        return "glacier"
+    if tags.get("bridge") in {"yes", "aqueduct", "boardwalk", "covered", "movable", "trestle", "viaduct"} or tags.get("man_made") == "bridge":
+        return "bridge"
+    if tags.get("barrier") == "checkpoint" or tags.get("checkpoint") == "yes" or tags.get("amenity") == "police":
+        return "checkpost"
+    if tags.get("place") in {"city", "town", "village", "hamlet", "locality", "isolated_dwelling"}:
+        return "settlement"
+    if tags.get("amenity") in {"clinic", "hospital", "doctors", "pharmacy", "first_aid"}:
+        return "medical"
     if tags.get("tourism") in {"camp_site", "caravan_site", "camp_pitch", "alpine_hut", "wilderness_hut", "chalet", "guest_house", "hostel"}:
         return "camp"
     if tags.get("amenity") == "shelter" or tags.get("shelter_type") in {"basic_hut", "lean_to", "weather_shelter", "rock_shelter"}:
@@ -226,6 +244,12 @@ def _classify_osm(el: dict) -> str | None:
         return "food"
     if tags.get("shop") in {"supermarket", "convenience", "general"}:
         return "grocery"
+    if tags.get("shop") == "hardware":
+        return "hardware"
+    if tags.get("shop") in {"car_parts", "motorcycle_repair", "tyres"}:
+        return "parts"
+    if tags.get("internet_access") in {"yes", "wlan"} or tags.get("amenity") == "internet_cafe":
+        return "wifi"
     if tags.get("shop") in {"car_repair", "tyres"} or tags.get("craft") == "mechanic":
         return "mechanic"
     if tags.get("amenity") == "parking":
@@ -769,9 +793,15 @@ out body center 1800;
   way["tourism"~"hotel|motel|guest_house|hostel"]({bbox});
   node["amenity"~"restaurant|cafe|fast_food"]({bbox});
   node["shop"~"supermarket|convenience|general"]({bbox});
-  node["shop"~"car_repair|tyres"]({bbox});
-  way["shop"~"car_repair|tyres"]({bbox});
+  node["shop"~"car_repair|tyres|hardware|car_parts|motorcycle_repair"]({bbox});
+  way["shop"~"car_repair|tyres|hardware|car_parts|motorcycle_repair"]({bbox});
   node["craft"="mechanic"]({bbox});
+  node["amenity"~"clinic|hospital|doctors|pharmacy|first_aid|police|internet_cafe"]({bbox});
+  way["amenity"~"clinic|hospital|doctors|pharmacy|first_aid|police|internet_cafe"]({bbox});
+  node["internet_access"~"yes|wlan"]({bbox});
+  way["internet_access"~"yes|wlan"]({bbox});
+  node["barrier"="checkpoint"]({bbox});
+  way["barrier"="checkpoint"]({bbox});
   node["amenity"="parking"]({bbox});
   way["amenity"="parking"]({bbox});
   node["tourism"="attraction"]({bbox});
@@ -884,6 +914,141 @@ PAKISTAN_CAMP_ANCHORS = (
     ("Khaplu / Hushe", 35.4519, 76.3582),
 )
 
+PAKISTAN_LOCAL_TERM_ALIASES = {
+    "la": ["pass", "mountain pass"],
+    "jheel": ["lake", "water"],
+    "nala": ["nullah", "stream", "watercourse"],
+    "nullah": ["nala", "stream", "watercourse"],
+    "sarai": ["rest house", "guest house", "camp"],
+    "dak bungalow": ["rest house", "guest house"],
+    "rest house": ["sarai", "guest house", "lodging"],
+    "checkpost": ["checkpoint", "police", "permit check"],
+    "bazaar": ["market", "food", "grocery", "supplies"],
+    "meadows": ["maidan", "pasture", "camp"],
+    "glacier": ["baraf", "ice", "trekking only"],
+}
+
+
+def _pakistan_aliases_for_place(item: dict) -> list[str]:
+    text = " ".join(str(v or "") for v in [
+        item.get("name"),
+        item.get("type"),
+        item.get("category"),
+        item.get("subtype"),
+        item.get("address"),
+        *(item.get("tags") if isinstance(item.get("tags"), list) else []),
+        *(item.get("site_types") if isinstance(item.get("site_types"), list) else []),
+    ]).lower()
+    aliases: set[str] = set()
+    for token, expansions in PAKISTAN_LOCAL_TERM_ALIASES.items():
+        if token in text:
+            aliases.add(token)
+            aliases.update(expansions)
+    if "k2" in text:
+        aliases.update({"k2", "chogori", "base camp", "baltoro"})
+    if "concordia" in text:
+        aliases.update({"concordia", "baltoro", "glacier junction"})
+    if "fairy" in text or "nanga parbat" in text:
+        aliases.update({"fairy meadows", "nanga parbat", "raikot", "beyal", "behal"})
+    if "hunza" in text or "passu" in text:
+        aliases.update({"hunza", "passu", "karakoram highway", "kkh"})
+    if "guest house" in text or "lodge" in text:
+        aliases.update({"stay", "lodging", "rest house", "sarai"})
+    if "bridge" in text:
+        aliases.update({"bridge", "crossing"})
+    if "checkpost" in text or "checkpoint" in text or "police" in text:
+        aliases.update({"checkpost", "checkpoint", "permit check", "police"})
+    return sorted(a for a in aliases if a)
+
+
+def _with_pakistan_search_terms(item: dict) -> dict:
+    aliases = sorted(set([*(item.get("aliases") if isinstance(item.get("aliases"), list) else []), *_pakistan_aliases_for_place(item)]))
+    tags = sorted(set([*(item.get("tags") if isinstance(item.get("tags"), list) else []), *aliases, "pakistan", "karakoram"]))
+    item["aliases"] = aliases
+    item["search_terms"] = sorted(set([item.get("name", ""), item.get("subtype", ""), *aliases, *tags]))
+    item["local_terms"] = sorted(alias for alias in aliases if alias in PAKISTAN_LOCAL_TERM_ALIASES or alias in {"la", "jheel", "nala", "nullah", "sarai", "checkpost", "bazaar"})
+    item["tags"] = tags
+    return item
+
+
+def _normalize_pakistan_place_source(item: dict, default_type: str = "poi") -> dict | None:
+    lat, lng = item.get("lat"), item.get("lng")
+    if not isinstance(lat, (int, float)) or not isinstance(lng, (int, float)):
+        return None
+    ptype = str(item.get("type") or item.get("category") or default_type)
+    source = str(item.get("source") or "pakistan_karakoram_curated")
+    source_badge = item.get("source_badge") or item.get("verified_source") or item.get("source_label") or "Trailhead mixed"
+    normalized = {
+        "id": str(item.get("id") or f"{source}_{ptype}_{float(lat):.5f}_{float(lng):.5f}"),
+        "name": str(item.get("name") or ptype.replace("_", " ").title()),
+        "lat": float(lat),
+        "lng": float(lng),
+        "type": ptype,
+        "category": ptype,
+        "source": source,
+        "subtype": item.get("subtype") or item.get("land_type") or "",
+        "address": item.get("address") or "",
+        "fuel_types": item.get("fuel_types") or "",
+        "elevation": item.get("elevation") or "",
+        "official_url": item.get("official_url") or item.get("url") or item.get("website") or "",
+        "booking_url": item.get("booking_url") or "",
+        "photo_url": item.get("photo_url") or "",
+        "reservable": bool(item.get("reservable")),
+        "tags": item.get("tags") if isinstance(item.get("tags"), list) else [],
+        "amenities": item.get("amenities") if isinstance(item.get("amenities"), list) else [],
+        "site_types": item.get("site_types") if isinstance(item.get("site_types"), list) else [],
+        "source_badge": source_badge,
+        "source_freshness": item.get("source_freshness") or "Pakistan mountain place data packaged by Trailhead; verify access, permits, guide requirements, and current local conditions.",
+        "last_checked": int(item.get("last_checked") or time.time()),
+        "safety_note": item.get("safety_note") or ("Trekking-only context. Verify locally before relying on this point." if ptype in {"pass", "glacier", "bridge", "checkpost"} else ""),
+    }
+    return _with_pakistan_search_terms(normalized)
+
+
+def _anchor_cell(lat: float, lng: float, radius_deg: float = 0.35) -> tuple[float, float, float, float]:
+    return (lng - radius_deg, lat - radius_deg, lng + radius_deg, lat + radius_deg)
+
+
+async def _fetch_pakistan_trek_cell(cell: tuple[float, float, float, float]) -> dict:
+    west, south, east, north = cell
+    bbox = f"{south},{west},{north},{east}"
+    query = f"""[out:json][timeout:25];
+(
+  node["mountain_pass"="yes"]({bbox});
+  way["mountain_pass"="yes"]({bbox});
+  node["natural"~"glacier|saddle|peak|spring"]({bbox});
+  way["natural"~"glacier|saddle|spring"]({bbox});
+  node["highway"="trailhead"]({bbox});
+  node["trailhead"="yes"]({bbox});
+  node["tourism"~"viewpoint|attraction|camp_site|alpine_hut|wilderness_hut|guest_house|hostel"]({bbox});
+  way["tourism"~"viewpoint|attraction|camp_site|alpine_hut|wilderness_hut|guest_house|hostel"]({bbox});
+  node["amenity"~"shelter|drinking_water|water_point|clinic|hospital|doctors|pharmacy|police"]({bbox});
+  way["amenity"~"shelter|drinking_water|water_point|clinic|hospital|doctors|pharmacy|police"]({bbox});
+  node["barrier"="checkpoint"]({bbox});
+  way["barrier"="checkpoint"]({bbox});
+  node["bridge"]({bbox});
+  way["bridge"]({bbox});
+  node["place"~"city|town|village|hamlet|locality|isolated_dwelling"]["name"]({bbox});
+);
+out body center 1200;
+"""
+    try:
+        payload, _endpoint, _errors = await _post_overpass_json(
+            query,
+            user_agent="Trailhead/1.0 (pakistan trek place pack builder)",
+            timeout_seconds=35,
+        )
+    except Exception as exc:
+        return {"points": [], "failed_cell": _failed_cell(cell, f"{type(exc).__name__}: {exc}")}
+    points = []
+    for el in payload.get("elements") or []:
+        point = _normalize_overpass_element(el)
+        if point:
+            normalized = _normalize_pakistan_place_source(point, default_type=str(point.get("type") or "poi"))
+            if normalized:
+                points.append(normalized)
+    return {"points": points, "failed_cell": None}
+
 
 async def _build_pakistan_camp_pack() -> Path:
     region = "pk"
@@ -908,6 +1073,7 @@ async def _build_pakistan_camp_pack() -> Path:
                 continue
             normalized["source_freshness"] = item.get("source_freshness") or "Pakistan mountain stay data packaged by Trailhead; verify permits, access, guide requirements, safety, and current local conditions."
             normalized["tags"] = sorted(set([*(normalized.get("tags") or []), "pakistan", "trekking"]))
+            normalized = _with_pakistan_search_terms(normalized)
             point_key = normalized.get("id") or f"{normalized.get('name')}:{normalized.get('lat'):.4f}:{normalized.get('lng'):.4f}"
             if point_key in seen:
                 continue
@@ -938,6 +1104,85 @@ async def _build_pakistan_camp_pack() -> Path:
         "name": "Pakistan Camps",
         "generated_at": int(time.time()),
         "source": "Trailhead curated + OpenStreetMap mixed outdoor stay data",
+        "categories": PACK_DEFINITIONS[pack_id]["categories"],
+        "failed_cells": failed_cells,
+        "failed_cell_count": len(failed_cells),
+        "points": points,
+    }
+    path = pack_path(region, pack_id)
+    path.write_text(json.dumps(payload, separators=(",", ":")))
+    _status[key].update(
+        status="built",
+        progress=f"built · {len(points)} places" + (f" · {len(failed_cells)} failed corridors" if failed_cells else ""),
+        size_bytes=path.stat().st_size,
+        point_count=len(points),
+        failed_cells=failed_cells,
+        failed_cell_count=len(failed_cells),
+    )
+    return path
+
+
+async def _build_pakistan_context_pack(pack_id: str) -> Path:
+    region = "pk"
+    key = f"{region}:{pack_id}"
+    anchors = PAKISTAN_CAMP_ANCHORS
+    _status[key] = {
+        "status": "building",
+        "progress": f"0/{len(anchors)} corridors",
+        "error": None,
+        "size_bytes": 0,
+        "failed_cells": [],
+        "failed_cell_count": 0,
+    }
+    allowed_categories = set(PACK_DEFINITIONS[pack_id]["categories"])
+    points: list[dict] = []
+    failed_cells: list[dict] = []
+    seen: set[str] = set()
+
+    def add_items(items: list[dict], *, default_type: str = "poi") -> None:
+        for item in items:
+            normalized = _normalize_pakistan_place_source(item, default_type=default_type)
+            if not normalized:
+                continue
+            if str(normalized.get("type") or normalized.get("category")) not in allowed_categories:
+                continue
+            point_key = normalized.get("id") or f"{normalized.get('type')}:{normalized.get('lat'):.4f}:{normalized.get('lng'):.4f}"
+            if point_key in seen:
+                continue
+            seen.add(point_key)
+            points.append(normalized)
+
+    completed = 0
+    for label, lat, lng in anchors:
+        try:
+            if pack_id == "trek_places":
+                add_items(get_pakistan_curated_places(lat, lng, radius_miles=85))
+                live = await asyncio.wait_for(_fetch_pakistan_trek_cell(_anchor_cell(lat, lng, radius_deg=0.55)), timeout=40)
+            else:
+                add_items(get_pakistan_curated_services(lat, lng, radius_miles=85))
+                live = await asyncio.wait_for(_fetch_bbox_cell(_anchor_cell(lat, lng, radius_deg=0.28)), timeout=32)
+            add_items(live.get("points") or [])
+            if live.get("failed_cell"):
+                failed_cells.append({"label": label, **live["failed_cell"]})
+        except Exception as exc:
+            failed_cells.append({"label": label, "lat": lat, "lng": lng, "error": f"{type(exc).__name__}: {exc}"})
+        completed += 1
+        _status[key]["progress"] = f"{completed}/{len(anchors)} corridors"
+        _status[key]["failed_cells"] = failed_cells
+        _status[key]["failed_cell_count"] = len(failed_cells)
+
+    priority = {"trailhead": 0, "camp": 1, "water": 2, "pass": 3, "glacier": 4, "bridge": 5, "checkpost": 6, "settlement": 7, "viewpoint": 8, "peak": 9}
+    points.sort(key=lambda p: (priority.get(str(p.get("type")), 20), str(p.get("name", "")), float(p.get("lat") or 0), float(p.get("lng") or 0)))
+    if not points:
+        raise RuntimeError(f"pk:{pack_id} returned 0 places")
+    payload = {
+        "schema_version": 1,
+        "pack_id": f"pk-{pack_id}",
+        "region_id": "pk",
+        "region_name": "Pakistan",
+        "name": f"Pakistan {PACK_DEFINITIONS[pack_id]['name']}",
+        "generated_at": int(time.time()),
+        "source": "Trailhead curated + OpenStreetMap Karakoram context",
         "categories": PACK_DEFINITIONS[pack_id]["categories"],
         "failed_cells": failed_cells,
         "failed_cell_count": len(failed_cells),
@@ -1105,6 +1350,8 @@ async def build_region_pack(region: str, pack_id: str = "essentials") -> Path | 
         raise ValueError(f"Unknown place pack: {pack_id}")
     if region == "pk" and pack_id == "camps":
         return await _build_pakistan_camp_pack()
+    if region == "pk" and pack_id in {"trek_places", "services"}:
+        return await _build_pakistan_context_pack(pack_id)
     bbox = _bbox_for_region(region)
     key = f"{region}:{pack_id}"
     cells = _bbox_cells(bbox, _cell_step_for_region(region))

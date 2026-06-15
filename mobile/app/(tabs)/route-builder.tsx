@@ -185,12 +185,18 @@ const PLACE_FILTER_TYPES = [
   { id: 'trailhead', label: 'Trailheads', icon: 'trail-sign-outline', color: '#22c55e' },
   { id: 'viewpoint', label: 'Views', icon: 'flag-outline', color: '#a855f7' },
   { id: 'peak', label: 'Peaks', icon: 'triangle-outline', color: '#92400e' },
+  { id: 'pass', label: 'Passes', icon: 'git-compare-outline', color: '#7c2d12' },
+  { id: 'glacier', label: 'Glaciers', icon: 'snow-outline', color: '#0284c7' },
+  { id: 'bridge', label: 'Bridges', icon: 'swap-horizontal-outline', color: '#64748b' },
+  { id: 'checkpost', label: 'Checkposts', icon: 'shield-checkmark-outline', color: '#475569' },
+  { id: 'settlement', label: 'Villages', icon: 'business-outline', color: '#0f766e' },
+  { id: 'medical', label: 'Medical', icon: 'medkit-outline', color: '#dc2626' },
   { id: 'hot_spring', label: 'Hot Springs', icon: 'flame-outline', color: '#f97316' },
 ] as const;
-const DEFAULT_PLACE_FILTERS = ['fuel', 'propane', 'water', 'boat_ramp', 'paddle_launch', 'fishing_access', 'marina', 'dock', 'shore_access', 'dump', 'trailhead'];
+const DEFAULT_PLACE_FILTERS = ['fuel', 'propane', 'water', 'boat_ramp', 'paddle_launch', 'fishing_access', 'marina', 'dock', 'shore_access', 'dump', 'trailhead', 'pass', 'glacier', 'bridge', 'checkpost', 'settlement'];
 const WATER_PLACE_FILTER_IDS = new Set(['boat_ramp', 'paddle_launch', 'fishing_access', 'marina', 'dock', 'shore_access', 'swimming', 'spring', 'water_fill', 'gauge']);
 const FUEL_POI_TYPES = 'fuel,propane';
-const ROUTE_POI_TYPES = 'water,trailhead,viewpoint,peak,hot_spring,dump,shower,laundromat,lodging,private_stay,farm_stay,ranch,winery,glamping,private_camp,food,grocery,mechanic,parking,attraction';
+const ROUTE_POI_TYPES = 'water,trailhead,viewpoint,peak,pass,glacier,bridge,checkpost,settlement,hot_spring,dump,shower,laundromat,lodging,private_stay,farm_stay,ranch,winery,glamping,private_camp,food,grocery,mechanic,parking,attraction,medical';
 const CAMP_PREFERENCE_OPTIONS: Array<{ id: CampPreferenceMode; label: string; sub: string; icon: keyof typeof Ionicons.glyphMap; filters: string[] }> = [
   { id: 'public', label: 'Public', sub: 'BLM / USFS first', icon: 'trail-sign-outline', filters: ['blm', 'usfs', 'dispersed', 'free', 'tent'] },
   { id: 'developed', label: 'Developed', sub: 'Parks + reservable', icon: 'bonfire-outline', filters: ['tent', 'reservable', 'state', 'nps', 'usfs'] },
@@ -930,6 +936,52 @@ function areaScopedOfflinePlaces(points: OsmPoi[], center: { lat: number; lng: n
   );
 }
 
+function offlinePlaceSearchText(place: OsmPoi) {
+  return [
+    place.name,
+    place.type,
+    place.subtype,
+    place.source_label,
+    place.address,
+    place.trek_name,
+    place.stage_name,
+    ...(Array.isArray((place as any).aliases) ? (place as any).aliases : []),
+    ...(Array.isArray((place as any).search_terms) ? (place as any).search_terms : []),
+    ...(Array.isArray((place as any).local_terms) ? (place as any).local_terms : []),
+    ...(Array.isArray((place as any).tags) ? (place as any).tags : []),
+    ...(Array.isArray((place as any).site_types) ? (place as any).site_types : []),
+  ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function searchOfflinePlaces(points: OsmPoi[], query: string, limit = 10): SearchPlace[] {
+  const q = query.trim().toLowerCase();
+  if (q.length < 2) return [];
+  const tokens = q.split(/\s+/).filter(Boolean);
+  return points
+    .map(place => {
+      const name = place.name.toLowerCase();
+      const text = offlinePlaceSearchText(place);
+      let score = 0;
+      if (name === q) score += 120;
+      if (name.includes(q)) score += 70;
+      if (text.includes(q)) score += 45;
+      for (const token of tokens) {
+        if (name.includes(token)) score += 16;
+        else if (text.includes(token)) score += 8;
+      }
+      if (place.source?.includes('pakistan') || text.includes('pakistan') || text.includes('karakoram')) score += 4;
+      return { place, score };
+    })
+    .filter(row => row.score > 0)
+    .sort((a, b) => b.score - a.score || a.place.name.localeCompare(b.place.name))
+    .slice(0, limit)
+    .map(({ place }) => ({
+      name: `${place.name}${place.subtype ? ` · ${String(place.subtype).replace(/_/g, ' ')}` : ''}`,
+      lat: place.lat,
+      lng: place.lng,
+    }));
+}
+
 function stopTypeFromWaypoint(type?: string): BuilderStopType {
   const t = (type || '').toLowerCase();
   if (t === 'start') return 'start';
@@ -1427,6 +1479,12 @@ export default function RouteBuilderScreen() {
           chart_source: point.chart_source,
           chart_url: point.chart_url,
           navigation_note: point.navigation_note,
+          aliases: point.aliases,
+          search_terms: point.search_terms,
+          local_terms: point.local_terms,
+          trek_name: point.trek_name,
+          stage_name: point.stage_name,
+          safety_note: point.safety_note,
         })));
       })
       .catch(() => {
@@ -1901,9 +1959,17 @@ export default function RouteBuilderScreen() {
     if (!query.trim()) return;
     setSearching(true);
     try {
-      setSearchResults(await geocodePlaces(query.trim()));
+      const offlineMatches = searchOfflinePlaces(offlinePlaces, query.trim());
+      const onlineMatches = await geocodePlaces(query.trim()).catch(() => [] as SearchPlace[]);
+      const seen = new Set<string>();
+      setSearchResults([...offlineMatches, ...onlineMatches].filter(place => {
+        const key = `${place.name.toLowerCase()}:${place.lat.toFixed(4)}:${place.lng.toFixed(4)}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      }).slice(0, 12));
     } catch {
-      setSearchResults([]);
+      setSearchResults(searchOfflinePlaces(offlinePlaces, query.trim()));
     } finally {
       setSearching(false);
     }

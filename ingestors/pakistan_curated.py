@@ -37,6 +37,36 @@ PAKISTAN_KARAKORAM_STAYS: tuple[dict, ...] = (
     {"name": "Attabad Lake Stay Area", "lat": 36.3450, "lng": 74.8670, "land_type": "Trekking Lodge Area", "tags": ["hunza", "attabad", "guest house", "scenic"]},
 )
 
+PAKISTAN_KARAKORAM_PLACES: tuple[dict, ...] = (
+    {"name": "Askole Trailhead", "lat": 35.6806, "lng": 75.8178, "type": "trailhead", "subtype": "trek_start", "tags": ["askole", "baltoro", "k2", "jeep track", "porter staging"]},
+    {"name": "Baltoro Glacier", "lat": 35.7391, "lng": 76.3482, "type": "glacier", "subtype": "glacier", "tags": ["baltoro", "k2", "concordia", "trekking only"]},
+    {"name": "Godwin-Austen Glacier", "lat": 35.8466, "lng": 76.5050, "type": "glacier", "subtype": "glacier", "tags": ["k2", "base camp", "trekking only"]},
+    {"name": "Concordia", "lat": 35.7455, "lng": 76.5142, "type": "viewpoint", "subtype": "glacier_junction", "tags": ["concordia", "baltoro", "k2", "broad peak"]},
+    {"name": "Gondogoro La", "lat": 35.5906, "lng": 76.5586, "type": "pass", "subtype": "mountain_pass", "tags": ["la", "pass", "gondogoro", "guide required", "trekking only"]},
+    {"name": "Ali Camp", "lat": 35.6045, "lng": 76.5131, "type": "camp", "subtype": "high_camp", "tags": ["gondogoro", "ali camp", "trekking"]},
+    {"name": "Hushe Trailhead", "lat": 35.4519, "lng": 76.3582, "type": "trailhead", "subtype": "trek_start", "tags": ["hushe", "gondogoro", "masherbrum"]},
+    {"name": "Fairy Meadows", "lat": 35.3858, "lng": 74.5805, "type": "settlement", "subtype": "meadow", "tags": ["fairy meadows", "nanga parbat", "raikot serai"]},
+    {"name": "Nanga Parbat Viewpoint", "lat": 35.3192, "lng": 74.5903, "type": "viewpoint", "subtype": "mountain_view", "tags": ["nanga parbat", "base camp", "fairy meadows"]},
+    {"name": "Rakaposhi Base Camp Trailhead", "lat": 36.1682, "lng": 74.4889, "type": "trailhead", "subtype": "trek_start", "tags": ["rakaposhi", "minapin", "hunza"]},
+    {"name": "Rakaposhi Base Camp", "lat": 36.1425, "lng": 74.4892, "type": "camp", "subtype": "base_camp", "tags": ["rakaposhi", "base camp", "hunza"]},
+    {"name": "Passu Glacier View Area", "lat": 36.4828, "lng": 74.8825, "type": "viewpoint", "subtype": "glacier_view", "tags": ["passu", "glacier", "hunza"]},
+    {"name": "Borith Lake", "lat": 36.4269, "lng": 74.8617, "type": "water", "subtype": "lake", "tags": ["borith", "jheel", "lake", "hunza"]},
+    {"name": "Attabad Lake", "lat": 36.3450, "lng": 74.8670, "type": "water", "subtype": "lake", "tags": ["attabad", "jheel", "lake", "hunza"]},
+    {"name": "Skardu Support Area", "lat": 35.2971, "lng": 75.6333, "type": "settlement", "subtype": "support_town", "tags": ["skardu", "fuel", "food", "lodging", "permits"]},
+    {"name": "Karimabad Support Area", "lat": 36.3167, "lng": 74.6500, "type": "settlement", "subtype": "support_town", "tags": ["karimabad", "hunza", "food", "lodging"]},
+)
+
+PAKISTAN_KARAKORAM_SERVICES: tuple[dict, ...] = (
+    {"name": "Skardu Fuel and Supply Area", "lat": 35.2971, "lng": 75.6333, "type": "fuel", "subtype": "support_area", "tags": ["skardu", "fuel", "supplies", "approach"]},
+    {"name": "Skardu Clinic and Pharmacy Area", "lat": 35.2978, "lng": 75.6339, "type": "medical", "subtype": "clinic_area", "tags": ["skardu", "clinic", "pharmacy", "medical"]},
+    {"name": "Skardu Food and Bazaar Area", "lat": 35.2967, "lng": 75.6330, "type": "food", "subtype": "bazaar", "tags": ["skardu", "bazaar", "food", "grocery"]},
+    {"name": "Karimabad Bazaar Area", "lat": 36.3167, "lng": 74.6500, "type": "food", "subtype": "bazaar", "tags": ["karimabad", "hunza", "bazaar", "food"]},
+    {"name": "Aliabad Fuel and Supply Area", "lat": 36.3075, "lng": 74.6161, "type": "fuel", "subtype": "support_area", "tags": ["aliabad", "hunza", "fuel", "supplies"]},
+    {"name": "Passu Support Area", "lat": 36.4828, "lng": 74.8825, "type": "lodging", "subtype": "guest_house_area", "tags": ["passu", "guest house", "food", "hunza"]},
+    {"name": "Askole Checkpost / Staging Area", "lat": 35.6806, "lng": 75.8178, "type": "checkpost", "subtype": "staging_area", "tags": ["askole", "checkpost", "porter staging", "permits"]},
+    {"name": "Hushe Staging Area", "lat": 35.4519, "lng": 76.3582, "type": "lodging", "subtype": "guest_house_area", "tags": ["hushe", "guest house", "staging"]},
+)
+
 
 def _haversine_miles(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     r = 3958.7613
@@ -89,3 +119,38 @@ def get_pakistan_curated_stays(lat: float, lng: float, radius_miles: float = 50)
         })
     return sorted(rows, key=lambda row: float(row.get("distance_mi", 9999)))[:80]
 
+
+def _curated_rows(items: tuple[dict, ...], lat: float, lng: float, radius_miles: float, *, source_name: str) -> list[dict]:
+    rows: list[dict] = []
+    for item in items:
+        distance = _haversine_miles(lat, lng, float(item["lat"]), float(item["lng"]))
+        if distance > radius_miles:
+            continue
+        tags = sorted(set(["pakistan", "karakoram", "mixed_source", *(item.get("tags") or [])]))
+        rows.append({
+            "id": f"pk_karakoram_curated_{_safe_id(str(item['name']))}",
+            "name": item["name"],
+            "lat": item["lat"],
+            "lng": item["lng"],
+            "type": item.get("type") or "poi",
+            "subtype": item.get("subtype") or "",
+            "tags": tags,
+            "amenities": item.get("amenities") or [],
+            "site_types": item.get("site_types") or [item.get("subtype") or item.get("type") or "Place"],
+            "description": "Curated Pakistan/Karakoram planning lead. Verify permits, guide requirements, access, safety, and current local conditions before relying on it.",
+            "official_url": "https://visitgilgitbaltistan.gov.pk/",
+            "source": source_name,
+            "source_badge": "Trailhead mixed",
+            "source_confidence": "mixed",
+            "source_freshness": "Curated fallback for Pakistan mountain planning; verify all access, permits, safety, and availability locally.",
+            "distance_mi": round(distance, 2),
+        })
+    return sorted(rows, key=lambda row: float(row.get("distance_mi", 9999)))[:120]
+
+
+def get_pakistan_curated_places(lat: float, lng: float, radius_miles: float = 50) -> list[dict]:
+    return _curated_rows(PAKISTAN_KARAKORAM_PLACES, lat, lng, radius_miles, source_name="pakistan_karakoram_curated_places")
+
+
+def get_pakistan_curated_services(lat: float, lng: float, radius_miles: float = 50) -> list[dict]:
+    return _curated_rows(PAKISTAN_KARAKORAM_SERVICES, lat, lng, radius_miles, source_name="pakistan_karakoram_curated_services")

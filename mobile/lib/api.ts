@@ -1622,7 +1622,7 @@ export interface PinPayload {
 }
 export interface OsmPoi {
   id: string; name: string; lat: number; lng: number;
-  type: 'camp' | 'water' | 'trail' | 'trailhead' | 'viewpoint' | 'peak' | 'hot_spring' | 'fuel' | 'propane' | 'dump' | 'shower' | 'laundromat' | 'lodging' | 'private_stay' | 'farm_stay' | 'ranch' | 'winery' | 'glamping' | 'private_camp' | 'food' | 'grocery' | 'mechanic' | 'parking' | 'attraction' | 'hardware' | 'camping' | 'medical' | 'parts' | 'wifi' | 'poi'; subtype?: string; elevation?: string;
+  type: 'camp' | 'water' | 'trail' | 'trailhead' | 'viewpoint' | 'peak' | 'pass' | 'glacier' | 'bridge' | 'checkpost' | 'settlement' | 'hot_spring' | 'fuel' | 'propane' | 'dump' | 'shower' | 'laundromat' | 'lodging' | 'private_stay' | 'farm_stay' | 'ranch' | 'winery' | 'glamping' | 'private_camp' | 'food' | 'grocery' | 'mechanic' | 'parking' | 'attraction' | 'hardware' | 'camping' | 'medical' | 'parts' | 'wifi' | 'poi'; subtype?: string; elevation?: string;
   display_type?: string;
   source?: string;
   source_label?: string;
@@ -1701,6 +1701,12 @@ export interface OsmPoi {
   depth_ft?: number;
   max_draft_ft?: number;
   navigation_note?: string;
+  aliases?: string[];
+  search_terms?: string[];
+  local_terms?: string[];
+  trek_name?: string;
+  stage_name?: string;
+  safety_note?: string;
 }
 
 export interface WaterNavigationLineFeature {
@@ -2250,6 +2256,12 @@ export interface PlacePackPoint {
   depth_ft?: number;
   max_draft_ft?: number;
   navigation_note?: string;
+  aliases?: string[];
+  search_terms?: string[];
+  local_terms?: string[];
+  trek_name?: string;
+  stage_name?: string;
+  safety_note?: string;
 }
 export interface PlacePack {
   schema_version: number;

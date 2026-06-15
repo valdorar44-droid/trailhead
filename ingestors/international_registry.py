@@ -13,6 +13,7 @@ from ingestors.australia_open_data import get_australia_open_data_campsites
 from ingestors.canada_open_data import get_canada_open_data_campsites
 from ingestors.nz_doc import get_nz_doc_campsites
 from ingestors.osm import get_osm_outdoor_stays
+from ingestors.pakistan_curated import get_pakistan_curated_stays
 
 CampProvider = Callable[[float, float, float, list[str] | None], Awaitable[list[dict]]]
 
@@ -48,7 +49,12 @@ async def _canada_open_data_provider(lat: float, lng: float, radius: float, type
 
 async def _pakistan_karakoram_provider(lat: float, lng: float, radius: float, type_filters: list[str] | None) -> list[dict]:
     radius_m = int(min(max(radius, 30), 60) * 1609.344)
-    return await get_osm_outdoor_stays(lat, lng, radius_m=radius_m, profile="pakistan_karakoram")
+    rows = get_pakistan_curated_stays(lat, lng, radius_miles=max(radius, 30))
+    try:
+        rows.extend(await get_osm_outdoor_stays(lat, lng, radius_m=radius_m, profile="pakistan_karakoram"))
+    except Exception:
+        pass
+    return rows
 
 
 INTERNATIONAL_CAMP_PROVIDERS: tuple[InternationalCampProvider, ...] = (
@@ -110,4 +116,3 @@ def international_camp_tasks(lat: float, lng: float, radius: float, type_filters
         provider.provider(lat, lng, radius, type_filters)
         for provider in matching_international_providers(lat, lng)
     ]
-

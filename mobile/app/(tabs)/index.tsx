@@ -7,7 +7,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as Haptics from 'expo-haptics';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
@@ -16,6 +16,7 @@ import PaywallModal from '@/components/PaywallModal';
 import AppReviewPrompt from '@/components/AppReviewPrompt';
 import TourTarget from '@/components/TourTarget';
 import { TrailheadButton, TrailheadButtonDock, TrailheadCard } from '@/components/TrailheadUI';
+import AiReportModal from '@/components/AiReportModal';
 import { useStore } from '@/lib/store';
 import { useTheme, useTag, mono, ColorPalette } from '@/lib/design';
 import { saveOfflineTrip, loadOfflineTrip } from '@/lib/offlineTrips';
@@ -114,6 +115,8 @@ export default function PlanScreen() {
 
   const [paywallVisible, setPaywallVisible] = useState(false);
   const [reviewPromptVisible, setReviewPromptVisible] = useState(false);
+  const [aiReportVisible, setAiReportVisible] = useState(false);
+  const [aiReportKind, setAiReportKind] = useState<'bug' | 'offensive'>('bug');
   const [offlineToast, setOfflineToast] = useState(false);
   const offlineToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -459,6 +462,16 @@ export default function PlanScreen() {
         visible={reviewPromptVisible}
         onClose={() => setReviewPromptVisible(false)}
       />
+      <AiReportModal
+        visible={aiReportVisible}
+        onClose={() => setAiReportVisible(false)}
+        initialKind={aiReportKind}
+        surface="planner"
+        surfaceLabel="AI Planner"
+        messages={messages.filter(msg => !!msg.text).map(msg => ({ role: msg.role === 'ai' ? 'assistant' : 'user', text: msg.text || '' }))}
+        sessionId={sessionId}
+        tripId={activeTrip?.trip_id ?? null}
+      />
 
       {/* ── Header ── */}
       <View style={s.header}>
@@ -639,6 +652,28 @@ export default function PlanScreen() {
 
       {/* ── Input ── */}
       <KeyboardAvoidingView style={[s.inputDock, { bottom: 94 + bottomInset }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View style={s.aiReportRow}>
+          <TouchableOpacity
+            style={s.aiReportBtn}
+            onPress={() => {
+              setAiReportKind('bug');
+              setAiReportVisible(true);
+            }}
+          >
+            <Ionicons name="bug-outline" size={14} color={C.orange} />
+            <Text style={s.aiReportBtnText}>REPORT BUG</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={s.aiReportBtn}
+            onPress={() => {
+              setAiReportKind('offensive');
+              setAiReportVisible(true);
+            }}
+          >
+            <Ionicons name="warning-outline" size={14} color={C.orange} />
+            <Text style={s.aiReportBtnText}>REPORT OFFENSIVE</Text>
+          </TouchableOpacity>
+        </View>
         <TourTarget id="plan.input">
           <View style={s.inputWrap}>
             <TextInput
@@ -1269,6 +1304,32 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     bottom: 94,
     zIndex: 40,
     backgroundColor: C.bg,
+  },
+  aiReportRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingTop: 8,
+    paddingBottom: 4,
+    backgroundColor: C.bg,
+  },
+  aiReportBtn: {
+    flex: 1,
+    minHeight: 36,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.s2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  aiReportBtnText: {
+    color: C.orange,
+    fontSize: 10,
+    fontFamily: mono,
+    fontWeight: '900',
   },
   inputWrap: {
     flexDirection: 'row', gap: 10, paddingHorizontal: 14, paddingTop: 10, paddingBottom: 12,

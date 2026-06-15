@@ -9,7 +9,7 @@
  * planned on wifi is still available days later with no signal.
  */
 
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import type { RouteProviderMode, RouteStep } from './types';
 import { fetchJSOfflineRoute, ENABLE_JS_OFFLINE_ROUTER, getLastOfflineRouterDebug } from './offlineRouter';
 import { diagnoseValhalla, routeValhalla } from 'expo-valhalla-routing';

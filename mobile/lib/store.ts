@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { User, TripResult, Report, CampsitePin } from './api';
 
 // File-based trip storage — no 2KB SecureStore limit
@@ -191,6 +191,7 @@ interface AppState {
   pendingNavigatePlace: { lat: number; lng: number; name: string } | null;
   pendingMapSelection: { kind: 'camp'; camp: CampsitePin } | { kind: 'place'; place: SavedPlace } | null;
   pendingStartCopilotVoice: boolean;
+  pendingOpenOfflineModal: boolean;
   tabBarHidden: boolean;
   hasPlan: boolean;
   planExpiresAt: number | null;
@@ -233,6 +234,7 @@ interface AppState {
   setPendingNavigatePlace: (place: { lat: number; lng: number; name: string } | null) => void;
   setPendingMapSelection: (selection: AppState['pendingMapSelection']) => void;
   setPendingStartCopilotVoice: (start: boolean) => void;
+  setPendingOpenOfflineModal: (open: boolean) => void;
   setPlan: (active: boolean, expiresAt?: number | null) => void;
   startGuidedTour: () => void;
   setGuidedTourActive: (active: boolean) => void;
@@ -267,6 +269,7 @@ export const useStore = create<AppState>((set) => ({
   pendingNavigatePlace: null,
   pendingMapSelection: null,
   pendingStartCopilotVoice: false,
+  pendingOpenOfflineModal: false,
   tabBarHidden: false,
   hasPlan: false,
   planExpiresAt: null,
@@ -391,6 +394,7 @@ export const useStore = create<AppState>((set) => ({
   setPendingNavigatePlace: (place) => set({ pendingNavigatePlace: place }),
   setPendingMapSelection: (selection) => set({ pendingMapSelection: selection }),
   setPendingStartCopilotVoice: (start) => set({ pendingStartCopilotVoice: start }),
+  setPendingOpenOfflineModal: (open) => set({ pendingOpenOfflineModal: open }),
   setPlan: (active, expiresAt = null) => {
     sd(PLAN_KEY);
     set({ hasPlan: active, planExpiresAt: expiresAt });

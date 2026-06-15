@@ -11,7 +11,7 @@ import React, {
   forwardRef, useCallback, useEffect, useImperativeHandle,
   useMemo, useRef, useState,
 } from 'react';
-import { Dimensions, PanResponder, TouchableOpacity, View, StyleSheet, Text } from 'react-native';
+import { Dimensions, PanResponder, Platform, TouchableOpacity, View, StyleSheet, Text } from 'react-native';
 import { EventEmitter, requireNativeModule } from 'expo-modules-core';
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import MapboxGL from '@rnmapbox/maps';
@@ -29,7 +29,7 @@ import { useTheme } from '@/lib/design';
 import { buildOfflineTrailGraphSelection } from '@/lib/trailGraph';
 import { CACHE_OFFLINE_DIR, CONTOUR_DIR, OFFLINE_DIR, FILE_REGIONS } from '@/lib/useOfflineFiles';
 import { saveRouteGeometry } from '@/lib/offlineRoutes';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Location from 'expo-location';
 
 // Lazy-load the tile server module — gracefully no-ops if the binary doesn't
@@ -89,6 +89,11 @@ const MAPBOX_LIGHT_PRESETS: Partial<Record<PremiumMapStyle, 'dawn' | 'day' | 'du
   night: 'night',
 };
 
+function isUserCameraEvent(feature: any) {
+  const props = feature?.properties ?? feature?.nativeEvent?.payload?.properties ?? feature?.nativeEvent?.payload ?? {};
+  return !!(props.isUserInteraction || props.isAnimatingFromUserInteraction);
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 export type { WP, RouteOpts, MapBounds, RouteResult, RouteStep } from './types';
 
@@ -100,6 +105,12 @@ export type NativeMapCameraOptions = {
   bearing?: number;
   duration?: number;
   mode?: 'flyTo' | 'easeTo' | string;
+};
+
+export type NativeMapDebugEvent = {
+  at: number;
+  kind: string;
+  details?: Record<string, unknown>;
 };
 
 export interface NativeMapHandle {
@@ -196,6 +207,7 @@ export interface NativeMapProps {
   onTraceStart?:    (coord: [number, number]) => void;
   onTraceMove?:     (coord: [number, number]) => void;
   onTraceEnd?:      () => void;
+  onDebugEvent?:    (event: NativeMapDebugEvent) => void;
   onError?:         (msg: string) => void;
 }
 
@@ -668,17 +680,22 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     onMapReady, onBoundsChange, onMapGesture, onMapTap, onMapLongPress,
     onCampTap, onGasTap, onPoiTap, onWaterSpotTap, onCommunityPinTap, onTileCampTap, onBaseCampTap, onTrailTap, onWaypointTap,
     onRouteReady, onRoutePersist, onOffRoute, onOffRouteWarn, onBackOnRoute, onRouteProgress,
-    onTraceStart, onTraceMove, onTraceEnd,
+    onTraceStart, onTraceMove, onTraceEnd, onDebugEvent,
   } = props;
 
   const mapRef = useRef<any>(null);
   const camRef = useRef<any>(null);
   const lastNativeStandardTapRef = useRef<{ at: number; lat: number; lng: number } | null>(null);
   const onPoiTapRef = useRef(onPoiTap);
+  const onDebugEventRef = useRef(onDebugEvent);
 
   useEffect(() => {
     onPoiTapRef.current = onPoiTap;
   }, [onPoiTap]);
+
+  useEffect(() => {
+    onDebugEventRef.current = onDebugEvent;
+  }, [onDebugEvent]);
 
   // ── Overlay data ──────────────────────────────────────────────────────────────
   const [fireData,   setFireData]   = useState<GeoJSON.FeatureCollection | null>(null);
@@ -754,6 +771,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     waypoints[0] ? [waypoints[0].lng, waypoints[0].lat] : [-98.5, 39.5]
   );
   const [initialZoom] = useState<number>(() => waypoints.length === 0 ? 3.7 : waypoints.length > 1 ? 7 : 10);
+  const [freeCameraRevision, setFreeCameraRevision] = useState(0);
   const mapboxToken = useStore(s => s.mapboxToken);
   const activeTrip  = useStore(s => s.activeTrip);
   const C = useTheme();
@@ -764,6 +782,26 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const [localTrails, setLocalTrails] = useState(false);
   const [tileDebug,    setTileDebug]    = useState('Checking maps');
   const [tileSession,  setTileSession]  = useState(() => Date.now());
+  const emitDebugEvent = useCallback((kind: string, details: Record<string, unknown> = {}) => {
+    if (Platform.OS !== 'android') return;
+    onDebugEventRef.current?.({
+      at: Date.now(),
+      kind,
+      details: {
+        provider: isExtremeMapbox ? 'rnmapbox' : 'maplibre',
+        navMode,
+        navCameraFollow,
+        mapLayer,
+        premiumMapStyle: props.premiumMapStyle ?? 'standard',
+        showTerrain,
+        localTiles,
+        localContours,
+        localTrails,
+        tileDebug,
+        ...details,
+      },
+    });
+  }, [isExtremeMapbox, localContours, localTiles, localTrails, mapLayer, navCameraFollow, navMode, props.premiumMapStyle, showTerrain, tileDebug]);
   const trailHighlightRef = useRef<GeoJSON.FeatureCollection>(emptyFC());
   const lastTracePointRef = useRef(0);
   const onlineTilesRef  = useRef(true);                // true = prefer live CDN tiles
@@ -777,6 +815,16 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const wasOffRouteRef = useRef(false);
   const lastFlyToRef    = useRef(0);                   // timestamp of last flyTo — debounce CDN fallback
   const lastCamRef      = useRef(0);                   // timestamp of last nav setCamera — prevent animation overlap
+  const freeCameraDefaultRef = useRef({
+    centerCoordinate: initialCenter,
+    zoomLevel: initialZoom,
+    pitch: showTerrain ? 68 : 0,
+    animationDuration: 0,
+  });
+  const pendingFreeCameraRef = useRef<null | (() => void)>(null);
+  const programmaticCameraUntilRef = useRef(0);
+  const userCameraGestureUntilRef = useRef(0);
+  const deferredSourceRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const routeRequestRef = useRef(0);                   // cancels stale async route results
   const tileProbeSeqRef = useRef(0);                   // cancels stale online/offline source probes
   const onlineProbeStreakRef = useRef(0);
@@ -831,12 +879,14 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     switchingRef.current = true;
     const nativePath = path.replace(/^file:\/\//, '');
     const fileName = path.split('/').pop() ?? 'pmtiles';
+    emitDebugEvent('source:switch-state:start', { fileName, sizeMb });
     setTileDebug(`Loading ${stateDisplayName(fileName)} maps`);
     try {
       await tileServer!.switchState(nativePath);
       loadedStateRef.current = path;
       setLocalTiles(true);
       setTileSession(Date.now());
+      emitDebugEvent('source:switch-state:applied', { fileName, sizeMb });
       setTimeout(async () => {
         try {
           const health = await fetch('http://127.0.0.1:57832/health');
@@ -854,10 +904,11 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       loadedStateRef.current = null;
       if (onlineTilesRef.current) setLocalTiles(false);
       setTileDebug(`${stateDisplayName(fileName)} maps unavailable`);
+      emitDebugEvent('source:switch-state:error', { fileName, sizeMb, message: e?.message ?? String(e || '') });
     } finally {
       switchingRef.current = false;
     }
-  }, []);
+  }, [emitDebugEvent]);
 
   const switchContourFile = useCallback(async (path: string, sizeMb: number) => {
     if (loadedContourRef.current === path) return;
@@ -869,10 +920,12 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       setLocalContours(true);
       setTileSession(Date.now());
       setTileDebug(`Topo contours ${sizeMb}MB`);
+      emitDebugEvent('source:contours:applied', { fileName: path.split('/').pop() ?? 'contours', sizeMb });
     } catch {
       setLocalContours(false);
+      emitDebugEvent('source:contours:error', { fileName: path.split('/').pop() ?? 'contours', sizeMb });
     }
-  }, []);
+  }, [emitDebugEvent]);
 
   const loadBestContourFile = useCallback(async (lat?: number, lng?: number) => {
     const files = await getDownloadedContourFiles();
@@ -991,7 +1044,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         const targetUrl = shouldDownloadGlobalBase ? GLOBAL_BASE_DL_URL : BASE_DL_URL;
         FileSystem.createDownloadResumable(targetUrl, targetPath)
           .downloadAsync()
-          .then(async res => {
+          .then(async (res: FileSystem.FileSystemDownloadResult | undefined) => {
             if (res?.status === 200) {
               try {
                 const ts = tileServer as any;
@@ -1161,18 +1214,46 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   useEffect(() => {
     if (navMode) return;
     lastCamRef.current = Date.now();
+    freeCameraDefaultRef.current = {
+      ...freeCameraDefaultRef.current,
+      pitch: showTerrain ? 68 : 0,
+      animationDuration: 0,
+    };
+    emitDebugEvent('camera:set:terrain-pitch', { pitch: showTerrain ? 68 : 0 });
     camRef.current?.setCamera({
       pitch: showTerrain ? 68 : 0,
       animationDuration: 520,
       animationMode: 'easeTo',
     } as any);
-  }, [navMode, showTerrain]);
+  }, [emitDebugEvent, navMode, showTerrain]);
+
+  useEffect(() => {
+    emitDebugEvent('camera:branch', {
+      branch: navMode && navCameraFollow ? 'nav-follow' : 'free',
+      freeCameraRevision,
+      defaultCenter: freeCameraDefaultRef.current.centerCoordinate,
+      defaultZoom: freeCameraDefaultRef.current.zoomLevel,
+    });
+  }, [emitDebugEvent, freeCameraRevision, navCameraFollow, navMode]);
+
+  useEffect(() => {
+    if (!pendingFreeCameraRef.current) return;
+    const timer = setTimeout(() => {
+      const pending = pendingFreeCameraRef.current;
+      pendingFreeCameraRef.current = null;
+      emitDebugEvent('camera:pending-free-camera:apply', { freeCameraRevision });
+      pending?.();
+    }, 40);
+    return () => clearTimeout(timer);
+  }, [emitDebugEvent, freeCameraRevision]);
 
   // ── Imperative API (replaces postMessage) ───────────────────────────────────
   useImperativeHandle(ref, () => ({
     flyTo(lat, lng, zoom = 14) {
       lastFlyToRef.current = Date.now();
       lastCamRef.current = Date.now();
+      programmaticCameraUntilRef.current = Date.now() + 1100;
+      emitDebugEvent('camera:set:flyTo', { lat, lng, zoom, programmatic_until_ms: programmaticCameraUntilRef.current - Date.now() });
       camRef.current?.setCamera({ centerCoordinate: [lng, lat], zoomLevel: zoom, animationDuration: 250, animationMode: 'flyTo' });
     },
     flyToCamera(options) {
@@ -1181,6 +1262,16 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
       lastFlyToRef.current = Date.now();
       lastCamRef.current = Date.now();
+      programmaticCameraUntilRef.current = Date.now() + Math.max(900, (Number.isFinite(Number(options.duration)) ? Number(options.duration) : 520) + 450);
+      emitDebugEvent('camera:set:flyToCamera', {
+        lat,
+        lng,
+        zoom: options.zoom ?? null,
+        pitch: options.pitch ?? null,
+        bearing: options.bearing ?? null,
+        duration: options.duration ?? null,
+        mode: options.mode || 'flyTo',
+      });
       camRef.current?.setCamera({
         centerCoordinate: [lng, lat],
         ...(Number.isFinite(Number(options.zoom)) ? { zoomLevel: clampMapZoom(Number(options.zoom), 14) } : {}),
@@ -1196,6 +1287,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       const lng = Number(focus?.lng);
       const hasFocus = Number.isFinite(lat) && Number.isFinite(lng);
       lastCamRef.current = Date.now();
+      programmaticCameraUntilRef.current = Date.now() + 900;
+      emitDebugEvent('camera:set:setZoom', { zoom: nextZoom, focus: hasFocus ? { lat, lng } : null });
       camRef.current?.setCamera({
         ...(hasFocus ? { centerCoordinate: [lng, lat] } : {}),
         zoomLevel: nextZoom,
@@ -1213,6 +1306,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       const lng = Number(focus?.lng);
       const hasFocus = Number.isFinite(lat) && Number.isFinite(lng);
       lastCamRef.current = Date.now();
+      programmaticCameraUntilRef.current = Date.now() + 900;
+      emitDebugEvent('camera:set:zoomBy', { delta, zoom: nextZoom, base, focus: hasFocus ? { lat, lng } : null });
       camRef.current?.setCamera({
         ...(hasFocus ? { centerCoordinate: [lng, lat] } : {}),
         zoomLevel: nextZoom,
@@ -1221,10 +1316,25 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       } as any);
       return nextZoom;
     },
-    locate(lat, lng) {
+    async locate(lat, lng) {
       lastFlyToRef.current = Date.now();
       lastCamRef.current = Date.now();
-      camRef.current?.setCamera({ centerCoordinate: [lng, lat], zoomLevel: 13, animationDuration: 250, animationMode: 'flyTo' });
+      programmaticCameraUntilRef.current = Date.now() + 1200;
+      emitDebugEvent('locate:start', { lat, lng });
+      const current = await mapRef.current?.getZoom?.().catch(() => null);
+      const currentZoom = Number(current);
+      const zoomLevel = Number.isFinite(currentZoom)
+        ? Math.max(9, Math.min(13, currentZoom))
+        : 11.5;
+      const cameraUpdate = {
+        centerCoordinate: [lng, lat],
+        zoomLevel,
+        animationDuration: 260,
+        animationMode: 'easeTo',
+      } as any;
+      emitDebugEvent('locate:schedule-camera', { lat, lng, currentZoom: Number.isFinite(currentZoom) ? currentZoom : null, zoomLevel, nextFreeCameraRevision: freeCameraRevision + 1 });
+      pendingFreeCameraRef.current = () => camRef.current?.setCamera(cameraUpdate);
+      setFreeCameraRevision(value => value + 1);
     },
     loadRouteFrom(lat, lng, fromIdx) {
       const rem = waypoints.slice(fromIdx).filter(w => w.route_point_type !== 'side_stop');
@@ -1271,6 +1381,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     async highlightTrail(lat, lng, name) {
       lastFlyToRef.current = Date.now();
       lastCamRef.current = Date.now();
+      programmaticCameraUntilRef.current = Date.now() + 1100;
+      emitDebugEvent('camera:set:highlightTrail', { lat, lng, name: name ?? null });
       camRef.current?.setCamera({ centerCoordinate: [lng, lat], zoomLevel: 13, animationDuration: 260, animationMode: 'flyTo' });
       setTimeout(async () => {
         if (!mapRef.current) return;
@@ -1497,7 +1609,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       onRouteReady({ coords, steps, legs, totalDistance: td, totalDuration: tt, isProper: true, fromCache: true, fromIdx: 0 });
     },
     setNavTarget(idx) { setNavTargetIdx(idx); },
-  }), [waypoints, routePairsForWaypoints, searchDest, mapboxToken, makeRouteState]);
+  }), [emitDebugEvent, freeCameraRevision, waypoints, routePairsForWaypoints, searchDest, mapboxToken, makeRouteState]);
 
   const emitTracePoint = useCallback(async (
     x: number,
@@ -1741,8 +1853,21 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
 
   // ── Map event handlers ───────────────────────────────────────────────────────
   const handleMapReady = useCallback(() => {
+    emitDebugEvent('map:ready');
     onMapReady();
-  }, [onMapReady]);
+  }, [emitDebugEvent, onMapReady]);
+
+  const handleRegionIsChanging = useCallback((feat: any) => {
+    if (!isUserCameraEvent(feat)) return;
+    const props = feat?.properties ?? {};
+    userCameraGestureUntilRef.current = Date.now() + 1800;
+    emitDebugEvent('region:is-changing:user', {
+      zoom: props.zoomLevel ?? null,
+      center: Array.isArray(feat?.geometry?.coordinates) ? feat.geometry.coordinates : null,
+      isUserInteraction: !!props.isUserInteraction,
+      isAnimatingFromUserInteraction: !!props.isAnimatingFromUserInteraction,
+    });
+  }, [emitDebugEvent]);
 
   const coordinateFromPress = useCallback(async (event: any): Promise<[number, number] | null> => {
     const lngLat = eventLngLat(event);
@@ -1867,15 +1992,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     onMapLongPress(lat, lng);
   }, [coordinateFromPress, onMapLongPress]);
 
-  const handleRegionChange = useCallback(async (feat: GeoJSON.Feature | undefined) => {
-    if (!feat?.properties || !mapRef.current) return;
-    const { zoomLevel } = feat.properties;
-    const bounds = await mapRef.current.getVisibleBounds();
-    if (!bounds) return;
-    const [[e, n], [w, s]] = bounds;
-    boundsRef.current = { n, s, e, w };
-    onBoundsChange({ n, s, e, w, zoom: zoomLevel || 10 });
-    if (showMvum) fetchMvum({ n, s, e, w });
+  const refreshMapSourcesForBounds = useCallback((n: number, s: number, e: number, w: number) => {
+    emitDebugEvent('source:refresh:requested', { center: { lat: (n + s) / 2, lng: (e + w) / 2 }, bounds: { n, s, e, w } });
     loadBestContourFile((n + s) / 2, (e + w) / 2).catch(() => {});
     loadBestTrailFile().catch(() => {});
 
@@ -1892,6 +2010,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         onlineTilesRef.current = online;
         onlineProbeStreakRef.current = online ? onlineProbeStreakRef.current + 1 : 0;
         const canUseOnline = online && (!navMode || !localTiles || onlineProbeStreakRef.current >= 2);
+        emitDebugEvent('source:refresh:probe', { online, canUseOnline, probeSeq, onlineProbeStreak: onlineProbeStreakRef.current });
         if (online) {
           if (canUseOnline) {
             if (localTiles) setLocalTiles(false);
@@ -1911,6 +2030,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           centerLat >= b.s && centerLat <= b.n &&
           centerLng >= b.w && centerLng <= b.e
         );
+        emitDebugEvent('source:refresh:offline-match', { matched: !!match, fileName: match?.path.split('/').pop() ?? null, localTiles });
         if (match) {
           if (loadedStateRef.current === match.path) {
             setTileDebug(`${stateName(match.id)} maps ready`);
@@ -1923,7 +2043,50 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         }
       })();
     }
-  }, [onBoundsChange, showMvum, fetchMvum, localTiles, navMode, getDownloadedFiles, switchFile, loadBestContourFile, loadBestTrailFile]);
+  }, [emitDebugEvent, localTiles, navMode, getDownloadedFiles, switchFile, loadBestContourFile, loadBestTrailFile]);
+
+  useEffect(() => () => {
+    if (deferredSourceRefreshRef.current) clearTimeout(deferredSourceRefreshRef.current);
+  }, []);
+
+  const handleRegionChange = useCallback(async (feat: GeoJSON.Feature | undefined) => {
+    if (!feat?.properties || !mapRef.current) return;
+    const { zoomLevel } = feat.properties;
+    const bounds = await mapRef.current.getVisibleBounds();
+    if (!bounds) return;
+    const [[e, n], [w, s]] = bounds;
+    const userDriven = isUserCameraEvent(feat) || Date.now() < userCameraGestureUntilRef.current;
+    const programmatic = Date.now() < programmaticCameraUntilRef.current;
+    emitDebugEvent('region:did-change', {
+      center: { lat: (n + s) / 2, lng: (e + w) / 2 },
+      zoom: zoomLevel || 10,
+      userDriven,
+      programmatic,
+      isUserInteraction: !!(feat as any)?.properties?.isUserInteraction,
+      isAnimatingFromUserInteraction: !!(feat as any)?.properties?.isAnimatingFromUserInteraction,
+    });
+    if (userDriven || !programmatic) {
+      freeCameraDefaultRef.current = {
+        centerCoordinate: [(e + w) / 2, (n + s) / 2],
+        zoomLevel: Number.isFinite(Number(zoomLevel)) ? Number(zoomLevel) : freeCameraDefaultRef.current.zoomLevel,
+        pitch: navMode ? freeCameraDefaultRef.current.pitch : showTerrain ? 68 : 0,
+        animationDuration: 0,
+      };
+    }
+    boundsRef.current = { n, s, e, w };
+    onBoundsChange({ n, s, e, w, zoom: zoomLevel || 10 });
+    if (showMvum) fetchMvum({ n, s, e, w });
+    if (userDriven) {
+      if (deferredSourceRefreshRef.current) clearTimeout(deferredSourceRefreshRef.current);
+      emitDebugEvent('source:refresh:deferred', { delay_ms: 1400, center: { lat: (n + s) / 2, lng: (e + w) / 2 } });
+      deferredSourceRefreshRef.current = setTimeout(() => {
+        deferredSourceRefreshRef.current = null;
+        refreshMapSourcesForBounds(n, s, e, w);
+      }, 1400);
+    } else {
+      refreshMapSourcesForBounds(n, s, e, w);
+    }
+  }, [emitDebugEvent, onBoundsChange, showMvum, fetchMvum, navMode, showTerrain, refreshMapSourcesForBounds]);
 
   const handleCampPress = useCallback((e: any) => {
     const feat = e.features?.[0];
@@ -1935,6 +2098,16 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   }, [onCampTap]);
 
   const mapStatusLabel = localTiles ? compactMapStatus(tileDebug) : 'Online maps';
+  const userLocationShape = userLoc
+    ? {
+        type: 'FeatureCollection',
+        features: [{
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [userLoc.lng, userLoc.lat] },
+          properties: { accuracy: userLoc.accuracy ?? null },
+        }],
+      } as GeoJSON.FeatureCollection
+    : emptyFC();
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <View style={styles.mapRoot}>
@@ -1946,10 +2119,22 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         onPress={handlePress}
         onLongPress={handleLongPress}
         onRegionWillChange={(feature: any) => {
-          if (feature?.properties?.isUserInteraction) onMapGesture?.();
+          if (isUserCameraEvent(feature)) {
+            userCameraGestureUntilRef.current = Date.now() + 1800;
+            const props = feature?.properties ?? {};
+            emitDebugEvent('region:will-change:user', {
+              zoom: props.zoomLevel ?? null,
+              center: Array.isArray(feature?.geometry?.coordinates) ? feature.geometry.coordinates : null,
+              isUserInteraction: !!props.isUserInteraction,
+              isAnimatingFromUserInteraction: !!props.isAnimatingFromUserInteraction,
+            });
+            onMapGesture?.();
+          }
         }}
+        onRegionIsChanging={handleRegionIsChanging}
         onRegionDidChange={handleRegionChange}
         onDidFinishLoadingMap={handleMapReady}
+        onDidFinishLoadingStyle={() => emitDebugEvent('map:style-loaded', { tileSession, effectiveMapLayer, contourMode, trailMode })}
         compassEnabled={false}
         attributionEnabled={false}
         logoEnabled={false}
@@ -1979,30 +2164,57 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       {/* ── Camera ────────────────────────────────────────────────────── */}
       {/* Initial placement is default-only. Navigation follow and explicit
           locate actions are the only code paths that should recenter later. */}
-      <MapGL.Camera
-        ref={camRef}
-        defaultSettings={{
-          centerCoordinate: initialCenter,
-          zoomLevel: initialZoom,
-          pitch: showTerrain ? 68 : 0,
-          animationDuration: 0,
-        }}
-        followUserLocation={navMode && navCameraFollow}
-        followUserMode={(navSpeed ?? 0) > 1.2 ? MapGL.UserTrackingMode.FollowWithCourse : MapGL.UserTrackingMode.FollowWithHeading}
-        followZoomLevel={(navSpeed ?? 0) > 20 ? 15.5 : (navSpeed ?? 0) > 9 ? 16.2 : 17}
-        followPitch={showTerrain ? 62 : (navSpeed ?? 0) > 2.2 ? 45 : 0}
-        onUserTrackingModeChange={(event: any) => {
-          if (navMode && event?.nativeEvent?.payload?.followUserLocation === false) onMapGesture?.();
-        }}
-      />
+      {navMode && navCameraFollow ? (
+        <MapGL.Camera
+          key="nav-follow-camera"
+          ref={camRef}
+          defaultSettings={freeCameraDefaultRef.current}
+          followUserLocation
+          followUserMode={(navSpeed ?? 0) > 1.2 ? MapGL.UserTrackingMode.FollowWithCourse : MapGL.UserTrackingMode.FollowWithHeading}
+          followZoomLevel={(navSpeed ?? 0) > 20 ? 15.5 : (navSpeed ?? 0) > 9 ? 16.2 : 17}
+          followPitch={showTerrain ? 62 : (navSpeed ?? 0) > 2.2 ? 45 : 0}
+          onUserTrackingModeChange={(event: any) => {
+            if (event?.nativeEvent?.payload?.followUserLocation === false) onMapGesture?.();
+          }}
+        />
+      ) : (
+        <MapGL.Camera
+          key={`free-camera-${freeCameraRevision}`}
+          ref={camRef}
+          defaultSettings={freeCameraDefaultRef.current}
+        />
+      )}
 
       {/* ── User location ─────────────────────────────────────────────── */}
-      <MapGL.UserLocation
-        visible={!!userLoc}
-        renderMode="normal"
-        showsUserHeadingIndicator
-        animated
-      />
+      {navMode && navCameraFollow ? (
+        <MapGL.UserLocation
+          visible={!!userLoc}
+          renderMode="normal"
+          showsUserHeadingIndicator
+          animated
+        />
+      ) : userLoc ? (
+        <MapGL.ShapeSource id="trailhead-user-location" shape={userLocationShape}>
+          <MapGL.CircleLayer
+            id="trailhead-user-location-halo"
+            style={{
+              circleRadius: 14,
+              circleColor: 'rgba(59,130,246,0.18)',
+              circleStrokeColor: 'rgba(255,255,255,0.68)',
+              circleStrokeWidth: 1,
+            }}
+          />
+          <MapGL.CircleLayer
+            id="trailhead-user-location-dot"
+            style={{
+              circleRadius: 6,
+              circleColor: '#2563eb',
+              circleStrokeColor: '#ffffff',
+              circleStrokeWidth: 2,
+            }}
+          />
+        </MapGL.ShapeSource>
+      ) : null}
 
       {trailHighlight.features.length > 0 && (
         <MapGL.ShapeSource id="selected-trail-highlight" shape={trailHighlight}>

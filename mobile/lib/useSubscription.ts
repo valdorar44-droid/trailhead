@@ -78,17 +78,19 @@ function purchaseTransactionId(purchase: any) {
 }
 
 function androidOffer(product: any) {
-  const offers = product?.subscriptionOfferDetails ?? [];
+  const offers = product?.subscriptionOffers ?? product?.subscriptionOfferDetailsAndroid ?? product?.subscriptionOfferDetails ?? [];
   if (!Array.isArray(offers) || !offers.length) return null;
-  return offers.find((offer: any) => offer?.offerToken && !offer?.offerId) ?? offers.find((offer: any) => offer?.offerToken) ?? null;
+  return offers.find((offer: any) => (offer?.offerTokenAndroid ?? offer?.offerToken) && !offer?.offerId && !offer?.id)
+    ?? offers.find((offer: any) => offer?.offerTokenAndroid ?? offer?.offerToken)
+    ?? null;
 }
 
 function androidPrice(product: any, offer: any) {
-  const phases = offer?.pricingPhases?.pricingPhaseList ?? [];
+  const phases = offer?.pricingPhasesAndroid?.pricingPhaseList ?? offer?.pricingPhases?.pricingPhaseList ?? [];
   const recurring = Array.isArray(phases)
     ? phases.find((phase: any) => Number(phase?.recurrenceMode) === 1) ?? phases[phases.length - 1]
     : null;
-  return recurring?.formattedPrice ?? product?.localizedPrice ?? product?.price ?? '';
+  return recurring?.formattedPrice ?? offer?.displayPrice ?? product?.displayPrice ?? product?.localizedPrice ?? product?.price ?? '';
 }
 
 function storeName() {
@@ -187,7 +189,7 @@ export function useSubscription() {
         });
 
         const skus = [PRODUCT_IDS.monthly, PRODUCT_IDS.annual];
-        const items = await iap.getSubscriptions({ skus });
+        const items = await iap.fetchProducts({ skus, type: 'subs' });
         if (!mounted) return;
 
         const normalized: IAPProduct[] = (items ?? []).map((p: any) => {
@@ -197,8 +199,8 @@ export function useSubscription() {
             title:          p.title ?? p.displayName ?? p.name ?? '',
             description:    p.description ?? '',
             localizedPrice: Platform.OS === 'android' ? androidPrice(p, offer) : (p.localizedPrice ?? p.price ?? ''),
-            currency:       p.currency ?? offer?.pricingPhases?.pricingPhaseList?.[0]?.priceCurrencyCode ?? '',
-            offerTokenAndroid: offer?.offerToken,
+            currency:       p.currency ?? offer?.currency ?? offer?.pricingPhasesAndroid?.pricingPhaseList?.[0]?.priceCurrencyCode ?? offer?.pricingPhases?.pricingPhaseList?.[0]?.priceCurrencyCode ?? '',
+            offerTokenAndroid: offer?.offerTokenAndroid ?? offer?.offerToken,
             introductoryPricePaymentModeIOS: p.introductoryPricePaymentModeIOS ?? p.subscription?.introductoryOffer?.paymentMode,
             introductoryPriceNumberOfPeriodsIOS: p.introductoryPriceNumberOfPeriodsIOS ?? p.subscription?.introductoryOffer?.period?.value?.toString?.(),
             introductoryPriceSubscriptionPeriodIOS: p.introductoryPriceSubscriptionPeriodIOS ?? p.subscription?.introductoryOffer?.period?.unit,
@@ -259,11 +261,22 @@ export function useSubscription() {
     setPurchasing(true);
     try {
       if (Platform.OS === 'android') {
-        await iap.requestSubscription({
-          subscriptionOffers: [{ sku: productId, offerToken: product!.offerTokenAndroid! }],
-        } as any);
+        await iap.requestPurchase({
+          type: 'subs',
+          request: {
+            google: {
+              skus: [productId],
+              subscriptionOffers: [{ sku: productId, offerToken: product!.offerTokenAndroid! }],
+            },
+          },
+        });
       } else {
-        await iap.requestSubscription({ sku: productId } as any);
+        await iap.requestPurchase({
+          type: 'subs',
+          request: {
+            apple: { sku: productId },
+          },
+        });
       }
       return true;
     } catch (e: any) {

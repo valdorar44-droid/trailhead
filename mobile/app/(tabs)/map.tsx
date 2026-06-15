@@ -2,9 +2,23 @@ import { useEffect, useRef, useState, useMemo, useCallback, Component } from 're
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Linking, Animated, TextInput, ActivityIndicator, Modal, Image, Share, Alert, AppState, Keyboard, KeyboardAvoidingView, Platform, PanResponder, useWindowDimensions, InteractionManager } from 'react-native';
 import { requireOptionalNativeModule } from 'expo-modules-core';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import NativeMap, { type NativeMapHandle } from '@/components/NativeMap';
+import NativeMap, { type NativeMapDebugEvent, type NativeMapHandle } from '@/components/NativeMap';
 import RouteSearchModal from '@/components/RouteSearchModal';
 import OfflineModal, { type OfflineAreaSelection } from '@/components/NativeMap/OfflineModal';
+import CampCommentsSection from '@/components/map/CampCommentsSection';
+import CampCoordinatesSection from '@/components/map/CampCoordinatesSection';
+import CampFieldReportsSection from '@/components/map/CampFieldReportsSection';
+import CampInsightSection from '@/components/map/CampInsightSection';
+import CampNearbyPlacesSection from '@/components/map/CampNearbyPlacesSection';
+import CampReviewsSection from '@/components/map/CampReviewsSection';
+import MapDrawerSheet from '@/components/map/MapDrawerSheet';
+import MapFilterSheet from '@/components/map/MapFilterSheet';
+import MapLayerSheetContent from '@/components/map/MapLayerSheetContent';
+import MapStyleSheet from '@/components/map/MapStyleSheet';
+import MapWeatherPeek from '@/components/map/MapWeatherPeek';
+import MapWeatherSheet from '@/components/map/MapWeatherSheet';
+import RouteAlertsPanel from '@/components/map/RouteAlertsPanel';
+import RouteScoutPanel from '@/components/map/RouteScoutPanel';
 import TourTarget from '@/components/TourTarget';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
 import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
@@ -23,16 +37,23 @@ import { storage } from '@/lib/storage';
 import * as Speech from 'expo-speech';
 import * as Haptics from 'expo-haptics';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useStore, type WaterSpot, type CatchLog, type WaterRoute } from '@/lib/store';
 import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile, MapCardResolveResponse, WaterNavigationLinesResponse, WaterConditionsResponse, WaterSpotCard, WaterSpotCardsResponse, FishingConditionsResponse, SuggestedWaterCorridorResponse, type GeocodePlace, type ExtremeConfig, type CopilotContext, type MapActionRequest, type MapSelectableFeature, type RouteCampWindowInput, type RouteCampWindowResult, type RouteScoutState } from '@/lib/api';
+import { trackPhase0Event, trackPhase0Once } from '@/lib/telemetry';
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { deleteRouteGeometry, loadRouteGeometry, saveRouteGeometry } from '@/lib/offlineRoutes';
 import { loadOfflineTrail, saveOfflineTrail } from '@/lib/offlineTrails';
 import { trailRouteGraphLocalPath } from '@/lib/useOfflineFiles';
 import { loadAllPlacePoints } from '@/lib/offlinePlacePacks';
+import {
+  buildCampNearbyGroups,
+  isLowValueGenericBlmPlace,
+  isTripServicePlace,
+  normalizeCampDetailArrays,
+} from '@/lib/campNearby';
 import {
   buildTrailDiscoveries,
   buildTrailSupport,
@@ -57,6 +78,7 @@ import { getExtremeMapboxCapabilities, type ExtremeMapboxCapabilities } from 'ex
 import * as ImagePicker from 'expo-image-picker';
 import PaywallModal from '@/components/PaywallModal';
 import AppReviewPrompt from '@/components/AppReviewPrompt';
+import AiReportModal from '@/components/AiReportModal';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 import { CREDIT_REWARDS } from '@/lib/credits';
 import { useConnectivitySync } from '@/lib/connectivitySync';
@@ -65,6 +87,7 @@ import { startRealtimeCopilotSession } from '@/lib/realtimeCopilot';
 import {
   loadTrailheadRouteBuilderDraft,
   mergeTrailheadRouteBuilderDraft,
+  normalizeTrailheadRouteBuilderDraft,
   saveTrailheadRouteBuilderDraft,
   type TrailheadRouteBuilderDraft,
 } from '@/lib/copilotCapabilities';
@@ -821,37 +844,6 @@ function campMobileCoverage(detail?: CampsiteDetail | null, camp?: CampsitePin |
     source: primary?.source_label || coverage.modeled_source?.source_label || coverage.source_label || 'FCC modeled',
     disclaimer: coverage.disclaimer || 'FCC mobile data is advisory and not a guarantee of service at camp.',
   };
-}
-
-function normalizeCampDetailArrays(detail: CampsiteDetail): CampsiteDetail {
-  const usefulRail = (items: any[] | undefined, keepServices = false) =>
-    (Array.isArray(items) ? items : []).filter(item => !isLowValueGenericBlmPlace(item, keepServices));
-  return {
-    ...detail,
-    tags: Array.isArray(detail.tags) ? detail.tags : [],
-    photos: Array.isArray(detail.photos) ? detail.photos : [],
-    amenities: Array.isArray(detail.amenities) ? detail.amenities : [],
-    site_types: Array.isArray(detail.site_types) ? detail.site_types : [],
-    activities: Array.isArray(detail.activities) ? detail.activities : [],
-    campsites: Array.isArray(detail.campsites) ? detail.campsites : [],
-    reviews: Array.isArray((detail as any).reviews) ? (detail as any).reviews : [],
-    things_to_do: usefulRail(detail.things_to_do),
-    things_to_see: usefulRail(detail.things_to_see),
-    visitor_centers: Array.isArray(detail.visitor_centers) ? detail.visitor_centers : [],
-    campgrounds_nearby: Array.isArray(detail.campgrounds_nearby) ? detail.campgrounds_nearby : [],
-    trip_services: usefulRail(detail.trip_services, true),
-  } as CampsiteDetail;
-}
-
-function isLowValueGenericBlmPlace(place: Partial<OsmPoi> | null | undefined, keepServices = false) {
-  if (!place) return false;
-  const type = String(place.type || (place as any).category || '').toLowerCase().replace(/[\s-]+/g, '_');
-  if (keepServices && TRIP_SERVICE_PLACE_TYPES.has(type)) return false;
-  const name = String(place.name || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-  const source = String((place as any).source || (place as any).source_label || (place as any).source_badge || (place as any).attribution || '').toLowerCase();
-  const hasPhoto = !!((place as any).photo_url || ((place as any).photos || [])[0]);
-  const lowName = !name || ['blm recreation site', 'recreation site', 'trailhead', 'viewpoint', 'parking', 'campground', 'campsite'].includes(name);
-  return source.includes('blm') && lowName && !hasPhoto;
 }
 
 type SavedAiKind = 'route_brief' | 'packing_list';
@@ -1657,8 +1649,11 @@ function prioritizeRouteAlerts(alerts: Report[], limit = 40) {
   const sorted = visible.sort((a, b) => {
     const aSafety = ['fire', 'smoke', 'weather', 'hazard', 'closure', 'road_closure'].includes(String(a.type || '').toLowerCase()) ? 1 : 0;
     const bSafety = ['fire', 'smoke', 'weather', 'hazard', 'closure', 'road_closure'].includes(String(b.type || '').toLowerCase()) ? 1 : 0;
+    const aRouteDistance = Number.isFinite(Number((a as any).route_distance_m)) ? Number((a as any).route_distance_m) : Number.POSITIVE_INFINITY;
+    const bRouteDistance = Number.isFinite(Number((b as any).route_distance_m)) ? Number((b as any).route_distance_m) : Number.POSITIVE_INFINITY;
     return bSafety - aSafety
       || (sevRank[String(b.severity || '').toLowerCase()] ?? 0) - (sevRank[String(a.severity || '').toLowerCase()] ?? 0)
+      || aRouteDistance - bRouteDistance
       || Number(b.created_at || 0) - Number(a.created_at || 0);
   }).slice(0, limit);
   if (hiddenTraffic.length && sorted.length < limit && !sorted.some(alert => String(alert.id) === 'tomtom:traffic-summary')) {
@@ -1756,7 +1751,7 @@ function calcBearing(lat1: number, lng1: number, lat2: number, lng2: number) {
 }
 
 async function startNavigationBackgroundLocation() {
-  if (Platform.OS === 'web') return;
+  if (Platform.OS === 'web' || Platform.OS === 'android') return;
   try {
     const fg = await Location.getForegroundPermissionsAsync();
     if (fg.status !== 'granted') return;
@@ -1785,7 +1780,7 @@ async function startNavigationBackgroundLocation() {
 }
 
 async function stopNavigationBackgroundLocation() {
-  if (Platform.OS === 'web') return;
+  if (Platform.OS === 'web' || Platform.OS === 'android') return;
   try {
     const active = await Location.hasStartedLocationUpdatesAsync(AUDIO_LOCATION_TASK).catch(() => false);
     if (active) await Location.stopLocationUpdatesAsync(AUDIO_LOCATION_TASK);
@@ -2473,9 +2468,6 @@ const WATER_NAV_PLACE_FILTER_IDS = ['navigation_aid', 'channel_marker', 'water_h
 const ALL_PLACE_FILTER_IDS = [...PLACE_FILTER_TYPES.map(t => t.id), ...WATER_ACCESS_FILTER_TYPES.map(t => t.id)];
 const SMART_PLACE_CATEGORIES = ESSENTIAL_PLACE_CATEGORIES;
 const UTILITY_PLACE_TYPES = new Set(['fuel', 'propane', 'water', 'dump', 'parking']);
-const TRIP_SERVICE_PLACE_TYPES = new Set(['fuel', 'propane', 'water', 'dump', 'parking', 'mechanic', 'grocery', 'food', 'hardware', 'parts']);
-const VISITOR_CENTER_PLACE_TYPES = new Set(['visitor_center', 'visitor center', 'ranger_station', 'visitor']);
-const THINGS_TO_SEE_PLACE_TYPES = new Set(['viewpoint', 'overlook', 'vista', 'peak', 'park', 'historic', 'attraction', 'monument', 'museum']);
 const TRAIL_DISCOVERY_PIN_TYPES = new Set(['trail', 'trailhead', 'viewpoint', 'peak', 'hot_spring']);
 const CAMP_PLACE_TYPES = new Set(['camp', 'camping', 'informal_camp', 'wild_camp', 'private_stay', 'farm_stay', 'ranch', 'winery', 'glamping', 'private_camp']);
 const DEFAULT_COMMUNITY_PIN_FILTERS = COMMUNITY_PIN_TYPES
@@ -4675,6 +4667,8 @@ function MapScreen() {
   const setPendingMapSelection = useStore(st => st.setPendingMapSelection);
   const pendingStartCopilotVoice = useStore(st => st.pendingStartCopilotVoice);
   const setPendingStartCopilotVoice = useStore(st => st.setPendingStartCopilotVoice);
+  const pendingOpenOfflineModal = useStore(st => st.pendingOpenOfflineModal);
+  const setPendingOpenOfflineModal = useStore(st => st.setPendingOpenOfflineModal);
   const user = useStore(st => st.user);
   const hasPlan = useStore(st => st.hasPlan);
   const setStoreLoc = useStore(st => st.setUserLoc);
@@ -4793,6 +4787,8 @@ function MapScreen() {
   const [extremeCopilotBusy, setExtremeCopilotBusy] = useState(false);
   const [extremeCopilotMessages, setExtremeCopilotMessages] = useState<CopilotChatMessage[]>([]);
   const [pendingCopilotAction, setPendingCopilotAction] = useState<MapActionRequest | null>(null);
+  const [aiReportVisible, setAiReportVisible] = useState(false);
+  const [aiReportKind, setAiReportKind] = useState<'bug' | 'offensive'>('bug');
   const [extremeCopilotVoiceActive, setExtremeCopilotVoiceActive] = useState(false);
   const [extremeCopilotVoiceBusy, setExtremeCopilotVoiceBusy] = useState(false);
   const [extremeCopilotVoiceStatus, setExtremeCopilotVoiceStatus] = useState('');
@@ -4936,8 +4932,33 @@ function MapScreen() {
 
   useEffect(() => {
     if (!selectedCamp?.id) return;
+    trackPhase0Once(`phase0:camp-card:${selectedCamp.id}`, 'phase0_camp_card_opened', {
+      surface: 'map',
+      camp_id: selectedCamp.id,
+      source: selectedCamp.verified_source || selectedCamp.source || 'unknown',
+      land_type: selectedCamp.land_type || '',
+      reservable: !!selectedCamp.reservable,
+      active_trip: !!activeTrip,
+    });
+  }, [activeTrip, selectedCamp]);
+
+  useEffect(() => {
+    if (!selectedCamp?.id) return;
     loadCampDetailForCamp(selectedCamp, { loadInsight: hasPlan }).catch(() => {});
   }, [selectedCamp?.id, selectedCamp?.lat, selectedCamp?.lng, hasPlan]);
+
+  useEffect(() => {
+    if (!showAlerts || routeAlerts.length === 0) return;
+    trackPhase0Once(
+      `phase0:route-alerts:${activeTrip?.trip_id || 'none'}:${routeAlerts.map(alert => String(alert.id)).join(',')}`,
+      'phase0_route_alerts_opened',
+      {
+        trip_id: activeTrip?.trip_id ?? null,
+        alert_count: routeAlerts.length,
+        alert_types: Array.from(new Set(routeAlerts.map(alert => alert.type).filter(Boolean))).slice(0, 8),
+      },
+    );
+  }, [activeTrip?.trip_id, routeAlerts, showAlerts]);
 
   // Field reports
   const [fieldReports,      setFieldReports]      = useState<CampFieldReport[]>([]);
@@ -5038,7 +5059,7 @@ function MapScreen() {
     notes: '',
   });
   const [catchLogContext, setCatchLogContext] = useState<{ spot?: WaterSpotCard | WaterSpot; route?: WaterRoute; lat?: number; lng?: number } | null>(null);
-  const [nearbyPlaceFeeds, setNearbyPlaceFeeds] = useState<Record<string, { loading: boolean; places: OsmPoi[]; error?: string; loadedAt?: number }>>({});
+  const [nearbyPlaceFeeds, setNearbyPlaceFeeds] = useState<Record<string, { loading: boolean; places: OsmPoi[]; error?: string; loadedAt?: number; sourceLabel?: string }>>({});
   const [liveRouteGas, setLiveRouteGas] = useState<Array<{ lat: number; lng: number; name: string }>>([]);
   const [liveRoutePois, setLiveRoutePois] = useState<OsmPoi[]>([]);
   const [routeContextLoading, setRouteContextLoading] = useState(false);
@@ -5100,6 +5121,39 @@ function MapScreen() {
   const [showRouteBrief,setShowRouteBrief]= useState(false);
   const [loadingBrief,  setLoadingBrief]  = useState(false);
   const [routeBriefSaved, setRouteBriefSaved] = useState(false);
+
+  function closeRouteBrief(reason: 'close_button' | 'system_dismiss' = 'close_button') {
+    if (showRouteBrief && routeBrief) {
+      trackPhase0Event('phase0_route_brief_dismissed', {
+        trip_id: activeTrip?.trip_id ?? null,
+        reason,
+        readiness_score: routeBrief.readiness_score,
+        saved: routeBriefSaved,
+      });
+    }
+    setShowRouteBrief(false);
+  }
+
+  function closeRouteAlerts(reason: 'close_button' | 'toggle_button' = 'close_button') {
+    if (showAlerts && routeAlerts.length > 0) {
+      trackPhase0Event('phase0_route_alerts_dismissed', {
+        trip_id: activeTrip?.trip_id ?? null,
+        reason,
+        alert_count: routeAlerts.length,
+      });
+    }
+    setShowAlerts(false);
+  }
+
+  useEffect(() => {
+    if (!showRouteBrief || !routeBrief) return;
+    trackPhase0Event('phase0_route_brief_opened', {
+      trip_id: activeTrip?.trip_id ?? null,
+      alert_count: routeAlerts.length,
+      readiness_score: routeBrief.readiness_score,
+      saved: routeBriefSaved,
+    });
+  }, [activeTrip?.trip_id, routeAlerts.length, routeBrief, routeBriefSaved, showRouteBrief]);
 
   // Packing list
   const [packingList,   setPackingList]   = useState<PackingList | null>(null);
@@ -5225,10 +5279,14 @@ function MapScreen() {
   const smoothedHdgRef   = useRef<number | null>(null);
   const compassHdgRef    = useRef<number | null>(null);
   const courseHdgRef     = useRef<number | null>(null);
+  const navModeStateRef  = useRef(navMode);
+  const navCameraFollowStateRef = useRef(navCameraFollow);
+  const lastAndroidLocationDebugRef = useRef<{ at: number; lat: number; lng: number } | null>(null);
   const discoverRef  = useRef<CampsitePin[]>([]);
 
   const webLoadedRef = useRef(false);
   const viewportRef  = useRef<{ n: number; s: number; e: number; w: number; zoom: number } | null>(null);
+  const androidMapDebugRef = useRef<NativeMapDebugEvent[]>([]);
   const lastPinFetchRef = useRef<{ lat: number; lng: number; ts: number } | null>(null);
   const [isLoadingAreaCamps, setIsLoadingAreaCamps] = useState(false);
   const [areaCamps, setAreaCamps] = useState<CampsitePin[]>([]);
@@ -5240,6 +5298,14 @@ function MapScreen() {
 
   const [nearbyLoading,   setNearbyLoading]   = useState(false);
   const [nearbyNarration, setNearbyNarration] = useState<string | null>(null);
+
+  useEffect(() => {
+    navModeStateRef.current = navMode;
+  }, [navMode]);
+
+  useEffect(() => {
+    navCameraFollowStateRef.current = navCameraFollow;
+  }, [navCameraFollow]);
 
   useEffect(() => {
     offlineAreaBoxRef.current = offlineAreaBox;
@@ -5829,6 +5895,26 @@ function MapScreen() {
           const rawSpeed = loc.coords.speed ?? null;
           setUserSpeed(rawSpeed);
           userSpeedRef.current = rawSpeed;
+          if (Platform.OS === 'android') {
+            const last = lastAndroidLocationDebugRef.current;
+            const movedM = last ? haversineKm(last.lat, last.lng, pos.lat, pos.lng) * 1000 : Number.POSITIVE_INFINITY;
+            if (!last || Date.now() - last.at > 3500 || movedM > 12) {
+              lastAndroidLocationDebugRef.current = { at: Date.now(), lat: pos.lat, lng: pos.lng };
+              recordAndroidMapDebugEvent({
+                at: Date.now(),
+                kind: 'location:update',
+                details: {
+                  lat: Number(pos.lat.toFixed(6)),
+                  lng: Number(pos.lng.toFixed(6)),
+                  accuracy: pos.accuracy ?? null,
+                  speed: rawSpeed ?? null,
+                  navMode: navModeStateRef.current,
+                  navCameraFollow: navCameraFollowStateRef.current,
+                  movedM: Number.isFinite(movedM) ? Number(movedM.toFixed(1)) : null,
+                },
+              });
+            }
+          }
 
           // GPS heading is course-over-ground, not a reliable compass while stopped.
           // Use course for map-follow when moving; use watchHeadingAsync for the UI compass.
@@ -7117,6 +7203,12 @@ function MapScreen() {
     webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: place.lat, lng: place.lng, zoom: 12, name: place.name }));
   }, [pendingMapSelection, setPendingMapSelection, weatherUnitMode]);
 
+  useEffect(() => {
+    if (!pendingOpenOfflineModal) return;
+    setPendingOpenOfflineModal(false);
+    setShowOfflineModal(true);
+  }, [pendingOpenOfflineModal, setPendingOpenOfflineModal]);
+
   function beginCommunityPinDrop(useCurrentLocation = false) {
     setQuickReport(false);
     setQuickTypeIdx(null);
@@ -8009,6 +8101,125 @@ function MapScreen() {
     });
   }
 
+  function routeScoutNameNeedsReview(name?: string | null) {
+    const clean = String(name || '').trim().replace(/\s+/g, ' ').toLowerCase();
+    if (!clean) return true;
+    if (['camp', 'campground', 'campsite', 'site', 'rv park', 'park', 'overnight option'].includes(clean)) return true;
+    return /review area$/.test(clean) || /^day \d+ (?:dispersed |rv |private stay )?review area$/.test(clean);
+  }
+
+  function routeScoutWindowIsLocked(win: RouteCampWindowResult | null | undefined) {
+    if (!win) return false;
+    const candidateName = String(win.display_name || win.selected?.name || win.camp?.name || '').trim();
+    return String(win.confidence || '').toLowerCase() === 'strong' && !!candidateName && !routeScoutNameNeedsReview(candidateName);
+  }
+
+  function routeScoutFallbackPoint(
+    win: Pick<RouteCampWindowResult, 'target_mi' | 'start' | 'end' | 'day' | 'label'>,
+    coords: [number, number][],
+    cumulative: number[],
+    defaultPoint: { lat: number; lng: number },
+  ) {
+    const targetMi = Number(win.target_mi ?? ((win.start + win.end) / 2));
+    return routePointAtDistance(coords, cumulative, targetMi * 1609.344) ?? defaultPoint;
+  }
+
+  function routeScoutReviewLabel(win: RouteCampWindowResult) {
+    const fallback = String(win.fallback_label || win.fallback?.name || '').trim();
+    if (fallback) return fallback;
+    const label = String(win.label || `Day ${win.day}`).trim();
+    return `${label} review area`;
+  }
+
+  function routeScoutReasonText(win: RouteCampWindowResult, locked: boolean) {
+    const source = String(win.reason_short || win.reason || win.fallback?.description || '').trim().replace(/\s+/g, ' ');
+    if (!source) {
+      return locked ? 'Locked for this day.' : 'Review access, services, and alternates before you commit.';
+    }
+    if (!locked && /^locked\b/i.test(source)) {
+      return `Review ${routeScoutReviewLabel(win)} before you commit.`;
+    }
+    return source;
+  }
+
+  function routeScoutFallbackWindow(
+    win: RouteCampWindowInput,
+    coords: [number, number][],
+    cumulative: number[],
+    defaultPoint: { lat: number; lng: number },
+    error?: string | null,
+  ): RouteCampWindowResult {
+    const point = routeScoutFallbackPoint(win, coords, cumulative, defaultPoint);
+    return {
+      ...win,
+      camp: null,
+      selected: null,
+      candidates: [],
+      fallback: {
+        lat: point.lat,
+        lng: point.lng,
+        name: `${win.label} review area`,
+        description: 'Review this day. Choose an overnight stop before navigation.',
+      },
+      strong: false,
+      confidence: 'missing',
+      coverage_status: 'sparse',
+      reason: error ? `Overnight search failed for ${win.label.toLowerCase()}.` : `No overnight is locked for ${win.label.toLowerCase()} yet.`,
+      reason_short: `${win.label} still needs an overnight.`,
+      display_name: `${win.label} review area`,
+      overnight_kind: 'review',
+      overnight_style: 'unknown',
+      fallback_label: `${win.label} review area`,
+      fit_notes: [],
+      found: 0,
+      error: error || undefined,
+    };
+  }
+
+  function routeScoutStopFromWindow(
+    win: RouteCampWindowResult,
+    coords: [number, number][],
+    cumulative: number[],
+    defaultPoint: { lat: number; lng: number },
+  ): NonNullable<RouteScoutState['stops']>[number] {
+    const camp = win.selected ?? win.camp ?? win.candidates?.[0] ?? null;
+    const point = routeScoutFallbackPoint(win, coords, cumulative, defaultPoint);
+    const locked = routeScoutWindowIsLocked(win);
+    return {
+      day: win.day,
+      name: locked
+        ? String(win.display_name || camp?.name || `Day ${win.day}`).trim()
+        : routeScoutReviewLabel(win),
+      lat: camp?.lat ?? win.fallback?.lat ?? point.lat,
+      lng: camp?.lng ?? win.fallback?.lng ?? point.lng,
+      type: locked ? 'camp' : 'review',
+      label: win.label,
+      confidence: win.confidence || (win.strong ? 'strong' : 'review'),
+      progress_mi: win.target_mi ?? ((win.start + win.end) / 2),
+      camp,
+      reason: win.reason_short || win.reason || null,
+      description: locked
+        ? (camp?.description || win.reason || 'Corridor overnight option. Verify access, rules, and fit before you head out.')
+        : (win.reason || 'Temporary overnight review area. Pick a camp before navigation.'),
+      source: locked ? 'camp' : 'map',
+      routePointType: locked ? 'break' as const : 'through' as const,
+      routeShapeRole: locked ? 'overnight' as const : 'outbound_anchor' as const,
+      overnight_kind: locked ? (win.overnight_kind || 'camp') : 'review',
+      overnight_style: win.overnight_style || 'unknown',
+      fit_notes: win.fit_notes || [],
+    };
+  }
+
+  function routeScoutProgressMessage(win: RouteCampWindowResult, completed: number, total: number) {
+    const locked = routeScoutWindowIsLocked(win);
+    const label = win.label || `Day ${win.day}`;
+    const name = locked
+      ? String(win.display_name || win.selected?.name || win.camp?.name || label).trim()
+      : routeScoutReviewLabel(win);
+    const head = locked ? `${label} locked ${name}.` : `${label} marked ${name}.`;
+    return `${head} ${completed} of ${total} overnight windows checked.`;
+  }
+
   function buildRouteScoutSummary(args: {
     startName: string;
     destinationName: string;
@@ -8020,44 +8231,49 @@ function MapScreen() {
     windows?: RouteCampWindowResult[];
     missingDays: number[];
   }) {
-    const stayStops = (args.stops ?? []).filter(stop => stop.type === 'camp');
-    const reviewStops = (args.stops ?? []).filter(stop => stop.type === 'review');
+    const windows = (args.windows ?? []).slice().sort((a, b) => a.day - b.day);
+    const lockedWindows = windows.filter(routeScoutWindowIsLocked);
+    const reviewWindows = windows.filter(win => !routeScoutWindowIsLocked(win));
     const miles = Math.round(args.totalMiles || 0);
     const driveWindow = args.driveHours ? ` with about ${args.driveHours} hours of driving per day` : '';
-    const stayText = stayStops.length
-      ? `Overnights are ${stayStops.map(stop => `${stop.label || `Day ${stop.day}`} at ${stop.name}`).join('; ')}.`
-      : reviewStops.length
-        ? `I marked ${reviewStops.length} overnight area${reviewStops.length === 1 ? '' : 's'} for review before you lock camps.`
+    const stayText = lockedWindows.length
+      ? `Locked overnights: ${lockedWindows.slice(0, 3).map(win => `${win.label || `Day ${win.day}`} at ${String(win.display_name || win.selected?.name || win.camp?.name || '').trim()}`).join('; ')}${lockedWindows.length > 3 ? `; plus ${lockedWindows.length - 3} more` : ''}.`
+      : reviewWindows.length
+        ? `I marked ${reviewWindows.length} overnight review area${reviewWindows.length === 1 ? '' : 's'} before you lock camps.`
         : 'I did not lock overnight stays yet.';
     const styleText = args.routeStyle === 'wild'
-      ? 'I weighted the scout toward public-land and quieter camp options.'
+      ? 'I biased the scout toward rougher but still sane backroads and public-land style overnights.'
       : args.routeStyle === 'direct'
-        ? 'I kept the drive more direct and used camp windows near the route.'
-        : 'I balanced drive time with useful overnight windows.';
-    const dayBriefs = (args.windows ?? [])
-      .slice()
-      .sort((a, b) => a.day - b.day)
-      .slice(0, 4)
+        ? 'I kept the drive direct and stayed tight to the corridor for overnights.'
+        : 'I balanced drive time, scenic value, and workable overnight windows.';
+    const dayBriefs = windows
+      .slice(0, 3)
       .map(win => {
-        const stop = stayStops.find(item => item.day === win.day) ?? reviewStops.find(item => item.day === win.day);
-        const target = stop?.type === 'camp'
-          ? `stay at ${stop.name}`
-          : `review ${stop?.name || win.fallback?.name || win.label}`;
-        const reason = String(win.reason || win.fallback?.description || '').trim();
-        const note = reason ? ` ${reason.replace(/\s+/g, ' ').slice(0, 120)}` : ' Look for fuel, viewpoints, trailheads, and town services before locking the day.';
-        return `Day ${win.day}: ${target}.${note}`;
+        const locked = routeScoutWindowIsLocked(win);
+        const targetName = locked
+          ? String(win.display_name || win.selected?.name || win.camp?.name || `Day ${win.day}`).trim()
+          : routeScoutReviewLabel(win);
+        const target = locked ? targetName : `review ${targetName}`;
+        const fitNote = Array.isArray(win.fit_notes) && win.fit_notes.length ? ` ${win.fit_notes.slice(0, 2).join(', ')}.` : '';
+        const reason = routeScoutReasonText(win, locked);
+        const note = reason ? ` ${reason.slice(0, 88)}` : fitNote || ' Review access, services, and alternates before you commit.';
+        return `Day ${win.day}: ${target}.${note}${fitNote && !note.includes(fitNote.trim()) ? fitNote : ''}`;
       });
     const dayText = dayBriefs.length ? ` ${dayBriefs.join(' ')}` : '';
-    const reviewText = args.missingDays.length
-      ? ` Review day${args.missingDays.length === 1 ? '' : 's'} ${args.missingDays.join(', ')} before starting navigation.`
+    const reviewDays = reviewWindows.map(win => win.day);
+    const reviewText = reviewDays.length
+      ? ` Review day${reviewDays.length === 1 ? '' : 's'} ${reviewDays.join(', ')} before starting navigation.`
       : '';
-    return `Route summary: ${args.startName} to ${args.destinationName}, about ${miles} miles over ${args.days} days${driveWindow}. ${styleText} ${stayText}${dayText} Watch the route corridor for addable fuel, viewpoint, trailhead, food, and town stops around each overnight window.${reviewText}`;
+    return `Route summary: ${args.startName} to ${args.destinationName}, about ${miles} miles over ${args.days} days${driveWindow}. ${styleText} ${stayText}${dayText}${reviewText}`;
   }
 
   function routeScoutArgsFromAction(args: Record<string, unknown> = {}) {
     const draft = args.draft && typeof args.draft === 'object' ? args.draft as Record<string, unknown> : {};
-    const previous = routeScout?.draftArgs ?? {};
-    const merged = { ...previous, ...draft, ...args };
+    const previous = (routeScout?.draftArgs ?? {}) as Record<string, unknown>;
+    const clarifyArg = args.clarify && typeof args.clarify === 'object' ? args.clarify as Record<string, unknown> : null;
+    const { clarify: _ignoredClarify, draft: _ignoredDraft, ...argFields } = args;
+    const normalized = normalizeTrailheadRouteBuilderDraft({ ...previous, ...draft, ...argFields }) as TrailheadRouteBuilderDraft & Record<string, unknown>;
+    const merged: Record<string, unknown> = { ...previous, ...draft, ...argFields, ...normalized };
     const startRaw = merged.start ?? merged.origin ?? merged.from;
     const destinationRaw = merged.destination ?? merged.dest ?? merged.end ?? merged.to ?? merged.query;
     const days = Math.max(2, Math.min(30, Math.round(Number(merged.days ?? merged.duration_days ?? merged.day_count ?? routeScout?.days ?? 3) || 3)));
@@ -8076,6 +8292,7 @@ function MapScreen() {
       campPreference,
       campPhotoOnly,
       poiPreferences: Array.isArray(merged.poiPreferences) ? merged.poiPreferences : Array.isArray(merged.poi_preferences) ? merged.poi_preferences : [],
+      clarify: clarifyArg,
     };
   }
 
@@ -8113,6 +8330,7 @@ function MapScreen() {
       const next: RouteScoutState = {
         status: 'needs_input',
         message: 'Tell me the destination for this route.',
+        question: 'Tell me the destination for this route.',
         operationId,
         phase: 'starting',
         phaseLabel: 'Destination needed',
@@ -8123,6 +8341,29 @@ function MapScreen() {
         campPreference: scoutArgs.campPreference,
         draftArgs: scoutArgs.merged,
         spoken_summary: 'Where should this route end?',
+      };
+      setRouteScout(next);
+      setShowExtremeCopilot(true);
+      return { applied: false, status: 'needs_input', route_scout: next, spoken_summary: next.spoken_summary };
+    }
+    if (scoutArgs.clarify) {
+      const question = String(scoutArgs.clarify.question || 'I need one more detail before I scout this route.').trim();
+      const options = Array.isArray(scoutArgs.clarify.options) ? scoutArgs.clarify.options.map(item => String(item)).filter(Boolean).slice(0, 6) : [];
+      const next: RouteScoutState = {
+        status: 'needs_input',
+        message: question,
+        question,
+        options,
+        operationId,
+        phase: 'starting',
+        phaseLabel: 'One more detail needed',
+        progressPct: 0,
+        days: scoutArgs.days,
+        driveHours: scoutArgs.driveHours,
+        routeStyle: scoutArgs.routeStyle,
+        campPreference: scoutArgs.campPreference,
+        draftArgs: scoutArgs.merged,
+        spoken_summary: options.length ? `${question} ${options.join(', ')}.` : question,
       };
       setRouteScout(next);
       setShowExtremeCopilot(true);
@@ -8247,8 +8488,8 @@ function MapScreen() {
       { name: destination.name, lat: destination.lat, lng: destination.lng, role: 'destination' },
     ]);
     routeScoutPhase(operationId, 'windows', `Route sketched. Checking ${windows.length} overnight windows...`, 45);
-    previewTargets.slice(0, 4).forEach((target, idx) => {
-      scheduleRouteScoutPhase(operationId, 850 + idx * 1050, 'windows', `Checking ${target.name}...`, 50 + idx * 5, target);
+    previewTargets.forEach((target, idx) => {
+      scheduleRouteScoutPhase(operationId, 850 + idx * 900, 'windows', `Checking ${target.name}...`, Math.min(66, 50 + idx * 4), target);
     });
     setRouteScout(prev => ({
       ...(prev ?? {}),
@@ -8275,22 +8516,72 @@ function MapScreen() {
       draftArgs: { ...scoutArgs.merged, start: start.name, destination: destination.name, days: scoutArgs.days, campPhotoOnly: scoutArgs.campPhotoOnly },
     }));
     scheduleRouteScoutPhase(operationId, 2200, 'camps', 'Searching real camp options near those windows...', 68);
+    scheduleRouteScoutPhase(
+      operationId,
+      5200,
+      'camps',
+      windows.length > 1 ? `Still checking the last ${Math.min(2, windows.length)} overnight fits...` : 'Still checking the overnight fit...',
+      82,
+      previewTargets[Math.max(0, Math.min(previewTargets.length - 1, windows.length - 1))],
+    );
 
-    const campResponse = await api.getRouteCampWindows({
+    const baseCampWindowRequest = {
       route: coords.map((coord: [number, number]) => ({ lat: coord[1], lng: coord[0] })),
-      windows,
       camp_filters: routeScoutCampFilters(scoutArgs.campPreference, scoutArgs.routeStyle, activeFilters),
       route_style: scoutArgs.routeStyle as 'direct' | 'balanced' | 'wild',
       camp_preference: scoutArgs.campPreference,
       require_photos: scoutArgs.campPhotoOnly,
       max_daily_drive_hours: scoutArgs.driveHours ?? undefined,
       max_radius: scoutArgs.routeStyle === 'wild' || scoutArgs.campPreference === 'public' ? 120 : 95,
-    }).catch((error: any) => ({ windows: [], errors: { route_scout: error?.message || 'camp search failed' } }));
+    };
+    const progressiveWindows = new Map<number, RouteCampWindowResult>();
+    const windowDefaultPoint = { lat: start.lat, lng: start.lng };
+    const queue = windows.slice();
+    let completedWindowCount = 0;
+    const workerCount = Math.min(3, Math.max(1, Math.ceil(windows.length / 2)));
+    const runCampWindowWorker = async () => {
+      while (queue.length && routeScoutOperationRef.current === operationId) {
+        const nextWindow = queue.shift();
+        if (!nextWindow) return;
+        const response = await api.getRouteCampWindows({
+          ...baseCampWindowRequest,
+          windows: [nextWindow],
+        }).catch((error: any) => ({ windows: [], errors: { route_scout: error?.message || 'camp search failed' } }));
+        if (routeScoutOperationRef.current !== operationId) return;
+        const partial = response.windows?.[0] ?? routeScoutFallbackWindow(nextWindow, coords, cumulative, windowDefaultPoint, response.errors?.route_scout || null);
+        progressiveWindows.set(nextWindow.day, partial);
+        completedWindowCount += 1;
+        const partialWindows = windows
+          .map(win => progressiveWindows.get(win.day))
+          .filter((item): item is RouteCampWindowResult => !!item);
+        const previewStops = partialWindows.map(win => routeScoutStopFromWindow(win, coords, cumulative, windowDefaultPoint));
+        const latestStop = routeScoutStopFromWindow(partial, coords, cumulative, windowDefaultPoint);
+        routeScoutPhase(
+          operationId,
+          'camps',
+          routeScoutProgressMessage(partial, completedWindowCount, windows.length),
+          Math.min(86, 68 + Math.round((completedWindowCount / Math.max(1, windows.length)) * 16)),
+          { name: latestStop.name, lat: latestStop.lat, lng: latestStop.lng, zoom: latestStop.type === 'camp' ? 10.3 : 8.9 },
+        );
+        setRouteScout(prev => {
+          if (!prev || prev.operationId !== operationId) return prev;
+          return {
+            ...prev,
+            windows: partialWindows,
+            previewStops,
+            missingDays: partialWindows.filter(win => !routeScoutWindowIsLocked(win)).map(win => win.day),
+          };
+        });
+      }
+    };
+    await Promise.all(Array.from({ length: workerCount }, () => runCampWindowWorker()));
     if (routeScoutOperationRef.current !== operationId) {
       return { applied: false, status: 'cancelled', reason: 'route_scout_cancelled' };
     }
     routeScoutPhase(operationId, 'finalizing', 'Finalizing the line and overnight stops...', 88);
-    const scoutWindows = campResponse.windows ?? [];
+    const scoutWindows = windows
+      .map(win => progressiveWindows.get(win.day) ?? routeScoutFallbackWindow(win, coords, cumulative, windowDefaultPoint))
+      .sort((a, b) => a.day - b.day);
     const selectedCamps = scoutWindows
       .map(win => win.selected ?? win.camp ?? win.candidates?.[0] ?? null)
       .filter((camp): camp is CampsitePin => !!camp && Number.isFinite(camp.lat) && Number.isFinite(camp.lng));
@@ -8310,39 +8601,18 @@ function MapScreen() {
     }
     const stops = [
       { day: 0, name: start.name, lat: start.lat, lng: start.lng, type: 'start', label: 'Start', routePointType: 'break' as const, routeShapeRole: 'start' as const, source: 'copilot' },
-      ...scoutWindows.map(win => {
-        const camp = win.selected ?? win.camp ?? win.candidates?.[0] ?? null;
-        const targetMi = win.target_mi ?? (win.start + win.end) / 2;
-        const fallbackPoint = routePointAtDistance(coords, cumulative, targetMi * 1609.344);
-        const hasCamp = !!camp;
-        return {
-          day: win.day,
-          name: camp?.name || win.fallback?.name || `Review ${win.label}`,
-          lat: camp?.lat ?? win.fallback?.lat ?? fallbackPoint?.lat ?? start.lat,
-          lng: camp?.lng ?? win.fallback?.lng ?? fallbackPoint?.lng ?? start.lng,
-          type: hasCamp ? 'camp' : 'review',
-          label: win.label,
-          confidence: win.confidence || (win.strong ? 'strong' : 'review'),
-          progress_mi: targetMi,
-          camp,
-          reason: win.reason || null,
-          description: hasCamp
-            ? (camp?.description || 'Picked by Trailhead Copilot route scout.')
-            : (win.reason || 'Temporary overnight search area. Pick a camp before navigation.'),
-          source: hasCamp ? 'camp' : 'map',
-          routePointType: hasCamp ? 'break' as const : 'through' as const,
-          routeShapeRole: hasCamp ? 'overnight' as const : 'outbound_anchor' as const,
-        };
-      }),
+      ...scoutWindows.map(win => routeScoutStopFromWindow(win, coords, cumulative, windowDefaultPoint)),
       { day: scoutArgs.days, name: destination.name, lat: destination.lat, lng: destination.lng, type: 'destination', label: 'Finish', routePointType: 'break' as const, routeShapeRole: 'destination' as const, source: 'copilot' },
     ];
     const missingDays = scoutWindows.filter(win => !(win.selected ?? win.camp ?? win.candidates?.[0])).map(win => win.day);
-    const nextStatus = missingDays.length ? 'review' : scoutArgs.driveHours ? 'ready' : 'needs_input';
-    const resultMessage = missingDays.length
-      ? `${missingDays.length} overnight ${missingDays.length === 1 ? 'stop needs' : 'stops need'} review.`
+    const reviewDays = scoutWindows.filter(win => !routeScoutWindowIsLocked(win)).map(win => win.day);
+    const lockedCount = scoutWindows.filter(routeScoutWindowIsLocked).length;
+    const nextStatus = reviewDays.length ? 'review' : scoutArgs.driveHours ? 'ready' : 'needs_input';
+    const resultMessage = reviewDays.length
+      ? `${reviewDays.length} overnight ${reviewDays.length === 1 ? 'stop needs' : 'stops need'} review.`
       : scoutArgs.driveHours
-        ? `Found ${selectedCamps.length} overnight ${selectedCamps.length === 1 ? 'stop' : 'stops'} along the route.`
-        : `Found ${selectedCamps.length} overnight ${selectedCamps.length === 1 ? 'stop' : 'stops'}. Tell me your preferred daily drive time to tune it.`;
+        ? `Locked ${lockedCount} overnight ${lockedCount === 1 ? 'stop' : 'stops'} along the route.`
+        : `Locked ${lockedCount} overnight ${lockedCount === 1 ? 'stop' : 'stops'}. Tell me your preferred daily drive time to tune it.`;
     const nextMessage = buildRouteScoutSummary({
       startName: start.name,
       destinationName: destination.name,
@@ -8360,6 +8630,8 @@ function MapScreen() {
     const next: RouteScoutState = {
       status: nextStatus,
       message: nextMessage,
+      question: !missingDays.length && !scoutArgs.driveHours ? 'How many hours of driving per day should I target?' : undefined,
+      options: !missingDays.length && !scoutArgs.driveHours ? ['4 hours', '5 hours', '6 hours'] : undefined,
       operationId,
       phase: 'finalizing',
       phaseLabel: resultMessage,
@@ -8377,7 +8649,7 @@ function MapScreen() {
       windows: scoutWindows,
       missingDays,
       draftArgs: { ...scoutArgs.merged, start: start.name, destination: destination.name, days: scoutArgs.days, driveHours: scoutArgs.driveHours, routeStyle: scoutArgs.routeStyle, campPreference: scoutArgs.campPreference, campPhotoOnly: scoutArgs.campPhotoOnly },
-      spoken_summary: nextMessage,
+      spoken_summary: !missingDays.length && !scoutArgs.driveHours ? `${nextMessage} Tell me the daily drive limit if you want me to tighten the overnight windows.` : nextMessage,
     };
     setRouteScout(next);
     recentRouteScoutActionRef.current = { at: Date.now(), action: 'start' };
@@ -8392,7 +8664,7 @@ function MapScreen() {
         stops: stops.slice(0, 12),
       },
       route_preview: { active: true, destination: destination.name, total_miles: Math.round(totalMiles), days: scoutArgs.days },
-      spoken_summary: nextMessage,
+      spoken_summary: next.spoken_summary,
     };
   }
 
@@ -8403,6 +8675,41 @@ function MapScreen() {
       autoBuild,
       rigConstraints: source.rigConstraints ?? (rigProfile as unknown as Record<string, unknown> | null),
     });
+  }
+
+  function filterRoutePlanningVisibleFeatures(features: MapSelectableFeature[]) {
+    const nonFuelish = features.filter(feature => {
+      const type = String(feature?.type || feature?.subtype || '').toLowerCase();
+      return !['fuel', 'grocery', 'shop'].includes(type);
+    });
+    return (nonFuelish.length ? nonFuelish : features).slice(0, 12);
+  }
+
+  function copilotVisibleContextState(
+    currentSnap: CopilotResultSnapshot | null | undefined,
+    visibleSnap: CopilotResultSnapshot | null | undefined,
+    selected: Record<string, unknown> | null,
+  ) {
+    const currentQueryContext = currentSnap?.queryContext ?? null;
+    const visibleQueryContext = visibleSnap?.queryContext ?? copilotQueryContextRef.current ?? null;
+    const hasCurrentResultList = !!(
+      currentSnap?.resultSetId
+      && (
+        (currentSnap.kind === 'camp' && (currentSnap.camps?.length ?? 0) > 0)
+        || (currentSnap.kind === 'place' && (currentSnap.places?.length ?? 0) > 0)
+        || (currentSnap.kind === 'trail' && (currentSnap.trails?.length ?? 0) > 0)
+      )
+    );
+    const routePlanningActive = !!routeScout && !['idle', 'failed'].includes(String(routeScout.status || ''));
+    const suppressVisibleContext = routePlanningActive && !hasCurrentResultList && !selected && !currentQueryContext;
+    const rawVisibleFeatures = ((visibleSnap?.features?.length ? visibleSnap.features : visibleMapFeatures) as MapSelectableFeature[]).slice(0, 16);
+    return {
+      suppressVisibleContext,
+      visibleFeatures: suppressVisibleContext ? [] : rawVisibleFeatures,
+      visibleFeaturesForMapContext: suppressVisibleContext ? filterRoutePlanningVisibleFeatures(rawVisibleFeatures) : rawVisibleFeatures.slice(0, 12),
+      visibleResultSetId: suppressVisibleContext ? null : visibleSnap?.resultSetId ?? null,
+      queryContext: copilotQueryContextPayload(currentQueryContext ?? (suppressVisibleContext ? null : visibleQueryContext)),
+    };
   }
 
   function buildCopilotContext(): CopilotContext {
@@ -8423,6 +8730,8 @@ function MapScreen() {
       : areaCamps.slice(0, 8).map(copilotCampPayload);
     const activeTrailResults = currentSnap?.kind === 'trail' ? (currentSnap.trails ?? []) : trailDiscoveries;
     const currentTrailResults = activeTrailResults.slice(0, 8).map((trail, idx) => copilotTrailPayload(trail, idx));
+    const selected = (selectedPlace ?? selectedCamp ?? selectedTrail ?? selectedCommunityPin ?? null) as Record<string, unknown> | null;
+    const visibleContext = copilotVisibleContextState(currentSnap, visibleSnap, selected);
     return {
       user: {
         location: userLoc,
@@ -8449,7 +8758,7 @@ function MapScreen() {
           layerMvum ? 'mvum' : '',
           layerNautical ? 'nautical' : '',
         ].filter(Boolean),
-        selected_place: (selectedPlace ?? selectedCamp ?? selectedTrail ?? selectedCommunityPin ?? null) as Record<string, unknown> | null,
+        selected_place: selected,
         current_screen: 'map',
         current_result_set_id: currentSnap?.resultSetId ?? null,
         current_results: currentSnap?.kind === 'camp'
@@ -8460,9 +8769,9 @@ function MapScreen() {
         current_place_results: currentPlaceResults,
         current_camp_results: currentCampResults,
         current_trail_results: currentTrailResults,
-        visible_result_set_id: visibleSnap?.resultSetId ?? null,
-        visible_map_features: (visibleSnap?.features?.length ? visibleSnap.features : visibleMapFeatures).slice(0, 16),
-        query_context: copilotQueryContextPayload(copilotSnapshotContext(currentSnap) ?? copilotSnapshotContext(visibleSnap)),
+        visible_result_set_id: visibleContext.visibleResultSetId,
+        visible_map_features: visibleContext.visibleFeatures,
+        query_context: visibleContext.queryContext,
         active_pins: displayCommunityPins.slice(0, 24).map(p => ({ lat: p.lat, lng: p.lng, name: p.name, type: p.type })),
       },
       route: {
@@ -8689,6 +8998,23 @@ function MapScreen() {
     }
   }
 
+  function recordAndroidMapDebugEvent(event: NativeMapDebugEvent) {
+    if (Platform.OS !== 'android') return;
+    const next = androidMapDebugRef.current.concat(event).slice(-160);
+    androidMapDebugRef.current = next;
+  }
+
+  function formatAndroidMapDebugEvents(events: NativeMapDebugEvent[]) {
+    if (!events.length) return '[]';
+    return copilotDebugJson(
+      events.slice(-120).map(event => ({
+        ...event,
+        at_iso: new Date(event.at).toISOString(),
+      })),
+      12000,
+    );
+  }
+
   function copilotDebugActionPayload(action?: MapActionRequest | null) {
     if (!action) return null;
     return {
@@ -8740,7 +9066,10 @@ function MapScreen() {
     lines.push('');
     lines.push('Query context:');
     lines.push(copilotDebugJson(result.query_context ?? null, 4500));
-    return lines.join('\n').slice(0, 24000);
+    lines.push('');
+    lines.push('Android map camera/source events:');
+    lines.push(formatAndroidMapDebugEvents(payload.android_map_debug ?? []));
+    return lines.join('\n').slice(0, 36000);
   }
 
   function buildAdminCopilotDebugPayload(reason: string, details: Record<string, unknown> = {}) {
@@ -8812,6 +9141,7 @@ function MapScreen() {
             }
           : null,
       },
+      android_map_debug: androidMapDebugRef.current.slice(-120),
       result_context: {
         current_kind: currentSnap?.kind ?? copilotResultScope?.kind ?? null,
         current_scope: copilotResultScope,
@@ -10747,10 +11077,9 @@ function MapScreen() {
         : currentSnap?.kind === 'trail'
           ? currentTrailResults
           : currentPlaceResults;
-      const renderedFeatures = visibleCandidates
-        .slice(0, 12)
-        .map(visibleCandidatePayload);
       const selected = context.map?.selected_place as Record<string, unknown> | null | undefined;
+      const visibleContext = copilotVisibleContextState(currentSnap, copilotVisibleSnapshotRef.current, selected ?? null);
+      const renderedFeatures = visibleContext.visibleFeaturesForMapContext.map(visibleCandidatePayload);
       const visibleLayers = context.map?.visible_layers ?? [];
       const counts = {
         places: Math.max(routePois.filter(inView).length, visibleCandidates.length),
@@ -10781,9 +11110,9 @@ function MapScreen() {
           current_results: currentSnap?.kind === 'camp' ? currentCampResults : currentPlaceResults,
           current_place_results: currentPlaceResults,
           current_camp_results: currentCampResults,
-          visible_result_set_id: copilotVisibleSnapshotRef.current?.resultSetId ?? null,
+          visible_result_set_id: visibleContext.visibleResultSetId,
           visible_map_features: renderedFeatures,
-          query_context: copilotQueryContextPayload(copilotVisibleSnapshotRef.current?.queryContext ?? copilotQueryContextRef.current),
+          query_context: visibleContext.queryContext,
           counts,
           examples: {
             rendered_features: renderedFeatures,
@@ -10924,6 +11253,14 @@ function MapScreen() {
             ? `I found ${camps.length} camps near ${searchedNear}. ${openedCampSummary}`
             : `I found ${camps.length} camps near ${searchedNear}. Top options: ${names.slice(0, 3).join(', ')}.`
           : `I did not find camps near ${searchedNear} in this data set.`;
+        if (!camps.length) {
+          trackPhase0Event('phase0_search_no_results', {
+            surface: 'map_copilot_camp_search',
+            category: 'camp',
+            query: query || null,
+            searched_near: searchedNear,
+          });
+        }
         setQuickToast(camps.length ? spokenSummary : `No camps found near ${searchedNear}.`);
         setTimeout(() => setQuickToast(''), 3200);
         return {
@@ -11633,6 +11970,17 @@ function MapScreen() {
 
   async function shareAdminCopilotDebugTranscript() {
     if (!user?.is_admin) return;
+    recordAndroidMapDebugEvent({
+      at: Date.now(),
+      kind: 'debug:manual-share',
+      details: {
+        viewport: currentCopilotBounds(),
+        userLoc,
+        mapZoom,
+        navMode,
+        navCameraFollow,
+      },
+    });
     const payload = await recordAdminCopilotDebugSnapshot(
       'manual_admin_debug_share',
       {
@@ -11711,12 +12059,11 @@ function MapScreen() {
 
   function centerMapOnUser() {
     if (!userLoc) return;
-    webRef.current?.postMessage(JSON.stringify({ type: 'locate', lat: userLoc.lat, lng: userLoc.lng }));
-    nativeMapRef.current?.locate(userLoc.lat, userLoc.lng);
-    const deg = 0.35;
-    const b = { n: userLoc.lat + deg, s: userLoc.lat - deg, e: userLoc.lng + deg, w: userLoc.lng - deg, zoom: 10 };
-    viewportRef.current = b;
-    loadCampsInArea(b, activeFilters);
+    if (USE_NATIVE_MAP) {
+      nativeMapRef.current?.locate(userLoc.lat, userLoc.lng);
+    } else {
+      webRef.current?.postMessage(JSON.stringify({ type: 'locate', lat: userLoc.lat, lng: userLoc.lng }));
+    }
   }
 
   function closeSafeWaterMode() {
@@ -11798,12 +12145,27 @@ function MapScreen() {
     }
     setLoadingBrief(true);
     try {
+      const briefReports = routeAlerts.filter(alert => {
+        const provider = String((alert as any).provider || '').toLowerCase();
+        const type = String(alert.type || '').toLowerCase();
+        const subtype = String(alert.subtype || '').toLowerCase();
+        const severity = String(alert.severity || '').toLowerCase();
+        if (provider === 'tomtom' && type === 'traffic' && subtype === 'summary') return false;
+        if (provider === 'tomtom' && type === 'traffic' && !['critical', 'high'].includes(severity)) return false;
+        return true;
+      });
       const brief = await api.getRouteBrief({
         trip_name: activeTrip.plan.trip_name,
         waypoints: usableTripWaypoints(activeTrip.plan.waypoints),
-        reports: routeAlerts,
+        reports: briefReports,
       });
       const normalized = normalizeRouteBrief(brief, activeTrip, routeAlerts);
+      trackPhase0Event('phase0_route_brief_generated', {
+        trip_id: activeTrip.trip_id,
+        source: 'ai',
+        alert_count: briefReports.length,
+        readiness_score: normalized.readiness_score,
+      });
       setRouteBrief(normalized);
       setRouteBriefSaved(true);
       saveTripAi(activeTrip, 'route_brief', normalized).catch(() => {});
@@ -11813,6 +12175,12 @@ function MapScreen() {
         setPaywallCode(e.code); setPaywallMessage(e.message); setPaywallVisible(true);
       } else {
         const fallback = localRouteBrief(activeTrip, routeAlerts);
+        trackPhase0Event('phase0_route_brief_generated', {
+          trip_id: activeTrip.trip_id,
+          source: 'fallback',
+          alert_count: routeAlerts.length,
+          readiness_score: fallback.readiness_score,
+        });
         setRouteBrief(fallback);
         setRouteBriefSaved(true);
         saveTripAi(activeTrip, 'route_brief', fallback).catch(() => {});
@@ -14328,41 +14696,10 @@ function MapScreen() {
     );
   }
 
-  function nearbyType(place: Partial<OsmPoi> | null | undefined) {
-    return String(place?.type || (place as any)?.category || '').toLowerCase().replace(/[\s-]+/g, '_');
-  }
-
-  function isTripServicePlace(place: Partial<OsmPoi> | null | undefined) {
-    return TRIP_SERVICE_PLACE_TYPES.has(nearbyType(place));
-  }
-
-  function isVisitorCenterPlace(place: Partial<OsmPoi> | null | undefined) {
-    const type = nearbyType(place);
-    const name = String(place?.name || '').toLowerCase();
-    return VISITOR_CENTER_PLACE_TYPES.has(type) || /visitor\s+center|ranger\s+station/.test(name);
-  }
-
-  function isSightPlace(place: Partial<OsmPoi> | null | undefined) {
-    const type = nearbyType(place);
-    return THINGS_TO_SEE_PLACE_TYPES.has(type);
-  }
-
   function nearbyPlacePhoto(place: Partial<OsmPoi> | null | undefined) {
     const photos = (place as any)?.photos;
     const first = Array.isArray(photos) ? photos[0] : null;
     return mediaUrl((place as any)?.photo_url || (typeof first === 'string' ? first : first?.url));
-  }
-
-  function photoBackedNearbyPlace(place: Partial<OsmPoi> | null | undefined) {
-    return !!nearbyPlacePhoto(place) && String((place as any)?.photo_status || '').toLowerCase() !== 'placeholder';
-  }
-
-  function qualityGuideRail(items: OsmPoi[], options: { photoFirst?: boolean; keepServices?: boolean } = {}) {
-    const cleaned = items.filter(item => !isLowValueGenericBlmPlace(item, !!options.keepServices));
-    if (!options.photoFirst) return cleaned;
-    const photoBacked = cleaned.filter(photoBackedNearbyPlace);
-    const named = cleaned.filter(item => !photoBackedNearbyPlace(item) && !['trailhead', 'viewpoint', 'parking', 'campground', 'campsite'].includes(String(item.name || '').toLowerCase().trim()));
-    return photoBacked.length ? [...photoBacked, ...named].slice(0, Math.max(photoBacked.length, 4)) : named;
   }
 
   function loadNearbyPlacesFor(
@@ -14388,6 +14725,7 @@ function MapScreen() {
       [key]: { loading: true, places: prev[key]?.places ?? [], loadedAt: prev[key]?.loadedAt },
     }));
     const categories = placeCategoryRequest(DEFAULT_PLACE_FILTERS, true);
+    const allowedPlaceFilters = new Set(categories.split(',').map(item => item.trim()).filter(Boolean));
     const primaryCenter = { lat: center.lat, lng: center.lng };
     const centers = uniqueRouteContextCenters(
       [primaryCenter],
@@ -14438,31 +14776,66 @@ function MapScreen() {
         })
         .slice(0, 18);
     };
+    const offlineFallbackPlaces = merge(centers.map(point => normalize(
+      offlinePlacePois
+        .filter(p => p.lat != null && p.lng != null && isFinite(p.lat) && isFinite(p.lng))
+        .filter(p => placeMatchesFilters(p, allowedPlaceFilters))
+        .map(p => ({
+          ...p,
+          source: p.source || 'offline',
+          source_label: p.source_label || 'Offline pack',
+          distance_mi: typeof (p as any).distance_mi === 'number' ? (p as any).distance_mi : haversineKm(point.lat!, point.lng!, p.lat, p.lng) * 0.621371,
+        }))
+        .filter(p => (p.distance_mi ?? 999) <= Math.max(radius + 6, 14))
+    )));
     Promise.allSettled(
       centers.map(point => api.getNearbySmartPack(point.lat!, point.lng!, radius, categories, route, scopeOptions).then(pack => normalize((pack.places ?? []) as OsmPoi[])))
     ).then(async smartResults => {
       const smartPlaces = merge(smartResults.flatMap(result => result.status === 'fulfilled' ? [result.value] : []));
-      if (smartPlaces.length) return smartPlaces;
+      if (smartPlaces.length >= 6) return { places: smartPlaces, sourceLabel: undefined as string | undefined };
+      if (smartPlaces.length) {
+        return {
+          places: offlineFallbackPlaces.length ? merge([smartPlaces, offlineFallbackPlaces]) : smartPlaces,
+          sourceLabel: offlineFallbackPlaces.length ? 'Expanded with downloaded place packs' : undefined,
+        };
+      }
       const nearbyResults = await Promise.allSettled(
         centers.map(point => api.getNearbyPlaces(point.lat!, point.lng!, radius, categories, 'auto').then(places => normalize(places)))
       );
       const nearby = merge(nearbyResults.flatMap(result => result.status === 'fulfilled' ? [result.value] : []));
-      if (nearby.length) return nearby;
-      return api.getOsmPois(center.lat!, center.lng!, radius, 'trailhead,viewpoint,peak,hot_spring,water,fuel,parking')
+      if (nearby.length >= 6) return { places: nearby, sourceLabel: undefined as string | undefined };
+      if (nearby.length) {
+        return {
+          places: offlineFallbackPlaces.length ? merge([nearby, offlineFallbackPlaces]) : nearby,
+          sourceLabel: offlineFallbackPlaces.length ? 'Expanded with downloaded place packs' : undefined,
+        };
+      }
+      const osmPlaces = await api.getOsmPois(center.lat!, center.lng!, radius, 'trailhead,viewpoint,peak,hot_spring,water,fuel,parking')
         .then(places => normalize(places))
         .catch(() => []);
-    }).then(places => {
+      if (osmPlaces.length) {
+        return {
+          places: offlineFallbackPlaces.length ? merge([osmPlaces, offlineFallbackPlaces]) : osmPlaces,
+          sourceLabel: offlineFallbackPlaces.length ? 'Expanded with downloaded place packs' : undefined,
+        };
+      }
+      if (offlineFallbackPlaces.length) {
+        return { places: offlineFallbackPlaces, sourceLabel: 'Downloaded place packs' };
+      }
+      return { places: [] as OsmPoi[], sourceLabel: undefined as string | undefined };
+    }).then(({ places, sourceLabel }) => {
       setNearbyPlaceFeeds(prev => ({
         ...prev,
         [key]: {
           loading: false,
           places,
-          error: places.length ? undefined : 'No official or open places found near this day yet.',
+          error: places.length ? undefined : 'No nearby place cards loaded yet. Try a wider search from the map.',
           loadedAt: Date.now(),
+          sourceLabel,
         },
       }));
     }).catch(() => {
-      setNearbyPlaceFeeds(prev => ({ ...prev, [key]: { loading: false, places: prev[key]?.places ?? [], error: 'Places unavailable', loadedAt: Date.now() } }));
+      setNearbyPlaceFeeds(prev => ({ ...prev, [key]: { loading: false, places: prev[key]?.places ?? [], error: 'Places unavailable right now. Try this area again.', loadedAt: Date.now() } }));
     });
   }
 
@@ -15714,7 +16087,7 @@ function MapScreen() {
         'Saved routes are cached for offline follow.',
         [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Save', onPress: name => saveTrailRoutePlan(trail, plan, name || fallbackName) },
+          { text: 'Save', onPress: (name?: string) => saveTrailRoutePlan(trail, plan, name || fallbackName) },
         ],
         'plain-text',
         fallbackName,
@@ -15775,127 +16148,65 @@ function MapScreen() {
     { id: 'night', label: 'Night', sub: 'Standard night', icon: 'moon-outline', color: '#818cf8' },
     { id: 'satellite_streets', label: 'Sat Streets', sub: 'Classic satellite', icon: 'image-outline', color: '#14b8a6' },
   ];
-  const renderLayerMiniPreview = (layer: { key: string; color: string; icon: keyof typeof Ionicons.glyphMap; val: boolean }) => {
-    const baseStyle = [s.layerTogglePreview, { borderColor: layer.color + '55', backgroundColor: layer.color + '14' }];
-    const activeDot = layer.val ? <View style={[s.layerToggleOnDot, { backgroundColor: layer.color }]} /> : null;
-    if (layer.key === '3d') {
-      return (
-        <View style={baseStyle}>
-          <View style={[s.layerPreviewHorizon, { backgroundColor: '#38bdf8' + '24' }]} />
-          <View style={[s.layerPreviewPeak, { backgroundColor: '#365314' }]} />
-          <View style={[s.layerPreviewPeak, s.layerPreviewPeakAlt, { backgroundColor: '#65a30d' }]} />
-          <View style={[s.layerPreviewBuilding, { left: 46, height: 28 }]} />
-          <View style={[s.layerPreviewBuilding, { left: 57, height: 18, opacity: 0.75 }]} />
-          {activeDot}
-        </View>
-      );
-    }
-    if (layer.key === 'lands') {
-      return (
-        <View style={baseStyle}>
-          <View style={[s.layerPreviewPatch, { left: 8, top: 10, width: 42, height: 26, backgroundColor: '#22c55e55' }]} />
-          <View style={[s.layerPreviewPatch, { right: 10, bottom: 8, width: 34, height: 24, backgroundColor: '#f59e0b4c' }]} />
-          <View style={[s.layerPreviewLine, { top: 39, left: -5, backgroundColor: '#ffffffa8', transform: [{ rotate: '-13deg' }] }]} />
-          {activeDot}
-        </View>
-      );
-    }
-    if (layer.key === 'usgs') {
-      return (
-        <View style={baseStyle}>
-          {[10, 22, 34, 46].map((top, idx) => (
-            <View key={top} style={[s.layerPreviewContour, { top, left: idx % 2 ? 8 : -8, borderColor: '#d97706aa' }]} />
-          ))}
-          <View style={[s.layerPreviewLine, { top: 30, backgroundColor: '#0ea5e9aa', transform: [{ rotate: '18deg' }] }]} />
-          {activeDot}
-        </View>
-      );
-    }
-    if (layer.key === 'pois') {
-      return (
-        <View style={baseStyle}>
-          {[['#f97316', 12, 16], ['#38bdf8', 34, 10], ['#22c55e', 54, 28], ['#eab308', 24, 38]].map(([color, left, top]) => (
-            <View key={`${left}-${top}`} style={[s.layerPreviewPin, { left: Number(left), top: Number(top), backgroundColor: String(color) }]} />
-          ))}
-          <View style={[s.layerPreviewLine, { top: 34, backgroundColor: '#ffffff66' }]} />
-          {activeDot}
-        </View>
-      );
-    }
-    if (layer.key === 'trails') {
-      return (
-        <View style={baseStyle}>
-          <View style={[s.layerPreviewTrailDash, { left: 5, top: 40, transform: [{ rotate: '-14deg' }] }]} />
-          <View style={[s.layerPreviewTrailDash, { left: 26, top: 35, transform: [{ rotate: '-14deg' }] }]} />
-          <View style={[s.layerPreviewTrailDash, { left: 47, top: 29, transform: [{ rotate: '-14deg' }] }]} />
-          <View style={[s.layerPreviewLine, { top: 19, backgroundColor: '#ef4444aa', transform: [{ rotate: '10deg' }] }]} />
-          {activeDot}
-        </View>
-      );
-    }
-    if (layer.key === 'nautical') {
-      return (
-        <View style={baseStyle}>
-          <View style={[s.layerPreviewWaterBand, { backgroundColor: '#0891b255' }]} />
-          <View style={[s.layerPreviewLine, { top: 37, backgroundColor: '#38bdf8cc', transform: [{ rotate: '-8deg' }] }]} />
-          <View style={[s.layerPreviewHazard, { left: 48, top: 16 }]} />
-          <View style={[s.layerPreviewBuoy, { left: 19, top: 27, backgroundColor: '#22c55e' }]} />
-          {activeDot}
-        </View>
-      );
-    }
-    if (layer.key === 'fire') {
-      return (
-        <View style={baseStyle}>
-          <View style={[s.layerPreviewPatch, { left: 15, top: 12, width: 46, height: 35, backgroundColor: '#ef444455' }]} />
-          <View style={[s.layerPreviewPatch, { left: 29, top: 20, width: 26, height: 19, backgroundColor: '#f97316aa' }]} />
-          <Ionicons name="flame" size={16} color="#fff" />
-          {activeDot}
-        </View>
-      );
-    }
-    if (layer.key === 'ava') {
-      return (
-        <View style={baseStyle}>
-          {['#22c55e', '#facc15', '#f97316', '#ef4444'].map((color, idx) => (
-            <View key={color} style={[s.layerPreviewAvaBand, { left: idx * 19, backgroundColor: color }]} />
-          ))}
-          <View style={[s.layerPreviewPeak, { backgroundColor: '#ffffff55', bottom: -6 }]} />
-          {activeDot}
-        </View>
-      );
-    }
-	    if (layer.key === 'radar') {
-	      return (
-	        <View style={baseStyle}>
-	          <View style={[s.layerPreviewRainBand, { left: 8, top: 34, backgroundColor: '#22c55e88' }]} />
-	          <View style={[s.layerPreviewRainBand, { left: 22, top: 25, backgroundColor: '#38bdf8aa', transform: [{ rotate: '-18deg' }] }]} />
-	          <View style={[s.layerPreviewRainBand, { left: 42, top: 38, backgroundColor: '#facc15aa', transform: [{ rotate: '16deg' }] }]} />
-	          <View style={s.layerPreviewCloud}>
-	            <Ionicons name="rainy-outline" size={22} color="#e0f2fe" />
-	          </View>
-	          <View style={s.layerPreviewRadarSweep} />
-	          {activeDot}
-	        </View>
-	      );
-	    }
-    if (layer.key === 'mvum') {
-      return (
-        <View style={baseStyle}>
-          <View style={[s.layerPreviewLine, { top: 17, backgroundColor: '#22c55e', transform: [{ rotate: '7deg' }] }]} />
-          <View style={[s.layerPreviewLine, { top: 32, backgroundColor: '#f97316', transform: [{ rotate: '-18deg' }] }]} />
-          <View style={[s.layerPreviewLine, { top: 47, backgroundColor: '#ef4444', transform: [{ rotate: '16deg' }] }]} />
-          {activeDot}
-        </View>
-      );
-    }
-    return (
-      <View style={baseStyle}>
-        <Ionicons name={layer.icon as any} size={22} color={layer.val ? '#fff' : layer.color} />
-        {activeDot}
-      </View>
-    );
-  };
+  const layerSheetItems = [
+    { key: '3d', label: map3dEnabled ? '2D View' : '3D Terrain', sub: map3dEnabled ? 'Return to flat map' : 'Tilted terrain and buildings', icon: map3dEnabled ? 'map-outline' : 'cube-outline', val: map3dEnabled, color: '#a3e635', onPress: () => toggleMap3d() },
+    { key: 'lands', label: 'Public Land', sub: 'BLM / USFS / parks tint', icon: 'map-outline', val: showLands, color: '#22c55e', onPress: () => toggleLandOverlay(!showLands) },
+    { key: 'usgs', label: 'USGS Topo', sub: 'Topo raster + trails', icon: 'trail-sign-outline', val: showUsgs, color: '#0ea5e9', onPress: () => toggleUsgsOverlay(!showUsgs) },
+    { key: 'pois', label: 'Places', sub: 'Fuel, water, services', icon: 'location-outline', val: showPois, color: '#3b82f6', onPress: () => togglePoiOverlay(!showPois) },
+    { key: 'trails', label: 'Offroad', sub: 'Tracks and paths', icon: 'trail-sign-outline', val: layerTrails, color: '#22c55e', onPress: () => setLayerTrails(!layerTrails) },
+    { key: 'nautical', label: 'Safe Water', sub: 'Structure and hazards', icon: 'boat-outline', val: layerNautical, color: '#0891b2', onPress: () => { if (layerNautical) { closeSafeWaterMode(); return; } setLayerNautical(true); toggleDataLayer('nautical', true); setActivePlaceFilters(prev => Array.from(new Set([...prev, ...WATER_NAV_PLACE_FILTER_IDS]))); } },
+    { key: 'fire', label: 'Wildfire', sub: 'Active fire perimeters', icon: 'flame-outline', val: layerFire, color: '#ef4444', onPress: () => { const next = !layerFire; setLayerFire(next); toggleDataLayer('fire', next); } },
+    { key: 'ava', label: 'Avalanche', sub: 'Danger zones', icon: 'snow-outline', val: layerAva, color: '#3b82f6', onPress: () => { const next = !layerAva; setLayerAva(next); toggleDataLayer('ava', next); } },
+    { key: 'radar', label: 'Radar', sub: 'Rain radar', icon: 'rainy-outline', val: layerRadar, color: '#06b6d4', onPress: () => { const next = !layerRadar; setLayerRadar(next); toggleDataLayer('radar', next); } },
+    { key: 'mvum', label: 'MVUM', sub: 'Legal access', icon: 'car-outline', val: layerMvum, color: '#22c55e', onPress: () => { const next = !layerMvum; setLayerMvum(next); toggleDataLayer('mvum', next); } },
+  ] as const;
+  const premiumMapItems = premiumMapOptions.map(option => ({
+    ...option,
+    active: option.id === premiumMapStyle,
+    onPress: () => {
+      setPremiumMapStyle(option.id);
+      api.logExtremeLedger({
+        event_type: 'mapbox_style_selected',
+        surface: 'map_layers',
+        event_data: { style: option.id },
+      }).catch(() => {});
+    },
+  }));
+  const extremeFeatureItems = [
+    { key: 'globe_terrain', label: map3dEnabled ? '2D Terrain' : 'Globe / 3D', sub: map3dEnabled ? 'Flatten camera' : 'Terrain camera', icon: 'planet-outline', val: map3dEnabled, color: '#a3e635', enabled: true, onPress: () => toggleMap3d() },
+    { key: 'search_box', label: 'Search Box', sub: 'Find and fly to places', icon: 'search-outline', val: false, color: '#38bdf8', enabled: !!extremeConfig?.feature_flags?.search, onPress: () => { if (extremeConfig?.feature_flags?.search) { setSearchMode('browse'); setShowSearch(true); setShowLayerSheet(false); return; } setQuickToast('This EXTREME feature is beta locked.'); setTimeout(() => setQuickToast(''), 2400); } },
+    { key: 'directions', label: 'Directions', sub: searchRouteCard ? 'Preview selected route' : 'Choose destination', icon: 'navigate-outline', val: !!searchRouteCard, color: '#f97316', enabled: !!extremeConfig?.feature_flags?.navigation, onPress: () => { if (extremeConfig?.feature_flags?.navigation) { openExtremeDirections(); return; } setQuickToast('This EXTREME feature is beta locked.'); setTimeout(() => setQuickToast(''), 2400); } },
+    { key: 'traffic', label: 'Traffic', sub: 'Congestion style', icon: 'git-merge-outline', val: extremeTrafficEnabled, color: '#ef4444', enabled: !!extremeConfig?.feature_flags?.navigation, onPress: () => { if (extremeConfig?.feature_flags?.navigation) { toggleExtremeTraffic(); return; } setQuickToast('This EXTREME feature is beta locked.'); setTimeout(() => setQuickToast(''), 2400); } },
+    { key: 'weather', label: 'Weather', sub: extremeConfig?.weather?.mapbox_conditions_enabled ? 'Radar + route conditions' : 'Radar overlay', icon: 'rainy-outline', val: layerRadar, color: '#06b6d4', enabled: !!extremeConfig?.feature_flags?.weather, onPress: () => { if (extremeConfig?.feature_flags?.weather) { openExtremeWeather(); return; } setQuickToast('EXTREME weather is locked for this beta.'); setTimeout(() => setQuickToast(''), 2400); } },
+  ] as const;
+  const safeWaterLegendItems = [
+    { color: '#f97316', label: '0-5 ft shallow structure' },
+    { color: '#facc15', label: '5-10 ft shallow zone' },
+    { color: '#bae6fd', label: '5 ft contours / heavier 10 ft lines' },
+    { color: '#38bdf8', label: 'Recommended track / open follow line' },
+    { color: '#22c55e', label: 'Marked channel / fairway' },
+    { color: '#f59e0b', label: 'Range or leading line' },
+    { color: '#dc2626', label: 'Red marker' },
+    { color: '#16a34a', label: 'Green marker' },
+    { color: '#ef4444', label: 'Rock, wreck, obstruction, shoal, or hazard' },
+  ] as const;
+  const trailLegendItems = layerTrails ? [
+    { color: '#22c55e', label: 'Tracks / dirt roads' },
+    { color: '#1d8cff', label: 'Paths / trails' },
+  ] : [];
+  const mvumLegendItems = layerMvum ? [
+    { color: '#22c55e', label: 'Open to all vehicles' },
+    { color: '#f97316', label: 'High clearance required' },
+    { color: '#ef4444', label: 'Closed / motorized prohibited' },
+    { color: '#a855f7', label: 'Designated trail' },
+  ] : [];
+  const avalancheLegendItems = layerAva ? [
+    { color: '#50C878', label: 'Low (1)' },
+    { color: '#FFD700', label: 'Moderate (2)' },
+    { color: '#FF8C00', label: 'Considerable (3)' },
+    { color: '#E63946', label: 'High (4)' },
+    { color: '#1a0a0a', label: 'Extreme (5)' },
+  ] : [];
   const placeFilterChanged = activePlaceFilters.length !== DEFAULT_PLACE_FILTERS.length ||
     DEFAULT_PLACE_FILTERS.some(id => !activePlaceFilters.includes(id));
   const waterFilterBroadActive = activePlaceFilters.includes('water');
@@ -15999,6 +16310,9 @@ function MapScreen() {
     showPlacePins ? 'Places' : null,
     showCommunityPins ? 'Community' : null,
   ].filter(Boolean).join(' · ') || 'Map pins hidden';
+  const waterFilterSummary = waterFilterBroadActive
+    ? 'All water points'
+    : waterFilterNarrowCount > 0 ? `${waterFilterNarrowCount} selected` : 'Choose water access types';
   const toggleFilterSection = (section: string) => {
     setExpandedFilterSections(prev => prev.includes(section) ? prev.filter(item => item !== section) : [...prev, section]);
   };
@@ -16042,36 +16356,6 @@ function MapScreen() {
     }
     setShowCommunityPins(false);
   };
-  const renderFilterCheckRows = (
-    options: readonly { id: string; label: string; icon: keyof typeof Ionicons.glyphMap; color?: string }[],
-    selected: string[],
-    onToggle: (id: string) => void,
-    disabledIds = new Set<string>(),
-  ) => (
-    <View style={s.filterOptionList}>
-      {options.map(item => {
-        const active = selected.includes(item.id);
-        const locked = disabledIds.has(item.id);
-        return (
-          <TouchableOpacity
-            key={item.id}
-            style={[s.filterOptionRow, locked && s.filterOptionRowDisabled]}
-            activeOpacity={0.82}
-            onPress={() => locked ? Alert.alert('Unlock Explore for today', 'Town services use richer provider searches. Unlock this group for today with credits, or use Explorer.', [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Unlock', onPress: unlockExploreCategories },
-            ]) : onToggle(item.id)}
-          >
-            <View style={[s.filterOptionCheck, active && { backgroundColor: item.color || C.orange, borderColor: item.color || C.orange }]}>
-              {active ? <Ionicons name="checkmark" size={14} color="#fff" /> : null}
-            </View>
-            <Ionicons name={(locked ? 'lock-closed-outline' : item.icon) as any} size={18} color={locked ? C.text3 : item.color || C.text2} />
-            <Text style={[s.filterOptionText, locked && { color: C.text3 }]} numberOfLines={1}>{item.label}</Text>
-          </TouchableOpacity>
-        );
-      })}
-    </View>
-  );
   const showMapStatusBar = Boolean(
     !navMode &&
     !waterFollowActive &&
@@ -16340,6 +16624,7 @@ function MapScreen() {
           onMapGesture={() => {
             if (navMode) setNavCameraFollow(false);
           }}
+          onDebugEvent={recordAndroidMapDebugEvent}
           onMapTap={async (lat, lng) => {
             if (waterCorridorPickMode) {
               if (lat == null || lng == null) {
@@ -16559,138 +16844,56 @@ function MapScreen() {
         </TourTarget>
       )}
 
-      {showMapDrawer && (
-        <View style={s.mapDrawerOverlay} pointerEvents="auto">
-          <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => setShowMapDrawer(false)} />
-          <View style={[s.mapDrawer, { paddingTop: insets.top + 18, paddingBottom: bottomInset + 16 }]}>
-            <View style={s.mapDrawerHeader}>
-              <View>
-                <Text style={s.mapDrawerTitle}>Map tools</Text>
-              </View>
-              <TouchableOpacity style={s.mapDrawerClose} onPress={() => setShowMapDrawer(false)}>
-                <Ionicons name="close" size={17} color={C.text2} />
-              </TouchableOpacity>
-            </View>
-            <View style={s.mapDrawerSection}>
-              {[
-                { label: 'Search places', sub: 'Find and fly to a place', icon: 'search-outline', tone: '#60a5fa', action: () => { setShowMapDrawer(false); setSearchMode('browse'); setShowSearch(true); } },
-                { label: 'Trails', sub: 'Nearby trail discovery', icon: 'trail-sign-outline', tone: '#22c55e', action: openTrailDiscoveryFromDrawer },
-	                { label: 'Layers', sub: 'Styles, 3D, land, weather', icon: 'layers-outline', tone: C.silverBright, action: () => { setShowMapDrawer(false); setShowLayerSheet(true); } },
-	                { label: 'Weather', sub: 'Forecast at map center', icon: 'cloud-outline', tone: '#38bdf8', action: openMapWeatherTool },
-	                { label: 'Filters', sub: 'Camps, places, community pins', icon: 'filter-outline', tone: C.orange, action: () => { setShowMapDrawer(false); setShowFilterSheet(true); } },
-                { label: 'Offline maps', sub: 'Download and readiness', icon: 'cloud-download-outline', tone: '#a3e635', action: () => { setShowMapDrawer(false); setShowOfflineModal(true); } },
-                { label: 'Trail builder', sub: 'Pin and snap a trail route', icon: 'git-branch-outline', tone: '#22c55e', action: () => { setShowMapDrawer(false); trailPinCaptureMode ? clearTrailPinCapture() : beginTrailPinCapture(); } },
-                { label: nearbyLoading ? 'Loading audio' : 'Nearby audio', sub: nearbyNarration ? 'Replay nearby context' : 'What is around me', icon: 'headset-outline', tone: C.orange, action: () => { handleNearbyAudio(); } },
-              ].map(item => (
-                <TouchableOpacity key={item.label} style={s.mapDrawerRow} onPress={item.action} activeOpacity={0.84}>
-                  <View style={[s.mapDrawerRowIcon, { borderColor: item.tone + '55', backgroundColor: item.tone + '14' }]}>
-                    <Ionicons name={item.icon as any} size={16} color={item.tone} />
-                  </View>
-                  <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={s.mapDrawerRowTitle} numberOfLines={1}>{item.label}</Text>
-                    <Text style={s.mapDrawerRowSub} numberOfLines={1}>{item.sub}</Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={15} color={C.text3} />
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-        </View>
-      )}
+      <MapDrawerSheet
+        visible={showMapDrawer}
+        topInset={insets.top}
+        bottomInset={bottomInset}
+        onClose={() => setShowMapDrawer(false)}
+        items={[
+          { label: 'Search places', sub: 'Find and fly to a place', icon: 'search-outline', tone: '#60a5fa', onPress: () => { setShowMapDrawer(false); setSearchMode('browse'); setShowSearch(true); } },
+          { label: 'Trails', sub: 'Nearby trail discovery', icon: 'trail-sign-outline', tone: '#22c55e', onPress: openTrailDiscoveryFromDrawer },
+          { label: 'Layers', sub: 'Styles, 3D, land, weather', icon: 'layers-outline', tone: C.silverBright, onPress: () => { setShowMapDrawer(false); setShowLayerSheet(true); } },
+          { label: 'Weather', sub: 'Forecast at map center', icon: 'cloud-outline', tone: '#38bdf8', onPress: openMapWeatherTool },
+          { label: 'Filters', sub: 'Camps, places, community pins', icon: 'filter-outline', tone: C.orange, onPress: () => { setShowMapDrawer(false); setShowFilterSheet(true); } },
+          { label: 'Offline maps', sub: 'Download and readiness', icon: 'cloud-download-outline', tone: '#a3e635', onPress: () => { setShowMapDrawer(false); setShowOfflineModal(true); } },
+          { label: 'Trail builder', sub: 'Pin and snap a trail route', icon: 'git-branch-outline', tone: '#22c55e', onPress: () => { setShowMapDrawer(false); trailPinCaptureMode ? clearTrailPinCapture() : beginTrailPinCapture(); } },
+          { label: nearbyLoading ? 'Loading audio' : 'Nearby audio', sub: nearbyNarration ? 'Replay nearby context' : 'What is around me', icon: 'headset-outline', tone: C.orange, onPress: () => { handleNearbyAudio(); } },
+        ]}
+      />
 
-      {mapWeatherEnabled && !navMode && !safeWaterPlanningActive && !waterFollowActive && (
-        <>
-          <View style={s.mapWeatherOverlay} pointerEvents="box-none">
-            <View style={s.mapWeatherCrosshair} pointerEvents="none">
-              <View style={s.mapWeatherCrosshairLineH} />
-              <View style={s.mapWeatherCrosshairLineV} />
-              <View style={s.mapWeatherCrosshairDot} />
-            </View>
-          </View>
-          <View style={[s.mapWeatherPeekSheet, { bottom: Math.max(bottomInset + 8, 14) }]} pointerEvents="box-none">
-            <TouchableOpacity style={s.mapWeatherPeekCard} activeOpacity={0.9} onPress={() => setShowMapWeatherSheet(true)}>
-              {(() => {
-                const current = mapWeather?.current;
-                const code = Number(current?.weather_code ?? mapWeather?.daily?.weathercode?.[0] ?? 3);
-                const high = mapWeather?.daily?.temperature_2m_max?.[0];
-                const low = mapWeather?.daily?.temperature_2m_min?.[0];
-                const precip = firstNumber([
-                  mapWeather?.daily?.precipitation_probability_max?.[0] ?? null,
-                  current?.precipitation ?? null,
-                  mapWeather?.daily?.precipitation_sum?.[0] ?? null,
-                ]);
-                const wind = Math.round(Number(current?.wind_speed_10m ?? 0));
-                const units = mapWeather?.trailhead_units;
-                const aqi = mapWeather?.air_quality?.current?.us_aqi;
-                return (
-                  <>
-                    <View style={s.mapWeatherPeekHandleRow}>
-                      <View style={s.mapWeatherGrabber} />
-                      <View style={s.mapWeatherPeekActions}>
-                        <TouchableOpacity
-                          style={s.mapWeatherPeekIconBtn}
-                          onPress={event => {
-                            event.stopPropagation();
-                            setShowMapWeatherSheet(true);
-                          }}
-                        >
-                          <Ionicons name="chevron-up" size={15} color={C.text2} />
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={s.mapWeatherPeekIconBtn}
-                          onPress={event => {
-                            event.stopPropagation();
-                            setMapWeatherEnabled(false);
-                            setShowMapWeatherSheet(false);
-                          }}
-                        >
-                          <Ionicons name="close" size={14} color={C.text2} />
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                    <View style={s.mapWeatherPeekMain}>
-                      <View style={s.mapWeatherPeekIcon}>
-                        {mapWeatherLoading ? (
-                          <ActivityIndicator size="small" color="#38bdf8" />
-                        ) : (
-                          <Ionicons name={weatherIonIcon(code)} size={24} color="#38bdf8" />
-                        )}
-                      </View>
-                      <View style={{ flex: 1, minWidth: 0 }}>
-                        <Text style={s.mapWeatherPeekKicker}>WEATHER AT MAP CENTER</Text>
-                        <Text style={s.mapWeatherPeekTitle} numberOfLines={1}>
-                          {mapWeatherError || `${weatherTemp(current?.temperature_2m, units)} · ${weatherSummaryLabel(code)}`}
-                        </Text>
-                        <Text style={s.mapWeatherPeekSub} numberOfLines={1}>
-                          {mapWeatherCenter ? `${mapWeatherCenter.lat.toFixed(4)}, ${mapWeatherCenter.lng.toFixed(4)}` : 'Move map to inspect'}
-                        </Text>
-                      </View>
-                    </View>
-                    <View style={s.mapWeatherPeekMetrics}>
-                      <View style={s.mapWeatherPeekMetric}>
-                              <Text style={s.mapWeatherPeekMetricValue}>{weatherTemp(high, units)} / {weatherTemp(low, units)}</Text>
-                        <Text style={s.mapWeatherPeekMetricLabel}>high / low</Text>
-                      </View>
-                      <View style={s.mapWeatherPeekMetric}>
-                        <Text style={s.mapWeatherPeekMetricValue}>{precip != null ? `${Math.round(precip)}%` : '--'}</Text>
-                        <Text style={s.mapWeatherPeekMetricLabel}>precip</Text>
-                      </View>
-                      <View style={s.mapWeatherPeekMetric}>
-                        <Text style={s.mapWeatherPeekMetricValue}>{wind || '--'} {units?.wind_label ?? ''}</Text>
-                        <Text style={s.mapWeatherPeekMetricLabel}>wind</Text>
-                      </View>
-                      <View style={s.mapWeatherPeekMetric}>
-                        <Text style={s.mapWeatherPeekMetricValue}>{aqi ?? '--'}</Text>
-                        <Text style={s.mapWeatherPeekMetricLabel}>AQI</Text>
-                      </View>
-                    </View>
-                  </>
-                );
-              })()}
-            </TouchableOpacity>
-          </View>
-        </>
-      )}
+      {(() => {
+        const current = mapWeather?.current;
+        const code = Number(current?.weather_code ?? mapWeather?.daily?.weathercode?.[0] ?? 3);
+        const high = mapWeather?.daily?.temperature_2m_max?.[0];
+        const low = mapWeather?.daily?.temperature_2m_min?.[0];
+        const precip = firstNumber([
+          mapWeather?.daily?.precipitation_probability_max?.[0] ?? null,
+          current?.precipitation ?? null,
+          mapWeather?.daily?.precipitation_sum?.[0] ?? null,
+        ]);
+        const wind = Math.round(Number(current?.wind_speed_10m ?? 0));
+        const units = mapWeather?.trailhead_units;
+        const aqi = mapWeather?.air_quality?.current?.us_aqi;
+        return (
+          <MapWeatherPeek
+            visible={mapWeatherEnabled && !navMode && !safeWaterPlanningActive && !waterFollowActive}
+            bottomInset={bottomInset}
+            loading={mapWeatherLoading}
+            icon={weatherIonIcon(code)}
+            title={mapWeatherError || `${weatherTemp(current?.temperature_2m, units)} · ${weatherSummaryLabel(code)}`}
+            subtitle={mapWeatherCenter ? `${mapWeatherCenter.lat.toFixed(4)}, ${mapWeatherCenter.lng.toFixed(4)}` : 'Move map to inspect'}
+            highLow={`${weatherTemp(high, units)} / ${weatherTemp(low, units)}`}
+            precip={precip != null ? `${Math.round(precip)}%` : '--'}
+            wind={`${wind || '--'} ${units?.wind_label ?? ''}`.trim()}
+            aqi={aqi != null ? String(aqi) : '--'}
+            onOpenDetails={() => setShowMapWeatherSheet(true)}
+            onClose={() => {
+              setMapWeatherEnabled(false);
+              setShowMapWeatherSheet(false);
+            }}
+          />
+        );
+      })()}
 
       {offlineAreaPicker && (
         <View style={s.offlineAreaOverlay} pointerEvents="box-none">
@@ -16780,7 +16983,10 @@ function MapScreen() {
           </Text>
         </TouchableOpacity>
         {routeAlerts.length > 0 && (
-          <TouchableOpacity style={s.alertPill} onPress={() => setShowAlerts(v => !v)}>
+          <TouchableOpacity style={s.alertPill} onPress={() => {
+            if (showAlerts) closeRouteAlerts('toggle_button');
+            else setShowAlerts(true);
+          }}>
             <Ionicons name="warning-outline" size={12} color={C.red} />
             <Text style={s.alertPillText}>{routeAlerts.length}</Text>
           </TouchableOpacity>
@@ -16845,83 +17051,25 @@ function MapScreen() {
         </View>
       )}
 
-      {routeScout && routeScout.status !== 'idle' && !selectedPlace && !selectedCamp && !selectedTrail && !selectedCommunityPin && !navMode && !safeWaterPlanningActive && !waterFollowActive && !showSearch && (
-        <View style={s.routeScoutPanel} pointerEvents="auto">
-          <View style={s.routeScoutTop}>
-            <View style={s.routeScoutTitleWrap}>
-              <Ionicons name={routeScout.status === 'scouting' ? 'scan-outline' : routeScout.status === 'failed' ? 'alert-circle-outline' : 'map-outline'} size={14} color={routeScout.status === 'failed' ? C.red : C.orange} />
-              <View style={{ flex: 1 }}>
-                <Text style={s.routeScoutTitle}>ROUTE SCOUT</Text>
-                <Text style={s.routeScoutSub} numberOfLines={1}>
-                  {[routeScout.startName, routeScout.destinationName].filter(Boolean).join(' -> ') || routeScout.message}
-                </Text>
-              </View>
-            </View>
-            <TouchableOpacity onPress={closeRouteScout} hitSlop={10}>
-              <Ionicons name="close" size={15} color={OVR.text3} />
-            </TouchableOpacity>
-          </View>
-          {routeScout.status === 'scouting' && (
-            <View style={s.routeScoutProgressWrap}>
-              <View style={s.routeScoutProgressTrack}>
-                <View style={[s.routeScoutProgressFill, { width: `${Math.max(6, Math.min(100, routeScout.progressPct ?? 8))}%` }]} />
-              </View>
-              <Text style={s.routeScoutPhaseText} numberOfLines={1}>
-                {routeScout.phaseLabel || routeScout.message}
-              </Text>
-            </View>
-          )}
-          <Text style={s.routeScoutMessage} numberOfLines={routeScout.status === 'scouting' ? 2 : 6}>{routeScout.message}</Text>
-          <View style={s.routeScoutStats}>
-            <Text style={s.routeScoutStat}>{routeScout.days ? `${routeScout.days} days` : 'Days TBD'}</Text>
-            <Text style={s.routeScoutStat}>{routeScout.driveHours ? `${routeScout.driveHours}h/day` : 'Drive time TBD'}</Text>
-            <Text style={s.routeScoutStat}>{routeScout.totalMiles ? `${Math.round(routeScout.totalMiles)} mi` : 'Routing'}</Text>
-          </View>
-          {(((routeScout.stops?.length ?? 0) > 0) || ((routeScout.previewStops?.length ?? 0) > 0)) && (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.routeScoutStops}>
-              {(routeScout.stops ?? routeScout.previewStops ?? []).slice(0, 10).map((stop, idx) => (
-                <TouchableOpacity
-                  key={`${stop.type}-${stop.day}-${stop.lat}-${stop.lng}-${idx}`}
-                  style={[s.routeScoutStop, stop.type === 'review' && s.routeScoutStopReview]}
-                  onPress={() => nativeMapRef.current?.flyTo(stop.lat, stop.lng, stop.type === 'camp' ? 11 : 9, stop.name)}
-                >
-                  <Ionicons
-                    name={stop.type === 'camp' ? 'bonfire-outline' : stop.type === 'destination' ? 'flag-outline' : stop.type === 'review' ? 'help-circle-outline' : 'radio-button-on-outline'}
-                    size={13}
-                    color={stop.type === 'review' ? C.red : stop.type === 'camp' ? '#22c55e' : C.orange}
-                  />
-                  <Text style={s.routeScoutStopName} numberOfLines={1}>{stop.name}</Text>
-                  <Text style={s.routeScoutStopMeta} numberOfLines={1}>{stop.label || (stop.day ? `Day ${stop.day}` : 'Start')}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          )}
-          <View style={s.routeScoutActions}>
-            <TouchableOpacity
-              style={s.routeScoutAction}
-              onPress={() => routeScout.draftArgs && startCopilotRouteScout(routeScout.draftArgs)}
-            >
-              <Ionicons name="refresh-outline" size={13} color={OVR.text2} />
-              <Text style={s.routeScoutActionText}>Rescout</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[s.routeScoutAction, s.routeScoutPrimary]}
-              onPress={() => runCopilotAction({
-                action_id: `route_scout_save_${Date.now()}`,
-                action_type: 'saveScoutToRouteBuilder',
-                args: {},
-                requires_confirmation: false,
-                cost_class: 'local',
-                surface: 'map_layers',
-                provider: 'trailhead_client',
-              }, true)}
-            >
-              <Ionicons name="git-branch-outline" size={13} color="#fff" />
-              <Text style={[s.routeScoutActionText, { color: '#fff' }]}>Builder</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
+      <RouteScoutPanel
+        visible={!!routeScout && !selectedPlace && !selectedCamp && !selectedTrail && !selectedCommunityPin && !navMode && !safeWaterPlanningActive && !waterFollowActive && !showSearch}
+        routeScout={routeScout}
+        onClose={closeRouteScout}
+        onRescout={() => {
+          if (!routeScout?.draftArgs) return;
+          startCopilotRouteScout(routeScout.draftArgs);
+        }}
+        onOpenBuilder={() => runCopilotAction({
+          action_id: `route_scout_save_${Date.now()}`,
+          action_type: 'saveScoutToRouteBuilder',
+          args: {},
+          requires_confirmation: false,
+          cost_class: 'local',
+          surface: 'map_layers',
+          provider: 'trailhead_client',
+        }, true)}
+        onStopPress={stop => nativeMapRef.current?.flyTo(stop.lat, stop.lng, stop.type === 'camp' ? 11 : 9, stop.name)}
+      />
 
       {copilotResults.length > 0 && !routeScout && !selectedPlace && !selectedCamp && !selectedTrail && !selectedCommunityPin && !navMode && !safeWaterPlanningActive && !waterFollowActive && !showSearch && (
         <View style={s.copilotResultRail} pointerEvents="auto">
@@ -18127,39 +18275,33 @@ function MapScreen() {
       )}
 
       {/* Route alerts */}
-      {showAlerts && routeAlerts.length > 0 && (
-        <View style={s.alertPanel}>
-          <View style={s.alertHeader}>
-            <Ionicons name="warning" size={14} color={C.red} />
-            <Text style={s.alertTitle}>ROUTE ALERTS ({routeAlerts.length})</Text>
-            <TouchableOpacity onPress={() => setShowAlerts(false)}>
-              <Ionicons name="close" size={15} color={C.text3} />
-            </TouchableOpacity>
-          </View>
-          <ScrollView style={{ maxHeight: 160 }} showsVerticalScrollIndicator={false}>
-            {routeAlerts.map(r => (
-              <View key={r.id} style={[s.alertItem, r.severity === 'critical' && { borderLeftWidth: 3, borderLeftColor: C.red }]}>
-                <View style={{ flexDirection: 'row', gap: 8, marginBottom: 2 }}>
-                  <Text style={s.alertBadge}>{r.type.replace('_', ' ').toUpperCase()}</Text>
-                  {r.source === 'provider' && (
-                    <Text style={s.alertBadge}>{conditionSourceLabel(r)}</Text>
-                  )}
-                  {(r.severity === 'critical' || r.severity === 'high') && (
-                    <Text style={[s.alertSev, { color: r.severity === 'critical' ? C.red : C.yellow }]}>
-                      {r.severity.toUpperCase()}
-                    </Text>
-                  )}
-                </View>
-                {r.description ? <Text style={s.alertDesc} numberOfLines={2}>{r.description}</Text> : null}
-                {r.road_name ? <Text style={[s.alertDesc, { opacity: 0.65 }]} numberOfLines={1}>{r.road_name}</Text> : null}
-                {r.created_at ? (
-                  <Text style={[s.alertDesc, { opacity: 0.45, marginTop: 1 }]}>{timeAgo(r.created_at)}</Text>
-                ) : null}
-              </View>
-            ))}
-          </ScrollView>
-        </View>
-      )}
+      <RouteAlertsPanel
+        visible={showAlerts}
+        count={routeAlerts.length}
+        alerts={routeAlerts.map(r => ({
+          id: String(r.id),
+          typeLabel: r.type.replace('_', ' ').toUpperCase(),
+          sourceLabel: r.source === 'provider' ? conditionSourceLabel(r) : null,
+          severityLabel: r.severity === 'critical' || r.severity === 'high' ? r.severity.toUpperCase() : null,
+          severityTone: r.severity === 'critical' ? C.red : r.severity === 'high' ? C.yellow : null,
+          critical: r.severity === 'critical',
+          description: r.description || null,
+          roadName: r.road_name || null,
+          timeLabel: r.created_at ? timeAgo(r.created_at) : null,
+        }))}
+        onClose={() => closeRouteAlerts('close_button')}
+        onAlertPress={(alertId) => {
+          const r = routeAlerts.find(alert => String(alert.id) === alertId);
+          if (!r) return;
+          trackPhase0Event('phase0_route_alert_row_tapped', {
+            trip_id: activeTrip?.trip_id ?? null,
+            alert_id: String(r.id),
+            alert_type: r.type,
+            provider: r.provider || null,
+            severity: r.severity,
+          });
+        }}
+      />
 
       {/* ── Search overlay ── */}
       {/* ── Route Search Modal (OsmAnd-style) ──────────────────────────── */}
@@ -18222,6 +18364,17 @@ function MapScreen() {
           />
         </View>
       )}
+
+      <AiReportModal
+        visible={aiReportVisible}
+        onClose={() => setAiReportVisible(false)}
+        initialKind={aiReportKind}
+        surface="copilot"
+        surfaceLabel="Co-Pilot"
+        messages={extremeCopilotMessages.map(msg => ({ role: msg.role === 'assistant' ? 'assistant' : 'user', text: msg.text || '' }))}
+        sessionId={extremeCopilotSessionId}
+        tripId={activeTrip?.trip_id ?? null}
+      />
 
       <Modal visible={showExtremeCopilot && !navMode} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setShowExtremeCopilot(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.extremeCopilotOverlay}>
@@ -18332,6 +18485,29 @@ function MapScreen() {
               </View>
             )}
 
+            <View style={s.extremeCopilotReportRow}>
+              <TouchableOpacity
+                style={s.extremeCopilotReportBtn}
+                onPress={() => {
+                  setAiReportKind('bug');
+                  setAiReportVisible(true);
+                }}
+              >
+                <Ionicons name="bug-outline" size={14} color={C.orange} />
+                <Text style={s.extremeCopilotReportText}>REPORT BUG</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={s.extremeCopilotReportBtn}
+                onPress={() => {
+                  setAiReportKind('offensive');
+                  setAiReportVisible(true);
+                }}
+              >
+                <Ionicons name="warning-outline" size={14} color={C.orange} />
+                <Text style={s.extremeCopilotReportText}>REPORT OFFENSIVE</Text>
+              </TouchableOpacity>
+            </View>
+
             <View style={s.extremeCopilotInputRow}>
               <TextInput
                 value={extremeCopilotInput}
@@ -18350,248 +18526,156 @@ function MapScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* ── Filter Sheet ── */}
-      <Modal visible={showFilterSheet && !navMode} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setShowFilterSheet(false)}>
-        <View style={s.filterModalOverlay}>
-          <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => setShowFilterSheet(false)} />
-          <TrailheadSheet
-            handle={false}
-            style={Platform.OS === 'android'
-            ? [s.filterSheet, { height: filterSheetHeight, maxHeight: undefined, paddingBottom: 0 }]
-            : s.filterSheet}
-            contentStyle={{ padding: 0 }}
-          >
-            <View style={s.filterSheetHeader}>
-              <View>
-                <Text style={s.filterSheetTitle}>MAP FILTERS</Text>
-                <Text style={s.filterSheetSub}>
-                  {changedFilterGroupCount} changed · saved on this device
-                </Text>
-              </View>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <TouchableOpacity onPress={resetMapFilterPreferences} style={s.filterResetBtn}>
-                  <Text style={s.filterResetText}>RESET ALL</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => setShowFilterSheet(false)} style={s.filterCloseBtn}>
-                  <Ionicons name="close" size={20} color={C.text2} />
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            <ScrollView
-              showsVerticalScrollIndicator={false}
-              style={Platform.OS === 'android' ? s.filterSheetScroll : undefined}
-              contentContainerStyle={Platform.OS === 'android'
-                ? s.filterSheetContent
-                : { paddingBottom: 28 }}
-              keyboardShouldPersistTaps="handled"
-              nestedScrollEnabled={Platform.OS === 'android'}
-              bounces={Platform.OS !== 'android'}
-              overScrollMode={Platform.OS === 'android' ? 'always' : 'auto'}
-            >
-              <View style={s.filterPresetWrap}>
-                {[
-                  ['default', 'Default'],
-                  ['overland', 'Overland'],
-                  ['camps', 'Camps Only'],
-                  ['water', 'Safe Water'],
-                  ['hideCommunity', 'Hide Community'],
-                ].map(([id, label]) => (
-                  <TouchableOpacity key={id} style={s.filterPresetBtn} onPress={() => applyMapFilterPreset(id as any)} activeOpacity={0.82}>
-                    <Text style={s.filterPresetText}>{label}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              <View style={s.filterGroup}>
-                <TouchableOpacity style={s.filterSectionRow} onPress={() => toggleFilterSection('map-content')} activeOpacity={0.84}>
-                  <View style={s.filterSectionIcon}><Ionicons name="map-outline" size={18} color={C.orange} /></View>
-                  <View style={s.filterSectionCopy}>
-                    <Text style={s.filterSectionRowTitle}>Map Content</Text>
-                    <Text style={s.filterSectionRowSub} numberOfLines={1}>{mapContentSummary}</Text>
-                  </View>
-                  <Ionicons name={expandedFilterSections.includes('map-content') ? 'chevron-up' : 'chevron-down'} size={18} color={C.text3} />
-                </TouchableOpacity>
-                {expandedFilterSections.includes('map-content') && (
-                  <View style={s.filterToggleList}>
-                    {[
-                      ['showCampPins', 'Camps', 'All camp pins and route camps', showCampPins, setShowCampPins, 'bonfire-outline'],
-                      ['showPlacePins', 'Places', 'Trailheads, services, parks, water, and stops', showPlacePins, setShowPlacePins, 'location-outline'],
-                      ['showCommunityPins', 'Community Pins', 'Shared road, camp, service, and trail notes', showCommunityPins, setShowCommunityPins, 'people-outline'],
-                    ].map(([key, title, sub, value, setter, icon]) => {
-                      const enabled = Boolean(value);
-                      return (
-                        <TouchableOpacity key={String(key)} style={s.filterToggleRow} onPress={() => (setter as (v: boolean) => void)(!enabled)} activeOpacity={0.82}>
-                          <Ionicons name={icon as any} size={18} color={enabled ? C.orange : C.text3} />
-                          <View style={s.filterSectionCopy}>
-                            <Text style={s.filterOptionText}>{title as string}</Text>
-                            <Text style={s.filterSectionRowSub} numberOfLines={1}>{sub as string}</Text>
-                          </View>
-                          <View style={[s.filterSwitch, enabled && s.filterSwitchOn]}>
-                            <View style={[s.filterSwitchKnob, enabled && s.filterSwitchKnobOn]} />
-                          </View>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                )}
-              </View>
-
-              <View style={s.filterGroup}>
-                <TouchableOpacity style={s.filterSectionRow} onPress={() => toggleFilterSection('camps')} activeOpacity={0.84}>
-                  <View style={s.filterSectionIcon}><Ionicons name="bonfire-outline" size={18} color="#14b8a6" /></View>
-                  <View style={s.filterSectionCopy}>
-                    <Text style={s.filterSectionRowTitle}>Camps</Text>
-                    <Text style={s.filterSectionRowSub} numberOfLines={1}>{campFilterSummary}</Text>
-                  </View>
-                  {activeFilters.length > 0 && <TouchableOpacity onPress={() => setActiveFilters([])} hitSlop={8}><Text style={s.filterClearText}>RESET</Text></TouchableOpacity>}
-                  <Ionicons name={expandedFilterSections.includes('camps') ? 'chevron-up' : 'chevron-down'} size={18} color={C.text3} />
-                </TouchableOpacity>
-                {expandedFilterSections.includes('camps') && (
-                  <>
-                    <Text style={s.filterHintText}>No refinements means all camp types. Turn Camps off above to hide the group.</Text>
-                    {renderFilterCheckRows(CAMP_FILTER_OPTIONS, activeFilters, id => toggleFilterId(setActiveFilters, id))}
-                  </>
-                )}
-              </View>
-
-              <View style={s.filterGroup}>
-                <TouchableOpacity style={s.filterSectionRow} onPress={() => toggleFilterSection('places')} activeOpacity={0.84}>
-                  <View style={s.filterSectionIcon}><Ionicons name="location-outline" size={18} color="#0ea5e9" /></View>
-                  <View style={s.filterSectionCopy}>
-                    <Text style={s.filterSectionRowTitle}>Places</Text>
-                    <Text style={s.filterSectionRowSub} numberOfLines={1}>{placeFilterSummary}</Text>
-                  </View>
-                  <TouchableOpacity onPress={() => setActivePlaceFilters(DEFAULT_PLACE_FILTERS)} hitSlop={8}><Text style={s.filterClearText}>DEFAULT</Text></TouchableOpacity>
-                  <Ionicons name={expandedFilterSections.includes('places') ? 'chevron-up' : 'chevron-down'} size={18} color={C.text3} />
-                </TouchableOpacity>
-                {expandedFilterSections.includes('places') && (
-                  <>
-                    <Text style={s.filterHintText}>Default keeps camps, trails, water, fuel, dump, propane, parking, and repair visible without town clutter.</Text>
-                    {renderFilterCheckRows(PLACE_FILTER_TYPES.filter(f => f.group === 'essentials'), activePlaceFilters, id => {
-                      if (id === 'water') {
-                        setActivePlaceFilters(prev => prev.includes('water') ? prev.filter(x => x !== 'water') : [...prev.filter(x => !WATER_PLACE_FILTER_IDS.has(x)), 'water']);
-                      } else {
-                        toggleFilterId(setActivePlaceFilters, id);
-                      }
-                    })}
-                  </>
-                )}
-              </View>
-
-              <View style={s.filterGroup}>
-                <TouchableOpacity style={s.filterSectionRow} onPress={() => toggleFilterSection('water')} activeOpacity={0.84}>
-                  <View style={s.filterSectionIcon}><Ionicons name="boat-outline" size={18} color="#0891b2" /></View>
-                  <View style={s.filterSectionCopy}>
-                    <Text style={s.filterSectionRowTitle}>Water</Text>
-                    <Text style={s.filterSectionRowSub} numberOfLines={1}>{waterFilterBroadActive ? 'All water points' : waterFilterNarrowCount > 0 ? `${waterFilterNarrowCount} selected` : 'Choose water access types'}</Text>
-                  </View>
-                  <TouchableOpacity onPress={() => applyMapFilterPreset('water')} hitSlop={8}><Text style={s.filterClearText}>SAFE WATER</Text></TouchableOpacity>
-                  <Ionicons name={expandedFilterSections.includes('water') ? 'chevron-up' : 'chevron-down'} size={18} color={C.text3} />
-                </TouchableOpacity>
-                {expandedFilterSections.includes('water') && renderFilterCheckRows(WATER_ACCESS_FILTER_TYPES, activePlaceFilters, id => {
-                  setActivePlaceFilters(prev => {
-                    const withoutBroadWater = prev.filter(item => item !== 'water');
-                    return withoutBroadWater.includes(id) ? withoutBroadWater.filter(item => item !== id) : [...withoutBroadWater, id];
-                  });
-                })}
-              </View>
-
-              <View style={s.filterGroup}>
-                <TouchableOpacity style={s.filterSectionRow} onPress={() => toggleFilterSection('stays')} activeOpacity={0.84}>
-                  <View style={s.filterSectionIcon}><Ionicons name="bed-outline" size={18} color="#6366f1" /></View>
-                  <View style={s.filterSectionCopy}>
-                    <Text style={s.filterSectionRowTitle}>Camps & Stays</Text>
-                    <Text style={s.filterSectionRowSub} numberOfLines={1}>Private stays, glamping, lodging-style camps</Text>
-                  </View>
-                  <TouchableOpacity onPress={() => setActivePlaceFilters(prev => Array.from(new Set([...prev, 'private_stay', 'farm_stay', 'ranch', 'winery', 'glamping', 'private_camp'])))} hitSlop={8}>
-                    <Text style={s.filterClearText}>ALL</Text>
-                  </TouchableOpacity>
-                  <Ionicons name={expandedFilterSections.includes('stays') ? 'chevron-up' : 'chevron-down'} size={18} color={C.text3} />
-                </TouchableOpacity>
-                {expandedFilterSections.includes('stays') && renderFilterCheckRows(PLACE_FILTER_TYPES.filter(f => f.group === 'stays'), activePlaceFilters, id => toggleFilterId(setActivePlaceFilters, id))}
-              </View>
-
-              <View style={s.filterGroup}>
-                <TouchableOpacity style={s.filterSectionRow} onPress={() => toggleFilterSection('explore-services')} activeOpacity={0.84}>
-                  <View style={s.filterSectionIcon}><Ionicons name="sparkles-outline" size={18} color="#06b6d4" /></View>
-                  <View style={s.filterSectionCopy}>
-                    <Text style={s.filterSectionRowTitle}>Explore & Services</Text>
-                    <Text style={s.filterSectionRowSub} numberOfLines={1}>Food, groceries, lodging, attractions, parts, medical, wifi</Text>
-                  </View>
-                  {!exploreCategoriesUnlocked && <TouchableOpacity onPress={unlockExploreCategories} disabled={categoryUnlocking} hitSlop={8}><Text style={s.filterClearText}>{categoryUnlocking ? 'OPENING' : 'OPEN'}</Text></TouchableOpacity>}
-                  <Ionicons name={expandedFilterSections.includes('explore-services') ? 'chevron-up' : 'chevron-down'} size={18} color={C.text3} />
-                </TouchableOpacity>
-                {expandedFilterSections.includes('explore-services') && renderFilterCheckRows(
-                  PLACE_FILTER_TYPES.filter(f => f.group === 'explore'),
-                  activePlaceFilters,
-                  id => toggleFilterId(setActivePlaceFilters, id),
-                  exploreCategoriesUnlocked ? new Set<string>() : new Set(EXPLORE_PLACE_FILTER_IDS),
-                )}
-              </View>
-
-              <View style={s.filterGroup}>
-                <TouchableOpacity style={s.filterSectionRow} onPress={() => toggleFilterSection('community')} activeOpacity={0.84}>
-                  <View style={s.filterSectionIcon}><Ionicons name="people-outline" size={18} color="#22c55e" /></View>
-                  <View style={s.filterSectionCopy}>
-                    <Text style={s.filterSectionRowTitle}>Community Pins</Text>
-                    <Text style={s.filterSectionRowSub} numberOfLines={1}>{communityFilterSummary}</Text>
-                  </View>
-                  <TouchableOpacity onPress={() => setActivePinFilters(DEFAULT_COMMUNITY_PIN_FILTERS)} hitSlop={8}><Text style={s.filterClearText}>DEFAULT</Text></TouchableOpacity>
-                  <Ionicons name={expandedFilterSections.includes('community') ? 'chevron-up' : 'chevron-down'} size={18} color={C.text3} />
-                </TouchableOpacity>
-                {expandedFilterSections.includes('community') && (
-                  <>
-                    <View style={s.pinFilterHint}>
-                      <Ionicons name="shield-checkmark-outline" size={12} color={OVR.text3} />
-                      <Text style={s.pinFilterHintText}>Default shows shared pins and keeps GPX imports hidden.</Text>
-                    </View>
-                    {renderFilterCheckRows(COMMUNITY_PIN_TYPES, activePinFilters, id => toggleFilterId(setActivePinFilters, id))}
-                  </>
-                )}
-              </View>
-
-              <View style={s.filterGroup}>
-                <TouchableOpacity style={s.filterSectionRow} onPress={() => toggleFilterSection('weather-layers')} activeOpacity={0.84}>
-                  <View style={s.filterSectionIcon}><Ionicons name="partly-sunny-outline" size={18} color="#f59e0b" /></View>
-                  <View style={s.filterSectionCopy}>
-                    <Text style={s.filterSectionRowTitle}>Weather & Layers</Text>
-                    <Text style={s.filterSectionRowSub} numberOfLines={1}>Radar, trails, MVUM, land, and public data overlays</Text>
-                  </View>
-                  <Ionicons name={expandedFilterSections.includes('weather-layers') ? 'chevron-up' : 'chevron-down'} size={18} color={C.text3} />
-                </TouchableOpacity>
-                {expandedFilterSections.includes('weather-layers') && (
-                  <View style={s.filterToggleList}>
-                    {[
-                      ['Trails', 'Trail overlays on the map', layerTrails, setLayerTrails, 'trail-sign-outline'],
-                      ['Radar', 'Weather radar layer', layerRadar, (v: boolean) => { setLayerRadar(v); toggleDataLayer('radar', v); }, 'rainy-outline'],
-                      ['MVUM', 'Motor vehicle use map layer', layerMvum, (v: boolean) => { setLayerMvum(v); toggleDataLayer('mvum', v); }, 'trail-sign-outline'],
-                      ['Safe Water', 'Navigation markers and hazards', layerNautical, (v: boolean) => { if (!v) { closeSafeWaterMode(); return; } setLayerNautical(true); toggleDataLayer('nautical', true); setActivePlaceFilters(prev => Array.from(new Set([...prev, ...WATER_NAV_PLACE_FILTER_IDS]))); }, 'boat-outline'],
-                      ['Public Land', 'Public land overlay', showLands, toggleLandOverlay, 'map-outline'],
-                      ['USGS', 'USGS map overlay', showUsgs, toggleUsgsOverlay, 'layers-outline'],
-                    ].map(([title, sub, value, setter, icon]) => {
-                      const enabled = Boolean(value);
-                      return (
-                        <TouchableOpacity key={String(title)} style={s.filterToggleRow} onPress={() => (setter as (v: boolean) => void)(!enabled)} activeOpacity={0.82}>
-                          <Ionicons name={icon as any} size={18} color={enabled ? C.orange : C.text3} />
-                          <View style={s.filterSectionCopy}>
-                            <Text style={s.filterOptionText}>{title as string}</Text>
-                            <Text style={s.filterSectionRowSub} numberOfLines={1}>{sub as string}</Text>
-                          </View>
-                          <View style={[s.filterSwitch, enabled && s.filterSwitchOn]}>
-                            <View style={[s.filterSwitchKnob, enabled && s.filterSwitchKnobOn]} />
-                          </View>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                )}
-              </View>
-              {Platform.OS === 'android' ? <View style={{ height: filterBottomSpacer }} /> : null}
-            </ScrollView>
-          </TrailheadSheet>
-        </View>
-      </Modal>
+      <MapFilterSheet
+        visible={showFilterSheet && !navMode}
+        changedCount={changedFilterGroupCount}
+        filterSheetHeight={filterSheetHeight}
+        filterBottomSpacer={filterBottomSpacer}
+        expandedSections={expandedFilterSections}
+        presets={[
+          { id: 'default', label: 'Default', onPress: () => applyMapFilterPreset('default') },
+          { id: 'overland', label: 'Overland', onPress: () => applyMapFilterPreset('overland') },
+          { id: 'camps', label: 'Camps Only', onPress: () => applyMapFilterPreset('camps') },
+          { id: 'water', label: 'Safe Water', onPress: () => applyMapFilterPreset('water') },
+          { id: 'hideCommunity', label: 'Hide Community', onPress: () => applyMapFilterPreset('hideCommunity') },
+        ]}
+        mapContentSummary={mapContentSummary}
+        mapContentItems={[
+          {
+            key: 'showCampPins',
+            title: 'Camps',
+            sub: 'All camp pins and route camps',
+            enabled: showCampPins,
+            icon: 'bonfire-outline',
+            onPress: () => setShowCampPins(!showCampPins),
+          },
+          {
+            key: 'showPlacePins',
+            title: 'Places',
+            sub: 'Trailheads, services, parks, water, and stops',
+            enabled: showPlacePins,
+            icon: 'location-outline',
+            onPress: () => setShowPlacePins(!showPlacePins),
+          },
+          {
+            key: 'showCommunityPins',
+            title: 'Community Pins',
+            sub: 'Shared road, camp, service, and trail notes',
+            enabled: showCommunityPins,
+            icon: 'people-outline',
+            onPress: () => setShowCommunityPins(!showCommunityPins),
+          },
+        ]}
+        campFilterSummary={campFilterSummary}
+        activeCampFilterCount={activeFilters.length}
+        campOptions={CAMP_FILTER_OPTIONS}
+        activeCampFilters={activeFilters}
+        placeFilterSummary={placeFilterSummary}
+        essentialPlaceOptions={PLACE_FILTER_TYPES.filter(f => f.group === 'essentials')}
+        activePlaceFilters={activePlaceFilters}
+        waterSummary={waterFilterSummary}
+        waterOptions={WATER_ACCESS_FILTER_TYPES}
+        stayOptions={PLACE_FILTER_TYPES.filter(f => f.group === 'stays')}
+        exploreOptions={PLACE_FILTER_TYPES.filter(f => f.group === 'explore')}
+        disabledExploreIds={exploreCategoriesUnlocked ? new Set<string>() : new Set(EXPLORE_PLACE_FILTER_IDS)}
+        exploreCategoriesUnlocked={exploreCategoriesUnlocked}
+        categoryUnlocking={categoryUnlocking}
+        communityFilterSummary={communityFilterSummary}
+        pinOptions={COMMUNITY_PIN_TYPES}
+        activePinFilters={activePinFilters}
+        weatherLayerItems={[
+          {
+            key: 'trails',
+            title: 'Trails',
+            sub: 'Trail overlays on the map',
+            enabled: layerTrails,
+            icon: 'trail-sign-outline',
+            onPress: () => setLayerTrails(!layerTrails),
+          },
+          {
+            key: 'radar',
+            title: 'Radar',
+            sub: 'Weather radar layer',
+            enabled: layerRadar,
+            icon: 'rainy-outline',
+            onPress: () => {
+              const next = !layerRadar;
+              setLayerRadar(next);
+              toggleDataLayer('radar', next);
+            },
+          },
+          {
+            key: 'mvum',
+            title: 'MVUM',
+            sub: 'Motor vehicle use map layer',
+            enabled: layerMvum,
+            icon: 'trail-sign-outline',
+            onPress: () => {
+              const next = !layerMvum;
+              setLayerMvum(next);
+              toggleDataLayer('mvum', next);
+            },
+          },
+          {
+            key: 'safe-water',
+            title: 'Safe Water',
+            sub: 'Navigation markers and hazards',
+            enabled: layerNautical,
+            icon: 'boat-outline',
+            onPress: () => {
+              if (layerNautical) {
+                closeSafeWaterMode();
+                return;
+              }
+              setLayerNautical(true);
+              toggleDataLayer('nautical', true);
+              setActivePlaceFilters(prev => Array.from(new Set([...prev, ...WATER_NAV_PLACE_FILTER_IDS])));
+            },
+          },
+          {
+            key: 'public-land',
+            title: 'Public Land',
+            sub: 'Public land overlay',
+            enabled: showLands,
+            icon: 'map-outline',
+            onPress: () => toggleLandOverlay(!showLands),
+          },
+          {
+            key: 'usgs',
+            title: 'USGS',
+            sub: 'USGS map overlay',
+            enabled: showUsgs,
+            icon: 'layers-outline',
+            onPress: () => toggleUsgsOverlay(!showUsgs),
+          },
+        ]}
+        onClose={() => setShowFilterSheet(false)}
+        onResetAll={resetMapFilterPreferences}
+        onToggleSection={toggleFilterSection}
+        onResetCamps={() => setActiveFilters([])}
+        onToggleCampFilter={id => toggleFilterId(setActiveFilters, id)}
+        onResetPlacesDefault={() => setActivePlaceFilters(DEFAULT_PLACE_FILTERS)}
+        onToggleEssentialPlace={id => {
+          if (id === 'water') {
+            setActivePlaceFilters(prev => prev.includes('water') ? prev.filter(x => x !== 'water') : [...prev.filter(x => !WATER_PLACE_FILTER_IDS.has(x)), 'water']);
+            return;
+          }
+          toggleFilterId(setActivePlaceFilters, id);
+        }}
+        onSafeWaterPreset={() => applyMapFilterPreset('water')}
+        onToggleWater={id => {
+          setActivePlaceFilters(prev => {
+            const withoutBroadWater = prev.filter(item => item !== 'water');
+            return withoutBroadWater.includes(id) ? withoutBroadWater.filter(item => item !== id) : [...withoutBroadWater, id];
+          });
+        }}
+        onEnableAllStays={() => setActivePlaceFilters(prev => Array.from(new Set([...prev, 'private_stay', 'farm_stay', 'ranch', 'winery', 'glamping', 'private_camp'])))}
+        onToggleStay={id => toggleFilterId(setActivePlaceFilters, id)}
+        onUnlockExplore={unlockExploreCategories}
+        onToggleExplore={id => toggleFilterId(setActivePlaceFilters, id)}
+        onResetCommunityDefault={() => setActivePinFilters(DEFAULT_COMMUNITY_PIN_FILTERS)}
+        onTogglePin={id => toggleFilterId(setActivePinFilters, id)}
+      />
 
       <PremiumPlaceSheet
         place={selectedPlace}
@@ -19192,158 +19276,54 @@ function MapScreen() {
 	                  </View>
 	                ) : null}
 
-                {Number.isFinite(campDetail.lat) && Number.isFinite(campDetail.lng) && Math.abs(campDetail.lat) > 0.0001 && Math.abs(campDetail.lng) > 0.0001 ? (
-                  <View style={s.detailSection}>
-                    <Text style={s.detailSectionTitle}>COORDINATES</Text>
-                    <View style={s.coordRow}>
-                      <Text style={s.coordText}>{campDetail.lat.toFixed(6)}, {campDetail.lng.toFixed(6)}</Text>
-                      <TouchableOpacity style={s.coordCopy} onPress={() => copyCoordinates(campDetail.lat, campDetail.lng)}>
-                        <Ionicons name="copy-outline" size={14} color={C.orange} />
-                        <Text style={s.coordCopyText}>COPY</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                ) : null}
+                <CampCoordinatesSection
+                  title="COORDINATES"
+                  lat={campDetail.lat}
+                  lng={campDetail.lng}
+                  onCopy={() => copyCoordinates(campDetail.lat, campDetail.lng)}
+                />
 
-                {(campDetail.reviews ?? []).length > 0 ? (
-                  <View style={s.detailSection}>
-                    <Text style={s.detailSectionTitle}>REVIEWS</Text>
-                    {(campDetail.reviews ?? []).slice(0, hasPlan ? 3 : 1).map((review, idx) => (
-                      <View key={`${review.authorName}-${idx}`} style={s.campReviewCard}>
-                        <View style={s.campReviewTop}>
-                          <Text style={s.campReviewAuthor} numberOfLines={1}>{review.authorName || 'Review'}</Text>
-                          <Text style={s.campReviewRating}>{review.rating ? `${review.rating}/5` : review.source || 'Provider'}</Text>
-                        </View>
-                        {!!review.relativeTime && <Text style={s.campReviewMeta}>{review.relativeTime}</Text>}
-                        {!!review.text && <Text style={s.campReviewText} numberOfLines={hasPlan ? 4 : 2}>{review.text}</Text>}
-                      </View>
-                    ))}
-                    {!hasPlan && (campDetail.reviews ?? []).length > 1 ? (
-                      <TouchableOpacity style={s.lockedInlineCard} onPress={() => { setPaywallCode('camp_detail'); setPaywallMessage('Explorer unlocks deeper campground details, longer review previews, and richer camp planning context.'); setPaywallVisible(true); }}>
-                        <Ionicons name="lock-closed-outline" size={15} color={C.orange} />
-                        <Text style={s.lockedInlineText}>More review detail is included with Explorer.</Text>
-                      </TouchableOpacity>
-                    ) : null}
-                  </View>
-                ) : null}
+                <CampReviewsSection
+                  reviews={campDetail.reviews ?? []}
+                  limit={hasPlan ? 3 : 1}
+                  showUpsell={!hasPlan && (campDetail.reviews ?? []).length > 1}
+                  onPressUpsell={() => {
+                    setPaywallCode('camp_detail');
+                    setPaywallMessage('Explorer unlocks deeper campground details, longer review previews, and richer camp planning context.');
+                    setPaywallVisible(true);
+                  }}
+                />
 
-                <View style={s.detailSection}>
-                  <View style={s.frHeader}>
-                    <Text style={s.detailSectionTitle}>COMMENTS & QUESTIONS</Text>
-                    {campComments.length > 0 ? <Text style={s.frCount}>{campComments.length}</Text> : null}
-                  </View>
-                  {campComments.slice(0, 3).map(comment => (
-                    <View key={comment.id} style={s.campCommentCard}>
-                      <View style={s.campCommentTop}>
-                        <Text style={s.campCommentAuthor} numberOfLines={1}>{comment.username}</Text>
-                        <Text style={s.campCommentDate}>{new Date(comment.created_at * 1000).toLocaleDateString()}</Text>
-                      </View>
-                      <Text style={s.campCommentBody}>{comment.body}</Text>
-                    </View>
-                  ))}
-                  {!campComments.length && !showCampCommentForm ? <Text style={s.frEmpty}>No comments yet. Ask a question or leave a recent note.</Text> : null}
-                  {showCampCommentForm ? (
-                    <View style={s.frForm}>
-                      <Text style={s.frFormLabel}>Comment</Text>
-                      <TextInput
-                        style={s.frNoteInput}
-                        value={campCommentText}
-                        onChangeText={v => setCampCommentText(v.slice(0, 800))}
-                        placeholder="Ask a question, share a recent condition, or add a useful note..."
-                        placeholderTextColor={C.text3}
-                        multiline
-                        numberOfLines={4}
-                      />
-                      <Text style={s.frCharCount}>{campCommentText.length}/800</Text>
-                      <View style={s.frFormActions}>
-                        <TouchableOpacity style={s.frCancelBtn} onPress={() => { setShowCampCommentForm(false); setCampCommentText(''); }}>
-                          <Text style={s.frCancelText}>Cancel</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={[s.frSubmitBtn, (campCommentText.trim().length < 2 || campCommentSubmitting) && { opacity: 0.5 }]}
-                          onPress={submitCampComment}
-                          disabled={campCommentText.trim().length < 2 || campCommentSubmitting}
-                        >
-                          {campCommentSubmitting ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.frSubmitText}>POST COMMENT</Text>}
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  ) : user ? (
-                    <TouchableOpacity style={s.frAddBtn} onPress={() => setShowCampCommentForm(true)}>
-                      <Ionicons name="chatbubble-ellipses-outline" size={15} color={C.orange} />
-                      <Text style={s.frAddBtnText}>ADD COMMENT</Text>
-                    </TouchableOpacity>
-                  ) : null}
-                </View>
+                <CampCommentsSection
+                  comments={campComments}
+                  limit={3}
+                  showForm={showCampCommentForm}
+                  commentText={campCommentText}
+                  commentSubmitting={campCommentSubmitting}
+                  canComment={!!user}
+                  onOpenForm={() => setShowCampCommentForm(true)}
+                  onCancelForm={() => { setShowCampCommentForm(false); setCampCommentText(''); }}
+                  onChangeCommentText={setCampCommentText}
+                  onSubmitComment={submitCampComment}
+                />
 
-                <View style={s.detailSection}>
-                  <View style={s.frHeader}>
-                    <Text style={s.detailSectionTitle}>FIELD REPORTS</Text>
-                    {fieldReportSummary && fieldReportSummary.count > 0 ? <Text style={s.frCount}>{fieldReportSummary.count}</Text> : null}
-                  </View>
-                  {fieldReports.slice(0, 3).map(fr => {
-                    const sentiment = fieldSentimentLabel(fr.sentiment);
-                    const access = fieldAccessLabel(fr.access_condition);
-                    const crowd = fieldCrowdLabel(fr.crowd_level);
-                    return (
-                      <View key={fr.id} style={s.frCard}>
-                        <View style={s.frCardTop}>
-                          <View style={[s.frIconBubble, { backgroundColor: sentiment.color + '18' }]}>
-                            <Ionicons name={sentiment.icon} size={15} color={sentiment.color} />
-                          </View>
-                          <View style={{ flex: 1 }}>
-                            <Text style={s.frCardMeta}>{sentiment.label} · {fr.username}</Text>
-                            <Text style={s.frCardDate}>{fr.visited_date}</Text>
-                          </View>
-                          {fr.has_photo && <Ionicons name="camera-outline" size={13} color={C.text3} />}
-                        </View>
-                        <View style={s.frCardBadges}>
-                          <View style={s.frMiniBadge}><Ionicons name={access.icon} size={10} color={access.color} /><Text style={s.frCardBadge}>{access.label}</Text></View>
-                          <View style={s.frMiniBadge}><Ionicons name={crowd.icon} size={11} color={crowd.color} /><Text style={s.frCardBadge}>{crowd.label}</Text></View>
-                        </View>
-                        {fr.note ? <Text style={s.frCardNote} numberOfLines={3}>{fr.note}</Text> : null}
-                      </View>
-                    );
-                  })}
-                  {fieldReports.length === 0 ? <Text style={s.frEmpty}>No field reports yet. Be the first to check in.</Text> : null}
-                  {user ? (
-                    <TouchableOpacity style={s.frAddBtn} onPress={() => setShowFieldReportForm(true)}>
-                      <Ionicons name="add-circle-outline" size={15} color={C.orange} />
-                      <Text style={s.frAddBtnText}>ADD FIELD REPORT</Text>
-                    </TouchableOpacity>
-                  ) : null}
-                </View>
+                <CampFieldReportsSection
+                  reports={fieldReports}
+                  summary={fieldReportSummary}
+                  limit={3}
+                  showSummary={false}
+                  canAddReport={!!user}
+                  onAddReport={() => setShowFieldReportForm(true)}
+                />
 
                 {(campInsight || loadingInsight) ? (
-                  <View style={s.detailSection}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-	                      <Text style={s.detailSectionTitle}>CAMP INSIGHT</Text>
-                      {loadingInsight ? <ActivityIndicator size="small" color={C.orange} /> : null}
-                      {campInsight?.star_rating ? <Text style={s.aiStars}>{campInsight.star_rating}/5</Text> : null}
-                    </View>
-                    {campInsight?.insider_tip ? (
-                      <View style={s.insiderTip}>
-                        <Text style={s.insiderLabel}>INSIDER TIP</Text>
-                        <Text style={s.insiderText}>{campInsight.insider_tip}</Text>
-                      </View>
-                    ) : null}
-                    {campInsight?.best_for ? <Text style={s.aiMeta}>Best for: {campInsight.best_for}</Text> : null}
-                    {campInsight?.best_season ? <Text style={s.aiMeta}>Best season: {campInsight.best_season}</Text> : null}
-                    {campInsight?.hazards ? (
-                      <View style={s.hazardRow}>
-                        <Ionicons name="warning-outline" size={13} color={C.yellow} />
-                        <Text style={s.hazardText}>{campInsight.hazards}</Text>
-                      </View>
-                    ) : null}
-                    {campInsight?.nearby_highlights?.length ? (
-                      <View style={{ marginTop: 8 }}>
-                        <Text style={[s.detailSectionTitle, { marginBottom: 6 }]}>NEARBY</Text>
-                        {campInsight.nearby_highlights.map((h, i) => (
-                          <Text key={i} style={s.nearbyItem}>• {h}</Text>
-                        ))}
-                      </View>
-                    ) : null}
-                  </View>
+                  <CampInsightSection
+                    title="CAMP INSIGHT"
+                    nearbyTitle="NEARBY"
+                    insight={campInsight}
+                    loading={loadingInsight}
+                    showLoadingSpinner
+                  />
 	                ) : hasPlan ? (
 	                  <TouchableOpacity style={s.lockedInlineCard} onPress={() => openCampInsight(selectedCamp, campDetail)}>
 	                    <Ionicons name="sparkles-outline" size={15} color={C.orange} />
@@ -19379,56 +19359,21 @@ function MapScreen() {
             {(() => {
               const key = nearbyFeedKey('camp', selectedCamp.lat, selectedCamp.lng);
               const feed = nearbyPlaceFeeds[key];
-              const feedPlaces = (feed?.places ?? []).filter(place => !isLowValueGenericBlmPlace(place, isTripServicePlace(place)));
-              const visitorCenters = qualityGuideRail(feedPlaces.filter(isVisitorCenterPlace), { photoFirst: true });
-              const tripServices = qualityGuideRail(feedPlaces.filter(isTripServicePlace), { keepServices: true });
-              const sights = qualityGuideRail(feedPlaces.filter(place => !isTripServicePlace(place) && !isVisitorCenterPlace(place) && isSightPlace(place)), { photoFirst: true });
-              const things = qualityGuideRail(feedPlaces.filter(place => !isTripServicePlace(place) && !isVisitorCenterPlace(place) && !isSightPlace(place)), { photoFirst: true });
+              const { things, sights, visitorCenters, tripServices } = buildCampNearbyGroups(feed?.places ?? []);
               return (
-                <View style={s.nearbyPlacesBlock}>
-                  <View style={s.nearbyPlacesHeader}>
-	                    <Text style={s.nearbyPlacesTitle}>NEARBY PLACES</Text>
-                    {feed?.loading ? <ActivityIndicator size="small" color={C.orange} /> : null}
-                  </View>
-                  {!feed?.loading && !feedPlaces.length ? (
-                    <Text style={s.nearbyPlacesEmpty}>{feed?.error ?? 'No useful nearby places loaded yet'}</Text>
-                  ) : (
-                    <>
-                      {things.length > 0 ? (
-                        <>
-                          <Text style={s.nearbyPlacesTitle}>THINGS TO DO</Text>
-                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.nearbyPlaceRail}>
-                            {things.slice(0, 10).map(place => renderNearbyPlaceCard(place))}
-                          </ScrollView>
-                        </>
-                      ) : null}
-                      {sights.length > 0 ? (
-                        <>
-                          <Text style={s.nearbyPlacesTitle}>THINGS TO SEE</Text>
-                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.nearbyPlaceRail}>
-                            {sights.slice(0, 10).map(place => renderNearbyPlaceCard(place))}
-                          </ScrollView>
-                        </>
-                      ) : null}
-                      {visitorCenters.length > 0 ? (
-                        <>
-                          <Text style={s.nearbyPlacesTitle}>VISITOR CENTERS</Text>
-                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.nearbyPlaceRail}>
-                            {visitorCenters.slice(0, 8).map(place => renderNearbyPlaceCard(place))}
-                          </ScrollView>
-                        </>
-                      ) : null}
-                      {tripServices.length > 0 ? (
-                        <>
-                          <Text style={s.nearbyPlacesTitle}>TRIP SERVICES</Text>
-                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.nearbyPlaceRail}>
-                            {tripServices.slice(0, 8).map(place => renderNearbyPlaceCard(place))}
-                          </ScrollView>
-                        </>
-                      ) : null}
-                    </>
-                  )}
-                </View>
+                <CampNearbyPlacesSection
+                  loading={!!feed?.loading}
+                  sourceLabel={feed?.sourceLabel}
+                  emptyMessage={feed?.error ?? 'No useful nearby places loaded yet'}
+                  emptyActionLabel="WIDER SEARCH"
+                  onRetry={() => loadNearbyPlacesFor(key, selectedCamp, 32)}
+                  rails={[
+                    { title: 'THINGS TO DO', cards: things.slice(0, 10).map(place => renderNearbyPlaceCard(place)) },
+                    { title: 'THINGS TO SEE', cards: sights.slice(0, 10).map(place => renderNearbyPlaceCard(place)) },
+                    { title: 'VISITOR CENTERS', cards: visitorCenters.slice(0, 8).map(place => renderNearbyPlaceCard(place)) },
+                    { title: 'TRIP SERVICES', cards: tripServices.slice(0, 8).map(place => renderNearbyPlaceCard(place)) },
+                  ]}
+                />
               );
             })()}
             {(selectedCamp.reservable || String(selectedCamp.url || '').includes('recreation.gov')) && selectedCamp.url ? (
@@ -19748,125 +19693,45 @@ function MapScreen() {
                 )}
 
                 {/* Coordinates */}
-                <View style={s.detailSection}>
-                  <Text style={s.detailSectionTitle}>Coordinates</Text>
-                  <View style={s.coordRow}>
-                    <Text style={s.coordText}>
-                      {campDetail.lat.toFixed(6)}, {campDetail.lng.toFixed(6)}
-                    </Text>
-                    <TouchableOpacity style={s.coordCopy} onPress={() => copyCoordinates(campDetail.lat, campDetail.lng)}>
-                      <Ionicons name="copy-outline" size={14} color={C.orange} />
-                      <Text style={s.coordCopyText}>COPY</Text>
-                    </TouchableOpacity>
-                  </View>
-                  {campInsight?.coordinates_dms ? (
-                    <Text style={s.coordDms}>{campInsight.coordinates_dms}</Text>
-                  ) : null}
-                </View>
+                <CampCoordinatesSection
+                  title="Coordinates"
+                  lat={campDetail.lat}
+                  lng={campDetail.lng}
+                  dms={campInsight?.coordinates_dms}
+                  onCopy={() => copyCoordinates(campDetail.lat, campDetail.lng)}
+                />
 
 	                {/* Camp insight */}
-                {(campInsight || loadingInsight) && (
-                  <View style={s.detailSection}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 }}>
-	                      <Text style={s.detailSectionTitle}>Camp Insight</Text>
-                      {campInsight?.star_rating && (
-                        <Text style={s.aiStars}>{campInsight.star_rating}/5</Text>
-                      )}
-                    </View>
-                    {loadingInsight && !campInsight && <ActivityIndicator size="small" color={C.orange} />}
-                    {campInsight?.insider_tip ? (
-                      <View style={s.insiderTip}>
-                        <Text style={s.insiderLabel}>INSIDER TIP</Text>
-                        <Text style={s.insiderText}>{campInsight.insider_tip}</Text>
-                      </View>
-                    ) : null}
-                    {campInsight?.best_for ? <Text style={s.aiMeta}>Best for: {campInsight.best_for}</Text> : null}
-                    {campInsight?.best_season ? <Text style={s.aiMeta}>Best season: {campInsight.best_season}</Text> : null}
-                    {campInsight?.hazards ? (
-                      <View style={s.hazardRow}>
-                        <Ionicons name="warning-outline" size={13} color={C.yellow} />
-                        <Text style={s.hazardText}>{campInsight.hazards}</Text>
-                      </View>
-                    ) : null}
-                    {campInsight?.nearby_highlights?.length ? (
-                      <View style={{ marginTop: 8 }}>
-                        <Text style={[s.detailSectionTitle, { borderBottomWidth: 0, paddingBottom: 0, marginBottom: 6 }]}>Nearby</Text>
-                        {campInsight.nearby_highlights.map((h, i) => (
-                          <Text key={i} style={s.nearbyItem}>• {h}</Text>
-                        ))}
-                      </View>
-                    ) : null}
-                  </View>
-                )}
+                <CampInsightSection
+                  title="Camp Insight"
+                  nearbyTitle="Nearby"
+                  insight={campInsight}
+                  loading={loadingInsight}
+                  showLoadingSpinner={!campInsight}
+                />
 
-                {(campDetail.reviews ?? []).length > 0 && (
-                  <View style={s.detailSection}>
-                    <Text style={s.detailSectionTitle}>REVIEWS</Text>
-                    {(campDetail.reviews ?? []).slice(0, 3).map((review, idx) => (
-                      <View key={`${review.authorName}-${idx}`} style={s.campReviewCard}>
-                        <View style={s.campReviewTop}>
-                          <Text style={s.campReviewAuthor} numberOfLines={1}>{review.authorName || 'Review'}</Text>
-                          <Text style={s.campReviewRating}>{review.rating ? `${review.rating}/5` : review.source || 'Provider'}</Text>
-                        </View>
-                        {!!review.relativeTime && <Text style={s.campReviewMeta}>{review.relativeTime}</Text>}
-                        {!!review.text && <Text style={s.campReviewText} numberOfLines={4}>{review.text}</Text>}
-                      </View>
-                    ))}
-                  </View>
-                )}
+                <CampReviewsSection reviews={campDetail.reviews ?? []} limit={3} />
 
                 {(() => {
                   const key = nearbyFeedKey('camp', campDetail.lat, campDetail.lng);
                   const feed = nearbyPlaceFeeds[key];
-                  const feedPlaces = (feed?.places ?? []).filter(place => !isLowValueGenericBlmPlace(place, isTripServicePlace(place)));
-                  const visitorCenters = qualityGuideRail(feedPlaces.filter(isVisitorCenterPlace), { photoFirst: true });
-                  const tripServices = qualityGuideRail(feedPlaces.filter(isTripServicePlace), { keepServices: true });
-                  const sights = qualityGuideRail(feedPlaces.filter(place => !isTripServicePlace(place) && !isVisitorCenterPlace(place) && isSightPlace(place)), { photoFirst: true });
-                  const things = qualityGuideRail(feedPlaces.filter(place => !isTripServicePlace(place) && !isVisitorCenterPlace(place) && !isSightPlace(place)), { photoFirst: true });
+                  const { things, sights, visitorCenters, tripServices } = buildCampNearbyGroups(feed?.places ?? []);
                   return (
                     <View style={s.detailSection}>
-                      <View style={s.nearbyPlacesHeader}>
-	                        <Text style={s.detailSectionTitle}>NEARBY PLACES</Text>
-                        {feed?.loading ? <ActivityIndicator size="small" color={C.orange} /> : null}
-                      </View>
-                      {!feed?.loading && !feedPlaces.length ? (
-                        <Text style={s.nearbyPlacesEmpty}>{feed?.error ?? 'No nearby discovery loaded yet'}</Text>
-                      ) : (
-                        <>
-                          {things.length > 0 ? (
-                            <>
-                              <Text style={s.nearbyPlacesTitle}>THINGS TO DO</Text>
-                              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.nearbyPlaceRail}>
-                                {things.slice(0, 12).map(place => renderNearbyPlaceCard(place))}
-                              </ScrollView>
-                            </>
-                          ) : null}
-                          {sights.length > 0 ? (
-                            <>
-                              <Text style={s.nearbyPlacesTitle}>THINGS TO SEE</Text>
-                              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.nearbyPlaceRail}>
-                                {sights.slice(0, 12).map(place => renderNearbyPlaceCard(place))}
-                              </ScrollView>
-                            </>
-                          ) : null}
-                          {visitorCenters.length > 0 ? (
-                            <>
-                              <Text style={s.nearbyPlacesTitle}>VISITOR CENTERS</Text>
-                              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.nearbyPlaceRail}>
-                                {visitorCenters.slice(0, 8).map(place => renderNearbyPlaceCard(place))}
-                              </ScrollView>
-                            </>
-                          ) : null}
-                          {tripServices.length > 0 ? (
-                            <>
-                              <Text style={s.nearbyPlacesTitle}>TRIP SERVICES</Text>
-                              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.nearbyPlaceRail}>
-                                {tripServices.slice(0, 8).map(place => renderNearbyPlaceCard(place))}
-                              </ScrollView>
-                            </>
-                          ) : null}
-                        </>
-                      )}
+                      <CampNearbyPlacesSection
+                        title="NEARBY PLACES"
+                        loading={!!feed?.loading}
+                        sourceLabel={feed?.sourceLabel}
+                        emptyMessage={feed?.error ?? 'No nearby discovery loaded yet'}
+                        emptyActionLabel="WIDER SEARCH"
+                        onRetry={() => loadNearbyPlacesFor(key, campDetail, 32)}
+                        rails={[
+                          { title: 'THINGS TO DO', cards: things.slice(0, 12).map(place => renderNearbyPlaceCard(place)) },
+                          { title: 'THINGS TO SEE', cards: sights.slice(0, 12).map(place => renderNearbyPlaceCard(place)) },
+                          { title: 'VISITOR CENTERS', cards: visitorCenters.slice(0, 8).map(place => renderNearbyPlaceCard(place)) },
+                          { title: 'TRIP SERVICES', cards: tripServices.slice(0, 8).map(place => renderNearbyPlaceCard(place)) },
+                        ]}
+                      />
                     </View>
                   );
                 })()}
@@ -19888,159 +19753,27 @@ function MapScreen() {
                   </View>
                 )}
 
-                <View style={s.detailSection}>
-                  <View style={s.frHeader}>
-                    <Text style={s.detailSectionTitle}>COMMENTS & QUESTIONS</Text>
-                    {campComments.length > 0 && (
-                      <Text style={s.frCount}>{campComments.length} {campComments.length === 1 ? 'comment' : 'comments'}</Text>
-                    )}
-                  </View>
-                  {campComments.slice(0, 8).map(comment => (
-                    <View key={comment.id} style={s.campCommentCard}>
-                      <View style={s.campCommentTop}>
-                        <Text style={s.campCommentAuthor} numberOfLines={1}>{comment.username}</Text>
-                        <Text style={s.campCommentDate}>{new Date(comment.created_at * 1000).toLocaleDateString()}</Text>
-                      </View>
-                      <Text style={s.campCommentBody}>{comment.body}</Text>
-                    </View>
-                  ))}
-                  {!campComments.length && !showCampCommentForm ? (
-                    <Text style={s.frEmpty}>No comments yet. Ask a question or leave a recent note.</Text>
-                  ) : null}
-                  {showCampCommentForm ? (
-                    <View style={s.frForm}>
-                      <Text style={s.frFormLabel}>Comment</Text>
-                      <TextInput
-                        style={s.frNoteInput}
-                        value={campCommentText}
-                        onChangeText={v => setCampCommentText(v.slice(0, 800))}
-                        placeholder="Ask a question, share a recent condition, or add a useful note..."
-                        placeholderTextColor={C.text3}
-                        multiline
-                        numberOfLines={4}
-                      />
-                      <Text style={s.frCharCount}>{campCommentText.length}/800</Text>
-                      <View style={s.frFormActions}>
-                        <TouchableOpacity style={s.frCancelBtn} onPress={() => { setShowCampCommentForm(false); setCampCommentText(''); }}>
-                          <Text style={s.frCancelText}>Cancel</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={[s.frSubmitBtn, (campCommentText.trim().length < 2 || campCommentSubmitting) && { opacity: 0.5 }]}
-                          onPress={submitCampComment}
-                          disabled={campCommentText.trim().length < 2 || campCommentSubmitting}
-                        >
-                          {campCommentSubmitting
-                            ? <ActivityIndicator size="small" color="#fff" />
-                            : <Text style={s.frSubmitText}>POST COMMENT</Text>}
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  ) : (
-                    user && (
-                      <TouchableOpacity style={s.frAddBtn} onPress={() => setShowCampCommentForm(true)}>
-                        <Ionicons name="chatbubble-ellipses-outline" size={15} color={C.orange} />
-                        <Text style={s.frAddBtnText}>ADD COMMENT</Text>
-                      </TouchableOpacity>
-                    )
-                  )}
-                </View>
+                <CampCommentsSection
+                  comments={campComments}
+                  limit={8}
+                  showForm={showCampCommentForm}
+                  commentText={campCommentText}
+                  commentSubmitting={campCommentSubmitting}
+                  canComment={!!user}
+                  onOpenForm={() => setShowCampCommentForm(true)}
+                  onCancelForm={() => { setShowCampCommentForm(false); setCampCommentText(''); }}
+                  onChangeCommentText={setCampCommentText}
+                  onSubmitComment={submitCampComment}
+                />
 
-                {/* ── Field Reports ── */}
-                <View style={s.detailSection}>
-                  <View style={s.frHeader}>
-                    <Text style={s.detailSectionTitle}>FIELD REPORTS</Text>
-                    {fieldReportSummary && fieldReportSummary.count > 0 && (
-                      <Text style={s.frCount}>{fieldReportSummary.count} {fieldReportSummary.count === 1 ? 'report' : 'reports'}</Text>
-                    )}
-                  </View>
-
-                  {/* Sentiment bar */}
-                  {fieldReportSummary && fieldReportSummary.count > 0 && (() => {
-                    const total = fieldReportSummary.count;
-                    const loved = (fieldReportSummary.sentiment_counts['loved_it'] ?? 0) / total;
-                    const ok    = (fieldReportSummary.sentiment_counts['its_ok']    ?? 0) / total;
-                    const skip  = (fieldReportSummary.sentiment_counts['would_skip'] ?? 0) / total;
-                    return (
-                      <View style={{ marginBottom: 10 }}>
-                        <View style={s.frSentimentBar}>
-                          {loved > 0 && <View style={[s.frBarSeg, { flex: loved, backgroundColor: '#22c55e' }]} />}
-                          {ok    > 0 && <View style={[s.frBarSeg, { flex: ok,    backgroundColor: '#f59e0b' }]} />}
-                          {skip  > 0 && <View style={[s.frBarSeg, { flex: skip,  backgroundColor: '#ef4444' }]} />}
-                        </View>
-                        <View style={s.frSentimentLegend}>
-                          {loved > 0 && <View style={s.frLegendPill}><Ionicons name="heart" size={12} color="#22c55e" /><Text style={[s.frLegendItem, { color: '#22c55e' }]}>{Math.round(loved * 100)}%</Text></View>}
-                          {ok    > 0 && <View style={s.frLegendPill}><Ionicons name="thumbs-up" size={12} color="#f59e0b" /><Text style={[s.frLegendItem, { color: '#f59e0b' }]}>{Math.round(ok * 100)}%</Text></View>}
-                          {skip  > 0 && <View style={s.frLegendPill}><Ionicons name="thumbs-down" size={12} color="#ef4444" /><Text style={[s.frLegendItem, { color: '#ef4444' }]}>{Math.round(skip * 100)}%</Text></View>}
-                          {fieldReportSummary.last_visited && (
-                            <Text style={s.frLastVisited}>Last visited {fieldReportSummary.last_visited}</Text>
-                          )}
-                        </View>
-                        {/* Top tags */}
-                        {fieldReportSummary.top_tags.length > 0 && (
-                          <View style={s.frTagCloud}>
-                            {fieldReportSummary.top_tags.map(({ tag, count }) => (
-                              <View key={tag} style={s.frTagCloudItem}>
-                                <Text style={s.frTagCloudText}>{tag}</Text>
-                                {count > 1 && <Text style={s.frTagCloudCount}>{count}</Text>}
-                              </View>
-                            ))}
-                          </View>
-                        )}
-                      </View>
-                    );
-                  })()}
-
-                  {/* Report list */}
-                  {fieldReports.slice(0, 5).map(fr => {
-                    const sentiment = fieldSentimentLabel(fr.sentiment);
-                    const access = fieldAccessLabel(fr.access_condition);
-                    const crowd = fieldCrowdLabel(fr.crowd_level);
-                    return (
-                      <View key={fr.id} style={s.frCard}>
-                        <View style={s.frCardTop}>
-                          <View style={[s.frIconBubble, { backgroundColor: sentiment.color + '18' }]}>
-                            <Ionicons name={sentiment.icon} size={15} color={sentiment.color} />
-                          </View>
-                          <View style={{ flex: 1 }}>
-                            <Text style={s.frCardMeta}>{sentiment.label} · {fr.username}</Text>
-                            <Text style={s.frCardDate}>{fr.visited_date}</Text>
-                            {fr.rig_label && <Text style={s.frCardRig}>{fr.rig_label}</Text>}
-                          </View>
-                          {fr.has_photo && <Ionicons name="camera-outline" size={13} color={C.text3} />}
-                        </View>
-                        <View style={s.frCardBadges}>
-                          <View style={s.frMiniBadge}>
-                            <Ionicons name={access.icon} size={10} color={access.color} />
-                            <Text style={s.frCardBadge}>{access.label}</Text>
-                          </View>
-                          <View style={s.frMiniBadge}>
-                            <Ionicons name={crowd.icon} size={11} color={crowd.color} />
-                            <Text style={s.frCardBadge}>{crowd.label}</Text>
-                          </View>
-                        </View>
-                        {fr.tags.length > 0 && (
-                          <View style={s.frCardTags}>
-                            {fr.tags.slice(0, 5).map(t => (
-                              <View key={t} style={s.frInlineTag}><Text style={s.frInlineTagText}>{t}</Text></View>
-                            ))}
-                          </View>
-                        )}
-                        {fr.note ? <Text style={s.frCardNote} numberOfLines={3}>{fr.note}</Text> : null}
-                      </View>
-                    );
-                  })}
-
-                  {fieldReports.length === 0 && (
-                    <Text style={s.frEmpty}>No field reports yet. Be the first to check in.</Text>
-                  )}
-
-                  {user && (
-                    <TouchableOpacity style={s.frAddBtn} onPress={() => setShowFieldReportForm(true)}>
-                      <Ionicons name="add-circle-outline" size={15} color={C.orange} />
-                      <Text style={s.frAddBtnText}>ADD FIELD REPORT</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
+                <CampFieldReportsSection
+                  reports={fieldReports}
+                  summary={fieldReportSummary}
+                  limit={5}
+                  showSummary
+                  canAddReport={!!user}
+                  onAddReport={() => setShowFieldReportForm(true)}
+                />
 
                 {/* Actions */}
                 <View style={s.detailActions}>
@@ -20074,95 +19807,62 @@ function MapScreen() {
         onClose={() => setCampGalleryIndex(null)}
       />
 
-      <Modal visible={showMapWeatherSheet} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowMapWeatherSheet(false)}>
-        <SafeAreaView style={[s.detailModal, { backgroundColor: C.bg }]}>
-          <View style={s.mapWeatherSheetHeader}>
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={s.mapWeatherSheetKicker}>WEATHER AT MAP CENTER</Text>
-              <Text style={s.mapWeatherSheetTitle} numberOfLines={1}>
-                {mapWeatherCenter ? `${mapWeatherCenter.lat.toFixed(4)}, ${mapWeatherCenter.lng.toFixed(4)}` : 'Map center'}
-              </Text>
-            </View>
-            <TouchableOpacity style={s.detailClose} onPress={() => setShowMapWeatherSheet(false)}>
-              <Ionicons name="close" size={18} color={C.text2} />
-            </TouchableOpacity>
-          </View>
-          <ScrollView contentContainerStyle={s.mapWeatherSheetContent} showsVerticalScrollIndicator={false}>
-            {mapWeather ? (() => {
-              const current = mapWeather.current;
-              const code = Number(current?.weather_code ?? mapWeather.daily.weathercode?.[0] ?? 3);
-              const units = mapWeather.trailhead_units;
-              const airCurrent = mapWeather.air_quality?.current;
-              return (
-                <>
-                  <View style={s.mapWeatherCurrentCard}>
-                    <Ionicons name={weatherIonIcon(code)} size={36} color="#38bdf8" />
-                    <View style={{ flex: 1, minWidth: 0 }}>
-                      <Text style={s.mapWeatherCurrentTemp}>{weatherTemp(current?.temperature_2m, units)}</Text>
-                      <Text style={s.mapWeatherCurrentMeta}>{weatherSummaryLabel(code)} · feels {weatherTemp(current?.apparent_temperature, units)}</Text>
-                    </View>
-                    <View style={s.mapWeatherMetricStack}>
-                      <Text style={s.mapWeatherMetric}>{Math.round(Number(current?.wind_speed_10m ?? 0))} {units?.wind_label ?? ''}</Text>
-                      <Text style={s.mapWeatherMetricSub}>wind</Text>
-                    </View>
-                  </View>
-
-                  <View style={s.detailSection}>
-                    <Text style={s.detailSectionTitle}>NEXT HOURS</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.mapWeatherHourlyRail}>
-                      {(mapWeather.hourly?.time ?? []).slice(0, 12).map((time, idx) => (
-                        <View key={`${time}-${idx}`} style={s.mapWeatherHourCard}>
-                          <Text style={s.mapWeatherHourTime}>{new Date(time).getHours().toString().padStart(2, '0')}</Text>
-                          <Ionicons name={weatherIonIcon(Number(mapWeather.hourly?.weather_code?.[idx] ?? code))} size={17} color="#38bdf8" />
-                          <Text style={s.mapWeatherHourTemp}>{weatherTemp(mapWeather.hourly?.temperature_2m?.[idx], units)}</Text>
-                          <Text style={s.mapWeatherHourRain}>{Math.round(Number(mapWeather.hourly?.precipitation_probability?.[idx] ?? 0))}%</Text>
-                        </View>
-                      ))}
-                    </ScrollView>
-                  </View>
-
-                  <View style={s.detailSection}>
-                    <Text style={s.detailSectionTitle}>7 DAY FORECAST</Text>
-                    {(mapWeather.daily.time ?? []).slice(0, 7).map((day, idx) => (
-                      <View key={day} style={s.mapWeatherDayRow}>
-                        <Text style={s.mapWeatherDayName}>{idx === 0 ? 'Today' : new Date(day).toLocaleDateString(undefined, { weekday: 'short' })}</Text>
-                        <Ionicons name={weatherIonIcon(Number(mapWeather.daily.weathercode?.[idx] ?? code))} size={17} color="#38bdf8" />
-                        <Text style={s.mapWeatherDayTemp}>{weatherTemp(mapWeather.daily.temperature_2m_max?.[idx], units)} / {weatherTemp(mapWeather.daily.temperature_2m_min?.[idx], units)}</Text>
-                        <Text style={s.mapWeatherDayMeta}>{Math.round(Number(mapWeather.daily.precipitation_probability_max?.[idx] ?? 0))}% · UV {Math.round(Number(mapWeather.daily.uv_index_max?.[idx] ?? 0))}</Text>
-                      </View>
-                    ))}
-                  </View>
-
-                  <View style={s.detailSection}>
-                    <Text style={s.detailSectionTitle}>AIR & HEALTH</Text>
-                    <View style={s.mapWeatherHealthGrid}>
-                      <View style={s.mapWeatherHealthCard}>
-                        <Text style={s.mapWeatherHealthLabel}>AQI</Text>
-                        <Text style={s.mapWeatherHealthValue}>{airCurrent?.us_aqi ?? '--'}</Text>
-                      </View>
-                      <View style={s.mapWeatherHealthCard}>
-                        <Text style={s.mapWeatherHealthLabel}>PM2.5</Text>
-                        <Text style={s.mapWeatherHealthValue}>{airCurrent?.pm2_5 ?? '--'}</Text>
-                      </View>
-                      <View style={s.mapWeatherHealthCard}>
-                        <Text style={s.mapWeatherHealthLabel}>Ozone</Text>
-                        <Text style={s.mapWeatherHealthValue}>{airCurrent?.ozone ?? '--'}</Text>
-                      </View>
-                    </View>
-                    <Text style={s.mapWeatherDisclaimer}>{mapWeather.health_summary?.advisory || 'Weather and health data are modeled estimates. Verify severe weather with official alerts before travel.'}</Text>
-                  </View>
-                  <Text style={s.mapWeatherSource}>{mapWeather.source_label || 'Open-Meteo'}</Text>
-                </>
-              );
-            })() : (
-              <View style={s.inlineLoadingDetail}>
-                <ActivityIndicator size="small" color="#38bdf8" />
-                <Text style={s.inlineLoadingText}>{mapWeatherError || 'Loading weather'}</Text>
-              </View>
-            )}
-          </ScrollView>
-        </SafeAreaView>
-      </Modal>
+      <MapWeatherSheet
+        visible={showMapWeatherSheet}
+        title={mapWeatherCenter ? `${mapWeatherCenter.lat.toFixed(4)}, ${mapWeatherCenter.lng.toFixed(4)}` : 'Map center'}
+        loadingMessage={mapWeatherError || 'Loading weather'}
+        currentIcon={(() => {
+          const current = mapWeather?.current;
+          const code = Number(current?.weather_code ?? mapWeather?.daily?.weathercode?.[0] ?? 3);
+          return weatherIonIcon(code);
+        })()}
+        currentTemp={(() => {
+          const units = mapWeather?.trailhead_units;
+          return weatherTemp(mapWeather?.current?.temperature_2m, units);
+        })()}
+        currentMeta={(() => {
+          const current = mapWeather?.current;
+          const code = Number(current?.weather_code ?? mapWeather?.daily?.weathercode?.[0] ?? 3);
+          const units = mapWeather?.trailhead_units;
+          return `${weatherSummaryLabel(code)} · feels ${weatherTemp(current?.apparent_temperature, units)}`;
+        })()}
+        currentWind={(() => {
+          const current = mapWeather?.current;
+          const units = mapWeather?.trailhead_units;
+          return `${Math.round(Number(current?.wind_speed_10m ?? 0))} ${units?.wind_label ?? ''}`.trim();
+        })()}
+        hourly={(() => {
+          const code = Number(mapWeather?.current?.weather_code ?? mapWeather?.daily?.weathercode?.[0] ?? 3);
+          const units = mapWeather?.trailhead_units;
+          return (mapWeather?.hourly?.time ?? []).slice(0, 12).map((time, idx) => ({
+            id: `${time}-${idx}`,
+            hour: new Date(time).getHours().toString().padStart(2, '0'),
+            icon: weatherIonIcon(Number(mapWeather?.hourly?.weather_code?.[idx] ?? code)),
+            temp: weatherTemp(mapWeather?.hourly?.temperature_2m?.[idx], units),
+            precip: `${Math.round(Number(mapWeather?.hourly?.precipitation_probability?.[idx] ?? 0))}%`,
+          }));
+        })()}
+        daily={(() => {
+          const code = Number(mapWeather?.current?.weather_code ?? mapWeather?.daily?.weathercode?.[0] ?? 3);
+          const units = mapWeather?.trailhead_units;
+          return (mapWeather?.daily?.time ?? []).slice(0, 7).map((day, idx) => ({
+            id: day,
+            day: idx === 0 ? 'Today' : new Date(day).toLocaleDateString(undefined, { weekday: 'short' }),
+            icon: weatherIonIcon(Number(mapWeather?.daily?.weathercode?.[idx] ?? code)),
+            temp: `${weatherTemp(mapWeather?.daily?.temperature_2m_max?.[idx], units)} / ${weatherTemp(mapWeather?.daily?.temperature_2m_min?.[idx], units)}`,
+            meta: `${Math.round(Number(mapWeather?.daily?.precipitation_probability_max?.[idx] ?? 0))}% · UV ${Math.round(Number(mapWeather?.daily?.uv_index_max?.[idx] ?? 0))}`,
+          }));
+        })()}
+        health={[
+          { label: 'AQI', value: mapWeather?.air_quality?.current?.us_aqi != null ? String(mapWeather.air_quality.current.us_aqi) : '--' },
+          { label: 'PM2.5', value: mapWeather?.air_quality?.current?.pm2_5 != null ? String(mapWeather.air_quality.current.pm2_5) : '--' },
+          { label: 'Ozone', value: mapWeather?.air_quality?.current?.ozone != null ? String(mapWeather.air_quality.current.ozone) : '--' },
+        ]}
+        disclaimer={mapWeather?.health_summary?.advisory || 'Weather and health data are modeled estimates. Verify severe weather with official alerts before travel.'}
+        sourceLabel={mapWeather?.source_label || 'Open-Meteo'}
+        hasData={!!mapWeather}
+        onClose={() => setShowMapWeatherSheet(false)}
+      />
 
       <Modal
         visible={showFieldReportForm && !!selectedCamp}
@@ -20364,76 +20064,21 @@ function MapScreen() {
         webDownloadLabel={downloadLabel}
       />
 
-      <Modal visible={showMapStyleSheet && !navMode} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setShowMapStyleSheet(false)}>
-        <TouchableOpacity style={s.mapStyleOverlay} activeOpacity={1} onPress={() => setShowMapStyleSheet(false)}>
-          <TouchableOpacity activeOpacity={1} style={[s.mapStyleSheet, { paddingBottom: bottomInset + 16 }]} onPress={() => {}}>
-            <View style={s.mapStyleHeader}>
-              <View>
-                <Text style={s.mapStyleTitle}>Map style</Text>
-                <Text style={s.mapStyleSub}>Choose how the map looks.</Text>
-              </View>
-              <TouchableOpacity style={s.mapDrawerClose} onPress={() => setShowMapStyleSheet(false)}>
-                <Ionicons name="close" size={17} color={OVR.text2} />
-              </TouchableOpacity>
-            </View>
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.mapStyleGrid}>
-              {mapStyleOptions.map(option => {
-                const active = option.id === mapLayer;
-                return (
-                  <TouchableOpacity
-                    key={option.id}
-                    style={[s.mapStyleCard, active && s.mapStyleCardActive]}
-                    activeOpacity={0.86}
-                    onPress={() => {
-                      applyMapLayer(option.id);
-                      setShowMapStyleSheet(false);
-                    }}
-                  >
-                    <View style={[s.mapStylePreview, { backgroundColor: option.colors[0] }]}>
-                      <View style={[s.mapStylePreviewWater, { backgroundColor: option.colors[2] }]} />
-                      <View style={[s.mapStylePreviewLand, { backgroundColor: option.colors[1] }]} />
-                      <View style={s.mapStylePreviewRoad} />
-                      <View style={[s.mapStylePreviewRoad, s.mapStylePreviewRoadAlt]} />
-                    </View>
-                    <View style={{ flex: 1, minWidth: 0 }}>
-                      <Text style={s.mapStyleCardTitle} numberOfLines={1}>{option.title}</Text>
-                      <Text style={s.mapStyleCardSub} numberOfLines={1}>{option.sub}</Text>
-                    </View>
-                    {active && <Ionicons name="checkmark-circle" size={18} color={C.green} />}
-                  </TouchableOpacity>
-                );
-              })}
-              <TouchableOpacity
-                style={[
-                  s.mapStyleCard,
-                  s.extremeMapStyleCard,
-                  extremeMapLayerActive && s.extremeMapStyleCardActive,
-                  (!extremeConfig?.enabled || !extremeMapLayerAvailable) && s.extremeMapStyleCardLocked,
-                ]}
-                activeOpacity={0.86}
-                onPress={() => {
-                  selectExtremeMapLayer();
-                  if (extremeConfig?.enabled && extremeMapLayerAvailable) setShowMapStyleSheet(false);
-                }}
-              >
-                <View style={s.extremeCompactPreview}>
-                  <Text style={s.extremeCompactWord}>EXTREME</Text>
-                </View>
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={s.extremeStyleTitle} numberOfLines={1}>EXTREME</Text>
-                  <Text style={s.mapStyleCardSub} numberOfLines={1}>
-                    {extremeMapLayerSub}
-                  </Text>
-                </View>
-                <Ionicons name={extremeMapLayerActive ? 'checkmark-circle' : 'lock-closed'} size={18} color="#ef4444" />
-              </TouchableOpacity>
-            </ScrollView>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
+      <MapStyleSheet
+        visible={showMapStyleSheet && !navMode}
+        bottomInset={bottomInset}
+        activeMapLayer={mapLayer}
+        options={mapStyleOptions}
+        extremeActive={extremeMapLayerActive}
+        extremeSelectable={!!extremeConfig?.enabled && extremeMapLayerAvailable}
+        extremeSub={extremeMapLayerSub}
+        onClose={() => setShowMapStyleSheet(false)}
+        onSelectMapLayer={id => applyMapLayer(id as MapLayer)}
+        onSelectExtreme={selectExtremeMapLayer}
+      />
 
       {/* ── Route Brief Modal ── */}
-      <Modal visible={showRouteBrief} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowRouteBrief(false)}>
+      <Modal visible={showRouteBrief} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => closeRouteBrief('system_dismiss')}>
         <View style={s.detailModal}>
           {routeBrief && (
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 20 }}>
@@ -20445,7 +20090,7 @@ function MapScreen() {
                 <TouchableOpacity style={s.detailClose} onPress={() => fetchRouteBrief(true)} disabled={loadingBrief}>
                   {loadingBrief ? <ActivityIndicator size="small" color={C.orange} /> : <Ionicons name="refresh" size={18} color={C.orange} />}
                 </TouchableOpacity>
-                <TouchableOpacity style={s.detailClose} onPress={() => setShowRouteBrief(false)}>
+                <TouchableOpacity style={s.detailClose} onPress={() => closeRouteBrief('close_button')}>
                   <Ionicons name="close" size={22} color={C.text} />
                 </TouchableOpacity>
               </View>
@@ -20646,253 +20291,34 @@ function MapScreen() {
               ))}
             </ScrollView>
           ) : (
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.layerSheetContent}>
-            <Text style={s.layerSectionHead}>MAP STYLE</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={s.layerStyleCarousel}
-            >
-              {mapStyleOptions.map(option => {
-                const active = option.id === mapLayer;
-                return (
-                  <TouchableOpacity
-                    key={option.id}
-                    style={[s.layerStyleCard, active && s.layerStyleCardActive]}
-                    activeOpacity={0.86}
-                    onPress={() => applyMapLayer(option.id)}
-                  >
-                    <View style={[s.layerStylePreview, { backgroundColor: option.colors[0] }]}>
-                      <View style={[s.mapStylePreviewWater, { backgroundColor: option.colors[2] }]} />
-                      <View style={[s.mapStylePreviewLand, { backgroundColor: option.colors[1] }]} />
-                      <View style={s.mapStylePreviewRoad} />
-                      <View style={[s.mapStylePreviewRoad, s.mapStylePreviewRoadAlt]} />
-                    </View>
-                    <View style={s.layerStyleCardText}>
-                      <Text style={s.layerStyleTitle} numberOfLines={1}>{option.title}</Text>
-                      <Text style={s.layerStyleSub} numberOfLines={1}>{option.sub}</Text>
-                    </View>
-                    {active && <Ionicons name="checkmark-circle" size={17} color={C.green} />}
-                  </TouchableOpacity>
-                );
-              })}
-              <TouchableOpacity
-                style={[
-                  s.layerStyleCard,
-                  s.extremeStyleCard,
-                  extremeMapLayerActive && s.extremeStyleCardActive,
-                  (!extremeConfig?.enabled || !extremeMapLayerAvailable) && s.extremeStyleCardLocked,
-                ]}
-                activeOpacity={0.86}
-                onPress={selectExtremeMapLayer}
-              >
-                <View style={s.extremeStylePreview}>
-                  <Text style={s.extremeStyleWord}>EXTREME</Text>
-                  <View style={s.extremeStyleSlash} />
-                  <View style={[s.extremeStyleSlash, s.extremeStyleSlashAlt]} />
-                </View>
-                <View style={s.layerStyleCardText}>
-                  <Text style={s.extremeStyleTitle} numberOfLines={1}>EXTREME</Text>
-                  <Text style={s.layerStyleSub} numberOfLines={1}>
-                    {extremeMapLayerSub}
-                  </Text>
-                </View>
-                {extremeMapLayerActive ? (
-                  <Ionicons name="checkmark-circle" size={17} color="#ef4444" />
-                ) : (
-                  <Ionicons name="lock-closed" size={15} color="#ef4444" />
-                )}
-              </TouchableOpacity>
-            </ScrollView>
-
-            <Text style={s.layerSectionHead}>LAYERS</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={s.layerStyleCarousel}
-            >
-              {([
-                { key: '3d', label: map3dEnabled ? '2D View' : '3D Terrain', sub: map3dEnabled ? 'Return to flat map' : 'Tilted terrain and buildings', icon: map3dEnabled ? 'map-outline' : 'cube-outline', val: map3dEnabled, color: '#a3e635', toggle: (_v: boolean) => toggleMap3d() },
-                { key: 'lands', label: 'Public Land', sub: 'BLM / USFS / parks tint', icon: 'map-outline', val: showLands, color: '#22c55e', toggle: toggleLandOverlay },
-                { key: 'usgs', label: 'USGS Topo', sub: 'Topo raster + trails', icon: 'trail-sign-outline', val: showUsgs, color: '#0ea5e9', toggle: toggleUsgsOverlay },
-                { key: 'pois', label: 'Places', sub: 'Fuel, water, services', icon: 'location-outline', val: showPois, color: '#3b82f6', toggle: togglePoiOverlay },
-                { key: 'trails', label: 'Offroad', sub: 'Tracks and paths', icon: 'trail-sign-outline', val: layerTrails, color: '#22c55e', toggle: setLayerTrails },
-                { key: 'nautical', label: 'Safe Water', sub: 'Structure and hazards', icon: 'boat-outline', val: layerNautical, color: '#0891b2', toggle: (v: boolean) => { if (!v) { closeSafeWaterMode(); return; } setLayerNautical(true); toggleDataLayer('nautical', true); setActivePlaceFilters(prev => Array.from(new Set([...prev, ...WATER_NAV_PLACE_FILTER_IDS]))); } },
-                { key: 'fire', label: 'Wildfire', sub: 'Active fire perimeters', icon: 'flame-outline', val: layerFire, color: '#ef4444', toggle: (v: boolean) => { setLayerFire(v); toggleDataLayer('fire', v); } },
-                { key: 'ava', label: 'Avalanche', sub: 'Danger zones', icon: 'snow-outline', val: layerAva, color: '#3b82f6', toggle: (v: boolean) => { setLayerAva(v); toggleDataLayer('ava', v); } },
-                { key: 'radar', label: 'Radar', sub: 'Rain radar', icon: 'rainy-outline', val: layerRadar, color: '#06b6d4', toggle: (v: boolean) => { setLayerRadar(v); toggleDataLayer('radar', v); } },
-                { key: 'mvum', label: 'MVUM', sub: 'Legal access', icon: 'car-outline', val: layerMvum, color: '#22c55e', toggle: (v: boolean) => { setLayerMvum(v); toggleDataLayer('mvum', v); } },
-              ] as Array<{ key: string; label: string; sub: string; icon: keyof typeof Ionicons.glyphMap; val: boolean; color: string; toggle: (v: boolean) => void }>).map(layer => (
-                <TouchableOpacity
-                  key={layer.key}
-                  style={[s.layerToggleCard, layer.val && { borderColor: layer.color + '88', backgroundColor: layer.color + '16' }]}
-                  activeOpacity={0.86}
-                  onPress={() => layer.toggle(!layer.val)}
-                >
-                  {renderLayerMiniPreview(layer)}
-                  <Text style={s.layerStyleTitle} numberOfLines={1}>{layer.label}</Text>
-                  <Text style={s.layerStyleSub} numberOfLines={1}>{layer.sub}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-
-            {extremeMapLayerActive && (
-              <>
-                <Text style={s.layerSectionHead}>PREMIUM MAP</Text>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={s.layerStyleCarousel}
-                >
-                  {premiumMapOptions.map(option => {
-                    const active = option.id === premiumMapStyle;
-                    return (
-                      <TouchableOpacity
-                        key={option.id}
-                        style={[s.layerToggleCard, active && { borderColor: option.color + '88', backgroundColor: option.color + '16' }]}
-                        activeOpacity={0.86}
-                        onPress={() => {
-                          setPremiumMapStyle(option.id);
-                          api.logExtremeLedger({
-                            event_type: 'mapbox_style_selected',
-                            surface: 'map_layers',
-                            event_data: { style: option.id },
-                          }).catch(() => {});
-                        }}
-                      >
-                        <View style={[s.layerTogglePreview, { borderColor: option.color + '55', backgroundColor: option.color + '14' }]}>
-                          <Ionicons name={option.icon} size={22} color={option.color} />
-                          {active ? <View style={[s.layerToggleOnDot, { backgroundColor: option.color }]} /> : null}
-                        </View>
-                        <Text style={s.layerStyleTitle} numberOfLines={1}>{option.label}</Text>
-                        <Text style={s.layerStyleSub} numberOfLines={1}>{option.sub}</Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                  {([
-                    { key: 'globe_terrain', label: map3dEnabled ? '2D Terrain' : 'Globe / 3D', sub: map3dEnabled ? 'Flatten camera' : 'Terrain camera', icon: 'planet-outline', val: map3dEnabled, color: '#a3e635', action: () => toggleMap3d(), enabled: true },
-                    { key: 'search_box', label: 'Search Box', sub: 'Find and fly to places', icon: 'search-outline', val: false, color: '#38bdf8', action: () => { setSearchMode('browse'); setShowSearch(true); setShowLayerSheet(false); }, enabled: !!extremeConfig?.feature_flags?.search },
-                    { key: 'directions', label: 'Directions', sub: searchRouteCard ? 'Preview selected route' : 'Choose destination', icon: 'navigate-outline', val: !!searchRouteCard, color: '#f97316', action: openExtremeDirections, enabled: !!extremeConfig?.feature_flags?.navigation },
-                    { key: 'traffic', label: 'Traffic', sub: 'Congestion style', icon: 'git-merge-outline', val: extremeTrafficEnabled, color: '#ef4444', action: toggleExtremeTraffic, enabled: !!extremeConfig?.feature_flags?.navigation },
-                    { key: 'weather', label: 'Weather', sub: extremeConfig?.weather?.mapbox_conditions_enabled ? 'Radar + route conditions' : 'Radar overlay', icon: 'rainy-outline', val: layerRadar, color: '#06b6d4', action: openExtremeWeather, enabled: !!extremeConfig?.feature_flags?.weather },
-                  ] as Array<{ key: string; label: string; sub: string; icon: keyof typeof Ionicons.glyphMap; val: boolean; color: string; action: () => void; enabled: boolean }>).map(layer => (
-                    <TouchableOpacity
-                      key={layer.key}
-                      style={[s.layerToggleCard, layer.val && { borderColor: layer.color + '88', backgroundColor: layer.color + '16' }, !layer.enabled && { opacity: 0.55 }]}
-                      activeOpacity={0.86}
-                      onPress={() => {
-                        if (layer.enabled) layer.action();
-                        else {
-                          setQuickToast(layer.key === 'weather' ? 'EXTREME weather is locked for this beta.' : 'This EXTREME feature is beta locked.');
-                          setTimeout(() => setQuickToast(''), 2400);
-                        }
-                      }}
-                    >
-                      <View style={[s.layerTogglePreview, { borderColor: layer.color + '55', backgroundColor: layer.color + '14' }]}>
-                        <Ionicons name={layer.icon} size={22} color={layer.color} />
-                        {layer.val ? <View style={[s.layerToggleOnDot, { backgroundColor: layer.color }]} /> : null}
-                      </View>
-                      <Text style={s.layerStyleTitle} numberOfLines={1}>{layer.label}</Text>
-                      <Text style={s.layerStyleSub} numberOfLines={1}>{layer.enabled ? layer.sub : 'Beta locked'}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </>
-            )}
-
-            {layerNautical && (
-              <View style={{ paddingHorizontal: 16, paddingBottom: 8, gap: 6 }}>
-                <Text style={s.layerSectionHead}>SAFE WATER LEGEND</Text>
-                {[
-                  { color: '#f97316', label: '0-5 ft shallow structure' },
-                  { color: '#facc15', label: '5-10 ft shallow zone' },
-                  { color: '#bae6fd', label: '5 ft contours / heavier 10 ft lines' },
-                  { color: '#38bdf8', label: 'Recommended track / open follow line' },
-                  { color: '#22c55e', label: 'Marked channel / fairway' },
-                  { color: '#f59e0b', label: 'Range or leading line' },
-                  { color: '#dc2626', label: 'Red marker' },
-                  { color: '#16a34a', label: 'Green marker' },
-                  { color: '#ef4444', label: 'Rock, wreck, obstruction, shoal, or hazard' },
-                ].map(l => (
-                  <View key={l.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <View style={{ width: 22, height: 4, backgroundColor: l.color, borderRadius: 2 }} />
-                    <Text style={{ color: C.text2, fontSize: 11, fontFamily: mono }}>{l.label}</Text>
-                  </View>
-                ))}
-                <Text style={{ color: C.text3, fontSize: 10, fontFamily: mono, lineHeight: 14 }}>
-                  {hydroAvailable
-                    ? `${hydroContourCount} bathymetry contour${hydroContourCount === 1 ? '' : 's'}, ${hydroShallowCount} shallow zone${hydroShallowCount === 1 ? '' : 's'}, ${hydroHazardCount} hydro hazard${hydroHazardCount === 1 ? '' : 's'}, ${waterNavRecommendedCount} recommended track${waterNavRecommendedCount === 1 ? '' : 's'}, and ${waterNavPointCount} buoy/nav aid pin${waterNavPointCount === 1 ? '' : 's'} loaded in this view. Sources: ${waterChartSourceNames}.`
-                    : waterNavFeatureCount > 0
-                      ? `${waterNavLineCount} open chart line${waterNavLineCount === 1 ? '' : 's'}, ${waterNavPointCount} aid/hazard pin${waterNavPointCount === 1 ? '' : 's'}, ${waterNavHazardCount} hazard${waterNavHazardCount === 1 ? '' : 's'}, and ${waterNavRecommendedCount} recommended track${waterNavRecommendedCount === 1 ? '' : 's'} loaded in this view. Hydro bathymetry coverage: ${hydroCoverage?.coverage || 'none'}. Sources: ${waterChartSourceNames}.`
-                      : 'No hydro bathymetry or open seamark chart lines are loaded in this view yet. NOAA/CHS/OpenSeaMap context may still be visible without pretending local depth contours exist.'}
-                </Text>
-                {waterConditionsLabel ? (
-                  <Text style={{ color: C.text2, fontSize: 10, fontFamily: mono, lineHeight: 14 }}>
-                    {waterConditions?.station?.name}: {waterConditionsLabel}
-                  </Text>
-                ) : null}
-                <Text style={{ color: C.text3, fontSize: 10, fontFamily: mono, lineHeight: 14 }}>
-                  Informational only; not certified chartplotter data, not turn-by-turn boat routing, and not an offline nautical chart.
-                </Text>
-              </View>
-            )}
-
-            {(layerTrails || layerMvum || layerAva) && (
-              <Text style={s.layerSectionHead}>{layerTrails ? 'OFFROAD TRAILS LEGEND' : layerMvum ? 'MVUM LEGEND' : 'CONDITION LEGEND'}</Text>
-            )}
-            {(layerTrails || layerMvum || layerAva) && (
-              <View style={{ paddingHorizontal: 16, paddingBottom: 8, gap: 6 }}>
-                {layerTrails && [
-                  { color: '#22c55e', label: 'Tracks / dirt roads' },
-                  { color: '#1d8cff', label: 'Paths / trails' },
-                ].map(l => (
-                  <View key={l.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <View style={{ width: 22, height: 4, backgroundColor: l.color, borderRadius: 2 }} />
-                    <Text style={{ color: C.text2, fontSize: 11, fontFamily: mono }}>{l.label}</Text>
-                  </View>
-                ))}
-                {layerTrails && layerMvum && (
-                  <Text style={[s.layerSectionHead, { paddingHorizontal: 0, marginTop: 10 }]}>MVUM LEGEND</Text>
-                )}
-                {layerMvum && [
-                  { color: '#22c55e', label: 'Open to all vehicles' },
-                  { color: '#f97316', label: 'High clearance required' },
-                  { color: '#ef4444', label: 'Closed / motorized prohibited' },
-                  { color: '#a855f7', label: 'Designated trail' },
-                ].map(l => (
-                  <View key={l.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <View style={{ width: 22, height: 4, backgroundColor: l.color, borderRadius: 2 }} />
-                    <Text style={{ color: C.text2, fontSize: 11, fontFamily: mono }}>{l.label}</Text>
-                  </View>
-                ))}
-                {layerMvum && (
-                  <Text style={{ color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 }}>
-                    MVUM is a legal-access overlay. Offroad Trails uses subdued base-map roads and paths until classified trail tiles are rebuilt.
-                  </Text>
-                )}
-                {layerAva && layerMvum && (
-                  <Text style={[s.layerSectionHead, { paddingHorizontal: 0, marginTop: 10 }]}>AVALANCHE LEGEND</Text>
-                )}
-                {layerAva && (
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
-                    {[
-                      { color: '#50C878', label: 'Low (1)' }, { color: '#FFD700', label: 'Moderate (2)' },
-                      { color: '#FF8C00', label: 'Considerable (3)' }, { color: '#E63946', label: 'High (4)' }, { color: '#1a0a0a', label: 'Extreme (5)' },
-                    ].map(a => (
-                      <View key={a.label} style={{ alignItems: 'center', gap: 2 }}>
-                        <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: a.color }} />
-                        <Text style={{ color: C.text3, fontSize: 8, fontFamily: mono }}>{a.label}</Text>
-                      </View>
-                    ))}
-                  </View>
-                )}
-                {layerAva && (
-                  <Text style={{ color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 }}>Avalanche danger levels</Text>
-                )}
-              </View>
-            )}
-            <View style={{ height: 40 }} />
-          </ScrollView>
+          <MapLayerSheetContent
+            mapStyleOptions={mapStyleOptions}
+            activeMapLayer={mapLayer}
+            onSelectMapLayer={id => applyMapLayer(id as MapLayer)}
+            extremeMapLayerActive={extremeMapLayerActive}
+            extremeMapLayerSelectable={!!extremeConfig?.enabled && extremeMapLayerAvailable}
+            extremeMapLayerSub={extremeMapLayerSub}
+            onSelectExtremeMapLayer={selectExtremeMapLayer}
+            layerItems={layerSheetItems}
+            premiumMapVisible={extremeMapLayerActive}
+            premiumMapItems={premiumMapItems}
+            extremeFeatureItems={extremeFeatureItems}
+            safeWaterLegendVisible={layerNautical}
+            safeWaterLegendItems={safeWaterLegendItems}
+            safeWaterSummary={hydroAvailable
+              ? `${hydroContourCount} bathymetry contour${hydroContourCount === 1 ? '' : 's'}, ${hydroShallowCount} shallow zone${hydroShallowCount === 1 ? '' : 's'}, ${hydroHazardCount} hydro hazard${hydroHazardCount === 1 ? '' : 's'}, ${waterNavRecommendedCount} recommended track${waterNavRecommendedCount === 1 ? '' : 's'}, and ${waterNavPointCount} buoy/nav aid pin${waterNavPointCount === 1 ? '' : 's'} loaded in this view. Sources: ${waterChartSourceNames}.`
+              : waterNavFeatureCount > 0
+                ? `${waterNavLineCount} open chart line${waterNavLineCount === 1 ? '' : 's'}, ${waterNavPointCount} aid/hazard pin${waterNavPointCount === 1 ? '' : 's'}, ${waterNavHazardCount} hazard${waterNavHazardCount === 1 ? '' : 's'}, and ${waterNavRecommendedCount} recommended track${waterNavRecommendedCount === 1 ? '' : 's'} loaded in this view. Hydro bathymetry coverage: ${hydroCoverage?.coverage || 'none'}. Sources: ${waterChartSourceNames}.`
+                : 'No hydro bathymetry or open seamark chart lines are loaded in this view yet. NOAA/CHS/OpenSeaMap context may still be visible without pretending local depth contours exist.'}
+            safeWaterStationSummary={waterConditionsLabel ? `${waterConditions?.station?.name}: ${waterConditionsLabel}` : null}
+            safeWaterDisclosure="Informational only; not certified chartplotter data, not turn-by-turn boat routing, and not an offline nautical chart."
+            conditionLegendVisible={layerTrails || layerMvum || layerAva}
+            conditionLegendTitle={layerTrails ? 'OFFROAD TRAILS LEGEND' : layerMvum ? 'MVUM LEGEND' : 'CONDITION LEGEND'}
+            trailLegendItems={trailLegendItems}
+            mvumLegendItems={mvumLegendItems}
+            avalancheLegendItems={avalancheLegendItems}
+            mvumNote={layerMvum ? 'MVUM is a legal-access overlay. Offroad Trails uses subdued base-map roads and paths until classified trail tiles are rebuilt.' : null}
+          />
           )}
         </View>
         </View>
@@ -22388,13 +21814,6 @@ const makeStyles = (C: ColorPalette) => {
   const navText = light ? '#101820' : '#ffffff';
   const navText2 = light ? '#29323f' : 'rgba(255,255,255,0.86)';
   const navText3 = light ? '#69736f' : 'rgba(255,255,255,0.58)';
-  const weatherSurface = light ? '#f8faf7' : 'rgba(17,24,39,0.98)';
-  const weatherSurfaceSoft = light ? '#eef2ec' : 'rgba(255,255,255,0.06)';
-  const weatherBorder = light ? 'rgba(148,163,184,0.34)' : 'rgba(56,189,248,0.30)';
-  const weatherText = light ? '#101820' : '#f8fafc';
-  const weatherText2 = light ? '#52606d' : '#cbd5e1';
-  const weatherText3 = light ? '#6b7280' : '#94a3b8';
-  const weatherButton = light ? '#edf1ec' : 'rgba(255,255,255,0.08)';
   return StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
   map: { flex: 1 },
@@ -22619,35 +22038,6 @@ const makeStyles = (C: ColorPalette) => {
     borderRadius: 2,
     backgroundColor: OVR.text3,
   },
-  mapDrawerOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 12000,
-    elevation: 120,
-    backgroundColor: 'rgba(0,0,0,0.36)',
-  },
-  mapDrawer: {
-    width: '88%' as any,
-    maxWidth: 335,
-    height: '100%' as any,
-    backgroundColor: C.s1,
-    borderRightWidth: 1,
-    borderColor: C.border,
-    paddingHorizontal: 14,
-    shadowColor: '#000',
-    shadowOpacity: 0.26,
-    shadowRadius: 28,
-    shadowOffset: { width: 12, height: 0 },
-    elevation: 121,
-  },
-  mapDrawerHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 12,
-    paddingBottom: 14,
-  },
-  mapDrawerTitle: { color: C.text, fontSize: 19, fontWeight: '900' },
-  mapDrawerSub: { color: C.text3, fontSize: 11, marginTop: 3 },
   mapDrawerClose: {
     width: 32,
     height: 32,
@@ -22657,166 +22047,6 @@ const makeStyles = (C: ColorPalette) => {
     borderColor: C.border,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  mapDrawerPrimary: { paddingTop: 10, paddingBottom: 10 },
-  mapDrawerFeature: {
-    minHeight: 78,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(103,232,249,0.24)',
-    backgroundColor: 'rgba(8,145,178,0.1)',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    padding: 12,
-  },
-  mapDrawerFeatureActive: {
-    backgroundColor: 'rgba(8,145,178,0.22)',
-    borderColor: 'rgba(103,232,249,0.58)',
-  },
-  mapDrawerFeatureIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 14,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  mapDrawerFeatureTitle: { color: C.text, fontSize: 14, fontWeight: '900' },
-  mapDrawerFeatureSub: { color: C.text3, fontSize: 10.5, lineHeight: 14, marginTop: 3 },
-  mapDrawerSection: { gap: 7 },
-  mapDrawerRow: {
-    minHeight: 54,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: C.border,
-    backgroundColor: C.s2,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 10,
-  },
-  mapDrawerRowIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 12,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  mapDrawerRowTitle: { color: C.text, fontSize: 12.5, fontWeight: '900' },
-  mapDrawerRowSub: { color: C.text3, fontSize: 10.5, marginTop: 2 },
-  mapStyleOverlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.48)',
-  },
-  mapStyleSheet: {
-    maxHeight: '78%' as any,
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
-    backgroundColor: 'rgba(8,11,15,0.98)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    paddingTop: 16,
-    paddingHorizontal: 14,
-  },
-  mapStyleHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 12,
-    paddingBottom: 12,
-  },
-  mapStyleTitle: { color: OVR.text, fontSize: 18, fontWeight: '900' },
-  mapStyleSub: { color: OVR.text3, fontSize: 11, marginTop: 3 },
-  mapStyleGrid: { gap: 8, paddingBottom: 8 },
-  mapStyleCard: {
-    minHeight: 68,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.09)',
-    backgroundColor: 'rgba(255,255,255,0.045)',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    padding: 10,
-  },
-  mapStyleCardActive: {
-    borderColor: C.green + '80',
-    backgroundColor: C.green + '12',
-  },
-  extremeMapStyleCard: {
-    borderColor: '#7f1d1d88',
-    backgroundColor: 'rgba(20,20,22,0.92)',
-  },
-  extremeMapStyleCardActive: {
-    borderColor: '#ef4444',
-    backgroundColor: '#7f1d1d22',
-  },
-  extremeMapStyleCardLocked: {
-    borderColor: '#4b5563',
-    backgroundColor: '#18181b',
-  },
-  mapStylePreview: {
-    width: 58,
-    height: 44,
-    borderRadius: 8,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
-  },
-  mapStylePreviewWater: {
-    position: 'absolute',
-    right: -8,
-    top: -10,
-    width: 34,
-    height: 64,
-    borderRadius: 18,
-    transform: [{ rotate: '16deg' }],
-  },
-  mapStylePreviewLand: {
-    position: 'absolute',
-    left: 5,
-    bottom: 5,
-    width: 25,
-    height: 17,
-    borderRadius: 9,
-    opacity: 0.82,
-  },
-  mapStylePreviewRoad: {
-    position: 'absolute',
-    left: -5,
-    top: 17,
-    width: 70,
-    height: 3,
-    borderRadius: 3,
-    backgroundColor: 'rgba(255,255,255,0.82)',
-    transform: [{ rotate: '-17deg' }],
-  },
-  mapStylePreviewRoadAlt: {
-    top: 28,
-    height: 2,
-    opacity: 0.7,
-    transform: [{ rotate: '13deg' }],
-  },
-  mapStyleCardTitle: { color: OVR.text, fontSize: 12.5, fontWeight: '900' },
-  mapStyleCardSub: { color: OVR.text3, fontSize: 10, marginTop: 2 },
-  extremeCompactPreview: {
-    width: 58,
-    height: 44,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#ef444488',
-    backgroundColor: '#111113',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  extremeCompactWord: {
-    color: '#ef4444',
-    fontSize: 9,
-    fontFamily: mono,
-    fontWeight: '900',
   },
   discoveryModeWrap: {
     position: 'absolute',
@@ -23266,97 +22496,6 @@ const makeStyles = (C: ColorPalette) => {
   },
   discoveryEmpty: { alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 24, paddingHorizontal: 18, borderWidth: 1, borderColor: C.border, backgroundColor: C.s2, borderRadius: 12 },
   discoveryEmptyText: { color: C.text3, fontSize: 12, lineHeight: 17, textAlign: 'center' },
-  routeScoutPanel: {
-    position: 'absolute',
-    left: 12,
-    right: 12,
-    bottom: 118,
-    backgroundColor: OVR.bg,
-    borderWidth: 1,
-    borderColor: C.orange + '66',
-    borderRadius: 14,
-    padding: 11,
-    zIndex: 9050,
-    elevation: 95,
-    shadowColor: '#000',
-    shadowOpacity: 0.3,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 9 },
-  },
-  routeScoutTop: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
-  routeScoutTitleWrap: { flex: 1, flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
-  routeScoutTitle: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 0.7 },
-  routeScoutSub: { color: OVR.text3, fontSize: 10, fontFamily: mono, marginTop: 2, letterSpacing: 0 },
-  routeScoutProgressWrap: { marginTop: 9, gap: 6 },
-  routeScoutProgressTrack: {
-    height: 4,
-    borderRadius: 999,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1,
-    borderColor: OVR.border2,
-  },
-  routeScoutProgressFill: {
-    height: '100%',
-    borderRadius: 999,
-    backgroundColor: C.orange,
-  },
-  routeScoutPhaseText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 0 },
-  routeScoutMessage: { color: OVR.text2, fontSize: 12, lineHeight: 17, marginTop: 8 },
-  routeScoutStats: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 9 },
-  routeScoutStat: {
-    color: OVR.text2,
-    fontSize: 9,
-    fontFamily: mono,
-    fontWeight: '800',
-    borderWidth: 1,
-    borderColor: OVR.border2,
-    backgroundColor: 'rgba(255,255,255,0.055)',
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    overflow: 'hidden',
-  },
-  routeScoutStops: { gap: 8, paddingTop: 10, paddingRight: 4 },
-  routeScoutStop: {
-    width: 146,
-    minHeight: 62,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: OVR.border2,
-    backgroundColor: 'rgba(255,255,255,0.055)',
-    padding: 8,
-    justifyContent: 'center',
-  },
-  routeScoutStopReview: {
-    borderColor: C.red + '66',
-    backgroundColor: C.red + '12',
-  },
-  routeScoutStopName: { color: OVR.text, fontSize: 11, fontWeight: '900', marginTop: 5 },
-  routeScoutStopMeta: { color: OVR.text3, fontSize: 9, fontFamily: mono, marginTop: 2 },
-  routeScoutActions: { flexDirection: 'row', gap: 8, marginTop: 10 },
-  routeScoutAction: {
-    minHeight: 34,
-    paddingHorizontal: 11,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: OVR.border2,
-    backgroundColor: 'rgba(255,255,255,0.055)',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  routeScoutPrimary: {
-    backgroundColor: C.orange,
-    borderColor: C.orange,
-  },
-  routeScoutActionText: { color: OVR.text2, fontSize: 10, fontFamily: mono, fontWeight: '900' },
   copilotResultRail: {
     position: 'absolute',
     left: 12,
@@ -23419,22 +22558,6 @@ const makeStyles = (C: ColorPalette) => {
   },
   compassDir: { color: OVR.text, fontSize: 12, fontFamily: mono, fontWeight: '900', lineHeight: 14 },
   compassDeg: { color: OVR.text3, fontSize: 9, fontFamily: mono, fontWeight: '700', marginTop: 1 },
-
-  alertPanel: {
-    position: 'absolute', top: 106, left: 16, right: 70,
-    backgroundColor: OVR.bg2, borderRadius: 14,
-    borderWidth: 1, borderColor: C.red,
-  },
-  alertHeader: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    paddingHorizontal: 12, paddingVertical: 9,
-    borderBottomWidth: 1, borderColor: OVR.border,
-  },
-  alertTitle: { color: C.red, fontSize: 10, fontFamily: mono, fontWeight: '700', flex: 1 },
-  alertItem: { paddingHorizontal: 12, paddingVertical: 8, borderBottomWidth: 1, borderColor: OVR.border2 },
-  alertBadge: { color: OVR.text, fontSize: 10, fontFamily: mono },
-  alertSev: { fontSize: 9, fontFamily: mono, fontWeight: '700' },
-  alertDesc: { color: OVR.text3, fontSize: 11 },
 
   // ── Nav HUD
   navHudAnimated: {
@@ -23929,74 +23052,6 @@ const makeStyles = (C: ColorPalette) => {
   tripMiniName: { color: C.text, fontSize: 11, lineHeight: 15, fontWeight: '800' },
 
   // ── Filter bar
-  filterModalOverlay: {
-    flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.42)',
-  },
-  filterSheet: {
-    maxHeight: '82%', backgroundColor: C.bg,
-    borderTopLeftRadius: 20, borderTopRightRadius: 20,
-    borderTopWidth: 1, borderColor: C.border,
-    paddingTop: 14,
-  },
-  filterSheetScroll: { flex: 1 },
-  filterSheetContent: { paddingBottom: 0 },
-  filterSheetHeader: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: 1, borderColor: C.border,
-  },
-  filterSheetTitle: { color: C.text, fontSize: 15, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
-  filterSheetSub: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 3 },
-  filterCloseBtn: {
-    width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: C.s1, borderWidth: 1, borderColor: C.border,
-  },
-  filterResetBtn: {
-    minHeight: 34, alignItems: 'center', justifyContent: 'center',
-    borderRadius: 17, paddingHorizontal: 10,
-    backgroundColor: C.s1, borderWidth: 1, borderColor: C.border,
-  },
-  filterResetText: { color: '#14b8a6', fontSize: 9, fontFamily: mono, fontWeight: '900' },
-  filterPresetWrap: {
-    flexDirection: 'row', flexWrap: 'wrap', gap: 8,
-    paddingHorizontal: 14, paddingTop: 12, paddingBottom: 10,
-  },
-  filterPresetBtn: {
-    minHeight: 34, alignItems: 'center', justifyContent: 'center',
-    paddingHorizontal: 12, borderRadius: 8,
-    backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
-  },
-  filterPresetText: { color: C.text2, fontSize: 10, fontFamily: mono, fontWeight: '900' },
-  filterGroup: {
-    marginHorizontal: 12, marginBottom: 10,
-    borderRadius: 8, borderWidth: 1, borderColor: C.border,
-    backgroundColor: C.s1, overflow: 'hidden',
-  },
-  filterSectionRow: {
-    minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingHorizontal: 12, paddingVertical: 10,
-  },
-  filterSectionIcon: {
-    width: 34, height: 34, borderRadius: 8, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
-  },
-  filterSectionCopy: { flex: 1, minWidth: 0 },
-  filterSectionRowTitle: { color: C.text, fontSize: 14, lineHeight: 18, fontWeight: '900' },
-  filterSectionRowSub: { color: C.text3, fontSize: 11, lineHeight: 15, marginTop: 2 },
-  filterToggleList: { borderTopWidth: 1, borderColor: C.border, backgroundColor: C.bg },
-  filterToggleRow: {
-    minHeight: 54, flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingHorizontal: 12, paddingVertical: 10,
-    borderBottomWidth: 1, borderColor: C.border,
-  },
-  filterSwitch: {
-    width: 42, height: 24, borderRadius: 12, padding: 3,
-    backgroundColor: C.s3, borderWidth: 1, borderColor: C.border,
-  },
-  filterSwitchOn: { backgroundColor: '#14b8a6', borderColor: '#14b8a6' },
-  filterSwitchKnob: {
-    width: 16, height: 16, borderRadius: 8, backgroundColor: C.text3,
-  },
-  filterSwitchKnobOn: { backgroundColor: '#fff', transform: [{ translateX: 18 }] },
   filterBar: {
     position: 'absolute', top: 92, left: 0, right: 0,
     backgroundColor: OVR.bg2, borderBottomWidth: 1, borderColor: OVR.border,
@@ -24012,41 +23067,6 @@ const makeStyles = (C: ColorPalette) => {
   filterChipLocked: { opacity: 0.58, borderStyle: 'dashed', backgroundColor: C.s1 },
   filterChipText: { color: C.text2, fontSize: 11, fontFamily: mono, fontWeight: '600' },
   filterChipLockedText: { color: C.text3 },
-  filterOptionList: { borderTopWidth: 1, borderColor: C.border, backgroundColor: C.bg },
-  filterOptionRow: {
-    minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingHorizontal: 12, paddingVertical: 9,
-    borderBottomWidth: 1, borderColor: C.border,
-  },
-  filterOptionRowDisabled: { opacity: 0.62 },
-  filterOptionCheck: {
-    width: 20, height: 20, borderRadius: 6, alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: C.border2, backgroundColor: C.s2,
-  },
-  filterOptionText: { flex: 1, minWidth: 0, color: C.text, fontSize: 13, lineHeight: 18, fontWeight: '800' },
-  filterGrid: {
-    flexDirection: 'row', flexWrap: 'wrap', gap: 8,
-    paddingHorizontal: 14, paddingTop: 8, paddingBottom: 4,
-  },
-  filterHintText: {
-    color: C.text3, fontSize: 10, fontFamily: mono, lineHeight: 14,
-    paddingHorizontal: 16, paddingTop: 6,
-  },
-  filterSectionHeader: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingTop: 4,
-  },
-  filterSectionTitle: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
-  filterClearText: { color: '#14b8a6', fontSize: 9, fontFamily: mono, fontWeight: '900' },
-  pinFilterHint: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: 6,
-    marginHorizontal: 14, marginTop: 7, marginBottom: 2,
-    paddingHorizontal: 10, paddingVertical: 8,
-    borderRadius: 10, borderWidth: 1, borderColor: C.border,
-    backgroundColor: C.s2,
-  },
-  pinFilterHintText: { flex: 1, color: C.text3, fontSize: 10, lineHeight: 14, fontFamily: mono },
-  filterLoading: { alignItems: 'center', paddingBottom: 8 },
 
   // ── Campsite quick card
   quickCard: {
@@ -24145,11 +23165,6 @@ const makeStyles = (C: ColorPalette) => {
     borderWidth: 1, borderColor: C.green + '66', backgroundColor: C.green + '14',
   },
   quickCardTripText: { color: C.green, fontSize: 10, fontFamily: mono, fontWeight: '800', letterSpacing: 0.5 },
-  nearbyPlacesBlock: { gap: 8, marginTop: 4, marginBottom: 2 },
-  nearbyPlacesHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  nearbyPlacesTitle: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
-  nearbyPlacesEmpty: { color: C.text3, fontSize: 11, lineHeight: 15 },
-  nearbyPlaceRail: { gap: 10, paddingRight: 6 },
   nearbyPlaceCard: { width: 158, minHeight: 154, borderWidth: 1, borderColor: 'rgba(15,23,42,0.10)', backgroundColor: '#f8faf7', borderRadius: 14, overflow: 'hidden', position: 'relative' },
   nearbyPlaceCardCompact: { minHeight: 126 },
   nearbyPlacePhoto: { width: '100%', height: 90, backgroundColor: '#dfe6dc' },
@@ -24171,51 +23186,6 @@ const makeStyles = (C: ColorPalette) => {
   mobileCoverageMetric: { color: C.blueGlow, fontSize: 10, lineHeight: 14, fontFamily: mono, fontWeight: '900' },
   mobileCoverageSource: { color: C.text3, fontSize: 9, lineHeight: 13, fontFamily: mono, fontWeight: '900' },
   mobileCoverageNote: { color: C.text3, fontSize: 10, lineHeight: 14 },
-  mapWeatherOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', zIndex: 66 },
-  mapWeatherCrosshair: { width: 52, height: 52, alignItems: 'center', justifyContent: 'center' },
-  mapWeatherCrosshairLineH: { position: 'absolute', width: 46, height: 2, borderRadius: 1, backgroundColor: '#38bdf8' },
-  mapWeatherCrosshairLineV: { position: 'absolute', width: 2, height: 46, borderRadius: 1, backgroundColor: '#38bdf8' },
-  mapWeatherCrosshairDot: { width: 14, height: 14, borderRadius: 7, backgroundColor: C.bg, borderWidth: 2, borderColor: '#38bdf8' },
-  mapWeatherPeekSheet: { position: 'absolute', left: 12, right: 12, zIndex: 130, elevation: 130, alignItems: 'stretch' },
-  mapWeatherPeekCard: { minHeight: 204, borderRadius: 24, borderWidth: 1, borderColor: weatherBorder, backgroundColor: weatherSurface, paddingHorizontal: 14, paddingTop: 8, paddingBottom: 16, shadowColor: '#000', shadowOpacity: light ? 0.22 : 0.34, shadowRadius: 24, shadowOffset: { width: 0, height: 12 }, elevation: 28 },
-  mapWeatherPeekHandleRow: { minHeight: 30, alignItems: 'center', justifyContent: 'center' },
-  mapWeatherGrabber: { width: 48, height: 5, borderRadius: 3, backgroundColor: light ? 'rgba(15,23,42,0.18)' : 'rgba(255,255,255,0.22)' },
-  mapWeatherPeekActions: { position: 'absolute', right: 0, top: 0, flexDirection: 'row', alignItems: 'center', gap: 6 },
-  mapWeatherPeekIconBtn: { width: 34, height: 34, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: weatherButton, borderWidth: 1, borderColor: weatherBorder },
-  mapWeatherPeekMain: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  mapWeatherPeekIcon: { width: 54, height: 54, borderRadius: 18, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#38bdf866', backgroundColor: '#e8f7fb' },
-  mapWeatherPeekKicker: { color: light ? '#117ea2' : '#38bdf8', fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
-  mapWeatherPeekTitle: { color: weatherText, fontSize: 19, fontWeight: '900', letterSpacing: 0, marginTop: 3 },
-  mapWeatherPeekSub: { color: weatherText2, fontSize: 10.5, fontFamily: mono, marginTop: 3 },
-  mapWeatherPeekMetrics: { flexDirection: 'row', gap: 8, marginTop: 14 },
-  mapWeatherPeekMetric: { flex: 1, minHeight: 58, borderWidth: 1, borderColor: weatherBorder, backgroundColor: weatherSurfaceSoft, borderRadius: 14, paddingHorizontal: 7, paddingVertical: 8, justifyContent: 'center' },
-  mapWeatherPeekMetricValue: { color: weatherText, fontSize: 11, fontFamily: mono, fontWeight: '900', textAlign: 'center' },
-  mapWeatherPeekMetricLabel: { color: weatherText3, fontSize: 8, fontFamily: mono, fontWeight: '800', textAlign: 'center', marginTop: 3 },
-  mapWeatherSheetHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 12, borderBottomWidth: 1, borderColor: C.border },
-  mapWeatherSheetKicker: { color: '#38bdf8', fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
-  mapWeatherSheetTitle: { color: C.text, fontSize: 20, fontWeight: '900', marginTop: 3 },
-  mapWeatherSheetContent: { padding: 16, paddingBottom: 100 },
-  mapWeatherCurrentCard: { minHeight: 112, flexDirection: 'row', alignItems: 'center', gap: 14, borderWidth: 1, borderColor: '#38bdf844', backgroundColor: '#38bdf810', borderRadius: 16, padding: 14, marginBottom: 18 },
-  mapWeatherCurrentTemp: { color: C.text, fontSize: 34, fontWeight: '900' },
-  mapWeatherCurrentMeta: { color: C.text3, fontSize: 12, marginTop: 3 },
-  mapWeatherMetricStack: { alignItems: 'flex-end' },
-  mapWeatherMetric: { color: '#38bdf8', fontSize: 13, fontFamily: mono, fontWeight: '900' },
-  mapWeatherMetricSub: { color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 2 },
-  mapWeatherHourlyRail: { gap: 8, paddingRight: 4 },
-  mapWeatherHourCard: { width: 70, minHeight: 96, alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderColor: C.border, borderRadius: 12, backgroundColor: C.s2 },
-  mapWeatherHourTime: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900' },
-  mapWeatherHourTemp: { color: C.text, fontSize: 13, fontWeight: '900' },
-  mapWeatherHourRain: { color: '#38bdf8', fontSize: 9, fontFamily: mono, fontWeight: '900' },
-  mapWeatherDayRow: { minHeight: 46, flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: 1, borderColor: C.border },
-  mapWeatherDayName: { width: 64, color: C.text, fontSize: 12, fontWeight: '900' },
-  mapWeatherDayTemp: { flex: 1, color: C.text2, fontSize: 12, fontFamily: mono, fontWeight: '900' },
-  mapWeatherDayMeta: { color: C.text3, fontSize: 10, fontFamily: mono },
-  mapWeatherHealthGrid: { flexDirection: 'row', gap: 8 },
-  mapWeatherHealthCard: { flex: 1, minHeight: 72, borderWidth: 1, borderColor: C.border, borderRadius: 12, backgroundColor: C.s2, padding: 10, justifyContent: 'center' },
-  mapWeatherHealthLabel: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900' },
-  mapWeatherHealthValue: { color: C.text, fontSize: 18, fontWeight: '900', marginTop: 4 },
-  mapWeatherDisclaimer: { color: C.text3, fontSize: 11, lineHeight: 16, marginTop: 10 },
-  mapWeatherSource: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', textAlign: 'center' },
   campReservationCard: { gap: 8, borderWidth: 1, borderColor: C.orange + '35', backgroundColor: C.orange + '10', borderRadius: 12, padding: 10, marginTop: 4 },
   quickCardActions: { flexDirection: 'row', gap: 8, marginTop: 2 },
   quickCardNav: {
@@ -24545,23 +23515,6 @@ const makeStyles = (C: ColorPalette) => {
     alignItems: 'center', justifyContent: 'center',
   },
   campEditSaveText: { color: '#fff', fontSize: 13, fontFamily: mono, fontWeight: '900', letterSpacing: 0.5 },
-
-  // ── Coordinates
-  coordRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  coordText: { color: C.text2, fontSize: 13, fontFamily: mono, flex: 1 },
-  coordDms: { color: C.text2, fontSize: 11, fontFamily: mono, marginTop: 4 },
-  coordCopy: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: C.orange },
-  coordCopyText: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '700' },
-
-  // ── AI insight
-  aiStars: { color: C.yellow, fontSize: 14 },
-  insiderTip: { backgroundColor: C.orange + '14', borderRadius: 10, borderWidth: 1, borderColor: C.orange + '44', padding: 12, marginBottom: 8 },
-  insiderLabel: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '800', marginBottom: 4 },
-  insiderText: { color: C.text, fontSize: 13, lineHeight: 19 },
-  aiMeta: { color: C.text2, fontSize: 12, marginBottom: 3 },
-  hazardRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 6, backgroundColor: C.yellow + '14', borderRadius: 8, padding: 8 },
-  hazardText: { color: C.yellow, fontSize: 12, flex: 1, lineHeight: 17 },
-  nearbyItem: { color: C.text2, fontSize: 12, marginBottom: 3 },
 
   // ── Wikipedia
   wikiItem: { paddingVertical: 10, borderBottomWidth: 1, borderColor: C.border },
@@ -25633,260 +24586,6 @@ const makeStyles = (C: ColorPalette) => {
     borderBottomWidth: 1, borderBottomColor: C.border,
   },
   layerSheetTitle: { color: C.text, fontSize: 14, fontWeight: '900', fontFamily: mono, letterSpacing: 1 },
-  layerSheetContent: {
-    paddingBottom: 16,
-  },
-  layerSectionHead: {
-    color: C.text3, fontSize: 10, fontWeight: '800', fontFamily: mono, letterSpacing: 1.5,
-    paddingHorizontal: 16, paddingTop: 12, paddingBottom: 7,
-  },
-  layerStyleCarousel: {
-    gap: 10,
-    paddingHorizontal: 16,
-    paddingBottom: 10,
-  },
-  layerStyleCard: {
-    width: 142,
-    minHeight: 128,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: C.border,
-    backgroundColor: C.s1,
-    padding: 9,
-    gap: 7,
-  },
-  layerStyleCardActive: {
-    borderColor: C.green + '88',
-    backgroundColor: C.green + '12',
-  },
-  extremeStyleCard: {
-    borderColor: '#7f1d1d88',
-    backgroundColor: '#18181b',
-  },
-  extremeStyleCardActive: {
-    borderColor: '#ef4444',
-    backgroundColor: '#7f1d1d22',
-  },
-  extremeStyleCardLocked: {
-    borderColor: '#4b5563',
-    backgroundColor: '#171717',
-  },
-  layerStylePreview: {
-    height: 64,
-    borderRadius: 11,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
-  },
-  layerStyleCardText: {
-    minHeight: 30,
-  },
-  layerStyleTitle: {
-    color: C.text,
-    fontSize: 12,
-    fontFamily: mono,
-    fontWeight: '900',
-  },
-  layerStyleSub: {
-    color: C.text3,
-    fontSize: 9,
-    fontFamily: mono,
-    marginTop: 2,
-  },
-  extremeStylePreview: {
-    height: 64,
-    borderRadius: 11,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: '#ef444488',
-    backgroundColor: '#111113',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  extremeStyleWord: {
-    color: '#ef4444',
-    fontSize: 17,
-    fontFamily: mono,
-    fontWeight: '900',
-  },
-  extremeStyleTitle: {
-    color: '#ef4444',
-    fontSize: 12,
-    fontFamily: mono,
-    fontWeight: '900',
-  },
-  extremeStyleSlash: {
-    position: 'absolute',
-    width: 112,
-    height: 2,
-    borderRadius: 2,
-    backgroundColor: '#ef444433',
-    transform: [{ rotate: '-18deg' }],
-  },
-  extremeStyleSlashAlt: {
-    transform: [{ rotate: '18deg' }],
-    backgroundColor: '#991b1b44',
-  },
-  layerToggleCard: {
-    width: 142,
-    minHeight: 128,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: C.border,
-    backgroundColor: C.s1,
-    padding: 9,
-    gap: 7,
-  },
-  layerTogglePreview: {
-    height: 64,
-    borderRadius: 11,
-    overflow: 'hidden',
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  layerToggleOnDot: {
-    position: 'absolute',
-    right: 8,
-    top: 8,
-    width: 9,
-    height: 9,
-    borderRadius: 5,
-    borderWidth: 1,
-    borderColor: '#fff',
-  },
-  layerPreviewHorizon: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: 0,
-    height: 30,
-  },
-  layerPreviewPeak: {
-    position: 'absolute',
-    left: 9,
-    bottom: -16,
-    width: 50,
-    height: 50,
-    borderRadius: 8,
-    transform: [{ rotate: '45deg' }],
-  },
-  layerPreviewPeakAlt: {
-    left: 34,
-    bottom: -24,
-    width: 58,
-    height: 58,
-    opacity: 0.9,
-  },
-  layerPreviewBuilding: {
-    position: 'absolute',
-    bottom: 10,
-    width: 8,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.68)',
-  },
-  layerPreviewPatch: {
-    position: 'absolute',
-    borderRadius: 18,
-  },
-  layerPreviewLine: {
-    position: 'absolute',
-    left: -8,
-    width: 102,
-    height: 4,
-    borderRadius: 4,
-  },
-  layerPreviewContour: {
-    position: 'absolute',
-    width: 82,
-    height: 28,
-    borderRadius: 28,
-    borderWidth: 1,
-    opacity: 0.88,
-  },
-  layerPreviewPin: {
-    position: 'absolute',
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    borderWidth: 2,
-    borderColor: '#fff',
-  },
-  layerPreviewTrailDash: {
-    position: 'absolute',
-    width: 16,
-    height: 5,
-    borderRadius: 5,
-    backgroundColor: '#22c55e',
-  },
-  layerPreviewWaterBand: {
-    position: 'absolute',
-    left: -16,
-    right: -16,
-    top: 26,
-    height: 36,
-    borderRadius: 26,
-    transform: [{ rotate: '-8deg' }],
-  },
-  layerPreviewHazard: {
-    position: 'absolute',
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: '#fff',
-    backgroundColor: '#ef4444',
-  },
-  layerPreviewBuoy: {
-    position: 'absolute',
-    width: 10,
-    height: 18,
-    borderRadius: 5,
-    borderWidth: 1,
-    borderColor: '#fff',
-  },
-  layerPreviewAvaBand: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    width: 20,
-    opacity: 0.72,
-  },
-	  layerPreviewRadarRing: {
-	    position: 'absolute',
-	    borderRadius: 40,
-	    borderWidth: 2,
-	  },
-  layerPreviewRainBand: {
-    position: 'absolute',
-    width: 28,
-    height: 14,
-    borderRadius: 8,
-    opacity: 0.9,
-  },
-  layerPreviewCloud: {
-    position: 'absolute',
-    left: 18,
-    top: 11,
-    width: 38,
-    height: 30,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(14,165,233,0.82)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.55)',
-  },
-  layerPreviewRadarSweep: {
-    position: 'absolute',
-    left: 34,
-    top: 30,
-    width: 34,
-    height: 3,
-    borderRadius: 3,
-    backgroundColor: 'rgba(255,255,255,0.78)',
-    transform: [{ rotate: '-24deg' }],
-  },
   layerRow: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     paddingHorizontal: 16, paddingVertical: 12,
@@ -26215,6 +24914,29 @@ const makeStyles = (C: ColorPalette) => {
   },
   extremeCopilotVoiceTextActive: {
     color: '#050505',
+  },
+  extremeCopilotReportRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 10,
+  },
+  extremeCopilotReportBtn: {
+    flex: 1,
+    minHeight: 38,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.s2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+  },
+  extremeCopilotReportText: {
+    color: C.orange,
+    fontSize: 10,
+    fontFamily: mono,
+    fontWeight: '900',
   },
   extremeCopilotInputRow: {
     minHeight: 46,

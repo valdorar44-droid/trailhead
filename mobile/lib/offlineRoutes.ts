@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { api } from './api';
 
 const DIR = FileSystem.documentDirectory + 'offline_routes/';

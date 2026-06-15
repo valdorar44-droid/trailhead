@@ -9,7 +9,7 @@
  *   if (conus.status === 'complete') { // file is at conus.localPath }
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { storage } from './storage';
 
 const BASE = 'https://tiles.gettrailhead.app';

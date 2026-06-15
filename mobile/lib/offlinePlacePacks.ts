@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import type { PlacePack, PlacePackPoint } from './api';
 
 const DIR = FileSystem.documentDirectory + 'offline_place_packs/';

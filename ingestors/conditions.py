@@ -7,7 +7,9 @@ import logging
 import math
 import time
 from datetime import datetime
+from email.utils import parsedate_to_datetime
 from typing import Any
+from xml.etree import ElementTree as ET
 
 import httpx
 
@@ -17,6 +19,7 @@ from ingestors.tomtom_traffic import (
     bbox_for_center,
     bboxes_for_route_corridor,
     filter_alerts_near_waypoints,
+    filter_tomtom_alerts_along_route,
     get_tomtom_incidents_for_bbox,
 )
 
@@ -26,6 +29,7 @@ WFIGS_PERIMETERS_URL = "https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/res
 NWS_ALERTS_URL = "https://api.weather.gov/alerts/active"
 AIRNOW_CURRENT_URL = "https://www.airnowapi.org/aq/observation/latLong/current/"
 FIRMS_AREA_URL = "https://firms.modaps.eosdis.nasa.gov/usfs/api/area/csv"
+GDACS_RSS_URL = "https://www.gdacs.org/xml/rss.xml"
 UA = "Trailhead/1.0 (https://api.gettrailhead.app; hello@gettrailhead.app)"
 
 
@@ -42,6 +46,15 @@ def _parse_ts(value: Any) -> int | None:
         return int(datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp())
     except Exception:
         return None
+
+
+def _parse_rfc822_ts(value: Any) -> int | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return int(parsedate_to_datetime(value.strip()).timestamp())
+    except Exception:
+        return _parse_ts(value)
 
 
 def _haversine_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
@@ -73,6 +86,16 @@ def _centroid(geometry: dict | None) -> tuple[float, float] | None:
     if not pts:
         return None
     return (sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts))
+
+
+def _bbox_distance_candidate(lat: float, lng: float, bbox_text: str, radius_miles: float) -> bool:
+    """GDACS bbox format is lonmin lonmax latmin latmax."""
+    try:
+        lon_min, lon_max, lat_min, lat_max = [float(v) for v in str(bbox_text or "").split()[:4]]
+    except Exception:
+        return False
+    pad = max(0.05, min(radius_miles / 69.0, 2.0))
+    return (lat_min - pad) <= lat <= (lat_max + pad) and (lon_min - pad) <= lng <= (lon_max + pad)
 
 
 def _condition_alert(
@@ -152,6 +175,97 @@ def _aqi_label(aqi: int) -> str:
     if aqi >= 51:
         return "Moderate air quality"
     return "Good air quality"
+
+
+GDACS_EVENT_TYPES = {
+    "EQ": "earthquake",
+    "TC": "cyclone",
+    "FL": "flood",
+    "VO": "volcano",
+    "DR": "drought",
+    "WF": "fire",
+    "TS": "tsunami",
+}
+
+
+def _gdacs_severity(alert_level: str, distance_m: float) -> str:
+    level = str(alert_level or "").strip().lower()
+    if level == "red":
+        return "critical"
+    if level == "orange":
+        return "high"
+    if level == "green" and distance_m <= 25 * 1609.344:
+        return "moderate"
+    return "low"
+
+
+def _xml_text(node: ET.Element, path: str, ns: dict[str, str]) -> str:
+    found = node.find(path, ns)
+    return (found.text or "").strip() if found is not None and found.text else ""
+
+
+async def get_gdacs_alerts_near(lat: float, lng: float, radius_miles: float = 75) -> list[dict]:
+    if not settings.gdacs_alerts_enabled:
+        return []
+    radius_miles = max(10.0, min(radius_miles, 250.0))
+    key = f"conditions:gdacs:{lat:.1f},{lng:.1f}:{int(radius_miles)}"
+    cached = get_cached("weather_cache", key, ttl_seconds=900)
+    if cached is not None:
+        return cached
+    try:
+        async with httpx.AsyncClient(timeout=12, headers={"User-Agent": UA, "Accept": "application/rss+xml, application/xml"}) as client:
+            resp = await client.get(GDACS_RSS_URL)
+            resp.raise_for_status()
+            root = ET.fromstring(resp.content)
+    except Exception as exc:
+        log.warning("GDACS alerts fetch failed: %s", exc)
+        return []
+
+    ns = {
+        "geo": "http://www.w3.org/2003/01/geo/wgs84_pos#",
+        "gdacs": "http://www.gdacs.org",
+        "dc": "http://purl.org/dc/elements/1.1/",
+    }
+    alerts: list[dict] = []
+    for item in root.findall(".//item"):
+        try:
+            alat = float(_xml_text(item, "geo:Point/geo:lat", ns))
+            alng = float(_xml_text(item, "geo:Point/geo:long", ns))
+        except Exception:
+            continue
+        distance_m = _haversine_m(lat, lng, alat, alng)
+        bbox_text = _xml_text(item, "gdacs:bbox", ns)
+        if distance_m > radius_miles * 1609.344 and not _bbox_distance_candidate(lat, lng, bbox_text, radius_miles):
+            continue
+        event_type = _xml_text(item, "gdacs:eventtype", ns)
+        alert_level = _xml_text(item, "gdacs:alertlevel", ns)
+        severity = _gdacs_severity(alert_level, distance_m)
+        if severity == "low":
+            continue
+        event_name = _xml_text(item, "gdacs:eventname", ns)
+        country = _xml_text(item, "gdacs:country", ns)
+        title = _xml_text(item, "title", ns)
+        desc = _xml_text(item, "description", ns) or title
+        label = GDACS_EVENT_TYPES.get(event_type.upper(), event_type.lower() or "disaster")
+        provider_id = f"{event_type}{_xml_text(item, 'gdacs:eventid', ns) or _xml_text(item, 'guid', ns)}"
+        description = " · ".join([part for part in [title, event_name, country, desc] if part])[:520]
+        alerts.append(_condition_alert(
+            provider="gdacs",
+            provider_id=provider_id,
+            alert_type=label,
+            subtype=f"{alert_level.title()} GDACS {label}".strip(),
+            severity=severity,
+            description=description,
+            lat=alat,
+            lng=alng,
+            created_at=_parse_rfc822_ts(_xml_text(item, "gdacs:dateadded", ns) or _xml_text(item, "pubDate", ns)),
+            updated_at=_parse_rfc822_ts(_xml_text(item, "gdacs:datemodified", ns) or _xml_text(item, "pubDate", ns)),
+            expires_at=_parse_rfc822_ts(_xml_text(item, "gdacs:todate", ns)),
+            geometry=None,
+            confidence=0.84,
+        ))
+    set_cached("weather_cache", key, alerts[:60])
+    return alerts[:60]
 
 
 async def get_nws_alerts_near(lat: float, lng: float) -> list[dict]:
@@ -377,6 +491,7 @@ async def get_provider_conditions_near(lat: float, lng: float, radius_deg: float
         get_airnow_alerts_near(lat, lng, radius_miles=min(radius_miles, 50)),
         get_wfigs_fire_alerts_near(lat, lng, radius_miles=radius_miles),
         get_firms_fire_alerts_near(lat, lng, radius_miles=min(radius_miles, 50)),
+        get_gdacs_alerts_near(lat, lng, radius_miles=max(radius_miles, 90)),
     )
     return _dedupe([item for result in results for item in result])
 
@@ -385,14 +500,15 @@ async def get_provider_conditions_along_route(waypoints: list[dict], radius_deg:
     samples = [{"lat": float(wp["lat"]), "lng": float(wp["lng"]), "day": wp.get("day")} for wp in waypoints if wp.get("lat") and wp.get("lng")]
     if not samples:
         return []
-    combined: list[dict] = []
+    tomtom_alerts: list[dict] = []
+    context_alerts: list[dict] = []
     seen: set[str] = set()
     for bbox in bboxes_for_route_corridor(samples, radius_deg):
         for alert in await get_tomtom_incidents_for_bbox(bbox):
             key = str(alert.get("id") or alert.get("provider_id"))
             if key not in seen:
                 seen.add(key)
-                combined.append(alert)
+                tomtom_alerts.append(alert)
     for sample in samples[:8]:
         radius_miles = max(5.0, min(max(radius_deg, 0.18) * 69.0, 75.0))
         sample_results = await asyncio_gather_quiet(
@@ -400,13 +516,19 @@ async def get_provider_conditions_along_route(waypoints: list[dict], radius_deg:
             get_airnow_alerts_near(sample["lat"], sample["lng"], radius_miles=min(radius_miles, 50)),
             get_wfigs_fire_alerts_near(sample["lat"], sample["lng"], radius_miles=radius_miles),
             get_firms_fire_alerts_near(sample["lat"], sample["lng"], radius_miles=min(radius_miles, 50)),
+            get_gdacs_alerts_near(sample["lat"], sample["lng"], radius_miles=max(radius_miles, 90)),
         )
         for alert in [item for result in sample_results for item in result]:
             key = str(alert.get("id") or alert.get("provider_id"))
             if key not in seen:
                 seen.add(key)
-                combined.append(alert)
-    filtered = filter_alerts_near_waypoints(combined, samples, radius_deg=max(radius_deg, 0.18))
+                context_alerts.append(alert)
+    filtered = _dedupe(
+        [
+            *filter_tomtom_alerts_along_route(tomtom_alerts, samples, default_radius_m=1_200.0),
+            *filter_alerts_near_waypoints(context_alerts, samples, radius_deg=max(radius_deg, 0.18)),
+        ]
+    )
     high_value: list[dict] = []
     low_traffic = 0
     for alert in filtered:

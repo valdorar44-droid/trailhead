@@ -41,6 +41,7 @@ from ingestors.provider_guard import provider_call_snapshot, record_provider_cal
 from ingestors.blm import get_blm_campsites, get_blm_campsite_detail, get_blm_recreation_sites
 from ingestors.international_registry import international_camp_tasks
 from ingestors.conditions import get_provider_conditions_along_route, get_provider_conditions_near, get_wfigs_fire_perimeters
+from ingestors.pakistan_confidence import pakistan_route_confidence
 from db.store import (
     save_trip, get_trip, add_community_pin, get_community_pins, find_duplicate_community_pin,
     save_audio_guide, get_audio_guide, get_cached, set_cached, clear_cached_rows, get_route_cached, set_route_cached,
@@ -8353,6 +8354,11 @@ async def nearby_conditions(lat: float, lng: float, radius: float = 0.5):
 async def route_conditions(body: RouteReportRequest):
     """Unified live conditions feed along active route waypoints."""
     return await route_alerts(body)
+
+@app.post("/api/route-confidence/pakistan")
+async def pakistan_confidence(body: RouteReportRequest):
+    """Conservative Pakistan road/trek confidence until OSM segment scoring is live."""
+    return pakistan_route_confidence(body.waypoints)
 
 @app.get("/api/conditions/fire-perimeters")
 async def fire_perimeters():

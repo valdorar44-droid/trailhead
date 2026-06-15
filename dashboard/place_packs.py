@@ -18,6 +18,8 @@ from dashboard.pmtiles_bootstrap import DATA_DIR
 from dashboard.pmtiles_states import STATE_BBOXES, REGION_BBOXES
 from ingestors.blm import get_blm_campsites, get_blm_recreation_sites
 from ingestors.nps import get_nps_places, nps_enabled
+from ingestors.osm import get_osm_outdoor_stays
+from ingestors.pakistan_curated import get_pakistan_curated_stays
 from ingestors.ridb import get_campsites_search
 from ingestors.usfs import get_usfs_recreation_sites
 
@@ -108,6 +110,8 @@ def _region_name(region: str) -> str:
         return "Mexico"
     if code == "FI":
         return "Finland"
+    if code == "PK":
+        return "Pakistan"
     return code
 
 
@@ -192,7 +196,9 @@ def _node_coord(el: dict) -> tuple[float, float] | None:
 
 def _classify_osm(el: dict) -> str | None:
     tags = el.get("tags") or {}
-    if tags.get("tourism") in {"camp_site", "caravan_site"}:
+    if tags.get("tourism") in {"camp_site", "caravan_site", "camp_pitch", "alpine_hut", "wilderness_hut", "chalet", "guest_house", "hostel"}:
+        return "camp"
+    if tags.get("amenity") == "shelter" or tags.get("shelter_type") in {"basic_hut", "lean_to", "weather_shelter", "rock_shelter"}:
         return "camp"
     if tags.get("amenity") == "fuel":
         if tags.get("fuel:propane") == "yes" and tags.get("fuel:diesel") != "yes":
@@ -772,6 +778,12 @@ out body center 1800;
   way["tourism"="attraction"]({bbox});
   node["tourism"~"camp_site|caravan_site"]({bbox});
   way["tourism"~"camp_site|caravan_site"]({bbox});
+  node["tourism"~"camp_pitch|alpine_hut|wilderness_hut|chalet|guest_house|hostel"]({bbox});
+  way["tourism"~"camp_pitch|alpine_hut|wilderness_hut|chalet|guest_house|hostel"]({bbox});
+  node["amenity"="shelter"]({bbox});
+  way["amenity"="shelter"]({bbox});
+  node["shelter_type"~"basic_hut|lean_to|weather_shelter|rock_shelter"]({bbox});
+  way["shelter_type"~"basic_hut|lean_to|weather_shelter|rock_shelter"]({bbox});
   node["highway"="trailhead"]({bbox});
   node["trailhead"="yes"]({bbox});
   node["tourism"="viewpoint"]({bbox});
@@ -860,6 +872,88 @@ async def _fetch_official_camp_cell(cell: tuple[float, float, float, float]) -> 
             if normalized:
                 points.append(normalized)
     return {"points": points, "failed_cell": None}
+
+
+PAKISTAN_CAMP_ANCHORS = (
+    ("K2 / Concordia", 35.8808, 76.5158),
+    ("Askole", 35.6806, 75.8178),
+    ("Skardu", 35.2971, 75.6333),
+    ("Hunza", 36.3167, 74.6500),
+    ("Upper Hunza / Passu", 36.4828, 74.8825),
+    ("Fairy Meadows / Nanga Parbat", 35.3525, 74.5774),
+    ("Khaplu / Hushe", 35.4519, 76.3582),
+)
+
+
+async def _build_pakistan_camp_pack() -> Path:
+    region = "pk"
+    pack_id = "camps"
+    key = f"{region}:{pack_id}"
+    _status[key] = {
+        "status": "building",
+        "progress": f"0/{len(PAKISTAN_CAMP_ANCHORS)} corridors",
+        "error": None,
+        "size_bytes": 0,
+        "failed_cells": [],
+        "failed_cell_count": 0,
+    }
+    points: list[dict] = []
+    failed_cells: list[dict] = []
+    seen: set[str] = set()
+
+    def add_items(items: list[dict]) -> None:
+        for item in items:
+            normalized = _normalize_camp_source(item)
+            if not normalized:
+                continue
+            normalized["source_freshness"] = item.get("source_freshness") or "Pakistan mountain stay data packaged by Trailhead; verify permits, access, guide requirements, safety, and current local conditions."
+            normalized["tags"] = sorted(set([*(normalized.get("tags") or []), "pakistan", "trekking"]))
+            point_key = normalized.get("id") or f"{normalized.get('name')}:{normalized.get('lat'):.4f}:{normalized.get('lng'):.4f}"
+            if point_key in seen:
+                continue
+            seen.add(point_key)
+            points.append(normalized)
+
+    completed = 0
+    for label, lat, lng in PAKISTAN_CAMP_ANCHORS:
+        try:
+            add_items(get_pakistan_curated_stays(lat, lng, radius_miles=65))
+            live = await asyncio.wait_for(get_osm_outdoor_stays(lat, lng, radius_m=80_000, profile="pakistan_karakoram"), timeout=28)
+            add_items(live)
+        except Exception as exc:
+            failed_cells.append({"label": label, "lat": lat, "lng": lng, "error": f"{type(exc).__name__}: {exc}"})
+        completed += 1
+        _status[key]["progress"] = f"{completed}/{len(PAKISTAN_CAMP_ANCHORS)} corridors"
+        _status[key]["failed_cells"] = failed_cells
+        _status[key]["failed_cell_count"] = len(failed_cells)
+
+    points.sort(key=lambda p: (str(p.get("name", "")), float(p.get("lat") or 0), float(p.get("lng") or 0)))
+    if not points:
+        raise RuntimeError("pk:camps returned 0 places")
+    payload = {
+        "schema_version": 1,
+        "pack_id": "pk-camps",
+        "region_id": "pk",
+        "region_name": "Pakistan",
+        "name": "Pakistan Camps",
+        "generated_at": int(time.time()),
+        "source": "Trailhead curated + OpenStreetMap mixed outdoor stay data",
+        "categories": PACK_DEFINITIONS[pack_id]["categories"],
+        "failed_cells": failed_cells,
+        "failed_cell_count": len(failed_cells),
+        "points": points,
+    }
+    path = pack_path(region, pack_id)
+    path.write_text(json.dumps(payload, separators=(",", ":")))
+    _status[key].update(
+        status="built",
+        progress=f"built · {len(points)} places" + (f" · {len(failed_cells)} failed corridors" if failed_cells else ""),
+        size_bytes=path.stat().st_size,
+        point_count=len(points),
+        failed_cells=failed_cells,
+        failed_cell_count=len(failed_cells),
+    )
+    return path
 
 
 def _water_subtype_from_text(*values: object) -> str:
@@ -1009,6 +1103,8 @@ async def build_region_pack(region: str, pack_id: str = "essentials") -> Path | 
     pack_id = _pack_id(pack_id)
     if pack_id not in PACK_DEFINITIONS:
         raise ValueError(f"Unknown place pack: {pack_id}")
+    if region == "pk" and pack_id == "camps":
+        return await _build_pakistan_camp_pack()
     bbox = _bbox_for_region(region)
     key = f"{region}:{pack_id}"
     cells = _bbox_cells(bbox, _cell_step_for_region(region))

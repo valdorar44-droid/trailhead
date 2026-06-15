@@ -101,6 +101,75 @@ treated as an official campground API market yet.
   camping, booking availability, guide availability, permit status, or current
   road/glacier safety.
 
+Live work added June 15, 2026:
+
+- GDACS RSS is wired into the server conditions pipeline, so Pakistan routes can
+  inherit nearby flood, earthquake, cyclone, volcano, drought, and wildfire
+  notices without showing unrelated town-wide clutter.
+- `/api/route-confidence/pakistan` exists as a conservative API scaffold. It
+  marks K2/Baltoro/Karakoram trek corridors as `trekking_only`, mountain access
+  regions as `medium` or `low`, and clearly says it is pending OSM road-tag
+  validation.
+- Docker is available locally again. Build the Pakistan Valhalla artifact from
+  Geofabrik next, publish it to R2, then replace the scaffold with real segment
+  scoring from the imported OSM graph.
+
+## Next Country Source Leads
+
+These are not all production-ready. Keep them in this order so the catalog grows
+from stronger sources before softer tourism or partner data.
+
+### Canada - Yukon first
+
+- Source: open.canada.ca CKAN search for `campground`.
+- Confirmed useful result: Government of Yukon `Campgrounds`, with all resource
+  data ZIP and government-run campground/recreation-site map data.
+- Related result: Yukon `Parks and Protected Areas`, useful for Explorer parks,
+  protected areas, monuments/equivalents, and trip context.
+- Implementation: add a Yukon parser before trying broad Canada. Use ZIP/static
+  pack ingestion, not runtime catalog search.
+
+### Australia - Tasmania first, Noosa as small live test
+
+- Source: data.gov.au CKAN search for `campground`.
+- Confirmed useful result: Tasmania Government The LIST `Campground/site`,
+  point/polygon camping and caravan-ground locations.
+- Existing cautious lead: Noosa Accommodation GeoJSON/WFS includes campground
+  and accommodation POIs; keep it opt-in or mirrored because public WFS can be
+  slow.
+- Low-confidence fallback: Parks Victoria Camp Grounds and Huts is useful as a
+  format example, but the catalog says it is temporary/not official Parks
+  Victoria data.
+
+### France
+
+- Source: data.gouv.fr API search for `campings`.
+- Useful pattern: departmental/local camping and camping-car datasets with CSV,
+  KML, SHP, WMS, and WFS resources. Some are official local authority/DDT
+  datasets; some are OSM-derived and should be labeled community.
+- Implementation: add a France CKAN/udata discovery script, then curate only
+  datasets with open formats and working public resources.
+
+### Switzerland
+
+- Source direction: swisstopo / geo.admin official layers for hiking routes,
+  closures, terrain, protected areas, and map context.
+- Hut data: SAC huts are important, but SAC is not a government source. Treat
+  as a partner/free-source candidate unless a clearly licensed open feed is
+  confirmed.
+
+### Norway
+
+- Source direction: UT.no / DNT cabins and routes are high-value for huts and
+  trails, but not government. Treat as a partner/free-source candidate.
+- Government support layers can come from Norwegian mapping/environment data for
+  protected areas, trails, roads, avalanche/warning context, and offline maps.
+
+### UK
+
+- Retry data.gov.uk. The catalog endpoint returned a technical-difficulty page
+  during this pass, so do not mark any UK campsite feed confirmed yet.
+
 ## Other Free Sources Worth Layering
 
 - OpenStreetMap/Overpass: already integrated; keep as global fallback for

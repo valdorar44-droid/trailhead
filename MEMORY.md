@@ -8,7 +8,34 @@ Use this after a Codex restart:
 
 ## Current Focus
 
-We are improving the Trailhead mobile app, especially Route Builder, offline state packs, My Rig persistence, camp cards, and Explorer purchase handling.
+We are improving Trailhead production quality and expanding the outdoor catalog internationally.
+
+Immediate reminder from June 15, 2026:
+
+- Keep pushing the Pakistan/K2 work from mixed-source search into a live routing/confidence product.
+- Pakistan is already live for mixed-source K2/Hunza/Skardu camp/stay search through curated fallback + OSM outdoor stays.
+- New backend work added GDACS global disaster alerts into the live conditions pipeline and added `/api/route-confidence/pakistan` as the conservative API scaffold.
+- Next Pakistan infrastructure checkpoint is the Valhalla artifact:
+  - build from `https://download.geofabrik.de/asia/pakistan-latest.osm.pbf`
+  - publish as `routing/valhalla/pakistan.tar.zst`
+  - deploy/wire a Pakistan Valhalla runtime only after probes pass
+  - then replace the confidence scaffold with OSM road-class/surface/slope/router-agreement scoring
+- Continue researching and adding official/free country sources. Current best next leads:
+  - New Zealand DOC API for campsites/huts/tracks
+  - Canada Yukon government campgrounds and parks/protected areas
+  - Australia Tasmania `Campground/site` and cautious Noosa GeoJSON/WFS
+  - France data.gouv.fr camping/camping-car WFS/CSV/KML datasets
+  - Switzerland swisstopo/geo.admin hiking, closures, protected-area layers; SAC huts are useful but not government
+  - Norway UT.no/DNT cabins are strong hut data, but not government; treat as partner/free-source candidate
+  - Pakistan GDACS + NDMA advisories + HOTOSM roads + Geofabrik PBF remain the main live-alert/routing stack
+
+## Current Production Plan
+
+- The saved execution plan for the next production pass is:
+  - `docs/production-improvement-execution-plan.md`
+- Resume from the next unchecked phase in that doc.
+- Do not restart from a broad brainstorm unless the product direction materially changes.
+- Audit the previous completed phase before moving into the next one.
 
 ## Current Design Direction
 

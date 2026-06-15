@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { useStore } from '@/lib/store';
 import { useTheme, mono, type ColorPalette } from '@/lib/design';
 import {
@@ -99,10 +99,10 @@ const REGION_GROUPS: Array<{
   },
   {
     key: 'international',
-    label: 'CAN / MEX',
-    title: 'Canada / Mexico',
-    subtitle: 'Cross-border overland regions',
-    ids: ['canada', 'mexico'],
+    label: 'GLOBAL',
+    title: 'International',
+    subtitle: 'Canada, Mexico, Pakistan, and more regions',
+    ids: ['canada', 'mexico', 'pk'],
   },
   {
     key: 'europe',
@@ -121,6 +121,7 @@ function regionCodeFor(id: string) {
   if (id === 'canada') return 'CAN';
   if (id === 'mexico') return 'MEX';
   if (id === 'fi') return 'FIN';
+  if (id === 'pk') return 'PAK';
   if (id === 'conus') return 'US';
   return id.toUpperCase();
 }

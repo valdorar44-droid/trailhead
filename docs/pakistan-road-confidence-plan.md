@@ -58,6 +58,11 @@ Confidence inputs:
 
 ## Implementation Phases
 
+0. Live scaffold now in place.
+   - Mixed-source K2/Hunza/Skardu camp and stay search is live.
+   - GDACS global disaster alerts are part of the server conditions feed.
+   - `/api/route-confidence/pakistan` returns conservative `medium`, `low`, and
+     `trekking_only` confidence labels until segment tags are imported.
 1. Build Pakistan Valhalla artifact from Geofabrik PBF.
    - Use the existing regional Valhalla artifact pattern.
    - Publish as `routing/valhalla/pakistan.tar.zst`.
@@ -104,4 +109,3 @@ Confidence inputs:
   - Enough disk/CPU to build Pakistan Valhalla from a ~150 MB PBF.
   - R2 storage for the artifact.
   - Railway service or equivalent for the Pakistan Valhalla runtime.
-

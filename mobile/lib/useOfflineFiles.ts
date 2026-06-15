@@ -110,6 +110,14 @@ export const FILE_REGIONS = {
     description: 'Finland offline map · roads, trails, towns, parks',
     bounds: { n: 70.1, s: 59.5, e: 31.6, w: 19.0 },
   },
+  pk: {
+    id: 'pk', name: 'Pakistan',
+    url: `${BASE}/api/download/pk.pmtiles`,
+    localPath: `${OFFLINE_DIR}pk.pmtiles`,
+    estimatedGb: 0.9,
+    description: 'Pakistan offline map · roads, trails, parks, K2/Hunza context',
+    bounds: { n: 37.4, s: 23.5, e: 77.9, w: 60.5 },
+  },
 } as const;
 
 export type FileRegionId = keyof typeof FILE_REGIONS;
@@ -131,6 +139,7 @@ export const ROUTING_PACK_BYTES: Record<string, number> = {
   canada: 1828741120,
   mexico: 1835325440,
   fi: 450000000,
+  pk: 350000000,
 };
 
 export const ROUTING_REGIONS = Object.fromEntries(

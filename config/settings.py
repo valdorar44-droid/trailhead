@@ -53,6 +53,7 @@ class Settings:
     australia_open_data_enabled: bool = os.environ.get("AUSTRALIA_OPEN_DATA_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
     canada_open_data_enabled: bool = os.environ.get("CANADA_OPEN_DATA_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
     pakistan_mixed_source_enabled: bool = os.environ.get("PAKISTAN_MIXED_SOURCE_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+    gdacs_alerts_enabled: bool = os.environ.get("GDACS_ALERTS_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
     fcc_vizmo_enabled: bool = os.environ.get("FCC_VIZMO_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
     fcc_bdc_mobile_data_date: str = os.environ.get("FCC_BDC_MOBILE_DATA_DATE", "")
     fcc_bdc_mobile_source_url: str = os.environ.get("FCC_BDC_MOBILE_SOURCE_URL", "https://broadbandmap.fcc.gov/data-download/nationwide-data")

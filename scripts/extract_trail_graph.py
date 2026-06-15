@@ -74,6 +74,7 @@ GEOFABRIK_STATE_SLUGS = {
 
 GEOFABRIK_REGION_URLS = {
     "fi": "https://download.geofabrik.de/europe/finland-latest.osm.pbf",
+    "pk": "https://download.geofabrik.de/asia/pakistan-latest.osm.pbf",
 }
 
 

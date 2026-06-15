@@ -15,6 +15,7 @@ import { useStore } from '@/lib/store';
 import { api, PaywallError, type CampsitePin, type ExplorePlaceProfile, type ExploreSourcePackItem, type OsmPoi } from '@/lib/api';
 import { storage } from '@/lib/storage';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
+import { trackPhase0Once } from '@/lib/telemetry';
 import { playTrailheadVoice, stopTrailheadVoice } from '@/lib/voice';
 
 const EXPLORE_CACHE_KEY = 'trailhead_explore_catalog_v2';
@@ -78,7 +79,7 @@ function exploreIcon(category: string, group?: string): keyof typeof Ionicons.gl
   if (g === 'glamping') return 'sparkles-outline';
   if (g === 'huts_lodging') return 'bed-outline';
   if (g === 'trails') return 'trail-sign-outline';
-  if (g === 'water') return 'water-outline';
+  if (g === 'water' || g === 'water_scenic') return 'water-outline';
   if (g === 'services') return 'build-outline';
   const c = category.toLowerCase();
   if (c.includes('camp')) return 'bonfire-outline';
@@ -94,6 +95,7 @@ function exploreIcon(category: string, group?: string): keyof typeof Ionicons.gl
 
 function groupForExplorePlace(place: ExplorePlaceProfile) {
   const group = place.summary.explore_group;
+  if (group === 'water_scenic') return 'water';
   if (group) return group;
   const c = (place.summary.category || '').toLowerCase();
   if (c.includes('camp')) return 'camping';
@@ -135,6 +137,69 @@ function mediaUrl(url?: string | null) {
   return url.startsWith('/') ? `${API_BASE}${url}` : url;
 }
 
+function formatExactDate(timestamp?: number | null) {
+  if (!timestamp || !Number.isFinite(timestamp)) return '';
+  return new Date(timestamp * 1000).toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+function exploreSourceLine(place: ExplorePlaceProfile) {
+  const quality = String(place.source_pack?.quality || place.facts.source_quality || '').toLowerCase();
+  const primary = place.source_pack?.primary?.trim();
+  const title = place.facts.source_title?.trim();
+  if (quality === 'official' || quality.includes('official')) {
+    return primary ? `${primary} official source` : 'Official source';
+  }
+  if (primary && place.source_pack?.sources?.length) return `${primary} source pack`;
+  if (title) return `${title} reference`;
+  return 'Trailhead field guide';
+}
+
+function exploreFreshnessLine(place: ExplorePlaceProfile) {
+  const updated = formatExactDate(place.facts.last_updated);
+  if (updated) return `Source updated ${updated}`;
+  if (String(place.source_pack?.quality || '').toLowerCase() === 'official') return 'Official source details included';
+  return 'No dated source refresh listed';
+}
+
+function exploreTrustScore(place: ExplorePlaceProfile) {
+  let score = 0;
+  const quality = String(place.source_pack?.quality || place.facts.source_quality || '').toLowerCase();
+  if (quality === 'official' || quality.includes('official')) score += 60;
+  else if (quality.includes('wiki')) score += 12;
+  if (place.source_pack?.sources?.length) score += 12;
+  if (place.summary.image_url || place.summary.thumbnail_url) score += 8;
+  if (place.profile.summary || place.profile.why_it_matters) score += 6;
+  if (place.source_pack?.alerts?.length) score += 4;
+  return score;
+}
+
+function exploreQueryScore(place: ExplorePlaceProfile, query: string) {
+  if (!query) return 0;
+  const normalized = query.trim().toLowerCase();
+  const title = String(place.summary.title || '').toLowerCase();
+  const category = String(place.summary.category || '').toLowerCase();
+  const text = [
+    place.summary.title,
+    place.summary.category,
+    place.summary.state,
+    place.summary.hook,
+    place.summary.short_description,
+    place.profile.summary,
+    place.profile.why_it_matters,
+  ].filter(Boolean).join(' ').toLowerCase();
+  let score = 0;
+  if (title === normalized) score += 120;
+  else if (title.startsWith(normalized)) score += 75;
+  else if (title.includes(normalized)) score += 40;
+  if (category.includes(normalized)) score += 20;
+  if (text.includes(normalized)) score += 12;
+  return score;
+}
+
 function timeGreeting(date = new Date()) {
   const hour = date.getHours();
   if (hour < 12) return 'Good morning';
@@ -160,8 +225,23 @@ function campMetaLine(camp: CampsitePin) {
   ].filter(Boolean).join(' · ');
 }
 
+function mergeCampPins(primary: CampsitePin[], fallback: CampsitePin[]) {
+  const seen = new Set<string>();
+  const merged: CampsitePin[] = [];
+  for (const camp of [...primary, ...fallback]) {
+    if (!camp?.lat || !camp?.lng) continue;
+    const idKey = String(camp.id || '').trim();
+    const fuzzyKey = `${String(camp.name || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 40)}:${camp.lat.toFixed(3)}:${camp.lng.toFixed(3)}`;
+    if ((idKey && seen.has(idKey)) || seen.has(fuzzyKey)) continue;
+    if (idKey) seen.add(idKey);
+    seen.add(fuzzyKey);
+    merged.push(camp);
+  }
+  return merged;
+}
+
 function shouldLoadExploreCamps(place: ExplorePlaceProfile) {
-  return ['camping', 'glamping', 'huts_lodging', 'trails', 'parks'].includes(groupForExplorePlace(place));
+  return ['camping', 'glamping', 'huts_lodging', 'trails', 'parks', 'water'].includes(groupForExplorePlace(place));
 }
 
 function exploreCampRailTitle(place: ExplorePlaceProfile) {
@@ -169,7 +249,16 @@ function exploreCampRailTitle(place: ExplorePlaceProfile) {
   if (group === 'glamping') return 'STAYS NEAR THIS AREA';
   if (group === 'huts_lodging') return 'HUTS, CABINS & CAMPS NEARBY';
   if (group === 'trails') return 'CAMPS NEAR THIS TRAIL AREA';
+  if (group === 'water') return 'CAMPS AND STAYS NEARBY';
   return 'CAMPGROUNDS IN THIS AREA';
+}
+
+function exploreCampFallbackRadius(place: ExplorePlaceProfile) {
+  const group = groupForExplorePlace(place);
+  if (group === 'glamping' || group === 'huts_lodging') return 26;
+  if (group === 'camping') return 24;
+  if (group === 'trails') return 32;
+  return 38;
 }
 
 export default function GuideScreen() {
@@ -185,7 +274,6 @@ export default function GuideScreen() {
   const weatherUnitMode = useStore(st => st.weatherUnitMode);
   const setPendingNavigatePlace = useStore(st => st.setPendingNavigatePlace);
   const setPendingMapSelection = useStore(st => st.setPendingMapSelection);
-  const setPendingStartCopilotVoice = useStore(st => st.setPendingStartCopilotVoice);
   const [guide, setGuide] = useState<Record<string, string>>({});
   const [guideLoading, setGuideLoading] = useState(false);
   const [guideError, setGuideError] = useState('');
@@ -201,6 +289,7 @@ export default function GuideScreen() {
   const [profileReadMode, setProfileReadMode] = useState<'summary' | 'story'>('summary');
   const [explorePlaces, setExplorePlaces] = useState<ExplorePlaceProfile[]>([]);
   const [exploreCampgroundsById, setExploreCampgroundsById] = useState<Record<string, CampsitePin[]>>({});
+  const [exploreCampSourceById, setExploreCampSourceById] = useState<Record<string, 'official' | 'fallback'>>({});
   const [exploreCampLoadingId, setExploreCampLoadingId] = useState<string | null>(null);
   const [exploreCampErrors, setExploreCampErrors] = useState<Record<string, string>>({});
   const [liveExplorePlaces, setLiveExplorePlaces] = useState<OsmPoi[]>([]);
@@ -263,8 +352,28 @@ export default function GuideScreen() {
   }, [exploreMode, userLoc?.lat, userLoc?.lng]);
 
   useEffect(() => {
+    const place = selectedExplore;
+    const placeId = place?.summary.id;
+    if (!place || !placeId || !shouldLoadExploreCamps(place)) return;
+    if (exploreCampLoadingId === placeId) return;
+    const camps = exploreCampgroundsById[placeId];
+    const error = exploreCampErrors[placeId];
+    if ((!Array.isArray(camps) || camps.length > 0) && !error) return;
+    trackPhase0Once(`phase0:guide-empty:${placeId}:${error ? 'error' : 'none'}`, 'phase0_empty_state_seen', {
+      surface: 'guide_explore_camp_rail',
+      place_id: placeId,
+      group: groupForExplorePlace(place),
+      reason: error ? 'provider_error' : 'no_results',
+    });
+  }, [exploreCampErrors, exploreCampLoadingId, exploreCampgroundsById, selectedExplore]);
+
+  useEffect(() => {
     if (!selectedExplore || !shouldLoadExploreCamps(selectedExplore)) return;
-    const placeId = selectedExplore.id;
+    const place = selectedExplore;
+    const placeId = place.id;
+    const fallbackLat = place.summary.lat;
+    const fallbackLng = place.summary.lng;
+    const fallbackRadius = exploreCampFallbackRadius(place);
     let cancelled = false;
     const cacheKey = `${EXPLORE_CAMPGROUNDS_CACHE_PREFIX}${placeId}`;
     storage.get(cacheKey).then(raw => {
@@ -273,19 +382,46 @@ export default function GuideScreen() {
         const cached = JSON.parse(raw);
         if (Array.isArray(cached?.campgrounds)) {
           setExploreCampgroundsById(prev => ({ ...prev, [placeId]: cached.campgrounds }));
+          if (cached?.source_mode === 'official' || cached?.source_mode === 'fallback') {
+            setExploreCampSourceById(prev => ({ ...prev, [placeId]: cached.source_mode }));
+          }
         }
       } catch {}
     }).catch(() => {});
     setExploreCampLoadingId(placeId);
     api.getExploreCampgrounds(placeId)
-      .then(res => {
+      .then(async res => {
         if (cancelled) return;
-        setExploreCampgroundsById(prev => ({ ...prev, [placeId]: res.campgrounds ?? [] }));
+        const primary = res.campgrounds ?? [];
+        let merged = primary;
+        let sourceMode: 'official' | 'fallback' = 'official';
+        if (fallbackLat != null && fallbackLng != null && primary.length < 6) {
+          const fallback = await api.getNearbyCamps(fallbackLat, fallbackLng, fallbackRadius, []).catch(() => []);
+          if (cancelled) return;
+          if (fallback.length) {
+            merged = mergeCampPins(primary, fallback);
+            if (primary.length === 0) sourceMode = 'fallback';
+          }
+        }
+        setExploreCampgroundsById(prev => ({ ...prev, [placeId]: merged }));
+        setExploreCampSourceById(prev => ({ ...prev, [placeId]: sourceMode }));
         setExploreCampErrors(prev => ({ ...prev, [placeId]: '' }));
-        storage.set(cacheKey, JSON.stringify({ campgrounds: res.campgrounds ?? [], fetched_at: Date.now() })).catch(() => {});
+        storage.set(cacheKey, JSON.stringify({ campgrounds: merged, source_mode: sourceMode, fetched_at: Date.now() })).catch(() => {});
       })
-      .catch(() => {
-        if (!cancelled) setExploreCampErrors(prev => ({ ...prev, [placeId]: 'Campgrounds unavailable right now.' }));
+      .catch(async () => {
+        if (cancelled) return;
+        if (fallbackLat != null && fallbackLng != null) {
+          const fallback = await api.getNearbyCamps(fallbackLat, fallbackLng, fallbackRadius, []).catch(() => []);
+          if (cancelled) return;
+          if (fallback.length) {
+            setExploreCampgroundsById(prev => ({ ...prev, [placeId]: fallback }));
+            setExploreCampSourceById(prev => ({ ...prev, [placeId]: 'fallback' }));
+            setExploreCampErrors(prev => ({ ...prev, [placeId]: '' }));
+            storage.set(cacheKey, JSON.stringify({ campgrounds: fallback, source_mode: 'fallback', fetched_at: Date.now() })).catch(() => {});
+            return;
+          }
+        }
+        setExploreCampErrors(prev => ({ ...prev, [placeId]: 'No camp cards loaded for this area. Open the area map to search wider.' }));
       })
       .finally(() => {
         if (!cancelled) setExploreCampLoadingId(current => current === placeId ? null : current);
@@ -368,21 +504,34 @@ export default function GuideScreen() {
       const categoryOk = categoryMatchesExploreSelection(place, exploreCategory);
       if (!categoryOk) return false;
       if (!query) return true;
-      return [
-        place.summary.title,
-        place.summary.category,
-        place.summary.state,
-        place.summary.hook,
-        place.summary.short_description,
-        place.profile.summary,
-      ].filter(Boolean).join(' ').toLowerCase().includes(query);
+      return exploreQueryScore(place, query) > 0;
     });
+    const decorated = filtered.map(item => ({
+      ...item,
+      queryScore: exploreQueryScore(item.place, query),
+      trustScore: exploreTrustScore(item.place),
+    }));
     if (exploreMode === 'featured') {
-      return filtered.sort((a, b) => a.place.summary.rank - b.place.summary.rank);
+      return decorated.sort((a, b) => {
+        if (query && b.queryScore !== a.queryScore) return b.queryScore - a.queryScore;
+        const aHero = a.place.summary.hero_rank ?? a.place.summary.rank;
+        const bHero = b.place.summary.hero_rank ?? b.place.summary.rank;
+        if (aHero !== bHero) return aHero - bHero;
+        if (b.trustScore !== a.trustScore) return b.trustScore - a.trustScore;
+        return a.place.summary.rank - b.place.summary.rank;
+      });
     }
-    return filtered
+    return decorated
       .filter(item => item.distance == null || item.distance < (exploreMode === 'trip' ? 250 : 1200))
-      .sort((a, b) => (a.distance ?? 99999) - (b.distance ?? 99999));
+      .sort((a, b) => {
+        if (query && b.queryScore !== a.queryScore) return b.queryScore - a.queryScore;
+        const aDist = a.distance ?? 99999;
+        const bDist = b.distance ?? 99999;
+        const distanceThreshold = exploreMode === 'trip' ? 10 : 20;
+        if (Math.abs(aDist - bDist) > distanceThreshold) return aDist - bDist;
+        if (b.trustScore !== a.trustScore) return b.trustScore - a.trustScore;
+        return aDist - bDist;
+      });
   }, [explorePlaces, exploreCategory, exploreMode, exploreQuery, userLoc?.lat, userLoc?.lng, waypoints]);
 
   const featuredSections = useMemo(() => {
@@ -398,6 +547,27 @@ export default function GuideScreen() {
       }))
       .filter(section => section.rows.length > 0);
   }, [exploreCategory, exploreMode, rankedExplore]);
+  const relatedExplore = useMemo(() => {
+    if (selectedExplore?.summary.lat == null || selectedExplore?.summary.lng == null) return [];
+    const selectedGroup = groupForExplorePlace(selectedExplore);
+    const origin = { lat: Number(selectedExplore.summary.lat), lng: Number(selectedExplore.summary.lng) };
+    return explorePlaces
+      .filter(place => place.id !== selectedExplore.id && place.summary.lat != null && place.summary.lng != null)
+      .map(place => ({
+        place,
+        distance: distMi(origin, { lat: Number(place.summary.lat), lng: Number(place.summary.lng) }),
+      }))
+      .filter(item => item.distance < 90)
+      .sort((a, b) => {
+        const aSameGroup = groupForExplorePlace(a.place) === selectedGroup ? 1 : 0;
+        const bSameGroup = groupForExplorePlace(b.place) === selectedGroup ? 1 : 0;
+        if (bSameGroup !== aSameGroup) return bSameGroup - aSameGroup;
+        const trustDelta = exploreTrustScore(b.place) - exploreTrustScore(a.place);
+        if (trustDelta) return trustDelta;
+        return (a.distance ?? 99999) - (b.distance ?? 99999);
+      })
+      .slice(0, 6);
+  }, [explorePlaces, selectedExplore?.id, selectedExplore?.summary.lat, selectedExplore?.summary.lng]);
 
   async function generateGuide() {
     if (!activeTrip || guideLoading) return;
@@ -535,11 +705,6 @@ export default function GuideScreen() {
     router.push('/(tabs)/map');
   }
 
-  function startCopilotVoiceFromExplore() {
-    setPendingStartCopilotVoice(true);
-    router.push('/(tabs)/map');
-  }
-
   function renderExploreCard(
     item: { place: ExplorePlaceProfile; distance?: number | null; day?: number },
     idx: number,
@@ -550,6 +715,7 @@ export default function GuideScreen() {
     const group = groupForExplorePlace(place);
     const badge = place.summary.badges?.[0] || place.summary.category;
     const isPlaying = playing === `explore:${place.id}`;
+    const sourceLine = exploreSourceLine(place);
     return (
       <TouchableOpacity
         key={place.id}
@@ -577,6 +743,7 @@ export default function GuideScreen() {
             <Text style={s.exploreMeta} numberOfLines={1}>
               {day ? `Day ${day} · ` : ''}{distance != null ? `${fmtMi(distance)} · ` : ''}{place.summary.state}
             </Text>
+            <Text style={s.exploreTrustLine} numberOfLines={1}>{sourceLine}</Text>
             <Text style={s.exploreDesc} numberOfLines={compact ? 2 : 3}>{place.summary.hook || place.summary.short_description}</Text>
             <TouchableOpacity
               style={s.exploreMapLink}
@@ -602,6 +769,7 @@ export default function GuideScreen() {
   function renderExploreCampgrounds(place: ExplorePlaceProfile) {
     if (!shouldLoadExploreCamps(place)) return null;
     const camps = exploreCampgroundsById[place.id] ?? [];
+    const sourceMode = exploreCampSourceById[place.id] || 'official';
     const loading = exploreCampLoadingId === place.id && camps.length === 0;
     const error = exploreCampErrors[place.id];
     return (
@@ -610,7 +778,11 @@ export default function GuideScreen() {
           <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={s.profileLabel}>{exploreCampRailTitle(place)}</Text>
             <Text style={s.campgroundSectionSub}>
-              {camps.length ? `${camps.length} nearby campground cards` : 'Nearby campground cards with photos, fees, and official links'}
+              {camps.length
+                ? sourceMode === 'fallback'
+                  ? `${camps.length} nearby camp cards from wider area search`
+                  : `${camps.length} nearby campground cards`
+                : 'Nearby campground cards with photos, fees, and official links'}
             </Text>
           </View>
           <TouchableOpacity style={s.campgroundAreaBtn} onPress={() => showExploreOnMap(place)}>
@@ -687,6 +859,10 @@ export default function GuideScreen() {
           <View style={s.campgroundEmpty}>
             <Ionicons name="map-outline" size={22} color={C.text3} />
             <Text style={s.campgroundEmptyText}>{error || 'No campground cards found nearby yet.'}</Text>
+            <TouchableOpacity style={s.campgroundAreaBtn} onPress={() => showExploreOnMap(place)}>
+              <Ionicons name="compass-outline" size={14} color={C.orange} />
+              <Text style={s.campgroundAreaBtnText}>OPEN AREA MAP</Text>
+            </TouchableOpacity>
           </View>
         )}
       </TrailheadCard>
@@ -791,19 +967,6 @@ export default function GuideScreen() {
 
         {tab === 'explore' && (
           <>
-            <View style={s.guideCallout}>
-              <View style={s.guideCalloutIcon}>
-                <Ionicons name="mic-outline" size={24} color={C.orange} />
-              </View>
-              <View style={s.guideCalloutText}>
-                <Text style={s.guideCalloutTitle}>Co-Pilot</Text>
-                <Text style={s.guideCalloutSub}>Tap to talk through routes, camps, map layers, and trip next steps.</Text>
-              </View>
-              <TouchableOpacity style={s.guideCalloutAction} onPress={startCopilotVoiceFromExplore}>
-                <Ionicons name="mic" size={19} color={C.orange} />
-              </TouchableOpacity>
-            </View>
-
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.categoryStrip}>
               {EXPLORE_CATEGORY_BUTTONS.map(item => {
                 const active = item.label === 'Nearby' ? exploreMode === 'nearby' : exploreCategory === item.label && exploreMode !== 'nearby';
@@ -1147,6 +1310,18 @@ export default function GuideScreen() {
 
                 {renderExploreCampgrounds(selectedExplore)}
 
+                {relatedExplore.length > 0 && (
+                  <TrailheadCard style={s.profileSection}>
+                    <Text style={s.profileLabel}>NEAR THIS STOP</Text>
+                    <Text style={s.profileTextMuted}>
+                      Nearby parks, camp areas, trails, and stops that make this place feel more grounded.
+                    </Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.relatedExploreRail}>
+                      {relatedExplore.map((item, idx) => renderExploreCard(item, idx, true))}
+                    </ScrollView>
+                  </TrailheadCard>
+                )}
+
                 <View style={s.readModeRow}>
                   {(['summary', 'story'] as const).map(mode => (
                     <TouchableOpacity
@@ -1183,6 +1358,19 @@ export default function GuideScreen() {
                       {selectedExplore.profile.summary || selectedExplore.profile.hook}
                     </Text>
                   )}
+                </TrailheadCard>
+                <TrailheadCard style={s.profileSection}>
+                  <Text style={s.profileLabel}>SOURCE & FRESHNESS</Text>
+                  <View style={s.profileTrustGrid}>
+                    <View style={s.profileTrustCell}>
+                      <Text style={s.profileTrustHeading}>WHY TRUST THIS</Text>
+                      <Text style={s.profileTrustText}>{exploreSourceLine(selectedExplore)}</Text>
+                    </View>
+                    <View style={s.profileTrustCell}>
+                      <Text style={s.profileTrustHeading}>LAST SOURCE CHECK</Text>
+                      <Text style={s.profileTrustText}>{exploreFreshnessLine(selectedExplore)}</Text>
+                    </View>
+                  </View>
                 </TrailheadCard>
                 {[
                   ['WHY IT MATTERS', selectedExplore.profile.why_it_matters],
@@ -1406,23 +1594,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   modeBtnActive: { backgroundColor: C.orangeGlow },
   modeBtnText: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '800' },
   modeBtnTextActive: { color: C.orange },
-  guideCallout: {
-    minHeight: 76,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: C.orange + '26',
-    backgroundColor: C.orangeGlow,
-    paddingHorizontal: 13,
-    paddingVertical: 12,
-  },
-  guideCalloutIcon: { width: 48, height: 48, borderRadius: 14, borderWidth: 1, borderColor: C.orange + '28', backgroundColor: C.s1, alignItems: 'center', justifyContent: 'center' },
-  guideCalloutText: { flex: 1, minWidth: 0 },
-  guideCalloutTitle: { color: C.orange, fontSize: 15, lineHeight: 19, fontWeight: '900' },
-  guideCalloutSub: { color: C.text2, fontSize: 12, lineHeight: 17, marginTop: 2 },
-  guideCalloutAction: { width: 42, height: 42, borderRadius: 21, backgroundColor: C.s1, borderWidth: 1, borderColor: C.orange + '28', alignItems: 'center', justifyContent: 'center' },
   narrationToolbar: { minHeight: 58, borderRadius: 16, borderWidth: 1, borderColor: C.border, backgroundColor: C.s1, paddingHorizontal: 13, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   categoryStrip: { gap: 9, paddingRight: 8 },
   categoryPill: {
@@ -1494,6 +1665,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   exploreName: { color: C.text, fontSize: 18, fontWeight: '900', lineHeight: 22 },
   exploreRailName: { fontSize: 15, lineHeight: 19 },
   exploreMeta: { color: C.orange, fontSize: 10, fontFamily: mono, marginTop: 5, fontWeight: '800' },
+  exploreTrustLine: { color: C.text3, fontSize: 10.5, lineHeight: 15, marginTop: 5, fontWeight: '700' },
   exploreDesc: { color: C.text2, fontSize: 13, lineHeight: 19, marginTop: 8 },
   exploreMapLink: {
     alignSelf: 'flex-start',
@@ -1596,11 +1768,17 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   campgroundEmpty: { marginTop: 12, paddingVertical: 18, borderRadius: 12, borderWidth: 1, borderColor: C.border, backgroundColor: C.s1, alignItems: 'center', gap: 7 },
   campgroundEmptyText: { color: C.text3, fontSize: 12, fontWeight: '700', textAlign: 'center' },
   profileHook: { color: C.text, fontSize: 17, lineHeight: 25, fontWeight: '800' },
+  relatedExploreRail: { gap: 12, paddingTop: 12, paddingRight: 2 },
   storyReadBox: { maxHeight: 390, borderRadius: 12, backgroundColor: C.s1, borderWidth: 1, borderColor: C.border, paddingHorizontal: 12, paddingVertical: 10 },
   storySentence: { color: C.text2, fontSize: 17, lineHeight: 28, fontWeight: '600' },
   storySentenceActive: { color: C.text, backgroundColor: C.orange + '22', borderRadius: 8 },
   profileLabel: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8, marginBottom: 7 },
   profileText: { color: C.text2, fontSize: 14, lineHeight: 22 },
+  profileTextMuted: { color: C.text3, fontSize: 12.5, lineHeight: 18 },
+  profileTrustGrid: { gap: 10 },
+  profileTrustCell: { borderWidth: 1, borderColor: C.border, borderRadius: 12, backgroundColor: C.s1, padding: 12, gap: 5 },
+  profileTrustHeading: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.6 },
+  profileTrustText: { color: C.text, fontSize: 13, lineHeight: 19, fontWeight: '700' },
   sourcePackTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   sourcePackBadge: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.5 },
   sourcePackLabel: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.6, marginTop: 13, marginBottom: 6 },

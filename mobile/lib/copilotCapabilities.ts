@@ -4,6 +4,24 @@ import type { CampReusePolicy, RouteStyleMode, TripShapeMode } from '@/lib/api';
 export const TRAILHEAD_COPILOT_ROUTE_BUILDER_DRAFT_KEY = 'trailhead_copilot_route_builder_draft_v1';
 
 export type CopilotCampPreference = 'public' | 'private' | 'rv' | 'developed' | 'any';
+export type CopilotRoadPreference = 'paved_ok' | 'dirt_ok' | 'high_clearance' | '4wd_only';
+export type CopilotRiskTolerance = 'conservative' | 'moderate' | 'wild_but_safe';
+export type CopilotPoiPreference =
+  | 'fuel'
+  | 'water'
+  | 'trailhead'
+  | 'viewpoint'
+  | 'hot_spring'
+  | 'food'
+  | 'grocery'
+  | 'mechanic'
+  | 'attraction'
+  | 'historic'
+  | 'park'
+  | 'monument'
+  | 'visitor_center'
+  | 'water_access'
+  | 'camp_services';
 
 export type TrailheadRouteBuilderDraftStop = {
   id?: string;
@@ -39,14 +57,16 @@ export type TrailheadRouteBuilderDraft = {
   useRigProfile?: boolean;
   autoBuild?: boolean;
   fuelStrategy?: 'auto_when_needed' | 'manual' | string;
-  poiPreferences?: string[];
+  poiPreferences?: CopilotPoiPreference[] | string[];
+  roadPreference?: CopilotRoadPreference | string;
+  riskTolerance?: CopilotRiskTolerance | string;
   originalCommand?: string;
 };
 
 export const TRAILHEAD_COPILOT_CAPABILITY_SUMMARY = [
   'Map can search, fly, select cards, preview routes, toggle layers, change style, show radar, public lands, topo, satellite, nautical, pins, camps, group sites, trails, and places.',
   'Navigation only starts through startNavigation after explicit confirmation and a usable current location.',
-  'Route Builder handles multi-day trip drafts with start, destination, stops, days, shape, route style, camp preference, camp reuse, drive hours, target miles, rest days, rig constraints, official camp details, group-site fit, nearby things to do, nearby campgrounds, and trip services.',
+  'Route Builder handles multi-day trip drafts with start, destination, stops, days, shape, route style, camp preference, camp reuse, drive hours, target miles, rest days, rig constraints, official camp details, huts, shelters, trekking lodges, base-camp corridors, group-site fit, nearby things to do, nearby campgrounds, parks, monuments, trail systems, and trip services.',
   'Recreation.gov/RIDB permits, tours, tickets, lotteries, and campsite bookings are assisted official handoffs; Trailhead can open, remind, and plan around them, but does not checkout or enter lotteries directly.',
   'Guide, reports, offline downloads, rig profile, paid trip outputs, weather, safety, water, and community pins are first-class workflows.',
 ];
@@ -81,7 +101,43 @@ function cleanDraftStop(value: unknown): string | TrailheadRouteBuilderDraftStop
   return stop;
 }
 
-function cleanDraft(value: unknown): TrailheadRouteBuilderDraft {
+function normalizeRoadPreference(value: unknown): CopilotRoadPreference | undefined {
+  const clean = String(value || '').trim().toLowerCase();
+  if (clean === 'paved_ok' || clean === 'dirt_ok' || clean === 'high_clearance' || clean === '4wd_only') return clean;
+  return undefined;
+}
+
+function normalizeRiskTolerance(value: unknown): CopilotRiskTolerance | undefined {
+  const clean = String(value || '').trim().toLowerCase();
+  if (clean === 'conservative' || clean === 'moderate' || clean === 'wild_but_safe') return clean;
+  return undefined;
+}
+
+function normalizePoiPreference(value: unknown): CopilotPoiPreference | null {
+  const clean = String(value || '').trim().toLowerCase();
+  if (
+    clean === 'fuel'
+    || clean === 'water'
+    || clean === 'trailhead'
+    || clean === 'viewpoint'
+    || clean === 'hot_spring'
+    || clean === 'food'
+    || clean === 'grocery'
+    || clean === 'mechanic'
+    || clean === 'attraction'
+    || clean === 'historic'
+    || clean === 'park'
+    || clean === 'monument'
+    || clean === 'visitor_center'
+    || clean === 'water_access'
+    || clean === 'camp_services'
+  ) {
+    return clean;
+  }
+  return null;
+}
+
+export function normalizeTrailheadRouteBuilderDraft(value: unknown): TrailheadRouteBuilderDraft {
   const input = value && typeof value === 'object' ? value as Record<string, unknown> : {};
   const days = Number(input.days);
   const driveHours = Number(input.driveHours);
@@ -92,6 +148,9 @@ function cleanDraft(value: unknown): TrailheadRouteBuilderDraft {
     ? input.campPreference
     : input.campPreference === 'public' ? 'public' : undefined;
   const campReuse = input.campReuse === 'same_camp_window' || input.campReuse === 'manual' ? input.campReuse : input.campReuse === 'different_each_night' ? 'different_each_night' : undefined;
+  const poiPreferences = Array.isArray(input.poiPreferences)
+    ? input.poiPreferences.map(normalizePoiPreference).filter((item): item is CopilotPoiPreference => !!item).slice(0, 12)
+    : undefined;
   return {
     id: typeof input.id === 'string' ? input.id : `copilot-draft-${Date.now()}`,
     source: typeof input.source === 'string' ? input.source : 'copilot',
@@ -112,7 +171,9 @@ function cleanDraft(value: unknown): TrailheadRouteBuilderDraft {
     useRigProfile: input.useRigProfile === true,
     autoBuild: input.autoBuild === true,
     fuelStrategy: typeof input.fuelStrategy === 'string' ? input.fuelStrategy : undefined,
-    poiPreferences: Array.isArray(input.poiPreferences) ? input.poiPreferences.map(String).map(s => s.trim()).filter(Boolean).slice(0, 12) : undefined,
+    poiPreferences,
+    roadPreference: normalizeRoadPreference(input.roadPreference),
+    riskTolerance: normalizeRiskTolerance(input.riskTolerance),
     originalCommand: typeof input.originalCommand === 'string' ? input.originalCommand.slice(0, 500) : undefined,
   };
 }
@@ -121,14 +182,14 @@ export async function loadTrailheadRouteBuilderDraft(): Promise<TrailheadRouteBu
   const raw = await storage.get(TRAILHEAD_COPILOT_ROUTE_BUILDER_DRAFT_KEY).catch(() => null);
   if (!raw) return null;
   try {
-    return cleanDraft(JSON.parse(raw));
+    return normalizeTrailheadRouteBuilderDraft(JSON.parse(raw));
   } catch {
     return null;
   }
 }
 
 export async function saveTrailheadRouteBuilderDraft(draft: TrailheadRouteBuilderDraft): Promise<TrailheadRouteBuilderDraft> {
-  const clean = cleanDraft({ ...draft, updatedAt: Date.now(), source: draft.source || 'copilot' });
+  const clean = normalizeTrailheadRouteBuilderDraft({ ...draft, updatedAt: Date.now(), source: draft.source || 'copilot' });
   await storage.set(TRAILHEAD_COPILOT_ROUTE_BUILDER_DRAFT_KEY, JSON.stringify(clean));
   return clean;
 }

@@ -557,7 +557,16 @@ export const api = {
   getPackingList: (data: PackingRequest) =>
     req<PackingList>('/api/ai/packing-list', { method: 'POST', body: JSON.stringify(data) }),
 
-  submitBugReport: (data: { title: string; description: string; app_version?: string }) =>
+  submitBugReport: (data: {
+    title: string;
+    description: string;
+    app_version?: string;
+    category?: 'bug' | 'offensive';
+    source_surface?: string;
+    screenshot_data?: string;
+    screenshot_content_type?: string;
+    ai_context?: Record<string, unknown>;
+  }) =>
     req<{ bug_id: number; message: string }>('/api/bugs', { method: 'POST', body: JSON.stringify(data) }),
 
   getContestStatus: () =>
@@ -939,10 +948,15 @@ export interface RouteScoutStop {
   progress_mi?: number | null;
   camp?: CampsitePin | null;
   reason?: string | null;
+  overnight_kind?: 'camp' | 'motel' | 'review' | string | null;
+  overnight_style?: 'dispersed' | 'developed' | 'rv' | 'private' | 'unknown' | string | null;
+  fit_notes?: string[];
 }
 export interface RouteScoutState {
   status: 'idle' | 'scouting' | 'needs_input' | 'ready' | 'review' | 'failed' | string;
   message: string;
+  question?: string;
+  options?: string[];
   operationId?: number | string;
   phase?: 'starting' | 'plotting' | 'windows' | 'camps' | 'services' | 'finalizing' | string;
   phaseLabel?: string;
@@ -1334,6 +1348,7 @@ function campSourceBadge(camp: Partial<CampsitePin> & Record<string, any>): stri
   if (raw.includes('usfs') || raw.includes('forest')) return 'USFS';
   if (raw.includes('mapbox')) return 'Mapbox';
   if (raw.includes('geoapify')) return 'Map data';
+  if (raw.includes('mixed')) return 'Mixed source';
   if (raw.includes('osm') || raw.includes('openstreetmap')) return 'OSM';
   if (raw.includes('community')) return 'Community';
   return camp.source_badge || camp.verified_source || 'Camp source';
@@ -1430,6 +1445,12 @@ export interface RouteCampWindowResult {
   confidence?: 'strong' | 'review' | 'missing' | string;
   coverage_status?: 'ready' | 'review' | 'sparse' | string;
   reason?: string;
+  reason_short?: string;
+  display_name?: string;
+  overnight_kind?: 'camp' | 'motel' | 'review' | string;
+  overnight_style?: 'dispersed' | 'developed' | 'rv' | 'private' | 'unknown' | string;
+  fallback_label?: string;
+  fit_notes?: string[];
   search_radius_mi?: number;
   search_passes?: Array<{ name: string; radius_mi: number; filters?: string[]; found: number; kept?: number; target_only?: boolean }>;
   found: number;

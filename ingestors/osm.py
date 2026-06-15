@@ -30,6 +30,19 @@ _CAMP_QUERY = """
 out center tags 60;
 """
 
+_OUTDOOR_STAY_QUERY = """
+[out:json][timeout:22];
+(
+  node["tourism"~"^(camp_site|caravan_site|camp_pitch|wilderness_hut|alpine_hut|chalet|guest_house|hostel)$"](around:{radius},{lat},{lng});
+  way["tourism"~"^(camp_site|caravan_site|camp_pitch|wilderness_hut|alpine_hut|chalet|guest_house|hostel)$"](around:{radius},{lat},{lng});
+  node["amenity"="shelter"](around:{radius},{lat},{lng});
+  way["amenity"="shelter"](around:{radius},{lat},{lng});
+  node["shelter_type"~"^(basic_hut|lean_to|weather_shelter|rock_shelter)$"](around:{radius},{lat},{lng});
+  way["shelter_type"~"^(basic_hut|lean_to|weather_shelter|rock_shelter)$"](around:{radius},{lat},{lng});
+);
+out center tags 100;
+"""
+
 _WATER_QUERY = """
 [out:json][timeout:15];
 (
@@ -371,6 +384,94 @@ def _normalize_osm_camp(el: dict) -> dict | None:
     }
 
 
+def _normalize_osm_outdoor_stay(el: dict, profile: str = "") -> dict | None:
+    coord = _node_coord(el)
+    if not coord:
+        return None
+    tags_raw = el.get("tags", {})
+    access = str(tags_raw.get("access") or "yes").lower()
+    if access in {"private", "no"}:
+        return None
+    tourism = str(tags_raw.get("tourism") or "").lower()
+    amenity = str(tags_raw.get("amenity") or "").lower()
+    shelter_type = str(tags_raw.get("shelter_type") or "").lower()
+    lat, lng = coord
+    name = tags_raw.get("name") or tags_raw.get("operator")
+    tags = ["osm", "mixed_source"]
+    site_types: list[str] = []
+    if tourism in {"wilderness_hut", "alpine_hut"} or shelter_type in {"basic_hut", "lean_to", "weather_shelter", "rock_shelter"}:
+        land_type = "Backcountry Hut"
+        tags.extend(["hut", "walk_in", "backcountry"])
+        site_types.append("Hut / shelter")
+        name = name or "Backcountry hut"
+    elif amenity == "shelter":
+        land_type = "Trail Shelter"
+        tags.extend(["shelter", "walk_in"])
+        site_types.append("Shelter")
+        name = name or "Trail shelter"
+    elif tourism in {"guest_house", "hostel", "chalet"}:
+        land_type = "Trekking Lodge" if profile == "pakistan_karakoram" else tourism.replace("_", " ").title()
+        tags.extend(["lodging", "trekking_lodge" if profile == "pakistan_karakoram" else "stay"])
+        site_types.append(land_type)
+        name = name or land_type
+    elif tourism == "caravan_site":
+        land_type = "Caravan Site"
+        tags.extend(["campground", "rv"])
+        site_types.append("RV / caravan")
+        name = name or "Caravan site"
+    else:
+        land_type = "Campground"
+        tags.extend(["campground", "tent"])
+        site_types.append("Campground")
+        name = name or "Campsite"
+    if profile == "pakistan_karakoram":
+        tags.extend(["pakistan", "karakoram", "trekking"])
+    if str(tags_raw.get("fee") or "").lower() == "no":
+        tags.append("free")
+    description_bits = [
+        tags_raw.get("description"),
+        tags_raw.get("operator"),
+        tags_raw.get("website"),
+    ]
+    description = " · ".join([str(x).strip() for x in description_bits if str(x or "").strip()])[:320]
+    if not description:
+        description = (
+            "Mapped outdoor stay or shelter from OpenStreetMap. Verify current access, safety, permits, and local conditions before relying on it."
+        )
+    kind = el.get("type") or "node"
+    osm_id = el.get("id", "")
+    return {
+        "id": f"osm_outdoor_stay_{kind}_{osm_id}",
+        "name": str(name).strip(),
+        "lat": lat,
+        "lng": lng,
+        "tags": sorted(set(tags)),
+        "land_type": land_type,
+        "description": description,
+        "photo_url": None,
+        "reservable": str(tags_raw.get("reservation") or "").lower() in {"required", "yes"},
+        "cost": "Free" if str(tags_raw.get("fee") or "").lower() == "no" else "Verify locally",
+        "amenities": _osm_tags_to_amenities(tags_raw),
+        "site_types": site_types,
+        "url": tags_raw.get("website") or _osm_url(el),
+        "official_url": tags_raw.get("website") or "",
+        "booking_url": "",
+        "ada": str(tags_raw.get("wheelchair") or "").lower() in {"yes", "designated"},
+        "source": "osm_mixed_outdoor",
+        "source_tier": "free_community",
+        "verified_source": "OpenStreetMap + local review",
+        "source_badge": "OSM mixed",
+        "source_confidence": "mixed",
+        "source_freshness": "Community-mapped outdoor stay data. Verify permits, access, safety, seasonal closures, and current availability locally.",
+        "link_label": "Map source",
+        "rich_detail_available": False,
+        "rich_detail_locked": False,
+        "rich_detail_reason": "",
+        "_osm_type": kind,
+        "_osm_tags": tags_raw,
+    }
+
+
 async def _overpass(query: str) -> list[dict]:
     try:
         async with httpx.AsyncClient(timeout=25) as client:
@@ -403,6 +504,37 @@ async def get_osm_campsites(lat: float, lng: float, radius_m: int = 40000) -> li
 
     set_cached("campsite_cache", key, sites)
     return sites
+
+
+async def get_osm_outdoor_stays(lat: float, lng: float, radius_m: int = 40000, profile: str = "") -> list[dict]:
+    """Fetch camp, hut, shelter, and trekking-lodge style stays from OSM.
+
+    This is used for international regions where official campsite geometry is
+    limited or fragmented. Results are labeled mixed-confidence so the app does
+    not imply legal availability or booking support.
+    """
+    radius_m = max(1000, min(int(radius_m), 96_000))
+    key = f"osm_outdoor_stays_v1_{profile}_{lat:.2f}_{lng:.2f}_{radius_m}"
+    cached = get_cached("campsite_cache", key, ttl_seconds=3600 * 12)
+    if cached is not None:
+        return cached
+
+    elements = await _overpass(_OUTDOOR_STAY_QUERY.format(lat=lat, lng=lng, radius=radius_m))
+    seen: set[str] = set()
+    sites: list[dict] = []
+    for el in elements:
+        site = _normalize_osm_outdoor_stay(el, profile=profile)
+        if not site:
+            continue
+        site.pop("_osm_tags", None)
+        dedupe = f"{site.get('name')}:{float(site.get('lat', 0)):.4f}:{float(site.get('lng', 0)):.4f}"
+        if dedupe in seen:
+            continue
+        seen.add(dedupe)
+        sites.append(site)
+
+    set_cached("campsite_cache", key, sites[:120])
+    return sites[:120]
 
 
 async def get_osm_campsite_detail(camp_id: str) -> dict | None:

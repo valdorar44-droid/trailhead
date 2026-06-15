@@ -7,168 +7,4247 @@
       "key": "camping",
       "label": "Camping",
       "entries": [
-        ["Yosemite Campgrounds", "Yosemite National Park", "CA"],
-        ["Yellowstone Campgrounds", "Yellowstone National Park", "WY"],
-        ["Glacier Campgrounds", "Glacier National Park (U.S.)", "MT"],
-        ["Grand Canyon Campgrounds", "Grand Canyon National Park", "AZ"],
-        ["Zion Campgrounds", "Zion National Park", "UT"],
-        ["Grand Teton Campgrounds", "Grand Teton National Park", "WY"],
-        ["Olympic Campgrounds", "Olympic National Park", "WA"],
-        ["Acadia Campgrounds", "Acadia National Park", "ME"],
-        ["Great Smoky Mountains Campgrounds", "Great Smoky Mountains National Park", "TN"],
-        ["Rocky Mountain Campgrounds", "Rocky Mountain National Park", "CO"],
-        ["Joshua Tree Campgrounds", "Joshua Tree National Park", "CA"],
-        ["Sequoia Campgrounds", "Sequoia National Park", "CA"],
-        ["Mount Rainier Campgrounds", "Mount Rainier National Park", "WA"],
-        ["Shenandoah Campgrounds", "Shenandoah National Park", "VA"],
-        ["Arches Campgrounds", "Arches National Park", "UT"],
-        ["Big Bend Campgrounds", "Big Bend National Park", "TX"],
-        ["Everglades Campgrounds", "Everglades National Park", "FL"],
-        ["Denali Campgrounds", "Denali National Park and Preserve", "AK"],
-        ["Badlands Campgrounds", "Badlands National Park", "SD"],
-        ["Death Valley Campgrounds", "Death Valley National Park", "CA"],
-        ["Great Sand Dunes Campgrounds", "Great Sand Dunes National Park and Preserve", "CO"],
-        ["Crater Lake Campgrounds", "Crater Lake National Park", "OR"],
-        ["Redwood Campgrounds", "Redwood National and State Parks", "CA"],
-        ["Isle Royale Campgrounds", "Isle Royale National Park", "MI"],
-        ["North Cascades Campgrounds", "North Cascades National Park", "WA"],
-        ["Bryce Canyon Campgrounds", "Bryce Canyon National Park", "UT"],
-        ["Canyonlands Campgrounds", "Canyonlands National Park", "UT"],
-        ["Capitol Reef Campgrounds", "Capitol Reef National Park", "UT"],
-        ["Lassen Volcanic Campgrounds", "Lassen Volcanic National Park", "CA"],
-        ["Pinnacles Campgrounds", "Pinnacles National Park", "CA"],
-        ["Great Basin Campgrounds", "Great Basin National Park", "NV"],
-        ["Assateague Island Campgrounds", "Assateague Island National Seashore", "MD"],
-        ["Pictured Rocks Campgrounds", "Pictured Rocks National Lakeshore", "MI"],
-        ["Apostle Islands Campgrounds", "Apostle Islands National Lakeshore", "WI"],
-        ["Padre Island Campgrounds", "Padre Island National Seashore", "TX"],
-        ["Black Canyon Campgrounds", "Black Canyon of the Gunnison National Park", "CO"]
+        [
+          "Yosemite Campgrounds",
+          "Yosemite National Park",
+          "CA"
+        ],
+        [
+          "Yellowstone Campgrounds",
+          "Yellowstone National Park",
+          "WY"
+        ],
+        [
+          "Glacier Campgrounds",
+          "Glacier National Park (U.S.)",
+          "MT"
+        ],
+        [
+          "Grand Canyon Campgrounds",
+          "Grand Canyon National Park",
+          "AZ"
+        ],
+        [
+          "Zion Campgrounds",
+          "Zion National Park",
+          "UT"
+        ],
+        [
+          "Grand Teton Campgrounds",
+          "Grand Teton National Park",
+          "WY"
+        ],
+        [
+          "Olympic Campgrounds",
+          "Olympic National Park",
+          "WA"
+        ],
+        [
+          "Acadia Campgrounds",
+          "Acadia National Park",
+          "ME"
+        ],
+        [
+          "Great Smoky Mountains Campgrounds",
+          "Great Smoky Mountains National Park",
+          "TN"
+        ],
+        [
+          "Rocky Mountain Campgrounds",
+          "Rocky Mountain National Park",
+          "CO"
+        ],
+        [
+          "Joshua Tree Campgrounds",
+          "Joshua Tree National Park",
+          "CA"
+        ],
+        [
+          "Sequoia Campgrounds",
+          "Sequoia National Park",
+          "CA"
+        ],
+        [
+          "Mount Rainier Campgrounds",
+          "Mount Rainier National Park",
+          "WA"
+        ],
+        [
+          "Shenandoah Campgrounds",
+          "Shenandoah National Park",
+          "VA"
+        ],
+        [
+          "Arches Campgrounds",
+          "Arches National Park",
+          "UT"
+        ],
+        [
+          "Big Bend Campgrounds",
+          "Big Bend National Park",
+          "TX"
+        ],
+        [
+          "Everglades Campgrounds",
+          "Everglades National Park",
+          "FL"
+        ],
+        [
+          "Denali Campgrounds",
+          "Denali National Park and Preserve",
+          "AK"
+        ],
+        [
+          "Badlands Campgrounds",
+          "Badlands National Park",
+          "SD"
+        ],
+        [
+          "Death Valley Campgrounds",
+          "Death Valley National Park",
+          "CA"
+        ],
+        [
+          "Great Sand Dunes Campgrounds",
+          "Great Sand Dunes National Park and Preserve",
+          "CO"
+        ],
+        [
+          "Crater Lake Campgrounds",
+          "Crater Lake National Park",
+          "OR"
+        ],
+        [
+          "Redwood Campgrounds",
+          "Redwood National and State Parks",
+          "CA"
+        ],
+        [
+          "Isle Royale Campgrounds",
+          "Isle Royale National Park",
+          "MI"
+        ],
+        [
+          "North Cascades Campgrounds",
+          "North Cascades National Park",
+          "WA"
+        ],
+        [
+          "Bryce Canyon Campgrounds",
+          "Bryce Canyon National Park",
+          "UT"
+        ],
+        [
+          "Canyonlands Campgrounds",
+          "Canyonlands National Park",
+          "UT"
+        ],
+        [
+          "Capitol Reef Campgrounds",
+          "Capitol Reef National Park",
+          "UT"
+        ],
+        [
+          "Lassen Volcanic Campgrounds",
+          "Lassen Volcanic National Park",
+          "CA"
+        ],
+        [
+          "Pinnacles Campgrounds",
+          "Pinnacles National Park",
+          "CA"
+        ],
+        [
+          "Great Basin Campgrounds",
+          "Great Basin National Park",
+          "NV"
+        ],
+        [
+          "Assateague Island Campgrounds",
+          "Assateague Island National Seashore",
+          "MD"
+        ],
+        [
+          "Pictured Rocks Campgrounds",
+          "Pictured Rocks National Lakeshore",
+          "MI"
+        ],
+        [
+          "Apostle Islands Campgrounds",
+          "Apostle Islands National Lakeshore",
+          "WI"
+        ],
+        [
+          "Padre Island Campgrounds",
+          "Padre Island National Seashore",
+          "TX"
+        ],
+        [
+          "Black Canyon Campgrounds",
+          "Black Canyon of the Gunnison National Park",
+          "CO"
+        ],
+        [
+          "Banff Campgrounds",
+          "Banff National Park",
+          "AB",
+          "https://parks.canada.ca/pn-np/ab/banff/activ/camping"
+        ],
+        [
+          "Jasper Campgrounds",
+          "Jasper National Park",
+          "AB",
+          "https://parks.canada.ca/pn-np/ab/jasper/activ/passez-stay/camping"
+        ],
+        [
+          "Pacific Rim Campgrounds",
+          "Pacific Rim National Park Reserve",
+          "BC",
+          "https://parks.canada.ca/pn-np/bc/pacificrim/activ/camping"
+        ],
+        [
+          "Algonquin Campgrounds",
+          "Algonquin Provincial Park",
+          "ON",
+          "https://www.algonquinpark.on.ca/visit/camping/"
+        ],
+        [
+          "Gros Morne Campgrounds",
+          "Gros Morne National Park",
+          "NL",
+          "https://parks.canada.ca/pn-np/nl/grosmorne/activ/camping"
+        ],
+        [
+          "Fiordland DOC Campsites",
+          "Fiordland National Park",
+          "NZ",
+          "https://www.doc.govt.nz/parks-and-recreation/places-to-go/fiordland/places/fiordland-national-park/"
+        ],
+        [
+          "Tongariro DOC Campsites",
+          "Tongariro National Park",
+          "NZ",
+          "https://www.doc.govt.nz/parks-and-recreation/places-to-go/central-north-island/places/tongariro-national-park/"
+        ],
+        [
+          "Abel Tasman DOC Campsites",
+          "Abel Tasman National Park",
+          "NZ",
+          "https://www.doc.govt.nz/parks-and-recreation/places-to-go/nelson-tasman/places/abel-tasman-national-park/"
+        ],
+        [
+          "Aoraki Mount Cook DOC Campsites",
+          "Aoraki / Mount Cook National Park",
+          "NZ",
+          "https://www.doc.govt.nz/parks-and-recreation/places-to-go/canterbury/places/aoraki-mount-cook-national-park/"
+        ],
+        [
+          "Mount Aspiring DOC Campsites",
+          "Mount Aspiring National Park",
+          "NZ",
+          "https://www.doc.govt.nz/parks-and-recreation/places-to-go/otago/places/mount-aspiring-national-park/"
+        ],
+        [
+          "Blue Mountains Campgrounds",
+          "Blue Mountains National Park",
+          "NSW",
+          "https://www.nationalparks.nsw.gov.au/camping-and-accommodation"
+        ],
+        [
+          "Kosciuszko Campgrounds",
+          "Kosciuszko National Park",
+          "NSW",
+          "https://www.nationalparks.nsw.gov.au/visit-a-park/parks/kosciuszko-national-park"
+        ],
+        [
+          "Kakadu Campgrounds",
+          "Kakadu National Park",
+          "NT",
+          "https://kakadu.gov.au/plan/accommodation/camping/"
+        ],
+        [
+          "Grampians Campgrounds",
+          "Grampians National Park",
+          "VIC",
+          "https://www.parks.vic.gov.au/places-to-see/parks/grampians-national-park"
+        ],
+        [
+          "Freycinet Campgrounds",
+          "Freycinet National Park",
+          "TAS",
+          "https://parks.tas.gov.au/explore-our-parks/freycinet-national-park"
+        ],
+        [
+          "Daintree Campgrounds",
+          "Daintree National Park",
+          "QLD",
+          "https://parks.desi.qld.gov.au/parks/daintree"
+        ],
+        {
+          "title": "Haleakala Campgrounds",
+          "base_title": "Haleakala National Park",
+          "state": "HI",
+          "lat": 20.7204,
+          "lng": -156.1552,
+          "source_url": "https://www.nps.gov/hale/index.htm",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "parks",
+            "volcanoes"
+          ],
+          "hook": "Haleakala Campgrounds keeps Haleakala National Park available as a campground-area search anchor.",
+          "short_description": "Haleakala Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Haleakala National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Hawaii Volcanoes Campgrounds",
+          "base_title": "Hawaii Volcanoes National Park",
+          "state": "HI",
+          "lat": 19.4194,
+          "lng": -155.2885,
+          "source_url": "https://www.nps.gov/havo/index.htm",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "parks",
+            "volcanoes"
+          ],
+          "hook": "Hawaii Volcanoes Campgrounds keeps Hawaii Volcanoes National Park available as a campground-area search anchor.",
+          "short_description": "Hawaii Volcanoes Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Hawaii Volcanoes National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Katmai Campgrounds",
+          "base_title": "Katmai National Park and Preserve",
+          "state": "AK",
+          "lat": 58.5978,
+          "lng": -155.0,
+          "source_url": "https://www.nps.gov/katm/index.htm",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "parks",
+            "wildlife"
+          ],
+          "hook": "Katmai Campgrounds keeps Katmai National Park and Preserve available as a campground-area search anchor.",
+          "short_description": "Katmai Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Katmai National Park and Preserve. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Kenai Fjords Campgrounds",
+          "base_title": "Kenai Fjords National Park",
+          "state": "AK",
+          "lat": 59.818,
+          "lng": -150.1065,
+          "source_url": "https://www.nps.gov/kefj/index.htm",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "coast",
+            "parks"
+          ],
+          "hook": "Kenai Fjords Campgrounds keeps Kenai Fjords National Park available as a campground-area search anchor.",
+          "short_description": "Kenai Fjords Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Kenai Fjords National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Glacier Bay Campgrounds",
+          "base_title": "Glacier Bay National Park and Preserve",
+          "state": "AK",
+          "lat": 58.6658,
+          "lng": -136.9002,
+          "source_url": "https://www.nps.gov/glba/index.htm",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "coast",
+            "parks"
+          ],
+          "hook": "Glacier Bay Campgrounds keeps Glacier Bay National Park and Preserve available as a campground-area search anchor.",
+          "short_description": "Glacier Bay Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Glacier Bay National Park and Preserve. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Wrangell-St. Elias Campgrounds",
+          "base_title": "Wrangell-St. Elias National Park and Preserve",
+          "state": "AK",
+          "lat": 61.0,
+          "lng": -142.0,
+          "source_url": "https://www.nps.gov/wrst/index.htm",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "parks",
+            "remote"
+          ],
+          "hook": "Wrangell-St. Elias Campgrounds keeps Wrangell-St. Elias National Park and Preserve available as a campground-area search anchor.",
+          "short_description": "Wrangell-St. Elias Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Wrangell-St. Elias National Park and Preserve. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Gates of the Arctic Campgrounds",
+          "base_title": "Gates of the Arctic National Park and Preserve",
+          "state": "AK",
+          "lat": 67.78,
+          "lng": -153.3,
+          "source_url": "https://www.nps.gov/gaar/index.htm",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "parks",
+            "remote"
+          ],
+          "hook": "Gates of the Arctic Campgrounds keeps Gates of the Arctic National Park and Preserve available as a campground-area search anchor.",
+          "short_description": "Gates of the Arctic Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Gates of the Arctic National Park and Preserve. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Kobuk Valley Campgrounds",
+          "base_title": "Kobuk Valley National Park",
+          "state": "AK",
+          "lat": 67.3563,
+          "lng": -159.2002,
+          "source_url": "https://www.nps.gov/kova/index.htm",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "parks",
+            "remote"
+          ],
+          "hook": "Kobuk Valley Campgrounds keeps Kobuk Valley National Park available as a campground-area search anchor.",
+          "short_description": "Kobuk Valley Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Kobuk Valley National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Lake Clark Campgrounds",
+          "base_title": "Lake Clark National Park and Preserve",
+          "state": "AK",
+          "lat": 60.97,
+          "lng": -153.42,
+          "source_url": "https://www.nps.gov/lacl/index.htm",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "parks",
+            "remote"
+          ],
+          "hook": "Lake Clark Campgrounds keeps Lake Clark National Park and Preserve available as a campground-area search anchor.",
+          "short_description": "Lake Clark Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Lake Clark National Park and Preserve. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "American Samoa Campgrounds",
+          "base_title": "National Park of American Samoa",
+          "state": "AS",
+          "lat": -14.2583,
+          "lng": -170.6833,
+          "source_url": "https://www.nps.gov/npsa/index.htm",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "coast",
+            "parks"
+          ],
+          "hook": "American Samoa Campgrounds keeps National Park of American Samoa available as a campground-area search anchor.",
+          "short_description": "American Samoa Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around National Park of American Samoa. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Virgin Islands Campgrounds",
+          "base_title": "Virgin Islands National Park",
+          "state": "VI",
+          "lat": 18.3424,
+          "lng": -64.7413,
+          "source_url": "https://www.nps.gov/viis/index.htm",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "coast",
+            "parks"
+          ],
+          "hook": "Virgin Islands Campgrounds keeps Virgin Islands National Park available as a campground-area search anchor.",
+          "short_description": "Virgin Islands Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Virgin Islands National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "White Sands Campgrounds",
+          "base_title": "White Sands National Park",
+          "state": "NM",
+          "lat": 32.7797,
+          "lng": -106.1717,
+          "source_url": "https://www.nps.gov/whsa/index.htm",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "desert",
+            "parks"
+          ],
+          "hook": "White Sands Campgrounds keeps White Sands National Park available as a campground-area search anchor.",
+          "short_description": "White Sands Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around White Sands National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Carlsbad Caverns Campgrounds",
+          "base_title": "Carlsbad Caverns National Park",
+          "state": "NM",
+          "lat": 32.1479,
+          "lng": -104.5567,
+          "source_url": "https://www.nps.gov/cave/index.htm",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "caves",
+            "parks"
+          ],
+          "hook": "Carlsbad Caverns Campgrounds keeps Carlsbad Caverns National Park available as a campground-area search anchor.",
+          "short_description": "Carlsbad Caverns Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Carlsbad Caverns National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Petrified Forest Campgrounds",
+          "base_title": "Petrified Forest National Park",
+          "state": "AZ",
+          "lat": 35.0037,
+          "lng": -109.7889,
+          "source_url": "https://www.nps.gov/pefo/index.htm",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "geology",
+            "parks"
+          ],
+          "hook": "Petrified Forest Campgrounds keeps Petrified Forest National Park available as a campground-area search anchor.",
+          "short_description": "Petrified Forest Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Petrified Forest National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Saguaro Campgrounds",
+          "base_title": "Saguaro National Park",
+          "state": "AZ",
+          "lat": 32.2967,
+          "lng": -111.1666,
+          "source_url": "https://www.nps.gov/sagu/index.htm",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "desert",
+            "parks"
+          ],
+          "hook": "Saguaro Campgrounds keeps Saguaro National Park available as a campground-area search anchor.",
+          "short_description": "Saguaro Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Saguaro National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Guadalupe Mountains Campgrounds",
+          "base_title": "Guadalupe Mountains National Park",
+          "state": "TX",
+          "lat": 31.923,
+          "lng": -104.8855,
+          "source_url": "https://www.nps.gov/gumo/index.htm",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "mountains",
+            "parks"
+          ],
+          "hook": "Guadalupe Mountains Campgrounds keeps Guadalupe Mountains National Park available as a campground-area search anchor.",
+          "short_description": "Guadalupe Mountains Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Guadalupe Mountains National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Wind Cave Campgrounds",
+          "base_title": "Wind Cave National Park",
+          "state": "SD",
+          "lat": 43.6046,
+          "lng": -103.4213,
+          "source_url": "https://www.nps.gov/wica/index.htm",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "caves",
+            "parks"
+          ],
+          "hook": "Wind Cave Campgrounds keeps Wind Cave National Park available as a campground-area search anchor.",
+          "short_description": "Wind Cave Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Wind Cave National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Theodore Roosevelt Campgrounds",
+          "base_title": "Theodore Roosevelt National Park",
+          "state": "ND",
+          "lat": 46.979,
+          "lng": -103.5387,
+          "source_url": "https://www.nps.gov/thro/index.htm",
+          "tags": [
+            "badlands",
+            "campgrounds",
+            "camping",
+            "parks"
+          ],
+          "hook": "Theodore Roosevelt Campgrounds keeps Theodore Roosevelt National Park available as a campground-area search anchor.",
+          "short_description": "Theodore Roosevelt Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Theodore Roosevelt National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Mammoth Cave Campgrounds",
+          "base_title": "Mammoth Cave National Park",
+          "state": "KY",
+          "lat": 37.1869,
+          "lng": -86.1005,
+          "source_url": "https://www.nps.gov/maca/index.htm",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "caves",
+            "parks"
+          ],
+          "hook": "Mammoth Cave Campgrounds keeps Mammoth Cave National Park available as a campground-area search anchor.",
+          "short_description": "Mammoth Cave Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Mammoth Cave National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Cuyahoga Valley Campgrounds",
+          "base_title": "Cuyahoga Valley National Park",
+          "state": "OH",
+          "lat": 41.2808,
+          "lng": -81.5678,
+          "source_url": "https://www.nps.gov/cuva/index.htm",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "parks",
+            "trails"
+          ],
+          "hook": "Cuyahoga Valley Campgrounds keeps Cuyahoga Valley National Park available as a campground-area search anchor.",
+          "short_description": "Cuyahoga Valley Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Cuyahoga Valley National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Indiana Dunes Campgrounds",
+          "base_title": "Indiana Dunes National Park",
+          "state": "IN",
+          "lat": 41.6533,
+          "lng": -87.0524,
+          "source_url": "https://www.nps.gov/indu/index.htm",
+          "tags": [
+            "beach",
+            "campgrounds",
+            "camping",
+            "parks"
+          ],
+          "hook": "Indiana Dunes Campgrounds keeps Indiana Dunes National Park available as a campground-area search anchor.",
+          "short_description": "Indiana Dunes Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Indiana Dunes National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Gateway Arch Campgrounds",
+          "base_title": "Gateway Arch National Park",
+          "state": "MO",
+          "lat": 38.6247,
+          "lng": -90.1848,
+          "source_url": "https://www.nps.gov/jeff/index.htm",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "monuments",
+            "parks"
+          ],
+          "hook": "Gateway Arch Campgrounds keeps Gateway Arch National Park available as a campground-area search anchor.",
+          "short_description": "Gateway Arch Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Gateway Arch National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Hot Springs Campgrounds",
+          "base_title": "Hot Springs National Park",
+          "state": "AR",
+          "lat": 34.5217,
+          "lng": -93.0424,
+          "source_url": "https://www.nps.gov/hosp/index.htm",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "hot springs",
+            "parks"
+          ],
+          "hook": "Hot Springs Campgrounds keeps Hot Springs National Park available as a campground-area search anchor.",
+          "short_description": "Hot Springs Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Hot Springs National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Dry Tortugas Campgrounds",
+          "base_title": "Dry Tortugas National Park",
+          "state": "FL",
+          "lat": 24.6285,
+          "lng": -82.8732,
+          "source_url": "https://www.nps.gov/drto/index.htm",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "coast",
+            "parks"
+          ],
+          "hook": "Dry Tortugas Campgrounds keeps Dry Tortugas National Park available as a campground-area search anchor.",
+          "short_description": "Dry Tortugas Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Dry Tortugas National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Congaree Campgrounds",
+          "base_title": "Congaree National Park",
+          "state": "SC",
+          "lat": 33.7919,
+          "lng": -80.7487,
+          "source_url": "https://www.nps.gov/cong/index.htm",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "forest",
+            "parks"
+          ],
+          "hook": "Congaree Campgrounds keeps Congaree National Park available as a campground-area search anchor.",
+          "short_description": "Congaree Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Congaree National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "New River Gorge Campgrounds",
+          "base_title": "New River Gorge National Park and Preserve",
+          "state": "WV",
+          "lat": 37.9263,
+          "lng": -81.1547,
+          "source_url": "https://www.nps.gov/neri/index.htm",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "parks",
+            "river"
+          ],
+          "hook": "New River Gorge Campgrounds keeps New River Gorge National Park and Preserve available as a campground-area search anchor.",
+          "short_description": "New River Gorge Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around New River Gorge National Park and Preserve. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Channel Islands Campgrounds",
+          "base_title": "Channel Islands National Park",
+          "state": "CA",
+          "lat": 34.0069,
+          "lng": -119.7785,
+          "source_url": "https://www.nps.gov/chis/index.htm",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "islands",
+            "parks"
+          ],
+          "hook": "Channel Islands Campgrounds keeps Channel Islands National Park available as a campground-area search anchor.",
+          "short_description": "Channel Islands Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Channel Islands National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Kings Canyon Campgrounds",
+          "base_title": "Kings Canyon National Park",
+          "state": "CA",
+          "lat": 36.8879,
+          "lng": -118.5551,
+          "source_url": "https://www.nps.gov/seki/index.htm",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "mountains",
+            "parks"
+          ],
+          "hook": "Kings Canyon Campgrounds keeps Kings Canyon National Park available as a campground-area search anchor.",
+          "short_description": "Kings Canyon Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Kings Canyon National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Minnewanka and Lake Louise Campgrounds",
+          "base_title": "Banff National Park",
+          "state": "AB",
+          "lat": 51.4167,
+          "lng": -116.2167,
+          "source_url": "https://parks.canada.ca/pn-np/ab/banff",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "lakes",
+            "parks"
+          ],
+          "hook": "Minnewanka and Lake Louise Campgrounds keeps Banff National Park available as a campground-area search anchor.",
+          "short_description": "Minnewanka and Lake Louise Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Banff National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Kootenay Campgrounds",
+          "base_title": "Kootenay National Park",
+          "state": "BC",
+          "lat": 50.95,
+          "lng": -116.05,
+          "source_url": "https://parks.canada.ca/pn-np/bc/kootenay",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "canada",
+            "parks"
+          ],
+          "hook": "Kootenay Campgrounds keeps Kootenay National Park available as a campground-area search anchor.",
+          "short_description": "Kootenay Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Kootenay National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Yoho Campgrounds",
+          "base_title": "Yoho National Park",
+          "state": "BC",
+          "lat": 51.4993,
+          "lng": -116.4854,
+          "source_url": "https://parks.canada.ca/pn-np/bc/yoho",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "canada",
+            "parks"
+          ],
+          "hook": "Yoho Campgrounds keeps Yoho National Park available as a campground-area search anchor.",
+          "short_description": "Yoho Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Yoho National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Waterton Lakes Campgrounds",
+          "base_title": "Waterton Lakes National Park",
+          "state": "AB",
+          "lat": 49.0833,
+          "lng": -113.9167,
+          "source_url": "https://parks.canada.ca/pn-np/ab/waterton",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "canada",
+            "parks"
+          ],
+          "hook": "Waterton Lakes Campgrounds keeps Waterton Lakes National Park available as a campground-area search anchor.",
+          "short_description": "Waterton Lakes Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Waterton Lakes National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Kluane and Reserve Campgrounds",
+          "base_title": "Kluane National Park and Reserve",
+          "state": "YT",
+          "lat": 60.75,
+          "lng": -138.5,
+          "source_url": "https://parks.canada.ca/pn-np/yt/kluane",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "canada",
+            "parks"
+          ],
+          "hook": "Kluane and Reserve Campgrounds keeps Kluane National Park and Reserve available as a campground-area search anchor.",
+          "short_description": "Kluane and Reserve Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Kluane National Park and Reserve. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Cape Breton Highlands Campgrounds",
+          "base_title": "Cape Breton Highlands National Park",
+          "state": "NS",
+          "lat": 46.7383,
+          "lng": -60.65,
+          "source_url": "https://parks.canada.ca/pn-np/ns/cbreton",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "canada",
+            "parks"
+          ],
+          "hook": "Cape Breton Highlands Campgrounds keeps Cape Breton Highlands National Park available as a campground-area search anchor.",
+          "short_description": "Cape Breton Highlands Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Cape Breton Highlands National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Fundy Campgrounds",
+          "base_title": "Fundy National Park",
+          "state": "NB",
+          "lat": 45.595,
+          "lng": -64.954,
+          "source_url": "https://parks.canada.ca/pn-np/nb/fundy",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "canada",
+            "parks"
+          ],
+          "hook": "Fundy Campgrounds keeps Fundy National Park available as a campground-area search anchor.",
+          "short_description": "Fundy Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Fundy National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Bruce Peninsula Campgrounds",
+          "base_title": "Bruce Peninsula National Park",
+          "state": "ON",
+          "lat": 45.245,
+          "lng": -81.523,
+          "source_url": "https://parks.canada.ca/pn-np/on/bruce",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "canada",
+            "parks"
+          ],
+          "hook": "Bruce Peninsula Campgrounds keeps Bruce Peninsula National Park available as a campground-area search anchor.",
+          "short_description": "Bruce Peninsula Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Bruce Peninsula National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Georgian Bay Islands Campgrounds",
+          "base_title": "Georgian Bay Islands National Park",
+          "state": "ON",
+          "lat": 44.8692,
+          "lng": -79.869,
+          "source_url": "https://parks.canada.ca/pn-np/on/georg",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "canada",
+            "parks"
+          ],
+          "hook": "Georgian Bay Islands Campgrounds keeps Georgian Bay Islands National Park available as a campground-area search anchor.",
+          "short_description": "Georgian Bay Islands Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Georgian Bay Islands National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Riding Mountain Campgrounds",
+          "base_title": "Riding Mountain National Park",
+          "state": "MB",
+          "lat": 50.658,
+          "lng": -99.971,
+          "source_url": "https://parks.canada.ca/pn-np/mb/riding",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "canada",
+            "parks"
+          ],
+          "hook": "Riding Mountain Campgrounds keeps Riding Mountain National Park available as a campground-area search anchor.",
+          "short_description": "Riding Mountain Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Riding Mountain National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Prince Albert Campgrounds",
+          "base_title": "Prince Albert National Park",
+          "state": "SK",
+          "lat": 53.9333,
+          "lng": -106.0833,
+          "source_url": "https://parks.canada.ca/pn-np/sk/princealbert",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "canada",
+            "parks"
+          ],
+          "hook": "Prince Albert Campgrounds keeps Prince Albert National Park available as a campground-area search anchor.",
+          "short_description": "Prince Albert Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Prince Albert National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Grasslands Campgrounds",
+          "base_title": "Grasslands National Park",
+          "state": "SK",
+          "lat": 49.1333,
+          "lng": -107.4333,
+          "source_url": "https://parks.canada.ca/pn-np/sk/grasslands",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "canada",
+            "parks"
+          ],
+          "hook": "Grasslands Campgrounds keeps Grasslands National Park available as a campground-area search anchor.",
+          "short_description": "Grasslands Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Grasslands National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Wapusk Campgrounds",
+          "base_title": "Wapusk National Park",
+          "state": "MB",
+          "lat": 57.7333,
+          "lng": -93.3667,
+          "source_url": "https://parks.canada.ca/pn-np/mb/wapusk",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "canada",
+            "parks"
+          ],
+          "hook": "Wapusk Campgrounds keeps Wapusk National Park available as a campground-area search anchor.",
+          "short_description": "Wapusk Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Wapusk National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Torngat Mountains Campgrounds",
+          "base_title": "Torngat Mountains National Park",
+          "state": "NL",
+          "lat": 58.5,
+          "lng": -63.5,
+          "source_url": "https://parks.canada.ca/pn-np/nl/torngats",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "canada",
+            "parks"
+          ],
+          "hook": "Torngat Mountains Campgrounds keeps Torngat Mountains National Park available as a campground-area search anchor.",
+          "short_description": "Torngat Mountains Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Torngat Mountains National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Eldorado Canyon Campgrounds",
+          "base_title": "Eldorado Canyon State Park",
+          "state": "CO",
+          "lat": 39.9306,
+          "lng": -105.2839,
+          "source_url": "https://cpw.state.co.us/placestogo/parks/EldoradoCanyon",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "climbing",
+            "state parks"
+          ],
+          "hook": "Eldorado Canyon Campgrounds keeps Eldorado Canyon State Park available as a campground-area search anchor.",
+          "short_description": "Eldorado Canyon Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Eldorado Canyon State Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Custer Campgrounds",
+          "base_title": "Custer State Park",
+          "state": "SD",
+          "lat": 43.7606,
+          "lng": -103.3961,
+          "source_url": "https://gfp.sd.gov/parks/detail/custer-state-park/",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "state parks",
+            "wildlife"
+          ],
+          "hook": "Custer Campgrounds keeps Custer State Park available as a campground-area search anchor.",
+          "short_description": "Custer Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Custer State Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Valley of Fire Campgrounds",
+          "base_title": "Valley of Fire State Park",
+          "state": "NV",
+          "lat": 36.485,
+          "lng": -114.5353,
+          "source_url": "https://parks.nv.gov/parks/valley-of-fire",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "desert",
+            "state parks"
+          ],
+          "hook": "Valley of Fire Campgrounds keeps Valley of Fire State Park available as a campground-area search anchor.",
+          "short_description": "Valley of Fire Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Valley of Fire State Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Dead Horse Point Campgrounds",
+          "base_title": "Dead Horse Point State Park",
+          "state": "UT",
+          "lat": 38.508,
+          "lng": -109.7407,
+          "source_url": "https://stateparks.utah.gov/parks/dead-horse/",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "scenic",
+            "state parks"
+          ],
+          "hook": "Dead Horse Point Campgrounds keeps Dead Horse Point State Park available as a campground-area search anchor.",
+          "short_description": "Dead Horse Point Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Dead Horse Point State Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Goblin Valley Campgrounds",
+          "base_title": "Goblin Valley State Park",
+          "state": "UT",
+          "lat": 38.5735,
+          "lng": -110.7071,
+          "source_url": "https://stateparks.utah.gov/parks/goblin-valley/",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "desert",
+            "state parks"
+          ],
+          "hook": "Goblin Valley Campgrounds keeps Goblin Valley State Park available as a campground-area search anchor.",
+          "short_description": "Goblin Valley Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Goblin Valley State Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Custer Gallatin Campgrounds",
+          "base_title": "Custer Gallatin National Forest",
+          "state": "MT",
+          "lat": 45.265,
+          "lng": -110.55,
+          "source_url": "https://www.fs.usda.gov/custergallatin",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "forests"
+          ],
+          "hook": "Custer Gallatin Campgrounds keeps Custer Gallatin National Forest available as a campground-area search anchor.",
+          "short_description": "Custer Gallatin Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Custer Gallatin National Forest. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "White Mountain Campgrounds",
+          "base_title": "White Mountain National Forest",
+          "state": "NH",
+          "lat": 44.158,
+          "lng": -71.407,
+          "source_url": "https://www.fs.usda.gov/whitemountain",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "forests",
+            "trails"
+          ],
+          "hook": "White Mountain Campgrounds keeps White Mountain National Forest available as a campground-area search anchor.",
+          "short_description": "White Mountain Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around White Mountain National Forest. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Pisgah Campgrounds",
+          "base_title": "Pisgah National Forest",
+          "state": "NC",
+          "lat": 35.35,
+          "lng": -82.78,
+          "source_url": "https://www.fs.usda.gov/nfsnc",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "forests",
+            "trails"
+          ],
+          "hook": "Pisgah Campgrounds keeps Pisgah National Forest available as a campground-area search anchor.",
+          "short_description": "Pisgah Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Pisgah National Forest. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Superior Campgrounds",
+          "base_title": "Superior National Forest",
+          "state": "MN",
+          "lat": 47.8,
+          "lng": -91.5,
+          "source_url": "https://www.fs.usda.gov/superior",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "forests",
+            "water"
+          ],
+          "hook": "Superior Campgrounds keeps Superior National Forest available as a campground-area search anchor.",
+          "short_description": "Superior Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Superior National Forest. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Gifford Pinchot Campgrounds",
+          "base_title": "Gifford Pinchot National Forest",
+          "state": "WA",
+          "lat": 46.1667,
+          "lng": -121.8333,
+          "source_url": "https://www.fs.usda.gov/giffordpinchot",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "forests",
+            "volcanoes"
+          ],
+          "hook": "Gifford Pinchot Campgrounds keeps Gifford Pinchot National Forest available as a campground-area search anchor.",
+          "short_description": "Gifford Pinchot Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Gifford Pinchot National Forest. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Karijini Campgrounds",
+          "base_title": "Karijini National Park",
+          "state": "WA",
+          "lat": -22.4833,
+          "lng": 118.4667,
+          "source_url": "https://exploreparks.dbca.wa.gov.au/park/karijini-national-park",
+          "tags": [
+            "australia",
+            "campgrounds",
+            "camping",
+            "parks"
+          ],
+          "hook": "Karijini Campgrounds keeps Karijini National Park available as a campground-area search anchor.",
+          "short_description": "Karijini Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Karijini National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Kalbarri Campgrounds",
+          "base_title": "Kalbarri National Park",
+          "state": "WA",
+          "lat": -27.6167,
+          "lng": 114.45,
+          "source_url": "https://exploreparks.dbca.wa.gov.au/park/kalbarri-national-park",
+          "tags": [
+            "australia",
+            "campgrounds",
+            "camping",
+            "parks"
+          ],
+          "hook": "Kalbarri Campgrounds keeps Kalbarri National Park available as a campground-area search anchor.",
+          "short_description": "Kalbarri Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Kalbarri National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Cape Range Campgrounds",
+          "base_title": "Cape Range National Park",
+          "state": "WA",
+          "lat": -22.1,
+          "lng": 113.9333,
+          "source_url": "https://exploreparks.dbca.wa.gov.au/park/cape-range-national-park",
+          "tags": [
+            "australia",
+            "campgrounds",
+            "camping",
+            "parks"
+          ],
+          "hook": "Cape Range Campgrounds keeps Cape Range National Park available as a campground-area search anchor.",
+          "short_description": "Cape Range Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Cape Range National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Wilsons Promontory Campgrounds",
+          "base_title": "Wilsons Promontory National Park",
+          "state": "VIC",
+          "lat": -39.03,
+          "lng": 146.34,
+          "source_url": "https://www.parks.vic.gov.au/places-to-see/parks/wilsons-promontory-national-park",
+          "tags": [
+            "australia",
+            "campgrounds",
+            "camping",
+            "parks"
+          ],
+          "hook": "Wilsons Promontory Campgrounds keeps Wilsons Promontory National Park available as a campground-area search anchor.",
+          "short_description": "Wilsons Promontory Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Wilsons Promontory National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Great Otway Campgrounds",
+          "base_title": "Great Otway National Park",
+          "state": "VIC",
+          "lat": -38.65,
+          "lng": 143.6,
+          "source_url": "https://www.parks.vic.gov.au/places-to-see/parks/great-otway-national-park",
+          "tags": [
+            "australia",
+            "campgrounds",
+            "camping",
+            "parks"
+          ],
+          "hook": "Great Otway Campgrounds keeps Great Otway National Park available as a campground-area search anchor.",
+          "short_description": "Great Otway Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Great Otway National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Flinders Ranges Campgrounds",
+          "base_title": "Ikara-Flinders Ranges National Park",
+          "state": "SA",
+          "lat": -31.4333,
+          "lng": 138.6333,
+          "source_url": "https://www.parks.sa.gov.au/parks/ikara-flinders-ranges-national-park",
+          "tags": [
+            "australia",
+            "campgrounds",
+            "camping",
+            "parks"
+          ],
+          "hook": "Flinders Ranges Campgrounds keeps Ikara-Flinders Ranges National Park available as a campground-area search anchor.",
+          "short_description": "Flinders Ranges Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Ikara-Flinders Ranges National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Wilpena Pound Campgrounds",
+          "base_title": "Wilpena Pound",
+          "state": "SA",
+          "lat": -31.526,
+          "lng": 138.618,
+          "source_url": "https://www.parks.sa.gov.au/parks/ikara-flinders-ranges-national-park",
+          "tags": [
+            "australia",
+            "campgrounds",
+            "camping",
+            "parks"
+          ],
+          "hook": "Wilpena Pound Campgrounds keeps Wilpena Pound available as a campground-area search anchor.",
+          "short_description": "Wilpena Pound Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Wilpena Pound. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Ikara-Flinders Ranges Campgrounds",
+          "base_title": "Ikara-Flinders Ranges National Park",
+          "state": "SA",
+          "lat": -31.45,
+          "lng": 138.65,
+          "source_url": "https://www.parks.sa.gov.au/parks/ikara-flinders-ranges-national-park",
+          "tags": [
+            "australia",
+            "campgrounds",
+            "camping",
+            "parks"
+          ],
+          "hook": "Ikara-Flinders Ranges Campgrounds keeps Ikara-Flinders Ranges National Park available as a campground-area search anchor.",
+          "short_description": "Ikara-Flinders Ranges Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Ikara-Flinders Ranges National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Litchfield Campgrounds",
+          "base_title": "Litchfield National Park",
+          "state": "NT",
+          "lat": -13.1667,
+          "lng": 130.7833,
+          "source_url": "https://nt.gov.au/parks/find-a-park/litchfield-national-park",
+          "tags": [
+            "australia",
+            "campgrounds",
+            "camping",
+            "parks"
+          ],
+          "hook": "Litchfield Campgrounds keeps Litchfield National Park available as a campground-area search anchor.",
+          "short_description": "Litchfield Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Litchfield National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Nitmiluk Campgrounds",
+          "base_title": "Nitmiluk National Park",
+          "state": "NT",
+          "lat": -14.3167,
+          "lng": 132.4167,
+          "source_url": "https://nt.gov.au/parks/find-a-park/nitmiluk-national-park",
+          "tags": [
+            "australia",
+            "campgrounds",
+            "camping",
+            "parks"
+          ],
+          "hook": "Nitmiluk Campgrounds keeps Nitmiluk National Park available as a campground-area search anchor.",
+          "short_description": "Nitmiluk Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Nitmiluk National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Cradle Mountain-Lake St Clair Campgrounds",
+          "base_title": "Cradle Mountain-Lake St Clair National Park",
+          "state": "TAS",
+          "lat": -41.8333,
+          "lng": 146.05,
+          "source_url": "https://parks.tas.gov.au/explore-our-parks/cradle-mountain",
+          "tags": [
+            "australia",
+            "campgrounds",
+            "camping",
+            "parks"
+          ],
+          "hook": "Cradle Mountain-Lake St Clair Campgrounds keeps Cradle Mountain-Lake St Clair National Park available as a campground-area search anchor.",
+          "short_description": "Cradle Mountain-Lake St Clair Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Cradle Mountain-Lake St Clair National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Southwest Tasmania Campgrounds",
+          "base_title": "Southwest National Park",
+          "state": "TAS",
+          "lat": -43.3333,
+          "lng": 146.25,
+          "source_url": "https://parks.tas.gov.au/explore-our-parks/southwest-national-park",
+          "tags": [
+            "australia",
+            "campgrounds",
+            "camping",
+            "parks"
+          ],
+          "hook": "Southwest Tasmania Campgrounds keeps Southwest National Park available as a campground-area search anchor.",
+          "short_description": "Southwest Tasmania Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Southwest National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Glass House Mountains Campgrounds",
+          "base_title": "Glass House Mountains National Park",
+          "state": "QLD",
+          "lat": -26.9,
+          "lng": 152.95,
+          "source_url": "https://parks.desi.qld.gov.au/parks/glass-house-mountains",
+          "tags": [
+            "australia",
+            "campgrounds",
+            "camping",
+            "parks"
+          ],
+          "hook": "Glass House Mountains Campgrounds keeps Glass House Mountains National Park available as a campground-area search anchor.",
+          "short_description": "Glass House Mountains Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Glass House Mountains National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Lamington Campgrounds",
+          "base_title": "Lamington National Park",
+          "state": "QLD",
+          "lat": -28.2167,
+          "lng": 153.1333,
+          "source_url": "https://parks.desi.qld.gov.au/parks/lamington",
+          "tags": [
+            "australia",
+            "campgrounds",
+            "camping",
+            "parks"
+          ],
+          "hook": "Lamington Campgrounds keeps Lamington National Park available as a campground-area search anchor.",
+          "short_description": "Lamington Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Lamington National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Springbrook Campgrounds",
+          "base_title": "Springbrook National Park",
+          "state": "QLD",
+          "lat": -28.2,
+          "lng": 153.2667,
+          "source_url": "https://parks.desi.qld.gov.au/parks/springbrook",
+          "tags": [
+            "australia",
+            "campgrounds",
+            "camping",
+            "parks"
+          ],
+          "hook": "Springbrook Campgrounds keeps Springbrook National Park available as a campground-area search anchor.",
+          "short_description": "Springbrook Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Springbrook National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Namadgi Campgrounds",
+          "base_title": "Namadgi National Park",
+          "state": "ACT",
+          "lat": -35.65,
+          "lng": 148.95,
+          "source_url": "https://www.parks.act.gov.au/find-a-park/namadgi-national-park",
+          "tags": [
+            "australia",
+            "campgrounds",
+            "camping",
+            "parks"
+          ],
+          "hook": "Namadgi Campgrounds keeps Namadgi National Park available as a campground-area search anchor.",
+          "short_description": "Namadgi Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Namadgi National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Booderee Campgrounds",
+          "base_title": "Booderee National Park",
+          "state": "NSW",
+          "lat": -35.145,
+          "lng": 150.7,
+          "source_url": "https://parksaustralia.gov.au/booderee/",
+          "tags": [
+            "australia",
+            "campgrounds",
+            "camping",
+            "parks"
+          ],
+          "hook": "Booderee Campgrounds keeps Booderee National Park available as a campground-area search anchor.",
+          "short_description": "Booderee Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Booderee National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Myall Lakes Campgrounds",
+          "base_title": "Myall Lakes National Park",
+          "state": "NSW",
+          "lat": -32.5,
+          "lng": 152.3,
+          "source_url": "https://www.nationalparks.nsw.gov.au/visit-a-park/parks/myall-lakes-national-park",
+          "tags": [
+            "australia",
+            "campgrounds",
+            "camping",
+            "parks"
+          ],
+          "hook": "Myall Lakes Campgrounds keeps Myall Lakes National Park available as a campground-area search anchor.",
+          "short_description": "Myall Lakes Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Myall Lakes National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Wollemi Campgrounds",
+          "base_title": "Wollemi National Park",
+          "state": "NSW",
+          "lat": -32.9,
+          "lng": 150.3,
+          "source_url": "https://www.nationalparks.nsw.gov.au/visit-a-park/parks/wollemi-national-park",
+          "tags": [
+            "australia",
+            "campgrounds",
+            "camping",
+            "parks"
+          ],
+          "hook": "Wollemi Campgrounds keeps Wollemi National Park available as a campground-area search anchor.",
+          "short_description": "Wollemi Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Wollemi National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Mount Field Campgrounds",
+          "base_title": "Mount Field National Park",
+          "state": "TAS",
+          "lat": -42.6833,
+          "lng": 146.7,
+          "source_url": "https://parks.tas.gov.au/explore-our-parks/mount-field-national-park",
+          "tags": [
+            "australia",
+            "campgrounds",
+            "camping",
+            "parks"
+          ],
+          "hook": "Mount Field Campgrounds keeps Mount Field National Park available as a campground-area search anchor.",
+          "short_description": "Mount Field Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Mount Field National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Egmont Campgrounds",
+          "base_title": "Egmont National Park",
+          "state": "NZ",
+          "lat": -39.3,
+          "lng": 174.0667,
+          "source_url": "https://www.doc.govt.nz/parks-and-recreation/places-to-go/taranaki/places/egmont-national-park/",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "new zealand",
+            "parks"
+          ],
+          "hook": "Egmont Campgrounds keeps Egmont National Park available as a campground-area search anchor.",
+          "short_description": "Egmont Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Egmont National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Whanganui Campgrounds",
+          "base_title": "Whanganui National Park",
+          "state": "NZ",
+          "lat": -39.35,
+          "lng": 175.05,
+          "source_url": "https://www.doc.govt.nz/parks-and-recreation/places-to-go/manawatu-whanganui/places/whanganui-national-park/",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "new zealand",
+            "parks"
+          ],
+          "hook": "Whanganui Campgrounds keeps Whanganui National Park available as a campground-area search anchor.",
+          "short_description": "Whanganui Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Whanganui National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Kahurangi Campgrounds",
+          "base_title": "Kahurangi National Park",
+          "state": "NZ",
+          "lat": -41.25,
+          "lng": 172.1,
+          "source_url": "https://www.doc.govt.nz/parks-and-recreation/places-to-go/nelson-tasman/places/kahurangi-national-park/",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "new zealand",
+            "parks"
+          ],
+          "hook": "Kahurangi Campgrounds keeps Kahurangi National Park available as a campground-area search anchor.",
+          "short_description": "Kahurangi Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Kahurangi National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Nelson Lakes Campgrounds",
+          "base_title": "Nelson Lakes National Park",
+          "state": "NZ",
+          "lat": -41.85,
+          "lng": 172.8,
+          "source_url": "https://www.doc.govt.nz/parks-and-recreation/places-to-go/nelson-tasman/places/nelson-lakes-national-park/",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "new zealand",
+            "parks"
+          ],
+          "hook": "Nelson Lakes Campgrounds keeps Nelson Lakes National Park available as a campground-area search anchor.",
+          "short_description": "Nelson Lakes Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Nelson Lakes National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Paparoa Campgrounds",
+          "base_title": "Paparoa National Park",
+          "state": "NZ",
+          "lat": -42.0833,
+          "lng": 171.45,
+          "source_url": "https://www.doc.govt.nz/parks-and-recreation/places-to-go/west-coast/places/paparoa-national-park/",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "new zealand",
+            "parks"
+          ],
+          "hook": "Paparoa Campgrounds keeps Paparoa National Park available as a campground-area search anchor.",
+          "short_description": "Paparoa Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Paparoa National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Westland Tai Poutini Campgrounds",
+          "base_title": "Westland Tai Poutini National Park",
+          "state": "NZ",
+          "lat": -43.3833,
+          "lng": 170.1833,
+          "source_url": "https://www.doc.govt.nz/parks-and-recreation/places-to-go/west-coast/places/westland-tai-poutini-national-park/",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "new zealand",
+            "parks"
+          ],
+          "hook": "Westland Tai Poutini Campgrounds keeps Westland Tai Poutini National Park available as a campground-area search anchor.",
+          "short_description": "Westland Tai Poutini Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Westland Tai Poutini National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Arthur’s Pass Campgrounds",
+          "base_title": "Arthur's Pass National Park",
+          "state": "NZ",
+          "lat": -42.95,
+          "lng": 171.5667,
+          "source_url": "https://www.doc.govt.nz/parks-and-recreation/places-to-go/canterbury/places/arthurs-pass-national-park/",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "new zealand",
+            "parks"
+          ],
+          "hook": "Arthur’s Pass Campgrounds keeps Arthur's Pass National Park available as a campground-area search anchor.",
+          "short_description": "Arthur’s Pass Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Arthur's Pass National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        },
+        {
+          "title": "Rakiura Campgrounds",
+          "base_title": "Rakiura National Park",
+          "state": "NZ",
+          "lat": -46.9,
+          "lng": 168.1167,
+          "source_url": "https://www.doc.govt.nz/parks-and-recreation/places-to-go/southland/places/rakiura-national-park/",
+          "tags": [
+            "campgrounds",
+            "camping",
+            "new zealand",
+            "parks"
+          ],
+          "hook": "Rakiura Campgrounds keeps Rakiura National Park available as a campground-area search anchor.",
+          "short_description": "Rakiura Campgrounds is a seeded Trailhead campground-area anchor for searching overnight options around Rakiura National Park. Verify actual campgrounds, closures, fees, and reservations with the official source before relying on it."
+        }
+      ]
+    },
+    {
+      "key": "parks",
+      "label": "Parks",
+      "entries": [
+        [
+          "Banff National Park",
+          "Banff National Park",
+          "AB",
+          "https://parks.canada.ca/pn-np/ab/banff"
+        ],
+        [
+          "Jasper National Park",
+          "Jasper National Park",
+          "AB",
+          "https://parks.canada.ca/pn-np/ab/jasper"
+        ],
+        [
+          "Pacific Rim National Park Reserve",
+          "Pacific Rim National Park Reserve",
+          "BC",
+          "https://parks.canada.ca/pn-np/bc/pacificrim"
+        ],
+        [
+          "Nahanni National Park Reserve",
+          "Nahanni National Park Reserve",
+          "NT",
+          "https://parks.canada.ca/pn-np/nt/nahanni"
+        ],
+        [
+          "Wood Buffalo National Park",
+          "Wood Buffalo National Park",
+          "AB",
+          "https://parks.canada.ca/pn-np/nt/woodbuffalo"
+        ],
+        [
+          "L'Anse aux Meadows",
+          "L'Anse aux Meadows",
+          "NL",
+          "https://parks.canada.ca/lhn-nhs/nl/meadows"
+        ],
+        [
+          "Head-Smashed-In Buffalo Jump",
+          "Head-Smashed-In Buffalo Jump",
+          "AB",
+          "https://headsmashedin.ca/"
+        ],
+        [
+          "Fortress of Louisbourg",
+          "Fortress of Louisbourg",
+          "NS",
+          "https://parks.canada.ca/lhn-nhs/ns/louisbourg"
+        ],
+        [
+          "Fiordland National Park",
+          "Fiordland National Park",
+          "NZ",
+          "https://www.doc.govt.nz/parks-and-recreation/places-to-go/fiordland/places/fiordland-national-park/"
+        ],
+        [
+          "Tongariro National Park",
+          "Tongariro National Park",
+          "NZ",
+          "https://www.doc.govt.nz/parks-and-recreation/places-to-go/central-north-island/places/tongariro-national-park/"
+        ],
+        [
+          "Abel Tasman National Park",
+          "Abel Tasman National Park",
+          "NZ",
+          "https://www.doc.govt.nz/parks-and-recreation/places-to-go/nelson-tasman/places/abel-tasman-national-park/"
+        ],
+        [
+          "Aoraki Mount Cook National Park",
+          "Aoraki / Mount Cook National Park",
+          "NZ",
+          "https://www.doc.govt.nz/parks-and-recreation/places-to-go/canterbury/places/aoraki-mount-cook-national-park/"
+        ],
+        [
+          "Mount Aspiring National Park",
+          "Mount Aspiring National Park",
+          "NZ",
+          "https://www.doc.govt.nz/parks-and-recreation/places-to-go/otago/places/mount-aspiring-national-park/"
+        ],
+        [
+          "Te Wahipounamu",
+          "Te Wahipounamu",
+          "NZ",
+          "https://whc.unesco.org/en/list/551/"
+        ],
+        [
+          "Waitangi Treaty Grounds",
+          "Waitangi Treaty Grounds",
+          "NZ",
+          "https://www.waitangi.org.nz/"
+        ],
+        [
+          "Uluru-Kata Tjuta National Park",
+          "Uluṟu-Kata Tjuṭa National Park",
+          "NT",
+          "https://parksaustralia.gov.au/uluru/"
+        ],
+        [
+          "Kakadu National Park",
+          "Kakadu National Park",
+          "NT",
+          "https://kakadu.gov.au/"
+        ],
+        [
+          "Great Barrier Reef Marine Park",
+          "Great Barrier Reef Marine Park",
+          "QLD",
+          "https://www2.gbrmpa.gov.au/"
+        ],
+        [
+          "Blue Mountains National Park",
+          "Blue Mountains National Park",
+          "NSW",
+          "https://www.nationalparks.nsw.gov.au/visit-a-park/parks/blue-mountains-national-park"
+        ],
+        [
+          "Kosciuszko National Park",
+          "Kosciuszko National Park",
+          "NSW",
+          "https://www.nationalparks.nsw.gov.au/visit-a-park/parks/kosciuszko-national-park"
+        ],
+        [
+          "Daintree National Park",
+          "Daintree National Park",
+          "QLD",
+          "https://parks.desi.qld.gov.au/parks/daintree"
+        ],
+        [
+          "Purnululu National Park",
+          "Purnululu National Park",
+          "WA",
+          "https://exploreparks.dbca.wa.gov.au/park/purnululu-national-park"
+        ],
+        [
+          "Port Arthur Historic Site",
+          "Port Arthur, Tasmania",
+          "TAS",
+          "https://portarthur.org.au/"
+        ],
+        [
+          "Royal National Park",
+          "Royal National Park",
+          "NSW",
+          "https://www.nationalparks.nsw.gov.au/visit-a-park/parks/royal-national-park"
+        ],
+        {
+          "title": "Central Karakoram National Park",
+          "base_title": "Central Karakoram National Park",
+          "state": "PK",
+          "lat": 35.75,
+          "lng": 76.3,
+          "source_url": "https://fwegb.gov.pk/",
+          "source_publisher": "Gilgit-Baltistan Forest, Wildlife and Environment Department",
+          "source_note": "Curated protected-area source pack. Verify permits, local rules, guides, and seasonal access before travel.",
+          "tags": [
+            "pakistan",
+            "parks",
+            "karakoram",
+            "k2",
+            "protected area"
+          ],
+          "hook": "Central Karakoram National Park is the big protected-area anchor for K2-side planning.",
+          "short_description": "Use this as a protected-area anchor for K2, Baltoro, and Concordia planning. Confirm permits, guide requirements, road access, weather, and safety conditions before travel."
+        },
+        {
+          "title": "Deosai National Park",
+          "base_title": "Deosai National Park",
+          "state": "PK",
+          "lat": 35.0333,
+          "lng": 75.4167,
+          "source_url": "https://fwegb.gov.pk/",
+          "source_publisher": "Gilgit-Baltistan Forest, Wildlife and Environment Department",
+          "source_note": "Curated protected-area source pack. Verify road openings, park rules, and overnight permissions locally.",
+          "tags": [
+            "pakistan",
+            "parks",
+            "deosai",
+            "skardu",
+            "protected area"
+          ],
+          "hook": "Deosai National Park gives Skardu planning a high-plateau park anchor.",
+          "short_description": "Use Deosai as a park and overland route-area anchor near Skardu. Verify seasonal road access, camping rules, wildlife protections, and weather before relying on it."
+        },
+        {
+          "title": "Khunjerab National Park",
+          "base_title": "Khunjerab National Park",
+          "state": "PK",
+          "lat": 36.85,
+          "lng": 75.42,
+          "source_url": "https://fwegb.gov.pk/",
+          "source_publisher": "Gilgit-Baltistan Forest, Wildlife and Environment Department",
+          "source_note": "Curated protected-area source pack. Verify border-area access, permits, weather, and road status before travel.",
+          "tags": [
+            "pakistan",
+            "parks",
+            "hunza",
+            "khunjerab",
+            "karakoram highway"
+          ],
+          "hook": "Khunjerab National Park anchors the high Karakoram Highway side of Hunza planning.",
+          "short_description": "Use Khunjerab as a park and scenic-route anchor north of Hunza. Confirm border-area access, permits, altitude, road status, and seasonal closures before travel."
+        },
+        {
+          "title": "Haleakala National Park",
+          "base_title": "Haleakala National Park",
+          "state": "HI",
+          "lat": 20.7204,
+          "lng": -156.1552,
+          "source_url": "https://www.nps.gov/hale/index.htm",
+          "tags": [
+            "parks",
+            "volcanoes"
+          ]
+        },
+        {
+          "title": "Hawaii Volcanoes National Park",
+          "base_title": "Hawaii Volcanoes National Park",
+          "state": "HI",
+          "lat": 19.4194,
+          "lng": -155.2885,
+          "source_url": "https://www.nps.gov/havo/index.htm",
+          "tags": [
+            "parks",
+            "volcanoes"
+          ]
+        },
+        {
+          "title": "Katmai National Park and Preserve",
+          "base_title": "Katmai National Park and Preserve",
+          "state": "AK",
+          "lat": 58.5978,
+          "lng": -155.0,
+          "source_url": "https://www.nps.gov/katm/index.htm",
+          "tags": [
+            "parks",
+            "wildlife"
+          ]
+        },
+        {
+          "title": "Kenai Fjords National Park",
+          "base_title": "Kenai Fjords National Park",
+          "state": "AK",
+          "lat": 59.818,
+          "lng": -150.1065,
+          "source_url": "https://www.nps.gov/kefj/index.htm",
+          "tags": [
+            "parks",
+            "coast"
+          ]
+        },
+        {
+          "title": "Glacier Bay National Park",
+          "base_title": "Glacier Bay National Park and Preserve",
+          "state": "AK",
+          "lat": 58.6658,
+          "lng": -136.9002,
+          "source_url": "https://www.nps.gov/glba/index.htm",
+          "tags": [
+            "parks",
+            "coast"
+          ]
+        },
+        {
+          "title": "Wrangell-St. Elias National Park",
+          "base_title": "Wrangell-St. Elias National Park and Preserve",
+          "state": "AK",
+          "lat": 61.0,
+          "lng": -142.0,
+          "source_url": "https://www.nps.gov/wrst/index.htm",
+          "tags": [
+            "parks",
+            "remote"
+          ]
+        },
+        {
+          "title": "Gates of the Arctic National Park",
+          "base_title": "Gates of the Arctic National Park and Preserve",
+          "state": "AK",
+          "lat": 67.78,
+          "lng": -153.3,
+          "source_url": "https://www.nps.gov/gaar/index.htm",
+          "tags": [
+            "parks",
+            "remote"
+          ]
+        },
+        {
+          "title": "Kobuk Valley National Park",
+          "base_title": "Kobuk Valley National Park",
+          "state": "AK",
+          "lat": 67.3563,
+          "lng": -159.2002,
+          "source_url": "https://www.nps.gov/kova/index.htm",
+          "tags": [
+            "parks",
+            "remote"
+          ]
+        },
+        {
+          "title": "Lake Clark National Park",
+          "base_title": "Lake Clark National Park and Preserve",
+          "state": "AK",
+          "lat": 60.97,
+          "lng": -153.42,
+          "source_url": "https://www.nps.gov/lacl/index.htm",
+          "tags": [
+            "parks",
+            "remote"
+          ]
+        },
+        {
+          "title": "American Samoa National Park",
+          "base_title": "National Park of American Samoa",
+          "state": "AS",
+          "lat": -14.2583,
+          "lng": -170.6833,
+          "source_url": "https://www.nps.gov/npsa/index.htm",
+          "tags": [
+            "parks",
+            "coast"
+          ]
+        },
+        {
+          "title": "Virgin Islands National Park",
+          "base_title": "Virgin Islands National Park",
+          "state": "VI",
+          "lat": 18.3424,
+          "lng": -64.7413,
+          "source_url": "https://www.nps.gov/viis/index.htm",
+          "tags": [
+            "parks",
+            "coast"
+          ]
+        },
+        {
+          "title": "White Sands National Park",
+          "base_title": "White Sands National Park",
+          "state": "NM",
+          "lat": 32.7797,
+          "lng": -106.1717,
+          "source_url": "https://www.nps.gov/whsa/index.htm",
+          "tags": [
+            "parks",
+            "desert"
+          ]
+        },
+        {
+          "title": "Carlsbad Caverns National Park",
+          "base_title": "Carlsbad Caverns National Park",
+          "state": "NM",
+          "lat": 32.1479,
+          "lng": -104.5567,
+          "source_url": "https://www.nps.gov/cave/index.htm",
+          "tags": [
+            "parks",
+            "caves"
+          ]
+        },
+        {
+          "title": "Petrified Forest National Park",
+          "base_title": "Petrified Forest National Park",
+          "state": "AZ",
+          "lat": 35.0037,
+          "lng": -109.7889,
+          "source_url": "https://www.nps.gov/pefo/index.htm",
+          "tags": [
+            "parks",
+            "geology"
+          ]
+        },
+        {
+          "title": "Saguaro National Park",
+          "base_title": "Saguaro National Park",
+          "state": "AZ",
+          "lat": 32.2967,
+          "lng": -111.1666,
+          "source_url": "https://www.nps.gov/sagu/index.htm",
+          "tags": [
+            "parks",
+            "desert"
+          ]
+        },
+        {
+          "title": "Mesa Verde National Park",
+          "base_title": "Mesa Verde National Park",
+          "state": "CO",
+          "lat": 37.2309,
+          "lng": -108.4618,
+          "source_url": "https://www.nps.gov/meve/index.htm",
+          "tags": [
+            "parks",
+            "history"
+          ]
+        },
+        {
+          "title": "Guadalupe Mountains National Park",
+          "base_title": "Guadalupe Mountains National Park",
+          "state": "TX",
+          "lat": 31.923,
+          "lng": -104.8855,
+          "source_url": "https://www.nps.gov/gumo/index.htm",
+          "tags": [
+            "parks",
+            "mountains"
+          ]
+        },
+        {
+          "title": "Wind Cave National Park",
+          "base_title": "Wind Cave National Park",
+          "state": "SD",
+          "lat": 43.6046,
+          "lng": -103.4213,
+          "source_url": "https://www.nps.gov/wica/index.htm",
+          "tags": [
+            "parks",
+            "caves"
+          ]
+        },
+        {
+          "title": "Theodore Roosevelt National Park",
+          "base_title": "Theodore Roosevelt National Park",
+          "state": "ND",
+          "lat": 46.979,
+          "lng": -103.5387,
+          "source_url": "https://www.nps.gov/thro/index.htm",
+          "tags": [
+            "parks",
+            "badlands"
+          ]
+        },
+        {
+          "title": "Mammoth Cave National Park",
+          "base_title": "Mammoth Cave National Park",
+          "state": "KY",
+          "lat": 37.1869,
+          "lng": -86.1005,
+          "source_url": "https://www.nps.gov/maca/index.htm",
+          "tags": [
+            "parks",
+            "caves"
+          ]
+        },
+        {
+          "title": "Cuyahoga Valley National Park",
+          "base_title": "Cuyahoga Valley National Park",
+          "state": "OH",
+          "lat": 41.2808,
+          "lng": -81.5678,
+          "source_url": "https://www.nps.gov/cuva/index.htm",
+          "tags": [
+            "parks",
+            "trails"
+          ]
+        },
+        {
+          "title": "Indiana Dunes National Park",
+          "base_title": "Indiana Dunes National Park",
+          "state": "IN",
+          "lat": 41.6533,
+          "lng": -87.0524,
+          "source_url": "https://www.nps.gov/indu/index.htm",
+          "tags": [
+            "parks",
+            "beach"
+          ]
+        },
+        {
+          "title": "Gateway Arch National Park",
+          "base_title": "Gateway Arch National Park",
+          "state": "MO",
+          "lat": 38.6247,
+          "lng": -90.1848,
+          "source_url": "https://www.nps.gov/jeff/index.htm",
+          "tags": [
+            "parks",
+            "monuments"
+          ]
+        },
+        {
+          "title": "Hot Springs National Park",
+          "base_title": "Hot Springs National Park",
+          "state": "AR",
+          "lat": 34.5217,
+          "lng": -93.0424,
+          "source_url": "https://www.nps.gov/hosp/index.htm",
+          "tags": [
+            "parks",
+            "hot springs"
+          ]
+        },
+        {
+          "title": "Dry Tortugas National Park",
+          "base_title": "Dry Tortugas National Park",
+          "state": "FL",
+          "lat": 24.6285,
+          "lng": -82.8732,
+          "source_url": "https://www.nps.gov/drto/index.htm",
+          "tags": [
+            "parks",
+            "coast"
+          ]
+        },
+        {
+          "title": "Congaree National Park",
+          "base_title": "Congaree National Park",
+          "state": "SC",
+          "lat": 33.7919,
+          "lng": -80.7487,
+          "source_url": "https://www.nps.gov/cong/index.htm",
+          "tags": [
+            "parks",
+            "forest"
+          ]
+        },
+        {
+          "title": "New River Gorge National Park",
+          "base_title": "New River Gorge National Park and Preserve",
+          "state": "WV",
+          "lat": 37.9263,
+          "lng": -81.1547,
+          "source_url": "https://www.nps.gov/neri/index.htm",
+          "tags": [
+            "parks",
+            "river"
+          ]
+        },
+        {
+          "title": "Channel Islands National Park",
+          "base_title": "Channel Islands National Park",
+          "state": "CA",
+          "lat": 34.0069,
+          "lng": -119.7785,
+          "source_url": "https://www.nps.gov/chis/index.htm",
+          "tags": [
+            "parks",
+            "islands"
+          ]
+        },
+        {
+          "title": "Kings Canyon National Park",
+          "base_title": "Kings Canyon National Park",
+          "state": "CA",
+          "lat": 36.8879,
+          "lng": -118.5551,
+          "source_url": "https://www.nps.gov/seki/index.htm",
+          "tags": [
+            "parks",
+            "mountains"
+          ]
+        },
+        {
+          "title": "Minnewanka and Lake Louise",
+          "base_title": "Banff National Park",
+          "state": "AB",
+          "lat": 51.4167,
+          "lng": -116.2167,
+          "source_url": "https://parks.canada.ca/pn-np/ab/banff",
+          "tags": [
+            "parks",
+            "lakes"
+          ]
+        },
+        {
+          "title": "Kootenay National Park",
+          "base_title": "Kootenay National Park",
+          "state": "BC",
+          "lat": 50.95,
+          "lng": -116.05,
+          "source_url": "https://parks.canada.ca/pn-np/bc/kootenay",
+          "tags": [
+            "parks",
+            "canada"
+          ]
+        },
+        {
+          "title": "Yoho National Park",
+          "base_title": "Yoho National Park",
+          "state": "BC",
+          "lat": 51.4993,
+          "lng": -116.4854,
+          "source_url": "https://parks.canada.ca/pn-np/bc/yoho",
+          "tags": [
+            "parks",
+            "canada"
+          ]
+        },
+        {
+          "title": "Waterton Lakes National Park",
+          "base_title": "Waterton Lakes National Park",
+          "state": "AB",
+          "lat": 49.0833,
+          "lng": -113.9167,
+          "source_url": "https://parks.canada.ca/pn-np/ab/waterton",
+          "tags": [
+            "parks",
+            "canada"
+          ]
+        },
+        {
+          "title": "Kluane National Park and Reserve",
+          "base_title": "Kluane National Park and Reserve",
+          "state": "YT",
+          "lat": 60.75,
+          "lng": -138.5,
+          "source_url": "https://parks.canada.ca/pn-np/yt/kluane",
+          "tags": [
+            "parks",
+            "canada"
+          ]
+        },
+        {
+          "title": "Cape Breton Highlands National Park",
+          "base_title": "Cape Breton Highlands National Park",
+          "state": "NS",
+          "lat": 46.7383,
+          "lng": -60.65,
+          "source_url": "https://parks.canada.ca/pn-np/ns/cbreton",
+          "tags": [
+            "parks",
+            "canada"
+          ]
+        },
+        {
+          "title": "Fundy National Park",
+          "base_title": "Fundy National Park",
+          "state": "NB",
+          "lat": 45.595,
+          "lng": -64.954,
+          "source_url": "https://parks.canada.ca/pn-np/nb/fundy",
+          "tags": [
+            "parks",
+            "canada"
+          ]
+        },
+        {
+          "title": "Bruce Peninsula National Park",
+          "base_title": "Bruce Peninsula National Park",
+          "state": "ON",
+          "lat": 45.245,
+          "lng": -81.523,
+          "source_url": "https://parks.canada.ca/pn-np/on/bruce",
+          "tags": [
+            "parks",
+            "canada"
+          ]
+        },
+        {
+          "title": "Georgian Bay Islands National Park",
+          "base_title": "Georgian Bay Islands National Park",
+          "state": "ON",
+          "lat": 44.8692,
+          "lng": -79.869,
+          "source_url": "https://parks.canada.ca/pn-np/on/georg",
+          "tags": [
+            "parks",
+            "canada"
+          ]
+        },
+        {
+          "title": "Riding Mountain National Park",
+          "base_title": "Riding Mountain National Park",
+          "state": "MB",
+          "lat": 50.658,
+          "lng": -99.971,
+          "source_url": "https://parks.canada.ca/pn-np/mb/riding",
+          "tags": [
+            "parks",
+            "canada"
+          ]
+        },
+        {
+          "title": "Prince Albert National Park",
+          "base_title": "Prince Albert National Park",
+          "state": "SK",
+          "lat": 53.9333,
+          "lng": -106.0833,
+          "source_url": "https://parks.canada.ca/pn-np/sk/princealbert",
+          "tags": [
+            "parks",
+            "canada"
+          ]
+        },
+        {
+          "title": "Grasslands National Park",
+          "base_title": "Grasslands National Park",
+          "state": "SK",
+          "lat": 49.1333,
+          "lng": -107.4333,
+          "source_url": "https://parks.canada.ca/pn-np/sk/grasslands",
+          "tags": [
+            "parks",
+            "canada"
+          ]
+        },
+        {
+          "title": "Wapusk National Park",
+          "base_title": "Wapusk National Park",
+          "state": "MB",
+          "lat": 57.7333,
+          "lng": -93.3667,
+          "source_url": "https://parks.canada.ca/pn-np/mb/wapusk",
+          "tags": [
+            "parks",
+            "canada"
+          ]
+        },
+        {
+          "title": "Torngat Mountains National Park",
+          "base_title": "Torngat Mountains National Park",
+          "state": "NL",
+          "lat": 58.5,
+          "lng": -63.5,
+          "source_url": "https://parks.canada.ca/pn-np/nl/torngats",
+          "tags": [
+            "parks",
+            "canada"
+          ]
+        },
+        {
+          "title": "Eldorado Canyon State Park",
+          "base_title": "Eldorado Canyon State Park",
+          "state": "CO",
+          "lat": 39.9306,
+          "lng": -105.2839,
+          "source_url": "https://cpw.state.co.us/placestogo/parks/EldoradoCanyon",
+          "tags": [
+            "state parks",
+            "climbing"
+          ]
+        },
+        {
+          "title": "Custer State Park",
+          "base_title": "Custer State Park",
+          "state": "SD",
+          "lat": 43.7606,
+          "lng": -103.3961,
+          "source_url": "https://gfp.sd.gov/parks/detail/custer-state-park/",
+          "tags": [
+            "state parks",
+            "wildlife"
+          ]
+        },
+        {
+          "title": "Valley of Fire State Park",
+          "base_title": "Valley of Fire State Park",
+          "state": "NV",
+          "lat": 36.485,
+          "lng": -114.5353,
+          "source_url": "https://parks.nv.gov/parks/valley-of-fire",
+          "tags": [
+            "state parks",
+            "desert"
+          ]
+        },
+        {
+          "title": "Dead Horse Point State Park",
+          "base_title": "Dead Horse Point State Park",
+          "state": "UT",
+          "lat": 38.508,
+          "lng": -109.7407,
+          "source_url": "https://stateparks.utah.gov/parks/dead-horse/",
+          "tags": [
+            "state parks",
+            "scenic"
+          ]
+        },
+        {
+          "title": "Goblin Valley State Park",
+          "base_title": "Goblin Valley State Park",
+          "state": "UT",
+          "lat": 38.5735,
+          "lng": -110.7071,
+          "source_url": "https://stateparks.utah.gov/parks/goblin-valley/",
+          "tags": [
+            "state parks",
+            "desert"
+          ]
+        },
+        {
+          "title": "Custer Gallatin National Forest",
+          "base_title": "Custer Gallatin National Forest",
+          "state": "MT",
+          "lat": 45.265,
+          "lng": -110.55,
+          "source_url": "https://www.fs.usda.gov/custergallatin",
+          "tags": [
+            "forests",
+            "camping"
+          ]
+        },
+        {
+          "title": "White Mountain National Forest",
+          "base_title": "White Mountain National Forest",
+          "state": "NH",
+          "lat": 44.158,
+          "lng": -71.407,
+          "source_url": "https://www.fs.usda.gov/whitemountain",
+          "tags": [
+            "forests",
+            "trails"
+          ]
+        },
+        {
+          "title": "Pisgah National Forest",
+          "base_title": "Pisgah National Forest",
+          "state": "NC",
+          "lat": 35.35,
+          "lng": -82.78,
+          "source_url": "https://www.fs.usda.gov/nfsnc",
+          "tags": [
+            "forests",
+            "trails"
+          ]
+        },
+        {
+          "title": "Superior National Forest",
+          "base_title": "Superior National Forest",
+          "state": "MN",
+          "lat": 47.8,
+          "lng": -91.5,
+          "source_url": "https://www.fs.usda.gov/superior",
+          "tags": [
+            "forests",
+            "water"
+          ]
+        },
+        {
+          "title": "Gifford Pinchot National Forest",
+          "base_title": "Gifford Pinchot National Forest",
+          "state": "WA",
+          "lat": 46.1667,
+          "lng": -121.8333,
+          "source_url": "https://www.fs.usda.gov/giffordpinchot",
+          "tags": [
+            "forests",
+            "volcanoes"
+          ]
+        },
+        {
+          "title": "Karijini National Park",
+          "base_title": "Karijini National Park",
+          "state": "WA",
+          "lat": -22.4833,
+          "lng": 118.4667,
+          "source_url": "https://exploreparks.dbca.wa.gov.au/park/karijini-national-park",
+          "tags": [
+            "parks",
+            "australia"
+          ]
+        },
+        {
+          "title": "Kalbarri National Park",
+          "base_title": "Kalbarri National Park",
+          "state": "WA",
+          "lat": -27.6167,
+          "lng": 114.45,
+          "source_url": "https://exploreparks.dbca.wa.gov.au/park/kalbarri-national-park",
+          "tags": [
+            "parks",
+            "australia"
+          ]
+        },
+        {
+          "title": "Cape Range National Park",
+          "base_title": "Cape Range National Park",
+          "state": "WA",
+          "lat": -22.1,
+          "lng": 113.9333,
+          "source_url": "https://exploreparks.dbca.wa.gov.au/park/cape-range-national-park",
+          "tags": [
+            "parks",
+            "australia"
+          ]
+        },
+        {
+          "title": "Wilsons Promontory National Park",
+          "base_title": "Wilsons Promontory National Park",
+          "state": "VIC",
+          "lat": -39.03,
+          "lng": 146.34,
+          "source_url": "https://www.parks.vic.gov.au/places-to-see/parks/wilsons-promontory-national-park",
+          "tags": [
+            "parks",
+            "australia"
+          ]
+        },
+        {
+          "title": "Great Otway National Park",
+          "base_title": "Great Otway National Park",
+          "state": "VIC",
+          "lat": -38.65,
+          "lng": 143.6,
+          "source_url": "https://www.parks.vic.gov.au/places-to-see/parks/great-otway-national-park",
+          "tags": [
+            "parks",
+            "australia"
+          ]
+        },
+        {
+          "title": "Flinders Ranges National Park",
+          "base_title": "Ikara-Flinders Ranges National Park",
+          "state": "SA",
+          "lat": -31.4333,
+          "lng": 138.6333,
+          "source_url": "https://www.parks.sa.gov.au/parks/ikara-flinders-ranges-national-park",
+          "tags": [
+            "parks",
+            "australia"
+          ]
+        },
+        {
+          "title": "Wilpena Pound",
+          "base_title": "Wilpena Pound",
+          "state": "SA",
+          "lat": -31.526,
+          "lng": 138.618,
+          "source_url": "https://www.parks.sa.gov.au/parks/ikara-flinders-ranges-national-park",
+          "tags": [
+            "parks",
+            "australia"
+          ]
+        },
+        {
+          "title": "Ikara-Flinders Ranges National Park",
+          "base_title": "Ikara-Flinders Ranges National Park",
+          "state": "SA",
+          "lat": -31.45,
+          "lng": 138.65,
+          "source_url": "https://www.parks.sa.gov.au/parks/ikara-flinders-ranges-national-park",
+          "tags": [
+            "parks",
+            "australia"
+          ]
+        },
+        {
+          "title": "Litchfield National Park",
+          "base_title": "Litchfield National Park",
+          "state": "NT",
+          "lat": -13.1667,
+          "lng": 130.7833,
+          "source_url": "https://nt.gov.au/parks/find-a-park/litchfield-national-park",
+          "tags": [
+            "parks",
+            "australia"
+          ]
+        },
+        {
+          "title": "Nitmiluk National Park",
+          "base_title": "Nitmiluk National Park",
+          "state": "NT",
+          "lat": -14.3167,
+          "lng": 132.4167,
+          "source_url": "https://nt.gov.au/parks/find-a-park/nitmiluk-national-park",
+          "tags": [
+            "parks",
+            "australia"
+          ]
+        },
+        {
+          "title": "Cradle Mountain-Lake St Clair",
+          "base_title": "Cradle Mountain-Lake St Clair National Park",
+          "state": "TAS",
+          "lat": -41.8333,
+          "lng": 146.05,
+          "source_url": "https://parks.tas.gov.au/explore-our-parks/cradle-mountain",
+          "tags": [
+            "parks",
+            "australia"
+          ]
+        },
+        {
+          "title": "Southwest National Park Tasmania",
+          "base_title": "Southwest National Park",
+          "state": "TAS",
+          "lat": -43.3333,
+          "lng": 146.25,
+          "source_url": "https://parks.tas.gov.au/explore-our-parks/southwest-national-park",
+          "tags": [
+            "parks",
+            "australia"
+          ]
+        },
+        {
+          "title": "Glass House Mountains National Park",
+          "base_title": "Glass House Mountains National Park",
+          "state": "QLD",
+          "lat": -26.9,
+          "lng": 152.95,
+          "source_url": "https://parks.desi.qld.gov.au/parks/glass-house-mountains",
+          "tags": [
+            "parks",
+            "australia"
+          ]
+        },
+        {
+          "title": "Lamington National Park",
+          "base_title": "Lamington National Park",
+          "state": "QLD",
+          "lat": -28.2167,
+          "lng": 153.1333,
+          "source_url": "https://parks.desi.qld.gov.au/parks/lamington",
+          "tags": [
+            "parks",
+            "australia"
+          ]
+        },
+        {
+          "title": "Springbrook National Park",
+          "base_title": "Springbrook National Park",
+          "state": "QLD",
+          "lat": -28.2,
+          "lng": 153.2667,
+          "source_url": "https://parks.desi.qld.gov.au/parks/springbrook",
+          "tags": [
+            "parks",
+            "australia"
+          ]
+        },
+        {
+          "title": "Namadgi National Park",
+          "base_title": "Namadgi National Park",
+          "state": "ACT",
+          "lat": -35.65,
+          "lng": 148.95,
+          "source_url": "https://www.parks.act.gov.au/find-a-park/namadgi-national-park",
+          "tags": [
+            "parks",
+            "australia"
+          ]
+        },
+        {
+          "title": "Booderee National Park",
+          "base_title": "Booderee National Park",
+          "state": "NSW",
+          "lat": -35.145,
+          "lng": 150.7,
+          "source_url": "https://parksaustralia.gov.au/booderee/",
+          "tags": [
+            "parks",
+            "australia"
+          ]
+        },
+        {
+          "title": "Myall Lakes National Park",
+          "base_title": "Myall Lakes National Park",
+          "state": "NSW",
+          "lat": -32.5,
+          "lng": 152.3,
+          "source_url": "https://www.nationalparks.nsw.gov.au/visit-a-park/parks/myall-lakes-national-park",
+          "tags": [
+            "parks",
+            "australia"
+          ]
+        },
+        {
+          "title": "Wollemi National Park",
+          "base_title": "Wollemi National Park",
+          "state": "NSW",
+          "lat": -32.9,
+          "lng": 150.3,
+          "source_url": "https://www.nationalparks.nsw.gov.au/visit-a-park/parks/wollemi-national-park",
+          "tags": [
+            "parks",
+            "australia"
+          ]
+        },
+        {
+          "title": "Mount Field National Park",
+          "base_title": "Mount Field National Park",
+          "state": "TAS",
+          "lat": -42.6833,
+          "lng": 146.7,
+          "source_url": "https://parks.tas.gov.au/explore-our-parks/mount-field-national-park",
+          "tags": [
+            "parks",
+            "australia"
+          ]
+        },
+        {
+          "title": "Egmont National Park",
+          "base_title": "Egmont National Park",
+          "state": "NZ",
+          "lat": -39.3,
+          "lng": 174.0667,
+          "source_url": "https://www.doc.govt.nz/parks-and-recreation/places-to-go/taranaki/places/egmont-national-park/",
+          "tags": [
+            "parks",
+            "new zealand"
+          ]
+        },
+        {
+          "title": "Whanganui National Park",
+          "base_title": "Whanganui National Park",
+          "state": "NZ",
+          "lat": -39.35,
+          "lng": 175.05,
+          "source_url": "https://www.doc.govt.nz/parks-and-recreation/places-to-go/manawatu-whanganui/places/whanganui-national-park/",
+          "tags": [
+            "parks",
+            "new zealand"
+          ]
+        },
+        {
+          "title": "Kahurangi National Park",
+          "base_title": "Kahurangi National Park",
+          "state": "NZ",
+          "lat": -41.25,
+          "lng": 172.1,
+          "source_url": "https://www.doc.govt.nz/parks-and-recreation/places-to-go/nelson-tasman/places/kahurangi-national-park/",
+          "tags": [
+            "parks",
+            "new zealand"
+          ]
+        },
+        {
+          "title": "Nelson Lakes National Park",
+          "base_title": "Nelson Lakes National Park",
+          "state": "NZ",
+          "lat": -41.85,
+          "lng": 172.8,
+          "source_url": "https://www.doc.govt.nz/parks-and-recreation/places-to-go/nelson-tasman/places/nelson-lakes-national-park/",
+          "tags": [
+            "parks",
+            "new zealand"
+          ]
+        },
+        {
+          "title": "Paparoa National Park",
+          "base_title": "Paparoa National Park",
+          "state": "NZ",
+          "lat": -42.0833,
+          "lng": 171.45,
+          "source_url": "https://www.doc.govt.nz/parks-and-recreation/places-to-go/west-coast/places/paparoa-national-park/",
+          "tags": [
+            "parks",
+            "new zealand"
+          ]
+        },
+        {
+          "title": "Westland Tai Poutini National Park",
+          "base_title": "Westland Tai Poutini National Park",
+          "state": "NZ",
+          "lat": -43.3833,
+          "lng": 170.1833,
+          "source_url": "https://www.doc.govt.nz/parks-and-recreation/places-to-go/west-coast/places/westland-tai-poutini-national-park/",
+          "tags": [
+            "parks",
+            "new zealand"
+          ]
+        },
+        {
+          "title": "Arthur’s Pass National Park",
+          "base_title": "Arthur's Pass National Park",
+          "state": "NZ",
+          "lat": -42.95,
+          "lng": 171.5667,
+          "source_url": "https://www.doc.govt.nz/parks-and-recreation/places-to-go/canterbury/places/arthurs-pass-national-park/",
+          "tags": [
+            "parks",
+            "new zealand"
+          ]
+        },
+        {
+          "title": "Rakiura National Park",
+          "base_title": "Rakiura National Park",
+          "state": "NZ",
+          "lat": -46.9,
+          "lng": 168.1167,
+          "source_url": "https://www.doc.govt.nz/parks-and-recreation/places-to-go/southland/places/rakiura-national-park/",
+          "tags": [
+            "parks",
+            "new zealand"
+          ]
+        }
       ]
     },
     {
       "key": "glamping",
       "label": "Glamping",
       "entries": [
-        ["Zion Glamping Basecamps", "Zion National Park", "UT", "https://www.undercanvas.com/camps/zion/"],
-        ["Moab Desert Glamping", "Arches National Park", "UT", "https://www.undercanvas.com/camps/moab/"],
-        ["Yellowstone Glamping", "Yellowstone National Park", "WY", "https://www.undercanvas.com/camps/yellowstone/"],
-        ["Grand Canyon Glamping", "Grand Canyon National Park", "AZ", "https://www.undercanvas.com/camps/grand-canyon/"],
-        ["Glacier Glamping", "Glacier National Park (U.S.)", "MT", "https://www.undercanvas.com/camps/glacier/"],
-        ["Bryce Canyon Glamping", "Bryce Canyon National Park", "UT", "https://www.undercanvas.com/camps/bryce-canyon/"],
-        ["Great Smoky Mountains Glamping", "Great Smoky Mountains National Park", "TN", "https://www.undercanvas.com/camps/great-smoky-mountains/"],
-        ["Acadia Glamping", "Acadia National Park", "ME", "https://www.undercanvas.com/camps/acadia/"],
-        ["Yosemite Airstream Stays", "Yosemite National Park", "CA", "https://autocamp.com/location/yosemite/"],
-        ["Joshua Tree Airstream Stays", "Joshua Tree National Park", "CA", "https://autocamp.com/location/joshua-tree/"],
-        ["Zion Airstream Stays", "Zion National Park", "UT", "https://autocamp.com/location/zion/"],
-        ["Russian River Glamping", "Redwood National and State Parks", "CA", "https://autocamp.com/location/russian-river/"],
-        ["Catskills Glamping", "Shenandoah National Park", "VA", "https://autocamp.com/location/catskills/"],
-        ["Asheville Glamping", "Great Smoky Mountains National Park", "TN", "https://autocamp.com/location/asheville/"],
-        ["Southern Maine Glamping", "Acadia National Park", "ME", "https://canada-usa.huttopia.com/en/site/southern-maine/"],
-        ["White Mountains Glamping", "Mount Washington", "NH", "https://canada-usa.huttopia.com/en/site/white-mountains/"],
-        ["Adirondacks Glamping", "Adirondack Park", "NY", "https://canada-usa.huttopia.com/en/site/adirondacks/"],
-        ["Texas Hill Country Glamping", "Big Bend National Park", "TX", "https://collectiveretreats.com/retreat/collective-hill-country/"],
-        ["Vail Glamping Retreats", "Rocky Mountain National Park", "CO", "https://collectiveretreats.com/retreat/collective-vail/"],
-        ["Mendocino Grove", "Point Reyes National Seashore", "CA", "https://mendocinogrove.com/"],
-        ["Conestoga Ranch", "Bear Lake (Idaho\u2013Utah)", "UT", "https://conestogaranch.com/"],
-        ["Paws Up Wilderness Stays", "Glacier National Park (U.S.)", "MT", "https://www.pawsup.com/"],
-        ["El Cosmico Desert Stays", "Big Bend National Park", "TX", "https://elcosmico.com/"],
-        ["Westgate River Ranch Glamping", "Everglades National Park", "FL", "https://www.westgateresorts.com/hotels/florida/river-ranch/westgate-river-ranch-resort/"],
-        ["Capitol Reef Glamping", "Capitol Reef National Park", "UT", "https://www.undercanvas.com/camps/capitol-reef/"],
-        ["Lake Powell Glamping", "Grand Staircase\u2013Escalante National Monument", "UT", "https://www.undercanvas.com/camps/lake-powell-grand-staircase/"],
-        ["Mount Rushmore Glamping", "Mount Rushmore", "SD", "https://www.undercanvas.com/camps/mount-rushmore/"],
-        ["North Yellowstone Glamping", "Yellowstone National Park", "MT", "https://www.undercanvas.com/camps/north-yellowstone-paradise-valley/"],
-        ["Great Sand Dunes Glamping", "Great Sand Dunes National Park and Preserve", "CO", "https://www.undercanvas.com/camps/great-sand-dunes/"],
-        ["Cape Cod Airstream Stays", "Cape Cod National Seashore", "MA", "https://autocamp.com/location/cape-cod/"],
-        ["Sequoia Airstream Stays", "Sequoia National Park", "CA", "https://autocamp.com/location/sequoia/"],
-        ["Terramor Acadia Glamping", "Acadia National Park", "ME", "https://terramoroutdoorresort.com/"],
-        ["Great Basin Dark Sky Glamping", "Great Basin National Park", "NV"],
-        ["Assateague Beach Glamping", "Assateague Island National Seashore", "MD"],
-        ["North Cascades Glamping", "North Cascades National Park", "WA"],
-        ["Pictured Rocks Glamping", "Pictured Rocks National Lakeshore", "MI"]
+        [
+          "Zion Glamping Basecamps",
+          "Zion National Park",
+          "UT",
+          "https://www.undercanvas.com/camps/zion/"
+        ],
+        [
+          "Moab Desert Glamping",
+          "Arches National Park",
+          "UT",
+          "https://www.undercanvas.com/camps/moab/"
+        ],
+        [
+          "Yellowstone Glamping",
+          "Yellowstone National Park",
+          "WY",
+          "https://www.undercanvas.com/camps/yellowstone/"
+        ],
+        [
+          "Grand Canyon Glamping",
+          "Grand Canyon National Park",
+          "AZ",
+          "https://www.undercanvas.com/camps/grand-canyon/"
+        ],
+        [
+          "Glacier Glamping",
+          "Glacier National Park (U.S.)",
+          "MT",
+          "https://www.undercanvas.com/camps/glacier/"
+        ],
+        [
+          "Bryce Canyon Glamping",
+          "Bryce Canyon National Park",
+          "UT",
+          "https://www.undercanvas.com/camps/bryce-canyon/"
+        ],
+        [
+          "Great Smoky Mountains Glamping",
+          "Great Smoky Mountains National Park",
+          "TN",
+          "https://www.undercanvas.com/camps/great-smoky-mountains/"
+        ],
+        [
+          "Acadia Glamping",
+          "Acadia National Park",
+          "ME",
+          "https://www.undercanvas.com/camps/acadia/"
+        ],
+        [
+          "Yosemite Airstream Stays",
+          "Yosemite National Park",
+          "CA",
+          "https://autocamp.com/location/yosemite/"
+        ],
+        [
+          "Joshua Tree Airstream Stays",
+          "Joshua Tree National Park",
+          "CA",
+          "https://autocamp.com/location/joshua-tree/"
+        ],
+        [
+          "Zion Airstream Stays",
+          "Zion National Park",
+          "UT",
+          "https://autocamp.com/location/zion/"
+        ],
+        [
+          "Russian River Glamping",
+          "Redwood National and State Parks",
+          "CA",
+          "https://autocamp.com/location/russian-river/"
+        ],
+        [
+          "Catskills Glamping",
+          "Shenandoah National Park",
+          "VA",
+          "https://autocamp.com/location/catskills/"
+        ],
+        [
+          "Asheville Glamping",
+          "Great Smoky Mountains National Park",
+          "TN",
+          "https://autocamp.com/location/asheville/"
+        ],
+        [
+          "Southern Maine Glamping",
+          "Acadia National Park",
+          "ME",
+          "https://canada-usa.huttopia.com/en/site/southern-maine/"
+        ],
+        [
+          "White Mountains Glamping",
+          "Mount Washington",
+          "NH",
+          "https://canada-usa.huttopia.com/en/site/white-mountains/"
+        ],
+        [
+          "Adirondacks Glamping",
+          "Adirondack Park",
+          "NY",
+          "https://canada-usa.huttopia.com/en/site/adirondacks/"
+        ],
+        [
+          "Texas Hill Country Glamping",
+          "Big Bend National Park",
+          "TX",
+          "https://collectiveretreats.com/retreat/collective-hill-country/"
+        ],
+        [
+          "Vail Glamping Retreats",
+          "Rocky Mountain National Park",
+          "CO",
+          "https://collectiveretreats.com/retreat/collective-vail/"
+        ],
+        [
+          "Mendocino Grove",
+          "Point Reyes National Seashore",
+          "CA",
+          "https://mendocinogrove.com/"
+        ],
+        [
+          "Conestoga Ranch",
+          "Bear Lake (Idaho–Utah)",
+          "UT",
+          "https://conestogaranch.com/"
+        ],
+        [
+          "Paws Up Wilderness Stays",
+          "Glacier National Park (U.S.)",
+          "MT",
+          "https://www.pawsup.com/"
+        ],
+        [
+          "El Cosmico Desert Stays",
+          "Big Bend National Park",
+          "TX",
+          "https://elcosmico.com/"
+        ],
+        [
+          "Westgate River Ranch Glamping",
+          "Everglades National Park",
+          "FL",
+          "https://www.westgateresorts.com/hotels/florida/river-ranch/westgate-river-ranch-resort/"
+        ],
+        [
+          "Capitol Reef Glamping",
+          "Capitol Reef National Park",
+          "UT",
+          "https://www.undercanvas.com/camps/capitol-reef/"
+        ],
+        [
+          "Lake Powell Glamping",
+          "Grand Staircase–Escalante National Monument",
+          "UT",
+          "https://www.undercanvas.com/camps/lake-powell-grand-staircase/"
+        ],
+        [
+          "Mount Rushmore Glamping",
+          "Mount Rushmore",
+          "SD",
+          "https://www.undercanvas.com/camps/mount-rushmore/"
+        ],
+        [
+          "North Yellowstone Glamping",
+          "Yellowstone National Park",
+          "MT",
+          "https://www.undercanvas.com/camps/north-yellowstone-paradise-valley/"
+        ],
+        [
+          "Great Sand Dunes Glamping",
+          "Great Sand Dunes National Park and Preserve",
+          "CO",
+          "https://www.undercanvas.com/camps/great-sand-dunes/"
+        ],
+        [
+          "Cape Cod Airstream Stays",
+          "Cape Cod National Seashore",
+          "MA",
+          "https://autocamp.com/location/cape-cod/"
+        ],
+        [
+          "Sequoia Airstream Stays",
+          "Sequoia National Park",
+          "CA",
+          "https://autocamp.com/location/sequoia/"
+        ],
+        [
+          "Terramor Acadia Glamping",
+          "Acadia National Park",
+          "ME",
+          "https://terramoroutdoorresort.com/"
+        ],
+        [
+          "Great Basin Dark Sky Glamping",
+          "Great Basin National Park",
+          "NV"
+        ],
+        [
+          "Assateague Beach Glamping",
+          "Assateague Island National Seashore",
+          "MD"
+        ],
+        [
+          "North Cascades Glamping",
+          "North Cascades National Park",
+          "WA"
+        ],
+        [
+          "Pictured Rocks Glamping",
+          "Pictured Rocks National Lakeshore",
+          "MI"
+        ]
       ]
     },
     {
       "key": "huts_lodging",
       "label": "Huts & Lodging",
       "entries": [
-        ["Yosemite Valley Lodging", "Yosemite National Park", "CA", "https://www.nps.gov/yose/planyourvisit/lodging.htm"],
-        ["Old Faithful Inn", "Yellowstone National Park", "WY", "https://www.nps.gov/yell/planyourvisit/lodging.htm"],
-        ["Many Glacier Hotel", "Glacier National Park (U.S.)", "MT", "https://www.nps.gov/glac/planyourvisit/lodging.htm"],
-        ["Grand Canyon Lodges", "Grand Canyon National Park", "AZ", "https://www.nps.gov/grca/planyourvisit/lodging.htm"],
-        ["Paradise Inn", "Mount Rainier National Park", "WA", "https://www.nps.gov/mora/planyourvisit/lodging.htm"],
-        ["Crater Lake Lodge", "Crater Lake National Park", "OR", "https://www.nps.gov/crla/planyourvisit/lodging.htm"],
-        ["Zion Lodge", "Zion National Park", "UT", "https://www.nps.gov/zion/planyourvisit/lodging.htm"],
-        ["Bryce Canyon Lodge", "Bryce Canyon National Park", "UT", "https://www.nps.gov/brca/planyourvisit/lodging.htm"],
-        ["Chisos Mountains Lodge", "Big Bend National Park", "TX", "https://www.nps.gov/bibe/planyourvisit/lodging.htm"],
-        ["Grand Teton Lodges", "Grand Teton National Park", "WY", "https://www.nps.gov/grte/planyourvisit/lodging.htm"],
-        ["Lake Crescent Lodge", "Olympic National Park", "WA", "https://www.nps.gov/olym/planyourvisit/lodging.htm"],
-        ["Kalaloch Lodge", "Olympic National Park", "WA", "https://www.nps.gov/olym/planyourvisit/lodging.htm"],
-        ["LeConte Lodge", "Great Smoky Mountains National Park", "TN", "https://www.nps.gov/grsm/planyourvisit/lodging.htm"],
-        ["AMC High Huts", "Mount Washington", "NH", "https://www.outdoors.org/destinations/new-hampshire/high-huts/"],
-        ["10th Mountain Division Huts", "Rocky Mountain National Park", "CO", "https://huts.org/"],
-        ["San Juan Huts", "Black Canyon of the Gunnison National Park", "CO", "https://sanjuanhuts.com/"],
-        ["Len Foote Hike Inn", "Great Smoky Mountains National Park", "GA", "https://hike-inn.com/"],
-        ["Ross Lake Resort", "North Cascades National Park", "WA", "https://www.nps.gov/noca/planyourvisit/lodging.htm"],
-        ["Stehekin Valley Lodging", "North Cascades National Park", "WA", "https://www.nps.gov/noca/planyourvisit/lodging.htm"],
-        ["Phantom Ranch", "Grand Canyon National Park", "AZ", "https://www.nps.gov/grca/planyourvisit/phantom-ranch.htm"],
-        ["Wuksachi Lodge", "Sequoia National Park", "CA", "https://www.nps.gov/seki/planyourvisit/lodging.htm"],
-        ["Lodging at Death Valley", "Death Valley National Park", "CA", "https://www.nps.gov/deva/planyourvisit/lodging.htm"],
-        ["Denali Park Lodging", "Denali National Park and Preserve", "AK", "https://www.nps.gov/dena/planyourvisit/lodging.htm"],
-        ["Volcano House", "Hawaii Volcanoes National Park", "HI", "https://www.nps.gov/havo/planyourvisit/lodging.htm"],
-        ["Lake McDonald Lodge", "Glacier National Park (U.S.)", "MT", "https://www.nps.gov/glac/planyourvisit/lodging.htm"],
-        ["El Tovar Hotel", "Grand Canyon National Park", "AZ", "https://www.nps.gov/grca/planyourvisit/lodging.htm"],
-        ["Jackson Lake Lodge", "Grand Teton National Park", "WY", "https://www.nps.gov/grte/planyourvisit/lodging.htm"],
-        ["Jenny Lake Lodge", "Grand Teton National Park", "WY", "https://www.nps.gov/grte/planyourvisit/lodging.htm"],
-        ["Curry Village", "Yosemite National Park", "CA", "https://www.nps.gov/yose/planyourvisit/lodging.htm"],
-        ["Yosemite High Sierra Camps", "Yosemite National Park", "CA", "https://www.nps.gov/yose/planyourvisit/lodging.htm"],
-        ["Skyland", "Shenandoah National Park", "VA", "https://www.nps.gov/shen/planyourvisit/lodging.htm"],
-        ["Big Meadows Lodge", "Shenandoah National Park", "VA", "https://www.nps.gov/shen/planyourvisit/lodging.htm"],
-        ["Drakesbad Guest Ranch", "Lassen Volcanic National Park", "CA", "https://www.nps.gov/lavo/planyourvisit/lodging.htm"],
-        ["Mammoth Cave Lodge", "Mammoth Cave National Park", "KY", "https://www.nps.gov/maca/planyourvisit/lodging.htm"],
-        ["Brooks Lodge", "Katmai National Park and Preserve", "AK", "https://www.nps.gov/katm/planyourvisit/lodging.htm"],
-        ["Glacier Bay Lodge", "Glacier Bay National Park and Preserve", "AK", "https://www.nps.gov/glba/planyourvisit/lodging.htm"]
+        [
+          "Yosemite Valley Lodging",
+          "Yosemite National Park",
+          "CA",
+          "https://www.nps.gov/yose/planyourvisit/lodging.htm"
+        ],
+        [
+          "Old Faithful Inn",
+          "Yellowstone National Park",
+          "WY",
+          "https://www.nps.gov/yell/planyourvisit/lodging.htm"
+        ],
+        [
+          "Many Glacier Hotel",
+          "Glacier National Park (U.S.)",
+          "MT",
+          "https://www.nps.gov/glac/planyourvisit/lodging.htm"
+        ],
+        [
+          "Grand Canyon Lodges",
+          "Grand Canyon National Park",
+          "AZ",
+          "https://www.nps.gov/grca/planyourvisit/lodging.htm"
+        ],
+        [
+          "Paradise Inn",
+          "Mount Rainier National Park",
+          "WA",
+          "https://www.nps.gov/mora/planyourvisit/lodging.htm"
+        ],
+        [
+          "Crater Lake Lodge",
+          "Crater Lake National Park",
+          "OR",
+          "https://www.nps.gov/crla/planyourvisit/lodging.htm"
+        ],
+        [
+          "Zion Lodge",
+          "Zion National Park",
+          "UT",
+          "https://www.nps.gov/zion/planyourvisit/lodging.htm"
+        ],
+        [
+          "Bryce Canyon Lodge",
+          "Bryce Canyon National Park",
+          "UT",
+          "https://www.nps.gov/brca/planyourvisit/lodging.htm"
+        ],
+        [
+          "Chisos Mountains Lodge",
+          "Big Bend National Park",
+          "TX",
+          "https://www.nps.gov/bibe/planyourvisit/lodging.htm"
+        ],
+        [
+          "Grand Teton Lodges",
+          "Grand Teton National Park",
+          "WY",
+          "https://www.nps.gov/grte/planyourvisit/lodging.htm"
+        ],
+        [
+          "Lake Crescent Lodge",
+          "Olympic National Park",
+          "WA",
+          "https://www.nps.gov/olym/planyourvisit/lodging.htm"
+        ],
+        [
+          "Kalaloch Lodge",
+          "Olympic National Park",
+          "WA",
+          "https://www.nps.gov/olym/planyourvisit/lodging.htm"
+        ],
+        [
+          "LeConte Lodge",
+          "Great Smoky Mountains National Park",
+          "TN",
+          "https://www.nps.gov/grsm/planyourvisit/lodging.htm"
+        ],
+        [
+          "AMC High Huts",
+          "Mount Washington",
+          "NH",
+          "https://www.outdoors.org/destinations/new-hampshire/high-huts/"
+        ],
+        [
+          "10th Mountain Division Huts",
+          "Rocky Mountain National Park",
+          "CO",
+          "https://huts.org/"
+        ],
+        [
+          "San Juan Huts",
+          "Black Canyon of the Gunnison National Park",
+          "CO",
+          "https://sanjuanhuts.com/"
+        ],
+        [
+          "Len Foote Hike Inn",
+          "Great Smoky Mountains National Park",
+          "GA",
+          "https://hike-inn.com/"
+        ],
+        [
+          "Ross Lake Resort",
+          "North Cascades National Park",
+          "WA",
+          "https://www.nps.gov/noca/planyourvisit/lodging.htm"
+        ],
+        [
+          "Stehekin Valley Lodging",
+          "North Cascades National Park",
+          "WA",
+          "https://www.nps.gov/noca/planyourvisit/lodging.htm"
+        ],
+        [
+          "Phantom Ranch",
+          "Grand Canyon National Park",
+          "AZ",
+          "https://www.nps.gov/grca/planyourvisit/phantom-ranch.htm"
+        ],
+        [
+          "Wuksachi Lodge",
+          "Sequoia National Park",
+          "CA",
+          "https://www.nps.gov/seki/planyourvisit/lodging.htm"
+        ],
+        [
+          "Lodging at Death Valley",
+          "Death Valley National Park",
+          "CA",
+          "https://www.nps.gov/deva/planyourvisit/lodging.htm"
+        ],
+        [
+          "Denali Park Lodging",
+          "Denali National Park and Preserve",
+          "AK",
+          "https://www.nps.gov/dena/planyourvisit/lodging.htm"
+        ],
+        [
+          "Volcano House",
+          "Hawaii Volcanoes National Park",
+          "HI",
+          "https://www.nps.gov/havo/planyourvisit/lodging.htm"
+        ],
+        [
+          "Lake McDonald Lodge",
+          "Glacier National Park (U.S.)",
+          "MT",
+          "https://www.nps.gov/glac/planyourvisit/lodging.htm"
+        ],
+        [
+          "El Tovar Hotel",
+          "Grand Canyon National Park",
+          "AZ",
+          "https://www.nps.gov/grca/planyourvisit/lodging.htm"
+        ],
+        [
+          "Jackson Lake Lodge",
+          "Grand Teton National Park",
+          "WY",
+          "https://www.nps.gov/grte/planyourvisit/lodging.htm"
+        ],
+        [
+          "Jenny Lake Lodge",
+          "Grand Teton National Park",
+          "WY",
+          "https://www.nps.gov/grte/planyourvisit/lodging.htm"
+        ],
+        [
+          "Curry Village",
+          "Yosemite National Park",
+          "CA",
+          "https://www.nps.gov/yose/planyourvisit/lodging.htm"
+        ],
+        [
+          "Yosemite High Sierra Camps",
+          "Yosemite National Park",
+          "CA",
+          "https://www.nps.gov/yose/planyourvisit/lodging.htm"
+        ],
+        [
+          "Skyland",
+          "Shenandoah National Park",
+          "VA",
+          "https://www.nps.gov/shen/planyourvisit/lodging.htm"
+        ],
+        [
+          "Big Meadows Lodge",
+          "Shenandoah National Park",
+          "VA",
+          "https://www.nps.gov/shen/planyourvisit/lodging.htm"
+        ],
+        [
+          "Drakesbad Guest Ranch",
+          "Lassen Volcanic National Park",
+          "CA",
+          "https://www.nps.gov/lavo/planyourvisit/lodging.htm"
+        ],
+        [
+          "Mammoth Cave Lodge",
+          "Mammoth Cave National Park",
+          "KY",
+          "https://www.nps.gov/maca/planyourvisit/lodging.htm"
+        ],
+        [
+          "Brooks Lodge",
+          "Katmai National Park and Preserve",
+          "AK",
+          "https://www.nps.gov/katm/planyourvisit/lodging.htm"
+        ],
+        [
+          "Glacier Bay Lodge",
+          "Glacier Bay National Park and Preserve",
+          "AK",
+          "https://www.nps.gov/glba/planyourvisit/lodging.htm"
+        ],
+        {
+          "title": "Hunza Trekking Lodges",
+          "base_title": "Hunza Valley",
+          "state": "PK",
+          "lat": 36.3167,
+          "lng": 74.65,
+          "source_url": "https://visitgilgitbaltistan.gov.pk/",
+          "source_publisher": "Gilgit-Baltistan Tourism",
+          "source_note": "Curated Pakistan mountain-region source pack. Lodges and guest houses should be verified locally before travel.",
+          "tags": [
+            "pakistan",
+            "hunza",
+            "trekking lodges",
+            "karakoram"
+          ],
+          "hook": "Hunza Trekking Lodges gives northern Pakistan searches a real stay anchor instead of a blank map.",
+          "short_description": "Use Hunza as a trekking-lodge and guest-house search area for Karakoram route planning. Confirm access, permits, road conditions, and current lodging locally."
+        },
+        {
+          "title": "Skardu Trekking Lodges",
+          "base_title": "Skardu",
+          "state": "PK",
+          "lat": 35.2971,
+          "lng": 75.6333,
+          "source_url": "https://visitgilgitbaltistan.gov.pk/",
+          "source_publisher": "Gilgit-Baltistan Tourism",
+          "source_note": "Curated Pakistan mountain-region source pack. Lodges and guest houses should be verified locally before travel.",
+          "tags": [
+            "pakistan",
+            "skardu",
+            "trekking lodges",
+            "karakoram"
+          ],
+          "hook": "Skardu Trekking Lodges anchors Baltistan searches near the routes toward Deosai, Hushe, and the Baltoro side.",
+          "short_description": "Search around Skardu for trekking lodges, guest houses, and route services. Verify seasonal access, permits, and local operator details before relying on it."
+        },
+        {
+          "title": "Askole Trekking Stays",
+          "base_title": "Askole",
+          "state": "PK",
+          "lat": 35.6806,
+          "lng": 75.8178,
+          "source_url": "https://visitgilgitbaltistan.gov.pk/",
+          "source_publisher": "Gilgit-Baltistan Tourism",
+          "source_note": "Curated Pakistan mountain-region source pack for the K2/Baltoro approach. Verify logistics with local guides and authorities.",
+          "tags": [
+            "pakistan",
+            "askole",
+            "k2",
+            "trekking lodges"
+          ],
+          "hook": "Askole Trekking Stays is the practical K2-side staging area to search before the Baltoro route gets remote.",
+          "short_description": "Use Askole as a staging search area for K2 trekking logistics. Treat results as planning leads and confirm transport, permits, guides, and lodging locally."
+        }
       ]
     },
     {
       "key": "trails",
       "label": "Trails",
       "entries": [
-        ["Yosemite Valley Trails", "Yosemite National Park", "CA"],
-        ["Zion Canyon Trails", "Zion National Park", "UT"],
-        ["Grand Canyon Corridor Trails", "Grand Canyon National Park", "AZ"],
-        ["Glacier High Country Trails", "Glacier National Park (U.S.)", "MT"],
-        ["Rocky Mountain Alpine Trails", "Rocky Mountain National Park", "CO"],
-        ["Grand Teton Trailheads", "Grand Teton National Park", "WY"],
-        ["Great Smoky Mountains Trails", "Great Smoky Mountains National Park", "TN"],
-        ["Acadia Coastal Trails", "Acadia National Park", "ME"],
-        ["Olympic Rainforest Trails", "Olympic National Park", "WA"],
-        ["Mount Rainier Wildflower Trails", "Mount Rainier National Park", "WA"],
-        ["Shenandoah Skyline Trails", "Shenandoah National Park", "VA"],
-        ["Arches Desert Trails", "Arches National Park", "UT"],
-        ["Bryce Canyon Rim Trails", "Bryce Canyon National Park", "UT"],
-        ["Canyonlands Backcountry Trails", "Canyonlands National Park", "UT"],
-        ["Joshua Tree Trails", "Joshua Tree National Park", "CA"],
-        ["Sequoia Giant Forest Trails", "Sequoia National Park", "CA"],
-        ["Death Valley Canyon Trails", "Death Valley National Park", "CA"],
-        ["North Cascades Alpine Trails", "North Cascades National Park", "WA"],
-        ["Great Sand Dunes Trails", "Great Sand Dunes National Park and Preserve", "CO"],
-        ["Badlands Loop Trails", "Badlands National Park", "SD"],
-        ["Big Bend Desert Trails", "Big Bend National Park", "TX"],
-        ["Denali Trailheads", "Denali National Park and Preserve", "AK"],
-        ["Redwood Forest Trails", "Redwood National and State Parks", "CA"],
-        ["Voyageurs Water Trails", "Voyageurs National Park", "MN"],
-        ["Half Dome Trail", "Yosemite National Park", "CA"],
-        ["Angels Landing Trail", "Zion National Park", "UT"],
-        ["The Narrows", "Zion National Park", "UT"],
-        ["Bright Angel Trail", "Grand Canyon National Park", "AZ"],
-        ["Highline Trail", "Glacier National Park (U.S.)", "MT"],
-        ["Grinnell Glacier Trail", "Glacier National Park (U.S.)", "MT"],
-        ["Teton Crest Trail", "Grand Teton National Park", "WY"],
-        ["Wonderland Trail", "Mount Rainier National Park", "WA"],
-        ["Precipice Trail", "Acadia National Park", "ME"],
-        ["Delicate Arch Trail", "Arches National Park", "UT"],
-        ["Chesler Park Trails", "Canyonlands National Park", "UT"],
-        ["Skyline Trail", "Mount Rainier National Park", "WA"]
+        [
+          "Yosemite Valley Trails",
+          "Yosemite National Park",
+          "CA"
+        ],
+        [
+          "Zion Canyon Trails",
+          "Zion National Park",
+          "UT"
+        ],
+        [
+          "Grand Canyon Corridor Trails",
+          "Grand Canyon National Park",
+          "AZ"
+        ],
+        [
+          "Glacier High Country Trails",
+          "Glacier National Park (U.S.)",
+          "MT"
+        ],
+        [
+          "Rocky Mountain Alpine Trails",
+          "Rocky Mountain National Park",
+          "CO"
+        ],
+        [
+          "Grand Teton Trailheads",
+          "Grand Teton National Park",
+          "WY"
+        ],
+        [
+          "Great Smoky Mountains Trails",
+          "Great Smoky Mountains National Park",
+          "TN"
+        ],
+        [
+          "Acadia Coastal Trails",
+          "Acadia National Park",
+          "ME"
+        ],
+        [
+          "Olympic Rainforest Trails",
+          "Olympic National Park",
+          "WA"
+        ],
+        [
+          "Mount Rainier Wildflower Trails",
+          "Mount Rainier National Park",
+          "WA"
+        ],
+        [
+          "Shenandoah Skyline Trails",
+          "Shenandoah National Park",
+          "VA"
+        ],
+        [
+          "Arches Desert Trails",
+          "Arches National Park",
+          "UT"
+        ],
+        [
+          "Bryce Canyon Rim Trails",
+          "Bryce Canyon National Park",
+          "UT"
+        ],
+        [
+          "Canyonlands Backcountry Trails",
+          "Canyonlands National Park",
+          "UT"
+        ],
+        [
+          "Joshua Tree Trails",
+          "Joshua Tree National Park",
+          "CA"
+        ],
+        [
+          "Sequoia Giant Forest Trails",
+          "Sequoia National Park",
+          "CA"
+        ],
+        [
+          "Death Valley Canyon Trails",
+          "Death Valley National Park",
+          "CA"
+        ],
+        [
+          "North Cascades Alpine Trails",
+          "North Cascades National Park",
+          "WA"
+        ],
+        [
+          "Great Sand Dunes Trails",
+          "Great Sand Dunes National Park and Preserve",
+          "CO"
+        ],
+        [
+          "Badlands Loop Trails",
+          "Badlands National Park",
+          "SD"
+        ],
+        [
+          "Big Bend Desert Trails",
+          "Big Bend National Park",
+          "TX"
+        ],
+        [
+          "Denali Trailheads",
+          "Denali National Park and Preserve",
+          "AK"
+        ],
+        [
+          "Redwood Forest Trails",
+          "Redwood National and State Parks",
+          "CA"
+        ],
+        [
+          "Voyageurs Water Trails",
+          "Voyageurs National Park",
+          "MN"
+        ],
+        [
+          "Half Dome Trail",
+          "Yosemite National Park",
+          "CA"
+        ],
+        [
+          "Angels Landing Trail",
+          "Zion National Park",
+          "UT"
+        ],
+        [
+          "The Narrows",
+          "Zion National Park",
+          "UT"
+        ],
+        [
+          "Bright Angel Trail",
+          "Grand Canyon National Park",
+          "AZ"
+        ],
+        [
+          "Highline Trail",
+          "Glacier National Park (U.S.)",
+          "MT"
+        ],
+        [
+          "Grinnell Glacier Trail",
+          "Glacier National Park (U.S.)",
+          "MT"
+        ],
+        [
+          "Teton Crest Trail",
+          "Grand Teton National Park",
+          "WY"
+        ],
+        [
+          "Wonderland Trail",
+          "Mount Rainier National Park",
+          "WA"
+        ],
+        [
+          "Precipice Trail",
+          "Acadia National Park",
+          "ME"
+        ],
+        [
+          "Delicate Arch Trail",
+          "Arches National Park",
+          "UT"
+        ],
+        [
+          "Chesler Park Trails",
+          "Canyonlands National Park",
+          "UT"
+        ],
+        [
+          "Skyline Trail",
+          "Mount Rainier National Park",
+          "WA"
+        ],
+        {
+          "title": "K2 Base Camp Trek",
+          "base_title": "Baltoro Glacier and Concordia",
+          "state": "PK",
+          "lat": 35.8808,
+          "lng": 76.5158,
+          "source_url": "https://visitgilgitbaltistan.gov.pk/",
+          "source_publisher": "Gilgit-Baltistan Tourism",
+          "source_note": "Curated K2 trekking-area source pack. This is route-planning context, not a live permit or guide service.",
+          "tags": [
+            "pakistan",
+            "k2",
+            "trekking",
+            "baltoro",
+            "concordia",
+            "karakoram"
+          ],
+          "hook": "K2 Base Camp Trek belongs in Trailhead as a trek corridor, not a generic campground search.",
+          "short_description": "Use this as the K2/Baltoro route-area anchor for camps, shelters, guest houses, route towns, and safety checks. Confirm permits, guides, road access, glacier conditions, and rescue logistics before travel."
+        },
+        {
+          "title": "Fairy Meadows and Nanga Parbat Trek",
+          "base_title": "Fairy Meadows",
+          "state": "PK",
+          "lat": 35.3875,
+          "lng": 74.5786,
+          "source_url": "https://visitgilgitbaltistan.gov.pk/",
+          "source_publisher": "Gilgit-Baltistan Tourism",
+          "source_note": "Curated Pakistan trekking-area source pack. Verify seasonal road access and local rules before travel.",
+          "tags": [
+            "pakistan",
+            "fairy meadows",
+            "nanga parbat",
+            "trekking",
+            "karakoram"
+          ],
+          "hook": "Fairy Meadows and Nanga Parbat Trek gives Pakistan Explore a second high-value mountain route anchor.",
+          "short_description": "Use Fairy Meadows as a trek and lodge search area near Nanga Parbat. Confirm road access, local transport, lodging, fees, and weather before relying on it."
+        },
+        {
+          "title": "Rakaposhi Base Camp Trek",
+          "base_title": "Rakaposhi",
+          "state": "PK",
+          "lat": 36.1425,
+          "lng": 74.4892,
+          "source_url": "https://visitgilgitbaltistan.gov.pk/",
+          "source_publisher": "Gilgit-Baltistan Tourism",
+          "source_note": "Curated Hunza/Nagar trekking-area source pack. Verify local access and guide requirements before travel.",
+          "tags": [
+            "pakistan",
+            "hunza",
+            "rakaposhi",
+            "trekking",
+            "karakoram"
+          ],
+          "hook": "Rakaposhi Base Camp Trek gives Hunza searches a mountain route anchor beyond town lodging.",
+          "short_description": "Use this for Hunza and Nagar trekking context. Confirm trail access, weather, lodging, and local guidance before planning around it."
+        }
+      ]
+    },
+    {
+      "key": "monuments",
+      "label": "Monuments & History",
+      "entries": [
+        {
+          "title": "Devils Tower National Monument",
+          "base_title": "Devils Tower National Monument",
+          "state": "WY",
+          "lat": 44.5902,
+          "lng": -104.7146,
+          "source_url": "https://www.nps.gov/deto/index.htm",
+          "tags": [
+            "monuments",
+            "climbing"
+          ]
+        },
+        {
+          "title": "Craters of the Moon National Monument",
+          "base_title": "Craters of the Moon National Monument and Preserve",
+          "state": "ID",
+          "lat": 43.4166,
+          "lng": -113.5166,
+          "source_url": "https://www.nps.gov/crmo/index.htm",
+          "tags": [
+            "monuments",
+            "geology"
+          ]
+        },
+        {
+          "title": "Dinosaur National Monument",
+          "base_title": "Dinosaur National Monument",
+          "state": "CO",
+          "lat": 40.5333,
+          "lng": -108.9833,
+          "source_url": "https://www.nps.gov/dino/index.htm",
+          "tags": [
+            "monuments",
+            "fossils"
+          ]
+        },
+        {
+          "title": "Colorado National Monument",
+          "base_title": "Colorado National Monument",
+          "state": "CO",
+          "lat": 39.0503,
+          "lng": -108.692,
+          "source_url": "https://www.nps.gov/colm/index.htm",
+          "tags": [
+            "monuments",
+            "scenic"
+          ]
+        },
+        {
+          "title": "Bandelier National Monument",
+          "base_title": "Bandelier National Monument",
+          "state": "NM",
+          "lat": 35.7789,
+          "lng": -106.3317,
+          "source_url": "https://www.nps.gov/band/index.htm",
+          "tags": [
+            "monuments",
+            "history"
+          ]
+        },
+        {
+          "title": "Gila Cliff Dwellings National Monument",
+          "base_title": "Gila Cliff Dwellings National Monument",
+          "state": "NM",
+          "lat": 33.2272,
+          "lng": -108.2703,
+          "source_url": "https://www.nps.gov/gicl/index.htm",
+          "tags": [
+            "monuments",
+            "history"
+          ]
+        },
+        {
+          "title": "Chiricahua National Monument",
+          "base_title": "Chiricahua National Monument",
+          "state": "AZ",
+          "lat": 32.0124,
+          "lng": -109.3416,
+          "source_url": "https://www.nps.gov/chir/index.htm",
+          "tags": [
+            "monuments",
+            "geology"
+          ]
+        },
+        {
+          "title": "Casa Grande Ruins National Monument",
+          "base_title": "Casa Grande Ruins National Monument",
+          "state": "AZ",
+          "lat": 32.9954,
+          "lng": -111.5357,
+          "source_url": "https://www.nps.gov/cagr/index.htm",
+          "tags": [
+            "monuments",
+            "history"
+          ]
+        },
+        {
+          "title": "Montezuma Castle National Monument",
+          "base_title": "Montezuma Castle National Monument",
+          "state": "AZ",
+          "lat": 34.6116,
+          "lng": -111.8349,
+          "source_url": "https://www.nps.gov/moca/index.htm",
+          "tags": [
+            "monuments",
+            "history"
+          ]
+        },
+        {
+          "title": "Tonto National Monument",
+          "base_title": "Tonto National Monument",
+          "state": "AZ",
+          "lat": 33.6453,
+          "lng": -111.1124,
+          "source_url": "https://www.nps.gov/tont/index.htm",
+          "tags": [
+            "monuments",
+            "history"
+          ]
+        },
+        {
+          "title": "Hovenweep National Monument",
+          "base_title": "Hovenweep National Monument",
+          "state": "UT",
+          "lat": 37.3833,
+          "lng": -109.08,
+          "source_url": "https://www.nps.gov/hove/index.htm",
+          "tags": [
+            "monuments",
+            "history"
+          ]
+        },
+        {
+          "title": "Natural Bridges National Monument",
+          "base_title": "Natural Bridges National Monument",
+          "state": "UT",
+          "lat": 37.6044,
+          "lng": -110.0029,
+          "source_url": "https://www.nps.gov/nabr/index.htm",
+          "tags": [
+            "monuments",
+            "geology"
+          ]
+        },
+        {
+          "title": "Cedar Breaks National Monument",
+          "base_title": "Cedar Breaks National Monument",
+          "state": "UT",
+          "lat": 37.635,
+          "lng": -112.8453,
+          "source_url": "https://www.nps.gov/cebr/index.htm",
+          "tags": [
+            "monuments",
+            "scenic"
+          ]
+        },
+        {
+          "title": "Grand Staircase-Escalante National Monument",
+          "base_title": "Grand Staircase-Escalante National Monument",
+          "state": "UT",
+          "lat": 37.4,
+          "lng": -111.6833,
+          "source_url": "https://www.blm.gov/programs/national-conservation-lands/utah/grand-staircase-escalante-national-monument",
+          "tags": [
+            "monuments",
+            "desert"
+          ]
+        },
+        {
+          "title": "Bears Ears National Monument",
+          "base_title": "Bears Ears National Monument",
+          "state": "UT",
+          "lat": 37.629,
+          "lng": -109.86,
+          "source_url": "https://www.blm.gov/programs/national-conservation-lands/utah/bears-ears-national-monument",
+          "tags": [
+            "monuments",
+            "culture"
+          ]
+        },
+        {
+          "title": "Vermilion Cliffs National Monument",
+          "base_title": "Vermilion Cliffs National Monument",
+          "state": "AZ",
+          "lat": 36.8333,
+          "lng": -111.9667,
+          "source_url": "https://www.blm.gov/programs/national-conservation-lands/arizona/vermilion-cliffs",
+          "tags": [
+            "monuments",
+            "desert"
+          ]
+        },
+        {
+          "title": "Organ Pipe Cactus National Monument",
+          "base_title": "Organ Pipe Cactus National Monument",
+          "state": "AZ",
+          "lat": 31.954,
+          "lng": -112.8019,
+          "source_url": "https://www.nps.gov/orpi/index.htm",
+          "tags": [
+            "monuments",
+            "desert"
+          ]
+        },
+        {
+          "title": "Muir Woods National Monument",
+          "base_title": "Muir Woods National Monument",
+          "state": "CA",
+          "lat": 37.8966,
+          "lng": -122.5808,
+          "source_url": "https://www.nps.gov/muwo/index.htm",
+          "tags": [
+            "monuments",
+            "forest"
+          ]
+        },
+        {
+          "title": "Lava Beds National Monument",
+          "base_title": "Lava Beds National Monument",
+          "state": "CA",
+          "lat": 41.7592,
+          "lng": -121.5172,
+          "source_url": "https://www.nps.gov/labe/index.htm",
+          "tags": [
+            "monuments",
+            "geology"
+          ]
+        },
+        {
+          "title": "Carrizo Plain National Monument",
+          "base_title": "Carrizo Plain National Monument",
+          "state": "CA",
+          "lat": 35.1914,
+          "lng": -119.7929,
+          "source_url": "https://www.blm.gov/programs/national-conservation-lands/california/carrizo-plain-national-monument",
+          "tags": [
+            "monuments",
+            "wildflowers"
+          ]
+        },
+        {
+          "title": "Mount St. Helens National Volcanic Monument",
+          "base_title": "Mount St. Helens National Volcanic Monument",
+          "state": "WA",
+          "lat": 46.1912,
+          "lng": -122.1944,
+          "source_url": "https://www.fs.usda.gov/visit/destination/mount-st-helens-national-volcanic-monument",
+          "tags": [
+            "monuments",
+            "volcanoes"
+          ]
+        },
+        {
+          "title": "Little Bighorn Battlefield National Monument",
+          "base_title": "Little Bighorn Battlefield National Monument",
+          "state": "MT",
+          "lat": 45.57,
+          "lng": -107.4275,
+          "source_url": "https://www.nps.gov/libi/index.htm",
+          "tags": [
+            "history",
+            "battlefields"
+          ]
+        },
+        {
+          "title": "Gettysburg National Military Park",
+          "base_title": "Gettysburg National Military Park",
+          "state": "PA",
+          "lat": 39.8309,
+          "lng": -77.2311,
+          "source_url": "https://www.nps.gov/gett/index.htm",
+          "tags": [
+            "history",
+            "battlefields"
+          ]
+        },
+        {
+          "title": "Harpers Ferry National Historical Park",
+          "base_title": "Harpers Ferry National Historical Park",
+          "state": "WV",
+          "lat": 39.3162,
+          "lng": -77.7566,
+          "source_url": "https://www.nps.gov/hafe/index.htm",
+          "tags": [
+            "history"
+          ]
+        },
+        {
+          "title": "San Antonio Missions National Historical Park",
+          "base_title": "San Antonio Missions National Historical Park",
+          "state": "TX",
+          "lat": 29.3309,
+          "lng": -98.4531,
+          "source_url": "https://www.nps.gov/saan/index.htm",
+          "tags": [
+            "history",
+            "culture"
+          ]
+        },
+        {
+          "title": "Canyon de Chelly National Monument",
+          "base_title": "Canyon de Chelly National Monument",
+          "state": "AZ",
+          "lat": 36.1553,
+          "lng": -109.5325,
+          "source_url": "https://www.nps.gov/cach/index.htm",
+          "tags": [
+            "monuments",
+            "culture"
+          ]
+        },
+        {
+          "title": "Scotts Bluff National Monument",
+          "base_title": "Scotts Bluff National Monument",
+          "state": "NE",
+          "lat": 41.835,
+          "lng": -103.7072,
+          "source_url": "https://www.nps.gov/scbl/index.htm",
+          "tags": [
+            "monuments",
+            "history"
+          ]
+        },
+        {
+          "title": "Jewel Cave National Monument",
+          "base_title": "Jewel Cave National Monument",
+          "state": "SD",
+          "lat": 43.73,
+          "lng": -103.829,
+          "source_url": "https://www.nps.gov/jeca/index.htm",
+          "tags": [
+            "monuments",
+            "caves"
+          ]
+        },
+        {
+          "title": "Florissant Fossil Beds National Monument",
+          "base_title": "Florissant Fossil Beds National Monument",
+          "state": "CO",
+          "lat": 38.9128,
+          "lng": -105.2803,
+          "source_url": "https://www.nps.gov/flfo/index.htm",
+          "tags": [
+            "monuments",
+            "fossils"
+          ]
+        },
+        {
+          "title": "Statue of Liberty National Monument",
+          "base_title": "Statue of Liberty National Monument",
+          "state": "NY",
+          "lat": 40.6892,
+          "lng": -74.0445,
+          "source_url": "https://www.nps.gov/stli/index.htm",
+          "tags": [
+            "monuments",
+            "history"
+          ]
+        },
+        {
+          "title": "Ellis Island",
+          "base_title": "Ellis Island",
+          "state": "NY",
+          "lat": 40.6995,
+          "lng": -74.0396,
+          "source_url": "https://www.nps.gov/elis/index.htm",
+          "tags": [
+            "history"
+          ]
+        },
+        {
+          "title": "Independence National Historical Park",
+          "base_title": "Independence National Historical Park",
+          "state": "PA",
+          "lat": 39.9489,
+          "lng": -75.15,
+          "source_url": "https://www.nps.gov/inde/index.htm",
+          "tags": [
+            "history"
+          ]
+        },
+        {
+          "title": "Boston National Historical Park",
+          "base_title": "Boston National Historical Park",
+          "state": "MA",
+          "lat": 42.359,
+          "lng": -71.055,
+          "source_url": "https://www.nps.gov/bost/index.htm",
+          "tags": [
+            "history"
+          ]
+        },
+        {
+          "title": "Pearl Harbor National Memorial",
+          "base_title": "Pearl Harbor National Memorial",
+          "state": "HI",
+          "lat": 21.3649,
+          "lng": -157.9501,
+          "source_url": "https://www.nps.gov/perl/index.htm",
+          "tags": [
+            "history"
+          ]
+        },
+        {
+          "title": "Manzanar National Historic Site",
+          "base_title": "Manzanar National Historic Site",
+          "state": "CA",
+          "lat": 36.728,
+          "lng": -118.154,
+          "source_url": "https://www.nps.gov/manz/index.htm",
+          "tags": [
+            "history"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "water_scenic",
+      "label": "Water & Scenic",
+      "entries": [
+        {
+          "title": "Cape Cod National Seashore",
+          "base_title": "Cape Cod National Seashore",
+          "state": "MA",
+          "lat": 41.923,
+          "lng": -70.043,
+          "source_url": "https://www.nps.gov/caco/index.htm",
+          "tags": [
+            "seashore",
+            "beach"
+          ]
+        },
+        {
+          "title": "Cape Hatteras National Seashore",
+          "base_title": "Cape Hatteras National Seashore",
+          "state": "NC",
+          "lat": 35.251,
+          "lng": -75.529,
+          "source_url": "https://www.nps.gov/caha/index.htm",
+          "tags": [
+            "seashore",
+            "beach"
+          ]
+        },
+        {
+          "title": "Cumberland Island National Seashore",
+          "base_title": "Cumberland Island National Seashore",
+          "state": "GA",
+          "lat": 30.8585,
+          "lng": -81.4521,
+          "source_url": "https://www.nps.gov/cuis/index.htm",
+          "tags": [
+            "seashore",
+            "island"
+          ]
+        },
+        {
+          "title": "Fire Island National Seashore",
+          "base_title": "Fire Island National Seashore",
+          "state": "NY",
+          "lat": 40.665,
+          "lng": -73.066,
+          "source_url": "https://www.nps.gov/fiis/index.htm",
+          "tags": [
+            "seashore",
+            "beach"
+          ]
+        },
+        {
+          "title": "Point Reyes National Seashore",
+          "base_title": "Point Reyes National Seashore",
+          "state": "CA",
+          "lat": 38.0834,
+          "lng": -122.9,
+          "source_url": "https://www.nps.gov/pore/index.htm",
+          "tags": [
+            "seashore",
+            "coast"
+          ]
+        },
+        {
+          "title": "Golden Gate National Recreation Area",
+          "base_title": "Golden Gate National Recreation Area",
+          "state": "CA",
+          "lat": 37.8324,
+          "lng": -122.5233,
+          "source_url": "https://www.nps.gov/goga/index.htm",
+          "tags": [
+            "coast",
+            "scenic"
+          ]
+        },
+        {
+          "title": "Glen Canyon National Recreation Area",
+          "base_title": "Glen Canyon National Recreation Area",
+          "state": "AZ",
+          "lat": 36.935,
+          "lng": -111.485,
+          "source_url": "https://www.nps.gov/glca/index.htm",
+          "tags": [
+            "water",
+            "desert"
+          ]
+        },
+        {
+          "title": "Lake Mead National Recreation Area",
+          "base_title": "Lake Mead National Recreation Area",
+          "state": "NV",
+          "lat": 36.01,
+          "lng": -114.796,
+          "source_url": "https://www.nps.gov/lake/index.htm",
+          "tags": [
+            "water",
+            "desert"
+          ]
+        },
+        {
+          "title": "Delaware Water Gap",
+          "base_title": "Delaware Water Gap National Recreation Area",
+          "state": "PA",
+          "lat": 41.129,
+          "lng": -74.944,
+          "source_url": "https://www.nps.gov/dewa/index.htm",
+          "tags": [
+            "water",
+            "scenic"
+          ]
+        },
+        {
+          "title": "Apostle Islands Sea Caves",
+          "base_title": "Apostle Islands National Lakeshore",
+          "state": "WI",
+          "lat": 46.93,
+          "lng": -90.66,
+          "source_url": "https://www.nps.gov/apis/index.htm",
+          "tags": [
+            "water",
+            "lakeshore"
+          ]
+        },
+        {
+          "title": "Sleeping Bear Dunes",
+          "base_title": "Sleeping Bear Dunes National Lakeshore",
+          "state": "MI",
+          "lat": 44.875,
+          "lng": -86.043,
+          "source_url": "https://www.nps.gov/slbe/index.htm",
+          "tags": [
+            "water",
+            "dunes"
+          ]
+        },
+        {
+          "title": "Ozark National Scenic Riverways",
+          "base_title": "Ozark National Scenic Riverways",
+          "state": "MO",
+          "lat": 37.154,
+          "lng": -91.321,
+          "source_url": "https://www.nps.gov/ozar/index.htm",
+          "tags": [
+            "river",
+            "paddling"
+          ]
+        },
+        {
+          "title": "Buffalo National River",
+          "base_title": "Buffalo National River",
+          "state": "AR",
+          "lat": 35.986,
+          "lng": -92.757,
+          "source_url": "https://www.nps.gov/buff/index.htm",
+          "tags": [
+            "river",
+            "paddling"
+          ]
+        },
+        {
+          "title": "Big South Fork",
+          "base_title": "Big South Fork National River and Recreation Area",
+          "state": "TN",
+          "lat": 36.479,
+          "lng": -84.697,
+          "source_url": "https://www.nps.gov/biso/index.htm",
+          "tags": [
+            "river",
+            "scenic"
+          ]
+        },
+        {
+          "title": "Flaming Gorge National Recreation Area",
+          "base_title": "Flaming Gorge National Recreation Area",
+          "state": "UT",
+          "lat": 40.9,
+          "lng": -109.55,
+          "source_url": "https://www.fs.usda.gov/recarea/ashley/recarea/?recid=72189",
+          "tags": [
+            "water",
+            "scenic"
+          ]
+        },
+        {
+          "title": "Boundary Waters Canoe Area Wilderness",
+          "base_title": "Boundary Waters Canoe Area Wilderness",
+          "state": "MN",
+          "lat": 48.0,
+          "lng": -91.0,
+          "source_url": "https://www.fs.usda.gov/recarea/superior/recarea/?recid=84168",
+          "tags": [
+            "water",
+            "wilderness"
+          ]
+        },
+        {
+          "title": "Lake Tahoe Basin",
+          "base_title": "Lake Tahoe Basin Management Unit",
+          "state": "CA",
+          "lat": 39.0968,
+          "lng": -120.0324,
+          "source_url": "https://www.fs.usda.gov/ltbmu",
+          "tags": [
+            "water",
+            "scenic"
+          ]
+        },
+        {
+          "title": "Columbia River Gorge",
+          "base_title": "Columbia River Gorge National Scenic Area",
+          "state": "OR",
+          "lat": 45.7253,
+          "lng": -121.73,
+          "source_url": "https://www.fs.usda.gov/crgnsa",
+          "tags": [
+            "scenic",
+            "waterfalls"
+          ]
+        },
+        {
+          "title": "Great Ocean Road",
+          "base_title": "Great Ocean Road",
+          "state": "VIC",
+          "lat": -38.68,
+          "lng": 143.39,
+          "source_url": "https://www.visitgreatoceanroad.org.au/",
+          "tags": [
+            "scenic",
+            "coast"
+          ]
+        },
+        {
+          "title": "Ninety Mile Beach",
+          "base_title": "Ninety Mile Beach, New Zealand",
+          "state": "NZ",
+          "lat": -34.9667,
+          "lng": 173.1667,
+          "source_url": "https://www.newzealand.com/us/ninety-mile-beach/",
+          "tags": [
+            "scenic",
+            "coast"
+          ]
+        },
+        {
+          "title": "Milford Sound",
+          "base_title": "Milford Sound / Piopiotahi",
+          "state": "NZ",
+          "lat": -44.6716,
+          "lng": 167.925,
+          "source_url": "https://www.doc.govt.nz/parks-and-recreation/places-to-go/fiordland/places/milford-sound-piopiotahi-area/",
+          "tags": [
+            "water",
+            "scenic"
+          ]
+        },
+        {
+          "title": "Bay of Islands",
+          "base_title": "Bay of Islands",
+          "state": "NZ",
+          "lat": -35.2,
+          "lng": 174.0,
+          "source_url": "https://www.newzealand.com/us/bay-of-islands/",
+          "tags": [
+            "water",
+            "coast"
+          ]
+        },
+        {
+          "title": "Lake Tekapo",
+          "base_title": "Lake Tekapo",
+          "state": "NZ",
+          "lat": -44.0047,
+          "lng": 170.4771,
+          "source_url": "https://www.newzealand.com/us/lake-tekapo/",
+          "tags": [
+            "water",
+            "dark sky"
+          ]
+        },
+        {
+          "title": "Lake Wakatipu",
+          "base_title": "Lake Wakatipu",
+          "state": "NZ",
+          "lat": -45.05,
+          "lng": 168.5,
+          "source_url": "https://www.newzealand.com/us/lake-wakatipu/",
+          "tags": [
+            "water",
+            "scenic"
+          ]
+        },
+        {
+          "title": "Whitsunday Islands",
+          "base_title": "Whitsunday Islands National Park",
+          "state": "QLD",
+          "lat": -20.2833,
+          "lng": 148.95,
+          "source_url": "https://parks.desi.qld.gov.au/parks/whitsunday-islands",
+          "tags": [
+            "water",
+            "islands"
+          ]
+        },
+        {
+          "title": "Ningaloo Coast",
+          "base_title": "Ningaloo Coast",
+          "state": "WA",
+          "lat": -22.66,
+          "lng": 113.65,
+          "source_url": "https://parksaustralia.gov.au/marine/parks/north-west/ningaloo/",
+          "tags": [
+            "water",
+            "reef"
+          ]
+        },
+        {
+          "title": "Lord Howe Island",
+          "base_title": "Lord Howe Island",
+          "state": "NSW",
+          "lat": -31.5553,
+          "lng": 159.0821,
+          "source_url": "https://www.lordhoweisland.info/",
+          "tags": [
+            "water",
+            "island"
+          ]
+        },
+        {
+          "title": "Attabad Lake and Upper Hunza",
+          "base_title": "Attabad Lake",
+          "state": "PK",
+          "lat": 36.345,
+          "lng": 74.867,
+          "source_url": "https://visitgilgitbaltistan.gov.pk/",
+          "source_publisher": "Gilgit-Baltistan Tourism",
+          "source_note": "Curated Hunza scenic-route source pack. Verify local access, weather, and road conditions before travel.",
+          "tags": [
+            "pakistan",
+            "hunza",
+            "water",
+            "scenic",
+            "karakoram highway"
+          ],
+          "hook": "Attabad Lake and Upper Hunza gives Pakistan route planning a scenic stop that can shape camps, lodges, and services nearby.",
+          "short_description": "Use Attabad Lake as a scenic route anchor in Upper Hunza. Check Karakoram Highway conditions, local access, weather, and services before building a day around it."
+        }
       ]
     }
   ]

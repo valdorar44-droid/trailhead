@@ -39,6 +39,7 @@ from ingestors.geoapify import get_geoapify_places
 from ingestors.usfs import get_usfs_recreation_sites
 from ingestors.provider_guard import provider_call_snapshot, record_provider_call, runtime_cached_call
 from ingestors.blm import get_blm_campsites, get_blm_campsite_detail, get_blm_recreation_sites
+from ingestors.international_registry import international_camp_tasks
 from ingestors.conditions import get_provider_conditions_along_route, get_provider_conditions_near, get_wfigs_fire_perimeters
 from db.store import (
     save_trip, get_trip, add_community_pin, get_community_pins, find_duplicate_community_pin,
@@ -624,6 +625,192 @@ def _apply_explore_story_overrides(catalog: dict) -> dict:
         }
         places.append(enriched)
     return {**catalog, "places": places}
+
+def _catalog_place_category(summary: dict) -> str:
+    group = str(summary.get("explore_group") or "").lower()
+    category = str(summary.get("category") or "").lower()
+    title = str(summary.get("title") or "").lower()
+    hay = f"{group} {category} {title}"
+    if "camp" in hay:
+        return "camp"
+    if any(term in hay for term in ("water", "lake", "coast", "shore", "marine", "reef", "river", "scenic")):
+        return "viewpoint"
+    if "trail" in hay:
+        return "trail"
+    if "visitor" in hay:
+        return "visitor_center"
+    if any(term in hay for term in ("historic", "monument", "heritage")):
+        return "historic"
+    if any(term in hay for term in ("park", "marine", "preserve", "refuge")):
+        return "park"
+    return "attraction"
+
+def _explore_query_text(place: dict) -> str:
+    summary = place.get("summary") or {}
+    profile = place.get("profile") or {}
+    values = [
+        place.get("id"),
+        summary.get("title"),
+        summary.get("state"),
+        summary.get("category"),
+        summary.get("explore_group"),
+        summary.get("hook"),
+        summary.get("short_description"),
+        profile.get("summary"),
+        profile.get("why_it_matters"),
+        " ".join(summary.get("tags") or []),
+    ]
+    return " ".join(str(v or "") for v in values).lower()
+
+def _explore_place_matches_categories(place_type: str, requested: set[str] | None) -> bool:
+    if not requested:
+        return True
+    normalized = {_normalize_place_category(c) for c in requested if str(c).strip()}
+    if not normalized:
+        return True
+    if place_type == "camp":
+        return bool(normalized.intersection({"camp", "camping", "rv", "private_stay"}))
+    if place_type == "park":
+        return bool(normalized.intersection({"park", "attraction", "tourism", "viewpoint"}))
+    if place_type == "historic":
+        return bool(normalized.intersection({"historic", "monument", "attraction", "tourism"}))
+    if place_type == "viewpoint":
+        return bool(normalized.intersection({"viewpoint", "water", "attraction", "tourism", "park"}))
+    if place_type == "trail":
+        return bool(normalized.intersection({"trail", "trailhead", "attraction", "tourism"}))
+    return bool(normalized.intersection({place_type, "attraction", "tourism", "place", "poi"}))
+
+def _explore_place_to_nearby_place(place: dict, center_lat: float, center_lng: float) -> dict | None:
+    summary = place.get("summary") or {}
+    try:
+        lat = float(summary.get("lat"))
+        lng = float(summary.get("lng"))
+    except Exception:
+        return None
+    ptype = _catalog_place_category(summary)
+    dist = _haversine_m(center_lat, center_lng, lat, lng) / 1609.344
+    source_pack = place.get("source_pack") or {}
+    source_url = source_pack.get("official_url") or summary.get("source_url") or ""
+    photo_url = summary.get("image_url") or summary.get("thumbnail_url") or ""
+    return {
+        "id": f"explore:{place.get('id') or summary.get('title')}",
+        "name": summary.get("title") or "Trailhead Explore place",
+        "lat": lat,
+        "lng": lng,
+        "type": ptype,
+        "subtype": {
+            "camp": "Campground area",
+            "park": "Park",
+            "historic": "Historic site",
+            "trail": "Trail area",
+        }.get(ptype, "Attraction"),
+        "source": "trailhead_explore",
+        "source_label": "Trailhead Explore",
+        "source_badge": "Explore",
+        "verified_source": "Trailhead seeded catalog",
+        "summary": _planner_clean_text(summary.get("hook") or summary.get("short_description") or (place.get("profile") or {}).get("summary") or "", 320),
+        "description": _planner_clean_text((place.get("profile") or {}).get("summary") or summary.get("short_description") or "", 700),
+        "photo_url": photo_url,
+        "photos": [photo_url] if photo_url else [],
+        "photo_status": "catalog" if photo_url else "placeholder",
+        "website": source_url,
+        "url": source_url,
+        "official_url": source_url,
+        "distance_mi": round(dist, 2),
+        "attribution": place.get("attribution") or "Trailhead Explore catalog",
+        "source_freshness": "Seeded Trailhead Explore fallback; verify current closures, permits, fees, and access with the official source.",
+        "category_access": {
+            "explore_unlocked": True,
+            "locked_categories": [],
+            "official_free_categories": [],
+            "unlock_cost": 0,
+        },
+    }
+
+def _explore_place_to_camp(place: dict, center_lat: float, center_lng: float) -> dict | None:
+    nearby = _explore_place_to_nearby_place(place, center_lat, center_lng)
+    if not nearby or nearby.get("type") != "camp":
+        return None
+    return {
+        "id": nearby["id"],
+        "name": nearby["name"],
+        "lat": nearby["lat"],
+        "lng": nearby["lng"],
+        "tags": ["campground", "explore_seed", "official_link"],
+        "land_type": "Campground Area",
+        "description": nearby.get("summary") or "Seeded campground area from Trailhead Explore. Open the official source before relying on availability or access.",
+        "photo_url": nearby.get("photo_url") or "",
+        "photos": nearby.get("photos") or [],
+        "reservable": False,
+        "cost": "",
+        "url": nearby.get("official_url") or "",
+        "ada": False,
+        "source": "trailhead_explore",
+        "source_tier": "seeded",
+        "verified_source": "Trailhead Explore catalog",
+        "source_badge": "Explore",
+        "source_confidence": "seeded",
+        "link_label": "Official page",
+        "distance_mi": nearby.get("distance_mi"),
+        "source_freshness": nearby.get("source_freshness"),
+        "amenities": [],
+        "site_types": ["Campground area"],
+    }
+
+def _explore_catalog_fallback_places(
+    lat: float,
+    lng: float,
+    radius_miles: float,
+    categories: set[str] | None = None,
+    query: str = "",
+    limit: int = 24,
+) -> list[dict]:
+    def item_distance(item: dict) -> float:
+        try:
+            return float(item.get("distance_mi"))
+        except Exception:
+            return 999999.0
+
+    query_terms = [t for t in re.split(r"\s+", str(query or "").lower().strip()) if len(t) >= 2]
+    items: list[dict] = []
+    for place in _load_explore_catalog().get("places") or []:
+        summary = place.get("summary") or {}
+        ptype = _catalog_place_category(summary)
+        if not _explore_place_matches_categories(ptype, categories):
+            continue
+        nearby = _explore_place_to_nearby_place(place, lat, lng)
+        if not nearby:
+            continue
+        if query_terms:
+            hay = _explore_query_text(place)
+            if not all(term in hay for term in query_terms):
+                continue
+        if item_distance(nearby) > radius_miles:
+            continue
+        items.append(nearby)
+    return sorted(items, key=lambda item: (item_distance(item), str(item.get("name") or "")))[:limit]
+
+def _explore_catalog_fallback_camps(lat: float, lng: float, radius_miles: float, limit: int = 24) -> list[dict]:
+    def item_distance(item: dict) -> float:
+        try:
+            return float(item.get("distance_mi"))
+        except Exception:
+            return 999999.0
+
+    camps = []
+    for place in _load_explore_catalog().get("places") or []:
+        camp = _explore_place_to_camp(place, lat, lng)
+        if not camp:
+            continue
+        if item_distance(camp) > radius_miles:
+            continue
+        camps.append(camp)
+    return sorted(camps, key=lambda item: (item_distance(item), str(item.get("name") or "")))[:limit]
+
+def _merge_place_fallbacks(primary: list[dict], fallback: list[dict], limit: int = 80, min_results: int = 8) -> list[dict]:
+    if len(primary) >= min_results or not fallback:
+        return primary[:limit]
+    return _dedupe_nearby_places([*primary, *fallback])[:limit]
 def _hash_pw(password: str) -> str:
     return _bcrypt_lib.hashpw(password[:72].encode(), _bcrypt_lib.gensalt()).decode()
 
@@ -1400,7 +1587,7 @@ TRAILHEAD_COPILOT_CAPABILITY_REGISTRY = {
     "route_builder": {
         "summary": "Multi-day trip planning starts as a map-first Route Scout. Use Route Builder only when the user asks for builder/draft/save/export, or after scout results are ready.",
         "commands": ["openRouteBuilderDraft", "updateRouteBuilderDraft", "buildRouteBuilderFramework", "readRouteBuilderContext"],
-        "fields": ["start", "destination", "stops", "days", "tripShape", "routeStyle", "campPreference", "campReuse", "driveHours", "targetMiles", "restDays", "rigConstraints", "fuelStrategy", "poiPreferences"],
+        "fields": ["start", "destination", "stops", "days", "tripShape", "routeStyle", "campPreference", "campReuse", "driveHours", "targetMiles", "restDays", "rigConstraints", "fuelStrategy", "poiPreferences", "roadPreference", "riskTolerance"],
         "vocabulary": {
             "wild": ["wild", "adventure", "backroads"],
             "direct": ["direct", "fastest"],
@@ -1409,6 +1596,8 @@ TRAILHEAD_COPILOT_CAPABILITY_REGISTRY = {
             "private_camps": ["private stays", "farm", "ranch", "winery", "glamping"],
             "same_camp_window": ["same camp", "basecamp", "there and back"],
             "different_each_night": ["different camps", "each night"],
+            "rough_roads": ["forest roads", "wild roads", "high clearance", "4wd", "rough roads"],
+            "poi_categories": ["parks", "monuments", "historic sites", "visitor centers", "water access", "trailheads"],
         },
     },
     "app": {
@@ -1704,8 +1893,12 @@ def _copilot_realtime_instructions(wake_phrase: bool) -> str:
         "For \"route me there\" use routeToSelectedPlace or buildRoute to preview only; use the selected card/current result, not a random nearby place. "
         "For \"start navigation\" or \"navigate there\" use startNavigation with confirmation. "
         "For full multi-day planning such as \"plan/build/create a 5-day dispersed route from Moab to Big Sur\", call startRouteScout with start, destination, days, driveHours when known, routeStyle, campPreference, campPhotoOnly when they ask for camps with photos/pictures only, fuelStrategy, poiPreferences, and rig profile context. "
+        "Before staging a multi-day scout, ask one short follow-up when camp style, route style, daily drive window, or rough-road vehicle fit is ambiguous. "
         "Treat driveHours as the user's maximum drive time per day across the requested days, not a required exact daily duration. "
         "If the user gives a follow-up drive time such as \"5 hours\" while a route scout is active, call startRouteScout again with the prior scout context plus driveHours. "
+        "Interpret requests for dangerous, gnarly, rough, or high-clearance roads as wild but safe scouting. Use the saved rig profile when available and do not silently push low-clearance or towing rigs onto rough roads. "
+        "For parks, monuments, historic sites, visitor centers, scenic drives, overlooks, water access, and other POIs, map them to Trailhead's supported place or trail searches instead of defaulting to camps. "
+        "Do not use visible_map_features to invent route plans or overnight stops unless the user explicitly asks about the current screen. "
         "Only use Route Builder actions when the user explicitly asks to open, save, export, or prefill Route Builder. "
         "Never call openRigProfile during or immediately after route planning. Only call openRigProfile when the user explicitly says open/show/edit/set up my rig profile; include args.explicit_request=true. "
         "Ignore tiny fragments, map labels, loading copy, and background speech that are not clear user commands. "
@@ -1741,9 +1934,12 @@ def _extract_place_query(command: str) -> str:
         return ""
     query = match.group(1)
     query = re.split(r"\b(?:for|with|that|and|then|please)\b", query, maxsplit=1, flags=re.I)[0]
-    query = re.sub(r"\b(?:campgrounds?|campsites?|camps?|rv parks?|trails?|fuel|gas|propane|restaurants?|food|eat|dining|hotels?|motels?|lodg(?:e|ing)|places? to stay|inns?|hostels?|viewpoints?|views?|scenic|cool places?|attractions?|landmarks?|nearby|around|area|map|view)\b", " ", query, flags=re.I)
+    query = re.sub(r"\b(?:campgrounds?|campsites?|camps?|rv parks?|huts?|shelters?|refuges?|bothies|treks?|trekking|base\s*camps?|trails?|fuel|gas|propane|restaurants?|food|eat|dining|hotels?|motels?|lodg(?:e|ing)|guest\s*houses?|places? to stay|inns?|hostels?|viewpoints?|views?|scenic|cool places?|attractions?|landmarks?|nearby|around|area|map|view)\b", " ", query, flags=re.I)
     query = re.sub(r"\s+", " ", query).strip(" .,'-")
-    if query.lower() in {"me", "here", "my location", "current location", "current view", "map view", "this area"}:
+    if query.lower() in {
+        "me", "here", "my location", "current location", "current view", "map view", "this area",
+        "my route", "the route", "route", "route corridor", "along my route",
+    }:
         return ""
     return query[:80]
 
@@ -1808,6 +2004,13 @@ def _visible_selection_args(command: str) -> dict:
             args["name"] = raw[:80]
     return args
 
+def _explicit_visible_reference(command: str) -> bool:
+    text = str(command or "").lower()
+    return bool(
+        _visible_selection_args(command)
+        or re.search(r"\b(visible|on screen|on the map|map label|map icon|that icon|this icon)\b", text)
+    )
+
 def _copilot_result_selection_args(items: object, index: int) -> dict:
     if not isinstance(items, list) or index < 0 or index >= len(items):
         return {"result_index": index}
@@ -1823,6 +2026,82 @@ def _clean_route_builder_place(value: str) -> str:
     clean = re.split(r"\b(?:for|with|using|and make|make it|different camps|same camp|basecamp|route style|camp preference|please)\b", value, maxsplit=1, flags=re.I)[0]
     clean = re.sub(r"\b(?:mostly|camping|camps?|campsites?|campgrounds?|wild|adventure|backroads|direct|fastest|balanced|scenic but sane|dispersed|boondock|free|blm|usfs|public land|private stays?|farm|ranch|winery|glamping|rv|developed|reservable|route|trip|plan|days?|nights?)\b", " ", clean, flags=re.I)
     return re.sub(r"\s+", " ", clean).strip(" .,'-")[:120]
+
+def _copilot_rig_profile(context: dict | None = None) -> dict | None:
+    user_ctx = (context or {}).get("user") if isinstance((context or {}).get("user"), dict) else {}
+    rig = user_ctx.get("rig_profile") if isinstance(user_ctx, dict) else None
+    return rig if isinstance(rig, dict) else None
+
+def _route_builder_has_towing_risk(rig: dict | None) -> bool:
+    if not isinstance(rig, dict):
+        return False
+    if rig.get("is_towing") is True:
+        return True
+    try:
+        trailer_len = float(rig.get("trailer_length_ft") or 0)
+    except Exception:
+        trailer_len = 0.0
+    return trailer_len >= 10
+
+def _route_builder_has_low_clearance(rig: dict | None) -> bool:
+    if not isinstance(rig, dict):
+        return False
+    try:
+        lift = float(rig.get("lift_in") or 0)
+        clearance = float(rig.get("ground_clearance_in") or 0) + lift
+    except Exception:
+        clearance = 0.0
+    return 0 < clearance < 8.5
+
+def _route_builder_clarification(draft: dict, command: str, context: dict | None = None, route_scout_active: bool = False) -> dict | None:
+    text = (command or "").lower()
+    rig = _copilot_rig_profile(context)
+    road_pref = str(draft.get("roadPreference") or "").lower()
+    route_style = str(draft.get("routeStyle") or "").lower()
+    needs_rough_vehicle = road_pref in {"high_clearance", "4wd_only"} or route_style == "wild"
+    if needs_rough_vehicle and not rig:
+        return {
+            "question": "What should I tune this for: stock SUV, high-clearance rig, or true 4WD build?",
+            "options": ["stock SUV", "high-clearance rig", "4WD build"],
+            "reason": "missing_rig_for_rough_roads",
+        }
+    if road_pref in {"high_clearance", "4wd_only"} and _route_builder_has_towing_risk(rig):
+        return {
+            "question": "You look set up to tow. Keep this trailer-safe, or switch to a rough-road scout for the tow rig only?",
+            "options": ["trailer-safe", "rough-road tow rig", "I am not towing"],
+            "reason": "towing_conflict",
+        }
+    if road_pref in {"high_clearance", "4wd_only"} and _route_builder_has_low_clearance(rig):
+        return {
+            "question": "Your saved rig reads low-clearance for rough-road scouting. Keep it balanced, or switch to a high-clearance route anyway?",
+            "options": ["keep it balanced", "switch to high-clearance", "update my rig later"],
+            "reason": "low_clearance_conflict",
+        }
+    camping_intent = bool(re.search(r"\b(camp|camping|campsite|overnight|sleep|dispersed|boondock|rv park|glamping|private stay|lodging|hut|huts|shelter|refuge|bothy|trekking lodge|guest house|base camp|basecamp)\b", text))
+    has_primary_signal = any(
+        draft.get(key)
+        for key in ("campPreference", "driveHours", "routeStyle", "roadPreference", "poiPreferences", "campReuse")
+    )
+    if draft.get("destination") and not route_scout_active and camping_intent and not draft.get("campPreference"):
+        return {
+            "question": "What overnight style should I scout first: public/dispersed, developed campgrounds, RV-friendly, or any legal stop?",
+            "options": ["public/dispersed", "developed campgrounds", "RV-friendly", "any legal stop"],
+            "reason": "missing_camp_preference",
+        }
+    if draft.get("destination") and not route_scout_active and not has_primary_signal:
+        return {
+            "question": "How should I bias this scout: direct, balanced, or wild but safe?",
+            "options": ["direct", "balanced", "wild but safe"],
+            "reason": "missing_route_style",
+        }
+    vague_update = bool(re.search(r"\b(make it|change it|update it|better|cooler|wilder|rougher|gnarlier|more scenic|quiet|legal)\b", text))
+    if route_scout_active and vague_update and not has_primary_signal and not re.search(r"\b(\d{1,2}(?:\.\d+)?)\s*(?:hours?|hrs?)\b", text):
+        return {
+            "question": "What should I optimize next: easier driving, wilder roads, better camps, or more trails and landmarks?",
+            "options": ["easier driving", "wilder roads", "better camps", "trails and landmarks"],
+            "reason": "vague_route_tuning",
+        }
+    return None
 
 def _route_builder_draft_from_text(command: str, context: dict | None = None) -> dict:
     text = (command or "").lower()
@@ -1875,10 +2154,31 @@ def _route_builder_draft_from_text(command: str, context: dict | None = None) ->
         draft["routeStyle"] = "direct"
     elif re.search(r"\b(scenic but sane|balanced|scenic)\b", text):
         draft["routeStyle"] = "balanced"
+    if re.search(r"\b(stock suv|crossover|paved only|easy roads?|low clearance|trailer safe|avoid rough roads?)\b", text):
+        draft["roadPreference"] = "paved_ok"
+        draft["riskTolerance"] = "conservative"
+        draft.setdefault("rigConstraints", {"vehicle_fit": "stock_suv"})
+    elif re.search(r"\b(forest roads?|gravel roads?|washboards?|dirt roads?|fire roads?)\b", text):
+        draft["roadPreference"] = "dirt_ok"
+        draft["riskTolerance"] = "moderate"
+    elif re.search(r"\b(high clearance|high-clearance|shelf roads?|rocky roads?|rutted roads?)\b", text):
+        draft["roadPreference"] = "high_clearance"
+        draft["riskTolerance"] = "wild_but_safe"
+        draft.setdefault("rigConstraints", {"vehicle_fit": "high_clearance"})
+        draft.setdefault("routeStyle", "wild")
+    elif re.search(r"\b(4wd|4x4|technical|gnarly|rough roads?|dangerous|danger|locking diffs?|low range)\b", text):
+        draft["roadPreference"] = "4wd_only"
+        draft["riskTolerance"] = "wild_but_safe"
+        draft.setdefault("rigConstraints", {"vehicle_fit": "4wd"})
+        draft.setdefault("routeStyle", "wild")
+    elif re.search(r"\b(safe|sane|not stupid|reasonable)\b", text):
+        draft["riskTolerance"] = "moderate" if draft.get("routeStyle") == "wild" else "conservative"
     if re.search(r"\b(dispersed|boondock|boondocking|free|blm|usfs|forest service|public lands?)\b", text):
         draft["campPreference"] = "public"
     elif re.search(r"\b(private stays?|farm|ranch|winery|glamping|hipcamp)\b", text):
         draft["campPreference"] = "private"
+    elif re.search(r"\b(huts?|shelters?|refuges?|bothy|bothies|trekking lodges?|guest houses?|hostels?|chalets?|base camp|basecamp)\b", text):
+        draft["campPreference"] = "developed"
     elif re.search(r"\b(rv|developed|reservable|hookups?)\b", text):
         draft["campPreference"] = "rv" if "rv" in text else "developed"
     if re.search(r"\b(?:photos?|pictures?|images?)\s*(?:only|required|preferred)?\b|\b(?:with|that have)\s+(?:photos?|pictures?|images?)\b", text):
@@ -1887,13 +2187,19 @@ def _route_builder_draft_from_text(command: str, context: dict | None = None) ->
     poi_specs = [
         ("fuel", r"\b(fuel|gas|propane|resupply)\b"),
         ("water", r"\b(water|fill water|water fill)\b"),
-        ("trailhead", r"\b(trailheads?|hikes?|hiking)\b"),
+        ("trailhead", r"\b(trailheads?|hikes?|hiking|treks?|trekking|base camp|basecamp)\b"),
         ("viewpoint", r"\b(viewpoints?|views?|overlooks?|scenic stops?)\b"),
         ("hot_spring", r"\b(hot springs?)\b"),
         ("food", r"\b(food|restaurants?|dinner|lunch|coffee)\b"),
         ("grocery", r"\b(grocer(?:y|ies)|supplies)\b"),
         ("mechanic", r"\b(mechanic|repair|service)\b"),
         ("attraction", r"\b(attractions?|historic|landmarks?)\b"),
+        ("historic", r"\b(history|historic|battlefield|petroglyphs?|rock art|ghost town)\b"),
+        ("park", r"\b(parks?|state parks?|national parks?)\b"),
+        ("monument", r"\b(monuments?|memorials?)\b"),
+        ("visitor_center", r"\b(visitor centers?|ranger stations?)\b"),
+        ("water_access", r"\b(lake|river|beach|boat ramp|swimming hole|water access)\b"),
+        ("camp_services", r"\b(dump station|showers?|laundry|laundromat|water fill|camp services?)\b"),
     ]
     for key, pattern in poi_specs:
         if re.search(pattern, text):
@@ -1901,7 +2207,7 @@ def _route_builder_draft_from_text(command: str, context: dict | None = None) ->
     if poi_preferences:
         draft["poiPreferences"] = list(dict.fromkeys(poi_preferences))
     draft["fuelStrategy"] = "auto_when_needed"
-    if re.search(r"\b(same camp|basecamp|base camp|there and back|out and back)\b", text):
+    if re.search(r"\b(same camp|same campground|same basecamp|basecamp|base camp|stay put|two nights same camp|same camp window|there and back|out and back)\b", text):
         draft["campReuse"] = "same_camp_window"
         if re.search(r"\b(there and back|out and back)\b", text):
             draft["tripShape"] = "there_and_back"
@@ -1911,15 +2217,13 @@ def _route_builder_draft_from_text(command: str, context: dict | None = None) ->
         draft["tripShape"] = "loop"
     elif "tripShape" not in draft and re.search(r"\b(one way|one-way)\b", text):
         draft["tripShape"] = "one_way"
-    if re.search(r"\b(use my rig|rig profile|vehicle profile|trailer|clearance)\b", text):
+    if re.search(r"\b(use my rig|rig profile|vehicle profile|trailer|clearance|high clearance|4wd|4x4|stock suv)\b", text):
         draft["useRigProfile"] = True
-        user_ctx = (context or {}).get("user") if isinstance((context or {}).get("user"), dict) else {}
-        rig = user_ctx.get("rig_profile") if isinstance(user_ctx, dict) else None
+        rig = _copilot_rig_profile(context)
         if isinstance(rig, dict):
             draft["rigConstraints"] = rig
     else:
-        user_ctx = (context or {}).get("user") if isinstance((context or {}).get("user"), dict) else {}
-        rig = user_ctx.get("rig_profile") if isinstance(user_ctx, dict) else None
+        rig = _copilot_rig_profile(context)
         if isinstance(rig, dict):
             draft["useRigProfile"] = True
             draft["rigConstraints"] = rig
@@ -1983,6 +2287,19 @@ def _build_extreme_map_action(command: str, context: dict, provider: str = "trai
         route_builder_draft = draft
         map_updates = {"route_scout": True, "route_scout_tune": True}
         message = "Route Scout is tuning the daily drive window."
+    elif route_scout_ctx.get("status") == "needs_input" and not re.search(r"\b(save|send|export|open)\b.*\b(route builder|builder|draft)\b|\broute builder\b.*\b(save|send|open)\b", text):
+        draft = dict(route_scout_ctx.get("draftArgs") if isinstance(route_scout_ctx.get("draftArgs"), dict) else {})
+        draft.update(_route_builder_draft_from_text(command, context))
+        clarify = _route_builder_clarification(draft, command, context, route_scout_active=True)
+        action_type = "startRouteScout"
+        args = {"draft": draft}
+        if clarify:
+            args["clarify"] = clarify
+            message = clarify["question"]
+        else:
+            message = "Route Scout is updating the route preview."
+        route_builder_draft = draft
+        map_updates = {"route_scout": True, "route_scout_tune": True}
     elif route_scout_active and re.search(r"\b(save|send|export|open)\b.*\b(route builder|builder|draft)\b|\broute builder\b.*\b(save|send|open)\b", text):
         action_type = "saveScoutToRouteBuilder"
         args = {"source": "active_route_scout"}
@@ -2007,11 +2324,16 @@ def _build_extreme_map_action(command: str, context: dict, provider: str = "trai
         draft = _route_builder_draft_from_text(command, context)
         explicit_builder = bool(re.search(r"\b(route builder|trip builder|builder|draft|prefill)\b", text))
         if route_scout_capable and not explicit_builder and _route_builder_should_auto_build(text, draft):
+            clarify = _route_builder_clarification(draft, command, context, route_scout_active=False)
             action_type = "startRouteScout"
             args = {"draft": draft}
+            if clarify:
+                args["clarify"] = clarify
+                message = clarify["question"]
+            else:
+                message = "Route Scout is plotting the route and looking for overnight stops."
             route_builder_draft = draft
             map_updates = {"route_scout": True, "route_preview": True}
-            message = "Route Scout is plotting the route and looking for overnight stops."
         elif _route_builder_should_auto_build(text, draft):
             draft["autoBuild"] = True
             action_type = "buildRouteBuilderFramework"
@@ -2111,7 +2433,7 @@ def _build_extreme_map_action(command: str, context: dict, provider: str = "trai
         args = {"category": "food", "route_scoped": route_active, "near": center, "query": query, "keyword": keyword, "open_card": open_card, "limit": 8}
         map_updates = {"result_list": True, "open_card": open_card, "category": "food", "query": query, "keyword": keyword}
         message = f"{keyword.title() if keyword else 'Food'} search staged near {query}." if query else f"{keyword.title() if keyword else 'Food'} search staged for the current map view."
-    elif re.search(r"\b(cool places?|things to do|views?|viewpoints?|scenic|overlook|vista|landmarks?|attractions?|sights?)\b", text):
+    elif re.search(r"\b(cool places?|things to do|views?|viewpoints?|scenic|overlook|vista|landmarks?|attractions?|sights?|parks?|monuments?|historic|visitor centers?|water access|swimming holes?)\b", text):
         action_type = "searchPlaces"
         query = _extract_place_query(command)
         category = "viewpoint" if re.search(r"\b(views?|viewpoints?|scenic|overlook|vista)\b", text) else "attraction"
@@ -2164,21 +2486,32 @@ def _build_extreme_map_action(command: str, context: dict, provider: str = "trai
     elif re.search(r"\b(select|choose|open|take me to)\b.*\b(first|second|third|1|2|3|result)\b|\b(first|second|third) result\b|\b(another|next one|next result|show another|open another)\b", text):
         visible_features = map_ctx.get("visible_map_features") if isinstance(map_ctx.get("visible_map_features"), list) else []
         current_results = map_ctx.get("current_results") if isinstance(map_ctx.get("current_results"), list) else []
-        action_type = "selectVisiblePlace" if visible_features and not current_results else "selectPlace"
+        if visible_features and not current_results and route_active and not _explicit_visible_reference(command):
+            action_type = "askForConfirmation"
+            args = {
+                "question": "I do not have a route result list yet. Do you want camps, trails, fuel, food, or a visible map label?",
+                "options": ["camps", "trails", "fuel", "food", "visible map label"],
+                "reason": "route_selection_without_result_list",
+            }
+            map_updates = {"needs_category": True, "options": args["options"]}
+            message = args["question"]
+        else:
+            action_type = "selectVisiblePlace" if visible_features and not current_results else "selectPlace"
         if re.search(r"\bthird\b|\b3\b", text):
             index = 2
         elif re.search(r"\bsecond\b|\b2\b|\banother\b|\bnext one\b|\bnext result\b|\bshow another\b|\bopen another\b", text):
             index = 1
         else:
             index = 0
-        args = _copilot_result_selection_args(visible_features if action_type == "selectVisiblePlace" else current_results, index)
-        for key, value in _visible_selection_args(command).items():
-            if key == "name" and args.get("result_id"):
-                continue
-            args[key] = value
-        map_updates = {"select_result_index": index}
-        selected_place = {"result_index": index}
-        message = "Selection staged from the current result list."
+        if action_type != "askForConfirmation":
+            args = _copilot_result_selection_args(visible_features if action_type == "selectVisiblePlace" else current_results, index)
+            for key, value in _visible_selection_args(command).items():
+                if key == "name" and args.get("result_id"):
+                    continue
+                args[key] = value
+            map_updates = {"select_result_index": index}
+            selected_place = {"result_index": index}
+            message = "Selection staged from the current result list."
     elif re.search(r"\b(open|select|choose)\b.*\b(hotel|motel|restaurant|bar|cafe|coffee|shop|store|museum|park|on the left|on the right|near the center|in the center)\b", text):
         action_type = "selectVisiblePlace"
         args = _visible_selection_args(command)
@@ -4935,7 +5268,7 @@ async def admin_place_photo_status(photo_id: int, body: dict, admin: dict = Depe
 @app.post("/api/analytics/event")
 async def analytics_event(body: AnalyticsEventRequest, user: dict | None = Depends(_optional_user)):
     event_type = re.sub(r"[^a-z0-9_.:-]+", "_", (body.event_type or "").strip().lower())[:80]
-    if event_type not in {"welcome_contest_seen", "welcome_contest_cta", "welcome_contest_cta_attributed"}:
+    if event_type not in {"welcome_contest_seen", "welcome_contest_cta", "welcome_contest_cta_attributed"} and not event_type.startswith("phase0_"):
         raise HTTPException(400, "Unsupported analytics event")
     clean_session = re.sub(r"[^a-zA-Z0-9_.:-]+", "", (body.session_id or "").strip())[:120]
     log_event(user["id"] if user else None, clean_session or None, event_type, body.event_data or {})
@@ -6827,12 +7160,17 @@ async def campsites_search(
         # Anonymous: treated as one-time per session via anon check
         if request:
             _anon_check(_client_ip(request), "search")
-    ridb, blm, active = await asyncio.gather(
+    international_tasks = _international_camp_tasks(lat, lng, radius, type_filters)
+    ridb, blm, active, *international_sources = await asyncio.gather(
         get_campsites_search(lat, lng, radius_miles=radius, type_filters=type_filters),
         get_blm_campsites(lat, lng, radius_miles=radius),
         get_active_campgrounds(lat, lng, radius_miles=radius, filters={"group_site": bool(type_filters and "group" in type_filters)}),
+        *international_tasks,
     )
-    return _merge_camp_sources(ridb, blm, active, type_filters=type_filters)[:80]
+    merged = _merge_camp_sources(ridb, blm, active, *international_sources, type_filters=type_filters)
+    if len(merged) < 8:
+        merged = _merge_camp_sources(merged, _explore_catalog_fallback_camps(lat, lng, max(radius, 75), limit=24), type_filters=type_filters)
+    return merged[:80]
 
 @app.get("/api/campsites/{facility_id}/detail")
 async def campsite_detail(facility_id: str):
@@ -7972,7 +8310,13 @@ def _dedupe_sort_alerts(alerts: list[dict]) -> list[dict]:
             continue
         seen.add(key)
         out.append(alert)
-    out.sort(key=lambda a: (_severity_rank(a), int(a.get("updated_at") or a.get("created_at") or 0)), reverse=True)
+    out.sort(
+        key=lambda a: (
+            -_severity_rank(a),
+            float(a.get("route_distance_m") if a.get("route_distance_m") is not None else 9e9),
+            -int(a.get("updated_at") or a.get("created_at") or 0),
+        )
+    )
     return out
 
 async def _provider_alerts_near(lat: float, lng: float, radius_deg: float) -> list[dict]:
@@ -9244,15 +9588,28 @@ class BugReportPayload(BaseModel):
     title: str
     description: str
     app_version: Optional[str] = ""
+    category: Optional[str] = "bug"
+    source_surface: Optional[str] = ""
+    screenshot_data: Optional[str] = None
+    screenshot_content_type: Optional[str] = "image/jpeg"
+    ai_context: Optional[dict] = None
 
 @app.post("/api/bugs")
 async def submit_bug(body: BugReportPayload, user: dict = Depends(_current_user)):
     if not body.title.strip() or not body.description.strip():
         raise HTTPException(400, "Title and description are required.")
+    category = str(body.category or "bug").strip().lower()
+    if category not in {"bug", "offensive"}:
+        raise HTTPException(400, "Invalid bug category.")
     bug_id = submit_bug_report(
         user_id=user["id"], username=user["username"],
         title=body.title.strip(), description=body.description.strip(),
-        app_version=body.app_version or ""
+        app_version=body.app_version or "",
+        category=category,
+        source_surface=str(body.source_surface or "").strip()[:40],
+        screenshot_data=(body.screenshot_data or "")[:4_000_000],
+        screenshot_content_type=str(body.screenshot_content_type or "image/jpeg")[:80],
+        ai_context=body.ai_context or None,
     )
     return {"bug_id": bug_id, "message": "Bug report received. If it's legit you'll earn credits — thank you!"}
 
@@ -9298,6 +9655,11 @@ def _camp_source_rank(camp: dict) -> int:
     if "blm" in source or "blm" in verified:
         return 1
     if "active" in source or "reserveamerica" in verified:
+        return 2
+    if any(v in source or v in verified for v in (
+        "nz_doc", "department of conservation", "australia_open_data",
+        "canada_open_data", "government open data", "open data",
+    )):
         return 2
     if "osm" in source or "openstreetmap" in verified:
         return 3
@@ -9483,6 +9845,9 @@ def _camp_from_live_place(place: dict) -> dict | None:
         "site_types": [land_type] if is_private_stay else (["RV"] if "rv" in tags else ["Tent", "Campground"]),
     }
 
+def _international_camp_tasks(lat: float, lng: float, radius: float, type_filters: list[str] | None) -> list:
+    return international_camp_tasks(lat, lng, radius, type_filters)
+
 async def _aggregate_nearby_camps(lat: float, lng: float, radius: float = 50, types: str = "") -> list[dict]:
     type_filters = [t.strip() for t in types.split(",") if t.strip()] if types else None
     private_stay_categories = _private_stay_categories_for_filters(type_filters)
@@ -9491,15 +9856,20 @@ async def _aggregate_nearby_camps(lat: float, lng: float, radius: float = 50, ty
         "rv": bool(type_filters and "rv" in type_filters),
         "tent": bool(type_filters and "tent" in type_filters),
     }
-    ridb, blm, osm, active, hosted_private = await asyncio.gather(
+    international_tasks = _international_camp_tasks(lat, lng, radius, type_filters)
+    ridb, blm, osm, active, hosted_private, *international_sources = await asyncio.gather(
         get_campsites_search(lat, lng, radius_miles=radius, type_filters=type_filters),
         get_blm_campsites(lat, lng, radius_miles=radius),
         get_osm_campsites(lat, lng, radius_m=int(min(radius, 60) * 1600)),
         get_active_campgrounds(lat, lng, radius_miles=radius, filters=active_filters),
         get_geoapify_places(lat, lng, radius_m=int(min(radius, 45) * 1609.344), categories=private_stay_categories, limit_per_category=12) if private_stay_categories else asyncio.sleep(0, result=[]),
+        *international_tasks,
     )
     hosted_camps = [_camp_from_live_place(place) for place in hosted_private if isinstance(place, dict)]
-    return _merge_camp_sources(ridb, blm, osm, active, [c for c in hosted_camps if c], type_filters=type_filters)[:160]
+    merged = _merge_camp_sources(ridb, blm, osm, active, [c for c in hosted_camps if c], *international_sources, type_filters=type_filters)
+    if len(merged) < 10:
+        merged = _merge_camp_sources(merged, _explore_catalog_fallback_camps(lat, lng, max(radius, 75), limit=32), type_filters=type_filters)
+    return merged[:160]
 
 
 @app.get("/api/nearby-camps")
@@ -9656,6 +10026,12 @@ def _camp_matches_filters(camp: dict, type_filters: list[str]) -> bool:
             return True
         if f in {"public", "blm", "usfs", "dispersed", "free"} and any(term in text for term in ("blm", "usfs", "national forest", "forest service", "public", "dispersed", "primitive", "free")):
             return True
+        if f in {"hut", "huts", "shelter", "refuge", "bothy", "alpine_hut", "wilderness_hut", "walk_in", "walk-in"} and any(term in text for term in ("hut", "shelter", "refuge", "bothy", "alpine hut", "wilderness hut", "walk in", "walk-in", "backcountry")):
+            return True
+        if f in {"trek", "trekking", "trail", "trails", "basecamp", "base_camp", "base camp"} and any(term in text for term in ("trek", "trekking", "trail", "base camp", "basecamp", "karakoram", "k2")):
+            return True
+        if f in {"lodging", "lodge", "guesthouse", "guest_house", "hostel", "chalet"} and any(term in text for term in ("lodging", "lodge", "guest house", "guesthouse", "hostel", "chalet", "trekking lodge")):
+            return True
         if f == "tent" and not any(term in text for term in ("rv resort", "koa", "hookup-only")):
             return True
         if f == "reservable" and any(term in text for term in ("reservable", "reservation", "recreation.gov", "state park", "nps", "national park")):
@@ -9672,6 +10048,9 @@ def _route_fit_label(route_distance: float) -> str:
     return "review"
 
 def _camp_source_confidence(camp: dict) -> str:
+    explicit = str(camp.get("source_confidence") or "").lower().strip()
+    if explicit in {"high", "medium", "low", "review", "mixed", "official"}:
+        return "high" if explicit == "official" else explicit
     source = f"{camp.get('source') or ''} {camp.get('verified_source') or ''}".lower()
     if any(term in source for term in ("ridb", "recreation.gov", "nps", "blm")):
         return "high"
@@ -9684,6 +10063,64 @@ def _camp_has_media(camp: dict) -> bool:
         return True
     photos = camp.get("photos") or camp.get("photo_candidates") or camp.get("images") or []
     return isinstance(photos, list) and any(bool(photo.get("url") if isinstance(photo, dict) else photo) for photo in photos)
+
+def _camp_overnight_style(camp: dict | None) -> str:
+    text = _camp_text(camp or {})
+    if any(term in text for term in ("dispersed", "primitive", "boondock", "public land", "blm", "usfs", "forest service", "free")):
+        return "dispersed"
+    if any(term in text for term in ("rv park", "rv resort", "koa", "hookup", "electric")):
+        return "rv"
+    if any(term in text for term in ("private stay", "farm stay", "ranch stay", "winery stay", "glamping", "private camp")):
+        return "private"
+    if any(term in text for term in ("recreation.gov", "ridb", "state park", "national park", "county park", "campground")):
+        return "developed"
+    return "unknown"
+
+def _camp_name_needs_review(name: str | None) -> bool:
+    clean = re.sub(r"\s+", " ", str(name or "")).strip().lower()
+    if not clean:
+        return True
+    return clean in {"camp", "campground", "campsite", "site", "rv park", "park", "overnight option"}
+
+def _camp_display_name(camp: dict | None, label: str) -> str:
+    name = re.sub(r"\s+", " ", str((camp or {}).get("name") or "")).strip()
+    if _camp_name_needs_review(name):
+        style = _camp_overnight_style(camp)
+        if style == "dispersed":
+            return f"{label} dispersed review area"
+        if style == "rv":
+            return f"{label} RV review area"
+        if style == "private":
+            return f"{label} private stay review area"
+        return f"{label} review area"
+    return name
+
+def _route_window_fit_notes(camp: dict | None, require_photos: bool = False) -> list[str]:
+    if not isinstance(camp, dict):
+        return []
+    notes: list[str] = []
+    route_fit = str(camp.get("route_fit") or "").strip().replace("_", " ")
+    route_distance = camp.get("route_distance_mi")
+    endpoint_distance = camp.get("endpoint_distance_mi")
+    if route_fit:
+        notes.append(route_fit)
+    if isinstance(route_distance, (int, float)):
+        notes.append(f"{float(route_distance):.1f} mi off route")
+    elif isinstance(endpoint_distance, (int, float)):
+        notes.append(f"{float(endpoint_distance):.1f} mi from the overnight window")
+    if require_photos:
+        notes.append("photo-backed" if _camp_has_media(camp) else "no photos yet")
+    if camp.get("reservable"):
+        notes.append("reservable")
+    source_confidence = str(camp.get("source_confidence") or "").strip().lower()
+    if source_confidence in {"high", "medium"}:
+        notes.append(f"{source_confidence} source confidence")
+    deduped: list[str] = []
+    for note in notes:
+        clean = re.sub(r"\s+", " ", str(note or "")).strip()
+        if clean and clean not in deduped:
+            deduped.append(clean)
+    return deduped[:4]
 
 async def _select_camp_for_window(
     window: RouteCampWindow,
@@ -9787,17 +10224,34 @@ async def _select_camp_for_window(
         best_route_distance = float(best.get("route_distance_mi") if best.get("route_distance_mi") is not None else 999) if best else 999
         best_endpoint_distance = float(best.get("endpoint_distance_mi") if best.get("endpoint_distance_mi") is not None else 999) if best else 999
         preferred_best = bool(best and (best.get("preference_match") or not type_filters))
-        strong = bool(best and best_route_distance <= 28 and best_endpoint_distance <= 55 and (preferred_best or str(camp_preference or "").lower() == "any"))
+        display_name = _camp_display_name(best, label)
+        display_name_needs_review = _camp_name_needs_review(display_name) or display_name.lower().endswith("review area")
+        strong = bool(
+            best
+            and best_route_distance <= 28
+            and best_endpoint_distance <= 55
+            and (preferred_best or str(camp_preference or "").lower() == "any")
+            and not display_name_needs_review
+        )
         confidence = "strong" if strong else "review" if best else "missing"
         coverage_status = "ready" if strong else "review" if best else "sparse"
+        overnight_style = _camp_overnight_style(best)
+        fit_notes = _route_window_fit_notes(best, require_photos=require_photos)
         reason = (
-            "Strong overnight option found."
+            f"{display_name} fits this overnight window with a short detour."
             if strong else
-            "No photo-backed overnight option matched this window. Pick a camp manually or turn off Photos only."
+            f"{display_name} is the best photo-backed overnight option here."
             if require_photos and not best else
-            "Showing the best legal overnight option; review fit before navigation."
+            f"{display_name} is the best legal overnight option here. Review the fit before navigation."
             if best else
-            "No overnight option found near this day yet. Keep it as a review stop or choose a camp manually."
+            f"No overnight is locked for {label.lower()} yet. Keep it as a review stop or choose a camp manually."
+        )
+        reason_short = (
+            f"Locked {display_name}."
+            if strong else
+            f"Review {display_name} before you commit."
+            if best else
+            f"{label} still needs an overnight."
         )
         response = {
             "day": window.day,
@@ -9809,11 +10263,17 @@ async def _select_camp_for_window(
             "camp": best,
             "selected": best,
             "candidates": candidates,
-            "fallback": None if best else {"lat": target["lat"], "lng": target["lng"], "name": f"{label} overnight area", "description": "Review this day. Choose an overnight stop before navigation."},
+            "fallback": None if best else {"lat": target["lat"], "lng": target["lng"], "name": f"{label} review area", "description": "Review this day. Choose an overnight stop before navigation."},
             "strong": strong,
             "confidence": confidence,
             "coverage_status": coverage_status,
             "reason": reason,
+            "reason_short": reason_short,
+            "display_name": display_name,
+            "overnight_kind": "camp" if best else "review",
+            "overnight_style": overnight_style if best else "unknown",
+            "fallback_label": f"{label} review area",
+            "fit_notes": fit_notes,
             "search_radius_mi": max((p["radius_mi"] for p in search_passes), default=round(base_radius, 1)),
             "search_passes": search_passes,
             "found": len(candidates),
@@ -9830,11 +10290,17 @@ async def _select_camp_for_window(
             "camp": None,
             "selected": None,
             "candidates": [],
-            "fallback": {"lat": target["lat"], "lng": target["lng"], "name": f"{label} overnight area", "description": "Review this day. Choose an overnight stop before navigation."},
+            "fallback": {"lat": target["lat"], "lng": target["lng"], "name": f"{label} review area", "description": "Review this day. Choose an overnight stop before navigation."},
             "strong": False,
             "confidence": "missing",
             "coverage_status": "sparse",
             "reason": "Overnight search failed for this day.",
+            "reason_short": f"{label} still needs an overnight.",
+            "display_name": f"{label} review area",
+            "overnight_kind": "review",
+            "overnight_style": "unknown",
+            "fallback_label": f"{label} review area",
+            "fit_notes": [],
             "search_radius_mi": round(base_radius, 1),
             "search_passes": [],
             "found": 0,
@@ -11594,6 +12060,10 @@ async def nearby_places(
     balanced = _balanced_nearby_places(merged, discovery_categories, dist_mi, limit=80)
     if private_stay_only:
         balanced = [item for item in balanced if _private_stay_place_type(item) in private_stay_allowed_types]
+    if not private_stay_only and len(balanced) < 8:
+        fallback_radius = max(float(radius), 75.0 if discovery_categories.intersection({"camp", "camping", "park", "historic", "attraction", "tourism", "trailhead", "viewpoint"}) else float(radius))
+        fallback = _explore_catalog_fallback_places(lat, lng, fallback_radius, discovery_categories, limit=32)
+        balanced = _merge_place_fallbacks(balanced, fallback, limit=80, min_results=8)
     for item in balanced:
         strip_lightweight_google_rich_fields(item)
         if _is_official_free_place(item):
@@ -13573,10 +14043,18 @@ async def explore_places(
     lat: float | None = None,
     lng: float | None = None,
     mode: str = "featured",
+    q: str = "",
+    category: str = "",
     limit: int = 60,
 ):
     catalog = _load_explore_catalog()
     places = list(catalog.get("places") or [])
+    query_terms = [t for t in re.split(r"\s+", str(q or "").lower().strip()) if len(t) >= 2]
+    if query_terms:
+        places = [place for place in places if all(term in _explore_query_text(place) for term in query_terms)]
+    if category:
+        requested = {_normalize_place_category(category)}
+        places = [place for place in places if _explore_place_matches_categories(_catalog_place_category(place.get("summary") or {}), requested)]
     if lat is not None and lng is not None and mode in {"nearby", "trip"}:
         ranked = []
         for place in places:

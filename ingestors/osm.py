@@ -379,6 +379,11 @@ def _normalize_osm_camp(el: dict) -> dict | None:
         "ada": _tag(el, "wheelchair", "") in ("yes", "designated"),
         "source": "osm",
         "verified_source": "OpenStreetMap",
+        "source_badge": "OSM",
+        "source_confidence": "medium",
+        "source_freshness": "Community-mapped OpenStreetMap camp data cached by Trailhead; verify current access, legality, fees, and conditions locally.",
+        "source_tier": "free_community",
+        "link_label": "Map source",
         "_osm_type": el.get("type") or "node",
         "_osm_tags": tags_raw,
     }

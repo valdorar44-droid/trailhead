@@ -2,10 +2,10 @@ module.exports = {
   expo: {
     name: 'Trailhead',
     slug: 'trailhead',
-    version: '1.0.4',
-    runtimeVersion: 'native-20260607-1',
+    version: '1.0.5',
+    runtimeVersion: 'native-20260614-sdk54-1',
+    newArchEnabled: true,
     updates: { url: 'https://u.expo.dev/92c016d2-6e63-480e-a483-a6898d7e77d5' },
-    orientation: 'portrait',
     icon: './assets/icon.png',
     scheme: 'trailhead',
     userInterfaceStyle: 'dark',
@@ -47,14 +47,19 @@ module.exports = {
       permissions: [
         'android.permission.ACCESS_FINE_LOCATION',
         'android.permission.ACCESS_COARSE_LOCATION',
-        'android.permission.ACCESS_BACKGROUND_LOCATION',
-        'android.permission.FOREGROUND_SERVICE',
-        'android.permission.FOREGROUND_SERVICE_LOCATION',
         'android.permission.MODIFY_AUDIO_SETTINGS',
-        'android.permission.RECEIVE_BOOT_COMPLETED',
         'android.permission.VIBRATE',
         'android.permission.RECORD_AUDIO',
         'com.android.vending.BILLING',
+      ],
+      blockedPermissions: [
+        'android.permission.ACCESS_BACKGROUND_LOCATION',
+        'android.permission.FOREGROUND_SERVICE',
+        'android.permission.FOREGROUND_SERVICE_LOCATION',
+        'android.permission.RECEIVE_BOOT_COMPLETED',
+        'android.permission.READ_EXTERNAL_STORAGE',
+        'android.permission.WRITE_EXTERNAL_STORAGE',
+        'android.permission.SYSTEM_ALERT_WINDOW',
       ],
     },
     plugins: [
@@ -64,8 +69,8 @@ module.exports = {
         {
           locationAlwaysAndWhenInUsePermission: 'Trailhead uses location to auto-play audio guides as you drive near landmarks.',
           locationAlwaysPermission: 'Background location lets Trailhead narrate landmarks while your phone is in your pocket.',
-          isAndroidBackgroundLocationEnabled: true,
-          isAndroidForegroundServiceEnabled: true,
+          isAndroidBackgroundLocationEnabled: false,
+          isAndroidForegroundServiceEnabled: false,
         },
       ],
       [

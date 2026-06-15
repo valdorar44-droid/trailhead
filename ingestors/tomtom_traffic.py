@@ -13,6 +13,7 @@ from config.settings import settings
 TOMTOM_INCIDENTS_URL = "https://api.tomtom.com/traffic/services/5/incidentDetails"
 TRAFFIC_CACHE_TTL_SECONDS = 60
 MAX_BBOX_SPAN_DEG = 1.25
+EARTH_RADIUS_M = 6_371_000.0
 
 log = logging.getLogger(__name__)
 _cache: dict[str, tuple[float, list[dict]]] = {}
@@ -223,6 +224,88 @@ def _bbox_key(bbox: tuple[float, float, float, float]) -> str:
     return ",".join(f"{v:.2f}" for v in bbox)
 
 
+def _project_xy_m(lat: float, lng: float, ref_lat: float) -> tuple[float, float]:
+    ref_cos = math.cos(math.radians(ref_lat))
+    return (
+        math.radians(lng) * EARTH_RADIUS_M * ref_cos,
+        math.radians(lat) * EARTH_RADIUS_M,
+    )
+
+
+def _point_distance_m(a_lat: float, a_lng: float, b_lat: float, b_lng: float, ref_lat: float) -> float:
+    ax, ay = _project_xy_m(a_lat, a_lng, ref_lat)
+    bx, by = _project_xy_m(b_lat, b_lng, ref_lat)
+    return math.hypot(ax - bx, ay - by)
+
+
+def _point_segment_distance_m(
+    point_lat: float,
+    point_lng: float,
+    start_lat: float,
+    start_lng: float,
+    end_lat: float,
+    end_lng: float,
+    ref_lat: float,
+) -> tuple[float, float]:
+    px, py = _project_xy_m(point_lat, point_lng, ref_lat)
+    ax, ay = _project_xy_m(start_lat, start_lng, ref_lat)
+    bx, by = _project_xy_m(end_lat, end_lng, ref_lat)
+    dx = bx - ax
+    dy = by - ay
+    if abs(dx) < 1e-9 and abs(dy) < 1e-9:
+        return math.hypot(px - ax, py - ay), 0.0
+    t = ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)
+    t = max(0.0, min(1.0, t))
+    closest_x = ax + t * dx
+    closest_y = ay + t * dy
+    return math.hypot(px - closest_x, py - closest_y), t
+
+
+def _alert_points(alert: dict) -> list[tuple[float, float]]:
+    points: list[tuple[float, float]] = []
+    for lng, lat in _coords_from_geometry(alert.get("geometry")):
+        points.append((lat, lng))
+    if not points:
+        try:
+            points.append((float(alert["lat"]), float(alert["lng"])))
+        except Exception:
+            return []
+    return points
+
+
+def _route_match_radius_m(alert: dict, default_radius_m: float) -> float:
+    alert_type = str(alert.get("type") or "").lower()
+    severity = str(alert.get("severity") or "").lower()
+    if alert_type == "traffic":
+        return 900.0 if severity in {"low", "moderate"} else 1_200.0
+    if alert_type in {"closure", "road_condition", "hazard"}:
+        return max(default_radius_m, 1_200.0)
+    return default_radius_m
+
+
+def _nearest_route_match(point_lat: float, point_lng: float, waypoints: list[dict]) -> tuple[float, Any]:
+    valid = [(float(wp["lat"]), float(wp["lng"]), wp.get("day")) for wp in waypoints if wp.get("lat") and wp.get("lng")]
+    if not valid:
+        return float("inf"), None
+    ref_lat = sum(lat for lat, _, _ in valid) / len(valid)
+    if len(valid) == 1:
+        lat, lng, day = valid[0]
+        return _point_distance_m(point_lat, point_lng, lat, lng, ref_lat), day
+    best_distance = float("inf")
+    best_day = None
+    for idx in range(len(valid) - 1):
+        start_lat, start_lng, start_day = valid[idx]
+        end_lat, end_lng, end_day = valid[idx + 1]
+        distance_m, t = _point_segment_distance_m(point_lat, point_lng, start_lat, start_lng, end_lat, end_lng, ref_lat)
+        if distance_m < best_distance:
+            best_distance = distance_m
+            if t < 0.5:
+                best_day = start_day if start_day is not None else end_day
+            else:
+                best_day = end_day if end_day is not None else start_day
+    return best_distance, best_day
+
+
 def bbox_for_center(lat: float, lng: float, radius_deg: float) -> tuple[float, float, float, float]:
     radius = max(0.02, min(float(radius_deg), MAX_BBOX_SPAN_DEG / 2))
     return (lng - radius, lat - radius, lng + radius, lat + radius)
@@ -301,4 +384,35 @@ def filter_alerts_near_waypoints(alerts: list[dict], waypoints: list[dict], radi
             copied = dict(alert)
             copied["waypoint_day"] = best_day
             out.append(copied)
+    return out
+
+
+def filter_tomtom_alerts_along_route(
+    alerts: list[dict],
+    waypoints: list[dict],
+    default_radius_m: float = 1_200.0,
+) -> list[dict]:
+    valid = [wp for wp in waypoints if wp.get("lat") and wp.get("lng")]
+    if not valid:
+        return []
+    out: list[dict] = []
+    for alert in alerts:
+        points = _alert_points(alert)
+        if not points:
+            continue
+        best_distance = float("inf")
+        best_day = None
+        for point_lat, point_lng in points:
+            distance_m, day = _nearest_route_match(point_lat, point_lng, valid)
+            if distance_m < best_distance:
+                best_distance = distance_m
+                best_day = day
+        if best_day is None:
+            continue
+        if best_distance > _route_match_radius_m(alert, default_radius_m):
+            continue
+        copied = dict(alert)
+        copied["waypoint_day"] = best_day
+        copied["route_distance_m"] = round(best_distance, 1)
+        out.append(copied)
     return out

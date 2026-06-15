@@ -10026,7 +10026,7 @@ def _camp_matches_filters(camp: dict, type_filters: list[str]) -> bool:
             return True
         if f in {"public", "blm", "usfs", "dispersed", "free"} and any(term in text for term in ("blm", "usfs", "national forest", "forest service", "public", "dispersed", "primitive", "free")):
             return True
-        if f in {"hut", "huts", "shelter", "refuge", "bothy", "alpine_hut", "wilderness_hut", "walk_in", "walk-in"} and any(term in text for term in ("hut", "shelter", "refuge", "bothy", "alpine hut", "wilderness hut", "walk in", "walk-in", "backcountry")):
+        if f in {"hut", "huts", "shelter", "refuge", "bothy", "alpine_hut", "wilderness_hut", "walk_in", "walk-in"} and any(term in text for term in ("hut", "shelter", "refuge", "bothy", "alpine hut", "wilderness hut", "walk in", "walk-in", "backcountry", "trekking lodge", "guest house", "guesthouse")):
             return True
         if f in {"trek", "trekking", "trail", "trails", "basecamp", "base_camp", "base camp"} and any(term in text for term in ("trek", "trekking", "trail", "base camp", "basecamp", "karakoram", "k2")):
             return True

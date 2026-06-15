@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import time
 from pathlib import Path
@@ -34,7 +35,9 @@ PACK_DEFINITIONS = {
         "categories": [
             "fuel", "propane", "water", "dump", "shower", "laundromat",
             "lodging", "food", "grocery", "mechanic", "parking", "attraction",
-            "trailhead", "viewpoint", "peak", "hot_spring",
+            "trailhead", "viewpoint", "peak", "hot_spring", "camp", "medical",
+            "hardware", "parts", "wifi", "checkpost", "settlement", "pass",
+            "glacier", "bridge",
         ],
     },
     "services": {
@@ -1201,6 +1204,116 @@ async def _build_pakistan_context_pack(pack_id: str) -> Path:
     return path
 
 
+async def _build_pakistan_essentials_pack() -> Path:
+    region = "pk"
+    pack_id = "essentials"
+    key = f"{region}:{pack_id}"
+    anchors = PAKISTAN_CAMP_ANCHORS
+    _status[key] = {
+        "status": "building",
+        "progress": f"0/{len(anchors)} corridors",
+        "error": None,
+        "size_bytes": 0,
+        "failed_cells": [],
+        "failed_cell_count": 0,
+    }
+    allowed_categories = set(PACK_DEFINITIONS[pack_id]["categories"])
+    points: list[dict] = []
+    failed_cells: list[dict] = []
+    seen: set[str] = set()
+
+    def add_point(point: dict) -> None:
+        category = str(point.get("type") or point.get("category") or "")
+        if category not in allowed_categories:
+            return
+        point_key = point.get("id") or f"{category}:{point.get('lat'):.4f}:{point.get('lng'):.4f}:{point.get('name')}"
+        if point_key in seen:
+            return
+        seen.add(point_key)
+        points.append(point)
+
+    def add_context(items: list[dict], *, default_type: str = "poi") -> None:
+        for item in items:
+            normalized = _normalize_pakistan_place_source(item, default_type=default_type)
+            if normalized:
+                add_point(normalized)
+
+    def add_stays(items: list[dict]) -> None:
+        for item in items:
+            normalized = _normalize_camp_source(item)
+            if not normalized:
+                continue
+            normalized["source_freshness"] = item.get("source_freshness") or "Pakistan mountain stay data packaged by Trailhead; verify permits, access, guide requirements, safety, and current local conditions."
+            normalized["tags"] = sorted(set([*(normalized.get("tags") or []), "pakistan", "trekking", "essential"]))
+            normalized = _with_pakistan_search_terms(normalized)
+            add_point(normalized)
+
+    completed = 0
+    live_enrichment = os.environ.get("TRAILHEAD_PK_LIVE_ESSENTIALS", "").strip().lower() in {"1", "true", "yes"}
+    for label, lat, lng in anchors:
+        try:
+            add_stays(get_pakistan_curated_stays(lat, lng, radius_miles=85))
+            add_context(get_pakistan_curated_places(lat, lng, radius_miles=95))
+            add_context(get_pakistan_curated_services(lat, lng, radius_miles=95))
+
+            if live_enrichment:
+                trek_live = await asyncio.wait_for(_fetch_pakistan_trek_cell(_anchor_cell(lat, lng, radius_deg=0.58)), timeout=42)
+                add_context(trek_live.get("points") or [])
+                if trek_live.get("failed_cell"):
+                    failed_cells.append({"label": label, **trek_live["failed_cell"]})
+
+                service_live = await asyncio.wait_for(_fetch_bbox_cell(_anchor_cell(lat, lng, radius_deg=0.3)), timeout=32)
+                add_context(service_live.get("points") or [])
+                if service_live.get("failed_cell"):
+                    failed_cells.append({"label": label, **service_live["failed_cell"]})
+
+                try:
+                    add_stays(await asyncio.wait_for(get_osm_outdoor_stays(lat, lng, radius_m=85_000, profile="pakistan_karakoram"), timeout=28))
+                except Exception as exc:
+                    failed_cells.append({"label": label, "lat": lat, "lng": lng, "error": f"stay search {type(exc).__name__}: {exc}"})
+        except Exception as exc:
+            failed_cells.append({"label": label, "lat": lat, "lng": lng, "error": f"{type(exc).__name__}: {exc}"})
+        completed += 1
+        _status[key]["progress"] = f"{completed}/{len(anchors)} corridors"
+        _status[key]["failed_cells"] = failed_cells
+        _status[key]["failed_cell_count"] = len(failed_cells)
+
+    priority = {
+        "fuel": 0, "medical": 1, "food": 2, "grocery": 3, "lodging": 4,
+        "camp": 5, "water": 6, "checkpost": 7, "trailhead": 8, "bridge": 9,
+        "pass": 10, "glacier": 11, "settlement": 12, "viewpoint": 13,
+        "peak": 14, "attraction": 15, "parking": 16,
+    }
+    points.sort(key=lambda p: (priority.get(str(p.get("type")), 50), str(p.get("name", "")), float(p.get("lat") or 0), float(p.get("lng") or 0)))
+    if not points:
+        raise RuntimeError("pk:essentials returned 0 places")
+
+    payload = {
+        "schema_version": 1,
+        "pack_id": "pk-essentials",
+        "region_id": "pk",
+        "region_name": "Pakistan",
+        "name": "Pakistan Essentials",
+        "generated_at": int(time.time()),
+        "source": "Trailhead curated Karakoram essentials" + (" + OpenStreetMap live enrichment" if live_enrichment else ""),
+        "categories": PACK_DEFINITIONS[pack_id]["categories"],
+        "failed_cells": failed_cells,
+        "failed_cell_count": len(failed_cells),
+        "points": points,
+    }
+    path = pack_path(region, pack_id)
+    path.write_text(json.dumps(payload, separators=(",", ":")))
+    _status[key].update(
+        status="built",
+        progress=f"built · {len(points)} places" + (f" · {len(failed_cells)} failed corridors" if failed_cells else ""),
+        size_bytes=path.stat().st_size,
+        point_count=len(points),
+        failed_cells=failed_cells,
+        failed_cell_count=len(failed_cells),
+    )
+    return path
+
+
 def _water_subtype_from_text(*values: object) -> str:
     text = " ".join(str(v or "").lower() for v in values)
     if re.search(r"\b(boat\s*ramp|launch\s*ramp|boat launch|slipway)\b", text):
@@ -1348,6 +1461,8 @@ async def build_region_pack(region: str, pack_id: str = "essentials") -> Path | 
     pack_id = _pack_id(pack_id)
     if pack_id not in PACK_DEFINITIONS:
         raise ValueError(f"Unknown place pack: {pack_id}")
+    if region == "pk" and pack_id == "essentials":
+        return await _build_pakistan_essentials_pack()
     if region == "pk" and pack_id == "camps":
         return await _build_pakistan_camp_pack()
     if region == "pk" and pack_id in {"trek_places", "services"}:

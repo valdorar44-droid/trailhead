@@ -139,7 +139,7 @@ export const ROUTING_PACK_BYTES: Record<string, number> = {
   canada: 1828741120,
   mexico: 1835325440,
   fi: 450000000,
-  pk: 350000000,
+  pk: 531517440,
 };
 
 export const ROUTING_REGIONS = Object.fromEntries(

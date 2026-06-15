@@ -54,6 +54,21 @@ PAKISTAN_KARAKORAM_PLACES: tuple[dict, ...] = (
     {"name": "Attabad Lake", "lat": 36.3450, "lng": 74.8670, "type": "water", "subtype": "lake", "tags": ["attabad", "jheel", "lake", "hunza"]},
     {"name": "Skardu Support Area", "lat": 35.2971, "lng": 75.6333, "type": "settlement", "subtype": "support_town", "tags": ["skardu", "fuel", "food", "lodging", "permits"]},
     {"name": "Karimabad Support Area", "lat": 36.3167, "lng": 74.6500, "type": "settlement", "subtype": "support_town", "tags": ["karimabad", "hunza", "food", "lodging"]},
+    {"name": "Gilgit Support Area", "lat": 35.9208, "lng": 74.3084, "type": "settlement", "subtype": "support_town", "tags": ["gilgit", "fuel", "medical", "supplies", "kkh"]},
+    {"name": "Chilas Support Area", "lat": 35.4213, "lng": 74.0969, "type": "settlement", "subtype": "support_town", "tags": ["chilas", "fuel", "food", "kkh"]},
+    {"name": "Jaglot Junction", "lat": 35.6764, "lng": 74.6296, "type": "settlement", "subtype": "road_junction", "tags": ["jaglot", "kkh", "skardu road", "fuel"]},
+    {"name": "Raikot Bridge Staging Area", "lat": 35.4162, "lng": 74.5890, "type": "trailhead", "subtype": "jeep_track_staging", "tags": ["raikot", "fairy meadows", "nanga parbat", "jeep track"]},
+    {"name": "Shigar Support Area", "lat": 35.4267, "lng": 75.7342, "type": "settlement", "subtype": "support_town", "tags": ["shigar", "skardu", "food", "lodging"]},
+    {"name": "Khaplu Support Area", "lat": 35.1646, "lng": 76.3433, "type": "settlement", "subtype": "support_town", "tags": ["khaplu", "hushe", "food", "lodging"]},
+    {"name": "Deosai Plains Access Area", "lat": 35.0300, "lng": 75.4100, "type": "attraction", "subtype": "high_plateau", "tags": ["deosai", "seasonal", "high altitude", "road check"]},
+    {"name": "Satpara Lake", "lat": 35.2283, "lng": 75.6318, "type": "water", "subtype": "lake", "tags": ["satpara", "jheel", "skardu", "water"]},
+    {"name": "Shigar Fort Area", "lat": 35.4260, "lng": 75.7355, "type": "attraction", "subtype": "heritage", "tags": ["shigar", "fort", "heritage", "lodging"]},
+    {"name": "Katpana Desert View Area", "lat": 35.3090, "lng": 75.5455, "type": "viewpoint", "subtype": "scenic_area", "tags": ["katpana", "skardu", "cold desert"]},
+    {"name": "Hopper Valley / Nagar Staging Area", "lat": 36.2078, "lng": 74.7725, "type": "trailhead", "subtype": "trek_start", "tags": ["hopper", "nagar", "glacier", "hunza"]},
+    {"name": "Minapin Rakaposhi Staging Area", "lat": 36.1682, "lng": 74.4889, "type": "trailhead", "subtype": "trek_start", "tags": ["minapin", "rakaposhi", "base camp"]},
+    {"name": "Shimshal Staging Area", "lat": 36.4264, "lng": 75.3387, "type": "trailhead", "subtype": "remote_valley", "tags": ["shimshal", "passu", "remote road", "trekking"]},
+    {"name": "Khunjerab Pass", "lat": 36.8497, "lng": 75.4306, "type": "pass", "subtype": "border_pass", "tags": ["khunjerab", "pass", "border", "high altitude"]},
+    {"name": "Sost Support Area", "lat": 36.7100, "lng": 74.8570, "type": "settlement", "subtype": "border_support_town", "tags": ["sost", "fuel", "food", "customs", "khunjerab"]},
 )
 
 PAKISTAN_KARAKORAM_SERVICES: tuple[dict, ...] = (
@@ -65,6 +80,16 @@ PAKISTAN_KARAKORAM_SERVICES: tuple[dict, ...] = (
     {"name": "Passu Support Area", "lat": 36.4828, "lng": 74.8825, "type": "lodging", "subtype": "guest_house_area", "tags": ["passu", "guest house", "food", "hunza"]},
     {"name": "Askole Checkpost / Staging Area", "lat": 35.6806, "lng": 75.8178, "type": "checkpost", "subtype": "staging_area", "tags": ["askole", "checkpost", "porter staging", "permits"]},
     {"name": "Hushe Staging Area", "lat": 35.4519, "lng": 76.3582, "type": "lodging", "subtype": "guest_house_area", "tags": ["hushe", "guest house", "staging"]},
+    {"name": "Gilgit Fuel and Supply Area", "lat": 35.9208, "lng": 74.3084, "type": "fuel", "subtype": "support_area", "tags": ["gilgit", "fuel", "supplies", "kkh"]},
+    {"name": "Gilgit Medical Area", "lat": 35.9220, "lng": 74.3092, "type": "medical", "subtype": "hospital_area", "tags": ["gilgit", "hospital", "clinic", "medical"]},
+    {"name": "Chilas Fuel and Food Area", "lat": 35.4213, "lng": 74.0969, "type": "fuel", "subtype": "support_area", "tags": ["chilas", "fuel", "food", "kkh"]},
+    {"name": "Jaglot Fuel / Junction Area", "lat": 35.6764, "lng": 74.6296, "type": "fuel", "subtype": "road_junction", "tags": ["jaglot", "fuel", "skardu road", "kkh"]},
+    {"name": "Shigar Food and Lodging Area", "lat": 35.4267, "lng": 75.7342, "type": "food", "subtype": "bazaar", "tags": ["shigar", "food", "lodging", "skardu"]},
+    {"name": "Khaplu Food and Lodging Area", "lat": 35.1646, "lng": 76.3433, "type": "food", "subtype": "bazaar", "tags": ["khaplu", "food", "lodging", "hushe"]},
+    {"name": "Aliabad Clinic Area", "lat": 36.3075, "lng": 74.6161, "type": "medical", "subtype": "clinic_area", "tags": ["aliabad", "hunza", "clinic", "medical"]},
+    {"name": "Sost Fuel and Border Support Area", "lat": 36.7100, "lng": 74.8570, "type": "fuel", "subtype": "border_support", "tags": ["sost", "fuel", "customs", "khunjerab"]},
+    {"name": "Khunjerab Checkpost Area", "lat": 36.8497, "lng": 75.4306, "type": "checkpost", "subtype": "border_pass", "tags": ["khunjerab", "checkpost", "border", "high altitude"]},
+    {"name": "Raikot Bridge Jeep Staging Area", "lat": 35.4162, "lng": 74.5890, "type": "parking", "subtype": "jeep_track_staging", "tags": ["raikot", "fairy meadows", "parking", "jeep"]},
 )
 
 

@@ -176,6 +176,14 @@ Notes:
   - The web export warning is from `react-native-webrtc@124.0.7` importing `event-target-shim/index` while its pinned `event-target-shim@6.0.2` only exports the package root. Expo export still completes, so leave this as a dependency warning unless doing a native/dependency pass.
   - OTA still needs to be published with explicit `--message` flags because the `npm run ota` package script previously failed in non-interactive mode.
 
+OTA follow-up:
+
+- Source commits: `b671727 Fix Explore phone web audit` and `28aa26f Resolve Explore OTA preflight notes`.
+- Published with explicit message `Fix Explore phone web audit`.
+- Production update group: `008c96d8-8fb8-479e-b85b-b4614d91cc2f`.
+- Preview update group: `52519bef-0347-4a7e-bc34-63be30abc0c7`.
+- Runtime version: `native-20260614-sdk54-1`.
+
 ## Current Design Direction
 
 - The user wants a broader premium redesign direction because the map feels confusing and some pages are inconsistent.

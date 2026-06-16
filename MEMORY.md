@@ -2780,12 +2780,17 @@ OTA:
 
 - Source checkpoint commit:
   - `2004d57 Redesign Explore discovery UI`
-- Attempted `cd mobile && npm run ota` after the clean commit.
-- OTA did not upload. EAS failed immediately with:
+- First attempted `cd mobile && npm run ota` after the clean commit.
+- That package-script OTA did not upload. EAS failed immediately with:
   - `Must supply --message or use --auto when in non-interactive mode and VCS is available`
-- The package script already invokes:
+- The package script invokes:
   - `eas update --channel production --auto && eas update --channel preview --auto`
-- Per stop-on-failure instruction, no alternate EAS command was attempted in this pass.
+- Retried with explicit EAS messages after user approval:
+  - `npx eas update --channel production --message "Redesign Explore discovery UI"` published.
+  - Production update group: `d0cf5460-0696-4905-bacf-c6e25a166133`
+  - `npx eas update --channel preview --message "Redesign Explore discovery UI"` published.
+  - Preview update group: `243f15e3-76d6-44c1-9399-967ef2ab992a`
+  - Runtime version: `native-20260614-sdk54-1`
 
 Follow-up:
 

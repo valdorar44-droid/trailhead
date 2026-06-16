@@ -189,7 +189,11 @@ interface AppState {
   activeTripFromCache: boolean;
   pendingSavedTrailId: string | null;
   pendingNavigatePlace: { lat: number; lng: number; name: string } | null;
-  pendingMapSelection: { kind: 'camp'; camp: CampsitePin } | { kind: 'place'; place: SavedPlace } | null;
+  pendingMapSelection:
+    | { kind: 'camp'; camp: CampsitePin }
+    | { kind: 'place'; place: SavedPlace }
+    | { kind: 'trail'; trail: SavedPlace }
+    | null;
   pendingStartCopilotVoice: boolean;
   pendingOpenOfflineModal: boolean;
   tabBarHidden: boolean;

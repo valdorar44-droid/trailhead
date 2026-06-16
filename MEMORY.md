@@ -136,6 +136,18 @@ Deploy note:
 
 User asked to audit the Explore web app at a 6.5-6.9 inch phone reference size and clean up the Yosemite-heavy/cut-off/dev-ish wording.
 
+Follow-up trail expansion checkpoint:
+
+- User liked the Yosemite trail-card treatment and wants the app closer to AllTrails over time.
+- Implemented the first OTA-safe curated expansion path:
+  - Existing Explore trail-area records can now be upgraded by id/title/state with curated `trails` arrays instead of staying generic catalog cards.
+  - Added Yosemite-style rich trail packs for Zion Canyon, Grand Canyon corridor, Glacier high country, Rocky Mountain alpine, Grand Teton, Great Smoky Mountains, and Acadia.
+  - These seven new areas add 28 individual trail cards with distance, route type, elevation gain, time, difficulty, access/safety notes, coordinates, source URLs, tags, highlights, and map/route actions.
+  - The map handoff now supports a `trail` pending selection. Opening an individual Explore trail on the map calls the existing native `highlightTrail(lat, lng, name)` flow so the loaded trail/path layer is highlighted instead of only centering a generic pin.
+- Follow-up direction:
+  - Fill the remaining generic trail catalog areas next: Olympic, Mount Rainier, Shenandoah, Arches, Bryce Canyon, Canyonlands, Joshua Tree, Sequoia, Death Valley, North Cascades, Big Bend, and Redwood.
+  - Longer term, move curated trail packs into the backend Explore/catalog build so mobile is not carrying all trail editorial data.
+
 Implemented OTA-safe mobile/web changes:
 
 - Installed missing web dependency `@lottiefiles/dotlottie-react` so Expo web can bundle `lottie-react-native`.

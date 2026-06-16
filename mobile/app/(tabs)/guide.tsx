@@ -697,8 +697,8 @@ export default function GuideScreen() {
     const lng = trail.lng ?? place.summary.lng;
     if (lat == null || lng == null) return;
     setPendingMapSelection({
-      kind: 'place',
-      place: {
+      kind: 'trail',
+      trail: {
         id: `explore-trail:${trail.id}`,
         name: trail.title,
         lat: Number(lat),

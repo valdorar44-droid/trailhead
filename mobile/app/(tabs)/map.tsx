@@ -7183,8 +7183,10 @@ function MapScreen() {
       if (camp.lat && camp.lng) api.getWeather(camp.lat, camp.lng, 3, weatherUnitMode).then(r => setCampWeather(r)).catch(() => {});
       return;
     }
-    const place = pendingMapSelection.place;
+    const isTrailSelection = pendingMapSelection.kind === 'trail';
+    const place = isTrailSelection ? pendingMapSelection.trail : pendingMapSelection.place;
     const isExploreArea = String(place.id || '').startsWith('explore-area:');
+    const isExploreTrail = isTrailSelection || String(place.id || '').startsWith('explore-trail:');
     setSelectedCamp(null);
     setCampDetail(null);
     setCampInsight(null);
@@ -7194,13 +7196,15 @@ function MapScreen() {
       name: place.name,
       lat: place.lat,
       lng: place.lng,
-      type: place.icon === 'fuel' ? 'fuel' : place.icon === 'water' ? 'water' : place.icon === 'camp' ? 'camp' : 'poi',
-      source: isExploreArea ? 'explore' : 'saved',
-      source_label: isExploreArea ? 'Explore area' : 'Saved location',
+      type: isExploreTrail ? 'trail' : place.icon === 'fuel' ? 'fuel' : place.icon === 'water' ? 'water' : place.icon === 'camp' ? 'camp' : 'poi',
+      source: isExploreArea || isExploreTrail ? 'explore' : 'saved',
+      source_label: isExploreTrail ? 'Explore trail' : isExploreArea ? 'Explore area' : 'Saved location',
       summary: place.note || 'Saved location',
     });
-    nativeMapRef.current?.flyTo(place.lat, place.lng, 12, place.name);
-    webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: place.lat, lng: place.lng, zoom: 12, name: place.name }));
+    const zoom = isExploreTrail ? 13 : 12;
+    if (isExploreTrail) nativeMapRef.current?.highlightTrail(place.lat, place.lng, place.name);
+    else nativeMapRef.current?.flyTo(place.lat, place.lng, zoom, place.name);
+    webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: place.lat, lng: place.lng, zoom, name: place.name }));
   }, [pendingMapSelection, setPendingMapSelection, weatherUnitMode]);
 
   useEffect(() => {

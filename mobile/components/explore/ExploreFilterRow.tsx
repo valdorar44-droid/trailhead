@@ -14,7 +14,7 @@ type Props = {
 
 export function ExploreFilterRow({
   shownCount,
-  sourceLabel = 'Checked details',
+  sourceLabel = 'Sources',
   sortLabel = 'Best match',
   onCountPress,
   onSourcePress,

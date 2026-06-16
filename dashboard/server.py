@@ -1695,10 +1695,17 @@ def _extreme_config_for_user(user: dict | None) -> dict:
     db_enabled = _bool_override(overrides, "enabled", True)
     beta_active = bool(((master_enabled and db_enabled) or is_admin) and not kill_switch)
     entitled = has_extreme_plan(user)
+    visual_entitled = bool(entitled or has_active_plan(user or {}))
     if beta_active and is_admin:
         allowed_surfaces = list(dict.fromkeys([*_extreme_allowed_surfaces_from_overrides(overrides), *EXTREME_ADMIN_SURFACES]))
     else:
         allowed_surfaces = _extreme_allowed_surfaces_from_overrides(overrides) if beta_active else []
+    allowed_surfaces_visual = list(dict.fromkeys([
+        *(allowed_surfaces if entitled else []),
+        "map_layers",
+        "terrain_3d",
+        "trail_overlays",
+    ])) if beta_active and visual_entitled else []
     feature_flags = _extreme_feature_flags(beta_active, overrides)
     if beta_active and is_admin:
         feature_flags.update({
@@ -1717,10 +1724,13 @@ def _extreme_config_for_user(user: dict | None) -> dict:
         "tier_name": "Extreme Explorer",
         "enabled": bool(beta_active and entitled),
         "entitled": bool(entitled),
+        "enabled_visual": bool(beta_active and visual_entitled),
+        "entitled_visual": bool(visual_entitled),
         "kill_switch": kill_switch,
         "master_enabled": master_enabled,
         "beta_active": beta_active,
         "allowed_surfaces": allowed_surfaces,
+        "allowed_surfaces_visual": allowed_surfaces_visual,
         "style_uris": _extreme_style_uris(),
         "style_labels": EXTREME_STYLE_LABELS,
         "mapbox_public_token": settings.mapbox_token,

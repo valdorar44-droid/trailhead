@@ -742,9 +742,13 @@ export interface ExtremeConfig {
   tier_name: 'Extreme Explorer' | string;
   enabled: boolean;
   entitled: boolean;
+  enabled_visual?: boolean;
+  entitled_visual?: boolean;
   kill_switch: boolean;
+  master_enabled?: boolean;
   beta_active: boolean;
   allowed_surfaces: ExtremeSurface[] | string[];
+  allowed_surfaces_visual?: string[];
   style_uris: Record<'standard' | 'live_road' | 'satellite_trail' | '3d_terrain' | 'night_drive' | 'weather_watch' | 'outdoors', string>;
   style_labels: Record<string, string>;
   mapbox_public_token: string;

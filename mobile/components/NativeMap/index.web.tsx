@@ -253,6 +253,89 @@ function syncWebRoute(map: any, waypoints: WP[]) {
   }
 }
 
+function emptyTrailHighlight(): GeoJSON.FeatureCollection {
+  return { type: 'FeatureCollection', features: [] };
+}
+
+function syncWebTrailHighlight(map: any, data: GeoJSON.FeatureCollection) {
+  if (!map?.getStyle?.()) return;
+  const source = map.getSource('trailhead-web-trail-highlight');
+  if (source?.setData) {
+    source.setData(data);
+    return;
+  }
+  if (!map.getSource('trailhead-web-trail-highlight')) {
+    map.addSource('trailhead-web-trail-highlight', { type: 'geojson', data });
+  }
+  if (!map.getLayer('trailhead-web-trail-highlight-casing')) {
+    map.addLayer({
+      id: 'trailhead-web-trail-highlight-casing',
+      type: 'line',
+      source: 'trailhead-web-trail-highlight',
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': '#082f49', 'line-width': 10, 'line-opacity': 0.76 },
+    });
+  }
+  if (!map.getLayer('trailhead-web-trail-highlight-line')) {
+    map.addLayer({
+      id: 'trailhead-web-trail-highlight-line',
+      type: 'line',
+      source: 'trailhead-web-trail-highlight',
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': '#38bdf8', 'line-width': 5, 'line-opacity': 0.96 },
+    });
+  }
+}
+
+function lineDistanceScore(coords: number[][], lng: number, lat: number) {
+  let best = Number.POSITIVE_INFINITY;
+  for (const coord of coords) {
+    const dx = Number(coord?.[0]) - lng;
+    const dy = Number(coord?.[1]) - lat;
+    if (Number.isFinite(dx) && Number.isFinite(dy)) best = Math.min(best, dx * dx + dy * dy);
+  }
+  return best;
+}
+
+function webTrailHighlightFromFeatures(features: any[], lng: number, lat: number, name?: string): GeoJSON.FeatureCollection {
+  const cleanName = String(name || '').trim().toLowerCase();
+  const lineFeatures = features
+    .map((feature: any) => {
+      const geometry = feature?.geometry;
+      const props = feature?.properties ?? {};
+      const type = geometry?.type;
+      const coords = type === 'LineString'
+        ? geometry.coordinates
+        : type === 'MultiLineString'
+          ? geometry.coordinates?.flat()
+          : [];
+      if (!Array.isArray(coords) || coords.length < 2) return null;
+      const layerId = String(feature?.layer?.id || feature?.sourceLayer || feature?.source || '').toLowerCase();
+      const rawClass = String(props.class || props.type || props.maki || props.category || '').toLowerCase();
+      const featureName = String(props.name || props.name_en || props.ref || '').toLowerCase();
+      const trailSignal = /(trail|path|track|foot|hiking|outdoor|road)/.test(`${layerId} ${rawClass} ${featureName}`);
+      const nameSignal = cleanName && featureName.includes(cleanName.split(/\s+/)[0]);
+      if (!trailSignal && !nameSignal) return null;
+      return {
+        feature: {
+          type: 'Feature',
+          properties: {
+            name: props.name || name || 'Selected trail',
+            source: 'mapbox_rendered_feature',
+            source_layer: feature?.sourceLayer || feature?.layer?.id || null,
+          },
+          geometry: geometry as GeoJSON.Geometry,
+        } as GeoJSON.Feature,
+        score: lineDistanceScore(coords, lng, lat) - (nameSignal ? 0.0005 : 0),
+      };
+    })
+    .filter((item): item is { feature: GeoJSON.Feature; score: number } => !!item)
+    .sort((a, b) => a.score - b.score)
+    .slice(0, 3)
+    .map(item => item.feature);
+  return { type: 'FeatureCollection', features: lineFeatures };
+}
+
 function markerElement(label: string, color: string) {
   const el = document.createElement('button');
   el.type = 'button';
@@ -409,6 +492,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const mapboxGlRef = useRef<any>(null);
   const markerRefs = useRef<any[]>([]);
   const routeReadyRef = useRef(false);
+  const trailHighlightRef = useRef<GeoJSON.FeatureCollection>(emptyTrailHighlight());
   const [mapboxError, setMapboxError] = useState('');
   const initialCenter = useMemo(() => firstUsableCenter(props), [props.userLoc, props.searchMarker, props.waypoints, props.camps]);
   const premiumStyle = (props.premiumMapStyle as PremiumMapStyle | undefined) ?? 'standard';
@@ -461,9 +545,32 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     routeToSearch: (lat: number, lng: number) => mapRef.current?.flyTo?.({ center: [lng, lat], zoom: 12, essential: true }),
     resetRoute: noop,
     stopNavigation: noop,
-    highlightTrail: noop,
-    clearTrailHighlight: noop,
-    getTrailHighlight: () => ({ type: 'FeatureCollection', features: [] }),
+    highlightTrail: (lat: number, lng: number, name?: string) => {
+      const map = mapRef.current;
+      if (!map) return;
+      map.flyTo?.({
+        center: [lng, lat],
+        zoom: Math.max(13, Number(map.getZoom?.()) || 13),
+        ...(props.showTerrain ? { pitch: 58 } : {}),
+        essential: true,
+      });
+      window.setTimeout(() => {
+        const point = map.project?.([lng, lat]);
+        if (!point) return;
+        const box = [[point.x - 72, point.y - 72], [point.x + 72, point.y + 72]];
+        const features = [
+          ...(map.queryRenderedFeatures?.(box) ?? []),
+          ...(map.queryRenderedFeatures?.([point.x, point.y]) ?? []),
+        ];
+        trailHighlightRef.current = webTrailHighlightFromFeatures(features, lng, lat, name);
+        syncWebTrailHighlight(map, trailHighlightRef.current);
+      }, 320);
+    },
+    clearTrailHighlight: () => {
+      trailHighlightRef.current = emptyTrailHighlight();
+      syncWebTrailHighlight(mapRef.current, trailHighlightRef.current);
+    },
+    getTrailHighlight: () => trailHighlightRef.current,
     captureTrailAt: async () => ({ type: 'FeatureCollection', features: [] }),
     screenToCoordinate: async (x: number, y: number) => {
       const point = mapRef.current?.unproject?.([x, y]);
@@ -566,6 +673,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           props.onMapReady?.();
           props.onBoundsChange?.(currentBounds(mapRef.current));
           syncWebRoute(mapRef.current, props.waypoints);
+          syncWebTrailHighlight(mapRef.current, trailHighlightRef.current);
           syncWebMarkers(mapboxgl, mapRef.current, props, markerRefs);
         });
         mapRef.current.on('moveend', () => props.onBoundsChange?.(currentBounds(mapRef.current)));
@@ -606,6 +714,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     mapRef.current.once('style.load', () => {
       routeReadyRef.current = true;
       syncWebRoute(mapRef.current, props.waypoints);
+      syncWebTrailHighlight(mapRef.current, trailHighlightRef.current);
       if (mapRef.current?.setConfigProperty) {
         Object.entries(styleConfig(premiumStyle, props.showTerrain).basemap).forEach(([key, value]) => {
           mapRef.current.setConfigProperty('basemap', key, value);

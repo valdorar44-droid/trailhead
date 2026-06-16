@@ -4767,19 +4767,21 @@ function MapScreen() {
   const [mapLayer,    setMapLayerState] = useState<MapLayer>('light');
   const [premiumMapStyle, setPremiumMapStyle] = useState<PremiumMapStyle>('standard');
   const [extremeTrafficEnabled, setExtremeTrafficEnabled] = useState(false);
-  const extremeMapLayerEntitled = !!extremeConfig?.beta_active
-    && !extremeConfig.kill_switch
-    && extremeConfig.allowed_surfaces.includes('map_layers');
+  const extremeVisualSurfaces = (extremeConfig?.allowed_surfaces_visual ?? extremeConfig?.allowed_surfaces ?? []) as string[];
+  const extremeMapLayerEntitled = !!(extremeConfig?.enabled_visual ?? extremeConfig?.enabled)
+    && !!extremeConfig?.beta_active
+    && !extremeConfig?.kill_switch
+    && extremeVisualSurfaces.includes('map_layers');
   const extremeMapboxPending = Platform.OS === 'android' && !extremeMapboxCapabilities;
   const extremeMapboxSupported = Platform.OS !== 'android' || extremeMapboxCapabilities?.supported === true;
   const extremeMapLayerAvailable = extremeMapLayerEntitled && extremeMapboxSupported;
   const extremeMapLayerActive = mapLayer === 'extreme';
-  const extremeMapLayerSub = !extremeConfig?.enabled || !extremeMapLayerEntitled
+  const extremeMapLayerSub = !extremeMapLayerEntitled
     ? 'Hidden beta locked'
     : extremeMapboxPending
       ? 'Checking device'
       : extremeMapboxSupported
-        ? 'Premium Mapbox mode'
+        ? (extremeConfig?.enabled ? 'Premium Mapbox mode' : 'Explorer 3D terrain')
         : 'Android fallback';
   const extremeCopilotAvailable = !!extremeConfig?.enabled && !!extremeConfig?.feature_flags?.copilot;
   const [showExtremeCopilot, setShowExtremeCopilot] = useState(false);
@@ -4987,9 +4989,9 @@ function MapScreen() {
   const [paywallMessage, setPaywallMessage] = useState('');
 
   function selectExtremeMapLayer() {
-    if (!extremeConfig?.enabled || !extremeMapLayerEntitled) {
+    if (!extremeMapLayerEntitled) {
       setPaywallCode('extreme_hidden_beta');
-      setPaywallMessage('EXTREME is a hidden beta for selected accounts. Request access or use Explorer while this map mode is locked.');
+      setPaywallMessage('Explorer includes EXTREME terrain previews. Premium beta tools stay locked to Extreme accounts.');
       setPaywallVisible(true);
       return;
     }
@@ -5011,11 +5013,13 @@ function MapScreen() {
     }
     applyMapLayer('extreme');
     setLayerTrails(true);
-    api.logExtremeLedger({
-      event_type: 'mapbox_mode_selected',
-      surface: 'map_layers',
-      event_data: { entry: 'layers_sheet', renderer: extremeMapboxCapabilities?.renderer ?? (Platform.OS === 'ios' ? 'metal' : 'unknown') },
-    }).catch(() => {});
+    if (extremeConfig?.enabled) {
+      api.logExtremeLedger({
+        event_type: 'mapbox_mode_selected',
+        surface: 'map_layers',
+        event_data: { entry: 'layers_sheet', renderer: extremeMapboxCapabilities?.renderer ?? (Platform.OS === 'ios' ? 'metal' : 'unknown') },
+      }).catch(() => {});
+    }
   }
 
   // POI layer
@@ -20106,7 +20110,7 @@ function MapScreen() {
         activeMapLayer={mapLayer}
         options={mapStyleOptions}
         extremeActive={extremeMapLayerActive}
-        extremeSelectable={!!extremeConfig?.enabled && extremeMapLayerAvailable}
+        extremeSelectable={extremeMapLayerAvailable}
         extremeSub={extremeMapLayerSub}
         onClose={() => setShowMapStyleSheet(false)}
         onSelectMapLayer={id => applyMapLayer(id as MapLayer)}
@@ -20332,7 +20336,7 @@ function MapScreen() {
             activeMapLayer={mapLayer}
             onSelectMapLayer={id => applyMapLayer(id as MapLayer)}
             extremeMapLayerActive={extremeMapLayerActive}
-            extremeMapLayerSelectable={!!extremeConfig?.enabled && extremeMapLayerAvailable}
+            extremeMapLayerSelectable={extremeMapLayerAvailable}
             extremeMapLayerSub={extremeMapLayerSub}
             onSelectExtremeMapLayer={selectExtremeMapLayer}
             layerItems={layerSheetItems}

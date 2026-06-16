@@ -43,17 +43,7 @@ export function ExploreHero({ greeting, displayName, heroImage, height, query, o
               <TouchableOpacity onPress={onClearQuery} style={styles.iconButton} hitSlop={8}>
                 <Ionicons name="close" size={16} color="rgba(15,23,42,0.62)" />
               </TouchableOpacity>
-            ) : (
-              <View style={styles.iconButton}>
-                <Ionicons name="options-outline" size={18} color="rgba(15,23,42,0.62)" />
-              </View>
-            )}
-          </View>
-          <View style={styles.viewToggle}>
-            <View style={styles.toggleIconActive}>
-              <Ionicons name="map-outline" size={23} color="#64748b" />
-            </View>
-            <Ionicons name="list-outline" size={24} color="#64748b" />
+            ) : null}
           </View>
         </View>
       </View>
@@ -111,27 +101,4 @@ const styles = StyleSheet.create({
   },
   input: { flex: 1, color: '#111827', fontSize: 15, fontWeight: '700', paddingVertical: 0 },
   iconButton: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
-  viewToggle: {
-    height: 58,
-    minWidth: 90,
-    borderRadius: 22,
-    paddingHorizontal: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-    backgroundColor: 'rgba(255,255,255,0.94)',
-  },
-  toggleIconActive: {
-    width: 44,
-    height: 44,
-    borderRadius: 16,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 9,
-  },
 });

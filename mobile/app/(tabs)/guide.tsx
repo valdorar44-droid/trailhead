@@ -1249,7 +1249,7 @@ export default function GuideScreen() {
             <ExploreModeTabs value={exploreMode} onChange={setExploreMode} />
             <ExploreFilterRow
               shownCount={rankedExplore.length}
-              sourceLabel={exploreSortMode === 'source' ? 'Source first' : 'Checked details'}
+              sourceLabel={exploreSortMode === 'source' ? 'Source first' : 'Sources'}
               sortLabel={EXPLORE_SORT_LABELS[exploreSortMode]}
               onCountPress={() => setExploreCategory('all')}
               onSourcePress={() => setExploreSortMode(current => current === 'source' ? 'best' : 'source')}

@@ -1,6 +1,7 @@
 import unittest
 
 import dashboard.server as server
+from ingestors.pakistan_curated import get_pakistan_curated_treks
 
 
 class TrailCatalogTests(unittest.TestCase):
@@ -70,6 +71,38 @@ class TrailCatalogTests(unittest.TestCase):
         self.assertEqual(len(area["trails"]), 1)
         self.assertEqual(area["trails"][0]["route_type"], "Point or route")
         self.assertIn("source_pack", area)
+
+    def test_pakistan_trek_profile_preserves_trek_and_glacier_fields(self):
+        treks = get_pakistan_curated_treks(35.7455, 76.5142, radius_miles=80)
+        k2 = next(item for item in treks if item["name"] == "K2 Base Camp Trek")
+        profile = server._trail_profile_from_pakistan_trek(k2)
+        self.assertIsNotNone(profile)
+
+        public = server._public_trail_profile(profile)
+        card = server._trail_profile_to_explore_card(profile)
+
+        self.assertEqual(public["feature_type"], "trek")
+        self.assertEqual(public["feature_label"], "Trek")
+        self.assertTrue(public["trekking_only"])
+        self.assertTrue(public["guide_required"])
+        self.assertTrue(public["glacier_crossing"])
+        self.assertEqual(public["route_target"]["name"], "Askole Trailhead")
+        self.assertIn("permits", public["permit_note"].lower())
+        self.assertEqual(card["feature_label"], "Trek")
+        self.assertTrue(card["trekking_only"])
+        self.assertEqual(card["route_target"]["lng"], 75.8178)
+
+    def test_pakistan_area_uses_trek_glacier_copy_and_sources(self):
+        trek = server._trail_profile_from_pakistan_trek(
+            next(item for item in get_pakistan_curated_treks(35.7455, 76.5142, 80) if item["name"] == "Baltoro Glacier")
+        )
+        area = server._trail_area_from_profiles(35.7455, 76.5142, 50, [trek])
+
+        self.assertEqual(area["summary"]["title"], "Northern Pakistan Treks")
+        self.assertIn("glaciers", area["subcategories"])
+        self.assertEqual(area["trails"][0]["feature_type"], "glacier")
+        self.assertTrue(area["trails"][0]["trekking_only"])
+        self.assertTrue(any(source.get("kind") == "glacier_reference" for source in area["source_pack"]["sources"]))
 
 
 if __name__ == "__main__":

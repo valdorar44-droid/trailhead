@@ -40,6 +40,7 @@ from ingestors.usfs import get_usfs_recreation_sites
 from ingestors.provider_guard import provider_call_snapshot, record_provider_call, runtime_cached_call
 from ingestors.blm import get_blm_campsites, get_blm_campsite_detail, get_blm_recreation_sites
 from ingestors.international_registry import international_camp_tasks
+from ingestors.pakistan_curated import get_pakistan_curated_treks
 from ingestors.conditions import get_provider_conditions_along_route, get_provider_conditions_near, get_wfigs_fire_perimeters
 from ingestors.pakistan_confidence import pakistan_route_confidence
 from db.store import (
@@ -7710,6 +7711,7 @@ TRAIL_PHOTO_ALLOWED_LICENSES = {
     "cc-by-sa", "cc-by-nc", "cc-by-nd",
 }
 TRAIL_PHOTO_COMMERCIAL_RESTRICTED = {"by-nc", "by-nd", "cc-by-nc", "cc-by-nd"}
+PAKISTAN_BBOX = (23.5, 60.5, 37.4, 77.9)
 
 def _trail_catalog_from_profile(profile: dict) -> dict:
     provenance = profile.get("provenance") if isinstance(profile.get("provenance"), dict) else {}
@@ -7742,6 +7744,24 @@ def _trail_route_type(profile: dict) -> str:
         return "Out and back"
     return "Point or route"
 
+def _trail_feature_label(feature_type: str) -> str:
+    text = str(feature_type or "").replace("_", " ").strip().title()
+    if text == "Trek":
+        return "Trek"
+    if text == "Glacier":
+        return "Glacier"
+    if text == "Pass":
+        return "Pass"
+    if text == "Base Camp":
+        return "Base camp"
+    if text == "Trailhead":
+        return "Trailhead"
+    return text or "Trail"
+
+def _point_in_pakistan(lat: float, lng: float) -> bool:
+    min_lat, min_lng, max_lat, max_lng = PAKISTAN_BBOX
+    return min_lat <= lat <= max_lat and min_lng <= lng <= max_lng
+
 def _trail_difficulty_label(profile: dict) -> str:
     value = str(profile.get("difficulty") or "").strip()
     if value:
@@ -7759,7 +7779,7 @@ def _trail_difficulty_label(profile: dict) -> str:
 
 def _trail_source_pack(profile: dict) -> dict:
     catalog = _trail_catalog_from_profile(profile)
-    sources = []
+    sources = list(catalog.get("sources") or [])
     official = str(profile.get("official_url") or catalog.get("official_url") or "").strip()
     if official:
         sources.append({
@@ -7797,6 +7817,16 @@ def _public_trail_profile(profile: dict) -> dict:
     out["elevation_gain_ft"] = catalog.get("elevation_gain_ft")
     out["best_season"] = catalog.get("best_season") or ""
     out["warnings"] = catalog.get("warnings") or []
+    out["feature_type"] = catalog.get("feature_type") or "trail"
+    out["feature_label"] = _trail_feature_label(out["feature_type"])
+    out["trekking_only"] = bool(catalog.get("trekking_only"))
+    out["guide_required"] = bool(catalog.get("guide_required"))
+    out["permit_note"] = catalog.get("permit_note") or ""
+    out["glacier_crossing"] = bool(catalog.get("glacier_crossing"))
+    out["altitude_ft"] = catalog.get("altitude_ft")
+    out["season_window"] = catalog.get("season_window") or out["best_season"]
+    out["source_confidence"] = catalog.get("source_confidence") or ""
+    out["route_target"] = catalog.get("route_target") or None
     out["source_pack"] = _trail_source_pack(out)
     return out
 
@@ -7809,6 +7839,15 @@ def _trail_profile_to_explore_card(profile: dict) -> dict:
         "trail_id": public.get("id"),
         "title": public.get("name") or "Trail",
         "difficulty": public.get("difficulty") or "Scout first",
+        "feature_type": public.get("feature_type") or "trail",
+        "feature_label": public.get("feature_label") or "Trail",
+        "trekking_only": bool(public.get("trekking_only")),
+        "guide_required": bool(public.get("guide_required")),
+        "permit_note": public.get("permit_note") or "",
+        "glacier_crossing": bool(public.get("glacier_crossing")),
+        "altitude_ft": public.get("altitude_ft"),
+        "season_window": public.get("season_window") or "",
+        "route_target": public.get("route_target"),
         "distance_mi": float(public.get("length_mi") or 0),
         "route_type": public.get("route_type") or "Point or route",
         "elevation_gain_ft": public.get("elevation_gain_ft"),
@@ -7822,6 +7861,10 @@ def _trail_profile_to_explore_card(profile: dict) -> dict:
         "best_season": public.get("best_season") or "",
         "tags": [str(a).title() for a in (public.get("activities") or [])[:4]],
         "highlights": [h for h in [
+            public.get("feature_label") or "",
+            "Trekking-only" if public.get("trekking_only") else "",
+            "Guide required" if public.get("guide_required") else "",
+            "Glacier context" if public.get("feature_type") == "glacier" or public.get("glacier_crossing") else "",
             "Map geometry available" if public.get("geometry") or public.get("geometry_ref") else "",
             public.get("source_label") or "",
             "Photo source credited" if first_photo else "",
@@ -7837,10 +7880,13 @@ def _trail_profile_to_explore_card(profile: dict) -> dict:
 
 def _trail_area_from_profiles(lat: float, lng: float, radius: float, profiles: list[dict]) -> dict:
     public_profiles = [_public_trail_profile(p) for p in profiles]
-    title = "Nearby Trail Area"
+    is_pakistan = _point_in_pakistan(lat, lng)
+    title = "Northern Pakistan Treks" if is_pakistan else "Nearby Trail Area"
     if public_profiles:
         managers = [str(p.get("land_manager") or "").strip() for p in public_profiles if p.get("land_manager")]
-        if managers:
+        if is_pakistan:
+            title = "Northern Pakistan Treks"
+        elif managers:
             title = managers[0]
         else:
             title = f"Trails near {public_profiles[0].get('name') or 'this stop'}"
@@ -7855,49 +7901,53 @@ def _trail_area_from_profiles(lat: float, lng: float, radius: float, profiles: l
             "explore_group": "trails",
             "category": "trails",
             "state": "",
-            "region": "Nearby",
+            "region": "Gilgit-Baltistan" if is_pakistan else "Nearby",
             "lat": lat,
             "lng": lng,
             "rank": 1,
             "hero_rank": 1,
-            "tags": ["trails", "hiking", "trailheads"],
-            "hook": "Trail cards built from open map data and attributed sources.",
-            "short_description": "Compare trail distance, route type, map context, and source-backed photos near this stop.",
+            "tags": ["treks", "glaciers", "pakistan", "karakoram"] if is_pakistan else ["trails", "hiking", "trailheads"],
+            "hook": "Trek and glacier cards for northern Pakistan." if is_pakistan else "Trail cards built from open map data and attributed sources.",
+            "short_description": "Compare trek, glacier, base-camp, staging, permit, and guide context." if is_pakistan else "Compare trail distance, route type, map context, and source-backed photos near this stop.",
             "image_url": (photos[0] or {}).get("url") if photos else "",
             "image_credit": (photos[0] or {}).get("credit") if photos else "",
         },
         "card": {
             "title": title,
-            "headline": "Trail options near this stop",
-            "summary": "Trailhead groups nearby trail records into one map-ready card list.",
-            "highlight": "Open a trail to route to it or highlight it on the map.",
-            "region": "Nearby",
+            "headline": "Trek and glacier options near this stop" if is_pakistan else "Trail options near this stop",
+            "summary": "Trailhead groups northern Pakistan trek, glacier, and staging records into one map-ready card list." if is_pakistan else "Trailhead groups nearby trail records into one map-ready card list.",
+            "highlight": "Route to staging points and verify permits, guide, glacier, bridge, weather, and local safety." if is_pakistan else "Open a trail to route to it or highlight it on the map.",
+            "region": "Gilgit-Baltistan" if is_pakistan else "Nearby",
         },
         "category": "trails",
-        "subcategories": ["trailheads", "hiking", "map"],
+        "subcategories": ["treks", "glaciers", "base camps", "map"] if is_pakistan else ["trailheads", "hiking", "map"],
         "quality": "open",
-        "search_aliases": ["trails nearby", "hiking trails", "trailheads"],
+        "search_aliases": ["pakistan treks", "karakoram", "k2", "baltoro", "hunza", "glaciers"] if is_pakistan else ["trails nearby", "hiking trails", "trailheads"],
         "trails": [_trail_profile_to_explore_card(p) for p in public_profiles],
         "profile": {
-            "hook": "Trail cards near your selected map area.",
-            "summary": "Use these as scouting leads and verify current access before committing.",
-            "why_it_matters": "Nearby trail context helps choose stops, detours, and camp windows.",
-            "what_to_know": "Open-source records can miss closures, permits, seasonal access, and local restrictions.",
-            "best_time_to_stop": "Check daylight, weather, and trail status before starting.",
-            "access_notes": "Route to the listed trailhead or open the map highlight for geometry context.",
-            "nearby_context": "Use nearby camps, weather, fuel, and water before relying on a trail stop.",
+            "hook": "Northern Pakistan trek and glacier planning leads." if is_pakistan else "Trail cards near your selected map area.",
+            "summary": "Use these as planning leads and verify permits, guide requirements, glacier, bridge, road, weather, and local safety before committing." if is_pakistan else "Use these as scouting leads and verify current access before committing.",
+            "why_it_matters": "Karakoram trek planning needs staging towns, guide/permit context, glacier awareness, and conservative routing." if is_pakistan else "Nearby trail context helps choose stops, detours, and camp windows.",
+            "what_to_know": "These are mixed-source planning leads; glacier and trek data is informational, not a safety assessment." if is_pakistan else "Open-source records can miss closures, permits, seasonal access, and local restrictions.",
+            "best_time_to_stop": "Check season, weather, daylight, permits, and local advice before starting." if is_pakistan else "Check daylight, weather, and trail status before starting.",
+            "access_notes": "Route to the listed staging point; do not treat trek or glacier lines as vehicle navigation." if is_pakistan else "Route to the listed trailhead or open the map highlight for geometry context.",
+            "nearby_context": "Use support towns, camps, fuel, weather, and safety alerts before relying on a trek stop." if is_pakistan else "Use nearby camps, weather, fuel, and water before relying on a trail stop.",
         },
         "audio_script": "",
         "wiki_extract": "",
         "source_pack": {
             "quality": "open",
-            "primary": "Trailhead trail catalog",
-            "sources": [{"title": "OpenStreetMap trail data", "publisher": "OpenStreetMap contributors", "kind": "geometry"}],
+            "primary": "Trailhead northern Pakistan trek catalog" if is_pakistan else "Trailhead trail catalog",
+            "sources": [
+                {"title": "Gilgit-Baltistan Tourism", "publisher": "Government of Gilgit-Baltistan", "url": "https://visitgilgitbaltistan.gov.pk/", "kind": "official_context"},
+                {"title": "OpenStreetMap trail and glacier data", "publisher": "OpenStreetMap contributors", "kind": "geometry"},
+                {"title": "RGI 7.0 glacier outlines", "publisher": "NSIDC / GLIMS", "url": "https://www.glims.org/RGI/", "kind": "glacier_reference"},
+            ] if is_pakistan else [{"title": "OpenStreetMap trail data", "publisher": "OpenStreetMap contributors", "kind": "geometry"}],
             "photos": photos[:12],
-            "source_note": "Generated from open map records and enriched with credited media where available.",
+            "source_note": "Mixed-source northern Pakistan planning leads. Verify all access, permits, guide requirements, glacier, bridge, weather, and local safety conditions." if is_pakistan else "Generated from open map records and enriched with credited media where available.",
         },
         "facts": {"coordinates": f"{lat:.5f}, {lng:.5f}", "source_quality": "open", "last_updated": now},
-        "attribution": "Open map data and credited media sources.",
+        "attribution": "Gilgit-Baltistan official context, OpenStreetMap contributors, RGI/GLIMS glacier reference, and credited media sources." if is_pakistan else "Open map data and credited media sources.",
     }
 
 def _trail_profile_from_open_poi(item: dict) -> dict | None:
@@ -7961,6 +8011,115 @@ def _trail_profile_from_open_poi(item: dict) -> dict | None:
         "provenance": provenance,
         "last_checked": now,
     }
+
+def _trail_profile_from_pakistan_trek(item: dict) -> dict | None:
+    try:
+        lat = float(item.get("lat"))
+        lng = float(item.get("lng"))
+    except Exception:
+        return None
+    if not _point_in_pakistan(lat, lng):
+        return None
+    name = re.sub(r"\s+", " ", str(item.get("name") or "Pakistan trek")).strip()[:180]
+    if not name:
+        return None
+    feature_type = str(item.get("feature_type") or item.get("type") or "trek").strip() or "trek"
+    source_id = _clean_trail_profile_id(f"pk:{feature_type}:{name.lower().replace(' ', '-')}")
+    now = int(time.time())
+    route_lat = item.get("route_lat")
+    route_lng = item.get("route_lng")
+    route_target = None
+    try:
+        if route_lat is not None and route_lng is not None:
+            route_target = {
+                "name": str(item.get("route_name") or "Staging point")[:140],
+                "lat": float(route_lat),
+                "lng": float(route_lng),
+                "reason": "Route to the staging point; verify the trek or glacier approach locally.",
+            }
+    except Exception:
+        route_target = None
+    tags = [str(tag).strip() for tag in (item.get("tags") or []) if str(tag).strip()]
+    warnings = list(item.get("warnings") or [])
+    if item.get("trekking_only") and not any("vehicle" in warning.lower() for warning in warnings):
+        warnings.append("Trekking-only feature; do not treat as vehicle navigation.")
+    if item.get("glacier_crossing") and not any("glacier" in warning.lower() for warning in warnings):
+        warnings.append("Verify glacier, bridge, weather, and local safety conditions.")
+    summary = str(item.get("summary") or "Northern Pakistan trek and glacier planning lead.").strip()
+    official_url = str(item.get("official_url") or "https://visitgilgitbaltistan.gov.pk/")
+    catalog = {
+        "feature_type": feature_type,
+        "route_type": item.get("route_type") or ("Glacier feature" if feature_type == "glacier" else "Trek"),
+        "geometry_ref": source_id,
+        "area_id": _clean_trail_profile_id(f"pk:{str(item.get('area_name') or 'karakoram').lower().replace(' ', '-')}"),
+        "area_name": item.get("area_name") or "Gilgit-Baltistan",
+        "best_season": item.get("best_season") or "",
+        "season_window": item.get("season_window") or item.get("best_season") or "",
+        "altitude_ft": item.get("altitude_ft"),
+        "trekking_only": bool(item.get("trekking_only", True)),
+        "guide_required": bool(item.get("guide_required")),
+        "permit_note": item.get("permit_note") or "Verify permits, guide requirements, and current local access before committing.",
+        "glacier_crossing": bool(item.get("glacier_crossing")),
+        "route_target": route_target,
+        "warnings": warnings,
+        "source_confidence": "mixed_curated",
+        "quality": "mixed_curated",
+        "official_url": official_url,
+        "sources": [
+            {"title": "Gilgit-Baltistan Tourism", "publisher": "Government of Gilgit-Baltistan", "url": "https://visitgilgitbaltistan.gov.pk/", "kind": "official_context"},
+            {"title": "OpenStreetMap Pakistan extract", "publisher": "OpenStreetMap contributors / Geofabrik", "url": "https://download.geofabrik.de/asia/pakistan.html", "kind": "open_map_reference"},
+            {"title": "RGI 7.0 glacier outlines", "publisher": "NSIDC / GLIMS", "url": "https://www.glims.org/RGI/", "kind": "glacier_reference"},
+        ],
+        "source_note": "Mixed-source northern Pakistan trek/glacier planning lead. Verify permits, guide, glacier, bridge, weather, road, and local safety conditions.",
+    }
+    return {
+        "id": source_id,
+        "name": name,
+        "summary": summary[:800],
+        "description": (
+            str(item.get("description") or summary).strip()
+            + " Verify permits, guide requirements, glacier, bridge, weather, road, and local safety conditions before relying on this record."
+        )[:6000],
+        "lat": lat,
+        "lng": lng,
+        "length_mi": item.get("length_mi"),
+        "difficulty": str(item.get("difficulty") or ("Guide required" if item.get("guide_required") else "Trekking lead"))[:80],
+        "activities": ["Trekking", "Hiking", "Glacier context"] if feature_type == "glacier" else ["Trekking", "Hiking"],
+        "land_manager": "Gilgit-Baltistan / local authorities",
+        "geometry": None,
+        "trailheads": [route_target] if route_target else [{"name": name, "lat": lat, "lng": lng, "source": "Trailhead curated"}],
+        "official_url": official_url,
+        "photos": [],
+        "source": "pakistan_karakoram_curated",
+        "source_label": "Trailhead mixed Pakistan sources",
+        "provenance": {
+            "name": {"source": "Trailhead curated Pakistan/Karakoram seed", "last_checked": now},
+            "location": {"source": "Trailhead curated from OSM and official destination context", "last_checked": now},
+            "summary": {"source": "Trailhead curated safety-first trek catalog", "last_checked": now},
+            "catalog": catalog,
+            "tags": tags,
+        },
+        "last_checked": now,
+    }
+
+async def _seed_pakistan_trek_profiles(lat: float, lng: float, radius_mi: float, limit: int = 80) -> list[dict]:
+    if not _point_in_pakistan(lat, lng):
+        return []
+    profiles: list[dict] = []
+    seen: set[str] = set()
+    for item in get_pakistan_curated_treks(lat, lng, radius_miles=max(radius_mi, 50)):
+        profile = _trail_profile_from_pakistan_trek(item)
+        if not profile or profile["id"] in seen:
+            continue
+        photos = await _open_trail_photos(profile["name"], profile["lat"], profile["lng"])
+        if photos:
+            profile["photos"] = photos
+            profile["provenance"]["photos"] = {"source": "Wikipedia / Wikimedia Commons / Openverse", "last_checked": profile["last_checked"]}
+        seen.add(profile["id"])
+        profiles.append(_public_trail_profile(upsert_trail_profile(profile)))
+        if len(profiles) >= limit:
+            break
+    return profiles
 
 async def _open_trail_photos(name: str, lat: float, lng: float) -> list[dict]:
     clean = re.sub(r"\s+", " ", (name or "").strip())
@@ -8058,6 +8217,7 @@ async def _openverse_trail_photos(name: str, lat: float, lng: float) -> list[dic
 
 async def _seed_open_trail_profiles(lat: float, lng: float, radius_mi: float, limit: int = 80) -> list[dict]:
     radius_m = int(max(3, min(radius_mi, 80)) * 1609.344)
+    pakistan_profiles = await _seed_pakistan_trek_profiles(lat, lng, radius_mi, limit=limit)
     batches = await asyncio.gather(
         get_trails(lat, lng, radius_m=radius_m),
         get_trailheads(lat, lng, radius_m=radius_m),
@@ -8066,8 +8226,8 @@ async def _seed_open_trail_profiles(lat: float, lng: float, radius_mi: float, li
         get_hot_springs(lat, lng, radius_m=radius_m),
         return_exceptions=True,
     )
-    profiles: list[dict] = []
-    seen: set[str] = set()
+    profiles: list[dict] = list(pakistan_profiles)
+    seen: set[str] = {str(p.get("id")) for p in profiles}
     for batch in batches:
         if not isinstance(batch, list):
             continue

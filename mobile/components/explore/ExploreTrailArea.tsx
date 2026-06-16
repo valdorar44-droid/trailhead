@@ -61,6 +61,7 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
           const selected = selectedId === trail.id;
           const photo = primaryTrailPhoto(trail);
           const sourceLabel = trail.source_label || trail.source_pack?.primary || trail.image_credit || '';
+          const featureLabel = trail.feature_label || trail.feature_type?.replace(/_/g, ' ') || 'Trail';
           return (
             <View key={trail.id} style={[styles.trailWrap, { borderColor: selected ? C.orange + '66' : C.border, backgroundColor: C.s2 }]}>
               <TouchableOpacity
@@ -76,7 +77,7 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
                   </View>
                   <View style={[styles.difficultyPill, difficultyTone(trail.difficulty)]}>
                     <Text style={[styles.difficultyText, { color: difficultyTextColor(trail.difficulty) }]}>
-                      {trail.difficulty}
+                      {featureLabel} · {trail.difficulty}
                     </Text>
                   </View>
                   <Text style={[styles.trailMeta, { color: C.text2 }]} numberOfLines={1}>
@@ -112,7 +113,10 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
                   <View style={styles.detailsTable}>
                     {[
                       ['Difficulty', trail.difficulty],
-                      ['Best Season', trail.best_season],
+                      ['Season', trail.season_window || trail.best_season],
+                      ['Altitude', trail.altitude_ft ? `${trail.altitude_ft.toLocaleString()} ft` : ''],
+                      ['Guide', trail.guide_required ? 'Verify locally' : ''],
+                      ['Permit', trail.permit_note],
                       ['Map', trail.geometry_ref ? 'Trail line available' : 'Map point'],
                       ['Dogs', trail.dogs],
                       ['Bikes', trail.bikes],
@@ -131,6 +135,14 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
                           <Text style={[styles.highlightText, { color: C.text2 }]} numberOfLines={2}>{highlight}</Text>
                         </View>
                       ))}
+                    </View>
+                  )}
+                  {!!trail.trekking_only && (
+                    <View style={[styles.warningBox, { borderColor: C.orange + '55', backgroundColor: C.orange + '12' }]}>
+                      <Ionicons name="warning-outline" size={17} color={C.orange} />
+                      <Text style={[styles.warningText, { color: C.text2 }]}>
+                        Route goes to staging. Verify guide, permit, glacier, bridge, weather, and local safety.
+                      </Text>
                     </View>
                   )}
                   <View style={styles.actions}>
@@ -249,6 +261,8 @@ const styles = StyleSheet.create({
   statLabel: { fontSize: 8, fontFamily: mono, fontWeight: '900', marginTop: 5, textAlign: 'center' },
   description: { fontSize: 14, lineHeight: 21, fontWeight: '600' },
   photoCredit: { fontSize: 10.5, lineHeight: 15, fontWeight: '700' },
+  warningBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, borderWidth: 1, borderRadius: 12, padding: 10 },
+  warningText: { flex: 1, minWidth: 0, fontSize: 11.5, lineHeight: 16, fontWeight: '700' },
   detailsTable: { gap: 0 },
   detailRow: { borderTopWidth: 1, minHeight: 38, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   detailLabel: { fontSize: 13, fontWeight: '700' },

@@ -719,10 +719,11 @@ export default function GuideScreen() {
   }
 
   function routeExploreTrail(place: ExplorePlaceProfile, trail: ExploreTrailCard) {
-    const lat = trail.lat ?? place.summary.lat;
-    const lng = trail.lng ?? place.summary.lng;
+    const target = trail.trekking_only && trail.route_target ? trail.route_target : null;
+    const lat = target?.lat ?? trail.lat ?? place.summary.lat;
+    const lng = target?.lng ?? trail.lng ?? place.summary.lng;
     if (lat == null || lng == null) return;
-    setPendingNavigatePlace({ lat: Number(lat), lng: Number(lng), name: trail.title });
+    setPendingNavigatePlace({ lat: Number(lat), lng: Number(lng), name: target?.name || trail.title });
     setSelectedExplore(null);
     router.push('/(tabs)/map');
   }

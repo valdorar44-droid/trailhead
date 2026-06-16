@@ -40,6 +40,8 @@ const EXPLORE_CACHE_KEY = 'trailhead_explore_catalog_v2';
 const EXPLORE_CAMPGROUNDS_CACHE_PREFIX = 'trailhead_explore_campgrounds_v1:';
 const EXPLORE_TRAIL_AREA_CACHE_PREFIX = 'trailhead_explore_trail_area_v1:';
 const SAVED_EXPLORE_KEY = 'trailhead_saved_explore_places_v1';
+const EXPLORE_INITIAL_VISIBLE = 80;
+const EXPLORE_VISIBLE_STEP = 80;
 const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
 
 type ExploreSortMode = 'best' | 'nearest' | 'source';
@@ -324,6 +326,7 @@ export default function GuideScreen() {
   const [exploreSortMode, setExploreSortMode] = useState<ExploreSortMode>('best');
   const [exploreCategory, setExploreCategory] = useState<ExploreCategoryKey>('all');
   const [exploreQuery, setExploreQuery] = useState('');
+  const [exploreVisibleLimit, setExploreVisibleLimit] = useState(EXPLORE_INITIAL_VISIBLE);
   const [profileReadMode, setProfileReadMode] = useState<ExploreDetailTab>('summary');
   const [explorePlaces, setExplorePlaces] = useState<ExplorePlaceProfile[]>([]);
   const [exploreTrailAreasById, setExploreTrailAreasById] = useState<Record<string, ExplorePlaceProfile>>({});
@@ -631,6 +634,15 @@ export default function GuideScreen() {
         return aDist - bDist;
       });
   }, [enrichedExplorePlaces, exploreCategory, exploreMode, exploreQuery, exploreSortMode, userLoc?.lat, userLoc?.lng, waypoints]);
+
+  useEffect(() => {
+    setExploreVisibleLimit(EXPLORE_INITIAL_VISIBLE);
+  }, [exploreCategory, exploreMode, exploreQuery, exploreSortMode]);
+
+  const visibleRankedExplore = useMemo(
+    () => rankedExplore.slice(0, exploreVisibleLimit),
+    [rankedExplore, exploreVisibleLimit],
+  );
 
   const featuredSections = useMemo(() => {
     if (hasExploreQuery || exploreCategory !== 'all' || exploreMode !== 'featured') return [];
@@ -1340,7 +1352,19 @@ export default function GuideScreen() {
                 <Text style={s.emptySub}>Try camp, trail, viewpoint, waterfall, hut, fuel, or hot spring.</Text>
               </View>
             ) : (
-              rankedExplore.map((item, idx) => renderExploreCard(item, idx))
+              <>
+                {visibleRankedExplore.map((item, idx) => renderExploreCard(item, idx))}
+                {visibleRankedExplore.length < rankedExplore.length && (
+                  <TouchableOpacity
+                    style={s.exploreLoadMoreBtn}
+                    onPress={() => setExploreVisibleLimit(limit => limit + EXPLORE_VISIBLE_STEP)}
+                  >
+                    <Text style={s.exploreLoadMoreText}>
+                      SHOW {Math.min(EXPLORE_VISIBLE_STEP, rankedExplore.length - visibleRankedExplore.length)} MORE
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </>
             )}
           </>
         )}
@@ -1708,6 +1732,18 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   exploreSectionLink: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900' },
   exploreRailSection: { gap: 9 },
   exploreRail: { gap: 12, paddingRight: 8 },
+  exploreLoadMoreBtn: {
+    minHeight: 42,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: C.orange + '55',
+    backgroundColor: C.orangeGlow,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginHorizontal: 20,
+    marginBottom: 12,
+  },
+  exploreLoadMoreText: { color: C.orange, fontSize: 11, fontFamily: mono, fontWeight: '900' },
   categoryRow: { gap: 8, paddingVertical: 2 },
   categoryChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: C.border, backgroundColor: C.s1 },
   categoryChipActive: { borderColor: C.orange, backgroundColor: C.orangeGlow },

@@ -652,14 +652,14 @@ def coerce_seed_entry(raw, group: dict, rank: int) -> dict:
     return entry
 
 
-def load_seed(path: Path) -> tuple[dict, list[dict]]:
+def load_seed(path: Path, rank_offset: int = 0) -> tuple[dict, list[dict]]:
     seed = json.loads(path.read_text())
     entries: list[dict] = []
     for group_idx, group in enumerate(seed.get("groups") or [], start=1):
         for rank, raw in enumerate(group.get("entries") or [], start=1):
             entry = coerce_seed_entry(raw, group, rank)
             entry["hero_rank"] = rank
-            entry["rank"] = group_idx * 100 + rank
+            entry["rank"] = rank_offset + group_idx * 100 + rank
             entries.append(entry)
     return seed, entries
 
@@ -1111,9 +1111,19 @@ def source_pack_from_seed(entry: dict, base_pack: dict, summary: dict, extract: 
             "url": source_url,
             "kind": "booking" if booking_url else "official",
         })
+    photos = list(base_pack.get("photos") or [])
+    if entry.get("image_url") and all(photo.get("url") != entry.get("image_url") for photo in photos):
+        photos.insert(0, {
+            "url": entry.get("image_url"),
+            "caption": entry.get("image_caption") or entry.get("title") or summary.get("title") or "",
+            "credit": entry.get("image_credit") or "Wikimedia Commons",
+            "source_url": entry.get("image_source_url") or source_url,
+            "license": entry.get("image_license") or entry.get("license") or "Wikimedia Commons",
+        })
     return {
         **base_pack,
         "sources": sources,
+        "photos": photos,
         "booking_url": booking_url,
         "license": entry.get("license") or base_pack.get("license") or "",
         "image_asset": entry.get("image_asset") or "",
@@ -1498,6 +1508,7 @@ def main() -> int:
     parser.add_argument("--out", default="dashboard/explore_catalog_v1.json")
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--seed", default=str(DEFAULT_SEED))
+    parser.add_argument("--extra-seed", action="append", default=[], help="Additional seed JSON file to append after the base seed")
     parser.add_argument("--download-images", action="store_true")
     parser.add_argument("--asset-dir", default=str(DEFAULT_ASSET_DIR))
     args = parser.parse_args()
@@ -1509,6 +1520,12 @@ def main() -> int:
     with httpx.Client(timeout=20, follow_redirects=True) as client:
         if seed_path.exists():
             seed, seed_entries = load_seed(seed_path)
+            for idx, extra in enumerate(args.extra_seed or [], start=1):
+                extra_path = Path(extra)
+                if not extra_path.exists():
+                    raise FileNotFoundError(f"extra seed not found: {extra_path}")
+                _, extra_entries = load_seed(extra_path, rank_offset=idx * 10000)
+                seed_entries.extend(extra_entries)
             if args.limit:
                 seed_entries = seed_entries[:args.limit]
             base_image_assets = build_existing_base_asset_map(seed_entries, existing_index)

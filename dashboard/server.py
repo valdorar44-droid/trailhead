@@ -682,6 +682,34 @@ def _explore_place_matches_categories(place_type: str, requested: set[str] | Non
         return bool(normalized.intersection({"trail", "trailhead", "attraction", "tourism"}))
     return bool(normalized.intersection({place_type, "attraction", "tourism", "place", "poi"}))
 
+def _explore_place_index_item(place: dict) -> dict:
+    summary = place.get("summary") or {}
+    source_pack = place.get("source_pack") or {}
+    sources = source_pack.get("sources") if isinstance(source_pack.get("sources"), list) else []
+    primary_source = source_pack.get("primary") or summary.get("source_title") or ""
+    source_url = (
+        source_pack.get("official_url")
+        or summary.get("source_url")
+        or next((item.get("url") for item in sources if isinstance(item, dict) and item.get("url")), "")
+        or ""
+    )
+    return {
+        "id": place.get("id") or summary.get("id") or "",
+        "title": summary.get("title") or "",
+        "category": summary.get("category") or place.get("category") or "",
+        "explore_group": summary.get("explore_group") or "",
+        "region": summary.get("region") or summary.get("state") or "",
+        "lat": summary.get("lat"),
+        "lng": summary.get("lng"),
+        "rank": summary.get("rank") or 999999,
+        "hero_rank": summary.get("hero_rank") or summary.get("rank") or 999999,
+        "tags": summary.get("tags") or [],
+        "thumbnail_url": summary.get("thumbnail_url") or summary.get("image_url") or "",
+        "source_title": primary_source,
+        "source_url": source_url,
+        "source_quality": (place.get("facts") or {}).get("source_quality") or source_pack.get("quality") or "",
+    }
+
 def _explore_place_to_nearby_place(place: dict, center_lat: float, center_lng: float) -> dict | None:
     summary = place.get("summary") or {}
     try:
@@ -14527,6 +14555,32 @@ async def explore_catalog():
     """Return the prebuilt featured Explore catalog. No request-time AI."""
     return _load_explore_catalog()
 
+@app.get("/api/explore/catalog/index")
+async def explore_catalog_index(q: str = "", category: str = "", limit: int = 500, cursor: int = 0):
+    """Return lightweight Explore cards for scalable browsing."""
+    catalog = _load_explore_catalog()
+    places = list(catalog.get("places") or [])
+    query_terms = [t for t in re.split(r"\s+", str(q or "").lower().strip()) if len(t) >= 2]
+    if query_terms:
+        places = [place for place in places if all(term in _explore_query_text(place) for term in query_terms)]
+    if category:
+        requested = {_normalize_place_category(category)}
+        places = [place for place in places if _explore_place_matches_categories(_catalog_place_category(place.get("summary") or {}), requested)]
+    places = sorted(places, key=lambda p: ((p.get("summary") or {}).get("hero_rank") or (p.get("summary") or {}).get("rank") or 999999))
+    cursor = max(0, int(cursor or 0))
+    limit = max(1, min(int(limit or 500), 1000))
+    items = [_explore_place_index_item(place) for place in places[cursor:cursor + limit]]
+    next_cursor = cursor + limit if cursor + limit < len(places) else None
+    return {
+        "schema_version": catalog.get("schema_version", 1),
+        "catalog_id": catalog.get("catalog_id", ""),
+        "generated_at": catalog.get("generated_at", 0),
+        "count": len(places),
+        "cursor": cursor,
+        "next_cursor": next_cursor,
+        "places": items,
+    }
+
 
 @app.get("/api/explore/places")
 async def explore_places(
@@ -14536,6 +14590,7 @@ async def explore_places(
     q: str = "",
     category: str = "",
     limit: int = 60,
+    cursor: int = 0,
 ):
     catalog = _load_explore_catalog()
     places = list(catalog.get("places") or [])
@@ -14560,8 +14615,11 @@ async def explore_places(
         places = sorted(ranked, key=lambda p: (p.get("summary") or {}).get("distance_m", 999999999))
     else:
         places = sorted(places, key=lambda p: (p.get("summary") or {}).get("rank", 9999))
+    cursor = max(0, int(cursor or 0))
     limit = max(1, min(limit, 100))
-    return {**catalog, "places": places[:limit], "mode": mode}
+    page = places[cursor:cursor + limit]
+    next_cursor = cursor + limit if cursor + limit < len(places) else None
+    return {**catalog, "places": page, "mode": mode, "count": len(places), "cursor": cursor, "next_cursor": next_cursor}
 
 
 def _find_explore_place(place_id: str) -> dict | None:
@@ -14569,6 +14627,14 @@ def _find_explore_place(place_id: str) -> dict | None:
         if str(place.get("id") or "") == str(place_id):
             return place
     return None
+
+
+@app.get("/api/explore/places/{place_id}")
+async def explore_place_detail(place_id: str):
+    place = _find_explore_place(place_id)
+    if not place:
+        raise HTTPException(404, "Explore place not found")
+    return place
 
 
 def _explore_camp_radius_mi(place: dict, requested: float | None = None) -> float:

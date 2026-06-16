@@ -351,14 +351,25 @@ export const api = {
     req<Record<string, string>>(`/api/trip/${tripId}/guide${generate ? '?generate=true' : ''}`),
   getExploreCatalog: () =>
     req<ExploreCatalog>('/api/explore/catalog'),
-  getExplorePlaces: (lat?: number, lng?: number, mode: 'featured' | 'nearby' | 'trip' = 'featured', limit = 60) => {
-    const qs = new URLSearchParams({ mode, limit: String(limit) });
+  getExploreCatalogIndex: (params: { q?: string; category?: string; limit?: number; cursor?: number } = {}) => {
+    const qs = new URLSearchParams({
+      limit: String(params.limit ?? 500),
+      cursor: String(params.cursor ?? 0),
+    });
+    if (params.q) qs.set('q', params.q);
+    if (params.category) qs.set('category', params.category);
+    return req<ExploreCatalogIndex>(`/api/explore/catalog/index?${qs.toString()}`);
+  },
+  getExplorePlaces: (lat?: number, lng?: number, mode: 'featured' | 'nearby' | 'trip' = 'featured', limit = 60, cursor = 0) => {
+    const qs = new URLSearchParams({ mode, limit: String(limit), cursor: String(cursor) });
     if (lat != null && lng != null) {
       qs.set('lat', String(lat));
       qs.set('lng', String(lng));
     }
     return req<ExploreCatalog>(`/api/explore/places?${qs.toString()}`);
   },
+  getExplorePlace: (placeId: string) =>
+    req<ExplorePlaceProfile>(`/api/explore/places/${encodeURIComponent(placeId)}`),
   getExploreCampgrounds: (placeId: string, limit = 24) =>
     req<ExploreCampgroundsResponse>(`/api/explore/places/${encodeURIComponent(placeId)}/campgrounds?limit=${limit}`)
       .then(res => ({ ...res, campgrounds: canonicalizeCampsitePins(res.campgrounds ?? []) })),
@@ -2470,7 +2481,35 @@ export interface ExploreCatalog {
   source: string;
   future_pack_compatible?: boolean;
   mode?: string;
+  count?: number;
+  cursor?: number;
+  next_cursor?: number | null;
   places: ExplorePlaceProfile[];
+}
+export interface ExploreCatalogIndexItem {
+  id: string;
+  title: string;
+  category: string;
+  explore_group?: string;
+  region?: string;
+  lat?: number | null;
+  lng?: number | null;
+  rank?: number;
+  hero_rank?: number;
+  tags?: string[];
+  thumbnail_url?: string;
+  source_title?: string;
+  source_url?: string;
+  source_quality?: string;
+}
+export interface ExploreCatalogIndex {
+  schema_version: number;
+  catalog_id: string;
+  generated_at: number;
+  count: number;
+  cursor: number;
+  next_cursor?: number | null;
+  places: ExploreCatalogIndexItem[];
 }
 export interface ExploreCampgroundsResponse {
   place_id: string;

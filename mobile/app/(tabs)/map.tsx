@@ -4251,7 +4251,10 @@ const buildMapHtml = (
       updateRouteScoutPreview([], [{lat:msg.lat,lng:msg.lng,name:msg.name||'Checking area',role:'focus'}]);
     }
     if(msg.type==='fly_to'&&msg.lat){
-      map.flyTo({center:[msg.lng,msg.lat],zoom:msg.zoom||14,duration:600});
+      var flyOpts={center:[msg.lng,msg.lat],zoom:msg.zoom||14,duration:msg.duration||600};
+      if(typeof msg.pitch==='number')flyOpts.pitch=msg.pitch;
+      if(typeof msg.bearing==='number')flyOpts.bearing=msg.bearing;
+      map.flyTo(flyOpts);
       // Country-level fly-to skips the pin (no point pinpointing the geographic center of CONUS)
       if(msg.zoom&&msg.zoom<=5)return;
       if(searchMarker){searchMarker.remove();searchMarker=null;}
@@ -7182,8 +7185,7 @@ function MapScreen() {
       setWikiArticles([]);
       setCampFullness(null);
       setCampWeather(null);
-      nativeMapRef.current?.flyTo(camp.lat, camp.lng, 12, camp.name);
-      webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: camp.lat, lng: camp.lng, zoom: 12, name: camp.name }));
+      focusMapSelectionPoint({ lat: camp.lat, lng: camp.lng, name: camp.name }, 12, 'place');
       if (camp.id) api.getCampFullness(camp.id).then(r => setCampFullness(r)).catch(() => {});
       if (camp.lat && camp.lng) api.getWeather(camp.lat, camp.lng, 3, weatherUnitMode).then(r => setCampWeather(r)).catch(() => {});
       return;
@@ -7215,8 +7217,6 @@ function MapScreen() {
         },
       };
       openTrailFeature(trailFeature);
-      const zoom = 13;
-      webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: place.lat, lng: place.lng, zoom, name: place.name }));
       setQuickToast('Trail selected on map');
       setTimeout(() => setQuickToast(''), 2200);
       return;
@@ -7238,9 +7238,7 @@ function MapScreen() {
       geometry_ref: isExploreTrail ? place.geometryRef : undefined,
     });
     const zoom = isExploreTrail ? 13 : 12;
-    if (isExploreTrail) nativeMapRef.current?.highlightTrail(place.lat, place.lng, place.name);
-    else nativeMapRef.current?.flyTo(place.lat, place.lng, zoom, place.name);
-    webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: place.lat, lng: place.lng, zoom, name: place.name }));
+    focusMapSelectionPoint({ lat: place.lat, lng: place.lng, name: place.name }, zoom, isExploreTrail ? 'trail' : 'place');
   }, [pendingMapSelection, setPendingMapSelection, weatherUnitMode]);
 
   useEffect(() => {
@@ -10902,6 +10900,49 @@ function MapScreen() {
     webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: place.lat, lng: place.lng, zoom, name: place.name }));
   }
 
+  function map3dFocusOptions(zoom: number, kind: 'place' | 'trail' = 'place') {
+    if (!map3dEnabled || navMode) return { zoom, duration: 600 };
+    return {
+      zoom: clampNumber(Math.max(zoom, kind === 'trail' ? 13 : 12.5), 3, 18),
+      pitch: kind === 'trail' ? 62 : 58,
+      bearing: -24,
+      duration: 760,
+    };
+  }
+
+  function focusMapSelectionPoint(
+    point: { lat: number; lng: number; name?: string },
+    zoom = 12,
+    kind: 'place' | 'trail' = 'place',
+  ) {
+    const camera = map3dFocusOptions(zoom, kind);
+    if (kind === 'trail') {
+      nativeMapRef.current?.highlightTrail(point.lat, point.lng, point.name);
+    } else if (map3dEnabled && !navMode && nativeMapRef.current?.flyToCamera) {
+      nativeMapRef.current.flyToCamera({
+        lat: point.lat,
+        lng: point.lng,
+        zoom: camera.zoom,
+        pitch: camera.pitch,
+        bearing: camera.bearing,
+        duration: camera.duration,
+        mode: 'flyTo',
+      });
+    } else {
+      nativeMapRef.current?.flyTo(point.lat, point.lng, camera.zoom, point.name);
+    }
+    webRef.current?.postMessage(JSON.stringify({
+      type: 'fly_to',
+      lat: point.lat,
+      lng: point.lng,
+      zoom: camera.zoom,
+      pitch: camera.pitch,
+      bearing: camera.bearing,
+      duration: camera.duration,
+      name: point.name,
+    }));
+  }
+
   function openCopilotPlaceCard(place: SearchPlace, focusZoom = 13) {
     const dist = userLoc ? haversineKm(userLoc.lat, userLoc.lng, place.lat, place.lng) : place.dist ?? null;
     const isMapboxPlace = String(place.source || place.source_label || '').toLowerCase().includes('mapbox');
@@ -14443,7 +14484,7 @@ function MapScreen() {
   }
 
   function openTrailFeature(feature: TrailFeature) {
-    nativeMapRef.current?.highlightTrail(feature.lat, feature.lng, feature.name);
+    focusMapSelectionPoint({ lat: feature.lat, lng: feature.lng, name: feature.name }, 13, 'trail');
     setSelectedTrailProfile(null);
     setTrailRouteBuilderOpen(false);
     setSavedTrailRouteOpenId(null);
@@ -14987,8 +15028,6 @@ function MapScreen() {
     setShowDiscoveryPanel(false);
     setShowTrailList(false);
     setShowLayerSheet(false);
-    nativeMapRef.current?.highlightTrail(trail.lat, trail.lng, trail.name);
-    webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: trail.lat, lng: trail.lng, zoom: 13 }));
     setTimeout(() => openTrailFeature(trail), 180);
   }
 

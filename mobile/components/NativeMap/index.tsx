@@ -1305,9 +1305,16 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       lastFlyToRef.current = Date.now();
       lastCamRef.current = Date.now();
       programmaticCameraUntilRef.current = Date.now() + 1100;
-      rememberFreeCamera(lat, lng, zoom, navMode ? freeCameraDefaultRef.current.pitch : showTerrain ? 68 : 0);
-      emitDebugEvent('camera:set:flyTo', { lat, lng, zoom, programmatic_until_ms: programmaticCameraUntilRef.current - Date.now() });
-      camRef.current?.setCamera({ centerCoordinate: [lng, lat], zoomLevel: zoom, animationDuration: 250, animationMode: 'flyTo' });
+      const pitch = navMode ? freeCameraDefaultRef.current.pitch : showTerrain ? 62 : 0;
+      rememberFreeCamera(lat, lng, zoom, pitch);
+      emitDebugEvent('camera:set:flyTo', { lat, lng, zoom, pitch, programmatic_until_ms: programmaticCameraUntilRef.current - Date.now() });
+      camRef.current?.setCamera({
+        centerCoordinate: [lng, lat],
+        zoomLevel: zoom,
+        pitch,
+        animationDuration: showTerrain && !navMode ? 620 : 250,
+        animationMode: 'flyTo',
+      } as any);
     },
     flyToCamera(options) {
       const lat = Number(options.lat);
@@ -1453,9 +1460,10 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       lastFlyToRef.current = Date.now();
       lastCamRef.current = Date.now();
       programmaticCameraUntilRef.current = Date.now() + 1100;
-      rememberFreeCamera(lat, lng, 13, navMode ? freeCameraDefaultRef.current.pitch : showTerrain ? 68 : 0);
-      emitDebugEvent('camera:set:highlightTrail', { lat, lng, name: name ?? null });
-      camRef.current?.setCamera({ centerCoordinate: [lng, lat], zoomLevel: 13, animationDuration: 260, animationMode: 'flyTo' });
+      const pitch = navMode ? freeCameraDefaultRef.current.pitch : showTerrain ? 62 : 0;
+      rememberFreeCamera(lat, lng, 13, pitch);
+      emitDebugEvent('camera:set:highlightTrail', { lat, lng, name: name ?? null, pitch });
+      camRef.current?.setCamera({ centerCoordinate: [lng, lat], zoomLevel: 13, pitch, animationDuration: showTerrain && !navMode ? 640 : 260, animationMode: 'flyTo' } as any);
       setTimeout(async () => {
         if (!mapRef.current) return;
         try {

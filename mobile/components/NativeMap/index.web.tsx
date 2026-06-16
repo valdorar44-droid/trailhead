@@ -498,7 +498,13 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const premiumStyle = (props.premiumMapStyle as PremiumMapStyle | undefined) ?? 'standard';
 
   useImperativeHandle(ref, () => ({
-    flyTo: (lat: number, lng: number, zoom = 11) => mapRef.current?.flyTo?.({ center: [lng, lat], zoom, essential: true }),
+    flyTo: (lat: number, lng: number, zoom = 11) => mapRef.current?.flyTo?.({
+      center: [lng, lat],
+      zoom,
+      ...(props.showTerrain ? { pitch: 58 } : {}),
+      duration: props.showTerrain ? 620 : 300,
+      essential: true,
+    }),
     flyToCamera: (options: NativeMapCameraOptions) => {
       const map = mapRef.current;
       const lat = Number(options.lat);
@@ -542,7 +548,13 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     locate: (lat: number, lng: number) => mapRef.current?.flyTo?.({ center: [lng, lat], zoom: 13, essential: true }),
     loadRouteFrom: noop,
     rerouteFrom: noop,
-    routeToSearch: (lat: number, lng: number) => mapRef.current?.flyTo?.({ center: [lng, lat], zoom: 12, essential: true }),
+    routeToSearch: (lat: number, lng: number) => mapRef.current?.flyTo?.({
+      center: [lng, lat],
+      zoom: 12,
+      ...(props.showTerrain ? { pitch: 58 } : {}),
+      duration: props.showTerrain ? 620 : 300,
+      essential: true,
+    }),
     resetRoute: noop,
     stopNavigation: noop,
     highlightTrail: (lat: number, lng: number, name?: string) => {

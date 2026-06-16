@@ -9,7 +9,7 @@ type Props = {
   sortLabel?: string;
 };
 
-export function ExploreFilterRow({ shownCount, sourceLabel = 'Official + Community', sortLabel = 'Best match' }: Props) {
+export function ExploreFilterRow({ shownCount, sourceLabel = 'Checked details', sortLabel = 'Best match' }: Props) {
   const C = useTheme();
   const items = [
     { icon: 'list-outline', label: `${shownCount} shown` },
@@ -50,4 +50,3 @@ const styles = StyleSheet.create({
   },
   label: { fontSize: 12, fontWeight: '800' },
 });
-

@@ -2333,6 +2333,7 @@ export interface ExplorePlaceProfile {
   best_season?: string;
   access?: Record<string, unknown>;
   safety?: Record<string, unknown>;
+  trails?: ExploreTrailCard[];
   profile: {
     hook: string;
     summary?: string;
@@ -2369,6 +2370,27 @@ export interface ExplorePlaceProfile {
   };
   facts: { coordinates?: string; source_url?: string; source_title?: string; official_url?: string; source_quality?: string; last_updated?: number };
   attribution: string;
+}
+export interface ExploreTrailCard {
+  id: string;
+  title: string;
+  difficulty: 'Easy' | 'Moderate' | 'Hard' | string;
+  distance_mi: number;
+  route_type: string;
+  elevation_gain_ft?: number;
+  typical_time?: string;
+  area?: string;
+  image_url?: string;
+  summary: string;
+  description?: string;
+  best_season?: string;
+  dogs?: string;
+  bikes?: string;
+  tags?: string[];
+  highlights?: string[];
+  lat?: number | null;
+  lng?: number | null;
+  source_url?: string;
 }
 export interface ExploreSourcePackItem {
   kind?: string;

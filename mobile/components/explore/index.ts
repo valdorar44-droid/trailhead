@@ -4,5 +4,6 @@ export { ExploreFilterRow } from './ExploreFilterRow';
 export { ExploreHero } from './ExploreHero';
 export { ExploreModeTabs } from './ExploreModeTabs';
 export { ExplorePlaceCard } from './ExplorePlaceCard';
+export { ExploreTrailArea } from './ExploreTrailArea';
 export * from './exploreDisplay';
 export * from './curatedExplorePlaces';

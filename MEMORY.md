@@ -132,6 +132,46 @@ Deploy note:
 - `python3 scripts/qa_route_matrix.py --limit 3` passed 3 of 3 scenarios with planner context enabled.
 - Cross-USA still routes through `osrm-fallback`, but now preserves the expected optional side-stop repair metadata.
 
+## Explore Mobile Web Phone Audit - June 16, 2026
+
+User asked to audit the Explore web app at a 6.5-6.9 inch phone reference size and clean up the Yosemite-heavy/cut-off/dev-ish wording.
+
+Implemented OTA-safe mobile/web changes:
+
+- Installed missing web dependency `@lottiefiles/dotlottie-react` so Expo web can bundle `lottie-react-native`.
+- Added curated `Yosemite Trails` data with six detailed trail cards: Mist Trail, Half Dome, Mirror Lake Loop, Upper Yosemite Fall Trail, Taft Point & The Fissures, and Mariposa Grove.
+- Added `ExploreTrailArea` so opening Yosemite shows a trail list with photos, distance, route type, elevation gain, time, difficulty, season, dog/bike notes, highlights, and Route/Map actions.
+- The trail filter pill now cycles All/Easy/Hard instead of looking like a dead control.
+- Fixed Explore category matching so category rails do not bleed unrelated cards into Camp/Trails/etc.
+- Removed/replaced confusing UI copy:
+  - `Timing notes` -> short season labels like `Book early`, `Road-open season`, `Check hours`.
+  - `Official + Community` -> `Checked details` / `Multiple sources`.
+  - route-planner/dev-ish card copy -> plain trip-facing descriptions.
+- Wired `Near this stop` actions in the Explore detail sheet:
+  - Weather now calls `/api/weather` and renders a `WEATHER AT THIS STOP` card.
+  - Trails switches to the Summary trail list.
+  - Route/Map/services buttons now call existing map/route actions instead of doing nothing.
+- Skipped the curated Explore campground endpoint for local `explore:trails:*` IDs so opening Yosemite does not log a 404; it uses nearby-camp fallback by coordinates.
+
+Verification:
+
+- `cd mobile && npx tsc --noEmit` passed.
+- `cd mobile && npx expo export --platform web --output-dir /tmp/trailhead-explore-phone-check` passed; only existing `react-native-webrtc` export warning.
+- Playwright Chromium at `430x932`:
+  - Explore loaded with 0 console errors.
+  - Trails filter showed `Yosemite Trails`.
+  - Search for `Yosemite Trails` opened the detail sheet.
+  - Mist Trail expanded with `3.2 mi`, `Out & Back`, `700 ft`, `2-3 hrs`.
+  - Trail filter switched to `EASY` and reduced the list to four easy trails.
+  - Weather `Forecast` button rendered `WEATHER AT THIS STOP` with hi/lo, wind, and precip.
+  - Screenshot saved at `mobile/.playwright-cli/page-2026-06-16T05-03-48-520Z.png`.
+- `git diff --check` passed.
+
+Notes:
+
+- Mariposa Grove currently uses a verified Yosemite image fallback because the first guessed Wikimedia image URL returned 404.
+- No Expo OTA was published during this specific phone-web audit pass; publish separately if the user wants it live immediately.
+
 ## Current Design Direction
 
 - The user wants a broader premium redesign direction because the map feels confusing and some pages are inconsistent.

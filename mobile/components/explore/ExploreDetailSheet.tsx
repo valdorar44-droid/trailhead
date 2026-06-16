@@ -1,9 +1,10 @@
 import React from 'react';
 import { Image, Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import type { ExplorePlaceProfile, ExploreSourcePackItem } from '@/lib/api';
+import type { ExplorePlaceProfile, ExploreSourcePackItem, ExploreTrailCard } from '@/lib/api';
 import { TrailheadButton, TrailheadButtonDock } from '@/components/TrailheadUI';
 import { mono, useTheme } from '@/lib/design';
+import { ExploreTrailArea } from './ExploreTrailArea';
 import {
   getExploreCategoryColor,
   getExploreDisplayCategory,
@@ -18,6 +19,7 @@ import {
   getExploreSourceBadge,
   getExploreTrustBadge,
   getExploreWhyCopy,
+  type ExploreNearbyModule,
   type ExploreDisplayContext,
 } from './exploreDisplay';
 
@@ -37,11 +39,15 @@ type Props = {
   storyScrollRef: React.RefObject<ScrollView | null>;
   campgroundsSlot?: React.ReactNode;
   relatedSlot?: React.ReactNode;
+  weatherSlot?: React.ReactNode;
   onClose: () => void;
   onPlayAudio: () => void;
   onShowArea: () => void;
   onRoute: () => void;
   onToggleSave: () => void;
+  onNearbyAction?: (module: ExploreNearbyModule) => void;
+  onTrailMap?: (trail: ExploreTrailCard) => void;
+  onTrailRoute?: (trail: ExploreTrailCard) => void;
   mediaUrl: (url?: string | null) => string;
 };
 
@@ -59,11 +65,15 @@ export function ExploreDetailSheet({
   storyScrollRef,
   campgroundsSlot,
   relatedSlot,
+  weatherSlot,
   onClose,
   onPlayAudio,
   onShowArea,
   onRoute,
   onToggleSave,
+  onNearbyAction,
+  onTrailMap,
+  onTrailRoute,
   mediaUrl,
 }: Props) {
   const C = useTheme();
@@ -183,6 +193,8 @@ export function ExploreDetailSheet({
                   </View>
                 </View>
 
+                <ExploreTrailArea place={place} mediaUrl={mediaUrl} onTrailMap={onTrailMap} onTrailRoute={onTrailRoute} />
+
                 {planNotes.length > 0 && (
                   <View style={[styles.planCard, { borderColor: C.border, backgroundColor: C.s1 }]}>
                     <View style={styles.planTop}>
@@ -217,7 +229,7 @@ export function ExploreDetailSheet({
                   </View>
                 </View>
 
-                <Text style={[styles.blockHeading, { color: C.text }]}>Source & Freshness</Text>
+                <Text style={[styles.blockHeading, { color: C.text }]}>Details & Updates</Text>
                 <View style={styles.sourceGrid}>
                   <SourceCard
                     icon="shield-checkmark-outline"
@@ -228,7 +240,7 @@ export function ExploreDetailSheet({
                   <SourceCard
                     icon="calendar-outline"
                     title={getExploreFreshnessLabel(place)}
-                    body={place.facts.last_updated ? 'Source date is included with this guide.' : 'Check official sources for current access, fees, and closures.'}
+                    body={place.facts.last_updated ? 'Update date is included with this guide.' : 'Check current access, fees, and closures before you go.'}
                     tone="#15803d"
                   />
                 </View>
@@ -246,15 +258,22 @@ export function ExploreDetailSheet({
             <Text style={[styles.blockHeading, { color: C.text }]}>Near this stop</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.moduleRail}>
               {modules.map(module => (
-                <View key={module.label} style={[styles.moduleCard, { borderColor: C.border, backgroundColor: C.s1 }]}>
+                <TouchableOpacity
+                  key={module.label}
+                  style={[styles.moduleCard, { borderColor: C.border, backgroundColor: C.s1 }]}
+                  activeOpacity={0.86}
+                  onPress={() => onNearbyAction?.(module)}
+                >
                   <Ionicons name={module.icon as any} size={24} color={module.tone} />
-                  <View>
+                  <View style={styles.moduleText}>
                     <Text style={[styles.moduleTitle, { color: C.text }]} numberOfLines={1}>{module.label}</Text>
                     <Text style={[styles.moduleDetail, { color: C.text3 }]} numberOfLines={1}>{module.detail}</Text>
                   </View>
-                </View>
+                  <Ionicons name="chevron-forward" size={15} color={C.text3} />
+                </TouchableOpacity>
               ))}
             </ScrollView>
+            {weatherSlot}
           </>
         )}
 
@@ -299,7 +318,7 @@ function SourcePack({ place, mediaUrl }: { place: ExplorePlaceProfile; mediaUrl:
   return (
     <View style={[styles.pack, { borderColor: C.border, backgroundColor: C.s1 }]}>
       <View style={styles.packTop}>
-        <Text style={[styles.blockHeading, { color: C.text, marginBottom: 0 }]}>Source Details</Text>
+        <Text style={[styles.blockHeading, { color: C.text, marginBottom: 0 }]}>More Details</Text>
         {!!pack.primary && <Text style={[styles.packBadge, { color: C.text3 }]}>{sourcePublisherLabel(pack.primary)}</Text>}
       </View>
       {!!pack.operating_hours && (
@@ -347,7 +366,7 @@ function sourceBodyForPlace(place: ExplorePlaceProfile) {
   if (/wiki|source pack/i.test(raw)) {
     return 'Curated reference details are included. Confirm current access, fees, closures, and rules before you go.';
   }
-  return raw || place.attribution || 'Source details available. Verify access before you go.';
+  return raw || place.attribution || 'Details available. Verify access before you go.';
 }
 
 function sourcePublisherLabel(primary: string) {
@@ -411,7 +430,8 @@ const styles = StyleSheet.create({
   sourceTitle: { fontSize: 14, lineHeight: 18, fontWeight: '900', marginBottom: 4 },
   sourceBody: { fontSize: 12, lineHeight: 17, fontWeight: '600' },
   moduleRail: { gap: 10, paddingHorizontal: 20, paddingBottom: 18 },
-  moduleCard: { minWidth: 146, minHeight: 64, borderWidth: 1, borderRadius: 14, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  moduleCard: { minWidth: 158, minHeight: 64, borderWidth: 1, borderRadius: 14, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 9 },
+  moduleText: { flex: 1, minWidth: 0 },
   moduleTitle: { fontSize: 13, fontWeight: '900' },
   moduleDetail: { fontSize: 12, fontWeight: '700', marginTop: 2 },
   panel: { margin: 20, borderWidth: 1, borderRadius: 16, padding: 12 },

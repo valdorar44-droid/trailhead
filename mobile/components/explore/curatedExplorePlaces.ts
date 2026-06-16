@@ -1,4 +1,4 @@
-import type { ExplorePlaceProfile, ExploreSourcePackItem } from '@/lib/api';
+import type { ExplorePlaceProfile, ExploreSourcePackItem, ExploreTrailCard } from '@/lib/api';
 
 type WaterfallSeed = {
   title: string;
@@ -18,6 +18,141 @@ type WaterfallSeed = {
 };
 
 const LAST_UPDATED = 1781496931;
+const YOSEMITE_TRAILS_URL = 'https://www.nps.gov/yose/planyourvisit/hiking.htm';
+const YOSEMITE_FALLS_IMAGE = 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/38/Yosemite_falls_winter_2010.JPG/960px-Yosemite_falls_winter_2010.JPG';
+const VERNAL_FALL_IMAGE = 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/36/Vernal_Fall%2C_Yosemite_NP%2C_CA%2C_US_-_Diliff.jpg/960px-Vernal_Fall%2C_Yosemite_NP%2C_CA%2C_US_-_Diliff.jpg';
+const HALF_DOME_IMAGE = 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/90/Half_dome_yosemite_nationalpark.JPG/1280px-Half_dome_yosemite_nationalpark.JPG';
+const MIRROR_LAKE_IMAGE = 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/70/Yosemite_national_park_mirror_lake_2010u.JPG/1280px-Yosemite_national_park_mirror_lake_2010u.JPG';
+const GLACIER_POINT_IMAGE = 'https://upload.wikimedia.org/wikipedia/commons/thumb/2/21/Glacier_Point_at_Sunset%2C_Yosemite_NP%2C_CA%2C_US_-_Diliff.jpg/1280px-Glacier_Point_at_Sunset%2C_Yosemite_NP%2C_CA%2C_US_-_Diliff.jpg';
+
+const YOSEMITE_TRAILS: ExploreTrailCard[] = [
+  {
+    id: 'yosemite-mist-trail',
+    title: 'Mist Trail',
+    difficulty: 'Easy',
+    distance_mi: 3.2,
+    route_type: 'Out & Back',
+    elevation_gain_ft: 700,
+    typical_time: '2-3 hrs',
+    area: 'Yosemite Valley',
+    image_url: VERNAL_FALL_IMAGE,
+    summary: 'Close-up Vernal Fall access with mist, granite steps, and big valley views.',
+    description: 'A popular Yosemite Valley hike that climbs toward Vernal Fall. Expect wet steps in high flow and heavy use on peak days.',
+    best_season: 'Spring to early summer flow',
+    dogs: 'Not allowed',
+    bikes: 'Not allowed',
+    tags: ['Waterfalls', 'Popular'],
+    highlights: ['Waterfalls', 'Scenic Views', 'Wildflowers', 'Family Friendly'],
+    lat: 37.7325,
+    lng: -119.5586,
+    source_url: 'https://www.nps.gov/yose/planyourvisit/vernalnevadatrail.htm',
+  },
+  {
+    id: 'yosemite-half-dome',
+    title: 'Half Dome',
+    difficulty: 'Hard',
+    distance_mi: 14.2,
+    route_type: 'Out & Back',
+    elevation_gain_ft: 4800,
+    typical_time: '10-12 hrs',
+    area: 'High Country',
+    image_url: HALF_DOME_IMAGE,
+    summary: 'Permit-only cable route with major elevation, exposure, and all-day commitment.',
+    description: 'Half Dome is a long, exposed Yosemite classic. Permits, weather, water, and turnaround time matter before starting.',
+    best_season: 'Cable season only',
+    dogs: 'Not allowed',
+    bikes: 'Not allowed',
+    tags: ['Iconic', 'Challenging'],
+    highlights: ['Summit', 'Permits', 'Exposure', 'Big Views'],
+    lat: 37.7460,
+    lng: -119.5332,
+    source_url: 'https://www.nps.gov/yose/planyourvisit/halfdome.htm',
+  },
+  {
+    id: 'yosemite-mirror-lake-loop',
+    title: 'Mirror Lake Loop',
+    difficulty: 'Easy',
+    distance_mi: 2.0,
+    route_type: 'Loop',
+    elevation_gain_ft: 100,
+    typical_time: '1-2 hrs',
+    area: 'Yosemite Valley',
+    image_url: MIRROR_LAKE_IMAGE,
+    summary: 'Easy valley walk to seasonal water and Half Dome reflections.',
+    description: 'Mirror Lake is a low-effort Yosemite Valley stop with seasonal water, shaded walking, and easy add-on distance.',
+    best_season: 'Spring and early summer',
+    dogs: 'Paved section only',
+    bikes: 'Paved section only',
+    tags: ['Family Friendly', 'Scenic'],
+    highlights: ['Lake', 'Reflections', 'Easy Walk', 'Half Dome'],
+    lat: 37.7485,
+    lng: -119.5491,
+    source_url: 'https://www.nps.gov/yose/planyourvisit/mirrorlaketrail.htm',
+  },
+  {
+    id: 'yosemite-upper-yosemite-fall',
+    title: 'Upper Yosemite Fall Trail',
+    difficulty: 'Hard',
+    distance_mi: 7.2,
+    route_type: 'Out & Back',
+    elevation_gain_ft: 2700,
+    typical_time: '6-8 hrs',
+    area: 'Yosemite Valley',
+    image_url: YOSEMITE_FALLS_IMAGE,
+    summary: 'Steep climb to the top of Yosemite Falls with exposed switchbacks.',
+    description: 'A demanding valley climb with heat, drop-offs, and major payoff views. Start early and carry enough water.',
+    best_season: 'Spring to early summer flow',
+    dogs: 'Not allowed',
+    bikes: 'Not allowed',
+    tags: ['Waterfalls', 'Climb'],
+    highlights: ['Waterfalls', 'Valley Views', 'Steep Grade', 'Exposure'],
+    lat: 37.7426,
+    lng: -119.6024,
+    source_url: 'https://www.nps.gov/yose/planyourvisit/yosemitefallstrail.htm',
+  },
+  {
+    id: 'yosemite-taft-point',
+    title: 'Taft Point & The Fissures',
+    difficulty: 'Easy',
+    distance_mi: 2.2,
+    route_type: 'Out & Back',
+    elevation_gain_ft: 200,
+    typical_time: '1-2 hrs',
+    area: 'Glacier Point Road',
+    image_url: GLACIER_POINT_IMAGE,
+    summary: 'Short forest approach to cliff-edge views and deep granite fissures.',
+    description: 'Taft Point is short but exposed. Stay back from cliff edges and check Glacier Point Road status before driving up.',
+    best_season: 'Road-open season',
+    dogs: 'Not allowed',
+    bikes: 'Not allowed',
+    tags: ['Scenic', 'Cliff Views'],
+    highlights: ['Fissures', 'Views', 'Sunset', 'Short Hike'],
+    lat: 37.7128,
+    lng: -119.6047,
+    source_url: YOSEMITE_TRAILS_URL,
+  },
+  {
+    id: 'yosemite-mariposa-grove',
+    title: 'Mariposa Grove',
+    difficulty: 'Easy',
+    distance_mi: 2.0,
+    route_type: 'Loop',
+    elevation_gain_ft: 300,
+    typical_time: '1.5-3 hrs',
+    area: 'South Entrance',
+    image_url: MIRROR_LAKE_IMAGE,
+    summary: 'Giant sequoia grove walks with longer loop options beyond the arrival area.',
+    description: 'Mariposa Grove gives Yosemite a forest-focused trail day. Shuttle access, snow, and restoration closures can affect plans.',
+    best_season: 'Spring through fall',
+    dogs: 'Not allowed',
+    bikes: 'Not allowed',
+    tags: ['Sequoias', 'Family Friendly'],
+    highlights: ['Giant Sequoias', 'Forest', 'Loop Options', 'Shade'],
+    lat: 37.5116,
+    lng: -119.6008,
+    source_url: 'https://www.nps.gov/yose/planyourvisit/mg.htm',
+  },
+];
 
 const WATERFALLS: WaterfallSeed[] = [
   {
@@ -166,19 +301,87 @@ const WATERFALLS: WaterfallSeed[] = [
   },
 ];
 
-export const CURATED_EXPLORE_PLACES: ExplorePlaceProfile[] = WATERFALLS.map((seed, index) => buildWaterfallPlace(seed, index));
+const YOSEMITE_TRAIL_AREA = buildYosemiteTrailArea();
+
+export const CURATED_EXPLORE_PLACES: ExplorePlaceProfile[] = [
+  YOSEMITE_TRAIL_AREA,
+  ...WATERFALLS.map((seed, index) => buildWaterfallPlace(seed, index)),
+];
 
 export function mergeCuratedExplorePlaces(places: ExplorePlaceProfile[]) {
+  const enrichedPlaces = places.map(place => isYosemiteTrailPlace(place) ? withYosemiteTrailDetails(place) : place);
+  const curatedPlaces = CURATED_EXPLORE_PLACES.filter(place => place.id !== YOSEMITE_TRAIL_AREA.id);
   const seen = new Set<string>();
   const merged: ExplorePlaceProfile[] = [];
-  for (const place of [...places, ...CURATED_EXPLORE_PLACES]) {
+  for (const place of [YOSEMITE_TRAIL_AREA, ...enrichedPlaces, ...curatedPlaces]) {
     const key = `${normalizeTitle(place.summary.title)}:${String(place.summary.state || '').toUpperCase()}`;
+    if (isLooseYosemiteTrailPlace(place) && seen.has('yosemite-trails:CA')) continue;
     if (seen.has(place.id) || seen.has(key)) continue;
     seen.add(place.id);
     seen.add(key);
     merged.push(place);
   }
   return merged;
+}
+
+function isYosemiteTrailPlace(place: ExplorePlaceProfile) {
+  const title = normalizeTitle(String(place.summary.title || ''));
+  const state = String(place.summary.state || '').toUpperCase();
+  const categoryText = normalizeTitle([
+    place.summary.category,
+    place.category,
+    ...(Array.isArray(place.subcategories) ? place.subcategories : []),
+  ].filter(Boolean).join(' '));
+  return state === 'CA' && title.includes('yosemite') && title.includes('trail') && categoryText.includes('trail');
+}
+
+function isLooseYosemiteTrailPlace(place: ExplorePlaceProfile) {
+  const title = normalizeTitle(String(place.summary.title || ''));
+  const state = String(place.summary.state || '').toUpperCase();
+  return state === 'CA' && title.includes('yosemite') && title.includes('trail');
+}
+
+function withYosemiteTrailDetails(place: ExplorePlaceProfile): ExplorePlaceProfile {
+  const guide = YOSEMITE_TRAIL_AREA;
+  return {
+    ...place,
+    category: guide.category,
+    subcategories: guide.subcategories,
+    quality: guide.quality,
+    quality_score: Math.max(Number((place as any).quality_score || 0), Number((guide as any).quality_score || 0)),
+    search_aliases: Array.from(new Set([
+      ...((place as any).search_aliases || []),
+      ...((guide as any).search_aliases || []),
+    ])),
+    best_season: (guide as any).best_season,
+    access: (guide as any).access,
+    safety: (guide as any).safety,
+    trails: YOSEMITE_TRAILS,
+    sources: (guide as any).sources,
+    card: {
+      ...((place as any).card || {}),
+      ...((guide as any).card || {}),
+    },
+    summary: {
+      ...place.summary,
+      ...guide.summary,
+      id: place.summary.id || place.id,
+      rank: Math.min(Number(place.summary.rank ?? 99), Number(guide.summary.rank ?? 12)),
+      hero_rank: Math.min(Number(place.summary.hero_rank ?? place.summary.rank ?? 99), Number(guide.summary.hero_rank ?? 12)),
+    },
+    profile: {
+      ...place.profile,
+      ...guide.profile,
+    },
+    audio_script: guide.audio_script,
+    wiki_extract: guide.wiki_extract,
+    source_pack: guide.source_pack,
+    facts: {
+      ...place.facts,
+      ...guide.facts,
+    },
+    attribution: guide.attribution,
+  };
 }
 
 function buildWaterfallPlace(seed: WaterfallSeed, index: number): ExplorePlaceProfile {
@@ -199,7 +402,7 @@ function buildWaterfallPlace(seed: WaterfallSeed, index: number): ExplorePlacePr
       url: seed.officialUrl,
     },
   ];
-  const story = `${seed.title} is a waterfall planning anchor in ${seed.region}. ${seed.summary} Check current access, weather, closures, and local rules before building a day around it.`;
+  const story = `${seed.title} is a waterfall stop in ${seed.region}. ${seed.summary} Check current access, weather, closures, and local rules before building a day around it.`;
   return {
     id,
     category: 'Waterfall',
@@ -291,6 +494,107 @@ function buildWaterfallPlace(seed: WaterfallSeed, index: number): ExplorePlacePr
       last_updated: LAST_UPDATED,
     },
     attribution: 'Official access source + Wikimedia Commons image reference',
+  };
+}
+
+function buildYosemiteTrailArea(): ExplorePlaceProfile {
+  const id = 'explore:trails:yosemite-trails';
+  const story = 'Yosemite Trails brings the valley classics into one place: waterfall walks, Half Dome permits, family loops, cliff viewpoints, and giant sequoia routes. Pick the trail by distance, route type, elevation, and current access.';
+  return {
+    id,
+    category: 'Trails',
+    subcategories: ['trails', 'hiking'],
+    quality: 'official_plus_open_media',
+    quality_score: 92,
+    search_aliases: ['yosemite trails', 'yosemite hikes', 'mist trail', 'half dome', 'mirror lake', 'upper yosemite fall'],
+    best_season: 'Year-round, check road and trail status',
+    access: { summary: 'Yosemite Valley, Glacier Point Road, and South Entrance trailheads' },
+    safety: { summary: 'Permits, snow, heat, wet rock, and cliff exposure vary by trail' },
+    trails: YOSEMITE_TRAILS,
+    sources: [
+      { title: 'Yosemite hiking', publisher: 'National Park Service', url: YOSEMITE_TRAILS_URL, kind: 'official' },
+      { title: 'Open Yosemite trail imagery', publisher: 'Wikimedia Commons', url: 'https://commons.wikimedia.org/wiki/Category:Yosemite_National_Park', kind: 'open_media' },
+    ],
+    card: {
+      title: 'Yosemite Trails',
+      region: 'Yosemite National Park',
+      headline: 'Valley walks, waterfall climbs, big-view routes, and permit hikes in one trail list.',
+      summary: 'Choose Yosemite hikes by distance, route type, elevation, time, and current access.',
+      highlight: 'Open the area to compare Mist Trail, Half Dome, Mirror Lake, Yosemite Falls, Taft Point, and sequoia routes.',
+      facts: ['6 trails', 'Easy - Hard', 'Year-round status checks', 'Official trail pages'],
+    },
+    summary: {
+      id,
+      title: 'Yosemite Trails',
+      category: 'Trails',
+      explore_group: 'trails',
+      state: 'CA',
+      region: 'Yosemite National Park',
+      lat: 37.7485,
+      lng: -119.5870,
+      rank: 12,
+      hero_rank: 12,
+      tags: ['trails', 'hiking', 'waterfalls', 'views', 'loops', 'yosemite'],
+      badges: ['Trails'],
+      hook: 'Yosemite hikes with distance, route type, elevation, and trail-specific details.',
+      short_description: 'Choose Yosemite hikes by distance, route type, elevation, time, and current access.',
+      thumbnail_url: GLACIER_POINT_IMAGE,
+      image_url: GLACIER_POINT_IMAGE,
+      image_credit: 'Wikimedia Commons',
+      image_license: 'Open image reference',
+      source_url: YOSEMITE_TRAILS_URL,
+      source_title: 'National Park Service hiking page',
+    },
+    profile: {
+      hook: 'Explore trails in and around Yosemite National Park.',
+      summary: 'From easy valley walks to exposed all-day routes, Yosemite trails need distance, route type, elevation, access, and weather checks.',
+      story,
+      why_it_matters: 'Yosemite has very different trail days in the same area: short loops, wet waterfall steps, permit routes, and high-exposure viewpoints.',
+      what_to_know: 'Check current trail status, seasonal road access, permits, weather, daylight, and water before starting.',
+      best_time_to_stop: 'Year-round, check road and trail status',
+      access_notes: 'Use Yosemite Valley shuttles and signed trailheads where available. Glacier Point Road and Mariposa Grove access can be seasonal.',
+      nearby_context: 'Trailheads, campgrounds, waterfall stops, fuel towns, and weather checks sit close together in Yosemite.',
+    },
+    audio_script: story,
+    wiki_extract: '',
+    source_pack: {
+      quality: 'official',
+      primary: 'National Park Service',
+      official_url: YOSEMITE_TRAILS_URL,
+      nps_park_code: 'yose',
+      sources: [
+        { title: 'Yosemite hiking', publisher: 'National Park Service', url: YOSEMITE_TRAILS_URL, kind: 'official' },
+        { title: 'Open Yosemite images', publisher: 'Wikimedia Commons', url: 'https://commons.wikimedia.org/wiki/Category:Yosemite_National_Park', kind: 'open_media' },
+      ],
+      photos: YOSEMITE_TRAILS.slice(0, 4).map(trail => ({ url: trail.image_url, caption: trail.title, credit: 'Wikimedia Commons' })),
+      activities: ['Hiking', 'Waterfalls', 'Viewpoints', 'Backcountry access'],
+      things_to_do: YOSEMITE_TRAILS.map(trail => ({
+        title: trail.title,
+        description: `${trail.distance_mi.toFixed(1)} mi · ${trail.route_type} · ${trail.difficulty}`,
+        url: trail.source_url || YOSEMITE_TRAILS_URL,
+        lat: trail.lat,
+        lng: trail.lng,
+        image_url: trail.image_url,
+        image_credit: 'Wikimedia Commons',
+      })),
+      things_to_see: [
+        { title: 'Vernal Fall', description: 'Mist Trail waterfall viewpoint.', url: 'https://www.nps.gov/yose/planyourvisit/vernalnevadatrail.htm', image_url: VERNAL_FALL_IMAGE },
+        { title: 'Half Dome', description: 'Permit-only cable route and Yosemite landmark.', url: 'https://www.nps.gov/yose/planyourvisit/halfdome.htm', image_url: HALF_DOME_IMAGE },
+        { title: 'Mirror Lake', description: 'Seasonal lake and easy valley walk.', url: 'https://www.nps.gov/yose/planyourvisit/mirrorlaketrail.htm', image_url: MIRROR_LAKE_IMAGE },
+      ],
+      source_note: 'Trail details use official Yosemite hiking pages and open image references. Check current trail status before starting.',
+      license: 'Open image reference; verify media license at source.',
+      image_asset: GLACIER_POINT_IMAGE,
+    },
+    facts: {
+      coordinates: '37.74850, -119.58700',
+      source_url: YOSEMITE_TRAILS_URL,
+      source_title: 'National Park Service hiking page',
+      official_url: YOSEMITE_TRAILS_URL,
+      source_quality: 'official',
+      last_updated: LAST_UPDATED,
+    },
+    attribution: 'National Park Service trail pages + Wikimedia Commons image references',
   };
 }
 

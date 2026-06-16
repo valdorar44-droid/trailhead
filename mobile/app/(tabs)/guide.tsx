@@ -27,9 +27,10 @@ import {
   mergeCuratedExplorePlaces,
   type ExploreCategoryKey,
   type ExploreDetailTab,
+  type ExploreNearbyModule,
 } from '@/components/explore';
 import { useStore } from '@/lib/store';
-import { api, PaywallError, type CampsitePin, type ExplorePlaceProfile, type OsmPoi } from '@/lib/api';
+import { api, PaywallError, type CampsitePin, type ExplorePlaceProfile, type ExploreTrailCard, type OsmPoi } from '@/lib/api';
 import { storage } from '@/lib/storage';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 import { trackPhase0Once } from '@/lib/telemetry';
@@ -168,7 +169,7 @@ function shouldLoadExploreCamps(place: ExplorePlaceProfile) {
 }
 
 function shouldUseExploreCampgroundEndpoint(place: ExplorePlaceProfile) {
-  return !place.id.startsWith('explore:waterfalls:');
+  return !place.id.startsWith('explore:waterfalls:') && !place.id.startsWith('explore:trails:');
 }
 
 function exploreCampRailTitle(place: ExplorePlaceProfile) {
@@ -220,6 +221,9 @@ export default function GuideScreen() {
   const [exploreCampSourceById, setExploreCampSourceById] = useState<Record<string, 'official' | 'fallback'>>({});
   const [exploreCampLoadingId, setExploreCampLoadingId] = useState<string | null>(null);
   const [exploreCampErrors, setExploreCampErrors] = useState<Record<string, string>>({});
+  const [exploreWeatherById, setExploreWeatherById] = useState<Record<string, any>>({});
+  const [exploreWeatherLoadingId, setExploreWeatherLoadingId] = useState<string | null>(null);
+  const [exploreWeatherErrors, setExploreWeatherErrors] = useState<Record<string, string>>({});
   const [liveExplorePlaces, setLiveExplorePlaces] = useState<OsmPoi[]>([]);
   const [exploreLoading, setExploreLoading] = useState(false);
   const [liveExploreLoading, setLiveExploreLoading] = useState(false);
@@ -686,6 +690,123 @@ export default function GuideScreen() {
     setPendingMapSelection({ kind: 'camp', camp });
     setSelectedExplore(null);
     router.push('/(tabs)/map');
+  }
+
+  function showExploreTrailOnMap(place: ExplorePlaceProfile, trail: ExploreTrailCard) {
+    const lat = trail.lat ?? place.summary.lat;
+    const lng = trail.lng ?? place.summary.lng;
+    if (lat == null || lng == null) return;
+    setPendingMapSelection({
+      kind: 'place',
+      place: {
+        id: `explore-trail:${trail.id}`,
+        name: trail.title,
+        lat: Number(lat),
+        lng: Number(lng),
+        icon: 'flag',
+        note: `${trail.distance_mi.toFixed(trail.distance_mi >= 10 ? 0 : 1)} mi · ${trail.route_type}`,
+        createdAt: Date.now(),
+      },
+    });
+    setSelectedExplore(null);
+    router.push('/(tabs)/map');
+  }
+
+  function routeExploreTrail(place: ExplorePlaceProfile, trail: ExploreTrailCard) {
+    const lat = trail.lat ?? place.summary.lat;
+    const lng = trail.lng ?? place.summary.lng;
+    if (lat == null || lng == null) return;
+    setPendingNavigatePlace({ lat: Number(lat), lng: Number(lng), name: trail.title });
+    setSelectedExplore(null);
+    router.push('/(tabs)/map');
+  }
+
+  async function fetchExploreWeather(place: ExplorePlaceProfile) {
+    const { lat, lng } = place.summary;
+    if (lat == null || lng == null) {
+      setExploreWeatherErrors(prev => ({ ...prev, [place.id]: 'No coordinates for this stop.' }));
+      return;
+    }
+    setExploreWeatherLoadingId(place.id);
+    setExploreWeatherErrors(prev => ({ ...prev, [place.id]: '' }));
+    try {
+      const weather = await api.getWeather(Number(lat), Number(lng), 3, weatherUnitMode);
+      setExploreWeatherById(prev => ({ ...prev, [place.id]: weather }));
+    } catch {
+      setExploreWeatherErrors(prev => ({ ...prev, [place.id]: 'Weather unavailable right now.' }));
+    } finally {
+      setExploreWeatherLoadingId(current => current === place.id ? null : current);
+    }
+  }
+
+  function handleExploreNearbyAction(place: ExplorePlaceProfile, module: ExploreNearbyModule) {
+    if (module.action === 'weather') {
+      fetchExploreWeather(place);
+      return;
+    }
+    if (module.action === 'trails') {
+      setProfileReadMode('summary');
+      return;
+    }
+    if (module.action === 'route') {
+      routeExplore(place);
+      return;
+    }
+    const officialUrl = place.source_pack?.official_url || place.summary.source_url;
+    if (module.action === 'hours' && officialUrl) {
+      Linking.openURL(officialUrl);
+      return;
+    }
+    showExploreOnMap(place);
+  }
+
+  function renderExploreWeather(place: ExplorePlaceProfile) {
+    const weather = exploreWeatherById[place.id];
+    const error = exploreWeatherErrors[place.id];
+    const loading = exploreWeatherLoadingId === place.id;
+    if (!weather && !error && !loading) return null;
+    const daily = weather?.daily;
+    const code = Number(weather?.current?.weather_code ?? daily?.weathercode?.[0] ?? 3);
+    const units = weather?.trailhead_units;
+    const tempLabel = units?.temperature_label ?? '°';
+    const windLabel = units?.wind_label ?? 'mph';
+    const hi = daily?.temperature_2m_max?.[0];
+    const lo = daily?.temperature_2m_min?.[0];
+    const wind = daily?.windspeed_10m_max?.[0];
+    const precip = daily?.precipitation_probability_max?.[0] ?? daily?.precipitation_sum?.[0];
+    return (
+      <TrailheadCard style={s.exploreWeatherCard}>
+        <View style={s.exploreWeatherTop}>
+          <View>
+            <Text style={s.profileLabel}>WEATHER AT THIS STOP</Text>
+            <Text style={s.exploreWeatherSub}>{place.summary.title}</Text>
+          </View>
+          {loading ? <ActivityIndicator color={C.orange} size="small" /> : <Ionicons name={wmoIcon(code)} size={26} color={C.orange} />}
+        </View>
+        {loading ? (
+          <Text style={s.exploreWeatherText}>Loading forecast...</Text>
+        ) : error ? (
+          <Text style={s.exploreWeatherText}>{error}</Text>
+        ) : (
+          <View style={s.exploreWeatherStats}>
+            <View style={s.exploreWeatherStat}>
+              <Text style={s.exploreWeatherValue}>
+                {Number.isFinite(hi) ? Math.round(Number(hi)) : '--'}{tempLabel}/{Number.isFinite(lo) ? Math.round(Number(lo)) : '--'}{tempLabel}
+              </Text>
+              <Text style={s.exploreWeatherLabel}>HI/LO</Text>
+            </View>
+            <View style={s.exploreWeatherStat}>
+              <Text style={s.exploreWeatherValue}>{Number.isFinite(wind) ? Math.round(Number(wind)) : '--'} {windLabel}</Text>
+              <Text style={s.exploreWeatherLabel}>WIND</Text>
+            </View>
+            <View style={s.exploreWeatherStat}>
+              <Text style={s.exploreWeatherValue}>{Number.isFinite(precip) ? Math.round(Number(precip)) : '--'}%</Text>
+              <Text style={s.exploreWeatherLabel}>PRECIP</Text>
+            </View>
+          </View>
+        )}
+      </TrailheadCard>
+    );
   }
 
   function renderExploreCard(
@@ -1200,12 +1321,11 @@ export default function GuideScreen() {
             highlightedSentence={highlightSentence}
             storyScrollRef={storyScrollRef}
             campgroundsSlot={renderExploreCampgrounds(selectedExplore)}
+            weatherSlot={renderExploreWeather(selectedExplore)}
             relatedSlot={relatedExplore.length > 0 ? (
               <TrailheadCard style={s.profileSection}>
                 <Text style={s.profileLabel}>NEAR THIS STOP</Text>
-                <Text style={s.profileTextMuted}>
-                  Nearby parks, camp areas, trails, and stops that make this place feel more grounded.
-                </Text>
+                <Text style={s.profileTextMuted}>Nearby parks, camp areas, trails, and stops.</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.relatedExploreRail}>
                   {relatedExplore.map((item, idx) => renderExploreCard(item, idx, true))}
                 </ScrollView>
@@ -1216,6 +1336,9 @@ export default function GuideScreen() {
             onShowArea={() => showExploreOnMap(selectedExplore)}
             onRoute={() => routeExplore(selectedExplore)}
             onToggleSave={() => toggleSavedExplore(selectedExplore)}
+            onNearbyAction={module => handleExploreNearbyAction(selectedExplore, module)}
+            onTrailMap={trail => showExploreTrailOnMap(selectedExplore, trail)}
+            onTrailRoute={trail => routeExploreTrail(selectedExplore, trail)}
             mediaUrl={mediaUrl}
           />
         )}
@@ -1434,6 +1557,14 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   weatherStat: { flex: 1, alignItems: 'center', paddingVertical: 8, borderTopWidth: 1, borderColor: C.border },
   weatherStatVal: { color: C.text, fontSize: 13, fontWeight: '700', fontFamily: mono },
   weatherStatLabel: { color: C.text3, fontSize: 8, fontFamily: mono, letterSpacing: 0.5, marginTop: 2 },
+  exploreWeatherCard: { marginHorizontal: 20, marginBottom: 16, backgroundColor: C.s2, borderRadius: 14, borderWidth: 1, borderColor: C.border, padding: 14, gap: 12 },
+  exploreWeatherTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  exploreWeatherSub: { color: C.text3, fontSize: 12, fontWeight: '700' },
+  exploreWeatherText: { color: C.text2, fontSize: 13, lineHeight: 19, fontWeight: '700' },
+  exploreWeatherStats: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: C.border, paddingTop: 10 },
+  exploreWeatherStat: { flex: 1, alignItems: 'center', minWidth: 0 },
+  exploreWeatherValue: { color: C.text, fontSize: 13, fontWeight: '900', fontFamily: mono },
+  exploreWeatherLabel: { color: C.text3, fontSize: 8, fontWeight: '900', fontFamily: mono, marginTop: 3 },
   emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, paddingTop: 80 },
   emptyTitle: { color: C.text, fontSize: 17, fontWeight: '700' },
   emptySub: { color: C.text3, fontSize: 13, textAlign: 'center', maxWidth: 280, lineHeight: 20 },

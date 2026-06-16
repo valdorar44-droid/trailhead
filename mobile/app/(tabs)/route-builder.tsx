@@ -7,7 +7,10 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { Asset } from 'expo-asset';
 import { ResizeMode, Video } from 'expo-av';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import PaywallModal from '@/components/PaywallModal';
 import TourTarget from '@/components/TourTarget';
@@ -19,6 +22,7 @@ import { loadAllPlacePoints } from '@/lib/offlinePlacePacks';
 import { deleteOfflineTrail, listOfflineTrails, type OfflineTrail } from '@/lib/offlineTrails';
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { useStore } from '@/lib/store';
+import { trackPhase0Once } from '@/lib/telemetry';
 import {
   clearTrailheadRouteBuilderDraft,
   loadTrailheadRouteBuilderDraft,
@@ -215,10 +219,10 @@ const CAMP_REUSE_OPTIONS: Array<{ id: CampReusePolicy; label: string; sub: strin
   { id: 'manual', label: 'Manual reuse', sub: 'You decide night by night', icon: 'hand-left-outline' },
 ];
 const BUILD_STATUS_LINES = [
-  'Setting up your trip',
-  'Checking the route',
-  'Finding overnight options',
-  'Balancing fuel and distance',
+  'Tracing the route line',
+  'Checking camp windows',
+  'Adding fuel and useful stops',
+  'Saving the route preview',
 ];
 const EMPTY_DISCOVERY_RESULTS: DiscoveryResults = { camps: [], gas: [], pois: [], excursions: [], summary: '' };
 
@@ -243,7 +247,7 @@ function placeMatchesFilters(place: OsmPoi, filters: string[]) {
   return filters.includes(subtype) || (subtype === 'water' && filters.includes('water'));
 }
 
-function RouteBuildStatus({ C, message }: { C: ColorPalette; message: string }) {
+function RouteBuildStatus({ message }: { C: ColorPalette; message: string }) {
   const pulse = useRef(new Animated.Value(0)).current;
   const sweep = useRef(new Animated.Value(0)).current;
   const [lineIdx, setLineIdx] = useState(0);
@@ -273,20 +277,20 @@ function RouteBuildStatus({ C, message }: { C: ColorPalette; message: string }) 
   const sweepX = sweep.interpolate({ inputRange: [0, 1], outputRange: [-90, 220] });
 
   return (
-    <View style={[statusS.card, { borderColor: C.orange + '44', backgroundColor: C.glassStrong }]}>
+    <View style={statusS.card}>
       <View style={statusS.top}>
         <View style={statusS.orbit}>
-          <Animated.View style={[statusS.pulse, { borderColor: C.orange, transform: [{ scale: pulseScale }], opacity: pulseOpacity }]} />
-          <View style={[statusS.dot, { backgroundColor: C.orange }]} />
+          <Animated.View style={[statusS.pulse, { transform: [{ scale: pulseScale }], opacity: pulseOpacity }]} />
+          <View style={statusS.dot} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={[statusS.kicker, { color: C.orange }]}>TRIP OUTLINE</Text>
-          <Text style={[statusS.title, { color: C.text }]}>{message || BUILD_STATUS_LINES[lineIdx]}</Text>
-          <Text style={[statusS.sub, { color: C.text3 }]}>{BUILD_STATUS_LINES[lineIdx]}</Text>
+          <Text style={statusS.kicker}>CURRENT STEP</Text>
+          <Text style={statusS.title}>{message || BUILD_STATUS_LINES[lineIdx]}</Text>
+          <Text style={statusS.sub}>Keeping the builder awake until it finishes.</Text>
         </View>
       </View>
-      <View style={[statusS.track, { backgroundColor: C.border }]}>
-        <Animated.View style={[statusS.sweep, { backgroundColor: C.orange, transform: [{ translateX: sweepX }] }]} />
+      <View style={statusS.track}>
+        <Animated.View style={[statusS.sweep, { transform: [{ translateX: sweepX }] }]} />
       </View>
     </View>
   );
@@ -295,20 +299,22 @@ function RouteBuildStatus({ C, message }: { C: ColorPalette; message: string }) 
 const statusS = StyleSheet.create({
   card: {
     borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
     borderRadius: 18,
+    backgroundColor: 'rgba(5,5,5,0.72)',
     padding: 13,
     overflow: 'hidden',
     gap: 12,
   },
   top: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   orbit: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
-  pulse: { position: 'absolute', width: 30, height: 30, borderRadius: 15, borderWidth: 1 },
-  dot: { width: 10, height: 10, borderRadius: 5 },
-  kicker: { fontSize: 8, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
-  title: { fontSize: 13, fontWeight: '900' },
-  sub: { fontSize: 10, fontFamily: mono, marginTop: 3 },
-  track: { height: 4, borderRadius: 2, overflow: 'hidden' },
-  sweep: { width: 90, height: 4, borderRadius: 2 },
+  pulse: { position: 'absolute', width: 30, height: 30, borderRadius: 15, borderWidth: 1, borderColor: '#f97316' },
+  dot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#f97316' },
+  kicker: { color: '#fb923c', fontSize: 8, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
+  title: { color: '#fff', fontSize: 13, fontWeight: '900' },
+  sub: { color: 'rgba(255,255,255,0.64)', fontSize: 10, fontFamily: mono, marginTop: 3 },
+  track: { height: 4, borderRadius: 2, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.16)' },
+  sweep: { width: 90, height: 4, borderRadius: 2, backgroundColor: '#f97316' },
 });
 
 const STATE_INFO: Record<string, { name: string; minLat: number; maxLat: number; minLng: number; maxLng: number }> = {
@@ -1059,7 +1065,7 @@ function sourceLabel(source?: BuilderStop['source']) {
 }
 
 function isFrameworkTarget(stop: BuilderStop) {
-  return stop.source === 'map' && stop.type === 'waypoint' && /(target area|camp search area|overnight area)/i.test(stop.name);
+  return stop.source === 'map' && stop.type === 'waypoint' && /(target area|camp search area|overnight area|review area)/i.test(stop.name);
 }
 
 function isFrameworkManagedStop(stop: BuilderStop) {
@@ -1120,7 +1126,7 @@ function builderStopFromCopilotDraft(stop: string | TrailheadRouteBuilderDraftSt
     lat,
     lng,
     type,
-    description: stop.description || (type === 'camp' ? 'Picked by Trailhead Copilot route scout.' : 'Added by Trailhead Copilot route scout.'),
+    description: stop.description || (type === 'camp' ? 'Scout-picked overnight option. Verify access, rules, and fit before you head out.' : 'Scout-added route stop. Review it before you lock the trip.'),
     land_type: stop.label || '',
     source: stop.source === 'camp' || stop.source === 'gas' || stop.source === 'poi' || stop.source === 'search' || stop.source === 'map'
       ? stop.source
@@ -1274,6 +1280,8 @@ export default function RouteBuilderScreen() {
 
   const [activeDay, setActiveDay] = useState(1);
   const [routeTabMode, setRouteTabMode] = useState<RouteTabMode>('hub');
+  const [buildingVideoReady, setBuildingVideoReady] = useState(false);
+  const [buildingVideoSource, setBuildingVideoSource] = useState<any>(ROUTE_BUILDER_LOAD_VIDEO);
   const [savedTrails, setSavedTrails] = useState<OfflineTrail[]>([]);
   const [days, setDays] = useState([1]);
   const [stops, setStops] = useState<BuilderStop[]>([]);
@@ -1298,6 +1306,33 @@ export default function RouteBuilderScreen() {
   const [restDays, setRestDays] = useState<number[]>([]);
   const [dayDriveTargets, setDayDriveTargets] = useState<Record<number, string>>({});
   const gasPrice = '3.65';
+
+  useEffect(() => {
+    if (!buildingFramework) {
+      setBuildingVideoReady(false);
+      deactivateKeepAwake('route-builder-build').catch(() => {});
+      return;
+    }
+    let cancelled = false;
+    setBuildingVideoReady(false);
+    activateKeepAwakeAsync('route-builder-build').catch(() => {});
+    const asset = Asset.fromModule(ROUTE_BUILDER_LOAD_VIDEO);
+    const immediateUri = asset.localUri || asset.uri;
+    setBuildingVideoSource(immediateUri ? { uri: immediateUri } : ROUTE_BUILDER_LOAD_VIDEO);
+    asset.downloadAsync()
+      .then(downloaded => {
+        if (cancelled) return;
+        const uri = downloaded.localUri || downloaded.uri || asset.localUri || asset.uri;
+        setBuildingVideoSource(uri ? { uri } : ROUTE_BUILDER_LOAD_VIDEO);
+      })
+      .catch(() => {
+        if (!cancelled) setBuildingVideoSource(ROUTE_BUILDER_LOAD_VIDEO);
+      });
+    return () => {
+      cancelled = true;
+      deactivateKeepAwake('route-builder-build').catch(() => {});
+    };
+  }, [buildingFramework]);
   const [fuelEstimate, setFuelEstimate] = useState<FuelEstimate | null>(null);
   const [routeGeometry, setRouteGeometry] = useState<ProviderRouteGeometry | null>(null);
   const [importedTripId, setImportedTripId] = useState<string | null>(null);
@@ -1666,6 +1701,30 @@ export default function RouteBuilderScreen() {
     return dedupePois(scoped);
   }, [anchor, filteredOfflinePlaces, legContext]);
   const discoveryPois = useMemo(() => dedupePois([...pois, ...offlinePlaceCandidates]), [pois, offlinePlaceCandidates]);
+  useEffect(() => {
+    if (!inlineSearch || discoverLoading) return;
+    const payload = {
+      surface: 'route_builder_inline',
+      day: inlineSearch.day,
+      tab: inlineSearch.tab,
+      active_key: activeDiscoveryKey,
+    };
+    if (inlineSearch.tab === 'camps' && camps.length === 0) {
+      trackPhase0Once(`phase0:route-builder-empty:camps:${activeDiscoveryKey || 'none'}:${inlineSearch.day}`, 'phase0_empty_state_seen', payload);
+      return;
+    }
+    if (inlineSearch.tab === 'gas' && gas.length === 0) {
+      trackPhase0Once(`phase0:route-builder-empty:gas:${activeDiscoveryKey || 'none'}:${inlineSearch.day}`, 'phase0_empty_state_seen', payload);
+      return;
+    }
+    if (inlineSearch.tab === 'excursions' && excursions.length === 0) {
+      trackPhase0Once(`phase0:route-builder-empty:excursions:${activeDiscoveryKey || 'none'}:${inlineSearch.day}`, 'phase0_empty_state_seen', payload);
+      return;
+    }
+    if (inlineSearch.tab === 'poi' && discoveryPois.length === 0) {
+      trackPhase0Once(`phase0:route-builder-empty:poi:${activeDiscoveryKey || 'none'}:${inlineSearch.day}`, 'phase0_empty_state_seen', payload);
+    }
+  }, [activeDiscoveryKey, camps.length, discoverLoading, discoveryPois.length, excursions.length, gas.length, inlineSearch]);
   const routeStateMiles = useMemo(() => sampleRouteStates(orderedStops, tripLoop), [orderedStops, tripLoop]);
   const routeStates = useMemo(() => Object.keys(routeStateMiles).sort((a, b) => routeStateMiles[b] - routeStateMiles[a]), [routeStateMiles]);
   const routeDaySegments = useMemo(() => {
@@ -2603,6 +2662,68 @@ export default function RouteBuilderScreen() {
     Alert.alert('Pick a route point', 'Add a start and destination, or tap a place on the map so Trailhead can search nearby options.');
   }
 
+  function rerunInlineSearch(day: number, tab: DiscoveryTab) {
+    const plan = routeDayPlans.find(item => item.day === day);
+    if (plan) {
+      scanDayPlan(plan, tab);
+      return;
+    }
+    const fallbackTarget = orderedStops.find(stop => stop.day === day) ?? orderedStops[orderedStops.length - 1] ?? anchor;
+    if (!fallbackTarget) return;
+    setDiscoverTab(tab);
+    setInlineSearch({
+      day,
+      tab,
+      label: tab === 'camps'
+        ? `Choose a camp near Day ${day}`
+        : `Add ${tab === 'gas' ? 'fuel' : tab === 'excursions' ? 'side trips' : 'places'} near Day ${day}`,
+    });
+    runDiscovery(tab, { lat: fallbackTarget.lat, lng: fallbackTarget.lng }, null, { focusMap: false });
+  }
+
+  function renderInlineEmptyState(day: number, tab: DiscoveryTab) {
+    const title = tab === 'camps'
+      ? 'No camp cards landed on this day segment.'
+      : tab === 'gas'
+        ? 'No fuel stops landed on this day segment.'
+        : tab === 'excursions'
+          ? 'No side trips landed on this day segment.'
+          : 'No place cards landed on this day segment.';
+    const hint = tab === 'camps'
+      ? campPhotoOnly
+        ? 'Photo-only is still on. Open the search to no-photo camp backups or rerun the segment scan.'
+        : 'Rerun the segment scan or keep building and search a wider map area from the day stop.'
+      : tab === 'gas'
+        ? 'Rerun the segment scan. Fuel often appears once the route day or nearby town is tightened up.'
+        : tab === 'excursions'
+          ? 'Rerun the segment scan or use the map after you lock in the day route.'
+          : 'Rerun the segment scan or use the map to search a wider area around this day.';
+    return (
+      <View style={s.inlineEmptyCard}>
+        <Text style={s.inlineEmpty}>{title}</Text>
+        <Text style={s.inlineEmptyHint}>{hint}</Text>
+        <View style={s.inlineEmptyActions}>
+          {tab === 'camps' && campPhotoOnly ? (
+            <TouchableOpacity
+              style={s.sectionAction}
+              onPress={() => {
+                setCampPhotoOnly(false);
+                rerunInlineSearch(day, tab);
+              }}
+            >
+              <Ionicons name="images-outline" size={13} color={C.orange} />
+              <Text style={s.sectionActionText}>ALLOW NO-PHOTO</Text>
+            </TouchableOpacity>
+          ) : null}
+          <TouchableOpacity style={s.sectionAction} onPress={() => rerunInlineSearch(day, tab)}>
+            <Ionicons name="refresh-outline" size={13} color={C.orange} />
+            <Text style={s.sectionActionText}>SEARCH AGAIN</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
   function replaceCampStop(stop: BuilderStop) {
     const sortedIdx = orderedStops.findIndex(st => st.id === stop.id);
     const from = orderedStops[sortedIdx - 1] ?? orderedStops[sortedIdx];
@@ -3038,7 +3159,7 @@ export default function RouteBuilderScreen() {
       stop: {
         id: `target_${Date.now()}_${day}_${Math.random().toString(36).slice(2, 6)}`,
         day,
-        name: `Day ${day} overnight area`,
+        name: `Day ${day} review area`,
         lat: target.lat,
         lng: target.lng,
         type: 'waypoint' as BuilderStopType,
@@ -3117,7 +3238,7 @@ export default function RouteBuilderScreen() {
         const target = {
           lat: win.fallback?.lat ?? fallbackPoint.lat,
           lng: win.fallback?.lng ?? fallbackPoint.lng,
-          name: win.fallback?.name ?? `${win.label} overnight area`,
+          name: win.fallback?.name ?? win.fallback_label ?? `${win.label} review area`,
           description: win.fallback?.description ?? 'Review this day. Choose an overnight stop before navigation.',
         };
         return {
@@ -3302,6 +3423,7 @@ export default function RouteBuilderScreen() {
         framework,
         nextDays,
         nextName,
+        buildGeometry,
       );
     } finally {
       setBuildingFramework(false);
@@ -3556,16 +3678,18 @@ export default function RouteBuilderScreen() {
     inputStops: BuilderStop[] = orderedStops,
     inputDays: number[] = days,
     nameOverride?: string,
+    fallbackGeometry?: ProviderRouteGeometry | null,
   ) {
     if (routeSaving) return;
     setRouteSaving(true);
+    const knownGoodGeometry = fallbackGeometry?.coords?.length ? fallbackGeometry : routeGeometry;
     const routeGeometryPayload = await buildSavedRouteGeometry(inputStops)
-      ?? (routeGeometry?.coords?.length
+      ?? (knownGoodGeometry?.coords?.length
         ? {
-            coords: routeGeometry.coords,
-            totalDistance: routeGeometry.totalDistanceMi * 1609.344,
-            totalDuration: routeGeometry.totalDurationHours * 3600,
-            source: routeGeometry.engine ?? routeGeometry.source,
+            coords: knownGoodGeometry.coords,
+            totalDistance: knownGoodGeometry.totalDistanceMi * 1609.344,
+            totalDuration: knownGoodGeometry.totalDurationHours * 3600,
+            source: knownGoodGeometry.engine ?? knownGoodGeometry.source,
             ts: Date.now(),
           } satisfies SavedRouteGeometryPayload
         : null);
@@ -4017,7 +4141,7 @@ export default function RouteBuilderScreen() {
               </TouchableOpacity>
             </TouchableOpacity>
           )) : (
-            <Text style={s.inlineEmpty}>No camps found for this day segment.</Text>
+            renderInlineEmptyState(day, 'camps')
           )
         ) : inlineTab === 'gas' ? (
           gas.length ? gas.slice(0, 6).map(station => (
@@ -4035,7 +4159,7 @@ export default function RouteBuilderScreen() {
               </View>
             </TouchableOpacity>
           )) : (
-            <Text style={s.inlineEmpty}>No fuel found for this day segment.</Text>
+            renderInlineEmptyState(day, 'gas')
           )
         ) : inlineTab === 'excursions' ? (
           excursions.length ? excursions.slice(0, 8).map(item => (
@@ -4056,7 +4180,7 @@ export default function RouteBuilderScreen() {
               </View>
             </TouchableOpacity>
           )) : (
-            <Text style={s.inlineEmpty}>No side trips found for this day segment.</Text>
+            renderInlineEmptyState(day, 'excursions')
           )
         ) : (
           discoveryPois.length ? discoveryPois.slice(0, 6).map(poi => (
@@ -4074,7 +4198,7 @@ export default function RouteBuilderScreen() {
               </View>
             </TouchableOpacity>
           )) : (
-            <Text style={s.inlineEmpty}>No places found for this day segment.</Text>
+            renderInlineEmptyState(day, 'poi')
           )
         )}
       </View>
@@ -4548,13 +4672,32 @@ export default function RouteBuilderScreen() {
   if (buildingFramework) {
     return (
       <SafeAreaView style={s.buildingVideoScreen}>
+        <LinearGradient
+          colors={['#06080b', '#10201d', '#2f2415']}
+          start={{ x: 0.1, y: 0 }}
+          end={{ x: 0.9, y: 1 }}
+          style={s.buildingVideoFallback}
+        >
+          <View style={[s.buildingTerrainBand, s.buildingTerrainBandOne]} />
+          <View style={[s.buildingTerrainBand, s.buildingTerrainBandTwo]} />
+          <View style={[s.buildingRouteLine, s.buildingRouteLineOne]} />
+          <View style={[s.buildingRouteLine, s.buildingRouteLineTwo]} />
+          <View style={[s.buildingRouteLine, s.buildingRouteLineThree]} />
+          <View style={[s.buildingRoutePoint, s.buildingRoutePointStart]} />
+          <View style={[s.buildingRoutePoint, s.buildingRoutePointCamp]} />
+          <View style={[s.buildingRoutePoint, s.buildingRoutePointEnd]} />
+        </LinearGradient>
         <Video
-          source={ROUTE_BUILDER_LOAD_VIDEO}
-          style={s.buildingVideo}
+          source={buildingVideoSource}
+          style={[s.buildingVideo, !buildingVideoReady && { opacity: 0 }]}
           resizeMode={ResizeMode.COVER}
           shouldPlay
           isLooping
           isMuted
+          useNativeControls={false}
+          onLoad={() => setBuildingVideoReady(true)}
+          onReadyForDisplay={() => setBuildingVideoReady(true)}
+          onError={() => setBuildingVideoReady(false)}
         />
         <View style={s.buildingVideoShade} />
         <View style={[s.buildingVideoContent, { paddingTop: Math.max(insets.top, 12) + 18, paddingBottom: Math.max(insets.bottom, 18) + 22 }]}>
@@ -4567,9 +4710,9 @@ export default function RouteBuilderScreen() {
 
           <View style={s.buildingHeroCopy}>
             <Text style={s.buildingEyebrow}>TRAILHEAD ROUTE BUILDER</Text>
-            <Text style={s.buildingHeadline}>Building your trip</Text>
+            <Text style={s.buildingHeadline}>Building your route</Text>
             <Text style={s.buildingSubtitle}>
-              {frameworkStatus || 'Checking route and overnight options...'}
+              Checking camps, fuel, and daily drive windows.
             </Text>
           </View>
 
@@ -5348,15 +5491,91 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   buildingVideo: {
     ...StyleSheet.absoluteFillObject,
   },
+  buildingVideoFallback: {
+    ...StyleSheet.absoluteFillObject,
+    width: '100%',
+    height: '100%',
+  },
+  buildingTerrainBand: {
+    position: 'absolute',
+    left: '-10%',
+    right: '-10%',
+    height: 120,
+    borderRadius: 90,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.035)',
+  },
+  buildingTerrainBandOne: {
+    top: '18%',
+    transform: [{ rotate: '-14deg' }],
+  },
+  buildingTerrainBandTwo: {
+    bottom: '22%',
+    transform: [{ rotate: '18deg' }],
+  },
+  buildingRouteLine: {
+    position: 'absolute',
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(249,115,22,0.82)',
+    shadowColor: '#f97316',
+    shadowOpacity: 0.36,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 0 },
+  },
+  buildingRouteLineOne: {
+    left: '13%',
+    top: '37%',
+    width: '36%',
+    transform: [{ rotate: '21deg' }],
+  },
+  buildingRouteLineTwo: {
+    left: '38%',
+    top: '48%',
+    width: '34%',
+    backgroundColor: 'rgba(20,184,166,0.78)',
+    transform: [{ rotate: '-17deg' }],
+  },
+  buildingRouteLineThree: {
+    right: '10%',
+    top: '40%',
+    width: '29%',
+    backgroundColor: 'rgba(34,197,94,0.74)',
+    transform: [{ rotate: '26deg' }],
+  },
+  buildingRoutePoint: {
+    position: 'absolute',
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 3,
+    borderColor: '#ffffff',
+    backgroundColor: '#f97316',
+  },
+  buildingRoutePointStart: {
+    left: '12%',
+    top: '35%',
+  },
+  buildingRoutePointCamp: {
+    left: '54%',
+    top: '43%',
+    backgroundColor: '#14b8a6',
+  },
+  buildingRoutePointEnd: {
+    right: '11%',
+    top: '43%',
+    backgroundColor: '#22c55e',
+  },
   buildingVideoShade: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.44)',
+    backgroundColor: 'rgba(0,0,0,0.48)',
   },
   buildingVideoContent: {
     flex: 1,
     paddingHorizontal: 18,
-    justifyContent: 'center',
-    gap: 22,
+    justifyContent: 'flex-end',
+    gap: 18,
   },
   buildingVideoTop: {
     alignItems: 'center',
@@ -5374,19 +5593,19 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   buildingLiveText: { color: '#fff', fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
   buildingHeroCopy: {
-    gap: 10,
+    gap: 8,
     alignItems: 'center',
     paddingHorizontal: 10,
   },
   buildingEyebrow: { color: '#f97316', fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 1.5 },
-  buildingHeadline: { color: '#fff', fontSize: 38, lineHeight: 42, fontWeight: '900', textAlign: 'center' },
+  buildingHeadline: { color: '#fff', fontSize: 36, lineHeight: 40, fontWeight: '900', textAlign: 'center' },
   buildingSubtitle: { color: 'rgba(255,255,255,0.82)', fontSize: 15, lineHeight: 21, maxWidth: 340, textAlign: 'center' },
   buildingBottomPanel: {
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
+    borderColor: 'rgba(255,255,255,0.14)',
     borderRadius: 20,
-    backgroundColor: 'rgba(5,5,5,0.62)',
-    padding: 14,
+    backgroundColor: 'rgba(5,5,5,0.38)',
+    padding: 10,
     alignSelf: 'stretch',
   },
   buildingChecklist: {
@@ -6030,7 +6249,10 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   inlineCampPlaceholder: { width: '100%', height: 74, alignItems: 'center', justifyContent: 'center' },
   inlineCampBody: { flex: 1, minHeight: 74, justifyContent: 'center' },
   inlineStopRow: { flexDirection: 'row', alignItems: 'center', gap: 9, padding: 9, borderWidth: 1, borderColor: C.border, borderRadius: 11, backgroundColor: C.s1 },
+  inlineEmptyCard: { gap: 8, paddingVertical: 4 },
   inlineEmpty: { color: C.text3, fontSize: 11, lineHeight: 16, paddingVertical: 8 },
+  inlineEmptyHint: { color: C.text3, fontSize: 10, lineHeight: 15 },
+  inlineEmptyActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   sectionHeader: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 4 },
   sectionTitle: { color: C.text, fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
   sectionMeta: { color: C.text3, fontSize: 10, fontFamily: mono, maxWidth: 190 },

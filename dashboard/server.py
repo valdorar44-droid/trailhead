@@ -4272,6 +4272,10 @@ async def route_proxy(body: RouteRequest):
             "target": target["id"],
             "valhalla_error": valhalla_error,
         }
+        if dropped_optional > 0:
+            cached["_trailhead"]["repair"] = "dropped_optional_points"
+            cached["_trailhead"]["dropped_optional_points"] = dropped_optional
+            cached["_trailhead"]["message"] = "Route kept. Optional side stops are saved as pins, not navigation stops."
         return cached
 
     repair_locations = route_locations

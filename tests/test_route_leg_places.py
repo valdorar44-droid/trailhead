@@ -387,6 +387,30 @@ class ValhallaAreaRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["_trailhead"]["repair"], "dropped_optional_points")
         self.assertEqual(result["_trailhead"]["dropped_optional_points"], 1)
 
+    async def test_route_proxy_preserves_optional_side_stop_repair_on_cached_osrm_fallback(self):
+        server.settings.valhalla_url = "http://default:8002"
+        cached = {
+            "trip": {"status": 0, "status_message": "Found route", "summary": {"length": 10, "time": 600}, "legs": [{}]},
+            "_fallback": {"engine": "osrm"},
+        }
+        body = server.RouteRequest(
+            locations=[
+                {"lat": 38.5733, "lon": -109.5498, "type": "break"},
+                {"lat": 38.57, "lon": -109.54, "type": "side_stop"},
+                {"lat": 38.5677, "lon": -109.5271, "type": "break"},
+            ],
+            options=server.RouteOptions(),
+            units="miles",
+        )
+
+        with patch.object(server, "get_route_cached", return_value=cached):
+            result = await server.route_proxy(body)
+
+        self.assertEqual(result["_trailhead"]["engine"], "osrm-fallback")
+        self.assertEqual(result["_trailhead"]["cache"], "stale-fallback-hit")
+        self.assertEqual(result["_trailhead"]["repair"], "dropped_optional_points")
+        self.assertEqual(result["_trailhead"]["dropped_optional_points"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

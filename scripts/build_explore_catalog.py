@@ -156,6 +156,27 @@ GROUP_COPY = {
         "timing": "Start early, carry current maps, and check permits, weather, heat, snow, and daylight before heading out.",
         "access": "Use the official land-manager page for trail closures, permits, parking, shuttle rules, and safety notices.",
     },
+    "parks": {
+        "category": "Parks",
+        "tags": ["parks", "monuments", "historic sites", "landmarks"],
+        "reason": "national parks, monuments, historic sites, and protected landscapes worth anchoring a route around",
+        "timing": "Check seasonal access, road closures, permits, visitor capacity, and weather before building a route around the stop.",
+        "access": "Use the official land-manager page for current access, fees, closures, cultural protocols, and safety notices.",
+    },
+    "monuments": {
+        "category": "Monuments & History",
+        "tags": ["monuments", "historic sites", "landmarks", "culture"],
+        "reason": "historic sites, cultural landmarks, monuments, and protected stories worth planning a stop around",
+        "timing": "Check hours, timed-entry rules, seasonal closures, tour availability, cultural protocols, and weather before routing there.",
+        "access": "Use the official site for current hours, tickets, closures, road access, and visitor rules.",
+    },
+    "water_scenic": {
+        "category": "Water & Scenic",
+        "tags": ["water", "scenic", "lakes", "coast", "viewpoints"],
+        "reason": "scenic water access, coastlines, overlooks, and route-worthy landscape stops",
+        "timing": "Check road access, water levels, wind, surf, ferry schedules, parking rules, and seasonal closures before committing.",
+        "access": "Use the official land-manager or park page for current access, fees, closures, permits, and safety notices.",
+    },
 }
 BASE_FALLBACKS = {
     "Adirondack Park": {
@@ -342,6 +363,118 @@ BASE_FALLBACKS = {
         "lat": 44.6, "lng": -110.5,
         "source_url": "https://www.nps.gov/yell/index.htm",
     },
+    "Banff National Park": {
+        "lat": 51.4968, "lng": -115.9281,
+        "source_url": "https://parks.canada.ca/pn-np/ab/banff/activ/camping",
+    },
+    "Jasper National Park": {
+        "lat": 52.8734, "lng": -118.0823,
+        "source_url": "https://parks.canada.ca/pn-np/ab/jasper/activ/passez-stay/camping",
+    },
+    "Pacific Rim National Park Reserve": {
+        "lat": 49.0523, "lng": -125.6925,
+        "source_url": "https://parks.canada.ca/pn-np/bc/pacificrim/activ/camping",
+    },
+    "Algonquin Provincial Park": {
+        "lat": 45.8372, "lng": -78.3791,
+        "source_url": "https://www.algonquinpark.on.ca/visit/camping/",
+    },
+    "Gros Morne National Park": {
+        "lat": 49.6728, "lng": -57.7381,
+        "source_url": "https://parks.canada.ca/pn-np/nl/grosmorne/activ/camping",
+    },
+    "Fiordland National Park": {
+        "lat": -45.4150, "lng": 167.7181,
+        "source_url": "https://www.doc.govt.nz/parks-and-recreation/places-to-go/fiordland/places/fiordland-national-park/",
+    },
+    "Tongariro National Park": {
+        "lat": -39.2000, "lng": 175.5833,
+        "source_url": "https://www.doc.govt.nz/parks-and-recreation/places-to-go/central-north-island/places/tongariro-national-park/",
+    },
+    "Abel Tasman National Park": {
+        "lat": -40.8333, "lng": 172.9000,
+        "source_url": "https://www.doc.govt.nz/parks-and-recreation/places-to-go/nelson-tasman/places/abel-tasman-national-park/",
+    },
+    "Aoraki / Mount Cook National Park": {
+        "lat": -43.7340, "lng": 170.0967,
+        "source_url": "https://www.doc.govt.nz/parks-and-recreation/places-to-go/canterbury/places/aoraki-mount-cook-national-park/",
+    },
+    "Mount Aspiring National Park": {
+        "lat": -44.3833, "lng": 168.7333,
+        "source_url": "https://www.doc.govt.nz/parks-and-recreation/places-to-go/otago/places/mount-aspiring-national-park/",
+    },
+    "Blue Mountains National Park": {
+        "lat": -33.6250, "lng": 150.4200,
+        "source_url": "https://www.nationalparks.nsw.gov.au/camping-and-accommodation",
+    },
+    "Kosciuszko National Park": {
+        "lat": -36.4559, "lng": 148.2636,
+        "source_url": "https://www.nationalparks.nsw.gov.au/visit-a-park/parks/kosciuszko-national-park",
+    },
+    "Kakadu National Park": {
+        "lat": -13.0923, "lng": 132.3938,
+        "source_url": "https://kakadu.gov.au/plan/accommodation/camping/",
+    },
+    "Grampians National Park": {
+        "lat": -37.2500, "lng": 142.5000,
+        "source_url": "https://www.parks.vic.gov.au/places-to-see/parks/grampians-national-park",
+    },
+    "Freycinet National Park": {
+        "lat": -42.1220, "lng": 148.2880,
+        "source_url": "https://parks.tas.gov.au/explore-our-parks/freycinet-national-park",
+    },
+    "Daintree National Park": {
+        "lat": -16.1700, "lng": 145.4180,
+        "source_url": "https://parks.desi.qld.gov.au/parks/daintree",
+    },
+    "Nahanni National Park Reserve": {
+        "lat": 61.5500, "lng": -125.5833,
+        "source_url": "https://parks.canada.ca/pn-np/nt/nahanni",
+    },
+    "Wood Buffalo National Park": {
+        "lat": 59.3750, "lng": -112.5000,
+        "source_url": "https://parks.canada.ca/pn-np/nt/woodbuffalo",
+    },
+    "L'Anse aux Meadows": {
+        "lat": 51.5965, "lng": -55.5335,
+        "source_url": "https://parks.canada.ca/lhn-nhs/nl/meadows",
+    },
+    "Head-Smashed-In Buffalo Jump": {
+        "lat": 49.7000, "lng": -113.6500,
+        "source_url": "https://headsmashedin.ca/",
+    },
+    "Fortress of Louisbourg": {
+        "lat": 45.8922, "lng": -59.9853,
+        "source_url": "https://parks.canada.ca/lhn-nhs/ns/louisbourg",
+    },
+    "Te Wahipounamu": {
+        "lat": -44.7000, "lng": 168.2000,
+        "source_url": "https://whc.unesco.org/en/list/551/",
+    },
+    "Waitangi Treaty Grounds": {
+        "lat": -35.2652, "lng": 174.0807,
+        "source_url": "https://www.waitangi.org.nz/",
+    },
+    "Ulu\u1e5fu-Kata Tju\u1e6da National Park": {
+        "lat": -25.3444, "lng": 131.0369,
+        "source_url": "https://parksaustralia.gov.au/uluru/",
+    },
+    "Great Barrier Reef Marine Park": {
+        "lat": -18.2871, "lng": 147.6992,
+        "source_url": "https://www2.gbrmpa.gov.au/",
+    },
+    "Purnululu National Park": {
+        "lat": -17.5000, "lng": 128.5000,
+        "source_url": "https://exploreparks.dbca.wa.gov.au/park/purnululu-national-park",
+    },
+    "Port Arthur, Tasmania": {
+        "lat": -43.1414, "lng": 147.8511,
+        "source_url": "https://portarthur.org.au/",
+    },
+    "Royal National Park": {
+        "lat": -34.1500, "lng": 151.0667,
+        "source_url": "https://www.nationalparks.nsw.gov.au/visit-a-park/parks/royal-national-park",
+    },
 }
 RELATED_IMAGE_BASE = {
     "Assateague Island National Seashore": "Acadia National Park",
@@ -359,6 +492,33 @@ RELATED_IMAGE_BASE = {
     "Glacier Bay National Park and Preserve": "Denali National Park and Preserve",
     "Mammoth Cave National Park": "Great Smoky Mountains National Park",
     "Mount Rushmore": "Badlands National Park",
+    "Jasper National Park": "Banff National Park",
+    "Pacific Rim National Park Reserve": "Olympic National Park",
+    "Algonquin Provincial Park": "Acadia National Park",
+    "Gros Morne National Park": "Acadia National Park",
+    "Fiordland National Park": "North Cascades National Park",
+    "Tongariro National Park": "Hawaii Volcanoes National Park",
+    "Abel Tasman National Park": "Olympic National Park",
+    "Aoraki / Mount Cook National Park": "Mount Rainier National Park",
+    "Mount Aspiring National Park": "North Cascades National Park",
+    "Blue Mountains National Park": "Shenandoah National Park",
+    "Kosciuszko National Park": "Rocky Mountain National Park",
+    "Kakadu National Park": "Everglades National Park",
+    "Grampians National Park": "Rocky Mountain National Park",
+    "Freycinet National Park": "Acadia National Park",
+    "Daintree National Park": "Olympic National Park",
+    "Nahanni National Park Reserve": "North Cascades National Park",
+    "Wood Buffalo National Park": "Denali National Park and Preserve",
+    "L'Anse aux Meadows": "Acadia National Park",
+    "Head-Smashed-In Buffalo Jump": "Badlands National Park",
+    "Fortress of Louisbourg": "Acadia National Park",
+    "Te Wahipounamu": "North Cascades National Park",
+    "Waitangi Treaty Grounds": "Olympic National Park",
+    "Ulu\u1e5fu-Kata Tju\u1e6da National Park": "Arches National Park",
+    "Great Barrier Reef Marine Park": "Everglades National Park",
+    "Purnululu National Park": "Arches National Park",
+    "Port Arthur, Tasmania": "Acadia National Park",
+    "Royal National Park": "Shenandoah National Park",
 }
 NPS_PARK_CODES = {
     "Grand Canyon National Park": "grca",
@@ -613,6 +773,232 @@ def join_sentences(parts: list[str], start: int, count: int, fallback: str) -> s
     selected = parts[start:start + count]
     return " ".join(selected).strip() or fallback
 
+def copy_theme(title: str, base: str, group_key: str, tags: list[str] | None = None) -> dict:
+    text = " ".join([title, base, " ".join(tags or [])]).lower()
+    if any(term in text for term in ("volcano", "volcanic", "lava", "craters")):
+        return {
+            "terrain": "volcanic terrain, stark overlooks, and geology you can read from the road",
+            "action": "check eruption notices, heat, snow, and road status",
+        }
+    if any(term in text for term in ("cave", "caverns", "karst")):
+        return {
+            "terrain": "cave country, ranger-led timing, and weather-proof underground payoff",
+            "action": "confirm tour windows, footwear rules, and surface-road closures",
+        }
+    if any(term in text for term in ("coast", "beach", "island", "seashore", "marine", "reef", "sound", "bay", "fjord", "lakeshore")):
+        return {
+            "terrain": "coastline, water access, wind, tides, and long-view scenery",
+            "action": "check tides, ferries, surf, wind, and parking",
+        }
+    if any(term in text for term in ("lake", "river", "canoe", "water", "gorge", "gap")):
+        return {
+            "terrain": "water access, scenic pullouts, and weather-dependent route decisions",
+            "action": "check water levels, boat rules, seasonal roads, and shoreline access",
+        }
+    if any(term in text for term in ("desert", "dunes", "cactus", "canyon", "arches", "escalante", "valley of fire", "white sands")):
+        return {
+            "terrain": "desert light, exposed roads, heat planning, and high-payoff geology",
+            "action": "check heat, water, road surface, flash-flood risk, and camp rules",
+        }
+    if any(term in text for term in ("historic", "battlefield", "missions", "fort", "liberty", "ellis", "pearl harbor", "manzanar", "treaty", "meadows")):
+        return {
+            "terrain": "history, interpretation stops, walking time, and context that rewards slowing down",
+            "action": "check hours, tickets, tour timing, and preservation rules",
+        }
+    if any(term in text for term in ("monument", "ruins", "cliff dwellings", "fossil", "dinosaur", "tower", "mesa verde", "bears ears")):
+        return {
+            "terrain": "landmark scenery, cultural context, and short detours with real route payoff",
+            "action": "confirm access roads, permits, site protections, and current notices",
+        }
+    if any(term in text for term in ("forest", "rainforest", "redwood", "smoky", "pisgah", "white mountain", "superior")):
+        return {
+            "terrain": "forest roads, trailheads, shaded stops, and weather that can change the drive",
+            "action": "check seasonal gates, fire rules, trail conditions, and camping limits",
+        }
+    if any(term in text for term in ("mount", "mountain", "alpine", "glacier", "teton", "rainier", "rocky", "kluane", "fiordland", "aspiring")):
+        return {
+            "terrain": "mountain access, elevation, weather windows, and big-scenery route anchors",
+            "action": "check snow, storms, shuttle rules, and road openings",
+        }
+    if group_key == "glamping":
+        return {
+            "terrain": "a softer landing near a major outdoor route, with comfort trading off against price and availability",
+            "action": "confirm check-in, location, cancellation terms, and included gear",
+        }
+    if group_key == "huts_lodging":
+        return {
+            "terrain": "fixed-roof lodging that can anchor a hard weather day or a classic park overnight",
+            "action": "confirm reservation windows, food, shuttle access, and operating dates",
+        }
+    if group_key == "trails":
+        return {
+            "terrain": "trail time, parking logistics, and a route day that should be planned around daylight",
+            "action": "check permits, closures, heat or snow, and trailhead access",
+        }
+    return {
+        "terrain": "public-land scenery, practical route context, and enough payoff to justify a stop",
+        "action": "verify access, fees, closures, and overnight rules",
+    }
+
+
+def copy_variant(title: str, count: int) -> int:
+    if count <= 1:
+        return 0
+    digest = hashlib.sha1(title.encode("utf-8")).hexdigest()
+    return int(digest[:8], 16) % count
+
+
+def choose_template(key: str, templates: list[str], **values: str) -> str:
+    template = templates[copy_variant(key, len(templates))]
+    return template.format(**values)
+
+
+def preview_base_name(value: str) -> str:
+    text = re.sub(r"\s+", " ", value or "").strip()
+    text = re.sub(r"\bNational Park and Preserve\b", "NP Preserve", text)
+    text = re.sub(r"\bNational Park Reserve\b", "NP Reserve", text)
+    text = re.sub(r"\bNational Recreation Area\b", "NRA", text)
+    text = re.sub(r"\bNational Lakeshore\b", "Lakeshore", text)
+    text = re.sub(r"\bNational Seashore\b", "Seashore", text)
+    text = re.sub(r"\bNational Park\b", "NP", text)
+    return text
+
+
+def sentence_case(value: str) -> str:
+    text = (value or "").strip()
+    return text[:1].upper() + text[1:] if text else text
+
+
+def generated_copy_for_seed(entry: dict, base_title: str) -> tuple[str, str, str, str]:
+    group_key = entry.get("explore_group") or ""
+    group = GROUP_COPY.get(group_key, GROUP_COPY["camping"])
+    title = entry["title"]
+    base = base_title or title
+    state = entry.get("state") or entry.get("region") or ""
+    tags = list(entry.get("tags") or [])
+    theme = copy_theme(title, base, group_key, tags)
+    preview_base = preview_base_name(base)
+    action = theme["action"]
+    action_sentence = sentence_case(action)
+    place = title if title == base else f"{title} around {base}"
+    region = f" in {state}" if state else ""
+
+    if group_key == "camping":
+        hook = choose_template(title, [
+            "{title} gives camp search a real center near {base}{region}.",
+            "Use {title} as the overnight search area for {base}{region}.",
+            "{title} is the place to start looking for legal stays near {base}{region}.",
+            "Start camp planning around {title}, then narrow it with live results.",
+        ], title=title, base=preview_base, region=region)
+        summary = choose_template(title, [
+            "Search around {base} for legal overnight options. Then {action}.",
+            "Start near {base}; live results show actual sites. {Action}.",
+            "Good for overnight planning near {base}. Use live map results. {Action}.",
+            "Use this area to avoid a blank camp search. Look nearby and {action}.",
+        ], base=preview_base, action=action, Action=action_sentence)
+        why = f"{title} matters because it gives the route planner a named camping area near {base}, not just a blank map search."
+    elif group_key == "parks":
+        hook = choose_template(title, [
+            "{title} is worth slowing down for{region}.",
+            "Put {title} on the route when the day needs more than road miles.",
+            "{title} works as a real day stop{region}, not just a map label.",
+            "Use {title} to shape nearby camps, walks, and services{region}.",
+        ], title=title, region=region)
+        summary = choose_template(title, [
+            "A good place to slow the route down. Before you go, {action}.",
+            "Use it as a day anchor when the drive needs more than mileage. {Action}.",
+            "Build extra time around this stop, especially if weather or crowds matter. {Action}.",
+            "Worth planning around, not just passing on the highway. {Action}.",
+        ], action=action, Action=action_sentence)
+        why = f"{title} earns a card because it can shape where you camp, fuel, walk, and slow down on the surrounding route."
+    elif group_key == "monuments":
+        hook = choose_template(title, [
+            "History is the reason to stop at {title}{region}.",
+            "{title} is best treated as a real stop, not a quick pin.",
+            "Use {title} when the route needs context, not just scenery.",
+            "{title} gives the drive a specific story to stop for{region}.",
+        ], title=title, region=region)
+        summary = choose_template(title, [
+            "Plan enough time to get out, read the place, and walk it properly. {Action}.",
+            "Best as a focused stop, not a drive-by pin. {Action}.",
+            "A short detour can be worth it here if you give the site time. {Action}.",
+            "Use it for context, photos, and a cleaner break in the drive. {Action}.",
+        ], Action=action_sentence)
+        why = f"{title} adds context to the map: history, land protection, and a specific reason to leave the fastest road."
+    elif group_key == "water_scenic":
+        hook = choose_template(title, [
+            "Put {title} on the route when water and views matter.",
+            "{title} is a good excuse to slow down near the water{region}.",
+            "Use {title} when the route needs a scenic pause{region}.",
+            "{title} is useful when the map needs more than roads and camps.",
+        ], title=title, region=region)
+        summary = choose_template(title, [
+            "Good for a slower scenic leg, photos, or shoreline time. {Action}.",
+            "Use this when the route needs water, views, and a real pause. {Action}.",
+            "Plan around conditions here; wind and access can change the day. {Action}.",
+            "Useful when nearby camps or towns feel too generic. {Action}.",
+        ], Action=action_sentence)
+        why = f"{title} helps turn nearby search into a better route choice by tying camps, stops, and weather to a visible landscape feature."
+    elif group_key == "trails":
+        hook = choose_template(title, [
+            "Plan around {title} if hiking is the main event{region}.",
+            "{title} can decide where the rest of the day goes.",
+            "Use {title} to stage parking, camps, and post-hike services{region}.",
+            "{title} is a better day anchor than a last-minute trail search.",
+        ], title=title, region=region)
+        summary = choose_template(title, [
+            "Plan parking, daylight, nearby camps, and food around this one. {Action}.",
+            "Use it when a hike should decide the day, not just fill an hour. {Action}.",
+            "Good for staging the route before and after trail time. {Action}.",
+            "Trail logistics can ripple into camp plans. {Action}.",
+        ], Action=action_sentence)
+        why = f"{title} belongs in Explore because trail timing often decides the rest of the day: sleep, food, fuel, and how far to drive next."
+    elif group_key == "glamping":
+        hook = choose_template(title, [
+            "{title} is for the night you want comfort near {base}.",
+            "Use {title} when the route needs a softer landing{region}.",
+            "{title} gives the trip a paid reset option near {base}.",
+            "Choose {title} when setup time matters more than roughing it.",
+        ], title=title, base=preview_base, region=region)
+        summary = choose_template(title, [
+            "Use it for a reset night when camping every day stops sounding fun. {Action}.",
+            "A paid comfort stop near {base}; useful after heat, weather, or long miles. {Action}.",
+            "Good when the trip needs showers, easier sleep, and less setup. {Action}.",
+            "Treat it as lodging, not public campground inventory. {Action}.",
+        ], base=preview_base, Action=action_sentence)
+        why = f"{title} gives the planner a paid-stay option near outdoor access without treating it like public campground inventory."
+    elif group_key == "huts_lodging":
+        hook = choose_template(title, [
+            "{title} gives the route a real roof near {base}.",
+            "Use {title} when weather or mileage makes camping less appealing.",
+            "{title} can be the safer end point for a long day{region}.",
+            "Build around {title} only if the reservation timing works.",
+        ], title=title, base=preview_base, region=region)
+        summary = choose_template(title, [
+            "Useful when weather, mileage, or park access calls for a real roof. {Action}.",
+            "Build around this only if the reservation and access details work. {Action}.",
+            "A classic overnight anchor, especially when camp logistics get tight. {Action}.",
+            "Use it for a recovery night or a safer end to a hard day. {Action}.",
+        ], Action=action_sentence)
+        why = f"{title} is useful because lodging can decide the safe end point for a long mountain, desert, or park day."
+    else:
+        hook = f"{title} is a Trailhead Explore anchor{region} for {theme['terrain']}."
+        summary = f"Use it as a starting point for route context, then {theme['action']}."
+        why = f"{title} adds enough travel context to be worth surfacing before a user zooms into the map."
+    return hook, summary, why, theme["action"]
+
+
+def is_generic_seed_text(value: str, title: str) -> bool:
+    text = (value or "").lower()
+    title_lower = title.lower()
+    return (
+        not text
+        or "puts " in text and " on the shortlist for " in text
+        or "curated trailhead pick" in text
+        or "seeded trailhead campground-area anchor" in text
+        or text.startswith(f"{title_lower} keeps ")
+    )
+
 
 def profile_from_summary(title: str, category: str, extract: str, state: str) -> dict:
     parts = sentences(extract)
@@ -648,11 +1034,11 @@ def profile_from_seed(entry: dict, base_title: str, extract: str) -> dict:
     title = entry["title"]
     base = base_title or title
     state = entry.get("state") or entry.get("region") or ""
-    lead = entry.get("hook") or f"{title} puts {base} on the shortlist for {group['category'].lower()} trips."
-    summary = entry.get("short_description") or (
-        f"{title} is a curated Trailhead pick for {group['reason']}. "
-        f"Use it as a starting point, then verify current access before you go."
-    )
+    generated_hook, generated_summary, generated_why, generated_action = generated_copy_for_seed(entry, base)
+    entry_hook = entry.get("hook") or ""
+    entry_summary = entry.get("short_description") or ""
+    lead = entry_hook if not is_generic_seed_text(entry_hook, title) else generated_hook
+    summary = entry_summary if not is_generic_seed_text(entry_summary, title) else generated_summary
     story_core = sentence(extract, f"{base} is a major outdoor destination.")
     return {
         "hook": lead,
@@ -661,9 +1047,9 @@ def profile_from_seed(entry: dict, base_title: str, extract: str) -> dict:
             f"{title}. {summary} {story_core} "
             f"Build the stop around current conditions, reservation rules, and the time you want on the ground."
         ),
-        "why_it_matters": entry.get("why_it_matters") or f"{title} stands out for {group['reason']}.",
+        "why_it_matters": entry.get("why_it_matters") or generated_why,
         "what_to_know": entry.get("what_to_know") or (
-            "Treat this as a featured lead, not live availability. Details can change quickly by season, operator, weather, and land manager."
+            f"This is a planning card, not live availability. Use it for discovery, then {generated_action}."
         ),
         "best_time_to_stop": entry.get("best_time_to_stop") or group["timing"],
         "access_notes": entry.get("access_notes") or (

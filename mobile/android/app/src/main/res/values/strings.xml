@@ -2,5 +2,5 @@
   <string name="app_name">Trailhead</string>
   <string name="expo_splash_screen_resize_mode" translatable="false">contain</string>
   <string name="expo_splash_screen_status_bar_translucent" translatable="false">false</string>
-  <string name="expo_runtime_version">native-20260607-1</string>
+  <string name="expo_runtime_version">native-20260614-sdk54-1</string>
 </resources>

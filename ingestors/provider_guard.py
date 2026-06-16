@@ -17,7 +17,11 @@ _IN_FLIGHT: dict[str, asyncio.Task] = {}
 
 PAID_OR_FRAGILE_PROVIDERS = {"elevenlabs", "anthropic"}
 HOSTED_LIGHTWEIGHT_PROVIDERS = {"locationiq"}
-LIVE_FREE_PROVIDERS = {"nps", "ridb", "blm", "usfs", "wikimedia", "wikipedia", "overpass", "nominatim", "mapbox", "active", "fcc"}
+LIVE_FREE_PROVIDERS = {
+    "nps", "ridb", "blm", "usfs", "wikimedia", "wikipedia", "overpass",
+    "nominatim", "mapbox", "active", "fcc", "nz_doc",
+    "australia_open_data", "canada_open_data",
+}
 OWNED_FREE_PROVIDERS = {"trailhead", "community", "osm", "openstreetmap", "overture", "offline", "place_pack", "explore"}
 
 PROVIDER_BUDGETS: dict[tuple[str, str], tuple[int, int]] = {

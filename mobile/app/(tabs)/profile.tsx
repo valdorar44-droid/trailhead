@@ -1,25 +1,25 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   TextInput, Alert, Share, Linking, ActivityIndicator, Image, Modal, Animated, Keyboard, Switch, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { storage } from '@/lib/storage';
 import * as Updates from 'expo-updates';
 import Constants from 'expo-constants';
 import * as Application from 'expo-application';
-import { api, ApiError, ContestStatus, ContributorProfile, SupportThread } from '@/lib/api';
+import { api, ApiError, ContestStatus, ContributorProfile, SupportThread, TripResult } from '@/lib/api';
 import { useStore, RigProfile, SavedPlace, TripHistoryItem } from '@/lib/store';
 import PaywallModal from '@/components/PaywallModal';
 import TourTarget from '@/components/TourTarget';
 import { TrailheadButton, TrailheadCard, TrailheadMetricRow, TrailheadTopBar } from '@/components/TrailheadUI';
 import { freeTrialLabel, useSubscription } from '@/lib/useSubscription';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
-import { deleteOfflineTrip, getOfflineTripIndex, loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
+import { deleteOfflineTrip, getOfflineTripIndex, getOfflineTripSummaries, loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { deleteRouteGeometry, saveRouteGeometry } from '@/lib/offlineRoutes';
 import {
   buildTripFromGpxTrack,
@@ -32,6 +32,7 @@ import {
   type GpxImportBatch,
 } from '@/lib/gpxImport';
 import { CREDIT_REWARDS } from '@/lib/credits';
+import { trackPhase0Event } from '@/lib/telemetry';
 import {
   displayConsumptionToMpg,
   displayToMiles,
@@ -114,6 +115,17 @@ const DEFAULT_RIG: RigProfile = {
   is_towing: false, trailer_length_ft: '', tow_capacity_lbs: '',
 };
 
+const PROFILE_SECTIONS = [
+  { id: 'account', label: 'Account', icon: 'person-circle-outline' },
+  { id: 'rig', label: 'Rig', icon: 'car-sport-outline' },
+  { id: 'trips', label: 'Trips', icon: 'map-outline' },
+  { id: 'saved', label: 'Saved', icon: 'bookmark-outline' },
+  { id: 'support', label: 'Support', icon: 'ribbon-outline' },
+  { id: 'settings', label: 'Settings', icon: 'settings-outline' },
+] as const;
+
+type ProfileSectionId = typeof PROFILE_SECTIONS[number]['id'];
+
 export default function ProfileScreen() {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
@@ -133,6 +145,7 @@ export default function ProfileScreen() {
   const removeSavedPlace = useStore(st => st.removeSavedPlace);
   const setPendingMapSelection = useStore(st => st.setPendingMapSelection);
   const setPendingSavedTrailId = useStore(st => st.setPendingSavedTrailId);
+  const [profileSection, setProfileSection] = useState<ProfileSectionId>('account');
   const [view, setView] = useState<'main' | 'login' | 'register' | 'forgot'>(!user ? 'login' : 'main');
   const [authSuccess, setAuthSuccess] = useState('');  // brief success message before switching to main
   const authFade = useRef(new Animated.Value(1)).current;
@@ -193,9 +206,11 @@ export default function ProfileScreen() {
   // Offline cache state
   const [offlineCachedIds, setOfflineCachedIds] = useState<Set<string>>(new Set());
   const setActiveTrip = useStore(st => st.setActiveTrip);
+  const setPendingOpenOfflineModal = useStore(st => st.setPendingOpenOfflineModal);
   const addTripToHistory = useStore(st => st.addTripToHistory);
   const startGuidedTour = useStore(st => st.startGuidedTour);
   const startWelcomePrompt = useStore(st => st.startWelcomePrompt);
+  const [offlineTripSummaries, setOfflineTripSummaries] = useState<Array<TripResult & { cached_at: number }>>([]);
 
   function openSavedCampOnMap(camp: typeof favoriteCamps[number]) {
     setPendingMapSelection({ kind: 'camp', camp });
@@ -291,13 +306,78 @@ export default function ProfileScreen() {
     }).catch(() => {});
   }, []);
 
-  // Load offline trip index to show cache badges
-  useEffect(() => {
+  const refreshOfflineTrips = useCallback(() => {
     getOfflineTripIndex().then(ids => {
       setOfflineCachedIds(new Set(ids));
     }).catch(() => {});
-    loadGpxImportBatches().then(setGpxBatches).catch(() => {});
+    getOfflineTripSummaries().then(setOfflineTripSummaries).catch(() => {});
   }, []);
+
+  // Load offline trip index to show cache badges
+  useEffect(() => {
+    refreshOfflineTrips();
+    loadGpxImportBatches().then(setGpxBatches).catch(() => {});
+  }, [refreshOfflineTrips]);
+
+  const offlineTripCount = useMemo(
+    () => tripHistory.filter(trip => offlineCachedIds.has(trip.trip_id)).length,
+    [offlineCachedIds, tripHistory],
+  );
+  const importedRouteCount = useMemo(
+    () => gpxBatches.filter(batch => !!(batch.routeTripId || batch.routeTripIds?.length)).length,
+    [gpxBatches],
+  );
+  const importedPinCount = useMemo(
+    () => gpxBatches.reduce((sum, batch) => sum + (batch.importedPins || 0), 0),
+    [gpxBatches],
+  );
+  const offlineOnlyTrips = useMemo(
+    () => offlineTripSummaries.filter(summary => !tripHistory.some(trip => trip.trip_id === summary.trip_id)),
+    [offlineTripSummaries, tripHistory],
+  );
+
+  function openOfflineMapsManager() {
+    setPendingOpenOfflineModal(true);
+    router.push('/(tabs)/map');
+  }
+
+  function openOfflineTripSummary(trip: TripResult & { cached_at: number }) {
+    setActiveTrip({ ...trip, updated_at: Date.now() }, true);
+    router.push('/(tabs)/map');
+  }
+
+  function formatCachedDate(timestamp?: number | null) {
+    if (!timestamp || !Number.isFinite(timestamp)) return 'Saved offline';
+    return `Saved ${new Date(timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+  }
+
+  function confirmDeleteOfflineCopy(trip: TripResult & { cached_at: number }) {
+    Alert.alert(
+      'Remove offline copy?',
+      `${trip.plan.trip_name || trip.trip_id} will stay in Profile if it is also saved there, but the device cache will be removed.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            await deleteOfflineTrip(trip.trip_id);
+            refreshOfflineTrips();
+          },
+        },
+      ],
+    );
+  }
+
+  useFocusEffect(useCallback(() => {
+    trackPhase0Event('phase0_profile_opened', {
+      signed_in: !!user,
+      has_plan: !!hasPlan,
+      saved_trips: tripHistory.length,
+      favorite_camps: favoriteCamps.length,
+      saved_places: savedPlaces.length,
+    });
+  }, [favoriteCamps.length, hasPlan, savedPlaces.length, tripHistory.length, user]));
 
   async function openContest() {
     setShowContest(true);
@@ -557,15 +637,24 @@ export default function ProfileScreen() {
       const cached = await loadOfflineTrip(t.trip_id);
       if (cached) {
         setActiveTrip({ ...cached, updated_at: Date.now() }, true);
+        trackPhase0Event('phase0_saved_trip_opened', {
+          trip_id: t.trip_id,
+          source: 'offline',
+          has_active_user: !!user,
+        });
         router.push('/(tabs)/map');
         return;
       }
 
       const trip = await api.getTrip(t.trip_id);
       setActiveTrip({ ...trip, updated_at: Date.now() });
+      trackPhase0Event('phase0_saved_trip_opened', {
+        trip_id: t.trip_id,
+        source: 'server',
+        has_active_user: !!user,
+      });
       saveOfflineTrip(trip)
-        .then(() => getOfflineTripIndex())
-        .then(ids => setOfflineCachedIds(new Set(ids)))
+        .then(() => refreshOfflineTrips())
         .catch(() => {});
       router.push('/(tabs)/map');
     } catch (e: any) {
@@ -593,11 +682,7 @@ export default function ProfileScreen() {
           onPress: async () => {
             removeTripFromHistory(t.trip_id);
             await deleteOfflineTrip(t.trip_id);
-            setOfflineCachedIds(prev => {
-              const next = new Set(prev);
-              next.delete(t.trip_id);
-              return next;
-            });
+            refreshOfflineTrips();
           },
         },
       ],
@@ -641,11 +726,7 @@ export default function ProfileScreen() {
             }));
             const next = await removeGpxImportBatch(batch.id);
             setGpxBatches(next);
-            setOfflineCachedIds(prev => {
-              const out = new Set(prev);
-              tripIds.forEach(id => out.delete(id));
-              return out;
-            });
+            refreshOfflineTrips();
           },
         },
       ],
@@ -772,7 +853,7 @@ export default function ProfileScreen() {
         });
       }
       if (savedTripIds.length > 0) {
-        setOfflineCachedIds(prev => new Set([...savedTripIds, ...prev]));
+        refreshOfflineTrips();
         const batch: GpxImportBatch = {
           id: `gpx_batch_${Date.now()}`,
           fileName: file.name,
@@ -1082,35 +1163,155 @@ export default function ProfileScreen() {
           </TrailheadCard>
         </TourTarget>
 
-        {/* Stats row */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={s.profileSectionNav}
+          contentContainerStyle={s.profileSectionNavContent}
+        >
+          {PROFILE_SECTIONS.map(section => {
+            const active = profileSection === section.id;
+            return (
+              <TouchableOpacity
+                key={section.id}
+                style={[s.profileSectionChip, active && s.profileSectionChipActive]}
+                onPress={() => setProfileSection(section.id)}
+              >
+                <Ionicons name={section.icon} size={15} color={active ? '#fff' : C.text3} />
+                <Text style={[s.profileSectionChipText, active && s.profileSectionChipTextActive]}>{section.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+
         {(() => {
-          const totalMiles = tripHistory.reduce((sum, t) => sum + (t.est_miles || 0), 0);
-          const states = [...new Set(tripHistory.flatMap(t => t.states || []))];
+          const actions = profileSection === 'account'
+            ? [
+                { icon: 'compass', label: 'PLAN TRIP', color: C.orange, onPress: () => { setActiveTrip(null); router.push('/(tabs)'); } },
+                { icon: 'people', label: 'REFER', color: C.orange, onPress: shareReferral },
+                { icon: 'time-outline', label: 'HISTORY', color: C.silverBright, onPress: loadHistory },
+              ]
+            : profileSection === 'rig'
+              ? [
+                  {
+                    icon: 'car-sport-outline',
+                    label: editingRig ? 'SAVE RIG' : rigProfile ? 'EDIT RIG' : 'ADD RIG',
+                    color: C.orange,
+                    onPress: () => {
+                      if (editingRig) saveRig();
+                      else {
+                        setRigDraft(rigProfile ?? DEFAULT_RIG);
+                        setRigSection('vehicle');
+                        setEditingRig(true);
+                      }
+                    },
+                  },
+                  { icon: 'checkmark-circle', label: 'TRIP PREP', color: C.green, onPress: () => setShowChecklist(true) },
+                ]
+              : profileSection === 'trips'
+                ? [
+                    { icon: 'compass', label: 'PLAN TRIP', color: C.orange, onPress: () => { setActiveTrip(null); router.push('/(tabs)'); } },
+                    { icon: 'cloud-download-outline', label: 'OFFLINE MAPS', color: C.green, onPress: openOfflineMapsManager },
+                    { icon: 'cloud-upload-outline', label: 'IMPORT GPX', color: C.text3, onPress: importGpx },
+                  ]
+                : profileSection === 'saved'
+                  ? [
+                      { icon: 'map-outline', label: 'OPEN MAP', color: C.orange, onPress: () => router.push('/(tabs)/map') },
+                      { icon: 'sparkles-outline', label: 'EXPLORE', color: '#d4af37', onPress: () => router.push('/(tabs)/guide') },
+                    ]
+                  : profileSection === 'support'
+                    ? [
+                        { icon: 'mail-outline', label: 'INBOX', color: '#3b82f6', onPress: () => openSupportInbox() },
+                        { icon: 'ribbon-outline', label: 'CONTRIB', color: '#14b8a6', onPress: openContributions },
+                        { icon: 'trophy-outline', label: 'CONTEST', color: '#d4af37', onPress: openContest },
+                        { icon: 'help-buoy-outline', label: 'CONTACT', color: '#3b82f6', onPress: () => contactSupport('Trailhead question') },
+                      ]
+                    : [
+                        { icon: 'sparkles-outline', label: 'WELCOME', color: '#d4af37', onPress: startWelcomePrompt },
+                        { icon: 'help-buoy-outline', label: 'APP TOUR', color: '#3b82f6', onPress: startGuidedTour },
+                        { icon: 'bug-outline', label: 'BUG', color: C.red, onPress: () => setShowBugModal(true) },
+                        ...(user?.is_admin ? [{ icon: 'refresh-circle-outline', label: adminClearingCampCache ? 'CLEARING' : 'CAMP CACHE', color: C.yellow, onPress: clearCampCacheAdmin }] : []),
+                      ];
           return (
-            <View>
-              <TrailheadMetricRow
-                metrics={[
-                  { label: 'Credits', value: String(user?.credits ?? 0), icon: 'flash', tone: C.orange },
-                  { label: 'Day streak', value: String(user?.report_streak ?? 0), icon: 'flame', tone: C.orange },
-                  { label: 'Trips', value: String(tripHistory.length), icon: 'map-outline', tone: C.silverBright },
-                ]}
-              />
-              {tripHistory.length > 0 && (
-                <TrailheadMetricRow
-                  style={{ marginTop: 6 }}
-                  metrics={[
-                    { label: 'Miles planned', value: totalMiles > 0 ? totalMiles.toLocaleString() : '—', icon: 'speedometer-outline', tone: C.silverBright },
-                    { label: 'States explored', value: String(states.length), icon: 'flag-outline', tone: C.silverBright },
-                    { label: 'Regions', value: states.slice(0, 2).join(' ') || '—', icon: 'trail-sign-outline', tone: C.silverBright },
-                  ]}
-                />
-              )}
-            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={s.quickActionsRow}
+              contentContainerStyle={s.quickActionsContent}
+            >
+              {actions.map(({ icon, label, color, onPress }) => (
+                <TouchableOpacity key={label} style={s.quickAction} onPress={onPress}>
+                  <View style={[s.quickActionIcon, { borderColor: color + '44', backgroundColor: color + '18' }]}>
+                    <Ionicons name={icon as any} size={22} color={color} />
+                  </View>
+                  <Text style={s.quickActionLabel}>{label}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
           );
         })()}
 
         {/* My Trips — with offline cache badges */}
-        {tripHistory.length > 0 && (
+        {profileSection === 'trips' && tripHistory.length > 0 && (
+          <>
+            <TrailheadMetricRow
+              metrics={[
+                { label: 'Saved trips', value: String(tripHistory.length), icon: 'map-outline', tone: C.silverBright },
+                { label: 'Offline', value: String(offlineTripCount), icon: 'download-outline', tone: C.green },
+                { label: 'GPX routes', value: String(importedRouteCount), icon: 'git-branch-outline', tone: C.orange },
+              ]}
+            />
+            <TrailheadCard style={s.tripSummaryCard}>
+              <Text style={s.sectionLabel}>DOWNLOAD STATUS</Text>
+              <Text style={s.emptySectionText}>
+                {offlineTripCount > 0
+                  ? `${offlineTripCount} trip ${offlineTripCount === 1 ? 'is' : 'are'} ready offline. ${Math.max(0, tripHistory.length - offlineTripCount)} still need a cached copy if you want them without service.`
+                  : 'No trip is cached offline yet. Open a saved trip and cache it before you head out of service.'}
+              </Text>
+              <TouchableOpacity style={s.tripSummaryAction} onPress={openOfflineMapsManager}>
+                <Ionicons name="cloud-download-outline" size={14} color={C.orange} />
+                <Text style={s.tripSummaryActionText}>OPEN OFFLINE MAPS</Text>
+              </TouchableOpacity>
+              {gpxBatches.length > 0 && (
+                <Text style={s.tripSummaryMeta}>
+                  {importedRouteCount} GPX route {importedRouteCount === 1 ? 'preview' : 'previews'} · {importedPinCount} imported {importedPinCount === 1 ? 'pin' : 'pins'}
+                </Text>
+              )}
+            </TrailheadCard>
+            {offlineTripSummaries.length > 0 && (
+              <TrailheadCard style={s.tripsCard}>
+                <Text style={s.sectionLabel}>OFFLINE TRIPS</Text>
+                {offlineTripSummaries.slice(0, 8).map(trip => (
+                  <View key={`offline-${trip.trip_id}`} style={s.tripRow}>
+                    <TouchableOpacity style={s.tripRowOpen} onPress={() => openOfflineTripSummary(trip)}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.tripRowName} numberOfLines={1}>{trip.plan.trip_name || trip.trip_id}</Text>
+                        <Text style={s.tripRowMeta}>
+                          {trip.plan.duration_days || trip.plan.daily_itinerary?.length || 0}D · {Math.round(trip.plan.total_est_miles || 0)}MI · {formatCachedDate((trip as any).cached_at)}
+                        </Text>
+                      </View>
+                      <View style={s.offlineBadge}>
+                        <Ionicons name="cloud-done-outline" size={10} color="#22c55e" />
+                        <Text style={s.offlineBadgeText}>READY</Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={14} color={C.text3} style={{ marginLeft: 4 }} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={s.tripDeleteBtn}
+                      onPress={() => confirmDeleteOfflineCopy(trip)}
+                      accessibilityLabel={`Remove offline copy for ${trip.plan.trip_name || trip.trip_id}`}
+                    >
+                      <Ionicons name="trash-outline" size={15} color={C.red} />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+                {offlineOnlyTrips.length > 0 && (
+                  <Text style={s.tripSummaryMeta}>
+                    {offlineOnlyTrips.length} cached {offlineOnlyTrips.length === 1 ? 'trip is' : 'trips are'} not in the saved trip list anymore.
+                  </Text>
+                )}
+              </TrailheadCard>
+            )}
           <TrailheadCard style={s.tripsCard}>
             <Text style={s.sectionLabel}>MY TRIPS</Text>
             {tripHistory.map(t => {
@@ -1141,37 +1342,64 @@ export default function ProfileScreen() {
               );
             })}
           </TrailheadCard>
+          </>
         )}
 
-        {/* Quick actions */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={s.quickActionsRow}
-          contentContainerStyle={s.quickActionsContent}
-        >
-          {[
-            { icon: 'compass', label: 'PLAN TRIP',   color: C.orange, onPress: () => { setActiveTrip(null); router.push('/(tabs)'); } },
-            { icon: 'trophy-outline', label: 'CONTEST', color: '#d4af37', onPress: openContest },
-            { icon: 'ribbon-outline', label: 'CONTRIB', color: '#14b8a6', onPress: openContributions },
-            { icon: 'sparkles-outline', label: 'WELCOME', color: '#d4af37', onPress: startWelcomePrompt },
-            ...(user?.is_admin ? [{ icon: 'refresh-circle-outline', label: adminClearingCampCache ? 'CLEARING' : 'CAMP CACHE', color: C.yellow, onPress: clearCampCacheAdmin }] : []),
-            { icon: 'people',  label: 'REFER',       color: C.orange, onPress: shareReferral },
-            { icon: 'checkmark-circle', label: 'TRIP PREP', color: C.green,  onPress: () => setShowChecklist(true) },
-            { icon: 'help-buoy-outline', label: 'APP TOUR', color: '#3b82f6', onPress: startGuidedTour },
-            { icon: 'mail-outline', label: 'CONTACT', color: '#3b82f6', onPress: () => contactSupport('Trailhead question') },
-            { icon: 'cloud-upload-outline', label: 'IMPORT GPX', color: C.text3, onPress: importGpx },
-            { icon: 'bug-outline', label: 'BUG',     color: C.red,   onPress: () => setShowBugModal(true) },
-          ].map(({ icon, label, color, onPress }) => (
-            <TouchableOpacity key={label} style={s.quickAction} onPress={onPress}>
-              <View style={[s.quickActionIcon, { borderColor: color + '44', backgroundColor: color + '18' }]}>
-                <Ionicons name={icon as any} size={22} color={color} />
-              </View>
-              <Text style={s.quickActionLabel}>{label}</Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+        {profileSection === 'trips' && tripHistory.length === 0 && (
+          <>
+            <TrailheadMetricRow
+              metrics={[
+                { label: 'Saved trips', value: '0', icon: 'map-outline', tone: C.silverBright },
+                { label: 'Offline', value: '0', icon: 'download-outline', tone: C.green },
+                { label: 'GPX routes', value: String(importedRouteCount), icon: 'git-branch-outline', tone: C.orange },
+              ]}
+            />
+            <TrailheadCard style={s.historyCard}>
+              <Text style={s.sectionLabel}>TRIPS & DOWNLOADS</Text>
+              <Text style={s.emptySectionText}>Saved trips, offline copies, and GPX route imports will show up here after you build or import them.</Text>
+              <TouchableOpacity style={s.tripSummaryAction} onPress={openOfflineMapsManager}>
+                <Ionicons name="cloud-download-outline" size={14} color={C.orange} />
+                <Text style={s.tripSummaryActionText}>OPEN OFFLINE MAPS</Text>
+              </TouchableOpacity>
+              {gpxBatches.length > 0 && (
+                <Text style={s.tripSummaryMeta}>
+                  {importedRouteCount} GPX route {importedRouteCount === 1 ? 'preview' : 'previews'} · {importedPinCount} imported {importedPinCount === 1 ? 'pin' : 'pins'}
+                </Text>
+              )}
+            </TrailheadCard>
+            {offlineTripSummaries.length > 0 && (
+              <TrailheadCard style={s.tripsCard}>
+                <Text style={s.sectionLabel}>OFFLINE TRIPS</Text>
+                {offlineTripSummaries.slice(0, 8).map(trip => (
+                  <View key={`offline-empty-${trip.trip_id}`} style={s.tripRow}>
+                    <TouchableOpacity style={s.tripRowOpen} onPress={() => openOfflineTripSummary(trip)}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.tripRowName} numberOfLines={1}>{trip.plan.trip_name || trip.trip_id}</Text>
+                        <Text style={s.tripRowMeta}>
+                          {trip.plan.duration_days || trip.plan.daily_itinerary?.length || 0}D · {Math.round(trip.plan.total_est_miles || 0)}MI · {formatCachedDate((trip as any).cached_at)}
+                        </Text>
+                      </View>
+                      <View style={s.offlineBadge}>
+                        <Ionicons name="cloud-done-outline" size={10} color="#22c55e" />
+                        <Text style={s.offlineBadgeText}>READY</Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={14} color={C.text3} style={{ marginLeft: 4 }} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={s.tripDeleteBtn}
+                      onPress={() => confirmDeleteOfflineCopy(trip)}
+                      accessibilityLabel={`Remove offline copy for ${trip.plan.trip_name || trip.trip_id}`}
+                    >
+                      <Ionicons name="trash-outline" size={15} color={C.red} />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </TrailheadCard>
+            )}
+          </>
+        )}
 
+        {profileSection === 'support' && (
         <TouchableOpacity style={s.supportCard} onPress={() => openSupportInbox()} activeOpacity={0.9}>
           <View style={s.supportCardTop}>
             <View style={s.supportCardIcon}>
@@ -1201,8 +1429,10 @@ export default function ProfileScreen() {
             <Text style={s.supportMetaAction}>OPEN</Text>
           </View>
         </TouchableOpacity>
+        )}
 
         {/* My Rig */}
+        {profileSection === 'rig' && (
         <View style={s.rigCard}>
           <View style={s.rigHeader}>
             <Ionicons name="car-sport-outline" size={18} color={C.orange} />
@@ -1557,8 +1787,10 @@ export default function ProfileScreen() {
             <Text style={s.rigEmptyText}>Add your vehicle specs so Trailhead can tailor trail difficulty and logistics to your rig.</Text>
           )}
         </View>
+        )}
 
         {/* Trip Prep Checklist */}
+        {profileSection === 'rig' && (
         <View style={s.checklistCard}>
           <TouchableOpacity style={s.checklistHeader} onPress={() => setShowChecklist(p => !p)}>
             <Ionicons name="checkmark-circle-outline" size={18} color={C.green} />
@@ -1610,8 +1842,10 @@ export default function ProfileScreen() {
             </>
           )}
         </View>
+        )}
 
         {/* Plan + Credits */}
+        {profileSection === 'account' && (
         <View style={s.creditsCard}>
           <View style={s.creditsTop}>
             <View>
@@ -1661,13 +1895,14 @@ export default function ProfileScreen() {
             <Text style={s.historyBtnText}>CREDIT HISTORY</Text>
           </TouchableOpacity>
         </View>
+        )}
 
         <PaywallModal
           visible={showPaywall}
           onClose={() => setShowPaywall(false)}
         />
 
-        {showHistory && creditHistory.length > 0 && (
+        {profileSection === 'account' && showHistory && creditHistory.length > 0 && (
           <View style={s.historyCard}>
             <Text style={s.sectionLabel}>RECENT ACTIVITY</Text>
             {creditHistory.map(tx => (
@@ -1682,7 +1917,7 @@ export default function ProfileScreen() {
         )}
 
         {/* Saved Camps */}
-        {favoriteCamps.length > 0 && (
+        {profileSection === 'saved' && favoriteCamps.length > 0 && (
           <View style={s.historyCard}>
             <View style={s.sectionLabelRow}>
               <Ionicons name="heart" size={13} color="#ef4444" />
@@ -1705,7 +1940,7 @@ export default function ProfileScreen() {
         )}
 
         {/* Saved Locations */}
-        {savedPlaces.length > 0 && (
+        {profileSection === 'saved' && savedPlaces.length > 0 && (
           <View style={s.historyCard}>
             <View style={s.sectionLabelRow}>
               <Ionicons name="bookmark" size={13} color={C.orange} />
@@ -1728,6 +1963,7 @@ export default function ProfileScreen() {
         )}
 
         {/* Theme toggle */}
+        {profileSection === 'settings' && (
         <TouchableOpacity
           style={s.themeToggle}
           onPress={() => setThemeMode(themeMode === 'dark' ? 'light' : 'dark')}
@@ -1739,7 +1975,9 @@ export default function ProfileScreen() {
           </View>
           <Ionicons name="chevron-forward" size={16} color={C.text3} />
         </TouchableOpacity>
+        )}
 
+        {profileSection === 'settings' && (
         <View style={s.weatherUnitsCard}>
           <View style={{ flex: 1 }}>
             <Text style={s.themeToggleLabel}>UNITS</Text>
@@ -1764,8 +2002,10 @@ export default function ProfileScreen() {
             })}
           </View>
         </View>
+        )}
 
         {/* GPX Import */}
+        {profileSection === 'trips' && (
         <View style={s.gpxCard}>
           <View style={s.gpxHeader}>
             <Ionicons name="map-outline" size={18} color={C.orange} />
@@ -1816,6 +2056,7 @@ export default function ProfileScreen() {
             </View>
           )}
         </View>
+        )}
 
         <Modal visible={showSupportInbox} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowSupportInbox(false)}>
           <SafeAreaView style={s.contestModal}>
@@ -1948,6 +2189,7 @@ export default function ProfileScreen() {
         </Modal>
 
         {/* Bug Report */}
+        {profileSection === 'settings' && (
         <TouchableOpacity style={s.bugCard} onPress={() => setShowBugModal(true)}>
           <View style={s.bugCardLeft}>
             <Ionicons name="bug-outline" size={20} color={C.red} />
@@ -1958,6 +2200,7 @@ export default function ProfileScreen() {
           </View>
           <Ionicons name="chevron-forward" size={16} color={C.text3} />
         </TouchableOpacity>
+        )}
 
         {/* Bug report modal */}
         <Modal visible={showBugModal} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowBugModal(false)}>
@@ -2233,6 +2476,7 @@ export default function ProfileScreen() {
         </Modal>
 
         {/* Contributions */}
+        {profileSection === 'support' && (
         <TouchableOpacity style={s.contributionCard} onPress={openContributions} activeOpacity={0.9}>
           <View style={s.contributionGlow} />
           <View style={s.contestHeader}>
@@ -2260,8 +2504,10 @@ export default function ProfileScreen() {
             </View>
           </View>
         </TouchableOpacity>
+        )}
 
         {/* Contest */}
+        {profileSection === 'support' && (
         <TouchableOpacity style={s.contestCard} onPress={openContest} activeOpacity={0.9}>
           <View style={s.contestGlow} />
           <View style={s.contestHeader}>
@@ -2290,8 +2536,10 @@ export default function ProfileScreen() {
           </View>
           <Text style={s.contestFinePrint}>No purchase necessary. Apple is not a sponsor or involved.</Text>
         </TouchableOpacity>
+        )}
 
         {/* Referral */}
+        {profileSection === 'account' && (
         <View style={s.referralCard}>
           <View style={s.referralHeader}>
             <Ionicons name="people-outline" size={18} color={C.orange} />
@@ -2308,8 +2556,10 @@ export default function ProfileScreen() {
             <Text style={s.shareBtnText}>SHARE REFERRAL LINK</Text>
           </TouchableOpacity>
         </View>
+        )}
 
         {/* How to earn */}
+        {profileSection === 'account' && (
         <View style={s.earnCard}>
           <Text style={s.sectionLabel}>HOW TO EARN CREDITS</Text>
           {[
@@ -2331,8 +2581,17 @@ export default function ProfileScreen() {
             </View>
           ))}
         </View>
+        )}
+
+        {profileSection === 'saved' && favoriteCamps.length === 0 && savedPlaces.length === 0 && (
+          <TrailheadCard style={s.historyCard}>
+            <Text style={s.sectionLabel}>SAVED PLACES</Text>
+            <Text style={s.emptySectionText}>Saved camps and bookmarked places will land here after you favorite them from the map or guide.</Text>
+          </TrailheadCard>
+        )}
 
         {/* Delete account — required by App Store guideline 5.1.1(v) */}
+        {profileSection === 'settings' && (
         <TouchableOpacity
           style={s.deleteAccountBtn}
           onPress={() => {
@@ -2366,8 +2625,10 @@ export default function ProfileScreen() {
           <Ionicons name="trash-outline" size={14} color="#ef4444" />
           <Text style={s.deleteAccountText}>Delete Account</Text>
         </TouchableOpacity>
+        )}
 
         {/* App version info */}
+        {profileSection === 'settings' && (
         <View style={s.versionCard}>
           <Text style={[s.versionLabel, { marginBottom: 8, letterSpacing: 0.5 }]}>TRAILHEAD</Text>
           <View style={s.versionRow}>
@@ -2388,6 +2649,7 @@ export default function ProfileScreen() {
             </Text>
           </View>
         </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -2479,6 +2741,46 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   statDivider: { width: 1, backgroundColor: C.border, marginVertical: 10 },
   statBig: { color: C.text, fontSize: 26, fontWeight: '900', fontFamily: mono, lineHeight: 28 },
   statLabel: { color: C.text3, fontSize: 8, fontFamily: mono, letterSpacing: 0.8, marginTop: 3 },
+
+  profileSectionNav: { marginHorizontal: -14 },
+  profileSectionNavContent: { paddingHorizontal: 14, gap: 8 },
+  profileSectionChip: {
+    height: 38,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.s2,
+  },
+  profileSectionChipActive: { backgroundColor: C.orange, borderColor: C.orange },
+  profileSectionChipText: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '800' },
+  profileSectionChipTextActive: { color: '#fff' },
+  emptySectionText: { color: C.text3, fontSize: 12.5, lineHeight: 18 },
+  tripSummaryCard: {
+    backgroundColor: C.s2,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: C.border,
+    padding: 14,
+    gap: 8,
+  },
+  tripSummaryAction: {
+    alignSelf: 'flex-start',
+    minHeight: 34,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: C.orange + '44',
+    backgroundColor: C.orangeGlow,
+  },
+  tripSummaryActionText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900' },
+  tripSummaryMeta: { color: C.text3, fontSize: 11, fontFamily: mono, lineHeight: 16 },
 
   // Quick actions
   quickActionsRow: { marginHorizontal: -14 },

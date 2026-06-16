@@ -771,7 +771,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     waypoints[0] ? [waypoints[0].lng, waypoints[0].lat] : [-98.5, 39.5]
   );
   const [initialZoom] = useState<number>(() => waypoints.length === 0 ? 3.7 : waypoints.length > 1 ? 7 : 10);
-  const [freeCameraRevision, setFreeCameraRevision] = useState(0);
+  const [freeCameraRevision] = useState(0);
   const mapboxToken = useStore(s => s.mapboxToken);
   const activeTrip  = useStore(s => s.activeTrip);
   const C = useTheme();
@@ -824,10 +824,62 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const pendingFreeCameraRef = useRef<null | (() => void)>(null);
   const programmaticCameraUntilRef = useRef(0);
   const userCameraGestureUntilRef = useRef(0);
+  const locateSettleTimersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   const deferredSourceRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const routeRequestRef = useRef(0);                   // cancels stale async route results
   const tileProbeSeqRef = useRef(0);                   // cancels stale online/offline source probes
   const onlineProbeStreakRef = useRef(0);
+
+  const rememberFreeCamera = useCallback((lat: number, lng: number, zoom?: number, pitch?: number) => {
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    freeCameraDefaultRef.current = {
+      centerCoordinate: [lng, lat],
+      zoomLevel: Number.isFinite(Number(zoom)) ? Number(zoom) : freeCameraDefaultRef.current.zoomLevel,
+      pitch: Number.isFinite(Number(pitch)) ? Number(pitch) : freeCameraDefaultRef.current.pitch,
+      animationDuration: 0,
+    };
+  }, []);
+
+  const markUserCameraGesture = useCallback((source: string, details: Record<string, unknown> = {}) => {
+    const now = Date.now();
+    userCameraGestureUntilRef.current = now + 2200;
+    // A real touch should win over an in-flight locate/flyTo animation. Without
+    // this, Android can keep treating the following region changes as
+    // programmatic and later remount the camera back to the locate point.
+    if (now > lastFlyToRef.current + 160) programmaticCameraUntilRef.current = 0;
+    emitDebugEvent('camera:user-gesture', { source, ...details });
+    onMapGesture?.();
+  }, [emitDebugEvent, onMapGesture]);
+
+  const clearLocateSettleTimers = useCallback(() => {
+    locateSettleTimersRef.current.forEach(timer => clearTimeout(timer));
+    locateSettleTimersRef.current = [];
+  }, []);
+
+  const applyLocateCamera = useCallback((lat: number, lng: number, zoomLevel: number, animated = true) => {
+    const camera = camRef.current as any;
+    if (!camera) return;
+    if (Platform.OS === 'ios') {
+      // iOS MapLibre can lose a long animated setCamera when style/source
+      // updates happen during the move. Snap the target first, then let the
+      // final short settle call correct any interrupted camera state.
+      camera.moveTo?.([lng, lat], animated ? 120 : 0);
+      camera.zoomTo?.(zoomLevel, animated ? 120 : 0);
+      camera.setCamera?.({
+        centerCoordinate: [lng, lat],
+        zoomLevel,
+        animationDuration: animated ? 120 : 0,
+        animationMode: animated ? 'easeTo' : 'none',
+      });
+      return;
+    }
+    camera.setCamera?.({
+      centerCoordinate: [lng, lat],
+      zoomLevel,
+      animationDuration: animated ? 520 : 0,
+      animationMode: animated ? 'flyTo' : 'none',
+    });
+  }, []);
 
   // Returns all downloaded region files with their bounds, or null for CONUS.
   // Skips files under 25% of estimated size (obviously truncated downloads).
@@ -1253,6 +1305,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       lastFlyToRef.current = Date.now();
       lastCamRef.current = Date.now();
       programmaticCameraUntilRef.current = Date.now() + 1100;
+      rememberFreeCamera(lat, lng, zoom, navMode ? freeCameraDefaultRef.current.pitch : showTerrain ? 68 : 0);
       emitDebugEvent('camera:set:flyTo', { lat, lng, zoom, programmatic_until_ms: programmaticCameraUntilRef.current - Date.now() });
       camRef.current?.setCamera({ centerCoordinate: [lng, lat], zoomLevel: zoom, animationDuration: 250, animationMode: 'flyTo' });
     },
@@ -1263,6 +1316,12 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       lastFlyToRef.current = Date.now();
       lastCamRef.current = Date.now();
       programmaticCameraUntilRef.current = Date.now() + Math.max(900, (Number.isFinite(Number(options.duration)) ? Number(options.duration) : 520) + 450);
+      rememberFreeCamera(
+        lat,
+        lng,
+        Number.isFinite(Number(options.zoom)) ? Number(options.zoom) : undefined,
+        Number.isFinite(Number(options.pitch)) ? Math.max(0, Math.min(75, Number(options.pitch))) : undefined,
+      );
       emitDebugEvent('camera:set:flyToCamera', {
         lat,
         lng,
@@ -1288,6 +1347,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       const hasFocus = Number.isFinite(lat) && Number.isFinite(lng);
       lastCamRef.current = Date.now();
       programmaticCameraUntilRef.current = Date.now() + 900;
+      if (hasFocus) rememberFreeCamera(lat, lng, nextZoom, navMode ? freeCameraDefaultRef.current.pitch : showTerrain ? 68 : 0);
+      else freeCameraDefaultRef.current = { ...freeCameraDefaultRef.current, zoomLevel: nextZoom, animationDuration: 0 };
       emitDebugEvent('camera:set:setZoom', { zoom: nextZoom, focus: hasFocus ? { lat, lng } : null });
       camRef.current?.setCamera({
         ...(hasFocus ? { centerCoordinate: [lng, lat] } : {}),
@@ -1307,6 +1368,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       const hasFocus = Number.isFinite(lat) && Number.isFinite(lng);
       lastCamRef.current = Date.now();
       programmaticCameraUntilRef.current = Date.now() + 900;
+      if (hasFocus) rememberFreeCamera(lat, lng, nextZoom, navMode ? freeCameraDefaultRef.current.pitch : showTerrain ? 68 : 0);
+      else freeCameraDefaultRef.current = { ...freeCameraDefaultRef.current, zoomLevel: nextZoom, animationDuration: 0 };
       emitDebugEvent('camera:set:zoomBy', { delta, zoom: nextZoom, base, focus: hasFocus ? { lat, lng } : null });
       camRef.current?.setCamera({
         ...(hasFocus ? { centerCoordinate: [lng, lat] } : {}),
@@ -1317,24 +1380,32 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       return nextZoom;
     },
     async locate(lat, lng) {
+      clearLocateSettleTimers();
       lastFlyToRef.current = Date.now();
       lastCamRef.current = Date.now();
-      programmaticCameraUntilRef.current = Date.now() + 1200;
+      programmaticCameraUntilRef.current = Date.now() + (Platform.OS === 'ios' ? 1600 : 1200);
       emitDebugEvent('locate:start', { lat, lng });
       const current = await mapRef.current?.getZoom?.().catch(() => null);
       const currentZoom = Number(current);
       const zoomLevel = Number.isFinite(currentZoom)
         ? Math.max(9, Math.min(13, currentZoom))
         : 11.5;
-      const cameraUpdate = {
-        centerCoordinate: [lng, lat],
-        zoomLevel,
-        animationDuration: 260,
-        animationMode: 'easeTo',
-      } as any;
-      emitDebugEvent('locate:schedule-camera', { lat, lng, currentZoom: Number.isFinite(currentZoom) ? currentZoom : null, zoomLevel, nextFreeCameraRevision: freeCameraRevision + 1 });
-      pendingFreeCameraRef.current = () => camRef.current?.setCamera(cameraUpdate);
-      setFreeCameraRevision(value => value + 1);
+      rememberFreeCamera(lat, lng, zoomLevel, navMode ? freeCameraDefaultRef.current.pitch : showTerrain ? 68 : 0);
+      emitDebugEvent('locate:set-camera', { lat, lng, currentZoom: Number.isFinite(currentZoom) ? currentZoom : null, zoomLevel });
+      applyLocateCamera(lat, lng, zoomLevel, true);
+      if (Platform.OS === 'ios') {
+        [180, 460].forEach(delay => {
+          const timer = setTimeout(() => {
+            if (Date.now() < userCameraGestureUntilRef.current) return;
+            lastCamRef.current = Date.now();
+            programmaticCameraUntilRef.current = Date.now() + 700;
+            rememberFreeCamera(lat, lng, zoomLevel, navMode ? freeCameraDefaultRef.current.pitch : showTerrain ? 68 : 0);
+            emitDebugEvent('locate:settle-camera', { lat, lng, zoomLevel, delay });
+            applyLocateCamera(lat, lng, zoomLevel, false);
+          }, delay);
+          locateSettleTimersRef.current.push(timer);
+        });
+      }
     },
     loadRouteFrom(lat, lng, fromIdx) {
       const rem = waypoints.slice(fromIdx).filter(w => w.route_point_type !== 'side_stop');
@@ -1382,6 +1453,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       lastFlyToRef.current = Date.now();
       lastCamRef.current = Date.now();
       programmaticCameraUntilRef.current = Date.now() + 1100;
+      rememberFreeCamera(lat, lng, 13, navMode ? freeCameraDefaultRef.current.pitch : showTerrain ? 68 : 0);
       emitDebugEvent('camera:set:highlightTrail', { lat, lng, name: name ?? null });
       camRef.current?.setCamera({ centerCoordinate: [lng, lat], zoomLevel: 13, animationDuration: 260, animationMode: 'flyTo' });
       setTimeout(async () => {
@@ -1609,7 +1681,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       onRouteReady({ coords, steps, legs, totalDistance: td, totalDuration: tt, isProper: true, fromCache: true, fromIdx: 0 });
     },
     setNavTarget(idx) { setNavTargetIdx(idx); },
-  }), [emitDebugEvent, freeCameraRevision, waypoints, routePairsForWaypoints, searchDest, mapboxToken, makeRouteState]);
+  }), [applyLocateCamera, clearLocateSettleTimers, emitDebugEvent, waypoints, routePairsForWaypoints, searchDest, mapboxToken, makeRouteState, navMode, rememberFreeCamera, showTerrain]);
 
   const emitTracePoint = useCallback(async (
     x: number,
@@ -1860,14 +1932,19 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const handleRegionIsChanging = useCallback((feat: any) => {
     if (!isUserCameraEvent(feat)) return;
     const props = feat?.properties ?? {};
-    userCameraGestureUntilRef.current = Date.now() + 1800;
+    markUserCameraGesture('region-is-changing', {
+      zoom: props.zoomLevel ?? null,
+      center: Array.isArray(feat?.geometry?.coordinates) ? feat.geometry.coordinates : null,
+      isUserInteraction: !!props.isUserInteraction,
+      isAnimatingFromUserInteraction: !!props.isAnimatingFromUserInteraction,
+    });
     emitDebugEvent('region:is-changing:user', {
       zoom: props.zoomLevel ?? null,
       center: Array.isArray(feat?.geometry?.coordinates) ? feat.geometry.coordinates : null,
       isUserInteraction: !!props.isUserInteraction,
       isAnimatingFromUserInteraction: !!props.isAnimatingFromUserInteraction,
     });
-  }, [emitDebugEvent]);
+  }, [emitDebugEvent, markUserCameraGesture]);
 
   const coordinateFromPress = useCallback(async (event: any): Promise<[number, number] | null> => {
     const lngLat = eventLngLat(event);
@@ -2047,7 +2124,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
 
   useEffect(() => () => {
     if (deferredSourceRefreshRef.current) clearTimeout(deferredSourceRefreshRef.current);
-  }, []);
+    clearLocateSettleTimers();
+  }, [clearLocateSettleTimers]);
 
   const handleRegionChange = useCallback(async (feat: GeoJSON.Feature | undefined) => {
     if (!feat?.properties || !mapRef.current) return;
@@ -2083,6 +2161,13 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         deferredSourceRefreshRef.current = null;
         refreshMapSourcesForBounds(n, s, e, w);
       }, 1400);
+    } else if (programmatic) {
+      if (deferredSourceRefreshRef.current) clearTimeout(deferredSourceRefreshRef.current);
+      emitDebugEvent('source:refresh:programmatic-deferred', { delay_ms: 900, center: { lat: (n + s) / 2, lng: (e + w) / 2 } });
+      deferredSourceRefreshRef.current = setTimeout(() => {
+        deferredSourceRefreshRef.current = null;
+        refreshMapSourcesForBounds(n, s, e, w);
+      }, 900);
     } else {
       refreshMapSourcesForBounds(n, s, e, w);
     }
@@ -2118,17 +2203,22 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         projection={isExtremeMapbox ? 'globe' : undefined}
         onPress={handlePress}
         onLongPress={handleLongPress}
+        onTouchStart={() => markUserCameraGesture('touch-start')}
         onRegionWillChange={(feature: any) => {
           if (isUserCameraEvent(feature)) {
-            userCameraGestureUntilRef.current = Date.now() + 1800;
             const props = feature?.properties ?? {};
+            markUserCameraGesture('region-will-change', {
+              zoom: props.zoomLevel ?? null,
+              center: Array.isArray(feature?.geometry?.coordinates) ? feature.geometry.coordinates : null,
+              isUserInteraction: !!props.isUserInteraction,
+              isAnimatingFromUserInteraction: !!props.isAnimatingFromUserInteraction,
+            });
             emitDebugEvent('region:will-change:user', {
               zoom: props.zoomLevel ?? null,
               center: Array.isArray(feature?.geometry?.coordinates) ? feature.geometry.coordinates : null,
               isUserInteraction: !!props.isUserInteraction,
               isAnimatingFromUserInteraction: !!props.isAnimatingFromUserInteraction,
             });
-            onMapGesture?.();
           }
         }}
         onRegionIsChanging={handleRegionIsChanging}

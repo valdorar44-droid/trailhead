@@ -7,6 +7,7 @@ import {
   rebalanceAfterCampSelection,
   ROUTE_BUILDER_AUDIT_MATRIX,
 } from '@/lib/routeBuilder';
+import { normalizeTrailheadRouteBuilderDraft } from '@/lib/copilotCapabilities';
 import { computeOfflineReadiness } from '@/lib/offlineReadiness';
 
 const moab = { lat: 38.5733, lng: -109.5498 };
@@ -166,6 +167,21 @@ assertRouteBuilderContract(offline.regionIds.includes('ut') && offline.regionIds
 assertRouteBuilderContract(!offline.ready && offline.rows.some(row => row.key === 'navigation' && !row.ready), 'offline readiness reports missing downloads');
 
 assertRouteBuilderContract(ROUTE_BUILDER_AUDIT_MATRIX.some(item => /Moab to Big Sur/.test(item) && /there and back/.test(item)), 'Moab to Big Sur audit coverage');
+assertRouteBuilderContract(ROUTE_BUILDER_AUDIT_MATRIX.some(item => /wild but safe/.test(item) && /high-clearance/.test(item)), 'copilot rough-road audit coverage');
+
+const normalizedDraft = normalizeTrailheadRouteBuilderDraft({
+  start: 'Moab',
+  destination: 'Big Sur',
+  days: 5,
+  routeStyle: 'wild',
+  campPreference: 'public',
+  roadPreference: 'high_clearance',
+  riskTolerance: 'wild_but_safe',
+  poiPreferences: ['park', 'monument', 'trailhead', 'invalid'],
+});
+assertRouteBuilderContract(normalizedDraft.roadPreference === 'high_clearance', 'copilot draft keeps road preference');
+assertRouteBuilderContract(normalizedDraft.riskTolerance === 'wild_but_safe', 'copilot draft keeps risk tolerance');
+assertRouteBuilderContract((normalizedDraft.poiPreferences || []).join('|') === 'park|monument|trailhead', 'copilot draft filters poi preferences');
 
 export const routeBuilderContractCases = {
   oneWay,

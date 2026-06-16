@@ -37,6 +37,101 @@ Immediate reminder from June 15, 2026:
 - Do not restart from a broad brainstorm unless the product direction materially changes.
 - Audit the previous completed phase before moving into the next one.
 
+## Valhalla US Expansion Checkpoint - June 16, 2026
+
+User asked to finish the US Valhalla state expansion, then pause on Alaska/Hawaii.
+
+Completed artifact publishing to R2:
+
+- `routing/valhalla/il_in_oh.tar.zst` size `608250932`, sha256 `d3653d6df8dc115646cfd094f9f47cc22b43581c207e8d2ed7c6319039c25c1a`
+- `routing/valhalla/mi_wi.tar.zst` size `391642469`, sha256 `891b0372bc46724e5dd8c2c15c8d7a65cadea2cfb1ac30876447fdef8637bcb9`
+- `routing/valhalla/ia_mn.tar.zst` size `215838623`, sha256 `43d2f97d636f6828905162d1227f6464ed6cdc2e2484153cb435f9d3232728c7`
+- `routing/valhalla/nd_sd_ne.tar.zst` size `134753959`, sha256 `18ed78378a2477705060cc58cdb3a06165989b6160d77e0e50ce5ed03e1c0640`
+- `routing/valhalla/al_ms_tn_ky.tar.zst` size `383748709`, sha256 `167c8300f80feff9a1abec4f537177ca20c47b7415c209894e95267436c951a1`
+- `routing/valhalla/la.tar.zst` size `66166074`, sha256 `9109f29b0f31e96d9a935dd61039bd2283e8f8fd729d64c60b27c923bb462b07`
+- `routing/valhalla/fl_ga.tar.zst` size `517062964`, sha256 `8a83802542d96b405f51e6e92d62752083c0e5e98f2b033977645e993e9e4b8a`
+- `routing/valhalla/tx.tar.zst` size `996120281`, sha256 `c8ca11670d4c505bdff2f6b8a4b8a8c5180b4aacd0ec00bf81a592016c37d96c`
+
+Railway/API state:
+
+- Existing services already pointed at the correct artifacts for Midwest, Great Lakes, Upper Midwest, Plains, South, Louisiana, and Southeast.
+- Created new service `trailhead-valhalla-texas` with volume `trailhead-valhalla-texas-volume`.
+- Added API selector entry `texas_tx` to `VALHALLA_AREA_URLS`, pointing at `http://trailhead-valhalla-texas.railway.internal:8002`; API deployment `5a5b4427-79a6-43b4-a429-0fb7d2c520c9` succeeded.
+- `/api/route/health` saw `texas_tx` before the Texas service restart attempt.
+
+Texas status:
+
+- The local Texas artifact in `/home/sean/valhalla-region-builds/tx/tx-valhalla.tar.zst` was published, but it was bad: the local `valhalla_tiles` contained temporary builder `.bin` files only, not a real `0/1/2` tile hierarchy. Production probes returned Valhalla `171 No suitable edges near location`.
+- Rebuilt Texas inside `trailhead-valhalla-texas` Railway volume using `/custom_files/tx-rebuild-work/texas-latest.osm.pbf`.
+- Final tmux rebuild succeeded: `/custom_files/tx-rebuild2.log` ended with `VALHALLA_BUILD_EXIT=0`; rebuilt graph was `/custom_files/valhalla_tiles_rebuild2` with `0`, `1`, and `2` tile directories.
+- Swapped rebuilt graph into `/custom_files/valhalla_tiles`, regenerated `/custom_files/valhalla.json`, and moved the bad R2 extraction to `/custom_files/valhalla_tiles_bad_r2`.
+- Removed `VALHALLA_ARTIFACT_KEY` and `VALHALLA_ARTIFACT_SHA256` from `trailhead-valhalla-texas` so future boot should use the mounted graph, not re-extract the bad R2 artifact.
+- Blocker at pause: after `railway service restart --service trailhead-valhalla-texas --yes`, production health showed `texas_tx` as connection failed (`All connection attempts failed`). Logs showed old R2 extraction entries and then a fresh `Mounting volume...` line, but no confirmed post-restart `Mounted Valhalla graph ready` or successful `/status`.
+- Per user instruction, stop here if Texas service restart/probe fails again and move to another task. Do not start Alaska/Hawaii now.
+
+Recommended next Texas recovery:
+
+- Since Docker is available again locally, consider rebuilding Texas locally with Docker from scratch and publishing a clean R2 artifact, or patch/redeploy `docker/valhalla-artifact/valhalla_artifact_bootstrap.py` to prefer a valid mounted graph when `VALHALLA_ARTIFACT_KEY` is absent.
+- First quick check: `railway variables --service trailhead-valhalla-texas --environment production --kv | rg '^VALHALLA_|^PORT='`; expected only `PORT=8002` and `VALHALLA_DATA_DIR=/custom_files`.
+- Then check `railway logs --service trailhead-valhalla-texas --environment production --lines 120` and `curl -sS https://api.gettrailhead.app/api/route/health`.
+- Remaining states intentionally paused: `AK`, `HI`. Texas is built on volume but not yet verified live.
+
+## Route QA Matrix Checkpoint - June 16, 2026
+
+User asked for QA across wild/balanced routes, cross-USA, there-and-back, same route with different camp windows/hours/day counts, and POI insertion.
+
+Added repeatable QA script:
+
+- `scripts/qa_route_matrix.py`
+- Hits production-style endpoints:
+  - `/api/route`
+  - `/api/route/camp-windows`
+  - optional `/api/planner/context`
+- Scenarios include:
+  - wild Moab to Big Sur with POI side stops
+  - balanced Moab to Big Sur with same camp window
+  - balanced Denver to Asheville cross-USA with Badlands side stop
+  - wild there-and-back Moab to Big Sur
+  - same route with 3 days / 9h max and 7 days / 4h max
+  - PNW wild route
+  - Rockies balanced same-window route
+
+Production QA result before backend deploy:
+
+- `python3 scripts/qa_route_matrix.py --skip-context`
+  - 7 of 8 scenarios passed.
+  - Camp-window endpoint returned all requested windows for all scenarios.
+  - Different day/hour/camp-window combinations produced expected different window counts.
+  - POI side stops did not break successful Valhalla routes.
+  - Failure: `balanced_cross_usa_7d` returned a usable OSRM fallback route, but because it came from stale fallback cache, `_trailhead.repair=dropped_optional_points` metadata was missing.
+- `python3 scripts/qa_route_matrix.py --limit 3`
+  - Same cross-USA metadata failure.
+  - Planner context returned provider notes like `{'places': ''}` in some live-provider cases; route/camp behavior still completed.
+
+Backend fix implemented locally:
+
+- `dashboard/server.py`
+  - stale cached OSRM fallback responses now preserve optional side-stop repair metadata:
+    - `repair=dropped_optional_points`
+    - `dropped_optional_points`
+    - user-facing message that optional side stops are saved as pins, not navigation stops
+- `tests/test_route_leg_places.py`
+  - added coverage for cached OSRM fallback with dropped optional side stops.
+
+Verification:
+
+- `python3 -m unittest tests.test_route_leg_places tests.test_route_camp_windows` passed, but took 300s due async executor shutdown warning.
+- `python3 -m py_compile dashboard/server.py scripts/qa_route_matrix.py` passed.
+- `git diff --check -- dashboard/server.py tests/test_route_leg_places.py scripts/qa_route_matrix.py MEMORY.md` passed.
+- `npx tsx mobile/lib/routeBuilder/__tests__/routeBuilder.test.ts` is currently blocked by an existing `react-native/index.js` transform error under Node 22 / tsx, not by this backend patch.
+
+Deploy note:
+
+- Deployed API fix to Railway production service `trailhead` with deployment `225a5697-a600-4b08-86bf-d12ca6925e25`.
+- `python3 scripts/qa_route_matrix.py --skip-context` passed 8 of 8 scenarios after deploy.
+- `python3 scripts/qa_route_matrix.py --limit 3` passed 3 of 3 scenarios with planner context enabled.
+- Cross-USA still routes through `osrm-fallback`, but now preserves the expected optional side-stop repair metadata.
+
 ## Current Design Direction
 
 - The user wants a broader premium redesign direction because the map feels confusing and some pages are inconsistent.
@@ -182,6 +277,171 @@ Verification:
 
 - `cd mobile && NODE_OPTIONS=--max-old-space-size=4096 npx tsc --noEmit` passed.
 - `git diff --check` passed.
+
+## Online Valhalla State Expansion Checkpoint - East, Ozarks, NY/NJ/CT
+
+Production routing was expanded beyond the default West graph.
+
+Live Valhalla targets now configured on `trailhead` via `VALHALLA_AREA_URLS`:
+
+- `east_vt_nh` -> `trailhead-valhalla-west`, bounds for VT/NH overlap.
+- `east_pa_md_de_va` -> `trailhead-valhalla-west`.
+- `east_wv` -> `trailhead-valhalla-west`.
+- `east_nc` -> `trailhead-valhalla-west`.
+- `east_sc` -> `trailhead-valhalla-west`.
+- `ny_nj_ct` -> `trailhead-valhalla-west2`.
+- `east_new_england` -> `trailhead-valhalla-west`.
+- `ozarks` -> `trailhead-valhalla`.
+- default remains `trailhead-valhalla-us`.
+
+New NY/NJ/CT artifact:
+
+- Local artifact: `/home/sean/valhalla-region-builds/ny_nj_ct/ny_nj_ct-valhalla.tar.zst`
+- R2 key: `routing/valhalla/ny_nj_ct.tar.zst`
+- Size: `399707852`
+- SHA-256: `727ce43fe67d88e9f6b09d913327b88da39cafb359174be6f81cc9ed7d6a6a6b`
+- Deployed to `trailhead-valhalla-west2` with artifact bootstrap deployment `67ba94b6-b077-4e99-86ec-a257fbe0317f`.
+
+Railway/API deployments:
+
+- `trailhead-valhalla-west2` artifact deployment succeeded after adding R2 env vars.
+- `trailhead` API deployment with final target rename succeeded: `cd9a848a-ebc0-4621-9762-220283d77d55`.
+- `/api/route/health` returned `ok: true` for all nine targets.
+
+Verification:
+
+- Direct west2 probes passed:
+  - NY: NYC -> Albany, Valhalla status `0`, length `149.8507 mi`.
+  - CT: Hartford -> New Haven, Valhalla status `0`, length `38.5962 mi`.
+  - NJ: Newark -> Philadelphia, Valhalla status `0`, length `84.1135 mi`.
+- API targeted probes passed:
+  - NY/CT/NJ use `ny_nj_ct`.
+  - PA uses `east_pa_md_de_va`.
+  - NC uses `east_nc`.
+  - SC uses `east_sc`.
+  - VT uses `east_vt_nh`.
+  - RI uses `east_new_england`.
+  - GA no longer gets caught by the east graph; it falls back through `default`.
+- Final `scripts/probe_routing_50_states.py --api https://api.gettrailhead.app/api/route --timeout 45`:
+  - total `50`
+  - Valhalla `30`
+  - OSRM fallback `20`
+  - failed `[]`
+  - remaining fallback states: `AL, AK, FL, GA, HI, IA, IL, IN, KY, LA, MI, MN, MS, ND, NE, OH, SD, TN, TX, WI`
+
+Next sane online routing chunks:
+
+- Great Lakes / Midwest: split small to avoid memory failures, likely `IL,IN,OH` and `MI,WI,MN,IA` or smaller.
+- South: split `AL,MS,TN,KY`, `LA`, `FL`, `GA` separately or in small groups.
+- Texas likely should be its own graph because of size.
+
+## Native Map Locate Camera Fix Checkpoint
+
+Issue addressed:
+
+- Android could still snap back to the user's location after pressing locate, especially when trying to pan immediately afterward.
+- iOS locate sometimes moved only a small amount instead of clearly recentering.
+
+Code change:
+
+- `mobile/components/NativeMap/index.tsx`
+- Native map imperative camera moves now update the free-camera default before calling `setCamera`.
+- Locate no longer remounts the Camera through `freeCameraRevision`; it applies one direct `flyTo` camera update.
+- Real map touches now mark a user camera gesture and cancel the programmatic camera window, so panning right after locate wins over any in-flight locate animation.
+
+Verification:
+
+- `cd mobile && NODE_OPTIONS=--max-old-space-size=4096 npx tsc --noEmit` passed.
+- `git diff --check` passed.
+
+OTA shipped:
+
+- Production update group: `220af3d1-f653-4360-b351-680805399ed7`
+- Production Android update: `019ecd4b-1d74-740d-b5af-cc270aed268e`
+- Production iOS update: `019ecd4b-1d74-7393-839c-67524f6c4877`
+- Preview update group: `aad6065f-8e5b-4c2a-ad66-fabebc45ca56`
+- Preview Android update: `019ecd4b-c5fb-798a-a492-7c79e10e10c8`
+- Preview iOS update: `019ecd4b-c5fb-708f-b4b7-529ece8331f3`
+
+## Ozarks Valhalla Online Routing Checkpoint
+
+Date: 2026-06-15.
+
+Reason:
+
+- Screenshot showed `St. Louis to SMORR Technical Loop` drawing as a near-straight cross-state line.
+- Production `/api/route` was healthy but only pointed at expanded-West `trailhead-valhalla-us`; Missouri routes fell through to fallback instead of Trailhead Valhalla.
+
+Backend routing findings:
+
+- Before this pass, 50-state production probe was:
+  - `valhalla: 11`
+  - `osrm_fallback: 39`
+  - `failed: []`
+- R2 already had per-state routing packs for all 50 states, including `mo.tar`, `ar.tar`, `ok.tar`, and `ks.tar`.
+- Full Plains connected build for `ND,SD,NE,KS,OK,IA,MO,AR` was killed during final validation/binning, likely memory pressure. Do not use that failed artifact.
+- Smaller connected Ozarks build for `MO,AR,OK,KS` succeeded:
+  - Local artifact: `/home/sean/valhalla-region-builds/ozarks/ozarks-valhalla.tar.zst`
+  - R2 key: `routing/valhalla/ozarks.tar.zst`
+  - Size: `418,563,671`
+  - SHA-256: `01aeff23d344989e05fd13646d4faa7aff241b3dabc5313a6c645831652986f9`
+
+Railway changes:
+
+- `trailhead-valhalla` was redeployed with the artifact bootstrap image from `docker/valhalla-artifact`.
+- Deployment: `841f0028-7d02-41ec-b6e6-58fc167bcde9`.
+- `trailhead-valhalla` variables:
+  - `VALHALLA_ARTIFACT_KEY=routing/valhalla/ozarks.tar.zst`
+  - `VALHALLA_ARTIFACT_SHA256=01aeff23d344989e05fd13646d4faa7aff241b3dabc5313a6c645831652986f9`
+  - old `VALHALLA_ARTIFACT_KEYS` was deleted.
+- `trailhead` API `VALHALLA_AREA_URLS` now includes only:
+  - `id=ozarks`
+  - `url=http://trailhead-valhalla.railway.internal:8002`
+  - bounds `s=33.0,w=-102.2,n=40.8,e=-89.0`
+  - states `MO,AR,OK,KS`
+- API deployment after env change: `ebac8f81-01dd-4e02-9344-e7e734a3ce7d`.
+
+Validation:
+
+- Direct Ozarks Valhalla probes passed:
+  - St. Louis -> SMORR area: `215.9414 mi`, shape chars `17074`
+  - St. Louis -> Columbia: `124.8712 mi`
+  - Kansas City -> Columbia: `125.9952 mi`
+  - Little Rock -> Ouachita probe: `55.0865 mi`
+  - Tulsa -> OKC: `107.6207 mi`
+  - Wichita -> Topeka: `144.8184 mi`
+- Production `/api/route` now returns:
+  - St. Louis -> SMORR area: `engine=valhalla`, `target=ozarks`, `215.9414 mi`, shape chars `17074`
+  - Moab -> Big Sur still uses `engine=valhalla`, `target=default`
+- 50-state production probe after wiring Ozarks:
+  - `valhalla: 15`
+  - `osrm_fallback: 35`
+  - `failed: []`
+  - Newly Valhalla-backed states: `AR`, `KS`, `MO`, `OK`.
+
+Route Builder fix:
+
+- `mobile/app/(tabs)/route-builder.tsx` now passes the known-good provider spine geometry directly into `commitTrip` during auto-build.
+- This prevents a race where the builder fetched a valid provider route, then saved before React state held the geometry, causing saved trips to fall back to waypoint/straight-line geometry.
+- OTA shipped:
+  - Production update group: `8a1362a5-373e-4157-b7ea-ce13139441d8`
+  - Production Android update: `019ecaa1-d1a7-7624-9741-a64d016c7cd3`
+  - Production iOS update: `019ecaa1-d1a7-706a-b44d-c4123ae01484`
+  - Preview update group: `dd3ec76b-8114-459b-b64d-e0c532791981`
+  - Preview Android update: `019ecaa2-99ab-7c03-bbf2-9c5d730f040c`
+  - Preview iOS update: `019ecaa2-99ab-7778-b53b-361a0b5f30d7`
+- Verification:
+  - `cd mobile && NODE_OPTIONS=--max-old-space-size=4096 npx tsc --noEmit` passed.
+  - `git diff --check` passed.
+
+Remaining routing work:
+
+- Build/deploy more connected regional artifacts, not runtime-merged per-state tar packs.
+- Next candidates:
+  - `great_lakes`: `MN,WI,IL,IN,MI,OH`
+  - `south_central`: likely split smaller than `TX,LA,MS,AL,TN,KY` if memory pressure appears.
+  - `southeast`: `FL,GA,SC,NC,VA,WV`
+  - `northeast`: still needs special handling for the old `NY,NJ,CT` multi-PBF crash.
 
 ## Valhalla Regional Build Resume Note
 
@@ -1798,3 +2058,665 @@ Verification:
 
 - `cd mobile && NODE_OPTIONS=--max-old-space-size=4096 npx tsc --noEmit` passed.
 - `git diff --check` passed.
+
+## Native Locate Camera And Midwest Valhalla Checkpoint
+
+Date: 2026-06-15
+
+Native locate/camera work:
+
+- Fixed a native map camera issue where tapping locate could fight the free-camera remount path.
+- `mobile/components/NativeMap/index.tsx` now remembers programmatic camera destinations for `flyTo`, `flyToCamera`, zoom changes, locate, and trail highlight so style/source refreshes do not snap back to stale coordinates.
+- Locate now uses one direct camera animation and no longer queues a free-camera remount.
+- Real touch/region gestures clear the programmatic-camera guard, with Android touch-start handling added so panning after locate is treated as user intent sooner.
+
+Locate verification:
+
+- `cd mobile && NODE_OPTIONS=--max-old-space-size=4096 npx tsc --noEmit` passed.
+- `git diff --check` passed.
+- Production OTA shipped:
+  - update group `220af3d1-f653-4360-b351-680805399ed7`
+  - Android update `019ecd4b-1d74-740d-b5af-cc270aed268e`
+  - iOS update `019ecd4b-1d74-7393-839c-67524f6c4877`
+  - dashboard `https://expo.dev/accounts/danub44/projects/trailhead/updates/220af3d1-f653-4360-b351-680805399ed7`
+- Preview OTA shipped:
+  - update group `aad6065f-8e5b-4c2a-ad66-fabebc45ca56`
+  - Android update `019ecd4b-c5fb-798a-a492-7c79e10e10c8`
+  - iOS update `019ecd4b-c5fb-708f-b4b7-529ece8331f3`
+  - dashboard `https://expo.dev/accounts/danub44/projects/trailhead/updates/aad6065f-8e5b-4c2a-ad66-fabebc45ca56`
+
+Midwest Valhalla rollout:
+
+- Built IL/IN/OH Valhalla artifact locally:
+  - `/home/sean/valhalla-region-builds/il_in_oh/il_in_oh-valhalla.tar.zst`
+  - size `608250932`
+  - sha256 `d3653d6df8dc115646cfd094f9f47cc22b43581c207e8d2ed7c6319039c25c1a`
+- Published to R2:
+  - `routing/valhalla/il_in_oh.tar.zst`
+- Created Railway service:
+  - service `trailhead-valhalla-midwest`
+  - service id `e085e46e-7a6f-4649-9f75-ed5905531ba6`
+  - public domain `https://trailhead-valhalla-midwest-production.up.railway.app`
+  - volume `trailhead-valhalla-midwest-volume`
+  - volume id `5e2fbdec-075f-4985-afe8-ee24c1b5156f`
+  - mount `/custom_files`
+- Deployed artifact bootstrap:
+  - deployment `945226bb-269c-4329-aed8-f8a85afaee3b`
+  - message `Load IL IN OH Valhalla artifact from R2`
+- Wired production API `VALHALLA_AREA_URLS` with tight state boxes:
+  - `midwest_il`
+  - `midwest_in`
+  - `midwest_oh`
+- Production API deployment:
+  - `304430ab-cb93-42af-b494-9e0ad27a9578`
+
+Midwest verification:
+
+- Direct Midwest service probes passed for:
+  - Chicago to Springfield, IL
+  - Indianapolis to Fort Wayne, IN
+  - Columbus to Cleveland, OH
+- API `/api/route/health` passed all Valhalla targets.
+- API route probes selected the expected targets:
+  - IL -> `valhalla` / `midwest_il`
+  - IN -> `valhalla` / `midwest_in`
+  - OH -> `valhalla` / `midwest_oh`
+- Michigan neighbor probe stayed out of the Midwest service and used `osrm-fallback` / `default`, which confirms the boxes are not over-catching nearby states.
+- 50-state probe result after rollout:
+  - total `50`
+  - Valhalla `33`
+  - OSRM fallback `17`
+  - failed `0`
+  - remaining fallback states: `AL, AK, FL, GA, HI, IA, KY, LA, MI, MN, MS, ND, NE, SD, TN, TX, WI`
+
+Next routing chunks to consider:
+
+- `MI,WI` or `IA,MN` for another Midwest/north chunk.
+- `AL,MS,TN,KY` for the next South/Appalachia expansion.
+- `TX` should likely be its own graph.
+- `AK` and `HI` should stay isolated because their routing geography is separate and artifact shape/cost is different.
+
+## Great Lakes MI/WI Valhalla Checkpoint
+
+Date: 2026-06-15
+
+Built and shipped the Michigan/Wisconsin online Valhalla target.
+
+Artifact:
+
+- Built with:
+  - `VALHALLA_THREADS=4 scripts/build_valhalla_artifact.sh --workdir /home/sean/valhalla-region-builds/mi_wi --states MI,WI --label mi_wi`
+- Local artifact:
+  - `/home/sean/valhalla-region-builds/mi_wi/mi_wi-valhalla.tar.zst`
+- Compression result:
+  - `1.21 GiB => 373 MiB`
+- Size:
+  - `391642469`
+- SHA-256:
+  - `891b0372bc46724e5dd8c2c15c8d7a65cadea2cfb1ac30876447fdef8637bcb9`
+- Build stats:
+  - `3139269 routable ways`
+  - `21699966 nodes contained in routable ways`
+  - `7716784 graph edges`
+  - `5841099 graph nodes`
+  - `689 tiles`
+  - `15433568 directed edges`
+  - tile build took `226s`
+
+R2:
+
+- Published key:
+  - `routing/valhalla/mi_wi.tar.zst`
+- Manifest label:
+  - `mi_wi`
+
+Railway:
+
+- Created service:
+  - `trailhead-valhalla-greatlakes`
+  - service id `ee5b39b6-0539-4299-85b6-cd5800272e27`
+- Created volume:
+  - `trailhead-valhalla-greatlakes-volume`
+  - id `a065a949-1ace-45b1-8331-459a3ff24dab`
+  - mount `/custom_files`
+  - size `50000 MB`
+- Public direct-probe domain:
+  - `https://trailhead-valhalla-greatlakes-production.up.railway.app`
+- First artifact deployment crashed because `R2_BUCKET` resolved empty through a variable reference.
+- Fixed by setting `R2_BUCKET=trailhead-tiles` directly on the service, then redeployed.
+- Successful deployment:
+  - `82eddcde-2e2e-4f15-a41a-c1e334cbb69c`
+  - logs confirmed R2 download, extraction, config generation, and `Valhalla R2 artifacts extracted: 1`.
+
+Direct service verification:
+
+- `/status` returned Valhalla `3.5.1-49b40b7f2` with route action available.
+- Detroit to Grand Rapids routed successfully:
+  - length `158.1872`
+- Milwaukee to Madison routed successfully:
+  - length `80.0048`
+
+Production API wiring:
+
+- Added a combined target instead of separate MI/WI targets because Michigan's Upper Peninsula bbox overlaps Wisconsin. The first per-state version worked, but Wisconsin matched `greatlakes_mi`, so the final config uses one honest target:
+  - `greatlakes_mi_wi`
+  - URL `http://trailhead-valhalla-greatlakes.railway.internal:8002`
+  - bounds `{s:41.6,w:-92.9,n:48.5,e:-82.0}`
+  - states `["MI","WI"]`
+  - priority `17`
+- Production API deployment for the final combined target went live after the variable update.
+
+Production verification:
+
+- `/api/route/health` passed all targets, including `greatlakes_mi_wi`.
+- Final 50-state probe:
+  - total `50`
+  - Valhalla `35`
+  - OSRM fallback `15`
+  - failed `0`
+  - MI target `greatlakes_mi_wi`
+  - WI target `greatlakes_mi_wi`
+- Remaining fallback states:
+  - `AL, AK, FL, GA, HI, IA, KY, LA, MN, MS, ND, NE, SD, TN, TX`
+
+Next routing chunks to consider:
+
+- `IA,MN` or `ND,SD,NE` for Upper Midwest / Plains.
+- `AL,MS,TN,KY` for a South/Appalachia chunk.
+- `FL,GA` can be a Southeast coastal chunk.
+- `TX` should stay standalone.
+- `AK` and `HI` should stay isolated.
+
+## iOS Locate Camera Settle Checkpoint
+
+Date: 2026-06-15
+
+Issue reported:
+
+- Android locate/pan was working better after the previous native map camera fix.
+- iOS locate still moved only a few inches toward the GPS point per tap; repeated taps eventually reached the user location.
+
+Fix:
+
+- Updated `mobile/components/NativeMap/index.tsx`.
+- Added an iOS-specific locate camera path that uses Camera `moveTo` and `zoomTo` with a short direct `setCamera` instead of relying on one longer animated `setCamera`.
+- Added two iOS settle passes after locate (`180ms` and `460ms`) that snap to the requested GPS point unless the user has started a gesture.
+- Deferred source refreshes during programmatic camera movement so map style/source changes do not interrupt the iOS locate animation mid-flight.
+- Kept the Android locate path on the existing longer `flyTo` behavior because Android had improved.
+
+Verification:
+
+- `cd mobile && NODE_OPTIONS=--max-old-space-size=4096 npx tsc --noEmit` passed.
+- `git diff --check` passed.
+
+OTA:
+
+- Production:
+  - update group `4e45d895-e727-4978-b58e-8938f19b8c52`
+  - Android update `019ecd8d-bcca-79b8-bde9-11b9dbd869ad`
+  - iOS update `019ecd8d-bcca-7a92-8435-0c13b0de4e3d`
+  - dashboard `https://expo.dev/accounts/danub44/projects/trailhead/updates/4e45d895-e727-4978-b58e-8938f19b8c52`
+- Preview:
+  - update group `22f4c1b6-b39a-4de6-adb2-d664a01a2194`
+  - Android update `019ecd8e-7fb7-7537-8572-c15d6ef68749`
+  - iOS update `019ecd8e-7fb7-7125-bf71-f7b2b9ff3377`
+  - dashboard `https://expo.dev/accounts/danub44/projects/trailhead/updates/22f4c1b6-b39a-4de6-adb2-d664a01a2194`
+
+Device follow-up:
+
+- Have Sean confirm iOS locate now jumps/settles to the GPS point in one tap.
+- If it still inches toward location, next step is to remount the free camera only on iOS locate with a monotonic `freeCameraRevision`, but avoid that unless this settle path is insufficient.
+
+## IA/MN Upper Midwest Valhalla Checkpoint
+
+Date: 2026-06-15
+
+Purpose:
+
+- Continue replacing online route fallback states with self-hosted Valhalla coverage.
+- Add Iowa and Minnesota without making nearby states hit the wrong service first.
+
+Local artifact:
+
+- Workdir:
+  - `/home/sean/valhalla-region-builds/ia_mn`
+- Artifact:
+  - `/home/sean/valhalla-region-builds/ia_mn/ia_mn-valhalla.tar.zst`
+- Compression result:
+  - `671 MiB => 206 MiB`
+- Size:
+  - `215838623`
+- SHA-256:
+  - `43d2f97d636f6828905162d1227f6464ed6cdc2e2484153cb435f9d3232728c7`
+- Build stats:
+  - `1716123 routable ways`
+  - `12000294 nodes contained in routable ways`
+  - `4091050 graph edges`
+  - `3096730 graph nodes`
+  - `775 tiles`
+  - `8182100 directed edges`
+  - tile build took `115s`
+
+R2:
+
+- Published key:
+  - `routing/valhalla/ia_mn.tar.zst`
+- Manifest label:
+  - `ia_mn`
+
+Railway:
+
+- Created service:
+  - `trailhead-valhalla-uppermidwest`
+  - service id `f4233e2a-5e29-4aab-9f8a-254e83ec7723`
+- Created volume:
+  - `trailhead-valhalla-uppermidwest-volume-A7Y5`
+  - id `05b0d422-c78d-4261-be4c-548a9018ac8b`
+  - mount `/custom_files`
+- Public direct-probe domain:
+  - `https://trailhead-valhalla-uppermidwest-production.up.railway.app`
+- Successful artifact deployment:
+  - `e95acb6e-1736-4781-b228-d38daba9dcce`
+
+Direct service verification:
+
+- `/status` returned Valhalla `3.5.1-49b40b7f2` with route action available.
+- Des Moines to Cedar Rapids routed successfully.
+- Minneapolis to Duluth routed successfully.
+
+Production API wiring:
+
+- First used one combined `uppermidwest_ia_mn` target.
+- Audit found that box was too broad: Nebraska correctly fell back to OSRM, but it tried the IA/MN target first.
+- Replaced it with two tighter targets on the same Railway service:
+  - `uppermidwest_ia`
+  - `uppermidwest_mn`
+
+Production verification:
+
+- `/api/route/health` passed all targets, including `uppermidwest_ia` and `uppermidwest_mn`.
+- Final 50-state probe:
+  - total `50`
+  - Valhalla `37`
+  - OSRM fallback `13`
+  - failed `0`
+  - IA target `uppermidwest_ia`
+  - MN target `uppermidwest_mn`
+  - NE target `default` OSRM fallback, as expected until the Plains service is added
+
+Remaining fallback states:
+
+- `AL, AK, FL, GA, HI, KY, LA, MS, ND, NE, SD, TN, TX`
+
+Next routing chunks:
+
+- `ND,SD,NE` for Plains.
+- `AL,MS,TN,KY` for South/Appalachia.
+- `FL,GA` for Southeast coastal.
+- `TX` standalone.
+- `AK` and `HI` isolated.
+
+## ND/SD/NE Plains Valhalla Checkpoint
+
+Date: 2026-06-15
+
+Purpose:
+
+- Move North Dakota, South Dakota, and Nebraska from OSRM fallback to Trailhead-owned Valhalla routing.
+- Keep the boxes tight enough that Kansas/Ozarks routes are not pulled into the Plains service.
+
+Local artifact:
+
+- Workdir:
+  - `/home/sean/valhalla-region-builds/nd_sd_ne`
+- Artifact:
+  - `/home/sean/valhalla-region-builds/nd_sd_ne/nd_sd_ne-valhalla.tar.zst`
+- Compression result:
+  - `404 MiB => 129 MiB`
+- Size:
+  - `134753959`
+- SHA-256:
+  - `18ed78378a2477705060cc58cdb3a06165989b6160d77e0e50ce5ed03e1c0640`
+- Build stats:
+  - `994212 routable ways`
+  - `10190214 nodes contained in routable ways`
+  - `2411953 graph edges`
+  - `1807898 graph nodes`
+  - `1205 tiles`
+  - `4823906 directed edges`
+  - tile build took `74s`
+
+R2:
+
+- Published key:
+  - `routing/valhalla/nd_sd_ne.tar.zst`
+- Manifest label:
+  - `nd_sd_ne`
+
+Railway:
+
+- Created service:
+  - `trailhead-valhalla-plains`
+  - service id `3e9ef8db-08e7-43ab-a89d-0f121f1c83e8`
+- Created volume:
+  - `trailhead-valhalla-plains-volume`
+  - id `251dd798-18ef-4808-a2ce-ec118c14481a`
+  - mount `/custom_files`
+- Public direct-probe domain:
+  - `https://trailhead-valhalla-plains-production.up.railway.app`
+- Deployment:
+  - `3e274783-d016-4c8b-9c7f-9483519654e9`
+  - logs confirmed R2 download, extraction, config generation, and `Valhalla R2 artifacts extracted: 1`.
+
+Direct service verification:
+
+- `/status` returned Valhalla `3.5.1-49b40b7f2` with route action available.
+- Bismarck to Fargo routed successfully.
+- Sioux Falls to Rapid City routed successfully.
+- Omaha to Lincoln routed successfully.
+
+Production API wiring:
+
+- Added three separate targets on the same service:
+  - `plains_nd`
+  - `plains_sd`
+  - `plains_ne`
+- Set Nebraska south bound to `40.0` to avoid catching Kansas/Ozarks routes through a rectangular bbox overlap.
+- First API health check did not show the Plains targets because the API had not restarted onto the new variable.
+- Forced a production API redeploy with `railway deployment redeploy --service trailhead --yes`.
+
+Production verification:
+
+- `/api/route/health` passed all targets, including `plains_nd`, `plains_sd`, and `plains_ne`.
+- Final 50-state probe:
+  - total `50`
+  - Valhalla `40`
+  - OSRM fallback `10`
+  - failed `0`
+  - ND target `plains_nd`
+  - SD target `plains_sd`
+  - NE target `plains_ne`
+
+Remaining fallback states:
+
+- `AL, AK, FL, GA, HI, KY, LA, MS, TN, TX`
+
+Next routing chunks:
+
+- `AL,MS,TN,KY` for South/Appalachia.
+- `FL,GA` for Southeast coastal.
+- `TX` standalone.
+- `AK` and `HI` isolated.
+
+## AL/MS/TN/KY South Valhalla Checkpoint
+
+Date: 2026-06-15
+
+Purpose:
+
+- Move Alabama, Mississippi, Tennessee, and Kentucky from OSRM fallback to Trailhead-owned Valhalla routing.
+- Keep western Tennessee/Kentucky ahead of the Ozarks target so those routes do not select the older Ozarks bundle first.
+
+Local artifact:
+
+- Workdir:
+  - `/home/sean/valhalla-region-builds/al_ms_tn_ky`
+- Artifact:
+  - `/home/sean/valhalla-region-builds/al_ms_tn_ky/al_ms_tn_ky-valhalla.tar.zst`
+- Compression result:
+  - `1.09 GiB => 366 MiB`
+- Size:
+  - `383748709`
+- SHA-256:
+  - `167c8300f80feff9a1abec4f537177ca20c47b7415c209894e95267436c951a1`
+- Build stats:
+  - `2897067 routable ways`
+  - `28500885 nodes contained in routable ways`
+  - `6538050 graph edges`
+  - `5254142 graph nodes`
+  - `861 tiles`
+  - `13076099 directed edges`
+  - tile build took `232s`
+
+R2:
+
+- Published key:
+  - `routing/valhalla/al_ms_tn_ky.tar.zst`
+- Manifest label:
+  - `al_ms_tn_ky`
+
+Railway:
+
+- Created service:
+  - `trailhead-valhalla-south`
+  - service id `593ed672-72b7-4576-b1f1-df5a6dd96eb1`
+- Created volume:
+  - `trailhead-valhalla-south-volume`
+  - id `004b3c0d-d504-4715-b1ac-7c67ea35d6b6`
+  - mount `/custom_files`
+- Public direct-probe domain:
+  - `https://trailhead-valhalla-south-production.up.railway.app`
+- Deployment:
+  - `75f441f5-0db2-4664-a63f-5f89a196fa3b`
+  - logs confirmed R2 download, extraction, config generation, and `Valhalla R2 artifacts extracted: 1`.
+
+Direct service verification:
+
+- `/status` returned Valhalla `3.5.1-49b40b7f2` with route action available.
+- Birmingham to Montgomery routed successfully.
+- Jackson to Tupelo routed successfully.
+- Nashville to Memphis routed successfully.
+- Louisville to Lexington routed successfully.
+
+Production API wiring:
+
+- Added four separate targets on the same service:
+  - `south_al`
+  - `south_ms`
+  - `south_tn`
+  - `south_ky`
+- The variable update triggered an API deployment; manual redeploy was rejected because the latest deployment was already active.
+
+Production verification:
+
+- `/api/route/health` passed all targets, including `south_al`, `south_ms`, `south_tn`, and `south_ky`.
+- Final 50-state probe:
+  - total `50`
+  - Valhalla `44`
+  - OSRM fallback `6`
+  - failed `0`
+  - AL target `south_al`
+  - MS target `south_ms`
+  - TN target `south_tn`
+  - KY target `south_ky`
+
+Remaining fallback states:
+
+- `AK, FL, GA, HI, LA, TX`
+
+Next routing chunks:
+
+- `FL,GA` for Southeast coastal.
+- `TX` standalone.
+- `LA` could be standalone or paired with TX if service size allows, but standalone is safer for clean target boxes.
+- `AK` and `HI` isolated.
+
+## FL/GA Southeast Valhalla Checkpoint
+
+Date: 2026-06-16
+
+Purpose:
+
+- Move Florida and Georgia from OSRM fallback to Trailhead-owned Valhalla routing.
+- Reduce the Florida panhandle overlap risk from the Alabama target by giving Florida its own target ahead of South.
+
+Local artifact:
+
+- Workdir:
+  - `/home/sean/valhalla-region-builds/fl_ga`
+- Artifact:
+  - `/home/sean/valhalla-region-builds/fl_ga/fl_ga-valhalla.tar.zst`
+- Compression result:
+  - `1.56 GiB => 493 MiB`
+- Size:
+  - `517062964`
+- SHA-256:
+  - `8a83802542d96b405f51e6e92d62752083c0e5e98f2b033977645e993e9e4b8a`
+- Build stats:
+  - `4428249 routable ways`
+  - `28661263 nodes contained in routable ways`
+  - `9877591 graph edges`
+  - `7617761 graph nodes`
+  - `568 tiles`
+  - `19755182 directed edges`
+  - tile build took `345s`
+
+R2:
+
+- Published key:
+  - `routing/valhalla/fl_ga.tar.zst`
+- Manifest label:
+  - `fl_ga`
+
+Railway:
+
+- Created service:
+  - `trailhead-valhalla-southeast`
+  - service id `873b6692-1ffa-4249-8cf9-b5b3fc289af5`
+- Created volume:
+  - `trailhead-valhalla-southeast-volume`
+  - id `7b8b42b5-bede-4b23-bd04-a7d0bb35d876`
+  - mount `/custom_files`
+- Public direct-probe domain:
+  - `https://trailhead-valhalla-southeast-production.up.railway.app`
+- Deployment:
+  - `bacddea8-bca9-4ff5-bb4b-5eaa9f23a69c`
+  - logs confirmed R2 download, extraction, config generation, and `Valhalla R2 artifacts extracted: 1`.
+
+Direct service verification:
+
+- `/status` returned Valhalla `3.5.1-49b40b7f2` with route action available.
+- Miami to Orlando routed successfully.
+- Atlanta to Savannah routed successfully.
+
+Production API wiring:
+
+- Added two separate targets on the same service:
+  - `southeast_fl`
+  - `southeast_ga`
+- Target-order audit:
+  - `southeast_fl` priority `12`, ahead of `south_al`, so Florida panhandle routes prefer the Florida service.
+  - `southeast_ga` priority `9`, behind `east_sc`, so existing South Carolina routes keep selecting the SC target.
+- First health check after the variable update did not show Southeast targets, so the API was forced to redeploy with `railway deployment redeploy --service trailhead --yes`.
+
+Production verification:
+
+- `/api/route/health` passed all targets, including `southeast_fl` and `southeast_ga`.
+- Final 50-state probe:
+  - total `50`
+  - Valhalla `46`
+  - OSRM fallback `4`
+  - failed `0`
+  - FL target `southeast_fl`
+  - GA target `southeast_ga`
+
+Remaining fallback states:
+
+- `AK, HI, LA, TX`
+
+Next routing chunks:
+
+- `LA` standalone.
+- `TX` standalone.
+- `AK` standalone.
+- `HI` standalone.
+
+Known routing-target weakness:
+
+- Regional routing targets still use rectangular bounds, not state polygons.
+- Border areas can select a neighboring target before fallback if both endpoints sit in a rectangular overlap.
+- Current ordering avoids the obvious FL/AL and GA/SC regressions for common cases, but the more durable production fix is polygon-aware target selection or a state/country hint in route requests.
+
+## Louisiana Valhalla Checkpoint
+
+Date: 2026-06-16
+
+Purpose:
+
+- Move Louisiana from OSRM fallback to Trailhead-owned Valhalla routing.
+- Keep Louisiana standalone so TX and Gulf Coast target boxes can be tuned independently.
+
+Local artifact:
+
+- Workdir:
+  - `/home/sean/valhalla-region-builds/la`
+- Artifact:
+  - `/home/sean/valhalla-region-builds/la/la-valhalla.tar.zst`
+- Compression result:
+  - `199 MiB => 63.1 MiB`
+- Size:
+  - `66166074`
+- SHA-256:
+  - `9109f29b0f31e96d9a935dd61039bd2283e8f8fd729d64c60b27c923bb462b07`
+- Build stats:
+  - `523296 routable ways`
+  - `3759352 nodes contained in routable ways`
+  - `1179524 graph edges`
+  - `928553 graph nodes`
+  - `238 tiles`
+  - `2359048 directed edges`
+  - tile build took `29s`
+
+R2:
+
+- Published key:
+  - `routing/valhalla/la.tar.zst`
+- Manifest label:
+  - `la`
+
+Railway:
+
+- Created service:
+  - `trailhead-valhalla-louisiana`
+  - service id `6d52e566-cc86-423b-b481-ac70528cc41c`
+- Volume:
+  - mount `/custom_files`
+  - `railway volume add` timed out, then retry confirmed a volume was already mounted; volume id was not captured in the console output.
+- Public direct-probe domain:
+  - `https://trailhead-valhalla-louisiana-production.up.railway.app`
+- Deployment:
+  - `289e786a-f4e5-4702-adf0-a7b02e939dff`
+  - logs confirmed R2 extraction and `Valhalla R2 artifacts extracted: 1`.
+
+Direct service verification:
+
+- `/status` returned Valhalla `3.5.1-49b40b7f2` with route action available.
+- New Orleans to Baton Rouge routed successfully.
+
+Production API wiring:
+
+- Added target:
+  - `louisiana_la`
+  - service URL `http://trailhead-valhalla-louisiana.railway.internal:8002`
+  - priority `12`
+  - state hint `LA`
+
+Production verification:
+
+- `/api/route/health` passed all targets, including `louisiana_la`.
+- Final 50-state probe:
+  - total `50`
+  - Valhalla `47`
+  - OSRM fallback `3`
+  - failed `0`
+  - LA target `louisiana_la`
+
+Remaining fallback states:
+
+- `AK, HI, TX`
+
+Next routing chunks:
+
+- `TX` standalone.
+- `AK` standalone.
+- `HI` standalone.

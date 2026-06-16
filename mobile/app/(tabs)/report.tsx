@@ -16,6 +16,7 @@ import { api, Report, ContributorLeader, ContributorProfile, ContributionPeriod 
 import { useStore } from '@/lib/store';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 import { CREDIT_REWARDS } from '@/lib/credits';
+import { trackPhase0Once } from '@/lib/telemetry';
 import Reanimated, { FadeInDown, ZoomIn } from 'react-native-reanimated';
 
 // ── Alert notification helpers ────────────────────────────────────────────────
@@ -90,12 +91,67 @@ const SEVERITY = [
 
 const PHOTO_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
 
-type TabView = 'submit' | 'nearby' | 'leaderboard';
+type TabView = 'route' | 'camp' | 'nearby' | 'submit' | 'leaderboard';
+
+function tripWaypointsForConditions(activeTrip: ReturnType<typeof useStore.getState>['activeTrip']) {
+  return activeTrip?.plan.waypoints.filter(wp => wp.lat != null && wp.lng != null) ?? [];
+}
+
+function distanceMiBetween(a: { lat?: number | null; lng?: number | null }, b: { lat: number; lng: number }) {
+  const dLat = ((a.lat ?? 0) - b.lat) * Math.PI / 180;
+  const dLng = ((a.lng ?? 0) - b.lng) * Math.PI / 180;
+  const lat1 = (a.lat ?? 0) * Math.PI / 180;
+  const lat2 = b.lat * Math.PI / 180;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 3958.8 * 2 * Math.asin(Math.sqrt(h));
+}
+
+function isOvernightWaypoint(type: string | null | undefined) {
+  return ['camp', 'motel', 'town'].includes(String(type || '').toLowerCase());
+}
+
+function tonightAnchorForTrip(
+  activeTrip: ReturnType<typeof useStore.getState>['activeTrip'],
+  loc: { lat: number; lng: number } | null,
+) {
+  const orderedWaypoints = (activeTrip?.plan.waypoints ?? [])
+    .filter(wp => wp.lat != null && wp.lng != null)
+    .map((wp, index) => ({ wp, index }));
+  const overnights = orderedWaypoints.filter(({ wp }) => isOvernightWaypoint(wp.type));
+  if (overnights.length === 0) return null;
+  if (!loc) return overnights[0].wp;
+
+  let nearestRoutePoint = orderedWaypoints[0];
+  let nearestRouteDistance = Infinity;
+  for (const candidate of orderedWaypoints) {
+    const dist = distanceMiBetween(candidate.wp, loc);
+    if (dist < nearestRouteDistance) {
+      nearestRouteDistance = dist;
+      nearestRoutePoint = candidate;
+    }
+  }
+
+  if (nearestRouteDistance > 35) {
+    return overnights
+      .slice()
+      .sort((a, b) => distanceMiBetween(a.wp, loc) - distanceMiBetween(b.wp, loc))[0]?.wp ?? overnights[0].wp;
+  }
+
+  const upcomingByOrder = overnights.find(({ index }) => index >= nearestRoutePoint.index);
+  if (upcomingByOrder) return upcomingByOrder.wp;
+
+  const currentDay = nearestRoutePoint.wp.day ?? 0;
+  const upcomingByDay = overnights.find(({ wp }) => (wp.day ?? 0) >= currentDay);
+  if (upcomingByDay) return upcomingByDay.wp;
+
+  return overnights[overnights.length - 1].wp;
+}
 
 export default function ReportScreen() {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
   const { user, setAuth, addLiveReport } = useStore();
+  const activeTrip = useStore(st => st.activeTrip);
   const [loc, setLoc] = useState<{ lat: number; lng: number } | null>(null);
   const [selectedType, setSelectedType] = useState<typeof REPORT_TYPES[0] | null>(null);
   const [selectedSubtype, setSelectedSubtype] = useState('');
@@ -106,11 +162,15 @@ export default function ReportScreen() {
   const [submitted, setSubmitted] = useState(false);
   const [creditsGained, setCreditsGained] = useState(0);
   const [nearby, setNearby] = useState<Report[]>([]);
+  const [routeReports, setRouteReports] = useState<Report[]>([]);
+  const [campReports, setCampReports] = useState<Report[]>([]);
+  const [routeLoading, setRouteLoading] = useState(false);
+  const [campLoading, setCampLoading] = useState(false);
   const [topUsers, setTopUsers] = useState<ContributorLeader[]>([]);
   const [topPeriod, setTopPeriod] = useState<ContributionPeriod>('month');
   const [selectedContributor, setSelectedContributor] = useState<ContributorProfile | null>(null);
   const [contributorLoading, setContributorLoading] = useState(false);
-  const [view, setView] = useState<TabView>('submit');
+  const [view, setView] = useState<TabView>('route');
   const [notifPrefs, setNotifPrefs] = useState<Record<string, boolean>>({});
   const [showNotifSettings, setShowNotifSettings] = useState(false);
 
@@ -119,6 +179,8 @@ export default function ReportScreen() {
   const [campsiteRating, setCampsiteRating] = useState(0);
   const successAnim = useRef(new Animated.Value(0)).current;
   const typeAnims = useRef(REPORT_TYPES.map(() => new Animated.Value(1))).current;
+  const routeWaypoints = useMemo(() => tripWaypointsForConditions(activeTrip), [activeTrip?.trip_id, activeTrip?.updated_at]);
+  const tonightAnchor = useMemo(() => tonightAnchorForTrip(activeTrip, loc), [activeTrip?.trip_id, activeTrip?.updated_at, loc?.lat, loc?.lng]);
   // Refs so async callbacks always read latest values without stale closures
   const seenIdsRef = useRef<Record<string, number>>({});
   const notifPrefsRef = useRef<Record<string, boolean>>({});
@@ -185,11 +247,39 @@ export default function ReportScreen() {
   }, []);
 
   useEffect(() => {
+    if (view === 'route' && routeWaypoints.length === 0) setView('nearby');
+  }, [routeWaypoints.length, view]);
+
+  useEffect(() => {
     if (view !== 'leaderboard') return;
     api.getContributionsLeaderboard(topPeriod).then(res => setTopUsers(res.leaders)).catch(() => {});
   }, [view, topPeriod]);
 
-  // Refresh nearby reports each time user opens the NEARBY tab
+  // Refresh route alerts each time user opens the route tab
+  useEffect(() => {
+    if (view !== 'route' || routeWaypoints.length === 0) return;
+    setRouteLoading(true);
+    api.getAlertsAlongRoute(routeWaypoints).then(reports => {
+      setRouteReports(reports);
+      checkAndNotify(reports);
+    }).catch(() => {
+      setRouteReports([]);
+    }).finally(() => setRouteLoading(false));
+  }, [routeWaypoints, view]);
+
+  // Refresh tonight camp context each time user opens the tonight tab
+  useEffect(() => {
+    if (view !== 'camp' || !tonightAnchor?.lat || !tonightAnchor?.lng) return;
+    setCampLoading(true);
+    api.getNearbyAlerts(tonightAnchor.lat, tonightAnchor.lng, 8).then(reports => {
+      setCampReports(reports);
+      checkAndNotify(reports);
+    }).catch(() => {
+      setCampReports([]);
+    }).finally(() => setCampLoading(false));
+  }, [tonightAnchor?.day, tonightAnchor?.lat, tonightAnchor?.lng, view]);
+
+  // Refresh nearby reports each time user opens the nearby tab
   useEffect(() => {
     if (view !== 'nearby') return;
     const c = locRef.current;
@@ -199,6 +289,17 @@ export default function ReportScreen() {
       checkAndNotify(reports);
     }).catch(() => {});
   }, [view]);
+
+  useEffect(() => {
+    if (view !== 'nearby' || !loc || nearby.length > 0) return;
+    const latBucket = loc.lat.toFixed(2);
+    const lngBucket = loc.lng.toFixed(2);
+    trackPhase0Once(`phase0:report-empty:${latBucket}:${lngBucket}`, 'phase0_empty_state_seen', {
+      surface: 'report_nearby',
+      lat_bucket: latBucket,
+      lng_bucket: lngBucket,
+    });
+  }, [loc, nearby.length, view]);
 
   async function openContributor(userId: number) {
     setContributorLoading(true);
@@ -290,6 +391,98 @@ export default function ReportScreen() {
     }
   }
 
+  function renderConditionsFeed(
+    mode: 'route' | 'camp' | 'nearby',
+    reports: Report[],
+    options: {
+      title: string;
+      kicker: string;
+      subtitle: string;
+      countLabel: string;
+      loading?: boolean;
+      emptyTitle: string;
+      emptySub: string;
+      primaryActionLabel: string;
+      primaryAction: () => void;
+    },
+  ) {
+    return (
+      <ScrollView contentContainerStyle={s.scroll}>
+        <View style={s.nearbyHero}>
+          <View style={{ flex: 1 }}>
+            <Text style={s.nearbyKicker}>{options.kicker}</Text>
+            <Text style={s.nearbyTitle}>{options.title}</Text>
+            <Text style={s.nearbySubtitle}>{options.subtitle}</Text>
+          </View>
+          <View style={s.nearbyCount}>
+            <Text style={s.nearbyCountNum}>{options.loading ? '…' : reports.length}</Text>
+            <Text style={s.nearbyCountLabel}>{options.countLabel}</Text>
+          </View>
+        </View>
+
+        <TouchableOpacity style={s.notifSettingsBtn} onPress={() => setShowNotifSettings(true)}>
+          <View style={s.notifSettingsIcon}>
+            <Ionicons name="notifications-outline" size={14} color={C.orange} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={s.notifSettingsBtnText}>Critical alert settings</Text>
+            <Text style={s.notifSettingsSub}>Choose which warnings can notify you while you travel.</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={13} color={C.text3} />
+        </TouchableOpacity>
+
+        <TouchableOpacity style={s.notifSettingsBtn} onPress={() => setView('leaderboard')}>
+          <View style={s.notifSettingsIcon}>
+            <Ionicons name="trophy-outline" size={14} color={C.orange} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={s.notifSettingsBtnText}>Community standings</Text>
+            <Text style={s.notifSettingsSub}>Leaderboard moved out of the main report flow, but it is still here.</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={13} color={C.text3} />
+        </TouchableOpacity>
+
+        {!options.loading && reports.length === 0 ? (
+          <View style={s.emptyWrap}>
+            <View style={s.emptyIconWrap}>
+              <Ionicons name={mode === 'route' ? 'trail-sign-outline' : mode === 'camp' ? 'bonfire-outline' : 'location-outline'} size={30} color={C.text3} />
+            </View>
+            <Text style={s.emptyText}>{options.emptyTitle}</Text>
+            <Text style={s.emptySub}>{options.emptySub}</Text>
+            <TouchableOpacity style={s.emptyAction} onPress={options.primaryAction}>
+              <Ionicons name={mode === 'nearby' ? 'add-circle-outline' : 'compass-outline'} size={14} color={C.orange} />
+              <Text style={s.emptyActionText}>{options.primaryActionLabel}</Text>
+            </TouchableOpacity>
+          </View>
+        ) : reports.map(r => (
+          <ReportCard key={`${mode}-${r.id}`} report={r}
+            onPress={() => setDetailReport(r)}
+            onUpvote={() => typeof r.id === 'number' && api.upvoteReport(r.id).catch(() => {})}
+            onDownvote={() => typeof r.id === 'number' && api.downvoteReport(r.id).catch(() => {})}
+            onConfirm={() => typeof r.id === 'number' && api.confirmReport(r.id).then(res => {
+              Alert.alert('Confirmed ✓', `+${res.credits_earned} credit earned`);
+            }).catch((e: any) => Alert.alert('Error', e.message))}
+            onAdminDelete={user?.is_admin ? () => Alert.alert('Delete Report', 'Permanently remove this report?', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Delete', style: 'destructive', onPress: () => typeof r.id === 'number' && api.adminDeleteReport(r.id).then(() => {
+                const drop = (items: Report[]) => items.filter(x => x.id !== r.id);
+                if (mode === 'route') setRouteReports(prev => drop(prev));
+                else if (mode === 'camp') setCampReports(prev => drop(prev));
+                else setNearby(prev => drop(prev));
+              }).catch(() => {}) },
+            ]) : undefined}
+            onAdminRemovePhoto={user?.is_admin ? () => typeof r.id === 'number' && api.adminRemovePhoto(r.id).then(() => {
+              const strip = (items: Report[]) => items.map(x => x.id === r.id ? { ...x, has_photo: 0 } : x);
+              if (mode === 'route') setRouteReports(prev => strip(prev));
+              else if (mode === 'camp') setCampReports(prev => strip(prev));
+              else setNearby(prev => strip(prev));
+            }).catch(() => {}) : undefined}
+          />
+        ))}
+      </ScrollView>
+    );
+  }
+
   return (
     <SafeAreaView style={s.container}>
       {/* Driving safety modal */}
@@ -343,7 +536,12 @@ export default function ReportScreen() {
 
       {/* Tabs */}
       <View style={s.tabs}>
-        {([['submit','REPORT'],['nearby','NEARBY'],['leaderboard','TOP']] as const).map(([t, label]) => (
+        {([
+          ['route', 'ROUTE'],
+          ['camp', 'TONIGHT'],
+          ['nearby', 'NEAR ME'],
+          ['submit', 'SUBMIT'],
+        ] as const).map(([t, label]) => (
           <TouchableOpacity key={t} style={[s.tab, view === t && s.tabActive]} onPress={() => setView(t)}>
             <Text style={[s.tabText, view === t && s.tabTextActive]}>{label}</Text>
           </TouchableOpacity>
@@ -523,59 +721,80 @@ export default function ReportScreen() {
         </View>
       </Modal>
 
-      {view === 'nearby' && (
-        <ScrollView contentContainerStyle={s.scroll}>
-          <View style={s.nearbyHero}>
-            <View>
-              <Text style={s.nearbyKicker}>LIVE CONDITIONS</Text>
-              <Text style={s.nearbyTitle}>Nearby trail reports</Text>
-            </View>
-            <View style={s.nearbyCount}>
-              <Text style={s.nearbyCountNum}>{nearby.length}</Text>
-              <Text style={s.nearbyCountLabel}>ACTIVE</Text>
-            </View>
-          </View>
-          {/* Alert settings row */}
-          <TouchableOpacity style={s.notifSettingsBtn} onPress={() => setShowNotifSettings(true)}>
-            <View style={s.notifSettingsIcon}>
-              <Ionicons name="notifications-outline" size={14} color={C.orange} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={s.notifSettingsBtnText}>Critical alert settings</Text>
-              <Text style={s.notifSettingsSub}>Choose which nearby warnings can notify you.</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={13} color={C.text3} />
-          </TouchableOpacity>
-
-          {nearby.length === 0 ? (
-            <View style={s.emptyWrap}>
-              <View style={s.emptyIconWrap}>
-                <Ionicons name="location-outline" size={30} color={C.text3} />
+      {view === 'route' && (
+        routeWaypoints.length > 0
+          ? renderConditionsFeed('route', routeReports, {
+              title: 'Reports on my route',
+              kicker: 'ROUTE CONTEXT',
+              subtitle: activeTrip?.plan.trip_name || 'Active route',
+              countLabel: 'ON ROUTE',
+              loading: routeLoading,
+              emptyTitle: 'No active route reports',
+              emptySub: 'Your saved route is clear right now. If you hit a closure, washed road, or fuel issue, post it from Submit.',
+              primaryActionLabel: 'SUBMIT REPORT',
+              primaryAction: () => setView('submit'),
+            })
+          : (
+            <ScrollView contentContainerStyle={s.scroll}>
+              <View style={s.emptyWrap}>
+                <View style={s.emptyIconWrap}>
+                  <Ionicons name="trail-sign-outline" size={30} color={C.text3} />
+                </View>
+                <Text style={s.emptyText}>No active route yet</Text>
+                <Text style={s.emptySub}>Build or open a trip first, then Report can show what affects the route instead of just what is nearby.</Text>
+                <TouchableOpacity style={s.emptyAction} onPress={() => setView('nearby')}>
+                  <Ionicons name="locate-outline" size={14} color={C.orange} />
+                  <Text style={s.emptyActionText}>USE NEAR ME</Text>
+                </TouchableOpacity>
               </View>
-              <Text style={s.emptyText}>No active reports nearby</Text>
-              <Text style={s.emptySub}>This area looks quiet. If you spot a closure, washed road, full camp, or fuel issue, add the first report.</Text>
-              <TouchableOpacity style={s.emptyAction} onPress={() => setView('submit')}>
-                <Ionicons name="add-circle-outline" size={14} color={C.orange} />
-                <Text style={s.emptyActionText}>ADD REPORT</Text>
-              </TouchableOpacity>
-            </View>
-          ) : nearby.map(r => (
-            <ReportCard key={r.id} report={r}
-              onPress={() => setDetailReport(r)}
-              onUpvote={() => typeof r.id === 'number' && api.upvoteReport(r.id).catch(() => {})}
-              onDownvote={() => typeof r.id === 'number' && api.downvoteReport(r.id).catch(() => {})}
-              onConfirm={() => typeof r.id === 'number' && api.confirmReport(r.id).then(res => {
-                Alert.alert('Confirmed ✓', `+${res.credits_earned} credit earned`);
-              }).catch((e: any) => Alert.alert('Error', e.message))}
-              onAdminDelete={user?.is_admin ? () => Alert.alert('Delete Report', 'Permanently remove this report?', [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Delete', style: 'destructive', onPress: () => typeof r.id === 'number' && api.adminDeleteReport(r.id).then(() => setNearby(prev => prev.filter(x => x.id !== r.id))).catch(() => {}) },
-              ]) : undefined}
-              onAdminRemovePhoto={user?.is_admin ? () => typeof r.id === 'number' && api.adminRemovePhoto(r.id).then(() => setNearby(prev => prev.map(x => x.id === r.id ? { ...x, has_photo: 0 } : x))).catch(() => {}) : undefined}
-            />
-          ))}
-        </ScrollView>
+            </ScrollView>
+          )
       )}
+
+      {view === 'camp' && (
+        tonightAnchor?.lat && tonightAnchor?.lng
+          ? renderConditionsFeed('camp', campReports, {
+              title: tonightAnchor.camp_window_label || `Night ${tonightAnchor.day || 1} stop`,
+              kicker: 'TONIGHT',
+              subtitle: tonightAnchor.name || 'Camp area',
+              countLabel: 'NEAR CAMP',
+              loading: campLoading,
+              emptyTitle: 'No active reports near camp tonight',
+              emptySub: 'This stop looks quiet. If the camp is full, trashed, closed, or sketchy, add the update before the next rig rolls in.',
+              primaryActionLabel: 'ADD CAMP REPORT',
+              primaryAction: () => {
+                setSelectedType(REPORT_TYPES.find(rt => rt.type === 'campsite') ?? null);
+                setView('submit');
+              },
+            })
+          : (
+            <ScrollView contentContainerStyle={s.scroll}>
+              <View style={s.emptyWrap}>
+                <View style={s.emptyIconWrap}>
+                  <Ionicons name="bonfire-outline" size={30} color={C.text3} />
+                </View>
+                <Text style={s.emptyText}>No camp stop selected yet</Text>
+                <Text style={s.emptySub}>Once your trip has an overnight stop, this view will focus on what matters around tonight’s camp.</Text>
+                <TouchableOpacity style={s.emptyAction} onPress={() => setView('route')}>
+                  <Ionicons name="trail-sign-outline" size={14} color={C.orange} />
+                  <Text style={s.emptyActionText}>VIEW ROUTE</Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          )
+      )}
+
+      {view === 'nearby' && renderConditionsFeed('nearby', nearby, {
+        title: 'Nearby trail reports',
+        kicker: 'NEAR ME',
+        subtitle: 'Local conditions around your current position',
+        countLabel: 'ACTIVE',
+        loading: false,
+        emptyTitle: 'No active reports nearby',
+        emptySub: 'This area looks quiet. If you spot a closure, washed road, full camp, or fuel issue, add the first report.',
+        primaryActionLabel: 'ADD REPORT',
+        primaryAction: () => setView('submit'),
+      })}
 
       {view === 'leaderboard' && (
         <ScrollView contentContainerStyle={s.scroll}>
@@ -1215,6 +1434,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   nearbyKicker: { color: C.orange, fontSize: 8, fontFamily: mono, fontWeight: '900' },
   nearbyTitle: { color: C.text, fontSize: 19, lineHeight: 23, fontWeight: '900', marginTop: 3 },
+  nearbySubtitle: { color: C.text3, fontSize: 11.5, lineHeight: 16, marginTop: 5 },
   nearbyCount: {
     minWidth: 62,
     minHeight: 54,

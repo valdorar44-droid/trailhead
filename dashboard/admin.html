@@ -1860,15 +1860,34 @@ async function loadBugs(status) {
     list.innerHTML = bugs.map(b => {
       const date = new Date(b.created_at * 1000).toLocaleString();
       const col = statusColor[b.status] || 'var(--text3)';
+      let aiContext = null;
+      try { aiContext = b.ai_context_json ? JSON.parse(b.ai_context_json) : null; } catch(e) {}
+      const recentMessages = Array.isArray(aiContext?.recent_messages) ? aiContext.recent_messages.slice(-4) : [];
       return `<div class="card" style="border-left:3px solid ${col};">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;">
           <div style="flex:1;">
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
               <span style="font-weight:700;font-size:15px;">${esc(b.title)}</span>
               <span style="font-size:10px;font-family:var(--mono);color:${col};text-transform:uppercase;border:1px solid ${col};padding:2px 7px;border-radius:20px;">${b.status}</span>
+              ${b.category ? `<span style="font-size:10px;font-family:var(--mono);color:${b.category === 'offensive' ? 'var(--red)' : 'var(--blue)'};text-transform:uppercase;border:1px solid ${b.category === 'offensive' ? 'var(--red)' : 'var(--blue)'};padding:2px 7px;border-radius:20px;">${esc(b.category)}</span>` : ''}
+              ${b.source_surface ? `<span style="font-size:10px;font-family:var(--mono);color:var(--text2);text-transform:uppercase;border:1px solid var(--border);padding:2px 7px;border-radius:20px;">${esc(b.source_surface)}</span>` : ''}
               ${b.credits_awarded > 0 ? `<span style="font-size:10px;font-family:var(--mono);color:var(--green);">+${b.credits_awarded} cr awarded</span>` : ''}
             </div>
             <div style="color:var(--text2);font-size:13px;line-height:1.6;white-space:pre-wrap;margin-bottom:10px;">${esc(b.description)}</div>
+            ${b.screenshot_data ? `<img src="data:${esc(b.screenshot_content_type || 'image/jpeg')};base64,${b.screenshot_data}" alt="bug screenshot" style="max-width:280px;width:100%;border-radius:12px;border:1px solid var(--border);margin-bottom:10px;display:block;" />` : ''}
+            ${(b.source_surface || recentMessages.length || aiContext?.session_id || aiContext?.trip_id) ? `
+            <div style="background:var(--panel-2);border:1px solid var(--border);border-radius:12px;padding:10px;margin-bottom:10px;">
+              <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px;font-family:var(--mono);color:var(--text3);margin-bottom:${recentMessages.length ? 10 : 0}px;">
+                ${aiContext?.session_id ? `<span>session ${esc(String(aiContext.session_id))}</span>` : ''}
+                ${aiContext?.trip_id ? `<span>trip ${esc(String(aiContext.trip_id))}</span>` : ''}
+              </div>
+              ${recentMessages.length ? recentMessages.map(msg => `
+                <div style="color:var(--text2);font-size:12px;line-height:1.5;margin-bottom:7px;">
+                  <span style="font-family:var(--mono);font-size:10px;color:var(--text3);text-transform:uppercase;">${esc(String(msg.role || 'unknown'))}</span>
+                  <div style="white-space:pre-wrap;margin-top:2px;">${esc(String(msg.text || ''))}</div>
+                </div>
+              `).join('') : ''}
+            </div>` : ''}
             <div style="display:flex;gap:16px;font-size:11px;font-family:var(--mono);color:var(--text3);">
               <span>User ${b.username ? esc(b.username) : 'anonymous'}</span>
               ${b.app_version ? `<span>v${esc(b.app_version)}</span>` : ''}

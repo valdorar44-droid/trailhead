@@ -203,6 +203,11 @@ def init_db():
             title       TEXT NOT NULL,
             description TEXT NOT NULL,
             app_version TEXT,
+            category    TEXT NOT NULL DEFAULT 'bug',
+            source_surface TEXT,
+            screenshot_data TEXT,
+            screenshot_content_type TEXT,
+            ai_context_json TEXT,
             status      TEXT NOT NULL DEFAULT 'open',
             credits_awarded INTEGER NOT NULL DEFAULT 0,
             created_at  INTEGER NOT NULL
@@ -724,6 +729,11 @@ def init_db():
         "ALTER TABLE users ADD COLUMN auth_provider TEXT",
         "ALTER TABLE users ADD COLUMN apple_sub TEXT",
         "ALTER TABLE users ADD COLUMN google_sub TEXT",
+        "ALTER TABLE bug_reports ADD COLUMN category TEXT NOT NULL DEFAULT 'bug'",
+        "ALTER TABLE bug_reports ADD COLUMN source_surface TEXT",
+        "ALTER TABLE bug_reports ADD COLUMN screenshot_data TEXT",
+        "ALTER TABLE bug_reports ADD COLUMN screenshot_content_type TEXT",
+        "ALTER TABLE bug_reports ADD COLUMN ai_context_json TEXT",
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_apple_sub ON users(apple_sub) WHERE apple_sub IS NOT NULL AND apple_sub != ''",
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub) WHERE google_sub IS NOT NULL AND google_sub != ''",
         """CREATE TABLE IF NOT EXISTS plan_jobs (
@@ -2916,11 +2926,39 @@ def delete_pin(pin_id: int):
     db.execute("DELETE FROM community_pins WHERE id=?", (pin_id,))
     db.commit(); db.close()
 
-def submit_bug_report(user_id: int | None, username: str | None, title: str, description: str, app_version: str = '') -> int:
+def submit_bug_report(
+    user_id: int | None,
+    username: str | None,
+    title: str,
+    description: str,
+    app_version: str = '',
+    category: str = 'bug',
+    source_surface: str = '',
+    screenshot_data: str = '',
+    screenshot_content_type: str = '',
+    ai_context: dict | list | None = None,
+) -> int:
     db = _conn()
+    ai_context_json = json.dumps(ai_context) if ai_context is not None else None
     cur = db.execute(
-        "INSERT INTO bug_reports (user_id,username,title,description,app_version,created_at) VALUES (?,?,?,?,?,?)",
-        (user_id, username, title, description, app_version, int(time.time()))
+        """INSERT INTO bug_reports (
+            user_id, username, title, description, app_version,
+            category, source_surface, screenshot_data, screenshot_content_type,
+            ai_context_json, created_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            user_id,
+            username,
+            title,
+            description,
+            app_version,
+            category or 'bug',
+            source_surface or '',
+            screenshot_data or None,
+            screenshot_content_type or None,
+            ai_context_json,
+            int(time.time()),
+        )
     )
     bug_id = cur.lastrowid
     db.commit(); db.close()

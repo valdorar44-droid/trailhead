@@ -2316,6 +2316,23 @@ export interface ExplorePlaceSummary {
 export interface ExplorePlaceProfile {
   id: string;
   summary: ExplorePlaceSummary;
+  card?: {
+    title?: string;
+    headline?: string;
+    summary?: string;
+    highlight?: string;
+    region?: string;
+    facts?: string[];
+  };
+  category?: string;
+  subcategories?: string[];
+  sources?: { title?: string; publisher?: string; name?: string; url?: string; kind?: string }[];
+  quality?: string;
+  quality_score?: number;
+  search_aliases?: string[];
+  best_season?: string;
+  access?: Record<string, unknown>;
+  safety?: Record<string, unknown>;
   profile: {
     hook: string;
     summary?: string;

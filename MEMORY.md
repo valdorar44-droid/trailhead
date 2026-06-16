@@ -2720,3 +2720,63 @@ Next routing chunks:
 - `TX` standalone.
 - `AK` standalone.
 - `HI` standalone.
+
+## Explore UI Redesign Checkpoint
+
+Date: 2026-06-16
+
+Purpose:
+
+- Implement the Explore UI redesign package from `/tmp/trailhead_explore_ui_redesign_codex_package`.
+- Keep the work OTA-safe: JS/TS, styles, docs, and remote image references only.
+
+Source package preserved:
+
+- Copied redesign docs and mock/current screenshots into `docs/explore-ui-redesign/`.
+- Skipped Windows `:Zone.Identifier` metadata files.
+
+Implemented:
+
+- New Explore component set in `mobile/components/explore/`.
+- Redesigned Explore hero/search, category chips, mode tabs, filter row, cards, and detail sheet.
+- Local saved Explore IDs via `trailhead_saved_explore_places_v1`.
+- Explore card Area/Save/Route actions wired to existing map/navigation state.
+- Future v3 Explore catalog typing added in `mobile/lib/api.ts`.
+- Search/category scoring tightened so direct category queries like `waterfalls`, `hiking`, and `fuel` filter by actual Explore card type.
+- Added a curated waterfall fill-in pack with 9 named waterfall cards and verified Wikimedia image URLs:
+  - Multnomah Falls
+  - Yosemite Falls
+  - Havasu Falls
+  - Shoshone Falls
+  - Tahquamenon Falls
+  - Cumberland Falls
+  - Amicalola Falls
+  - Palouse Falls
+  - Taughannock Falls
+- Waterfall detail sheets now show a `Waterfalls plan` panel with drop, access, best flow, and safety.
+- Trail detail sheets now show a `Trails plan` panel with route type, distance, difficulty, and trail-line map hints.
+- Curated waterfall cards bypass the backend `/api/explore/places/:id/campgrounds` endpoint and use nearby-camp fallback directly, avoiding expected 404s for local-only IDs.
+
+Verification:
+
+- `cd mobile && npx tsc --noEmit` passed.
+- `git diff --check` passed.
+- `cd mobile && npx expo export --platform web --output-dir dist-explore-redesign` passed.
+- Playwright static web smoke on `http://127.0.0.1:8094`:
+  - Explore home rendered redesigned hero/cards.
+  - `waterfalls` search returned 9 unique waterfall cards only.
+  - Multnomah Falls detail rendered `Waterfalls plan`, source details, camp fallback rail, and related modules.
+  - `hiking` search returned 39 trail/trailhead-style cards.
+  - Yosemite Valley Trails detail rendered `Trails plan` with route type, distance, difficulty, and trail-line hints.
+
+Known benign smoke warnings:
+
+- Static Python server has no SPA fallback, so direct `/guide` reload 404s; root navigation works.
+- Static server requests `/favicon.ico` and gets 404.
+- Expo web warnings remain for notifications listener and `expo-av` deprecation.
+- Expo export still emits the existing `react-native-webrtc` / `event-target-shim` package-exports warning.
+
+Follow-up:
+
+- Move the curated waterfall fill-in pack into the backend Explore seed/catalog pipeline when rebuilding Explore v3, so the API owns these records.
+- True graph-backed trail loop geometry still belongs in the trail graph/detail workflow; the Explore detail panel currently exposes inferred planning hints and sends users to the map for exact segments.

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator,
-  Image, Modal, Linking, TextInput, useWindowDimensions,
+  Image, Modal, Linking, useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
@@ -10,9 +10,26 @@ import { useRouter } from 'expo-router';
 import TourTarget from '@/components/TourTarget';
 import PaywallModal from '@/components/PaywallModal';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
-import { TrailheadButton, TrailheadButtonDock, TrailheadCard } from '@/components/TrailheadUI';
+import { TrailheadButton, TrailheadCard } from '@/components/TrailheadUI';
+import {
+  EXPLORE_CATEGORY_CHIPS,
+  ExploreCategoryChips,
+  ExploreDetailSheet,
+  ExploreFilterRow,
+  ExploreHero,
+  ExploreModeTabs,
+  ExplorePlaceCard,
+  exploreCategoryFromQuery,
+  exploreCategoryMatches,
+  exploreQueryScore as scoreExploreQuery,
+  exploreTrustScore as scoreExploreTrust,
+  getExploreCategoryKey,
+  mergeCuratedExplorePlaces,
+  type ExploreCategoryKey,
+  type ExploreDetailTab,
+} from '@/components/explore';
 import { useStore } from '@/lib/store';
-import { api, PaywallError, type CampsitePin, type ExplorePlaceProfile, type ExploreSourcePackItem, type OsmPoi } from '@/lib/api';
+import { api, PaywallError, type CampsitePin, type ExplorePlaceProfile, type OsmPoi } from '@/lib/api';
 import { storage } from '@/lib/storage';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 import { trackPhase0Once } from '@/lib/telemetry';
@@ -20,17 +37,8 @@ import { playTrailheadVoice, stopTrailheadVoice } from '@/lib/voice';
 
 const EXPLORE_CACHE_KEY = 'trailhead_explore_catalog_v2';
 const EXPLORE_CAMPGROUNDS_CACHE_PREFIX = 'trailhead_explore_campgrounds_v1:';
+const SAVED_EXPLORE_KEY = 'trailhead_saved_explore_places_v1';
 const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
-const EXPLORE_CATEGORY_BUTTONS = [
-  { key: 'camping', label: 'Camping', icon: 'bonfire-outline', color: '#16a34a' },
-  { key: 'glamping', label: 'Glamping', icon: 'sparkles-outline', color: '#0ea5e9' },
-  { key: 'huts_lodging', label: 'Huts & Lodging', icon: 'bed-outline', color: '#6366f1' },
-  { key: 'trails', label: 'Trails', icon: 'trail-sign-outline', color: '#f97316' },
-  { key: 'water', label: 'Water', icon: 'water-outline', color: '#0284c7' },
-  { key: 'parks', label: 'Parks', icon: 'leaf-outline', color: '#22c55e' },
-  { key: 'services', label: 'Services', icon: 'build-outline', color: '#eab308' },
-  { key: 'nearby', label: 'Nearby', icon: 'locate-outline', color: '#a855f7' },
-] as const;
 
 const WMO_ICON: Record<number, keyof typeof Ionicons.glyphMap> = {
   0: 'sunny-outline', 1: 'partly-sunny-outline', 2: 'partly-sunny-outline', 3: 'cloud-outline',
@@ -73,27 +81,15 @@ function fmtMi(mi?: number | null) {
   return mi >= 10 ? `${Math.round(mi)} mi` : `${mi.toFixed(1)} mi`;
 }
 
-function exploreIcon(category: string, group?: string): keyof typeof Ionicons.glyphMap {
-  const g = (group || '').toLowerCase();
-  if (g === 'camping') return 'bonfire-outline';
-  if (g === 'glamping') return 'sparkles-outline';
-  if (g === 'huts_lodging') return 'bed-outline';
-  if (g === 'trails') return 'trail-sign-outline';
-  if (g === 'water' || g === 'water_scenic') return 'water-outline';
-  if (g === 'services') return 'build-outline';
-  const c = category.toLowerCase();
-  if (c.includes('camp')) return 'bonfire-outline';
-  if (c.includes('glamp')) return 'sparkles-outline';
-  if (/hut|lodg|cabin|hotel|motel|stay/.test(c)) return 'bed-outline';
-  if (/trail|hike|ohv|climb/.test(c)) return 'trail-sign-outline';
-  if (c.includes('historic')) return 'library-outline';
-  if (c.includes('monument')) return 'business-outline';
-  if (c.includes('park')) return 'leaf-outline';
-  if (c.includes('shore') || c.includes('lake')) return 'water-outline';
-  return 'sparkles-outline';
-}
-
 function groupForExplorePlace(place: ExplorePlaceProfile) {
+  const key = getExploreCategoryKey(place);
+  if (key === 'camp') return 'camping';
+  if (key === 'glamping') return 'glamping';
+  if (key === 'huts') return 'huts_lodging';
+  if (['trails', 'trailheads', 'climb'].includes(key)) return 'trails';
+  if (['water', 'waterfalls', 'springs', 'views', 'peaks', 'scenic'].includes(key)) return 'water';
+  if (['fuel', 'resupply'].includes(key)) return 'services';
+  if (key === 'land') return 'parks';
   const group = place.summary.explore_group;
   if (group === 'water_scenic') return 'water';
   if (group) return group;
@@ -105,16 +101,6 @@ function groupForExplorePlace(place: ExplorePlaceProfile) {
   if (/water|lake|river|shore|beach|marina|boat/.test(c)) return 'water';
   if (/service|fuel|food|grocery|repair|medical|wifi|laundry|shower/.test(c)) return 'services';
   return 'parks';
-}
-
-function keyForExploreSelection(selected: string) {
-  return EXPLORE_CATEGORY_BUTTONS.find(item => item.label === selected)?.key || '';
-}
-
-function categoryMatchesExploreSelection(place: ExplorePlaceProfile, selected: string) {
-  if (selected === 'All') return true;
-  const selectedKey = keyForExploreSelection(selected);
-  return selectedKey ? groupForExplorePlace(place) === selectedKey : (place.summary.category || '') === selected;
 }
 
 function storyTextForPlace(place: ExplorePlaceProfile) {
@@ -135,69 +121,6 @@ function sentenceDurationMs(sentence: string) {
 function mediaUrl(url?: string | null) {
   if (!url) return '';
   return url.startsWith('/') ? `${API_BASE}${url}` : url;
-}
-
-function formatExactDate(timestamp?: number | null) {
-  if (!timestamp || !Number.isFinite(timestamp)) return '';
-  return new Date(timestamp * 1000).toLocaleDateString('en-US', {
-    month: 'long',
-    day: 'numeric',
-    year: 'numeric',
-  });
-}
-
-function exploreSourceLine(place: ExplorePlaceProfile) {
-  const quality = String(place.source_pack?.quality || place.facts.source_quality || '').toLowerCase();
-  const primary = place.source_pack?.primary?.trim();
-  const title = place.facts.source_title?.trim();
-  if (quality === 'official' || quality.includes('official')) {
-    return primary ? `${primary} official source` : 'Official source';
-  }
-  if (primary && place.source_pack?.sources?.length) return `${primary} source pack`;
-  if (title) return `${title} reference`;
-  return 'Trailhead field guide';
-}
-
-function exploreFreshnessLine(place: ExplorePlaceProfile) {
-  const updated = formatExactDate(place.facts.last_updated);
-  if (updated) return `Source updated ${updated}`;
-  if (String(place.source_pack?.quality || '').toLowerCase() === 'official') return 'Official source details included';
-  return 'No dated source refresh listed';
-}
-
-function exploreTrustScore(place: ExplorePlaceProfile) {
-  let score = 0;
-  const quality = String(place.source_pack?.quality || place.facts.source_quality || '').toLowerCase();
-  if (quality === 'official' || quality.includes('official')) score += 60;
-  else if (quality.includes('wiki')) score += 12;
-  if (place.source_pack?.sources?.length) score += 12;
-  if (place.summary.image_url || place.summary.thumbnail_url) score += 8;
-  if (place.profile.summary || place.profile.why_it_matters) score += 6;
-  if (place.source_pack?.alerts?.length) score += 4;
-  return score;
-}
-
-function exploreQueryScore(place: ExplorePlaceProfile, query: string) {
-  if (!query) return 0;
-  const normalized = query.trim().toLowerCase();
-  const title = String(place.summary.title || '').toLowerCase();
-  const category = String(place.summary.category || '').toLowerCase();
-  const text = [
-    place.summary.title,
-    place.summary.category,
-    place.summary.state,
-    place.summary.hook,
-    place.summary.short_description,
-    place.profile.summary,
-    place.profile.why_it_matters,
-  ].filter(Boolean).join(' ').toLowerCase();
-  let score = 0;
-  if (title === normalized) score += 120;
-  else if (title.startsWith(normalized)) score += 75;
-  else if (title.includes(normalized)) score += 40;
-  if (category.includes(normalized)) score += 20;
-  if (text.includes(normalized)) score += 12;
-  return score;
 }
 
 function timeGreeting(date = new Date()) {
@@ -244,6 +167,10 @@ function shouldLoadExploreCamps(place: ExplorePlaceProfile) {
   return ['camping', 'glamping', 'huts_lodging', 'trails', 'parks', 'water'].includes(groupForExplorePlace(place));
 }
 
+function shouldUseExploreCampgroundEndpoint(place: ExplorePlaceProfile) {
+  return !place.id.startsWith('explore:waterfalls:');
+}
+
 function exploreCampRailTitle(place: ExplorePlaceProfile) {
   const group = groupForExplorePlace(place);
   if (group === 'glamping') return 'STAYS NEAR THIS AREA';
@@ -284,10 +211,11 @@ export default function GuideScreen() {
   const [weatherLoading, setWeatherLoading] = useState(false);
   const [tab, setTab] = useState<'explore' | 'narrations' | 'weather'>('explore');
   const [exploreMode, setExploreMode] = useState<'featured' | 'nearby' | 'trip'>('featured');
-  const [exploreCategory, setExploreCategory] = useState('All');
+  const [exploreCategory, setExploreCategory] = useState<ExploreCategoryKey>('all');
   const [exploreQuery, setExploreQuery] = useState('');
-  const [profileReadMode, setProfileReadMode] = useState<'summary' | 'story'>('summary');
+  const [profileReadMode, setProfileReadMode] = useState<ExploreDetailTab>('summary');
   const [explorePlaces, setExplorePlaces] = useState<ExplorePlaceProfile[]>([]);
+  const [savedExploreIds, setSavedExploreIds] = useState<string[]>([]);
   const [exploreCampgroundsById, setExploreCampgroundsById] = useState<Record<string, CampsitePin[]>>({});
   const [exploreCampSourceById, setExploreCampSourceById] = useState<Record<string, 'official' | 'fallback'>>({});
   const [exploreCampLoadingId, setExploreCampLoadingId] = useState<string | null>(null);
@@ -328,6 +256,18 @@ export default function GuideScreen() {
         if (!cancelled) setExploreError('Explore catalog unavailable offline until it has been loaded once.');
       })
       .finally(() => !cancelled && setExploreLoading(false));
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    storage.get(SAVED_EXPLORE_KEY).then(raw => {
+      if (cancelled || !raw) return;
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) setSavedExploreIds(parsed.filter(Boolean).map(String));
+      } catch {}
+    }).catch(() => {});
     return () => { cancelled = true; };
   }, []);
 
@@ -389,6 +329,32 @@ export default function GuideScreen() {
       } catch {}
     }).catch(() => {});
     setExploreCampLoadingId(placeId);
+    const loadFallbackCamps = async () => {
+      if (fallbackLat != null && fallbackLng != null) {
+        const fallback = await api.getNearbyCamps(fallbackLat, fallbackLng, fallbackRadius, []).catch(() => []);
+        if (cancelled) return true;
+        if (fallback.length) {
+          setExploreCampgroundsById(prev => ({ ...prev, [placeId]: fallback }));
+          setExploreCampSourceById(prev => ({ ...prev, [placeId]: 'fallback' }));
+          setExploreCampErrors(prev => ({ ...prev, [placeId]: '' }));
+          storage.set(cacheKey, JSON.stringify({ campgrounds: fallback, source_mode: 'fallback', fetched_at: Date.now() })).catch(() => {});
+          return true;
+        }
+      }
+      return false;
+    };
+    if (!shouldUseExploreCampgroundEndpoint(place)) {
+      loadFallbackCamps()
+        .then(loaded => {
+          if (!cancelled && !loaded) {
+            setExploreCampErrors(prev => ({ ...prev, [placeId]: 'No camp cards loaded for this area. Open the area map to search wider.' }));
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setExploreCampLoadingId(current => current === placeId ? null : current);
+        });
+      return () => { cancelled = true; };
+    }
     api.getExploreCampgrounds(placeId)
       .then(async res => {
         if (cancelled) return;
@@ -410,17 +376,7 @@ export default function GuideScreen() {
       })
       .catch(async () => {
         if (cancelled) return;
-        if (fallbackLat != null && fallbackLng != null) {
-          const fallback = await api.getNearbyCamps(fallbackLat, fallbackLng, fallbackRadius, []).catch(() => []);
-          if (cancelled) return;
-          if (fallback.length) {
-            setExploreCampgroundsById(prev => ({ ...prev, [placeId]: fallback }));
-            setExploreCampSourceById(prev => ({ ...prev, [placeId]: 'fallback' }));
-            setExploreCampErrors(prev => ({ ...prev, [placeId]: '' }));
-            storage.set(cacheKey, JSON.stringify({ campgrounds: fallback, source_mode: 'fallback', fetched_at: Date.now() })).catch(() => {});
-            return;
-          }
-        }
+        if (await loadFallbackCamps()) return;
         setExploreCampErrors(prev => ({ ...prev, [placeId]: 'No camp cards loaded for this area. Open the area map to search wider.' }));
       })
       .finally(() => {
@@ -463,9 +419,10 @@ export default function GuideScreen() {
 
   const waypoints = useMemo(() => activeTrip?.plan.waypoints.filter(w => w.lat && w.lng) ?? [], [activeTrip?.trip_id]);
   const displayName = useMemo(() => (user?.username || 'Explorer').trim().split(/\s+/)[0] || 'Explorer', [user?.username]);
+  const enrichedExplorePlaces = useMemo(() => mergeCuratedExplorePlaces(explorePlaces), [explorePlaces]);
   const heroHeight = Math.max(280, Math.min(340, Math.round(windowHeight * 0.39)));
   const heroImage = useMemo(() => {
-    const images = explorePlaces
+    const images = enrichedExplorePlaces
       .filter(place => ['camping', 'trails', 'parks'].includes(groupForExplorePlace(place)))
       .map(place => place.summary.image_url || place.summary.thumbnail_url)
       .filter(Boolean) as string[];
@@ -473,9 +430,10 @@ export default function GuideScreen() {
     const now = new Date();
     const dayKey = Math.floor((Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) - Date.UTC(now.getFullYear(), 0, 0)) / 86400000);
     return mediaUrl(images[dayKey % images.length]);
-  }, [explorePlaces]);
+  }, [enrichedExplorePlaces]);
+  const hasExploreQuery = exploreQuery.trim().length > 0;
   const rankedExplore = useMemo(() => {
-    const places = explorePlaces.map(place => {
+    const places = enrichedExplorePlaces.map(place => {
       const loc = place.summary.lat != null && place.summary.lng != null
         ? { lat: Number(place.summary.lat), lng: Number(place.summary.lng) }
         : null;
@@ -499,17 +457,19 @@ export default function GuideScreen() {
       }
       return { place, distance, day };
     });
-    const query = exploreQuery.trim().toLowerCase();
+    const query = exploreQuery.trim();
+    const queryCategory = exploreCategory === 'all' ? exploreCategoryFromQuery(query) : null;
     const filtered = places.filter(({ place }) => {
-      const categoryOk = categoryMatchesExploreSelection(place, exploreCategory);
+      const categoryOk = exploreCategoryMatches(place, exploreCategory);
       if (!categoryOk) return false;
+      if (queryCategory && getExploreCategoryKey(place) !== queryCategory) return false;
       if (!query) return true;
-      return exploreQueryScore(place, query) > 0;
+      return scoreExploreQuery(place, query) > 0;
     });
     const decorated = filtered.map(item => ({
       ...item,
-      queryScore: exploreQueryScore(item.place, query),
-      trustScore: exploreTrustScore(item.place),
+      queryScore: scoreExploreQuery(item.place, query),
+      trustScore: scoreExploreTrust(item.place),
     }));
     if (exploreMode === 'featured') {
       return decorated.sort((a, b) => {
@@ -532,26 +492,26 @@ export default function GuideScreen() {
         if (b.trustScore !== a.trustScore) return b.trustScore - a.trustScore;
         return aDist - bDist;
       });
-  }, [explorePlaces, exploreCategory, exploreMode, exploreQuery, userLoc?.lat, userLoc?.lng, waypoints]);
+  }, [enrichedExplorePlaces, exploreCategory, exploreMode, exploreQuery, userLoc?.lat, userLoc?.lng, waypoints]);
 
   const featuredSections = useMemo(() => {
-    if (exploreCategory !== 'All' || exploreMode !== 'featured') return [];
-    return EXPLORE_CATEGORY_BUTTONS
-      .filter(item => !['nearby', 'services'].includes(item.key))
+    if (hasExploreQuery || exploreCategory !== 'all' || exploreMode !== 'featured') return [];
+    return EXPLORE_CATEGORY_CHIPS
+      .filter(item => !['all', 'nearby', 'fuel', 'resupply'].includes(item.key))
       .map(item => ({
         item,
         rows: rankedExplore
-          .filter(({ place }) => groupForExplorePlace(place) === item.key)
+          .filter(({ place }) => exploreCategoryMatches(place, item.key))
           .sort((a, b) => (a.place.summary.hero_rank ?? a.place.summary.rank) - (b.place.summary.hero_rank ?? b.place.summary.rank))
           .slice(0, 8),
       }))
       .filter(section => section.rows.length > 0);
-  }, [exploreCategory, exploreMode, rankedExplore]);
+  }, [exploreCategory, exploreMode, hasExploreQuery, rankedExplore]);
   const relatedExplore = useMemo(() => {
     if (selectedExplore?.summary.lat == null || selectedExplore?.summary.lng == null) return [];
     const selectedGroup = groupForExplorePlace(selectedExplore);
     const origin = { lat: Number(selectedExplore.summary.lat), lng: Number(selectedExplore.summary.lng) };
-    return explorePlaces
+    return enrichedExplorePlaces
       .filter(place => place.id !== selectedExplore.id && place.summary.lat != null && place.summary.lng != null)
       .map(place => ({
         place,
@@ -562,12 +522,12 @@ export default function GuideScreen() {
         const aSameGroup = groupForExplorePlace(a.place) === selectedGroup ? 1 : 0;
         const bSameGroup = groupForExplorePlace(b.place) === selectedGroup ? 1 : 0;
         if (bSameGroup !== aSameGroup) return bSameGroup - aSameGroup;
-        const trustDelta = exploreTrustScore(b.place) - exploreTrustScore(a.place);
+        const trustDelta = scoreExploreTrust(b.place) - scoreExploreTrust(a.place);
         if (trustDelta) return trustDelta;
         return (a.distance ?? 99999) - (b.distance ?? 99999);
       })
       .slice(0, 6);
-  }, [explorePlaces, selectedExplore?.id, selectedExplore?.summary.lat, selectedExplore?.summary.lng]);
+  }, [enrichedExplorePlaces, selectedExplore?.id, selectedExplore?.summary.lat, selectedExplore?.summary.lng]);
 
   async function generateGuide() {
     if (!activeTrip || guideLoading) return;
@@ -668,12 +628,13 @@ export default function GuideScreen() {
   }
 
   async function playExplore(place: ExplorePlaceProfile) {
+    const audioMode = profileReadMode === 'story' ? 'story' : 'summary';
     const text = profileReadMode === 'story'
       ? storyTextForPlace(place)
       : (place.profile.summary || place.profile.hook || place.summary.short_description);
     try {
-      await api.authorizeExploreAudio(place.id, profileReadMode);
-      playNarration(`explore:${place.id}`, text, profileReadMode === 'story');
+      await api.authorizeExploreAudio(place.id, audioMode);
+      playNarration(`explore:${place.id}`, text, audioMode === 'story');
     } catch (e: any) {
       if (e instanceof PaywallError) showPaywall(e);
       else setExploreError(e?.message ?? 'Could not start audio right now.');
@@ -699,6 +660,28 @@ export default function GuideScreen() {
     router.push('/(tabs)/map');
   }
 
+  function routeExplore(place: ExplorePlaceProfile) {
+    const { lat, lng, title } = place.summary;
+    if (lat == null || lng == null) return;
+    setPendingNavigatePlace({ lat: Number(lat), lng: Number(lng), name: title });
+    setSelectedExplore(null);
+    router.push('/(tabs)/map');
+  }
+
+  function isExploreSaved(place: ExplorePlaceProfile) {
+    return savedExploreIds.includes(place.id);
+  }
+
+  function toggleSavedExplore(place: ExplorePlaceProfile) {
+    setSavedExploreIds(prev => {
+      const next = prev.includes(place.id)
+        ? prev.filter(id => id !== place.id)
+        : [...prev, place.id];
+      storage.set(SAVED_EXPLORE_KEY, JSON.stringify(next)).catch(() => {});
+      return next;
+    });
+  }
+
   function showExploreCampOnMap(camp: CampsitePin) {
     setPendingMapSelection({ kind: 'camp', camp });
     setSelectedExplore(null);
@@ -711,58 +694,28 @@ export default function GuideScreen() {
     compact = false,
   ) {
     const { place, distance, day } = item;
-    const img = mediaUrl(place.summary.image_url || place.summary.thumbnail_url);
-    const group = groupForExplorePlace(place);
-    const badge = place.summary.badges?.[0] || place.summary.category;
-    const isPlaying = playing === `explore:${place.id}`;
-    const sourceLine = exploreSourceLine(place);
     return (
-      <TouchableOpacity
+      <ExplorePlaceCard
         key={place.id}
-        style={[compact ? s.exploreRailCard : s.exploreCard, idx === 0 && s.exploreCardLead]}
-        activeOpacity={0.88}
-        onPress={() => setSelectedExplore(place)}
-      >
-        <View style={[s.exploreImageWrap, compact && s.exploreRailImageWrap]}>
-          {img ? (
-            <Image source={{ uri: img }} style={s.exploreImage} resizeMode="cover" />
-          ) : (
-            <View style={s.exploreImageFallback}>
-              <Ionicons name={exploreIcon(place.summary.category, group)} size={30} color={C.orange} />
-            </View>
-          )}
-          <View style={s.exploreImageShade} />
-          <View style={s.exploreBadge}>
-            <Ionicons name={exploreIcon(place.summary.category, group)} size={11} color="#fff" />
-            <Text style={s.exploreBadgeText}>{String(badge).toUpperCase()}</Text>
-          </View>
-        </View>
-        <View style={s.exploreBody}>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={[s.exploreName, compact && s.exploreRailName]} numberOfLines={2}>{place.summary.title}</Text>
-            <Text style={s.exploreMeta} numberOfLines={1}>
-              {day ? `Day ${day} · ` : ''}{distance != null ? `${fmtMi(distance)} · ` : ''}{place.summary.state}
-            </Text>
-            <Text style={s.exploreTrustLine} numberOfLines={1}>{sourceLine}</Text>
-            <Text style={s.exploreDesc} numberOfLines={compact ? 2 : 3}>{place.summary.hook || place.summary.short_description}</Text>
-            <TouchableOpacity
-              style={s.exploreMapLink}
-              onPress={() => showExploreOnMap(place)}
-              activeOpacity={0.82}
-            >
-              <Ionicons name="map-outline" size={13} color={C.orange} />
-              <Text style={s.exploreMapLinkText}>SHOW AREA</Text>
-            </TouchableOpacity>
-          </View>
-          {!compact && (
-            <View style={s.exploreActions}>
-              <TouchableOpacity style={[s.circleBtn, isPlaying && s.circleBtnActive]} onPress={() => playExplore(place)}>
-                <Ionicons name={isPlaying ? 'stop' : 'play'} size={16} color={isPlaying ? '#fff' : C.orange} />
-              </TouchableOpacity>
-            </View>
-          )}
-        </View>
-      </TouchableOpacity>
+        place={place}
+        compact={compact}
+        lead={idx === 0}
+        imageUrl={mediaUrl(place.summary.image_url || place.summary.thumbnail_url)}
+        context={{
+          distanceMi: distance,
+          day,
+          campCount: exploreCampgroundsById[place.id]?.length,
+        }}
+        saved={isExploreSaved(place)}
+        canRoute={place.summary.lat != null && place.summary.lng != null}
+        onOpen={() => {
+          setProfileReadMode('summary');
+          setSelectedExplore(place);
+        }}
+        onArea={() => showExploreOnMap(place)}
+        onRoute={() => routeExplore(place)}
+        onToggleSave={() => toggleSavedExplore(place)}
+      />
     );
   }
 
@@ -872,41 +825,15 @@ export default function GuideScreen() {
   function renderLandingHeader() {
     return (
       <View style={s.landingHeader}>
-        <View style={[s.heroShell, { height: heroHeight }]}>
-          {heroImage ? (
-            <Image source={{ uri: heroImage }} style={s.heroImage} resizeMode="cover" />
-          ) : (
-            <View style={s.heroImageFallback}>
-              <Ionicons name="compass-outline" size={44} color="#fff" />
-            </View>
-          )}
-          <View style={s.heroOverlay} />
-          <View style={s.heroContent}>
-            <Text style={s.heroGreeting}>{timeGreeting()}, {displayName}</Text>
-            <Text style={s.heroTitle}>Find your next adventure</Text>
-            <Text style={s.heroSub}>Campsites, trails, parks, and stories from one place.</Text>
-            <View style={s.heroSearch}>
-              <Ionicons name="search-outline" size={19} color="rgba(15,23,42,0.55)" />
-              <TextInput
-                value={exploreQuery}
-                onChangeText={setExploreQuery}
-                placeholder="Search destinations or activities"
-                placeholderTextColor="rgba(15,23,42,0.48)"
-                style={s.heroSearchInput}
-                returnKeyType="search"
-              />
-              {!!exploreQuery ? (
-                <TouchableOpacity onPress={() => setExploreQuery('')} style={s.heroSearchIconBtn}>
-                  <Ionicons name="close" size={15} color="rgba(15,23,42,0.55)" />
-                </TouchableOpacity>
-              ) : (
-                <View style={s.heroSearchIconBtn}>
-                  <Ionicons name="options-outline" size={18} color="rgba(15,23,42,0.62)" />
-                </View>
-              )}
-            </View>
-          </View>
-        </View>
+        <ExploreHero
+          greeting={timeGreeting()}
+          displayName={displayName}
+          heroImage={heroImage}
+          height={heroHeight}
+          query={exploreQuery}
+          onQueryChange={setExploreQuery}
+          onClearQuery={() => setExploreQuery('')}
+        />
 
         <View style={s.tabs}>
           {(['explore', 'narrations', 'weather'] as const).map(t => (
@@ -967,49 +894,25 @@ export default function GuideScreen() {
 
         {tab === 'explore' && (
           <>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.categoryStrip}>
-              {EXPLORE_CATEGORY_BUTTONS.map(item => {
-                const active = item.label === 'Nearby' ? exploreMode === 'nearby' : exploreCategory === item.label && exploreMode !== 'nearby';
-                return (
-                  <TouchableOpacity
-                    key={item.label}
-                    style={[s.categoryPill, active && { borderColor: item.color, backgroundColor: item.color + '18' }]}
-                    activeOpacity={0.86}
-                    onPress={() => {
-                      if (item.label === 'Nearby') {
-                        setExploreMode('nearby');
-                        setExploreCategory('All');
-                      } else {
-                        setExploreMode(exploreMode === 'nearby' ? 'featured' : exploreMode);
-                        setExploreCategory(active ? 'All' : item.label);
-                      }
-                    }}
-                  >
-                    <Ionicons name={item.icon as any} size={18} color={item.color} />
-                    <Text style={[s.categoryPillText, active && { color: item.color }]} numberOfLines={1}>
-                      {item.label === 'Nearby' ? 'Near Me' : item.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
+            <ExploreCategoryChips
+              selected={exploreCategory}
+              mode={exploreMode}
+              onSelect={key => {
+                if (key === 'nearby') {
+                  setExploreMode('nearby');
+                  setExploreCategory('all');
+                } else {
+                  setExploreMode(exploreMode === 'nearby' ? 'featured' : exploreMode);
+                  setExploreCategory(exploreCategory === key ? 'all' : key);
+                }
+              }}
+            />
 
-            <View style={s.modeRow}>
-              {(['featured', 'nearby', 'trip'] as const).map(mode => (
-                <TouchableOpacity
-                  key={mode}
-                  style={[s.modeBtn, exploreMode === mode && s.modeBtnActive]}
-                  onPress={() => setExploreMode(mode)}
-                >
-                  <Text style={[s.modeBtnText, exploreMode === mode && s.modeBtnTextActive]}>
-                    {mode === 'featured' ? 'FEATURED' : mode === 'nearby' ? 'NEAR ME' : 'TRIP'}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+            <ExploreModeTabs value={exploreMode} onChange={setExploreMode} />
+            <ExploreFilterRow shownCount={rankedExplore.length} />
 
-            {exploreCategory !== 'All' && (
-              <TouchableOpacity style={s.clearCategoryBtn} onPress={() => setExploreCategory('All')}>
+            {exploreCategory !== 'all' && (
+              <TouchableOpacity style={s.clearCategoryBtn} onPress={() => setExploreCategory('all')}>
                 <Ionicons name="close" size={14} color={C.orange} />
                 <Text style={s.clearCategoryText}>Show all Explore places</Text>
               </TouchableOpacity>
@@ -1044,7 +947,15 @@ export default function GuideScreen() {
 
             <View style={s.exploreSectionHeader}>
               <Text style={s.exploreSectionTitle}>
-                {exploreMode === 'nearby' ? 'NEARBY PLACES' : exploreMode === 'trip' ? 'ALONG YOUR TRIP' : exploreCategory === 'All' ? 'FEATURED PLACES' : exploreCategory.toUpperCase()}
+                {exploreMode === 'nearby'
+                  ? 'NEARBY PLACES'
+                  : exploreMode === 'trip'
+                    ? 'ALONG YOUR TRIP'
+                    : hasExploreQuery
+                      ? 'SEARCH RESULTS'
+                    : exploreCategory === 'all'
+                      ? 'FEATURED EXPLORER HUBS'
+                      : `${EXPLORE_CATEGORY_CHIPS.find(item => item.key === exploreCategory)?.label ?? 'EXPLORE'} AREAS`.toUpperCase()}
               </Text>
               <Text style={s.exploreSectionSub}>{rankedExplore.length} shown</Text>
             </View>
@@ -1066,7 +977,7 @@ export default function GuideScreen() {
                 <View key={section.item.key} style={s.exploreRailSection}>
                   <View style={s.exploreSectionHeader}>
                     <Text style={s.exploreSectionTitle}>{section.item.label.toUpperCase()}</Text>
-                    <TouchableOpacity onPress={() => setExploreCategory(section.item.label)}>
+                    <TouchableOpacity onPress={() => setExploreCategory(section.item.key)}>
                       <Text style={s.exploreSectionLink}>VIEW ALL</Text>
                     </TouchableOpacity>
                   </View>
@@ -1075,6 +986,12 @@ export default function GuideScreen() {
                   </ScrollView>
                 </View>
               ))
+            ) : !exploreLoading && rankedExplore.length === 0 ? (
+              <View style={s.emptyState}>
+                <Ionicons name="search-outline" size={44} color={C.text3} />
+                <Text style={s.emptyTitle}>No exact match</Text>
+                <Text style={s.emptySub}>Try camp, trail, viewpoint, waterfall, hut, fuel, or hot spring.</Text>
+              </View>
             ) : (
               rankedExplore.map((item, idx) => renderExploreCard(item, idx))
             )}
@@ -1266,239 +1183,42 @@ export default function GuideScreen() {
       />
 
       <Modal visible={!!selectedExplore} animationType="slide" onRequestClose={() => setSelectedExplore(null)}>
-        <View style={s.modal}>
-          {selectedExplore && (
-            <>
-              <ScrollView contentContainerStyle={s.profileScroll}>
-                <View style={s.profileHero}>
-                  {selectedExplore.summary.image_url || selectedExplore.summary.thumbnail_url ? (
-                    <Image source={{ uri: mediaUrl(selectedExplore.summary.image_url || selectedExplore.summary.thumbnail_url || '') }} style={s.profileImage} resizeMode="cover" />
-                  ) : (
-                    <View style={s.profileImageFallback}>
-                      <Ionicons name={exploreIcon(selectedExplore.summary.category, selectedExplore.summary.explore_group)} size={42} color={C.orange} />
-                    </View>
-                  )}
-                  <View style={s.profileShade} />
-                  <View style={s.profileHeroText}>
-                    <Text style={s.profileCategory}>{selectedExplore.summary.category.toUpperCase()} · {selectedExplore.summary.state}</Text>
-                    <Text style={s.profileTitle}>{selectedExplore.summary.title}</Text>
-                  </View>
-                  <TouchableOpacity
-                    style={[s.profileHeroClose, { top: Math.max(insets.top + 10, 18) }]}
-                    onPress={() => setSelectedExplore(null)}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  >
-                    <Ionicons name="close" size={22} color="#fff" />
-                  </TouchableOpacity>
-                </View>
-
-                <TrailheadButtonDock style={s.profileActions}>
-                  <TrailheadButton
-                    label={playing === `explore:${selectedExplore.id}` ? 'Stop' : 'Play Audio'}
-                    icon={playing === `explore:${selectedExplore.id}` ? 'stop' : 'play'}
-                    variant="primary"
-                    onPress={() => playExplore(selectedExplore)}
-                    style={{ flex: 1 }}
-                  />
-                  <TrailheadButton
-                    label="Show Area"
-                    icon="map-outline"
-                    onPress={() => showExploreOnMap(selectedExplore)}
-                    style={{ flex: 1 }}
-                  />
-                </TrailheadButtonDock>
-
-                {renderExploreCampgrounds(selectedExplore)}
-
-                {relatedExplore.length > 0 && (
-                  <TrailheadCard style={s.profileSection}>
-                    <Text style={s.profileLabel}>NEAR THIS STOP</Text>
-                    <Text style={s.profileTextMuted}>
-                      Nearby parks, camp areas, trails, and stops that make this place feel more grounded.
-                    </Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.relatedExploreRail}>
-                      {relatedExplore.map((item, idx) => renderExploreCard(item, idx, true))}
-                    </ScrollView>
-                  </TrailheadCard>
-                )}
-
-                <View style={s.readModeRow}>
-                  {(['summary', 'story'] as const).map(mode => (
-                    <TouchableOpacity
-                      key={mode}
-                      style={[s.readModeBtn, profileReadMode === mode && s.readModeBtnActive]}
-                      onPress={() => setProfileReadMode(mode)}
-                    >
-                      <Text style={[s.readModeText, profileReadMode === mode && s.readModeTextActive]}>
-                        {mode === 'summary' ? 'SUMMARY' : 'FULL STORY'}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-
-                <TrailheadCard style={s.profileSection}>
-                  {profileReadMode === 'story' ? (
-                    <ScrollView
-                      ref={storyScrollRef}
-                      style={s.storyReadBox}
-                      nestedScrollEnabled
-                      showsVerticalScrollIndicator
-                    >
-                      {splitStorySentences(storyTextForPlace(selectedExplore)).map((sentence, idx) => (
-                        <Text
-                          key={`${idx}-${sentence.slice(0, 18)}`}
-                          style={[s.storySentence, highlightSentence === idx && s.storySentenceActive]}
-                        >
-                          {sentence}{' '}
-                        </Text>
-                      ))}
-                    </ScrollView>
-                  ) : (
-                    <Text style={s.profileHook}>
-                      {selectedExplore.profile.summary || selectedExplore.profile.hook}
-                    </Text>
-                  )}
-                </TrailheadCard>
-                <TrailheadCard style={s.profileSection}>
-                  <Text style={s.profileLabel}>SOURCE & FRESHNESS</Text>
-                  <View style={s.profileTrustGrid}>
-                    <View style={s.profileTrustCell}>
-                      <Text style={s.profileTrustHeading}>WHY TRUST THIS</Text>
-                      <Text style={s.profileTrustText}>{exploreSourceLine(selectedExplore)}</Text>
-                    </View>
-                    <View style={s.profileTrustCell}>
-                      <Text style={s.profileTrustHeading}>LAST SOURCE CHECK</Text>
-                      <Text style={s.profileTrustText}>{exploreFreshnessLine(selectedExplore)}</Text>
-                    </View>
-                  </View>
-                </TrailheadCard>
-                {[
-                  ['WHY IT MATTERS', selectedExplore.profile.why_it_matters],
-                  ['KEY DETAILS', selectedExplore.profile.what_to_know],
-                  ['BEST STOP TIMING', selectedExplore.profile.best_time_to_stop],
-                  ['ACCESS NOTES', selectedExplore.profile.access_notes],
-                  ['NEARBY CONTEXT', selectedExplore.profile.nearby_context],
-                ].map(([label, text]) => (
-                  <TrailheadCard key={label} style={s.profileSection}>
-                    <Text style={s.profileLabel}>{label}</Text>
-                    <Text style={s.profileText}>{text}</Text>
-                  </TrailheadCard>
-                ))}
-                {!!selectedExplore.source_pack && (
-                  <TrailheadCard style={s.profileSection}>
-                    <View style={s.sourcePackTop}>
-                      <Text style={s.profileLabel}>
-                        {selectedExplore.source_pack.quality === 'official' ? 'OFFICIAL SOURCE PACK' : 'SOURCE PACK'}
-                      </Text>
-                      {!!selectedExplore.source_pack.primary && (
-                        <Text style={s.sourcePackBadge}>{selectedExplore.source_pack.primary.toUpperCase()}</Text>
-                      )}
-                    </View>
-                    {!!selectedExplore.source_pack.source_note && (
-                      <Text style={s.profileText}>{selectedExplore.source_pack.source_note}</Text>
-                    )}
-                    {!!selectedExplore.source_pack.operating_hours && (
-                      <>
-                        <Text style={s.sourcePackLabel}>HOURS</Text>
-                        <Text style={s.profileText}>{selectedExplore.source_pack.operating_hours}</Text>
-                      </>
-                    )}
-                    {!!selectedExplore.source_pack.fees?.length && (
-                      <>
-                        <Text style={s.sourcePackLabel}>FEES</Text>
-                        {selectedExplore.source_pack.fees.map((fee, idx) => (
-                          <Text key={`${fee}-${idx}`} style={s.profileText}>- {fee}</Text>
-                        ))}
-                      </>
-                    )}
-                    {!!selectedExplore.source_pack.alerts?.length && (
-                      <>
-                        <Text style={s.sourcePackLabel}>CURRENT ALERTS</Text>
-                        {selectedExplore.source_pack.alerts.map((alert, idx) => (
-                          <TouchableOpacity
-                            key={`${alert.title}-${idx}`}
-                            style={s.alertRow}
-                            disabled={!alert.url}
-                            onPress={() => alert.url && Linking.openURL(alert.url)}
-                          >
-                            <Ionicons name="warning-outline" size={15} color={C.orange} />
-                            <Text style={s.alertText}>{alert.title}{alert.category ? ` · ${alert.category}` : ''}</Text>
-                          </TouchableOpacity>
-                        ))}
-                      </>
-                    )}
-                    {!!selectedExplore.source_pack.activities?.length && (
-                      <>
-                        <Text style={s.sourcePackLabel}>GOOD FOR</Text>
-                        <View style={s.sourcePillRow}>
-                          {selectedExplore.source_pack.activities.slice(0, 8).map(activity => (
-                            <View key={activity} style={s.sourcePill}>
-                              <Text style={s.sourcePillText}>{activity}</Text>
-                            </View>
-                          ))}
-                        </View>
-                      </>
-                    )}
-                    {([
-                      ['THINGS TO DO', selectedExplore.source_pack.things_to_do],
-                      ['THINGS TO SEE', selectedExplore.source_pack.things_to_see],
-                      ['VISITOR CENTERS', selectedExplore.source_pack.visitor_centers],
-                      ['CAMPGROUNDS', selectedExplore.source_pack.campgrounds],
-                    ] as [string, ExploreSourcePackItem[] | undefined][]).map(([label, items]) => Array.isArray(items) && items.length ? (
-                      <View key={label}>
-                        <Text style={s.sourcePackLabel}>{label}</Text>
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.npsRail}>
-                          {items.slice(0, 6).map((item, idx) => (
-                            <TouchableOpacity
-                              key={`${item.title}-${idx}`}
-                              style={s.npsMiniCard}
-                              disabled={!item.url}
-                              onPress={() => item.url && Linking.openURL(item.url)}
-                            >
-                              {!!item.image_url && (
-                                <Image source={{ uri: mediaUrl(item.image_url) }} style={s.npsMiniImage} resizeMode="cover" />
-                              )}
-                              <View style={s.npsMiniBody}>
-                                <Text style={s.npsMiniTitle} numberOfLines={2}>{item.title}</Text>
-                                {!!item.description && (
-                                  <Text style={s.npsMiniDesc} numberOfLines={3}>{item.description}</Text>
-                                )}
-                              </View>
-                            </TouchableOpacity>
-                          ))}
-                        </ScrollView>
-                      </View>
-                    ) : null)}
-                    {!!selectedExplore.source_pack.photos?.length && (
-                      <>
-                        <Text style={s.sourcePackLabel}>PHOTO CREDITS</Text>
-                        <Text style={s.profileText}>
-                          {selectedExplore.source_pack.photos.slice(0, 3).map(photo => photo.credit || photo.caption).filter(Boolean).join(' · ')}
-                        </Text>
-                      </>
-                    )}
-                  </TrailheadCard>
-                )}
-                {!!selectedExplore.wiki_extract && (
-                  <TrailheadCard style={s.profileSection}>
-                    <Text style={s.profileLabel}>SOURCE SUMMARY</Text>
-                    <Text style={s.profileText}>{selectedExplore.wiki_extract}</Text>
-                  </TrailheadCard>
-                )}
-                <TouchableOpacity
-                  style={s.sourceBtn}
-                  onPress={() => {
-                    const url = selectedExplore.source_pack?.booking_url || selectedExplore.source_pack?.official_url || selectedExplore.summary.source_url;
-                    if (url) Linking.openURL(url);
-                  }}
-                >
-                  <Ionicons name="open-outline" size={15} color={C.text2} />
-                  <Text style={s.sourceText}>{selectedExplore.attribution}</Text>
-                </TouchableOpacity>
-              </ScrollView>
-            </>
-          )}
-        </View>
+        {selectedExplore && (
+          <ExploreDetailSheet
+            place={selectedExplore}
+            tab={profileReadMode}
+            onTabChange={setProfileReadMode}
+            imageUrl={mediaUrl(selectedExplore.summary.image_url || selectedExplore.summary.thumbnail_url)}
+            topInset={insets.top}
+            saved={isExploreSaved(selectedExplore)}
+            isPlaying={playing === `explore:${selectedExplore.id}`}
+            context={{
+              campCount: exploreCampgroundsById[selectedExplore.id]?.length,
+              relatedCount: relatedExplore.length,
+            }}
+            storySentences={splitStorySentences(storyTextForPlace(selectedExplore))}
+            highlightedSentence={highlightSentence}
+            storyScrollRef={storyScrollRef}
+            campgroundsSlot={renderExploreCampgrounds(selectedExplore)}
+            relatedSlot={relatedExplore.length > 0 ? (
+              <TrailheadCard style={s.profileSection}>
+                <Text style={s.profileLabel}>NEAR THIS STOP</Text>
+                <Text style={s.profileTextMuted}>
+                  Nearby parks, camp areas, trails, and stops that make this place feel more grounded.
+                </Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.relatedExploreRail}>
+                  {relatedExplore.map((item, idx) => renderExploreCard(item, idx, true))}
+                </ScrollView>
+              </TrailheadCard>
+            ) : null}
+            onClose={() => setSelectedExplore(null)}
+            onPlayAudio={() => playExplore(selectedExplore)}
+            onShowArea={() => showExploreOnMap(selectedExplore)}
+            onRoute={() => routeExplore(selectedExplore)}
+            onToggleSave={() => toggleSavedExplore(selectedExplore)}
+            mediaUrl={mediaUrl}
+          />
+        )}
       </Modal>
     </SafeAreaView>
   );

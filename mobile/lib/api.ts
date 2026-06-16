@@ -530,6 +530,13 @@ export const api = {
     if (params.w != null) qs.set('w', String(params.w));
     return req<TrailDiscoverResponse>(`/api/trails/discover?${qs.toString()}`);
   },
+  discoverTrailArea: (params: TrailDiscoverParams) => {
+    const qs = new URLSearchParams({ limit: String(params.limit ?? 24) });
+    if (params.lat != null) qs.set('lat', String(params.lat));
+    if (params.lng != null) qs.set('lng', String(params.lng));
+    if (params.radius != null) qs.set('radius', String(params.radius));
+    return req<{ area: ExplorePlaceProfile }>(`/api/trail-areas/discover?${qs.toString()}`);
+  },
   getTrailProfile: (trailId: string) =>
     req<TrailProfile>(`/api/trails/${encodeURIComponent(trailId)}`),
   suggestTrailEdit: (trailId: string, data: TrailEditSuggestionPayload) =>
@@ -2150,9 +2157,14 @@ export interface TrailClaim {
 }
 export interface TrailPhoto {
   url: string;
+  thumbnail_url?: string;
   caption?: string;
   credit?: string;
   source?: string;
+  provider?: string;
+  license?: string;
+  source_url?: string;
+  commercial_restricted?: boolean;
 }
 export interface TrailProfile {
   id: string;
@@ -2163,6 +2175,13 @@ export interface TrailProfile {
   lng: number;
   length_mi?: number | null;
   difficulty?: string;
+  route_type?: string;
+  elevation_gain_ft?: number | null;
+  best_season?: string;
+  warnings?: string[];
+  geometry_ref?: string;
+  area_id?: string;
+  area_name?: string;
   activities: string[];
   land_manager?: string;
   geometry?: GeoJSON.FeatureCollection | null;
@@ -2171,6 +2190,16 @@ export interface TrailProfile {
   photos: TrailPhoto[];
   source: string;
   source_label: string;
+  source_pack?: {
+    quality?: string;
+    primary?: string;
+    official_url?: string;
+    sources?: { title?: string; publisher?: string; url?: string; kind?: string }[];
+    photos?: TrailPhoto[];
+    license?: string;
+    geometry_ref?: string;
+    source_note?: string;
+  };
   provenance: Record<string, TrailClaim>;
   last_checked: number;
   admin_edited?: boolean;
@@ -2373,6 +2402,7 @@ export interface ExplorePlaceProfile {
 }
 export interface ExploreTrailCard {
   id: string;
+  trail_id?: string;
   title: string;
   difficulty: 'Easy' | 'Moderate' | 'Hard' | string;
   distance_mi: number;
@@ -2381,6 +2411,8 @@ export interface ExploreTrailCard {
   typical_time?: string;
   area?: string;
   image_url?: string;
+  image_credit?: string;
+  image_license?: string;
   summary: string;
   description?: string;
   best_season?: string;
@@ -2391,6 +2423,10 @@ export interface ExploreTrailCard {
   lat?: number | null;
   lng?: number | null;
   source_url?: string;
+  source_label?: string;
+  geometry_ref?: string;
+  photos?: TrailPhoto[];
+  source_pack?: TrailProfile['source_pack'];
 }
 export interface ExploreSourcePackItem {
   kind?: string;

@@ -315,6 +315,7 @@ interface SearchPlace {
   lat: number; lng: number; name: string; dist?: number | null;
   isCurrentLocation?: boolean;
   id?: string; source?: string; source_label?: string; place_id?: string; provider_place_id?: string;
+  profile_id?: string; geometry_ref?: string;
   result_id?: string; result_set_id?: string;
   selection_source?: string; feature_id?: string; source_layer?: string | null;
   screen_x?: number | null; screen_y?: number | null; screen_position?: string | null;
@@ -7198,8 +7199,10 @@ function MapScreen() {
       lng: place.lng,
       type: isExploreTrail ? 'trail' : place.icon === 'fuel' ? 'fuel' : place.icon === 'water' ? 'water' : place.icon === 'camp' ? 'camp' : 'poi',
       source: isExploreArea || isExploreTrail ? 'explore' : 'saved',
-      source_label: isExploreTrail ? 'Explore trail' : isExploreArea ? 'Explore area' : 'Saved location',
+      source_label: isExploreTrail ? (place.sourceLabel || 'Explore trail') : isExploreArea ? 'Explore area' : 'Saved location',
       summary: place.note || 'Saved location',
+      profile_id: isExploreTrail ? place.trailId : undefined,
+      geometry_ref: isExploreTrail ? place.geometryRef : undefined,
     });
     const zoom = isExploreTrail ? 13 : 12;
     if (isExploreTrail) nativeMapRef.current?.highlightTrail(place.lat, place.lng, place.name);

@@ -7705,6 +7705,201 @@ async def list_camp_comments(camp_id: str):
 def _clean_trail_profile_id(value: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_.:-]", "", value or "")[:180]
 
+TRAIL_PHOTO_ALLOWED_LICENSES = {
+    "cc0", "pdm", "publicdomain", "public_domain", "by", "by-sa", "by-nc", "by-nd", "cc-by",
+    "cc-by-sa", "cc-by-nc", "cc-by-nd",
+}
+TRAIL_PHOTO_COMMERCIAL_RESTRICTED = {"by-nc", "by-nd", "cc-by-nc", "cc-by-nd"}
+
+def _trail_catalog_from_profile(profile: dict) -> dict:
+    provenance = profile.get("provenance") if isinstance(profile.get("provenance"), dict) else {}
+    catalog = provenance.get("catalog") if isinstance(provenance.get("catalog"), dict) else {}
+    return catalog
+
+def _trail_geometry_ref(profile: dict) -> str:
+    catalog = _trail_catalog_from_profile(profile)
+    ref = str(catalog.get("geometry_ref") or "").strip()
+    if ref:
+        return ref[:220]
+    source = str(profile.get("source") or "trail").strip() or "trail"
+    return _clean_trail_profile_id(f"{source}:{profile.get('id') or profile.get('name') or ''}")[:220]
+
+def _trail_route_type(profile: dict) -> str:
+    catalog = _trail_catalog_from_profile(profile)
+    value = str(catalog.get("route_type") or "").strip()
+    if value:
+        return value[:80]
+    geometry = profile.get("geometry") or {}
+    features = geometry.get("features") if isinstance(geometry, dict) else []
+    if features:
+        coords = (((features[0] or {}).get("geometry") or {}).get("coordinates") or [])
+        if isinstance(coords, list) and len(coords) >= 3 and coords[0] == coords[-1]:
+            return "Loop"
+    name = str(profile.get("name") or "").lower()
+    if "loop" in name:
+        return "Loop"
+    if any(term in name for term in ("out and back", "out-and-back")):
+        return "Out and back"
+    return "Point or route"
+
+def _trail_difficulty_label(profile: dict) -> str:
+    value = str(profile.get("difficulty") or "").strip()
+    if value:
+        return value[:80]
+    length = profile.get("length_mi")
+    try:
+        miles = float(length)
+    except Exception:
+        return "Scout first"
+    if miles >= 8:
+        return "Hard"
+    if miles >= 3:
+        return "Moderate"
+    return "Easy"
+
+def _trail_source_pack(profile: dict) -> dict:
+    catalog = _trail_catalog_from_profile(profile)
+    sources = []
+    official = str(profile.get("official_url") or catalog.get("official_url") or "").strip()
+    if official:
+        sources.append({
+            "title": profile.get("source_label") or "Official trail source",
+            "publisher": profile.get("source_label") or profile.get("source") or "Trail source",
+            "url": official,
+            "kind": "official" if str(profile.get("source") or "").lower() in {"nps", "usfs", "blm", "ridb"} else "open",
+        })
+    if str(profile.get("source_label") or "").lower().startswith("openstreetmap"):
+        sources.append({
+            "title": "OpenStreetMap feature",
+            "publisher": "OpenStreetMap contributors",
+            "url": official or "",
+            "kind": "geometry",
+        })
+    return {
+        "quality": catalog.get("quality") or ("official" if official and profile.get("source") != "osm" else "open"),
+        "primary": profile.get("source_label") or "Open trail data",
+        "official_url": official,
+        "sources": sources,
+        "photos": profile.get("photos") or [],
+        "license": catalog.get("license") or "",
+        "geometry_ref": _trail_geometry_ref(profile),
+        "source_note": catalog.get("source_note") or "Trailhead combines open map data, official sources, and attributed media where available.",
+    }
+
+def _public_trail_profile(profile: dict) -> dict:
+    out = dict(profile)
+    catalog = _trail_catalog_from_profile(out)
+    out["route_type"] = _trail_route_type(out)
+    out["difficulty"] = _trail_difficulty_label(out)
+    out["geometry_ref"] = _trail_geometry_ref(out)
+    out["area_id"] = catalog.get("area_id") or ""
+    out["area_name"] = catalog.get("area_name") or ""
+    out["elevation_gain_ft"] = catalog.get("elevation_gain_ft")
+    out["best_season"] = catalog.get("best_season") or ""
+    out["warnings"] = catalog.get("warnings") or []
+    out["source_pack"] = _trail_source_pack(out)
+    return out
+
+def _trail_profile_to_explore_card(profile: dict) -> dict:
+    public = _public_trail_profile(profile)
+    photos = public.get("photos") or []
+    first_photo = next((p for p in photos if isinstance(p, dict) and p.get("url")), {})
+    return {
+        "id": public.get("id"),
+        "trail_id": public.get("id"),
+        "title": public.get("name") or "Trail",
+        "difficulty": public.get("difficulty") or "Scout first",
+        "distance_mi": float(public.get("length_mi") or 0),
+        "route_type": public.get("route_type") or "Point or route",
+        "elevation_gain_ft": public.get("elevation_gain_ft"),
+        "typical_time": public.get("typical_time") or "",
+        "area": public.get("area_name") or public.get("land_manager") or "",
+        "image_url": first_photo.get("url") or "",
+        "image_credit": first_photo.get("credit") or first_photo.get("source") or "",
+        "image_license": first_photo.get("license") or "",
+        "summary": public.get("summary") or "Mapped trail feature with Trailhead scouting context.",
+        "description": public.get("description") or public.get("summary") or "",
+        "best_season": public.get("best_season") or "",
+        "tags": [str(a).title() for a in (public.get("activities") or [])[:4]],
+        "highlights": [h for h in [
+            "Map geometry available" if public.get("geometry") or public.get("geometry_ref") else "",
+            public.get("source_label") or "",
+            "Photo source credited" if first_photo else "",
+        ] if h],
+        "lat": public.get("lat"),
+        "lng": public.get("lng"),
+        "source_url": public.get("official_url") or "",
+        "source_label": public.get("source_label") or "",
+        "source_pack": public.get("source_pack") or {},
+        "geometry_ref": public.get("geometry_ref") or "",
+        "photos": photos,
+    }
+
+def _trail_area_from_profiles(lat: float, lng: float, radius: float, profiles: list[dict]) -> dict:
+    public_profiles = [_public_trail_profile(p) for p in profiles]
+    title = "Nearby Trail Area"
+    if public_profiles:
+        managers = [str(p.get("land_manager") or "").strip() for p in public_profiles if p.get("land_manager")]
+        if managers:
+            title = managers[0]
+        else:
+            title = f"Trails near {public_profiles[0].get('name') or 'this stop'}"
+    photos = []
+    for profile in public_profiles:
+        photos.extend([p for p in profile.get("photos") or [] if isinstance(p, dict) and p.get("url")])
+    now = int(time.time())
+    return {
+        "id": _clean_trail_profile_id(f"trail-area:{lat:.4f}:{lng:.4f}:{radius:.0f}"),
+        "summary": {
+            "title": title,
+            "explore_group": "trails",
+            "category": "trails",
+            "state": "",
+            "region": "Nearby",
+            "lat": lat,
+            "lng": lng,
+            "rank": 1,
+            "hero_rank": 1,
+            "tags": ["trails", "hiking", "trailheads"],
+            "hook": "Trail cards built from open map data and attributed sources.",
+            "short_description": "Compare trail distance, route type, map context, and source-backed photos near this stop.",
+            "image_url": (photos[0] or {}).get("url") if photos else "",
+            "image_credit": (photos[0] or {}).get("credit") if photos else "",
+        },
+        "card": {
+            "title": title,
+            "headline": "Trail options near this stop",
+            "summary": "Trailhead groups nearby trail records into one map-ready card list.",
+            "highlight": "Open a trail to route to it or highlight it on the map.",
+            "region": "Nearby",
+        },
+        "category": "trails",
+        "subcategories": ["trailheads", "hiking", "map"],
+        "quality": "open",
+        "search_aliases": ["trails nearby", "hiking trails", "trailheads"],
+        "trails": [_trail_profile_to_explore_card(p) for p in public_profiles],
+        "profile": {
+            "hook": "Trail cards near your selected map area.",
+            "summary": "Use these as scouting leads and verify current access before committing.",
+            "why_it_matters": "Nearby trail context helps choose stops, detours, and camp windows.",
+            "what_to_know": "Open-source records can miss closures, permits, seasonal access, and local restrictions.",
+            "best_time_to_stop": "Check daylight, weather, and trail status before starting.",
+            "access_notes": "Route to the listed trailhead or open the map highlight for geometry context.",
+            "nearby_context": "Use nearby camps, weather, fuel, and water before relying on a trail stop.",
+        },
+        "audio_script": "",
+        "wiki_extract": "",
+        "source_pack": {
+            "quality": "open",
+            "primary": "Trailhead trail catalog",
+            "sources": [{"title": "OpenStreetMap trail data", "publisher": "OpenStreetMap contributors", "kind": "geometry"}],
+            "photos": photos[:12],
+            "source_note": "Generated from open map records and enriched with credited media where available.",
+        },
+        "facts": {"coordinates": f"{lat:.5f}, {lng:.5f}", "source_quality": "open", "last_updated": now},
+        "attribution": "Open map data and credited media sources.",
+    }
+
 def _trail_profile_from_open_poi(item: dict) -> dict | None:
     lat, lng = item.get("lat"), item.get("lng")
     if not isinstance(lat, (int, float)) or not isinstance(lng, (int, float)):
@@ -7739,6 +7934,12 @@ def _trail_profile_from_open_poi(item: dict) -> dict | None:
         "location": {"source": "OpenStreetMap", "last_checked": now},
         "summary": {"source": "Trailhead generated from open-source tags", "last_checked": now},
         "activities": {"source": "Trailhead inference", "last_checked": now},
+        "catalog": {
+            "route_type": "Point or route",
+            "geometry_ref": trail_id,
+            "quality": "open",
+            "source_note": "Seeded from open map data; verify current trail status with the land manager.",
+        },
     }
     return {
         "id": trail_id,
@@ -7801,13 +8002,59 @@ async def _open_trail_photos(name: str, lat: float, lng: float) -> list[dict]:
                     "caption": title,
                     "credit": "Wikipedia / Wikimedia Commons",
                     "source": "Wikipedia",
+                    "provider": "wikimedia",
+                    "license": "Wikimedia Commons",
+                    "source_url": page.get("fullurl") or "",
+                    "commercial_restricted": False,
                 }]
                 set_cached("campsite_cache", cache_key, photos)
                 return photos
     except Exception:
         pass
-    set_cached("campsite_cache", cache_key, [])
-    return []
+    photos = await _openverse_trail_photos(clean, lat, lng)
+    set_cached("campsite_cache", cache_key, photos)
+    return photos
+
+async def _openverse_trail_photos(name: str, lat: float, lng: float) -> list[dict]:
+    try:
+        async with httpx.AsyncClient(timeout=7.0, headers={"User-Agent": "TrailheadTrailDiscovery/1.0"}) as client:
+            res = await client.get(
+                "https://api.openverse.engineering/v1/images/",
+                params={
+                    "q": name,
+                    "page_size": 3,
+                    "license": ",".join(sorted(TRAIL_PHOTO_ALLOWED_LICENSES)),
+                },
+            )
+            if res.status_code >= 400:
+                return []
+            results = (res.json() or {}).get("results") or []
+    except Exception:
+        return []
+    photos: list[dict] = []
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        url = item.get("url") or item.get("thumbnail")
+        if not url:
+            continue
+        license_code = str(item.get("license") or "").lower().strip()
+        photos.append({
+            "url": url,
+            "thumbnail_url": item.get("thumbnail") or url,
+            "caption": item.get("title") or name,
+            "credit": item.get("creator") or item.get("source") or "Openverse",
+            "source": item.get("source") or "Openverse",
+            "provider": "openverse",
+            "license": license_code or "cc",
+            "source_url": item.get("foreign_landing_url") or item.get("url") or "",
+            "commercial_restricted": license_code in TRAIL_PHOTO_COMMERCIAL_RESTRICTED,
+            "lat": lat,
+            "lng": lng,
+        })
+        if len(photos) >= 3:
+            break
+    return photos
 
 async def _seed_open_trail_profiles(lat: float, lng: float, radius_mi: float, limit: int = 80) -> list[dict]:
     radius_m = int(max(3, min(radius_mi, 80)) * 1609.344)
@@ -7833,7 +8080,7 @@ async def _seed_open_trail_profiles(lat: float, lng: float, radius_mi: float, li
                 profile["photos"] = photos
                 profile["provenance"]["photos"] = {"source": "Wikipedia / Wikimedia Commons", "last_checked": profile["last_checked"]}
             seen.add(profile["id"])
-            profiles.append(upsert_trail_profile(profile))
+            profiles.append(_public_trail_profile(upsert_trail_profile(profile)))
             if len(profiles) >= limit:
                 return profiles
     return profiles
@@ -7860,7 +8107,7 @@ async def trails_discover(
     if lat is None or lng is None:
         raise HTTPException(400, "lat/lng or n/s/e/w bounds are required")
     await _seed_open_trail_profiles(float(lat), float(lng), radius, limit=max(limit, 80))
-    trails = list_trail_profiles_near(float(lat), float(lng), radius, max(1, min(limit, 100)), bbox=bbox, mode=mode)
+    trails = [_public_trail_profile(p) for p in list_trail_profiles_near(float(lat), float(lng), radius, max(1, min(limit, 100)), bbox=bbox, mode=mode)]
     return {
         "mode": mode,
         "source": "online-open-official-first",
@@ -7873,8 +8120,17 @@ async def trail_profile(trail_id: str):
     profile = get_trail_profile(_clean_trail_profile_id(trail_id))
     if not profile:
         raise HTTPException(404, "Trail profile not found")
+    profile = _public_trail_profile(profile)
     profile["field_report_summary"] = get_trail_field_report_summary(profile["id"])
     return profile
+
+@app.get("/api/trail-areas/discover")
+async def trail_area_discover(lat: float, lng: float, radius: float = 45, limit: int = 24):
+    radius = max(3.0, min(float(radius), 80.0))
+    limit = max(1, min(int(limit), 60))
+    await _seed_open_trail_profiles(float(lat), float(lng), radius, limit=max(limit, 80))
+    profiles = list_trail_profiles_near(float(lat), float(lng), radius, limit)
+    return {"area": _trail_area_from_profiles(float(lat), float(lng), radius, profiles)}
 
 class TrailEditSuggestionPayload(BaseModel):
     trail_name: str

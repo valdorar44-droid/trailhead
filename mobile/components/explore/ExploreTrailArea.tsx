@@ -59,6 +59,8 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
       <View style={styles.list}>
         {visibleTrails.map(trail => {
           const selected = selectedId === trail.id;
+          const photo = primaryTrailPhoto(trail);
+          const sourceLabel = trail.source_label || trail.source_pack?.primary || trail.image_credit || '';
           return (
             <View key={trail.id} style={[styles.trailWrap, { borderColor: selected ? C.orange + '66' : C.border, backgroundColor: C.s2 }]}>
               <TouchableOpacity
@@ -66,7 +68,7 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
                 activeOpacity={0.88}
                 onPress={() => setSelectedId(current => current === trail.id ? null : trail.id)}
               >
-                <Image source={{ uri: mediaUrl(trail.image_url) }} style={styles.trailImage} resizeMode="cover" />
+                <Image source={{ uri: mediaUrl(photo || trail.image_url) }} style={styles.trailImage} resizeMode="cover" />
                 <View style={styles.trailBody}>
                   <View style={styles.trailTitleRow}>
                     <Text style={[styles.trailTitle, { color: C.text }]} numberOfLines={2}>{trail.title}</Text>
@@ -81,6 +83,7 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
                     {formatMiles(trail.distance_mi)} · {trail.route_type}
                   </Text>
                   {!!trail.area && <Text style={[styles.trailArea, { color: C.text3 }]} numberOfLines={1}>{trail.area}</Text>}
+                  {!!sourceLabel && <Text style={[styles.trailSource, { color: C.text3 }]} numberOfLines={1}>{sourceLabel}</Text>}
                   {!!trail.tags?.length && (
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tagRail}>
                       {trail.tags.slice(0, 3).map((tag: string) => (
@@ -101,10 +104,16 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
                     <TrailStat label="TIME" value={trail.typical_time || 'Check'} />
                   </View>
                   <Text style={[styles.description, { color: C.text2 }]}>{trail.description || trail.summary}</Text>
+                  {!!photoCredit(trail) && (
+                    <Text style={[styles.photoCredit, { color: C.text3 }]} numberOfLines={2}>
+                      Photo: {photoCredit(trail)}
+                    </Text>
+                  )}
                   <View style={styles.detailsTable}>
                     {[
                       ['Difficulty', trail.difficulty],
                       ['Best Season', trail.best_season],
+                      ['Map', trail.geometry_ref ? 'Trail line available' : 'Map point'],
                       ['Dogs', trail.dogs],
                       ['Bikes', trail.bikes],
                     ].filter(([, value]) => !!value).map(([label, value]) => (
@@ -160,8 +169,27 @@ function TrailStat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function formatMiles(mi: number) {
-  return `${mi.toFixed(mi >= 10 ? 0 : 1)} mi`;
+function formatMiles(mi?: number | null) {
+  const value = typeof mi === 'number' ? mi : NaN;
+  if (!Number.isFinite(value) || value <= 0) return 'Check';
+  return `${value.toFixed(value >= 10 ? 0 : 1)} mi`;
+}
+
+function primaryTrailPhoto(trail: ExploreTrailCard) {
+  return trail.photos?.find(photo => !!photo.url)?.url || trail.image_url || '';
+}
+
+function photoCredit(trail: ExploreTrailCard) {
+  const photo = trail.photos?.find(item => !!item.url);
+  return compactCredit([
+    photo?.credit || trail.image_credit,
+    photo?.license || trail.image_license,
+    photo?.commercial_restricted ? 'limited reuse' : '',
+  ]);
+}
+
+function compactCredit(parts: Array<string | undefined>) {
+  return parts.map(part => String(part || '').trim()).filter(Boolean).join(' · ');
 }
 
 function difficultyTone(value: string) {
@@ -210,6 +238,7 @@ const styles = StyleSheet.create({
   difficultyText: { fontSize: 11, fontWeight: '900' },
   trailMeta: { fontSize: 13, fontWeight: '800' },
   trailArea: { fontSize: 12, fontWeight: '700' },
+  trailSource: { fontSize: 11, lineHeight: 14, fontWeight: '700' },
   tagRail: { gap: 6, paddingRight: 8 },
   tag: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
   tagText: { fontSize: 9, fontFamily: mono, fontWeight: '900' },
@@ -219,6 +248,7 @@ const styles = StyleSheet.create({
   statValue: { fontSize: 13, lineHeight: 16, fontWeight: '900', textAlign: 'center' },
   statLabel: { fontSize: 8, fontFamily: mono, fontWeight: '900', marginTop: 5, textAlign: 'center' },
   description: { fontSize: 14, lineHeight: 21, fontWeight: '600' },
+  photoCredit: { fontSize: 10.5, lineHeight: 15, fontWeight: '700' },
   detailsTable: { gap: 0 },
   detailRow: { borderTopWidth: 1, minHeight: 38, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   detailLabel: { fontSize: 13, fontWeight: '700' },

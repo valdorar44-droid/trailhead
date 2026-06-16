@@ -50,6 +50,9 @@ export interface SavedPlace {
   icon: 'star' | 'camp' | 'flag' | 'water' | 'fuel' | 'pin';
   groupId?: string;
   note?: string;
+  trailId?: string;
+  geometryRef?: string;
+  sourceLabel?: string;
   createdAt: number;
 }
 

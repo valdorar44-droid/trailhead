@@ -696,15 +696,21 @@ export default function GuideScreen() {
     const lat = trail.lat ?? place.summary.lat;
     const lng = trail.lng ?? place.summary.lng;
     if (lat == null || lng == null) return;
+    const distance = Number.isFinite(trail.distance_mi) && trail.distance_mi > 0
+      ? `${trail.distance_mi.toFixed(trail.distance_mi >= 10 ? 0 : 1)} mi`
+      : 'Check distance';
     setPendingMapSelection({
       kind: 'trail',
       trail: {
-        id: `explore-trail:${trail.id}`,
+        id: `explore-trail:${trail.trail_id || trail.id}`,
         name: trail.title,
         lat: Number(lat),
         lng: Number(lng),
         icon: 'flag',
-        note: `${trail.distance_mi.toFixed(trail.distance_mi >= 10 ? 0 : 1)} mi · ${trail.route_type}`,
+        note: `${distance} · ${trail.route_type}`,
+        trailId: trail.trail_id || trail.id,
+        geometryRef: trail.geometry_ref,
+        sourceLabel: trail.source_label || trail.source_pack?.primary,
         createdAt: Date.now(),
       },
     });

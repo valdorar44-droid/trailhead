@@ -24,6 +24,7 @@ const VERNAL_FALL_IMAGE = 'https://upload.wikimedia.org/wikipedia/commons/thumb/
 const HALF_DOME_IMAGE = 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/90/Half_dome_yosemite_nationalpark.JPG/1280px-Half_dome_yosemite_nationalpark.JPG';
 const MIRROR_LAKE_IMAGE = 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/70/Yosemite_national_park_mirror_lake_2010u.JPG/1280px-Yosemite_national_park_mirror_lake_2010u.JPG';
 const GLACIER_POINT_IMAGE = 'https://upload.wikimedia.org/wikipedia/commons/thumb/2/21/Glacier_Point_at_Sunset%2C_Yosemite_NP%2C_CA%2C_US_-_Diliff.jpg/1280px-Glacier_Point_at_Sunset%2C_Yosemite_NP%2C_CA%2C_US_-_Diliff.jpg';
+const MARIPOSA_GROVE_IMAGE = 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8f/Grizzly_Giant%2C_Mariposa_Grove%2C_Yosemite_National_Park_-_June_2022.jpg/960px-Grizzly_Giant%2C_Mariposa_Grove%2C_Yosemite_National_Park_-_June_2022.jpg';
 
 const YOSEMITE_TRAILS: ExploreTrailCard[] = [
   {
@@ -140,7 +141,7 @@ const YOSEMITE_TRAILS: ExploreTrailCard[] = [
     elevation_gain_ft: 300,
     typical_time: '1.5-3 hrs',
     area: 'South Entrance',
-    image_url: MIRROR_LAKE_IMAGE,
+    image_url: MARIPOSA_GROVE_IMAGE,
     summary: 'Giant sequoia grove walks with longer loop options beyond the arrival area.',
     description: 'Mariposa Grove gives Yosemite a forest-focused trail day. Shuttle access, snow, and restoration closures can affect plans.',
     best_season: 'Spring through fall',

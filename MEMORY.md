@@ -169,8 +169,12 @@ Verification:
 
 Notes:
 
-- Mariposa Grove currently uses a verified Yosemite image fallback because the first guessed Wikimedia image URL returned 404.
-- No Expo OTA was published during this specific phone-web audit pass; publish separately if the user wants it live immediately.
+- Mariposa Grove now uses a verified Grizzly Giant / Mariposa Grove Wikimedia image URL.
+- Pre-OTA follow-up:
+  - Ran `npm audit fix --omit=dev`; high/low advisories were cleared and the remaining audit output is 22 moderate advisories.
+  - The remaining audit fixes require forced major upgrades through Expo 56 / React Native 0.86, so do not apply those before an OTA-only publish.
+  - The web export warning is from `react-native-webrtc@124.0.7` importing `event-target-shim/index` while its pinned `event-target-shim@6.0.2` only exports the package root. Expo export still completes, so leave this as a dependency warning unless doing a native/dependency pass.
+  - OTA still needs to be published with explicit `--message` flags because the `npm run ota` package script previously failed in non-interactive mode.
 
 ## Current Design Direction
 

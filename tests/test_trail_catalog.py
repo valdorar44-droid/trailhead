@@ -1,6 +1,9 @@
 import unittest
+import tempfile
+from pathlib import Path
 
 import dashboard.server as server
+from db import store
 from ingestors.pakistan_curated import get_pakistan_curated_treks
 
 
@@ -103,6 +106,59 @@ class TrailCatalogTests(unittest.TestCase):
         self.assertEqual(area["trails"][0]["feature_type"], "glacier")
         self.assertTrue(area["trails"][0]["trekking_only"])
         self.assertTrue(any(source.get("kind") == "glacier_reference" for source in area["source_pack"]["sources"]))
+
+    def test_nearby_store_query_does_not_drop_exact_curated_match_before_sort(self):
+        old_path = store.settings.db_path
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                store.settings.db_path = str(Path(tmp) / "trailhead-test.db")
+                store.init_db()
+                for idx in range(80):
+                    store.upsert_trail_profile({
+                        "id": f"osm:test:{idx}",
+                        "name": f"Mapped trail {idx}",
+                        "summary": "Farther OSM trail",
+                        "description": "",
+                        "lat": 35.30 + idx * 0.001,
+                        "lng": 75.80 + idx * 0.001,
+                        "length_mi": None,
+                        "difficulty": "Scout first",
+                        "activities": ["Hiking"],
+                        "land_manager": "",
+                        "geometry": None,
+                        "trailheads": [],
+                        "official_url": "",
+                        "photos": [],
+                        "source": "osm",
+                        "source_label": "OpenStreetMap",
+                        "provenance": {},
+                        "last_checked": 1,
+                    })
+                store.upsert_trail_profile({
+                    "id": "pk:trek:k2-base-camp-trek",
+                    "name": "K2 Base Camp Trek",
+                    "summary": "Exact curated trek",
+                    "description": "",
+                    "lat": 35.7455,
+                    "lng": 76.5142,
+                    "length_mi": 62,
+                    "difficulty": "Expedition trek",
+                    "activities": ["Trekking"],
+                    "land_manager": "Gilgit-Baltistan / local authorities",
+                    "geometry": None,
+                    "trailheads": [],
+                    "official_url": "https://visitgilgitbaltistan.gov.pk/",
+                    "photos": [],
+                    "source": "pakistan_karakoram_curated",
+                    "source_label": "Trailhead mixed Pakistan sources",
+                    "provenance": {},
+                    "last_checked": 1,
+                })
+
+                rows = store.list_trail_profiles_near(35.7455, 76.5142, 80, limit=10)
+                self.assertEqual(rows[0]["id"], "pk:trek:k2-base-camp-trek")
+        finally:
+            store.settings.db_path = old_path
 
 
 if __name__ == "__main__":

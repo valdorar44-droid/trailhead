@@ -4528,7 +4528,13 @@ def list_trail_profiles_near(lat: float, lng: float, radius_mi: float = 50, limi
         lng_delta = radius_mi / max(10, 69 * math.cos(math.radians(lat)))
         where = "WHERE lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?"
         params = [lat - lat_delta, lat + lat_delta, lng - lng_delta, lng + lng_delta]
-    rows = db.execute(f"SELECT * FROM trail_profiles {where} LIMIT ?", (*params, max(limit * 3, limit))).fetchall()
+    candidate_limit = max(limit * 12, 500)
+    rows = db.execute(
+        f"""SELECT * FROM trail_profiles {where}
+            ORDER BY ((lat - ?) * (lat - ?)) + ((lng - ?) * (lng - ?))
+            LIMIT ?""",
+        (*params, lat, lat, lng, lng, candidate_limit),
+    ).fetchall()
     db.close()
     profiles = [_decode_trail_profile(r) for r in rows]
     for p in profiles:
@@ -4536,10 +4542,13 @@ def list_trail_profiles_near(lat: float, lng: float, radius_mi: float = 50, limi
         if bbox:
             center_score = _distance_miles(lat, lng, p["lat"], p["lng"])
             p["viewport_score"] = max(0, 100 - center_score)
+    def _sort_distance(profile: dict) -> float:
+        value = profile.get("distance_mi")
+        return float(value) if isinstance(value, (int, float)) else 9999.0
     if mode == "view":
-        profiles.sort(key=lambda p: (-(p.get("viewport_score") or 0), p.get("distance_mi") or 9999, p["name"]))
+        profiles.sort(key=lambda p: (-(p.get("viewport_score") or 0), _sort_distance(p), p["name"]))
     else:
-        profiles.sort(key=lambda p: (p.get("distance_mi") or 9999, p["name"]))
+        profiles.sort(key=lambda p: (_sort_distance(p), p["name"]))
     return profiles[:limit]
 
 def _distance_miles(lat1: float, lng1: float, lat2: float, lng2: float) -> float:

@@ -25,7 +25,7 @@ QUERY_GROUPS = [
     {
         "key": "trails",
         "label": "Trails",
-        "limit": 360,
+        "limit": 520,
         "classes": ["Q2143825", "Q1286517", "Q22698", "Q8502"],
         "tags": ["trails", "trekking", "route"],
         "hook": "{title} is a route-worthy trail or trek anchor in {region}.",
@@ -34,7 +34,7 @@ QUERY_GROUPS = [
     {
         "key": "parks",
         "label": "Parks",
-        "limit": 420,
+        "limit": 560,
         "classes": ["Q46169", "Q179049", "Q473972", "Q9259"],
         "tags": ["parks", "protected area", "outdoors"],
         "hook": "{title} is a protected-land destination worth shaping a route around.",
@@ -43,8 +43,8 @@ QUERY_GROUPS = [
     {
         "key": "water_scenic",
         "label": "Water & Scenic",
-        "limit": 420,
-        "classes": ["Q34038", "Q39816", "Q47521", "Q23442", "Q40080", "Q12280"],
+        "limit": 560,
+        "classes": ["Q34038", "Q35666", "Q23397", "Q45776", "Q40080", "Q23442", "Q47521"],
         "tags": ["water", "waterfalls", "glaciers", "coast", "views"],
         "hook": "{title} gives Explore a scenic water, ice, or coast anchor in {region}.",
         "summary": "Use it for photos, route timing, nearby trail context, and weather checks. Confirm seasonal access, flow, surf, ice, or road status locally.",
@@ -52,7 +52,7 @@ QUERY_GROUPS = [
     {
         "key": "monuments",
         "label": "Monuments & History",
-        "limit": 320,
+        "limit": 440,
         "classes": ["Q9259", "Q4989906", "Q839954", "Q570116"],
         "tags": ["monuments", "history", "heritage", "landmarks"],
         "hook": "{title} gives the route a specific history or landmark stop in {region}.",
@@ -61,7 +61,7 @@ QUERY_GROUPS = [
     {
         "key": "huts_lodging",
         "label": "Huts & Lodging",
-        "limit": 180,
+        "limit": 320,
         "classes": ["Q182676", "Q2710737", "Q11900058"],
         "tags": ["huts", "lodging", "shelter", "trekking"],
         "hook": "{title} can be a roofed mountain or backcountry planning anchor in {region}.",
@@ -81,16 +81,18 @@ QUERY_GROUPS = [
 
 def sparql_for_group(group: dict) -> str:
     values = " ".join(f"wd:{qid}" for qid in group["classes"])
+    row_limit = max(200, int(group["limit"]) * int(group.get("query_multiplier", 5)))
     return f"""
-SELECT ?item ?itemLabel ?coord ?countryLabel ?adminLabel WHERE {{
+SELECT ?item ?itemLabel ?coord ?countryLabel ?adminLabel ?image WHERE {{
   VALUES ?class {{ {values} }}
   ?item wdt:P31 ?class ;
         wdt:P625 ?coord .
   OPTIONAL {{ ?item wdt:P17 ?country . }}
   OPTIONAL {{ ?item wdt:P131 ?admin . }}
+  OPTIONAL {{ ?item wdt:P18 ?image . }}
   SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
 }}
-LIMIT {int(group["limit"]) * 3}
+LIMIT {row_limit}
 """
 
 
@@ -117,6 +119,48 @@ def clean_title(value: str) -> str:
     return text
 
 
+def should_keep_title(value: str) -> bool:
+    text = clean_title(value)
+    if len(text) < 3 or len(text) > 90:
+        return False
+    lowered = text.lower()
+    if re.match(r"^q\d+$", lowered):
+        return False
+    if any(term in lowered for term in (
+        "list of ",
+        "category:",
+        "template:",
+        "disambiguation",
+        "unnamed ",
+        "railway station",
+        "metro station",
+        "bus station",
+    )):
+        return False
+    return True
+
+
+def should_keep_group_entry(group_key: str, title: str) -> bool:
+    lowered = clean_title(title).lower()
+    if group_key == "water_scenic":
+        if "bridge" in lowered:
+            return False
+        return bool(re.search(
+            r"\b(falls?|waterfall|cascade|glacier|icefield|fjord|sound|lake|river|creek|spring|hot spring|bay|coast|shore|beach|reef|lagoon|canyon|gorge)\b",
+            lowered,
+        ))
+    if group_key == "monuments":
+        if re.search(r"\b(mountain|mount|peak|summit|hill|range|glacier|lake|river)\b", lowered):
+            return False
+        return bool(re.search(
+            r"\b(monument|memorial|historic|historical|heritage|ruins?|castle|fort|fortress|abbey|temple|church|cathedral|palace|tower|wall|arch|bridge|site|museum|mission|mosque|shrine)\b",
+            lowered,
+        ))
+    if group_key == "trails":
+        return True
+    return True
+
+
 def source_url(item_url: str, article: str) -> str:
     return article or item_url or ""
 
@@ -129,6 +173,18 @@ def region_for(row: dict) -> str:
 
 def wikidata_qid(item_url: str) -> str:
     return item_url.rstrip("/").rsplit("/", 1)[-1] if item_url else ""
+
+
+def image_url_from_wikidata(value: str) -> str:
+    if not value:
+        return ""
+    if value.startswith("http://commons.wikimedia.org/wiki/Special:FilePath/"):
+        return value.replace("http://", "https://", 1)
+    if value.startswith("https://commons.wikimedia.org/wiki/Special:FilePath/"):
+        return value
+    if value.startswith("http"):
+        return value.replace("http://", "https://", 1)
+    return commons_file_url(value)
 
 
 def fetch_group(client: httpx.Client, group: dict) -> list[dict]:
@@ -156,10 +212,11 @@ def fetch_group(client: httpx.Client, group: dict) -> list[dict]:
         qid = wikidata_qid(item_url)
         title = clean_title(row.get("itemLabel", {}).get("value", ""))
         lat, lng = point_to_lat_lng(row.get("coord", {}).get("value", ""))
-        if not qid or not title or lat is None or lng is None or qid in seen:
+        if not qid or not should_keep_title(title) or not should_keep_group_entry(group["key"], title) or lat is None or lng is None or qid in seen:
             continue
         seen.add(qid)
         region = region_for(row)
+        image_url = image_url_from_wikidata(row.get("image", {}).get("value", ""))
         tags = sorted(set(group["tags"] + [group["label"].lower(), region.lower()]))
         entry = {
             "title": title,
@@ -172,6 +229,7 @@ def fetch_group(client: httpx.Client, group: dict) -> list[dict]:
             "source_note": "Open global Explore seed from Wikidata/Wikipedia. Verify current access, closures, permits, and local rules before relying on it.",
             "license": "Wikidata CC0; Wikipedia/Commons content requires attribution where used",
             "wikidata_qid": qid,
+            **({"image_url": image_url, "image_credit": "Wikimedia Commons"} if image_url else {}),
             "tags": tags,
             "search_aliases": [title, region, qid],
             "hook": group["hook"].format(title=title, region=region),
@@ -181,6 +239,29 @@ def fetch_group(client: httpx.Client, group: dict) -> list[dict]:
         if len(entries) >= int(group["limit"]):
             break
     return entries
+
+
+def dedupe_seed(seed: dict) -> dict:
+    seen_titles: set[str] = set()
+    seen_points: set[tuple[str, int, int]] = set()
+    groups = []
+    for group in seed.get("groups") or []:
+        entries = []
+        for entry in group.get("entries") or []:
+            title_key = clean_title(str(entry.get("title") or "")).lower()
+            lat = entry.get("lat")
+            lng = entry.get("lng")
+            try:
+                point_key = (str(group.get("key") or ""), round(float(lat) * 100), round(float(lng) * 100))
+            except Exception:
+                point_key = ("", 0, 0)
+            if not title_key or title_key in seen_titles or point_key in seen_points:
+                continue
+            seen_titles.add(title_key)
+            seen_points.add(point_key)
+            entries.append(entry)
+        groups.append({**group, "entries": entries})
+    return {**seed, "groups": groups}
 
 
 def fallback_seed() -> dict:
@@ -285,6 +366,7 @@ def main() -> int:
             "groups": groups,
         }
 
+    seed = dedupe_seed(seed)
     Path(args.out).write_text(json.dumps(seed, indent=2, ensure_ascii=False) + "\n")
     total = sum(len(group.get("entries") or []) for group in seed.get("groups") or [])
     print(f"wrote {total} global Explore seed entries to {args.out}")

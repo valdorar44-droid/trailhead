@@ -2497,7 +2497,12 @@ export interface ExploreCatalogIndexItem {
   rank?: number;
   hero_rank?: number;
   tags?: string[];
+  hook?: string;
+  short_description?: string;
   thumbnail_url?: string;
+  image_url?: string;
+  image_credit?: string;
+  image_license?: string;
   source_title?: string;
   source_url?: string;
   source_quality?: string;

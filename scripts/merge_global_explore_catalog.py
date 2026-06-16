@@ -102,7 +102,7 @@ def image_from_summary(summary: dict) -> tuple[str, str]:
 def source_url(entry: dict, summary: dict) -> str:
     content = summary.get("content_urls") or {}
     desktop = content.get("desktop") or {}
-    return entry.get("source_url") or desktop.get("page") or ""
+    return desktop.get("page") or entry.get("source_url") or ""
 
 
 def build_place(entry: dict, wiki: dict, rank: int) -> dict | None:

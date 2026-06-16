@@ -30,13 +30,13 @@ import {
   type ExploreNearbyModule,
 } from '@/components/explore';
 import { useStore } from '@/lib/store';
-import { api, PaywallError, type CampsitePin, type ExplorePlaceProfile, type ExploreTrailCard, type OsmPoi } from '@/lib/api';
+import { api, PaywallError, type CampsitePin, type ExploreCatalogIndexItem, type ExplorePlaceProfile, type ExploreTrailCard, type OsmPoi } from '@/lib/api';
 import { storage } from '@/lib/storage';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 import { trackPhase0Once } from '@/lib/telemetry';
 import { playTrailheadVoice, stopTrailheadVoice } from '@/lib/voice';
 
-const EXPLORE_CACHE_KEY = 'trailhead_explore_catalog_v2';
+const EXPLORE_CACHE_KEY = 'trailhead_explore_catalog_index_v3';
 const EXPLORE_CAMPGROUNDS_CACHE_PREFIX = 'trailhead_explore_campgrounds_v1:';
 const EXPLORE_TRAIL_AREA_CACHE_PREFIX = 'trailhead_explore_trail_area_v1:';
 const SAVED_EXPLORE_KEY = 'trailhead_saved_explore_places_v1';
@@ -215,6 +215,77 @@ function mergeDynamicTrailArea(place: ExplorePlaceProfile, area: ExplorePlacePro
   };
 }
 
+function exploreIndexItemToProfile(item: ExploreCatalogIndexItem): ExplorePlaceProfile {
+  const title = String(item.title || 'Explore stop').trim();
+  const category = item.category || 'Explore';
+  const region = item.region || '';
+  const hook = item.hook || item.short_description || `${title} is a mapped Explore stop.`;
+  const short = item.short_description || item.hook || 'Open the card for source details, nearby stops, weather, and map context.';
+  return {
+    id: item.id,
+    summary: {
+      id: item.id,
+      title,
+      category,
+      explore_group: item.explore_group,
+      state: region,
+      region,
+      lat: item.lat,
+      lng: item.lng,
+      rank: item.rank ?? 999999,
+      hero_rank: item.hero_rank ?? item.rank ?? 999999,
+      tags: item.tags ?? [],
+      badges: [category],
+      hook,
+      short_description: short,
+      thumbnail_url: item.thumbnail_url || item.image_url || '',
+      image_url: item.image_url || item.thumbnail_url || '',
+      image_credit: item.image_credit || '',
+      image_license: item.image_license || '',
+      source_url: item.source_url || '',
+      source_title: item.source_title || '',
+    },
+    profile: {
+      hook,
+      summary: short,
+      story: short,
+      why_it_matters: short,
+      what_to_know: 'Check current access, fees, closures, permits, and local rules before you go.',
+      best_time_to_stop: 'Check season and current conditions.',
+      access_notes: 'Open the source link and map before committing to the stop.',
+      nearby_context: 'Use nearby camps, trails, services, weather, and map context from this stop.',
+    },
+    audio_script: short,
+    wiki_extract: '',
+    source_pack: {
+      quality: item.source_quality || 'open',
+      primary: item.source_title || '',
+      official_url: item.source_url || '',
+      sources: item.source_url ? [{
+        title,
+        publisher: item.source_title || 'Open source',
+        url: item.source_url,
+        kind: item.source_quality || 'open',
+      }] : [],
+      photos: (item.image_url || item.thumbnail_url) ? [{
+        url: item.image_url || item.thumbnail_url,
+        caption: title,
+        credit: item.image_credit || item.source_title || '',
+      }] : [],
+      topics: item.tags ?? [],
+      source_note: 'Open the full card for more details.',
+    },
+    facts: {
+      coordinates: item.lat != null && item.lng != null ? `${Number(item.lat).toFixed(5)}, ${Number(item.lng).toFixed(5)}` : '',
+      source_url: item.source_url || '',
+      source_title: item.source_title || '',
+      official_url: item.source_url || '',
+      source_quality: item.source_quality || '',
+    },
+    attribution: item.source_title || 'Open source details',
+  };
+}
+
 function storyTextForPlace(place: ExplorePlaceProfile) {
   return place.profile.story || place.audio_script || place.wiki_extract || '';
 }
@@ -281,6 +352,10 @@ function shouldLoadExploreCamps(place: ExplorePlaceProfile) {
 
 function shouldUseExploreCampgroundEndpoint(place: ExplorePlaceProfile) {
   return !place.id.startsWith('explore:waterfalls:') && !place.id.startsWith('explore:trails:');
+}
+
+function shouldUseExploreDetailEndpoint(place: ExplorePlaceProfile) {
+  return !place.id.startsWith('explore:waterfalls:') && place.id !== 'explore:trails:yosemite-trails';
 }
 
 function exploreCampRailTitle(place: ExplorePlaceProfile) {
@@ -365,11 +440,21 @@ export default function GuideScreen() {
         if (Array.isArray(cached?.places)) setExplorePlaces(cached.places);
       } catch {}
     }).catch(() => {});
-    api.getExploreCatalog()
-      .then(catalog => {
+    (async () => {
+      const places: ExplorePlaceProfile[] = [];
+      let cursor = 0;
+      for (let page = 0; page < 8; page += 1) {
+        const catalog = await api.getExploreCatalogIndex({ limit: 1000, cursor });
+        places.push(...(catalog.places ?? []).map(exploreIndexItemToProfile));
+        if (catalog.next_cursor == null) break;
+        cursor = catalog.next_cursor;
+      }
+      return places;
+    })()
+      .then(places => {
         if (cancelled) return;
-        setExplorePlaces(catalog.places ?? []);
-        storage.set(EXPLORE_CACHE_KEY, JSON.stringify(catalog)).catch(() => {});
+        setExplorePlaces(places);
+        storage.set(EXPLORE_CACHE_KEY, JSON.stringify({ places, fetched_at: Date.now() })).catch(() => {});
         setExploreError('');
       })
       .catch(() => {
@@ -943,6 +1028,25 @@ export default function GuideScreen() {
     }
   }
 
+  async function openExplorePlace(place: ExplorePlaceProfile) {
+    setProfileReadMode('summary');
+    const local = exploreTrailAreasById[place.id] ?? place;
+    setSelectedExplore(local);
+    if (!shouldUseExploreDetailEndpoint(place)) {
+      if (shouldHydrateExploreTrailArea(local)) hydrateExploreTrailArea(local).catch(() => {});
+      return;
+    }
+    try {
+      const detail = await api.getExplorePlace(place.id);
+      setExplorePlaces(prev => prev.map(item => item.id === detail.id ? detail : item));
+      const hydrated = exploreTrailAreasById[detail.id] ?? detail;
+      setSelectedExplore(current => current?.id === place.id ? hydrated : current);
+      if (shouldHydrateExploreTrailArea(hydrated)) hydrateExploreTrailArea(hydrated).catch(() => {});
+    } catch {
+      if (shouldHydrateExploreTrailArea(local)) hydrateExploreTrailArea(local).catch(() => {});
+    }
+  }
+
   function handleExploreNearbyAction(place: ExplorePlaceProfile, module: ExploreNearbyModule) {
     if (module.action === 'weather') {
       setProfileReadMode('summary');
@@ -1056,12 +1160,7 @@ export default function GuideScreen() {
         }}
         saved={isExploreSaved(place)}
         canRoute={place.summary.lat != null && place.summary.lng != null}
-        onOpen={() => {
-          setProfileReadMode('summary');
-          const hydrated = exploreTrailAreasById[place.id] ?? place;
-          setSelectedExplore(hydrated);
-          if (shouldHydrateExploreTrailArea(hydrated)) hydrateExploreTrailArea(hydrated).catch(() => {});
-        }}
+        onOpen={() => openExplorePlace(place)}
         onArea={() => showExploreOnMap(place)}
         onRoute={() => routeExplore(place)}
         onToggleSave={() => toggleSavedExplore(place)}

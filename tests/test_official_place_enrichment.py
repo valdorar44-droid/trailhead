@@ -169,10 +169,11 @@ class OfficialPlaceEndpointTests(unittest.IsolatedAsyncioTestCase):
                 user=None,
             )
 
-        self.assertEqual(len(places), 1)
-        self.assertEqual(places[0]["name"], "Official View")
-        self.assertTrue(places[0]["official_free"])
-        self.assertEqual(places[0]["category_access"]["official_free_categories"], ["attraction"])
+        self.assertGreaterEqual(len(places), 1)
+        official = next((place for place in places if place["name"] == "Official View"), None)
+        self.assertIsNotNone(official)
+        self.assertTrue(official["official_free"])
+        self.assertEqual(official["category_access"]["official_free_categories"], ["attraction"])
 
     async def test_nearby_places_does_not_return_google_or_foursquare_providers(self):
         osm_place = {

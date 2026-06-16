@@ -2776,6 +2776,17 @@ Known benign smoke warnings:
 - Expo web warnings remain for notifications listener and `expo-av` deprecation.
 - Expo export still emits the existing `react-native-webrtc` / `event-target-shim` package-exports warning.
 
+OTA:
+
+- Source checkpoint commit:
+  - `2004d57 Redesign Explore discovery UI`
+- Attempted `cd mobile && npm run ota` after the clean commit.
+- OTA did not upload. EAS failed immediately with:
+  - `Must supply --message or use --auto when in non-interactive mode and VCS is available`
+- The package script already invokes:
+  - `eas update --channel production --auto && eas update --channel preview --auto`
+- Per stop-on-failure instruction, no alternate EAS command was attempted in this pass.
+
 Follow-up:
 
 - Move the curated waterfall fill-in pack into the backend Explore seed/catalog pipeline when rebuilding Explore v3, so the API owns these records.

@@ -7188,6 +7188,35 @@ function MapScreen() {
     const place = isTrailSelection ? pendingMapSelection.trail : pendingMapSelection.place;
     const isExploreArea = String(place.id || '').startsWith('explore-area:');
     const isExploreTrail = isTrailSelection || String(place.id || '').startsWith('explore-trail:');
+    if (isTrailSelection) {
+      const trailFeature: TrailFeature = {
+        id: place.trailId || place.id,
+        name: place.name,
+        lat: place.lat,
+        lng: place.lng,
+        type: 'trail',
+        source: 'trailhead',
+        subtitle: place.note || 'Explore trail',
+        score: 100,
+        profile_id: place.trailId,
+        source_label: place.sourceLabel || 'Explore trail',
+        summary: place.note || 'Trailhead trail card',
+        support: {
+          campsNearby: 0,
+          fuelNearby: 0,
+          waterNearby: 0,
+          reportsNearby: 0,
+          offlineReady: false,
+          readinessLabel: 'Download map/routing before leaving signal',
+        },
+      };
+      openTrailFeature(trailFeature);
+      const zoom = 13;
+      webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: place.lat, lng: place.lng, zoom, name: place.name }));
+      setQuickToast('Trail selected on map');
+      setTimeout(() => setQuickToast(''), 2200);
+      return;
+    }
     setSelectedCamp(null);
     setCampDetail(null);
     setCampInsight(null);

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator,
   Image, Modal, Linking, useWindowDimensions,
@@ -38,8 +38,17 @@ import { playTrailheadVoice, stopTrailheadVoice } from '@/lib/voice';
 
 const EXPLORE_CACHE_KEY = 'trailhead_explore_catalog_v2';
 const EXPLORE_CAMPGROUNDS_CACHE_PREFIX = 'trailhead_explore_campgrounds_v1:';
+const EXPLORE_TRAIL_AREA_CACHE_PREFIX = 'trailhead_explore_trail_area_v1:';
 const SAVED_EXPLORE_KEY = 'trailhead_saved_explore_places_v1';
 const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
+
+type ExploreSortMode = 'best' | 'nearest' | 'source';
+
+const EXPLORE_SORT_LABELS: Record<ExploreSortMode, string> = {
+  best: 'Best match',
+  nearest: 'Nearest',
+  source: 'Source quality',
+};
 
 const WMO_ICON: Record<number, keyof typeof Ionicons.glyphMap> = {
   0: 'sunny-outline', 1: 'partly-sunny-outline', 2: 'partly-sunny-outline', 3: 'cloud-outline',
@@ -102,6 +111,106 @@ function groupForExplorePlace(place: ExplorePlaceProfile) {
   if (/water|lake|river|shore|beach|marina|boat/.test(c)) return 'water';
   if (/service|fuel|food|grocery|repair|medical|wifi|laundry|shower/.test(c)) return 'services';
   return 'parks';
+}
+
+function hasExploreTrailCards(place?: ExplorePlaceProfile | null) {
+  return Array.isArray((place as any)?.trails) && (place as any).trails.length > 0;
+}
+
+function shouldHydrateExploreTrailArea(place?: ExplorePlaceProfile | null) {
+  if (!place || hasExploreTrailCards(place)) return false;
+  const key = getExploreCategoryKey(place);
+  const text = [
+    place.id,
+    place.summary.title,
+    place.summary.category,
+    place.summary.explore_group,
+    place.summary.region,
+    place.summary.state,
+    place.profile?.summary,
+    ...(place.summary.tags ?? []),
+    ...((place as any).search_aliases ?? []),
+  ].join(' ').toLowerCase();
+  return ['trails', 'trailheads', 'climb', 'peaks'].includes(key)
+    || /\b(trail|hike|trek|trekking|glacier|karakoram|pakistan|k2|base camp|pass)\b/.test(text);
+}
+
+function mergeDynamicTrailArea(place: ExplorePlaceProfile, area: ExplorePlaceProfile): ExplorePlaceProfile {
+  const trails = Array.isArray((area as any).trails) ? (area as any).trails : [];
+  if (!trails.length) return place;
+  const firstTrailPhoto = trails
+    .map((trail: ExploreTrailCard) => trail.image_url || trail.photos?.find(photo => !!photo.url)?.url)
+    .find(Boolean);
+  const imageUrl = place.summary.image_url || area.summary.image_url || firstTrailPhoto || place.summary.thumbnail_url || area.summary.thumbnail_url || '';
+  const imageCredit = place.summary.image_credit || area.summary.image_credit || trails.find((trail: ExploreTrailCard) => trail.image_credit)?.image_credit || '';
+  return {
+    ...place,
+    category: area.category || place.category,
+    subcategories: Array.from(new Set([...(place.subcategories ?? []), ...(area.subcategories ?? [])])),
+    quality: area.quality || place.quality,
+    quality_score: Math.max(Number((place as any).quality_score || 0), Number((area as any).quality_score || 0)),
+    search_aliases: Array.from(new Set([...((place as any).search_aliases ?? []), ...((area as any).search_aliases ?? [])])),
+    trails,
+    sources: Array.from(new Set([...(place.sources ?? []), ...(area.sources ?? [])] as any[])) as any,
+    card: {
+      ...(area.card || {}),
+      ...(place.card || {}),
+      title: place.card?.title || place.summary.title || area.card?.title,
+      region: place.card?.region || area.card?.region,
+      headline: area.card?.headline || place.card?.headline,
+      summary: area.card?.summary || place.card?.summary,
+      highlight: area.card?.highlight || place.card?.highlight,
+      facts: area.card?.facts || place.card?.facts,
+    },
+    summary: {
+      ...place.summary,
+      category: area.summary.category || place.summary.category,
+      explore_group: area.summary.explore_group || place.summary.explore_group,
+      region: place.summary.region || area.summary.region,
+      tags: Array.from(new Set([...(place.summary.tags ?? []), ...(area.summary.tags ?? [])])),
+      hook: area.summary.hook || place.summary.hook,
+      short_description: area.summary.short_description || place.summary.short_description,
+      image_url: imageUrl,
+      thumbnail_url: imageUrl || place.summary.thumbnail_url,
+      image_credit: imageCredit,
+      image_license: place.summary.image_license || area.summary.image_license,
+      source_url: place.summary.source_url || area.summary.source_url,
+      source_title: place.summary.source_title || area.summary.source_title,
+    },
+    profile: {
+      ...place.profile,
+      why_it_matters: area.profile?.why_it_matters || place.profile.why_it_matters,
+      what_to_know: area.profile?.what_to_know || place.profile.what_to_know,
+      best_time_to_stop: area.profile?.best_time_to_stop || place.profile.best_time_to_stop,
+      access_notes: area.profile?.access_notes || place.profile.access_notes,
+      nearby_context: area.profile?.nearby_context || place.profile.nearby_context,
+    },
+    source_pack: {
+      ...(place.source_pack || {}),
+      ...(area.source_pack || {}),
+      photos: [
+        ...((place.source_pack?.photos ?? []) as any[]),
+        ...((area.source_pack?.photos ?? []) as any[]),
+      ].slice(0, 12),
+      things_to_do: [
+        ...((place.source_pack?.things_to_do ?? []) as any[]),
+        ...trails.slice(0, 8).map((trail: ExploreTrailCard) => ({
+          title: trail.title,
+          description: [fmtMi(trail.distance_mi), trail.route_type, trail.difficulty].filter(Boolean).join(' · '),
+          url: trail.source_url,
+          lat: trail.lat,
+          lng: trail.lng,
+          image_url: trail.image_url || trail.photos?.find(photo => !!photo.url)?.url,
+          image_credit: trail.image_credit || trail.photos?.find(photo => !!photo.url)?.credit,
+        })),
+      ],
+    },
+    facts: {
+      ...place.facts,
+      ...area.facts,
+    },
+    attribution: area.attribution || place.attribution,
+  };
 }
 
 function storyTextForPlace(place: ExplorePlaceProfile) {
@@ -212,10 +321,14 @@ export default function GuideScreen() {
   const [weatherLoading, setWeatherLoading] = useState(false);
   const [tab, setTab] = useState<'explore' | 'narrations' | 'weather'>('explore');
   const [exploreMode, setExploreMode] = useState<'featured' | 'nearby' | 'trip'>('featured');
+  const [exploreSortMode, setExploreSortMode] = useState<ExploreSortMode>('best');
   const [exploreCategory, setExploreCategory] = useState<ExploreCategoryKey>('all');
   const [exploreQuery, setExploreQuery] = useState('');
   const [profileReadMode, setProfileReadMode] = useState<ExploreDetailTab>('summary');
   const [explorePlaces, setExplorePlaces] = useState<ExplorePlaceProfile[]>([]);
+  const [exploreTrailAreasById, setExploreTrailAreasById] = useState<Record<string, ExplorePlaceProfile>>({});
+  const [exploreTrailAreaLoadingId, setExploreTrailAreaLoadingId] = useState<string | null>(null);
+  const [exploreTrailAreaErrors, setExploreTrailAreaErrors] = useState<Record<string, string>>({});
   const [savedExploreIds, setSavedExploreIds] = useState<string[]>([]);
   const [exploreCampgroundsById, setExploreCampgroundsById] = useState<Record<string, CampsitePin[]>>({});
   const [exploreCampSourceById, setExploreCampSourceById] = useState<Record<string, 'official' | 'fallback'>>({});
@@ -423,7 +536,9 @@ export default function GuideScreen() {
 
   const waypoints = useMemo(() => activeTrip?.plan.waypoints.filter(w => w.lat && w.lng) ?? [], [activeTrip?.trip_id]);
   const displayName = useMemo(() => (user?.username || 'Explorer').trim().split(/\s+/)[0] || 'Explorer', [user?.username]);
-  const enrichedExplorePlaces = useMemo(() => mergeCuratedExplorePlaces(explorePlaces), [explorePlaces]);
+  const enrichedExplorePlaces = useMemo(() => (
+    mergeCuratedExplorePlaces(explorePlaces).map(place => exploreTrailAreasById[place.id] ?? place)
+  ), [explorePlaces, exploreTrailAreasById]);
   const heroHeight = Math.max(280, Math.min(340, Math.round(windowHeight * 0.39)));
   const heroImage = useMemo(() => {
     const images = enrichedExplorePlaces
@@ -443,7 +558,7 @@ export default function GuideScreen() {
         : null;
       let distance: number | null = null;
       let day: number | undefined;
-      if (loc && exploreMode === 'nearby' && userLoc) {
+      if (loc && userLoc && (exploreMode === 'nearby' || exploreSortMode === 'nearest')) {
         distance = distMi(userLoc, loc);
       }
       if (loc && exploreMode === 'trip' && waypoints.length > 0) {
@@ -475,8 +590,25 @@ export default function GuideScreen() {
       queryScore: scoreExploreQuery(item.place, query),
       trustScore: scoreExploreTrust(item.place),
     }));
+    const sortByNearest = (a: typeof decorated[number], b: typeof decorated[number]) => {
+      const aDist = a.distance ?? 99999;
+      const bDist = b.distance ?? 99999;
+      if (aDist !== bDist) return aDist - bDist;
+      if (b.trustScore !== a.trustScore) return b.trustScore - a.trustScore;
+      return a.place.summary.rank - b.place.summary.rank;
+    };
+    const sortBySource = (a: typeof decorated[number], b: typeof decorated[number]) => {
+      if (b.trustScore !== a.trustScore) return b.trustScore - a.trustScore;
+      if (query && b.queryScore !== a.queryScore) return b.queryScore - a.queryScore;
+      const aDist = a.distance ?? 99999;
+      const bDist = b.distance ?? 99999;
+      if (aDist !== bDist) return aDist - bDist;
+      return a.place.summary.rank - b.place.summary.rank;
+    };
     if (exploreMode === 'featured') {
       return decorated.sort((a, b) => {
+        if (exploreSortMode === 'nearest') return sortByNearest(a, b);
+        if (exploreSortMode === 'source') return sortBySource(a, b);
         if (query && b.queryScore !== a.queryScore) return b.queryScore - a.queryScore;
         const aHero = a.place.summary.hero_rank ?? a.place.summary.rank;
         const bHero = b.place.summary.hero_rank ?? b.place.summary.rank;
@@ -488,6 +620,8 @@ export default function GuideScreen() {
     return decorated
       .filter(item => item.distance == null || item.distance < (exploreMode === 'trip' ? 250 : 1200))
       .sort((a, b) => {
+        if (exploreSortMode === 'nearest') return sortByNearest(a, b);
+        if (exploreSortMode === 'source') return sortBySource(a, b);
         if (query && b.queryScore !== a.queryScore) return b.queryScore - a.queryScore;
         const aDist = a.distance ?? 99999;
         const bDist = b.distance ?? 99999;
@@ -496,7 +630,7 @@ export default function GuideScreen() {
         if (b.trustScore !== a.trustScore) return b.trustScore - a.trustScore;
         return aDist - bDist;
       });
-  }, [enrichedExplorePlaces, exploreCategory, exploreMode, exploreQuery, userLoc?.lat, userLoc?.lng, waypoints]);
+  }, [enrichedExplorePlaces, exploreCategory, exploreMode, exploreQuery, exploreSortMode, userLoc?.lat, userLoc?.lng, waypoints]);
 
   const featuredSections = useMemo(() => {
     if (hasExploreQuery || exploreCategory !== 'all' || exploreMode !== 'featured') return [];
@@ -532,6 +666,57 @@ export default function GuideScreen() {
       })
       .slice(0, 6);
   }, [enrichedExplorePlaces, selectedExplore?.id, selectedExplore?.summary.lat, selectedExplore?.summary.lng]);
+
+  const applyHydratedTrailArea = useCallback((placeId: string, basePlace: ExplorePlaceProfile, area: ExplorePlaceProfile) => {
+    const merged = mergeDynamicTrailArea(basePlace, area);
+    setExploreTrailAreasById(prev => ({ ...prev, [placeId]: merged }));
+    setSelectedExplore(current => current?.id === placeId ? mergeDynamicTrailArea(current, area) : current);
+    return merged;
+  }, []);
+
+  const hydrateExploreTrailArea = useCallback(async (place: ExplorePlaceProfile, force = false) => {
+    if (place.summary.lat == null || place.summary.lng == null) return null;
+    if (!force && !shouldHydrateExploreTrailArea(place)) return place;
+    if (!force && exploreTrailAreasById[place.id]) return exploreTrailAreasById[place.id];
+    if (exploreTrailAreaLoadingId === place.id) return place;
+    const cacheKey = `${EXPLORE_TRAIL_AREA_CACHE_PREFIX}${place.id}`;
+    setExploreTrailAreaLoadingId(place.id);
+    setExploreTrailAreaErrors(prev => ({ ...prev, [place.id]: '' }));
+    try {
+      if (!force) {
+        const raw = await storage.get(cacheKey).catch(() => '');
+        if (raw) {
+          const cached = JSON.parse(raw);
+          if (cached?.area?.trails?.length) {
+            return applyHydratedTrailArea(place.id, place, cached.area);
+          }
+        }
+      }
+      const response = await api.discoverTrailArea({
+        lat: Number(place.summary.lat),
+        lng: Number(place.summary.lng),
+        radius: /pakistan|karakoram|k2|glacier/i.test(JSON.stringify(place)) ? 80 : 45,
+        limit: 24,
+      });
+      const area = response.area;
+      if (area?.trails?.length) {
+        await storage.set(cacheKey, JSON.stringify({ area, fetched_at: Date.now() })).catch(() => {});
+        return applyHydratedTrailArea(place.id, place, area);
+      }
+      setExploreTrailAreaErrors(prev => ({ ...prev, [place.id]: 'No trail cards found near this stop yet.' }));
+      return place;
+    } catch {
+      setExploreTrailAreaErrors(prev => ({ ...prev, [place.id]: 'Could not load trail cards right now.' }));
+      return place;
+    } finally {
+      setExploreTrailAreaLoadingId(current => current === place.id ? null : current);
+    }
+  }, [applyHydratedTrailArea, exploreTrailAreaLoadingId, exploreTrailAreasById]);
+
+  useEffect(() => {
+    if (!selectedExplore || !shouldHydrateExploreTrailArea(selectedExplore)) return;
+    hydrateExploreTrailArea(selectedExplore).catch(() => {});
+  }, [selectedExplore?.id]);
 
   async function generateGuide() {
     if (!activeTrip || guideLoading) return;
@@ -748,11 +933,13 @@ export default function GuideScreen() {
 
   function handleExploreNearbyAction(place: ExplorePlaceProfile, module: ExploreNearbyModule) {
     if (module.action === 'weather') {
+      setProfileReadMode('summary');
       fetchExploreWeather(place);
       return;
     }
     if (module.action === 'trails') {
       setProfileReadMode('summary');
+      if (!hasExploreTrailCards(place)) hydrateExploreTrailArea(place, true).catch(() => {});
       return;
     }
     if (module.action === 'route') {
@@ -816,6 +1003,27 @@ export default function GuideScreen() {
     );
   }
 
+  function renderExploreTrailStatus(place: ExplorePlaceProfile) {
+    const loading = exploreTrailAreaLoadingId === place.id;
+    const error = exploreTrailAreaErrors[place.id];
+    if (!loading && !error) return null;
+    if (hasExploreTrailCards(place) && !loading) return null;
+    return (
+      <TrailheadCard style={s.exploreTrailStatusCard}>
+        <View style={s.exploreWeatherTop}>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={s.profileLabel}>TRAIL CARDS</Text>
+            <Text style={s.exploreWeatherSub}>{place.summary.title}</Text>
+          </View>
+          {loading ? <ActivityIndicator color={C.orange} size="small" /> : <Ionicons name="trail-sign-outline" size={24} color={C.orange} />}
+        </View>
+        <Text style={s.exploreWeatherText}>
+          {loading ? 'Loading trails, treks, and glacier cards...' : error}
+        </Text>
+      </TrailheadCard>
+    );
+  }
+
   function renderExploreCard(
     item: { place: ExplorePlaceProfile; distance?: number | null; day?: number },
     idx: number,
@@ -838,7 +1046,9 @@ export default function GuideScreen() {
         canRoute={place.summary.lat != null && place.summary.lng != null}
         onOpen={() => {
           setProfileReadMode('summary');
-          setSelectedExplore(place);
+          const hydrated = exploreTrailAreasById[place.id] ?? place;
+          setSelectedExplore(hydrated);
+          if (shouldHydrateExploreTrailArea(hydrated)) hydrateExploreTrailArea(hydrated).catch(() => {});
         }}
         onArea={() => showExploreOnMap(place)}
         onRoute={() => routeExplore(place)}
@@ -1037,7 +1247,16 @@ export default function GuideScreen() {
             />
 
             <ExploreModeTabs value={exploreMode} onChange={setExploreMode} />
-            <ExploreFilterRow shownCount={rankedExplore.length} />
+            <ExploreFilterRow
+              shownCount={rankedExplore.length}
+              sourceLabel={exploreSortMode === 'source' ? 'Source first' : 'Checked details'}
+              sortLabel={EXPLORE_SORT_LABELS[exploreSortMode]}
+              onCountPress={() => setExploreCategory('all')}
+              onSourcePress={() => setExploreSortMode(current => current === 'source' ? 'best' : 'source')}
+              onSortPress={() => setExploreSortMode(current => (
+                current === 'best' ? 'nearest' : current === 'nearest' ? 'source' : 'best'
+              ))}
+            />
 
             {exploreCategory !== 'all' && (
               <TouchableOpacity style={s.clearCategoryBtn} onPress={() => setExploreCategory('all')}>
@@ -1328,6 +1547,7 @@ export default function GuideScreen() {
             highlightedSentence={highlightSentence}
             storyScrollRef={storyScrollRef}
             campgroundsSlot={renderExploreCampgrounds(selectedExplore)}
+            trailStatusSlot={renderExploreTrailStatus(selectedExplore)}
             weatherSlot={renderExploreWeather(selectedExplore)}
             relatedSlot={relatedExplore.length > 0 ? (
               <TrailheadCard style={s.profileSection}>
@@ -1565,6 +1785,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   weatherStatVal: { color: C.text, fontSize: 13, fontWeight: '700', fontFamily: mono },
   weatherStatLabel: { color: C.text3, fontSize: 8, fontFamily: mono, letterSpacing: 0.5, marginTop: 2 },
   exploreWeatherCard: { marginHorizontal: 20, marginBottom: 16, backgroundColor: C.s2, borderRadius: 14, borderWidth: 1, borderColor: C.border, padding: 14, gap: 12 },
+  exploreTrailStatusCard: { marginHorizontal: 20, marginBottom: 14, backgroundColor: C.s2, borderRadius: 14, borderWidth: 1, borderColor: C.border, padding: 14, gap: 12 },
   exploreWeatherTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   exploreWeatherSub: { color: C.text3, fontSize: 12, fontWeight: '700' },
   exploreWeatherText: { color: C.text2, fontSize: 13, lineHeight: 19, fontWeight: '700' },

@@ -107,6 +107,11 @@ class TrailCatalogTests(unittest.TestCase):
         self.assertTrue(area["trails"][0]["trekking_only"])
         self.assertTrue(any(source.get("kind") == "glacier_reference" for source in area["source_pack"]["sources"]))
 
+    def test_pakistan_fallback_photos_cover_key_trek_and_glacier_cards(self):
+        self.assertTrue(server._pakistan_trail_fallback_photos("K2 Base Camp Trek")[0]["url"].startswith("https://upload.wikimedia.org/"))
+        self.assertIn("Baltoro", server._pakistan_trail_fallback_photos("Baltoro Glacier")[0]["caption"])
+        self.assertIn("K2", server._pakistan_trail_fallback_photos("Godwin-Austen Glacier")[0]["caption"])
+
     def test_nearby_store_query_does_not_drop_exact_curated_match_before_sort(self):
         old_path = store.settings.db_path
         try:

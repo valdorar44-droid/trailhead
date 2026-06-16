@@ -40,6 +40,7 @@ type Props = {
   campgroundsSlot?: React.ReactNode;
   relatedSlot?: React.ReactNode;
   weatherSlot?: React.ReactNode;
+  trailStatusSlot?: React.ReactNode;
   onClose: () => void;
   onPlayAudio: () => void;
   onShowArea: () => void;
@@ -66,6 +67,7 @@ export function ExploreDetailSheet({
   campgroundsSlot,
   relatedSlot,
   weatherSlot,
+  trailStatusSlot,
   onClose,
   onPlayAudio,
   onShowArea,
@@ -193,6 +195,7 @@ export function ExploreDetailSheet({
                   </View>
                 </View>
 
+                {trailStatusSlot}
                 <ExploreTrailArea place={place} mediaUrl={mediaUrl} onTrailMap={onTrailMap} onTrailRoute={onTrailRoute} />
 
                 {planNotes.length > 0 && (

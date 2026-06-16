@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/lib/design';
 
@@ -7,22 +7,39 @@ type Props = {
   shownCount: number;
   sourceLabel?: string;
   sortLabel?: string;
+  onCountPress?: () => void;
+  onSourcePress?: () => void;
+  onSortPress?: () => void;
 };
 
-export function ExploreFilterRow({ shownCount, sourceLabel = 'Checked details', sortLabel = 'Best match' }: Props) {
+export function ExploreFilterRow({
+  shownCount,
+  sourceLabel = 'Checked details',
+  sortLabel = 'Best match',
+  onCountPress,
+  onSourcePress,
+  onSortPress,
+}: Props) {
   const C = useTheme();
   const items = [
-    { icon: 'list-outline', label: `${shownCount} shown` },
-    { icon: 'shield-checkmark-outline', label: sourceLabel },
-    { icon: 'filter-outline', label: `Sort: ${sortLabel}` },
+    { icon: 'list-outline', label: `${shownCount} shown`, onPress: onCountPress },
+    { icon: 'shield-checkmark-outline', label: sourceLabel, onPress: onSourcePress },
+    { icon: 'filter-outline', label: `Sort: ${sortLabel}`, onPress: onSortPress },
   ];
   return (
     <View style={styles.row}>
       {items.map(item => (
-        <View key={item.label} style={[styles.pill, { borderColor: C.border, backgroundColor: C.s1 }]}>
+        <TouchableOpacity
+          key={item.label}
+          style={[styles.pill, { borderColor: C.border, backgroundColor: C.s1 }]}
+          activeOpacity={0.78}
+          onPress={item.onPress}
+          disabled={!item.onPress}
+          accessibilityRole={item.onPress ? 'button' : undefined}
+        >
           <Ionicons name={item.icon as any} size={16} color={C.text3} />
           <Text style={[styles.label, { color: C.text3 }]} numberOfLines={1}>{item.label}</Text>
-        </View>
+        </TouchableOpacity>
       ))}
     </View>
   );

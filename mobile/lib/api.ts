@@ -375,12 +375,13 @@ export const api = {
       .then(res => ({ ...res, campgrounds: canonicalizeCampsitePins(res.campgrounds ?? []) })),
   getExplorePlaceExperiences: (placeId: string, limit = 12, source = 'viator') =>
     req<ExploreExperiencesResponse>(`/api/explore/places/${encodeURIComponent(placeId)}/experiences?source=${encodeURIComponent(source)}&limit=${limit}`),
-  getExploreExperiences: (lat?: number, lng?: number, radius = 30, source = 'viator', limit = 20) => {
+  getExploreExperiences: (lat?: number, lng?: number, radius = 30, source = 'viator', limit = 20, q = '') => {
     const qs = new URLSearchParams({ source, radius: String(radius), limit: String(limit) });
     if (lat != null && lng != null) {
       qs.set('lat', String(lat));
       qs.set('lng', String(lng));
     }
+    if (q.trim()) qs.set('q', q.trim());
     return req<ExploreExperiencesResponse>(`/api/explore/experiences?${qs.toString()}`);
   },
   getExploreExperience: (experienceId: string) =>

@@ -14974,6 +14974,33 @@ def _find_experience(experience_id: str) -> dict | None:
     return None
 
 
+def _experience_query_text(item: dict) -> str:
+    values = [
+        item.get("id"),
+        item.get("title"),
+        item.get("category"),
+        item.get("region"),
+        item.get("country"),
+        item.get("summary"),
+        item.get("description"),
+        " ".join(item.get("subcategories") or []),
+        " ".join(item.get("highlights") or []),
+    ]
+    return " ".join(str(v or "") for v in values).lower()
+
+
+def _filter_experiences_by_query(experiences: list[dict], q: str = "") -> list[dict]:
+    cleaned = re.sub(
+        r"\b(things to do|tour|tours|experience|experiences|activity|activities|ticket|tickets|guide|guided|book|booking)\b",
+        " ",
+        str(q or "").lower(),
+    )
+    query_terms = [t for t in re.split(r"\s+", cleaned.strip()) if len(t) >= 2]
+    if not query_terms:
+        return list(experiences)
+    return [item for item in experiences if all(term in _experience_query_text(item) for term in query_terms)]
+
+
 def _experience_response(source: str, results: list[dict], place_id: str = "", cache_status: str = "fresh") -> dict:
     return {
         "source": source or "viator",
@@ -15005,12 +15032,13 @@ async def explore_place_experiences(place_id: str, source: str = "viator", limit
 
 
 @app.get("/api/explore/experiences")
-async def explore_experiences(lat: float | None = None, lng: float | None = None, radius: float = 30, source: str = "viator", limit: int = 20):
+async def explore_experiences(lat: float | None = None, lng: float | None = None, radius: float = 30, source: str = "viator", limit: int = 20, q: str = ""):
     payload = _load_explore_experiences()
     experiences = [
         item for item in payload.get("experiences") or []
         if source in {"", "all"} or str(item.get("source") or "").lower() == source.lower()
     ]
+    experiences = _filter_experiences_by_query(experiences, q)
     nearby = _experience_distance_filter(experiences, lat, lng, max(1.0, min(float(radius or 30), 100.0)))
     ranked = rank_experiences(nearby, lat=lat, lng=lng)[:max(1, min(int(limit or 20), 50))]
     return _experience_response(source, ranked, cache_status="fresh" if payload.get("generated_at") else "empty")

@@ -19,6 +19,7 @@ export type ExploreCategoryKey =
   | 'land'
   | 'fuel'
   | 'resupply'
+  | 'tours'
   | 'nearby';
 
 export type ExploreFact = {
@@ -74,6 +75,7 @@ export const EXPLORE_CATEGORY_CHIPS: Array<{
   { key: 'land', label: 'Land', icon: 'map-outline', color: '#84cc16' },
   { key: 'fuel', label: 'Fuel', icon: 'car-outline', color: '#ea580c' },
   { key: 'resupply', label: 'Resupply', icon: 'basket-outline', color: '#7c3aed' },
+  { key: 'tours', label: 'Tours', icon: 'ticket-outline', color: '#d97706' },
   { key: 'nearby', label: 'Nearby', icon: 'locate-outline', color: '#a855f7' },
 ];
 
@@ -95,6 +97,7 @@ const CATEGORY_ALIASES: Record<ExploreCategoryKey, string[]> = {
   land: ['public land', 'blm', 'national forest', 'wilderness', 'conservation'],
   fuel: ['fuel', 'gas', 'diesel', 'petrol', 'service station'],
   resupply: ['resupply', 'grocery', 'gear', 'supplies', 'food', 'market'],
+  tours: ['tour', 'tours', 'experience', 'experiences', 'things to do', 'activity', 'activities', 'ticket', 'tickets', 'guide', 'guided'],
   nearby: [],
 };
 
@@ -111,6 +114,7 @@ const FALLBACK_COPY: Record<string, string> = {
   climb: 'Climbing area or crag. Check access, closures, route information, rules, and conditions.',
   fuel: 'Fuel or service stop. Verify hours, availability, road access, and payment options.',
   resupply: 'Resupply stop. Verify hours, inventory, payment options, and road access before depending on it.',
+  tours: 'Bookable guided trips, tickets, local tours, and activities from external providers.',
   water: 'Water access or feature. Verify safety, access, seasonal conditions, and local rules.',
   scenic: 'Scenic stop for photos, short walks, and nearby exploration.',
   parks: 'Outdoor destination. Check official access, fees, closures, and local rules before committing dates.',
@@ -139,6 +143,7 @@ function categoryFromText(text: string): ExploreCategoryKey | null {
   if (/climb|crag|boulder/.test(text)) return 'climb';
   if (/fuel|gas|diesel|petrol/.test(text)) return 'fuel';
   if (/resupply|grocery|gear|supplies|market/.test(text)) return 'resupply';
+  if (/things to do|tour|experience|activity|ticket|guided|guide\b/.test(text)) return 'tours';
   if (/glamp|private stay|yurt/.test(text)) return 'glamping';
   if (/hut|shelter|refuge|cabin|lodg/.test(text)) return 'huts';
   if (/trail|hike|trek|ohv|route/.test(text)) return 'trails';
@@ -433,6 +438,7 @@ export function getExploreSearchText(place: ExplorePlaceProfile) {
 
 export function exploreCategoryMatches(place: ExplorePlaceProfile, selected: ExploreCategoryKey) {
   if (selected === 'all') return true;
+  if (selected === 'tours') return false;
   if (selected === 'nearby') return true;
   const key = getExploreCategoryKey(place);
   return key === selected;

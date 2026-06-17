@@ -139,6 +139,18 @@ function shouldHydrateExploreTrailArea(place?: ExplorePlaceProfile | null) {
     || /\b(trail|hike|trek|trekking|glacier|karakoram|pakistan|k2|base camp|pass)\b/.test(text);
 }
 
+function shouldSearchBookableExperiences(query: string, category: ExploreCategoryKey) {
+  if (category === 'tours') return true;
+  return /\b(tour|tours|experience|experiences|things to do|activity|activities|ticket|tickets|guide|guided|jeep|rafting|boat|shuttle)\b/i.test(query);
+}
+
+function placeQueryFromExploreQuery(query: string) {
+  return query
+    .replace(/\b(things to do|tour|tours|experience|experiences|activity|activities|ticket|tickets|guide|guided|book|booking)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function mergeDynamicTrailArea(place: ExplorePlaceProfile, area: ExplorePlaceProfile): ExplorePlaceProfile {
   const trails = Array.isArray((area as any).trails) ? (area as any).trails : [];
   if (!trails.length) return place;
@@ -440,9 +452,9 @@ export default function GuideScreen() {
   const [exploreExperiencesById, setExploreExperiencesById] = useState<Record<string, BookableExperience[]>>({});
   const [exploreExperienceLoadingId, setExploreExperienceLoadingId] = useState<string | null>(null);
   const [exploreExperienceErrors, setExploreExperienceErrors] = useState<Record<string, string>>({});
-  const [nearbyExperiences, setNearbyExperiences] = useState<BookableExperience[]>([]);
-  const [nearbyExperiencesLoading, setNearbyExperiencesLoading] = useState(false);
-  const [nearbyExperiencesError, setNearbyExperiencesError] = useState('');
+  const [exploreSearchExperiences, setExploreSearchExperiences] = useState<BookableExperience[]>([]);
+  const [exploreSearchExperienceLoading, setExploreSearchExperienceLoading] = useState(false);
+  const [exploreSearchExperienceError, setExploreSearchExperienceError] = useState('');
   const [liveExplorePlaces, setLiveExplorePlaces] = useState<OsmPoi[]>([]);
   const [exploreLoading, setExploreLoading] = useState(false);
   const [liveExploreLoading, setLiveExploreLoading] = useState(false);
@@ -652,25 +664,27 @@ export default function GuideScreen() {
   }, [selectedExplore?.id]);
 
   useEffect(() => {
-    if (tab !== 'narrations' || !userLoc) {
-      setNearbyExperiences([]);
+    const shouldLoad = tab === 'explore' && shouldSearchBookableExperiences(exploreQuery, exploreCategory);
+    if (!shouldLoad) {
+      setExploreSearchExperiences([]);
+      setExploreSearchExperienceError('');
       return;
     }
     let cancelled = false;
-    setNearbyExperiencesLoading(true);
-    setNearbyExperiencesError('');
-    api.getExploreExperiences(userLoc.lat, userLoc.lng, 45, 'viator', 12)
+    setExploreSearchExperienceLoading(true);
+    setExploreSearchExperienceError('');
+    api.getExploreExperiences(userLoc?.lat, userLoc?.lng, userLoc ? 45 : 100, 'viator', 16, exploreQuery)
       .then(res => {
-        if (!cancelled) setNearbyExperiences(res.results ?? []);
+        if (!cancelled) setExploreSearchExperiences(res.results ?? []);
       })
       .catch(() => {
-        if (!cancelled) setNearbyExperiencesError('Tours unavailable right now.');
+        if (!cancelled) setExploreSearchExperienceError('Tours unavailable right now.');
       })
       .finally(() => {
-        if (!cancelled) setNearbyExperiencesLoading(false);
+        if (!cancelled) setExploreSearchExperienceLoading(false);
       });
     return () => { cancelled = true; };
-  }, [tab, userLoc?.lat, userLoc?.lng]);
+  }, [tab, exploreCategory, exploreQuery, userLoc?.lat, userLoc?.lng]);
 
   useEffect(() => {
     if (!activeTrip) {
@@ -721,6 +735,7 @@ export default function GuideScreen() {
     return mediaUrl(images[dayKey % images.length]);
   }, [enrichedExplorePlaces]);
   const hasExploreQuery = exploreQuery.trim().length > 0;
+  const showExperienceSearch = shouldSearchBookableExperiences(exploreQuery, exploreCategory);
   const rankedExplore = useMemo(() => {
     const places = enrichedExplorePlaces.map(place => {
       const loc = place.summary.lat != null && place.summary.lng != null
@@ -747,17 +762,18 @@ export default function GuideScreen() {
       return { place, distance, day };
     });
     const query = exploreQuery.trim();
+    const placeQuery = showExperienceSearch ? placeQueryFromExploreQuery(query) : query;
     const queryCategory = exploreCategory === 'all' ? exploreCategoryFromQuery(query) : null;
     const filtered = places.filter(({ place }) => {
       const categoryOk = exploreCategoryMatches(place, exploreCategory);
       if (!categoryOk) return false;
-      if (queryCategory && getExploreCategoryKey(place) !== queryCategory) return false;
-      if (!query) return true;
-      return scoreExploreQuery(place, query) > 0;
+      if (queryCategory && queryCategory !== 'tours' && getExploreCategoryKey(place) !== queryCategory) return false;
+      if (!placeQuery) return true;
+      return scoreExploreQuery(place, placeQuery) > 0;
     });
     const decorated = filtered.map(item => ({
       ...item,
-      queryScore: scoreExploreQuery(item.place, query),
+      queryScore: scoreExploreQuery(item.place, placeQuery),
       trustScore: scoreExploreTrust(item.place),
     }));
     const sortByNearest = (a: typeof decorated[number], b: typeof decorated[number]) => {
@@ -800,7 +816,7 @@ export default function GuideScreen() {
         if (b.trustScore !== a.trustScore) return b.trustScore - a.trustScore;
         return aDist - bDist;
       });
-  }, [enrichedExplorePlaces, exploreCategory, exploreMode, exploreQuery, exploreSortMode, userLoc?.lat, userLoc?.lng, waypoints]);
+  }, [enrichedExplorePlaces, exploreCategory, exploreMode, exploreQuery, exploreSortMode, showExperienceSearch, userLoc?.lat, userLoc?.lng, waypoints]);
 
   useEffect(() => {
     setExploreVisibleLimit(EXPLORE_INITIAL_VISIBLE);
@@ -1437,12 +1453,12 @@ export default function GuideScreen() {
             <TouchableOpacity key={t} style={[s.tab, tab === t && s.tabActive]} onPress={() => setTab(t)}>
               <View style={s.tabInner}>
                 <Ionicons
-                  name={t === 'explore' ? 'compass-outline' : t === 'narrations' ? 'ticket-outline' : 'partly-sunny-outline'}
+                  name={t === 'explore' ? 'compass-outline' : t === 'narrations' ? 'map-outline' : 'partly-sunny-outline'}
                   size={15}
                   color={tab === t ? C.orange : C.text3}
                 />
                 <Text style={[s.tabText, tab === t && s.tabTextActive]}>
-                  {t === 'explore' ? 'EXPLORE' : t === 'narrations' ? 'TOURS' : 'WEATHER'}
+                  {t === 'explore' ? 'EXPLORE' : t === 'narrations' ? 'TRIP' : 'WEATHER'}
                 </Text>
               </View>
             </TouchableOpacity>
@@ -1524,6 +1540,17 @@ export default function GuideScreen() {
               </TouchableOpacity>
             )}
 
+            {showExperienceSearch && (
+              <ExploreExperiencesRail
+                experiences={exploreSearchExperiences}
+                loading={exploreSearchExperienceLoading}
+                error={exploreSearchExperienceError}
+                mediaUrl={mediaUrl}
+                onSave={saveExperienceToPlanner}
+                onShowArea={showExperienceOnMap}
+              />
+            )}
+
             {exploreMode === 'nearby' && (
               <View style={s.livePlacesBlock}>
                 <View style={s.livePlacesTop}>
@@ -1592,11 +1619,11 @@ export default function GuideScreen() {
                   </ScrollView>
                 </View>
               ))
-            ) : !exploreLoading && rankedExplore.length === 0 ? (
+            ) : !exploreLoading && rankedExplore.length === 0 && (!showExperienceSearch || (!exploreSearchExperienceLoading && exploreSearchExperiences.length === 0)) ? (
               <View style={s.emptyState}>
                 <Ionicons name="search-outline" size={44} color={C.text3} />
                 <Text style={s.emptyTitle}>No exact match</Text>
-                <Text style={s.emptySub}>Try camp, trail, viewpoint, waterfall, hut, fuel, or hot spring.</Text>
+                <Text style={s.emptySub}>Try camp, trail, viewpoint, waterfall, hut, fuel, tour, or hot spring.</Text>
               </View>
             ) : (
               <>
@@ -1618,14 +1645,6 @@ export default function GuideScreen() {
 
         {tab === 'narrations' && (
           <>
-            <ExploreExperiencesRail
-              experiences={nearbyExperiences}
-              loading={nearbyExperiencesLoading}
-              error={nearbyExperiencesError}
-              mediaUrl={mediaUrl}
-              onSave={saveExperienceToPlanner}
-              onShowArea={showExperienceOnMap}
-            />
             {!!activeTrip && Object.keys(guide).length > 0 && (
               <View style={s.narrationToolbar}>
                 <View>
@@ -1644,9 +1663,9 @@ export default function GuideScreen() {
             )}
             {!activeTrip && (
               <View style={s.emptyState}>
-                <Ionicons name="ticket-outline" size={48} color={C.text3} />
-                <Text style={s.emptyTitle}>Tours Nearby</Text>
-                <Text style={s.emptySub}>Open an Explore card to compare bookable local tours and activities near that stop.</Text>
+                <Ionicons name="map-outline" size={48} color={C.text3} />
+                <Text style={s.emptyTitle}>No Active Trip</Text>
+                <Text style={s.emptySub}>Plan a trip on the PLAN tab to unlock waypoint tools and narrations. Tours now live in Explore search and place details.</Text>
               </View>
             )}
             {!!activeTrip && guideLoading && (

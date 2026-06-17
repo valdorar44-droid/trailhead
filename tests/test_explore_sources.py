@@ -14,6 +14,7 @@ from scripts.explore_sources.base.schema import ExplorePlaceV3
 from scripts.explore_sources.nps.import_nps import import_nps_fixture
 from scripts.explore_sources.osm.import_geofabrik import import_osm_fixture
 from scripts.explore_sources.ridb.import_ridb import import_ridb_fixture
+from scripts.explore_sources.usfs.import_usfs import import_usfs_fixture
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,6 +22,7 @@ YOSEMITE = ROOT / "tests/fixtures/explore_sources/osm_yosemite_sample.geojson"
 PAKISTAN = ROOT / "tests/fixtures/explore_sources/osm_pakistan_sample.geojson"
 RIDB = ROOT / "tests/fixtures/explore_sources/ridb_sample.json"
 NPS = ROOT / "tests/fixtures/explore_sources/nps_sample.json"
+USFS = ROOT / "tests/fixtures/explore_sources/usfs_sierra_sample.geojson"
 
 
 class ExploreSourcePipelineTests(unittest.TestCase):
@@ -103,6 +105,25 @@ class ExploreSourcePipelineTests(unittest.TestCase):
         self.assertIn("national park", place.search_blob)
         self.assertIn("National Park Service", records[0].attribution)
 
+    def test_usfs_importer_builds_trails_roads_and_recreation_places(self):
+        records, places, trails = import_usfs_fixture(USFS, fetched_at=123)
+        self.assertEqual(len(records), 6)
+        self.assertEqual(len(trails), 2)
+        categories = {place.category for place in places}
+        self.assertIn("trail", categories)
+        self.assertIn("trailhead", categories)
+        self.assertIn("forest_road", categories)
+        self.assertIn("campground", categories)
+        self.assertIn("shelter", categories)
+        self.assertIn("forest", categories)
+        pohono = next(trail for trail in trails if trail.name == "Pohono Trail")
+        self.assertEqual(pohono.land_manager, "Sierra National Forest")
+        self.assertIn("hiking", pohono.allowed_uses)
+        road = next(trail for trail in trails if trail.name == "Forest Road 5S30")
+        self.assertIn("4x4", road.allowed_uses)
+        self.assertTrue(all(record.license.startswith("USFS") for record in records))
+        self.assertTrue(all("USDA Forest Service" in record.attribution for record in records))
+
     def test_peak_viewpoint_and_trail_same_name_do_not_auto_merge(self):
         _records, places, _trails = build_catalog([str(YOSEMITE)])
         sentinel = [place for place in places if place.name == "Sentinel Dome"]
@@ -130,7 +151,12 @@ class ExploreSourcePipelineTests(unittest.TestCase):
         self.assertGreater(official.quality_score, osm.quality_score)
 
     def test_builder_outputs_searchable_pilot_catalog(self):
-        records, places, trails = build_catalog([str(YOSEMITE), str(PAKISTAN)], ridb_fixtures=[str(RIDB)], nps_fixtures=[str(NPS)])
+        records, places, trails = build_catalog(
+            [str(YOSEMITE), str(PAKISTAN)],
+            ridb_fixtures=[str(RIDB)],
+            nps_fixtures=[str(NPS)],
+            usfs_fixtures=[str(USFS)],
+        )
         self.assertGreaterEqual(len(records), 10)
         self.assertTrue(any(trail.name == "K2 Base Camp Trek" for trail in trails))
         campground = next(place for place in places if place.name == "Yosemite Valley Campground")
@@ -138,8 +164,10 @@ class ExploreSourcePipelineTests(unittest.TestCase):
         self.assertIn("osm:node/1005", campground.source_ids)
         self.assertEqual(campground.quality, "official_source")
         self.assertTrue(any(place.name == "Yosemite National Park" and place.category == "park" for place in places))
+        self.assertTrue(any(place.name == "Pohono Trail" and place.category == "trail" for place in places))
+        self.assertTrue(any(place.name == "Forest Road 5S30" and place.category == "forest_road" for place in places))
         blobs = " ".join(place.search_blob for place in places)
-        for term in ["camping", "hiking", "trailhead", "waterfalls", "fuel", "resupply", "k2", "hunza", "national park"]:
+        for term in ["camping", "hiking", "trailhead", "waterfalls", "fuel", "resupply", "k2", "hunza", "national park", "forest road"]:
             self.assertIn(term, blobs)
 
     def test_command_writes_outputs(self):
@@ -156,6 +184,7 @@ class ExploreSourcePipelineTests(unittest.TestCase):
                     "--source-fixture", str(YOSEMITE),
                     "--ridb-fixture", str(RIDB),
                     "--nps-fixture", str(NPS),
+                    "--usfs-fixture", str(USFS),
                     "--out", str(out),
                     "--trails-out", str(trails_out),
                     "--source-records-out", str(records_out),

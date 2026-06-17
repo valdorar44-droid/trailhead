@@ -21,6 +21,7 @@ CATEGORY_ALIASES = {
     "bouldering_area": ["boulder", "bouldering", "problems"],
     "scenic_drive": ["road trip", "byway", "scenic road", "drive"],
     "offroad_route": ["4x4", "overland", "ohv", "jeep trail"],
+    "forest_road": ["forest road", "service road", "fs road", "road access"],
     "water_source": ["drinking water", "water refill", "potable"],
     "fuel": ["gas", "diesel", "petrol", "service station"],
     "resupply": ["grocery", "outdoor store", "gear", "supplies"],
@@ -29,6 +30,7 @@ CATEGORY_ALIASES = {
     "visitor_center": ["information", "ranger station", "park info"],
     "park": ["national park", "state park", "preserve", "public land", "visitor center"],
     "public_land": ["park", "preserve", "forest", "wilderness", "public land"],
+    "forest": ["national forest", "forest service", "public land", "wilderness"],
 }
 
 

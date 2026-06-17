@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "generated_at": 1781669995,
-  "count": 3,
+  "generated_at": 1781670271,
+  "count": 5,
   "trails": [
     {
       "id": "trail:osm:relation-1001",
@@ -150,6 +150,119 @@
           "license": "Open Database License (ODbL)",
           "attribution": "OpenStreetMap contributors",
           "quality": "open_community_data"
+        }
+      ],
+      "linked_place_ids": []
+    },
+    {
+      "id": "trail:usfs:15e09",
+      "source_ids": [
+        "usfs:15E09"
+      ],
+      "name": "Pohono Trail",
+      "geometry_line": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -119.5741,
+            37.7154
+          ],
+          [
+            -119.6047,
+            37.7128
+          ],
+          [
+            -119.641,
+            37.704
+          ]
+        ]
+      },
+      "representative_lat": 37.7128,
+      "representative_lng": -119.6047,
+      "distance_mi": 12.8,
+      "elevation_gain_ft": null,
+      "elevation_loss_ft": null,
+      "route_type": "Point or route",
+      "activities": [
+        "hiking",
+        "horse"
+      ],
+      "difficulty": "Moderate",
+      "surface": "Natural",
+      "access": "Verify current trail status",
+      "allowed_uses": [
+        "hiking",
+        "horse"
+      ],
+      "seasonal_notes": "Seasonal snow possible",
+      "land_manager": "Sierra National Forest",
+      "source_quality": "official_source",
+      "sources": [
+        {
+          "source": "usfs",
+          "source_id": "15E09",
+          "url": "https://data.fs.usda.gov/geodata/",
+          "license": "USFS public geospatial data; verify current dataset terms before redistribution",
+          "attribution": "USDA Forest Service",
+          "quality": "official_source"
+        }
+      ],
+      "linked_place_ids": [
+        "place:usfs:9002"
+      ]
+    },
+    {
+      "id": "trail:usfs:9003",
+      "source_ids": [
+        "usfs:9003"
+      ],
+      "name": "Forest Road 5S30",
+      "geometry_line": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -119.68,
+            37.61
+          ],
+          [
+            -119.71,
+            37.62
+          ],
+          [
+            -119.735,
+            37.64
+          ]
+        ]
+      },
+      "representative_lat": 37.62,
+      "representative_lng": -119.71,
+      "distance_mi": 4.6,
+      "elevation_gain_ft": null,
+      "elevation_loss_ft": null,
+      "route_type": "Forest road",
+      "activities": [
+        "motorcycle",
+        "4x4",
+        "overland"
+      ],
+      "difficulty": "",
+      "surface": "",
+      "access": "Seasonal gate possible",
+      "allowed_uses": [
+        "motorcycle",
+        "4x4"
+      ],
+      "seasonal_notes": "Check snow and gate status",
+      "land_manager": "Sierra National Forest",
+      "source_quality": "official_source",
+      "sources": [
+        {
+          "source": "usfs",
+          "source_id": "9003",
+          "url": "https://data.fs.usda.gov/geodata/",
+          "license": "USFS public geospatial data; verify current dataset terms before redistribution",
+          "attribution": "USDA Forest Service",
+          "quality": "official_source"
         }
       ],
       "linked_place_ids": []

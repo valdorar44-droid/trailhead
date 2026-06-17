@@ -21,6 +21,8 @@ CATEGORY_FALLBACKS = {
     "glacier": "Mapped glacier or ice feature; verify access, glacier conditions, permits, guide needs, and weather.",
     "park": "Official park or protected area; check current access, fees, closures, permits, weather, and local rules.",
     "public_land": "Mapped public land or protected area; verify land rules, access, closures, and current restrictions.",
+    "forest": "Official forest or ranger-district context; verify road access, fire restrictions, seasonal closures, and land-use rules.",
+    "forest_road": "Mapped forest road or access route; verify vehicle suitability, gates, seasonal closures, snow, and road condition.",
 }
 
 PRIMARY_ACTIONS = {

@@ -1,9 +1,9 @@
 {
   "schema_version": 3,
   "catalog_id": "trailhead-explore-v3-real-data-foundation",
-  "generated_at": 1781669995,
-  "source": "Prepared OSM/Geofabrik, RIDB/Recreation.gov, and NPS fixtures; source attribution preserved",
-  "count": 17,
+  "generated_at": 1781670271,
+  "source": "Prepared OSM/Geofabrik, RIDB/Recreation.gov, NPS, and USFS fixtures; source attribution preserved",
+  "count": 23,
   "places": [
     {
       "id": "place:osm:relation-1001",
@@ -98,8 +98,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781669995,
-      "updated_at": 1781669995,
+      "last_seen_at": 1781670271,
+      "updated_at": 1781670271,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -184,8 +184,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781669995,
-      "updated_at": 1781669995,
+      "last_seen_at": 1781670271,
+      "updated_at": 1781670271,
       "linked_trail_ids": [
         "trail:osm:relation-1001"
       ],
@@ -269,8 +269,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781669995,
-      "updated_at": 1781669995,
+      "last_seen_at": 1781670271,
+      "updated_at": 1781670271,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -353,8 +353,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781669995,
-      "updated_at": 1781669995,
+      "last_seen_at": 1781670271,
+      "updated_at": 1781670271,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -465,8 +465,8 @@
       "quality": "official_source",
       "quality_score": 85.0,
       "verified": true,
-      "last_seen_at": 1781669995,
-      "updated_at": 1781669995,
+      "last_seen_at": 1781670271,
+      "updated_at": 1781670271,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -550,8 +550,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781669995,
-      "updated_at": 1781669995,
+      "last_seen_at": 1781670271,
+      "updated_at": 1781670271,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -634,8 +634,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781669995,
-      "updated_at": 1781669995,
+      "last_seen_at": 1781670271,
+      "updated_at": 1781670271,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -719,8 +719,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781669995,
-      "updated_at": 1781669995,
+      "last_seen_at": 1781670271,
+      "updated_at": 1781670271,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -803,8 +803,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781669995,
-      "updated_at": 1781669995,
+      "last_seen_at": 1781670271,
+      "updated_at": 1781670271,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -897,8 +897,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781669995,
-      "updated_at": 1781669995,
+      "last_seen_at": 1781670271,
+      "updated_at": 1781670271,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -995,8 +995,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781669995,
-      "updated_at": 1781669995,
+      "last_seen_at": 1781670271,
+      "updated_at": 1781670271,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -1080,8 +1080,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781669995,
-      "updated_at": 1781669995,
+      "last_seen_at": 1781670271,
+      "updated_at": 1781670271,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -1166,8 +1166,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781669995,
-      "updated_at": 1781669995,
+      "last_seen_at": 1781670271,
+      "updated_at": 1781670271,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -1250,8 +1250,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781669995,
-      "updated_at": 1781669995,
+      "last_seen_at": 1781670271,
+      "updated_at": 1781670271,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -1334,8 +1334,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781669995,
-      "updated_at": 1781669995,
+      "last_seen_at": 1781670271,
+      "updated_at": 1781670271,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -1419,8 +1419,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781669995,
-      "updated_at": 1781669995,
+      "last_seen_at": 1781670271,
+      "updated_at": 1781670271,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -1519,8 +1519,589 @@
       "quality": "official_source",
       "quality_score": 85.0,
       "verified": true,
-      "last_seen_at": 1781669995,
-      "updated_at": 1781669995,
+      "last_seen_at": 1781670271,
+      "updated_at": 1781670271,
+      "linked_trail_ids": [],
+      "linked_place_ids": []
+    },
+    {
+      "id": "place:usfs:15e09",
+      "source_ids": [
+        "usfs:15E09"
+      ],
+      "name": "Pohono Trail",
+      "category": "trail",
+      "subcategories": [
+        "trail"
+      ],
+      "lat": 37.7128,
+      "lng": -119.6047,
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -119.5741,
+            37.7154
+          ],
+          [
+            -119.6047,
+            37.7128
+          ],
+          [
+            -119.641,
+            37.704
+          ]
+        ]
+      },
+      "country": "US",
+      "region": "CA",
+      "admin": "Sierra National Forest",
+      "summary": "Pohono Trail is an official Sierra National Forest trail record. Verify access, seasonal closures, fire restrictions, road conditions, and local rules before relying on it.",
+      "description": "Mapped trail or route; check current trail conditions, permits, weather, daylight, and navigation before starting.",
+      "tags": [
+        "trail",
+        "usfs",
+        "forest service",
+        "Sierra National Forest"
+      ],
+      "search_aliases": [
+        "hike",
+        "hiking",
+        "trek",
+        "trekking",
+        "walk",
+        "route"
+      ],
+      "search_blob": "pohono trail trail trail trail usfs forest service sierra national forest hike hiking trek trekking walk route us ca sierra national forest pohono trail is an official sierra national forest trail record. verify access, seasonal closures, fire restrictions, road conditions, and local rules before relying on it. mapped trail or route; check current trail conditions, permits, weather, daylight, and navigation before starting. pohono trail pohono trail is an official sierra national forest trail record. verify access, seasonal closures, fire restrictions, road conditions, and local rules before relying on it. usfs usda forest service https://data.fs.usda.gov/geodata/",
+      "difficulty": "",
+      "best_season": "",
+      "access": "Verify current trail status",
+      "safety": "",
+      "amenities": [],
+      "reservations": {},
+      "media": [],
+      "card": {
+        "headline": "Pohono Trail",
+        "summary": "Pohono Trail is an official Sierra National Forest trail record. Verify access, seasonal closures, fire restrictions, road conditions, and local rules before relying on it.",
+        "quick_facts": [
+          "Trail",
+          "CA",
+          "Verify current trail status"
+        ],
+        "warnings": [
+          "Verify access",
+          "Check official source or local rules",
+          "Offline maps recommended",
+          "Check weather and daylight"
+        ],
+        "best_for": [
+          "Hiking",
+          "Route planning",
+          "Weather checks"
+        ],
+        "source_badge": "Official source",
+        "primary_action": "Open trail",
+        "secondary_actions": [
+          "Save",
+          "Route",
+          "Weather"
+        ]
+      },
+      "sources": [
+        {
+          "source": "usfs",
+          "source_id": "15E09",
+          "url": "https://data.fs.usda.gov/geodata/",
+          "license": "USFS public geospatial data; verify current dataset terms before redistribution",
+          "attribution": "USDA Forest Service",
+          "quality": "official_source"
+        }
+      ],
+      "quality": "official_source",
+      "quality_score": 85.0,
+      "verified": true,
+      "last_seen_at": 1781670271,
+      "updated_at": 1781670271,
+      "linked_trail_ids": [],
+      "linked_place_ids": []
+    },
+    {
+      "id": "place:usfs:9002",
+      "source_ids": [
+        "usfs:9002"
+      ],
+      "name": "Pohono Trailhead",
+      "category": "trailhead",
+      "subcategories": [
+        "trailhead"
+      ],
+      "lat": 37.7153,
+      "lng": -119.574,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -119.574,
+          37.7153
+        ]
+      },
+      "country": "US",
+      "region": "CA",
+      "admin": "Sierra National Forest",
+      "summary": "Pohono Trailhead is an official Sierra National Forest trailhead record. Verify access, seasonal closures, fire restrictions, road conditions, and local rules before relying on it.",
+      "description": "Mapped trail access point; confirm parking, road conditions, closures, daylight, and route details before starting.",
+      "tags": [
+        "trailhead",
+        "usfs",
+        "forest service",
+        "Sierra National Forest"
+      ],
+      "search_aliases": [
+        "start point",
+        "parking",
+        "hike start",
+        "trail access",
+        "Pohono Trail"
+      ],
+      "search_blob": "pohono trailhead trailhead trailhead trailhead usfs forest service sierra national forest start point parking hike start trail access pohono trail us ca sierra national forest pohono trailhead is an official sierra national forest trailhead record. verify access, seasonal closures, fire restrictions, road conditions, and local rules before relying on it. mapped trail access point; confirm parking, road conditions, closures, daylight, and route details before starting. pohono trailhead pohono trailhead is an official sierra national forest trailhead record. verify access, seasonal closures, fire restrictions, road conditions, and local rules before relying on it. pohono trail usfs usda forest service https://data.fs.usda.gov/geodata/",
+      "difficulty": "",
+      "best_season": "",
+      "access": "Verify parking and road conditions",
+      "safety": "",
+      "amenities": [
+        "parking"
+      ],
+      "reservations": {},
+      "media": [],
+      "card": {
+        "headline": "Pohono Trailhead",
+        "summary": "Pohono Trailhead is an official Sierra National Forest trailhead record. Verify access, seasonal closures, fire restrictions, road conditions, and local rules before relying on it.",
+        "quick_facts": [
+          "Trailhead",
+          "CA",
+          "Verify parking and road conditions"
+        ],
+        "warnings": [
+          "Verify access",
+          "Check official source or local rules",
+          "Offline maps recommended",
+          "Check weather and daylight"
+        ],
+        "best_for": [
+          "Trail access",
+          "Parking check",
+          "Route start"
+        ],
+        "source_badge": "Official source",
+        "primary_action": "Show access",
+        "secondary_actions": [
+          "Save",
+          "Route",
+          "Weather"
+        ]
+      },
+      "sources": [
+        {
+          "source": "usfs",
+          "source_id": "9002",
+          "url": "https://data.fs.usda.gov/geodata/",
+          "license": "USFS public geospatial data; verify current dataset terms before redistribution",
+          "attribution": "USDA Forest Service",
+          "quality": "official_source"
+        }
+      ],
+      "quality": "official_source",
+      "quality_score": 85.0,
+      "verified": true,
+      "last_seen_at": 1781670271,
+      "updated_at": 1781670271,
+      "linked_trail_ids": [
+        "trail:usfs:15e09"
+      ],
+      "linked_place_ids": []
+    },
+    {
+      "id": "place:usfs:9003",
+      "source_ids": [
+        "usfs:9003"
+      ],
+      "name": "Forest Road 5S30",
+      "category": "forest_road",
+      "subcategories": [
+        "forest_road"
+      ],
+      "lat": 37.62,
+      "lng": -119.71,
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -119.68,
+            37.61
+          ],
+          [
+            -119.71,
+            37.62
+          ],
+          [
+            -119.735,
+            37.64
+          ]
+        ]
+      },
+      "country": "US",
+      "region": "CA",
+      "admin": "Sierra National Forest",
+      "summary": "Forest Road 5S30 is an official Sierra National Forest forest road record. Verify access, seasonal closures, fire restrictions, road conditions, and local rules before relying on it.",
+      "description": "Mapped forest road or access route; verify vehicle suitability, gates, seasonal closures, snow, and road condition.",
+      "tags": [
+        "forest_road",
+        "usfs",
+        "forest service",
+        "Sierra National Forest"
+      ],
+      "search_aliases": [
+        "forest road",
+        "service road",
+        "fs road",
+        "road access"
+      ],
+      "search_blob": "forest road 5s30 forest_road forest_road forest_road usfs forest service sierra national forest forest road service road fs road road access us ca sierra national forest forest road 5s30 is an official sierra national forest forest road record. verify access, seasonal closures, fire restrictions, road conditions, and local rules before relying on it. mapped forest road or access route; verify vehicle suitability, gates, seasonal closures, snow, and road condition. forest road 5s30 forest road 5s30 is an official sierra national forest forest road record. verify access, seasonal closures, fire restrictions, road conditions, and local rules before relying on it. usfs usda forest service https://data.fs.usda.gov/geodata/",
+      "difficulty": "",
+      "best_season": "",
+      "access": "Seasonal gate possible",
+      "safety": "",
+      "amenities": [],
+      "reservations": {},
+      "media": [],
+      "card": {
+        "headline": "Forest Road 5S30",
+        "summary": "Forest Road 5S30 is an official Sierra National Forest forest road record. Verify access, seasonal closures, fire restrictions, road conditions, and local rules before relying on it.",
+        "quick_facts": [
+          "Forest Road",
+          "CA",
+          "Seasonal gate possible"
+        ],
+        "warnings": [
+          "Verify access",
+          "Check official source or local rules",
+          "Offline maps recommended"
+        ],
+        "best_for": [
+          "Map context",
+          "Nearby stops",
+          "Route planning"
+        ],
+        "source_badge": "Official source",
+        "primary_action": "Show on map",
+        "secondary_actions": [
+          "Save",
+          "Route",
+          "Weather"
+        ]
+      },
+      "sources": [
+        {
+          "source": "usfs",
+          "source_id": "9003",
+          "url": "https://data.fs.usda.gov/geodata/",
+          "license": "USFS public geospatial data; verify current dataset terms before redistribution",
+          "attribution": "USDA Forest Service",
+          "quality": "official_source"
+        }
+      ],
+      "quality": "official_source",
+      "quality_score": 85.0,
+      "verified": true,
+      "last_seen_at": 1781670271,
+      "updated_at": 1781670271,
+      "linked_trail_ids": [],
+      "linked_place_ids": []
+    },
+    {
+      "id": "place:usfs:9004",
+      "source_ids": [
+        "usfs:9004"
+      ],
+      "name": "Sierra Creek Campground",
+      "category": "campground",
+      "subcategories": [
+        "campground"
+      ],
+      "lat": 37.63,
+      "lng": -119.69,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -119.69,
+          37.63
+        ]
+      },
+      "country": "US",
+      "region": "CA",
+      "admin": "Sierra National Forest",
+      "summary": "Sierra Creek Campground is an official Sierra National Forest campground record. Verify access, seasonal closures, fire restrictions, road conditions, and local rules before relying on it.",
+      "description": "Mapped camping location; check access, fees, fire restrictions, reservations, and seasonal road conditions.",
+      "tags": [
+        "campground",
+        "usfs",
+        "forest service",
+        "Sierra National Forest"
+      ],
+      "search_aliases": [
+        "camp",
+        "camping",
+        "campsite",
+        "tent",
+        "rv",
+        "overnight"
+      ],
+      "search_blob": "sierra creek campground campground campground campground usfs forest service sierra national forest camp camping campsite tent rv overnight us ca sierra national forest sierra creek campground is an official sierra national forest campground record. verify access, seasonal closures, fire restrictions, road conditions, and local rules before relying on it. mapped camping location; check access, fees, fire restrictions, reservations, and seasonal road conditions. sierra creek campground sierra creek campground is an official sierra national forest campground record. verify access, seasonal closures, fire restrictions, road conditions, and local rules before relying on it. usfs usda forest service https://data.fs.usda.gov/geodata/",
+      "difficulty": "",
+      "best_season": "",
+      "access": "",
+      "safety": "",
+      "amenities": [
+        "water",
+        "toilets",
+        "fee"
+      ],
+      "reservations": {},
+      "media": [],
+      "card": {
+        "headline": "Sierra Creek Campground",
+        "summary": "Sierra Creek Campground is an official Sierra National Forest campground record. Verify access, seasonal closures, fire restrictions, road conditions, and local rules before relying on it.",
+        "quick_facts": [
+          "Campground",
+          "CA"
+        ],
+        "warnings": [
+          "Verify access",
+          "Check official source or local rules",
+          "Offline maps recommended"
+        ],
+        "best_for": [
+          "Overnight planning",
+          "Fire rule checks",
+          "Nearby trails"
+        ],
+        "source_badge": "Official source",
+        "primary_action": "Check camping",
+        "secondary_actions": [
+          "Save",
+          "Route",
+          "Weather"
+        ]
+      },
+      "sources": [
+        {
+          "source": "usfs",
+          "source_id": "9004",
+          "url": "https://data.fs.usda.gov/geodata/",
+          "license": "USFS public geospatial data; verify current dataset terms before redistribution",
+          "attribution": "USDA Forest Service",
+          "quality": "official_source"
+        }
+      ],
+      "quality": "official_source",
+      "quality_score": 85.0,
+      "verified": true,
+      "last_seen_at": 1781670271,
+      "updated_at": 1781670271,
+      "linked_trail_ids": [],
+      "linked_place_ids": []
+    },
+    {
+      "id": "place:usfs:9005",
+      "source_ids": [
+        "usfs:9005"
+      ],
+      "name": "Meadow Lookout Shelter",
+      "category": "shelter",
+      "subcategories": [
+        "shelter"
+      ],
+      "lat": 37.66,
+      "lng": -119.72,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -119.72,
+          37.66
+        ]
+      },
+      "country": "US",
+      "region": "CA",
+      "admin": "Sierra National Forest",
+      "summary": "Meadow Lookout Shelter is an official Sierra National Forest shelter record. Verify access, seasonal closures, fire restrictions, road conditions, and local rules before relying on it.",
+      "description": "Backcountry shelter or hut; confirm condition, reservations, weather, and seasonal access.",
+      "tags": [
+        "shelter",
+        "usfs",
+        "forest service",
+        "Sierra National Forest"
+      ],
+      "search_aliases": [
+        "lean-to",
+        "backcountry shelter",
+        "wilderness shelter"
+      ],
+      "search_blob": "meadow lookout shelter shelter shelter shelter usfs forest service sierra national forest lean-to backcountry shelter wilderness shelter us ca sierra national forest meadow lookout shelter is an official sierra national forest shelter record. verify access, seasonal closures, fire restrictions, road conditions, and local rules before relying on it. backcountry shelter or hut; confirm condition, reservations, weather, and seasonal access. meadow lookout shelter meadow lookout shelter is an official sierra national forest shelter record. verify access, seasonal closures, fire restrictions, road conditions, and local rules before relying on it. usfs usda forest service https://data.fs.usda.gov/geodata/",
+      "difficulty": "",
+      "best_season": "",
+      "access": "Verify reservation and road access",
+      "safety": "",
+      "amenities": [],
+      "reservations": {},
+      "media": [],
+      "card": {
+        "headline": "Meadow Lookout Shelter",
+        "summary": "Meadow Lookout Shelter is an official Sierra National Forest shelter record. Verify access, seasonal closures, fire restrictions, road conditions, and local rules before relying on it.",
+        "quick_facts": [
+          "Shelter",
+          "CA",
+          "Verify reservation and road access"
+        ],
+        "warnings": [
+          "Verify access",
+          "Check official source or local rules",
+          "Offline maps recommended"
+        ],
+        "best_for": [
+          "Map context",
+          "Nearby stops",
+          "Route planning"
+        ],
+        "source_badge": "Official source",
+        "primary_action": "Show on map",
+        "secondary_actions": [
+          "Save",
+          "Route",
+          "Weather"
+        ]
+      },
+      "sources": [
+        {
+          "source": "usfs",
+          "source_id": "9005",
+          "url": "https://data.fs.usda.gov/geodata/",
+          "license": "USFS public geospatial data; verify current dataset terms before redistribution",
+          "attribution": "USDA Forest Service",
+          "quality": "official_source"
+        }
+      ],
+      "quality": "official_source",
+      "quality_score": 85.0,
+      "verified": true,
+      "last_seen_at": 1781670271,
+      "updated_at": 1781670271,
+      "linked_trail_ids": [],
+      "linked_place_ids": []
+    },
+    {
+      "id": "place:usfs:9006",
+      "source_ids": [
+        "usfs:9006"
+      ],
+      "name": "Sierra National Forest",
+      "category": "forest",
+      "subcategories": [
+        "national_forest"
+      ],
+      "lat": 37.75,
+      "lng": -119.55,
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              -119.75,
+              37.6
+            ],
+            [
+              -119.55,
+              37.6
+            ],
+            [
+              -119.55,
+              37.75
+            ],
+            [
+              -119.75,
+              37.75
+            ],
+            [
+              -119.75,
+              37.6
+            ]
+          ]
+        ]
+      },
+      "country": "US",
+      "region": "CA",
+      "admin": "Sierra National Forest",
+      "summary": "Sierra National Forest is an official Sierra National Forest forest record. Verify access, seasonal closures, fire restrictions, road conditions, and local rules before relying on it.",
+      "description": "Official forest or ranger-district context; verify road access, fire restrictions, seasonal closures, and land-use rules.",
+      "tags": [
+        "forest",
+        "national_forest",
+        "usfs",
+        "forest service",
+        "Sierra National Forest"
+      ],
+      "search_aliases": [
+        "national forest",
+        "forest service",
+        "public land",
+        "wilderness"
+      ],
+      "search_blob": "sierra national forest forest national_forest forest national_forest usfs forest service sierra national forest national forest forest service public land wilderness us ca sierra national forest sierra national forest is an official sierra national forest forest record. verify access, seasonal closures, fire restrictions, road conditions, and local rules before relying on it. official forest or ranger-district context; verify road access, fire restrictions, seasonal closures, and land-use rules. sierra national forest sierra national forest is an official sierra national forest forest record. verify access, seasonal closures, fire restrictions, road conditions, and local rules before relying on it. usfs usda forest service https://data.fs.usda.gov/geodata/",
+      "difficulty": "",
+      "best_season": "",
+      "access": "",
+      "safety": "",
+      "amenities": [],
+      "reservations": {},
+      "media": [],
+      "card": {
+        "headline": "Sierra National Forest",
+        "summary": "Sierra National Forest is an official Sierra National Forest forest record. Verify access, seasonal closures, fire restrictions, road conditions, and local rules before relying on it.",
+        "quick_facts": [
+          "Forest",
+          "CA"
+        ],
+        "warnings": [
+          "Verify access",
+          "Check official source or local rules",
+          "Offline maps recommended"
+        ],
+        "best_for": [
+          "Map context",
+          "Nearby stops",
+          "Route planning"
+        ],
+        "source_badge": "Official source",
+        "primary_action": "Show on map",
+        "secondary_actions": [
+          "Save",
+          "Route",
+          "Weather"
+        ]
+      },
+      "sources": [
+        {
+          "source": "usfs",
+          "source_id": "9006",
+          "url": "https://data.fs.usda.gov/geodata/",
+          "license": "USFS public geospatial data; verify current dataset terms before redistribution",
+          "attribution": "USDA Forest Service",
+          "quality": "official_source"
+        }
+      ],
+      "quality": "official_source",
+      "quality_score": 85.0,
+      "verified": true,
+      "last_seen_at": 1781670271,
+      "updated_at": 1781670271,
       "linked_trail_ids": [],
       "linked_place_ids": []
     }

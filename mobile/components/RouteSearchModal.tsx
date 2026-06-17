@@ -450,13 +450,21 @@ export default function RouteSearchModal({
       .catch(() => setOfflineTrips([]));
   }, [visible]);
 
+  const focusSearchInput = useCallback(() => {
+    const delays = Platform.OS === 'android' ? [80, 220, 420] : [60, 160];
+    inputRef.current?.focus();
+    delays.forEach(delay => {
+      setTimeout(() => inputRef.current?.focus(), delay);
+    });
+  }, []);
+
   useEffect(() => {
     if (!visible || view !== 'searching') return;
     const interaction = InteractionManager.runAfterInteractions(() => {
-      setTimeout(() => inputRef.current?.focus(), Platform.OS === 'android' ? 180 : 80);
+      focusSearchInput();
     });
     return () => interaction.cancel();
-  }, [visible, view]);
+  }, [focusSearchInput, visible, view]);
 
   const getExtremeSearchSession = useCallback(async () => {
     const now = Date.now();
@@ -831,7 +839,7 @@ export default function RouteSearchModal({
     }, {} as Record<string, typeof searchHistory>);
 
     return (
-      <Modal visible animationType="slide" transparent={false} statusBarTranslucent>
+      <Modal visible animationType="slide" transparent={false} statusBarTranslucent onShow={focusSearchInput}>
         <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <View style={s.searchingSheet}>
@@ -841,9 +849,10 @@ export default function RouteSearchModal({
               <Ionicons name="arrow-back" size={20} color={C.text2} />
             </TouchableOpacity>
             <TextInput ref={inputRef} style={s.searchInput} value={query} onChangeText={setQuery}
+              onPressIn={focusSearchInput}
               onSubmitEditing={() => { Keyboard.dismiss(); doSearch(); }}
               placeholder={activeEndpoint === 'origin' ? 'Start address or place' : 'Destination address or place'} placeholderTextColor={C.text3}
-              returnKeyType="search" blurOnSubmit autoFocus />
+              returnKeyType="search" blurOnSubmit autoFocus showSoftInputOnFocus />
             {searching
               ? <ActivityIndicator size="small" color={C.orange} />
                 : <TouchableOpacity onPress={() => { Keyboard.dismiss(); setView('picker'); setQuery(''); setResults([]); setActiveCat(null); setCatResults([]); }}>

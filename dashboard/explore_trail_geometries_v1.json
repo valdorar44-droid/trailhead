@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "generated_at": 1781670271,
-  "count": 5,
+  "generated_at": 1781671357,
+  "count": 7,
   "trails": [
     {
       "id": "trail:osm:relation-1001",
@@ -262,6 +262,123 @@
           "url": "https://data.fs.usda.gov/geodata/",
           "license": "USFS public geospatial data; verify current dataset terms before redistribution",
           "attribution": "USDA Forest Service",
+          "quality": "official_source"
+        }
+      ],
+      "linked_place_ids": []
+    },
+    {
+      "id": "trail:blm:ut-moab-ohv-001",
+      "source_ids": [
+        "blm:ut-moab-ohv-001"
+      ],
+      "name": "Fins and Things OHV Route",
+      "geometry_line": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -109.4822,
+            38.5812
+          ],
+          [
+            -109.4742,
+            38.5744
+          ],
+          [
+            -109.4677,
+            38.5686
+          ],
+          [
+            -109.4596,
+            38.5615
+          ]
+        ]
+      },
+      "representative_lat": 38.5686,
+      "representative_lng": -109.4677,
+      "distance_mi": 9.4,
+      "elevation_gain_ft": null,
+      "elevation_loss_ft": null,
+      "route_type": "OHV route",
+      "activities": [
+        "OHV",
+        "motorcycle",
+        "4x4",
+        "overland"
+      ],
+      "difficulty": "Difficult",
+      "surface": "Slickrock and sand",
+      "access": "Designated route",
+      "allowed_uses": [
+        "OHV",
+        "motorcycle",
+        "4x4"
+      ],
+      "seasonal_notes": "",
+      "land_manager": "Moab Field Office",
+      "source_quality": "official_source",
+      "sources": [
+        {
+          "source": "blm",
+          "source_id": "ut-moab-ohv-001",
+          "url": "https://www.blm.gov/visit/fins-and-things",
+          "license": "BLM public geospatial data; verify current dataset terms before redistribution",
+          "attribution": "Bureau of Land Management",
+          "quality": "official_source"
+        }
+      ],
+      "linked_place_ids": []
+    },
+    {
+      "id": "trail:blm:ut-moab-drive-001",
+      "source_ids": [
+        "blm:ut-moab-drive-001"
+      ],
+      "name": "Potash Road Scenic Drive",
+      "geometry_line": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -109.5891,
+            38.5742
+          ],
+          [
+            -109.6166,
+            38.5538
+          ],
+          [
+            -109.655,
+            38.5308
+          ],
+          [
+            -109.7055,
+            38.5071
+          ]
+        ]
+      },
+      "representative_lat": 38.5308,
+      "representative_lng": -109.655,
+      "distance_mi": 17.0,
+      "elevation_gain_ft": null,
+      "elevation_loss_ft": null,
+      "route_type": "Scenic drive",
+      "activities": [
+        "driving"
+      ],
+      "difficulty": "",
+      "surface": "Paved and graded road",
+      "access": "Open; verify weather and road status",
+      "allowed_uses": [],
+      "seasonal_notes": "",
+      "land_manager": "Moab Field Office",
+      "source_quality": "official_source",
+      "sources": [
+        {
+          "source": "blm",
+          "source_id": "ut-moab-drive-001",
+          "url": "https://www.blm.gov/visit/potash-road",
+          "license": "BLM public geospatial data; verify current dataset terms before redistribution",
+          "attribution": "Bureau of Land Management",
           "quality": "official_source"
         }
       ],

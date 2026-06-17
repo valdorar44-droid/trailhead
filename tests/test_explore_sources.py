@@ -11,6 +11,7 @@ from scripts.explore_sources.base.cards import build_card
 from scripts.explore_sources.base.dedupe import dedupe_places
 from scripts.explore_sources.base.quality import score_place
 from scripts.explore_sources.base.schema import ExplorePlaceV3
+from scripts.explore_sources.blm.import_blm import import_blm_fixture
 from scripts.explore_sources.nps.import_nps import import_nps_fixture
 from scripts.explore_sources.osm.import_geofabrik import import_osm_fixture
 from scripts.explore_sources.ridb.import_ridb import import_ridb_fixture
@@ -23,6 +24,7 @@ PAKISTAN = ROOT / "tests/fixtures/explore_sources/osm_pakistan_sample.geojson"
 RIDB = ROOT / "tests/fixtures/explore_sources/ridb_sample.json"
 NPS = ROOT / "tests/fixtures/explore_sources/nps_sample.json"
 USFS = ROOT / "tests/fixtures/explore_sources/usfs_sierra_sample.geojson"
+BLM = ROOT / "tests/fixtures/explore_sources/blm_moab_sample.geojson"
 
 
 class ExploreSourcePipelineTests(unittest.TestCase):
@@ -124,6 +126,31 @@ class ExploreSourcePipelineTests(unittest.TestCase):
         self.assertTrue(all(record.license.startswith("USFS") for record in records))
         self.assertTrue(all("USDA Forest Service" in record.attribution for record in records))
 
+    def test_blm_importer_builds_public_land_ohv_and_dispersed_camp(self):
+        records, places, trails = import_blm_fixture(BLM, fetched_at=123)
+        self.assertEqual(len(records), 6)
+        self.assertEqual(len(trails), 2)
+        categories = {place.category for place in places}
+        self.assertIn("offroad_route", categories)
+        self.assertIn("scenic_drive", categories)
+        self.assertIn("public_land", categories)
+        self.assertIn("dispersed_camp", categories)
+        self.assertIn("trailhead", categories)
+        self.assertIn("viewpoint", categories)
+        ohv = next(trail for trail in trails if trail.name == "Fins and Things OHV Route")
+        self.assertEqual(ohv.route_type, "OHV route")
+        self.assertIn("4x4", ohv.allowed_uses)
+        self.assertIn("overland", ohv.activities)
+        monument = next(place for place in places if place.name == "Bears Ears National Monument")
+        self.assertEqual(monument.category, "public_land")
+        self.assertIn("national_monument", monument.subcategories)
+        self.assertIn("monuments", monument.search_blob)
+        camp = next(place for place in places if place.name == "Willow Springs Dispersed Camping")
+        self.assertEqual(camp.category, "dispersed_camp")
+        self.assertIn("boondocking", camp.search_blob)
+        self.assertTrue(all(record.license.startswith("BLM") for record in records))
+        self.assertTrue(all("Bureau of Land Management" in record.attribution for record in records))
+
     def test_peak_viewpoint_and_trail_same_name_do_not_auto_merge(self):
         _records, places, _trails = build_catalog([str(YOSEMITE)])
         sentinel = [place for place in places if place.name == "Sentinel Dome"]
@@ -156,6 +183,7 @@ class ExploreSourcePipelineTests(unittest.TestCase):
             ridb_fixtures=[str(RIDB)],
             nps_fixtures=[str(NPS)],
             usfs_fixtures=[str(USFS)],
+            blm_fixtures=[str(BLM)],
         )
         self.assertGreaterEqual(len(records), 10)
         self.assertTrue(any(trail.name == "K2 Base Camp Trek" for trail in trails))
@@ -166,8 +194,10 @@ class ExploreSourcePipelineTests(unittest.TestCase):
         self.assertTrue(any(place.name == "Yosemite National Park" and place.category == "park" for place in places))
         self.assertTrue(any(place.name == "Pohono Trail" and place.category == "trail" for place in places))
         self.assertTrue(any(place.name == "Forest Road 5S30" and place.category == "forest_road" for place in places))
+        self.assertTrue(any(place.name == "Bears Ears National Monument" and place.category == "public_land" for place in places))
+        self.assertTrue(any(place.name == "Fins and Things OHV Route" and place.category == "offroad_route" for place in places))
         blobs = " ".join(place.search_blob for place in places)
-        for term in ["camping", "hiking", "trailhead", "waterfalls", "fuel", "resupply", "k2", "hunza", "national park", "forest road"]:
+        for term in ["camping", "hiking", "trailhead", "waterfalls", "fuel", "resupply", "k2", "hunza", "national park", "forest road", "ohv", "monuments", "boondocking"]:
             self.assertIn(term, blobs)
 
     def test_command_writes_outputs(self):
@@ -185,6 +215,7 @@ class ExploreSourcePipelineTests(unittest.TestCase):
                     "--ridb-fixture", str(RIDB),
                     "--nps-fixture", str(NPS),
                     "--usfs-fixture", str(USFS),
+                    "--blm-fixture", str(BLM),
                     "--out", str(out),
                     "--trails-out", str(trails_out),
                     "--source-records-out", str(records_out),

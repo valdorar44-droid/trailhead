@@ -21,16 +21,22 @@ CATEGORY_FALLBACKS = {
     "glacier": "Mapped glacier or ice feature; verify access, glacier conditions, permits, guide needs, and weather.",
     "park": "Official park or protected area; check current access, fees, closures, permits, weather, and local rules.",
     "public_land": "Mapped public land or protected area; verify land rules, access, closures, and current restrictions.",
+    "dispersed_camp": "Mapped dispersed camping area; confirm overnight limits, road access, fire restrictions, human-waste rules, and current closures.",
     "forest": "Official forest or ranger-district context; verify road access, fire restrictions, seasonal closures, and land-use rules.",
     "forest_road": "Mapped forest road or access route; verify vehicle suitability, gates, seasonal closures, snow, and road condition.",
+    "offroad_route": "Mapped OHV or overland route; verify vehicle suitability, current route status, seasonal closures, permits, and land-manager rules.",
+    "scenic_drive": "Mapped scenic drive or byway; verify road condition, seasonal closures, fuel range, weather, and daylight.",
 }
 
 PRIMARY_ACTIONS = {
     "trail": "Open trail",
     "trailhead": "Show access",
     "campground": "Check camping",
+    "dispersed_camp": "Check camping",
     "fuel": "Route to fuel",
     "resupply": "Check hours",
+    "offroad_route": "Open route",
+    "scenic_drive": "Open drive",
 }
 
 
@@ -83,8 +89,11 @@ def best_for(category: str) -> list[str]:
         "trail": ["Hiking", "Route planning", "Weather checks"],
         "trailhead": ["Trail access", "Parking check", "Route start"],
         "campground": ["Overnight planning", "Fire rule checks", "Nearby trails"],
+        "dispersed_camp": ["Wild camping", "Fire rule checks", "Road access"],
         "waterfall": ["Short detours", "Photos", "Flow checks"],
         "hut": ["Backcountry stays", "Weather checks", "Reservation planning"],
+        "offroad_route": ["Overland routes", "Road status", "Vehicle planning"],
+        "scenic_drive": ["Road trips", "Viewpoints", "Fuel planning"],
         "fuel": ["Road trips", "Range planning", "Service checks"],
         "resupply": ["Food", "Gear", "Trip support"],
     }.get(category, ["Map context", "Nearby stops", "Route planning"])

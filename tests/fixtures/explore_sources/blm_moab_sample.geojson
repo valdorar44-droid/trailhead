@@ -1,0 +1,131 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "BLM_ID": "ut-moab-ohv-001",
+        "ROUTE_NAME": "Fins and Things OHV Route",
+        "FEATURE_TYPE": "OHV Route",
+        "ROUTE_TYPE": "OHV route",
+        "STATE": "UT",
+        "FIELD_OFFICE": "Moab Field Office",
+        "LENGTH_MILES": 9.4,
+        "SURFACE": "Slickrock and sand",
+        "ACCESS_STATUS": "Designated route",
+        "DIFFICULTY": "Difficult",
+        "OHV": "yes",
+        "FOUR_WHEEL_DRIVE": "yes",
+        "MOTORCYCLE": "yes",
+        "SOURCE_URL": "https://www.blm.gov/visit/fins-and-things"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-109.4822, 38.5812],
+          [-109.4742, 38.5744],
+          [-109.4677, 38.5686],
+          [-109.4596, 38.5615]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "BLM_ID": "ut-moab-drive-001",
+        "ROUTE_NAME": "Potash Road Scenic Drive",
+        "FEATURE_TYPE": "Scenic Drive",
+        "ROUTE_TYPE": "Scenic drive",
+        "STATE": "UT",
+        "FIELD_OFFICE": "Moab Field Office",
+        "LENGTH_MILES": 17.0,
+        "SURFACE": "Paved and graded road",
+        "ACCESS_STATUS": "Open; verify weather and road status",
+        "SOURCE_URL": "https://www.blm.gov/visit/potash-road"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-109.5891, 38.5742],
+          [-109.6166, 38.5538],
+          [-109.6550, 38.5308],
+          [-109.7055, 38.5071]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "BLM_ID": "ut-bears-ears-001",
+        "AREA_NAME": "Bears Ears National Monument",
+        "FEATURE_TYPE": "National Monument",
+        "DESIGNATION": "National Conservation Lands",
+        "STATE": "UT",
+        "FIELD_OFFICE": "Monticello Field Office",
+        "ACCESS_STATUS": "Verify current access and permits",
+        "SOURCE_URL": "https://www.blm.gov/programs/national-conservation-lands/utah/bears-ears-national-monument"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-109.92, 37.78],
+          [-109.72, 37.78],
+          [-109.72, 37.62],
+          [-109.92, 37.62],
+          [-109.92, 37.78]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "BLM_ID": "ut-moab-camp-001",
+        "SITE_NAME": "Willow Springs Dispersed Camping",
+        "SITE_TYPE": "Dispersed Camping",
+        "STATE": "UT",
+        "FIELD_OFFICE": "Moab Field Office",
+        "ACCESS_STATUS": "Designated dispersed camping area",
+        "PARKING": "yes",
+        "SOURCE_URL": "https://www.blm.gov/visit/moab-camping"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [-109.5435, 38.6847]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "BLM_ID": "ut-moab-th-001",
+        "SITE_NAME": "Corona Arch Trailhead",
+        "SITE_TYPE": "Trailhead",
+        "STATE": "UT",
+        "FIELD_OFFICE": "Moab Field Office",
+        "ACCESS_STATUS": "Day-use access; verify parking and heat",
+        "PARKING": "yes",
+        "TOILET": "yes",
+        "SOURCE_URL": "https://www.blm.gov/visit/corona-arch"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [-109.6783, 38.5740]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "BLM_ID": "ut-moab-view-001",
+        "SITE_NAME": "Fisher Towers Overlook",
+        "SITE_TYPE": "Viewpoint",
+        "STATE": "UT",
+        "FIELD_OFFICE": "Moab Field Office",
+        "ACCESS_STATUS": "Verify road conditions",
+        "SOURCE_URL": "https://www.blm.gov/visit/fisher-towers"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [-109.3096, 38.7245]
+      }
+    }
+  ]
+}

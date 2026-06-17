@@ -236,6 +236,7 @@ WEB_DIST = Path(__file__).parent / "site" / "dist"
 BLOG_INDEX = Path(__file__).parent / "blog.html"
 BLOG_DIR = Path(__file__).parent / "blog"
 EXPLORE_CATALOG = Path(__file__).parent / "explore_catalog_v1.json"
+EXPLORE_CATALOG_V3 = Path(__file__).parent / "explore_catalog_v3.json"
 EXPLORE_ASSETS = Path(__file__).parent / "explore_assets"
 APP_ICON = Path(__file__).resolve().parents[1] / "mobile" / "assets" / "icon.png"
 
@@ -578,11 +579,227 @@ def _build_trip_timeline(
     }
 
 
+def _title_case_category(value: object) -> str:
+    text = re.sub(r"[_-]+", " ", str(value or "").strip())
+    return " ".join(part.capitalize() for part in text.split()) or "Explore"
+
+
+def _v3_explore_group(category: str) -> str:
+    normalized = str(category or "").lower()
+    if normalized in {"campground", "dispersed_camp", "rv_park"}:
+        return "camping"
+    if normalized in {"trail", "trailhead", "forest_road", "offroad_route", "scenic_drive"}:
+        return "trails"
+    if normalized in {"park", "public_land", "forest", "wilderness"}:
+        return "parks"
+    if normalized in {"waterfall", "lake", "glacier", "hot_spring", "river", "shore"}:
+        return "water"
+    if normalized in {"climbing_area", "bouldering_area", "peak", "viewpoint"}:
+        return "scenic"
+    if normalized in {"historic_site", "monument"}:
+        return "monuments"
+    if normalized in {"fuel", "resupply"}:
+        return "services"
+    return "explore"
+
+
+def _v3_source_quality(value: object) -> str:
+    normalized = str(value or "").lower()
+    return {
+        "official_source": "official",
+        "open_community_data": "open",
+        "curated_trailhead": "curated",
+        "needs_verification": "needs_verification",
+    }.get(normalized, normalized or "open")
+
+
+def _v3_primary_source(place: dict) -> dict:
+    sources = place.get("sources") if isinstance(place.get("sources"), list) else []
+    for source in sources:
+        if isinstance(source, dict):
+            return source
+    return {}
+
+
+def _v3_primary_media(place: dict) -> dict:
+    media = place.get("media") if isinstance(place.get("media"), list) else []
+    for item in media:
+        if isinstance(item, dict) and item.get("url"):
+            return item
+    return {}
+
+
+def _explore_v3_place_to_profile(place: dict, rank: int = 900000) -> dict:
+    place_id = str(place.get("id") or f"place:v3:{rank}")
+    title = str(place.get("name") or place.get("title") or "Explore stop").strip()
+    category = str(place.get("category") or "explore").strip()
+    category_title = _title_case_category(category)
+    region = str(place.get("region") or place.get("admin") or place.get("country") or "").strip()
+    summary_text = str(place.get("summary") or place.get("description") or "").strip()
+    description = str(place.get("description") or summary_text or f"{title} is mapped from open source data.").strip()
+    tags = [str(tag) for tag in (place.get("tags") or []) if str(tag).strip()]
+    card = place.get("card") if isinstance(place.get("card"), dict) else {}
+    primary_source = _v3_primary_source(place)
+    primary_media = _v3_primary_media(place)
+    source_title = (
+        primary_source.get("title")
+        or primary_source.get("publisher")
+        or primary_source.get("source")
+        or card.get("source_badge")
+        or "Open source"
+    )
+    source_url = primary_source.get("url") or primary_source.get("source_url") or ""
+    image_url = primary_media.get("url") or ""
+    image_credit = primary_media.get("credit") or primary_media.get("caption") or source_title or ""
+    quality = _v3_source_quality(place.get("quality"))
+    lat = place.get("lat")
+    lng = place.get("lng")
+    try:
+        lat_value = float(lat) if lat is not None else None
+        lng_value = float(lng) if lng is not None else None
+    except Exception:
+        lat_value = None
+        lng_value = None
+    hook = str(card.get("headline") or title).strip()
+    card_summary = str(card.get("summary") or summary_text or description).strip()
+    quick_facts = [str(item) for item in (card.get("quick_facts") or []) if str(item).strip()]
+    source_pack_sources = []
+    for source in place.get("sources") or []:
+        if not isinstance(source, dict):
+            continue
+        source_pack_sources.append({
+            "title": source.get("title") or source.get("publisher") or source.get("source") or source_title,
+            "publisher": source.get("publisher") or source.get("source") or source_title,
+            "url": source.get("url") or source.get("source_url") or "",
+            "kind": source.get("kind") or source.get("source") or quality,
+        })
+    photos = []
+    for item in place.get("media") or []:
+        if isinstance(item, dict) and item.get("url"):
+            photos.append({
+                "url": item.get("url"),
+                "caption": item.get("caption") or title,
+                "credit": item.get("credit") or source_title,
+            })
+    return {
+        "id": place_id,
+        "category": category,
+        "subcategories": place.get("subcategories") or [],
+        "sources": place.get("sources") or [],
+        "source_ids": place.get("source_ids") or [],
+        "quality": place.get("quality") or quality,
+        "quality_score": place.get("quality_score"),
+        "verified": bool(place.get("verified")),
+        "search_aliases": place.get("search_aliases") or [],
+        "search_blob": place.get("search_blob") or "",
+        "best_season": place.get("best_season") or "",
+        "access": place.get("access") or "",
+        "safety": place.get("safety") or "",
+        "amenities": place.get("amenities") or [],
+        "reservations": place.get("reservations") or {},
+        "media": place.get("media") or [],
+        "geometry": place.get("geometry"),
+        "linked_trail_ids": place.get("linked_trail_ids") or [],
+        "card": {
+            "title": title,
+            "headline": hook,
+            "summary": card_summary,
+            "highlight": str(card.get("highlight") or card_summary).strip(),
+            "region": region,
+            "facts": quick_facts,
+            **card,
+        },
+        "summary": {
+            "id": place_id,
+            "title": title,
+            "category": category_title,
+            "explore_group": _v3_explore_group(category),
+            "state": region,
+            "region": region,
+            "lat": lat_value,
+            "lng": lng_value,
+            "rank": rank,
+            "hero_rank": rank,
+            "tags": tags,
+            "badges": [category_title],
+            "hook": hook,
+            "short_description": card_summary,
+            "thumbnail_url": image_url,
+            "image_url": image_url,
+            "image_credit": image_credit,
+            "image_license": primary_media.get("license") or "",
+            "source_url": source_url,
+            "source_title": source_title,
+        },
+        "profile": {
+            "hook": hook,
+            "summary": card_summary,
+            "story": description,
+            "why_it_matters": card_summary,
+            "what_to_know": str(place.get("safety") or "Check current access, closures, permits, weather, and local rules before you go."),
+            "best_time_to_stop": str(place.get("best_season") or "Check season and current conditions."),
+            "access_notes": str(place.get("access") or "Open the source link and map before committing to the stop."),
+            "nearby_context": "Use nearby camps, trails, services, weather, and map context from this stop.",
+        },
+        "audio_script": description,
+        "wiki_extract": description if any(str(source.get("source") or "").lower() == "wikidata" for source in place.get("sources") or [] if isinstance(source, dict)) else "",
+        "source_pack": {
+            "quality": quality,
+            "primary": source_title,
+            "official_url": source_url,
+            "sources": source_pack_sources,
+            "photos": photos,
+            "activities": place.get("amenities") or [],
+            "topics": tags,
+            "source_note": card.get("source_badge") or source_title,
+            "extract": description,
+            "booking_url": (place.get("reservations") or {}).get("url") if isinstance(place.get("reservations"), dict) else "",
+            "license": primary_source.get("license") or "",
+        },
+        "facts": {
+            "coordinates": f"{lat_value:.5f}, {lng_value:.5f}" if lat_value is not None and lng_value is not None else "",
+            "source_url": source_url,
+            "source_title": source_title,
+            "official_url": source_url,
+            "source_quality": quality,
+            "last_updated": place.get("last_updated"),
+        },
+        "attribution": primary_source.get("attribution") or source_title,
+    }
+
+
+def _load_explore_catalog_v3_profiles() -> list[dict]:
+    if not EXPLORE_CATALOG_V3.exists():
+        return []
+    try:
+        catalog = json.loads(EXPLORE_CATALOG_V3.read_text())
+    except Exception:
+        return []
+    profiles = []
+    for idx, place in enumerate(catalog.get("places") or [], start=1):
+        if isinstance(place, dict):
+            profiles.append(_explore_v3_place_to_profile(place, rank=900000 + idx))
+    return profiles
+
+
 def _load_explore_catalog() -> dict:
     if EXPLORE_CATALOG.exists():
         try:
             catalog = json.loads(EXPLORE_CATALOG.read_text())
-            return _apply_explore_story_overrides(catalog)
+            places = list(catalog.get("places") or [])
+            seen = {str(place.get("id") or "") for place in places if isinstance(place, dict)}
+            for place in _load_explore_catalog_v3_profiles():
+                if str(place.get("id") or "") not in seen:
+                    places.append(place)
+                    seen.add(str(place.get("id") or ""))
+            merged = {
+                **catalog,
+                "catalog_id": "explore-us-top-v1-plus-real-data-v3",
+                "source": f"{catalog.get('source') or 'Featured catalog'} + ExplorePlace v3 real-data sidecar",
+                "count": len(places),
+                "places": places,
+            }
+            return _apply_explore_story_overrides(merged)
         except Exception:
             pass
     return _apply_explore_story_overrides({
@@ -660,6 +877,10 @@ def _explore_query_text(place: dict) -> str:
         summary.get("short_description"),
         profile.get("summary"),
         profile.get("why_it_matters"),
+        place.get("category"),
+        " ".join(place.get("subcategories") or []),
+        " ".join(place.get("search_aliases") or []),
+        place.get("search_blob"),
         " ".join(summary.get("tags") or []),
     ]
     return " ".join(str(v or "") for v in values).lower()
@@ -681,6 +902,40 @@ def _explore_place_matches_categories(place_type: str, requested: set[str] | Non
     if place_type == "trail":
         return bool(normalized.intersection({"trail", "trailhead", "attraction", "tourism"}))
     return bool(normalized.intersection({place_type, "attraction", "tourism", "place", "poi"}))
+
+
+def _explore_place_category_tokens(place: dict) -> set[str]:
+    summary = place.get("summary") or {}
+    raw_values = [
+        place.get("category"),
+        summary.get("category"),
+        summary.get("explore_group"),
+        *(place.get("subcategories") or []),
+        *(summary.get("tags") or []),
+    ]
+    tokens = {_normalize_place_category(value) for value in raw_values if str(value or "").strip()}
+    if "waterfall" in tokens:
+        tokens.add("waterfalls")
+    if "hot_spring" in tokens:
+        tokens.add("springs")
+    if "climbing_area" in tokens or "bouldering_area" in tokens:
+        tokens.add("climb")
+        tokens.add("climbing")
+    if "forest_road" in tokens or "offroad_route" in tokens:
+        tokens.add("ohv")
+    return tokens
+
+
+def _explore_place_matches_category_request(place: dict, requested: set[str] | None) -> bool:
+    if not requested:
+        return True
+    normalized = {_normalize_place_category(c) for c in requested if str(c).strip()}
+    if not normalized:
+        return True
+    if _explore_place_category_tokens(place).intersection(normalized):
+        return True
+    return _explore_place_matches_categories(_catalog_place_category(place.get("summary") or {}), normalized)
+
 
 def _explore_place_index_item(place: dict) -> dict:
     summary = place.get("summary") or {}
@@ -713,6 +968,22 @@ def _explore_place_index_item(place: dict) -> dict:
         "source_title": primary_source,
         "source_url": source_url,
         "source_quality": (place.get("facts") or {}).get("source_quality") or source_pack.get("quality") or "",
+        "v3_category": place.get("category") or "",
+        "subcategories": place.get("subcategories") or [],
+        "sources": place.get("sources") or [],
+        "source_ids": place.get("source_ids") or [],
+        "quality": place.get("quality") or "",
+        "quality_score": place.get("quality_score"),
+        "verified": place.get("verified"),
+        "search_aliases": place.get("search_aliases") or [],
+        "search_blob": place.get("search_blob") or "",
+        "best_season": place.get("best_season") or "",
+        "access": place.get("access") or "",
+        "safety": place.get("safety") or "",
+        "amenities": place.get("amenities") or [],
+        "media": place.get("media") or [],
+        "card": place.get("card") or {},
+        "linked_trail_ids": place.get("linked_trail_ids") or [],
     }
 
 def _explore_place_to_nearby_place(place: dict, center_lat: float, center_lng: float) -> dict | None:
@@ -14570,7 +14841,7 @@ async def explore_catalog_index(q: str = "", category: str = "", limit: int = 50
         places = [place for place in places if all(term in _explore_query_text(place) for term in query_terms)]
     if category:
         requested = {_normalize_place_category(category)}
-        places = [place for place in places if _explore_place_matches_categories(_catalog_place_category(place.get("summary") or {}), requested)]
+        places = [place for place in places if _explore_place_matches_category_request(place, requested)]
     places = sorted(places, key=lambda p: ((p.get("summary") or {}).get("hero_rank") or (p.get("summary") or {}).get("rank") or 999999))
     cursor = max(0, int(cursor or 0))
     limit = max(1, min(int(limit or 500), 1000))
@@ -14604,7 +14875,7 @@ async def explore_places(
         places = [place for place in places if all(term in _explore_query_text(place) for term in query_terms)]
     if category:
         requested = {_normalize_place_category(category)}
-        places = [place for place in places if _explore_place_matches_categories(_catalog_place_category(place.get("summary") or {}), requested)]
+        places = [place for place in places if _explore_place_matches_category_request(place, requested)]
     if lat is not None and lng is not None and mode in {"nearby", "trip"}:
         ranked = []
         for place in places:

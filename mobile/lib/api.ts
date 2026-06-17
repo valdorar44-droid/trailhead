@@ -2385,8 +2385,14 @@ export interface ExplorePlaceProfile {
   quality_score?: number;
   search_aliases?: string[];
   best_season?: string;
-  access?: Record<string, unknown>;
-  safety?: Record<string, unknown>;
+  source_ids?: string[];
+  verified?: boolean;
+  search_blob?: string;
+  amenities?: string[];
+  media?: { url?: string; caption?: string; credit?: string; license?: string }[];
+  linked_trail_ids?: string[];
+  access?: Record<string, unknown> | string;
+  safety?: Record<string, unknown> | string;
   trails?: ExploreTrailCard[];
   profile: {
     hook: string;
@@ -2506,6 +2512,29 @@ export interface ExploreCatalogIndexItem {
   source_title?: string;
   source_url?: string;
   source_quality?: string;
+  v3_category?: string;
+  subcategories?: string[];
+  sources?: { title?: string; publisher?: string; name?: string; url?: string; kind?: string }[];
+  source_ids?: string[];
+  quality?: string;
+  quality_score?: number;
+  verified?: boolean;
+  search_aliases?: string[];
+  search_blob?: string;
+  best_season?: string;
+  access?: Record<string, unknown> | string;
+  safety?: Record<string, unknown> | string;
+  amenities?: string[];
+  media?: { url?: string; caption?: string; credit?: string; license?: string }[];
+  card?: {
+    title?: string;
+    headline?: string;
+    summary?: string;
+    highlight?: string;
+    region?: string;
+    facts?: string[];
+  };
+  linked_trail_ids?: string[];
 }
 export interface ExploreCatalogIndex {
   schema_version: number;

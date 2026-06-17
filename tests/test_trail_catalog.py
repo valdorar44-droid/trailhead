@@ -1,3 +1,4 @@
+import json
 import unittest
 import tempfile
 from pathlib import Path
@@ -8,6 +9,140 @@ from ingestors.pakistan_curated import get_pakistan_curated_treks
 
 
 class TrailCatalogTests(unittest.TestCase):
+    def test_explore_v3_place_converts_to_profile_shape(self):
+        profile = server._explore_v3_place_to_profile({
+            "id": "place:wikidata:Q805806",
+            "source_ids": ["wikidata:Q805806"],
+            "name": "Baltoro Glacier",
+            "category": "glacier",
+            "subcategories": ["glacier"],
+            "lat": 35.7364,
+            "lng": 76.3808,
+            "region": "Gilgit-Baltistan",
+            "summary": "Glacier in the Karakoram range.",
+            "description": "Baltoro Glacier is a major Karakoram glacier.",
+            "tags": ["glacier", "karakoram"],
+            "search_aliases": ["ice", "trek"],
+            "quality": "open_community_data",
+            "quality_score": 72,
+            "media": [{"url": "https://example.test/baltoro.jpg", "credit": "Commons"}],
+            "sources": [{
+                "source": "wikidata",
+                "title": "Baltoro Glacier",
+                "publisher": "Wikidata",
+                "url": "https://www.wikidata.org/wiki/Q805806",
+                "license": "CC0",
+                "attribution": "Wikidata contributors",
+            }],
+            "card": {"headline": "Baltoro Glacier", "summary": "Karakoram glacier route context."},
+        }, rank=700001)
+
+        self.assertEqual(profile["summary"]["title"], "Baltoro Glacier")
+        self.assertEqual(profile["summary"]["category"], "Glacier")
+        self.assertEqual(profile["summary"]["explore_group"], "water")
+        self.assertEqual(profile["category"], "glacier")
+        self.assertEqual(profile["source_pack"]["quality"], "open")
+        self.assertEqual(profile["source_pack"]["official_url"], "https://www.wikidata.org/wiki/Q805806")
+        self.assertEqual(profile["facts"]["source_quality"], "open")
+        self.assertEqual(profile["media"][0]["url"], "https://example.test/baltoro.jpg")
+        self.assertIn("trek", profile["search_aliases"])
+
+    def test_load_explore_catalog_merges_v3_sidecar(self):
+        old_catalog = server.EXPLORE_CATALOG
+        old_catalog_v3 = server.EXPLORE_CATALOG_V3
+        old_overrides = server.get_explore_story_overrides
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                tmp_path = Path(tmp)
+                server.EXPLORE_CATALOG = tmp_path / "explore_catalog_v1.json"
+                server.EXPLORE_CATALOG_V3 = tmp_path / "explore_catalog_v3.json"
+                server.get_explore_story_overrides = lambda: {}
+                server.EXPLORE_CATALOG.write_text(json.dumps({
+                    "schema_version": 1,
+                    "catalog_id": "test-v1",
+                    "source": "test",
+                    "places": [{
+                        "id": "explore:test",
+                        "summary": {"title": "Featured Stop", "rank": 1, "lat": 1.0, "lng": 2.0},
+                        "profile": {"hook": "Featured", "summary": "Featured stop."},
+                    }],
+                }))
+                server.EXPLORE_CATALOG_V3.write_text(json.dumps({
+                    "schema_version": 3,
+                    "places": [{
+                        "id": "place:nps:yose",
+                        "name": "Yosemite National Park",
+                        "category": "park",
+                        "lat": 37.85,
+                        "lng": -119.56,
+                        "region": "CA",
+                        "summary": "Granite, waterfalls, and high Sierra trails.",
+                        "sources": [{"source": "nps", "title": "NPS", "url": "https://www.nps.gov/yose/"}],
+                        "quality": "official_source",
+                    }],
+                }))
+
+                catalog = server._load_explore_catalog()
+
+            place_ids = {place["id"] for place in catalog["places"]}
+            self.assertIn("explore:test", place_ids)
+            self.assertIn("place:nps:yose", place_ids)
+            self.assertEqual(catalog["count"], 2)
+            self.assertEqual(catalog["catalog_id"], "explore-us-top-v1-plus-real-data-v3")
+        finally:
+            server.EXPLORE_CATALOG = old_catalog
+            server.EXPLORE_CATALOG_V3 = old_catalog_v3
+            server.get_explore_story_overrides = old_overrides
+
+    def test_explore_place_index_item_includes_v3_fields(self):
+        profile = server._explore_v3_place_to_profile({
+            "id": "place:osm:waterfall",
+            "source_ids": ["osm:node/1"],
+            "name": "Vernal Fall",
+            "category": "waterfall",
+            "subcategories": ["waterfall"],
+            "lat": 37.7275,
+            "lng": -119.5438,
+            "summary": "Mapped waterfall.",
+            "search_aliases": ["falls"],
+            "search_blob": "vernal fall waterfall yosemite",
+            "media": [{"url": "https://example.test/fall.jpg"}],
+            "sources": [{"source": "osm", "title": "OpenStreetMap", "url": "https://www.openstreetmap.org/node/1"}],
+        })
+
+        item = server._explore_place_index_item(profile)
+
+        self.assertEqual(item["id"], "place:osm:waterfall")
+        self.assertEqual(item["v3_category"], "waterfall")
+        self.assertEqual(item["subcategories"], ["waterfall"])
+        self.assertEqual(item["search_aliases"], ["falls"])
+        self.assertEqual(item["media"][0]["url"], "https://example.test/fall.jpg")
+        self.assertEqual(item["sources"][0]["title"], "OpenStreetMap")
+
+    def test_explore_category_request_matches_v3_direct_categories(self):
+        glacier = server._explore_v3_place_to_profile({
+            "id": "place:wikidata:glacier",
+            "name": "Baltoro Glacier",
+            "category": "glacier",
+            "subcategories": ["glacier"],
+            "lat": 35.7364,
+            "lng": 76.3808,
+            "summary": "Mapped glacier.",
+        })
+        waterfall = server._explore_v3_place_to_profile({
+            "id": "place:osm:waterfall",
+            "name": "Vernal Fall",
+            "category": "waterfall",
+            "subcategories": ["waterfall"],
+            "lat": 37.7275,
+            "lng": -119.5438,
+            "summary": "Mapped waterfall.",
+        })
+
+        self.assertTrue(server._explore_place_matches_category_request(glacier, {"glacier"}))
+        self.assertTrue(server._explore_place_matches_category_request(waterfall, {"waterfalls"}))
+        self.assertFalse(server._explore_place_matches_category_request(glacier, {"fuel"}))
+
     def test_public_trail_profile_adds_catalog_fields(self):
         profile = {
             "id": "osm:way:123",

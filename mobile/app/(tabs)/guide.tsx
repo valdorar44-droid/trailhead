@@ -223,6 +223,22 @@ function exploreIndexItemToProfile(item: ExploreCatalogIndexItem): ExplorePlaceP
   const short = item.short_description || item.hook || 'Open the card for source details, nearby stops, weather, and map context.';
   return {
     id: item.id,
+    category: item.v3_category || item.category,
+    subcategories: item.subcategories ?? [],
+    sources: item.sources ?? [],
+    source_ids: item.source_ids ?? [],
+    quality: item.quality || item.source_quality,
+    quality_score: item.quality_score,
+    verified: item.verified,
+    search_aliases: item.search_aliases ?? [],
+    search_blob: item.search_blob || '',
+    best_season: item.best_season || '',
+    access: item.access,
+    safety: item.safety,
+    amenities: item.amenities ?? [],
+    media: item.media ?? [],
+    card: item.card,
+    linked_trail_ids: item.linked_trail_ids ?? [],
     summary: {
       id: item.id,
       title,
@@ -261,13 +277,17 @@ function exploreIndexItemToProfile(item: ExploreCatalogIndexItem): ExplorePlaceP
       quality: item.source_quality || 'open',
       primary: item.source_title || '',
       official_url: item.source_url || '',
-      sources: item.source_url ? [{
+      sources: item.sources?.length ? item.sources : item.source_url ? [{
         title,
         publisher: item.source_title || 'Open source',
         url: item.source_url,
         kind: item.source_quality || 'open',
       }] : [],
-      photos: (item.image_url || item.thumbnail_url) ? [{
+      photos: item.media?.length ? item.media.map(photo => ({
+        url: photo.url,
+        caption: photo.caption || title,
+        credit: photo.credit || item.image_credit || item.source_title || '',
+      })) : (item.image_url || item.thumbnail_url) ? [{
         url: item.image_url || item.thumbnail_url,
         caption: title,
         credit: item.image_credit || item.source_title || '',

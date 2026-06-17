@@ -1,9 +1,9 @@
 {
   "schema_version": 3,
   "catalog_id": "trailhead-explore-v3-real-data-foundation",
-  "generated_at": 1781671357,
-  "source": "Prepared OSM/Geofabrik, RIDB/Recreation.gov, NPS, USFS, and BLM fixtures; source attribution preserved",
-  "count": 29,
+  "generated_at": 1781671753,
+  "source": "Prepared OSM/Geofabrik, RIDB/Recreation.gov, NPS, USFS, BLM, and Wikidata fixtures; source attribution preserved",
+  "count": 34,
   "places": [
     {
       "id": "place:osm:relation-1001",
@@ -98,8 +98,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671357,
-      "updated_at": 1781671357,
+      "last_seen_at": 1781671753,
+      "updated_at": 1781671753,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -184,8 +184,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671357,
-      "updated_at": 1781671357,
+      "last_seen_at": 1781671753,
+      "updated_at": 1781671753,
       "linked_trail_ids": [
         "trail:osm:relation-1001"
       ],
@@ -269,8 +269,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671357,
-      "updated_at": 1781671357,
+      "last_seen_at": 1781671753,
+      "updated_at": 1781671753,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -353,8 +353,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671357,
-      "updated_at": 1781671357,
+      "last_seen_at": 1781671753,
+      "updated_at": 1781671753,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -465,8 +465,8 @@
       "quality": "official_source",
       "quality_score": 85.0,
       "verified": true,
-      "last_seen_at": 1781671357,
-      "updated_at": 1781671357,
+      "last_seen_at": 1781671753,
+      "updated_at": 1781671753,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -550,8 +550,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671357,
-      "updated_at": 1781671357,
+      "last_seen_at": 1781671753,
+      "updated_at": 1781671753,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -634,8 +634,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671357,
-      "updated_at": 1781671357,
+      "last_seen_at": 1781671753,
+      "updated_at": 1781671753,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -719,8 +719,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671357,
-      "updated_at": 1781671357,
+      "last_seen_at": 1781671753,
+      "updated_at": 1781671753,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -803,8 +803,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671357,
-      "updated_at": 1781671357,
+      "last_seen_at": 1781671753,
+      "updated_at": 1781671753,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -897,8 +897,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671357,
-      "updated_at": 1781671357,
+      "last_seen_at": 1781671753,
+      "updated_at": 1781671753,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -995,8 +995,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671357,
-      "updated_at": 1781671357,
+      "last_seen_at": 1781671753,
+      "updated_at": 1781671753,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -1080,8 +1080,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671357,
-      "updated_at": 1781671357,
+      "last_seen_at": 1781671753,
+      "updated_at": 1781671753,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -1166,8 +1166,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671357,
-      "updated_at": 1781671357,
+      "last_seen_at": 1781671753,
+      "updated_at": 1781671753,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -1250,8 +1250,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671357,
-      "updated_at": 1781671357,
+      "last_seen_at": 1781671753,
+      "updated_at": 1781671753,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -1334,8 +1334,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671357,
-      "updated_at": 1781671357,
+      "last_seen_at": 1781671753,
+      "updated_at": 1781671753,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -1419,8 +1419,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671357,
-      "updated_at": 1781671357,
+      "last_seen_at": 1781671753,
+      "updated_at": 1781671753,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -1519,8 +1519,8 @@
       "quality": "official_source",
       "quality_score": 85.0,
       "verified": true,
-      "last_seen_at": 1781671357,
-      "updated_at": 1781671357,
+      "last_seen_at": 1781671753,
+      "updated_at": 1781671753,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -1620,8 +1620,8 @@
       "quality": "official_source",
       "quality_score": 85.0,
       "verified": true,
-      "last_seen_at": 1781671357,
-      "updated_at": 1781671357,
+      "last_seen_at": 1781671753,
+      "updated_at": 1781671753,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -1712,8 +1712,8 @@
       "quality": "official_source",
       "quality_score": 85.0,
       "verified": true,
-      "last_seen_at": 1781671357,
-      "updated_at": 1781671357,
+      "last_seen_at": 1781671753,
+      "updated_at": 1781671753,
       "linked_trail_ids": [
         "trail:usfs:15e09"
       ],
@@ -1812,8 +1812,8 @@
       "quality": "official_source",
       "quality_score": 85.0,
       "verified": true,
-      "last_seen_at": 1781671357,
-      "updated_at": 1781671357,
+      "last_seen_at": 1781671753,
+      "updated_at": 1781671753,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -1905,8 +1905,8 @@
       "quality": "official_source",
       "quality_score": 85.0,
       "verified": true,
-      "last_seen_at": 1781671357,
-      "updated_at": 1781671357,
+      "last_seen_at": 1781671753,
+      "updated_at": 1781671753,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -1992,8 +1992,8 @@
       "quality": "official_source",
       "quality_score": 85.0,
       "verified": true,
-      "last_seen_at": 1781671357,
-      "updated_at": 1781671357,
+      "last_seen_at": 1781671753,
+      "updated_at": 1781671753,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -2100,8 +2100,8 @@
       "quality": "official_source",
       "quality_score": 85.0,
       "verified": true,
-      "last_seen_at": 1781671357,
-      "updated_at": 1781671357,
+      "last_seen_at": 1781671753,
+      "updated_at": 1781671753,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -2204,8 +2204,8 @@
       "quality": "official_source",
       "quality_score": 85.0,
       "verified": true,
-      "last_seen_at": 1781671357,
-      "updated_at": 1781671357,
+      "last_seen_at": 1781671753,
+      "updated_at": 1781671753,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -2306,8 +2306,8 @@
       "quality": "official_source",
       "quality_score": 85.0,
       "verified": true,
-      "last_seen_at": 1781671357,
-      "updated_at": 1781671357,
+      "last_seen_at": 1781671753,
+      "updated_at": 1781671753,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -2421,8 +2421,8 @@
       "quality": "official_source",
       "quality_score": 85.0,
       "verified": true,
-      "last_seen_at": 1781671357,
-      "updated_at": 1781671357,
+      "last_seen_at": 1781671753,
+      "updated_at": 1781671753,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -2512,8 +2512,8 @@
       "quality": "official_source",
       "quality_score": 85.0,
       "verified": true,
-      "last_seen_at": 1781671357,
-      "updated_at": 1781671357,
+      "last_seen_at": 1781671753,
+      "updated_at": 1781671753,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -2604,8 +2604,8 @@
       "quality": "official_source",
       "quality_score": 85.0,
       "verified": true,
-      "last_seen_at": 1781671357,
-      "updated_at": 1781671357,
+      "last_seen_at": 1781671753,
+      "updated_at": 1781671753,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -2693,8 +2693,496 @@
       "quality": "official_source",
       "quality_score": 85.0,
       "verified": true,
-      "last_seen_at": 1781671357,
-      "updated_at": 1781671357,
+      "last_seen_at": 1781671753,
+      "updated_at": 1781671753,
+      "linked_trail_ids": [],
+      "linked_place_ids": []
+    },
+    {
+      "id": "place:wikidata:q805806",
+      "source_ids": [
+        "wikidata:Q805806"
+      ],
+      "name": "Baltoro Glacier",
+      "category": "glacier",
+      "subcategories": [
+        "glacier"
+      ],
+      "lat": 35.7364,
+      "lng": 76.3808,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.3808,
+          35.7364
+        ]
+      },
+      "country": "PK",
+      "region": "Gilgit-Baltistan",
+      "admin": "Shigar District",
+      "summary": "Glacier in the Karakoram range of Gilgit-Baltistan, Pakistan.",
+      "description": "Glacier in the Karakoram range of Gilgit-Baltistan, Pakistan.",
+      "tags": [
+        "glacier",
+        "wikidata",
+        "wikipedia"
+      ],
+      "search_aliases": [
+        "ice",
+        "icefield",
+        "glacier viewpoint",
+        "trekking",
+        "Baltoro",
+        "Baltoro gangs",
+        "K2 trek glacier",
+        "Concordia approach"
+      ],
+      "search_blob": "baltoro glacier glacier glacier glacier wikidata wikipedia ice icefield glacier viewpoint trekking baltoro baltoro gangs k2 trek glacier concordia approach pk gilgit-baltistan shigar district glacier in the karakoram range of gilgit-baltistan, pakistan. glacier in the karakoram range of gilgit-baltistan, pakistan. baltoro glacier glacier in the karakoram range of gilgit-baltistan, pakistan. wikidata wikidata contributors https://www.wikidata.org/wiki/q805806",
+      "difficulty": "",
+      "best_season": "",
+      "access": "",
+      "safety": "",
+      "amenities": [],
+      "reservations": {},
+      "media": [
+        {
+          "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Baltoro_glacier_from_air.jpg",
+          "caption": "Baltoro Glacier",
+          "credit": "Wikimedia Commons",
+          "license": "Wikimedia Commons"
+        }
+      ],
+      "card": {
+        "headline": "Baltoro Glacier",
+        "summary": "Glacier in the Karakoram range of Gilgit-Baltistan, Pakistan.",
+        "quick_facts": [
+          "Glacier",
+          "Gilgit-Baltistan"
+        ],
+        "warnings": [
+          "Verify access",
+          "Check official source or local rules",
+          "Offline maps recommended",
+          "Check weather and daylight"
+        ],
+        "best_for": [
+          "Map context",
+          "Nearby stops",
+          "Route planning"
+        ],
+        "source_badge": "Open map data",
+        "primary_action": "Show on map",
+        "secondary_actions": [
+          "Save",
+          "Route",
+          "Weather"
+        ]
+      },
+      "sources": [
+        {
+          "source": "wikidata",
+          "source_id": "Q805806",
+          "url": "https://www.wikidata.org/wiki/Q805806",
+          "license": "Creative Commons CC0 1.0 (Wikidata); verify media license per item",
+          "attribution": "Wikidata contributors",
+          "quality": "open_community_data"
+        }
+      ],
+      "quality": "open_community_data",
+      "quality_score": 45.0,
+      "verified": false,
+      "last_seen_at": 1781671753,
+      "updated_at": 1781671753,
+      "linked_trail_ids": [],
+      "linked_place_ids": []
+    },
+    {
+      "id": "place:wikidata:q102470",
+      "source_ids": [
+        "wikidata:Q102470"
+      ],
+      "name": "K2",
+      "category": "peak",
+      "subcategories": [
+        "mountain"
+      ],
+      "lat": 35.8808,
+      "lng": 76.5158,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.5158,
+          35.8808
+        ]
+      },
+      "country": "PK",
+      "region": "Gilgit-Baltistan",
+      "admin": "Shigar District",
+      "summary": "Mountain in the Karakoram range and the second-highest mountain on Earth.",
+      "description": "Mountain in the Karakoram range and the second-highest mountain on Earth.",
+      "tags": [
+        "peak",
+        "mountain",
+        "wikidata",
+        "wikipedia"
+      ],
+      "search_aliases": [
+        "summit",
+        "mountain",
+        "ridge",
+        "high point",
+        "Mount Godwin-Austen",
+        "Chhogori",
+        "K2 Base Camp",
+        "eight-thousander"
+      ],
+      "search_blob": "k2 peak mountain peak mountain wikidata wikipedia summit mountain ridge high point mount godwin-austen chhogori k2 base camp eight-thousander pk gilgit-baltistan shigar district mountain in the karakoram range and the second-highest mountain on earth. mountain in the karakoram range and the second-highest mountain on earth. k2 mountain in the karakoram range and the second-highest mountain on earth. wikidata wikidata contributors https://www.wikidata.org/wiki/q102470",
+      "difficulty": "",
+      "best_season": "",
+      "access": "",
+      "safety": "",
+      "amenities": [],
+      "reservations": {},
+      "media": [
+        {
+          "url": "https://commons.wikimedia.org/wiki/Special:FilePath/K2_2006b.jpg",
+          "caption": "K2",
+          "credit": "Wikimedia Commons",
+          "license": "Wikimedia Commons"
+        }
+      ],
+      "card": {
+        "headline": "K2",
+        "summary": "Mountain in the Karakoram range and the second-highest mountain on Earth.",
+        "quick_facts": [
+          "Peak",
+          "Gilgit-Baltistan"
+        ],
+        "warnings": [
+          "Verify access",
+          "Check official source or local rules",
+          "Offline maps recommended",
+          "Check weather and daylight"
+        ],
+        "best_for": [
+          "Map context",
+          "Nearby stops",
+          "Route planning"
+        ],
+        "source_badge": "Open map data",
+        "primary_action": "Show on map",
+        "secondary_actions": [
+          "Save",
+          "Route",
+          "Weather"
+        ]
+      },
+      "sources": [
+        {
+          "source": "wikidata",
+          "source_id": "Q102470",
+          "url": "https://www.wikidata.org/wiki/Q102470",
+          "license": "Creative Commons CC0 1.0 (Wikidata); verify media license per item",
+          "attribution": "Wikidata contributors",
+          "quality": "open_community_data"
+        }
+      ],
+      "quality": "open_community_data",
+      "quality_score": 45.0,
+      "verified": false,
+      "last_seen_at": 1781671753,
+      "updated_at": 1781671753,
+      "linked_trail_ids": [],
+      "linked_place_ids": []
+    },
+    {
+      "id": "place:wikidata:q1137017",
+      "source_ids": [
+        "wikidata:Q1137017"
+      ],
+      "name": "Khunjerab Pass",
+      "category": "viewpoint",
+      "subcategories": [
+        "mountain_pass"
+      ],
+      "lat": 36.85,
+      "lng": 75.4283,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          75.4283,
+          36.85
+        ]
+      },
+      "country": "PK",
+      "region": "Gilgit-Baltistan",
+      "admin": "Hunza District",
+      "summary": "High mountain pass on the Karakoram Highway between Gilgit-Baltistan and Xinjiang.",
+      "description": "High mountain pass on the Karakoram Highway between Gilgit-Baltistan and Xinjiang.",
+      "tags": [
+        "viewpoint",
+        "mountain_pass",
+        "wikidata",
+        "wikipedia",
+        "mountain pass"
+      ],
+      "search_aliases": [
+        "overlook",
+        "scenic view",
+        "lookout",
+        "photo spot",
+        "Karakoram Highway pass",
+        "China Pakistan border pass",
+        "Khunjerab"
+      ],
+      "search_blob": "khunjerab pass viewpoint mountain_pass viewpoint mountain_pass wikidata wikipedia mountain pass overlook scenic view lookout photo spot karakoram highway pass china pakistan border pass khunjerab pk gilgit-baltistan hunza district high mountain pass on the karakoram highway between gilgit-baltistan and xinjiang. high mountain pass on the karakoram highway between gilgit-baltistan and xinjiang. khunjerab pass high mountain pass on the karakoram highway between gilgit-baltistan and xinjiang. wikidata wikidata contributors https://www.wikidata.org/wiki/q1137017",
+      "difficulty": "",
+      "best_season": "",
+      "access": "",
+      "safety": "",
+      "amenities": [],
+      "reservations": {},
+      "media": [
+        {
+          "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Khunjerab_Pass.jpg",
+          "caption": "Khunjerab Pass",
+          "credit": "Wikimedia Commons",
+          "license": "Wikimedia Commons"
+        }
+      ],
+      "card": {
+        "headline": "Khunjerab Pass",
+        "summary": "High mountain pass on the Karakoram Highway between Gilgit-Baltistan and Xinjiang.",
+        "quick_facts": [
+          "Viewpoint",
+          "Gilgit-Baltistan"
+        ],
+        "warnings": [
+          "Verify access",
+          "Check official source or local rules",
+          "Offline maps recommended"
+        ],
+        "best_for": [
+          "Map context",
+          "Nearby stops",
+          "Route planning"
+        ],
+        "source_badge": "Open map data",
+        "primary_action": "Show on map",
+        "secondary_actions": [
+          "Save",
+          "Route",
+          "Weather"
+        ]
+      },
+      "sources": [
+        {
+          "source": "wikidata",
+          "source_id": "Q1137017",
+          "url": "https://www.wikidata.org/wiki/Q1137017",
+          "license": "Creative Commons CC0 1.0 (Wikidata); verify media license per item",
+          "attribution": "Wikidata contributors",
+          "quality": "open_community_data"
+        }
+      ],
+      "quality": "open_community_data",
+      "quality_score": 45.0,
+      "verified": false,
+      "last_seen_at": 1781671753,
+      "updated_at": 1781671753,
+      "linked_trail_ids": [],
+      "linked_place_ids": []
+    },
+    {
+      "id": "place:wikidata:q780770",
+      "source_ids": [
+        "wikidata:Q780770"
+      ],
+      "name": "Attabad Lake",
+      "category": "lake",
+      "subcategories": [
+        "lake"
+      ],
+      "lat": 36.33694,
+      "lng": 74.8675,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          74.8675,
+          36.33694
+        ]
+      },
+      "country": "PK",
+      "region": "Gilgit-Baltistan",
+      "admin": "Hunza District",
+      "summary": "Lake in the Gojal region of Hunza Valley, Gilgit-Baltistan.",
+      "description": "Lake in the Gojal region of Hunza Valley, Gilgit-Baltistan.",
+      "tags": [
+        "lake",
+        "wikidata",
+        "wikipedia"
+      ],
+      "search_aliases": [
+        "water",
+        "reservoir",
+        "shore",
+        "swim",
+        "water access",
+        "Gojal Lake",
+        "Hunza Lake",
+        "Attabad"
+      ],
+      "search_blob": "attabad lake lake lake lake wikidata wikipedia water reservoir shore swim water access gojal lake hunza lake attabad pk gilgit-baltistan hunza district lake in the gojal region of hunza valley, gilgit-baltistan. lake in the gojal region of hunza valley, gilgit-baltistan. attabad lake lake in the gojal region of hunza valley, gilgit-baltistan. wikidata wikidata contributors https://www.wikidata.org/wiki/q780770",
+      "difficulty": "",
+      "best_season": "",
+      "access": "",
+      "safety": "",
+      "amenities": [],
+      "reservations": {},
+      "media": [
+        {
+          "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Attabad_Lake_Gojal.jpg",
+          "caption": "Attabad Lake",
+          "credit": "Wikimedia Commons",
+          "license": "Wikimedia Commons"
+        }
+      ],
+      "card": {
+        "headline": "Attabad Lake",
+        "summary": "Lake in the Gojal region of Hunza Valley, Gilgit-Baltistan.",
+        "quick_facts": [
+          "Lake",
+          "Gilgit-Baltistan"
+        ],
+        "warnings": [
+          "Verify access",
+          "Check official source or local rules",
+          "Offline maps recommended"
+        ],
+        "best_for": [
+          "Water access",
+          "Scenic stops",
+          "Weather checks"
+        ],
+        "source_badge": "Open map data",
+        "primary_action": "Show on map",
+        "secondary_actions": [
+          "Save",
+          "Route",
+          "Weather"
+        ]
+      },
+      "sources": [
+        {
+          "source": "wikidata",
+          "source_id": "Q780770",
+          "url": "https://www.wikidata.org/wiki/Q780770",
+          "license": "Creative Commons CC0 1.0 (Wikidata); verify media license per item",
+          "attribution": "Wikidata contributors",
+          "quality": "open_community_data"
+        }
+      ],
+      "quality": "open_community_data",
+      "quality_score": 45.0,
+      "verified": false,
+      "last_seen_at": 1781671753,
+      "updated_at": 1781671753,
+      "linked_trail_ids": [],
+      "linked_place_ids": []
+    },
+    {
+      "id": "place:wikidata:q1438427",
+      "source_ids": [
+        "wikidata:Q1438427"
+      ],
+      "name": "Altit Fort",
+      "category": "historic_site",
+      "subcategories": [
+        "historic_site"
+      ],
+      "lat": 36.315,
+      "lng": 74.6819,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          74.6819,
+          36.315
+        ]
+      },
+      "country": "PK",
+      "region": "Gilgit-Baltistan",
+      "admin": "Hunza District",
+      "summary": "Historic fort and heritage landmark in Hunza Valley.",
+      "description": "Historic fort and heritage landmark in Hunza Valley.",
+      "tags": [
+        "historic_site",
+        "wikidata",
+        "wikipedia",
+        "historic fort"
+      ],
+      "search_aliases": [
+        "historic",
+        "history",
+        "heritage",
+        "landmark",
+        "Hunza heritage fort",
+        "Altit heritage site"
+      ],
+      "search_blob": "altit fort historic_site historic_site historic_site wikidata wikipedia historic fort historic history heritage landmark hunza heritage fort altit heritage site pk gilgit-baltistan hunza district historic fort and heritage landmark in hunza valley. historic fort and heritage landmark in hunza valley. altit fort historic fort and heritage landmark in hunza valley. wikidata wikidata contributors https://www.wikidata.org/wiki/q1438427",
+      "difficulty": "",
+      "best_season": "",
+      "access": "",
+      "safety": "",
+      "amenities": [],
+      "reservations": {},
+      "media": [
+        {
+          "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Altit_Fort_Hunza.jpg",
+          "caption": "Altit Fort",
+          "credit": "Wikimedia Commons",
+          "license": "Wikimedia Commons"
+        }
+      ],
+      "card": {
+        "headline": "Altit Fort",
+        "summary": "Historic fort and heritage landmark in Hunza Valley.",
+        "quick_facts": [
+          "Historic Site",
+          "Gilgit-Baltistan"
+        ],
+        "warnings": [
+          "Verify access",
+          "Check official source or local rules",
+          "Offline maps recommended"
+        ],
+        "best_for": [
+          "Map context",
+          "Nearby stops",
+          "Route planning"
+        ],
+        "source_badge": "Open map data",
+        "primary_action": "Show on map",
+        "secondary_actions": [
+          "Save",
+          "Route",
+          "Weather"
+        ]
+      },
+      "sources": [
+        {
+          "source": "wikidata",
+          "source_id": "Q1438427",
+          "url": "https://www.wikidata.org/wiki/Q1438427",
+          "license": "Creative Commons CC0 1.0 (Wikidata); verify media license per item",
+          "attribution": "Wikidata contributors",
+          "quality": "open_community_data"
+        }
+      ],
+      "quality": "open_community_data",
+      "quality_score": 45.0,
+      "verified": false,
+      "last_seen_at": 1781671753,
+      "updated_at": 1781671753,
       "linked_trail_ids": [],
       "linked_place_ids": []
     }

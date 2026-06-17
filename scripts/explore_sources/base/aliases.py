@@ -17,6 +17,7 @@ CATEGORY_ALIASES = {
     "peak": ["summit", "mountain", "ridge", "high point"],
     "waterfall": ["waterfalls", "falls", "cascade"],
     "hot_spring": ["thermal spring", "soak", "hot pool"],
+    "lake": ["water", "reservoir", "shore", "swim", "water access"],
     "climbing_area": ["rock climbing", "crag", "climb", "routes"],
     "bouldering_area": ["boulder", "bouldering", "problems"],
     "scenic_drive": ["road trip", "byway", "scenic road", "drive"],

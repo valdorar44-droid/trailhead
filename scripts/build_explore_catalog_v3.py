@@ -20,6 +20,7 @@ from scripts.explore_sources.nps.import_nps import import_nps_fixture
 from scripts.explore_sources.osm.import_geofabrik import import_osm_fixture, write_import_outputs
 from scripts.explore_sources.ridb.import_ridb import import_ridb_fixture
 from scripts.explore_sources.usfs.import_usfs import import_usfs_fixture
+from scripts.explore_sources.wikidata.import_wikidata import import_wikidata_fixture
 
 
 def build_catalog(
@@ -29,6 +30,7 @@ def build_catalog(
     nps_fixtures: list[str] | None = None,
     usfs_fixtures: list[str] | None = None,
     blm_fixtures: list[str] | None = None,
+    wikidata_fixtures: list[str] | None = None,
 ) -> tuple[list, list, list]:
     all_records = []
     all_places = []
@@ -49,6 +51,9 @@ def build_catalog(
     ] + [
         ("blm", fixture, import_blm_fixture)
         for fixture in (blm_fixtures or [])
+    ] + [
+        ("wikidata", fixture, import_wikidata_fixture)
+        for fixture in (wikidata_fixtures or [])
     ]
     if not import_jobs:
         raise ValueError("at least one source fixture is required")
@@ -89,6 +94,7 @@ def main() -> int:
     parser.add_argument("--nps-fixture", action="append", default=[], help="Prepared NPS fixture.")
     parser.add_argument("--usfs-fixture", action="append", default=[], help="Prepared USFS FSGeodata fixture.")
     parser.add_argument("--blm-fixture", action="append", default=[], help="Prepared BLM recreation/public-land fixture.")
+    parser.add_argument("--wikidata-fixture", action="append", default=[], help="Prepared Wikidata/Wikimedia landmark fixture.")
     parser.add_argument("--out", default="dashboard/explore_catalog_v3.json")
     parser.add_argument("--trails-out", default="dashboard/explore_trail_geometries_v1.json")
     parser.add_argument("--source-records-out", default="dashboard/explore_source_records_sample.jsonl")
@@ -102,13 +108,14 @@ def main() -> int:
         nps_fixtures=args.nps_fixture,
         usfs_fixtures=args.usfs_fixture,
         blm_fixtures=args.blm_fixture,
+        wikidata_fixtures=args.wikidata_fixture,
     )
     generated_at = int(time.time())
     catalog = {
         "schema_version": 3,
         "catalog_id": "trailhead-explore-v3-real-data-foundation",
         "generated_at": generated_at,
-        "source": "Prepared OSM/Geofabrik, RIDB/Recreation.gov, NPS, USFS, and BLM fixtures; source attribution preserved",
+        "source": "Prepared OSM/Geofabrik, RIDB/Recreation.gov, NPS, USFS, BLM, and Wikidata fixtures; source attribution preserved",
         "count": len(places),
         "places": [place.to_dict() for place in places],
     }

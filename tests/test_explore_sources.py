@@ -16,6 +16,7 @@ from scripts.explore_sources.nps.import_nps import import_nps_fixture
 from scripts.explore_sources.osm.import_geofabrik import import_osm_fixture
 from scripts.explore_sources.ridb.import_ridb import import_ridb_fixture
 from scripts.explore_sources.usfs.import_usfs import import_usfs_fixture
+from scripts.explore_sources.wikidata.import_wikidata import import_wikidata_fixture
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,6 +26,7 @@ RIDB = ROOT / "tests/fixtures/explore_sources/ridb_sample.json"
 NPS = ROOT / "tests/fixtures/explore_sources/nps_sample.json"
 USFS = ROOT / "tests/fixtures/explore_sources/usfs_sierra_sample.geojson"
 BLM = ROOT / "tests/fixtures/explore_sources/blm_moab_sample.geojson"
+WIKIDATA = ROOT / "tests/fixtures/explore_sources/wikidata_pakistan_landmarks_sample.json"
 
 
 class ExploreSourcePipelineTests(unittest.TestCase):
@@ -151,6 +153,28 @@ class ExploreSourcePipelineTests(unittest.TestCase):
         self.assertTrue(all(record.license.startswith("BLM") for record in records))
         self.assertTrue(all("Bureau of Land Management" in record.attribution for record in records))
 
+    def test_wikidata_importer_builds_global_landmarks_aliases_and_media(self):
+        records, places, trails = import_wikidata_fixture(WIKIDATA, fetched_at=123)
+        self.assertEqual(len(records), 5)
+        self.assertEqual(len(trails), 0)
+        categories = {place.category for place in places}
+        self.assertIn("glacier", categories)
+        self.assertIn("peak", categories)
+        self.assertIn("viewpoint", categories)
+        self.assertIn("lake", categories)
+        self.assertIn("historic_site", categories)
+        baltoro = next(place for place in places if place.name == "Baltoro Glacier")
+        self.assertEqual(baltoro.quality, "open_community_data")
+        self.assertIn("Concordia approach", baltoro.search_aliases)
+        self.assertTrue(baltoro.media)
+        k2 = next(place for place in places if place.name == "K2")
+        self.assertIn("eight-thousander", k2.search_blob)
+        lake = next(place for place in places if place.name == "Attabad Lake")
+        self.assertEqual(lake.category, "lake")
+        self.assertIn("Gojal Lake", lake.search_aliases)
+        self.assertTrue(all(record.license.startswith("Creative Commons CC0") for record in records))
+        self.assertTrue(all("Wikidata contributors" in record.attribution for record in records))
+
     def test_peak_viewpoint_and_trail_same_name_do_not_auto_merge(self):
         _records, places, _trails = build_catalog([str(YOSEMITE)])
         sentinel = [place for place in places if place.name == "Sentinel Dome"]
@@ -184,6 +208,7 @@ class ExploreSourcePipelineTests(unittest.TestCase):
             nps_fixtures=[str(NPS)],
             usfs_fixtures=[str(USFS)],
             blm_fixtures=[str(BLM)],
+            wikidata_fixtures=[str(WIKIDATA)],
         )
         self.assertGreaterEqual(len(records), 10)
         self.assertTrue(any(trail.name == "K2 Base Camp Trek" for trail in trails))
@@ -196,8 +221,10 @@ class ExploreSourcePipelineTests(unittest.TestCase):
         self.assertTrue(any(place.name == "Forest Road 5S30" and place.category == "forest_road" for place in places))
         self.assertTrue(any(place.name == "Bears Ears National Monument" and place.category == "public_land" for place in places))
         self.assertTrue(any(place.name == "Fins and Things OHV Route" and place.category == "offroad_route" for place in places))
+        self.assertTrue(any(place.name == "K2" and place.category == "peak" for place in places))
+        self.assertTrue(any(place.name == "Attabad Lake" and place.category == "lake" for place in places))
         blobs = " ".join(place.search_blob for place in places)
-        for term in ["camping", "hiking", "trailhead", "waterfalls", "fuel", "resupply", "k2", "hunza", "national park", "forest road", "ohv", "monuments", "boondocking"]:
+        for term in ["camping", "hiking", "trailhead", "waterfalls", "fuel", "resupply", "k2", "hunza", "national park", "forest road", "ohv", "monuments", "boondocking", "gojal lake", "concordia approach"]:
             self.assertIn(term, blobs)
 
     def test_command_writes_outputs(self):
@@ -216,6 +243,7 @@ class ExploreSourcePipelineTests(unittest.TestCase):
                     "--nps-fixture", str(NPS),
                     "--usfs-fixture", str(USFS),
                     "--blm-fixture", str(BLM),
+                    "--wikidata-fixture", str(WIKIDATA),
                     "--out", str(out),
                     "--trails-out", str(trails_out),
                     "--source-records-out", str(records_out),

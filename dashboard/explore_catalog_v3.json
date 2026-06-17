@@ -1,9 +1,9 @@
 {
   "schema_version": 3,
   "catalog_id": "trailhead-explore-v3-real-data-foundation",
-  "generated_at": 1781669464,
-  "source": "Prepared OSM/Geofabrik-derived fixtures; ODbL attribution preserved",
-  "count": 16,
+  "generated_at": 1781669995,
+  "source": "Prepared OSM/Geofabrik, RIDB/Recreation.gov, and NPS fixtures; source attribution preserved",
+  "count": 17,
   "places": [
     {
       "id": "place:osm:relation-1001",
@@ -98,8 +98,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781669464,
-      "updated_at": 1781669464,
+      "last_seen_at": 1781669995,
+      "updated_at": 1781669995,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -184,8 +184,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781669464,
-      "updated_at": 1781669464,
+      "last_seen_at": 1781669995,
+      "updated_at": 1781669995,
       "linked_trail_ids": [
         "trail:osm:relation-1001"
       ],
@@ -269,8 +269,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781669464,
-      "updated_at": 1781669464,
+      "last_seen_at": 1781669995,
+      "updated_at": 1781669995,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -353,19 +353,21 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781669464,
-      "updated_at": 1781669464,
+      "last_seen_at": 1781669995,
+      "updated_at": 1781669995,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
     {
-      "id": "place:osm:node-1005",
+      "id": "place:ridb:251974",
       "source_ids": [
+        "ridb:251974",
         "osm:node/1005"
       ],
       "name": "Yosemite Valley Campground",
       "category": "campground",
       "subcategories": [
+        "Campground",
         "camp_site"
       ],
       "lat": 37.742,
@@ -379,11 +381,14 @@
       },
       "country": "",
       "region": "CA",
-      "admin": "",
-      "summary": "Yosemite Valley Campground is mapped as campground in OpenStreetMap. Verify access, current conditions, and local rules before relying on it.",
-      "description": "Mapped camping location; check access, fees, fire restrictions, reservations, and seasonal road conditions.",
+      "admin": "Yosemite Valley",
+      "summary": "Official campground facility record for Yosemite Valley. Availability, fees, and fire restrictions must be checked before travel.",
+      "description": "Official campground facility record for Yosemite Valley. Availability, fees, and fire restrictions must be checked before travel.",
       "tags": [
         "campground",
+        "official",
+        "camping",
+        "recreation.gov",
         "camp_site"
       ],
       "search_aliases": [
@@ -394,20 +399,29 @@
         "rv",
         "overnight"
       ],
-      "search_blob": "yosemite valley campground campground camp_site campground camp_site camp camping campsite tent rv overnight ca yosemite valley campground is mapped as campground in openstreetmap. verify access, current conditions, and local rules before relying on it. mapped camping location; check access, fees, fire restrictions, reservations, and seasonal road conditions. yosemite valley campground yosemite valley campground is mapped as campground in openstreetmap. verify access, current conditions, and local rules before relying on it. osm openstreetmap contributors https://www.openstreetmap.org/node/1005",
+      "search_blob": "yosemite valley campground campground campground camp_site campground official camping recreation.gov camp_site camp camping campsite tent rv overnight ca yosemite valley official campground facility record for yosemite valley. availability, fees, and fire restrictions must be checked before travel. official campground facility record for yosemite valley. availability, fees, and fire restrictions must be checked before travel. yosemite valley campground official campground facility record for yosemite valley. availability, fees, and fire restrictions must be checked before travel. ridb ridb / recreation.gov https://www.recreation.gov/camping/campgrounds/251974 osm openstreetmap contributors https://www.openstreetmap.org/node/1005",
       "difficulty": "",
       "best_season": "",
       "access": "",
       "safety": "",
       "amenities": [
-        "drinking water",
-        "toilets"
+        "camping, tent, rv"
       ],
-      "reservations": {},
-      "media": [],
+      "reservations": {
+        "reservation_url": "https://www.recreation.gov/camping/campgrounds/251974",
+        "reservable": true
+      },
+      "media": [
+        {
+          "url": "https://www.recreation.gov/img/test-yosemite-camp.jpg",
+          "caption": "Yosemite Valley Campground",
+          "credit": "Recreation.gov",
+          "license": "RIDB/Recreation.gov public API; verify current terms before redistribution"
+        }
+      ],
       "card": {
         "headline": "Yosemite Valley Campground",
-        "summary": "Yosemite Valley Campground is mapped as campground in OpenStreetMap. Verify access, current conditions, and local rules before relying on it.",
+        "summary": "Official campground facility record for Yosemite Valley. Availability, fees, and fire restrictions must be checked before travel.",
         "quick_facts": [
           "Campground",
           "CA"
@@ -422,7 +436,7 @@
           "Fire rule checks",
           "Nearby trails"
         ],
-        "source_badge": "Open map data",
+        "source_badge": "Official source",
         "primary_action": "Check camping",
         "secondary_actions": [
           "Save",
@@ -432,6 +446,14 @@
       },
       "sources": [
         {
+          "source": "ridb",
+          "source_id": "251974",
+          "url": "https://www.recreation.gov/camping/campgrounds/251974",
+          "license": "RIDB/Recreation.gov public API; verify current terms before redistribution",
+          "attribution": "RIDB / Recreation.gov",
+          "quality": "official_source"
+        },
+        {
           "source": "osm",
           "source_id": "node/1005",
           "url": "https://www.openstreetmap.org/node/1005",
@@ -440,11 +462,11 @@
           "quality": "open_community_data"
         }
       ],
-      "quality": "open_community_data",
-      "quality_score": 45.0,
-      "verified": false,
-      "last_seen_at": 1781669464,
-      "updated_at": 1781669464,
+      "quality": "official_source",
+      "quality_score": 85.0,
+      "verified": true,
+      "last_seen_at": 1781669995,
+      "updated_at": 1781669995,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -528,8 +550,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781669464,
-      "updated_at": 1781669464,
+      "last_seen_at": 1781669995,
+      "updated_at": 1781669995,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -612,8 +634,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781669464,
-      "updated_at": 1781669464,
+      "last_seen_at": 1781669995,
+      "updated_at": 1781669995,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -697,8 +719,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781669464,
-      "updated_at": 1781669464,
+      "last_seen_at": 1781669995,
+      "updated_at": 1781669995,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -781,8 +803,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781669464,
-      "updated_at": 1781669464,
+      "last_seen_at": 1781669995,
+      "updated_at": 1781669995,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -875,8 +897,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781669464,
-      "updated_at": 1781669464,
+      "last_seen_at": 1781669995,
+      "updated_at": 1781669995,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -973,8 +995,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781669464,
-      "updated_at": 1781669464,
+      "last_seen_at": 1781669995,
+      "updated_at": 1781669995,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -1058,8 +1080,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781669464,
-      "updated_at": 1781669464,
+      "last_seen_at": 1781669995,
+      "updated_at": 1781669995,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -1144,8 +1166,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781669464,
-      "updated_at": 1781669464,
+      "last_seen_at": 1781669995,
+      "updated_at": 1781669995,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -1228,8 +1250,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781669464,
-      "updated_at": 1781669464,
+      "last_seen_at": 1781669995,
+      "updated_at": 1781669995,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -1312,8 +1334,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781669464,
-      "updated_at": 1781669464,
+      "last_seen_at": 1781669995,
+      "updated_at": 1781669995,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -1397,8 +1419,108 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781669464,
-      "updated_at": 1781669464,
+      "last_seen_at": 1781669995,
+      "updated_at": 1781669995,
+      "linked_trail_ids": [],
+      "linked_place_ids": []
+    },
+    {
+      "id": "place:nps:yose",
+      "source_ids": [
+        "nps:yose"
+      ],
+      "name": "Yosemite National Park",
+      "category": "park",
+      "subcategories": [
+        "National Park"
+      ],
+      "lat": 37.84883288,
+      "lng": -119.5571873,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -119.5571873,
+          37.84883288
+        ]
+      },
+      "country": "US",
+      "region": "CA",
+      "admin": "",
+      "summary": "Official National Park Service record for Yosemite National Park.",
+      "description": "Official National Park Service record for Yosemite National Park.",
+      "tags": [
+        "park",
+        "official",
+        "nps",
+        "National Park",
+        "Hiking",
+        "Camping"
+      ],
+      "search_aliases": [
+        "national park",
+        "state park",
+        "preserve",
+        "public land",
+        "visitor center"
+      ],
+      "search_blob": "yosemite national park park national park park official nps national park hiking camping national park state park preserve public land visitor center us ca official national park service record for yosemite national park. official national park service record for yosemite national park. yosemite national park official national park service record for yosemite national park. nps national park service https://www.nps.gov/yose/index.htm",
+      "difficulty": "",
+      "best_season": "",
+      "access": "",
+      "safety": "",
+      "amenities": [
+        "Hiking",
+        "Camping"
+      ],
+      "reservations": {},
+      "media": [
+        {
+          "url": "https://www.nps.gov/common/uploads/test-yosemite.jpg",
+          "caption": "Yosemite Valley",
+          "credit": "NPS",
+          "license": "National Park Service public data"
+        }
+      ],
+      "card": {
+        "headline": "Yosemite National Park",
+        "summary": "Official National Park Service record for Yosemite National Park.",
+        "quick_facts": [
+          "Park",
+          "CA"
+        ],
+        "warnings": [
+          "Verify access",
+          "Check official source or local rules",
+          "Offline maps recommended"
+        ],
+        "best_for": [
+          "Map context",
+          "Nearby stops",
+          "Route planning"
+        ],
+        "source_badge": "Official source",
+        "primary_action": "Show on map",
+        "secondary_actions": [
+          "Save",
+          "Route",
+          "Weather"
+        ]
+      },
+      "sources": [
+        {
+          "source": "nps",
+          "source_id": "yose",
+          "url": "https://www.nps.gov/yose/index.htm",
+          "license": "National Park Service public data",
+          "attribution": "National Park Service",
+          "quality": "official_source"
+        }
+      ],
+      "quality": "official_source",
+      "quality_score": 85.0,
+      "verified": true,
+      "last_seen_at": 1781669995,
+      "updated_at": 1781669995,
       "linked_trail_ids": [],
       "linked_place_ids": []
     }

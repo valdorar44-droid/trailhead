@@ -6,8 +6,21 @@
       "fullName": "Yosemite National Park",
       "url": "https://www.nps.gov/yose/index.htm",
       "latitude": "37.84883288",
-      "longitude": "-119.5571873"
+      "longitude": "-119.5571873",
+      "states": "CA",
+      "designation": "National Park",
+      "description": "Official National Park Service record for Yosemite National Park.",
+      "activities": [
+        {"name": "Hiking"},
+        {"name": "Camping"}
+      ],
+      "images": [
+        {
+          "url": "https://www.nps.gov/common/uploads/test-yosemite.jpg",
+          "caption": "Yosemite Valley",
+          "credit": "NPS"
+        }
+      ]
     }
   ]
 }
-

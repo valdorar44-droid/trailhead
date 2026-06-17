@@ -19,6 +19,8 @@ CATEGORY_FALLBACKS = {
     "hot_spring": "Mapped hot spring; verify legality, temperature, access, water safety, and local rules.",
     "water_source": "Mapped water source; verify access, potability, season, and reliability before depending on it.",
     "glacier": "Mapped glacier or ice feature; verify access, glacier conditions, permits, guide needs, and weather.",
+    "park": "Official park or protected area; check current access, fees, closures, permits, weather, and local rules.",
+    "public_land": "Mapped public land or protected area; verify land rules, access, closures, and current restrictions.",
 }
 
 PRIMARY_ACTIONS = {
@@ -84,4 +86,3 @@ def best_for(category: str) -> list[str]:
         "fuel": ["Road trips", "Range planning", "Service checks"],
         "resupply": ["Food", "Gear", "Trip support"],
     }.get(category, ["Map context", "Nearby stops", "Route planning"])
-

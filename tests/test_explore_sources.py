@@ -11,12 +11,16 @@ from scripts.explore_sources.base.cards import build_card
 from scripts.explore_sources.base.dedupe import dedupe_places
 from scripts.explore_sources.base.quality import score_place
 from scripts.explore_sources.base.schema import ExplorePlaceV3
+from scripts.explore_sources.nps.import_nps import import_nps_fixture
 from scripts.explore_sources.osm.import_geofabrik import import_osm_fixture
+from scripts.explore_sources.ridb.import_ridb import import_ridb_fixture
 
 
 ROOT = Path(__file__).resolve().parents[1]
 YOSEMITE = ROOT / "tests/fixtures/explore_sources/osm_yosemite_sample.geojson"
 PAKISTAN = ROOT / "tests/fixtures/explore_sources/osm_pakistan_sample.geojson"
+RIDB = ROOT / "tests/fixtures/explore_sources/ridb_sample.json"
+NPS = ROOT / "tests/fixtures/explore_sources/nps_sample.json"
 
 
 class ExploreSourcePipelineTests(unittest.TestCase):
@@ -76,6 +80,29 @@ class ExploreSourcePipelineTests(unittest.TestCase):
         self.assertIn("ridb:251974", merged[0].source_ids)
         self.assertIn("osm:node/1005", merged[0].source_ids)
 
+    def test_ridb_importer_builds_official_campground(self):
+        records, places, trails = import_ridb_fixture(RIDB, fetched_at=123)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(len(trails), 0)
+        place = places[0]
+        self.assertEqual(place.category, "campground")
+        self.assertEqual(place.quality, "official_source")
+        self.assertTrue(place.verified)
+        self.assertIn("RIDB", records[0].attribution)
+        self.assertIn("reservation", json.dumps(place.reservations).lower())
+        self.assertIn("Official source", place.card["source_badge"])
+
+    def test_nps_importer_builds_official_park(self):
+        records, places, trails = import_nps_fixture(NPS, fetched_at=123)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(len(trails), 0)
+        place = places[0]
+        self.assertEqual(place.category, "park")
+        self.assertEqual(place.quality, "official_source")
+        self.assertIn("Hiking", place.amenities)
+        self.assertIn("national park", place.search_blob)
+        self.assertIn("National Park Service", records[0].attribution)
+
     def test_peak_viewpoint_and_trail_same_name_do_not_auto_merge(self):
         _records, places, _trails = build_catalog([str(YOSEMITE)])
         sentinel = [place for place in places if place.name == "Sentinel Dome"]
@@ -103,11 +130,16 @@ class ExploreSourcePipelineTests(unittest.TestCase):
         self.assertGreater(official.quality_score, osm.quality_score)
 
     def test_builder_outputs_searchable_pilot_catalog(self):
-        records, places, trails = build_catalog([str(YOSEMITE), str(PAKISTAN)])
+        records, places, trails = build_catalog([str(YOSEMITE), str(PAKISTAN)], ridb_fixtures=[str(RIDB)], nps_fixtures=[str(NPS)])
         self.assertGreaterEqual(len(records), 10)
         self.assertTrue(any(trail.name == "K2 Base Camp Trek" for trail in trails))
+        campground = next(place for place in places if place.name == "Yosemite Valley Campground")
+        self.assertIn("ridb:251974", campground.source_ids)
+        self.assertIn("osm:node/1005", campground.source_ids)
+        self.assertEqual(campground.quality, "official_source")
+        self.assertTrue(any(place.name == "Yosemite National Park" and place.category == "park" for place in places))
         blobs = " ".join(place.search_blob for place in places)
-        for term in ["camping", "hiking", "trailhead", "waterfalls", "fuel", "resupply", "k2", "hunza"]:
+        for term in ["camping", "hiking", "trailhead", "waterfalls", "fuel", "resupply", "k2", "hunza", "national park"]:
             self.assertIn(term, blobs)
 
     def test_command_writes_outputs(self):
@@ -122,6 +154,8 @@ class ExploreSourcePipelineTests(unittest.TestCase):
                 sys.argv = [
                     "build_explore_catalog_v3.py",
                     "--source-fixture", str(YOSEMITE),
+                    "--ridb-fixture", str(RIDB),
+                    "--nps-fixture", str(NPS),
                     "--out", str(out),
                     "--trails-out", str(trails_out),
                     "--source-records-out", str(records_out),
@@ -138,4 +172,3 @@ class ExploreSourcePipelineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

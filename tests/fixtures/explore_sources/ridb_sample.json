@@ -6,8 +6,19 @@
       "FacilityTypeDescription": "Campground",
       "FacilityLatitude": 37.742,
       "FacilityLongitude": -119.565,
-      "FacilityReservationURL": "https://www.recreation.gov/"
+      "FacilityState": "CA",
+      "FacilityCity": "Yosemite Valley",
+      "FacilityDescription": "Official campground facility record for Yosemite Valley. Availability, fees, and fire restrictions must be checked before travel.",
+      "FacilityReservationURL": "https://www.recreation.gov/camping/campgrounds/251974",
+      "Reservable": true,
+      "Keywords": "camping, tent, rv",
+      "MEDIA": [
+        {
+          "URL": "https://www.recreation.gov/img/test-yosemite-camp.jpg",
+          "Title": "Yosemite Valley Campground",
+          "Credit": "Recreation.gov"
+        }
+      ]
     }
   ]
 }
-

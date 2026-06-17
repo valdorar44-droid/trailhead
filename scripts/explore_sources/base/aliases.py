@@ -27,6 +27,8 @@ CATEGORY_ALIASES = {
     "glacier": ["ice", "icefield", "glacier viewpoint", "trekking"],
     "historic_site": ["historic", "history", "heritage", "landmark"],
     "visitor_center": ["information", "ranger station", "park info"],
+    "park": ["national park", "state park", "preserve", "public land", "visitor center"],
+    "public_land": ["park", "preserve", "forest", "wilderness", "public land"],
 }
 
 

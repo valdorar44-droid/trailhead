@@ -2,36 +2,38 @@
   "brand": {
     "name": "Trailhead",
     "mark": "",
-    "tagline": "Overland planner / Offline app"
+    "tagline": "Camp / Trail / Offline"
   },
   "nav": [
-    { "label": "Planner", "href": "/app" },
-    { "label": "Offline Maps", "href": "/#offline" },
+    { "label": "App", "href": "/#app" },
+    { "label": "Explore", "href": "/#explore" },
+    { "label": "Offline", "href": "/#offline" },
+    { "label": "Web app", "href": "/app" },
     { "label": "Journal", "href": "/blog" },
-    { "label": "Download", "href": "https://apps.apple.com/app/id6763677349" }
+    { "label": "Download", "href": "/#download" }
   ],
   "footer": {
     "headline": {
-      "lead": "Plan with",
-      "italic": "signal.",
-      "tail": "Carry it without."
+      "lead": "Find the",
+      "italic": "way in.",
+      "tail": "Carry the way out."
     },
-    "blurb": "Trailhead is built for overland planning on the web and offline navigation on the phone. The browser is the planning desk. The app is the field tool.",
+    "blurb": "Trailhead brings camps, trails, route planning, Explore cards, field reports, and offline map packs into one trip app.",
     "columns": [
       {
-        "title": "Trailhead",
+        "title": "Download",
         "links": [
-          { "label": "Web planner", "href": "/app" },
-          { "label": "Download iOS", "href": "https://apps.apple.com/app/id6763677349" },
-          { "label": "Journal", "href": "/blog" }
+          { "label": "Download iOS", "href": "https://apps.apple.com/au/app/trailhead-camp-route-free/id6763677349" },
+          { "label": "Download Android", "href": "https://play.google.com/store/apps/details?id=com.trailhead.app&gl=us&hl=en_US" },
+          { "label": "Open web app", "href": "/app" }
         ]
       },
       {
-        "title": "Field",
+        "title": "Trailhead",
         "links": [
+          { "label": "Explore", "href": "/#explore" },
           { "label": "Offline maps", "href": "/#offline" },
-          { "label": "Route builder", "href": "/app" },
-          { "label": "Camp search", "href": "/app" }
+          { "label": "Journal", "href": "/blog" }
         ]
       },
       {

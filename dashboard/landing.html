@@ -3,152 +3,69 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="description" content="Trailhead is an overland navigation app for route planning, offline map packs, camp and trail discovery, public-land context, and field reports.">
-<meta name="theme-color" content="#06100f">
-<title>Trailhead — Know the trail before you roll.</title>
+<meta name="description" content="Trailhead helps overland and outdoor travelers find camps, trails, route context, Explore cards, field reports, and offline map packs on iOS, Android, and the web app.">
+<meta name="theme-color" content="#070807">
+<title>Trailhead - Camps, trails, routes, and offline maps</title>
 <style>
-*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;min-height:100vh;background:var(--th-bg);color:var(--th-ink);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",Roboto,Arial,sans-serif;line-height:1.5;letter-spacing:0;overflow-x:hidden}a{color:inherit}button,input{font:inherit}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.page-shell{position:relative;isolation:isolate;min-height:100vh;overflow:hidden}.page-shell:before{content:"";position:absolute;inset:0;z-index:-3;background:radial-gradient(circle at 86% 0%,rgba(217,154,61,.18),transparent 30%),radial-gradient(circle at 26% 100%,rgba(143,227,217,.1),transparent 30%),linear-gradient(140deg,var(--th-bg),var(--th-bg-2) 62%,#151106)}.page-shell:after{content:"";position:absolute;inset:-10%;z-index:-2;opacity:.42;background-image:url("data:image/svg+xml,%3Csvg width='1600' height='900' viewBox='0 0 1600 900' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' stroke='%23e7d7bb' stroke-opacity='.12' stroke-width='1'%3E%3Cpath d='M-80 102C94 171 203 54 364 102s249 88 410 38 255-120 458-69 265-11 444-38'/%3E%3Cpath d='M-120 209C80 301 232 136 389 194s255 95 416 41 259-119 469-52 263-10 455-55'/%3E%3Cpath d='M-90 342C145 262 257 384 454 325s314-122 486-75 282 83 460 5 250-21 386 21'/%3E%3Cpath d='M-140 493C74 565 188 452 384 498s338 96 536 22 305-128 510-71 253 8 391-48'/%3E%3Cpath d='M-120 646C131 562 275 707 484 641s319-151 520-82 328 84 531 0 247-40 374 5'/%3E%3Cpath d='M-80 804C139 716 282 847 514 786s345-122 543-65 320 83 517 2 233-23 330 27'/%3E%3C/g%3E%3C/svg%3E");background-size:cover}.wrap{width:min(1600px,calc(100% - 96px));margin:0 auto}.glass,.GlassCard{background:linear-gradient(135deg,rgba(255,255,255,.105),rgba(255,255,255,.035)),var(--th-panel);border:1px solid var(--th-border);box-shadow:var(--th-shadow);backdrop-filter:blur(24px) saturate(1.35);-webkit-backdrop-filter:blur(24px) saturate(1.35)}.site-nav{position:sticky;top:0;z-index:30;padding:52px 0 24px}.nav-frame{min-height:82px;border-radius:var(--th-radius-xl);display:flex;align-items:center;justify-content:space-between;gap:20px;padding:16px 22px 16px 28px}.brand{display:flex;align-items:center;gap:16px;text-decoration:none;min-width:0}.brand-icon{width:48px;height:48px;border-radius:14px;display:block;box-shadow:0 16px 34px rgba(0,0,0,.26)}.brand-name{font-size:24px;font-weight:900;letter-spacing:.02em;text-transform:uppercase}.nav-links{display:flex;gap:46px;align-items:center;color:var(--th-sand);font-size:18px}.nav-links a{text-decoration:none}.nav-links a:hover{color:var(--th-ink)}.CTAButton,.cta-button{display:inline-flex;align-items:center;justify-content:center;min-height:54px;padding:0 32px;border-radius:var(--th-radius-pill);font-weight:900;font-size:17px;text-decoration:none;border:1px solid rgba(255,255,255,.18);white-space:nowrap}.CTAButton.primary,.cta-button.primary{background:var(--th-amber);color:#050505;box-shadow:0 18px 42px rgba(217,154,61,.24)}.CTAButton.secondary,.cta-button.secondary{background:#050505;color:var(--th-ink)}.hero{padding:68px 0 36px}.hero-grid{display:grid;grid-template-columns:minmax(460px,.82fr) minmax(620px,1fr);gap:72px;align-items:center}.eyebrow{color:var(--th-cyan);font-size:20px;font-weight:900;letter-spacing:.12em;text-transform:uppercase;margin-bottom:30px}.hero h1{font-size:clamp(72px,7.2vw,136px);line-height:.95;letter-spacing:0;margin:0 0 28px;max-width:850px}.hero h1 .sand{color:var(--th-sand)}.hero-body{font-size:clamp(24px,2vw,35px);line-height:1.35;color:var(--th-sand);max-width:760px;margin:0 0 30px}.hero-actions{display:flex;gap:20px;align-items:center;flex-wrap:wrap}.feature-pills{display:flex;flex-wrap:wrap;gap:14px;margin-top:38px}.FeaturePill,.feature-pill{display:inline-flex;align-items:center;gap:9px;min-height:38px;padding:0 16px;border:1px solid var(--th-border);border-radius:var(--th-radius-pill);background:#030504;color:var(--th-ink);font-weight:700;font-size:16px}.FeaturePill:before,.feature-pill:before{content:"";width:11px;height:11px;border-radius:50%;background:var(--pill-color,var(--th-sand))}.hero-visual{position:relative;min-height:690px}.HeroMapPreview,.hero-map-preview{position:relative;height:650px;border-radius:var(--th-radius-xl);padding:38px;overflow:hidden}.map-title{position:relative;z-index:4;display:flex;align-items:flex-start;justify-content:space-between;gap:20px}.map-title h2{font-size:30px;line-height:1.05;margin:0 0 4px}.map-title p{margin:0;color:var(--th-sand);font-size:18px}.topo-toggle{display:flex;gap:8px;background:#030504;border:1px solid var(--th-ink);border-radius:var(--th-radius-pill);padding:5px}.topo-toggle span{min-width:96px;text-align:center;padding:10px 20px;border-radius:var(--th-radius-pill);font-weight:900}.topo-toggle .on{background:var(--th-amber);color:#050505}.map-canvas{position:absolute;left:48px;right:48px;top:124px;bottom:70px;border-radius:28px;overflow:hidden;background:#182720;border:1px solid rgba(255,255,255,.24)}.map-canvas svg{position:absolute;inset:0;width:100%;height:100%}.MapLayerControl,.map-layer-control{position:absolute;z-index:5;left:72px;top:170px;width:170px;border-radius:24px;padding:22px}.map-layer-control h3{margin:0 0 12px;font-size:20px}.layer-pill{height:32px;border-radius:var(--th-radius-pill);background:var(--th-ink);margin:10px 0}.RouteSummaryCard,.route-summary-card{position:absolute;z-index:8;left:72px;bottom:28px;width:330px;border-radius:28px;padding:24px}.route-summary-card .label,.phone-card .label{color:var(--th-cyan);font-weight:900;letter-spacing:.06em}.route-summary-card h3{font-size:30px;line-height:1.05;margin:8px 0;color:var(--th-ink)}.route-summary-card p{margin:0;color:var(--th-sand);font-size:17px}.pin{position:absolute;z-index:6;display:grid;place-items:center;height:30px;padding:0 13px;border-radius:999px;background:#030504;border:1px solid var(--th-ink);font-weight:900;font-size:14px}.pin.dot{width:28px;height:28px;padding:0;border:4px solid var(--th-amber);background:#182720}.pin.cluster{background:var(--th-amber);color:#050505}.PhonePreview,.phone-preview{position:absolute;z-index:9;right:18px;bottom:2px;width:300px;height:470px;border-radius:50px;background:#030504;border:3px solid var(--th-ink);padding:14px;box-shadow:0 28px 70px rgba(0,0,0,.52)}.phone-screen{height:100%;border-radius:38px;overflow:hidden;background:#1b2f25;border:1px solid rgba(255,255,255,.25);position:relative}.phone-notch{position:absolute;z-index:4;top:16px;left:50%;width:112px;height:28px;transform:translateX(-50%);border-radius:999px;background:#030504}.phone-search{position:absolute;z-index:4;left:24px;right:24px;top:86px;border-radius:999px;background:rgba(255,255,255,.34);padding:15px 18px;text-align:center;color:var(--th-ink);font-weight:900}.phone-card{position:absolute;z-index:4;left:22px;right:22px;bottom:18px;border-radius:24px;padding:18px;background:rgba(7,13,12,.68);border:1px solid rgba(255,255,255,.18)}.phone-card h3{font-size:24px;line-height:1.05;margin:5px 0;color:var(--th-ink)}.ready{display:block;text-align:center;margin-top:14px;border-radius:999px;background:var(--th-green);color:#07100c;padding:8px 12px;font-weight:900}.section{padding:70px 0}.feature-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:28px}.feature-card{border-radius:var(--th-radius-lg);padding:28px;min-height:152px}.feature-card h2{font-size:30px;line-height:1.05;margin:0 0 10px}.feature-card p{margin:0;color:var(--th-sand);font-size:19px}.showcase{display:grid;grid-template-columns:.85fr 1.15fr;gap:28px;align-items:stretch}.copy-card{border-radius:var(--th-radius-lg);padding:36px}.copy-card h2{font-size:52px;line-height:1;margin:0 0 18px}.copy-card p{font-size:21px;color:var(--th-muted);margin:0 0 18px}.app-tools{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}.tool-card{border-radius:24px;padding:20px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12)}.tool-card b{display:block;color:var(--th-ink);font-size:20px;margin-bottom:6px}.tool-card span{color:var(--th-muted);font-size:16px}.footer{padding:46px 0 56px;color:var(--th-muted)}.footer .wrap{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}.footer a{margin-left:18px;text-decoration:none;color:var(--th-sand)}:root{--th-bg:#06100f;--th-bg-2:#10201d;--th-ink:#f7f3ea;--th-sand:#e7d7bb;--th-muted:rgba(231,215,187,.72);--th-amber:#d99a3d;--th-cyan:#8fe3d9;--th-green:#7cbf74;--th-panel:rgba(255,255,255,.055);--th-panel-strong:rgba(7,13,12,.68);--th-border:rgba(255,255,255,.16);--th-radius-xl:48px;--th-radius-lg:30px;--th-radius-pill:999px;--th-shadow:0 28px 90px rgba(0,0,0,.45)}@media(prefers-reduced-transparency:reduce){.glass,.GlassCard{background:rgba(13,27,25,.96);backdrop-filter:none;-webkit-backdrop-filter:none}}@media(max-width:1100px){.wrap{width:min(100% - 40px,1600px)}.site-nav{padding-top:24px}.hero-grid,.showcase{grid-template-columns:1fr}.hero-visual{min-height:620px}.hero-map-preview{height:610px}.feature-grid{grid-template-columns:1fr}.nav-links{gap:20px;font-size:16px}}@media(max-width:720px){.wrap{width:min(100% - 28px,1600px)}.nav-frame{min-height:70px;border-radius:28px;padding:12px}.brand-icon{width:42px;height:42px}.brand-name{font-size:19px}.nav-links{display:none}.site-nav .cta-button{min-height:46px;padding:0 18px;font-size:15px}.hero{padding-top:40px}.hero h1{font-size:clamp(48px,14vw,56px)}.eyebrow{font-size:13px;line-height:1.4}.hero-body{font-size:20px}.hero-actions .cta-button{width:100%}.hero-visual{min-height:470px}.hero-map-preview{height:450px;border-radius:30px;padding:22px}.map-title{display:block}.map-title h2{font-size:24px}.topo-toggle{display:none}.map-canvas{left:18px;right:18px;top:112px;bottom:22px}.map-layer-control{left:28px;top:134px;width:138px;padding:15px}.route-summary-card{left:28px;right:28px;width:auto;bottom:30px}.phone-preview{display:none}.feature-pills{gap:9px}.feature-pill{font-size:14px}.copy-card h2{font-size:38px}.app-tools{grid-template-columns:1fr}.footer .wrap{display:block}.footer a{display:inline-block;margin:14px 16px 0 0}}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:#070807;color:#f7f3ea;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",Roboto,Arial,sans-serif;line-height:1.5;letter-spacing:0}a{color:inherit}.wrap{width:min(1180px,calc(100% - 40px));margin:0 auto}.page{min-height:100vh;background:linear-gradient(180deg,#070807,#111611 56%,#070807)}.nav{position:sticky;top:0;z-index:10;background:rgba(7,8,7,.84);border-bottom:1px solid rgba(255,255,255,.1);backdrop-filter:blur(18px)}.nav .wrap{min-height:76px;display:flex;align-items:center;justify-content:space-between;gap:18px}.brand{display:flex;align-items:center;gap:12px;text-decoration:none;font-weight:900;font-size:20px}.brand img{width:42px;height:42px;border-radius:12px}.nav-links{display:flex;gap:24px;color:rgba(247,243,234,.74);font-weight:750}.nav-links a{text-decoration:none}.button,.store{display:inline-flex;align-items:center;justify-content:center;border:1px solid rgba(255,255,255,.16);border-radius:18px;text-decoration:none;font-weight:900}.button{min-height:52px;padding:0 22px;background:#e06f42;color:#070807}.button.alt{background:rgba(255,255,255,.08);color:#f7f3ea}.button.android{background:#39d9ad}.hero{position:relative;overflow:hidden;padding:96px 0 58px}.hero-grid{display:grid;grid-template-columns:minmax(0,.98fr) minmax(360px,1.02fr);gap:54px;align-items:center}.eyebrow{color:#39d9ad;text-transform:uppercase;font-weight:900;font-size:13px}.hero h1{font-size:clamp(48px,4.9vw,84px);line-height:1.1;letter-spacing:0;margin:18px 0 22px;max-width:760px}.lead{color:rgba(247,243,234,.72);font-size:clamp(20px,2.1vw,28px);max-width:680px}.actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:30px}.store{min-width:172px;min-height:58px;flex-direction:column;align-items:flex-start;padding:9px 18px;background:#050505}.store span{font-size:12px;color:rgba(247,243,234,.62);line-height:1}.store strong{font-size:18px;line-height:1.08}.shots{position:relative;min-height:620px}.shot{position:absolute;width:min(310px,42vw);border-radius:36px;border:1px solid rgba(255,255,255,.16);box-shadow:0 28px 80px rgba(0,0,0,.48);background:#050505}.shot.one{right:8%;top:0;transform:rotate(1deg)}.shot.two{right:42%;bottom:0;transform:rotate(-4deg)}.pills{display:flex;flex-wrap:wrap;gap:10px;margin-top:24px}.pills span,.card{border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.07);backdrop-filter:blur(18px)}.pills span{border-radius:999px;padding:8px 12px;color:rgba(247,243,234,.84);font-weight:750}.section{padding:56px 0}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.card{border-radius:26px;padding:26px;min-height:230px}.card span{color:#39d9ad;font-size:13px;font-weight:900}.card h2{font-size:clamp(25px,2.5vw,38px);line-height:1.12;letter-spacing:0;margin:46px 0 12px}.card p,.split p{color:rgba(247,243,234,.68);font-size:18px;margin:0}.split{display:grid;grid-template-columns:.92fr 1.08fr;gap:24px;align-items:center}.split h2{font-size:clamp(40px,5.2vw,74px);line-height:1.1;letter-spacing:0;margin:12px 0 18px}.phone-wide{border:1px solid rgba(255,255,255,.14);border-radius:30px;background:rgba(255,255,255,.07);padding:10px;box-shadow:0 28px 80px rgba(0,0,0,.42)}.phone-wide img{width:100%;display:block;border-radius:22px}.footer{padding:44px 0 58px;color:rgba(247,243,234,.62);border-top:1px solid rgba(255,255,255,.1)}.footer .wrap{display:flex;justify-content:space-between;gap:18px;flex-wrap:wrap}.footer a{margin-left:16px;text-decoration:none;color:#f7f3ea}@media(max-width:900px){.hero-grid,.grid,.split{grid-template-columns:1fr}.shots{min-height:540px}.nav-links{display:none}}@media(max-width:640px){.wrap{width:min(100% - 28px,1180px)}.hero{padding-top:72px}.hero h1{font-size:clamp(42px,12.5vw,58px)}.lead{font-size:19px}.store,.button{width:100%}.shots{min-height:440px}.shot{width:58vw;border-radius:28px}.shot.two{right:34%}.grid{gap:12px}.card{min-height:0}.card h2{margin-top:24px}.footer a{display:inline-block;margin:12px 14px 0 0}}
 </style>
-<script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Trailhead","applicationCategory":"NavigationApplication","operatingSystem":"Web, iOS, Android","description":"Overland navigation, route planning, offline map packs, camp and trail discovery, field reports, public-land context, audio guides, GPX export, and credits."}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Trailhead","applicationCategory":"NavigationApplication","operatingSystem":"iOS, Android, Web","description":"Camps, trails, route planning, Explore cards, field reports, and offline map packs.","downloadUrl":["https://apps.apple.com/au/app/trailhead-camp-route-free/id6763677349","https://play.google.com/store/apps/details?id=com.trailhead.app&gl=us&hl=en_US"]}</script>
 </head>
 <body>
-<div class="page-shell">
-  <nav class="site-nav" aria-label="Main navigation">
-    <div class="wrap nav-frame glass">
-      <a class="brand" href="/" aria-label="Trailhead home">
-        <img class="brand-icon" src="/assets/app-icon.png" alt="" width="48" height="48">
-        <span class="brand-name">Trailhead</span>
-      </a>
-      <div class="nav-links"><a href="#features">Features</a><a href="#map">Map</a><a href="#credits">Credits</a><a href="#download">Download</a></div>
-      <a class="CTAButton cta-button primary" href="https://apps.apple.com/app/id6763677349">Get the app</a>
+<div class="page">
+  <nav class="nav" aria-label="Main navigation">
+    <div class="wrap">
+      <a class="brand" href="/" aria-label="Trailhead home"><img src="/assets/app-icon.png" alt="" width="42" height="42">Trailhead</a>
+      <div class="nav-links"><a href="#app">App</a><a href="#explore">Explore</a><a href="#offline">Offline</a><a href="/app">Web app</a></div>
+      <a class="button" href="#download">Download</a>
     </div>
   </nav>
-
   <main>
-    <section class="hero">
+    <section class="hero" id="app">
       <div class="wrap hero-grid">
         <div>
-          <div class="eyebrow">OVERLAND NAVIGATION • OFFLINE MAPS • FIELD REPORTS</div>
-          <h1>Know the trail <span class="sand">before you roll.</span></h1>
-          <p class="hero-body">Plan routes, find camps, save offline map packs, and check trail reports without staring at a cluttered dashboard.</p>
-          <div class="hero-actions" id="download">
-            <a class="CTAButton cta-button primary" href="https://apps.apple.com/app/id6763677349">Download iOS</a>
-            <a class="CTAButton cta-button secondary" href="/app">Open web app</a>
+          <div class="eyebrow">Trailhead for iOS, Android, and web</div>
+          <h1>Find the camp. Keep the route. Carry the map.</h1>
+          <p class="lead">Trailhead brings camps, trails, Explore cards, field reports, route planning, and offline map packs into one trip app.</p>
+          <div class="actions" id="download">
+            <a class="store" href="https://apps.apple.com/au/app/trailhead-camp-route-free/id6763677349"><span>Download on the</span><strong>App Store</strong></a>
+            <a class="store" href="https://play.google.com/store/apps/details?id=com.trailhead.app&gl=us&hl=en_US"><span>Get it on</span><strong>Google Play</strong></a>
+            <a class="button alt" href="/app">Open web app</a>
           </div>
-          <div class="feature-pills" aria-label="Trailhead highlights">
-            <span class="FeaturePill feature-pill" style="--pill-color:var(--th-sand)">Offline map packs</span>
-            <span class="FeaturePill feature-pill" style="--pill-color:var(--th-cyan)">Route Builder</span>
-            <span class="FeaturePill feature-pill" style="--pill-color:var(--th-green)">Community reports</span>
-          </div>
+          <div class="pills"><span>Offline map packs</span><span>Camp and trail search</span><span>Route builder</span><span>Explore guides</span></div>
         </div>
-
-        <div class="hero-visual" id="map">
-          <section class="HeroMapPreview hero-map-preview GlassCard glass" aria-label="Trailhead app map preview">
-            <div class="map-title">
-              <div>
-                <h2>Clean map-first experience</h2>
-                <p>Useful layers, readable cards, and route context in one view.</p>
-              </div>
-              <div class="topo-toggle" aria-hidden="true"><span>Topo</span><span class="on">Trail</span></div>
-            </div>
-
-            <div class="map-canvas" aria-hidden="true">
-              <svg viewBox="0 0 760 430" preserveAspectRatio="none">
-                <defs>
-                  <linearGradient id="land" x1="0" x2="1"><stop stop-color="#183025"/><stop offset=".55" stop-color="#463a23"/><stop offset="1" stop-color="#6e5029"/></linearGradient>
-                  <filter id="glow"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-                </defs>
-                <rect width="760" height="430" fill="url(#land)"/>
-                <g fill="none" stroke="#f7f3ea" stroke-opacity=".72" stroke-width="1">
-                  <path d="M-20 30C70 54 120 10 210 32s148 62 237 20 156-55 235-10 123 5 195-18"/>
-                  <path d="M-40 76C65 108 139 55 236 76s148 52 242 19 159-60 248-20 129 10 200-20"/>
-                  <path d="M-35 128C62 170 158 91 244 128s149 42 244 11 151-38 241-8 132-18 211-43"/>
-                  <path d="M-30 183C78 142 156 206 254 174s160-64 262-23 154 54 258 0"/>
-                  <path d="M-45 238C84 296 156 205 280 240s166 61 287 10 151-78 246-31"/>
-                  <path d="M-30 300C81 260 150 333 262 302s165-74 276-31 180 60 290 3"/>
-                  <path d="M-20 362C98 318 165 392 280 358s175-65 292-23 175 38 258-10"/>
-                </g>
-                <path d="M0 130C84 160 124 112 186 130s84 98 154 75 84-78 144-52 42 120 122 116 78-88 154-70" fill="none" stroke="#8fe3d9" stroke-width="5" stroke-linecap="round" opacity=".9"/>
-                <path d="M48 320 168 262 270 276 342 222 448 214 556 162 704 92" fill="none" stroke="#050505" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" opacity=".85"/>
-                <path d="M48 320 168 262 270 276 342 222 448 214 556 162 704 92" fill="none" stroke="#d99a3d" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)"/>
-                <g fill="#10201d" stroke="#f7f3ea" stroke-width="4">
-                  <circle cx="48" cy="320" r="10"/><circle cx="270" cy="276" r="13"/><circle cx="556" cy="162" r="12"/><circle cx="704" cy="92" r="10"/>
-                </g>
-              </svg>
-              <span class="pin" style="left:20px;bottom:104px">Start</span>
-              <span class="pin" style="left:244px;bottom:148px">Camp</span>
-              <span class="pin cluster" style="right:36px;top:210px">12</span>
-              <span class="pin dot" style="right:84px;top:232px"></span>
-            </div>
-
-            <aside class="MapLayerControl map-layer-control glass">
-              <h3>Layers</h3>
-              <div class="layer-pill"></div>
-              <div class="layer-pill"></div>
-              <div class="layer-pill"></div>
-            </aside>
-
-            <aside class="RouteSummaryCard route-summary-card glass">
-              <div class="label">Sample route</div>
-              <h3>Escalante loop</h3>
-              <p>3 camps • fuel stop • offline ready</p>
-            </aside>
-
-            <aside class="PhonePreview phone-preview" aria-label="Trailhead phone app preview">
-              <div class="phone-screen">
-                <svg viewBox="0 0 260 440" preserveAspectRatio="none" aria-hidden="true">
-                  <rect width="260" height="440" fill="#1c3528"/>
-                  <g fill="none" stroke="#f7f3ea" stroke-opacity=".65" stroke-width="1">
-                    <path d="M-20 64C52 43 81 80 145 56s79-1 139-30"/><path d="M-20 118C41 86 89 130 150 98s85-3 128-44"/><path d="M-20 178C44 145 86 194 145 160s83 4 136-36"/><path d="M-20 246C47 208 92 263 154 228s87 2 129-44"/><path d="M-20 314C57 272 102 334 165 296s72-12 118-49"/></g>
-                  <path d="M58 390C82 320 92 262 120 220s42-78 86-120" fill="none" stroke="#d99a3d" stroke-width="7" stroke-linecap="round"/>
-                  <g fill="#f7f3ea"><circle cx="58" cy="390" r="8"/><circle cx="120" cy="220" r="8"/><circle cx="206" cy="100" r="8"/></g>
-                </svg>
-                <div class="phone-notch"></div>
-                <div class="phone-search">Search camps or trails</div>
-                <div class="phone-card">
-                  <div class="label">Offline pack</div>
-                  <h3>Grand Staircase</h3>
-                  <p>Saved for dead-zone navigation.</p>
-                  <span class="ready">Ready</span>
-                </div>
-              </div>
-            </aside>
-          </section>
+        <div class="shots" aria-label="Trailhead app screenshots">
+          <img class="shot one" src="/assets/screenshots/map-main.jpg" alt="Trailhead app map with camp pins and layers">
+          <img class="shot two" src="/assets/screenshots/route-builder.jpg" alt="Trailhead route builder">
         </div>
       </div>
     </section>
-
-    <section class="section" id="features">
-      <div class="wrap feature-grid">
-        <article class="GlassCard feature-card"><h2>Route Builder</h2><p>Plan starts, destinations, fuel, camps, POIs, daily legs, and GPX backups.</p></article>
-        <article class="GlassCard feature-card"><h2>Offline map packs</h2><p>Prepare map regions on the phone before the service bars disappear.</p></article>
-        <article class="GlassCard feature-card"><h2>Camp and trail discovery</h2><p>Search around the route instead of digging through a cluttered list.</p></article>
+    <section class="section" id="explore">
+      <div class="wrap grid">
+        <article class="card"><span>01</span><h2>Explore that feels useful</h2><p>Destination cards can cover trails, camps, parks, monuments, glaciers, tours, routes, and nearby context.</p></article>
+        <article class="card"><span>02</span><h2>Route planning without clutter</h2><p>Build a trip with starts, destinations, camps, POIs, fuel, daily limits, route style, and GPX export.</p></article>
+        <article class="card"><span>03</span><h2>Field details on the phone</h2><p>Keep saved routes, offline packs, reports, layers, and guide audio where they matter most.</p></article>
       </div>
     </section>
-
-    <section class="section" id="credits">
-      <div class="wrap showcase">
-        <article class="GlassCard copy-card">
-          <h2>Built around the app. Useful on the web.</h2>
-          <p>The website is the planning desk. The phone app is where offline packs, field reports, saved routes, navigation, and poor-service recovery belong.</p>
-          <p>Use the bigger screen for route building, camp search, trail creation, Explore, credits, and GPX export. Then move the trip to the phone before you drive.</p>
-        </article>
-        <div class="GlassCard copy-card app-tools">
-          <div class="tool-card"><b>Route Builder</b><span>Plan starts, destinations, fuel, camps, POIs, and GPX exports.</span></div>
-          <div class="tool-card"><b>Camp search</b><span>Find camps around the route and check useful context.</span></div>
-          <div class="tool-card"><b>Trail discovery</b><span>Browse trailheads, trail reports, and route-building options.</span></div>
-          <div class="tool-card"><b>Explore</b><span>Use guide-style place discovery and audio guides before the drive.</span></div>
-          <div class="tool-card"><b>Offline packs</b><span>Download on the phone before leaving service.</span></div>
-          <div class="tool-card"><b>Credits</b><span>Use credits for heavier planning and guide features.</span></div>
+    <section class="section" id="offline">
+      <div class="wrap split">
+        <div>
+          <div class="eyebrow">The app is the field tool</div>
+          <h2>Built for the places that make service unreliable.</h2>
+          <p>Search around a route, inspect camp details, save map packs, and bring the trip with you. The web app stays available for planning, but the mobile app is the center of the experience.</p>
+          <div class="actions">
+            <a class="button" href="https://apps.apple.com/au/app/trailhead-camp-route-free/id6763677349">Download iOS</a>
+            <a class="button android" href="https://play.google.com/store/apps/details?id=com.trailhead.app&gl=us&hl=en_US">Download Android</a>
+          </div>
         </div>
+        <div class="phone-wide"><img src="/assets/screenshots/camp-card.jpg" alt="Trailhead camp detail card"></div>
       </div>
     </section>
   </main>
-
   <footer class="footer">
     <div class="wrap">
-      <span>Trailhead • overland planning on the web, offline navigation on the phone</span>
-      <span><a href="/app">Web app</a><a href="/blog">Blog</a><a href="/privacy">Privacy</a></span>
+      <span>Trailhead: camps, trails, route planning, and offline maps.</span>
+      <span><a href="/app">Web app</a><a href="/blog">Journal</a><a href="/privacy">Privacy</a></span>
     </div>
   </footer>
 </div>

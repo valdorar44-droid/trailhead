@@ -1,20 +1,40 @@
 ---
 import Layout from "../layouts/Layout.astro";
+
+const iosUrl = "https://apps.apple.com/au/app/trailhead-camp-route-free/id6763677349";
+const androidUrl = "https://play.google.com/store/apps/details?id=com.trailhead.app&gl=us&hl=en_US";
 ---
 
-<Layout title="Trailhead - Know the trail before you roll." transparentNav={true}>
+<Layout
+  title="Trailhead - Camps, trails, routes, and offline maps"
+  description="Trailhead helps overland and outdoor travelers find camps, trails, route context, Explore cards, field reports, and offline map packs on iOS, Android, and the web app."
+  transparentNav={true}
+>
   <main class="trailhead-home">
-    <section class="th-hero">
+    <section class="th-hero" id="app">
       <video class="th-hero-video" src="/hero.mp4" poster="/hero.jpg" autoplay muted loop playsinline></video>
       <div class="th-hero-shade"></div>
       <div class="th-hero-inner">
         <div class="th-hero-copy">
-          <p class="th-eyebrow">Overland navigation / Offline maps / Field reports</p>
-          <h1>Know the trail before you roll.</h1>
-          <p class="th-lead">Plan routes, find camps, build custom trails, save offline map packs, and check field reports without staring at a cluttered dashboard.</p>
+          <p class="th-eyebrow">Trailhead for iOS, Android, and web</p>
+          <h1>Find the camp. Keep the route. Carry the map.</h1>
+          <p class="th-lead">Trailhead brings camps, trails, Explore cards, field reports, route planning, and offline map packs into one trip app.</p>
           <div class="th-actions">
-            <a class="th-btn th-btn-primary" href="https://apps.apple.com/app/id6763677349">Download iOS</a>
-            <a class="th-btn th-btn-ghost" href="/app">Open web planner</a>
+            <a class="th-store-link" href={iosUrl} aria-label="Download Trailhead on the App Store">
+              <span>Download on the</span>
+              <strong>App Store</strong>
+            </a>
+            <a class="th-store-link" href={androidUrl} aria-label="Get Trailhead on Google Play">
+              <span>Get it on</span>
+              <strong>Google Play</strong>
+            </a>
+            <a class="th-btn th-btn-ghost" href="/app">Open web app</a>
+          </div>
+          <div class="th-proof-row" aria-label="Trailhead highlights">
+            <span>Offline map packs</span>
+            <span>Camp and trail search</span>
+            <span>Route builder</span>
+            <span>Explore guides</span>
           </div>
         </div>
         <div class="th-phone-stack" aria-label="Trailhead app screenshots">
@@ -24,49 +44,75 @@ import Layout from "../layouts/Layout.astro";
       </div>
     </section>
 
-    <section class="th-section th-map-first">
+    <section class="th-product-strip" id="explore" aria-label="Trailhead app surfaces">
+      <article>
+        <span>01</span>
+        <h2>Explore that feels useful</h2>
+        <p>Destination cards can cover trails, camps, parks, monuments, glaciers, tours, routes, and nearby context without making every place feel the same.</p>
+      </article>
+      <article>
+        <span>02</span>
+        <h2>Route planning without clutter</h2>
+        <p>Build a trip with starts, destinations, camps, POIs, fuel, daily limits, route style, and GPX export when the bigger screen helps.</p>
+      </article>
+      <article>
+        <span>03</span>
+        <h2>Field details on the phone</h2>
+        <p>Keep saved routes, offline packs, reports, layers, and guide audio where they matter most: in the app before service drops.</p>
+      </article>
+    </section>
+
+    <section class="th-section th-section-app">
       <div>
-        <p class="th-eyebrow">Map first</p>
-        <h2>The website is the planning desk.</h2>
-        <p>Use the bigger screen for route building, camp search, trail creation, Explore, credits, and GPX export. Then pick up the trip on the phone before you drive.</p>
+        <p class="th-eyebrow">The app is the field tool</p>
+        <h2>Built for the places that make service unreliable.</h2>
+        <p>Search around a route, inspect camp details, save map packs, and bring the trip with you. The web app stays available for planning, but the mobile app is the center of the experience.</p>
+        <div class="th-actions th-actions-tight" id="download">
+          <a class="th-btn th-btn-primary" href={iosUrl}>Download iOS</a>
+          <a class="th-btn th-btn-primary th-btn-android" href={androidUrl}>Download Android</a>
+          <a class="th-btn th-btn-ghost" href="/app">Open web app</a>
+        </div>
       </div>
-      <div class="th-glass th-map-card">
+      <div class="th-shot th-shot-wide">
         <img src="/assets/screenshots/camp-card.jpg" alt="Trailhead camp card over the map" loading="lazy" />
       </div>
     </section>
 
     <section class="th-feature-grid" id="offline">
-      <article class="th-glass">
-        <span>01</span>
-        <h3>Route Builder</h3>
-        <p>Starts, destinations, fuel, camps, POIs, daily legs, and saved routes that open on the phone.</p>
+      <article>
+        <span>Offline</span>
+        <h3>Map packs before the dead zone</h3>
+        <p>Prepare regions on the phone instead of hoping the map stays cached.</p>
       </article>
-      <article class="th-glass">
-        <span>02</span>
-        <h3>Offline map packs</h3>
-        <p>Download on the app before the signal disappears. Cached is useful; downloaded is deliberate.</p>
+      <article>
+        <span>Layers</span>
+        <h3>Terrain, public land, and conditions</h3>
+        <p>Use readable layer controls for land context, trails, water, weather, fire, avalanche, and road information.</p>
       </article>
-      <article class="th-glass">
-        <span>03</span>
-        <h3>Custom trail pins</h3>
-        <p>Drop pins at bends and forks, preview the line, then save or publish a community trail profile.</p>
+      <article>
+        <span>Explore</span>
+        <h3>Cards with a reason to open them</h3>
+        <p>See places, photos, details, nearby trails, camps, and route options from one surface.</p>
       </article>
-      <article class="th-glass">
-        <span>04</span>
-        <h3>Field reports</h3>
-        <p>Community notes, camp fullness, trail updates, and conditions that are useful before the drive.</p>
+      <article>
+        <span>Reports</span>
+        <h3>Field notes that stay practical</h3>
+        <p>Keep trail and camp context short, current, and easy to read when time matters.</p>
       </article>
     </section>
 
     <section class="th-section">
-      <div class="th-glass th-layer-shot">
+      <div class="th-shot th-layer-shot">
         <img src="/assets/screenshots/map-layers.jpg" alt="Trailhead map layers sheet" loading="lazy" />
       </div>
       <div>
-        <p class="th-eyebrow">Real layers</p>
-        <h2>Filters that match the app.</h2>
-        <p>Public land tint, USGS topo and trails, trailheads and water POIs, active wildfires, avalanche zones, rain radar, and MVUM roads and trails belong on the planner too.</p>
-        <a class="th-btn th-btn-primary" href="/app">Open the planner</a>
+        <p class="th-eyebrow">One account, useful surfaces</p>
+        <h2>Plan on web. Carry it in the app.</h2>
+        <p>The web app is there when a laptop makes sense. Trailhead on iOS and Android is where saved trips, offline packs, layers, reports, and location-aware tools are meant to live.</p>
+        <div class="th-actions th-actions-tight">
+          <a class="th-btn th-btn-primary" href={iosUrl}>iOS download</a>
+          <a class="th-btn th-btn-primary th-btn-android" href={androidUrl}>Android download</a>
+        </div>
       </div>
     </section>
   </main>

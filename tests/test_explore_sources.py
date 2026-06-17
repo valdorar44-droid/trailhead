@@ -9,6 +9,7 @@ from scripts.build_explore_catalog_v3 import build_catalog
 from scripts.explore_sources.base.aliases import aliases_for_category
 from scripts.explore_sources.base.cards import build_card
 from scripts.explore_sources.base.dedupe import dedupe_places
+from scripts.explore_sources.base.fetch import parse_headers, resolve_input_paths
 from scripts.explore_sources.base.quality import score_place
 from scripts.explore_sources.base.schema import ExplorePlaceV3
 from scripts.explore_sources.blm.import_blm import import_blm_fixture
@@ -221,6 +222,19 @@ class ExploreSourcePipelineTests(unittest.TestCase):
         osm = score_place(ExplorePlaceV3(id="osm", sources=[{"source": "osm"}]))
         self.assertGreater(official.quality_score, osm.quality_score)
 
+    def test_source_url_fetches_to_cache_and_imports(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_dir = Path(tmp) / "cache"
+            headers = parse_headers(["X-Test: Trailhead"])
+            paths = resolve_input_paths([], [NPS.as_uri()], source="nps", cache_dir=cache_dir, headers=headers)
+            self.assertEqual(len(paths), 1)
+            cached = Path(paths[0])
+            self.assertTrue(cached.exists())
+            self.assertEqual(cached.parent.name, "nps")
+            records, places, _trails = import_nps_fixture(cached, fetched_at=123)
+            self.assertEqual(len(records), 1)
+            self.assertEqual(places[0].name, "Yosemite National Park")
+
     def test_builder_outputs_searchable_pilot_catalog(self):
         records, places, trails = build_catalog(
             [str(YOSEMITE), str(PAKISTAN)],
@@ -255,6 +269,7 @@ class ExploreSourcePipelineTests(unittest.TestCase):
             out = Path(tmp) / "explore_catalog_v3.json"
             trails_out = Path(tmp) / "explore_trail_geometries_v1.json"
             records_out = Path(tmp) / "source_records.jsonl"
+            cache_dir = Path(tmp) / "source_cache"
             from scripts.build_explore_catalog_v3 import main
             import sys
             old_argv = sys.argv
@@ -263,11 +278,12 @@ class ExploreSourcePipelineTests(unittest.TestCase):
                     "build_explore_catalog_v3.py",
                     "--source-fixture", str(YOSEMITE),
                     "--ridb-fixture", str(RIDB),
-                    "--nps-fixture", str(NPS),
+                    "--nps-url", NPS.as_uri(),
                     "--usfs-fixture", str(USFS),
                     "--blm-fixture", str(BLM),
                     "--wikidata-fixture", str(WIKIDATA),
                     "--openbeta-fixture", str(OPENBETA),
+                    "--source-cache-dir", str(cache_dir),
                     "--out", str(out),
                     "--trails-out", str(trails_out),
                     "--source-records-out", str(records_out),
@@ -279,6 +295,7 @@ class ExploreSourcePipelineTests(unittest.TestCase):
             self.assertTrue(out.exists())
             self.assertTrue(trails_out.exists())
             self.assertTrue(records_out.exists())
+            self.assertTrue(any((cache_dir / "nps").glob("*.json")))
             self.assertEqual(json.loads(out.read_text())["schema_version"], 3)
 
 

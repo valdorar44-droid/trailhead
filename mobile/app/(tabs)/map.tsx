@@ -18385,7 +18385,7 @@ function MapScreen() {
       {/* ── Search overlay ── */}
       {/* ── Route Search Modal (OsmAnd-style) ──────────────────────────── */}
       {showSearch && !navMode && (
-        <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
+        <View style={{ position: 'absolute', bottom: Platform.OS === 'android' ? Math.max(bottomInset - 8, 16) : 0, left: 0, right: 0 }}>
           <RouteSearchModal
             visible={showSearch}
             mode={searchMode}

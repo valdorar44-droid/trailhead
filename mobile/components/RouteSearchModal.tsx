@@ -6,12 +6,12 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
   StyleSheet, Keyboard, KeyboardAvoidingView, Platform, ActivityIndicator, useWindowDimensions,
-  Modal, SafeAreaView, LayoutChangeEvent, Image,
+  Modal, SafeAreaView, LayoutChangeEvent, Image, InteractionManager,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore, SavedPlace, MarkerGroup, TripHistoryItem } from '@/lib/store';
-import { api, CampsitePin, Pin } from '@/lib/api';
+import { api, CampsitePin, Pin, type ExploreCatalogIndexItem } from '@/lib/api';
 import { getOfflineTripSummaries, loadOfflineTrip } from '@/lib/offlineTrips';
 import { useTheme, mono } from '@/lib/design';
 import { TrailheadSheet } from '@/components/TrailheadUI';
@@ -39,6 +39,7 @@ export interface SearchPlace {
   google_maps_uri?: string;
   attribution?: string;
   icon?: string;
+  summary?: string;
   _camp?: CampsitePin;
 }
 
@@ -197,6 +198,70 @@ function parseCoordinateQuery(raw: string): { lat: number; lng: number; name: st
     lng,
     name: `${lat.toFixed(5)}, ${lng.toFixed(5)}`,
   };
+}
+
+function normalizeSearchText(raw: string) {
+  return String(raw || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function exploreItemToSearchPlace(item: ExploreCatalogIndexItem, userLoc: { lat: number; lng: number } | null): SearchPlace | null {
+  const lat = Number(item.lat);
+  const lng = Number(item.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  const title = (item.title || item.card?.title || item.card?.headline || 'Trailhead place').trim();
+  const region = [item.region, item.category || item.v3_category].filter(Boolean).join(' · ');
+  const type = String(item.explore_group || item.v3_category || item.category || 'place').toLowerCase().replace(/[^a-z0-9_]+/g, '_');
+  return {
+    id: item.id,
+    place_id: item.id,
+    provider_place_id: item.id,
+    name: title,
+    lat,
+    lng,
+    dist: userLoc ? haversineKm(userLoc, { lat, lng }) : null,
+    source: 'trailhead_explore',
+    source_label: item.verified ? 'Trailhead verified' : 'Trailhead Explore',
+    type,
+    subtype: region || undefined,
+    address: region || undefined,
+    photo_url: item.thumbnail_url || item.image_url || item.media?.find(media => media.url)?.url || null,
+    website: item.source_url || item.sources?.find(source => source.url)?.url,
+    attribution: item.source_title || item.quality || item.source_quality || 'Trailhead Explore',
+    icon: type.includes('trail') ? 'trail' : type.includes('camp') ? 'camp' : 'pin',
+    summary: item.short_description || item.hook || item.card?.summary || item.card?.highlight,
+  };
+}
+
+function exploreSearchScore(place: SearchPlace, query: string) {
+  const q = normalizeSearchText(query);
+  const name = normalizeSearchText(place.name);
+  const meta = normalizeSearchText(`${place.subtype || ''} ${place.address || ''} ${place.summary || ''}`);
+  if (!q) return 0;
+  let score = 0;
+  if (name === q) score += 120;
+  if (name.startsWith(q)) score += 90;
+  if (name.includes(q)) score += 70;
+  const terms = q.split(/\s+/).filter(Boolean);
+  score += terms.filter(term => name.includes(term)).length * 12;
+  score += terms.filter(term => meta.includes(term)).length * 4;
+  if (place.source === 'trailhead_explore') score += 35;
+  if (place.source === 'mapbox_search') score += 8;
+  if (place.dist != null) score -= Math.min(place.dist, 2000) / 500;
+  return score;
+}
+
+function dedupeSearchResults<T extends SearchPlace>(items: T[]): T[] {
+  const seen = new Set<string>();
+  return items.filter(item => {
+    const source = String(item.source || '').toLowerCase();
+    const name = normalizeSearchText(item.name);
+    const key = source === 'trailhead_explore' && name
+      ? `trailhead:${name}`
+      : `${name}:${Number(item.lat).toFixed(4)}:${Number(item.lng).toFixed(4)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 // ── Elevation profile ─────────────────────────────────────────────────────────
@@ -385,6 +450,14 @@ export default function RouteSearchModal({
       .catch(() => setOfflineTrips([]));
   }, [visible]);
 
+  useEffect(() => {
+    if (!visible || view !== 'searching') return;
+    const interaction = InteractionManager.runAfterInteractions(() => {
+      setTimeout(() => inputRef.current?.focus(), Platform.OS === 'android' ? 180 : 80);
+    });
+    return () => interaction.cancel();
+  }, [visible, view]);
+
   const getExtremeSearchSession = useCallback(async () => {
     const now = Date.now();
     if (extremeSearchSessionRef.current && extremeSearchSessionRef.current.expiresAt > now + 15_000) {
@@ -454,6 +527,16 @@ export default function RouteSearchModal({
       .sort((a, b) => (a.dist ?? 9999) - (b.dist ?? 9999));
   }, [getExtremeSearchSession, mapboxFeatureToPlace, userLoc]);
 
+  const searchExplorePlaces = useCallback(async (text: string) => {
+    const clean = text.trim();
+    if (clean.length < 2) return [] as SearchPlace[];
+    const index = await api.getExploreCatalogIndex({ q: clean, limit: 12 }).catch(() => null);
+    return (index?.places ?? [])
+      .map(item => exploreItemToSearchPlace(item, userLoc))
+      .filter(Boolean)
+      .filter(hasUsableCoordinate) as SearchPlace[];
+  }, [userLoc]);
+
   const searchExtremeCategory = useCallback(async (catId: string) => {
     if (!extremeSearchEnabled || !userLoc) return [] as SearchPlace[];
     const categoryMap: Record<string, string> = {
@@ -496,18 +579,27 @@ export default function RouteSearchModal({
     }
     setSearching(true);
     try {
+      const explorePlaces = await searchExplorePlaces(query.trim());
+      let providerPlaces: SearchPlace[] = [];
       if (extremeSearchEnabled) {
-        setResults(await searchExtremePlaces(query.trim()));
+        providerPlaces = await searchExtremePlaces(query.trim());
       } else {
         const places = await api.geocodePlaces(query.trim(), 8);
-        setResults(places
+        providerPlaces = places
           .map(place => ({ name: place.name, lat: place.lat, lng: place.lng, dist: userLoc ? haversineKm(userLoc, place) : null, source: place.source, place_id: place.place_id }))
           .filter(hasUsableCoordinate)
-          .sort((a, b) => (a.dist ?? 9999) - (b.dist ?? 9999)));
+          .sort((a, b) => (a.dist ?? 9999) - (b.dist ?? 9999));
       }
+      setResults(dedupeSearchResults([...explorePlaces, ...providerPlaces])
+        .sort((a, b) => {
+          const scoreDelta = exploreSearchScore(b, query) - exploreSearchScore(a, query);
+          if (Math.abs(scoreDelta) > 0.01) return scoreDelta;
+          return (a.dist ?? 9999) - (b.dist ?? 9999);
+        })
+        .slice(0, 18));
     } catch { setResults([]); }
     setSearching(false);
-  }, [query, userLoc, extremeSearchEnabled, searchExtremePlaces]);
+  }, [query, userLoc, extremeSearchEnabled, searchExtremePlaces, searchExplorePlaces]);
 
   const pickCategory = useCallback(async (catId: string) => {
     setActiveCat(catId);
@@ -612,8 +704,15 @@ export default function RouteSearchModal({
         const local = pois
           .filter(p => types.includes(p.type || '') && distanceMi(userLoc, p) <= radiusMi)
           .map(p => ({ ...p, name: p.name || (p.type || 'place').replace('_', ' '), dist: haversineKm(userLoc, p) }));
+        const exploreTrails = catId === 'trails'
+          ? ((await api.getExploreCatalogIndex({ category: 'trails', limit: 120 }).catch(() => null))?.places ?? [])
+            .map(item => exploreItemToSearchPlace(item, userLoc))
+            .filter((place): place is SearchPlace => !!place)
+            .filter(hasUsableCoordinate)
+            .filter(place => distanceMi(userLoc, place) <= radiusMi)
+          : [];
         const live = await api.getNearbyPlaces(userLoc.lat, userLoc.lng, radiusMi, types.join(','));
-        setCatResults(dedupePlaces([...extremeCategoryResults, ...local, ...live
+        setCatResults(dedupePlaces([...extremeCategoryResults, ...exploreTrails, ...local, ...live
           .filter(p => p.lat != null && p.lng != null && distanceMi(userLoc, p) <= radiusMi)
             .map(p => ({
               name: p.name || p.type.replace('_', ' '),
@@ -743,7 +842,6 @@ export default function RouteSearchModal({
             </TouchableOpacity>
             <TextInput ref={inputRef} style={s.searchInput} value={query} onChangeText={setQuery}
               onSubmitEditing={() => { Keyboard.dismiss(); doSearch(); }}
-              onBlur={() => Keyboard.dismiss()}
               placeholder={activeEndpoint === 'origin' ? 'Start address or place' : 'Destination address or place'} placeholderTextColor={C.text3}
               returnKeyType="search" blurOnSubmit autoFocus />
             {searching
@@ -775,7 +873,9 @@ export default function RouteSearchModal({
                 <View style={s.resultIcon}><Ionicons name="location" size={14} color={C.orange} /></View>
                 <View style={{ flex: 1 }}>
                   <Text style={s.resultName} numberOfLines={1}>{r.name.split(',')[0]}</Text>
-                  <Text style={s.resultSub} numberOfLines={1}>{r.name.split(',').slice(1, 3).join(',').trim()}</Text>
+                  <Text style={s.resultSub} numberOfLines={1}>
+                    {r.address || r.subtype || r.source_label || r.name.split(',').slice(1, 3).join(',').trim()}
+                  </Text>
                 </View>
                 {r.dist != null && <Text style={s.resultDist}>{fmtDist(r.dist)}</Text>}
                 {!isTemporaryMapboxPlace(r) && (

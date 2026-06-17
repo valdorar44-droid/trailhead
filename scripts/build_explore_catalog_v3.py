@@ -21,6 +21,7 @@ from scripts.explore_sources.nps.fetch_nps import fetch_nps_parks_to_cache
 from scripts.explore_sources.nps.import_nps import import_nps_fixture
 from scripts.explore_sources.openbeta.import_openbeta import import_openbeta_fixture
 from scripts.explore_sources.osm.import_geofabrik import import_osm_fixture, write_import_outputs
+from scripts.explore_sources.ridb.fetch_ridb import fetch_ridb_facilities_to_cache
 from scripts.explore_sources.ridb.import_ridb import import_ridb_fixture
 from scripts.explore_sources.usfs.import_usfs import import_usfs_fixture
 from scripts.explore_sources.wikidata.import_wikidata import import_wikidata_fixture
@@ -53,6 +54,16 @@ def build_catalog(
     nps_query: str = "",
     nps_limit: int = 50,
     nps_max_records: int = 500,
+    ridb_live: bool = False,
+    ridb_api_key: str = "",
+    ridb_states: list[str] | None = None,
+    ridb_activities: list[str] | None = None,
+    ridb_query: str = "",
+    ridb_latitude: float | None = None,
+    ridb_longitude: float | None = None,
+    ridb_radius: float | None = None,
+    ridb_limit: int = 50,
+    ridb_max_records: int = 500,
 ) -> tuple[list, list, list]:
     all_records = []
     all_places = []
@@ -60,6 +71,21 @@ def build_catalog(
     fetched_at = int(time.time())
     source_paths = resolve_input_paths(source_fixtures, source_urls, source="osm", cache_dir=source_cache_dir, headers=http_headers, timeout=http_timeout, force=force_fetch)
     ridb_paths = resolve_input_paths(ridb_fixtures, ridb_urls, source="ridb", cache_dir=source_cache_dir, headers=http_headers, timeout=http_timeout, force=force_fetch)
+    if ridb_live:
+        ridb_paths.append(str(fetch_ridb_facilities_to_cache(
+            api_key=ridb_api_key,
+            cache_dir=source_cache_dir,
+            states=ridb_states,
+            activities=ridb_activities,
+            query=ridb_query,
+            latitude=ridb_latitude,
+            longitude=ridb_longitude,
+            radius=ridb_radius,
+            limit=ridb_limit,
+            max_records=ridb_max_records,
+            timeout=http_timeout,
+            force=force_fetch,
+        )))
     nps_paths = resolve_input_paths(nps_fixtures, nps_urls, source="nps", cache_dir=source_cache_dir, headers=http_headers, timeout=http_timeout, force=force_fetch)
     if nps_live:
         nps_paths.append(str(fetch_nps_parks_to_cache(
@@ -158,6 +184,16 @@ def main() -> int:
     parser.add_argument("--nps-query", default="", help="NPS parks q search term.")
     parser.add_argument("--nps-limit", type=int, default=50, help="NPS API page size.")
     parser.add_argument("--nps-max-records", type=int, default=500, help="Maximum NPS parks to cache/import.")
+    parser.add_argument("--ridb-live", action="store_true", help="Fetch live RIDB facilities API data into the source cache before importing.")
+    parser.add_argument("--ridb-api-key", default="", help="RIDB API key. Defaults to RIDB_API_KEY or RECREATION_GOV_API_KEY when omitted.")
+    parser.add_argument("--ridb-state", action="append", default=[], help="RIDB state filter, e.g. CA. May be repeated.")
+    parser.add_argument("--ridb-activity", action="append", default=[], help="RIDB activity filter, e.g. CAMPING. May be repeated.")
+    parser.add_argument("--ridb-query", default="", help="RIDB facilities query search term.")
+    parser.add_argument("--ridb-latitude", type=float, default=None, help="RIDB latitude filter for nearby facility search.")
+    parser.add_argument("--ridb-longitude", type=float, default=None, help="RIDB longitude filter for nearby facility search.")
+    parser.add_argument("--ridb-radius", type=float, default=None, help="RIDB nearby radius filter.")
+    parser.add_argument("--ridb-limit", type=int, default=50, help="RIDB API page size.")
+    parser.add_argument("--ridb-max-records", type=int, default=500, help="Maximum RIDB facilities to cache/import.")
     parser.add_argument("--out", default="dashboard/explore_catalog_v3.json")
     parser.add_argument("--trails-out", default="dashboard/explore_trail_geometries_v1.json")
     parser.add_argument("--source-records-out", default="dashboard/explore_source_records_sample.jsonl")
@@ -191,6 +227,16 @@ def main() -> int:
         nps_query=args.nps_query,
         nps_limit=args.nps_limit,
         nps_max_records=args.nps_max_records,
+        ridb_live=args.ridb_live,
+        ridb_api_key=args.ridb_api_key,
+        ridb_states=args.ridb_state,
+        ridb_activities=args.ridb_activity,
+        ridb_query=args.ridb_query,
+        ridb_latitude=args.ridb_latitude,
+        ridb_longitude=args.ridb_longitude,
+        ridb_radius=args.ridb_radius,
+        ridb_limit=args.ridb_limit,
+        ridb_max_records=args.ridb_max_records,
     )
     generated_at = int(time.time())
     catalog = {

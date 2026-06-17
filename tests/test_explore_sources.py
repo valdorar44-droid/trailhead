@@ -18,6 +18,7 @@ from scripts.explore_sources.nps.fetch_nps import fetch_nps_parks_to_cache, requ
 from scripts.explore_sources.nps.import_nps import import_nps_fixture
 from scripts.explore_sources.openbeta.import_openbeta import import_openbeta_fixture
 from scripts.explore_sources.osm.import_geofabrik import import_osm_fixture
+from scripts.explore_sources.ridb.fetch_ridb import fetch_ridb_facilities_to_cache, request_params as ridb_request_params
 from scripts.explore_sources.ridb.import_ridb import import_ridb_fixture
 from scripts.explore_sources.usfs.import_usfs import import_usfs_fixture
 from scripts.explore_sources.wikidata.import_wikidata import import_wikidata_fixture
@@ -79,6 +80,46 @@ class FakeNpsOpener:
             },
         ][start:start + 1]
         return FakeHttpResponse({"total": "2", "data": page})
+
+
+class FakeRidbOpener:
+    def __init__(self):
+        self.requests = []
+
+    def __call__(self, request, timeout):
+        self.requests.append((request, timeout))
+        qs = parse_qs(urlparse(request.full_url).query)
+        offset = int(qs.get("offset", ["0"])[0])
+        page = [
+            {
+                "FacilityID": "251974",
+                "FacilityName": "Yosemite Valley Campground",
+                "FacilityTypeDescription": "Campground",
+                "FacilityLatitude": 37.742,
+                "FacilityLongitude": -119.565,
+                "FacilityState": "CA",
+                "FacilityCity": "Yosemite Valley",
+                "FacilityDescription": "Official campground facility record for Yosemite Valley.",
+                "FacilityReservationURL": "https://www.recreation.gov/camping/campgrounds/251974",
+                "Reservable": True,
+            },
+            {
+                "FacilityID": "233336",
+                "FacilityName": "Watchman Campground",
+                "FacilityTypeDescription": "Campground",
+                "FacilityLatitude": 37.2002,
+                "FacilityLongitude": -112.9877,
+                "FacilityState": "UT",
+                "FacilityCity": "Springdale",
+                "FacilityDescription": "Official campground facility record for Zion Canyon.",
+                "FacilityReservationURL": "https://www.recreation.gov/camping/campgrounds/233336",
+                "Reservable": True,
+            },
+        ][offset:offset + 1]
+        return FakeHttpResponse({
+            "METADATA": {"RESULTS": {"TOTAL_COUNT": 2, "CURRENT_COUNT": len(page)}},
+            "RECDATA": page,
+        })
 
 
 class ExploreSourcePipelineTests(unittest.TestCase):
@@ -325,6 +366,63 @@ class ExploreSourcePipelineTests(unittest.TestCase):
         self.assertEqual(params["limit"], 25)
         self.assertEqual(params["start"], 50)
 
+    def test_ridb_live_fetcher_pages_and_caches_official_facilities(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            opener = FakeRidbOpener()
+            path = fetch_ridb_facilities_to_cache(
+                api_key="ridb-key",
+                cache_dir=tmp,
+                states=["CA", "UT"],
+                activities=["CAMPING"],
+                query="campground",
+                limit=1,
+                max_records=2,
+                opener=opener,
+            )
+            payload = json.loads(path.read_text())
+            self.assertEqual(payload["source"], "ridb")
+            self.assertEqual(payload["count"], 2)
+            self.assertEqual([item["FacilityID"] for item in payload["RECDATA"]], ["251974", "233336"])
+            self.assertEqual(len(opener.requests), 2)
+            first_request, timeout = opener.requests[0]
+            self.assertEqual(timeout, 30.0)
+            self.assertEqual(first_request.headers["Apikey"], "ridb-key")
+            records, places, _trails = import_ridb_fixture(path, fetched_at=123)
+            self.assertEqual(len(records), 2)
+            self.assertTrue(any(place.name == "Watchman Campground" and place.quality == "official_source" for place in places))
+            cached_again = fetch_ridb_facilities_to_cache(
+                api_key="ridb-key",
+                cache_dir=tmp,
+                states=["CA", "UT"],
+                activities=["CAMPING"],
+                query="campground",
+                limit=1,
+                max_records=2,
+                opener=opener,
+            )
+            self.assertEqual(cached_again, path)
+            self.assertEqual(len(opener.requests), 2)
+
+    def test_ridb_live_request_params(self):
+        params = ridb_request_params(
+            states=["CA", "UT"],
+            activities=["CAMPING"],
+            query="campground",
+            latitude=37.7,
+            longitude=-119.5,
+            radius=25,
+            limit=20,
+            offset=40,
+        )
+        self.assertEqual(params["state"], "CA,UT")
+        self.assertEqual(params["activity"], "CAMPING")
+        self.assertEqual(params["query"], "campground")
+        self.assertEqual(params["latitude"], 37.7)
+        self.assertEqual(params["longitude"], -119.5)
+        self.assertEqual(params["radius"], 25)
+        self.assertEqual(params["limit"], 20)
+        self.assertEqual(params["offset"], 40)
+
     def test_builder_outputs_searchable_pilot_catalog(self):
         records, places, trails = build_catalog(
             [str(YOSEMITE), str(PAKISTAN)],
@@ -400,6 +498,19 @@ class ExploreSourcePipelineTests(unittest.TestCase):
             )
             _records, places, _trails = build_catalog(nps_fixtures=[str(path)])
             self.assertTrue(any(place.name == "Yosemite National Park" and place.category == "park" for place in places))
+
+    def test_build_catalog_accepts_cached_live_ridb_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = fetch_ridb_facilities_to_cache(
+                api_key="ridb-key",
+                cache_dir=tmp,
+                states=["CA"],
+                limit=1,
+                max_records=1,
+                opener=FakeRidbOpener(),
+            )
+            _records, places, _trails = build_catalog(ridb_fixtures=[str(path)])
+            self.assertTrue(any(place.name == "Yosemite Valley Campground" and place.category == "campground" for place in places))
 
 
 if __name__ == "__main__":

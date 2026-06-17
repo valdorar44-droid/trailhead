@@ -1,0 +1,141 @@
+from __future__ import annotations
+
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from scripts.build_explore_catalog_v3 import build_catalog
+from scripts.explore_sources.base.aliases import aliases_for_category
+from scripts.explore_sources.base.cards import build_card
+from scripts.explore_sources.base.dedupe import dedupe_places
+from scripts.explore_sources.base.quality import score_place
+from scripts.explore_sources.base.schema import ExplorePlaceV3
+from scripts.explore_sources.osm.import_geofabrik import import_osm_fixture
+
+
+ROOT = Path(__file__).resolve().parents[1]
+YOSEMITE = ROOT / "tests/fixtures/explore_sources/osm_yosemite_sample.geojson"
+PAKISTAN = ROOT / "tests/fixtures/explore_sources/osm_pakistan_sample.geojson"
+
+
+class ExploreSourcePipelineTests(unittest.TestCase):
+    def test_osm_tag_mapping_and_attribution(self):
+        records, places, trails = import_osm_fixture(YOSEMITE, fetched_at=123)
+        categories = {place.category for place in places}
+        self.assertIn("campground", categories)
+        self.assertIn("trailhead", categories)
+        self.assertIn("waterfall", categories)
+        self.assertIn("viewpoint", categories)
+        self.assertIn("peak", categories)
+        self.assertTrue(trails)
+        self.assertTrue(all(record.license == "Open Database License (ODbL)" for record in records))
+        self.assertTrue(all("OpenStreetMap contributors" in record.attribution for record in records))
+
+    def test_same_source_id_dedupes(self):
+        place = ExplorePlaceV3(id="a", source_ids=["osm:node/1"], name="Camp", category="campground", lat=1, lng=1)
+        duplicate = ExplorePlaceV3(id="b", source_ids=["osm:node/1"], name="Camp", category="campground", lat=1, lng=1)
+        self.assertEqual(len(dedupe_places([place, duplicate])), 1)
+
+    def test_same_name_category_nearby_dedupes(self):
+        a = ExplorePlaceV3(id="a", source_ids=["osm:node/1"], name="Yosemite Valley Campground", category="campground", lat=37.742, lng=-119.565)
+        b = ExplorePlaceV3(id="b", source_ids=["osm:node/2"], name="Yosemite Valley Campground", category="campground", lat=37.7422, lng=-119.5651)
+        self.assertEqual(len(dedupe_places([a, b])), 1)
+
+    def test_trailhead_near_trail_links_but_does_not_merge(self):
+        _records, places, trails = build_catalog([str(YOSEMITE)])
+        trailhead = next(place for place in places if place.name == "Mist Trail Trailhead")
+        trail = next(trail for trail in trails if trail.name == "Mist Trail")
+        self.assertIn(trail.id, trailhead.linked_trail_ids)
+        self.assertTrue(any(place.name == "Mist Trail" for place in places))
+        self.assertTrue(any(place.name == "Mist Trail Trailhead" for place in places))
+
+    def test_official_campground_and_osm_camp_site_merge(self):
+        osm = ExplorePlaceV3(
+            id="osm",
+            source_ids=["osm:node/1005"],
+            name="Yosemite Valley Campground",
+            category="campground",
+            lat=37.742,
+            lng=-119.565,
+            sources=[{"source": "osm", "source_id": "node/1005"}],
+        )
+        official = ExplorePlaceV3(
+            id="ridb",
+            source_ids=["ridb:251974"],
+            name="Yosemite Valley Campground",
+            category="campground",
+            lat=37.7421,
+            lng=-119.5651,
+            quality="official_source",
+            quality_score=85,
+            sources=[{"source": "ridb", "source_id": "251974"}],
+        )
+        merged = dedupe_places([osm, official])
+        self.assertEqual(len(merged), 1)
+        self.assertIn("ridb:251974", merged[0].source_ids)
+        self.assertIn("osm:node/1005", merged[0].source_ids)
+
+    def test_peak_viewpoint_and_trail_same_name_do_not_auto_merge(self):
+        _records, places, _trails = build_catalog([str(YOSEMITE)])
+        sentinel = [place for place in places if place.name == "Sentinel Dome"]
+        self.assertGreaterEqual(len(sentinel), 3)
+        self.assertEqual({"peak", "viewpoint", "trail"}, {place.category for place in sentinel})
+
+    def test_smart_card_fallbacks_for_sparse_categories(self):
+        for category, expected in [("trail", "trail conditions"), ("hut", "Backcountry shelter"), ("waterfall", "seasonal flow")]:
+            place = ExplorePlaceV3(id=category, name=f"Sparse {category}", category=category)
+            build_card(place)
+            text = json.dumps(place.card)
+            self.assertIn(expected, text)
+            self.assertIn("Verify access", place.card["warnings"])
+
+    def test_search_aliases(self):
+        self.assertIn("hiking", aliases_for_category("trail"))
+        self.assertIn("trail access", aliases_for_category("trailhead"))
+        self.assertIn("falls", aliases_for_category("waterfall"))
+        self.assertIn("gas", aliases_for_category("fuel"))
+        self.assertIn("backcountry hut", aliases_for_category("hut"))
+
+    def test_quality_score_official_beats_osm_only(self):
+        official = score_place(ExplorePlaceV3(id="official", sources=[{"source": "nps"}]))
+        osm = score_place(ExplorePlaceV3(id="osm", sources=[{"source": "osm"}]))
+        self.assertGreater(official.quality_score, osm.quality_score)
+
+    def test_builder_outputs_searchable_pilot_catalog(self):
+        records, places, trails = build_catalog([str(YOSEMITE), str(PAKISTAN)])
+        self.assertGreaterEqual(len(records), 10)
+        self.assertTrue(any(trail.name == "K2 Base Camp Trek" for trail in trails))
+        blobs = " ".join(place.search_blob for place in places)
+        for term in ["camping", "hiking", "trailhead", "waterfalls", "fuel", "resupply", "k2", "hunza"]:
+            self.assertIn(term, blobs)
+
+    def test_command_writes_outputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "explore_catalog_v3.json"
+            trails_out = Path(tmp) / "explore_trail_geometries_v1.json"
+            records_out = Path(tmp) / "source_records.jsonl"
+            from scripts.build_explore_catalog_v3 import main
+            import sys
+            old_argv = sys.argv
+            try:
+                sys.argv = [
+                    "build_explore_catalog_v3.py",
+                    "--source-fixture", str(YOSEMITE),
+                    "--out", str(out),
+                    "--trails-out", str(trails_out),
+                    "--source-records-out", str(records_out),
+                    "--imports-out", str(Path(tmp) / "imports"),
+                ]
+                self.assertEqual(main(), 0)
+            finally:
+                sys.argv = old_argv
+            self.assertTrue(out.exists())
+            self.assertTrue(trails_out.exists())
+            self.assertTrue(records_out.exists())
+            self.assertEqual(json.loads(out.read_text())["schema_version"], 3)
+
+
+if __name__ == "__main__":
+    unittest.main()
+

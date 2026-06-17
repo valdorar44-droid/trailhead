@@ -1,0 +1,1406 @@
+{
+  "schema_version": 3,
+  "catalog_id": "trailhead-explore-v3-real-data-foundation",
+  "generated_at": 1781669464,
+  "source": "Prepared OSM/Geofabrik-derived fixtures; ODbL attribution preserved",
+  "count": 16,
+  "places": [
+    {
+      "id": "place:osm:relation-1001",
+      "source_ids": [
+        "osm:relation/1001"
+      ],
+      "name": "Mist Trail",
+      "category": "trail",
+      "subcategories": [
+        "hiking"
+      ],
+      "lat": 37.7272,
+      "lng": -119.5511,
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -119.5586,
+            37.7325
+          ],
+          [
+            -119.5511,
+            37.7272
+          ],
+          [
+            -119.5435,
+            37.7249
+          ]
+        ]
+      },
+      "country": "",
+      "region": "CA",
+      "admin": "",
+      "summary": "Mist Trail is mapped as trail in OpenStreetMap. Verify access, current conditions, and local rules before relying on it.",
+      "description": "Mapped trail or route; check current trail conditions, permits, weather, daylight, and navigation before starting.",
+      "tags": [
+        "trail",
+        "hiking"
+      ],
+      "search_aliases": [
+        "hike",
+        "hiking",
+        "trek",
+        "trekking",
+        "walk",
+        "route"
+      ],
+      "search_blob": "mist trail trail hiking trail hiking hike hiking trek trekking walk route ca mist trail is mapped as trail in openstreetmap. verify access, current conditions, and local rules before relying on it. mapped trail or route; check current trail conditions, permits, weather, daylight, and navigation before starting. mist trail mist trail is mapped as trail in openstreetmap. verify access, current conditions, and local rules before relying on it. osm openstreetmap contributors https://www.openstreetmap.org/relation/1001",
+      "difficulty": "",
+      "best_season": "",
+      "access": "",
+      "safety": "",
+      "amenities": [],
+      "reservations": {},
+      "media": [],
+      "card": {
+        "headline": "Mist Trail",
+        "summary": "Mist Trail is mapped as trail in OpenStreetMap. Verify access, current conditions, and local rules before relying on it.",
+        "quick_facts": [
+          "Trail",
+          "CA"
+        ],
+        "warnings": [
+          "Verify access",
+          "Check official source or local rules",
+          "Offline maps recommended",
+          "Check weather and daylight"
+        ],
+        "best_for": [
+          "Hiking",
+          "Route planning",
+          "Weather checks"
+        ],
+        "source_badge": "Open map data",
+        "primary_action": "Open trail",
+        "secondary_actions": [
+          "Save",
+          "Route",
+          "Weather"
+        ]
+      },
+      "sources": [
+        {
+          "source": "osm",
+          "source_id": "relation/1001",
+          "url": "https://www.openstreetmap.org/relation/1001",
+          "license": "Open Database License (ODbL)",
+          "attribution": "OpenStreetMap contributors",
+          "quality": "open_community_data"
+        }
+      ],
+      "quality": "open_community_data",
+      "quality_score": 45.0,
+      "verified": false,
+      "last_seen_at": 1781669464,
+      "updated_at": 1781669464,
+      "linked_trail_ids": [],
+      "linked_place_ids": []
+    },
+    {
+      "id": "place:osm:node-1002",
+      "source_ids": [
+        "osm:node/1002"
+      ],
+      "name": "Mist Trail Trailhead",
+      "category": "trailhead",
+      "subcategories": [
+        "trailhead"
+      ],
+      "lat": 37.7326,
+      "lng": -119.5587,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -119.5587,
+          37.7326
+        ]
+      },
+      "country": "",
+      "region": "CA",
+      "admin": "",
+      "summary": "Mist Trail Trailhead is mapped as trailhead in OpenStreetMap. Verify access, current conditions, and local rules before relying on it.",
+      "description": "Mapped trail access point; confirm parking, road conditions, closures, daylight, and route details before starting.",
+      "tags": [
+        "trailhead"
+      ],
+      "search_aliases": [
+        "start point",
+        "parking",
+        "hike start",
+        "trail access",
+        "Mist Trail"
+      ],
+      "search_blob": "mist trail trailhead trailhead trailhead trailhead start point parking hike start trail access mist trail ca mist trail trailhead is mapped as trailhead in openstreetmap. verify access, current conditions, and local rules before relying on it. mapped trail access point; confirm parking, road conditions, closures, daylight, and route details before starting. mist trail trailhead mist trail trailhead is mapped as trailhead in openstreetmap. verify access, current conditions, and local rules before relying on it. mist trail osm openstreetmap contributors https://www.openstreetmap.org/node/1002",
+      "difficulty": "",
+      "best_season": "",
+      "access": "",
+      "safety": "",
+      "amenities": [],
+      "reservations": {},
+      "media": [],
+      "card": {
+        "headline": "Mist Trail Trailhead",
+        "summary": "Mist Trail Trailhead is mapped as trailhead in OpenStreetMap. Verify access, current conditions, and local rules before relying on it.",
+        "quick_facts": [
+          "Trailhead",
+          "CA"
+        ],
+        "warnings": [
+          "Verify access",
+          "Check official source or local rules",
+          "Offline maps recommended",
+          "Check weather and daylight"
+        ],
+        "best_for": [
+          "Trail access",
+          "Parking check",
+          "Route start"
+        ],
+        "source_badge": "Open map data",
+        "primary_action": "Show access",
+        "secondary_actions": [
+          "Save",
+          "Route",
+          "Weather"
+        ]
+      },
+      "sources": [
+        {
+          "source": "osm",
+          "source_id": "node/1002",
+          "url": "https://www.openstreetmap.org/node/1002",
+          "license": "Open Database License (ODbL)",
+          "attribution": "OpenStreetMap contributors",
+          "quality": "open_community_data"
+        }
+      ],
+      "quality": "open_community_data",
+      "quality_score": 45.0,
+      "verified": false,
+      "last_seen_at": 1781669464,
+      "updated_at": 1781669464,
+      "linked_trail_ids": [
+        "trail:osm:relation-1001"
+      ],
+      "linked_place_ids": []
+    },
+    {
+      "id": "place:osm:node-1003",
+      "source_ids": [
+        "osm:node/1003"
+      ],
+      "name": "Vernal Fall",
+      "category": "waterfall",
+      "subcategories": [
+        "waterfall"
+      ],
+      "lat": 37.7275,
+      "lng": -119.5432,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -119.5432,
+          37.7275
+        ]
+      },
+      "country": "",
+      "region": "CA",
+      "admin": "",
+      "summary": "Vernal Fall is mapped as waterfall in OpenStreetMap. Verify access, current conditions, and local rules before relying on it.",
+      "description": "Mapped waterfall or cascade; check trail access, seasonal flow, closures, and slippery terrain.",
+      "tags": [
+        "waterfall"
+      ],
+      "search_aliases": [
+        "waterfalls",
+        "falls",
+        "cascade"
+      ],
+      "search_blob": "vernal fall waterfall waterfall waterfall waterfalls falls cascade ca vernal fall is mapped as waterfall in openstreetmap. verify access, current conditions, and local rules before relying on it. mapped waterfall or cascade; check trail access, seasonal flow, closures, and slippery terrain. vernal fall vernal fall is mapped as waterfall in openstreetmap. verify access, current conditions, and local rules before relying on it. osm openstreetmap contributors https://www.openstreetmap.org/node/1003",
+      "difficulty": "",
+      "best_season": "",
+      "access": "",
+      "safety": "",
+      "amenities": [],
+      "reservations": {},
+      "media": [],
+      "card": {
+        "headline": "Vernal Fall",
+        "summary": "Vernal Fall is mapped as waterfall in OpenStreetMap. Verify access, current conditions, and local rules before relying on it.",
+        "quick_facts": [
+          "Waterfall",
+          "CA"
+        ],
+        "warnings": [
+          "Verify access",
+          "Check official source or local rules",
+          "Offline maps recommended"
+        ],
+        "best_for": [
+          "Short detours",
+          "Photos",
+          "Flow checks"
+        ],
+        "source_badge": "Open map data",
+        "primary_action": "Show on map",
+        "secondary_actions": [
+          "Save",
+          "Route",
+          "Weather"
+        ]
+      },
+      "sources": [
+        {
+          "source": "osm",
+          "source_id": "node/1003",
+          "url": "https://www.openstreetmap.org/node/1003",
+          "license": "Open Database License (ODbL)",
+          "attribution": "OpenStreetMap contributors",
+          "quality": "open_community_data"
+        }
+      ],
+      "quality": "open_community_data",
+      "quality_score": 45.0,
+      "verified": false,
+      "last_seen_at": 1781669464,
+      "updated_at": 1781669464,
+      "linked_trail_ids": [],
+      "linked_place_ids": []
+    },
+    {
+      "id": "place:osm:node-1004",
+      "source_ids": [
+        "osm:node/1004"
+      ],
+      "name": "Glacier Point",
+      "category": "viewpoint",
+      "subcategories": [
+        "viewpoint"
+      ],
+      "lat": 37.7303,
+      "lng": -119.5736,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -119.5736,
+          37.7303
+        ]
+      },
+      "country": "",
+      "region": "CA",
+      "admin": "",
+      "summary": "Glacier Point is mapped as viewpoint in OpenStreetMap. Verify access, current conditions, and local rules before relying on it.",
+      "description": "Mapped viewpoint or overlook; check access, road conditions, weather, and daylight.",
+      "tags": [
+        "viewpoint"
+      ],
+      "search_aliases": [
+        "overlook",
+        "scenic view",
+        "lookout",
+        "photo spot"
+      ],
+      "search_blob": "glacier point viewpoint viewpoint viewpoint overlook scenic view lookout photo spot ca glacier point is mapped as viewpoint in openstreetmap. verify access, current conditions, and local rules before relying on it. mapped viewpoint or overlook; check access, road conditions, weather, and daylight. glacier point glacier point is mapped as viewpoint in openstreetmap. verify access, current conditions, and local rules before relying on it. osm openstreetmap contributors https://www.openstreetmap.org/node/1004",
+      "difficulty": "",
+      "best_season": "",
+      "access": "",
+      "safety": "",
+      "amenities": [],
+      "reservations": {},
+      "media": [],
+      "card": {
+        "headline": "Glacier Point",
+        "summary": "Glacier Point is mapped as viewpoint in OpenStreetMap. Verify access, current conditions, and local rules before relying on it.",
+        "quick_facts": [
+          "Viewpoint",
+          "CA"
+        ],
+        "warnings": [
+          "Verify access",
+          "Check official source or local rules",
+          "Offline maps recommended"
+        ],
+        "best_for": [
+          "Map context",
+          "Nearby stops",
+          "Route planning"
+        ],
+        "source_badge": "Open map data",
+        "primary_action": "Show on map",
+        "secondary_actions": [
+          "Save",
+          "Route",
+          "Weather"
+        ]
+      },
+      "sources": [
+        {
+          "source": "osm",
+          "source_id": "node/1004",
+          "url": "https://www.openstreetmap.org/node/1004",
+          "license": "Open Database License (ODbL)",
+          "attribution": "OpenStreetMap contributors",
+          "quality": "open_community_data"
+        }
+      ],
+      "quality": "open_community_data",
+      "quality_score": 45.0,
+      "verified": false,
+      "last_seen_at": 1781669464,
+      "updated_at": 1781669464,
+      "linked_trail_ids": [],
+      "linked_place_ids": []
+    },
+    {
+      "id": "place:osm:node-1005",
+      "source_ids": [
+        "osm:node/1005"
+      ],
+      "name": "Yosemite Valley Campground",
+      "category": "campground",
+      "subcategories": [
+        "camp_site"
+      ],
+      "lat": 37.742,
+      "lng": -119.565,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -119.565,
+          37.742
+        ]
+      },
+      "country": "",
+      "region": "CA",
+      "admin": "",
+      "summary": "Yosemite Valley Campground is mapped as campground in OpenStreetMap. Verify access, current conditions, and local rules before relying on it.",
+      "description": "Mapped camping location; check access, fees, fire restrictions, reservations, and seasonal road conditions.",
+      "tags": [
+        "campground",
+        "camp_site"
+      ],
+      "search_aliases": [
+        "camp",
+        "camping",
+        "campsite",
+        "tent",
+        "rv",
+        "overnight"
+      ],
+      "search_blob": "yosemite valley campground campground camp_site campground camp_site camp camping campsite tent rv overnight ca yosemite valley campground is mapped as campground in openstreetmap. verify access, current conditions, and local rules before relying on it. mapped camping location; check access, fees, fire restrictions, reservations, and seasonal road conditions. yosemite valley campground yosemite valley campground is mapped as campground in openstreetmap. verify access, current conditions, and local rules before relying on it. osm openstreetmap contributors https://www.openstreetmap.org/node/1005",
+      "difficulty": "",
+      "best_season": "",
+      "access": "",
+      "safety": "",
+      "amenities": [
+        "drinking water",
+        "toilets"
+      ],
+      "reservations": {},
+      "media": [],
+      "card": {
+        "headline": "Yosemite Valley Campground",
+        "summary": "Yosemite Valley Campground is mapped as campground in OpenStreetMap. Verify access, current conditions, and local rules before relying on it.",
+        "quick_facts": [
+          "Campground",
+          "CA"
+        ],
+        "warnings": [
+          "Verify access",
+          "Check official source or local rules",
+          "Offline maps recommended"
+        ],
+        "best_for": [
+          "Overnight planning",
+          "Fire rule checks",
+          "Nearby trails"
+        ],
+        "source_badge": "Open map data",
+        "primary_action": "Check camping",
+        "secondary_actions": [
+          "Save",
+          "Route",
+          "Weather"
+        ]
+      },
+      "sources": [
+        {
+          "source": "osm",
+          "source_id": "node/1005",
+          "url": "https://www.openstreetmap.org/node/1005",
+          "license": "Open Database License (ODbL)",
+          "attribution": "OpenStreetMap contributors",
+          "quality": "open_community_data"
+        }
+      ],
+      "quality": "open_community_data",
+      "quality_score": 45.0,
+      "verified": false,
+      "last_seen_at": 1781669464,
+      "updated_at": 1781669464,
+      "linked_trail_ids": [],
+      "linked_place_ids": []
+    },
+    {
+      "id": "place:osm:node-1006",
+      "source_ids": [
+        "osm:node/1006"
+      ],
+      "name": "Half Dome",
+      "category": "peak",
+      "subcategories": [
+        "peak"
+      ],
+      "lat": 37.746,
+      "lng": -119.5332,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -119.5332,
+          37.746
+        ]
+      },
+      "country": "",
+      "region": "CA",
+      "admin": "",
+      "summary": "Half Dome is mapped as peak in OpenStreetMap. Verify access, current conditions, and local rules before relying on it.",
+      "description": "Mapped summit or high point; verify route, weather, exposure, and land-manager rules.",
+      "tags": [
+        "peak"
+      ],
+      "search_aliases": [
+        "summit",
+        "mountain",
+        "ridge",
+        "high point"
+      ],
+      "search_blob": "half dome peak peak peak summit mountain ridge high point ca half dome is mapped as peak in openstreetmap. verify access, current conditions, and local rules before relying on it. mapped summit or high point; verify route, weather, exposure, and land-manager rules. half dome half dome is mapped as peak in openstreetmap. verify access, current conditions, and local rules before relying on it. osm openstreetmap contributors https://www.openstreetmap.org/node/1006",
+      "difficulty": "",
+      "best_season": "",
+      "access": "",
+      "safety": "",
+      "amenities": [],
+      "reservations": {},
+      "media": [],
+      "card": {
+        "headline": "Half Dome",
+        "summary": "Half Dome is mapped as peak in OpenStreetMap. Verify access, current conditions, and local rules before relying on it.",
+        "quick_facts": [
+          "Peak",
+          "CA"
+        ],
+        "warnings": [
+          "Verify access",
+          "Check official source or local rules",
+          "Offline maps recommended",
+          "Check weather and daylight"
+        ],
+        "best_for": [
+          "Map context",
+          "Nearby stops",
+          "Route planning"
+        ],
+        "source_badge": "Open map data",
+        "primary_action": "Show on map",
+        "secondary_actions": [
+          "Save",
+          "Route",
+          "Weather"
+        ]
+      },
+      "sources": [
+        {
+          "source": "osm",
+          "source_id": "node/1006",
+          "url": "https://www.openstreetmap.org/node/1006",
+          "license": "Open Database License (ODbL)",
+          "attribution": "OpenStreetMap contributors",
+          "quality": "open_community_data"
+        }
+      ],
+      "quality": "open_community_data",
+      "quality_score": 45.0,
+      "verified": false,
+      "last_seen_at": 1781669464,
+      "updated_at": 1781669464,
+      "linked_trail_ids": [],
+      "linked_place_ids": []
+    },
+    {
+      "id": "place:osm:node-1007",
+      "source_ids": [
+        "osm:node/1007"
+      ],
+      "name": "Yosemite Visitor Center",
+      "category": "visitor_center",
+      "subcategories": [
+        "information"
+      ],
+      "lat": 37.748,
+      "lng": -119.587,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -119.587,
+          37.748
+        ]
+      },
+      "country": "",
+      "region": "CA",
+      "admin": "",
+      "summary": "Yosemite Visitor Center is mapped as visitor center in OpenStreetMap. Verify access, current conditions, and local rules before relying on it.",
+      "description": "Mapped outdoor place; verify access, current conditions, and local rules before relying on it.",
+      "tags": [
+        "visitor_center",
+        "information"
+      ],
+      "search_aliases": [
+        "information",
+        "ranger station",
+        "park info"
+      ],
+      "search_blob": "yosemite visitor center visitor_center information visitor_center information information ranger station park info ca yosemite visitor center is mapped as visitor center in openstreetmap. verify access, current conditions, and local rules before relying on it. mapped outdoor place; verify access, current conditions, and local rules before relying on it. yosemite visitor center yosemite visitor center is mapped as visitor center in openstreetmap. verify access, current conditions, and local rules before relying on it. osm openstreetmap contributors https://www.openstreetmap.org/node/1007",
+      "difficulty": "",
+      "best_season": "",
+      "access": "",
+      "safety": "",
+      "amenities": [],
+      "reservations": {},
+      "media": [],
+      "card": {
+        "headline": "Yosemite Visitor Center",
+        "summary": "Yosemite Visitor Center is mapped as visitor center in OpenStreetMap. Verify access, current conditions, and local rules before relying on it.",
+        "quick_facts": [
+          "Visitor Center",
+          "CA"
+        ],
+        "warnings": [
+          "Verify access",
+          "Check official source or local rules",
+          "Offline maps recommended"
+        ],
+        "best_for": [
+          "Map context",
+          "Nearby stops",
+          "Route planning"
+        ],
+        "source_badge": "Open map data",
+        "primary_action": "Show on map",
+        "secondary_actions": [
+          "Save",
+          "Route",
+          "Weather"
+        ]
+      },
+      "sources": [
+        {
+          "source": "osm",
+          "source_id": "node/1007",
+          "url": "https://www.openstreetmap.org/node/1007",
+          "license": "Open Database License (ODbL)",
+          "attribution": "OpenStreetMap contributors",
+          "quality": "open_community_data"
+        }
+      ],
+      "quality": "open_community_data",
+      "quality_score": 45.0,
+      "verified": false,
+      "last_seen_at": 1781669464,
+      "updated_at": 1781669464,
+      "linked_trail_ids": [],
+      "linked_place_ids": []
+    },
+    {
+      "id": "place:osm:node-1008",
+      "source_ids": [
+        "osm:node/1008"
+      ],
+      "name": "Sentinel Dome",
+      "category": "peak",
+      "subcategories": [
+        "peak"
+      ],
+      "lat": 37.722,
+      "lng": -119.584,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -119.584,
+          37.722
+        ]
+      },
+      "country": "",
+      "region": "CA",
+      "admin": "",
+      "summary": "Sentinel Dome is mapped as peak in OpenStreetMap. Verify access, current conditions, and local rules before relying on it.",
+      "description": "Mapped summit or high point; verify route, weather, exposure, and land-manager rules.",
+      "tags": [
+        "peak"
+      ],
+      "search_aliases": [
+        "summit",
+        "mountain",
+        "ridge",
+        "high point"
+      ],
+      "search_blob": "sentinel dome peak peak peak summit mountain ridge high point ca sentinel dome is mapped as peak in openstreetmap. verify access, current conditions, and local rules before relying on it. mapped summit or high point; verify route, weather, exposure, and land-manager rules. sentinel dome sentinel dome is mapped as peak in openstreetmap. verify access, current conditions, and local rules before relying on it. osm openstreetmap contributors https://www.openstreetmap.org/node/1008",
+      "difficulty": "",
+      "best_season": "",
+      "access": "",
+      "safety": "",
+      "amenities": [],
+      "reservations": {},
+      "media": [],
+      "card": {
+        "headline": "Sentinel Dome",
+        "summary": "Sentinel Dome is mapped as peak in OpenStreetMap. Verify access, current conditions, and local rules before relying on it.",
+        "quick_facts": [
+          "Peak",
+          "CA"
+        ],
+        "warnings": [
+          "Verify access",
+          "Check official source or local rules",
+          "Offline maps recommended",
+          "Check weather and daylight"
+        ],
+        "best_for": [
+          "Map context",
+          "Nearby stops",
+          "Route planning"
+        ],
+        "source_badge": "Open map data",
+        "primary_action": "Show on map",
+        "secondary_actions": [
+          "Save",
+          "Route",
+          "Weather"
+        ]
+      },
+      "sources": [
+        {
+          "source": "osm",
+          "source_id": "node/1008",
+          "url": "https://www.openstreetmap.org/node/1008",
+          "license": "Open Database License (ODbL)",
+          "attribution": "OpenStreetMap contributors",
+          "quality": "open_community_data"
+        }
+      ],
+      "quality": "open_community_data",
+      "quality_score": 45.0,
+      "verified": false,
+      "last_seen_at": 1781669464,
+      "updated_at": 1781669464,
+      "linked_trail_ids": [],
+      "linked_place_ids": []
+    },
+    {
+      "id": "place:osm:node-1009",
+      "source_ids": [
+        "osm:node/1009"
+      ],
+      "name": "Sentinel Dome",
+      "category": "viewpoint",
+      "subcategories": [
+        "viewpoint"
+      ],
+      "lat": 37.7221,
+      "lng": -119.5841,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -119.5841,
+          37.7221
+        ]
+      },
+      "country": "",
+      "region": "CA",
+      "admin": "",
+      "summary": "Sentinel Dome is mapped as viewpoint in OpenStreetMap. Verify access, current conditions, and local rules before relying on it.",
+      "description": "Mapped viewpoint or overlook; check access, road conditions, weather, and daylight.",
+      "tags": [
+        "viewpoint"
+      ],
+      "search_aliases": [
+        "overlook",
+        "scenic view",
+        "lookout",
+        "photo spot"
+      ],
+      "search_blob": "sentinel dome viewpoint viewpoint viewpoint overlook scenic view lookout photo spot ca sentinel dome is mapped as viewpoint in openstreetmap. verify access, current conditions, and local rules before relying on it. mapped viewpoint or overlook; check access, road conditions, weather, and daylight. sentinel dome sentinel dome is mapped as viewpoint in openstreetmap. verify access, current conditions, and local rules before relying on it. osm openstreetmap contributors https://www.openstreetmap.org/node/1009",
+      "difficulty": "",
+      "best_season": "",
+      "access": "",
+      "safety": "",
+      "amenities": [],
+      "reservations": {},
+      "media": [],
+      "card": {
+        "headline": "Sentinel Dome",
+        "summary": "Sentinel Dome is mapped as viewpoint in OpenStreetMap. Verify access, current conditions, and local rules before relying on it.",
+        "quick_facts": [
+          "Viewpoint",
+          "CA"
+        ],
+        "warnings": [
+          "Verify access",
+          "Check official source or local rules",
+          "Offline maps recommended"
+        ],
+        "best_for": [
+          "Map context",
+          "Nearby stops",
+          "Route planning"
+        ],
+        "source_badge": "Open map data",
+        "primary_action": "Show on map",
+        "secondary_actions": [
+          "Save",
+          "Route",
+          "Weather"
+        ]
+      },
+      "sources": [
+        {
+          "source": "osm",
+          "source_id": "node/1009",
+          "url": "https://www.openstreetmap.org/node/1009",
+          "license": "Open Database License (ODbL)",
+          "attribution": "OpenStreetMap contributors",
+          "quality": "open_community_data"
+        }
+      ],
+      "quality": "open_community_data",
+      "quality_score": 45.0,
+      "verified": false,
+      "last_seen_at": 1781669464,
+      "updated_at": 1781669464,
+      "linked_trail_ids": [],
+      "linked_place_ids": []
+    },
+    {
+      "id": "place:osm:relation-1010",
+      "source_ids": [
+        "osm:relation/1010"
+      ],
+      "name": "Sentinel Dome",
+      "category": "trail",
+      "subcategories": [
+        "hiking"
+      ],
+      "lat": 37.719,
+      "lng": -119.587,
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -119.5841,
+            37.7221
+          ],
+          [
+            -119.587,
+            37.719
+          ]
+        ]
+      },
+      "country": "",
+      "region": "CA",
+      "admin": "",
+      "summary": "Sentinel Dome is mapped as trail in OpenStreetMap. Verify access, current conditions, and local rules before relying on it.",
+      "description": "Mapped trail or route; check current trail conditions, permits, weather, daylight, and navigation before starting.",
+      "tags": [
+        "trail",
+        "hiking"
+      ],
+      "search_aliases": [
+        "hike",
+        "hiking",
+        "trek",
+        "trekking",
+        "walk",
+        "route"
+      ],
+      "search_blob": "sentinel dome trail hiking trail hiking hike hiking trek trekking walk route ca sentinel dome is mapped as trail in openstreetmap. verify access, current conditions, and local rules before relying on it. mapped trail or route; check current trail conditions, permits, weather, daylight, and navigation before starting. sentinel dome sentinel dome is mapped as trail in openstreetmap. verify access, current conditions, and local rules before relying on it. osm openstreetmap contributors https://www.openstreetmap.org/relation/1010",
+      "difficulty": "",
+      "best_season": "",
+      "access": "",
+      "safety": "",
+      "amenities": [],
+      "reservations": {},
+      "media": [],
+      "card": {
+        "headline": "Sentinel Dome",
+        "summary": "Sentinel Dome is mapped as trail in OpenStreetMap. Verify access, current conditions, and local rules before relying on it.",
+        "quick_facts": [
+          "Trail",
+          "CA"
+        ],
+        "warnings": [
+          "Verify access",
+          "Check official source or local rules",
+          "Offline maps recommended",
+          "Check weather and daylight"
+        ],
+        "best_for": [
+          "Hiking",
+          "Route planning",
+          "Weather checks"
+        ],
+        "source_badge": "Open map data",
+        "primary_action": "Open trail",
+        "secondary_actions": [
+          "Save",
+          "Route",
+          "Weather"
+        ]
+      },
+      "sources": [
+        {
+          "source": "osm",
+          "source_id": "relation/1010",
+          "url": "https://www.openstreetmap.org/relation/1010",
+          "license": "Open Database License (ODbL)",
+          "attribution": "OpenStreetMap contributors",
+          "quality": "open_community_data"
+        }
+      ],
+      "quality": "open_community_data",
+      "quality_score": 45.0,
+      "verified": false,
+      "last_seen_at": 1781669464,
+      "updated_at": 1781669464,
+      "linked_trail_ids": [],
+      "linked_place_ids": []
+    },
+    {
+      "id": "place:osm:relation-2001",
+      "source_ids": [
+        "osm:relation/2001"
+      ],
+      "name": "K2 Base Camp Trek",
+      "category": "trail",
+      "subcategories": [
+        "hiking"
+      ],
+      "lat": 35.72,
+      "lng": 76.111,
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            75.811,
+            35.681
+          ],
+          [
+            76.111,
+            35.72
+          ],
+          [
+            76.5158,
+            35.8808
+          ]
+        ]
+      },
+      "country": "PK",
+      "region": "Gilgit-Baltistan",
+      "admin": "",
+      "summary": "K2 Base Camp Trek is mapped as trail in OpenStreetMap. Verify access, current conditions, and local rules before relying on it.",
+      "description": "Mapped trail or route; check current trail conditions, permits, weather, daylight, and navigation before starting.",
+      "tags": [
+        "trail",
+        "hiking"
+      ],
+      "search_aliases": [
+        "hike",
+        "hiking",
+        "trek",
+        "trekking",
+        "walk",
+        "route"
+      ],
+      "search_blob": "k2 base camp trek trail hiking trail hiking hike hiking trek trekking walk route pk gilgit-baltistan k2 base camp trek is mapped as trail in openstreetmap. verify access, current conditions, and local rules before relying on it. mapped trail or route; check current trail conditions, permits, weather, daylight, and navigation before starting. k2 base camp trek k2 base camp trek is mapped as trail in openstreetmap. verify access, current conditions, and local rules before relying on it. osm openstreetmap contributors https://www.openstreetmap.org/relation/2001",
+      "difficulty": "",
+      "best_season": "",
+      "access": "",
+      "safety": "",
+      "amenities": [],
+      "reservations": {},
+      "media": [],
+      "card": {
+        "headline": "K2 Base Camp Trek",
+        "summary": "K2 Base Camp Trek is mapped as trail in OpenStreetMap. Verify access, current conditions, and local rules before relying on it.",
+        "quick_facts": [
+          "Trail",
+          "Gilgit-Baltistan"
+        ],
+        "warnings": [
+          "Verify access",
+          "Check official source or local rules",
+          "Offline maps recommended",
+          "Check weather and daylight"
+        ],
+        "best_for": [
+          "Hiking",
+          "Route planning",
+          "Weather checks"
+        ],
+        "source_badge": "Open map data",
+        "primary_action": "Open trail",
+        "secondary_actions": [
+          "Save",
+          "Route",
+          "Weather"
+        ]
+      },
+      "sources": [
+        {
+          "source": "osm",
+          "source_id": "relation/2001",
+          "url": "https://www.openstreetmap.org/relation/2001",
+          "license": "Open Database License (ODbL)",
+          "attribution": "OpenStreetMap contributors",
+          "quality": "open_community_data"
+        }
+      ],
+      "quality": "open_community_data",
+      "quality_score": 45.0,
+      "verified": false,
+      "last_seen_at": 1781669464,
+      "updated_at": 1781669464,
+      "linked_trail_ids": [],
+      "linked_place_ids": []
+    },
+    {
+      "id": "place:osm:node-2002",
+      "source_ids": [
+        "osm:node/2002"
+      ],
+      "name": "Baltoro Glacier",
+      "category": "glacier",
+      "subcategories": [
+        "glacier"
+      ],
+      "lat": 35.74,
+      "lng": 76.51,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.51,
+          35.74
+        ]
+      },
+      "country": "PK",
+      "region": "Gilgit-Baltistan",
+      "admin": "",
+      "summary": "Baltoro Glacier is mapped as glacier in OpenStreetMap. Verify access, current conditions, and local rules before relying on it.",
+      "description": "Mapped glacier or ice feature; verify access, glacier conditions, permits, guide needs, and weather.",
+      "tags": [
+        "glacier"
+      ],
+      "search_aliases": [
+        "ice",
+        "icefield",
+        "glacier viewpoint",
+        "trekking"
+      ],
+      "search_blob": "baltoro glacier glacier glacier glacier ice icefield glacier viewpoint trekking pk gilgit-baltistan baltoro glacier is mapped as glacier in openstreetmap. verify access, current conditions, and local rules before relying on it. mapped glacier or ice feature; verify access, glacier conditions, permits, guide needs, and weather. baltoro glacier baltoro glacier is mapped as glacier in openstreetmap. verify access, current conditions, and local rules before relying on it. osm openstreetmap contributors https://www.openstreetmap.org/node/2002",
+      "difficulty": "",
+      "best_season": "",
+      "access": "",
+      "safety": "",
+      "amenities": [],
+      "reservations": {},
+      "media": [],
+      "card": {
+        "headline": "Baltoro Glacier",
+        "summary": "Baltoro Glacier is mapped as glacier in OpenStreetMap. Verify access, current conditions, and local rules before relying on it.",
+        "quick_facts": [
+          "Glacier",
+          "Gilgit-Baltistan"
+        ],
+        "warnings": [
+          "Verify access",
+          "Check official source or local rules",
+          "Offline maps recommended",
+          "Check weather and daylight"
+        ],
+        "best_for": [
+          "Map context",
+          "Nearby stops",
+          "Route planning"
+        ],
+        "source_badge": "Open map data",
+        "primary_action": "Show on map",
+        "secondary_actions": [
+          "Save",
+          "Route",
+          "Weather"
+        ]
+      },
+      "sources": [
+        {
+          "source": "osm",
+          "source_id": "node/2002",
+          "url": "https://www.openstreetmap.org/node/2002",
+          "license": "Open Database License (ODbL)",
+          "attribution": "OpenStreetMap contributors",
+          "quality": "open_community_data"
+        }
+      ],
+      "quality": "open_community_data",
+      "quality_score": 45.0,
+      "verified": false,
+      "last_seen_at": 1781669464,
+      "updated_at": 1781669464,
+      "linked_trail_ids": [],
+      "linked_place_ids": []
+    },
+    {
+      "id": "place:osm:node-2003",
+      "source_ids": [
+        "osm:node/2003"
+      ],
+      "name": "Askole Shelter",
+      "category": "hut",
+      "subcategories": [
+        "wilderness_hut"
+      ],
+      "lat": 35.681,
+      "lng": 75.811,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          75.811,
+          35.681
+        ]
+      },
+      "country": "PK",
+      "region": "Gilgit-Baltistan",
+      "admin": "",
+      "summary": "Askole Shelter is mapped as hut in OpenStreetMap. Verify access, current conditions, and local rules before relying on it.",
+      "description": "Backcountry shelter or hut; confirm condition, reservations, weather, and seasonal access.",
+      "tags": [
+        "hut",
+        "wilderness_hut"
+      ],
+      "search_aliases": [
+        "shelter",
+        "refuge",
+        "mountain hut",
+        "backcountry hut",
+        "cabin"
+      ],
+      "search_blob": "askole shelter hut wilderness_hut hut wilderness_hut shelter refuge mountain hut backcountry hut cabin pk gilgit-baltistan askole shelter is mapped as hut in openstreetmap. verify access, current conditions, and local rules before relying on it. backcountry shelter or hut; confirm condition, reservations, weather, and seasonal access. askole shelter askole shelter is mapped as hut in openstreetmap. verify access, current conditions, and local rules before relying on it. osm openstreetmap contributors https://www.openstreetmap.org/node/2003",
+      "difficulty": "",
+      "best_season": "",
+      "access": "",
+      "safety": "",
+      "amenities": [],
+      "reservations": {},
+      "media": [],
+      "card": {
+        "headline": "Askole Shelter",
+        "summary": "Askole Shelter is mapped as hut in OpenStreetMap. Verify access, current conditions, and local rules before relying on it.",
+        "quick_facts": [
+          "Hut",
+          "Gilgit-Baltistan"
+        ],
+        "warnings": [
+          "Verify access",
+          "Check official source or local rules",
+          "Offline maps recommended"
+        ],
+        "best_for": [
+          "Backcountry stays",
+          "Weather checks",
+          "Reservation planning"
+        ],
+        "source_badge": "Open map data",
+        "primary_action": "Show on map",
+        "secondary_actions": [
+          "Save",
+          "Route",
+          "Weather"
+        ]
+      },
+      "sources": [
+        {
+          "source": "osm",
+          "source_id": "node/2003",
+          "url": "https://www.openstreetmap.org/node/2003",
+          "license": "Open Database License (ODbL)",
+          "attribution": "OpenStreetMap contributors",
+          "quality": "open_community_data"
+        }
+      ],
+      "quality": "open_community_data",
+      "quality_score": 45.0,
+      "verified": false,
+      "last_seen_at": 1781669464,
+      "updated_at": 1781669464,
+      "linked_trail_ids": [],
+      "linked_place_ids": []
+    },
+    {
+      "id": "place:osm:node-2004",
+      "source_ids": [
+        "osm:node/2004"
+      ],
+      "name": "Skardu Fuel",
+      "category": "fuel",
+      "subcategories": [
+        "fuel"
+      ],
+      "lat": 35.297,
+      "lng": 75.633,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          75.633,
+          35.297
+        ]
+      },
+      "country": "PK",
+      "region": "Gilgit-Baltistan",
+      "admin": "",
+      "summary": "Skardu Fuel is mapped as fuel in OpenStreetMap. Verify access, current conditions, and local rules before relying on it.",
+      "description": "Mapped service stop; verify hours, availability, road access, and payment options.",
+      "tags": [
+        "fuel"
+      ],
+      "search_aliases": [
+        "gas",
+        "diesel",
+        "petrol",
+        "service station"
+      ],
+      "search_blob": "skardu fuel fuel fuel fuel gas diesel petrol service station pk gilgit-baltistan skardu fuel is mapped as fuel in openstreetmap. verify access, current conditions, and local rules before relying on it. mapped service stop; verify hours, availability, road access, and payment options. skardu fuel skardu fuel is mapped as fuel in openstreetmap. verify access, current conditions, and local rules before relying on it. osm openstreetmap contributors https://www.openstreetmap.org/node/2004",
+      "difficulty": "",
+      "best_season": "",
+      "access": "",
+      "safety": "",
+      "amenities": [],
+      "reservations": {},
+      "media": [],
+      "card": {
+        "headline": "Skardu Fuel",
+        "summary": "Skardu Fuel is mapped as fuel in OpenStreetMap. Verify access, current conditions, and local rules before relying on it.",
+        "quick_facts": [
+          "Fuel",
+          "Gilgit-Baltistan"
+        ],
+        "warnings": [
+          "Verify access",
+          "Check official source or local rules",
+          "Offline maps recommended"
+        ],
+        "best_for": [
+          "Road trips",
+          "Range planning",
+          "Service checks"
+        ],
+        "source_badge": "Open map data",
+        "primary_action": "Route to fuel",
+        "secondary_actions": [
+          "Save",
+          "Route",
+          "Weather"
+        ]
+      },
+      "sources": [
+        {
+          "source": "osm",
+          "source_id": "node/2004",
+          "url": "https://www.openstreetmap.org/node/2004",
+          "license": "Open Database License (ODbL)",
+          "attribution": "OpenStreetMap contributors",
+          "quality": "open_community_data"
+        }
+      ],
+      "quality": "open_community_data",
+      "quality_score": 45.0,
+      "verified": false,
+      "last_seen_at": 1781669464,
+      "updated_at": 1781669464,
+      "linked_trail_ids": [],
+      "linked_place_ids": []
+    },
+    {
+      "id": "place:osm:node-2005",
+      "source_ids": [
+        "osm:node/2005"
+      ],
+      "name": "Hunza Valley Viewpoint",
+      "category": "viewpoint",
+      "subcategories": [
+        "viewpoint"
+      ],
+      "lat": 36.316,
+      "lng": 74.669,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          74.669,
+          36.316
+        ]
+      },
+      "country": "PK",
+      "region": "Hunza",
+      "admin": "",
+      "summary": "Hunza Valley Viewpoint is mapped as viewpoint in OpenStreetMap. Verify access, current conditions, and local rules before relying on it.",
+      "description": "Mapped viewpoint or overlook; check access, road conditions, weather, and daylight.",
+      "tags": [
+        "viewpoint"
+      ],
+      "search_aliases": [
+        "overlook",
+        "scenic view",
+        "lookout",
+        "photo spot"
+      ],
+      "search_blob": "hunza valley viewpoint viewpoint viewpoint viewpoint overlook scenic view lookout photo spot pk hunza hunza valley viewpoint is mapped as viewpoint in openstreetmap. verify access, current conditions, and local rules before relying on it. mapped viewpoint or overlook; check access, road conditions, weather, and daylight. hunza valley viewpoint hunza valley viewpoint is mapped as viewpoint in openstreetmap. verify access, current conditions, and local rules before relying on it. osm openstreetmap contributors https://www.openstreetmap.org/node/2005",
+      "difficulty": "",
+      "best_season": "",
+      "access": "",
+      "safety": "",
+      "amenities": [],
+      "reservations": {},
+      "media": [],
+      "card": {
+        "headline": "Hunza Valley Viewpoint",
+        "summary": "Hunza Valley Viewpoint is mapped as viewpoint in OpenStreetMap. Verify access, current conditions, and local rules before relying on it.",
+        "quick_facts": [
+          "Viewpoint",
+          "Hunza"
+        ],
+        "warnings": [
+          "Verify access",
+          "Check official source or local rules",
+          "Offline maps recommended"
+        ],
+        "best_for": [
+          "Map context",
+          "Nearby stops",
+          "Route planning"
+        ],
+        "source_badge": "Open map data",
+        "primary_action": "Show on map",
+        "secondary_actions": [
+          "Save",
+          "Route",
+          "Weather"
+        ]
+      },
+      "sources": [
+        {
+          "source": "osm",
+          "source_id": "node/2005",
+          "url": "https://www.openstreetmap.org/node/2005",
+          "license": "Open Database License (ODbL)",
+          "attribution": "OpenStreetMap contributors",
+          "quality": "open_community_data"
+        }
+      ],
+      "quality": "open_community_data",
+      "quality_score": 45.0,
+      "verified": false,
+      "last_seen_at": 1781669464,
+      "updated_at": 1781669464,
+      "linked_trail_ids": [],
+      "linked_place_ids": []
+    },
+    {
+      "id": "place:osm:node-2006",
+      "source_ids": [
+        "osm:node/2006"
+      ],
+      "name": "Karimabad Market",
+      "category": "resupply",
+      "subcategories": [
+        "supermarket"
+      ],
+      "lat": 36.309,
+      "lng": 74.669,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          74.669,
+          36.309
+        ]
+      },
+      "country": "PK",
+      "region": "Hunza",
+      "admin": "",
+      "summary": "Karimabad Market is mapped as resupply in OpenStreetMap. Verify access, current conditions, and local rules before relying on it.",
+      "description": "Mapped resupply stop; verify hours, availability, road access, and payment options.",
+      "tags": [
+        "resupply",
+        "supermarket"
+      ],
+      "search_aliases": [
+        "grocery",
+        "outdoor store",
+        "gear",
+        "supplies"
+      ],
+      "search_blob": "karimabad market resupply supermarket resupply supermarket grocery outdoor store gear supplies pk hunza karimabad market is mapped as resupply in openstreetmap. verify access, current conditions, and local rules before relying on it. mapped resupply stop; verify hours, availability, road access, and payment options. karimabad market karimabad market is mapped as resupply in openstreetmap. verify access, current conditions, and local rules before relying on it. osm openstreetmap contributors https://www.openstreetmap.org/node/2006",
+      "difficulty": "",
+      "best_season": "",
+      "access": "",
+      "safety": "",
+      "amenities": [],
+      "reservations": {},
+      "media": [],
+      "card": {
+        "headline": "Karimabad Market",
+        "summary": "Karimabad Market is mapped as resupply in OpenStreetMap. Verify access, current conditions, and local rules before relying on it.",
+        "quick_facts": [
+          "Resupply",
+          "Hunza"
+        ],
+        "warnings": [
+          "Verify access",
+          "Check official source or local rules",
+          "Offline maps recommended"
+        ],
+        "best_for": [
+          "Food",
+          "Gear",
+          "Trip support"
+        ],
+        "source_badge": "Open map data",
+        "primary_action": "Check hours",
+        "secondary_actions": [
+          "Save",
+          "Route",
+          "Weather"
+        ]
+      },
+      "sources": [
+        {
+          "source": "osm",
+          "source_id": "node/2006",
+          "url": "https://www.openstreetmap.org/node/2006",
+          "license": "Open Database License (ODbL)",
+          "attribution": "OpenStreetMap contributors",
+          "quality": "open_community_data"
+        }
+      ],
+      "quality": "open_community_data",
+      "quality_score": 45.0,
+      "verified": false,
+      "last_seen_at": 1781669464,
+      "updated_at": 1781669464,
+      "linked_trail_ids": [],
+      "linked_place_ids": []
+    }
+  ]
+}

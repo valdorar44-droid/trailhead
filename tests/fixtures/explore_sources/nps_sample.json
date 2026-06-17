@@ -1,0 +1,13 @@
+{
+  "data": [
+    {
+      "id": "yose",
+      "parkCode": "yose",
+      "fullName": "Yosemite National Park",
+      "url": "https://www.nps.gov/yose/index.htm",
+      "latitude": "37.84883288",
+      "longitude": "-119.5571873"
+    }
+  ]
+}
+

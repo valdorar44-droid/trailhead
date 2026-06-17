@@ -1,0 +1,16 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {"type":"Feature","properties":{"@id":"relation/1001","name":"Mist Trail","route":"hiking","type":"route","operator":"National Park Service","addr:state":"CA"},"geometry":{"type":"LineString","coordinates":[[-119.5586,37.7325],[-119.5511,37.7272],[-119.5435,37.7249]]}},
+    {"type":"Feature","properties":{"@id":"node/1002","name":"Mist Trail Trailhead","highway":"trailhead","addr:state":"CA"},"geometry":{"type":"Point","coordinates":[-119.5587,37.7326]}},
+    {"type":"Feature","properties":{"@id":"node/1003","name":"Vernal Fall","waterway":"waterfall","addr:state":"CA"},"geometry":{"type":"Point","coordinates":[-119.5432,37.7275]}},
+    {"type":"Feature","properties":{"@id":"node/1004","name":"Glacier Point","tourism":"viewpoint","addr:state":"CA"},"geometry":{"type":"Point","coordinates":[-119.5736,37.7303]}},
+    {"type":"Feature","properties":{"@id":"node/1005","name":"Yosemite Valley Campground","tourism":"camp_site","addr:state":"CA","drinking_water":"yes","toilets":"yes"},"geometry":{"type":"Point","coordinates":[-119.565,37.742]}},
+    {"type":"Feature","properties":{"@id":"node/1006","name":"Half Dome","natural":"peak","addr:state":"CA"},"geometry":{"type":"Point","coordinates":[-119.5332,37.746]}},
+    {"type":"Feature","properties":{"@id":"node/1007","name":"Yosemite Visitor Center","tourism":"information","addr:state":"CA"},"geometry":{"type":"Point","coordinates":[-119.587,37.748]}},
+    {"type":"Feature","properties":{"@id":"node/1008","name":"Sentinel Dome","natural":"peak","addr:state":"CA"},"geometry":{"type":"Point","coordinates":[-119.584,37.722]}},
+    {"type":"Feature","properties":{"@id":"node/1009","name":"Sentinel Dome","tourism":"viewpoint","addr:state":"CA"},"geometry":{"type":"Point","coordinates":[-119.5841,37.7221]}},
+    {"type":"Feature","properties":{"@id":"relation/1010","name":"Sentinel Dome","route":"hiking","addr:state":"CA"},"geometry":{"type":"LineString","coordinates":[[-119.5841,37.7221],[-119.587,37.719]]}}
+  ]
+}
+

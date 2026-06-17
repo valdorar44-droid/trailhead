@@ -1,0 +1,12 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {"type":"Feature","properties":{"@id":"relation/2001","name":"K2 Base Camp Trek","route":"hiking","addr:country":"PK","region":"Gilgit-Baltistan"},"geometry":{"type":"LineString","coordinates":[[75.811,35.681],[76.111,35.72],[76.5158,35.8808]]}},
+    {"type":"Feature","properties":{"@id":"node/2002","name":"Baltoro Glacier","natural":"glacier","addr:country":"PK","region":"Gilgit-Baltistan"},"geometry":{"type":"Point","coordinates":[76.51,35.74]}},
+    {"type":"Feature","properties":{"@id":"node/2003","name":"Askole Shelter","tourism":"wilderness_hut","addr:country":"PK","region":"Gilgit-Baltistan"},"geometry":{"type":"Point","coordinates":[75.811,35.681]}},
+    {"type":"Feature","properties":{"@id":"node/2004","name":"Skardu Fuel","amenity":"fuel","addr:country":"PK","region":"Gilgit-Baltistan"},"geometry":{"type":"Point","coordinates":[75.633,35.297]}},
+    {"type":"Feature","properties":{"@id":"node/2005","name":"Hunza Valley Viewpoint","tourism":"viewpoint","addr:country":"PK","region":"Hunza"},"geometry":{"type":"Point","coordinates":[74.669,36.316]}},
+    {"type":"Feature","properties":{"@id":"node/2006","name":"Karimabad Market","shop":"supermarket","addr:country":"PK","region":"Hunza"},"geometry":{"type":"Point","coordinates":[74.669,36.309]}}
+  ]
+}
+

@@ -1,0 +1,158 @@
+{
+  "schema_version": 1,
+  "generated_at": 1781669464,
+  "count": 3,
+  "trails": [
+    {
+      "id": "trail:osm:relation-1001",
+      "source_ids": [
+        "osm:relation/1001"
+      ],
+      "name": "Mist Trail",
+      "geometry_line": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -119.5586,
+            37.7325
+          ],
+          [
+            -119.5511,
+            37.7272
+          ],
+          [
+            -119.5435,
+            37.7249
+          ]
+        ]
+      },
+      "representative_lat": 37.7272,
+      "representative_lng": -119.5511,
+      "distance_mi": 0.99,
+      "elevation_gain_ft": null,
+      "elevation_loss_ft": null,
+      "route_type": "Point or route",
+      "activities": [
+        "hiking"
+      ],
+      "difficulty": "",
+      "surface": "",
+      "access": "",
+      "allowed_uses": [],
+      "seasonal_notes": "",
+      "land_manager": "National Park Service",
+      "source_quality": "open_community_data",
+      "sources": [
+        {
+          "source": "osm",
+          "source_id": "relation/1001",
+          "url": "https://www.openstreetmap.org/relation/1001",
+          "license": "Open Database License (ODbL)",
+          "attribution": "OpenStreetMap contributors",
+          "quality": "open_community_data"
+        }
+      ],
+      "linked_place_ids": [
+        "place:osm:node-1002"
+      ]
+    },
+    {
+      "id": "trail:osm:relation-1010",
+      "source_ids": [
+        "osm:relation/1010"
+      ],
+      "name": "Sentinel Dome",
+      "geometry_line": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -119.5841,
+            37.7221
+          ],
+          [
+            -119.587,
+            37.719
+          ]
+        ]
+      },
+      "representative_lat": 37.719,
+      "representative_lng": -119.587,
+      "distance_mi": 0.27,
+      "elevation_gain_ft": null,
+      "elevation_loss_ft": null,
+      "route_type": "Point or route",
+      "activities": [
+        "hiking"
+      ],
+      "difficulty": "",
+      "surface": "",
+      "access": "",
+      "allowed_uses": [],
+      "seasonal_notes": "",
+      "land_manager": "",
+      "source_quality": "open_community_data",
+      "sources": [
+        {
+          "source": "osm",
+          "source_id": "relation/1010",
+          "url": "https://www.openstreetmap.org/relation/1010",
+          "license": "Open Database License (ODbL)",
+          "attribution": "OpenStreetMap contributors",
+          "quality": "open_community_data"
+        }
+      ],
+      "linked_place_ids": []
+    },
+    {
+      "id": "trail:osm:relation-2001",
+      "source_ids": [
+        "osm:relation/2001"
+      ],
+      "name": "K2 Base Camp Trek",
+      "geometry_line": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            75.811,
+            35.681
+          ],
+          [
+            76.111,
+            35.72
+          ],
+          [
+            76.5158,
+            35.8808
+          ]
+        ]
+      },
+      "representative_lat": 35.72,
+      "representative_lng": 76.111,
+      "distance_mi": 42.31,
+      "elevation_gain_ft": null,
+      "elevation_loss_ft": null,
+      "route_type": "Point or route",
+      "activities": [
+        "hiking"
+      ],
+      "difficulty": "",
+      "surface": "",
+      "access": "",
+      "allowed_uses": [],
+      "seasonal_notes": "",
+      "land_manager": "",
+      "source_quality": "open_community_data",
+      "sources": [
+        {
+          "source": "osm",
+          "source_id": "relation/2001",
+          "url": "https://www.openstreetmap.org/relation/2001",
+          "license": "Open Database License (ODbL)",
+          "attribution": "OpenStreetMap contributors",
+          "quality": "open_community_data"
+        }
+      ],
+      "linked_place_ids": []
+    }
+  ]
+}

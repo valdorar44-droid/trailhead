@@ -1,14 +1,59 @@
 ---
-import BaseHead from "../components/BaseHead.astro";
-import WebPlanner from "../components/WebPlanner";
+import Layout from "../layouts/Layout.astro";
+
+const iosUrl = "https://apps.apple.com/au/app/trailhead-camp-route-free/id6763677349";
+const androidUrl = "https://play.google.com/store/apps/details?id=com.trailhead.app&gl=us&hl=en_US";
 ---
 
-<!doctype html>
-<html lang="en" data-theme="dark">
-  <head>
-    <BaseHead title="Trailhead Web Planner" description="Build Trailhead routes, camps, pins, filters, and custom trail routes on the web, then pick them up in the phone app." />
-  </head>
-  <body class="planner-body">
-    <WebPlanner client:only="react" />
-  </body>
-</html>
+<Layout
+  title="Trailhead Web App"
+  description="Open Trailhead on the web for account, Explore, saved trip, and download paths, or use the iOS and Android apps for maps, location, and offline trip work."
+>
+  <main class="webapp-page">
+    <section class="webapp-hero">
+      <div class="webapp-copy">
+        <p class="th-eyebrow">Trailhead web app</p>
+        <h1>Web app at the desk. Mobile app in the field.</h1>
+        <p>
+          Web access keeps Trailhead simple on a laptop. Use it for account and trip surfaces, or jump straight to the iOS and Android apps for maps, offline packs, reports, and location-aware tools.
+        </p>
+        <div class="th-actions">
+          <a class="th-store-link" href={iosUrl} aria-label="Download Trailhead on the App Store">
+            <span>Download on the</span>
+            <strong>App Store</strong>
+          </a>
+          <a class="th-store-link" href={androidUrl} aria-label="Get Trailhead on Google Play">
+            <span>Get it on</span>
+            <strong>Google Play</strong>
+          </a>
+          <a class="th-btn th-btn-ghost" href="/">Website</a>
+        </div>
+      </div>
+      <div class="webapp-screens" aria-label="Trailhead app screenshots">
+        <img class="webapp-screen webapp-screen-main" src="/assets/screenshots/explore-home.jpg" alt="Trailhead Explore home screen" />
+        <img class="webapp-screen webapp-screen-side" src="/assets/screenshots/yosemite-detail.jpg" alt="Trailhead destination detail screen" />
+      </div>
+    </section>
+
+    <section class="webapp-strip" aria-label="Trailhead web app choices">
+      <article>
+        <span>WEBAPP</span>
+        <h2>Open the web surface</h2>
+        <p>For account, trip, and desktop-friendly Trailhead views without exposing the full map workspace.</p>
+        <a class="th-btn th-btn-ghost" href="/">Back to website</a>
+      </article>
+      <article>
+        <span>IOS</span>
+        <h2>Use Trailhead on iPhone</h2>
+        <p>Best for maps, offline packs, field reports, saved places, and guide audio.</p>
+        <a class="th-btn th-btn-primary" href={iosUrl}>Download iOS</a>
+      </article>
+      <article>
+        <span>ANDROID</span>
+        <h2>Use Trailhead on Android</h2>
+        <p>Same Trailhead trip tools with mobile-first map and location workflows.</p>
+        <a class="th-btn th-btn-primary th-btn-android" href={androidUrl}>Download Android</a>
+      </article>
+    </section>
+  </main>
+</Layout>

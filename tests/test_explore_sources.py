@@ -13,6 +13,7 @@ from scripts.explore_sources.base.quality import score_place
 from scripts.explore_sources.base.schema import ExplorePlaceV3
 from scripts.explore_sources.blm.import_blm import import_blm_fixture
 from scripts.explore_sources.nps.import_nps import import_nps_fixture
+from scripts.explore_sources.openbeta.import_openbeta import import_openbeta_fixture
 from scripts.explore_sources.osm.import_geofabrik import import_osm_fixture
 from scripts.explore_sources.ridb.import_ridb import import_ridb_fixture
 from scripts.explore_sources.usfs.import_usfs import import_usfs_fixture
@@ -27,6 +28,7 @@ NPS = ROOT / "tests/fixtures/explore_sources/nps_sample.json"
 USFS = ROOT / "tests/fixtures/explore_sources/usfs_sierra_sample.geojson"
 BLM = ROOT / "tests/fixtures/explore_sources/blm_moab_sample.geojson"
 WIKIDATA = ROOT / "tests/fixtures/explore_sources/wikidata_pakistan_landmarks_sample.json"
+OPENBETA = ROOT / "tests/fixtures/explore_sources/openbeta_climbing_sample.json"
 
 
 class ExploreSourcePipelineTests(unittest.TestCase):
@@ -175,6 +177,24 @@ class ExploreSourcePipelineTests(unittest.TestCase):
         self.assertTrue(all(record.license.startswith("Creative Commons CC0") for record in records))
         self.assertTrue(all("Wikidata contributors" in record.attribution for record in records))
 
+    def test_openbeta_importer_builds_climbing_and_bouldering_cards(self):
+        records, places, trails = import_openbeta_fixture(OPENBETA, fetched_at=123)
+        self.assertEqual(len(records), 4)
+        self.assertEqual(len(trails), 0)
+        categories = {place.category for place in places}
+        self.assertIn("climbing_area", categories)
+        self.assertIn("bouldering_area", categories)
+        yosemite = next(place for place in places if place.name == "Yosemite Valley Climbing")
+        self.assertEqual(yosemite.quality, "open_community_data")
+        self.assertIn("big wall", yosemite.search_blob)
+        self.assertIn("1240 routes", yosemite.amenities)
+        self.assertTrue(yosemite.media)
+        rocklands = next(place for place in places if place.name == "Rocklands Bouldering")
+        self.assertEqual(rocklands.category, "bouldering_area")
+        self.assertIn("v0-v16", rocklands.search_blob)
+        self.assertTrue(all(record.license.startswith("OpenBeta") for record in records))
+        self.assertTrue(all("OpenBeta contributors" in record.attribution for record in records))
+
     def test_peak_viewpoint_and_trail_same_name_do_not_auto_merge(self):
         _records, places, _trails = build_catalog([str(YOSEMITE)])
         sentinel = [place for place in places if place.name == "Sentinel Dome"]
@@ -209,6 +229,7 @@ class ExploreSourcePipelineTests(unittest.TestCase):
             usfs_fixtures=[str(USFS)],
             blm_fixtures=[str(BLM)],
             wikidata_fixtures=[str(WIKIDATA)],
+            openbeta_fixtures=[str(OPENBETA)],
         )
         self.assertGreaterEqual(len(records), 10)
         self.assertTrue(any(trail.name == "K2 Base Camp Trek" for trail in trails))
@@ -223,8 +244,10 @@ class ExploreSourcePipelineTests(unittest.TestCase):
         self.assertTrue(any(place.name == "Fins and Things OHV Route" and place.category == "offroad_route" for place in places))
         self.assertTrue(any(place.name == "K2" and place.category == "peak" for place in places))
         self.assertTrue(any(place.name == "Attabad Lake" and place.category == "lake" for place in places))
+        self.assertTrue(any(place.name == "Yosemite Valley Climbing" and place.category == "climbing_area" for place in places))
+        self.assertTrue(any(place.name == "Rocklands Bouldering" and place.category == "bouldering_area" for place in places))
         blobs = " ".join(place.search_blob for place in places)
-        for term in ["camping", "hiking", "trailhead", "waterfalls", "fuel", "resupply", "k2", "hunza", "national park", "forest road", "ohv", "monuments", "boondocking", "gojal lake", "concordia approach"]:
+        for term in ["camping", "hiking", "trailhead", "waterfalls", "fuel", "resupply", "k2", "hunza", "national park", "forest road", "ohv", "monuments", "boondocking", "gojal lake", "concordia approach", "rock climbing", "big wall"]:
             self.assertIn(term, blobs)
 
     def test_command_writes_outputs(self):
@@ -244,6 +267,7 @@ class ExploreSourcePipelineTests(unittest.TestCase):
                     "--usfs-fixture", str(USFS),
                     "--blm-fixture", str(BLM),
                     "--wikidata-fixture", str(WIKIDATA),
+                    "--openbeta-fixture", str(OPENBETA),
                     "--out", str(out),
                     "--trails-out", str(trails_out),
                     "--source-records-out", str(records_out),

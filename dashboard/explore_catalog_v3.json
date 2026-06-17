@@ -1,9 +1,9 @@
 {
   "schema_version": 3,
   "catalog_id": "trailhead-explore-v3-real-data-foundation",
-  "generated_at": 1781671753,
-  "source": "Prepared OSM/Geofabrik, RIDB/Recreation.gov, NPS, USFS, BLM, and Wikidata fixtures; source attribution preserved",
-  "count": 34,
+  "generated_at": 1781671990,
+  "source": "Prepared OSM/Geofabrik, RIDB/Recreation.gov, NPS, USFS, BLM, Wikidata, and OpenBeta fixtures; source attribution preserved",
+  "count": 38,
   "places": [
     {
       "id": "place:osm:relation-1001",
@@ -98,8 +98,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671753,
-      "updated_at": 1781671753,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -184,8 +184,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671753,
-      "updated_at": 1781671753,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
       "linked_trail_ids": [
         "trail:osm:relation-1001"
       ],
@@ -269,8 +269,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671753,
-      "updated_at": 1781671753,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -353,8 +353,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671753,
-      "updated_at": 1781671753,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -465,8 +465,8 @@
       "quality": "official_source",
       "quality_score": 85.0,
       "verified": true,
-      "last_seen_at": 1781671753,
-      "updated_at": 1781671753,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -550,8 +550,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671753,
-      "updated_at": 1781671753,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -634,8 +634,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671753,
-      "updated_at": 1781671753,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -719,8 +719,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671753,
-      "updated_at": 1781671753,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -803,8 +803,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671753,
-      "updated_at": 1781671753,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -897,8 +897,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671753,
-      "updated_at": 1781671753,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -995,8 +995,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671753,
-      "updated_at": 1781671753,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -1080,8 +1080,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671753,
-      "updated_at": 1781671753,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -1166,8 +1166,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671753,
-      "updated_at": 1781671753,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -1250,8 +1250,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671753,
-      "updated_at": 1781671753,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -1334,8 +1334,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671753,
-      "updated_at": 1781671753,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -1419,8 +1419,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671753,
-      "updated_at": 1781671753,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -1519,8 +1519,8 @@
       "quality": "official_source",
       "quality_score": 85.0,
       "verified": true,
-      "last_seen_at": 1781671753,
-      "updated_at": 1781671753,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -1620,8 +1620,8 @@
       "quality": "official_source",
       "quality_score": 85.0,
       "verified": true,
-      "last_seen_at": 1781671753,
-      "updated_at": 1781671753,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -1712,8 +1712,8 @@
       "quality": "official_source",
       "quality_score": 85.0,
       "verified": true,
-      "last_seen_at": 1781671753,
-      "updated_at": 1781671753,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
       "linked_trail_ids": [
         "trail:usfs:15e09"
       ],
@@ -1812,8 +1812,8 @@
       "quality": "official_source",
       "quality_score": 85.0,
       "verified": true,
-      "last_seen_at": 1781671753,
-      "updated_at": 1781671753,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -1905,8 +1905,8 @@
       "quality": "official_source",
       "quality_score": 85.0,
       "verified": true,
-      "last_seen_at": 1781671753,
-      "updated_at": 1781671753,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -1992,8 +1992,8 @@
       "quality": "official_source",
       "quality_score": 85.0,
       "verified": true,
-      "last_seen_at": 1781671753,
-      "updated_at": 1781671753,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -2100,8 +2100,8 @@
       "quality": "official_source",
       "quality_score": 85.0,
       "verified": true,
-      "last_seen_at": 1781671753,
-      "updated_at": 1781671753,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -2204,8 +2204,8 @@
       "quality": "official_source",
       "quality_score": 85.0,
       "verified": true,
-      "last_seen_at": 1781671753,
-      "updated_at": 1781671753,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -2306,8 +2306,8 @@
       "quality": "official_source",
       "quality_score": 85.0,
       "verified": true,
-      "last_seen_at": 1781671753,
-      "updated_at": 1781671753,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -2421,8 +2421,8 @@
       "quality": "official_source",
       "quality_score": 85.0,
       "verified": true,
-      "last_seen_at": 1781671753,
-      "updated_at": 1781671753,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -2512,8 +2512,8 @@
       "quality": "official_source",
       "quality_score": 85.0,
       "verified": true,
-      "last_seen_at": 1781671753,
-      "updated_at": 1781671753,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -2604,8 +2604,8 @@
       "quality": "official_source",
       "quality_score": 85.0,
       "verified": true,
-      "last_seen_at": 1781671753,
-      "updated_at": 1781671753,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -2693,8 +2693,8 @@
       "quality": "official_source",
       "quality_score": 85.0,
       "verified": true,
-      "last_seen_at": 1781671753,
-      "updated_at": 1781671753,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -2791,8 +2791,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671753,
-      "updated_at": 1781671753,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -2890,8 +2890,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671753,
-      "updated_at": 1781671753,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -2988,8 +2988,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671753,
-      "updated_at": 1781671753,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -3085,8 +3085,8 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671753,
-      "updated_at": 1781671753,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
       "linked_trail_ids": [],
       "linked_place_ids": []
     },
@@ -3181,8 +3181,408 @@
       "quality": "open_community_data",
       "quality_score": 45.0,
       "verified": false,
-      "last_seen_at": 1781671753,
-      "updated_at": 1781671753,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
+      "linked_trail_ids": [],
+      "linked_place_ids": []
+    },
+    {
+      "id": "place:openbeta:openbeta-yosemite-valley",
+      "source_ids": [
+        "openbeta:openbeta-yosemite-valley"
+      ],
+      "name": "Yosemite Valley Climbing",
+      "category": "climbing_area",
+      "subcategories": [
+        "climbing_area",
+        "trad",
+        "bouldering",
+        "big wall"
+      ],
+      "lat": 37.7416,
+      "lng": -119.6021,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -119.6021,
+          37.7416
+        ]
+      },
+      "country": "US",
+      "region": "CA",
+      "admin": "Yosemite National Park",
+      "summary": "Granite big-wall, crack, slab, and boulder climbing area in Yosemite Valley.",
+      "description": "Granite big-wall, crack, slab, and boulder climbing area in Yosemite Valley.",
+      "tags": [
+        "climbing_area",
+        "openbeta",
+        "climbing",
+        "trad",
+        "bouldering",
+        "big wall",
+        "V0-5.14",
+        "granite"
+      ],
+      "search_aliases": [
+        "rock climbing",
+        "crag",
+        "climb",
+        "routes"
+      ],
+      "search_blob": "yosemite valley climbing climbing_area climbing_area trad bouldering big wall climbing_area openbeta climbing trad bouldering big wall v0-5.14 granite rock climbing crag climb routes us ca yosemite national park granite big-wall, crack, slab, and boulder climbing area in yosemite valley. granite big-wall, crack, slab, and boulder climbing area in yosemite valley. yosemite valley climbing granite big-wall, crack, slab, and boulder climbing area in yosemite valley. openbeta openbeta contributors https://openbeta.io/crag/yosemite-valley",
+      "difficulty": "V0-5.14",
+      "best_season": "",
+      "access": "Verify current park closures, permits, peregrine closures, and seasonal conditions",
+      "safety": "",
+      "amenities": [
+        "trad",
+        "bouldering",
+        "big wall",
+        "V0-5.14",
+        "1240 routes"
+      ],
+      "reservations": {},
+      "media": [
+        {
+          "url": "https://commons.wikimedia.org/wiki/Special:FilePath/El_Capitan_from_Tunnel_View.jpg",
+          "caption": "Yosemite Valley Climbing",
+          "credit": "Wikimedia Commons",
+          "license": "Wikimedia Commons"
+        }
+      ],
+      "card": {
+        "headline": "Yosemite Valley Climbing",
+        "summary": "Granite big-wall, crack, slab, and boulder climbing area in Yosemite Valley.",
+        "quick_facts": [
+          "Climbing Area",
+          "CA",
+          "Verify current park closures, permits, peregrine closures, and seasonal conditions"
+        ],
+        "warnings": [
+          "Verify access",
+          "Check official source or local rules",
+          "Offline maps recommended"
+        ],
+        "best_for": [
+          "Climbing",
+          "Access checks",
+          "Route planning"
+        ],
+        "source_badge": "Open map data",
+        "primary_action": "Show on map",
+        "secondary_actions": [
+          "Save",
+          "Route",
+          "Weather"
+        ]
+      },
+      "sources": [
+        {
+          "source": "openbeta",
+          "source_id": "openbeta-yosemite-valley",
+          "url": "https://openbeta.io/crag/yosemite-valley",
+          "license": "OpenBeta open climbing data; verify current dataset terms before redistribution",
+          "attribution": "OpenBeta contributors",
+          "quality": "open_community_data"
+        }
+      ],
+      "quality": "open_community_data",
+      "quality_score": 45.0,
+      "verified": false,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
+      "linked_trail_ids": [],
+      "linked_place_ids": []
+    },
+    {
+      "id": "place:openbeta:openbeta-el-capitan",
+      "source_ids": [
+        "openbeta:openbeta-el-capitan"
+      ],
+      "name": "El Capitan",
+      "category": "climbing_area",
+      "subcategories": [
+        "climbing_area",
+        "trad",
+        "aid",
+        "big wall"
+      ],
+      "lat": 37.7339,
+      "lng": -119.6377,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -119.6377,
+          37.7339
+        ]
+      },
+      "country": "US",
+      "region": "CA",
+      "admin": "Yosemite Valley",
+      "summary": "Major Yosemite granite big-wall climbing formation with long traditional aid and free routes.",
+      "description": "Major Yosemite granite big-wall climbing formation with long traditional aid and free routes.",
+      "tags": [
+        "climbing_area",
+        "openbeta",
+        "climbing",
+        "trad",
+        "aid",
+        "big wall",
+        "5.8-5.14",
+        "granite"
+      ],
+      "search_aliases": [
+        "rock climbing",
+        "crag",
+        "climb",
+        "routes"
+      ],
+      "search_blob": "el capitan climbing_area climbing_area trad aid big wall climbing_area openbeta climbing trad aid big wall 5.8-5.14 granite rock climbing crag climb routes us ca yosemite valley major yosemite granite big-wall climbing formation with long traditional aid and free routes. major yosemite granite big-wall climbing formation with long traditional aid and free routes. el capitan major yosemite granite big-wall climbing formation with long traditional aid and free routes. openbeta openbeta contributors https://openbeta.io/crag/el-capitan",
+      "difficulty": "5.8-5.14",
+      "best_season": "",
+      "access": "Verify wall closures, weather, permits, and current route condition",
+      "safety": "",
+      "amenities": [
+        "trad",
+        "aid",
+        "big wall",
+        "5.8-5.14",
+        "180 routes"
+      ],
+      "reservations": {},
+      "media": [],
+      "card": {
+        "headline": "El Capitan",
+        "summary": "Major Yosemite granite big-wall climbing formation with long traditional aid and free routes.",
+        "quick_facts": [
+          "Climbing Area",
+          "CA",
+          "Verify wall closures, weather, permits, and current route condition"
+        ],
+        "warnings": [
+          "Verify access",
+          "Check official source or local rules",
+          "Offline maps recommended"
+        ],
+        "best_for": [
+          "Climbing",
+          "Access checks",
+          "Route planning"
+        ],
+        "source_badge": "Open map data",
+        "primary_action": "Show on map",
+        "secondary_actions": [
+          "Save",
+          "Route",
+          "Weather"
+        ]
+      },
+      "sources": [
+        {
+          "source": "openbeta",
+          "source_id": "openbeta-el-capitan",
+          "url": "https://openbeta.io/crag/el-capitan",
+          "license": "OpenBeta open climbing data; verify current dataset terms before redistribution",
+          "attribution": "OpenBeta contributors",
+          "quality": "open_community_data"
+        }
+      ],
+      "quality": "open_community_data",
+      "quality_score": 45.0,
+      "verified": false,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
+      "linked_trail_ids": [],
+      "linked_place_ids": []
+    },
+    {
+      "id": "place:openbeta:openbeta-indian-creek",
+      "source_ids": [
+        "openbeta:openbeta-indian-creek"
+      ],
+      "name": "Indian Creek Crack Climbing",
+      "category": "climbing_area",
+      "subcategories": [
+        "climbing_area",
+        "trad",
+        "crack climbing"
+      ],
+      "lat": 38.0209,
+      "lng": -109.5413,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -109.5413,
+          38.0209
+        ]
+      },
+      "country": "US",
+      "region": "UT",
+      "admin": "Bears Ears region",
+      "summary": "Desert sandstone crack climbing area near Bears Ears and Moab.",
+      "description": "Desert sandstone crack climbing area near Bears Ears and Moab.",
+      "tags": [
+        "climbing_area",
+        "openbeta",
+        "climbing",
+        "trad",
+        "crack climbing",
+        "5.8-5.13",
+        "sandstone"
+      ],
+      "search_aliases": [
+        "rock climbing",
+        "crag",
+        "climb",
+        "routes"
+      ],
+      "search_blob": "indian creek crack climbing climbing_area climbing_area trad crack climbing climbing_area openbeta climbing trad crack climbing 5.8-5.13 sandstone rock climbing crag climb routes us ut bears ears region desert sandstone crack climbing area near bears ears and moab. desert sandstone crack climbing area near bears ears and moab. indian creek crack climbing desert sandstone crack climbing area near bears ears and moab. openbeta openbeta contributors https://openbeta.io/crag/indian-creek",
+      "difficulty": "5.8-5.13",
+      "best_season": "",
+      "access": "Verify seasonal access, land-manager rules, cultural-site closures, and desert road conditions",
+      "safety": "",
+      "amenities": [
+        "trad",
+        "crack climbing",
+        "5.8-5.13",
+        "900 routes"
+      ],
+      "reservations": {},
+      "media": [],
+      "card": {
+        "headline": "Indian Creek Crack Climbing",
+        "summary": "Desert sandstone crack climbing area near Bears Ears and Moab.",
+        "quick_facts": [
+          "Climbing Area",
+          "UT",
+          "Verify seasonal access, land-manager rules, cultural-site closures, and desert road conditions"
+        ],
+        "warnings": [
+          "Verify access",
+          "Check official source or local rules",
+          "Offline maps recommended"
+        ],
+        "best_for": [
+          "Climbing",
+          "Access checks",
+          "Route planning"
+        ],
+        "source_badge": "Open map data",
+        "primary_action": "Show on map",
+        "secondary_actions": [
+          "Save",
+          "Route",
+          "Weather"
+        ]
+      },
+      "sources": [
+        {
+          "source": "openbeta",
+          "source_id": "openbeta-indian-creek",
+          "url": "https://openbeta.io/crag/indian-creek",
+          "license": "OpenBeta open climbing data; verify current dataset terms before redistribution",
+          "attribution": "OpenBeta contributors",
+          "quality": "open_community_data"
+        }
+      ],
+      "quality": "open_community_data",
+      "quality_score": 45.0,
+      "verified": false,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
+      "linked_trail_ids": [],
+      "linked_place_ids": []
+    },
+    {
+      "id": "place:openbeta:openbeta-rocklands",
+      "source_ids": [
+        "openbeta:openbeta-rocklands"
+      ],
+      "name": "Rocklands Bouldering",
+      "category": "bouldering_area",
+      "subcategories": [
+        "bouldering"
+      ],
+      "lat": -32.1315,
+      "lng": 19.0528,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          19.0528,
+          -32.1315
+        ]
+      },
+      "country": "ZA",
+      "region": "Western Cape",
+      "admin": "Cederberg",
+      "summary": "Sandstone bouldering destination in the Cederberg region.",
+      "description": "Sandstone bouldering destination in the Cederberg region.",
+      "tags": [
+        "bouldering_area",
+        "bouldering",
+        "openbeta",
+        "climbing",
+        "V0-V16",
+        "sandstone"
+      ],
+      "search_aliases": [
+        "boulder",
+        "bouldering",
+        "problems"
+      ],
+      "search_blob": "rocklands bouldering bouldering_area bouldering bouldering_area bouldering openbeta climbing v0-v16 sandstone boulder bouldering problems za western cape cederberg sandstone bouldering destination in the cederberg region. sandstone bouldering destination in the cederberg region. rocklands bouldering sandstone bouldering destination in the cederberg region. openbeta openbeta contributors https://openbeta.io/crag/rocklands",
+      "difficulty": "V0-V16",
+      "best_season": "",
+      "access": "Verify permits, seasonal conditions, land access, and local rules",
+      "safety": "",
+      "amenities": [
+        "bouldering",
+        "V0-V16",
+        "2700 routes"
+      ],
+      "reservations": {},
+      "media": [],
+      "card": {
+        "headline": "Rocklands Bouldering",
+        "summary": "Sandstone bouldering destination in the Cederberg region.",
+        "quick_facts": [
+          "Bouldering Area",
+          "Western Cape",
+          "Verify permits, seasonal conditions, land access, and local rules"
+        ],
+        "warnings": [
+          "Verify access",
+          "Check official source or local rules",
+          "Offline maps recommended"
+        ],
+        "best_for": [
+          "Bouldering",
+          "Landing checks",
+          "Route planning"
+        ],
+        "source_badge": "Open map data",
+        "primary_action": "Show on map",
+        "secondary_actions": [
+          "Save",
+          "Route",
+          "Weather"
+        ]
+      },
+      "sources": [
+        {
+          "source": "openbeta",
+          "source_id": "openbeta-rocklands",
+          "url": "https://openbeta.io/crag/rocklands",
+          "license": "OpenBeta open climbing data; verify current dataset terms before redistribution",
+          "attribution": "OpenBeta contributors",
+          "quality": "open_community_data"
+        }
+      ],
+      "quality": "open_community_data",
+      "quality_score": 45.0,
+      "verified": false,
+      "last_seen_at": 1781671990,
+      "updated_at": 1781671990,
       "linked_trail_ids": [],
       "linked_place_ids": []
     }

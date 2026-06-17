@@ -24,6 +24,7 @@ from scripts.explore_sources.osm.import_geofabrik import import_osm_fixture, wri
 from scripts.explore_sources.ridb.fetch_ridb import fetch_ridb_facilities_to_cache
 from scripts.explore_sources.ridb.import_ridb import import_ridb_fixture
 from scripts.explore_sources.usfs.import_usfs import import_usfs_fixture
+from scripts.explore_sources.wikidata.fetch_wikidata import fetch_wikidata_places_to_cache
 from scripts.explore_sources.wikidata.import_wikidata import import_wikidata_fixture
 
 
@@ -64,6 +65,10 @@ def build_catalog(
     ridb_radius: float | None = None,
     ridb_limit: int = 50,
     ridb_max_records: int = 500,
+    wikidata_live: bool = False,
+    wikidata_class_qids: list[str] | None = None,
+    wikidata_country_qids: list[str] | None = None,
+    wikidata_limit: int = 500,
 ) -> tuple[list, list, list]:
     all_records = []
     all_places = []
@@ -102,6 +107,15 @@ def build_catalog(
     usfs_paths = resolve_input_paths(usfs_fixtures, usfs_urls, source="usfs", cache_dir=source_cache_dir, headers=http_headers, timeout=http_timeout, force=force_fetch)
     blm_paths = resolve_input_paths(blm_fixtures, blm_urls, source="blm", cache_dir=source_cache_dir, headers=http_headers, timeout=http_timeout, force=force_fetch)
     wikidata_paths = resolve_input_paths(wikidata_fixtures, wikidata_urls, source="wikidata", cache_dir=source_cache_dir, headers=http_headers, timeout=http_timeout, force=force_fetch)
+    if wikidata_live:
+        wikidata_paths.append(str(fetch_wikidata_places_to_cache(
+            cache_dir=source_cache_dir,
+            class_qids=wikidata_class_qids,
+            country_qids=wikidata_country_qids,
+            limit=wikidata_limit,
+            timeout=http_timeout,
+            force=force_fetch,
+        )))
     openbeta_paths = resolve_input_paths(openbeta_fixtures, openbeta_urls, source="openbeta", cache_dir=source_cache_dir, headers=http_headers, timeout=http_timeout, force=force_fetch)
     import_jobs = [
         ("osm", fixture, import_osm_fixture)
@@ -194,6 +208,10 @@ def main() -> int:
     parser.add_argument("--ridb-radius", type=float, default=None, help="RIDB nearby radius filter.")
     parser.add_argument("--ridb-limit", type=int, default=50, help="RIDB API page size.")
     parser.add_argument("--ridb-max-records", type=int, default=500, help="Maximum RIDB facilities to cache/import.")
+    parser.add_argument("--wikidata-live", action="store_true", help="Fetch live Wikidata SPARQL places into the source cache before importing.")
+    parser.add_argument("--wikidata-class-qid", action="append", default=[], help="Wikidata class QID to fetch, e.g. Q35666 for glaciers. May be repeated.")
+    parser.add_argument("--wikidata-country-qid", action="append", default=[], help="Wikidata country QID filter, e.g. Q843 for Pakistan. May be repeated.")
+    parser.add_argument("--wikidata-limit", type=int, default=500, help="Maximum Wikidata SPARQL rows to cache/import.")
     parser.add_argument("--out", default="dashboard/explore_catalog_v3.json")
     parser.add_argument("--trails-out", default="dashboard/explore_trail_geometries_v1.json")
     parser.add_argument("--source-records-out", default="dashboard/explore_source_records_sample.jsonl")
@@ -237,6 +255,10 @@ def main() -> int:
         ridb_radius=args.ridb_radius,
         ridb_limit=args.ridb_limit,
         ridb_max_records=args.ridb_max_records,
+        wikidata_live=args.wikidata_live,
+        wikidata_class_qids=args.wikidata_class_qid,
+        wikidata_country_qids=args.wikidata_country_qid,
+        wikidata_limit=args.wikidata_limit,
     )
     generated_at = int(time.time())
     catalog = {

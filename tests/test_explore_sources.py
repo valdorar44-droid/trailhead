@@ -21,6 +21,7 @@ from scripts.explore_sources.osm.import_geofabrik import import_osm_fixture
 from scripts.explore_sources.ridb.fetch_ridb import fetch_ridb_facilities_to_cache, request_params as ridb_request_params
 from scripts.explore_sources.ridb.import_ridb import import_ridb_fixture
 from scripts.explore_sources.usfs.import_usfs import import_usfs_fixture
+from scripts.explore_sources.wikidata.fetch_wikidata import fetch_wikidata_places_to_cache, sparql_query
 from scripts.explore_sources.wikidata.import_wikidata import import_wikidata_fixture
 
 
@@ -119,6 +120,42 @@ class FakeRidbOpener:
         return FakeHttpResponse({
             "METADATA": {"RESULTS": {"TOTAL_COUNT": 2, "CURRENT_COUNT": len(page)}},
             "RECDATA": page,
+        })
+
+
+class FakeWikidataOpener:
+    def __init__(self):
+        self.requests = []
+
+    def __call__(self, request, timeout):
+        self.requests.append((request, timeout))
+        return FakeHttpResponse({
+            "head": {"vars": ["item", "itemLabel", "coord"]},
+            "results": {
+                "bindings": [
+                    {
+                        "item": {"type": "uri", "value": "http://www.wikidata.org/entity/Q805806"},
+                        "itemLabel": {"type": "literal", "value": "Baltoro Glacier"},
+                        "itemDescription": {"type": "literal", "value": "Glacier in the Karakoram range."},
+                        "class": {"type": "uri", "value": "http://www.wikidata.org/entity/Q35666"},
+                        "classLabel": {"type": "literal", "value": "glacier"},
+                        "coord": {"type": "literal", "value": "Point(76.3808 35.7364)"},
+                        "countryLabel": {"type": "literal", "value": "Pakistan"},
+                        "adminLabel": {"type": "literal", "value": "Gilgit-Baltistan"},
+                        "image": {"type": "uri", "value": "http://commons.wikimedia.org/wiki/Special:FilePath/Baltoro_glacier_from_air.jpg"},
+                    },
+                    {
+                        "item": {"type": "uri", "value": "http://www.wikidata.org/entity/Q780770"},
+                        "itemLabel": {"type": "literal", "value": "Attabad Lake"},
+                        "itemDescription": {"type": "literal", "value": "Lake in Hunza Valley."},
+                        "class": {"type": "uri", "value": "http://www.wikidata.org/entity/Q23397"},
+                        "classLabel": {"type": "literal", "value": "lake"},
+                        "coord": {"type": "literal", "value": "Point(74.8675 36.33694)"},
+                        "countryLabel": {"type": "literal", "value": "Pakistan"},
+                        "adminLabel": {"type": "literal", "value": "Hunza District"},
+                    },
+                ]
+            },
         })
 
 
@@ -423,6 +460,46 @@ class ExploreSourcePipelineTests(unittest.TestCase):
         self.assertEqual(params["limit"], 20)
         self.assertEqual(params["offset"], 40)
 
+    def test_wikidata_live_fetcher_caches_sparql_places(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            opener = FakeWikidataOpener()
+            path = fetch_wikidata_places_to_cache(
+                cache_dir=tmp,
+                class_qids=["Q35666", "Q23397"],
+                country_qids=["Q843"],
+                limit=2,
+                opener=opener,
+            )
+            payload = json.loads(path.read_text())
+            self.assertEqual(payload["source"], "wikidata")
+            self.assertEqual(payload["count"], 2)
+            self.assertEqual([item["qid"] for item in payload["records"]], ["Q805806", "Q780770"])
+            self.assertEqual(len(opener.requests), 1)
+            request, timeout = opener.requests[0]
+            self.assertEqual(timeout, 90.0)
+            self.assertIn("query.wikidata.org/sparql", request.full_url)
+            records, places, _trails = import_wikidata_fixture(path, fetched_at=123)
+            self.assertEqual(len(records), 2)
+            baltoro = next(place for place in places if place.name == "Baltoro Glacier")
+            self.assertEqual(baltoro.category, "glacier")
+            self.assertTrue(baltoro.media)
+            cached_again = fetch_wikidata_places_to_cache(
+                cache_dir=tmp,
+                class_qids=["Q35666", "Q23397"],
+                country_qids=["Q843"],
+                limit=2,
+                opener=opener,
+            )
+            self.assertEqual(cached_again, path)
+            self.assertEqual(len(opener.requests), 1)
+
+    def test_wikidata_sparql_query_includes_class_and_country_filters(self):
+        query = sparql_query(class_qids=["Q35666"], country_qids=["Q843"], limit=25)
+        self.assertIn("wd:Q35666", query)
+        self.assertIn("wd:Q843", query)
+        self.assertIn("wdt:P31/wdt:P279*", query)
+        self.assertIn("LIMIT 25", query)
+
     def test_builder_outputs_searchable_pilot_catalog(self):
         records, places, trails = build_catalog(
             [str(YOSEMITE), str(PAKISTAN)],
@@ -511,6 +588,18 @@ class ExploreSourcePipelineTests(unittest.TestCase):
             )
             _records, places, _trails = build_catalog(ridb_fixtures=[str(path)])
             self.assertTrue(any(place.name == "Yosemite Valley Campground" and place.category == "campground" for place in places))
+
+    def test_build_catalog_accepts_cached_live_wikidata_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = fetch_wikidata_places_to_cache(
+                cache_dir=tmp,
+                class_qids=["Q35666"],
+                country_qids=["Q843"],
+                limit=2,
+                opener=FakeWikidataOpener(),
+            )
+            _records, places, _trails = build_catalog(wikidata_fixtures=[str(path)])
+            self.assertTrue(any(place.name == "Baltoro Glacier" and place.category == "glacier" for place in places))
 
 
 if __name__ == "__main__":

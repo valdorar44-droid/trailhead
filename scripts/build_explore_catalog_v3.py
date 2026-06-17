@@ -17,6 +17,7 @@ from scripts.explore_sources.base.dedupe import dedupe_places, link_trailheads_t
 from scripts.explore_sources.base.fetch import parse_headers, resolve_input_paths
 from scripts.explore_sources.base.quality import score_place
 from scripts.explore_sources.blm.import_blm import import_blm_fixture
+from scripts.explore_sources.nps.fetch_nps import fetch_nps_parks_to_cache
 from scripts.explore_sources.nps.import_nps import import_nps_fixture
 from scripts.explore_sources.openbeta.import_openbeta import import_openbeta_fixture
 from scripts.explore_sources.osm.import_geofabrik import import_osm_fixture, write_import_outputs
@@ -45,6 +46,13 @@ def build_catalog(
     http_headers: dict[str, str] | None = None,
     http_timeout: float = 30.0,
     force_fetch: bool = False,
+    nps_live: bool = False,
+    nps_api_key: str = "",
+    nps_park_codes: list[str] | None = None,
+    nps_states: list[str] | None = None,
+    nps_query: str = "",
+    nps_limit: int = 50,
+    nps_max_records: int = 500,
 ) -> tuple[list, list, list]:
     all_records = []
     all_places = []
@@ -53,6 +61,18 @@ def build_catalog(
     source_paths = resolve_input_paths(source_fixtures, source_urls, source="osm", cache_dir=source_cache_dir, headers=http_headers, timeout=http_timeout, force=force_fetch)
     ridb_paths = resolve_input_paths(ridb_fixtures, ridb_urls, source="ridb", cache_dir=source_cache_dir, headers=http_headers, timeout=http_timeout, force=force_fetch)
     nps_paths = resolve_input_paths(nps_fixtures, nps_urls, source="nps", cache_dir=source_cache_dir, headers=http_headers, timeout=http_timeout, force=force_fetch)
+    if nps_live:
+        nps_paths.append(str(fetch_nps_parks_to_cache(
+            api_key=nps_api_key,
+            cache_dir=source_cache_dir,
+            park_codes=nps_park_codes,
+            states=nps_states,
+            query=nps_query,
+            limit=nps_limit,
+            max_records=nps_max_records,
+            timeout=http_timeout,
+            force=force_fetch,
+        )))
     usfs_paths = resolve_input_paths(usfs_fixtures, usfs_urls, source="usfs", cache_dir=source_cache_dir, headers=http_headers, timeout=http_timeout, force=force_fetch)
     blm_paths = resolve_input_paths(blm_fixtures, blm_urls, source="blm", cache_dir=source_cache_dir, headers=http_headers, timeout=http_timeout, force=force_fetch)
     wikidata_paths = resolve_input_paths(wikidata_fixtures, wikidata_urls, source="wikidata", cache_dir=source_cache_dir, headers=http_headers, timeout=http_timeout, force=force_fetch)
@@ -131,6 +151,13 @@ def main() -> int:
     parser.add_argument("--http-header", action="append", default=[], help="Header for source URL requests, e.g. 'X-Api-Key: ...'.")
     parser.add_argument("--http-timeout", type=float, default=30.0, help="Source URL request timeout in seconds.")
     parser.add_argument("--force-fetch", action="store_true", help="Fetch source URLs even when a cached payload exists.")
+    parser.add_argument("--nps-live", action="store_true", help="Fetch live NPS parks API data into the source cache before importing.")
+    parser.add_argument("--nps-api-key", default="", help="NPS API key. Defaults to NPS_API_KEY when omitted.")
+    parser.add_argument("--nps-park-code", action="append", default=[], help="NPS park code to fetch, e.g. yose. May be repeated.")
+    parser.add_argument("--nps-state", action="append", default=[], help="NPS stateCode filter, e.g. CA. May be repeated.")
+    parser.add_argument("--nps-query", default="", help="NPS parks q search term.")
+    parser.add_argument("--nps-limit", type=int, default=50, help="NPS API page size.")
+    parser.add_argument("--nps-max-records", type=int, default=500, help="Maximum NPS parks to cache/import.")
     parser.add_argument("--out", default="dashboard/explore_catalog_v3.json")
     parser.add_argument("--trails-out", default="dashboard/explore_trail_geometries_v1.json")
     parser.add_argument("--source-records-out", default="dashboard/explore_source_records_sample.jsonl")
@@ -157,6 +184,13 @@ def main() -> int:
         http_headers=parse_headers(args.http_header),
         http_timeout=args.http_timeout,
         force_fetch=args.force_fetch,
+        nps_live=args.nps_live,
+        nps_api_key=args.nps_api_key,
+        nps_park_codes=args.nps_park_code,
+        nps_states=args.nps_state,
+        nps_query=args.nps_query,
+        nps_limit=args.nps_limit,
+        nps_max_records=args.nps_max_records,
     )
     generated_at = int(time.time())
     catalog = {

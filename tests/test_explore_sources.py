@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from urllib.parse import parse_qs, urlparse
 from pathlib import Path
 
 from scripts.build_explore_catalog_v3 import build_catalog
@@ -13,6 +14,7 @@ from scripts.explore_sources.base.fetch import parse_headers, resolve_input_path
 from scripts.explore_sources.base.quality import score_place
 from scripts.explore_sources.base.schema import ExplorePlaceV3
 from scripts.explore_sources.blm.import_blm import import_blm_fixture
+from scripts.explore_sources.nps.fetch_nps import fetch_nps_parks_to_cache, request_params
 from scripts.explore_sources.nps.import_nps import import_nps_fixture
 from scripts.explore_sources.openbeta.import_openbeta import import_openbeta_fixture
 from scripts.explore_sources.osm.import_geofabrik import import_osm_fixture
@@ -30,6 +32,53 @@ USFS = ROOT / "tests/fixtures/explore_sources/usfs_sierra_sample.geojson"
 BLM = ROOT / "tests/fixtures/explore_sources/blm_moab_sample.geojson"
 WIKIDATA = ROOT / "tests/fixtures/explore_sources/wikidata_pakistan_landmarks_sample.json"
 OPENBETA = ROOT / "tests/fixtures/explore_sources/openbeta_climbing_sample.json"
+
+
+class FakeHttpResponse:
+    def __init__(self, payload: dict):
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def read(self) -> bytes:
+        return json.dumps(self.payload).encode("utf-8")
+
+
+class FakeNpsOpener:
+    def __init__(self):
+        self.requests = []
+
+    def __call__(self, request, timeout):
+        self.requests.append((request, timeout))
+        qs = parse_qs(urlparse(request.full_url).query)
+        start = int(qs.get("start", ["0"])[0])
+        page = [
+            {
+                "parkCode": "yose",
+                "fullName": "Yosemite National Park",
+                "latitude": "37.84883288",
+                "longitude": "-119.5571873",
+                "states": "CA",
+                "designation": "National Park",
+                "url": "https://www.nps.gov/yose/index.htm",
+                "description": "Granite cliffs, waterfalls, and high Sierra wilderness.",
+            },
+            {
+                "parkCode": "zion",
+                "fullName": "Zion National Park",
+                "latitude": "37.2982",
+                "longitude": "-112.9478",
+                "states": "UT",
+                "designation": "National Park",
+                "url": "https://www.nps.gov/zion/index.htm",
+                "description": "Canyon hikes, river routes, and desert cliffs.",
+            },
+        ][start:start + 1]
+        return FakeHttpResponse({"total": "2", "data": page})
 
 
 class ExploreSourcePipelineTests(unittest.TestCase):
@@ -235,6 +284,47 @@ class ExploreSourcePipelineTests(unittest.TestCase):
             self.assertEqual(len(records), 1)
             self.assertEqual(places[0].name, "Yosemite National Park")
 
+    def test_nps_live_fetcher_pages_and_caches_official_parks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            opener = FakeNpsOpener()
+            path = fetch_nps_parks_to_cache(
+                api_key="test-key",
+                cache_dir=tmp,
+                park_codes=["yose", "zion"],
+                limit=1,
+                max_records=2,
+                opener=opener,
+            )
+            payload = json.loads(path.read_text())
+            self.assertEqual(payload["source"], "nps")
+            self.assertEqual(payload["count"], 2)
+            self.assertEqual([item["parkCode"] for item in payload["data"]], ["yose", "zion"])
+            self.assertEqual(len(opener.requests), 2)
+            first_request, timeout = opener.requests[0]
+            self.assertEqual(timeout, 30.0)
+            self.assertEqual(first_request.headers["X-api-key"], "test-key")
+            records, places, _trails = import_nps_fixture(path, fetched_at=123)
+            self.assertEqual(len(records), 2)
+            self.assertTrue(any(place.name == "Zion National Park" for place in places))
+            cached_again = fetch_nps_parks_to_cache(
+                api_key="test-key",
+                cache_dir=tmp,
+                park_codes=["yose", "zion"],
+                limit=1,
+                max_records=2,
+                opener=opener,
+            )
+            self.assertEqual(cached_again, path)
+            self.assertEqual(len(opener.requests), 2)
+
+    def test_nps_live_request_params(self):
+        params = request_params(park_codes=["yose"], states=["CA", "UT"], query="waterfalls", limit=25, start=50)
+        self.assertEqual(params["parkCode"], "yose")
+        self.assertEqual(params["stateCode"], "CA,UT")
+        self.assertEqual(params["q"], "waterfalls")
+        self.assertEqual(params["limit"], 25)
+        self.assertEqual(params["start"], 50)
+
     def test_builder_outputs_searchable_pilot_catalog(self):
         records, places, trails = build_catalog(
             [str(YOSEMITE), str(PAKISTAN)],
@@ -297,6 +387,19 @@ class ExploreSourcePipelineTests(unittest.TestCase):
             self.assertTrue(records_out.exists())
             self.assertTrue(any((cache_dir / "nps").glob("*.json")))
             self.assertEqual(json.loads(out.read_text())["schema_version"], 3)
+
+    def test_build_catalog_accepts_cached_live_nps_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = fetch_nps_parks_to_cache(
+                api_key="test-key",
+                cache_dir=tmp,
+                park_codes=["yose"],
+                limit=1,
+                max_records=1,
+                opener=FakeNpsOpener(),
+            )
+            _records, places, _trails = build_catalog(nps_fixtures=[str(path)])
+            self.assertTrue(any(place.name == "Yosemite National Park" and place.category == "park" for place in places))
 
 
 if __name__ == "__main__":

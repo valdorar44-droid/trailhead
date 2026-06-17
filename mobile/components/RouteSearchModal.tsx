@@ -381,6 +381,7 @@ export default function RouteSearchModal({
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const bottomPad = Math.max(insets.bottom, Platform.OS === 'android' ? 16 : 18);
+  const searchModalTopPad = Platform.OS === 'android' ? Math.max(insets.top + 12, 36) : 0;
   const sheetMaxHeight = Math.min(height * (Platform.OS === 'android' ? 0.84 : 0.78), height - Math.max(insets.top + 36, 72));
 
   const savedPlaces   = useStore(st => st.savedPlaces);
@@ -840,7 +841,7 @@ export default function RouteSearchModal({
 
     return (
       <Modal visible animationType="slide" transparent={false} statusBarTranslucent onShow={focusSearchInput}>
-        <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: C.bg, paddingTop: searchModalTopPad }}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <View style={s.searchingSheet}>
           {/* Search input row */}

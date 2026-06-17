@@ -1,0 +1,473 @@
+{
+  "schema_version": 1,
+  "source": "viator",
+  "attribution": "Tours and experiences sourced from Viator.",
+  "generated_at": 1781676185,
+  "fixture_mode": true,
+  "count": 4,
+  "experiences": [
+    {
+      "id": "viator:yose-hike-001",
+      "source": "viator",
+      "source_id": "YOSE-HIKE-001",
+      "source_badge": "Viator",
+      "source_url": "https://www.viator.com/tours/Yosemite-National-Park/Half-Day-Yosemite-Valley-Hiking-Tour/d5265-YOSE-HIKE-001?pid=P00000000&medium=api",
+      "booking_url": "https://www.viator.com/tours/Yosemite-National-Park/Half-Day-Yosemite-Valley-Hiking-Tour/d5265-YOSE-HIKE-001?pid=P00000000&medium=api",
+      "affiliate_url": "https://www.viator.com/tours/Yosemite-National-Park/Half-Day-Yosemite-Valley-Hiking-Tour/d5265-YOSE-HIKE-001?pid=P00000000&medium=api",
+      "cache_policy": "partner_api_ingest",
+      "fetched_at": 1781676185,
+      "expires_at": 1781762585,
+      "last_seen_at": 1781676185,
+      "title": "Half-Day Yosemite Valley Hiking Tour",
+      "category": "guided_tour",
+      "subcategories": [
+        "hiking",
+        "national_park",
+        "tickets",
+        "free_cancellation",
+        "11930",
+        "21972"
+      ],
+      "lat": 37.748,
+      "lng": -119.588,
+      "region": "Yosemite National Park, CA",
+      "country": "",
+      "summary": "Walk Yosemite Valley with a local guide, stopping for waterfall views, granite walls, trailheads, and photo points. Designed as an outdoor orientation before exploring on your own.",
+      "description": "Walk Yosemite Valley with a local guide, stopping for waterfall views, granite walls, trailheads, and photo points. Designed as an outdoor orientation before exploring on your own.",
+      "highlights": [
+        "FREE_CANCELLATION",
+        "INSTANT_CONFIRMATION",
+        "MOBILE_TICKET"
+      ],
+      "inclusions": [],
+      "exclusions": [],
+      "duration_label": "4 hours",
+      "price_from": "129.00",
+      "currency": "USD",
+      "rating": 4.8,
+      "review_count": 231,
+      "hero_image_url": "https://media-cdn.tripadvisor.com/media/attractions-splice-spp-720x480/yosemite-valley.jpg",
+      "images": [
+        {
+          "url": "https://media-cdn.tripadvisor.com/media/attractions-splice-spp-720x480/yosemite-valley.jpg",
+          "caption": "Yosemite Valley",
+          "credit": "Viator supplier",
+          "license": "Viator Partner API media; display with Viator product attribution",
+          "is_cover": true
+        }
+      ],
+      "cancellation_summary": "Free cancellation",
+      "availability_summary": "",
+      "mobile_ticket": true,
+      "instant_confirmation": true,
+      "languages": [],
+      "supplier_name": "",
+      "attribution": "Tours and experiences sourced from Viator.",
+      "primary_action": "Book on Viator",
+      "secondary_actions": [
+        "Save",
+        "Add to Planner",
+        "Show Area"
+      ],
+      "raw": {
+        "productCode": "YOSE-HIKE-001",
+        "title": "Half-Day Yosemite Valley Hiking Tour",
+        "description": "Walk Yosemite Valley with a local guide, stopping for waterfall views, granite walls, trailheads, and photo points. Designed as an outdoor orientation before exploring on your own.",
+        "lat": 37.748,
+        "lng": -119.588,
+        "region": "Yosemite National Park, CA",
+        "duration": {
+          "fixedDurationInMinutes": 240
+        },
+        "images": [
+          {
+            "caption": "Yosemite Valley",
+            "isCover": true,
+            "variants": [
+              {
+                "height": 240,
+                "width": 360,
+                "url": "https://media-cdn.tripadvisor.com/media/attractions-splice-spp-360x240/yosemite-valley.jpg"
+              },
+              {
+                "height": 480,
+                "width": 720,
+                "url": "https://media-cdn.tripadvisor.com/media/attractions-splice-spp-720x480/yosemite-valley.jpg"
+              }
+            ]
+          }
+        ],
+        "reviews": {
+          "totalReviews": 231,
+          "combinedAverageRating": 4.8
+        },
+        "pricing": {
+          "summary": {
+            "fromPrice": 129.0,
+            "fromPriceBeforeDiscount": 149.0
+          },
+          "currency": "USD"
+        },
+        "productUrl": "https://www.viator.com/tours/Yosemite-National-Park/Half-Day-Yosemite-Valley-Hiking-Tour/d5265-YOSE-HIKE-001?pid=P00000000&medium=api",
+        "destinations": [
+          {
+            "ref": "5265",
+            "name": "Yosemite National Park",
+            "primary": true
+          }
+        ],
+        "tags": [
+          11930,
+          21972
+        ],
+        "flags": [
+          "FREE_CANCELLATION",
+          "INSTANT_CONFIRMATION",
+          "MOBILE_TICKET"
+        ]
+      }
+    },
+    {
+      "id": "viator:yose-scenic-002",
+      "source": "viator",
+      "source_id": "YOSE-SCENIC-002",
+      "source_badge": "Viator",
+      "source_url": "https://www.viator.com/tours/Yosemite-National-Park/Yosemite-Scenic-Van-Tour/d5265-YOSE-SCENIC-002?pid=P00000000&medium=api",
+      "booking_url": "https://www.viator.com/tours/Yosemite-National-Park/Yosemite-Scenic-Van-Tour/d5265-YOSE-SCENIC-002?pid=P00000000&medium=api",
+      "affiliate_url": "https://www.viator.com/tours/Yosemite-National-Park/Yosemite-Scenic-Van-Tour/d5265-YOSE-SCENIC-002?pid=P00000000&medium=api",
+      "cache_policy": "partner_api_ingest",
+      "fetched_at": 1781676185,
+      "expires_at": 1781762585,
+      "last_seen_at": 1781676185,
+      "title": "Yosemite Scenic Van Tour with Waterfall Stops",
+      "category": "guided_tour",
+      "subcategories": [
+        "hiking",
+        "national_park",
+        "free_cancellation",
+        "21972",
+        "21956"
+      ],
+      "lat": 37.734,
+      "lng": -119.57,
+      "region": "Yosemite National Park, CA",
+      "country": "",
+      "summary": "A guided sightseeing loop for visitors who want short walks, valley viewpoints, waterfall stops, and local context without planning every parking stop.",
+      "description": "A guided sightseeing loop for visitors who want short walks, valley viewpoints, waterfall stops, and local context without planning every parking stop.",
+      "highlights": [
+        "FREE_CANCELLATION"
+      ],
+      "inclusions": [],
+      "exclusions": [],
+      "duration_label": "5 hours-6 hours",
+      "price_from": "189.00",
+      "currency": "USD",
+      "rating": 4.6,
+      "review_count": 88,
+      "hero_image_url": "https://media-cdn.tripadvisor.com/media/attractions-splice-spp-480x320/yosemite-falls.jpg",
+      "images": [
+        {
+          "url": "https://media-cdn.tripadvisor.com/media/attractions-splice-spp-480x320/yosemite-falls.jpg",
+          "caption": "Yosemite waterfall stop",
+          "credit": "Viator supplier",
+          "license": "Viator Partner API media; display with Viator product attribution",
+          "is_cover": true
+        }
+      ],
+      "cancellation_summary": "Free cancellation",
+      "availability_summary": "",
+      "mobile_ticket": null,
+      "instant_confirmation": null,
+      "languages": [],
+      "supplier_name": "",
+      "attribution": "Tours and experiences sourced from Viator.",
+      "primary_action": "Book on Viator",
+      "secondary_actions": [
+        "Save",
+        "Add to Planner",
+        "Show Area"
+      ],
+      "raw": {
+        "productCode": "YOSE-SCENIC-002",
+        "title": "Yosemite Scenic Van Tour with Waterfall Stops",
+        "description": "A guided sightseeing loop for visitors who want short walks, valley viewpoints, waterfall stops, and local context without planning every parking stop.",
+        "lat": 37.734,
+        "lng": -119.57,
+        "region": "Yosemite National Park, CA",
+        "duration": {
+          "fromMinutes": 300,
+          "toMinutes": 360
+        },
+        "images": [
+          {
+            "caption": "Yosemite waterfall stop",
+            "isCover": true,
+            "variants": [
+              {
+                "height": 320,
+                "width": 480,
+                "url": "https://media-cdn.tripadvisor.com/media/attractions-splice-spp-480x320/yosemite-falls.jpg"
+              }
+            ]
+          }
+        ],
+        "reviews": {
+          "totalReviews": 88,
+          "combinedAverageRating": 4.6
+        },
+        "pricing": {
+          "summary": {
+            "fromPrice": 189.0
+          },
+          "currency": "USD"
+        },
+        "productUrl": "https://www.viator.com/tours/Yosemite-National-Park/Yosemite-Scenic-Van-Tour/d5265-YOSE-SCENIC-002?pid=P00000000&medium=api",
+        "destinations": [
+          {
+            "ref": "5265",
+            "name": "Yosemite National Park",
+            "primary": true
+          }
+        ],
+        "tags": [
+          21972,
+          21956
+        ],
+        "flags": [
+          "FREE_CANCELLATION"
+        ]
+      }
+    },
+    {
+      "id": "viator:moab-jeep-001",
+      "source": "viator",
+      "source_id": "MOAB-JEEP-001",
+      "source_badge": "Viator",
+      "source_url": "https://www.viator.com/tours/Moab/Moab-4x4-Jeep-and-Canyonlands-Backcountry-Tour/d5600-MOAB-JEEP-001?pid=P00000000&medium=api",
+      "booking_url": "https://www.viator.com/tours/Moab/Moab-4x4-Jeep-and-Canyonlands-Backcountry-Tour/d5600-MOAB-JEEP-001?pid=P00000000&medium=api",
+      "affiliate_url": "https://www.viator.com/tours/Moab/Moab-4x4-Jeep-and-Canyonlands-Backcountry-Tour/d5600-MOAB-JEEP-001?pid=P00000000&medium=api",
+      "cache_policy": "partner_api_ingest",
+      "fetched_at": 1781676185,
+      "expires_at": 1781762585,
+      "last_seen_at": 1781676185,
+      "title": "Moab 4x4 Jeep and Canyonlands Backcountry Tour",
+      "category": "guided_tour",
+      "subcategories": [
+        "national_park",
+        "offroad",
+        "climbing",
+        "free_cancellation",
+        "21972",
+        "21951"
+      ],
+      "lat": 38.5733,
+      "lng": -109.5498,
+      "region": "Moab, UT",
+      "country": "",
+      "summary": "Ride with a local guide through Moab backcountry terrain, canyon viewpoints, sandstone roads, and classic off-road scenery near Canyonlands.",
+      "description": "Ride with a local guide through Moab backcountry terrain, canyon viewpoints, sandstone roads, and classic off-road scenery near Canyonlands.",
+      "highlights": [
+        "FREE_CANCELLATION",
+        "LIKELY_TO_SELL_OUT"
+      ],
+      "inclusions": [],
+      "exclusions": [],
+      "duration_label": "3 hours",
+      "price_from": "156.50",
+      "currency": "USD",
+      "rating": 4.9,
+      "review_count": 412,
+      "hero_image_url": "https://media-cdn.tripadvisor.com/media/attractions-splice-spp-720x480/moab-jeep.jpg",
+      "images": [
+        {
+          "url": "https://media-cdn.tripadvisor.com/media/attractions-splice-spp-720x480/moab-jeep.jpg",
+          "caption": "Moab jeep route",
+          "credit": "Viator supplier",
+          "license": "Viator Partner API media; display with Viator product attribution",
+          "is_cover": true
+        }
+      ],
+      "cancellation_summary": "Free cancellation",
+      "availability_summary": "Likely to sell out",
+      "mobile_ticket": null,
+      "instant_confirmation": null,
+      "languages": [],
+      "supplier_name": "",
+      "attribution": "Tours and experiences sourced from Viator.",
+      "primary_action": "Book on Viator",
+      "secondary_actions": [
+        "Save",
+        "Add to Planner",
+        "Show Area"
+      ],
+      "raw": {
+        "productCode": "MOAB-JEEP-001",
+        "title": "Moab 4x4 Jeep and Canyonlands Backcountry Tour",
+        "description": "Ride with a local guide through Moab backcountry terrain, canyon viewpoints, sandstone roads, and classic off-road scenery near Canyonlands.",
+        "lat": 38.5733,
+        "lng": -109.5498,
+        "region": "Moab, UT",
+        "duration": {
+          "fixedDurationInMinutes": 180
+        },
+        "images": [
+          {
+            "caption": "Moab jeep route",
+            "isCover": true,
+            "variants": [
+              {
+                "height": 240,
+                "width": 360,
+                "url": "https://media-cdn.tripadvisor.com/media/attractions-splice-spp-360x240/moab-jeep.jpg"
+              },
+              {
+                "height": 480,
+                "width": 720,
+                "url": "https://media-cdn.tripadvisor.com/media/attractions-splice-spp-720x480/moab-jeep.jpg"
+              }
+            ]
+          }
+        ],
+        "reviews": {
+          "totalReviews": 412,
+          "combinedAverageRating": 4.9
+        },
+        "pricing": {
+          "summary": {
+            "fromPrice": 156.5
+          },
+          "currency": "USD"
+        },
+        "productUrl": "https://www.viator.com/tours/Moab/Moab-4x4-Jeep-and-Canyonlands-Backcountry-Tour/d5600-MOAB-JEEP-001?pid=P00000000&medium=api",
+        "destinations": [
+          {
+            "ref": "5600",
+            "name": "Moab",
+            "primary": true
+          }
+        ],
+        "tags": [
+          21972,
+          21951
+        ],
+        "flags": [
+          "FREE_CANCELLATION",
+          "LIKELY_TO_SELL_OUT"
+        ]
+      }
+    },
+    {
+      "id": "viator:moab-raft-002",
+      "source": "viator",
+      "source_id": "MOAB-RAFT-002",
+      "source_badge": "Viator",
+      "source_url": "https://www.viator.com/tours/Moab/Colorado-River-Rafting-Half-Day-from-Moab/d5600-MOAB-RAFT-002?pid=P00000000&medium=api",
+      "booking_url": "https://www.viator.com/tours/Moab/Colorado-River-Rafting-Half-Day-from-Moab/d5600-MOAB-RAFT-002?pid=P00000000&medium=api",
+      "affiliate_url": "https://www.viator.com/tours/Moab/Colorado-River-Rafting-Half-Day-from-Moab/d5600-MOAB-RAFT-002?pid=P00000000&medium=api",
+      "cache_policy": "partner_api_ingest",
+      "fetched_at": 1781676185,
+      "expires_at": 1781762585,
+      "last_seen_at": 1781676185,
+      "title": "Colorado River Rafting Half-Day from Moab",
+      "category": "guided_tour",
+      "subcategories": [
+        "rafting",
+        "family",
+        "tickets",
+        "free_cancellation",
+        "11930",
+        "12056"
+      ],
+      "lat": 38.6097,
+      "lng": -109.6024,
+      "region": "Moab, UT",
+      "country": "",
+      "summary": "Half-day guided rafting on the Colorado River with red-rock scenery, calm-water sections, and splashy family-friendly rapids depending on season.",
+      "description": "Half-day guided rafting on the Colorado River with red-rock scenery, calm-water sections, and splashy family-friendly rapids depending on season.",
+      "highlights": [
+        "FREE_CANCELLATION",
+        "MOBILE_TICKET"
+      ],
+      "inclusions": [],
+      "exclusions": [],
+      "duration_label": "4 hours",
+      "price_from": "94.00",
+      "currency": "USD",
+      "rating": 4.7,
+      "review_count": 167,
+      "hero_image_url": "https://media-cdn.tripadvisor.com/media/attractions-splice-spp-480x320/moab-rafting.jpg",
+      "images": [
+        {
+          "url": "https://media-cdn.tripadvisor.com/media/attractions-splice-spp-480x320/moab-rafting.jpg",
+          "caption": "Colorado River rafting",
+          "credit": "Viator supplier",
+          "license": "Viator Partner API media; display with Viator product attribution",
+          "is_cover": true
+        }
+      ],
+      "cancellation_summary": "Free cancellation",
+      "availability_summary": "",
+      "mobile_ticket": true,
+      "instant_confirmation": null,
+      "languages": [],
+      "supplier_name": "",
+      "attribution": "Tours and experiences sourced from Viator.",
+      "primary_action": "Book on Viator",
+      "secondary_actions": [
+        "Save",
+        "Add to Planner",
+        "Show Area"
+      ],
+      "raw": {
+        "productCode": "MOAB-RAFT-002",
+        "title": "Colorado River Rafting Half-Day from Moab",
+        "description": "Half-day guided rafting on the Colorado River with red-rock scenery, calm-water sections, and splashy family-friendly rapids depending on season.",
+        "lat": 38.6097,
+        "lng": -109.6024,
+        "region": "Moab, UT",
+        "duration": {
+          "fixedDurationInMinutes": 240
+        },
+        "images": [
+          {
+            "caption": "Colorado River rafting",
+            "isCover": true,
+            "variants": [
+              {
+                "height": 320,
+                "width": 480,
+                "url": "https://media-cdn.tripadvisor.com/media/attractions-splice-spp-480x320/moab-rafting.jpg"
+              }
+            ]
+          }
+        ],
+        "reviews": {
+          "totalReviews": 167,
+          "combinedAverageRating": 4.7
+        },
+        "pricing": {
+          "summary": {
+            "fromPrice": 94.0
+          },
+          "currency": "USD"
+        },
+        "productUrl": "https://www.viator.com/tours/Moab/Colorado-River-Rafting-Half-Day-from-Moab/d5600-MOAB-RAFT-002?pid=P00000000&medium=api",
+        "destinations": [
+          {
+            "ref": "5600",
+            "name": "Moab",
+            "primary": true
+          }
+        ],
+        "tags": [
+          11930,
+          12056
+        ],
+        "flags": [
+          "FREE_CANCELLATION",
+          "MOBILE_TICKET"
+        ]
+      }
+    }
+  ]
+}

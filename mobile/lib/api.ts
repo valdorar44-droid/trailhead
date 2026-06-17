@@ -373,6 +373,18 @@ export const api = {
   getExploreCampgrounds: (placeId: string, limit = 24) =>
     req<ExploreCampgroundsResponse>(`/api/explore/places/${encodeURIComponent(placeId)}/campgrounds?limit=${limit}`)
       .then(res => ({ ...res, campgrounds: canonicalizeCampsitePins(res.campgrounds ?? []) })),
+  getExplorePlaceExperiences: (placeId: string, limit = 12, source = 'viator') =>
+    req<ExploreExperiencesResponse>(`/api/explore/places/${encodeURIComponent(placeId)}/experiences?source=${encodeURIComponent(source)}&limit=${limit}`),
+  getExploreExperiences: (lat?: number, lng?: number, radius = 30, source = 'viator', limit = 20) => {
+    const qs = new URLSearchParams({ source, radius: String(radius), limit: String(limit) });
+    if (lat != null && lng != null) {
+      qs.set('lat', String(lat));
+      qs.set('lng', String(lng));
+    }
+    return req<ExploreExperiencesResponse>(`/api/explore/experiences?${qs.toString()}`);
+  },
+  getExploreExperience: (experienceId: string) =>
+    req<BookableExperience>(`/api/explore/experiences/${encodeURIComponent(experienceId)}`),
   nearbyAudio: (lat: number, lng: number, location_name = '') =>
     req<{ narration: string }>('/api/audio/nearby', {
       method: 'POST', body: JSON.stringify({ lat, lng, location_name }),
@@ -2551,6 +2563,56 @@ export interface ExploreCampgroundsResponse {
   radius_mi: number;
   count: number;
   campgrounds: CampsitePin[];
+}
+export interface BookableExperience {
+  id: string;
+  source: string;
+  source_id: string;
+  source_badge: string;
+  source_url?: string;
+  booking_url?: string;
+  affiliate_url?: string;
+  cache_policy?: string;
+  fetched_at?: number;
+  expires_at?: number;
+  last_seen_at?: number;
+  title: string;
+  category?: string;
+  subcategories?: string[];
+  lat?: number | null;
+  lng?: number | null;
+  region?: string;
+  country?: string;
+  summary?: string;
+  description?: string;
+  highlights?: string[];
+  inclusions?: string[];
+  exclusions?: string[];
+  duration_label?: string;
+  price_from?: string;
+  currency?: string;
+  rating?: number | null;
+  review_count?: number | null;
+  hero_image_url?: string;
+  images?: { url?: string; caption?: string; credit?: string; license?: string }[];
+  cancellation_summary?: string;
+  availability_summary?: string;
+  mobile_ticket?: boolean | null;
+  instant_confirmation?: boolean | null;
+  languages?: string[];
+  supplier_name?: string;
+  attribution?: string;
+  primary_action?: string;
+  secondary_actions?: string[];
+  distance_mi?: number;
+}
+export interface ExploreExperiencesResponse {
+  source: string;
+  place_id?: string;
+  results: BookableExperience[];
+  count?: number;
+  attribution?: string;
+  cache_status?: string;
 }
 export interface WikiArticle {
   title: string; lat: number; lng: number; dist_m: number; extract: string; url: string;

@@ -1,0 +1,54 @@
+{
+  "products": [
+    {
+      "productCode": "MOAB-JEEP-001",
+      "title": "Moab 4x4 Jeep and Canyonlands Backcountry Tour",
+      "description": "Ride with a local guide through Moab backcountry terrain, canyon viewpoints, sandstone roads, and classic off-road scenery near Canyonlands.",
+      "lat": 38.5733,
+      "lng": -109.5498,
+      "region": "Moab, UT",
+      "duration": { "fixedDurationInMinutes": 180 },
+      "images": [
+        {
+          "caption": "Moab jeep route",
+          "isCover": true,
+          "variants": [
+            { "height": 240, "width": 360, "url": "https://media-cdn.tripadvisor.com/media/attractions-splice-spp-360x240/moab-jeep.jpg" },
+            { "height": 480, "width": 720, "url": "https://media-cdn.tripadvisor.com/media/attractions-splice-spp-720x480/moab-jeep.jpg" }
+          ]
+        }
+      ],
+      "reviews": { "totalReviews": 412, "combinedAverageRating": 4.9 },
+      "pricing": { "summary": { "fromPrice": 156.5 }, "currency": "USD" },
+      "productUrl": "https://www.viator.com/tours/Moab/Moab-4x4-Jeep-and-Canyonlands-Backcountry-Tour/d5600-MOAB-JEEP-001?pid=P00000000&medium=api",
+      "destinations": [{ "ref": "5600", "name": "Moab", "primary": true }],
+      "tags": [21972, 21951],
+      "flags": ["FREE_CANCELLATION", "LIKELY_TO_SELL_OUT"]
+    },
+    {
+      "productCode": "MOAB-RAFT-002",
+      "title": "Colorado River Rafting Half-Day from Moab",
+      "description": "Half-day guided rafting on the Colorado River with red-rock scenery, calm-water sections, and splashy family-friendly rapids depending on season.",
+      "lat": 38.6097,
+      "lng": -109.6024,
+      "region": "Moab, UT",
+      "duration": { "fixedDurationInMinutes": 240 },
+      "images": [
+        {
+          "caption": "Colorado River rafting",
+          "isCover": true,
+          "variants": [
+            { "height": 320, "width": 480, "url": "https://media-cdn.tripadvisor.com/media/attractions-splice-spp-480x320/moab-rafting.jpg" }
+          ]
+        }
+      ],
+      "reviews": { "totalReviews": 167, "combinedAverageRating": 4.7 },
+      "pricing": { "summary": { "fromPrice": 94.0 }, "currency": "USD" },
+      "productUrl": "https://www.viator.com/tours/Moab/Colorado-River-Rafting-Half-Day-from-Moab/d5600-MOAB-RAFT-002?pid=P00000000&medium=api",
+      "destinations": [{ "ref": "5600", "name": "Moab", "primary": true }],
+      "tags": [11930, 12056],
+      "flags": ["FREE_CANCELLATION", "MOBILE_TICKET"]
+    }
+  ]
+}
+

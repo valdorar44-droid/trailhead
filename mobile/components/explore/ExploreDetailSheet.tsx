@@ -38,6 +38,7 @@ type Props = {
   highlightedSentence: number;
   storyScrollRef: React.RefObject<ScrollView | null>;
   campgroundsSlot?: React.ReactNode;
+  experiencesSlot?: React.ReactNode;
   relatedSlot?: React.ReactNode;
   weatherSlot?: React.ReactNode;
   trailStatusSlot?: React.ReactNode;
@@ -65,6 +66,7 @@ export function ExploreDetailSheet({
   highlightedSentence,
   storyScrollRef,
   campgroundsSlot,
+  experiencesSlot,
   relatedSlot,
   weatherSlot,
   trailStatusSlot,
@@ -197,6 +199,7 @@ export function ExploreDetailSheet({
 
                 {trailStatusSlot}
                 <ExploreTrailArea place={place} mediaUrl={mediaUrl} onTrailMap={onTrailMap} onTrailRoute={onTrailRoute} />
+                {experiencesSlot}
 
                 {planNotes.length > 0 && (
                   <View style={[styles.planCard, { borderColor: C.border, backgroundColor: C.s1 }]}>

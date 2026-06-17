@@ -1,0 +1,54 @@
+{
+  "products": [
+    {
+      "productCode": "YOSE-HIKE-001",
+      "title": "Half-Day Yosemite Valley Hiking Tour",
+      "description": "Walk Yosemite Valley with a local guide, stopping for waterfall views, granite walls, trailheads, and photo points. Designed as an outdoor orientation before exploring on your own.",
+      "lat": 37.748,
+      "lng": -119.588,
+      "region": "Yosemite National Park, CA",
+      "duration": { "fixedDurationInMinutes": 240 },
+      "images": [
+        {
+          "caption": "Yosemite Valley",
+          "isCover": true,
+          "variants": [
+            { "height": 240, "width": 360, "url": "https://media-cdn.tripadvisor.com/media/attractions-splice-spp-360x240/yosemite-valley.jpg" },
+            { "height": 480, "width": 720, "url": "https://media-cdn.tripadvisor.com/media/attractions-splice-spp-720x480/yosemite-valley.jpg" }
+          ]
+        }
+      ],
+      "reviews": { "totalReviews": 231, "combinedAverageRating": 4.8 },
+      "pricing": { "summary": { "fromPrice": 129.0, "fromPriceBeforeDiscount": 149.0 }, "currency": "USD" },
+      "productUrl": "https://www.viator.com/tours/Yosemite-National-Park/Half-Day-Yosemite-Valley-Hiking-Tour/d5265-YOSE-HIKE-001?pid=P00000000&medium=api",
+      "destinations": [{ "ref": "5265", "name": "Yosemite National Park", "primary": true }],
+      "tags": [11930, 21972],
+      "flags": ["FREE_CANCELLATION", "INSTANT_CONFIRMATION", "MOBILE_TICKET"]
+    },
+    {
+      "productCode": "YOSE-SCENIC-002",
+      "title": "Yosemite Scenic Van Tour with Waterfall Stops",
+      "description": "A guided sightseeing loop for visitors who want short walks, valley viewpoints, waterfall stops, and local context without planning every parking stop.",
+      "lat": 37.734,
+      "lng": -119.57,
+      "region": "Yosemite National Park, CA",
+      "duration": { "fromMinutes": 300, "toMinutes": 360 },
+      "images": [
+        {
+          "caption": "Yosemite waterfall stop",
+          "isCover": true,
+          "variants": [
+            { "height": 320, "width": 480, "url": "https://media-cdn.tripadvisor.com/media/attractions-splice-spp-480x320/yosemite-falls.jpg" }
+          ]
+        }
+      ],
+      "reviews": { "totalReviews": 88, "combinedAverageRating": 4.6 },
+      "pricing": { "summary": { "fromPrice": 189.0 }, "currency": "USD" },
+      "productUrl": "https://www.viator.com/tours/Yosemite-National-Park/Yosemite-Scenic-Van-Tour/d5265-YOSE-SCENIC-002?pid=P00000000&medium=api",
+      "destinations": [{ "ref": "5265", "name": "Yosemite National Park", "primary": true }],
+      "tags": [21972, 21956],
+      "flags": ["FREE_CANCELLATION"]
+    }
+  ]
+}
+

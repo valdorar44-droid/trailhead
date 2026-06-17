@@ -15,6 +15,7 @@ import {
   EXPLORE_CATEGORY_CHIPS,
   ExploreCategoryChips,
   ExploreDetailSheet,
+  ExploreExperiencesRail,
   ExploreFilterRow,
   ExploreHero,
   ExploreModeTabs,
@@ -30,7 +31,7 @@ import {
   type ExploreNearbyModule,
 } from '@/components/explore';
 import { useStore } from '@/lib/store';
-import { api, PaywallError, type CampsitePin, type ExploreCatalogIndexItem, type ExplorePlaceProfile, type ExploreTrailCard, type OsmPoi } from '@/lib/api';
+import { api, PaywallError, type BookableExperience, type CampsitePin, type ExploreCatalogIndexItem, type ExplorePlaceProfile, type ExploreTrailCard, type OsmPoi } from '@/lib/api';
 import { storage } from '@/lib/storage';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 import { trackPhase0Once } from '@/lib/telemetry';
@@ -39,6 +40,7 @@ import { playTrailheadVoice, stopTrailheadVoice } from '@/lib/voice';
 const EXPLORE_CACHE_KEY = 'trailhead_explore_catalog_index_v3';
 const EXPLORE_CAMPGROUNDS_CACHE_PREFIX = 'trailhead_explore_campgrounds_v1:';
 const EXPLORE_TRAIL_AREA_CACHE_PREFIX = 'trailhead_explore_trail_area_v1:';
+const EXPLORE_EXPERIENCES_CACHE_PREFIX = 'trailhead_explore_experiences_v1:';
 const SAVED_EXPLORE_KEY = 'trailhead_saved_explore_places_v1';
 const EXPLORE_INITIAL_VISIBLE = 80;
 const EXPLORE_VISIBLE_STEP = 80;
@@ -435,6 +437,12 @@ export default function GuideScreen() {
   const [exploreWeatherById, setExploreWeatherById] = useState<Record<string, any>>({});
   const [exploreWeatherLoadingId, setExploreWeatherLoadingId] = useState<string | null>(null);
   const [exploreWeatherErrors, setExploreWeatherErrors] = useState<Record<string, string>>({});
+  const [exploreExperiencesById, setExploreExperiencesById] = useState<Record<string, BookableExperience[]>>({});
+  const [exploreExperienceLoadingId, setExploreExperienceLoadingId] = useState<string | null>(null);
+  const [exploreExperienceErrors, setExploreExperienceErrors] = useState<Record<string, string>>({});
+  const [nearbyExperiences, setNearbyExperiences] = useState<BookableExperience[]>([]);
+  const [nearbyExperiencesLoading, setNearbyExperiencesLoading] = useState(false);
+  const [nearbyExperiencesError, setNearbyExperiencesError] = useState('');
   const [liveExplorePlaces, setLiveExplorePlaces] = useState<OsmPoi[]>([]);
   const [exploreLoading, setExploreLoading] = useState(false);
   const [liveExploreLoading, setLiveExploreLoading] = useState(false);
@@ -609,6 +617,60 @@ export default function GuideScreen() {
       });
     return () => { cancelled = true; };
   }, [selectedExplore?.id]);
+
+  useEffect(() => {
+    if (!selectedExplore) return;
+    const place = selectedExplore;
+    const placeId = place.id;
+    let cancelled = false;
+    const cacheKey = `${EXPLORE_EXPERIENCES_CACHE_PREFIX}${placeId}`;
+    storage.get(cacheKey).then(raw => {
+      if (cancelled || !raw || exploreExperiencesById[placeId]?.length) return;
+      try {
+        const cached = JSON.parse(raw);
+        if (Array.isArray(cached?.experiences)) {
+          setExploreExperiencesById(prev => ({ ...prev, [placeId]: cached.experiences }));
+        }
+      } catch {}
+    }).catch(() => {});
+    setExploreExperienceLoadingId(placeId);
+    setExploreExperienceErrors(prev => ({ ...prev, [placeId]: '' }));
+    api.getExplorePlaceExperiences(placeId, 12)
+      .then(res => {
+        if (cancelled) return;
+        const experiences = res.results ?? [];
+        setExploreExperiencesById(prev => ({ ...prev, [placeId]: experiences }));
+        storage.set(cacheKey, JSON.stringify({ experiences, fetched_at: Date.now() })).catch(() => {});
+      })
+      .catch(() => {
+        if (!cancelled) setExploreExperienceErrors(prev => ({ ...prev, [placeId]: 'Tours unavailable right now.' }));
+      })
+      .finally(() => {
+        if (!cancelled) setExploreExperienceLoadingId(current => current === placeId ? null : current);
+      });
+    return () => { cancelled = true; };
+  }, [selectedExplore?.id]);
+
+  useEffect(() => {
+    if (tab !== 'narrations' || !userLoc) {
+      setNearbyExperiences([]);
+      return;
+    }
+    let cancelled = false;
+    setNearbyExperiencesLoading(true);
+    setNearbyExperiencesError('');
+    api.getExploreExperiences(userLoc.lat, userLoc.lng, 45, 'viator', 12)
+      .then(res => {
+        if (!cancelled) setNearbyExperiences(res.results ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setNearbyExperiencesError('Tours unavailable right now.');
+      })
+      .finally(() => {
+        if (!cancelled) setNearbyExperiencesLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [tab, userLoc?.lat, userLoc?.lng]);
 
   useEffect(() => {
     if (!activeTrip) {
@@ -1030,6 +1092,56 @@ export default function GuideScreen() {
     router.push('/(tabs)/map');
   }
 
+  function showExperienceOnMap(experience: BookableExperience) {
+    if (experience.lat == null || experience.lng == null) return;
+    setPendingMapSelection({
+      kind: 'place',
+      place: {
+        id: `experience:${experience.id}`,
+        name: experience.title,
+        lat: Number(experience.lat),
+        lng: Number(experience.lng),
+        icon: 'star',
+        note: experience.summary || 'Bookable tour or local experience',
+        createdAt: Date.now(),
+      },
+    });
+    setSelectedExplore(null);
+    router.push('/(tabs)/map');
+  }
+
+  function saveExperienceToPlanner(experience: BookableExperience) {
+    if (!activeTrip) {
+      showExperienceOnMap(experience);
+      return;
+    }
+    const waypoint = {
+      day: activeTrip.plan.waypoints[0]?.day ?? 1,
+      name: experience.title,
+      type: 'bookable_experience',
+      description: experience.summary || experience.description || 'Bookable Viator experience.',
+      land_type: 'external_booking',
+      notes: [
+        experience.duration_label,
+        experience.price_from ? `From ${experience.currency || 'USD'} ${experience.price_from}` : '',
+        'Status: needs booking on Viator',
+      ].filter(Boolean).join(' · '),
+      lat: experience.lat ?? undefined,
+      lng: experience.lng ?? undefined,
+      verified_source: 'Viator',
+      needs_review: true,
+      verification_note: experience.booking_url || experience.affiliate_url || experience.source_url || '',
+    };
+    setActiveTrip({
+      ...activeTrip,
+      plan: {
+        ...activeTrip.plan,
+        waypoints: [...activeTrip.plan.waypoints, waypoint],
+      },
+      updated_at: Date.now(),
+    });
+  }
+
   async function fetchExploreWeather(place: ExplorePlaceProfile) {
     const { lat, lng } = place.summary;
     if (lat == null || lng == null) {
@@ -1291,6 +1403,22 @@ export default function GuideScreen() {
     );
   }
 
+  function renderExploreExperiences(place: ExplorePlaceProfile) {
+    const experiences = exploreExperiencesById[place.id] ?? [];
+    const loading = exploreExperienceLoadingId === place.id && experiences.length === 0;
+    const error = exploreExperienceErrors[place.id];
+    return (
+      <ExploreExperiencesRail
+        experiences={experiences}
+        loading={loading}
+        error={error}
+        mediaUrl={mediaUrl}
+        onSave={saveExperienceToPlanner}
+        onShowArea={showExperienceOnMap}
+      />
+    );
+  }
+
   function renderLandingHeader() {
     return (
       <View style={s.landingHeader}>
@@ -1309,12 +1437,12 @@ export default function GuideScreen() {
             <TouchableOpacity key={t} style={[s.tab, tab === t && s.tabActive]} onPress={() => setTab(t)}>
               <View style={s.tabInner}>
                 <Ionicons
-                  name={t === 'explore' ? 'compass-outline' : t === 'narrations' ? 'mic-outline' : 'partly-sunny-outline'}
+                  name={t === 'explore' ? 'compass-outline' : t === 'narrations' ? 'ticket-outline' : 'partly-sunny-outline'}
                   size={15}
                   color={tab === t ? C.orange : C.text3}
                 />
                 <Text style={[s.tabText, tab === t && s.tabTextActive]}>
-                  {t === 'explore' ? 'EXPLORE' : t === 'narrations' ? 'GUIDES' : 'WEATHER'}
+                  {t === 'explore' ? 'EXPLORE' : t === 'narrations' ? 'TOURS' : 'WEATHER'}
                 </Text>
               </View>
             </TouchableOpacity>
@@ -1490,10 +1618,18 @@ export default function GuideScreen() {
 
         {tab === 'narrations' && (
           <>
+            <ExploreExperiencesRail
+              experiences={nearbyExperiences}
+              loading={nearbyExperiencesLoading}
+              error={nearbyExperiencesError}
+              mediaUrl={mediaUrl}
+              onSave={saveExperienceToPlanner}
+              onShowArea={showExperienceOnMap}
+            />
             {!!activeTrip && Object.keys(guide).length > 0 && (
               <View style={s.narrationToolbar}>
                 <View>
-                  <Text style={s.exploreSectionTitle}>TRIP GUIDES</Text>
+                  <Text style={s.exploreSectionTitle}>TRIP AUDIO</Text>
                   <Text style={s.exploreSectionSub}>{Object.keys(guide).length} narrations ready</Text>
                 </View>
                 <TouchableOpacity
@@ -1508,9 +1644,9 @@ export default function GuideScreen() {
             )}
             {!activeTrip && (
               <View style={s.emptyState}>
-                <Ionicons name="mic-outline" size={48} color={C.text3} />
-                <Text style={s.emptyTitle}>No Active Trip</Text>
-                <Text style={s.emptySub}>Plan a trip on the PLAN tab to unlock waypoint narrations. Explore stories are ready now.</Text>
+                <Ionicons name="ticket-outline" size={48} color={C.text3} />
+                <Text style={s.emptyTitle}>Tours Nearby</Text>
+                <Text style={s.emptySub}>Open an Explore card to compare bookable local tours and activities near that stop.</Text>
               </View>
             )}
             {!!activeTrip && guideLoading && (
@@ -1690,6 +1826,7 @@ export default function GuideScreen() {
             highlightedSentence={highlightSentence}
             storyScrollRef={storyScrollRef}
             campgroundsSlot={renderExploreCampgrounds(selectedExplore)}
+            experiencesSlot={renderExploreExperiences(selectedExplore)}
             trailStatusSlot={renderExploreTrailStatus(selectedExplore)}
             weatherSlot={renderExploreWeather(selectedExplore)}
             relatedSlot={relatedExplore.length > 0 ? (

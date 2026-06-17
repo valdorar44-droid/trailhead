@@ -32,6 +32,9 @@ from dashboard.marine_chart_provider import (
 )
 from dashboard.hydro_provider import LOCAL_HYDRO_DIR, HYDRO_DIR, hydro_profile, read_hydro_manifest
 from dashboard.water_routing_provider import route_with_water_graph, water_graph_manifest
+from scripts.explore_sources.travel.ranking import rank_experiences
+from scripts.explore_sources.travel.viator.client import ViatorClient, config_from_env as viator_config_from_env
+from scripts.explore_sources.travel.viator.normalize_viator import normalize_viator_products
 from ingestors.ridb import get_campsites_near, get_campsites_search, get_facility_detail, get_campsite_detail as get_ridb_campsite_detail
 from ingestors.osm import get_osm_campsites, get_osm_campsite_detail, get_water_sources, get_trailheads, get_trails, get_viewpoints, get_peaks, get_hot_springs, get_fuel_stations, get_service_places
 from ingestors.nps import get_nps_places, nps_enabled
@@ -237,6 +240,8 @@ BLOG_INDEX = Path(__file__).parent / "blog.html"
 BLOG_DIR = Path(__file__).parent / "blog"
 EXPLORE_CATALOG = Path(__file__).parent / "explore_catalog_v1.json"
 EXPLORE_CATALOG_V3 = Path(__file__).parent / "explore_catalog_v3.json"
+EXPLORE_BOOKABLE_EXPERIENCES = Path(__file__).parent / "explore_bookable_experiences_v1.json"
+EXPLORE_TOURS_VIATOR = Path(__file__).parent / "explore_tours_viator_v1.json"
 EXPLORE_ASSETS = Path(__file__).parent / "explore_assets"
 APP_ICON = Path(__file__).resolve().parents[1] / "mobile" / "assets" / "icon.png"
 
@@ -14911,6 +14916,155 @@ async def explore_place_detail(place_id: str):
     if not place:
         raise HTTPException(404, "Explore place not found")
     return place
+
+
+def _load_explore_experiences() -> dict:
+    for path in (EXPLORE_BOOKABLE_EXPERIENCES, EXPLORE_TOURS_VIATOR):
+        if path.exists():
+            try:
+                payload = json.loads(path.read_text())
+                experiences = payload.get("experiences") if isinstance(payload, dict) else []
+                fixture_enabled = str(os.getenv("VIATOR_ENABLE_FIXTURE_DATA", "")).lower() in {"1", "true", "yes", "on"}
+                if payload.get("fixture_mode") and not fixture_enabled:
+                    continue
+                if isinstance(experiences, list):
+                    return {
+                        "schema_version": payload.get("schema_version", 1),
+                        "source": payload.get("source", "viator"),
+                        "attribution": payload.get("attribution", "Tours and experiences sourced from Viator."),
+                        "generated_at": payload.get("generated_at", 0),
+                        "count": len(experiences),
+                        "experiences": experiences,
+                    }
+            except Exception:
+                continue
+    return {
+        "schema_version": 1,
+        "source": "viator",
+        "attribution": "Tours and experiences sourced from Viator.",
+        "generated_at": 0,
+        "count": 0,
+        "experiences": [],
+    }
+
+
+def _experience_distance_filter(experiences: list[dict], lat: float | None, lng: float | None, radius_mi: float) -> list[dict]:
+    if lat is None or lng is None:
+        return list(experiences)
+    out = []
+    for item in experiences or []:
+        try:
+            item_lat = float(item.get("lat"))
+            item_lng = float(item.get("lng"))
+            distance = _haversine_m(float(lat), float(lng), item_lat, item_lng) / 1609.344
+        except Exception:
+            continue
+        if distance <= radius_mi:
+            enriched = dict(item)
+            enriched["distance_mi"] = round(distance, 1)
+            out.append(enriched)
+    return out
+
+
+def _find_experience(experience_id: str) -> dict | None:
+    decoded = unquote(str(experience_id or ""))
+    for item in _load_explore_experiences().get("experiences") or []:
+        if str(item.get("id") or "") == decoded:
+            return item
+    return None
+
+
+def _experience_response(source: str, results: list[dict], place_id: str = "", cache_status: str = "fresh") -> dict:
+    return {
+        "source": source or "viator",
+        "place_id": place_id,
+        "results": results,
+        "count": len(results),
+        "attribution": "Tours and experiences sourced from Viator.",
+        "cache_status": cache_status,
+    }
+
+
+@app.get("/api/explore/places/{place_id}/experiences")
+async def explore_place_experiences(place_id: str, source: str = "viator", limit: int = 12, radius: float | None = None):
+    place = _find_explore_place(place_id)
+    if not place:
+        raise HTTPException(404, "Explore place not found")
+    summary = place.get("summary") or {}
+    lat = summary.get("lat")
+    lng = summary.get("lng")
+    radius_mi = max(5.0, min(float(radius or _explore_experience_radius_mi(place)), 100.0))
+    payload = _load_explore_experiences()
+    experiences = [
+        item for item in payload.get("experiences") or []
+        if source in {"", "all"} or str(item.get("source") or "").lower() == source.lower()
+    ]
+    nearby = _experience_distance_filter(experiences, float(lat) if isinstance(lat, (int, float)) else None, float(lng) if isinstance(lng, (int, float)) else None, radius_mi)
+    ranked = rank_experiences(nearby, place)[:max(1, min(int(limit or 12), 24))]
+    return _experience_response(source, ranked, place_id=place_id, cache_status="fresh" if payload.get("generated_at") else "empty")
+
+
+@app.get("/api/explore/experiences")
+async def explore_experiences(lat: float | None = None, lng: float | None = None, radius: float = 30, source: str = "viator", limit: int = 20):
+    payload = _load_explore_experiences()
+    experiences = [
+        item for item in payload.get("experiences") or []
+        if source in {"", "all"} or str(item.get("source") or "").lower() == source.lower()
+    ]
+    nearby = _experience_distance_filter(experiences, lat, lng, max(1.0, min(float(radius or 30), 100.0)))
+    ranked = rank_experiences(nearby, lat=lat, lng=lng)[:max(1, min(int(limit or 20), 50))]
+    return _experience_response(source, ranked, cache_status="fresh" if payload.get("generated_at") else "empty")
+
+
+@app.post("/api/explore/experiences/refresh")
+async def explore_experience_refresh(source: str = "viator", destination_id: str = "", limit: int = 12):
+    if source.lower() != "viator":
+        raise HTTPException(400, "Only Viator refresh is supported in this source pack.")
+    config = viator_config_from_env()
+    client = ViatorClient(config)
+    if not client.ready():
+        return {
+            "ok": False,
+            "source": "viator",
+            "status": "disabled",
+            "results": [],
+            "message": "Set VIATOR_API_KEY and VIATOR_ENABLE_LIVE=true to refresh live Viator Basic Access products.",
+        }
+    payload = client.search_products(destination_id=destination_id, count=limit)
+    experiences = [item.to_dict() for item in normalize_viator_products(payload, ttl_hours=config.cache_ttl_hours)]
+    return {
+        "ok": True,
+        "source": "viator",
+        "status": payload.get("status", "live"),
+        "results": experiences,
+        "count": len(experiences),
+        "message": "Live Viator refresh returned external-booking products. Persist via importer before serving broadly.",
+    }
+
+
+@app.get("/api/explore/experiences/{experience_id}")
+async def explore_experience_detail(experience_id: str):
+    item = _find_experience(experience_id)
+    if not item:
+        raise HTTPException(404, "Experience not found")
+    return item
+
+
+def _explore_experience_radius_mi(place: dict) -> float:
+    summary = place.get("summary") or {}
+    hay = " ".join(str(v or "").lower() for v in (
+        summary.get("category"),
+        summary.get("explore_group"),
+        summary.get("title"),
+        place.get("category"),
+    ))
+    if any(term in hay for term in ("fuel", "resupply", "town", "service")):
+        return 20.0
+    if any(term in hay for term in ("park", "trail", "water", "glacier", "offroad", "scenic")):
+        return 50.0
+    if any(term in hay for term in ("pakistan", "karakoram", "remote")):
+        return 80.0
+    return 30.0
 
 
 def _explore_camp_radius_mi(place: dict, requested: float | None = None) -> float:

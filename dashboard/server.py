@@ -13889,10 +13889,18 @@ async def resolve_map_card(body: MapCardResolveRequest, user: dict | None = Depe
             return default, round((time.time() - t0) * 1000)
 
     provider = (body.source or "").lower()
+    source_label = str(body.source_label or "").lower()
     provider_id = body.provider_place_id or body.place_id or ""
     raw_id = str(body.id or "")
     if not provider_id and raw_id.startswith(("google:", "foursquare:", "geoapify:")):
         provider, provider_id = raw_id.split(":", 1)
+    is_trailhead_explore = (
+        provider == "trailhead_explore"
+        or source_label.startswith("trailhead explore")
+        or source_label.startswith("trailhead verified")
+        or raw_id.startswith("explore:")
+        or str(provider_id or "").startswith("explore:")
+    )
 
     timings: dict[str, int] = {}
     detail_task = None
@@ -13919,7 +13927,7 @@ async def resolve_map_card(body: MapCardResolveRequest, user: dict | None = Depe
         trails_discover(lat=center_lat, lng=center_lng, radius=min(context_radius, 55), mode="nearby", limit=16),
         {"trails": []},
     )
-    overnight_task = guarded("overnight_card", _resolve_map_card_overnight(body, base), (None, None), timeout=8.0) if _map_card_is_overnight(body, base) else None
+    overnight_task = guarded("overnight_card", _resolve_map_card_overnight(body, base), (None, None), timeout=8.0) if not is_trailhead_explore and _map_card_is_overnight(body, base) else None
     if photos_task and overnight_task:
         (detail_value, detail_ms), (photos, photos_ms), (related_pack, nearby_ms), (trail_pack, trails_ms), ((camp_card, camp_detail), overnight_ms) = await asyncio.gather(detail_task, photos_task, nearby_task, trails_task, overnight_task)
         timings["trail_photos_ms"] = photos_ms

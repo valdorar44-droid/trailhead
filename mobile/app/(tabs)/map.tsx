@@ -448,6 +448,13 @@ function isOvernightPlaceLike(place: Record<string, any> | null | undefined) {
   return OVERNIGHT_PLACE_RE.test(text);
 }
 
+function isTrailheadExploreSelection(place: Record<string, any> | null | undefined) {
+  if (!place) return false;
+  const source = String(place.source || place.source_label || '').toLowerCase();
+  if (source.includes('trailhead_explore') || source.includes('trailhead explore')) return true;
+  return [place.id, place.place_id, place.provider_place_id].some(value => String(value || '').startsWith('explore:'));
+}
+
 const COPILOT_QUERY_CONTEXT_TTL_MS = 5 * 60 * 1000;
 
 function bboxStringFromBounds(bounds?: CopilotMapBounds | null) {
@@ -6328,10 +6335,11 @@ function MapScreen() {
     if (selectedPlaceResolveKeyRef.current === resolveKey) return;
     selectedPlaceResolveKeyRef.current = resolveKey;
     const selectedPlaceSource = String(selectedPlace.source || selectedPlace.selection_source || '').toLowerCase();
+    const selectedPlaceIsExplore = isTrailheadExploreSelection(selectedPlace);
     let cancelled = false;
     const mergeResolvedCard = (resolved: MapCardResolveResponse) => {
       const resolvedCard = (resolved.card as any) ?? {};
-      const shouldOpenCampCard = !!resolved.camp || !!resolved.camp_detail || isOvernightPlaceLike(selectedPlace) || isOvernightPlaceLike(resolvedCard);
+      const shouldOpenCampCard = !selectedPlaceIsExplore && (!!resolved.camp || !!resolved.camp_detail || isOvernightPlaceLike(selectedPlace) || isOvernightPlaceLike(resolvedCard));
       if (shouldOpenCampCard) {
         const camp = resolvedMapCardToCampPin(selectedPlace, resolved);
         if (camp) {
@@ -6344,12 +6352,28 @@ function MapScreen() {
           return;
         }
       }
-      const nextCard = {
-        ...selectedPlace,
-        ...resolvedCard,
-        photos: resolved.photo_candidates?.length ? resolved.photo_candidates : resolved.photos?.length ? resolved.photos : resolvedCard.photos,
-      } as SearchPlace;
-      if (resolved.display_source_label) {
+      const resolvedPhotos = resolved.photo_candidates?.length ? resolved.photo_candidates : resolved.photos?.length ? resolved.photos : resolvedCard.photos;
+      const nextCard = selectedPlaceIsExplore
+        ? {
+            ...selectedPlace,
+            photo_url: selectedPlace.photo_url || resolvedCard.photo_url,
+            photos: (selectedPlace as any).photos?.length ? (selectedPlace as any).photos : resolvedPhotos,
+            summary: selectedPlace.summary || resolvedCard.summary,
+            source: 'trailhead_explore',
+            source_label: selectedPlace.source_label || 'Trailhead Explore',
+            id: selectedPlace.id,
+            place_id: selectedPlace.place_id,
+            provider_place_id: selectedPlace.provider_place_id,
+            name: selectedPlace.name,
+            type: selectedPlace.type,
+            subtype: selectedPlace.subtype,
+          }
+        : {
+            ...selectedPlace,
+            ...resolvedCard,
+            photos: resolvedPhotos,
+          } as SearchPlace;
+      if (resolved.display_source_label && !selectedPlaceIsExplore) {
         nextCard.source_label = resolved.display_source_label;
       }
       setSelectedPlace(current => {
@@ -6398,7 +6422,7 @@ function MapScreen() {
     }
     const selectedPlaceResolveKind = selectedPlace.type === 'trail' || selectedPlace.type === 'trailhead'
       ? 'trail'
-      : selectedPlace.type === 'camp' || isOvernightPlaceLike(selectedPlace)
+      : !selectedPlaceIsExplore && (selectedPlace.type === 'camp' || isOvernightPlaceLike(selectedPlace))
         ? 'camp'
       : selectedPlaceSource === 'search' || selectedPlaceSource === 'rendered_mapbox_standard' || selectedPlaceSource === 'mapbox_feature' || selectedPlaceSource === 'mapbox_search' || selectedPlaceSource === 'rendered_map'
           ? 'search'

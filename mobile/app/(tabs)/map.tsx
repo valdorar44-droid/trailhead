@@ -7729,7 +7729,7 @@ function MapScreen() {
       setSearchResults(sorted.map(place => ({
         ...place,
         source: place.source || 'search',
-        source_label: place.source === 'mapbox' ? 'Mapbox geocode' : place.source === 'trailhead_landmark' ? 'Trailhead landmark' : 'Map search',
+        source_label: place.source_label || (place.source === 'mapbox' ? 'Mapbox geocode' : place.source === 'trailhead_landmark' ? 'Trailhead landmark' : 'Map search'),
         type: place.feature_type || place.category || 'poi',
         geocode_status: resolved?.status,
         geocode_reason: resolved?.reason,
@@ -10935,7 +10935,7 @@ function MapScreen() {
       name: place.name || query,
       type: place.feature_type || place.category || 'poi',
       source: place.source || 'geocode',
-      source_label: place.source === 'trailhead_landmark' ? 'Trailhead landmark' : place.source === 'mapbox' ? 'Mapbox geocode' : 'Geocode',
+      source_label: place.source_label || (place.source === 'trailhead_landmark' ? 'Trailhead landmark' : place.source === 'mapbox' ? 'Mapbox geocode' : 'Geocode'),
       provider_place_id: place.provider_place_id || place.place_id,
       selection_source: place.source === 'mapbox' ? 'mapbox_search' : 'map_point',
       selection_confidence: place.confidence || (status === 'resolved' ? 'high' : 'medium'),

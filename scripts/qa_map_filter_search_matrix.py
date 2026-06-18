@@ -12,6 +12,7 @@ MAP_SCREEN = ROOT / "mobile/app/(tabs)/map.tsx"
 FILTER_SHEET = ROOT / "mobile/components/map/MapFilterSheet.tsx"
 NATIVE_MAP = ROOT / "mobile/components/NativeMap/index.tsx"
 WEB_MAP = ROOT / "mobile/components/NativeMap/index.web.tsx"
+SERVER = ROOT / "dashboard/server.py"
 
 
 def read(path: Path) -> str:
@@ -34,6 +35,7 @@ def main() -> int:
     filter_sheet = read(FILTER_SHEET)
     native_map = read(NATIVE_MAP)
     web_map = read(WEB_MAP)
+    server = read(SERVER)
 
     if "MapLegendSheet" in filter_sheet:
         failures.append("MapFilterSheet still imports or renders MapLegendSheet; legend must be top-level on iOS.")
@@ -64,6 +66,7 @@ def main() -> int:
         "trail tool quick message lift": "const trailToolPanelActive = trailPinCaptureMode || trailTraceMode || trailRouteBuilderOpen;",
         "quick map message guard": "const showQuickMapMessage = Boolean(",
         "quick toast two-line clamp": "numberOfLines={2}>{quickToast}</Text>",
+        "preserve geocode source label": "source_label: place.source_label || (place.source === 'mapbox'",
         "copilot accent text": "const copilotAccentText = themeMode === 'light'",
         "copilot themed backdrop": "const copilotBackdrop = light ?",
         "copilot themed placeholder": "placeholderTextColor={C.text3}",
@@ -80,6 +83,18 @@ def main() -> int:
     for label, marker in filter_sheet_required.items():
         if marker not in filter_sheet:
             failures.append(f"Missing filter sheet marker for {label}: {marker}")
+
+    server_required = {
+        "explore geocode helper": "def _explore_catalog_geocode_candidates(",
+        "explore geocode source": '"source": "trailhead_explore"',
+        "geocode explore merge": "explore_candidates = _explore_catalog_geocode_candidates(query, limit, country_filter)",
+        "strong explore geocode short circuit": "if _strong_explore_geocode_hit(explore_candidates):",
+        "geocode candidate merge": "return _merge_geocode_candidates([explore_candidates, canonical_landmarks, places], limit)",
+        "road query protection": "def _geocode_query_is_road(query: str) -> bool:",
+    }
+    for label, marker in server_required.items():
+        if marker not in server:
+            failures.append(f"Missing server search marker for {label}: {marker}")
 
     preset_block = between(map_screen, "const applyMapFilterPreset = (preset: MapModePresetId) => {", "const showMapStatusBar = Boolean(")
     if not preset_block:
@@ -133,7 +148,7 @@ def main() -> int:
             failures.append(f"Missing web map tap guard for {label}: {marker}")
 
     print("Map filter/search QA matrix")
-    print("Checks: top-level legend modal, filter-only map presets, inline map search, tap ownership, Android filter height, map tool collapse, themed Co-Pilot controls")
+    print("Checks: top-level legend modal, filter-only map presets, inline map search, Trailhead Explore search, tap ownership, Android filter height, map tool collapse, themed Co-Pilot controls")
 
     if failures:
         print("")

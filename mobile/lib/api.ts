@@ -1312,6 +1312,7 @@ export interface GeocodePlace {
   lat: number;
   lng: number;
   source?: string;
+  source_label?: string;
   place_id?: string;
   provider_place_id?: string;
   feature_type?: string;

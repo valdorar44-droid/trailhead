@@ -1,3 +1,4 @@
+import asyncio
 import tempfile
 import unittest
 
@@ -16,6 +17,8 @@ from dashboard.server import (
     _mapbox_session_hash,
     _canonical_landmark_geocode,
     _countrycodes_for_query,
+    _explore_catalog_geocode_candidates,
+    resolve_geocode_place,
     extreme_authorize_navigation,
     _resolve_geocode_candidates,
 )
@@ -243,6 +246,40 @@ class ExtremeExplorerTests(unittest.TestCase):
         ], "")
 
         self.assertEqual(result["selected"]["name"], "Eiffel Tower Road, Missouri, United States")
+
+    def test_explore_catalog_geocode_finds_k2_base_camp(self):
+        hits = _explore_catalog_geocode_candidates("k2 base camp", limit=6)
+        names = [hit["name"] for hit in hits]
+
+        self.assertGreaterEqual(len(hits), 1)
+        self.assertEqual(hits[0]["name"], "K2 Base Camp Trek")
+        self.assertIn("K2", names)
+        self.assertEqual(hits[0]["source"], "trailhead_explore")
+        self.assertEqual(hits[0]["source_label"], "Trailhead trail")
+        self.assertEqual(hits[0]["country_code"], "pk")
+
+        resolved = _resolve_geocode_candidates("k2 base camp", hits, "")
+        self.assertEqual(resolved["status"], "resolved")
+        self.assertEqual(resolved["selected"]["name"], "K2 Base Camp Trek")
+
+    def test_geocode_resolve_endpoint_uses_explore_catalog_for_k2(self):
+        resolved = asyncio.run(resolve_geocode_place("k2 base camp", limit=6))
+
+        self.assertEqual(resolved["status"], "resolved")
+        self.assertEqual(resolved["selected"]["name"], "K2 Base Camp Trek")
+        self.assertEqual(resolved["selected"]["source"], "trailhead_explore")
+
+    def test_explore_catalog_geocode_finds_related_k2_places(self):
+        hits = _explore_catalog_geocode_candidates("k2", limit=8, country_filter="pk")
+        names = {hit["name"] for hit in hits}
+
+        self.assertIn("K2 Base Camp Trek", names)
+        self.assertIn("Central Karakoram National Park", names)
+        self.assertTrue(any("Baltoro" in name for name in names))
+        self.assertTrue(all(hit["source"] == "trailhead_explore" for hit in hits))
+
+    def test_explore_catalog_geocode_does_not_override_roads(self):
+        self.assertEqual(_explore_catalog_geocode_candidates("Eiffel Tower Road", limit=6), [])
 
     def test_env_kill_switch_overrides_dashboard(self):
         store.set_extreme_admin_config({"enabled": True, "kill_switch": False, "navigation_enabled": True})

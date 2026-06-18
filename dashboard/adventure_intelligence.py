@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import math
 import time
-from collections import Counter
 from typing import Any
+
+from dashboard.provider_registry import normalize_provider_id, provider_metadata, source_quality_summary
 
 
 Readiness = str
@@ -38,6 +39,7 @@ OFFICIAL_SOURCE_HINTS = (
 
 
 def build_mission_control(payload: dict[str, Any]) -> dict[str, Any]:
+    generated_at = int(time.time())
     route = _clean_route(payload.get("route"))
     checkpoints = _clean_items(payload.get("checkpoints"))
     places = _clean_items(payload.get("places"))
@@ -54,6 +56,7 @@ def build_mission_control(payload: dict[str, Any]) -> dict[str, Any]:
     fuel_score, fuel_risks = score_fuel_and_services(route_miles, trip_memory, checkpoints, places)
     hazard_score, hazard_risks = score_hazards(checkpoints, places)
     offline_score, offline_risks = score_offline_readiness(route, checkpoints, trip_memory)
+    report_score, report_risks = score_reports(checkpoints, places, generated_at)
     context_score, context_risks = score_visible_context(context)
 
     scores = [
@@ -64,6 +67,7 @@ def build_mission_control(payload: dict[str, Any]) -> dict[str, Any]:
         fuel_score,
         hazard_score,
         offline_score,
+        report_score,
         context_score,
     ]
     risks = [
@@ -74,27 +78,35 @@ def build_mission_control(payload: dict[str, Any]) -> dict[str, Any]:
         *fuel_risks,
         *hazard_risks,
         *offline_risks,
+        *report_risks,
         *context_risks,
     ]
     readiness = _aggregate_readiness(scores, risks)
     recommendations = _recommendations(readiness, scores, risks, overnights)
     map_filters = _map_filters(readiness, risks, overnights)
-    source_summary = _source_summary([*checkpoints, *places, *overnights])
+    evidence_items = [*checkpoints, *places, *overnights]
+    source_summary = _source_summary(evidence_items, generated_at)
+    provider_evidence = _provider_evidence(evidence_items, generated_at)
+    status_summary = _status_summary(readiness, scores, risks, overnights)
     headline, summary = _brief_copy(readiness, scores, risks, overnights)
 
     return {
         "ok": True,
+        "schema_version": 2,
         "trip_id": trip_id,
-        "generated_at": int(time.time()),
+        "generated_at": generated_at,
         "readiness": readiness,
         "headline": headline,
         "summary": summary,
+        "status_summary": status_summary,
         "scores": scores,
         "overnights": overnights,
         "risks": risks,
         "recommendations": recommendations,
+        "next_actions": _staged_next_actions(recommendations),
         "map_filters": map_filters,
         "source_summary": source_summary,
+        "provider_evidence": provider_evidence,
         "debug": {
             "route_points": len(route),
             "route_miles": round(route_miles, 1),
@@ -330,13 +342,144 @@ def _route_distance_m(item: dict[str, Any]) -> int | None:
 def score_offline_readiness(route: list[dict[str, float]], checkpoints: list[dict[str, Any]], trip_memory: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     offline = trip_memory.get("offline_readiness") if isinstance(trip_memory.get("offline_readiness"), dict) else {}
     if not route and not checkpoints:
-        return _score("offline_readiness", "Offline readiness", "needs_review", "unknown", 30, ["Offline pack cannot be sized without route context."]), []
-    ready_keys = [key for key, value in offline.items() if value is True or str(value).lower() in {"ready", "downloaded", "complete"}]
-    if ready_keys:
-        return _score("offline_readiness", "Offline readiness", "ready", "medium", 82, ["Offline data is marked ready."]), []
-    return _score("offline_readiness", "Offline readiness", "needs_review", "unknown", 50, ["Download route maps and key stops before leaving signal."]), [
+        score = _score("offline_readiness", "Offline readiness", "needs_review", "unknown", 30, ["Offline pack cannot be sized without route context."])
+        score["offline_status"] = "missing"
+        score["missing_keys"] = ["route"]
+        return score, []
+
+    groups = {
+        "maps": ("maps", "map_tiles", "tiles", "route_tiles", "trail_tiles"),
+        "route": ("route", "route_line", "route_cache", "route_geometry"),
+        "trail_graph": ("trail_graph", "trail_route_graph", "route_graph", "graph", "trail_graph_sidecars"),
+        "places": ("places", "stays", "camps", "camp_packs", "poi", "key_stops"),
+        "conditions": ("weather", "reports", "hazards", "conditions"),
+    }
+    ready_groups: list[str] = []
+    missing_groups: list[str] = []
+    known_groups: list[str] = []
+    for group, aliases in groups.items():
+        raw = next((offline.get(alias) for alias in aliases if alias in offline), None)
+        if raw is None:
+            continue
+        known_groups.append(group)
+        state = _offline_state(raw)
+        if state == "ready":
+            ready_groups.append(group)
+        elif state == "missing":
+            missing_groups.append(group)
+
+    if {"maps", "route"}.issubset(set(ready_groups)) and not missing_groups:
+        score = _score("offline_readiness", "Offline readiness", "ready", "medium", 86, ["Route maps and route data are marked ready."])
+        score["offline_status"] = "complete"
+        score["ready_keys"] = ready_groups
+        return score, []
+    if ready_groups:
+        label = ", ".join(_status_label(key) for key in missing_groups[:3]) or "some route data"
+        score = _score("offline_readiness", "Offline readiness", "needs_review", "medium", 62, [f"Offline pack is partial; review {label}."])
+        score["offline_status"] = "partial"
+        score["ready_keys"] = ready_groups
+        score["missing_keys"] = missing_groups or [group for group in groups if group not in known_groups][:3]
+        return score, [
+            _risk("offline_partial", "offline", "Offline pack partial", "Some route data is downloaded, but key offline pieces still need review.", "watch", "medium")
+        ]
+
+    score = _score("offline_readiness", "Offline readiness", "needs_review", "unknown", 50, ["Download route maps and key stops before leaving signal."])
+    score["offline_status"] = "missing"
+    score["missing_keys"] = list(groups.keys())
+    return score, [
         _risk("offline_not_confirmed", "offline", "Offline pack not confirmed", "Route maps, stays, and key stops are not marked downloaded.", "watch", "unknown")
     ]
+
+
+def _offline_state(value: Any) -> str:
+    if value is True:
+        return "ready"
+    if value is False or value is None:
+        return "missing"
+    text = _clean_text(value, 80).lower()
+    if text in {"ready", "downloaded", "complete", "available", "cached", "done", "true"}:
+        return "ready"
+    if text in {"missing", "unavailable", "not_downloaded", "not downloaded", "failed", "false", "none"}:
+        return "missing"
+    return "partial"
+
+
+def score_reports(checkpoints: list[dict[str, Any]], places: list[dict[str, Any]], now: int | None = None) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    now = int(now or time.time())
+    report_items = [item for item in [*checkpoints, *places] if _is_report(item)]
+    if not report_items:
+        score = _score("reports", "Reports", "ready", "unknown", 72, ["No current community conflicts are attached."])
+        score["report_status"] = "current"
+        return score, []
+
+    conflicting = [item for item in report_items if _is_conflicting_report(item)]
+    stale = [item for item in report_items if _is_stale_report(item, now)]
+    current = [item for item in report_items if item not in stale and item not in conflicting]
+
+    if conflicting:
+        score = _score("reports", "Reports", "needs_review", "medium", 42, ["One report has conflicting or disputed status."])
+        score["report_status"] = "conflicting"
+        return score, [
+            _risk(
+                "reports_conflicting",
+                "report",
+                "Reports conflict",
+                "Community or route reports disagree; confirm before relying on this route detail.",
+                "warning",
+                "medium",
+            )
+        ]
+    if stale and not current:
+        score = _score("reports", "Reports", "needs_review", "low", 50, ["Only stale route reports are attached."])
+        score["report_status"] = "stale"
+        return score, [
+            _risk(
+                "reports_stale",
+                "report",
+                "Reports are stale",
+                "Attached reports are old or expired and need a current check.",
+                "watch",
+                "low",
+            )
+        ]
+
+    reasons = [f"{len(current)} current report{'s' if len(current) != 1 else ''} attached."]
+    if stale:
+        reasons.append(f"{len(stale)} stale report{'s' if len(stale) != 1 else ''} ignored for readiness.")
+    score = _score("reports", "Reports", "ready", "medium", 78, reasons)
+    score["report_status"] = "current"
+    return score, []
+
+
+def _is_report(item: dict[str, Any]) -> bool:
+    text = " ".join(
+        _clean_text(item.get(key), 120).lower()
+        for key in ("type", "subtype", "category", "source", "source_label", "status", "report_type")
+    )
+    return (
+        "report" in text
+        or "trailhead_user" in text
+        or "community" in text
+        or item.get("reported_at") is not None
+        or item.get("community_confirmations") is not None
+    )
+
+
+def _is_conflicting_report(item: dict[str, Any]) -> bool:
+    text = " ".join(str(item.get(key) or "") for key in ("status", "note", "summary", "description")).lower()
+    return bool(item.get("conflicting") or item.get("disputed") or "conflict" in text or "disputed" in text)
+
+
+def _is_stale_report(item: dict[str, Any], now: int) -> bool:
+    expires_at = _timestamp(item.get("expires_at"))
+    if expires_at and expires_at < now:
+        return True
+    if item.get("stale") is True:
+        return True
+    seen_at = _timestamp(item.get("updated_at") or item.get("last_seen_at") or item.get("reported_at") or item.get("created_at"))
+    if not seen_at:
+        return False
+    return now - seen_at > 30 * 86_400
 
 
 def score_visible_context(context: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -414,16 +557,43 @@ def _aggregate_readiness(scores: list[dict[str, Any]], risks: list[dict[str, Any
     return "ready"
 
 
-def _source_summary(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    counts: Counter[str] = Counter()
+def _source_summary(items: list[dict[str, Any]], now: int) -> list[dict[str, Any]]:
+    buckets: dict[str, dict[str, Any]] = {}
     for item in items:
         source = _source(item)
-        if source:
-            counts[source] += 1
-    return [
-        {"source": source, "count": count, "confidence": "high" if source != "unknown" and any(hint in source.lower() for hint in OFFICIAL_SOURCE_HINTS) else "medium"}
-        for source, count in counts.most_common(8)
-    ]
+        if not source:
+            continue
+        quality = _item_source_quality(item, now)
+        bucket = buckets.setdefault(source, {
+            "source": source,
+            "count": 0,
+            "scores": [],
+            "factors": set(),
+            "provider_ids": set(),
+            "attribution": "",
+            "freshness_label": "",
+        })
+        bucket["count"] += 1
+        if _number(quality.get("score")) is not None:
+            bucket["scores"].append(float(quality["score"]))
+        bucket["factors"].update(str(factor) for factor in quality.get("factors", []) if factor)
+        bucket["provider_ids"].update(str(pid) for pid in quality.get("provider_ids", []) if pid)
+        bucket["attribution"] = bucket["attribution"] or _clean_text(quality.get("attribution"), 160)
+        bucket["freshness_label"] = bucket["freshness_label"] or _clean_text(quality.get("freshness_label"), 160)
+    summaries: list[dict[str, Any]] = []
+    for bucket in sorted(buckets.values(), key=lambda item: item["count"], reverse=True)[:8]:
+        scores = bucket.pop("scores")
+        avg = int(round(sum(scores) / len(scores))) if scores else 45
+        factors = sorted(bucket.pop("factors"))
+        provider_ids = sorted(bucket.pop("provider_ids"))
+        summaries.append({
+            **bucket,
+            "confidence": _quality_label(avg),
+            "score": avg,
+            "factors": factors[:6],
+            "provider_ids": provider_ids[:6],
+        })
+    return summaries
 
 
 def _score(id_: str, label: str, status: Readiness, confidence: Confidence, value: int, reasons: list[str], source_ids: list[str] | None = None) -> dict[str, Any]:
@@ -464,6 +634,119 @@ def _recommendation(action_type: str, label: str, reason: str, requires_confirma
         "priority": priority,
         "args": args,
     }
+
+
+def _staged_next_actions(recommendations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    actions: list[dict[str, Any]] = []
+    for rec in recommendations:
+        staged = dict(rec)
+        staged["status"] = "staged"
+        staged["mutates_trip"] = False
+        actions.append(staged)
+    return actions
+
+
+def _status_summary(readiness: Readiness, scores: list[dict[str, Any]], risks: list[dict[str, Any]], overnights: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    by_id = {score.get("id"): score for score in scores}
+    route_score = by_id.get("route_geometry", {})
+    overnight_score = by_id.get("overnights", {})
+    rig_score = by_id.get("rig_fit", {})
+    legal_score = by_id.get("legal_stay", {})
+    fuel_score = by_id.get("fuel_services", {})
+    hazard_score = by_id.get("hazards", {})
+    offline_score = by_id.get("offline_readiness", {})
+    report_score = by_id.get("reports", {})
+
+    return {
+        "route_status": _status_item("Route status", str(route_score.get("status") or readiness), route_score),
+        "overnights": _status_item("Overnights", _overnight_state(overnights, overnight_score), overnight_score),
+        "rig_fit": _status_item("Rig fit", _rig_state(rig_score), rig_score),
+        "legal_stay": _status_item("Legal stay", _legal_state(legal_score), legal_score),
+        "fuel_risk": _status_item("Fuel risk", _fuel_state(fuel_score), fuel_score),
+        "conditions": _status_item("Conditions", _condition_state(hazard_score, risks), hazard_score),
+        "offline_readiness": _status_item("Offline readiness", str(offline_score.get("offline_status") or _offline_summary_state(offline_score)), offline_score),
+        "reports": _status_item("Reports", str(report_score.get("report_status") or "current"), report_score),
+    }
+
+
+def _status_item(label: str, value: str, score: dict[str, Any]) -> dict[str, Any]:
+    reasons = score.get("reasons") if isinstance(score.get("reasons"), list) else []
+    return {
+        "label": label,
+        "value": value,
+        "score_id": score.get("id") or "",
+        "readiness": score.get("status") or "needs_review",
+        "confidence": score.get("confidence") or "unknown",
+        "summary": _clean_text(reasons[0] if reasons else "", 180),
+    }
+
+
+def _overnight_state(overnights: list[dict[str, Any]], score: dict[str, Any]) -> str:
+    if not overnights:
+        return "missing"
+    statuses = {str(item.get("status") or "") for item in overnights}
+    if "blocked" in statuses:
+        return "blocked"
+    if "missing" in statuses:
+        return "missing"
+    if "review_area" in statuses:
+        return "review_area"
+    if "candidate" in statuses:
+        return "candidate"
+    if statuses == {"confirmed"} or score.get("status") == "ready":
+        return "confirmed"
+    return "candidate"
+
+
+def _rig_state(score: dict[str, Any]) -> str:
+    if score.get("status") == "ready":
+        return "safe"
+    if score.get("status") == "blocked":
+        return "not_recommended"
+    if score.get("confidence") == "unknown" and _number(score.get("value")) is not None and float(score.get("value")) <= 45:
+        return "unknown"
+    return "caution"
+
+
+def _legal_state(score: dict[str, Any]) -> str:
+    if score.get("status") == "ready":
+        return str(score.get("confidence") or "medium")
+    if score.get("status") == "blocked":
+        return "low"
+    if score.get("confidence") in {"medium", "high"}:
+        return "medium"
+    return "unknown"
+
+
+def _fuel_state(score: dict[str, Any]) -> str:
+    if score.get("status") == "ready":
+        return "safe"
+    if score.get("status") == "blocked":
+        return "warning"
+    return "watch"
+
+
+def _condition_state(score: dict[str, Any], risks: list[dict[str, Any]]) -> str:
+    condition_types = {"weather", "fire", "smoke", "air_quality", "water", "road", "hazard", "flood", "earthquake", "volcano", "drought", "tsunami"}
+    condition_risks = [risk for risk in risks if risk.get("type") in condition_types]
+    if any(risk.get("severity") in {"block", "warning"} for risk in condition_risks):
+        return "warning"
+    if any(risk.get("severity") == "watch" for risk in condition_risks) or score.get("status") != "ready":
+        return "watch"
+    return "clear"
+
+
+def _offline_summary_state(score: dict[str, Any]) -> str:
+    value = _number(score.get("value"))
+    if score.get("status") == "ready":
+        return "complete"
+    if value is not None and value > 40:
+        return "partial"
+    return "missing"
+
+
+def _status_label(value: str) -> str:
+    return value.replace("_", " ")
 
 
 def _clean_route(value: Any) -> list[dict[str, float]]:
@@ -575,6 +858,88 @@ def _source(item: dict[str, Any]) -> str:
     return _clean_text(item.get("source_label") or item.get("source") or item.get("source_badge"), 100) or "unknown"
 
 
+def _provider_id(item: dict[str, Any]) -> str:
+    explicit = item.get("provider") or item.get("source_provider")
+    if explicit:
+        return normalize_provider_id(explicit)
+    source = item.get("source")
+    if source and str(source).lower() != "provider":
+        return normalize_provider_id(source)
+    return normalize_provider_id(_source(item))
+
+
+def _item_source_quality(item: dict[str, Any], now: int) -> dict[str, Any]:
+    existing = item.get("source_quality")
+    if isinstance(existing, dict):
+        quality = dict(existing)
+        quality.setdefault("label", _quality_label(_number(quality.get("score"))))
+        quality.setdefault("factors", [])
+        quality.setdefault("provider_ids", [_provider_id(item)] if _provider_id(item) else [])
+        return quality
+    provider_id = _provider_id(item)
+    source_ids = _source_ids(item)
+    inferred = _confidence(item) == "low" or "preview" in _source(item).lower() or "estimated" in _clean_text(existing, 80).lower()
+    unknown_access = _is_stay(item) and _confidence(item) in {"unknown", "low"}
+    return source_quality_summary(
+        [{"source": provider_id or _source(item), "source_id": source_ids[0] if source_ids else ""}],
+        fetched_at=_timestamp(item.get("fetched_at") or item.get("created_at")),
+        last_seen_at=_timestamp(item.get("last_seen_at") or item.get("updated_at") or item.get("reported_at")),
+        community_confirmations=int(_number(item.get("community_confirmations")) or 0),
+        inferred=inferred,
+        unknown_access=unknown_access,
+        now=now,
+    )
+
+
+def _provider_evidence(items: list[dict[str, Any]], now: int) -> list[dict[str, Any]]:
+    buckets: dict[str, dict[str, Any]] = {}
+    for item in items:
+        provider_id = _provider_id(item)
+        if not provider_id:
+            continue
+        quality = _item_source_quality(item, now)
+        meta = provider_metadata(provider_id)
+        bucket = buckets.setdefault(provider_id, {
+            "provider_id": provider_id,
+            "name": meta.name if meta else _source(item),
+            "source_type": meta.source_type if meta else "unknown",
+            "count": 0,
+            "scores": [],
+            "factors": set(),
+            "freshness_label": meta.freshness_label if meta else _clean_text(quality.get("freshness_label"), 160),
+            "attribution": meta.attribution_text if meta else _clean_text(quality.get("attribution"), 160),
+            "offline_allowed": bool(meta.offline_allowed) if meta else bool(quality.get("offline_allowed")),
+        })
+        bucket["count"] += 1
+        if _number(quality.get("score")) is not None:
+            bucket["scores"].append(float(quality["score"]))
+        bucket["factors"].update(str(factor) for factor in quality.get("factors", []) if factor)
+    out: list[dict[str, Any]] = []
+    for bucket in sorted(buckets.values(), key=lambda item: item["count"], reverse=True)[:8]:
+        scores = bucket.pop("scores")
+        avg = int(round(sum(scores) / len(scores))) if scores else 45
+        factors = sorted(bucket.pop("factors"))
+        out.append({
+            **bucket,
+            "confidence": _quality_label(avg),
+            "score": avg,
+            "factors": factors[:6],
+        })
+    return out
+
+
+def _quality_label(score: float | None) -> str:
+    if score is None:
+        return "unknown"
+    if score >= 85:
+        return "high"
+    if score >= 65:
+        return "medium"
+    if score >= 40:
+        return "review"
+    return "low"
+
+
 def _source_ids(item: dict[str, Any]) -> list[str]:
     out: list[str] = []
     for key in ("source_id", "id", "place_id", "result_id"):
@@ -582,6 +947,13 @@ def _source_ids(item: dict[str, Any]) -> list[str]:
         if value:
             out.append(value)
     return list(dict.fromkeys(out))[:4]
+
+
+def _timestamp(value: Any) -> int | None:
+    parsed = _number(value)
+    if parsed is None or parsed <= 0:
+        return None
+    return int(parsed)
 
 
 def _number(value: Any) -> float | None:

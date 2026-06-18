@@ -56,9 +56,14 @@ class AdventureIntelligenceTests(unittest.TestCase):
         brief = build_mission_control(base_payload())
 
         self.assertEqual(brief["readiness"], "ready")
+        self.assertEqual(brief["schema_version"], 2)
         self.assertEqual(brief["debug"]["provider_calls"], 0)
         self.assertTrue(any(score["id"] == "route_geometry" and score["status"] == "ready" for score in brief["scores"]))
         self.assertEqual(brief["overnights"][0]["name"], "Willow Flat Campground")
+        self.assertEqual(brief["status_summary"]["route_status"]["value"], "ready")
+        self.assertEqual(brief["status_summary"]["overnights"]["value"], "confirmed")
+        self.assertEqual(brief["status_summary"]["offline_readiness"]["value"], "complete")
+        self.assertTrue(any(source["provider_id"] == "nps" for source in brief["provider_evidence"]))
 
     def test_missing_route_geometry_blocks_readiness(self):
         payload = base_payload()
@@ -69,6 +74,7 @@ class AdventureIntelligenceTests(unittest.TestCase):
 
         self.assertEqual(brief["readiness"], "blocked")
         self.assertTrue(any(risk["id"] == "route_missing_geometry" for risk in brief["risks"]))
+        self.assertTrue(all(action["status"] == "staged" and action["mutates_trip"] is False for action in brief["next_actions"]))
 
     def test_placeholder_overnight_needs_review(self):
         payload = base_payload()
@@ -209,6 +215,40 @@ class AdventureIntelligenceTests(unittest.TestCase):
 
         self.assertEqual(brief["readiness"], "ready")
         self.assertTrue(any(risk["title"] == "Traffic summary" and risk["severity"] == "info" for risk in brief["risks"]))
+
+    def test_partial_offline_pack_needs_review_without_silent_ready(self):
+        payload = base_payload()
+        payload["trip_memory"]["offline_readiness"] = {
+            "maps": "downloaded",
+            "route": True,
+            "trail_graph": "missing",
+        }
+
+        brief = build_mission_control(payload)
+
+        self.assertEqual(brief["readiness"], "needs_review")
+        self.assertEqual(brief["status_summary"]["offline_readiness"]["value"], "partial")
+        self.assertTrue(any(risk["id"] == "offline_partial" for risk in brief["risks"]))
+
+    def test_conflicting_report_stages_review_status(self):
+        payload = base_payload()
+        payload["places"].append({
+            "id": "report:gate",
+            "type": "community_report",
+            "title": "Gate status report",
+            "lat": 38.61,
+            "lng": -109.5,
+            "source": "trailhead_user",
+            "confidence": "medium",
+            "reported_at": 1999999999,
+            "conflicting": True,
+        })
+
+        brief = build_mission_control(payload)
+
+        self.assertEqual(brief["readiness"], "needs_review")
+        self.assertEqual(brief["status_summary"]["reports"]["value"], "conflicting")
+        self.assertTrue(any(risk["id"] == "reports_conflicting" for risk in brief["risks"]))
 
 
 if __name__ == "__main__":

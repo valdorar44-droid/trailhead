@@ -912,6 +912,8 @@ export interface MissionControlRecommendation {
   reason: string;
   requires_confirmation: boolean;
   priority: number;
+  status?: 'staged' | string;
+  mutates_trip?: boolean;
   args?: Record<string, unknown>;
 }
 export interface MissionControlOvernight {
@@ -951,20 +953,49 @@ export interface MissionSourceSummary {
   source: string;
   count: number;
   confidence: MissionConfidence | 'medium' | string;
+  score?: number;
+  factors?: string[];
+  provider_ids?: string[];
+  attribution?: string;
+  freshness_label?: string;
+}
+export interface MissionStatusItem {
+  label: string;
+  value: string;
+  score_id: string;
+  readiness: MissionReadiness | string;
+  confidence: MissionConfidence | string;
+  summary?: string;
+}
+export interface MissionProviderEvidence {
+  provider_id: string;
+  name: string;
+  source_type?: string;
+  count: number;
+  confidence: MissionConfidence | 'review' | string;
+  score?: number;
+  factors?: string[];
+  freshness_label?: string;
+  attribution?: string;
+  offline_allowed?: boolean;
 }
 export interface MissionControlBrief {
   ok: boolean;
+  schema_version?: number;
   trip_id?: string | null;
   generated_at: number;
   readiness: MissionReadiness;
   headline: string;
   summary: string;
+  status_summary?: Record<string, MissionStatusItem>;
   scores: MissionControlScore[];
   overnights: MissionControlOvernight[];
   risks: MissionControlRisk[];
   recommendations: MissionControlRecommendation[];
+  next_actions?: MissionControlRecommendation[];
   map_filters: MissionMapFilterPreset[];
   source_summary: MissionSourceSummary[];
+  provider_evidence?: MissionProviderEvidence[];
   ledger_id?: number;
   debug?: Record<string, unknown>;
 }

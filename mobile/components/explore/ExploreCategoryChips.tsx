@@ -38,12 +38,13 @@ export function ExploreCategoryChips({ selected, mode, onSelect }: Props) {
 }
 
 const styles = StyleSheet.create({
-  row: { gap: 9, paddingHorizontal: 20, paddingVertical: 14 },
+  row: { gap: 10, paddingLeft: 20, paddingRight: 68, paddingTop: 13, paddingBottom: 10 },
   chip: {
     minHeight: 48,
-    maxWidth: 146,
-    paddingHorizontal: 13,
-    borderRadius: 12,
+    minWidth: 104,
+    maxWidth: 158,
+    paddingHorizontal: 14,
+    borderRadius: 15,
     borderWidth: 1,
     flexDirection: 'row',
     alignItems: 'center',

@@ -39,16 +39,16 @@ export function ExploreModeTabs({ value, onChange }: Props) {
 const styles = StyleSheet.create({
   shell: {
     marginHorizontal: 20,
-    borderRadius: 18,
+    borderRadius: 16,
     borderWidth: 1,
-    padding: 6,
+    padding: 4,
     flexDirection: 'row',
-    gap: 6,
+    gap: 4,
   },
   tab: {
     flex: 1,
-    minHeight: 44,
-    borderRadius: 14,
+    minHeight: 38,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },

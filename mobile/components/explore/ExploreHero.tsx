@@ -23,18 +23,18 @@ export function ExploreHero({ greeting, displayName, height, query, onQueryChang
         <Text style={styles.title}>Find your next adventure</Text>
         <View style={styles.searchRow}>
           <View style={styles.search}>
-            <Ionicons name="search-outline" size={22} color="rgba(15,23,42,0.58)" />
+            <Ionicons name="search-outline" size={22} color="rgba(255,255,255,0.86)" />
             <TextInput
               value={query}
               onChangeText={onQueryChange}
-              placeholder="Search trails, camps, parks, fuel"
-              placeholderTextColor="rgba(15,23,42,0.5)"
+              placeholder="Search camps, trails, fuel"
+              placeholderTextColor="rgba(255,255,255,0.68)"
               style={styles.input}
               returnKeyType="search"
             />
             {query ? (
               <TouchableOpacity onPress={onClearQuery} style={styles.iconButton} hitSlop={8}>
-                <Ionicons name="close" size={16} color="rgba(15,23,42,0.62)" />
+                <Ionicons name="close" size={16} color="rgba(255,255,255,0.82)" />
               </TouchableOpacity>
             ) : null}
           </View>
@@ -85,12 +85,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: 'rgba(255,255,255,0.94)',
+    backgroundColor: 'rgba(15,23,42,0.36)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.32)',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.18,
     shadowRadius: 22,
   },
-  input: { flex: 1, color: '#111827', fontSize: 15, fontWeight: '700', paddingVertical: 0 },
-  iconButton: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
+  input: { flex: 1, color: '#fff', fontSize: 15, fontWeight: '800', paddingVertical: 0 },
+  iconButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.14)',
+  },
 });

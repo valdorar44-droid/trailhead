@@ -6,7 +6,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import TourTarget from '@/components/TourTarget';
 import PaywallModal from '@/components/PaywallModal';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
@@ -53,29 +53,6 @@ const EXPLORE_SORT_LABELS: Record<ExploreSortMode, string> = {
   nearest: 'Nearest',
   source: 'Source quality',
 };
-
-type ExploreHomeSection = {
-  id: string;
-  label: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  color: string;
-  mode?: 'featured' | 'nearby' | 'trip';
-  category?: ExploreCategoryKey;
-  savedOnly?: boolean;
-};
-
-const EXPLORE_HOME_SECTIONS: ExploreHomeSection[] = [
-  { id: 'trip', label: 'Trip', icon: 'git-branch-outline', color: '#f97316', mode: 'trip' },
-  { id: 'near-me', label: 'Near', icon: 'locate-outline', color: '#a855f7', mode: 'nearby' },
-  { id: 'trails', label: 'Trails', icon: 'walk-outline', color: '#16a34a', category: 'trails' },
-  { id: 'parks', label: 'Parks', icon: 'leaf-outline', color: '#22c55e', category: 'parks' },
-  { id: 'camps', label: 'Camps', icon: 'bonfire-outline', color: '#14b8a6', category: 'camp' },
-  { id: 'water', label: 'Water', icon: 'water-outline', color: '#0ea5e9', category: 'water' },
-  { id: 'scenic', label: 'Scenic', icon: 'camera-outline', color: '#ca8a04', category: 'scenic' },
-  { id: 'tours', label: 'Tours', icon: 'ticket-outline', color: '#d97706', category: 'tours' },
-  { id: 'services', label: 'Services', icon: 'basket-outline', color: '#7c3aed', category: 'resupply' },
-  { id: 'saved', label: 'Saved', icon: 'bookmark-outline', color: '#64748b', savedOnly: true },
-];
 
 const WMO_ICON: Record<number, keyof typeof Ionicons.glyphMap> = {
   0: 'sunny-outline', 1: 'partly-sunny-outline', 2: 'partly-sunny-outline', 3: 'cloud-outline',
@@ -438,6 +415,7 @@ export default function GuideScreen() {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const router = useRouter();
+  const params = useLocalSearchParams<{ view?: string | string[] }>();
   const user = useStore(st => st.user);
   const activeTrip = useStore(st => st.activeTrip);
   const setActiveTrip = useStore(st => st.setActiveTrip);
@@ -493,6 +471,19 @@ export default function GuideScreen() {
   const locationSub = useRef<Location.LocationSubscription | null>(null);
   const storyScrollRef = useRef<ScrollView | null>(null);
   const storyTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const requestedView = Array.isArray(params.view) ? params.view[0] : params.view;
+
+  useEffect(() => {
+    if (requestedView === 'narrations' || requestedView === 'trip-audio') {
+      setTab('narrations');
+      return;
+    }
+    if (requestedView === 'weather' || requestedView === 'trip-weather') {
+      setTab('weather');
+      return;
+    }
+    setTab('explore');
+  }, [requestedView]);
 
   useEffect(() => {
     let cancelled = false;
@@ -851,7 +842,7 @@ export default function GuideScreen() {
         rows: rankedExplore
           .filter(({ place }) => exploreCategoryMatches(place, item.key))
           .sort((a, b) => (a.place.summary.hero_rank ?? a.place.summary.rank) - (b.place.summary.hero_rank ?? b.place.summary.rank))
-          .slice(0, 8),
+          .slice(0, 5),
       }))
       .filter(section => section.rows.length > 0);
   }, [exploreCategory, exploreMode, exploreSavedOnly, hasExploreQuery, rankedExplore]);
@@ -1079,51 +1070,6 @@ export default function GuideScreen() {
       storage.set(SAVED_EXPLORE_KEY, JSON.stringify(next)).catch(() => {});
       return next;
     });
-  }
-
-  function applyExploreHomeSection(section: ExploreHomeSection) {
-    setExploreSavedOnly(Boolean(section.savedOnly));
-    setExploreQuery('');
-    if (section.savedOnly) {
-      setExploreMode('featured');
-      setExploreCategory('all');
-      return;
-    }
-    setExploreMode(section.mode ?? 'featured');
-    setExploreCategory(section.category ?? 'all');
-  }
-
-  function exploreSectionActive(section: ExploreHomeSection) {
-    if (section.savedOnly) return exploreSavedOnly;
-    if (exploreSavedOnly) return false;
-    if (section.mode && exploreMode !== section.mode) return false;
-    if (section.category && exploreCategory !== section.category) return false;
-    if (!section.mode && !section.category) return exploreMode === 'featured' && exploreCategory === 'all';
-    return true;
-  }
-
-  function renderExploreHomeSections() {
-    return (
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.homeSectionRail}>
-        {EXPLORE_HOME_SECTIONS.map(section => {
-          const active = exploreSectionActive(section);
-          return (
-            <TouchableOpacity
-              key={section.id}
-              style={[
-                s.homeSectionChip,
-                { borderColor: active ? section.color + '88' : C.border, backgroundColor: active ? section.color + '16' : C.s1 },
-              ]}
-              activeOpacity={0.84}
-              onPress={() => applyExploreHomeSection(section)}
-            >
-              <Ionicons name={section.icon} size={16} color={active ? section.color : C.text3} />
-              <Text style={[s.homeSectionText, { color: active ? C.text : C.text2 }]} numberOfLines={1}>{section.label}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
-    );
   }
 
   function showExploreCampOnMap(camp: CampsitePin) {
@@ -1506,22 +1452,31 @@ export default function GuideScreen() {
           onQueryChange={setExploreQuery}
           onClearQuery={() => setExploreQuery('')}
         />
+      </View>
+    );
+  }
 
-        <View style={s.tabs}>
-          {(['explore', 'narrations', 'weather'] as const).map(t => (
-            <TouchableOpacity key={t} style={[s.tab, tab === t && s.tabActive]} onPress={() => setTab(t)}>
-              <View style={s.tabInner}>
-                <Ionicons
-                  name={t === 'explore' ? 'compass-outline' : t === 'narrations' ? 'map-outline' : 'partly-sunny-outline'}
-                  size={15}
-                  color={tab === t ? C.orange : C.text3}
-                />
-                <Text style={[s.tabText, tab === t && s.tabTextActive]}>
-                  {t === 'explore' ? 'EXPLORE' : t === 'narrations' ? 'TRIP' : 'WEATHER'}
-                </Text>
-              </View>
-            </TouchableOpacity>
-          ))}
+  function openExploreFeed() {
+    setTab('explore');
+    router.replace('/(tabs)/guide' as any);
+  }
+
+  function renderUtilityHeader() {
+    const isWeather = tab === 'weather';
+    return (
+      <View style={s.utilityHeader}>
+        <TouchableOpacity style={s.utilityBack} onPress={openExploreFeed}>
+          <Ionicons name="chevron-back" size={16} color={C.text2} />
+          <Text style={s.utilityBackText}>Explore</Text>
+        </TouchableOpacity>
+        <View style={s.utilityTitleRow}>
+          <View style={s.utilityIcon}>
+            <Ionicons name={isWeather ? 'partly-sunny-outline' : 'mic-outline'} size={22} color={C.orange} />
+          </View>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={s.utilityKicker}>{isWeather ? 'TRIP WEATHER' : 'TRIP AUDIO'}</Text>
+            <Text style={s.utilityTitle}>{isWeather ? 'Forecasts for route stops' : 'Narrations for route stops'}</Text>
+          </View>
         </View>
       </View>
     );
@@ -1562,7 +1517,7 @@ export default function GuideScreen() {
   return (
     <SafeAreaView style={s.container}>
       <ScrollView style={s.scroll} contentContainerStyle={s.scrollContent}>
-        {renderLandingHeader()}
+        {tab === 'explore' ? renderLandingHeader() : renderUtilityHeader()}
 
         {tab === 'explore' && (
           <>
@@ -1585,7 +1540,6 @@ export default function GuideScreen() {
               setExploreSavedOnly(false);
               setExploreMode(mode);
             }} />
-            {renderExploreHomeSections()}
             <ExploreFilterRow
               shownCount={rankedExplore.length}
               sourceLabel={exploreSortMode === 'source' ? 'Source first' : 'Sources'}
@@ -1698,16 +1652,22 @@ export default function GuideScreen() {
             )}
             {featuredSections.length > 0 ? (
               featuredSections.map(section => (
-                <View key={section.item.key} style={s.exploreRailSection}>
+                <View key={section.item.key} style={s.explorePreviewSection}>
                   <View style={s.exploreSectionHeader}>
                     <Text style={s.exploreSectionTitle}>{section.item.label.toUpperCase()}</Text>
                     <TouchableOpacity onPress={() => setExploreCategory(section.item.key)}>
                       <Text style={s.exploreSectionLink}>VIEW ALL</Text>
                     </TouchableOpacity>
                   </View>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.exploreRail}>
-                    {section.rows.map((item, idx) => renderExploreCard(item, idx, true))}
-                  </ScrollView>
+                  {section.rows.map((item, idx) => renderExploreCard(item, idx))}
+                  <TouchableOpacity
+                    style={s.exploreSectionMoreBtn}
+                    onPress={() => setExploreCategory(section.item.key)}
+                    activeOpacity={0.84}
+                  >
+                    <Text style={s.exploreSectionMoreText}>MORE {section.item.label.toUpperCase()}</Text>
+                    <Ionicons name="arrow-forward" size={14} color={C.orange} />
+                  </TouchableOpacity>
                 </View>
               ))
             ) : !exploreLoading && rankedExplore.length === 0 && (!showExperienceSearch || (!exploreSearchExperienceLoading && exploreSearchExperiences.length === 0)) ? (
@@ -1987,7 +1947,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   autoBtnOn: { borderColor: C.orange, backgroundColor: C.orangeGlow },
   autoBtnText: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '700' },
-  landingHeader: { marginHorizontal: -14, marginTop: -14, backgroundColor: C.s1, borderBottomWidth: 1, borderColor: C.border },
+  landingHeader: { marginHorizontal: -14, marginTop: -14, backgroundColor: C.s1 },
   heroShell: { height: 330, backgroundColor: C.s1, overflow: 'hidden' },
   heroImage: { width: '100%', height: '100%' },
   heroImageFallback: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#1f2937' },
@@ -2012,12 +1972,43 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   heroSearchInput: { flex: 1, minWidth: 0, color: '#111827', fontSize: 16, paddingVertical: 13 },
   heroSearchIconBtn: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
-  tabs: { flexDirection: 'row', backgroundColor: C.s1 },
-  tab: { flex: 1, paddingVertical: 12, alignItems: 'center', borderBottomWidth: 2, borderBottomColor: 'transparent' },
-  tabActive: { borderBottomColor: C.orange },
-  tabInner: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  tabText: { color: C.text3, fontSize: 11, fontFamily: mono, fontWeight: '900' },
-  tabTextActive: { color: C.orange },
+  utilityHeader: {
+    marginHorizontal: -14,
+    marginTop: -14,
+    paddingHorizontal: 18,
+    paddingTop: 16,
+    paddingBottom: 18,
+    borderBottomWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.s1,
+    gap: 16,
+  },
+  utilityBack: {
+    alignSelf: 'flex-start',
+    minHeight: 34,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.s2,
+    paddingHorizontal: 10,
+  },
+  utilityBackText: { color: C.text2, fontSize: 11, fontFamily: mono, fontWeight: '900' },
+  utilityTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  utilityIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: C.orange + '44',
+    backgroundColor: C.orangeGlow,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  utilityKicker: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 0 },
+  utilityTitle: { color: C.text, fontSize: 22, lineHeight: 27, fontWeight: '900', marginTop: 3 },
   scroll: { flex: 1 },
   scrollContent: { padding: 14, gap: 11, paddingBottom: 122 },
   loadRow: {
@@ -2059,19 +2050,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   modeBtnActive: { backgroundColor: C.orangeGlow },
   modeBtnText: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '800' },
   modeBtnTextActive: { color: C.orange },
-  homeSectionRail: { gap: 9, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 4 },
-  homeSectionChip: {
-    minHeight: 40,
-    minWidth: 82,
-    maxWidth: 132,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 11,
-  },
-  homeSectionText: { flexShrink: 1, minWidth: 0, fontSize: 12, fontWeight: '900' },
   narrationToolbar: { minHeight: 58, borderRadius: 16, borderWidth: 1, borderColor: C.border, backgroundColor: C.s1, paddingHorizontal: 13, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   categoryStrip: { gap: 9, paddingRight: 8 },
   categoryPill: {
@@ -2114,8 +2092,22 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   exploreSectionTitle: { color: C.text3, fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
   exploreSectionSub: { color: C.text3, fontSize: 10, fontFamily: mono },
   exploreSectionLink: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900' },
+  explorePreviewSection: { gap: 0, marginBottom: 6 },
   exploreRailSection: { gap: 9 },
   exploreRail: { gap: 12, paddingRight: 8 },
+  exploreSectionMoreBtn: {
+    minHeight: 44,
+    marginBottom: 18,
+    borderRadius: 13,
+    borderWidth: 1,
+    borderColor: C.orange + '55',
+    backgroundColor: C.orangeGlow,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  exploreSectionMoreText: { color: C.orange, fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 0 },
   exploreLoadMoreBtn: {
     minHeight: 42,
     borderRadius: 8,

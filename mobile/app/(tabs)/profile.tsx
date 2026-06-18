@@ -1227,6 +1227,8 @@ export default function ProfileScreen() {
                       ]
                     : [
                         { icon: 'sparkles-outline', label: 'WELCOME', color: '#d4af37', onPress: startWelcomePrompt },
+                        { icon: 'mic-outline', label: 'TRIP AUDIO', color: '#3b82f6', onPress: () => router.push('/(tabs)/guide?view=narrations' as any) },
+                        { icon: 'partly-sunny-outline', label: 'WEATHER', color: '#0ea5e9', onPress: () => router.push('/(tabs)/guide?view=weather' as any) },
                         { icon: 'bug-outline', label: 'BUG', color: C.red, onPress: () => setShowBugModal(true) },
                         ...(user?.is_admin ? [{ icon: 'refresh-circle-outline', label: adminClearingCampCache ? 'CLEARING' : 'CAMP CACHE', color: C.yellow, onPress: clearCampCacheAdmin }] : []),
                       ];

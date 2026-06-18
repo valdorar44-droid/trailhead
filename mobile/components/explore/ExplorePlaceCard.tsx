@@ -47,6 +47,8 @@ export function ExplorePlaceCard({
   const C = useTheme();
   const categoryColor = getExploreCategoryColor(place);
   const facts = getExploreQuickFacts(place, context).slice(0, compact ? 2 : 3);
+  const title = getExploreDisplayTitle(place);
+  const region = `${context?.day ? `Day ${context.day} · ` : ''}${context?.distanceMi != null ? `${formatMiles(context.distanceMi)} · ` : ''}${getExploreDisplayRegion(place)}`;
   return (
     <TouchableOpacity
       style={[
@@ -73,14 +75,24 @@ export function ExplorePlaceCard({
         <TouchableOpacity style={styles.bookmark} onPress={onToggleSave} hitSlop={8}>
           <Ionicons name={saved ? 'bookmark' : 'bookmark-outline'} size={20} color="#fff" />
         </TouchableOpacity>
+        {!compact && (
+          <View style={styles.imageTitleBlock}>
+            <Text style={styles.imageTitle} numberOfLines={2}>{title}</Text>
+            <Text style={styles.imageMeta} numberOfLines={1}>{region}</Text>
+          </View>
+        )}
       </View>
       <View style={styles.body}>
-        <Text style={[styles.title, compact && styles.railTitle, { color: C.text }]} numberOfLines={2}>
-          {getExploreDisplayTitle(place)}
-        </Text>
-        <Text style={[styles.meta, { color: C.text3 }]} numberOfLines={1}>
-          {context?.day ? `Day ${context.day} · ` : ''}{context?.distanceMi != null ? `${formatMiles(context.distanceMi)} · ` : ''}{getExploreDisplayRegion(place)}
-        </Text>
+        {compact && (
+          <>
+            <Text style={[styles.title, styles.railTitle, { color: C.text }]} numberOfLines={2}>
+              {title}
+            </Text>
+            <Text style={[styles.meta, { color: C.text3 }]} numberOfLines={1}>
+              {region}
+            </Text>
+          </>
+        )}
         <View style={styles.sourceLine}>
           <Ionicons name="shield-checkmark-outline" size={13} color={categoryColor} />
           <Text style={[styles.source, { color: categoryColor }]} numberOfLines={1}>{getExploreCardSourceLine(place)}</Text>
@@ -134,7 +146,7 @@ function formatMiles(mi: number) {
 
 const styles = StyleSheet.create({
   card: {
-    marginHorizontal: 20,
+    marginHorizontal: 0,
     marginBottom: 18,
     borderRadius: 16,
     borderWidth: 1,
@@ -155,11 +167,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 16,
   },
-  imageWrap: { height: 172 },
+  imageWrap: { height: 218 },
   railImageWrap: { height: 140 },
   image: { width: '100%', height: '100%' },
   imageFallback: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  imageShade: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.16)' },
+  imageShade: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.18)' },
   badge: {
     position: 'absolute',
     top: 12,
@@ -186,6 +198,30 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(15,23,42,0.46)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.44)',
+  },
+  imageTitleBlock: {
+    position: 'absolute',
+    left: 18,
+    right: 58,
+    bottom: 16,
+    gap: 4,
+  },
+  imageTitle: {
+    color: '#fff',
+    fontSize: 29,
+    lineHeight: 33,
+    fontWeight: '900',
+    letterSpacing: 0,
+    textShadowColor: 'rgba(0,0,0,0.42)',
+    textShadowRadius: 12,
+  },
+  imageMeta: {
+    color: 'rgba(255,255,255,0.88)',
+    fontSize: 13,
+    lineHeight: 17,
+    fontWeight: '900',
+    textShadowColor: 'rgba(0,0,0,0.38)',
+    textShadowRadius: 10,
   },
   body: { padding: 16, gap: 7 },
   title: { fontSize: 21, lineHeight: 25, fontWeight: '900', letterSpacing: 0 },

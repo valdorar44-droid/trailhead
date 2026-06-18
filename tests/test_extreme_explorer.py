@@ -1,8 +1,11 @@
 import tempfile
 import unittest
 
+from fastapi import HTTPException
+
 from config.settings import settings
 from dashboard.server import (
+    ExtremeNavigationAuthorizeRequest,
     _build_extreme_map_action,
     _classify_extreme_command,
     _clean_mapbox_param,
@@ -13,6 +16,7 @@ from dashboard.server import (
     _mapbox_session_hash,
     _canonical_landmark_geocode,
     _countrycodes_for_query,
+    extreme_authorize_navigation,
     _resolve_geocode_candidates,
 )
 from db import store
@@ -277,6 +281,34 @@ class ExtremeExplorerTests(unittest.TestCase):
         self.assertTrue(cfg["guardrails"]["navigation_sessions"])
         self.assertIn("navigation", cfg["allowed_surfaces"])
         self.assertFalse(cfg["navigation"]["free_drive"])
+
+    def test_navigation_authorization_requires_confirmation_and_blocks_free_drive(self):
+        settings.extreme_navigation_enabled = True
+        settings.extreme_allowed_surfaces = "map_layers,navigation"
+        uid = store.create_user("nav@example.com", "navuser", "hash", "nav-code")
+        admin = {"id": uid, "email": "nav@example.com", "is_admin": 1, "plan_type": "free"}
+
+        with self.assertRaises(HTTPException) as missing_ack:
+            extreme_authorize_navigation(
+                ExtremeNavigationAuthorizeRequest(surface="navigation", acknowledged_billing=False),
+                user=admin,
+            )
+        self.assertEqual(missing_ack.exception.status_code, 400)
+
+        with self.assertRaises(HTTPException) as free_drive:
+            extreme_authorize_navigation(
+                ExtremeNavigationAuthorizeRequest(surface="navigation", acknowledged_billing=True, navigation_mode="free_drive"),
+                user=admin,
+            )
+        self.assertEqual(free_drive.exception.status_code, 400)
+
+        result = extreme_authorize_navigation(
+            ExtremeNavigationAuthorizeRequest(surface="navigation", acknowledged_billing=True, navigation_mode="route_guidance", route_id="route-1"),
+            user=admin,
+        )
+        self.assertTrue(result["navigation_session_authorized"])
+        self.assertFalse(result["free_drive_authorized"])
+        self.assertEqual(result["route_id"], "route-1")
 
     def test_copilot_actions_are_staged_not_mutated(self):
         uid = store.create_user("pilot@example.com", "pilotuser", "hash", "pilot-code")

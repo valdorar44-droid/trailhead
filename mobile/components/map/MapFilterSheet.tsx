@@ -235,7 +235,7 @@ export default function MapFilterSheet({
             style={isAndroid
               ? [styles.sheet, styles.androidSheet, { height: androidSheetHeight }]
               : styles.sheet}
-            contentStyle={{ padding: 0 }}
+            contentStyle={isAndroid ? { padding: 0, flex: 1 } : { padding: 0 }}
           >
             <View style={styles.header}>
               <View style={styles.headerCopy}>
@@ -257,8 +257,8 @@ export default function MapFilterSheet({
 
             <ScrollView
               showsVerticalScrollIndicator={false}
-              style={isAndroid ? styles.scroll : undefined}
-              contentContainerStyle={isAndroid ? styles.scrollContent : { paddingBottom: 28 }}
+              style={styles.scroll}
+              contentContainerStyle={isAndroid ? [styles.scrollContent, { paddingBottom: Math.max(28, filterBottomSpacer) }] : { paddingBottom: 28 }}
               keyboardShouldPersistTaps="handled"
               nestedScrollEnabled={isAndroid}
               bounces={!isAndroid}
@@ -407,7 +407,6 @@ export default function MapFilterSheet({
               {expandedSections.includes('weather-layers') ? renderToggleRows(weatherLayerItems) : null}
             </View>
 
-            {isAndroid ? <View style={{ height: filterBottomSpacer }} /> : null}
             </ScrollView>
           </TrailheadSheet>
         </View>
@@ -421,6 +420,8 @@ function makeStyles(C: ColorPalette) {
       flex: 1,
       justifyContent: 'flex-end',
       backgroundColor: 'rgba(0,0,0,0.42)',
+      zIndex: 20000,
+      elevation: 200,
     },
     sheet: {
       maxHeight: '82%',
@@ -436,6 +437,10 @@ function makeStyles(C: ColorPalette) {
       minHeight: 360,
       alignSelf: 'stretch',
       paddingBottom: 0,
+      borderBottomLeftRadius: 0,
+      borderBottomRightRadius: 0,
+      zIndex: 20001,
+      elevation: 201,
     },
     header: {
       flexDirection: 'row',
@@ -495,8 +500,8 @@ function makeStyles(C: ColorPalette) {
       fontFamily: mono,
       fontWeight: '900',
     },
-    scroll: { flex: 1 },
-    scrollContent: { paddingBottom: 0 },
+    scroll: { flex: 1, minHeight: 0 },
+    scrollContent: { paddingBottom: 28 },
     sheetLoadingRow: {
       marginHorizontal: 12,
       marginBottom: 10,

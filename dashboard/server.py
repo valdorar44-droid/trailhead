@@ -6586,9 +6586,48 @@ def _normalize_geocode_text(value: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", str(value or "").lower())).strip()
 
 GEOCODE_ROAD_WORD_RE = re.compile(r"\b(road|rd|street|st|avenue|ave|boulevard|blvd|drive|dr|lane|ln|way|highway|hwy|route|rte)\b")
+GEOCODE_SEARCH_CENTER_PREFERENCES = {"center", "search center", "nearby search", "locality", "place", "map center"}
+GEOCODE_LOCALITY_TYPES = {
+    "place", "locality", "city", "town", "village", "hamlet", "municipality", "settlement",
+    "county", "district", "region", "province", "state", "country", "neighborhood", "suburb",
+    "borough", "administrative", "boundary",
+}
+GEOCODE_CENTER_ANCHOR_TYPES = {
+    "landmark", "park", "national_park", "protected_area", "mountain", "peak", "volcano",
+    "glacier", "natural", "tourism", "attraction", "historic", "monument",
+}
 
 def _geocode_query_is_road(query: str) -> bool:
     return bool(GEOCODE_ROAD_WORD_RE.search(_normalize_geocode_text(query)))
+
+def _geocode_prefer_search_center(prefer: str) -> bool:
+    return _normalize_geocode_text(prefer) in GEOCODE_SEARCH_CENTER_PREFERENCES
+
+def _geocode_candidate_type_tokens(place: dict) -> set[str]:
+    raw_types = [
+        place.get("feature_type"),
+        place.get("category"),
+        *(place.get("place_types") if isinstance(place.get("place_types"), list) else []),
+    ]
+    tokens: set[str] = set()
+    for value in raw_types:
+        normalized = _normalize_geocode_text(str(value or ""))
+        if not normalized:
+            continue
+        tokens.add(normalized)
+        tokens.update(part for part in normalized.split() if part)
+    return tokens
+
+def _geocode_candidate_is_locality(place: dict) -> bool:
+    return bool(_geocode_candidate_type_tokens(place).intersection(GEOCODE_LOCALITY_TYPES))
+
+def _geocode_candidate_is_search_center(place: dict) -> bool:
+    tokens = _geocode_candidate_type_tokens(place)
+    if tokens.intersection(GEOCODE_LOCALITY_TYPES):
+        return True
+    if str(place.get("source") or "").lower() == "trailhead_landmark":
+        return True
+    return bool(tokens.intersection(GEOCODE_CENTER_ANCHOR_TYPES))
 
 def _country_code_from_mapbox_context(feature: dict) -> tuple[str | None, str | None, str | None]:
     country_code = None
@@ -6636,14 +6675,11 @@ def _geocode_place_matches_country(place: dict, country_filter: str) -> bool:
     }
     return any(any(_normalize_geocode_text(name) in hay for name in country_names.get(code, [])) for code in filters)
 
-def _geocode_candidate_score(query: str, place: dict, country_filter: str = "") -> float:
+def _geocode_candidate_score(query: str, place: dict, country_filter: str = "", prefer_search_center: bool = False) -> float:
     needle = _normalize_geocode_text(query)
     name = _normalize_geocode_text(str(place.get("name") or ""))
-    types = " ".join(_normalize_geocode_text(str(value or "")) for value in [
-        place.get("feature_type"),
-        place.get("category"),
-        *(place.get("place_types") if isinstance(place.get("place_types"), list) else []),
-    ])
+    tokens = _geocode_candidate_type_tokens(place)
+    types = " ".join(sorted(tokens))
     score = 0.0
     if needle and name:
         if name == needle:
@@ -6671,6 +6707,16 @@ def _geocode_candidate_score(query: str, place: dict, country_filter: str = "") 
         pass
     if str(place.get("source") or "").lower() == "trailhead_explore" and not query_is_road:
         score -= 12
+    if prefer_search_center and not query_is_road:
+        source = str(place.get("source") or "").lower()
+        if _geocode_candidate_is_locality(place):
+            score -= 70
+        elif _geocode_candidate_is_search_center(place):
+            score -= 30
+        elif source == "trailhead_explore":
+            score += 35
+        else:
+            score += 12
     try:
         score += min(max(float(place.get("trailhead_match_score")), 0.0), 999.0) / 20.0
     except (TypeError, ValueError):
@@ -6827,7 +6873,7 @@ def _strong_explore_geocode_hit(candidates: list[dict]) -> bool:
     except (TypeError, ValueError):
         return False
 
-def _resolve_geocode_candidates(query: str, places: list[dict], country_filter: str = "") -> dict:
+def _resolve_geocode_candidates(query: str, places: list[dict], country_filter: str = "", prefer_search_center: bool = False) -> dict:
     valid = [
         place for place in places
         if isinstance(place, dict)
@@ -6836,8 +6882,10 @@ def _resolve_geocode_candidates(query: str, places: list[dict], country_filter: 
     ]
     if not valid:
         return {"status": "not_found", "query": query, "normalized_query": query, "selected": None, "alternatives": [], "rejected": [], "reason": "no_candidates"}
+    def score_place(place: dict) -> float:
+        return _geocode_candidate_score(query, place, country_filter, prefer_search_center)
     ranked = sorted(valid, key=lambda place: (
-        _geocode_candidate_score(query, place, country_filter),
+        score_place(place),
         str(place.get("name") or ""),
         float(place.get("lat") or 0),
         float(place.get("lng") or 0),
@@ -6851,7 +6899,7 @@ def _resolve_geocode_candidates(query: str, places: list[dict], country_filter: 
             "country_code": place.get("country_code"),
             "feature_type": place.get("feature_type"),
             "place_id": place.get("place_id"),
-            "score": round(_geocode_candidate_score(query, place, country_filter), 3),
+            "score": round(score_place(place), 3),
             "reason": "country_mismatch" if country_filter and not _geocode_place_matches_country(place, country_filter) else "lower_rank",
         }
         for place in ranked[1:8]
@@ -6868,7 +6916,7 @@ def _resolve_geocode_candidates(query: str, places: list[dict], country_filter: 
             "countrycodes": country_filter,
         }
     runner_up = ranked[1] if len(ranked) > 1 else None
-    margin = (_geocode_candidate_score(query, runner_up, country_filter) - _geocode_candidate_score(query, selected, country_filter)) if runner_up else 999
+    margin = (score_place(runner_up) - score_place(selected)) if runner_up else 999
     status = "ambiguous" if runner_up and margin < 3 and not country_filter else "resolved"
     return {
         "status": status,
@@ -6877,7 +6925,7 @@ def _resolve_geocode_candidates(query: str, places: list[dict], country_filter: 
         "selected": {
             **selected,
             "confidence": "high" if status == "resolved" and margin >= 8 else "medium",
-            "score": round(_geocode_candidate_score(query, selected, country_filter), 3),
+            "score": round(score_place(selected), 3),
         },
         "alternatives": ranked[1:6],
         "rejected": rejected,
@@ -6944,17 +6992,18 @@ def _canonical_landmark_geocode(query: str) -> list[dict]:
     return []
 
 @app.get("/api/geocode")
-async def geocode_places(q: str, limit: int = 8, countrycodes: str = ""):
+async def geocode_places(q: str, limit: int = 8, countrycodes: str = "", prefer: str = ""):
     query = (q or "").strip()
     if not query:
         return []
     limit = max(1, min(int(limit or 8), 10))
     country_filter = _clean_countrycodes(countrycodes) or _countrycodes_for_query(query)
+    prefer_search_center = _geocode_prefer_search_center(prefer)
     canonical_landmarks = _canonical_landmark_geocode(query)
     explore_candidates = _explore_catalog_geocode_candidates(query, limit, country_filter)
-    if _strong_explore_geocode_hit(explore_candidates):
+    if not prefer_search_center and _strong_explore_geocode_hit(explore_candidates):
         return _merge_geocode_candidates([explore_candidates, canonical_landmarks], limit)
-    if canonical_landmarks:
+    if canonical_landmarks and not prefer_search_center:
         return _merge_geocode_candidates([explore_candidates, canonical_landmarks], limit)
 
     async def fetch_geocode() -> list[dict]:
@@ -7003,7 +7052,8 @@ async def geocode_places(q: str, limit: int = 8, countrycodes: str = ""):
                                 "provider_place_id": properties.get("mapbox_id") or feat.get("id"),
                             })
                     if places:
-                        return _merge_geocode_candidates([explore_candidates, canonical_landmarks, places], limit)
+                        groups = [canonical_landmarks, places, explore_candidates] if prefer_search_center else [explore_candidates, canonical_landmarks, places]
+                        return _merge_geocode_candidates(groups, limit)
                 except Exception:
                     pass
             try:
@@ -7046,13 +7096,15 @@ async def geocode_places(q: str, limit: int = 8, countrycodes: str = ""):
                         "bbox": [float(v) for v in p.get("boundingbox", [])] if isinstance(p.get("boundingbox"), list) and len(p.get("boundingbox")) == 4 else None,
                         "provider_place_id": p.get("osm_id"),
                     })
-                return _merge_geocode_candidates([explore_candidates, canonical_landmarks, places], limit)
+                groups = [canonical_landmarks, places, explore_candidates] if prefer_search_center else [explore_candidates, canonical_landmarks, places]
+                return _merge_geocode_candidates(groups, limit)
             except Exception as e:
                 if explore_candidates or canonical_landmarks:
-                    return _merge_geocode_candidates([explore_candidates, canonical_landmarks], limit)
+                    groups = [canonical_landmarks, explore_candidates] if prefer_search_center else [explore_candidates, canonical_landmarks]
+                    return _merge_geocode_candidates(groups, limit)
                 raise HTTPException(502, f"Geocode failed: {e}")
 
-    cache_key = f"geocode:{query.lower()}:{country_filter}:{limit}"
+    cache_key = f"geocode:{query.lower()}:{country_filter}:{limit}:{_normalize_geocode_text(prefer)}"
     return await runtime_cached_call(
         cache_key,
         10 * 60,
@@ -7063,15 +7115,16 @@ async def geocode_places(q: str, limit: int = 8, countrycodes: str = ""):
     )
 
 @app.get("/api/geocode/resolve")
-async def resolve_geocode_place(q: str, limit: int = 8, countrycodes: str = ""):
+async def resolve_geocode_place(q: str, limit: int = 8, countrycodes: str = "", prefer: str = ""):
     query = (q or "").strip()
     if not query:
         return {"status": "not_found", "query": "", "normalized_query": "", "selected": None, "alternatives": [], "rejected": [], "reason": "empty_query"}
     limit = max(2, min(int(limit or 8), 10))
     country_filter = _clean_countrycodes(countrycodes) or _countrycodes_for_query(query)
+    prefer_search_center = _geocode_prefer_search_center(prefer)
     normalized_query = re.sub(r"\s+", " ", query).strip()
-    places = await geocode_places(normalized_query, limit, country_filter)
-    result = _resolve_geocode_candidates(normalized_query, places, country_filter)
+    places = await geocode_places(normalized_query, limit, country_filter, prefer)
+    result = _resolve_geocode_candidates(normalized_query, places, country_filter, prefer_search_center)
     if result.get("status") in {"mismatch", "not_found"} and country_filter:
         strict_query = normalized_query
         first_country = country_filter.split(",")[0]
@@ -7082,8 +7135,8 @@ async def resolve_geocode_place(q: str, limit: int = 8, countrycodes: str = ""):
         suffix = country_names.get(first_country)
         if suffix and _normalize_geocode_text(suffix) not in _normalize_geocode_text(strict_query):
             strict_query = f"{normalized_query}, {suffix}"
-        retry_places = await geocode_places(strict_query, limit, country_filter)
-        retry_result = _resolve_geocode_candidates(strict_query, retry_places, country_filter)
+        retry_places = await geocode_places(strict_query, limit, country_filter, prefer)
+        retry_result = _resolve_geocode_candidates(strict_query, retry_places, country_filter, prefer_search_center)
         retry_result["query"] = query
         retry_result["normalized_query"] = strict_query
         retry_result["retry_of"] = normalized_query

@@ -183,6 +183,7 @@ export interface NativeMapProps {
   showAva:         boolean;
   showRadar:       boolean;
   showNautical?:   boolean;
+  hideMapStatusBadge?: boolean;
 
   // Callbacks → replaces onWebMessage
   onMapReady:       () => void;
@@ -678,7 +679,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     mapLayer, routeProviderMode = 'trailhead', routeOpts,
     traceMode = false, traceDraftCoords = [], traceRouteCoords = [], tracePinCoords = [],
     suppressFeatureTaps = false,
-    showLandOverlay, showUsgsOverlay, showTerrain, showFire, showAva, showRadar, showTrailOverlay = true, showMvum, showNautical = false,
+    showLandOverlay, showUsgsOverlay, showTerrain, showFire, showAva, showRadar, showTrailOverlay = true, showMvum, showNautical = false, hideMapStatusBadge = false,
     onMapReady, onBoundsChange, onMapGesture, onMapTap, onMapLongPress,
     onCampTap, onGasTap, onPoiTap, onWaterSpotTap, onCommunityPinTap, onTileCampTap, onBaseCampTap, onTrailTap, onWaypointTap,
     onRouteReady, onRoutePersist, onOffRoute, onOffRouteWarn, onBackOnRoute, onRouteProgress,
@@ -778,7 +779,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     waypoints[0] ? [waypoints[0].lng, waypoints[0].lat] : [-98.5, 39.5]
   );
   const [initialZoom] = useState<number>(() => waypoints.length === 0 ? 3.7 : waypoints.length > 1 ? 7 : 10);
-  const [freeCameraRevision] = useState(0);
+  const [freeCameraRevision, setFreeCameraRevision] = useState(0);
   const mapboxToken = useStore(s => s.mapboxToken);
   const activeTrip  = useStore(s => s.activeTrip);
   const C = useTheme();
@@ -850,13 +851,15 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const markUserCameraGesture = useCallback((source: string, details: Record<string, unknown> = {}) => {
     const now = Date.now();
     userCameraGestureUntilRef.current = now + 2200;
-    // A real touch should win over an in-flight locate/flyTo animation. Without
-    // this, Android can keep treating the following region changes as
-    // programmatic and later remount the camera back to the locate point.
-    if (now > lastFlyToRef.current + 160) programmaticCameraUntilRef.current = 0;
+    // A real touch should win over any in-flight locate/flyTo animation.
+    programmaticCameraUntilRef.current = 0;
+    pendingFreeCameraRef.current = null;
+    locateSettleTimersRef.current.forEach(timer => clearTimeout(timer));
+    locateSettleTimersRef.current = [];
+    if (navMode && !navCameraFollow) setFreeCameraRevision(value => value + 1);
     emitDebugEvent('camera:user-gesture', { source, ...details });
     onMapGesture?.();
-  }, [emitDebugEvent, onMapGesture]);
+  }, [emitDebugEvent, navCameraFollow, navMode, onMapGesture]);
 
   const clearLocateSettleTimers = useCallback(() => {
     locateSettleTimersRef.current.forEach(timer => clearTimeout(timer));
@@ -3159,18 +3162,20 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           {...tracePanResponder.panHandlers}
         />
       )}
-      <View pointerEvents="none" style={styles.tileDebugWrap}>
-        <View style={[styles.tileDebug, localTiles ? styles.tileDebugLocal : styles.tileDebugRemote]}>
-          <Ionicons
-            name={localTiles ? 'cloud-done-outline' : 'cloud-outline'}
-            size={11}
-            color={localTiles ? '#86efac' : '#bfdbfe'}
-          />
-          <Text numberOfLines={1} style={[styles.tileDebugText, localTiles ? styles.tileDebugTextLocal : styles.tileDebugTextRemote]}>
-            {mapStatusLabel}
-          </Text>
+      {!hideMapStatusBadge && (
+        <View pointerEvents="none" style={styles.tileDebugWrap}>
+          <View style={[styles.tileDebug, localTiles ? styles.tileDebugLocal : styles.tileDebugRemote]}>
+            <Ionicons
+              name={localTiles ? 'cloud-done-outline' : 'cloud-outline'}
+              size={11}
+              color={localTiles ? '#86efac' : '#bfdbfe'}
+            />
+            <Text numberOfLines={1} style={[styles.tileDebugText, localTiles ? styles.tileDebugTextLocal : styles.tileDebugTextRemote]}>
+              {mapStatusLabel}
+            </Text>
+          </View>
         </View>
-      </View>
+      )}
     </View>
   );
 });

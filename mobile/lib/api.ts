@@ -36,6 +36,23 @@ export class ApiError extends Error {
   }
 }
 
+export type GeocodeRequestOptions = {
+  countrycodes?: string;
+  prefer?: 'search_center' | 'center' | 'locality' | 'place' | string;
+};
+
+function geocodeOptionsQuery(options: GeocodeRequestOptions = {}) {
+  const parts: string[] = [];
+  const countrycodes = normalizeRequestText(options.countrycodes ?? '');
+  const prefer = normalizeRequestText(options.prefer ?? '');
+  if (countrycodes) parts.push(`countrycodes=${encodeURIComponent(countrycodes)}`);
+  if (prefer) parts.push(`prefer=${encodeURIComponent(prefer)}`);
+  return {
+    cacheKey: `${countrycodes || 'any'}:${prefer || 'default'}`,
+    query: parts.length ? `&${parts.join('&')}` : '',
+  };
+}
+
 async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const token = await getToken();
   const headers: Record<string, string> = {
@@ -264,17 +281,18 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-  geocodePlaces: (query: string, limit = 8) => {
+  geocodePlaces: (query: string, limit = 8, options: GeocodeRequestOptions = {}) => {
     const normalized = normalizeRequestText(query);
     if (normalized.length < 2) return Promise.resolve([]);
     const safeLimit = Math.max(1, Math.min(Math.round(limit || 8), 10));
+    const optionParams = geocodeOptionsQuery(options);
     return guardedRequest(
-      `geocode:${normalized}:${safeLimit}`,
+      `geocode:${normalized}:${safeLimit}:${optionParams.cacheKey}`,
       10 * 60_000,
-      () => req<GeocodePlace[]>(`/api/geocode?q=${encodeURIComponent(normalized)}&limit=${safeLimit}`),
+      () => req<GeocodePlace[]>(`/api/geocode?q=${encodeURIComponent(normalized)}&limit=${safeLimit}${optionParams.query}`),
     );
   },
-  resolveGeocodePlace: (query: string, limit = 8) => {
+  resolveGeocodePlace: (query: string, limit = 8, options: GeocodeRequestOptions = {}) => {
     const normalized = normalizeRequestText(query);
     if (normalized.length < 2) {
       return Promise.resolve({
@@ -288,10 +306,11 @@ export const api = {
       } as GeocodeResolveResponse);
     }
     const safeLimit = Math.max(2, Math.min(Math.round(limit || 8), 10));
+    const optionParams = geocodeOptionsQuery(options);
     return guardedRequest(
-      `geocode-resolve:${normalized}:${safeLimit}`,
+      `geocode-resolve:${normalized}:${safeLimit}:${optionParams.cacheKey}`,
       10 * 60_000,
-      () => req<GeocodeResolveResponse>(`/api/geocode/resolve?q=${encodeURIComponent(normalized)}&limit=${safeLimit}`),
+      () => req<GeocodeResolveResponse>(`/api/geocode/resolve?q=${encodeURIComponent(normalized)}&limit=${safeLimit}${optionParams.query}`),
     );
   },
   getSearchPlaceCard: (query: string, lat: number, lng: number) =>
@@ -1867,6 +1886,7 @@ export interface OsmPoi {
   source_freshness?: string;
   photo_status?: string;
   last_checked?: number;
+  distance_mi?: number;
   route_distance_mi?: number; route_fit?: string;
   route_progress?: number; route_progress_mi?: number; route_segment_index?: number;
   waterbody_name?: string;

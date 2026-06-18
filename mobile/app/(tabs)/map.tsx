@@ -1891,6 +1891,12 @@ function smoothAngle(prev: number | null, next: number, alpha: number) {
   return (prev + diff * alpha + 360) % 360;
 }
 
+function angleDeltaDeg(a: number, b: number) {
+  let diff = Math.abs(a - b) % 360;
+  if (diff > 180) diff = 360 - diff;
+  return diff;
+}
+
 function formatDist(km: number) {
   const mi = km * 0.621371;
   if (mi < 0.05) return 'ARRIVING';
@@ -2612,6 +2618,186 @@ function placeMatchesFilters(place: OsmPoi, filters: Set<string>) {
 
 function categoryForPlaceFilter(filterId: string) {
   return WATER_PLACE_FILTER_IDS.has(filterId) ? 'water' : filterId;
+}
+
+type ScopedMapSearchIntent = {
+  query: string;
+  whatText: string;
+  whereText: string;
+  categoryIds: string[];
+  categories: string;
+  categoryLabel: string;
+  radiusMi: number;
+};
+
+type ScopedMapSearchSession = {
+  id: string;
+  query: string;
+  categoryLabel: string;
+  categories: string;
+  center: { lat: number; lng: number; name: string };
+  places: OsmPoi[];
+  loading: boolean;
+  error?: string;
+  startedAt: number;
+};
+
+type ScopedSearchCategoryRule = {
+  label: string;
+  ids: string[];
+  radiusMi?: number;
+  pattern: RegExp;
+};
+
+const SCOPED_SEARCH_SPLIT_RE = /\s+(near|nearby|around|by|close to|in|at)\s+/i;
+const SCOPED_SEARCH_CURRENT_LOCATION_RE = /^(me|my location|current location|here|near me)$/i;
+const SCOPED_SEARCH_PREFIX_RE = /^(gas stations?|gas|fuel|petrol|diesel|propane|restaurants?|food|coffee|groceries|grocery|campgrounds?|camps?|camping|rv parks?|lodging|hotels?|motels?|trailheads?|trails?|treks?|hikes?|views?|viewpoints?|waterfalls?|falls|glaciers?|parks?|attractions?|mechanics?|repair|parking|medical|pharmacy|wifi)\s+(.{2,})$/i;
+
+const SCOPED_SEARCH_CATEGORY_RULES: ScopedSearchCategoryRule[] = [
+  { label: 'Fuel', ids: ['fuel'], radiusMi: 18, pattern: /\b(gas stations?|gas\b|fuel|petrol|diesel|charging stations?|ev charging)\b/i },
+  { label: 'Propane', ids: ['propane'], radiusMi: 18, pattern: /\b(propane|lp gas|lpg)\b/i },
+  { label: 'Food', ids: ['food'], radiusMi: 16, pattern: /\b(restaurants?|food|dinner|lunch|breakfast|cafe|coffee|pizza|tacos?)\b/i },
+  { label: 'Groceries', ids: ['grocery'], radiusMi: 18, pattern: /\b(grocer(?:y|ies)|market|supermarket|supplies)\b/i },
+  { label: 'Camps', ids: ['camping'], radiusMi: 28, pattern: /\b(campgrounds?|campsites?|camps?|camping|rv parks?|rv sites?)\b/i },
+  { label: 'Lodging', ids: ['lodging'], radiusMi: 22, pattern: /\b(lodging|hotels?|motels?|inns?|cabins?|hostels?)\b/i },
+  { label: 'Trails', ids: ['trailhead'], radiusMi: 30, pattern: /\b(trailheads?|trails?|treks?|hikes?|hiking|routes?)\b/i },
+  { label: 'Views', ids: ['viewpoint'], radiusMi: 28, pattern: /\b(views?|viewpoints?|overlooks?|lookouts?|scenic)\b/i },
+  { label: 'Waterfalls', ids: ['water', 'viewpoint', 'attraction'], radiusMi: 32, pattern: /\b(waterfalls?|falls|cascade)\b/i },
+  { label: 'Glaciers', ids: ['glacier', 'viewpoint', 'attraction'], radiusMi: 40, pattern: /\b(glaciers?|icefields?)\b/i },
+  { label: 'Parks', ids: ['park'], radiusMi: 35, pattern: /\b(parks?|national parks?|state parks?)\b/i },
+  { label: 'Attractions', ids: ['attraction', 'historic', 'park'], radiusMi: 30, pattern: /\b(attractions?|things to do|monuments?|historic|museums?)\b/i },
+  { label: 'Mechanic', ids: ['mechanic', 'parts'], radiusMi: 22, pattern: /\b(mechanics?|repair|auto repair|parts|service shop)\b/i },
+  { label: 'Parking', ids: ['parking'], radiusMi: 14, pattern: /\b(parking|trail parking|lot)\b/i },
+  { label: 'Medical', ids: ['medical'], radiusMi: 22, pattern: /\b(medical|hospital|clinic|pharmacy|urgent care)\b/i },
+  { label: 'Wifi', ids: ['wifi'], radiusMi: 16, pattern: /\b(wifi|internet|cell service)\b/i },
+];
+
+function normalizeScopedSearchText(value: string) {
+  return String(value || '').trim().replace(/\s+/g, ' ');
+}
+
+function scopedSearchCategoryForText(text: string): Pick<ScopedMapSearchIntent, 'categoryIds' | 'categories' | 'categoryLabel' | 'radiusMi'> | null {
+  const clean = normalizeScopedSearchText(text);
+  if (!clean) return null;
+  const rule = SCOPED_SEARCH_CATEGORY_RULES.find(item => item.pattern.test(clean));
+  if (!rule) return null;
+  const categoryIds = Array.from(new Set(rule.ids));
+  const categories = Array.from(new Set(categoryIds.map(categoryForPlaceFilter))).join(',');
+  return {
+    categoryIds,
+    categories,
+    categoryLabel: rule.label,
+    radiusMi: rule.radiusMi ?? 25,
+  };
+}
+
+function parseScopedMapSearchQuery(query: string): ScopedMapSearchIntent | null {
+  const cleanQuery = normalizeScopedSearchText(query);
+  if (cleanQuery.length < 4) return null;
+
+  const splitMatch = cleanQuery.match(SCOPED_SEARCH_SPLIT_RE);
+  if (splitMatch?.index != null) {
+    const whatText = normalizeScopedSearchText(cleanQuery.slice(0, splitMatch.index));
+    const whereText = normalizeScopedSearchText(cleanQuery.slice(splitMatch.index + splitMatch[0].length));
+    const category = scopedSearchCategoryForText(whatText);
+    if (category && whereText.length >= 2) {
+      return { query: cleanQuery, whatText, whereText, ...category };
+    }
+  }
+
+  const prefixMatch = cleanQuery.match(SCOPED_SEARCH_PREFIX_RE);
+  if (prefixMatch) {
+    const whatText = normalizeScopedSearchText(prefixMatch[1]);
+    const whereText = normalizeScopedSearchText(prefixMatch[2]);
+    const category = scopedSearchCategoryForText(whatText);
+    if (category && whereText.length >= 2) {
+      return { query: cleanQuery, whatText, whereText, ...category };
+    }
+  }
+  return null;
+}
+
+function scopedSearchPlaceKey(place: Pick<OsmPoi, 'id' | 'name' | 'lat' | 'lng' | 'type'>) {
+  return String(place.id || `${place.type || 'poi'}:${place.name || 'place'}:${Number(place.lat).toFixed(5)}:${Number(place.lng).toFixed(5)}`);
+}
+
+function normalizeScopedSearchPoi(place: Partial<OsmPoi>, index: number, sessionId: string, center: { lat: number; lng: number }): OsmPoi | null {
+  const lat = Number(place.lat);
+  const lng = Number(place.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  const rawType = String(place.type || place.subtype || 'poi').toLowerCase().replace(/[^a-z0-9_]+/g, '_') || 'poi';
+  const type = ({
+    gas: 'fuel',
+    gas_station: 'fuel',
+    fuel_station: 'fuel',
+    petrol: 'fuel',
+    ev_charging: 'fuel',
+    charging_station: 'fuel',
+    restaurant: 'food',
+    cafe: 'food',
+    coffee: 'food',
+    fast_food: 'food',
+    supermarket: 'grocery',
+    market: 'grocery',
+    hotel: 'lodging',
+    motel: 'lodging',
+    hostel: 'lodging',
+    waterfall: 'attraction',
+    falls: 'attraction',
+    park: 'attraction',
+  }[rawType] || rawType) as OsmPoi['type'];
+  const name = normalizeScopedSearchText(String(place.name || cleanDisplayLabel(type) || 'Place'));
+  const distanceMi = Number.isFinite(Number(place.distance_mi))
+    ? Number(place.distance_mi)
+    : haversineKm(center.lat, center.lng, lat, lng) * 0.621371;
+  return {
+    ...(place as OsmPoi),
+    id: String(place.id || place.place_id || place.provider_place_id || `scoped:${sessionId}:${index}:${lat.toFixed(5)}:${lng.toFixed(5)}`),
+    name,
+    lat,
+    lng,
+    type,
+    source: place.source || 'trailhead_search',
+    source_label: place.source_label || place.source_badge || 'Map search',
+    distance_mi: Number.isFinite(distanceMi) ? Math.round(distanceMi * 10) / 10 : undefined,
+  };
+}
+
+function scopedPoiToSearchPlace(poi: OsmPoi, query: string): SearchPlace {
+  return {
+    ...(poi as unknown as SearchPlace),
+    id: poi.id,
+    name: poi.name,
+    lat: poi.lat,
+    lng: poi.lng,
+    type: poi.type || 'poi',
+    source: poi.source || 'trailhead_search',
+    source_label: poi.source_label || poi.source_badge || 'Map search',
+    geocode_query: query,
+  };
+}
+
+function scopedPoiIconName(type?: string): keyof typeof Ionicons.glyphMap {
+  switch (String(type || '').toLowerCase()) {
+    case 'fuel': return 'flash-outline';
+    case 'propane': return 'flame-outline';
+    case 'food': return 'restaurant-outline';
+    case 'grocery': return 'cart-outline';
+    case 'camp':
+    case 'camping': return 'bonfire-outline';
+    case 'lodging': return 'bed-outline';
+    case 'trail':
+    case 'trailhead': return 'trail-sign-outline';
+    case 'viewpoint': return 'flag-outline';
+    case 'glacier': return 'snow-outline';
+    case 'water': return 'water-outline';
+    case 'mechanic':
+    case 'parts': return 'construct-outline';
+    case 'parking': return 'car-outline';
+    case 'medical': return 'medical-outline';
+    case 'wifi': return 'wifi-outline';
+    default: return 'location-outline';
+  }
 }
 
 function waterKindLabel(kind?: string): string {
@@ -4930,6 +5116,7 @@ function MapScreen() {
   const [selectOnMapMode, setSelectOnMapMode] = useState(false);
   const [searchQuery,  setSearchQuery]  = useState('');
   const [searchResults,setSearchResults] = useState<SearchPlace[]>([]);
+  const [mapSearchSession, setMapSearchSession] = useState<ScopedMapSearchSession | null>(null);
   const [inlineSearchOpen, setInlineSearchOpen] = useState(false);
   const inlineSearchInputRef = useRef<TextInput | null>(null);
   const [copilotResults, setCopilotResults] = useState<SearchPlace[]>([]);
@@ -5385,6 +5572,7 @@ function MapScreen() {
   const smoothedHdgRef   = useRef<number | null>(null);
   const compassHdgRef    = useRef<number | null>(null);
   const courseHdgRef     = useRef<number | null>(null);
+  const lastAndroidHeadingRef = useRef<{ at: number; raw: number; smooth: number } | null>(null);
   const navModeStateRef  = useRef(navMode);
   const navCameraFollowStateRef = useRef(navCameraFollow);
   const lastAndroidLocationDebugRef = useRef<{ at: number; lat: number; lng: number } | null>(null);
@@ -5832,6 +6020,7 @@ function MapScreen() {
     setTappedTrail(null);
     setTappedWp(null);
     setPendingPin(null);
+    setMapSearchSession(null);
     setCampPickerVisible(false);
     setCatchLogVisible(false);
     setTrailPinCaptureMode(false);
@@ -5988,8 +6177,26 @@ function MapScreen() {
     Location.watchHeadingAsync(h => {
       const raw = h.trueHeading != null && h.trueHeading >= 0 ? h.trueHeading : h.magHeading;
       if (raw == null || raw < 0 || !Number.isFinite(raw)) return;
-      const smooth = smoothAngle(compassHdgRef.current, raw, 0.32);
+      const normalizedRaw = ((raw % 360) + 360) % 360;
+      const speedMs = userSpeedRef.current ?? 0;
+      if (Platform.OS === 'android') {
+        const now = Date.now();
+        const last = lastAndroidHeadingRef.current;
+        const headingAccuracy = Number((h as any).accuracy ?? (h as any).headingAccuracy ?? NaN);
+        const unreliable = Number.isFinite(headingAccuracy) && headingAccuracy > 45;
+        const rawJump = last ? angleDeltaDeg(last.raw, normalizedRaw) : 0;
+        const smoothJump = last ? angleDeltaDeg(last.smooth, normalizedRaw) : 0;
+        const dt = last ? now - last.at : Infinity;
+        if (unreliable && speedMs < 1.2 && last) return;
+        if (speedMs < 0.8 && last && dt < 1200 && rawJump > 70 && smoothJump > 70) return;
+        if (speedMs < 1.2 && last && dt < 700 && rawJump > 95) return;
+      }
+      const alpha = Platform.OS === 'android'
+        ? speedMs > 2.5 ? 0.24 : 0.16
+        : 0.32;
+      const smooth = smoothAngle(compassHdgRef.current, normalizedRaw, alpha);
       compassHdgRef.current = smooth;
+      if (Platform.OS === 'android') lastAndroidHeadingRef.current = { at: Date.now(), raw: normalizedRaw, smooth };
       setUserHeading(smooth);
       if ((userSpeedRef.current ?? 0) < 1.2) {
         smoothedHdgRef.current = smooth;
@@ -7706,8 +7913,106 @@ function MapScreen() {
     setInlineSearchOpen(false);
     setIsSearching(false);
     setSearchResults([]);
-    if (clear) setSearchQuery('');
+    if (clear) {
+      setSearchQuery('');
+      setMapSearchSession(null);
+    }
     Keyboard.dismiss();
+  }
+
+  async function runScopedMapSearch(intent: ScopedMapSearchIntent) {
+    const sessionId = `map-search-${Date.now().toString(36)}`;
+    const currentLocationSearch = SCOPED_SEARCH_CURRENT_LOCATION_RE.test(intent.whereText);
+    setIsSearching(true);
+    setSearchRouteCard(null);
+    setSelectedCamp(null);
+    setTappedTrail(null);
+    setTappedTileSpot(null);
+    setTappedGas(null);
+    setTappedPoi(null);
+    setSelectedTrail(null);
+    setSelectedCommunityPin(null);
+    setShowSearch(false);
+    setShowMapDrawer(false);
+    setShowDiscoveryPanel(false);
+    setMapSearchSession({
+      id: sessionId,
+      query: intent.query,
+      categoryLabel: intent.categoryLabel,
+      categories: intent.categories,
+      center: {
+        lat: currentLocationSearch && userLoc ? userLoc.lat : 0,
+        lng: currentLocationSearch && userLoc ? userLoc.lng : 0,
+        name: currentLocationSearch ? 'Current location' : intent.whereText,
+      },
+      places: [],
+      loading: true,
+      startedAt: Date.now(),
+    });
+    try {
+      const center = currentLocationSearch
+        ? userLoc
+          ? { lat: userLoc.lat, lng: userLoc.lng, name: 'Current location' }
+          : null
+        : await resolveVerifiedGeocodePlace(intent.whereText, { allowAmbiguous: true, center: userLoc, source: 'map_scoped_search', geocodePrefer: 'search_center' });
+      if (!center) {
+        setMapSearchSession(current => current?.id === sessionId
+          ? { ...current, loading: false, places: [], error: currentLocationSearch ? 'Location unavailable' : `Could not find ${intent.whereText}.` }
+          : current);
+        setSearchResults([]);
+        return;
+      }
+
+      const centerPoint = { lat: center.lat, lng: center.lng };
+      const smartPack = await api.getNearbySmartPack(
+        center.lat,
+        center.lng,
+        intent.radiusMi,
+        intent.categories,
+        undefined,
+        { scope_id: sessionId, route_scope: 'area' },
+      ).catch(() => null);
+      let rawPlaces = (smartPack?.places ?? []) as OsmPoi[];
+      if (rawPlaces.length === 0) {
+        rawPlaces = await api.getNearbyPlaces(center.lat, center.lng, intent.radiusMi, intent.categories, 'auto').catch(() => [] as OsmPoi[]);
+      }
+
+      const allowed = new Set(intent.categoryIds);
+      const seen = new Set<string>();
+      const places = rawPlaces
+        .map((place, index) => normalizeScopedSearchPoi(place, index, sessionId, centerPoint))
+        .filter((place): place is OsmPoi => !!place)
+        .filter(place => placeMatchesFilters(place, allowed) || intent.categoryIds.includes(String(place.type || '')))
+        .sort((a, b) => (Number(a.distance_mi ?? 9999) - Number(b.distance_mi ?? 9999)) || String(a.name).localeCompare(String(b.name)))
+        .filter(place => {
+          const key = scopedSearchPlaceKey(place);
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+        .slice(0, 80);
+
+      setMapSearchSession(current => current?.id === sessionId
+        ? {
+            ...current,
+            center: { lat: center.lat, lng: center.lng, name: center.name || intent.whereText },
+            places,
+            loading: false,
+            error: places.length ? undefined : `No ${intent.categoryLabel.toLowerCase()} found near ${center.name || intent.whereText}.`,
+          }
+        : current);
+      setSearchResults(places.slice(0, 8).map(place => scopedPoiToSearchPlace(place, intent.query)));
+      setInlineSearchOpen(false);
+      Keyboard.dismiss();
+      focusPlaceCamera({ lat: center.lat, lng: center.lng, name: center.name || intent.whereText, type: intent.categoryLabel }, places.length ? 12.8 : 11.5, intent.categoryLabel);
+    } catch (e: any) {
+      setMapSearchSession(current => current?.id === sessionId
+        ? { ...current, loading: false, places: [], error: e?.message || 'Search unavailable' }
+        : current);
+      setSearchResults([{ lat: 0, lng: 0, name: '__error__' }]);
+    } finally {
+      setIsSearching(false);
+    }
   }
 
   async function searchMap(queryOverride?: string) {
@@ -7716,8 +8021,14 @@ function MapScreen() {
       setSearchResults([]);
       return;
     }
+    const scopedIntent = parseScopedMapSearchQuery(cleanQuery);
+    if (scopedIntent) {
+      await runScopedMapSearch(scopedIntent);
+      return;
+    }
     setIsSearching(true);
     setSearchRouteCard(null);
+    setMapSearchSession(null);
     try {
       const resolved = await api.resolveGeocodePlace(cleanQuery, 8).catch(() => null);
       const places = resolved?.selected
@@ -10945,13 +11256,15 @@ function MapScreen() {
     };
   }
 
-  async function resolveVerifiedGeocodePlace(query: string, options: { allowAmbiguous?: boolean; center?: { lat: number; lng: number } | null; source?: string } = {}): Promise<SearchPlace | null> {
+  async function resolveVerifiedGeocodePlace(query: string, options: { allowAmbiguous?: boolean; center?: { lat: number; lng: number } | null; source?: string; geocodePrefer?: string } = {}): Promise<SearchPlace | null> {
     const cleanQuery = String(query || '').trim();
     if (cleanQuery.length < 2) return null;
-    const resolved = await api.resolveGeocodePlace(cleanQuery, 8).catch((error: any) => {
+    const geocodeOptions = options.geocodePrefer ? { prefer: options.geocodePrefer } : undefined;
+    const resolved = await api.resolveGeocodePlace(cleanQuery, 8, geocodeOptions).catch((error: any) => {
       logCopilotMapTelemetry('copilot_geocode_resolve_failed', {
         query: cleanQuery,
         source: options.source || null,
+        prefer: options.geocodePrefer || null,
         error: String(error?.message || error || 'unknown').slice(0, 240),
       });
       return null;
@@ -10961,6 +11274,7 @@ function MapScreen() {
         query: cleanQuery,
         normalized_query: resolved.normalized_query || cleanQuery,
         source: options.source || null,
+        prefer: options.geocodePrefer || null,
         status: resolved.status,
         reason: resolved.reason || null,
         countrycodes: resolved.countrycodes || null,
@@ -10981,7 +11295,7 @@ function MapScreen() {
       }
       if (resolved.status === 'ambiguous' && !options.allowAmbiguous) return null;
     }
-    const places = await api.geocodePlaces(cleanQuery, 5).catch(() => []);
+    const places = await api.geocodePlaces(cleanQuery, 5, geocodeOptions).catch(() => []);
     const fallback = pickDeterministicGeocodePlace(cleanQuery, places, options.center ?? boundsCenter(currentCopilotBounds()) ?? userLoc);
     return fallback && Number.isFinite(fallback.lat) && Number.isFinite(fallback.lng)
       ? geocodePlaceToSearchPlace(fallback, cleanQuery, 'fallback', 'legacy_geocode_rank')
@@ -16848,9 +17162,12 @@ function MapScreen() {
       sections: ['places', 'explore-services', 'community'],
     });
   };
+  const scopedMapSearchActive = Boolean(mapSearchSession && !navMode && !waterFollowActive && !safeWaterPlanningActive);
+  const scopedMapSearchPois = scopedMapSearchActive ? (mapSearchSession?.places ?? []) : routePois;
   const showMapStatusBar = Boolean(
     !navMode &&
     !waterFollowActive &&
+    !scopedMapSearchActive &&
     (
       activeTrip ||
       isDownloading ||
@@ -16898,7 +17215,7 @@ function MapScreen() {
     !waterFollowActive &&
     !safeWaterPlanningActive &&
     !showSearch &&
-    (!mapSheetOpen || inlineSearchOpen)
+    (!mapSheetOpen || inlineSearchOpen || scopedMapSearchActive)
   );
   const inlineSearchSideBySide = userHeading === null || windowWidth >= 380;
   const inlineSearchTop = inlineSearchSideBySide ? compassTop : compassTop + 52;
@@ -16910,6 +17227,7 @@ function MapScreen() {
     !navMode &&
     !safeWaterPlanningActive &&
     !waterFollowActive &&
+    !scopedMapSearchActive &&
     !showSearch &&
     !showMapDrawer &&
     (
@@ -17084,18 +17402,18 @@ function MapScreen() {
         <NativeMap
           ref={nativeMapRef}
           waypoints={waypoints}
-          camps={waterFollowActive || !showCampPins ? [] : [
+          camps={scopedMapSearchActive || waterFollowActive || !showCampPins ? [] : [
             ...(activeTrip?.campsites ?? []).filter(c => c.lat != null && c.lng != null && isFinite(c.lat) && isFinite(c.lng)),
             ...areaCamps.filter(c => c.lat != null && c.lng != null),
           ] as any}
-          gas={routeSearchGas as any}
-          pois={routePois}
-          waterNavLines={waterNavLines}
-          waterSpotCards={allWaterSpotCards}
+          gas={scopedMapSearchActive ? [] : routeSearchGas as any}
+          pois={scopedMapSearchPois}
+          waterNavLines={scopedMapSearchActive ? null : waterNavLines}
+          waterSpotCards={scopedMapSearchActive ? [] : allWaterSpotCards}
           waterCorridor={waterCorridor}
           waterFollowRoute={waterFollowRoute}
-          reports={safeWaterPlanningActive || waterFollowActive ? [] : mapReports}
-          communityPins={safeWaterPlanningActive || waterFollowActive ? [] : displayCommunityPins}
+          reports={scopedMapSearchActive || safeWaterPlanningActive || waterFollowActive ? [] : mapReports}
+          communityPins={scopedMapSearchActive || safeWaterPlanningActive || waterFollowActive ? [] : displayCommunityPins}
           searchMarker={searchRouteCard ? { lat: searchRouteCard.lat, lng: searchRouteCard.lng, name: searchRouteCard.name } : null}
           userLoc={userLoc}
           navMode={navMode}
@@ -17122,6 +17440,7 @@ function MapScreen() {
           showAva={layerAva}
           showRadar={layerRadar}
           showNautical={layerNautical}
+          hideMapStatusBadge={scopedMapSearchActive}
           onMapReady={() => {
             webLoadedRef.current = true;
             // Load camps in the current area — this is what the WebView did on map_ready.
@@ -17151,15 +17470,18 @@ function MapScreen() {
             const lat = (b.n + b.s) / 2;
             const lng = (b.e + b.w) / 2;
             const radius = Math.max(1.0, Math.min(4.0, Math.max(Math.abs(b.n - b.s), Math.abs(b.e - b.w)) / 2 + 0.5));
-            refreshCommunityPins({ lat, lng }, radius, false);
-            queueViewportPlaceFetch(b);
-            queueViewportCampFetch(b);
-            queueWaterNavigationLineFetch(b);
-            queueRenderedFeatureRefresh(b);
-            handleWeatherBounds(b);
+            if (!scopedMapSearchActive) {
+              refreshCommunityPins({ lat, lng }, radius, false);
+              queueViewportPlaceFetch(b);
+              queueViewportCampFetch(b);
+              queueWaterNavigationLineFetch(b);
+              queueRenderedFeatureRefresh(b);
+              handleWeatherBounds(b);
+            }
           }}
           onMapGesture={() => {
             if (navMode) setNavCameraFollow(false);
+            if (searchRouteCard) setSearchRouteCard(null);
           }}
           onDebugEvent={recordAndroidMapDebugEvent}
           onMapTap={async (lat, lng) => {
@@ -17424,7 +17746,7 @@ function MapScreen() {
         const aqi = mapWeather?.air_quality?.current?.us_aqi;
         return (
           <MapWeatherPeek
-            visible={mapWeatherEnabled && !navMode && !safeWaterPlanningActive && !waterFollowActive}
+            visible={mapWeatherEnabled && !navMode && !safeWaterPlanningActive && !waterFollowActive && !scopedMapSearchActive}
             bottomInset={bottomInset}
             loading={mapWeatherLoading}
             icon={weatherIonIcon(code)}
@@ -17619,7 +17941,7 @@ function MapScreen() {
         onStopPress={stop => nativeMapRef.current?.flyTo(stop.lat, stop.lng, stop.type === 'camp' ? 11 : 9, stop.name)}
       />
 
-      {copilotResults.length > 0 && !routeScout && !selectedPlace && !selectedCamp && !selectedTrail && !selectedCommunityPin && !navMode && !safeWaterPlanningActive && !waterFollowActive && !showSearch && (
+      {copilotResults.length > 0 && !scopedMapSearchActive && !routeScout && !selectedPlace && !selectedCamp && !selectedTrail && !selectedCommunityPin && !navMode && !safeWaterPlanningActive && !waterFollowActive && !showSearch && (
         <View style={s.copilotResultRail} pointerEvents="auto">
           <View style={s.copilotResultHeader}>
             <View style={s.copilotResultTitleWrap}>
@@ -17668,7 +17990,7 @@ function MapScreen() {
         </View>
       )}
 
-      {!trailPinCaptureMode && !navMode && !activeTrip && !safeWaterPlanningActive && !waterFollowActive && userHeading !== null && !showSearch && (
+      {!trailPinCaptureMode && !navMode && (scopedMapSearchActive || !activeTrip) && !safeWaterPlanningActive && !waterFollowActive && userHeading !== null && !showSearch && (
         <View style={[s.compassPill, mapChrome.toast, { top: compassTop, left: 68 }]}>
           <ThreeNeedleCompass heading={userHeading} bearing={null} compact />
           <View>
@@ -17692,6 +18014,7 @@ function MapScreen() {
               onChangeText={text => {
                 setSearchQuery(text);
                 if (!inlineSearchOpen) setInlineSearchOpen(true);
+                if (mapSearchSession && normalizeScopedSearchText(text) !== mapSearchSession.query) setMapSearchSession(null);
                 if (text.trim().length < 2) setSearchResults([]);
               }}
               placeholder="Search map"
@@ -17758,8 +18081,84 @@ function MapScreen() {
         </View>
       )}
 
+      {scopedMapSearchActive && mapSearchSession && !inlineSearchOpen && !selectedPlace && !selectedCamp && !selectedTrail && !selectedCommunityPin && !showMapDrawer && !showFilterSheet && (
+        <View style={[s.scopedSearchRail, { bottom: bottomInset + 90 }]} pointerEvents="auto">
+          <View style={s.scopedSearchHeader}>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={s.scopedSearchTitle} numberOfLines={1}>
+                {mapSearchSession.categoryLabel.toUpperCase()} NEAR {mapSearchSession.center.name.toUpperCase()}
+              </Text>
+              <Text style={s.scopedSearchSub} numberOfLines={1}>
+                {mapSearchSession.loading
+                  ? 'Searching nearby'
+                  : mapSearchSession.error
+                    ? mapSearchSession.error
+                    : `${mapSearchSession.places.length} result${mapSearchSession.places.length === 1 ? '' : 's'}`}
+              </Text>
+            </View>
+            <TouchableOpacity style={s.scopedSearchClose} onPress={() => { setMapSearchSession(null); setSearchResults([]); }}>
+              <Ionicons name="close" size={15} color={OVR.text2} />
+            </TouchableOpacity>
+          </View>
+          {mapSearchSession.loading ? (
+            <View style={s.scopedSearchLoading}>
+              <ActivityIndicator size="small" color={C.orange} />
+              <Text style={s.scopedSearchLoadingText}>Searching</Text>
+            </View>
+          ) : mapSearchSession.places.length === 0 ? (
+            <View style={s.scopedSearchEmpty}>
+              <Ionicons name="search-outline" size={16} color={OVR.text3} />
+              <Text style={s.scopedSearchEmptyText} numberOfLines={2}>{mapSearchSession.error || 'No results found'}</Text>
+            </View>
+          ) : (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.scopedSearchCards}>
+              {mapSearchSession.places.slice(0, 16).map((place, idx) => (
+                <TouchableOpacity
+                  key={`${place.id || idx}-${place.lat}-${place.lng}`}
+                  style={s.scopedSearchCard}
+                  activeOpacity={0.86}
+                  onPress={() => {
+                    openPoiFeature(place);
+                    focusPlaceCamera(place as unknown as SearchPlace, 14, mapSearchSession.categoryLabel);
+                  }}
+                >
+                  <View style={s.scopedSearchCardTop}>
+                    <View style={s.scopedSearchIcon}>
+                      <Ionicons name={scopedPoiIconName(place.type)} size={14} color={C.orange} />
+                    </View>
+                    {place.distance_mi != null ? <Text style={s.scopedSearchDistance}>{Number(place.distance_mi).toFixed(Number(place.distance_mi) >= 10 ? 0 : 1)} mi</Text> : null}
+                  </View>
+                  <Text style={s.scopedSearchName} numberOfLines={2}>{place.name}</Text>
+                  <Text style={s.scopedSearchMeta} numberOfLines={1}>{place.address || place.source_label || cleanDisplayLabel(place.type || 'Place')}</Text>
+                  <View style={s.scopedSearchActions}>
+                    <TouchableOpacity
+                      style={s.scopedSearchIconBtn}
+                      onPress={() => {
+                        openPoiFeature(place);
+                        focusPlaceCamera(place as unknown as SearchPlace, 14, mapSearchSession.categoryLabel);
+                      }}
+                      hitSlop={8}
+                    >
+                      <Ionicons name="information-circle-outline" size={14} color={OVR.text2} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[s.scopedSearchIconBtn, !userLoc && { opacity: 0.45 }]}
+                      disabled={!userLoc}
+                      onPress={() => userLoc && previewSearchRoute({ name: 'My Location', lat: userLoc.lat, lng: userLoc.lng, isCurrentLocation: true }, scopedPoiToSearchPlace(place, mapSearchSession.query))}
+                      hitSlop={8}
+                    >
+                      <Ionicons name="navigate-outline" size={14} color={C.orange} />
+                    </TouchableOpacity>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
+        </View>
+      )}
+
       {/* Sync toast — flashes briefly when signal restores and weather is refreshed */}
-      {!!syncToast && (
+      {!!syncToast && !scopedMapSearchActive && (
         <View style={s.syncToast}>
           <Ionicons name="wifi" size={11} color={C.orange} />
           <Text style={s.syncToastText}>{syncToast}</Text>
@@ -17894,7 +18293,7 @@ function MapScreen() {
       )}
 
       {/* Land check card — appears on long-press, auto-dismisses after 8s */}
-      {!safeWaterPlanningActive && !waterFollowActive && (landCheckLoading || landCheck) && (
+      {!scopedMapSearchActive && !safeWaterPlanningActive && !waterFollowActive && (landCheckLoading || landCheck) && (
         <TouchableOpacity
           activeOpacity={0.92}
           style={s.landCheckCard}
@@ -17949,10 +18348,10 @@ function MapScreen() {
 
       {/* Controls — hidden during nav (panel covers them and they serve no purpose while driving) */}
       <ScrollView
-        pointerEvents={navMode || safeWaterSheetOwnsPage || mapSheetOpen || (!!selectedTrail && !trailCardCollapsed) ? 'none' : 'auto'}
+        pointerEvents={navMode || scopedMapSearchActive || safeWaterSheetOwnsPage || mapSheetOpen || (!!selectedTrail && !trailCardCollapsed) ? 'none' : 'auto'}
         style={[
           s.controls,
-          (navMode || safeWaterSheetOwnsPage || mapSheetOpen || (!!selectedTrail && !trailCardCollapsed)) && { opacity: 0 },
+          (navMode || scopedMapSearchActive || safeWaterSheetOwnsPage || mapSheetOpen || (!!selectedTrail && !trailCardCollapsed)) && { opacity: 0 },
         ]}
         contentContainerStyle={s.controlsInner}
         showsVerticalScrollIndicator={false}
@@ -21365,7 +21764,7 @@ function MapScreen() {
         );
       })()}
 
-      {extremeCopilotAvailable && !navMode && !mapSheetOpen && !safeWaterPlanningActive && !waterFollowActive && !showExtremeCopilot && (
+      {extremeCopilotAvailable && !scopedMapSearchActive && !navMode && !mapSheetOpen && !safeWaterPlanningActive && !waterFollowActive && !showExtremeCopilot && (
         <View style={[s.extremeCopilotDock, { bottom: bottomInset + 92 }]} pointerEvents="box-none">
           <TouchableOpacity
             style={s.extremeCopilotFab}
@@ -23422,6 +23821,144 @@ const makeStyles = (C: ColorPalette) => {
     fontSize: 10,
     fontFamily: mono,
     letterSpacing: 0,
+  },
+  scopedSearchRail: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    backgroundColor: OVR.bg2,
+    borderWidth: 1,
+    borderColor: OVR.border,
+    borderRadius: 12,
+    paddingTop: 10,
+    paddingBottom: 11,
+    zIndex: 9000,
+    elevation: 90,
+    shadowColor: '#000',
+    shadowOpacity: 0.26,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+  },
+  scopedSearchHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    paddingHorizontal: 11,
+    marginBottom: 8,
+  },
+  scopedSearchTitle: {
+    color: OVR.text,
+    fontSize: 10,
+    fontFamily: mono,
+    fontWeight: '900',
+    letterSpacing: 0.4,
+  },
+  scopedSearchSub: {
+    color: OVR.text3,
+    fontSize: 11,
+    lineHeight: 15,
+    marginTop: 3,
+  },
+  scopedSearchClose: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.s2,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  scopedSearchLoading: {
+    minHeight: 82,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  scopedSearchLoadingText: {
+    color: OVR.text3,
+    fontSize: 11,
+    fontFamily: mono,
+    fontWeight: '800',
+  },
+  scopedSearchEmpty: {
+    minHeight: 82,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 18,
+  },
+  scopedSearchEmptyText: {
+    color: OVR.text3,
+    fontSize: 12,
+    lineHeight: 16,
+    textAlign: 'center',
+  },
+  scopedSearchCards: {
+    gap: 8,
+    paddingHorizontal: 11,
+  },
+  scopedSearchCard: {
+    width: 206,
+    minHeight: 122,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: OVR.border,
+    backgroundColor: C.s2,
+    padding: 10,
+  },
+  scopedSearchCardTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  scopedSearchIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.orange + '1f',
+    borderWidth: 1,
+    borderColor: C.orange + '33',
+  },
+  scopedSearchDistance: {
+    color: OVR.text3,
+    fontSize: 10,
+    fontFamily: mono,
+    fontWeight: '800',
+  },
+  scopedSearchName: {
+    color: C.text,
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: '900',
+    letterSpacing: 0,
+    minHeight: 36,
+  },
+  scopedSearchMeta: {
+    color: C.text3,
+    fontSize: 11,
+    lineHeight: 15,
+    marginTop: 5,
+    letterSpacing: 0,
+  },
+  scopedSearchActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    marginTop: 10,
+  },
+  scopedSearchIconBtn: {
+    width: 32,
+    height: 30,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.s1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   // ── Nav HUD

@@ -17,6 +17,7 @@ from dashboard.server import (
     _mapbox_session_hash,
     _canonical_landmark_geocode,
     _countrycodes_for_query,
+    _geocode_prefer_search_center,
     _explore_catalog_geocode_candidates,
     resolve_geocode_place,
     extreme_authorize_navigation,
@@ -246,6 +247,40 @@ class ExtremeExplorerTests(unittest.TestCase):
         ], "")
 
         self.assertEqual(result["selected"]["name"], "Eiffel Tower Road, Missouri, United States")
+
+    def test_geocode_resolver_prefers_search_center_over_explore_poi(self):
+        self.assertTrue(_geocode_prefer_search_center("search_center"))
+        self.assertTrue(_geocode_prefer_search_center("nearby_search"))
+
+        result = _resolve_geocode_candidates("moab", [
+            {
+                "name": "Moab Desert Glamping",
+                "lat": 38.7331,
+                "lng": -109.5925,
+                "source": "trailhead_explore",
+                "place_id": "explore:moab-desert-glamping",
+                "feature_type": "camping",
+                "place_types": ["poi", "camping", "lodging"],
+                "country_code": "us",
+                "relevance": 0.95,
+                "trailhead_match_score": 2.0,
+            },
+            {
+                "name": "Moab, Utah, United States",
+                "lat": 38.5733,
+                "lng": -109.5498,
+                "source": "mapbox",
+                "place_id": "place.moab-utah",
+                "feature_type": "place",
+                "place_types": ["place"],
+                "country_code": "us",
+                "relevance": 0.98,
+            },
+        ], "", prefer_search_center=True)
+
+        self.assertEqual(result["status"], "resolved")
+        self.assertEqual(result["selected"]["name"], "Moab, Utah, United States")
+        self.assertEqual(result["selected"]["source"], "mapbox")
 
     def test_explore_catalog_geocode_finds_k2_base_camp(self):
         hits = _explore_catalog_geocode_candidates("k2 base camp", limit=6)

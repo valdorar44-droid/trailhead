@@ -51,6 +51,16 @@ def main() -> int:
         "legend rendered as sibling": "<MapLegendSheet",
         "filter callback wired": "onOpenLegend={openMapFilterLegend}",
         "inline search state": "const [inlineSearchOpen, setInlineSearchOpen] = useState(false);",
+        "scoped map search state": "const [mapSearchSession, setMapSearchSession] = useState<ScopedMapSearchSession | null>(null);",
+        "scoped map search parser": "function parseScopedMapSearchQuery(query: string): ScopedMapSearchIntent | null",
+        "scoped map search runner": "async function runScopedMapSearch(intent: ScopedMapSearchIntent)",
+        "scoped search center geocode": "geocodePrefer: 'search_center'",
+        "scoped map search active state": "const scopedMapSearchActive = Boolean(mapSearchSession",
+        "scoped search poi override": "const scopedMapSearchPois = scopedMapSearchActive ?",
+        "scoped search map status hide": "hideMapStatusBadge={scopedMapSearchActive}",
+        "scoped search chrome rail": "scopedSearchRail",
+        "android compass jump filter": "const lastAndroidHeadingRef = useRef<{ at: number; raw: number; smooth: number } | null>(null);",
+        "android compass delta helper": "function angleDeltaDeg(a: number, b: number)",
         "inline search opener": "function openInlineMapSearch()",
         "inline search chrome": "inlineMapSearchWrap",
         "search button opens inline": "onPress={openInlineMapSearch}",
@@ -79,6 +89,8 @@ def main() -> int:
         "android viewport fallback": "const { height: viewportHeight } = useWindowDimensions();",
         "android safe sheet height": "const androidSheetHeight = React.useMemo(() => {",
         "android sheet style": "styles.androidSheet",
+        "android filter flex body": "contentStyle={isAndroid ? { padding: 0, flex: 1 } : { padding: 0 }}",
+        "android elevated overlay": "zIndex: 20000",
     }
     for label, marker in filter_sheet_required.items():
         if marker not in filter_sheet:
@@ -88,8 +100,10 @@ def main() -> int:
         "explore geocode helper": "def _explore_catalog_geocode_candidates(",
         "explore geocode source": '"source": "trailhead_explore"',
         "geocode explore merge": "explore_candidates = _explore_catalog_geocode_candidates(query, limit, country_filter)",
-        "strong explore geocode short circuit": "if _strong_explore_geocode_hit(explore_candidates):",
-        "geocode candidate merge": "return _merge_geocode_candidates([explore_candidates, canonical_landmarks, places], limit)",
+        "search center preference helper": "def _geocode_prefer_search_center(prefer: str) -> bool:",
+        "search center endpoint param": 'async def geocode_places(q: str, limit: int = 8, countrycodes: str = "", prefer: str = ""):',
+        "strong explore geocode short circuit": "if not prefer_search_center and _strong_explore_geocode_hit(explore_candidates):",
+        "search center geocode merge": "groups = [canonical_landmarks, places, explore_candidates] if prefer_search_center else [explore_candidates, canonical_landmarks, places]",
         "road query protection": "def _geocode_query_is_road(query: str) -> bool:",
     }
     for label, marker in server_required.items():
@@ -133,6 +147,10 @@ def main() -> int:
         "native press guard": "if (suppressFeatureTaps) {\n        onMapTap(lat, lng);",
         "native camp guard": "if (suppressFeatureTaps) {\n      onMapTap(coords?.[1], coords?.[0]);",
         "native marker guard": "suppressFeatureTaps ? onMapTap(poi.lat, poi.lng)",
+        "native map status hide prop": "hideMapStatusBadge?: boolean;",
+        "native map status hidden": "{!hideMapStatusBadge && (",
+        "native user camera cancellation": "programmaticCameraUntilRef.current = 0;",
+        "native pending camera cancellation": "pendingFreeCameraRef.current = null;",
     }
     for label, marker in native_required.items():
         if marker not in native_map:

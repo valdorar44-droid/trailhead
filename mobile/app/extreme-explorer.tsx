@@ -13,8 +13,18 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Speech from 'expo-speech';
 import { WebView } from 'react-native-webview';
+import { MissionControlPanel } from '@/components/copilot/MissionControlPanel';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
-import { api, ExtremeCheckpoint, ExtremeConfig, ExtremeSurface, OsmPoi, TripMemory } from '@/lib/api';
+import {
+  api,
+  ExtremeCheckpoint,
+  ExtremeConfig,
+  ExtremeSurface,
+  MissionControlBrief,
+  MissionControlRecommendation,
+  OsmPoi,
+  TripMemory,
+} from '@/lib/api';
 import { useTheme, mono } from '@/lib/design';
 import { useStore } from '@/lib/store';
 
@@ -381,14 +391,6 @@ function makeHtml(payload: DemoPayload) {
   <div id="map"></div>
   <div id="loading" class="loading"><div class="load-card"><div class="pulse"></div><div class="load-title">EXTREME EXPLORER</div><div class="load-sub">Loading premium route preview</div></div></div>
   <div class="stylebar" id="stylebar"></div>
-  <div class="tray">
-    <div class="tray-top"><div class="orb"></div><div><div class="tray-title">PREMIUM MAP</div><div class="tray-text">${payload.summary.replace(/[<>&]/g, '')}</div></div></div>
-    <div class="mode-badges">
-      <span>${payload.navigationEnabled ? 'GUIDANCE READY' : 'GUIDANCE LOCKED'}</span>
-      <span>${payload.weatherLayers.length ? 'WEATHER WATCH' : 'WEATHER LOCKED'}</span>
-      <span>COMMANDS HIDDEN</span>
-    </div>
-  </div>
   <script>
     const demo = ${data};
     mapboxgl.accessToken = demo.token || '';
@@ -542,6 +544,8 @@ export default function ExtremeExplorerScreen() {
   const [selectedPlace, setSelectedPlace] = useState<ExtremePlaceCard | null>(null);
   const [relatedPlaces, setRelatedPlaces] = useState<ExtremePlaceCard[]>([]);
   const [relatedLoading, setRelatedLoading] = useState(false);
+  const [missionBrief, setMissionBrief] = useState<MissionControlBrief | null>(null);
+  const [missionLoading, setMissionLoading] = useState(false);
   const surface: ExtremeSurface = params.surface === 'route_builder' ? 'route_builder' : 'map';
 
   const route = useMemo(() => routeFromTrip(activeTrip), [activeTrip?.trip_id, activeTrip?.route_geometry?.ts]);
@@ -552,7 +556,8 @@ export default function ExtremeExplorerScreen() {
     return mergePlaces([...tripPlaces, ...discoveredPlaces, ...seed]);
   }, [checkpoints, discoveredPlaces, route, tripPlaces]);
   const tripMemory = useMemo(() => tripMemoryFromState(rigProfile), [rigProfile]);
-  const summary = useMemo(() => coPilotSummary(places), [places]);
+  const summary = useMemo(() => missionBrief?.summary || coPilotSummary(places), [missionBrief?.summary, places]);
+  const missionEnabled = config?.feature_flags?.mission_control !== false && config?.feature_flags?.adventure_scores !== false;
 
   useEffect(() => {
     let cancelled = false;
@@ -642,6 +647,12 @@ export default function ExtremeExplorerScreen() {
     return () => { cancelled = true; };
   }, [checkpoints, route, status]);
 
+  useEffect(() => {
+    if (status !== 'ready') return;
+    if (!missionEnabled) return;
+    refreshMissionControl();
+  }, [activeTrip?.trip_id, checkpoints.length, missionEnabled, places.length, route.length, status]);
+
   const payload = useMemo<DemoPayload | null>(() => {
     if (!config) return null;
     const demoRoute = route.length > 1 ? route : checkpoints.map(cp => [cp.lng, cp.lat] as [number, number]);
@@ -691,6 +702,105 @@ export default function ExtremeExplorerScreen() {
     });
     speak(response.message);
     return response.message;
+  }
+
+  async function refreshMissionControl() {
+    if (!sessionIdRef.current) return;
+    setMissionLoading(true);
+    try {
+      const days = Math.max(1, ...checkpoints.map(cp => Number(cp.day || 1)), ...places.map(place => Number(place.day || 0)));
+      const brief = await api.extremeMissionControl({
+        session_id: sessionIdRef.current,
+        trip_id: activeTrip?.trip_id ?? null,
+        route,
+        checkpoints,
+        places: places.map(place => ({
+          id: place.id,
+          type: place.type,
+          title: place.title,
+          note: place.note,
+          lat: place.lat,
+          lng: place.lng,
+          day: place.day,
+          source: place.source,
+          source_label: place.source_label,
+          confidence: place.source_label === 'Trailhead preview' ? 'low' : place.confidence,
+          route_distance_mi: place.route_distance_mi,
+        })),
+        trip_memory: tripMemory,
+        context: {
+          route: { active_route: route.length > 1, route_ready: route.length > 1 },
+          map: { current_screen: 'extreme_explorer' },
+          trip: { active_trip: activeTrip?.trip_id ?? null },
+        },
+        metadata: { source: Platform.OS, days },
+      });
+      setMissionBrief(brief);
+    } catch (error: any) {
+      if (!missionBrief) {
+        setMissionBrief({
+          ok: false,
+          generated_at: Math.floor(Date.now() / 1000),
+          readiness: 'needs_review',
+          headline: 'Trip needs review',
+          summary: error?.message || 'Mission Control could not check this trip yet.',
+          scores: [],
+          overnights: [],
+          risks: [],
+          recommendations: [],
+          map_filters: [],
+          source_summary: [],
+        });
+      }
+    } finally {
+      setMissionLoading(false);
+    }
+  }
+
+  async function runMissionRecommendation(action: MissionControlRecommendation) {
+    if (action.action_type === 'applyMissionFilter') {
+      Alert.alert('Mission Control', action.reason || 'Map focus is ready for route review.');
+      api.logExtremeLedger({
+        session_id: sessionIdRef.current,
+        event_type: 'mission_filter_selected',
+        surface,
+        trip_id: activeTrip?.trip_id ?? null,
+        event_data: { preset: action.args?.preset || 'remote_ready' },
+      }).catch(() => {});
+      return;
+    }
+    if (action.action_type === 'searchPlaces') {
+      const category = safeText(action.args?.category, 'camp');
+      const anchor = routeAnchor(route, checkpoints);
+      const query = category === 'fuel' ? 'fuel,gas,propane' : 'private_stay,camp,lodging';
+      setRelatedLoading(true);
+      try {
+        const nearby = await api.getNearbyPlaces(anchor.lat, anchor.lng, 45, query, 'auto');
+        const mapped = nearby.map(placeFromPoi).filter(Boolean) as DemoPlace[];
+        setDiscoveredPlaces(prev => mergePlaces([...mapped, ...prev]));
+        Alert.alert('Mission Control', action.reason || `Showing ${category} options near this route.`);
+      } catch (error: any) {
+        Alert.alert('Mission Control', error?.message || 'Nearby search could not load.');
+      } finally {
+        setRelatedLoading(false);
+      }
+      return;
+    }
+    if (action.action_type === 'toggleLayer') {
+      const text = await previewWeather().catch((error: any) => error?.message || action.reason);
+      Alert.alert('Mission Control', text || action.reason);
+      return;
+    }
+    const fallbackCommand =
+      action.action_type === 'startRouteScout'
+        ? 'Build route geometry for this trip.'
+        : action.action_type === 'openOfflineDownloads'
+          ? 'Show offline downloads for this route.'
+          : action.action_type === 'showMissionControl'
+            ? 'Show Mission Control.'
+            : action.reason || action.label;
+    const message = await stageCopilotCommand(fallbackCommand).catch((error: any) => error?.message || 'Action staged for review.');
+    Alert.alert(action.requires_confirmation ? 'Confirm in Co-Pilot' : 'Mission Control', message || action.reason);
   }
 
   async function previewWeather() {
@@ -912,6 +1022,16 @@ export default function ExtremeExplorerScreen() {
           <Text style={styles.titleText} numberOfLines={1}>{activeTrip?.plan.trip_name ?? 'Premium map preview'}</Text>
         </View>
       </View>
+      {!selectedPlace && missionEnabled && (
+        <View pointerEvents="box-none" style={[styles.missionWrap, { bottom: insets.bottom + 16 }]}>
+          <MissionControlPanel
+            brief={missionBrief}
+            loading={missionLoading}
+            onRefresh={refreshMissionControl}
+            onRecommendation={runMissionRecommendation}
+          />
+        </View>
+      )}
       <PremiumPlaceSheet
         place={selectedPlace}
         visible={!!selectedPlace}
@@ -1006,6 +1126,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(8,12,18,.82)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,.16)',
+  },
+  missionWrap: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    zIndex: 4,
   },
   titleKicker: { color: '#fb923c', fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1.2 },
   titleText: { color: '#f8fafc', fontSize: 12, fontWeight: '800', marginTop: 2 },

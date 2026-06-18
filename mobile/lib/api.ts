@@ -209,6 +209,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  extremeMissionControl: (data: MissionControlRequest) =>
+    req<MissionControlBrief>('/api/extreme/copilot/mission-control', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
   extremeCopilotSession: (data: ExtremeCopilotSessionRequest) =>
     req<ExtremeCopilotSessionResponse>('/api/extreme/copilot/session', {
       method: 'POST',
@@ -785,6 +790,8 @@ export interface ExtremeConfig {
     navigation: boolean;
     voice: boolean;
     copilot: boolean;
+    mission_control?: boolean;
+    adventure_scores?: boolean;
     mapgpt_pilot: boolean;
     atlas_pilot: boolean;
   };
@@ -871,6 +878,91 @@ export interface ExtremeRouteRiskResponse {
   layers: Array<{ id: string; label: string; enabled_by_default?: boolean }>;
   risk_checkpoints: ExtremeCheckpoint[];
   summary: string;
+}
+export type MissionReadiness = 'ready' | 'needs_review' | 'blocked';
+export type MissionSeverity = 'info' | 'watch' | 'warning' | 'block';
+export type MissionConfidence = 'high' | 'medium' | 'low' | 'unknown';
+export interface MissionControlScore {
+  id: string;
+  label: string;
+  status: MissionReadiness;
+  confidence: MissionConfidence;
+  value?: number;
+  max?: number;
+  reasons: string[];
+  source_ids: string[];
+}
+export interface MissionControlRecommendation {
+  action_type: string;
+  label: string;
+  reason: string;
+  requires_confirmation: boolean;
+  priority: number;
+  args?: Record<string, unknown>;
+}
+export interface MissionControlOvernight {
+  day: number;
+  name: string;
+  lat?: number;
+  lng?: number;
+  status: 'confirmed' | 'candidate' | 'review_area' | 'missing' | 'blocked' | string;
+  source: string;
+  confidence: MissionConfidence;
+  legal_stay?: MissionReadiness;
+  reason: string;
+  source_ids?: string[];
+  actions?: MissionControlRecommendation[];
+}
+export interface MissionControlRisk {
+  id: string;
+  type: 'fuel_gap' | 'weather' | 'fire' | 'smoke' | 'air_quality' | 'road' | 'camp' | 'legal' | 'offline' | 'signal' | 'water' | 'medical' | 'repair' | 'route_geometry' | string;
+  title: string;
+  summary: string;
+  severity: MissionSeverity;
+  confidence: MissionConfidence;
+  lat?: number;
+  lng?: number;
+  day?: number;
+  route_distance_m?: number;
+  expires_at?: number | null;
+  source_ids: string[];
+}
+export interface MissionMapFilterPreset {
+  id: string;
+  label: string;
+  reason: string;
+  layers: string[];
+}
+export interface MissionSourceSummary {
+  source: string;
+  count: number;
+  confidence: MissionConfidence | 'medium' | string;
+}
+export interface MissionControlBrief {
+  ok: boolean;
+  trip_id?: string | null;
+  generated_at: number;
+  readiness: MissionReadiness;
+  headline: string;
+  summary: string;
+  scores: MissionControlScore[];
+  overnights: MissionControlOvernight[];
+  risks: MissionControlRisk[];
+  recommendations: MissionControlRecommendation[];
+  map_filters: MissionMapFilterPreset[];
+  source_summary: MissionSourceSummary[];
+  ledger_id?: number;
+  debug?: Record<string, unknown>;
+}
+export interface MissionControlRequest {
+  session_id?: string | null;
+  trip_id?: string | null;
+  route?: Array<[number, number]> | Array<{ lat: number; lng: number }>;
+  checkpoints?: ExtremeCheckpoint[];
+  places?: Array<Record<string, unknown>>;
+  trip_memory?: TripMemory;
+  context?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
 }
 export interface ExtremeCopilotCommandRequest {
   session_id?: string | null;

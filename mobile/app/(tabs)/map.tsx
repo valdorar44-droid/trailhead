@@ -11778,6 +11778,16 @@ function MapScreen() {
       setShowOfflineModal(true);
       return { applied: true, status: 'applied', opened: 'offline_downloads' };
     }
+    if (type === 'showMissionControl') {
+      setShowExtremeCopilot(false);
+      router.push('/extreme-explorer');
+      return {
+        applied: true,
+        status: 'applied',
+        opened: 'mission_control',
+        spoken_summary: 'Mission Control is opening.',
+      };
+    }
     if (type === 'openRigProfile') {
       const recentScout = recentRouteScoutActionRef.current;
       const accidentalAfterScout = action.provider === 'openai_realtime'

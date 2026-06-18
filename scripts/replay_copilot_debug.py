@@ -91,6 +91,9 @@ def compare_actions(expected: dict[str, Any], replayed: dict[str, Any]) -> dict[
     for key in ("category", "query", "keyword", "route_scoped", "open_card", "style"):
         if expected_args.get(key) != replayed_args.get(key):
             mismatches.append(f"args.{key} {expected_args.get(key)!r} -> {replayed_args.get(key)!r}")
+    permanent_actions = {"saveTrip", "dropPin", "startNavigation", "downloadOfflineArea", "stageReport", "saveScoutToRouteBuilder"}
+    if replayed.get("action_type") in permanent_actions and not replayed.get("requires_confirmation"):
+        mismatches.append(f"mission_action_without_confirmation {replayed.get('action_type')}")
     return {
         "ok": not mismatches,
         "mismatches": mismatches,
@@ -109,6 +112,11 @@ def replay_action_cases(actions: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         replayed = _build_extreme_map_action(command, context, provider)
         diff = compare_actions(original, replayed)
+        command_l = command.lower()
+        mission_expected = any(term in command_l for term in ("mission control", "trip ready", "are we ready", "ready to go", "risky ahead"))
+        if mission_expected and replayed.get("action_type") != "showMissionControl":
+            diff["ok"] = False
+            diff["mismatches"].append(f"mission_readiness_routed_to {replayed.get('action_type')}")
         out.append(
             {
                 "action_id": row.get("id"),

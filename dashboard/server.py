@@ -20,6 +20,7 @@ from jose import jwt, JWTError
 from config.settings import settings
 from ai.planner import plan_trip, chat_guide, edit_trip, plan_trip_from_conversation
 from dashboard.route_enrichment import enrich_trip_along_route
+from dashboard.adventure_intelligence import build_mission_control
 from dashboard.marine_chart_provider import (
     MarineBounds,
     fishing_conditions,
@@ -1658,6 +1659,16 @@ class ExtremeCopilotConfirmRequest(BaseModel):
     confirmed: bool = True
     client_result: dict = Field(default_factory=dict)
 
+class MissionControlRequest(BaseModel):
+    session_id: Optional[str] = None
+    trip_id: Optional[str] = None
+    route: list = Field(default_factory=list)
+    checkpoints: list[ExtremeCheckpoint] = Field(default_factory=list)
+    places: list[dict] = Field(default_factory=list)
+    trip_memory: Optional[TripMemory] = None
+    context: dict = Field(default_factory=dict)
+    metadata: dict = Field(default_factory=dict)
+
 class RealtimeCopilotSessionRequest(BaseModel):
     session_id: Optional[str] = None
     voice: str = ""
@@ -1757,6 +1768,8 @@ class AdminExtremeConfigBody(BaseModel):
     weather_enabled: Optional[bool] = None
     voice_enabled: Optional[bool] = None
     copilot_enabled: Optional[bool] = None
+    mission_control_enabled: Optional[bool] = None
+    adventure_scores_enabled: Optional[bool] = None
     copilot_wake_phrase_enabled: Optional[bool] = None
     native_mode_enabled: Optional[bool] = None
     mapgpt_pilot_enabled: Optional[bool] = None
@@ -1764,6 +1777,8 @@ class AdminExtremeConfigBody(BaseModel):
     max_demo_session_seconds: Optional[int] = None
     max_navigation_session_seconds: Optional[int] = None
     cost_cap_cents_daily: Optional[int] = None
+    copilot_persona: Optional[str] = None
+    copilot_voice: Optional[str] = None
 
 class AdminPushAudience(BaseModel):
     segment: str = "active_recent"
@@ -1991,6 +2006,8 @@ def _extreme_feature_flags(beta_active: bool, overrides: dict) -> dict:
         "navigation": bool(beta_active and _bool_override(overrides, "navigation_enabled", settings.extreme_navigation_enabled)),
         "voice": bool(beta_active and _bool_override(overrides, "voice_enabled", settings.extreme_voice_enabled)),
         "copilot": bool(beta_active and _bool_override(overrides, "copilot_enabled", settings.extreme_copilot_enabled)),
+        "mission_control": bool(beta_active and _bool_override(overrides, "mission_control_enabled", settings.extreme_mission_control_enabled)),
+        "adventure_scores": bool(beta_active and _bool_override(overrides, "adventure_scores_enabled", settings.extreme_adventure_scores_enabled)),
         "mapgpt_pilot": bool(beta_active and _bool_override(overrides, "mapgpt_pilot_enabled", settings.extreme_mapgpt_pilot_enabled)),
         "atlas_pilot": bool(beta_active and _bool_override(overrides, "atlas_pilot_enabled", settings.extreme_atlas_pilot_enabled)),
     }
@@ -2024,6 +2041,8 @@ def _extreme_config_for_user(user: dict | None) -> dict:
             "navigation": True,
             "voice": True,
             "copilot": True,
+            "mission_control": True,
+            "adventure_scores": True,
             "mapgpt_pilot": True,
             "atlas_pilot": True,
         })
@@ -2179,7 +2198,7 @@ def _copilot_realtime_tools() -> list[dict]:
                         "saveTrip", "downloadOfflineArea", "openRouteBuilderDraft", "updateRouteBuilderDraft",
                         "buildRouteBuilderFramework", "readRouteBuilderContext", "openGuide", "playTripGuide",
                         "openReports", "stageReport", "openOfflineDownloads", "openRigProfile",
-                        "explainVisibleArea", "askForConfirmation",
+                        "showMissionControl", "explainVisibleArea", "askForConfirmation",
                     ],
                 },
                 "args": {"type": "object"},
@@ -2190,6 +2209,16 @@ def _copilot_realtime_tools() -> list[dict]:
         },
     }]
 
+def _copilot_realtime_turn_detection() -> dict:
+    return {
+        "type": "server_vad",
+        "threshold": 0.9,
+        "prefix_padding_ms": 250,
+        "silence_duration_ms": 1400,
+        "create_response": True,
+        "interrupt_response": False,
+    }
+
 def _copilot_realtime_instructions(wake_phrase: bool) -> str:
     capabilities = _copilot_capability_summary()
     base = (
@@ -2197,6 +2226,7 @@ def _copilot_realtime_instructions(wake_phrase: bool) -> str:
         f"Trailhead capabilities: {capabilities} "
         "Use map_action for map changes. Keep spoken confirmations short. "
         "For questions about what is visible, call map_action with explainVisibleArea and answer from the tool output. "
+        "For readiness questions like \"is this trip ready\", \"what is risky ahead\", \"why is this blocked\", or \"mission control\", call showMissionControl; answer only from Mission Control output. "
         "For fly-to commands with a named place, call flyToPlace with args.target.name set to the place name. "
         "For famous landmarks or named attractions such as Eiffel Tower, Golden Gate Bridge, Grand Canyon, Arches, museums, monuments, or parks, use flyToPlace with only the landmark name unless the user gives a specific city/region; do not choose similarly named roads or addresses. "
         "For zoom in/out commands, call zoomMap with args.direction=\"in\" or \"out\" and answer from the returned visible_map_features; for zooming to a visible icon, include the visible candidate feature_id, result_index, type, or screen_position. "
@@ -2223,6 +2253,8 @@ def _copilot_realtime_instructions(wake_phrase: bool) -> str:
         "Only use Route Builder actions when the user explicitly asks to open, save, export, or prefill Route Builder. "
         "Never call openRigProfile during or immediately after route planning. Only call openRigProfile when the user explicitly says open/show/edit/set up my rig profile; include args.explicit_request=true. "
         "Ignore tiny fragments, map labels, loading copy, and background speech that are not clear user commands. "
+        "If the detected speech is only filler, partial words, breathing, road noise, or silence, do not answer, do not say filler words like well/okay/let's, and wait for a clear command. "
+        "When the command is unclear, ask one short clarification instead of thinking out loud. "
         "After every tool call, answer only from returned tool output; do not invent camps or claim map results without tool data. "
         "Speak brief audio responses for driving, such as \"I found three camps\" or \"Confirm to route there.\" "
         "Never create pins, save trips, start navigation, modify active routes, stage reports, make paid calls, "
@@ -2595,7 +2627,12 @@ def _build_extreme_map_action(command: str, context: dict, provider: str = "trai
     cost_class = "local"
     requires_confirmation = False
 
-    if re.search(r"(?:^|\s)/help\b|\bwhat can (?:i|you) do\b|\bhelp\b|\bcapabilities\b|\bhow do i\b", text):
+    if re.search(r"\b(mission control|trip readiness|is (?:this|my) trip ready|are we ready|ready to go|what(?:'s| is) risky|risky ahead|why (?:is|isn'?t)|what do i need before|before i lose signal)\b", text):
+        action_type = "showMissionControl"
+        args = {"scope": "active_trip"}
+        map_updates = {"assistant_panel": True, "mission_control": True}
+        message = "Mission Control is checking the route."
+    elif re.search(r"(?:^|\s)/help\b|\bwhat can (?:i|you) do\b|\bhelp\b|\bcapabilities\b|\bhow do i\b", text):
         action_type = "getMapContext"
         args = {"scope": "current_screen", "capabilities": TRAILHEAD_COPILOT_CAPABILITY_REGISTRY}
         map_updates = {"assistant_panel": True}
@@ -2916,6 +2953,7 @@ def _admin_extreme_config_values(body: AdminExtremeConfigBody) -> dict:
     bool_keys = (
         "enabled", "kill_switch", "navigation_enabled", "weather_enabled",
         "voice_enabled", "copilot_enabled", "copilot_wake_phrase_enabled", "native_mode_enabled",
+        "mission_control_enabled", "adventure_scores_enabled",
         "mapgpt_pilot_enabled", "atlas_pilot_enabled",
     )
     for key in bool_keys:
@@ -6203,6 +6241,41 @@ def extreme_copilot_message(body: ExtremeCopilotMessageRequest, user: dict = Dep
         "result": result,
     }
 
+@app.post("/api/extreme/copilot/mission-control")
+def extreme_copilot_mission_control(body: MissionControlRequest, user: dict = Depends(_current_user)):
+    config = _require_extreme_copilot(user)
+    if not config["feature_flags"].get("mission_control") or not config["feature_flags"].get("adventure_scores"):
+        raise HTTPException(403, {"code": "mission_control_disabled", "message": "Mission Control is not enabled for this beta."})
+    clean_session = _clean_extreme_session_id(body.session_id)
+    trip_id = (body.trip_id or "").strip()[:120] or None
+    payload = {
+        "trip_id": trip_id,
+        "route": body.route[:400],
+        "checkpoints": [checkpoint.dict() for checkpoint in body.checkpoints[:80]],
+        "places": body.places[:120],
+        "trip_memory": body.trip_memory.dict() if body.trip_memory else {},
+        "context": body.context or {},
+        "metadata": body.metadata or {},
+    }
+    brief = build_mission_control(payload)
+    ledger_id = log_extreme_ledger_event(
+        user["id"],
+        "mission_control_generated",
+        clean_session,
+        "copilot",
+        trip_id,
+        {
+            "readiness": brief.get("readiness"),
+            "score_count": len(brief.get("scores") or []),
+            "risk_count": len(brief.get("risks") or []),
+            "recommendation_count": len(brief.get("recommendations") or []),
+            "route_points": len(payload["route"]),
+            "provider_calls": 0,
+        },
+    )
+    brief["ledger_id"] = ledger_id
+    return brief
+
 @app.post("/api/extreme/copilot/action/confirm")
 def extreme_copilot_action_confirm(body: ExtremeCopilotConfirmRequest, user: dict = Depends(_current_user)):
     _require_extreme_copilot(user)
@@ -6266,14 +6339,7 @@ def extreme_copilot_realtime_session(body: RealtimeCopilotSessionRequest, user: 
             "audio": {
                 "output": {"voice": voice},
                 "input": {
-                    "turn_detection": {
-                        "type": "server_vad",
-                        "threshold": 0.75,
-                        "prefix_padding_ms": 450,
-                        "silence_duration_ms": 950,
-                        "create_response": True,
-                        "interrupt_response": False,
-                    },
+                    "turn_detection": _copilot_realtime_turn_detection(),
                     "noise_reduction": {"type": "near_field"},
                 },
             },

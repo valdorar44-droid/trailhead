@@ -6,6 +6,8 @@ from dashboard.server import (
     _build_extreme_map_action,
     _classify_extreme_command,
     _clean_mapbox_param,
+    _copilot_realtime_instructions,
+    _copilot_realtime_turn_detection,
     _extreme_config_for_user,
     _mapbox_directions_url,
     _mapbox_session_hash,
@@ -30,6 +32,8 @@ class ExtremeExplorerTests(unittest.TestCase):
             "extreme_mapbox_weather_enabled": settings.extreme_mapbox_weather_enabled,
             "extreme_voice_enabled": settings.extreme_voice_enabled,
             "extreme_copilot_enabled": settings.extreme_copilot_enabled,
+            "extreme_mission_control_enabled": settings.extreme_mission_control_enabled,
+            "extreme_adventure_scores_enabled": settings.extreme_adventure_scores_enabled,
             "extreme_copilot_wake_phrase_enabled": settings.extreme_copilot_wake_phrase_enabled,
             "extreme_mapgpt_pilot_enabled": settings.extreme_mapgpt_pilot_enabled,
             "extreme_atlas_pilot_enabled": settings.extreme_atlas_pilot_enabled,
@@ -48,6 +52,8 @@ class ExtremeExplorerTests(unittest.TestCase):
         settings.extreme_mapbox_weather_enabled = False
         settings.extreme_voice_enabled = False
         settings.extreme_copilot_enabled = False
+        settings.extreme_mission_control_enabled = False
+        settings.extreme_adventure_scores_enabled = False
         settings.extreme_copilot_wake_phrase_enabled = False
         settings.extreme_mapgpt_pilot_enabled = False
         settings.extreme_atlas_pilot_enabled = False
@@ -72,6 +78,8 @@ class ExtremeExplorerTests(unittest.TestCase):
         self.assertTrue(admin_cfg["guardrails"]["navigation_sessions"])
         self.assertTrue(admin_cfg["feature_flags"]["search"])
         self.assertTrue(admin_cfg["feature_flags"]["copilot"])
+        self.assertTrue(admin_cfg["feature_flags"]["mission_control"])
+        self.assertTrue(admin_cfg["feature_flags"]["adventure_scores"])
         self.assertIn("navigation", admin_cfg["allowed_surfaces"])
         self.assertIn("route_builder", admin_cfg["allowed_surfaces"])
         self.assertIn("outdoors", admin_cfg["style_uris"])
@@ -359,6 +367,7 @@ class ExtremeExplorerTests(unittest.TestCase):
         offline = _build_extreme_map_action("Show offline downloads for this route", context)
         reports = _build_extreme_map_action("What reports are nearby?", context)
         rig = _build_extreme_map_action("Open my rig profile", context)
+        mission = _build_extreme_map_action("Is this trip ready?", context)
 
         self.assertEqual(fuel["action_type"], "searchPlaces")
         self.assertFalse(fuel["requires_confirmation"])
@@ -452,6 +461,8 @@ class ExtremeExplorerTests(unittest.TestCase):
         self.assertEqual(offline["action_type"], "openOfflineDownloads")
         self.assertEqual(reports["action_type"], "openReports")
         self.assertEqual(rig["action_type"], "openRigProfile")
+        self.assertEqual(mission["action_type"], "showMissionControl")
+        self.assertFalse(mission["requires_confirmation"])
 
     def test_copilot_wake_phrase_requires_explicit_flag(self):
         admin = {"id": 12, "email": "admin@example.com", "is_admin": 1, "plan_type": "free"}
@@ -463,6 +474,17 @@ class ExtremeExplorerTests(unittest.TestCase):
         settings.extreme_copilot_wake_phrase_enabled = True
         cfg = _extreme_config_for_user(admin)
         self.assertTrue(cfg["copilot"]["wake_phrase"])
+
+    def test_copilot_realtime_instructions_reject_filler_noise(self):
+        instructions = _copilot_realtime_instructions(False).lower()
+        turn_detection = _copilot_realtime_turn_detection()
+
+        self.assertIn("filler", instructions)
+        self.assertIn("silence", instructions)
+        self.assertIn("do not answer", instructions)
+        self.assertGreaterEqual(turn_detection["threshold"], 0.9)
+        self.assertGreaterEqual(turn_detection["silence_duration_ms"], 1400)
+        self.assertLessEqual(turn_detection["prefix_padding_ms"], 300)
 
     def test_copilot_confirmation_updates_staged_action(self):
         uid = store.create_user("confirm@example.com", "confirmuser", "hash", "confirm-code")

@@ -50,7 +50,7 @@ export default function PreviewRunOnboarding() {
   function close(action?: 'map' | 'plan') {
     setVisible(false);
     if (action === 'map') router.push('/(tabs)/map' as any);
-    if (action === 'plan') router.push('/(tabs)' as any);
+    if (action === 'plan') router.push('/(tabs)/plan' as any);
   }
 
   return (

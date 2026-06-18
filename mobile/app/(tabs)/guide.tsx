@@ -749,14 +749,17 @@ export default function GuideScreen() {
   ), [explorePlaces, exploreTrailAreasById]);
   const heroHeight = Math.max(280, Math.min(340, Math.round(windowHeight * 0.39)));
   const heroImage = useMemo(() => {
-    const images = enrichedExplorePlaces
+    const heroPlace = enrichedExplorePlaces
       .filter(place => ['camping', 'trails', 'parks'].includes(groupForExplorePlace(place)))
-      .map(place => place.summary.image_url || place.summary.thumbnail_url)
-      .filter(Boolean) as string[];
-    if (!images.length) return '';
-    const now = new Date();
-    const dayKey = Math.floor((Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) - Date.UTC(now.getFullYear(), 0, 0)) / 86400000);
-    return mediaUrl(images[dayKey % images.length]);
+      .filter(place => place.summary.image_url || place.summary.thumbnail_url)
+      .sort((a, b) => {
+        const aRank = a.summary.hero_rank ?? a.summary.rank ?? 999999;
+        const bRank = b.summary.hero_rank ?? b.summary.rank ?? 999999;
+        if (aRank !== bRank) return aRank - bRank;
+        return a.summary.title.localeCompare(b.summary.title);
+      })[0];
+    const image = heroPlace?.summary.image_url || heroPlace?.summary.thumbnail_url || '';
+    return image ? mediaUrl(image) : '';
   }, [enrichedExplorePlaces]);
   const hasExploreQuery = exploreQuery.trim().length > 0;
   const showExperienceSearch = shouldSearchBookableExperiences(exploreQuery, exploreCategory);

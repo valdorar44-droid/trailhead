@@ -629,19 +629,6 @@ type TrailRouteSegmentStatus = {
   engine: string;
   message?: string;
 };
-type TrailGraphReadiness = {
-  stateId: string | null;
-  routeGraphReady: boolean;
-  checked: boolean;
-  detail: string;
-};
-type TrailReadinessRow = {
-  label: string;
-  ready: boolean;
-  detail: string;
-  icon: keyof typeof Ionicons.glyphMap;
-};
-
 const TRAIL_SNAP_MODE_OPTIONS: Array<{ id: TrailSnapMode; label: string; icon: keyof typeof Ionicons.glyphMap; sub: string }> = [
   { id: 'trail', label: 'Trail', icon: 'git-branch-outline', sub: 'Trail graph first' },
   { id: 'road', label: 'Road', icon: 'car-outline', sub: 'Connector routing' },
@@ -649,13 +636,6 @@ const TRAIL_SNAP_MODE_OPTIONS: Array<{ id: TrailSnapMode; label: string; icon: k
   { id: 'hybrid', label: 'Hybrid', icon: 'git-compare-outline', sub: 'Road + trail' },
   { id: 'straight', label: 'Line', icon: 'analytics-outline', sub: 'Manual fallback' },
 ];
-
-const EMPTY_TRAIL_GRAPH_READINESS: TrailGraphReadiness = {
-  stateId: null,
-  routeGraphReady: false,
-  checked: false,
-  detail: 'Tap a trail area to check routing graph coverage.',
-};
 
 function trailSnapModeHelp(mode: TrailSnapMode) {
   switch (mode) {
@@ -4932,7 +4912,7 @@ function MapScreen() {
     const topClearance = Math.max(insets.top + 24, 56);
     return Math.max(420, Math.min(Math.round(windowHeight * 0.94), windowHeight - topClearance));
   }, [insets.top, windowHeight]);
-  const filterBottomSpacer = Platform.OS === 'android' ? Math.max(insets.bottom + 130, 150) : 0;
+  const filterBottomSpacer = Platform.OS === 'android' ? Math.max(insets.bottom + 130, 150) : Math.max(insets.bottom + 34, 52);
   const router = useRouter();
   const activeTrip = useStore(st => st.activeTrip);
   const setActiveTrip = useStore(st => st.setActiveTrip);
@@ -5055,7 +5035,7 @@ function MapScreen() {
   const extremeMapLayerAvailable = extremeMapLayerEntitled && extremeMapboxSupported;
   const extremeMapLayerActive = mapLayer === 'extreme';
   const extremeMapLayerSub = !extremeMapLayerEntitled
-    ? 'Hidden beta locked'
+    ? 'Not available yet'
     : extremeMapboxPending
       ? 'Checking device'
       : extremeMapboxSupported
@@ -5118,6 +5098,8 @@ function MapScreen() {
   const [searchResults,setSearchResults] = useState<SearchPlace[]>([]);
   const [mapSearchSession, setMapSearchSession] = useState<ScopedMapSearchSession | null>(null);
   const [inlineSearchOpen, setInlineSearchOpen] = useState(false);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const inlineSearchInputRef = useRef<TextInput | null>(null);
   const [copilotResults, setCopilotResults] = useState<SearchPlace[]>([]);
   const [copilotResultScope, setCopilotResultScope] = useState<CopilotResultScope | null>(null);
@@ -5133,6 +5115,24 @@ function MapScreen() {
   const [showSearch,   setShowSearch]   = useState(false);
   const [searchMode, setSearchMode] = useState<'browse' | 'route_pick'>('browse');
   const [isSearching,  setIsSearching]  = useState(false);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (event: any) => {
+      setKeyboardVisible(true);
+      setKeyboardHeight(Number(event?.endCoordinates?.height) || 0);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      setKeyboardVisible(false);
+      setKeyboardHeight(0);
+    });
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
   const [routeLegOffset, setRouteLegOffset] = useState(0);
   const [isApproaching,  setIsApproaching]  = useState(false);
   const [isRerouting,    setIsRerouting]    = useState(false);
@@ -5505,7 +5505,6 @@ function MapScreen() {
   const [trailRouteBuilderError, setTrailRouteBuilderError] = useState('');
   const [trailSnapMode, setTrailSnapMode] = useState<TrailSnapMode>('trail');
   const [trailSnapFailureReason, setTrailSnapFailureReason] = useState('');
-  const [trailGraphReadiness, setTrailGraphReadiness] = useState<TrailGraphReadiness>(EMPTY_TRAIL_GRAPH_READINESS);
   const [trailBuildFinalized, setTrailBuildFinalized] = useState(false);
   const [trailTraceMode, setTrailTraceMode] = useState(false);
   const [trailTraceDraft, setTrailTraceDraft] = useState<[number, number][]>([]);
@@ -8182,7 +8181,7 @@ function MapScreen() {
 
   function openExtremeDirections() {
     if (!extremeConfig?.feature_flags?.navigation) {
-      setQuickToast('Mapbox Directions is locked for this beta.');
+      setQuickToast('Directions are not available on this account yet.');
       setTimeout(() => setQuickToast(''), 2400);
       return;
     }
@@ -8207,7 +8206,7 @@ function MapScreen() {
 
   function toggleExtremeTraffic() {
     if (!extremeConfig?.feature_flags?.navigation) {
-      setQuickToast('Mapbox traffic is locked for this beta.');
+      setQuickToast('Traffic is not available on this account yet.');
       setTimeout(() => setQuickToast(''), 2400);
       return;
     }
@@ -8225,7 +8224,7 @@ function MapScreen() {
 
   function openExtremeWeather() {
     if (!extremeConfig?.feature_flags?.weather) {
-      setQuickToast('EXTREME weather is locked for this beta.');
+      setQuickToast('Weather layers are not available on this account yet.');
       setTimeout(() => setQuickToast(''), 2600);
       return;
     }
@@ -14772,109 +14771,6 @@ function MapScreen() {
   const speedMph  = userSpeed !== null && userSpeed > 0 ? userSpeed * 2.237 : null;
   const selectedTrailRoutePlan = trailRoutePlans.find(p => p.id === selectedTrailRoutePlanId) ?? trailRoutePlans[0] ?? null;
   const previewTrailDistanceM = selectedTrailRoutePlan?.distanceM ?? (trailTraceRoute.length > 1 ? trailCoordsDistanceM(trailTraceRoute) : 0);
-  useEffect(() => {
-    let cancelled = false;
-    const probe = selectedTrail
-      ? ([selectedTrail.lng, selectedTrail.lat] as [number, number])
-      : trailCapturePins[0] ?? null;
-    if (!probe) {
-      setTrailGraphReadiness(EMPTY_TRAIL_GRAPH_READINESS);
-      return () => { cancelled = true; };
-    }
-    const stateId = stateIdForTrailPoint(probe[1], probe[0]);
-    if (!stateId) {
-      setTrailGraphReadiness({
-        stateId: null,
-        routeGraphReady: false,
-        checked: true,
-        detail: 'No trail graph here yet.',
-      });
-      return () => { cancelled = true; };
-    }
-    if (Platform.OS !== 'ios') {
-      setTrailGraphReadiness({
-        stateId,
-        routeGraphReady: false,
-        checked: true,
-        detail: 'Native trail graph routing is not active on this build.',
-      });
-      return () => { cancelled = true; };
-    }
-    FileSystem.getInfoAsync(trailRouteGraphLocalPath(stateId))
-      .then(info => {
-        if (cancelled) return;
-        const size = (info as any)?.size ?? 0;
-        const ready = Boolean(info?.exists && size > 0);
-        setTrailGraphReadiness({
-          stateId,
-          routeGraphReady: ready,
-          checked: true,
-          detail: ready
-            ? `${stateId.toUpperCase()} trail routing graph is downloaded.`
-            : `${stateId.toUpperCase()} trail routing graph is missing.`,
-        });
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setTrailGraphReadiness({
-          stateId,
-          routeGraphReady: false,
-          checked: true,
-          detail: `${stateId.toUpperCase()} trail routing graph could not be checked.`,
-        });
-      });
-    return () => { cancelled = true; };
-  }, [selectedTrail?.id, selectedTrail?.lat, selectedTrail?.lng, trailCapturePins]);
-  const trailRoutingReadinessRows: TrailReadinessRow[] = useMemo(() => {
-    const routeLineReady = Boolean(
-      selectedTrailRoutePlan?.coords?.length
-      || trailTraceRoute.length > 1
-      || selectedTrail?.support.offlineReady
-    );
-    return [
-      {
-        label: 'Map tiles',
-        ready: offlineSaved,
-        detail: offlineSaved ? 'Downloaded map region found.' : 'Download map tiles before leaving signal.',
-        icon: 'map-outline',
-      },
-      {
-        label: 'Trail graph',
-        ready: trailGraphReadiness.routeGraphReady,
-        detail: trailGraphReadiness.detail,
-        icon: 'git-network-outline',
-      },
-      {
-        label: 'Route line',
-        ready: routeLineReady,
-        detail: routeLineReady ? 'A followable line is available.' : 'Build or download a route line.',
-        icon: 'analytics-outline',
-      },
-      {
-        label: 'Camps/places',
-        ready: trailSupportCamps.length > 0 || allMapPois.length > 0,
-        detail: trailSupportCamps.length || allMapPois.length ? 'Nearby support context loaded.' : 'Pan/search nearby or download place packs.',
-        icon: 'trail-sign-outline',
-      },
-      {
-        label: 'Reports/weather',
-        ready: mapReports.length > 0 || Boolean(cachedWeather || mapWeather),
-        detail: mapReports.length || cachedWeather || mapWeather ? 'Live or cached field context loaded.' : 'Open weather or reports before going offline.',
-        icon: 'cloud-outline',
-      },
-    ];
-  }, [
-    allMapPois.length,
-    cachedWeather,
-    mapReports.length,
-    mapWeather,
-    offlineSaved,
-    selectedTrail?.support.offlineReady,
-    selectedTrailRoutePlan,
-    trailGraphReadiness,
-    trailSupportCamps.length,
-    trailTraceRoute.length,
-  ]);
   const elevationHydrationRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     trailRoutePlans.forEach(plan => {
@@ -16692,12 +16588,6 @@ function MapScreen() {
     return { label: 'ADD PINS', color: C.red, icon: 'add-circle-outline' as const };
   }
 
-  function trailRouteSegmentLabel(segment: TrailRouteSegmentStatus) {
-    if (segment.status === 'ok') return 'Ready';
-    if (segment.status === 'fallback') return 'Adjusted';
-    return 'Add pin';
-  }
-
   async function hydrateTrailRoutePlanElevation(plan: TrailRoutePlan) {
     if (plan.elevationConfidence && plan.elevationConfidence !== 'unavailable') return;
     try {
@@ -16877,10 +16767,10 @@ function MapScreen() {
   }));
   const extremeFeatureItems = [
     { key: 'globe_terrain', label: map3dEnabled ? '2D Terrain' : 'Globe / 3D', sub: map3dEnabled ? 'Flatten camera' : 'Terrain camera', icon: 'planet-outline', val: map3dEnabled, color: '#a3e635', enabled: true, onPress: () => toggleMap3d() },
-    { key: 'search_box', label: 'Search Box', sub: 'Find and fly to places', icon: 'search-outline', val: inlineSearchOpen, color: '#38bdf8', enabled: !!extremeConfig?.feature_flags?.search, onPress: () => { if (extremeConfig?.feature_flags?.search) { setShowLayerSheet(false); openInlineMapSearch(); return; } setQuickToast('This EXTREME feature is beta locked.'); setTimeout(() => setQuickToast(''), 2400); } },
-    { key: 'directions', label: 'Directions', sub: searchRouteCard ? 'Preview selected route' : 'Choose destination', icon: 'navigate-outline', val: !!searchRouteCard, color: '#f97316', enabled: !!extremeConfig?.feature_flags?.navigation, onPress: () => { if (extremeConfig?.feature_flags?.navigation) { openExtremeDirections(); return; } setQuickToast('This EXTREME feature is beta locked.'); setTimeout(() => setQuickToast(''), 2400); } },
-    { key: 'traffic', label: 'Traffic', sub: 'Congestion style', icon: 'git-merge-outline', val: extremeTrafficEnabled, color: '#ef4444', enabled: !!extremeConfig?.feature_flags?.navigation, onPress: () => { if (extremeConfig?.feature_flags?.navigation) { toggleExtremeTraffic(); return; } setQuickToast('This EXTREME feature is beta locked.'); setTimeout(() => setQuickToast(''), 2400); } },
-    { key: 'weather', label: 'Weather', sub: extremeConfig?.weather?.mapbox_conditions_enabled ? 'Radar + route conditions' : 'Radar overlay', icon: 'rainy-outline', val: layerRadar, color: '#06b6d4', enabled: !!extremeConfig?.feature_flags?.weather, onPress: () => { if (extremeConfig?.feature_flags?.weather) { openExtremeWeather(); return; } setQuickToast('EXTREME weather is locked for this beta.'); setTimeout(() => setQuickToast(''), 2400); } },
+    { key: 'search_box', label: 'Search Box', sub: 'Find and fly to places', icon: 'search-outline', val: inlineSearchOpen, color: '#38bdf8', enabled: !!extremeConfig?.feature_flags?.search, onPress: () => { if (extremeConfig?.feature_flags?.search) { setShowLayerSheet(false); openInlineMapSearch(); return; } setQuickToast('Search is not available on this account yet.'); setTimeout(() => setQuickToast(''), 2400); } },
+    { key: 'directions', label: 'Directions', sub: searchRouteCard ? 'Preview selected route' : 'Choose destination', icon: 'navigate-outline', val: !!searchRouteCard, color: '#f97316', enabled: !!extremeConfig?.feature_flags?.navigation, onPress: () => { if (extremeConfig?.feature_flags?.navigation) { openExtremeDirections(); return; } setQuickToast('Directions are not available on this account yet.'); setTimeout(() => setQuickToast(''), 2400); } },
+    { key: 'traffic', label: 'Traffic', sub: 'Congestion style', icon: 'git-merge-outline', val: extremeTrafficEnabled, color: '#ef4444', enabled: !!extremeConfig?.feature_flags?.navigation, onPress: () => { if (extremeConfig?.feature_flags?.navigation) { toggleExtremeTraffic(); return; } setQuickToast('Traffic is not available on this account yet.'); setTimeout(() => setQuickToast(''), 2400); } },
+    { key: 'weather', label: 'Weather', sub: extremeConfig?.weather?.mapbox_conditions_enabled ? 'Radar + route conditions' : 'Radar overlay', icon: 'rainy-outline', val: layerRadar, color: '#06b6d4', enabled: !!extremeConfig?.feature_flags?.weather, onPress: () => { if (extremeConfig?.feature_flags?.weather) { openExtremeWeather(); return; } setQuickToast('Weather layers are not available on this account yet.'); setTimeout(() => setQuickToast(''), 2400); } },
   ] as const;
   const safeWaterLegendItems = [
     { color: '#f97316', label: '0-5 ft shallow structure' },
@@ -17032,7 +16922,7 @@ function MapScreen() {
     const unlockedPlaces = (ids: string[]) => {
       const lockedRequested = ids.some(id => (EXPLORE_PLACE_FILTER_IDS as readonly string[]).includes(id));
       if (lockedRequested && exploreLocked) {
-        setQuickToast('Open Explore & Services to add town categories.');
+        setQuickToast('Open Services to add town categories.');
         setTimeout(() => setQuickToast(''), 2600);
       }
       return ids.filter(id => !exploreLocked || !(EXPLORE_PLACE_FILTER_IDS as readonly string[]).includes(id));
@@ -17163,10 +17053,12 @@ function MapScreen() {
     });
   };
   const scopedMapSearchActive = Boolean(mapSearchSession && !navMode && !waterFollowActive && !safeWaterPlanningActive);
+  const androidInlineSearchKeyboardActive = Platform.OS === 'android' && inlineSearchOpen && keyboardVisible;
   const scopedMapSearchPois = scopedMapSearchActive ? (mapSearchSession?.places ?? []) : routePois;
   const showMapStatusBar = Boolean(
     !navMode &&
     !waterFollowActive &&
+    !androidInlineSearchKeyboardActive &&
     !scopedMapSearchActive &&
     (
       activeTrip ||
@@ -17220,6 +17112,9 @@ function MapScreen() {
   const inlineSearchSideBySide = userHeading === null || windowWidth >= 380;
   const inlineSearchTop = inlineSearchSideBySide ? compassTop : compassTop + 52;
   const inlineSearchLeft = userHeading !== null && inlineSearchSideBySide ? 176 : 68;
+  const inlineSearchResultsMaxHeight = androidInlineSearchKeyboardActive
+    ? Math.max(128, windowHeight - keyboardHeight - inlineSearchTop - 28)
+    : undefined;
   const trailToolPanelActive = trailPinCaptureMode || trailTraceMode || trailRouteBuilderOpen;
   const showQuickMapMessage = Boolean(
     (!!quickToast || quickReport) &&
@@ -17227,6 +17122,7 @@ function MapScreen() {
     !navMode &&
     !safeWaterPlanningActive &&
     !waterFollowActive &&
+    !androidInlineSearchKeyboardActive &&
     !scopedMapSearchActive &&
     !showSearch &&
     !showMapDrawer &&
@@ -17941,7 +17837,7 @@ function MapScreen() {
         onStopPress={stop => nativeMapRef.current?.flyTo(stop.lat, stop.lng, stop.type === 'camp' ? 11 : 9, stop.name)}
       />
 
-      {copilotResults.length > 0 && !scopedMapSearchActive && !routeScout && !selectedPlace && !selectedCamp && !selectedTrail && !selectedCommunityPin && !navMode && !safeWaterPlanningActive && !waterFollowActive && !showSearch && (
+      {copilotResults.length > 0 && !androidInlineSearchKeyboardActive && !scopedMapSearchActive && !routeScout && !selectedPlace && !selectedCamp && !selectedTrail && !selectedCommunityPin && !navMode && !safeWaterPlanningActive && !waterFollowActive && !showSearch && (
         <View style={s.copilotResultRail} pointerEvents="auto">
           <View style={s.copilotResultHeader}>
             <View style={s.copilotResultTitleWrap}>
@@ -18017,7 +17913,7 @@ function MapScreen() {
                 if (mapSearchSession && normalizeScopedSearchText(text) !== mapSearchSession.query) setMapSearchSession(null);
                 if (text.trim().length < 2) setSearchResults([]);
               }}
-              placeholder="Search map"
+              placeholder="Search places or services"
               placeholderTextColor={mapChrome.textMuted}
               style={[s.inlineMapSearchInput, { color: mapChrome.toastText }]}
               returnKeyType="search"
@@ -18040,7 +17936,7 @@ function MapScreen() {
           </View>
 
           {inlineSearchOpen && (searchResults.length > 0 || isSearching || searchQuery.trim().length >= 2) && (
-            <View style={[s.inlineMapSearchResults, mapChrome.toast]}>
+            <View style={[s.inlineMapSearchResults, mapChrome.toast, inlineSearchResultsMaxHeight ? { maxHeight: inlineSearchResultsMaxHeight } : null]}>
               {isSearching ? (
                 <View style={s.inlineMapSearchStateRow}>
                   <ActivityIndicator size="small" color={mapChrome.toastText} />
@@ -18081,7 +17977,7 @@ function MapScreen() {
         </View>
       )}
 
-      {scopedMapSearchActive && mapSearchSession && !inlineSearchOpen && !selectedPlace && !selectedCamp && !selectedTrail && !selectedCommunityPin && !showMapDrawer && !showFilterSheet && (
+      {scopedMapSearchActive && mapSearchSession && !androidInlineSearchKeyboardActive && !inlineSearchOpen && !selectedPlace && !selectedCamp && !selectedTrail && !selectedCommunityPin && !showMapDrawer && !showFilterSheet && (
         <View style={[s.scopedSearchRail, { bottom: bottomInset + 90 }]} pointerEvents="auto">
           <View style={s.scopedSearchHeader}>
             <View style={{ flex: 1, minWidth: 0 }}>
@@ -18234,15 +18130,6 @@ function MapScreen() {
                 );
               })}
             </View>
-            <View style={s.trailRoutingReadinessPanel}>
-              {trailRoutingReadinessRows.slice(0, 4).map(row => (
-                <View key={row.label} style={s.trailRoutingReadinessRow}>
-                  <Ionicons name={row.ready ? 'checkmark-circle-outline' : row.icon as any} size={13} color={row.ready ? C.green : C.orange} />
-                  <Text style={s.trailRoutingReadinessLabel}>{row.label}</Text>
-                  <Text style={s.trailRoutingReadinessValue} numberOfLines={1}>{row.detail}</Text>
-                </View>
-              ))}
-            </View>
             {!!trailSnapFailureReason && (
               <View style={s.trailRouteWarningBox}>
                 <Ionicons name="information-circle-outline" size={16} color={C.orange} />
@@ -18348,10 +18235,10 @@ function MapScreen() {
 
       {/* Controls — hidden during nav (panel covers them and they serve no purpose while driving) */}
       <ScrollView
-        pointerEvents={navMode || scopedMapSearchActive || safeWaterSheetOwnsPage || mapSheetOpen || (!!selectedTrail && !trailCardCollapsed) ? 'none' : 'auto'}
+        pointerEvents={navMode || androidInlineSearchKeyboardActive || scopedMapSearchActive || safeWaterSheetOwnsPage || mapSheetOpen || (!!selectedTrail && !trailCardCollapsed) ? 'none' : 'auto'}
         style={[
           s.controls,
-          (navMode || scopedMapSearchActive || safeWaterSheetOwnsPage || mapSheetOpen || (!!selectedTrail && !trailCardCollapsed)) && { opacity: 0 },
+          (navMode || androidInlineSearchKeyboardActive || scopedMapSearchActive || safeWaterSheetOwnsPage || mapSheetOpen || (!!selectedTrail && !trailCardCollapsed)) && { opacity: 0 },
         ]}
         contentContainerStyle={s.controlsInner}
         showsVerticalScrollIndicator={false}
@@ -19185,15 +19072,6 @@ function MapScreen() {
                 );
               })}
             </View>
-            <View style={s.trailRoutingReadinessPanel}>
-              {trailRoutingReadinessRows.map(row => (
-                <View key={row.label} style={s.trailRoutingReadinessRow}>
-                  <Ionicons name={row.ready ? 'checkmark-circle-outline' : row.icon as any} size={13} color={row.ready ? C.green : C.orange} />
-                  <Text style={s.trailRoutingReadinessLabel}>{row.label}</Text>
-                  <Text style={s.trailRoutingReadinessValue} numberOfLines={1}>{row.detail}</Text>
-                </View>
-              ))}
-            </View>
             {!!trailSnapFailureReason && (
               <View style={[s.trailRouteWarningBox, { marginBottom: 9 }]}>
                 <Ionicons name="information-circle-outline" size={16} color={C.orange} />
@@ -19254,27 +19132,6 @@ function MapScreen() {
                     <Text style={s.trailRouteWarningText} numberOfLines={4}>
                       {trailRoutePlans.find(p => p.id === selectedTrailRoutePlanId)?.warnings[0]}
                     </Text>
-                  </View>
-                )}
-
-                {!!trailRouteSegmentStatus.length && (
-                  <View style={s.trailSegmentStrip}>
-                    {trailRouteSegmentStatus.slice(0, 8).map((segment, idx) => {
-                      const color = segment.status === 'ok' ? C.green : segment.status === 'fallback' ? C.orange : C.red;
-                      return (
-                        <View key={`${segment.label}-${idx}`} style={[s.trailSegmentPill, { borderColor: color + '55', backgroundColor: color + '12' }]}>
-                          <Ionicons
-                            name={segment.status === 'ok' ? 'checkmark-circle-outline' : segment.status === 'fallback' ? 'git-compare-outline' : 'alert-circle-outline'}
-                            size={12}
-                            color={color}
-                          />
-                          <Text style={[s.trailSegmentText, { color }]} numberOfLines={1}>Section {idx + 1} {trailRouteSegmentLabel(segment)}</Text>
-                        </View>
-                      );
-                    })}
-                    {trailRouteSegmentStatus.length > 8 && (
-                      <Text style={s.trailSegmentMore}>+{trailRouteSegmentStatus.length - 8}</Text>
-                    )}
                   </View>
                 )}
 
@@ -19669,7 +19526,7 @@ function MapScreen() {
               <TextInput
                 value={extremeCopilotInput}
                 onChangeText={setExtremeCopilotInput}
-                placeholder="Ask Copilot to work the map, or ask what it can do"
+                placeholder="Search or ask Co-Pilot"
                 placeholderTextColor={C.text3}
                 style={s.extremeCopilotInput}
                 returnKeyType="send"
@@ -21764,7 +21621,7 @@ function MapScreen() {
         );
       })()}
 
-      {extremeCopilotAvailable && !scopedMapSearchActive && !navMode && !mapSheetOpen && !safeWaterPlanningActive && !waterFollowActive && !showExtremeCopilot && (
+      {extremeCopilotAvailable && !androidInlineSearchKeyboardActive && !scopedMapSearchActive && !navMode && !mapSheetOpen && !safeWaterPlanningActive && !waterFollowActive && !showExtremeCopilot && (
         <View style={[s.extremeCopilotDock, { bottom: bottomInset + 92 }]} pointerEvents="box-none">
           <TouchableOpacity
             style={s.extremeCopilotFab}
@@ -25608,7 +25465,7 @@ const makeStyles = (C: ColorPalette) => {
   trailRouteBuilderBlur: {
     borderRadius: 24,
     overflow: 'hidden',
-    padding: 12,
+    padding: 10,
     backgroundColor: OVR.bg,
     borderWidth: 1,
     borderColor: OVR.border,
@@ -25617,8 +25474,8 @@ const makeStyles = (C: ColorPalette) => {
     shadowRadius: 28,
     shadowOffset: { width: 0, height: 16 },
   },
-  trailRouteBuilderHeader: { flexDirection: 'row', alignItems: 'center', gap: 11, marginBottom: 10 },
-  trailCaptureSheetContent: { gap: 8, padding: 10, paddingBottom: 14 },
+  trailRouteBuilderHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
+  trailCaptureSheetContent: { gap: 7, padding: 9, paddingBottom: 12 },
   trailCompactMessage: {
     minHeight: 56,
     flexDirection: 'row',
@@ -25654,7 +25511,7 @@ const makeStyles = (C: ColorPalette) => {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 6,
-    marginBottom: 9,
+    marginBottom: 7,
   },
   trailSnapModeBtn: {
     minHeight: 32,
@@ -25676,23 +25533,6 @@ const makeStyles = (C: ColorPalette) => {
   },
   trailSnapModeText: { color: OVR.text2, fontSize: 9, fontFamily: mono, fontWeight: '900' },
   trailSnapModeTextActive: { color: '#fff' },
-  trailRoutingReadinessPanel: {
-    gap: 5,
-    marginBottom: 9,
-    padding: 9,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    backgroundColor: 'rgba(255,255,255,0.04)',
-  },
-  trailRoutingReadinessRow: {
-    minHeight: 21,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  trailRoutingReadinessLabel: { color: OVR.text2, fontSize: 9, fontFamily: mono, fontWeight: '900', width: 82 },
-  trailRoutingReadinessValue: { color: OVR.text3, fontSize: 9, flex: 1 },
   trailRouteLoading: {
     minHeight: 138,
     alignItems: 'center',
@@ -25715,7 +25555,7 @@ const makeStyles = (C: ColorPalette) => {
     backgroundColor: C.orange + '14',
   },
   trailRouteErrorText: { color: OVR.text2, fontSize: 12, lineHeight: 17, flex: 1 },
-  trailRoutePlanList: { gap: 8, maxHeight: 246 },
+  trailRoutePlanList: { gap: 8, maxHeight: 210 },
   trailRoutePlanCard: {
     minHeight: 72,
     flexDirection: 'row',
@@ -25754,25 +25594,6 @@ const makeStyles = (C: ColorPalette) => {
     borderColor: 'rgba(255,255,255,0.1)',
   },
   trailRouteWarningText: { color: OVR.text2, fontSize: 10.5, lineHeight: 15, flex: 1 },
-  trailSegmentStrip: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 9,
-  },
-  trailSegmentPill: {
-    minHeight: 25,
-    maxWidth: 138,
-    borderRadius: 999,
-    borderWidth: 1,
-    paddingHorizontal: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  trailSegmentText: { fontSize: 8.5, fontFamily: mono, fontWeight: '900', flexShrink: 1 },
-  trailSegmentMore: { color: OVR.text3, fontSize: 9, fontFamily: mono, fontWeight: '900' },
   trailRouteBuilderActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 9 },
   trailRouteSecondaryBtn: {
     flex: 0.8,

@@ -158,11 +158,11 @@ export default function MapFilterSheet({
             onPress={() => {
               if (locked) {
                 Alert.alert(
-                  'Unlock Explore for today',
-                  'Town services use richer provider searches. Unlock this group for today with credits, or use Explorer.',
+                  'Open services for today',
+                  'Town services use live search. Open this group with credits, or search in Explorer.',
                   [
                     { text: 'Cancel', style: 'cancel' },
-                    { text: 'Unlock', onPress: onUnlockExplore },
+                    { text: 'Open', onPress: onUnlockExplore },
                   ],
                 );
                 return;
@@ -228,19 +228,19 @@ export default function MapFilterSheet({
 
   return (
       <Modal visible={visible} animationType="slide" transparent statusBarTranslucent onRequestClose={onClose}>
-        <View style={styles.overlay}>
+        <View style={[styles.overlay, isAndroid ? styles.androidOverlay : styles.iosOverlay]}>
           <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={onClose} />
           <TrailheadSheet
             handle={false}
             style={isAndroid
               ? [styles.sheet, styles.androidSheet, { height: androidSheetHeight }]
-              : styles.sheet}
+              : [styles.sheet, styles.iosSheet]}
             contentStyle={isAndroid ? { padding: 0, flex: 1 } : { padding: 0 }}
           >
             <View style={styles.header}>
               <View style={styles.headerCopy}>
                 <Text style={styles.title}>MAP FILTERS</Text>
-                <Text style={styles.sub}>{activeModeTitle} · {changedCount} changed · saved on this device</Text>
+                <Text style={styles.sub}>{activeModeTitle} · {changedCount} changed</Text>
               </View>
               <View style={styles.headerActions}>
                 <TouchableOpacity onPress={onOpenLegend} style={styles.resetBtn}>
@@ -258,7 +258,7 @@ export default function MapFilterSheet({
             <ScrollView
               showsVerticalScrollIndicator={false}
               style={styles.scroll}
-              contentContainerStyle={isAndroid ? [styles.scrollContent, { paddingBottom: Math.max(28, filterBottomSpacer) }] : { paddingBottom: 28 }}
+              contentContainerStyle={[styles.scrollContent, { paddingBottom: Math.max(28, filterBottomSpacer) }]}
               keyboardShouldPersistTaps="handled"
               nestedScrollEnabled={isAndroid}
               bounces={!isAndroid}
@@ -271,8 +271,8 @@ export default function MapFilterSheet({
               />
               {categoryUnlocking ? (
                 <TrailheadLoadingRow
-                  label="Checking route context"
-                  sub="Opening richer Explore and service filters for this session."
+                  label="Opening filters"
+                  sub="Getting services ready for this session."
                   icon="sparkles-outline"
                   style={styles.sheetLoadingRow}
                 />
@@ -303,7 +303,7 @@ export default function MapFilterSheet({
               })}
               {expandedSections.includes('camps') ? (
                 <>
-                  <Text style={styles.hintText}>No refinements means all camp types. Turn Camps off above to hide the group.</Text>
+                  <Text style={styles.hintText}>No selection means all camp types. Turn Camps off above to hide them.</Text>
                   {renderCheckRows(campOptions, activeCampFilters, onToggleCampFilter)}
                 </>
               ) : null}
@@ -322,7 +322,7 @@ export default function MapFilterSheet({
               })}
               {expandedSections.includes('places') ? (
                 <>
-                  <Text style={styles.hintText}>Default keeps camps, trails, water, fuel, dump, propane, parking, and repair visible without town clutter.</Text>
+                  <Text style={styles.hintText}>Default keeps camps, trails, water, fuel, dump, propane, parking, and repair visible.</Text>
                   {renderCheckRows(essentialPlaceOptions, activePlaceFilters, onToggleEssentialPlace)}
                 </>
               ) : null}
@@ -360,7 +360,7 @@ export default function MapFilterSheet({
               {renderSectionRow({
                 icon: 'sparkles-outline',
                 iconColor: '#06b6d4',
-                title: 'Explore & Services',
+                title: 'Services',
                 summary: 'Food, groceries, lodging, attractions, parts, medical, wifi',
                 expanded: expandedSections.includes('explore-services'),
                 actionLabel: exploreCategoriesUnlocked ? undefined : (categoryUnlocking ? 'OPENING' : 'OPEN'),
@@ -400,7 +400,7 @@ export default function MapFilterSheet({
                 icon: 'partly-sunny-outline',
                 iconColor: '#f59e0b',
                 title: 'Weather & Layers',
-                summary: 'Radar, trails, MVUM, land, and public data overlays',
+                summary: 'Radar, trails, MVUM, land, and map overlays',
                 expanded: expandedSections.includes('weather-layers'),
                 onPress: () => onToggleSection('weather-layers'),
               })}
@@ -420,17 +420,24 @@ function makeStyles(C: ColorPalette) {
       flex: 1,
       justifyContent: 'flex-end',
       backgroundColor: 'rgba(0,0,0,0.42)',
+    },
+    androidOverlay: {
       zIndex: 20000,
       elevation: 200,
     },
+    iosOverlay: {
+      paddingBottom: 0,
+    },
     sheet: {
-      maxHeight: '82%',
       backgroundColor: C.bg,
       borderTopLeftRadius: 20,
       borderTopRightRadius: 20,
       borderTopWidth: 1,
       borderColor: C.border,
       paddingTop: 14,
+    },
+    iosSheet: {
+      maxHeight: '84%',
     },
     androidSheet: {
       maxHeight: undefined,

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Image, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/lib/design';
@@ -15,10 +15,17 @@ type Props = {
 
 export function ExploreHero({ greeting, displayName, heroImage, height, query, onQueryChange, onClearQuery }: Props) {
   const C = useTheme();
+  const [failedImage, setFailedImage] = useState('');
+  const showHeroImage = !!heroImage && heroImage !== failedImage;
+
+  useEffect(() => {
+    if (heroImage !== failedImage) setFailedImage('');
+  }, [failedImage, heroImage]);
+
   return (
     <View style={[styles.shell, { height }]}>
-      {heroImage ? (
-        <Image source={{ uri: heroImage }} style={styles.image} resizeMode="cover" />
+      {showHeroImage ? (
+        <Image source={{ uri: heroImage }} style={styles.image} resizeMode="cover" onError={() => setFailedImage(heroImage || '')} />
       ) : (
         <View style={[styles.fallback, { backgroundColor: C.s3 }]}>
           <Ionicons name="compass-outline" size={44} color="#fff" />
@@ -34,7 +41,7 @@ export function ExploreHero({ greeting, displayName, heroImage, height, query, o
             <TextInput
               value={query}
               onChangeText={onQueryChange}
-              placeholder="Search camps, huts, trails, peaks, fuel, more"
+              placeholder="Search trails, camps, parks, fuel"
               placeholderTextColor="rgba(15,23,42,0.5)"
               style={styles.input}
               returnKeyType="search"

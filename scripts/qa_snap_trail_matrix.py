@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static QA for snap-to-trail and route-graph readiness."""
+"""Static QA for snap-to-trail and compact Trail Builder controls."""
 from __future__ import annotations
 
 import sys
@@ -21,13 +21,20 @@ REQUIRED_MAP_MARKERS = {
     "straight mode": "id: 'straight'",
     "hybrid mode": "id: 'hybrid'",
     "failure normalizer": "normalizeTrailSnapFailure",
-    "graph readiness state": "TrailGraphReadiness",
-    "readiness rows": "trailRoutingReadinessRows",
-    "readiness panel": "trailRoutingReadinessPanel",
+    "compact builder panel": "trailRouteBuilderWrap",
+    "compact snap controls": "trailSnapModeStrip",
+    "route plan list": "trailRoutePlanList",
     "manual fallback": "Straight line mode only connects your pins",
     "missing graph message": "Trail routing graph is not downloaded for this area",
     "gap message": "Gap between trail segments",
     "route graph path": "trailRouteGraphLocalPath(stateId)",
+}
+
+FORBIDDEN_MAP_MARKERS = {
+    "removed readiness type": "TrailGraphReadiness",
+    "removed readiness rows": "trailRoutingReadinessRows",
+    "removed readiness panel": "trailRoutingReadinessPanel",
+    "removed segment status strip": "trailSegmentStrip",
 }
 
 REQUIRED_OFFLINE_MARKERS = {
@@ -58,6 +65,10 @@ def main() -> int:
         if marker not in map_tsx:
             failures.append(f"Missing map marker for {label}: {marker}")
 
+    for label, marker in FORBIDDEN_MAP_MARKERS.items():
+        if marker in map_tsx:
+            failures.append(f"Unexpected compact builder marker for {label}: {marker}")
+
     for label, marker in REQUIRED_OFFLINE_MARKERS.items():
         if marker not in offline:
             failures.append(f"Missing offline marker for {label}: {marker}")
@@ -70,7 +81,7 @@ def main() -> int:
         failures.append(f"Missing audit note: {AUDIT_DOC.relative_to(ROOT)}")
 
     print("Snap-to-trail QA matrix")
-    print("Checks: snap modes, route graph readiness, failure copy, offline sidecar status")
+    print("Checks: snap modes, compact builder controls, failure copy, offline sidecar status")
 
     if failures:
         print("")

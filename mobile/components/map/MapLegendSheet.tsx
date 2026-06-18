@@ -41,7 +41,7 @@ export default function MapLegendSheet({ visible, focusCategory, contextLabel, o
           <View style={s.header}>
             <View style={s.headerCopy}>
               <Text style={s.title}>MAP LEGEND</Text>
-              <Text style={s.sub} numberOfLines={1}>{contextLabel ? `${contextLabel} mode` : 'Pins, lines, layers, and source trust'}</Text>
+              <Text style={s.sub} numberOfLines={1}>{contextLabel ? `${contextLabel} mode` : 'Map symbols and layers'}</Text>
             </View>
             <TouchableOpacity onPress={onClose} style={s.closeBtn}>
               <Ionicons name="close" size={20} color={C.text2} />
@@ -72,13 +72,6 @@ export default function MapLegendSheet({ visible, focusCategory, contextLabel, o
                 <Ionicons name="shield-checkmark-outline" size={16} color={active.color} />
               </View>
               <Text style={s.sourceText}>{active.source}</Text>
-            </View>
-            <View style={s.examples}>
-              <Text style={s.exampleHead}>SOURCE LINES TO EXPECT</Text>
-              <Text style={s.exampleText}>Source: NPS official alert · updated 2h ago</Text>
-              <Text style={s.exampleText}>Source: Trailhead report · 3 confirmations · expires in 4h</Text>
-              <Text style={s.exampleText}>Source: OSM trail geometry · difficulty inferred</Text>
-              <Text style={s.exampleText}>Source: USFS MVUM · legal access map, not live gate status</Text>
             </View>
           </ScrollView>
         </TrailheadSheet>
@@ -372,29 +365,6 @@ function makeStyles(C: ColorPalette) {
       color: C.text2,
       fontSize: 11,
       lineHeight: 16,
-    },
-    examples: {
-      marginTop: 12,
-      borderRadius: 8,
-      borderWidth: 1,
-      borderColor: C.border,
-      backgroundColor: C.s1,
-      padding: 12,
-      gap: 5,
-    },
-    exampleHead: {
-      color: C.text3,
-      fontSize: 9,
-      fontFamily: mono,
-      fontWeight: '900',
-      letterSpacing: 0.7,
-      marginBottom: 2,
-    },
-    exampleText: {
-      color: C.text2,
-      fontSize: 10,
-      lineHeight: 15,
-      fontFamily: mono,
     },
   });
 }

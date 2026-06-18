@@ -1187,7 +1187,7 @@ export default function ProfileScreen() {
         {(() => {
           const actions = profileSection === 'account'
             ? [
-                { icon: 'compass', label: 'PLAN TRIP', color: C.orange, onPress: () => { setActiveTrip(null); router.push('/(tabs)'); } },
+                { icon: 'compass', label: 'PLAN TRIP', color: C.orange, onPress: () => { setActiveTrip(null); router.push('/(tabs)/plan' as any); } },
                 { icon: 'people', label: 'REFER', color: C.orange, onPress: shareReferral },
                 { icon: 'time-outline', label: 'HISTORY', color: C.silverBright, onPress: loadHistory },
               ]
@@ -1210,7 +1210,7 @@ export default function ProfileScreen() {
                 ]
               : profileSection === 'trips'
                 ? [
-                    { icon: 'compass', label: 'PLAN TRIP', color: C.orange, onPress: () => { setActiveTrip(null); router.push('/(tabs)'); } },
+                    { icon: 'compass', label: 'PLAN TRIP', color: C.orange, onPress: () => { setActiveTrip(null); router.push('/(tabs)/plan' as any); } },
                     { icon: 'cloud-download-outline', label: 'OFFLINE MAPS', color: C.green, onPress: openOfflineMapsManager },
                     { icon: 'cloud-upload-outline', label: 'IMPORT GPX', color: C.text3, onPress: importGpx },
                   ]

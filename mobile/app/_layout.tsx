@@ -216,7 +216,7 @@ export default function RootLayout() {
           const job = await api.getPlanJob(data.job_id);
           if (job.result) {
             setActiveTrip(job.result);
-            router.push('/(tabs)');
+            router.push('/(tabs)/plan' as any);
           }
         } catch {}
       } else if (data?.type === 'trail_alert') {

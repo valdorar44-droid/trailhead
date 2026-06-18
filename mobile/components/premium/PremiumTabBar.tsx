@@ -10,6 +10,7 @@ import { TrailheadSheet } from '@/components/TrailheadUI';
 
 const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   index: 'compass-outline',
+  plan: 'compass-outline',
   map: 'map-outline',
   'route-builder': 'trail-sign-outline',
   report: 'warning-outline',
@@ -27,9 +28,10 @@ export function PremiumTabBar({ state, descriptors, navigation }: BottomTabBarPr
   return (
     <View pointerEvents="box-none" style={[s.wrap, { bottom }]}>
       <TrailheadSheet handle={false} style={s.bar} contentStyle={s.barInner}>
-        {state.routes.map((route, index) => {
-          const focused = state.index === index;
-          const options = descriptors[route.key]?.options;
+        {state.routes.map((route) => {
+          const options = descriptors[route.key]?.options as { title?: string; href?: unknown };
+          if (options?.href === null) return null;
+          const focused = state.routes[state.index]?.key === route.key;
           const label = String(options?.title ?? route.name);
           const color = focused ? C.text : C.text3;
           return (

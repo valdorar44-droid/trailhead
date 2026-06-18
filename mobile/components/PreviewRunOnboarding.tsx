@@ -70,7 +70,7 @@ export default function PreviewRunOnboarding() {
               <Ionicons name="close" size={16} color={C.text2} />
             </TouchableOpacity>
           </View>
-          <Text style={s.eyebrow}>APP TOUR</Text>
+          <Text style={s.eyebrow}>MAP BASICS</Text>
           <Text style={s.title}>Find the next good stop</Text>
           <Text style={s.body}>Use the map to scout trails, camps, fuel, water, and road notes. Open any card to save it, navigate, report conditions, or build it into a trip.</Text>
 

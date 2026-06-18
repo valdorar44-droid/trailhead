@@ -1,6 +1,6 @@
 import '@/lib/backgroundTasks'; // must be first — registers background location task
 import { useEffect, useRef, useState } from 'react';
-import { Alert, AppState, Linking, Modal, ScrollView, View, Text, TouchableOpacity } from 'react-native';
+import { Alert, AppState, Linking, View, Text, TouchableOpacity } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { storage } from '@/lib/storage';
@@ -13,6 +13,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import TrailheadLaunchLoader from '@/components/TrailheadLaunchLoader';
+import WelcomeOnboardingModal from '@/components/WelcomeOnboardingModal';
 
 const LAUNCH_LOADER_MIN_MS = 1200;
 const LAUNCH_LOADER_MAX_MS = 4500;
@@ -26,7 +27,6 @@ export default function RootLayout() {
   const user         = useStore(s => s.user);
   const sessionId    = useStore(s => s.sessionId);
   const welcomePromptRunId = useStore(s => s.welcomePromptRunId);
-  const startGuidedTour = useStore(s => s.startGuidedTour);
   const router       = useRouter();
   const C            = useTheme();
   const insets       = useSafeAreaInsets();
@@ -42,7 +42,7 @@ export default function RootLayout() {
   // the latest code on every cold start with one short reload). After that
   // window we fall back to a banner so we don't interrupt active use.
   const launchAtRef = useRef(Date.now());
-  const WELCOME_SEEN_KEY = 'trailhead_first_run_onboarding_seen_v2';
+  const WELCOME_SEEN_KEY = 'trailhead_first_run_onboarding_seen_v3';
   const WELCOME_PENDING_ATTR_KEY = 'trailhead_welcome_contest_clicked_pending_v1';
 
   function verificationTokenFromUrl(url: string | null | undefined) {
@@ -135,13 +135,6 @@ export default function RootLayout() {
     storage.set(WELCOME_PENDING_ATTR_KEY, '1').catch(() => {});
     logWelcomeEvent('welcome_contest_cta', { source: 'first_open_modal', signed_in: !!user });
     router.push('/(tabs)/profile');
-  }
-
-  function startTourFromWelcome() {
-    setWelcomeVisible(false);
-    storage.set(WELCOME_SEEN_KEY, '1').catch(() => {});
-    startGuidedTour();
-    router.push('/(tabs)/guide');
   }
 
   useEffect(() => {
@@ -302,94 +295,11 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <StatusBar style={themeMode === 'dark' ? 'light' : 'dark'} />
       <Stack screenOptions={{ headerShown: false }} />
-      <Modal visible={welcomeVisible} animationType="fade" transparent onRequestClose={closeWelcomeContest}>
-        <View style={{
-          flex: 1, backgroundColor: 'rgba(0,0,0,0.66)', justifyContent: 'flex-end',
-        }}>
-          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={closeWelcomeContest} />
-          <View style={{
-            margin: 12, marginBottom: Math.max(insets.bottom + 12, 18), borderRadius: 26,
-            backgroundColor: C.bg, borderWidth: 1, borderColor: C.border, overflow: 'hidden',
-          }}>
-            <ScrollView contentContainerStyle={{ padding: 20, gap: 14 }} showsVerticalScrollIndicator={false}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                <View style={{
-                  width: 48, height: 48, borderRadius: 18, backgroundColor: '#d4af3720',
-                  borderWidth: 1, borderColor: '#d4af3755', alignItems: 'center', justifyContent: 'center',
-                }}>
-                  <Ionicons name="trophy-outline" size={23} color="#f8d77a" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: '#d4af37', fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1.2 }}>TRAILHEAD FIELD SETUP</Text>
-                  <Text style={{ color: C.text, fontSize: 22, lineHeight: 26, fontWeight: '900', marginTop: 3 }}>
-                    Build routes around your rig, then make the trip ready offline.
-                  </Text>
-                </View>
-                <TouchableOpacity onPress={closeWelcomeContest} style={{
-                  width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center',
-                  backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
-                }}>
-                  <Ionicons name="close" size={18} color={C.text2} />
-                </TouchableOpacity>
-              </View>
-
-              <Text style={{ color: C.text2, fontSize: 14, lineHeight: 21 }}>
-                Start with your vehicle profile, then plan a route, build days, layer the map, download the trip for free, and use community pins to keep the route current.
-              </Text>
-
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                {[
-                  ['Rig', 'car-sport-outline'],
-                  ['Planner', 'sparkles-outline'],
-                  ['Offline', 'cloud-done-outline'],
-                ].map(([label, icon]) => (
-                  <View key={label} style={{ flex: 1, backgroundColor: C.s2, borderWidth: 1, borderColor: C.border, borderRadius: 16, padding: 10, gap: 7 }}>
-                    <Ionicons name={icon as any} size={17} color={C.orange} />
-                    <Text style={{ color: C.text, fontSize: 11, fontFamily: mono, fontWeight: '900' }}>{label.toUpperCase()}</Text>
-                  </View>
-                ))}
-              </View>
-
-              <View style={{ backgroundColor: C.s2, borderRadius: 18, borderWidth: 1, borderColor: '#d4af3744', padding: 14, gap: 10 }}>
-                {[
-                  ['Rig setup', 'Fuel range, clearance, towing, and comfort shape every route.', 'car-sport-outline'],
-                  ['Trip Planner', 'Enter the trip intent; Trailhead turns it into daily stops and warnings.', 'sparkles-outline'],
-                  ['Map search', 'Use the Map search and filter controls for camps, trails, public land, weather, reports, and places as you scout.', 'search-outline'],
-                  ['Trail building', 'Free from the map button: drop anchors along a trail, snap the route, then save or follow it.', 'git-branch-outline'],
-                  ['Route Builder', 'Choose Direct, Balanced, Wild, Loop, or There and back, then swap camps, fuel, and places by day.', 'map-outline'],
-                  ['Downloads', 'Free for everyone: save Map, Navigation, Places, Topo, Trails, and the Trip download before signal drops.', 'download-outline'],
-                  ['Community pins', 'Add reports, confirmations, photos, and edits that help the next driver.', 'pin-outline'],
-                ].map(([title, body, icon]) => (
-                  <View key={title} style={{ flexDirection: 'row', gap: 10, alignItems: 'flex-start' }}>
-                    <View style={{ width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: C.orange + '16', borderWidth: 1, borderColor: C.orange + '38' }}>
-                      <Ionicons name={icon as any} size={15} color={C.orange} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ color: C.text, fontSize: 13, fontWeight: '900' }}>{title}</Text>
-                      <Text style={{ color: C.text3, fontSize: 11.5, lineHeight: 16, marginTop: 2 }}>{body}</Text>
-                    </View>
-                  </View>
-                ))}
-              </View>
-
-              <View style={{ flexDirection: 'row', gap: 10 }}>
-                <TouchableOpacity
-                  onPress={startTourFromWelcome}
-                  style={{ flex: 1, minHeight: 46, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s2, borderWidth: 1, borderColor: C.border }}
-                >
-                  <Text style={{ color: C.text2, fontSize: 12, fontFamily: mono, fontWeight: '900' }}>SHOW ME AROUND</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={goToProfileFromWelcome}
-                  style={{ flex: 1.35, minHeight: 46, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: C.orange }}
-                >
-                  <Text style={{ color: '#fff', fontSize: 12, fontFamily: mono, fontWeight: '900' }}>SET UP RIG</Text>
-                </TouchableOpacity>
-              </View>
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
+      <WelcomeOnboardingModal
+        visible={welcomeVisible}
+        onClose={closeWelcomeContest}
+        onSetupRig={goToProfileFromWelcome}
+      />
       {updateBanner && (
         <View style={{
           position: 'absolute', bottom: 90 + Math.max(insets.bottom, 0), left: 16, right: 16, zIndex: 9999,

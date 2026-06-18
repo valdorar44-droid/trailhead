@@ -208,7 +208,6 @@ export default function ProfileScreen() {
   const setActiveTrip = useStore(st => st.setActiveTrip);
   const setPendingOpenOfflineModal = useStore(st => st.setPendingOpenOfflineModal);
   const addTripToHistory = useStore(st => st.addTripToHistory);
-  const startGuidedTour = useStore(st => st.startGuidedTour);
   const startWelcomePrompt = useStore(st => st.startWelcomePrompt);
   const [offlineTripSummaries, setOfflineTripSummaries] = useState<Array<TripResult & { cached_at: number }>>([]);
 
@@ -1228,7 +1227,6 @@ export default function ProfileScreen() {
                       ]
                     : [
                         { icon: 'sparkles-outline', label: 'WELCOME', color: '#d4af37', onPress: startWelcomePrompt },
-                        { icon: 'help-buoy-outline', label: 'APP TOUR', color: '#3b82f6', onPress: startGuidedTour },
                         { icon: 'bug-outline', label: 'BUG', color: C.red, onPress: () => setShowBugModal(true) },
                         ...(user?.is_admin ? [{ icon: 'refresh-circle-outline', label: adminClearingCampCache ? 'CLEARING' : 'CAMP CACHE', color: C.yellow, onPress: clearCampCacheAdmin }] : []),
                       ];
@@ -3066,7 +3064,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   sectionLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 10 },
   txRow: {
     flexDirection: 'row', justifyContent: 'space-between',
-    paddingVertical: 7, borderBottomWidth: 1, borderColor: C.border + '50',
+    paddingVertical: 7, borderBottomWidth: 1, borderColor: C.border,
   },
   txReason: { color: C.text2, fontSize: 12, flex: 1, marginRight: 8 },
   txAmount: { fontSize: 13, fontWeight: '700', fontFamily: mono },
@@ -3101,7 +3099,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     gap: 8,
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderColor: C.border + '66',
+    borderColor: C.border,
   },
   gpxBatchMain: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 9 },
   gpxBatchIcon: {
@@ -3228,7 +3226,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   tripRow: {
     flexDirection: 'row', alignItems: 'center', paddingVertical: 9,
-    borderBottomWidth: 1, borderColor: C.border + '50',
+    borderBottomWidth: 1, borderColor: C.border,
   },
   tripRowOpen: { flex: 1, flexDirection: 'row', alignItems: 'center' },
   tripDeleteBtn: {

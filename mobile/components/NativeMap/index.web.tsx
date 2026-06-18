@@ -71,6 +71,7 @@ export interface NativeMapProps {
   traceDraftCoords?: [number, number][];
   traceRouteCoords?: [number, number][];
   tracePinCoords?: [number, number][];
+  suppressFeatureTaps?: boolean;
   showLandOverlay: boolean;
   showUsgsOverlay: boolean;
   showTrailOverlay?: boolean;
@@ -379,9 +380,9 @@ function syncWebMarkers(
   };
   props.waypoints.slice(0, 24).forEach((p, idx) => add(p.lng, p.lat, String(idx + 1), '#f97316', () => props.onWaypointTap(idx, p.name)));
   props.camps.slice(0, 80).forEach(c => add(c.lng, c.lat, 'C', '#14b8a6', () => props.onCampTap(c)));
-  props.gas.slice(0, 40).forEach(g => add(g.lng, g.lat, 'F', '#eab308', () => props.onGasTap?.(g)));
-  props.pois.slice(0, 80).forEach(p => add(p.lng, p.lat, 'P', '#38bdf8', () => props.onPoiTap?.(p as any)));
-  props.communityPins.slice(0, 80).forEach(p => add(p.lng, p.lat, 'U', '#a855f7', () => props.onCommunityPinTap?.(p)));
+  props.gas.slice(0, 40).forEach(g => add(g.lng, g.lat, 'F', '#eab308', () => props.suppressFeatureTaps ? props.onMapTap(g.lat, g.lng) : props.onGasTap?.(g)));
+  props.pois.slice(0, 80).forEach(p => add(p.lng, p.lat, 'P', '#38bdf8', () => props.suppressFeatureTaps ? props.onMapTap(p.lat, p.lng) : props.onPoiTap?.(p as any)));
+  props.communityPins.slice(0, 80).forEach(p => add(p.lng, p.lat, 'U', '#a855f7', () => props.suppressFeatureTaps ? props.onMapTap(p.lat, p.lng) : props.onCommunityPinTap?.(p)));
   if (props.searchMarker) add(props.searchMarker.lng, props.searchMarker.lat, 'S', '#ef4444');
   if (props.userLoc) add(props.userLoc.lng, props.userLoc.lat, 'ME', '#22c55e');
 }
@@ -493,9 +494,18 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const markerRefs = useRef<any[]>([]);
   const routeReadyRef = useRef(false);
   const trailHighlightRef = useRef<GeoJSON.FeatureCollection>(emptyTrailHighlight());
+  const suppressFeatureTapsRef = useRef(props.suppressFeatureTaps);
+  const onMapTapRef = useRef(props.onMapTap);
+  const onPoiTapRef = useRef(props.onPoiTap);
   const [mapboxError, setMapboxError] = useState('');
   const initialCenter = useMemo(() => firstUsableCenter(props), [props.userLoc, props.searchMarker, props.waypoints, props.camps]);
   const premiumStyle = (props.premiumMapStyle as PremiumMapStyle | undefined) ?? 'standard';
+
+  useEffect(() => {
+    suppressFeatureTapsRef.current = props.suppressFeatureTaps;
+    onMapTapRef.current = props.onMapTap;
+    onPoiTapRef.current = props.onPoiTap;
+  }, [props.suppressFeatureTaps, props.onMapTap, props.onPoiTap]);
 
   useImperativeHandle(ref, () => ({
     flyTo: (lat: number, lng: number, zoom = 11) => mapRef.current?.flyTo?.({
@@ -690,6 +700,10 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         });
         mapRef.current.on('moveend', () => props.onBoundsChange?.(currentBounds(mapRef.current)));
         mapRef.current.on('click', (e: any) => {
+          if (suppressFeatureTapsRef.current) {
+            onMapTapRef.current?.(e.lngLat?.lat, e.lngLat?.lng);
+            return;
+          }
           const box = [
             [e.point.x - 24, e.point.y - 24],
             [e.point.x + 24, e.point.y + 24],
@@ -700,10 +714,10 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           ];
           const place = bestWebMapboxPlaceFromFeatures(features, e.lngLat?.lat, e.lngLat?.lng);
           if (place) {
-            props.onPoiTap?.(place as any);
+            onPoiTapRef.current?.(place as any);
             return;
           }
-          props.onMapTap?.(e.lngLat?.lat, e.lngLat?.lng);
+          onMapTapRef.current?.(e.lngLat?.lat, e.lngLat?.lng);
         });
       })
       .catch(err => setMapboxError(err?.message ?? 'Failed to load Mapbox GL JS'));
@@ -743,13 +757,13 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   useEffect(() => {
     if (!isExtremeWeb || !mapRef.current || !mapboxGlRef.current) return;
     syncWebMarkers(mapboxGlRef.current, mapRef.current, props, markerRefs);
-  }, [isExtremeWeb, props.waypoints, props.camps, props.gas, props.pois, props.searchMarker, props.userLoc]);
+  }, [isExtremeWeb, props.waypoints, props.camps, props.gas, props.pois, props.searchMarker, props.userLoc, props.suppressFeatureTaps]);
 
   const pins = [
     ...props.waypoints.map((p, idx) => ({ key: `wp_${idx}`, name: p.name, type: p.type, color: '#c65f39', onPress: () => props.onWaypointTap(idx, p.name) })),
     ...props.camps.map(c => ({ key: `camp_${c.id}`, name: c.name, type: 'camp', color: '#14b8a6', onPress: () => props.onCampTap(c) })),
-    ...props.gas.map(g => ({ key: `gas_${g.lat}_${g.lng}`, name: g.name, type: 'fuel', color: '#eab308', onPress: () => props.onGasTap?.(g) })),
-    ...props.pois.map(p => ({ key: `poi_${p.lat}_${p.lng}_${p.type}`, name: p.name, type: p.type, color: '#38bdf8', onPress: () => props.onPoiTap?.(p) })),
+    ...props.gas.map(g => ({ key: `gas_${g.lat}_${g.lng}`, name: g.name, type: 'fuel', color: '#eab308', onPress: () => props.suppressFeatureTaps ? props.onMapTap(g.lat, g.lng) : props.onGasTap?.(g) })),
+    ...props.pois.map(p => ({ key: `poi_${p.lat}_${p.lng}_${p.type}`, name: p.name, type: p.type, color: '#38bdf8', onPress: () => props.suppressFeatureTaps ? props.onMapTap(p.lat, p.lng) : props.onPoiTap?.(p) })),
   ].slice(0, 12);
   const hasRouteLine = props.waypoints.length > 1;
   const hasMapContent = pins.length > 0 || !!props.searchMarker || !!props.userLoc;

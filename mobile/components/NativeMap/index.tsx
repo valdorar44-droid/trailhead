@@ -171,6 +171,7 @@ export interface NativeMapProps {
   traceDraftCoords?: [number, number][];
   traceRouteCoords?: [number, number][];
   tracePinCoords?: [number, number][];
+  suppressFeatureTaps?: boolean;
 
   // Overlay visibility
   showLandOverlay: boolean;
@@ -676,6 +677,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     userLoc, navMode, navCameraFollow = false, nativeNavEngineActive = false, navIdx, navHeading, navSpeed,
     mapLayer, routeProviderMode = 'trailhead', routeOpts,
     traceMode = false, traceDraftCoords = [], traceRouteCoords = [], tracePinCoords = [],
+    suppressFeatureTaps = false,
     showLandOverlay, showUsgsOverlay, showTerrain, showFire, showAva, showRadar, showTrailOverlay = true, showMvum, showNautical = false,
     onMapReady, onBoundsChange, onMapGesture, onMapTap, onMapLongPress,
     onCampTap, onGasTap, onPoiTap, onWaterSpotTap, onCommunityPinTap, onTileCampTap, onBaseCampTap, onTrailTap, onWaypointTap,
@@ -687,11 +689,16 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const camRef = useRef<any>(null);
   const lastNativeStandardTapRef = useRef<{ at: number; lat: number; lng: number } | null>(null);
   const onPoiTapRef = useRef(onPoiTap);
+  const suppressFeatureTapsRef = useRef(suppressFeatureTaps);
   const onDebugEventRef = useRef(onDebugEvent);
 
   useEffect(() => {
     onPoiTapRef.current = onPoiTap;
   }, [onPoiTap]);
+
+  useEffect(() => {
+    suppressFeatureTapsRef.current = suppressFeatureTaps;
+  }, [suppressFeatureTaps]);
 
   useEffect(() => {
     onDebugEventRef.current = onDebugEvent;
@@ -1238,6 +1245,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     let retry: ReturnType<typeof setTimeout> | null = null;
     const sub = mapboxStandardInteractionEvents.addListener('onStandardFeatureTap', (event: any) => {
       if (!mounted) return;
+      if (suppressFeatureTapsRef.current) return;
       const poi = mapboxStandardFeatureEventToPoi(event);
       if (poi) {
         lastNativeStandardTapRef.current = { at: Date.now(), lat: poi.lat, lng: poi.lng };
@@ -1979,6 +1987,10 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         const distanceMiles = haversineMiles(lat, lng, nativeTap.lat, nativeTap.lng);
         if (Number.isFinite(distanceMiles) && distanceMiles < 0.08) return;
       }
+      if (suppressFeatureTaps) {
+        onMapTap(lat, lng);
+        return;
+      }
       try {
         const point = eventScreenPoint(feat);
         const pressPoint = point ?? await mapRef.current.getPointInView([lng, lat]);
@@ -2068,7 +2080,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     } else {
       onMapTap();
     }
-  }, [coordinateFromPress, isExtremeMapbox, onMapTap, onPoiTap, onTileCampTap, onTrailTap, showNautical]);
+  }, [coordinateFromPress, isExtremeMapbox, onMapTap, onPoiTap, onTileCampTap, onTrailTap, showNautical, suppressFeatureTaps]);
 
   const handleLongPress = useCallback(async (feat: any) => {
     const lngLat = await coordinateFromPress(feat);
@@ -2184,11 +2196,16 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const handleCampPress = useCallback((e: any) => {
     const feat = e.features?.[0];
     if (!feat) return;
+    const coords = (feat.geometry as any)?.coordinates;
+    if (suppressFeatureTaps) {
+      onMapTap(coords?.[1], coords?.[0]);
+      return;
+    }
     const p = feat.properties;
     let raw: CampsitePin;
     try { raw = JSON.parse(p.raw || '{}'); } catch { raw = p as any; }
     onCampTap(raw);
-  }, [onCampTap]);
+  }, [onCampTap, onMapTap, suppressFeatureTaps]);
 
   const mapStatusLabel = localTiles ? compactMapStatus(tileDebug) : 'Online maps';
   const userLocationShape = userLoc
@@ -2660,7 +2677,13 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           shape={waterSpotFC}
           onPress={(e: any) => {
             const f = e.features?.[0];
-            if (!f || !onWaterSpotTap) return;
+            if (!f) return;
+            const coords = (f.geometry as any)?.coordinates;
+            if (suppressFeatureTaps) {
+              onMapTap(coords?.[1], coords?.[0]);
+              return;
+            }
+            if (!onWaterSpotTap) return;
             try {
               const raw = f.properties?.raw ? JSON.parse(String(f.properties.raw)) : null;
               if (raw) onWaterSpotTap(raw);
@@ -2805,8 +2828,13 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           id="gas" shape={gasFC}
           onPress={(e: any) => {
             const f = e.features?.[0];
-            if (f && onGasTap) {
+            if (f) {
               const [lng, lat] = (f.geometry as any).coordinates;
+              if (suppressFeatureTaps) {
+                onMapTap(lat, lng);
+                return;
+              }
+              if (!onGasTap) return;
               onGasTap({ name: f.properties?.name ?? 'Gas Station', lat, lng });
             }
           }}
@@ -2851,7 +2879,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           <IconPin
             color="#eab308"
             icon="flash-outline"
-            onPress={() => onGasTap?.({ name: station.name || 'Gas Station', lat: station.lat, lng: station.lng })}
+            onPress={() => suppressFeatureTaps ? onMapTap(station.lat, station.lng) : onGasTap?.({ name: station.name || 'Gas Station', lat: station.lat, lng: station.lng })}
           />
         </MapGL.MarkerView>
       ))}
@@ -2862,8 +2890,13 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           id="pois" shape={poiFC}
           onPress={(e: any) => {
             const f = e.features?.[0];
-            if (f && onPoiTap) {
+            if (f) {
               const [lng, lat] = (f.geometry as any).coordinates;
+              if (suppressFeatureTaps) {
+                onMapTap(lat, lng);
+                return;
+              }
+              if (!onPoiTap) return;
               let raw: OsmPoi | null = null;
               try { raw = f.properties?.raw ? JSON.parse(String(f.properties.raw)) : null; } catch {}
               onPoiTap({ ...(raw || {}), id: raw?.id || f.properties?.id || `${f.properties?.type ?? 'poi'}:${lat}:${lng}`, name: raw?.name || f.properties?.name || '', type: (raw?.type || f.properties?.type || 'poi') as OsmPoi['type'], lat, lng });
@@ -2970,7 +3003,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           <IconPin
             color={visual.color}
             icon={visual.icon}
-            onPress={() => onPoiTap?.(poi)}
+            onPress={() => suppressFeatureTaps ? onMapTap(poi.lat, poi.lng) : onPoiTap?.(poi)}
           />
         </MapGL.MarkerView>
         );
@@ -2988,7 +3021,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             <IconPin
               color={visual.color}
               icon={visual.icon}
-              onPress={() => onCommunityPinTap?.(pin)}
+              onPress={() => suppressFeatureTaps ? onMapTap(pin.lat, pin.lng) : onCommunityPinTap?.(pin)}
             />
           </MapGL.MarkerView>
         );

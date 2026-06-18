@@ -14955,6 +14955,7 @@ function MapScreen() {
   }
 
   function openPoiFeature(poi: OsmPoi, day?: number | null) {
+    if (mapTapToolOwnsFeatureSelection) return;
     const place = poi as SearchPlace;
     const source = String(poi.source || '').toLowerCase();
     const renderedMapbox = isRenderedMapboxPlaceSource(source);
@@ -16881,6 +16882,13 @@ function MapScreen() {
     trailRouteBuilderOpen
   );
   const compassTop = Math.max(insets.top + 6, 14);
+  const mapTapToolOwnsFeatureSelection = Boolean(
+    waterCorridorPickMode ||
+    pinDropMode ||
+    selectOnMapMode ||
+    trailPinCaptureMode ||
+    inlineSearchOpen
+  );
   const showInlineMapSearch = Boolean(
     !trailPinCaptureMode &&
     !navMode &&
@@ -17077,6 +17085,7 @@ function MapScreen() {
           traceDraftCoords={trailTraceMode ? trailTraceDraft : []}
           traceRouteCoords={trailTraceRoute}
           tracePinCoords={trailPinCaptureMode ? trailCapturePins : []}
+          suppressFeatureTaps={mapTapToolOwnsFeatureSelection}
           showLandOverlay={showLands}
           showUsgsOverlay={showUsgs}
           showTerrain={map3dEnabled && !navMode}
@@ -17197,6 +17206,10 @@ function MapScreen() {
               addTrailCaptureAnchor([lng, lat]);
               return;
             }
+            if (inlineSearchOpen) {
+              closeInlineMapSearch(false);
+              return;
+            }
             if (shouldIgnoreRecentRenderedMapboxFallbackTap(lat, lng)) return;
             cancelRenderedMapboxEnrichment();
             nativeMapRef.current?.clearTrailHighlight();
@@ -17205,20 +17218,23 @@ function MapScreen() {
           }}
           onMapLongPress={runLandCheck}
           onCampTap={camp => {
+            if (mapTapToolOwnsFeatureSelection) return;
             setSelectedCamp(camp);
             setCampDetail(null); setCampInsight(null); setWikiArticles([]);
             setCampFullness(null); setCampWeather(null);
             if (camp?.id) api.getCampFullness(camp.id).then(r => setCampFullness(r)).catch(() => {});
             if (camp?.lat && camp?.lng) api.getWeather(camp.lat, camp.lng, 3, weatherUnitMode).then(r => setCampWeather(r)).catch(() => {});
           }}
-          onGasTap={station => { setTappedGas(null); setSearchRouteCard(null); setSelectedPlace({ ...station, type: 'fuel', source: 'fuel' }); setSelectedCamp(null); setTappedTrail(null); setTappedTileSpot(null); setSelectedTrail(null); }}
-          onPoiTap={p => openPoiFeature(p)}
-          onWaterSpotTap={spot => selectWaterSpot(spot)}
-          onCommunityPinTap={p => { setSelectedCommunityPin(p); setSelectedCamp(null); setTappedTrail(null); setTappedTileSpot(null); setTappedGas(null); setTappedPoi(null); setSelectedTrail(null); }}
+          onGasTap={station => { if (mapTapToolOwnsFeatureSelection) return; setTappedGas(null); setSearchRouteCard(null); setSelectedPlace({ ...station, type: 'fuel', source: 'fuel' }); setSelectedCamp(null); setTappedTrail(null); setTappedTileSpot(null); setSelectedTrail(null); }}
+          onPoiTap={p => { if (mapTapToolOwnsFeatureSelection) return; openPoiFeature(p); }}
+          onWaterSpotTap={spot => { if (mapTapToolOwnsFeatureSelection) return; selectWaterSpot(spot); }}
+          onCommunityPinTap={p => { if (mapTapToolOwnsFeatureSelection) return; setSelectedCommunityPin(p); setSelectedCamp(null); setTappedTrail(null); setTappedTileSpot(null); setTappedGas(null); setTappedPoi(null); setSelectedTrail(null); }}
           onTileCampTap={(name, kind, lat, lng) => {
+            if (mapTapToolOwnsFeatureSelection) return;
             openMapTileCamp(name, kind, lat, lng);
           }}
           onBaseCampTap={(name, lat, lng, landType) => {
+            if (mapTapToolOwnsFeatureSelection) return;
             openMapTileCamp(name, 'camp_site', lat, lng, landType);
           }}
           onTrailTap={(name, lat, lng) => {
@@ -17226,6 +17242,7 @@ function MapScreen() {
               if (lat != null && lng != null) addTrailCaptureAnchor([lng, lat]);
               return;
             }
+            if (mapTapToolOwnsFeatureSelection) return;
             setSearchRouteCard(null);
             setSelectedPlace({ id: `trail:${lat}:${lng}`, name: name || 'Trail', lat, lng, type: 'trail', source: 'map', source_label: 'Map trail', summary: 'Trail or track selected from the map.' });
             setSelectedCamp(null); setTappedTrail(null); setTappedTileSpot(null); setSelectedTrail(null); setSelectedCommunityPin(null);

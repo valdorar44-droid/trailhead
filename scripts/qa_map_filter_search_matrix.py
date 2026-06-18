@@ -10,6 +10,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MAP_SCREEN = ROOT / "mobile/app/(tabs)/map.tsx"
 FILTER_SHEET = ROOT / "mobile/components/map/MapFilterSheet.tsx"
+NATIVE_MAP = ROOT / "mobile/components/NativeMap/index.tsx"
+WEB_MAP = ROOT / "mobile/components/NativeMap/index.web.tsx"
 
 
 def read(path: Path) -> str:
@@ -30,6 +32,8 @@ def main() -> int:
     failures: list[str] = []
     map_screen = read(MAP_SCREEN)
     filter_sheet = read(FILTER_SHEET)
+    native_map = read(NATIVE_MAP)
+    web_map = read(WEB_MAP)
 
     if "MapLegendSheet" in filter_sheet:
         failures.append("MapFilterSheet still imports or renders MapLegendSheet; legend must be top-level on iOS.")
@@ -49,6 +53,9 @@ def main() -> int:
         "inline search chrome": "inlineMapSearchWrap",
         "search button opens inline": "onPress={openInlineMapSearch}",
         "extreme search opens inline": "val: inlineSearchOpen",
+        "tap tool ownership state": "const mapTapToolOwnsFeatureSelection = Boolean(",
+        "map passes suppress feature taps": "suppressFeatureTaps={mapTapToolOwnsFeatureSelection}",
+        "inline search map tap dismissal": "closeInlineMapSearch(false);",
         "copilot accent text": "const copilotAccentText = themeMode === 'light'",
         "copilot themed backdrop": "const copilotBackdrop = light ?",
         "copilot themed placeholder": "placeholderTextColor={C.text3}",
@@ -88,8 +95,28 @@ def main() -> int:
     if "OVR.text3" in copilot_modal:
         failures.append("Co-Pilot modal still uses overlay placeholder text instead of app theme text.")
 
+    native_required = {
+        "native suppress prop": "suppressFeatureTaps?: boolean;",
+        "native standard tap guard": "if (suppressFeatureTapsRef.current) return;",
+        "native press guard": "if (suppressFeatureTaps) {\n        onMapTap(lat, lng);",
+        "native camp guard": "if (suppressFeatureTaps) {\n      onMapTap(coords?.[1], coords?.[0]);",
+        "native marker guard": "suppressFeatureTaps ? onMapTap(poi.lat, poi.lng)",
+    }
+    for label, marker in native_required.items():
+        if marker not in native_map:
+            failures.append(f"Missing native map tap guard for {label}: {marker}")
+
+    web_required = {
+        "web suppress prop": "suppressFeatureTaps?: boolean;",
+        "web click guard": "if (suppressFeatureTapsRef.current) {",
+        "web marker guard": "props.suppressFeatureTaps ? props.onMapTap(p.lat, p.lng)",
+    }
+    for label, marker in web_required.items():
+        if marker not in web_map:
+            failures.append(f"Missing web map tap guard for {label}: {marker}")
+
     print("Map filter/search QA matrix")
-    print("Checks: top-level legend modal, filter-only map presets, inline map search, themed Co-Pilot controls")
+    print("Checks: top-level legend modal, filter-only map presets, inline map search, tap ownership, themed Co-Pilot controls")
 
     if failures:
         print("")

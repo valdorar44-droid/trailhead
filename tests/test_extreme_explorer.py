@@ -282,6 +282,36 @@ class ExtremeExplorerTests(unittest.TestCase):
         self.assertEqual(result["selected"]["name"], "Moab, Utah, United States")
         self.assertEqual(result["selected"]["source"], "mapbox")
 
+    def test_geocode_resolver_prefers_specific_place_over_country_center(self):
+        result = _resolve_geocode_candidates("skardu pakistan", [
+            {
+                "name": "Pakistan",
+                "lat": 28.186385,
+                "lng": 67.695237,
+                "source": "mapbox",
+                "place_id": "country.8884",
+                "feature_type": "country",
+                "place_types": ["country"],
+                "relevance": 0.5,
+            },
+            {
+                "name": "Skardu, Gilgit-Baltistan, Pakistan",
+                "lat": 35.299202,
+                "lng": 75.63532,
+                "source": "mapbox",
+                "place_id": "place.112543924",
+                "feature_type": "place",
+                "place_types": ["place"],
+                "country_code": "pk",
+                "country": "Pakistan",
+                "region": "Gilgit-Baltistan",
+                "relevance": 1.0,
+            },
+        ], "pk", prefer_search_center=True)
+
+        self.assertEqual(result["status"], "resolved")
+        self.assertEqual(result["selected"]["name"], "Skardu, Gilgit-Baltistan, Pakistan")
+
     def test_explore_catalog_geocode_finds_k2_base_camp(self):
         hits = _explore_catalog_geocode_candidates("k2 base camp", limit=6)
         names = [hit["name"] for hit in hits]

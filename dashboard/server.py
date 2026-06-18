@@ -6717,6 +6717,8 @@ def _geocode_candidate_score(query: str, place: dict, country_filter: str = "", 
             score += 35
         else:
             score += 12
+        if "country" in tokens and len([term for term in needle.split() if len(term) > 1]) > 1:
+            score += 35
     try:
         score += min(max(float(place.get("trailhead_match_score")), 0.0), 999.0) / 20.0
     except (TypeError, ValueError):

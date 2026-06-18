@@ -12,6 +12,10 @@ import { useTheme, mono } from '@/lib/design';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import TrailheadLaunchLoader from '@/components/TrailheadLaunchLoader';
+
+const LAUNCH_LOADER_MIN_MS = 1200;
+const LAUNCH_LOADER_MAX_MS = 4500;
 
 export default function RootLayout() {
   const setAuth            = useStore(s => s.setAuth);
@@ -28,6 +32,8 @@ export default function RootLayout() {
   const insets       = useSafeAreaInsets();
   const [updateBanner, setUpdateBanner] = useState(false);
   const [welcomeVisible, setWelcomeVisible] = useState(false);
+  const [startupReady, setStartupReady] = useState(false);
+  const [launchLoaderVisible, setLaunchLoaderVisible] = useState(true);
   const updateReady  = useRef(false);
   const checking     = useRef(false);
   const pushRegistered = useRef(false);
@@ -139,7 +145,21 @@ export default function RootLayout() {
   }
 
   useEffect(() => {
+    const maxTimer = setTimeout(() => setLaunchLoaderVisible(false), LAUNCH_LOADER_MAX_MS);
+    return () => clearTimeout(maxTimer);
+  }, []);
+
+  useEffect(() => {
+    if (!startupReady || !launchLoaderVisible) return;
+    const elapsed = Date.now() - launchAtRef.current;
+    const releaseDelay = Math.max(0, LAUNCH_LOADER_MIN_MS - elapsed);
+    const timer = setTimeout(() => setLaunchLoaderVisible(false), releaseDelay);
+    return () => clearTimeout(timer);
+  }, [launchLoaderVisible, startupReady]);
+
+  useEffect(() => {
     let appStateSub: ReturnType<typeof AppState.addEventListener> | null = null;
+    let launchCancelled = false;
 
     if (!__DEV__) {
       // Check immediately on launch
@@ -180,6 +200,8 @@ export default function RootLayout() {
           storage.del('trailhead_user');
         }
       }
+    }).finally(() => {
+      if (!launchCancelled) setStartupReady(true);
     });
 
     // NOTE: Do NOT call iap.initConnection() / getAvailablePurchases() here.
@@ -246,6 +268,7 @@ export default function RootLayout() {
     }).catch(() => {});
 
     return () => {
+      launchCancelled = true;
       notifSub.remove();
       linkSub.remove();
       appStateSub?.remove();
@@ -388,6 +411,7 @@ export default function RootLayout() {
           </TouchableOpacity>
         </View>
       )}
+      {launchLoaderVisible ? <TrailheadLaunchLoader /> : null}
     </GestureHandlerRootView>
   );
 }

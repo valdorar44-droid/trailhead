@@ -27,6 +27,7 @@ import { TrailDetailFacts } from '@/components/trails/TrailDetailSheet';
 import {
   TrailheadButton,
   TrailheadButtonDock,
+  TrailheadCardSkeleton,
   TrailheadMetricRow,
   TrailheadSheet,
 } from '@/components/TrailheadUI';
@@ -20020,8 +20021,8 @@ function MapScreen() {
             )}
             {loadingDetail && !campDetail ? (
               <View style={s.inlineLoadingDetail}>
-                <ActivityIndicator size="small" color={C.orange} />
-                <Text style={s.inlineLoadingText}>Loading camp details</Text>
+                <TrailheadCardSkeleton media lines={3} style={s.detailSkeletonCard} />
+                <TrailheadCardSkeleton lines={2} style={s.detailSkeletonCard} />
               </View>
             ) : null}
             {campDetail ? (() => {
@@ -24477,11 +24478,11 @@ const makeStyles = (C: ColorPalette) => {
   },
   quickCardSecondaryText: { color: C.text2, fontSize: 9, fontFamily: mono, fontWeight: '900' },
   inlineLoadingDetail: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
+    gap: 8,
     borderWidth: 1, borderColor: C.border, backgroundColor: C.s1,
     borderRadius: 14, padding: 12,
   },
-  inlineLoadingText: { color: C.text3, fontSize: 11, fontFamily: mono, fontWeight: '800' },
+  detailSkeletonCard: { borderRadius: 12, padding: 10, backgroundColor: C.s2 },
   lockedInlineCard: {
     flexDirection: 'row', alignItems: 'center', gap: 9,
     borderWidth: 1, borderColor: C.orange + '55', backgroundColor: C.orange + '12',

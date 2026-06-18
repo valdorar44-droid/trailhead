@@ -21,10 +21,12 @@ export function ExploreFilterRow({
   onSortPress,
 }: Props) {
   const C = useTheme();
+  const compactCount = formatShownCount(shownCount);
+  const compactSort = sortLabel === 'Best match' ? 'Best' : sortLabel;
   const items = [
-    { icon: 'list-outline', label: `${shownCount} shown`, onPress: onCountPress },
-    { icon: 'shield-checkmark-outline', label: sourceLabel, onPress: onSourcePress },
-    { icon: 'filter-outline', label: `Sort: ${sortLabel}`, onPress: onSortPress },
+    { icon: 'list-outline', label: compactCount, accessibilityLabel: `${shownCount} places shown`, onPress: onCountPress },
+    { icon: 'shield-checkmark-outline', label: sourceLabel, accessibilityLabel: 'Sources', onPress: onSourcePress },
+    { icon: 'filter-outline', label: compactSort, accessibilityLabel: `Sort: ${sortLabel}`, onPress: onSortPress },
   ];
   return (
     <View style={styles.row}>
@@ -35,6 +37,7 @@ export function ExploreFilterRow({
           activeOpacity={0.78}
           onPress={item.onPress}
           disabled={!item.onPress}
+          accessibilityLabel={item.accessibilityLabel}
           accessibilityRole={item.onPress ? 'button' : undefined}
         >
           <Ionicons name={item.icon as any} size={16} color={C.text3} />
@@ -43,6 +46,12 @@ export function ExploreFilterRow({
       ))}
     </View>
   );
+}
+
+function formatShownCount(count: number) {
+  if (count < 1000) return `${count}`;
+  const compact = count / 1000;
+  return `${compact.toFixed(compact >= 10 ? 0 : 1)}K`;
 }
 
 const styles = StyleSheet.create({

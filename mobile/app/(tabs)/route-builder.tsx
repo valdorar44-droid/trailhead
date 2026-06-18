@@ -15,7 +15,7 @@ import * as Location from 'expo-location';
 import PaywallModal from '@/components/PaywallModal';
 import TourTarget from '@/components/TourTarget';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
-import { TrailheadButton, TrailheadCard, TrailheadSheet, TrailheadTopBar } from '@/components/TrailheadUI';
+import { TrailheadButton, TrailheadCard, TrailheadCardSkeleton, TrailheadSheet, TrailheadTopBar } from '@/components/TrailheadUI';
 import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
 import { api, ApiError, CampFullness, Campsite, CampsiteDetail, CampsiteInsight, CampsitePin, CampReusePolicy, ExcursionCandidate, FuelEstimate, GasStation, GeocodePlace, OsmPoi, PaywallError, RouteStyleMode, SavedRouteGeometryPayload, TripResult, TripShapeMode, TripTimeline, Waypoint, WeatherForecast } from '@/lib/api';
 import { loadAllPlacePoints } from '@/lib/offlinePlacePacks';
@@ -4112,8 +4112,8 @@ export default function RouteBuilderScreen() {
         </View>
         {discoverLoading ? (
           <View style={s.inlineLoading}>
-            <ActivityIndicator size="small" color={C.orange} />
-            <Text style={s.inlineLoadingText}>Finding options on this route segment...</Text>
+            <TrailheadCardSkeleton media lines={3} style={s.inlineLoadingCard} />
+            <TrailheadCardSkeleton lines={2} style={s.inlineLoadingCard} />
           </View>
         ) : inlineTab === 'camps' ? (
           camps.length ? camps.slice(0, 6).map(camp => (
@@ -6241,8 +6241,8 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   inlineResultsTitle: { color: C.text, fontSize: 12, fontWeight: '900' },
   inlineResultsSub: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
   inlineClose: { width: 28, height: 28, borderRadius: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s2, borderWidth: 1, borderColor: C.border },
-  inlineLoading: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
-  inlineLoadingText: { color: C.text3, fontSize: 11, fontFamily: mono },
+  inlineLoading: { gap: 8, paddingVertical: 4 },
+  inlineLoadingCard: { borderRadius: 11, padding: 9, backgroundColor: C.s1 },
   inlineCampCard: { flexDirection: 'row', alignItems: 'stretch', gap: 8, padding: 8, borderRadius: 11, borderWidth: 1, borderColor: C.border, backgroundColor: C.s1 },
   inlineCampPhotoWrap: { width: 64, borderRadius: 9, overflow: 'hidden', backgroundColor: C.s2 },
   inlineCampPhoto: { width: '100%', height: 74 },

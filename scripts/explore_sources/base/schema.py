@@ -82,6 +82,7 @@ class TrailGeometry:
     seasonal_notes: str = ""
     land_manager: str = ""
     source_quality: str = "basic_map_data"
+    source_confidence: dict[str, Any] = field(default_factory=dict)
     sources: list[dict[str, Any]] = field(default_factory=list)
     linked_place_ids: list[str] = field(default_factory=list)
 
@@ -118,6 +119,7 @@ class ExplorePlaceV3:
     sources: list[dict[str, Any]] = field(default_factory=list)
     quality: str = "basic_map_data"
     quality_score: float = 0.0
+    source_quality: dict[str, Any] = field(default_factory=dict)
     verified: bool = False
     last_seen_at: int = 0
     updated_at: int = 0
@@ -126,4 +128,3 @@ class ExplorePlaceV3:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
-

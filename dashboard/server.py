@@ -21,6 +21,7 @@ from config.settings import settings
 from ai.planner import plan_trip, chat_guide, edit_trip, plan_trip_from_conversation
 from dashboard.route_enrichment import enrich_trip_along_route
 from dashboard.adventure_intelligence import build_mission_control
+from dashboard.provider_registry import list_provider_metadata
 from dashboard.marine_chart_provider import (
     MarineBounds,
     fishing_conditions,
@@ -3195,6 +3196,14 @@ async def app_icon_head():
 async def health():
     cleanup_stale_data()
     return {"status": "ok", "service": "trailhead"}
+
+@app.get("/api/providers/registry")
+async def provider_registry():
+    return {
+        "schema_version": 1,
+        "generated_at": int(time.time()),
+        "providers": list_provider_metadata(),
+    }
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
 

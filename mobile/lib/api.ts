@@ -2524,6 +2524,16 @@ export interface ExplorePlaceProfile {
   sources?: { title?: string; publisher?: string; name?: string; url?: string; kind?: string }[];
   quality?: string;
   quality_score?: number;
+  source_quality?: {
+    score?: number;
+    label?: string;
+    factors?: string[];
+    primary_provider?: string;
+    primary_name?: string;
+    freshness_label?: string;
+    attribution?: string;
+    offline_allowed?: boolean;
+  };
   search_aliases?: string[];
   best_season?: string;
   source_ids?: string[];

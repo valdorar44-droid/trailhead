@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dashboard.provider_registry import source_quality_summary
 from .schema import ExplorePlaceV3
 
 
@@ -14,7 +15,7 @@ QUALITY_SCORES = {
 }
 
 
-OFFICIAL_SOURCES = {"ridb", "recreation.gov", "nps", "usfs", "blm"}
+OFFICIAL_SOURCES = {"ridb", "recreation.gov", "nps", "usfs", "blm", "usgs", "nws", "airnow", "firms"}
 
 
 def quality_for_source(source: str) -> str:
@@ -23,7 +24,7 @@ def quality_for_source(source: str) -> str:
         return "official_source"
     if key in {"trailhead_curated"}:
         return "curated_trailhead"
-    if key in {"osm", "geofabrik", "overpass", "openbeta", "wikidata", "wikipedia"}:
+    if key in {"osm", "geofabrik", "overpass", "openbeta", "wikidata", "wikipedia", "natural_earth"}:
         return "open_community_data"
     return "basic_map_data"
 
@@ -33,8 +34,15 @@ def score_place(place: ExplorePlaceV3) -> ExplorePlaceV3:
     if place.quality in QUALITY_SCORES:
         labels.append(place.quality)
     best = max(labels or ["basic_map_data"], key=lambda label: QUALITY_SCORES.get(label, 0))
+    summary = source_quality_summary(
+        place.sources,
+        fetched_at=place.updated_at or None,
+        last_seen_at=place.last_seen_at or None,
+        inferred=best == "ai_enriched",
+        unknown_access=not bool(place.access),
+    )
+    place.source_quality = summary
     place.quality = best
-    place.quality_score = float(QUALITY_SCORES.get(best, 0))
-    place.verified = best in {"official_source", "community_verified", "curated_trailhead"}
+    place.quality_score = float(max(QUALITY_SCORES.get(best, 0), summary["score"]))
+    place.verified = best in {"official_source", "community_verified", "curated_trailhead"} or summary["score"] >= 80
     return place
-

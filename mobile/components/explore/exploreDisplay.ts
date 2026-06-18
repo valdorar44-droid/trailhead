@@ -1,4 +1,5 @@
 import type { ExplorePlaceProfile } from '@/lib/api';
+import { sourceConfidenceFromRecord } from '@/lib/sourceConfidence';
 
 export type ExploreMode = 'featured' | 'nearby' | 'trip';
 export type ExploreCategoryKey =
@@ -140,6 +141,14 @@ function normalize(value: string) {
   return value.toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+function confidenceFactorLabel(value: string) {
+  const key = normalize(value);
+  if (key === 'multiple sources') return 'multiple sources';
+  if (key === 'community confirmed') return 'confirmed';
+  if (key === 'unknown access') return 'access unknown';
+  return key;
+}
+
 function categoryFromText(text: string): ExploreCategoryKey | null {
   if (!text) return null;
   if (/waterfall|falls|cascade/.test(text)) return 'waterfalls';
@@ -259,6 +268,9 @@ export function getExploreSourceBadge(place: ExplorePlaceProfile) {
 }
 
 export function getExploreTrustBadge(place: ExplorePlaceProfile) {
+  const confidence = sourceConfidenceFromRecord(readV3(place));
+  if (confidence.score >= 85) return 'High confidence';
+  if (confidence.score >= 65) return 'Good confidence';
   const badge = getExploreSourceBadge(place);
   if (/official/i.test(badge)) return 'Verified details';
   if (/community|curated|multiple/i.test(badge)) return 'Curated details';
@@ -278,10 +290,11 @@ export function getExploreFreshnessLabel(place: ExplorePlaceProfile) {
 }
 
 export function getExploreCardSourceLine(place: ExplorePlaceProfile) {
+  const confidence = sourceConfidenceFromRecord(readV3(place));
   return compact([
     getExploreSourceBadge(place),
     getExploreFreshnessLabel(place),
-    getExploreTrustBadge(place),
+    confidence.displayLabel,
   ]).filter((part, index, parts) => parts.indexOf(part) === index).join(' · ');
 }
 
@@ -289,6 +302,7 @@ export function getExploreSourceRows(place: ExplorePlaceProfile): ExploreSourceR
   const v3 = readV3(place);
   const sourceBadge = getExploreSourceBadge(place);
   const freshness = getExploreFreshnessLabel(place);
+  const confidence = sourceConfidenceFromRecord(v3);
   const sourceCount = Math.max(
     Array.isArray(v3.sources) ? v3.sources.length : 0,
     Array.isArray(place.source_pack?.sources) ? place.source_pack?.sources?.length ?? 0 : 0,
@@ -316,9 +330,15 @@ export function getExploreSourceRows(place: ExplorePlaceProfile): ExploreSourceR
     },
     {
       label: 'Trust',
-      value: getExploreTrustBadge(place),
+      value: confidence.displayLabel,
       icon: 'shield-outline',
-      tone: /check/i.test(getExploreTrustBadge(place)) ? '#ca8a04' : '#0ea5e9',
+      tone: confidence.score >= 65 ? '#0ea5e9' : '#ca8a04',
+    },
+    {
+      label: 'Confidence',
+      value: `${confidence.score}%${confidence.factors.length ? ` · ${confidence.factors.slice(0, 2).map(confidenceFactorLabel).join(', ')}` : ''}`,
+      icon: 'shield-checkmark-outline',
+      tone: confidence.score >= 75 ? '#16a34a' : confidence.score >= 50 ? '#ca8a04' : '#dc2626',
     },
   ];
   if (sourceCount > 1) {
@@ -550,7 +570,9 @@ export function exploreQueryScore(place: ExplorePlaceProfile, query: string) {
 
 export function exploreTrustScore(place: ExplorePlaceProfile) {
   const v3 = readV3(place);
+  const confidence = sourceConfidenceFromRecord(v3);
   let score = Number(v3.quality_score || 0);
+  score = Math.max(score, confidence.score);
   const badge = getExploreSourceBadge(place);
   if (/official/i.test(badge)) score += 60;
   else if (/curated|community/i.test(badge)) score += 24;

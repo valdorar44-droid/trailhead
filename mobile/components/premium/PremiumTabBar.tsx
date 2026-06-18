@@ -30,7 +30,7 @@ export function PremiumTabBar({ state, descriptors, navigation }: BottomTabBarPr
       <TrailheadSheet handle={false} style={s.bar} contentStyle={s.barInner}>
         {state.routes.map((route) => {
           const options = descriptors[route.key]?.options as { title?: string; href?: unknown };
-          if (options?.href === null) return null;
+          if (route.name === 'index' || options?.href === null) return null;
           const focused = state.routes[state.index]?.key === route.key;
           const label = String(options?.title ?? route.name);
           const color = focused ? C.text : C.text3;

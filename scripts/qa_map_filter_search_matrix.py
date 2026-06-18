@@ -87,9 +87,10 @@ def main() -> int:
 
     filter_sheet_required = {
         "android viewport fallback": "const { height: viewportHeight } = useWindowDimensions();",
-        "android safe sheet height": "const androidSheetHeight = React.useMemo(() => {",
+        "platform safe sheet height": "const sheetHeight = React.useMemo(() => {",
         "android sheet style": "styles.androidSheet",
-        "android filter flex body": "contentStyle={isAndroid ? { padding: 0, flex: 1 } : { padding: 0 }}",
+        "filter flex body": "contentStyle={{ padding: 0, flex: 1 }}",
+        "ios explicit sheet height": "styles.iosSheet, { height: sheetHeight }",
         "android elevated overlay": "zIndex: 20000",
     }
     for label, marker in filter_sheet_required.items():

@@ -131,14 +131,14 @@ export default function MapFilterSheet({
   const { height: viewportHeight } = useWindowDimensions();
   const styles = React.useMemo(() => makeStyles(C), [C]);
   const activeModeTitle = mapModePresetTitle(activePresetId);
-  const androidSheetHeight = React.useMemo(() => {
+  const sheetHeight = React.useMemo(() => {
     const maxSheetHeight = Math.max(360, viewportHeight - 24);
     const requestedHeight = Number(filterSheetHeight);
     const preferredHeight = Number.isFinite(requestedHeight) && requestedHeight > 320
       ? requestedHeight
-      : Math.round(viewportHeight * 0.88);
+      : Math.round(viewportHeight * (isAndroid ? 0.88 : 0.84));
     return Math.min(Math.max(preferredHeight, 360), maxSheetHeight);
-  }, [filterSheetHeight, viewportHeight]);
+  }, [filterSheetHeight, isAndroid, viewportHeight]);
 
   const renderCheckRows = (
     options: readonly MapFilterOption[],
@@ -233,9 +233,9 @@ export default function MapFilterSheet({
           <TrailheadSheet
             handle={false}
             style={isAndroid
-              ? [styles.sheet, styles.androidSheet, { height: androidSheetHeight }]
-              : [styles.sheet, styles.iosSheet]}
-            contentStyle={isAndroid ? { padding: 0, flex: 1 } : { padding: 0 }}
+              ? [styles.sheet, styles.androidSheet, { height: sheetHeight }]
+              : [styles.sheet, styles.iosSheet, { height: sheetHeight }]}
+            contentStyle={{ padding: 0, flex: 1 }}
           >
             <View style={styles.header}>
               <View style={styles.headerCopy}>
@@ -429,6 +429,7 @@ function makeStyles(C: ColorPalette) {
       paddingBottom: 0,
     },
     sheet: {
+      alignSelf: 'stretch',
       backgroundColor: C.bg,
       borderTopLeftRadius: 20,
       borderTopRightRadius: 20,
@@ -437,7 +438,10 @@ function makeStyles(C: ColorPalette) {
       paddingTop: 14,
     },
     iosSheet: {
-      maxHeight: '84%',
+      maxHeight: undefined,
+      paddingBottom: 0,
+      borderBottomLeftRadius: 0,
+      borderBottomRightRadius: 0,
     },
     androidSheet: {
       maxHeight: undefined,

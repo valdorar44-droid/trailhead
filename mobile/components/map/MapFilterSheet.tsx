@@ -3,7 +3,10 @@ import { Alert, Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity,
 import { Ionicons } from '@expo/vector-icons';
 
 import { TrailheadLoadingRow, TrailheadSheet } from '@/components/TrailheadUI';
+import MapLegendSheet from '@/components/map/MapLegendSheet';
+import MapModeGallery from '@/components/map/MapModeGallery';
 import { mono, useTheme, type ColorPalette } from '@/lib/design';
+import { legendCategoryForPreset, mapModePresetTitle, type MapModePresetId } from '@/lib/mapLegend';
 
 export type MapFilterOption = {
   id: string;
@@ -21,19 +24,13 @@ export type MapFilterToggleItem = {
   onPress: () => void;
 };
 
-export type MapFilterPresetItem = {
-  id: string;
-  label: string;
-  onPress: () => void;
-};
-
 type MapFilterSheetProps = {
   visible: boolean;
   changedCount: number;
   filterSheetHeight?: number;
   filterBottomSpacer: number;
   expandedSections: string[];
-  presets: readonly MapFilterPresetItem[];
+  activePresetId: MapModePresetId;
   mapContentSummary: string;
   mapContentItems: readonly MapFilterToggleItem[];
   campFilterSummary: string;
@@ -56,6 +53,7 @@ type MapFilterSheetProps = {
   weatherLayerItems: readonly MapFilterToggleItem[];
   onClose: () => void;
   onResetAll: () => void;
+  onSelectPreset: (presetId: MapModePresetId) => void;
   onToggleSection: (section: string) => void;
   onResetCamps: () => void;
   onToggleCampFilter: (id: string) => void;
@@ -89,7 +87,7 @@ export default function MapFilterSheet({
   filterSheetHeight,
   filterBottomSpacer,
   expandedSections,
-  presets,
+  activePresetId,
   mapContentSummary,
   mapContentItems,
   campFilterSummary,
@@ -112,6 +110,7 @@ export default function MapFilterSheet({
   weatherLayerItems,
   onClose,
   onResetAll,
+  onSelectPreset,
   onToggleSection,
   onResetCamps,
   onToggleCampFilter,
@@ -129,6 +128,13 @@ export default function MapFilterSheet({
   const C = useTheme();
   const isAndroid = Platform.OS === 'android';
   const styles = React.useMemo(() => makeStyles(C), [C]);
+  const [legendVisible, setLegendVisible] = React.useState(false);
+  const activeLegendCategory = legendCategoryForPreset(activePresetId);
+  const activeModeTitle = mapModePresetTitle(activePresetId);
+
+  React.useEffect(() => {
+    if (!visible) setLegendVisible(false);
+  }, [visible]);
 
   const renderCheckRows = (
     options: readonly MapFilterOption[],
@@ -217,55 +223,57 @@ export default function MapFilterSheet({
   );
 
   return (
-    <Modal visible={visible} animationType="slide" transparent statusBarTranslucent onRequestClose={onClose}>
-      <View style={styles.overlay}>
-        <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={onClose} />
-        <TrailheadSheet
-          handle={false}
-          style={isAndroid
-            ? [styles.sheet, { height: filterSheetHeight, maxHeight: undefined, paddingBottom: 0 }]
-            : styles.sheet}
-          contentStyle={{ padding: 0 }}
-        >
-          <View style={styles.header}>
-            <View>
-              <Text style={styles.title}>MAP FILTERS</Text>
-              <Text style={styles.sub}>{changedCount} changed · saved on this device</Text>
-            </View>
-            <View style={styles.headerActions}>
-              <TouchableOpacity onPress={onResetAll} style={styles.resetBtn}>
-                <Text style={styles.resetText}>RESET ALL</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-                <Ionicons name="close" size={20} color={C.text2} />
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          <ScrollView
-            showsVerticalScrollIndicator={false}
-            style={isAndroid ? styles.scroll : undefined}
-            contentContainerStyle={isAndroid ? styles.scrollContent : { paddingBottom: 28 }}
-            keyboardShouldPersistTaps="handled"
-            nestedScrollEnabled={isAndroid}
-            bounces={!isAndroid}
-            overScrollMode={isAndroid ? 'always' : 'auto'}
+    <>
+      <Modal visible={visible} animationType="slide" transparent statusBarTranslucent onRequestClose={onClose}>
+        <View style={styles.overlay}>
+          <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={onClose} />
+          <TrailheadSheet
+            handle={false}
+            style={isAndroid
+              ? [styles.sheet, { height: filterSheetHeight, maxHeight: undefined, paddingBottom: 0 }]
+              : styles.sheet}
+            contentStyle={{ padding: 0 }}
           >
-            <View style={styles.presetWrap}>
-              {presets.map(item => (
-                <TouchableOpacity key={item.id} style={styles.presetBtn} onPress={item.onPress} activeOpacity={0.82}>
-                  <Text style={styles.presetText}>{item.label}</Text>
+            <View style={styles.header}>
+              <View style={styles.headerCopy}>
+                <Text style={styles.title}>MAP FILTERS</Text>
+                <Text style={styles.sub}>{activeModeTitle} · {changedCount} changed · saved on this device</Text>
+              </View>
+              <View style={styles.headerActions}>
+                <TouchableOpacity onPress={() => setLegendVisible(true)} style={styles.resetBtn}>
+                  <Text style={styles.resetText}>LEGEND</Text>
                 </TouchableOpacity>
-              ))}
+                <TouchableOpacity onPress={onResetAll} style={styles.resetBtn}>
+                  <Text style={styles.resetText}>RESET</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
+                  <Ionicons name="close" size={20} color={C.text2} />
+                </TouchableOpacity>
+              </View>
             </View>
-            {categoryUnlocking ? (
-              <TrailheadLoadingRow
-                label="Checking route context"
-                sub="Opening richer Explore and service filters for this session."
-                icon="sparkles-outline"
-                style={styles.sheetLoadingRow}
+
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              style={isAndroid ? styles.scroll : undefined}
+              contentContainerStyle={isAndroid ? styles.scrollContent : { paddingBottom: 28 }}
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled={isAndroid}
+              bounces={!isAndroid}
+              overScrollMode={isAndroid ? 'always' : 'auto'}
+            >
+              <MapModeGallery
+                activePresetId={activePresetId}
+                onSelectPreset={onSelectPreset}
+                onOpenLegend={() => setLegendVisible(true)}
               />
-            ) : null}
+              {categoryUnlocking ? (
+                <TrailheadLoadingRow
+                  label="Checking route context"
+                  sub="Opening richer Explore and service filters for this session."
+                  icon="sparkles-outline"
+                  style={styles.sheetLoadingRow}
+                />
+              ) : null}
 
             <View style={styles.group}>
               {renderSectionRow({
@@ -397,10 +405,17 @@ export default function MapFilterSheet({
             </View>
 
             {isAndroid ? <View style={{ height: filterBottomSpacer }} /> : null}
-          </ScrollView>
-        </TrailheadSheet>
-      </View>
-    </Modal>
+            </ScrollView>
+          </TrailheadSheet>
+        </View>
+      </Modal>
+      <MapLegendSheet
+        visible={legendVisible}
+        focusCategory={activeLegendCategory}
+        contextLabel={activeModeTitle}
+        onClose={() => setLegendVisible(false)}
+      />
+    </>
   );
 }
 
@@ -429,6 +444,10 @@ function makeStyles(C: ColorPalette) {
       borderBottomWidth: 1,
       borderColor: C.border,
       gap: 12,
+    },
+    headerCopy: {
+      flex: 1,
+      minWidth: 0,
     },
     title: {
       color: C.text,
@@ -476,30 +495,6 @@ function makeStyles(C: ColorPalette) {
     },
     scroll: { flex: 1 },
     scrollContent: { paddingBottom: 0 },
-    presetWrap: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 8,
-      paddingHorizontal: 14,
-      paddingTop: 12,
-      paddingBottom: 10,
-    },
-    presetBtn: {
-      minHeight: 34,
-      alignItems: 'center',
-      justifyContent: 'center',
-      paddingHorizontal: 12,
-      borderRadius: 8,
-      backgroundColor: C.s2,
-      borderWidth: 1,
-      borderColor: C.border,
-    },
-    presetText: {
-      color: C.text2,
-      fontSize: 10,
-      fontFamily: mono,
-      fontWeight: '900',
-    },
     sheetLoadingRow: {
       marginHorizontal: 12,
       marginBottom: 10,

@@ -80,6 +80,7 @@ import PaywallModal from '@/components/PaywallModal';
 import AppReviewPrompt from '@/components/AppReviewPrompt';
 import AiReportModal from '@/components/AiReportModal';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
+import { MAP_MODE_PRESETS, type MapModePresetId } from '@/lib/mapLegend';
 import { CREDIT_REWARDS } from '@/lib/credits';
 import { useConnectivitySync } from '@/lib/connectivitySync';
 import { playTrailheadCue, playTrailheadVoice, stopTrailheadVoice } from '@/lib/voice';
@@ -2649,6 +2650,7 @@ function mapWaterNavigationPlace(props: Record<string, any>, lat: number, lng: n
 
 type MapFilterPreferences = {
   mapLayer?: MapLayer;
+  mapModePreset?: MapModePresetId;
   activeFilters?: string[];
   activePinFilters?: string[];
   activePlaceFilters?: string[];
@@ -2666,6 +2668,12 @@ type MapFilterPreferences = {
   layerMvum?: boolean;
   layerNautical?: boolean;
 };
+
+const MAP_MODE_PRESET_IDS = new Set<MapModePresetId>(MAP_MODE_PRESETS.map(preset => preset.id));
+function validMapModePreset(value: unknown): MapModePresetId | null {
+  const candidate = String(value || '') as MapModePresetId;
+  return MAP_MODE_PRESET_IDS.has(candidate) ? candidate : null;
+}
 
 type CommunityPinTypeId = typeof COMMUNITY_PIN_TYPES[number]['id'];
 function communityPinMeta(type?: string) {
@@ -4887,6 +4895,7 @@ function MapScreen() {
   const [mapboxToken,   setMapboxToken]   = useState('');
   const [protomapsKey,  setProtomapsKey]  = useState('');
   const [showFilterSheet, setShowFilterSheet] = useState(false);
+  const [activeMapModePreset, setActiveMapModePreset] = useState<MapModePresetId>('default');
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
   const [activePinFilters, setActivePinFilters] = useState<string[]>(DEFAULT_COMMUNITY_PIN_FILTERS);
   const [activePlaceFilters, setActivePlaceFilters] = useState<string[]>(DEFAULT_PLACE_FILTERS);
@@ -5532,6 +5541,7 @@ function MapScreen() {
         try {
           const prefs = JSON.parse(raw) as MapFilterPreferences;
           const savedLayer = validMapLayer(prefs.mapLayer);
+          const savedMapModePreset = validMapModePreset(prefs.mapModePreset);
           const savedCampFilters = validIds(prefs.activeFilters, CAMP_FILTER_IDS);
           const savedPinFilters = validIds(prefs.activePinFilters, COMMUNITY_PIN_TYPES.map(t => t.id));
           const savedPlaceFilters = validIds(prefs.activePlaceFilters, ALL_PLACE_FILTER_IDS);
@@ -5539,6 +5549,7 @@ function MapScreen() {
             ? DEFAULT_PLACE_FILTERS
             : savedPlaceFilters;
           if (savedLayer) setMapLayerState(savedLayer);
+          if (savedMapModePreset) setActiveMapModePreset(savedMapModePreset);
           if (savedCampFilters) setActiveFilters(savedCampFilters);
           if (savedPinFilters) setActivePinFilters(savedPinFilters);
           if (nextPlaceFilters) setActivePlaceFilters(nextPlaceFilters);
@@ -5570,6 +5581,7 @@ function MapScreen() {
     if (!filterPrefsLoadedRef.current) return;
     const prefs: MapFilterPreferences = {
       mapLayer,
+      mapModePreset: activeMapModePreset,
       activeFilters,
       activePinFilters,
       activePlaceFilters,
@@ -5588,7 +5600,7 @@ function MapScreen() {
       layerNautical,
     };
     storage.set(MAP_FILTER_PREFS_KEY, JSON.stringify(prefs)).catch(() => {});
-  }, [activeFilters, activePinFilters, activePlaceFilters, layerAva, layerFire, layerMvum, layerNautical, layerRadar, layerTrails, map3dEnabled, mapLayer, showCampPins, showCommunityPins, showLands, showPlacePins, showPois, showUsgs]);
+  }, [activeFilters, activeMapModePreset, activePinFilters, activePlaceFilters, layerAva, layerFire, layerMvum, layerNautical, layerRadar, layerTrails, map3dEnabled, mapLayer, showCampPins, showCommunityPins, showLands, showPlacePins, showPois, showUsgs]);
 
   useEffect(() => {
     const today = new Date().toISOString().slice(0, 10);
@@ -12715,6 +12727,7 @@ function MapScreen() {
   }
 
   function resetMapFilterPreferences() {
+    setActiveMapModePreset('default');
     setMapLayerState('light');
     setPremiumMapStyle('standard');
     setMap3dEnabled(false);
@@ -16441,42 +16454,207 @@ function MapScreen() {
   const toggleFilterId = (setter: (updater: (prev: string[]) => string[]) => void, id: string) => {
     setter(prev => prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]);
   };
-  const applyMapFilterPreset = (preset: 'default' | 'overland' | 'camps' | 'water' | 'hideCommunity') => {
+  const applyMapFilterPreset = (preset: MapModePresetId) => {
+    setActiveMapModePreset(preset);
+    const exploreLocked = !exploreCategoriesUnlocked;
+    const unlockedPlaces = (ids: string[]) => {
+      const lockedRequested = ids.some(id => (EXPLORE_PLACE_FILTER_IDS as readonly string[]).includes(id));
+      if (lockedRequested && exploreLocked) {
+        setQuickToast('Open Explore & Services to add town categories.');
+        setTimeout(() => setQuickToast(''), 2600);
+      }
+      return ids.filter(id => !exploreLocked || !(EXPLORE_PLACE_FILTER_IDS as readonly string[]).includes(id));
+    };
+    const setRiskLayers = ({
+      fire = false,
+      ava = false,
+      radar = false,
+      mvum = false,
+      nautical = false,
+    }: { fire?: boolean; ava?: boolean; radar?: boolean; mvum?: boolean; nautical?: boolean }) => {
+      setLayerFire(fire);
+      setLayerAva(ava);
+      setLayerRadar(radar);
+      setLayerMvum(mvum);
+      toggleDataLayer('fire', fire);
+      toggleDataLayer('ava', ava);
+      toggleDataLayer('radar', radar);
+      toggleDataLayer('mvum', mvum);
+      if (nautical) {
+        setLayerNautical(true);
+        toggleDataLayer('nautical', true);
+      } else if (layerNautical || waterFollowActive) {
+        closeSafeWaterMode();
+      } else {
+        setLayerNautical(false);
+        toggleDataLayer('nautical', false);
+      }
+    };
+    const openSections = (sections: string[]) => setExpandedFilterSections(Array.from(new Set(['map-content', ...sections])));
+
     if (preset === 'default') {
+      applyMapLayer('light');
       setShowCampPins(true);
       setShowPlacePins(true);
       setShowCommunityPins(true);
       setActiveFilters([]);
       setActivePlaceFilters(DEFAULT_PLACE_FILTERS);
       setActivePinFilters(DEFAULT_COMMUNITY_PIN_FILTERS);
+      toggleLandOverlay(false);
+      toggleUsgsOverlay(false);
+      togglePoiOverlay(false);
+      setLayerTrails(true);
+      setRiskLayers({});
+      openSections(['camps', 'places']);
       return;
     }
-    if (preset === 'overland') {
+    if (preset === 'tonight') {
+      setShowCampPins(true);
+      setShowPlacePins(true);
+      setShowCommunityPins(true);
+      setActiveFilters([]);
+      setActivePlaceFilters(unlockedPlaces(Array.from(new Set([
+        ...DEFAULT_PLACE_FILTERS,
+        'private_stay',
+        'glamping',
+        'private_camp',
+        'food',
+        'grocery',
+        'lodging',
+      ]))));
+      setActivePinFilters(['camp', 'informal_camp', 'wild_camp', 'private_stay', 'water', 'fuel', 'dump', 'parking', 'restaurant', 'warning']);
+      toggleLandOverlay(false);
+      toggleUsgsOverlay(false);
+      togglePoiOverlay(true);
+      setLayerTrails(true);
+      setRiskLayers({});
+      openSections(['camps', 'places', 'stays', 'community']);
+      return;
+    }
+    if (preset === 'remoteRoute') {
+      applyMapLayer('topo');
       setShowCampPins(true);
       setShowPlacePins(true);
       setShowCommunityPins(true);
       setActiveFilters(['blm', 'usfs', 'dispersed', 'free']);
-      setActivePlaceFilters(Array.from(new Set([...DEFAULT_PLACE_FILTERS, 'mechanic', 'parking', 'private_stay', 'glamping'])));
-      setActivePinFilters(DEFAULT_COMMUNITY_PIN_FILTERS);
+      setActivePlaceFilters(Array.from(new Set([...DEFAULT_PLACE_FILTERS, 'mechanic', 'parking', 'water', 'fuel', 'propane', 'dump'])));
+      setActivePinFilters(['fuel', 'propane', 'water', 'dump', 'parking', 'mechanic', 'cell_signal', 'checkpoint', 'road_report', 'warning', 'gate']);
+      toggleLandOverlay(true);
+      toggleUsgsOverlay(false);
+      togglePoiOverlay(true);
+      setLayerTrails(true);
+      setRiskLayers({});
+      openSections(['places', 'community', 'weather-layers']);
       return;
     }
-    if (preset === 'camps') {
+    if (preset === 'overland') {
+      applyMapLayer('topo');
       setShowCampPins(true);
-      setShowPlacePins(false);
-      setShowCommunityPins(false);
-      setActiveFilters([]);
+      setShowPlacePins(true);
+      setShowCommunityPins(true);
+      setActiveFilters(['blm', 'usfs', 'dispersed', 'free']);
+      setActivePlaceFilters(unlockedPlaces(Array.from(new Set([...DEFAULT_PLACE_FILTERS, 'mechanic', 'parking', 'private_stay', 'glamping', 'ohv']))));
+      setActivePinFilters(['camp', 'informal_camp', 'wild_camp', 'water', 'fuel', 'parking', 'mechanic', 'gate', 'road_report', 'warning', 'checkpoint', 'trail_closure']);
+      toggleLandOverlay(true);
+      toggleUsgsOverlay(true);
+      togglePoiOverlay(true);
+      setLayerTrails(true);
+      setRiskLayers({ mvum: true });
+      openSections(['camps', 'places', 'community', 'weather-layers']);
       return;
     }
-    if (preset === 'water') {
+    if (preset === 'trailDay') {
+      applyMapLayer('topo');
+      setShowCampPins(true);
+      setShowPlacePins(true);
+      setShowCommunityPins(true);
+      setActiveFilters([]);
+      setActivePlaceFilters(['trailhead', 'viewpoint', 'peak', 'hot_spring', 'water', 'parking']);
+      setActivePinFilters(['trailhead', 'trail_note', 'overlook', 'crossing', 'gate', 'trail_closure', 'water', 'parking', 'warning', 'wildlife']);
+      toggleLandOverlay(false);
+      toggleUsgsOverlay(true);
+      togglePoiOverlay(true);
+      setLayerTrails(true);
+      setRiskLayers({});
+      openSections(['places', 'community', 'weather-layers']);
+      return;
+    }
+    if (preset === 'familyEasy') {
+      applyMapLayer('light');
+      setShowCampPins(true);
+      setShowPlacePins(true);
+      setShowCommunityPins(true);
+      setActiveFilters(['ada', 'tent']);
+      setActivePlaceFilters(unlockedPlaces(['trailhead', 'viewpoint', 'park', 'attraction', 'historic', 'water', 'parking', 'food']));
+      setActivePinFilters(['trailhead', 'overlook', 'water', 'parking', 'restaurant', 'attraction', 'medical', 'pet']);
+      toggleLandOverlay(false);
+      toggleUsgsOverlay(false);
+      togglePoiOverlay(true);
+      setLayerTrails(true);
+      setRiskLayers({});
+      openSections(['places', 'explore-services', 'community']);
+      return;
+    }
+    if (preset === 'weatherRisk') {
+      setShowCampPins(true);
+      setShowPlacePins(true);
+      setShowCommunityPins(true);
+      setActiveFilters([]);
+      setActivePlaceFilters(DEFAULT_PLACE_FILTERS);
+      setActivePinFilters(['warning', 'road_report', 'checkpoint', 'gate', 'trail_closure', 'cell_signal', 'water']);
+      toggleLandOverlay(false);
+      toggleUsgsOverlay(false);
+      togglePoiOverlay(false);
+      setLayerTrails(true);
+      setRiskLayers({ fire: true, ava: true, radar: true });
+      openSections(['community', 'weather-layers']);
+      return;
+    }
+    if (preset === 'waterFish') {
+      applyMapLayer('topo');
       setShowCampPins(false);
       setShowPlacePins(true);
-      setShowCommunityPins(false);
-      setActivePlaceFilters(Array.from(new Set(['water', ...WATER_NAV_PLACE_FILTER_IDS])));
-      setLayerNautical(true);
-      toggleDataLayer('nautical', true);
+      setShowCommunityPins(true);
+      setActiveFilters([]);
+      setActivePlaceFilters(Array.from(new Set(['water', 'boat_ramp', 'paddle_launch', 'fishing_access', 'marina', 'dock', 'shore_access', ...WATER_NAV_PLACE_FILTER_IDS])));
+      setActivePinFilters(['water', 'crossing', 'warning', 'checkpoint', 'parking']);
+      toggleLandOverlay(false);
+      toggleUsgsOverlay(false);
+      togglePoiOverlay(true);
+      setLayerTrails(false);
+      setRiskLayers({ nautical: true });
+      openSections(['water', 'community', 'weather-layers']);
       return;
     }
-    setShowCommunityPins(false);
+    if (preset === 'townReset') {
+      applyMapLayer('city');
+      setShowCampPins(false);
+      setShowPlacePins(true);
+      setShowCommunityPins(true);
+      setActiveFilters([]);
+      setActivePlaceFilters(unlockedPlaces(['fuel', 'propane', 'water', 'dump', 'mechanic', 'parking', 'food', 'grocery', 'lodging', 'shower', 'laundromat', 'hardware', 'parts', 'medical', 'wifi']));
+      setActivePinFilters(['fuel', 'propane', 'water', 'dump', 'parking', 'mechanic', 'restaurant', 'shopping', 'medical', 'laundromat', 'shower', 'wifi']);
+      toggleLandOverlay(false);
+      toggleUsgsOverlay(false);
+      togglePoiOverlay(true);
+      setLayerTrails(false);
+      setRiskLayers({});
+      openSections(['places', 'explore-services', 'community']);
+      return;
+    }
+    applyMapLayer('hybrid');
+    setShowCampPins(false);
+    setShowPlacePins(true);
+    setShowCommunityPins(true);
+    setActiveFilters([]);
+    setActivePlaceFilters(unlockedPlaces(['trailhead', 'viewpoint', 'peak', 'hot_spring', 'attraction', 'historic', 'park']));
+    setActivePinFilters(['trailhead', 'overlook', 'attraction', 'rock_art', 'wildlife', 'other']);
+    toggleLandOverlay(false);
+    toggleUsgsOverlay(false);
+    togglePoiOverlay(true);
+    setLayerTrails(true);
+    setRiskLayers({});
+    openSections(['places', 'explore-services', 'community']);
   };
   const showMapStatusBar = Boolean(
     !navMode &&
@@ -18654,13 +18832,7 @@ function MapScreen() {
         filterSheetHeight={filterSheetHeight}
         filterBottomSpacer={filterBottomSpacer}
         expandedSections={expandedFilterSections}
-        presets={[
-          { id: 'default', label: 'Default', onPress: () => applyMapFilterPreset('default') },
-          { id: 'overland', label: 'Overland', onPress: () => applyMapFilterPreset('overland') },
-          { id: 'camps', label: 'Camps Only', onPress: () => applyMapFilterPreset('camps') },
-          { id: 'water', label: 'Safe Water', onPress: () => applyMapFilterPreset('water') },
-          { id: 'hideCommunity', label: 'Hide Community', onPress: () => applyMapFilterPreset('hideCommunity') },
-        ]}
+        activePresetId={activeMapModePreset}
         mapContentSummary={mapContentSummary}
         mapContentItems={[
           {
@@ -18773,6 +18945,7 @@ function MapScreen() {
         ]}
         onClose={() => setShowFilterSheet(false)}
         onResetAll={resetMapFilterPreferences}
+        onSelectPreset={applyMapFilterPreset}
         onToggleSection={toggleFilterSection}
         onResetCamps={() => setActiveFilters([])}
         onToggleCampFilter={id => toggleFilterId(setActiveFilters, id)}
@@ -18784,7 +18957,7 @@ function MapScreen() {
           }
           toggleFilterId(setActivePlaceFilters, id);
         }}
-        onSafeWaterPreset={() => applyMapFilterPreset('water')}
+        onSafeWaterPreset={() => applyMapFilterPreset('waterFish')}
         onToggleWater={id => {
           setActivePlaceFilters(prev => {
             const withoutBroadWater = prev.filter(item => item !== 'water');

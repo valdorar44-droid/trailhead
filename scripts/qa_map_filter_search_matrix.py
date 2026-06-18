@@ -51,6 +51,7 @@ def main() -> int:
         "legend rendered as sibling": "<MapLegendSheet",
         "filter callback wired": "onOpenLegend={openMapFilterLegend}",
         "inline search state": "const [inlineSearchOpen, setInlineSearchOpen] = useState(false);",
+        "android inline search hides tab bar": "Platform.OS === 'android' && inlineSearchOpen && keyboardVisible",
         "scoped map search state": "const [mapSearchSession, setMapSearchSession] = useState<ScopedMapSearchSession | null>(null);",
         "scoped map search parser": "function parseScopedMapSearchQuery(query: string): ScopedMapSearchIntent | null",
         "scoped map search runner": "async function runScopedMapSearch(intent: ScopedMapSearchIntent)",

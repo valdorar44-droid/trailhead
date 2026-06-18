@@ -5980,6 +5980,7 @@ function MapScreen() {
       || showMapStyleSheet
       || mapWeatherEnabled
       || showMapWeatherSheet
+      || (Platform.OS === 'android' && inlineSearchOpen && keyboardVisible)
       || (showSearch && !!searchRouteCard)
       || !!selectedCamp
       || !!selectedPlace
@@ -5996,7 +5997,7 @@ function MapScreen() {
     );
     return () => setTabBarHidden(false);
   }, [
-    navMode, waterFollowActive, safeWaterSheetOwnsPage, offlineAreaPicker, showMapDrawer, showSearch, showFilterSheet, showLayerSheet, showMapStyleSheet, mapWeatherEnabled, showMapWeatherSheet, searchRouteCard, selectedCamp, selectedPlace, selectedTrail,
+    navMode, waterFollowActive, safeWaterSheetOwnsPage, offlineAreaPicker, showMapDrawer, showSearch, showFilterSheet, showLayerSheet, showMapStyleSheet, mapWeatherEnabled, showMapWeatherSheet, inlineSearchOpen, keyboardVisible, searchRouteCard, selectedCamp, selectedPlace, selectedTrail,
     selectedCommunityPin, tappedPoi, tappedGas, tappedTileSpot, tappedTrail,
     tappedWp, pendingPin, trailPinCaptureMode, trailRouteBuilderOpen, setTabBarHidden,
   ]);

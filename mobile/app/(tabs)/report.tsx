@@ -12,7 +12,7 @@ import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import TourTarget from '@/components/TourTarget';
 import { TrailheadButton, TrailheadCard, TrailheadCardSkeleton, TrailheadLoadingRow, TrailheadSheet, TrailheadTopBar } from '@/components/TrailheadUI';
-import { api, Report, ContributorLeader, ContributorProfile, ContributionPeriod } from '@/lib/api';
+import { api, Report, ReportPayload, ContributorLeader, ContributorProfile, ContributionPeriod } from '@/lib/api';
 import { useStore } from '@/lib/store';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 import { CREDIT_REWARDS } from '@/lib/credits';
@@ -50,36 +50,40 @@ async function saveAlertPrefs(prefs: Record<string, boolean>): Promise<void> {
 
 // Semantic category colors — chosen to read well on both light and dark backgrounds
 const REPORT_TYPES = [
-  { type: 'hazard',      label: 'HAZARD',   icon: 'warning-outline',      color: '#ef4444', ttl: '7d',
-    subtypes: ['Downed tree', 'Rockfall', 'Wildlife', 'Fire / smoke', 'Flash flood'] },
-  { type: 'police',      label: 'PATROL',   icon: 'shield-outline',        color: '#f59e0b', ttl: '2h',
-    subtypes: ['Ranger patrol', 'Fee checkpoint', 'OHV enforcement', 'Fire restriction'] },
-  { type: 'road_condition', label: 'ROAD',  icon: 'trail-sign-outline',    color: '#f97316', ttl: '7d',
-    subtypes: ['Clear & good', 'Muddy / soft', 'Washed out', 'Snow / ice', 'Flooded'] },
-  { type: 'water',       label: 'WATER',    icon: 'water-outline',         color: '#38bdf8', ttl: '3d',
-    subtypes: ['Flowing well', 'Spring dry', 'Questionable quality', 'Filter required'] },
-  { type: 'cell_signal', label: 'SIGNAL',   icon: 'cellular-outline',      color: '#22c55e', ttl: '1d',
-    subtypes: ['Strong signal', 'Weak signal', 'No signal', 'Starlink only'] },
-  { type: 'wildlife',    label: 'WILDLIFE', icon: 'paw-outline',           color: '#a78bfa', ttl: '1d',
-    subtypes: ['Bear activity', 'Mountain lion', 'Elk / deer', 'Snake', 'Cool sighting'] },
-  { type: 'campsite',    label: 'CAMPSITE', icon: 'bonfire-outline',       color: '#14b8a6', ttl: '14d',
-    subtypes: ['Available & clean', 'Occupied', 'Trashed', 'Great condition', 'No water'] },
-  { type: 'closure',     label: 'CLOSURE',  icon: 'remove-circle-outline', color: '#ef4444', ttl: '30d',
-    subtypes: ['Gate locked', 'Road closed', 'Seasonal', 'Fire closure', 'Now open!'] },
-  { type: 'traffic',     label: 'TRAFFIC',  icon: 'car-outline',           color: '#38bdf8', ttl: '6h',
-    subtypes: ['Crash', 'Congestion', 'Lane closed', 'Disabled vehicle', 'Delay'] },
-  { type: 'weather',     label: 'WEATHER',  icon: 'thunderstorm-outline',  color: '#6DA8FF', ttl: '12h',
-    subtypes: ['Severe storm', 'Flash flood', 'High wind', 'Winter storm', 'Heat warning'] },
-  { type: 'fire',        label: 'FIRE',     icon: 'flame-outline',         color: '#ef4444', ttl: '14d',
+  { type: 'road_condition', label: 'ROAD', icon: 'trail-sign-outline', color: '#f97316', ttl: '7d',
+    subtypes: ['Washout', 'Mud', 'Snow / ice', 'High clearance needed', '4WD needed', 'Shelf road', 'Deep sand', 'Low bridge'] },
+  { type: 'road_closure', label: 'CLOSED', icon: 'remove-circle-outline', color: '#ef4444', ttl: '30d',
+    subtypes: ['Road closed', 'Gate closed', 'Construction', 'Ferry / bridge issue', 'Seasonal closure', 'Now open'] },
+  { type: 'campsite', label: 'CAMP', icon: 'bonfire-outline', color: '#14b8a6', ttl: '14d',
+    subtypes: ['Camp full', 'Camp closed', 'Fee changed', 'Water unavailable', 'Toilet / trash issue', 'Noisy / unsafe', 'Access road issue', 'Reservation issue'] },
+  { type: 'trail_condition', label: 'TRAIL', icon: 'walk-outline', color: '#22c55e', ttl: '7d',
+    subtypes: ['Trail closed', 'Washed out', 'Downed trees', 'Snow', 'Muddy', 'Crowded', 'Wildlife', 'Water crossing', 'Parking full', 'Access restriction'] },
+  { type: 'weather', label: 'WEATHER', icon: 'thunderstorm-outline', color: '#6DA8FF', ttl: '12h',
+    subtypes: ['Flash flood', 'Avalanche / slope', 'Heat', 'High wind', 'Winter storm', 'Severe storm'] },
+  { type: 'fire', label: 'FIRE', icon: 'flame-outline', color: '#ef4444', ttl: '14d',
     subtypes: ['Active wildfire', 'Fire closure', 'Evacuation', 'Fire restriction', 'Smoke visible'] },
-  { type: 'smoke',       label: 'SMOKE',    icon: 'cloud-outline',         color: '#a78bfa', ttl: '12h',
+  { type: 'smoke', label: 'SMOKE', icon: 'cloud-outline', color: '#a78bfa', ttl: '12h',
     subtypes: ['Unhealthy AQI', 'Heavy smoke', 'Low visibility', 'Sensitive groups', 'Clearing'] },
-  { type: 'fuel',        label: 'FUEL',     icon: 'flash-outline',         color: '#eab308', ttl: '12h',
-    subtypes: ['Diesel available', 'Gas available', 'Propane available', 'Fuel out', 'Price info'] },
-  { type: 'viewpoint',   label: 'VIEW',     icon: 'flag-outline',          color: '#38bdf8', ttl: '90d',
+  { type: 'water', label: 'WATER', icon: 'water-outline', color: '#38bdf8', ttl: '3d',
+    subtypes: ['Water source dry', 'Flowing well', 'Unsafe water', 'Algae bloom', 'Filter required', 'Flooded crossing'] },
+  { type: 'fuel', label: 'FUEL', icon: 'flash-outline', color: '#eab308', ttl: '12h',
+    subtypes: ['Fuel unavailable', 'Diesel available', 'Gas available', 'Propane unavailable', 'Price info', 'Payment issue'] },
+  { type: 'service', label: 'SERVICE', icon: 'construct-outline', color: '#94a3b8', ttl: '30d',
+    subtypes: ['Dump closed', 'Water fill closed', 'Repair / tire service', 'Medical', 'Wifi good', 'Cell bad', 'Auto parts'] },
+  { type: 'cell_signal', label: 'SIGNAL', icon: 'cellular-outline', color: '#22c55e', ttl: '1d',
+    subtypes: ['Strong signal', 'Weak signal', 'No signal', 'Starlink only'] },
+  { type: 'wildlife', label: 'WILDLIFE', icon: 'paw-outline', color: '#a78bfa', ttl: '1d',
+    subtypes: ['Bear activity', 'Mountain lion', 'Elk / deer', 'Snake', 'Cool sighting'] },
+  { type: 'hazard', label: 'HAZARD', icon: 'warning-outline', color: '#ef4444', ttl: '7d',
+    subtypes: ['Rockfall', 'Downed tree', 'Unsafe pullout', 'Debris', 'Sketchy area'] },
+  { type: 'traffic', label: 'TRAFFIC', icon: 'car-outline', color: '#38bdf8', ttl: '6h',
+    subtypes: ['Crash', 'Congestion', 'Lane closed', 'Disabled vehicle', 'Delay'] },
+  { type: 'viewpoint', label: 'VIEW', icon: 'flag-outline', color: '#38bdf8', ttl: '90d',
     subtypes: ['Epic vista', 'Sunrise spot', 'Sunset spot', 'Photo opportunity', 'Hidden gem'] },
-  { type: 'service',     label: 'SERVICE',  icon: 'construct-outline',     color: '#94a3b8', ttl: '30d',
-    subtypes: ['Mechanic nearby', 'Tire repair', 'Tow available', 'Auto parts', 'Dump station'] },
+  { type: 'closure', label: 'ACCESS', icon: 'lock-closed-outline', color: '#ef4444', ttl: '30d',
+    subtypes: ['Gate locked', 'Area closed', 'Permit issue', 'Seasonal', 'Fire closure'] },
+  { type: 'police', label: 'PATROL', icon: 'shield-outline', color: '#f59e0b', ttl: '2h',
+    subtypes: ['Ranger patrol', 'Fee checkpoint', 'OHV enforcement', 'Fire restriction'] },
 ];
 
 const SEVERITY = [
@@ -90,8 +94,17 @@ const SEVERITY = [
 ];
 
 const PHOTO_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
+const OFFLINE_REPORT_QUEUE_KEY = 'trailhead_report_queue_v1';
 
 type TabView = 'route' | 'camp' | 'nearby' | 'submit' | 'leaderboard';
+type SourceConfidence = 'observed' | 'reported';
+type QueuedReport = {
+  id: string;
+  payload: ReportPayload;
+  label: string;
+  created_at: number;
+  had_photo: boolean;
+};
 
 function tripWaypointsForConditions(activeTrip: ReturnType<typeof useStore.getState>['activeTrip']) {
   return activeTrip?.plan.waypoints.filter(wp => wp.lat != null && wp.lng != null) ?? [];
@@ -108,6 +121,93 @@ function distanceMiBetween(a: { lat?: number | null; lng?: number | null }, b: {
 
 function isOvernightWaypoint(type: string | null | undefined) {
   return ['camp', 'motel', 'town'].includes(String(type || '').toLowerCase());
+}
+
+async function loadQueuedReports(): Promise<QueuedReport[]> {
+  try {
+    const raw = await storage.get(OFFLINE_REPORT_QUEUE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter(item => item?.payload?.lat != null && item?.payload?.lng != null) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function saveQueuedReports(items: QueuedReport[]) {
+  try {
+    await storage.set(OFFLINE_REPORT_QUEUE_KEY, JSON.stringify(items.slice(-20)));
+  } catch {}
+}
+
+function isOfflineSubmitError(error: any) {
+  const message = String(error?.message || error || '').toLowerCase();
+  return !message || /network|offline|failed to fetch|timeout|connection|temporarily unavailable/.test(message);
+}
+
+function sourceConfidenceCopy(source: SourceConfidence) {
+  return source === 'observed' ? 'Source: firsthand observation.' : 'Source: reported by another traveler or local staff.';
+}
+
+function reportDescriptionWithSource(description: string, source: SourceConfidence) {
+  const note = sourceConfidenceCopy(source);
+  const trimmed = description.trim();
+  return trimmed ? `${note} ${trimmed}` : note;
+}
+
+function ttlHoursForType(type: string) {
+  const ttl = REPORT_TYPES.find(rt => rt.type === type)?.ttl ?? '7d';
+  const match = ttl.match(/^(\d+)([hd])$/);
+  if (!match) return 7 * 24;
+  const value = Number(match[1]);
+  return match[2] === 'd' ? value * 24 : value;
+}
+
+function formatReportDuration(hours: number | null) {
+  if (hours == null) return '';
+  if (hours <= 0) return 'now';
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  const rem = hours % 24;
+  return rem > 0 ? `${days}d ${rem}h` : `${days}d`;
+}
+
+function reportAgeLabel(createdAt?: number) {
+  if (!createdAt) return 'age unknown';
+  const minutes = Math.max(0, Math.floor((Date.now() / 1000 - createdAt) / 60));
+  if (minutes < 2) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  return `${formatReportDuration(Math.floor(minutes / 60))} ago`;
+}
+
+function reportExpiresLabel(expiresAt?: number | null) {
+  if (!expiresAt) return '';
+  const hours = Math.max(0, Math.floor((expiresAt - Date.now() / 1000) / 3600));
+  return `expires ${formatReportDuration(hours)}`;
+}
+
+function reportTrustLabel(r: Report) {
+  if (r.source === 'provider') {
+    const confidence = typeof r.confidence === 'number' ? ` · ${Math.round(r.confidence * 100)}%` : '';
+    return `Provider signal${confidence}`;
+  }
+  if ((r.downvotes ?? 0) >= 3) return 'Needs review';
+  if ((r.confirmations ?? 0) > 0) return `${r.confirmations} still-there check${r.confirmations === 1 ? '' : 's'}`;
+  if (r.has_photo) return 'Photo evidence';
+  return 'New community report';
+}
+
+function sourceLabelForReport(r: Report) {
+  if (r.source === 'provider') return conditionSourceLabel(r);
+  if (/source:\s*reported/i.test(r.description || '')) return 'Heard report';
+  if (/source:\s*firsthand/i.test(r.description || '')) return 'Firsthand';
+  return r.username ? `@${r.username}` : 'Community';
+}
+
+function displayReportDescription(description?: string | null) {
+  return String(description || '')
+    .replace(/^source:\s*firsthand observation\.\s*/i, '')
+    .replace(/^source:\s*reported by another traveler or local staff\.\s*/i, '')
+    .trim();
 }
 
 function tonightAnchorForTrip(
@@ -156,11 +256,14 @@ export default function ReportScreen() {
   const [selectedType, setSelectedType] = useState<typeof REPORT_TYPES[0] | null>(null);
   const [selectedSubtype, setSelectedSubtype] = useState('');
   const [severity, setSeverity] = useState('moderate');
+  const [sourceConfidence, setSourceConfidence] = useState<SourceConfidence>('observed');
   const [description, setDescription] = useState('');
   const [photoBase64, setPhotoBase64] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [creditsGained, setCreditsGained] = useState(0);
+  const [queuedReports, setQueuedReports] = useState<QueuedReport[]>([]);
+  const [queueFlushing, setQueueFlushing] = useState(false);
   const [nearby, setNearby] = useState<Report[]>([]);
   const [routeReports, setRouteReports] = useState<Report[]>([]);
   const [campReports, setCampReports] = useState<Report[]>([]);
@@ -220,6 +323,87 @@ export default function ReportScreen() {
     saveSeenAlertIds(updated);
   }
 
+  async function refreshQueuedReports() {
+    const items = await loadQueuedReports();
+    setQueuedReports(items);
+    return items;
+  }
+
+  async function queueReportForRetry(payload: ReportPayload, label: string, hadPhoto: boolean) {
+    const queuedPayload = { ...payload, photo_data: undefined };
+    const item: QueuedReport = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      payload: queuedPayload,
+      label,
+      created_at: Date.now() / 1000,
+      had_photo: hadPhoto,
+    };
+    const next = [...await loadQueuedReports(), item].slice(-20);
+    await saveQueuedReports(next);
+    setQueuedReports(next);
+  }
+
+  async function flushQueuedReports(showResult = false) {
+    if (!user || queueFlushing) return;
+    const items = await loadQueuedReports();
+    if (items.length === 0) {
+      setQueuedReports([]);
+      if (showResult) Alert.alert('Queue empty', 'No saved reports are waiting.');
+      return;
+    }
+    setQueueFlushing(true);
+    let sent = 0;
+    let dropped = 0;
+    let remaining: QueuedReport[] = [];
+    try {
+      for (let i = 0; i < items.length; i += 1) {
+        const item = items[i];
+        try {
+          const res = await api.submitReport(item.payload);
+          sent += 1;
+          addLiveReport({
+            id: res.report_id,
+            lat: item.payload.lat,
+            lng: item.payload.lng,
+            type: item.payload.type,
+            subtype: item.payload.subtype ?? '',
+            description: item.payload.description ?? '',
+            severity: item.payload.severity ?? 'moderate',
+            upvotes: 0,
+            downvotes: 0,
+            confirmations: 0,
+            has_photo: 0,
+            cluster_count: 1,
+            username: user?.username ?? 'me',
+            created_at: Date.now() / 1000,
+            expires_at: Date.now() / 1000 + res.ttl_hours * 3600,
+          });
+        } catch (e: any) {
+          if (isOfflineSubmitError(e)) {
+            remaining = [item, ...items.slice(i + 1)];
+            break;
+          }
+          dropped += 1;
+        }
+      }
+      await saveQueuedReports(remaining);
+      setQueuedReports(remaining);
+      if (locRef.current && sent > 0) {
+        api.getNearbyAlerts(locRef.current.lat, locRef.current.lng).then(setNearby).catch(() => {});
+      }
+      if (showResult) {
+        const parts = [
+          sent ? `${sent} sent` : '',
+          remaining.length ? `${remaining.length} still waiting` : '',
+          dropped ? `${dropped} dropped` : '',
+        ].filter(Boolean);
+        Alert.alert('Offline queue', parts.join(' · ') || 'No changes.');
+      }
+    } finally {
+      setQueueFlushing(false);
+    }
+  }
+
   // Load prefs + seen IDs, then request location once on mount
   useEffect(() => {
     loadAlertPrefs().then(prefs => {
@@ -247,6 +431,12 @@ export default function ReportScreen() {
 
     api.getContributionsLeaderboard('month').then(res => setTopUsers(res.leaders)).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    refreshQueuedReports().then(items => {
+      if (user && items.length > 0) flushQueuedReports(false);
+    });
+  }, [user?.id]);
 
   useEffect(() => {
     if (view === 'route' && routeWaypoints.length === 0) setView('nearby');
@@ -322,6 +512,80 @@ export default function ReportScreen() {
     saveAlertPrefs(updated);
   }
 
+  function patchReport(reportId: Report['id'], updater: (report: Report) => Report) {
+    const apply = (items: Report[]) => items.map(item => item.id === reportId ? updater(item) : item);
+    setRouteReports(apply);
+    setCampReports(apply);
+    setNearby(apply);
+    setDetailReport(current => current?.id === reportId ? updater(current) : current);
+  }
+
+  async function handleStillThere(report: Report) {
+    if (report.source === 'provider' || typeof report.id !== 'number') return;
+    try {
+      const res = await api.confirmReport(report.id);
+      const ttlHours = ttlHoursForType(report.type);
+      patchReport(report.id, item => ({
+        ...item,
+        confirmations: (item.confirmations ?? 0) + 1,
+        expires_at: Date.now() / 1000 + ttlHours * 3600,
+      }));
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      Alert.alert('Still there', `+${res.credits_earned} credit earned`);
+    } catch (e: any) {
+      Alert.alert('Could not confirm', e?.message ?? 'Try again when you have signal.');
+    }
+  }
+
+  async function handleUpvote(report: Report) {
+    if (report.source === 'provider' || typeof report.id !== 'number') return;
+    try {
+      await api.upvoteReport(report.id);
+      patchReport(report.id, item => ({ ...item, upvotes: (item.upvotes ?? 0) + 1 }));
+    } catch {}
+  }
+
+  function handleNotThere(report: Report) {
+    if (report.source === 'provider' || typeof report.id !== 'number') return;
+    Alert.alert('Mark not there?', 'This helps hide stale or inaccurate reports.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Not there',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await api.downvoteReport(report.id as number);
+            patchReport(report.id, item => ({ ...item, downvotes: (item.downvotes ?? 0) + 1 }));
+          } catch (e: any) {
+            Alert.alert('Could not mark it', e?.message ?? 'Try again when you have signal.');
+          }
+        },
+      },
+    ]);
+  }
+
+  function distanceLabelForReport(report: Report, mode: 'route' | 'camp' | 'nearby') {
+    const point = { lat: report.lat, lng: report.lng };
+    let target: { lat?: number | null; lng?: number | null } | null = null;
+    let suffix = 'away';
+    if (mode === 'nearby') {
+      target = loc;
+      suffix = 'from you';
+    } else if (mode === 'camp') {
+      target = tonightAnchor;
+      suffix = 'from camp';
+    } else if (routeWaypoints.length > 0) {
+      target = routeWaypoints
+        .slice()
+        .sort((a, b) => distanceMiBetween(a, point) - distanceMiBetween(b, point))[0];
+      suffix = 'from route';
+    }
+    if (!target?.lat || !target?.lng) return '';
+    const miles = distanceMiBetween(target, point);
+    const label = miles < 0.1 ? '<0.1 mi' : miles < 10 ? `${miles.toFixed(1)} mi` : `${Math.round(miles)} mi`;
+    return `${label} ${suffix}`;
+  }
+
   function selectType(rt: typeof REPORT_TYPES[0], idx: number) {
     setSelectedType(rt);
     setSelectedSubtype('');
@@ -355,16 +619,19 @@ export default function ReportScreen() {
     if (!selectedType) { Alert.alert('Select a report type first'); return; }
     if (!loc) { Alert.alert('Location unavailable'); return; }
     setSubmitting(true);
+    const reportLabel = selectedSubtype || selectedType.label;
+    const descriptionWithSource = reportDescriptionWithSource(description, sourceConfidence);
     try {
       const fullDesc = (campsiteRating > 0 && selectedType.type === 'campsite')
-        ? `${campsiteRating}/5 stars.${description ? ' ' + description : ''}`
-        : description;
-      const res = await api.submitReport({
+        ? `${campsiteRating}/5 stars. ${descriptionWithSource}`
+        : descriptionWithSource;
+      const payload: ReportPayload = {
         lat: loc.lat, lng: loc.lng,
         type: selectedType.type, subtype: selectedSubtype,
         description: fullDesc, severity,
         photo_data: photoBase64 ?? undefined,
-      });
+      };
+      const res = await api.submitReport(payload);
       setCreditsGained(res.credits_earned);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setSubmitted(true);
@@ -383,12 +650,30 @@ export default function ReportScreen() {
       setTimeout(() => {
         Animated.timing(successAnim, { toValue: 0, duration: 300, useNativeDriver: true }).start(() => setSubmitted(false));
         setSelectedType(null); setSelectedSubtype('');
-        setDescription(''); setPhotoBase64(null);
+        setDescription(''); setPhotoBase64(null); setSourceConfidence('observed');
       }, 3000);
       api.me().then(async u => setAuth(await getToken(), u)).catch(() => {});
       if (loc) api.getNearbyAlerts(loc.lat, loc.lng).then(setNearby).catch(() => {});
     } catch (e: any) {
-      Alert.alert('Error', e.message);
+      const fullDesc = (campsiteRating > 0 && selectedType.type === 'campsite')
+        ? `${campsiteRating}/5 stars. ${descriptionWithSource}`
+        : descriptionWithSource;
+      const payload: ReportPayload = {
+        lat: loc.lat, lng: loc.lng,
+        type: selectedType.type, subtype: selectedSubtype,
+        description: fullDesc, severity,
+      };
+      if (isOfflineSubmitError(e)) {
+        await queueReportForRetry(payload, reportLabel, Boolean(photoBase64));
+        Alert.alert(
+          'Saved for retry',
+          photoBase64
+            ? 'The report was queued without the photo and will retry when the app has signal.'
+            : 'The report will retry when the app has signal.',
+        );
+      } else {
+        Alert.alert('Error', e.message);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -469,12 +754,12 @@ export default function ReportScreen() {
           </View>
         ) : reports.map(r => (
           <ReportCard key={`${mode}-${r.id}`} report={r}
+            distanceLabel={distanceLabelForReport(r, mode)}
             onPress={() => setDetailReport(r)}
-            onUpvote={() => typeof r.id === 'number' && api.upvoteReport(r.id).catch(() => {})}
-            onDownvote={() => typeof r.id === 'number' && api.downvoteReport(r.id).catch(() => {})}
-            onConfirm={() => typeof r.id === 'number' && api.confirmReport(r.id).then(res => {
-              Alert.alert('Confirmed ✓', `+${res.credits_earned} credit earned`);
-            }).catch((e: any) => Alert.alert('Error', e.message))}
+            onUpvote={() => handleUpvote(r)}
+            onDownvote={() => handleNotThere(r)}
+            onConfirm={() => handleStillThere(r)}
+            onReportMore={() => setView('submit')}
             onAdminDelete={user?.is_admin ? () => Alert.alert('Delete Report', 'Permanently remove this report?', [
               { text: 'Cancel', style: 'cancel' },
               { text: 'Delete', style: 'destructive', onPress: () => typeof r.id === 'number' && api.adminDeleteReport(r.id).then(() => {
@@ -576,6 +861,22 @@ export default function ReportScreen() {
             <Ionicons name="car-outline" size={13} color={C.orange} />
             <Text style={s.safetyText}>Pull over before posting. Reports use your current location.</Text>
           </TrailheadCard>
+          {queuedReports.length > 0 && (
+            <TrailheadCard style={s.queueBanner}>
+              <View style={s.queueIcon}>
+                <Ionicons name="cloud-upload-outline" size={17} color={C.orange} />
+              </View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={s.queueTitle}>{queuedReports.length} report{queuedReports.length === 1 ? '' : 's'} waiting</Text>
+                <Text style={s.queueText} numberOfLines={2}>
+                  Saved reports retry when you have signal. Photos stay live-only.
+                </Text>
+              </View>
+              <TouchableOpacity style={s.queueRetry} onPress={() => flushQueuedReports(true)} disabled={queueFlushing}>
+                <Text style={s.queueRetryText}>{queueFlushing ? 'SENDING' : 'RETRY'}</Text>
+              </TouchableOpacity>
+            </TrailheadCard>
+          )}
           <Text style={s.sectionLabel}>TYPE</Text>
           <TourTarget id="report.types">
             <View style={s.typeGrid}>
@@ -624,6 +925,29 @@ export default function ReportScreen() {
                     <Text style={[s.sevText, severity === sv.val && { color: sv.color }]}>{sv.label}</Text>
                   </TouchableOpacity>
                 ))}
+              </View>
+
+              <Text style={s.sectionLabel}>SOURCE</Text>
+              <View style={s.sourceConfidenceRow}>
+                {([
+                  ['observed', 'I saw this', 'Best confidence'],
+                  ['reported', 'I heard this', 'Needs follow-up'],
+                ] as const).map(([value, label, sub]) => {
+                  const active = sourceConfidence === value;
+                  return (
+                    <TouchableOpacity
+                      key={value}
+                      style={[s.sourceConfidenceBtn, active && { borderColor: selectedType.color, backgroundColor: selectedType.color + '16' }]}
+                      onPress={() => setSourceConfidence(value)}
+                    >
+                      <Ionicons name={value === 'observed' ? 'eye-outline' : 'chatbubble-ellipses-outline'} size={16} color={active ? selectedType.color : C.text3} />
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={[s.sourceConfidenceText, active && { color: selectedType.color }]}>{label}</Text>
+                        <Text style={s.sourceConfidenceSub}>{sub}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
 
               <View style={s.photoSection}>
@@ -906,13 +1230,15 @@ export default function ReportScreen() {
       {detailReport && (
         <ReportDetailModal
           report={detailReport}
+          distanceLabel={distanceLabelForReport(detailReport, view === 'leaderboard' || view === 'submit' ? 'nearby' : view)}
           onClose={() => setDetailReport(null)}
-          onUpvote={() => { if (typeof detailReport.id === 'number') api.upvoteReport(detailReport.id).catch(() => {}); setDetailReport(null); }}
-          onDownvote={() => { if (typeof detailReport.id === 'number') api.downvoteReport(detailReport.id).catch(() => {}); setDetailReport(null); }}
-          onConfirm={() => typeof detailReport.id === 'number' && api.confirmReport(detailReport.id).then(res => {
-            Alert.alert('Confirmed ✓', `+${res.credits_earned} credit earned`);
+          onUpvote={() => handleUpvote(detailReport)}
+          onDownvote={() => handleNotThere(detailReport)}
+          onConfirm={() => handleStillThere(detailReport)}
+          onReportMore={() => {
             setDetailReport(null);
-          }).catch((e: any) => Alert.alert('Error', e.message))}
+            setView('submit');
+          }}
         />
       )}
       {selectedContributor && (
@@ -1028,8 +1354,8 @@ function conditionSourceLabel(r: Report): string {
   return `LIVE CONDITION · ${(r.provider ?? 'provider').toUpperCase()}`;
 }
 
-function ReportCard({ report: r, onPress, onUpvote, onDownvote, onConfirm, onAdminDelete, onAdminRemovePhoto }:
-  { report: Report; onPress: () => void; onUpvote: () => void; onDownvote: () => void; onConfirm: () => void;
+function ReportCard({ report: r, distanceLabel, onPress, onUpvote, onDownvote, onConfirm, onReportMore, onAdminDelete, onAdminRemovePhoto }:
+  { report: Report; distanceLabel?: string; onPress: () => void; onUpvote: () => void; onDownvote: () => void; onConfirm: () => void; onReportMore: () => void;
     onAdminDelete?: () => void; onAdminRemovePhoto?: () => void; }) {
   const C = useTheme();
   const rc = useMemo(() => makeRcStyles(C), [C]);
@@ -1037,10 +1363,12 @@ function ReportCard({ report: r, onPress, onUpvote, onDownvote, onConfirm, onAdm
   const typeInfo = REPORT_TYPES.find(t => t.type === r.type);
   const sevInfo = SEVERITY.find(sv => sv.val === r.severity);
   const isProvider = r.source === 'provider';
-  const sourceLabel = conditionSourceLabel(r);
-  const createdAt = typeof r.created_at === 'number' ? r.created_at : 0;
-  const age = Math.floor((Date.now() / 1000 - createdAt) / 3600);
-  const expiresIn = r.expires_at ? Math.max(0, Math.floor((r.expires_at - Date.now() / 1000) / 3600)) : null;
+  const sourceLabel = sourceLabelForReport(r);
+  const age = reportAgeLabel(r.created_at);
+  const expires = reportExpiresLabel(r.expires_at);
+  const trust = reportTrustLabel(r);
+  const description = displayReportDescription(r.description);
+  const metaParts = [sourceLabel, distanceLabel, age, expires, trust, r.has_photo ? 'photo' : ''].filter(Boolean);
 
   return (
     <TouchableOpacity style={rc.card} onPress={onPress} activeOpacity={0.85}>
@@ -1063,7 +1391,7 @@ function ReportCard({ report: r, onPress, onUpvote, onDownvote, onConfirm, onAdm
           {!!r.subtype && <Text style={rc.subtype}>{r.subtype}</Text>}
           {isProvider && (
             <Text style={rc.provider}>
-              {sourceLabel}{r.road_name ? ` · ${r.road_name}` : ''}
+              {conditionSourceLabel(r)}{r.road_name ? ` · ${r.road_name}` : ''}
             </Text>
           )}
         </View>
@@ -1073,26 +1401,28 @@ function ReportCard({ report: r, onPress, onUpvote, onDownvote, onConfirm, onAdm
           </View>
         )}
       </View>
-      {r.description ? <Text style={rc.desc}>{r.description}</Text> : null}
+      {description ? <Text style={rc.desc}>{description}</Text> : null}
+      <View style={rc.signalRow}>
+        <Ionicons name={isProvider ? 'radio-outline' : 'shield-checkmark-outline'} size={13} color={isProvider ? '#38bdf8' : C.text3} />
+        <Text style={rc.signalText} numberOfLines={2}>{metaParts.join(' · ')}</Text>
+      </View>
       <View style={rc.footer}>
-        <Text style={rc.age}>
-          {isProvider ? sourceLabel : `@${r.username}`} · {age < 1 ? 'just now' : `${age}h ago`}
-          {expiresIn !== null ? ` · exp ${expiresIn}h` : ''}
-          {r.has_photo ? ' · photo' : ''}
-          {!isProvider && r.confirmations > 0 ? ` · ✓${r.confirmations}` : ''}
-        </Text>
         {!isProvider ? <View style={rc.actions}>
           <TouchableOpacity style={rc.confirmBtn} onPress={onConfirm}>
             <Ionicons name="checkmark-circle-outline" size={15} color={C.green} />
             <Text style={[rc.actionText, { color: C.green }]}>Still there</Text>
           </TouchableOpacity>
+          <TouchableOpacity style={rc.notThereBtn} onPress={onDownvote}>
+            <Ionicons name="close-circle-outline" size={15} color={C.red} />
+            <Text style={[rc.actionText, { color: C.red }]}>Not there</Text>
+          </TouchableOpacity>
           <TouchableOpacity style={rc.voteBtn} onPress={onUpvote}>
             <Ionicons name="thumbs-up-outline" size={13} color={C.text3} />
             <Text style={rc.voteCount}>{r.upvotes}</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={rc.voteBtn} onPress={onDownvote}>
-            <Ionicons name="thumbs-down-outline" size={13} color={C.text3} />
-            <Text style={rc.voteCount}>{r.downvotes ?? 0}</Text>
+          <TouchableOpacity style={rc.reportMoreBtn} onPress={onReportMore}>
+            <Ionicons name="add-circle-outline" size={15} color={C.orange} />
+            <Text style={[rc.actionText, { color: C.orange }]}>Report more</Text>
           </TouchableOpacity>
           {/* Admin-only controls — hidden from regular users */}
           {onAdminDelete && (
@@ -1114,16 +1444,18 @@ function ReportCard({ report: r, onPress, onUpvote, onDownvote, onConfirm, onAdm
 }
 
 // ── Report detail modal ────────────────────────────────────────────────────────
-function ReportDetailModal({ report: r, onClose, onUpvote, onDownvote, onConfirm }:
-  { report: Report; onClose: () => void; onUpvote: () => void; onDownvote: () => void; onConfirm: () => void }) {
+function ReportDetailModal({ report: r, distanceLabel, onClose, onUpvote, onDownvote, onConfirm, onReportMore }:
+  { report: Report; distanceLabel?: string; onClose: () => void; onUpvote: () => void; onDownvote: () => void; onConfirm: () => void; onReportMore: () => void }) {
   const C = useTheme();
   const dm = useMemo(() => makeDmStyles(C), [C]);
   const typeInfo = REPORT_TYPES.find(t => t.type === r.type);
   const sevInfo = SEVERITY.find(sv => sv.val === r.severity);
   const isProvider = r.source === 'provider';
-  const sourceLabel = conditionSourceLabel(r);
-  const age = Math.floor((Date.now() / 1000 - r.created_at) / 3600);
-  const expiresIn = r.expires_at ? Math.max(0, Math.floor((r.expires_at - Date.now() / 1000) / 3600)) : null;
+  const sourceLabel = sourceLabelForReport(r);
+  const age = reportAgeLabel(r.created_at);
+  const expires = reportExpiresLabel(r.expires_at);
+  const trust = reportTrustLabel(r);
+  const description = displayReportDescription(r.description);
   const photoUri = !isProvider && r.has_photo ? `${PHOTO_BASE}/api/reports/${r.id}/photo` : null;
 
   return (
@@ -1150,7 +1482,7 @@ function ReportDetailModal({ report: r, onClose, onUpvote, onDownvote, onConfirm
             <View style={{ flex: 1 }}>
               <Text style={dm.typeLabel}>{typeInfo?.label ?? r.type}</Text>
               {r.subtype ? <Text style={dm.subtype}>{r.subtype}</Text> : null}
-              {isProvider ? <Text style={dm.provider}>{sourceLabel}</Text> : null}
+              {isProvider ? <Text style={dm.provider}>{conditionSourceLabel(r)}</Text> : null}
             </View>
             {sevInfo && (
               <View style={[dm.sevPill, { backgroundColor: sevInfo.color + '22', borderColor: sevInfo.color }]}>
@@ -1169,9 +1501,9 @@ function ReportDetailModal({ report: r, onClose, onUpvote, onDownvote, onConfirm
           )}
 
           {/* Description */}
-          {r.description ? (
+          {description ? (
             <View style={dm.descBox}>
-              <Text style={dm.descText}>{r.description}</Text>
+              <Text style={dm.descText}>{description}</Text>
             </View>
           ) : null}
 
@@ -1181,6 +1513,12 @@ function ReportDetailModal({ report: r, onClose, onUpvote, onDownvote, onConfirm
               <Ionicons name={isProvider ? "radio-outline" : "person-circle-outline"} size={16} color={C.text3} />
               <Text style={dm.metaText}>{isProvider ? sourceLabel : `@${r.username}`}</Text>
             </View>
+            {distanceLabel ? (
+              <View style={dm.metaRow}>
+                <Ionicons name="navigate-outline" size={16} color={C.text3} />
+                <Text style={dm.metaText}>{distanceLabel}</Text>
+              </View>
+            ) : null}
             {r.road_name ? (
               <View style={dm.metaRow}>
                 <Ionicons name="map-outline" size={16} color={C.text3} />
@@ -1189,20 +1527,24 @@ function ReportDetailModal({ report: r, onClose, onUpvote, onDownvote, onConfirm
             ) : null}
             <View style={dm.metaRow}>
               <Ionicons name="time-outline" size={16} color={C.text3} />
-              <Text style={dm.metaText}>{age < 1 ? 'Just now' : `${age}h ago`}</Text>
+              <Text style={dm.metaText}>{age}</Text>
             </View>
-            {expiresIn !== null && (
+            {expires ? (
               <View style={dm.metaRow}>
                 <Ionicons name="hourglass-outline" size={16} color={C.text3} />
-                <Text style={dm.metaText}>Expires in {expiresIn}h</Text>
+                <Text style={dm.metaText}>{expires}</Text>
               </View>
-            )}
-            {!isProvider && r.confirmations > 0 && (
+            ) : null}
+            <View style={dm.metaRow}>
+              <Ionicons name="shield-checkmark-outline" size={16} color={C.text3} />
+              <Text style={dm.metaText}>{trust}</Text>
+            </View>
+            {!isProvider && r.confirmations > 0 ? (
               <View style={dm.metaRow}>
                 <Ionicons name="checkmark-done-circle-outline" size={16} color={C.green} />
                 <Text style={[dm.metaText, { color: C.green }]}>{r.confirmations} confirmation{r.confirmations !== 1 ? 's' : ''}</Text>
               </View>
-            )}
+            ) : null}
           </View>
 
           {/* Actions */}
@@ -1211,13 +1553,17 @@ function ReportDetailModal({ report: r, onClose, onUpvote, onDownvote, onConfirm
               <Ionicons name="checkmark-circle-outline" size={18} color={C.green} />
               <Text style={[dm.btnText, { color: C.green }]}>STILL THERE</Text>
             </TouchableOpacity>
+            <TouchableOpacity style={dm.notThereBtn} onPress={onDownvote}>
+              <Ionicons name="close-circle-outline" size={18} color={C.red} />
+              <Text style={[dm.btnText, { color: C.red }]}>NOT THERE</Text>
+            </TouchableOpacity>
             <TouchableOpacity style={dm.voteBtn} onPress={onUpvote}>
               <Ionicons name="thumbs-up-outline" size={18} color={C.text2} />
               <Text style={dm.voteTxt}>{r.upvotes}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={dm.voteBtn} onPress={onDownvote}>
-              <Ionicons name="thumbs-down-outline" size={18} color={C.text2} />
-              <Text style={dm.voteTxt}>{r.downvotes ?? 0}</Text>
+            <TouchableOpacity style={dm.reportMoreBtn} onPress={onReportMore}>
+              <Ionicons name="add-circle-outline" size={18} color={C.orange} />
+              <Text style={[dm.btnText, { color: C.orange }]}>MORE</Text>
             </TouchableOpacity>
           </View> : null}
         </ScrollView>
@@ -1255,10 +1601,20 @@ const makeDmStyles = (C: ColorPalette) => StyleSheet.create({
     backgroundColor: C.green + '18', borderWidth: 1, borderColor: C.green,
     borderRadius: 12, paddingVertical: 13,
   },
+  notThereBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    backgroundColor: C.red + '12', borderWidth: 1, borderColor: C.red + '88',
+    borderRadius: 12, paddingVertical: 13,
+  },
   voteBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
     backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
     borderRadius: 12, paddingVertical: 13, paddingHorizontal: 18,
+  },
+  reportMoreBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    backgroundColor: C.orange + '12', borderWidth: 1, borderColor: C.orange + '66',
+    borderRadius: 12, paddingVertical: 13, paddingHorizontal: 14,
   },
   btnText: { fontSize: 12, fontWeight: '700', fontFamily: mono },
   voteTxt: { color: C.text2, fontSize: 14, fontWeight: '700', fontFamily: mono },
@@ -1283,13 +1639,17 @@ const makeRcStyles = (C: ColorPalette) => StyleSheet.create({
   sevPill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 20, borderWidth: 1 },
   sevText: { fontSize: 9, fontFamily: mono, fontWeight: '700', letterSpacing: 0.5 },
   desc: { color: C.text2, fontSize: 12, lineHeight: 17, marginBottom: 10 },
+  signalRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginBottom: 10 },
+  signalText: { flex: 1, color: C.text3, fontSize: 10, lineHeight: 14, fontFamily: mono, fontWeight: '700' },
   footer: { gap: 8 },
   age: { color: C.text3, fontSize: 10, fontFamily: mono },
-  actions: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  actions: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   providerPill: { paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, borderWidth: 1, borderColor: '#38bdf855', backgroundColor: '#38bdf814', alignSelf: 'flex-start' },
   providerPillText: { color: '#38bdf8', fontSize: 9, fontFamily: mono, fontWeight: '800' },
-  confirmBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  actionText: { fontSize: 12, fontWeight: '600' },
+  confirmBtn: { minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 10, paddingHorizontal: 8, backgroundColor: C.green + '12' },
+  notThereBtn: { minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 10, paddingHorizontal: 8, backgroundColor: C.red + '10' },
+  reportMoreBtn: { minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 10, paddingHorizontal: 8, backgroundColor: C.orange + '10' },
+  actionText: { fontSize: 11, fontWeight: '700' },
   voteBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   voteCount: { color: C.text3, fontSize: 12, fontWeight: '600', fontFamily: mono },
 });
@@ -1366,6 +1726,21 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     borderRadius: 12, alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.05)',
   },
   sevText: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '700' },
+  sourceConfidenceRow: { flexDirection: 'row', gap: 9, marginBottom: 16 },
+  sourceConfidenceBtn: {
+    flex: 1,
+    minHeight: 58,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.s2,
+    padding: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  sourceConfidenceText: { color: C.text2, fontSize: 12, fontWeight: '900' },
+  sourceConfidenceSub: { color: C.text3, fontSize: 10, marginTop: 2 },
   photoSection: { marginBottom: 4 },
   bonusBadge: {
     color: C.green, fontSize: 9, fontFamily: mono,
@@ -1429,6 +1804,21 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
   },
   safetyText: { color: C.text2, fontSize: 11, fontFamily: mono, flex: 1 },
+  queueBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderColor: C.orange + '44',
+    borderRadius: 14,
+    backgroundColor: C.orange + '10',
+    padding: 12,
+  },
+  queueIcon: { width: 34, height: 34, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: C.orange + '16' },
+  queueTitle: { color: C.text, fontSize: 13, fontWeight: '900' },
+  queueText: { color: C.text3, fontSize: 11, lineHeight: 15, marginTop: 2 },
+  queueRetry: { minHeight: 32, paddingHorizontal: 10, borderRadius: 10, borderWidth: 1, borderColor: C.orange + '66', alignItems: 'center', justifyContent: 'center' },
+  queueRetryText: { color: C.orange, fontSize: 10, fontWeight: '900', fontFamily: mono },
   starRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 16 },
   star: { color: C.border, fontSize: 32 },
   starActive: { color: '#f59e0b' },

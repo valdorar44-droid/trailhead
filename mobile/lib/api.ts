@@ -1694,6 +1694,7 @@ export interface Report {
   username: string; created_at: number; expires_at: number; waypoint_day?: number;
   source?: 'trailhead' | 'provider' | string; provider?: string | null; provider_id?: string;
   updated_at?: number; road_name?: string | null; confidence?: number; geometry?: unknown;
+  route_distance_m?: number; distance_m?: number; reporter_trust?: string; source_confidence?: string;
 }
 export interface ReportPayload {
   lat: number; lng: number; type: string;

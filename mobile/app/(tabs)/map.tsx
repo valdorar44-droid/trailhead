@@ -645,7 +645,7 @@ type TrailReadinessRow = {
 const TRAIL_SNAP_MODE_OPTIONS: Array<{ id: TrailSnapMode; label: string; icon: keyof typeof Ionicons.glyphMap; sub: string }> = [
   { id: 'trail', label: 'Trail', icon: 'git-branch-outline', sub: 'Trail graph first' },
   { id: 'road', label: 'Road', icon: 'car-outline', sub: 'Connector routing' },
-  { id: 'dirt', label: 'Dirt/4WD', icon: 'trail-sign-outline', sub: 'Track-style review' },
+  { id: 'dirt', label: '4WD', icon: 'trail-sign-outline', sub: 'Track-style review' },
   { id: 'hybrid', label: 'Hybrid', icon: 'git-compare-outline', sub: 'Road + trail' },
   { id: 'straight', label: 'Line', icon: 'analytics-outline', sub: 'Manual fallback' },
 ];
@@ -4972,6 +4972,7 @@ function MapScreen() {
   const [mapboxToken,   setMapboxToken]   = useState('');
   const [protomapsKey,  setProtomapsKey]  = useState('');
   const [showFilterSheet, setShowFilterSheet] = useState(false);
+  const [mapControlsCollapsed, setMapControlsCollapsed] = useState(false);
   const [showMapLegendSheet, setShowMapLegendSheet] = useState(false);
   const [activeMapModePreset, setActiveMapModePreset] = useState<MapModePresetId>('default');
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
@@ -16887,6 +16888,8 @@ function MapScreen() {
     pinDropMode ||
     selectOnMapMode ||
     trailPinCaptureMode ||
+    trailTraceMode ||
+    trailRouteBuilderOpen ||
     inlineSearchOpen
   );
   const showInlineMapSearch = Boolean(
@@ -16900,6 +16903,30 @@ function MapScreen() {
   const inlineSearchSideBySide = userHeading === null || windowWidth >= 380;
   const inlineSearchTop = inlineSearchSideBySide ? compassTop : compassTop + 52;
   const inlineSearchLeft = userHeading !== null && inlineSearchSideBySide ? 176 : 68;
+  const trailToolPanelActive = trailPinCaptureMode || trailTraceMode || trailRouteBuilderOpen;
+  const showQuickMapMessage = Boolean(
+    (!!quickToast || quickReport) &&
+    userLoc &&
+    !navMode &&
+    !safeWaterPlanningActive &&
+    !waterFollowActive &&
+    !showSearch &&
+    !showMapDrawer &&
+    (
+      trailToolPanelActive ||
+      (
+        !showDiscoveryPanel &&
+        !selectedCamp &&
+        !selectedPlace &&
+        !tappedPoi &&
+        !selectedTrail &&
+        !selectedCommunityPin
+      )
+    )
+  );
+  const quickMapMessagePosition = trailToolPanelActive
+    ? { top: Math.max(compassTop + 56, insets.top + 72), left: 16, right: 16 }
+    : { bottom: bottomInset + 78, left: 16, right: 16 };
 
   const nativeNavigationPanel = navMode ? (
     <Animated.View
@@ -17204,6 +17231,9 @@ function MapScreen() {
                 return;
               }
               addTrailCaptureAnchor([lng, lat]);
+              return;
+            }
+            if (trailTraceMode || trailRouteBuilderOpen) {
               return;
             }
             if (inlineSearchOpen) {
@@ -17931,6 +17961,17 @@ function MapScreen() {
         {!waterFollowActive && (
           <TouchableOpacity
             style={[s.ctrlBtn, mapChrome.button]}
+            onPress={() => setMapControlsCollapsed(value => !value)}
+            activeOpacity={0.84}
+            accessibilityLabel={mapControlsCollapsed ? 'Expand map tools' : 'Collapse map tools'}
+          >
+            <Ionicons name={mapControlsCollapsed ? 'ellipsis-vertical' : 'chevron-up'} size={18} color={mapChrome.text} />
+          </TouchableOpacity>
+        )}
+
+        {!mapControlsCollapsed && !waterFollowActive && (
+          <TouchableOpacity
+            style={[s.ctrlBtn, mapChrome.button]}
             onPress={() => setShowLayerSheet(true)}
             activeOpacity={0.84}
             accessibilityLabel="Open layers"
@@ -17939,7 +17980,7 @@ function MapScreen() {
           </TouchableOpacity>
         )}
 
-        {!waterFollowActive && (
+        {!mapControlsCollapsed && !waterFollowActive && (
           <TouchableOpacity
             style={[s.ctrlBtn, mapChrome.button, map3dEnabled && s.ctrlBtnActive, map3dEnabled && mapChrome.buttonActive]}
             onPress={toggleMap3d}
@@ -17952,11 +17993,13 @@ function MapScreen() {
           </TouchableOpacity>
         )}
 
-        <TouchableOpacity style={[s.ctrlBtn, mapChrome.button, !userLoc && { opacity: 0.62 }]} onPress={centerMapOnUser} disabled={!userLoc}>
-          <Ionicons name="locate" size={20} color={userLoc ? mapChrome.text : mapChrome.textMuted} />
-        </TouchableOpacity>
+        {!mapControlsCollapsed && (
+          <TouchableOpacity style={[s.ctrlBtn, mapChrome.button, !userLoc && { opacity: 0.62 }]} onPress={centerMapOnUser} disabled={!userLoc}>
+            <Ionicons name="locate" size={20} color={userLoc ? mapChrome.text : mapChrome.textMuted} />
+          </TouchableOpacity>
+        )}
 
-        {!waterFollowActive && <TourTarget id="map.search">
+        {!mapControlsCollapsed && !waterFollowActive && <TourTarget id="map.search">
           <TouchableOpacity
             style={[s.ctrlBtn, mapChrome.button, inlineSearchOpen && mapChrome.buttonActive]}
             onPress={openInlineMapSearch}
@@ -17965,7 +18008,7 @@ function MapScreen() {
           </TouchableOpacity>
         </TourTarget>}
 
-        {!waterFollowActive && (
+        {!mapControlsCollapsed && !waterFollowActive && (
           <TourTarget id="map.pinReport">
             <TouchableOpacity
               style={[s.ctrlBtn, mapChrome.button, pinDropMode && mapChrome.buttonActive]}
@@ -17978,7 +18021,7 @@ function MapScreen() {
           </TourTarget>
         )}
 
-        {!waterFollowActive && waypoints.length > 0 && (
+        {!mapControlsCollapsed && !waterFollowActive && waypoints.length > 0 && (
           <TouchableOpacity
             style={[s.ctrlBtn, mapChrome.button, navMode && s.ctrlBtnActive, navMode && mapChrome.buttonActive]}
             onPress={() => {
@@ -21346,12 +21389,12 @@ function MapScreen() {
       )}
 
       {/* ── Waze-style quick report (two-step: type → subtype) ─────────────── */}
-      {(!!quickToast || quickReport) && userLoc && !navMode && !safeWaterPlanningActive && !waterFollowActive && !showSearch && !showMapDrawer && !showDiscoveryPanel && !selectedCamp && !selectedPlace && !tappedPoi && !selectedTrail && !selectedCommunityPin && (
-        <View style={[s.quickReportWrap, { bottom: bottomInset + 78 }]} pointerEvents="box-none">
+      {showQuickMapMessage && (
+        <View style={[s.quickReportWrap, quickMapMessagePosition]} pointerEvents="box-none">
           {!!quickToast && (
             <View style={[s.quickToast, mapChrome.toast]}>
               <Ionicons name="information-circle-outline" size={14} color={C.orange} />
-              <Text style={[s.quickToastText, { color: mapChrome.toastText }]}>{quickToast}</Text>
+              <Text style={[s.quickToastText, { color: mapChrome.toastText }]} numberOfLines={2}>{quickToast}</Text>
             </View>
           )}
           {quickReport && (
@@ -21402,16 +21445,18 @@ function MapScreen() {
                             setQuickReport(false);
                             setQuickTypeIdx(null);
                             try {
+                              const reportLoc = userLoc;
+                              if (!reportLoc) return;
                               const sev = sevMap[sub] ?? 'moderate';
                               const res = await api.submitReport({
-                                lat: userLoc.lat, lng: userLoc.lng,
+                                lat: reportLoc.lat, lng: reportLoc.lng,
                                 type: rt.type as any, subtype: sub,
                                 description: '', severity: sev as any,
                               });
                               setQuickToast(`+${res.credits_earned} credits`);
                               setTimeout(() => setQuickToast(''), 3000);
                               addLiveReport({
-                                id: res.report_id, lat: userLoc.lat, lng: userLoc.lng,
+                                id: res.report_id, lat: reportLoc.lat, lng: reportLoc.lng,
                                 type: rt.type, subtype: sub, description: '',
                                 severity: sev, upvotes: 0, downvotes: 0, confirmations: 0,
                                 has_photo: 0, cluster_count: 1, username: user?.username ?? 'me',
@@ -24553,8 +24598,11 @@ const makeStyles = (C: ColorPalette) => {
   // ── Waze-style quick report
   quickReportWrap: {
     position: 'absolute',
+    left: 16,
     right: 16,
-    alignItems: 'flex-end',
+    alignItems: 'center',
+    zIndex: 10080,
+    elevation: 140,
   },
   quickToast: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
@@ -24562,9 +24610,10 @@ const makeStyles = (C: ColorPalette) => {
     paddingHorizontal: 12, paddingVertical: 7,
     borderWidth: 1, borderColor: OVR.border,
     marginBottom: 8,
-    alignSelf: 'center',
+    alignSelf: 'stretch',
+    maxWidth: '100%',
   },
-  quickToastText: { color: OVR.text2, fontSize: 11, fontFamily: mono, fontWeight: '700' },
+  quickToastText: { flex: 1, minWidth: 0, color: OVR.text2, fontSize: 11, lineHeight: 14, fontFamily: mono, fontWeight: '700' },
   quickReportPanel: {
     backgroundColor: 'rgba(8,8,10,0.88)', borderRadius: 18,
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',

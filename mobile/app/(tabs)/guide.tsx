@@ -65,15 +65,15 @@ type ExploreHomeSection = {
 };
 
 const EXPLORE_HOME_SECTIONS: ExploreHomeSection[] = [
-  { id: 'trip', label: 'For this trip', icon: 'git-branch-outline', color: '#f97316', mode: 'trip' },
-  { id: 'near-me', label: 'Near me', icon: 'locate-outline', color: '#a855f7', mode: 'nearby' },
+  { id: 'trip', label: 'Trip', icon: 'git-branch-outline', color: '#f97316', mode: 'trip' },
+  { id: 'near-me', label: 'Near', icon: 'locate-outline', color: '#a855f7', mode: 'nearby' },
   { id: 'trails', label: 'Trails', icon: 'walk-outline', color: '#16a34a', category: 'trails' },
   { id: 'parks', label: 'Parks', icon: 'leaf-outline', color: '#22c55e', category: 'parks' },
   { id: 'camps', label: 'Camps', icon: 'bonfire-outline', color: '#14b8a6', category: 'camp' },
   { id: 'water', label: 'Water', icon: 'water-outline', color: '#0ea5e9', category: 'water' },
   { id: 'scenic', label: 'Scenic', icon: 'camera-outline', color: '#ca8a04', category: 'scenic' },
   { id: 'tours', label: 'Tours', icon: 'ticket-outline', color: '#d97706', category: 'tours' },
-  { id: 'services', label: 'Town services', icon: 'basket-outline', color: '#7c3aed', category: 'resupply' },
+  { id: 'services', label: 'Services', icon: 'basket-outline', color: '#7c3aed', category: 'resupply' },
   { id: 'saved', label: 'Saved', icon: 'bookmark-outline', color: '#64748b', savedOnly: true },
 ];
 
@@ -2073,7 +2073,8 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   homeSectionRail: { gap: 9, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 4 },
   homeSectionChip: {
     minHeight: 40,
-    maxWidth: 148,
+    minWidth: 82,
+    maxWidth: 132,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,
@@ -2081,7 +2082,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 11,
   },
-  homeSectionText: { fontSize: 12, fontWeight: '900' },
+  homeSectionText: { flexShrink: 1, minWidth: 0, fontSize: 12, fontWeight: '900' },
   narrationToolbar: { minHeight: 58, borderRadius: 16, borderWidth: 1, borderColor: C.border, backgroundColor: C.s1, paddingHorizontal: 13, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   categoryStrip: { gap: 9, paddingRight: 8 },
   categoryPill: {

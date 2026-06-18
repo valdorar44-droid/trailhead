@@ -84,7 +84,7 @@ export const EXPLORE_CATEGORY_CHIPS: Array<{
   { key: 'fuel', label: 'Fuel', icon: 'car-outline', color: '#ea580c' },
   { key: 'resupply', label: 'Resupply', icon: 'basket-outline', color: '#7c3aed' },
   { key: 'tours', label: 'Tours', icon: 'ticket-outline', color: '#d97706' },
-  { key: 'nearby', label: 'Nearby', icon: 'locate-outline', color: '#a855f7' },
+  { key: 'nearby', label: 'Near', icon: 'locate-outline', color: '#a855f7' },
 ];
 
 const CATEGORY_ALIASES: Record<ExploreCategoryKey, string[]> = {

@@ -12,7 +12,7 @@ export function ExploreModeTabs({ value, onChange }: Props) {
   const C = useTheme();
   const tabs: Array<{ key: ExploreMode; label: string }> = [
     { key: 'featured', label: 'FEATURED' },
-    { key: 'nearby', label: 'NEAR ME' },
+    { key: 'nearby', label: 'NEAR' },
     { key: 'trip', label: 'TRIP' },
   ];
   return (
@@ -26,7 +26,9 @@ export function ExploreModeTabs({ value, onChange }: Props) {
             onPress={() => onChange(tab.key)}
             activeOpacity={0.86}
           >
-            <Text style={[styles.label, { color: active ? C.orange : C.text3 }]}>{tab.label}</Text>
+            <Text style={[styles.label, { color: active ? C.orange : C.text3 }]} numberOfLines={1}>
+              {tab.label}
+            </Text>
           </TouchableOpacity>
         );
       })}
@@ -45,11 +47,10 @@ const styles = StyleSheet.create({
   },
   tab: {
     flex: 1,
-    minHeight: 48,
+    minHeight: 44,
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  label: { fontSize: 12, fontWeight: '900', letterSpacing: 0 },
+  label: { fontSize: 11, fontWeight: '900', letterSpacing: 0 },
 });
-

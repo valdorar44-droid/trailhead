@@ -1,5 +1,5 @@
 import React from 'react';
-import { Alert, Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { TrailheadLoadingRow, TrailheadSheet } from '@/components/TrailheadUI';
@@ -128,8 +128,17 @@ export default function MapFilterSheet({
 }: MapFilterSheetProps) {
   const C = useTheme();
   const isAndroid = Platform.OS === 'android';
+  const { height: viewportHeight } = useWindowDimensions();
   const styles = React.useMemo(() => makeStyles(C), [C]);
   const activeModeTitle = mapModePresetTitle(activePresetId);
+  const androidSheetHeight = React.useMemo(() => {
+    const maxSheetHeight = Math.max(360, viewportHeight - 24);
+    const requestedHeight = Number(filterSheetHeight);
+    const preferredHeight = Number.isFinite(requestedHeight) && requestedHeight > 320
+      ? requestedHeight
+      : Math.round(viewportHeight * 0.88);
+    return Math.min(Math.max(preferredHeight, 360), maxSheetHeight);
+  }, [filterSheetHeight, viewportHeight]);
 
   const renderCheckRows = (
     options: readonly MapFilterOption[],
@@ -224,7 +233,7 @@ export default function MapFilterSheet({
           <TrailheadSheet
             handle={false}
             style={isAndroid
-              ? [styles.sheet, { height: filterSheetHeight, maxHeight: undefined, paddingBottom: 0 }]
+              ? [styles.sheet, styles.androidSheet, { height: androidSheetHeight }]
               : styles.sheet}
             contentStyle={{ padding: 0 }}
           >
@@ -421,6 +430,12 @@ function makeStyles(C: ColorPalette) {
       borderTopWidth: 1,
       borderColor: C.border,
       paddingTop: 14,
+    },
+    androidSheet: {
+      maxHeight: undefined,
+      minHeight: 360,
+      alignSelf: 'stretch',
+      paddingBottom: 0,
     },
     header: {
       flexDirection: 'row',

@@ -54,8 +54,16 @@ def main() -> int:
         "search button opens inline": "onPress={openInlineMapSearch}",
         "extreme search opens inline": "val: inlineSearchOpen",
         "tap tool ownership state": "const mapTapToolOwnsFeatureSelection = Boolean(",
+        "trail builder owns feature taps": "trailRouteBuilderOpen ||",
+        "trail trace owns feature taps": "trailTraceMode ||",
+        "trail builder ignores map taps": "if (trailTraceMode || trailRouteBuilderOpen) {",
         "map passes suppress feature taps": "suppressFeatureTaps={mapTapToolOwnsFeatureSelection}",
         "inline search map tap dismissal": "closeInlineMapSearch(false);",
+        "map controls collapse state": "const [mapControlsCollapsed, setMapControlsCollapsed] = useState(false);",
+        "map controls collapse action": "setMapControlsCollapsed(value => !value)",
+        "trail tool quick message lift": "const trailToolPanelActive = trailPinCaptureMode || trailTraceMode || trailRouteBuilderOpen;",
+        "quick map message guard": "const showQuickMapMessage = Boolean(",
+        "quick toast two-line clamp": "numberOfLines={2}>{quickToast}</Text>",
         "copilot accent text": "const copilotAccentText = themeMode === 'light'",
         "copilot themed backdrop": "const copilotBackdrop = light ?",
         "copilot themed placeholder": "placeholderTextColor={C.text3}",
@@ -63,6 +71,15 @@ def main() -> int:
     for label, marker in map_required.items():
         if marker not in map_screen:
             failures.append(f"Missing map marker for {label}: {marker}")
+
+    filter_sheet_required = {
+        "android viewport fallback": "const { height: viewportHeight } = useWindowDimensions();",
+        "android safe sheet height": "const androidSheetHeight = React.useMemo(() => {",
+        "android sheet style": "styles.androidSheet",
+    }
+    for label, marker in filter_sheet_required.items():
+        if marker not in filter_sheet:
+            failures.append(f"Missing filter sheet marker for {label}: {marker}")
 
     preset_block = between(map_screen, "const applyMapFilterPreset = (preset: MapModePresetId) => {", "const showMapStatusBar = Boolean(")
     if not preset_block:
@@ -116,7 +133,7 @@ def main() -> int:
             failures.append(f"Missing web map tap guard for {label}: {marker}")
 
     print("Map filter/search QA matrix")
-    print("Checks: top-level legend modal, filter-only map presets, inline map search, tap ownership, themed Co-Pilot controls")
+    print("Checks: top-level legend modal, filter-only map presets, inline map search, tap ownership, Android filter height, map tool collapse, themed Co-Pilot controls")
 
     if failures:
         print("")

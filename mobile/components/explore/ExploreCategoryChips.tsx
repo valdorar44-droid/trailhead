@@ -41,6 +41,7 @@ const styles = StyleSheet.create({
   row: { gap: 9, paddingHorizontal: 20, paddingVertical: 14 },
   chip: {
     minHeight: 48,
+    maxWidth: 146,
     paddingHorizontal: 13,
     borderRadius: 12,
     borderWidth: 1,
@@ -48,6 +49,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 7,
   },
-  label: { fontSize: 13, fontWeight: '900' },
+  label: { flexShrink: 1, minWidth: 0, fontSize: 12, fontWeight: '900' },
 });
-

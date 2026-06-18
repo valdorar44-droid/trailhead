@@ -135,7 +135,7 @@ export default function RootLayout() {
     setWelcomeVisible(false);
     storage.set(WELCOME_SEEN_KEY, '1').catch(() => {});
     startGuidedTour();
-    router.push('/(tabs)/map');
+    router.push('/(tabs)/guide');
   }
 
   useEffect(() => {

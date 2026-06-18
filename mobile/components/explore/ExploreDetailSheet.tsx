@@ -10,13 +10,12 @@ import {
   getExploreDisplayCategory,
   getExploreDisplayRegion,
   getExploreDisplayTitle,
-  getExploreFreshnessLabel,
   getExploreHighlightCopy,
   getExploreIcon,
   getExploreNearbyModules,
   getExplorePlanNotes,
   getExploreQuickFacts,
-  getExploreSourceBadge,
+  getExploreSourceRows,
   getExploreTrustBadge,
   getExploreWhyCopy,
   type ExploreNearbyModule,
@@ -235,21 +234,8 @@ export function ExploreDetailSheet({
                   </View>
                 </View>
 
-                <Text style={[styles.blockHeading, { color: C.text }]}>Details & Updates</Text>
-                <View style={styles.sourceGrid}>
-                  <SourceCard
-                    icon="shield-checkmark-outline"
-                    title={getExploreSourceBadge(place)}
-                    body={sourceBodyForPlace(place)}
-                    tone="#2563eb"
-                  />
-                  <SourceCard
-                    icon="calendar-outline"
-                    title={getExploreFreshnessLabel(place)}
-                    body={place.facts.last_updated ? 'Update date is included with this guide.' : 'Check current access, fees, and closures before you go.'}
-                    tone="#15803d"
-                  />
-                </View>
+                <Text style={[styles.blockHeading, { color: C.text }]}>Source & Freshness</Text>
+                <SourceFreshnessPanel place={place} />
                 {campgroundsSlot}
               </>
             )}
@@ -296,16 +282,30 @@ export function ExploreDetailSheet({
   );
 }
 
-function SourceCard({ icon, title, body, tone }: { icon: string; title: string; body: string; tone: string }) {
+function SourceFreshnessPanel({ place }: { place: ExplorePlaceProfile }) {
   const C = useTheme();
+  const rows = getExploreSourceRows(place);
   return (
-    <View style={[styles.sourceCard, { borderColor: C.border, backgroundColor: C.s1 }]}>
-      <View style={[styles.sourceIcon, { backgroundColor: tone + '18' }]}>
-        <Ionicons name={icon as any} size={24} color={tone} />
+    <View style={[styles.sourcePanel, { borderColor: C.border, backgroundColor: C.s1 }]}>
+      <View style={styles.sourcePanelTop}>
+        <View style={[styles.sourceIcon, { backgroundColor: '#2563eb18' }]}>
+          <Ionicons name="shield-checkmark-outline" size={23} color="#2563eb" />
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={[styles.sourcePanelTitle, { color: C.text }]}>Where this card comes from</Text>
+          <Text style={[styles.sourcePanelBody, { color: C.text2 }]} numberOfLines={3}>{sourceBodyForPlace(place)}</Text>
+        </View>
       </View>
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={[styles.sourceTitle, { color: C.text }]} numberOfLines={2}>{title}</Text>
-        <Text style={[styles.sourceBody, { color: C.text2 }]} numberOfLines={3}>{body}</Text>
+      <View style={styles.sourceRows}>
+        {rows.slice(0, 6).map(row => (
+          <View key={`${row.label}-${row.value}`} style={[styles.sourceRow, { borderColor: C.border, backgroundColor: C.s2 }]}>
+            <Ionicons name={row.icon as any} size={17} color={row.tone} />
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={[styles.sourceRowLabel, { color: C.text3 }]} numberOfLines={1}>{row.label.toUpperCase()}</Text>
+              <Text style={[styles.sourceRowValue, { color: C.text }]} numberOfLines={2}>{row.value}</Text>
+            </View>
+          </View>
+        ))}
       </View>
     </View>
   );
@@ -430,11 +430,15 @@ const styles = StyleSheet.create({
   planLabel: { fontSize: 9, fontFamily: mono, fontWeight: '900', marginBottom: 3 },
   planValue: { fontSize: 12, lineHeight: 16, fontWeight: '800' },
   blockHeading: { marginHorizontal: 20, marginBottom: 9, fontSize: 18, fontWeight: '900', letterSpacing: 0 },
-  sourceGrid: { flexDirection: 'row', gap: 10, paddingHorizontal: 20, marginBottom: 18 },
-  sourceCard: { flex: 1, minHeight: 118, borderWidth: 1, borderRadius: 15, padding: 12, flexDirection: 'row', gap: 10 },
+  sourcePanel: { marginHorizontal: 20, marginBottom: 18, borderWidth: 1, borderRadius: 16, padding: 14, gap: 12 },
+  sourcePanelTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   sourceIcon: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center' },
-  sourceTitle: { fontSize: 14, lineHeight: 18, fontWeight: '900', marginBottom: 4 },
-  sourceBody: { fontSize: 12, lineHeight: 17, fontWeight: '600' },
+  sourcePanelTitle: { fontSize: 15, lineHeight: 19, fontWeight: '900', marginBottom: 4 },
+  sourcePanelBody: { fontSize: 12, lineHeight: 17, fontWeight: '700' },
+  sourceRows: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  sourceRow: { width: '48%', minHeight: 66, borderWidth: 1, borderRadius: 13, padding: 10, flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  sourceRowLabel: { fontSize: 8.5, fontFamily: mono, fontWeight: '900', marginBottom: 3 },
+  sourceRowValue: { fontSize: 12, lineHeight: 16, fontWeight: '800' },
   moduleRail: { gap: 10, paddingHorizontal: 20, paddingBottom: 18 },
   moduleCard: { minWidth: 158, minHeight: 64, borderWidth: 1, borderRadius: 14, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 9 },
   moduleText: { flex: 1, minWidth: 0 },

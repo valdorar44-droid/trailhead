@@ -5,13 +5,13 @@ import type { ExplorePlaceProfile } from '@/lib/api';
 import { useTheme } from '@/lib/design';
 import {
   getExploreCardSummary,
+  getExploreCardSourceLine,
   getExploreCategoryColor,
   getExploreDisplayCategory,
   getExploreDisplayRegion,
   getExploreDisplayTitle,
   getExploreIcon,
   getExploreQuickFacts,
-  getExploreSourceBadge,
   type ExploreDisplayContext,
 } from './exploreDisplay';
 
@@ -26,6 +26,7 @@ type Props = {
   onOpen: () => void;
   onArea: () => void;
   onRoute: () => void;
+  onNearby?: () => void;
   onToggleSave: () => void;
 };
 
@@ -40,6 +41,7 @@ export function ExplorePlaceCard({
   onOpen,
   onArea,
   onRoute,
+  onNearby,
   onToggleSave,
 }: Props) {
   const C = useTheme();
@@ -79,7 +81,10 @@ export function ExplorePlaceCard({
         <Text style={[styles.meta, { color: C.text3 }]} numberOfLines={1}>
           {context?.day ? `Day ${context.day} · ` : ''}{context?.distanceMi != null ? `${formatMiles(context.distanceMi)} · ` : ''}{getExploreDisplayRegion(place)}
         </Text>
-        <Text style={[styles.source, { color: categoryColor }]} numberOfLines={1}>{getExploreSourceBadge(place)}</Text>
+        <View style={styles.sourceLine}>
+          <Ionicons name="shield-checkmark-outline" size={13} color={categoryColor} />
+          <Text style={[styles.source, { color: categoryColor }]} numberOfLines={1}>{getExploreCardSourceLine(place)}</Text>
+        </View>
         <Text style={[styles.summary, { color: C.text2 }]} numberOfLines={compact ? 2 : 3}>
           {getExploreCardSummary(place)}
         </Text>
@@ -96,12 +101,18 @@ export function ExplorePlaceCard({
         <View style={styles.actions}>
           <TouchableOpacity style={[styles.action, { borderColor: C.border }]} onPress={onArea}>
             <Ionicons name="map-outline" size={17} color={C.text2} />
-            <Text style={[styles.actionText, { color: C.text2 }]}>Area</Text>
+            <Text style={[styles.actionText, { color: C.text2 }]}>Map</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.action, { borderColor: C.border }]} onPress={onToggleSave}>
             <Ionicons name={saved ? 'bookmark' : 'bookmark-outline'} size={16} color={C.text2} />
             <Text style={[styles.actionText, { color: C.text2 }]}>{saved ? 'Saved' : 'Save'}</Text>
           </TouchableOpacity>
+          {!!onNearby && (
+            <TouchableOpacity style={[styles.action, { borderColor: C.border }]} onPress={onNearby}>
+              <Ionicons name="locate-outline" size={16} color={C.text2} />
+              <Text style={[styles.actionText, { color: C.text2 }]}>Nearby</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
             style={[styles.action, { borderColor: C.border, opacity: canRoute ? 1 : 0.5 }]}
             onPress={onRoute}
@@ -180,7 +191,8 @@ const styles = StyleSheet.create({
   title: { fontSize: 21, lineHeight: 25, fontWeight: '900', letterSpacing: 0 },
   railTitle: { fontSize: 18, lineHeight: 22 },
   meta: { fontSize: 13, fontWeight: '700' },
-  source: { fontSize: 13, fontWeight: '900' },
+  sourceLine: { minHeight: 19, flexDirection: 'row', alignItems: 'center', gap: 5 },
+  source: { flex: 1, minWidth: 0, fontSize: 12, lineHeight: 16, fontWeight: '900' },
   summary: { fontSize: 14, lineHeight: 19, fontWeight: '600' },
   factRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, paddingTop: 4 },
   fact: {
@@ -193,10 +205,10 @@ const styles = StyleSheet.create({
     gap: 5,
   },
   factText: { fontSize: 11, fontWeight: '800' },
-  actions: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 6 },
+  actions: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingTop: 6 },
   action: {
     flex: 1,
-    minHeight: 44,
+    minHeight: 42,
     borderRadius: 12,
     borderWidth: 1,
     flexDirection: 'row',
@@ -204,6 +216,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 6,
   },
-  actionText: { fontSize: 13, fontWeight: '900' },
+  actionText: { fontSize: 11, fontWeight: '900' },
 });
-

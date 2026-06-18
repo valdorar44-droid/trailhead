@@ -44,6 +44,13 @@ export type ExplorePlanNote = {
   tone: string;
 };
 
+export type ExploreSourceRow = {
+  label: string;
+  value: string;
+  icon: string;
+  tone: string;
+};
+
 export type ExploreDisplayContext = {
   campCount?: number;
   relatedCount?: number;
@@ -268,6 +275,85 @@ export function getExploreFreshnessLabel(place: ExplorePlaceProfile) {
   }
   if (/official/i.test(getExploreSourceBadge(place))) return 'Official details';
   return 'Check current status';
+}
+
+export function getExploreCardSourceLine(place: ExplorePlaceProfile) {
+  return compact([
+    getExploreSourceBadge(place),
+    getExploreFreshnessLabel(place),
+    getExploreTrustBadge(place),
+  ]).filter((part, index, parts) => parts.indexOf(part) === index).join(' · ');
+}
+
+export function getExploreSourceRows(place: ExplorePlaceProfile): ExploreSourceRow[] {
+  const v3 = readV3(place);
+  const sourceBadge = getExploreSourceBadge(place);
+  const freshness = getExploreFreshnessLabel(place);
+  const sourceCount = Math.max(
+    Array.isArray(v3.sources) ? v3.sources.length : 0,
+    Array.isArray(place.source_pack?.sources) ? place.source_pack?.sources?.length ?? 0 : 0,
+  );
+  const photoCredit = compact([
+    place.summary.image_credit,
+    place.summary.image_license,
+    place.media?.find(item => item.credit)?.credit,
+    place.source_pack?.photos?.find(item => item.credit)?.credit,
+  ])[0];
+  const sourceNote = String(place.source_pack?.source_note || '').trim();
+  const officialUrl = place.source_pack?.official_url || place.facts.official_url || place.summary.source_url || place.facts.source_url;
+  const rows: ExploreSourceRow[] = [
+    {
+      label: 'Primary source',
+      value: sourceBadge,
+      icon: /official/i.test(sourceBadge) ? 'shield-checkmark-outline' : 'map-outline',
+      tone: /official/i.test(sourceBadge) ? '#16a34a' : '#2563eb',
+    },
+    {
+      label: 'Freshness',
+      value: freshness,
+      icon: 'calendar-outline',
+      tone: place.facts.last_updated ? '#16a34a' : '#ca8a04',
+    },
+    {
+      label: 'Trust',
+      value: getExploreTrustBadge(place),
+      icon: 'shield-outline',
+      tone: /check/i.test(getExploreTrustBadge(place)) ? '#ca8a04' : '#0ea5e9',
+    },
+  ];
+  if (sourceCount > 1) {
+    rows.push({
+      label: 'Source count',
+      value: `${sourceCount} sources`,
+      icon: 'layers-outline',
+      tone: '#6366f1',
+    });
+  }
+  if (officialUrl) {
+    rows.push({
+      label: 'Handoff',
+      value: /viator|booking/i.test(String(officialUrl)) ? 'Partner booking link' : 'Official source link',
+      icon: 'open-outline',
+      tone: '#f97316',
+    });
+  }
+  if (photoCredit) {
+    rows.push({
+      label: 'Photo',
+      value: photoCredit,
+      icon: 'image-outline',
+      tone: '#0f766e',
+    });
+  }
+  if (sourceNote) {
+    rows.push({
+      label: 'Note',
+      value: cleanExploreCopy(sourceNote, place),
+      icon: 'information-circle-outline',
+      tone: '#64748b',
+    });
+  }
+  return rows;
 }
 
 export function getExploreCardSummary(place: ExplorePlaceProfile) {

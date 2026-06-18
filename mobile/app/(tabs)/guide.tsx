@@ -54,6 +54,29 @@ const EXPLORE_SORT_LABELS: Record<ExploreSortMode, string> = {
   source: 'Source quality',
 };
 
+type ExploreHomeSection = {
+  id: string;
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  color: string;
+  mode?: 'featured' | 'nearby' | 'trip';
+  category?: ExploreCategoryKey;
+  savedOnly?: boolean;
+};
+
+const EXPLORE_HOME_SECTIONS: ExploreHomeSection[] = [
+  { id: 'trip', label: 'For this trip', icon: 'git-branch-outline', color: '#f97316', mode: 'trip' },
+  { id: 'near-me', label: 'Near me', icon: 'locate-outline', color: '#a855f7', mode: 'nearby' },
+  { id: 'trails', label: 'Trails', icon: 'walk-outline', color: '#16a34a', category: 'trails' },
+  { id: 'parks', label: 'Parks', icon: 'leaf-outline', color: '#22c55e', category: 'parks' },
+  { id: 'camps', label: 'Camps', icon: 'bonfire-outline', color: '#14b8a6', category: 'camp' },
+  { id: 'water', label: 'Water', icon: 'water-outline', color: '#0ea5e9', category: 'water' },
+  { id: 'scenic', label: 'Scenic', icon: 'camera-outline', color: '#ca8a04', category: 'scenic' },
+  { id: 'tours', label: 'Tours', icon: 'ticket-outline', color: '#d97706', category: 'tours' },
+  { id: 'services', label: 'Town services', icon: 'basket-outline', color: '#7c3aed', category: 'resupply' },
+  { id: 'saved', label: 'Saved', icon: 'bookmark-outline', color: '#64748b', savedOnly: true },
+];
+
 const WMO_ICON: Record<number, keyof typeof Ionicons.glyphMap> = {
   0: 'sunny-outline', 1: 'partly-sunny-outline', 2: 'partly-sunny-outline', 3: 'cloud-outline',
   45: 'cloud-outline', 48: 'cloud-outline',
@@ -434,6 +457,7 @@ export default function GuideScreen() {
   const [exploreMode, setExploreMode] = useState<'featured' | 'nearby' | 'trip'>('featured');
   const [exploreSortMode, setExploreSortMode] = useState<ExploreSortMode>('best');
   const [exploreCategory, setExploreCategory] = useState<ExploreCategoryKey>('all');
+  const [exploreSavedOnly, setExploreSavedOnly] = useState(false);
   const [exploreQuery, setExploreQuery] = useState('');
   const [exploreVisibleLimit, setExploreVisibleLimit] = useState(EXPLORE_INITIAL_VISIBLE);
   const [profileReadMode, setProfileReadMode] = useState<ExploreDetailTab>('summary');
@@ -765,6 +789,7 @@ export default function GuideScreen() {
     const placeQuery = showExperienceSearch ? placeQueryFromExploreQuery(query) : query;
     const queryCategory = exploreCategory === 'all' ? exploreCategoryFromQuery(query) : null;
     const filtered = places.filter(({ place }) => {
+      if (exploreSavedOnly && !savedExploreIds.includes(place.id)) return false;
       const categoryOk = exploreCategoryMatches(place, exploreCategory);
       if (!categoryOk) return false;
       if (queryCategory && queryCategory !== 'tours' && getExploreCategoryKey(place) !== queryCategory) return false;
@@ -816,11 +841,11 @@ export default function GuideScreen() {
         if (b.trustScore !== a.trustScore) return b.trustScore - a.trustScore;
         return aDist - bDist;
       });
-  }, [enrichedExplorePlaces, exploreCategory, exploreMode, exploreQuery, exploreSortMode, showExperienceSearch, userLoc?.lat, userLoc?.lng, waypoints]);
+  }, [enrichedExplorePlaces, exploreCategory, exploreMode, exploreQuery, exploreSavedOnly, exploreSortMode, savedExploreIds, showExperienceSearch, userLoc?.lat, userLoc?.lng, waypoints]);
 
   useEffect(() => {
     setExploreVisibleLimit(EXPLORE_INITIAL_VISIBLE);
-  }, [exploreCategory, exploreMode, exploreQuery, exploreSortMode]);
+  }, [exploreCategory, exploreMode, exploreQuery, exploreSavedOnly, exploreSortMode]);
 
   const visibleRankedExplore = useMemo(
     () => rankedExplore.slice(0, exploreVisibleLimit),
@@ -828,7 +853,7 @@ export default function GuideScreen() {
   );
 
   const featuredSections = useMemo(() => {
-    if (hasExploreQuery || exploreCategory !== 'all' || exploreMode !== 'featured') return [];
+    if (hasExploreQuery || exploreSavedOnly || exploreCategory !== 'all' || exploreMode !== 'featured') return [];
     return EXPLORE_CATEGORY_CHIPS
       .filter(item => !['all', 'nearby', 'fuel', 'resupply'].includes(item.key))
       .map(item => ({
@@ -839,7 +864,7 @@ export default function GuideScreen() {
           .slice(0, 8),
       }))
       .filter(section => section.rows.length > 0);
-  }, [exploreCategory, exploreMode, hasExploreQuery, rankedExplore]);
+  }, [exploreCategory, exploreMode, exploreSavedOnly, hasExploreQuery, rankedExplore]);
   const relatedExplore = useMemo(() => {
     if (selectedExplore?.summary.lat == null || selectedExplore?.summary.lng == null) return [];
     const selectedGroup = groupForExplorePlace(selectedExplore);
@@ -1066,6 +1091,51 @@ export default function GuideScreen() {
     });
   }
 
+  function applyExploreHomeSection(section: ExploreHomeSection) {
+    setExploreSavedOnly(Boolean(section.savedOnly));
+    setExploreQuery('');
+    if (section.savedOnly) {
+      setExploreMode('featured');
+      setExploreCategory('all');
+      return;
+    }
+    setExploreMode(section.mode ?? 'featured');
+    setExploreCategory(section.category ?? 'all');
+  }
+
+  function exploreSectionActive(section: ExploreHomeSection) {
+    if (section.savedOnly) return exploreSavedOnly;
+    if (exploreSavedOnly) return false;
+    if (section.mode && exploreMode !== section.mode) return false;
+    if (section.category && exploreCategory !== section.category) return false;
+    if (!section.mode && !section.category) return exploreMode === 'featured' && exploreCategory === 'all';
+    return true;
+  }
+
+  function renderExploreHomeSections() {
+    return (
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.homeSectionRail}>
+        {EXPLORE_HOME_SECTIONS.map(section => {
+          const active = exploreSectionActive(section);
+          return (
+            <TouchableOpacity
+              key={section.id}
+              style={[
+                s.homeSectionChip,
+                { borderColor: active ? section.color + '88' : C.border, backgroundColor: active ? section.color + '16' : C.s1 },
+              ]}
+              activeOpacity={0.84}
+              onPress={() => applyExploreHomeSection(section)}
+            >
+              <Ionicons name={section.icon} size={16} color={active ? section.color : C.text3} />
+              <Text style={[s.homeSectionText, { color: active ? C.text : C.text2 }]} numberOfLines={1}>{section.label}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+    );
+  }
+
   function showExploreCampOnMap(camp: CampsitePin) {
     setPendingMapSelection({ kind: 'camp', camp });
     setSelectedExplore(null);
@@ -1176,8 +1246,8 @@ export default function GuideScreen() {
     }
   }
 
-  async function openExplorePlace(place: ExplorePlaceProfile) {
-    setProfileReadMode('summary');
+  async function openExplorePlace(place: ExplorePlaceProfile, initialTab: ExploreDetailTab = 'summary') {
+    setProfileReadMode(initialTab);
     const local = exploreTrailAreasById[place.id] ?? place;
     setSelectedExplore(local);
     if (!shouldUseExploreDetailEndpoint(place)) {
@@ -1189,6 +1259,7 @@ export default function GuideScreen() {
       setExplorePlaces(prev => prev.map(item => item.id === detail.id ? detail : item));
       const hydrated = exploreTrailAreasById[detail.id] ?? detail;
       setSelectedExplore(current => current?.id === place.id ? hydrated : current);
+      setProfileReadMode(initialTab);
       if (shouldHydrateExploreTrailArea(hydrated)) hydrateExploreTrailArea(hydrated).catch(() => {});
     } catch {
       if (shouldHydrateExploreTrailArea(local)) hydrateExploreTrailArea(local).catch(() => {});
@@ -1312,6 +1383,7 @@ export default function GuideScreen() {
         onOpen={() => openExplorePlace(place)}
         onArea={() => showExploreOnMap(place)}
         onRoute={() => routeExplore(place)}
+        onNearby={() => openExplorePlace(place, 'nearby')}
         onToggleSave={() => toggleSavedExplore(place)}
       />
     );
@@ -1509,6 +1581,7 @@ export default function GuideScreen() {
               selected={exploreCategory}
               mode={exploreMode}
               onSelect={key => {
+                setExploreSavedOnly(false);
                 if (key === 'nearby') {
                   setExploreMode('nearby');
                   setExploreCategory('all');
@@ -1519,12 +1592,19 @@ export default function GuideScreen() {
               }}
             />
 
-            <ExploreModeTabs value={exploreMode} onChange={setExploreMode} />
+            <ExploreModeTabs value={exploreMode} onChange={mode => {
+              setExploreSavedOnly(false);
+              setExploreMode(mode);
+            }} />
+            {renderExploreHomeSections()}
             <ExploreFilterRow
               shownCount={rankedExplore.length}
               sourceLabel={exploreSortMode === 'source' ? 'Source first' : 'Sources'}
               sortLabel={EXPLORE_SORT_LABELS[exploreSortMode]}
-              onCountPress={() => setExploreCategory('all')}
+              onCountPress={() => {
+                setExploreSavedOnly(false);
+                setExploreCategory('all');
+              }}
               onSourcePress={() => setExploreSortMode(current => current === 'source' ? 'best' : 'source')}
               onSortPress={() => setExploreSortMode(current => (
                 current === 'best' ? 'nearest' : current === 'nearest' ? 'source' : 'best'
@@ -1533,6 +1613,12 @@ export default function GuideScreen() {
 
             {exploreCategory !== 'all' && (
               <TouchableOpacity style={s.clearCategoryBtn} onPress={() => setExploreCategory('all')}>
+                <Ionicons name="close" size={14} color={C.orange} />
+                <Text style={s.clearCategoryText}>Show all Explore places</Text>
+              </TouchableOpacity>
+            )}
+            {exploreSavedOnly && (
+              <TouchableOpacity style={s.clearCategoryBtn} onPress={() => setExploreSavedOnly(false)}>
                 <Ionicons name="close" size={14} color={C.orange} />
                 <Text style={s.clearCategoryText}>Show all Explore places</Text>
               </TouchableOpacity>
@@ -1588,6 +1674,8 @@ export default function GuideScreen() {
                   ? 'NEARBY PLACES'
                   : exploreMode === 'trip'
                     ? 'ALONG YOUR TRIP'
+                    : exploreSavedOnly
+                      ? 'SAVED PLACES'
                     : hasExploreQuery
                       ? 'SEARCH RESULTS'
                     : exploreCategory === 'all'
@@ -1635,9 +1723,13 @@ export default function GuideScreen() {
               ))
             ) : !exploreLoading && rankedExplore.length === 0 && (!showExperienceSearch || (!exploreSearchExperienceLoading && exploreSearchExperiences.length === 0)) ? (
               <View style={s.emptyState}>
-                <Ionicons name="search-outline" size={44} color={C.text3} />
-                <Text style={s.emptyTitle}>No exact match</Text>
-                <Text style={s.emptySub}>Try camp, trail, viewpoint, waterfall, hut, fuel, tour, or hot spring.</Text>
+                <Ionicons name={exploreSavedOnly ? 'bookmark-outline' : 'search-outline'} size={44} color={C.text3} />
+                <Text style={s.emptyTitle}>{exploreSavedOnly ? 'No saved places yet' : 'No exact match'}</Text>
+                <Text style={s.emptySub}>
+                  {exploreSavedOnly
+                    ? 'Save Explore cards to build a short list for your route.'
+                    : 'Try camp, trail, viewpoint, waterfall, hut, fuel, tour, or hot spring.'}
+                </Text>
               </View>
             ) : (
               <>
@@ -1978,6 +2070,18 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   modeBtnActive: { backgroundColor: C.orangeGlow },
   modeBtnText: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '800' },
   modeBtnTextActive: { color: C.orange },
+  homeSectionRail: { gap: 9, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 4 },
+  homeSectionChip: {
+    minHeight: 40,
+    maxWidth: 148,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 11,
+  },
+  homeSectionText: { fontSize: 12, fontWeight: '900' },
   narrationToolbar: { minHeight: 58, borderRadius: 16, borderWidth: 1, borderColor: C.border, backgroundColor: C.s1, paddingHorizontal: 13, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   categoryStrip: { gap: 9, paddingRight: 8 },
   categoryPill: {

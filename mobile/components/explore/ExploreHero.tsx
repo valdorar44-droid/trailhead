@@ -1,36 +1,22 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { Image, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '@/lib/design';
+
+const DEFAULT_HERO_IMAGE = require('@/assets/explore-hero-moraine-lake.jpg');
 
 type Props = {
   greeting: string;
   displayName: string;
-  heroImage?: string;
   height: number;
   query: string;
   onQueryChange: (value: string) => void;
   onClearQuery: () => void;
 };
 
-export function ExploreHero({ greeting, displayName, heroImage, height, query, onQueryChange, onClearQuery }: Props) {
-  const C = useTheme();
-  const [failedImage, setFailedImage] = useState('');
-  const showHeroImage = !!heroImage && heroImage !== failedImage;
-
-  useEffect(() => {
-    if (heroImage !== failedImage) setFailedImage('');
-  }, [failedImage, heroImage]);
-
+export function ExploreHero({ greeting, displayName, height, query, onQueryChange, onClearQuery }: Props) {
   return (
     <View style={[styles.shell, { height }]}>
-      {showHeroImage ? (
-        <Image source={{ uri: heroImage }} style={styles.image} resizeMode="cover" onError={() => setFailedImage(heroImage || '')} />
-      ) : (
-        <View style={[styles.fallback, { backgroundColor: C.s3 }]}>
-          <Ionicons name="compass-outline" size={44} color="#fff" />
-        </View>
-      )}
+      <Image source={DEFAULT_HERO_IMAGE} style={styles.image} resizeMode="cover" />
       <View style={styles.overlay} />
       <View style={styles.content}>
         <Text style={styles.greeting}>{greeting}, {displayName}</Text>
@@ -64,7 +50,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#0f172a',
   },
   image: { ...StyleSheet.absoluteFillObject, width: '100%', height: '100%' },
-  fallback: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(3,7,18,0.28)' },
   content: {
     flex: 1,

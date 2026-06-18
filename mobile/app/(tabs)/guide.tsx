@@ -748,19 +748,6 @@ export default function GuideScreen() {
     mergeCuratedExplorePlaces(explorePlaces).map(place => exploreTrailAreasById[place.id] ?? place)
   ), [explorePlaces, exploreTrailAreasById]);
   const heroHeight = Math.max(280, Math.min(340, Math.round(windowHeight * 0.39)));
-  const heroImage = useMemo(() => {
-    const heroPlace = enrichedExplorePlaces
-      .filter(place => ['camping', 'trails', 'parks'].includes(groupForExplorePlace(place)))
-      .filter(place => place.summary.image_url || place.summary.thumbnail_url)
-      .sort((a, b) => {
-        const aRank = a.summary.hero_rank ?? a.summary.rank ?? 999999;
-        const bRank = b.summary.hero_rank ?? b.summary.rank ?? 999999;
-        if (aRank !== bRank) return aRank - bRank;
-        return a.summary.title.localeCompare(b.summary.title);
-      })[0];
-    const image = heroPlace?.summary.image_url || heroPlace?.summary.thumbnail_url || '';
-    return image ? mediaUrl(image) : '';
-  }, [enrichedExplorePlaces]);
   const hasExploreQuery = exploreQuery.trim().length > 0;
   const showExperienceSearch = shouldSearchBookableExperiences(exploreQuery, exploreCategory);
   const rankedExplore = useMemo(() => {
@@ -1514,7 +1501,6 @@ export default function GuideScreen() {
         <ExploreHero
           greeting={timeGreeting()}
           displayName={displayName}
-          heroImage={heroImage}
           height={heroHeight}
           query={exploreQuery}
           onQueryChange={setExploreQuery}

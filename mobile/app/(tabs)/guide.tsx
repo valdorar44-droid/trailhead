@@ -10,7 +10,7 @@ import { useRouter } from 'expo-router';
 import TourTarget from '@/components/TourTarget';
 import PaywallModal from '@/components/PaywallModal';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
-import { TrailheadButton, TrailheadCard } from '@/components/TrailheadUI';
+import { TrailheadButton, TrailheadCard, TrailheadCardSkeleton, TrailheadLoadingRow, TrailheadRailSkeleton } from '@/components/TrailheadUI';
 import {
   EXPLORE_CATEGORY_CHIPS,
   ExploreCategoryChips,
@@ -1284,6 +1284,7 @@ export default function GuideScreen() {
         <Text style={s.exploreWeatherText}>
           {loading ? 'Loading trails, treks, and glacier cards...' : error}
         </Text>
+        {loading ? <TrailheadCardSkeleton lines={2} style={s.exploreTrailSkeleton} /> : null}
       </TrailheadCard>
     );
   }
@@ -1341,10 +1342,7 @@ export default function GuideScreen() {
           </TouchableOpacity>
         </View>
         {loading ? (
-          <View style={s.campgroundLoadRow}>
-            <ActivityIndicator color={C.orange} size="small" />
-            <Text style={s.campgroundLoadText}>Loading campgrounds...</Text>
-          </View>
+          <TrailheadRailSkeleton label="Loading nearby options" count={3} cardWidth={190} style={s.campgroundLoadingSkeleton} />
         ) : camps.length ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.campgroundRail}>
             {camps.slice(0, 12).map(camp => {
@@ -1557,6 +1555,12 @@ export default function GuideScreen() {
                   <Text style={s.livePlacesTitle}>LIVE PLACES NEAR YOU</Text>
                   {liveExploreLoading && <ActivityIndicator color={C.orange} size="small" />}
                 </View>
+                {liveExploreLoading && liveExplorePlaces.length === 0 ? (
+                  <>
+                    <TrailheadCardSkeleton media lines={2} style={s.livePlaceSkeleton} />
+                    <TrailheadCardSkeleton media lines={2} style={s.livePlaceSkeleton} />
+                  </>
+                ) : null}
                 {liveExplorePlaces.map(place => (
                   <TouchableOpacity key={place.id} style={s.livePlaceRow} activeOpacity={0.86} onPress={() => setSelectedLivePlace(place)}>
                     {place.photo_url ? (
@@ -1594,9 +1598,19 @@ export default function GuideScreen() {
             </View>
 
             {exploreLoading && (
-              <View style={s.loadRow}>
-                <ActivityIndicator color={C.orange} />
-                <Text style={s.loadText}>Loading featured places...</Text>
+              <View style={s.exploreLoadingBlock}>
+                <TrailheadLoadingRow
+                  label="Ranking official sources"
+                  sub="Loading parks, trails, stays, water, and route-ready Explore cards."
+                  icon="sparkles-outline"
+                />
+                {explorePlaces.length === 0 ? (
+                  <>
+                    <TrailheadCardSkeleton media lines={3} />
+                    <TrailheadCardSkeleton media lines={3} />
+                    <TrailheadCardSkeleton media lines={3} />
+                  </>
+                ) : null}
               </View>
             )}
             {!!exploreError && explorePlaces.length === 0 && (
@@ -1930,6 +1944,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     padding: 16, backgroundColor: C.s2, borderRadius: 12, borderWidth: 1, borderColor: C.border,
   },
   loadText: { color: C.text2, fontSize: 13 },
+  exploreLoadingBlock: { gap: 10, marginHorizontal: 20, marginBottom: 14 },
   exploreHero: {
     flexDirection: 'row', gap: 12, alignItems: 'center',
     paddingHorizontal: 2, paddingVertical: 4,
@@ -2027,6 +2042,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   livePlacesBlock: { backgroundColor: C.glassStrong, borderWidth: 1, borderColor: C.border, borderRadius: 16, padding: 10, gap: 8 },
   livePlacesTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 2 },
   livePlacesTitle: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
+  livePlaceSkeleton: { minHeight: 64, padding: 8 },
   livePlaceRow: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: C.border, backgroundColor: C.glass, borderRadius: 13, padding: 8 },
   livePlacePhoto: { width: 46, height: 46, borderRadius: 11, backgroundColor: C.s2 },
   livePlaceIcon: { width: 46, height: 46, borderRadius: 11, backgroundColor: C.s1, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center' },
@@ -2097,6 +2113,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   weatherStatLabel: { color: C.text3, fontSize: 8, fontFamily: mono, letterSpacing: 0.5, marginTop: 2 },
   exploreWeatherCard: { marginHorizontal: 20, marginBottom: 16, backgroundColor: C.s2, borderRadius: 14, borderWidth: 1, borderColor: C.border, padding: 14, gap: 12 },
   exploreTrailStatusCard: { marginHorizontal: 20, marginBottom: 14, backgroundColor: C.s2, borderRadius: 14, borderWidth: 1, borderColor: C.border, padding: 14, gap: 12 },
+  exploreTrailSkeleton: { minHeight: 62, padding: 10 },
   exploreWeatherTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   exploreWeatherSub: { color: C.text3, fontSize: 12, fontWeight: '700' },
   exploreWeatherText: { color: C.text2, fontSize: 13, lineHeight: 19, fontWeight: '700' },
@@ -2132,8 +2149,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   campgroundSectionSub: { color: C.text3, fontSize: 12, lineHeight: 17 },
   campgroundAreaBtn: { height: 36, paddingHorizontal: 10, borderRadius: 10, borderWidth: 1, borderColor: C.orange + '55', backgroundColor: C.orangeGlow, flexDirection: 'row', alignItems: 'center', gap: 5 },
   campgroundAreaBtnText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900' },
-  campgroundLoadRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 18 },
-  campgroundLoadText: { color: C.text3, fontSize: 12, fontWeight: '700' },
+  campgroundLoadingSkeleton: { paddingTop: 4 },
   campgroundRail: { gap: 12, paddingTop: 12, paddingRight: 2 },
   campgroundCard: { width: 236, backgroundColor: C.s1, borderRadius: 12, borderWidth: 1, borderColor: C.border, overflow: 'hidden' },
   campgroundImageWrap: { height: 126, backgroundColor: C.s2 },

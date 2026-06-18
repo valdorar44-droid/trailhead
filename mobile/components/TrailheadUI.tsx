@@ -317,6 +317,93 @@ export function TrailheadSectionTitle({ children }: { children: React.ReactNode 
   return <Text style={[ui.sectionTitle, { color: C.text3 }]}>{children}</Text>;
 }
 
+export function TrailheadSkeletonLine({
+  width = '100%',
+  height = 12,
+  style,
+}: {
+  width?: number | `${number}%`;
+  height?: number;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const C = useTheme();
+  const tone = useOverlayTone(C);
+  return <View style={[ui.skeletonLine, { width, height, backgroundColor: tone.field, borderColor: tone.line }, style]} />;
+}
+
+export function TrailheadLoadingRow({
+  label = 'Loading nearby options',
+  sub,
+  icon = 'sync-outline',
+  style,
+}: {
+  label?: string;
+  sub?: string;
+  icon?: IconName;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const C = useTheme();
+  return (
+    <TrailheadCard style={[ui.loadingRow, style]}>
+      <View style={[ui.smallIcon, { borderColor: C.orange + '55', backgroundColor: C.orange + '14' }]}>
+        <ActivityIndicator size="small" color={C.orange} />
+      </View>
+      <View style={ui.titleBlock}>
+        <View style={ui.loadingTitleRow}>
+          <Ionicons name={icon} size={13} color={C.orange} />
+          <Text style={[ui.loadingTitle, { color: C.text }]} numberOfLines={1}>{label}</Text>
+        </View>
+        {sub ? <Text style={[ui.loadingSub, { color: C.text3 }]} numberOfLines={2}>{sub}</Text> : null}
+      </View>
+    </TrailheadCard>
+  );
+}
+
+export function TrailheadCardSkeleton({
+  media = false,
+  lines = 3,
+  style,
+}: {
+  media?: boolean;
+  lines?: number;
+  style?: StyleProp<ViewStyle>;
+}) {
+  return (
+    <TrailheadCard style={[ui.skeletonCard, style]}>
+      {media ? <TrailheadSkeletonLine width={68} height={58} style={ui.skeletonMedia} /> : null}
+      <View style={ui.skeletonCopy}>
+        <TrailheadSkeletonLine width="72%" height={13} />
+        {Array.from({ length: Math.max(1, lines - 1) }).map((_, idx) => (
+          <TrailheadSkeletonLine key={idx} width={idx % 2 ? '58%' : '90%'} height={10} />
+        ))}
+      </View>
+    </TrailheadCard>
+  );
+}
+
+export function TrailheadRailSkeleton({
+  label,
+  count = 4,
+  cardWidth = 176,
+  style,
+}: {
+  label?: string;
+  count?: number;
+  cardWidth?: number;
+  style?: StyleProp<ViewStyle>;
+}) {
+  return (
+    <View style={style}>
+      {label ? <TrailheadSectionTitle>{label}</TrailheadSectionTitle> : null}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={ui.skeletonRail}>
+        {Array.from({ length: count }).map((_, idx) => (
+          <TrailheadCardSkeleton key={idx} media lines={3} style={[ui.skeletonRailCard, { width: cardWidth }]} />
+        ))}
+      </ScrollView>
+    </View>
+  );
+}
+
 export function TrailheadGradientLine() {
   const C = useTheme();
   return <LinearGradient colors={[C.orange + '00', C.orange + '88', C.orange + '00']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={ui.gradientLine} />;
@@ -357,5 +444,15 @@ const ui = StyleSheet.create({
   metricValue: { fontFamily: mono, fontSize: 13, fontWeight: '900', marginTop: 2 },
   metricLabel: { fontFamily: mono, fontSize: 8.5, fontWeight: '900', marginTop: 2 },
   sectionTitle: { fontFamily: mono, fontSize: 9, fontWeight: '900', letterSpacing: 0.9, marginBottom: spacing.sm },
+  loadingRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  loadingTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  loadingTitle: { fontSize: 13, fontWeight: '900' },
+  loadingSub: { fontSize: 11.5, lineHeight: 16, marginTop: 3 },
+  skeletonLine: { borderWidth: 1, borderRadius: 999, opacity: 0.84 },
+  skeletonCard: { minHeight: 84, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  skeletonMedia: { borderRadius: radii.md },
+  skeletonCopy: { flex: 1, minWidth: 0, gap: 8 },
+  skeletonRail: { gap: spacing.sm, paddingRight: spacing.md },
+  skeletonRailCard: { flexShrink: 0 },
   gradientLine: { height: 1, opacity: 0.8 },
 });

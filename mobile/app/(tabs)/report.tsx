@@ -11,7 +11,7 @@ import { storage } from '@/lib/storage';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import TourTarget from '@/components/TourTarget';
-import { TrailheadButton, TrailheadCard, TrailheadSheet, TrailheadTopBar } from '@/components/TrailheadUI';
+import { TrailheadButton, TrailheadCard, TrailheadCardSkeleton, TrailheadLoadingRow, TrailheadSheet, TrailheadTopBar } from '@/components/TrailheadUI';
 import { api, Report, ContributorLeader, ContributorProfile, ContributionPeriod } from '@/lib/api';
 import { useStore } from '@/lib/store';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
@@ -166,6 +166,7 @@ export default function ReportScreen() {
   const [campReports, setCampReports] = useState<Report[]>([]);
   const [routeLoading, setRouteLoading] = useState(false);
   const [campLoading, setCampLoading] = useState(false);
+  const [nearbyLoading, setNearbyLoading] = useState(false);
   const [topUsers, setTopUsers] = useState<ContributorLeader[]>([]);
   const [topPeriod, setTopPeriod] = useState<ContributionPeriod>('month');
   const [selectedContributor, setSelectedContributor] = useState<ContributorProfile | null>(null);
@@ -235,10 +236,11 @@ export default function ReportScreen() {
           setLoc(c);
           locRef.current = c;
           if (l.coords.speed !== null && l.coords.speed > 2.2) setDrivingWarning(true);
+          setNearbyLoading(true);
           api.getNearbyAlerts(c.lat, c.lng).then(reports => {
             setNearby(reports);
             checkAndNotify(reports);
-          }).catch(() => {});
+          }).catch(() => {}).finally(() => setNearbyLoading(false));
         })
         .catch(() => {}); // prevent unhandled rejection crash
     }).catch(() => {});
@@ -284,10 +286,11 @@ export default function ReportScreen() {
     if (view !== 'nearby') return;
     const c = locRef.current;
     if (!c) return;
+    setNearbyLoading(true);
     api.getNearbyAlerts(c.lat, c.lng).then(reports => {
       setNearby(reports);
       checkAndNotify(reports);
-    }).catch(() => {});
+    }).catch(() => {}).finally(() => setNearbyLoading(false));
   }, [view]);
 
   useEffect(() => {
@@ -442,7 +445,17 @@ export default function ReportScreen() {
           <Ionicons name="chevron-forward" size={13} color={C.text3} />
         </TouchableOpacity>
 
-        {!options.loading && reports.length === 0 ? (
+        {options.loading && reports.length === 0 ? (
+          <View style={s.feedLoadingBlock}>
+            <TrailheadLoadingRow
+              label={mode === 'route' ? 'Checking route context' : mode === 'camp' ? 'Checking tonight’s stop' : 'Loading nearby options'}
+              sub={mode === 'route' ? 'Ranking reports that affect the active route.' : mode === 'camp' ? 'Looking for current reports near the overnight area.' : 'Checking recent field reports around you.'}
+              icon={mode === 'camp' ? 'bonfire-outline' : mode === 'route' ? 'trail-sign-outline' : 'location-outline'}
+            />
+            <TrailheadCardSkeleton lines={3} />
+            <TrailheadCardSkeleton lines={3} />
+          </View>
+        ) : !options.loading && reports.length === 0 ? (
           <View style={s.emptyWrap}>
             <View style={s.emptyIconWrap}>
               <Ionicons name={mode === 'route' ? 'trail-sign-outline' : mode === 'camp' ? 'bonfire-outline' : 'location-outline'} size={30} color={C.text3} />
@@ -789,7 +802,7 @@ export default function ReportScreen() {
         kicker: 'NEAR ME',
         subtitle: 'Local conditions around your current position',
         countLabel: 'ACTIVE',
-        loading: false,
+        loading: nearbyLoading,
         emptyTitle: 'No active reports nearby',
         emptySub: 'This area looks quiet. If you spot a closure, washed road, full camp, or fuel issue, add the first report.',
         primaryActionLabel: 'ADD REPORT',
@@ -1447,6 +1460,10 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   nearbyCountNum: { color: C.orange, fontSize: 21, fontFamily: mono, fontWeight: '900' },
   nearbyCountLabel: { color: C.text3, fontSize: 7, fontFamily: mono, fontWeight: '900', marginTop: 1 },
+  feedLoadingBlock: {
+    gap: 10,
+    marginTop: 6,
+  },
   emptyWrap: {
     alignItems: 'center',
     marginTop: 34,

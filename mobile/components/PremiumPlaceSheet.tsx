@@ -20,7 +20,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api, PaywallError, type PlaceComment, type PlaceDetail, type PlaceReservationStatus, type TrailheadPlace } from '@/lib/api';
 import { useTheme, mono, type ColorPalette } from '@/lib/design';
-import { TrailheadButton, TrailheadButtonDock, TrailheadSheet } from '@/components/TrailheadUI';
+import { TrailheadButton, TrailheadButtonDock, TrailheadLoadingRow, TrailheadRailSkeleton, TrailheadSheet } from '@/components/TrailheadUI';
 import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
 
 type Stage = 'full' | 'half' | 'peek';
@@ -758,6 +758,16 @@ export default function PremiumPlaceSheet({
                     <Text style={s.sectionLabel}>NEARBY CONTEXT</Text>
                     {related?.loading ? <ActivityIndicator color={C.orange} size="small" /> : null}
                   </View>
+                  {related?.loading ? (
+                    <View style={s.relatedLoadingBody}>
+                      <TrailheadLoadingRow
+                        label="Loading nearby options"
+                        sub="Checking useful stops, camps, trails, and services around this place."
+                        icon="location-outline"
+                      />
+                      <TrailheadRailSkeleton count={3} cardWidth={174} />
+                    </View>
+                  ) : null}
                   {!!related?.error && !related?.loading && (
                     <Text style={s.sectionText}>{related.error}</Text>
                   )}
@@ -1207,6 +1217,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   richLockedPill: { height: 22, borderRadius: 11, backgroundColor: C.text3 },
   relatedBlock: { gap: 10, paddingVertical: 2 },
   relatedHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  relatedLoadingBody: { gap: 10 },
   relatedSection: { gap: 7 },
   relatedTitle: { color: C.text3, fontSize: 9, fontFamily: mono, letterSpacing: 0.9, fontWeight: '900' },
   relatedRail: { gap: 8, paddingRight: 12 },

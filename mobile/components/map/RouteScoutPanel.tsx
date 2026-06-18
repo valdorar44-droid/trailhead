@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
+import { TrailheadSkeletonLine } from '@/components/TrailheadUI';
 import { mono, useTheme, type ColorPalette } from '@/lib/design';
 import type { RouteScoutState, RouteScoutStop } from '@/lib/api';
 
@@ -98,6 +99,12 @@ export default function RouteScoutPanel({
             );
           })}
         </ScrollView>
+      ) : routeScout.status === 'scouting' ? (
+        <View style={s.scoutSkeleton}>
+          <TrailheadSkeletonLine width={118} height={54} style={s.scoutSkeletonCard} />
+          <TrailheadSkeletonLine width={118} height={54} style={s.scoutSkeletonCard} />
+          <TrailheadSkeletonLine width={118} height={54} style={s.scoutSkeletonCard} />
+        </View>
       ) : null}
 
       <View style={s.actions}>
@@ -209,6 +216,15 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     gap: 8,
     paddingTop: 10,
     paddingRight: 4,
+  },
+  scoutSkeleton: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingTop: 10,
+    overflow: 'hidden',
+  },
+  scoutSkeletonCard: {
+    borderRadius: 10,
   },
   stop: {
     width: 146,

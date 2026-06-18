@@ -2,7 +2,7 @@ import React from 'react';
 import { Alert, Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { TrailheadSheet } from '@/components/TrailheadUI';
+import { TrailheadLoadingRow, TrailheadSheet } from '@/components/TrailheadUI';
 import { mono, useTheme, type ColorPalette } from '@/lib/design';
 
 export type MapFilterOption = {
@@ -258,6 +258,14 @@ export default function MapFilterSheet({
                 </TouchableOpacity>
               ))}
             </View>
+            {categoryUnlocking ? (
+              <TrailheadLoadingRow
+                label="Checking route context"
+                sub="Opening richer Explore and service filters for this session."
+                icon="sparkles-outline"
+                style={styles.sheetLoadingRow}
+              />
+            ) : null}
 
             <View style={styles.group}>
               {renderSectionRow({
@@ -491,6 +499,10 @@ function makeStyles(C: ColorPalette) {
       fontSize: 10,
       fontFamily: mono,
       fontWeight: '900',
+    },
+    sheetLoadingRow: {
+      marginHorizontal: 12,
+      marginBottom: 10,
     },
     group: {
       marginHorizontal: 12,

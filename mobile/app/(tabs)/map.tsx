@@ -65,6 +65,12 @@ import {
   type TrailFeature,
 } from '@/lib/trailEngine';
 import {
+  normalizeTrailheadTrailProfile,
+  trailFeatureSourceSummary,
+  trailProfileSourceRows,
+  trailProfileStatRows,
+} from '@/lib/trailProfileDisplay';
+import {
   addNavigationStateListener,
   hasNativeNavigationEngine,
   setNavigationFollow,
@@ -1297,7 +1303,7 @@ function compactCoords(coords: [number, number][], maxPoints = 96): [number, num
 }
 
 function trailSourceLine(trail: TrailFeature, profile?: TrailProfile | null) {
-  const source = profile?.source_label || trailSourceLabel(trail);
+  const source = trailFeatureSourceSummary(trail, profile);
   const ts = profile?.last_checked || trail.last_checked;
   if (!ts) return source;
   const date = new Date(ts * 1000);
@@ -18087,6 +18093,51 @@ function MapScreen() {
             borderColor={OVR.border}
             surfaceColor={OVR.bg2}
           />
+          {(() => {
+            const model = normalizeTrailheadTrailProfile(selectedTrailProfile, selectedTrail);
+            const statRows = trailProfileStatRows(model);
+            const sourceRows = trailProfileSourceRows(model);
+            return (
+              <>
+                <View style={s.trailProfileStatGrid}>
+                  {statRows.map(row => (
+                    <View key={`${row.label}-${row.value}`} style={s.trailProfileStatCard}>
+                      <Ionicons name={row.icon as any} size={14} color={row.tone} />
+                      <Text style={s.trailProfileStatLabel}>{row.label.toUpperCase()}</Text>
+                      <Text style={s.trailProfileStatValue} numberOfLines={1}>{row.value}</Text>
+                    </View>
+                  ))}
+                </View>
+                <View style={s.trailSourcePanel}>
+                  {sourceRows.map(row => (
+                    <View key={`${row.label}-${row.value}`} style={s.trailSourceRow}>
+                      <Ionicons name={row.icon as any} size={14} color={row.tone} />
+                      <Text style={s.trailSourceRowLabel}>{row.label}</Text>
+                      <Text style={s.trailSourceRowValue} numberOfLines={1}>{row.value}</Text>
+                    </View>
+                  ))}
+                </View>
+                {model.difficulty_reason.length > 0 && (
+                  <View style={s.trailReasonPanel}>
+                    <Text style={s.trailReportTitle}>DIFFICULTY BASIS</Text>
+                    {model.difficulty_reason.slice(0, 3).map(reason => (
+                      <View key={reason} style={s.trailReasonRow}>
+                        <Ionicons name="checkmark-circle-outline" size={13} color={C.green} />
+                        <Text style={s.trailReasonText} numberOfLines={2}>{reason}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+                {model.recent_conditions.length > 0 && (
+                  <View style={s.trailConditionPills}>
+                    {model.recent_conditions.map(tag => (
+                      <Text key={tag} style={s.trailConditionPill}>{tag}</Text>
+                    ))}
+                  </View>
+                )}
+              </>
+            );
+          })()}
           {(selectedTrailProfile?.summary || selectedTrail.summary) && (
             <View style={s.trailStoryPanel}>
               <Text style={s.trailReportTitle}>TRAIL NOTES</Text>
@@ -18563,7 +18614,7 @@ function MapScreen() {
                     <Text style={s.discoveryTrailStat}>{trail.support.reportsNearby} reports</Text>
                   </View>
                   <View style={s.discoveryTrailFooter}>
-                    <Text style={s.discoveryTrailPreview}>{trail.source === 'trailhead' ? 'Source-backed profile' : 'Preview'}</Text>
+                    <Text style={s.discoveryTrailPreview} numberOfLines={1}>{trailFeatureSourceSummary(trail)}</Text>
                     <Ionicons name="chevron-forward" size={15} color={C.text3} />
                   </View>
                 </View>
@@ -24339,6 +24390,55 @@ const makeStyles = (C: ColorPalette) => {
     marginBottom: 8,
   },
   trailReadinessText: { color: C.text2, fontSize: 10.5, fontFamily: mono, flex: 1 },
+  trailProfileStatGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginBottom: 8 },
+  trailProfileStatCard: {
+    width: '48%',
+    minHeight: 58,
+    backgroundColor: C.s2,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 11,
+    padding: 9,
+    gap: 3,
+  },
+  trailProfileStatLabel: { color: C.text3, fontSize: 7.5, fontFamily: mono, fontWeight: '900' },
+  trailProfileStatValue: { color: C.text, fontSize: 11.5, lineHeight: 15, fontWeight: '900' },
+  trailSourcePanel: {
+    gap: 6,
+    backgroundColor: C.s2,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 9,
+  },
+  trailSourceRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  trailSourceRowLabel: { width: 76, color: C.text3, fontSize: 8.5, fontFamily: mono, fontWeight: '900' },
+  trailSourceRowValue: { flex: 1, color: C.text2, fontSize: 10.5, fontWeight: '800' },
+  trailReasonPanel: {
+    backgroundColor: C.s2,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 9,
+  },
+  trailReasonRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 7, marginTop: 7 },
+  trailReasonText: { flex: 1, color: C.text2, fontSize: 10.5, lineHeight: 15 },
+  trailConditionPills: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 9 },
+  trailConditionPill: {
+    color: C.text2,
+    fontSize: 9,
+    fontFamily: mono,
+    fontWeight: '800',
+    backgroundColor: C.s2,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    overflow: 'hidden',
+  },
   trailStoryPanel: {
     backgroundColor: C.s2,
     borderWidth: 1,

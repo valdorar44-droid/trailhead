@@ -13,6 +13,7 @@ import CampNearbyPlacesSection from '@/components/map/CampNearbyPlacesSection';
 import CampReviewsSection from '@/components/map/CampReviewsSection';
 import MapDrawerSheet from '@/components/map/MapDrawerSheet';
 import MapFilterSheet from '@/components/map/MapFilterSheet';
+import MapLegendSheet from '@/components/map/MapLegendSheet';
 import MapLayerSheetContent from '@/components/map/MapLayerSheetContent';
 import MapStyleSheet from '@/components/map/MapStyleSheet';
 import MapWeatherPeek from '@/components/map/MapWeatherPeek';
@@ -86,7 +87,7 @@ import PaywallModal from '@/components/PaywallModal';
 import AppReviewPrompt from '@/components/AppReviewPrompt';
 import AiReportModal from '@/components/AiReportModal';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
-import { MAP_MODE_PRESETS, type MapModePresetId } from '@/lib/mapLegend';
+import { MAP_MODE_PRESETS, legendCategoryForPreset, mapModePresetTitle, type MapModePresetId } from '@/lib/mapLegend';
 import { CREDIT_REWARDS } from '@/lib/credits';
 import { useConnectivitySync } from '@/lib/connectivitySync';
 import { playTrailheadCue, playTrailheadVoice, stopTrailheadVoice } from '@/lib/voice';
@@ -4907,6 +4908,7 @@ function MapScreen() {
   const trailGuideSheetSub = extremeConfig?.copilot?.voice_enabled
     ? (trailGuideDockLabel || extremeCopilotVoiceStatus || 'Text and push-to-talk')
     : 'Text actions · preview rebuild required for voice';
+  const copilotAccentText = themeMode === 'light' ? '#ffffff' : '#050505';
   useEffect(() => () => {
     realtimeCopilotRef.current?.stop();
     realtimeCopilotRef.current = null;
@@ -4928,6 +4930,8 @@ function MapScreen() {
   const [selectOnMapMode, setSelectOnMapMode] = useState(false);
   const [searchQuery,  setSearchQuery]  = useState('');
   const [searchResults,setSearchResults] = useState<SearchPlace[]>([]);
+  const [inlineSearchOpen, setInlineSearchOpen] = useState(false);
+  const inlineSearchInputRef = useRef<TextInput | null>(null);
   const [copilotResults, setCopilotResults] = useState<SearchPlace[]>([]);
   const [copilotResultScope, setCopilotResultScope] = useState<CopilotResultScope | null>(null);
   const [copilotDebugTranscript, setCopilotDebugTranscript] = useState('');
@@ -4968,6 +4972,7 @@ function MapScreen() {
   const [mapboxToken,   setMapboxToken]   = useState('');
   const [protomapsKey,  setProtomapsKey]  = useState('');
   const [showFilterSheet, setShowFilterSheet] = useState(false);
+  const [showMapLegendSheet, setShowMapLegendSheet] = useState(false);
   const [activeMapModePreset, setActiveMapModePreset] = useState<MapModePresetId>('default');
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
   const [activePinFilters, setActivePinFilters] = useState<string[]>(DEFAULT_COMMUNITY_PIN_FILTERS);
@@ -7678,15 +7683,45 @@ function MapScreen() {
 
   // ── Server-proxied map search ───────────────────────────────────────────────
 
-  async function searchMap() {
-    if (!searchQuery.trim()) return;
+  function focusInlineMapSearch() {
+    setInlineSearchOpen(true);
+    InteractionManager.runAfterInteractions(() => {
+      inlineSearchInputRef.current?.focus();
+      if (Platform.OS === 'android') {
+        setTimeout(() => inlineSearchInputRef.current?.focus(), 110);
+        setTimeout(() => inlineSearchInputRef.current?.focus(), 260);
+      }
+    });
+  }
+
+  function openInlineMapSearch() {
+    setShowMapDrawer(false);
+    setShowSearch(false);
+    setSearchMode('browse');
+    focusInlineMapSearch();
+  }
+
+  function closeInlineMapSearch(clear = true) {
+    setInlineSearchOpen(false);
+    setIsSearching(false);
+    setSearchResults([]);
+    if (clear) setSearchQuery('');
+    Keyboard.dismiss();
+  }
+
+  async function searchMap(queryOverride?: string) {
+    const cleanQuery = (queryOverride ?? searchQuery).trim();
+    if (cleanQuery.length < 2) {
+      setSearchResults([]);
+      return;
+    }
     setIsSearching(true);
     setSearchRouteCard(null);
     try {
-      const resolved = await api.resolveGeocodePlace(searchQuery.trim(), 8).catch(() => null);
+      const resolved = await api.resolveGeocodePlace(cleanQuery, 8).catch(() => null);
       const places = resolved?.selected
         ? [resolved.selected, ...(resolved.alternatives ?? [])]
-        : await api.geocodePlaces(searchQuery.trim(), 6);
+        : await api.geocodePlaces(cleanQuery, 6);
       const sorted = userLoc
         ? places.slice().sort((a, b) => haversineKm(userLoc.lat, userLoc.lng, a.lat, a.lng) - haversineKm(userLoc.lat, userLoc.lng, b.lat, b.lng))
         : places;
@@ -7697,27 +7732,36 @@ function MapScreen() {
         type: place.feature_type || place.category || 'poi',
         geocode_status: resolved?.status,
         geocode_reason: resolved?.reason,
-        geocode_query: searchQuery.trim(),
+        geocode_query: cleanQuery,
       })));
     } catch (e: any) {
-      setSearchResults([]);
       setSearchResults([{ lat: 0, lng: 0, name: '__error__' }]);
+    } finally {
+      setIsSearching(false);
     }
-    setIsSearching(false);
   }
 
   function selectSearchResult(place: SearchPlace) {
+    if (place.name === '__error__') return;
+    const query = searchQuery.trim();
     const dist = userLoc ? haversineKm(userLoc.lat, userLoc.lng, place.lat, place.lng) : null;
     const basePlace = { ...place, dist, source: place.source || 'search', type: place.type || 'poi' };
     const isMapboxPlace = String(basePlace.source || '').toLowerCase().includes('mapbox');
-    setSearchRouteCard(basePlace);
+    setSearchRouteCard(null);
+    setSelectedCamp(null);
+    setTappedTrail(null);
+    setTappedTileSpot(null);
+    setTappedGas(null);
+    setTappedPoi(null);
+    setSelectedTrail(null);
+    setSelectedCommunityPin(null);
     setSelectedPlace({
       ...basePlace,
       summary: basePlace.summary || (isMapboxPlace ? undefined : 'Loading place details, nearby camps, trails, and useful stops...'),
       source_label: basePlace.source_label || 'Map search',
     });
-    setSearchResults([]);
-    focusPlaceCamera(basePlace, 14, searchQuery);
+    closeInlineMapSearch();
+    focusPlaceCamera(basePlace, 14, query);
   }
 
   async function openExtremeReversePlace(lat: number, lng: number) {
@@ -16517,7 +16561,7 @@ function MapScreen() {
   }));
   const extremeFeatureItems = [
     { key: 'globe_terrain', label: map3dEnabled ? '2D Terrain' : 'Globe / 3D', sub: map3dEnabled ? 'Flatten camera' : 'Terrain camera', icon: 'planet-outline', val: map3dEnabled, color: '#a3e635', enabled: true, onPress: () => toggleMap3d() },
-    { key: 'search_box', label: 'Search Box', sub: 'Find and fly to places', icon: 'search-outline', val: false, color: '#38bdf8', enabled: !!extremeConfig?.feature_flags?.search, onPress: () => { if (extremeConfig?.feature_flags?.search) { setSearchMode('browse'); setShowSearch(true); setShowLayerSheet(false); return; } setQuickToast('This EXTREME feature is beta locked.'); setTimeout(() => setQuickToast(''), 2400); } },
+    { key: 'search_box', label: 'Search Box', sub: 'Find and fly to places', icon: 'search-outline', val: inlineSearchOpen, color: '#38bdf8', enabled: !!extremeConfig?.feature_flags?.search, onPress: () => { if (extremeConfig?.feature_flags?.search) { setShowLayerSheet(false); openInlineMapSearch(); return; } setQuickToast('This EXTREME feature is beta locked.'); setTimeout(() => setQuickToast(''), 2400); } },
     { key: 'directions', label: 'Directions', sub: searchRouteCard ? 'Preview selected route' : 'Choose destination', icon: 'navigate-outline', val: !!searchRouteCard, color: '#f97316', enabled: !!extremeConfig?.feature_flags?.navigation, onPress: () => { if (extremeConfig?.feature_flags?.navigation) { openExtremeDirections(); return; } setQuickToast('This EXTREME feature is beta locked.'); setTimeout(() => setQuickToast(''), 2400); } },
     { key: 'traffic', label: 'Traffic', sub: 'Congestion style', icon: 'git-merge-outline', val: extremeTrafficEnabled, color: '#ef4444', enabled: !!extremeConfig?.feature_flags?.navigation, onPress: () => { if (extremeConfig?.feature_flags?.navigation) { toggleExtremeTraffic(); return; } setQuickToast('This EXTREME feature is beta locked.'); setTimeout(() => setQuickToast(''), 2400); } },
     { key: 'weather', label: 'Weather', sub: extremeConfig?.weather?.mapbox_conditions_enabled ? 'Radar + route conditions' : 'Radar overlay', icon: 'rainy-outline', val: layerRadar, color: '#06b6d4', enabled: !!extremeConfig?.feature_flags?.weather, onPress: () => { if (extremeConfig?.feature_flags?.weather) { openExtremeWeather(); return; } setQuickToast('EXTREME weather is locked for this beta.'); setTimeout(() => setQuickToast(''), 2400); } },
@@ -16662,6 +16706,10 @@ function MapScreen() {
   const toggleFilterId = (setter: (updater: (prev: string[]) => string[]) => void, id: string) => {
     setter(prev => prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]);
   };
+  const openMapFilterLegend = () => {
+    setShowFilterSheet(false);
+    setTimeout(() => setShowMapLegendSheet(true), Platform.OS === 'ios' ? 90 : 0);
+  };
   const applyMapFilterPreset = (preset: MapModePresetId) => {
     setActiveMapModePreset(preset);
     const exploreLocked = !exploreCategoriesUnlocked;
@@ -16673,196 +16721,130 @@ function MapScreen() {
       }
       return ids.filter(id => !exploreLocked || !(EXPLORE_PLACE_FILTER_IDS as readonly string[]).includes(id));
     };
-    const setRiskLayers = ({
-      fire = false,
-      ava = false,
-      radar = false,
-      mvum = false,
-      nautical = false,
-    }: { fire?: boolean; ava?: boolean; radar?: boolean; mvum?: boolean; nautical?: boolean }) => {
-      setLayerFire(fire);
-      setLayerAva(ava);
-      setLayerRadar(radar);
-      setLayerMvum(mvum);
-      toggleDataLayer('fire', fire);
-      toggleDataLayer('ava', ava);
-      toggleDataLayer('radar', radar);
-      toggleDataLayer('mvum', mvum);
-      if (nautical) {
-        setLayerNautical(true);
-        toggleDataLayer('nautical', true);
-      } else if (layerNautical || waterFollowActive) {
-        closeSafeWaterMode();
-      } else {
-        setLayerNautical(false);
-        toggleDataLayer('nautical', false);
-      }
+    const commitPreset = ({
+      camps = true,
+      places = true,
+      community = true,
+      campFilters = [],
+      placeFilters = DEFAULT_PLACE_FILTERS,
+      pinFilters = DEFAULT_COMMUNITY_PIN_FILTERS,
+      sections = [],
+    }: {
+      camps?: boolean;
+      places?: boolean;
+      community?: boolean;
+      campFilters?: string[];
+      placeFilters?: string[];
+      pinFilters?: string[];
+      sections?: string[];
+    }) => {
+      setShowCampPins(camps);
+      setShowPlacePins(places);
+      setShowCommunityPins(community);
+      setActiveFilters(campFilters);
+      setActivePlaceFilters(placeFilters);
+      setActivePinFilters(pinFilters);
+      setExpandedFilterSections(Array.from(new Set(['map-content', ...sections])));
     };
-    const openSections = (sections: string[]) => setExpandedFilterSections(Array.from(new Set(['map-content', ...sections])));
 
     if (preset === 'default') {
-      applyMapLayer('light');
-      setShowCampPins(true);
-      setShowPlacePins(true);
-      setShowCommunityPins(true);
-      setActiveFilters([]);
-      setActivePlaceFilters(DEFAULT_PLACE_FILTERS);
-      setActivePinFilters(DEFAULT_COMMUNITY_PIN_FILTERS);
-      toggleLandOverlay(false);
-      toggleUsgsOverlay(false);
-      togglePoiOverlay(false);
-      setLayerTrails(true);
-      setRiskLayers({});
-      openSections(['camps', 'places']);
+      commitPreset({
+        campFilters: [],
+        placeFilters: DEFAULT_PLACE_FILTERS,
+        pinFilters: DEFAULT_COMMUNITY_PIN_FILTERS,
+        sections: ['camps', 'places'],
+      });
       return;
     }
     if (preset === 'tonight') {
-      setShowCampPins(true);
-      setShowPlacePins(true);
-      setShowCommunityPins(true);
-      setActiveFilters([]);
-      setActivePlaceFilters(unlockedPlaces(Array.from(new Set([
-        ...DEFAULT_PLACE_FILTERS,
-        'private_stay',
-        'glamping',
-        'private_camp',
-        'food',
-        'grocery',
-        'lodging',
-      ]))));
-      setActivePinFilters(['camp', 'informal_camp', 'wild_camp', 'private_stay', 'water', 'fuel', 'dump', 'parking', 'restaurant', 'warning']);
-      toggleLandOverlay(false);
-      toggleUsgsOverlay(false);
-      togglePoiOverlay(true);
-      setLayerTrails(true);
-      setRiskLayers({});
-      openSections(['camps', 'places', 'stays', 'community']);
+      commitPreset({
+        campFilters: [],
+        placeFilters: unlockedPlaces(Array.from(new Set([
+          ...DEFAULT_PLACE_FILTERS,
+          'private_stay',
+          'glamping',
+          'private_camp',
+          'food',
+          'grocery',
+          'lodging',
+        ]))),
+        pinFilters: ['camp', 'informal_camp', 'wild_camp', 'private_stay', 'water', 'fuel', 'dump', 'parking', 'restaurant', 'warning'],
+        sections: ['camps', 'places', 'stays', 'community'],
+      });
       return;
     }
     if (preset === 'remoteRoute') {
-      applyMapLayer('topo');
-      setShowCampPins(true);
-      setShowPlacePins(true);
-      setShowCommunityPins(true);
-      setActiveFilters(['blm', 'usfs', 'dispersed', 'free']);
-      setActivePlaceFilters(Array.from(new Set([...DEFAULT_PLACE_FILTERS, 'mechanic', 'parking', 'water', 'fuel', 'propane', 'dump'])));
-      setActivePinFilters(['fuel', 'propane', 'water', 'dump', 'parking', 'mechanic', 'cell_signal', 'checkpoint', 'road_report', 'warning', 'gate']);
-      toggleLandOverlay(true);
-      toggleUsgsOverlay(false);
-      togglePoiOverlay(true);
-      setLayerTrails(true);
-      setRiskLayers({});
-      openSections(['places', 'community', 'weather-layers']);
+      commitPreset({
+        campFilters: ['blm', 'usfs', 'dispersed', 'free'],
+        placeFilters: Array.from(new Set([...DEFAULT_PLACE_FILTERS, 'mechanic', 'parking', 'water', 'fuel', 'propane', 'dump'])),
+        pinFilters: ['fuel', 'propane', 'water', 'dump', 'parking', 'mechanic', 'cell_signal', 'checkpoint', 'road_report', 'warning', 'gate'],
+        sections: ['places', 'community', 'weather-layers'],
+      });
       return;
     }
     if (preset === 'overland') {
-      applyMapLayer('topo');
-      setShowCampPins(true);
-      setShowPlacePins(true);
-      setShowCommunityPins(true);
-      setActiveFilters(['blm', 'usfs', 'dispersed', 'free']);
-      setActivePlaceFilters(unlockedPlaces(Array.from(new Set([...DEFAULT_PLACE_FILTERS, 'mechanic', 'parking', 'private_stay', 'glamping', 'ohv']))));
-      setActivePinFilters(['camp', 'informal_camp', 'wild_camp', 'water', 'fuel', 'parking', 'mechanic', 'gate', 'road_report', 'warning', 'checkpoint', 'trail_closure']);
-      toggleLandOverlay(true);
-      toggleUsgsOverlay(true);
-      togglePoiOverlay(true);
-      setLayerTrails(true);
-      setRiskLayers({ mvum: true });
-      openSections(['camps', 'places', 'community', 'weather-layers']);
+      commitPreset({
+        campFilters: ['blm', 'usfs', 'dispersed', 'free'],
+        placeFilters: unlockedPlaces(Array.from(new Set([...DEFAULT_PLACE_FILTERS, 'mechanic', 'parking', 'private_stay', 'glamping', 'ohv']))),
+        pinFilters: ['camp', 'informal_camp', 'wild_camp', 'water', 'fuel', 'parking', 'mechanic', 'gate', 'road_report', 'warning', 'checkpoint', 'trail_closure'],
+        sections: ['camps', 'places', 'community', 'weather-layers'],
+      });
       return;
     }
     if (preset === 'trailDay') {
-      applyMapLayer('topo');
-      setShowCampPins(true);
-      setShowPlacePins(true);
-      setShowCommunityPins(true);
-      setActiveFilters([]);
-      setActivePlaceFilters(['trailhead', 'viewpoint', 'peak', 'hot_spring', 'water', 'parking']);
-      setActivePinFilters(['trailhead', 'trail_note', 'overlook', 'crossing', 'gate', 'trail_closure', 'water', 'parking', 'warning', 'wildlife']);
-      toggleLandOverlay(false);
-      toggleUsgsOverlay(true);
-      togglePoiOverlay(true);
-      setLayerTrails(true);
-      setRiskLayers({});
-      openSections(['places', 'community', 'weather-layers']);
+      commitPreset({
+        campFilters: [],
+        placeFilters: ['trailhead', 'viewpoint', 'peak', 'hot_spring', 'water', 'parking'],
+        pinFilters: ['trailhead', 'trail_note', 'overlook', 'crossing', 'gate', 'trail_closure', 'water', 'parking', 'warning', 'wildlife'],
+        sections: ['places', 'community', 'weather-layers'],
+      });
       return;
     }
     if (preset === 'familyEasy') {
-      applyMapLayer('light');
-      setShowCampPins(true);
-      setShowPlacePins(true);
-      setShowCommunityPins(true);
-      setActiveFilters(['ada', 'tent']);
-      setActivePlaceFilters(unlockedPlaces(['trailhead', 'viewpoint', 'park', 'attraction', 'historic', 'water', 'parking', 'food']));
-      setActivePinFilters(['trailhead', 'overlook', 'water', 'parking', 'restaurant', 'attraction', 'medical', 'pet']);
-      toggleLandOverlay(false);
-      toggleUsgsOverlay(false);
-      togglePoiOverlay(true);
-      setLayerTrails(true);
-      setRiskLayers({});
-      openSections(['places', 'explore-services', 'community']);
+      commitPreset({
+        campFilters: ['ada', 'tent'],
+        placeFilters: unlockedPlaces(['trailhead', 'viewpoint', 'park', 'attraction', 'historic', 'water', 'parking', 'food']),
+        pinFilters: ['trailhead', 'overlook', 'water', 'parking', 'restaurant', 'attraction', 'medical', 'pet'],
+        sections: ['places', 'explore-services', 'community'],
+      });
       return;
     }
     if (preset === 'weatherRisk') {
-      setShowCampPins(true);
-      setShowPlacePins(true);
-      setShowCommunityPins(true);
-      setActiveFilters([]);
-      setActivePlaceFilters(DEFAULT_PLACE_FILTERS);
-      setActivePinFilters(['warning', 'road_report', 'checkpoint', 'gate', 'trail_closure', 'cell_signal', 'water']);
-      toggleLandOverlay(false);
-      toggleUsgsOverlay(false);
-      togglePoiOverlay(false);
-      setLayerTrails(true);
-      setRiskLayers({ fire: true, ava: true, radar: true });
-      openSections(['community', 'weather-layers']);
+      commitPreset({
+        campFilters: [],
+        placeFilters: DEFAULT_PLACE_FILTERS,
+        pinFilters: ['warning', 'road_report', 'checkpoint', 'gate', 'trail_closure', 'cell_signal', 'water'],
+        sections: ['community', 'weather-layers'],
+      });
       return;
     }
     if (preset === 'waterFish') {
-      applyMapLayer('topo');
-      setShowCampPins(false);
-      setShowPlacePins(true);
-      setShowCommunityPins(true);
-      setActiveFilters([]);
-      setActivePlaceFilters(Array.from(new Set(['water', 'boat_ramp', 'paddle_launch', 'fishing_access', 'marina', 'dock', 'shore_access', ...WATER_NAV_PLACE_FILTER_IDS])));
-      setActivePinFilters(['water', 'crossing', 'warning', 'checkpoint', 'parking']);
-      toggleLandOverlay(false);
-      toggleUsgsOverlay(false);
-      togglePoiOverlay(true);
-      setLayerTrails(false);
-      setRiskLayers({ nautical: true });
-      openSections(['water', 'community', 'weather-layers']);
+      commitPreset({
+        camps: false,
+        campFilters: [],
+        placeFilters: Array.from(new Set(['water', 'boat_ramp', 'paddle_launch', 'fishing_access', 'marina', 'dock', 'shore_access', ...WATER_NAV_PLACE_FILTER_IDS])),
+        pinFilters: ['water', 'crossing', 'warning', 'checkpoint', 'parking'],
+        sections: ['water', 'community', 'weather-layers'],
+      });
       return;
     }
     if (preset === 'townReset') {
-      applyMapLayer('city');
-      setShowCampPins(false);
-      setShowPlacePins(true);
-      setShowCommunityPins(true);
-      setActiveFilters([]);
-      setActivePlaceFilters(unlockedPlaces(['fuel', 'propane', 'water', 'dump', 'mechanic', 'parking', 'food', 'grocery', 'lodging', 'shower', 'laundromat', 'hardware', 'parts', 'medical', 'wifi']));
-      setActivePinFilters(['fuel', 'propane', 'water', 'dump', 'parking', 'mechanic', 'restaurant', 'shopping', 'medical', 'laundromat', 'shower', 'wifi']);
-      toggleLandOverlay(false);
-      toggleUsgsOverlay(false);
-      togglePoiOverlay(true);
-      setLayerTrails(false);
-      setRiskLayers({});
-      openSections(['places', 'explore-services', 'community']);
+      commitPreset({
+        camps: false,
+        campFilters: [],
+        placeFilters: unlockedPlaces(['fuel', 'propane', 'water', 'dump', 'mechanic', 'parking', 'food', 'grocery', 'lodging', 'shower', 'laundromat', 'hardware', 'parts', 'medical', 'wifi']),
+        pinFilters: ['fuel', 'propane', 'water', 'dump', 'parking', 'mechanic', 'restaurant', 'shopping', 'medical', 'laundromat', 'shower', 'wifi'],
+        sections: ['places', 'explore-services', 'community'],
+      });
       return;
     }
-    applyMapLayer('hybrid');
-    setShowCampPins(false);
-    setShowPlacePins(true);
-    setShowCommunityPins(true);
-    setActiveFilters([]);
-    setActivePlaceFilters(unlockedPlaces(['trailhead', 'viewpoint', 'peak', 'hot_spring', 'attraction', 'historic', 'park']));
-    setActivePinFilters(['trailhead', 'overlook', 'attraction', 'rock_art', 'wildlife', 'other']);
-    toggleLandOverlay(false);
-    toggleUsgsOverlay(false);
-    togglePoiOverlay(true);
-    setLayerTrails(true);
-    setRiskLayers({});
-    openSections(['places', 'explore-services', 'community']);
+    commitPreset({
+      camps: false,
+      campFilters: [],
+      placeFilters: unlockedPlaces(['trailhead', 'viewpoint', 'peak', 'hot_spring', 'attraction', 'historic', 'park']),
+      pinFilters: ['trailhead', 'overlook', 'attraction', 'rock_art', 'wildlife', 'other'],
+      sections: ['places', 'explore-services', 'community'],
+    });
   };
   const showMapStatusBar = Boolean(
     !navMode &&
@@ -16899,6 +16881,17 @@ function MapScreen() {
     trailRouteBuilderOpen
   );
   const compassTop = Math.max(insets.top + 6, 14);
+  const showInlineMapSearch = Boolean(
+    !trailPinCaptureMode &&
+    !navMode &&
+    !waterFollowActive &&
+    !safeWaterPlanningActive &&
+    !showSearch &&
+    (!mapSheetOpen || inlineSearchOpen)
+  );
+  const inlineSearchSideBySide = userHeading === null || windowWidth >= 380;
+  const inlineSearchTop = inlineSearchSideBySide ? compassTop : compassTop + 52;
+  const inlineSearchLeft = userHeading !== null && inlineSearchSideBySide ? 176 : 68;
 
   const nativeNavigationPanel = navMode ? (
     <Animated.View
@@ -17358,7 +17351,7 @@ function MapScreen() {
         bottomInset={bottomInset}
         onClose={() => setShowMapDrawer(false)}
         items={[
-          { label: 'Search places', sub: 'Find and fly to a place', icon: 'search-outline', tone: '#60a5fa', onPress: () => { setShowMapDrawer(false); setSearchMode('browse'); setShowSearch(true); } },
+          { label: 'Search places', sub: 'Find and fly to a place', icon: 'search-outline', tone: '#60a5fa', onPress: openInlineMapSearch },
           { label: 'Trails', sub: 'Nearby trail discovery', icon: 'trail-sign-outline', tone: '#22c55e', onPress: openTrailDiscoveryFromDrawer },
           { label: 'Layers', sub: 'Styles, 3D, land, weather', icon: 'layers-outline', tone: C.silverBright, onPress: () => { setShowMapDrawer(false); setShowLayerSheet(true); } },
           { label: 'Weather', sub: 'Forecast at map center', icon: 'cloud-outline', tone: '#38bdf8', onPress: openMapWeatherTool },
@@ -17638,6 +17631,86 @@ function MapScreen() {
         </View>
       )}
 
+      {showInlineMapSearch && (
+        <View
+          style={[s.inlineMapSearchWrap, { top: inlineSearchTop, left: inlineSearchLeft, right: 16 }]}
+          pointerEvents="box-none"
+        >
+          <View style={[s.inlineMapSearchBar, mapChrome.toast, inlineSearchOpen && s.inlineMapSearchBarActive]}>
+            <Ionicons name="search" size={16} color={mapChrome.textMuted} />
+            <TextInput
+              ref={inlineSearchInputRef}
+              value={searchQuery}
+              onFocus={() => setInlineSearchOpen(true)}
+              onChangeText={text => {
+                setSearchQuery(text);
+                if (!inlineSearchOpen) setInlineSearchOpen(true);
+                if (text.trim().length < 2) setSearchResults([]);
+              }}
+              placeholder="Search map"
+              placeholderTextColor={mapChrome.textMuted}
+              style={[s.inlineMapSearchInput, { color: mapChrome.toastText }]}
+              returnKeyType="search"
+              autoCorrect={false}
+              autoCapitalize="none"
+              blurOnSubmit={false}
+              onSubmitEditing={() => searchMap()}
+            />
+            {isSearching ? (
+              <ActivityIndicator size="small" color={mapChrome.toastText} />
+            ) : searchQuery.trim().length > 0 ? (
+              <TouchableOpacity style={s.inlineMapSearchIconBtn} onPress={() => closeInlineMapSearch(true)} hitSlop={8}>
+                <Ionicons name="close" size={15} color={mapChrome.textMuted} />
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity style={s.inlineMapSearchIconBtn} onPress={focusInlineMapSearch} hitSlop={8}>
+                <Ionicons name="chevron-forward" size={15} color={mapChrome.textMuted} />
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {inlineSearchOpen && (searchResults.length > 0 || isSearching || searchQuery.trim().length >= 2) && (
+            <View style={[s.inlineMapSearchResults, mapChrome.toast]}>
+              {isSearching ? (
+                <View style={s.inlineMapSearchStateRow}>
+                  <ActivityIndicator size="small" color={mapChrome.toastText} />
+                  <Text style={[s.inlineMapSearchStateText, { color: mapChrome.textMuted }]}>Searching</Text>
+                </View>
+              ) : searchResults.some(place => place.name === '__error__') ? (
+                <Text style={[s.inlineMapSearchStateText, { color: mapChrome.textMuted }]}>Search unavailable</Text>
+              ) : searchResults.length === 0 ? (
+                <Text style={[s.inlineMapSearchStateText, { color: mapChrome.textMuted }]}>No places found</Text>
+              ) : (
+                searchResults.slice(0, 4).map(place => {
+                  const distMi = userLoc ? haversineKm(userLoc.lat, userLoc.lng, place.lat, place.lng) * 0.621371 : null;
+                  const sourceLabel = place.source_label || place.source || place.type || 'Place';
+                  return (
+                    <TouchableOpacity
+                      key={`${place.name}:${place.lat}:${place.lng}:${place.place_id || place.provider_place_id || ''}`}
+                      style={s.inlineMapSearchResultRow}
+                      onPress={() => selectSearchResult(place)}
+                      activeOpacity={0.84}
+                    >
+                      <View style={s.inlineMapSearchResultIcon}>
+                        <Ionicons name="location-outline" size={14} color={C.orange} />
+                      </View>
+                      <View style={s.inlineMapSearchResultCopy}>
+                        <Text style={[s.inlineMapSearchResultName, { color: mapChrome.toastText }]} numberOfLines={1}>
+                          {place.name}
+                        </Text>
+                        <Text style={[s.inlineMapSearchResultMeta, { color: mapChrome.textMuted }]} numberOfLines={1}>
+                          {sourceLabel}{distMi != null ? ` · ${distMi >= 10 ? distMi.toFixed(0) : distMi.toFixed(1)} mi` : ''}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+            </View>
+          )}
+        </View>
+      )}
+
       {/* Sync toast — flashes briefly when signal restores and weather is refreshed */}
       {!!syncToast && (
         <View style={s.syncToast}>
@@ -17868,10 +17941,10 @@ function MapScreen() {
 
         {!waterFollowActive && <TourTarget id="map.search">
           <TouchableOpacity
-            style={[s.ctrlBtn, mapChrome.button, showSearch && { backgroundColor: '#2563eb', borderColor: '#fff' }]}
-            onPress={() => { setSearchMode('browse'); setShowSearch(p => !p); setSearchResults([]); setSearchQuery(''); }}
+            style={[s.ctrlBtn, mapChrome.button, inlineSearchOpen && mapChrome.buttonActive]}
+            onPress={openInlineMapSearch}
           >
-            <Ionicons name="search" size={20} color={showSearch ? '#fff' : mapChrome.text} />
+            <Ionicons name="search" size={20} color={inlineSearchOpen ? mapChrome.activeText : mapChrome.text} />
           </TouchableOpacity>
         </TourTarget>}
 
@@ -19014,7 +19087,7 @@ function MapScreen() {
                 </Text>
               </View>
               <TouchableOpacity style={s.extremeCopilotClose} onPress={() => setShowExtremeCopilot(false)}>
-                <Ionicons name="close" size={17} color={OVR.text2} />
+                <Ionicons name="close" size={17} color={C.text2} />
               </TouchableOpacity>
             </View>
 
@@ -19083,9 +19156,9 @@ function MapScreen() {
                   disabled={extremeCopilotVoiceBusy}
                 >
                   {extremeCopilotVoiceBusy && extremeCopilotVoiceMode !== 'wake_phrase' ? (
-                    <ActivityIndicator size="small" color={extremeCopilotVoiceMode === 'push_to_talk' ? '#050505' : C.orange} />
+                    <ActivityIndicator size="small" color={extremeCopilotVoiceMode === 'push_to_talk' ? copilotAccentText : C.orange} />
                   ) : (
-                    <Ionicons name={extremeCopilotVoiceMode === 'push_to_talk' ? 'stop' : 'mic'} size={16} color={extremeCopilotVoiceMode === 'push_to_talk' ? '#050505' : C.orange} />
+                    <Ionicons name={extremeCopilotVoiceMode === 'push_to_talk' ? 'stop' : 'mic'} size={16} color={extremeCopilotVoiceMode === 'push_to_talk' ? copilotAccentText : C.orange} />
                   )}
                   <Text style={[s.extremeCopilotVoiceText, extremeCopilotVoiceMode === 'push_to_talk' && s.extremeCopilotVoiceTextActive]}>
                     {extremeCopilotVoiceMode === 'push_to_talk' ? 'STOP VOICE' : 'PUSH TO TALK'}
@@ -19098,9 +19171,9 @@ function MapScreen() {
                     disabled={extremeCopilotVoiceBusy}
                   >
                     {extremeCopilotVoiceBusy && extremeCopilotVoiceMode !== 'push_to_talk' ? (
-                      <ActivityIndicator size="small" color={extremeCopilotVoiceMode === 'wake_phrase' ? '#050505' : C.orange} />
+                      <ActivityIndicator size="small" color={extremeCopilotVoiceMode === 'wake_phrase' ? copilotAccentText : C.orange} />
                     ) : (
-                      <Ionicons name={extremeCopilotVoiceMode === 'wake_phrase' ? 'stop' : 'radio'} size={16} color={extremeCopilotVoiceMode === 'wake_phrase' ? '#050505' : C.orange} />
+                      <Ionicons name={extremeCopilotVoiceMode === 'wake_phrase' ? 'stop' : 'radio'} size={16} color={extremeCopilotVoiceMode === 'wake_phrase' ? copilotAccentText : C.orange} />
                     )}
                     <Text style={[s.extremeCopilotVoiceText, extremeCopilotVoiceMode === 'wake_phrase' && s.extremeCopilotVoiceTextActive]}>
                       {extremeCopilotVoiceMode === 'wake_phrase' ? 'STOP WAKE' : 'WAKE'}
@@ -19138,13 +19211,13 @@ function MapScreen() {
                 value={extremeCopilotInput}
                 onChangeText={setExtremeCopilotInput}
                 placeholder="Ask Copilot to work the map, or ask what it can do"
-                placeholderTextColor={OVR.text3}
+                placeholderTextColor={C.text3}
                 style={s.extremeCopilotInput}
                 returnKeyType="send"
                 onSubmitEditing={() => submitCopilotMessage()}
               />
               <TouchableOpacity style={[s.extremeCopilotSend, (!extremeCopilotInput.trim() || extremeCopilotBusy) && { opacity: 0.45 }]} onPress={() => submitCopilotMessage()} disabled={!extremeCopilotInput.trim() || extremeCopilotBusy}>
-                <Ionicons name="send" size={16} color="#050505" />
+                <Ionicons name="send" size={16} color={copilotAccentText} />
               </TouchableOpacity>
             </View>
           </View>
@@ -19271,6 +19344,7 @@ function MapScreen() {
         onClose={() => setShowFilterSheet(false)}
         onResetAll={resetMapFilterPreferences}
         onSelectPreset={applyMapFilterPreset}
+        onOpenLegend={openMapFilterLegend}
         onToggleSection={toggleFilterSection}
         onResetCamps={() => setActiveFilters([])}
         onToggleCampFilter={id => toggleFilterId(setActiveFilters, id)}
@@ -19295,6 +19369,13 @@ function MapScreen() {
         onToggleExplore={id => toggleFilterId(setActivePlaceFilters, id)}
         onResetCommunityDefault={() => setActivePinFilters(DEFAULT_COMMUNITY_PIN_FILTERS)}
         onTogglePin={id => toggleFilterId(setActivePinFilters, id)}
+      />
+
+      <MapLegendSheet
+        visible={showMapLegendSheet && !navMode}
+        focusCategory={legendCategoryForPreset(activeMapModePreset)}
+        contextLabel={mapModePresetTitle(activeMapModePreset)}
+        onClose={() => setShowMapLegendSheet(false)}
       />
 
       <PremiumPlaceSheet
@@ -22434,6 +22515,9 @@ const makeStyles = (C: ColorPalette) => {
   const navText = light ? '#101820' : '#ffffff';
   const navText2 = light ? '#29323f' : 'rgba(255,255,255,0.86)';
   const navText3 = light ? '#69736f' : 'rgba(255,255,255,0.58)';
+  const accentText = light ? '#ffffff' : '#050505';
+  const copilotBackdrop = light ? 'rgba(17,24,39,0.20)' : 'rgba(0,0,0,0.48)';
+  const copilotMiniVoiceBg = light ? C.s1 : 'rgba(8,8,10,0.92)';
   return StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
   map: { flex: 1 },
@@ -23178,6 +23262,105 @@ const makeStyles = (C: ColorPalette) => {
   },
   compassDir: { color: OVR.text, fontSize: 12, fontFamily: mono, fontWeight: '900', lineHeight: 14 },
   compassDeg: { color: OVR.text3, fontSize: 9, fontFamily: mono, fontWeight: '700', marginTop: 1 },
+  inlineMapSearchWrap: {
+    position: 'absolute',
+    zIndex: 45,
+    elevation: 45,
+  },
+  inlineMapSearchBar: {
+    minHeight: 44,
+    borderRadius: 22,
+    borderWidth: 1,
+    paddingLeft: 13,
+    paddingRight: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.24,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 8,
+  },
+  inlineMapSearchBarActive: {
+    borderColor: C.orange + '77',
+  },
+  inlineMapSearchInput: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 38,
+    paddingVertical: 0,
+    fontSize: 13,
+    fontFamily: mono,
+    fontWeight: '800',
+    letterSpacing: 0,
+  },
+  inlineMapSearchIconBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  inlineMapSearchResults: {
+    marginTop: 7,
+    borderRadius: 16,
+    borderWidth: 1,
+    overflow: 'hidden',
+    paddingVertical: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.24,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 8,
+  },
+  inlineMapSearchStateRow: {
+    minHeight: 42,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  inlineMapSearchStateText: {
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    fontSize: 11,
+    fontFamily: mono,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  inlineMapSearchResultRow: {
+    minHeight: 50,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  inlineMapSearchResultIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.orange + '1f',
+  },
+  inlineMapSearchResultCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  inlineMapSearchResultName: {
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  inlineMapSearchResultMeta: {
+    marginTop: 2,
+    fontSize: 10,
+    fontFamily: mono,
+    letterSpacing: 0,
+  },
 
   // ── Nav HUD
   navHudAnimated: {
@@ -25399,7 +25582,7 @@ const makeStyles = (C: ColorPalette) => {
     borderRadius: 21,
     borderWidth: 1,
     borderColor: C.orange + '66',
-    backgroundColor: 'rgba(8,8,10,0.92)',
+    backgroundColor: copilotMiniVoiceBg,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: C.orange,
@@ -25429,7 +25612,7 @@ const makeStyles = (C: ColorPalette) => {
   extremeCopilotOverlay: {
     flex: 1,
     justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.48)',
+    backgroundColor: copilotBackdrop,
   },
   extremeCopilotSheet: {
     backgroundColor: C.s1,
@@ -25562,7 +25745,7 @@ const makeStyles = (C: ColorPalette) => {
     paddingHorizontal: 12,
   },
   extremeCopilotRunText: {
-    color: '#050505',
+    color: accentText,
     fontSize: 9,
     fontFamily: mono,
     fontWeight: '900',
@@ -25625,7 +25808,7 @@ const makeStyles = (C: ColorPalette) => {
     fontWeight: '900',
   },
   extremeCopilotVoiceTextActive: {
-    color: '#050505',
+    color: accentText,
   },
   extremeCopilotReportRow: {
     flexDirection: 'row',

@@ -3,10 +3,9 @@ import { Alert, Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity,
 import { Ionicons } from '@expo/vector-icons';
 
 import { TrailheadLoadingRow, TrailheadSheet } from '@/components/TrailheadUI';
-import MapLegendSheet from '@/components/map/MapLegendSheet';
 import MapModeGallery from '@/components/map/MapModeGallery';
 import { mono, useTheme, type ColorPalette } from '@/lib/design';
-import { legendCategoryForPreset, mapModePresetTitle, type MapModePresetId } from '@/lib/mapLegend';
+import { mapModePresetTitle, type MapModePresetId } from '@/lib/mapLegend';
 
 export type MapFilterOption = {
   id: string;
@@ -54,6 +53,7 @@ type MapFilterSheetProps = {
   onClose: () => void;
   onResetAll: () => void;
   onSelectPreset: (presetId: MapModePresetId) => void;
+  onOpenLegend: () => void;
   onToggleSection: (section: string) => void;
   onResetCamps: () => void;
   onToggleCampFilter: (id: string) => void;
@@ -111,6 +111,7 @@ export default function MapFilterSheet({
   onClose,
   onResetAll,
   onSelectPreset,
+  onOpenLegend,
   onToggleSection,
   onResetCamps,
   onToggleCampFilter,
@@ -128,13 +129,7 @@ export default function MapFilterSheet({
   const C = useTheme();
   const isAndroid = Platform.OS === 'android';
   const styles = React.useMemo(() => makeStyles(C), [C]);
-  const [legendVisible, setLegendVisible] = React.useState(false);
-  const activeLegendCategory = legendCategoryForPreset(activePresetId);
   const activeModeTitle = mapModePresetTitle(activePresetId);
-
-  React.useEffect(() => {
-    if (!visible) setLegendVisible(false);
-  }, [visible]);
 
   const renderCheckRows = (
     options: readonly MapFilterOption[],
@@ -223,7 +218,6 @@ export default function MapFilterSheet({
   );
 
   return (
-    <>
       <Modal visible={visible} animationType="slide" transparent statusBarTranslucent onRequestClose={onClose}>
         <View style={styles.overlay}>
           <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={onClose} />
@@ -240,7 +234,7 @@ export default function MapFilterSheet({
                 <Text style={styles.sub}>{activeModeTitle} · {changedCount} changed · saved on this device</Text>
               </View>
               <View style={styles.headerActions}>
-                <TouchableOpacity onPress={() => setLegendVisible(true)} style={styles.resetBtn}>
+                <TouchableOpacity onPress={onOpenLegend} style={styles.resetBtn}>
                   <Text style={styles.resetText}>LEGEND</Text>
                 </TouchableOpacity>
                 <TouchableOpacity onPress={onResetAll} style={styles.resetBtn}>
@@ -264,7 +258,7 @@ export default function MapFilterSheet({
               <MapModeGallery
                 activePresetId={activePresetId}
                 onSelectPreset={onSelectPreset}
-                onOpenLegend={() => setLegendVisible(true)}
+                onOpenLegend={onOpenLegend}
               />
               {categoryUnlocking ? (
                 <TrailheadLoadingRow
@@ -409,13 +403,6 @@ export default function MapFilterSheet({
           </TrailheadSheet>
         </View>
       </Modal>
-      <MapLegendSheet
-        visible={legendVisible}
-        focusCategory={activeLegendCategory}
-        contextLabel={activeModeTitle}
-        onClose={() => setLegendVisible(false)}
-      />
-    </>
   );
 }
 

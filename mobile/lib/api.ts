@@ -373,6 +373,15 @@ export const api = {
     }
     return req<ExploreCatalog>(`/api/explore/places?${qs.toString()}`);
   },
+  getExploreRouteRank: (data: ExploreRouteRankRequest) =>
+    guardedRequest(
+      `explore-route-rank:${stableRouteKey(data.route as [number, number][])}:${(data.categories ?? []).join(',')}:${data.q ?? ''}:${data.limit ?? 48}:${data.max_distance_mi ?? 90}`,
+      5 * 60_000,
+      () => req<ExploreRouteRankResponse>('/api/explore/route-rank', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    ),
   getExplorePlace: (placeId: string) =>
     req<ExplorePlaceProfile>(`/api/explore/places/${encodeURIComponent(placeId)}`),
   getExploreCampgrounds: (placeId: string, limit = 24) =>
@@ -437,6 +446,11 @@ export const api = {
       .then(canonicalizeCampsitePins),
   getRouteCampWindows: (data: RouteCampWindowsRequest) =>
     req<RouteCampWindowsResponse>('/api/route/camp-windows', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getExtremeRouteScoutWindows: (data: ExtremeRouteScoutWindowsRequest) =>
+    req<ExtremeRouteScoutWindowsResponse>('/api/extreme/route-scout/windows', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
@@ -1588,6 +1602,27 @@ export interface RouteCampWindowsResponse {
   windows: RouteCampWindowResult[];
   errors?: Record<string, string>;
 }
+export interface ExtremeRouteScoutWindowsRequest {
+  session_id?: string | null;
+  trip_id?: string | null;
+  route?: Array<[number, number]> | Array<{ lat: number; lng: number }>;
+  total_miles?: number;
+  days: number;
+  drive_hours?: number | null;
+  route_style?: RouteStyleMode | 'adventure' | string;
+  metadata?: Record<string, unknown>;
+}
+export interface ExtremeRouteScoutWindowsResponse {
+  ok: boolean;
+  trip_id?: string | null;
+  route_distance_mi: number;
+  days: number;
+  drive_hours?: number | null;
+  route_style?: string;
+  policy: string;
+  windows: RouteCampWindowInput[];
+  ledger_id?: number;
+}
 export interface CampsiteDetail extends CampsitePin {
   photos: string[]; amenities: string[]; site_types: string[];
   activities: string[]; phone?: string; campsites_count: number;
@@ -2595,6 +2630,24 @@ export interface ExploreCatalog {
   count?: number;
   cursor?: number;
   next_cursor?: number | null;
+  places: ExplorePlaceProfile[];
+}
+export interface ExploreRouteRankRequest {
+  route: Array<[number, number]>;
+  categories?: string[];
+  q?: string;
+  limit?: number;
+  max_distance_mi?: number;
+  mode?: string;
+}
+export interface ExploreRouteRankResponse {
+  schema_version: number;
+  catalog_id: string;
+  generated_at: number;
+  mode: string;
+  route_points: number;
+  categories: string[];
+  count: number;
   places: ExplorePlaceProfile[];
 }
 export interface ExploreCatalogIndexItem {

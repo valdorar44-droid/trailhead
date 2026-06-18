@@ -159,6 +159,57 @@ class AdventureIntelligenceTests(unittest.TestCase):
         self.assertTrue(any(risk["id"] == "visible_context_pollution" for risk in brief["risks"]))
         self.assertTrue(any(rec["action_type"] == "applyMissionFilter" for rec in brief["recommendations"]))
 
+    def test_provider_condition_keeps_source_and_expiry(self):
+        payload = base_payload()
+        payload["places"].append({
+            "id": "nws:test-warning",
+            "type": "weather",
+            "title": "Flash Flood Warning",
+            "note": "Official flash flood warning near the route.",
+            "lat": 38.61,
+            "lng": -109.5,
+            "source": "provider",
+            "source_label": "NWS",
+            "provider": "nws",
+            "source_id": "nws:test-warning",
+            "severity": "high",
+            "confidence": "high",
+            "expires_at": 1999999999,
+            "route_distance_mi": 1.25,
+        })
+
+        brief = build_mission_control(payload)
+        risk = next(risk for risk in brief["risks"] if risk["title"] == "Flash Flood Warning")
+
+        self.assertEqual(brief["readiness"], "needs_review")
+        self.assertEqual(risk["type"], "weather")
+        self.assertEqual(risk["severity"], "warning")
+        self.assertEqual(risk["expires_at"], 1999999999)
+        self.assertEqual(risk["provider"], "nws")
+        self.assertIn("nws:test-warning", risk["source_ids"])
+        self.assertTrue(any(source["source"] == "NWS" for source in brief["source_summary"]))
+
+    def test_low_provider_traffic_does_not_force_review(self):
+        payload = base_payload()
+        payload["places"].append({
+            "id": "tomtom:traffic-summary",
+            "type": "traffic",
+            "title": "Traffic summary",
+            "note": "Ordinary traffic slowdowns hidden from default route alerts.",
+            "lat": 38.61,
+            "lng": -109.5,
+            "source": "provider",
+            "source_label": "TOMTOM",
+            "provider": "tomtom",
+            "severity": "low",
+            "confidence": "medium",
+        })
+
+        brief = build_mission_control(payload)
+
+        self.assertEqual(brief["readiness"], "ready")
+        self.assertTrue(any(risk["title"] == "Traffic summary" and risk["severity"] == "info" for risk in brief["risks"]))
+
 
 if __name__ == "__main__":
     unittest.main()

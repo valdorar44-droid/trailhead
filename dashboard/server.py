@@ -1669,6 +1669,24 @@ class MissionControlRequest(BaseModel):
     context: dict = Field(default_factory=dict)
     metadata: dict = Field(default_factory=dict)
 
+class RouteScoutWindowPlanRequest(BaseModel):
+    session_id: Optional[str] = None
+    trip_id: Optional[str] = None
+    route: list = Field(default_factory=list)
+    total_miles: Optional[float] = None
+    days: int = 2
+    drive_hours: Optional[float] = None
+    route_style: str = "balanced"
+    metadata: dict = Field(default_factory=dict)
+
+class ExploreRouteRankRequest(BaseModel):
+    route: list = Field(default_factory=list)
+    categories: list[str] = Field(default_factory=list)
+    q: str = ""
+    limit: int = 48
+    max_distance_mi: float = 90
+    mode: str = "route"
+
 class RealtimeCopilotSessionRequest(BaseModel):
     session_id: Optional[str] = None
     voice: str = ""
@@ -1770,6 +1788,7 @@ class AdminExtremeConfigBody(BaseModel):
     copilot_enabled: Optional[bool] = None
     mission_control_enabled: Optional[bool] = None
     adventure_scores_enabled: Optional[bool] = None
+    mission_provider_evidence_enabled: Optional[bool] = None
     copilot_wake_phrase_enabled: Optional[bool] = None
     native_mode_enabled: Optional[bool] = None
     mapgpt_pilot_enabled: Optional[bool] = None
@@ -2008,6 +2027,7 @@ def _extreme_feature_flags(beta_active: bool, overrides: dict) -> dict:
         "copilot": bool(beta_active and _bool_override(overrides, "copilot_enabled", settings.extreme_copilot_enabled)),
         "mission_control": bool(beta_active and _bool_override(overrides, "mission_control_enabled", settings.extreme_mission_control_enabled)),
         "adventure_scores": bool(beta_active and _bool_override(overrides, "adventure_scores_enabled", settings.extreme_adventure_scores_enabled)),
+        "mission_provider_evidence": bool(beta_active and _bool_override(overrides, "mission_provider_evidence_enabled", settings.extreme_mission_provider_evidence_enabled)),
         "mapgpt_pilot": bool(beta_active and _bool_override(overrides, "mapgpt_pilot_enabled", settings.extreme_mapgpt_pilot_enabled)),
         "atlas_pilot": bool(beta_active and _bool_override(overrides, "atlas_pilot_enabled", settings.extreme_atlas_pilot_enabled)),
     }
@@ -2043,6 +2063,7 @@ def _extreme_config_for_user(user: dict | None) -> dict:
             "copilot": True,
             "mission_control": True,
             "adventure_scores": True,
+            "mission_provider_evidence": True,
             "mapgpt_pilot": True,
             "atlas_pilot": True,
         })
@@ -2954,6 +2975,7 @@ def _admin_extreme_config_values(body: AdminExtremeConfigBody) -> dict:
         "enabled", "kill_switch", "navigation_enabled", "weather_enabled",
         "voice_enabled", "copilot_enabled", "copilot_wake_phrase_enabled", "native_mode_enabled",
         "mission_control_enabled", "adventure_scores_enabled",
+        "mission_provider_evidence_enabled",
         "mapgpt_pilot_enabled", "atlas_pilot_enabled",
     )
     for key in bool_keys:
@@ -6241,23 +6263,118 @@ def extreme_copilot_message(body: ExtremeCopilotMessageRequest, user: dict = Dep
         "result": result,
     }
 
+def _mission_provider_confidence(value: object) -> str:
+    try:
+        numeric = float(value)
+    except Exception:
+        numeric = 0.0
+    if numeric >= 0.85:
+        return "high"
+    if numeric >= 0.65:
+        return "medium"
+    if numeric > 0:
+        return "low"
+    return "unknown"
+
+def _mission_condition_type(alert: dict) -> str:
+    raw = re.sub(r"[^a-z0-9_]+", "_", str(alert.get("type") or "hazard").lower()).strip("_")
+    if raw in {"weather", "fire", "smoke", "traffic", "road", "closure", "hazard"}:
+        return raw
+    if raw in {"earthquake", "cyclone", "flood", "volcano", "drought", "tsunami"}:
+        return raw
+    subtype = str(alert.get("subtype") or "").lower()
+    if "weather" in subtype or "warning" in subtype or "watch" in subtype:
+        return "weather"
+    return "hazard"
+
+def _mission_place_from_condition(alert: dict, route_points: list[dict]) -> dict | None:
+    try:
+        lat = float(alert.get("lat"))
+        lng = float(alert.get("lng"))
+    except Exception:
+        return None
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return None
+    provider = re.sub(r"[^a-z0-9_:-]+", "", str(alert.get("provider") or alert.get("source") or "provider").lower()) or "provider"
+    subtype = _planner_clean_text(alert.get("subtype") or alert.get("title") or alert.get("type") or "Route condition", 120)
+    description = _planner_clean_text(alert.get("description") or alert.get("note") or subtype, 360)
+    item = {
+        "id": str(alert.get("id") or f"{provider}:{alert.get('provider_id') or lat}:{lng}")[:180],
+        "type": _mission_condition_type(alert),
+        "subtype": subtype,
+        "title": subtype,
+        "note": description or "Review this route condition before departure.",
+        "summary": description,
+        "lat": lat,
+        "lng": lng,
+        "source": "provider",
+        "source_label": provider.upper(),
+        "provider": provider,
+        "provider_id": str(alert.get("provider_id") or "")[:160],
+        "source_id": str(alert.get("id") or alert.get("provider_id") or "")[:180],
+        "severity": str(alert.get("severity") or "").lower() or "low",
+        "confidence": _mission_provider_confidence(alert.get("confidence")),
+        "created_at": alert.get("created_at"),
+        "updated_at": alert.get("updated_at"),
+        "expires_at": alert.get("expires_at"),
+    }
+    _annotate_route_candidate(item, route_points)
+    return item
+
+async def _mission_provider_places_for_route(config: dict, route: object, metadata: dict | None = None) -> tuple[list[dict], dict]:
+    flags = config.get("feature_flags") or {}
+    meta = metadata if isinstance(metadata, dict) else {}
+    enabled = bool(flags.get("weather") and flags.get("mission_provider_evidence"))
+    if meta.get("include_provider_evidence") is False:
+        enabled = False
+    route_points = _route_points_from_any(route, limit=160)
+    debug = {
+        "provider_evidence_enabled": enabled,
+        "provider_route_points": len(route_points),
+        "provider_evidence_count": 0,
+        "provider_sources": [],
+        "provider_errors": [],
+    }
+    if not enabled or len(route_points) < 2:
+        return [], debug
+    try:
+        alerts = await get_provider_conditions_along_route(route_points, radius_deg=0.18)
+    except Exception as exc:
+        debug["provider_errors"] = [str(exc)[:180]]
+        return [], debug
+    places = []
+    for alert in alerts:
+        place = _mission_place_from_condition(alert, route_points)
+        if place:
+            places.append(place)
+    sources = sorted({str(place.get("source_label") or place.get("provider") or "").upper() for place in places if place.get("source_label") or place.get("provider")})
+    debug.update({
+        "provider_evidence_count": len(places),
+        "provider_sources": sources[:8],
+    })
+    return places[:40], debug
+
 @app.post("/api/extreme/copilot/mission-control")
-def extreme_copilot_mission_control(body: MissionControlRequest, user: dict = Depends(_current_user)):
+async def extreme_copilot_mission_control(body: MissionControlRequest, user: dict = Depends(_current_user)):
     config = _require_extreme_copilot(user)
     if not config["feature_flags"].get("mission_control") or not config["feature_flags"].get("adventure_scores"):
         raise HTTPException(403, {"code": "mission_control_disabled", "message": "Mission Control is not enabled for this beta."})
     clean_session = _clean_extreme_session_id(body.session_id)
     trip_id = (body.trip_id or "").strip()[:120] or None
+    metadata = body.metadata or {}
+    provider_places, provider_debug = await _mission_provider_places_for_route(config, body.route, metadata)
     payload = {
         "trip_id": trip_id,
         "route": body.route[:400],
         "checkpoints": [checkpoint.dict() for checkpoint in body.checkpoints[:80]],
-        "places": body.places[:120],
+        "places": [*body.places[:120], *provider_places],
         "trip_memory": body.trip_memory.dict() if body.trip_memory else {},
         "context": body.context or {},
-        "metadata": body.metadata or {},
+        "metadata": metadata,
     }
     brief = build_mission_control(payload)
+    brief.setdefault("debug", {}).update(provider_debug)
+    brief["debug"]["provider_calls"] = 1 if provider_debug.get("provider_evidence_enabled") else 0
     ledger_id = log_extreme_ledger_event(
         user["id"],
         "mission_control_generated",
@@ -6270,11 +6387,54 @@ def extreme_copilot_mission_control(body: MissionControlRequest, user: dict = De
             "risk_count": len(brief.get("risks") or []),
             "recommendation_count": len(brief.get("recommendations") or []),
             "route_points": len(payload["route"]),
-            "provider_calls": 0,
+            "provider_calls": brief["debug"].get("provider_calls", 0),
+            "provider_evidence_count": provider_debug.get("provider_evidence_count", 0),
+            "provider_sources": provider_debug.get("provider_sources", []),
         },
     )
     brief["ledger_id"] = ledger_id
     return brief
+
+@app.post("/api/extreme/route-scout/windows")
+def extreme_route_scout_windows(body: RouteScoutWindowPlanRequest, user: dict = Depends(_current_user)):
+    config = _require_extreme_copilot(user)
+    if not config["feature_flags"].get("copilot"):
+        raise HTTPException(403, {"code": "route_scout_disabled", "message": "Route Scout is not enabled for this beta."})
+    route_points = _route_points_from_any(body.route, limit=400)
+    total_miles = float(body.total_miles or 0)
+    if total_miles <= 0 and len(route_points) >= 2:
+        total_miles = _route_distance_mi(route_points)
+    if total_miles <= 0:
+        raise HTTPException(400, "Route distance is required for Route Scout windows")
+    safe_days = max(2, min(30, int(round(float(body.days or 2)))))
+    windows = _route_scout_window_plan(safe_days, total_miles)
+    clean_session = _clean_extreme_session_id(body.session_id)
+    trip_id = (body.trip_id or "").strip()[:120] or None
+    ledger_id = log_extreme_ledger_event(
+        user["id"],
+        "route_scout_windows_planned",
+        clean_session,
+        "copilot",
+        trip_id,
+        {
+            "route_points": len(route_points),
+            "route_distance_mi": round(total_miles, 1),
+            "days": safe_days,
+            "window_count": len(windows),
+            "route_style": str(body.route_style or "balanced")[:40],
+        },
+    )
+    return {
+        "ok": True,
+        "trip_id": trip_id,
+        "route_distance_mi": round(total_miles, 2),
+        "days": safe_days,
+        "drive_hours": body.drive_hours,
+        "route_style": str(body.route_style or "balanced")[:40],
+        "policy": "route_scout_windows_v1",
+        "windows": windows,
+        "ledger_id": ledger_id,
+    }
 
 @app.post("/api/extreme/copilot/action/confirm")
 def extreme_copilot_action_confirm(body: ExtremeCopilotConfirmRequest, user: dict = Depends(_current_user)):
@@ -10761,6 +10921,55 @@ def _route_distance_mi(points: list[dict]) -> float:
         total += _haversine_m(a["lat"], a["lng"], b["lat"], b["lng"]) / 1609.344
     return total
 
+def _route_points_from_any(route: object, limit: int = 400) -> list[dict]:
+    points: list[dict] = []
+    if not isinstance(route, list):
+        return points
+    for item in route[:limit]:
+        lat = lng = None
+        day = None
+        if isinstance(item, dict):
+            try:
+                lat = float(item.get("lat"))
+                lng = float(item.get("lng"))
+                day = item.get("day")
+            except Exception:
+                continue
+        elif isinstance(item, (list, tuple)) and len(item) >= 2:
+            try:
+                lng = float(item[0])
+                lat = float(item[1])
+            except Exception:
+                continue
+        if lat is None or lng is None:
+            continue
+        if -90 <= lat <= 90 and -180 <= lng <= 180:
+            point = {"lat": lat, "lng": lng}
+            if day is not None:
+                point["day"] = day
+            points.append(point)
+    return points
+
+def _route_scout_window_plan(days: int, total_miles: float) -> list[dict]:
+    safe_days = max(2, min(30, int(round(float(days or 2)))))
+    total = max(0.1, float(total_miles or 0))
+    overnight_count = max(1, safe_days - 1)
+    day_span = total / safe_days
+    windows: list[dict] = []
+    for idx in range(overnight_count):
+        day = idx + 1
+        target = day_span * day
+        search_window = max(28.0, min(85.0, day_span * 0.72))
+        windows.append({
+            "day": day,
+            "start": round(max(0.0, target - search_window * 0.5), 2),
+            "end": round(min(total, target + search_window * 0.5), 2),
+            "label": f"Day {day} overnight",
+            "target_mi": round(target, 2),
+            "search_window_mi": round(search_window, 2),
+        })
+    return windows
+
 def _point_at_route_mile(points: list[dict], target_mi: float) -> dict | None:
     if not points:
         return None
@@ -14934,6 +15143,137 @@ async def explore_catalog_index(q: str = "", category: str = "", limit: int = 50
         "cursor": cursor,
         "next_cursor": next_cursor,
         "places": items,
+    }
+
+
+def _explore_route_rank_categories(categories: object) -> set[str]:
+    raw: list[str] = []
+    if isinstance(categories, list):
+        raw = [str(item) for item in categories]
+    elif isinstance(categories, str):
+        raw = [part for part in categories.split(",")]
+    return {_normalize_place_category(item) for item in raw if str(item).strip()}
+
+def _explore_place_route_location(place: dict) -> dict | None:
+    summary = place.get("summary") or {}
+    for source in (summary, place):
+        try:
+            lat = float(source.get("lat"))
+            lng = float(source.get("lng"))
+        except Exception:
+            continue
+        if -90 <= lat <= 90 and -180 <= lng <= 180:
+            return {"lat": lat, "lng": lng}
+    return None
+
+def _explore_source_quality_score(place: dict) -> float:
+    source_pack = place.get("source_pack") or {}
+    sources = source_pack.get("sources") if isinstance(source_pack.get("sources"), list) else []
+    source_text = " ".join(str(item.get("publisher") or item.get("name") or item.get("title") or item.get("kind") or "") for item in sources if isinstance(item, dict)).lower()
+    source_text = " ".join([
+        source_text,
+        str(source_pack.get("primary") or ""),
+        str((place.get("summary") or {}).get("source_title") or ""),
+        str(place.get("quality") or ""),
+    ]).lower()
+    if place.get("verified") or any(term in source_text for term in ("nps", "national park service", "blm", "usfs", "forest service", "recreation.gov", "ridb", "official")):
+        return 0.0
+    if any(term in source_text for term in ("osm", "openstreetmap", "wikipedia", "wikimedia")):
+        return 4.0
+    return 8.0
+
+def _explore_route_fit_label(distance_mi: float) -> str:
+    if distance_mi <= 2:
+        return "on route"
+    if distance_mi <= 12:
+        return "near route"
+    if distance_mi <= 35:
+        return "short detour"
+    return "long detour"
+
+def _rank_explore_places_for_route(
+    places: list[dict],
+    route_points: list[dict],
+    *,
+    categories: set[str] | None = None,
+    q: str = "",
+    limit: int = 48,
+    max_distance_mi: float = 90,
+) -> list[dict]:
+    if len(route_points) < 2:
+        return []
+    query_terms = [t for t in re.split(r"\s+", str(q or "").lower().strip()) if len(t) >= 2]
+    ranked: list[tuple[float, dict]] = []
+    max_distance = max(1.0, min(float(max_distance_mi or 90), 250.0))
+    for place in places:
+        if query_terms and not all(term in _explore_query_text(place) for term in query_terms):
+            continue
+        if categories and not _explore_place_matches_category_request(place, categories):
+            continue
+        location = _explore_place_route_location(place)
+        if not location:
+            continue
+        projection = _route_projection_for_item(location, route_points)
+        if not projection:
+            continue
+        distance_mi = float(projection.get("route_distance_mi") or 9999)
+        if distance_mi > max_distance:
+            continue
+        summary = place.get("summary") or {}
+        route_rank = (
+            distance_mi * 10.0
+            + float(projection.get("route_progress") or 0) * 3.0
+            + _explore_source_quality_score(place)
+            + min(float(summary.get("hero_rank") or summary.get("rank") or 9999), 9999.0) / 400.0
+        )
+        enriched = dict(place)
+        enriched_summary = dict(summary)
+        enriched_summary.update({
+            "lat": location["lat"],
+            "lng": location["lng"],
+            "route_distance_mi": round(distance_mi, 2),
+            "route_progress": projection.get("route_progress"),
+            "route_progress_mi": projection.get("route_progress_mi"),
+            "route_segment_index": projection.get("route_segment_index"),
+            "route_fit": _explore_route_fit_label(distance_mi),
+            "route_rank": round(route_rank, 3),
+        })
+        enriched["summary"] = enriched_summary
+        enriched["route_rank"] = {
+            "distance_mi": round(distance_mi, 2),
+            "progress": projection.get("route_progress"),
+            "progress_mi": projection.get("route_progress_mi"),
+            "fit": enriched_summary["route_fit"],
+            "score": round(route_rank, 3),
+        }
+        ranked.append((route_rank, enriched))
+    ranked.sort(key=lambda item: item[0])
+    return [item for _, item in ranked[:max(1, min(int(limit or 48), 120))]]
+
+@app.post("/api/explore/route-rank")
+async def explore_route_rank(body: ExploreRouteRankRequest):
+    route_points = _route_points_from_any(body.route, limit=400)
+    if len(route_points) < 2:
+        raise HTTPException(400, "At least two route points are required")
+    catalog = _load_explore_catalog()
+    categories = _explore_route_rank_categories(body.categories)
+    ranked = _rank_explore_places_for_route(
+        list(catalog.get("places") or []),
+        route_points,
+        categories=categories,
+        q=body.q,
+        limit=body.limit,
+        max_distance_mi=body.max_distance_mi,
+    )
+    return {
+        "schema_version": catalog.get("schema_version", 1),
+        "catalog_id": catalog.get("catalog_id", ""),
+        "generated_at": catalog.get("generated_at", 0),
+        "mode": body.mode or "route",
+        "route_points": len(route_points),
+        "categories": sorted(categories),
+        "count": len(ranked),
+        "places": ranked,
     }
 
 

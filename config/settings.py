@@ -27,6 +27,7 @@ class Settings:
     extreme_copilot_enabled: bool = os.environ.get("EXTREME_COPILOT_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
     extreme_mission_control_enabled: bool = os.environ.get("EXTREME_MISSION_CONTROL_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
     extreme_adventure_scores_enabled: bool = os.environ.get("EXTREME_ADVENTURE_SCORES_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+    extreme_mission_provider_evidence_enabled: bool = os.environ.get("EXTREME_MISSION_PROVIDER_EVIDENCE_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
     extreme_mapgpt_pilot_enabled: bool = os.environ.get("EXTREME_MAPGPT_PILOT_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
     extreme_atlas_pilot_enabled: bool = os.environ.get("EXTREME_ATLAS_PILOT_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
     extreme_native_mode_enabled: bool = os.environ.get("EXTREME_NATIVE_MODE_ENABLED", "false").lower() in {"1", "true", "yes", "on"}

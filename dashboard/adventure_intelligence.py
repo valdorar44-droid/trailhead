@@ -28,6 +28,12 @@ OFFICIAL_SOURCE_HINTS = (
     "blm",
     "trailhead",
     "official",
+    "nws",
+    "airnow",
+    "wfigs",
+    "firms",
+    "gdacs",
+    "tomtom",
 )
 
 
@@ -251,25 +257,74 @@ def score_fuel_and_services(route_miles: float, trip_memory: dict[str, Any], che
 
 
 def score_hazards(checkpoints: list[dict[str, Any]], places: list[dict[str, Any]]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    hazard_items = [item for item in [*checkpoints, *places] if any(term in _type_text(item) for term in ("weather", "risk", "fire", "smoke", "closure", "hazard"))]
+    hazard_terms = (
+        "weather", "risk", "fire", "smoke", "closure", "hazard", "traffic",
+        "road", "flood", "earthquake", "cyclone", "volcano", "drought", "tsunami",
+    )
+    hazard_items = [item for item in [*checkpoints, *places] if any(term in _type_text(item) for term in hazard_terms)]
     risks = [
         _risk(
             f"hazard_{idx}",
-            "weather" if "weather" in _type_text(item) else "road",
+            _hazard_risk_type(item),
             _item_name(item, "Route hazard"),
-            _clean_text(item.get("note") or item.get("summary") or "Review this route condition before departure.", 180),
-            "warning",
+            _clean_text(item.get("note") or item.get("summary") or item.get("description") or "Review this route condition before departure.", 220),
+            _hazard_severity(item),
             _confidence(item),
             lat=item.get("lat"),
             lng=item.get("lng"),
             day=_item_day(item) or None,
+            route_distance_m=_route_distance_m(item),
+            expires_at=item.get("expires_at"),
+            provider=item.get("provider"),
             source_ids=_source_ids(item),
         )
-        for idx, item in enumerate(hazard_items[:6])
+        for idx, item in enumerate(hazard_items[:8])
     ]
+    review_risks = [risk for risk in risks if risk.get("severity") in {"block", "warning", "watch"}]
+    if review_risks:
+        return _score("hazards", "Hazards", "needs_review", "medium", 58, [f"{len(review_risks)} route condition needs review."]), risks
     if risks:
-        return _score("hazards", "Hazards", "needs_review", "medium", 58, [f"{len(risks)} route condition needs review."]), risks
+        return _score("hazards", "Hazards", "ready", "medium", 74, ["Only low-severity route conditions are attached."]), risks
     return _score("hazards", "Hazards", "ready", "unknown", 72, ["No attached route hazards were found."]), []
+
+
+def _hazard_risk_type(item: dict[str, Any]) -> str:
+    text = _type_text(item)
+    if "fire" in text:
+        return "fire"
+    if "smoke" in text or "aqi" in text or "air_quality" in text:
+        return "smoke"
+    if "weather" in text or "cyclone" in text:
+        return "weather"
+    if "traffic" in text or "road" in text or "closure" in text:
+        return "road"
+    if text in {"flood", "earthquake", "volcano", "drought", "tsunami"}:
+        return text
+    return "hazard"
+
+
+def _hazard_severity(item: dict[str, Any]) -> str:
+    raw = _clean_text(item.get("mission_severity") or item.get("severity"), 40).lower()
+    if raw in {"block", "warning", "watch", "info"}:
+        return raw
+    text = " ".join(str(item.get(key) or "") for key in ("title", "name", "note", "summary", "description", "subtype", "type")).lower()
+    if any(term in text for term in ("closed", "closure", "evacuation", "no travel", "impassable", "blocked")):
+        return "block"
+    if raw in {"critical", "extreme", "severe", "high"}:
+        return "warning"
+    if raw in {"moderate", "medium"}:
+        return "watch"
+    return "info"
+
+
+def _route_distance_m(item: dict[str, Any]) -> int | None:
+    explicit = _number(item.get("route_distance_m"))
+    if explicit is not None:
+        return int(max(0, explicit))
+    miles = _number(item.get("route_distance_mi") or item.get("distance_from_route_mi"))
+    if miles is None:
+        return None
+    return int(max(0, miles * 1609.344))
 
 
 def score_offline_readiness(route: list[dict[str, float]], checkpoints: list[dict[str, Any]], trip_memory: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:

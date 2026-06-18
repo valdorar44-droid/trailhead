@@ -20,6 +20,7 @@ import {
   ExtremeCheckpoint,
   ExtremeConfig,
   ExtremeSurface,
+  ExplorePlaceProfile,
   MissionControlBrief,
   MissionControlRecommendation,
   OsmPoi,
@@ -180,6 +181,49 @@ function placeFromPoi(p: OsmPoi, idx: number): DemoPlace | null {
     rating_count: p.rating_count,
     route_distance_mi: p.route_distance_mi,
     confidence: (p as any).confidence,
+  };
+}
+
+function placeFromExploreProfile(place: ExplorePlaceProfile, idx: number): DemoPlace | null {
+  const summary = place.summary || ({} as ExplorePlaceProfile['summary']);
+  const lat = Number(summary.lat);
+  const lng = Number(summary.lng);
+  if (!finiteCoord(lat, lng)) return null;
+  const routeSummary = summary as typeof summary & {
+    route_distance_mi?: number;
+    route_fit?: string;
+  };
+  const media = Array.isArray(place.media) ? place.media.find(item => item?.url) : null;
+  const sources = Array.isArray(place.sources) ? place.sources : [];
+  const sourceLabel = safeText(
+    place.source_pack?.primary
+      || summary.source_title
+      || sources.find(item => item.publisher || item.name || item.title)?.publisher
+      || sources.find(item => item.publisher || item.name || item.title)?.name
+      || 'Explore',
+    'Explore',
+  );
+  const note = safeText(
+    place.card?.summary
+      || place.profile?.summary
+      || summary.short_description
+      || summary.hook
+      || routeSummary.route_fit,
+    'Explore stop',
+  );
+  return {
+    id: String(place.id || summary.id || `explore-${idx}`),
+    type: safeText(place.category || summary.explore_group || summary.category || 'place', 'place'),
+    title: safeText(summary.title || place.card?.title, 'Explore stop'),
+    note: routeSummary.route_fit ? `${routeSummary.route_fit}. ${note}` : note,
+    lat,
+    lng,
+    source: 'explore',
+    source_label: sourceLabel,
+    website: place.source_pack?.official_url || summary.source_url || place.facts?.official_url || place.facts?.source_url,
+    photo_url: summary.image_url || summary.thumbnail_url || media?.url || place.source_pack?.photos?.find(item => item?.url)?.url || null,
+    route_distance_mi: typeof routeSummary.route_distance_mi === 'number' ? routeSummary.route_distance_mi : undefined,
+    confidence: place.verified || place.quality === 'official' ? 'high' : 'medium',
   };
 }
 
@@ -541,6 +585,7 @@ export default function ExtremeExplorerScreen() {
   const [status, setStatus] = useState<'loading' | 'ready' | 'blocked' | 'error'>('loading');
   const [message, setMessage] = useState('Loading Extreme Explorer');
   const [discoveredPlaces, setDiscoveredPlaces] = useState<DemoPlace[]>([]);
+  const [routeExplorePlaces, setRouteExplorePlaces] = useState<DemoPlace[]>([]);
   const [selectedPlace, setSelectedPlace] = useState<ExtremePlaceCard | null>(null);
   const [relatedPlaces, setRelatedPlaces] = useState<ExtremePlaceCard[]>([]);
   const [relatedLoading, setRelatedLoading] = useState(false);
@@ -552,9 +597,9 @@ export default function ExtremeExplorerScreen() {
   const checkpoints = useMemo(() => checkpointsFromTrip(activeTrip), [activeTrip?.trip_id, activeTrip?.updated_at, activeTrip?.version]);
   const tripPlaces = useMemo(() => placesFromTrip(activeTrip), [activeTrip?.trip_id, activeTrip?.updated_at, activeTrip?.version]);
   const places = useMemo(() => {
-    const seed = tripPlaces.length + discoveredPlaces.length > 0 ? [] : fallbackPlaces(route, checkpoints);
-    return mergePlaces([...tripPlaces, ...discoveredPlaces, ...seed]);
-  }, [checkpoints, discoveredPlaces, route, tripPlaces]);
+    const seed = tripPlaces.length + discoveredPlaces.length + routeExplorePlaces.length > 0 ? [] : fallbackPlaces(route, checkpoints);
+    return mergePlaces([...tripPlaces, ...routeExplorePlaces, ...discoveredPlaces, ...seed]);
+  }, [checkpoints, discoveredPlaces, route, routeExplorePlaces, tripPlaces]);
   const tripMemory = useMemo(() => tripMemoryFromState(rigProfile), [rigProfile]);
   const summary = useMemo(() => missionBrief?.summary || coPilotSummary(places), [missionBrief?.summary, places]);
   const missionEnabled = config?.feature_flags?.mission_control !== false && config?.feature_flags?.adventure_scores !== false;
@@ -646,6 +691,30 @@ export default function ExtremeExplorerScreen() {
       });
     return () => { cancelled = true; };
   }, [checkpoints, route, status]);
+
+  useEffect(() => {
+    if (status !== 'ready' || route.length < 2) {
+      setRouteExplorePlaces([]);
+      return;
+    }
+    let cancelled = false;
+    api.getExploreRouteRank({
+      route,
+      categories: ['trails', 'trail', 'trailhead', 'viewpoint', 'park', 'monument', 'historic', 'water', 'waterfall', 'camping', 'glamping', 'glacier', 'tourism'],
+      limit: 28,
+      max_distance_mi: 75,
+      mode: 'extreme_explorer',
+    })
+      .then(results => {
+        if (cancelled) return;
+        const mapped = (results.places ?? []).map(placeFromExploreProfile).filter(Boolean) as DemoPlace[];
+        setRouteExplorePlaces(mapped);
+      })
+      .catch(() => {
+        if (!cancelled) setRouteExplorePlaces([]);
+      });
+    return () => { cancelled = true; };
+  }, [route, status]);
 
   useEffect(() => {
     if (status !== 'ready') return;

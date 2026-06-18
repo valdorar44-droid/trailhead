@@ -34,6 +34,7 @@ class ExtremeExplorerTests(unittest.TestCase):
             "extreme_copilot_enabled": settings.extreme_copilot_enabled,
             "extreme_mission_control_enabled": settings.extreme_mission_control_enabled,
             "extreme_adventure_scores_enabled": settings.extreme_adventure_scores_enabled,
+            "extreme_mission_provider_evidence_enabled": settings.extreme_mission_provider_evidence_enabled,
             "extreme_copilot_wake_phrase_enabled": settings.extreme_copilot_wake_phrase_enabled,
             "extreme_mapgpt_pilot_enabled": settings.extreme_mapgpt_pilot_enabled,
             "extreme_atlas_pilot_enabled": settings.extreme_atlas_pilot_enabled,
@@ -54,6 +55,7 @@ class ExtremeExplorerTests(unittest.TestCase):
         settings.extreme_copilot_enabled = False
         settings.extreme_mission_control_enabled = False
         settings.extreme_adventure_scores_enabled = False
+        settings.extreme_mission_provider_evidence_enabled = False
         settings.extreme_copilot_wake_phrase_enabled = False
         settings.extreme_mapgpt_pilot_enabled = False
         settings.extreme_atlas_pilot_enabled = False

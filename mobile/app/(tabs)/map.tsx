@@ -8542,7 +8542,16 @@ function MapScreen() {
     const totalDistanceM = Number(route?.distance) || cumulative[cumulative.length - 1] || 0;
     const totalMiles = totalDistanceM / 1609.344;
     const totalDuration = Number(route?.duration) || 0;
-    const windows = routeScoutWindows(scoutArgs.days, totalMiles);
+    const backendWindowPlan = await api.getExtremeRouteScoutWindows({
+      session_id: extremeCopilotSessionId,
+      route: coords,
+      total_miles: totalMiles,
+      days: scoutArgs.days,
+      drive_hours: scoutArgs.driveHours,
+      route_style: scoutArgs.routeStyle,
+      metadata: { source: 'mobile_route_scout', destination: destination.name },
+    }).catch(() => null);
+    const windows = backendWindowPlan?.windows?.length ? backendWindowPlan.windows : routeScoutWindows(scoutArgs.days, totalMiles);
     const previewTargets = routeScoutTargetPoints(coords, cumulative, windows);
     scheduleRouteSketch(operationId, coords, [
       { name: start.name, lat: start.lat, lng: start.lng, role: 'start' },

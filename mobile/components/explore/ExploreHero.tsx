@@ -1,23 +1,37 @@
 import React from 'react';
 import { Image, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 
-const DEFAULT_HERO_IMAGE = require('@/assets/explore-hero-moraine-lake.jpg');
+const DEFAULT_HERO_IMAGE = require('@/assets/explore-hero-welcome-mountains.jpg');
 
 type Props = {
   greeting: string;
   displayName: string;
   height: number;
+  topInset?: number;
   query: string;
   onQueryChange: (value: string) => void;
   onClearQuery: () => void;
 };
 
-export function ExploreHero({ greeting, displayName, height, query, onQueryChange, onClearQuery }: Props) {
+export function ExploreHero({ greeting, displayName, height, topInset = 0, query, onQueryChange, onClearQuery }: Props) {
   return (
     <View style={[styles.shell, { height }]}>
       <Image source={DEFAULT_HERO_IMAGE} style={styles.image} resizeMode="cover" />
       <View style={styles.overlay} />
+      <LinearGradient
+        pointerEvents="none"
+        colors={['rgba(3,7,18,0.46)', 'rgba(3,7,18,0.16)', 'rgba(3,7,18,0)']}
+        locations={[0, 0.58, 1]}
+        style={[styles.statusShade, { height: Math.max(104, topInset + 76) }]}
+      />
+      <LinearGradient
+        pointerEvents="none"
+        colors={['rgba(3,7,18,0)', 'rgba(3,7,18,0.62)']}
+        locations={[0, 1]}
+        style={styles.bottomShade}
+      />
       <View style={styles.content}>
         <Text style={styles.greeting}>{greeting}, {displayName}</Text>
         <Text style={styles.title}>Find your next adventure</Text>
@@ -50,7 +64,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#0f172a',
   },
   image: { ...StyleSheet.absoluteFillObject, width: '100%', height: '100%' },
-  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(3,7,18,0.28)' },
+  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(3,7,18,0.12)' },
+  statusShade: { position: 'absolute', top: 0, left: 0, right: 0 },
+  bottomShade: { position: 'absolute', left: 0, right: 0, bottom: 0, height: '58%' },
   content: {
     flex: 1,
     justifyContent: 'flex-end',

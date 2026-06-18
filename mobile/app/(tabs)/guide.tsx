@@ -1447,7 +1447,8 @@ export default function GuideScreen() {
         <ExploreHero
           greeting={timeGreeting()}
           displayName={displayName}
-          height={heroHeight}
+          height={heroHeight + insets.top}
+          topInset={insets.top}
           query={exploreQuery}
           onQueryChange={setExploreQuery}
           onClearQuery={() => setExploreQuery('')}
@@ -1464,7 +1465,7 @@ export default function GuideScreen() {
   function renderUtilityHeader() {
     const isWeather = tab === 'weather';
     return (
-      <View style={s.utilityHeader}>
+      <View style={[s.utilityHeader, { paddingTop: insets.top + 16 }]}>
         <TouchableOpacity style={s.utilityBack} onPress={openExploreFeed}>
           <Ionicons name="chevron-back" size={16} color={C.text2} />
           <Text style={s.utilityBackText}>Explore</Text>
@@ -1515,7 +1516,7 @@ export default function GuideScreen() {
   }
 
   return (
-    <SafeAreaView style={s.container}>
+    <SafeAreaView style={s.container} edges={['left', 'right', 'bottom']}>
       <ScrollView style={s.scroll} contentContainerStyle={s.scrollContent}>
         {tab === 'explore' ? renderLandingHeader() : renderUtilityHeader()}
 

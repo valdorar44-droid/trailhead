@@ -478,7 +478,7 @@ export function useOfflineFiles() {
           const sizeMb = Math.round(((info as any).size ?? 0) / 1_048_576 * 10) / 10;
           setTrailStates(prev => ({
             ...prev,
-            [id]: { ...EMPTY_TRAIL(id), status: 'complete', progress: 100, fileSizeMb: sizeMb, localPath: region.localPath },
+            [id]: { ...EMPTY_TRAIL(id), status: 'complete', progress: 100, fileSizeMb: sizeMb, localPath: region.localPath, details: 'Trail tiles found; checking graph sidecars' },
           }));
           continue;
         }
@@ -1026,11 +1026,11 @@ export function useOfflineFiles() {
       }
       updateTrailState(id, {
         details: graphExpected
-          ? 'Trail lines and offline follow saved'
-          : 'Trail lines and offline follow saved',
+          ? 'Trail lines, selection graph, and route graph saved'
+          : 'Trail lines and route graph saved',
       });
     } else {
-      updateTrailState(id, { details: 'Trail lines saved; offline follow coming soon' });
+      updateTrailState(id, { details: 'Trail lines saved; route graph not published yet' });
     }
   }, [downloadTrailSidecar, trailRouteGraphManifestSizes, trailSelectionGraphManifestSizes, updateTrailState]);
 
@@ -1070,8 +1070,8 @@ export function useOfflineFiles() {
               fileSizeMb: sizeMb,
               error: undefined,
               details: graphExpected
-                ? 'Trail lines and offline follow saved'
-                : 'Trail lines and offline follow saved',
+                ? 'Trail lines, selection graph, and route graph saved'
+                : 'Trail lines and route graph saved',
             });
           }
           continue;
@@ -1098,6 +1098,7 @@ export function useOfflineFiles() {
               speedBps: 0,
               etaSec: 0,
               error: undefined,
+              details: 'Trail graph sidecars repaired',
             });
           }
         } catch (error: any) {
@@ -1170,7 +1171,7 @@ export function useOfflineFiles() {
         await downloadTrailSidecars(id, ((info as any)?.size ?? 0));
         const sizeMb = await trailBundleSizeMb(id, ((info as any)?.size ?? 0));
         await storage.del(TRAIL_RESUME_KEY(id)).catch(() => {});
-        updateTrailState(id, { status: 'complete', progress: 100, fileSizeMb: sizeMb, speedBps: 0, etaSec: 0, error: undefined });
+        updateTrailState(id, { status: 'complete', progress: 100, fileSizeMb: sizeMb, speedBps: 0, etaSec: 0, error: undefined, details: 'Trail lines, selection graph, and route graph saved' });
       } else if (result && result.status !== 200) {
         await FileSystem.deleteAsync(region.localPath, { idempotent: true }).catch(() => {});
         await storage.del(TRAIL_RESUME_KEY(id)).catch(() => {});
@@ -1205,7 +1206,7 @@ export function useOfflineFiles() {
           await downloadTrailSidecars(id, ((info as any)?.size ?? 0));
           const sizeMb = await trailBundleSizeMb(id, ((info as any)?.size ?? 0));
           await storage.del(TRAIL_RESUME_KEY(id)).catch(() => {});
-          updateTrailState(id, { status: 'complete', progress: 100, fileSizeMb: sizeMb, speedBps: 0, etaSec: 0 });
+          updateTrailState(id, { status: 'complete', progress: 100, fileSizeMb: sizeMb, speedBps: 0, etaSec: 0, details: 'Trail lines, selection graph, and route graph saved' });
         } else if (result && result.status !== 200) {
           await FileSystem.deleteAsync(TRAIL_REGIONS[id].localPath, { idempotent: true }).catch(() => {});
           await storage.del(TRAIL_RESUME_KEY(id)).catch(() => {});

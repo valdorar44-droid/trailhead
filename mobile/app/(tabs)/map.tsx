@@ -602,6 +602,7 @@ type CatchDraft = {
 };
 type DiscoveryMode = 'camps' | 'trails';
 type TrailDiscoveryScope = 'nearby' | 'view';
+type TrailSnapMode = 'trail' | 'road' | 'dirt' | 'straight' | 'hybrid';
 type TrailRouteIntent = 'segment' | 'out_back' | 'loop' | 'far_end' | 'capture';
 type TrailRoutePlan = {
   id: TrailRouteIntent;
@@ -627,6 +628,72 @@ type TrailRouteSegmentStatus = {
   engine: string;
   message?: string;
 };
+type TrailGraphReadiness = {
+  stateId: string | null;
+  routeGraphReady: boolean;
+  checked: boolean;
+  detail: string;
+};
+type TrailReadinessRow = {
+  label: string;
+  ready: boolean;
+  detail: string;
+  icon: keyof typeof Ionicons.glyphMap;
+};
+
+const TRAIL_SNAP_MODE_OPTIONS: Array<{ id: TrailSnapMode; label: string; icon: keyof typeof Ionicons.glyphMap; sub: string }> = [
+  { id: 'trail', label: 'Trail', icon: 'git-branch-outline', sub: 'Trail graph first' },
+  { id: 'road', label: 'Road', icon: 'car-outline', sub: 'Connector routing' },
+  { id: 'dirt', label: 'Dirt/4WD', icon: 'trail-sign-outline', sub: 'Track-style review' },
+  { id: 'hybrid', label: 'Hybrid', icon: 'git-compare-outline', sub: 'Road + trail' },
+  { id: 'straight', label: 'Line', icon: 'analytics-outline', sub: 'Manual fallback' },
+];
+
+const EMPTY_TRAIL_GRAPH_READINESS: TrailGraphReadiness = {
+  stateId: null,
+  routeGraphReady: false,
+  checked: false,
+  detail: 'Tap a trail area to check routing graph coverage.',
+};
+
+function trailSnapModeHelp(mode: TrailSnapMode) {
+  switch (mode) {
+    case 'straight':
+      return 'Straight line mode only connects your pins. It does not follow trails or roads.';
+    case 'road':
+      return 'Road mode is for connectors. Review the handoff before saving a trail route.';
+    case 'dirt':
+      return 'Dirt/4WD mode is a planning aid. Check gates, seasonal access, and MVUM context.';
+    case 'hybrid':
+      return 'Hybrid mode uses the best trail or connector line available, then asks you to review gaps.';
+    default:
+      return 'Trail mode snaps to trail data when graph coverage is available.';
+  }
+}
+
+function normalizeTrailSnapFailure(err: unknown, mode: TrailSnapMode) {
+  const raw = String((err as any)?.message ?? err ?? '').trim();
+  const lower = raw.toLowerCase();
+  if (lower.includes('not downloaded') || lower.includes('missing trail graph')) {
+    return 'Trail routing graph is not downloaded for this area. Download the trail pack or use straight line for this segment.';
+  }
+  if (lower.includes('could not be identified') || lower.includes('no trail graph here')) {
+    return 'No trail graph here yet. Use straight line, add manual points, or report a missing trail.';
+  }
+  if (lower.includes('no visible trail connection') || lower.includes('could not connect pins')) {
+    return 'Gap between trail segments. Add a pin on the trail between those points or switch to straight line.';
+  }
+  if (lower.includes('snapped one anchor')) {
+    return raw;
+  }
+  if (lower.includes('too many pins')) {
+    return raw;
+  }
+  if (mode === 'straight') {
+    return 'Straight line mode is active. The route follows your pins only.';
+  }
+  return raw || 'Could not build that route. Add pins around forks or switch snap mode.';
+}
 
 interface RouteStep {
   type: string;
@@ -5243,6 +5310,9 @@ function MapScreen() {
   const [trailRoutePlans, setTrailRoutePlans] = useState<TrailRoutePlan[]>([]);
   const [selectedTrailRoutePlanId, setSelectedTrailRoutePlanId] = useState<TrailRouteIntent | null>(null);
   const [trailRouteBuilderError, setTrailRouteBuilderError] = useState('');
+  const [trailSnapMode, setTrailSnapMode] = useState<TrailSnapMode>('trail');
+  const [trailSnapFailureReason, setTrailSnapFailureReason] = useState('');
+  const [trailGraphReadiness, setTrailGraphReadiness] = useState<TrailGraphReadiness>(EMPTY_TRAIL_GRAPH_READINESS);
   const [trailBuildFinalized, setTrailBuildFinalized] = useState(false);
   const [trailTraceMode, setTrailTraceMode] = useState(false);
   const [trailTraceDraft, setTrailTraceDraft] = useState<[number, number][]>([]);
@@ -7186,6 +7256,7 @@ function MapScreen() {
       setTrailRoutePlans([plan]);
       setSelectedTrailRoutePlanId('capture');
       setTrailRouteBuilderError('');
+      setTrailSnapFailureReason('');
       setTrailTraceRoute(coords);
       previewTrailRoutePlan(saved.trail, plan);
       nativeMapRef.current?.flyTo(saved.trail.lat, saved.trail.lng, 13, saved.trail.name);
@@ -14342,6 +14413,109 @@ function MapScreen() {
   const speedMph  = userSpeed !== null && userSpeed > 0 ? userSpeed * 2.237 : null;
   const selectedTrailRoutePlan = trailRoutePlans.find(p => p.id === selectedTrailRoutePlanId) ?? trailRoutePlans[0] ?? null;
   const previewTrailDistanceM = selectedTrailRoutePlan?.distanceM ?? (trailTraceRoute.length > 1 ? trailCoordsDistanceM(trailTraceRoute) : 0);
+  useEffect(() => {
+    let cancelled = false;
+    const probe = selectedTrail
+      ? ([selectedTrail.lng, selectedTrail.lat] as [number, number])
+      : trailCapturePins[0] ?? null;
+    if (!probe) {
+      setTrailGraphReadiness(EMPTY_TRAIL_GRAPH_READINESS);
+      return () => { cancelled = true; };
+    }
+    const stateId = stateIdForTrailPoint(probe[1], probe[0]);
+    if (!stateId) {
+      setTrailGraphReadiness({
+        stateId: null,
+        routeGraphReady: false,
+        checked: true,
+        detail: 'No trail graph here yet.',
+      });
+      return () => { cancelled = true; };
+    }
+    if (Platform.OS !== 'ios') {
+      setTrailGraphReadiness({
+        stateId,
+        routeGraphReady: false,
+        checked: true,
+        detail: 'Native trail graph routing is not active on this build.',
+      });
+      return () => { cancelled = true; };
+    }
+    FileSystem.getInfoAsync(trailRouteGraphLocalPath(stateId))
+      .then(info => {
+        if (cancelled) return;
+        const size = (info as any)?.size ?? 0;
+        const ready = Boolean(info?.exists && size > 0);
+        setTrailGraphReadiness({
+          stateId,
+          routeGraphReady: ready,
+          checked: true,
+          detail: ready
+            ? `${stateId.toUpperCase()} trail routing graph is downloaded.`
+            : `${stateId.toUpperCase()} trail routing graph is missing.`,
+        });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setTrailGraphReadiness({
+          stateId,
+          routeGraphReady: false,
+          checked: true,
+          detail: `${stateId.toUpperCase()} trail routing graph could not be checked.`,
+        });
+      });
+    return () => { cancelled = true; };
+  }, [selectedTrail?.id, selectedTrail?.lat, selectedTrail?.lng, trailCapturePins]);
+  const trailRoutingReadinessRows: TrailReadinessRow[] = useMemo(() => {
+    const routeLineReady = Boolean(
+      selectedTrailRoutePlan?.coords?.length
+      || trailTraceRoute.length > 1
+      || selectedTrail?.support.offlineReady
+    );
+    return [
+      {
+        label: 'Map tiles',
+        ready: offlineSaved,
+        detail: offlineSaved ? 'Downloaded map region found.' : 'Download map tiles before leaving signal.',
+        icon: 'map-outline',
+      },
+      {
+        label: 'Trail graph',
+        ready: trailGraphReadiness.routeGraphReady,
+        detail: trailGraphReadiness.detail,
+        icon: 'git-network-outline',
+      },
+      {
+        label: 'Route line',
+        ready: routeLineReady,
+        detail: routeLineReady ? 'A followable line is available.' : 'Build or download a route line.',
+        icon: 'analytics-outline',
+      },
+      {
+        label: 'Camps/places',
+        ready: trailSupportCamps.length > 0 || allMapPois.length > 0,
+        detail: trailSupportCamps.length || allMapPois.length ? 'Nearby support context loaded.' : 'Pan/search nearby or download place packs.',
+        icon: 'trail-sign-outline',
+      },
+      {
+        label: 'Reports/weather',
+        ready: mapReports.length > 0 || Boolean(cachedWeather || mapWeather),
+        detail: mapReports.length || cachedWeather || mapWeather ? 'Live or cached field context loaded.' : 'Open weather or reports before going offline.',
+        icon: 'cloud-outline',
+      },
+    ];
+  }, [
+    allMapPois.length,
+    cachedWeather,
+    mapReports.length,
+    mapWeather,
+    offlineSaved,
+    selectedTrail?.support.offlineReady,
+    selectedTrailRoutePlan,
+    trailGraphReadiness,
+    trailSupportCamps.length,
+    trailTraceRoute.length,
+  ]);
   const elevationHydrationRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     trailRoutePlans.forEach(plan => {
@@ -14553,6 +14727,7 @@ function MapScreen() {
     setTrailRoutePlans([]);
     setSelectedTrailRoutePlanId(null);
     setTrailRouteBuilderError('');
+    setTrailSnapFailureReason('');
     setTrailRouteSegmentStatus([]);
     setTrailFieldReports([]);
     setTrailFieldReportSummary(null);
@@ -15637,6 +15812,7 @@ function MapScreen() {
     setTrailRoutePlans([]);
     setSelectedTrailRoutePlanId(null);
     setTrailRouteBuilderError('');
+    setTrailSnapFailureReason('');
     setTrailRouteSegmentStatus([]);
     setTrailTraceRoute([]);
     setTrailTraceDraft([]);
@@ -15700,6 +15876,7 @@ function MapScreen() {
     setTrailRoutePlans([]);
     setSelectedTrailRoutePlanId(null);
     setTrailRouteBuilderError('');
+    setTrailSnapFailureReason('');
     setTrailRouteSegmentStatus([]);
     setTrailTraceDraft([]);
     trailTraceDraftRef.current = [];
@@ -15722,6 +15899,7 @@ function MapScreen() {
   }
 
   async function routeTraceWithGraph(coords: [number, number][]) {
+    if (trailSnapMode === 'straight') return null;
     return routeTrailGraphPath(coords, 900);
   }
 
@@ -15738,6 +15916,7 @@ function MapScreen() {
     setTrailRouteBuilderOpen(true);
     setTrailCardCollapsed(true);
     setTrailRouteBuilderError('');
+    setTrailSnapFailureReason('');
     setQuickToast('Building route from trace...');
 
     let captured = rough;
@@ -15747,9 +15926,13 @@ function MapScreen() {
       if (graphRoute?.length) {
         captured = graphRoute;
         graphSnapped = true;
+      } else if (trailSnapMode !== 'straight') {
+        setTrailSnapFailureReason('Trail graph did not match that trace. Keeping the drawn line.');
       }
     } catch (err: any) {
-      setTrailRouteBuilderError('Trace could not be cleaned up. Try pins at bends and forks instead.');
+      const message = normalizeTrailSnapFailure(err, trailSnapMode);
+      setTrailRouteBuilderError(message);
+      setTrailSnapFailureReason(message);
     }
 
     const distanceM = trailCoordsDistanceM(captured);
@@ -15830,6 +16013,7 @@ function MapScreen() {
     setTrailRoutePlans([]);
     setSelectedTrailRoutePlanId(null);
     setTrailRouteBuilderError('');
+    setTrailSnapFailureReason('');
     setTrailBuildFinalized(false);
     setTrailRouteSegmentStatus([]);
     trailAutoBuildCountRef.current = 0;
@@ -15871,6 +16055,7 @@ function MapScreen() {
     setTrailRoutePlans([]);
     setSelectedTrailRoutePlanId(null);
     setTrailRouteBuilderError('');
+    setTrailSnapFailureReason('');
     setTrailBuildFinalized(false);
     setTrailTraceMode(false);
     setTrailTraceRoute([]);
@@ -15969,6 +16154,7 @@ function MapScreen() {
       setTrailBuildFinalized(false);
     }
     setTrailRouteBuilderError('');
+    setTrailSnapFailureReason('');
     setTrailRouteSegmentStatus(pins.slice(0, -1).map((_, idx) => ({ label: `${idx + 1}-${idx + 2}`, status: 'fallback', engine: 'Queued' })));
     setQuickToast(previewOnly ? 'Building route...' : 'Building trail route...');
 
@@ -15979,7 +16165,20 @@ function MapScreen() {
       let engineConfidence: TrailRoutePlan['confidence'] = 'high';
       let segmentStatuses: TrailRouteSegmentStatus[] = [];
       let routedDistanceM = 0;
-      try {
+      if (trailSnapMode === 'straight') {
+        clean = dedupeTrailCoords(pins);
+        routedDistanceM = trailCoordsDistanceM(clean);
+        engineLabel = 'Straight line';
+        engineConfidence = 'low';
+        segmentStatuses = pins.slice(0, -1).map((_, idx) => ({
+          label: `${idx + 1}-${idx + 2}`,
+          status: 'fallback',
+          engine: 'Straight',
+          message: 'Manual connector',
+        }));
+        engineWarning = trailSnapModeHelp('straight');
+      } else {
+        try {
         const stadiaRoute = pins.length > 2
           ? await fetchStadiaPinnedTrailRouteByLeg(pins)
           : await fetchStadiaPinnedTrailRoute(pins);
@@ -16044,6 +16243,7 @@ function MapScreen() {
           }
         }
       }
+      }
       if (clean.length < 2) throw new Error('Pinned capture returned an empty route.');
 
       const distanceM = routedDistanceM || trailCoordsDistanceM(clean);
@@ -16089,6 +16289,7 @@ function MapScreen() {
       setTrailRoutePlans([plan]);
       setSelectedTrailRoutePlanId('capture');
       setTrailRouteBuilderError('');
+      setTrailSnapFailureReason('');
       setTrailRouteSegmentStatus(segmentStatuses);
       hydrateTrailRoutePlanElevation(plan);
       if (previewOnly) {
@@ -16102,8 +16303,9 @@ function MapScreen() {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       }
     } catch (err: any) {
-      const message = err?.message ?? 'Could not build that trail route. Add pins around forks or bends.';
+      const message = normalizeTrailSnapFailure(err, trailSnapMode);
       setTrailRouteBuilderError(message);
+      setTrailSnapFailureReason(message);
       setQuickToast(message);
       setTimeout(() => setQuickToast(''), 5200);
       if (!previewOnly) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
@@ -17492,6 +17694,42 @@ function MapScreen() {
                 { label: trailElevationLabel(selectedTrailRoutePlan), value: fmtTrailElevation(selectedTrailRoutePlan), icon: 'trending-up-outline', tone: C.orange },
               ]}
             />
+            <View style={s.trailSnapModeStrip}>
+              {TRAIL_SNAP_MODE_OPTIONS.map(mode => {
+                const active = trailSnapMode === mode.id;
+                return (
+                  <TouchableOpacity
+                    key={mode.id}
+                    activeOpacity={0.85}
+                    style={[s.trailSnapModeBtn, active && s.trailSnapModeBtnActive]}
+                    onPress={() => {
+                      setTrailSnapMode(mode.id);
+                      setTrailSnapFailureReason('');
+                      setQuickToast(trailSnapModeHelp(mode.id));
+                      setTimeout(() => setQuickToast(''), 2800);
+                    }}
+                  >
+                    <Ionicons name={mode.icon as any} size={13} color={active ? '#fff' : OVR.text2} />
+                    <Text style={[s.trailSnapModeText, active && s.trailSnapModeTextActive]} numberOfLines={1}>{mode.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <View style={s.trailRoutingReadinessPanel}>
+              {trailRoutingReadinessRows.slice(0, 4).map(row => (
+                <View key={row.label} style={s.trailRoutingReadinessRow}>
+                  <Ionicons name={row.ready ? 'checkmark-circle-outline' : row.icon as any} size={13} color={row.ready ? C.green : C.orange} />
+                  <Text style={s.trailRoutingReadinessLabel}>{row.label}</Text>
+                  <Text style={s.trailRoutingReadinessValue} numberOfLines={1}>{row.detail}</Text>
+                </View>
+              ))}
+            </View>
+            {!!trailSnapFailureReason && (
+              <View style={s.trailRouteWarningBox}>
+                <Ionicons name="information-circle-outline" size={16} color={C.orange} />
+                <Text style={s.trailRouteWarningText} numberOfLines={3}>{trailSnapFailureReason}</Text>
+              </View>
+            )}
             <TrailheadButtonDock style={s.trailRouteBuilderActions}>
               <TrailheadButton
                 label="Undo"
@@ -18394,6 +18632,42 @@ function MapScreen() {
                 { label: trailElevationLabel(selectedTrailRoutePlan), value: fmtTrailElevation(selectedTrailRoutePlan), icon: 'trending-up-outline', tone: C.orange },
               ]}
             />
+            <View style={s.trailSnapModeStrip}>
+              {TRAIL_SNAP_MODE_OPTIONS.map(mode => {
+                const active = trailSnapMode === mode.id;
+                return (
+                  <TouchableOpacity
+                    key={mode.id}
+                    activeOpacity={0.85}
+                    style={[s.trailSnapModeBtn, active && s.trailSnapModeBtnActive]}
+                    onPress={() => {
+                      setTrailSnapMode(mode.id);
+                      setTrailSnapFailureReason('');
+                      setQuickToast(trailSnapModeHelp(mode.id));
+                      setTimeout(() => setQuickToast(''), 2800);
+                    }}
+                  >
+                    <Ionicons name={mode.icon as any} size={13} color={active ? '#fff' : OVR.text2} />
+                    <Text style={[s.trailSnapModeText, active && s.trailSnapModeTextActive]} numberOfLines={1}>{mode.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <View style={s.trailRoutingReadinessPanel}>
+              {trailRoutingReadinessRows.map(row => (
+                <View key={row.label} style={s.trailRoutingReadinessRow}>
+                  <Ionicons name={row.ready ? 'checkmark-circle-outline' : row.icon as any} size={13} color={row.ready ? C.green : C.orange} />
+                  <Text style={s.trailRoutingReadinessLabel}>{row.label}</Text>
+                  <Text style={s.trailRoutingReadinessValue} numberOfLines={1}>{row.detail}</Text>
+                </View>
+              ))}
+            </View>
+            {!!trailSnapFailureReason && (
+              <View style={[s.trailRouteWarningBox, { marginBottom: 9 }]}>
+                <Ionicons name="information-circle-outline" size={16} color={C.orange} />
+                <Text style={s.trailRouteWarningText} numberOfLines={3}>{trailSnapFailureReason}</Text>
+              </View>
+            )}
 
             {trailRouteBuilding ? (
               <View style={s.trailRouteLoading}>
@@ -24590,6 +24864,49 @@ const makeStyles = (C: ColorPalette) => {
     paddingVertical: 6,
   },
   trailRouteStatusText: { color: OVR.text2, fontSize: 10, fontFamily: mono, fontWeight: '800' },
+  trailSnapModeStrip: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 9,
+  },
+  trailSnapModeBtn: {
+    minHeight: 32,
+    flexGrow: 1,
+    flexBasis: '30%' as any,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.045)',
+    paddingHorizontal: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+  },
+  trailSnapModeBtnActive: {
+    backgroundColor: C.orange,
+    borderColor: C.orange,
+  },
+  trailSnapModeText: { color: OVR.text2, fontSize: 9, fontFamily: mono, fontWeight: '900' },
+  trailSnapModeTextActive: { color: '#fff' },
+  trailRoutingReadinessPanel: {
+    gap: 5,
+    marginBottom: 9,
+    padding: 9,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  trailRoutingReadinessRow: {
+    minHeight: 21,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  trailRoutingReadinessLabel: { color: OVR.text2, fontSize: 9, fontFamily: mono, fontWeight: '900', width: 82 },
+  trailRoutingReadinessValue: { color: OVR.text3, fontSize: 9, flex: 1 },
   trailRouteLoading: {
     minHeight: 138,
     alignItems: 'center',

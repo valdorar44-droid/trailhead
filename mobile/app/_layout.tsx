@@ -4,6 +4,7 @@ import { Alert, AppState, Linking, View, Text, TouchableOpacity } from 'react-na
 import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { storage } from '@/lib/storage';
+import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
 import * as Updates from 'expo-updates';
 import { useStore } from '@/lib/store';
@@ -17,12 +18,14 @@ import WelcomeOnboardingModal from '@/components/WelcomeOnboardingModal';
 
 const LAUNCH_LOADER_MIN_MS = 1200;
 const LAUNCH_LOADER_MAX_MS = 4500;
+const LOCATION_WARMUP_PROMPT_KEY = 'trailhead_foreground_location_prompt_v1';
 
 export default function RootLayout() {
   const setAuth            = useStore(s => s.setAuth);
   const setPlan            = useStore(s => s.setPlan);
   const setActiveTrip      = useStore(s => s.setActiveTrip);
   const restoreActiveTrip  = useStore(s => s.restoreActiveTrip);
+  const setUserLoc         = useStore(s => s.setUserLoc);
   const themeMode    = useStore(s => s.themeMode);
   const user         = useStore(s => s.user);
   const sessionId    = useStore(s => s.sessionId);
@@ -290,6 +293,31 @@ export default function RootLayout() {
     if (welcomePromptRunId <= 0) return;
     openWelcomeContest();
   }, [welcomePromptRunId]);
+
+  useEffect(() => {
+    if (launchLoaderVisible) return;
+    let cancelled = false;
+    (async () => {
+      const existing = await Location.getForegroundPermissionsAsync().catch(() => null);
+      if (cancelled) return;
+      let permission = existing;
+      if (existing?.status !== 'granted') {
+        const alreadyPrompted = await storage.get(LOCATION_WARMUP_PROMPT_KEY).catch(() => null);
+        if (cancelled || alreadyPrompted || existing?.status === 'denied') {
+          if (existing?.status === 'denied') storage.set(LOCATION_WARMUP_PROMPT_KEY, '1').catch(() => {});
+          return;
+        }
+        storage.set(LOCATION_WARMUP_PROMPT_KEY, '1').catch(() => {});
+        permission = await Location.requestForegroundPermissionsAsync().catch(() => null);
+      }
+      if (cancelled || permission?.status !== 'granted') return;
+      const fix = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }).catch(() => null);
+      if (!cancelled && fix?.coords) {
+        setUserLoc({ lat: fix.coords.latitude, lng: fix.coords.longitude });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [launchLoaderVisible, setUserLoc]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

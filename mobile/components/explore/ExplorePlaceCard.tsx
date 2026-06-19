@@ -46,7 +46,7 @@ export function ExplorePlaceCard({
 }: Props) {
   const C = useTheme();
   const categoryColor = getExploreCategoryColor(place);
-  const facts = getExploreQuickFacts(place, context).slice(0, compact ? 2 : 3);
+  const facts = getExploreQuickFacts(place, context).slice(0, 2);
   const title = getExploreDisplayTitle(place);
   const region = `${context?.day ? `Day ${context.day} · ` : ''}${context?.distanceMi != null ? `${formatMiles(context.distanceMi)} · ` : ''}${getExploreDisplayRegion(place)}`;
   if (compact) {
@@ -90,7 +90,7 @@ export function ExplorePlaceCard({
       activeOpacity={0.88}
       onPress={onOpen}
     >
-      <View style={styles.imageWrap}>
+      <View style={[styles.imageWrap, lead && styles.leadImageWrap]}>
         {imageUrl ? (
           <Image source={{ uri: imageUrl }} style={styles.image} resizeMode="cover" />
         ) : (
@@ -116,7 +116,7 @@ export function ExplorePlaceCard({
           <Ionicons name="shield-checkmark-outline" size={13} color={categoryColor} />
           <Text style={[styles.source, { color: categoryColor }]} numberOfLines={1}>{getExploreCardSourceLine(place)}</Text>
         </View>
-        <Text style={[styles.summary, { color: C.text2 }]} numberOfLines={compact ? 2 : 3}>
+        <Text style={[styles.summary, { color: C.text2 }]} numberOfLines={2}>
           {getExploreCardSummary(place)}
         </Text>
         <View style={styles.factRow}>
@@ -132,7 +132,7 @@ export function ExplorePlaceCard({
         <View style={styles.actions}>
           <TouchableOpacity style={[styles.action, { borderColor: C.border }]} onPress={onArea}>
             <Ionicons name="map-outline" size={17} color={C.text2} />
-            <Text style={[styles.actionText, { color: C.text2 }]}>Map</Text>
+            <Text style={[styles.actionText, { color: C.text2 }]}>Area</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.action, { borderColor: C.border }]} onPress={onToggleSave}>
             <Ionicons name={saved ? 'bookmark' : 'bookmark-outline'} size={16} color={C.text2} />
@@ -177,8 +177,8 @@ const styles = StyleSheet.create({
   },
   leadCard: { marginTop: 2 },
   railCard: {
-    width: 176,
-    height: 196,
+    width: 208,
+    height: 244,
     borderRadius: 16,
     borderWidth: 1,
     overflow: 'hidden',
@@ -187,7 +187,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 16,
   },
-  imageWrap: { height: 218 },
+  imageWrap: { height: 252 },
+  leadImageWrap: { height: 286 },
   railImageWrap: { flex: 1 },
   image: { width: '100%', height: '100%' },
   imageFallback: { flex: 1, alignItems: 'center', justifyContent: 'center' },
@@ -276,12 +277,12 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(0,0,0,0.46)',
     textShadowRadius: 8,
   },
-  body: { padding: 16, gap: 7 },
+  body: { padding: 15, gap: 8 },
   title: { fontSize: 21, lineHeight: 25, fontWeight: '900', letterSpacing: 0 },
   meta: { fontSize: 13, fontWeight: '700' },
   sourceLine: { minHeight: 19, flexDirection: 'row', alignItems: 'center', gap: 5 },
   source: { flex: 1, minWidth: 0, fontSize: 12, lineHeight: 16, fontWeight: '900' },
-  summary: { fontSize: 14, lineHeight: 19, fontWeight: '600' },
+  summary: { fontSize: 13, lineHeight: 18, fontWeight: '700' },
   factRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, paddingTop: 4 },
   fact: {
     minHeight: 30,

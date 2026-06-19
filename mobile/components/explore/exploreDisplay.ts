@@ -141,14 +141,6 @@ function normalize(value: string) {
   return value.toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-function confidenceFactorLabel(value: string) {
-  const key = normalize(value);
-  if (key === 'multiple sources') return 'multiple sources';
-  if (key === 'community confirmed') return 'confirmed';
-  if (key === 'unknown access') return 'access unknown';
-  return key;
-}
-
 function categoryFromText(text: string): ExploreCategoryKey | null {
   if (!text) return null;
   if (/waterfall|falls|cascade/.test(text)) return 'waterfalls';
@@ -290,11 +282,9 @@ export function getExploreFreshnessLabel(place: ExplorePlaceProfile) {
 }
 
 export function getExploreCardSourceLine(place: ExplorePlaceProfile) {
-  const confidence = sourceConfidenceFromRecord(readV3(place));
   return compact([
     getExploreSourceBadge(place),
     getExploreFreshnessLabel(place),
-    confidence.displayLabel,
   ]).filter((part, index, parts) => parts.indexOf(part) === index).join(' · ');
 }
 
@@ -317,33 +307,27 @@ export function getExploreSourceRows(place: ExplorePlaceProfile): ExploreSourceR
   const officialUrl = place.source_pack?.official_url || place.facts.official_url || place.summary.source_url || place.facts.source_url;
   const rows: ExploreSourceRow[] = [
     {
-      label: 'Primary source',
+      label: 'Source',
       value: sourceBadge,
       icon: /official/i.test(sourceBadge) ? 'shield-checkmark-outline' : 'map-outline',
       tone: /official/i.test(sourceBadge) ? '#16a34a' : '#2563eb',
     },
     {
-      label: 'Freshness',
+      label: 'Updated',
       value: freshness,
       icon: 'calendar-outline',
       tone: place.facts.last_updated ? '#16a34a' : '#ca8a04',
     },
     {
-      label: 'Trust',
-      value: confidence.displayLabel,
+      label: 'Status',
+      value: confidence.score >= 65 ? 'Ready to compare' : 'Confirm before going',
       icon: 'shield-outline',
       tone: confidence.score >= 65 ? '#0ea5e9' : '#ca8a04',
-    },
-    {
-      label: 'Confidence',
-      value: `${confidence.score}%${confidence.factors.length ? ` · ${confidence.factors.slice(0, 2).map(confidenceFactorLabel).join(', ')}` : ''}`,
-      icon: 'shield-checkmark-outline',
-      tone: confidence.score >= 75 ? '#16a34a' : confidence.score >= 50 ? '#ca8a04' : '#dc2626',
     },
   ];
   if (sourceCount > 1) {
     rows.push({
-      label: 'Source count',
+      label: 'References',
       value: `${sourceCount} sources`,
       icon: 'layers-outline',
       tone: '#6366f1',
@@ -351,8 +335,8 @@ export function getExploreSourceRows(place: ExplorePlaceProfile): ExploreSourceR
   }
   if (officialUrl) {
     rows.push({
-      label: 'Handoff',
-      value: /viator|booking/i.test(String(officialUrl)) ? 'Partner booking link' : 'Official source link',
+      label: 'Link',
+      value: /viator|booking/i.test(String(officialUrl)) ? 'Booking page' : 'Official website',
       icon: 'open-outline',
       tone: '#f97316',
     });
@@ -366,12 +350,15 @@ export function getExploreSourceRows(place: ExplorePlaceProfile): ExploreSourceR
     });
   }
   if (sourceNote) {
-    rows.push({
-      label: 'Note',
-      value: cleanExploreCopy(sourceNote, place),
-      icon: 'information-circle-outline',
-      tone: '#64748b',
-    });
+    const cleanedNote = cleanExploreCopy(sourceNote, place);
+    if (!/will be added|future|enrichment/i.test(cleanedNote)) {
+      rows.push({
+        label: 'Note',
+        value: cleanedNote,
+        icon: 'information-circle-outline',
+        tone: '#64748b',
+      });
+    }
   }
   return rows;
 }

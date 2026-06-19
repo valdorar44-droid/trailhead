@@ -1,5 +1,5 @@
 export { ExploreCategoryChips } from './ExploreCategoryChips';
-export { ExploreDetailSheet, type ExploreDetailTab } from './ExploreDetailSheet';
+export { ExploreDetailSheet, type ExploreDetailTab, type ExploreDetailWeather } from './ExploreDetailSheet';
 export { ExploreExperiencesRail } from './ExploreExperiencesRail';
 export { ExploreFilterRow } from './ExploreFilterRow';
 export { ExploreHero } from './ExploreHero';

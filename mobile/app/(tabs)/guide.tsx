@@ -26,6 +26,7 @@ import {
   mergeCuratedExplorePlaces,
   type ExploreCategoryKey,
   type ExploreDetailTab,
+  type ExploreDetailWeather,
   type ExploreNearbyModule,
 } from '@/components/explore';
 import { useStore } from '@/lib/store';
@@ -40,6 +41,7 @@ const EXPLORE_CAMPGROUNDS_CACHE_PREFIX = 'trailhead_explore_campgrounds_v1:';
 const EXPLORE_TRAIL_AREA_CACHE_PREFIX = 'trailhead_explore_trail_area_v1:';
 const EXPLORE_EXPERIENCES_CACHE_PREFIX = 'trailhead_explore_experiences_v1:';
 const SAVED_EXPLORE_KEY = 'trailhead_saved_explore_places_v1';
+const LOCATION_WARMUP_PROMPT_KEY = 'trailhead_foreground_location_prompt_v1';
 const EXPLORE_INITIAL_VISIBLE = 80;
 const EXPLORE_VISIBLE_STEP = 80;
 const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
@@ -579,11 +581,20 @@ export default function GuideScreen() {
     setExploreHomeWeatherError('');
     (async () => {
       const existing = await Location.getForegroundPermissionsAsync().catch(() => null);
+      const alreadyPrompted = await storage.get(LOCATION_WARMUP_PROMPT_KEY).catch(() => null);
+      if (cancelled) return;
+      if (existing?.status !== 'granted' && alreadyPrompted) {
+        setExploreHomeWeather(null);
+        setExploreHomeWeatherError('Location unavailable');
+        setExploreHomeWeatherLoading(false);
+        return;
+      }
       const permission = existing?.status === 'granted'
         ? existing
         : await Location.requestForegroundPermissionsAsync().catch(() => null);
       if (cancelled) return;
       if (permission?.status !== 'granted') {
+        storage.set(LOCATION_WARMUP_PROMPT_KEY, '1').catch(() => {});
         setExploreHomeWeather(null);
         setExploreHomeWeatherError('Location unavailable');
         setExploreHomeWeatherLoading(false);
@@ -1370,6 +1381,9 @@ export default function GuideScreen() {
     setProfileReadMode(initialTab);
     const local = exploreTrailAreasById[place.id] ?? place;
     setSelectedExplore(local);
+    if (!exploreWeatherById[local.id] && exploreWeatherLoadingId !== local.id) {
+      fetchExploreWeather(local).catch(() => {});
+    }
     if (!shouldUseExploreDetailEndpoint(place)) {
       if (shouldHydrateExploreTrailArea(local)) hydrateExploreTrailArea(local).catch(() => {});
       return;
@@ -1380,6 +1394,9 @@ export default function GuideScreen() {
       const hydrated = exploreTrailAreasById[detail.id] ?? detail;
       setSelectedExplore(current => current?.id === place.id ? hydrated : current);
       setProfileReadMode(initialTab);
+      if (!exploreWeatherById[hydrated.id] && exploreWeatherLoadingId !== hydrated.id) {
+        fetchExploreWeather(hydrated).catch(() => {});
+      }
       if (shouldHydrateExploreTrailArea(hydrated)) hydrateExploreTrailArea(hydrated).catch(() => {});
     } catch {
       if (shouldHydrateExploreTrailArea(local)) hydrateExploreTrailArea(local).catch(() => {});
@@ -1407,6 +1424,39 @@ export default function GuideScreen() {
       return;
     }
     showExploreOnMap(place);
+  }
+
+  function getExploreDetailWeather(place: ExplorePlaceProfile): ExploreDetailWeather | null {
+    const weather = exploreWeatherById[place.id];
+    const error = exploreWeatherErrors[place.id];
+    const loading = exploreWeatherLoadingId === place.id;
+    if (loading) {
+      return { loading: true, icon: 'partly-sunny-outline', temp: 'Loading', detail: 'Forecast' };
+    }
+    if (error) {
+      return { unavailable: true, icon: 'cloud-offline-outline', temp: 'Weather', detail: 'Unavailable' };
+    }
+    if (!weather) {
+      return place.summary.lat != null && place.summary.lng != null
+        ? { icon: 'partly-sunny-outline', temp: 'Weather', detail: 'Forecast' }
+        : null;
+    }
+    const daily = weather.daily;
+    const code = Number(weather?.current?.weather_code ?? daily?.weathercode?.[0] ?? 3);
+    const units = weather?.trailhead_units;
+    const tempLabel = units?.temperature_label ?? '°';
+    const windLabel = units?.wind_label ?? 'mph';
+    const hi = daily?.temperature_2m_max?.[0];
+    const lo = daily?.temperature_2m_min?.[0];
+    const wind = daily?.windspeed_10m_max?.[0];
+    const hiLabel = Number.isFinite(hi) ? `${Math.round(Number(hi))}${tempLabel}` : '--';
+    const loLabel = Number.isFinite(lo) ? `${Math.round(Number(lo))}${tempLabel}` : '--';
+    const windText = Number.isFinite(wind) ? `${Math.round(Number(wind))} ${windLabel}` : 'Wind --';
+    return {
+      icon: wmoIcon(code),
+      temp: `${hiLabel}/${loLabel}`,
+      detail: windText,
+    };
   }
 
   function renderExploreWeather(place: ExplorePlaceProfile) {
@@ -2105,6 +2155,7 @@ export default function GuideScreen() {
             campgroundsSlot={renderExploreCampgrounds(selectedExplore)}
             experiencesSlot={renderExploreExperiences(selectedExplore)}
             trailStatusSlot={renderExploreTrailStatus(selectedExplore)}
+            weather={getExploreDetailWeather(selectedExplore)}
             weatherSlot={renderExploreWeather(selectedExplore)}
             relatedSlot={relatedExplore.length > 0 ? (
               <TrailheadCard style={s.profileSection}>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -182,9 +183,25 @@ def source_ref(record: SourceRecord) -> dict[str, Any]:
 def summary_from_record(record: SourceRecord) -> str:
     description = compact_text(record.properties.get("description"))
     if description:
-        return description[:420]
+        return sentence_safe_preview(description, 520)
     readable = record.category.replace("_", " ")
     return f"{record.name} is a Wikidata-linked {readable} landmark. Verify access, local conditions, restrictions, and route details before relying on it."
+
+
+def sentence_safe_preview(value: Any, max_chars: int) -> str:
+    text = compact_text(value)
+    if not text or len(text) <= max_chars:
+        return text
+    boundaries = [match.end() for match in re.finditer(r'[.!?](?=(?:["\')\]]|\s|$))', text)]
+    if not boundaries:
+        return text
+    min_chars = min(max(90, int(max_chars * 0.45)), max_chars)
+    before = next((idx for idx in reversed(boundaries) if min_chars <= idx <= max_chars), None)
+    after = next((idx for idx in boundaries if max_chars < idx <= int(max_chars * 1.45)), None)
+    cut = before or after
+    if not cut:
+        return text
+    return text[:cut].strip()
 
 
 def aliases_from_props(props: dict[str, Any]) -> list[str]:

@@ -144,7 +144,7 @@ def place_from_record(record: SourceRecord, related: dict[str, list[dict[str, An
 def summary_from_park(park: dict[str, Any], name: str) -> str:
     desc = compact_text(park.get("description"))
     if desc:
-        return desc[:420]
+        return sentence_safe_preview(desc, 560)
     return f"{name} is an official National Park Service place record. Check current access, fees, permits, alerts, road status, and weather before building a route around it."
 
 
@@ -224,7 +224,7 @@ def source_pack_from_park(park: dict[str, Any], record: SourceRecord, related: d
         "operating_hours": operating_hours(park),
         "alerts": alert_items(related.get("alerts", [])),
         "source_note": "Official National Park Service data",
-        "extract": summary_from_park(park, record.name),
+        "extract": compact_text(park.get("description")) or summary_from_park(park, record.name),
         "license": NPS_LICENSE,
     }
 
@@ -327,7 +327,7 @@ def child_description(item: dict[str, Any]) -> str:
         or item.get("listingDescription")
         or item.get("description")
         or item.get("abstract")
-    )[:320]
+    )
 
 
 def plain_text(value: Any) -> str:
@@ -336,6 +336,22 @@ def plain_text(value: Any) -> str:
     text = re.sub(r"</p\s*>", " ", text, flags=re.IGNORECASE)
     text = re.sub(r"<[^>]+>", " ", text)
     return compact_text(text)
+
+
+def sentence_safe_preview(value: Any, max_chars: int) -> str:
+    text = compact_text(value)
+    if not text or len(text) <= max_chars:
+        return text
+    boundaries = [match.end() for match in re.finditer(r'[.!?](?=(?:["\')\]]|\s|$))', text)]
+    if not boundaries:
+        return text
+    min_chars = min(max(90, int(max_chars * 0.45)), max_chars)
+    before = next((idx for idx in reversed(boundaries) if min_chars <= idx <= max_chars), None)
+    after = next((idx for idx in boundaries if max_chars < idx <= int(max_chars * 1.45)), None)
+    cut = before or after
+    if not cut:
+        return text
+    return text[:cut].strip()
 
 
 def event_type_names(item: dict[str, Any]) -> list[str]:

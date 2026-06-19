@@ -157,6 +157,37 @@ function normalize(value: string) {
   return value.toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+export function normalizeExploreCopyBlock(value?: string | null) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+export function sentenceAwarePreview(value?: string | null, maxChars = 220) {
+  const clean = normalizeExploreCopyBlock(value);
+  if (!clean || clean.length <= maxChars) return { text: clean, expandable: false };
+  const wordBoundary = clean.slice(0, maxChars).replace(/\s+\S*$/, '').trim() || clean.slice(0, maxChars).trim();
+  const boundaries = Array.from(clean.matchAll(/[.!?](?=(?:["')\]]|\s|$))/g))
+    .map(match => (match.index ?? 0) + 1);
+  if (!boundaries.length) return { text: wordBoundary, expandable: true };
+  const minChars = Math.min(Math.max(72, Math.floor(maxChars * 0.45)), maxChars);
+  const beforeLimit = [...boundaries].reverse().find(index => index >= minChars && index <= maxChars);
+  const afterLimit = boundaries.find(index => index > maxChars && index <= Math.floor(maxChars * 1.45));
+  const cut = beforeLimit ?? afterLimit;
+  if (!cut || cut >= clean.length) return { text: wordBoundary, expandable: true };
+  return { text: clean.slice(0, cut).trim(), expandable: true };
+}
+
+export function withPreviewEllipsis(value?: string | null) {
+  const clean = normalizeExploreCopyBlock(value);
+  if (!clean) return '';
+  return `${clean.replace(/[.!?]+$/, '')}...`;
+}
+
+export function sentenceAwarePreviewText(value?: string | null, maxChars = 220) {
+  const preview = sentenceAwarePreview(value, maxChars);
+  if (!preview.text) return '';
+  return preview.expandable ? withPreviewEllipsis(preview.text) : preview.text;
+}
+
 function categoryFromText(text: string): ExploreCategoryKey | null {
   if (!text) return null;
   if (/waterfall|falls|cascade/.test(text)) return 'waterfalls';

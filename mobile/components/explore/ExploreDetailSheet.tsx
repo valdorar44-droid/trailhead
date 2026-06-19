@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Image, Linking, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, type ImageResizeMode, type ImageStyle, type StyleProp } from 'react-native';
+import { Image, Linking, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, type ImageResizeMode, type ImageStyle, type StyleProp, type TextStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { ExplorePlaceProfile, ExploreSourcePackItem, ExploreTrailCard } from '@/lib/api';
 import { mono, useTheme } from '@/lib/design';
@@ -13,6 +13,10 @@ import {
   getExploreIcon,
   getExploreSourceRows,
   getExploreTrustBadge,
+  normalizeExploreCopyBlock,
+  sentenceAwarePreview,
+  sentenceAwarePreviewText,
+  withPreviewEllipsis,
   type ExploreNearbyModule,
   type ExploreDisplayContext,
 } from './exploreDisplay';
@@ -126,6 +130,36 @@ function sizedNpsMediaUrl(url?: string | null, width = 900) {
   if (!/^https:\/\/www\.nps\.gov\/common\/uploads\//i.test(clean)) return clean;
   if (/[?&](width|maxwidth)=/i.test(clean)) return clean;
   return `${clean}${clean.includes('?') ? '&' : '?'}width=${width}&quality=85&mode=crop`;
+}
+
+function ExpandableText({
+  value,
+  textStyle,
+  previewChars = 300,
+}: {
+  value?: string | null;
+  textStyle: StyleProp<TextStyle>;
+  previewChars?: number;
+}) {
+  const C = useTheme();
+  const [expanded, setExpanded] = useState(false);
+  const clean = normalizeExploreCopyBlock(value);
+  const preview = sentenceAwarePreview(clean, previewChars);
+  const canExpand = preview.expandable;
+  if (!clean) return null;
+  return (
+    <Text style={textStyle}>
+      {expanded || !canExpand ? clean : withPreviewEllipsis(preview.text)}
+      {canExpand ? (
+        <>
+          {expanded ? ' ' : ' '}
+          <Text style={[styles.expandLink, { color: C.orange }]} onPress={() => setExpanded(current => !current)}>
+            {expanded ? 'Show less' : 'See more'}
+          </Text>
+        </>
+      ) : null}
+    </Text>
+  );
 }
 
 export function ExploreDetailSheet({
@@ -487,7 +521,7 @@ export function ExploreDetailSheet({
               <View style={styles.detailItemBody}>
                 <Text style={[styles.detailItemTitle, { color: C.text }]} numberOfLines={2}>{item.title || 'Place'}</Text>
                 {!!item.description && (
-                  <Text style={[styles.detailItemCopy, { color: C.text2 }]} numberOfLines={4}>{item.description}</Text>
+                  <Text style={[styles.detailItemCopy, { color: C.text2 }]}>{sentenceAwarePreviewText(item.description, 230)}</Text>
                 )}
                 <View style={styles.detailItemMeta}>
                   {!!item.source_label && <Text style={[styles.detailItemMetaText, { color: C.text3 }]} numberOfLines={1}>{item.source_label}</Text>}
@@ -788,7 +822,7 @@ export function ExploreDetailSheet({
             <View style={styles.heroText}>
               <Text style={[styles.kicker, { color: '#bbf7d0' }]} numberOfLines={1}>{(item.kind || activeModuleDef?.label || 'Place').replace(/_/g, ' ').toUpperCase()}</Text>
               <Text style={styles.title} numberOfLines={3}>{item.title || 'Place'}</Text>
-              {!!item.description && <Text style={styles.heroSummary} numberOfLines={3}>{item.description}</Text>}
+              {!!item.description && <Text style={styles.heroSummary}>{sentenceAwarePreviewText(item.description, 190)}</Text>}
             </View>
           )}
         </View>
@@ -796,13 +830,13 @@ export function ExploreDetailSheet({
           {itemImages.length === 0 && (
             <View style={[styles.copyPanel, { borderColor: C.border, backgroundColor: C.s1 }]}>
               <Text style={[styles.copyTitle, { color: C.text }]}>{item.title || 'Place'}</Text>
-              {!!item.description && <Text style={[styles.copyBody, { color: C.text2 }]}>{item.description}</Text>}
+              {!!item.description && <ExpandableText value={item.description} textStyle={[styles.copyBody, { color: C.text2 }]} previewChars={420} />}
             </View>
           )}
           {!!item.description && itemImages.length > 0 && (
             <View style={[styles.copyPanel, { borderColor: C.border, backgroundColor: C.s1 }]}>
               <Text style={[styles.copyTitle, { color: C.text }]}>Details</Text>
-              <Text style={[styles.copyBody, { color: C.text2 }]}>{item.description}</Text>
+              <ExpandableText value={item.description} textStyle={[styles.copyBody, { color: C.text2 }]} previewChars={420} />
             </View>
           )}
           {renderDetailFacts(item)}
@@ -839,7 +873,7 @@ export function ExploreDetailSheet({
           {!!place.profile?.why_it_matters && (
             <View style={[styles.copyPanel, { borderColor: C.border, backgroundColor: C.s1 }]}>
               <Text style={[styles.copyTitle, { color: C.text }]}>Why Go</Text>
-              <Text style={[styles.copyBody, { color: C.text2 }]}>{place.profile.why_it_matters}</Text>
+              <ExpandableText value={place.profile.why_it_matters} textStyle={[styles.copyBody, { color: C.text2 }]} previewChars={420} />
             </View>
           )}
           {seeItems.length === 0 && !place.profile?.why_it_matters ? renderItemList([], 'No saved highlights yet.') : null}
@@ -993,11 +1027,25 @@ export function ExploreDetailSheet({
   }
 
   function renderModuleHub() {
+    const aboutCopy = normalizeExploreCopyBlock(
+      place.profile?.story
+      || place.wiki_extract
+      || place.source_pack?.extract
+      || place.profile?.summary
+      || place.profile?.why_it_matters
+      || getExploreCardSummary(place),
+    );
     return (
       <View style={styles.moduleHub}>
         <View style={styles.moduleIntro}>
           <Text style={[styles.moduleIntroTitle, { color: C.text }]}>Explore this place</Text>
         </View>
+        {!!aboutCopy && (
+          <View style={[styles.copyPanel, { borderColor: C.border, backgroundColor: C.s1 }]}>
+            <Text style={[styles.copyTitle, { color: C.text }]}>About</Text>
+            <ExpandableText value={aboutCopy} textStyle={[styles.copyBody, { color: C.text2 }]} previewChars={520} />
+          </View>
+        )}
         <View style={styles.moduleGrid}>
           {visibleModules.map(module => {
             const imageCandidates = module.imageCandidates?.length ? module.imageCandidates : module.imageUrl ? [module.imageUrl] : [];
@@ -1081,7 +1129,7 @@ export function ExploreDetailSheet({
               {getExploreDisplayCategory(place).toUpperCase()} · {place.summary.state || getExploreDisplayRegion(place)}
             </Text>
             <Text style={styles.title} numberOfLines={3}>{getExploreDisplayTitle(place)}</Text>
-            <Text style={styles.heroSummary} numberOfLines={2}>{getExploreCardSummary(place)}</Text>
+            <Text style={styles.heroSummary}>{sentenceAwarePreviewText(getExploreCardSummary(place), 180)}</Text>
             <View style={styles.heroMetaRow}>
               <View style={styles.heroTrust}>
                 <Ionicons name="star" size={16} color="#facc15" />
@@ -1158,7 +1206,7 @@ function SourceFreshnessPanel({ place }: { place: ExplorePlaceProfile }) {
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={[styles.sourcePanelTitle, { color: C.text }]}>Details</Text>
-          <Text style={[styles.sourcePanelBody, { color: C.text2 }]} numberOfLines={3}>{sourceBodyForPlace(place)}</Text>
+          <ExpandableText value={sourceBodyForPlace(place)} textStyle={[styles.sourcePanelBody, { color: C.text2 }]} previewChars={230} />
         </View>
       </View>
       <View style={styles.sourceRows}>
@@ -1238,7 +1286,7 @@ function SourcePack({
                   {!!item.image_url && <ResilientImage uris={[sizedNpsMediaUrl(mediaUrl(item.image_url)), mediaUrl(item.image_url)]} style={styles.miniImage} />}
                   <View style={styles.miniBody}>
                     <Text style={[styles.miniTitle, { color: C.text }]} numberOfLines={2}>{item.title}</Text>
-                    {!!item.description && <Text style={[styles.miniDesc, { color: C.text3 }]} numberOfLines={3}>{item.description}</Text>}
+                    {!!item.description && <Text style={[styles.miniDesc, { color: C.text3 }]}>{sentenceAwarePreviewText(item.description, 135)}</Text>}
                   </View>
                 </TouchableOpacity>
               );
@@ -1364,6 +1412,7 @@ const styles = StyleSheet.create({
   copyPanel: { borderWidth: 1, borderRadius: 14, padding: 14, gap: 6 },
   copyTitle: { fontSize: 15, lineHeight: 19, fontWeight: '900' },
   copyBody: { fontSize: 13, lineHeight: 19, fontWeight: '700' },
+  expandLink: { fontWeight: '900' },
   infoRowCard: { borderWidth: 1, borderRadius: 14, padding: 14, flexDirection: 'row', alignItems: 'flex-start', gap: 11 },
   mapActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   moduleMapHero: { height: 360, backgroundColor: '#101811' },

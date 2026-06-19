@@ -12,6 +12,7 @@ import {
   getExploreDisplayTitle,
   getExploreIcon,
   getExploreQuickFacts,
+  sentenceAwarePreviewText,
   type ExploreDisplayContext,
 } from './exploreDisplay';
 
@@ -49,6 +50,7 @@ export function ExplorePlaceCard({
   const facts = getExploreQuickFacts(place, context).slice(0, 2);
   const title = getExploreDisplayTitle(place);
   const region = `${context?.day ? `Day ${context.day} · ` : ''}${context?.distanceMi != null ? `${formatMiles(context.distanceMi)} · ` : ''}${getExploreDisplayRegion(place)}`;
+  const summary = sentenceAwarePreviewText(getExploreCardSummary(place), lead ? 220 : 160);
   if (compact) {
     return (
       <TouchableOpacity
@@ -116,9 +118,7 @@ export function ExplorePlaceCard({
           <Ionicons name="shield-checkmark-outline" size={13} color={categoryColor} />
           <Text style={[styles.source, { color: categoryColor }]} numberOfLines={1}>{getExploreCardSourceLine(place)}</Text>
         </View>
-        <Text style={[styles.summary, { color: C.text2 }]} numberOfLines={2}>
-          {getExploreCardSummary(place)}
-        </Text>
+        <Text style={[styles.summary, { color: C.text2 }]}>{summary}</Text>
         <View style={styles.factRow}>
           {facts.map(fact => (
             <View key={`${fact.icon}-${fact.label}`} style={[styles.fact, { borderColor: C.border, backgroundColor: C.s2 }]}>

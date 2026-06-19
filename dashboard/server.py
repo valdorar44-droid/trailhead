@@ -841,16 +841,106 @@ def _load_explore_catalog_v3_profiles() -> list[dict]:
     return profiles
 
 
+def _explore_title_merge_key(place: dict) -> str:
+    summary = place.get("summary") if isinstance(place.get("summary"), dict) else {}
+    title = str(summary.get("title") or place.get("name") or "").lower()
+    title = re.sub(r"&", " and ", title)
+    title = re.sub(r"[^a-z0-9]+", " ", title)
+    return re.sub(r"\s+", " ", title).strip()
+
+
+def _explore_richer_text(current: object, candidate: object) -> object:
+    current_text = str(current or "").strip()
+    candidate_text = str(candidate or "").strip()
+    if len(candidate_text) > len(current_text) + 60:
+        return candidate
+    return current if current_text else candidate
+
+
+def _merge_unique_dicts(primary: list, secondary: list, key_fields: tuple[str, ...]) -> list:
+    merged = []
+    seen = set()
+    for item in [*(primary or []), *(secondary or [])]:
+        if not isinstance(item, dict):
+            continue
+        key = tuple(str(item.get(field) or "").strip().lower() for field in key_fields)
+        if not any(key) or key in seen:
+            continue
+        seen.add(key)
+        merged.append(item)
+    return merged
+
+
+def _merge_explore_sidecar_enrichment(base: dict, sidecar: dict) -> dict:
+    enriched = dict(base)
+    base_summary = dict(enriched.get("summary") or {})
+    side_summary = sidecar.get("summary") if isinstance(sidecar.get("summary"), dict) else {}
+    for key in ("image_url", "thumbnail_url", "image_credit", "image_license", "source_url", "source_title"):
+        if not base_summary.get(key) and side_summary.get(key):
+            base_summary[key] = side_summary.get(key)
+    for key in ("hook", "short_description"):
+        if side_summary.get(key):
+            base_summary[key] = _explore_richer_text(base_summary.get(key), side_summary.get(key))
+    enriched["summary"] = base_summary
+
+    base_profile = dict(enriched.get("profile") or {})
+    side_profile = sidecar.get("profile") if isinstance(sidecar.get("profile"), dict) else {}
+    for key in ("summary", "story", "why_it_matters", "what_to_know", "best_time_to_stop", "access_notes", "nearby_context"):
+        if side_profile.get(key):
+            base_profile[key] = _explore_richer_text(base_profile.get(key), side_profile.get(key))
+    enriched["profile"] = base_profile
+
+    base_pack = enriched.get("source_pack") if isinstance(enriched.get("source_pack"), dict) else {}
+    side_pack = sidecar.get("source_pack") if isinstance(sidecar.get("source_pack"), dict) else {}
+    if side_pack:
+        merged_pack = _v3_merge_source_pack(base_pack, side_pack)
+        if side_pack.get("extract"):
+            merged_pack["extract"] = _explore_richer_text(base_pack.get("extract"), side_pack.get("extract"))
+        enriched["source_pack"] = merged_pack
+    enriched["sources"] = _merge_unique_dicts(enriched.get("sources") or [], sidecar.get("sources") or [], ("url", "title", "publisher", "name"))
+    enriched["media"] = _merge_unique_dicts(enriched.get("media") or [], sidecar.get("media") or [], ("url", "caption"))
+    if sidecar.get("wiki_extract"):
+        enriched["wiki_extract"] = _explore_richer_text(enriched.get("wiki_extract"), sidecar.get("wiki_extract"))
+    if sidecar.get("audio_script"):
+        enriched["audio_script"] = _explore_richer_text(enriched.get("audio_script"), sidecar.get("audio_script"))
+    facts = dict(enriched.get("facts") or {})
+    for key, value in (sidecar.get("facts") or {}).items():
+        if value and not facts.get(key):
+            facts[key] = value
+    if facts:
+        enriched["facts"] = facts
+    return enriched
+
+
 def _load_explore_catalog() -> dict:
     if EXPLORE_CATALOG.exists():
         try:
             catalog = json.loads(EXPLORE_CATALOG.read_text())
             places = list(catalog.get("places") or [])
             seen = {str(place.get("id") or "") for place in places if isinstance(place, dict)}
+            id_to_index = {str(place.get("id") or ""): idx for idx, place in enumerate(places) if isinstance(place, dict)}
+            title_to_index = {
+                key: idx
+                for idx, place in enumerate(places)
+                if isinstance(place, dict) and (key := _explore_title_merge_key(place))
+            }
             for place in _load_explore_catalog_v3_profiles():
-                if str(place.get("id") or "") not in seen:
+                place_id = str(place.get("id") or "")
+                title_key = _explore_title_merge_key(place)
+                if place_id in id_to_index:
+                    places[id_to_index[place_id]] = _merge_explore_sidecar_enrichment(places[id_to_index[place_id]], place)
+                    seen.add(place_id)
+                    continue
+                if title_key and title_key in title_to_index:
+                    places[title_to_index[title_key]] = _merge_explore_sidecar_enrichment(places[title_to_index[title_key]], place)
+                    seen.add(place_id)
+                    continue
+                if place_id not in seen:
                     places.append(place)
-                    seen.add(str(place.get("id") or ""))
+                    id_to_index[place_id] = len(places) - 1
+                    if title_key:
+                        title_to_index[title_key] = len(places) - 1
+                    seen.add(place_id)
             merged = {
                 **catalog,
                 "catalog_id": "explore-us-top-v1-plus-real-data-v3",

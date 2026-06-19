@@ -21,7 +21,7 @@ import { api, ApiError, CampFullness, Campsite, CampsiteDetail, CampsiteInsight,
 import { loadAllPlacePoints } from '@/lib/offlinePlacePacks';
 import { deleteOfflineTrail, listOfflineTrails, type OfflineTrail } from '@/lib/offlineTrails';
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
-import { useStore } from '@/lib/store';
+import { useStore, type TripHistoryItem } from '@/lib/store';
 import { trackPhase0Once } from '@/lib/telemetry';
 import {
   clearTrailheadRouteBuilderDraft,
@@ -51,6 +51,25 @@ import {
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
 const ROUTE_BUILDER_LOAD_VIDEO = require('../../assets/route-builder-load.mp4');
 const ROUTE_BUILDER_MAP_SETTLE_MS = 2800;
+const ROUTE_HERO_PHOTO = 'https://www.nps.gov/common/uploads/structured_data/473F5463-F0D2-261D-CEF5FCB39363590B.jpg';
+
+const ROUTE_COVER_FALLBACKS = [
+  { match: /utah|moab|arches|canyonlands|red rock|\but\b/i, url: 'https://www.nps.gov/common/uploads/structured_data/473F5463-F0D2-261D-CEF5FCB39363590B.jpg' },
+  { match: /zion/i, url: 'https://www.nps.gov/common/uploads/structured_data/68BFC1AC-BF96-629F-89D261D78F181C64.jpg' },
+  { match: /yosemite|\bca\b|sierra/i, url: 'https://www.nps.gov/common/uploads/structured_data/3C84CC4C-1DD8-B71B-0BE967E5E5D93F25.jpg' },
+  { match: /grand canyon|\baz\b/i, url: 'https://www.nps.gov/common/uploads/structured_data/3C7B12D1-1DD8-B71B-0BCE0712F9CEA155.jpg' },
+  { match: /yellowstone|\bwy\b/i, url: 'https://www.nps.gov/common/uploads/structured_data/3C7D5920-1DD8-B71B-0B83F012ED802CEA.jpg' },
+  { match: /glacier|\bmt\b/i, url: 'https://www.nps.gov/common/uploads/structured_data/C20E6CD3-CDF7-B3AB-8448CDCD7FD590FF.jpg' },
+  { match: /rocky|colorado|\bco\b/i, url: 'https://www.nps.gov/common/uploads/structured_data/25871823-F36D-9986-8C552F7496B7D557.jpg' },
+  { match: /olympic|\bwa\b/i, url: 'https://www.nps.gov/common/uploads/structured_data/3C7B1DB4-1DD8-B71B-0B9DFEFDD398DB71.jpg' },
+  { match: /big bend|texas|\btx\b/i, url: 'https://www.nps.gov/common/uploads/structured_data/8BF8356B-BB63-76A4-19F5296EF94C96B4.jpg' },
+  { match: /smoky|tennessee|north carolina|\btn\b|\bnc\b/i, url: 'https://www.nps.gov/common/uploads/structured_data/3C80EC37-1DD8-B71B-0B87F63E8B030D15.jpg' },
+] as const;
+
+type RouteTripCardData = {
+  coverUrl: string;
+  stats: string;
+};
 
 function mediaUrl(url?: string | null) {
   if (!url) return '';
@@ -1064,6 +1083,98 @@ function sourceLabel(source?: BuilderStop['source']) {
   return 'manual';
 }
 
+function routeCoverPhotoFromValue(value: unknown) {
+  const url = campMediaUrl(value);
+  return url && !isGeneratedCampPlaceholder(url) ? mediaUrl(url) : '';
+}
+
+function firstRouteCoverPhoto(items: unknown[]) {
+  for (const item of items) {
+    if (!item || typeof item !== 'object') continue;
+    const entry = item as Record<string, any>;
+    const direct = [
+      entry.hero_photo_url,
+      entry.photo_url,
+      entry.primary_image,
+      entry.image_url,
+      entry.thumbnail_url,
+      entry.cover_url,
+    ].map(routeCoverPhotoFromValue).find(Boolean);
+    if (direct) return direct;
+    for (const key of ['photos', 'photo_candidates', 'images', 'media']) {
+      const values = Array.isArray(entry[key]) ? entry[key] : [];
+      const nested = values.map(routeCoverPhotoFromValue).find(Boolean);
+      if (nested) return nested;
+    }
+  }
+  return '';
+}
+
+function fallbackRouteCover(route: TripHistoryItem, trip?: TripResult | null) {
+  const finalWaypoint = trip?.plan?.waypoints?.[trip.plan.waypoints.length - 1];
+  const text = [
+    route.trip_name,
+    ...(route.states ?? []),
+    trip?.plan?.trip_name,
+    ...(trip?.plan?.states ?? []),
+    finalWaypoint?.name,
+  ].filter(Boolean).join(' ');
+  return ROUTE_COVER_FALLBACKS.find(item => item.match.test(text))?.url || ROUTE_HERO_PHOTO;
+}
+
+function nearestCatalogRouteCover(trip: TripResult | null | undefined, places: OsmPoi[]) {
+  const finalWaypoint = trip?.plan?.waypoints?.[trip.plan.waypoints.length - 1];
+  if (!finalWaypoint || !Number.isFinite(finalWaypoint.lat) || !Number.isFinite(finalWaypoint.lng)) return '';
+  const target = { lat: finalWaypoint.lat!, lng: finalWaypoint.lng! };
+  const candidates = places.map(place => {
+    const entry = place as Record<string, any>;
+    const url = [
+      entry.hero_photo_url,
+      entry.photo_url,
+      entry.primary_image,
+      entry.image_url,
+      entry.thumbnail_url,
+    ].map(routeCoverPhotoFromValue).find(Boolean);
+    if (!url || !Number.isFinite(place.lat) || !Number.isFinite(place.lng)) return null;
+    const sourceText = `${entry.source_label ?? ''} ${entry.source_badge ?? ''} ${entry.source ?? ''} ${entry.name ?? ''}`;
+    const npsPriority = /nps|national park|national monument|national preserve|national seashore/i.test(sourceText) ? 0 : 1;
+    return { url, miles: haversineMi(target, place), npsPriority };
+  }).filter((item): item is { url: string; miles: number; npsPriority: number } => !!item && item.miles <= 160);
+  candidates.sort((a, b) => a.npsPriority - b.npsPriority || a.miles - b.miles);
+  return candidates[0]?.url || '';
+}
+
+function tripCardData(route: TripHistoryItem, trip?: TripResult | null, catalogPlaces: OsmPoi[] = []): RouteTripCardData {
+  const waypoints = trip?.plan?.waypoints ?? [];
+  const pois = trip?.route_pois ?? [];
+  const coverUrl = firstRouteCoverPhoto([...(trip?.campsites ?? []), ...pois, ...(waypoints as unknown[])])
+    || nearestCatalogRouteCover(trip, catalogPlaces)
+    || fallbackRouteCover(route, trip);
+  const days = trip?.plan?.duration_days || route.duration_days || 0;
+  const miles = Math.round(trip?.plan?.total_est_miles || route.est_miles || 0);
+  const camps = Math.max(
+    trip?.campsites?.length ?? 0,
+    waypoints.filter(wp => /camp|overnight/i.test(wp.type || '')).length,
+  );
+  const trails = pois.filter(poi => /trail|trailhead|climb/i.test(`${poi.type} ${poi.subtype ?? ''}`)).length;
+  const gas = Math.max(
+    trip?.gas_stations?.length ?? 0,
+    waypoints.filter(wp => /fuel|gas/i.test(wp.type || '')).length,
+  );
+  const poi = Math.max(0, pois.length - trails);
+  const stateCount = (trip?.plan?.states?.length || route.states?.length || 0);
+  const parts = [
+    days ? `${days} day${days === 1 ? '' : 's'}` : '',
+    miles ? `${miles.toLocaleString()} mi` : '',
+    camps ? `${camps} camp${camps === 1 ? '' : 's'}` : '',
+    trails ? `${trails} trail${trails === 1 ? '' : 's'}` : '',
+    gas ? `${gas} gas` : '',
+    poi ? `${poi} POI` : '',
+    stateCount ? `${stateCount} state${stateCount === 1 ? '' : 's'}` : '',
+  ].filter(Boolean);
+  return { coverUrl, stats: parts.join('  •  ') };
+}
+
 function isFrameworkTarget(stop: BuilderStop) {
   return stop.source === 'map' && stop.type === 'waypoint' && /(target area|camp search area|overnight area|review area)/i.test(stop.name);
 }
@@ -1283,6 +1394,7 @@ export default function RouteBuilderScreen() {
   const [buildingVideoReady, setBuildingVideoReady] = useState(false);
   const [buildingVideoSource, setBuildingVideoSource] = useState<any>(ROUTE_BUILDER_LOAD_VIDEO);
   const [savedTrails, setSavedTrails] = useState<OfflineTrail[]>([]);
+  const [routeTripCards, setRouteTripCards] = useState<Record<string, RouteTripCardData>>({});
   const [days, setDays] = useState([1]);
   const [stops, setStops] = useState<BuilderStop[]>([]);
   const [tripShapeMode, setTripShapeMode] = useState<TripShapeMode>('one_way');
@@ -1539,6 +1651,26 @@ export default function RouteBuilderScreen() {
       });
     return () => { mounted = false; };
   }, [routeTabMode]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const routes = tripHistory.slice(0, 10);
+    if (!routes.length) {
+      setRouteTripCards({});
+      return;
+    }
+    Promise.all(routes.map(async route => {
+      const trip = activeTrip?.trip_id === route.trip_id
+        ? activeTrip
+        : await loadOfflineTrip(route.trip_id).catch(() => null);
+      return [route.trip_id, tripCardData(route, trip, offlinePlaces)] as const;
+    })).then(entries => {
+      if (!cancelled) setRouteTripCards(Object.fromEntries(entries));
+    }).catch(() => {
+      if (!cancelled) setRouteTripCards(Object.fromEntries(routes.map(route => [route.trip_id, tripCardData(route, null, offlinePlaces)])));
+    });
+    return () => { cancelled = true; };
+  }, [activeTrip, offlinePlaces, tripHistory]);
 
   useEffect(() => {
     if (routeTabMode !== 'wizard' || !activeTrip || importedTripId === activeTrip.trip_id || stops.length > 0) return;
@@ -4211,7 +4343,7 @@ export default function RouteBuilderScreen() {
       <SafeAreaView style={s.wizardScreen}>
         <TrailheadTopBar
           title="ROUTE BUILDER"
-          subtitle="Saved routes, camps, trail routes"
+          subtitle="Recent Adventures"
           icon="trail-sign-outline"
           style={s.wizardScreenTop}
         />
@@ -4223,12 +4355,12 @@ export default function RouteBuilderScreen() {
           keyboardDismissMode="on-drag"
         >
           <TrailheadCard style={s.routeHubHero}>
-            <View style={s.routeHubIcon}>
-              <Ionicons name="map-outline" size={22} color={C.orange} />
+            <Image source={{ uri: ROUTE_HERO_PHOTO }} style={s.routeHubHeroImage} resizeMode="cover" />
+            <LinearGradient colors={['rgba(3,7,18,0.04)', 'rgba(3,7,18,0.76)']} style={s.routeHubHeroShade} />
+            <View style={s.routeHubHeroContent}>
+              <Text style={s.routeHubTitle}>Plan a Route</Text>
+              <TrailheadButton label="Build New Route" icon="add" variant="primary" onPress={startNewRoute} disabled={routeSaving} />
             </View>
-            <Text style={s.routeHubTitle}>Plan a route</Text>
-            <Text style={s.routeHubText}>Build a new trip with your rig, daily pace, fuel range, camps, and route style. Finished routes open on the Map workspace.</Text>
-            <TrailheadButton label="Build New Route" icon="add" variant="primary" onPress={startNewRoute} disabled={routeSaving} />
           </TrailheadCard>
 
           <TrailheadCard style={[s.routeHubRig, rigRouteSummary.ready && s.routeHubRigReady]}>
@@ -4245,7 +4377,7 @@ export default function RouteBuilderScreen() {
           </TrailheadCard>
 
           <View style={s.routeHubSectionHead}>
-            <Text style={s.routeHubSectionTitle}>Saved routes</Text>
+            <Text style={s.routeHubSectionTitle}>Recent Adventures</Text>
             {activeTrip ? (
               <TouchableOpacity style={s.routeHubTinyAction} onPress={() => router.replace('/(tabs)/map')}>
                 <Ionicons name="map-outline" size={12} color={C.orange} />
@@ -4255,47 +4387,33 @@ export default function RouteBuilderScreen() {
           </View>
 
           {savedRoutes.length ? (
-            savedRoutes.map(route => (
-              <TrailheadCard key={route.trip_id} style={s.savedRouteCard} onPress={() => openSavedRoute(route.trip_id)}>
-                <View style={s.savedRouteTop}>
-                  <View style={s.savedRouteIcon}>
-                    <Ionicons name="trail-sign-outline" size={16} color={C.orange} />
+            savedRoutes.map(route => {
+              const card = routeTripCards[route.trip_id] || tripCardData(route, activeTrip?.trip_id === route.trip_id ? activeTrip : null, offlinePlaces);
+              return (
+                <TrailheadCard key={route.trip_id} style={s.savedRouteCard} onPress={() => openSavedRoute(route.trip_id)}>
+                  <Image source={{ uri: card.coverUrl }} style={s.savedRouteImage} resizeMode="cover" />
+                  <LinearGradient colors={['rgba(2,6,23,0.05)', 'rgba(2,6,23,0.78)']} style={s.savedRouteShade} />
+                  <View style={s.savedRouteOverlay}>
+                    <Text style={s.savedTripName} numberOfLines={2}>{route.trip_name}</Text>
+                    {card.stats ? <Text style={s.savedTripMeta} numberOfLines={2}>{card.stats}</Text> : null}
+                    <View style={s.savedRouteContinue}>
+                      <Text style={s.savedRouteOpenText}>Continue</Text>
+                      <Ionicons name="chevron-forward" size={13} color="#fff" />
+                    </View>
                   </View>
-                  <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={s.savedRouteName} numberOfLines={2}>{route.trip_name}</Text>
-                    <Text style={s.savedRouteMeta} numberOfLines={1}>
-                      {[route.duration_days ? `${route.duration_days} days` : null, route.est_miles ? `${route.est_miles} mi` : null, (route.states ?? []).join(' · ')].filter(Boolean).join(' · ')}
-                    </Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={17} color={C.text3} />
-                </View>
-                <View style={s.savedRouteActions}>
-                  <View style={s.savedRouteStat}>
-                    <Text style={s.savedRouteStatValue}>{route.duration_days || '-'}</Text>
-                    <Text style={s.savedRouteStatLabel}>DAYS</Text>
-                  </View>
-                  <View style={s.savedRouteStat}>
-                    <Text style={s.savedRouteStatValue}>{route.est_miles || '-'}</Text>
-                    <Text style={s.savedRouteStatLabel}>MILES</Text>
-                  </View>
-                  <View style={s.savedRouteOpen}>
-                    <Ionicons name="map-outline" size={13} color={C.green} />
-                    <Text style={s.savedRouteOpenText}>OPEN ON MAP</Text>
-                  </View>
-                </View>
-              </TrailheadCard>
-            ))
+                </TrailheadCard>
+              );
+            })
           ) : (
             <TrailheadCard style={s.routeHubEmpty}>
               <Ionicons name="map-outline" size={20} color={C.text3} />
-              <Text style={s.routeHubEmptyTitle}>No saved routes yet</Text>
-              <Text style={s.routeHubEmptyText}>Build your first route, then it will appear here for quick map editing or navigation.</Text>
+              <Text style={s.routeHubEmptyTitle}>No adventures yet</Text>
             </TrailheadCard>
           )}
 
           <View style={s.routeHubSectionHead}>
             <Text style={s.routeHubSectionTitle}>Trails</Text>
-            <Text style={s.routeHubSectionMeta}>{savedTrails.length ? `${savedTrails.length} saved` : 'Pinned routes'}</Text>
+            <Text style={s.routeHubSectionMeta}>{savedTrails.length ? `${savedTrails.length} saved` : 'Saved'}</Text>
           </View>
 
           {savedTrails.length ? (
@@ -4306,10 +4424,10 @@ export default function RouteBuilderScreen() {
                 </View>
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={s.savedRouteName} numberOfLines={2}>{item.trail.name}</Text>
-                  <Text style={s.savedRouteMeta} numberOfLines={1}>{savedTrailDistance(item)} · saved from pinned trail builder</Text>
+                  <Text style={s.savedRouteMeta} numberOfLines={1}>{savedTrailDistance(item)}</Text>
                   <View style={s.savedTrailPills}>
                     <Text style={s.savedTrailPill}>TRAIL</Text>
-                    <Text style={s.savedTrailPill}>OFFLINE GEOMETRY</Text>
+                    <Text style={s.savedTrailPill}>SAVED</Text>
                   </View>
                 </View>
                 <View style={s.savedTrailActions}>
@@ -4376,7 +4494,7 @@ export default function RouteBuilderScreen() {
             <Text style={s.wizardEyebrow}>ROUTE BUILDER</Text>
             <Text style={s.wizardHeaderTitle}>{stepMeta}</Text>
           </View>
-          <TouchableOpacity style={s.wizardHeaderClose} onPress={() => setRouteTabMode('hub')} accessibilityLabel="Back to saved routes" activeOpacity={0.82}>
+          <TouchableOpacity style={s.wizardHeaderClose} onPress={() => setRouteTabMode('hub')} accessibilityLabel="Back to recent adventures" activeOpacity={0.82}>
             <Ionicons name="close" size={18} color={C.orange} />
           </TouchableOpacity>
         </View>
@@ -4739,7 +4857,7 @@ export default function RouteBuilderScreen() {
   return (
     <SafeAreaView style={s.wizardScreen}>
       <View style={s.wizardCompactTop}>
-        <TouchableOpacity style={s.headerBtn} onPress={() => setRouteTabMode('hub')} accessibilityLabel="Back to saved routes" activeOpacity={0.82}>
+        <TouchableOpacity style={s.headerBtn} onPress={() => setRouteTabMode('hub')} accessibilityLabel="Back to recent adventures" activeOpacity={0.82}>
           <Ionicons name="close" size={17} color={C.orange} />
         </TouchableOpacity>
       </View>
@@ -5670,17 +5788,26 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   bodyContent: { padding: 12, paddingTop: 0, paddingBottom: 150, gap: 14 },
   routeHubContent: { paddingBottom: 120, gap: 14 },
   routeHubHero: {
+    minHeight: 220,
     overflow: 'hidden',
     borderWidth: 1, borderColor: C.border, borderRadius: 26,
-    backgroundColor: C.glassStrong, padding: 18, gap: 14,
+    backgroundColor: C.glassStrong, padding: 0,
     shadowColor: '#000', shadowOpacity: 0.34, shadowRadius: 28, shadowOffset: { width: 0, height: 14 },
+  },
+  routeHubHeroImage: { ...StyleSheet.absoluteFillObject, width: '100%', height: '100%' },
+  routeHubHeroShade: { ...StyleSheet.absoluteFillObject },
+  routeHubHeroContent: {
+    minHeight: 220,
+    justifyContent: 'flex-end',
+    padding: 18,
+    gap: 12,
   },
   routeHubIcon: {
     width: 48, height: 48, borderRadius: 16,
     borderWidth: 1, borderColor: C.border,
     backgroundColor: C.s2, alignItems: 'center', justifyContent: 'center',
   },
-  routeHubTitle: { color: C.text, fontSize: 30, lineHeight: 35, fontWeight: '800' },
+  routeHubTitle: { color: '#fff', fontSize: 34, lineHeight: 38, fontWeight: '900' },
   routeHubText: { color: C.text3, fontSize: 14, lineHeight: 20 },
   routeHubPrimary: {
     minHeight: 52, borderRadius: 16, backgroundColor: C.orange,
@@ -5729,9 +5856,33 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   routeHubTinyText: { color: C.orange, fontSize: 8, fontFamily: mono, fontWeight: '900' },
   savedRouteCard: {
+    minHeight: 214,
+    overflow: 'hidden',
     borderWidth: 1, borderColor: C.border, borderRadius: 22,
-    backgroundColor: C.s1, padding: 12, gap: 12,
+    backgroundColor: C.s1, padding: 0,
     shadowColor: '#000', shadowOpacity: 0.24, shadowRadius: 22, shadowOffset: { width: 0, height: 10 },
+  },
+  savedRouteImage: { ...StyleSheet.absoluteFillObject, width: '100%', height: '100%' },
+  savedRouteShade: { ...StyleSheet.absoluteFillObject },
+  savedRouteOverlay: {
+    minHeight: 214,
+    justifyContent: 'flex-end',
+    padding: 14,
+    gap: 8,
+  },
+  savedTripName: { color: '#fff', fontSize: 22, lineHeight: 26, fontWeight: '900' },
+  savedTripMeta: { color: 'rgba(255,255,255,0.86)', fontSize: 12, lineHeight: 17, fontFamily: mono, fontWeight: '800' },
+  savedRouteContinue: {
+    alignSelf: 'flex-start',
+    minHeight: 32,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.28)',
+    paddingHorizontal: 11,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
   },
   savedRouteTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   savedRouteIcon: {
@@ -5762,7 +5913,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  savedRouteOpenText: { color: C.silverBright, fontSize: 9, fontFamily: mono, fontWeight: '900' },
+  savedRouteOpenText: { color: '#fff', fontSize: 9, fontFamily: mono, fontWeight: '900' },
   savedTrailCard: {
     flexDirection: 'row',
     alignItems: 'center',

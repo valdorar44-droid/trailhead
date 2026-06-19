@@ -69,7 +69,7 @@ export const EXPLORE_CATEGORY_CHIPS: Array<{
   { key: 'all', label: 'All', icon: 'grid-outline', color: '#64748b' },
   { key: 'camp', label: 'Camp', icon: 'bonfire-outline', color: '#16a34a' },
   { key: 'glamping', label: 'Glamping', icon: 'sparkles-outline', color: '#0ea5e9' },
-  { key: 'huts', label: 'Huts', icon: 'home-outline', color: '#6366f1' },
+  { key: 'huts', label: 'Cabins', icon: 'home-outline', color: '#6366f1' },
   { key: 'trails', label: 'Trails', icon: 'walk-outline', color: '#f97316' },
   { key: 'trailheads', label: 'Trailheads', icon: 'trail-sign-outline', color: '#f59e0b' },
   { key: 'views', label: 'Views', icon: 'binoculars-outline', color: '#0f766e' },

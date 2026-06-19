@@ -49,17 +49,48 @@ export function ExplorePlaceCard({
   const facts = getExploreQuickFacts(place, context).slice(0, compact ? 2 : 3);
   const title = getExploreDisplayTitle(place);
   const region = `${context?.day ? `Day ${context.day} · ` : ''}${context?.distanceMi != null ? `${formatMiles(context.distanceMi)} · ` : ''}${getExploreDisplayRegion(place)}`;
+  if (compact) {
+    return (
+      <TouchableOpacity
+        style={[styles.railCard, { borderColor: C.border, backgroundColor: C.s1 }]}
+        activeOpacity={0.88}
+        onPress={onOpen}
+      >
+        <View style={styles.railImageWrap}>
+          {imageUrl ? (
+            <Image source={{ uri: imageUrl }} style={styles.image} resizeMode="cover" />
+          ) : (
+            <View style={[styles.imageFallback, { backgroundColor: C.s2 }]}>
+              <Ionicons name={getExploreIcon(place) as any} size={28} color={categoryColor} />
+            </View>
+          )}
+          <View style={styles.railShade} />
+          <View style={[styles.badge, styles.railBadge]}>
+            <Ionicons name={getExploreIcon(place) as any} size={11} color="#fff" />
+            <Text style={styles.badgeText}>{getExploreDisplayCategory(place).toUpperCase()}</Text>
+          </View>
+          <TouchableOpacity style={[styles.bookmark, styles.railBookmark]} onPress={onToggleSave} hitSlop={8}>
+            <Ionicons name={saved ? 'bookmark' : 'bookmark-outline'} size={18} color="#fff" />
+          </TouchableOpacity>
+          <View style={styles.railOverlay}>
+            <Text style={styles.railTitle} numberOfLines={2}>{title}</Text>
+            <Text style={styles.railMeta} numberOfLines={1}>{region}</Text>
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
+  }
   return (
     <TouchableOpacity
       style={[
-        compact ? styles.railCard : styles.card,
+        styles.card,
         lead && !compact && styles.leadCard,
         { borderColor: C.border, backgroundColor: C.s1 },
       ]}
       activeOpacity={0.88}
       onPress={onOpen}
     >
-      <View style={[styles.imageWrap, compact && styles.railImageWrap]}>
+      <View style={styles.imageWrap}>
         {imageUrl ? (
           <Image source={{ uri: imageUrl }} style={styles.image} resizeMode="cover" />
         ) : (
@@ -75,24 +106,12 @@ export function ExplorePlaceCard({
         <TouchableOpacity style={styles.bookmark} onPress={onToggleSave} hitSlop={8}>
           <Ionicons name={saved ? 'bookmark' : 'bookmark-outline'} size={20} color="#fff" />
         </TouchableOpacity>
-        {!compact && (
-          <View style={styles.imageTitleBlock}>
-            <Text style={styles.imageTitle} numberOfLines={2}>{title}</Text>
-            <Text style={styles.imageMeta} numberOfLines={1}>{region}</Text>
-          </View>
-        )}
+        <View style={styles.imageTitleBlock}>
+          <Text style={styles.imageTitle} numberOfLines={2}>{title}</Text>
+          <Text style={styles.imageMeta} numberOfLines={1}>{region}</Text>
+        </View>
       </View>
       <View style={styles.body}>
-        {compact && (
-          <>
-            <Text style={[styles.title, styles.railTitle, { color: C.text }]} numberOfLines={2}>
-              {title}
-            </Text>
-            <Text style={[styles.meta, { color: C.text3 }]} numberOfLines={1}>
-              {region}
-            </Text>
-          </>
-        )}
         <View style={styles.sourceLine}>
           <Ionicons name="shield-checkmark-outline" size={13} color={categoryColor} />
           <Text style={[styles.source, { color: categoryColor }]} numberOfLines={1}>{getExploreCardSourceLine(place)}</Text>
@@ -158,7 +177,8 @@ const styles = StyleSheet.create({
   },
   leadCard: { marginTop: 2 },
   railCard: {
-    width: 286,
+    width: 176,
+    height: 196,
     borderRadius: 16,
     borderWidth: 1,
     overflow: 'hidden',
@@ -168,10 +188,11 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
   },
   imageWrap: { height: 218 },
-  railImageWrap: { height: 140 },
+  railImageWrap: { flex: 1 },
   image: { width: '100%', height: '100%' },
   imageFallback: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   imageShade: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.18)' },
+  railShade: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.28)' },
   badge: {
     position: 'absolute',
     top: 12,
@@ -186,6 +207,7 @@ const styles = StyleSheet.create({
     gap: 5,
   },
   badgeText: { color: '#fff', fontSize: 10, fontWeight: '900', letterSpacing: 0 },
+  railBadge: { top: 10, left: 10, maxWidth: 130, paddingHorizontal: 9, paddingVertical: 6 },
   bookmark: {
     position: 'absolute',
     top: 11,
@@ -198,6 +220,13 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(15,23,42,0.46)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.44)',
+  },
+  railBookmark: {
+    top: 10,
+    right: 10,
+    width: 32,
+    height: 32,
+    borderRadius: 11,
   },
   imageTitleBlock: {
     position: 'absolute',
@@ -223,9 +252,32 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(0,0,0,0.38)',
     textShadowRadius: 10,
   },
+  railOverlay: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    bottom: 12,
+    gap: 4,
+  },
+  railTitle: {
+    color: '#fff',
+    fontSize: 17,
+    lineHeight: 20,
+    fontWeight: '900',
+    letterSpacing: 0,
+    textShadowColor: 'rgba(0,0,0,0.46)',
+    textShadowRadius: 10,
+  },
+  railMeta: {
+    color: 'rgba(255,255,255,0.86)',
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '900',
+    textShadowColor: 'rgba(0,0,0,0.46)',
+    textShadowRadius: 8,
+  },
   body: { padding: 16, gap: 7 },
   title: { fontSize: 21, lineHeight: 25, fontWeight: '900', letterSpacing: 0 },
-  railTitle: { fontSize: 18, lineHeight: 22 },
   meta: { fontSize: 13, fontWeight: '700' },
   sourceLine: { minHeight: 19, flexDirection: 'row', alignItems: 'center', gap: 5 },
   source: { flex: 1, minWidth: 0, fontSize: 12, lineHeight: 16, fontWeight: '900' },

@@ -13,10 +13,8 @@ import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
 import { TrailheadButton, TrailheadCard, TrailheadCardSkeleton, TrailheadLoadingRow, TrailheadRailSkeleton } from '@/components/TrailheadUI';
 import {
   EXPLORE_CATEGORY_CHIPS,
-  ExploreCategoryChips,
   ExploreDetailSheet,
   ExploreExperiencesRail,
-  ExploreFilterRow,
   ExploreHero,
   ExploreModeTabs,
   ExplorePlaceCard,
@@ -45,14 +43,25 @@ const SAVED_EXPLORE_KEY = 'trailhead_saved_explore_places_v1';
 const EXPLORE_INITIAL_VISIBLE = 80;
 const EXPLORE_VISIBLE_STEP = 80;
 const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
+const FEATURED_SECTION_ORDER: ExploreCategoryKey[] = [
+  'camp',
+  'glamping',
+  'trails',
+  'huts',
+  'views',
+  'waterfalls',
+  'peaks',
+  'springs',
+  'climb',
+  'water',
+  'scenic',
+  'parks',
+  'land',
+  'trailheads',
+  'tours',
+];
 
 type ExploreSortMode = 'best' | 'nearest' | 'source';
-
-const EXPLORE_SORT_LABELS: Record<ExploreSortMode, string> = {
-  best: 'Best match',
-  nearest: 'Nearest',
-  source: 'Source quality',
-};
 
 const WMO_ICON: Record<number, keyof typeof Ionicons.glyphMap> = {
   0: 'sunny-outline', 1: 'partly-sunny-outline', 2: 'partly-sunny-outline', 3: 'cloud-outline',
@@ -69,6 +78,11 @@ function wmoIcon(code: number) {
   const keys = Object.keys(WMO_ICON).map(Number).sort((a, b) => b - a);
   for (const k of keys) { if (code >= k) return WMO_ICON[k]; }
   return 'thermometer-outline';
+}
+
+function exploreCategoryLabel(key: ExploreCategoryKey) {
+  if (key === 'huts') return 'Cabins';
+  return EXPLORE_CATEGORY_CHIPS.find(item => item.key === key)?.label ?? 'Explore';
 }
 
 function reversePlaceLabel(place?: any): string {
@@ -421,6 +435,7 @@ export default function GuideScreen() {
   const setActiveTrip = useStore(st => st.setActiveTrip);
   const userLoc = useStore(st => st.userLoc);
   const weatherUnitMode = useStore(st => st.weatherUnitMode);
+  const setWeatherUnitMode = useStore(st => st.setWeatherUnitMode);
   const setPendingNavigatePlace = useStore(st => st.setPendingNavigatePlace);
   const setPendingMapSelection = useStore(st => st.setPendingMapSelection);
   const [guide, setGuide] = useState<Record<string, string>>({});
@@ -457,6 +472,9 @@ export default function GuideScreen() {
   const [exploreSearchExperiences, setExploreSearchExperiences] = useState<BookableExperience[]>([]);
   const [exploreSearchExperienceLoading, setExploreSearchExperienceLoading] = useState(false);
   const [exploreSearchExperienceError, setExploreSearchExperienceError] = useState('');
+  const [exploreHomeWeather, setExploreHomeWeather] = useState<any>(null);
+  const [exploreHomeWeatherLoading, setExploreHomeWeatherLoading] = useState(false);
+  const [exploreHomeWeatherError, setExploreHomeWeatherError] = useState('');
   const [liveExplorePlaces, setLiveExplorePlaces] = useState<OsmPoi[]>([]);
   const [exploreLoading, setExploreLoading] = useState(false);
   const [liveExploreLoading, setLiveExploreLoading] = useState(false);
@@ -550,6 +568,29 @@ export default function GuideScreen() {
       });
     return () => { cancelled = true; };
   }, [exploreMode, userLoc?.lat, userLoc?.lng]);
+
+  useEffect(() => {
+    if (tab !== 'explore' || !userLoc) {
+      setExploreHomeWeather(null);
+      setExploreHomeWeatherError(userLoc ? '' : 'Location unavailable');
+      setExploreHomeWeatherLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setExploreHomeWeatherLoading(true);
+    setExploreHomeWeatherError('');
+    api.getWeather(userLoc.lat, userLoc.lng, 3, weatherUnitMode)
+      .then(weather => {
+        if (!cancelled) setExploreHomeWeather(weather);
+      })
+      .catch(() => {
+        if (!cancelled) setExploreHomeWeatherError('Weather unavailable');
+      })
+      .finally(() => {
+        if (!cancelled) setExploreHomeWeatherLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [tab, userLoc?.lat, userLoc?.lng, weatherUnitMode]);
 
   useEffect(() => {
     const place = selectedExplore;
@@ -738,7 +779,7 @@ export default function GuideScreen() {
   const enrichedExplorePlaces = useMemo(() => (
     mergeCuratedExplorePlaces(explorePlaces).map(place => exploreTrailAreasById[place.id] ?? place)
   ), [explorePlaces, exploreTrailAreasById]);
-  const heroHeight = Math.max(280, Math.min(340, Math.round(windowHeight * 0.39)));
+  const heroHeight = Math.max(390, Math.min(430, Math.round(windowHeight * 0.48)));
   const hasExploreQuery = exploreQuery.trim().length > 0;
   const showExperienceSearch = shouldSearchBookableExperiences(exploreQuery, exploreCategory);
   const rankedExplore = useMemo(() => {
@@ -832,15 +873,96 @@ export default function GuideScreen() {
     () => rankedExplore.slice(0, exploreVisibleLimit),
     [rankedExplore, exploreVisibleLimit],
   );
+  const showExploreHome = !hasExploreQuery && !exploreSavedOnly && exploreCategory === 'all' && exploreMode === 'featured';
+  const featuredLead = useMemo(() => {
+    if (!showExploreHome) return null;
+    return rankedExplore.find(({ place }) => !!(place.summary.image_url || place.summary.thumbnail_url)) ?? rankedExplore[0] ?? null;
+  }, [rankedExplore, showExploreHome]);
+  const trendingExplore = useMemo(() => {
+    if (!showExploreHome) return [];
+    const used = new Set<string>();
+    if (featuredLead?.place.id) used.add(featuredLead.place.id);
+    const candidates = rankedExplore
+      .filter(({ place }) => !used.has(place.id) && !!(place.summary.image_url || place.summary.thumbnail_url))
+      .sort((a, b) => {
+        const aHero = a.place.summary.hero_rank ?? a.place.summary.rank;
+        const bHero = b.place.summary.hero_rank ?? b.place.summary.rank;
+        if (aHero !== bHero) return aHero - bHero;
+        return scoreExploreTrust(b.place) - scoreExploreTrust(a.place);
+      });
+    const picks: typeof candidates = [];
+    const textFor = (place: ExplorePlaceProfile) => [
+      place.id,
+      place.summary.title,
+      place.summary.state,
+      place.summary.region,
+      place.summary.category,
+      place.summary.short_description,
+      place.summary.hook,
+      ...(place.summary.tags ?? []),
+    ].filter(Boolean).join(' ').toLowerCase();
+    const pick = (match: (text: string) => boolean) => {
+      const item = candidates.find(candidate => !used.has(candidate.place.id) && match(textFor(candidate.place)));
+      if (item) {
+        used.add(item.place.id);
+        picks.push(item);
+      }
+    };
+    pick(text => /pakistan|gilgit|karakoram|hunza|k2|baltistan/.test(text));
+    pick(text => /\b(ca|ut|az|wy|mt|co|wa|or|id|tn|nc|me|usa|united states|yosemite|zion|glacier|teton|moab)\b/.test(text));
+    pick(text => /italy|italia|dolomite|dolomites|alps|switzerland|france|norway|iceland|slovenia|austria|scotland|spain|portugal/.test(text));
+    for (const item of candidates) {
+      if (picks.length >= 8) break;
+      if (used.has(item.place.id)) continue;
+      used.add(item.place.id);
+      picks.push(item);
+    }
+    return picks.slice(0, 8);
+  }, [featuredLead?.place.id, rankedExplore, showExploreHome]);
+  const heroWeather = useMemo(() => {
+    const daily = exploreHomeWeather?.daily;
+    const current = exploreHomeWeather?.current;
+    const units = exploreHomeWeather?.trailhead_units;
+    const tempLabel = units?.temperature_label ?? (weatherUnitMode === 'metric' ? '°C' : '°F');
+    const windLabel = units?.wind_label ?? (weatherUnitMode === 'metric' ? 'km/h' : 'mph');
+    const code = Number(current?.weather_code ?? daily?.weathercode?.[0] ?? 3);
+    const currentTemp = Number(current?.temperature_2m);
+    const hi = Number(daily?.temperature_2m_max?.[0]);
+    const lo = Number(daily?.temperature_2m_min?.[0]);
+    const wind = Number(current?.wind_speed_10m ?? daily?.windspeed_10m_max?.[0]);
+    const temp = Number.isFinite(currentTemp)
+      ? `${Math.round(currentTemp)}${tempLabel}`
+      : Number.isFinite(hi)
+        ? `${Math.round(hi)}${tempLabel}`
+        : exploreHomeWeatherLoading
+          ? ''
+          : 'Weather';
+    const hiLo = Number.isFinite(hi) && Number.isFinite(lo)
+      ? `${Math.round(hi)}/${Math.round(lo)}${tempLabel}`
+      : '';
+    const windText = Number.isFinite(wind) ? `${Math.round(wind)} ${windLabel}` : '';
+    const detail = exploreHomeWeather
+      ? [hiLo, windText].filter(Boolean).join(' · ') || 'Current area'
+      : exploreHomeWeatherError || 'Current area';
+    return {
+      loading: exploreHomeWeatherLoading,
+      unavailable: !exploreHomeWeather && !!exploreHomeWeatherError,
+      icon: wmoIcon(code),
+      temp,
+      detail,
+      unitMode: weatherUnitMode,
+      onUnitChange: setWeatherUnitMode,
+    };
+  }, [exploreHomeWeather, exploreHomeWeatherError, exploreHomeWeatherLoading, setWeatherUnitMode, weatherUnitMode]);
 
   const featuredSections = useMemo(() => {
     if (hasExploreQuery || exploreSavedOnly || exploreCategory !== 'all' || exploreMode !== 'featured') return [];
-    return EXPLORE_CATEGORY_CHIPS
-      .filter(item => !['all', 'nearby', 'fuel', 'resupply'].includes(item.key))
-      .map(item => ({
-        item,
+    return FEATURED_SECTION_ORDER
+      .map(key => ({
+        key,
+        label: exploreCategoryLabel(key),
         rows: rankedExplore
-          .filter(({ place }) => exploreCategoryMatches(place, item.key))
+          .filter(({ place }) => exploreCategoryMatches(place, key))
           .sort((a, b) => (a.place.summary.hero_rank ?? a.place.summary.rank) - (b.place.summary.hero_rank ?? b.place.summary.rank))
           .slice(0, 5),
       }))
@@ -1441,6 +1563,17 @@ export default function GuideScreen() {
     );
   }
 
+  function selectExploreHomeCategory(key: ExploreCategoryKey) {
+    setExploreSavedOnly(false);
+    if (key === 'all') {
+      setExploreMode(exploreMode === 'nearby' ? 'featured' : exploreMode);
+      setExploreCategory('all');
+      return;
+    }
+    setExploreMode(exploreMode === 'nearby' ? 'featured' : exploreMode);
+    setExploreCategory(exploreCategory === key ? 'all' : key);
+  }
+
   function renderLandingHeader() {
     return (
       <View style={s.landingHeader}>
@@ -1450,8 +1583,12 @@ export default function GuideScreen() {
           height={heroHeight + insets.top}
           topInset={insets.top}
           query={exploreQuery}
+          selectedCategory={exploreCategory}
+          mode={exploreMode}
+          weather={heroWeather}
           onQueryChange={setExploreQuery}
           onClearQuery={() => setExploreQuery('')}
+          onCategorySelect={selectExploreHomeCategory}
         />
       </View>
     );
@@ -1521,39 +1658,11 @@ export default function GuideScreen() {
         {tab === 'explore' ? renderLandingHeader() : renderUtilityHeader()}
 
         {tab === 'explore' && (
-          <>
-            <ExploreCategoryChips
-              selected={exploreCategory}
-              mode={exploreMode}
-              onSelect={key => {
-                setExploreSavedOnly(false);
-                if (key === 'nearby') {
-                  setExploreMode('nearby');
-                  setExploreCategory('all');
-                } else {
-                  setExploreMode(exploreMode === 'nearby' ? 'featured' : exploreMode);
-                  setExploreCategory(exploreCategory === key ? 'all' : key);
-                }
-              }}
-            />
-
+          <View style={s.exploreFeedSheet}>
             <ExploreModeTabs value={exploreMode} onChange={mode => {
               setExploreSavedOnly(false);
               setExploreMode(mode);
             }} />
-            <ExploreFilterRow
-              shownCount={rankedExplore.length}
-              sourceLabel={exploreSortMode === 'source' ? 'Source first' : 'Sources'}
-              sortLabel={EXPLORE_SORT_LABELS[exploreSortMode]}
-              onCountPress={() => {
-                setExploreSavedOnly(false);
-                setExploreCategory('all');
-              }}
-              onSourcePress={() => setExploreSortMode(current => current === 'source' ? 'best' : 'source')}
-              onSortPress={() => setExploreSortMode(current => (
-                current === 'best' ? 'nearest' : current === 'nearest' ? 'source' : 'best'
-              ))}
-            />
 
             {exploreCategory !== 'all' && (
               <TouchableOpacity style={s.clearCategoryBtn} onPress={() => setExploreCategory('all')}>
@@ -1608,25 +1717,36 @@ export default function GuideScreen() {
                     </View>
                     <Ionicons name="chevron-up-outline" size={16} color={C.text3} />
                   </TouchableOpacity>
-                ))}
-              </View>
+              ))}
+            </View>
             )}
 
-            <View style={s.exploreSectionHeader}>
-              <Text style={s.exploreSectionTitle}>
-                {exploreMode === 'nearby'
-                  ? 'NEARBY PLACES'
-                  : exploreMode === 'trip'
-                    ? 'ALONG YOUR TRIP'
-                    : exploreSavedOnly
-                      ? 'SAVED PLACES'
-                    : hasExploreQuery
-                      ? 'SEARCH RESULTS'
-                    : exploreCategory === 'all'
-                      ? 'FEATURED EXPLORER HUBS'
-                      : `${EXPLORE_CATEGORY_CHIPS.find(item => item.key === exploreCategory)?.label ?? 'EXPLORE'} AREAS`.toUpperCase()}
-              </Text>
-              <Text style={s.exploreSectionSub}>{rankedExplore.length} shown</Text>
+            <View style={s.exploreHomeHeading}>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={s.exploreHomeTitle}>
+                  {exploreMode === 'nearby'
+                    ? 'Nearby Places'
+                    : exploreMode === 'trip'
+                      ? 'Along Your Trip'
+                      : exploreSavedOnly
+                        ? 'Saved Places'
+                        : hasExploreQuery
+                          ? 'Search Results'
+                          : exploreCategory === 'all'
+                            ? 'Featured Explorer Hubs'
+                            : `${exploreCategoryLabel(exploreCategory)} Areas`}
+                </Text>
+                <Text style={s.exploreHomeCount}>{rankedExplore.length.toLocaleString()} places</Text>
+              </View>
+              <TouchableOpacity
+                style={s.exploreFilterGlyph}
+                activeOpacity={0.72}
+                onPress={() => setExploreSortMode(current => current === 'nearest' ? 'best' : 'nearest')}
+                accessibilityRole="button"
+                accessibilityLabel="Toggle nearest ranking"
+              >
+                <Ionicons name="options-outline" size={24} color={exploreSortMode === 'nearest' ? C.orange : C.text3} />
+              </TouchableOpacity>
             </View>
 
             {exploreLoading && (
@@ -1652,25 +1772,45 @@ export default function GuideScreen() {
               </View>
             )}
             {featuredSections.length > 0 ? (
-              featuredSections.map(section => (
-                <View key={section.item.key} style={s.explorePreviewSection}>
+              <>
+                {!!featuredLead && (
+                  <View style={s.exploreLeadBlock}>
+                    {renderExploreCard(featuredLead, 0)}
+                  </View>
+                )}
+                {trendingExplore.length > 0 && (
+                  <View style={s.trendingSection}>
+                    <View style={s.trendingHeader}>
+                      <Text style={s.trendingTitle}>Trending This Week</Text>
+                      <TouchableOpacity onPress={() => setExploreCategory('views')} activeOpacity={0.8}>
+                        <Text style={s.trendingLink}>View all</Text>
+                      </TouchableOpacity>
+                    </View>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.trendingRail}>
+                      {trendingExplore.map((item, idx) => renderExploreCard(item, idx, true))}
+                    </ScrollView>
+                  </View>
+                )}
+                {featuredSections.map(section => (
+                  <View key={section.key} style={s.explorePreviewSection}>
                   <View style={s.exploreSectionHeader}>
-                    <Text style={s.exploreSectionTitle}>{section.item.label.toUpperCase()}</Text>
-                    <TouchableOpacity onPress={() => setExploreCategory(section.item.key)}>
+                    <Text style={s.exploreSectionTitle}>{section.label.toUpperCase()}</Text>
+                    <TouchableOpacity onPress={() => setExploreCategory(section.key)}>
                       <Text style={s.exploreSectionLink}>VIEW ALL</Text>
                     </TouchableOpacity>
                   </View>
                   {section.rows.map((item, idx) => renderExploreCard(item, idx))}
                   <TouchableOpacity
                     style={s.exploreSectionMoreBtn}
-                    onPress={() => setExploreCategory(section.item.key)}
+                    onPress={() => setExploreCategory(section.key)}
                     activeOpacity={0.84}
                   >
-                    <Text style={s.exploreSectionMoreText}>MORE {section.item.label.toUpperCase()}</Text>
+                    <Text style={s.exploreSectionMoreText}>MORE {section.label.toUpperCase()}</Text>
                     <Ionicons name="arrow-forward" size={14} color={C.orange} />
                   </TouchableOpacity>
                 </View>
-              ))
+                ))}
+              </>
             ) : !exploreLoading && rankedExplore.length === 0 && (!showExperienceSearch || (!exploreSearchExperienceLoading && exploreSearchExperiences.length === 0)) ? (
               <View style={s.emptyState}>
                 <Ionicons name={exploreSavedOnly ? 'bookmark-outline' : 'search-outline'} size={44} color={C.text3} />
@@ -1696,7 +1836,7 @@ export default function GuideScreen() {
                 )}
               </>
             )}
-          </>
+          </View>
         )}
 
         {tab === 'narrations' && (
@@ -2011,7 +2151,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   utilityKicker: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 0 },
   utilityTitle: { color: C.text, fontSize: 22, lineHeight: 27, fontWeight: '900', marginTop: 3 },
   scroll: { flex: 1 },
-  scrollContent: { padding: 14, gap: 11, paddingBottom: 122 },
+  scrollContent: { padding: 14, gap: 0, paddingBottom: 122 },
   loadRow: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     padding: 16, backgroundColor: C.s2, borderRadius: 12, borderWidth: 1, borderColor: C.border,
@@ -2080,9 +2220,36 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   clearCategoryBtn: {
     alignSelf: 'flex-start', minHeight: 34, flexDirection: 'row', alignItems: 'center', gap: 6,
     borderRadius: 8, borderWidth: 1, borderColor: C.orange + '44',
-    backgroundColor: C.orangeGlow, paddingHorizontal: 10,
+    backgroundColor: C.orangeGlow, paddingHorizontal: 10, marginHorizontal: 20,
   },
   clearCategoryText: { color: C.orange, fontSize: 11, fontFamily: mono, fontWeight: '900' },
+  exploreFeedSheet: {
+    marginHorizontal: -14,
+    marginTop: -30,
+    paddingTop: 22,
+    paddingHorizontal: 14,
+    paddingBottom: 18,
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+    backgroundColor: C.bg,
+    gap: 14,
+  },
+  exploreHomeHeading: {
+    marginHorizontal: 20,
+    marginTop: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 14,
+  },
+  exploreHomeTitle: { color: C.text, fontSize: 23, lineHeight: 28, fontWeight: '900', letterSpacing: 0 },
+  exploreHomeCount: { color: C.text3, fontSize: 12, lineHeight: 16, fontWeight: '800', marginTop: 3 },
+  exploreFilterGlyph: {
+    width: 46,
+    height: 46,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   exploreSectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2093,7 +2260,13 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   exploreSectionTitle: { color: C.text3, fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
   exploreSectionSub: { color: C.text3, fontSize: 10, fontFamily: mono },
   exploreSectionLink: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900' },
-  explorePreviewSection: { gap: 0, marginBottom: 6 },
+  exploreLeadBlock: { marginHorizontal: 20 },
+  trendingSection: { gap: 12, marginBottom: 10 },
+  trendingHeader: { marginHorizontal: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  trendingTitle: { color: C.text, fontSize: 20, lineHeight: 24, fontWeight: '900', letterSpacing: 0 },
+  trendingLink: { color: C.text2, fontSize: 13, fontWeight: '900' },
+  trendingRail: { gap: 12, paddingHorizontal: 20, paddingBottom: 2, paddingRight: 34 },
+  explorePreviewSection: { gap: 0, marginBottom: 6, marginHorizontal: 20 },
   exploreRailSection: { gap: 9 },
   exploreRail: { gap: 12, paddingRight: 8 },
   exploreSectionMoreBtn: {
@@ -2126,7 +2299,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   categoryChipActive: { borderColor: C.orange, backgroundColor: C.orangeGlow },
   categoryText: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '800' },
   categoryTextActive: { color: C.orange },
-  livePlacesBlock: { backgroundColor: C.glassStrong, borderWidth: 1, borderColor: C.border, borderRadius: 16, padding: 10, gap: 8 },
+  livePlacesBlock: { marginHorizontal: 20, backgroundColor: C.glassStrong, borderWidth: 1, borderColor: C.border, borderRadius: 16, padding: 10, gap: 8 },
   livePlacesTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 2 },
   livePlacesTitle: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
   livePlaceSkeleton: { minHeight: 64, padding: 8 },

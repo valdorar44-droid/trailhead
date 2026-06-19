@@ -1,9 +1,21 @@
 import React from 'react';
-import { Image, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { EXPLORE_CATEGORY_CHIPS, type ExploreCategoryKey, type ExploreMode } from './exploreDisplay';
 
 const DEFAULT_HERO_IMAGE = require('@/assets/explore-hero-welcome-mountains.jpg');
+const HERO_CATEGORY_KEYS: ExploreCategoryKey[] = ['all', 'camp', 'glamping', 'trails', 'huts'];
+
+type HeroWeather = {
+  loading: boolean;
+  unavailable?: boolean;
+  icon: keyof typeof Ionicons.glyphMap;
+  temp: string;
+  detail: string;
+  unitMode: 'auto' | 'imperial' | 'metric';
+  onUnitChange: (mode: 'imperial' | 'metric') => void;
+};
 
 type Props = {
   greeting: string;
@@ -11,11 +23,27 @@ type Props = {
   height: number;
   topInset?: number;
   query: string;
+  selectedCategory: ExploreCategoryKey;
+  mode: ExploreMode;
+  weather: HeroWeather;
   onQueryChange: (value: string) => void;
   onClearQuery: () => void;
+  onCategorySelect: (key: ExploreCategoryKey) => void;
 };
 
-export function ExploreHero({ greeting, displayName, height, topInset = 0, query, onQueryChange, onClearQuery }: Props) {
+export function ExploreHero({
+  greeting,
+  displayName,
+  height,
+  topInset = 0,
+  query,
+  selectedCategory,
+  mode,
+  weather,
+  onQueryChange,
+  onClearQuery,
+  onCategorySelect,
+}: Props) {
   return (
     <View style={[styles.shell, { height }]}>
       <Image source={DEFAULT_HERO_IMAGE} style={styles.image} resizeMode="cover" />
@@ -37,22 +65,79 @@ export function ExploreHero({ greeting, displayName, height, topInset = 0, query
         <Text style={styles.title}>Find your next adventure</Text>
         <View style={styles.searchRow}>
           <View style={styles.search}>
-            <Ionicons name="search-outline" size={22} color="rgba(255,255,255,0.86)" />
+            <Ionicons name="search-outline" size={22} color="#64748b" />
             <TextInput
               value={query}
               onChangeText={onQueryChange}
               placeholder="Search camps, trails, fuel"
-              placeholderTextColor="rgba(255,255,255,0.68)"
+              placeholderTextColor="#94a3b8"
               style={styles.input}
               returnKeyType="search"
             />
             {query ? (
               <TouchableOpacity onPress={onClearQuery} style={styles.iconButton} hitSlop={8}>
-                <Ionicons name="close" size={16} color="rgba(255,255,255,0.82)" />
+                <Ionicons name="close" size={16} color="#334155" />
               </TouchableOpacity>
             ) : null}
           </View>
         </View>
+        <View style={styles.weather}>
+          <View style={styles.weatherLeft}>
+            {weather.loading ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Ionicons name={weather.icon} size={22} color="rgba(255,255,255,0.92)" />
+            )}
+            <View style={styles.weatherTextWrap}>
+              <Text style={styles.weatherTemp} numberOfLines={1}>
+                {weather.loading ? 'Checking weather' : weather.temp}
+              </Text>
+              <Text style={styles.weatherDetail} numberOfLines={1}>
+                {weather.loading ? 'Current area' : weather.detail}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.unitToggle}>
+            {(['imperial', 'metric'] as const).map(unit => {
+              const label = unit === 'imperial' ? 'F' : 'C';
+              const active = weather.unitMode === unit || (weather.unitMode === 'auto' && unit === 'imperial');
+              return (
+                <TouchableOpacity
+                  key={unit}
+                  style={[styles.unitOption, active && styles.unitOptionActive]}
+                  onPress={() => weather.onUnitChange(unit)}
+                  activeOpacity={0.82}
+                >
+                  <Text style={[styles.unitText, active && styles.unitTextActive]}>{label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryRail}>
+          {HERO_CATEGORY_KEYS.map(key => {
+            const source = EXPLORE_CATEGORY_CHIPS.find(item => item.key === key);
+            if (!source) return null;
+            const active = key === 'all'
+              ? selectedCategory === 'all' && mode !== 'nearby'
+              : selectedCategory === key && mode !== 'nearby';
+            const label = key === 'huts' ? 'Cabins' : source.label;
+            const icon = key === 'huts' ? 'home-outline' : source.icon;
+            return (
+              <TouchableOpacity
+                key={key}
+                style={styles.categoryItem}
+                onPress={() => onCategorySelect(key)}
+                activeOpacity={0.84}
+              >
+                <View style={[styles.categoryIcon, active && styles.categoryIconActive]}>
+                  <Ionicons name={icon as any} size={24} color="#fff" />
+                </View>
+                <Text style={styles.categoryLabel} numberOfLines={1}>{label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
       </View>
     </View>
   );
@@ -71,8 +156,8 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'flex-end',
     paddingHorizontal: 20,
-    paddingBottom: 34,
-    gap: 12,
+    paddingBottom: 24,
+    gap: 10,
   },
   greeting: {
     color: '#fff',
@@ -84,8 +169,8 @@ const styles = StyleSheet.create({
   },
   title: {
     color: '#fff',
-    fontSize: 39,
-    lineHeight: 43,
+    fontSize: 37,
+    lineHeight: 41,
     fontWeight: '900',
     letterSpacing: 0,
     maxWidth: 430,
@@ -95,27 +180,86 @@ const styles = StyleSheet.create({
   searchRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 6 },
   search: {
     flex: 1,
-    minHeight: 58,
+    minHeight: 56,
     borderRadius: 22,
-    paddingHorizontal: 17,
+    paddingHorizontal: 18,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: 'rgba(15,23,42,0.36)',
+    backgroundColor: 'rgba(255,255,255,0.92)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.32)',
+    borderColor: 'rgba(255,255,255,0.5)',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.18,
     shadowRadius: 22,
   },
-  input: { flex: 1, color: '#fff', fontSize: 15, fontWeight: '800', paddingVertical: 0 },
+  input: { flex: 1, color: '#111827', fontSize: 15, fontWeight: '800', paddingVertical: 0 },
   iconButton: {
     width: 34,
     height: 34,
     borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: 'rgba(15,23,42,0.10)',
+  },
+  weather: {
+    minHeight: 48,
+    borderRadius: 18,
+    paddingLeft: 14,
+    paddingRight: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    backgroundColor: 'rgba(15,23,42,0.38)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+  },
+  weatherLeft: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  weatherTextWrap: { flex: 1, minWidth: 0 },
+  weatherTemp: { color: '#fff', fontSize: 14, lineHeight: 17, fontWeight: '900' },
+  weatherDetail: { color: 'rgba(255,255,255,0.72)', fontSize: 11, lineHeight: 15, fontWeight: '800', marginTop: 1 },
+  unitToggle: {
+    minHeight: 34,
+    borderRadius: 999,
+    padding: 3,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  unitOption: {
+    width: 31,
+    height: 28,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  unitOptionActive: { backgroundColor: '#fff' },
+  unitText: { color: 'rgba(255,255,255,0.74)', fontSize: 12, fontWeight: '900' },
+  unitTextActive: { color: '#0f172a' },
+  categoryRail: { gap: 10, paddingTop: 5, paddingRight: 30 },
+  categoryItem: { width: 62, alignItems: 'center', gap: 7 },
+  categoryIcon: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(15,23,42,0.34)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+  },
+  categoryIconActive: {
+    backgroundColor: 'rgba(15,23,42,0.74)',
+    borderColor: 'rgba(255,255,255,0.56)',
+  },
+  categoryLabel: {
+    color: '#fff',
+    fontSize: 12,
+    lineHeight: 15,
+    fontWeight: '900',
+    textShadowColor: 'rgba(0,0,0,0.38)',
+    textShadowRadius: 8,
   },
 });

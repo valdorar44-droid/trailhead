@@ -63,6 +63,24 @@ const FEATURED_SECTION_ORDER: ExploreCategoryKey[] = [
   'tours',
 ];
 
+const HOME_SHELF_ASSIGNMENT_ORDER: ExploreCategoryKey[] = [
+  'parks',
+  'land',
+  'trails',
+  'trailheads',
+  'camp',
+  'glamping',
+  'huts',
+  'views',
+  'waterfalls',
+  'peaks',
+  'springs',
+  'tours',
+  'climb',
+  'water',
+  'scenic',
+];
+
 type ExploreSortMode = 'best' | 'nearest' | 'source';
 
 const WMO_ICON: Record<number, keyof typeof Ionicons.glyphMap> = {
@@ -334,6 +352,14 @@ function exploreCategoryMatchesWithHub(place: ExplorePlaceProfile, key: ExploreC
   if (key === 'all' || key === 'nearby') return true;
   if (exploreCategoryMatches(place, key)) return true;
   return hubCategories.get(place.id)?.has(key) ?? false;
+}
+
+function exploreHomeShelfKey(place: ExplorePlaceProfile, hubCategories: Map<string, Set<ExploreCategoryKey>>) {
+  const primary = getExploreCategoryKey(place);
+  const assignmentOrder = isDestinationExploreHub(place)
+    ? HOME_SHELF_ASSIGNMENT_ORDER
+    : [primary, ...HOME_SHELF_ASSIGNMENT_ORDER.filter(key => key !== primary)];
+  return assignmentOrder.find(key => exploreCategoryMatchesWithHub(place, key, hubCategories)) ?? null;
 }
 
 function mergeDynamicTrailArea(place: ExplorePlaceProfile, area: ExplorePlaceProfile): ExplorePlaceProfile {
@@ -1144,6 +1170,12 @@ export default function GuideScreen() {
     }
     return picks.slice(0, 8);
   }, [featuredLead?.place.id, rankedExplore, showExploreHome]);
+  const featuredReservedExploreIds = useMemo(() => {
+    const used = new Set<string>();
+    if (featuredLead?.place.id) used.add(featuredLead.place.id);
+    trendingExplore.forEach(item => used.add(item.place.id));
+    return used;
+  }, [featuredLead?.place.id, trendingExplore]);
   const heroWeather = useMemo(() => {
     const daily = exploreHomeWeather?.daily;
     const current = exploreHomeWeather?.current;
@@ -1182,17 +1214,32 @@ export default function GuideScreen() {
 
   const featuredSections = useMemo(() => {
     if (hasExploreQuery || exploreSavedOnly || exploreCategory !== 'all' || exploreMode !== 'featured') return [];
+    const used = new Set(featuredReservedExploreIds);
     return FEATURED_SECTION_ORDER
-      .map(key => ({
-        key,
-        label: exploreCategoryLabel(key),
-        rows: rankedExplore
-          .filter(({ place }) => exploreCategoryMatchesWithHub(place, key, exploreHubMeta.categoryKeysByHubId))
+      .map(key => {
+        const rows = rankedExplore
+          .filter(({ place }) => {
+            if (used.has(place.id)) return false;
+            return exploreHomeShelfKey(place, exploreHubMeta.categoryKeysByHubId) === key;
+          })
           .sort((a, b) => (a.place.summary.hero_rank ?? a.place.summary.rank) - (b.place.summary.hero_rank ?? b.place.summary.rank))
-          .slice(0, 5),
-      }))
+          .slice(0, 5);
+        rows.forEach(({ place }) => used.add(place.id));
+        return {
+          key,
+          label: exploreCategoryLabel(key),
+          rows,
+        };
+      })
       .filter(section => section.rows.length > 0);
-  }, [exploreCategory, exploreHubMeta.categoryKeysByHubId, exploreMode, exploreSavedOnly, hasExploreQuery, rankedExplore]);
+  }, [exploreCategory, exploreHubMeta.categoryKeysByHubId, exploreMode, exploreSavedOnly, featuredReservedExploreIds, hasExploreQuery, rankedExplore]);
+  const exploreHomeCountLabel = useMemo(() => {
+    if (!showExploreHome) return `${rankedExplore.length.toLocaleString()} places`;
+    const count = (featuredLead ? 1 : 0)
+      + trendingExplore.length
+      + featuredSections.reduce((total, section) => total + section.rows.length, 0);
+    return `${count.toLocaleString()} featured hubs`;
+  }, [featuredLead, featuredSections, rankedExplore.length, showExploreHome, trendingExplore.length]);
   const relatedExplore = useMemo(() => {
     if (selectedExplore?.summary.lat == null || selectedExplore?.summary.lng == null) return [];
     const selectedGroup = groupForExplorePlace(selectedExplore);
@@ -2029,7 +2076,7 @@ export default function GuideScreen() {
                             ? 'Featured Explorer Hubs'
                             : `${exploreCategoryLabel(exploreCategory)} Areas`}
                 </Text>
-                <Text style={s.exploreHomeCount}>{rankedExplore.length.toLocaleString()} places</Text>
+                <Text style={s.exploreHomeCount}>{exploreHomeCountLabel}</Text>
               </View>
               <TouchableOpacity
                 style={s.exploreFilterGlyph}

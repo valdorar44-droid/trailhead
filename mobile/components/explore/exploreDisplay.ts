@@ -109,6 +109,22 @@ const CATEGORY_ALIASES: Record<ExploreCategoryKey, string[]> = {
   nearby: [],
 };
 
+const DESTINATION_PRIMARY_OVERRIDES: ExploreCategoryKey[] = [
+  'camp',
+  'glamping',
+  'huts',
+  'trails',
+  'trailheads',
+  'views',
+  'peaks',
+  'waterfalls',
+  'springs',
+  'climb',
+  'water',
+  'scenic',
+  'tours',
+];
+
 const FALLBACK_COPY: Record<string, string> = {
   camp: 'Camp options for the area. Check access, fees, closures, fire rules, and overnight limits.',
   glamping: 'Comfort-focused outdoor stay. Check booking rules, road conditions, and availability.',
@@ -163,6 +179,21 @@ function categoryFromText(text: string): ExploreCategoryKey | null {
   return null;
 }
 
+function categoryFromDestinationTitle(text: string): ExploreCategoryKey | null {
+  if (!text) return null;
+  if (/\b(national|state|provincial|regional|county|territorial|historic|historical|ecological\s*&\s*historic|ecological\s+and\s+historic)\s+(park|monument|preserve|reserve|seashore|lakeshore|memorial|battlefield|historic site|historical park|historic park|historical reserve|historic reserve|recreation area)\b/.test(text)) {
+    return 'parks';
+  }
+  if (/\b(national|state|provincial|regional|county|territorial)\s+(forest|wilderness|reserve|conservation area)\b/.test(text)) {
+    return 'land';
+  }
+  return null;
+}
+
+function isNestedDestinationTitle(text: string) {
+  return /\b(campgrounds?|campsites?|camping|glamping|huts?|cabins?|lodges?|lodging|trails?|trailheads?|visitor centers?|parking|rv|tent|overnight|tours?|activities|things to do|places to stay|where to stay)\b/.test(text);
+}
+
 function categoryFromGroup(text: string): ExploreCategoryKey | null {
   if (!text) return null;
   if (/camping/.test(text)) return 'camp';
@@ -208,13 +239,25 @@ export function getExploreDisplayRegion(place: ExplorePlaceProfile) {
 
 export function getExploreCategoryKey(place: ExplorePlaceProfile): ExploreCategoryKey {
   const v3 = readV3(place);
+  const titleText = normalize(getExploreDisplayTitle(place));
+  const destinationTitle = categoryFromDestinationTitle(titleText);
+  const nestedDestinationTitle = isNestedDestinationTitle(titleText);
   const explicit = categoryFromText(normalize(compact([
     v3.category,
     place.summary.category,
     ...(Array.isArray(v3.subcategories) ? v3.subcategories : []),
   ]).join(' ')));
+  if (
+    destinationTitle
+    && !nestedDestinationTitle
+    && explicit
+    && DESTINATION_PRIMARY_OVERRIDES.includes(explicit)
+  ) {
+    return destinationTitle;
+  }
   if (explicit) return explicit;
-  const title = categoryFromText(normalize(getExploreDisplayTitle(place)));
+  if (destinationTitle && !nestedDestinationTitle) return destinationTitle;
+  const title = categoryFromText(titleText);
   if (title) return title;
   const group = categoryFromGroup(normalize(String(place.summary.explore_group || '')));
   if (group) return group;

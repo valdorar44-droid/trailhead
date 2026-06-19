@@ -926,6 +926,7 @@ def _catalog_place_category(summary: dict) -> str:
 def _explore_query_text(place: dict) -> str:
     summary = place.get("summary") or {}
     profile = place.get("profile") or {}
+    source_pack = place.get("source_pack") if isinstance(place.get("source_pack"), dict) else {}
     values = [
         place.get("id"),
         summary.get("title"),
@@ -941,8 +942,200 @@ def _explore_query_text(place: dict) -> str:
         " ".join(place.get("search_aliases") or []),
         place.get("search_blob"),
         " ".join(summary.get("tags") or []),
+        _explore_source_pack_query_text(source_pack),
     ]
     return " ".join(str(v or "") for v in values).lower()
+
+
+def _explore_query_terms(query: str) -> list[str]:
+    return [t for t in re.findall(r"[a-z0-9]+", str(query or "").lower()) if len(t) >= 2]
+
+
+def _explore_query_tokens(text: str) -> set[str]:
+    return set(re.findall(r"[a-z0-9]+", str(text or "").lower()))
+
+
+EXPLORE_QUERY_GENERIC_TERMS = {
+    "activity",
+    "activities",
+    "base",
+    "camp",
+    "campground",
+    "campgrounds",
+    "camping",
+    "campsite",
+    "campsites",
+    "center",
+    "centers",
+    "centre",
+    "centres",
+    "do",
+    "fall",
+    "falls",
+    "forest",
+    "forests",
+    "fuel",
+    "gas",
+    "glacier",
+    "glaciers",
+    "glamping",
+    "hike",
+    "hiking",
+    "hut",
+    "huts",
+    "lodging",
+    "monument",
+    "monuments",
+    "mountain",
+    "mountains",
+    "park",
+    "parks",
+    "parking",
+    "place",
+    "places",
+    "peak",
+    "peaks",
+    "see",
+    "stay",
+    "stays",
+    "thing",
+    "things",
+    "to",
+    "tour",
+    "tours",
+    "trail",
+    "trailhead",
+    "trailheads",
+    "trails",
+    "trek",
+    "treks",
+    "trekking",
+    "view",
+    "views",
+    "visitor",
+    "visitors",
+    "waterfall",
+    "waterfalls",
+}
+
+
+def _explore_identity_query_text(place: dict) -> str:
+    summary = place.get("summary") or {}
+    profile = place.get("profile") or {}
+    source_pack = place.get("source_pack") if isinstance(place.get("source_pack"), dict) else {}
+    values = [
+        place.get("id"),
+        summary.get("title"),
+        summary.get("state"),
+        summary.get("region"),
+        " ".join(place.get("search_aliases") or []),
+        source_pack.get("nps_park_code"),
+    ]
+    return " ".join(str(v or "") for v in values).lower()
+
+
+def _explore_terms_match_tokens(query_terms: list[str], tokens: set[str]) -> bool:
+    for term in query_terms:
+        if term in tokens:
+            continue
+        if len(term) >= 4 and any(token.startswith(term) or term.startswith(token) for token in tokens):
+            continue
+        return False
+    return True
+
+
+def _explore_query_terms_match(place: dict, query_terms: list[str]) -> bool:
+    if not query_terms:
+        return True
+    specific_terms = [term for term in query_terms if term not in EXPLORE_QUERY_GENERIC_TERMS]
+    if specific_terms and not _explore_terms_match_tokens(specific_terms, _explore_query_tokens(_explore_identity_query_text(place))):
+        return False
+    text = _explore_query_text(place)
+    return _explore_terms_match_tokens(query_terms, _explore_query_tokens(text))
+
+
+def _explore_source_pack_query_text(source_pack: dict) -> str:
+    if not isinstance(source_pack, dict):
+        return ""
+    values: list[str] = []
+    for key in ("primary", "official_url", "nps_park_code", "source_note", "extract", "operating_hours"):
+        if source_pack.get(key):
+            values.append(str(source_pack.get(key)))
+    for key in ("activities", "topics", "fees", "passes"):
+        values.extend(str(item) for item in source_pack.get(key) or [] if str(item or "").strip())
+    for key in (
+        "sources",
+        "photos",
+        "things_to_do",
+        "things_to_see",
+        "visitor_centers",
+        "campgrounds",
+        "events",
+        "tours",
+        "parking_lots",
+        "alerts",
+    ):
+        for item in source_pack.get(key) or []:
+            if isinstance(item, dict):
+                values.extend(
+                    str(item.get(field) or "")
+                    for field in ("title", "name", "description", "caption", "category", "publisher", "kind", "url")
+                    if str(item.get(field) or "").strip()
+                )
+            elif str(item or "").strip():
+                values.append(str(item))
+    return " ".join(values).lower()
+
+
+def _explore_is_destination_hub(place: dict) -> bool:
+    summary = place.get("summary") or {}
+    title = str(summary.get("title") or "").lower()
+    category_text = " ".join(str(value or "") for value in [
+        place.get("category"),
+        summary.get("category"),
+        summary.get("explore_group"),
+        *(place.get("subcategories") or []),
+    ]).lower()
+    if re.search(r"\b(campgrounds?|campsites?|camping|glamping|huts?|cabins?|lodging|trails?|trailheads?|visitor centers?|parking|tours?|activities|climb|climbing)\b", category_text):
+        return False
+    if str(place.get("id") or "").startswith("place:nps:"):
+        return True
+    if re.search(r"\b(national|state|provincial|regional|county|territorial)\s+(park|monument|preserve|seashore|lakeshore|forest|wilderness|reserve|historic site|historical park|recreation area)\b", title):
+        return True
+    if re.search(r"\b(park|monument|preserve|forest|wilderness|reserve|seashore|lakeshore)\b", title) and re.search(r"\b(parks?|land|public land)\b", category_text):
+        return True
+    if re.search(r"\b(peak|mountain|glacier)\b", category_text) and not re.search(r"\b(base camp|trek|trail|campground|hut|cabin)\b", title):
+        return True
+    return False
+
+
+def _explore_query_sort_key(place: dict, query_terms: list[str]) -> tuple[float, float]:
+    summary = place.get("summary") or {}
+    rank = float(summary.get("hero_rank") or summary.get("rank") or 999999)
+    if not query_terms:
+        return (0.0, rank)
+    title_tokens = _explore_query_tokens(str(summary.get("title") or ""))
+    source_pack = place.get("source_pack") if isinstance(place.get("source_pack"), dict) else {}
+    nested_tokens = _explore_query_tokens(" ".join([
+        str(place.get("search_blob") or ""),
+        _explore_source_pack_query_text(source_pack),
+    ]))
+    is_hub = _explore_is_destination_hub(place)
+    child_title = bool(re.search(r"\b(campgrounds?|campsites?|camping|glamping|huts?|cabins?|lodging|trails?|trailheads?|visitor centers?|parking|tours?|activities|base camp|trek)\b", str(summary.get("title") or ""), re.I))
+    all_in_title = all(term in title_tokens or any(token.startswith(term) for token in title_tokens) for term in query_terms)
+    all_in_nested = all(term in nested_tokens or any(token.startswith(term) for token in nested_tokens) for term in query_terms)
+    score = 100.0
+    if all_in_title:
+        score -= 30.0
+    if is_hub and all_in_nested:
+        score -= 55.0
+    if is_hub:
+        score -= 15.0
+    if str(place.get("id") or "").startswith("place:nps:"):
+        score -= 15.0
+    if child_title and not is_hub:
+        score += 15.0
+    return (score, rank)
 
 def _explore_place_matches_categories(place_type: str, requested: set[str] | None) -> bool:
     if not requested:
@@ -965,14 +1158,28 @@ def _explore_place_matches_categories(place_type: str, requested: set[str] | Non
 
 def _explore_place_category_tokens(place: dict) -> set[str]:
     summary = place.get("summary") or {}
+    source_pack = place.get("source_pack") if isinstance(place.get("source_pack"), dict) else {}
     raw_values = [
         place.get("category"),
         summary.get("category"),
         summary.get("explore_group"),
         *(place.get("subcategories") or []),
         *(summary.get("tags") or []),
+        *(source_pack.get("activities") or []),
+        *(source_pack.get("topics") or []),
     ]
     tokens = {_normalize_place_category(value) for value in raw_values if str(value or "").strip()}
+    if source_pack.get("campgrounds"):
+        tokens.update({"camp", "camping", "campground"})
+    if source_pack.get("visitor_centers"):
+        tokens.update({"visitor_center", "park"})
+    nested_text = _explore_source_pack_query_text(source_pack)
+    if re.search(r"\b(trails?|hiking|hike|trek|trekking|trailheads?)\b", nested_text):
+        tokens.update({"trail", "trails", "trailhead"})
+    if re.search(r"\b(tours?|guided|tickets?|activities|things to do)\b", nested_text):
+        tokens.update({"tour", "tours", "activity"})
+    if re.search(r"\b(waterfalls?|falls|lake|river|viewpoint|overlook|scenic)\b", nested_text):
+        tokens.update({"water", "viewpoint", "scenic"})
     if "waterfall" in tokens:
         tokens.add("waterfalls")
     if "hot_spring" in tokens:
@@ -1035,7 +1242,10 @@ def _explore_place_index_item(place: dict) -> dict:
         "quality_score": place.get("quality_score"),
         "verified": place.get("verified"),
         "search_aliases": place.get("search_aliases") or [],
-        "search_blob": place.get("search_blob") or "",
+        "search_blob": " ".join(
+            part for part in (str(place.get("search_blob") or ""), _explore_source_pack_query_text(source_pack))
+            if part.strip()
+        ),
         "best_season": place.get("best_season") or "",
         "access": place.get("access") or "",
         "safety": place.get("safety") or "",
@@ -1136,7 +1346,7 @@ def _explore_catalog_fallback_places(
         except Exception:
             return 999999.0
 
-    query_terms = [t for t in re.split(r"\s+", str(query or "").lower().strip()) if len(t) >= 2]
+    query_terms = _explore_query_terms(query)
     items: list[dict] = []
     for place in _load_explore_catalog().get("places") or []:
         summary = place.get("summary") or {}
@@ -1147,8 +1357,7 @@ def _explore_catalog_fallback_places(
         if not nearby:
             continue
         if query_terms:
-            hay = _explore_query_text(place)
-            if not all(term in hay for term in query_terms):
+            if not _explore_query_terms_match(place, query_terms):
                 continue
         if item_distance(nearby) > radius_miles:
             continue
@@ -15405,13 +15614,13 @@ async def explore_catalog_index(q: str = "", category: str = "", limit: int = 50
     """Return lightweight Explore cards for scalable browsing."""
     catalog = _load_explore_catalog()
     places = list(catalog.get("places") or [])
-    query_terms = [t for t in re.split(r"\s+", str(q or "").lower().strip()) if len(t) >= 2]
+    query_terms = _explore_query_terms(q)
     if query_terms:
-        places = [place for place in places if all(term in _explore_query_text(place) for term in query_terms)]
+        places = [place for place in places if _explore_query_terms_match(place, query_terms)]
     if category:
         requested = {_normalize_place_category(category)}
         places = [place for place in places if _explore_place_matches_category_request(place, requested)]
-    places = sorted(places, key=lambda p: ((p.get("summary") or {}).get("hero_rank") or (p.get("summary") or {}).get("rank") or 999999))
+    places = sorted(places, key=lambda p: _explore_query_sort_key(p, query_terms))
     cursor = max(0, int(cursor or 0))
     limit = max(1, min(int(limit or 500), 1000))
     items = [_explore_place_index_item(place) for place in places[cursor:cursor + limit]]
@@ -15483,11 +15692,11 @@ def _rank_explore_places_for_route(
 ) -> list[dict]:
     if len(route_points) < 2:
         return []
-    query_terms = [t for t in re.split(r"\s+", str(q or "").lower().strip()) if len(t) >= 2]
+    query_terms = _explore_query_terms(q)
     ranked: list[tuple[float, dict]] = []
     max_distance = max(1.0, min(float(max_distance_mi or 90), 250.0))
     for place in places:
-        if query_terms and not all(term in _explore_query_text(place) for term in query_terms):
+        if query_terms and not _explore_query_terms_match(place, query_terms):
             continue
         if categories and not _explore_place_matches_category_request(place, categories):
             continue
@@ -15570,9 +15779,9 @@ async def explore_places(
 ):
     catalog = _load_explore_catalog()
     places = list(catalog.get("places") or [])
-    query_terms = [t for t in re.split(r"\s+", str(q or "").lower().strip()) if len(t) >= 2]
+    query_terms = _explore_query_terms(q)
     if query_terms:
-        places = [place for place in places if all(term in _explore_query_text(place) for term in query_terms)]
+        places = [place for place in places if _explore_query_terms_match(place, query_terms)]
     if category:
         requested = {_normalize_place_category(category)}
         places = [place for place in places if _explore_place_matches_category_request(place, requested)]
@@ -15590,7 +15799,7 @@ async def explore_places(
             ranked.append(enriched)
         places = sorted(ranked, key=lambda p: (p.get("summary") or {}).get("distance_m", 999999999))
     else:
-        places = sorted(places, key=lambda p: (p.get("summary") or {}).get("rank", 9999))
+        places = sorted(places, key=lambda p: _explore_query_sort_key(p, query_terms))
     cursor = max(0, int(cursor or 0))
     limit = max(1, min(limit, 100))
     page = places[cursor:cursor + limit]

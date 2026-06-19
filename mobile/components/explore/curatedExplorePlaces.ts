@@ -1062,9 +1062,13 @@ const WATERFALLS: WaterfallSeed[] = [
 
 const YOSEMITE_TRAIL_AREA = buildYosemiteTrailArea();
 const CURATED_TRAIL_AREAS = TRAIL_AREA_SEEDS.map(seed => buildTrailAreaPlace(seed));
-const TRAIL_AREA_BY_ID = new Map(CURATED_TRAIL_AREAS.map(place => [place.id, place]));
+const ALL_TRAIL_AREA_GUIDES = [YOSEMITE_TRAIL_AREA, ...CURATED_TRAIL_AREAS];
+const TRAIL_AREA_BY_ID = new Map(ALL_TRAIL_AREA_GUIDES.map(place => [place.id, place]));
 const TRAIL_AREA_BY_TITLE_STATE = new Map(
-  CURATED_TRAIL_AREAS.map(place => [`${normalizeTitle(place.summary.title)}:${String(place.summary.state || '').toUpperCase()}`, place]),
+  ALL_TRAIL_AREA_GUIDES.map(place => [`${normalizeTitle(place.summary.title)}:${String(place.summary.state || '').toUpperCase()}`, place]),
+);
+const TRAIL_AREA_BY_REGION_TITLE = new Map(
+  ALL_TRAIL_AREA_GUIDES.map(place => [normalizeTitle(String(place.summary.region || '')), place]),
 );
 
 export const CURATED_EXPLORE_PLACES: ExplorePlaceProfile[] = [
@@ -1074,19 +1078,31 @@ export const CURATED_EXPLORE_PLACES: ExplorePlaceProfile[] = [
 ];
 
 export function mergeCuratedExplorePlaces(places: ExplorePlaceProfile[]) {
+  const attachedGuideIds = new Set<string>();
   const enrichedPlaces = places.map(place => {
     const guide = curatedTrailAreaForPlace(place);
+    if (guide && guide.id !== place.id) attachedGuideIds.add(guide.id);
     return guide ? withTrailAreaDetails(place, guide) : place;
   });
   const curatedPlaces = CURATED_EXPLORE_PLACES.filter(place => place.id !== YOSEMITE_TRAIL_AREA.id && !TRAIL_AREA_BY_ID.has(place.id));
-  const seen = new Set<string>();
+  const orphanTrailAreas = ALL_TRAIL_AREA_GUIDES.filter(place => !attachedGuideIds.has(place.id));
+  const indexByKey = new Map<string, number>();
   const merged: ExplorePlaceProfile[] = [];
-  for (const place of [YOSEMITE_TRAIL_AREA, ...CURATED_TRAIL_AREAS, ...enrichedPlaces, ...curatedPlaces]) {
-    const key = `${normalizeTitle(place.summary.title)}:${String(place.summary.state || '').toUpperCase()}`;
-    if (isLooseYosemiteTrailPlace(place) && seen.has('yosemite-trails:CA')) continue;
-    if (seen.has(place.id) || seen.has(key)) continue;
-    seen.add(place.id);
-    seen.add(key);
+  for (const place of [...enrichedPlaces, ...orphanTrailAreas, ...curatedPlaces]) {
+    const keys = mergeKeysForPlace(place);
+    const existingIndex = keys
+      .map(key => indexByKey.get(key))
+      .find(index => index != null);
+    if (existingIndex != null) {
+      const current = merged[existingIndex];
+      if (curatedPlacePriority(place) > curatedPlacePriority(current)) {
+        merged[existingIndex] = place;
+        keys.forEach(key => indexByKey.set(key, existingIndex));
+      }
+      continue;
+    }
+    const nextIndex = merged.length;
+    keys.forEach(key => indexByKey.set(key, nextIndex));
     merged.push(place);
   }
   return merged;
@@ -1095,7 +1111,50 @@ export function mergeCuratedExplorePlaces(places: ExplorePlaceProfile[]) {
 function curatedTrailAreaForPlace(place: ExplorePlaceProfile) {
   if (isYosemiteTrailPlace(place)) return YOSEMITE_TRAIL_AREA;
   const titleState = `${normalizeTitle(String(place.summary.title || ''))}:${String(place.summary.state || '').toUpperCase()}`;
-  return TRAIL_AREA_BY_ID.get(place.id) || TRAIL_AREA_BY_TITLE_STATE.get(titleState) || null;
+  const titleOnly = normalizeTitle(String(place.summary.title || ''));
+  return TRAIL_AREA_BY_ID.get(place.id) || TRAIL_AREA_BY_TITLE_STATE.get(titleState) || TRAIL_AREA_BY_REGION_TITLE.get(titleOnly) || null;
+}
+
+function mergeKeysForPlace(place: ExplorePlaceProfile) {
+  const title = normalizeTitle(String(place.summary.title || ''));
+  const state = String(place.summary.state || '').toUpperCase();
+  const keys = new Set<string>([place.id, `${title}:${state}`]);
+  if (isDestinationHubPlace(place)) keys.add(`hub:${title}`);
+  if (isLooseYosemiteTrailPlace(place)) keys.add('yosemite-trails:CA');
+  return Array.from(keys).filter(Boolean);
+}
+
+function isDestinationHubPlace(place: ExplorePlaceProfile) {
+  const title = normalizeTitle(String(place.summary.title || ''));
+  const categoryText = normalizeTitle([
+    place.category,
+    place.summary.category,
+    place.summary.explore_group,
+    ...(place.subcategories ?? []),
+  ].filter(Boolean).join(' '));
+  if (place.id.startsWith('place:nps:')) return true;
+  if (/\b(national|state|provincial|regional|county)?\s*(park|monument|preserve|seashore|lakeshore|forest|wilderness|recreation area|reserve|historic site|historical park)\b/.test(title)) return true;
+  if (/camp|trail|trailhead|visitor|parking|glamp|hut|lodg|tour|activity|climb/.test(categoryText)) return false;
+  return false;
+}
+
+function curatedPlacePriority(place: ExplorePlaceProfile) {
+  const text = JSON.stringify({
+    id: place.id,
+    quality: (place as any).quality,
+    sources: place.sources,
+    source_pack: place.source_pack,
+    source_title: place.summary.source_title,
+  }).toLowerCase();
+  let score = 0;
+  if (place.id.startsWith('place:nps:')) score += 1000;
+  if (/national park service|nps|official/.test(text)) score += 220;
+  if (place.source_pack?.things_to_do?.length) score += place.source_pack.things_to_do.length;
+  if (place.source_pack?.things_to_see?.length) score += place.source_pack.things_to_see.length;
+  if (place.source_pack?.campgrounds?.length) score += place.source_pack.campgrounds.length;
+  if (place.summary.image_url || place.summary.thumbnail_url) score += 10;
+  score -= Math.min(Number(place.summary.rank ?? 999999), 999999) / 100000;
+  return score;
 }
 
 function isYosemiteTrailPlace(place: ExplorePlaceProfile) {
@@ -1116,44 +1175,89 @@ function isLooseYosemiteTrailPlace(place: ExplorePlaceProfile) {
 }
 
 function withTrailAreaDetails(place: ExplorePlaceProfile, guide: ExplorePlaceProfile): ExplorePlaceProfile {
+  const guideTrails = (guide as any).trails ?? [];
+  const placeSourcePack = place.source_pack ?? {};
+  const guideSourcePack = guide.source_pack ?? {};
+  const imageUrl = place.summary.image_url || guide.summary.image_url || place.summary.thumbnail_url || guide.summary.thumbnail_url || '';
+  const preserveHubIdentity = isDestinationHubPlace(place);
   return {
     ...place,
-    category: guide.category,
-    subcategories: guide.subcategories,
-    quality: guide.quality,
+    category: preserveHubIdentity ? place.category || guide.category : place.category || guide.category,
+    subcategories: preserveHubIdentity
+      ? (place.subcategories ?? [])
+      : Array.from(new Set([...(place.subcategories ?? []), ...(guide.subcategories ?? [])])),
+    quality: place.quality || guide.quality,
     quality_score: Math.max(Number((place as any).quality_score || 0), Number((guide as any).quality_score || 0)),
     search_aliases: Array.from(new Set([
       ...((place as any).search_aliases || []),
       ...((guide as any).search_aliases || []),
     ])),
-    best_season: (guide as any).best_season,
-    access: (guide as any).access,
-    safety: (guide as any).safety,
-    trails: (guide as any).trails,
-    sources: (guide as any).sources,
+    best_season: (place as any).best_season || (guide as any).best_season,
+    access: (place as any).access || (guide as any).access,
+    safety: (place as any).safety || (guide as any).safety,
+    trails: guideTrails,
+    sources: Array.from(new Set([...(place.sources ?? []), ...(guide.sources ?? [])] as any[])) as any,
     card: {
-      ...((place as any).card || {}),
       ...((guide as any).card || {}),
+      ...((place as any).card || {}),
+      title: place.card?.title || place.summary.title,
+      region: place.card?.region || place.summary.region || guide.card?.region,
+      headline: place.card?.headline || guide.card?.headline,
+      summary: place.card?.summary || guide.card?.summary,
+      highlight: place.card?.highlight || guide.card?.highlight,
     },
     summary: {
       ...place.summary,
-      ...guide.summary,
       id: place.summary.id || place.id,
       rank: Math.min(Number(place.summary.rank ?? 99), Number(guide.summary.rank ?? 12)),
       hero_rank: Math.min(Number(place.summary.hero_rank ?? place.summary.rank ?? 99), Number(guide.summary.hero_rank ?? 12)),
+      tags: Array.from(new Set([...(place.summary.tags ?? []), ...(guide.summary.tags ?? [])])),
+      badges: Array.from(new Set([...(place.summary.badges ?? []), ...(guide.summary.badges ?? [])])),
+      hook: place.summary.hook || guide.summary.hook,
+      short_description: place.summary.short_description || guide.summary.short_description,
+      image_url: imageUrl,
+      thumbnail_url: imageUrl || place.summary.thumbnail_url || guide.summary.thumbnail_url,
+      image_credit: place.summary.image_credit || guide.summary.image_credit,
+      image_license: place.summary.image_license || guide.summary.image_license,
+      source_url: place.summary.source_url || guide.summary.source_url,
+      source_title: place.summary.source_title || guide.summary.source_title,
     },
     profile: {
-      ...place.profile,
       ...guide.profile,
+      ...place.profile,
+      why_it_matters: place.profile.why_it_matters || guide.profile.why_it_matters,
+      what_to_know: place.profile.what_to_know || guide.profile.what_to_know,
+      best_time_to_stop: place.profile.best_time_to_stop || guide.profile.best_time_to_stop,
+      access_notes: place.profile.access_notes || guide.profile.access_notes,
+      nearby_context: place.profile.nearby_context || guide.profile.nearby_context,
     },
-    audio_script: guide.audio_script,
-    wiki_extract: guide.wiki_extract,
-    source_pack: guide.source_pack,
+    audio_script: place.audio_script || guide.audio_script,
+    wiki_extract: place.wiki_extract || guide.wiki_extract,
+    source_pack: {
+      ...guideSourcePack,
+      ...placeSourcePack,
+      photos: [
+        ...((placeSourcePack.photos ?? []) as any[]),
+        ...((guideSourcePack.photos ?? []) as any[]),
+      ].filter((item, index, arr) => item?.url && arr.findIndex(other => other?.url === item.url) === index).slice(0, 16),
+      things_to_do: [
+        ...((placeSourcePack.things_to_do ?? []) as any[]),
+        ...((guideSourcePack.things_to_do ?? []) as any[]),
+      ].filter((item, index, arr) => item?.title && arr.findIndex(other => other?.title === item.title) === index),
+      things_to_see: [
+        ...((placeSourcePack.things_to_see ?? []) as any[]),
+        ...((guideSourcePack.things_to_see ?? []) as any[]),
+      ].filter((item, index, arr) => item?.title && arr.findIndex(other => other?.title === item.title) === index),
+      sources: [
+        ...((placeSourcePack.sources ?? []) as any[]),
+        ...((guideSourcePack.sources ?? []) as any[]),
+      ].filter((item, index, arr) => item?.url && arr.findIndex(other => other?.url === item.url) === index),
+    },
     facts: {
       ...place.facts,
       ...guide.facts,
     },
-    attribution: guide.attribution,
+    attribution: place.attribution || guide.attribution,
   };
 }
 

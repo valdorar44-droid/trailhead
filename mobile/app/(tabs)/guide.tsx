@@ -29,7 +29,7 @@ import {
   type ExploreNearbyModule,
 } from '@/components/explore';
 import { useStore } from '@/lib/store';
-import { api, PaywallError, type BookableExperience, type CampsitePin, type ExploreCatalogIndexItem, type ExplorePlaceProfile, type ExploreTrailCard, type OsmPoi } from '@/lib/api';
+import { api, PaywallError, type BookableExperience, type CampsitePin, type ExploreCatalogIndexItem, type ExplorePlaceProfile, type ExploreSourcePackItem, type ExploreTrailCard, type OsmPoi } from '@/lib/api';
 import { storage } from '@/lib/storage';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 import { trackPhase0Once } from '@/lib/telemetry';
@@ -1205,6 +1205,35 @@ export default function GuideScreen() {
     router.push('/(tabs)/map');
   }
 
+  function showSourcePackItemOnMap(item: ExploreSourcePackItem) {
+    const lat = Number(item.lat);
+    const lng = Number(item.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      if (item.url) Linking.openURL(item.url);
+      return;
+    }
+    const sourceKey = String(item.source_id || item.title || item.kind || 'detail')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 60) || 'detail';
+    setPendingMapSelection({
+      kind: 'place',
+      place: {
+        id: `source-pack:${selectedExplore?.id || 'explore'}:${sourceKey}`,
+        name: item.title || 'Explore stop',
+        lat,
+        lng,
+        icon: item.kind === 'campground' ? 'camp' : 'pin',
+        note: item.description || item.kind || item.source_label || 'Explore detail',
+        sourceLabel: item.source_label || item.source || selectedExplore?.source_pack?.primary,
+        createdAt: Date.now(),
+      },
+    });
+    setSelectedExplore(null);
+    router.push('/(tabs)/map');
+  }
+
   function routeExplore(place: ExplorePlaceProfile) {
     const { lat, lng, title } = place.summary;
     if (lat == null || lng == null) return;
@@ -2092,6 +2121,7 @@ export default function GuideScreen() {
             onRoute={() => routeExplore(selectedExplore)}
             onToggleSave={() => toggleSavedExplore(selectedExplore)}
             onNearbyAction={module => handleExploreNearbyAction(selectedExplore, module)}
+            onSourcePackItem={showSourcePackItemOnMap}
             onTrailMap={trail => showExploreTrailOnMap(selectedExplore, trail)}
             onTrailRoute={trail => routeExploreTrail(selectedExplore, trail)}
             mediaUrl={mediaUrl}

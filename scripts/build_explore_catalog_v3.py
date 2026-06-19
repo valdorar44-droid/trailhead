@@ -17,7 +17,7 @@ from scripts.explore_sources.base.dedupe import dedupe_places, link_trailheads_t
 from scripts.explore_sources.base.fetch import parse_headers, resolve_input_paths
 from scripts.explore_sources.base.quality import score_place
 from scripts.explore_sources.blm.import_blm import import_blm_fixture
-from scripts.explore_sources.nps.fetch_nps import fetch_nps_parks_to_cache
+from scripts.explore_sources.nps.fetch_nps import fetch_nps_parks_to_cache, fetch_nps_source_pack_to_cache
 from scripts.explore_sources.nps.import_nps import import_nps_fixture
 from scripts.explore_sources.openbeta.import_openbeta import import_openbeta_fixture
 from scripts.explore_sources.osm.import_geofabrik import import_osm_fixture, write_import_outputs
@@ -55,6 +55,10 @@ def build_catalog(
     nps_query: str = "",
     nps_limit: int = 50,
     nps_max_records: int = 500,
+    nps_rich: bool = False,
+    nps_related_endpoints: list[str] | None = None,
+    nps_per_park_endpoints: list[str] | None = None,
+    nps_related_max_records: int = 100,
     ridb_live: bool = False,
     ridb_api_key: str = "",
     ridb_states: list[str] | None = None,
@@ -93,17 +97,25 @@ def build_catalog(
         )))
     nps_paths = resolve_input_paths(nps_fixtures, nps_urls, source="nps", cache_dir=source_cache_dir, headers=http_headers, timeout=http_timeout, force=force_fetch)
     if nps_live:
-        nps_paths.append(str(fetch_nps_parks_to_cache(
-            api_key=nps_api_key,
-            cache_dir=source_cache_dir,
-            park_codes=nps_park_codes,
-            states=nps_states,
-            query=nps_query,
-            limit=nps_limit,
-            max_records=nps_max_records,
-            timeout=http_timeout,
-            force=force_fetch,
-        )))
+        nps_fetcher = fetch_nps_source_pack_to_cache if nps_rich else fetch_nps_parks_to_cache
+        nps_fetch_kwargs = {
+            "api_key": nps_api_key,
+            "cache_dir": source_cache_dir,
+            "park_codes": nps_park_codes,
+            "states": nps_states,
+            "query": nps_query,
+            "limit": nps_limit,
+            "max_records": nps_max_records,
+            "timeout": http_timeout,
+            "force": force_fetch,
+        }
+        if nps_rich:
+            nps_fetch_kwargs.update({
+                "related_endpoints": nps_related_endpoints,
+                "per_park_endpoints": nps_per_park_endpoints,
+                "related_max_records": nps_related_max_records,
+            })
+        nps_paths.append(str(nps_fetcher(**nps_fetch_kwargs)))
     usfs_paths = resolve_input_paths(usfs_fixtures, usfs_urls, source="usfs", cache_dir=source_cache_dir, headers=http_headers, timeout=http_timeout, force=force_fetch)
     blm_paths = resolve_input_paths(blm_fixtures, blm_urls, source="blm", cache_dir=source_cache_dir, headers=http_headers, timeout=http_timeout, force=force_fetch)
     wikidata_paths = resolve_input_paths(wikidata_fixtures, wikidata_urls, source="wikidata", cache_dir=source_cache_dir, headers=http_headers, timeout=http_timeout, force=force_fetch)
@@ -198,6 +210,10 @@ def main() -> int:
     parser.add_argument("--nps-query", default="", help="NPS parks q search term.")
     parser.add_argument("--nps-limit", type=int, default=50, help="NPS API page size.")
     parser.add_argument("--nps-max-records", type=int, default=500, help="Maximum NPS parks to cache/import.")
+    parser.add_argument("--nps-rich", action="store_true", help="Fetch NPS park source packs with places, things to do, visitor centers, campgrounds, alerts, and images.")
+    parser.add_argument("--nps-related-endpoint", action="append", default=[], help="NPS related endpoint for --nps-rich, e.g. places or thingstodo. May be repeated.")
+    parser.add_argument("--nps-per-park-endpoint", action="append", default=None, help="Fetch a related endpoint one park at a time for higher-fidelity grouping. Use sparingly to avoid NPS rate limits.")
+    parser.add_argument("--nps-related-max-records", type=int, default=100, help="Maximum related records per NPS endpoint per park.")
     parser.add_argument("--ridb-live", action="store_true", help="Fetch live RIDB facilities API data into the source cache before importing.")
     parser.add_argument("--ridb-api-key", default="", help="RIDB API key. Defaults to RIDB_API_KEY or RECREATION_GOV_API_KEY when omitted.")
     parser.add_argument("--ridb-state", action="append", default=[], help="RIDB state filter, e.g. CA. May be repeated.")
@@ -245,6 +261,10 @@ def main() -> int:
         nps_query=args.nps_query,
         nps_limit=args.nps_limit,
         nps_max_records=args.nps_max_records,
+        nps_rich=args.nps_rich,
+        nps_related_endpoints=args.nps_related_endpoint,
+        nps_per_park_endpoints=args.nps_per_park_endpoint,
+        nps_related_max_records=args.nps_related_max_records,
         ridb_live=args.ridb_live,
         ridb_api_key=args.ridb_api_key,
         ridb_states=args.ridb_state,

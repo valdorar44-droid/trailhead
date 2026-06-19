@@ -60,6 +60,7 @@ def merge_places(a: ExplorePlaceV3, b: ExplorePlaceV3) -> ExplorePlaceV3:
     primary.tags = sorted_unique([*primary.tags, *secondary.tags])
     primary.search_aliases = sorted_unique([*primary.search_aliases, *secondary.search_aliases])
     primary.media = [*primary.media, *[item for item in secondary.media if item not in primary.media]]
+    primary.source_pack = merge_source_pack(primary.source_pack, secondary.source_pack)
     primary.linked_trail_ids = sorted_unique([*primary.linked_trail_ids, *secondary.linked_trail_ids])
     primary.linked_place_ids = sorted_unique([*primary.linked_place_ids, *secondary.linked_place_ids])
     if not primary.summary:
@@ -73,6 +74,24 @@ def merge_places(a: ExplorePlaceV3, b: ExplorePlaceV3) -> ExplorePlaceV3:
     if not primary.admin:
         primary.admin = secondary.admin
     return score_place(primary)
+
+
+def merge_source_pack(primary: dict, secondary: dict) -> dict:
+    if not isinstance(primary, dict) or not primary:
+        return secondary if isinstance(secondary, dict) else {}
+    if not isinstance(secondary, dict) or not secondary:
+        return primary
+    merged = {**secondary, **primary}
+    for key in ("sources", "photos", "things_to_do", "things_to_see", "visitor_centers", "campgrounds", "alerts"):
+        values = []
+        for item in [*(secondary.get(key) or []), *(primary.get(key) or [])]:
+            if isinstance(item, dict) and item not in values:
+                values.append(item)
+        if values:
+            merged[key] = values
+    for key in ("activities", "topics", "fees"):
+        merged[key] = sorted_unique([*(secondary.get(key) or []), *(primary.get(key) or [])])
+    return merged
 
 
 def dedupe_places(places: list[ExplorePlaceV3]) -> list[ExplorePlaceV3]:

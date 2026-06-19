@@ -14,7 +14,7 @@ from scripts.explore_sources.base.fetch import parse_headers, resolve_input_path
 from scripts.explore_sources.base.quality import score_place
 from scripts.explore_sources.base.schema import ExplorePlaceV3
 from scripts.explore_sources.blm.import_blm import import_blm_fixture
-from scripts.explore_sources.nps.fetch_nps import fetch_nps_parks_to_cache, request_params
+from scripts.explore_sources.nps.fetch_nps import fetch_nps_parks_to_cache, fetch_nps_source_pack_to_cache, park_codes_for_item, request_params
 from scripts.explore_sources.nps.import_nps import import_nps_fixture
 from scripts.explore_sources.openbeta.import_openbeta import import_openbeta_fixture
 from scripts.explore_sources.osm.import_geofabrik import import_osm_fixture
@@ -81,6 +81,109 @@ class FakeNpsOpener:
             },
         ][start:start + 1]
         return FakeHttpResponse({"total": "2", "data": page})
+
+
+class FakeNpsSourcePackOpener:
+    def __init__(self):
+        self.requests = []
+
+    def __call__(self, request, timeout):
+        self.requests.append((request, timeout))
+        endpoint = urlparse(request.full_url).path.rstrip("/").split("/")[-1]
+        if endpoint == "parks":
+            return FakeHttpResponse({
+                "total": "1",
+                "data": [nps_rich_park()],
+            })
+        items = {
+            "places": [{
+                "id": "bridalveil-fall",
+                "title": "Bridalveil Fall",
+                "shortDescription": "A classic Yosemite waterfall viewpoint.",
+                "latitude": "37.716",
+                "longitude": "-119.647",
+                "url": "https://www.nps.gov/places/bridalveil-fall.htm",
+                "images": [{"url": "https://www.nps.gov/bride.jpg", "caption": "Bridalveil Fall", "credit": "NPS"}],
+            }],
+            "thingstodo": [{
+                "id": "mist-trail",
+                "title": "Mist Trail",
+                "shortDescription": "Stone steps beside Vernal Fall and Nevada Fall.",
+                "latLong": "lat:37.7325, long:-119.5586",
+                "url": "https://www.nps.gov/thingstodo/mist-trail.htm",
+                "images": [{"url": "https://www.nps.gov/mist.jpg", "caption": "Mist Trail", "credit": "NPS"}],
+            }],
+        }.get(endpoint, [])
+        return FakeHttpResponse({"total": str(len(items)), "data": items})
+
+
+def nps_rich_park() -> dict:
+    return {
+        "parkCode": "yose",
+        "fullName": "Yosemite National Park",
+        "latitude": "37.84883288",
+        "longitude": "-119.5571873",
+        "states": "CA",
+        "designation": "National Park",
+        "url": "https://www.nps.gov/yose/index.htm",
+        "description": "Granite cliffs, waterfalls, and high Sierra wilderness.",
+        "activities": [{"name": "Hiking"}, {"name": "Climbing"}],
+        "topics": [{"name": "Waterfalls"}],
+        "images": [{"url": "https://www.nps.gov/yose.jpg", "caption": "Yosemite Valley", "credit": "NPS"}],
+        "entranceFees": [{"title": "Private Vehicle", "cost": "35.00"}],
+        "operatingHours": [{"name": "Yosemite", "description": "Open 24 hours unless roads close."}],
+    }
+
+
+def nps_rich_payload() -> dict:
+    return {
+        "source": "nps",
+        "endpoint": "source_pack",
+        "data": [nps_rich_park()],
+        "related": {
+            "yose": {
+                "thingstodo": [{
+                    "id": "mist-trail",
+                    "title": "Mist Trail",
+                    "shortDescription": "Stone steps beside Vernal Fall and Nevada Fall.",
+                    "latLong": "lat:37.7325, long:-119.5586",
+                    "url": "https://www.nps.gov/thingstodo/mist-trail.htm",
+                    "images": [{"url": "https://www.nps.gov/mist.jpg", "caption": "Mist Trail", "credit": "NPS"}],
+                }],
+                "places": [{
+                    "id": "bridalveil-fall",
+                    "title": "Bridalveil Fall",
+                    "shortDescription": "A classic Yosemite waterfall viewpoint.",
+                    "latitude": "37.716",
+                    "longitude": "-119.647",
+                    "url": "https://www.nps.gov/places/bridalveil-fall.htm",
+                    "images": [{"url": "https://www.nps.gov/bride.jpg", "caption": "Bridalveil Fall", "credit": "NPS"}],
+                }],
+                "visitorcenters": [{
+                    "id": "yosemite-valley-visitor-center",
+                    "title": "Yosemite Valley Visitor Center",
+                    "shortDescription": "Ranger information and exhibits.",
+                    "latitude": "37.7486",
+                    "longitude": "-119.5871",
+                    "url": "https://www.nps.gov/places/yosemite-valley-visitor-center.htm",
+                }],
+                "campgrounds": [{
+                    "id": "upper-pines",
+                    "title": "Upper Pines Campground",
+                    "shortDescription": "A reservable campground in Yosemite Valley.",
+                    "latitude": "37.739",
+                    "longitude": "-119.565",
+                    "url": "https://www.nps.gov/places/upper-pines-campground.htm",
+                }],
+                "alerts": [{
+                    "id": "road-work",
+                    "title": "Road work",
+                    "category": "Park Closure",
+                    "url": "https://www.nps.gov/yose/planyourvisit/conditions.htm",
+                }],
+            }
+        },
+    }
 
 
 class FakeRidbOpener:
@@ -239,6 +342,29 @@ class ExploreSourcePipelineTests(unittest.TestCase):
         self.assertIn("national park", place.search_blob)
         self.assertIn("National Park Service", records[0].attribution)
 
+    def test_nps_importer_builds_rich_source_pack(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "nps_source_pack.json"
+            path.write_text(json.dumps(nps_rich_payload()))
+
+            records, places, trails = import_nps_fixture(path, fetched_at=123)
+
+        self.assertEqual(len(records), 1)
+        self.assertEqual(len(trails), 0)
+        place = places[0]
+        pack = place.source_pack
+        self.assertEqual(pack["quality"], "official")
+        self.assertEqual(pack["nps_park_code"], "yose")
+        self.assertEqual(pack["fees"], ["Private Vehicle: $35"])
+        self.assertIn("Open 24 hours", pack["operating_hours"])
+        self.assertEqual(pack["alerts"][0]["title"], "Road work")
+        self.assertEqual(pack["things_to_do"][0]["title"], "Mist Trail")
+        self.assertAlmostEqual(pack["things_to_do"][0]["lat"], 37.7325)
+        self.assertEqual(pack["things_to_see"][0]["title"], "Bridalveil Fall")
+        self.assertEqual(pack["visitor_centers"][0]["title"], "Yosemite Valley Visitor Center")
+        self.assertEqual(pack["campgrounds"][0]["title"], "Upper Pines Campground")
+        self.assertTrue(any(item["url"] == "https://www.nps.gov/mist.jpg" for item in place.media))
+
     def test_usfs_importer_builds_trails_roads_and_recreation_places(self):
         records, places, trails = import_usfs_fixture(USFS, fetched_at=123)
         self.assertEqual(len(records), 6)
@@ -380,7 +506,7 @@ class ExploreSourcePipelineTests(unittest.TestCase):
             self.assertEqual(len(opener.requests), 2)
             first_request, timeout = opener.requests[0]
             self.assertEqual(timeout, 30.0)
-            self.assertEqual(first_request.headers["X-api-key"], "test-key")
+            self.assertEqual(parse_qs(urlparse(first_request.full_url).query)["api_key"], ["test-key"])
             records, places, _trails = import_nps_fixture(path, fetched_at=123)
             self.assertEqual(len(records), 2)
             self.assertTrue(any(place.name == "Zion National Park" for place in places))
@@ -395,6 +521,42 @@ class ExploreSourcePipelineTests(unittest.TestCase):
             self.assertEqual(cached_again, path)
             self.assertEqual(len(opener.requests), 2)
 
+    def test_nps_source_pack_fetcher_caches_related_official_endpoints(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            opener = FakeNpsSourcePackOpener()
+            path = fetch_nps_source_pack_to_cache(
+                api_key="test-key",
+                cache_dir=tmp,
+                park_codes=["yose"],
+                limit=1,
+                max_records=1,
+                related_endpoints=["places", "thingstodo"],
+                related_max_records=1,
+                opener=opener,
+            )
+            payload = json.loads(path.read_text())
+            endpoints = [urlparse(request.full_url).path.rstrip("/").split("/")[-1] for request, _timeout in opener.requests]
+            self.assertEqual(payload["endpoint"], "source_pack")
+            self.assertEqual(payload["count"], 1)
+            self.assertEqual(payload["related"]["yose"]["places"][0]["title"], "Bridalveil Fall")
+            self.assertEqual(payload["related"]["yose"]["thingstodo"][0]["title"], "Mist Trail")
+            self.assertEqual(endpoints, ["parks", "places", "thingstodo"])
+            records, places, _trails = import_nps_fixture(path, fetched_at=123)
+            self.assertEqual(len(records), 1)
+            self.assertEqual(places[0].source_pack["things_to_see"][0]["title"], "Bridalveil Fall")
+            cached_again = fetch_nps_source_pack_to_cache(
+                api_key="test-key",
+                cache_dir=tmp,
+                park_codes=["yose"],
+                limit=1,
+                max_records=1,
+                related_endpoints=["places", "thingstodo"],
+                related_max_records=1,
+                opener=opener,
+            )
+            self.assertEqual(cached_again, path)
+            self.assertEqual(len(opener.requests), 3)
+
     def test_nps_live_request_params(self):
         params = request_params(park_codes=["yose"], states=["CA", "UT"], query="waterfalls", limit=25, start=50)
         self.assertEqual(params["parkCode"], "yose")
@@ -402,6 +564,10 @@ class ExploreSourcePipelineTests(unittest.TestCase):
         self.assertEqual(params["q"], "waterfalls")
         self.assertEqual(params["limit"], 25)
         self.assertEqual(params["start"], 50)
+
+    def test_nps_related_item_park_code_from_url(self):
+        self.assertEqual(park_codes_for_item({"url": "https://www.nps.gov/yose/planyourvisit/mist-trail.htm"}), ["yose"])
+        self.assertEqual(park_codes_for_item({"url": "https://www.nps.gov/places/bridalveil-fall.htm"}), [])
 
     def test_ridb_live_fetcher_pages_and_caches_official_facilities(self):
         with tempfile.TemporaryDirectory() as tmp:

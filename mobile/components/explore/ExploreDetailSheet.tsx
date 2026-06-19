@@ -47,6 +47,7 @@ type Props = {
   onRoute: () => void;
   onToggleSave: () => void;
   onNearbyAction?: (module: ExploreNearbyModule) => void;
+  onSourcePackItem?: (item: ExploreSourcePackItem) => void;
   onTrailMap?: (trail: ExploreTrailCard) => void;
   onTrailRoute?: (trail: ExploreTrailCard) => void;
   mediaUrl: (url?: string | null) => string;
@@ -75,6 +76,7 @@ export function ExploreDetailSheet({
   onRoute,
   onToggleSave,
   onNearbyAction,
+  onSourcePackItem,
   onTrailMap,
   onTrailRoute,
   mediaUrl,
@@ -269,7 +271,7 @@ export function ExploreDetailSheet({
           </>
         )}
 
-        {tab === 'summary' && <SourcePack place={place} mediaUrl={mediaUrl} />}
+        {tab === 'summary' && <SourcePack place={place} mediaUrl={mediaUrl} onSourcePackItem={onSourcePackItem} />}
 
         {!!sourceUrl && (
           <TouchableOpacity style={[styles.sourceButton, { borderColor: C.border }]} onPress={() => Linking.openURL(sourceUrl)}>
@@ -311,7 +313,15 @@ function SourceFreshnessPanel({ place }: { place: ExplorePlaceProfile }) {
   );
 }
 
-function SourcePack({ place, mediaUrl }: { place: ExplorePlaceProfile; mediaUrl: (url?: string | null) => string }) {
+function SourcePack({
+  place,
+  mediaUrl,
+  onSourcePackItem,
+}: {
+  place: ExplorePlaceProfile;
+  mediaUrl: (url?: string | null) => string;
+  onSourcePackItem?: (item: ExploreSourcePackItem) => void;
+}) {
   const C = useTheme();
   if (!place.source_pack) return null;
   const pack = place.source_pack;
@@ -346,20 +356,30 @@ function SourcePack({ place, mediaUrl }: { place: ExplorePlaceProfile; mediaUrl:
         <View key={label}>
           <Text style={[styles.packLabel, { color: C.text3 }]}>{label.toUpperCase()}</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.miniRail}>
-            {items.slice(0, 6).map((item, idx) => (
-              <TouchableOpacity
-                key={`${item.title}-${idx}`}
-                style={[styles.miniCard, { borderColor: C.border, backgroundColor: C.s2 }]}
-                disabled={!item.url}
-                onPress={() => item.url && Linking.openURL(item.url)}
-              >
-                {!!item.image_url && <Image source={{ uri: mediaUrl(item.image_url) }} style={styles.miniImage} resizeMode="cover" />}
-                <View style={styles.miniBody}>
-                  <Text style={[styles.miniTitle, { color: C.text }]} numberOfLines={2}>{item.title}</Text>
-                  {!!item.description && <Text style={[styles.miniDesc, { color: C.text3 }]} numberOfLines={3}>{item.description}</Text>}
-                </View>
-              </TouchableOpacity>
-            ))}
+            {items.slice(0, 6).map((item, idx) => {
+              const hasLocation = item.lat != null && item.lng != null;
+              const canOpen = (!!onSourcePackItem && hasLocation) || !!item.url;
+              return (
+                <TouchableOpacity
+                  key={`${item.title}-${idx}`}
+                  style={[styles.miniCard, { borderColor: C.border, backgroundColor: C.s2 }]}
+                  disabled={!canOpen}
+                  onPress={() => {
+                    if (hasLocation && onSourcePackItem) {
+                      onSourcePackItem(item);
+                      return;
+                    }
+                    if (item.url) Linking.openURL(item.url);
+                  }}
+                >
+                  {!!item.image_url && <Image source={{ uri: mediaUrl(item.image_url) }} style={styles.miniImage} resizeMode="cover" />}
+                  <View style={styles.miniBody}>
+                    <Text style={[styles.miniTitle, { color: C.text }]} numberOfLines={2}>{item.title}</Text>
+                    {!!item.description && <Text style={[styles.miniDesc, { color: C.text3 }]} numberOfLines={3}>{item.description}</Text>}
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
           </ScrollView>
         </View>
       ) : null)}

@@ -2615,7 +2615,7 @@ export interface ExplorePlaceProfile {
     official_url?: string;
     nps_park_code?: string;
     sources?: { title?: string; publisher?: string; url?: string; kind?: string }[];
-    photos?: { url?: string; caption?: string; credit?: string }[];
+    photos?: { url?: string; caption?: string; credit?: string; license?: string }[];
     activities?: string[];
     topics?: string[];
     things_to_do?: ExploreSourcePackItem[];
@@ -2673,6 +2673,8 @@ export interface ExploreTrailCard {
 }
 export interface ExploreSourcePackItem {
   kind?: string;
+  source?: string;
+  source_id?: string;
   title?: string;
   description?: string;
   url?: string;
@@ -2681,6 +2683,8 @@ export interface ExploreSourcePackItem {
   image_url?: string;
   image_caption?: string;
   image_credit?: string;
+  image_license?: string;
+  source_label?: string;
 }
 export interface ExploreCatalog {
   schema_version: number;

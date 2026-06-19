@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": 1781671990,
+  "generated_at": 1781846279,
   "count": 7,
   "trails": [
     {
@@ -42,6 +42,7 @@
       "seasonal_notes": "",
       "land_manager": "National Park Service",
       "source_quality": "open_community_data",
+      "source_confidence": {},
       "sources": [
         {
           "source": "osm",
@@ -91,6 +92,7 @@
       "seasonal_notes": "",
       "land_manager": "",
       "source_quality": "open_community_data",
+      "source_confidence": {},
       "sources": [
         {
           "source": "osm",
@@ -142,6 +144,7 @@
       "seasonal_notes": "",
       "land_manager": "",
       "source_quality": "open_community_data",
+      "source_confidence": {},
       "sources": [
         {
           "source": "osm",
@@ -197,6 +200,7 @@
       "seasonal_notes": "Seasonal snow possible",
       "land_manager": "Sierra National Forest",
       "source_quality": "official_source",
+      "source_confidence": {},
       "sources": [
         {
           "source": "usfs",
@@ -255,6 +259,7 @@
       "seasonal_notes": "Check snow and gate status",
       "land_manager": "Sierra National Forest",
       "source_quality": "official_source",
+      "source_confidence": {},
       "sources": [
         {
           "source": "usfs",
@@ -317,6 +322,7 @@
       "seasonal_notes": "",
       "land_manager": "Moab Field Office",
       "source_quality": "official_source",
+      "source_confidence": {},
       "sources": [
         {
           "source": "blm",
@@ -372,6 +378,7 @@
       "seasonal_notes": "",
       "land_manager": "Moab Field Office",
       "source_quality": "official_source",
+      "source_confidence": {},
       "sources": [
         {
           "source": "blm",

@@ -115,6 +115,7 @@ class ExplorePlaceV3:
     amenities: list[str] = field(default_factory=list)
     reservations: dict[str, Any] = field(default_factory=dict)
     media: list[dict[str, Any]] = field(default_factory=list)
+    source_pack: dict[str, Any] = field(default_factory=dict)
     card: dict[str, Any] = field(default_factory=dict)
     sources: list[dict[str, Any]] = field(default_factory=list)
     quality: str = "basic_map_data"

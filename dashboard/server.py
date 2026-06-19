@@ -633,7 +633,47 @@ def _v3_primary_media(place: dict) -> dict:
     for item in media:
         if isinstance(item, dict) and item.get("url"):
             return item
+    source_pack = place.get("source_pack") if isinstance(place.get("source_pack"), dict) else {}
+    for item in source_pack.get("photos") or []:
+        if isinstance(item, dict) and item.get("url"):
+            return item
+    for key in ("things_to_do", "things_to_see", "visitor_centers", "campgrounds"):
+        for item in source_pack.get(key) or []:
+            if isinstance(item, dict) and item.get("image_url"):
+                return {
+                    "url": item.get("image_url"),
+                    "caption": item.get("image_caption") or item.get("title") or place.get("name"),
+                    "credit": item.get("image_credit") or source_pack.get("primary") or "",
+                    "license": item.get("image_license") or source_pack.get("license") or "",
+                }
     return {}
+
+
+def _v3_source_pack(place: dict) -> dict:
+    source_pack = place.get("source_pack")
+    return source_pack if isinstance(source_pack, dict) else {}
+
+
+def _v3_merge_source_pack(existing: dict, generated: dict) -> dict:
+    if not existing:
+        return generated
+    merged = {**generated, **existing}
+    for key in ("sources", "photos", "things_to_do", "things_to_see", "visitor_centers", "campgrounds", "alerts"):
+        values = []
+        for item in [*(generated.get(key) or []), *(existing.get(key) or [])]:
+            if isinstance(item, dict) and item not in values:
+                values.append(item)
+        if values:
+            merged[key] = values
+    for key in ("activities", "topics", "fees"):
+        values = []
+        for item in [*(generated.get(key) or []), *(existing.get(key) or [])]:
+            text = str(item or "").strip()
+            if text and text not in values:
+                values.append(text)
+        if values:
+            merged[key] = values
+    return merged
 
 
 def _explore_v3_place_to_profile(place: dict, rank: int = 900000) -> dict:
@@ -647,15 +687,17 @@ def _explore_v3_place_to_profile(place: dict, rank: int = 900000) -> dict:
     tags = [str(tag) for tag in (place.get("tags") or []) if str(tag).strip()]
     card = place.get("card") if isinstance(place.get("card"), dict) else {}
     primary_source = _v3_primary_source(place)
+    existing_source_pack = _v3_source_pack(place)
     primary_media = _v3_primary_media(place)
     source_title = (
-        primary_source.get("title")
+        existing_source_pack.get("primary")
+        or primary_source.get("title")
         or primary_source.get("publisher")
         or primary_source.get("source")
         or card.get("source_badge")
         or "Open source"
     )
-    source_url = primary_source.get("url") or primary_source.get("source_url") or ""
+    source_url = existing_source_pack.get("official_url") or primary_source.get("url") or primary_source.get("source_url") or ""
     image_url = primary_media.get("url") or ""
     image_credit = primary_media.get("credit") or primary_media.get("caption") or source_title or ""
     quality = _v3_source_quality(place.get("quality"))
@@ -687,7 +729,29 @@ def _explore_v3_place_to_profile(place: dict, rank: int = 900000) -> dict:
                 "url": item.get("url"),
                 "caption": item.get("caption") or title,
                 "credit": item.get("credit") or source_title,
+                "license": item.get("license") or "",
             })
+    for item in existing_source_pack.get("photos") or []:
+        if isinstance(item, dict) and item.get("url") and all(photo.get("url") != item.get("url") for photo in photos):
+            photos.append({
+                "url": item.get("url"),
+                "caption": item.get("caption") or title,
+                "credit": item.get("credit") or source_title,
+                "license": item.get("license") or existing_source_pack.get("license") or "",
+            })
+    generated_source_pack = {
+        "quality": quality,
+        "primary": source_title,
+        "official_url": source_url,
+        "sources": source_pack_sources,
+        "photos": photos,
+        "activities": place.get("amenities") or [],
+        "topics": tags,
+        "source_note": card.get("source_badge") or source_title,
+        "extract": description,
+        "booking_url": (place.get("reservations") or {}).get("url") if isinstance(place.get("reservations"), dict) else "",
+        "license": primary_source.get("license") or existing_source_pack.get("license") or "",
+    }
     return {
         "id": place_id,
         "category": category,
@@ -750,19 +814,7 @@ def _explore_v3_place_to_profile(place: dict, rank: int = 900000) -> dict:
         },
         "audio_script": description,
         "wiki_extract": description if any(str(source.get("source") or "").lower() == "wikidata" for source in place.get("sources") or [] if isinstance(source, dict)) else "",
-        "source_pack": {
-            "quality": quality,
-            "primary": source_title,
-            "official_url": source_url,
-            "sources": source_pack_sources,
-            "photos": photos,
-            "activities": place.get("amenities") or [],
-            "topics": tags,
-            "source_note": card.get("source_badge") or source_title,
-            "extract": description,
-            "booking_url": (place.get("reservations") or {}).get("url") if isinstance(place.get("reservations"), dict) else "",
-            "license": primary_source.get("license") or "",
-        },
+        "source_pack": _v3_merge_source_pack(existing_source_pack, generated_source_pack),
         "facts": {
             "coordinates": f"{lat_value:.5f}, {lng_value:.5f}" if lat_value is not None and lng_value is not None else "",
             "source_url": source_url,

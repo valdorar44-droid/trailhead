@@ -23,6 +23,7 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
     () => filter === 'all' ? trails : trails.filter(trail => trail.difficulty.toLowerCase().includes(filter)),
     [filter, trails],
   );
+  const areaPhoto = useMemo(() => primaryAreaPhoto(place), [place]);
 
   if (!trails.length) return null;
 
@@ -59,7 +60,7 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
       <View style={styles.list}>
         {visibleTrails.map(trail => {
           const selected = selectedId === trail.id;
-          const photo = primaryTrailPhoto(trail);
+          const photo = primaryTrailPhoto(trail) || areaPhoto;
           const sourceLabel = trail.source_label || trail.source_pack?.primary || trail.image_credit || '';
           const featureLabel = trail.feature_label || trail.feature_type?.replace(/_/g, ' ') || 'Trail';
           return (
@@ -69,7 +70,13 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
                 activeOpacity={0.88}
                 onPress={() => setSelectedId(current => current === trail.id ? null : trail.id)}
               >
-                <Image source={{ uri: mediaUrl(photo || trail.image_url) }} style={styles.trailImage} resizeMode="cover" />
+                {photo ? (
+                  <Image source={{ uri: mediaUrl(photo) }} style={styles.trailImage} resizeMode="cover" />
+                ) : (
+                  <View style={styles.trailImageFallback}>
+                    <Ionicons name="trail-sign-outline" size={32} color="#64748b" />
+                  </View>
+                )}
                 <View style={styles.trailBody}>
                   <View style={styles.trailTitleRow}>
                     <Text style={[styles.trailTitle, { color: C.text }]} numberOfLines={2}>{trail.title}</Text>
@@ -191,6 +198,15 @@ function primaryTrailPhoto(trail: ExploreTrailCard) {
   return trail.photos?.find(photo => !!photo.url)?.url || trail.image_url || '';
 }
 
+function primaryAreaPhoto(place: ExplorePlaceProfile) {
+  return (
+    place.summary.image_url
+    || place.summary.thumbnail_url
+    || place.source_pack?.photos?.find(photo => !!photo.url)?.url
+    || ''
+  );
+}
+
 function photoCredit(trail: ExploreTrailCard) {
   const photo = trail.photos?.find(item => !!item.url);
   return compactCredit([
@@ -243,6 +259,7 @@ const styles = StyleSheet.create({
   trailWrap: { borderWidth: 1, borderRadius: 13, overflow: 'hidden' },
   trailRow: { flexDirection: 'row', minHeight: 150 },
   trailImage: { width: 126, minHeight: 150, backgroundColor: '#e2e8f0' },
+  trailImageFallback: { width: 126, minHeight: 150, alignItems: 'center', justifyContent: 'center', backgroundColor: '#e2e8f0' },
   trailBody: { flex: 1, minWidth: 0, padding: 13, gap: 6 },
   trailTitleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
   trailTitle: { flex: 1, minWidth: 0, fontSize: 18, lineHeight: 22, fontWeight: '900' },

@@ -141,6 +141,52 @@ class OfficialPlaceEnrichmentTests(unittest.TestCase):
         self.assertEqual([p["name"] for p in merged["trip_services"]], ["Water"])
         self.assertEqual(merged["context_status"]["status"], "partial")
 
+    def test_v3_profile_preserves_rich_source_pack_and_photo_fallbacks(self):
+        profile = server._explore_v3_place_to_profile({
+            "id": "place:nps:yose",
+            "name": "Yosemite National Park",
+            "category": "park",
+            "lat": 37.84,
+            "lng": -119.55,
+            "region": "CA",
+            "summary": "Official park summary.",
+            "quality": "official_source",
+            "sources": [{
+                "source": "nps",
+                "source_id": "yose",
+                "url": "https://www.nps.gov/yose/index.htm",
+                "license": "National Park Service public data",
+                "attribution": "National Park Service",
+            }],
+            "source_pack": {
+                "quality": "official",
+                "primary": "National Park Service",
+                "official_url": "https://www.nps.gov/yose/index.htm",
+                "photos": [{
+                    "url": "https://www.nps.gov/yose.jpg",
+                    "caption": "Yosemite Valley",
+                    "credit": "NPS",
+                    "license": "National Park Service public data",
+                }],
+                "things_to_do": [{
+                    "title": "Mist Trail",
+                    "description": "Stone steps beside waterfalls.",
+                    "lat": 37.7325,
+                    "lng": -119.5586,
+                    "image_url": "https://www.nps.gov/mist.jpg",
+                    "image_credit": "NPS",
+                    "image_license": "National Park Service public data",
+                }],
+                "fees": ["Private Vehicle: $35"],
+            },
+        })
+
+        self.assertEqual(profile["summary"]["image_url"], "https://www.nps.gov/yose.jpg")
+        self.assertEqual(profile["summary"]["image_license"], "National Park Service public data")
+        self.assertEqual(profile["source_pack"]["fees"], ["Private Vehicle: $35"])
+        self.assertEqual(profile["source_pack"]["things_to_do"][0]["title"], "Mist Trail")
+        self.assertTrue(any(photo["url"] == "https://www.nps.gov/yose.jpg" for photo in profile["source_pack"]["photos"]))
+
 
 class OfficialPlaceEndpointTests(unittest.IsolatedAsyncioTestCase):
     async def test_nearby_places_returns_official_explore_category_without_unlock(self):

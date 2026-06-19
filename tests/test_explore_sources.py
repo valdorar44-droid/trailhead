@@ -14,7 +14,13 @@ from scripts.explore_sources.base.fetch import parse_headers, resolve_input_path
 from scripts.explore_sources.base.quality import score_place
 from scripts.explore_sources.base.schema import ExplorePlaceV3
 from scripts.explore_sources.blm.import_blm import import_blm_fixture
-from scripts.explore_sources.nps.fetch_nps import fetch_nps_parks_to_cache, fetch_nps_source_pack_to_cache, park_codes_for_item, request_params
+from scripts.explore_sources.nps.fetch_nps import (
+    NpsRequestBudgetExceeded,
+    fetch_nps_parks_to_cache,
+    fetch_nps_source_pack_to_cache,
+    park_codes_for_item,
+    request_params,
+)
 from scripts.explore_sources.nps.import_nps import import_nps_fixture
 from scripts.explore_sources.openbeta.import_openbeta import import_openbeta_fixture
 from scripts.explore_sources.osm.import_geofabrik import import_osm_fixture
@@ -588,6 +594,26 @@ class ExploreSourcePipelineTests(unittest.TestCase):
             )
             self.assertEqual(cached_again, path)
             self.assertEqual(len(opener.requests), 4)
+
+    def test_nps_source_pack_fetcher_stops_before_request_budget_is_exceeded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            opener = FakeNpsSourcePackOpener()
+            with self.assertRaises(NpsRequestBudgetExceeded):
+                fetch_nps_source_pack_to_cache(
+                    api_key="test-key",
+                    cache_dir=tmp,
+                    park_codes=["yose"],
+                    limit=1,
+                    max_records=1,
+                    related_endpoints=["places", "thingstodo", "events"],
+                    related_max_records=1,
+                    request_budget=2,
+                    opener=opener,
+                )
+            self.assertEqual(
+                [urlparse(request.full_url).path.rstrip("/").split("/")[-1] for request, _timeout in opener.requests],
+                ["parks", "places"],
+            )
 
     def test_nps_live_request_params(self):
         params = request_params(park_codes=["yose"], states=["CA", "UT"], query="waterfalls", limit=25, start=50)

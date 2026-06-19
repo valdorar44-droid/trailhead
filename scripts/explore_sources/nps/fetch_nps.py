@@ -32,6 +32,25 @@ NPS_RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
 UrlOpener = Callable[[urllib.request.Request, float], Any]
 
 
+class NpsRequestBudgetExceeded(RuntimeError):
+    """Raised before making an NPS request that would exceed the run budget."""
+
+
+class NpsRequestBudget:
+    def __init__(self, limit: int | None = None):
+        self.limit = limit if limit and limit > 0 else None
+        self.used = 0
+
+    def charge(self, endpoint: str) -> None:
+        if self.limit is None:
+            return
+        if self.used >= self.limit:
+            raise NpsRequestBudgetExceeded(
+                f"NPS request budget exhausted before {endpoint}: {self.used}/{self.limit} requests used"
+            )
+        self.used += 1
+
+
 def fetch_nps_source_pack_to_cache(
     *,
     api_key: str | None = None,
@@ -46,6 +65,7 @@ def fetch_nps_source_pack_to_cache(
     related_max_records: int = 100,
     timeout: float = 30.0,
     force: bool = False,
+    request_budget: int | NpsRequestBudget | None = None,
     opener: UrlOpener = urllib.request.urlopen,
 ) -> Path:
     key = (api_key or os.environ.get("NPS_API_KEY") or "").strip()
@@ -63,6 +83,7 @@ def fetch_nps_source_pack_to_cache(
     )
     if target.exists() and not force:
         return target
+    budget = coerce_request_budget(request_budget)
     target.parent.mkdir(parents=True, exist_ok=True)
     parks = fetch_nps_parks(
         api_key=key,
@@ -72,6 +93,7 @@ def fetch_nps_source_pack_to_cache(
         limit=limit,
         max_records=max_records,
         timeout=timeout,
+        request_budget=budget,
         opener=opener,
     )
     park_code_list = [str(park.get("parkCode") or park.get("id") or "").strip() for park in parks if isinstance(park, dict)]
@@ -90,6 +112,7 @@ def fetch_nps_source_pack_to_cache(
                     limit=limit,
                     max_records=related_max_records,
                     timeout=timeout,
+                    request_budget=budget,
                     opener=opener,
                 )
             continue
@@ -101,6 +124,7 @@ def fetch_nps_source_pack_to_cache(
                 limit=limit,
                 max_records=max(related_max_records, related_max_records * max(len(code_batch), 1)),
                 timeout=timeout,
+                request_budget=budget,
                 opener=opener,
             )
             for item in endpoint_items:
@@ -136,6 +160,7 @@ def fetch_nps_parks_to_cache(
     max_records: int = 500,
     timeout: float = 30.0,
     force: bool = False,
+    request_budget: int | NpsRequestBudget | None = None,
     opener: UrlOpener = urllib.request.urlopen,
 ) -> Path:
     key = (api_key or os.environ.get("NPS_API_KEY") or "").strip()
@@ -144,6 +169,7 @@ def fetch_nps_parks_to_cache(
     target = cache_path(cache_dir, park_codes=park_codes, states=states, query=query, max_records=max_records)
     if target.exists() and not force:
         return target
+    budget = coerce_request_budget(request_budget)
     target.parent.mkdir(parents=True, exist_ok=True)
     parks = fetch_nps_parks(
         api_key=key,
@@ -153,6 +179,7 @@ def fetch_nps_parks_to_cache(
         limit=limit,
         max_records=max_records,
         timeout=timeout,
+        request_budget=budget,
         opener=opener,
     )
     payload = {
@@ -176,6 +203,7 @@ def fetch_nps_endpoint(
     limit: int = 50,
     max_records: int = 500,
     timeout: float = 30.0,
+    request_budget: int | NpsRequestBudget | None = None,
     opener: UrlOpener = urllib.request.urlopen,
 ) -> list[dict[str, Any]]:
     endpoint = endpoint.strip().lower()
@@ -188,9 +216,10 @@ def fetch_nps_endpoint(
     out: list[dict[str, Any]] = []
     start = 0
     page_limit = min(limit, max_records)
+    budget = coerce_request_budget(request_budget)
     while len(out) < max_records:
         params = request_params(park_codes=park_codes, states=states, query=query, limit=page_limit, start=start)
-        page = nps_get(endpoint, api_key=api_key, params=params, timeout=timeout, opener=opener)
+        page = nps_get(endpoint, api_key=api_key, params=params, timeout=timeout, request_budget=budget, opener=opener)
         items = page.get("data") or []
         if not isinstance(items, list) or not items:
             break
@@ -213,6 +242,7 @@ def fetch_nps_parks(
     limit: int = 50,
     max_records: int = 500,
     timeout: float = 30.0,
+    request_budget: int | NpsRequestBudget | None = None,
     opener: UrlOpener = urllib.request.urlopen,
 ) -> list[dict[str, Any]]:
     if limit <= 0:
@@ -222,9 +252,10 @@ def fetch_nps_parks(
     out: list[dict[str, Any]] = []
     start = 0
     page_limit = min(limit, max_records)
+    budget = coerce_request_budget(request_budget)
     while len(out) < max_records:
         params = request_params(park_codes=park_codes, states=states, query=query, limit=page_limit, start=start)
-        page = nps_get("parks", api_key=api_key, params=params, timeout=timeout, opener=opener)
+        page = nps_get("parks", api_key=api_key, params=params, timeout=timeout, request_budget=budget, opener=opener)
         items = page.get("data") or []
         if not isinstance(items, list) or not items:
             break
@@ -244,6 +275,7 @@ def nps_get(
     api_key: str,
     params: dict[str, Any],
     timeout: float,
+    request_budget: NpsRequestBudget | None = None,
     opener: UrlOpener = urllib.request.urlopen,
 ) -> dict[str, Any]:
     query_params = {key: value for key, value in params.items() if value not in (None, "", [])}
@@ -261,6 +293,8 @@ def nps_get(
     )
     for attempt in range(4):
         try:
+            if request_budget:
+                request_budget.charge(endpoint)
             with opener(request, timeout=timeout) as response:
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
@@ -276,6 +310,12 @@ def nps_get(
         except json.JSONDecodeError as exc:
             raise RuntimeError(f"NPS {endpoint} response was not valid JSON") from exc
     raise RuntimeError(f"NPS {endpoint} fetch failed after retries")
+
+
+def coerce_request_budget(value: int | NpsRequestBudget | None) -> NpsRequestBudget:
+    if isinstance(value, NpsRequestBudget):
+        return value
+    return NpsRequestBudget(value)
 
 
 def retry_delay(exc: Exception, attempt: int) -> float:

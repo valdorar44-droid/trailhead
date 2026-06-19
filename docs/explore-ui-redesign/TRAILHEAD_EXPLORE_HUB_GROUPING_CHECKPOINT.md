@@ -62,3 +62,14 @@ Date: 2026-06-19
 - Live targeted probe succeeded without a broad all-parks refresh.
 - Grand Canyon source pack after rebuild: 20 photos, 6 things to do/tours, 96 things to see, 3 campgrounds, 2 visitor centers, 22 events, 24 parking records, 2 alerts.
 - Catalog stayed at 511 top-level places, confirming the seed enriched the destination hub instead of adding duplicate child cards to top-level Explorer.
+
+## Next Seed Checkpoint: Yellowstone
+
+Date: 2026-06-19
+
+- Target: `yell` / Yellowstone National Park.
+- Cached payload: `data/explore/source_cache/nps/source-pack_codes-yell_with-places-thingstodo-campgrounds-visitorcenters-alerts-articles-events-tours-parkin_max-500.json`.
+- Seeded through `scripts/run_nps_hourly_enrichment.py` with a 750-request NPS budget.
+- Yellowstone fetch used 14 NPS requests.
+- Yellowstone source pack after rebuild: 20 photos, 48 things to do/tours, 96 things to see, 12 campgrounds, 11 visitor centers, 35 events, 11 parking records, 4 alerts.
+- The first runner audit exposed Railway provider keys leaking into local tests; the runner now strips live provider keys before audit subprocesses.

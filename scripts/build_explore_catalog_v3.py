@@ -59,6 +59,7 @@ def build_catalog(
     nps_related_endpoints: list[str] | None = None,
     nps_per_park_endpoints: list[str] | None = None,
     nps_related_max_records: int = 100,
+    nps_request_budget: int | None = None,
     ridb_live: bool = False,
     ridb_api_key: str = "",
     ridb_states: list[str] | None = None,
@@ -108,6 +109,7 @@ def build_catalog(
             "max_records": nps_max_records,
             "timeout": http_timeout,
             "force": force_fetch,
+            "request_budget": nps_request_budget,
         }
         if nps_rich:
             nps_fetch_kwargs.update({
@@ -214,6 +216,7 @@ def main() -> int:
     parser.add_argument("--nps-related-endpoint", action="append", default=[], help="NPS related endpoint for --nps-rich, e.g. places or thingstodo. May be repeated.")
     parser.add_argument("--nps-per-park-endpoint", action="append", default=None, help="Fetch a related endpoint one park at a time for higher-fidelity grouping. Use sparingly to avoid NPS rate limits.")
     parser.add_argument("--nps-related-max-records", type=int, default=100, help="Maximum related records per NPS endpoint per park.")
+    parser.add_argument("--nps-request-budget", type=int, default=None, help="Maximum NPS HTTP requests allowed for this live fetch run.")
     parser.add_argument("--ridb-live", action="store_true", help="Fetch live RIDB facilities API data into the source cache before importing.")
     parser.add_argument("--ridb-api-key", default="", help="RIDB API key. Defaults to RIDB_API_KEY or RECREATION_GOV_API_KEY when omitted.")
     parser.add_argument("--ridb-state", action="append", default=[], help="RIDB state filter, e.g. CA. May be repeated.")
@@ -265,6 +268,7 @@ def main() -> int:
         nps_related_endpoints=args.nps_related_endpoint,
         nps_per_park_endpoints=args.nps_per_park_endpoint,
         nps_related_max_records=args.nps_related_max_records,
+        nps_request_budget=args.nps_request_budget,
         ridb_live=args.ridb_live,
         ridb_api_key=args.ridb_api_key,
         ridb_states=args.ridb_state,

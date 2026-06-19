@@ -61,3 +61,28 @@ railway run -- python3 scripts/build_explore_catalog_v3.py --nps-live --nps-rich
 ```
 
 Merge targeted refreshed source packs back into the normal v3 build once the API limit allows it.
+
+## Hourly Runner
+
+Added `scripts/run_nps_hourly_enrichment.py` for resumable rich NPS batching.
+
+- Default cap: 750 NPS HTTP requests per invocation.
+- Default planning estimate: 25 requests per park, so a normal hourly run selects up to 30 parks.
+- Actual fetches share one in-process request budget and stop before request 751.
+- Progress state is written to ignored local data at `data/explore/nps_enrichment_state.json`.
+- The runner skips parks with existing rich cache files unless `--force-fetch` is passed.
+- The runner rebuilds `dashboard/explore_catalog_v3.json`, `dashboard/explore_trail_geometries_v1.json`, and `dashboard/explore_source_records_sample.jsonl` from the national cache plus every per-park rich source-pack cache.
+
+Manual single-park run:
+
+```bash
+python3 scripts/run_nps_hourly_enrichment.py --park-code yell --max-api-calls 750 --run-audits
+```
+
+Unattended hourly shape, once we are ready to let the repo mutate hourly:
+
+```cron
+0 * * * * cd /home/sean/.openclaw/workspace/trailhead && railway run -- python3 scripts/run_nps_hourly_enrichment.py --max-api-calls 750 --run-audits >> /home/sean/.openclaw/workspace/trailhead/data/explore/nps_enrichment_cron.log 2>&1
+```
+
+Keep the hourly runner review-first for now: let it rebuild the catalog, then commit/deploy/OTA after auditing the batch.

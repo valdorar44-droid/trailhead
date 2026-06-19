@@ -434,6 +434,7 @@ export default function GuideScreen() {
   const activeTrip = useStore(st => st.activeTrip);
   const setActiveTrip = useStore(st => st.setActiveTrip);
   const userLoc = useStore(st => st.userLoc);
+  const setUserLoc = useStore(st => st.setUserLoc);
   const weatherUnitMode = useStore(st => st.weatherUnitMode);
   const setWeatherUnitMode = useStore(st => st.setWeatherUnitMode);
   const setPendingNavigatePlace = useStore(st => st.setPendingNavigatePlace);
@@ -487,6 +488,7 @@ export default function GuideScreen() {
   const [autoPlay, setAutoPlay] = useState(false);
   const [highlightSentence, setHighlightSentence] = useState(-1);
   const locationSub = useRef<Location.LocationSubscription | null>(null);
+  const exploreLocationPrompted = useRef(false);
   const storyScrollRef = useRef<ScrollView | null>(null);
   const storyTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const requestedView = Array.isArray(params.view) ? params.view[0] : params.view;
@@ -570,9 +572,40 @@ export default function GuideScreen() {
   }, [exploreMode, userLoc?.lat, userLoc?.lng]);
 
   useEffect(() => {
+    if (tab !== 'explore' || userLoc || exploreLocationPrompted.current) return;
+    let cancelled = false;
+    exploreLocationPrompted.current = true;
+    setExploreHomeWeatherLoading(true);
+    setExploreHomeWeatherError('');
+    (async () => {
+      const existing = await Location.getForegroundPermissionsAsync().catch(() => null);
+      const permission = existing?.status === 'granted'
+        ? existing
+        : await Location.requestForegroundPermissionsAsync().catch(() => null);
+      if (cancelled) return;
+      if (permission?.status !== 'granted') {
+        setExploreHomeWeather(null);
+        setExploreHomeWeatherError('Location unavailable');
+        setExploreHomeWeatherLoading(false);
+        return;
+      }
+      const fix = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }).catch(() => null);
+      if (cancelled) return;
+      if (fix?.coords) {
+        setUserLoc({ lat: fix.coords.latitude, lng: fix.coords.longitude });
+      } else {
+        setExploreHomeWeather(null);
+        setExploreHomeWeatherError('Location unavailable');
+        setExploreHomeWeatherLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [tab, userLoc?.lat, userLoc?.lng, setUserLoc]);
+
+  useEffect(() => {
     if (tab !== 'explore' || !userLoc) {
       setExploreHomeWeather(null);
-      setExploreHomeWeatherError(userLoc ? '' : 'Location unavailable');
+      setExploreHomeWeatherError(userLoc ? '' : '');
       setExploreHomeWeatherLoading(false);
       return;
     }
@@ -779,7 +812,7 @@ export default function GuideScreen() {
   const enrichedExplorePlaces = useMemo(() => (
     mergeCuratedExplorePlaces(explorePlaces).map(place => exploreTrailAreasById[place.id] ?? place)
   ), [explorePlaces, exploreTrailAreasById]);
-  const heroHeight = Math.max(390, Math.min(430, Math.round(windowHeight * 0.48)));
+  const heroHeight = Math.max(480, Math.min(560, Math.round(windowHeight * 0.58)));
   const hasExploreQuery = exploreQuery.trim().length > 0;
   const showExperienceSearch = shouldSearchBookableExperiences(exploreQuery, exploreCategory);
   const rankedExplore = useMemo(() => {
@@ -946,7 +979,7 @@ export default function GuideScreen() {
       : exploreHomeWeatherError || 'Current area';
     return {
       loading: exploreHomeWeatherLoading,
-      unavailable: !exploreHomeWeather && !!exploreHomeWeatherError,
+      unavailable: !exploreHomeWeather && !exploreHomeWeatherLoading,
       icon: wmoIcon(code),
       temp,
       detail,
@@ -2225,7 +2258,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   clearCategoryText: { color: C.orange, fontSize: 11, fontFamily: mono, fontWeight: '900' },
   exploreFeedSheet: {
     marginHorizontal: -14,
-    marginTop: -30,
+    marginTop: 0,
     paddingTop: 22,
     paddingHorizontal: 14,
     paddingBottom: 18,

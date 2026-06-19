@@ -5,7 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { EXPLORE_CATEGORY_CHIPS, type ExploreCategoryKey, type ExploreMode } from './exploreDisplay';
 
 const DEFAULT_HERO_IMAGE = require('@/assets/explore-hero-welcome-mountains.jpg');
-const HERO_CATEGORY_KEYS: ExploreCategoryKey[] = ['all', 'camp', 'glamping', 'trails', 'huts'];
+const HERO_CATEGORY_KEYS: ExploreCategoryKey[] = ['all', 'camp', 'glamping', 'trails', 'waterfalls', 'peaks', 'huts'];
 
 type HeroWeather = {
   loading: boolean;
@@ -65,64 +65,71 @@ export function ExploreHero({
         <Text style={styles.title}>Find your next adventure</Text>
         <View style={styles.searchRow}>
           <View style={styles.search}>
-            <Ionicons name="search-outline" size={22} color="#64748b" />
+            <Ionicons name="search-outline" size={22} color="rgba(255,255,255,0.9)" />
             <TextInput
               value={query}
               onChangeText={onQueryChange}
               placeholder="Search camps, trails, fuel"
-              placeholderTextColor="#94a3b8"
+              placeholderTextColor="rgba(255,255,255,0.72)"
               style={styles.input}
               returnKeyType="search"
             />
             {query ? (
               <TouchableOpacity onPress={onClearQuery} style={styles.iconButton} hitSlop={8}>
-                <Ionicons name="close" size={16} color="#334155" />
+                <Ionicons name="close" size={16} color="rgba(255,255,255,0.86)" />
               </TouchableOpacity>
             ) : null}
           </View>
         </View>
-        <View style={styles.weather}>
-          <View style={styles.weatherLeft}>
-            {weather.loading ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <Ionicons name={weather.icon} size={22} color="rgba(255,255,255,0.92)" />
-            )}
-            <View style={styles.weatherTextWrap}>
-              <Text style={styles.weatherTemp} numberOfLines={1}>
-                {weather.loading ? 'Checking weather' : weather.temp}
-              </Text>
-              <Text style={styles.weatherDetail} numberOfLines={1}>
-                {weather.loading ? 'Current area' : weather.detail}
-              </Text>
+        {weather.loading || !weather.unavailable ? (
+          <View style={styles.weather}>
+            <View style={styles.weatherLeft}>
+              {weather.loading ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Ionicons name={weather.icon} size={22} color="rgba(255,255,255,0.92)" />
+              )}
+              <View style={styles.weatherTextWrap}>
+                <Text style={styles.weatherTemp} numberOfLines={1}>
+                  {weather.loading ? 'Checking weather' : weather.temp}
+                </Text>
+                <Text style={styles.weatherDetail} numberOfLines={1}>
+                  {weather.loading ? 'Current area' : weather.detail}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.unitToggle}>
+              {(['imperial', 'metric'] as const).map(unit => {
+                const label = unit === 'imperial' ? 'F' : 'C';
+                const active = weather.unitMode === unit || (weather.unitMode === 'auto' && unit === 'imperial');
+                return (
+                  <TouchableOpacity
+                    key={unit}
+                    style={[styles.unitOption, active && styles.unitOptionActive]}
+                    onPress={() => weather.onUnitChange(unit)}
+                    activeOpacity={0.82}
+                  >
+                    <Text style={[styles.unitText, active && styles.unitTextActive]}>{label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           </View>
-          <View style={styles.unitToggle}>
-            {(['imperial', 'metric'] as const).map(unit => {
-              const label = unit === 'imperial' ? 'F' : 'C';
-              const active = weather.unitMode === unit || (weather.unitMode === 'auto' && unit === 'imperial');
-              return (
-                <TouchableOpacity
-                  key={unit}
-                  style={[styles.unitOption, active && styles.unitOptionActive]}
-                  onPress={() => weather.onUnitChange(unit)}
-                  activeOpacity={0.82}
-                >
-                  <Text style={[styles.unitText, active && styles.unitTextActive]}>{label}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </View>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryRail}>
+        ) : null}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.categoryScroller}
+          contentContainerStyle={styles.categoryRail}
+        >
           {HERO_CATEGORY_KEYS.map(key => {
             const source = EXPLORE_CATEGORY_CHIPS.find(item => item.key === key);
             if (!source) return null;
             const active = key === 'all'
               ? selectedCategory === 'all' && mode !== 'nearby'
               : selectedCategory === key && mode !== 'nearby';
-            const label = key === 'huts' ? 'Cabins' : source.label;
-            const icon = key === 'huts' ? 'home-outline' : source.icon;
+            const label = key === 'huts' ? 'Cabins' : key === 'peaks' ? 'Mountains' : source.label;
+            const icon = key === 'huts' ? 'home-outline' : key === 'peaks' ? 'triangle-outline' : source.icon;
             return (
               <TouchableOpacity
                 key={key}
@@ -153,7 +160,7 @@ const styles = StyleSheet.create({
   statusShade: { position: 'absolute', top: 0, left: 0, right: 0 },
   bottomShade: { position: 'absolute', left: 0, right: 0, bottom: 0, height: '58%' },
   content: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
     justifyContent: 'flex-end',
     paddingHorizontal: 20,
     paddingBottom: 24,
@@ -186,22 +193,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: 'rgba(255,255,255,0.92)',
+    backgroundColor: 'rgba(15,23,42,0.30)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.5)',
+    borderColor: 'rgba(255,255,255,0.34)',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.18,
     shadowRadius: 22,
   },
-  input: { flex: 1, color: '#111827', fontSize: 15, fontWeight: '800', paddingVertical: 0 },
+  input: { flex: 1, color: '#fff', fontSize: 15, fontWeight: '800', paddingVertical: 0 },
   iconButton: {
     width: 34,
     height: 34,
     borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(15,23,42,0.10)',
+    backgroundColor: 'rgba(255,255,255,0.14)',
   },
   weather: {
     minHeight: 48,
@@ -238,6 +245,7 @@ const styles = StyleSheet.create({
   unitOptionActive: { backgroundColor: '#fff' },
   unitText: { color: 'rgba(255,255,255,0.74)', fontSize: 12, fontWeight: '900' },
   unitTextActive: { color: '#0f172a' },
+  categoryScroller: { flexGrow: 0, flexShrink: 0, height: 82 },
   categoryRail: { gap: 10, paddingTop: 5, paddingRight: 30 },
   categoryItem: { width: 62, alignItems: 'center', gap: 7 },
   categoryIcon: {

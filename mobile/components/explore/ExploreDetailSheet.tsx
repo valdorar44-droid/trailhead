@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Image, Linking, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Image, Linking, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, type ImageResizeMode, type ImageStyle, type StyleProp } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { ExplorePlaceProfile, ExploreSourcePackItem, ExploreTrailCard } from '@/lib/api';
 import { mono, useTheme } from '@/lib/design';
@@ -41,6 +41,7 @@ type ExploreDetailModule = {
   tone: string;
   count?: number;
   imageUrl?: string;
+  imageCandidates?: string[];
   searchText: string;
 };
 
@@ -81,6 +82,51 @@ type Props = {
   onTrailRoute?: (trail: ExploreTrailCard) => void;
   mediaUrl: (url?: string | null) => string;
 };
+
+function ResilientImage({
+  uris,
+  style,
+  resizeMode = 'cover',
+}: {
+  uris: string[];
+  style: StyleProp<ImageStyle>;
+  resizeMode?: ImageResizeMode;
+}) {
+  const cleanUris = useMemo(() => {
+    const seen = new Set<string>();
+    return uris.map(uri => String(uri || '').trim()).filter(uri => {
+      if (!uri || seen.has(uri)) return false;
+      seen.add(uri);
+      return true;
+    });
+  }, [uris]);
+  const resetKey = cleanUris.join('|');
+  const [index, setIndex] = useState(0);
+
+  useEffect(() => {
+    setIndex(0);
+  }, [resetKey]);
+
+  const uri = cleanUris[index];
+  if (!uri) return null;
+  return (
+    <Image
+      key={uri}
+      source={{ uri }}
+      style={style}
+      resizeMode={resizeMode}
+      onError={() => setIndex(current => current < cleanUris.length - 1 ? current + 1 : cleanUris.length)}
+    />
+  );
+}
+
+function sizedNpsMediaUrl(url?: string | null, width = 900) {
+  const clean = String(url || '').trim();
+  if (!clean) return '';
+  if (!/^https:\/\/www\.nps\.gov\/common\/uploads\//i.test(clean)) return clean;
+  if (/[?&](width|maxwidth)=/i.test(clean)) return clean;
+  return `${clean}${clean.includes('?') ? '&' : '?'}width=${width}&quality=85&mode=crop`;
+}
 
 export function ExploreDetailSheet({
   place,
@@ -132,9 +178,23 @@ export function ExploreDetailSheet({
     }
   }, [place.id, tab]);
 
-  const firstItemImage = (items?: ExploreSourcePackItem[]) => {
-    const found = items?.find(item => item.image_url)?.image_url;
-    return found ? mediaUrl(found) : '';
+  const mediaCandidates = (...groups: Array<Array<string | null | undefined> | string | null | undefined>) => {
+    const urls: string[] = [];
+    const seen = new Set<string>();
+    for (const group of groups) {
+      const rawList = Array.isArray(group) ? group : [group];
+      for (const raw of rawList) {
+        const normalized = mediaUrl(raw).trim();
+        if (!normalized) continue;
+        const sized = sizedNpsMediaUrl(normalized);
+        for (const url of [sized, normalized]) {
+          if (!url || seen.has(url)) continue;
+          seen.add(url);
+          urls.push(url);
+        }
+      }
+    }
+    return urls;
   };
 
   const searchTextForItems = (items?: ExploreSourcePackItem[]) => (items ?? [])
@@ -143,14 +203,27 @@ export function ExploreDetailSheet({
 
   const detailModules = useMemo<ExploreDetailModule[]>(() => {
     const modules: ExploreDetailModule[] = [];
+    const usedTileImages = new Set<string>();
     const add = (module: ExploreDetailModule | null | false | undefined) => {
       if (module) modules.push(module);
     };
     const count = (items?: ExploreSourcePackItem[]) => Array.isArray(items) ? items.length : 0;
-    const packPhoto = pack?.photos?.find(photo => photo.url)?.url;
-    const heroOrPack = packPhoto ? mediaUrl(packPhoto) : imageUrl;
+    const packPhotoCandidates = mediaCandidates((pack?.photos ?? []).map(photo => photo.url));
+    const imageKey = (url: string) => url.replace(/\?.*$/, '');
+    const tileImages = (items?: ExploreSourcePackItem[], extra: Array<string | null | undefined> = []) => {
+      const candidates = mediaCandidates((items ?? []).map(item => item.image_url), extra, packPhotoCandidates, imageUrl);
+      const primary = candidates.find(url => !usedTileImages.has(imageKey(url))) || candidates[0] || '';
+      if (primary) usedTileImages.add(imageKey(primary));
+      return { imageUrl: primary, imageCandidates: primary ? [primary, ...candidates.filter(url => url !== primary)] : candidates };
+    };
     const activityCount = (pack?.activities?.length ?? 0) + (place.amenities?.length ?? 0);
     const hasCoords = place.summary.lat != null && place.summary.lng != null;
+    const seeImages = tileImages(pack?.things_to_see);
+    const doImages = tileImages(pack?.things_to_do);
+    const stayImages = tileImages(pack?.campgrounds);
+    const visitorImages = tileImages(pack?.visitor_centers);
+    const trailImages = tileImages([], (place.trails ?? []).map(trail => trail.image_url));
+    const eventImages = tileImages(pack?.events);
 
     add({
       key: 'see',
@@ -159,7 +232,8 @@ export function ExploreDetailSheet({
       icon: 'camera-outline',
       tone: '#0f766e',
       count: count(pack?.things_to_see) || undefined,
-      imageUrl: firstItemImage(pack?.things_to_see) || heroOrPack,
+      imageUrl: seeImages.imageUrl,
+      imageCandidates: seeImages.imageCandidates,
       searchText: `${searchTextForItems(pack?.things_to_see)} ${place.profile?.why_it_matters ?? ''} ${place.wiki_extract ?? ''}`,
     });
 
@@ -170,7 +244,8 @@ export function ExploreDetailSheet({
       icon: 'walk-outline',
       tone: '#f97316',
       count: count(pack?.things_to_do) || activityCount || undefined,
-      imageUrl: firstItemImage(pack?.things_to_do) || heroOrPack,
+      imageUrl: doImages.imageUrl,
+      imageCandidates: doImages.imageCandidates,
       searchText: `${searchTextForItems(pack?.things_to_do)} ${(pack?.activities ?? []).join(' ')} ${(place.amenities ?? []).join(' ')}`,
     });
 
@@ -181,7 +256,8 @@ export function ExploreDetailSheet({
       icon: 'bonfire-outline',
       tone: '#16a34a',
       count: count(pack?.campgrounds) || undefined,
-      imageUrl: firstItemImage(pack?.campgrounds) || heroOrPack,
+      imageUrl: stayImages.imageUrl,
+      imageCandidates: stayImages.imageCandidates,
       searchText: `${searchTextForItems(pack?.campgrounds)} camp campground lodge cabin rv overnight`,
     });
 
@@ -192,7 +268,8 @@ export function ExploreDetailSheet({
       icon: 'information-circle-outline',
       tone: '#2563eb',
       count: count(pack?.visitor_centers) || undefined,
-      imageUrl: firstItemImage(pack?.visitor_centers) || heroOrPack,
+      imageUrl: visitorImages.imageUrl,
+      imageCandidates: visitorImages.imageCandidates,
       searchText: `${searchTextForItems(pack?.visitor_centers)} visitor center ranger station park info`,
     });
 
@@ -203,7 +280,8 @@ export function ExploreDetailSheet({
       icon: 'trail-sign-outline',
       tone: '#ca8a04',
       count: place.trails?.length || undefined,
-      imageUrl: place.trails?.find(trail => trail.image_url)?.image_url ? mediaUrl(place.trails.find(trail => trail.image_url)?.image_url) : heroOrPack,
+      imageUrl: trailImages.imageUrl,
+      imageCandidates: trailImages.imageCandidates,
       searchText: `${(place.trails ?? []).map(trail => `${trail.title} ${trail.summary} ${trail.description ?? ''}`).join(' ')} trail trek route hike glacier`,
     });
 
@@ -244,7 +322,8 @@ export function ExploreDetailSheet({
       icon: 'calendar-outline',
       tone: '#22c55e',
       count: pack?.events?.length,
-      imageUrl: firstItemImage(pack?.events) || heroOrPack,
+      imageUrl: eventImages.imageUrl,
+      imageCandidates: eventImages.imageCandidates,
       searchText: `${searchTextForItems(pack?.events)} ranger program event calendar schedule`,
     });
 
@@ -318,6 +397,7 @@ export function ExploreDetailSheet({
   const heroWeather = weather ?? (place.summary.lat != null && place.summary.lng != null
     ? { icon: 'partly-sunny-outline' as const, temp: 'Weather', detail: 'Forecast' }
     : null);
+  const placeHeroCandidates = mediaCandidates(imageUrl, (pack?.photos ?? []).map(photo => photo.url), place.summary.image_url, place.summary.thumbnail_url);
 
   const filteredItems = (items?: ExploreSourcePackItem[]) => {
     const list = items ?? [];
@@ -389,10 +469,11 @@ export function ExploreDetailSheet({
         </View>
       );
     }
+    const moduleFallbackImages = activeModuleDef?.imageCandidates ?? [];
     return (
       <View style={styles.itemList}>
         {items.map((item, idx) => {
-          const itemImage = item.image_url ? mediaUrl(item.image_url) : imageUrl;
+          const itemImages = item.image_url ? mediaCandidates(item.image_url, moduleFallbackImages, imageUrl) : [];
           const canOpen = !!item.title || !!item.url || itemHasCoords(item);
           return (
             <TouchableOpacity
@@ -402,7 +483,7 @@ export function ExploreDetailSheet({
               disabled={!canOpen}
               onPress={() => openSourceItem(item)}
             >
-              {!!itemImage && <Image source={{ uri: itemImage }} style={styles.detailItemImage} resizeMode="cover" />}
+              {itemImages.length > 0 && <ResilientImage uris={itemImages} style={styles.detailItemImage} />}
               <View style={styles.detailItemBody}>
                 <Text style={[styles.detailItemTitle, { color: C.text }]} numberOfLines={2}>{item.title || 'Place'}</Text>
                 {!!item.description && (
@@ -681,15 +762,15 @@ export function ExploreDetailSheet({
   }
 
   function renderChildDetail(item: ExploreSourcePackItem) {
-    const itemImage = item.image_url ? mediaUrl(item.image_url) : imageUrl;
+    const itemImages = item.image_url ? mediaCandidates(item.image_url, activeModuleDef?.imageCandidates ?? [], imageUrl) : [];
     const siblingItems = activeModule ? moduleItems(activeModule) : moduleItems('map');
     return (
       <>
         <View style={styles.childHero}>
-          {itemImage ? (
-            <Image source={{ uri: itemImage }} style={styles.heroImage} resizeMode="cover" />
+          {itemImages.length > 0 ? (
+            <ResilientImage uris={itemImages} style={styles.heroImage} />
           ) : renderMapPreview({ items: siblingItems, activeItem: item, title: item.title || 'Place', height: 340 })}
-          {!!itemImage && <View style={styles.heroShade} />}
+          {itemImages.length > 0 && <View style={styles.heroShade} />}
           <TouchableOpacity style={[styles.roundButton, styles.backButton, { top: Math.max(topInset + 10, 22) }]} onPress={() => setSelectedItem(null)}>
             <Ionicons name="arrow-back" size={25} color="#fff" />
           </TouchableOpacity>
@@ -703,7 +784,7 @@ export function ExploreDetailSheet({
               </TouchableOpacity>
             )}
           </View>
-          {!!itemImage && (
+          {itemImages.length > 0 && (
             <View style={styles.heroText}>
               <Text style={[styles.kicker, { color: '#bbf7d0' }]} numberOfLines={1}>{(item.kind || activeModuleDef?.label || 'Place').replace(/_/g, ' ').toUpperCase()}</Text>
               <Text style={styles.title} numberOfLines={3}>{item.title || 'Place'}</Text>
@@ -712,13 +793,13 @@ export function ExploreDetailSheet({
           )}
         </View>
         <ScrollView contentContainerStyle={styles.childContent} showsVerticalScrollIndicator={false}>
-          {!itemImage && (
+          {itemImages.length === 0 && (
             <View style={[styles.copyPanel, { borderColor: C.border, backgroundColor: C.s1 }]}>
               <Text style={[styles.copyTitle, { color: C.text }]}>{item.title || 'Place'}</Text>
               {!!item.description && <Text style={[styles.copyBody, { color: C.text2 }]}>{item.description}</Text>}
             </View>
           )}
-          {!!item.description && itemImage && (
+          {!!item.description && itemImages.length > 0 && (
             <View style={[styles.copyPanel, { borderColor: C.border, backgroundColor: C.s1 }]}>
               <Text style={[styles.copyTitle, { color: C.text }]}>Details</Text>
               <Text style={[styles.copyBody, { color: C.text2 }]}>{item.description}</Text>
@@ -919,7 +1000,8 @@ export function ExploreDetailSheet({
         </View>
         <View style={styles.moduleGrid}>
           {visibleModules.map(module => {
-            const hasImage = !!module.imageUrl;
+            const imageCandidates = module.imageCandidates?.length ? module.imageCandidates : module.imageUrl ? [module.imageUrl] : [];
+            const hasImage = imageCandidates.length > 0;
             return (
               <TouchableOpacity
                 key={module.key}
@@ -929,7 +1011,7 @@ export function ExploreDetailSheet({
               >
                 {hasImage ? (
                   <>
-                    <Image source={{ uri: module.imageUrl }} style={styles.moduleTileImage} resizeMode="cover" />
+                    <ResilientImage uris={imageCandidates} style={styles.moduleTileImage} />
                     <View style={styles.moduleTileShade} />
                   </>
                 ) : (
@@ -973,8 +1055,8 @@ export function ExploreDetailSheet({
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {activeModuleDef ? renderModuleHero(activeModuleDef) : (
         <View style={styles.hero}>
-          {imageUrl ? (
-            <Image source={{ uri: imageUrl }} style={styles.heroImage} resizeMode="cover" />
+          {placeHeroCandidates.length > 0 ? (
+            <ResilientImage uris={placeHeroCandidates} style={styles.heroImage} />
           ) : (
             <View style={[styles.heroFallback, { backgroundColor: C.s3 }]}>
               <Ionicons name={getExploreIcon(place) as any} size={52} color="#fff" />
@@ -1153,7 +1235,7 @@ function SourcePack({
                     if (item.url) Linking.openURL(item.url);
                   }}
                 >
-                  {!!item.image_url && <Image source={{ uri: mediaUrl(item.image_url) }} style={styles.miniImage} resizeMode="cover" />}
+                  {!!item.image_url && <ResilientImage uris={[sizedNpsMediaUrl(mediaUrl(item.image_url)), mediaUrl(item.image_url)]} style={styles.miniImage} />}
                   <View style={styles.miniBody}>
                     <Text style={[styles.miniTitle, { color: C.text }]} numberOfLines={2}>{item.title}</Text>
                     {!!item.description && <Text style={[styles.miniDesc, { color: C.text3 }]} numberOfLines={3}>{item.description}</Text>}

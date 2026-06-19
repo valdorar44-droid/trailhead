@@ -52,3 +52,13 @@ Date: 2026-06-19
 
 - Continue batching rich NPS parks in small groups from the existing NPS refresh plan.
 - Consider shortening NPS park descriptions in compact cards so source-rich cards do not feel too text-heavy on mobile.
+
+## Next Seed Checkpoint: Grand Canyon
+
+Date: 2026-06-19
+
+- Target: `grca` / Grand Canyon National Park.
+- Cached payload: `data/explore/source_cache/nps/source-pack_codes-grca_with-places-thingstodo-campgrounds-visitorcenters-alerts-articles-events-tours-parkin_max-500.json`.
+- Live targeted probe succeeded without a broad all-parks refresh.
+- Grand Canyon source pack after rebuild: 20 photos, 6 things to do/tours, 96 things to see, 3 campgrounds, 2 visitor centers, 22 events, 24 parking records, 2 alerts.
+- Catalog stayed at 511 top-level places, confirming the seed enriched the destination hub instead of adding duplicate child cards to top-level Explorer.

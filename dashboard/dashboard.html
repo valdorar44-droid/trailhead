@@ -1002,7 +1002,7 @@ function initMap() {
     map.on('load', () => {
       map.addSource('route', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } });
       map.addLayer({ id: 'route-shadow', type: 'line', source: 'route', paint: { 'line-color': 'rgba(0,0,0,.4)', 'line-width': 9, 'line-blur': 6, 'line-translate': [0, 2] }, layout: { 'line-cap': 'round', 'line-join': 'round' } });
-      map.addLayer({ id: 'route-line', type: 'line', source: 'route', paint: { 'line-color': '#d99a3d', 'line-width': 4.5, 'line-opacity': 0.95 }, layout: { 'line-cap': 'round', 'line-join': 'round' } });
+      map.addLayer({ id: 'route-line', type: 'line', source: 'route', paint: { 'line-color': '#00a7ff', 'line-width': 4.5, 'line-opacity': 0.96 }, layout: { 'line-cap': 'round', 'line-join': 'round' } });
     });
     document.getElementById('zoom-in').onclick = () => map.zoomIn();
     document.getElementById('zoom-out').onclick = () => map.zoomOut();
@@ -1559,9 +1559,9 @@ function plotMap(data) {
       fetch(`https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`)
         .then(r => r.json()).then(data => {
           const geom = data.routes?.[0]?.geometry?.coordinates;
-          if (geom) { routeLayerId = L.polyline(geom.map(([lng, lat]) => [lat, lng]), { color: '#b85c38', weight: 5, opacity: .9 }).addTo(_leafletMap); }
+          if (geom) { routeLayerId = L.polyline(geom.map(([lng, lat]) => [lat, lng]), { color: '#00a7ff', weight: 5, opacity: .94 }).addTo(_leafletMap); }
         }).catch(() => {
-          routeLayerId = L.polyline(waypoints.map(w => [w.lat, w.lng]), { color: '#b85c38', weight: 4, opacity: .7, dashArray: '10 6' }).addTo(_leafletMap);
+          routeLayerId = L.polyline(waypoints.map(w => [w.lat, w.lng]), { color: '#00a7ff', weight: 4, opacity: .78, dashArray: '10 6' }).addTo(_leafletMap);
         });
       const bounds = L.latLngBounds(waypoints.map(w => [w.lat, w.lng]));
       _leafletMap.fitBounds(bounds, { padding: [60, 60], maxZoom: 10, animate: true, duration: 1.5 });

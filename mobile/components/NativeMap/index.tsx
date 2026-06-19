@@ -2421,11 +2421,11 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         <MapGL.ShapeSource id="trail-trace-route" shape={lineFC(traceRouteCoords)}>
           <MapGL.LineLayer
             id="trail-trace-route-glow"
-            style={{ lineColor: '#f97316', lineWidth: 13, lineBlur: 5, lineOpacity: 0.28, lineCap: 'round', lineJoin: 'round' }}
+            style={{ lineColor: '#00a7ff', lineWidth: 13, lineBlur: 5, lineOpacity: 0.28, lineCap: 'round', lineJoin: 'round' }}
           />
           <MapGL.LineLayer
             id="trail-trace-route-line"
-            style={{ lineColor: '#ff8a2a', lineWidth: 5.5, lineOpacity: 0.96, lineCap: 'round', lineJoin: 'round' }}
+            style={{ lineColor: '#00a7ff', lineWidth: 5.5, lineOpacity: 0.96, lineCap: 'round', lineJoin: 'round' }}
           />
         </MapGL.ShapeSource>
       )}
@@ -2439,7 +2439,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           />
           <MapGL.LineLayer
             id="route-line"
-            style={{ lineColor: '#f97316', lineWidth: 5, lineCap: 'round', lineJoin: 'round', lineOpacity: 0.94 }}
+            style={{ lineColor: '#00a7ff', lineWidth: 5, lineCap: 'round', lineJoin: 'round', lineOpacity: 0.96 }}
           />
           {/* Direction arrows along route — ASCII > rotated along line direction */}
           <MapGL.SymbolLayer

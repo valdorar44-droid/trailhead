@@ -659,7 +659,7 @@ export default function WebPlanner() {
     if (!map.getSource('excursions')) map.addSource('excursions', { type: 'geojson', data: geojson([]) as any, cluster: true, clusterRadius: 42 });
     const layers: any[] = [
       { id: 'route-halo', type: 'line', source: 'route', paint: { 'line-color': '#06100f', 'line-width': 9, 'line-opacity': 0.58 } },
-      { id: 'route-line', type: 'line', source: 'route', paint: { 'line-color': '#d99a3d', 'line-width': 5, 'line-opacity': 0.94 } },
+      { id: 'route-line', type: 'line', source: 'route', paint: { 'line-color': '#00a7ff', 'line-width': 5, 'line-opacity': 0.96 } },
       { id: 'camp-clusters', type: 'circle', source: 'camps', filter: ['has', 'point_count'], paint: { 'circle-color': '#7cbf74', 'circle-radius': 18, 'circle-stroke-color': '#f7f3ea', 'circle-stroke-width': 1 } },
       { id: 'camp-points', type: 'circle', source: 'camps', filter: ['!', ['has', 'point_count']], paint: { 'circle-color': '#7cbf74', 'circle-radius': 8, 'circle-stroke-color': '#06100f', 'circle-stroke-width': 2 } },
       { id: 'poi-points', type: 'circle', source: 'pois', paint: { 'circle-color': '#8fe3d9', 'circle-radius': 6, 'circle-stroke-color': '#06100f', 'circle-stroke-width': 1.5 } },

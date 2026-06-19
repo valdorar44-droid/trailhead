@@ -249,7 +249,7 @@ function syncWebRoute(map: any, waypoints: WP[]) {
       type: 'line',
       source: 'trailhead-web-route',
       layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: { 'line-color': '#f97316', 'line-width': 4 },
+      paint: { 'line-color': '#00a7ff', 'line-width': 4 },
     });
   }
 }

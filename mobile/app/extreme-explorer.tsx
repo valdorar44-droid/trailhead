@@ -535,7 +535,7 @@ function makeHtml(payload: DemoPayload) {
         }
         if (!map.getSource('route-anim')) {
           map.addSource('route-anim', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } });
-          map.addLayer({ id: 'route-anim-line', type: 'line', source: 'route-anim', paint: { 'line-color': '#f97316', 'line-width': 5, 'line-opacity': .96 } });
+          map.addLayer({ id: 'route-anim-line', type: 'line', source: 'route-anim', paint: { 'line-color': '#00a7ff', 'line-width': 5, 'line-opacity': .96 } });
         }
         const b = boundsFor(demo.route);
         if (!b.isEmpty()) map.fitBounds(b, { padding: { top: ${mapTopPadding}, bottom: ${mapBottomPadding}, left: 40, right: 40 }, duration: 950, maxZoom: 12 });
